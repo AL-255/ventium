@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 rtl plugin tests clean help
+.PHONY: all m0-smoke m1 m2 m3 rtl plugin tests clean help
 .DEFAULT_GOAL := help
 
 help:
@@ -17,6 +17,7 @@ help:
 	@echo "  make m0-smoke   build RTL+plugin, gen golden traces, run TB, diff (M0 gate)"
 	@echo "  make m1         M1 differential gate: real integer core func-equiv vs QEMU"
 	@echo "  make m2         M2 differential gate: user-mode integer ISA completeness vs QEMU"
+	@echo "  make m3         M3 differential gate: x87 FPU func-equiv vs QEMU (+ integer suites)"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -55,8 +56,19 @@ m1:
 m2:
 	bash verif/run-m2.sh
 
+# --- M3 differential gate (verif/run-m3.sh) ---------------------------------
+# Adds the x87 FPU. Builds the RTL TB, then for every program (integer + x87,
+# discovered from verif/tests/**/manifest.json) builds the ELF, ISA-verifies,
+# flattens, generates the QEMU golden, runs the RTL TB, and asserts compare.py
+# --mode func exits 0. x87 programs (manifest "x87":true) run BOTH producers
+# with --x87 so the x87 architectural state (st0..st7, fctrl, fstat, ftag) is
+# compared; integer programs stay x87:false and are unaffected. (run-m3.sh
+# builds the TB + each ELF itself.)
+m3:
+	bash verif/run-m3.sh
+
 clean:
 	-$(MAKE) -C verif/tb clean
 	-$(MAKE) -C verif/qemu-plugins clean
 	-$(MAKE) -C verif/tests clean
-	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2
+	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2 $(BUILD)/m3

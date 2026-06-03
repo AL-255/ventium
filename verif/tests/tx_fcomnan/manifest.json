@@ -1,0 +1,10 @@
+{
+  "name": "tx_fcomnan",
+  "src": "tx_fcomnan/tx_fcomnan.s",
+  "elf": "tx_fcomnan/tx_fcomnan.elf",
+  "image": "tx_fcomnan/tx_fcomnan.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 50,
+  "x87": true
+}

@@ -1,0 +1,10 @@
+{
+  "name": "tx_round",
+  "src": "tx_round/tx_round.s",
+  "elf": "tx_round/tx_round.elf",
+  "image": "tx_round/tx_round.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 45,
+  "x87": true
+}

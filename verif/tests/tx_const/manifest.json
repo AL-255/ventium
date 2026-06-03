@@ -1,0 +1,10 @@
+{
+  "name": "tx_const",
+  "src": "tx_const/tx_const.s",
+  "elf": "tx_const/tx_const.elf",
+  "image": "tx_const/tx_const.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 35,
+  "x87": true
+}

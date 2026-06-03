@@ -40,9 +40,14 @@ namespace ventium {
 TraceWriter* g_trace = nullptr;
 }  // namespace ventium
 
-// Match the SystemVerilog import signature from docs/rtl-interface.md §2.
-// When Verilator's generated header is present it already declares this with
-// extern "C"; we provide the body. Otherwise we declare+define it ourselves.
+// Match the SystemVerilog import signatures from docs/rtl-interface.md §2.
+// When Verilator's generated header is present it already declares these with
+// extern "C"; we provide the bodies. Otherwise we declare+define them ourselves.
+//
+// vtm_retire_x87 passing convention (ventium_pkg.sv / rtl-interface.md §2):
+//   each st(i) split as longint unsigned mantissa lo (uint64_t) +
+//   shortint unsigned sign/exp hi (uint16_t, passed widened); fctrl/fstat/ftag
+//   as int unsigned (uint32_t, 16-bit value in a 32b slot).
 #ifndef VTM_HAVE_DPI_HEADER
 extern "C" void vtm_retire(
     unsigned long long n,
@@ -55,7 +60,49 @@ extern "C" void vtm_retire(
     unsigned short cs, unsigned short ss,
     unsigned short ds, unsigned short es,
     unsigned short fs, unsigned short gs);
+extern "C" void vtm_retire_x87(
+    unsigned long long n,
+    unsigned int fctrl, unsigned int fstat, unsigned int ftag,
+    unsigned long long st0_lo, unsigned short st0_hi,
+    unsigned long long st1_lo, unsigned short st1_hi,
+    unsigned long long st2_lo, unsigned short st2_hi,
+    unsigned long long st3_lo, unsigned short st3_hi,
+    unsigned long long st4_lo, unsigned short st4_hi,
+    unsigned long long st5_lo, unsigned short st5_hi,
+    unsigned long long st6_lo, unsigned short st6_hi,
+    unsigned long long st7_lo, unsigned short st7_hi);
 #endif
+
+// x87 retire (M3): the core calls this with the SAME `n` as the paired
+// vtm_retire, carrying the post-commit x87 state. We stash it keyed by `n`; the
+// paired vtm_retire drains it and emits one combined record. No file write here.
+extern "C" void vtm_retire_x87(
+    unsigned long long n,
+    unsigned int fctrl, unsigned int fstat, unsigned int ftag,
+    unsigned long long st0_lo, unsigned short st0_hi,
+    unsigned long long st1_lo, unsigned short st1_hi,
+    unsigned long long st2_lo, unsigned short st2_hi,
+    unsigned long long st3_lo, unsigned short st3_hi,
+    unsigned long long st4_lo, unsigned short st4_hi,
+    unsigned long long st5_lo, unsigned short st5_hi,
+    unsigned long long st6_lo, unsigned short st6_hi,
+    unsigned long long st7_lo, unsigned short st7_hi) {
+    using namespace ventium;
+    if (!g_trace) return;
+    X87State s;
+    s.st_lo[0] = st0_lo; s.st_hi[0] = st0_hi;
+    s.st_lo[1] = st1_lo; s.st_hi[1] = st1_hi;
+    s.st_lo[2] = st2_lo; s.st_hi[2] = st2_hi;
+    s.st_lo[3] = st3_lo; s.st_hi[3] = st3_hi;
+    s.st_lo[4] = st4_lo; s.st_hi[4] = st4_hi;
+    s.st_lo[5] = st5_lo; s.st_hi[5] = st5_hi;
+    s.st_lo[6] = st6_lo; s.st_hi[6] = st6_hi;
+    s.st_lo[7] = st7_lo; s.st_hi[7] = st7_hi;
+    s.fctrl = (unsigned short)(fctrl & 0xFFFFu);
+    s.fstat = (unsigned short)(fstat & 0xFFFFu);
+    s.ftag  = (unsigned short)(ftag  & 0xFFFFu);
+    g_trace->stash_x87(n, s);
+}
 
 extern "C" void vtm_retire(
     unsigned long long n,
@@ -73,8 +120,9 @@ extern "C" void vtm_retire(
 
     // Emit one compact JSON object on its own line. Field order is irrelevant
     // to the comparator (it parses by name), but we follow the canonical
-    // compare order (pc, GPRs, eflags, segs) from tracefmt.func_compare_keys
-    // for readable diffs. 32-bit -> 0x%08x, 16-bit -> 0x%04x (tracefmt.hx).
+    // compare order (pc, GPRs, eflags, segs[, x87]) from
+    // tracefmt.func_compare_keys for readable diffs. 32-bit -> 0x%08x, 16-bit ->
+    // 0x%04x (tracefmt.hx). The integer prefix is identical in both modes.
     std::fprintf(g_trace->fp(),
         "{\"n\":%llu,"
         "\"pc\":\"0x%08x\","
@@ -85,13 +133,41 @@ extern "C" void vtm_retire(
         "\"eflags\":\"0x%08x\","
         "\"cs\":\"0x%04x\",\"ss\":\"0x%04x\","
         "\"ds\":\"0x%04x\",\"es\":\"0x%04x\","
-        "\"fs\":\"0x%04x\",\"gs\":\"0x%04x\"}\n",
+        "\"fs\":\"0x%04x\",\"gs\":\"0x%04x\"",
         (unsigned long long)n,
         pc,
         eax, ecx, edx, ebx, esp, ebp, esi, edi,
         eflags,
         (unsigned)cs, (unsigned)ss, (unsigned)ds,
         (unsigned)es, (unsigned)fs, (unsigned)gs);
+
+    // x87 fields (only when the trace header declares x87:true). Drain the
+    // x87 state the core stashed via vtm_retire_x87 for this same `n`; if the
+    // core did not call it for this retirement, emit zeros (still well-formed).
+    // Formats MUST match tracefmt.py: st0..st7 = 80-bit (20 hex digits) as
+    // hi(16)<<64 | lo(64); fctrl/fstat/ftag = 16-bit (4 digits); the untracked
+    // pointer fields fop/fiseg/foseg = 16-bit 0, fioff/fooff = 32-bit 0.
+    if (g_trace->x87()) {
+        bool present = false;
+        X87State s = g_trace->take_x87((uint64_t)n, &present);
+        for (int i = 0; i < 8; ++i) {
+            // 80-bit canonical floatx80: print high 16 bits then low 64 bits,
+            // zero-padded to 4 + 16 = 20 hex digits.
+            std::fprintf(g_trace->fp(),
+                ",\"st%d\":\"0x%04x%016llx\"",
+                i, (unsigned)s.st_hi[i], (unsigned long long)s.st_lo[i]);
+        }
+        std::fprintf(g_trace->fp(),
+            ",\"fctrl\":\"0x%04x\",\"fstat\":\"0x%04x\",\"ftag\":\"0x%04x\","
+            "\"fop\":\"0x%04x\","
+            "\"fioff\":\"0x%08x\",\"fooff\":\"0x%08x\","
+            "\"fiseg\":\"0x%04x\",\"foseg\":\"0x%04x\"",
+            (unsigned)s.fctrl, (unsigned)s.fstat, (unsigned)s.ftag,
+            0u, 0u, 0u, 0u, 0u);
+        (void)present;  // absence already yields zeros; nothing else to do
+    }
+
+    std::fprintf(g_trace->fp(), "}\n");
 
     g_trace->note_retire();
 }

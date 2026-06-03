@@ -56,6 +56,12 @@ module ventium_top
   logic [31:0] core_retire_pc;
   arch_state_t core_retire_state;
 
+  // x87 post-commit state (M3); valid when core_retire_valid && core_x87_touched.
+  logic        core_x87_touched;
+  logic [15:0] core_fctrl, core_fstat, core_ftag;
+  logic [79:0] core_st0, core_st1, core_st2, core_st3;
+  logic [79:0] core_st4, core_st5, core_st6, core_st7;
+
   intcore u_core (
       .clk          (clk),
       .rst_n        (rst_n),
@@ -70,7 +76,15 @@ module ventium_top
       .mem_ack      (mem_ack),
       .retire_valid (core_retire_valid),
       .retire_pc    (core_retire_pc),
-      .retire_state (core_retire_state)
+      .retire_state (core_retire_state),
+      .retire_x87_touched (core_x87_touched),
+      .retire_fctrl (core_fctrl),
+      .retire_fstat (core_fstat),
+      .retire_ftag  (core_ftag),
+      .retire_st0   (core_st0), .retire_st1 (core_st1),
+      .retire_st2   (core_st2), .retire_st3 (core_st3),
+      .retire_st4   (core_st4), .retire_st5 (core_st5),
+      .retire_st6   (core_st6), .retire_st7 (core_st7)
   );
 
   // ---------------------------------------------------------------------------
@@ -86,6 +100,21 @@ module ventium_top
       retire_n <= 64'd0;
     end else if (core_retire_valid) begin
 `ifndef VTM_NO_DPI
+      // x87 hook FIRST so the TB stashes the LIVE FP state keyed by `n` before
+      // the paired vtm_retire (same `n`) drains+emits the combined record. We
+      // call it on EVERY retirement (not just FP ops): in x87-trace mode QEMU
+      // reports the live st0..st7/fctrl/fstat on every instruction, so an
+      // integer instruction must still carry the current (unchanged) FP state.
+      // The TB only emits the x87 fields when its header declares x87:true, so
+      // this is harmless for integer programs. (core_x87_touched is retained on
+      // the port for future use but no longer gates the call.)
+      vtm_retire_x87(
+          retire_n,
+          {16'd0, core_fctrl}, {16'd0, core_fstat}, {16'd0, core_ftag},
+          core_st0[63:0], core_st0[79:64], core_st1[63:0], core_st1[79:64],
+          core_st2[63:0], core_st2[79:64], core_st3[63:0], core_st3[79:64],
+          core_st4[63:0], core_st4[79:64], core_st5[63:0], core_st5[79:64],
+          core_st6[63:0], core_st6[79:64], core_st7[63:0], core_st7[79:64]);
       vtm_retire(
           retire_n,
           core_retire_pc,

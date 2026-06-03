@@ -1,0 +1,10 @@
+{
+  "name": "tx_ctl",
+  "src": "tx_ctl/tx_ctl.s",
+  "elf": "tx_ctl/tx_ctl.elf",
+  "image": "tx_ctl/tx_ctl.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 30,
+  "x87": true
+}

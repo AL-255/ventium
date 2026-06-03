@@ -1,0 +1,10 @@
+{
+  "name": "tx_addsub",
+  "src": "tx_addsub/tx_addsub.s",
+  "elf": "tx_addsub/tx_addsub.elf",
+  "image": "tx_addsub/tx_addsub.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 80,
+  "x87": true
+}

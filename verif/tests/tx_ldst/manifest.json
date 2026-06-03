@@ -1,0 +1,10 @@
+{
+  "name": "tx_ldst",
+  "src": "tx_ldst/tx_ldst.s",
+  "elf": "tx_ldst/tx_ldst.elf",
+  "image": "tx_ldst/tx_ldst.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 25,
+  "x87": true
+}

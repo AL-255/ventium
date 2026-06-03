@@ -51,6 +51,7 @@ QEMU="$REFS/build/qemu/build/qemu-i386"
 GEN_TRACE="$ROOT/verif/qemu-trace/gen_trace.py"
 COMPARE="$ROOT/verif/diff/compare.py"
 TRACEFMT_DIR="$ROOT/verif/diff"
+ELF2FLAT="$ROOT/verif/tests/elf2flat.py"
 
 TESTS_DIR="$ROOT/verif/tests"
 BUILD="$ROOT/build"
@@ -58,6 +59,10 @@ M1="$BUILD/m1"
 TB_BIN="$ROOT/verif/tb/obj_dir/tb_ventium"
 
 PYTHON="${PYTHON:-python3}"
+CC="${CC:-gcc}"
+# Generic build flags for programs the tests Makefile doesn't pre-build (e.g.
+# the x87 corpus, auto-discovered by manifest). Matches run-m2/run-m3.sh.
+CFLAGS_BASE="-m32 -march=pentium -nostdlib -static -Wl,--build-id=none"
 
 # ---- helpers ----------------------------------------------------------------
 say()  { printf '\n=== %s ===\n' "$*"; }
@@ -132,6 +137,30 @@ for MANIFEST in $MANIFESTS; do
     RTL_VT="$M1/${NAME}_rtl.vtrace"
 
     say "PROGRAM: $NAME"
+
+    # If the tests Makefile didn't pre-build the in-tree ELF/flat (it only knows
+    # a small PROGS list; the auto-discovered x87 corpus etc. is not in it),
+    # build them generically from the manifest 'src' into build/m1 — exactly the
+    # mechanism run-m2.sh/run-m3.sh use. The M1 gate still compares only the
+    # INTEGER architectural state (no --x87), so x87 programs are exercised here
+    # purely as integer streams (which they are, aside from the FPU regs M1
+    # doesn't look at). A program the core can't run simply FAILs the compare.
+    if [ ! -f "$ELF" ] || [ ! -f "$FLAT" ]; then
+        SRC_REL="$(manifest_get "$MANIFEST" src 2>/dev/null || true)"
+        SRC="$TESTS_DIR/$SRC_REL"
+        if [ -n "$SRC_REL" ] && [ -f "$SRC" ]; then
+            ELF="$M1/${NAME}.elf"; FLAT="$M1/${NAME}.flat"
+            if ! "$CC" $CFLAGS_BASE -Wl,-Ttext="$LOAD" -o "$ELF" "$SRC" \
+                    > "$M1/${NAME}_build.log" 2>&1; then
+                ALL_OK=0; NAMES+=("$NAME"); VERDICTS+=("FAIL"); DETAILS+=("ELF build failed (gcc)"); continue
+            fi
+            if ! "$PYTHON" "$ELF2FLAT" "$ELF" --out "$FLAT" --base "$LOAD" \
+                    > "$M1/${NAME}_flat.log" 2>&1; then
+                ALL_OK=0; NAMES+=("$NAME"); VERDICTS+=("FAIL"); DETAILS+=("elf2flat failed"); continue
+            fi
+            info "built generically from src: $SRC"
+        fi
+    fi
     [ -f "$ELF" ]  || { ALL_OK=0; NAMES+=("$NAME"); VERDICTS+=("FAIL"); DETAILS+=("ELF not built: $ELF"); continue; }
     [ -f "$FLAT" ] || { ALL_OK=0; NAMES+=("$NAME"); VERDICTS+=("FAIL"); DETAILS+=("flat not built: $FLAT"); continue; }
 

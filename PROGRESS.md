@@ -11,8 +11,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M1 | Decoder + single-issue integer functional | integer subset diff-clean vs QEMU (decoder-exhaustive vs XED/Capstone is ongoing toward M2) | ✅ done (integer SUBSET func-equiv vs QEMU on smoke + M1 corpus; not yet decoder-exhaustive) |
 | M2 | User-mode integer ISA completeness (re-scoped; system mode → M2S) | broad integer-ISA corpus diff-clean vs QEMU (user-mode) | ✅ done (28-program corpus func-equiv vs QEMU user-mode; system ops / far CALL-RET / ENTER / mem-operand bit-string + SHLD deferred & HALT; decoder-exhaustive-vs-XED still ongoing) |
 | M2S | System mode: segmentation/paging/TLB/interrupts/SMM (needs system-mode oracle) | system-arch corpus diff-clean | ☐ not started (deferred from M2) |
-| M3 | x87 FPU | x87 corpus vs SoftFloat/MPFR + QEMU | ☐ not started |
-| M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ☐ not started |
+| M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
+| M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ☐ not started (the first CYCLE milestone) |
 | M5 | Cache/bus timing + x87 cycle accuracy | bus corpus + FP/branch cycle match | ☐ not started |
 | M6 | Errata & stepping fidelity (stretch) | targeted errata repro | ☐ not started |
 
@@ -37,6 +37,199 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-03 — M3 complete (x87 FPU functional core, bit-exact vs QEMU)
+
+Added the **x87 floating-point unit** to the single-issue core and verified the
+x87 architectural state **diff-clean vs QEMU** (`compare.py --mode func` exit 0).
+**M3 = the x87 functional core: data movement + normal-operand arithmetic,
+bit-exact vs QEMU's softfloat `floatx80`. Transcendentals and exotic corners are
+deferred (and HALT loudly).** Gate: `make m3` (exit 0). `make m2` / `make m1` /
+`make m0-smoke` all still pass; RTL stays lint-clean (`verilator --lint-only
+-Wall -Wno-DECLFILENAME -Wno-UNUSED`, exit 0).
+
+**The x87 FPU** (`rtl/core/intcore.sv` FSM + `rtl/fpu/fpu_x87_pkg.sv` datapath):
+- **Register stack model**: 8×80-bit physical regfile with a 3-bit `TOP`; `st(i)`
+  = `fpr[(TOP+i)&7]`; push = `TOP--`, pop = `TOP++`; an 8-bit per-register valid
+  tag (`fptag`, 1=empty) drives FXAM's empty class and FFREE.
+- **Status word** (`fstat`): condition codes C0/C2/C3 (compares/classify), the C1
+  bit, and the masked exception flags IE/ZE/PE accumulated sticky; the retire
+  snapshot overlays `TOP` into bits[13:11] exactly as QEMU's gdbstub reports it.
+- **Control word** (`fctrl`): FLDCW/FNSTCW; reset/FNINIT = `0x037f` (RC=00
+  nearest, PC=11 64-bit, all six masks set). RC (rounding control) is fully
+  honored by the datapath (see below).
+- **Tag word**: QEMU's user-mode gdbstub abridges `ftag` to `0x0000`, so the RTL
+  reports `0x0000` (confirmed across empty/full-stack/FFREE/after-pop probes) —
+  we reproduce **what QEMU reports**, not the architectural 2-bit-per-reg tag.
+- **80-bit datapath** (`fpu_x87_pkg.sv`): a self-contained `floatx80` engine —
+  add/sub (aligned 128-bit significand, RNE/directed round-pack), multiply
+  (64×64→128), divide (long division with an exact-remainder sticky), sqrt
+  (256-bit restoring integer sqrt + sticky), and float32/64↔floatx80,
+  int16/32/64↔floatx80 conversions. The canonical layout (sign|exp in [79:64],
+  mantissa in [63:0]) is the SAME encoding `gen_trace --x87` emits, so the st-reg
+  hex strings compare directly.
+
+**Trace infrastructure** (the second DPI hook, per `rtl-interface.md` §2 /
+`trace-format.md` §2.2): the core calls `vtm_retire_x87` on the same retirement
+as `vtm_retire`, carrying the post-commit x87 state (st0..st7 as packed 80-bit,
+`fctrl`/`fstat`/`ftag`); the TB buffers both and emits ONE func record with the
+x87 fields, and the RTL trace header declares `x87:true`. `fop`/`fiseg`/`fioff`/
+`foseg`/`fooff` are reported 0 (matches QEMU user-mode, which does no FP ptr
+tracking). The golden side uses the already-committed `gen_trace.py --x87`
+i387/tail-anchor fix (commit c39905b). `compare.py` compares the full x87 set iff
+BOTH headers say `x87:true`; the 28 integer programs keep `x87:false` and are
+unaffected.
+
+**Tier-1 / Tier-2 coverage — bit-exact vs QEMU** (the 14-program x87 corpus):
+- **Tier 1** (data movement, stack, status/control, compares, classify): FLD/FST/
+  FSTP (m32/m64/m80 + `st(i)`), FILD/FIST/FISTP (m16/m32/m64), FXCH, FFREE,
+  FINCSTP/FDECSTP, FNOP; the seven constants FLDZ/FLD1/FLDPI/FLDL2E/FLDL2T/FLDLG2/
+  FLDLN2; FABS/FCHS; FCOM/FCOMP/FCOMPP, FUCOM/FUCOMP/FUCOMPP, FTST, FXAM, FICOM/
+  FICOMP; FNSTSW ax/m16, FNSTCW/FLDCW, FNINIT, FNCLEX, FWAIT.
+- **Tier 2** (normal operands, default control word): FADD/FSUB/FSUBR/FMUL/FDIV/
+  FDIVR (+ `p`/`ip` and memory/int FIADD… forms), FSQRT — round-to-nearest-even,
+  64-bit precision, bit-exact.
+- **Tier 3 pulled INTO the gate this phase**: non-default **rounding** control
+  (RC = toward-zero / toward +inf / toward -inf) at 64-bit precision; masked
+  special-operand arithmetic (x/0, 0/0, sqrt of a negative / of -0).
+
+**Adversarial review — found + fixed** (each reproduced against QEMU with a tiny
+program first, fixed, then locked with a new gated regression program; the FSQRT
+clear-codes/C2 behavior was discovered while reproducing finding 1):
+- **[high] FXAM on an Infinity** — `fxam_codes` returned the WRONG class encoding
+  for Inf (C3+C0 = 0x4100; the in-code comment was self-contradictory). QEMU's
+  `helper_fxam_ST0` sets **0x500 (C2+C0)** for Inf. Fixed the Inf branch.
+  (Reproduced: `fxam` on +Inf → QEMU fstat=0x3d00; pre-fix RTL=0x7900.) Locked by
+  `tx_fxam` (every FXAM class incl. ±Inf/QNaN/±0/normal/empty).
+- **[med] FST/FIST store flags** — the store path never set PE (precision/inexact)
+  on a rounding FST m32/m64 or non-integer FIST, and never set IE + integer-
+  indefinite on an out-of-range FIST. QEMU's helper_fst*/fist* latch these via
+  `merge_exception_flags`. Added `_ex` conversion variants returning inexact (and
+  invalid+indefinite for FIST overflow), latched into `fstat` at store dispatch.
+  (Reproduced: `fstps` of 1.2345678901234567 → QEMU fstat PE=0x0020; FIST of 2.5
+  → PE; FIST m16 of 100000 → IE + 0x8000.) Locked by `tx_storeflags`.
+- **[med] arithmetic under non-default RC/PC** — the datapath was hard-wired to
+  RNE/64-bit and silently ignored `fctrl`. **Fixed RC fully** (round-pack now
+  takes the RC field; toward-zero/+inf/-inf verified bit-exact for all of add/sub/
+  mul/div/sqrt incl. the signed-zero cancellation cases). **PC (precision)** other
+  than 64-bit is now a DEFERRED Tier-3 corner that **HALTs loudly** at the
+  arithmetic op (rather than silently mis-rounding). (Reproduced: 10/3 under RC=11
+  matches QEMU; PC=53-bit arithmetic correctly produces a length-mismatch FAIL,
+  not a false pass.) Locked by `tx_round`.
+- **[low] FDIV by zero / 0÷0 / FSQRT of a negative** — `fx_div` divided by mb=0
+  (X in sim) and `fx_sqrt` of a negative returned sqrt(|x|) with a forced-positive
+  sign. With masked exceptions QEMU produces: x/0 → signed Inf + ZE; 0/0 →
+  real-indefinite QNaN (0xffff_c000000000000000) + IE; sqrt(−x) → real-indefinite
+  QNaN + IE + C2; sqrt(−0) → −0 + C2. Implemented all four bit-exact (guarded the
+  datapath against /0 and negative-sqrt as defense-in-depth). Locked by
+  `tx_special`. (`helper_fsqrt` also clears 0x4700 and sets C2 whenever ST0's sign
+  bit is set — reproduced and matched.)
+- **[low] FCOM vs FUCOM #IA on NaN** — one shared `fcom_codes` produced correct
+  C-codes but never raised IE. QEMU's signaling compares (FCOM/FCOMP/FCOMPP/FTST/
+  FICOM, `floatx80_compare`) raise IE on ANY NaN; the quiet compares (FUCOM/
+  FUCOMP/FUCOMPP, `floatx80_compare_quiet`) raise IE only on a SIGNALING NaN.
+  Added SNaN/QNaN classifiers and a per-op signaling flag; IE latched accordingly.
+  (Reproduced: FCOM vs QNaN → IE; FUCOM vs QNaN → no IE; FCOM/FUCOM vs SNaN(m80)
+  → IE both.) Locked by `tx_fcomnan`.
+
+**DEFERRED — loud HALT, never a false pass** (confirmed each retires the
+preceding ops then STOPS, yielding a length-mismatch FAIL — verified for FSIN,
+FRNDINT, FXTRACT, FPREM):
+- **Transcendentals** FSIN/FCOS/FSINCOS/FPTAN/FPATAN/F2XM1/FYL2X/FYL2XP1 — QEMU
+  computes these with its own approximation; matching it bit-exact ≠ matching a
+  real Pentium, so deferred to a later ulp-tolerance oracle. HALT.
+- **BCD** FBLD/FBSTP; **environment/state** FSAVE/FRSTOR/FLDENV/FNSTENV (28/108-
+  byte memory images). HALT.
+- **FCMOVcc / FCOMI / FUCOMI** register forms (P6+ extensions, not core P5
+  user x87 in the corpus). HALT.
+- **Tier-3 numeric ops** FPREM/FPREM1/FRNDINT/FSCALE/FXTRACT. HALT.
+- **Non-default PRECISION control (PC ≠ 11 / 64-bit)** at an arithmetic op — the
+  datapath implements full extended precision only; rather than silently
+  mis-rounding to 53/24-bit, the core HALTs. (RC directed rounding IS supported.)
+- **Unmasked numeric exceptions / #MF delivery** — not implemented; the corpus
+  keeps exceptions masked (default cw) and avoids faulting operands. FWAIT is a
+  no-op (no SE is ever set in the masked corpus).
+
+**Harness:** `run-m3.sh` is the differential gate (per-program `x87:true` via an
+optional `"x87"` manifest field; everything else identical to `run-m2.sh`).
+`run-m1.sh` was also taught to build any discovered program's ELF/flat
+generically from the manifest `src` (mirroring run-m2/run-m3) when the tests
+Makefile didn't pre-build it — this enrolls the x87 corpus in the M1 integer gate
+too (the x87 programs run as integer streams there and pass), so `make m1` is
+green again (it was failing on the auto-discovered x87 dirs before, an
+infrastructure gap independent of the RTL).
+
+**How to run:** `make m3` (= `bash verif/run-m3.sh`). For each program discovered
+from `verif/tests/**/manifest.json` it builds the ELF, ISA-verifies it, flattens
+it, generates the QEMU golden (with `--x87` for x87 programs), runs the RTL TB
+(`--x87`, init-ESP from the golden n=0), runs `compare.py --mode func`, and
+asserts exit 0 for all.
+
+**Observed result** (`make m3` from a clean TB build, exit 0):
+
+```
+    PROGRAM          MODE  RESULT DETAIL
+    -------          ----  ------ ------
+    smoke            int   PASS   func-equivalent (22 insns max)
+    t_bit            int   PASS   func-equivalent (55 insns max)
+    t_branch         int   PASS   func-equivalent (43 insns max)
+    t_callret        int   PASS   func-equivalent (35 insns max)
+    t_carry          int   PASS   func-equivalent (40 insns max)
+    t_div            int   PASS   func-equivalent (60 insns max)
+    t_ext            int   PASS   func-equivalent (50 insns max)
+    t_leave16        int   PASS   func-equivalent (25 insns max)
+    t_loop16         int   PASS   func-equivalent (60 insns max)
+    t_loop2          int   PASS   func-equivalent (65 insns max)
+    t_loop           int   PASS   func-equivalent (78 insns max)
+    t_mem            int   PASS   func-equivalent (25 insns max)
+    t_mixed          int   PASS   func-equivalent (200 insns max)
+    t_moffs          int   PASS   func-equivalent (30 insns max)
+    t_mul            int   PASS   func-equivalent (60 insns max)
+    t_op16b          int   PASS   func-equivalent (60 insns max)
+    t_op16           int   PASS   func-equivalent (60 insns max)
+    t_op8            int   PASS   func-equivalent (64 insns max)
+    t_partial        int   PASS   func-equivalent (44 insns max)
+    t_prefix         int   PASS   func-equivalent (44 insns max)
+    t_rep            int   PASS   func-equivalent (85 insns max)
+    t_rotate         int   PASS   func-equivalent (68 insns max)
+    t_setcc          int   PASS   func-equivalent (65 insns max)
+    t_shift          int   PASS   func-equivalent (67 insns max)
+    t_shld           int   PASS   func-equivalent (44 insns max)
+    t_stack          int   PASS   func-equivalent (45 insns max)
+    t_string         int   PASS   func-equivalent (50 insns max)
+    t_unary          int   PASS   func-equivalent (80 insns max)
+    tx_addsub        x87   PASS   func-equivalent (80 insns max)
+    tx_chain         x87   PASS   func-equivalent (70 insns max)
+    tx_cmp           x87   PASS   func-equivalent (45 insns max)
+    tx_const         x87   PASS   func-equivalent (35 insns max)
+    tx_ctl           x87   PASS   func-equivalent (30 insns max)
+    tx_fcomnan       x87   PASS   func-equivalent (50 insns max)
+    tx_fxam          x87   PASS   func-equivalent (40 insns max)
+    tx_ldst          x87   PASS   func-equivalent (25 insns max)
+    tx_muldiv        x87   PASS   func-equivalent (90 insns max)
+    tx_round         x87   PASS   func-equivalent (45 insns max)
+    tx_special       x87   PASS   func-equivalent (45 insns max)
+    tx_sqrt          x87   PASS   func-equivalent (70 insns max)
+    tx_stack         x87   PASS   func-equivalent (33 insns max)
+    tx_storeflags    x87   PASS   func-equivalent (40 insns max)
+
+    totals: 42 PASS / 0 FAIL / 42 total
+M3 GATE: PASS — every program is func-diff-clean vs QEMU (exit 0).
+```
+
+**Honest coverage statement:** M3 is the x87 **functional core** — the register
+stack, status/control/tag words, and a `floatx80` datapath that is **bit-exact vs
+QEMU** for data movement and **normal-operand** arithmetic under the default
+control word, plus directed rounding (RC) and the masked special-operand cases
+above. **Transcendentals, BCD, FSAVE/FRSTOR/FLDENV/FNSTENV, unmasked exceptions
+(#MF), the P6 FCMOV/FCOMI forms, the Tier-3 numeric ops (FPREM/FRNDINT/FSCALE/
+FXTRACT), and non-default precision control all HALT loudly** — never silently
+mis-executed. No pipeline / U-V pairing / branch prediction / cycle accuracy yet
+(M4/M5); M3 is functional-only.
+
+**Next:** M4 — dual-issue U/V pipeline + instruction pairing + branch prediction
+(the first CYCLE milestone: µbench CPI/pairing/mispredict matched against
+`p5model`).
 
 ### 2026-06-02 — M2 complete (user-mode integer ISA completeness, func-equiv vs QEMU)
 
