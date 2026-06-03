@@ -50,6 +50,7 @@ struct Args {
     uint64_t max_insn   = 1ull << 20;
     uint64_t max_cycles = 1ull << 24;
     uint32_t quiesce    = 64;     // K consecutive no-retire cycles => done
+    bool     x87        = false;  // emit x87 fields + header x87:true (M3)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -57,7 +58,7 @@ struct Args {
         "usage: %s --out <trace.vtrace> [--image <blob> --load <hexaddr>]\n"
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
-        "          [--trace-vcd f] [--quiesce K]\n", prog);
+        "          [--trace-vcd f] [--quiesce K] [--x87]\n", prog);
     std::exit(code);
 }
 
@@ -88,6 +89,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--max-insn")   a.max_insn   = parse_u64(need("--max-insn"));
         else if (k == "--max-cycles") a.max_cycles = parse_u64(need("--max-cycles"));
         else if (k == "--quiesce")    a.quiesce    = parse_u32(need("--quiesce"));
+        else if (k == "--x87")        a.x87        = true;
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -125,10 +127,11 @@ int main(int argc, char** argv) {
     {
         char note[256];
         std::snprintf(note, sizeof note,
-                      "ventium tb; entry=0x%08x load=0x%08x image=%s",
+                      "ventium tb; entry=0x%08x load=0x%08x image=%s%s",
                       args.entry, args.load_addr,
-                      args.image.empty() ? "(none)" : args.image.c_str());
-        if (!trace.open(args.out, note)) {
+                      args.image.empty() ? "(none)" : args.image.c_str(),
+                      args.x87 ? " x87" : "");
+        if (!trace.open(args.out, note, args.x87)) {
             std::fprintf(stderr, "tb: cannot open trace '%s'\n", args.out.c_str());
             return 2;
         }

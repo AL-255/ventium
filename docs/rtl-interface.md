@@ -44,9 +44,61 @@ import "DPI-C" context function void vtm_retire(
 - The core calls this from a single always_ff retire point; pairing (two retires
   in one cycle, M4+) means two calls in the same clock with consecutive `n`.
 - **x87** (M3+) uses a second optional import `vtm_retire_x87(...)` called
-  immediately after `vtm_retire` for FP-affecting instructions; defined later.
+  immediately after `vtm_retire` for FP-affecting instructions — see §2.1.
 - A `--no-dpi` Verilator define lets the core compile without the import for
   standalone lint.
+
+### 2.1 x87 retire callback (M3+)
+
+For x87 floating-point instructions the core calls `vtm_retire(...)` (integer
+state, unchanged) **and**, on the *same retirement* (same `n`), a second DPI-C
+import `vtm_retire_x87(...)` carrying the **post-commit x87 state**. The
+testbench buffers the x87 state keyed by `n`; the paired `vtm_retire` then emits
+**one** func record carrying both halves, and the RTL trace header declares
+`x87:true` (the testbench `--x87` flag). Declared in `ventium_pkg.sv`, guarded
+by `VTM_NO_DPI` like `vtm_retire`.
+
+```systemverilog
+import "DPI-C" context function void vtm_retire_x87(
+    input longint  unsigned n,         // SAME retire seq as the paired vtm_retire
+    input int      unsigned fctrl,     // control word (16-bit value, 32b slot)
+    input int      unsigned fstat,     // status  word (16-bit value, 32b slot)
+    input int      unsigned ftag,      // tag     word (16-bit value, 32b slot)
+    input longint  unsigned st0_lo, input shortint unsigned st0_hi,  // st0
+    input longint  unsigned st1_lo, input shortint unsigned st1_hi,  // st1
+    ... st2..st7 ...);                                               // st2..st7
+```
+
+**80-bit passing convention.** Each `st(i)` is the canonical `floatx80` value
+split into two operands:
+
+| operand | type | bits | meaning |
+|---|---|---|---|
+| `st<i>_lo` | `longint unsigned` | [63:0]  | mantissa (the low 64 bits) |
+| `st<i>_hi` | `shortint unsigned`| [79:64] | sign \| exponent (the high 16 bits) |
+
+so the reassembled 80-bit register is `{st<i>_hi, st<i>_lo}` — exactly the
+encoding `gen_trace.py` emits (sign\|exp in [79:64], mantissa in [63:0]). The
+testbench formats `st<i>` as the 20-hex-digit string `0x%04x%016llx` =
+`hi`·2⁶⁴ + `lo`, so the RTL and QEMU hex strings compare directly
+(`trace-format.md` §2.2, `tracefmt.h80`).
+
+**Control words.** `fctrl`/`fstat`/`ftag` are 16-bit architectural fields passed
+in `int unsigned` slots (mirroring how `vtm_retire` passes the 16-bit selectors);
+the testbench masks to 16 bits and formats `0x%04x`.
+
+**Untracked pointer fields.** `fop`/`fiseg`/`fioff`/`foseg`/`fooff` are **not**
+passed: QEMU linux-user reports them as 0, so the testbench always emits 0 for
+them (`trace-format.md` §2.2, `m3-fpu-spec.md`).
+
+**Convention rules.**
+- The core calls `vtm_retire_x87(n, ...)` with the *same* `n` it passes to the
+  paired `vtm_retire`, with the **post-commit** stack/tag/status state.
+- It must call this for any retirement that touches x87 state. If the core does
+  **not** call it for a retirement while the testbench is in `--x87` mode, the
+  testbench emits **zeros** for the x87 fields (the record stays well-formed).
+- The comparator only compares x87 fields when **both** trace headers declare
+  `x87:true`; integer programs keep `x87:false` and are unaffected.
 
 ## 3. Bus-functional model (memory port group)
 

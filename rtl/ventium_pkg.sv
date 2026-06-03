@@ -68,6 +68,45 @@ package ventium_pkg;
       input shortint unsigned cs,  input shortint unsigned ss,
       input shortint unsigned ds,  input shortint unsigned es,
       input shortint unsigned fs,  input shortint unsigned gs);
+
+  // ---------------------------------------------------------------------------
+  // DPI x87 retire callback — the FP observation contract (M3+).
+  //
+  // rtl-interface.md §2 reserved a second optional DPI import for the x87 FPU.
+  // On every retirement where the x87 architectural state may have changed, the
+  // core calls vtm_retire(...) (integer state, unchanged) AND vtm_retire_x87(...)
+  // with the SAME retire sequence number `n` and the POST-COMMIT x87 state. The
+  // testbench (dpi_retire.cpp) stashes the x87 state keyed by `n`; the matching
+  // vtm_retire emits ONE func record carrying both halves, and the trace header
+  // declares x87:true (TB --x87 flag). If the core does NOT call this for a given
+  // `n` under --x87, the TB emits zeros for the x87 fields (well-formed record).
+  //
+  // 80-bit passing convention (docs/rtl-interface.md §2 "x87 trace hook"):
+  //   each st(i) is the canonical floatx80 layout split into
+  //     st<i>_lo : longint  unsigned  -- mantissa, bits [63:0]
+  //     st<i>_hi : shortint unsigned  -- sign|exponent, bits [79:64]
+  //   so the reassembled 80-bit value is {st<i>_hi, st<i>_lo} — exactly the
+  //   encoding gen_trace.py emits, so the 20-hex-digit st-register strings
+  //   compare directly. Control words (fctrl/fstat/ftag) are 16-bit fields
+  //   carried in `int unsigned` slots (like the selectors in vtm_retire); the TB
+  //   masks to 16 bits when formatting. fop/fiseg/fioff/foseg/fooff are NOT
+  //   passed — QEMU user-mode reports them as 0, so the TB emits 0 (m3-fpu-spec).
+  //
+  // Guarded by VTM_NO_DPI alongside vtm_retire so the core lints/elaborates
+  // standalone without a C testbench (docs/rtl-interface.md §2 last bullet).
+  import "DPI-C" context function void vtm_retire_x87(
+      input longint  unsigned n,         // SAME retire seq as the paired vtm_retire
+      input int      unsigned fctrl,     // control word (16-bit value in 32b slot)
+      input int      unsigned fstat,     // status  word (16-bit value in 32b slot)
+      input int      unsigned ftag,      // tag     word (16-bit value in 32b slot)
+      input longint  unsigned st0_lo, input shortint unsigned st0_hi,
+      input longint  unsigned st1_lo, input shortint unsigned st1_hi,
+      input longint  unsigned st2_lo, input shortint unsigned st2_hi,
+      input longint  unsigned st3_lo, input shortint unsigned st3_hi,
+      input longint  unsigned st4_lo, input shortint unsigned st4_hi,
+      input longint  unsigned st5_lo, input shortint unsigned st5_hi,
+      input longint  unsigned st6_lo, input shortint unsigned st6_hi,
+      input longint  unsigned st7_lo, input shortint unsigned st7_hi);
 `endif
 
 endpackage : ventium_pkg

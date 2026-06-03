@@ -1,0 +1,10 @@
+{
+  "name": "tx_muldiv",
+  "src": "tx_muldiv/tx_muldiv.s",
+  "elf": "tx_muldiv/tx_muldiv.elf",
+  "image": "tx_muldiv/tx_muldiv.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 90,
+  "x87": true
+}

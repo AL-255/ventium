@@ -1,0 +1,10 @@
+{
+  "name": "tx_special",
+  "src": "tx_special/tx_special.s",
+  "elf": "tx_special/tx_special.elf",
+  "image": "tx_special/tx_special.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 45,
+  "x87": true
+}

@@ -1,0 +1,10 @@
+{
+  "name": "tx_chain",
+  "src": "tx_chain/tx_chain.s",
+  "elf": "tx_chain/tx_chain.elf",
+  "image": "tx_chain/tx_chain.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 70,
+  "x87": true
+}

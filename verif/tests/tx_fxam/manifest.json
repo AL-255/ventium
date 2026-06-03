@@ -1,0 +1,10 @@
+{
+  "name": "tx_fxam",
+  "src": "tx_fxam/tx_fxam.s",
+  "elf": "tx_fxam/tx_fxam.elf",
+  "image": "tx_fxam/tx_fxam.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 40,
+  "x87": true
+}

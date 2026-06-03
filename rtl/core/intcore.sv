@@ -17,6 +17,7 @@
 
 module intcore
   import ventium_pkg::*;
+  import fpu_x87_pkg::*;
 #(
     parameter logic [31:0] EFLAGS_RESET = 32'h0000_0202, // bit1 reserved-1 + IF
     parameter logic [15:0] SEG_CS = 16'h0023,
@@ -42,7 +43,20 @@ module intcore
 
     output logic        retire_valid,
     output logic [31:0] retire_pc,
-    output arch_state_t retire_state
+    output arch_state_t retire_state,
+
+    // x87 post-commit architectural state (M3). Valid in the same cycle as
+    // retire_valid. `retire_x87_touched` is 1 iff the retired instruction was an
+    // x87 op (so ventium_top calls vtm_retire_x87 only then). st0..st7 are in
+    // TOP-relative order (st0 = register at TOP), each canonical floatx80[79:0].
+    // fstat already has TOP overlaid in bits[13:11]; ftag follows QEMU's
+    // user-mode gdbstub convention (constant 0x0000).
+    output logic        retire_x87_touched,
+    output logic [15:0] retire_fctrl,
+    output logic [15:0] retire_fstat,
+    output logic [15:0] retire_ftag,
+    output logic [79:0] retire_st0, retire_st1, retire_st2, retire_st3,
+    output logic [79:0] retire_st4, retire_st5, retire_st6, retire_st7
 );
 
   // ===========================================================================
@@ -53,10 +67,29 @@ module intcore
   logic [31:0] gpr [NUM_GPR];   // eax ecx edx ebx esp ebp esi edi
 
   // ===========================================================================
+  // x87 FPU architectural state (M3)
+  // ===========================================================================
+  // Physical register file (8 x 80-bit) + TOP. st(i) = fpr[(ftop+i)&7]. Push
+  // decrements TOP then writes; pop increments TOP (leaving the stale value, so
+  // the trace's "empty" st-slots keep their last contents — matches QEMU).
+  logic [79:0] fpr [8];
+  logic [2:0]  ftop;
+  logic [15:0] fctrl;            // control word; reset 0x037f
+  // fstat holds the condition codes (C0/C1/C2/C3) + exception flags, with the
+  // TOP field (bits[13:11]) kept ZERO internally; it is overlaid from `ftop` on
+  // read (mirrors QEMU helper_fnstsw). fstat[15:11] are never written here.
+  logic [15:0] fstat;
+  // Architectural tag: 1=empty, 0=valid (drives FXAM's empty-detect + the FXAM
+  // C1 sign bit). NOT reported in the trace (QEMU's gdbstub abridges ftag to 0).
+  logic [7:0]  fptag;           // bit i = tag for fpr[i] (1=empty)
+  logic        x87_touched_r;   // retired insn touched the FPU (drives DPI call)
+
+  // ===========================================================================
   // FSM
   // ===========================================================================
   typedef enum logic [3:0] {
-    S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT
+    S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
+    S_FLOAD, S_FEXEC, S_FSTORE
   } state_e;
   state_e state;
 
@@ -149,6 +182,48 @@ module intcore
   logic        d_stc;          // STC (F9): CF<-1
   logic        d_cmc;          // CMC (F5): CF<-~CF
   logic        d_cnt16;        // 0x67 address-size: LOOP/JCXZ use CX (low 16)
+
+  // ---- x87 decode (M3) ------------------------------------------------------
+  // x87 sub-op encoding for the FPU execution path. The decoder classifies each
+  // escape (D8..DF + ModR/M) into one of these and supplies the addressing
+  // (d_f_mem_read/write + d_f_msize) and operand index (d_f_sti) it needs.
+  typedef enum logic [5:0] {
+    FX_NONE,
+    // loads / pushes
+    FX_FLD_M32, FX_FLD_M64, FX_FLD_M80, FX_FLD_STI,
+    FX_FILD_M16, FX_FILD_M32, FX_FILD_M64,
+    FX_FLDCONST,             // d_f_const selects which ROM constant
+    // stores
+    FX_FST_M32, FX_FST_M64, FX_FST_M80, FX_FST_STI,    // pop variants via d_f_pop
+    FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
+    FX_FNSTCW, FX_FNSTSW_M, FX_FNSTSW_AX, FX_FLDCW,
+    // stack management
+    FX_FXCH, FX_FFREE, FX_FINCSTP, FX_FDECSTP, FX_FNOP, FX_FNINIT, FX_FNCLEX, FX_FWAIT,
+    // sign / abs
+    FX_FABS, FX_FCHS,
+    // compares / classify
+    FX_FCOM_M32, FX_FCOM_M64, FX_FCOM_STI, FX_FUCOM_STI,
+    FX_FCOMPP, FX_FUCOMPP, FX_FTST, FX_FXAM,
+    FX_FICOM_M16, FX_FICOM_M32,
+    // arithmetic (d_f_aluop selects add/sub/subr/mul/div/divr; flavor via fields)
+    FX_AR_ST0_STI,           // ST0 op= ST(i)
+    FX_AR_STI_ST0,           // ST(i) op= ST0
+    FX_AR_M32, FX_AR_M64,    // ST0 op= mem float
+    FX_AR_I16, FX_AR_I32,    // ST0 op= mem int (FIADD..)
+    FX_FSQRT
+  } fxop_e;
+
+  fxop_e       d_fxop;
+  logic        d_is_x87;
+  logic        d_f_mem_read;     // x87 op reads a memory operand
+  logic        d_f_mem_write;    // x87 op writes a memory operand
+  logic [2:0]  d_f_msize;        // memory operand bytes: 2/4/8/10 (encoded as 2,4,8,10 won't fit 3b)
+  logic [3:0]  d_f_mbytes;       // memory operand size in bytes (2,4,8,10)
+  logic        d_f_pop;          // pop the stack after the op (1 pop)
+  logic        d_f_pop2;         // pop twice (FCOMPP/FUCOMPP)
+  logic [2:0]  d_f_sti;          // st(i) index operand
+  logic [2:0]  d_f_aluop;        // 0=add 1=mul 4=sub 5=subr 6=div 7=divr (x87 group)
+  logic [2:0]  d_f_const;        // ROM-constant selector for FLDCONST
 
   // ===========================================================================
   // ModR/M + SIB helpers
@@ -258,6 +333,9 @@ module intcore
     d_sm=SM_PUSHA; d_st=ST_MOVS; d_str_loadsi=1'b0; d_str_storedi=1'b0; d_str_scandi=1'b0;
     d_ct=CT_CALLREL; d_ret_imm=16'd0; d_cld=1'b0; d_std=1'b0;
     d_clc=1'b0; d_stc=1'b0; d_cmc=1'b0; d_cnt16=pfx_addr;
+    d_fxop=FX_NONE; d_is_x87=1'b0; d_f_mem_read=1'b0; d_f_mem_write=1'b0;
+    d_f_msize=3'd0; d_f_mbytes=4'd0; d_f_pop=1'b0; d_f_pop2=1'b0; d_f_sti=3'd0;
+    d_f_aluop=3'd0; d_f_const=3'd0;
 
     m_idx     = pfx_len + (two_byte ? 4'd2 : 4'd1);
     mrm       = ibuf[m_idx];
@@ -748,6 +826,191 @@ module intcore
         8'hF9: begin d_stc=1'b1; d_len=pfx_len+4'd1; end // STC: CF<-1
         8'hF5: begin d_cmc=1'b1; d_len=pfx_len+4'd1; end // CMC: CF<-~CF
         8'hCD: begin d_len=pfx_len+4'd2; d_halt=(ibuf[pfx_len+1]==8'h80); end
+
+        // -------------------------------------------------------------------
+        // x87 FPU escapes D8..DF (single-byte opcode + ModR/M). m_idx already
+        // points at the ModR/M byte; mod==11 = register form (length 2),
+        // mod!=11 = memory form (length = m_idx + mfl(...)). We classify into a
+        // fxop and supply addressing; the FPU exec path consumes them.
+        // m3-fpu-spec.md: Tier-1/2 ops are routed; deferred/Tier-3 ops set
+        // d_unknown so the core HALTs loudly (never mis-executes).
+        // -------------------------------------------------------------------
+        8'b1101_1???: begin
+          d_is_x87=1'b1;
+          d_f_sti = modrm_rm;
+          // default length: register form 2, memory form variable
+          if (modrm_mod==2'b11) d_len = m_idx + 4'd1;      // opcode + modrm
+          else                  d_len = m_idx + mfl(modrm_mod,modrm_rm,has_sib,sib_base);
+          unique case (op0)
+            // ----- D8: arithmetic ST0 op= m32 / ST0 op= ST(i) --------------
+            8'hD8: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin
+                    d_fxop=FX_AR_M32; d_f_aluop=modrm_reg; d_f_mem_read=1'b1; d_f_mbytes=4'd4;
+                  end
+                  3'd2: begin d_fxop=FX_FCOM_M32; d_f_mem_read=1'b1; d_f_mbytes=4'd4; end
+                  default: begin d_fxop=FX_FCOM_M32; d_f_mem_read=1'b1; d_f_mbytes=4'd4; d_f_pop=1'b1; end
+                endcase
+              end else begin
+                unique case (modrm_reg)
+                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin d_fxop=FX_AR_ST0_STI; d_f_aluop=modrm_reg; end
+                  3'd2: d_fxop=FX_FCOM_STI;
+                  default: begin d_fxop=FX_FCOM_STI; d_f_pop=1'b1; end
+                endcase
+              end
+            end
+            // ----- D9: loads/const/stack/sign/control -----------------------
+            8'hD9: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0: begin d_fxop=FX_FLD_M32;  d_f_mem_read=1'b1;  d_f_mbytes=4'd4; end
+                  3'd2: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; end
+                  3'd3: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; d_f_pop=1'b1; end
+                  3'd5: begin d_fxop=FX_FLDCW;    d_f_mem_read=1'b1;  d_f_mbytes=4'd2; end
+                  3'd7: begin d_fxop=FX_FNSTCW;   d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
+                  default: d_unknown=1'b1;   // /4 FLDENV /6 FNSTENV deferred
+                endcase
+              end else begin
+                unique casez (mrm)
+                  8'b1100_0???: d_fxop=FX_FLD_STI;            // D9 C0+i FLD st(i)
+                  8'b1100_1???: d_fxop=FX_FXCH;               // D9 C8+i FXCH
+                  8'hD0:        d_fxop=FX_FNOP;                // D9 D0   FNOP
+                  8'hE0:        d_fxop=FX_FCHS;                // D9 E0
+                  8'hE1:        d_fxop=FX_FABS;                // D9 E1
+                  8'hE4:        d_fxop=FX_FTST;                // D9 E4
+                  8'hE5:        d_fxop=FX_FXAM;                // D9 E5
+                  8'hE8:        begin d_fxop=FX_FLDCONST; d_f_const=3'd0; end  // FLD1
+                  8'hE9:        begin d_fxop=FX_FLDCONST; d_f_const=3'd1; end  // FLDL2T
+                  8'hEA:        begin d_fxop=FX_FLDCONST; d_f_const=3'd2; end  // FLDL2E
+                  8'hEB:        begin d_fxop=FX_FLDCONST; d_f_const=3'd3; end  // FLDPI
+                  8'hEC:        begin d_fxop=FX_FLDCONST; d_f_const=3'd4; end  // FLDLG2
+                  8'hED:        begin d_fxop=FX_FLDCONST; d_f_const=3'd5; end  // FLDLN2
+                  8'hEE:        begin d_fxop=FX_FLDCONST; d_f_const=3'd6; end  // FLDZ
+                  8'hF6:        d_fxop=FX_FDECSTP;            // D9 F6
+                  8'hF7:        d_fxop=FX_FINCSTP;            // D9 F7
+                  8'hFA:        d_fxop=FX_FSQRT;              // D9 FA FSQRT
+                  default:      d_unknown=1'b1;  // transcendentals/F2XM1/etc deferred
+                endcase
+              end
+            end
+            // ----- DA: FIADD..m32, FICOM m32, FUCOMPP -----------------------
+            8'hDA: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin d_fxop=FX_AR_I32; d_f_aluop=modrm_reg; d_f_mem_read=1'b1; d_f_mbytes=4'd4; end
+                  3'd2: begin d_fxop=FX_FICOM_M32; d_f_mem_read=1'b1; d_f_mbytes=4'd4; end
+                  default: begin d_fxop=FX_FICOM_M32; d_f_mem_read=1'b1; d_f_mbytes=4'd4; d_f_pop=1'b1; end
+                endcase
+              end else begin
+                if (mrm==8'hE9) begin d_fxop=FX_FUCOMPP; d_f_pop2=1'b1; end
+                else d_unknown=1'b1;   // FCMOVcc deferred (not P5-era anyway)
+              end
+            end
+            // ----- DB: FILD m32, FISTP m32, FNINIT/FNCLEX, FLD m80, FSTP m80 -
+            8'hDB: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0: begin d_fxop=FX_FILD_M32; d_f_mem_read=1'b1;  d_f_mbytes=4'd4; end
+                  3'd2: begin d_fxop=FX_FIST_M32; d_f_mem_write=1'b1; d_f_mbytes=4'd4; end
+                  3'd3: begin d_fxop=FX_FIST_M32; d_f_mem_write=1'b1; d_f_mbytes=4'd4; d_f_pop=1'b1; end
+                  3'd5: begin d_fxop=FX_FLD_M80;  d_f_mem_read=1'b1;  d_f_mbytes=4'd10; end
+                  3'd7: begin d_fxop=FX_FST_M80;  d_f_mem_write=1'b1; d_f_mbytes=4'd10; d_f_pop=1'b1; end
+                  default: d_unknown=1'b1;
+                endcase
+              end else begin
+                unique case (mrm)
+                  8'hE2: d_fxop=FX_FNCLEX;
+                  8'hE3: d_fxop=FX_FNINIT;
+                  default: d_unknown=1'b1;  // FCMOVcc/FCOMI deferred
+                endcase
+              end
+            end
+            // ----- DC: arithmetic ST0 op= m64 / ST(i) op= ST0 ---------------
+            8'hDC: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin d_fxop=FX_AR_M64; d_f_aluop=modrm_reg; d_f_mem_read=1'b1; d_f_mbytes=4'd8; end
+                  3'd2: begin d_fxop=FX_FCOM_M64; d_f_mem_read=1'b1; d_f_mbytes=4'd8; end
+                  default: begin d_fxop=FX_FCOM_M64; d_f_mem_read=1'b1; d_f_mbytes=4'd8; d_f_pop=1'b1; end
+                endcase
+              end else begin
+                unique case (modrm_reg)
+                  // DC C0+i .. : ST(i)-destination forms. The x87 SUBR/SUB and
+                  // DIVR/DIV senses are SWAPPED for the ST(i)-dest encoding vs
+                  // the ST0-dest one (classic x87 "reverse" gotcha): reg=4 means
+                  // FSUBR(ST(i)=ST0-ST(i)), 5=FSUB(ST(i)-ST0), 6=FDIVR, 7=FDIV.
+                  // We flip aluop bit0 for the {sub,div} group so f_arith (a=ST(i),
+                  // b=ST0) computes the right direction.
+                  3'd0,3'd1: begin d_fxop=FX_AR_STI_ST0; d_f_aluop=modrm_reg; end
+                  3'd4,3'd5,3'd6,3'd7: begin d_fxop=FX_AR_STI_ST0; d_f_aluop={modrm_reg[2:1], ~modrm_reg[0]}; end
+                  default: d_unknown=1'b1;
+                endcase
+              end
+            end
+            // ----- DD: FLD/FST m64, FST st(i), FFREE, FUCOM, FNSTSW m16 -----
+            8'hDD: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0: begin d_fxop=FX_FLD_M64; d_f_mem_read=1'b1;  d_f_mbytes=4'd8; end
+                  3'd2: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; end
+                  3'd3: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; d_f_pop=1'b1; end
+                  3'd7: begin d_fxop=FX_FNSTSW_M; d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
+                  default: d_unknown=1'b1;   // FRSTOR/FSAVE deferred
+                endcase
+              end else begin
+                unique casez (mrm)
+                  8'b1100_0???: d_fxop=FX_FFREE;             // DD C0+i FFREE
+                  8'b1101_0???: d_fxop=FX_FST_STI;           // DD D0+i FST st(i)
+                  8'b1101_1???: begin d_fxop=FX_FST_STI; d_f_pop=1'b1; end // DD D8+i FSTP st(i)
+                  8'b1110_0???: d_fxop=FX_FUCOM_STI;         // DD E0+i FUCOM
+                  8'b1110_1???: begin d_fxop=FX_FUCOM_STI; d_f_pop=1'b1; end // DD E8+i FUCOMP
+                  default:      d_unknown=1'b1;
+                endcase
+              end
+            end
+            // ----- DE: arithmetic-and-pop ST(i) op= ST0, FCOMPP -------------
+            8'hDE: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin d_fxop=FX_AR_I16; d_f_aluop=modrm_reg; d_f_mem_read=1'b1; d_f_mbytes=4'd2; end
+                  3'd2: begin d_fxop=FX_FICOM_M16; d_f_mem_read=1'b1; d_f_mbytes=4'd2; end
+                  default: begin d_fxop=FX_FICOM_M16; d_f_mem_read=1'b1; d_f_mbytes=4'd2; d_f_pop=1'b1; end
+                endcase
+              end else begin
+                if (mrm==8'hD9) begin d_fxop=FX_FCOMPP; d_f_pop2=1'b1; end
+                else begin
+                  unique case (modrm_reg)
+                    // DE C0+i ..: ST(i)-dest + pop. Same SUBR/SUB, DIVR/DIV swap
+                    // as the DC-reg group (see note above).
+                    3'd0,3'd1: begin d_fxop=FX_AR_STI_ST0; d_f_aluop=modrm_reg; d_f_pop=1'b1; end
+                    3'd4,3'd5,3'd6,3'd7: begin d_fxop=FX_AR_STI_ST0; d_f_aluop={modrm_reg[2:1], ~modrm_reg[0]}; d_f_pop=1'b1; end
+                    default: d_unknown=1'b1;
+                  endcase
+                end
+              end
+            end
+            // ----- DF: FILD m16/m64, FISTP m16/m64, FNSTSW AX --------------
+            8'hDF: begin
+              if (modrm_mod!=2'b11) begin
+                unique case (modrm_reg)
+                  3'd0: begin d_fxop=FX_FILD_M16; d_f_mem_read=1'b1;  d_f_mbytes=4'd2; end
+                  3'd2: begin d_fxop=FX_FIST_M16; d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
+                  3'd3: begin d_fxop=FX_FIST_M16; d_f_mem_write=1'b1; d_f_mbytes=4'd2; d_f_pop=1'b1; end
+                  3'd5: begin d_fxop=FX_FILD_M64; d_f_mem_read=1'b1;  d_f_mbytes=4'd8; end
+                  3'd7: begin d_fxop=FX_FIST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; d_f_pop=1'b1; end
+                  default: d_unknown=1'b1;   // FBLD/FBSTP deferred
+                endcase
+              end else begin
+                if (mrm==8'hE0) d_fxop=FX_FNSTSW_AX;
+                else d_unknown=1'b1;
+              end
+            end
+            default: d_unknown=1'b1;
+          endcase
+          if (d_unknown) d_is_x87=1'b0;   // a deferred escape HALTs as unknown
+        end
+
         default: begin d_len=pfx_len+4'd1; d_unknown=1'b1; end
       endcase
     end
@@ -797,6 +1060,16 @@ module intcore
   logic        q_cld, q_std;
   logic        q_clc, q_stc, q_cmc;
   logic        q_cnt16;
+
+  // latched x87 decode
+  fxop_e       q_fxop;
+  logic        q_is_x87;
+  logic        q_f_mem_read, q_f_mem_write;
+  logic [3:0]  q_f_mbytes;
+  logic        q_f_pop, q_f_pop2;
+  logic [2:0]  q_f_sti, q_f_aluop, q_f_const;
+  logic [3:0]  f_step;             // x87 memory beat counter
+  logic [79:0] f_mem80;            // assembled memory operand (m16/32/64/80)
 
   logic [31:0] mem_load_data, mem_load_data2;
   logic [3:0]  step;            // micro-sequence step counter
@@ -1094,6 +1367,231 @@ module intcore
   end
 
   // ===========================================================================
+  // x87 combinational execution (M3)
+  // ===========================================================================
+  // st(i) read helper on the physical regfile (st0 = fpr[ftop]).
+  function automatic logic [2:0] fri(input logic [2:0] i); return ftop + i; endfunction
+  function automatic logic [79:0] fst(input logic [2:0] i); return fpr[ftop + i]; endfunction
+
+  // Compare two floatx80, return {C3,C2,C0} per QEMU fcom_ccval. The C1 bit is
+  // left to the caller (compares clear only C3/C2/C0). less->001, equal->100,
+  // greater->000, unordered->111 (unordered also when either is NaN).
+  function automatic logic [2:0] fcom_codes(input logic [79:0] a, input logic [79:0] b);
+    logic an, bn;   // NaN? (exp all-ones, mantissa != the pure-infinity pattern)
+    begin
+      an = (fx_exp(a)==15'h7fff) && (fx_man(a)!=64'h8000000000000000);
+      bn = (fx_exp(b)==15'h7fff) && (fx_man(b)!=64'h8000000000000000);
+      if (an || bn) fcom_codes = 3'b111;           // unordered: C3=1,C2=1,C0=1
+      else if (fx_is_zero(a) && fx_is_zero(b)) fcom_codes = 3'b100;  // +0==-0 equal
+      else if (fst_lt(a,b)) fcom_codes = 3'b001;   // less:  C0=1
+      else if (fst_eq(a,b)) fcom_codes = 3'b100;   // equal: C3=1
+      else                  fcom_codes = 3'b000;   // greater
+    end
+  endfunction
+  // Ordered numeric < and == on normal/zero floatx80 (no NaN here).
+  function automatic logic fst_eq(input logic [79:0] a, input logic [79:0] b);
+    if (fx_is_zero(a) && fx_is_zero(b)) return 1'b1;
+    return (a==b);
+  endfunction
+  function automatic logic fst_lt(input logic [79:0] a, input logic [79:0] b);
+    logic sa, sb;
+    logic [78:0] mag_a, mag_b;
+    begin
+      if (fx_is_zero(a) && fx_is_zero(b)) return 1'b0;
+      sa=fx_sign(a); sb=fx_sign(b);
+      mag_a = a[78:0]; mag_b = b[78:0];   // exp:mant magnitude
+      if (fx_is_zero(a)) sa = sb ? 1'b0 : 1'b0;  // 0 vs nonzero handled by mag below
+      if (sa != sb) return sa & ~(fx_is_zero(a)&&fx_is_zero(b));  // a<b if a negative
+      // same sign: compare magnitudes
+      if (!sa) return (mag_a < mag_b);   // both positive
+      else     return (mag_a > mag_b);   // both negative: larger magnitude is smaller
+    end
+  endfunction
+
+  // NaN classifiers on floatx80 (x86 convention, snan_bit_is_one=false). A NaN
+  // has exp==0x7fff and is not the pure-infinity pattern (mantissa 0x8000..).
+  // QNaN = the quiet bit (mantissa bit 62) is set; SNaN = quiet bit clear with
+  // some other mantissa bit set. Mirrors softfloat floatx80_is_{quiet,signaling}.
+  function automatic logic fx_is_nan(input logic [79:0] v);
+    return (fx_exp(v)==15'h7fff) && (fx_man(v)!=64'h8000000000000000);
+  endfunction
+  function automatic logic fx_is_snan(input logic [79:0] v);
+    // exp all-ones, quiet bit (62) clear, and (low<<1) with bit62 masked != 0.
+    return (fx_exp(v)==15'h7fff) && !fx_man(v)[62] &&
+           (({fx_man(v)[63], 1'b0, fx_man(v)[61:0]} << 1) != 64'd0);
+  endfunction
+
+  // Compare-time invalid (#IA) per QEMU: FCOM/FTST/FICOM use floatx80_compare
+  // (SIGNALING) -> IE on ANY NaN operand; FUCOM uses floatx80_compare_quiet ->
+  // IE only on a SIGNALING NaN. `signaling` selects which rule applies.
+  function automatic logic fcom_ie(input logic [79:0] a, input logic [79:0] b,
+                                    input logic signaling);
+    if (signaling) return fx_is_nan(a) || fx_is_nan(b);
+    else           return fx_is_snan(a) || fx_is_snan(b);
+  endfunction
+
+  // Apply compare condition codes to fstat: clear C3/C2/C0 (mask 0x4500, NOT C1)
+  // and set per {C3,C2,C0} (QEMU helper_fcom: fpus = (fpus & ~0x4500) | ccval).
+  // `ie` latches the invalid-operation flag (fstat bit0), sticky, when the
+  // compare is unordered against a NaN that the op signals on.
+  function automatic logic [15:0] apply_cmp(input logic [15:0] cur,
+                                            input logic [2:0] codes, input logic ie);
+    logic [15:0] r;
+    begin
+      r = cur & ~16'h4500;
+      if (codes[2]) r[14] = 1'b1;   // C3
+      if (codes[1]) r[10] = 1'b1;   // C2
+      if (codes[0]) r[8]  = 1'b1;   // C0
+      if (ie)       r[0]  = 1'b1;   // IE (sticky)
+      return r;
+    end
+  endfunction
+
+  // The ROM constants QEMU emits (default rounding). 80-bit canonical.
+  function automatic logic [79:0] fconst(input logic [2:0] sel);
+    unique case (sel)
+      3'd0: fconst = 80'h3fff8000000000000000;          // 1.0
+      3'd1: fconst = 80'h4000d49a784bcd1b8afe;          // log2(10)
+      3'd2: fconst = 80'h3fffb8aa3b295c17f0bc;          // log2(e)
+      3'd3: fconst = 80'h4000c90fdaa22168c235;          // pi
+      3'd4: fconst = 80'h3ffd9a209a84fbcff799;          // log10(2)
+      3'd5: fconst = 80'h3ffeb17217f7d1cf79ac;          // ln(2)
+      default: fconst = 80'h00000000000000000000;       // 0.0
+    endcase
+  endfunction
+
+  // FXAM condition codes {C3,C2,C1,C0} per QEMU helper_fxam_ST0 (C1=sign always).
+  function automatic logic [3:0] fxam_codes(input logic [79:0] v, input logic empty);
+    logic c1;
+    logic [14:0] e;
+    logic [63:0] m;
+    begin
+      c1 = v[79];                    // C1 = sign bit (set even when empty)
+      if (empty) return {1'b1, 1'b0, c1, 1'b1};   // Empty: C3=1,C2=0,C0=1
+      e = fx_exp(v); m = fx_man(v);
+      if (e==15'h7fff) begin
+        // QEMU helper_fxam_ST0: Inf -> 0x500 (C2+C0), NaN -> 0x100 (C0). The C1
+        // sign bit (0x200) is overlaid by the caller for both.
+        if (m==64'h8000000000000000) return {1'b0,1'b1,c1,1'b1};  // Inf: C2=1,C0=1 (0x500)
+        else                          return {1'b0,1'b0,c1,1'b1};  // NaN: C0=1   (0x100)
+      end else if (e==15'd0) begin
+        if (m==64'd0) return {1'b1,1'b0,c1,1'b0};   // Zero: C3=1
+        else          return {1'b1,1'b1,c1,1'b0};   // Denormal: C3=1,C2=1
+      end else begin
+        return {1'b0,1'b1,c1,1'b0};                 // Normal: C2=1
+      end
+    end
+  endfunction
+
+  // The assembled memory operand value -> floatx80, by size/kind.
+  function automatic logic [79:0] f_mem_as_float(input logic [79:0] m80, input logic [3:0] bytes);
+    unique case (bytes)
+      4'd4:  f_mem_as_float = fx_from_f32(m80[31:0]);
+      4'd8:  f_mem_as_float = fx_from_f64(m80[63:0]);
+      default: f_mem_as_float = m80;     // m80 already floatx80
+    endcase
+  endfunction
+  function automatic logic [79:0] f_mem_as_int(input logic [79:0] m80, input logic [3:0] bytes);
+    unique case (bytes)
+      4'd2:  f_mem_as_int = fx_from_int({{48{m80[15]}}, m80[15:0]});
+      4'd4:  f_mem_as_int = fx_from_int({{32{m80[31]}}, m80[31:0]});
+      default: f_mem_as_int = fx_from_int($signed(m80[63:0]));
+    endcase
+  endfunction
+
+  // ARITHMETIC: compute {inexact, result} for ST(dst) given two floatx80 ops and
+  // the x87 group sub-op (0 add,1 mul,4 sub,5 subr,6 div,7 divr). For the memory/
+  // ST0-dest forms, a=ST0, b=mem/ST(i). For STI-dest forms, a=ST(i), b=ST0.
+  function automatic logic [80:0] f_arith(input logic [2:0] sub,
+                                          input logic [79:0] a, input logic [79:0] b,
+                                          input logic [1:0] rc);
+    unique case (sub)
+      3'd0: f_arith = fx_add(a, b, rc);                       // add
+      3'd1: f_arith = fx_mul(a, b, rc);                       // mul
+      3'd4: f_arith = fx_add(a, {~b[79], b[78:0]}, rc);       // sub: a - b
+      3'd5: f_arith = fx_add(b, {~a[79], a[78:0]}, rc);       // subr: b - a
+      3'd6: f_arith = fx_div(a, b, rc);                       // div: a / b
+      default: f_arith = fx_div(b, a, rc);                    // divr: b / a
+    endcase
+  endfunction
+
+  // The two arithmetic operands for the current x87 op, in the canonical
+  // (dividend/divisor, minuend/subtrahend) order f_arith expects, so the
+  // execute stage can pre-test them for the special cases QEMU handles
+  // explicitly (0/0 -> QNaN+IE, x/0 -> Inf+ZE, sqrt(neg) -> QNaN+IE) WITHOUT
+  // duplicating the per-form operand selection. `fa` is the left operand,
+  // `fb` the right, matching f_arith(sub, fa, fb).
+  function automatic logic f_div_by_zero(input logic [2:0] sub,
+                                         input logic [79:0] a, input logic [79:0] b);
+    // x/0 with x finite-nonzero. Only the div/divr group can zero-divide.
+    unique case (sub)
+      3'd6:    return fx_is_zero(b) && !fx_is_zero(a) && !fx_is_nan(a);  // a/b
+      3'd7:    return fx_is_zero(a) && !fx_is_zero(b) && !fx_is_nan(b);  // b/a
+      default: return 1'b0;
+    endcase
+  endfunction
+  function automatic logic f_zero_over_zero(input logic [2:0] sub,
+                                            input logic [79:0] a, input logic [79:0] b);
+    unique case (sub)
+      3'd6:    return fx_is_zero(a) && fx_is_zero(b);   // 0/0
+      3'd7:    return fx_is_zero(a) && fx_is_zero(b);   // 0/0
+      default: return 1'b0;
+    endcase
+  endfunction
+
+  // Full arithmetic evaluation with the exception cases QEMU handles explicitly
+  // for masked, default-control operands. Returns {ie, ze, inexact, result}:
+  //   0/0          -> real-indefinite QNaN, IE                 (helper_fdiv)
+  //   x/0 (x!=0)   -> signed Inf, ZE                           (helper_fdiv)
+  //   otherwise    -> normal-operand datapath via f_arith, PE = inexact.
+  // (a,b) are in f_arith canonical order: div = a/b, divr = b/a, etc.
+  function automatic logic [82:0] f_eval(input logic [2:0] sub,
+                                         input logic [79:0] a, input logic [79:0] b,
+                                         input logic [1:0] rc);
+    logic [80:0] r;
+    begin
+      if (f_zero_over_zero(sub, a, b))
+        f_eval = {1'b1, 1'b0, 1'b0, 80'hFFFFC000000000000000};   // IE, indefinite
+      else if (f_div_by_zero(sub, a, b)) begin
+        r = f_arith(sub, a, b, rc);                              // fx_div -> signed Inf
+        f_eval = {1'b0, 1'b1, 1'b0, r[79:0]};                   // ZE
+      end else begin
+        r = f_arith(sub, a, b, rc);
+        f_eval = {1'b0, 1'b0, r[80], r[79:0]};                  // PE = inexact
+      end
+    end
+  endfunction
+
+  // Latch arithmetic status flags (sticky) into fstat from f_eval's flag bits.
+  function automatic logic [15:0] f_arith_fstat(input logic [15:0] cur,
+                                                input logic [82:0] arf);
+    logic [15:0] r;
+    begin
+      r = cur;
+      if (arf[82]) r[0] = 1'b1;   // IE
+      if (arf[81]) r[2] = 1'b1;   // ZE
+      if (arf[80]) r[5] = 1'b1;   // PE
+      return r;
+    end
+  endfunction
+
+  // ===========================================================================
+  // x87 retire snapshot (TOP-relative st0..st7, fstat with TOP overlaid)
+  // ===========================================================================
+  assign retire_x87_touched = x87_touched_r;
+  assign retire_fctrl = fctrl;
+  assign retire_fstat = (fstat & ~16'h3800) | ({13'd0, ftop} << 11);
+  assign retire_ftag  = 16'h0000;       // QEMU gdbstub abridges ftag to 0
+  assign retire_st0 = fpr[ftop + 3'd0];
+  assign retire_st1 = fpr[ftop + 3'd1];
+  assign retire_st2 = fpr[ftop + 3'd2];
+  assign retire_st3 = fpr[ftop + 3'd3];
+  assign retire_st4 = fpr[ftop + 3'd4];
+  assign retire_st5 = fpr[ftop + 3'd5];
+  assign retire_st6 = fpr[ftop + 3'd6];
+  assign retire_st7 = fpr[ftop + 3'd7];
+
+  // ===========================================================================
   // Main sequential FSM
   // ===========================================================================
   always_ff @(posedge clk) begin
@@ -1102,8 +1600,16 @@ module intcore
       gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[2]<=32'd0; gpr[3]<=32'd0;
       gpr[4]<=init_esp; gpr[5]<=32'd0; gpr[6]<=32'd0; gpr[7]<=32'd0;
       fetch_word<=3'd0; retire_valid<=1'b0; step<=4'd0;
+      // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty).
+      ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
+      x87_touched_r<=1'b0; f_step<=4'd0;
+      for (int fi=0; fi<8; fi++) fpr[fi]<=80'd0;
     end else begin
       retire_valid <= 1'b0;
+      // x87-touched defaults low each cycle; only the x87 retire paths
+      // (S_FEXEC / S_FSTORE) raise it, so the DPI x87 hook fires only for FPU
+      // instructions. (ventium_top gates vtm_retire_x87 on this.)
+      x87_touched_r <= 1'b0;
 
       unique case (state)
         S_RESET: begin fetch_word<=3'd0; state<=S_FETCH; end
@@ -1135,8 +1641,17 @@ module intcore
           q_str_scandi<=d_str_scandi; q_ct<=d_ct; q_ret_imm<=d_ret_imm;
           q_cld<=d_cld; q_std<=d_std; step<=4'd0;
           q_clc<=d_clc; q_stc<=d_stc; q_cmc<=d_cmc; q_cnt16<=d_cnt16;
+          // latch x87 decode
+          q_fxop<=d_fxop; q_is_x87<=d_is_x87; q_f_mem_read<=d_f_mem_read;
+          q_f_mem_write<=d_f_mem_write; q_f_mbytes<=d_f_mbytes; q_f_pop<=d_f_pop;
+          q_f_pop2<=d_f_pop2; q_f_sti<=d_f_sti; q_f_aluop<=d_f_aluop; q_f_const<=d_f_const;
+          f_step<=4'd0;
 
           if (d_halt || d_unknown) state<=S_HALT;
+          else if (d_is_x87) begin
+            if (d_f_mem_read) state<=S_FLOAD;       // read mem operand first
+            else state<=S_FEXEC;                    // reg/const/control op
+          end
           else if (d_kind==K_STR) begin
             // REP with ECX==0: degenerate single no-op record (advance EIP).
             if ((pfx_rep!=2'd0) && (gpr[R_ECX]==32'd0)) state<=S_EXEC; // handled as no-op
@@ -1158,6 +1673,26 @@ module intcore
         end
         S_LOAD2: begin
           if (mem_ack) begin mem_load_data2<=mem_rdata; state<=S_EXEC; end
+        end
+
+        // -------------------------------------------------------------------
+        // S_FLOAD: read the x87 memory operand (m16/m32 = 1 word, m64 = 2,
+        // m80 = 3) into f_mem80, LSB-first. Bus addresses q_ea + 4*f_step.
+        // -------------------------------------------------------------------
+        S_FLOAD: begin
+          if (mem_ack) begin
+            unique case (f_step)
+              4'd0: f_mem80[31:0]  <= mem_rdata;
+              4'd1: f_mem80[63:32] <= mem_rdata;
+              default: f_mem80[79:64] <= mem_rdata[15:0];
+            endcase
+            // total words needed: m16/m32->1, m64->2, m80->3
+            if ((q_f_mbytes<=4'd4) ||
+                (q_f_mbytes==4'd8 && f_step==4'd1) ||
+                (q_f_mbytes==4'd10 && f_step==4'd2)) begin
+              f_step<=4'd0; state<=S_FEXEC;
+            end else f_step<=f_step+4'd1;
+          end
         end
 
         // -------------------------------------------------------------------
@@ -1616,10 +2151,281 @@ module intcore
           end
         end
 
+        // -------------------------------------------------------------------
+        // S_FEXEC: x87 execute + commit. Updates fpr/ftop/fstat/fptag, sets
+        // x87_touched_r, and either retires (advance EIP) or hands a memory
+        // store to S_FSTORE. All arithmetic is bit-exact vs QEMU softfloat for
+        // the corpus's normal operands (fpu_x87_pkg).
+        // -------------------------------------------------------------------
+        S_FEXEC: begin
+          logic f_do_store, f_do_retire;
+          logic [79:0] opnd_f;    // memory operand as floatx80 (read forms)
+          logic [79:0] arg_b;     // right arithmetic operand (mem or st(i))
+          logic [80:0] ar;        // {inexact, result}
+          logic [82:0] arf;       // {ie, ze, inexact, result} from f_eval
+          logic [2:0]  codes;
+          logic [3:0]  xc;
+          logic [79:0] st0v, stiv, resv;
+          logic        inexact, cmp_ie;
+          logic [1:0]  f_rc;      // rounding control (fctrl[11:10])
+          logic        f_pc_bad;  // arithmetic requested under non-64-bit PC
+          logic        f_is_arith;
+          f_do_store=1'b0; f_do_retire=1'b1; inexact=1'b0; cmp_ie=1'b0;
+          opnd_f = q_f_mem_read ? f_mem_as_float(f_mem80, q_f_mbytes) : 80'd0;
+          st0v = fst(3'd0);
+          stiv = fst(q_f_sti);
+          f_rc = fctrl[11:10];
+
+          // Precision control (PC = fctrl[9:8]) other than 11 (64-bit extended)
+          // is a Tier-3 deferral: the datapath only implements full extended
+          // precision, so rather than silently mis-rounding we HALT loudly on an
+          // arithmetic op requested under PC != 11. (Data movement / compares /
+          // constants are precision-independent and proceed normally.)
+          f_is_arith = (q_fxop==FX_AR_ST0_STI) || (q_fxop==FX_AR_STI_ST0) ||
+                       (q_fxop==FX_AR_M32)     || (q_fxop==FX_AR_M64)     ||
+                       (q_fxop==FX_AR_I16)     || (q_fxop==FX_AR_I32)     ||
+                       (q_fxop==FX_FSQRT);
+          f_pc_bad = f_is_arith && (fctrl[9:8] != 2'b11);
+          if (f_pc_bad) begin
+            state<=S_HALT;
+          end else
+          unique case (q_fxop)
+            // ---- loads (push) ----
+            FX_FLD_M32, FX_FLD_M64, FX_FLD_M80: begin
+              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
+              fpr[ftop-3'd1]<= (q_fxop==FX_FLD_M80) ? f_mem80 : opnd_f;
+            end
+            FX_FILD_M16, FX_FILD_M32, FX_FILD_M64: begin
+              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
+              fpr[ftop-3'd1]<= f_mem_as_int(f_mem80, q_f_mbytes);
+            end
+            FX_FLDCONST: begin
+              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
+              fpr[ftop-3'd1]<= fconst(q_f_const);
+            end
+            FX_FLD_STI: begin
+              // push a copy of ST(i). Note: i is evaluated on the CURRENT TOP,
+              // before the push (QEMU pushes then ST0=old ST(i)).
+              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
+              fpr[ftop-3'd1]<= stiv;
+            end
+            // ---- register moves / stack mgmt ----
+            FX_FST_STI: begin
+              fpr[fri(q_f_sti)] <= st0v; fptag[fri(q_f_sti)]<=1'b0;
+              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
+            end
+            FX_FXCH: begin
+              fpr[ftop]          <= stiv;
+              fpr[fri(q_f_sti)]  <= st0v;
+            end
+            FX_FFREE: begin fptag[fri(q_f_sti)]<=1'b1; end
+            FX_FINCSTP: begin ftop<=ftop+3'd1; fstat<=fstat & ~16'h4700; end
+            FX_FDECSTP: begin ftop<=ftop-3'd1; fstat<=fstat & ~16'h4700; end
+            FX_FNOP: begin /* no state change */ end
+            FX_FWAIT: begin /* no unmasked exception in corpus */ end
+            FX_FNINIT: begin
+              ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
+            end
+            FX_FNCLEX: begin fstat<=fstat & 16'h7f00; end
+            FX_FLDCW:  begin fctrl<=f_mem80[15:0]; end
+            // ---- sign / abs on ST0 ----
+            FX_FABS: begin fpr[ftop]<= {1'b0, st0v[78:0]}; end
+            FX_FCHS: begin fpr[ftop]<= {~st0v[79], st0v[78:0]}; end
+            // ---- compares ----
+            // FCOM/FCOMP/FCOMPP/FTST/FICOM are SIGNALING (#IA on any NaN);
+            // FUCOM/FUCOMP/FUCOMPP are QUIET (#IA only on a signaling NaN).
+            FX_FCOM_STI, FX_FCOM_M32, FX_FCOM_M64: begin
+              arg_b = (q_fxop==FX_FCOM_STI) ? stiv : opnd_f;
+              codes = fcom_codes(st0v, arg_b);
+              cmp_ie = fcom_ie(st0v, arg_b, 1'b1);     // signaling
+              fstat <= apply_cmp(fstat, codes, cmp_ie);
+              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
+            end
+            FX_FUCOM_STI: begin
+              codes = fcom_codes(st0v, stiv);
+              cmp_ie = fcom_ie(st0v, stiv, 1'b0);      // quiet
+              fstat <= apply_cmp(fstat, codes, cmp_ie);
+              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
+            end
+            FX_FCOMPP: begin
+              codes = fcom_codes(st0v, fst(3'd1));
+              cmp_ie = fcom_ie(st0v, fst(3'd1), 1'b1); // FCOMPP signaling
+              fstat <= apply_cmp(fstat, codes, cmp_ie);
+              fptag[ftop]<=1'b1; fptag[ftop+3'd1]<=1'b1; ftop<=ftop+3'd2;
+            end
+            FX_FUCOMPP: begin
+              codes = fcom_codes(st0v, fst(3'd1));
+              cmp_ie = fcom_ie(st0v, fst(3'd1), 1'b0); // FUCOMPP quiet
+              fstat <= apply_cmp(fstat, codes, cmp_ie);
+              fptag[ftop]<=1'b1; fptag[ftop+3'd1]<=1'b1; ftop<=ftop+3'd2;
+            end
+            FX_FTST: begin
+              codes = fcom_codes(st0v, 80'd0);   // compare ST0 vs +0.0
+              cmp_ie = fcom_ie(st0v, 80'd0, 1'b1);     // signaling
+              fstat <= apply_cmp(fstat, codes, cmp_ie);
+            end
+            FX_FXAM: begin
+              xc = fxam_codes(st0v, fptag[ftop]);
+              fstat <= (fstat & ~16'h4700) |
+                       ({1'd0,xc[3]}<<14) | ({5'd0,xc[2]}<<10) |
+                       ({6'd0,xc[1]}<<9)  | ({7'd0,xc[0]}<<8);
+            end
+            FX_FICOM_M16, FX_FICOM_M32: begin
+              arg_b = f_mem_as_int(f_mem80, q_f_mbytes);
+              codes = fcom_codes(st0v, arg_b);
+              cmp_ie = fcom_ie(st0v, arg_b, 1'b1);     // FICOM signaling
+              fstat <= apply_cmp(fstat, codes, cmp_ie);
+              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
+            end
+            // ---- arithmetic ----
+            // Each form selects (left,right) operands and calls f_eval, which
+            // returns {ie, ze, inexact, result}. f_eval handles QEMU's explicit
+            // special cases bit-exactly: x/0 -> signed Inf + ZE, 0/0 -> real-
+            // indefinite QNaN + IE; otherwise the normal-operand datapath.
+            FX_AR_ST0_STI: begin
+              arf = f_eval(q_f_aluop, st0v, stiv, f_rc);
+              fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
+            end
+            FX_AR_STI_ST0: begin
+              // ST(i) op= ST0 : a=ST(i), b=ST0; sub/subr/div/divr direction per
+              // QEMU helper_f{op}_STN_ST0 (which use ST(i) and ST0 in that order).
+              arf = f_eval(q_f_aluop, stiv, st0v, f_rc);
+              fpr[fri(q_f_sti)]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
+              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
+            end
+            FX_AR_M32, FX_AR_M64: begin
+              arf = f_eval(q_f_aluop, st0v, opnd_f, f_rc);
+              fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
+            end
+            FX_AR_I16, FX_AR_I32: begin
+              arf = f_eval(q_f_aluop, st0v, f_mem_as_int(f_mem80, q_f_mbytes), f_rc);
+              fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
+            end
+            FX_FSQRT: begin
+              // QEMU helper_fsqrt: if ST0 has its sign bit set (floatx80_is_neg),
+              // clear the condition codes (0x4700) and set C2 (0x400) FIRST; then
+              // floatx80_sqrt runs -> sqrt(-0)=-0 (no #IA); sqrt(negative finite)
+              // = real-indefinite QNaN + #IA (IE). Positive operands take the
+              // normal datapath (PE on inexact).
+              if (st0v[79]) begin               // sign set: -finite / -0 / -NaN
+                if (fx_is_neg(st0v) && !fx_is_nan(st0v)) begin
+                  // negative non-zero (and not NaN): QNaN + IE, plus C2.
+                  fpr[ftop]<= 80'hFFFFC000000000000000;
+                  fstat <= (fstat & ~16'h4700) | 16'h0400 | 16'h0001;  // C2 + IE
+                end else begin
+                  // -0 (or -NaN): sqrt returns the operand; C2 set, no IE here.
+                  ar = fx_sqrt(st0v, f_rc);
+                  fpr[ftop]<=ar[79:0];
+                  fstat <= (fstat & ~16'h4700) | 16'h0400;             // C2 only
+                end
+              end else begin
+                ar = fx_sqrt(st0v, f_rc); inexact=ar[80];
+                fpr[ftop]<=ar[79:0];
+                if (inexact) fstat<=fstat | 16'h0020;
+              end
+            end
+            // ---- memory stores: defer to S_FSTORE ----
+            // The store VALUE and its exception flags depend only on ST0/fctrl
+            // (stable across the store beats), so latch PE/IE (sticky) here at
+            // dispatch. FST m80 / FNSTCW / FNSTSW m16 are exact (flags stay 0).
+            FX_FST_M32, FX_FST_M64, FX_FST_M80,
+            FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
+            FX_FNSTCW, FX_FNSTSW_M: begin
+              f_do_store=1'b1; f_do_retire=1'b0;
+              if (fstore_ie)      fstat <= fstat | 16'h0001;   // IE (out-of-range FIST)
+              else if (fstore_pe) fstat <= fstat | 16'h0020;   // PE (inexact store)
+            end
+            // ---- FNSTSW AX (writes AX, no memory) ----
+            FX_FNSTSW_AX: begin
+              gpr[R_EAX] <= {gpr[R_EAX][31:16],
+                             (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
+            end
+            default: ;
+          endcase
+
+          // f_pc_bad already routed to S_HALT above (no retire); only commit the
+          // EIP/retire when we actually executed the op.
+          if (!f_pc_bad) begin
+            if (f_do_retire) begin
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_FETCH;
+            end else begin
+              state<=S_FSTORE; f_step<=4'd0;
+            end
+          end
+        end
+
+        // -------------------------------------------------------------------
+        // S_FSTORE: write the x87 store operand to memory over 1..3 bus beats,
+        // then (for FSTP/FISTP) pop, advance EIP and retire. Memory contents are
+        // not gate-compared, but stores are implemented faithfully.
+        // -------------------------------------------------------------------
+        S_FSTORE: begin
+          if (mem_ack) begin
+            // words needed: m16/cw/sw->1, m32->1, m64->2, m80->3
+            if ((q_f_mbytes<=4'd4) ||
+                (q_f_mbytes==4'd8 && f_step==4'd1) ||
+                (q_f_mbytes==4'd10 && f_step==4'd2)) begin
+              // last beat: apply pop and retire
+              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_FETCH; f_step<=4'd0;
+            end else f_step<=f_step+4'd1;
+          end
+        end
+
         S_HALT: state<=S_HALT;
         default: state<=S_HALT;
       endcase
     end
+  end
+
+  // ===========================================================================
+  // x87 store-operand value + exception flags (combinational). `fstore_val`
+  // holds the word-aligned bytes to write; `fstore_pe`/`fstore_ie` carry the
+  // precision (inexact) / invalid status QEMU latches on a rounding/overflowing
+  // store (helper_fst*/helper_fist* -> merge_exception_flags). fstat is trace-
+  // compared, so these must be set whenever QEMU would. Rounding honors RC.
+  //   FST  m32/m64 : PE if the floatx80->float32/64 narrow rounds (inexact).
+  //   FIST m16/m32/m64 : PE if the rounding-to-int loses a fraction; IE +
+  //     integer-indefinite if the result is out of the destination's range.
+  //   FST m80 / FNSTCW / FNSTSW m16 : exact, no exception.
+  // ===========================================================================
+  logic [79:0] fstore_val;
+  logic        fstore_pe;
+  logic        fstore_ie;
+  always_comb begin
+    logic [79:0] s0;
+    logic [32:0] r32;
+    logic [64:0] r64;
+    logic [65:0] ri;             // {invalid, inexact, value}
+    s0 = fpr[ftop];               // ST0
+    r32 = 33'd0; r64 = 65'd0; ri = 66'd0;
+    fstore_val = 80'd0; fstore_pe = 1'b0; fstore_ie = 1'b0;
+    unique case (q_fxop)
+      FX_FST_M32: begin
+        r32 = fx_to_f32_ex(s0, fctrl[11:10]);
+        fstore_val = {48'd0, r32[31:0]}; fstore_pe = r32[32];
+      end
+      FX_FST_M64: begin
+        r64 = fx_to_f64_ex(s0, fctrl[11:10]);
+        fstore_val = {16'd0, r64[63:0]}; fstore_pe = r64[64];
+      end
+      FX_FST_M80:  fstore_val = s0;
+      FX_FIST_M16: begin
+        ri = fx_to_int_ex(s0, 16, fctrl[11:10]);
+        fstore_val = {64'd0, ri[15:0]}; fstore_pe = ri[64]; fstore_ie = ri[65];
+      end
+      FX_FIST_M32: begin
+        ri = fx_to_int_ex(s0, 32, fctrl[11:10]);
+        fstore_val = {48'd0, ri[31:0]}; fstore_pe = ri[64]; fstore_ie = ri[65];
+      end
+      FX_FIST_M64: begin
+        ri = fx_to_int_ex(s0, 64, fctrl[11:10]);
+        fstore_val = {16'd0, ri[63:0]}; fstore_pe = ri[64]; fstore_ie = ri[65];
+      end
+      FX_FNSTCW:   fstore_val = {64'd0, fctrl};
+      FX_FNSTSW_M: fstore_val = {64'd0, (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
+      default:     fstore_val = 80'd0;
+    endcase
   end
 
   // ===========================================================================
@@ -1643,6 +2449,22 @@ module intcore
         end else mem_addr=q_ea;
       end
       S_LOAD2: begin mem_req=1'b1; mem_addr=gpr[R_EDI]; end
+      S_FLOAD: begin
+        mem_req=1'b1; mem_addr=q_ea + {26'd0, f_step, 2'b00};   // q_ea + 4*f_step
+      end
+      S_FSTORE: begin
+        mem_req=1'b1; mem_we=1'b1;
+        mem_addr = q_ea + {26'd0, f_step, 2'b00};
+        // the m80 third beat writes only 2 bytes; all others write a full word.
+        if (q_f_mbytes==4'd10 && f_step==4'd2) mem_wstrb=4'b0011;
+        else if (q_f_mbytes==4'd2)             mem_wstrb=4'b0011;   // m16 (cw/sw/int16)
+        else                                   mem_wstrb=4'b1111;
+        unique case (f_step)
+          4'd0: mem_wdata = fstore_val[31:0];
+          4'd1: mem_wdata = fstore_val[63:32];
+          default: mem_wdata = {16'd0, fstore_val[79:64]};
+        endcase
+      end
       S_STORE: begin
         mem_req=1'b1; mem_we=1'b1;
         if (q_kind==K_STR) begin
