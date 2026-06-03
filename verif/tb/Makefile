@@ -1,0 +1,107 @@
+# verif/tb/Makefile — Producer C: Verilator C++ testbench + bus-functional model
+#
+# Default target verilates+builds the testbench against the REAL core sources in
+# rtl/ (this is what the integration phase uses). The 'selftest' target builds
+# against the throwaway stub in verif/tb/selftest/ so this component can be
+# proven in isolation while rtl/ is authored in parallel.
+#
+# Contracts: docs/rtl-interface.md (ports + vtm_retire DPI), docs/trace-format.md
+# (the emitted .vtrace), PLAN.md §4.2.
+
+# ---- paths ------------------------------------------------------------------
+VENTIUM_ROOT := $(abspath $(CURDIR)/../..)
+RTL_DIR      := $(VENTIUM_ROOT)/rtl
+SELFTEST_DIR := $(CURDIR)/selftest
+TB_DIR       := $(CURDIR)
+
+# Real RTL sources (recursively): rtl/*.sv and rtl/<block>/*.sv
+RTL_SRCS := $(wildcard $(RTL_DIR)/*.sv $(RTL_DIR)/**/*.sv)
+
+# Self-test stub sources.
+SELFTEST_SRCS := $(wildcard $(SELFTEST_DIR)/*.sv)
+
+# C++ sources owned by Producer C.
+CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp
+
+# ---- verilator invocation ---------------------------------------------------
+VERILATOR ?= verilator
+TOP        = ventium_top
+EXE        = tb_ventium
+
+# Optional VCD waveform support: `make selftest TRACE=1` (or `make TRACE=1`).
+TRACE ?= 0
+ifeq ($(TRACE),1)
+  VL_TRACE := --trace
+else
+  VL_TRACE :=
+endif
+
+# -I.. so dpi_retire.cpp / tb_main.cpp can find trace_writer.h & memmodel.h, and
+# obj_dir on the include path for Vventium_top__Dpi.h (Verilator runs the C++
+# compile from inside -Mdir, so "." already resolves there; we add it explicitly
+# for clarity). CFLAGS go to the C++ compile of our .cpp files.
+VL_CFLAGS := -I$(TB_DIR) -std=c++17
+
+VL_FLAGS := --cc --exe --build -j 0 \
+            -sv --top-module $(TOP) \
+            -Wall -Wno-DECLFILENAME -Wno-UNUSED -Wno-fatal \
+            $(VL_TRACE) \
+            -CFLAGS "$(VL_CFLAGS)" \
+            -o $(EXE)
+
+# ---- default target: build against the real core ---------------------------
+.PHONY: all
+all: rtl
+
+.PHONY: rtl
+rtl:
+	@if [ -z "$(strip $(RTL_SRCS))" ]; then \
+	  echo "ERROR: no RTL sources found under $(RTL_DIR) (rtl/*.sv, rtl/**/*.sv)."; \
+	  echo "       The core is authored by a sibling agent; run 'make selftest'"; \
+	  echo "       to exercise this testbench in isolation."; \
+	  exit 1; \
+	fi
+	$(VERILATOR) $(VL_FLAGS) -Mdir obj_dir \
+	  $(RTL_SRCS) $(CPP_SRCS)
+	@echo "built: $(CURDIR)/obj_dir/$(EXE)"
+
+# ---- selftest target: build against the throwaway stub ----------------------
+# Built into a separate obj dir so it never clobbers a real-core build. ENTRY
+# is set via -GENTRY so the stub's deterministic pc values track --entry; the
+# selftest run below passes the matching --entry.
+SELFTEST_ENTRY ?= 0x08048000
+.PHONY: selftest-build
+selftest-build:
+	$(VERILATOR) $(VL_FLAGS) -Mdir obj_dir_selftest \
+	  -GENTRY=$(SELFTEST_ENTRY) \
+	  $(SELFTEST_SRCS) $(CPP_SRCS)
+	@echo "built: $(CURDIR)/obj_dir_selftest/$(EXE)"
+
+# Build + run the selftest and check the produced trace is well-formed.
+.PHONY: selftest
+selftest: selftest-build
+	./obj_dir_selftest/$(EXE) \
+	  --out $(CURDIR)/selftest.vtrace \
+	  --entry $(SELFTEST_ENTRY) --load $(SELFTEST_ENTRY) \
+	  --max-cycles 1000
+	@echo "--- selftest.vtrace ---"
+	@cat $(CURDIR)/selftest.vtrace
+	@echo "--- parsing with tracefmt.read_trace ---"
+	@PYTHONPATH=$(VENTIUM_ROOT)/verif/diff python3 -c \
+	  "import tracefmt; t=tracefmt.read_trace('$(CURDIR)/selftest.vtrace'); \
+	   print('hdr =', t.hdr); print('records =', len(t.records)); \
+	   assert t.hdr.get('vtrace')==1 and t.hdr.get('producer')=='rtl' \
+	          and t.hdr.get('mode')=='func', 'bad header'; \
+	   assert len(t.records)>=1, 'no records'; \
+	   ns=[r['n'] for r in t.records]; \
+	   assert ns==sorted(ns) and len(set(ns))==len(ns), 'n not strictly increasing'; \
+	   import re; \
+	   [ (any(re.fullmatch(r'0x[0-9a-f]{8}', r[k]) for _ in [0]) or (_ for _ in ()).throw(AssertionError('bad '+k))) for r in t.records for k in tracefmt.GPR_KEYS+['eflags','pc'] ]; \
+	   [ (re.fullmatch(r'0x[0-9a-f]{4}', r[k]) or (_ for _ in ()).throw(AssertionError('bad seg '+k))) for r in t.records for k in tracefmt.SEG_KEYS ]; \
+	   print('OK: well-formed func .vtrace with', len(t.records), 'records')"
+
+# ---- housekeeping -----------------------------------------------------------
+.PHONY: clean
+clean:
+	rm -rf obj_dir obj_dir_selftest
+	rm -f selftest.vtrace

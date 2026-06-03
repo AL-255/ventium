@@ -1,0 +1,139 @@
+// ventium_top.sv — Ventium top level (M1 single-issue in-order integer core).
+//
+// Ventium: a synthesizable SystemVerilog replica of the Intel Pentium (P5/P54C).
+// Block decomposition: PLAN.md §6.  M1 milestone (PLAN.md §7,
+// docs/m1-core-spec.md): replace the M0 NOP stub with a REAL integer core that
+// fetches/decodes/executes IA-32 from memory and is diff-clean vs QEMU.
+//
+// At M1 the live datapath is the multi-cycle functional core in
+// rtl/core/intcore.sv (instantiated below as u_core). ventium_top owns:
+//   * the top port list (docs/rtl-interface.md §1): clk, rst_n, init_eip/
+//     init_esp (driven by the TB at reset), and the mem_* bus group (§3);
+//   * the single DPI retire point (docs/rtl-interface.md §2): the core raises
+//     retire_valid for one clock with the post-commit architectural state, and
+//     ventium_top calls vtm_retire(n, pc, ...) here, maintaining the monotonic
+//     retire counter n.
+//
+// The remaining PLAN §6 blocks (bpred/issue/caches/tlb/fpu/biu/ucode/sys) are
+// still M0-style stubs instantiated for a coherent block map; they land in
+// M2..M6.  The integer regfile/fetch/decode/exec are realised inside
+// intcore.sv for M1 (a coherent functional FSM); the standalone block stubs
+// remain as the future home of the pipelined versions.
+//
+// ventium_pkg is supplied on the build command line (single compilation unit),
+// so no `include is needed — `import ventium_pkg::*` below resolves it.
+
+module ventium_top
+  import ventium_pkg::*;
+(
+    input  logic        clk,
+    input  logic        rst_n,     // active-low synchronous reset, held ≥1 cycle
+
+    // Reset-time architectural init (docs/m1-core-spec.md "Initial architectural
+    // state").  The TB drives these during the reset phase: init_eip = entry,
+    // init_esp = --init-esp (default 0x40c348d0).  The core latches them at the
+    // reset edge.  Segment selectors + EFLAGS reset value are constants in the
+    // core (the M1 corpus never changes them).
+    input  logic [31:0] init_eip,
+    input  logic [31:0] init_esp,
+
+    // M0/M1 bus-functional-model port group (docs/rtl-interface.md §3). Minimal
+    // by design; M5 replaces it with the modeled 64-bit P5 bus FSM.
+    output logic        mem_req,
+    output logic        mem_we,
+    output logic [31:0] mem_addr,
+    output logic [31:0] mem_wdata,
+    output logic [3:0]  mem_wstrb,
+    input  logic [31:0] mem_rdata,
+    input  logic        mem_ack
+);
+
+  // ---------------------------------------------------------------------------
+  // The M1 integer core: fetch -> decode -> execute -> mem -> retire, one insn
+  // at a time. It owns the bus and raises retire_valid with post-commit state.
+  // ---------------------------------------------------------------------------
+  logic        core_retire_valid;
+  logic [31:0] core_retire_pc;
+  arch_state_t core_retire_state;
+
+  intcore u_core (
+      .clk          (clk),
+      .rst_n        (rst_n),
+      .init_eip     (init_eip),
+      .init_esp     (init_esp),
+      .mem_req      (mem_req),
+      .mem_we       (mem_we),
+      .mem_addr     (mem_addr),
+      .mem_wdata    (mem_wdata),
+      .mem_wstrb    (mem_wstrb),
+      .mem_rdata    (mem_rdata),
+      .mem_ack      (mem_ack),
+      .retire_valid (core_retire_valid),
+      .retire_pc    (core_retire_pc),
+      .retire_state (core_retire_state)
+  );
+
+  // ---------------------------------------------------------------------------
+  // Single DPI retire point (docs/rtl-interface.md §2).  retire_n is the core's
+  // own retire counter (starts at 0, +1 per retired instruction).  The core
+  // pulses retire_valid for exactly one clock per committed instruction with the
+  // post-commit architectural state; we emit one vtm_retire call here.
+  // ---------------------------------------------------------------------------
+  logic [63:0] retire_n;
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      retire_n <= 64'd0;
+    end else if (core_retire_valid) begin
+`ifndef VTM_NO_DPI
+      vtm_retire(
+          retire_n,
+          core_retire_pc,
+          core_retire_state.eflags,
+          core_retire_state.eax, core_retire_state.ecx,
+          core_retire_state.edx, core_retire_state.ebx,
+          core_retire_state.esp, core_retire_state.ebp,
+          core_retire_state.esi, core_retire_state.edi,
+          core_retire_state.cs,  core_retire_state.ss,
+          core_retire_state.ds,  core_retire_state.es,
+          core_retire_state.fs,  core_retire_state.gs);
+`endif
+      retire_n <= retire_n + 64'd1;
+    end
+  end
+
+  // ---------------------------------------------------------------------------
+  // Block decomposition (PLAN §6). These remain M0-style stubs instantiated for
+  // a coherent block map; the pipelined versions land in M2..M6. (The M1
+  // integer datapath lives in intcore.sv above.) Inputs tied off; outputs left
+  // at the stubs' benign defaults.
+  // ---------------------------------------------------------------------------
+
+  // §6.1 Front end -----------------------------------------------------------
+  fetch       u_fetch   (.clk(clk), .rst_n(rst_n));
+  bpred_btb   u_bpred   (.clk(clk), .rst_n(rst_n));
+  decode      u_decode  (.clk(clk), .rst_n(rst_n));
+
+  // §6.3 Integer execution ----------------------------------------------------
+  issue_uv    u_issue   (.clk(clk), .rst_n(rst_n));
+  exec_int    u_exec    (.clk(clk), .rst_n(rst_n));
+  regfile     u_regfile (.clk(clk), .rst_n(rst_n));
+
+  // §6.6 x87 FPU ---------------------------------------------------------------
+  fpu_top     u_fpu     (.clk(clk), .rst_n(rst_n));
+
+  // §6.1/§6.5 Memory subsystem -------------------------------------------------
+  icache      u_icache  (.clk(clk), .rst_n(rst_n));
+  dcache      u_dcache  (.clk(clk), .rst_n(rst_n));
+  tlb         u_tlb     (.clk(clk), .rst_n(rst_n));
+
+  // §6.10 Bus interface unit ---------------------------------------------------
+  biu         u_biu     (.clk(clk), .rst_n(rst_n));
+
+  // §6.7 Microcode engine ------------------------------------------------------
+  ucode_rom   u_ucode   (.clk(clk), .rst_n(rst_n));
+
+  // §6.9 System state ----------------------------------------------------------
+  sys_state   u_sys     (.clk(clk), .rst_n(rst_n));
+
+endmodule : ventium_top
