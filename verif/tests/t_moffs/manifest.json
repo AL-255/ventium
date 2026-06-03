@@ -1,0 +1,9 @@
+{
+  "name": "t_moffs",
+  "src": "t_moffs/t_moffs.s",
+  "elf": "t_moffs/t_moffs.elf",
+  "image": "t_moffs/t_moffs.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 30
+}

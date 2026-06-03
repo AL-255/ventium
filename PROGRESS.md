@@ -9,7 +9,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 |---|---|---|---|
 | **M0** | Bootstrap: repo skeleton, QEMU golden-trace plugin, trace format, Verilator TB shell, comparator | comparator runs end-to-end on trivial trace | ✅ done (infrastructure proven; RTL still a NOP stub) |
 | M1 | Decoder + single-issue integer functional | integer subset diff-clean vs QEMU (decoder-exhaustive vs XED/Capstone is ongoing toward M2) | ✅ done (integer SUBSET func-equiv vs QEMU on smoke + M1 corpus; not yet decoder-exhaustive) |
-| M2 | Full integer ISA + memory + paging/segmentation | ISA arch corpus diff-clean | ☐ not started |
+| M2 | User-mode integer ISA completeness (re-scoped; system mode → M2S) | broad integer-ISA corpus diff-clean vs QEMU (user-mode) | ✅ done (28-program corpus func-equiv vs QEMU user-mode; system ops / far CALL-RET / ENTER / mem-operand bit-string + SHLD deferred & HALT; decoder-exhaustive-vs-XED still ongoing) |
+| M2S | System mode: segmentation/paging/TLB/interrupts/SMM (needs system-mode oracle) | system-arch corpus diff-clean | ☐ not started (deferred from M2) |
 | M3 | x87 FPU | x87 corpus vs SoftFloat/MPFR + QEMU | ☐ not started |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ☐ not started |
 | M5 | Cache/bus timing + x87 cycle accuracy | bus corpus + FP/branch cycle match | ☐ not started |
@@ -36,6 +37,163 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-02 — M2 complete (user-mode integer ISA completeness, func-equiv vs QEMU)
+
+Extended the M1 single-issue core to the **complete user-visible integer ISA**
+(`docs/m2-isa-spec.md`). **Every program in the corpus (M0/M1 baseline + the M2
+corpus = 28 programs) is func-diff-clean vs QEMU user-mode** (`compare.py --mode
+func` exit 0, no length mismatch). Gate: `make m2` (exit 0). `make m1` and
+`make m0-smoke` still pass; RTL stays lint-clean (`verilator --lint-only -Wall
+-Wno-DECLFILENAME -Wno-UNUSED`, exit 0).
+
+**Instruction groups now implemented** (on top of the M1 ALU/MOV/LEA/PUSH/POP/
+INC/DEC/TEST/Jcc/JMP subset): shifts & rotates `D0/D1/D2/D3`, `C0/C1` (ROL/ROR/
+RCL/RCR/SHL/SHR/SAL/SAR, count `& 0x1f`, count==0 ⇒ no flag change) and
+`SHLD/SHRD` (`0F A4/A5/AC/AD`, register destination); MUL/IMUL/DIV/IDIV
+(`F6/F7 /4../7`, EDX:EAX), two-/three-operand IMUL (`0F AF`, `69`, `6B`);
+MOVZX/MOVSX (`0F B6/B7/BE/BF`), NEG/NOT (`F6/F7 /2,/3`), INC/DEC r/m
+(`FE/FF /0,/1`), CDQ/CWDE/CBW (`99/98`, `66 98`), XCHG (`86/87`, `90+r` incl.
+`90`=NOP), SETcc (`0F 90+cc`), BSWAP (`0F C8+r`); bit tests BT/BTS/BTR/BTC
+(`0F A3/AB/B3/BB` reg, `0F BA /4../7` imm) and BSF/BSR (`0F BC/BD`); stack/flags
+PUSH/POP imm & r/m, PUSHA/POPA (`60/61`), PUSHF/POPF (`9C/9D`, user-mode POPF
+mask), LAHF/SAHF (`9F/9E`), LEAVE (`C9`); string ops MOVS/STOS/LODS/SCAS/CMPS
+(`A4..A7`, `AA..AF`) with REP/REPE/REPNE (`F3/F2`) and direction from DF
+(`STD/CLD` = `FD/FC`); control/loop LOOP/LOOPE/LOOPNE (`E2/E1/E0`), JCXZ/JECXZ
+(`E3`), near CALL `rel32` (`E8`) + RET (`C3`, `C2 iw`), near CALL/JMP r/m
+(`FF /2,/4`); and the carry-flag trio STC/CLC/CMC (`F9/F8/F5`, added this phase).
+
+**Prefix machine + partial-register handling.** A combinational prefix scanner
+consumes a run of up to four legacy prefixes (`66` operand-size, `67`
+address-size, `2E/36/3E/26/64/65` segment, `F0` LOCK, `F2/F3` REP) and feeds the
+correct opcode + length downstream; segment/LOCK are functional no-ops in the
+flat user model. **Partial-register semantics** route through a single
+`reg_read`/`reg_merge` pair: an 8-bit write updates `[7:0]` (or `[15:8]` for
+AH..BH) preserving the rest; a `66`-prefixed 16-bit write updates `[15:0]` and
+**preserves `[31:16]`**; flags are computed at the operand width (SF=bit7/15/31,
+PF on the low byte, CF/OF at the width boundary). The decoder maps AH..BH
+(encoded index 4..7) to the physical GPR so every datapath site uses
+`gpr[d_*_reg]` directly.
+
+**EFLAGS undefined-bit masking.** `verif/diff/tracefmt.py::EFLAGS_UNDEFINED`
+already carried the M2 cases (MUL/IMUL SF/ZF/AF/PF; DIV/IDIV all six;
+SHL/SHR/SAR/SHLD/SHRD OF+AF; ROL/ROR/RCL/RCR OF; BT* OF/SF/AF/PF; BSF/BSR
+CF/OF/SF/AF/PF; AAA/AAS/AAM/AAD/DAA/DAS). **No new entries were required this
+phase:** the instructions fixed/added below either touch no flags (MOVZX/MOVSX,
+MOV-moffs8, LEAVE, LOOP/JCXZ) or set only deterministic, *defined* flags
+(STC/CLC/CMC set CF exactly; their masking-table absence is correct so CF is
+compared in full), or their undefined bits are already covered by the existing
+`bt`/`bsf`/`bsr` keys (the new 16-bit BT*/BSF/BSR forms reuse them). The table is
+deliberately minimal so the gate cannot hide a real RTL bug.
+
+**New test corpus** (added this phase; discovered by the gate via
+`manifest.json`). The bulk of the M2 groups above were already covered by the
+inherited corpus (`t_bit`, `t_callret`, `t_div`, `t_ext`, `t_loop2`, `t_mixed`,
+`t_mul`, `t_op16`, `t_op8`, `t_partial`, `t_prefix`, `t_rep`, `t_rotate`,
+`t_setcc`, `t_shift`, `t_shld`, `t_stack`, `t_string`, `t_unary`). The five new
+programs regression-lock the adversarial-review findings the corpus did **not**
+hit:
+- `t_op16b` — `66`-prefixed MOVZX/MOVSX/BSF/BSR/BT*/BTS/BTR/BTC: proves the
+  destination's `[31:16]` is preserved and the bit index is mod 16 (not mod 32).
+- `t_carry` — STC/CLC/CMC, with the resulting CF consumed by ADC/RCL.
+- `t_moffs` — MOV AL,moffs8 (`A0`) and MOV moffs8,AL (`A2`), hand-encoded.
+- `t_leave16` — `66 C9` 16-bit LEAVE (preserve EBP[31:16], ESP += 2).
+- `t_loop16` — `67`-prefixed LOOP/LOOPE/JCXZ using CX (preserve ECX[31:16]).
+
+**Adversarial review — what was found and fixed** (every finding reproduced
+against QEMU with a tiny program before fixing, and each fix re-verified
+diff-clean; for the high findings a negative test — reverting the fix —
+confirmed the new regression program FAILS, proving the lock):
+- **MOVZX/MOVSX 16-bit (`66 0F B6/B7/BE/BF`)** [high, real]: `K_EXT` committed
+  the full 32-bit result, ignoring `q_w`; the `66` form must preserve `[31:16]`.
+  Fixed to `reg_merge(...,q_w,...)`. (Reproduced: `66 0F B6 C3` gave RTL
+  `eax=0x000000a5` vs QEMU `0xdead00a5`.)
+- **BSF/BSR 16-bit (`66 0F BC/BD`)** [high, real]: scanned all 32 bits, computed
+  ZF from 32 bits, wrote a full-32 index. Fixed to scan/ZF/merge at `q_w`.
+- **BT/BTS/BTR/BTC 16-bit reg/imm (`66 0F A3/AB/B3/BB`, `66 0F BA /4..7`)**
+  [high, real]: bit index was always masked mod 32 and modify forms wrote full
+  32. Fixed: index mod 16 for `q_w==2`, modify via `reg_merge`.
+- **STC/CLC/CMC (`F9/F8/F5`)** [high, real]: not decoded → `d_unknown` → HALT.
+  Added decode + a CF-only update arm (no other flags change).
+- **MOV AL,moffs8 / MOV moffs8,AL (`A0/A2`)** [med, real]: only the 16/32-bit
+  `A1/A3` were decoded; the 8-bit absolute forms HALTed. Added both (8-bit,
+  preserve `[31:8]` on load).
+- **16-bit near CALL/RET/LEAVE (`66 E8/C3/C2/C9`)** [low, real]: hardcoded 32-bit
+  width. Now width-aware: 16-bit CALL pushes a 2-byte next-IP, RET pops 2 bytes,
+  LEAVE pops 16-bit BP — all adjust ESP by 2 and (CALL/RET) truncate EIP to 16
+  bits, exactly matching QEMU. LEAVE-16 is regression-tested (`t_leave16`);
+  CALL-16/RET-16 are implemented but not testable in a continuing flat program
+  (the 16-bit-truncated target lands at an unmapped low address and faults in
+  **both** models — confirmed against QEMU), so they are documented, not gated.
+- **`67`-prefixed JECXZ/LOOP/LOOPE/LOOPNE** [low, real]: always used the full
+  32-bit ECX. Now the count register is CX (low 16, preserve `[31:16]`) under
+  `0x67`. Regression-tested (`t_loop16`).
+
+**Still HALTs (deliberately deferred; loud HALT, never mis-execute)** — confirmed
+the core stops cleanly (retires nothing past the unsupported opcode) rather than
+corrupting state:
+- **Memory-operand BT/BTS/BTR/BTC and SHLD/SHRD** (the bit-string memory addressing
+  and the memory-RMW shift-double): marked `d_unknown` → HALT. Genuine ISA forms
+  but uncommon (compilers rarely emit them); deferred to a later milestone.
+- **ENTER (`C8`)** — spec explicitly defers it ("LEAVE at least"); HALTs.
+- **System / privileged ops, far CALL/RET, segment-load, paging/TLB** — out of
+  M2 scope by design (need a system-mode oracle); these are **M2S**.
+
+**How to run:** `make m2` (= `bash verif/run-m2.sh`). It builds the RTL TB, then
+for each program discovered from `verif/tests/**/manifest.json` it builds the ELF
+(`gcc -m32 -nostdlib -static`), ISA-verifies it (`tools/isa_verify.py`, pure P5),
+flattens it, generates the QEMU golden (gdbstub), runs the RTL TB with init-ESP
+from the golden n=0, runs `compare.py --mode func`, and asserts exit 0 for all;
+prints a per-program table and exits 0 only if all pass.
+
+**Observed result** (`make m2` from a clean TB build, exit 0):
+
+```
+    PROGRAM          RESULT DETAIL
+    -------          ------ ------
+    smoke            PASS   func-equivalent (22 insns max)
+    t_bit            PASS   func-equivalent (55 insns max)
+    t_branch         PASS   func-equivalent (43 insns max)
+    t_callret        PASS   func-equivalent (35 insns max)
+    t_carry          PASS   func-equivalent (40 insns max)
+    t_div            PASS   func-equivalent (60 insns max)
+    t_ext            PASS   func-equivalent (50 insns max)
+    t_leave16        PASS   func-equivalent (25 insns max)
+    t_loop16         PASS   func-equivalent (60 insns max)
+    t_loop2          PASS   func-equivalent (65 insns max)
+    t_loop           PASS   func-equivalent (78 insns max)
+    t_mem            PASS   func-equivalent (25 insns max)
+    t_mixed          PASS   func-equivalent (200 insns max)
+    t_moffs          PASS   func-equivalent (30 insns max)
+    t_mul            PASS   func-equivalent (60 insns max)
+    t_op16b          PASS   func-equivalent (60 insns max)
+    t_op16           PASS   func-equivalent (60 insns max)
+    t_op8            PASS   func-equivalent (64 insns max)
+    t_partial        PASS   func-equivalent (44 insns max)
+    t_prefix         PASS   func-equivalent (44 insns max)
+    t_rep            PASS   func-equivalent (85 insns max)
+    t_rotate         PASS   func-equivalent (68 insns max)
+    t_setcc          PASS   func-equivalent (65 insns max)
+    t_shift          PASS   func-equivalent (67 insns max)
+    t_shld           PASS   func-equivalent (44 insns max)
+    t_stack          PASS   func-equivalent (45 insns max)
+    t_string         PASS   func-equivalent (50 insns max)
+    t_unary          PASS   func-equivalent (80 insns max)
+
+    totals: 28 PASS / 0 FAIL / 28 total
+M2 GATE: PASS — every program is func-diff-clean vs QEMU (exit 0).
+```
+
+**Honest coverage statement:** M2 covers the user-mode integer ISA a flat QEMU
+user-mode program can execute and reproduce bit-exactly. It is **NOT** yet
+"decoder-exhaustive vs XED/Capstone" — that audit remains ongoing. Memory-operand
+BT*/SHLD/SHRD and ENTER are genuine integer forms that currently HALT (deferred,
+not mis-executed). System mode (segmentation/paging/TLB/interrupts/SMM), far
+CALL/RET, and privileged ops are out of scope by design and move to **M2S**. No
+pipeline / U-V pairing / branch prediction / caches yet (M4/M5); M2 is
+functional-only (no cycle accuracy).
+
+**Next:** M3 — x87 FPU (x87 corpus vs SoftFloat/MPFR + QEMU).
 
 ### 2026-06-02 — M1 complete (real single-issue integer core, func-equiv vs QEMU)
 

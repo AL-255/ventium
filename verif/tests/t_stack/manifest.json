@@ -1,0 +1,9 @@
+{
+  "name": "t_stack",
+  "src": "t_stack/t_stack.s",
+  "elf": "t_stack/t_stack.elf",
+  "image": "t_stack/t_stack.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 45
+}

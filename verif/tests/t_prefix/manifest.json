@@ -1,0 +1,9 @@
+{
+  "name": "t_prefix",
+  "src": "t_prefix/t_prefix.s",
+  "elf": "t_prefix/t_prefix.elf",
+  "image": "t_prefix/t_prefix.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 44
+}

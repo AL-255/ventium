@@ -1,0 +1,9 @@
+{
+  "name": "t_leave16",
+  "src": "t_leave16/t_leave16.s",
+  "elf": "t_leave16/t_leave16.elf",
+  "image": "t_leave16/t_leave16.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 25
+}

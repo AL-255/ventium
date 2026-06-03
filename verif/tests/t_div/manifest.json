@@ -1,0 +1,9 @@
+{
+  "name": "t_div",
+  "src": "t_div/t_div.s",
+  "elf": "t_div/t_div.elf",
+  "image": "t_div/t_div.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60
+}

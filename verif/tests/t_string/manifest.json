@@ -1,0 +1,9 @@
+{
+  "name": "t_string",
+  "src": "t_string/t_string.s",
+  "elf": "t_string/t_string.elf",
+  "image": "t_string/t_string.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 50
+}

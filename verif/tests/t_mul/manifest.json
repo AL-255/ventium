@@ -1,0 +1,9 @@
+{
+  "name": "t_mul",
+  "src": "t_mul/t_mul.s",
+  "elf": "t_mul/t_mul.elf",
+  "image": "t_mul/t_mul.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60
+}

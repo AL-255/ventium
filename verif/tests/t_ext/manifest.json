@@ -1,0 +1,9 @@
+{
+  "name": "t_ext",
+  "src": "t_ext/t_ext.s",
+  "elf": "t_ext/t_ext.elf",
+  "image": "t_ext/t_ext.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 50
+}

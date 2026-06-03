@@ -1,0 +1,9 @@
+{
+  "name": "t_op8",
+  "src": "t_op8/t_op8.s",
+  "elf": "t_op8/t_op8.elf",
+  "image": "t_op8/t_op8.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 64
+}

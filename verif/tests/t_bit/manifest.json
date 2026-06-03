@@ -1,0 +1,9 @@
+{
+  "name": "t_bit",
+  "src": "t_bit/t_bit.s",
+  "elf": "t_bit/t_bit.elf",
+  "image": "t_bit/t_bit.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 55
+}

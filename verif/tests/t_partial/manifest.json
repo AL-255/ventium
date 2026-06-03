@@ -1,0 +1,9 @@
+{
+  "name": "t_partial",
+  "src": "t_partial/t_partial.s",
+  "elf": "t_partial/t_partial.elf",
+  "image": "t_partial/t_partial.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 44
+}

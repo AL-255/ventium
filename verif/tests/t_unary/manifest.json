@@ -1,0 +1,9 @@
+{
+  "name": "t_unary",
+  "src": "t_unary/t_unary.s",
+  "elf": "t_unary/t_unary.elf",
+  "image": "t_unary/t_unary.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 80
+}

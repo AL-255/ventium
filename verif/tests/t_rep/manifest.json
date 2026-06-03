@@ -1,0 +1,9 @@
+{
+  "name": "t_rep",
+  "src": "t_rep/t_rep.s",
+  "elf": "t_rep/t_rep.elf",
+  "image": "t_rep/t_rep.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 85
+}
