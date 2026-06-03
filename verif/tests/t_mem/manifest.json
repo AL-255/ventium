@@ -1,0 +1,9 @@
+{
+  "name": "t_mem",
+  "src": "t_mem/t_mem.s",
+  "elf": "t_mem/t_mem.elf",
+  "image": "t_mem/t_mem.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 25
+}

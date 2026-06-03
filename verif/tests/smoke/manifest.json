@@ -1,0 +1,9 @@
+{
+  "name": "smoke",
+  "src": "smoke/smoke.s",
+  "elf": "smoke/smoke.elf",
+  "image": "smoke/smoke.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 22
+}

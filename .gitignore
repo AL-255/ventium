@@ -1,0 +1,30 @@
+# build artifacts
+/build/
+obj_dir/
+*.o
+*.so
+*.a
+*.d
+
+# verilator / sim outputs
+verif/tb/obj_dir/
+*.vcd
+*.fst
+
+# traces
+*.vtrace
+verif/**/out/
+
+# test binaries (built from sources tracked in-tree)
+verif/tests/**/*.elf
+verif/tests/**/*.bin
+verif/tests/**/*.flat
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# editor
+*.swp
+.DS_Store
