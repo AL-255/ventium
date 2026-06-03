@@ -107,6 +107,38 @@ package ventium_pkg;
       input longint  unsigned st5_lo, input shortint unsigned st5_hi,
       input longint  unsigned st6_lo, input shortint unsigned st6_hi,
       input longint  unsigned st7_lo, input shortint unsigned st7_hi);
+
+  // ---------------------------------------------------------------------------
+  // DPI cycle retire callback — the CYCLE observation contract (M4).
+  //
+  // The M4 dual-issue (U/V) pipeline core calls vtm_retire_cycle(...) on the
+  // SAME retirement as vtm_retire(...) (same retire sequence number `n`),
+  // conveying WHICH pipe the instruction issued to and WHETHER it issued paired
+  // with its sibling this clock. This carries no cycle count: the testbench owns
+  // the core-clock counter and stamps `cyc = clock-count-at-retire` itself
+  // (docs/m4-pipeline-spec.md "RTL cycle-trace producer", docs/trace-format.md
+  // §2.3). The TB in --cycle mode stashes {pipe,paired} keyed by `n`; the paired
+  // vtm_retire then emits ONE cycle-mode record carrying the TB's clock count
+  // plus the pipe/paired the core reported. Two instructions retiring in the
+  // same clock (a paired issue) read the same TB clock and so share `cyc`, and
+  // the V-pipe sibling carries paired=true.
+  //
+  // pipe encoding (docs/trace-format.md §2.3 "pipe": "U"/"V"/"-"):
+  //   0 = U   (the U pipe / sole pipe / serialized-microcoded issue)
+  //   1 = V   (the V pipe — only valid when paired)
+  //   2 = none (microcoded/complex op not attributed to a pipe -> "-")
+  //
+  // If the core does NOT call vtm_retire_cycle for a retirement under --cycle,
+  // the TB defaults pipe=U paired=false (a well-formed record) — so a not-yet-
+  // pipelined core still produces a coherent cycle vtrace (the cycle bands will
+  // simply MISS until the real pipeline drives these signals).
+  //
+  // Guarded by VTM_NO_DPI alongside vtm_retire so the core lints/elaborates
+  // standalone without a C testbench (docs/rtl-interface.md §2 last bullet).
+  import "DPI-C" context function void vtm_retire_cycle(
+      input longint unsigned n,        // SAME retire seq as the paired vtm_retire
+      input int     unsigned pipe,     // 0=U, 1=V, 2=none
+      input int     unsigned paired);  // 0/1: issued paired with its sibling
 `endif
 
 endpackage : ventium_pkg

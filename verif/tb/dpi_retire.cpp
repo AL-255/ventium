@@ -71,6 +71,9 @@ extern "C" void vtm_retire_x87(
     unsigned long long st5_lo, unsigned short st5_hi,
     unsigned long long st6_lo, unsigned short st6_hi,
     unsigned long long st7_lo, unsigned short st7_hi);
+// vtm_retire_cycle (M4): pipe 0=U/1=V/2=none, paired 0/1. int unsigned -> uint32.
+extern "C" void vtm_retire_cycle(
+    unsigned long long n, unsigned int pipe, unsigned int paired);
 #endif
 
 // x87 retire (M3): the core calls this with the SAME `n` as the paired
@@ -104,6 +107,22 @@ extern "C" void vtm_retire_x87(
     g_trace->stash_x87(n, s);
 }
 
+// cycle retire (M4): the pipeline core calls this with the SAME `n` as the
+// paired vtm_retire, reporting which pipe the instruction issued to (0=U,1=V,
+// 2=none) and whether it issued paired with its sibling. We stash it keyed by
+// `n`; the paired vtm_retire drains it and (in --cycle mode) emits one cycle
+// record stamping the TB clock as cyc. No file write here. This is a no-op in
+// func mode (the stash is simply never drained) — harmless.
+extern "C" void vtm_retire_cycle(
+    unsigned long long n, unsigned int pipe, unsigned int paired) {
+    using namespace ventium;
+    if (!g_trace) return;
+    CycleInfo ci;
+    ci.pipe   = (unsigned char)(pipe > 2u ? 2u : pipe);  // clamp to {0,1,2}
+    ci.paired = (paired != 0u);
+    g_trace->stash_cycle(n, ci);
+}
+
 extern "C" void vtm_retire(
     unsigned long long n,
     unsigned int pc,
@@ -117,6 +136,35 @@ extern "C" void vtm_retire(
     unsigned short fs, unsigned short gs) {
     using namespace ventium;
     if (!g_trace || !g_trace->ok()) return;
+
+    // --- cycle mode (M4): emit a cycle-mode record instead of the func one ---
+    // The integer/system architectural state is irrelevant in cycle mode; we
+    // emit {n, pc, cyc, pipe, paired} (docs/trace-format.md §2.3). `cyc` is the
+    // TB-owned clock count at this retirement (paired insns share it because
+    // both vtm_retire calls fire in the same rising-edge eval, reading the same
+    // clock). pipe/paired come from the core's vtm_retire_cycle stash for this
+    // `n`; absent -> pipe=U paired=false (well-formed). The `bytes` field is not
+    // available at the retire callback (only post-state regs are), so we omit it
+    // — the cycle comparator aligns by n and sanity-checks pc, neither of which
+    // needs bytes.
+    if (g_trace->cycle()) {
+        bool present = false;
+        CycleInfo ci = g_trace->take_cycle((uint64_t)n, &present);
+        const char* pipe_str = (ci.pipe == 0) ? "U"
+                             : (ci.pipe == 1) ? "V"
+                                              : "-";
+        std::fprintf(g_trace->fp(),
+            "{\"n\":%llu,\"pc\":\"0x%08x\",\"cyc\":%llu,"
+            "\"pipe\":\"%s\",\"paired\":%s}\n",
+            (unsigned long long)n,
+            pc,
+            (unsigned long long)g_trace->clock(),
+            pipe_str,
+            ci.paired ? "true" : "false");
+        (void)present;  // absence already yields pipe=U paired=false
+        g_trace->note_retire();
+        return;
+    }
 
     // Emit one compact JSON object on its own line. Field order is irrelevant
     // to the comparator (it parses by name), but we follow the canonical

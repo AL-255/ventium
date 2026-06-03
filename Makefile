@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 rtl plugin tests clean help
+.PHONY: all m0-smoke m1 m2 m3 m4 rtl plugin tests clean help
 .DEFAULT_GOAL := help
 
 help:
@@ -18,6 +18,7 @@ help:
 	@echo "  make m1         M1 differential gate: real integer core func-equiv vs QEMU"
 	@echo "  make m2         M2 differential gate: user-mode integer ISA completeness vs QEMU"
 	@echo "  make m3         M3 differential gate: x87 FPU func-equiv vs QEMU (+ integer suites)"
+	@echo "  make m4         M4 cycle gate: dual-issue U/V pipeline cycle-accuracy vs p5model"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -67,8 +68,23 @@ m2:
 m3:
 	bash verif/run-m3.sh
 
+# --- M4 cycle-accuracy gate (verif/run-m4.sh) -------------------------------
+# The FIRST cycle-gated milestone. (a) HARD functional regression: make m1,
+# make m2, make m3 must all exit 0 (a dual-issue pipeline that breaks functional
+# equivalence FAILS M4 — never trade correctness for a cycle match). (b) Cycle
+# micro-gate: for each integer microbench (mb_depadd/indepadd/agi/brloop/
+# brrandom, built by the corpus agent under verif/tests/) generate the
+# p5trace.so golden cycle trace AND the RTL --cycle trace, compare.py --mode
+# cycle, and assert the 55-validate-model.sh bands (CPI / pairing% / AGI /
+# mispredict%) computed FROM THE RTL TRACE (emergent, not the p5model formula).
+# faddchain (FP) is INFO-only (FP cycle = M5). Exit 0 iff functional regression
+# green AND every integer kernel meets its band. (run-m4.sh builds the TB + each
+# ELF itself and invokes make m1/m2/m3 internally.)
+m4:
+	bash verif/run-m4.sh
+
 clean:
 	-$(MAKE) -C verif/tb clean
 	-$(MAKE) -C verif/qemu-plugins clean
 	-$(MAKE) -C verif/tests clean
-	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2 $(BUILD)/m3
+	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2 $(BUILD)/m3 $(BUILD)/m4

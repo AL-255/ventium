@@ -1,0 +1,12 @@
+{
+  "name": "mb_indepadd",
+  "src": "mb_indepadd/mb_indepadd.s",
+  "elf": "mb_indepadd/mb_indepadd.elf",
+  "image": "mb_indepadd/mb_indepadd.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "m4_cycle": true,
+  "m4_metric": "cpi",
+  "m4_band": "CPI 0.48-0.62, pairing >40%"
+}

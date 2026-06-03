@@ -1,0 +1,12 @@
+{
+  "name": "mb_depadd",
+  "src": "mb_depadd/mb_depadd.s",
+  "elf": "mb_depadd/mb_depadd.elf",
+  "image": "mb_depadd/mb_depadd.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "m4_cycle": true,
+  "m4_metric": "cpi",
+  "m4_band": "CPI 0.97-1.10, pairing <2%"
+}

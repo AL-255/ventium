@@ -1,0 +1,9 @@
+{
+  "name": "t_adcpair",
+  "src": "t_adcpair/t_adcpair.s",
+  "elf": "t_adcpair/t_adcpair.elf",
+  "image": "t_adcpair/t_adcpair.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60
+}

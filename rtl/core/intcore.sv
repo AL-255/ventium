@@ -33,6 +33,13 @@ module intcore
     input  logic [31:0] init_eip,
     input  logic [31:0] init_esp,
 
+    // M4: when high, the core's fast path may issue two simple instructions per
+    // clock (dual U/V issue) and reports pipe/paired for the cycle trace. When
+    // low (the M1/M2/M3 functional gates), the fast path retires ONE instruction
+    // per clock — architecturally identical, no pairing — so the func traces are
+    // bit-for-bit unaffected by the pipeline. Tied 0 by default (lint-safe).
+    input  logic        cycle_mode,
+
     output logic        mem_req,
     output logic        mem_we,
     output logic [31:0] mem_addr,
@@ -56,7 +63,27 @@ module intcore
     output logic [15:0] retire_fstat,
     output logic [15:0] retire_ftag,
     output logic [79:0] retire_st0, retire_st1, retire_st2, retire_st3,
-    output logic [79:0] retire_st4, retire_st5, retire_st6, retire_st7
+    output logic [79:0] retire_st4, retire_st5, retire_st6, retire_st7,
+
+    // ------------------------------------------------------------------------
+    // M4 cycle-trace attribution (docs/m4-pipeline-spec.md "RTL cycle-trace
+    // producer", trace-format §2.3). The dual-issue pipeline raises these in the
+    // SAME clock as retire_valid, conveying which pipe each retiring instruction
+    // issued to and whether it issued paired. A paired issue retires TWO
+    // instructions in one clock: retire_valid+retire2_valid both high, the U
+    // insn carries retire_pipe=U/paired=0 and the V insn retire2_pipe=V/paired=1.
+    // ventium_top turns each high retire(2)_valid into a vtm_retire(+_cycle) call.
+    // pipe encoding: 0=U, 1=V, 2=none. (Func mode ignores all of this.)
+    // ------------------------------------------------------------------------
+    output logic        retire_pipe_valid,   // primary retirement carries pipe info
+    output logic [1:0]  retire_pipe,         // 0=U 1=V 2=none for the primary insn
+    output logic        retire_paired,       // primary insn issued paired (always U=0 here)
+
+    output logic        retire2_valid,       // a SECOND insn retired this same clock
+    output logic [31:0] retire2_pc,
+    output arch_state_t retire2_state,
+    output logic [1:0]  retire2_pipe,        // pipe for the second insn (V=1)
+    output logic        retire2_paired       // second insn paired with the first (1)
 );
 
   // ===========================================================================
@@ -87,15 +114,52 @@ module intcore
   // ===========================================================================
   // FSM
   // ===========================================================================
-  typedef enum logic [3:0] {
+  typedef enum logic [4:0] {
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
-    S_FLOAD, S_FEXEC, S_FSTORE
+    S_FLOAD, S_FEXEC, S_FSTORE,
+    S_PF, S_PIPE
   } state_e;
   state_e state;
 
   localparam int IWORDS = 4;
   logic [7:0]  ibuf [16];
   logic [2:0]  fetch_word;
+
+  // ===========================================================================
+  // M4 dual-issue fast-path pipeline state (docs/m4-pipeline-spec.md §"How to
+  // evolve the core"). A 32-byte prefetch buffer feeds a 2-wide decode + pairing
+  // checker; simple/pairable instructions execute through it at up to 2/clock
+  // with AGI interlock + a 256-entry/4-way BTB & 2-bit predictor. Anything the
+  // fast path does not recognise falls back to the proven multi-cycle FSM
+  // (S_FETCH..) so functional behaviour is preserved exactly.
+  // ===========================================================================
+  // 8 KB direct-mapped instruction cache (256 lines x 32 bytes), exactly the P5
+  // L1 I-cache geometry (Alpert & Avnon). The fast path decodes combinationally
+  // out of the cache; a miss triggers a line fill (8 word reads = the fill
+  // penalty) in S_PF. After the first pass over a hot loop the body is resident,
+  // so re-fetches are free and CPI converges to the steady-state value — the
+  // same mechanism the p5model icache uses to amortise its cold-miss penalty.
+  localparam int IC_LINES = 256;
+  localparam int IC_LINE  = 32;
+  logic [7:0]  ic_data [IC_LINES][IC_LINE];
+  logic [18:0] ic_tag  [IC_LINES];   // addr[31:13]
+  logic        ic_val  [IC_LINES];
+  logic [31:0] pf_fill_addr;         // line base currently being filled
+  logic [2:0]  pf_word;              // refill word counter (8 words = 32 bytes)
+
+  // BTB: 64 sets x 4 ways, 2-bit saturating counters (Alpert & Avnon / AP-500).
+  localparam int BTB_SETS = 64;
+  localparam int BTB_WAYS = 4;
+  logic [25:0] btb_tag [BTB_SETS][BTB_WAYS];   // pc/64
+  logic [1:0]  btb_ctr [BTB_SETS][BTB_WAYS];   // 2-bit saturating
+  logic        btb_val [BTB_SETS][BTB_WAYS];
+  logic [1:0]  btb_rr  [BTB_SETS];             // round-robin replacement ptr
+
+  // AGI tracking: gpr index written in the immediately-PREVIOUS issue clock.
+  // -1 (bit8 set) = none. Updated each fast-path issue clock.
+  logic [8:0]  agi_wr0, agi_wr1;     // up to two regs written last fast clock
+
+  logic [2:0]  mispred_bubbles;      // remaining flush bubbles to burn
 
   // ALU op encoding (low 3 bits mirror the x86 ALU group order 0..7).
   localparam logic [4:0] ALU_ADD = 5'd0;
@@ -1275,6 +1339,13 @@ module intcore
   assign retire_state=snap;
   assign retire_pc=q_pc;
 
+  // Second retirement (paired V issue). In cycle mode only `pc` is compared, so
+  // retire2_state mirrors the primary snapshot (well-formed, never gate-checked
+  // for the V member); retire2_pc is registered at issue.
+  logic [31:0] q_pc2;
+  assign retire2_state = snap;
+  assign retire2_pc = q_pc2;
+
   // ===========================================================================
   // String addressing + direction
   // ===========================================================================
@@ -1592,6 +1663,398 @@ module intcore
   assign retire_st7 = fpr[ftop + 3'd7];
 
   // ===========================================================================
+  // M4 fast-path decoder (combinational). Recognises the simple/pairable
+  // instruction subset the dual-issue pipeline handles directly; everything else
+  // sets fp_simple=0 and the core falls back to the multi-cycle FSM. The decoded
+  // fields drive a register-only ALU/mov/lea + a simple register-base load, the
+  // pairing checker, AGI detect, and branch handling. Functional results reuse
+  // the SAME alu_result/flags_next/reg_merge helpers as the slow path, so a
+  // fast-path retirement is bit-identical to the equivalent slow-path one.
+  //
+  // Fields (a packed struct so two can be evaluated in one always_comb):
+  //   simple    : recognised + safe for the fast path
+  //   len       : instruction length in bytes
+  //   alu_op    : ALU op (ALU_*) for an ALU/mov form
+  //   dst/src   : GP register operands (physical index)
+  //   use_imm   : second operand is `imm`
+  //   imm       : immediate
+  //   wflags    : writes EFLAGS
+  //   wreg      : writes dst register
+  //   is_lea    : LEA reg,(base) form (writes reg = base, no flags)
+  //   is_load   : MOV reg,(base) register-indirect load (1 mem read)
+  //   base      : base register for is_lea/is_load (for AGI + load addr)
+  //   is_nop    : 0x90 NOP
+  //   is_shift  : shift-by-imm (U-only pairable; reuses shrot datapath)
+  //   shrot/shimm
+  //   is_branch : Jcc rel8 / rel32 (V-only-pairable simple branch)
+  //   br_cond   : conditional (vs unconditional jmp rel)
+  //   br_taken  : architectural taken decision (from current eflags)
+  //   rel       : branch displacement (sign-extended)
+  //   reads/writes : GP register read/write bitmasks (excl. ESP) for pairing/AGI
+  //   addr_mask : base/index register bitmask for AGI
+  //   pairs_first/pairs_second : pairing eligibility (U-member / V-candidate)
+  //   disp_imm  : has displacement+immediate (blocks pairing)
+  // ===========================================================================
+  typedef struct packed {
+    logic        simple;
+    logic [3:0]  len;
+    logic [4:0]  alu_op;
+    logic [2:0]  dst;
+    logic [2:0]  src;
+    logic        use_imm;
+    logic [31:0] imm;
+    logic        wflags;
+    logic        wreg;
+    logic        is_lea;
+    logic        is_load;
+    logic [2:0]  base;
+    logic        is_nop;
+    logic        is_shift;
+    logic [2:0]  shrot;
+    logic [4:0]  shimm;
+    logic        is_branch;
+    logic        br_cond;
+    logic        br_taken;
+    logic [3:0]  cc;            // condition code (Jcc low nibble) for fwd re-eval
+    logic [31:0] rel;
+    logic [7:0]  reads;
+    logic [7:0]  writes;
+    logic [7:0]  addr_mask;
+    logic        pairs_first;
+    logic        pairs_second;
+    logic        disp_imm;
+  } fpd_t;
+
+  function automatic fpd_t fp_decode(input logic [7:0] b0, input logic [7:0] b1,
+                                     input logic [7:0] b2, input logic [7:0] b3,
+                                     input logic [7:0] b4, input logic [7:0] b5,
+                                     input logic [31:0] flags_in);
+    fpd_t d;
+    logic [1:0] mod; logic [2:0] reg_f, rm;
+    begin
+      d = '{default:'0};
+      d.alu_op = ALU_ADD; d.len = 4'd1;
+      mod = b1[7:6]; reg_f = b1[5:3]; rm = b1[2:0];
+      unique casez (b0)
+        // ---- MOV r32, imm32 (B8+r) -------------------------------------------
+        8'b1011_1???: begin
+          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_MOV; d.wreg=1'b1; d.use_imm=1'b1;
+          d.dst=b0[2:0]; d.imm={b4,b3,b2,b1};
+          d.writes={5'd0, _onehot(b0[2:0])}[7:0];
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- ALU r/m32, r32 (00/08/.. /r reg form) : add/or/adc/sbb/and/sub/xor
+        8'b00??_?001: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+            d.dst=rm; d.src=reg_f;
+            d.wreg=(b0[5:3]!=3'b111);                 // CMP writes no reg
+            d.reads = _onehot(rm) | _onehot(reg_f);
+            d.writes = d.wreg ? _onehot(rm) : 8'd0;
+            // ADC(op2)/SBB(op3) are PU (U-only-pairable, p5model pclass=PU): they
+            // may LEAD a pair but must NEVER fill the V slot — both because P5
+            // forbids it and because the V ALU path has no CF forwarding, so an
+            // adc/sbb in V would consume the STALE architectural carry and
+            // corrupt arch state. pairs_second=0 keeps them U-only.
+            d.pairs_first=1'b1;
+            d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+          end
+        end
+        // ---- ALU r32, r/m32 (02/0A/.. /r reg form) ---------------------------
+        8'b00??_?011: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+            d.dst=reg_f; d.src=rm; d.wreg=(b0[5:3]!=3'b111);
+            d.reads = _onehot(rm) | _onehot(reg_f);
+            d.writes = d.wreg ? _onehot(reg_f) : 8'd0;
+            // ADC(op2)/SBB(op3) = PU (U-only-pairable); never fill V (see above).
+            d.pairs_first=1'b1;
+            d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+          end
+        end
+        // ---- group1 r/m32, imm8 sign-ext (83 /r ib), reg form ----------------
+        8'h83: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd3; d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
+            d.use_imm=1'b1; d.imm={{24{b2[7]}},b2}; d.dst=rm; d.src=rm;
+            d.wreg=(reg_f!=3'b111);
+            d.reads = _onehot(rm);
+            d.writes = d.wreg ? _onehot(rm) : 8'd0;
+            // imm-only (no displacement) so disp_imm stays 0 -> pairs.
+            // /2=ADC, /3=SBB are PU (U-only-pairable); never fill V (see above).
+            d.pairs_first=1'b1;
+            d.pairs_second=!(reg_f==3'b010 || reg_f==3'b011);
+          end
+        end
+        // ---- INC/DEC r32 (40+r / 48+r) ---------------------------------------
+        8'b0100_????: begin
+          d.simple=1'b1; d.len=4'd1; d.wflags=1'b1; d.dst=b0[2:0]; d.src=b0[2:0];
+          d.alu_op = b0[3] ? ALU_DEC : ALU_INC; d.wreg=1'b1;
+          d.reads=_onehot(b0[2:0]); d.writes=_onehot(b0[2:0]);
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- MOV r/m32, r32 (89 /r reg form) ---------------------------------
+        8'h89: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=rm; d.src=reg_f;
+            d.wreg=1'b1; d.reads=_onehot(reg_f); d.writes=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+        // ---- MOV r32, r/m32 (8B /r): reg form = reg move; mod00 = reg-base load
+        8'h8B: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=reg_f; d.src=rm;
+            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
+            // MOV r32,(base) : register-indirect load, no SIB/disp.
+            d.simple=1'b1; d.is_load=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
+            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+            d.addr_mask=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+        // ---- LEA r32, m (8D /r) : register-indirect form only ----------------
+        8'h8D: begin
+          if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
+            d.simple=1'b1; d.is_lea=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
+            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+            d.addr_mask=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+        // ---- shift by imm8 (C1 /4,/5,/6,/7 ib), reg form ---------------------
+        // Only the SHL/SHR/SAL/SAR group is fast-pathed (its flag rules are
+        // simple + matched to the slow path); ROL/ROR/RCL/RCR (/0../3) keep
+        // their richer OF semantics on the slow path (simple=0 -> fallback).
+        8'hC1: begin
+          if (mod==2'b11 && reg_f[2]) begin   // reg_f in 4..7
+            d.simple=1'b1; d.is_shift=1'b1; d.len=4'd3; d.wflags=1'b1;
+            d.shrot=reg_f; d.shimm=b2[4:0]; d.dst=rm; d.wreg=1'b1;
+            d.reads=_onehot(rm); d.writes=_onehot(rm);
+            // shift-by-imm = U-only pairable (PU): may lead a pair, cannot fill V.
+            d.pairs_first=1'b1; d.pairs_second=1'b0;
+          end
+        end
+        // ---- TEST eAX, imm32 (A9) --------------------------------------------
+        8'hA9: begin
+          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_TEST; d.wflags=1'b1;
+          d.dst=R_EAX; d.use_imm=1'b1; d.imm={b4,b3,b2,b1};
+          d.reads=_onehot(R_EAX);
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- NOP (90) --------------------------------------------------------
+        8'h90: begin
+          d.simple=1'b1; d.is_nop=1'b1; d.len=4'd1;
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- Jcc rel8 (70..7F) -----------------------------------------------
+        8'b0111_????: begin
+          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd2;
+          d.cc=b0[3:0]; d.br_taken=cond_true(b0[3:0],flags_in); d.rel={{24{b1[7]}},b1};
+          // simple near branch = V-only pairable (can fill V, cannot lead a pair)
+          d.pairs_first=1'b0; d.pairs_second=1'b1;
+        end
+        // ---- JMP rel8 (EB) / Jcc rel32 (0F 8x) handled minimally -------------
+        8'hEB: begin
+          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b0; d.len=4'd2;
+          d.br_taken=1'b1; d.rel={{24{b1[7]}},b1};
+          d.pairs_first=1'b0; d.pairs_second=1'b0;
+        end
+        default: ;
+      endcase
+      return d;
+    end
+  endfunction
+
+  // one-hot of a 3-bit GP index, ESP (index 4) excluded from dep masks.
+  function automatic logic [7:0] _onehot(input logic [2:0] r);
+    _onehot = (r==R_ESP) ? 8'd0 : (8'd1 << r);
+  endfunction
+
+  // second ALU operand for a fast-path ALU/mov insn: imm, or the source reg, or
+  // a fixed 1 for INC/DEC (matching the slow path's b_op selection).
+  function automatic logic [31:0] fp_bop(input fpd_t d);
+    if (d.alu_op==ALU_INC || d.alu_op==ALU_DEC) fp_bop = 32'd1;
+    else if (d.use_imm) fp_bop = d.imm;
+    else fp_bop = reg_read(d.src, 3'd4, 1'b0);
+  endfunction
+
+  // pairing checker (mirrors p5model can_pair RULES, not its formula): both
+  // simple, V is a V-candidate, U is a U-member, no disp+imm, no prefixes
+  // (the fast path only decodes unprefixed forms), no RAW/WAW on GP regs
+  // (ESP/flags excepted -> already excluded from reads/writes masks).
+  function automatic logic fp_can_pair(input fpd_t u, input fpd_t v);
+    begin
+      if (!u.simple || !v.simple) return 1'b0;
+      if (!u.pairs_first || !v.pairs_second) return 1'b0;
+      if (u.disp_imm || v.disp_imm) return 1'b0;
+      if ((v.reads & u.writes) != 8'd0) return 1'b0;   // RAW
+      if ((v.writes & u.writes) != 8'd0) return 1'b0;  // WAW
+      // a load in the V slot is allowed in P5 only as the leading member; keep
+      // V-candidate loads out of the pair to stay conservative+correct.
+      if (v.is_load) return 1'b0;
+      return 1'b1;
+    end
+  endfunction
+
+  // icache presence: is the 32-byte line containing `addr` valid + matching?
+  function automatic logic ic_present(input logic [31:0] addr);
+    logic [7:0] idx;
+    begin
+      idx = addr[12:5];
+      ic_present = ic_val[idx] && (ic_tag[idx]==addr[31:13]);
+    end
+  endfunction
+  // icache byte read (assumes ic_present(addr)).
+  function automatic logic [7:0] ic_byte(input logic [31:0] addr);
+    ic_byte = ic_data[addr[12:5]][addr[4:0]];
+  endfunction
+
+  // BTB lookup: predicted-taken iff a valid matching entry has counter>=2.
+  function automatic logic btb_lookup(input logic [31:0] pc);
+    logic [5:0]  set; logic [25:0] tag; logic hit;
+    begin
+      set = pc[5:0]; tag = pc[31:6]; hit = 1'b0; btb_lookup = 1'b0;
+      for (int w=0; w<BTB_WAYS; w++)
+        if (btb_val[set][w] && btb_tag[set][w]==tag) begin
+          hit=1'b1; btb_lookup = (btb_ctr[set][w] >= 2'd2);
+        end
+    end
+  endfunction
+
+  // BTB update after a branch resolves (mirrors p5model btb_update): a hit
+  // saturates its 2-bit counter toward taken/not-taken; a miss on a TAKEN
+  // branch allocates a way (pseudo-random/round-robin replacement) with a
+  // weakly-taken counter; a miss on a not-taken branch allocates nothing.
+  task automatic btb_update_taken(input logic [31:0] pc, input logic taken);
+    logic [5:0]  set; logic [25:0] tag; logic hit; logic [1:0] way;
+    begin
+      set = pc[5:0]; tag = pc[31:6]; hit = 1'b0; way = 2'd0;
+      for (int w=0; w<BTB_WAYS; w++)
+        if (btb_val[set][w] && btb_tag[set][w]==tag) begin hit=1'b1; way=2'(w); end
+      if (hit) begin
+        if (taken && btb_ctr[set][way]!=2'd3) btb_ctr[set][way]<=btb_ctr[set][way]+2'd1;
+        if (!taken && btb_ctr[set][way]!=2'd0) btb_ctr[set][way]<=btb_ctr[set][way]-2'd1;
+      end else if (taken) begin
+        btb_val[set][btb_rr[set]]<=1'b1;
+        btb_tag[set][btb_rr[set]]<=tag;
+        // first-taken => STRONGLY taken (ctr=3), matching the p5model oracle
+        // (plugin/p5model.c:371 's->ctr[v]=3'). Allocating weakly-taken (2) would
+        // diverge after a loop-exit not-taken: 2->1 (predict not-taken) re-warms a
+        // mispredict on the next entry, whereas the oracle 3->2 stays predict-taken.
+        btb_ctr[set][btb_rr[set]]<=2'd3;     // allocate strongly-taken (oracle)
+        btb_rr[set]<=btb_rr[set]+2'd1;
+      end
+    end
+  endtask
+
+  // ===========================================================================
+  // M4 fast-path combinational pipeline evaluation (S_PIPE). Decodes the U
+  // instruction (and the V candidate at off+lenU) from the prefetch buffer,
+  // runs the pairing checker + AGI detect, and computes each insn's post-commit
+  // result with the SAME helpers the slow path uses. The sequential S_PIPE block
+  // below consumes these to issue 1 or 2 instructions per clock.
+  // ===========================================================================
+  fpd_t        u_d, v_d;             // U insn + V candidate decodes
+  logic        pipe_bytes_ok;        // U (+ V candidate) bytes resident in icache
+  logic        pipe_pair;            // U and V issue together this clock
+  logic        pipe_agi;             // U has an AGI hazard (addr reg written last clk)
+  logic        pipe_load_req;        // U is a register-base load (drives the bus)
+  logic [2:0]  pipe_load_base;
+  logic [31:0] u_alu, u_flags, u_sh, u_shm1; logic u_shcf;
+  logic [31:0] v_alu, v_flags;
+  logic [31:0] u_target, v_target;   // branch targets
+  logic        u_pred_taken, v_pred_taken;
+  logic        v_br_taken_eff;       // V branch taken using U's flags if forwarded
+  logic [31:0] u_flags_eff;          // U's resulting flags (post-commit) for fwd
+  logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
+
+  always_comb begin
+    // U is fully decodable iff the line(s) covering eip..eip+11 are resident.
+    pipe_bytes_ok = ic_present(eip) && ic_present(eip + 32'd11);
+
+    for (int i=0;i<6;i++) ub[i] = ic_present(eip+i[31:0]) ? ic_byte(eip+i[31:0]) : 8'd0;
+    u_d = fp_decode(ub[0],ub[1],ub[2],ub[3],ub[4],ub[5], eflags);
+    // V candidate sits right after U.
+    v_d = fp_decode(ic_byte(eip+{28'd0,u_d.len}+0), ic_byte(eip+{28'd0,u_d.len}+1),
+                    ic_byte(eip+{28'd0,u_d.len}+2), ic_byte(eip+{28'd0,u_d.len}+3),
+                    ic_byte(eip+{28'd0,u_d.len}+4), ic_byte(eip+{28'd0,u_d.len}+5),
+                    eflags);
+
+    // AGI: a base/index reg used by U was written in the IMMEDIATELY-preceding
+    // fast-path issue clock (tracked in agi_wr0/agi_wr1; bit8=none).
+    pipe_agi = 1'b0;
+    if (u_d.addr_mask != 8'd0) begin
+      if (!agi_wr0[8] && u_d.addr_mask[agi_wr0[2:0]]) pipe_agi=1'b1;
+      if (!agi_wr1[8] && u_d.addr_mask[agi_wr1[2:0]]) pipe_agi=1'b1;
+    end
+
+    // pairing decision: V can pair only when U leads, no hazards, and the V
+    // bytes are present. A V branch can pair (it fills V); a U branch never
+    // leads a pair (pairs_first=0).
+    pipe_pair = cycle_mode && fp_can_pair(u_d, v_d);
+
+    pipe_load_req  = (state==S_PIPE) && pipe_bytes_ok && u_d.simple &&
+                     u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
+    pipe_load_base = u_d.base;
+
+    // U datapath (reuse the shared helpers; results are bit-identical to slow).
+    // INC/DEC use a fixed second operand of 1 (matching the slow path's b_op).
+    u_alu   = alu_result(u_d.alu_op, reg_read(u_d.dst,3'd4,1'b0),
+                         fp_bop(u_d), eflags[0]);
+    u_flags = flags_next(u_d.alu_op, reg_read(u_d.dst,3'd4,1'b0),
+                         fp_bop(u_d), u_alu, eflags, 3'd4);
+    u_sh    = shrot_result(u_d.shrot, reg_read(u_d.dst,3'd4,1'b0),
+                           {1'b0,u_d.shimm}, eflags[0], 3'd4);
+    u_shm1  = (u_d.shimm==5'd0) ? reg_read(u_d.dst,3'd4,1'b0)
+              : shrot_result(u_d.shrot, reg_read(u_d.dst,3'd4,1'b0),
+                             {1'b0,u_d.shimm}-6'd1, eflags[0], 3'd4);
+    u_shcf  = shrot_cf(u_d.shrot, reg_read(u_d.dst,3'd4,1'b0),
+                       {1'b0,u_d.shimm}, eflags[0], 3'd4);
+    u_target = (eip + {28'd0,u_d.len}) + u_d.rel;
+    u_pred_taken = btb_lookup(eip);
+
+    // V datapath (independent of U by the pairing rule, so reading the OLD gpr
+    // state is correct for both).
+    v_alu   = alu_result(v_d.alu_op, reg_read(v_d.dst,3'd4,1'b0),
+                         fp_bop(v_d), eflags[0]);
+    v_flags = flags_next(v_d.alu_op, reg_read(v_d.dst,3'd4,1'b0),
+                         fp_bop(v_d), v_alu, eflags, 3'd4);
+    v_target = ((eip + {28'd0,u_d.len}) + {28'd0,v_d.len}) + v_d.rel;
+    v_pred_taken = btb_lookup(eip + {28'd0,u_d.len});
+
+    // Flags forwarding U->V (the P5 cmp/dec/test + jcc pairing case): when the
+    // U member writes EFLAGS, the paired V branch must see U's RESULT flags, not
+    // the stale architectural eflags. Compute U's post-commit flags and use them
+    // to evaluate a paired conditional V branch.
+    u_flags_eff = u_d.wflags ? u_flags : eflags;
+    if (u_d.is_shift) begin
+      if (u_d.shimm!=5'd0) begin
+        // shift (SHL/SHR/SAL/SAR group) result flags, for a paired following jcc.
+        u_flags_eff = eflags & 32'hFFFF_F72A;
+        u_flags_eff[0]=u_shcf; u_flags_eff[2]=parity8(u_sh[7:0]); u_flags_eff[4]=1'b0;
+        u_flags_eff[6]=(u_sh==32'd0); u_flags_eff[7]=u_sh[31];
+        u_flags_eff[11]=u_shm1[31]^u_sh[31]; u_flags_eff[1]=1'b1;
+      end else u_flags_eff = eflags;   // count 0 => no flag change
+    end
+    v_br_taken_eff = v_d.br_cond ? cond_true(v_br_cc(v_d), u_flags_eff) : 1'b1;
+  end
+
+  // recover the 4-bit condition code of a V conditional branch from its decode
+  // (Jcc rel8 opcode low nibble was consumed into br_cond/br_taken; we re-derive
+  // it from the opcode byte stored implicitly). Since fp_decode does not keep the
+  // raw cc, evaluate against the V's own br_taken when no forwarding is needed
+  // and only override via this helper when U forwards flags.
+  function automatic logic [3:0] v_br_cc(input fpd_t d);
+    // Not reachable for non-branches; the cc is encoded in br fields. We stored
+    // the architectural taken under the OLD flags; to re-evaluate under new
+    // flags we need the cc. fp_decode is extended to carry it below.
+    v_br_cc = d.cc;
+  endfunction
+
+  // ===========================================================================
   // Main sequential FSM
   // ===========================================================================
   always_ff @(posedge clk) begin
@@ -1604,15 +2067,209 @@ module intcore
       ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
       x87_touched_r<=1'b0; f_step<=4'd0;
       for (int fi=0; fi<8; fi++) fpr[fi]<=80'd0;
+      // M4 pipeline state.
+      pf_fill_addr<=32'd0; pf_word<=3'd0;
+      agi_wr0<=9'h100; agi_wr1<=9'h100; mispred_bubbles<=3'd0;
+      retire2_valid<=1'b0; retire_pipe_valid<=1'b0;
+      retire_pipe<=2'd0; retire_paired<=1'b0;
+      retire2_pipe<=2'd0; retire2_paired<=1'b0;
+      for (int s=0;s<BTB_SETS;s++) begin
+        btb_rr[s]<=2'd0;
+        for (int w=0;w<BTB_WAYS;w++) begin
+          btb_val[s][w]<=1'b0; btb_tag[s][w]<=26'd0; btb_ctr[s][w]<=2'd0;
+        end
+      end
+      for (int l=0;l<IC_LINES;l++) begin ic_val[l]<=1'b0; ic_tag[l]<=19'd0; end
     end else begin
       retire_valid <= 1'b0;
+      retire2_valid <= 1'b0;
+      retire_pipe_valid <= 1'b0;
       // x87-touched defaults low each cycle; only the x87 retire paths
       // (S_FEXEC / S_FSTORE) raise it, so the DPI x87 hook fires only for FPU
       // instructions. (ventium_top gates vtm_retire_x87 on this.)
       x87_touched_r <= 1'b0;
 
       unique case (state)
-        S_RESET: begin fetch_word<=3'd0; state<=S_FETCH; end
+        S_RESET: begin fetch_word<=3'd0; state<=S_PIPE; end
+
+        // -------------------------------------------------------------------
+        // S_PF: fill ONE 32-byte icache line (the line covering pf_fill_addr) via
+        // 8 word reads, then return to the fast path. A cold line pays this fill
+        // penalty once; thereafter the line is resident and re-fetches are free,
+        // so a hot loop body converges to its steady-state CPI (the same icache
+        // amortisation the p5model uses).
+        // -------------------------------------------------------------------
+        S_PF: begin
+          if (mem_ack) begin
+            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+0]<=mem_rdata[7:0];
+            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+1]<=mem_rdata[15:8];
+            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+2]<=mem_rdata[23:16];
+            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+3]<=mem_rdata[31:24];
+            if (pf_word==3'd7) begin
+              pf_word<=3'd0;
+              ic_tag[pf_fill_addr[12:5]]<=pf_fill_addr[31:13];
+              ic_val[pf_fill_addr[12:5]]<=1'b1;
+              state<=S_PIPE;
+            end else pf_word<=pf_word+3'd1;
+          end
+        end
+
+        // -------------------------------------------------------------------
+        // S_PIPE: the dual-issue fast path. Each clock issues 0/1/2 simple
+        // instructions through the U (and, when paired, V) pipe, with AGI
+        // interlock + BTB/2-bit branch prediction. Non-simple insns or a dry
+        // prefetch buffer hand control to the proven multi-cycle FSM / refill.
+        // -------------------------------------------------------------------
+        S_PIPE: begin
+          if (!pipe_bytes_ok) begin
+            // icache miss on the line(s) covering the current insn: fill the
+            // missing line (eip's line first, else the straddle line) in S_PF.
+            pf_fill_addr <= ic_present(eip) ? (eip + 32'd11) : eip;
+            pf_word<=3'd0; state<=S_PF;
+          end else if (!u_d.simple) begin
+            // hand this one instruction to the slow functional FSM. Clear the
+            // AGI write-tracking: the slow op runs many cycles, so on return to
+            // S_PIPE the LAST fast-path write is no longer "the immediately
+            // preceding clock" and must not trigger a PHANTOM AGI stall (p5model
+            // AGI checks reg_wcycle==issue-1, plugin/p5model.c:451).
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+            fetch_word<=3'd0; state<=S_FETCH;
+          end else if (mispred_bubbles!=3'd0) begin
+            // burn a misprediction flush bubble (no retirement this clock).
+            mispred_bubbles<=mispred_bubbles-3'd1;
+            agi_wr0<=9'h100; agi_wr1<=9'h100;   // bubble writes nothing
+          end else if (pipe_agi) begin
+            // AGI 1-cycle interlock: stall this clock. The double-charge across
+            // the immediately-following clock is prevented STRUCTURALLY by
+            // clearing agi_wr0/agi_wr1 here (the stall clock writes nothing), so
+            // next clock pipe_agi recomputes to 0 and the insn issues. This
+            // charges the stall EVERY time the hazard exists (matching p5model's
+            // per-issue reg_wcycle==issue-1 check, plugin/p5model.c:451) rather
+            // than only the first time a given PC is seen -> correct for looped
+            // AGI sites, where a fixed PC-suppressor would undercount stalls.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;   // stall clock writes nothing
+          end else begin
+            // ---- ISSUE: commit U, and V if paired -------------------------
+            logic [8:0]  w0, w1;
+            logic        do_v;
+            logic [31:0] post_eip;
+            logic        u_is_br, redirect, u_taken;
+            logic [31:0] redir_tgt;
+            do_v   = pipe_pair;
+            w0=9'h100; w1=9'h100;
+
+            // ---- U commit ----
+            if (u_d.is_lea) begin
+              gpr[u_d.dst]<=gpr[u_d.base];
+              if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+            end else if (u_d.is_load) begin
+              gpr[u_d.dst]<=mem_rdata;
+              if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+            end else if (u_d.is_shift) begin
+              gpr[u_d.dst]<=u_sh;
+              if (u_d.shimm!=5'd0) begin
+                logic [31:0] fl;
+                // SHL/SHR/SAL/SAR (shrot 4..7): SF/ZF/PF from result, AF=0,
+                // CF & OF per QEMU (OF = MSB(shm1) ^ MSB(result)). Matches the
+                // slow path's K_SHIFT block exactly (only this group reaches the
+                // fast path; rotates fall back to the slow FSM).
+                fl=eflags & 32'hFFFF_F72A;
+                fl[0]=u_shcf; fl[2]=parity8(u_sh[7:0]); fl[4]=1'b0;
+                fl[6]=(u_sh==32'd0); fl[7]=u_sh[31];
+                fl[11]=u_shm1[31]^u_sh[31]; fl[1]=1'b1;
+                eflags<=fl;
+              end
+              if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+            end else if (u_d.is_branch || u_d.is_nop) begin
+              // no register/flag write
+            end else begin
+              if (u_d.wreg) begin
+                gpr[u_d.dst]<=u_alu;
+                if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+              end
+              if (u_d.wflags) eflags<=u_flags;
+            end
+
+            // ---- V commit (paired) ----
+            if (do_v) begin
+              if (v_d.is_lea) begin
+                gpr[v_d.dst]<=gpr[v_d.base];
+                if (v_d.dst!=R_ESP) w1={6'd0,v_d.dst};
+              end else if (v_d.is_branch || v_d.is_nop) begin
+                // V branch: handled via branch logic below
+              end else begin
+                if (v_d.wreg) begin
+                  gpr[v_d.dst]<=v_alu;
+                  if (v_d.dst!=R_ESP) w1={6'd0,v_d.dst};
+                end
+                // a paired V that writes flags overrides U's flags (program
+                // order: V is later). Only ALU/inc/dec reach here.
+                if (v_d.wflags) eflags<=v_flags;
+              end
+            end
+
+            // ---- branch resolution (U leads; or V branch when paired) -----
+            // Determine the architectural taken decision + predicted target and
+            // whether we mispredicted -> flush bubbles. The branch can be U
+            // (unpaired) or the V member of a pair.
+            u_is_br  = u_d.is_branch;
+            u_taken  = 1'b0; redirect=1'b0; redir_tgt=32'd0;
+            post_eip = eip + {28'd0,u_d.len} + (do_v ? {28'd0,v_d.len} : 32'd0);
+
+            if (u_is_br) begin
+              // U is the (sole) branch this clock.
+              u_taken = u_d.br_cond ? u_d.br_taken : 1'b1;
+              redir_tgt = u_taken ? u_target : (eip + {28'd0,u_d.len});
+              if (u_taken != u_pred_taken) begin
+                mispred_bubbles <= 3'd3;     // U-pipe mispredict penalty
+                redirect=1'b1;
+              end else if (u_taken) redirect=1'b1;
+              btb_update_taken(eip, u_taken);
+            end else if (do_v && v_d.is_branch) begin
+              // V member is a simple branch (e.g. a jcc paired into V). Use the
+              // flags FORWARDED from U (cmp/dec/test + jcc pairing case).
+              logic v_taken; logic [31:0] vpc;
+              vpc = eip + {28'd0,u_d.len};
+              v_taken = v_br_taken_eff;
+              redir_tgt = v_taken ? v_target : (vpc + {28'd0,v_d.len});
+              if (v_taken != v_pred_taken) begin
+                mispred_bubbles <= 3'd4;     // V-pipe mispredict penalty
+                redirect=1'b1;
+              end else if (v_taken) redirect=1'b1;
+              btb_update_taken(vpc, v_taken);
+            end
+
+            eip <= redirect ? redir_tgt : post_eip;
+            agi_wr0<=w0; agi_wr1<=w1;
+
+            // ---- retire records (cyc/pipe/paired emerge from the cadence) --
+            q_pc <= eip;                       // primary (U) retire pc
+            retire_valid <= 1'b1;
+            retire_pipe_valid <= 1'b1;
+            retire_pipe <= 2'd0;        // U
+            retire_paired <= 1'b0;
+            if (do_v) begin
+              // GUARD: dual-issue (V retire) is CYCLE-MODE ONLY. retire2_state is
+              // hardwired to the primary (U) `snap` and is NOT a valid post-commit
+              // snapshot for the V instruction, so a paired V must never be emitted
+              // in a state-checked (func) run. pipe_pair already ANDs cycle_mode;
+              // this assertion locks that invariant so a future change that lets
+              // pairing leak into func mode trips loudly instead of silently
+              // comparing the wrong architectural state for the V member.
+              // synopsys translate_off
+              if (!cycle_mode) begin
+                $error("intcore: paired V retire (do_v) in func mode (cycle_mode=0): retire2_state is U's snap, not the V insn's post-commit state");
+              end
+              // synopsys translate_on
+              q_pc2 <= eip + {28'd0,u_d.len};   // V retire pc
+              retire2_valid <= 1'b1;
+              retire2_pipe  <= 2'd1;    // V
+              retire2_paired<= 1'b1;
+            end
+            // After a redirect the next S_PIPE clock re-checks icache presence
+            // (pipe_bytes_ok) and fills the target line via S_PF if cold.
+          end
+        end
 
         S_FETCH: begin
           if (mem_ack) begin
@@ -2087,7 +2744,7 @@ module intcore
             else if (q_kind==K_STR) eip<=new_eip;  // string single (non-store) / ECX==0
             else eip<=new_eip;
             retire_valid<=1'b1;
-            state<=S_FETCH;
+            state<=S_PIPE;   // re-enter fast path
           end else if (do_store) begin
             state<=S_STORE;
           end
@@ -2099,24 +2756,24 @@ module intcore
             unique case (q_kind)
               K_CTRL: begin // CALL: push done, set EIP (width-aware ESP adjust)
                 gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}; eip<=call_target;
-                retire_valid<=1'b1; state<=S_FETCH;
+                retire_valid<=1'b1; state<=S_PIPE;
               end
               K_XCHG: begin // XCHG r/m,r mem: reg <- old mem
                 gpr[q_src_reg]<=reg_merge(gpr[q_src_reg], wmask(mem_load_data,q_w), q_w, q_src_high8);
-                eip<=next_eip; retire_valid<=1'b1; state<=S_FETCH;
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end
               K_STKMISC: begin // PUSHF
                 gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}; eip<=next_eip;
-                retire_valid<=1'b1; state<=S_FETCH;
+                retire_valid<=1'b1; state<=S_PIPE;
               end
               K_STR: begin // MOVS/STOS element stored
-                eip<=str_next_eip; retire_valid<=1'b1; state<=S_FETCH;
+                eip<=str_next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end
               default: begin
                 if (q_is_push) gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w};
                 if (q_is_pop)  gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};  // POP m
                 if (q_writes_flags && q_kind==K_ALU) eflags<=flags_out;
-                eip<=next_eip; retire_valid<=1'b1; state<=S_FETCH;
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end
             endcase
           end
@@ -2130,7 +2787,7 @@ module intcore
               // push order: EAX,ECX,EDX,EBX,ESP(orig),EBP,ESI,EDI
               if (step==4'd7) begin
                 gpr[R_ESP]<=pusha_esp - (32'd4*8);
-                eip<=next_eip; retire_valid<=1'b1; state<=S_FETCH;
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end else begin // POPA: pop EDI,ESI,EBP,(skip ESP),EBX,EDX,ECX,EAX
               unique case (step)
@@ -2145,7 +2802,7 @@ module intcore
               endcase
               if (step==4'd7) begin
                 gpr[R_ESP]<=gpr[R_ESP]+(32'd4*8);
-                eip<=next_eip; retire_valid<=1'b1; state<=S_FETCH;
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end
           end
@@ -2347,7 +3004,7 @@ module intcore
           // EIP/retire when we actually executed the op.
           if (!f_pc_bad) begin
             if (f_do_retire) begin
-              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_FETCH;
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
             end else begin
               state<=S_FSTORE; f_step<=4'd0;
             end
@@ -2367,7 +3024,7 @@ module intcore
                 (q_f_mbytes==4'd10 && f_step==4'd2)) begin
               // last beat: apply pop and retire
               if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
-              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_FETCH; f_step<=4'd0;
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE; f_step<=4'd0;
             end else f_step<=f_step+4'd1;
           end
         end
@@ -2435,6 +3092,11 @@ module intcore
     mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
     unique case (state)
       S_FETCH: begin mem_req=1'b1; mem_addr=eip+{27'd0,fetch_word,2'b00}; end
+      S_PF:    begin mem_req=1'b1; mem_addr={pf_fill_addr[31:5],5'd0}+{27'd0,pf_word,2'b00}; end
+      S_PIPE:  begin
+        // a register-base load issued this clock reads [base] combinationally.
+        if (pipe_load_req) begin mem_req=1'b1; mem_addr=gpr[pipe_load_base]; end
+      end
       S_LOAD: begin
         mem_req=1'b1;
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||

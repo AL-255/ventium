@@ -1,0 +1,12 @@
+{
+  "name": "mb_agi",
+  "src": "mb_agi/mb_agi.s",
+  "elf": "mb_agi/mb_agi.elf",
+  "image": "mb_agi/mb_agi.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 3000,
+  "m4_cycle": true,
+  "m4_metric": "agi_stalls",
+  "m4_band": "agi_stalls > 20% of insns"
+}

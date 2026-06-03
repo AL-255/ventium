@@ -51,6 +51,7 @@ struct Args {
     uint64_t max_cycles = 1ull << 24;
     uint32_t quiesce    = 64;     // K consecutive no-retire cycles => done
     bool     x87        = false;  // emit x87 fields + header x87:true (M3)
+    bool     cycle      = false;  // emit cycle-mode trace + header mode:cycle (M4)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -58,7 +59,7 @@ struct Args {
         "usage: %s --out <trace.vtrace> [--image <blob> --load <hexaddr>]\n"
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
-        "          [--trace-vcd f] [--quiesce K] [--x87]\n", prog);
+        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle]\n", prog);
     std::exit(code);
 }
 
@@ -90,6 +91,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--max-cycles") a.max_cycles = parse_u64(need("--max-cycles"));
         else if (k == "--quiesce")    a.quiesce    = parse_u32(need("--quiesce"));
         else if (k == "--x87")        a.x87        = true;
+        else if (k == "--cycle")      a.cycle      = true;
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -127,11 +129,14 @@ int main(int argc, char** argv) {
     {
         char note[256];
         std::snprintf(note, sizeof note,
-                      "ventium tb; entry=0x%08x load=0x%08x image=%s%s",
+                      "ventium tb; entry=0x%08x load=0x%08x image=%s%s%s",
                       args.entry, args.load_addr,
                       args.image.empty() ? "(none)" : args.image.c_str(),
-                      args.x87 ? " x87" : "");
-        if (!trace.open(args.out, note, args.x87)) {
+                      args.x87   ? " x87"   : "",
+                      args.cycle ? " cycle" : "");
+        // --cycle wins over --x87: a cycle trace carries no x87 fields. open()
+        // forces x87:false in cycle mode, so the header stays well-formed.
+        if (!trace.open(args.out, note, args.x87, args.cycle)) {
             std::fprintf(stderr, "tb: cannot open trace '%s'\n", args.out.c_str());
             return 2;
         }
@@ -191,6 +196,7 @@ int main(int argc, char** argv) {
     top->rst_n  = 0;
     top->init_eip  = args.entry;
     top->init_esp  = args.init_esp;
+    top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
     top->mem_rdata = 0;
     top->mem_ack   = 0;
     top->eval();
@@ -223,6 +229,13 @@ int main(int argc, char** argv) {
         service_bus();
         top->eval();
         dump(half++);
+
+        // Cycle mode (M4): stamp the clock the about-to-fire retirements belong
+        // to. `cycles` is the count of completed clocks; this rising edge is the
+        // (cycles+1)-th clock, so cyc is 1-based and the first retirement lands
+        // at cyc>=1. Two retirements in this same eval (a paired issue) read the
+        // same value and so share cyc. Cheap + harmless in func mode.
+        trace.set_clock(cycles + 1);
 
         // -- clk high phase: rising edge; vtm_retire fires inside eval() --
         top->clk = 1;

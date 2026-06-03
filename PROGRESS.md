@@ -12,8 +12,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2 | User-mode integer ISA completeness (re-scoped; system mode → M2S) | broad integer-ISA corpus diff-clean vs QEMU (user-mode) | ✅ done (28-program corpus func-equiv vs QEMU user-mode; system ops / far CALL-RET / ENTER / mem-operand bit-string + SHLD deferred & HALT; decoder-exhaustive-vs-XED still ongoing) |
 | M2S | System mode: segmentation/paging/TLB/interrupts/SMM (needs system-mode oracle) | system-arch corpus diff-clean | ☐ not started (deferred from M2) |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
-| M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ☐ not started (the first CYCLE milestone) |
-| M5 | Cache/bus timing + x87 cycle accuracy | bus corpus + FP/branch cycle match | ☐ not started |
+| M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
+| M5 | Cache/bus timing + x87 cycle accuracy | bus corpus + FP/branch cycle match | ☐ not started (NEXT) |
 | M6 | Errata & stepping fidelity (stretch) | targeted errata repro | ☐ not started |
 
 Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
@@ -37,6 +37,144 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-03 — M4 complete (dual-issue U/V pipeline + branch prediction; first CYCLE milestone)
+
+Turned the single-issue multi-cycle functional core into a **real in-order
+5-stage dual-issue (U/V) integer pipeline** whose **emergent** cycle behavior
+matches the `p5model` cycle oracle on the canonical integer microbenchmarks,
+**while the M1/M2/M3 functional gates stay green** (the hard safety rule).
+Gate: `make m4` (= `bash verif/run-m4.sh`), exit 0.
+
+**The pipeline (emergent-not-faked, `docs/m4-pipeline-spec.md`).** The control is
+reorganized into PF/D1/D2/EX/WB stages with **two pipes (U & V)**; the cycle
+counts *fall out* of the structure, they are not computed from the p5model
+formula. The proven M1–M3 execute/flag/FPU datapath is **reused unchanged**, so
+functional behavior is preserved bit-for-bit.
+- **Fast path (`S_PIPE`, `rtl/core/intcore.sv`):** simple/pairable insns
+  (ALU reg/imm, MOV, LEA, INC/DEC, TEST, NOP, shift-by-imm, reg-base load, Jcc/JMP
+  rel8) flow through the pipe at up to **2 insns/clock**. A combinational
+  **pairing checker** (`fp_can_pair`, mirrors the p5model *rules*, never its
+  formula) admits a V member only when: both simple, U is a U-member & V a
+  V-candidate, no disp+imm, no GP RAW/WAW (ESP/flags excepted). Pairing classes
+  follow AP-500 / `docs/ap500-pairing-table.md`: **UV** (ALU/MOV/LEA/INC/DEC/TEST),
+  **PU = U-only-pairable** (ADC/SBB, shift-by-imm — lead a pair, never fill V),
+  **V-only** (simple near branch). **Bypass:** the dependent `add`-chain runs at
+  1/clk while independent adds pair (depadd vs indepadd). **AGI:** a 1-cycle
+  interlock fires when an address base/index reg was written in the immediately
+  preceding clock. **Branch prediction:** a 64-set×4-way **BTB with 2-bit
+  saturating counters**, looked up in D1; miss ⇒ predict not-taken; first-taken
+  **allocates strongly-taken (ctr=3)**; mispredict penalty 3 (U) / 4 (V) bubbles.
+- **Serialized (slow) path:** complex/microcoded insns (mul/div/string/shift-CL/
+  rotates/x87/etc.) issue **alone** on the existing multi-cycle FSM and hold the
+  pipe until done — functionally exact, cycle-approximate (fine for M4, whose
+  bands use only simple-ALU/branch streams; FP/cache cycle = M5).
+
+**RTL cycle-trace producer (Producer C, cycle mode).** The core conveys
+**pipe** (U/V) and **paired** to the TB via the retire path; `tb_ventium --cycle`
+emits a `mode:"cycle"` vtrace `{n, pc, cyc=clock-at-retire, pipe, paired}`
+(`docs/trace-format.md` §2.3) — a paired issue gives both members the same `cyc`
+and `paired:true`. Default mode still emits the func trace (func gates unchanged).
+`verif/m4_metrics.py` derives CPI / pairing% / AGI-stall% / mispredict% **from the
+RTL trace** (only per-insn *identity* — is-this-a-branch — is borrowed from the
+golden's `bytes`; every cycle *cost* is the RTL's), and checks the
+`55-validate-model.sh` bands.
+
+**Measured per-kernel metrics vs the p5model bands** (`make m4`, all GATED bands
+met — EMERGENT from the RTL pipeline):
+
+| kernel | band | RTL measured | verdict |
+|---|---|---|---|
+| `mb_depadd`   | CPI 0.97–1.10 & pairing <2% | CPI **1.080**, pairing **0.6%** | PASS |
+| `mb_indepadd` | CPI 0.48–0.62 & pairing >40% | CPI **0.590**, pairing **49.5%** | PASS |
+| `mb_agi`      | AGI stalls >20% of insns | AGI **49.9%** (1208/2419) | PASS |
+| `mb_brloop`   | mispredict <2% | **0.2%** (7/3004 branches) | PASS |
+| `mb_brrandom` | mispredict >20% | **61.0%** (244/400 branches) | PASS |
+
+INFO-only (not gated): `mb_agiloop` (looped-AGI regression, see below) RTL CPI
+**1.010** vs golden **1.013**, AGI fires **99.8%** of loop iterations;
+`mb_faddchain` is FP, deferred to M5.
+
+**Emergent-real vs approximate (honest).** *Real* and matched to the oracle: U/V
+pairing decisions & pairing%, the 2-insn/clk vs 1/clk vs serialized cadence,
+EX/WB bypass, the AGI interlock, and BTB 2-bit prediction (per-PC mispredict
+counts match the oracle exactly on `mb_brloop`: inner 5/3000, outer 2/4).
+*Approximate*: absolute cumulative `cyc` carries a fixed offset because p5model
+charges an **icache cold-miss (imiss=8) per first-touched line** that the M4 RTL
+(cache cycle = M5) does not model — so `compare.py --mode cycle` runs at a
+generous structural tolerance (T=50%, pc-alignment / retire-order / no per-insn
+blow-ups) and the **tight 55-validate bands are the real verdict**. The
+serialized slow path (mul/div/string/x87, and rel32/indirect/call/ret branches)
+is functionally exact but cycle-approximate by design.
+
+**Adversarial review — found + fixed** (each reproduced vs the cycle golden /
+QEMU first; functional-correctness fixes locked with a regression program):
+- **[high] ADC/SBB pairable into V → pairing mislabel + ARCH CORRUPTION.** The
+  fast-path decoder set `pairs_second=1` for all ALU ops incl. ADC(op2)/SBB(op3),
+  so they could issue into V. p5model makes them **PU = U-only-pairable**
+  (`pclass=PU`); pairing into V both inflated pairing% and shifted per-insn cyc.
+  Worse, the V ALU path has **no carry-in forwarding**, so a paired `add(U)/adc(V)`
+  computed the adc with the **stale architectural CF** instead of the carry U just
+  produced — live arch corruption (invisible to func gates since func mode never
+  pairs, and to the cycle compare which checks only pc). **Fixed:** ADC/SBB are
+  now `pairs_second=0` (U-only-pairable) at all three decode sites (`00??_?001`,
+  `00??_?011`, `0x83 /2,/3`), exactly the P5 rule — which also removes the
+  corruption (an adc/sbb can never sit in V; the only V-pairable ALU ops do not
+  consume CF). Verified: the cycle pairing structure now matches the golden
+  with **0 pipe/paired mismatches** on a add/adc test, and the arch state is
+  **func-equivalent vs QEMU**. Regression: `verif/tests/t_adcpair` (64-bit
+  add/adc + sub/sbb carry-chains, reg & imm forms; func-diff-clean vs QEMU).
+- **[med] BTB first-taken allocated weakly-taken (2) not strongly-taken (3).**
+  Diverged from the oracle (`p5model.c:371 ctr=3`): after a loop-exit not-taken
+  the RTL counter went 2→1 (predict not-taken) and re-mispredicted the next loop
+  entry. **Fixed** to allocate ctr=3; per-PC mispredict counts on `mb_brloop` now
+  match the oracle exactly (inner 5/3000, outer 2/4).
+- **[med] Phantom AGI after a slow-path divert.** `agi_wr*` (regs written last
+  fast clock) were not cleared when a non-simple insn diverted to the slow FSM, so
+  on return the first insn could take a phantom 1-cycle AGI stall. **Fixed:** clear
+  `agi_wr0/agi_wr1` on the divert. Verified vs the golden (`mov(base)` after a
+  `mul` now costs 1, not 2).
+- **[med] Looped-AGI undercount.** A per-PC suppressor (`agi_stalled_eip`, set once
+  and never reset) charged a static AGI site inside a loop only on the FIRST
+  iteration. **Fixed:** removed the suppressor — the stall now fires every time the
+  hazard exists (the immediate double-charge is prevented *structurally* because
+  the stall clock clears `agi_wr*`), matching p5model's per-issue
+  `reg_wcycle==issue-1` check. Regression: `verif/tests/mb_agiloop` (INFO kernel;
+  AGI fires 99.8% of iterations, RTL CPI 1.010 ≈ golden 1.013).
+- **[low] rel32 / indirect / CALL / RET branches: no BTB modeling.** The fast path
+  decodes only rel8 Jcc/JMP; wider/indirect/call/ret run the slow FSM with no
+  prediction. **Dispositioned (documented tradeoff, not a corruption):** the
+  serialized path is cycle-approximate by design and the integer gate uses only
+  rel8 Jcc; functionally these branches are exact. Flagged for M5+ when real-code
+  cycle fidelity (rel32-dominated) matters.
+- **[low] `retire2_state` hardwired to the primary U `snap`.** Harmless today
+  (the cycle compare checks only pc for the V member) but a latent trap if
+  dual-issue were ever state-checked. **Fixed (guard):** added a sim-only
+  assertion (`synopsys translate_off`) that trips if a paired V retire is ever
+  emitted in func mode (`cycle_mode=0`), locking the cycle-only invariant; pairing
+  is already structurally gated on `cycle_mode`.
+
+**RTL stays lint-clean** (`verilator --lint-only -Wall -Wno-DECLFILENAME
+-Wno-UNUSED`, exit 0, no warnings).
+
+**How to run:** `make m4`. It (a) runs `make m1 && make m2 && make m3` (HARD
+functional regression — a pipeline that breaks func-equivalence FAILS M4
+regardless of cycle bands) then (b) for each integer microbench builds the ELF,
+ISA-verifies it, generates the `p5trace.so` golden cycle vtrace and the RTL
+`--cycle` vtrace, runs `compare.py --mode cycle` (structural) and asserts the
+55-validate bands computed from the RTL trace. Exit 0 iff func-green AND every
+gated integer band met.
+
+**Honest caveat (PLAN §8).** The cycle oracle (`p5model`) is itself an **estimate**
+of documented P5 timing rules, not silicon. M4 "cycle accuracy" = the RTL pipeline
+matches those rules as captured by p5model, within tolerance — not bit-true to a
+real chip. **x87/FP cycle accuracy and cache/bus timing are M5**, not M4: the FPU
+stays functionally correct (M3 green) but serializes the pipe; its cycle count is
+not yet matched. No assertion that the serialized slow-path cycle counts match the
+oracle (they are approximate by design).
+
+**Next:** M5 — cache/bus timing + x87/FP cycle accuracy (the `faddchain` CPI~3
+kernel and the icache cold-miss offset folded into the cycle model).
 
 ### 2026-06-03 — M3 complete (x87 FPU functional core, bit-exact vs QEMU)
 

@@ -15,6 +15,18 @@
 // vtm_retire_x87 for a retirement, the stash is "unset" and the record is
 // emitted with zeroed x87 fields — still a well-formed x87:true record.
 //
+// Cycle (M4): when tb_main opens the writer in --cycle mode, the header declares
+// "mode":"cycle" and each record carries the cycle fields (cyc, pipe, paired)
+// per docs/trace-format.md §2.3 INSTEAD of the func fields. tb_main keeps the
+// writer's clock counter current (set_clock) so that when vtm_retire fires the
+// writer stamps cyc = clock-count-at-retire. The core's separate
+// vtm_retire_cycle DPI call stashes {pipe,paired} keyed by `n` via stash_cycle();
+// the matching vtm_retire drains it for that `n`. If the core never called
+// vtm_retire_cycle for a retirement, the record defaults to pipe=U paired=false
+// (a well-formed cycle record). func and cycle modes are mutually exclusive
+// (--cycle wins); default (neither) is the unchanged func mode so the M1/M2/M3
+// functional gates are unaffected.
+//
 // Kept header-only and dependency-free so both translation units agree on the
 // layout without a separate .cpp. This is the only file shared between the two
 // owned source files of Producer C.
@@ -41,26 +53,41 @@ struct X87State {
     uint16_t ftag     = 0;
 };
 
+// Per-retirement cycle attribution the core reports via vtm_retire_cycle (M4):
+//   pipe : 0=U, 1=V, 2=none -> formatted "U"/"V"/"-" (docs/trace-format.md §2.3)
+//   paired : the instruction issued paired with its sibling this clock.
+// The cumulative `cyc` is NOT carried here — the TB owns the clock counter and
+// stamps cyc = clock-count-at-retire on the matching vtm_retire.
+struct CycleInfo {
+    uint8_t pipe   = 0;      // default U (the not-yet-pipelined / sole-pipe case)
+    bool    paired = false;
+};
+
 class TraceWriter {
 public:
     TraceWriter() = default;
     ~TraceWriter() { close(); }
 
     // Open the output file and emit the header line. The header matches
-    // tracefmt.header("rtl","func",x87=<x87>,...) — i.e.
+    // tracefmt.header("rtl",<mode>,x87=<x87>,...). In FUNC mode (cycle=false):
     //   {"vtrace":1,"producer":"rtl","mode":"func","x87":<bool>,"note":"..."}
-    // `x87` selects whether records carry the x87 fields (trace-format.md §2.2).
+    // In CYCLE mode (cycle=true, x87 ignored — cycle records carry no x87):
+    //   {"vtrace":1,"producer":"rtl","mode":"cycle","x87":false,"note":"..."}
+    // `x87` selects whether func records carry the x87 fields (trace-format §2.2).
     // Returns true on success.
-    bool open(const std::string& path, const std::string& note, bool x87) {
+    bool open(const std::string& path, const std::string& note, bool x87,
+              bool cycle = false) {
         fp_  = std::fopen(path.c_str(), "wb");
         if (!fp_) return false;
-        x87_ = x87;
+        cycle_ = cycle;
+        x87_   = cycle ? false : x87;   // cycle records never carry x87 fields
         // note is free-form (trace-format.md §1) and ignored by the comparator;
         // it must not contain a double-quote — tb_main passes only simple text.
         std::fprintf(fp_,
-            "{\"vtrace\":1,\"producer\":\"rtl\",\"mode\":\"func\","
+            "{\"vtrace\":1,\"producer\":\"rtl\",\"mode\":\"%s\","
             "\"x87\":%s,\"note\":\"%s\"}\n",
-            x87 ? "true" : "false",
+            cycle_ ? "cycle" : "func",
+            x87_ ? "true" : "false",
             note.c_str());
         return true;
     }
@@ -73,9 +100,58 @@ public:
         }
     }
 
-    bool   ok()  const { return fp_ != nullptr; }
-    FILE*  fp()  const { return fp_; }
-    bool   x87() const { return x87_; }
+    bool   ok()    const { return fp_ != nullptr; }
+    FILE*  fp()    const { return fp_; }
+    bool   x87()   const { return x87_; }
+    bool   cycle() const { return cycle_; }
+
+    // --- cycle clock + stash (M4) -------------------------------------------
+    // tb_main advances the writer's view of the core-clock counter once per
+    // core clock (BEFORE the rising-edge eval where vtm_retire may fire), so
+    // that vtm_retire can stamp cyc = clock(). Two retirements in the same eval
+    // (a paired issue) therefore read the same clock value and share cyc.
+    void     set_clock(uint64_t c) { clock_ = c; }
+    uint64_t clock() const         { return clock_; }
+
+    // vtm_retire_cycle stashes {pipe,paired} for sequence `n`; the matching
+    // vtm_retire calls take_cycle(n) to drain it. Up to two outstanding entries
+    // are needed because a paired issue retires BOTH instructions in the same
+    // clock: the core calls vtm_retire_cycle then vtm_retire for the U insn,
+    // then vtm_retire_cycle then vtm_retire for the V insn (in-order). Keying by
+    // `n` and validating means a stale/missing stash is treated as "absent"
+    // (pipe=U paired=false) rather than mis-attributed.
+    void stash_cycle(uint64_t n, const CycleInfo& ci) {
+        // store keyed by n in a tiny 2-slot ring so a U+V pair both survive
+        // until their respective vtm_retire drains them.
+        for (int s = 0; s < 2; ++s) {
+            if (!cyc_slot_set_[s] || cyc_slot_n_[s] == n) {
+                cyc_slot_[s]     = ci;
+                cyc_slot_n_[s]   = n;
+                cyc_slot_set_[s] = true;
+                return;
+            }
+        }
+        // both slots busy with other n's: overwrite slot 0 (older). This only
+        // happens if the core stashed >2 before retiring; not expected in-order.
+        cyc_slot_[0]     = ci;
+        cyc_slot_n_[0]   = n;
+        cyc_slot_set_[0] = true;
+    }
+
+    // Return the stashed cycle info for `n` if present; clear it. Sets `present`
+    // to whether a matching stash was found. When absent, returns the default
+    // (pipe=U paired=false) so the record is still well-formed.
+    CycleInfo take_cycle(uint64_t n, bool* present) {
+        for (int s = 0; s < 2; ++s) {
+            if (cyc_slot_set_[s] && cyc_slot_n_[s] == n) {
+                cyc_slot_set_[s] = false;
+                *present = true;
+                return cyc_slot_[s];
+            }
+        }
+        *present = false;
+        return CycleInfo{};   // pipe=U paired=false
+    }
 
     // --- x87 stash (M3) ------------------------------------------------------
     // vtm_retire_x87 calls this with the post-commit x87 state for sequence `n`;
@@ -111,10 +187,17 @@ private:
     FILE*    fp_      = nullptr;
     uint64_t retired_ = 0;
     bool     x87_     = false;
+    bool     cycle_   = false;
 
     X87State x87_pending_;
     uint64_t x87_pending_n_   = 0;
     bool     x87_pending_set_ = false;
+
+    // cycle-mode: TB-owned clock counter + 2-slot {pipe,paired} stash.
+    uint64_t  clock_ = 0;
+    CycleInfo cyc_slot_[2];
+    uint64_t  cyc_slot_n_[2]   = {0, 0};
+    bool      cyc_slot_set_[2] = {false, false};
 };
 
 // Defined in dpi_retire.cpp; set by tb_main before clocking begins.
