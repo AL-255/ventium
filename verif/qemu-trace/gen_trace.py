@@ -92,15 +92,46 @@ class RegLayout:
     def __init__(self, regs):
         self.regs = []          # list of (name, bits)
         self.offset = {}        # name -> byte offset in g-packet
+        self.nbits = {}         # name -> bit width
         off = 0
         for name, bits in regs:
             self.regs.append((name, bits))
             self.offset[name] = off
+            self.nbits[name] = bits
             off += bits // 8
         self.total_bytes = off
+        # Tail-anchor correction (see anchor_tail): the target description can
+        # advertise registers (segment bases, CRx, EFER, ...) that QEMU does NOT
+        # transmit in the 'g' packet, so the naive prefix-sum offsets for the
+        # FP/SSE tail (st0..mxcsr) are wrong. We correct those by anchoring the
+        # contiguous FP/SSE tail to the END of the actual g-packet image.
+        self._tail_delta = 0          # bytes to add to tail-register offsets
+        self._tail_from = None        # naive offset at/after which the delta applies
 
     def has(self, name):
         return name in self.offset
+
+    def anchor_tail(self, actual_len: int):
+        """Reconcile the layout with the real g-packet length.
+
+        The integer/segment registers occupy the FRONT of the g-packet at their
+        naive offsets (verified correct). The FP+SSE registers (st0..mxcsr) are a
+        contiguous block at the TAIL. If the actual g-packet is shorter/longer
+        than the naive total, the difference is entirely in the middle
+        (un-transmitted sys/seg-base/CRx registers), so we shift the whole tail
+        (everything at/after st0's naive offset) by that difference. This makes
+        st0 land exactly `sizeof(st0..mxcsr)` before the end, regardless of which
+        middle registers QEMU omits. No-op when lengths already match or there is
+        no FP block. Idempotent-safe: call once after the first read_g().
+        """
+        anchor = "st0" if "st0" in self.offset else None
+        if anchor is None:
+            return
+        delta = actual_len - self.total_bytes
+        if delta == 0:
+            return
+        self._tail_delta = delta
+        self._tail_from = self.offset[anchor]
 
     def slice(self, raw: bytes, name: str):
         """Return the little-endian integer for `name` from a raw g-packet image.
@@ -112,8 +143,11 @@ class RegLayout:
         if name not in self.offset:
             return None
         off = self.offset[name]
-        nbytes = dict(self.regs).get(name, 0) // 8
-        if off + nbytes > len(raw):
+        # Apply the tail-anchor correction to FP/SSE registers (st0 onward).
+        if self._tail_from is not None and off >= self._tail_from:
+            off += self._tail_delta
+        nbytes = self.nbits.get(name, 0) // 8
+        if off < 0 or off + nbytes > len(raw):
             return None
         chunk = raw[off:off + nbytes]
         return int.from_bytes(chunk, "little")
@@ -493,6 +527,15 @@ def generate(qemu, elf, out_path, max_insn, port, extra_args,
 
             # The stub halts at the entry point before executing anything.
             raw = rsp.read_g()
+            # Reconcile the FP/SSE tail offsets with the real g-packet length
+            # (QEMU omits some advertised sys/seg-base/CRx registers from 'g').
+            layout.anchor_tail(len(raw))
+            if verbose and layout._tail_delta:
+                sys.stderr.write("[gen_trace] tail-anchor: g-packet %d bytes vs "
+                                 "layout %d; FP tail shifted %+d (st0 @ %d)\n"
+                                 % (len(raw), layout.total_bytes,
+                                    layout._tail_delta,
+                                    layout.offset['st0'] + layout._tail_delta))
             eip, eflags, gpr, seg, x87 = regs_to_fields(layout, raw)
 
             while True:
