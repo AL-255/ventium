@@ -1,0 +1,12 @@
+{
+  "name": "mb_brloop",
+  "src": "mb_brloop/mb_brloop.s",
+  "elf": "mb_brloop/mb_brloop.elf",
+  "image": "mb_brloop/mb_brloop.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 8000,
+  "m4_cycle": true,
+  "m4_metric": "mispredict",
+  "m4_band": "mispredict <2%"
+}

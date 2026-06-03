@@ -37,6 +37,10 @@ module ventium_top
     input  logic [31:0] init_eip,
     input  logic [31:0] init_esp,
 
+    // M4: cycle-mode select (TB drives 1 in --cycle mode). Enables dual U/V
+    // issue + pipe/paired reporting. 0 = func mode (M1/M2/M3 gates, single issue).
+    input  logic        cycle_mode,
+
     // M0/M1 bus-functional-model port group (docs/rtl-interface.md §3). Minimal
     // by design; M5 replaces it with the modeled 64-bit P5 bus FSM.
     output logic        mem_req,
@@ -62,11 +66,20 @@ module ventium_top
   logic [79:0] core_st0, core_st1, core_st2, core_st3;
   logic [79:0] core_st4, core_st5, core_st6, core_st7;
 
+  // M4 cycle attribution + paired second retirement.
+  logic        core_pipe_valid, core_paired;
+  logic [1:0]  core_pipe;
+  logic        core_retire2_valid, core_retire2_paired;
+  logic [31:0] core_retire2_pc;
+  logic [1:0]  core_retire2_pipe;
+  arch_state_t core_retire2_state;
+
   intcore u_core (
       .clk          (clk),
       .rst_n        (rst_n),
       .init_eip     (init_eip),
       .init_esp     (init_esp),
+      .cycle_mode   (cycle_mode),
       .mem_req      (mem_req),
       .mem_we       (mem_we),
       .mem_addr     (mem_addr),
@@ -84,7 +97,15 @@ module ventium_top
       .retire_st0   (core_st0), .retire_st1 (core_st1),
       .retire_st2   (core_st2), .retire_st3 (core_st3),
       .retire_st4   (core_st4), .retire_st5 (core_st5),
-      .retire_st6   (core_st6), .retire_st7 (core_st7)
+      .retire_st6   (core_st6), .retire_st7 (core_st7),
+      .retire_pipe_valid (core_pipe_valid),
+      .retire_pipe       (core_pipe),
+      .retire_paired     (core_paired),
+      .retire2_valid     (core_retire2_valid),
+      .retire2_pc        (core_retire2_pc),
+      .retire2_state     (core_retire2_state),
+      .retire2_pipe      (core_retire2_pipe),
+      .retire2_paired    (core_retire2_paired)
   );
 
   // ---------------------------------------------------------------------------
@@ -100,6 +121,7 @@ module ventium_top
       retire_n <= 64'd0;
     end else if (core_retire_valid) begin
 `ifndef VTM_NO_DPI
+      // ---- primary (U) retirement -----------------------------------------
       // x87 hook FIRST so the TB stashes the LIVE FP state keyed by `n` before
       // the paired vtm_retire (same `n`) drains+emits the combined record. We
       // call it on EVERY retirement (not just FP ops): in x87-trace mode QEMU
@@ -115,6 +137,10 @@ module ventium_top
           core_st2[63:0], core_st2[79:64], core_st3[63:0], core_st3[79:64],
           core_st4[63:0], core_st4[79:64], core_st5[63:0], core_st5[79:64],
           core_st6[63:0], core_st6[79:64], core_st7[63:0], core_st7[79:64]);
+      // cycle attribution (M4): pipe/paired for this retirement. Absent (func
+      // mode / slow path) -> pipe defaults to U paired=false in the TB.
+      if (core_pipe_valid)
+        vtm_retire_cycle(retire_n, {30'd0, core_pipe}, {31'd0, core_paired});
       vtm_retire(
           retire_n,
           core_retire_pc,
@@ -126,8 +152,34 @@ module ventium_top
           core_retire_state.cs,  core_retire_state.ss,
           core_retire_state.ds,  core_retire_state.es,
           core_retire_state.fs,  core_retire_state.gs);
+
+      // ---- second (V) retirement in the SAME clock (paired issue) ----------
+      // n increments by one; the V insn shares the TB clock (same cyc) and
+      // carries pipe=V paired=true. x87 state is the same snapshot.
+      if (core_retire2_valid) begin
+        vtm_retire_x87(
+            retire_n + 64'd1,
+            {16'd0, core_fctrl}, {16'd0, core_fstat}, {16'd0, core_ftag},
+            core_st0[63:0], core_st0[79:64], core_st1[63:0], core_st1[79:64],
+            core_st2[63:0], core_st2[79:64], core_st3[63:0], core_st3[79:64],
+            core_st4[63:0], core_st4[79:64], core_st5[63:0], core_st5[79:64],
+            core_st6[63:0], core_st6[79:64], core_st7[63:0], core_st7[79:64]);
+        vtm_retire_cycle(retire_n + 64'd1, {30'd0, core_retire2_pipe},
+                         {31'd0, core_retire2_paired});
+        vtm_retire(
+            retire_n + 64'd1,
+            core_retire2_pc,
+            core_retire2_state.eflags,
+            core_retire2_state.eax, core_retire2_state.ecx,
+            core_retire2_state.edx, core_retire2_state.ebx,
+            core_retire2_state.esp, core_retire2_state.ebp,
+            core_retire2_state.esi, core_retire2_state.edi,
+            core_retire2_state.cs,  core_retire2_state.ss,
+            core_retire2_state.ds,  core_retire2_state.es,
+            core_retire2_state.fs,  core_retire2_state.gs);
+      end
 `endif
-      retire_n <= retire_n + 64'd1;
+      retire_n <= retire_n + (core_retire2_valid ? 64'd2 : 64'd1);
     end
   end
 

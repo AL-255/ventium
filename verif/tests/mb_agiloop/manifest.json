@@ -1,0 +1,12 @@
+{
+  "name": "mb_agiloop",
+  "src": "mb_agiloop/mb_agiloop.s",
+  "elf": "mb_agiloop/mb_agiloop.elf",
+  "image": "mb_agiloop/mb_agiloop.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 3000,
+  "m4_cycle": true,
+  "m4_metric": "agi_stalls",
+  "m4_band": "INFO: looped-AGI stall fires each iteration (no hard band)"
+}
