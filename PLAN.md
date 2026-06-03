@@ -273,11 +273,29 @@ Effort estimates are coarse; this is a long project.
   *Gate:* decoder matches XED/Capstone on the exhaustive corpus; integer ISA
   tests pass differentially vs. QEMU (arch state).
 
-- **M2 — Full integer ISA + memory + paging/segmentation (→ layer 1 complete).**
-  All integer/system instructions, segmentation, paging, TLBs, interrupts/
-  exceptions with correct fault priority + restartability, debug/SMM/CPUID/MSR.
-  D-cache + I-cache functional. *Gate:* ISA architectural corpus + a real
-  boot-ish workload pass differentially.
+- **M2 — User-mode integer ISA completeness (→ layer 1, user-mode integer).**
+  *Re-scoped from the original "full integer + system" M2 for verifiability:* our
+  differential oracle is QEMU **user-mode** (linux-user gdbstub), which runs flat
+  and cannot exercise paging/segmentation/SMM. So M2 completes the **user-visible
+  integer ISA** that QEMU user-mode *can* validate: shifts/rotates, mul/imul/
+  div/idiv, movzx/movsx, setcc, neg/not, xchg, bt/bts/btr/btc, bsf/bsr, shld/shrd,
+  string ops (movs/stos/lods/scas/cmps + REP/REPNE), loop/loopcc/jcxz, push/pop
+  variants, pushf/popf/lahf/sahf, cdq/cwde/cbw, and 8/16-bit operand forms with
+  correct **partial-register** semantics + the operand-size/address-size/segment/
+  LOCK **prefixes**. Functional I$/D$ memory already works (real caches = M5).
+  `int 0x80` stays a halt (no Linux syscall emulation; test programs are self-
+  contained). *Gate:* a broad generated integer-ISA corpus is diff-clean vs QEMU
+  (EFLAGS undefined-bit masking per `tracefmt.EFLAGS_UNDEFINED`). Decoder-
+  exhaustive-vs-XED remains ongoing.
+
+- **M2S — System mode: segmentation, paging, TLBs, interrupts, SMM (→ layer 1
+  complete + layer 2).** *Deferred from M2; needs a new oracle.* Stand up a
+  **system-mode** golden path (`qemu-system-i386` + a system-state trace via
+  gdbstub/QMP or a system TCG plugin) and a bare-metal test harness, then add
+  segmentation, paging + TLBs, the interrupt/exception pipeline (fault priority +
+  restartability), debug registers, SMM/`RSM`, CPUID/MSRs/test registers. *Gate:*
+  system-architectural corpus + a boot-ish workload pass differentially. Sequence
+  after M3/M4 if cycle work is higher priority.
 
 - **M3 — x87 FPU (→ layer 1 with x87).**
   8-stage FPU, 80-bit datapath, transcendental ROM, exception/status logic.

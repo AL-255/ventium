@@ -1,0 +1,9 @@
+{
+  "name": "t_shift",
+  "src": "t_shift/t_shift.s",
+  "elf": "t_shift/t_shift.elf",
+  "image": "t_shift/t_shift.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 67
+}

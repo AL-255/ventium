@@ -1,0 +1,9 @@
+{
+  "name": "t_mixed",
+  "src": "t_mixed/t_mixed.s",
+  "elf": "t_mixed/t_mixed.elf",
+  "image": "t_mixed/t_mixed.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 200
+}

@@ -1,0 +1,9 @@
+{
+  "name": "t_op16",
+  "src": "t_op16/t_op16.s",
+  "elf": "t_op16/t_op16.elf",
+  "image": "t_op16/t_op16.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60
+}

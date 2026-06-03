@@ -1,0 +1,9 @@
+{
+  "name": "t_shld",
+  "src": "t_shld/t_shld.s",
+  "elf": "t_shld/t_shld.elf",
+  "image": "t_shld/t_shld.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 44
+}

@@ -1,0 +1,9 @@
+{
+  "name": "t_loop2",
+  "src": "t_loop2/t_loop2.s",
+  "elf": "t_loop2/t_loop2.elf",
+  "image": "t_loop2/t_loop2.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 65
+}
