@@ -1,0 +1,19 @@
+{
+  "name": "mb_fpindep",
+  "src": "mb_fpindep/mb_fpindep.s",
+  "elf": "mb_fpindep/mb_fpindep.elf",
+  "image": "mb_fpindep/mb_fpindep.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "x87": true,
+  "m5_cycle": true,
+  "m5_kind": "fp",
+  "m5_gated": true,
+  "m5_metric": "cpi_rel",
+  "m5_band": "CPI < faddchain CPI - 0.5 AND < 2.5 (FP throughput tput 1 hides latency)",
+  "golden_cpi": 1.151,
+  "golden_insns": 3036,
+  "golden_cyc": 3493,
+  "note": "FP latency-vs-throughput contrast (relation band vs mb_faddchain). The SAME fadd opcode is interleaved with two independent integer adds; the fadd's 3-cycle latency is overlapped by the U/V integer work, so the stream retires at fadd THROUGHPUT (1) not LATENCY (3) -> CPI~1.15, far below the dependent chain ~2.99. p5trace.so golden: icache_miss 1.95%, dcache 0, misalign 0."
+}

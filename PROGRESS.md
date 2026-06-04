@@ -13,8 +13,9 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2S | System mode: segmentation/paging/TLB/interrupts/SMM (needs system-mode oracle) | system-arch corpus diff-clean | ☐ not started (deferred from M2) |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
-| M5 | Cache/bus timing + x87 cycle accuracy | bus corpus + FP/branch cycle match | ☐ not started (NEXT) |
-| M6 | Errata & stepping fidelity (stretch) | targeted errata repro | ☐ not started |
+| M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
+| M5B | Pin-level 64-bit bus protocol (needs real-chip bus traces) | structural + local SVA (no differential oracle) | ☐ not started (deferred from M5) |
+| M6 | Errata & stepping fidelity (stretch) | targeted errata repro | ☐ not started (next; M2S + M5B remain no-oracle deferred milestones) |
 
 Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
 
@@ -37,6 +38,133 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-03 — M5 complete (L1 cache-miss timing + x87/FP cycle accuracy; tightened abs-cyc)
+
+Extended the M4 dual-issue cycle model with the two pieces M4 deferred **and that
+the `p5model` oracle can differentially verify** (`docs/m5-cycle-spec.md`):
+**(1) L1 cache-miss cycle timing** and **(2) x87/FP latency + throughput +
+occupancy** — both **EMERGENT** from real RTL state machines using the SAME
+geometry/penalty as the oracle (`build/p5trace.so`: imiss=8, dmiss=8, 8 KB /
+2-way / 32 B / 128 sets, misalign +3), never a formula copied from p5model. The
+pin-level 64-bit bus protocol has **no oracle** and stays deferred to **M5B**.
+Gate: `make m5` (= `bash verif/run-m5.sh`), exit 0. **Hard safety held: m1/m2/m3
+stay func-diff-clean vs QEMU (53/53), and all five M4 integer bands stay met.**
+
+**FP latency / throughput / occupancy (emergent).** The M4 FP serialize-stall is
+replaced by a real scoreboard with **two distinct mechanisms**, mirroring the
+oracle's `p5_insn_exec` (`verif/qemu-plugins/p5trace.c`):
+- **Result LATENCY** (`fp_ready_cyc`): a dependent FP consumer stalls until the
+  producer's result is ready (issue+lat). A dependent `fadd %st(1),%st` chain runs
+  at **CPI 3.01** (fadd lat 3) — the headline gated band.
+- **Pipe OCCUPANCY** (`fp_occ`, new): an FP op HOLDS the in-order pipe for `occ`
+  clocks, so even a *following independent integer op* is delayed until occupancy
+  expires (oracle `pipe_free_at = issue + occ`): `fdiv` occ 39, `fmul` occ 2,
+  fadd/fsub occ 1. The op retires at issue+occ and `fp_ready` is anchored to the
+  issue cycle. Independent FP pipelines at throughput 1 (`mb_fpindep` CPI **1.16**,
+  far below the chain — latency-vs-throughput contrast).
+
+**L1 cache miss timing (emergent).** Both caches are **2-way / 128-set / 32 B /
+LRU** — the I-cache was rebuilt from M4's direct-mapped 256-line form to match the
+oracle's associativity (set=addr[11:5], tag=addr[31:12], `victim = lru^1`), so the
+miss SEQUENCE — not just the aggregate — agrees. An I-miss fills 8 words = imiss=8
+clocks; a D-read-miss defers +dmiss to the next insn (read-allocate); misalign +3;
+the 8-bank D-conflict +1 is kept from M4. Strided/oversized kernels show the
+miss-driven CPI elevation (`mb_dmiss` CPI **2.50**, `mb_imiss` **6.01**) and their
+absolute `cyc` tracks the golden to **≤0.14%**.
+
+**Tightened abs-cyc (`M5_TOL_PCT=10%`, achieved figures — honest).** With the same
+caches+FP timing modeled, the totals converge far inside the band: FP/cache
+kernels `mb_faddchain` **+0.5%**, `mb_fpindep` **+2.1%**, `mb_dmiss` **+0.10%**,
+`mb_imiss` **+0.14%**; integer kernels `mb_depadd` **+2.85%**, `mb_agi` **+2.84%**,
+`mb_brloop` **+0.23%**, `mb_brrandom` **−0.86%**, worst-case `mb_indepadd`
+**+6.16%** (unchanged structural path). No kernel needed a looser tolerance.
+
+**Adversarial review — found + fixed** (each reproduced vs the p5model golden
+first; functional correctness was paramount; each fix locked with a regression
+kernel where applicable):
+- **[high] FP unit OCCUPANCY/THROUGHPUT not modeled.** M4 charged only the result-
+  latency consumer stall; an FP op retired in 1 clock and a *following independent*
+  instruction issued immediately, so a single `fdiv` + independent integer work ran
+  **~2× too fast** vs the oracle (fdiv occ 39, fmul occ 2 dropped). **Fixed:** added
+  `fp_occ` and a real pipe-occupancy hold (the op retires at issue+occ; `fp_ready`
+  anchored to issue). Reproduced: oracle single-fdiv+6 movs ≈ 54 cyc, RTL was ≈ 27
+  → now matches per-op. Regression: `mb_fpocc` (fdiv/fmul + 8 independent movs;
+  abs-cyc **−1.5%** vs golden).
+- **[med] Unconditional short JMP (EB) never filled the V slot.** The oracle makes
+  JMP `pclass=PV`/`pairs_second` (V-only-pairable, like Jcc). M4 set
+  `pairs_second=0`, so `<UV op>; jmp` groups (e.g. the assembler's `.p2align`
+  `mov; jmp` filler) never paired, costing a clock per group. **Fixed:** EB
+  `pairs_second=1`; and an unconditional-jmp mispredict now costs 3 (oracle
+  `P5_MISPREDICT_UNCOND`), not the V-cond 4 (the old V-branch always charged 4).
+  Regression: `mb_jmppair` (abs-cyc **+1.6%**).
+- **[med] FLD-const lat/occ should be 2.** FLDZ/FLD1/FLD<const> are occ=2/lat=2 in
+  the oracle (vs lat=1 for FLD ST(i)/FLD mem). M4 conflated them. **Fixed.**
+- **[med] I-cache direct-mapped vs oracle 2-way.** Different associativity → a
+  different hit/miss sequence for conflict-prone/partially-resident working sets.
+  **Fixed:** I-cache rebuilt as 2-way/128/LRU (`ic_present`/`ic_hit_way`/`ic_byte`/
+  `ic_touch` + 2-way fill victim). `mb_imiss` miss count now matches the oracle
+  exactly (2010/2010) where before the geometries diverged.
+- **[med] Stores + slow-path disp/SIB loads bypassed the D-cache model.** The
+  oracle's `p5_mem` runs `l1_access` for STORES too (read-allocate: allocate/LRU,
+  no miss penalty) and for all loads. M4 mutated the D-cache only from fast-path
+  register-indirect loads, so a line a store warmed was wrongly counted a miss.
+  **Fixed:** slow-path S_LOAD/S_STORE run `dc_access` (+dmiss/misalign deferral on
+  loads; allocate-only on stores, cycle-mode-gated). Regression: `mb_dstore`
+  (199/200 reg-indirect loads HIT because the preceding stores warmed the lines —
+  the divergent-miss-sequence bug is gone; abs-cyc there is dominated by the
+  slow-path disp-store cost, an M4 cycle-approximation, so the regression checks
+  STATE consistency, not abs-cyc).
+- **[med] I-miss off-by-one + over-eager straddle.** M4 burned a non-fetching
+  S_PIPE→S_PF transition clock (effective ~9 not 8), and `pipe_bytes_ok` always
+  required BOTH `ic_present(eip)` and `ic_present(eip+11)`, charging a second-line
+  I-miss for short instructions near a line end that don't straddle. **Fixed:** the
+  detection clock now issues the fill's word-0 read (so a miss = exactly 8 clocks);
+  the straddle line is required only when `(eip&31)+len > 32` (matching the
+  oracle's real straddle test). Effect: `mb_imiss` +16.8%→**+0.14%**, and every
+  kernel's startup cold-miss offset shrank.
+- **[low] FK_ARITH fast path had no precision-control guard.** The slow path HALTs
+  (Tier-3 deferral) on an arithmetic op under PC≠extended; the cycle-mode fast path
+  silently used full extended precision → potential functional divergence vs QEMU's
+  programmed-precision rounding. **Fixed:** the fast-path FK_ARITH now HALTs under
+  `fctrl[9:8]!=11`, matching the slow path (default cw 0x037f is PC=11, so gate
+  kernels are unaffected).
+- **[low] Terminating `int 0x80` dropped its retire record (cycle mode).** The
+  oracle emits a record for the syscall; the RTL halted without one, so the cycle
+  trace was one record short (a `compare.py` LENGTH MISMATCH). **Fixed (cycle-mode
+  only):** a genuine HALT syscall (`int 0x80`) emits one retire then stops;
+  `d_unknown` (out-of-scope opcode) stays a LOUD no-retire HALT. Func mode keeps the
+  QEMU-gdbstub convention (no exit-syscall row), so the functional gates are
+  unaffected; `mb_imiss` now emits 4019 records = the golden 4019.
+
+**Functional correctness preserved by construction + verified.** Cache/FP timing
+changes ONLY cycle accounting (stalls), never architectural results; the FP fast
+path reuses the exact M3 `floatx80` helpers and is gated on `cycle_mode` (func runs
+keep FP on the proven slow FSM). The 2-way I-cache delivers the same bytes (only
+the LRU/timing changed). Verified: `make m1`/`m2`/`m3` all exit 0 (53/53
+func-diff-clean vs QEMU), and the five M4 integer bands stay met from the now
+cache-aware RTL. RTL stays **lint-clean** (`verilator --lint-only -Wall
+-Wno-DECLFILENAME -Wno-UNUSED`, exit 0).
+
+**How to run:** `make m5`. It (a) runs `make m1 && m2 && m3` (HARD functional
+regression), then (b) builds the TB and for each kernel generates the p5trace.so
+golden + RTL `--cycle` traces, runs `compare.py --mode cycle` at the tightened
+`M5_TOL_PCT=10%`, and asserts the M4 integer bands + the new M5 FP/cache bands
+(computed by `m5_metrics.py`, which delegates to `m4_metrics` for the integer
+kernels). Exit 0 iff func-green AND every gated band met.
+
+**Honest caveats (PLAN §8 / `docs/m5-cycle-spec.md`).** The cycle oracle
+(`p5model`) is itself an **estimate** of documented P5 timing rules, not silicon;
+the miss penalty (imiss/dmiss=8) is a p5model **assumption**, not a documented P5
+constant — matching it is estimate-vs-estimate, and we claim structural fidelity
+(same caches/FP timing/components), not bit-true silicon timing. The **pin-level
+64-bit bus protocol is deferred to M5B** (no differential oracle; structural +
+local-SVA only). The serialized slow path (mul/div/string, disp/SIB loads, stores,
+rel32/indirect/call/ret branches) stays functionally exact but **cycle-approximate
+by design** — `mb_dstore`'s abs-cyc reflects that, hence its STATE-only check.
+
+**Next:** M6 — errata & stepping fidelity (targeted errata repro). **M2S** (system
+mode) and **M5B** (pin-level bus) remain no-oracle deferred milestones.
 
 ### 2026-06-03 — M4 complete (dual-issue U/V pipeline + branch prediction; first CYCLE milestone)
 

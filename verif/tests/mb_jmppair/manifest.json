@@ -1,0 +1,15 @@
+{
+  "name": "mb_jmppair",
+  "src": "mb_jmppair/mb_jmppair.s",
+  "elf": "mb_jmppair/mb_jmppair.elf",
+  "image": "mb_jmppair/mb_jmppair.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 5000,
+  "x87": false,
+  "m5_cycle": true,
+  "m5_kind": "cache",
+  "m5_metric": "abscyc",
+  "m5_band": "INFO regression: unconditional short JMP (EB) is V-pairable; `mov; jmp` groups pair (mov U, jmp V); abs-cyc tracks the oracle",
+  "note": "Regression for finding [med] EB JMP V-pairing. p5model classifies JMP as PV/pairs_second. M5 makes the RTL pair `<UV op>; jmp` and charges an unconditional-jmp mispredict as 3, so the abs-cyc tracks the p5model golden."
+}

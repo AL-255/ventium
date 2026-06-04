@@ -1,0 +1,20 @@
+{
+  "name": "mb_dmiss",
+  "src": "mb_dmiss/mb_dmiss.s",
+  "elf": "mb_dmiss/mb_dmiss.elf",
+  "image": "mb_dmiss/mb_dmiss.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 9000,
+  "x87": false,
+  "m5_cycle": true,
+  "m5_kind": "cache",
+  "m5_gated": true,
+  "m5_metric": "miss_cpi+abscyc",
+  "m5_band": "miss-driven CPI >= 1.30 AND abs-cyc within tightened tol vs golden",
+  "golden_cpi": 2.502,
+  "golden_insns": 8204,
+  "golden_cyc": 20524,
+  "golden_dcache_miss_pct": 100.0,
+  "note": "D-cache-miss cycle check. Stride a load by one 32-byte line through a 32 KB buffer (1024 lines >> 256-line 8KB/2-way D-cache), so every load touches a fresh, already-evicted line -> 100% D-cache miss, each adding dmiss=8 cycles -> CPI~2.5. Buffer is 32-byte aligned (NO misalign +3), pure reads (read-allocate), so the elevation is purely the miss penalty. p5trace.so golden: dcache_miss 100.0%, icache_miss 0.02%, misalign 0."
+}

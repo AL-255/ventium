@@ -1,0 +1,15 @@
+{
+  "name": "mb_fpocc",
+  "src": "mb_fpocc/mb_fpocc.s",
+  "elf": "mb_fpocc/mb_fpocc.elf",
+  "image": "mb_fpocc/mb_fpocc.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "x87": true,
+  "m5_cycle": true,
+  "m5_kind": "fp",
+  "m5_metric": "abscyc",
+  "m5_band": "INFO regression: FP pipe occupancy (fdiv occ 39 / fmul occ 2) holds the pipe so following independent integer ops queue behind it; abs-cyc tracks the oracle",
+  "note": "Regression for finding [high] FP occupancy/throughput. A single fdiv + 8 independent movs runs ~2x too fast vs the oracle if occupancy is dropped; with the M5 fp_occ pipe-hold the abs-cyc tracks the p5model golden."
+}
