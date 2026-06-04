@@ -1,0 +1,12 @@
+{
+  "name": "err_f00f_mem",
+  "src": "err_f00f_mem/err_f00f_mem.s",
+  "elf": "err_f00f_mem/err_f00f_mem.elf",
+  "image": "err_f00f_mem/err_f00f_mem.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 30,
+  "erratum": "81 contrast (VALID memory CMPXCHG8B must NOT hang)",
+  "errata_mask": "0x4",
+  "selfcheck": "TB does NOT print 'CPU HUNG' even with errata ON"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "err_fdiv_neg",
+  "src": "err_fdiv_neg/err_fdiv_neg.s",
+  "elf": "err_fdiv_neg/err_fdiv_neg.elf",
+  "image": "err_fdiv_neg/err_fdiv_neg.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 30,
+  "x87": true,
+  "erratum": "23 negative control (FDIV no-fabrication guard, 242480-022 p.78)",
+  "errata_mask": "0x1",
+  "selfcheck": "st0(non-trigger divide) & st1(triggering-divisor-but-unpublished divide) each EQUAL with errata ON and OFF (no fabricated flaw)"
+}

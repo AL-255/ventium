@@ -44,6 +44,13 @@ module ventium_top
     // issue + pipe/paired reporting. 0 = func mode (M1/M2/M3 gates, single issue).
     input  logic        cycle_mode,
 
+    // M6: errata-enable bus (docs/m6-errata-spec.md). DEFAULT 0 = clean core
+    // (M0-M5, bit-exact vs QEMU); each set bit reproduces one documented P5
+    // silicon defect. The TB drives this from --errata (default 0). cpu_hung
+    // reports the F00F hang (Erratum 81).
+    input  logic [3:0]  errata_en,
+    output logic        cpu_hung,
+
     // M0/M1 bus-functional-model port group (docs/rtl-interface.md §3). Minimal
     // by design; M5 replaces it with the modeled 64-bit P5 bus FSM.
     output logic        mem_req,
@@ -83,6 +90,8 @@ module ventium_top
       .init_eip     (init_eip),
       .init_esp     (init_esp),
       .cycle_mode   (cycle_mode),
+      .errata_en    (errata_en),
+      .cpu_hung     (cpu_hung),
       .mem_req      (mem_req),
       .mem_we       (mem_we),
       .mem_addr     (mem_addr),

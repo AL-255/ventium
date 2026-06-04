@@ -16,7 +16,7 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
 | M5B | Pin-level 64-bit bus protocol (needs real-chip bus traces) | structural + local SVA (no differential oracle) | ✅ done STANDALONE (biu_p5, 16 cycle types, 19 mutation-validated SVA + 76 directed checks; commit 3e82269). Integration into rtl/ + wiring = M5B-int (deferred) |
 | R1 | RTL modularization + gate speedup (maintenance) | all of m1–m5 stay green across the refactor; fast `make verify` | ✅ done (fast parallel+cached gate `make verify` ~2s vs ~3h, mutation-validated; intcore.sv 3648→core.sv 3146 + ventium_alu_pkg/decode_pkg/decode.sv/issue_uv.sv extracted, lint-clean, behavior bit-exact. Leaf modules regfile/caches/fpu/btb DEFERRED — too entangled with the shared pipeline FSM to extract mechanically) |
-| M6 | Errata & stepping fidelity (stretch) | targeted errata repro | ☐ not started (oracle-limited: QEMU computes *correctly* so won't reproduce most errata to diff against) |
+| M6 | Errata & stepping fidelity (stretch) | targeted errata repro behind a flag, default OFF; `make verify` (OFF) stays GREEN + `make m6` (ON) self-checks vs DOCUMENTED values | ✅ done (PARTIAL, non-differential stretch) — 4 documented P5 errata reproduced behind `errata_en[3:0]` (default 0 = clean core, so `make verify` stays fully GREEN): **Err23 FDIV/SRT** (published vector 4195835/3145727 → documented flawed `1.3337390689…`; no fabrication for other operands — negative-controls confirm), **Err20 FIST overflow** (operand 4294967295.5 → stores 0, no IE), **Err81 F00F** (LOCK CMPXCHG8B reg-dst → hang), **Err59 MOV moffs** (A2/A3 fails to pair, cycle gate). Verified against DOCUMENTATION (Spec Updates), NOT a differential oracle — QEMU computes correctly. `make m6` = 11/11 self-checks. All BTB/SMM/NMI/APIC/DP/paging/exception/timing errata DEFERRED to M2S (need system-mode infra / no oracle). |
 
 Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
 
@@ -39,6 +39,103 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — M6 done (PARTIAL): documented P5/P54C errata behind a stepping flag
+
+M6 reproduces **documented Pentium silicon errata** in the RTL. It is — by the
+nature of the task — a **partial, mostly-non-differential stretch milestone**, and
+the report below states that plainly.
+
+**The oracle problem (read first).** QEMU `-cpu pentium` computes the **correct**
+result; it does **not** reproduce P5 silicon bugs. So there is **no differential
+oracle** for errata: we cannot diff a "buggy" core against QEMU because QEMU is the
+*correct* answer. M6 is therefore verified against the **DOCUMENTED behavior** in
+the Intel Specification Updates (242480-022, 242480-041) via **self-checking**
+tests that assert the documented buggy result occurs — never by diffing against
+QEMU. This is a fundamentally weaker form of verification than M1–M5's differential
+gate, and we do not claim otherwise.
+
+**The errata-stepping flag (default OFF → clean core stays GREEN).** Errata are
+SELECTABLE behind a 4-bit `errata_en` input on `rtl/core/core.sv` (plumbed through
+`ventium_top` from the TB's `--errata <hexmask>`), **default `0`**. With
+`errata_en==0` the datapath is the unmodified M0–M5 core, so **`make verify`
+(errata OFF) stays fully GREEN** — the HARD requirement; reproducing a bug must
+never regress the clean core. Bit map: `[0]` FDIV, `[1]` FIST, `[2]` F00F,
+`[3]` MOFFS. `make m6` runs the suite with the relevant bit ON per test and
+asserts both the documented defect (ON) and the clean result (OFF).
+
+**Reproduced + self-checked vs documented values (`make m6` = 11/11 PASS):**
+
+1. **Erratum 23 — FDIV / SRT divide flaw** (242480-022 printed p.78). Bit 0 /
+   `--errata 0x1`. *Approach:* the SRT-flaw **model** path (bit-reproducing Intel's
+   buggy SRT iteration for all operands) is **not faithfully verifiable** — Intel
+   never published per-operand reduced-precision bits and QEMU is correct, so there
+   is no oracle for an arbitrary operand. We therefore took the spec's explicit
+   fallback: **reproduce the published failing operand**. The canonical public pair
+   `4195835.0 / 3145727.0` is held in a table; errata ON returns the documented
+   flawed quotient floatx80 `0x3fffaab7f6392a768800` (= `1.3337390689…`, double
+   `0x3FF556FEC7254ED1`, wrong at the 13th significant binary digit — the documented
+   severity); errata OFF returns the correct `0x3fffaabaa0e3e35a14bd` (= QEMU/M3
+   bit-exact). We **deliberately do NOT fabricate** a quotient for any other
+   triggering divisor (an earlier draft did; that invented Intel-undocumented values
+   and was removed). Two **negative-control** self-checks confirm this: a divisor
+   that *hits* the documented SRT trigger pattern but is *not* the published pair
+   (`7654321.0/3145727.0`), and a non-triggering divisor (`/3.0`), both divide
+   **bit-identically with the flag ON and OFF**. So the only injected error is the
+   one published, self-checkable vector. *Honest limit:* the family-wide flaw is
+   **not** claimed reproduced — only the single published operand is.
+
+2. **Erratum 20 — FIST/FISTP overflow undetected** (242480-022 printed p.75).
+   Bit 1 / `--errata 0x2`. Operand `4294967295.5` (documented 32-bit / round-nearest
+   affected operand: unbiased exp 31, top 33 significand bits = 1), `FISTP m32`.
+   Errata ON → stores `0x00000000` and IE bit = 0 (the documented **Actual**
+   response); errata OFF → stores `0x80000000` (integer-indefinite) and IE = 1 (the
+   documented masked **Expected** response). *Honest limit:* this reproduces
+   **Erratum 20 only**. Erratum 21 ("Six Operands…", printed p.77 — the small
+   ±0.0625/±0.125/±0.1875 up/down case with PE/C1 anomalies) is a **distinct**
+   erratum and is **NOT** modelled; the label was corrected from "20/21" to "20".
+
+3. **Erratum 81 — F00F LOCK CMPXCHG8B register destination** (242480-041 printed
+   p.51). Bit 2 / `--errata 0x4`. Invalid sequence `F0 0F C7 C9`. Errata ON → the
+   core latches `cpu_hung` and the TB prints `CPU HUNG … Erratum 81` (the documented
+   system hang — never retires the offending op); errata OFF → loud HALT, no hang; a
+   **valid memory** form `F0 0F C7 09` does **not** hang even with the flag ON.
+
+4. **Erratum 59 — MOV moffs (A2/A3) fails to pair** (242480-022 printed p.99).
+   Bit 3 / `--errata 0x8`, **cycle-mode** gate. An `A3` moffs store followed by an
+   EAX-referencing `MOV`. Errata OFF → the follower PAIRS (cycle trace pipe=V,
+   paired=true); errata ON → the follower does NOT pair (the documented false-EAX-
+   dependency), retiring as its own U op on the next clock. moffs is fast-pathed
+   cycle-mode only (func mode keeps the proven slow FSM → no functional risk).
+
+**Page-citation note.** All in-code/README citations (FDIV p.78, FIST p.75/Err21
+p.77, F00F p.51, moffs p.99) were re-verified against the printed-page footers of
+the actual PDFs and are correct for these document revisions. The original M6 brief
+listed different pages (p.82/p.82/p.105); `docs/m6-errata-spec.md` was corrected to
+the verified printed pages.
+
+**Deferred to M2S (documented but NOT verifiable here — no oracle / need system
+infra):** all BTB multiple-allocation / BTB-flush, SMM / NMI / STPCLK# / RSM
+(Errata 80, 2, 39, 49…), APIC and dual-processing (xAP/xDP) errata — need system
+mode / bus / DP infra. CMPXCHG8B page-boundary #UD (Err 26), EIP corruption after
+FP + MOV Sreg (Err 32), 0F-misdecode (Err 42) — need the exception/segment/cache-
+line-alignment paths M2S builds. FBSTP A/D-bit on 16-bit wrap (Err 83) — needs
+paging A/D bits. Debug-exception-on-POPF/IRET (Err 79) — needs debug + exceptions.
+Timing / performance-counter errata — no oracle. Each is tracked under **M2S**.
+
+**Honest verdict.** M6 is a partial, mostly-non-differential stretch milestone:
+4 documented errata reproduced behind a default-OFF flag and self-checked against
+the Spec-Update text (not QEMU), with the clean core proven untouched (`make
+verify` GREEN). It does **not** model the full errata family for any erratum.
+
+**Files:** `rtl/core/core.sv` (errata_en plumbing, F00F FSM hang, FIST/FDIV errata
+dispatch, moffs non-pair), `rtl/fpu/fpu_x87_pkg.sv` (`fx_div_errata`,
+`fist_errata_overflow`/`fx_to_int_errata`, `srt_flaw_divisor`),
+`verif/errata/` (`run-m6.sh`, `README.md`, `err_fdiv`/`err_fdiv_neg`/`err_fist`/
+`err_f00f`/`err_f00f_mem`/`err_moffs`), `docs/m6-errata-spec.md`.
+
+**Next:** **M2S** (system mode — unlocks the deferred errata family + the integer
+system-ISA gap) and **M5B-int** (wire the standalone pin-level bus into `rtl/`).
 
 ### 2026-06-04 — R1 done (gate speedup + RTL modularization; maintenance)
 

@@ -1,0 +1,12 @@
+{
+  "name": "err_f00f",
+  "src": "err_f00f/err_f00f.s",
+  "elf": "err_f00f/err_f00f.elf",
+  "image": "err_f00f/err_f00f.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 30,
+  "erratum": "81 (F00F LOCK CMPXCHG8B reg-dst hang, 242480-041 p.51)",
+  "errata_mask": "0x4",
+  "selfcheck": "TB prints 'CPU HUNG' (errata ON) / loud HALT, no hang (errata OFF)"
+}

@@ -264,6 +264,190 @@ package fpu_x87_pkg;
     end
   endfunction
 
+  // ===========================================================================
+  // M6 ERRATA (selectable, DEFAULT OFF) — Pentium P5/P54C silicon defects.
+  //
+  // These functions reproduce DOCUMENTED buggy behavior from the Intel Pentium
+  // Specification Updates. They are ONLY reached when the core's errata-enable
+  // flag is set (a "buggy P54C stepping"); the clean datapath above is used by
+  // default so M0-M5 stay bit-exact vs QEMU. Verified against the documented
+  // values in the spec updates (NOT a differential oracle — QEMU is correct).
+  // ---------------------------------------------------------------------------
+
+  // --- Erratum 23: FDIV / SRT divide flaw (242480-022 doc p.78) --------------
+  // "Slight Precision Loss for Floating-point Divides on Specific Operand Pairs"
+  //
+  // The radix-4 SRT divider's quotient-prediction PLA is missing five entries.
+  // A divide/remainder pair that hits a missing entry mispredicts an interim
+  // quotient digit and the iterative refinement returns a quotient with reduced
+  // precision; the worst-case inaccuracy lands in the 13th significant binary
+  // digit (4th decimal). The trigger, documented verbatim by Intel, is on the
+  // *divisor* significand (normalized 1.f, integer bit + fraction): the most-
+  // significant bits must be one of
+  //     1.0001 , 1.0100 , 1.0111 , 1.1010 , 1.1101
+  // followed by at least six binary ones. (The flaw does not occur for a single-
+  // precision reciprocal, nor for integer operands valued < 100,000 — neither
+  // condition is needed for the corpus's self-check vectors, but we keep the
+  // ">=6 ones after the 4-bit pattern" gate which is the documented necessary
+  // condition.)
+  //
+  // srt_flaw_divisor: 1 iff the divisor `b` (a normal floatx80) hits one of the
+  // five missing PLA entries per the documented bit pattern.
+  function automatic logic srt_flaw_divisor(input logic [79:0] b);
+    logic [63:0] mb;
+    logic [3:0]  p4;      // the 4 fraction bits after the integer bit (1.PPPP)
+    logic        pat;     // matches one of the 5 documented patterns
+    logic [5:0]  six;     // the six bits immediately after the 4-bit pattern
+    begin
+      srt_flaw_divisor = 1'b0;
+      if (!fx_is_normal(b)) return 1'b0;
+      mb = fx_man(b);                 // mantissa, integer bit at [63]
+      // mb[63] is the implicit 1. ; the 4 documented pattern bits are [62:59].
+      p4  = mb[62:59];
+      six = mb[58:53];
+      // Documented patterns are the fraction bits of 1.0001 / 1.0100 / 1.0111 /
+      // 1.1010 / 1.1101  ->  0001 / 0100 / 0111 / 1010 / 1101.
+      pat = (p4==4'b0001) || (p4==4'b0100) || (p4==4'b0111) ||
+            (p4==4'b1010) || (p4==4'b1101);
+      // "...followed by at least six binary ones": the six bits after the 4-bit
+      // pattern must all be 1 (necessary condition for the flaw to occur).
+      srt_flaw_divisor = pat && (six==6'b111111);
+    end
+  endfunction
+
+  // fx_div_errata: SRT-flaw-aware divide (reproduce the PUBLISHED failing operands).
+  //
+  // HONEST SCOPE (per m6-errata-spec.md). Erratum 23 has the classic oracle
+  // problem: Intel NEVER published the per-operand reduced-precision quotient
+  // bits (only the divisor bit-pattern trigger and the worst-case severity --
+  // "13th significant binary digit"), and QEMU computes the CORRECT answer, so
+  // for an ARBITRARY triggering operand pair there is NO source to self-check a
+  // flawed quotient against. The spec's gold-standard path ("model the SRT flaw,
+  // covers all operands") would require bit-reproducing Intel's exact buggy SRT
+  // iteration -- not faithfully verifiable without that oracle. We therefore take
+  // the spec's explicit fallback: "reproduce the PUBLISHED failing operands."
+  //
+  // This function reproduces flawed quotients ONLY for operand pairs that have an
+  // EXACT, bit-precise published flawed result, via the DOC_VEC table below. The
+  // one such public vector with a full-precision documented double is the iconic
+  // 4195835.0 / 3145727.0 -> 1.3337390689... (double 0x3FF556FEC7254ED1, floatx80
+  // significand 0xAAB7F6392A768800), wrong vs the correct 1.3338204491... at the
+  // 13th significant binary digit -- exactly the documented severity. (Other
+  // widely-quoted public pairs such as 5505001/294911 only have ~10-digit decimal
+  // flawed values published, NOT enough to pin a bit-exact floatx80, so they are
+  // deliberately NOT in the table -- we do not invent low bits.)
+  //
+  // We deliberately DO NOT fabricate a quotient for triggering divisors that are
+  // absent from the table: doing so would emit an Intel-UNDOCUMENTED value with no
+  // oracle (the over-claim flagged in review). For any operand pair NOT in the
+  // table -- including triggering divisors -- this returns the EXACT clean fx_div
+  // result. So the only observable error this model injects is the published,
+  // self-checkable one. srt_flaw_divisor() (the documented trigger) is retained as
+  // a fast gate so the table lookup only runs on plausibly-affected divisors and
+  // so the trigger model is exercised/documented, but it never on its own forces a
+  // flaw. Returns {inexact, result} like fx_div; the flawed path forces inexact=1.
+  //
+  // The canonical operands in floatx80 (after FLD-from-double): 4195835.0 and
+  // 3145727.0 = +1.0111...1*2^21; matched by their exact normal floatx80 codes.
+  function automatic logic [80:0] fx_div_errata(input logic [79:0] a,
+                                                input logic [79:0] b,
+                                                input logic [1:0] rc);
+    logic [80:0] clean;
+    logic        sign;
+    logic [14:0] e;
+    // published-vector table (exact floatx80 encodings):
+    //   4195835.0 : exp 16383+21=0x4015, mant 0x800BF60000000000
+    //   3145727.0 : exp 0x4014,          mant 0xBFFFFC0000000000
+    localparam logic [79:0] CANON_A = 80'h4015_800B_F600_0000_0000;  // 4195835.0
+    localparam logic [79:0] CANON_B = 80'h4014_BFFF_FC00_0000_0000;  // 3145727.0
+    localparam logic [63:0] CANON_FLAWED_MANT = 64'hAAB7F6392A768800;
+    begin
+      clean = fx_div(a, b, rc);
+      // Only triggering divisors can hit a missing PLA entry (documented gate);
+      // among those, reproduce a flaw ONLY where a published bit-exact result
+      // exists. Everything else -- including other triggering divisors -- is
+      // returned EXACTLY (no fabricated quotient).
+      if (fx_is_normal(a) && fx_is_normal(b) && srt_flaw_divisor(b) &&
+          a == CANON_A && b == CANON_B) begin
+        sign = clean[79];
+        e    = clean[78:64];
+        // exact documented flawed quotient for the canonical published vector.
+        fx_div_errata = {1'b1, sign, e, CANON_FLAWED_MANT};
+      end else begin
+        fx_div_errata = clean;
+      end
+    end
+  endfunction
+
+  // --- Erratum 20: FIST/FISTP overflow undetected (242480-022 doc p.75) ------
+  // "Overflow Undetected on Some Numbers on FIST"
+  //
+  // For FIST[P] m16int / m32int ONLY (m64 unaffected), in the 'nearest' or 'up'
+  // rounding mode ONLY (chop/down unaffected), for a POSITIVE operand whose value
+  // is just above the destination's signed max (the documented "Affected Range"
+  // C..D just past +2^15 / +2^31), the processor fails to detect the integer
+  // overflow: instead of returning the integer-indefinite (10000...0000) it
+  // returns ZERO to memory and does NOT set the IE (invalid-operation) bit.
+  //
+  // The documented affected operands have:
+  //   16-bit Up      : unbiased exponent 15, 16 MSBs of significand = 1, >=1 low 1
+  //   16-bit Nearest : unbiased exponent 15, 17 MSBs of significand = 1
+  //   32-bit Up      : unbiased exponent 31, 32 MSBs of significand = 1, >=1 low 1
+  //   32-bit Nearest : unbiased exponent 31, 33 MSBs of significand = 1
+  // (Exponent so the value is in [+2^width-... , +2^width).)
+  //
+  // fist_errata_overflow: 1 iff the operand `v`, for width `width` (16/32) and
+  // rounding `rc`, hits the documented overflow-undetected condition.
+  function automatic logic fist_errata_overflow(input logic [79:0] v,
+                                                input int width,
+                                                input logic [1:0] rc);
+    logic signed [31:0] ue;
+    logic [63:0] m;
+    logic        nearest, up;
+    logic        exp_ok, top_ok, low_ok;
+    int          nmsb;
+    logic [63:0] topmask;
+    begin
+      fist_errata_overflow = 1'b0;
+      if (width != 16 && width != 32) return 1'b0;     // m64 unaffected
+      if (!fx_is_normal(v))           return 1'b0;
+      if (fx_sign(v))                 return 1'b0;      // positive only
+      nearest = (rc==2'b00);
+      up      = (rc==2'b10);                            // toward +inf
+      if (!nearest && !up)            return 1'b0;      // chop/down unaffected
+      ue = fx_uexp(v);
+      m  = fx_man(v);                                   // integer bit at [63]
+      // exponent: 15 for the 16-bit form, 31 for the 32-bit form.
+      exp_ok = (width==16) ? (ue==32'sd15) : (ue==32'sd31);
+      if (!exp_ok) return 1'b0;
+      // top-N significand bits (counting the integer bit [63]) must all be 1.
+      //   16-up: 16 MSBs ; 16-near: 17 MSBs ; 32-up: 32 MSBs ; 32-near: 33 MSBs.
+      nmsb = (width==16) ? (up ? 16 : 17) : (up ? 32 : 33);
+      topmask = ~((64'd1 << (64-nmsb)) - 64'd1);        // top nmsb bits set
+      top_ok  = ((m & topmask) == topmask);
+      // 'up' additionally requires at least one lower significand bit set
+      // (documented "At least one '1'"); 'nearest' is don't-care on the rest.
+      low_ok  = up ? ((m & ~topmask) != 64'd0) : 1'b1;
+      fist_errata_overflow = top_ok && low_ok;
+    end
+  endfunction
+
+  // fx_to_int_errata: FIST-erratum-aware conversion. Identical to fx_to_int_ex
+  // EXCEPT that for the documented overflow-undetected operands it returns the
+  // BUGGY response: value = ZERO, invalid(IE)=0 (the chip neither flags nor
+  // returns the indefinite). Returns {invalid, inexact, value[63:0]} like
+  // fx_to_int_ex. All other operands go through the clean conversion.
+  function automatic logic [65:0] fx_to_int_errata(input logic [79:0] v,
+                                                   input int width,
+                                                   input logic [1:0] rc);
+    begin
+      if (fist_errata_overflow(v, width, rc))
+        fx_to_int_errata = {1'b0, 1'b0, 64'd0};         // BUG: 0, no IE, no PE
+      else
+        fx_to_int_errata = fx_to_int_ex(v, width, rc);
+    end
+  endfunction
+
   // ---------------------------------------------------------------------------
   // Square root (operand >= 0, normal or +0). Returns {inexact, result}.
   // Negative operands are handled by the caller (real-indefinite QNaN + IE)
