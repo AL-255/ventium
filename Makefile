@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 rtl plugin tests clean help
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 verify verify-clean rtl plugin tests clean help
 .DEFAULT_GOAL := help
 
 help:
@@ -20,6 +20,8 @@ help:
 	@echo "  make m3         M3 differential gate: x87 FPU func-equiv vs QEMU (+ integer suites)"
 	@echo "  make m4         M4 cycle gate: dual-issue U/V pipeline cycle-accuracy vs p5model"
 	@echo "  make m5         M5 cycle gate: L1 cache-miss + x87/FP cycle accuracy vs p5model"
+	@echo "  make verify     FAST unified m1-m5 gate (parallel + cached goldens; refactor-time gate)"
+	@echo "  make verify-clean  drop the golden cache (forces a cold regen on the next make verify)"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -103,8 +105,27 @@ m4:
 m5:
 	bash verif/run-m5.sh
 
+# --- FAST unified differential gate (verif/verify.sh) -----------------------
+# Reaches the SAME verdict as the slow `make m5` (which supersets m1..m4) — but
+# PARALLEL (xargs -P across cores, unique gdbstub ports), CACHED (each program's
+# golden generated ONCE into build/golden-cache/, keyed by sha1(.s); a refactor
+# changes the RTL but never the .s, so warm runs reuse every golden and only
+# rebuild the RTL once + re-trace + re-compare), and with NO redundant 3x func
+# re-run (m3 is the func superset; m1/m2 are subsets). The RTL trace is ALWAYS
+# freshly regenerated and compared, so the verdict is fully authoritative. This
+# is the refactor-time gate R1b uses after every extraction. (verif/verify.sh
+# builds the corpus ELFs + TB itself.)
+verify:
+	bash verif/verify.sh
+
+# Drop the golden cache (forces a cold regeneration on the next `make verify`).
+verify-clean:
+	rm -rf $(BUILD)/golden-cache $(BUILD)/verify
+	@echo "verify-clean: dropped $(BUILD)/golden-cache (next 'make verify' is cold)"
+
 clean:
 	-$(MAKE) -C verif/tb clean
 	-$(MAKE) -C verif/qemu-plugins clean
 	-$(MAKE) -C verif/tests clean
-	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2 $(BUILD)/m3 $(BUILD)/m4 $(BUILD)/m5
+	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2 $(BUILD)/m3 $(BUILD)/m4 $(BUILD)/m5 $(BUILD)/verify
+	@echo "clean: (golden cache kept; use 'make verify-clean' to drop $(BUILD)/golden-cache)"
