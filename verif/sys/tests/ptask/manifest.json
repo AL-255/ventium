@@ -1,0 +1,39 @@
+{
+  "name": "ptask",
+  "kind": "system",
+  "src": "ptask.S",
+  "linker": "ptask.ld",
+  "image": "ptask.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 320,
+  "sys": true,
+  "paging": false,
+  "stretch": true,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT: null + code0 0x08 + data0 0x10 + filler 0x18 + TSS1 0x20 (base 0x3000) + TSS2 0x28 (base 0x4000), both 32-bit available TSS (access 0x89, limit 0x67)",
+    "TSS1 loaded with LTR 0x20 (current task = TSS1)",
+    "TSS2 pre-initialised with a full incoming task-state image: EIP=task2, ESP=0x00070000, EFLAGS=0x2, CS=0x08, SS/DS/ES/FS/GS=0x10, CR3=0, LDTR=0, EAX=0xAAAAAAAA, EBX=0xBBBBBBBB",
+    "HARDWARE TASK SWITCH: ljmp $0x28,$0 (far JMP to the TSS2 selector). The CPU SAVES task1 state into TSS1 (TR), LOADS task2 state from TSS2, toggles busy bits (JMP clears old/sets new), TR<-0x28, resumes at task2",
+    "GPR/ESP RELOAD from TSS2 captured: at the switch eax=0xAAAAAAAA ebx=0xBBBBBBBB esp=0x00070000",
+    "OUTGOING STATE SAVE into TSS1 captured: TSS1.EIP (0x3020) = task1 resume EIP (nonzero), TSS1.EAX (0x3028) = 0x1A1A1A1A (the live EAX at the jmp)",
+    "BUSY-bit toggle captured: TSS1 descriptor access -> 0x89 (available, busy cleared by the JMP), TSS2 descriptor access -> 0x8B (busy set)"
+  ],
+  "delivery_records": {
+    "task_switch": "n=275 (ljmp $0x28,$0) -> n=276 pc=0x000f01f0 (task2) cs=0x08 ss=0x10 esp=0x00070000: the hardware task switch; CS:EIP + ESP jump to the TSS2 image",
+    "gpr_reload": "n=276 eax=0xAAAAAAAA ebx=0xBBBBBBBB esp=0x00070000 (the incoming task GPR/ESP image loaded from TSS2 across the switch)",
+    "outgoing_save_proof": "task2 reads back TSS1.EIP (0x3020) into edx = 0x000f00f4 (nonzero: task1's resume EIP was saved) and TSS1.EAX (0x3028) into esi = 0x1A1A1A1A (the live EAX saved at the jmp)",
+    "busy_toggle_proof": "n=289 edi=0x0000898B = (TSS1 access 0x89 << 8) | TSS2 access 0x8B: TSS1 busy CLEARED (available), TSS2 busy SET (busy) -- the JMP busy-bit toggle",
+    "success_proof": "n=291 region (task2, CPL0) ecx=0x22222222 (task2 sentinel) edx=0x000f00f4 (TSS1 saved EIP) ebx=0xBBBBBBBB (reloaded) esi=0x1A1A1A1A (TSS1 saved EAX) edi=0x898B (busy toggle); then out 0xf4 = qemu status 133"
+  },
+  "deferred": [
+    "round-trip task switch (task2 JMPs back to TSS1, reloading the CPU-written saved image) -- the gnarliest reload variant, deferred",
+    "CALL-far / interrupt-via-task-gate task switch: sets NT + the TSS back-link (a JMP does NOT) -- deferred; ptask uses a one-way JMP so the save+load+busy-toggle is cleanly deterministic without the NT/back-link path"
+  ],
+  "description": "Bare-metal real->protected HARDWARE TASK SWITCH demonstrator for the M2S.4 gate (NO paging; STRETCH). Boots from the F000:FFF0 reset vector in 16-bit real mode, builds a 6-entry GDT (null + flat CPL0 code 0x08 + flat CPL0 data 0x10 + a zero filler 0x18 + two 32-bit available TSS descriptors: TSS1 at selector 0x20 / base 0x00003000 and TSS2 at selector 0x28 / base 0x00004000, both access 0x89 / limit 0x67), sets CR0.PE and far-jumps into the 32-bit flat CPL0 code segment, loads the flat data selectors + the task1 stack, zeroes a marker area at 0x2000 and both 104-byte TSS images at 0x3000 / 0x4000. It pre-initialises TSS2 (the INCOMING task) with a complete 32-bit task-state image at the architectural field offsets: CR3=0 (paging off), EIP=task2, EFLAGS=0x2, EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, ESP=0x00070000 (a private task2 stack), CS=0x08, SS/DS/ES/FS/GS=0x10, LDTR=0, I/O map base 0x68. It LTR 0x20 (TR now points at the current task TSS1, whose saved-state fields are left zero for the CPU to fill on the outgoing save), clears the visible GPRs, marks the switch point, loads a live EAX=0x1A1A1A1A, then performs the HARDWARE TASK SWITCH with a far JMP to the TSS2 selector (ljmp $0x28,$0; offset ignored). The CPU saves the outgoing task1 state into TSS1 (TR) -- including the resume EIP (the instruction after the jmp) at TSS1.EIP and the live EAX at TSS1.EAX -- clears the TSS1 busy bit (a JMP, not a CALL, so NO NT / back-link is set), loads the incoming task2 state from TSS2 (the golden shows EAX/EBX/ESP take the TSS2 image values at the switch, n=275->276 pc->task2 0x000f01f0, esp->0x00070000), sets the TSS2 busy bit, points TR at 0x28, and resumes at task2. task2 records markers proving the reload (EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, ESP~0x00070000), reads the TSS1 saved EIP/EAX back (edx=0x000f00f4 nonzero = a state save occurred, esi=0x1A1A1A1A = the live EAX was captured), and reads the two TSS descriptors' access bytes to confirm the busy-bit toggle (edi=0x898B: TSS1 access 0x89 = available/busy-cleared, TSS2 access 0x8B = busy/busy-set). It exits via out 0xf4 (isa-debug-exit -> qemu status 133). Exercises the M2S.4 hardware task switch: outgoing state SAVE to the current TSS + incoming state LOAD from the new TSS + the busy-bit toggle, all deterministic + observable. SCOPE NOTE (honest done-partial): this is a ONE-WAY JMP task switch; the round-trip switch-back (reloading the CPU-written TSS1 image), and the CALL-far / interrupt-via-task-gate variant that additionally sets NT + the TSS back-link, are DEFERRED (documented in this manifest's deferred list). NO paging; CR0.PG stays 0; CR3/CR4 untouched."
+}

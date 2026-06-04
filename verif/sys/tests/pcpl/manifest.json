@@ -1,0 +1,38 @@
+{
+  "name": "pcpl",
+  "kind": "system",
+  "src": "pcpl.S",
+  "linker": "pcpl.ld",
+  "image": "pcpl.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 320,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT: null + code0 0x08 + data0 0x10 + code3 0x18(DPL3) + data3 0x20(DPL3) + TSS32 0x28 (base 0x3000, limit 0x67)",
+    "TR load: LTR 0x28 (marks the TSS busy) + STR readback (n=220 region) -> TR established",
+    "TSS fields: SS0=0x10, ESP0=0x00088000 (the dedicated CPL0 interrupt stack)",
+    "IDT load (base=0x1000 limit=0x7FF) + 2 DPL=3 32-bit interrupt gates: vector 0x80 -> xcpl_handler, vector 0x40 -> sys_exit, both target CS 0x08 (DPL0)",
+    "transfer DOWN to CPL3: inter-priv IRET to CS 0x1B/SS 0x23 -> CPL 0->3, SS:ESP switch to CPL3 user stack 0x00080000 (n=259)",
+    "CROSS-PRIV delivery (INT 0x80): CPL 3->0, stack switch SS 0x23->0x10 ESP->0x00087fec (TSS.ESP0=0x88000 minus the 5-word frame), CPL0 xcpl_handler runs (n=272)",
+    "5-word inter-priv frame pushed (old SS, old ESP, EFLAGS, CS, EIP; no error code for INT n); handler reads it back as markers",
+    "INTER-PRIV IRET: handler IRETs, saved CS RPL=3 > CPL=0 -> additionally pops ESP/SS -> CPL 0->3, SS:ESP back to CPL3 user stack 0x00080000 (n=293)",
+    "syscall-style exit (INT 0x40): CPL 3->0 second cross-priv delivery -> sys_exit (CPL0) performs the isa-debug-exit (n=296)"
+  ],
+  "delivery_records": {
+    "cpl0_to_cpl3_down": "n=259 cs 0x0008->0x001b ss 0x0010->0x0023 esp->0x00080000 (inter-priv IRET DOWN to the CPL3 user task; CPL 0->3)",
+    "cross_priv_int80_enter": "n=272 cs 0x001b->0x0008 ss 0x0023->0x0010 esp->0x00087fec (INT 0x80 from CPL3: CPL 3->0, stack switched to TSS.SS0:ESP0 with the 5-word frame; xcpl_handler at CPL0)",
+    "inter_priv_iret_return": "n=293 cs 0x0008->0x001b ss 0x0010->0x0023 esp->0x00080000 (inter-priv IRET pops EIP/CS/EFLAGS + ESP/SS -> back to CPL3 user task)",
+    "syscall_int40_exit": "n=296 cs 0x001b->0x0008 ss 0x0023->0x0010 esp->0x00087fec (INT 0x40 from CPL3 -> sys_exit at CPL0, does not return)",
+    "frame_proof_handler_ss": "n=298 edx=0x00000010 (xcpl_handler ran on the CPL0 data segment SS = proof the delivery switched stacks to TSS.SS0)",
+    "frame_proof_saved_cs": "n=299 ebx=0x0000001b (the saved CS in the pushed 5-word frame = the CPL3 code selector RPL3 = proof the cross-priv frame held the CPL3 return CS)",
+    "success_proof": "n=303 (sys_exit, CPL0) ecx=0x1 (xcpl delivery counter) esi=0x80808080 (xcpl_handler sentinel) edi=0x33333333 (CPL3 task continued AFTER the inter-priv IRET returned to it); then out 0xf4 = qemu status 133"
+  },
+  "description": "Bare-metal real->protected CROSS-PRIVILEGE (TSS / stack-switch) demonstrator for the M2S.4 gate (NO paging). Boots from the F000:FFF0 reset vector in 16-bit real mode, builds a 6-entry GDT (null + flat CPL0 code 0x08 + flat CPL0 data 0x10 + flat CPL3 code 0x18 DPL3 + flat CPL3 data 0x20 DPL3 + a 32-bit available TSS at 0x28 with base 0x00003000 / limit 0x67), sets CR0.PE and far-jumps into the 32-bit flat CPL0 code segment, loads the CPL0 data selectors + the boot stack, zeroes a marker area at 0x2000. It builds a 104-byte 32-bit TSS at linear 0x3000 with SS0=0x10 and ESP0=0x00088000 (a DEDICATED CPL0 interrupt stack, distinct from the boot stack so the stack switch is unambiguous), then LTR 0x28 loads TR (marking the TSS busy) and STR reads it back (proof TR is established). It builds an IDT at linear 0x1000 with two 32-bit INTERRUPT gates whose target selector is the CPL0 code 0x08 but whose gate DPL is 3 (attr 0xEE) so a CPL3 task may use them: vector 0x80 -> xcpl_handler (the test interrupt), vector 0x40 -> sys_exit (the syscall-style exit). It then TRANSFERS DOWN to CPL3 by building a 5-word inter-priv IRET frame (SS=0x23, ESP=0x00080000, EFLAGS with IF set, CS=0x1B, EIP=user_entry) on the CPL0 stack and IRETing: because the target CS (0x1B) has RPL=3 > CPL=0, the CPU pops ESP/SS too, switching to the CPL3 user stack and lowering CPL to 3 (golden n=259: cs 0x08->0x1b, ss 0x10->0x23, esp->0x80000). The CPL3 user task loads the CPL3 data selectors, records a 0xC3C3C3C3 sentinel + its own SS/CS, then fires INT 0x80. This is the heart of the test: the gate DPL (3) >= CPL (3) so the INT is permitted, and because the target CS.DPL (0) < CPL (3) the CPU loads SS:ESP from TSS.SS0:ESP0 and pushes the LARGER 5-word frame (old SS 0x23, old ESP, EFLAGS, CS 0x1B, EIP -- no error code for INT n), running xcpl_handler at CPL0 on the TSS stack (golden n=272: cs 0x1b->0x08, ss 0x23->0x10, esp->0x00087fec = ESP0 0x88000 minus the 20-byte frame). The handler records its running SS:ESP (proving the switch), reads back the whole 5-word frame as markers, sets sentinel 0x80808080, increments a delivery counter, and IRETs. Because the saved CS has RPL=3 > the handler's CPL=0, the INTER-PRIV IRET additionally pops ESP/SS and switches back to the CPL3 user stack (golden n=293: cs 0x08->0x1b, ss 0x10->0x23, esp->0x80000), returning control to the CPL3 task, which reads the handler sentinel into ESI and records a 0x33333333 returned-to-CPL3 sentinel. Finally the CPL3 task issues INT 0x40 (a CPL3 task cannot OUT to 0xf4), a SECOND cross-priv delivery to sys_exit at CPL0 (golden n=296), which accumulates the success proof into the GPRs -- ecx=1 (delivery counter), edx=0x10 (handler SS = stack-switch proof, n=298), ebx=0x1b (saved CS in the frame = CPL3 return CS proof, n=299), esi=0x80808080, edi=0x33333333 -- and exits via out 0xf4 (isa-debug-exit -> qemu status 133). Exercises the M2S.4 privilege machinery: TR/TSS (LTR/STR + SS0:ESP0), the transfer down to CPL3, CROSS-PRIVILEGE interrupt delivery (stack switch via TSS.SS0:ESP0 + the larger 5-word frame + CPL 3->0), and the INTER-PRIVILEGE IRET (pop EIP/CS/EFLAGS + ESP/SS, CPL 0->3). NO paging; CR0.PG stays 0; CR3/CR4 untouched. Hardware task switch (CALL/JMP to a TSS / task gate) is the sibling ptask stretch test."
+}

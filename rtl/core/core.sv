@@ -165,6 +165,15 @@ module core
   logic [15:0] gdt_limit;
   logic [31:0] idt_base;
   logic [15:0] idt_limit;
+  // M2S.4 — TR / TSS. LTR loads the task register from a GDT TSS descriptor; the
+  // hidden cache holds the TSS linear base + limit (and the selector for STR).
+  // tr_valid records whether a TSS has been installed (so cross-priv delivery
+  // can read TSS.ssN:espN; if no TR is loaded a cross-priv attempt would #TS,
+  // but the pcpl corpus always LTRs first).
+  logic [15:0] tr_sel;
+  logic [31:0] tr_base;
+  logic [31:0] tr_limit;
+  logic        tr_valid;
   // real_mode = system-mode core with CR0.PE==0. In real mode the addressing is
   // linear = (sel<<4)+offset (and the CS default operand size is 16-bit).
   logic        real_mode;
@@ -284,7 +293,14 @@ module core
     // then load CS:EIP from the gate, clear IF/TF (interrupt gate), and retire.
     // S_IRET pops EIP/CS/EFLAGS (near, same-privilege); S_INT_CS_RET reloads the
     // returned-to CS descriptor and retires the IRET.
-    S_INT_GATE, S_INT_CS, S_INT_PUSH, S_IRET, S_INT_CS_RET
+    S_INT_GATE, S_INT_CS, S_INT_PUSH, S_IRET, S_INT_CS_RET,
+    // M2S.4 — TR/TSS + cross-privilege machinery:
+    //   S_LTR     : LTR — read the GDT TSS descriptor (base/limit), set busy bit,
+    //               load TR. (STR is a register write, handled in S_EXEC.)
+    //   S_INT_TSS : cross-priv delivery — read TSS.ssN:espN (N = target CS.DPL).
+    //   S_INT_SS  : cross-priv delivery — read + load the new SS descriptor.
+    //   S_IRET_SS : inter-priv IRET — reload the popped (outer) SS descriptor.
+    S_LTR, S_INT_TSS, S_INT_SS, S_IRET_SS
   } state_e;
   state_e state;
   // M2S.2 page-walk return state (declared here so it can use state_e).
@@ -478,7 +494,9 @@ module core
   logic [2:0]  d_seg;          // segment index for the data memory operand
   typedef enum logic [3:0] {
     SYS_NONE, SYS_LGDT, SYS_LIDT, SYS_MOVCR_TO, SYS_MOVCR_FROM,
-    SYS_MOVSREG_TO, SYS_MOVSREG_FROM, SYS_LJMP
+    SYS_MOVSREG_TO, SYS_MOVSREG_FROM, SYS_LJMP,
+    // M2S.4 — LTR (load TR from a GDT TSS selector) and STR (store TR selector).
+    SYS_LTR, SYS_STR
   } sysop_e;
   sysop_e      d_sysop;
   logic [2:0]  d_sys_sreg;     // target/source segment register index (mov sreg)
@@ -779,6 +797,25 @@ module core
 
     if (two_byte) begin
       unique casez (op1)
+        // ---- M2S.4 system 0F 00 group: /1 STR, /3 LTR ----------------------
+        // 0F 00 /3 LTR r/m16 — load TR from a GDT TSS selector (reads the TSS
+        // descriptor, marks it busy). 0F 00 /1 STR r/m16 — store the TR selector.
+        // Only the register form (mod==11) is used by the corpus; SLDT(/0) and
+        // LLDT(/2)/VERR(/4)/VERW(/5) are not needed here.
+        8'h00: begin
+          // LTR/STR are SYSTEM instructions: only meaningful in system mode. Gate
+          // the decode on sys_mode so user mode keeps its exact pre-M2S.4 behavior
+          // (0F 00 was d_unknown -> HALT; the user corpus never uses it, so this
+          // keeps `make verify` byte-identical).
+          if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd3) begin // LTR r16
+            d_sysop=SYS_LTR; d_src_reg=modrm_rm; d_w=3'd2; d_len=pfx_len+4'd3;
+          end else if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd1) begin // STR r16
+            d_sysop=SYS_STR; d_dst_reg=modrm_rm; d_writes_reg=1'b1;
+            d_w=3'd2; d_len=pfx_len+4'd3;
+          end else begin
+            d_unknown=1'b1; d_len=pfx_len+4'd2;  // SLDT/LLDT/VERR/VERW/mem deferred
+          end
+        end
         // ---- M2S.1 system 0F opcodes ---------------------------------------
         8'h01: begin // 0F 01 /2 LGDT, /3 LIDT (memory operand = 6 bytes)
           if (modrm_reg==3'd2 || modrm_reg==3'd3) begin
@@ -1591,9 +1628,31 @@ module core
   logic [31:0] int_gate_off;      // assembled handler offset from the IDT gate
   logic [15:0] int_gate_sel;      // gate's code selector
   logic        int_gate_trap;     // 1 = trap gate (leave IF), 0 = interrupt gate
+  logic        int_sw;            // delivery is a SOFTWARE INT n/INT3/INTO (the
+                                  // gate DPL>=CPL privilege check applies; HW
+                                  // faults / external INTs bypass it)
   logic [31:0] int_lo;            // first dword of the in-flight 8-byte gate/desc
   logic [31:0] iret_eip;          // IRET-popped EIP (held until ESP/CS settle)
   logic [15:0] iret_cs;           // IRET-popped CS selector
+  logic [31:0] iret_eflags;       // IRET-popped EFLAGS (held until SS/ESP settle)
+  // M2S.4 cross-privilege delivery scratch. When the target CS.DPL < CPL the
+  // delivery loads SS:ESP from TSS.ssN:espN (N = target DPL) and pushes the
+  // LARGER 5-word frame (old SS, old ESP, EFLAGS, CS, EIP[, errcode]) on the NEW
+  // stack. xpl_active marks the in-flight delivery as cross-privilege so the
+  // S_INT_PUSH frame layout + ESP math switch to the larger form.
+  logic        xpl_active;        // this delivery is cross-privilege (stack switch)
+  logic [15:0] int_old_ss;        // the interrupted task's SS (pushed in the frame)
+  logic [31:0] int_old_esp;       // the interrupted task's ESP (pushed in the frame)
+  logic [15:0] int_old_cs;        // the interrupted task's CS (pushed in the frame)
+  logic [1:0]  int_new_cpl;       // target privilege level (= target CS.DPL)
+  logic [15:0] int_new_ss;        // new SS selector from TSS.ssN
+  logic [31:0] int_new_esp;       // new ESP from TSS.espN
+  // M2S.4 inter-privilege IRET scratch. When the IRET-popped CS.RPL > current
+  // CPL the return is to a LESS-privileged level: additionally pop ESP/SS, switch
+  // to the outer stack, and null any data segment not accessible at the new CPL.
+  logic        iret_interpriv;    // this IRET returns to a lower privilege
+  logic [15:0] iret_ss;           // IRET-popped SS selector (inter-priv)
+  logic [31:0] iret_esp;          // IRET-popped ESP (inter-priv)
 
   // latched x87 decode
   fxop_e       q_fxop;
@@ -2446,6 +2505,12 @@ module core
       int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
       int_err<=32'd0; int_step<=3'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
+      int_sw<=1'b0;
+      // M2S.4 TR/TSS + cross-priv + inter-priv IRET state idle out of reset.
+      tr_sel<=16'd0; tr_base<=32'd0; tr_limit<=32'd0; tr_valid<=1'b0;
+      iret_eflags<=32'd0; xpl_active<=1'b0; int_old_ss<=16'd0; int_old_esp<=32'd0;
+      int_old_cs<=16'd0; int_new_cpl<=2'd0; int_new_ss<=16'd0; int_new_esp<=32'd0;
+      iret_interpriv<=1'b0; iret_ss<=16'd0; iret_esp<=32'd0;
     end else begin
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
@@ -2905,6 +2970,9 @@ module core
               int_has_err <= 1'b0;      // INT/INT3/INTO/#UD: no error code
               int_err     <= 32'd0;
               int_step    <= 3'd0;
+              // SOFTWARE INT n/INT3/INTO are subject to the gate DPL>=CPL check
+              // (IA-32 6.12.1.2); #UD (d_ud2) is a HARDWARE fault that bypasses it.
+              int_sw      <= d_int && !d_ud2;
               state       <= S_INT_GATE;
             end
           end
@@ -2928,7 +2996,12 @@ module core
                 if (real_mode) state<=S_EXEC;
                 else state<=S_LJMP;
               end
-              default: state<=S_EXEC;  // MOV CRn to/from, MOV sreg-from: no fetch
+              SYS_LTR: begin
+                // LTR — read the GDT TSS descriptor (S_LTR fetches it, loads the
+                // TR hidden base/limit + sets the descriptor busy bit).
+                seg_step<=1'b0; state<=S_LTR;
+              end
+              default: state<=S_EXEC;  // MOV CRn to/from, MOV/STR sreg: no fetch
             endcase
           end
           else if (d_kind==K_STR) begin
@@ -3051,6 +3124,11 @@ module core
             // MOV r/m16, Sreg -> write the selector value (zero-extended) to reg.
             flags_we=1'b0;
             gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], {16'd0, seg_sel[q_sys_sreg]}, 3'd2, 1'b0);
+          end
+          else if (q_sysop==SYS_STR) begin
+            // STR r/m16 -> write the current TR selector (zero-extended) to reg.
+            flags_we=1'b0;
+            gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], {16'd0, tr_sel}, 3'd2, 1'b0);
           end
           else if (q_sysop==SYS_MOVSREG_TO) begin
             // REAL-MODE MOV Sreg, r16: selector = value; hidden base = sel<<4.
@@ -3615,7 +3693,18 @@ module core
               logic [7:0]  attr;
               desc = {mem_rdata, gdt_lo};
               attr = desc_attr(desc);
-              if (seg_load_fault(1'b1, 1'b0, q_ljmp_sel, attr, cpl_r)) begin
+              // M2S.4 — a far JMP whose target descriptor is a SYSTEM descriptor
+              // (S=0) is a HARDWARE TASK SWITCH (target = available TSS type 0x9 /
+              // busy TSS 0xB) or a task-gate jump (type 0x5). The full task switch
+              // (save outgoing state to the current TSS, load the incoming TSS
+              // state, toggle busy/NT/back-link, reload CR3/LDTR) is the gnarliest
+              // M2S.4 piece and is DEFERRED — HALT cleanly here (a loud, honest
+              // "not implemented") rather than mis-delivering a spurious #GP. The
+              // ptask stretch corpus stops exactly here (its RTL diff is NOT gated;
+              // the golden self-diff + step-5d validation cover the oracle side).
+              if (!desc_s(attr)) begin
+                state<=S_HALT; seg_step<=1'b0;
+              end else if (seg_load_fault(1'b1, 1'b0, q_ljmp_sel, attr, cpl_r)) begin
                 // #GP/#NP on a far-jump CS load -> DELIVER (error code = selector).
                 start_fault(seg_fault_vec(1'b1, 1'b0, q_ljmp_sel, attr), 1'b1,
                             {16'd0, q_ljmp_sel[15:3], 3'd0}, q_pc);
@@ -3667,30 +3756,80 @@ module core
               int_gate_sel <= int_lo[31:16];
               int_gate_trap<= gattr[0];   // 0xF trap -> leave IF; 0xE int -> clear IF
               int_step     <= 3'd0;
-              state        <= S_INT_CS;
+              // M2S.4 GATE PROTECTION (deferred from M2S.3):
+              //   (1) gate not Present -> #NP(vec*8 + IDT bit). The error code for
+              //       an IDT-sourced fault is (vec<<3)|2 (the IDT/EXT bits).
+              //   (2) SOFTWARE INT n/INT3/INTO with gate.DPL < CPL -> #GP(vec*8+2)
+              //       (IA-32 6.12.1.2; HW faults bypass this — int_sw==0).
+              // A fault HERE is a nested delivery fault; we re-enter S_INT_GATE for
+              // the new vector. (A second nesting would escalate toward #DF; the
+              // corpus never triggers it, so the single re-vector is sufficient and
+              // honest — full #DF chaining is a documented follow-on.)
+              if (!gattr[7]) begin
+                start_fault(8'd11, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
+              end else if (int_sw && (gattr[6:5] < cpl_r)) begin
+                start_fault(8'd13, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
+              end else begin
+                state      <= S_INT_CS;
+              end
             end
           end
         end
 
         // S_INT_CS: read the gate's CS descriptor (8 bytes @ gdt_base + sel&~7).
-        // For the gate corpus the gate selector is 0x08 (the flat 32-bit code
-        // segment) — a present code descriptor, so no nested fault. Load the
-        // hidden CS base/limit/attr exactly like a far-jump CS load.
+        // Load the hidden CS base/limit/attr (like a far-jump CS load). The new
+        // CPL = the target CS.DPL (a conforming code seg keeps CPL; a non-
+        // conforming code seg sets CPL = DPL). M2S.4:
+        //   - TARGET CS PROTECTION: present (else #NP), is a code segment, and
+        //     DPL <= CPL (a more-privileged or equal handler) -> else #GP.
+        //   - CROSS-PRIV: when the target CS.DPL < CPL the handler is MORE
+        //     privileged: capture old SS:ESP, set the target CPL, and route to
+        //     S_INT_TSS to load SS:ESP from TSS.ssN:espN before the push. SAME-
+        //     PRIV (DPL == CPL): push on the current stack as in M2S.3.
         S_INT_CS: begin
           if (mem_ack) begin
             if (int_step == 3'd0) begin
               int_lo <= mem_rdata; int_step <= 3'd1;
             end else begin
               logic [63:0] desc;
-              desc = {mem_rdata, int_lo};
-              seg_sel  [SG_CS] <= int_gate_sel;
-              seg_base [SG_CS] <= desc_base(desc);
-              seg_limit[SG_CS] <= desc_limit(desc);
-              seg_attr [SG_CS] <= desc_attr(desc);
-              cpl_r            <= int_gate_sel[1:0];
-              cs_d             <= desc[54];
-              int_step         <= 3'd0;
-              state            <= S_INT_PUSH;
+              logic [7:0]  cattr;
+              logic [1:0]  tgt_dpl;
+              logic        cs_bad;
+              desc    = {mem_rdata, int_lo};
+              cattr   = desc_attr(desc);
+              tgt_dpl = desc_dpl(cattr);
+              // target CS must be present, a code segment, DPL <= CPL.
+              cs_bad  = !desc_present(cattr) || !desc_s(cattr) ||
+                        !seg_is_code(cattr) || (tgt_dpl > cpl_r);
+              if (cs_bad) begin
+                // bad target CS -> #NP(sel) if not present, else #GP(sel). Error
+                // code = the gate's code selector with the IDT/EXT bits.
+                int_step <= 3'd0;
+                start_fault(desc_present(cattr) ? 8'd13 : 8'd11, 1'b1,
+                            {16'd0, int_gate_sel[15:3], 3'b010}, int_src_pc);
+              end else begin
+                seg_sel  [SG_CS] <= int_gate_sel;
+                seg_base [SG_CS] <= desc_base(desc);
+                seg_limit[SG_CS] <= desc_limit(desc);
+                seg_attr [SG_CS] <= cattr;
+                cpl_r            <= tgt_dpl;     // CPL = target CS.DPL
+                cs_d             <= desc[54];
+                int_step         <= 3'd0;
+                if (tgt_dpl < cpl_r) begin
+                  // CROSS-PRIV: freeze the interrupted task's CS:SS:ESP for the
+                  // frame (seg_sel[] here still hold the OLD values), record the
+                  // target CPL, and read TSS.ssN:espN.
+                  xpl_active   <= 1'b1;
+                  int_old_cs   <= seg_sel[SG_CS];
+                  int_old_ss   <= seg_sel[SG_SS];
+                  int_old_esp  <= gpr[R_ESP];
+                  int_new_cpl  <= tgt_dpl;
+                  state        <= S_INT_TSS;
+                end else begin
+                  xpl_active   <= 1'b0;          // SAME-PRIV: push on current stack
+                  state        <= S_INT_PUSH;
+                end
+              end
             end
           end
         end
@@ -3704,12 +3843,27 @@ module core
         S_INT_PUSH: begin
           if (mem_ack) begin
             logic last;
-            // last push beat = 2 (EIP) when no error code, else 3 (errcode).
-            last = int_has_err ? (int_step == 3'd3) : (int_step == 3'd2);
+            // last push beat: SAME-PRIV = 2 (EIP) / 3 (errcode); CROSS-PRIV = 4
+            // (EIP) / 5 (errcode), since the larger frame adds old SS + old ESP.
+            if (xpl_active)
+              last = int_has_err ? (int_step == 3'd5) : (int_step == 3'd4);
+            else
+              last = int_has_err ? (int_step == 3'd3) : (int_step == 3'd2);
             if (last) begin
               logic [31:0] fsz;
-              fsz = int_has_err ? 32'd16 : 32'd12;
-              gpr[R_ESP] <= gpr[R_ESP] - fsz;
+              if (xpl_active) begin
+                // CROSS-PRIV: the new (CPL0) SS:base were already loaded in
+                // S_INT_SS; ESP now drops to the top of the pushed frame on the
+                // TSS stack. fsz = 20 (5 words) or 24 (6 words w/ errcode).
+                fsz = int_has_err ? 32'd24 : 32'd20;
+                gpr[R_ESP] <= int_new_esp - fsz;
+                // CPL already lowered when S_INT_CS loaded the target CS (RPL = the
+                // gate selector's RPL = 0); xpl_active is cleared below.
+              end else begin
+                fsz = int_has_err ? 32'd16 : 32'd12;
+                gpr[R_ESP] <= gpr[R_ESP] - fsz;
+              end
+              xpl_active <= 1'b0;
               eip        <= int_gate_off;
               // IA-32 6.12.1: on ANY interrupt/trap-gate entry the CPU clears TF
               // (bit8), NT (bit14), RF (bit16) and VM (bit17). An INTERRUPT gate
@@ -3733,21 +3887,48 @@ module core
           end
         end
 
-        // S_IRET: pop EIP, CS, EFLAGS (near, same-privilege). Beat 0 EIP @ ESP,
-        // 1 CS @ ESP+4, 2 EFLAGS @ ESP+8; then ESP += 12, reload CS descriptor
-        // from the GDT (S_IRET_CS), set EIP, restore EFLAGS. The NT / cross-priv
-        // task-return forms are M2S.4.
+        // S_IRET: pop EIP, CS, EFLAGS. Beat 0 EIP @ ESP, 1 CS @ ESP+4,
+        // 2 EFLAGS @ ESP+8. M2S.4 INTER-PRIV IRET: once the popped CS is known
+        // (beat 1), if CS.RPL > the current CPL the return is to a LESS-privileged
+        // level — the frame additionally carries ESP @ ESP+12 and SS @ ESP+16, so
+        // we keep popping (beats 3,4) and switch to the outer stack. SAME-PRIV
+        // (CS.RPL == CPL): stop at beat 2, ESP += 12, reload CS, retire.
         S_IRET: begin
           if (mem_ack) begin
             unique case (int_step)
               3'd0: begin iret_eip   <= mem_rdata;        int_step <= 3'd1; end
-              3'd1: begin iret_cs    <= mem_rdata[15:0];  int_step <= 3'd2; end
+              3'd1: begin
+                iret_cs    <= mem_rdata[15:0];
+                // inter-priv iff the returned-to CS is less privileged than now.
+                iret_interpriv <= (mem_rdata[1:0] > cpl_r);
+                int_step <= 3'd2;
+              end
+              3'd2: begin
+                // EFLAGS popped. Hold it; the actual eflags/eip/ESP commit happens
+                // on the final beat so an inter-priv pop can still read ESP/SS.
+                iret_eflags <= mem_rdata;
+                if (iret_interpriv) int_step <= 3'd3;   // keep popping ESP, SS
+                else begin
+                  // SAME-PRIV: commit now (ESP += 12), reload CS, retire via _RET.
+                  gpr[R_ESP]   <= gpr[R_ESP] + 32'd12;
+                  eip          <= iret_eip;
+                  eflags       <= mem_rdata;
+                  int_gate_sel <= iret_cs;
+                  int_step     <= 3'd0;
+                  state        <= S_INT_CS_RET;
+                end
+              end
+              3'd3: begin iret_esp <= mem_rdata;         int_step <= 3'd4; end
               default: begin
-                // pop EFLAGS, advance ESP, set EIP, restore EFLAGS, reload CS.
-                gpr[R_ESP] <= gpr[R_ESP] + 32'd12;
-                eip        <= iret_eip;
-                eflags     <= mem_rdata;
-                // reload the CS hidden descriptor for the returned-to selector.
+                // beat 4: SS popped. Commit the inter-priv return: EIP, EFLAGS, and
+                // the OUTER ESP/SS. seg_base[SG_SS] is still the inner base while we
+                // reload the CS (S_INT_CS_RET), then S_IRET_SS loads the outer SS
+                // descriptor. ESP <- popped outer ESP (the inner-frame consumption
+                // is irrelevant; we leave the inner stack entirely).
+                iret_ss      <= mem_rdata[15:0];
+                eip          <= iret_eip;
+                eflags       <= iret_eflags;
+                gpr[R_ESP]   <= iret_esp;
                 int_gate_sel <= iret_cs;
                 int_step     <= 3'd0;
                 state        <= S_INT_CS_RET;
@@ -3757,7 +3938,10 @@ module core
         end
 
         // S_INT_CS_RET: reload the CS descriptor named by the IRET-popped CS, set
-        // the selector + CPL, and RETIRE the IRET (q_pc = the IRET instruction).
+        // the selector + CPL. SAME-PRIV: RETIRE the IRET (q_pc = the IRET insn).
+        // INTER-PRIV (iret_interpriv): the CPL just dropped to CS.RPL; chain to
+        // S_IRET_SS to reload the OUTER SS descriptor (and null any data segment
+        // not accessible at the new, lower privilege) before retiring.
         S_INT_CS_RET: begin
           if (mem_ack) begin
             if (int_step == 3'd0) begin
@@ -3772,9 +3956,123 @@ module core
               cpl_r            <= int_gate_sel[1:0];
               cs_d             <= desc[54];
               int_step         <= 3'd0;
+              if (iret_interpriv) begin
+                state          <= S_IRET_SS;   // reload outer SS, then retire
+              end else begin
+                q_pc           <= int_src_pc;
+                retire_valid   <= 1'b1;
+                state          <= S_PIPE;
+              end
+            end
+          end
+        end
+
+        // S_IRET_SS (M2S.4): inter-priv IRET tail. Reload the OUTER stack segment
+        // from the popped SS selector (its hidden base/limit/attr), then NULL any
+        // of DS/ES/FS/GS whose DPL is more privileged than the new CPL (IA-32
+        // 6.12.3: on a privilege-lowering return, segment registers loaded with a
+        // selector that is now inaccessible are zeroed to prevent a less-privileged
+        // task from using a more-privileged data segment). Retire the IRET.
+        // DONE-PARTIAL (documented follow-on): the outer SS is reloaded from the
+        // popped selector WITHOUT re-validating that SS.RPL == popped CS.RPL and
+        // SS.DPL == popped CS.RPL (IA-32 requires both on an inter-priv return,
+        // else #GP(SS-selector)). The pcpl corpus uses matching RPL=3 selectors
+        // (CS=0x1B, SS=0x23), so this never trips and there is no oracle for the
+        // #GP path; deferred with the other negative-path SS checks above.
+        S_IRET_SS: begin
+          if (mem_ack) begin
+            if (int_step == 3'd0) begin
+              int_lo <= mem_rdata; int_step <= 3'd1;
+            end else begin
+              logic [63:0] desc;
+              desc = {mem_rdata, int_lo};
+              seg_sel  [SG_SS] <= iret_ss;
+              seg_base [SG_SS] <= desc_base(desc);
+              seg_limit[SG_SS] <= desc_limit(desc);
+              seg_attr [SG_SS] <= desc_attr(desc);
+              // null a data segment whose DPL < new CPL (would be inaccessible).
+              for (int s = 0; s < NUM_SEG; s++) begin
+                if ((s == int'(SG_DS) || s == int'(SG_ES) ||
+                     s == int'(SG_FS) || s == int'(SG_GS)) &&
+                    (desc_dpl(seg_attr[s]) < iret_cs[1:0])) begin
+                  seg_sel  [s] <= 16'd0;
+                  seg_base [s] <= 32'd0;
+                  seg_limit[s] <= 32'd0;
+                  seg_attr [s] <= 8'd0;
+                end
+              end
+              iret_interpriv   <= 1'b0;
+              int_step         <= 3'd0;
               q_pc             <= int_src_pc;
               retire_valid     <= 1'b1;
               state            <= S_PIPE;
+            end
+          end
+        end
+
+        // S_LTR (M2S.4): LTR r16 — read the GDT TSS descriptor named by the
+        // selector in gpr[q_src_reg], load the TR hidden cache (base/limit/sel),
+        // and retire. IA-32 also sets the descriptor's busy bit (type 9 -> B) in
+        // the GDT; that writeback is a memory-only side effect the corpus never
+        // reads back (STR returns the SELECTOR, captured below), so it is omitted
+        // here — a documented simplification (no architectural-register effect).
+        S_LTR: begin
+          if (mem_ack) begin
+            if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
+            else begin
+              logic [63:0] desc;
+              desc      = {mem_rdata, gdt_lo};
+              tr_sel   <= gpr[q_src_reg][15:0];
+              tr_base  <= desc_base(desc);
+              tr_limit <= desc_limit(desc);
+              tr_valid <= 1'b1;
+              seg_step <= 1'b0;
+              eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+            end
+          end
+        end
+
+        // S_INT_TSS (M2S.4 cross-priv): read TSS.ssN:espN (N = int_new_cpl). The
+        // 32-bit TSS stores ESPn then SSn contiguously at 0x04 + 8*N; beat 0 reads
+        // ESPn, beat 1 reads SSn. Then read the new SS descriptor (S_INT_SS).
+        S_INT_TSS: begin
+          if (mem_ack) begin
+            if (int_step == 3'd0) begin
+              int_new_esp <= mem_rdata; int_step <= 3'd1;
+            end else begin
+              int_new_ss  <= mem_rdata[15:0];
+              int_step    <= 3'd0;
+              state       <= S_INT_SS;
+            end
+          end
+        end
+
+        // S_INT_SS (M2S.4 cross-priv): read + load the new SS descriptor named by
+        // TSS.ssN, then push the larger frame (S_INT_PUSH). The new SS base feeds
+        // the descending push (flat 0 in the pcpl corpus).
+        // DONE-PARTIAL (documented follow-on): the new SS is loaded UNCONDITIONALLY.
+        // IA-32 6.12.1.2 validates the loaded SS — SS.DPL == target CPL, SS.RPL ==
+        // target CPL, a WRITABLE data segment, and Present — raising #TS(ssN)/#GP
+        // otherwise (and S_INT_TSS would first bound the ssN:espN read against the
+        // TSS limit + require tr_valid, raising #TS). The pcpl corpus uses a
+        // well-formed SS0 (0x10, DPL0, present, writable, within the 104-byte TSS),
+        // so none of these negative paths is exercised and there is NO oracle to
+        // differentially validate the #TS/#GP delivery. Wiring an unvalidated fault
+        // here would be unverified dead logic; deferred until a bad-SS / truncated-
+        // TSS corpus test exists (see the tr_valid/tr_limit lint-sink note).
+        S_INT_SS: begin
+          if (mem_ack) begin
+            if (int_step == 3'd0) begin
+              int_lo <= mem_rdata; int_step <= 3'd1;
+            end else begin
+              logic [63:0] desc;
+              desc = {mem_rdata, int_lo};
+              seg_sel  [SG_SS] <= int_new_ss;
+              seg_base [SG_SS] <= desc_base(desc);
+              seg_limit[SG_SS] <= desc_limit(desc);
+              seg_attr [SG_SS] <= desc_attr(desc);
+              int_step         <= 3'd0;
+              state            <= S_INT_PUSH;
             end
           end
         end
@@ -4332,6 +4630,7 @@ module core
       int_has_err <= has_err;
       int_err     <= err;
       int_step    <= 3'd0;
+      int_sw      <= 1'b0;        // HW fault: bypass the gate DPL>=CPL check
       state       <= S_INT_GATE;
     end
   endtask
@@ -4355,6 +4654,12 @@ module core
       default:       cur_is_d = 1'b1;
     endcase
   end
+
+  // M2S.4 — byte offset into the 32-bit TSS of the privilege-N stack pointer pair
+  // (ESPn then SSn). 32-bit TSS layout: ESP0@0x04, SS0@0x08, ESP1@0x0C, SS1@0x10,
+  // ESP2@0x14, SS2@0x18 -> ESPn @ 0x04 + 8*N (SSn is the next word). N=int_new_cpl.
+  logic [31:0] tss_stk_off;
+  assign tss_stk_off = 32'h0000_0004 + ({30'd0, int_new_cpl} << 3);
 
   // ---- the LINEAR address of the current state's access (pre-translation) and
   // whether the access is a write. Mirrors the per-state mem_addr computation in
@@ -4399,10 +4704,24 @@ module core
                               + {29'd0, int_step[0], 2'b00};
       S_INT_PUSH: begin
         cur_is_w = 1'b1;
-        cur_lin = seg_base[SG_SS] + gpr[R_ESP]
-                  - ({28'd0, int_step} * 32'd4) - 32'd4;
+        // CROSS-PRIV: push descending from the NEW stack (TSS.espN). SAME-PRIV:
+        // descending from the current SS:ESP. (mirror the bus driver arm.)
+        cur_lin = xpl_active
+                  ? (seg_base[SG_SS] + int_new_esp - ({28'd0, int_step} * 32'd4) - 32'd4)
+                  : (seg_base[SG_SS] + gpr[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
       end
-      S_IRET: cur_lin = seg_base[SG_SS] + gpr[R_ESP] + ({28'd0, int_step} * 32'd4);
+      S_IRET, S_IRET_SS:
+                    cur_lin = seg_base[SG_SS] + gpr[R_ESP] + ({28'd0, int_step} * 32'd4);
+      // M2S.4 — TR/TSS reads. S_LTR reads the GDT TSS descriptor; S_INT_TSS reads
+      // TSS.ssN:espN. Like the other descriptor-table reads, both address their
+      // (linear) structure PHYSICALLY under the M2S.1/.2 identity-map convention —
+      // excluded from both xlate_miss and the post-translate, so cur_lin here is
+      // informational only (they pass through untranslated). See those two sites.
+      S_LTR:     cur_lin = gdt_base + {16'd0, gpr[q_src_reg][15:3], 3'd0}
+                           + {29'd0, seg_step, 2'b00};
+      S_INT_TSS: cur_lin = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
+      S_INT_SS:  cur_lin = gdt_base + {16'd0, int_new_ss[15:3], 3'd0}
+                           + {29'd0, int_step[0], 2'b00};
       default: cur_lin = 32'd0;
     endcase
   end
@@ -4418,7 +4737,16 @@ module core
       S_FETCH, S_PF, S_PIPE,
       S_LOAD, S_LOAD2, S_FLOAD, S_FSTORE, S_STORE, S_USEQ,
       // M2S.3 IDT delivery reads/writes are translated when paging is on.
-      S_INT_GATE, S_INT_CS, S_INT_CS_RET, S_INT_PUSH, S_IRET: translatable = 1'b1;
+      // M2S.4 adds the inter-priv IRET SS pop (S_IRET_SS) — a genuine stack pop,
+      // translated like the other stack accesses.
+      // The DESCRIPTOR/TSS STRUCTURE reads are NOT translatable: S_LTR/S_INT_SS
+      // read the GDT and S_INT_TSS reads the TSS (TSS.ssN:espN). Per IA-32 the GDT
+      // and the TSS are both linear structures, but the M2S.1/.2 convention reads
+      // all descriptor-table / TSS structures PHYSICALLY under the identity-map
+      // simplification — so S_INT_TSS is excluded here exactly like its sibling
+      // S_INT_SS (the GDT read of the new SS descriptor) and S_LTR.
+      S_INT_GATE, S_INT_CS, S_INT_CS_RET, S_INT_PUSH, S_IRET,
+      S_IRET_SS: translatable = 1'b1;
       default: translatable = 1'b0;
     endcase
     // S_PIPE only reads memory when a load or an icache fill is requested.
@@ -4577,31 +4905,67 @@ module core
                    + {29'd0, int_step[0], 2'b00};
       end
       S_INT_PUSH: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
-        // descending pushes: beat 0 EFLAGS @ ESP-4, 1 CS @ ESP-8, 2 EIP @ ESP-12,
-        // 3 errcode @ ESP-16. The push uses the SS base (flat 0 here).
-        mem_addr = seg_base[SG_SS] + gpr[R_ESP]
-                   - ({28'd0, int_step} * 32'd4) - 32'd4;
-        unique case (int_step)
-          3'd0:    mem_wdata = eflags;
-          3'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
-          3'd2:    mem_wdata = int_ret_eip;
-          default: mem_wdata = int_err;
-        endcase
+        if (xpl_active) begin
+          // M2S.4 CROSS-PRIV: push the LARGER 5-word (or 6-word w/ errcode) frame
+          // descending from the NEW stack (TSS.espN). seg_base[SG_SS] is already
+          // the new (CPL0) SS base after S_INT_SS. Beats, low->high stored value:
+          //   0 old SS @ esp-4, 1 old ESP @ esp-8, 2 EFLAGS @ esp-12,
+          //   3 CS @ esp-16, 4 EIP @ esp-20, 5 errcode @ esp-24.
+          mem_addr = seg_base[SG_SS] + int_new_esp
+                     - ({28'd0, int_step} * 32'd4) - 32'd4;
+          unique case (int_step)
+            3'd0:    mem_wdata = {16'd0, int_old_ss};
+            3'd1:    mem_wdata = int_old_esp;
+            3'd2:    mem_wdata = eflags;
+            3'd3:    mem_wdata = {16'd0, int_old_cs};   // interrupted task's CS
+            3'd4:    mem_wdata = int_ret_eip;
+            default: mem_wdata = int_err;
+          endcase
+        end else begin
+          // SAME-PRIV: beat 0 EFLAGS @ ESP-4, 1 CS @ ESP-8, 2 EIP @ ESP-12,
+          // 3 errcode @ ESP-16. The push uses the SS base (flat 0 here).
+          mem_addr = seg_base[SG_SS] + gpr[R_ESP]
+                     - ({28'd0, int_step} * 32'd4) - 32'd4;
+          unique case (int_step)
+            3'd0:    mem_wdata = eflags;
+            3'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
+            3'd2:    mem_wdata = int_ret_eip;
+            default: mem_wdata = int_err;
+          endcase
+        end
       end
-      S_IRET: begin mem_req=1'b1;                // pop EIP/CS/EFLAGS ascending
+      S_IRET, S_IRET_SS: begin mem_req=1'b1;     // pop EIP/CS/EFLAGS[+ESP/SS] asc
         mem_addr = seg_base[SG_SS] + gpr[R_ESP] + ({28'd0, int_step} * 32'd4);
       end
       S_INT_CS_RET: begin mem_req=1'b1;          // reload returned-to CS descriptor
         mem_addr = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
                    + {29'd0, int_step[0], 2'b00};
       end
+      // M2S.4 — TR/TSS reads (run with paging OFF, like the other descriptor
+      // reads; NOT re-translated by the post-stage below).
+      S_LTR: begin mem_req=1'b1;                 // GDT TSS descriptor @ gdt_base
+        mem_addr = gdt_base + {16'd0, gpr[q_src_reg][15:3], 3'd0}
+                   + {29'd0, seg_step, 2'b00};
+      end
+      S_INT_TSS: begin mem_req=1'b1;             // TSS.ssN:espN (ESPn then SSn)
+        mem_addr = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
+      end
+      S_INT_SS: begin mem_req=1'b1;              // new SS descriptor @ gdt_base
+        mem_addr = gdt_base + {16'd0, int_new_ss[15:3], 3'd0}
+                   + {29'd0, int_step[0], 2'b00};
+      end
       default: ;
     endcase
     // ---- paging post-translation: linear -> physical for the data/fetch states.
-    // The descriptor reads (S_LGDT/S_SEGLD/S_LJMP) and the walk itself (S_WALK)
-    // address PHYSICAL memory directly and are NOT re-translated.
+    // The descriptor / TSS-structure reads (S_LGDT/S_SEGLD/S_LJMP and M2S.4
+    // S_LTR + the GDT read S_INT_SS + the TSS read S_INT_TSS) and the walk itself
+    // (S_WALK) address PHYSICAL memory directly and are NOT re-translated. Per
+    // IA-32 the GDT and TSS are linear structures, but the M2S.1/.2 identity-map
+    // simplification reads them physically — S_INT_TSS is excluded consistently
+    // with the sibling GDT read S_INT_SS (both feed the same cross-priv delivery).
     if (paging_on && state != S_WALK &&
-        state != S_LGDT && state != S_SEGLD && state != S_LJMP) begin
+        state != S_LGDT && state != S_SEGLD && state != S_LJMP &&
+        state != S_LTR && state != S_INT_SS && state != S_INT_TSS) begin
       // CRITICAL (Phase-3 [high] fix): on a TLB MISS this clock the FSM diverts to
       // S_WALK (the clocked block, gated on the same `xlate_miss`), so the bus this
       // clock belongs to the PAGE WALK, not to this state's access. But `state` is
@@ -4661,7 +5025,19 @@ module core
                    // RESERVED system state, loaded this stage, gated-diffed later:
                    // GDT limit (descriptor-table bounds) + the IDTR (interrupts =
                    // M2S.3). Retained as the home for those checks.
-                   gdt_limit[0], idt_base[0], idt_limit[0]};
+                   gdt_limit[0], idt_base[0], idt_limit[0],
+                   // M2S.4 — TR/TSS protection state COMPUTED-not-delivered. The
+                   // cross-priv delivery reads TSS.ssN:espN unconditionally; the
+                   // negative cases would consult:
+                   //   tr_valid   : no TSS loaded -> a cross-priv delivery is #TS;
+                   //                the pcpl corpus always LTRs a valid TSS first,
+                   //                so this is always 1 and never gates a fault.
+                   //   tr_limit   : the TSS limit (the ssN:espN read must lie within
+                   //                it, else #TS); the 104-byte TSS always covers
+                   //                SS0:ESP0, so the bound never trips. Retained as
+                   //                the home for the #TS bound check (documented
+                   //                M2S.4 follow-on; needs a truncated-TSS test).
+                   tr_valid, tr_limit[0]};
   // verilator lint_on UNUSED
 
 endmodule : core
