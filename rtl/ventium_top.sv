@@ -40,6 +40,11 @@ module ventium_top
     input  logic [31:0] init_eip,
     input  logic [31:0] init_esp,
 
+    // M2S.1: boot-mode select (TB drives 1 in --system mode). 0 = user (the
+    // M0-M6 cold reset to init_eip/init_esp, flat); 1 = system (cold reset at
+    // CS:EIP=F000:FFF0, real mode). Default 0 keeps make verify unchanged.
+    input  logic        boot_mode,
+
     // M4: cycle-mode select (TB drives 1 in --cycle mode). Enables dual U/V
     // issue + pipe/paired reporting. 0 = func mode (M1/M2/M3 gates, single issue).
     input  logic        cycle_mode,
@@ -84,11 +89,16 @@ module ventium_top
   logic [1:0]  core_retire2_pipe;
   arch_state_t core_retire2_state;
 
+  // M2S.1 system retire payload.
+  logic        core_retire_sys;
+  logic [31:0] core_cr0, core_cr2, core_cr3, core_cr4;
+
   core u_core (
       .clk          (clk),
       .rst_n        (rst_n),
       .init_eip     (init_eip),
       .init_esp     (init_esp),
+      .boot_mode    (boot_mode),
       .cycle_mode   (cycle_mode),
       .errata_en    (errata_en),
       .cpu_hung     (cpu_hung),
@@ -117,7 +127,12 @@ module ventium_top
       .retire2_pc        (core_retire2_pc),
       .retire2_state     (core_retire2_state),
       .retire2_pipe      (core_retire2_pipe),
-      .retire2_paired    (core_retire2_paired)
+      .retire2_paired    (core_retire2_paired),
+      .retire_sys        (core_retire_sys),
+      .retire_cr0        (core_cr0),
+      .retire_cr2        (core_cr2),
+      .retire_cr3        (core_cr3),
+      .retire_cr4        (core_cr4)
   );
 
   // ---------------------------------------------------------------------------
@@ -133,6 +148,11 @@ module ventium_top
       retire_n <= 64'd0;
     end else if (core_retire_valid) begin
 `ifndef VTM_NO_DPI
+      // ---- M2S.1 system hook: stash cr0..cr4 keyed by `n` BEFORE vtm_retire ---
+      // Only a system-mode core raises core_retire_sys; the TB (under --system)
+      // drains the stash on the matching vtm_retire and emits the sys fields.
+      if (core_retire_sys)
+        vtm_retire_sys(retire_n, core_cr0, core_cr2, core_cr3, core_cr4);
       // ---- primary (U) retirement -----------------------------------------
       // x87 hook FIRST so the TB stashes the LIVE FP state keyed by `n` before
       // the paired vtm_retire (same `n`) drains+emits the combined record. We

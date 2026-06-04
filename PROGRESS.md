@@ -10,7 +10,9 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | **M0** | Bootstrap: repo skeleton, QEMU golden-trace plugin, trace format, Verilator TB shell, comparator | comparator runs end-to-end on trivial trace | ✅ done (infrastructure proven; RTL still a NOP stub) |
 | M1 | Decoder + single-issue integer functional | integer subset diff-clean vs QEMU (decoder-exhaustive vs XED/Capstone is ongoing toward M2) | ✅ done (integer SUBSET func-equiv vs QEMU on smoke + M1 corpus; not yet decoder-exhaustive) |
 | M2 | User-mode integer ISA completeness (re-scoped; system mode → M2S) | broad integer-ISA corpus diff-clean vs QEMU (user-mode) | ✅ done (28-program corpus func-equiv vs QEMU user-mode; system ops / far CALL-RET / ENTER / mem-operand bit-string + SHLD deferred & HALT; decoder-exhaustive-vs-XED still ongoing) |
-| M2S | System mode: segmentation/paging/TLB/interrupts/SMM (needs system-mode oracle) | system-arch corpus diff-clean | ☐ not started (deferred from M2) |
+| M2S.0 | System-mode ORACLE + harness (qemu-system-i386, gen_trace --system, bare-metal flow, `make verify-sys`) | system golden round-trips + sys-field compare path | ✅ done (qemu-system-i386 built; sys .vtrace = cr0..cr4 + 6 selectors + GPRs + eflags + eip; comparator sys-field intersect path) |
+| M2S.1 | Real→protected mode + protected-mode SEGMENTATION (dual `boot_mode`) | `pseg` RTL sys-diff-clean vs qemu-system golden; `make verify` (user) GREEN | ✅ done-partial (cold reset + real mode + real→PM transition + flat & based GDT segment loads = RTL EQUIVALENT to the golden, 70 records; descriptor protection DECISION computed (present/type/DPL/limit, CPL=CS.RPL) but fault DELIVERY = M2S.3; 16-bit reg addressing modes, paging, IDT delivery, A20/real-mode wrap deferred) |
+| M2S (rest) | Paging/TLB (M2S.2), interrupts/IDT (M2S.3), TSS (M2S.4), SMM (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
@@ -39,6 +41,94 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — M2S.1 done-partial: real→protected mode + protected-mode SEGMENTATION
+
+The first **system-mode RTL** stage. The core now boots from the architectural
+**cold-reset vector** (real mode, `CS:EIP=F000:FFF0`), runs real-mode code, makes
+the **real→protected transition** (set `CR0.PE`, then a far jump that loads CS
+from the GDT and switches to 32-bit PM), and does **protected-mode segmentation**
+(MOV-Sreg / far-jump read the 8-byte GDT descriptor and load the hidden
+base/limit/attr). Gated **differentially** against the `qemu-system-i386` golden
+(M2S.0). `make verify-sys` runs the `pseg` segmentation test as a REAL RTL
+sys-diff (RTL `--system` trace vs the golden, 70 records, **EQUIVALENT** across
+cr0..cr4 + the 6 selectors + GPRs + eflags + eip); `pmode` (paging = M2S.2) keeps
+its golden self-diff and the RTL sys-diff is correctly **SKIPPED**.
+
+**Dual `boot_mode` (the crux) — user mode stays bit-for-bit GREEN.** A single
+registered `sys_mode` bit selects the reset: `boot_mode=user` (DEFAULT, M0–M6
+unchanged) resets to the TB-supplied `init_eip`/`init_esp` with flat 4 GB segments;
+`boot_mode=system` cold-resets to the qemu-system state (`cr0=0x60000010`,
+`EDX=0x663`, `eflags=0x2`, real mode). Every M2S addition is gated behind
+`sys_mode`/`real_mode` so the user path is numerically identical — `make verify`
+is **GREEN and unchanged** (every program diff-clean vs QEMU + every M4/M5 cycle
+band met), the HARD requirement.
+
+**What works (RTL EQUIVALENT to the qemu-system golden):**
+- Cold reset + 16-bit real mode (linear = (seg<<4)+offset), `LGDT`/`LIDT`, MOV
+  to/from CR0, the `66 ljmp ptr16:32` transition far-jump.
+- Real→PM transition as two single-step-atomic retires (CR0.PE 0→1, then the
+  CS far-jump) matching the golden.
+- Protected-mode segment loads: flat code/data (0x08/0x10), a **based** data
+  segment (0x18, hidden base 0x20000), a second based segment (0x28, base
+  0x40000), and a read-only data segment (0x20) — hidden base/limit/attr loaded
+  from the descriptor; PM linear = `seg.base + offset`. The hidden base is pinned
+  **indirectly** (the gdbstub does not expose it) by flat read-backs of based
+  stores; a **cross-base** check (two differently-based segments) catches
+  base-extraction bugs that corrupt descriptors by different amounts.
+
+**Phase-3 adversarial review — found + fixed (each probed live):**
+- **[med] Protection checks were claimed but not computed.** The S_SEGLD/S_LJMP
+  comments said present/type/DPL checks "are computed" while nothing was — and no
+  CPL existed. **Fixed:** added `desc_present/dpl/s/type` + a real
+  `seg_load_fault()` decision (null-SS/CS, P→#NP, S=0→#GP, SS=writable-data &
+  DPL==CPL==RPL, DS/ES/FS/GS readable & max(CPL,RPL)≤DPL, CS=code), a per-access
+  `seg_off_over_limit` limit decision, and `cpl_r` derived from CS.RPL on the far
+  jump. The DECISION is fully computed; fault DELIVERY (vectoring) is M2S.3, so a
+  raised decision HALTs loudly (never silently mis-loads). **Proven live:** forcing
+  the CS descriptor not-present makes the far jump HALT at record 25 → gate RED;
+  the clean pseg never trips it → GREEN. Comments rewritten to match reality.
+- **[med] Hidden-base check masked a uniform base offset.** The flat read-back
+  through ES cancels a base error applied IDENTICALLY to every descriptor (both
+  the based store and the ES read-back shift together — a fundamental limit of any
+  in-guest round-trip, since x86 always adds a base; only a direct hidden-base diff
+  via HMP, deferred, catches it). **Strengthened:** added a second based segment
+  (0x28, base 0x40000) + a CROSS-BASE store/read, which catches the realistic
+  base-EXTRACTION bug class (different descriptors corrupted by different amounts).
+  **Proven live:** a `desc_base` that drops base[23:16] now diverges the based
+  read-backs (ebp/esi) → gate RED. The uniform-additive class is documented as the
+  residual, awaiting the deferred HMP hidden-base diff.
+- **[low] Stale gate docs.** The Makefile `verify-sys` comment said "the RTL is
+  NOT yet involved" — stale; step 7 builds the TB and runs the real RTL sys-diff.
+  Corrected the Makefile + run-sys-golden.sh comments.
+- **[low] Real-mode A20/20-bit wrap** unmodeled — full 32-bit fetch add, correct
+  for A20-enabled (the bootstrap's qemu-system default); documented as a deferred
+  corner (pseg never wraps).
+- **[low] Reset CS.base = 0x000F0000** (low alias) not the architectural
+  0xFFFF0000 — equivalent for the `-bios` low-alias image layout (qemu reports
+  cs=0xf000, fetch hits the correct reset bytes); documented simplification, kept.
+
+**Deferred (genuinely-gnarly corners, consistent with done-partial; pseg avoids
+them):** descriptor protection-fault DELIVERY (#GP/#NP/#SS vectoring through the
+IDT) = M2S.3 (the DECISION is computed now, delivery is not); the 16-bit
+register addressing modes ([bx+si] etc.) — only the [disp16] direct form the
+bootstrap uses is implemented (others HALT loudly); **paging** (CR0.PG/CR3/CR4.PSE)
+= M2S.2 (the `pmode` test keeps golden self-diff only; the RTL `--system` sys-diff
+is correctly SKIPPED for it); IDTR is loaded by LIDT but interrupt/IDT delivery =
+M2S.3; segment hidden base/limit/attr are exercised INDIRECTLY via addressing (the
+gdbstub does not expose them — a direct diff awaits HMP `info registers` sourcing).
+
+**Lint clean** (`verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSED`, 0
+warn/err). **Files:** `rtl/core/core.sv` (seg_attr/cpl_r state + desc_*/seg_load_fault
+helpers + S_SEGLD/S_LJMP protection decisions + limit decision + comment fixes),
+`verif/sys/tests/pseg/pseg.S` (+ second based descriptor + cross-base check),
+`verif/sys/tests/pseg/manifest.json`, `verif/sys/tests/pseg/pseg.sys.vtrace.golden`
+(regenerated snapshot), `Makefile` + `verif/sys/run-sys-golden.sh` (gate-doc fixes).
+
+**Next:** **M2S.2** — paging + TLBs + MMU (CR0.PG/CR3, the 2-level page walk,
+`rtl/mem/tlb.sv`, #PF + error code + CR2, A/D bits); the `pmode` test becomes its
+differential gate. (M2S.3 then adds the fault-DELIVERY pipeline the M2S.1
+protection decisions feed into.)
 
 ### 2026-06-04 — M6 done (PARTIAL): documented P5/P54C errata behind a stepping flag
 

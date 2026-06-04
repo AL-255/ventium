@@ -106,5 +106,56 @@ else:
 print("  VALID: system golden is well-formed and captures the mode transitions")
 PYEOF
 
+# --- 6. comparator sys-diff path: golden self-diff sanity ----------------------
+# Confirms the comparator's sys-field path round-trips: the golden must self-diff
+# EQUIVALENT under compare.py --mode func with BOTH sides sys:true, so the cr0 +
+# selectors + GPRs + eflags + eip gated compare (and the segment-hidden
+# intersection) is exercised end-to-end. The REAL RTL differential (RTL trace vs
+# golden) follows in step 7 for the tests the M2S.1 RTL supports (pseg).
+say "6. comparator sys-diff path: golden self-diff must be EQUIVALENT"
+COMPARE="$REPO/verif/diff/compare.py"
+set +e
+DIFF_OUT="$("$PY" "$COMPARE" --mode func "$OUT" "$OUT" 2>/dev/null)"
+DIFF_RC=$?
+set -e
+echo "$DIFF_OUT" | sed 's/^/  /'
+[[ "$DIFF_RC" == "0" ]] || { echo "FATAL: golden self-diff did not exit 0 (sys path broken)"; exit 1; }
+echo "$DIFF_OUT" | grep -q "sys compared: True" \
+    || { echo "FATAL: comparator did not engage the sys-field compare (sys compared != True)"; exit 1; }
+echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVALENT"
+
+# --- 7. RTL (Producer C) sys-diff vs the golden (M2S.1 Phase 2) -----------------
+# For tests the RTL system-mode core supports (pseg = real mode + real->protected
+# + protected-mode SEGMENTATION; NO paging), build the Verilator TB, run it in
+# --system mode on the SAME bare-metal image, and assert compare.py --mode func
+# (sys) is EQUIVALENT to the golden across cr0..cr4 + the 6 selectors + GPRs +
+# eflags + eip. The pmode test enables paging (CR0.PG/CR3/CR4.PSE = M2S.2), which
+# the M2S.1 RTL does not yet model, so it keeps the golden self-diff only and the
+# RTL sys-diff is SKIPPED (reported) rather than forced.
+RTL_SYS_TESTS="pseg"
+if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
+  say "7. RTL (Producer C) --system sys-diff vs golden (M2S.1 segmentation gate)"
+  TB="$REPO/verif/tb/obj_dir/tb_ventium"
+  make -C "$REPO/verif/tb" rtl >/dev/null 2>&1
+  [[ -x "$TB" ]] || { echo "FATAL: RTL TB $TB not built"; exit 1; }
+  RTL_OUT="$OUTDIR/$TEST.rtl.sys.vtrace"
+  # --max-insn matches the golden length cap; --quiesce generous so the boot's
+  # icache fills + descriptor reads do not trip a premature idle stop.
+  "$TB" --image "$IMG" --system --out "$RTL_OUT" \
+      --max-insn "$MAXI" --quiesce 400 >/dev/null 2>&1 || true
+  echo "  RTL sys trace: $RTL_OUT ($(wc -l < "$RTL_OUT") lines)"
+  set +e
+  RDIFF_OUT="$("$PY" "$COMPARE" --mode func --all --max-report 8 "$OUT" "$RTL_OUT" 2>/dev/null)"
+  RDIFF_RC=$?
+  set -e
+  echo "$RDIFF_OUT" | sed 's/^/  /'
+  [[ "$RDIFF_RC" == "0" ]] || { echo "FATAL: RTL sys-diff DIVERGENT vs golden"; exit 1; }
+  echo "  RTL-SYS-DIFF-OK: RTL system-mode trace EQUIVALENT to the golden"
+  echo "                   (cr0..cr4 + selectors + GPRs + eflags + eip; real->PM + segmentation)"
+else
+  say "7. RTL --system sys-diff: SKIPPED for '$TEST'"
+  echo "  ($TEST exercises paging = M2S.2, not yet in the M2S.1 RTL; golden self-diff only)"
+fi
+
 echo
 echo "SYS-GOLDEN-OK  ($OUT)"

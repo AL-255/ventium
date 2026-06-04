@@ -77,30 +77,35 @@ _EXPECTED_PRODUCERS = {
 
 
 def validate_headers(mode: str, a: tracefmt.Trace, c: tracefmt.Trace,
-                     warn) -> tuple[bool, bool]:
+                     warn) -> tuple[bool, bool, bool]:
     """Validate both headers against `mode`.
 
-    Returns (ok, x87_both):
+    Returns (ok, x87_both, sys_both):
       ok        -- True if headers are usable (else caller should exit 2)
       x87_both  -- True iff *both* func headers declare x87 (only meaningful
                    for func mode); when exactly one declares x87 we warn and
                    compare only the common fields.
+      sys_both  -- True iff *both* func headers declare sys:true (M2S). When set,
+                   the system control registers (cr0/cr2/cr3/cr4) join the compare
+                   and the segment-hidden fields are diffed only where present in
+                   BOTH traces (see compare_func). When exactly one declares sys
+                   we warn and fall back to the user-mode integer/seg compare.
     """
     if not _vtrace_ok(a.hdr):
         warn(f"A: not a vtrace v{tracefmt.VERSION} header: {a.hdr!r}")
-        return False, False
+        return False, False, False
     if not _vtrace_ok(c.hdr):
         warn(f"C: not a vtrace v{tracefmt.VERSION} header: {c.hdr!r}")
-        return False, False
+        return False, False, False
 
     # Modes must match the requested --mode (this is a hard error: comparing a
     # func trace as cycle is meaningless and counts as malformed input).
     if a.mode != mode:
         warn(f"A mode {a.mode!r} != requested --mode {mode!r}")
-        return False, False
+        return False, False, False
     if c.mode != mode:
         warn(f"C mode {c.mode!r} != requested --mode {mode!r}")
-        return False, False
+        return False, False, False
 
     # Producer mismatch is only a soft warning (spec: "warn (not fail)").
     exp_a, exp_c = _EXPECTED_PRODUCERS[mode]
@@ -116,7 +121,15 @@ def validate_headers(mode: str, a: tracefmt.Trace, c: tracefmt.Trace,
     if mode == "func" and (a.x87 != c.x87):
         warn(f"x87 header mismatch (A x87={a.x87}, C x87={c.x87}); "
              "comparing common integer/seg fields only")
-    return True, x87_both
+
+    # sys (M2S): compare the system fields only when BOTH say sys. If exactly one
+    # does, warn and fall back to the user-mode integer/seg compare (so a user
+    # trace vs a sys trace is never silently wrong). Only meaningful in func mode.
+    sys_both = bool(a.sys and c.sys)
+    if mode == "func" and (a.sys != c.sys):
+        warn(f"sys header mismatch (A sys={a.sys}, C sys={c.sys}); "
+             "comparing common user-mode integer/seg fields only")
+    return True, x87_both, sys_both
 
 
 # --- functional-mode compare -------------------------------------------------
@@ -130,12 +143,46 @@ def _eflags_equal(a_hex: str, c_hex: str, base_mask: int, mnemonic: str | None):
     return (((a ^ c) & mask) == 0), mask
 
 
+def _sys_keys_intersection(keys: list, ra: list, rc: list) -> list:
+    """For a sys (M2S) compare, drop any *system* field absent from EITHER trace.
+
+    The control-register block (cr0/cr2/cr3/cr4) is always present in both sys
+    producers and stays in `keys`.  The segment-hidden descriptor fields
+    (<seg>_base/_limit/_attr) are RESERVED and optional: the gdbstub golden emits
+    only a subset (e.g. ss_base..gs_base) and the RTL producer may emit a
+    different subset, so per docs/trace-format.md §2.4 we INTERSECT — a hidden
+    field a producer legitimately omits must never force a miss.  We append the
+    hidden fields that appear in *both* traces (in canonical SYS_SEG_HIDDEN order)
+    and leave the user-mode + CRx keys untouched.
+
+    Only the system-specific fields are intersected: the user-mode fields (pc,
+    GPRs, eflags, selectors, x87, CRx) remain mandatory — their absence on one
+    side is still a real divergence, exactly as in user-mode compare.
+    """
+    # Hidden fields present in EVERY record of BOTH traces (a producer that emits
+    # a hidden field must emit it consistently; "present in both" = present in the
+    # first record of each, which the well-formedness check guarantees uniform).
+    def _has(recs, k):
+        return bool(recs) and k in recs[0]
+    extra = [k for k in tracefmt.SYS_SEG_HIDDEN
+             if _has(ra, k) and _has(rc, k)]
+    return keys + extra
+
+
 def compare_func(a: tracefmt.Trace, c: tracefmt.Trace, x87_both: bool,
                  eflags_mask: int, show_all: bool, max_report: int,
-                 out) -> int:
-    """Functional-mode compare. Returns an exit code (0/1/2)."""
-    keys = tracefmt.func_compare_keys(x87_both)
+                 out, sys_both: bool = False) -> int:
+    """Functional-mode compare. Returns an exit code (0/1/2).
+
+    When `sys_both` is set (both headers sys:true, M2S), the system control
+    registers (cr0/cr2/cr3/cr4) are compared alongside the user-mode fields, and
+    any segment-hidden descriptor field present in BOTH traces is compared too
+    (reserved fields a producer omits are intersected out, never a miss).
+    """
+    keys = tracefmt.func_compare_keys(x87_both, sys=sys_both)
     ra, rc = a.records, c.records
+    if sys_both:
+        keys = _sys_keys_intersection(keys, ra, rc)
     n_common = min(len(ra), len(rc))
 
     divergences = []  # list of (n, pc, field, expected, got)
@@ -204,7 +251,7 @@ def compare_func(a: tracefmt.Trace, c: tracefmt.Trace, x87_both: bool,
     print(f"A records: {len(ra)}   C records: {len(rc)}   "
           f"compared: {n_common}", file=out)
     print(f"eflags base mask: {tracefmt.hx(eflags_mask, 32)}   "
-          f"x87 compared: {x87_both}", file=out)
+          f"x87 compared: {x87_both}   sys compared: {sys_both}", file=out)
 
     if not divergences and not len_mismatch:
         print(f"RESULT: EQUIVALENT ({n_common} records match)", file=out)
@@ -389,7 +436,7 @@ def main(argv=None) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
 
-    ok, x87_both = validate_headers(args.mode, a, c, warn)
+    ok, x87_both, sys_both = validate_headers(args.mode, a, c, warn)
     if not ok:
         print("ERROR: header validation failed (see warnings) -> "
               "malformed/incompatible input", file=sys.stderr)
@@ -400,7 +447,7 @@ def main(argv=None) -> int:
 
     if args.mode == "func":
         return compare_func(a, c, x87_both, eflags_mask, args.all,
-                            args.max_report, sys.stdout)
+                            args.max_report, sys.stdout, sys_both=sys_both)
     else:
         return compare_cycle(a, c, args.tol_pct, args.all,
                              args.max_report, sys.stdout)

@@ -139,6 +139,24 @@ package ventium_pkg;
       input longint unsigned n,        // SAME retire seq as the paired vtm_retire
       input int     unsigned pipe,     // 0=U, 1=V, 2=none
       input int     unsigned paired);  // 0/1: issued paired with its sibling
+
+  // ---------------------------------------------------------------------------
+  // DPI system retire callback — the M2S.1 SYSTEM-state contract.
+  //
+  // A SYSTEM-mode core (boot_mode=1) calls vtm_retire_sys(...) with the SAME `n`
+  // as the paired vtm_retire, carrying the post-commit control registers
+  // cr0/cr2/cr3/cr4. The TB stashes them keyed by `n`; the matching vtm_retire
+  // (under --system) drains them and emits the cr0..cr4 fields plus the
+  // selectors (already in vtm_retire), and the header declares sys:true. In user
+  // mode the core never calls this, so the user trace is unchanged. Segment
+  // hidden base/limit/attr are NOT carried here (the gdbstub golden does not
+  // expose them; they are exercised indirectly via addressing, m2s1 spec §Trace).
+  //
+  // Guarded by VTM_NO_DPI alongside the others so the core lints standalone.
+  import "DPI-C" context function void vtm_retire_sys(
+      input longint unsigned n,        // SAME retire seq as the paired vtm_retire
+      input int     unsigned cr0, input int unsigned cr2,
+      input int     unsigned cr3, input int unsigned cr4);
 `endif
 
 endpackage : ventium_pkg

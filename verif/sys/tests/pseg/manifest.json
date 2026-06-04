@@ -1,0 +1,21 @@
+{
+  "name": "pseg",
+  "kind": "system",
+  "src": "pseg.S",
+  "linker": "pseg.ld",
+  "image": "pseg.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 200,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "segment loads (DS/ES/SS/FS/GS <- flat 0x10, DS <- based 0x18, DS <- based#2 0x28, DS <- read-only 0x20)"
+  ],
+  "description": "Bare-metal real->protected SEGMENTATION-only demonstrator for the M2S.1 gate (NO paging). Boots from the F000:FFF0 reset vector in 16-bit real mode, builds a GDT (null + flat code 0x08 + flat data 0x10 + based data 0x18 base=0x20000 limit=64KiB + read-only data 0x20 + based#2 data 0x28 base=0x40000 limit=64KiB), sets CR0.PE and far-jumps into the 32-bit flat code segment, loads the data selectors, does flat segment-relative loads/stores (push/pop through SS), then exercises segmentation proper: loads DS with the based selector (hidden base 0x20000) and stores/loads through it, reads the values back FLAT via ES to indirectly pin the hidden base, does an in-bounds top-of-segment access (offset 0xFFFC) that does NOT fault, and a benign type case (read a read-only data segment, never write it). A CROSS-BASE check then stores through a SECOND based segment (0x28, base 0x40000) at the same offset and reads it back flat, catching base-extraction bugs that corrupt different descriptors by different amounts (a uniform-additive base error across ALL segments stays invisible to any in-guest round-trip and awaits the deferred HMP hidden-base diff). The descriptor-load protection DECISION (present/type/DPL + null-SS/CS, CPL=CS.RPL) and the per-access limit DECISION are computed in the RTL (seg_load_fault / seg_off_over_limit); the clean descriptors here never trip them, so the test does not fault (fault DELIVERY is M2S.3). CR0.PG stays 0; CR3/CR4 untouched. Exits via out 0xf4 (isa-debug-exit -> qemu status 133)."
+}

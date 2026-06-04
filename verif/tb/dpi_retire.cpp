@@ -74,6 +74,10 @@ extern "C" void vtm_retire_x87(
 // vtm_retire_cycle (M4): pipe 0=U/1=V/2=none, paired 0/1. int unsigned -> uint32.
 extern "C" void vtm_retire_cycle(
     unsigned long long n, unsigned int pipe, unsigned int paired);
+// vtm_retire_sys (M2S.1): cr0..cr4 as int unsigned (uint32).
+extern "C" void vtm_retire_sys(
+    unsigned long long n, unsigned int cr0, unsigned int cr2,
+    unsigned int cr3, unsigned int cr4);
 #endif
 
 // x87 retire (M3): the core calls this with the SAME `n` as the paired
@@ -121,6 +125,19 @@ extern "C" void vtm_retire_cycle(
     ci.pipe   = (unsigned char)(pipe > 2u ? 2u : pipe);  // clamp to {0,1,2}
     ci.paired = (paired != 0u);
     g_trace->stash_cycle(n, ci);
+}
+
+// system retire (M2S.1): the core calls this with the SAME `n` as the paired
+// vtm_retire, carrying the post-commit cr0..cr4. We stash it keyed by `n`; the
+// paired vtm_retire drains it (under sys:true) and emits the cr0..cr4 fields.
+extern "C" void vtm_retire_sys(
+    unsigned long long n, unsigned int cr0, unsigned int cr2,
+    unsigned int cr3, unsigned int cr4) {
+    using namespace ventium;
+    if (!g_trace) return;
+    SysState s;
+    s.cr0 = cr0; s.cr2 = cr2; s.cr3 = cr3; s.cr4 = cr4;
+    g_trace->stash_sys(n, s);
 }
 
 extern "C" void vtm_retire(
@@ -213,6 +230,22 @@ extern "C" void vtm_retire(
             (unsigned)s.fctrl, (unsigned)s.fstat, (unsigned)s.ftag,
             0u, 0u, 0u, 0u, 0u);
         (void)present;  // absence already yields zeros; nothing else to do
+    }
+
+    // M2S.1 system fields (only when the trace header declares sys:true). Drain
+    // the cr0..cr4 the core stashed via vtm_retire_sys for this same `n`; if the
+    // core did not call it (e.g. a user-mode core), emit zeros (well-formed).
+    // The 6 selectors are already emitted above (cs..gs); the comparator's sys
+    // path compares cr0..cr4 + selectors + GPRs + eflags + eip. Field names +
+    // 0x%08x formatting MUST match tracefmt.py (SYS_CR).
+    if (g_trace->sys()) {
+        bool present = false;
+        SysState s = g_trace->take_sys((uint64_t)n, &present);
+        std::fprintf(g_trace->fp(),
+            ",\"cr0\":\"0x%08x\",\"cr2\":\"0x%08x\","
+            "\"cr3\":\"0x%08x\",\"cr4\":\"0x%08x\"",
+            s.cr0, s.cr2, s.cr3, s.cr4);
+        (void)present;
     }
 
     std::fprintf(g_trace->fp(), "}\n");

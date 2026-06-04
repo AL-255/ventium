@@ -63,6 +63,16 @@ struct CycleInfo {
     bool    paired = false;
 };
 
+// M2S.1: post-commit system control registers the core reports via
+// vtm_retire_sys. Emitted (with the selectors that vtm_retire already carries)
+// when the trace header declares sys:true. cr0 PE=bit0 .. PG=bit31.
+struct SysState {
+    uint32_t cr0 = 0;
+    uint32_t cr2 = 0;
+    uint32_t cr3 = 0;
+    uint32_t cr4 = 0;
+};
+
 class TraceWriter {
 public:
     TraceWriter() = default;
@@ -76,19 +86,23 @@ public:
     // `x87` selects whether func records carry the x87 fields (trace-format §2.2).
     // Returns true on success.
     bool open(const std::string& path, const std::string& note, bool x87,
-              bool cycle = false) {
+              bool cycle = false, bool sys = false) {
         fp_  = std::fopen(path.c_str(), "wb");
         if (!fp_) return false;
         cycle_ = cycle;
         x87_   = cycle ? false : x87;   // cycle records never carry x87 fields
+        sys_   = cycle ? false : sys;   // sys is a func-mode superset (M2S.1)
         // note is free-form (trace-format.md §1) and ignored by the comparator;
         // it must not contain a double-quote — tb_main passes only simple text.
+        // M2S.1: emit "sys":true (like x87) only when set, so existing user/x87
+        // traces are byte-for-byte identical.
         std::fprintf(fp_,
             "{\"vtrace\":1,\"producer\":\"rtl\",\"mode\":\"%s\","
-            "\"x87\":%s,\"note\":\"%s\"}\n",
+            "\"x87\":%s,\"note\":\"%s\"%s}\n",
             cycle_ ? "cycle" : "func",
             x87_ ? "true" : "false",
-            note.c_str());
+            note.c_str(),
+            sys_ ? ",\"sys\":true" : "");
         return true;
     }
 
@@ -104,6 +118,21 @@ public:
     FILE*  fp()    const { return fp_; }
     bool   x87()   const { return x87_; }
     bool   cycle() const { return cycle_; }
+    bool   sys()   const { return sys_; }
+
+    // --- M2S.1 system stash --------------------------------------------------
+    // vtm_retire_sys stashes cr0..cr4 for sequence `n`; the matching vtm_retire
+    // drains it via take_sys(n). Same single-outstanding pattern as x87 (the
+    // core calls vtm_retire_sys immediately before vtm_retire for the same n).
+    void stash_sys(uint64_t n, const SysState& s) {
+        sys_pending_ = s; sys_pending_n_ = n; sys_pending_set_ = true;
+    }
+    SysState take_sys(uint64_t n, bool* present) {
+        if (sys_pending_set_ && sys_pending_n_ == n) {
+            sys_pending_set_ = false; *present = true; return sys_pending_;
+        }
+        *present = false; return SysState{};
+    }
 
     // --- cycle clock + stash (M4) -------------------------------------------
     // tb_main advances the writer's view of the core-clock counter once per
@@ -188,10 +217,15 @@ private:
     uint64_t retired_ = 0;
     bool     x87_     = false;
     bool     cycle_   = false;
+    bool     sys_     = false;
 
     X87State x87_pending_;
     uint64_t x87_pending_n_   = 0;
     bool     x87_pending_set_ = false;
+
+    SysState sys_pending_;
+    uint64_t sys_pending_n_   = 0;
+    bool     sys_pending_set_ = false;
 
     // cycle-mode: TB-owned clock counter + 2-slot {pipe,paired} stash.
     uint64_t  clock_ = 0;
