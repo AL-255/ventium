@@ -38,6 +38,17 @@ module core
     input  logic [31:0] init_eip,
     input  logic [31:0] init_esp,
 
+    // M2S.1 (docs/m2s1-segmentation-spec.md "dual-boot-mode"): selects the COLD
+    // RESET state. DEFAULT 0 = USER (M0-M6 unchanged: reset to init_eip/init_esp,
+    // flat 4 GB segments, the post-loader linux-user state). 1 = SYSTEM: cold
+    // reset matching qemu-system-i386 (CS:EIP=F000:FFF0, REAL mode CR0.PE=0,
+    // cr0=0x60000010, EDX=0x00000663, eflags=0x00000002, real-mode selectors).
+    // The whole system-mode segmentation datapath below is gated on this input;
+    // with boot_mode==0 every segment base is 0 and real_mode is 0, so the
+    // fetch/data addressing reduces EXACTLY to the flat user-mode core and
+    // `make verify` is bit-for-bit unaffected.
+    input  logic        boot_mode,
+
     // M4: when high, the core's fast path may issue two simple instructions per
     // clock (dual U/V issue) and reports pipe/paired for the cycle trace. When
     // low (the M1/M2/M3 functional gates), the fast path retires ONE instruction
@@ -104,7 +115,18 @@ module core
     output logic [31:0] retire2_pc,
     output arch_state_t retire2_state,
     output logic [1:0]  retire2_pipe,        // pipe for the second insn (V=1)
-    output logic        retire2_paired       // second insn paired with the first (1)
+    output logic        retire2_paired,      // second insn paired with the first (1)
+
+    // ------------------------------------------------------------------------
+    // M2S.1 system-mode retire payload (docs/m2s1-segmentation-spec.md "TB sys
+    // emission"). Valid in the same clock as retire_valid. retire_sys is high
+    // only for a system-mode core (boot_mode=1); ventium_top then calls the
+    // vtm_retire_sys DPI hook carrying cr0..cr4 (and the selectors, which are
+    // already in retire_state). In user mode retire_sys stays low and these are
+    // never read, so the user trace is byte-for-byte identical.
+    // ------------------------------------------------------------------------
+    output logic        retire_sys,          // this retirement carries system state
+    output logic [31:0] retire_cr0, retire_cr2, retire_cr3, retire_cr4
 );
 
   // ===========================================================================
@@ -113,6 +135,53 @@ module core
   logic [31:0] eip;
   logic [31:0] eflags;
   logic [31:0] gpr [NUM_GPR];   // eax ecx edx ebx esp ebp esi edi
+
+  // ===========================================================================
+  // M2S.1 system-mode architectural state (docs/m2s1-segmentation-spec.md).
+  // ALL of this is INERT when boot_mode==0 (user): the selectors mirror the
+  // SEG_* params, every base is 0, real_mode is 0, and creg0/creg2/3/4 are not
+  // emitted. The addressing functions below fold the bases in additively, so a
+  // base of 0 is the unchanged flat user-mode address. sys_mode latches
+  // boot_mode at reset so the gating is a single registered bit.
+  // ===========================================================================
+  logic        sys_mode;          // latched boot_mode (1 = system-mode core)
+  logic [31:0] creg0;             // CR0 (PE bit0, ..., PG bit31). Only PE active.
+  logic [31:0] creg2, creg3, creg4;   // present; untouched this stage (paging=M2S.2)
+  // Segment selectors (visible part). Index order = SEG_KEYS: cs ss ds es fs gs.
+  logic [15:0] seg_sel  [NUM_SEG];
+  // Hidden descriptor cache: base + limit (byte granular, expanded) + the access
+  // byte (P/DPL/S/type) per segment. limit/attr are the home for the protection
+  // checks computed at descriptor load (seg_load_fault); the pseg corpus loads
+  // only clean descriptors so the decision is always "no fault" — but it IS
+  // computed (NOT just declared), per docs/m2s1-segmentation-spec §3.
+  logic [31:0] seg_base [NUM_SEG];
+  logic [31:0] seg_limit[NUM_SEG];   // hidden limit (byte granular; limit checks)
+  logic [7:0]  seg_attr [NUM_SEG];   // descriptor access byte: P|DPL[1:0]|S|type[3:0]
+  // CPL = the current privilege level, derived from CS.RPL on a CS load (far
+  // jump). Reset/real mode: 0. Used as the EFFECTIVE privilege in the DPL checks.
+  logic [1:0]  cpl_r;
+  // GDTR / IDTR (loaded by LGDT/LIDT).
+  logic [31:0] gdt_base;
+  logic [15:0] gdt_limit;
+  logic [31:0] idt_base;
+  logic [15:0] idt_limit;
+  // real_mode = system-mode core with CR0.PE==0. In real mode the addressing is
+  // linear = (sel<<4)+offset (and the CS default operand size is 16-bit).
+  logic        real_mode;
+  assign real_mode = sys_mode && !creg0[0];
+
+  // cs_d = the CS descriptor D/B bit (code default operand+address size, 1=32).
+  // It governs the EFFECTIVE operand/address size default, NOT real_mode: right
+  // after CR0.PE=1 but BEFORE the far jump loads a 32-bit CS, the segment is
+  // still 16-bit (CS.D=0), so the bootstrap's `66 ljmp ptr16:32` correctly means
+  // a 32-bit offset. Reset/real-mode CS.D=0; a PM far jump to a D=1 code segment
+  // sets it. def16 = "16-bit is the default" = system-mode core with CS.D==0.
+  logic        cs_d;
+  logic        def16;
+  assign def16 = sys_mode && !cs_d;
+
+  // SEG_KEYS index constants (cs ss ds es fs gs) for the seg_* arrays.
+  localparam int SG_CS = 0, SG_SS = 1, SG_DS = 2, SG_ES = 3, SG_FS = 4, SG_GS = 5;
 
   // ===========================================================================
   // x87 FPU architectural state (M3)
@@ -147,7 +216,9 @@ module core
   typedef enum logic [4:0] {
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
     S_FLOAD, S_FEXEC, S_FSTORE,
-    S_PF, S_PIPE, S_F00F_HANG
+    S_PF, S_PIPE, S_F00F_HANG,
+    // M2S.1 system-mode descriptor + table micro-sequences:
+    S_LGDT, S_SEGLD, S_LJMP
   } state_e;
   state_e state;
 
@@ -318,7 +389,29 @@ module core
   logic        d_clc;          // CLC (F8): CF<-0
   logic        d_stc;          // STC (F9): CF<-1
   logic        d_cmc;          // CMC (F5): CF<-~CF
+  logic        d_cli;          // CLI (FA): IF<-0  (M2S.1)
+  logic        d_sti;          // STI (FB): IF<-1  (M2S.1)
   logic        d_cnt16;        // 0x67 address-size: LOOP/JCXZ use CX (low 16)
+
+  // ---- M2S.1 system-mode decode (docs/m2s1-segmentation-spec.md) ------------
+  // d_seg : which segment the memory operand uses (SG_CS..SG_GS). Default DS
+  //   (=SG_DS); stack ops force SS; a 26/2E/36/3E/64/65 override prefix selects
+  //   ES/CS/SS/DS/FS/GS. In user mode this is ignored (all bases 0).
+  // d_sysop : a decoded system instruction (LGDT/LIDT/MOV CRn/MOV sreg/far JMP).
+  // d_def16 : the real-mode default operand/address size is 16-bit (so a 0x66
+  //   prefix means 32-bit). Computed at decode from real_mode ^ pfx.
+  logic [2:0]  d_seg;          // segment index for the data memory operand
+  typedef enum logic [3:0] {
+    SYS_NONE, SYS_LGDT, SYS_LIDT, SYS_MOVCR_TO, SYS_MOVCR_FROM,
+    SYS_MOVSREG_TO, SYS_MOVSREG_FROM, SYS_LJMP
+  } sysop_e;
+  sysop_e      d_sysop;
+  logic [2:0]  d_sys_sreg;     // target/source segment register index (mov sreg)
+  logic [2:0]  d_sys_creg;     // CR index (0/2/3/4) for MOV CRn
+  logic [31:0] d_ljmp_off;     // far-jump target offset
+  logic [15:0] d_ljmp_sel;     // far-jump target selector
+  logic        d_pfx_seg_en;   // a segment-override prefix is present
+  logic [2:0]  d_pfx_seg_idx;  // which segment the override selects
 
   // ---- x87 decode (M3) ------------------------------------------------------
   // x87 sub-op encoding (fxop_e: FX_*) lives in ventium_decode_pkg. The decoder
@@ -364,6 +457,7 @@ module core
 
   always_comb begin
     pfx_len=4'd0; pfx_opsize=1'b0; pfx_addr=1'b0; pfx_seg=1'b0; pfx_lock=1'b0; pfx_rep=2'd0;
+    d_pfx_seg_en=1'b0; d_pfx_seg_idx=3'd0;
     for (int i=0;i<4;i++) begin
       if (is_prefix(ibuf[pfx_len])) begin
         unique case (ibuf[pfx_len])
@@ -372,6 +466,13 @@ module core
           8'hF3: pfx_rep=2'd3;
           8'hF2: pfx_rep=2'd2;
           8'hF0: pfx_lock=1'b1;
+          // segment-override prefixes (M2S.1): record which segment they pick.
+          8'h2E: begin pfx_seg=1'b1; d_pfx_seg_en=1'b1; d_pfx_seg_idx=3'(SG_CS); end
+          8'h36: begin pfx_seg=1'b1; d_pfx_seg_en=1'b1; d_pfx_seg_idx=3'(SG_SS); end
+          8'h3E: begin pfx_seg=1'b1; d_pfx_seg_en=1'b1; d_pfx_seg_idx=3'(SG_DS); end
+          8'h26: begin pfx_seg=1'b1; d_pfx_seg_en=1'b1; d_pfx_seg_idx=3'(SG_ES); end
+          8'h64: begin pfx_seg=1'b1; d_pfx_seg_en=1'b1; d_pfx_seg_idx=3'(SG_FS); end
+          8'h65: begin pfx_seg=1'b1; d_pfx_seg_en=1'b1; d_pfx_seg_idx=3'(SG_GS); end
           default: pfx_seg=1'b1;
         endcase
         pfx_len = pfx_len + 4'd1;
@@ -381,6 +482,127 @@ module core
     two_byte=(op0==8'h0F);
     op1=ibuf[pfx_len+4'd1];
   end
+
+  // M2S.1: EFFECTIVE operand/address size. In REAL mode the default is 16-bit,
+  // so a 0x66/0x67 prefix means 32-bit (the bit is inverted vs protected/flat).
+  // In user mode and protected mode real_mode==0, so eff_* == the raw prefix and
+  // the decoder is byte-for-byte unchanged. The decoder below uses eff_opsize/
+  // eff_addr in place of pfx_opsize/pfx_addr.
+  logic eff_opsize, eff_addr;
+  assign eff_opsize = pfx_opsize ^ def16;
+  assign eff_addr   = pfx_addr   ^ def16;
+
+  // M2S.1 — ModR/M length contribution under EFFECTIVE addressing size. In
+  // 32-bit addressing this is exactly the existing mfl(); in 16-bit addressing
+  // (real mode w/o 0x67) the ONLY form the gate uses is [disp16] (mod00,rm110) =
+  // 1 ModR/M byte + 2 disp = 3 bytes. (No SIB in 16-bit mode.) Other 16-bit
+  // forms are unused by the gate and decode as length-2 here, but their handlers
+  // also raise d_unknown so the wrong length is never committed.
+  function automatic logic [3:0] mfl_e(input logic a16, input logic [1:0] mod,
+                                       input logic [2:0] rm, input logic sib,
+                                       input logic [2:0] base);
+    if (!a16) return mfl(mod, rm, sib, base);
+    // 16-bit addressing:
+    if (mod==2'b00 && rm==3'b110) return 4'd3;       // [disp16]
+    else if (mod==2'b00)          return 4'd1;       // [reg]/[reg+reg]
+    else if (mod==2'b01)          return 4'd2;       // +disp8
+    else if (mod==2'b10)          return 4'd3;       // +disp16
+    else                          return 4'd1;       // reg-direct
+  endfunction
+
+  // x86 8-byte GDT/LDT descriptor field extraction (docs/m2s1-segmentation-spec).
+  //   base  = desc[63:56]<<24 | desc[39:16]
+  //   limit = desc[51:48]<<16 | desc[15:0]; granularity (G=desc[55]) scales by 4K.
+  function automatic logic [31:0] desc_base(input logic [63:0] d);
+    desc_base = {d[63:56], d[39:16]};
+  endfunction
+  function automatic logic [31:0] desc_limit(input logic [63:0] d);
+    logic [19:0] lim20;
+    begin
+      lim20 = {d[51:48], d[15:0]};
+      desc_limit = d[55] ? {lim20, 12'hFFF} : {12'd0, lim20};
+    end
+  endfunction
+  // The descriptor access byte = d[47:40] = P|DPL[1:0]|S|type[3:0].
+  function automatic logic [7:0] desc_attr (input logic [63:0] d); desc_attr = d[47:40]; endfunction
+  function automatic logic       desc_present(input logic [7:0] a); desc_present = a[7];      endfunction
+  function automatic logic [1:0] desc_dpl    (input logic [7:0] a); desc_dpl     = a[6:5];    endfunction
+  function automatic logic       desc_s      (input logic [7:0] a); desc_s       = a[4];      endfunction
+  function automatic logic [3:0] desc_type   (input logic [7:0] a); desc_type    = a[3:0];    endfunction
+  // Type-bit helpers within a code/data (S=1) descriptor (type=a[3:0]):
+  //   bit3 = executable (1=code,0=data); for code bit1=readable, for data bit1=writable.
+  function automatic logic seg_is_code(input logic [7:0] a); seg_is_code = a[3]; endfunction
+  function automatic logic seg_writable(input logic [7:0] a);  // data segment & W
+    seg_writable = desc_s(a) && !a[3] && a[1];
+  endfunction
+  function automatic logic seg_readable(input logic [7:0] a);  // data, or readable code
+    seg_readable = desc_s(a) && (!a[3] || a[1]);
+  endfunction
+
+  // -------------------------------------------------------------------------
+  // PROTECTED-mode descriptor-load protection DECISION (IA-32 §5 / spec §3).
+  // Computes whether a MOV-to-Sreg / far-JMP descriptor load WOULD fault. This
+  // is the protection *decision* (#GP/#NP/#SS selector) — it is fully computed
+  // here; fault *delivery* (vectoring through the IDT) is M2S.3, so for now a
+  // raised decision can only HALT (the pseg corpus loads clean descriptors, so
+  // the decision is always "no fault" and the core never halts on it). Encodes
+  // the architectural rules:
+  //   - a NULL selector (idx 0) into DS/ES/FS/GS is legal (loads a null seg, no
+  //     fault); a null selector into SS or CS is #GP.
+  //   - not-present (P=0)            -> #NP (#SS for SS)
+  //   - system descriptor (S=0) used as a data/stack/code segment -> #GP
+  //   - SS load: must be a writable data segment, DPL==CPL==RPL          -> #GP/#SS
+  //   - DS/ES/FS/GS data load: must be readable; if non-conforming code/data,
+  //     max(CPL,RPL) must be <= DPL                                      -> #GP
+  //   - CS (far jmp, same-priv): must be executable (code)               -> #GP
+  // `is_cs` selects the CS rules, `is_ss` the SS rules; `cpl`/`rpl` are the
+  // current privilege and the selector RPL.
+  function automatic logic seg_load_fault(
+      input logic        is_cs, input logic is_ss,
+      input logic [15:0] sel,   input logic [7:0] a,
+      input logic [1:0]  cpl);
+    logic       nullsel;
+    logic [1:0] rpl, dpl;
+    logic       fault;
+    begin
+      nullsel = (sel[15:3] == 13'd0);   // selector index 0 (RPL/TI ignored)
+      rpl     = sel[1:0];
+      dpl     = desc_dpl(a);
+      fault   = 1'b0;
+      if (nullsel) begin
+        // null in CS or SS is illegal; null in DS/ES/FS/GS is fine.
+        fault = is_cs || is_ss;
+      end else begin
+        if (!desc_present(a))          fault = 1'b1;            // #NP / #SS
+        else if (!desc_s(a))           fault = 1'b1;            // system desc as seg -> #GP
+        else if (is_cs) begin
+          if (!seg_is_code(a))         fault = 1'b1;            // CS must be code
+        end else if (is_ss) begin
+          // SS: writable data, and DPL==CPL==RPL.
+          if (!seg_writable(a))        fault = 1'b1;
+          else if (dpl != cpl || rpl != cpl) fault = 1'b1;
+        end else begin
+          // DS/ES/FS/GS: readable; privilege max(CPL,RPL) <= DPL (data/non-conf code).
+          if (!seg_readable(a))        fault = 1'b1;
+          else if ((cpl > dpl) || (rpl > dpl)) fault = 1'b1;
+        end
+      end
+      seg_load_fault = fault;
+    end
+  endfunction
+
+  // x86 segment-register field (ModR/M.reg for MOV Sreg) -> our SG_ index.
+  // x86 encoding: 0=ES 1=CS 2=SS 3=DS 4=FS 5=GS; SG_ order: cs=0 ss=1 ds=2 es=3.
+  function automatic logic [2:0] sreg_idx(input logic [2:0] e);
+    unique case (e)
+      3'd0: sreg_idx = 3'(SG_ES);
+      3'd1: sreg_idx = 3'(SG_CS);
+      3'd2: sreg_idx = 3'(SG_SS);
+      3'd3: sreg_idx = 3'(SG_DS);
+      3'd4: sreg_idx = 3'(SG_FS);
+      default: sreg_idx = 3'(SG_GS);
+    endcase
+  endfunction
 
   // cond_true() (Jcc tttn condition eval) lives in ventium_decode_pkg.
   // Width helpers (wmask/sbit/sbit2/parity8) live in ventium_alu_pkg.
@@ -399,10 +621,15 @@ module core
     d_ext_srcw=3'd1; d_cc=4'd0; d_bit_imm=1'b0; d_bit_op=3'd4; d_conv_cdq=1'b0;
     d_sm=SM_PUSHA; d_st=ST_MOVS; d_str_loadsi=1'b0; d_str_storedi=1'b0; d_str_scandi=1'b0;
     d_ct=CT_CALLREL; d_ret_imm=16'd0; d_cld=1'b0; d_std=1'b0;
-    d_clc=1'b0; d_stc=1'b0; d_cmc=1'b0; d_cnt16=pfx_addr;
+    d_clc=1'b0; d_stc=1'b0; d_cmc=1'b0; d_cli=1'b0; d_sti=1'b0; d_cnt16=eff_addr;
     d_fxop=FX_NONE; d_is_x87=1'b0; d_f_mem_read=1'b0; d_f_mem_write=1'b0;
     d_f_msize=3'd0; d_f_mbytes=4'd0; d_f_pop=1'b0; d_f_pop2=1'b0; d_f_sti=3'd0;
     d_f_aluop=3'd0; d_f_const=3'd0;
+    // M2S.1 system-decode defaults. d_seg defaults to DS for data accesses (stack
+    // ops override to SS in their handlers below); a segment-override prefix wins.
+    d_sysop=SYS_NONE; d_sys_sreg=3'd0; d_sys_creg=3'd0;
+    d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
+    d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
 
     m_idx     = pfx_len + (two_byte ? 4'd2 : 4'd1);
     mrm       = ibuf[m_idx];
@@ -439,10 +666,42 @@ module core
       d_ea=(no_base?32'd0:base_val)+(no_index?32'd0:index_val)+disp_val;
     end
 
-    d_w = pfx_opsize ? 3'd2 : 3'd4;
+    // M2S.1 — 16-bit ADDRESSING (eff_addr==1, i.e. real mode w/o a 0x67 prefix).
+    // The bare-metal bootstrap uses ONLY the direct form `[disp16]` (modrm
+    // mod=00, rm=110) for the GDT-pointer writes + LGDT; recompute d_ea + the
+    // ModR/M length contribution for it. Other 16-bit modes ([bx+si] etc) are a
+    // DEFERRED corner (the pseg gate never uses them) -> d_unknown (loud HALT).
+    // `amode16_len` is the ModR/M+disp byte count under 16-bit addressing; the
+    // opcode handlers below use mfl() (32-bit) so we correct d_len when amode16.
+    if (eff_addr) begin
+      if (modrm_mod==2'b00 && modrm_rm==3'b110) begin
+        // [disp16] direct: 2-byte displacement at m_idx+1.
+        d_ea = {16'd0, ibuf[m_idx+2], ibuf[m_idx+1]};
+      end
+      // other 16-bit forms not needed by the gate -> flagged unknown below via
+      // the per-opcode handler (which sees mod!=11 mem but we have no EA).
+    end
+
+    d_w = eff_opsize ? 3'd2 : 3'd4;
 
     if (two_byte) begin
       unique casez (op1)
+        // ---- M2S.1 system 0F opcodes ---------------------------------------
+        8'h01: begin // 0F 01 /2 LGDT, /3 LIDT (memory operand = 6 bytes)
+          if (modrm_reg==3'd2 || modrm_reg==3'd3) begin
+            d_sysop=(modrm_reg==3'd2)?SYS_LGDT:SYS_LIDT;
+            d_mem_read=1'b1;       // read the 6-byte pseudo-descriptor from memory
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else d_unknown=1'b1;  // /4 SMSW /6 LMSW etc deferred
+        end
+        8'h20: begin // 0F 20 /r MOV r32, CRn  (mod field ignored, always reg)
+          d_sysop=SYS_MOVCR_FROM; d_sys_creg=modrm_reg; d_dst_reg=modrm_rm;
+          d_writes_reg=1'b1; d_w=3'd4; d_len=pfx_len+4'd3;
+        end
+        8'h22: begin // 0F 22 /r MOV CRn, r32
+          d_sysop=SYS_MOVCR_TO; d_sys_creg=modrm_reg; d_src_reg=modrm_rm;
+          d_w=3'd4; d_len=pfx_len+4'd3;
+        end
         8'b1000_????: begin // Jcc rel32
           d_len=pfx_len+4'd6; d_is_branch=1'b1; d_branch_taken=cond_true(op1[3:0],eflags);
           d_rel={ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1],ibuf[m_idx]};
@@ -454,7 +713,7 @@ module core
             d_len=pfx_len+4'd3;
           end else begin
             d_mem_write=1'b1; d_mem_dst=1'b1;
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end
         end
         8'hB6,8'hB7,8'hBE,8'hBF: begin // MOVZX/MOVSX
@@ -465,13 +724,13 @@ module core
             d_src_reg=modrm_rm; d_src_high8=(d_ext_srcw==3'd1)&&modrm_rm[2];
             d_len=pfx_len+4'd3;
           end else begin
-            d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base);
+            d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end
         end
         8'hAF: begin // IMUL r, r/m
           d_kind=K_IMUL2; d_writes_reg=1'b1; d_writes_flags=1'b1; d_dst_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd3; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'hA3,8'hAB,8'hB3,8'hBB: begin // BT/BTS/BTR/BTC reg
           d_kind=K_BITTEST; d_writes_flags=1'b1; d_src_reg=modrm_reg;
@@ -481,20 +740,20 @@ module core
           endcase
           if (modrm_mod==2'b11) begin
             d_dst_reg=modrm_rm; d_writes_reg=(op1!=8'hA3); d_len=pfx_len+4'd3;
-          end else begin d_unknown=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          end else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'hBA: begin // BT/BTS/BTR/BTC imm
           d_kind=K_BITTEST; d_writes_flags=1'b1; d_bit_imm=1'b1; d_bit_op=modrm_reg;
           if (modrm_mod==2'b11) begin
             d_dst_reg=modrm_rm; d_imm={24'd0,ibuf[m_idx+1]};
             d_writes_reg=(modrm_reg!=3'd4); d_len=pfx_len+4'd4;
-          end else begin d_unknown=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd1; end
+          end else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1; end
         end
         8'hBC,8'hBD: begin // BSF/BSR
           d_kind=K_BITSCAN; d_writes_reg=1'b1; d_writes_flags=1'b1; d_dst_reg=modrm_reg;
           d_shrd=(op1==8'hBD);
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd3; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'hA4,8'hA5,8'hAC,8'hAD: begin // SHLD/SHRD
           d_kind=K_SHLDRD; d_writes_flags=1'b1;
@@ -507,7 +766,7 @@ module core
             else begin d_shift_imm=ibuf[m_idx+1][4:0]; d_imm={24'd0,ibuf[m_idx+1]}; d_len=pfx_len+4'd4; end
           end else begin
             d_unknown=1'b1;
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+(d_shift_cl?4'd0:4'd1);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+(d_shift_cl?4'd0:4'd1);
           end
         end
         8'b1100_1???: begin // BSWAP r32
@@ -535,34 +794,34 @@ module core
         end
         8'b1011_1???: begin // MOV r16/32, imm
           d_is_mov=1'b1; d_writes_reg=1'b1; d_dst_reg=op0[2:0]; d_alu_op=ALU_MOV; d_use_imm=1'b1;
-          if (pfx_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_w=3'd4; d_imm={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'b0100_0???: begin // INC r16/32
           d_len=pfx_len+4'd1; d_writes_reg=1'b1; d_writes_flags=1'b1;
-          d_dst_reg=op0[2:0]; d_src_reg=op0[2:0]; d_alu_op=ALU_INC; d_w=pfx_opsize?3'd2:3'd4;
+          d_dst_reg=op0[2:0]; d_src_reg=op0[2:0]; d_alu_op=ALU_INC; d_w=eff_opsize?3'd2:3'd4;
         end
         8'b0100_1???: begin // DEC r16/32
           d_len=pfx_len+4'd1; d_writes_reg=1'b1; d_writes_flags=1'b1;
-          d_dst_reg=op0[2:0]; d_src_reg=op0[2:0]; d_alu_op=ALU_DEC; d_w=pfx_opsize?3'd2:3'd4;
+          d_dst_reg=op0[2:0]; d_src_reg=op0[2:0]; d_alu_op=ALU_DEC; d_w=eff_opsize?3'd2:3'd4;
         end
         8'b0101_0???: begin // PUSH r16/32
           d_len=pfx_len+4'd1; d_is_push=1'b1; d_mem_write=1'b1; d_src_reg=op0[2:0];
-          d_w=pfx_opsize?3'd2:3'd4;
+          d_w=eff_opsize?3'd2:3'd4;
         end
         8'b0101_1???: begin // POP r16/32
           d_len=pfx_len+4'd1; d_is_pop=1'b1; d_mem_read=1'b1; d_writes_reg=1'b1;
-          d_dst_reg=op0[2:0]; d_w=pfx_opsize?3'd2:3'd4;
+          d_dst_reg=op0[2:0]; d_w=eff_opsize?3'd2:3'd4;
         end
-        8'h60: begin d_kind=K_STKMISC; d_sm=SM_PUSHA; d_len=pfx_len+4'd1; d_w=pfx_opsize?3'd2:3'd4; end
-        8'h61: begin d_kind=K_STKMISC; d_sm=SM_POPA;  d_len=pfx_len+4'd1; d_w=pfx_opsize?3'd2:3'd4; end
+        8'h60: begin d_kind=K_STKMISC; d_sm=SM_PUSHA; d_len=pfx_len+4'd1; d_w=eff_opsize?3'd2:3'd4; end
+        8'h61: begin d_kind=K_STKMISC; d_sm=SM_POPA;  d_len=pfx_len+4'd1; d_w=eff_opsize?3'd2:3'd4; end
         8'h68: begin // PUSH imm
           d_is_push=1'b1; d_mem_write=1'b1; d_use_imm=1'b1;
-          if (pfx_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_w=3'd4; d_imm={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'h6A: begin // PUSH imm8 (sign-ext)
-          d_is_push=1'b1; d_mem_write=1'b1; d_use_imm=1'b1; d_w=pfx_opsize?3'd2:3'd4;
+          d_is_push=1'b1; d_mem_write=1'b1; d_use_imm=1'b1; d_w=eff_opsize?3'd2:3'd4;
           d_imm={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; d_len=pfx_len+4'd2;
         end
         8'h69: begin // IMUL r, r/m, imm32
@@ -572,11 +831,11 @@ module core
             d_len=pfx_len+4'd6;
           end else begin
             d_mem_read=1'b1;
-            d_imul_imm={ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+3],
-                        ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+2],
-                        ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+1],
-                        ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+0]};
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
+            d_imul_imm={ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+3],
+                        ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+2],
+                        ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1],
+                        ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+0]};
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
           end
         end
         8'h6B: begin // IMUL r, r/m, imm8
@@ -585,9 +844,9 @@ module core
             d_src_reg=modrm_rm; d_imul_imm={{24{ibuf[m_idx+1][7]}},ibuf[m_idx+1]}; d_len=pfx_len+4'd3;
           end else begin
             d_mem_read=1'b1;
-            d_imul_imm={{24{ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)][7]}},
-                        ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)]};
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
+            d_imul_imm={{24{ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)][7]}},
+                        ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
           end
         end
         8'b00??_?000: begin // ALU r/m8, r8
@@ -596,26 +855,26 @@ module core
           if (modrm_mod==2'b11) begin
             d_writes_reg=(op0[5:3]!=3'b111); d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2]; d_len=pfx_len+4'd2;
           end else begin d_mem_read=1'b1; d_mem_write=(op0[5:3]!=3'b111); d_mem_dst=1'b1;
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'b00??_?001: begin // ALU r/m16/32, r16/32
           d_alu_op={2'b00,op0[5:3]}; d_writes_flags=1'b1; d_src_reg=modrm_reg;
           if (modrm_mod==2'b11) begin
             d_writes_reg=(op0[5:3]!=3'b111); d_dst_reg=modrm_rm; d_len=pfx_len+4'd2;
           end else begin d_mem_read=1'b1; d_mem_write=(op0[5:3]!=3'b111); d_mem_dst=1'b1;
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'b00??_?010: begin // ALU r8, r/m8
           d_w=3'd1; d_alu_op={2'b00,op0[5:3]}; d_writes_flags=1'b1;
           d_writes_reg=(op0[5:3]!=3'b111); d_dst_reg=modrm_reg; d_dst_high8=modrm_reg[2];
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_src_high8=modrm_rm[2]; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'b00??_?011: begin // ALU r16/32, r/m16/32
           d_alu_op={2'b00,op0[5:3]}; d_writes_flags=1'b1;
           d_writes_reg=(op0[5:3]!=3'b111); d_dst_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'b00??_?100: begin // ALU AL, imm8
           d_w=3'd1; d_alu_op={2'b00,op0[5:3]}; d_writes_flags=1'b1;
@@ -625,7 +884,7 @@ module core
         8'b00??_?101: begin // ALU eAX, imm16/32
           d_alu_op={2'b00,op0[5:3]}; d_writes_flags=1'b1;
           d_writes_reg=(op0[5:3]!=3'b111); d_dst_reg=R_EAX; d_src_reg=R_EAX; d_use_imm=1'b1;
-          if (pfx_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_w=3'd4; d_imm={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'h80: begin // group1 r/m8, imm8
@@ -635,102 +894,116 @@ module core
             d_imm={24'd0,ibuf[m_idx+1]}; d_len=pfx_len+4'd3;
           end else begin
             d_mem_read=1'b1; d_mem_write=(modrm_reg!=3'b111); d_mem_dst=1'b1;
-            d_imm={24'd0,ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)]};
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
+            d_imm={24'd0,ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
           end
         end
         8'h81: begin // group1 r/m16/32, imm16/32
           d_alu_op={2'b00,modrm_reg}; d_writes_flags=1'b1; d_use_imm=1'b1;
           if (modrm_mod==2'b11) begin
             d_writes_reg=(modrm_reg!=3'b111); d_dst_reg=modrm_rm; d_src_reg=modrm_rm;
-            if (pfx_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd4; end
+            if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd4; end
             else begin d_w=3'd4; d_imm={ibuf[m_idx+4],ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd6; end
           end else begin
             d_mem_read=1'b1; d_mem_write=(modrm_reg!=3'b111); d_mem_dst=1'b1;
-            if (pfx_opsize) begin d_w=3'd2;
-              d_imm={16'd0,ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+1],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)]};
-              d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd2;
+            if (eff_opsize) begin d_w=3'd2;
+              d_imm={16'd0,ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+              d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd2;
             end else begin d_w=3'd4;
-              d_imm={ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+3],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+2],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+1],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+0]};
-              d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
+              d_imm={ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+3],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+2],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+0]};
+              d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
             end
           end
         end
         8'h83: begin // group1 r/m16/32, imm8 sign-ext
-          d_alu_op={2'b00,modrm_reg}; d_writes_flags=1'b1; d_use_imm=1'b1; d_w=pfx_opsize?3'd2:3'd4;
+          d_alu_op={2'b00,modrm_reg}; d_writes_flags=1'b1; d_use_imm=1'b1; d_w=eff_opsize?3'd2:3'd4;
           if (modrm_mod==2'b11) begin
             d_writes_reg=(modrm_reg!=3'b111); d_dst_reg=modrm_rm; d_src_reg=modrm_rm;
             d_imm={{24{ibuf[m_idx+1][7]}},ibuf[m_idx+1]}; d_len=pfx_len+4'd3;
           end else begin
             d_mem_read=1'b1; d_mem_write=(modrm_reg!=3'b111); d_mem_dst=1'b1;
-            d_imm={{24{ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)][7]}},
-                   ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)]};
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
+            d_imm={{24{ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)][7]}},
+                   ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
           end
         end
         8'h84: begin // TEST r/m8, r8
           d_w=3'd1; d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_src_reg=modrm_reg; d_src_high8=modrm_reg[2];
           if (modrm_mod==2'b11) begin d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2]; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h85: begin // TEST r/m16/32, r16/32
           d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_src_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h86: begin // XCHG r/m8, r8
           d_kind=K_XCHG; d_w=3'd1; d_src_reg=modrm_reg; d_src_high8=modrm_reg[2];
           if (modrm_mod==2'b11) begin d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2]; d_writes_reg=1'b1; d_len=pfx_len+4'd2; end
           else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1;
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h87: begin // XCHG r/m16/32, r16/32
           d_kind=K_XCHG; d_src_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_dst_reg=modrm_rm; d_writes_reg=1'b1; d_len=pfx_len+4'd2; end
           else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1;
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h88: begin // MOV r/m8, r8
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_w=3'd1; d_src_reg=modrm_reg; d_src_high8=modrm_reg[2];
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2]; d_len=pfx_len+4'd2; end
-          else begin d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h89: begin // MOV r/m16/32, r16/32
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_src_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h8A: begin // MOV r8, r/m8
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_w=3'd1; d_writes_reg=1'b1; d_dst_reg=modrm_reg; d_dst_high8=modrm_reg[2];
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_src_high8=modrm_rm[2]; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h8B: begin // MOV r16/32, r/m16/32
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+        end
+        8'h8C: begin // MOV r/m16, Sreg  (M2S.1)
+          // store the selector value of segment modrm_reg into r/m16. Reg form
+          // only here (the corpus uses reg-form); a memory dest defers (HALT).
+          d_sysop=SYS_MOVSREG_FROM; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
+          if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
+          else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h8D: begin // LEA
           d_is_lea=1'b1; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
-          d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base);
+          d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+        end
+        8'h8E: begin // MOV Sreg, r/m16  (M2S.1)
+          // load segment register modrm_reg from r/m16. Reg-form source only
+          // here (the corpus loads sregs from a GPR); memory source defers.
+          d_sysop=SYS_MOVSREG_TO; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
+          if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
+          else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'h8F: begin // POP r/m
-          d_is_pop=1'b1; d_mem_read=1'b1; d_w=pfx_opsize?3'd2:3'd4;
+          d_is_pop=1'b1; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'b1001_0???: begin // NOP / XCHG eAX,r
-          if (op0==8'h90 && !pfx_opsize) begin d_is_nop=1'b1; d_len=pfx_len+4'd1; end
+          if (op0==8'h90 && !eff_opsize) begin d_is_nop=1'b1; d_len=pfx_len+4'd1; end
           else begin d_kind=K_XCHG; d_writes_reg=1'b1; d_dst_reg=R_EAX; d_src_reg=op0[2:0]; d_len=pfx_len+4'd1; end
         end
         8'h98: begin d_kind=K_CONV; d_conv_cdq=1'b0; d_len=pfx_len+4'd1; end
         8'h99: begin d_kind=K_CONV; d_conv_cdq=1'b1; d_len=pfx_len+4'd1; end
-        8'h9C: begin d_kind=K_STKMISC; d_sm=SM_PUSHF; d_mem_write=1'b1; d_w=pfx_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
-        8'h9D: begin d_kind=K_STKMISC; d_sm=SM_POPF;  d_mem_read=1'b1;  d_w=pfx_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
+        8'h9C: begin d_kind=K_STKMISC; d_sm=SM_PUSHF; d_mem_write=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
+        8'h9D: begin d_kind=K_STKMISC; d_sm=SM_POPF;  d_mem_read=1'b1;  d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'h9E: begin d_kind=K_STKMISC; d_sm=SM_SAHF; d_len=pfx_len+4'd1; end
         8'h9F: begin d_kind=K_STKMISC; d_sm=SM_LAHF; d_len=pfx_len+4'd1; end
         8'hA0: begin // MOV AL, moffs8 (8-bit load, preserve [31:8])
@@ -742,7 +1015,7 @@ module core
         8'hA1: begin // MOV eAX, moffs
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=R_EAX; d_mem_read=1'b1;
           d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]};
-          d_w=pfx_opsize?3'd2:3'd4; d_len=pfx_len+4'd5;
+          d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd5;
         end
         8'hA2: begin // MOV moffs8, AL (8-bit store)
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_mem_dst=1'b1; d_src_reg=R_EAX;
@@ -753,75 +1026,75 @@ module core
         8'hA3: begin // MOV moffs, eAX
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_mem_dst=1'b1; d_src_reg=R_EAX;
           d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]};
-          d_w=pfx_opsize?3'd2:3'd4; d_len=pfx_len+4'd5;
+          d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd5;
         end
         8'hA8: begin d_w=3'd1; d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_dst_reg=R_EAX;
           d_use_imm=1'b1; d_imm={24'd0,ibuf[pfx_len+1]}; d_len=pfx_len+4'd2; end
         8'hA9: begin d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_dst_reg=R_EAX; d_use_imm=1'b1;
-          if (pfx_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_w=3'd4; d_imm={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         // string ops
         8'hA4: begin d_kind=K_STR; d_st=ST_MOVS; d_w=3'd1; d_str_loadsi=1'b1; d_str_storedi=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
-        8'hA5: begin d_kind=K_STR; d_st=ST_MOVS; d_w=pfx_opsize?3'd2:3'd4; d_str_loadsi=1'b1; d_str_storedi=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
+        8'hA5: begin d_kind=K_STR; d_st=ST_MOVS; d_w=eff_opsize?3'd2:3'd4; d_str_loadsi=1'b1; d_str_storedi=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
         8'hAA: begin d_kind=K_STR; d_st=ST_STOS; d_w=3'd1; d_str_storedi=1'b1; d_len=pfx_len+4'd1; end
-        8'hAB: begin d_kind=K_STR; d_st=ST_STOS; d_w=pfx_opsize?3'd2:3'd4; d_str_storedi=1'b1; d_len=pfx_len+4'd1; end
+        8'hAB: begin d_kind=K_STR; d_st=ST_STOS; d_w=eff_opsize?3'd2:3'd4; d_str_storedi=1'b1; d_len=pfx_len+4'd1; end
         8'hAC: begin d_kind=K_STR; d_st=ST_LODS; d_w=3'd1; d_str_loadsi=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
-        8'hAD: begin d_kind=K_STR; d_st=ST_LODS; d_w=pfx_opsize?3'd2:3'd4; d_str_loadsi=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
+        8'hAD: begin d_kind=K_STR; d_st=ST_LODS; d_w=eff_opsize?3'd2:3'd4; d_str_loadsi=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
         8'hAE: begin d_kind=K_STR; d_st=ST_SCAS; d_w=3'd1; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
-        8'hAF: begin d_kind=K_STR; d_st=ST_SCAS; d_w=pfx_opsize?3'd2:3'd4; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
+        8'hAF: begin d_kind=K_STR; d_st=ST_SCAS; d_w=eff_opsize?3'd2:3'd4; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
         8'hA6: begin d_kind=K_STR; d_st=ST_CMPS; d_w=3'd1; d_str_loadsi=1'b1; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
-        8'hA7: begin d_kind=K_STR; d_st=ST_CMPS; d_w=pfx_opsize?3'd2:3'd4; d_str_loadsi=1'b1; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
+        8'hA7: begin d_kind=K_STR; d_st=ST_CMPS; d_w=eff_opsize?3'd2:3'd4; d_str_loadsi=1'b1; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
         8'hC6: begin // MOV r/m8, imm8
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_use_imm=1'b1; d_w=3'd1;
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2];
             d_imm={24'd0,ibuf[m_idx+1]}; d_len=pfx_len+4'd3;
           end else begin d_mem_write=1'b1; d_mem_dst=1'b1;
-            d_imm={24'd0,ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)]};
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd1; end
+            d_imm={24'd0,ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1; end
         end
         8'hC7: begin // MOV r/m16/32, imm
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_use_imm=1'b1;
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm;
-            if (pfx_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd4; end
+            if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd4; end
             else begin d_w=3'd4; d_imm={ibuf[m_idx+4],ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd6; end
           end else begin d_mem_write=1'b1; d_mem_dst=1'b1;
-            if (pfx_opsize) begin d_w=3'd2;
-              d_imm={16'd0,ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+1],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)]};
-              d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd2;
+            if (eff_opsize) begin d_w=3'd2;
+              d_imm={16'd0,ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+              d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd2;
             end else begin d_w=3'd4;
-              d_imm={ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+3],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+2],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+1],
-                     ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+0]};
-              d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
+              d_imm={ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+3],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+2],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+1],
+                     ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+0]};
+              d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd4;
             end
           end
         end
         8'hD0,8'hD1,8'hD2,8'hD3: begin // shift/rotate by 1 / CL
           d_kind=K_SHIFT; d_writes_flags=1'b1; d_shrot=modrm_reg;
-          d_w=(op0==8'hD0||op0==8'hD2)?3'd1:(pfx_opsize?3'd2:3'd4);
+          d_w=(op0==8'hD0||op0==8'hD2)?3'd1:(eff_opsize?3'd2:3'd4);
           d_shift_one=(op0==8'hD0||op0==8'hD1);
           d_shift_cl=(op0==8'hD2||op0==8'hD3);
           if (modrm_mod==2'b11) begin
             d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=(d_w==3'd1)&&modrm_rm[2]; d_len=pfx_len+4'd2;
           end else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1;
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'hC0,8'hC1: begin // shift/rotate by imm8
           d_kind=K_SHIFT; d_writes_flags=1'b1; d_shrot=modrm_reg;
-          d_w=(op0==8'hC0)?3'd1:(pfx_opsize?3'd2:3'd4);
+          d_w=(op0==8'hC0)?3'd1:(eff_opsize?3'd2:3'd4);
           if (modrm_mod==2'b11) begin
             d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=(d_w==3'd1)&&modrm_rm[2];
             d_shift_imm=ibuf[m_idx+1][4:0]; d_imm={24'd0,ibuf[m_idx+1]}; d_len=pfx_len+4'd3;
           end else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1;
-            d_shift_imm=ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)][4:0];
-            d_imm={24'd0,ibuf[m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)]};
-            d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base)+4'd1; end
+            d_shift_imm=ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)][4:0];
+            d_imm={24'd0,ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1; end
         end
         8'hF6,8'hF7: begin // group3
-          d_w=(op0==8'hF6)?3'd1:(pfx_opsize?3'd2:3'd4);
+          d_w=(op0==8'hF6)?3'd1:(eff_opsize?3'd2:3'd4);
           unique case (modrm_reg)
             3'd0,3'd1: begin // TEST r/m, imm
               d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_use_imm=1'b1;
@@ -834,46 +1107,46 @@ module core
             3'd2: begin // NOT
               d_alu_op=ALU_NOT;
               if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=(d_w==3'd1)&&modrm_rm[2]; d_len=pfx_len+4'd2; end
-              else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+              else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
             3'd3: begin // NEG
               d_alu_op=ALU_NEG; d_writes_flags=1'b1;
               if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=(d_w==3'd1)&&modrm_rm[2]; d_len=pfx_len+4'd2; end
-              else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+              else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
             default: begin // MUL/IMUL/DIV/IDIV
               d_kind=K_MULDIV; d_md=modrm_reg; d_writes_flags=1'b1;
               if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_src_high8=(d_w==3'd1)&&modrm_rm[2]; d_len=pfx_len+4'd2; end
-              else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+              else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
           endcase
         end
         8'hFE: begin // INC/DEC r/m8
           d_w=3'd1; d_writes_flags=1'b1; d_alu_op=(modrm_reg==3'd0)?ALU_INC:ALU_DEC;
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2]; d_len=pfx_len+4'd2; end
-          else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+          else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
         end
         8'hFF: begin
           unique case (modrm_reg)
             3'd0,3'd1: begin // INC/DEC r/m16/32
-              d_w=pfx_opsize?3'd2:3'd4; d_writes_flags=1'b1; d_alu_op=(modrm_reg==3'd0)?ALU_INC:ALU_DEC;
+              d_w=eff_opsize?3'd2:3'd4; d_writes_flags=1'b1; d_alu_op=(modrm_reg==3'd0)?ALU_INC:ALU_DEC;
               if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
-              else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+              else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
             3'd2: begin // CALL r/m near
               d_kind=K_CTRL; d_ct=CT_CALLIND; d_mem_write=1'b1; d_w=3'd4;
               if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
-              else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+              else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
             3'd4: begin // JMP r/m near
               d_kind=K_CTRL; d_ct=CT_JMPIND;
               if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
-              else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+              else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
             3'd6: begin // PUSH r/m
-              d_is_push=1'b1; d_mem_write=1'b1; d_w=pfx_opsize?3'd2:3'd4;
+              d_is_push=1'b1; d_mem_write=1'b1; d_w=eff_opsize?3'd2:3'd4;
               if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
-              else begin d_mem_read=1'b1; d_len=m_idx+mfl(modrm_mod,modrm_rm,has_sib,sib_base); end
+              else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
             default: begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
           endcase
@@ -884,16 +1157,16 @@ module core
           d_rel={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; end
         8'b0111_????: begin d_len=pfx_len+4'd2; d_is_branch=1'b1;
           d_branch_taken=cond_true(op0[3:0],eflags); d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
-        8'hE8: begin d_kind=K_CTRL; d_ct=CT_CALLREL; d_mem_write=1'b1; d_w=pfx_opsize?3'd2:3'd4;
+        8'hE8: begin d_kind=K_CTRL; d_ct=CT_CALLREL; d_mem_write=1'b1; d_w=eff_opsize?3'd2:3'd4;
           // 0x66 near CALL: 16-bit rel (cw), push 16-bit next-IP, ESP-=2, and
           // EIP=(next_eip+rel16)&0xFFFF (operand-size-16 truncates EIP).
-          if (pfx_opsize) begin d_rel={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          if (eff_opsize) begin d_rel={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_rel={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
-        8'hC3: begin d_kind=K_CTRL; d_ct=CT_RETN; d_mem_read=1'b1; d_w=pfx_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
-        8'hC2: begin d_kind=K_CTRL; d_ct=CT_RETN_IMM; d_mem_read=1'b1; d_w=pfx_opsize?3'd2:3'd4;
+        8'hC3: begin d_kind=K_CTRL; d_ct=CT_RETN; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
+        8'hC2: begin d_kind=K_CTRL; d_ct=CT_RETN_IMM; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
           d_ret_imm={ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
-        8'hC9: begin d_kind=K_STKMISC; d_sm=SM_LEAVE; d_mem_read=1'b1; d_w=pfx_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
+        8'hC9: begin d_kind=K_STKMISC; d_sm=SM_LEAVE; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'hE2: begin d_kind=K_CTRL; d_ct=CT_LOOP;   d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
         8'hE1: begin d_kind=K_CTRL; d_ct=CT_LOOPE;  d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
         8'hE0: begin d_kind=K_CTRL; d_ct=CT_LOOPNE; d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
@@ -903,7 +1176,32 @@ module core
         8'hF8: begin d_clc=1'b1; d_len=pfx_len+4'd1; end // CLC: CF<-0
         8'hF9: begin d_stc=1'b1; d_len=pfx_len+4'd1; end // STC: CF<-1
         8'hF5: begin d_cmc=1'b1; d_len=pfx_len+4'd1; end // CMC: CF<-~CF
+        8'hFA: begin d_cli=1'b1; d_len=pfx_len+4'd1; end // CLI: IF<-0 (M2S.1)
+        8'hFB: begin d_sti=1'b1; d_len=pfx_len+4'd1; end // STI: IF<-1 (M2S.1)
         8'hCD: begin d_len=pfx_len+4'd2; d_halt=(ibuf[pfx_len+1]==8'h80); end
+
+        // -------------------------------------------------------------------
+        // M2S.1 system-mode instructions (real-mode boot + real->PM transition).
+        // -------------------------------------------------------------------
+        8'hEA: begin // far JMP ptr16:off  (EA off16/32 sel16)
+          // operand-size selects the offset width: 16-bit by default (real mode
+          // EA off16 sel16, len=5) or 32-bit under 0x66 (66 EA off32 sel16,
+          // len=7 incl the 66 prefix — pfx_len counts the 66). The bootstrap uses
+          // BOTH: the 16-bit reset stub (EA off16 sel16) and the 66 ljmp ptr16:32.
+          d_sysop=SYS_LJMP;
+          if (eff_opsize) begin
+            d_ljmp_off={16'd0, ibuf[pfx_len+2], ibuf[pfx_len+1]};
+            d_ljmp_sel={ibuf[pfx_len+4], ibuf[pfx_len+3]};
+            d_len=pfx_len+4'd5;
+          end else begin
+            d_ljmp_off={ibuf[pfx_len+4], ibuf[pfx_len+3], ibuf[pfx_len+2], ibuf[pfx_len+1]};
+            d_ljmp_sel={ibuf[pfx_len+6], ibuf[pfx_len+5]};
+            d_len=pfx_len+4'd7;
+          end
+        end
+        8'hF4: begin // HLT — stop retiring (a clean spin in the bare-metal test)
+          d_halt=1'b1; d_len=pfx_len+4'd1;
+        end
 
         // -------------------------------------------------------------------
         // x87 FPU escapes D8..DF (single-byte opcode + ModR/M). m_idx already
@@ -918,7 +1216,7 @@ module core
           d_f_sti = modrm_rm;
           // default length: register form 2, memory form variable
           if (modrm_mod==2'b11) d_len = m_idx + 4'd1;      // opcode + modrm
-          else                  d_len = m_idx + mfl(modrm_mod,modrm_rm,has_sib,sib_base);
+          else                  d_len = m_idx + mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           unique case (op0)
             // ----- D8: arithmetic ST0 op= m32 / ST0 op= ST(i) --------------
             8'hD8: begin
@@ -1137,7 +1435,16 @@ module core
   logic [15:0] q_ret_imm;
   logic        q_cld, q_std;
   logic        q_clc, q_stc, q_cmc;
+  logic        q_cli, q_sti;
   logic        q_cnt16;
+
+  // latched M2S.1 system decode
+  sysop_e      q_sysop;
+  logic [2:0]  q_sys_sreg, q_sys_creg, q_seg;
+  logic [31:0] q_ljmp_off;
+  logic [15:0] q_ljmp_sel;
+  logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
+  logic [31:0] gdt_lo;            // first dword of the in-flight 8-byte descriptor
 
   // latched x87 decode
   fxop_e       q_fxop;
@@ -1224,10 +1531,26 @@ module core
     snap.eflags=eflags;
     snap.eax=gpr[0]; snap.ecx=gpr[1]; snap.edx=gpr[2]; snap.ebx=gpr[3];
     snap.esp=gpr[4]; snap.ebp=gpr[5]; snap.esi=gpr[6]; snap.edi=gpr[7];
-    snap.cs=SEG_CS; snap.ss=SEG_SS; snap.ds=SEG_DS; snap.es=SEG_ES; snap.fs=SEG_FS; snap.gs=SEG_GS;
+    if (sys_mode) begin
+      // System-mode core: the selectors are the LIVE seg_sel[] (real-mode
+      // segment values, or protected-mode descriptor selectors). User mode is
+      // unchanged (the constant SEG_* params the M0-M6 corpus expects).
+      snap.cs=seg_sel[SG_CS]; snap.ss=seg_sel[SG_SS]; snap.ds=seg_sel[SG_DS];
+      snap.es=seg_sel[SG_ES]; snap.fs=seg_sel[SG_FS]; snap.gs=seg_sel[SG_GS];
+    end else begin
+      snap.cs=SEG_CS; snap.ss=SEG_SS; snap.ds=SEG_DS; snap.es=SEG_ES; snap.fs=SEG_FS; snap.gs=SEG_GS;
+    end
   end
   assign retire_state=snap;
   assign retire_pc=q_pc;
+
+  // M2S.1 system retire payload. retire_sys mirrors retire_valid in system mode
+  // (every retirement carries the control-register block); 0 in user mode.
+  assign retire_sys = sys_mode && retire_valid;
+  assign retire_cr0 = creg0;
+  assign retire_cr2 = creg2;
+  assign retire_cr3 = creg3;
+  assign retire_cr4 = creg4;
 
   // Second retirement (paired V issue). In cycle mode only `pc` is compared, so
   // retire2_state mirrors the primary snapshot (well-formed, never gate-checked
@@ -1718,14 +2041,30 @@ module core
   logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
   logic [7:0]  vb [6];               // V candidate decode bytes (at eip+lenU)
 
+  // M2S.1: the FETCH LINEAR address. The architectural `eip` carries the
+  // segment OFFSET (the value reported as `pc` in the trace); the bytes are
+  // fetched from linear = CS.base + eip. In user mode (and any flat segment)
+  // CS.base==0 so flin==eip and EVERY fetch/icache reference below is numerically
+  // unchanged. `flin` substitutes for `eip` ONLY in the fetch + I-cache path;
+  // the retire pc, the eip<-eip+len advance, and all branch math stay in offset
+  // space (so far jumps that reload CS.base shift the fetch window correctly).
+  // NOTE (deferred corner, M2S.x): this is a full 32-bit add with NO 20-bit
+  // real-mode wrap and NO A20 masking. With A20 ENABLED (the qemu-system default
+  // the bootstrap runs under) a real-mode access does NOT wrap at 1 MiB, so this
+  // is correct for the gate; the A20-masked 1 MiB wrap (and the seg:off overflow
+  // case) is unmodeled. The pseg corpus never exercises wrap.
+  logic [31:0] fbase, flin;
+  assign fbase = seg_base[SG_CS];
+  assign flin  = fbase + eip;
+
   // R1 phase-3: the fast-path decoder is now the `decode` leaf module
   // (rtl/core/decode.sv), instantiated once per slot (U + V candidate). The
-  // byte windows are gathered combinationally below (U at eip, V at eip+lenU),
+  // byte windows are gathered combinationally below (U at flin, V at flin+lenU),
   // exactly as the in-line `fp_decode(...)` calls read them. u_d/v_d are driven
   // by the instances; everything downstream consumes them unchanged.
   always_comb begin
-    for (int i=0;i<6;i++) ub[i] = ic_present(eip+i[31:0]) ? ic_byte(eip+i[31:0]) : 8'd0;
-    for (int i=0;i<6;i++) vb[i] = ic_byte(eip+{28'd0,u_d.len}+i[31:0]);
+    for (int i=0;i<6;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
+    for (int i=0;i<6;i++) vb[i] = ic_byte(flin+{28'd0,u_d.len}+i[31:0]);
   end
 
   decode u_decode (
@@ -1753,23 +2092,23 @@ module core
     // window can read into the next line, so require that straddle line for a SAFE
     // decode whenever the window crosses the boundary, but use the real decoded
     // length to decide whether a straddle miss is genuinely charged.
-    pipe_bytes_ok = ic_present(eip)
+    pipe_bytes_ok = ic_present(flin)
                     // window-straddle: need the next line present to decode safely
-                    && (({1'b0,eip[4:0]} + 6'd5 < 6'd32) || ic_present(eip + 32'd5))
+                    && (({1'b0,flin[4:0]} + 6'd5 < 6'd32) || ic_present(flin + 32'd5))
                     // instruction-straddle: its last byte's line must be resident
-                    && (({1'b0,eip[4:0]} + {2'b0,u_d.len} <= 6'd32)
-                        || ic_present(eip + {28'd0,u_d.len} - 32'd1));
+                    && (({1'b0,flin[4:0]} + {2'b0,u_d.len} <= 6'd32)
+                        || ic_present(flin + {28'd0,u_d.len} - 32'd1));
     // V candidate sits right after U (decoded by the v_decode instance above,
-    // from the vb[] byte window gathered at eip+lenU).
+    // from the vb[] byte window gathered at flin+lenU).
 
-    // I-cache fill line address for a current miss (eip's line first, else the
+    // I-cache fill line address for a current miss (flin's line first, else the
     // decode-window straddle line, else the instruction-straddle line) and the
     // condition under which the S_PIPE miss branch fires THIS clock (so the bus
     // driver can issue the fill's word-0 read on the detection clock — removing
     // the wasted transition clock, finding [med] I-miss off-by-one).
-    pf_miss_fa = !ic_present(eip)         ? eip
-               : !ic_present(eip + 32'd5) ? (eip + 32'd5)
-               : (eip + {28'd0,u_d.len} - 32'd1);
+    pf_miss_fa = !ic_present(flin)         ? flin
+               : !ic_present(flin + 32'd5) ? (flin + 32'd5)
+               : (flin + {28'd0,u_d.len} - 32'd1);
     pf_miss = (state==S_PIPE) && (stall_cnt==7'd0) && !pipe_bytes_ok;
 
     // AGI: a base/index reg used by U was written in the IMMEDIATELY-preceding
@@ -1794,8 +2133,8 @@ module core
     // require the V instruction's first byte AND its last byte to be in resident
     // lines before pairing; otherwise V is not paired this clock — it becomes the
     // next U, the cold line fills via S_PF, and it issues with correct bytes.
-    v_bytes_ok = ic_present(eip + {28'd0,u_d.len}) &&
-                 ic_present(eip + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
+    v_bytes_ok = ic_present(flin + {28'd0,u_d.len}) &&
+                 ic_present(flin + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
     pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok;
 
     // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
@@ -1873,9 +2212,47 @@ module core
   // ===========================================================================
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      state<=S_RESET; eip<=init_eip; eflags<=EFLAGS_RESET;
-      gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[2]<=32'd0; gpr[3]<=32'd0;
-      gpr[4]<=init_esp; gpr[5]<=32'd0; gpr[6]<=32'd0; gpr[7]<=32'd0;
+      state<=S_RESET;
+      // ----- M2S.1: dual boot-mode reset (docs/m2s1-segmentation-spec.md) -----
+      sys_mode<=boot_mode;
+      if (boot_mode) begin
+        // SYSTEM cold reset, matching qemu-system-i386: CS:EIP=F000:FFF0, real
+        // mode (CR0.PE=0, cr0=0x60000010), EDX=0x00000663 (P5 stepping sig),
+        // eflags=0x00000002. The reset CS hidden base is 0xFFFF0000 on a real
+        // P5, but qemu-system reports EIP=0xFFF0 and the bare-metal image is
+        // loaded at the LOW alias 0x000F0000; the reset stub immediately
+        // far-jumps to segment 0xF000 (base 0x000F0000), so we seed CS.base =
+        // 0x000F0000 here (fetch linear = 0x000F0000 + 0xFFF0 = 0x000FFFF0,
+        // exactly where the TB loads the image's last 16 bytes).
+        eip<=32'h0000_FFF0; eflags<=32'h0000_0002;
+        gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[2]<=32'h0000_0663; gpr[3]<=32'd0;
+        gpr[4]<=32'd0; gpr[5]<=32'd0; gpr[6]<=32'd0; gpr[7]<=32'd0;
+        creg0<=32'h6000_0010; creg2<=32'd0; creg3<=32'd0; creg4<=32'd0;
+        for (int s=0;s<NUM_SEG;s++) begin
+          seg_sel[s]<=16'h0000; seg_base[s]<=32'd0; seg_limit[s]<=32'h0000_FFFF;
+          // real-mode segs behave as present R/W data (attr only matters in PM):
+          // P=1 DPL=0 S=1 type=writable-data (0x93).
+          seg_attr[s]<=8'h93;
+        end
+        seg_sel[SG_CS]<=16'hF000; seg_base[SG_CS]<=32'h000F_0000;
+        seg_attr[SG_CS]<=8'h9B;   // CS: present readable code (P=1 S=1 type=0xB)
+        cpl_r<=2'd0;              // reset CPL = 0
+        gdt_base<=32'd0; gdt_limit<=16'd0; idt_base<=32'd0; idt_limit<=16'h03FF;
+        cs_d<=1'b0;   // real-mode CS: 16-bit default operand/address size
+      end else begin
+        eip<=init_eip; eflags<=EFLAGS_RESET;
+        gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[2]<=32'd0; gpr[3]<=32'd0;
+        gpr[4]<=init_esp; gpr[5]<=32'd0; gpr[6]<=32'd0; gpr[7]<=32'd0;
+        creg0<=32'd0; creg2<=32'd0; creg3<=32'd0; creg4<=32'd0;
+        for (int s=0;s<NUM_SEG;s++) begin
+          seg_sel[s]<=16'h0000; seg_base[s]<=32'd0; seg_limit[s]<=32'hFFFF_FFFF;
+          seg_attr[s]<=8'h93;   // flat present R/W (unused in user mode; benign)
+        end
+        seg_attr[SG_CS]<=8'h9B;
+        cpl_r<=2'd0;
+        gdt_base<=32'd0; gdt_limit<=16'd0; idt_base<=32'd0; idt_limit<=16'd0;
+        cs_d<=1'b1;   // user mode: flat 32-bit (def16 is gated off by !sys_mode)
+      end
       fetch_word<=3'd0; retire_valid<=1'b0; step<=4'd0;
       // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty).
       ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
@@ -2070,15 +2447,19 @@ module core
               fp_occ_pending <= 1'b0;
               // I-cache LRU: mark this fetched line MRU (2-way LRU, per the oracle
               // per-fetch l1_access). FP ops are 2 bytes (no straddle in practice).
-              ic_touch(eip);
+              ic_touch(flin);
               eip<=eip + {28'd0,u_d.len};
               q_pc<=eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
               retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
               agi_wr0<=9'h100; agi_wr1<=9'h100;   // FP writes no GP reg
             end
-          end else if (!u_d.simple) begin
+          end else if (!u_d.simple || sys_mode) begin
             // hand this one instruction to the slow functional FSM. Clear the
             // AGI write-tracking: the slow op runs many cycles, so on return to
+            // (M2S.1: a SYSTEM-mode core ALWAYS takes the slow FSM — the fast-path
+            //  decoder assumes 32-bit/flat and is unaware of real-mode 16-bit
+            //  defaults + segment bases. cycle_mode is 0 in the sys gate, so this
+            //  costs nothing there, and user mode is untouched.)
             // S_PIPE the LAST fast-path write is no longer "the immediately
             // preceding clock" and must not trigger a PHANTOM AGI stall (p5model
             // AGI checks reg_wcycle==issue-1, plugin/p5model.c:451).
@@ -2113,10 +2494,10 @@ module core
             // (only when it crosses the boundary), and the paired V's line are the
             // lines actually fetched this clock. Order matches the oracle (U then
             // its straddle then V).
-            ic_touch(eip);
-            if (({1'b0,eip[4:0]} + {2'b0,u_d.len}) > 6'd32)
-              ic_touch(eip + {28'd0,u_d.len} - 32'd1);
-            if (do_v) ic_touch(eip + {28'd0,u_d.len});
+            ic_touch(flin);
+            if (({1'b0,flin[4:0]} + {2'b0,u_d.len}) > 6'd32)
+              ic_touch(flin + {28'd0,u_d.len} - 32'd1);
+            if (do_v) ic_touch(flin + {28'd0,u_d.len});
 
             // ---- U commit ----
             if (u_d.is_lea) begin
@@ -2277,11 +2658,16 @@ module core
           q_str_scandi<=d_str_scandi; q_ct<=d_ct; q_ret_imm<=d_ret_imm;
           q_cld<=d_cld; q_std<=d_std; step<=4'd0;
           q_clc<=d_clc; q_stc<=d_stc; q_cmc<=d_cmc; q_cnt16<=d_cnt16;
+          q_cli<=d_cli; q_sti<=d_sti;
           // latch x87 decode
           q_fxop<=d_fxop; q_is_x87<=d_is_x87; q_f_mem_read<=d_f_mem_read;
           q_f_mem_write<=d_f_mem_write; q_f_mbytes<=d_f_mbytes; q_f_pop<=d_f_pop;
           q_f_pop2<=d_f_pop2; q_f_sti<=d_f_sti; q_f_aluop<=d_f_aluop; q_f_const<=d_f_const;
           f_step<=4'd0;
+          // M2S.1 system decode latch.
+          q_sysop<=d_sysop; q_sys_sreg<=d_sys_sreg; q_sys_creg<=d_sys_creg;
+          q_seg<=d_seg; q_ljmp_off<=d_ljmp_off; q_ljmp_sel<=d_ljmp_sel;
+          seg_step<=1'b0;
 
           if (d_halt || d_unknown) begin
             // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
@@ -2313,6 +2699,26 @@ module core
           else if (d_is_x87) begin
             if (d_f_mem_read) state<=S_FLOAD;       // read mem operand first
             else state<=S_FEXEC;                    // reg/const/control op
+          end
+          // ---- M2S.1 system instructions ------------------------------------
+          else if (d_sysop != SYS_NONE) begin
+            unique case (d_sysop)
+              SYS_LGDT, SYS_LIDT: state<=S_LGDT;    // read 6-byte pseudo-desc
+              SYS_MOVSREG_TO: begin
+                // load a segment register. In REAL mode (or a null/PM-but-here
+                // we keep it simple) compute the hidden base directly; in
+                // PROTECTED mode read the 8-byte descriptor from the GDT first.
+                if (real_mode) state<=S_EXEC;       // base = sel<<4, no fetch
+                else state<=S_SEGLD;                // PM: fetch descriptor
+              end
+              SYS_LJMP: begin
+                // far jump. REAL mode: base=sel<<4, jump now. PM: load CS from
+                // the GDT descriptor (S_LJMP fetches it) then switch.
+                if (real_mode) state<=S_EXEC;
+                else state<=S_LJMP;
+              end
+              default: state<=S_EXEC;  // MOV CRn to/from, MOV sreg-from: no fetch
+            endcase
           end
           else if (d_kind==K_STR) begin
             // REP with ECX==0: degenerate single no-op record (advance EIP).
@@ -2396,6 +2802,56 @@ module core
           else if (q_clc) begin eflags<=eflags & ~32'h0000_0001; flags_we=1'b0; end // CF<-0
           else if (q_stc) begin eflags<=eflags | 32'h0000_0001;  flags_we=1'b0; end // CF<-1
           else if (q_cmc) begin eflags<=eflags ^ 32'h0000_0001;  flags_we=1'b0; end // CF<-~CF
+          else if (q_cli) begin eflags<=eflags & ~32'h0000_0200; flags_we=1'b0; end // IF<-0
+          else if (q_sti) begin eflags<=eflags | 32'h0000_0200;  flags_we=1'b0; end // IF<-1
+          // ---- M2S.1 system ops with no memory operand --------------------
+          else if (q_sysop==SYS_MOVCR_TO) begin
+            // MOV CRn, r32. Only CR0 is architecturally active this stage; the
+            // others (CR2/CR3/CR4) latch but do not affect addressing (paging =
+            // M2S.2). Writing CR0.PE here is the real->protected transition: it
+            // retires updating cr0 (its own record), and the FOLLOWING far jump
+            // loads CS + switches to 32-bit PM (matching the golden's atomicity).
+            flags_we=1'b0;
+            unique case (q_sys_creg)
+              3'd0: creg0<=gpr[q_src_reg];
+              3'd2: creg2<=gpr[q_src_reg];
+              3'd3: creg3<=gpr[q_src_reg];
+              default: creg4<=gpr[q_src_reg];
+            endcase
+          end
+          else if (q_sysop==SYS_MOVCR_FROM) begin
+            // MOV r32, CRn.
+            flags_we=1'b0;
+            unique case (q_sys_creg)
+              3'd0: gpr[q_dst_reg]<=creg0;
+              3'd2: gpr[q_dst_reg]<=creg2;
+              3'd3: gpr[q_dst_reg]<=creg3;
+              default: gpr[q_dst_reg]<=creg4;
+            endcase
+          end
+          else if (q_sysop==SYS_MOVSREG_FROM) begin
+            // MOV r/m16, Sreg -> write the selector value (zero-extended) to reg.
+            flags_we=1'b0;
+            gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], {16'd0, seg_sel[q_sys_sreg]}, 3'd2, 1'b0);
+          end
+          else if (q_sysop==SYS_MOVSREG_TO) begin
+            // REAL-MODE MOV Sreg, r16: selector = value; hidden base = sel<<4.
+            // Real mode does no descriptor / protection checks (no GDT consulted);
+            // the hidden attr stays the present R/W data default.
+            flags_we=1'b0;
+            seg_sel [q_sys_sreg] <= gpr[q_src_reg][15:0];
+            seg_base[q_sys_sreg] <= {12'd0, gpr[q_src_reg][15:0], 4'd0};
+            seg_limit[q_sys_sreg]<= 32'h0000_FFFF;
+            seg_attr [q_sys_sreg]<= 8'h93;
+          end
+          else if (q_sysop==SYS_LJMP) begin
+            // REAL-MODE far jump: CS.sel = sel, CS.base = sel<<4, EIP = off.
+            flags_we=1'b0;
+            seg_sel [SG_CS] <= q_ljmp_sel;
+            seg_base[SG_CS] <= {12'd0, q_ljmp_sel, 4'd0};
+            seg_attr[SG_CS] <= 8'h9B;
+            new_eip = q_ljmp_off;
+          end
           else begin
             unique case (q_kind)
               K_ALU: begin
@@ -2851,6 +3307,96 @@ module core
         end
 
         // -------------------------------------------------------------------
+        // M2S.1 — S_LGDT: read the 6-byte LGDT/LIDT pseudo-descriptor (limit[2] +
+        // base[4]) from memory at q_ea via two word reads, then load GDTR/IDTR.
+        // beat 0: word @q_ea   = { base[15:0], limit[15:0] }
+        // beat 1: word @q_ea+4 = { ........., base[31:16] }
+        // -------------------------------------------------------------------
+        S_LGDT: begin
+          if (mem_ack) begin
+            if (!seg_step) begin
+              gdt_lo <= mem_rdata;     // limit[15:0] | base[15:0]
+              seg_step <= 1'b1;
+            end else begin
+              // base[31:16] is the low half of the second word.
+              logic [31:0] nb; logic [15:0] nl;
+              nl = gdt_lo[15:0];
+              nb = {mem_rdata[15:0], gdt_lo[31:16]};
+              if (q_sysop==SYS_LGDT) begin gdt_base<=nb; gdt_limit<=nl; end
+              else begin idt_base<=nb; idt_limit<=nl; end
+              eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
+            end
+          end
+        end
+
+        // -------------------------------------------------------------------
+        // M2S.1 — S_SEGLD: PROTECTED-mode MOV Sreg, r16. Read the 8-byte GDT
+        // descriptor at gdt_base + (sel & ~7) via two word reads, decode the
+        // hidden base/limit/attr, and load the segment. The protection DECISION
+        // (present/type/DPL + null-SS/CS rules, CPL=cpl_r, RPL=sel[1:0]) is
+        // genuinely COMPUTED here via seg_load_fault(); fault *delivery* through
+        // the IDT is M2S.3, so a raised decision can only HALT loudly (it never
+        // silently mis-loads). The pseg corpus loads only clean descriptors, so
+        // the decision is always "no fault" and this never halts — but a wrong/
+        // absent/mis-typed descriptor WOULD now be caught here (spec §3).
+        // -------------------------------------------------------------------
+        S_SEGLD: begin
+          if (mem_ack) begin
+            if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
+            else begin
+              logic [63:0] desc;
+              logic [7:0]  attr;
+              logic        is_ss;
+              desc  = {mem_rdata, gdt_lo};
+              attr  = desc_attr(desc);
+              is_ss = (q_sys_sreg == 3'(SG_SS));
+              // PROTECTION DECISION (computed, not delivered until M2S.3):
+              if (seg_load_fault(1'b0, is_ss, gpr[q_src_reg][15:0], attr, cpl_r)) begin
+                state<=S_HALT;   // #GP/#NP/#SS would vector here in M2S.3
+              end else begin
+                seg_sel  [q_sys_sreg] <= gpr[q_src_reg][15:0];
+                seg_base [q_sys_sreg] <= desc_base(desc);
+                seg_limit[q_sys_sreg] <= desc_limit(desc);
+                seg_attr [q_sys_sreg] <= attr;
+                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
+              end
+            end
+          end
+        end
+
+        // -------------------------------------------------------------------
+        // M2S.1 — S_LJMP: PROTECTED-mode far JMP. Read the CS descriptor from the
+        // GDT, load CS.sel/base/limit/attr, derive CPL=CS.RPL, and set EIP to the
+        // jump offset. This is the second half of the real->protected transition
+        // (the CR0.PE write retired separately): its own retire record, switching
+        // to 32-bit PM. The CS protection DECISION (present/code-type/null) is
+        // COMPUTED via seg_load_fault(); delivery is M2S.3 (a raised decision
+        // HALTs). The pseg far jump targets a present 32-bit code seg => no fault.
+        // -------------------------------------------------------------------
+        S_LJMP: begin
+          if (mem_ack) begin
+            if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
+            else begin
+              logic [63:0] desc;
+              logic [7:0]  attr;
+              desc = {mem_rdata, gdt_lo};
+              attr = desc_attr(desc);
+              if (seg_load_fault(1'b1, 1'b0, q_ljmp_sel, attr, cpl_r)) begin
+                state<=S_HALT;   // #GP would vector here in M2S.3
+              end else begin
+                seg_sel  [SG_CS] <= q_ljmp_sel;
+                seg_base [SG_CS] <= desc_base(desc);
+                seg_limit[SG_CS] <= desc_limit(desc);
+                seg_attr [SG_CS] <= attr;
+                cpl_r    <= q_ljmp_sel[1:0];  // CPL = CS.RPL after a far jump
+                cs_d <= desc[54];   // D/B bit: 1 => 32-bit default operand/addr size
+                eip<=q_ljmp_off; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
+              end
+            end
+          end
+        end
+
+        // -------------------------------------------------------------------
         // S_FEXEC: x87 execute + commit. Updates fpr/ftop/fstat/fptag, sets
         // x87_touched_r, and either retires (advance EIP) or hands a memory
         // store to S_FSTORE. All arithmetic is bit-exact vs QEMU softfloat for
@@ -3143,16 +3689,62 @@ module core
   end
 
   // ===========================================================================
+  // M2S.1 data segment base. For a slow-path data access the linear address is
+  // seg.base + offset. The base depends on which segment the access uses:
+  //   - stack ops (push/pop/call/ret/leave/pushf/popf) use SS
+  //   - string source ([ESI]) uses DS, dest ([EDI]) uses ES
+  //   - LGDT/LIDT pseudo-descriptor read uses DS
+  //   - everything else uses q_seg (DS default, or a segment-override prefix)
+  // In USER mode every seg_base[]==0 so dbase==0 and the linear address is the
+  // unchanged flat offset (so make verify is bit-for-bit unaffected).
+  // ===========================================================================
+  logic [31:0] dbase, dbase_edi;
+  logic [2:0]  dseg;              // which segment supplies dbase (for the limit check)
+  always_comb begin
+    if (q_is_pop || q_is_push || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
+        (q_kind==K_CTRL && (q_ct==CT_CALLREL || q_ct==CT_CALLIND)) ||
+        (q_kind==K_STKMISC && (q_sm==SM_POPF || q_sm==SM_PUSHF ||
+                               q_sm==SM_LEAVE || q_sm==SM_PUSHA || q_sm==SM_POPA)))
+      dseg = 3'(SG_SS);
+    else if (q_kind==K_STR)
+      dseg = (q_st==ST_SCAS) ? 3'(SG_ES) : 3'(SG_DS);
+    else
+      dseg = q_seg;
+    dbase     = seg_base[dseg];
+    dbase_edi = seg_base[SG_ES];   // string/[EDI] destination uses ES
+  end
+
+  // M2S.1 — protected-mode segment LIMIT-check DECISION (spec §3, computed not
+  // delivered). For an expand-up data/code segment the last byte of an access at
+  // segment offset `off` must satisfy off <= seg_limit. We compute this for the
+  // current data access (effective address q_ea against dseg's hidden limit) so
+  // the limit check is genuinely COMPUTED — but, like seg_load_fault, delivery
+  // (#GP) is M2S.3, so a positive decision can only be observed here / HALT in a
+  // later stage. The pseg corpus's top-of-segment access (offset 0xFFFC dword in
+  // the 64 KiB based segment) is exactly in-bounds, so this is always 0 for the
+  // gate. Only meaningful in protected mode (sys_mode & !real_mode); flat/user
+  // segments have seg_limit=0xFFFFFFFF so it is trivially 0 there too.
+  logic [31:0] dlimit;
+  logic        seg_off_over_limit;
+  always_comb begin
+    dlimit = seg_limit[dseg];
+    // worst-case last touched byte of the operand = q_ea + (width-1); use +3 (the
+    // widest scalar) as a conservative bound for the computed decision.
+    seg_off_over_limit = sys_mode && !real_mode && ({1'b0,q_ea} + 33'd3 > {1'b0,dlimit});
+  end
+
+  // ===========================================================================
   // Bus request generation (single combinational driver)
   // ===========================================================================
   always_comb begin
     mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
     unique case (state)
-      S_FETCH: begin mem_req=1'b1; mem_addr=eip+{27'd0,fetch_word,2'b00}; end
+      S_FETCH: begin mem_req=1'b1; mem_addr=flin+{27'd0,fetch_word,2'b00}; end
       S_PF:    begin mem_req=1'b1; mem_addr={pf_fill_addr[31:5],5'd0}+{27'd0,pf_word,2'b00}; end
       S_PIPE:  begin
         // a register-base load issued this clock reads [base] combinationally.
-        if (pipe_load_req) begin mem_req=1'b1; mem_addr=gpr[pipe_load_base]; end
+        // M2S.1: add the DS base (0 in user mode / flat PM).
+        if (pipe_load_req) begin mem_req=1'b1; mem_addr=seg_base[SG_DS]+gpr[pipe_load_base]; end
         // I-cache miss detected this clock: fetch the fill line's WORD 0 NOW so the
         // detection clock is productive (finding [med] I-miss off-by-one). S_PF then
         // fetches words 1..7. mem_req for the load and the fill are mutually
@@ -3163,22 +3755,30 @@ module core
         mem_req=1'b1;
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
             (q_kind==K_STKMISC && q_sm==SM_POPF))
-          mem_addr=gpr[R_ESP];
+          mem_addr=dbase+gpr[R_ESP];
         else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)
-          mem_addr=gpr[R_EBP];     // LEAVE reads [EBP] (the saved frame ptr)
+          mem_addr=dbase+gpr[R_EBP];     // LEAVE reads [EBP] (the saved frame ptr)
         else if (q_kind==K_STR) begin
           // load order: movs/lods/cmps -> [ESI]; scas -> [EDI]
-          if (q_st==ST_SCAS) mem_addr=gpr[R_EDI];
-          else               mem_addr=gpr[R_ESI];
-        end else mem_addr=q_ea;
+          if (q_st==ST_SCAS) mem_addr=dbase+gpr[R_EDI];
+          else               mem_addr=dbase+gpr[R_ESI];
+        end else mem_addr=dbase+q_ea;
       end
-      S_LOAD2: begin mem_req=1'b1; mem_addr=gpr[R_EDI]; end
+      S_LOAD2: begin mem_req=1'b1; mem_addr=dbase_edi+gpr[R_EDI]; end
+      // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
+      S_LGDT: begin mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
+      S_SEGLD: begin mem_req=1'b1;
+        mem_addr=gdt_base+{16'd0,gpr[q_src_reg][15:3],3'd0}+{29'd0,seg_step,2'b00};
+      end
+      S_LJMP: begin mem_req=1'b1;
+        mem_addr=gdt_base+{16'd0,q_ljmp_sel[15:3],3'd0}+{29'd0,seg_step,2'b00};
+      end
       S_FLOAD: begin
-        mem_req=1'b1; mem_addr=q_ea + {26'd0, f_step, 2'b00};   // q_ea + 4*f_step
+        mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
       end
       S_FSTORE: begin
         mem_req=1'b1; mem_we=1'b1;
-        mem_addr = q_ea + {26'd0, f_step, 2'b00};
+        mem_addr = dbase+q_ea + {26'd0, f_step, 2'b00};
         // the m80 third beat writes only 2 bytes; all others write a full word.
         if (q_f_mbytes==4'd10 && f_step==4'd2) mem_wstrb=4'b0011;
         else if (q_f_mbytes==4'd2)             mem_wstrb=4'b0011;   // m16 (cw/sw/int16)
@@ -3192,16 +3792,17 @@ module core
       S_STORE: begin
         mem_req=1'b1; mem_we=1'b1;
         if (q_kind==K_STR) begin
-          mem_wstrb=strb_of(q_w); mem_addr=str_store_addr; mem_wdata=str_store_data;
+          // string store [EDI] uses ES.
+          mem_wstrb=strb_of(q_w); mem_addr=dbase_edi+str_store_addr; mem_wdata=str_store_data;
         end else begin
-          mem_wstrb=st_strb; mem_addr=st_addr; mem_wdata=st_data;
+          mem_wstrb=st_strb; mem_addr=dbase+st_addr; mem_wdata=st_data;
         end
       end
       S_USEQ: begin
         mem_req=1'b1;
         if (q_sm==SM_PUSHA) begin
           mem_we=1'b1; mem_wstrb=4'b1111;
-          mem_addr=pusha_esp - (32'd4*({28'd0,step}+32'd1));
+          mem_addr=dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
           unique case (step)
             4'd0: mem_wdata=gpr[R_EAX];
             4'd1: mem_wdata=gpr[R_ECX];
@@ -3213,7 +3814,7 @@ module core
             default: mem_wdata=gpr[R_EDI];
           endcase
         end else begin // POPA: read ascending from ESP
-          mem_we=1'b0; mem_addr=gpr[R_ESP] + (32'd4*{28'd0,step});
+          mem_we=1'b0; mem_addr=dbase+gpr[R_ESP] + (32'd4*{28'd0,step});
         end
       end
       default: ;
@@ -3230,7 +3831,17 @@ module core
   // ===========================================================================
   // verilator lint_off UNUSED
   wire _unused = &{1'b0, mem_rdata[0], pfx_lock, pfx_seg, pfx_addr, q_imul_3op,
-                   q_str_storedi};
+                   q_str_storedi,
+                   // M2S.1 — protection DECISIONS that are genuinely COMPUTED here
+                   // but whose DELIVERY (#GP/#NP/#SS/limit fault vectoring) is
+                   // M2S.3: seg_off_over_limit (the per-access limit-check result;
+                   // 0 for the in-bounds pseg corpus). Sunk so the clean -Wall lint
+                   // stays quiet until M2S.3 wires the fault path to it.
+                   seg_off_over_limit,
+                   // RESERVED system state, loaded this stage, gated-diffed later:
+                   // GDT limit (descriptor-table bounds) + the IDTR (interrupts =
+                   // M2S.3). Retained as the home for those checks.
+                   gdt_limit[0], idt_base[0], idt_limit[0]};
   // verilator lint_on UNUSED
 
 endmodule : core

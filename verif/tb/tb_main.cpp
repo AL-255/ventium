@@ -53,6 +53,12 @@ struct Args {
     bool     x87        = false;  // emit x87 fields + header x87:true (M3)
     bool     cycle      = false;  // emit cycle-mode trace + header mode:cycle (M4)
     uint32_t errata     = 0;      // M6 errata-enable bus (default 0 = clean core)
+    // M2S.1: --system selects boot_mode=system (cold reset at F000:FFF0, real
+    // mode) and emits the sys fields + header sys:true. A -bios image is loaded
+    // so its LAST byte sits at 0x000FFFFF (image base = 0x100000 - image_bytes),
+    // matching qemu-system-i386 -bios; the reset vector F000:FFF0 = 0x000FFFF0
+    // then lands on the image's last 16 bytes.
+    bool     system     = false;
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -60,7 +66,7 @@ struct Args {
         "usage: %s --out <trace.vtrace> [--image <blob> --load <hexaddr>]\n"
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
-        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle]\n"
+        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle] [--system]\n"
         "          [--errata <hexmask>]\n", prog);
     std::exit(code);
 }
@@ -94,6 +100,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--quiesce")    a.quiesce    = parse_u32(need("--quiesce"));
         else if (k == "--x87")        a.x87        = true;
         else if (k == "--cycle")      a.cycle      = true;
+        else if (k == "--system")     a.system     = true;
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -117,14 +124,32 @@ int main(int argc, char** argv) {
     // ---- backing memory + image -------------------------------------------
     ventium::MemModel mem;
     if (!args.image.empty()) {
-        long n = mem.load_image(args.image, args.load_addr);
+        // M2S.1 --system: a -bios image is mapped so its LAST byte is at
+        // 0x000FFFFF (and the reset vector F000:FFF0 -> 0x000FFFF0 lands on its
+        // last 16 bytes). We compute the load address from the file size:
+        // load_addr = 0x00100000 - filesize. The whole image then sits at
+        // 0x000F0000.. for a 64 KiB image (where segment 0xF000, base 0x000F0000,
+        // and the PM code at 0x000Fxxxx all resolve). User mode keeps --load.
+        uint32_t load_at = args.load_addr;
+        if (args.system) {
+            long sz = 0;
+            { FILE* f = std::fopen(args.image.c_str(), "rb");
+              if (f) { std::fseek(f, 0, SEEK_END); sz = std::ftell(f); std::fclose(f); } }
+            if (sz <= 0 || sz > 0x00100000) {
+                std::fprintf(stderr, "tb: --system bios image bad size %ld\n", sz);
+                return 2;
+            }
+            load_at = (uint32_t)(0x00100000u - (uint32_t)sz);
+        }
+        long n = mem.load_image(args.image, load_at);
         if (n < 0) {
             std::fprintf(stderr, "tb: failed to load image '%s'\n",
                          args.image.c_str());
             return 2;
         }
-        std::fprintf(stderr, "tb: loaded %ld bytes at 0x%08x from %s\n",
-                     n, args.load_addr, args.image.c_str());
+        std::fprintf(stderr, "tb: loaded %ld bytes at 0x%08x from %s%s\n",
+                     n, load_at, args.image.c_str(),
+                     args.system ? " (bios)" : "");
     }
 
     // ---- trace writer (opens file + writes header) ------------------------
@@ -139,7 +164,8 @@ int main(int argc, char** argv) {
                       args.cycle ? " cycle" : "");
         // --cycle wins over --x87: a cycle trace carries no x87 fields. open()
         // forces x87:false in cycle mode, so the header stays well-formed.
-        if (!trace.open(args.out, note, args.x87, args.cycle)) {
+        // --system adds the sys fields (cr0..cr4) + header sys:true (func mode).
+        if (!trace.open(args.out, note, args.x87, args.cycle, args.system)) {
             std::fprintf(stderr, "tb: cannot open trace '%s'\n", args.out.c_str());
             return 2;
         }
@@ -199,6 +225,7 @@ int main(int argc, char** argv) {
     top->rst_n  = 0;
     top->init_eip  = args.entry;
     top->init_esp  = args.init_esp;
+    top->boot_mode  = args.system ? 1 : 0;  // M2S.1: system cold reset
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
     top->errata_en  = args.errata & 0xF;     // M6: errata-enable bus (default 0)
     top->mem_rdata = 0;
