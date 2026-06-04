@@ -307,10 +307,23 @@ Effort estimates are coarse; this is a long project.
   cycle estimate (CPI, pairing %, mispredict %) within tolerance; harness
   benchmarks track the cycle golden reference.
 
-- **M5 — Cache/bus timing + x87 cycle accuracy (→ layers 2 & 4).**
-  Banked D-cache timing, write buffers, 64-bit bus FSM with burst/locked/
-  pipelined/snoop cycles; FPU cycle behavior. *Gate:* bus/protocol corpus passes;
-  cycle match extends to FP + branch-heavy code.
+- **M5 — Cache-cycle + x87/FP-cycle accuracy (→ layer 4).** *Re-scoped to the
+  differentially-verifiable half:* model L1 I$/D$ **miss-cycle timing** (8 KB
+  2-way 32 B, p5model `imiss/dmiss`, bank conflict, misalign) and **FP cycle
+  accuracy** (dependent `fadd` chain → CPI≈3 via the FP latency/throughput model),
+  extending the M4 emergent cycle match. *Gate:* `faddchain` becomes a gated band,
+  I$/D$-miss kernels track the p5model golden, and the integer absolute-`cyc`
+  match tightens (M4 ran a loose 50% tolerance for the un-modeled cold-miss).
+  Functional gates + M4 integer bands stay green. (Cycle oracle is an estimate,
+  PLAN §8.)
+
+- **M5B — Pin-level 64-bit bus protocol (→ layer 2). *Deferred; no oracle.***
+  Bus interface unit: `ADS#/BRDY#/NA#/KEN#/CACHE#/HITM#/LOCK#/HOLD/HLDA/BOFF#/
+  AHOLD/EADS#`, burst line fills, write-back, locked + pipelined cycles, snoops,
+  reset/INIT/BIST. The p5model oracle models cache misses as a cycle count, not
+  bus pins, and QEMU has no pin-level bus trace — so this is built structurally +
+  checked with local SVA/self-consistency, not differentially verified until
+  real-chip bus traces exist (REF.md §4). Tracked like M2S.
 
 - **M6 — Errata & stepping fidelity (→ layer 5, stretch).**
   Model documented errata from spec updates (FDIV, F00F, SMM/BTB quirks, …) for a

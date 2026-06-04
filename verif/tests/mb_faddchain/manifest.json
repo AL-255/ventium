@@ -1,0 +1,19 @@
+{
+  "name": "mb_faddchain",
+  "src": "mb_faddchain/mb_faddchain.s",
+  "elf": "mb_faddchain/mb_faddchain.elf",
+  "image": "mb_faddchain/mb_faddchain.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "x87": true,
+  "m5_cycle": true,
+  "m5_kind": "fp",
+  "m5_gated": true,
+  "m5_metric": "cpi",
+  "m5_band": "CPI 2.7-3.3 (dependent fadd chain ~ fadd latency 3)",
+  "golden_cpi": 2.991,
+  "golden_insns": 3076,
+  "golden_cyc": 9201,
+  "note": "GATED FP-latency band (M5 promotes faddchain from M4 INFO). Dependent fadd %st(1),%st chain: each fadd RAW-depends on st(0) through the 3-cycle fadd latency, so the chain cannot overlap -> CPI~3.0. p5trace.so golden (imiss=8,dmiss=8,cache=1): icache_miss 0.52%, dcache 0, misalign 0 -- the elevation is purely FP latency."
+}

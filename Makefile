@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 rtl plugin tests clean help
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 rtl plugin tests clean help
 .DEFAULT_GOAL := help
 
 help:
@@ -19,6 +19,7 @@ help:
 	@echo "  make m2         M2 differential gate: user-mode integer ISA completeness vs QEMU"
 	@echo "  make m3         M3 differential gate: x87 FPU func-equiv vs QEMU (+ integer suites)"
 	@echo "  make m4         M4 cycle gate: dual-issue U/V pipeline cycle-accuracy vs p5model"
+	@echo "  make m5         M5 cycle gate: L1 cache-miss + x87/FP cycle accuracy vs p5model"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -83,8 +84,27 @@ m3:
 m4:
 	bash verif/run-m4.sh
 
+# --- M5 cycle-accuracy gate (verif/run-m5.sh) -------------------------------
+# Extends M4 with the two cycle pieces M4 deferred and that the p5model oracle
+# CAN differentially verify: (1) L1 cache-miss timing (I$/D$ hit/miss SM with
+# the SAME imiss=8/dmiss=8 8KB/2-way/32B geometry p5trace.so uses) and (2) x87/
+# FP cycle accuracy (real FP latency/throughput pipe, replacing the M4 serialize
+# stall). The pin-level 64-bit bus protocol has NO oracle and is DEFERRED to M5B
+# (not built here). The gate: (a) HARD functional regression — make m1/m2/m3
+# must all exit 0 (cache/FP timing changes only stall accounting, never
+# architectural results); (b) HARD M4 integer bands — the five M4 kernels still
+# meet their 55-validate bands from the now-cache-aware RTL; (c) NEW M5 bands —
+# mb_faddchain CPI ~3.0 (gated, promoted from M4 INFO), mb_fpindep CPI below the
+# faddchain CPI (latency<->throughput), mb_dmiss/mb_imiss miss-driven CPI
+# elevation + abs-cyc tracking the golden within the tightened M5_TOL_PCT (10%);
+# (d) integer abs-cyc vs golden reported under the tightened tolerance. Exit 0
+# iff func green AND M4 bands met AND new M5 bands met. (run-m5.sh builds the TB
+# + each ELF itself and invokes make m1/m2/m3 internally.)
+m5:
+	bash verif/run-m5.sh
+
 clean:
 	-$(MAKE) -C verif/tb clean
 	-$(MAKE) -C verif/qemu-plugins clean
 	-$(MAKE) -C verif/tests clean
-	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2 $(BUILD)/m3 $(BUILD)/m4
+	rm -rf $(BUILD)/*.vtrace $(BUILD)/m0 $(BUILD)/m1 $(BUILD)/m2 $(BUILD)/m3 $(BUILD)/m4 $(BUILD)/m5

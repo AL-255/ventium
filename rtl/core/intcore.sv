@@ -133,18 +133,25 @@ module intcore
   // fast path does not recognise falls back to the proven multi-cycle FSM
   // (S_FETCH..) so functional behaviour is preserved exactly.
   // ===========================================================================
-  // 8 KB direct-mapped instruction cache (256 lines x 32 bytes), exactly the P5
-  // L1 I-cache geometry (Alpert & Avnon). The fast path decodes combinationally
-  // out of the cache; a miss triggers a line fill (8 word reads = the fill
-  // penalty) in S_PF. After the first pass over a hot loop the body is resident,
-  // so re-fetches are free and CPI converges to the steady-state value — the
-  // same mechanism the p5model icache uses to amortise its cold-miss penalty.
-  localparam int IC_LINES = 256;
-  localparam int IC_LINE  = 32;
-  logic [7:0]  ic_data [IC_LINES][IC_LINE];
-  logic [18:0] ic_tag  [IC_LINES];   // addr[31:13]
-  logic        ic_val  [IC_LINES];
+  // 8 KB 2-WAY set-associative instruction cache (128 sets x 2 ways x 32 B line =
+  // 256 lines), the P5 L1 I-cache geometry (Alpert & Avnon, docs/p5-timing-model.md).
+  // M5 finding [med]: the oracle's I-cache is 2-WAY / 128-set / LRU
+  // (verif/qemu-plugins/p5trace.c:61-65 L1_SETS=128 L1_WAYS=2, l1_access 2-way
+  // LRU); a DIRECT-MAPPED I-cache gives a DIFFERENT hit/miss SEQUENCE for any
+  // conflict-prone or partially-resident working set (wrong-way / replacement
+  // divergence). The I-cache must use the SAME associativity/index/tag/LRU as the
+  // oracle (and as the RTL D-cache) so the miss sequence — not just the aggregate
+  // — agrees. set = addr[11:5] (128 sets), tag = addr[31:12] (20 bits). The fast
+  // path decodes combinationally out of the cache; a miss triggers a line fill
+  // (8 word reads = imiss penalty) in S_PF, allocating the 2-way LRU victim.
+  localparam int IC_SETS = 128;
+  localparam int IC_LINE = 32;
+  logic [7:0]  ic_data [IC_SETS][2][IC_LINE];
+  logic [19:0] ic_tag  [IC_SETS][2];   // addr[31:12]
+  logic        ic_val  [IC_SETS][2];
+  logic        ic_lru  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
   logic [31:0] pf_fill_addr;         // line base currently being filled
+  logic        pf_fill_way;          // 2-way victim way chosen for the fill
   logic [2:0]  pf_word;              // refill word counter (8 words = 32 bytes)
 
   // BTB: 64 sets x 4 ways, 2-bit saturating counters (Alpert & Avnon / AP-500).
@@ -160,6 +167,57 @@ module intcore
   logic [8:0]  agi_wr0, agi_wr1;     // up to two regs written last fast clock
 
   logic [2:0]  mispred_bubbles;      // remaining flush bubbles to burn
+
+  // ===========================================================================
+  // M5 cycle-accuracy state (docs/m5-cycle-spec.md). Two timing models, both
+  // EMERGENT (real SM / real scoreboard), using the SAME geometry/penalty as the
+  // p5model oracle (build/p5trace.so: imiss=8, dmiss=8, 8KB/2-way/32B, misalign
+  // +3) so the cycle COMPONENTS agree, not a formula copied from the oracle.
+  // ===========================================================================
+  // Free-running core-clock counter (the timeline the FP scoreboard lives on).
+  // Mirrors the TB's cyc = clock-count-at-retire; advances every clock.
+  logic [31:0] core_cyc;
+
+  // x87 FP latency/throughput scoreboard (p5model g.fp_ready). Holds the cycle at
+  // which the x87 top-of-stack result of the most recent FP producer/rmw becomes
+  // readable. A dependent FP consumer (fp_role>=2) must stall until then; this is
+  // what turns a dependent fadd chain into CPI~3 (lat 3) while independent FP
+  // pipelines at throughput 1 (the latency is overlapped by other work).
+  logic [31:0] fp_ready_cyc;
+
+  // FP pipe OCCUPANCY hold (p5model pipe_free_at = issue + occ). An FP op holds
+  // the in-order pipe for `occ` clocks: even a FOLLOWING INDEPENDENT integer op
+  // cannot issue until the FP op's occupancy expires (fdiv occ 39, fmul occ 2,
+  // fsqrt occ 70). This is DISTINCT from result latency (fp_ready_cyc), which
+  // only stalls a dependent FP CONSUMER. fp_occ_pending marks "occupancy clocks
+  // are being burned; commit+retire when stall_cnt reaches 0"; fp_issue_cyc is
+  // the cycle occupancy began (so fp_ready = issue + lat is anchored correctly).
+  logic        fp_occ_pending;
+  logic [31:0] fp_issue_cyc;
+
+  // L1 D-cache TIMING model: 8 KB / 2-way / 32 B line / 128 sets, LRU. Data still
+  // comes from the BFM (mem_rdata); this only gates WHEN a load completes. A read
+  // miss adds dmiss; a misaligned access adds +3 (AP-500). Matches p5_mem() +
+  // l1_access() in verif/qemu-plugins/p5trace.c (read-allocate, 2-way LRU).
+  localparam int DC_SETS = 128;
+  logic [19:0] dc_tag [DC_SETS][2];   // addr/32/128
+  logic        dc_val [DC_SETS][2];
+  logic        dc_lru [DC_SETS];      // 2-way LRU: way most-recently-used
+  // I-cache miss penalty (imiss=8) is materialised EMERGENTLY by the existing
+  // S_PF line-fill (8 word reads = 8 clocks), so it needs no constant here.
+  localparam logic [6:0] P5_DMISS = 7'd8;   // D-cache miss penalty (plugin arg)
+  localparam logic [6:0] P5_MISALIGN = 7'd3;// misaligned data access (AP-500)
+
+  // Deferred D-cache penalty (p5model g.pending_mem_pen): a load's miss/misalign
+  // penalty is charged to the NEXT instruction's issue (the model defers the
+  // data stall by one retire). We replicate that one-instruction defer so the
+  // per-instruction cyc deltas line up with the oracle.
+  logic [6:0]  pending_mem_pen;
+
+  // Multi-clock stall countdowns used to MATERIALISE a penalty as real clocks
+  // (so cyc = clock-count-at-retire grows by exactly the penalty). Only one is
+  // ever non-zero at a time; S_PIPE burns them before issuing.
+  logic [6:0]  stall_cnt;             // remaining stall clocks before next issue
 
   // ALU op encoding (low 3 bits mirror the x86 ALU group order 0..7).
   localparam logic [4:0] ALU_ADD = 5'd0;
@@ -1366,6 +1424,19 @@ module intcore
   logic [3:0]  st_strb;
   logic [31:0] call_target;
 
+  // Slow-path data-LOAD address (mirrors the S_LOAD bus-driver address selection)
+  // so the sequential block can run the D-cache timing SM on it (M5 finding [med]).
+  logic [31:0] slow_dmem_addr;
+  always_comb begin
+    if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
+        (q_kind==K_STKMISC && q_sm==SM_POPF))      slow_dmem_addr = gpr[R_ESP];
+    else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  slow_dmem_addr = gpr[R_EBP];
+    else if (q_kind==K_STR) begin
+      if (q_st==ST_SCAS)                           slow_dmem_addr = gpr[R_EDI];
+      else                                         slow_dmem_addr = gpr[R_ESI];
+    end else                                       slow_dmem_addr = q_ea;
+  end
+
   logic [31:0] call_t16;  // 0x66 near-CALL truncated target (declared at top to
                           // avoid an inferred latch on a branch-local var)
   always_comb begin
@@ -1723,7 +1794,29 @@ module intcore
     logic        pairs_first;
     logic        pairs_second;
     logic        disp_imm;
+    // ---- M5 x87/FP cycle-accuracy fast-path fields (cycle-mode only) --------
+    // A small whitelist of register-form x87 ops is recognised here so the FP
+    // *cycle* model (latency/throughput, the p5model fp_role scoreboard) is
+    // emergent from the dual-issue pipe rather than the M4 slow-FSM serialize.
+    // Functional execution reuses the SAME exact helpers (fconst/f_eval/...), so
+    // arch state is bit-identical to the slow path. is_fp is asserted ONLY in
+    // cycle_mode (func mode keeps FP on the proven slow FSM -> no regression).
+    logic        is_fp;       // fast-path x87 op (cycle-mode whitelist)
+    logic [2:0]  fp_kind;     // FK_* below
+    logic [2:0]  fp_aluop;    // x87 group (add/sub/mul/div/...) for FK_ARITH
+    logic [2:0]  fp_sti;      // st(i) index operand
+    logic [2:0]  fp_role;     // p5model fp_role: 0 none,1 producer,2 consumer,3 rmw
+    logic [6:0]  fp_lat;      // FP result latency (cycles) for the scoreboard
+    logic [6:0]  fp_occ;      // FP pipe OCCUPANCY (cycles the in-order pipe is held)
   } fpd_t;
+
+  // FP fast-path op kinds (the cycle-mode x87 whitelist).
+  localparam logic [2:0] FK_NONE   = 3'd0;
+  localparam logic [2:0] FK_FLDC   = 3'd1;   // FLD const (e.g. FLD1) — push
+  localparam logic [2:0] FK_ARITH  = 3'd2;   // ST0 op= ST(i) (reg form)
+  localparam logic [2:0] FK_FSTP0  = 3'd3;   // FSTP %st(0) — pop (discard)
+  localparam logic [2:0] FK_FLDSTI = 3'd4;   // FLD ST(i) — push copy
+  localparam logic [2:0] FK_FXCH   = 3'd5;   // FXCH ST(i)
 
   function automatic fpd_t fp_decode(input logic [7:0] b0, input logic [7:0] b1,
                                      input logic [7:0] b2, input logic [7:0] b3,
@@ -1860,7 +1953,76 @@ module intcore
         8'hEB: begin
           d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b0; d.len=4'd2;
           d.br_taken=1'b1; d.rel={{24{b1[7]}},b1};
-          d.pairs_first=1'b0; d.pairs_second=1'b0;
+          // M5 finding [med]: an unconditional short JMP (EB) is V-only-pairable in
+          // the oracle (verif/qemu-plugins/p5trace.c:271-273: JMP -> pclass=PV,
+          // pairs_second=true) — exactly like a Jcc rel8. It can FILL the V slot of
+          // a pair (e.g. `<UV op>; jmp`) but cannot LEAD a pair. Matching this pairs
+          // the `<mov>; jmp` groups the assembler's p2align filler emits (mb_imiss).
+          d.pairs_first=1'b0; d.pairs_second=1'b1;
+        end
+        // ---- M5: x87 register-form FP whitelist (cycle-mode only) ------------
+        // These are recognised by the fast path so the FP latency/throughput
+        // CYCLE model is emergent (p5model fp_role scoreboard). simple stays 0
+        // (so the fast path does NOT treat them as integer ALU ops) but is_fp
+        // marks the FP commit path. FP ops never pair (NP in p5model): they hold
+        // the U pipe alone, so pairs_first/second stay 0. Gated on cycle_mode so
+        // func runs keep FP on the proven slow FSM (zero functional risk).
+        8'b1101_1???: if (cycle_mode) begin
+          // register form only (mod==11); memory-operand FP stays slow-path.
+          if (b1[7:6]==2'b11) begin
+            unique case (b0)
+              8'hD9: begin
+                unique casez (b1)
+                  8'b1100_0???: begin   // D9 C0+i  FLD ST(i)  (push copy)
+                    d.is_fp=1'b1; d.fp_kind=FK_FLDSTI; d.len=4'd2;
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd1; d.fp_lat=7'd1; d.fp_occ=7'd1;
+                  end
+                  8'b1100_1???: begin   // D9 C8+i  FXCH ST(i)
+                    d.is_fp=1'b1; d.fp_kind=FK_FXCH; d.len=4'd2;
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
+                  end
+                  8'hE8,8'hE9,8'hEA,8'hEB,8'hEC,8'hED,8'hEE: begin // FLD const (E8=FLD1..)
+                    d.is_fp=1'b1; d.fp_kind=FK_FLDC; d.len=4'd2;
+                    d.fp_sti=(b1==8'hE8)?3'd0:(b1==8'hE9)?3'd1:(b1==8'hEA)?3'd2:
+                             (b1==8'hEB)?3'd3:(b1==8'hEC)?3'd4:(b1==8'hED)?3'd5:3'd6;
+                    // FLD-const is occ=2/lat=2 in the oracle (verif/qemu-plugins/
+                    // p5trace.c:307-309), NOT the lat-1 of FLD ST(i)/FLD mem.
+                    d.fp_role=3'd1; d.fp_lat=7'd2; d.fp_occ=7'd2;
+                  end
+                  default: ;  // other D9 reg-form ops stay slow-path
+                endcase
+              end
+              8'hD8: begin            // D8 C0+i.. : ST0 op= ST(i)  (add/mul/sub/div)
+                unique case (b1[5:3])
+                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin
+                    d.is_fp=1'b1; d.fp_kind=FK_ARITH; d.len=4'd2;
+                    d.fp_aluop=b1[5:3]; d.fp_sti=b1[2:0]; d.fp_role=3'd3;
+                    // Match the oracle classify() (verif/qemu-plugins/p5trace.c:
+                    // 285-297): fadd/fsub LAT 3 / OCC 1; fmul LAT 3 / OCC 2; fdiv/
+                    // fdivr LAT 39 / OCC 39 (extended PC). LATENCY governs a
+                    // dependent consumer's stall (fp_ready); OCCUPANCY governs how
+                    // long this op holds the in-order pipe (delays the NEXT insn,
+                    // even an independent integer op) — the two are distinct.
+                    // group: 0=FADD 1=FMUL 4=FSUB 5=FSUBR 6=FDIV 7=FDIVR.
+                    d.fp_lat = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 : 7'd3;
+                    d.fp_occ = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 :
+                               (b1[5:3]==3'd1)                ? 7'd2  : 7'd1;
+                  end
+                  default: ;  // FCOM/FCOMP reg-form stay slow-path
+                endcase
+              end
+              8'hDD: begin
+                unique casez (b1)
+                  8'b1101_1???: begin   // DD D8+i  FSTP ST(i)  (pop). FSTP st(0)=discard.
+                    d.is_fp=1'b1; d.fp_kind=FK_FSTP0; d.len=4'd2;
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
+                  end
+                  default: ;
+                endcase
+              end
+              default: ;
+            endcase
+          end
         end
         default: ;
       endcase
@@ -1899,18 +2061,68 @@ module intcore
     end
   endfunction
 
-  // icache presence: is the 32-byte line containing `addr` valid + matching?
+  // icache presence: is the 32-byte line containing `addr` resident in EITHER way
+  // of its set? (2-way, mirrors the oracle / the RTL D-cache lookup.)
   function automatic logic ic_present(input logic [31:0] addr);
-    logic [7:0] idx;
+    logic [6:0] set; logic [19:0] tag;
     begin
-      idx = addr[12:5];
-      ic_present = ic_val[idx] && (ic_tag[idx]==addr[31:13]);
+      set = addr[11:5]; tag = addr[31:12];
+      ic_present = (ic_val[set][0] && ic_tag[set][0]==tag) ||
+                   (ic_val[set][1] && ic_tag[set][1]==tag);
     end
   endfunction
-  // icache byte read (assumes ic_present(addr)).
-  function automatic logic [7:0] ic_byte(input logic [31:0] addr);
-    ic_byte = ic_data[addr[12:5]][addr[4:0]];
+  // which way holds the line (assumes ic_present(addr)); way 1 iff way0 misses.
+  function automatic logic ic_hit_way(input logic [31:0] addr);
+    logic [6:0] set; logic [19:0] tag;
+    begin
+      set = addr[11:5]; tag = addr[31:12];
+      ic_hit_way = !(ic_val[set][0] && ic_tag[set][0]==tag);
+    end
   endfunction
+  // icache byte read (assumes ic_present(addr)): from whichever way hit.
+  function automatic logic [7:0] ic_byte(input logic [31:0] addr);
+    ic_byte = ic_data[addr[11:5]][ic_hit_way(addr)][addr[4:0]];
+  endfunction
+
+  // icache LRU update on a confirmed HIT (the line's set marks the hit way MRU).
+  // Mirrors the oracle l1_access() hit path (s->lru = w) and the RTL D-cache
+  // dc_access hit path, so the I-cache replacement SEQUENCE matches the oracle.
+  task automatic ic_touch(input logic [31:0] addr);
+    logic [6:0] set; logic [19:0] tag;
+    begin
+      set = addr[11:5]; tag = addr[31:12];
+      for (int w=0; w<2; w++)
+        if (ic_val[set][w] && ic_tag[set][w]==tag) ic_lru[set]<=w[0];
+    end
+  endtask
+
+  // D-cache hit test (timing only): is the 32-byte line containing `addr`
+  // resident in either way of its set? Mirrors p5model l1_access() lookup. Does
+  // NOT mutate state (the allocate/LRU update is done in the sequential block on
+  // a confirmed access, so the model is a true LRU SM, not a combinational peek).
+  function automatic logic dc_hit(input logic [31:0] addr);
+    logic [6:0]  set; logic [19:0] tag;
+    begin
+      set = addr[11:5]; tag = addr[31:12];
+      dc_hit = (dc_val[set][0] && dc_tag[set][0]==tag) ||
+               (dc_val[set][1] && dc_tag[set][1]==tag);
+    end
+  endfunction
+
+  // D-cache access: update LRU on a hit, else allocate the not-MRU way (2-way
+  // LRU replacement, exactly p5model l1_access()). Called once per load access
+  // from the sequential block (so it advances the real cache SM, emergent).
+  task automatic dc_access(input logic [31:0] addr);
+    logic [6:0]  set; logic [19:0] tag; logic hit; logic victim;
+    begin
+      set = addr[11:5]; tag = addr[31:12]; hit = 1'b0; victim = ~dc_lru[set];
+      for (int w=0; w<2; w++)
+        if (dc_val[set][w] && dc_tag[set][w]==tag) begin hit=1'b1; dc_lru[set]<=w[0]; end
+      if (!hit) begin
+        dc_val[set][victim]<=1'b1; dc_tag[set][victim]<=tag; dc_lru[set]<=victim;
+      end
+    end
+  endtask
 
   // BTB lookup: predicted-taken iff a valid matching entry has counter>=2.
   function automatic logic btb_lookup(input logic [31:0] pc);
@@ -1959,7 +2171,10 @@ module intcore
   // ===========================================================================
   fpd_t        u_d, v_d;             // U insn + V candidate decodes
   logic        pipe_bytes_ok;        // U (+ V candidate) bytes resident in icache
+  logic [31:0] pf_miss_fa;           // I-cache fill line address for a current miss
+  logic        pf_miss;             // a fill-word-0 fetch is needed this S_PIPE clock
   logic        pipe_pair;            // U and V issue together this clock
+  logic        v_bytes_ok;           // V candidate's full bytes resident in I-cache
   logic        pipe_agi;             // U has an AGI hazard (addr reg written last clk)
   logic        pipe_load_req;        // U is a register-base load (drives the bus)
   logic [2:0]  pipe_load_base;
@@ -1972,16 +2187,38 @@ module intcore
   logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
 
   always_comb begin
-    // U is fully decodable iff the line(s) covering eip..eip+11 are resident.
-    pipe_bytes_ok = ic_present(eip) && ic_present(eip + 32'd11);
-
     for (int i=0;i<6;i++) ub[i] = ic_present(eip+i[31:0]) ? ic_byte(eip+i[31:0]) : 8'd0;
     u_d = fp_decode(ub[0],ub[1],ub[2],ub[3],ub[4],ub[5], eflags);
+    // M5 finding [med] (I-cache straddle): U is decodable+chargeable correctly iff
+    // the line containing eip is resident AND, only when the instruction actually
+    // crosses the 32-byte line boundary, the line containing its LAST byte too.
+    // The oracle charges a second I-miss exactly when (vaddr&31)+size > 32
+    // (verif/qemu-plugins/p5trace.c:428); it must NOT pre-charge a second-line
+    // miss for a short instruction near the line end. The 6-byte fast-path decode
+    // window can read into the next line, so require that straddle line for a SAFE
+    // decode whenever the window crosses the boundary, but use the real decoded
+    // length to decide whether a straddle miss is genuinely charged.
+    pipe_bytes_ok = ic_present(eip)
+                    // window-straddle: need the next line present to decode safely
+                    && (({1'b0,eip[4:0]} + 6'd5 < 6'd32) || ic_present(eip + 32'd5))
+                    // instruction-straddle: its last byte's line must be resident
+                    && (({1'b0,eip[4:0]} + {2'b0,u_d.len} <= 6'd32)
+                        || ic_present(eip + {28'd0,u_d.len} - 32'd1));
     // V candidate sits right after U.
     v_d = fp_decode(ic_byte(eip+{28'd0,u_d.len}+0), ic_byte(eip+{28'd0,u_d.len}+1),
                     ic_byte(eip+{28'd0,u_d.len}+2), ic_byte(eip+{28'd0,u_d.len}+3),
                     ic_byte(eip+{28'd0,u_d.len}+4), ic_byte(eip+{28'd0,u_d.len}+5),
                     eflags);
+
+    // I-cache fill line address for a current miss (eip's line first, else the
+    // decode-window straddle line, else the instruction-straddle line) and the
+    // condition under which the S_PIPE miss branch fires THIS clock (so the bus
+    // driver can issue the fill's word-0 read on the detection clock — removing
+    // the wasted transition clock, finding [med] I-miss off-by-one).
+    pf_miss_fa = !ic_present(eip)         ? eip
+               : !ic_present(eip + 32'd5) ? (eip + 32'd5)
+               : (eip + {28'd0,u_d.len} - 32'd1);
+    pf_miss = (state==S_PIPE) && (stall_cnt==7'd0) && !pipe_bytes_ok;
 
     // AGI: a base/index reg used by U was written in the IMMEDIATELY-preceding
     // fast-path issue clock (tracked in agi_wr0/agi_wr1; bit8=none).
@@ -1991,10 +2228,23 @@ module intcore
       if (!agi_wr1[8] && u_d.addr_mask[agi_wr1[2:0]]) pipe_agi=1'b1;
     end
 
-    // pairing decision: V can pair only when U leads, no hazards, and the V
-    // bytes are present. A V branch can pair (it fills V); a U branch never
-    // leads a pair (pairs_first=0).
-    pipe_pair = cycle_mode && fp_can_pair(u_d, v_d);
+    // pairing decision: V can pair only when U leads, no hazards, AND the V
+    // candidate's FULL bytes are resident in the I-cache. A V branch can pair (it
+    // fills V); a U branch never leads a pair (pairs_first=0).
+    //
+    // M5 (control-flow correctness): the V candidate is decoded combinationally
+    // from ic_byte(), which returns whatever is in the array even for a NON-RESIDENT
+    // line. If the V instruction STRADDLES into a cold line, its decode (opcode /
+    // displacement / immediate) uses stale bytes — and a stale Jcc would be
+    // mispaired and resolved with a wrong target/decode, diverging from the oracle's
+    // instruction stream (reproduced: a `test(U); jz(V)` where the jz at offset 31
+    // straddles a cold next line was resolved not-taken vs the oracle's taken). So
+    // require the V instruction's first byte AND its last byte to be in resident
+    // lines before pairing; otherwise V is not paired this clock — it becomes the
+    // next U, the cold line fills via S_PF, and it issues with correct bytes.
+    v_bytes_ok = ic_present(eip + {28'd0,u_d.len}) &&
+                 ic_present(eip + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
+    pipe_pair = cycle_mode && v_bytes_ok && fp_can_pair(u_d, v_d);
 
     pipe_load_req  = (state==S_PIPE) && pipe_bytes_ok && u_d.simple &&
                      u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
@@ -2068,8 +2318,15 @@ module intcore
       x87_touched_r<=1'b0; f_step<=4'd0;
       for (int fi=0; fi<8; fi++) fpr[fi]<=80'd0;
       // M4 pipeline state.
-      pf_fill_addr<=32'd0; pf_word<=3'd0;
+      pf_fill_addr<=32'd0; pf_word<=3'd0; pf_fill_way<=1'b0;
       agi_wr0<=9'h100; agi_wr1<=9'h100; mispred_bubbles<=3'd0;
+      // M5 cycle-accuracy state.
+      core_cyc<=32'd0; fp_ready_cyc<=32'd0; pending_mem_pen<=7'd0; stall_cnt<=7'd0;
+      fp_occ_pending<=1'b0; fp_issue_cyc<=32'd0;
+      for (int s=0;s<DC_SETS;s++) begin
+        dc_lru[s]<=1'b0; dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0;
+        dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
+      end
       retire2_valid<=1'b0; retire_pipe_valid<=1'b0;
       retire_pipe<=2'd0; retire_paired<=1'b0;
       retire2_pipe<=2'd0; retire2_paired<=1'b0;
@@ -2079,7 +2336,11 @@ module intcore
           btb_val[s][w]<=1'b0; btb_tag[s][w]<=26'd0; btb_ctr[s][w]<=2'd0;
         end
       end
-      for (int l=0;l<IC_LINES;l++) begin ic_val[l]<=1'b0; ic_tag[l]<=19'd0; end
+      for (int s=0;s<IC_SETS;s++) begin
+        ic_lru[s]<=1'b0;
+        ic_val[s][0]<=1'b0; ic_val[s][1]<=1'b0;
+        ic_tag[s][0]<=20'd0; ic_tag[s][1]<=20'd0;
+      end
     end else begin
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
@@ -2088,6 +2349,12 @@ module intcore
       // (S_FEXEC / S_FSTORE) raise it, so the DPI x87 hook fires only for FPU
       // instructions. (ventium_top gates vtm_retire_x87 on this.)
       x87_touched_r <= 1'b0;
+
+      // M5: advance the free-running core-clock counter (the timeline the FP
+      // scoreboard + miss-stall countdowns live on). It tracks the TB's
+      // cyc=clock-count-at-retire 1:1 (core_cyc is the count of completed clocks
+      // before this edge; a retire on this edge stamps cyc=core_cyc+1).
+      core_cyc <= core_cyc + 32'd1;
 
       unique case (state)
         S_RESET: begin fetch_word<=3'd0; state<=S_PIPE; end
@@ -2101,14 +2368,17 @@ module intcore
         // -------------------------------------------------------------------
         S_PF: begin
           if (mem_ack) begin
-            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+0]<=mem_rdata[7:0];
-            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+1]<=mem_rdata[15:8];
-            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+2]<=mem_rdata[23:16];
-            ic_data[pf_fill_addr[12:5]][{pf_word,2'b00}+3]<=mem_rdata[31:24];
+            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+0]<=mem_rdata[7:0];
+            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+1]<=mem_rdata[15:8];
+            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+2]<=mem_rdata[23:16];
+            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+3]<=mem_rdata[31:24];
             if (pf_word==3'd7) begin
               pf_word<=3'd0;
-              ic_tag[pf_fill_addr[12:5]]<=pf_fill_addr[31:13];
-              ic_val[pf_fill_addr[12:5]]<=1'b1;
+              // allocate the chosen 2-way victim and mark it MRU (oracle l1_access
+              // miss path: s->val[victim]=1; s->tag[victim]=tag; s->lru=victim).
+              ic_tag[pf_fill_addr[11:5]][pf_fill_way]<=pf_fill_addr[31:12];
+              ic_val[pf_fill_addr[11:5]][pf_fill_way]<=1'b1;
+              ic_lru[pf_fill_addr[11:5]]<=pf_fill_way;
               state<=S_PIPE;
             end else pf_word<=pf_word+3'd1;
           end
@@ -2121,11 +2391,126 @@ module intcore
         // prefetch buffer hand control to the proven multi-cycle FSM / refill.
         // -------------------------------------------------------------------
         S_PIPE: begin
-          if (!pipe_bytes_ok) begin
+          if (stall_cnt!=7'd0) begin
+            // M5: burn a materialised stall clock (D-cache miss / misalign /
+            // FP-latency wait). No retirement; cyc = clock-count-at-retire thus
+            // grows by exactly the penalty for the instruction that issues once
+            // the countdown reaches 0. The stall clock writes nothing, so it
+            // cannot create a phantom AGI hazard next clock.
+            stall_cnt<=stall_cnt-7'd1;
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+          end else if (!pipe_bytes_ok) begin
             // icache miss on the line(s) covering the current insn: fill the
-            // missing line (eip's line first, else the straddle line) in S_PF.
-            pf_fill_addr <= ic_present(eip) ? (eip + 32'd11) : eip;
-            pf_word<=3'd0; state<=S_PF;
+            // missing line (eip's line first, else the straddle line — the line of
+            // either the decode-window end or the instruction's last byte). Each
+            // fill = 8 word reads = imiss=8 clocks (the oracle penalty), emergent.
+            // The 2-way victim is the not-MRU way (ic_lru^1), exactly the oracle's
+            // `victim = s->lru ^ 1` (verif/qemu-plugins/p5trace.c:346).
+            //
+            // M5 finding [med] (I-miss off-by-one): the bus driver asserts the
+            // fill's WORD-0 read in THIS detection clock (mem_addr = fill line base
+            // when pf_miss is true), so this clock is productive — it captures word
+            // 0 here and S_PF fetches words 1..7 (7 clocks). Total = 1 + 7 = 8
+            // clocks = imiss exactly, with NO wasted transition clock (the old code
+            // burned a non-fetching detection clock before the 8 fill clocks -> 9).
+            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][0]<=mem_rdata[7:0];
+            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][1]<=mem_rdata[15:8];
+            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][2]<=mem_rdata[23:16];
+            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][3]<=mem_rdata[31:24];
+            pf_fill_addr <= pf_miss_fa;
+            pf_fill_way  <= ~ic_lru[pf_miss_fa[11:5]];
+            pf_word<=3'd1; state<=S_PF;
+          end else if (pending_mem_pen!=7'd0) begin
+            // M5: a previous load's D-cache miss/misalign penalty is DEFERRED to
+            // the next instruction (p5model g.pending_mem_pen folded into the next
+            // insn's pipe_free_at, verif/qemu-plugins/p5trace.c:420). Materialise
+            // it as real stall clocks so the next retire's cyc carries the +dmiss
+            // delta exactly where the oracle places it. This clock + the stall_cnt
+            // countdown together burn `pending_mem_pen` clocks before any issue.
+            stall_cnt<=pending_mem_pen-7'd1;
+            pending_mem_pen<=7'd0;
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+          end else if (u_d.is_fp && u_d.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin
+            // M5 finding [low]: an FK_ARITH (D8 reg-form fadd/fsub/fmul/fdiv) under
+            // a non-extended precision control word (PC != 11) must NOT silently
+            // compute the full extended-precision result (the datapath only
+            // implements 64-bit extended). The slow path HALTs loudly in this case
+            // (Tier-3 deferral, see f_pc_bad below); the fast path must do the same
+            // so cycle-mode FP cannot diverge functionally from QEMU's
+            // programmed-precision rounding. Default cw 0x037f has PC=11 (fine), so
+            // the gate kernels never trip this; non-default-PC code HALTs.
+            state<=S_HALT;
+          end else if (u_d.is_fp) begin
+            // M5: x87 FP fast path (cycle-mode whitelist). Functional execution
+            // reuses the exact M3 helpers; the FP latency/throughput timing is
+            // emergent from TWO distinct mechanisms, both mirroring the p5model
+            // oracle (verif/qemu-plugins/p5trace.c):
+            //   * RESULT LATENCY (fp_ready_cyc): a dependent FP consumer stalls
+            //     until the producer's result is ready (issue+lat) -> dependent
+            //     fadd chain CPI~3 (lat 3).
+            //   * PIPE OCCUPANCY (fp_occ): the in-order pipe is held for `occ`
+            //     clocks, so even a FOLLOWING INDEPENDENT op (integer or FP)
+            //     cannot issue until the FP op's occupancy expires (oracle
+            //     pipe_free_at=issue+occ; fdiv occ 39, fmul occ 2). This is what
+            //     makes a single fdiv delay the integer work behind it.
+            logic [31:0] dep_ready;
+            logic [82:0] fp_arf;
+            // RAW on the x87 top-of-stack: a consumer/rmw (fp_role>=2) must wait
+            // until the most recent FP producer's result is ready (fp_ready_cyc).
+            dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+            if (!fp_occ_pending && $signed(dep_ready - core_cyc) > 0) begin
+              // stall until core_cyc reaches dep_ready (materialise the latency).
+              stall_cnt <= 7'(dep_ready - core_cyc) - 7'd1;
+              agi_wr0<=9'h100; agi_wr1<=9'h100;
+            end else if (!fp_occ_pending && u_d.fp_occ > 7'd1) begin
+              // deps satisfied; begin burning the pipe-occupancy clocks. Record the
+              // issue cycle so the result-latency scoreboard is anchored to issue
+              // (not to the later retire). THIS clock is the issue clock (occupancy
+              // cycle 1) and the eventual commit clock is occupancy cycle `occ`;
+              // between them we burn occ-2 stall clocks, so the op retires exactly
+              // `occ` clocks after issue (oracle pipe_free_at = issue + occ).
+              fp_issue_cyc <= core_cyc;
+              fp_occ_pending <= 1'b1;
+              stall_cnt <= u_d.fp_occ - 7'd2;   // occ>=2 here; occ==2 => no stall
+              agi_wr0<=9'h100; agi_wr1<=9'h100;
+            end else begin
+              // ---- issue + commit the FP op (retires at issue+occ) -----------
+              fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10]);
+              unique case (u_d.fp_kind)
+                FK_FLDC: begin
+                  ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
+                  fpr[ftop-3'd1]<=fconst(u_d.fp_sti);
+                end
+                FK_FLDSTI: begin
+                  ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
+                  fpr[ftop-3'd1]<=fst(u_d.fp_sti);
+                end
+                FK_ARITH: begin
+                  fpr[ftop]<=fp_arf[79:0]; fstat<=f_arith_fstat(fstat, fp_arf);
+                end
+                FK_FSTP0: begin
+                  fptag[ftop]<=1'b1; ftop<=ftop+3'd1;
+                end
+                FK_FXCH: begin
+                  fpr[ftop]<=fst(u_d.fp_sti); fpr[fri(u_d.fp_sti)]<=fst(3'd0);
+                end
+                default: ;
+              endcase
+              // scoreboard: a producer/rmw publishes its result at ISSUE+lat. For
+              // an occ-burned op the issue cycle was recorded above; for an occ==1
+              // op issue==commit clock (core_cyc) — both anchor to the real issue.
+              if (u_d.fp_role==3'd1 || u_d.fp_role==3'd3)
+                fp_ready_cyc <= (fp_occ_pending ? fp_issue_cyc : core_cyc)
+                                + {25'd0, u_d.fp_lat};
+              fp_occ_pending <= 1'b0;
+              // I-cache LRU: mark this fetched line MRU (2-way LRU, per the oracle
+              // per-fetch l1_access). FP ops are 2 bytes (no straddle in practice).
+              ic_touch(eip);
+              eip<=eip + {28'd0,u_d.len};
+              q_pc<=eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
+              retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
+              agi_wr0<=9'h100; agi_wr1<=9'h100;   // FP writes no GP reg
+            end
           end else if (!u_d.simple) begin
             // hand this one instruction to the slow functional FSM. Clear the
             // AGI write-tracking: the slow op runs many cycles, so on return to
@@ -2158,6 +2543,16 @@ module intcore
             do_v   = pipe_pair;
             w0=9'h100; w1=9'h100;
 
+            // ---- I-cache LRU: mark the fetched line(s) MRU (2-way LRU, mirroring
+            // the oracle's per-instruction l1_access). U's line, U's straddle line
+            // (only when it crosses the boundary), and the paired V's line are the
+            // lines actually fetched this clock. Order matches the oracle (U then
+            // its straddle then V).
+            ic_touch(eip);
+            if (({1'b0,eip[4:0]} + {2'b0,u_d.len}) > 6'd32)
+              ic_touch(eip + {28'd0,u_d.len} - 32'd1);
+            if (do_v) ic_touch(eip + {28'd0,u_d.len});
+
             // ---- U commit ----
             if (u_d.is_lea) begin
               gpr[u_d.dst]<=gpr[u_d.base];
@@ -2165,6 +2560,19 @@ module intcore
             end else if (u_d.is_load) begin
               gpr[u_d.dst]<=mem_rdata;
               if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
+              // M5: L1 D-cache TIMING. The load data still comes from the BFM
+              // (mem_rdata, above); here we run the real 2-way LRU hit/miss SM and
+              // DEFER any miss penalty (read-allocate +dmiss) / misalign (+3) to
+              // the next instruction, exactly as p5_mem()/p5model does. A line
+              // that misses is allocated now (dc_access) so re-references hit.
+              dc_access(gpr[u_d.base]);
+              begin
+                logic [6:0] pen;
+                pen = 7'd0;
+                if (!dc_hit(gpr[u_d.base]))         pen = pen + P5_DMISS;
+                if (gpr[u_d.base][1:0] != 2'b00)    pen = pen + P5_MISALIGN;
+                pending_mem_pen <= pen;
+              end
             end else if (u_d.is_shift) begin
               gpr[u_d.dst]<=u_sh;
               if (u_d.shimm!=5'd0) begin
@@ -2233,7 +2641,13 @@ module intcore
               v_taken = v_br_taken_eff;
               redir_tgt = v_taken ? v_target : (vpc + {28'd0,v_d.len});
               if (v_taken != v_pred_taken) begin
-                mispred_bubbles <= 3'd4;     // V-pipe mispredict penalty
+                // Mispredict penalty matches the oracle resolve_pending_branch
+                // (verif/qemu-plugins/p5trace.c:402-403): an UNCONDITIONAL taken
+                // jmp/call mispredict is P5_MISPREDICT_UNCOND=3 REGARDLESS of pipe
+                // (the `!pend_cond` case is checked first); only a CONDITIONAL Jcc
+                // in the V pipe pays P5_MISPREDICT_V=4. The old code charged 4 for
+                // a V jmp too (now V-pairable per finding [med]) -> +1 over oracle.
+                mispred_bubbles <= v_d.br_cond ? 3'd4 : 3'd3;
                 redirect=1'b1;
               end else if (v_taken) redirect=1'b1;
               btb_update_taken(vpc, v_taken);
@@ -2304,7 +2718,25 @@ module intcore
           q_f_pop2<=d_f_pop2; q_f_sti<=d_f_sti; q_f_aluop<=d_f_aluop; q_f_const<=d_f_const;
           f_step<=4'd0;
 
-          if (d_halt || d_unknown) state<=S_HALT;
+          if (d_halt || d_unknown) begin
+            // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
+            // the terminating `int 0x80` (it is a retired instruction to the TCG
+            // plugin), so the RTL must too — otherwise the cycle trace is one
+            // record short of the golden and compare.py reports a LENGTH MISMATCH
+            // (harmless under the current gate, which ignores compare's exit code,
+            // but it would fail a tightened gate that honored it). Emit ONE retire
+            // for a genuine HALT syscall (d_halt) and THEN stop. d_unknown (an
+            // out-of-scope opcode) stays a LOUD no-retire HALT — never a record, so
+            // an unsupported opcode can never masquerade as a clean run. Func mode
+            // keeps the M0/QEMU-gdbstub convention (no post-state row for the exit
+            // syscall), so this extra retire is cycle-mode only and cannot perturb
+            // the functional gates.
+            if (cycle_mode && d_halt && !d_unknown) begin
+              q_pc<=eip; retire_valid<=1'b1;
+              retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
+            end
+            state<=S_HALT;
+          end
           else if (d_is_x87) begin
             if (d_f_mem_read) state<=S_FLOAD;       // read mem operand first
             else state<=S_FEXEC;                    // reg/const/control op
@@ -2324,12 +2756,38 @@ module intcore
         S_LOAD: begin
           if (mem_ack) begin
             mem_load_data<=mem_rdata;
+            // M5 finding [med] (D-cache state consistency): a SLOW-PATH data load
+            // (displacement/SIB load, RMW source, string/stack load) must mutate
+            // the D-cache timing model exactly like the oracle's p5_mem (which runs
+            // l1_access for EVERY memory op, not just register-indirect loads). Do
+            // the 2-way LRU access here and DEFER a read-miss/misalign penalty to
+            // the next instruction (read-allocate), so a line warmed by a slow-path
+            // access is later seen RESIDENT by a fast-path load (and vice-versa).
+            // Gated on cycle_mode (func mode does no cycle accounting).
+            if (cycle_mode) begin
+              logic [31:0] la; logic [6:0] pen;
+              la = slow_dmem_addr; pen = 7'd0;
+              if (!dc_hit(la))           pen = pen + P5_DMISS;
+              if (la[1:0] != 2'b00)      pen = pen + P5_MISALIGN;
+              dc_access(la);
+              pending_mem_pen <= pen;
+            end
             if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
             else state<=S_EXEC;
           end
         end
         S_LOAD2: begin
-          if (mem_ack) begin mem_load_data2<=mem_rdata; state<=S_EXEC; end
+          if (mem_ack) begin
+            mem_load_data2<=mem_rdata; state<=S_EXEC;
+            // CMPS second operand [EDI] is also a data load -> D-cache access.
+            if (cycle_mode) begin
+              logic [6:0] pen; pen=7'd0;
+              if (!dc_hit(gpr[R_EDI]))      pen = pen + P5_DMISS;
+              if (gpr[R_EDI][1:0]!=2'b00)   pen = pen + P5_MISALIGN;
+              dc_access(gpr[R_EDI]);
+              pending_mem_pen <= pen;
+            end
+          end
         end
 
         // -------------------------------------------------------------------
@@ -2753,6 +3211,17 @@ module intcore
         // -------------------------------------------------------------------
         S_STORE: begin
           if (mem_ack) begin
+            // M5 finding [med]: a STORE mutates the D-cache (read-allocate write-back
+            // allocates/updates LRU) but adds NO miss penalty (oracle p5_mem:
+            // `if (!hit && !store) pending += dmiss` — stores skip the penalty). A
+            // misaligned store still costs +3. Run the LRU SM so a line warmed by a
+            // store is later seen RESIDENT by a load (the divergent-state bug).
+            if (cycle_mode) begin
+              logic [31:0] sa;
+              sa = (q_kind==K_STR) ? str_store_addr : st_addr;
+              dc_access(sa);
+              if (sa[1:0] != 2'b00) pending_mem_pen <= pending_mem_pen + P5_MISALIGN;
+            end
             unique case (q_kind)
               K_CTRL: begin // CALL: push done, set EIP (width-aware ESP adjust)
                 gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}; eip<=call_target;
@@ -3096,6 +3565,11 @@ module intcore
       S_PIPE:  begin
         // a register-base load issued this clock reads [base] combinationally.
         if (pipe_load_req) begin mem_req=1'b1; mem_addr=gpr[pipe_load_base]; end
+        // I-cache miss detected this clock: fetch the fill line's WORD 0 NOW so the
+        // detection clock is productive (finding [med] I-miss off-by-one). S_PF then
+        // fetches words 1..7. mem_req for the load and the fill are mutually
+        // exclusive: pf_miss => !pipe_bytes_ok => pipe_load_req is false.
+        else if (pf_miss) begin mem_req=1'b1; mem_addr={pf_miss_fa[31:5],5'd0}; end
       end
       S_LOAD: begin
         mem_req=1'b1;

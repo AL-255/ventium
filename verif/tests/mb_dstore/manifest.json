@@ -1,0 +1,15 @@
+{
+  "name": "mb_dstore",
+  "src": "mb_dstore/mb_dstore.s",
+  "elf": "mb_dstore/mb_dstore.elf",
+  "image": "mb_dstore/mb_dstore.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 1200,
+  "x87": false,
+  "m5_cycle": true,
+  "m5_kind": "cache",
+  "m5_metric": "state",
+  "m5_band": "INFO regression: STORES warm the D-cache (read-allocate); a later reg-indirect load to a stored line HITS (no dmiss). Checks D-cache STATE consistency, not abs-cyc (the disp stores run the cycle-APPROXIMATE slow FSM, so abs-cyc is dominated by slow-path store cost — the M4 honest caveat, not a state bug).",
+  "note": "Regression for finding [med] D-cache state. p5_mem runs l1_access for stores too. M5 runs dc_access on slow-path stores+loads so the D-cache miss SEQUENCE matches the oracle: 199/200 reg-indirect loads HIT because the preceding stores warmed their lines. abs-cyc is NOT the check here (slow-path disp-store timing is approximate by design)."
+}

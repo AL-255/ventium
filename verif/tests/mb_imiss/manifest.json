@@ -1,0 +1,20 @@
+{
+  "name": "mb_imiss",
+  "src": "mb_imiss/mb_imiss.s",
+  "elf": "mb_imiss/mb_imiss.elf",
+  "image": "mb_imiss/mb_imiss.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 5000,
+  "x87": false,
+  "m5_cycle": true,
+  "m5_kind": "cache",
+  "m5_gated": true,
+  "m5_metric": "miss_cpi+abscyc",
+  "m5_band": "miss-driven CPI >= 1.30 AND abs-cyc within tightened tol vs golden",
+  "golden_cpi": 6.000,
+  "golden_insns": 4019,
+  "golden_cyc": 24115,
+  "golden_icache_miss_pct": 50.0,
+  "note": "I-cache-miss cycle check. Each body instruction is forced onto its own 32-byte line (.p2align 5); the body spans 400 lines >> 256-line 8KB/2-way I-cache, so each loop pass re-fetches evicted lines (50% steady-state I-miss), each adding imiss=8 cycles -> CPI~6.0. No data accesses (0 D-cache traffic). p5trace.so golden: icache_miss 50.01%, dcache 0, misalign 0."
+}
