@@ -136,24 +136,31 @@ verify:
 	bash verif/verify.sh
 
 # --- M2S system-mode gate (verif/sys/run-sys-golden.sh) ---------------------
-# M2S.0 was ORACLE + HARNESS ONLY; M2S.1 adds the SEGMENTATION-only `pseg` test,
-# the comparator sys-field path, AND the system-mode RTL (Producer C). For each
-# system test (pseg = the M2S.1 segmentation gate, pmode = the M2S.2 paging gate)
-# this: builds qemu-system-i386 (idempotent), builds the bare-metal image,
-# confirms it runs to the isa-debug-exit, generates the SYSTEM-state golden
-# .vtrace with gen_trace.py --system, validates it is well-formed AND captures the
-# real->protected (CR0.PE 0->1, CS far-jump) [+ paging (CR3 load, CR0.PG 0->1)
-# for pmode] transitions, exercises the compare.py sys-field path by self-diffing
-# the golden EQUIVALENT, AND (for pseg) builds the Verilator TB, runs it in
-# --system mode on the SAME image, and DIFFS the RTL system trace vs the golden
-# (cr0..cr4 + the 6 selectors + GPRs + eflags + eip) — a REAL RTL differential, not
-# a golden self-diff. pmode (paging = M2S.2, not yet in the M2S.1 RTL) keeps the
-# golden self-diff only and the RTL sys-diff is SKIPPED (reported). Independent of
-# and does not touch the user-mode `make verify` gate.
+# For EACH system test this: builds qemu-system-i386 (idempotent), builds the
+# bare-metal image, confirms it runs to the isa-debug-exit, generates the
+# SYSTEM-state golden .vtrace with gen_trace.py --system, validates it is
+# well-formed AND captures the real->protected (CR0.PE 0->1, CS far-jump) [+
+# paging (CR3 load, CR0.PG 0->1)] transitions, exercises the compare.py sys-field
+# path by self-diffing the golden EQUIVALENT, AND builds the Verilator TB, runs it
+# in --system mode on the SAME image, and DIFFS the RTL system trace vs the golden
+# (cr0..cr4 + the 6 selectors + GPRs + eflags + eip) — a REAL RTL differential,
+# not a golden self-diff. Independent of, and does not touch, the user-mode
+# `make verify` gate. ALL FIVE tests below run the REAL RTL --system diff (step 7
+# prints RTL-SYS-DIFF-OK); none is golden-self-diff-only / skipped:
+#   pseg   (M2S.1) real->PM + flat & based GDT segment loads.
+#   pmode  (M2S.2) identity 4 MiB PSE paging, full real->PM->PG->paged-exec.
+#   ppage  (M2S.2) NON-identity 4 KiB paging (linear != physical).
+#   pintr  (M2S.3) software INT n / INT3 / INTO -> int/trap gate handler -> IRET.
+#   pfault (M2S.3) #PF / #GP / #UD hardware faults DELIVERING through the IDT ->
+#                  handler -> IRET/restart.
+# For pintr/pfault step 5b additionally validates the IDT-delivery sequence
+# (handler entry + IRET return captured) before the RTL diff.
 verify-sys:
 	bash verif/sys/run-sys-golden.sh pseg
 	bash verif/sys/run-sys-golden.sh pmode
 	bash verif/sys/run-sys-golden.sh ppage
+	bash verif/sys/run-sys-golden.sh pintr
+	bash verif/sys/run-sys-golden.sh pfault
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

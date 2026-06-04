@@ -274,7 +274,17 @@ module core
     S_LGDT, S_SEGLD, S_LJMP,
     // M2S.2 paging: the 2-level page-walk micro-sequence (PDE read -> PTE read ->
     // optional A/D writeback -> TLB fill -> resume the diverted memory state).
-    S_WALK
+    S_WALK,
+    // M2S.3 IDT delivery micro-sequence (gated sys_mode). A fault DECISION (the
+    // M2S.1 segment faults + M2S.2 #PF, now DELIVERED) or a software INT/INT3/
+    // INTO/UD2 vectors through IDT[v]:
+    //   S_INT_GATE : read the 8-byte IDT gate descriptor (offset+selector+attr)
+    //   S_INT_CS   : read the 8-byte GDT code descriptor named by the gate sel
+    //   S_INT_PUSH : push the exception frame (EFLAGS, CS, EIP[, error code])
+    // then load CS:EIP from the gate, clear IF/TF (interrupt gate), and retire.
+    // S_IRET pops EIP/CS/EFLAGS (near, same-privilege); S_INT_CS_RET reloads the
+    // returned-to CS descriptor and retires the IRET.
+    S_INT_GATE, S_INT_CS, S_INT_PUSH, S_IRET, S_INT_CS_RET
   } state_e;
   state_e state;
   // M2S.2 page-walk return state (declared here so it can use state_e).
@@ -393,6 +403,13 @@ module core
   logic [3:0]  d_len;
   logic        d_halt;
   logic        d_unknown;
+  // M2S.3 software/conditional interrupt + return decode (gated sys_mode in the
+  // FSM; in user mode INT n still HALTs as before). d_int_n carries the vector.
+  logic        d_int;            // INT n / INT3 / INTO -> IDT delivery (a TRAP)
+  logic [7:0]  d_int_vec;        // the vector for d_int
+  logic        d_int_cond_of;    // INTO: deliver only if OF (eflags bit 11) set
+  logic        d_iret;           // IRET (CF): pop EIP/CS/EFLAGS
+  logic        d_ud2;            // UD2 (0F 0B) -> #UD (vector 6) in sys mode
   // M6 Erratum 81 (F00F): decoded the invalid LOCK CMPXCHG8B-with-register-dst
   // form (F0 0F C7 /reg, mod==11). Set ALONGSIDE d_unknown (so the clean core,
   // errata off, still HALTs loudly on this invalid opcode); when errata_en[
@@ -649,6 +666,22 @@ module core
     end
   endfunction
 
+  // M2S.3 — the IDT VECTOR for a raised descriptor-load fault (companion to
+  // seg_load_fault; only meaningful when that returns 1). #NP(11) when a non-SS
+  // present check fails; #SS(12) when an SS present check fails; #GP(13) for
+  // every other descriptor-load fault (type/privilege/null-CS-SS). A NULL DS/ES/
+  // FS/GS load is legal (no fault), so it never reaches here.
+  function automatic logic [7:0] seg_fault_vec(
+      input logic is_cs, input logic is_ss, input logic [15:0] sel,
+      input logic [7:0] a);
+    logic nullsel;
+    begin
+      nullsel = (sel[15:3] == 13'd0);
+      if (!nullsel && !desc_present(a)) seg_fault_vec = is_ss ? 8'd12 : 8'd11;
+      else                              seg_fault_vec = 8'd13;   // #GP
+    end
+  endfunction
+
   // x86 segment-register field (ModR/M.reg for MOV Sreg) -> our SG_ index.
   // x86 encoding: 0=ES 1=CS 2=SS 3=DS 4=FS 5=GS; SG_ order: cs=0 ss=1 ds=2 es=3.
   function automatic logic [2:0] sreg_idx(input logic [2:0] e);
@@ -688,6 +721,8 @@ module core
     d_sysop=SYS_NONE; d_sys_sreg=3'd0; d_sys_creg=3'd0;
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
+    // M2S.3 interrupt/return decode defaults.
+    d_int=1'b0; d_int_vec=8'd0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
 
     m_idx     = pfx_len + (two_byte ? 4'd2 : 4'd1);
     mrm       = ibuf[m_idx];
@@ -840,6 +875,14 @@ module core
         8'hC7: begin
           d_unknown=1'b1; d_len=pfx_len+4'd3;
           if (modrm_mod==2'b11 && modrm_reg==3'd1) d_f00f=1'b1;  // /1 reg-dst
+        end
+        // ---- 0F 0B: UD2, the architecturally-undefined opcode -> #UD (vector 6).
+        // In SYSTEM mode it DELIVERS #UD through the IDT (a FAULT: pushes the
+        // faulting EIP); in user mode there is no IDT, so it HALTs loudly as an
+        // out-of-scope opcode (unchanged). #UD carries NO error code.
+        8'h0B: begin
+          d_len=pfx_len+4'd2;
+          if (sys_mode) d_ud2=1'b1; else d_unknown=1'b1;
         end
         default: begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
       endcase
@@ -1236,7 +1279,32 @@ module core
         8'hF5: begin d_cmc=1'b1; d_len=pfx_len+4'd1; end // CMC: CF<-~CF
         8'hFA: begin d_cli=1'b1; d_len=pfx_len+4'd1; end // CLI: IF<-0 (M2S.1)
         8'hFB: begin d_sti=1'b1; d_len=pfx_len+4'd1; end // STI: IF<-1 (M2S.1)
-        8'hCD: begin d_len=pfx_len+4'd2; d_halt=(ibuf[pfx_len+1]==8'h80); end
+        // INT n (CD ib): in USER mode INT 0x80 is the syscall HALT (unchanged —
+        // no IDT in linux-user). In SYSTEM mode it is a software interrupt that
+        // vectors through IDT[n] (a TRAP: pushes the NEXT EIP so IRET resumes
+        // after the INT). The decode is gated on sys_mode so user mode is byte-
+        // identical; a non-0x80 INT in user mode still HALTs loudly (out of scope).
+        8'hCC: begin // INT3 (#BP, vector 3) — TRAP
+          d_len=pfx_len+4'd1;
+          // user mode: keep the prior loud-HALT (d_unknown) exactly so the M0-M6
+          // user gate stays BIT-IDENTICAL (0xCC was an unknown opcode before M2S.3).
+          if (sys_mode) begin d_int=1'b1; d_int_vec=8'd3; end else d_unknown=1'b1;
+        end
+        8'hCD: begin
+          d_len=pfx_len+4'd2;
+          if (sys_mode) begin d_int=1'b1; d_int_vec=ibuf[pfx_len+1]; end
+          else d_halt=(ibuf[pfx_len+1]==8'h80);
+        end
+        8'hCE: begin // INTO (#OF, vector 4) — TRAP, conditional on OF
+          d_len=pfx_len+4'd1;
+          // user mode: prior loud-HALT (d_unknown) preserved for bit-identity.
+          if (sys_mode) begin d_int=1'b1; d_int_vec=8'd4; d_int_cond_of=1'b1; end
+          else d_unknown=1'b1;
+        end
+        8'hCF: begin // IRET — pop EIP/CS/EFLAGS (near, same-privilege)
+          d_len=pfx_len+4'd1;
+          if (sys_mode) d_iret=1'b1; else d_unknown=1'b1;
+        end
 
         // -------------------------------------------------------------------
         // M2S.1 system-mode instructions (real-mode boot + real->PM transition).
@@ -1503,6 +1571,29 @@ module core
   logic [15:0] q_ljmp_sel;
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
   logic [31:0] gdt_lo;            // first dword of the in-flight 8-byte descriptor
+
+  // -------------------------------------------------------------------------
+  // M2S.3 IDT delivery state (latched when a fault/INT vectors). The delivery
+  // micro-sequence (S_INT_GATE -> S_INT_CS -> S_INT_PUSH) reads the gate, reads
+  // the target CS descriptor, and pushes the exception frame, then loads
+  // CS:EIP. The frame is pushed at the gate's target privilege stack (here:
+  // same-privilege, so the current SS:ESP — cross-priv stack switch via TSS is
+  // M2S.4). All of this is INERT when !sys_mode.
+  // -------------------------------------------------------------------------
+  logic [7:0]  int_vec;           // the vector being delivered (0..255)
+  logic [31:0] int_ret_eip;       // EIP to PUSH (faulting EIP for a FAULT, next
+                                  // EIP for a TRAP / software INT)
+  logic [31:0] int_src_pc;        // the q_pc to stamp on the delivery retire
+                                  // record (the faulting/INT instruction's PC)
+  logic        int_has_err;       // push a 32-bit error code for this vector
+  logic [31:0] int_err;           // the error code value (selector / #PF bits)
+  logic [2:0]  int_step;          // beat counter within S_INT_GATE/_CS/_PUSH
+  logic [31:0] int_gate_off;      // assembled handler offset from the IDT gate
+  logic [15:0] int_gate_sel;      // gate's code selector
+  logic        int_gate_trap;     // 1 = trap gate (leave IF), 0 = interrupt gate
+  logic [31:0] int_lo;            // first dword of the in-flight 8-byte gate/desc
+  logic [31:0] iret_eip;          // IRET-popped EIP (held until ESP/CS settle)
+  logic [15:0] iret_cs;           // IRET-popped CS selector
 
   // latched x87 decode
   fxop_e       q_fxop;
@@ -2351,6 +2442,10 @@ module core
       walk_ret_state<=S_PIPE; walk_lin<=32'd0; walk_for_d<=1'b0;
       walk_is_write<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
       walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
+      // M2S.3 IDT delivery state idle out of reset.
+      int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
+      int_err<=32'd0; int_step<=3'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
+      int_gate_trap<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
     end else begin
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
@@ -2756,6 +2851,9 @@ module core
           q_sysop<=d_sysop; q_sys_sreg<=d_sys_sreg; q_sys_creg<=d_sys_creg;
           q_seg<=d_seg; q_ljmp_off<=d_ljmp_off; q_ljmp_sel<=d_ljmp_sel;
           seg_step<=1'b0;
+          // M2S.3 INT/IRET/UD2 are dispatched directly from the d_* decode below
+          // (they begin their micro-sequence in S_DECODE), so no q_* latch is
+          // needed: the delivery state is captured in int_* / iret_* instead.
 
           if (d_halt || d_unknown) begin
             // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
@@ -2787,6 +2885,31 @@ module core
           else if (d_is_x87) begin
             if (d_f_mem_read) state<=S_FLOAD;       // read mem operand first
             else state<=S_FEXEC;                    // reg/const/control op
+          end
+          // ---- M2S.3 IDT delivery: software INT n / INT3 / INTO / UD2 --------
+          // These are TRAPS except UD2 (#UD, a FAULT). A TRAP pushes the EIP of
+          // the NEXT instruction (so IRET resumes after the INT); UD2 (#UD) is a
+          // FAULT and pushes the FAULTING EIP (this instruction). INTO only
+          // delivers when OF is set — otherwise it is a no-op that just advances.
+          // None of these carry an error code (#UD has none either).
+          else if (d_int || d_ud2) begin
+            if (d_int && d_int_cond_of && !eflags[11]) begin
+              state<=S_EXEC;            // INTO with OF=0: no-op, advance EIP
+            end else begin
+              int_vec     <= d_ud2 ? 8'd6 : d_int_vec;
+              // FAULT (#UD) pushes the faulting EIP; a TRAP (INT/INT3/INTO)
+              // pushes the NEXT EIP. In S_DECODE q_pc/q_len are not yet latched,
+              // so derive next-EIP from the live eip + decoded length.
+              int_ret_eip <= d_ud2 ? eip : (eip + {28'd0, d_len});
+              int_src_pc  <= eip;
+              int_has_err <= 1'b0;      // INT/INT3/INTO/#UD: no error code
+              int_err     <= 32'd0;
+              int_step    <= 3'd0;
+              state       <= S_INT_GATE;
+            end
+          end
+          else if (d_iret) begin
+            int_step <= 3'd0; int_src_pc <= eip; state <= S_IRET;
           end
           // ---- M2S.1 system instructions ------------------------------------
           else if (d_sysop != SYS_NONE) begin
@@ -3437,7 +3560,20 @@ module core
         // -------------------------------------------------------------------
         S_SEGLD: begin
           if (mem_ack) begin
-            if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
+            logic [15:0] msel;
+            logic        mnull;
+            msel  = gpr[q_src_reg][15:0];
+            mnull = (msel[15:3] == 13'd0);
+            // M2S.3 — selector index past the GDT limit -> #GP(13) carrying the
+            // selector as the error code (the descriptor read was out of bounds;
+            // we discard it). A NULL selector (idx 0) skips the limit check (a
+            // null load into DS/ES/FS/GS is legal). Checked on beat 0 so we
+            // deliver before consuming the (garbage) descriptor.
+            if (!seg_step && !mnull &&
+                ({16'd0, msel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit})) begin
+              start_fault(8'd13, 1'b1, {16'd0, msel}, q_pc);
+              seg_step<=1'b0;
+            end else if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
             else begin
               logic [63:0] desc;
               logic [7:0]  attr;
@@ -3445,11 +3581,14 @@ module core
               desc  = {mem_rdata, gdt_lo};
               attr  = desc_attr(desc);
               is_ss = (q_sys_sreg == 3'(SG_SS));
-              // PROTECTION DECISION (computed, not delivered until M2S.3):
-              if (seg_load_fault(1'b0, is_ss, gpr[q_src_reg][15:0], attr, cpl_r)) begin
-                state<=S_HALT;   // #GP/#NP/#SS would vector here in M2S.3
+              // PROTECTION DECISION (M2S.1) -> now DELIVERED through the IDT (M2S.3).
+              if (seg_load_fault(1'b0, is_ss, msel, attr, cpl_r)) begin
+                // #NP/#SS/#GP — error code = selector (idx<<3 | TI | EXT=0).
+                start_fault(seg_fault_vec(1'b0, is_ss, msel, attr), 1'b1,
+                            {16'd0, msel[15:3], 3'd0}, q_pc);
+                seg_step<=1'b0;
               end else begin
-                seg_sel  [q_sys_sreg] <= gpr[q_src_reg][15:0];
+                seg_sel  [q_sys_sreg] <= msel;
                 seg_base [q_sys_sreg] <= desc_base(desc);
                 seg_limit[q_sys_sreg] <= desc_limit(desc);
                 seg_attr [q_sys_sreg] <= attr;
@@ -3477,7 +3616,10 @@ module core
               desc = {mem_rdata, gdt_lo};
               attr = desc_attr(desc);
               if (seg_load_fault(1'b1, 1'b0, q_ljmp_sel, attr, cpl_r)) begin
-                state<=S_HALT;   // #GP would vector here in M2S.3
+                // #GP/#NP on a far-jump CS load -> DELIVER (error code = selector).
+                start_fault(seg_fault_vec(1'b1, 1'b0, q_ljmp_sel, attr), 1'b1,
+                            {16'd0, q_ljmp_sel[15:3], 3'd0}, q_pc);
+                seg_step<=1'b0;
               end else begin
                 seg_sel  [SG_CS] <= q_ljmp_sel;
                 seg_base [SG_CS] <= desc_base(desc);
@@ -3487,6 +3629,152 @@ module core
                 cs_d <= desc[54];   // D/B bit: 1 => 32-bit default operand/addr size
                 eip<=q_ljmp_off; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
               end
+            end
+          end
+        end
+
+        // ===================================================================
+        // M2S.3 — IDT DELIVERY micro-sequence (gated sys_mode). Reached from a
+        // software INT/INT3/INTO/UD2 (S_DECODE) or a hardware fault DECISION
+        // (S_SEGLD/S_LJMP #GP/#NP/#SS, S_WALK #PF — via start_fault). Reads the
+        // gate, reads the gate's CS descriptor, pushes the exception frame, then
+        // loads CS:EIP and retires ONCE (q_pc = the faulting/INT instruction's
+        // PC, post-state = the pushed frame + new CS:EIP + gated IF/TF).
+        // SAME-PRIVILEGE only: the frame is pushed on the current SS:ESP (cross-
+        // privilege stack switch via the TSS is M2S.4).
+        //
+        // GATE PROTECTION CHECKS DEFERRED (M2S.4 / negative tests): this path does
+        // NOT check the gate's Present bit (an absent gate -> #NP(v*8+2)), the gate
+        // DPL for a software INT n (IA-32 6.12.1.2 requires gate.DPL >= CPL else
+        // #GP(v*8+2); HW faults/INT3/INTO bypass this), or the target CS descriptor
+        // via seg_load_fault (a bad/absent CS -> #GP/#NP). The CPL0 corpus uses
+        // all-present DPL0 gates and a present 32-bit code CS (0x08), so none can
+        // fire; a fault DURING delivery escalates to #DF, which (with cross-priv)
+        // is M2S.4. The gate is loaded/CS-descriptor read unconditionally here.
+        // ===================================================================
+        // S_INT_GATE: read IDT[vec] (8 bytes @ idt_base + vec*8, 2 word reads).
+        //   word0 = {selector[15:0], offset[15:0]}
+        //   word1 = {offset[31:16], attr[7:0], 8'b0}  (attr at bits[15:8])
+        // attr[3:0]: 0xE = 32-bit interrupt gate (clears IF), 0xF = trap gate.
+        S_INT_GATE: begin
+          if (mem_ack) begin
+            if (int_step == 3'd0) begin
+              int_lo <= mem_rdata; int_step <= 3'd1;
+            end else begin
+              logic [7:0] gattr;
+              gattr        = mem_rdata[15:8];
+              int_gate_off <= {mem_rdata[31:16], int_lo[15:0]};
+              int_gate_sel <= int_lo[31:16];
+              int_gate_trap<= gattr[0];   // 0xF trap -> leave IF; 0xE int -> clear IF
+              int_step     <= 3'd0;
+              state        <= S_INT_CS;
+            end
+          end
+        end
+
+        // S_INT_CS: read the gate's CS descriptor (8 bytes @ gdt_base + sel&~7).
+        // For the gate corpus the gate selector is 0x08 (the flat 32-bit code
+        // segment) — a present code descriptor, so no nested fault. Load the
+        // hidden CS base/limit/attr exactly like a far-jump CS load.
+        S_INT_CS: begin
+          if (mem_ack) begin
+            if (int_step == 3'd0) begin
+              int_lo <= mem_rdata; int_step <= 3'd1;
+            end else begin
+              logic [63:0] desc;
+              desc = {mem_rdata, int_lo};
+              seg_sel  [SG_CS] <= int_gate_sel;
+              seg_base [SG_CS] <= desc_base(desc);
+              seg_limit[SG_CS] <= desc_limit(desc);
+              seg_attr [SG_CS] <= desc_attr(desc);
+              cpl_r            <= int_gate_sel[1:0];
+              cs_d             <= desc[54];
+              int_step         <= 3'd0;
+              state            <= S_INT_PUSH;
+            end
+          end
+        end
+
+        // S_INT_PUSH: push the exception frame (32-bit gate), one word per beat,
+        // at descending stack addresses (so the handler sees, low->high:
+        // [errcode], EIP, CS, EFLAGS). Beat 0 EFLAGS @ ESP-4, 1 CS @ ESP-8,
+        // 2 EIP @ ESP-12, 3 errcode @ ESP-16 (only when int_has_err). On the
+        // final beat: ESP -= frame size, load EIP <- gate offset, clear IF/TF on
+        // an interrupt gate (trap gate leaves them), and RETIRE the delivery.
+        S_INT_PUSH: begin
+          if (mem_ack) begin
+            logic last;
+            // last push beat = 2 (EIP) when no error code, else 3 (errcode).
+            last = int_has_err ? (int_step == 3'd3) : (int_step == 3'd2);
+            if (last) begin
+              logic [31:0] fsz;
+              fsz = int_has_err ? 32'd16 : 32'd12;
+              gpr[R_ESP] <= gpr[R_ESP] - fsz;
+              eip        <= int_gate_off;
+              // IA-32 6.12.1: on ANY interrupt/trap-gate entry the CPU clears TF
+              // (bit8), NT (bit14), RF (bit16) and VM (bit17). An INTERRUPT gate
+              // additionally clears IF (bit9); a TRAP gate leaves IF. The pushed
+              // EFLAGS (beat 0) is the PRE-clear value, so this only masks the live
+              // eflags after the frame is on the stack. NT/RF/VM are 0 throughout
+              // the corpus (eflags = 0x202), so masking them is a no-op for the gate
+              // but makes the entry IA-32-correct for any future TF/NT/V8086 test.
+              //   common mask = TF|NT|RF|VM = 0x0003_4100; +IF (0x200) for int gate.
+              if (!int_gate_trap)
+                eflags <= eflags & ~32'h0003_4300;   // clear IF+TF+NT+RF+VM (int gate)
+              else
+                eflags <= eflags & ~32'h0003_4100;   // clear TF+NT+RF+VM (trap gate)
+              q_pc          <= int_src_pc;   // stamp the delivering instruction's PC
+              retire_valid  <= 1'b1;
+              int_step      <= 3'd0;
+              state         <= S_PIPE;
+            end else begin
+              int_step <= int_step + 3'd1;
+            end
+          end
+        end
+
+        // S_IRET: pop EIP, CS, EFLAGS (near, same-privilege). Beat 0 EIP @ ESP,
+        // 1 CS @ ESP+4, 2 EFLAGS @ ESP+8; then ESP += 12, reload CS descriptor
+        // from the GDT (S_IRET_CS), set EIP, restore EFLAGS. The NT / cross-priv
+        // task-return forms are M2S.4.
+        S_IRET: begin
+          if (mem_ack) begin
+            unique case (int_step)
+              3'd0: begin iret_eip   <= mem_rdata;        int_step <= 3'd1; end
+              3'd1: begin iret_cs    <= mem_rdata[15:0];  int_step <= 3'd2; end
+              default: begin
+                // pop EFLAGS, advance ESP, set EIP, restore EFLAGS, reload CS.
+                gpr[R_ESP] <= gpr[R_ESP] + 32'd12;
+                eip        <= iret_eip;
+                eflags     <= mem_rdata;
+                // reload the CS hidden descriptor for the returned-to selector.
+                int_gate_sel <= iret_cs;
+                int_step     <= 3'd0;
+                state        <= S_INT_CS_RET;
+              end
+            endcase
+          end
+        end
+
+        // S_INT_CS_RET: reload the CS descriptor named by the IRET-popped CS, set
+        // the selector + CPL, and RETIRE the IRET (q_pc = the IRET instruction).
+        S_INT_CS_RET: begin
+          if (mem_ack) begin
+            if (int_step == 3'd0) begin
+              int_lo <= mem_rdata; int_step <= 3'd1;
+            end else begin
+              logic [63:0] desc;
+              desc = {mem_rdata, int_lo};
+              seg_sel  [SG_CS] <= int_gate_sel;
+              seg_base [SG_CS] <= desc_base(desc);
+              seg_limit[SG_CS] <= desc_limit(desc);
+              seg_attr [SG_CS] <= desc_attr(desc);
+              cpl_r            <= int_gate_sel[1:0];
+              cs_d             <= desc[54];
+              int_step         <= 3'd0;
+              q_pc             <= int_src_pc;
+              retire_valid     <= 1'b1;
+              state            <= S_PIPE;
             end
           end
         end
@@ -3734,13 +4022,16 @@ module core
                 walk_pde <= pde;
                 is_big = cr4_pse && pde[7];
                 if (!pde[0]) begin
-                  // PDE not present -> #PF DECISION (delivery M2S.3): set CR2 +
-                  // error code (US,RW from the access; P=0). HALT for now.
-                  // US bit = (the access was user-mode, CPL==3) — Phase-3 [low]
-                  // fix: derive from the real CPL, not a hardcoded supervisor 0.
+                  // PDE not present -> #PF (vector 14). M2S.3: DELIVER through the
+                  // IDT. Set CR2 (the faulting linear addr) + the error code
+                  // {US,RW,P} (P=0 here, RW from the access, US from the real CPL),
+                  // then vector. #PF is a FAULT -> push the FAULTING EIP (q_pc) so
+                  // IRET restarts the access after the handler maps the page.
                   creg2  <= walk_lin;
                   pf_errcode <= {cpl_r == 2'd3, walk_is_write, 1'b0};
-                  walk_pf <= 1'b1; state <= S_HALT;
+                  walk_pf <= 1'b1;
+                  start_fault(8'd14, 1'b1,
+                              {29'd0, cpl_r == 2'd3, walk_is_write, 1'b0}, q_pc);
                 end else if (is_big) begin
                   // 4 MiB large page: PDE is the leaf. Write A/D back if needed,
                   // else fill the TLB directly (reuse step-1's PDE writeback arm).
@@ -3779,10 +4070,14 @@ module core
                 pte = mem_rdata;
                 walk_pte <= pte;
                 if (!pte[0]) begin
-                  // US bit from the real CPL (Phase-3 [low] fix; see PDE arm).
+                  // PTE not present -> #PF (vector 14): DELIVER. CR2 + error code
+                  // {US,RW,P=0}; push the FAULTING EIP (q_pc) so IRET restarts the
+                  // access once the handler maps the page (the pfault demand-page).
                   creg2  <= walk_lin;
                   pf_errcode <= {cpl_r == 2'd3, walk_is_write, 1'b0};
-                  walk_pf <= 1'b1; state <= S_HALT;
+                  walk_pf <= 1'b1;
+                  start_fault(8'd14, 1'b1,
+                              {29'd0, cpl_r == 2'd3, walk_is_write, 1'b0}, q_pc);
                 end else if (!pte[5] || (walk_is_write && !pte[6])) begin
                   walk_step <= 3'd3;   // set A (+D on write) in the PTE
                 end else begin
@@ -4021,6 +4316,26 @@ module core
     end
   endtask
 
+  // M2S.3 — begin IDT delivery of a HARDWARE fault (#GP/#NP/#SS/#PF/#UD raised
+  // from a fault DECISION that prior stages only computed). A fault always
+  // pushes the FAULTING instruction's EIP (restartable); `vec`, `has_err`, and
+  // `err` carry the IA-32 error-code rules. `src_pc` is the q_pc to stamp on the
+  // single delivery retire record. The micro-sequence then reads IDT[vec], the
+  // gate's CS descriptor, pushes the frame, and loads CS:EIP. Only invoked when
+  // sys_mode (faults can only arise from the system-mode states).
+  task automatic start_fault(input logic [7:0] vec, input logic has_err,
+                             input logic [31:0] err, input logic [31:0] fault_pc);
+    begin
+      int_vec     <= vec;
+      int_ret_eip <= fault_pc;     // FAULT: push the faulting EIP (restart)
+      int_src_pc  <= fault_pc;
+      int_has_err <= has_err;
+      int_err     <= err;
+      int_step    <= 3'd0;
+      state       <= S_INT_GATE;
+    end
+  endtask
+
   // Is the current bus access a DATA access (D-TLB) vs an instruction fetch
   // (I-TLB)? Fetch states are S_FETCH / S_PF / the S_PIPE icache fill; the
   // descriptor table reads (S_LGDT/S_SEGLD/S_LJMP) always run with paging OFF
@@ -4076,6 +4391,18 @@ module core
           cur_lin = dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
         end else cur_lin = dbase+gpr[R_ESP] + (32'd4*{28'd0,step});
       end
+      // M2S.3 IDT delivery linear addresses (mirror the bus driver arms).
+      S_INT_GATE:   cur_lin = idt_base + {21'd0, int_vec, 3'd0}
+                              + {29'd0, int_step[0], 2'b00};
+      S_INT_CS, S_INT_CS_RET:
+                    cur_lin = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
+                              + {29'd0, int_step[0], 2'b00};
+      S_INT_PUSH: begin
+        cur_is_w = 1'b1;
+        cur_lin = seg_base[SG_SS] + gpr[R_ESP]
+                  - ({28'd0, int_step} * 32'd4) - 32'd4;
+      end
+      S_IRET: cur_lin = seg_base[SG_SS] + gpr[R_ESP] + ({28'd0, int_step} * 32'd4);
       default: cur_lin = 32'd0;
     endcase
   end
@@ -4089,7 +4416,9 @@ module core
     logic translatable;
     unique case (state)
       S_FETCH, S_PF, S_PIPE,
-      S_LOAD, S_LOAD2, S_FLOAD, S_FSTORE, S_STORE, S_USEQ: translatable = 1'b1;
+      S_LOAD, S_LOAD2, S_FLOAD, S_FSTORE, S_STORE, S_USEQ,
+      // M2S.3 IDT delivery reads/writes are translated when paging is on.
+      S_INT_GATE, S_INT_CS, S_INT_CS_RET, S_INT_PUSH, S_IRET: translatable = 1'b1;
       default: translatable = 1'b0;
     endcase
     // S_PIPE only reads memory when a load or an icache fill is requested.
@@ -4108,9 +4437,19 @@ module core
   // TLB-resident data access the effective {US,RW,P} (perm) is checked against
   // the current privilege (CPL) and CR0.WP (bit 16): a USER-mode (CPL==3) access
   // to a supervisor (US=0) page, or a WRITE to a read-only page when the writer is
-  // user OR CR0.WP is set, is a #PF. The gate runs at CPL=0 with WP=0 to present
-  // (RW) pages, so this DECISION is always "no fault"; like seg_off_over_limit the
-  // DELIVERY (#PF via the IDT, CR2 + error code) is M2S.3. Sunk in the lint sink.
+  // user OR CR0.WP is set, is a permission-violation #PF (error code P=1).
+  //
+  // M2S.3 STATUS: the NOT-PRESENT #PF (PDE/PTE P=0) now DELIVERS through the IDT
+  // (S_WALK -> start_fault(14), CR2 + error code with P=0; see S_WALK steps 0/2).
+  // This PERMISSION #PF (page present but US/RW protection fails) is still only
+  // COMPUTED, not delivered — wiring it would require raising a fault from the
+  // combinational S_PIPE/S_EXEC data path (the heavily-exercised user + sys fast
+  // path) AND a corpus test that actually triggers it (CPL3 or WP=1 against a
+  // present supervisor/RO page) to differentially validate the delivery. The
+  // pintr/pfault corpus runs at CPL=0 / WP=0 against present RW pages, so
+  // perm_fault is ALWAYS 0 here and there is no oracle for the delivery path; it
+  // is a documented M2S.4 follow-on (cross-privilege brings CPL3 + WP tests).
+  // Sunk in the lint sink; the access is NOT blocked when perm_fault would fire.
   logic perm_fault;
   always_comb begin
     logic [2:0] p; logic usr, wp;
@@ -4226,6 +4565,36 @@ module core
                                   | (walk_is_write ? 32'h0000_0040 : 32'd0); end
         endcase
       end
+      // M2S.3 — IDT delivery: gate read, CS-descriptor read, frame pushes, IRET
+      // pops, and the CS-descriptor reload. These are LINEAR addresses (the IDT/
+      // GDT are at known linear bases; the stack uses SS.base+ESP) and ARE paged
+      // when paging_on (the post-stage below translates them).
+      S_INT_GATE: begin mem_req=1'b1;            // IDT[vec] @ idt_base + vec*8
+        mem_addr = idt_base + {21'd0, int_vec, 3'd0} + {29'd0, int_step[0], 2'b00};
+      end
+      S_INT_CS: begin mem_req=1'b1;              // GDT[gate_sel] descriptor
+        mem_addr = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
+                   + {29'd0, int_step[0], 2'b00};
+      end
+      S_INT_PUSH: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
+        // descending pushes: beat 0 EFLAGS @ ESP-4, 1 CS @ ESP-8, 2 EIP @ ESP-12,
+        // 3 errcode @ ESP-16. The push uses the SS base (flat 0 here).
+        mem_addr = seg_base[SG_SS] + gpr[R_ESP]
+                   - ({28'd0, int_step} * 32'd4) - 32'd4;
+        unique case (int_step)
+          3'd0:    mem_wdata = eflags;
+          3'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
+          3'd2:    mem_wdata = int_ret_eip;
+          default: mem_wdata = int_err;
+        endcase
+      end
+      S_IRET: begin mem_req=1'b1;                // pop EIP/CS/EFLAGS ascending
+        mem_addr = seg_base[SG_SS] + gpr[R_ESP] + ({28'd0, int_step} * 32'd4);
+      end
+      S_INT_CS_RET: begin mem_req=1'b1;          // reload returned-to CS descriptor
+        mem_addr = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
+                   + {29'd0, int_step[0], 2'b00};
+      end
       default: ;
     endcase
     // ---- paging post-translation: linear -> physical for the data/fetch states.
@@ -4262,23 +4631,31 @@ module core
   // verilator lint_off UNUSED
   wire _unused = &{1'b0, mem_rdata[0], pfx_lock, pfx_seg, pfx_addr, q_imul_3op,
                    q_str_storedi,
-                   // M2S.1 — protection DECISIONS that are genuinely COMPUTED here
-                   // but whose DELIVERY (#GP/#NP/#SS/limit fault vectoring) is
-                   // M2S.3: seg_off_over_limit (the per-access limit-check result;
-                   // 0 for the in-bounds pseg corpus). Sunk so the clean -Wall lint
-                   // stays quiet until M2S.3 wires the fault path to it.
+                   // M2S.1 — the SEGMENT-LOAD protection DECISIONS (present/type/
+                   // DPL via seg_load_fault) now DELIVER through the IDT in M2S.3
+                   // (S_SEGLD/S_LJMP -> start_fault #GP/#NP/#SS). What remains here
+                   // is the PER-ACCESS LIMIT check:
+                   //   seg_off_over_limit : an operand whose last byte exceeds the
+                   //                 segment limit is #GP(0); COMPUTED (0 for the
+                   //                 in-bounds pseg corpus). Wiring it would raise a
+                   //                 fault from the combinational data path AND
+                   //                 needs an over-limit corpus test to validate —
+                   //                 deferred to M2S.4 (documented follow-on).
                    seg_off_over_limit,
-                   // M2S.2 — paging DECISIONS that are genuinely COMPUTED here but
-                   // whose DELIVERY (#PF via the IDT, CR2 + error code) is M2S.3:
-                   //   perm_fault  : the per-access P/RW/US permission-check result
-                   //                 (0 for the CPL=0/WP=0/present gate corpus).
-                   //   walk_pf     : a not-present PDE/PTE page-fault decision (the
-                   //                 gate is fully mapped, so never asserted).
-                   //   pf_errcode  : the {US,RW,P} error code for a raised #PF.
-                   //   itlb_perm   : the fetch-side effective {US,RW,P} (home for
-                   //                 the M2S.3 fetch permission / NX checks).
-                   // Sunk so the clean -Wall lint stays quiet until M2S.3 wires the
-                   // #PF delivery path to them.
+                   // M2S.2 — paging DECISIONS. The NOT-PRESENT #PF (PDE/PTE P=0)
+                   // NOW DELIVERS (S_WALK -> start_fault(14), CR2 + error code; so
+                   // walk_pf's delivery path IS live — it is sunk only because the
+                   // gate's pages are all present so the flag is never set). What
+                   // remains COMPUTED-not-delivered:
+                   //   perm_fault  : the per-access P/RW/US permission-violation #PF
+                   //                 (0 for the CPL=0/WP=0/present gate corpus) —
+                   //                 M2S.4 follow-on (needs CPL3/WP test + raising
+                   //                 from the data path); see perm_fault above.
+                   //   pf_errcode  : the {US,RW,P} error code latch (the delivered
+                   //                 #PF builds its error code inline in start_fault).
+                   //   itlb_perm   : the fetch-side effective {US,RW,P} (home for a
+                   //                 future fetch-permission / NX check).
+                   // Sunk so the clean -Wall lint stays quiet.
                    perm_fault, walk_pf, &pf_errcode,
                    itlb_perm[0][0],
                    // RESERVED system state, loaded this stage, gated-diffed later:
