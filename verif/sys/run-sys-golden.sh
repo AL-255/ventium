@@ -34,9 +34,13 @@ mkdir -p "$OUTDIR"
 #   INTR_TESTS  — M2S.3 IDT-delivery tests (extra 5b delivery validation)
 #   XPRIV_TESTS — M2S.4 cross-privilege tests (extra 5c cross-priv validation)
 #   TASK_TESTS  — M2S.4 hardware-task-switch tests (extra 5d task-switch validation)
+#   SMM_TESTS   — M2S.5 SMM/RSM PARTIAL-ORACLE tests (structural self-check, NO
+#                 differential golden: the gdbstub single-step path masks SMI and
+#                 has no SMM awareness, so the golden is infeasible and not faked)
 INTR_TESTS="pintr pfault"
 XPRIV_TESTS="pcpl"
 TASK_TESTS="ptask"
+SMM_TESTS="psmm"
 
 say(){ echo; echo "=== $* ==="; }
 
@@ -62,6 +66,76 @@ RC=$?
 set -e
 echo "qemu exit status = $RC (expected $EXPECT_EXIT)"
 [[ "$RC" == "$EXPECT_EXIT" ]] || { echo "FATAL: image did not reach the expected isa-debug-exit"; exit 1; }
+
+# --- 3b. (M2S.5) SMM/RSM PARTIAL-ORACLE branch ---------------------------------
+# psmm is a PARTIAL-ORACLE stage: the qemu-system gdbstub single-step path masks
+# SMI (sstep_flags=SSTEP_NOIRQ masks CPU_INTERRUPT_SSTEP_MASK, which includes
+# CPU_INTERRUPT_SMI) and has no SMM awareness, so gen_trace.py --system CANNOT
+# capture SMM entry/handler/RSM and a differential golden is INFEASIBLE.  We do
+# NOT fabricate one.  Instead:
+#   (a) demonstrate the infeasibility honestly: a gdbstub single-step trace of
+#       the image NEVER shows the SMM context (no jump to SMBASE+0x8000), then
+#   (b) prove the SMM round-trip STRUCTURALLY by running the image FREE-RUNNING
+#       (SMI fires via the APIC self-IPI) and reading the post-run physical
+#       memory + the QEMU SMM save area via QMP (psmm-selfcheck.py).
+# The RTL --system differential is DEFERRED to the RTL phase (RTL-only assertion
+# test with SMI asserted in the TB; see README.md + manifest.json).
+if echo " $SMM_TESTS " | grep -q " $TEST "; then
+  say "3b. SMM/RSM PARTIAL-ORACLE: demonstrate golden INFEASIBILITY + structural self-check"
+
+  # (a) honest infeasibility: single-step the image and confirm the gdbstub never
+  #     observes the SMM context (no CS:EIP in the SMM handler at SMBASE+0x8000).
+  echo "  (a) gdbstub single-step does NOT capture SMM (the golden infeasibility):"
+  PROBE_OUT="$OUTDIR/$TEST.sys.vtrace.infeasible"
+  MODE="$(grep -oP '"image_mode":\s*"\K[^"]+' "$TDIR/manifest.json")"
+  # A short cap is enough: the ICR-write that would dispatch SMI retires within
+  # the first ~60 single-steps, so 200 steps amply cross it. Under single-step
+  # SMI is masked, so the SMM context never appears no matter how far we step.
+  "$PY" "$GEN" --qemu "$QSYS" --system --image "$IMG" --image-mode "$MODE" \
+      --out "$PROBE_OUT" --port "$PORT" --max-insn 200 >/dev/null 2>&1 || true
+  # SMM entry would show CS selector reading SMBASE>>4 = 0x3000 or pc=0x00008000.
+  # (grep -c prints 0 AND exits 1 when there are no matches; capture the printed
+  # count only — do NOT append a second 0 via `|| echo`.)
+  SMM_HITS="$(grep -cE '"cs":"0x3000"|"pc":"0x00008000"' "$PROBE_OUT" 2>/dev/null)" || true
+  REC_CNT="$(grep -c '"n":' "$PROBE_OUT" 2>/dev/null)" || true
+  echo "      single-step trace records:                 ${REC_CNT:-0}"
+  echo "      records showing the SMM handler context:    $SMM_HITS  (expected 0 — SMI is masked under single-step)"
+  [[ "$SMM_HITS" == "0" ]] || { echo "FATAL: unexpected SMM context in single-step trace (oracle assumption changed)"; exit 1; }
+  echo "      CONFIRMED: gen_trace --system cannot trace SMM -> NO golden fabricated."
+
+  # (b) structural self-check: free-run, prove the SMM round-trip via QMP.
+  say "3c. SMM/RSM structural self-check (qemu free-run + QMP physical-memory readback)"
+  SELF="$(grep -oP '"selfcheck":\s*"\K[^"]+' "$TDIR/manifest.json")"
+  [[ -n "$SELF" && -f "$TDIR/$SELF" ]] || { echo "FATAL: selfcheck script $TDIR/$SELF missing"; exit 1; }
+  "$PY" "$TDIR/$SELF" "$QSYS" "$IMG" "$((PORT + 500))"
+
+  # (c) M2S.5 Phase 2 — the RTL SMM mechanism, self-checked RTL-ONLY. The RTL
+  #     implements SMI# entry (P5 save-state map @ SMBASE+0x8000+offset; clear
+  #     CR0 PE/PG/EM/TS; CS base=SMBASE sel=SMBASE>>4; EIP=0x8000; big limits),
+  #     the SMM handler, and RSM (0F AA) restoring the full state + resuming. The
+  #     RTL recognises the APIC self-IPI SMI source on the ICR write (exactly as
+  #     qemu's APIC does), so the SAME bare-metal psmm.bin drives the RTL round-
+  #     trip — NO TB poke, NO fabricated golden. The RTL trace + the save-map dump
+  #     prove the round-trip at the DOCUMENTED P5 offsets (the gdbstub single-step
+  #     oracle cannot trace SMM, so the differential golden stays INFEASIBLE +
+  #     deferred — README.md). This is the RTL-only assertion test the spec calls
+  #     for when the SMI oracle is infeasible.
+  say "3d. SMM/RSM RTL-ONLY structural self-check (RTL trace + P5 save-map dump)"
+  RTL_SELF="$(grep -oP '"selfcheck_rtl":\s*"\K[^"]+' "$TDIR/manifest.json")"
+  [[ -n "$RTL_SELF" && -f "$TDIR/$RTL_SELF" ]] || { echo "FATAL: RTL selfcheck $TDIR/$RTL_SELF missing"; exit 1; }
+  TB="$REPO/verif/tb/obj_dir/tb_ventium"
+  make -C "$REPO/verif/tb" rtl >/dev/null 2>&1
+  [[ -x "$TB" ]] || { echo "FATAL: RTL TB $TB not built"; exit 1; }
+  "$PY" "$TDIR/$RTL_SELF" "$TB" "$IMG" "$REPO"
+
+  echo
+  echo "SMM-PARTIAL-OK  (psmm: SMI#->save->SMM handler->RSM->resume proven"
+  echo "                structurally BOTH ways — qemu free-run (QMP) AND the RTL"
+  echo "                SMM mechanism (P5 save-map @ SMBASE+0xFE00, RTL-only); the"
+  echo "                differential golden is documented INFEASIBLE + deferred —"
+  echo "                see tests/psmm/README.md)"
+  exit 0
+fi
 
 # --- 4. generate the system golden ---------------------------------------------
 say "4. generate system golden trace (gen_trace.py --system)"

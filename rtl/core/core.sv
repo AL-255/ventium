@@ -174,6 +174,102 @@ module core
   logic [31:0] tr_base;
   logic [31:0] tr_limit;
   logic        tr_valid;
+  // M2S.5 — SMM / RSM (docs/m2s5-smm-spec.md). SMBASE holds the base of the SMRAM
+  // region (reset default 0x30000; RSM may relocate it from the SMBASE save slot).
+  // smm_active = the CPU is currently in System Management Mode (HF_SMM); set on
+  // SMI# entry, cleared by RSM. It gates the addressing-context overrides AND the
+  // RSM decode (RSM is #UD outside SMM). smi_pending latches a recognised SMI#
+  // (the APIC self-IPI with delivery-mode=SMI in the psmm corpus) so it is taken
+  // at the NEXT instruction boundary, exactly like qemu's deferred SMI dispatch.
+  // (The interrupted CR0 — incl. PE/PG — is saved to the SMRAM map at SMI# entry
+  // and read back from it on RSM, so no separate "saved PE" register is kept; the
+  // SMM addressing context is driven directly by CR0.PE==0 + the SMM CS/base set
+  // up at entry.)
+  logic [31:0] smbase;            // SMRAM base (default 0x30000)
+  logic        smm_active;        // in SMM (1 = HF_SMM)
+  logic        smi_pending;       // a recognised SMI# is waiting for an insn boundary
+  // M2S.5 scratch for the SMI-save / RSM-restore micro-sequences (state-save map
+  // at SMBASE+0x8000+offset, P5 Table 20-1 layout — see S_SMI_SAVE / S_RSM).
+  logic [5:0]  smm_step;          // beat counter across the save/restore sequence
+  logic [31:0] smm_resume_eip;    // EIP to save (next insn after the SMI boundary)
+  // RSM read-back holding registers: the restore reads the whole map into these,
+  // then commits the architectural state in one clock on the final beat so a
+  // half-restored context is never observable mid-sequence.
+  logic [31:0] rsm_cr0, rsm_cr3, rsm_cr4, rsm_cr2;
+  logic [31:0] rsm_eflags, rsm_eip;
+  logic [31:0] rsm_gpr [NUM_GPR];
+  logic [15:0] rsm_sel  [NUM_SEG];
+  logic [31:0] rsm_base [NUM_SEG];
+  logic [31:0] rsm_limit[NUM_SEG];
+  logic [7:0]  rsm_attr [NUM_SEG];
+  logic [31:0] rsm_gdtb, rsm_idtb, rsm_smbase;
+  logic [15:0] rsm_gdtl, rsm_idtl;
+  // ({cs_d, cpl} are restored directly from the final read-back beat, not staged
+  // in a holding reg — see S_RSM commit.)
+
+  // P5 SMRAM State Save Map — register offsets (Pentium Dev. Manual Vol.3
+  // Table 20-1, 510\60 variant). The ABSOLUTE save-map address of a field is
+  // smbase + 0x8000 + offset; the map spans offset 0x7E00..0x7FFC (absolute
+  // SMBASE+0xFE00..SMBASE+0xFFFC). The architecturally-named, writeable/restored
+  // fields the round-trip needs are below; the segment HIDDEN descriptor state
+  // (base/limit/attr) is saved into the reserved areas (the exact P5 reserved-slot
+  // encoding is stepping-specific / not publicly documented, so the hidden-state
+  // layout here is this RTL's internal convention — see the DONE-PARTIAL note in
+  // the README). All fields land in the documented map window so RSM round-trips.
+  // DONE-PARTIAL / DEFERRED (explicitly NOT in the save/restore beat list below):
+  // Table 20-1 also defines DR6 @ 0x7FCC, DR7 @ 0x7FC8, TR (selector) @ 0x7FC4,
+  // and LDT Base @ 0x7FC0. This RTL omits all four across SMI#/RSM: DR6/DR7 do not
+  // exist yet (debug registers are the next stage, M2S.6) and there is no LDT-base
+  // register in the core; TR (tr_sel/tr_base, from M2S.4) IS architectural but is
+  // left unchanged through SMM (the psmm corpus does not modify TR/LDT/DR in the
+  // handler, so the round-trip still closes). These are real divergences from the
+  // full P5 save map, deferred honestly — see the README "Still deferred" list.
+  localparam logic [15:0] SMO_CR0    = 16'h7FFC;
+  localparam logic [15:0] SMO_CR3    = 16'h7FF8;
+  localparam logic [15:0] SMO_EFLAGS = 16'h7FF4;
+  localparam logic [15:0] SMO_EIP    = 16'h7FF0;
+  localparam logic [15:0] SMO_EDI    = 16'h7FEC;
+  localparam logic [15:0] SMO_ESI    = 16'h7FE8;
+  localparam logic [15:0] SMO_EBP    = 16'h7FE4;
+  localparam logic [15:0] SMO_ESP    = 16'h7FE0;
+  localparam logic [15:0] SMO_EBX    = 16'h7FDC;
+  localparam logic [15:0] SMO_EDX    = 16'h7FD8;
+  localparam logic [15:0] SMO_ECX    = 16'h7FD4;
+  localparam logic [15:0] SMO_EAX    = 16'h7FD0;
+  localparam logic [15:0] SMO_GS     = 16'h7FBC;   // selector (upper 2 bytes rsvd)
+  localparam logic [15:0] SMO_FS     = 16'h7FB8;
+  localparam logic [15:0] SMO_DS     = 16'h7FB4;
+  localparam logic [15:0] SMO_SS     = 16'h7FB0;
+  localparam logic [15:0] SMO_CS     = 16'h7FAC;
+  localparam logic [15:0] SMO_ES     = 16'h7FA8;
+  localparam logic [15:0] SMO_IDTB   = 16'h7F94;   // IDT base
+  localparam logic [15:0] SMO_GDTB   = 16'h7F88;   // GDT base
+  localparam logic [15:0] SMO_AHALT  = 16'h7F02;   // Auto-HALT restart slot (word, bit0)
+  localparam logic [15:0] SMO_REVID  = 16'h7EFC;   // SMM revision identifier (RO)
+  localparam logic [15:0] SMO_SMBASE = 16'h7EF8;   // SMBASE relocation slot
+  // RTL-internal reserved-area convention for the segment HIDDEN descriptor cache
+  // + the GDT/IDT limits (so RSM restores the full hidden state bit-exactly). The
+  // SDM reserved window 0x7E00..0x7EF7 is private to the implementation; we lay
+  // the 6 segments' {base,limit,attr} + the table limits there.
+  localparam logic [15:0] SMO_HID    = 16'h7E00;   // base of the hidden-state block
+  // P5 SMM revision identifier value written by SMI# (Pentium Dev. Manual Vol.3
+  // §20.1.5.1, Fig 20-3). Lower word = base-SMM-architecture version; upper word =
+  // extensions. On the Pentium 510\60/567\66: bit 16 (I/O-Instruction-Restart) = 0
+  // (not supported), bit 17 (SMBASE/jump-vector relocation support) = 1 — §20.1.5.3
+  // states "Since bit 17 of the SMM Revision Identifier is set in the Pentium
+  // processor (510\60, 567\66) ...". So the faithful P5 value is 0x00020000. (The
+  // §20.2.2 remark that the 510\60 "revision ID is 0" refers to the upper-word
+  // EXTENSION version number being 0 — it becomes 2 on the 735\90+ when the I/O-
+  // restart extension is enabled — not to bit 17, the relocation-support flag,
+  // which is independent.) qemu-system-i386 agrees: target/i386 SMM_REVISION_ID =
+  // 0x00020000 for the 32-bit target (smm_helper.c). The slot is read-only / not
+  // restored by RSM, so this is benign for the round-trip but is the correct value.
+  localparam logic [31:0] SMM_REV_ID = 32'h0002_0000;
+  // Final beat index of the save/restore sequence (0-based). 45 beats: see the
+  // S_SMI_SAVE / S_RSM beat map. The bus arm + the restore latch both walk
+  // smm_step 0..SMM_LAST in lockstep so save & restore are symmetric.
+  localparam logic [5:0]  SMM_LAST   = 6'd44;
+
   // real_mode = system-mode core with CR0.PE==0. In real mode the addressing is
   // linear = (sel<<4)+offset (and the CS default operand size is 16-bit).
   logic        real_mode;
@@ -300,7 +396,16 @@ module core
     //   S_INT_TSS : cross-priv delivery — read TSS.ssN:espN (N = target CS.DPL).
     //   S_INT_SS  : cross-priv delivery — read + load the new SS descriptor.
     //   S_IRET_SS : inter-priv IRET — reload the popped (outer) SS descriptor.
-    S_LTR, S_INT_TSS, S_INT_SS, S_IRET_SS
+    S_LTR, S_INT_TSS, S_INT_SS, S_IRET_SS,
+    // M2S.5 — SMM / RSM (gated sys_mode; docs/m2s5-smm-spec.md):
+    //   S_SMI_SAVE : SMI# entry — save the CPU state to the SMRAM save-state map
+    //                (P5 Table 20-1 offsets @ SMBASE+0x8000+offset), then enter
+    //                SMM (clear CR0.PE/PG/EM/TS; CS base=SMBASE sel=SMBASE>>4;
+    //                EIP=0x8000; large limits) and retire ONCE in the SMM context.
+    //   S_RSM      : RSM (0F AA) — read the whole save map back, then commit the
+    //                restored state (honoring a handler-modified SMBASE/resume EIP)
+    //                in one clock and resume the interrupted context.
+    S_SMI_SAVE, S_RSM
   } state_e;
   state_e state;
   // M2S.2 page-walk return state (declared here so it can use state_e).
@@ -426,6 +531,10 @@ module core
   logic        d_int_cond_of;    // INTO: deliver only if OF (eflags bit 11) set
   logic        d_iret;           // IRET (CF): pop EIP/CS/EFLAGS
   logic        d_ud2;            // UD2 (0F 0B) -> #UD (vector 6) in sys mode
+  // M2S.5 RSM (0F AA): leave SMM, restore the saved CPU state from the SMRAM save
+  // map + resume the interrupted context. Only legal inside SMM (smm_active);
+  // outside SMM it is #UD (user mode HALTs as before — RSM is a system op).
+  logic        d_rsm;
   // M6 Erratum 81 (F00F): decoded the invalid LOCK CMPXCHG8B-with-register-dst
   // form (F0 0F C7 /reg, mod==11). Set ALONGSIDE d_unknown (so the clean core,
   // errata off, still HALTs loudly on this invalid opcode); when errata_en[
@@ -741,6 +850,7 @@ module core
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
     // M2S.3 interrupt/return decode defaults.
     d_int=1'b0; d_int_vec=8'd0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
+    d_rsm=1'b0;
 
     m_idx     = pfx_len + (two_byte ? 4'd2 : 4'd1);
     mrm       = ibuf[m_idx];
@@ -815,6 +925,18 @@ module core
           end else begin
             d_unknown=1'b1; d_len=pfx_len+4'd2;  // SLDT/LLDT/VERR/VERW/mem deferred
           end
+        end
+        // ---- M2S.5 RSM (0F AA): resume from System Management Mode ----------
+        // RSM restores the CPU state from the SMRAM save-state map and resumes
+        // the interrupted program. It is ONLY valid while the CPU is in SMM
+        // (HF_SMM); executing it outside SMM is #UD (Pentium Dev. Manual Vol.3
+        // §20.1.3.3). Here, inside SMM the FSM runs the S_RSM restore sequence;
+        // OUTSIDE SMM (or in user mode) it stays an unknown opcode -> HALT loudly
+        // (so a stray 0F AA cannot masquerade as a clean run, and user-mode
+        // `make verify` is byte-identical: 0F AA was d_unknown there before).
+        8'hAA: begin
+          d_len=pfx_len+4'd2;
+          if (sys_mode && smm_active) d_rsm=1'b1; else d_unknown=1'b1;
         end
         // ---- M2S.1 system 0F opcodes ---------------------------------------
         8'h01: begin // 0F 01 /2 LGDT, /3 LIDT (memory operand = 6 bytes)
@@ -2511,6 +2633,11 @@ module core
       iret_eflags<=32'd0; xpl_active<=1'b0; int_old_ss<=16'd0; int_old_esp<=32'd0;
       int_old_cs<=16'd0; int_new_cpl<=2'd0; int_new_ss<=16'd0; int_new_esp<=32'd0;
       iret_interpriv<=1'b0; iret_ss<=16'd0; iret_esp<=32'd0;
+      // M2S.5 SMM/RSM idle out of reset. SMBASE = the P5 default 0x30000; not in
+      // SMM; no SMI pending. (RSM read-back regs are scratch — left uninit; they
+      // are fully written by S_RSM before being committed.)
+      smbase<=32'h0003_0000; smm_active<=1'b0; smi_pending<=1'b0;
+      smm_step<=6'd0; smm_resume_eip<=32'd0;
     end else begin
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
@@ -2920,7 +3047,19 @@ module core
           // (they begin their micro-sequence in S_DECODE), so no q_* latch is
           // needed: the delivery state is captured in int_* / iret_* instead.
 
-          if (d_halt || d_unknown) begin
+          // ---- M2S.5 SMI# recognition (gated sys_mode) ----------------------
+          // A recognised SMI# is taken at the instruction boundary, BEFORE this
+          // instruction executes (so it does not retire). Save the resume EIP =
+          // the current EIP (this instruction restarts after RSM) and divert to
+          // S_SMI_SAVE. smm_active blocks re-entrant SMI (SMI is masked in SMM).
+          // This takes priority over the decoded instruction below.
+          if (smi_pending && sys_mode && !smm_active) begin
+            smi_pending    <= 1'b0;
+            smm_resume_eip <= eip;          // restart this instruction after RSM
+            smm_step       <= 6'd0;
+            state          <= S_SMI_SAVE;
+          end
+          else if (d_halt || d_unknown) begin
             // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
             // the terminating `int 0x80` (it is a retired instruction to the TCG
             // plugin), so the RTL must too — otherwise the cycle trace is one
@@ -2978,6 +3117,12 @@ module core
           end
           else if (d_iret) begin
             int_step <= 3'd0; int_src_pc <= eip; state <= S_IRET;
+          end
+          // ---- M2S.5 RSM (0F AA): leave SMM, restore the saved state ---------
+          else if (d_rsm) begin
+            int_src_pc <= eip;   // stamp the RSM insn's PC on the resume retire
+            smm_step   <= 6'd0;
+            state      <= S_RSM;
           end
           // ---- M2S.1 system instructions ------------------------------------
           else if (d_sysop != SYS_NONE) begin
@@ -3536,6 +3681,21 @@ module core
         // -------------------------------------------------------------------
         S_STORE: begin
           if (mem_ack) begin
+            // M2S.5 — SMI# source (gated sys_mode). The psmm corpus fires SMI by
+            // writing the local-APIC ICR-low (physical 0xFEE00300) with delivery
+            // mode = SMI (bits[10:8]==010). QEMU's APIC honours APIC_DM_SMI ->
+            // cpu_interrupt(CPU_INTERRUPT_SMI) (hw/intc/apic.c) and the SMI is taken
+            // at the next instruction boundary. We model that EXACTLY: on the ICR
+            // write whose value carries the SMI delivery mode, latch smi_pending so
+            // the SMI is recognised at the next S_DECODE boundary (it is NOT taken
+            // mid-instruction). This is the RTL SMI-sourcing path that lets the same
+            // bare-metal psmm.bin drive the RTL SMM round-trip (the gdbstub single-
+            // step oracle masks SMI, so this is structurally self-checked — README).
+            // mem_addr here is the post-translate physical address (paging off in
+            // the corpus => linear==physical), so comparing it directly is correct.
+            if (sys_mode && !smm_active && mem_we &&
+                mem_addr == 32'hFEE0_0300 && mem_wdata[10:8] == 3'b010)
+              smi_pending <= 1'b1;
             // M5 finding [med]: a STORE mutates the D-cache (read-allocate write-back
             // allocates/updates LRU) but adds NO miss penalty (oracle p5_mem:
             // `if (!hit && !store) pending += dmiss` — stores skip the penalty). A
@@ -4073,6 +4233,129 @@ module core
               seg_attr [SG_SS] <= desc_attr(desc);
               int_step         <= 3'd0;
               state            <= S_INT_PUSH;
+            end
+          end
+        end
+
+        // ===================================================================
+        // M2S.5 — SMM ENTRY (S_SMI_SAVE) + RSM (S_RSM). Gated sys_mode.
+        //
+        // SMI# entry: write the CPU state to the SMRAM save-state map (P5 Table
+        // 20-1 offsets @ SMBASE+0x8000+offset), one dword per beat (the bus arm
+        // drives the address+data per smm_step). After the last beat ENTER SMM:
+        //   CR0 PE/PG/EM/TS cleared, CS sel=SMBASE>>4 base=SMBASE limit big,
+        //   DS/ES/FS/GS/SS bases 0 limits big, EIP=0x8000, smm_active=1, and
+        //   retire ONCE (q_pc = the resume EIP = the interrupted instruction; the
+        //   post-state row is the SMM-handler entry context). The SMM handler then
+        //   runs real-mode-like flat and ends with RSM.
+        // RSM: read the whole save map back into rsm_* (one dword per beat), then
+        //   on the last beat COMMIT the restored architectural state in a single
+        //   clock (honoring a handler-modified SMBASE/resume-EIP) and resume.
+        //
+        // SMM_LAST = the final beat index (0-based). Beats:
+        //   0..5  CR0,CR3,CR4,CR2,EFLAGS,EIP        6..13 EAX..EDI (gpr[0..7])
+        //   14..19 CS,SS,DS,ES,FS,GS selectors      20..25 seg base[0..5]
+        //   26..31 seg limit[0..5]                  32..37 seg attr[0..5]
+        //   38 GDT base  39 IDT base  40 {gdtl,idtl}
+        //   41 SMBASE slot  42 SMM rev id  43 auto-HALT  44 {cs_d,cpl}
+        // ===================================================================
+        S_SMI_SAVE: begin
+          if (mem_ack) begin
+            if (smm_step == SMM_LAST) begin
+              // ---- last save beat: ENTER SMM ----
+              // CR0: clear PE(0)/EM(2)/TS(3)/PG(31). (NE/others left; the corpus
+              // CR0 here is 0x60000011 -> 0x60000010 after clearing PE.)
+              creg0 <= creg0 & ~32'h8000_000D;
+              // CS: real-mode-like, base = SMBASE, selector = SMBASE>>4, big limit.
+              seg_sel  [SG_CS] <= smbase[19:4];
+              seg_base [SG_CS] <= smbase;
+              seg_limit[SG_CS] <= 32'hFFFF_FFFF;   // SMM uses 4 GiB segment limits
+              seg_attr [SG_CS] <= 8'h93;            // present R/W (SMM flat data-like)
+              // DS/ES/FS/GS/SS: base 0, big limit (real-mode-like flat).
+              for (int s = 1; s < NUM_SEG; s++) begin
+                seg_sel  [s] <= 16'd0;
+                seg_base [s] <= 32'd0;
+                seg_limit[s] <= 32'hFFFF_FFFF;
+                seg_attr [s] <= 8'h93;
+              end
+              cs_d      <= 1'b0;          // SMM default operand/addr size = 16-bit
+              cpl_r     <= 2'd0;          // SMM runs at CPL0
+              eip       <= 32'h0000_8000; // SMM entry point = SMBASE + 0x8000
+              smm_active<= 1'b1;
+              smm_step  <= 6'd0;
+              // retire the SMI-entry: q_pc = the interrupted insn (the resume EIP).
+              q_pc         <= smm_resume_eip;
+              retire_valid <= 1'b1;
+              state        <= S_PIPE;
+            end else begin
+              smm_step <= smm_step + 6'd1;
+            end
+          end
+        end
+
+        S_RSM: begin
+          if (mem_ack) begin
+            // latch each read-back dword into the matching rsm_* holding reg.
+            unique case (smm_step)
+              6'd0:  rsm_cr0    <= mem_rdata;
+              6'd1:  rsm_cr3    <= mem_rdata;
+              6'd2:  rsm_cr4    <= mem_rdata;
+              6'd3:  rsm_cr2    <= mem_rdata;
+              6'd4:  rsm_eflags <= mem_rdata;
+              6'd5:  rsm_eip    <= mem_rdata;
+              6'd6,6'd7,6'd8,6'd9,6'd10,6'd11,6'd12,6'd13:
+                     rsm_gpr[3'(smm_step - 6'd6)]  <= mem_rdata;
+              6'd14,6'd15,6'd16,6'd17,6'd18,6'd19:
+                     rsm_sel[3'(smm_step - 6'd14)] <= mem_rdata[15:0];
+              6'd20,6'd21,6'd22,6'd23,6'd24,6'd25:
+                     rsm_base[3'(smm_step - 6'd20)]  <= mem_rdata;
+              6'd26,6'd27,6'd28,6'd29,6'd30,6'd31:
+                     rsm_limit[3'(smm_step - 6'd26)] <= mem_rdata;
+              6'd32,6'd33,6'd34,6'd35,6'd36,6'd37:
+                     rsm_attr[3'(smm_step - 6'd32)]  <= mem_rdata[7:0];
+              6'd38: rsm_gdtb   <= mem_rdata;
+              6'd39: rsm_idtb   <= mem_rdata;
+              6'd40: begin rsm_gdtl <= mem_rdata[15:0]; rsm_idtl <= mem_rdata[31:16]; end
+              6'd41: rsm_smbase <= mem_rdata;
+              6'd42: ;  // SMM revision id (read-only; not restored)
+              6'd43: ;  // auto-HALT restart slot (no HALT in the corpus; ignored)
+              // beat 44 = {cs_d, cpl}: committed directly from mem_rdata in the
+              // final-beat block below (a latched copy here would be one clock late).
+              default: ;
+            endcase
+            if (smm_step == SMM_LAST) begin
+              // ---- last restore beat: COMMIT the restored architectural state ---
+              // honoring a handler-modified resume EIP + SMBASE (both writeable).
+              creg0   <= rsm_cr0;  creg3 <= rsm_cr3;  creg4 <= rsm_cr4;  creg2 <= rsm_cr2;
+              eflags  <= rsm_eflags;
+              eip     <= rsm_eip;
+              for (int g = 0; g < NUM_GPR; g++) gpr[g] <= rsm_gpr[g];
+              for (int s = 0; s < NUM_SEG; s++) begin
+                seg_sel  [s] <= rsm_sel  [s];
+                seg_base [s] <= rsm_base [s];
+                seg_limit[s] <= rsm_limit[s];
+                seg_attr [s] <= rsm_attr [s];
+              end
+              gdt_base <= rsm_gdtb; idt_base <= rsm_idtb;
+              gdt_limit<= rsm_gdtl; idt_limit<= rsm_idtl;
+              smbase   <= rsm_smbase;     // handler-relocatable SMBASE
+              // {cs_d, cpl} are committed straight from the freshly-read word on
+              // THIS final beat (the read-back case above intentionally does NOT
+              // stage beat 44 in a holding reg). A latched copy would not be
+              // visible until the next clock — which never comes — leaving the
+              // resumed mainline in 16-bit operand/address mode (stale cs_d) and
+              // mis-decoding its 32-bit insns, so the commit must read mem_rdata.
+              cs_d     <= mem_rdata[0];
+              cpl_r    <= mem_rdata[2:1];
+              smm_active<= 1'b0;          // leave SMM
+              smm_step <= 6'd0;
+              // retire the RSM: q_pc = the RSM insn; the post-state row is the
+              // RESUMED interrupted context (its restored GPRs/segs/CRx/EIP).
+              q_pc         <= int_src_pc;
+              retire_valid <= 1'b1;
+              state        <= S_PIPE;
+            end else begin
+              smm_step <= smm_step + 6'd1;
             end
           end
         end
@@ -4661,6 +4944,78 @@ module core
   logic [31:0] tss_stk_off;
   assign tss_stk_off = 32'h0000_0004 + ({30'd0, int_new_cpl} << 3);
 
+  // M2S.5 — the SMRAM save-map offset for save/restore beat `s` (P5 Table 20-1;
+  // segment HIDDEN state + table limits go to the RTL-internal HID reserved
+  // block). Used by BOTH S_SMI_SAVE (write) and S_RSM (read) so the two walk the
+  // same addresses in lockstep. (NUM_SEG==6.)
+  function automatic logic [15:0] smm_off(input logic [5:0] s);
+    unique case (s)
+      6'd0:  smm_off = SMO_CR0;
+      6'd1:  smm_off = SMO_CR3;
+      6'd2:  smm_off = 16'h7E04;          // CR4 (hidden/reserved per Table 20-1)
+      6'd3:  smm_off = 16'h7E08;          // CR2 (hidden/reserved per Table 20-1)
+      6'd4:  smm_off = SMO_EFLAGS;
+      6'd5:  smm_off = SMO_EIP;
+      6'd6:  smm_off = SMO_EAX;
+      6'd7:  smm_off = SMO_ECX;
+      6'd8:  smm_off = SMO_EDX;
+      6'd9:  smm_off = SMO_EBX;
+      6'd10: smm_off = SMO_ESP;
+      6'd11: smm_off = SMO_EBP;
+      6'd12: smm_off = SMO_ESI;
+      6'd13: smm_off = SMO_EDI;
+      6'd14: smm_off = SMO_CS;
+      6'd15: smm_off = SMO_SS;
+      6'd16: smm_off = SMO_DS;
+      6'd17: smm_off = SMO_ES;
+      6'd18: smm_off = SMO_FS;
+      6'd19: smm_off = SMO_GS;
+      // seg base/limit/attr into the HID reserved block (6 each):
+      6'd20,6'd21,6'd22,6'd23,6'd24,6'd25:
+             smm_off = SMO_HID + ({10'd0,(s - 6'd20)} << 2);              // base
+      6'd26,6'd27,6'd28,6'd29,6'd30,6'd31:
+             smm_off = SMO_HID + 16'h0018 + ({10'd0,(s - 6'd26)} << 2);   // limit
+      6'd32,6'd33,6'd34,6'd35,6'd36,6'd37:
+             smm_off = SMO_HID + 16'h0030 + ({10'd0,(s - 6'd32)} << 2);   // attr
+      6'd38: smm_off = SMO_GDTB;
+      6'd39: smm_off = SMO_IDTB;
+      6'd40: smm_off = SMO_HID + 16'h0048;   // {gdt_limit, idt_limit}
+      6'd41: smm_off = SMO_SMBASE;
+      6'd42: smm_off = SMO_REVID;
+      6'd43: smm_off = SMO_AHALT;
+      default: smm_off = SMO_HID + 16'h004C; // {cs_d, cpl}
+    endcase
+  endfunction
+
+  // The value to WRITE on save beat `s` (the interrupted-context state).
+  function automatic logic [31:0] smm_save_data(input logic [5:0] s);
+    unique case (s)
+      6'd0:  smm_save_data = creg0;
+      6'd1:  smm_save_data = creg3;
+      6'd2:  smm_save_data = creg4;
+      6'd3:  smm_save_data = creg2;
+      6'd4:  smm_save_data = eflags;
+      6'd5:  smm_save_data = smm_resume_eip;        // resume EIP (writeable slot)
+      6'd6,6'd7,6'd8,6'd9,6'd10,6'd11,6'd12,6'd13:
+             smm_save_data = gpr[3'(s - 6'd6)];
+      6'd14,6'd15,6'd16,6'd17,6'd18,6'd19:
+             smm_save_data = {16'd0, seg_sel[3'(s - 6'd14)]};
+      6'd20,6'd21,6'd22,6'd23,6'd24,6'd25:
+             smm_save_data = seg_base [3'(s - 6'd20)];
+      6'd26,6'd27,6'd28,6'd29,6'd30,6'd31:
+             smm_save_data = seg_limit[3'(s - 6'd26)];
+      6'd32,6'd33,6'd34,6'd35,6'd36,6'd37:
+             smm_save_data = {24'd0, seg_attr[3'(s - 6'd32)]};
+      6'd38: smm_save_data = gdt_base;
+      6'd39: smm_save_data = idt_base;
+      6'd40: smm_save_data = {idt_limit, gdt_limit};
+      6'd41: smm_save_data = smbase;                // SMBASE relocation slot
+      6'd42: smm_save_data = SMM_REV_ID;            // SMM revision id (RO)
+      6'd43: smm_save_data = 32'd0;                 // auto-HALT slot (no HALT here)
+      default: smm_save_data = {29'd0, cpl_r, cs_d};// {cpl, cs_d}
+    endcase
+  endfunction
+
   // ---- the LINEAR address of the current state's access (pre-translation) and
   // whether the access is a write. Mirrors the per-state mem_addr computation in
   // the bus driver, but in LINEAR space so the page walk + #PF decision use the
@@ -4954,6 +5309,17 @@ module core
         mem_addr = gdt_base + {16'd0, int_new_ss[15:3], 3'd0}
                    + {29'd0, int_step[0], 2'b00};
       end
+      // M2S.5 — SMRAM save-map accesses. The SMRAM region is addressed PHYSICALLY
+      // (SMBASE+0x8000+offset). SMM runs with paging off in the corpus, and the
+      // save map is a fixed physical structure, so (like the descriptor/TSS reads)
+      // these are NOT re-translated by the post-stage below.
+      S_SMI_SAVE: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
+        mem_addr  = smbase + 32'h0000_8000 + {16'd0, smm_off(smm_step)};
+        mem_wdata = smm_save_data(smm_step);
+      end
+      S_RSM: begin mem_req=1'b1;                  // read the save map back
+        mem_addr  = smbase + 32'h0000_8000 + {16'd0, smm_off(smm_step)};
+      end
       default: ;
     endcase
     // ---- paging post-translation: linear -> physical for the data/fetch states.
@@ -4965,7 +5331,8 @@ module core
     // with the sibling GDT read S_INT_SS (both feed the same cross-priv delivery).
     if (paging_on && state != S_WALK &&
         state != S_LGDT && state != S_SEGLD && state != S_LJMP &&
-        state != S_LTR && state != S_INT_SS && state != S_INT_TSS) begin
+        state != S_LTR && state != S_INT_SS && state != S_INT_TSS &&
+        state != S_SMI_SAVE && state != S_RSM) begin
       // CRITICAL (Phase-3 [high] fix): on a TLB MISS this clock the FSM diverts to
       // S_WALK (the clocked block, gated on the same `xlate_miss`), so the bus this
       // clock belongs to the PAGE WALK, not to this state's access. But `state` is

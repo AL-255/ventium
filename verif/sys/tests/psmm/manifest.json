@@ -1,0 +1,51 @@
+{
+  "name": "psmm",
+  "kind": "system",
+  "src": "psmm.S",
+  "linker": "psmm.ld",
+  "image": "psmm.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 4000,
+  "sys": true,
+  "paging": false,
+  "oracle": "PARTIAL",
+  "golden": null,
+  "selfcheck": "psmm-selfcheck.py",
+  "selfcheck_rtl": "psmm-rtl-selfcheck.py",
+  "smbase": "0x30000",
+  "smm_entry": "0x38000",
+  "smm_save_map_p5": "0x3FE00",
+  "smm_save_map_qemu_p6": "0x3FF00",
+  "smi_trigger": "APIC self-IPI delivery-mode=SMI (ICR-low 0x00040200)",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "SMM handler install at SMBASE+0x8000 (0x38000) via rep movsb",
+    "local APIC enable (SVR bit 8) + self-IPI delivery-mode=SMI (free-run -> SMI#)",
+    "SMI#: CPU state saved to SMRAM save map -> enter SMM (CR0 cleared, CS base=SMBASE, EIP=0x8000)",
+    "SMM handler: write sentinel 0x5A4D5A4D to linear 0x2000 -> RSM (0F AA)",
+    "RSM: restore the full saved state -> resume the interrupted mainline after the ICR write"
+  ],
+  "oracle_feasibility": {
+    "verdict": "PARTIAL / differential-golden INFEASIBLE",
+    "smi_trigger_works_free_run": true,
+    "smi_trigger_port_0xB2": "NO (PIIX4 APMC->SMI gate config 0x5b bit1 is firmware-only; a raw -bios never sets it)",
+    "smi_trigger_apic_self_ipi": "YES free-running (QEMU APIC honours APIC_DM_SMI -> cpu_interrupt(CPU_INTERRUPT_SMI))",
+    "gdbstub_single_step_into_smm": "NO -- sstep_flags=SSTEP_NOIRQ masks CPU_INTERRUPT_SSTEP_MASK, which includes CPU_INTERRUPT_SMI (==CPU_INTERRUPT_TGT_EXT_2). SMI never delivered between gdb 's' steps.",
+    "gdbstub_exposes_smm_context": "NO -- target/i386/gdbstub.c has no SMM awareness; SMM-active flag is HMP-only (info registers: SMM=).",
+    "qemu_save_map_layout": "P6 / SDM-34.4 (CR0 @ SMBASE+0xFFFC, EIP @ +0xFFF0); NOT the Pentium P5 SMBASE+0xFE00 layout this RTL stage targets -> not byte-comparable.",
+    "consequence": "gen_trace.py --system (gdbstub single-step) CANNOT capture SMM entry/handler/RSM. NO golden fabricated. The image is run FREE-RUNNING and the SMM round-trip is proven by post-run physical-memory readback (psmm-selfcheck.py). The RTL --system differential is DEFERRED; the RTL self-checks the P5 save-map + SMI-entry/RSM mechanism via an RTL-only assertion test (SMI asserted in the TB)."
+  },
+  "selfcheck_records": {
+    "smm_ran": "[0x2000]=0x5A4D5A4D (SMM handler ran in SMM context)",
+    "mainline_resumed": "[0x2004]=0x52455421 'RET!' (control returned via RSM)",
+    "state_intact": "[0x2008]=0x5A4D900D (EBX witness survived SMI/RSM -> RSM restored the interrupted GPR state)",
+    "smi_saved_state": "QEMU P6 save area @ SMBASE+0xFF00: saved EIP=0x000f00d1, EFLAGS=0x00000006, CR0=0x60000011 (PE set)",
+    "rsm_completed": "info registers SMM=0 (CPU back in normal mode after RSM)"
+  },
+  "description": "Bare-metal real->protected SMM / RSM demonstrator for the M2S.5 PARTIAL-ORACLE stage (NO paging). Boots from the F000:FFF0 reset vector in 16-bit real mode, builds a flat GDT (null + flat code 0x08 + flat data 0x10), sets CR0.PE and far-jumps into the 32-bit flat code segment, loads the data selectors + a flat stack, zeroes a sentinel area at linear 0x2000. It copies a small SMM handler to SMBASE+0x8000 (default SMBASE 0x30000 -> 0x38000), enables the local APIC (SVR bit 8 @ 0xFEE000F0), loads a state-intact witness 0x5A4D900D into EBX, and fires a self-IPI with delivery mode = SMI (ICR-low 0x00040200 @ 0xFEE00300). FREE-RUNNING this dispatches SMI#: QEMU saves the interrupted CPU state to the SMRAM save map and enters SMM (CR0 cleared, real-mode-like CS base = SMBASE, EIP=0x8000); the SMM handler writes sentinel 0x5A4D5A4D to linear 0x2000 and executes RSM (0F AA), which restores the full saved state and resumes the mainline after the ICR write. The mainline records 0x52455421 'RET!' at 0x2004 and writes EBX back to 0x2008 (must read 0x5A4D900D iff RSM restored the GPR state), then exits via out 0xf4 (isa-debug-exit -> status 133). PARTIAL ORACLE: the qemu-system gdbstub single-step path masks SMI (SSTEP_NOIRQ) and has no SMM awareness, so the differential golden trace is INFEASIBLE and is NOT fabricated; the image is verified STRUCTURALLY by running free + reading the post-run physical memory via QMP (psmm-selfcheck.py). The RTL --system differential is deferred to the RTL phase with an RTL-only assertion test. NO paging; CR0.PG stays 0."
+}
