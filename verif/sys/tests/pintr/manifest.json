@@ -1,0 +1,37 @@
+{
+  "name": "pintr",
+  "kind": "system",
+  "src": "pintr.S",
+  "linker": "pintr.ld",
+  "image": "pintr.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 300,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT load (lidt base=0x1000 limit=0x7FF) + 4 gates (0x03 trap, 0x04 int, 0x20 int, 0x21 trap)",
+    "INT 0x20 delivery: interrupt gate -> int20_handler (IF cleared) -> IRET return",
+    "INT 0x21 delivery: trap gate -> int21_handler -> IRET return",
+    "INT3 delivery: trap gate -> bp_handler -> IRET return",
+    "INTO (OF set) delivery: #OF interrupt gate -> of_handler -> IRET return (OF cleared in saved frame)"
+  ],
+  "delivery_records": {
+    "if_set": "mainline runs with IF=1 (sti) so the interrupt-vs-trap-gate IF semantics are observable",
+    "int20_enter": "n=130 cs=0x08 eip=0x000f01b0 (INTERRUPT gate target; IF CLEARED: mainline IF=1 -> handler body IF=0)",
+    "int20_iret_return": "n=136 eip=0x000f0159 (instruction after INT 0x20; IF=1 restored by IRET)",
+    "int21_enter": "n=138 cs=0x08 eip=0x000f01d0 (TRAP gate target; IF LEFT SET: handler body IF=1)",
+    "int21_iret_return": "n=144 eip=0x000f0161",
+    "bp_enter": "n=146 cs=0x08 eip=0x000f01f0 (INT3 TRAP gate target; IF LEFT SET: handler body IF=1)",
+    "bp_iret_return": "n=152 eip=0x000f0168",
+    "of_enter": "n=156 cs=0x08 eip=0x000f0210 (INTO #OF INTERRUPT gate target; entry has OF set, IF CLEARED)",
+    "of_iret_return": "n=163 eip=0x000f0177 (handler cleared OF in the saved EFLAGS; returns OF=0, IF=1)",
+    "success_proof": "n=168 ecx=0x4 (sum of all four per-vector handler counters); esi/edi/ebp/edx hold the four sentinels 0x20202020/0x21212121/0x03030303/0x04040404"
+  },
+  "description": "Bare-metal real->protected SOFTWARE-INTERRUPT IDT-delivery demonstrator for the M2S.3 gate (NO paging). Boots from the F000:FFF0 reset vector in 16-bit real mode, builds a flat GDT (null + flat code 0x08 + flat data 0x10), sets CR0.PE and far-jumps into the 32-bit flat code segment, loads the data selectors + a flat stack, zeroes a marker area at linear 0x2000. It then builds an IDT at linear 0x1000 with four 32-bit gate descriptors (all selector 0x08, DPL=0): vector 0x03 (#BP/INT3) TRAP gate (attr 0x8F) -> bp_handler, vector 0x04 (#OF/INTO) INTERRUPT gate (attr 0x8E) -> of_handler, vector 0x20 INTERRUPT gate -> int20_handler, vector 0x21 TRAP gate -> int21_handler, and lidt's it (base 0x1000, limit 0x7FF). It sets IF (sti) so the interrupt-gate-vs-trap-gate IF semantics are OBSERVABLE in the golden, then fires the software interrupts in turn: INT 0x20 (CD 20) delivers through the INTERRUPT gate (the golden shows CS:EIP jump to 0x000f01b0 and IF CLEARED -- mainline IF=1 -> handler body IF=0), the handler writes sentinel 0x20202020 + increments its counter and IRETs back to the instruction after INT 0x20 (golden n=136, IF=1 restored). INT 0x21 (CD 21) delivers through the TRAP gate -> int21_handler (sentinel 0x21212121, IF LEFT SET in the handler body) -> IRET. INT3 (CC) delivers through the TRAP gate -> bp_handler (sentinel 0x03030303, IF left set) -> IRET. A real signed overflow (0x7FFFFFFF+1 sets OF) is then followed by INTO (CE), which delivers #OF through the interrupt gate -> of_handler (sentinel 0x04040404); the handler clears OF (bit 11) in the SAVED EFLAGS image on the stack so IRET returns with OF=0 and the post-delivery state is deterministic. Each handler pushes/pops EAX only, so the four accumulator GPRs (esi/edi/ebp/edx) carry the per-vector sentinels read back in the mainline, proving each handler ran and control returned. Finally the four handler counters are summed (ecx=4, golden n=167) -- only reachable if every gate delivered and IRETed -- and the test exits via out 0xf4 (isa-debug-exit -> qemu status 133). Exercises IDT gate read + exception-frame push (EFLAGS/CS/EIP, no error code for these vectors) + interrupt-vs-trap-gate IF handling + IRET (pop EIP/CS/EFLAGS, same-privilege). Cross-privilege stack switch via TSS is deferred to M2S.4 (handlers stay at CPL 0). NO paging; CR0.PG stays 0; CR3/CR4 untouched."
+}

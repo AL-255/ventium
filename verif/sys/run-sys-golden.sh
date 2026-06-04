@@ -106,6 +106,72 @@ else:
 print("  VALID: system golden is well-formed and captures the mode transitions")
 PYEOF
 
+# --- 5b. (M2S.3) IDT-delivery validation for the interrupt/fault tests ---------
+# For pintr / pfault, additionally confirm the golden captures the IDT-DELIVERY
+# sequence: a CS:EIP transfer INTO each installed gate's handler (read from the
+# test ELF's symbol table), the in-handler IF state (interrupt gates clear IF;
+# trap gates leave it), and the IRET RETURN of control to the mainline (a CS:EIP
+# transfer back OUT of the handler region).  This is the Phase-1 evidence that the
+# delivery -> frame-push -> handler -> IRET sequence is present in the golden; the
+# RTL --system diff against it is wired in Phase 2 (this stays golden self-diff).
+INTR_TESTS="pintr pfault"
+if echo " $INTR_TESTS " | grep -q " $TEST "; then
+  say "5b. IDT-delivery validation (handler entry + IRET return captured)"
+  ELF="$TDIR/$TEST.elf"
+  [[ -f "$ELF" ]] || { echo "FATAL: $ELF missing (needed for handler symbols)"; exit 1; }
+  SYMS="$(nm "$ELF" 2>/dev/null | grep -E '_handler$' || true)"
+  [[ -n "$SYMS" ]] || { echo "FATAL: no *_handler symbols in $ELF"; exit 1; }
+  PYTHONPATH="$REPO/verif/diff" SYMS="$SYMS" "$PY" - "$OUT" <<'PYEOF'
+import json, os, sys
+import tracefmt as t
+tr = t.read_trace(sys.argv[1])
+recs = tr.records
+def H(r, k): return int(r[k], 16)
+
+# handler offset -> name (flat code base 0 => symbol value == linear EIP)
+handlers = {}
+for line in os.environ["SYMS"].splitlines():
+    p = line.split()
+    if len(p) == 3 and p[2].endswith("_handler"):
+        handlers[int(p[0], 16)] = p[2]
+hi = sorted(handlers)
+lo, h16 = hi[0], hi[-1] + 0x40          # the contiguous handler region
+def in_handler(eip): return lo <= eip <= h16
+
+found = []   # (name, enter_n, iret_return_n, if_in_handler)
+recN = recs
+for idx, r in enumerate(recN):
+    eip = H(r, "pc")
+    if eip in handlers and (idx == 0 or not in_handler(H(recN[idx-1], "pc"))):
+        # delivery: control just entered a handler from outside the region
+        name = handlers[eip]
+        # IF state INSIDE the handler body (after the gate's IF handling) and the
+        # IRET RETURN of control back to the mainline.  Sample the IF from a
+        # settled handler-body record (a few in, past the entry transient) so the
+        # interrupt-gate-clears-IF vs trap-gate-leaves-IF distinction is reported.
+        if_in = None
+        ret_n = None
+        for j in range(idx + 1, min(len(recN), idx + 60)):
+            ej = H(recN[j], "pc")
+            # first settled handler-body record (past the entry transient, before
+            # IRET pops the saved EFLAGS back) -> the gated IF the handler runs at
+            if if_in is None and in_handler(ej):
+                if_in = (H(recN[j], "eflags") >> 9) & 1
+            # IRET return: control leaves the handler region back to mainline
+            if not in_handler(ej):
+                ret_n = recN[j]["n"]
+                break
+        found.append((name, r["n"], ret_n, if_in))
+
+assert found, "no IDT delivery (handler entry) captured in the golden"
+for name, en, rn, iff in found:
+    assert rn is not None, f"{name}: entered at n={en} but no IRET return captured"
+    print(f"  delivery: {name:>14}  enter n={en}  IRET-return n={rn}  IF-in-handler={iff}")
+print(f"  VALID: {len(found)} IDT delivery+IRET sequence(s) captured "
+      f"(gate read -> CS:EIP to handler -> handler -> IRET return)")
+PYEOF
+fi
+
 # --- 6. comparator sys-diff path: golden self-diff sanity ----------------------
 # Confirms the comparator's sys-field path round-trips: the golden must self-diff
 # EQUIVALENT under compare.py --mode func with BOTH sides sys:true, so the cr0 +
@@ -141,7 +207,19 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 their RTL --system traces are DIFFED against the golden (no
 #                 longer self-diff-only): EQUIVALENT across the paging-enable +
 #                 paged execution (cr0..cr4 + selectors + GPRs + eflags + eip).
-RTL_SYS_TESTS="pseg pmode ppage"
+#   M2S.3 (DONE — Phase 2 FLIP POINT): the IDT-delivery tests "pintr" (software
+#                 INT n / INT3 / INTO -> interrupt/trap gate handlers -> IRET) and
+#                 "pfault" (#PF / #GP / #UD hardware faults now DELIVERING through
+#                 the IDT -> handler -> IRET / fault restart). The RTL implements
+#                 IDT delivery (gate read -> CS-descriptor load -> exception-frame
+#                 push of EFLAGS/CS/EIP[+error code] -> CS:EIP <- gate, IF/TF
+#                 gating) + IRET (pop EIP/CS/EFLAGS + CS reload), so both are in
+#                 RTL_SYS_TESTS and their RTL --system traces are DIFFED against the
+#                 golden (no longer self-diff-only): EQUIVALENT across the
+#                 fault/INT -> frame-push -> handler -> IRET sequence (cr0..cr4 +
+#                 cr2 + selectors + GPRs + eflags + eip). Same-privilege (CPL0)
+#                 delivery; cross-privilege stack switch via the TSS is M2S.4.
+RTL_SYS_TESTS="pseg pmode ppage pintr pfault"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"
@@ -163,8 +241,16 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   echo "                   (cr0..cr4 + selectors + GPRs + eflags + eip)"
 else
   say "7. RTL --system sys-diff: SKIPPED for '$TEST'"
-  echo "  ($TEST exercises paging = M2S.2 RTL; not yet in the RTL, so golden"
-  echo "   self-diff only. Phase 2 adds it to RTL_SYS_TESTS for a real RTL diff.)"
+  if echo " $INTR_TESTS " | grep -q " $TEST "; then
+    echo "  ($TEST exercises M2S.3 IDT DELIVERY (interrupts/faults); the RTL"
+    echo "   delivery path lands in M2S.3 Phase 2, so this is golden self-diff +"
+    echo "   the step-5b delivery validation only. Phase 2 adds $TEST to"
+    echo "   RTL_SYS_TESTS for a real RTL --system diff across the"
+    echo "   fault->frame-push->handler->IRET sequence.)"
+  else
+    echo "  ($TEST exercises paging = M2S.2 RTL; not yet in the RTL, so golden"
+    echo "   self-diff only. Phase 2 adds it to RTL_SYS_TESTS for a real RTL diff.)"
+  fi
 fi
 
 echo

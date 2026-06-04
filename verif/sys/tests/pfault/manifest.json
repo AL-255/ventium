@@ -1,0 +1,39 @@
+{
+  "name": "pfault",
+  "kind": "system",
+  "src": "pfault.S",
+  "linker": "pfault.ld",
+  "image": "pfault.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 400,
+  "sys": true,
+  "paging": true,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT load (lidt base=0x1000) + 3 fault gates (#UD vec6, #GP vec13, #PF vec14, all interrupt gates)",
+    "paging enable (CR3 load = 0x11000, CR0.PG 0->1; 4 KiB pages; PT1[1] linear 0x401000 left NOT present)",
+    "#PF delivery: store to not-present linear 0x401000 -> #PF -> CR2=0x401000 -> pf_handler maps PTE -> IRET RESTARTS the faulting store (FAULT restart)",
+    "#GP delivery: load DS=0x38 (past GDT limit) -> #GP -> gp_handler -> resume past the faulting MOV",
+    "#UD delivery: UD2 -> #UD -> ud_handler -> resume past UD2"
+  ],
+  "delivery_records": {
+    "pf_fault": "n=305 pc=0x000f01fc (the faulting store) cr2->0x00401000 (the faulting linear address)",
+    "pf_enter": "n=306 cs=0x08 eip=0x000f0250 (pf_handler gate target; IF cleared inside, eflags 0x46->0x02)",
+    "pf_cr2_read": "n=307 eax=0x00401000 (handler reads CR2)",
+    "pf_iret_restart": "n=317 pc=0x000f01fc (IRET RESTARTS the faulting store; #PF is a FAULT -> faulting EIP was pushed)",
+    "pf_restart_proof": "n=318 esi=0xcafebabe (the restarted store committed to phys 0x801000; readback succeeds)",
+    "gp_fault": "n=322 pc=0x000f0215 (the faulting mov %ax,%ds with selector 0x38, past the GDT limit 0x2F)",
+    "gp_enter": "n=323 cs=0x08 eip=0x000f0280 (gp_handler gate target)",
+    "gp_iret_resume": "n=330 pc=0x000f0217 (resume past the faulting MOV; gp_handler overwrote the saved EIP)",
+    "ud_fault": "n=334 pc=0x000f0227 (UD2, the undefined opcode)",
+    "ud_enter": "n=335 cs=0x08 eip=0x000f02a0 (ud_handler gate target)",
+    "ud_iret_resume": "n=341 pc=0x000f0229 (resume past UD2)",
+    "success_proof": "n=344 ecx=0x3 (sum of the three fault counters #PF/#GP/#UD); n=345 edx=0x00401000 (the CR2 captured during the #PF); esi=0xcafebabe (restarted #PF store readback)"
+  },
+  "description": "Bare-metal real->protected->PAGING HARDWARE-FAULT IDT-delivery demonstrator for the M2S.3 gate. Boots from F000:FFF0 in 16-bit real mode, builds a flat GDT (6 entries -> limit 0x2F so selector 0x38 is genuinely past the limit), sets CR0.PE and far-jumps into the 32-bit flat code segment, loads data selectors + a flat stack, zeroes a marker area at linear 0x2000, builds an IDT at linear 0x1000 with three 32-bit INTERRUPT gates (selector 0x08, DPL=0): vector 6 (#UD) -> ud_handler, vector 13 (#GP) -> gp_handler, vector 14 (#PF) -> pf_handler, and lidt's it. It then builds a 2-level page hierarchy (4 KiB pages, CR4.PSE NOT set): PT0 identity-maps only the regions the running code touches (low data + page tables [0,0x14000), the stack region [0x8D000,0x91000), the code window [0xF0000,0x100000)) so the single-stepped golden stays short and EIP stays valid across CR0.PG 0->1; PT1 covers the demand-paging window [4 MiB,8 MiB) with PT1[0] linear 0x400000 present and PT1[1] linear 0x401000 deliberately NOT present (P=0). After CR3=0x11000 and CR0.PG=1 it deliberately triggers each fault so the M2S.1/.2 fault DECISIONS now DELIVER: (#PF) a store to linear 0x401000 hits the not-present PTE -> #PF (vector 14, CR2=0x401000); pf_handler reads CR2, sets PT1[1] present (|P|RW), flushes the TLB, and IRETs -- because #PF is a FAULT the pushed EIP is the FAULTING store, so IRET RESTARTS it and it now succeeds (golden: faulting store n=305 with CR2 set, enter pf_handler n=306, restart at the same EIP n=317, readback esi=0xcafebabe n=318 proves the restarted store wrote phys 0x801000). (#GP) a load of DS with selector 0x38 (past the GDT limit) -> #GP; gp_handler counts and overwrites the saved EIP with a precomputed resume label so IRET resumes PAST the faulting MOV (a #GP fault pushes the faulting EIP, which would re-fault on a plain IRET). (#UD) UD2 -> #UD; ud_handler counts and resumes past UD2 the same way. The three handlers are INTERRUPT gates so IF is cleared on entry (eflags 0x46->0x02 inside each, restored by IRET). The three fault counters are summed (ecx=3, only reachable if every fault delivered and returned) and the captured CR2 is loaded into edx (0x401000); the test exits via out 0xf4 (isa-debug-exit -> qemu status 133). Exercises the IDT gate read + exception-frame push (EFLAGS/CS/EIP [+error code for #PF/#GP]) + CR2 set on #PF + FAULT restart (#PF) vs handler-driven resume (#GP/#UD) + IRET, all same-privilege at CPL 0 (cross-privilege stack switch via TSS is M2S.4)."
+}

@@ -13,7 +13,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2S.0 | System-mode ORACLE + harness (qemu-system-i386, gen_trace --system, bare-metal flow, `make verify-sys`) | system golden round-trips + sys-field compare path | ✅ done (qemu-system-i386 built; sys .vtrace = cr0..cr4 + 6 selectors + GPRs + eflags + eip; comparator sys-field intersect path) |
 | M2S.1 | Real→protected mode + protected-mode SEGMENTATION (dual `boot_mode`) | `pseg` RTL sys-diff-clean vs qemu-system golden; `make verify` (user) GREEN | ✅ done-partial (cold reset + real mode + real→PM transition + flat & based GDT segment loads = RTL EQUIVALENT to the golden, 70 records; descriptor protection DECISION computed (present/type/DPL/limit, CPL=CS.RPL) but fault DELIVERY = M2S.3; 16-bit reg addressing modes, paging, IDT delivery, A20/real-mode wrap deferred) |
 | M2S.2 | 2-level paging MMU (CR3/CR0.PG/CR4.PSE, page walk, split I/D TLBs, A/D bits, #PF decision) | `pmode` + `ppage` RTL sys-diff-clean vs qemu-system golden; pseg stays green; `make verify` (user) GREEN | ✅ done-partial (CR3→PDE→PTE 2-level walk + split 16-entry I/D TLBs + A/D-bit table writes + P/RW/US permission DECISION + #PF DECISION/CR2/error-code: `pmode` (identity 4 MiB PSE, 1084 records) AND `ppage` (NON-IDENTITY 4 KiB, 128 records) = RTL EQUIVALENT to the golden; CR0.PG=0 ⇒ linear==physical. #PF DELIVERY through the IDT = M2S.3 (decision computed/HALTs); 4 MiB NON-identity translation + A/D differential read-back + page-split + global pages/INVLPG deferred; TLB is functional-not-cycle) |
-| M2S (rest) | Interrupts/IDT (M2S.3), TSS (M2S.4), SMM (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
+| M2S.3 | IDT-delivered interrupts/exceptions (gate read → exception frame push → handler → `IRET`); software `INT n`/`INT3`/`INTO`/`UD2` + the M2S.1/.2 hardware-fault DECISIONS now DELIVER | `pintr` + `pfault` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage stay green; `make verify` (user) GREEN | ✅ done-partial (SAME-PRIVILEGE CPL0 delivery: read IDT[v] gate → read gate CS descriptor → push EFLAGS/CS/EIP[/errcode] on SS:ESP → load CS:EIP → handler → `IRET` (pop EIP/CS/EFLAGS, reload CS); `pintr` (INT n/INT3/INTO trap+int gates, 171 records) AND `pfault` (#PF not-present DELIVERS via IDT[14]+CR2+errcode, #GP, #UD; 348 records) = RTL EQUIVALENT to the golden. FAULT pushes faulting EIP (restart), TRAP pushes next EIP; int gate clears IF, both clear TF/NT/RF/VM (IA-32 6.12.1); error code for #DF/#TS/#NP/#SS/#GP/#PF/#AC. user `int 0x80` STILL halts (IDT gated behind sys_mode). DEFERRED: cross-priv stack switch/TSS = M2S.4; gate-Present/gate-DPL/CS-descriptor protection checks (#NP/#GP-on-gate) + per-access perm #PF (perm_fault) + segment-limit #GP (seg_off_over_limit) computed-not-delivered; external/HW INTR + #DB single-step + BOUND not exercised) |
+| M2S (rest) | TSS/task switch + cross-privilege (M2S.4), SMM (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
@@ -42,6 +43,100 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — M2S.3 done-partial: IDT-delivered interrupts/exceptions + exception frame + IRET
+
+The third **system-mode RTL** stage: **IDT delivery**. The fault DECISIONS that
+M2S.1 (segmentation: `#GP/#NP/#SS` selector checks) and M2S.2 (paging: `#PF` +
+`CR2` + error code) only **computed** (and HALTed on) now **DELIVER** through the
+IDT — read the gate, push the exception frame, load `CS:EIP`, run the handler,
+and `IRET` back — gated **differentially** against the `qemu-system-i386` golden.
+Two new tests run as REAL RTL `--system` diffs: **`pintr`** (software `INT n` /
+`INT3` / `INTO` → interrupt+trap gate handlers → `IRET`, **171 records**) and
+**`pfault`** (the M2S.1/.2 **hardware faults** `#PF` / `#GP` / `#UD` DELIVERING
+through the IDT → handler → `IRET`/restart, **348 records**), both **RTL
+EQUIVALENT** to the golden across cr0..cr4 + the 6 selectors + GPRs + eflags +
+eip. `pseg` (70), `pmode` (1084), `ppage` (128) **stay sys-green**, and `make
+verify` (boot_mode=user) is **GREEN and unchanged** (56/56 func diff-clean +
+every M4/M5 cycle band met) — the HARD requirement, since all IDT delivery is
+gated behind `sys_mode` (in `boot_mode=user`, `int 0x80` STILL HALTs — no IDT).
+
+**What works (RTL EQUIVALENT to the qemu-system golden):**
+- **IDT delivery micro-sequence** (`S_INT_GATE → S_INT_CS → S_INT_PUSH`): read
+  the 8-byte IDT gate at `idt_base + v*8` (IDTR from `LIDT`, M2S.1) → extract the
+  gate offset/selector and the gate type (`0xE` interrupt / `0xF` trap) → read the
+  gate's **CS descriptor** from the GDT and load the hidden base/limit/attr + CPL
+  exactly like a far jump → **push the exception frame** on `SS:ESP` (descending:
+  EFLAGS @ ESP-4, CS @ ESP-8, EIP @ ESP-12, error code @ ESP-16 when present) →
+  `ESP -= frame size`, `EIP ← gate offset`, retire ONCE. These reads/pushes are
+  **paged** when `paging_on` (translated through the TLB/walk like any access).
+- **Software `INT`/cond** (`S_DECODE`): `INT n` (`CD ib`), `INT3` (`CC`, vec 3),
+  `INTO` (`CE`, vectors only when `OF=1`, else a no-op advance), `UD2` (`#UD`,
+  vec 6). `INT n`/`INT3`/`INTO` are **TRAPS** → push the **NEXT** EIP (`IRET`
+  resumes after the INT); `UD2` is a **FAULT** → push the **faulting** EIP.
+- **Hardware faults DELIVER** via `start_fault(vec, has_err, err, fault_pc)`:
+  `S_SEGLD`/`S_LJMP` raise `#GP/#NP/#SS` from `seg_load_fault`; `S_WALK` raises
+  the **not-present `#PF`** (vector 14) with `CR2 ←` faulting linear + the
+  `{US,RW,P}` error code. A FAULT always pushes the **faulting** EIP (restartable:
+  the `pfault` handler maps the page, `IRET` re-runs the access).
+- **Error code** pushed only for `#DF(8)/#TS(10)/#NP(11)/#SS(12)/#GP(13)/#PF(14)/
+  #AC(17)` (generic `int_has_err`/`int_err`; #GP/#NP/#SS/#PF exercised). `INT n`/
+  `INT3`/`INTO`/`#UD` carry none (correct — `INTO` `#OF` has no error code).
+- **Gate-entry EFLAGS mask:** an **interrupt** gate clears `IF`+`TF` (and `NT/RF/
+  VM`); a **trap** gate clears `TF` (and `NT/RF/VM`) but leaves `IF` (IA-32 6.12.1).
+  The pushed EFLAGS is the PRE-clear value.
+- **`IRET`** (`S_IRET → S_INT_CS_RET`): pop `EIP`, `CS`, `EFLAGS` (near, same-
+  privilege), `ESP += 12`, reload the returned-to CS descriptor from the GDT, set
+  EIP, restore EFLAGS. The handler-return register state + handler reads of the
+  stack frame indirectly prove the pushed frame.
+
+**Phase-3 adversarial review — found + fixed:**
+- **[low, correctness] Gate-entry EFLAGS mask was incomplete (NT/RF/VM not
+  cleared).** Gate entry cleared only `IF`+`TF` (int gate) / `TF` (trap gate);
+  IA-32 6.12.1 also clears `NT`, `RF`, `VM` on **any** interrupt/trap-gate entry.
+  **Fixed:** the masks are now `IF|TF|NT|RF|VM` (`0x0003_4300`, int gate) and
+  `TF|NT|RF|VM` (`0x0003_4100`, trap gate). `NT/RF/VM` are 0 throughout the
+  corpus (eflags = 0x202), so this is a no-op for the gate (it stays bit-exact
+  EQUIVALENT) but makes the entry IA-32-correct for any future `TF`/`NT`/V8086 test.
+- **[low, docs] Stale `Makefile` `verify-sys` comment contradicted the real gate.**
+  The comment block claimed `pmode`/`ppage`/`pintr`/`pfault` were "golden self-diff
+  only / RTL sys-diff SKIPPED / Phase-1", but `run-sys-golden.sh` step 7 runs a
+  REAL RTL `--system` diff for ALL FIVE (each prints `RTL-SYS-DIFF-OK`). **Fixed:**
+  rewrote the comment to describe the implemented gate (all five run the real RTL
+  diff) so the gate is not mistaken for vacuous.
+- **[low, docs] Misleading "delivery is M2S.3" comments on the still-undelivered
+  per-access checks.** With this stage, the *segment-LOAD* faults and the
+  *not-present* `#PF` now deliver, but the **per-access** `perm_fault` (present-page
+  P/RW/US violation) and `seg_off_over_limit` (operand past the segment limit)
+  remain **computed-not-delivered**. **Fixed** the comments (core.sv perm_fault +
+  the lint sink) to state this honestly and re-tag those two as M2S.4 follow-ons,
+  rather than implying M2S.3 delivers them.
+
+**Deferred (honest done-partial; the gate does not exercise these):**
+- **Cross-privilege (CPL>0) delivery + TSS stack switch** (load `SS:ESP` from the
+  TSS, push the SS/ESP frame) and the cross-priv / NT / V8086 `IRET` return forms —
+  **M2S.4** per spec. All handlers here are **CPL0 same-privilege**.
+- **Gate descriptor protection checks** on delivery: gate **Present** bit (→
+  `#NP(v*8+2)`), gate **DPL** for software `INT n` (`gate.DPL ≥ CPL` else
+  `#GP(v*8+2)`), and the target **CS descriptor** via `seg_load_fault` (bad/absent
+  CS → `#GP/#NP`). The CPL0 corpus uses all-present DPL0 gates + a present 32-bit
+  code CS, so none can fire; a fault DURING delivery escalates to `#DF` (with
+  cross-priv) = **M2S.4**. (Documented in `S_INT_GATE`.)
+- **Per-access `#PF`/`#GP` that are COMPUTED-but-not-DELIVERED:** the
+  permission-violation `#PF` (`perm_fault`: present page, US/RW protection fails —
+  needs a CPL3 or `WP=1` test) and the segment-limit `#GP` (`seg_off_over_limit`:
+  an operand past the segment limit). Both would require raising a fault from the
+  combinational data path AND a corpus test that triggers them (none does) to
+  differentially validate — documented M2S.4 follow-ons.
+- **External/hardware interrupts** (no `INTR` pin / PIC) and **single-step `#DB`**
+  (`TF` traps) — only software `INT`/`INT3`/`INTO` + the M2S.1/.2 hardware faults
+  are exercised. **`BOUND` (`#BR` via `0x62`)** named in the spec is not in the
+  corpus (decode not wired) — a future add. `#DF/#TS/#AC` and the other error-code
+  vectors are wired generically (`int_has_err`/`int_err`) but only `#GP/#NP/#SS/
+  #PF/#UD/#BP/#OF` are exercised.
+
+**Next:** **M2S.4** — TSS / task switch / cross-privilege (the deferred cross-priv
+stack switch, gate protection checks, per-access perm `#PF` / limit `#GP`).
 
 ### 2026-06-04 — M2S.2 done-partial: 2-level paging MMU + split I/D TLBs + A/D bits + #PF decision
 
