@@ -153,6 +153,7 @@ verify:
 verify-sys:
 	bash verif/sys/run-sys-golden.sh pseg
 	bash verif/sys/run-sys-golden.sh pmode
+	bash verif/sys/run-sys-golden.sh ppage
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

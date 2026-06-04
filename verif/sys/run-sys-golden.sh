@@ -124,17 +124,26 @@ echo "$DIFF_OUT" | grep -q "sys compared: True" \
     || { echo "FATAL: comparator did not engage the sys-field compare (sys compared != True)"; exit 1; }
 echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVALENT"
 
-# --- 7. RTL (Producer C) sys-diff vs the golden (M2S.1 Phase 2) -----------------
-# For tests the RTL system-mode core supports (pseg = real mode + real->protected
-# + protected-mode SEGMENTATION; NO paging), build the Verilator TB, run it in
+# --- 7. RTL (Producer C) sys-diff vs the golden --------------------------------
+# For tests the RTL system-mode core supports, build the Verilator TB, run it in
 # --system mode on the SAME bare-metal image, and assert compare.py --mode func
 # (sys) is EQUIVALENT to the golden across cr0..cr4 + the 6 selectors + GPRs +
-# eflags + eip. The pmode test enables paging (CR0.PG/CR3/CR4.PSE = M2S.2), which
-# the M2S.1 RTL does not yet model, so it keeps the golden self-diff only and the
-# RTL sys-diff is SKIPPED (reported) rather than forced.
-RTL_SYS_TESTS="pseg"
+# eflags + eip.
+#
+#   M2S.1 (DONE): pseg = real mode + real->protected + protected-mode
+#                 SEGMENTATION (NO paging) -> REAL RTL sys-diff vs the golden.
+#   M2S.2 (DONE — Phase 2 FLIP POINT): the paging tests (pmode = identity 4 MiB
+#                 PSE; ppage = focused NON-IDENTITY 4 KiB) enable CR0.PG/CR3
+#                 [+CR4.PSE for pmode]. The RTL now implements the 2-level paging
+#                 MMU (CR3->PDE->PTE walk, split I/D TLBs, 4 KiB + 4 MiB pages,
+#                 A/D writeback, P/RW/US decision; #PF DECISION computed, delivery
+#                 = M2S.3), so "pmode" and "ppage" are in RTL_SYS_TESTS below and
+#                 their RTL --system traces are DIFFED against the golden (no
+#                 longer self-diff-only): EQUIVALENT across the paging-enable +
+#                 paged execution (cr0..cr4 + selectors + GPRs + eflags + eip).
+RTL_SYS_TESTS="pseg pmode ppage"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
-  say "7. RTL (Producer C) --system sys-diff vs golden (M2S.1 segmentation gate)"
+  say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"
   make -C "$REPO/verif/tb" rtl >/dev/null 2>&1
   [[ -x "$TB" ]] || { echo "FATAL: RTL TB $TB not built"; exit 1; }
@@ -151,10 +160,11 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   echo "$RDIFF_OUT" | sed 's/^/  /'
   [[ "$RDIFF_RC" == "0" ]] || { echo "FATAL: RTL sys-diff DIVERGENT vs golden"; exit 1; }
   echo "  RTL-SYS-DIFF-OK: RTL system-mode trace EQUIVALENT to the golden"
-  echo "                   (cr0..cr4 + selectors + GPRs + eflags + eip; real->PM + segmentation)"
+  echo "                   (cr0..cr4 + selectors + GPRs + eflags + eip)"
 else
   say "7. RTL --system sys-diff: SKIPPED for '$TEST'"
-  echo "  ($TEST exercises paging = M2S.2, not yet in the M2S.1 RTL; golden self-diff only)"
+  echo "  ($TEST exercises paging = M2S.2 RTL; not yet in the RTL, so golden"
+  echo "   self-diff only. Phase 2 adds it to RTL_SYS_TESTS for a real RTL diff.)"
 fi
 
 echo

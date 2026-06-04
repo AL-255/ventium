@@ -184,6 +184,59 @@ module core
   localparam int SG_CS = 0, SG_SS = 1, SG_DS = 2, SG_ES = 3, SG_FS = 4, SG_GS = 5;
 
   // ===========================================================================
+  // M2S.2 PAGING MMU + split I/D TLBs (docs/m2s2-paging-spec.md).
+  // ===========================================================================
+  // paging_on = system-mode core with CR0.PG (creg0[31]) set AND CR0.PE set
+  // (paging only takes effect in protected mode). When 0, linear == physical
+  // (real mode, flat PM-before-PG, and ALL of user mode) so the M2S.1 path and
+  // the user-mode path are bit-identical. CR4.PSE (creg4[4]) enables 4 MiB pages
+  // when a PDE has PS (bit 7) set.
+  logic paging_on;
+  assign paging_on = sys_mode && creg0[31] && creg0[0];
+  logic cr4_pse;
+  assign cr4_pse = creg4[4];
+
+  // Split I/D TLBs (correctness model, NOT cycle timing — spec §3). Each is a
+  // small direct-mapped array keyed on the linear page number. An entry caches
+  // the translated physical frame + the effective P/RW/US permission of the page
+  // (AND of PDE & PTE) + a 4 MiB-page flag (so the offset width is right) +
+  // whether the page's A/D bits have already been set in memory (so a repeat use
+  // does not re-write them, matching qemu-system which sets A/D once per state).
+  localparam int TLB_ENTRIES = 16;          // direct-mapped; index = lin[15:12]
+  // I-TLB (instruction fetches)
+  logic                   itlb_val   [TLB_ENTRIES];
+  logic [19:0]            itlb_vpn   [TLB_ENTRIES];   // linear page number lin[31:12]
+  logic [19:0]            itlb_pfn   [TLB_ENTRIES];   // physical frame phys[31:12]
+  logic [2:0]             itlb_perm  [TLB_ENTRIES];   // {US, RW, P} effective
+  logic                   itlb_big   [TLB_ENTRIES];   // 1 = 4 MiB page
+  // D-TLB (data accesses) — separately tracks the Dirty bit so a write marks D.
+  logic                   dtlb_val   [TLB_ENTRIES];
+  logic [19:0]            dtlb_vpn   [TLB_ENTRIES];
+  logic [19:0]            dtlb_pfn   [TLB_ENTRIES];
+  logic [2:0]             dtlb_perm  [TLB_ENTRIES];
+  logic                   dtlb_big   [TLB_ENTRIES];
+  logic                   dtlb_dirty [TLB_ENTRIES];   // page already marked D in mem
+
+  // Page-walk micro-sequence registers. The walk is a small FSM living inside
+  // S_WALK: it reads the PDE, then the PTE (4 KiB) — writing A/D bits back to the
+  // page tables as memory writes — fills the proper TLB, then returns to the
+  // diverted memory state (walk_ret_state, declared with the FSM enum below).
+  // walk_for_d selects the D-TLB (else I).
+  logic [31:0] walk_lin;           // the linear address being translated
+  logic        walk_for_d;         // 1 = data access (D-TLB), 0 = fetch (I-TLB)
+  logic        walk_is_write;      // the resumed access is a write (sets Dirty)
+  logic [2:0]  walk_step;          // 0=read PDE,1=write PDE A,2=read PTE,3=write PTE A/D
+  logic [31:0] walk_pde;           // latched PDE
+  logic [31:0] walk_pte;           // latched PTE
+  logic [31:0] walk_pde_addr;      // physical addr of the PDE
+  logic [31:0] walk_pte_addr;      // physical addr of the PTE
+  logic        walk_pf;            // a page-fault DECISION was reached (delivery=M2S.3)
+  // M2S.2 #PF DECISION outputs (delivery is M2S.3): the faulting linear address is
+  // latched into CR2; the error code (P/RW/US) is computed. For the clean gate
+  // tests this is never asserted.
+  logic [2:0]  pf_errcode;         // {US, RW, P} of the faulting access
+
+  // ===========================================================================
   // x87 FPU architectural state (M3)
   // ===========================================================================
   // Physical register file (8 x 80-bit) + TOP. st(i) = fpr[(ftop+i)&7]. Push
@@ -218,9 +271,14 @@ module core
     S_FLOAD, S_FEXEC, S_FSTORE,
     S_PF, S_PIPE, S_F00F_HANG,
     // M2S.1 system-mode descriptor + table micro-sequences:
-    S_LGDT, S_SEGLD, S_LJMP
+    S_LGDT, S_SEGLD, S_LJMP,
+    // M2S.2 paging: the 2-level page-walk micro-sequence (PDE read -> PTE read ->
+    // optional A/D writeback -> TLB fill -> resume the diverted memory state).
+    S_WALK
   } state_e;
   state_e state;
+  // M2S.2 page-walk return state (declared here so it can use state_e).
+  state_e walk_ret_state;          // state to resume after a page walk
 
   // M6 Erratum 81: latched once the core enters the F00F hang (never clears
   // until reset). Drives the cpu_hung output and keeps the FSM parked.
@@ -2283,6 +2341,16 @@ module core
         ic_val[s][0]<=1'b0; ic_val[s][1]<=1'b0;
         ic_tag[s][0]<=20'd0; ic_tag[s][1]<=20'd0;
       end
+      // M2S.2 paging: TLBs empty + walk idle out of reset.
+      for (int t=0;t<TLB_ENTRIES;t++) begin
+        itlb_val[t]<=1'b0; itlb_vpn[t]<=20'd0; itlb_pfn[t]<=20'd0;
+        itlb_perm[t]<=3'd0; itlb_big[t]<=1'b0;
+        dtlb_val[t]<=1'b0; dtlb_vpn[t]<=20'd0; dtlb_pfn[t]<=20'd0;
+        dtlb_perm[t]<=3'd0; dtlb_big[t]<=1'b0; dtlb_dirty[t]<=1'b0;
+      end
+      walk_ret_state<=S_PIPE; walk_lin<=32'd0; walk_for_d<=1'b0;
+      walk_is_write<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
+      walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
     end else begin
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
@@ -2298,6 +2366,26 @@ module core
       // before this edge; a retire on this edge stamps cyc=core_cyc+1).
       core_cyc <= core_cyc + 32'd1;
 
+      // -------------------------------------------------------------------
+      // M2S.2 PAGING DIVERSION: when paging is on and the current state's
+      // translatable memory access MISSES the relevant TLB, run a 2-level page
+      // walk (S_WALK) FIRST, then resume this state (it then hits the TLB and
+      // completes against the physical address). The walk reads the PDE and PTE
+      // from physical memory, sets A (and D on a write) in the tables, and fills
+      // the TLB. The normal state body is skipped this clock (no mem_ack
+      // processed) because the bus this clock is the PDE read, not the access.
+      // -------------------------------------------------------------------
+      if (xlate_miss) begin
+        walk_ret_state <= state;
+        walk_lin       <= cur_lin;
+        walk_for_d     <= cur_is_d;
+        walk_is_write  <= cur_is_w;
+        walk_step      <= 3'd0;
+        walk_pf        <= 1'b0;
+        // PDE physical address = (CR3 & ~0xFFF) + PDIndex*4, PDIndex = lin[31:22].
+        walk_pde_addr  <= {creg3[31:12], cur_lin[31:22], 2'b00};
+        state          <= S_WALK;
+      end else
       unique case (state)
         S_RESET: begin fetch_word<=3'd0; state<=S_PIPE; end
 
@@ -2806,16 +2894,23 @@ module core
           else if (q_sti) begin eflags<=eflags | 32'h0000_0200;  flags_we=1'b0; end // IF<-1
           // ---- M2S.1 system ops with no memory operand --------------------
           else if (q_sysop==SYS_MOVCR_TO) begin
-            // MOV CRn, r32. Only CR0 is architecturally active this stage; the
-            // others (CR2/CR3/CR4) latch but do not affect addressing (paging =
-            // M2S.2). Writing CR0.PE here is the real->protected transition: it
-            // retires updating cr0 (its own record), and the FOLLOWING far jump
-            // loads CS + switches to 32-bit PM (matching the golden's atomicity).
+            // MOV CRn, r32. M2S.1 made CR0.PE active (real->protected); M2S.2 makes
+            // CR0.PG (paging enable), CR3 (PDBR) and CR4.PSE active. Writing CR0.PE
+            // is the real->protected transition; writing CR0.PG turns paging on
+            // (its own retire record, cr0 0x6...->0xe...). A CR3 load (new page-
+            // directory base) flushes the TLBs (IA-32 §4.10: MOV CR3 invalidates
+            // all non-global TLB entries) — for the gate this happens with PG still
+            // 0 so the TLBs are already empty, but the flush keeps it correct.
             flags_we=1'b0;
             unique case (q_sys_creg)
               3'd0: creg0<=gpr[q_src_reg];
               3'd2: creg2<=gpr[q_src_reg];
-              3'd3: creg3<=gpr[q_src_reg];
+              3'd3: begin
+                creg3<=gpr[q_src_reg];
+                for (int t=0;t<TLB_ENTRIES;t++) begin
+                  itlb_val[t]<=1'b0; dtlb_val[t]<=1'b0;
+                end
+              end
               default: creg4<=gpr[q_src_reg];
             endcase
           end
@@ -3617,6 +3712,96 @@ module core
           end
         end
 
+        // -------------------------------------------------------------------
+        // M2S.2 — S_WALK: the 2-level page-table walk for a TLB miss.
+        //   step 0: read PDE @ (CR3&~0xFFF)+lin[31:22]*4
+        //   step 1: (4 KiB only) write PDE back with A(bit5) set, if it was clear
+        //   step 2: read PTE @ (PDE&~0xFFF)+lin[21:12]*4
+        //   step 3: write PTE back with A (and D on a write) set, if clear
+        // On a 4 MiB page (CR4.PSE & PDE.PS) the PDE is the leaf: step 0 -> the
+        // PDE-A/D writeback (reusing step 1's bus arm, then fill). A missing
+        // Present bit is a #PF DECISION (CR2 + error code); delivery is M2S.3 so
+        // it HALTs here (the gate tests are clean + never fault). The TLB stores
+        // the effective {US,RW,P} = AND of the PDE and PTE permission bits.
+        // -------------------------------------------------------------------
+        S_WALK: begin
+          if (mem_ack) begin
+            unique case (walk_step)
+              // -------- step 0: PDE read --------
+              3'd0: begin
+                logic [31:0] pde; logic is_big;
+                pde    = mem_rdata;
+                walk_pde <= pde;
+                is_big = cr4_pse && pde[7];
+                if (!pde[0]) begin
+                  // PDE not present -> #PF DECISION (delivery M2S.3): set CR2 +
+                  // error code (US,RW from the access; P=0). HALT for now.
+                  // US bit = (the access was user-mode, CPL==3) — Phase-3 [low]
+                  // fix: derive from the real CPL, not a hardcoded supervisor 0.
+                  creg2  <= walk_lin;
+                  pf_errcode <= {cpl_r == 2'd3, walk_is_write, 1'b0};
+                  walk_pf <= 1'b1; state <= S_HALT;
+                end else if (is_big) begin
+                  // 4 MiB large page: PDE is the leaf. Write A/D back if needed,
+                  // else fill the TLB directly (reuse step-1's PDE writeback arm).
+                  if (!pde[5] || (walk_is_write && !pde[6])) begin
+                    walk_step <= 3'd1;   // writes PDE with A(+D for big-page write)
+                  end else begin
+                    tlb_fill_big(walk_for_d, walk_lin, pde);
+                    state <= walk_ret_state;
+                  end
+                end else begin
+                  // 4 KiB page: need the PTE. First set A on the PDE if clear.
+                  walk_pte_addr <= {pde[31:12], walk_lin[21:12], 2'b00};
+                  if (!pde[5]) walk_step <= 3'd1;   // write PDE.A then read PTE
+                  else         walk_step <= 3'd2;   // PDE.A already set: read PTE
+                end
+              end
+              // -------- step 1: PDE writeback (A, +D for a 4 MiB write) --------
+              3'd1: begin
+                logic is_big;
+                is_big = cr4_pse && walk_pde[7];
+                // reflect the just-written bits into the latched PDE.
+                walk_pde <= walk_pde | 32'h0000_0020
+                            | ((is_big && walk_is_write) ? 32'h0000_0040 : 32'd0);
+                if (is_big) begin
+                  tlb_fill_big(walk_for_d, walk_lin,
+                               walk_pde | 32'h0000_0020 |
+                               (walk_is_write ? 32'h0000_0040 : 32'd0));
+                  state <= walk_ret_state;
+                end else begin
+                  walk_step <= 3'd2;   // now read the PTE
+                end
+              end
+              // -------- step 2: PTE read --------
+              3'd2: begin
+                logic [31:0] pte;
+                pte = mem_rdata;
+                walk_pte <= pte;
+                if (!pte[0]) begin
+                  // US bit from the real CPL (Phase-3 [low] fix; see PDE arm).
+                  creg2  <= walk_lin;
+                  pf_errcode <= {cpl_r == 2'd3, walk_is_write, 1'b0};
+                  walk_pf <= 1'b1; state <= S_HALT;
+                end else if (!pte[5] || (walk_is_write && !pte[6])) begin
+                  walk_step <= 3'd3;   // set A (+D on write) in the PTE
+                end else begin
+                  tlb_fill_4k(walk_for_d, walk_lin, walk_pde, pte, walk_is_write);
+                  state <= walk_ret_state;
+                end
+              end
+              // -------- step 3: PTE writeback (A + D) then fill --------
+              default: begin
+                logic [31:0] pte_new;
+                pte_new = walk_pte | 32'h0000_0020
+                          | (walk_is_write ? 32'h0000_0040 : 32'd0);
+                tlb_fill_4k(walk_for_d, walk_lin, walk_pde, pte_new, walk_is_write);
+                state <= walk_ret_state;
+              end
+            endcase
+          end
+        end
+
         S_HALT: state<=S_HALT;
 
         // M6 Erratum 81 (F00F): the locked CMPXCHG8B-with-register-destination
@@ -3734,7 +3919,216 @@ module core
   end
 
   // ===========================================================================
-  // Bus request generation (single combinational driver)
+  // M2S.2 — linear-address translation (paging). The bus driver below first
+  // computes the LINEAR address for the current state's access into `mem_addr`
+  // exactly as M2S.1 did; this stage then post-translates it to PHYSICAL when
+  // paging_on. The split I/D TLBs are looked up combinationally; on a HIT the
+  // physical frame replaces the linear page; on a MISS the FSM diverts to S_WALK
+  // (see xlate_miss / mem_xlate below). When paging is off (real mode, flat
+  // PM-before-PG, ALL of user mode) translation is a pass-through (linear ==
+  // physical) so M2S.1 + user mode stay byte-identical.
+  // ===========================================================================
+  // Direct-mapped TLB index from a linear address (lin[15:12]).
+  function automatic logic [3:0] tlb_idx(input logic [31:0] lin);
+    tlb_idx = lin[15:12];
+  endfunction
+  // I-TLB lookup: hit iff valid + vpn matches.
+  function automatic logic itlb_hit(input logic [31:0] lin);
+    logic [3:0] ix; begin
+      ix = tlb_idx(lin);
+      itlb_hit = itlb_val[ix] && (itlb_vpn[ix] == lin[31:12]);
+    end
+  endfunction
+  // I-TLB physical address: 4 MiB page uses lin[21:0] offset, else 4 KiB lin[11:0].
+  function automatic logic [31:0] itlb_phys(input logic [31:0] lin);
+    logic [3:0] ix; begin
+      ix = tlb_idx(lin);
+      itlb_phys = itlb_big[ix] ? {itlb_pfn[ix][19:10], lin[21:0]}
+                               : {itlb_pfn[ix],          lin[11:0]};
+    end
+  endfunction
+  function automatic logic dtlb_hit(input logic [31:0] lin);
+    logic [3:0] ix; begin
+      ix = tlb_idx(lin);
+      dtlb_hit = dtlb_val[ix] && (dtlb_vpn[ix] == lin[31:12]);
+    end
+  endfunction
+  function automatic logic [31:0] dtlb_phys(input logic [31:0] lin);
+    logic [3:0] ix; begin
+      ix = tlb_idx(lin);
+      dtlb_phys = dtlb_big[ix] ? {dtlb_pfn[ix][19:10], lin[21:0]}
+                               : {dtlb_pfn[ix],          lin[11:0]};
+    end
+  endfunction
+
+  // Translate a linear address for the CURRENT bus access. `is_d`=1 selects the
+  // D-TLB (data), else the I-TLB (fetch). Returns the physical address on a hit;
+  // on a miss (or paging off) returns the linear address (the FSM never USES a
+  // miss result — it diverts to S_WALK first). `miss` is set when paging_on AND
+  // the relevant TLB misses.
+  function automatic logic [31:0] mem_xlate(input logic [31:0] lin, input logic is_d);
+    begin
+      if (!paging_on)                 mem_xlate = lin;
+      else if (is_d  &&  dtlb_hit(lin)) mem_xlate = dtlb_phys(lin);
+      else if (!is_d &&  itlb_hit(lin)) mem_xlate = itlb_phys(lin);
+      else                              mem_xlate = lin;   // miss: value unused
+    end
+  endfunction
+
+  // Fill a TLB entry for a completed walk. The effective permission is the AND of
+  // the PDE's and PTE's {P, RW, US} (bits 0/1/2): a page is writable only if BOTH
+  // levels are writable, user only if BOTH are user — IA-32 §4.x. is_d selects
+  // the D-TLB (data), else the I-TLB (fetch). is_w (data writes) records that the
+  // page is already Dirty so a later write does not redundantly re-walk to set D.
+  task automatic tlb_fill_4k(input logic is_d, input logic [31:0] lin,
+                             input logic [31:0] pde, input logic [31:0] pte,
+                             input logic is_w);
+    logic [3:0] ix; logic [2:0] perm;
+    begin
+      ix   = lin[15:12];
+      // effective {US, RW, P} = AND of the two levels.
+      perm = {pde[2]&pte[2], pde[1]&pte[1], pde[0]&pte[0]};
+      if (is_d) begin
+        dtlb_val[ix]   <= 1'b1;          dtlb_vpn[ix]   <= lin[31:12];
+        dtlb_pfn[ix]   <= pte[31:12];    dtlb_perm[ix]  <= perm;
+        dtlb_big[ix]   <= 1'b0;          dtlb_dirty[ix] <= is_w;
+      end else begin
+        itlb_val[ix]   <= 1'b1;          itlb_vpn[ix]   <= lin[31:12];
+        itlb_pfn[ix]   <= pte[31:12];    itlb_perm[ix]  <= perm;
+        itlb_big[ix]   <= 1'b0;
+      end
+    end
+  endtask
+  // 4 MiB large page: the PDE is the leaf; frame = pde[31:22] (4 MiB aligned), the
+  // pfn stored is pde[31:12] with the low 10 bits forced 0 so itlb_phys/dtlb_phys
+  // overlay lin[21:0] for the offset. Permission is the PDE's own {US,RW,P}.
+  task automatic tlb_fill_big(input logic is_d, input logic [31:0] lin,
+                              input logic [31:0] pde);
+    logic [3:0] ix; logic [2:0] perm; logic [19:0] pfn;
+    begin
+      ix   = lin[15:12];
+      perm = {pde[2], pde[1], pde[0]};
+      pfn  = {pde[31:22], 10'd0};
+      if (is_d) begin
+        dtlb_val[ix]   <= 1'b1;          dtlb_vpn[ix]   <= lin[31:12];
+        dtlb_pfn[ix]   <= pfn;           dtlb_perm[ix]  <= perm;
+        dtlb_big[ix]   <= 1'b1;          dtlb_dirty[ix] <= pde[6];
+      end else begin
+        itlb_val[ix]   <= 1'b1;          itlb_vpn[ix]   <= lin[31:12];
+        itlb_pfn[ix]   <= pfn;           itlb_perm[ix]  <= perm;
+        itlb_big[ix]   <= 1'b1;
+      end
+    end
+  endtask
+
+  // Is the current bus access a DATA access (D-TLB) vs an instruction fetch
+  // (I-TLB)? Fetch states are S_FETCH / S_PF / the S_PIPE icache fill; the
+  // descriptor table reads (S_LGDT/S_SEGLD/S_LJMP) always run with paging OFF
+  // (the GDT is loaded before CR0.PG), so they pass through untranslated.
+  logic cur_is_d;
+  always_comb begin
+    unique case (state)
+      S_FETCH, S_PF: cur_is_d = 1'b0;
+      // S_PIPE issues BOTH an icache fill (pf_miss -> I-TLB, a fetch) AND a
+      // register-base DATA load (pipe_load_req -> D-TLB). They are mutually
+      // exclusive (pf_miss => !pipe_bytes_ok => !pipe_load_req), so classify by
+      // which is active: a data load is D-side (Phase-3 [med] fix — previously
+      // hardcoded I-TLB, which polluted the I-TLB with data and applied the wrong
+      // permission set, defeating the split I/D model and mis-targeting the M2S.3
+      // permission check). The fill (or neither) is I-side.
+      S_PIPE:        cur_is_d = pipe_load_req;
+      default:       cur_is_d = 1'b1;
+    endcase
+  end
+
+  // ---- the LINEAR address of the current state's access (pre-translation) and
+  // whether the access is a write. Mirrors the per-state mem_addr computation in
+  // the bus driver, but in LINEAR space so the page walk + #PF decision use the
+  // architectural linear address. Only meaningful for the translatable states.
+  logic [31:0] cur_lin;
+  logic        cur_is_w;
+  always_comb begin
+    cur_lin  = 32'd0;
+    cur_is_w = 1'b0;
+    unique case (state)
+      S_FETCH: cur_lin = flin + {27'd0,fetch_word,2'b00};
+      S_PF:    cur_lin = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
+      S_PIPE:  cur_lin = pf_miss ? {pf_miss_fa[31:5],5'd0}
+                                 : (seg_base[SG_DS]+gpr[pipe_load_base]);
+      S_LOAD: begin
+        if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
+            (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+gpr[R_ESP];
+        else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+gpr[R_EBP];
+        else if (q_kind==K_STR)
+          cur_lin = (q_st==ST_SCAS) ? dbase+gpr[R_EDI] : dbase+gpr[R_ESI];
+        else                                           cur_lin = dbase+q_ea;
+      end
+      S_LOAD2: cur_lin = dbase_edi+gpr[R_EDI];
+      S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
+      S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end
+      S_STORE: begin
+        cur_is_w = 1'b1;
+        cur_lin = (q_kind==K_STR) ? dbase_edi+str_store_addr : dbase+st_addr;
+      end
+      S_USEQ: begin
+        if (q_sm==SM_PUSHA) begin
+          cur_is_w = 1'b1;
+          cur_lin = dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
+        end else cur_lin = dbase+gpr[R_ESP] + (32'd4*{28'd0,step});
+      end
+      default: cur_lin = 32'd0;
+    endcase
+  end
+
+  // xlate_miss: paging is on, the current state issues a translatable memory
+  // access, and the relevant TLB MISSES -> the FSM must run a page walk (S_WALK)
+  // before this access can complete. The descriptor-table reads always run with
+  // paging off, so they are excluded. Computed once and consumed by the FSM.
+  logic xlate_miss;
+  always_comb begin
+    logic translatable;
+    unique case (state)
+      S_FETCH, S_PF, S_PIPE,
+      S_LOAD, S_LOAD2, S_FLOAD, S_FSTORE, S_STORE, S_USEQ: translatable = 1'b1;
+      default: translatable = 1'b0;
+    endcase
+    // S_PIPE only reads memory when a load or an icache fill is requested.
+    if (state==S_PIPE && !(pipe_load_req || pf_miss)) translatable = 1'b0;
+    // A data access misses if the D-TLB lacks the page OR (for a WRITE) the page
+    // is TLB-resident but its Dirty bit has not yet been set in memory — that
+    // first write must re-walk to set D (matching qemu's set-D-on-first-write).
+    xlate_miss = paging_on && translatable &&
+                 (cur_is_d
+                    ? (!dtlb_hit(cur_lin) ||
+                       (cur_is_w && !dtlb_dirty[tlb_idx(cur_lin)]))
+                    : !itlb_hit(cur_lin));
+  end
+
+  // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
+  // TLB-resident data access the effective {US,RW,P} (perm) is checked against
+  // the current privilege (CPL) and CR0.WP (bit 16): a USER-mode (CPL==3) access
+  // to a supervisor (US=0) page, or a WRITE to a read-only page when the writer is
+  // user OR CR0.WP is set, is a #PF. The gate runs at CPL=0 with WP=0 to present
+  // (RW) pages, so this DECISION is always "no fault"; like seg_off_over_limit the
+  // DELIVERY (#PF via the IDT, CR2 + error code) is M2S.3. Sunk in the lint sink.
+  logic perm_fault;
+  always_comb begin
+    logic [2:0] p; logic usr, wp;
+    p   = dtlb_perm[tlb_idx(cur_lin)];   // {US, RW, P}
+    usr = (cpl_r == 2'd3);
+    wp  = creg0[16];
+    perm_fault = 1'b0;
+    if (paging_on && cur_is_d && dtlb_hit(cur_lin)) begin
+      // user access to a supervisor page
+      if (usr && !p[2]) perm_fault = 1'b1;
+      // write to a read-only page (user writer always; supervisor only if WP)
+      if (cur_is_w && !p[1] && (usr || wp)) perm_fault = 1'b1;
+    end
+  end
+
+  // ===========================================================================
+  // Bus request generation (single combinational driver). Each arm computes the
+  // LINEAR address into mem_addr; the post-stage below translates it.
   // ===========================================================================
   always_comb begin
     mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
@@ -3817,8 +4211,44 @@ module core
           mem_we=1'b0; mem_addr=dbase+gpr[R_ESP] + (32'd4*{28'd0,step});
         end
       end
+      // M2S.2 — the page-walk reads/writes the page tables in PHYSICAL memory.
+      // walk_step: 0=read PDE, 1=write PDE (A bit), 2=read PTE, 3=write PTE (A/D).
+      S_WALK: begin
+        mem_req=1'b1;
+        unique case (walk_step)
+          3'd0: mem_addr = walk_pde_addr;                        // read PDE
+          3'd1: begin mem_we=1'b1; mem_wstrb=4'b1111;            // write PDE (set A)
+                      mem_addr = walk_pde_addr; mem_wdata = walk_pde | 32'h0000_0020; end
+          3'd2: mem_addr = walk_pte_addr;                        // read PTE
+          default: begin mem_we=1'b1; mem_wstrb=4'b1111;         // write PTE (set A/D)
+                      mem_addr = walk_pte_addr;
+                      mem_wdata = walk_pte | 32'h0000_0020
+                                  | (walk_is_write ? 32'h0000_0040 : 32'd0); end
+        endcase
+      end
       default: ;
     endcase
+    // ---- paging post-translation: linear -> physical for the data/fetch states.
+    // The descriptor reads (S_LGDT/S_SEGLD/S_LJMP) and the walk itself (S_WALK)
+    // address PHYSICAL memory directly and are NOT re-translated.
+    if (paging_on && state != S_WALK &&
+        state != S_LGDT && state != S_SEGLD && state != S_LJMP) begin
+      // CRITICAL (Phase-3 [high] fix): on a TLB MISS this clock the FSM diverts to
+      // S_WALK (the clocked block, gated on the same `xlate_miss`), so the bus this
+      // clock belongs to the PAGE WALK, not to this state's access. But `state` is
+      // still the access state combinationally, so without this guard the driver
+      // would assert mem_req (and, on a WRITE state, mem_we) with mem_addr =
+      // mem_xlate(linear) — which on a MISS returns the UNTRANSLATED LINEAR address
+      // (see mem_xlate). The single-beat memmodel would then commit a spurious
+      // write to the linear==physical alias before the walk fills the TLB. SQUASH
+      // the access entirely on a miss: the walk owns the bus, and the access is
+      // re-driven (now TLB-resident, correct physical) when the FSM resumes.
+      if (xlate_miss) begin
+        mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
+      end else if (mem_req) begin
+        mem_addr = mem_xlate(mem_addr, cur_is_d);
+      end
+    end
   end
 
   // capture original ESP at the cycle we enter PUSHA's S_USEQ.
@@ -3838,6 +4268,19 @@ module core
                    // 0 for the in-bounds pseg corpus). Sunk so the clean -Wall lint
                    // stays quiet until M2S.3 wires the fault path to it.
                    seg_off_over_limit,
+                   // M2S.2 — paging DECISIONS that are genuinely COMPUTED here but
+                   // whose DELIVERY (#PF via the IDT, CR2 + error code) is M2S.3:
+                   //   perm_fault  : the per-access P/RW/US permission-check result
+                   //                 (0 for the CPL=0/WP=0/present gate corpus).
+                   //   walk_pf     : a not-present PDE/PTE page-fault decision (the
+                   //                 gate is fully mapped, so never asserted).
+                   //   pf_errcode  : the {US,RW,P} error code for a raised #PF.
+                   //   itlb_perm   : the fetch-side effective {US,RW,P} (home for
+                   //                 the M2S.3 fetch permission / NX checks).
+                   // Sunk so the clean -Wall lint stays quiet until M2S.3 wires the
+                   // #PF delivery path to them.
+                   perm_fault, walk_pf, &pf_errcode,
+                   itlb_perm[0][0],
                    // RESERVED system state, loaded this stage, gated-diffed later:
                    // GDT limit (descriptor-table bounds) + the IDTR (interrupts =
                    // M2S.3). Retained as the home for those checks.
