@@ -14,7 +14,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2S.1 | Real→protected mode + protected-mode SEGMENTATION (dual `boot_mode`) | `pseg` RTL sys-diff-clean vs qemu-system golden; `make verify` (user) GREEN | ✅ done-partial (cold reset + real mode + real→PM transition + flat & based GDT segment loads = RTL EQUIVALENT to the golden, 70 records; descriptor protection DECISION computed (present/type/DPL/limit, CPL=CS.RPL) but fault DELIVERY = M2S.3; 16-bit reg addressing modes, paging, IDT delivery, A20/real-mode wrap deferred) |
 | M2S.2 | 2-level paging MMU (CR3/CR0.PG/CR4.PSE, page walk, split I/D TLBs, A/D bits, #PF decision) | `pmode` + `ppage` RTL sys-diff-clean vs qemu-system golden; pseg stays green; `make verify` (user) GREEN | ✅ done-partial (CR3→PDE→PTE 2-level walk + split 16-entry I/D TLBs + A/D-bit table writes + P/RW/US permission DECISION + #PF DECISION/CR2/error-code: `pmode` (identity 4 MiB PSE, 1084 records) AND `ppage` (NON-IDENTITY 4 KiB, 128 records) = RTL EQUIVALENT to the golden; CR0.PG=0 ⇒ linear==physical. #PF DELIVERY through the IDT = M2S.3 (decision computed/HALTs); 4 MiB NON-identity translation + A/D differential read-back + page-split + global pages/INVLPG deferred; TLB is functional-not-cycle) |
 | M2S.3 | IDT-delivered interrupts/exceptions (gate read → exception frame push → handler → `IRET`); software `INT n`/`INT3`/`INTO`/`UD2` + the M2S.1/.2 hardware-fault DECISIONS now DELIVER | `pintr` + `pfault` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage stay green; `make verify` (user) GREEN | ✅ done-partial (SAME-PRIVILEGE CPL0 delivery: read IDT[v] gate → read gate CS descriptor → push EFLAGS/CS/EIP[/errcode] on SS:ESP → load CS:EIP → handler → `IRET` (pop EIP/CS/EFLAGS, reload CS); `pintr` (INT n/INT3/INTO trap+int gates, 171 records) AND `pfault` (#PF not-present DELIVERS via IDT[14]+CR2+errcode, #GP, #UD; 348 records) = RTL EQUIVALENT to the golden. FAULT pushes faulting EIP (restart), TRAP pushes next EIP; int gate clears IF, both clear TF/NT/RF/VM (IA-32 6.12.1); error code for #DF/#TS/#NP/#SS/#GP/#PF/#AC. user `int 0x80` STILL halts (IDT gated behind sys_mode). DEFERRED: cross-priv stack switch/TSS = M2S.4; gate-Present/gate-DPL/CS-descriptor protection checks (#NP/#GP-on-gate) + per-access perm #PF (perm_fault) + segment-limit #GP (seg_off_over_limit) computed-not-delivered; external/HW INTR + #DB single-step + BOUND not exercised) |
-| M2S (rest) | TSS/task switch + cross-privilege (M2S.4), SMM (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
+| M2S.4 | TSS + cross-privilege delivery + inter-priv `IRET` + gate/CS protection (TSS/task switch) | `pcpl` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage/pintr/pfault stay green; `make verify` (user) GREEN | ✅ done-partial (PRIVILEGE MACHINERY: **TR/TSS** (`LTR` loads TR base/limit/sel from the GDT TSS descriptor, `STR`; `SS0:ESP0` privilege stack); **CROSS-PRIV delivery** — gate target CS.DPL < CPL ⇒ load SS:ESP from `TSS.ssN:espN`, push the LARGER 5-word frame (old SS, old ESP, EFLAGS, CS, EIP [+errcode]), CPL 3→0; **INTER-PRIV `IRET`** — pop EIP/CS/EFLAGS + ESP/SS, CPL 0→3, null DS/ES/FS/GS whose DPL < new CPL; **gate/CS protection** (deferred from M2S.3): gate Present→#NP, gate DPL<CPL for `INT n`→#GP, target CS present/code/DPL≤CPL→#NP/#GP. `pcpl` (CPL3 user `INT n` → cross-priv CPL0 handler stack switch → inter-priv `IRET` back to CPL3) = RTL EQUIVALENT to the golden, 304 records. user mode bit-identical (all gated behind `sys_mode`). DEFERRED (documented honest follow-ons): full HW TASK SWITCH (`CALL`/`JMP` to TSS / task gate, `INT` through task gate — `ptask` stays golden self-diff + step-5d validation, RTL --system far-JMP to a system descriptor HALTs cleanly in S_LJMP and is NOT in the RTL gate; tracks the golden bit-for-bit 275 records then halts at ljmp-to-TSS); TSS busy-bit writeback on `LTR` (memory-only, STR returns the selector = the only observed reg effect); `tr_valid`/`tr_limit` #TS bound checks (missing/truncated TSS); cross-priv new-SS protection (SS.DPL/RPL/writable/present #TS/#GP) + inter-priv `IRET` SS RPL/DPL re-validation #GP; per-access perm #PF (`perm_fault`) — all NEGATIVE paths with no triggering corpus test / no oracle) |
+| M2S (rest) | SMM/`RSM` (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
@@ -43,6 +44,91 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — M2S.4 done-partial: TSS + cross-privilege delivery + inter-priv IRET + gate/CS protection
+
+The fourth **system-mode RTL** stage adds the **privilege machinery** on top of
+M2S.3's same-privilege (CPL0) IDT delivery. M2S.3 delivered faults/interrupts to a
+CPL0 handler on the current stack; M2S.4 makes the CPL transition real: a CPL3 user
+task `INT n` switches to the CPL0 handler stack via the TSS, and the inter-priv
+`IRET` returns to CPL3. New corpus **`pcpl`** (set up a TSS with `SS0:ESP0`, a CPL3
+code/data segment + user task that issues `INT n`, the cross-priv delivery, the
+handler, the inter-priv `IRET` back to CPL3). Gated vs `qemu-system-i386`.
+
+**What landed (RTL EQUIVALENT to the golden):**
+- **TR / TSS (32-bit).** `LTR r16` (`S_LTR`) reads the GDT TSS descriptor named by
+  the selector and loads the TR hidden cache (`tr_base`/`tr_limit`/`tr_sel`,
+  `tr_valid`). `STR` returns the TR selector (the only observed register effect).
+- **Cross-privilege delivery.** When the gate's target CS.DPL < CPL (`S_INT_CS`),
+  the handler is more privileged: freeze the interrupted task's CS:SS:ESP, set the
+  target CPL, read `TSS.ssN:espN` (`S_INT_TSS`, N = target DPL), load the new SS
+  descriptor (`S_INT_SS`), then push the **larger 5-word frame** (`S_INT_PUSH`):
+  old SS, old ESP, EFLAGS, CS, EIP `[+errcode]`, descending from the NEW stack
+  (`xpl_active`). CPL 3→0; SS:ESP ← `TSS.SS0:ESP0`.
+- **Inter-privilege `IRET`.** After popping EIP/CS/EFLAGS, when the popped CS.RPL >
+  current CPL the return is privilege-lowering: also pop ESP/SS (`iret_interpriv`),
+  reload the outer SS descriptor (`S_IRET_SS`), CPL 0→3, and NULL any of
+  DS/ES/FS/GS whose DPL < the new CPL (IA-32 6.12.3). Verified non-vacuous (the
+  transfer-down nulls DS/ES/FS/GS 0x10→0x0000 and the RTL matches the golden).
+- **Gate/CS protection checks (deferred from M2S.3).** `S_INT_GATE`: gate not
+  Present → `#NP(v*8+2)`; software `INT n` with gate.DPL < CPL → `#GP(v*8+2)`.
+  `S_INT_CS`: target CS must be Present (else `#NP(sel)`), a code segment, and
+  DPL ≤ CPL (else `#GP(sel)`).
+
+`pcpl` = RTL `--system` EQUIVALENT to the golden, **304 records** (cr0..cr4 +
+selectors + GPRs + eflags + eip), across the CPL 0→3 transfer-down + cross-priv
+3→0 delivery (SS stack switch to TSS.SS0:ESP0 confirmed by step 5c) + handler +
+inter-priv `IRET` 0→3 return. **`make verify` (user) stays GREEN + bit-identical**
+(all M2S.4 logic gated behind `sys_mode`/`paging_on`); **pseg/pmode/ppage/pintr/
+pfault stay sys-green** (70/1084/128/171/348 records). Lint clean.
+
+**Phase-3 findings addressed (this close-out):**
+- **[med, fixed] Paging/TSS translation asymmetry + stale comment.** `S_INT_TSS`
+  (the `TSS.ssN:espN` read) was in the `translatable` list AND not excluded from
+  the linear→physical post-translate, while its sibling `S_INT_SS` (the GDT new-SS
+  descriptor read) and the other descriptor reads (`S_LGDT/S_SEGLD/S_LJMP/S_LTR`)
+  were excluded — so under paging the TSS read would be translated while the GDT
+  reads were not, and the `cur_lin` comment claimed `S_INT_TSS` was untranslated
+  (code/comment contradiction). Per IA-32 the GDT and TSS are BOTH linear
+  structures; the M2S.1/.2 convention reads all descriptor/TSS structures
+  PHYSICALLY under the identity-map simplification. **Fixed:** removed `S_INT_TSS`
+  from `translatable`, added it to the post-translate exclusion (now consistent
+  with `S_INT_SS`/`S_LTR`), and corrected all three comments to describe the single
+  consistent convention. Inert for `pcpl` (no paging), so the gate stays bit-exact
+  EQUIVALENT — a latent-consistency fix that makes a future paged-TSS test correct.
+- **[low, documented] Cross-priv new-SS protection checks** (`S_INT_SS` loads the
+  new SS unconditionally; no SS.DPL/RPL == target CPL, writable-data, present, no
+  `tr_valid`/`tr_limit` #TS bound) and **inter-priv `IRET` SS RPL/DPL
+  re-validation** (`S_IRET_SS`). These are NEGATIVE paths: `pcpl` uses a well-formed
+  SS0 (0x10, DPL0, present, writable, within the 104-byte TSS) and matching RPL=3
+  selectors (CS=0x1B, SS=0x23), so none fire and there is NO oracle to
+  differentially validate the #TS/#GP delivery. Per the iron rule (never fake a
+  sys-diff; needs a triggering corpus test), wiring an unvalidated fault would be
+  unverified dead logic — kept DEFERRED, with the deferral now documented precisely
+  at each code site (`S_INT_SS`, `S_IRET_SS`) and in the `tr_valid`/`tr_limit`
+  lint-sink note.
+
+**Deferred (honest done-partial; documented):**
+- **Full hardware task switch** — `CALL`/`JMP` far to a TSS / task gate, `INT`
+  through a task gate (save/restore the full task state, NT + back-link, busy
+  bits, new CR3/LDTR). The gnarliest piece. The `ptask` stretch corpus exercises a
+  far `JMP` to a TSS; its golden captures the state save + reload + busy-bit toggle
+  (step 5d validates it), but `ptask` stays **golden self-diff + step-5d only** and
+  is NOT in `RTL_SYS_TESTS`. In the RTL, a far `JMP`/`CALL` to a SYSTEM descriptor
+  HALTs cleanly in `S_LJMP` (no mis-delivery); `ptask` tracks the golden bit-for-bit
+  for 275 records then halts at the ljmp-to-TSS. Honest partial — the cross-priv +
+  inter-priv + protection machinery is the verified deliverable.
+- **TSS busy-bit writeback on `LTR`** (type 9 → B in the GDT) — a memory-only side
+  effect the corpus never reads back (STR returns the selector = the only observed
+  register effect); omitted as a documented simplification.
+- **`tr_valid`/`tr_limit` #TS bound checks** (missing/truncated TSS), **cross-priv
+  new-SS protection** (#TS/#GP), **inter-priv `IRET` SS re-validation** (#GP), and
+  the M2S.2 **per-access permission `#PF`** (`perm_fault`: CPL3 / WP=1 against a
+  present supervisor/RO page) — all computed-not-delivered NEGATIVE paths needing a
+  triggering corpus test + an oracle.
+
+**Next:** **M2S.5** — SMM / `RSM` (System Management Mode: SMI entry → save the
+SMM state-save area → SMM handler → `RSM` restore).
 
 ### 2026-06-04 — M2S.3 done-partial: IDT-delivered interrupts/exceptions + exception frame + IRET
 

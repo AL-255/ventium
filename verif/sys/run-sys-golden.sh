@@ -29,6 +29,15 @@ OUTDIR="$REPO/build/sys"
 PORT="${PORT:-41277}"
 mkdir -p "$OUTDIR"
 
+# Test-class membership lists (defined unconditionally so the step-7 SKIP-branch
+# `elif` chain never references an unset var under `set -u`):
+#   INTR_TESTS  — M2S.3 IDT-delivery tests (extra 5b delivery validation)
+#   XPRIV_TESTS — M2S.4 cross-privilege tests (extra 5c cross-priv validation)
+#   TASK_TESTS  — M2S.4 hardware-task-switch tests (extra 5d task-switch validation)
+INTR_TESTS="pintr pfault"
+XPRIV_TESTS="pcpl"
+TASK_TESTS="ptask"
+
 say(){ echo; echo "=== $* ==="; }
 
 # --- 1. qemu-system-i386 (idempotent) ------------------------------------------
@@ -114,7 +123,6 @@ PYEOF
 # transfer back OUT of the handler region).  This is the Phase-1 evidence that the
 # delivery -> frame-push -> handler -> IRET sequence is present in the golden; the
 # RTL --system diff against it is wired in Phase 2 (this stays golden self-diff).
-INTR_TESTS="pintr pfault"
 if echo " $INTR_TESTS " | grep -q " $TEST "; then
   say "5b. IDT-delivery validation (handler entry + IRET return captured)"
   ELF="$TDIR/$TEST.elf"
@@ -172,6 +180,121 @@ print(f"  VALID: {len(found)} IDT delivery+IRET sequence(s) captured "
 PYEOF
 fi
 
+# --- 5c. (M2S.4) CROSS-PRIVILEGE validation for the pcpl test ------------------
+# For pcpl, additionally confirm the golden captures the cross-privilege machinery
+# the M2S.4 stage adds on top of M2S.3 same-privilege delivery:
+#   (1) a CPL TRANSITION DOWN to CPL3 (CS.RPL/CPL 0 -> 3) via the inter-priv IRET,
+#   (2) a CROSS-PRIV interrupt DELIVERY (CPL 3 -> 0) whose SS:ESP SWITCHES to the
+#       TSS.SS0:ESP0 stack (the larger 5-word frame), and
+#   (3) the INTER-PRIV IRET RETURN back UP to CPL3 (CS.RPL/CPL 0 -> 3 again, SS:ESP
+#       switched back to the CPL3 user stack).
+# This is the Phase-1 evidence that the cross-priv delivery -> handler -> inter-priv
+# IRET sequence is present in the golden; the RTL --system diff against it is wired
+# in Phase 2 (this stays golden self-diff for now).
+if echo " $XPRIV_TESTS " | grep -q " $TEST "; then
+  say "5c. CROSS-PRIVILEGE validation (CPL switch + stack switch + inter-priv IRET)"
+  PYTHONPATH="$REPO/verif/diff" "$PY" - "$OUT" <<'PYEOF'
+import sys
+import tracefmt as t
+tr = t.read_trace(sys.argv[1])
+recs = tr.records
+def H(r, k): return int(r[k], 16)
+def cpl(r): return H(r, "cs") & 3
+
+# Walk the trace and record every CPL transition along with the SS:ESP at that
+# point, so we can assert the three cross-priv events are present + ordered.
+down = None     # CPL 0 -> 3 (transfer DOWN to the user task, inter-priv IRET)
+deliver = None  # CPL 3 -> 0 (cross-priv interrupt delivery, SS:ESP <- TSS.SS0:ESP0)
+ret_up = None   # CPL 0 -> 3 (inter-priv IRET return back to the user task)
+prev = None
+for r in recs:
+    if prev is not None:
+        pc, cc = cpl(prev), cpl(r)
+        ss_sw = H(prev, "ss") != H(r, "ss")
+        if pc == 0 and cc == 3 and down is None:
+            down = (prev, r)
+        elif pc == 3 and cc == 0 and down is not None and deliver is None:
+            assert ss_sw, "cross-priv delivery did NOT switch SS (no stack switch)"
+            deliver = (prev, r)
+        elif pc == 0 and cc == 3 and deliver is not None and ret_up is None:
+            assert ss_sw, "inter-priv IRET return did NOT switch SS back"
+            ret_up = (prev, r)
+    prev = r
+
+assert down is not None,    "no CPL 0->3 transition (transfer DOWN to CPL3) captured"
+assert deliver is not None, "no CPL 3->0 cross-priv interrupt DELIVERY captured"
+assert ret_up is not None,  "no CPL 0->3 inter-priv IRET RETURN captured"
+
+dp, dn = down
+xp, xn = deliver
+rp, rn = ret_up
+# the delivery target SS must equal the transfer-source (CPL0) SS = TSS.SS0 stack,
+# and its ESP must be DIFFERENT from the CPL3 ESP (i.e. it switched stacks).
+assert H(xn, "ss") == H(dp, "ss"), "delivery SS != the CPL0 (TSS.SS0) data selector"
+assert H(xn, "esp") != H(xp, "esp"), "delivery ESP did not move to the TSS stack"
+# the inter-priv IRET return must restore the CPL3 SS:ESP the user task ran on.
+assert H(rn, "ss") == H(dn, "ss"), "IRET-return SS != the CPL3 user data selector"
+assert H(rn, "esp") == H(dn, "esp"), "IRET-return ESP != the CPL3 user stack ESP"
+
+print(f"  CPL 0->3 (transfer DOWN)   : n={dn['n']} cs {dp['cs']}->{dn['cs']} "
+      f"ss {dp['ss']}->{dn['ss']} esp->{dn['esp']}  (CPL{cpl(dp)}->{cpl(dn)})")
+print(f"  CPL 3->0 (cross-priv INT)  : n={xn['n']} cs {xp['cs']}->{xn['cs']} "
+      f"ss {xp['ss']}->{xn['ss']} esp->{xn['esp']}  (stack switch to TSS.SS0:ESP0)")
+print(f"  CPL 0->3 (inter-priv IRET) : n={rn['n']} cs {rp['cs']}->{rn['cs']} "
+      f"ss {rp['ss']}->{rn['ss']} esp->{rn['esp']}  (return back to CPL3)")
+print("  VALID: cross-privilege CPL transition + TSS stack switch + the 5-word "
+      "frame + inter-priv IRET return all captured in the golden")
+PYEOF
+fi
+
+# --- 5d. (M2S.4 STRETCH) HARDWARE TASK SWITCH validation for the ptask test ----
+# For ptask, confirm the golden captures the hardware task switch: a far JMP to a
+# TSS selector that (1) RELOADS the incoming task GPR/ESP state from the new TSS
+# (the GPRs/ESP take the pre-initialised TSS2 image values across the CS:EIP jump
+# to task2) and (2) SAVED the outgoing task state into the current TSS (task2
+# reads TSS1.EIP/TSS1.EAX back as nonzero / the live value).  This is the Phase-1
+# evidence of the save+load task switch; the RTL --system diff is Phase 2.
+if echo " $TASK_TESTS " | grep -q " $TEST "; then
+  say "5d. HARDWARE TASK SWITCH validation (state save + state reload across JMP)"
+  PYTHONPATH="$REPO/verif/diff" "$PY" - "$OUT" <<'PYEOF'
+import sys
+import tracefmt as t
+tr = t.read_trace(sys.argv[1])
+recs = tr.records
+def H(r, k): return int(r[k], 16)
+
+# The TSS2 incoming image programmed by the test: EAX=0xAAAAAAAA, EBX=0xBBBBBBBB,
+# ESP=0x00070000.  Find the record where ALL THREE appear together at once for the
+# first time -- that is the post-task-switch state (the GPRs reloaded from TSS2).
+sw = None
+for i, r in enumerate(recs):
+    if H(r,"eax")==0xAAAAAAAA and H(r,"ebx")==0xBBBBBBBB and H(r,"esp")==0x00070000:
+        sw = (recs[i-1] if i else None, r)
+        break
+assert sw is not None, ("no hardware-task-switch GPR reload captured "
+                        "(EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, ESP=0x00070000 from TSS2)")
+prev, cur = sw
+# the busy-bit toggle proof EDI=0x898B (TSS1 available 0x89, TSS2 busy 0x8B) must
+# appear later in the incoming task (proof the JMP toggled the descriptor busy bits).
+busy = next((r for r in recs if H(r,"edi")==0x898B), None)
+# the outgoing-save proof: a nonzero TSS1.EIP read back into EDX (the CPU wrote the
+# resume EIP into TSS1 during the save) -- captured as EDX in the 0x000fxxxx range.
+saved = next((r for r in recs if 0x000f0000 <= H(r,"edx") <= 0x000fffff), None)
+
+print(f"  TASK SWITCH (state reload) : n={cur['n']} pc={cur['pc']} "
+      f"eax={cur['eax']} ebx={cur['ebx']} esp={cur['esp']}  "
+      f"(GPR/ESP image loaded from the incoming TSS2)")
+assert saved is not None, "no outgoing state SAVE captured (TSS1.EIP read-back)"
+print(f"  outgoing STATE SAVE proof  : n={saved['n']} edx={saved['edx']} "
+      f"(task1 resume EIP saved into TSS1 by the switch)")
+assert busy is not None, "no busy-bit toggle captured (EDI=0x898B)"
+print(f"  BUSY-bit toggle proof      : n={busy['n']} edi={busy['edi']} "
+      f"(TSS1 access 0x89 available, TSS2 access 0x8B busy)")
+print("  VALID: hardware task switch (outgoing state save + incoming state load "
+      "+ busy-bit toggle) captured in the golden")
+PYEOF
+fi
+
 # --- 6. comparator sys-diff path: golden self-diff sanity ----------------------
 # Confirms the comparator's sys-field path round-trips: the golden must self-diff
 # EQUIVALENT under compare.py --mode func with BOTH sides sys:true, so the cr0 +
@@ -219,7 +342,20 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 fault/INT -> frame-push -> handler -> IRET sequence (cr0..cr4 +
 #                 cr2 + selectors + GPRs + eflags + eip). Same-privilege (CPL0)
 #                 delivery; cross-privilege stack switch via the TSS is M2S.4.
-RTL_SYS_TESTS="pseg pmode ppage pintr pfault"
+#   M2S.4 (DONE — Phase 2 FLIP POINT): "pcpl" exercises the privilege machinery —
+#                 TR/TSS (LTR/STR + SS0:ESP0), the transfer DOWN to CPL3, CROSS-
+#                 PRIVILEGE interrupt delivery (target CS.DPL < CPL -> load SS:ESP
+#                 from TSS.ssN:espN + push the LARGER 5-word frame + CPL 3->0), the
+#                 INTER-PRIVILEGE IRET (pop EIP/CS/EFLAGS + ESP/SS, CPL 0->3), and
+#                 the gate/CS protection checks (gate Present/DPL, target CS
+#                 present/type/DPL) deferred from M2S.3. The RTL implements all of
+#                 these, so "pcpl" is in RTL_SYS_TESTS and its RTL --system trace is
+#                 DIFFED against the golden (no longer self-diff-only): EQUIVALENT
+#                 across the CPL transition + handler + inter-priv IRET (cr0..cr4 +
+#                 selectors + GPRs + eflags + eip). The HARDWARE TASK SWITCH (CALL/
+#                 JMP to a TSS / task gate = the "ptask" sibling) is the gnarliest
+#                 piece and is DEFERRED — ptask stays self-diff-only (documented).
+RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"
@@ -247,6 +383,18 @@ else
     echo "   the step-5b delivery validation only. Phase 2 adds $TEST to"
     echo "   RTL_SYS_TESTS for a real RTL --system diff across the"
     echo "   fault->frame-push->handler->IRET sequence.)"
+  elif echo " $XPRIV_TESTS " | grep -q " $TEST "; then
+    echo "  ($TEST exercises M2S.4 CROSS-PRIVILEGE delivery (TSS stack switch +"
+    echo "   the 5-word frame + inter-priv IRET); the RTL cross-priv path lands in"
+    echo "   M2S.4 Phase 2, so this is golden self-diff + the step-5c cross-priv"
+    echo "   validation only. Phase 2 adds $TEST to RTL_SYS_TESTS for a real RTL"
+    echo "   --system diff across the CPL transition + handler + inter-priv IRET.)"
+  elif echo " $TASK_TESTS " | grep -q " $TEST "; then
+    echo "  ($TEST exercises the M2S.4 STRETCH HARDWARE TASK SWITCH (far JMP to a"
+    echo "   TSS: outgoing state save + incoming state load + busy-bit toggle); the"
+    echo "   RTL task-switch path lands in M2S.4 Phase 2, so this is golden"
+    echo "   self-diff + the step-5d task-switch validation only. Phase 2 adds"
+    echo "   $TEST to RTL_SYS_TESTS for a real RTL --system diff across the switch.)"
   else
     echo "  ($TEST exercises paging = M2S.2 RTL; not yet in the RTL, so golden"
     echo "   self-diff only. Phase 2 adds it to RTL_SYS_TESTS for a real RTL diff.)"
