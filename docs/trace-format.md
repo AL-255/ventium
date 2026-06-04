@@ -35,12 +35,17 @@ The shared Python parser/emitter is [`../verif/diff/tracefmt.py`](../verif/diff/
 
 ### Header line
 ```json
-{"vtrace":1,"producer":"qemu-gdbstub|qemu-plugin|rtl","mode":"func|cycle","x87":false,"note":"..."}
+{"vtrace":1,"producer":"qemu-gdbstub|qemu-plugin|rtl","mode":"func|cycle","x87":false,"sys":false,"note":"..."}
 ```
 - `vtrace`: format version, currently `1`.
 - `producer`: which of A/B/C wrote this file.
 - `mode`: `"func"` (architectural-state records) or `"cycle"` (cycle records).
 - `x87`: `true` if `func` records carry x87 fields (§2.2). Default `false`.
+- `sys`: `true` if `func` records carry **system/privileged** state — the control
+  registers cr0/cr2/cr3/cr4 and (reserved) segment-hidden descriptor fields
+  (§2.4). Default `false` / **absent**. Added at **M2S.0** (system-mode oracle).
+  The key is only written when `true`, so all pre-M2S user-mode and x87 traces
+  are byte-for-byte unchanged.
 - `note`: free-form (binary name, qemu args, git rev…). Ignored by the comparator.
 
 ---
@@ -77,6 +82,41 @@ x87 state (present only when header `x87:true`):
 | `fop` | hex string (16-bit) | last x87 opcode |
 | `fioff`,`fooff` | hex string (32-bit) | FPU instruction / data pointers (offset) |
 | `fiseg`,`foseg` | hex string (16-bit) | FPU instruction / data pointers (selector) |
+
+### 2.4 System-mode fields (`mode:"func"`, header `sys:true`) — M2S
+
+Present only when the header carries `sys:true`. These extend (do **not** replace)
+the §2.2 user-mode fields — every `sys` func record still has `pc`, the GPRs,
+`eflags`, the six selectors, and (if `x87:true`) the x87 block. In user-mode
+(linux-user) traces these control registers always read `0` and the producer never
+sets `sys`, so they are simply absent.
+
+Control registers (always present in a `sys` record):
+| key | type | meaning |
+|---|---|---|
+| `cr0` | hex string (32-bit) | machine control — `PE`(bit0), `PG`(bit31), MP/EM/TS/ET/NE/WP/AM/NW/CD |
+| `cr2` | hex string (32-bit) | page-fault linear address (set by `#PF`) |
+| `cr3` | hex string (32-bit) | page-directory base register (PDBR) + PCD/PWT |
+| `cr4` | hex string (32-bit) | feature enables — VME/PVI/TSD/DE/PSE/PAE/MCE/PGE/PCE/… |
+
+Segment **hidden** descriptor state — **RESERVED** for M2S.1 (segmentation),
+emission optional even under `sys:true`:
+| key | type | meaning |
+|---|---|---|
+| `<seg>_base` | hex string (32-bit) | hidden cached base of `<seg>` ∈ {cs,ss,ds,es,fs,gs} |
+| `<seg>_limit` | hex string (32-bit) | hidden cached limit (byte-granular, post-`G`-scaling) |
+| `<seg>_attr` | hex string (16-bit) | hidden cached type/DPL/P/D/B/G access-rights bits |
+
+These hidden fields are NOT in the default compare order: the QEMU gdbstub
+exposes only a subset (`ss_base..gs_base`) in one `g`-packet, so until M2S.1 emits
+the full set in **both** producers the comparator intersects the keys present in
+both traces before diffing — a producer that omits a hidden field never forces a
+miss. The field *names and widths* are fixed now so the RTL producer (Producer C)
+and comparator agree from the start.
+
+`exc` (§2.2) carries the **fault/exception vector** in system mode (e.g. `13`=`#GP`,
+`14`=`#PF`, `6`=`#UD`, `8`=`#DF`). Producer A sets it when the gdbstub reports a
+non-trap stop signal mid-step; full IDT-delivered fault semantics arrive at M2S.3.
 
 ### 2.3 Cycle-mode fields (`mode:"cycle"`)
 | key | type | meaning |
