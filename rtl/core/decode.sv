@@ -1,29 +1,260 @@
-// core/decode.sv — Decode: x86 length decode, prefix machine, ModR/M+SIB,
-//                  D1/D2 split (M0 stub).
+// core/decode.sv — M4/M5 fast-path variable-length x86 decoder.
 //
-// PLAN.md §6.2 (Decode): variable-length x86 length decoder, prefix machine,
-// ModR/M+SIB extraction, D1/D2 stage split, and the pairability checker (the
-// U/V issue algorithm — though pairing physically lands in issue_uv at M4).
-// Key reference: Pentium Dev. Manual Vol.1 (241428) ch.2; Alpert & Avnon
-// IEEE Micro 1993 p.3 Fig.5 (the "simple instruction" / pairing pseudocode).
+// Extracted VERBATIM from intcore.sv (R1 modularization phase 3,
+// docs/rtl-refactor-plan.md). This is the fast-path decoder the dual-issue
+// pipeline uses: it recognises the simple/pairable instruction subset directly
+// (MOV/ALU/INC-DEC/LEA/load/shift/Jcc + a cycle-mode x87 reg-form whitelist) and
+// emits the decoded-uop struct (fpd_t) consumed by the U/V issue logic. Anything
+// it does not recognise leaves d.simple=0 and the core falls back to the slow
+// multi-cycle FSM. Pure combinational: bytes (+ EFLAGS, + cycle_mode) -> fpd_t.
 //
-// M0 status: STUB. No real decode (real decode is the M1 gate, PLAN §7).
+// IF (docs/rtl-refactor-plan.md §6 decode.sv): instruction bytes in -> decoded
+// uop struct + length out. b0..b5 are the 6 fast-path decode bytes; flags_in is
+// the current EFLAGS (for the architectural Jcc taken decision); cycle_mode
+// gates the x87 reg-form whitelist exactly as the in-line version did (func runs
+// keep FP on the slow FSM). The fpd_t carries .len (decoded length).
+//
+// fp_decode / _onehot below are moved BIT-FOR-BIT from intcore.sv; the only
+// change is that they now live in this module's scope (cycle_mode is this
+// module's input port, read by the function exactly as it read intcore's port).
 
-module decode (
-    input  logic        clk,
-    input  logic        rst_n
-    // M1+ skeleton (not yet wired):
-    //   input  logic [31:0]  fetch_pc,
-    //   input  logic [127:0] fetch_bytes,
-    //   input  logic         fetch_valid,
-    //   output logic [3:0]   insn_len,      // decoded length (D1)
-    //   output logic         pairable_u,    // U-pipe eligible
-    //   output logic         pairable_v,    // V-pipe eligible
-    //   output logic         microcoded,    // routes to ucode_rom
-    //   output logic         decode_valid
+module decode
+  import ventium_pkg::*;
+  import ventium_alu_pkg::*;
+  import ventium_decode_pkg::*;
+(
+    input  logic [7:0]  ib0,
+    input  logic [7:0]  ib1,
+    input  logic [7:0]  ib2,
+    input  logic [7:0]  ib3,
+    input  logic [7:0]  ib4,
+    input  logic [7:0]  ib5,
+    input  logic [31:0] iflags,
+    input  logic        cycle_mode,
+    output fpd_t        uop
 );
-  // Intentionally empty at M0.
-  // verilator lint_off UNUSED
-  wire _unused = &{1'b0, clk, rst_n};
-  // verilator lint_on UNUSED
+
+  // ---- fast-path decoder (moved verbatim from intcore.sv) -------------------
+  function automatic fpd_t fp_decode(input logic [7:0] b0, input logic [7:0] b1,
+                                     input logic [7:0] b2, input logic [7:0] b3,
+                                     input logic [7:0] b4, input logic [7:0] b5,
+                                     input logic [31:0] flags_in);
+    fpd_t d;
+    logic [1:0] mod; logic [2:0] reg_f, rm;
+    begin
+      d = '{default:'0};
+      d.alu_op = ALU_ADD; d.len = 4'd1;
+      mod = b1[7:6]; reg_f = b1[5:3]; rm = b1[2:0];
+      unique casez (b0)
+        // ---- MOV r32, imm32 (B8+r) -------------------------------------------
+        8'b1011_1???: begin
+          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_MOV; d.wreg=1'b1; d.use_imm=1'b1;
+          d.dst=b0[2:0]; d.imm={b4,b3,b2,b1};
+          d.writes={5'd0, _onehot(b0[2:0])}[7:0];
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- ALU r/m32, r32 (00/08/.. /r reg form) : add/or/adc/sbb/and/sub/xor
+        8'b00??_?001: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+            d.dst=rm; d.src=reg_f;
+            d.wreg=(b0[5:3]!=3'b111);                 // CMP writes no reg
+            d.reads = _onehot(rm) | _onehot(reg_f);
+            d.writes = d.wreg ? _onehot(rm) : 8'd0;
+            // ADC(op2)/SBB(op3) are PU (U-only-pairable, p5model pclass=PU): they
+            // may LEAD a pair but must NEVER fill the V slot — both because P5
+            // forbids it and because the V ALU path has no CF forwarding, so an
+            // adc/sbb in V would consume the STALE architectural carry and
+            // corrupt arch state. pairs_second=0 keeps them U-only.
+            d.pairs_first=1'b1;
+            d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+          end
+        end
+        // ---- ALU r32, r/m32 (02/0A/.. /r reg form) ---------------------------
+        8'b00??_?011: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+            d.dst=reg_f; d.src=rm; d.wreg=(b0[5:3]!=3'b111);
+            d.reads = _onehot(rm) | _onehot(reg_f);
+            d.writes = d.wreg ? _onehot(reg_f) : 8'd0;
+            // ADC(op2)/SBB(op3) = PU (U-only-pairable); never fill V (see above).
+            d.pairs_first=1'b1;
+            d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+          end
+        end
+        // ---- group1 r/m32, imm8 sign-ext (83 /r ib), reg form ----------------
+        8'h83: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd3; d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
+            d.use_imm=1'b1; d.imm={{24{b2[7]}},b2}; d.dst=rm; d.src=rm;
+            d.wreg=(reg_f!=3'b111);
+            d.reads = _onehot(rm);
+            d.writes = d.wreg ? _onehot(rm) : 8'd0;
+            // imm-only (no displacement) so disp_imm stays 0 -> pairs.
+            // /2=ADC, /3=SBB are PU (U-only-pairable); never fill V (see above).
+            d.pairs_first=1'b1;
+            d.pairs_second=!(reg_f==3'b010 || reg_f==3'b011);
+          end
+        end
+        // ---- INC/DEC r32 (40+r / 48+r) ---------------------------------------
+        8'b0100_????: begin
+          d.simple=1'b1; d.len=4'd1; d.wflags=1'b1; d.dst=b0[2:0]; d.src=b0[2:0];
+          d.alu_op = b0[3] ? ALU_DEC : ALU_INC; d.wreg=1'b1;
+          d.reads=_onehot(b0[2:0]); d.writes=_onehot(b0[2:0]);
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- MOV r/m32, r32 (89 /r reg form) ---------------------------------
+        8'h89: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=rm; d.src=reg_f;
+            d.wreg=1'b1; d.reads=_onehot(reg_f); d.writes=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+        // ---- MOV r32, r/m32 (8B /r): reg form = reg move; mod00 = reg-base load
+        8'h8B: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=reg_f; d.src=rm;
+            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end else if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
+            // MOV r32,(base) : register-indirect load, no SIB/disp.
+            d.simple=1'b1; d.is_load=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
+            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+            d.addr_mask=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+        // ---- LEA r32, m (8D /r) : register-indirect form only ----------------
+        8'h8D: begin
+          if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
+            d.simple=1'b1; d.is_lea=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
+            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
+            d.addr_mask=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
+        // ---- shift by imm8 (C1 /4,/5,/6,/7 ib), reg form ---------------------
+        // Only the SHL/SHR/SAL/SAR group is fast-pathed (its flag rules are
+        // simple + matched to the slow path); ROL/ROR/RCL/RCR (/0../3) keep
+        // their richer OF semantics on the slow path (simple=0 -> fallback).
+        8'hC1: begin
+          if (mod==2'b11 && reg_f[2]) begin   // reg_f in 4..7
+            d.simple=1'b1; d.is_shift=1'b1; d.len=4'd3; d.wflags=1'b1;
+            d.shrot=reg_f; d.shimm=b2[4:0]; d.dst=rm; d.wreg=1'b1;
+            d.reads=_onehot(rm); d.writes=_onehot(rm);
+            // shift-by-imm = U-only pairable (PU): may lead a pair, cannot fill V.
+            d.pairs_first=1'b1; d.pairs_second=1'b0;
+          end
+        end
+        // ---- TEST eAX, imm32 (A9) --------------------------------------------
+        8'hA9: begin
+          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_TEST; d.wflags=1'b1;
+          d.dst=R_EAX; d.use_imm=1'b1; d.imm={b4,b3,b2,b1};
+          d.reads=_onehot(R_EAX);
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- NOP (90) --------------------------------------------------------
+        8'h90: begin
+          d.simple=1'b1; d.is_nop=1'b1; d.len=4'd1;
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
+        // ---- Jcc rel8 (70..7F) -----------------------------------------------
+        8'b0111_????: begin
+          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd2;
+          d.cc=b0[3:0]; d.br_taken=cond_true(b0[3:0],flags_in); d.rel={{24{b1[7]}},b1};
+          // simple near branch = V-only pairable (can fill V, cannot lead a pair)
+          d.pairs_first=1'b0; d.pairs_second=1'b1;
+        end
+        // ---- JMP rel8 (EB) / Jcc rel32 (0F 8x) handled minimally -------------
+        8'hEB: begin
+          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b0; d.len=4'd2;
+          d.br_taken=1'b1; d.rel={{24{b1[7]}},b1};
+          // M5 finding [med]: an unconditional short JMP (EB) is V-only-pairable in
+          // the oracle (verif/qemu-plugins/p5trace.c:271-273: JMP -> pclass=PV,
+          // pairs_second=true) — exactly like a Jcc rel8. It can FILL the V slot of
+          // a pair (e.g. `<UV op>; jmp`) but cannot LEAD a pair. Matching this pairs
+          // the `<mov>; jmp` groups the assembler's p2align filler emits (mb_imiss).
+          d.pairs_first=1'b0; d.pairs_second=1'b1;
+        end
+        // ---- M5: x87 register-form FP whitelist (cycle-mode only) ------------
+        // These are recognised by the fast path so the FP latency/throughput
+        // CYCLE model is emergent (p5model fp_role scoreboard). simple stays 0
+        // (so the fast path does NOT treat them as integer ALU ops) but is_fp
+        // marks the FP commit path. FP ops never pair (NP in p5model): they hold
+        // the U pipe alone, so pairs_first/second stay 0. Gated on cycle_mode so
+        // func runs keep FP on the proven slow FSM (zero functional risk).
+        8'b1101_1???: if (cycle_mode) begin
+          // register form only (mod==11); memory-operand FP stays slow-path.
+          if (b1[7:6]==2'b11) begin
+            unique case (b0)
+              8'hD9: begin
+                unique casez (b1)
+                  8'b1100_0???: begin   // D9 C0+i  FLD ST(i)  (push copy)
+                    d.is_fp=1'b1; d.fp_kind=FK_FLDSTI; d.len=4'd2;
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd1; d.fp_lat=7'd1; d.fp_occ=7'd1;
+                  end
+                  8'b1100_1???: begin   // D9 C8+i  FXCH ST(i)
+                    d.is_fp=1'b1; d.fp_kind=FK_FXCH; d.len=4'd2;
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
+                  end
+                  8'hE8,8'hE9,8'hEA,8'hEB,8'hEC,8'hED,8'hEE: begin // FLD const (E8=FLD1..)
+                    d.is_fp=1'b1; d.fp_kind=FK_FLDC; d.len=4'd2;
+                    d.fp_sti=(b1==8'hE8)?3'd0:(b1==8'hE9)?3'd1:(b1==8'hEA)?3'd2:
+                             (b1==8'hEB)?3'd3:(b1==8'hEC)?3'd4:(b1==8'hED)?3'd5:3'd6;
+                    // FLD-const is occ=2/lat=2 in the oracle (verif/qemu-plugins/
+                    // p5trace.c:307-309), NOT the lat-1 of FLD ST(i)/FLD mem.
+                    d.fp_role=3'd1; d.fp_lat=7'd2; d.fp_occ=7'd2;
+                  end
+                  default: ;  // other D9 reg-form ops stay slow-path
+                endcase
+              end
+              8'hD8: begin            // D8 C0+i.. : ST0 op= ST(i)  (add/mul/sub/div)
+                unique case (b1[5:3])
+                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin
+                    d.is_fp=1'b1; d.fp_kind=FK_ARITH; d.len=4'd2;
+                    d.fp_aluop=b1[5:3]; d.fp_sti=b1[2:0]; d.fp_role=3'd3;
+                    // Match the oracle classify() (verif/qemu-plugins/p5trace.c:
+                    // 285-297): fadd/fsub LAT 3 / OCC 1; fmul LAT 3 / OCC 2; fdiv/
+                    // fdivr LAT 39 / OCC 39 (extended PC). LATENCY governs a
+                    // dependent consumer's stall (fp_ready); OCCUPANCY governs how
+                    // long this op holds the in-order pipe (delays the NEXT insn,
+                    // even an independent integer op) — the two are distinct.
+                    // group: 0=FADD 1=FMUL 4=FSUB 5=FSUBR 6=FDIV 7=FDIVR.
+                    d.fp_lat = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 : 7'd3;
+                    d.fp_occ = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 :
+                               (b1[5:3]==3'd1)                ? 7'd2  : 7'd1;
+                  end
+                  default: ;  // FCOM/FCOMP reg-form stay slow-path
+                endcase
+              end
+              8'hDD: begin
+                unique casez (b1)
+                  8'b1101_1???: begin   // DD D8+i  FSTP ST(i)  (pop). FSTP st(0)=discard.
+                    d.is_fp=1'b1; d.fp_kind=FK_FSTP0; d.len=4'd2;
+                    d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
+                  end
+                  default: ;
+                endcase
+              end
+              default: ;
+            endcase
+          end
+        end
+        default: ;
+      endcase
+      return d;
+    end
+  endfunction
+
+  // one-hot of a 3-bit GP index, ESP (index 4) excluded from dep masks.
+  function automatic logic [7:0] _onehot(input logic [2:0] r);
+    _onehot = (r==R_ESP) ? 8'd0 : (8'd1 << r);
+  endfunction
+
+  // Drive the decoded-uop output combinationally. Bit-identical to the in-line
+  // `fp_decode(...)` calls in intcore.sv (the function read cycle_mode from its
+  // enclosing module's port; here it reads this module's port — same value).
+  always_comb uop = fp_decode(ib0, ib1, ib2, ib3, ib4, ib5, iflags);
+
 endmodule : decode

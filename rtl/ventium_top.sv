@@ -5,8 +5,11 @@
 // docs/m1-core-spec.md): replace the M0 NOP stub with a REAL integer core that
 // fetches/decodes/executes IA-32 from memory and is diff-clean vs QEMU.
 //
-// At M1 the live datapath is the multi-cycle functional core in
-// rtl/core/intcore.sv (instantiated below as u_core). ventium_top owns:
+// The live datapath is the integer/pipeline spine in
+// rtl/core/core.sv (module `core`, instantiated below as u_core; renamed from
+// intcore.sv in the R1 modularization, docs/rtl-refactor-plan.md). It wires the
+// extracted decode/issue_uv leaves + ALU/decode packages and runs the pipeline
+// FSM + retire. ventium_top owns:
 //   * the top port list (docs/rtl-interface.md §1): clk, rst_n, init_eip/
 //     init_esp (driven by the TB at reset), and the mem_* bus group (§3);
 //   * the single DPI retire point (docs/rtl-interface.md §2): the core raises
@@ -17,7 +20,7 @@
 // The remaining PLAN §6 blocks (bpred/issue/caches/tlb/fpu/biu/ucode/sys) are
 // still M0-style stubs instantiated for a coherent block map; they land in
 // M2..M6.  The integer regfile/fetch/decode/exec are realised inside
-// intcore.sv for M1 (a coherent functional FSM); the standalone block stubs
+// core.sv (a coherent functional FSM); the standalone block stubs
 // remain as the future home of the pipelined versions.
 //
 // ventium_pkg is supplied on the build command line (single compilation unit),
@@ -74,7 +77,7 @@ module ventium_top
   logic [1:0]  core_retire2_pipe;
   arch_state_t core_retire2_state;
 
-  intcore u_core (
+  core u_core (
       .clk          (clk),
       .rst_n        (rst_n),
       .init_eip     (init_eip),
@@ -185,18 +188,22 @@ module ventium_top
 
   // ---------------------------------------------------------------------------
   // Block decomposition (PLAN §6). These remain M0-style stubs instantiated for
-  // a coherent block map; the pipelined versions land in M2..M6. (The M1
-  // integer datapath lives in intcore.sv above.) Inputs tied off; outputs left
+  // a coherent block map; the pipelined versions land in M2..M6. (The
+  // integer datapath lives in core.sv above.) Inputs tied off; outputs left
   // at the stubs' benign defaults.
   // ---------------------------------------------------------------------------
 
   // §6.1 Front end -----------------------------------------------------------
   fetch       u_fetch   (.clk(clk), .rst_n(rst_n));
   bpred_btb   u_bpred   (.clk(clk), .rst_n(rst_n));
-  decode      u_decode  (.clk(clk), .rst_n(rst_n));
+  // R1 phase-3: `decode` is now a REAL fast-path decoder leaf (rtl/core/decode.sv),
+  // instantiated inside core.sv (u_decode / v_decode). No top-level block-map
+  // stub instance — it is wired into the datapath, not tied off.
 
   // §6.3 Integer execution ----------------------------------------------------
-  issue_uv    u_issue   (.clk(clk), .rst_n(rst_n));
+  // R1 phase-3: `issue_uv` is now a REAL pairing-checker leaf
+  // (rtl/core/issue_uv.sv), instantiated inside core.sv (u_issue). No
+  // top-level block-map stub — it is wired into the datapath, not tied off.
   exec_int    u_exec    (.clk(clk), .rst_n(rst_n));
   regfile     u_regfile (.clk(clk), .rst_n(rst_n));
 

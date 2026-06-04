@@ -14,8 +14,13 @@ RTL_DIR      := $(VENTIUM_ROOT)/rtl
 SELFTEST_DIR := $(CURDIR)/selftest
 TB_DIR       := $(CURDIR)
 
-# Real RTL sources (recursively): rtl/*.sv and rtl/<block>/*.sv
-RTL_SRCS := $(wildcard $(RTL_DIR)/*.sv $(RTL_DIR)/**/*.sv)
+# Real RTL sources: an EXPLICIT filelist (rtl/ventium.f) listing PACKAGES before
+# the modules that import their types (R1 modularization, deterministic compile
+# order; the old $(wildcard rtl/*.sv rtl/**/*.sv) ordered packages alphabetically
+# AFTER their consumers, tripping IEEE 1800 "reference before declaration").
+# Verilator resolves -f paths relative to the .f file's own directory ($(RTL_DIR)).
+RTL_FILELIST := $(RTL_DIR)/ventium.f
+RTL_SRCS     := $(RTL_FILELIST)
 
 # Self-test stub sources.
 SELFTEST_SRCS := $(wildcard $(SELFTEST_DIR)/*.sv)
@@ -44,7 +49,7 @@ VL_CFLAGS := -I$(TB_DIR) -std=c++17
 
 VL_FLAGS := --cc --exe --build -j 0 \
             -sv --top-module $(TOP) \
-            -Wall -Wno-DECLFILENAME -Wno-UNUSED -Wno-fatal \
+            -Wall -Wno-UNUSED -Wno-fatal \
             $(VL_TRACE) \
             -CFLAGS "$(VL_CFLAGS)" \
             -o $(EXE)
@@ -55,14 +60,14 @@ all: rtl
 
 .PHONY: rtl
 rtl:
-	@if [ -z "$(strip $(RTL_SRCS))" ]; then \
-	  echo "ERROR: no RTL sources found under $(RTL_DIR) (rtl/*.sv, rtl/**/*.sv)."; \
+	@if [ ! -f "$(RTL_FILELIST)" ]; then \
+	  echo "ERROR: RTL filelist not found: $(RTL_FILELIST)."; \
 	  echo "       The core is authored by a sibling agent; run 'make selftest'"; \
 	  echo "       to exercise this testbench in isolation."; \
 	  exit 1; \
 	fi
 	$(VERILATOR) $(VL_FLAGS) -Mdir obj_dir \
-	  $(RTL_SRCS) $(CPP_SRCS)
+	  -F $(RTL_FILELIST) $(CPP_SRCS)
 	@echo "built: $(CURDIR)/obj_dir/$(EXE)"
 
 # ---- selftest target: build against the throwaway stub ----------------------

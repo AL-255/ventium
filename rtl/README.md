@@ -1,95 +1,110 @@
 # Ventium RTL (`rtl/`) — block map
 
-Synthesizable SystemVerilog skeleton of the Intel Pentium (P5/P54C). This is the
-**M0** state (PLAN.md §7): `ventium_top` is a *NOP-stub* core that boots reset
-and retires a finite, deterministic canned sequence through the DPI retire
-callback, proving the clock/reset/DPI/trace path end-to-end. There is **no real
-x86 decode/execute yet** — that lands at M1+.
+Synthesizable SystemVerilog replica of the Intel Pentium (P5/P54C). Through
+M1–M5 + M5B the real integer/x87/pipeline logic was built up; **R1** then
+*modularized* it (docs/rtl-refactor-plan.md): the former monolith
+`core/intcore.sv` was decomposed into packages + leaf modules and renamed to
+`core/core.sv` (module `core`), which now just **wires the extracted blocks and
+runs the pipeline FSM + retire**. The empty PLAN §6 stub files remain as the
+future home of the fully-pipelined block versions.
+
+Compile order is pinned by the **explicit filelist `rtl/ventium.f`** (packages
+first, then modules) — it replaced the old `$(wildcard rtl/**)` glob, whose
+alphabetical ordering put packages after their consumers. `verif/tb/Makefile`
+and the lint target both build via `-f rtl/ventium.f`.
 
 Contracts this directory implements (read these, not this README, when in doubt):
 - [`../docs/rtl-interface.md`](../docs/rtl-interface.md) — top ports (§1, §3),
-  the DPI `vtm_retire` import (§2), and M0 NOP-stub behaviour (§5).
+  the DPI `vtm_retire`/`vtm_retire_x87`/`vtm_retire_cycle` imports (§2).
 - [`../docs/trace-format.md`](../docs/trace-format.md) — the `.vtrace` fields
-  the retire callback ultimately feeds (§2.2) and the M0 gate (§4).
+  the retire callback feeds (§2.2).
+- [`../docs/rtl-refactor-plan.md`](../docs/rtl-refactor-plan.md) — the R1
+  decomposition table + interface design (the source for the block map below).
 - [`../PLAN.md`](../PLAN.md) — §2 (target µarch + parameters), §6 (block
-  decomposition, mirrored below), §7 (milestones).
+  decomposition), §7 (milestones).
 
-## Build / lint (the self-test)
+## Build / lint
 
-Lint must pass standalone (no DPI symbol) via the `VTM_NO_DPI` define:
+The authoritative build is the Verilator testbench (`verif/tb/`, driven by
+`make verify` from the repo root). A standalone lint (no DPI symbol) is:
 
 ```sh
-cd /home/yukidama/github/ventium && \
-verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSED \
-  -sv --top-module ventium_top $(find rtl -name '*.sv') +define+VTM_NO_DPI
+cd /home/yukidama/github/ventium/rtl && \
+verilator --lint-only -Wall -Wno-UNUSED \
+  -sv --top-module ventium_top -f ventium.f +define+VTM_NO_DPI
 ```
 
-All `rtl/*.sv` files form a **single compilation unit** (the package
-`ventium_pkg` is supplied on the command line, so no `` `include `` is needed —
-`import ventium_pkg::*` resolves it). It also lints with the DPI import present
-(drop `+define+VTM_NO_DPI`); the Verilator testbench phase (`verif/tb/`) does the
-full `--cc --exe` build that binds the C++ `vtm_retire`.
+The packages supply all shared types/functions; `import …::*` in each module
+resolves them (no `` `include `` needed). It also lints with the DPI import
+present (drop `+define+VTM_NO_DPI`); the testbench phase does the full
+`--cc --exe` build that binds the C++ `vtm_retire`.
 
-### Warning waivers (kept minimal, as the task allows)
-- `-Wno-DECLFILENAME` — block files are grouped by directory (`core/`, `mem/`,
-  …), so module name ≠ file basename for some; this is intentional.
-- `-Wno-UNUSED` — block stubs have documented-but-unwired ports for M1+; the
-  command-line waiver covers them. (We *also* add narrow inline
-  `lint_off UNUSED` sinks per stub so each file is self-contained-clean.)
+### Warning waivers (kept minimal)
+- `-Wno-UNUSED` — the un-pipelined PLAN §6 block stubs (and a few intentionally
+  partial signals in `core.sv`) carry documented-but-unwired ports; the
+  command-line waiver covers them.
+- `-Wno-DECLFILENAME` — **dropped** in R1. Every file now satisfies
+  *file name == module/package name* (one module per file), so the waiver is no
+  longer needed.
 
 No other waivers are required.
 
 ## Block map → PLAN §6 + reference pages
 
-PLAN §6 lists ten blocks; §2 pins their parameters. Each stub file's header
-comment cites the PLAN §6 sub-block and the primary reference. `ventium_top`
-**instantiates** every block (inputs tied to `clk`/`rst_n`, outputs left for
-M1+) so the block decomposition is executable and port-list drift is caught at
-elaboration.
+`ventium_top` instantiates the spine `core` plus the PLAN §6 block stubs. The
+real datapath lives in `core/core.sv` and the leaf modules/packages extracted
+from it in R1; the remaining stubs go live (as pipelined blocks) at M2S+.
 
-| File | PLAN §6 block | Key reference (page) | Milestone it goes live |
+**STATUS legend:** `REAL` = carries live logic today; `stub` = empty block file
+(ports tied off, awaiting its milestone).
+
+### Packages (shared types + pure functions, compiled first)
+| File | Contents | STATUS |
+|---|---|---|
+| `ventium_pkg.sv` | arch-state types + DPI imports | REAL |
+| `core/ventium_alu_pkg.sv` | ALU-op encoding + ALU/flags/shift/rotate pure functions (`alu_result`, `flags_next`, `shrot_*`, `shld_*`, `wmask`/`sbit`/`sbit2`/`parity8`) | REAL (R1) |
+| `core/ventium_decode_pkg.sv` | decode enums (`kind_e`/`smk_e`/`st_e`/`ctk_e`/`fxop_e`), the `fpd_t` decoded-uop struct + `FK_*`, and pure helpers `mfl`/`is_prefix`/`cond_true` | REAL (R1) |
+| `fpu/fpu_x87_pkg.sv` | 80-bit floatx80 datapath | REAL (M3) |
+
+### Modules
+| File | PLAN §6 block | Key reference (page) | STATUS |
 |---|---|---|---|
-| `ventium_pkg.sv` | arch types + DPI import | rtl-interface.md §2 (verbatim); tracefmt.py field order | M0 |
-| `ventium_top.sv` | top / M0 retire sequencer | rtl-interface.md §1,§3,§5 | M0 |
-| `core/fetch.sv` | §6.1 Front end (prefetch) | Alpert & Avnon p.2–3 | M1 |
-| `core/bpred_btb.sv` | §6.1 Front end (BTB+predictor) | Alpert & Avnon p.3 Fig.6 | M4 |
-| `core/decode.sv` | §6.2 Decode (len/prefix/ModRM, D1/D2) | Dev. Manual Vol.1 ch.2; A&A p.3 Fig.5 | M1 |
-| `core/issue_uv.sv` | §6.3 U/V issue + pairing | Dev. Manual Vol.1 ch.2; AP-500 241799; Agner Fog | M4 |
-| `core/exec_int.sv` | §6.3 ALU/shift/mul/div/flags/bypass | Dev. Manual Vol.1 ch.2; Agner Fog tables | M1 |
-| `core/regfile.sv` | §6.3 integer GPR file | IA-32 SDM Vol.1 (243190) ch.3 | M1 |
-| `fpu/fpu_top.sv` | §6.6 x87 FPU (8-stage) | Alpert & Avnon p.6–8 Fig.8/9 | M3 |
-| `mem/icache.sv` | §6.1 L1 I-cache (8K/2-way/32B) | Alpert & Avnon p.5 | M2 |
-| `mem/dcache.sv` | §6.5 L1 D-cache (banked, MESI, dual-port) | Alpert & Avnon p.5 Fig.7; AP-500 | M2 |
-| `mem/tlb.sv` | §6.4 Address gen / I+D TLBs / paging | IA-32 SDM Vol.3 (243192) ch.3 | M2 |
-| `bus/biu.sv` | §6.10 64-bit bus interface unit | Datasheet 241997-010 | M5 |
-| `ucode/ucode_rom.sv` | §6.7 Microcode engine | Dev. Manual Vol.1 ch.2; Agner Fog | M1 |
-| `sys/sys_state.sv` | §6.9 system state + §6.8 exc pipeline | IA-32 SDM Vol.3 (243192); Dev. Manual Vol.3 | M2 |
+| `ventium_top.sv` | top: ports + single DPI retire point; wires `core` + the §6 stubs | rtl-interface.md §1,§2,§3 | REAL |
+| `core/core.sv` | the integer/pipeline **spine** — pipeline FSM (PF/D1/D2/EX/WB), AGI interlock, retire; instantiates `decode`×2 + `issue_uv`; uses the ALU/decode packages. Renamed from `intcore.sv` in R1. | docs/m2-isa-spec.md; m4-pipeline-spec.md; m5 | REAL (M1–M5; renamed R1) |
+| `core/decode.sv` | §6.2 fast-path variable-length decoder (MOV/ALU/INC-DEC/LEA/load/shift/Jcc + cycle-mode x87 reg-form whitelist) → `fpd_t`. Extracted from the spine in R1. | Dev. Manual Vol.1 ch.2; A&A p.3 Fig.5 | REAL (R1) |
+| `core/issue_uv.sv` | §6.3 U/V pairing checker (AP-500 classes) → `pair_ok`. Extracted from the spine in R1. | AP-500 241799; Agner Fog; docs/ap500-pairing-table.md | REAL (R1) |
+| `core/fetch.sv` | §6.1 Front end (prefetch) | Alpert & Avnon p.2–3 | stub |
+| `core/bpred_btb.sv` | §6.1 Front end (BTB+predictor) | Alpert & Avnon p.3 Fig.6 | stub |
+| `core/exec_int.sv` | §6.3 ALU/shift/mul/div/flags/bypass datapath | Dev. Manual Vol.1 ch.2; Agner Fog tables | stub |
+| `core/regfile.sv` | §6.3 integer GPR file + partial-reg + bypass | IA-32 SDM Vol.1 (243190) ch.3 | stub |
+| `fpu/fpu_top.sv` | §6.6 x87 FPU (scoreboard around `fpu_x87_pkg`) | Alpert & Avnon p.6–8 Fig.8/9 | stub |
+| `mem/icache.sv` | §6.1 L1 I-cache (8K/2-way/32B) | Alpert & Avnon p.5 | stub |
+| `mem/dcache.sv` | §6.5 L1 D-cache (banked, MESI, dual-port) | Alpert & Avnon p.5 Fig.7; AP-500 | stub |
+| `mem/tlb.sv` | §6.4 Address gen / I+D TLBs / paging | IA-32 SDM Vol.3 (243192) ch.3 | stub |
+| `bus/biu.sv` | §6.10 64-bit bus interface unit (the SVA-verified `biu_p5` lives under `verif/bus/`) | Datasheet 241997-010 | stub |
+| `ucode/ucode_rom.sv` | §6.7 Microcode engine | Dev. Manual Vol.1 ch.2; Agner Fog | stub |
+| `sys/sys_state.sv` | §6.9 system state + §6.8 exc pipeline | IA-32 SDM Vol.3 (243192); Dev. Manual Vol.3 | stub |
 
-(§6.8 Interrupt/exception pipeline is folded into `sys/sys_state.sv`'s scope at
-M0 and may split into its own file when it grows.)
+Note: the M1–M5 integer/x87/cache/FP **timing** all live inside `core/core.sv`
+today (the spine). The `exec_int`/`regfile`/`fpu_top`/`icache`/`dcache` modules
+above are still stubs — extracting the corresponding sub-blocks out of the spine
+into them was deferred in R1 as too entangled with the FSM (the gate is the
+authority; partial modularization that stays green is the rule).
 
-## M0 NOP-stub behaviour (what `ventium_top` actually does)
+(§6.8 Interrupt/exception pipeline is folded into `sys/sys_state.sv`'s scope and
+may split into its own file when it grows.)
 
-Per rtl-interface.md §5 and trace-format.md §4:
+## Retire / DPI point (what `ventium_top` actually does)
 
-1. Synchronous active-low reset; comes up clean.
-2. After `rst_n` deasserts, retires `N_RETIRE` (default 16) canned
-   "instructions", **one per clock**, from a single `always_ff` retire point,
-   calling `vtm_retire(n, pc, …)` with:
-   - `n` — the core's retire counter, 0-based, monotonic +1 per retire;
-   - `pc = ENTRY + n*STEP` (params; defaults `ENTRY=0x08048000`, `STEP=1`). The
-     real testbench can override `ENTRY` with the manifest `entry`
-     (rtl-interface.md §4).
-   - trivially-predictable stub state: all regs/segs zero except `eax=n` and
-     `eflags=0x00000002` (IA-32 always-set bit 1). This deliberately will **not**
-     match QEMU — the M0 gate is *infrastructure*, not correctness
-     (trace-format.md §4).
-3. After `N_RETIRE` retires, asserts `done` and goes idle (no further retires),
-   giving the TB its end-of-trace condition.
+`ventium_top` owns the top port list (rtl-interface.md §1,§3) and the **single
+DPI retire point** (§2). The `core` spine raises `retire_valid` for one clock per
+committed instruction with the post-commit architectural state (plus the paired
+`retire2_*` for a dual-issued V instruction and the x87/cycle side-channels);
+`ventium_top` translates each into `vtm_retire` / `vtm_retire_x87` /
+`vtm_retire_cycle` calls, maintaining the monotonic retire counter `n`.
 
-The M0 memory port group (`mem_*`, rtl-interface.md §3) is driven inert
-(`mem_req=0`); `mem_rdata`/`mem_ack` are sunk so they stay live. Real bus traffic
-arrives with the icache/dcache at M2 and the modeled P5 bus FSM at M5.
+The memory port group (`mem_*`, rtl-interface.md §3) carries the live fetch /
+load / store traffic the spine drives.
 
 ## Integration notes
 
@@ -101,7 +116,9 @@ arrives with the icache/dcache at M2 and the modeled P5 bus FSM at M5.
   `int→uint32_t`, `shortint→uint16_t`).
 - **Parameters for the TB.** Override on the `ventium_top` instance:
   `ENTRY` (fetch base = manifest `entry`), `STEP`, `N_RETIRE` (trace length).
-- **x87 retire.** `vtm_retire_x87` (rtl-interface.md §2, trace-format.md §2.2) is
-  **not** declared yet — it lands with the FPU at M3, alongside `fpu/fpu_top.sv`.
-- **Single compilation unit.** Pass all `rtl/*.sv` together (e.g.
-  `$(find rtl -name '*.sv')`); do not compile files individually.
+- **x87 retire.** `vtm_retire_x87` (rtl-interface.md §2, trace-format.md §2.2)
+  is declared in `ventium_pkg.sv` and called from `ventium_top.sv` (live since
+  M3); `vtm_retire_cycle` carries the M4 pipe/paired cycle attribution.
+- **Compile via the filelist.** Build with `-f rtl/ventium.f` (packages before
+  modules); do not glob `rtl/**` and do not compile files individually. The
+  packages form the shared compilation unit the modules import.
