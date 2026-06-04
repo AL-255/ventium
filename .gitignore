@@ -20,6 +20,12 @@ verif/tests/**/*.elf
 verif/tests/**/*.bin
 verif/tests/**/*.flat
 
+# M2S system-mode bare-metal test build artifacts (sources .S/.ld/manifest +
+# the *.golden reference trace stay tracked; .bin/.elf/.o are rebuilt by make)
+verif/sys/tests/**/*.elf
+verif/sys/tests/**/*.bin
+verif/sys/tests/**/*.o
+
 # python
 __pycache__/
 *.pyc

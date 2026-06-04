@@ -114,24 +114,40 @@ class RegLayout:
     def anchor_tail(self, actual_len: int):
         """Reconcile the layout with the real g-packet length.
 
-        The integer/segment registers occupy the FRONT of the g-packet at their
-        naive offsets (verified correct). The FP+SSE registers (st0..mxcsr) are a
-        contiguous block at the TAIL. If the actual g-packet is shorter/longer
-        than the naive total, the difference is entirely in the middle
-        (un-transmitted sys/seg-base/CRx registers), so we shift the whole tail
-        (everything at/after st0's naive offset) by that difference. This makes
-        st0 land exactly `sizeof(st0..mxcsr)` before the end, regardless of which
-        middle registers QEMU omits. No-op when lengths already match or there is
-        no FP block. Idempotent-safe: call once after the first read_g().
+        The integer/segment SELECTOR registers occupy the FRONT of the g-packet at
+        their naive offsets (verified correct: eax..gs). After them comes a MIDDLE
+        block (segment hidden bases, the CRx control registers, efer/cr8) of which
+        QEMU omits some from the 'g' image, followed by the FP+SSE registers
+        (st0..mxcsr) as a contiguous TAIL. The whole length deficit is the bytes of
+        the omitted middle registers, so EVERY register that sits AT OR AFTER the
+        first omitted one is shifted by that deficit.
+
+        Empirically (qemu-system-i386 8.2.2, i386 softmmu) the deficit lands BEFORE
+        the CRx block: cr0/cr2/cr3/cr4 and the FP tail all shift by the same delta
+        (e.g. -12 bytes => cr0 naive@88 -> real@76, st0 naive@112 -> real@100),
+        while the segment SELECTORS stay put. So we anchor the shift to the EARLIER
+        of {cr0, st0}: this places cr0..cr4 (the M2S system fields) AND the FP tail
+        correctly, regardless of exactly which middle registers QEMU omits. The
+        segment hidden BASES (ss_base..gs_base) live in the unshifted region of the
+        middle and read 0 in flat configurations — they are RESERVED fields, only
+        emitted where present and intersected by the comparator, so a coarse base
+        offset never affects a compared value.
+
+        For the user-mode layout (qemu-i386 linux-user) cr0 reads 0 and is never
+        emitted, and st0 is still >= cr0's offset, so the FP tail placement is
+        byte-for-byte identical to before — this is a pure superset of the old
+        behavior. No-op when lengths already match. Idempotent: call once after the
+        first read_g().
         """
-        anchor = "st0" if "st0" in self.offset else None
-        if anchor is None:
+        # Earliest of the FP tail and the CRx block is the shift anchor.
+        candidates = [self.offset[n] for n in ("cr0", "st0") if n in self.offset]
+        if not candidates:
             return
         delta = actual_len - self.total_bytes
         if delta == 0:
             return
         self._tail_delta = delta
-        self._tail_from = self.offset[anchor]
+        self._tail_from = min(candidates)
 
     def slice(self, raw: bytes, name: str):
         """Return the little-endian integer for `name` from a raw g-packet image.
@@ -496,6 +512,39 @@ def regs_to_fields(layout: RegLayout, raw: bytes):
     return eip, eflags, gpr, seg, x87
 
 
+def sysregs_from_raw(layout: RegLayout, raw: bytes):
+    """Slice the M2S system/privileged fields (CRx + available segment-hidden).
+
+    The i386-32bit.xml target description (served by qemu-system-i386) advertises
+    cr0/cr2/cr3/cr4 right after the segment selectors+bases, and the integer/seg
+    block sits at the FRONT of the g-packet at its naive offsets (verified), so
+    these slice cleanly with no tail-anchor correction (that only shifts the
+    FP/SSE tail). Returns {} for a user-mode layout that has no cr0 reg.
+
+    We emit the control registers always (they're the M2S payload) and, for the
+    RESERVED segment-hidden block, only the bases the stub actually exposes
+    (ss_base..gs_base in the 32-bit description; cs has no separate base reg, so
+    its base is left for the comparator-intersect to skip). limit/attr are not in
+    the gdbstub g-packet and are left unemitted (reserved for M2S.1).
+    """
+    def get(name):
+        v = layout.slice(raw, name)
+        return 0 if v is None else v
+
+    if not layout.has("cr0"):
+        return {}
+    s = {}
+    for k in tracefmt.SYS_CR:               # cr0,cr2,cr3,cr4
+        if layout.has(k):
+            s[k] = get(k) & 0xFFFFFFFF
+    # Reserved segment-hidden bases where the description provides a *_base reg.
+    for seg in tracefmt.SEG_KEYS:
+        base_reg = "%s_base" % seg
+        if layout.has(base_reg):
+            s[base_reg] = get(base_reg) & 0xFFFFFFFF
+    return s
+
+
 def generate(qemu, elf, out_path, max_insn, port, extra_args,
              want_x87, stop_at, want_bytes, verbose):
     """Launch qemu under gdbstub, single-step, and write the .vtrace."""
@@ -603,6 +652,185 @@ def generate(qemu, elf, out_path, max_insn, port, extra_args,
         _terminate(proc)
 
 
+def generate_system(qemu, image, image_mode, out_path, max_insn, port,
+                    extra_args, want_x87, stop_at, want_bytes, verbose):
+    """SYSTEM-MODE oracle: launch qemu-system-i386 under gdbstub, single-step a
+    bare-metal image from the real-mode reset vector, and write a sys .vtrace.
+
+    Differences vs generate() (user-mode):
+      * launch line is qemu-system-i386 -display none -S -gdb tcp::PORT
+        -machine pc -m <mem> <image-load-args> -device isa-debug-exit,...
+        (-S so the guest is frozen at the F000:FFF0 reset vector when we connect).
+      * each record additionally carries cr0/cr2/cr3/cr4 (+ available segment-hidden
+        bases) via sysregs_from_raw(); header has sys:true.
+      * stop conditions: the guest writing the isa-debug-exit port HLTs/exits the
+        VM (gdbstub reports W/X), OR a configurable --max-insn cap, OR --stop-at.
+      * a fault/exception that the stub surfaces as a non-trap stop signal is
+        recorded in the record's `exc` field (the fault vector mapping is refined
+        at M2S.3 when the IDT is modelled).
+
+    image_mode is "kernel" (multiboot -kernel) or "bios" (raw -bios image mapped
+    at the top of the 1MB real-mode space, reset vector at F000:FFF0).
+    """
+    # isa-debug-exit: `out 0xf4, code` exits qemu with status (code<<1)|1.
+    mem = "32"
+    base = [qemu, "-display", "none", "-S", "-gdb", "tcp::%d" % port,
+            "-machine", "pc", "-m", mem,
+            "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
+    if image_mode == "bios":
+        base += ["-bios", image]
+    else:  # multiboot kernel
+        base += ["-kernel", image]
+    cmd = base + list(extra_args)
+    if verbose:
+        sys.stderr.write("[gen_trace] launching (system): %s\n" % " ".join(cmd))
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    rsp = None
+    n_emitted = 0
+    exit_info = None
+    try:
+        rsp = RSPClient(port=port, timeout=20.0, verbose=verbose)
+        rsp.handshake()
+        layout = rsp.discover_layout()
+        if verbose:
+            sys.stderr.write("[gen_trace] g-packet layout: %d regs, %d bytes; "
+                             "x87=%s cr0=%s\n"
+                             % (len(layout.regs), layout.total_bytes,
+                                layout.has("st0"), layout.has("cr0")))
+
+        emit_x87 = want_x87 and layout.has("st0")
+        emit_sys = layout.has("cr0")
+        if not emit_sys:
+            sys.stderr.write("[gen_trace] WARNING: target description has no cr0; "
+                             "this does not look like qemu-system-i386. Records "
+                             "will lack system fields.\n")
+
+        with open(out_path, "w") as f:
+            note = "image=%s mode=%s qemu=-S -machine pc isa-debug-exit%s" % (
+                os.path.basename(image), image_mode,
+                (" args=%s" % " ".join(extra_args)) if extra_args else "")
+            f.write(tracefmt.dumps(
+                tracefmt.header("qemu-gdbstub", "func",
+                                x87=emit_x87, sys=emit_sys, note=note)) + "\n")
+
+            # The stub halts at the reset vector (CS:EIP=F000:FFF0, cr0.PE=0).
+            raw = rsp.read_g()
+            layout.anchor_tail(len(raw))
+            if verbose and layout._tail_delta:
+                sys.stderr.write("[gen_trace] tail-anchor: g-packet %d bytes vs "
+                                 "layout %d; FP tail shifted %+d\n"
+                                 % (len(raw), layout.total_bytes,
+                                    layout._tail_delta))
+            eip, eflags, gpr, seg, x87 = regs_to_fields(layout, raw)
+            sysr = sysregs_from_raw(layout, raw)
+
+            while True:
+                if max_insn is not None and n_emitted >= max_insn:
+                    if verbose:
+                        sys.stderr.write("[gen_trace] reached --max-insn %d\n"
+                                         % max_insn)
+                    break
+                if stop_at is not None and eip == stop_at:
+                    if verbose:
+                        sys.stderr.write("[gen_trace] reached --stop-at 0x%x\n"
+                                         % stop_at)
+                    break
+
+                pc = eip
+
+                bytes_hex = None
+                if want_bytes:
+                    # Read at the LINEAR address: pc is the offset; in real mode
+                    # the fetch linear addr is (cs<<4)+eip, in protected/flat it is
+                    # cs_base+eip. The gdbstub 'm' command takes the *current*
+                    # translation, so reading at the cs-relative linear addr is
+                    # what we want — but the simplest correct read for both modes
+                    # is via the segment base we already sliced.
+                    cs_base = sysr.get("cs_base")
+                    if cs_base is None:
+                        # Real mode (no cs_base reg) -> linear = (cs<<4)+eip.
+                        # Protected flat (cs_base present & 0) -> eip works too.
+                        lin = ((seg["cs"] << 4) + pc) & 0xFFFFFFFF
+                    else:
+                        lin = (cs_base + pc) & 0xFFFFFFFF
+                    mem_bytes = rsp.read_mem(lin, 15)
+                    if mem_bytes:
+                        bytes_hex = mem_bytes.hex()
+
+                # isa-debug-exit makes qemu exit the *process* immediately, which
+                # closes the gdb socket mid-step (no clean W/X stop-reply). Treat a
+                # connection-closed during the step as the program's exit, not an
+                # error — the records up to here are valid post-states.
+                try:
+                    reply = rsp.step()
+                except RSPError as e:
+                    if "closed" in str(e):
+                        exit_info = StopReply(b"W00")  # synthetic exit marker
+                        exit_info.note = "isa-debug-exit (socket closed)"
+                        if verbose:
+                            sys.stderr.write("[gen_trace] guest exited via "
+                                             "isa-debug-exit (socket closed) "
+                                             "after %d insns\n" % n_emitted)
+                        break
+                    raise
+                stop = StopReply(reply)
+                if stop.kind in ("exit", "term"):
+                    exit_info = stop
+                    if verbose:
+                        sys.stderr.write("[gen_trace] guest %s (code/sig=%s) "
+                                         "after %d insns (isa-debug-exit/HLT)\n"
+                                         % (stop.kind,
+                                            stop.exit_code if stop.kind == "exit"
+                                            else stop.signal, n_emitted))
+                    break
+                if stop.kind == "output":
+                    stop = StopReply(rsp.recv())
+                    if stop.kind in ("exit", "term"):
+                        exit_info = stop
+                        break
+
+                raw = rsp.read_g()
+                eip, eflags, gpr, seg, x87 = regs_to_fields(layout, raw)
+                sysr = sysregs_from_raw(layout, raw)
+
+                # A non-SIGTRAP stop signal surfaced by the stub mid-step is a
+                # fault. SIGTRAP(5) is the normal single-step stop. Map a couple
+                # of common ones to x86 vectors; otherwise carry the raw signal.
+                exc = None
+                if stop.kind == "stop" and stop.signal not in (None, 5):
+                    exc = _signal_to_vector(stop.signal)
+
+                rec = tracefmt.func_record(
+                    n_emitted, pc, eflags, gpr, seg,
+                    bytes_=bytes_hex, exc=exc,
+                    x87=(x87 if emit_x87 else None),
+                    sysregs=(sysr if emit_sys else None))
+                f.write(tracefmt.dumps(rec) + "\n")
+                n_emitted += 1
+
+        return n_emitted, exit_info
+    finally:
+        if rsp is not None:
+            try:
+                rsp.send("k")
+            except Exception:
+                pass
+            rsp.close()
+        _terminate(proc)
+
+
+def _signal_to_vector(sig):
+    """Best-effort map a gdb stop signal to an x86 fault vector (refined @M2S.3).
+
+    The gdbstub reports faults as POSIX-ish signals; the precise IDT vector +
+    error-code semantics arrive when M2S.3 models the IDT. Until then we record
+    the signal itself so a fault is at least *visible* in the trace.
+    """
+    # SIGSEGV(11) ~ #GP/#PF region, SIGILL(4) ~ #UD, SIGFPE(8) ~ #DE.
+    return int(sig)
+
+
 def _terminate(proc):
     """Ensure the qemu child is reaped, even on error paths."""
     if proc.poll() is None:
@@ -631,9 +859,22 @@ def _terminate(proc):
 def main(argv=None):
     p = argparse.ArgumentParser(
         description="Ventium Producer A: QEMU gdbstub golden functional .vtrace.")
-    p.add_argument("--qemu", required=True, help="path to qemu-i386 binary")
-    p.add_argument("--elf", required=True, help="32-bit i386 ELF to trace")
+    p.add_argument("--qemu", required=True,
+                   help="path to qemu binary (qemu-i386 user-mode, or "
+                        "qemu-system-i386 with --system)")
+    p.add_argument("--elf", default=None,
+                   help="32-bit i386 ELF to trace (user-mode; or use --image)")
     p.add_argument("--out", required=True, help="output .vtrace path")
+    # --- M2S.0 system-mode oracle ------------------------------------------
+    p.add_argument("--system", action="store_true",
+                   help="SYSTEM MODE: launch qemu-system-i386 on a bare-metal "
+                        "image from the reset vector and emit sys records "
+                        "(cr0/cr2/cr3/cr4 + segment-hidden bases).")
+    p.add_argument("--image", default=None,
+                   help="bare-metal image (used with --system instead of --elf)")
+    p.add_argument("--image-mode", choices=["bios", "kernel"], default="bios",
+                   help="how to load --image: 'bios' (raw, reset vector "
+                        "F000:FFF0) or 'kernel' (multiboot -kernel). Default bios.")
     p.add_argument("--max-insn", type=int, default=None,
                    help="stop after N retired instructions (safety cap)")
     p.add_argument("--port", type=int, default=1234,
@@ -652,18 +893,31 @@ def main(argv=None):
 
     if not os.path.isfile(args.qemu):
         p.error("qemu binary not found: %s" % args.qemu)
-    if not os.path.isfile(args.elf):
-        p.error("elf not found: %s" % args.elf)
 
     stop_at = None
     if args.stop_at is not None:
         stop_at = int(args.stop_at, 0)
 
-    n, exit_info = generate(
-        qemu=args.qemu, elf=args.elf, out_path=args.out,
-        max_insn=args.max_insn, port=args.port, extra_args=args.args,
-        want_x87=args.x87, stop_at=stop_at, want_bytes=(not args.no_bytes),
-        verbose=args.verbose)
+    if args.system:
+        if not args.image:
+            p.error("--system requires --image <bare-metal image>")
+        if not os.path.isfile(args.image):
+            p.error("image not found: %s" % args.image)
+        n, exit_info = generate_system(
+            qemu=args.qemu, image=args.image, image_mode=args.image_mode,
+            out_path=args.out, max_insn=args.max_insn, port=args.port,
+            extra_args=args.args, want_x87=args.x87, stop_at=stop_at,
+            want_bytes=(not args.no_bytes), verbose=args.verbose)
+    else:
+        if not args.elf:
+            p.error("user-mode requires --elf (or pass --system --image)")
+        if not os.path.isfile(args.elf):
+            p.error("elf not found: %s" % args.elf)
+        n, exit_info = generate(
+            qemu=args.qemu, elf=args.elf, out_path=args.out,
+            max_insn=args.max_insn, port=args.port, extra_args=args.args,
+            want_x87=args.x87, stop_at=stop_at, want_bytes=(not args.no_bytes),
+            verbose=args.verbose)
 
     msg = "[gen_trace] wrote %d records to %s" % (n, args.out)
     if exit_info is not None:

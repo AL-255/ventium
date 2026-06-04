@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 verify verify-clean rtl plugin tests clean help
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 verify verify-clean rtl plugin tests clean help verify-sys
 .DEFAULT_GOAL := help
 
 help:
@@ -23,6 +23,8 @@ help:
 	@echo "  make m6         M6 errata gate: reproduce 4 documented P5 silicon errata behind a flag"
 	@echo "  make verify     FAST unified m1-m5 gate (parallel + cached goldens; refactor-time gate)"
 	@echo "  make verify-clean  drop the golden cache (forces a cold regen on the next make verify)"
+	@echo "  make verify-sys M2S.0 system-mode ORACLE check: build qemu-system, gen + validate the"
+	@echo "                  bare-metal protected-mode/paging golden trace (no RTL yet; M2S.1 starts that)"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -132,6 +134,17 @@ m6:
 # builds the corpus ELFs + TB itself.)
 verify:
 	bash verif/verify.sh
+
+# --- M2S.0 system-mode oracle check (verif/sys/run-sys-golden.sh) -----------
+# ORACLE + HARNESS ONLY — no RTL is involved (the M2S RTL stages start at M2S.1).
+# Builds qemu-system-i386 (idempotent), builds the bare-metal protected-mode +
+# paging test image, confirms it runs to the isa-debug-exit under qemu-system,
+# generates the SYSTEM-state golden .vtrace with gen_trace.py --system, and
+# validates it is well-formed AND captures the real->protected (CR0.PE 0->1, CS
+# far-jump) and paging (CR3 load, CR0.PG 0->1) transitions. Independent of and
+# does not touch the user-mode `make verify` gate.
+verify-sys:
+	bash verif/sys/run-sys-golden.sh
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

@@ -21,6 +21,29 @@ SEG_KEYS = ["cs", "ss", "ds", "es", "fs", "gs"]
 X87_REGS = [f"st{i}" for i in range(8)]
 X87_CTL  = ["fctrl", "fstat", "ftag", "fop", "fioff", "fooff", "fiseg", "foseg"]
 
+# --- system-mode (M2S) field groups -----------------------------------------
+# Present only when header "sys":true.  Control registers carry the privileged
+# machine state the user-mode trace never exposes (always reads 0 in linux-user):
+#   cr0  — PE/MP/EM/TS/ET/NE/WP/AM/NW/CD/PG  (PE bit0, PG bit31)
+#   cr2  — page-fault linear address (#PF)
+#   cr3  — page-directory base + PCD/PWT
+#   cr4  — VME/PVI/TSD/DE/PSE/PAE/MCE/PGE/...
+# These are read straight from the qemu-system gdbstub g-packet (the i386-32bit.xml
+# target description advertises cr0/cr2/cr3/cr4 right after the segment bases — the
+# tail-anchor layout fix already places them correctly).
+SYS_CR = ["cr0", "cr2", "cr3", "cr4"]
+
+# Segment HIDDEN descriptor state (base/limit/attr per selector).  These are
+# RESERVED in the v1 format for M2S.1 (segmentation): the gdbstub exposes some of
+# them (ss_base..gs_base) but not the full hidden cache for cs/ds in one packet,
+# so the producer only emits the fields it can read and the comparator only diffs
+# the ones present in BOTH traces.  Field naming convention (lowercase):
+#   <seg>_base (32b), <seg>_limit (32b), <seg>_attr (16b)   e.g. cs_base, cs_attr
+# Emission of these is OPTIONAL even under sys:true (gated on availability); the
+# CRx block above is the always-present system payload.
+SEG_HIDDEN_SUFFIX = ["base", "limit", "attr"]
+SYS_SEG_HIDDEN = [f"{s}_{suf}" for s in SEG_KEYS for suf in SEG_HIDDEN_SUFFIX]
+
 # widths (in bits) used for canonical hex formatting / validation
 _WIDTH = {k: 32 for k in GPR_KEYS}
 _WIDTH.update({k: 16 for k in SEG_KEYS})
@@ -29,6 +52,12 @@ _WIDTH.update({k: 80 for k in X87_REGS})
 _WIDTH.update({"fctrl": 16, "fstat": 16, "ftag": 16, "fop": 16,
                "fioff": 32, "fooff": 32, "fiseg": 16, "foseg": 16})
 _WIDTH["pc"] = 32
+# system control registers are all 32-bit
+_WIDTH.update({k: 32 for k in SYS_CR})
+# reserved segment-hidden fields: base/limit 32b, attr 16b
+_WIDTH.update({f"{s}_base": 32 for s in SEG_KEYS})
+_WIDTH.update({f"{s}_limit": 32 for s in SEG_KEYS})
+_WIDTH.update({f"{s}_attr": 16 for s in SEG_KEYS})
 
 # --- EFLAGS masking ----------------------------------------------------------
 # Architecturally meaningful EFLAGS bits on a P5 in the situations the corpus
@@ -127,10 +156,19 @@ def parse_hex(s) -> int:
 
 
 # --- header ------------------------------------------------------------------
-def header(producer: str, mode: str, x87: bool = False, note: str = "") -> dict:
+def header(producer: str, mode: str, x87: bool = False, sys: bool = False,
+           note: str = "") -> dict:
     assert mode in ("func", "cycle")
-    return {"vtrace": VERSION, "producer": producer, "mode": mode,
-            "x87": bool(x87), "note": note}
+    h = {"vtrace": VERSION, "producer": producer, "mode": mode,
+         "x87": bool(x87), "note": note}
+    # "sys":true marks func records that carry system/privileged state (CRx, and
+    # optionally the reserved segment-hidden fields).  Analogous to "x87" — when
+    # absent/false the record is a plain user-mode func record (unchanged).  Only
+    # emit the key when set so existing user-mode/x87 traces are byte-for-byte
+    # identical to before.
+    if sys:
+        h["sys"] = True
+    return h
 
 
 def dumps(obj: dict) -> str:
@@ -140,11 +178,16 @@ def dumps(obj: dict) -> str:
 
 # --- record builders ---------------------------------------------------------
 def func_record(n, pc, eflags, gpr: dict, seg: dict,
-                bytes_=None, exc=None, x87: dict | None = None) -> dict:
+                bytes_=None, exc=None, x87: dict | None = None,
+                sysregs: dict | None = None) -> dict:
     """Build a functional-mode retire record.
 
     gpr: {name: int} over GPR_KEYS;  seg: {name: int} over SEG_KEYS.
     x87 (optional): {st0..st7: int(80b), fctrl,...: int}.
+    sysregs (optional, M2S): {cr0,cr2,cr3,cr4: int} plus any reserved
+        segment-hidden fields (cs_base, cs_attr, ...).  Only the keys present in
+        the dict are emitted, formatted at their declared width.  Pass this only
+        when the header has "sys":true.
     """
     r = {"n": int(n), "pc": h32(pc), "eflags": h32(eflags)}
     for k in GPR_KEYS:
@@ -160,6 +203,15 @@ def func_record(n, pc, eflags, gpr: dict, seg: dict,
             r[k] = h80(x87[k])
         for k in X87_CTL:
             r[k] = hx(x87[k], _WIDTH[k])
+    if sysregs is not None:
+        # Control registers (always emitted under sys:true).
+        for k in SYS_CR:
+            if k in sysregs:
+                r[k] = h32(sysregs[k])
+        # Reserved segment-hidden fields: emit only those actually provided.
+        for k in SYS_SEG_HIDDEN:
+            if k in sysregs:
+                r[k] = hx(sysregs[k], _WIDTH[k])
     return r
 
 
@@ -187,6 +239,9 @@ class Trace:
     @property
     def x87(self): return bool(self.hdr.get("x87"))
 
+    @property
+    def sys(self): return bool(self.hdr.get("sys"))
+
 
 def read_trace(path: str) -> Trace:
     hdr = None
@@ -208,11 +263,20 @@ def read_trace(path: str) -> Trace:
     return Trace(hdr, records)
 
 
-def func_compare_keys(x87: bool) -> list:
-    """Field compare order for functional mode."""
+def func_compare_keys(x87: bool, sys: bool = False) -> list:
+    """Field compare order for functional mode.
+
+    When `sys` is set, the system control registers (cr0/cr2/cr3/cr4) are
+    appended to the compare list.  The reserved segment-hidden fields are NOT in
+    the default compare order — they only become comparable once M2S.1 emits them
+    in both producers; the comparator should intersect the keys present in both
+    traces before diffing (a producer that omits a field must not force a miss).
+    """
     keys = ["pc"] + GPR_KEYS + ["eflags"] + SEG_KEYS
     if x87:
         keys += X87_REGS + X87_CTL
+    if sys:
+        keys += SYS_CR
     return keys
 
 

@@ -1,0 +1,20 @@
+{
+  "name": "pmode",
+  "kind": "system",
+  "src": "pmode.S",
+  "linker": "pmode.ld",
+  "image": "pmode.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 4000,
+  "sys": true,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit code segment)",
+    "paging enable (CR4.PSE, CR3 load, CR0.PG 0->1)"
+  ],
+  "description": "Bare-metal real->protected->paging demonstrator for the M2S.0 system-mode oracle. Boots from the F000:FFF0 reset vector in 16-bit real mode, loads a flat GDT, sets CR0.PE and far-jumps into a 32-bit protected-mode code segment, runs a handful of PM instructions, builds a 4 MiB identity PSE page directory, sets CR4.PSE + CR3 + CR0.PG, runs a few more paged instructions, then exits via out 0xf4 (isa-debug-exit -> qemu status 133)."
+}
