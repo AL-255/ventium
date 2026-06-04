@@ -153,6 +153,17 @@ verify:
 #   pintr  (M2S.3) software INT n / INT3 / INTO -> int/trap gate handler -> IRET.
 #   pfault (M2S.3) #PF / #GP / #UD hardware faults DELIVERING through the IDT ->
 #                  handler -> IRET/restart.
+#   pcpl   (M2S.4) TR/TSS + cross-privilege delivery + inter-priv IRET.
+#   ptask  (M2S.4) hardware task switch (self-diff + step-5d validation).
+#   psmm   (M2S.5) SMM / RSM — a PARTIAL-ORACLE stage. The qemu-system gdbstub
+#                  single-step path MASKS SMI and has no SMM awareness, so a
+#                  differential golden is INFEASIBLE and is NOT fabricated. Instead
+#                  psmm self-checks the SMM round-trip STRUCTURALLY two ways:
+#                  (3c) qemu FREE-RUN + QMP physical-memory readback, and (3d) the
+#                  RTL SMM mechanism (SMI# -> P5 save-state map @ SMBASE+0xFE00 ->
+#                  SMM handler -> RSM -> resume), proven RTL-only via the RTL trace
+#                  + the save-map dump at the documented P5 offsets. Differential
+#                  part documented + deferred (see tests/psmm/README.md).
 # For pintr/pfault step 5b additionally validates the IDT-delivery sequence
 # (handler entry + IRET return captured) before the RTL diff.
 verify-sys:
@@ -163,6 +174,7 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pfault
 	bash verif/sys/run-sys-golden.sh pcpl
 	bash verif/sys/run-sys-golden.sh ptask
+	bash verif/sys/run-sys-golden.sh psmm
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

@@ -59,6 +59,14 @@ struct Args {
     // matching qemu-system-i386 -bios; the reset vector F000:FFF0 = 0x000FFFF0
     // then lands on the image's last 16 bytes.
     bool     system     = false;
+    // M2S.5 SMM structural self-check: after the run, dump the SMM-relevant
+    // physical memory (the handler sentinels @ 0x2000.. AND the P5 save-state
+    // map @ SMBASE+0xFE00..) to this JSON file so the RTL-only self-check can
+    // assert the round-trip + the P5 save-map at the DOCUMENTED offsets — the
+    // RTL analogue of the QMP free-run readback (psmm-selfcheck.py). Off unless
+    // --smm-dump is given (so it never perturbs the normal func/sys gates).
+    std::string smm_dump;
+    uint32_t smbase = 0x30000;   // default SMBASE (overridable via --smbase)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -67,7 +75,7 @@ struct Args {
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
         "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle] [--system]\n"
-        "          [--errata <hexmask>]\n", prog);
+        "          [--errata <hexmask>] [--smm-dump <file>] [--smbase <hexaddr>]\n", prog);
     std::exit(code);
 }
 
@@ -101,6 +109,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--x87")        a.x87        = true;
         else if (k == "--cycle")      a.cycle      = true;
         else if (k == "--system")     a.system     = true;
+        else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
+        else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -316,6 +326,43 @@ int main(int argc, char** argv) {
         if (Verilated::gotFinish()) {
             std::fprintf(stderr, "tb: stop: $finish from RTL\n");
             break;
+        }
+    }
+
+    // ---- M2S.5: dump SMM-relevant physical memory for the structural check --
+    // The RTL analogue of psmm-selfcheck.py's QMP readback: the handler sentinels
+    // and the P5 save-state map at the DOCUMENTED offsets (SMBASE+0x8000+offset).
+    if (!args.smm_dump.empty()) {
+        const uint32_t sm = args.smbase + 0x8000u;   // base of the save-map window
+        FILE* df = std::fopen(args.smm_dump.c_str(), "w");
+        if (df) {
+            std::fprintf(df,
+                "{\n"
+                "  \"smbase\": \"0x%08x\",\n"
+                "  \"sent_smm_ran\":  \"0x%08x\",\n"   // [0x2000] handler sentinel
+                "  \"sent_resumed\":  \"0x%08x\",\n"   // [0x2004] 'RET!' resume
+                "  \"sent_intact\":   \"0x%08x\",\n"   // [0x2008] EBX witness
+                "  \"save_cr0\":      \"0x%08x\",\n"   // SMBASE+0xFFFC (offset 0x7FFC)
+                "  \"save_cr3\":      \"0x%08x\",\n"   // +0xFFF8
+                "  \"save_eflags\":   \"0x%08x\",\n"   // +0xFFF4
+                "  \"save_eip\":      \"0x%08x\",\n"   // +0xFFF0
+                "  \"save_eax\":      \"0x%08x\",\n"   // +0xFFD0
+                "  \"save_ebx\":      \"0x%08x\",\n"   // +0xFFDC
+                "  \"save_cs_sel\":   \"0x%08x\",\n"   // +0xFFAC
+                "  \"save_smbase\":   \"0x%08x\"\n"    // +0xFEF8 SMBASE relocation slot
+                "}\n",
+                args.smbase,
+                mem.read32(0x2000), mem.read32(0x2004), mem.read32(0x2008),
+                mem.read32(sm + 0x7FFC), mem.read32(sm + 0x7FF8),
+                mem.read32(sm + 0x7FF4), mem.read32(sm + 0x7FF0),
+                mem.read32(sm + 0x7FD0), mem.read32(sm + 0x7FDC),
+                mem.read32(sm + 0x7FAC), mem.read32(sm + 0x7EF8));
+            std::fclose(df);
+            std::fprintf(stderr, "tb: wrote SMM memory dump to %s\n",
+                         args.smm_dump.c_str());
+        } else {
+            std::fprintf(stderr, "tb: WARNING cannot open --smm-dump '%s'\n",
+                         args.smm_dump.c_str());
         }
     }
 

@@ -15,7 +15,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2S.2 | 2-level paging MMU (CR3/CR0.PG/CR4.PSE, page walk, split I/D TLBs, A/D bits, #PF decision) | `pmode` + `ppage` RTL sys-diff-clean vs qemu-system golden; pseg stays green; `make verify` (user) GREEN | ✅ done-partial (CR3→PDE→PTE 2-level walk + split 16-entry I/D TLBs + A/D-bit table writes + P/RW/US permission DECISION + #PF DECISION/CR2/error-code: `pmode` (identity 4 MiB PSE, 1084 records) AND `ppage` (NON-IDENTITY 4 KiB, 128 records) = RTL EQUIVALENT to the golden; CR0.PG=0 ⇒ linear==physical. #PF DELIVERY through the IDT = M2S.3 (decision computed/HALTs); 4 MiB NON-identity translation + A/D differential read-back + page-split + global pages/INVLPG deferred; TLB is functional-not-cycle) |
 | M2S.3 | IDT-delivered interrupts/exceptions (gate read → exception frame push → handler → `IRET`); software `INT n`/`INT3`/`INTO`/`UD2` + the M2S.1/.2 hardware-fault DECISIONS now DELIVER | `pintr` + `pfault` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage stay green; `make verify` (user) GREEN | ✅ done-partial (SAME-PRIVILEGE CPL0 delivery: read IDT[v] gate → read gate CS descriptor → push EFLAGS/CS/EIP[/errcode] on SS:ESP → load CS:EIP → handler → `IRET` (pop EIP/CS/EFLAGS, reload CS); `pintr` (INT n/INT3/INTO trap+int gates, 171 records) AND `pfault` (#PF not-present DELIVERS via IDT[14]+CR2+errcode, #GP, #UD; 348 records) = RTL EQUIVALENT to the golden. FAULT pushes faulting EIP (restart), TRAP pushes next EIP; int gate clears IF, both clear TF/NT/RF/VM (IA-32 6.12.1); error code for #DF/#TS/#NP/#SS/#GP/#PF/#AC. user `int 0x80` STILL halts (IDT gated behind sys_mode). DEFERRED: cross-priv stack switch/TSS = M2S.4; gate-Present/gate-DPL/CS-descriptor protection checks (#NP/#GP-on-gate) + per-access perm #PF (perm_fault) + segment-limit #GP (seg_off_over_limit) computed-not-delivered; external/HW INTR + #DB single-step + BOUND not exercised) |
 | M2S.4 | TSS + cross-privilege delivery + inter-priv `IRET` + gate/CS protection (TSS/task switch) | `pcpl` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage/pintr/pfault stay green; `make verify` (user) GREEN | ✅ done-partial (PRIVILEGE MACHINERY: **TR/TSS** (`LTR` loads TR base/limit/sel from the GDT TSS descriptor, `STR`; `SS0:ESP0` privilege stack); **CROSS-PRIV delivery** — gate target CS.DPL < CPL ⇒ load SS:ESP from `TSS.ssN:espN`, push the LARGER 5-word frame (old SS, old ESP, EFLAGS, CS, EIP [+errcode]), CPL 3→0; **INTER-PRIV `IRET`** — pop EIP/CS/EFLAGS + ESP/SS, CPL 0→3, null DS/ES/FS/GS whose DPL < new CPL; **gate/CS protection** (deferred from M2S.3): gate Present→#NP, gate DPL<CPL for `INT n`→#GP, target CS present/code/DPL≤CPL→#NP/#GP. `pcpl` (CPL3 user `INT n` → cross-priv CPL0 handler stack switch → inter-priv `IRET` back to CPL3) = RTL EQUIVALENT to the golden, 304 records. user mode bit-identical (all gated behind `sys_mode`). DEFERRED (documented honest follow-ons): full HW TASK SWITCH (`CALL`/`JMP` to TSS / task gate, `INT` through task gate — `ptask` stays golden self-diff + step-5d validation, RTL --system far-JMP to a system descriptor HALTs cleanly in S_LJMP and is NOT in the RTL gate; tracks the golden bit-for-bit 275 records then halts at ljmp-to-TSS); TSS busy-bit writeback on `LTR` (memory-only, STR returns the selector = the only observed reg effect); `tr_valid`/`tr_limit` #TS bound checks (missing/truncated TSS); cross-priv new-SS protection (SS.DPL/RPL/writable/present #TS/#GP) + inter-priv `IRET` SS RPL/DPL re-validation #GP; per-access perm #PF (`perm_fault`) — all NEGATIVE paths with no triggering corpus test / no oracle) |
-| M2S (rest) | SMM/`RSM` (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
+| M2S.5 | SMM / `RSM` (PARTIAL-ORACLE: `SMI#` → save CPU state to the P5 SMRAM save-map → real-mode-like SMM handler → `RSM` restore + resume) | `psmm` RTL `--system` STRUCTURAL self-check (differential golden INFEASIBLE — see below); pseg/pmode/ppage/pintr/pfault/pcpl stay sys-green; `make verify` (user) GREEN | ✅ done-partial (**STRUCTURAL, not differential** — the gdbstub single-step oracle masks `SMI#` via `SSTEP_NOIRQ` + has no SMM awareness ⇒ a differential golden is INFEASIBLE and is NOT fabricated). RTL (gated `sys_mode`): **SMBASE** reg (reset `0x30000`); **`SMI#` source** = the APIC self-IPI (store to `0xFEE00300`, delivery-mode SMI) latched + taken at the next insn boundary, exactly as qemu's APIC — so the SAME bare-metal `psmm.bin` drives it; **`SMI#` entry** saves the CPU state to the **P5** save-map at the documented offsets (CR0 `@SMBASE+0xFFFC`, EIP `+0xFFF0`, EFLAGS `+0xFFF4`, GPRs, the 6 segment selectors, GDT/IDT base, SMBASE slot `+0xFEF8`, rev-id `+0xFEFC` = `0x00020000` bit-17-set, auto-HALT word `+0xFF02`), clears `CR0` PE/PG/EM/TS, sets `CS` sel=`SMBASE>>4` base=`SMBASE` + 4-GiB limits, `EIP=0x8000`, CPL0, 16-bit default; **`RSM` (`0F AA`)** reads the whole map back + commits the restored architectural state (incl. a handler-relocatable SMBASE / resume-EIP) in one clock, resumes. `psmm` self-checked BOTH ways: (3c) qemu **free-run** + QMP memory readback ([0x2000]/[0x2004]/[0x2008] sentinels + the save area + `SMM=0` post-RSM), and (3d) the **RTL** trace (`CS=SMBASE>>4`, `CR0.PE` cleared, EIP `SMBASE+0x8000`; RSM restores CS/CR0.PE/EBX-witness/resume-EIP) + the P5 save-map dump at the documented offsets. user-mode bit-identical (RSM is `#UD` outside SMM/in user mode). DEFERRED (honest): the differential golden (oracle INFEASIBLE); I/O-restart + auto-HALT-restart slots (written 0 / not exercised); a handler that actually relocates SMBASE / modifies resume EIP (only round-trip-to-saved exercised); the exact P5 reserved-area encoding for the hidden descriptor state (RTL-internal convention); **DR6 `@+0xFFCC` / DR7 `@+0xFFC8` / TR `@+0xFFC4` / LDT-base `@+0xFFC0`** (Table 20-1 slots — NOT saved/restored: DR is M2S.6, no LDT-base reg yet, TR left unchanged through SMM; corpus does not touch them so the round-trip closes); FPU not auto-saved per Table 20-1) |
+| M2S.6 | debug registers / `#DB` (last system stage) | per-stage system corpus diff-clean | ☐ not started (NEXT) |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
@@ -44,6 +45,85 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — M2S.5 done-partial: SMM / RSM (PARTIAL-ORACLE; STRUCTURAL self-check, not differential)
+
+The fifth **system-mode RTL** stage adds **System Management Mode**: `SMI#` saves
+the CPU state to the SMRAM save-state map, the CPU enters a real-mode-like SMM
+context and runs the SMM handler, then `RSM` (`0F AA`) restores the saved state and
+resumes the interrupted program. New corpus **`psmm`** (set up SMRAM + an SMM
+handler at `SMBASE+0x8000`, trigger `SMI#` via an APIC self-IPI, write sentinels +
+`RSM`, prove resume with state intact).
+
+**Verification mode — STRUCTURAL, not differential (honest).** This is a
+**partial-oracle** stage. The de-risk phase proved the differential golden is
+**INFEASIBLE** and we did **not** fabricate one: the system oracle is built on the
+`qemu-system-i386` gdbstub **single-step** (`s`) path, which sets `SSTEP_NOIRQ` and
+masks `SMI#` (`CPU_INTERRUPT_SMI == CPU_INTERRUPT_TGT_EXT_2`, cleared from
+`interrupt_request` under single-step), so `SMI#` is never delivered between steps;
+and the gdbstub `g`-packet carries no SMM-active flag (it is HMP-only per M2S.0).
+qemu also writes the **P6/SDM-34.4** save area, not the **P5** layout this stage
+targets. So instead of a faked sys-diff, `psmm` self-checks the round-trip
+**structurally, two ways**: (3c) qemu **free-running** + QMP physical-memory
+readback, and (3d) the **RTL** SMM mechanism (RTL trace + a save-map dump at the
+documented P5 offsets). Both are RTL-/free-run-only structural checks — NOT a
+golden differential. (`pseg/pmode/ppage/pintr/pfault/pcpl` remain REAL RTL
+`--system` differentials and stay green; `psmm` is explicitly the structural one.)
+
+**What landed (RTL, gated `sys_mode`):**
+- **SMBASE** register (reset default `0x30000`) + **`RSM` (`0F AA`)** decode, which
+  is `#UD` outside SMM / in user mode (so user-mode `make verify` stays bit-identical).
+- **`SMI#` source** — the RTL recognises the **APIC self-IPI SMI** exactly as
+  qemu's APIC: on the ICR-low write (store to phys `0xFEE00300` with delivery-mode
+  `010`) it latches `smi_pending` and takes the SMI at the **next instruction
+  boundary**. The SAME bare-metal `psmm.bin` drives the RTL round-trip — no TB poke.
+- **`SMI#` entry (`S_SMI_SAVE`)** — saves the CPU state to the **P5** SMRAM save map
+  (Vol.3 Table 20-1) at the documented offsets, then enters SMM: clear `CR0`
+  PE/PG/EM/TS; `CS` sel=`SMBASE>>4` base=`SMBASE`, data segs base 0, all 4-GiB
+  limits; `EIP=0x8000`; CPL0; 16-bit default operand/address size.
+- **`RSM` (`S_RSM`)** — reads the whole map back into holding regs and **commits the
+  restored architectural state in one clock** (honoring a handler-relocatable SMBASE
+  / resume-EIP; `{cs_d,cpl}` committed straight from the final read-back word so
+  CS.D/B + CPL restore correctly), then resumes the interrupted context.
+
+`psmm` self-check PASS both ways — qemu free-run sentinels (`[0x2000]=0x5A4D5A4D`,
+`[0x2004]='RET!'`, `[0x2008]=0x5A4D900D` EBX-witness survived, `SMM=0` post-RSM) AND
+the RTL trace + P5 save-map dump (entry `CS=0x3000`/`CR0.PE` cleared/`EIP=0x8000`,
+RSM back to `CS=0x08`/`CR0.PE` set/EBX intact/mainline resume EIP; save-map CR0/EIP/
+EBX/CS-sel/SMBASE at the documented offsets).
+
+**P5-fidelity fixes this phase (review findings):** SMM Revision Identifier set to
+the faithful P5 value **`0x00020000`** (bit 17 = SMBASE-relocation support set per
+Vol.3 §20.1.5.1/§20.1.5.3 — *"bit 17 … is set in the Pentium processor (510\60,
+567\66)"*; bit 16 I/O-restart = 0; the §20.2.2 *"revision ID is 0"* refers to the
+upper-word EXTENSION version, not bit 17; `qemu-system-i386` agrees:
+`SMM_REVISION_ID=0x00020000`) — was `0` with a backwards comment claiming
+`0x00020000` is P6-only. Auto-HALT Restart slot moved to the documented **word
+location `0x7F02`** (Table 20-1 / Fig 20-4; `0x7F00` is Reserved) — was `0x7F00`.
+Removed three stale comments describing signals that were simplified away
+(`smm_saved_pe`; the `rsm_csd/rsm_cpl` one-clock-late note) — the implemented
+final-beat commit is correct; the comments now match it. Documented the explicit
+omission of **DR6 `0x7FCC` / DR7 `0x7FC8` / TR `0x7FC4` / LDT-base `0x7FC0`** from
+the save map (Table 20-1 slots not save/restored: DR is M2S.6, no LDT-base reg yet,
+TR left unchanged through SMM; the corpus does not touch them so the round-trip
+closes — a real divergence, deferred honestly).
+
+**Gates after the fixes:** `make verify` (user) GREEN + bit-identical; all prior
+sys tests sys-green (pseg 70 / pmode 1084 / ppage 128 / pintr 171 / pfault 348 /
+pcpl 304 RTL `--system` EQUIVALENT; ptask self-diff + step-5d); `psmm` structural
+self-check PASS both ways; verilator lint clean.
+
+**DEFERRED (honest done-partial):** the differential golden (oracle INFEASIBLE,
+documented — never faked); the I/O-instruction-restart + auto-HALT-restart slots
+(written 0 / not exercised by the corpus); a handler that actually RELOCATES SMBASE
+or modifies the resume EIP (RTL commits both from the writeable slots, but
+`psmm.bin`'s handler leaves them unchanged ⇒ only round-trip-to-saved-value is
+exercised); the exact P5 reserved-area encoding for the segment hidden descriptor
+state (stepping-specific / not publicly documented ⇒ RTL-internal convention at
+`SMBASE+0xFE00`); DR6/DR7/TR/LDT-base save-map slots (above); FPU/DR3–DR0 not
+auto-saved per Table 20-1; APIC-SMI *sourcing* corner cases in the front end.
+
+**Next: M2S.6** — debug registers / `#DB` (the last system-mode stage).
 
 ### 2026-06-04 — M2S.4 done-partial: TSS + cross-privilege delivery + inter-priv IRET + gate/CS protection
 
