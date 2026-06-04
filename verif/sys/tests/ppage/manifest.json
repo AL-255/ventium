@@ -1,0 +1,21 @@
+{
+  "name": "ppage",
+  "kind": "system",
+  "src": "ppage.S",
+  "linker": "ppage.ld",
+  "image": "ppage.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 200,
+  "sys": true,
+  "paging": true,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "paging enable (CR3 load = 0x11000, CR0.PG 0->1; 4 KiB pages, CR4.PSE NOT set)"
+  ],
+  "description": "Bare-metal real->protected->PAGING demonstrator for the M2S.2 gate, with a NON-IDENTITY mapping (linear != physical) so a base-only / no-translation MMU bug is caught. Boots from the F000:FFF0 reset vector in 16-bit real mode, builds a flat GDT (null + flat code 0x08 + flat data 0x10), sets CR0.PE and far-jumps into the 32-bit flat code segment, loads the data selectors + a flat stack. Then it builds a 2-level page hierarchy with 4 KiB pages (CR4.PSE deliberately NOT set -- 4 KiB is the core M2S.2 path; PSE 4 MiB pages are a deferred corner): PD @ phys 0x11000 with PD[0]->PT0 (P|RW) and PD[1]->PT1 (P|RW|US); PT0 @ phys 0x12000 identity-maps the CODE window linear [0x000F0000,0x00100000) (16 PTEs, frame==linear, P|RW) so EIP stays valid across CR0.PG 0->1; PT1 @ phys 0x13000 is the NON-IDENTITY window for linear [4 MiB,8 MiB): PT1[0] linear 0x400000->phys 0x800000 (P|RW|US), PT1[1] linear 0x401000->phys 0x800000 (P|RW, ALIAS of [0]), PT1[2] linear 0x402000->phys 0x801000 (P|US, READ-ONLY), PT1[3] linear 0x403000->phys 0x802000 (P|RW, SUPERVISOR-only), PT1[4] linear 0x404000->phys 0x801000 (P|RW, RW alias of [2]). After CR3=0x11000 and CR0.PG=1 it (a) NON-IDENTITY proof: stores 0xCAFEBABE through linear 0x400000 (->phys 0x800000) and reads it back through the ALIAS linear 0x401000 (also ->phys 0x800000) into ESI -- equal only if real translation happened; a no-translation bug sends the two linears to different physical pages and ESI diverges; (b) a second alias store/read 0x400040/0x401040 -> EDI; (c) seeds the READ-ONLY page (phys 0x801000) through its RW alias linear 0x404000 then READS it through the read-only linear 0x402000 -> EBP (reading a RO page is always legal); (d) stores + loads through the SUPERVISOR page linear 0x403000 at CPL=0 -> ECX (a supervisor access to a supervisor page is legal); (e) re-reads linear 0x400000 -> EDX to confirm distinct PTEs back DISTINCT physical memory (no aliasing). These exercise the P/RW/US permission DECISION (US 0/1, RW 0/1) without tripping a #PF (fault DELIVERY is M2S.3; this test is clean and never faults). Exits via out 0xf4 (isa-debug-exit -> qemu status 133). Whole clean run is ~128 single-stepped records."
+}

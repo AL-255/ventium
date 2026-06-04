@@ -12,7 +12,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2 | User-mode integer ISA completeness (re-scoped; system mode → M2S) | broad integer-ISA corpus diff-clean vs QEMU (user-mode) | ✅ done (28-program corpus func-equiv vs QEMU user-mode; system ops / far CALL-RET / ENTER / mem-operand bit-string + SHLD deferred & HALT; decoder-exhaustive-vs-XED still ongoing) |
 | M2S.0 | System-mode ORACLE + harness (qemu-system-i386, gen_trace --system, bare-metal flow, `make verify-sys`) | system golden round-trips + sys-field compare path | ✅ done (qemu-system-i386 built; sys .vtrace = cr0..cr4 + 6 selectors + GPRs + eflags + eip; comparator sys-field intersect path) |
 | M2S.1 | Real→protected mode + protected-mode SEGMENTATION (dual `boot_mode`) | `pseg` RTL sys-diff-clean vs qemu-system golden; `make verify` (user) GREEN | ✅ done-partial (cold reset + real mode + real→PM transition + flat & based GDT segment loads = RTL EQUIVALENT to the golden, 70 records; descriptor protection DECISION computed (present/type/DPL/limit, CPL=CS.RPL) but fault DELIVERY = M2S.3; 16-bit reg addressing modes, paging, IDT delivery, A20/real-mode wrap deferred) |
-| M2S (rest) | Paging/TLB (M2S.2), interrupts/IDT (M2S.3), TSS (M2S.4), SMM (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
+| M2S.2 | 2-level paging MMU (CR3/CR0.PG/CR4.PSE, page walk, split I/D TLBs, A/D bits, #PF decision) | `pmode` + `ppage` RTL sys-diff-clean vs qemu-system golden; pseg stays green; `make verify` (user) GREEN | ✅ done-partial (CR3→PDE→PTE 2-level walk + split 16-entry I/D TLBs + A/D-bit table writes + P/RW/US permission DECISION + #PF DECISION/CR2/error-code: `pmode` (identity 4 MiB PSE, 1084 records) AND `ppage` (NON-IDENTITY 4 KiB, 128 records) = RTL EQUIVALENT to the golden; CR0.PG=0 ⇒ linear==physical. #PF DELIVERY through the IDT = M2S.3 (decision computed/HALTs); 4 MiB NON-identity translation + A/D differential read-back + page-split + global pages/INVLPG deferred; TLB is functional-not-cycle) |
+| M2S (rest) | Interrupts/IDT (M2S.3), TSS (M2S.4), SMM (M2S.5), debug regs (M2S.6) | per-stage system corpus diff-clean | ☐ not started |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
@@ -41,6 +42,107 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — M2S.2 done-partial: 2-level paging MMU + split I/D TLBs + A/D bits + #PF decision
+
+The second **system-mode RTL** stage: the **2-level paging MMU**. The core now does
+real linear→physical translation under `CR0.PG`, gated **differentially** against the
+`qemu-system-i386` golden. Two paging tests now run as REAL RTL `--system` diffs (no
+longer skipped/self-diff-only): **`pmode`** (M2S.0 bootstrap — identity-mapped **4 MiB
+PSE** pages, the full real→PM→paging-enable→paged-execution sequence, **1084 records**)
+and **`ppage`** (a focused **NON-IDENTITY 4 KiB** map — linear ≠ physical so a base-only
+/ no-translation bug is caught, **128 records**), both **RTL EQUIVALENT** to the golden
+across cr0..cr4 + the 6 selectors + GPRs + eflags + eip. `pseg` (M2S.1) **stays
+sys-green** (70 records) and `make verify` (boot_mode=user) is **GREEN and unchanged**
+(56/56 func diff-clean + every M4/M5 cycle band met) — the HARD requirement, since all
+paging is gated behind `paging_on` (`CR0.PG & sys_mode`).
+
+**What works (RTL EQUIVALENT to the qemu-system golden):**
+- **2-level walk:** a TLB miss diverts the FSM to `S_WALK`, which reads
+  `CR3`→PDE→PTE from physical memory (PDE @ `(CR3&~0xFFF)+lin[31:22]*4`, PTE @
+  `(PDE&~0xFFF)+lin[21:12]*4`), forms the physical frame, and fills the TLB. 4 KiB
+  pages (`ppage`) and 4 MiB pages (`CR4.PSE & PDE.PS`, `pmode`, PDE is the leaf,
+  frame = `{pde[31:22],lin[21:0]}`).
+- **Split I/D TLBs:** 16-entry direct-mapped, separate I-side (fetch) and D-side
+  (data). A data load uses the D-TLB + D permissions; an icache fill uses the I-TLB.
+- **A/D bits:** the walk writes `Accessed` (PDE+PTE) and `Dirty` (PTE/4 MiB-PDE on a
+  write) back to the page tables in memory as qemu-system does; a first write to a
+  clean-Dirty resident page re-walks to set D.
+- **Permission DECISION** (P/RW/US): the effective `{US,RW,P}` is the AND of the PDE
+  and PTE bits; a user (CPL==3) access to a supervisor page, or a write to a
+  read-only page (user writer, or supervisor with CR0.WP), is a #PF DECISION. The
+  gate runs at CPL=0 / WP=0 to present pages, so the decision is always "no fault".
+- **#PF decision:** a not-present PDE/PTE sets `CR2` (faulting linear) + the
+  `{US,RW,P}` error code; **delivery through the IDT is M2S.3**, so a raised #PF
+  HALTs (the gate tests are fully mapped + never fault).
+- **`CR0.PG=0` ⇒ linear == physical** (paging off path preserved; the M2S.1
+  segmentation path and the user flat path stay bit-identical).
+
+**Phase-3 adversarial review — found + fixed (each probed live):**
+- **[high] Walk diversion wrote a spurious value to the untranslated LINEAR address
+  on a TLB-miss write.** On a TLB miss the clocked FSM diverts to `S_WALK`, but the
+  combinational bus driver was NOT gated on `xlate_miss`: during the diversion cycle
+  `state` is still the write state, so the driver asserted `mem_req=1, mem_we=1` with
+  `mem_addr = mem_xlate(linear)` — which on a MISS returns the **linear** address —
+  and the single-beat memmodel committed that write immediately, BEFORE the walk
+  filled the TLB. It was masked in `pmode` (the spurious linear==physical targets are
+  never read back) but would silently corrupt the page tables or live data at a
+  write's linear address. **Fixed:** the bus driver now SQUASHES the access entirely
+  when `xlate_miss` (the walk owns the bus that clock; the access is re-driven against
+  the correct physical frame when the FSM resumes). **Proven live** by instrumenting
+  the memmodel on the `ppage` run: pre-fix it logged spurious LINEAR writes
+  `0x00400000`, `0x00404000`, `0x00403000`; post-fix the ONLY writes to a
+  freshly-walked page go to the correct PHYSICAL frames `0x00800000`/`0x00801000`/
+  `0x00802000` — **zero** writes to the `0x004xxxxx` linear window.
+- **[med] S_PIPE fast-path DATA load was routed through the I-TLB.** `cur_is_d` was
+  hardcoded 0 (I-TLB) for `S_PIPE` with a comment claiming "only the icache fill reads
+  memory here", but `S_PIPE` also issues register-base DATA loads (`pipe_load_req`).
+  Under paging such a load was classified as a fetch — it filled/used the I-TLB and
+  would apply I-side permissions, defeating the split I/D model and mis-targeting the
+  future M2S.3 permission check. **Fixed:** `cur_is_d = pipe_load_req` for `S_PIPE` (a
+  data load → D-TLB + D permissions; the icache fill → I-TLB; the two are mutually
+  exclusive). The physical address was already computed correctly, so the gate is
+  unaffected; this restores the correct TLB targeting.
+- **[low] #PF error-code US bit was hardcoded supervisor (0).** Both not-present
+  arms built the error code as `{1'b0, walk_is_write, 1'b0}`. **Fixed** to derive the
+  US bit from the real CPL (`{cpl_r==3, walk_is_write, 1'b0}`); the gate runs at CPL=0
+  so the value is unchanged for it, but it is now correct for M2S.3 delivery. (The full
+  `pf_errcode` is now sunk in the lint sink, since delivery is M2S.3.)
+
+**Deferred (genuinely-gnarly corners, consistent with done-partial; the gate avoids
+them):**
+- **#PF DELIVERY through the IDT** = M2S.3. A not-present PDE/PTE or a permission
+  fault is genuinely **COMPUTED** (CR2 set, error code computed) but HALTs/sets `exc`
+  rather than vectoring; delivery is the next stage.
+- **A/D-bit memory writes** work and match qemu for the gate, but are **invisible to
+  the gate diff** — the page tables are never read back into a register/selector, so
+  the writes are exercised (and `ppage`'s first-write-sets-D re-walk runs) but not
+  directly differentially-proven against the golden. (The [high] fix's live probe
+  confirms the writes land at the correct physical PTE addresses.)
+- **4 MiB NON-identity translation** is unproven: the only 4 MiB test (`pmode`) is
+  identity-mapped (base 0), so a 4 MiB frame-masking bug would be masked there;
+  `ppage` uses 4 KiB. **Page-split** accesses (a 4-byte access straddling a page
+  boundary) are untranslated (translation keys on the access's starting word) — not
+  exercised by the aligned gate tests.
+- **Global pages** (`CR4.PGE` / `PTE.G`) and the **INVLPG** single-page flush are not
+  modeled — only a full TLB flush on a `CR3` write; no gate test uses them.
+- **TLB is a functional/correctness model only** (16-entry direct-mapped split I/D),
+  NOT cycle-accurate — TLB-miss walk timing is not charged into the M5 cycle model
+  (`cycle_mode` is 0 in the sys gate).
+- **Real-mode A20 1 MiB wrap and seg:off-overflow** on the fetch linear remain
+  unmodeled (pre-existing M2S.1 deferral; not exercised by any paging test).
+
+**Lint clean** (`verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSED`, 0
+warn/err). **Files:** `rtl/core/core.sv` (bus-driver `xlate_miss` squash + `cur_is_d`
+data-load classification + #PF US-bit from CPL + lint-sink update),
+`verif/sys/run-sys-golden.sh` (already had `pmode ppage` un-skipped from Phase 2),
+`PROGRESS.md`.
+
+**Next:** **M2S.3** — interrupts / exceptions / IDT delivery. This turns the deferred
+#PF (and the M2S.1 #GP/#NP/#SS segmentation) **DECISIONS** into real IDT-vectored
+faults (gate descriptor read, CPL/stack switch, error-code push), and the A/D-bit and
+permission-fault paths become differentially observable once a fault changes
+architectural state.
 
 ### 2026-06-04 — M2S.1 done-partial: real→protected mode + protected-mode SEGMENTATION
 
