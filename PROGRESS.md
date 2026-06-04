@@ -14,8 +14,9 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
-| M5B | Pin-level 64-bit bus protocol (needs real-chip bus traces) | structural + local SVA (no differential oracle) | ☐ not started (deferred from M5) |
-| M6 | Errata & stepping fidelity (stretch) | targeted errata repro | ☐ not started (next; M2S + M5B remain no-oracle deferred milestones) |
+| M5B | Pin-level 64-bit bus protocol (needs real-chip bus traces) | structural + local SVA (no differential oracle) | ✅ done STANDALONE (biu_p5, 16 cycle types, 19 mutation-validated SVA + 76 directed checks; commit 3e82269). Integration into rtl/ + wiring = M5B-int (deferred) |
+| R1 | RTL modularization + gate speedup (maintenance) | all of m1–m5 stay green across the refactor; fast `make verify` | ✅ done (fast parallel+cached gate `make verify` ~2s vs ~3h, mutation-validated; intcore.sv 3648→core.sv 3146 + ventium_alu_pkg/decode_pkg/decode.sv/issue_uv.sv extracted, lint-clean, behavior bit-exact. Leaf modules regfile/caches/fpu/btb DEFERRED — too entangled with the shared pipeline FSM to extract mechanically) |
+| M6 | Errata & stepping fidelity (stretch) | targeted errata repro | ☐ not started (oracle-limited: QEMU computes *correctly* so won't reproduce most errata to diff against) |
 
 Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
 
@@ -38,6 +39,48 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — R1 done (gate speedup + RTL modularization; maintenance)
+
+Two-part maintenance pass after the M0–M5 fidelity ladder, both serving direct
+user requests (faster gates + a readable, partitioned RTL tree). Behavior is
+**bit-for-bit unchanged** — proven by the differential gate.
+
+**R1a — fast differential gate (`make verify`, commit 9fdee89).** `verif/verify.sh`
+runs the full m1–m5 func+cycle verification **parallelized** (`gen_goldens.sh`,
+30 workers), **golden-cached** (key = sha1 of the test `.s`; a golden depends only
+on the program, not the RTL), and **de-duplicated** (no redundant 3× `make
+m1/m2/m3`). Cold ~17 min (one-time parallel golden gen); **warm/refactor-time
+~2 s** (goldens cached, RTL re-traced). Adversarially validated: verdict-equivalent
+to the slow gate (no check weakened), and **mutation-tested** — a broken ALU_XOR,
+a zeroed fadd latency, and a zeroed D-cache miss penalty each turn it RED in the
+right failure class (re-confirmed in-hand: inverted `parity8` → FUNCTIONAL
+REGRESSION caught; restore → GREEN). This permanently fixes the slow-sequential-
+gate thrash that stalled M5, and M6/M2S/M5B-int will all use it.
+
+**R1b — modularize `intcore.sv` (gate-protected, behavior-preserving).** Carved the
+3648-line monolith using `make verify` GREEN after **every** extraction:
+- **Packages:** `ventium_alu_pkg` (ALU/flags/shift/width-helper pure functions),
+  `ventium_decode_pkg` (op/uop/micro/x87 enums + `fpd_t` struct + `mfl`/`is_prefix`/
+  `cond_true`); explicit `rtl/ventium.f` filelist (packages before modules).
+- **Modules:** `decode.sv` (variable-length decoder, instantiated ×2),
+  `issue_uv.sv` (AP-500 U/V pairing checker).
+- **Spine:** `intcore.sv` → **`core.sv`** (3146 lines, now mostly wiring + the
+  pipeline FSM). Dropped the `-Wno-DECLFILENAME` lint waiver (file names now match
+  module names); `verilator --lint-only -Wall -Wno-UNUSED` is 0 warn/err.
+- **Deferred (honest):** `regfile`/`icache`/`dcache`/`fpu_unit`/`bpred_btb` — their
+  state is written from ~100+ scattered sites inside the single shared pipeline
+  `always_ff`, so extraction needs a *non-mechanical FSM re-architecture* (behavior-
+  risky), not a refactor. One `bpred_btb` attempt was built then reverted to keep
+  the tree green. These await a future pipeline-decoupling pass, not R1.
+
+Adversarial review ran a full normalized diff of `core.sv` vs the pristine
+pre-refactor monolith: every change is intended + behavior-preserving, every
+extracted symbol byte-identical (no enum/width/struct drift). Independently
+re-verified: `make verify` GREEN, build clean, lint clean.
+
+**Next:** M6 (errata — oracle-limited), M2S (system mode), M5B-int (wire the bus
+unit into `rtl/`). All now run on the fast gate.
 
 ### 2026-06-03 — M5 complete (L1 cache-miss timing + x87/FP cycle accuracy; tightened abs-cyc)
 

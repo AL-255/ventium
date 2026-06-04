@@ -1,6 +1,9 @@
-// core/intcore.sv — M2 single-issue, in-order, multi-cycle functional integer
-// core (PLAN.md §7, docs/m2-isa-spec.md). Extends the M1 core to user-mode
-// integer ISA completeness, diff-clean vs QEMU user-mode.
+// core/core.sv — the Ventium integer/pipeline spine (R1 modularization,
+// docs/rtl-refactor-plan.md). Renamed from intcore.sv: it now wires the
+// extracted blocks (decode / issue_uv / ventium_alu_pkg / ventium_decode_pkg /
+// fpu_x87_pkg) and runs the pipeline FSM + retire/DPI point. Functional spine:
+// single-issue, in-order, multi-cycle integer core (PLAN.md §7,
+// docs/m2-isa-spec.md), diff-clean vs QEMU user-mode.
 //
 // FSM skeleton (one instruction at a time, multi-cycle):
 //   S_RESET  -> latch init_eip/init_esp/reset arch state
@@ -15,8 +18,10 @@
 //
 // Out-of-scope opcodes raise d_unknown and HALT loudly (no mis-execution).
 
-module intcore
+module core
   import ventium_pkg::*;
+  import ventium_alu_pkg::*;
+  import ventium_decode_pkg::*;
   import fpu_x87_pkg::*;
 #(
     parameter logic [31:0] EFLAGS_RESET = 32'h0000_0202, // bit1 reserved-1 + IF
@@ -219,34 +224,9 @@ module intcore
   // ever non-zero at a time; S_PIPE burns them before issuing.
   logic [6:0]  stall_cnt;             // remaining stall clocks before next issue
 
-  // ALU op encoding (low 3 bits mirror the x86 ALU group order 0..7).
-  localparam logic [4:0] ALU_ADD = 5'd0;
-  localparam logic [4:0] ALU_OR  = 5'd1;
-  localparam logic [4:0] ALU_ADC = 5'd2;
-  localparam logic [4:0] ALU_SBB = 5'd3;
-  localparam logic [4:0] ALU_AND = 5'd4;
-  localparam logic [4:0] ALU_SUB = 5'd5;
-  localparam logic [4:0] ALU_XOR = 5'd6;
-  localparam logic [4:0] ALU_CMP = 5'd7;
-  localparam logic [4:0] ALU_INC = 5'd8;
-  localparam logic [4:0] ALU_DEC = 5'd9;
-  localparam logic [4:0] ALU_TEST= 5'd10;
-  localparam logic [4:0] ALU_MOV = 5'd11;
-  localparam logic [4:0] ALU_NEG = 5'd12;
-  localparam logic [4:0] ALU_NOT = 5'd13;
-
-  // op classes
-  typedef enum logic [4:0] {
-    K_ALU, K_SHIFT, K_SHLDRD, K_MULDIV, K_IMUL2, K_EXT, K_SETCC,
-    K_BITTEST, K_BITSCAN, K_XCHG, K_BSWAP, K_CONV, K_STKMISC, K_STR, K_CTRL
-  } kind_e;
-
-  typedef enum logic [2:0] { SM_PUSHA, SM_POPA, SM_PUSHF, SM_POPF, SM_LAHF, SM_SAHF, SM_LEAVE } smk_e;
-  typedef enum logic [2:0] { ST_MOVS, ST_STOS, ST_LODS, ST_SCAS, ST_CMPS } st_e;
-  typedef enum logic [3:0] {
-    CT_CALLREL, CT_RETN, CT_RETN_IMM, CT_CALLIND, CT_JMPIND,
-    CT_LOOP, CT_LOOPE, CT_LOOPNE, CT_JECXZ
-  } ctk_e;
+  // ALU op encoding (ALU_ADD..ALU_NOT) lives in ventium_alu_pkg (imported above).
+  // op-class enum (kind_e), micro-sequencer enums (smk_e/st_e/ctk_e), and the
+  // x87 decode enum (fxop_e) live in ventium_decode_pkg (imported above).
 
   // ===========================================================================
   // Decoder outputs (combinational)
@@ -306,35 +286,9 @@ module intcore
   logic        d_cnt16;        // 0x67 address-size: LOOP/JCXZ use CX (low 16)
 
   // ---- x87 decode (M3) ------------------------------------------------------
-  // x87 sub-op encoding for the FPU execution path. The decoder classifies each
-  // escape (D8..DF + ModR/M) into one of these and supplies the addressing
-  // (d_f_mem_read/write + d_f_msize) and operand index (d_f_sti) it needs.
-  typedef enum logic [5:0] {
-    FX_NONE,
-    // loads / pushes
-    FX_FLD_M32, FX_FLD_M64, FX_FLD_M80, FX_FLD_STI,
-    FX_FILD_M16, FX_FILD_M32, FX_FILD_M64,
-    FX_FLDCONST,             // d_f_const selects which ROM constant
-    // stores
-    FX_FST_M32, FX_FST_M64, FX_FST_M80, FX_FST_STI,    // pop variants via d_f_pop
-    FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
-    FX_FNSTCW, FX_FNSTSW_M, FX_FNSTSW_AX, FX_FLDCW,
-    // stack management
-    FX_FXCH, FX_FFREE, FX_FINCSTP, FX_FDECSTP, FX_FNOP, FX_FNINIT, FX_FNCLEX, FX_FWAIT,
-    // sign / abs
-    FX_FABS, FX_FCHS,
-    // compares / classify
-    FX_FCOM_M32, FX_FCOM_M64, FX_FCOM_STI, FX_FUCOM_STI,
-    FX_FCOMPP, FX_FUCOMPP, FX_FTST, FX_FXAM,
-    FX_FICOM_M16, FX_FICOM_M32,
-    // arithmetic (d_f_aluop selects add/sub/subr/mul/div/divr; flavor via fields)
-    FX_AR_ST0_STI,           // ST0 op= ST(i)
-    FX_AR_STI_ST0,           // ST(i) op= ST0
-    FX_AR_M32, FX_AR_M64,    // ST0 op= mem float
-    FX_AR_I16, FX_AR_I32,    // ST0 op= mem int (FIADD..)
-    FX_FSQRT
-  } fxop_e;
-
+  // x87 sub-op encoding (fxop_e: FX_*) lives in ventium_decode_pkg. The decoder
+  // classifies each escape (D8..DF + ModR/M) into one of these and supplies the
+  // addressing (d_f_mem_read/write + d_f_msize) and operand index (d_f_sti).
   fxop_e       d_fxop;
   logic        d_is_x87;
   logic        d_f_mem_read;     // x87 op reads a memory operand
@@ -360,18 +314,7 @@ module intcore
   logic [2:0]  sib_base;
   logic [7:0]  mrm, sibb;
 
-  function automatic logic [3:0] mfl(input logic [1:0] mod, input logic [2:0] rm,
-                                     input logic sib, input logic [2:0] base);
-    logic [3:0] disp;
-    begin
-      if (mod==2'b01)                          disp=4'd1;
-      else if (mod==2'b10)                     disp=4'd4;
-      else if (mod==2'b00 && rm==3'b101)       disp=4'd4;
-      else if (mod==2'b00 && sib && base==3'b101) disp=4'd4;
-      else                                     disp=4'd0;
-      return 4'd1 + (sib?4'd1:4'd0) + disp;
-    end
-  endfunction
+  // mfl() (ModR/M field length) lives in ventium_decode_pkg.
 
   // ===========================================================================
   // Prefix machine
@@ -382,10 +325,7 @@ module intcore
   logic [7:0] op0, op1;
   logic       two_byte;
 
-  function automatic logic is_prefix(input logic [7:0] b);
-    is_prefix = (b==8'h66)||(b==8'h67)||(b==8'h2E)||(b==8'h36)||(b==8'h3E)||
-                (b==8'h26)||(b==8'h64)||(b==8'h65)||(b==8'hF0)||(b==8'hF2)||(b==8'hF3);
-  endfunction
+  // is_prefix() lives in ventium_decode_pkg.
 
   always_comb begin
     pfx_len=4'd0; pfx_opsize=1'b0; pfx_addr=1'b0; pfx_seg=1'b0; pfx_lock=1'b0; pfx_rep=2'd0;
@@ -407,38 +347,8 @@ module intcore
     op1=ibuf[pfx_len+4'd1];
   end
 
-  // ===========================================================================
-  // Condition codes
-  // ===========================================================================
-  function automatic logic cond_true(input logic [3:0] tttn, input logic [31:0] fl);
-    logic cf,pf,zf,sf,of,res;
-    begin
-      cf=fl[0]; pf=fl[2]; zf=fl[6]; sf=fl[7]; of=fl[11];
-      unique case (tttn[3:1])
-        3'b000: res=of; 3'b001: res=cf; 3'b010: res=zf; 3'b011: res=cf|zf;
-        3'b100: res=sf; 3'b101: res=pf; 3'b110: res=(sf^of); 3'b111: res=(zf|(sf^of));
-        default: res=1'b0;
-      endcase
-      return tttn[0] ? ~res : res;
-    end
-  endfunction
-
-  // ===========================================================================
-  // Width helpers
-  // ===========================================================================
-  function automatic logic [31:0] wmask(input logic [31:0] v, input logic [2:0] w);
-    if (w==3'd1) return {24'd0, v[7:0]};
-    else if (w==3'd2) return {16'd0, v[15:0]};
-    else return v;
-  endfunction
-  function automatic logic sbit(input logic [31:0] v, input logic [2:0] w);
-    if (w==3'd1) return v[7]; else if (w==3'd2) return v[15]; else return v[31];
-  endfunction
-  // second-highest bit (MSB-1) of width w
-  function automatic logic sbit2(input logic [31:0] v, input logic [2:0] w);
-    if (w==3'd1) return v[6]; else if (w==3'd2) return v[14]; else return v[30];
-  endfunction
-  function automatic logic parity8(input logic [7:0] v); return ~^v; endfunction
+  // cond_true() (Jcc tttn condition eval) lives in ventium_decode_pkg.
+  // Width helpers (wmask/sbit/sbit2/parity8) live in ventium_alu_pkg.
 
   // ===========================================================================
   // Combinational decoder
@@ -1226,132 +1136,8 @@ module intcore
     end
   endfunction
 
-  // ===========================================================================
-  // ALU result + EFLAGS at width w
-  // ===========================================================================
-  function automatic logic [31:0] alu_result(input logic [4:0] op, input logic [31:0] a,
-                                             input logic [31:0] b, input logic cfin);
-    unique case (op)
-      ALU_ADD, ALU_INC: alu_result=a+b;
-      ALU_SUB, ALU_CMP, ALU_DEC: alu_result=a-b;
-      ALU_AND, ALU_TEST: alu_result=a&b;
-      ALU_OR:  alu_result=a|b;
-      ALU_XOR: alu_result=a^b;
-      ALU_MOV: alu_result=b;
-      ALU_ADC: alu_result=a+b+{31'd0,cfin};
-      ALU_SBB: alu_result=a-b-{31'd0,cfin};
-      ALU_NEG: alu_result=32'd0-a;
-      ALU_NOT: alu_result=~a;
-      default: alu_result=a;
-    endcase
-  endfunction
-
-  function automatic logic [31:0] flags_next(input logic [4:0] op, input logic [31:0] a,
-                                             input logic [31:0] b, input logic [31:0] res_full,
-                                             input logic [31:0] cur, input logic [2:0] w);
-    logic cf,pf,af,zf,sf,of;
-    logic [31:0] fl,res,am,bm;
-    logic [32:0] uadd,usub,uadc,usbb;
-    int msb, cpos;
-    begin
-      res=wmask(res_full,w); am=wmask(a,w); bm=wmask(b,w);
-      msb=(w==3'd1)?7:((w==3'd2)?15:31);
-      cpos=(w==3'd1)?8:((w==3'd2)?16:32);
-      zf=(res==32'd0); sf=sbit(res,w); pf=parity8(res[7:0]);
-      uadd={1'b0,am}+{1'b0,bm};
-      usub={1'b0,am}-{1'b0,bm};
-      uadc={1'b0,am}+{1'b0,bm}+{32'd0,cur[0]};
-      usbb={1'b0,am}-{1'b0,bm}-{32'd0,cur[0]};
-      cf=cur[0]; af=cur[4]; of=cur[11];
-      unique case (op)
-        ALU_ADD: begin cf=uadd[cpos]; af=(am[4]^bm[4]^res[4]); of=(~(am[msb]^bm[msb])&(am[msb]^res[msb])); end
-        ALU_ADC: begin cf=uadc[cpos]; af=(am[4]^bm[4]^res[4]); of=(~(am[msb]^bm[msb])&(am[msb]^res[msb])); end
-        ALU_SUB, ALU_CMP: begin cf=usub[cpos]; af=(am[4]^bm[4]^res[4]); of=((am[msb]^bm[msb])&(am[msb]^res[msb])); end
-        ALU_SBB: begin cf=usbb[cpos]; af=(am[4]^bm[4]^res[4]); of=((am[msb]^bm[msb])&(am[msb]^res[msb])); end
-        ALU_INC: begin cf=cur[0]; af=(am[4]^bm[4]^res[4]); of=(res[msb] && !am[msb]); end
-        ALU_DEC: begin cf=cur[0]; af=(am[4]^bm[4]^res[4]); of=(!res[msb] && am[msb]); end
-        ALU_NEG: begin cf=(am!=32'd0); af=(am[4]^res[4]); of=(am[msb] & res[msb]); end
-        ALU_AND, ALU_OR, ALU_XOR, ALU_TEST: begin cf=1'b0; af=1'b0; of=1'b0; end
-        default: begin cf=cur[0]; af=cur[4]; of=cur[11]; end
-      endcase
-      fl=cur & 32'hFFFF_F72A;
-      fl[0]=cf; fl[2]=pf; fl[4]=af; fl[6]=zf; fl[7]=sf; fl[11]=of; fl[1]=1'b1;
-      return fl;
-    end
-  endfunction
-
-  // ===========================================================================
-  // Shift/rotate result + CF
-  // ===========================================================================
-  function automatic logic [31:0] shrot_result(input logic [2:0] subop, input logic [31:0] v,
-                                               input logic [5:0] cnt, input logic cfin, input logic [2:0] w);
-    logic [31:0] x; logic [5:0] bits; logic carry, nc; int i; logic [4:0] ihi;
-    begin
-      x=wmask(v,w); bits=(w==3'd1)?6'd8:((w==3'd2)?6'd16:6'd32);
-      ihi=5'(bits-6'd1);
-      unique case (subop)
-        3'd4,3'd6: x = wmask(x << cnt, w);
-        3'd5:      x = x >> cnt;
-        3'd7: begin
-          if (w==3'd1)      x=$unsigned($signed({{24{v[7]}},v[7:0]})>>>cnt);
-          else if (w==3'd2) x=$unsigned($signed({{16{v[15]}},v[15:0]})>>>cnt);
-          else              x=$unsigned($signed(v)>>>cnt);
-          x=wmask(x,w);
-        end
-        3'd0: for (i=0;i<32;i++) if (i<cnt) x=wmask((x<<1)|{31'd0,x[ihi]},w);
-        3'd1: for (i=0;i<32;i++) if (i<cnt) x=wmask((x>>1)|({31'd0,x[0]}<<(bits-6'd1)),w);
-        3'd2: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[ihi]; x=wmask((x<<1)|{31'd0,carry},w); carry=nc; end end
-        3'd3: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[0]; x=wmask((x>>1)|({31'd0,carry}<<(bits-6'd1)),w); carry=nc; end end
-        default: ;
-      endcase
-      return wmask(x,w);
-    end
-  endfunction
-
-  function automatic logic shrot_cf(input logic [2:0] subop, input logic [31:0] v,
-                                    input logic [5:0] cnt, input logic cfin, input logic [2:0] w);
-    logic [31:0] x,res; logic [5:0] bits; logic carry,nc; int i;
-    logic [4:0] ihi, ilo, ic;
-    begin
-      x=wmask(v,w); bits=(w==3'd1)?6'd8:((w==3'd2)?6'd16:6'd32);
-      ihi=5'(bits-6'd1);        // top bit index of the width
-      ilo=5'(bits-cnt);         // SHL CF source bit
-      ic =5'(cnt-6'd1);         // SHR/SAR CF source bit
-      unique case (subop)
-        3'd4,3'd6: shrot_cf=(cnt==0)?cfin:x[ilo];
-        3'd5,3'd7: shrot_cf=(cnt==0)?cfin:x[ic];
-        3'd0: begin res=shrot_result(3'd0,v,cnt,cfin,w); shrot_cf=(cnt==0)?cfin:res[0]; end
-        3'd1: begin res=shrot_result(3'd1,v,cnt,cfin,w); shrot_cf=(cnt==0)?cfin:res[ihi]; end
-        3'd2: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[ihi]; x=wmask((x<<1)|{31'd0,carry},w); carry=nc; end shrot_cf=carry; end
-        3'd3: begin carry=cfin; for(i=0;i<32;i++) if(i<cnt) begin nc=x[0]; x=wmask((x>>1)|({31'd0,carry}<<(bits-6'd1)),w); carry=nc; end shrot_cf=carry; end
-        default: shrot_cf=cfin;
-      endcase
-    end
-  endfunction
-
-  // SHLD/SHRD (16/32-bit only)
-  function automatic logic [31:0] shld_result(input logic is_shrd, input logic [31:0] dst,
-                                              input logic [31:0] src, input logic [5:0] cnt, input logic [2:0] w);
-    logic [31:0] r; logic [5:0] bits;
-    begin
-      bits=(w==3'd2)?6'd16:6'd32;
-      if (cnt==0) r=dst;
-      else if (is_shrd) r=(dst>>cnt)|(src<<(bits-cnt));
-      else              r=(dst<<cnt)|(src>>(bits-cnt));
-      return wmask(r,w);
-    end
-  endfunction
-  function automatic logic shld_cf(input logic is_shrd, input logic [31:0] dst,
-                                   input logic [5:0] cnt, input logic [2:0] w);
-    logic [5:0] bits; logic [4:0] ilo, ic;
-    begin
-      bits=(w==3'd2)?6'd16:6'd32;
-      ilo=5'(bits-cnt); ic=5'(cnt-6'd1);
-      if (cnt==0) shld_cf=1'b0;
-      else if (is_shrd) shld_cf=dst[ic];
-      else shld_cf=dst[ilo];
-    end
-  endfunction
+  // ALU result + EFLAGS (alu_result/flags_next) and the shift/rotate datapath
+  // (shrot_result/shrot_cf, shld_result/shld_cf) live in ventium_alu_pkg.
 
   // ===========================================================================
   // EXEC combinational operands
@@ -1734,306 +1520,11 @@ module intcore
   assign retire_st7 = fpr[ftop + 3'd7];
 
   // ===========================================================================
-  // M4 fast-path decoder (combinational). Recognises the simple/pairable
-  // instruction subset the dual-issue pipeline handles directly; everything else
-  // sets fp_simple=0 and the core falls back to the multi-cycle FSM. The decoded
-  // fields drive a register-only ALU/mov/lea + a simple register-base load, the
-  // pairing checker, AGI detect, and branch handling. Functional results reuse
-  // the SAME alu_result/flags_next/reg_merge helpers as the slow path, so a
-  // fast-path retirement is bit-identical to the equivalent slow-path one.
-  //
-  // Fields (a packed struct so two can be evaluated in one always_comb):
-  //   simple    : recognised + safe for the fast path
-  //   len       : instruction length in bytes
-  //   alu_op    : ALU op (ALU_*) for an ALU/mov form
-  //   dst/src   : GP register operands (physical index)
-  //   use_imm   : second operand is `imm`
-  //   imm       : immediate
-  //   wflags    : writes EFLAGS
-  //   wreg      : writes dst register
-  //   is_lea    : LEA reg,(base) form (writes reg = base, no flags)
-  //   is_load   : MOV reg,(base) register-indirect load (1 mem read)
-  //   base      : base register for is_lea/is_load (for AGI + load addr)
-  //   is_nop    : 0x90 NOP
-  //   is_shift  : shift-by-imm (U-only pairable; reuses shrot datapath)
-  //   shrot/shimm
-  //   is_branch : Jcc rel8 / rel32 (V-only-pairable simple branch)
-  //   br_cond   : conditional (vs unconditional jmp rel)
-  //   br_taken  : architectural taken decision (from current eflags)
-  //   rel       : branch displacement (sign-extended)
-  //   reads/writes : GP register read/write bitmasks (excl. ESP) for pairing/AGI
-  //   addr_mask : base/index register bitmask for AGI
-  //   pairs_first/pairs_second : pairing eligibility (U-member / V-candidate)
-  //   disp_imm  : has displacement+immediate (blocks pairing)
+  // M4/M5 fast-path decoder — extracted to the `decode` leaf module
+  // (rtl/core/decode.sv), instantiated as u_decode / v_decode above. It decodes
+  // the simple/pairable instruction subset (fpd_t producer); anything else
+  // leaves d.simple=0 and the core falls back to the multi-cycle FSM.
   // ===========================================================================
-  typedef struct packed {
-    logic        simple;
-    logic [3:0]  len;
-    logic [4:0]  alu_op;
-    logic [2:0]  dst;
-    logic [2:0]  src;
-    logic        use_imm;
-    logic [31:0] imm;
-    logic        wflags;
-    logic        wreg;
-    logic        is_lea;
-    logic        is_load;
-    logic [2:0]  base;
-    logic        is_nop;
-    logic        is_shift;
-    logic [2:0]  shrot;
-    logic [4:0]  shimm;
-    logic        is_branch;
-    logic        br_cond;
-    logic        br_taken;
-    logic [3:0]  cc;            // condition code (Jcc low nibble) for fwd re-eval
-    logic [31:0] rel;
-    logic [7:0]  reads;
-    logic [7:0]  writes;
-    logic [7:0]  addr_mask;
-    logic        pairs_first;
-    logic        pairs_second;
-    logic        disp_imm;
-    // ---- M5 x87/FP cycle-accuracy fast-path fields (cycle-mode only) --------
-    // A small whitelist of register-form x87 ops is recognised here so the FP
-    // *cycle* model (latency/throughput, the p5model fp_role scoreboard) is
-    // emergent from the dual-issue pipe rather than the M4 slow-FSM serialize.
-    // Functional execution reuses the SAME exact helpers (fconst/f_eval/...), so
-    // arch state is bit-identical to the slow path. is_fp is asserted ONLY in
-    // cycle_mode (func mode keeps FP on the proven slow FSM -> no regression).
-    logic        is_fp;       // fast-path x87 op (cycle-mode whitelist)
-    logic [2:0]  fp_kind;     // FK_* below
-    logic [2:0]  fp_aluop;    // x87 group (add/sub/mul/div/...) for FK_ARITH
-    logic [2:0]  fp_sti;      // st(i) index operand
-    logic [2:0]  fp_role;     // p5model fp_role: 0 none,1 producer,2 consumer,3 rmw
-    logic [6:0]  fp_lat;      // FP result latency (cycles) for the scoreboard
-    logic [6:0]  fp_occ;      // FP pipe OCCUPANCY (cycles the in-order pipe is held)
-  } fpd_t;
-
-  // FP fast-path op kinds (the cycle-mode x87 whitelist).
-  localparam logic [2:0] FK_NONE   = 3'd0;
-  localparam logic [2:0] FK_FLDC   = 3'd1;   // FLD const (e.g. FLD1) — push
-  localparam logic [2:0] FK_ARITH  = 3'd2;   // ST0 op= ST(i) (reg form)
-  localparam logic [2:0] FK_FSTP0  = 3'd3;   // FSTP %st(0) — pop (discard)
-  localparam logic [2:0] FK_FLDSTI = 3'd4;   // FLD ST(i) — push copy
-  localparam logic [2:0] FK_FXCH   = 3'd5;   // FXCH ST(i)
-
-  function automatic fpd_t fp_decode(input logic [7:0] b0, input logic [7:0] b1,
-                                     input logic [7:0] b2, input logic [7:0] b3,
-                                     input logic [7:0] b4, input logic [7:0] b5,
-                                     input logic [31:0] flags_in);
-    fpd_t d;
-    logic [1:0] mod; logic [2:0] reg_f, rm;
-    begin
-      d = '{default:'0};
-      d.alu_op = ALU_ADD; d.len = 4'd1;
-      mod = b1[7:6]; reg_f = b1[5:3]; rm = b1[2:0];
-      unique casez (b0)
-        // ---- MOV r32, imm32 (B8+r) -------------------------------------------
-        8'b1011_1???: begin
-          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_MOV; d.wreg=1'b1; d.use_imm=1'b1;
-          d.dst=b0[2:0]; d.imm={b4,b3,b2,b1};
-          d.writes={5'd0, _onehot(b0[2:0])}[7:0];
-          d.pairs_first=1'b1; d.pairs_second=1'b1;
-        end
-        // ---- ALU r/m32, r32 (00/08/.. /r reg form) : add/or/adc/sbb/and/sub/xor
-        8'b00??_?001: begin
-          if (mod==2'b11) begin
-            d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
-            d.dst=rm; d.src=reg_f;
-            d.wreg=(b0[5:3]!=3'b111);                 // CMP writes no reg
-            d.reads = _onehot(rm) | _onehot(reg_f);
-            d.writes = d.wreg ? _onehot(rm) : 8'd0;
-            // ADC(op2)/SBB(op3) are PU (U-only-pairable, p5model pclass=PU): they
-            // may LEAD a pair but must NEVER fill the V slot — both because P5
-            // forbids it and because the V ALU path has no CF forwarding, so an
-            // adc/sbb in V would consume the STALE architectural carry and
-            // corrupt arch state. pairs_second=0 keeps them U-only.
-            d.pairs_first=1'b1;
-            d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
-          end
-        end
-        // ---- ALU r32, r/m32 (02/0A/.. /r reg form) ---------------------------
-        8'b00??_?011: begin
-          if (mod==2'b11) begin
-            d.simple=1'b1; d.len=4'd2; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
-            d.dst=reg_f; d.src=rm; d.wreg=(b0[5:3]!=3'b111);
-            d.reads = _onehot(rm) | _onehot(reg_f);
-            d.writes = d.wreg ? _onehot(reg_f) : 8'd0;
-            // ADC(op2)/SBB(op3) = PU (U-only-pairable); never fill V (see above).
-            d.pairs_first=1'b1;
-            d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
-          end
-        end
-        // ---- group1 r/m32, imm8 sign-ext (83 /r ib), reg form ----------------
-        8'h83: begin
-          if (mod==2'b11) begin
-            d.simple=1'b1; d.len=4'd3; d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
-            d.use_imm=1'b1; d.imm={{24{b2[7]}},b2}; d.dst=rm; d.src=rm;
-            d.wreg=(reg_f!=3'b111);
-            d.reads = _onehot(rm);
-            d.writes = d.wreg ? _onehot(rm) : 8'd0;
-            // imm-only (no displacement) so disp_imm stays 0 -> pairs.
-            // /2=ADC, /3=SBB are PU (U-only-pairable); never fill V (see above).
-            d.pairs_first=1'b1;
-            d.pairs_second=!(reg_f==3'b010 || reg_f==3'b011);
-          end
-        end
-        // ---- INC/DEC r32 (40+r / 48+r) ---------------------------------------
-        8'b0100_????: begin
-          d.simple=1'b1; d.len=4'd1; d.wflags=1'b1; d.dst=b0[2:0]; d.src=b0[2:0];
-          d.alu_op = b0[3] ? ALU_DEC : ALU_INC; d.wreg=1'b1;
-          d.reads=_onehot(b0[2:0]); d.writes=_onehot(b0[2:0]);
-          d.pairs_first=1'b1; d.pairs_second=1'b1;
-        end
-        // ---- MOV r/m32, r32 (89 /r reg form) ---------------------------------
-        8'h89: begin
-          if (mod==2'b11) begin
-            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=rm; d.src=reg_f;
-            d.wreg=1'b1; d.reads=_onehot(reg_f); d.writes=_onehot(rm);
-            d.pairs_first=1'b1; d.pairs_second=1'b1;
-          end
-        end
-        // ---- MOV r32, r/m32 (8B /r): reg form = reg move; mod00 = reg-base load
-        8'h8B: begin
-          if (mod==2'b11) begin
-            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=reg_f; d.src=rm;
-            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
-            d.pairs_first=1'b1; d.pairs_second=1'b1;
-          end else if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
-            // MOV r32,(base) : register-indirect load, no SIB/disp.
-            d.simple=1'b1; d.is_load=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
-            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
-            d.addr_mask=_onehot(rm);
-            d.pairs_first=1'b1; d.pairs_second=1'b1;
-          end
-        end
-        // ---- LEA r32, m (8D /r) : register-indirect form only ----------------
-        8'h8D: begin
-          if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
-            d.simple=1'b1; d.is_lea=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
-            d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
-            d.addr_mask=_onehot(rm);
-            d.pairs_first=1'b1; d.pairs_second=1'b1;
-          end
-        end
-        // ---- shift by imm8 (C1 /4,/5,/6,/7 ib), reg form ---------------------
-        // Only the SHL/SHR/SAL/SAR group is fast-pathed (its flag rules are
-        // simple + matched to the slow path); ROL/ROR/RCL/RCR (/0../3) keep
-        // their richer OF semantics on the slow path (simple=0 -> fallback).
-        8'hC1: begin
-          if (mod==2'b11 && reg_f[2]) begin   // reg_f in 4..7
-            d.simple=1'b1; d.is_shift=1'b1; d.len=4'd3; d.wflags=1'b1;
-            d.shrot=reg_f; d.shimm=b2[4:0]; d.dst=rm; d.wreg=1'b1;
-            d.reads=_onehot(rm); d.writes=_onehot(rm);
-            // shift-by-imm = U-only pairable (PU): may lead a pair, cannot fill V.
-            d.pairs_first=1'b1; d.pairs_second=1'b0;
-          end
-        end
-        // ---- TEST eAX, imm32 (A9) --------------------------------------------
-        8'hA9: begin
-          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_TEST; d.wflags=1'b1;
-          d.dst=R_EAX; d.use_imm=1'b1; d.imm={b4,b3,b2,b1};
-          d.reads=_onehot(R_EAX);
-          d.pairs_first=1'b1; d.pairs_second=1'b1;
-        end
-        // ---- NOP (90) --------------------------------------------------------
-        8'h90: begin
-          d.simple=1'b1; d.is_nop=1'b1; d.len=4'd1;
-          d.pairs_first=1'b1; d.pairs_second=1'b1;
-        end
-        // ---- Jcc rel8 (70..7F) -----------------------------------------------
-        8'b0111_????: begin
-          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd2;
-          d.cc=b0[3:0]; d.br_taken=cond_true(b0[3:0],flags_in); d.rel={{24{b1[7]}},b1};
-          // simple near branch = V-only pairable (can fill V, cannot lead a pair)
-          d.pairs_first=1'b0; d.pairs_second=1'b1;
-        end
-        // ---- JMP rel8 (EB) / Jcc rel32 (0F 8x) handled minimally -------------
-        8'hEB: begin
-          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b0; d.len=4'd2;
-          d.br_taken=1'b1; d.rel={{24{b1[7]}},b1};
-          // M5 finding [med]: an unconditional short JMP (EB) is V-only-pairable in
-          // the oracle (verif/qemu-plugins/p5trace.c:271-273: JMP -> pclass=PV,
-          // pairs_second=true) — exactly like a Jcc rel8. It can FILL the V slot of
-          // a pair (e.g. `<UV op>; jmp`) but cannot LEAD a pair. Matching this pairs
-          // the `<mov>; jmp` groups the assembler's p2align filler emits (mb_imiss).
-          d.pairs_first=1'b0; d.pairs_second=1'b1;
-        end
-        // ---- M5: x87 register-form FP whitelist (cycle-mode only) ------------
-        // These are recognised by the fast path so the FP latency/throughput
-        // CYCLE model is emergent (p5model fp_role scoreboard). simple stays 0
-        // (so the fast path does NOT treat them as integer ALU ops) but is_fp
-        // marks the FP commit path. FP ops never pair (NP in p5model): they hold
-        // the U pipe alone, so pairs_first/second stay 0. Gated on cycle_mode so
-        // func runs keep FP on the proven slow FSM (zero functional risk).
-        8'b1101_1???: if (cycle_mode) begin
-          // register form only (mod==11); memory-operand FP stays slow-path.
-          if (b1[7:6]==2'b11) begin
-            unique case (b0)
-              8'hD9: begin
-                unique casez (b1)
-                  8'b1100_0???: begin   // D9 C0+i  FLD ST(i)  (push copy)
-                    d.is_fp=1'b1; d.fp_kind=FK_FLDSTI; d.len=4'd2;
-                    d.fp_sti=b1[2:0]; d.fp_role=3'd1; d.fp_lat=7'd1; d.fp_occ=7'd1;
-                  end
-                  8'b1100_1???: begin   // D9 C8+i  FXCH ST(i)
-                    d.is_fp=1'b1; d.fp_kind=FK_FXCH; d.len=4'd2;
-                    d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
-                  end
-                  8'hE8,8'hE9,8'hEA,8'hEB,8'hEC,8'hED,8'hEE: begin // FLD const (E8=FLD1..)
-                    d.is_fp=1'b1; d.fp_kind=FK_FLDC; d.len=4'd2;
-                    d.fp_sti=(b1==8'hE8)?3'd0:(b1==8'hE9)?3'd1:(b1==8'hEA)?3'd2:
-                             (b1==8'hEB)?3'd3:(b1==8'hEC)?3'd4:(b1==8'hED)?3'd5:3'd6;
-                    // FLD-const is occ=2/lat=2 in the oracle (verif/qemu-plugins/
-                    // p5trace.c:307-309), NOT the lat-1 of FLD ST(i)/FLD mem.
-                    d.fp_role=3'd1; d.fp_lat=7'd2; d.fp_occ=7'd2;
-                  end
-                  default: ;  // other D9 reg-form ops stay slow-path
-                endcase
-              end
-              8'hD8: begin            // D8 C0+i.. : ST0 op= ST(i)  (add/mul/sub/div)
-                unique case (b1[5:3])
-                  3'd0,3'd1,3'd4,3'd5,3'd6,3'd7: begin
-                    d.is_fp=1'b1; d.fp_kind=FK_ARITH; d.len=4'd2;
-                    d.fp_aluop=b1[5:3]; d.fp_sti=b1[2:0]; d.fp_role=3'd3;
-                    // Match the oracle classify() (verif/qemu-plugins/p5trace.c:
-                    // 285-297): fadd/fsub LAT 3 / OCC 1; fmul LAT 3 / OCC 2; fdiv/
-                    // fdivr LAT 39 / OCC 39 (extended PC). LATENCY governs a
-                    // dependent consumer's stall (fp_ready); OCCUPANCY governs how
-                    // long this op holds the in-order pipe (delays the NEXT insn,
-                    // even an independent integer op) — the two are distinct.
-                    // group: 0=FADD 1=FMUL 4=FSUB 5=FSUBR 6=FDIV 7=FDIVR.
-                    d.fp_lat = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 : 7'd3;
-                    d.fp_occ = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 :
-                               (b1[5:3]==3'd1)                ? 7'd2  : 7'd1;
-                  end
-                  default: ;  // FCOM/FCOMP reg-form stay slow-path
-                endcase
-              end
-              8'hDD: begin
-                unique casez (b1)
-                  8'b1101_1???: begin   // DD D8+i  FSTP ST(i)  (pop). FSTP st(0)=discard.
-                    d.is_fp=1'b1; d.fp_kind=FK_FSTP0; d.len=4'd2;
-                    d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
-                  end
-                  default: ;
-                endcase
-              end
-              default: ;
-            endcase
-          end
-        end
-        default: ;
-      endcase
-      return d;
-    end
-  endfunction
-
-  // one-hot of a 3-bit GP index, ESP (index 4) excluded from dep masks.
-  function automatic logic [7:0] _onehot(input logic [2:0] r);
-    _onehot = (r==R_ESP) ? 8'd0 : (8'd1 << r);
-  endfunction
 
   // second ALU operand for a fast-path ALU/mov insn: imm, or the source reg, or
   // a fixed 1 for INC/DEC (matching the slow path's b_op selection).
@@ -2043,23 +1534,9 @@ module intcore
     else fp_bop = reg_read(d.src, 3'd4, 1'b0);
   endfunction
 
-  // pairing checker (mirrors p5model can_pair RULES, not its formula): both
-  // simple, V is a V-candidate, U is a U-member, no disp+imm, no prefixes
-  // (the fast path only decodes unprefixed forms), no RAW/WAW on GP regs
-  // (ESP/flags excepted -> already excluded from reads/writes masks).
-  function automatic logic fp_can_pair(input fpd_t u, input fpd_t v);
-    begin
-      if (!u.simple || !v.simple) return 1'b0;
-      if (!u.pairs_first || !v.pairs_second) return 1'b0;
-      if (u.disp_imm || v.disp_imm) return 1'b0;
-      if ((v.reads & u.writes) != 8'd0) return 1'b0;   // RAW
-      if ((v.writes & u.writes) != 8'd0) return 1'b0;  // WAW
-      // a load in the V slot is allowed in P5 only as the leading member; keep
-      // V-candidate loads out of the pair to stay conservative+correct.
-      if (v.is_load) return 1'b0;
-      return 1'b1;
-    end
-  endfunction
+  // pairing checker — extracted to the `issue_uv` leaf module
+  // (rtl/core/issue_uv.sv), instantiated as u_issue near the decode instances.
+  // It takes the U decode + V candidate decode and drives `pipe_pair_ok`.
 
   // icache presence: is the 32-byte line containing `addr` resident in EITHER way
   // of its set? (2-way, mirrors the oracle / the RTL D-cache lookup.)
@@ -2185,10 +1662,34 @@ module intcore
   logic        v_br_taken_eff;       // V branch taken using U's flags if forwarded
   logic [31:0] u_flags_eff;          // U's resulting flags (post-commit) for fwd
   logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
+  logic [7:0]  vb [6];               // V candidate decode bytes (at eip+lenU)
 
+  // R1 phase-3: the fast-path decoder is now the `decode` leaf module
+  // (rtl/core/decode.sv), instantiated once per slot (U + V candidate). The
+  // byte windows are gathered combinationally below (U at eip, V at eip+lenU),
+  // exactly as the in-line `fp_decode(...)` calls read them. u_d/v_d are driven
+  // by the instances; everything downstream consumes them unchanged.
   always_comb begin
     for (int i=0;i<6;i++) ub[i] = ic_present(eip+i[31:0]) ? ic_byte(eip+i[31:0]) : 8'd0;
-    u_d = fp_decode(ub[0],ub[1],ub[2],ub[3],ub[4],ub[5], eflags);
+    for (int i=0;i<6;i++) vb[i] = ic_byte(eip+{28'd0,u_d.len}+i[31:0]);
+  end
+
+  decode u_decode (
+      .ib0(ub[0]), .ib1(ub[1]), .ib2(ub[2]), .ib3(ub[3]), .ib4(ub[4]), .ib5(ub[5]),
+      .iflags(eflags), .cycle_mode(cycle_mode), .uop(u_d)
+  );
+  decode v_decode (
+      .ib0(vb[0]), .ib1(vb[1]), .ib2(vb[2]), .ib3(vb[3]), .ib4(vb[4]), .ib5(vb[5]),
+      .iflags(eflags), .cycle_mode(cycle_mode), .uop(v_d)
+  );
+
+  // R1 phase-3: the pairing checker is now the `issue_uv` leaf module
+  // (rtl/core/issue_uv.sv). pipe_pair_ok is the bare can-pair RULES decision;
+  // pipe_pair below ANDs in cycle_mode + V-bytes-resident exactly as before.
+  logic pipe_pair_ok;
+  issue_uv u_issue (.iu(u_d), .iv(v_d), .pair_ok(pipe_pair_ok));
+
+  always_comb begin
     // M5 finding [med] (I-cache straddle): U is decodable+chargeable correctly iff
     // the line containing eip is resident AND, only when the instruction actually
     // crosses the 32-byte line boundary, the line containing its LAST byte too.
@@ -2204,11 +1705,8 @@ module intcore
                     // instruction-straddle: its last byte's line must be resident
                     && (({1'b0,eip[4:0]} + {2'b0,u_d.len} <= 6'd32)
                         || ic_present(eip + {28'd0,u_d.len} - 32'd1));
-    // V candidate sits right after U.
-    v_d = fp_decode(ic_byte(eip+{28'd0,u_d.len}+0), ic_byte(eip+{28'd0,u_d.len}+1),
-                    ic_byte(eip+{28'd0,u_d.len}+2), ic_byte(eip+{28'd0,u_d.len}+3),
-                    ic_byte(eip+{28'd0,u_d.len}+4), ic_byte(eip+{28'd0,u_d.len}+5),
-                    eflags);
+    // V candidate sits right after U (decoded by the v_decode instance above,
+    // from the vb[] byte window gathered at eip+lenU).
 
     // I-cache fill line address for a current miss (eip's line first, else the
     // decode-window straddle line, else the instruction-straddle line) and the
@@ -2244,7 +1742,7 @@ module intcore
     // next U, the cold line fills via S_PF, and it issues with correct bytes.
     v_bytes_ok = ic_present(eip + {28'd0,u_d.len}) &&
                  ic_present(eip + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
-    pipe_pair = cycle_mode && v_bytes_ok && fp_can_pair(u_d, v_d);
+    pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok;
 
     pipe_load_req  = (state==S_PIPE) && pipe_bytes_ok && u_d.simple &&
                      u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
@@ -2672,7 +2170,7 @@ module intcore
               // comparing the wrong architectural state for the V member.
               // synopsys translate_off
               if (!cycle_mode) begin
-                $error("intcore: paired V retire (do_v) in func mode (cycle_mode=0): retire2_state is U's snap, not the V insn's post-commit state");
+                $error("core: paired V retire (do_v) in func mode (cycle_mode=0): retire2_state is U's snap, not the V insn's post-commit state");
               end
               // synopsys translate_on
               q_pc2 <= eip + {28'd0,u_d.len};   // V retire pc
@@ -3645,4 +3143,4 @@ module intcore
                    q_str_storedi};
   // verilator lint_on UNUSED
 
-endmodule : intcore
+endmodule : core
