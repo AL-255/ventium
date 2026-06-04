@@ -1,0 +1,13 @@
+{
+  "name": "err_fist",
+  "src": "err_fist/err_fist.s",
+  "elf": "err_fist/err_fist.elf",
+  "image": "err_fist/err_fist.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 30,
+  "x87": true,
+  "erratum": "20 (FIST/FISTP overflow undetected, 242480-022 p.75)",
+  "errata_mask": "0x2",
+  "selfcheck": "esi(result)==0x00000000 & IE==0 (errata ON) / 0x80000000 & IE==1 (errata OFF)"
+}

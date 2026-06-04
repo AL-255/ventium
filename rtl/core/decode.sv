@@ -159,6 +159,22 @@ module decode
           d.simple=1'b1; d.is_nop=1'b1; d.len=4'd1;
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
+        // ---- M6 Erratum 59: MOV moffs8,AL (A2) / MOV moffs,eAX (A3) ----------
+        // The absolute-displacement store short forms. CYCLE-MODE ONLY (func mode
+        // keeps moffs on the proven slow FSM; the store value is not traced, so
+        // here we model only the retire + pairing behavior). These are UV-pairable
+        // per the SDM (d.pairs_first/second=1); is_moffs lets the pairing logic
+        // reproduce the documented false-EAX-dependency non-pairing behind the
+        // errata flag. The store reads EAX (its data source) -> reads=EAX so a
+        // genuine RAW with a prior EAX writer is still honored; the ERRATUM adds a
+        // false dep on the FOLLOWING EAX reader (handled in core.sv pairing).
+        8'hA2, 8'hA3: if (cycle_mode) begin
+          d.simple=1'b1; d.is_moffs=1'b1; d.len=4'd5;
+          d.dst=R_EAX; d.src=R_EAX;             // data source = (e)AX
+          d.reads=_onehot(R_EAX);               // reads EAX (the stored datum)
+          d.writes=8'd0;                        // a store writes no GP register
+          d.pairs_first=1'b1; d.pairs_second=1'b1;
+        end
         // ---- Jcc rel8 (70..7F) -----------------------------------------------
         8'b0111_????: begin
           d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd2;

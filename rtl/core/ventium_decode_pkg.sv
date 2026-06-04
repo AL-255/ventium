@@ -125,6 +125,14 @@ package ventium_decode_pkg;
     logic        pairs_first;
     logic        pairs_second;
     logic        disp_imm;
+    // ---- M6 Erratum 59 (cycle-mode only): MOV moffs short forms A2/A3 --------
+    // The absolute-displacement store forms (opcodes 0xA2 MOV moffs8,AL and 0xA3
+    // MOV moffs,eAX). They ARE UV-pairable per the SDM, but the P5 instruction
+    // unit falsely fails to pair them when the NEXT instruction references EAX.
+    // is_moffs flags the U-member so the pairing logic can reproduce that defect
+    // behind errata_en[ERR_MOFFS]. Cycle-mode only (func mode keeps moffs on the
+    // proven slow FSM) -> no functional risk; the store value is not traced.
+    logic        is_moffs;     // A2/A3 absolute-displacement MOV store (cycle-mode)
     // ---- M5 x87/FP cycle-accuracy fast-path fields (cycle-mode only) --------
     // A small whitelist of register-form x87 ops is recognised here so the FP
     // *cycle* model (latency/throughput, the p5model fp_role scoreboard) is

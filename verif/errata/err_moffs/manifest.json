@@ -1,0 +1,13 @@
+{
+  "name": "err_moffs",
+  "src": "err_moffs/err_moffs.s",
+  "elf": "err_moffs/err_moffs.elf",
+  "image": "err_moffs/err_moffs.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 30,
+  "cycle": true,
+  "erratum": "59 (MOV moffs A2/A3 may not pair, 242480-022 p.99)",
+  "errata_mask": "0x8",
+  "selfcheck": "follower pc 0x0804800e paired=V (errata OFF) / not paired (errata ON)"
+}

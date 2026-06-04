@@ -1,0 +1,13 @@
+{
+  "name": "err_fdiv",
+  "src": "err_fdiv/err_fdiv.s",
+  "elf": "err_fdiv/err_fdiv.elf",
+  "image": "err_fdiv/err_fdiv.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 20,
+  "x87": true,
+  "erratum": "23 (FDIV/SRT divide flaw, 242480-022 p.78)",
+  "errata_mask": "0x1",
+  "selfcheck": "st0 floatx80 == 0x3fffaab7f6392a768800 (flawed, errata ON) / 0x3fffaabaa0e3e35a14bd (correct, errata OFF)"
+}

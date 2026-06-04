@@ -45,6 +45,17 @@ module core
     // bit-for-bit unaffected by the pipeline. Tied 0 by default (lint-safe).
     input  logic        cycle_mode,
 
+    // M6: errata-enable bus (docs/m6-errata-spec.md). DEFAULT 0 = clean core
+    // (M0-M5, bit-exact vs QEMU). When a bit is set, the core reproduces the
+    // corresponding DOCUMENTED P5/P54C silicon defect (a "buggy stepping"). The
+    // flag fully gates each bug: with errata_en==0 the datapath is unchanged, so
+    // `make verify` stays GREEN. Bit assignment (ERR_* localparams below):
+    //   [0] FDIV/SRT divide flaw      (Erratum 23)
+    //   [1] FIST/FISTP overflow       (Erratum 20)
+    //   [2] F00F LOCK CMPXCHG8B reg    hang (Erratum 81)
+    //   [3] MOV moffs A2/A3 non-pair   (Erratum 59, cycle-mode only)
+    input  logic [3:0]  errata_en,
+
     output logic        mem_req,
     output logic        mem_we,
     output logic [31:0] mem_addr,
@@ -52,6 +63,11 @@ module core
     output logic [3:0]  mem_wstrb,
     input  logic [31:0] mem_rdata,
     input  logic        mem_ack,
+
+    // M6: raised (and latched) when the core enters the F00F hang state
+    // (Erratum 81). Lets the TB observe the documented "system hang" without the
+    // core ever retiring the offending instruction or a clean #UD.
+    output logic        cpu_hung,
 
     output logic        retire_valid,
     output logic [31:0] retire_pc,
@@ -117,14 +133,28 @@ module core
   logic        x87_touched_r;   // retired insn touched the FPU (drives DPI call)
 
   // ===========================================================================
+  // M6 errata-enable bit positions (docs/m6-errata-spec.md). Each gates exactly
+  // one documented defect; all default OFF (errata_en==0 == clean M0-M5 core).
+  // ===========================================================================
+  localparam int ERR_FDIV  = 0;   // Erratum 23  : FDIV/SRT divide flaw
+  localparam int ERR_FIST  = 1;   // Erratum 20  : FIST/FISTP overflow undetected
+  localparam int ERR_F00F  = 2;   // Erratum 81  : LOCK CMPXCHG8B reg-dst hang
+  localparam int ERR_MOFFS = 3;   // Erratum 59  : MOV moffs A2/A3 non-pairing
+
+  // ===========================================================================
   // FSM
   // ===========================================================================
   typedef enum logic [4:0] {
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
     S_FLOAD, S_FEXEC, S_FSTORE,
-    S_PF, S_PIPE
+    S_PF, S_PIPE, S_F00F_HANG
   } state_e;
   state_e state;
+
+  // M6 Erratum 81: latched once the core enters the F00F hang (never clears
+  // until reset). Drives the cpu_hung output and keeps the FSM parked.
+  logic hung_r;
+  assign cpu_hung = hung_r;
 
   localparam int IWORDS = 4;
   logic [7:0]  ibuf [16];
@@ -234,6 +264,11 @@ module core
   logic [3:0]  d_len;
   logic        d_halt;
   logic        d_unknown;
+  // M6 Erratum 81 (F00F): decoded the invalid LOCK CMPXCHG8B-with-register-dst
+  // form (F0 0F C7 /reg, mod==11). Set ALONGSIDE d_unknown (so the clean core,
+  // errata off, still HALTs loudly on this invalid opcode); when errata_en[
+  // ERR_F00F] is set the FSM routes it to the documented hang instead.
+  logic        d_f00f;
   logic        d_is_branch;
   logic        d_branch_taken;
   logic [31:0] d_rel;
@@ -354,7 +389,7 @@ module core
   // Combinational decoder
   // ===========================================================================
   always_comb begin
-    d_len=4'd1; d_halt=1'b0; d_unknown=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
+    d_len=4'd1; d_halt=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
     d_rel=32'd0; d_alu_op=ALU_ADD; d_writes_reg=1'b0; d_writes_flags=1'b0;
     d_mem_read=1'b0; d_mem_write=1'b0; d_mem_dst=1'b0; d_dst_reg=3'd0; d_src_reg=3'd0;
     d_imm=32'd0; d_use_imm=1'b0; d_is_push=1'b0; d_is_pop=1'b0; d_is_lea=1'b0;
@@ -477,6 +512,17 @@ module core
         end
         8'b1100_1???: begin // BSWAP r32
           d_kind=K_BSWAP; d_writes_reg=1'b1; d_dst_reg=op1[2:0]; d_len=pfx_len+4'd2;
+        end
+        // ---- 0F C7: CMPXCHG8B (/1, memory only) ------------------------------
+        // The ONLY valid form is a MEMORY destination (mod != 11). A REGISTER
+        // destination (mod == 11) is an invalid opcode (#UD). The clean core does
+        // not implement CMPXCHG8B's memory form either (M2S), so both forms are
+        // d_unknown here -> HALT loudly. We additionally tag the invalid
+        // register-destination form (mod==11) as d_f00f so the FSM can reproduce
+        // Erratum 81 (the LOCK + reg-dst HANG) when errata_en[ERR_F00F] is set.
+        8'hC7: begin
+          d_unknown=1'b1; d_len=pfx_len+4'd3;
+          if (modrm_mod==2'b11 && modrm_reg==3'd1) d_f00f=1'b1;  // /1 reg-dst
         end
         default: begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
       endcase
@@ -1430,16 +1476,22 @@ module core
   // ARITHMETIC: compute {inexact, result} for ST(dst) given two floatx80 ops and
   // the x87 group sub-op (0 add,1 mul,4 sub,5 subr,6 div,7 divr). For the memory/
   // ST0-dest forms, a=ST0, b=mem/ST(i). For STI-dest forms, a=ST(i), b=ST0.
+  // `fdiv_err` (M6 Erratum 23): when 1, the div/divr group routes through the
+  // SRT-flaw-aware divide (fx_div_errata); when 0 (default) it uses the exact
+  // fx_div, so the clean core is bit-identical. add/sub/mul are never affected.
   function automatic logic [80:0] f_arith(input logic [2:0] sub,
                                           input logic [79:0] a, input logic [79:0] b,
-                                          input logic [1:0] rc);
+                                          input logic [1:0] rc,
+                                          input logic fdiv_err);
     unique case (sub)
       3'd0: f_arith = fx_add(a, b, rc);                       // add
       3'd1: f_arith = fx_mul(a, b, rc);                       // mul
       3'd4: f_arith = fx_add(a, {~b[79], b[78:0]}, rc);       // sub: a - b
       3'd5: f_arith = fx_add(b, {~a[79], a[78:0]}, rc);       // subr: b - a
-      3'd6: f_arith = fx_div(a, b, rc);                       // div: a / b
-      default: f_arith = fx_div(b, a, rc);                    // divr: b / a
+      3'd6: f_arith = fdiv_err ? fx_div_errata(a, b, rc)
+                               : fx_div(a, b, rc);            // div: a / b
+      default: f_arith = fdiv_err ? fx_div_errata(b, a, rc)
+                                  : fx_div(b, a, rc);         // divr: b / a
     endcase
   endfunction
 
@@ -1475,16 +1527,17 @@ module core
   // (a,b) are in f_arith canonical order: div = a/b, divr = b/a, etc.
   function automatic logic [82:0] f_eval(input logic [2:0] sub,
                                          input logic [79:0] a, input logic [79:0] b,
-                                         input logic [1:0] rc);
+                                         input logic [1:0] rc,
+                                         input logic fdiv_err);
     logic [80:0] r;
     begin
       if (f_zero_over_zero(sub, a, b))
         f_eval = {1'b1, 1'b0, 1'b0, 80'hFFFFC000000000000000};   // IE, indefinite
       else if (f_div_by_zero(sub, a, b)) begin
-        r = f_arith(sub, a, b, rc);                              // fx_div -> signed Inf
+        r = f_arith(sub, a, b, rc, fdiv_err);                   // fx_div -> signed Inf
         f_eval = {1'b0, 1'b1, 1'b0, r[79:0]};                   // ZE
       end else begin
-        r = f_arith(sub, a, b, rc);
+        r = f_arith(sub, a, b, rc, fdiv_err);
         f_eval = {1'b0, 1'b0, r[80], r[79:0]};                  // PE = inexact
       end
     end
@@ -1651,6 +1704,7 @@ module core
   logic [31:0] pf_miss_fa;           // I-cache fill line address for a current miss
   logic        pf_miss;             // a fill-word-0 fetch is needed this S_PIPE clock
   logic        pipe_pair;            // U and V issue together this clock
+  logic        moffs_falsedep;       // M6 Err59: A2/A3 moffs U + EAX-using V follower
   logic        v_bytes_ok;           // V candidate's full bytes resident in I-cache
   logic        pipe_agi;             // U has an AGI hazard (addr reg written last clk)
   logic        pipe_load_req;        // U is a register-base load (drives the bus)
@@ -1744,6 +1798,18 @@ module core
                  ic_present(eip + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
     pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok;
 
+    // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
+    // A2/A3 moffs store (the U member) followed by an instruction that uses
+    // (e)AX (as a source, base/index, or destination) triggers a FALSE EAX
+    // dependency in the instruction unit, so the pair is suppressed. We detect
+    // "V references EAX" as: V reads EAX (reads[EAX]) OR V writes EAX
+    // (writes[EAX]) OR V's address uses EAX (addr_mask[EAX]). The clean core
+    // (errata off) pairs them normally — that contrast is the self-check.
+    moffs_falsedep = u_d.is_moffs &&
+                     (v_d.reads[R_EAX] || v_d.writes[R_EAX] || v_d.addr_mask[R_EAX]);
+    if (errata_en[ERR_MOFFS] && moffs_falsedep)
+      pipe_pair = 1'b0;
+
     pipe_load_req  = (state==S_PIPE) && pipe_bytes_ok && u_d.simple &&
                      u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
     pipe_load_base = u_d.base;
@@ -1814,6 +1880,7 @@ module core
       // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty).
       ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
       x87_touched_r<=1'b0; f_step<=4'd0;
+      hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
       for (int fi=0; fi<8; fi++) fpr[fi]<=80'd0;
       // M4 pipeline state.
       pf_fill_addr<=32'd0; pf_word<=3'd0; pf_fill_way<=1'b0;
@@ -1973,7 +2040,7 @@ module core
               agi_wr0<=9'h100; agi_wr1<=9'h100;
             end else begin
               // ---- issue + commit the FP op (retires at issue+occ) -----------
-              fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10]);
+              fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10], errata_en[ERR_FDIV]);
               unique case (u_d.fp_kind)
                 FK_FLDC: begin
                   ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
@@ -2233,7 +2300,15 @@ module core
               q_pc<=eip; retire_valid<=1'b1;
               retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
             end
-            state<=S_HALT;
+            // M6 Erratum 81 (F00F): the invalid LOCK CMPXCHG8B reg-dst form. With
+            // errata enabled AND the LOCK prefix present, reproduce the documented
+            // HANG (the bus stays locked so the #UD handler never starts) instead
+            // of the clean loud HALT. The non-locked invalid form, and the valid
+            // memory form (mod!=11, never d_f00f), still take the clean HALT path.
+            if (d_f00f && errata_en[ERR_F00F] && pfx_lock)
+              state<=S_F00F_HANG;
+            else
+              state<=S_HALT;
           end
           else if (d_is_x87) begin
             if (d_f_mem_read) state<=S_FLOAD;       // read mem operand first
@@ -2907,22 +2982,22 @@ module core
             // special cases bit-exactly: x/0 -> signed Inf + ZE, 0/0 -> real-
             // indefinite QNaN + IE; otherwise the normal-operand datapath.
             FX_AR_ST0_STI: begin
-              arf = f_eval(q_f_aluop, st0v, stiv, f_rc);
+              arf = f_eval(q_f_aluop, st0v, stiv, f_rc, errata_en[ERR_FDIV]);
               fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
             end
             FX_AR_STI_ST0: begin
               // ST(i) op= ST0 : a=ST(i), b=ST0; sub/subr/div/divr direction per
               // QEMU helper_f{op}_STN_ST0 (which use ST(i) and ST0 in that order).
-              arf = f_eval(q_f_aluop, stiv, st0v, f_rc);
+              arf = f_eval(q_f_aluop, stiv, st0v, f_rc, errata_en[ERR_FDIV]);
               fpr[fri(q_f_sti)]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
               if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
             end
             FX_AR_M32, FX_AR_M64: begin
-              arf = f_eval(q_f_aluop, st0v, opnd_f, f_rc);
+              arf = f_eval(q_f_aluop, st0v, opnd_f, f_rc, errata_en[ERR_FDIV]);
               fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
             end
             FX_AR_I16, FX_AR_I32: begin
-              arf = f_eval(q_f_aluop, st0v, f_mem_as_int(f_mem80, q_f_mbytes), f_rc);
+              arf = f_eval(q_f_aluop, st0v, f_mem_as_int(f_mem80, q_f_mbytes), f_rc, errata_en[ERR_FDIV]);
               fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
             end
             FX_FSQRT: begin
@@ -2997,6 +3072,15 @@ module core
         end
 
         S_HALT: state<=S_HALT;
+
+        // M6 Erratum 81 (F00F): the locked CMPXCHG8B-with-register-destination
+        // form never starts the #UD handler because the bus stays locked — the
+        // processor HANGS. We model that as a parked state that NEVER retires and
+        // keeps cpu_hung asserted (documented "system hang"). Unlike S_HALT this
+        // is reached ONLY with errata_en[ERR_F00F] set; the clean core decodes
+        // 0F C7 /reg as an unknown opcode and HALTs loudly (no retire) instead.
+        S_F00F_HANG: begin hung_r<=1'b1; state<=S_F00F_HANG; end
+
         default: state<=S_HALT;
       endcase
     end
@@ -3034,12 +3118,18 @@ module core
         fstore_val = {16'd0, r64[63:0]}; fstore_pe = r64[64];
       end
       FX_FST_M80:  fstore_val = s0;
+      // M6 Erratum 20: FIST[P] m16int/m32int (NOT m64) miss the overflow on
+      // the documented positive operands in nearest/up rounding -> store ZERO,
+      // no IE. fx_to_int_errata reproduces that when errata_en[ERR_FIST] is set;
+      // otherwise it is identical to fx_to_int_ex (clean core unchanged).
       FX_FIST_M16: begin
-        ri = fx_to_int_ex(s0, 16, fctrl[11:10]);
+        ri = errata_en[ERR_FIST] ? fx_to_int_errata(s0, 16, fctrl[11:10])
+                                 : fx_to_int_ex     (s0, 16, fctrl[11:10]);
         fstore_val = {64'd0, ri[15:0]}; fstore_pe = ri[64]; fstore_ie = ri[65];
       end
       FX_FIST_M32: begin
-        ri = fx_to_int_ex(s0, 32, fctrl[11:10]);
+        ri = errata_en[ERR_FIST] ? fx_to_int_errata(s0, 32, fctrl[11:10])
+                                 : fx_to_int_ex     (s0, 32, fctrl[11:10]);
         fstore_val = {48'd0, ri[31:0]}; fstore_pe = ri[64]; fstore_ie = ri[65];
       end
       FX_FIST_M64: begin

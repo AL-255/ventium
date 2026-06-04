@@ -52,6 +52,7 @@ struct Args {
     uint32_t quiesce    = 64;     // K consecutive no-retire cycles => done
     bool     x87        = false;  // emit x87 fields + header x87:true (M3)
     bool     cycle      = false;  // emit cycle-mode trace + header mode:cycle (M4)
+    uint32_t errata     = 0;      // M6 errata-enable bus (default 0 = clean core)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -59,7 +60,8 @@ struct Args {
         "usage: %s --out <trace.vtrace> [--image <blob> --load <hexaddr>]\n"
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
-        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle]\n", prog);
+        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle]\n"
+        "          [--errata <hexmask>]\n", prog);
     std::exit(code);
 }
 
@@ -92,6 +94,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--quiesce")    a.quiesce    = parse_u32(need("--quiesce"));
         else if (k == "--x87")        a.x87        = true;
         else if (k == "--cycle")      a.cycle      = true;
+        else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -197,6 +200,7 @@ int main(int argc, char** argv) {
     top->init_eip  = args.entry;
     top->init_esp  = args.init_esp;
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
+    top->errata_en  = args.errata & 0xF;     // M6: errata-enable bus (default 0)
     top->mem_rdata = 0;
     top->mem_ack   = 0;
     top->eval();
@@ -263,6 +267,18 @@ int main(int argc, char** argv) {
         if (cycles >= args.max_cycles) {
             std::fprintf(stderr, "tb: stop: reached --max-cycles (%llu)\n",
                          (unsigned long long)args.max_cycles);
+            break;
+        }
+        // M6 Erratum 81 (F00F): the core latched cpu_hung -> it entered the
+        // documented LOCK-CMPXCHG8B-reg HANG. Report it distinctly and stop (the
+        // core will never retire again). This makes the hang observable to the
+        // self-check (which greps this line) without waiting out the full quiesce.
+        if (top->cpu_hung) {
+            std::fprintf(stderr,
+                "tb: stop: CPU HUNG (F00F: LOCK CMPXCHG8B reg-dst, Erratum 81) "
+                "after %llu retired in %llu clocks\n",
+                (unsigned long long)trace.retired(),
+                (unsigned long long)cycles);
             break;
         }
         if (idle >= args.quiesce) {
