@@ -1267,3 +1267,31 @@ independent V partner; before it serialized on the slow FSM). `make verify-sys`
 branches, memory) remain risk-ordered in `docs/fastpath-coverage-spec.md` §3 — the
 byte forms add byte-width fast-path ALU; PUSH/POP + stores add real stack/memory
 functional surface. RTL touched: `rtl/core/decode.sv`; `ventium-refs` untouched.
+
+### AP-500 fast-path coverage — batch 4: near branches + TEST-reg (2026-06-05, review Action 6)
+
+The DECODE-ONLY remaining forms, batched together (all reuse the existing
+branch/ALU execution, so zero functional risk): `E9` (JMP rel32, mirrors `EB`),
+`0F 8x` (Jcc rel32 — a new two-byte `0F` sub-decode in `fp_decode` that fast-paths
+only the `8x` sub-range, mirroring the `7x` Jcc rel8 arm; every other `0F` op stays
+on the slow FSM), and `85 /r` (TEST r/m32,r32 reg form, reusing the `ALU_TEST`
+datapath like `A9`). All in `rtl/core/decode.sv`.
+
+- **Func byte-identical** — `make verify` 68/68 goldens unchanged (these reuse the
+  proven `EB`/`7x` branch + `A9` TEST execution; no new datapath).
+- **They now pair** — NEW gated band `mb_nearbr`: the `cmp/test`→`jcc` idiom with a
+  >128-byte loop body that forces a `0F 85` (Jcc rel32) back-edge; the `85` TEST (U)
+  pairs with an independent `mov` (V) and the `0F 85` (PV) fills V after `dec` →
+  **RTL pairing 50% (matching p5model), abs-cyc +1.16%**. PASS.
+- **No regression** — all M4/M5 bands held; `make verify-sys` 10/10 EQUIVALENT
+  (fast path is `!sys_mode`-gated); lint 0/0.
+
+**This is where the decode-only fast-path batches stop.** The remaining AP-500
+forms — the BYTE forms (`04`/`A8`/`84`, byte-width ALU: the fast-path GP writeback
+is 32-bit-only, no `reg_merge`), PUSH/POP (`50+r`/`58+r`: the fast path does no
+memory stores + needs the ESP micro-update), and the general MEMORY/STORE forms —
+are NOT decode-only: each needs the fast-path EXECUTION datapath extended
+(width-aware writeback / a store path / ESP) and carries real functional risk, so
+they are a separate, carefully-gated effort, not a quick decode add
+(`docs/fastpath-coverage-spec.md` §3). RTL touched: `rtl/core/decode.sv`;
+`ventium-refs` untouched.
