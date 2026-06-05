@@ -196,6 +196,18 @@ lint clean (0 warn/err). Adversarial review verdict: GENUINE + behavior-preservi
 - 2026-06-05 — **fpu_top (the x87 STATE FILE) extracted bit-exact** — the 5th leaf;
   reverses the earlier "fpu-state spine-bound" call (it was extractable after a richer
   write-port design). Reviewed + gate-verified independently below.
+- 2026-06-05 — **dead-stub cleanup.** Removed the 4 remaining empty M0-skeleton stub
+  modules whose logic is spine-resident: `core/fetch.sv` (the fetch FSM IS the pipeline;
+  its I-cache is already `icache.sv`), `core/exec_int.sv` (the execute FSM IS the
+  pipeline; its ALU is already `ventium_alu_pkg`), `sys/sys_state.sv` (CRx/seg-hidden/
+  GDTR/IDTR/TR/DR — many-write-port FSM-coupled state), and `core/regfile.sv` (the GPR
+  file — spine-bound: true dual-issue 2-write-port; COULD be lifted to a state-bank
+  module later via the fpu_top pattern for a clean R2 6-of-6, but removed here as a dead
+  placeholder, not extracted). Deleted the files + their `ventium_top` no-op
+  instantiations + their `ventium.f`/`ventium_soc.f` entries (consistent with the earlier
+  `ucode_rom` removal). Also FIXES the `ventium_soc.f` MULTITOP lint warning (the stubs
+  were uninstantiated extra tops). `make verify` bit-identical (0 goldens regenerated —
+  the stubs were no-ops); ventium.f + ventium_soc.f both lint 0; SoC gate still EQUIVALENT.
 
 ### fpu_top — x87 architectural STATE FILE extraction (2026-06-05, bit-exact)
 

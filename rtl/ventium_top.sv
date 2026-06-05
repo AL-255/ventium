@@ -303,28 +303,18 @@ module ventium_top
   end
 
   // ---------------------------------------------------------------------------
-  // Block decomposition (PLAN §6). These remain M0-style stubs instantiated for
-  // a coherent block map; the pipelined versions land in M2..M6. (The
-  // integer datapath lives in core.sv above.) Inputs tied off; outputs left
-  // at the stubs' benign defaults.
+  // Block decomposition (PLAN §6) — NO top-level stubs remain. The §6 leaf
+  // blocks are all realized inside the core (rtl/core/core.sv): the real leaf
+  // MODULES bpred_btb / decode / issue_uv / dcache_timing / icache / tlb /
+  // fpu_top are instantiated within core.sv (wired into the datapath, not tied
+  // off); and the front-end FETCH, the integer EXECUTE, the GPR file (REGFILE),
+  // and the SYSTEM STATE (CRx/seg-hidden/GDTR/IDTR/TR/DR) are SPINE-BOUND — their
+  // logic IS the core's pipeline FSM, not a separable unit — so the old empty M0
+  // fetch/exec_int/regfile/sys_state placeholder stubs were removed (like the
+  // ucode_rom stub before them). regfile is a true dual-issue 2-write-port file;
+  // it COULD be lifted to a state-bank module later (the fpu_top pattern) for a
+  // clean R2 6-of-6, but the others are inherently FSM-resident.
   // ---------------------------------------------------------------------------
-
-  // §6.1 Front end -----------------------------------------------------------
-  fetch       u_fetch   (.clk(clk), .rst_n(rst_n));
-  // R2: the branch predictor (bpred_btb: 4-way BTB + 2-bit saturating counter)
-  // is now instantiated INSIDE the core (rtl/core/core.sv), wired to the two
-  // combinational predict ports + the single synchronous resolve port. The old
-  // empty M0 `bpred_btb` placeholder stub here is gone (the module is now real).
-  // R1 phase-3: `decode` is now a REAL fast-path decoder leaf (rtl/core/decode.sv),
-  // instantiated inside core.sv (u_decode / v_decode). No top-level block-map
-  // stub instance — it is wired into the datapath, not tied off.
-
-  // §6.3 Integer execution ----------------------------------------------------
-  // R1 phase-3: `issue_uv` is now a REAL pairing-checker leaf
-  // (rtl/core/issue_uv.sv), instantiated inside core.sv (u_issue). No
-  // top-level block-map stub — it is wired into the datapath, not tied off.
-  exec_int    u_exec    (.clk(clk), .rst_n(rst_n));
-  regfile     u_regfile (.clk(clk), .rst_n(rst_n));
 
   // §6.6 x87 FPU ---------------------------------------------------------------
   // R2: `fpu_top` is now the REAL x87 architectural STATE FILE (fpr[8]/ftop/
@@ -400,9 +390,6 @@ module ventium_top
 
   assign core_mem_rdata = bus_mode ? bus_c_rdata : mem_rdata;
   assign core_mem_ack   = bus_mode ? bus_c_ack   : mem_ack;
-
-  // §6.9 System state ----------------------------------------------------------
-  sys_state   u_sys     (.clk(clk), .rst_n(rst_n));
 
   // M8.1 lint sink: the tied-off core inta output (soc_en=0 here).
   // verilator lint_off UNUSED
