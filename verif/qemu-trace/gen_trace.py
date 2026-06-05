@@ -841,6 +841,294 @@ def _signal_to_vector(sig):
 
 
 # =============================================================================
+#  M7.3 — Win95 SYSTEM INPUT-REPLAY producer (--system-replay)
+# =============================================================================
+# Builds the Win95 boot-prefix golden + the captured environment inputs the
+# co-sim-bus CONSUMER will replay into the Ventium RTL, plus the initial physical
+# memory image so the RTL can fetch the BIOS reset code at F000:FFF0.
+#
+# WHY NOT THE GDBSTUB (the producer's central de-risk):
+#   qemu-system-i386 8.2.2's gdbstub is UNRESPONSIVE under `-icount rr=replay`
+#   (empirically verified here: it accepts the TCP connection but never answers
+#   even qSupported — the replay engine blocks the stub chardev). So we CANNOT
+#   single-step the replay over RSP. The path that DOES work under replay is the
+#   `-d cpu` register dump with `-accel tcg,one-insn-per-tb=on`, which emits the
+#   FULL architectural register file before each one-instruction TB. Routing the
+#   int + memory_region_ops trace events to the SAME -D log makes the textual
+#   order the replay-icount order, giving per-instruction alignment of every
+#   dev_in / intr / dma_wr (replaylog.iter_aligned).
+#
+# Two passes (one rrfile, fully deterministic):
+#   PASS A (initial phys-mem image): plain `-S -gdb` (NO rr — the gdbstub DOES
+#     work here) at the reset stop, RSP-read the BIOS ROM region + IVT/BDA/low
+#     RAM into the image sidecar. The reset state is identical to the replay's
+#     first cpu-dump (deterministic), so the bytes the RTL fetches at F000:FFF0
+#     match the golden's first instruction byte-for-byte.
+#   PASS B (golden + env inputs): `rr=replay + blkreplay(overlay) + one-insn-per-tb
+#     -d cpu,int,trace:memory_region_ops_{read,write}`, parse the combined log
+#     into the .vtrace with the sys arch state + dev_in/intr/dma_wr fields.
+
+# Physical-memory regions to snapshot for the initial image. These cover what the
+# RTL needs to fetch the reset vector and run the early real-mode prefix: the
+# whole upper BIOS ROM (F0000..FFFFF, holds the reset vector at FFFF0 + POST),
+# the legacy VGA option-ROM / BIOS extension window (C0000..CFFFF), the real-mode
+# IVT + BIOS Data Area + low conventional RAM the bootloader uses (0..0x10000).
+_INIT_MEM_REGIONS = [
+    (0x000000, 0x10000),   # IVT (0..0x3FF) + BDA (0x400) + low conventional RAM
+    (0x0C0000, 0x10000),   # video BIOS / option ROM window
+    (0x0F0000, 0x10000),   # system BIOS ROM (reset vector @ 0xFFFF0)
+]
+
+
+def _capture_initial_phys_mem(qemu, overlay, port, ram_mb, cpu, verbose):
+    """PASS A: snapshot the initial guest PHYSICAL memory via gdbstub at reset.
+
+    Launches qemu-system-i386 with plain `-S -gdb` (no rr — the gdbstub answers
+    here, unlike under rr=replay) so the guest is frozen at the F000:FFF0 reset
+    vector, then RSP-reads the BIOS ROM + low-memory regions in chunks. Returns
+    the image dict (regs/seg/segbase + regions[]) or None on failure (the caller
+    then bounds honestly).
+    """
+    cmd = [qemu, "-machine", "pc", "-cpu", cpu, "-m", str(ram_mb),
+           "-drive", "driver=blkreplay,id=dr0,if=none,image.driver=qcow2,"
+                     "image.file.filename=%s" % overlay,
+           "-device", "ide-hd,drive=dr0,bus=ide.0",
+           "-rtc", "base=utc,clock=vm", "-net", "none", "-display", "none",
+           "-no-reboot", "-S", "-gdb", "tcp::%d" % port]
+    if verbose:
+        sys.stderr.write("[gen_trace] PASS A (initial phys-mem): %s\n"
+                         % " ".join(cmd))
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    rsp = None
+    try:
+        rsp = RSPClient(port=port, timeout=20.0, verbose=False)
+        rsp.handshake()
+        layout = rsp.discover_layout()
+        raw = rsp.read_g()
+        layout.anchor_tail(len(raw))
+        eip, eflags, gpr, seg, _x87 = regs_to_fields(layout, raw)
+        sysr = sysregs_from_raw(layout, raw)
+
+        img = {"regs": {}, "seg": {}, "seg_base": {}, "regions": []}
+        for k in tracefmt.GPR_KEYS:
+            img["regs"][k] = tracefmt.h32(gpr[k])
+        img["regs"]["eip"] = tracefmt.h32(eip)
+        img["regs"]["eflags"] = tracefmt.h32(eflags)
+        for k in tracefmt.SEG_KEYS:
+            img["seg"][k] = tracefmt.h16(seg[k])
+        # Snapshot each physical region from guest memory (paddr == linear in the
+        # reset/real-mode flat view: cr0.PE=0, no paging -> 'm' reads phys).
+        n_bytes = 0
+        for (paddr, length) in _INIT_MEM_REGIONS:
+            before = len(img["regions"])
+            _append_phys_region(rsp, img["regions"], paddr, length)
+            n_bytes += sum(len(bytes.fromhex(r["hex"]))
+                           for r in img["regions"][before:])
+        img["meta"] = {
+            "producer": "qemu-system-replay-initmem",
+            "cpu": cpu, "ram_mb": ram_mb,
+            "reset_cs_eip": "%04x:%08x" % (seg["cs"], eip),
+            "cr0": tracefmt.h32(sysr.get("cr0", 0)),
+            "regions_spec": [[tracefmt.h32(p), l] for (p, l) in _INIT_MEM_REGIONS],
+            "bytes_captured": n_bytes,
+            "note": "M7.3a Win95 initial physical-memory image: paddr-keyed BIOS "
+                    "ROM + IVT/BDA + low RAM at the reset stop (F000:FFF0). The "
+                    "RTL loads these phys regions, sets the reset CS:EIP, then "
+                    "runs the .vtrace replaying dev_in/intr/dma_wr per record.",
+        }
+        if verbose:
+            sys.stderr.write("[gen_trace]   initial image: %d regions, %d bytes; "
+                             "reset %04x:%08x cr0=%s\n"
+                             % (len(img["regions"]), n_bytes, seg["cs"], eip,
+                                tracefmt.h32(sysr.get("cr0", 0))))
+        return img
+    except RSPError as e:
+        sys.stderr.write("[gen_trace] WARNING: initial phys-mem capture failed "
+                         "(%s); image sidecar will be omitted\n" % e)
+        return None
+    finally:
+        if rsp is not None:
+            try:
+                rsp.send("k")
+            except Exception:
+                pass
+            rsp.close()
+        _terminate(proc)
+
+
+def _append_phys_region(rsp, regions, paddr, length):
+    """Read `length` bytes at guest PHYSICAL addr in chunks; append byte regions.
+
+    Reads in CHUNK-sized pieces (a full-64KiB 'm' can exceed PacketSize=0x1000).
+    Unreadable spans are skipped (the RTL won't fetch them). Keyed by `paddr`."""
+    CHUNK = 0x800
+    off = 0
+    while off < length:
+        n = min(CHUNK, length - off)
+        data = rsp.read_mem((paddr + off) & 0xFFFFFFFF, n)
+        if data:
+            regions.append({"paddr": tracefmt.h32((paddr + off) & 0xFFFFFFFF),
+                            "hex": data.hex()})
+        off += n
+
+
+def _seg_fields_from_state(st):
+    """Map a replaylog.CpuState's segments to (seg_sel, sysregs-with-bases).
+
+    Returns (seg_dict over SEG_KEYS, sysregs dict for func_record). The hidden
+    base/limit/attr from -d cpu populate the reserved segment-hidden sys fields,
+    so the system golden carries real-mode AND protected-mode segment bases (which
+    the RTL must match through the real->PM->paging transitions)."""
+    seg = {k: st.seg.get(k, 0) & 0xFFFF for k in tracefmt.SEG_KEYS}
+    sysr = {}
+    for k in tracefmt.SYS_CR:
+        sysr[k] = getattr(st, k) & 0xFFFFFFFF
+    for k in tracefmt.SEG_KEYS:
+        if k in st.seg_base:
+            sysr["%s_base" % k] = st.seg_base[k] & 0xFFFFFFFF
+            sysr["%s_limit" % k] = st.seg_limit[k] & 0xFFFFFFFF
+            sysr["%s_attr" % k] = (st.seg_attr.get(k, 0) >> 8) & 0xFFFF
+    return seg, sysr
+
+
+def generate_system_replay(qemu, overlay, rrfile, out_path, image_path,
+                           combined_log, max_insn, port, ram_mb, cpu,
+                           icount_shift, verbose, keep_log=False):
+    """M7.3a PRODUCER: replay a recorded Win95 boot prefix and emit the system
+    golden (.vtrace) + the captured environment inputs + the initial phys-mem
+    image. See the module block comment above for the two-pass design.
+
+    Returns (n_emitted, n_dev_in, n_intr, n_dma_wr, log_path).
+    """
+    # --- PASS A: initial physical-memory image (gdbstub at reset, no rr) -------
+    if image_path:
+        img = _capture_initial_phys_mem(qemu, overlay, port, ram_mb, cpu, verbose)
+        if img is not None:
+            with open(image_path, "w") as imgf:
+                imgf.write(tracefmt.dumps(img) + "\n")
+            if verbose:
+                sys.stderr.write("[gen_trace] wrote initial phys-mem image to %s\n"
+                                 % image_path)
+
+    # --- PASS B: deterministic replay -> combined cpu+int+devio log ------------
+    icount = "shift=%s,rr=replay,rrfile=%s" % (icount_shift, rrfile)
+    cmd = [qemu, "-machine", "pc", "-cpu", cpu, "-m", str(ram_mb),
+           "-accel", "tcg,one-insn-per-tb=on",
+           "-icount", icount,
+           "-drive", "driver=blkreplay,id=dr0,if=none,image.driver=qcow2,"
+                     "image.file.filename=%s" % overlay,
+           "-device", "ide-hd,drive=dr0,bus=ide.0",
+           "-rtc", "base=utc,clock=vm", "-net", "none", "-display", "none",
+           "-no-reboot",
+           "-d", "cpu,int,trace:memory_region_ops_read,"
+                 "trace:memory_region_ops_write",
+           "-D", combined_log]
+    if verbose:
+        sys.stderr.write("[gen_trace] PASS B (replay->log): %s\n" % " ".join(cmd))
+    # Truncate any stale combined log.
+    open(combined_log, "w").close()
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+
+    # We must let the replay run long enough to PRODUCE the bounded prefix in the
+    # log, then stop QEMU and parse the file. The replay self-terminates at rrfile
+    # EOF (fixed shift); we also stop early once the log clearly contains far more
+    # than max_insn cpu-dumps (so we don't wait for the whole 8s prefix when the
+    # caller wants only the first N instructions). The parser then takes exactly
+    # max_insn records from the head (the deterministic prefix-of-a-prefix).
+    import replaylog  # local import (sibling module)
+
+    # Heuristic poll: stop when the log has accumulated enough EAX-dump lines to
+    # cover max_insn (+slack), or QEMU exits, or a generous wallclock cap hits.
+    need_dumps = (max_insn + 64) if max_insn is not None else None
+    cap_s = 90
+    waited = 0.0
+    try:
+        while True:
+            if proc.poll() is not None:
+                break               # replay finished at rrfile EOF
+            if waited >= cap_s:
+                break
+            if need_dumps is not None:
+                # cheap line count of the EAX anchor; bounded by reading the file.
+                try:
+                    cnt = _count_eax_dumps(combined_log, need_dumps)
+                except OSError:
+                    cnt = 0
+                if cnt >= need_dumps:
+                    if verbose:
+                        sys.stderr.write("[gen_trace]   log has >= %d cpu-dumps; "
+                                         "stopping replay\n" % need_dumps)
+                    break
+            time.sleep(0.5)
+            waited += 0.5
+    finally:
+        _terminate(proc)
+    # Give the OS a moment to flush the final buffered log writes.
+    time.sleep(0.5)
+
+    # --- parse the combined log into the aligned .vtrace -----------------------
+    n_emitted = n_dev_in = n_intr = n_dma_wr = 0
+    note = ("win95 system-replay rrfile=%s shift=%s one-insn-per-tb "
+            "-d cpu,int,memory_region_ops" % (os.path.basename(rrfile),
+                                              icount_shift))
+    with open(out_path, "w") as f:
+        f.write(tracefmt.dumps(
+            tracefmt.header("qemu-system-replay", "func",
+                            x87=False, sys=True, note=note)) + "\n")
+        for rec in replaylog.iter_aligned(combined_log, max_insn=max_insn):
+            pre = rec["pre"]
+            post = rec["post"]
+            # pc = fetch addr of THIS instruction (pre-state EIP); post-commit
+            # arch state comes from the NEXT dump (post). In real mode the RTL
+            # fetches at (cs<<4)+eip; we record eip + the segment selector/base so
+            # the consumer/comparator can form the linear address itself.
+            pc = pre.eip
+            seg, sysr = _seg_fields_from_state(post)
+            gpr = {k: getattr(post, k) for k in tracefmt.GPR_KEYS}
+            dev_in = tracefmt.dev_in_field(rec["dev_in"]) if rec["dev_in"] else None
+            dma_wr = tracefmt.dma_wr_field(rec["dma_wr"]) if rec["dma_wr"] else None
+            intr = None
+            if rec["intr"] is not None:
+                iv = rec["intr"]
+                intr = tracefmt.intr_field(
+                    iv["vec"], err=iv.get("err"), soft=iv.get("soft"),
+                    cpl=iv.get("cpl"), ip=iv.get("ip"), sp=iv.get("sp"))
+            r = tracefmt.func_record(
+                n_emitted, pc, post.eflags, gpr, seg,
+                bytes_=None, exc=None, x87=None, sysregs=sysr,
+                dev_in=dev_in, intr=intr, dma_wr=dma_wr)
+            f.write(tracefmt.dumps(r) + "\n")
+            n_emitted += 1
+            if dev_in:
+                n_dev_in += len(dev_in)
+            if dma_wr:
+                n_dma_wr += len(dma_wr)
+            if intr is not None:
+                n_intr += 1
+
+    if not keep_log and combined_log.startswith("/tmp"):
+        try:
+            os.remove(combined_log)
+        except OSError:
+            pass
+    return n_emitted, n_dev_in, n_intr, n_dma_wr, combined_log
+
+
+def _count_eax_dumps(path, limit):
+    """Count lines beginning with 'EAX=' up to `limit` (cheap progress probe)."""
+    n = 0
+    with open(path, "r", errors="replace") as f:
+        for line in f:
+            if line.startswith("EAX="):
+                n += 1
+                if n >= limit:
+                    return n
+    return n
+
+
+# =============================================================================
 #  M7.1 — Quake user-mode input-replay PRODUCER (int-0x80 syscall proxy)
 # =============================================================================
 # The RTL is a CPU core; at each `int 0x80` the *kernel* mutates state the CPU
@@ -1345,6 +1633,27 @@ def main(argv=None):
     p.add_argument("--image-mode", choices=["bios", "kernel"], default="bios",
                    help="how to load --image: 'bios' (raw, reset vector "
                         "F000:FFF0) or 'kernel' (multiboot -kernel). Default bios.")
+    # --- M7.3 Win95 system input-replay producer ---------------------------
+    p.add_argument("--system-replay", action="store_true", dest="system_replay",
+                   help="M7.3a PRODUCER: replay a recorded Win95 boot prefix "
+                        "(--rrfile + --overlay) under qemu-system-i386 rr=replay "
+                        "+ one-insn-per-tb -d cpu, emit the bounded system golden "
+                        "with dev_in/intr/dma_wr fields, and dump the initial "
+                        "physical-memory image (--image-out).")
+    p.add_argument("--rrfile", default=None,
+                   help="system-replay: the rr=record event log (replay.bin) "
+                        "produced by record.sh.")
+    p.add_argument("--overlay", default=None,
+                   help="system-replay: the qcow2 COW overlay over the read-only "
+                        "Win95 base disk (overlay.qcow2 from record.sh).")
+    p.add_argument("--combined-log", default=None,
+                   help="system-replay: path for the combined cpu+int+devio "
+                        "replay log (default a temp file; pass to keep it).")
+    p.add_argument("--ram-mb", type=int, default=64,
+                   help="system-replay: guest RAM in MiB (default 64, Win95-era).")
+    p.add_argument("--icount-shift", default="4",
+                   help="system-replay: -icount shift MUST match the recorded "
+                        "rrfile (record.sh default 4; shift=auto freezes replay).")
     # --- M7.1 Quake user-mode input-replay producer ------------------------
     p.add_argument("--syscall-proxy", "--user-quake", dest="syscall_proxy",
                    action="store_true",
@@ -1414,6 +1723,37 @@ def main(argv=None):
             sys.stderr.write("[gen_trace] syscall sites (n, nr, ret):\n")
             for (sn, snr, sret) in syscall_summary:
                 sys.stderr.write("    n=%d nr=%d ret=0x%08x\n" % (sn, snr, sret))
+        return 0
+    elif args.system_replay:
+        if not args.rrfile:
+            p.error("--system-replay requires --rrfile <replay.bin>")
+        if not os.path.isfile(args.rrfile):
+            p.error("rrfile not found: %s" % args.rrfile)
+        if not args.overlay:
+            p.error("--system-replay requires --overlay <overlay.qcow2>")
+        if not os.path.isfile(args.overlay):
+            p.error("overlay not found: %s" % args.overlay)
+        combined_log = args.combined_log
+        keep_log = combined_log is not None
+        if combined_log is None:
+            import tempfile
+            fd, combined_log = tempfile.mkstemp(prefix="win95-replay-",
+                                                suffix=".log")
+            os.close(fd)
+        n, n_dev_in, n_intr, n_dma_wr, log_path = generate_system_replay(
+            qemu=args.qemu, overlay=args.overlay, rrfile=args.rrfile,
+            out_path=args.out, image_path=args.image_out,
+            combined_log=combined_log, max_insn=args.max_insn, port=args.port,
+            ram_mb=args.ram_mb, cpu=args.cpu, icount_shift=args.icount_shift,
+            verbose=args.verbose, keep_log=keep_log)
+        msg = ("[gen_trace] wrote %d system-replay records to %s "
+               "(dev_in=%d intr=%d dma_wr=%d)"
+               % (n, args.out, n_dev_in, n_intr, n_dma_wr))
+        if args.image_out:
+            msg += "; initial phys-mem image -> %s" % args.image_out
+        if keep_log:
+            msg += "; combined log -> %s" % log_path
+        sys.stderr.write(msg + "\n")
         return 0
     elif args.system:
         if not args.image:

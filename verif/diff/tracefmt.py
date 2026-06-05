@@ -201,6 +201,79 @@ def dumps(obj: dict) -> str:
 #     "gs_base": "0x%08x" (hex32)           # OPTIONAL: resulting %gs TLS base
 #                                           # (set_thread_area user_desc.base_addr)
 #   }
+# --- M7.3 Win95 system input-replay fields (co-sim-bus lock-step) ------------
+# Three producer-only environment-input fields, carried on the record of the
+# instruction that consumed / was-interrupted-at the corresponding boundary. The
+# RTL CPU cannot compute any of them on its own; the co-sim-bus CONSUMER REPLAYS
+# them (returns the dev_in value for the matching in/MMIO read, raises the intr at
+# the same retire boundary QEMU did, applies the dma_wr bytes a bus master wrote
+# into guest memory). NONE is graded by compare.py (they are never in
+# func_compare_keys) — exactly like sys_call. A normal instruction's record has
+# none of these keys, so all existing goldens stay byte-for-byte identical. See
+# docs/m7-lockstep-spec.md "Trace-contract extension".
+#
+# Shapes (all on a func record, all optional):
+#   dev_in : [ {addr, val, size, region} , ... ]   # PIO in / MMIO read VALUE(s)
+#            the instruction consumed (>=1 when one insn does several reads, e.g.
+#            rep insw). addr/size/region are decimal/string ints; val is the raw
+#            value the device returned. The TB returns these for the matching
+#            in/MMIO read, in order.
+#   intr   : {vec, err?, soft?, cpl?, ip?, sp?}    # an interrupt/exception
+#            delivered AT this instruction's boundary. `vec` is the IDT vector
+#            (e.g. 0x8 = PIT IRQ0). `err` (errcode), `soft` (INT n vs async),
+#            `cpl`/`ip`/`sp` (the seg_helper boundary) are emitted when known
+#            (the authoritative seg_helper `v=` line provides them; an async
+#            hwint marker provides only `vec`). The TB raises it into the RTL IDT
+#            path at the same boundary.
+#   dma_wr : [ {addr, val, size, region} , ... ]   # device/DMA WRITE(s) into
+#            guest memory that the CPU did NOT compute (a bus master / device
+#            wrote them). The TB applies these to RTL memory at this boundary so
+#            the CPU sees the same memory a real device would have produced.
+#            (Pure CPU `out`/MMIO-writes are NOT here — those the RTL computes
+#            itself; this is reserved for writes whose SOURCE is a device.)
+def dev_in_field(reads) -> list:
+    """Build the `dev_in` field: a list of {addr,val,size,region} read records.
+
+    `reads`: iterable of dicts {addr:int, val:int, size:int, region:str}. Returns
+    a normalized list (ints + string region). Empty -> [] (caller should only
+    attach a non-empty list)."""
+    out = []
+    for r in (reads or []):
+        out.append({"addr": int(r["addr"]), "val": int(r["val"]),
+                    "size": int(r["size"]), "region": str(r.get("region", ""))})
+    return out
+
+
+def dma_wr_field(writes) -> list:
+    """Build the `dma_wr` field: a list of {addr,val,size,region} device-write
+    records (same shape as dev_in). See the block comment above."""
+    out = []
+    for w in (writes or []):
+        out.append({"addr": int(w["addr"]), "val": int(w["val"]),
+                    "size": int(w["size"]), "region": str(w.get("region", ""))})
+    return out
+
+
+def intr_field(vec: int, err=None, soft=None, cpl=None, ip=None, sp=None) -> dict:
+    """Build the `intr` field for a delivered interrupt/exception at a boundary.
+
+    vec: IDT vector (int). err/soft/cpl/ip/sp: emitted only when not None (the
+    authoritative seg_helper `v=` line supplies them; an async hwint marker
+    supplies only vec). ip/sp are kept as the "SEG:OFF" strings QEMU logs."""
+    d = {"vec": int(vec)}
+    if err is not None:
+        d["err"] = int(err)
+    if soft is not None:
+        d["soft"] = bool(soft)
+    if cpl is not None:
+        d["cpl"] = int(cpl)
+    if ip is not None:
+        d["ip"] = str(ip)
+    if sp is not None:
+        d["sp"] = str(sp)
+    return d
+
+
 def sys_call_field(nr: int, ret: int, writes=None, gs_base=None) -> dict:
     """Build the optional `sys_call` record field (see the block comment above).
 
@@ -231,7 +304,9 @@ def sys_call_field(nr: int, ret: int, writes=None, gs_base=None) -> dict:
 # --- record builders ---------------------------------------------------------
 def func_record(n, pc, eflags, gpr: dict, seg: dict,
                 bytes_=None, exc=None, x87: dict | None = None,
-                sysregs: dict | None = None, sys_call: dict | None = None) -> dict:
+                sysregs: dict | None = None, sys_call: dict | None = None,
+                dev_in: list | None = None, intr: dict | None = None,
+                dma_wr: list | None = None) -> dict:
     """Build a functional-mode retire record.
 
     gpr: {name: int} over GPR_KEYS;  seg: {name: int} over SEG_KEYS.
@@ -272,6 +347,16 @@ def func_record(n, pc, eflags, gpr: dict, seg: dict,
     # compare.py never grades it). Emitted only on `int 0x80` records.
     if sys_call is not None:
         r["sys_call"] = sys_call
+    # M7.3: producer-only Win95 input-replay environment fields (also NEVER in
+    # func_compare_keys — the consumer replays them, the comparator ignores them).
+    # Each is emitted only when non-empty/non-None, so a normal instruction's
+    # record is byte-for-byte identical to before.
+    if dev_in:
+        r["dev_in"] = dev_in
+    if intr is not None:
+        r["intr"] = intr
+    if dma_wr:
+        r["dma_wr"] = dma_wr
     return r
 
 
