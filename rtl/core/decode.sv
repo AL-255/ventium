@@ -113,6 +113,31 @@ module decode
             d.pairs_second=!(reg_f==3'b010 || reg_f==3'b011);
           end
         end
+        // ---- group1 r/m32, imm32 (81 /r id), reg form — fast-path batch 2 -----
+        // The imm32 sibling of the 83 arm above (imm = b2..b5, len 6). Reg form
+        // only (mod11, no memory). ALU op = reg_f; ADC/SBB=PU; CMP writes no reg.
+        8'h81: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd6; d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
+            d.use_imm=1'b1; d.imm={b5,b4,b3,b2}; d.dst=rm; d.src=rm;
+            d.wreg=(reg_f!=3'b111);
+            d.reads = _onehot(rm);
+            d.writes = d.wreg ? _onehot(rm) : 8'd0;
+            d.pairs_first=1'b1;
+            d.pairs_second=!(reg_f==3'b010 || reg_f==3'b011);
+          end
+        end
+        // ---- MOV r/m32, imm32 (C7 /0 id), reg form — fast-path batch 2 --------
+        // The ModRM sibling of B8+r. Only /0 (reg_f==0) is MOV (other /r are
+        // group11/UD — left to the slow FSM). Reg form only; no flags; imm=b2..b5.
+        8'hC7: begin
+          if (mod==2'b11 && reg_f==3'b000) begin
+            d.simple=1'b1; d.len=4'd6; d.alu_op=ALU_MOV;
+            d.use_imm=1'b1; d.imm={b5,b4,b3,b2}; d.dst=rm; d.wreg=1'b1;
+            d.writes=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
         // ---- INC/DEC r32 (40+r / 48+r) ---------------------------------------
         8'b0100_????: begin
           d.simple=1'b1; d.len=4'd1; d.wflags=1'b1; d.dst=b0[2:0]; d.src=b0[2:0];
