@@ -260,6 +260,16 @@
                       gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0];
                     end
                     flags_we=1'b0;
+                    // P5 DIVIDE OCCUPANCY (cycle-modeled, p5model occ DIV
+                    // 17/25/41 for r/m8/16/32). The native helper above produces
+                    // the bit-exact quotient/remainder; the modeled non-pipelined
+                    // occupancy is charged as a DEFERRED penalty (occ minus the 7-
+                    // clock measured slow-FSM cost of one reg-form divide) burned
+                    // before the next issue — reusing the pending_mem_pen mechanism
+                    // (the same way a D-cache miss penalty is folded into the next
+                    // insn's pipe_free_at). Holds the U pipe so a dependent EDX:EAX
+                    // consumer cannot issue until the divide latency elapses.
+                    pending_mem_pen <= (q_w==3'd4) ? 7'd34 : (q_w==3'd2) ? 7'd18 : 7'd10;
                   end
                   default: begin // IDIV /7
                     if (q_w==3'd1) begin
@@ -280,6 +290,10 @@
                       gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0];
                     end
                     flags_we=1'b0;
+                    // P5 IDIV OCCUPANCY (cycle-modeled, p5model occ IDIV 22/30/46
+                    // for r/m8/16/32 — a few clocks over DIV for the sign handling).
+                    // Same deferred-penalty mechanism as DIV above (occ - 7).
+                    pending_mem_pen <= (q_w==3'd4) ? 7'd39 : (q_w==3'd2) ? 7'd23 : 7'd15;
                   end
                 endcase
               end

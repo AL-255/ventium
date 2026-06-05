@@ -92,6 +92,17 @@ FPINDEP_CPI_MAX = 2.5    # and strictly below the latency (3) with headroom
 # while a no-cache-timing RTL (every access a hit) stays below.
 MISS_CPI_MIN = 1.30
 
+# Integer DIVIDE occupancy band (review-response, m5-div-spec.md). DIV/IDIV are
+# non-pipelined microcoded ops the p5model charges occ=17/25/41 (DIV r/m8/16/32)
+# and 22/30/46 (IDIV). The RTL charges the modeled occupancy as a deferred
+# penalty, so a divide-dominated kernel's CPI is far above the ~0.5-1.0 fast-path
+# CPI. DIV_CPI_MIN gates "the occupancy is actually present" (a 1-clock native
+# divide would land near ~3 incl. the loop, so 2.5 is a conservative floor that a
+# missing-occupancy RTL fails); the abs-cyc-vs-p5model check pins the exact value.
+DIV_CPI_MIN = 2.5
+# expected p5model per-op occupancy by kernel (for the informational detail).
+DIV_OCC = {"div8": 17, "div16": 25, "div32": 41, "idiv32": 46}
+
 # Default tightened abs-cyc tolerance (overridable via --abs-tol-pct from
 # run-m5.sh, which owns the documented M5_TOL_PCT choice).
 DEFAULT_ABS_TOL_PCT = 10.0
@@ -213,6 +224,28 @@ def compute(kernel, rtl_path, golden_path, abs_tol_pct=DEFAULT_ABS_TOL_PCT):
         extra = f"abscyc={d:+.2f}%"
         detail = (f"miss-driven CPI elevation (CPI {cpi:.3f} >= "
                   f"{MISS_CPI_MIN})? {elevated}; abs-cyc {d:+.2f}% vs golden "
+                  f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
+        return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
+
+    if short in ("div8", "div16", "div32", "idiv32"):
+        # TWO-part band (mirrors dmiss/imiss): (1) the divide occupancy is present
+        # (CPI elevated well above the fast-path baseline); (2) abs-cyc tracks the
+        # p5model golden within tolerance — the golden encodes occ*n_div, so this
+        # pins the exact modeled occupancy (17/25/41 DIV, 46 IDIV).
+        try:
+            gold = tracefmt.read_trace(golden_path)
+            gold_total = _total_cyc(gold)
+        except Exception as e:
+            return ("FAIL", cpi_s, pair_s, "abscyc=?",
+                    f"golden trace unreadable ({e}) — cannot check abs-cyc")
+        d = _abs_diff_pct(total, gold_total)
+        occ = DIV_OCC.get(short, 0)
+        elevated = cpi >= DIV_CPI_MIN
+        tracked = abs(d) <= abs_tol_pct
+        ok = elevated and tracked
+        extra = f"abscyc={d:+.2f}%"
+        detail = (f"divide-occupancy present (CPI {cpi:.3f} >= {DIV_CPI_MIN})? "
+                  f"{elevated}; abs-cyc {d:+.2f}% vs p5model (occ~{occ}) "
                   f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
         return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
 

@@ -1,11 +1,28 @@
-# M5 DIV/IDIV iterative-divider design spec (DEFERRED)
+# M5 DIV/IDIV iterative-divider design spec
 
-Status: **SPEC ONLY — not implemented in this change set.** This captures
-REVIEW_Jun5.md Limit #5, Actions 3/4/7/8 for the integer divide family. It
-perturbs the calibrated M4/M5 cycle bands and needs NEW microbenchmarks, so it
-is tracked as incremental work, not landed now.
+Status: **OCCUPANCY IMPLEMENTED + GATED (2026-06-05); `#DE` still deferred.**
+REVIEW_Jun5.md Limit #5, Actions 3/4/7/8 for the integer divide family.
 
-Owner doc; touches no `rtl/` and no Makefile.
+- **DONE — P5 divide OCCUPANCY (Actions 3/7/8).** DIV/IDIV now charge the modeled
+  p5model occupancy (17/25/41 DIV, 22/30/46 IDIV) as a deferred penalty
+  (`pending_mem_pen`, the same mechanism that folds a D-cache miss into the next
+  insn's `pipe_free_at`), holding the U pipe so a dependent EDX:EAX consumer
+  stalls the latency. `rtl/core/core_exec.svh` K_MULDIV DIV/IDIV arms set
+  `pending_mem_pen <= occ - 7` (7 = the measured slow-FSM cost of one reg-form
+  divide). NEW gated bands `mb_div8/mb_div16/mb_div32/mb_idiv32` (abs-cyc within
+  10% of the p5model golden + CPI-elevation) all PASS (+0.20 / −3.31 / +0.09 /
+  +0.08 %). The native `/`/`%` helper is retained for the bit-exact result
+  (Action 8 — architectural vs timing separated).
+- **DEFERRED — `#DE` divide-error (Action 4).** Divide-by-zero / quotient-overflow
+  → `#DE` (vector 0) is NOT yet raised (native `/` by 0 is X-prone; an
+  overflowing divide wraps instead of faulting — confirmed live: a byte divide
+  whose quotient exceeds 0xFF makes QEMU `#DE` while the RTL continues). §3.3
+  below specifies it. It is a *behavior* change (changes QEMU-observable
+  div-by-zero/overflow output), gated by new `tx_de_*` functional tests, so it is
+  the next increment.
+
+Owner doc; the occupancy edits are in `rtl/core/core_exec.svh` + the bands in
+`verif/m5_metrics.py` + `verif/tests/mb_div*`.
 
 ---
 

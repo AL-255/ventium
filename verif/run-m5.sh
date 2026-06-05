@@ -103,6 +103,7 @@ M4_INT_KERNELS="mb_depadd mb_indepadd mb_agi mb_brloop mb_brrandom"
 # CPI to the fpindep relation check (M5_FADDCHAIN_CPI env).
 M5_FP_KERNELS="mb_faddchain mb_fpindep"
 M5_CACHE_KERNELS="mb_dmiss mb_imiss"
+M5_DIV_KERNELS="mb_div8 mb_div16 mb_div32 mb_idiv32"
 # INFO kernels: reported, never gate.
 INFO_KERNELS="mb_agiloop"
 
@@ -382,6 +383,8 @@ for k in $M4_INT_KERNELS; do run_kernel "$k" INT 1; done
 # (c) New M5 FP + cache bands. faddchain BEFORE fpindep (relation check).
 for k in $M5_FP_KERNELS;    do run_kernel "$k" FP    1; done
 for k in $M5_CACHE_KERNELS; do run_kernel "$k" CACHE 1; done
+# (d) New M5 integer-DIVIDE occupancy bands (review-response, m5-div-spec.md).
+for k in $M5_DIV_KERNELS;   do run_kernel "$k" DIV   1; done
 # INFO kernels.
 for k in $INFO_KERNELS;     do run_kernel "$k" INFO  0; done
 
