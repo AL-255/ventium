@@ -308,19 +308,21 @@ module core
   // whether the page's A/D bits have already been set in memory (so a repeat use
   // does not re-write them, matching qemu-system which sets A/D once per state).
   localparam int TLB_ENTRIES = 16;          // direct-mapped; index = lin[15:12]
-  // I-TLB (instruction fetches)
-  logic                   itlb_val   [TLB_ENTRIES];
-  logic [19:0]            itlb_vpn   [TLB_ENTRIES];   // linear page number lin[31:12]
-  logic [19:0]            itlb_pfn   [TLB_ENTRIES];   // physical frame phys[31:12]
-  logic [2:0]             itlb_perm  [TLB_ENTRIES];   // {US, RW, P} effective
-  logic                   itlb_big   [TLB_ENTRIES];   // 1 = 4 MiB page
-  // D-TLB (data accesses) — separately tracks the Dirty bit so a write marks D.
-  logic                   dtlb_val   [TLB_ENTRIES];
-  logic [19:0]            dtlb_vpn   [TLB_ENTRIES];
-  logic [19:0]            dtlb_pfn   [TLB_ENTRIES];
-  logic [2:0]             dtlb_perm  [TLB_ENTRIES];
-  logic                   dtlb_big   [TLB_ENTRIES];
-  logic                   dtlb_dirty [TLB_ENTRIES];   // page already marked D in mem
+  // The TLB ARRAYS + lookup + fill-commit + flush now live in the parameterized
+  // `tlb` module (rtl/mem/tlb.sv), instantiated TWICE below: u_itlb (IS_D=0,
+  // fetch) and u_dtlb (IS_D=1, data). The whole S_WALK page-walk micro-sequence
+  // STAYS in this spine and drives the fill ports. These nets carry the two
+  // instances' combinational lookup outputs (read by xlate_miss / perm_fault /
+  // mem_xlate) and the spine-driven fill/flush inputs. See the instantiation +
+  // fill driver near the bus-translate block below.
+  // The lookup is at cur_lin; mem_xlate reuses it because cur_lin == the bus
+  // mem_addr in every translatable state (proven verbatim across the FSM arms).
+  // I-TLB (instruction fetches) lookup outputs.
+  logic        itlb_lk_hit;   logic [31:0] itlb_lk_phys;
+  logic [2:0]  itlb_lk_perm;  logic        itlb_lk_dirty;
+  // D-TLB (data accesses) lookup outputs — Dirty tracked so a write marks D.
+  logic        dtlb_lk_hit;   logic [31:0] dtlb_lk_phys;
+  logic [2:0]  dtlb_lk_perm;  logic        dtlb_lk_dirty;
 
   // Page-walk micro-sequence registers. The walk is a small FSM living inside
   // S_WALK: it reads the PDE, then the PTE (4 KiB) — writing A/D bits back to the
@@ -2714,13 +2716,9 @@ module core
         ic_val[s][0]<=1'b0; ic_val[s][1]<=1'b0;
         ic_tag[s][0]<=20'd0; ic_tag[s][1]<=20'd0;
       end
-      // M2S.2 paging: TLBs empty + walk idle out of reset.
-      for (int t=0;t<TLB_ENTRIES;t++) begin
-        itlb_val[t]<=1'b0; itlb_vpn[t]<=20'd0; itlb_pfn[t]<=20'd0;
-        itlb_perm[t]<=3'd0; itlb_big[t]<=1'b0;
-        dtlb_val[t]<=1'b0; dtlb_vpn[t]<=20'd0; dtlb_pfn[t]<=20'd0;
-        dtlb_perm[t]<=3'd0; dtlb_big[t]<=1'b0; dtlb_dirty[t]<=1'b0;
-      end
+      // M2S.2 paging: the TLB arrays are reset inside the tlb module's own rst_n
+      // arm (rtl/mem/tlb.sv) — u_itlb / u_dtlb. Only the page-walk FSM regs (which
+      // stay in the spine) are reset here.
       walk_ret_state<=S_PIPE; walk_lin<=32'd0; walk_for_d<=1'b0;
       walk_is_write<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
       walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
@@ -3406,9 +3404,9 @@ module core
               3'd2: creg2<=gpr[q_src_reg];
               3'd3: begin
                 creg3<=gpr[q_src_reg];
-                for (int t=0;t<TLB_ENTRIES;t++) begin
-                  itlb_val[t]<=1'b0; dtlb_val[t]<=1'b0;
-                end
+                // TLB flush (clear val bits only) now lands in u_itlb/u_dtlb via
+                // tlb_flush (driven combinationally from this exact MOV CR3
+                // condition; see the flush driver at the TLB instantiation).
               end
               default: creg4<=gpr[q_src_reg];
             endcase
@@ -4910,7 +4908,8 @@ module core
                   if (!pde[5] || (walk_is_write && !pde[6])) begin
                     walk_step <= 3'd1;   // writes PDE with A(+D for big-page write)
                   end else begin
-                    tlb_fill_big(walk_for_d, walk_lin, pde);
+                    // 4 MiB fill committed combinationally into u_itlb/u_dtlb this
+                    // clock (tlb_fill driver below, gated walk_for_d==IS_D).
                     state <= walk_ret_state;
                   end
                 end else begin
@@ -4928,9 +4927,8 @@ module core
                 walk_pde <= walk_pde | 32'h0000_0020
                             | ((is_big && walk_is_write) ? 32'h0000_0040 : 32'd0);
                 if (is_big) begin
-                  tlb_fill_big(walk_for_d, walk_lin,
-                               walk_pde | 32'h0000_0020 |
-                               (walk_is_write ? 32'h0000_0040 : 32'd0));
+                  // 4 MiB fill (PDE-writeback path) committed combinationally into
+                  // u_itlb/u_dtlb this clock (tlb_fill driver below).
                   state <= walk_ret_state;
                 end else begin
                   walk_step <= 3'd2;   // now read the PTE
@@ -4953,16 +4951,16 @@ module core
                 end else if (!pte[5] || (walk_is_write && !pte[6])) begin
                   walk_step <= 3'd3;   // set A (+D on write) in the PTE
                 end else begin
-                  tlb_fill_4k(walk_for_d, walk_lin, walk_pde, pte, walk_is_write);
+                  // 4 KiB fill committed combinationally into u_itlb/u_dtlb this
+                  // clock (tlb_fill driver below, gated walk_for_d==IS_D).
                   state <= walk_ret_state;
                 end
               end
               // -------- step 3: PTE writeback (A + D) then fill --------
               default: begin
-                logic [31:0] pte_new;
-                pte_new = walk_pte | 32'h0000_0020
-                          | (walk_is_write ? 32'h0000_0040 : 32'd0);
-                tlb_fill_4k(walk_for_d, walk_lin, walk_pde, pte_new, walk_is_write);
+                // 4 KiB fill (PTE-writeback path; pte_new = walk_pte | A | D)
+                // committed combinationally into u_itlb/u_dtlb this clock (the
+                // tlb_fill driver below recomputes pte_new identically).
                 state <= walk_ret_state;
               end
             endcase
@@ -5095,98 +5093,139 @@ module core
   // PM-before-PG, ALL of user mode) translation is a pass-through (linear ==
   // physical) so M2S.1 + user mode stay byte-identical.
   // ===========================================================================
-  // Direct-mapped TLB index from a linear address (lin[15:12]).
-  function automatic logic [3:0] tlb_idx(input logic [31:0] lin);
-    tlb_idx = lin[15:12];
-  endfunction
-  // I-TLB lookup: hit iff valid + vpn matches.
-  function automatic logic itlb_hit(input logic [31:0] lin);
-    logic [3:0] ix; begin
-      ix = tlb_idx(lin);
-      itlb_hit = itlb_val[ix] && (itlb_vpn[ix] == lin[31:12]);
-    end
-  endfunction
-  // I-TLB physical address: 4 MiB page uses lin[21:0] offset, else 4 KiB lin[11:0].
-  function automatic logic [31:0] itlb_phys(input logic [31:0] lin);
-    logic [3:0] ix; begin
-      ix = tlb_idx(lin);
-      itlb_phys = itlb_big[ix] ? {itlb_pfn[ix][19:10], lin[21:0]}
-                               : {itlb_pfn[ix],          lin[11:0]};
-    end
-  endfunction
-  function automatic logic dtlb_hit(input logic [31:0] lin);
-    logic [3:0] ix; begin
-      ix = tlb_idx(lin);
-      dtlb_hit = dtlb_val[ix] && (dtlb_vpn[ix] == lin[31:12]);
-    end
-  endfunction
-  function automatic logic [31:0] dtlb_phys(input logic [31:0] lin);
-    logic [3:0] ix; begin
-      ix = tlb_idx(lin);
-      dtlb_phys = dtlb_big[ix] ? {dtlb_pfn[ix][19:10], lin[21:0]}
-                               : {dtlb_pfn[ix],          lin[11:0]};
-    end
-  endfunction
+  // The TLB ARRAYS + lookup + fill-commit + flush were extracted into the `tlb`
+  // module (rtl/mem/tlb.sv), instantiated as u_itlb (IS_D=0) and u_dtlb (IS_D=1)
+  // below. The lk_* ports do the per-access lookup at `cur_lin` (consumed by
+  // xlate_miss / perm_fault); the xl_* ports do the bus post-translate lookup at
+  // `mem_addr` (consumed by mem_xlate). The whole S_WALK page-walk micro-sequence
+  // STAYS here in the spine and drives the fill ports (see tlb_fill_* drivers and
+  // the instantiation near the bus-translate block).
 
-  // Translate a linear address for the CURRENT bus access. `is_d`=1 selects the
-  // D-TLB (data), else the I-TLB (fetch). Returns the physical address on a hit;
-  // on a miss (or paging off) returns the linear address (the FSM never USES a
-  // miss result — it diverts to S_WALK first). `miss` is set when paging_on AND
-  // the relevant TLB misses.
+  // Translate a linear address for the CURRENT bus access (the bus post-stage).
+  // `is_d`=1 selects the D-TLB (data), else the I-TLB (fetch). Returns the
+  // physical address on a hit; on a miss (or paging off) returns the linear
+  // address `lin` (the FSM never USES a miss result — it diverts to S_WALK
+  // first). The hit/phys come from each instance's lk_* port. The post-translate
+  // is only applied to the translatable states where cur_lin == this `lin`
+  // (== mem_addr), so the lk lookup (driven by cur_lin) returns the right entry;
+  // on miss/paging-off the actual `lin` (mem_addr) is passed through unchanged.
   function automatic logic [31:0] mem_xlate(input logic [31:0] lin, input logic is_d);
     begin
-      if (!paging_on)                 mem_xlate = lin;
-      else if (is_d  &&  dtlb_hit(lin)) mem_xlate = dtlb_phys(lin);
-      else if (!is_d &&  itlb_hit(lin)) mem_xlate = itlb_phys(lin);
+      if (!paging_on)                  mem_xlate = lin;
+      else if (is_d  &&  dtlb_lk_hit)   mem_xlate = dtlb_lk_phys;
+      else if (!is_d &&  itlb_lk_hit)   mem_xlate = itlb_lk_phys;
       else                              mem_xlate = lin;   // miss: value unused
     end
   endfunction
 
-  // Fill a TLB entry for a completed walk. The effective permission is the AND of
-  // the PDE's and PTE's {P, RW, US} (bits 0/1/2): a page is writable only if BOTH
-  // levels are writable, user only if BOTH are user — IA-32 §4.x. is_d selects
-  // the D-TLB (data), else the I-TLB (fetch). is_w (data writes) records that the
-  // page is already Dirty so a later write does not redundantly re-walk to set D.
-  task automatic tlb_fill_4k(input logic is_d, input logic [31:0] lin,
-                             input logic [31:0] pde, input logic [31:0] pte,
-                             input logic is_w);
-    logic [3:0] ix; logic [2:0] perm;
-    begin
-      ix   = lin[15:12];
-      // effective {US, RW, P} = AND of the two levels.
-      perm = {pde[2]&pte[2], pde[1]&pte[1], pde[0]&pte[0]};
-      if (is_d) begin
-        dtlb_val[ix]   <= 1'b1;          dtlb_vpn[ix]   <= lin[31:12];
-        dtlb_pfn[ix]   <= pte[31:12];    dtlb_perm[ix]  <= perm;
-        dtlb_big[ix]   <= 1'b0;          dtlb_dirty[ix] <= is_w;
-      end else begin
-        itlb_val[ix]   <= 1'b1;          itlb_vpn[ix]   <= lin[31:12];
-        itlb_pfn[ix]   <= pte[31:12];    itlb_perm[ix]  <= perm;
-        itlb_big[ix]   <= 1'b0;
-      end
+  // ===========================================================================
+  // TLB fill-commit driver (combinational): mirrors the four S_WALK fill sites
+  // EXACTLY and produces the single fill transaction for THIS clock. The commit
+  // lands on the SAME posedge the original inline tlb_fill_*() NBA write did (the
+  // clock where S_WALK reaches the fill branch under `mem_ack`), so the read-
+  // before-write timing (lookup off the PRE-fill arrays this clock) is preserved.
+  //   step0 big, A/D already set     -> fill_big(pde=mem_rdata)
+  //   step1 big (PDE writeback)      -> fill_big(walk_pde | A | (write?D))
+  //   step2 4 KiB, A/D already set   -> fill_4k(walk_pde, pte=mem_rdata, is_w)
+  //   step3 4 KiB (PTE writeback)    -> fill_4k(walk_pde, pte_new=walk_pte|A|D, is_w)
+  // Operand computation (perm = AND of PDE&PTE, 4 MiB pfn = {pde[31:22],10'd0})
+  // is done here, replacing the old tlb_fill_4k/tlb_fill_big task bodies. The
+  // fill is routed to ONE instance by walk_for_d (u_itlb when 0, u_dtlb when 1).
+  logic        tlb_fill_en;
+  logic        tlb_fill_is_d;
+  logic [31:0] tlb_fill_lin;
+  logic [19:0] tlb_fill_pfn;
+  logic [2:0]  tlb_fill_perm;
+  logic        tlb_fill_big;
+  logic        tlb_fill_dirty;
+  always_comb begin
+    logic [31:0] pde, pte, pte_new;
+    logic        is_big;
+    tlb_fill_en    = 1'b0;
+    tlb_fill_is_d  = walk_for_d;
+    tlb_fill_lin   = walk_lin;
+    tlb_fill_pfn   = 20'd0;
+    tlb_fill_perm  = 3'd0;
+    tlb_fill_big   = 1'b0;
+    tlb_fill_dirty = 1'b0;
+    if (state==S_WALK && mem_ack) begin
+      unique case (walk_step)
+        3'd0: begin
+          pde    = mem_rdata;
+          is_big = cr4_pse && pde[7];
+          // a present 4 MiB page with A(+D for write) already set fills directly.
+          if (pde[0] && is_big && !(!pde[5] || (walk_is_write && !pde[6]))) begin
+            tlb_fill_en   = 1'b1;
+            tlb_fill_big  = 1'b1;
+            tlb_fill_pfn  = {pde[31:22], 10'd0};
+            tlb_fill_perm = {pde[2], pde[1], pde[0]};
+            tlb_fill_dirty= pde[6];
+          end
+        end
+        3'd1: begin
+          is_big = cr4_pse && walk_pde[7];
+          if (is_big) begin
+            pde = walk_pde | 32'h0000_0020 | (walk_is_write ? 32'h0000_0040 : 32'd0);
+            tlb_fill_en   = 1'b1;
+            tlb_fill_big  = 1'b1;
+            tlb_fill_pfn  = {pde[31:22], 10'd0};
+            tlb_fill_perm = {pde[2], pde[1], pde[0]};
+            tlb_fill_dirty= pde[6];
+          end
+        end
+        3'd2: begin
+          pte = mem_rdata;
+          // present 4 KiB page with A(+D for write) already set fills directly.
+          if (pte[0] && !(!pte[5] || (walk_is_write && !pte[6]))) begin
+            tlb_fill_en   = 1'b1;
+            tlb_fill_big  = 1'b0;
+            tlb_fill_pfn  = pte[31:12];
+            tlb_fill_perm = {walk_pde[2]&pte[2], walk_pde[1]&pte[1], walk_pde[0]&pte[0]};
+            tlb_fill_dirty= walk_is_write;
+          end
+        end
+        default: begin   // step 3: PTE writeback then fill
+          pte_new = walk_pte | 32'h0000_0020 | (walk_is_write ? 32'h0000_0040 : 32'd0);
+          tlb_fill_en   = 1'b1;
+          tlb_fill_big  = 1'b0;
+          tlb_fill_pfn  = pte_new[31:12];
+          tlb_fill_perm = {walk_pde[2]&pte_new[2], walk_pde[1]&pte_new[1],
+                           walk_pde[0]&pte_new[0]};
+          tlb_fill_dirty= walk_is_write;
+        end
+      endcase
     end
-  endtask
-  // 4 MiB large page: the PDE is the leaf; frame = pde[31:22] (4 MiB aligned), the
-  // pfn stored is pde[31:12] with the low 10 bits forced 0 so itlb_phys/dtlb_phys
-  // overlay lin[21:0] for the offset. Permission is the PDE's own {US,RW,P}.
-  task automatic tlb_fill_big(input logic is_d, input logic [31:0] lin,
-                              input logic [31:0] pde);
-    logic [3:0] ix; logic [2:0] perm; logic [19:0] pfn;
-    begin
-      ix   = lin[15:12];
-      perm = {pde[2], pde[1], pde[0]};
-      pfn  = {pde[31:22], 10'd0};
-      if (is_d) begin
-        dtlb_val[ix]   <= 1'b1;          dtlb_vpn[ix]   <= lin[31:12];
-        dtlb_pfn[ix]   <= pfn;           dtlb_perm[ix]  <= perm;
-        dtlb_big[ix]   <= 1'b1;          dtlb_dirty[ix] <= pde[6];
-      end else begin
-        itlb_val[ix]   <= 1'b1;          itlb_vpn[ix]   <= lin[31:12];
-        itlb_pfn[ix]   <= pfn;           itlb_perm[ix]  <= perm;
-        itlb_big[ix]   <= 1'b1;
-      end
-    end
-  endtask
+  end
+
+  // TLB CR3 flush (combinational pulse): clears ONLY the val bits in BOTH TLBs.
+  // Asserted on the exact clock the S_EXEC MOV CR3 commits (q_sysop SYS_MOVCR_TO,
+  // q_sys_creg==3, in S_EXEC). q_sysop is mutually exclusive with the flag ops
+  // (CLD/STD/CLC/.../STI), so the original if/else-if guard reduces to this.
+  logic tlb_flush;
+  assign tlb_flush = (state==S_EXEC) && (q_sysop==SYS_MOVCR_TO) && (q_sys_creg==3'd3);
+
+  // ---- Split I/D TLB instances. lk_* = combinational lookup at cur_lin (consumed
+  // by xlate_miss / perm_fault AND, via mem_xlate, the bus post-translate, since
+  // cur_lin == mem_addr in every translatable state). The fill is routed to the
+  // matching side by walk_for_d (tlb_fill_is_d); flush hits both on a CR3 write.
+  tlb #(.IS_D(1'b0), .TLB_ENTRIES(TLB_ENTRIES)) u_itlb (
+      .clk(clk), .rst_n(rst_n),
+      .lk_lin(cur_lin),  .lk_hit(itlb_lk_hit), .lk_phys(itlb_lk_phys),
+      .lk_perm(itlb_lk_perm), .lk_dirty(itlb_lk_dirty),
+      .fill_en(tlb_fill_en && (tlb_fill_is_d==1'b0)),
+      .fill_lin(tlb_fill_lin), .fill_pfn(tlb_fill_pfn), .fill_perm(tlb_fill_perm),
+      .fill_big(tlb_fill_big), .fill_dirty(tlb_fill_dirty),
+      .flush_en(tlb_flush)
+  );
+  tlb #(.IS_D(1'b1), .TLB_ENTRIES(TLB_ENTRIES)) u_dtlb (
+      .clk(clk), .rst_n(rst_n),
+      .lk_lin(cur_lin),  .lk_hit(dtlb_lk_hit), .lk_phys(dtlb_lk_phys),
+      .lk_perm(dtlb_lk_perm), .lk_dirty(dtlb_lk_dirty),
+      .fill_en(tlb_fill_en && (tlb_fill_is_d==1'b1)),
+      .fill_lin(tlb_fill_lin), .fill_pfn(tlb_fill_pfn), .fill_perm(tlb_fill_perm),
+      .fill_big(tlb_fill_big), .fill_dirty(tlb_fill_dirty),
+      .flush_en(tlb_flush)
+  );
 
   // M2S.3 — begin IDT delivery of a HARDWARE fault (#GP/#NP/#SS/#PF/#UD raised
   // from a fault DECISION that prior stages only computed). A fault always
@@ -5472,9 +5511,9 @@ module core
     // first write must re-walk to set D (matching qemu's set-D-on-first-write).
     xlate_miss = paging_on && translatable &&
                  (cur_is_d
-                    ? (!dtlb_hit(cur_lin) ||
-                       (cur_is_w && !dtlb_dirty[tlb_idx(cur_lin)]))
-                    : !itlb_hit(cur_lin));
+                    ? (!dtlb_lk_hit ||
+                       (cur_is_w && !dtlb_lk_dirty))
+                    : !itlb_lk_hit);
   end
 
   // ===========================================================================
@@ -5557,11 +5596,11 @@ module core
   logic perm_fault;
   always_comb begin
     logic [2:0] p; logic usr, wp;
-    p   = dtlb_perm[tlb_idx(cur_lin)];   // {US, RW, P}
+    p   = dtlb_lk_perm;   // {US, RW, P} (D-TLB lookup at cur_lin)
     usr = (cpl_r == 2'd3);
     wp  = creg0[16];
     perm_fault = 1'b0;
-    if (paging_on && cur_is_d && dtlb_hit(cur_lin)) begin
+    if (paging_on && cur_is_d && dtlb_lk_hit) begin
       // user access to a supervisor page
       if (usr && !p[2]) perm_fault = 1'b1;
       // write to a read-only page (user writer always; supervisor only if WP)
@@ -5805,11 +5844,12 @@ module core
                    //                 from the data path); see perm_fault above.
                    //   pf_errcode  : the {US,RW,P} error code latch (the delivered
                    //                 #PF builds its error code inline in start_fault).
-                   //   itlb_perm   : the fetch-side effective {US,RW,P} (home for a
-                   //                 future fetch-permission / NX check).
+                   //   itlb_lk_perm: the fetch-side effective {US,RW,P} (home for a
+                   //                 future fetch-permission / NX check; the I-TLB
+                   //                 lookup port's perm output, now in u_itlb).
                    // Sunk so the clean -Wall lint stays quiet.
                    perm_fault, walk_pf, &pf_errcode,
-                   itlb_perm[0][0],
+                   itlb_lk_perm[0], itlb_lk_dirty,
                    // RESERVED system state, loaded this stage, gated-diffed later:
                    // GDT limit (descriptor-table bounds) + the IDTR (interrupts =
                    // M2S.3). Retained as the home for those checks.

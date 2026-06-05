@@ -246,8 +246,11 @@ module ventium_top
   // R2: the L1 D-cache TIMING model (dcache_timing) is now instantiated INSIDE
   // the core (rtl/core/core.sv), wired to the load/store SM. The old empty M0
   // `dcache` placeholder stub here is gone (the module is now dcache_timing).
+  // R2: the split I/D TLBs (the `tlb` module) are likewise now instantiated
+  // INSIDE the core as u_itlb (IS_D=0) and u_dtlb (IS_D=1), wired to the page-walk
+  // FSM + the address-translate path. The old empty M0 `tlb` placeholder stub
+  // here is gone (the arrays/lookup/fill/flush live in rtl/mem/tlb.sv now).
   icache      u_icache  (.clk(clk), .rst_n(rst_n));
-  tlb         u_tlb     (.clk(clk), .rst_n(rst_n));
 
   // §6.10 Bus interface unit ---------------------------------------------------
   biu         u_biu     (.clk(clk), .rst_n(rst_n));
