@@ -311,7 +311,12 @@ module ventium_top
   regfile     u_regfile (.clk(clk), .rst_n(rst_n));
 
   // §6.6 x87 FPU ---------------------------------------------------------------
-  fpu_top     u_fpu     (.clk(clk), .rst_n(rst_n));
+  // R2: `fpu_top` is now the REAL x87 architectural STATE FILE (fpr[8]/ftop/
+  // fctrl/fstat/fptag + reset + the st(i) read addressing + a write-port
+  // interface), instantiated INSIDE the core as u_fpu_state (rtl/core/core.sv),
+  // wired to the two runtime-exclusive FP writer arms (the M5 cycle-mode fast
+  // path + the slow S_FEXEC/S_FSTORE FSM). The old empty M0 `fpu_top` placeholder
+  // stub here is gone (it was a no-op; the state lives in the core now).
 
   // §6.1/§6.5 Memory subsystem -------------------------------------------------
   // R2: the L1 D-cache TIMING model (dcache_timing) is now instantiated INSIDE

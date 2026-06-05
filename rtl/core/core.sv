@@ -439,19 +439,26 @@ module core
   // ===========================================================================
   // x87 FPU architectural state (M3)
   // ===========================================================================
-  // Physical register file (8 x 80-bit) + TOP. st(i) = fpr[(ftop+i)&7]. Push
-  // decrements TOP then writes; pop increments TOP (leaving the stale value, so
-  // the trace's "empty" st-slots keep their last contents — matches QEMU).
-  logic [79:0] fpr [8];
-  logic [2:0]  ftop;
-  logic [15:0] fctrl;            // control word; reset 0x037f
-  // fstat holds the condition codes (C0/C1/C2/C3) + exception flags, with the
-  // TOP field (bits[13:11]) kept ZERO internally; it is overlaid from `ftop` on
-  // read (mirrors QEMU helper_fnstsw). fstat[15:11] are never written here.
-  logic [15:0] fstat;
-  // Architectural tag: 1=empty, 0=valid (drives FXAM's empty-detect + the FXAM
-  // C1 sign bit). NOT reported in the trace (QEMU's gdbstub abridges ftag to 0).
-  logic [7:0]  fptag;           // bit i = tag for fpr[i] (1=empty)
+  // R2: the x87 architectural STATE FILE (the 8x80-bit physical stack fpr[8],
+  // TOP, control/status/tag words, the synchronous reset, and the ftop-relative
+  // st(i) read addressing) is now OWNED by the fpu_top module (rtl/fpu/fpu_top.sv),
+  // instantiated as u_fpu_state below. The spine keeps the DATAPATH (the
+  // fpu_x87_pkg value computations), the M5 FP scoreboard, the S_FEXEC/S_FSTORE
+  // FSM, and FNSTSW->gpr[EAX]; it computes each value and drives it onto the
+  // module's write ports (the fp_we_* combinational driver near the u_fpu_state
+  // instance), and reads the registered state back through these combinational
+  // wires (st(i) = fp_st[i], ftop/fctrl/fstat/fptag = the module's *_o outputs).
+  // st(i) = fpr[(ftop+i)&7]. Push decrements TOP then writes; pop increments TOP
+  // (leaving the stale value, so the trace's "empty" st-slots keep their last
+  // contents — matches QEMU). fstat keeps the TOP field (bits[13:11]) ZERO
+  // internally (overlaid from ftop on read, mirrors helper_fnstsw); fptag bit i =
+  // tag for fpr[i] (1=empty) — drives FXAM, NOT reported in the trace.
+  logic [79:0] fp_st [8];        // fp_st[i] = ST(i) = fpr[ftop+i] (module read port)
+  logic [79:0] fp_st0_phys;      // = fpr[ftop] (physical ST0, for fstore_val)
+  logic [2:0]  ftop;             // = u_fpu_state.ftop_o
+  logic [15:0] fctrl;            // = u_fpu_state.fctrl_o (control word; reset 0x037f)
+  logic [15:0] fstat;            // = u_fpu_state.fstat_o (RAW; TOP not overlaid)
+  logic [7:0]  fptag;            // = u_fpu_state.fptag_o (bit i = tag for fpr[i])
   logic        x87_touched_r;   // retired insn touched the FPU (drives DPI call)
 
   // ===========================================================================
@@ -2572,9 +2579,11 @@ module core
   // ===========================================================================
   // x87 combinational execution (M3)
   // ===========================================================================
-  // st(i) read helper on the physical regfile (st0 = fpr[ftop]).
+  // st(i) read helper on the physical regfile (st0 = fpr[ftop]). The physical
+  // index fri(i)=ftop+i is unchanged; fst(i) now reads the fpu_top module's
+  // TOP-relative read ports (fp_st[i] = fpr[ftop+i]), zero added latency.
   function automatic logic [2:0] fri(input logic [2:0] i); return ftop + i; endfunction
-  function automatic logic [79:0] fst(input logic [2:0] i); return fpr[ftop + i]; endfunction
+  function automatic logic [79:0] fst(input logic [2:0] i); return fp_st[i]; endfunction
 
   // Compare two floatx80, return {C3,C2,C0} per QEMU fcom_ccval. The C1 bit is
   // left to the caller (compares clear only C3/C2/C0). less->001, equal->100,
@@ -2792,14 +2801,14 @@ module core
   assign retire_fctrl = fctrl;
   assign retire_fstat = (fstat & ~16'h3800) | ({13'd0, ftop} << 11);
   assign retire_ftag  = 16'h0000;       // QEMU gdbstub abridges ftag to 0
-  assign retire_st0 = fpr[ftop + 3'd0];
-  assign retire_st1 = fpr[ftop + 3'd1];
-  assign retire_st2 = fpr[ftop + 3'd2];
-  assign retire_st3 = fpr[ftop + 3'd3];
-  assign retire_st4 = fpr[ftop + 3'd4];
-  assign retire_st5 = fpr[ftop + 3'd5];
-  assign retire_st6 = fpr[ftop + 3'd6];
-  assign retire_st7 = fpr[ftop + 3'd7];
+  assign retire_st0 = fp_st[0];
+  assign retire_st1 = fp_st[1];
+  assign retire_st2 = fp_st[2];
+  assign retire_st3 = fp_st[3];
+  assign retire_st4 = fp_st[4];
+  assign retire_st5 = fp_st[5];
+  assign retire_st6 = fp_st[6];
+  assign retire_st7 = fp_st[7];
 
   // ===========================================================================
   // M4/M5 fast-path decoder — extracted to the `decode` leaf module
@@ -3186,13 +3195,14 @@ module core
         cs_d<=1'b1;   // user mode: flat 32-bit (def16 is gated off by !sys_mode)
       end
       fetch_word<=3'd0; retire_valid<=1'b0; step<=4'd0;
-      // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty).
-      ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
+      // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty) now
+      // lives in u_fpu_state's own rst_n arm (rtl/fpu/fpu_top.sv) — ftop/fctrl/
+      // fstat/fptag/fpr[] are reset there. Only the spine-side touch flag here.
       x87_touched_r<=1'b0; f_step<=4'd0;
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
       gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
       fold_pending_r<=1'b0; fold_pc_r<=32'd0;   // M7.1: no folded syscall in flight
-      for (int fi=0; fi<8; fi++) fpr[fi]<=80'd0;
+      // (fpr[] cleared in u_fpu_state's rst_n arm.)
       // M4 pipeline state.
       pf_fill_addr<=32'd0; pf_word<=3'd0; pf_fill_way<=1'b0;
       agi_wr0<=9'h100; agi_wr1<=9'h100; mispred_bubbles<=3'd0;
@@ -3387,7 +3397,6 @@ module core
             //     pipe_free_at=issue+occ; fdiv occ 39, fmul occ 2). This is what
             //     makes a single fdiv delay the integer work behind it.
             logic [31:0] dep_ready;
-            logic [82:0] fp_arf;
             // RAW on the x87 top-of-stack: a consumer/rmw (fp_role>=2) must wait
             // until the most recent FP producer's result is ready (fp_ready_cyc).
             dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
@@ -3408,27 +3417,13 @@ module core
               agi_wr0<=9'h100; agi_wr1<=9'h100;
             end else begin
               // ---- issue + commit the FP op (retires at issue+occ) -----------
-              fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10], errata_en[ERR_FDIV]);
-              unique case (u_d.fp_kind)
-                FK_FLDC: begin
-                  ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
-                  fpr[ftop-3'd1]<=fconst(u_d.fp_sti);
-                end
-                FK_FLDSTI: begin
-                  ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
-                  fpr[ftop-3'd1]<=fst(u_d.fp_sti);
-                end
-                FK_ARITH: begin
-                  fpr[ftop]<=fp_arf[79:0]; fstat<=f_arith_fstat(fstat, fp_arf);
-                end
-                FK_FSTP0: begin
-                  fptag[ftop]<=1'b1; ftop<=ftop+3'd1;
-                end
-                FK_FXCH: begin
-                  fpr[ftop]<=fst(u_d.fp_sti); fpr[fri(u_d.fp_sti)]<=fst(3'd0);
-                end
-                default: ;
-              endcase
+              // R2: the architectural state update (the FK_* fpr/ftop/fstat/fptag
+              // writes that used to live here) is now driven onto u_fpu_state's
+              // write ports by the fp_we_* combinational driver near the module
+              // instance — it re-derives THIS exact issue+commit guard (mirroring
+              // the icache ic_fp_commit driver) and computes the same values via
+              // the same fpu_x87_pkg calls (fconst/fst/f_eval/f_arith_fstat). Only
+              // the spine-side scoreboard + retire/EIP stay here.
               // scoreboard: a producer/rmw publishes its result at ISSUE+lat. For
               // an occ-burned op the issue cycle was recorded above; for an occ==1
               // op issue==commit clock (core_cyc) — both anchor to the real issue.
@@ -5721,23 +5716,20 @@ module core
         // the corpus's normal operands (fpu_x87_pkg).
         // -------------------------------------------------------------------
         S_FEXEC: begin
+          // R2: the x87 ARCHITECTURAL STATE update for S_FEXEC (the fpr/ftop/
+          // fstat/fptag NBA writes that used to live in this case) is now driven
+          // onto u_fpu_state's write ports by the fp_we_* combinational driver
+          // near the module instance. That driver re-derives THIS exact arm
+          // (state==S_FEXEC && !f_pc_bad) and the same per-fxop value computation
+          // (via the same fpu_x87_pkg calls: f_eval/fconst/apply_cmp/fcom_codes/
+          // fxam_codes/fx_sqrt/f_mem_as_*/f_arith_fstat + the fstore sticky flags),
+          // so the state mutation is byte-identical. This block keeps ONLY the
+          // SPINE control: the f_pc_bad->S_HALT gate, the f_do_store/f_do_retire
+          // FSM transition, and the FNSTSW_AX cross-leaf gpr[EAX] write.
           logic f_do_store, f_do_retire;
-          logic [79:0] opnd_f;    // memory operand as floatx80 (read forms)
-          logic [79:0] arg_b;     // right arithmetic operand (mem or st(i))
-          logic [80:0] ar;        // {inexact, result}
-          logic [82:0] arf;       // {ie, ze, inexact, result} from f_eval
-          logic [2:0]  codes;
-          logic [3:0]  xc;
-          logic [79:0] st0v, stiv, resv;
-          logic        inexact, cmp_ie;
-          logic [1:0]  f_rc;      // rounding control (fctrl[11:10])
-          logic        f_pc_bad;  // arithmetic requested under non-64-bit PC
-          logic        f_is_arith;
-          f_do_store=1'b0; f_do_retire=1'b1; inexact=1'b0; cmp_ie=1'b0;
-          opnd_f = q_f_mem_read ? f_mem_as_float(f_mem80, q_f_mbytes) : 80'd0;
-          st0v = fst(3'd0);
-          stiv = fst(q_f_sti);
-          f_rc = fctrl[11:10];
+          logic f_pc_bad;        // arithmetic requested under non-64-bit PC
+          logic f_is_arith;
+          f_do_store=1'b0; f_do_retire=1'b1;
 
           // Precision control (PC = fctrl[9:8]) other than 11 (64-bit extended)
           // is a Tier-3 deferral: the datapath only implements full extended
@@ -5753,157 +5745,23 @@ module core
             state<=S_HALT;
           end else
           unique case (q_fxop)
-            // ---- loads (push) ----
-            FX_FLD_M32, FX_FLD_M64, FX_FLD_M80: begin
-              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
-              fpr[ftop-3'd1]<= (q_fxop==FX_FLD_M80) ? f_mem80 : opnd_f;
-            end
-            FX_FILD_M16, FX_FILD_M32, FX_FILD_M64: begin
-              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
-              fpr[ftop-3'd1]<= f_mem_as_int(f_mem80, q_f_mbytes);
-            end
-            FX_FLDCONST: begin
-              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
-              fpr[ftop-3'd1]<= fconst(q_f_const);
-            end
-            FX_FLD_STI: begin
-              // push a copy of ST(i). Note: i is evaluated on the CURRENT TOP,
-              // before the push (QEMU pushes then ST0=old ST(i)).
-              ftop<=ftop-3'd1; fptag[ftop-3'd1]<=1'b0;
-              fpr[ftop-3'd1]<= stiv;
-            end
-            // ---- register moves / stack mgmt ----
-            FX_FST_STI: begin
-              fpr[fri(q_f_sti)] <= st0v; fptag[fri(q_f_sti)]<=1'b0;
-              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
-            end
-            FX_FXCH: begin
-              fpr[ftop]          <= stiv;
-              fpr[fri(q_f_sti)]  <= st0v;
-            end
-            FX_FFREE: begin fptag[fri(q_f_sti)]<=1'b1; end
-            FX_FINCSTP: begin ftop<=ftop+3'd1; fstat<=fstat & ~16'h4700; end
-            FX_FDECSTP: begin ftop<=ftop-3'd1; fstat<=fstat & ~16'h4700; end
-            FX_FNOP: begin /* no state change */ end
-            FX_FWAIT: begin /* no unmasked exception in corpus */ end
-            FX_FNINIT: begin
-              ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
-            end
-            FX_FNCLEX: begin fstat<=fstat & 16'h7f00; end
-            FX_FLDCW:  begin fctrl<=f_mem80[15:0]; end
-            // ---- sign / abs on ST0 ----
-            FX_FABS: begin fpr[ftop]<= {1'b0, st0v[78:0]}; end
-            FX_FCHS: begin fpr[ftop]<= {~st0v[79], st0v[78:0]}; end
-            // ---- compares ----
-            // FCOM/FCOMP/FCOMPP/FTST/FICOM are SIGNALING (#IA on any NaN);
-            // FUCOM/FUCOMP/FUCOMPP are QUIET (#IA only on a signaling NaN).
-            FX_FCOM_STI, FX_FCOM_M32, FX_FCOM_M64: begin
-              arg_b = (q_fxop==FX_FCOM_STI) ? stiv : opnd_f;
-              codes = fcom_codes(st0v, arg_b);
-              cmp_ie = fcom_ie(st0v, arg_b, 1'b1);     // signaling
-              fstat <= apply_cmp(fstat, codes, cmp_ie);
-              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
-            end
-            FX_FUCOM_STI: begin
-              codes = fcom_codes(st0v, stiv);
-              cmp_ie = fcom_ie(st0v, stiv, 1'b0);      // quiet
-              fstat <= apply_cmp(fstat, codes, cmp_ie);
-              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
-            end
-            FX_FCOMPP: begin
-              codes = fcom_codes(st0v, fst(3'd1));
-              cmp_ie = fcom_ie(st0v, fst(3'd1), 1'b1); // FCOMPP signaling
-              fstat <= apply_cmp(fstat, codes, cmp_ie);
-              fptag[ftop]<=1'b1; fptag[ftop+3'd1]<=1'b1; ftop<=ftop+3'd2;
-            end
-            FX_FUCOMPP: begin
-              codes = fcom_codes(st0v, fst(3'd1));
-              cmp_ie = fcom_ie(st0v, fst(3'd1), 1'b0); // FUCOMPP quiet
-              fstat <= apply_cmp(fstat, codes, cmp_ie);
-              fptag[ftop]<=1'b1; fptag[ftop+3'd1]<=1'b1; ftop<=ftop+3'd2;
-            end
-            FX_FTST: begin
-              codes = fcom_codes(st0v, 80'd0);   // compare ST0 vs +0.0
-              cmp_ie = fcom_ie(st0v, 80'd0, 1'b1);     // signaling
-              fstat <= apply_cmp(fstat, codes, cmp_ie);
-            end
-            FX_FXAM: begin
-              xc = fxam_codes(st0v, fptag[ftop]);
-              fstat <= (fstat & ~16'h4700) |
-                       ({1'd0,xc[3]}<<14) | ({5'd0,xc[2]}<<10) |
-                       ({6'd0,xc[1]}<<9)  | ({7'd0,xc[0]}<<8);
-            end
-            FX_FICOM_M16, FX_FICOM_M32: begin
-              arg_b = f_mem_as_int(f_mem80, q_f_mbytes);
-              codes = fcom_codes(st0v, arg_b);
-              cmp_ie = fcom_ie(st0v, arg_b, 1'b1);     // FICOM signaling
-              fstat <= apply_cmp(fstat, codes, cmp_ie);
-              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
-            end
-            // ---- arithmetic ----
-            // Each form selects (left,right) operands and calls f_eval, which
-            // returns {ie, ze, inexact, result}. f_eval handles QEMU's explicit
-            // special cases bit-exactly: x/0 -> signed Inf + ZE, 0/0 -> real-
-            // indefinite QNaN + IE; otherwise the normal-operand datapath.
-            FX_AR_ST0_STI: begin
-              arf = f_eval(q_f_aluop, st0v, stiv, f_rc, errata_en[ERR_FDIV]);
-              fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
-            end
-            FX_AR_STI_ST0: begin
-              // ST(i) op= ST0 : a=ST(i), b=ST0; sub/subr/div/divr direction per
-              // QEMU helper_f{op}_STN_ST0 (which use ST(i) and ST0 in that order).
-              arf = f_eval(q_f_aluop, stiv, st0v, f_rc, errata_en[ERR_FDIV]);
-              fpr[fri(q_f_sti)]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
-              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
-            end
-            FX_AR_M32, FX_AR_M64: begin
-              arf = f_eval(q_f_aluop, st0v, opnd_f, f_rc, errata_en[ERR_FDIV]);
-              fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
-            end
-            FX_AR_I16, FX_AR_I32: begin
-              arf = f_eval(q_f_aluop, st0v, f_mem_as_int(f_mem80, q_f_mbytes), f_rc, errata_en[ERR_FDIV]);
-              fpr[ftop]<=arf[79:0]; fstat<=f_arith_fstat(fstat, arf);
-            end
-            FX_FSQRT: begin
-              // QEMU helper_fsqrt: if ST0 has its sign bit set (floatx80_is_neg),
-              // clear the condition codes (0x4700) and set C2 (0x400) FIRST; then
-              // floatx80_sqrt runs -> sqrt(-0)=-0 (no #IA); sqrt(negative finite)
-              // = real-indefinite QNaN + #IA (IE). Positive operands take the
-              // normal datapath (PE on inexact).
-              if (st0v[79]) begin               // sign set: -finite / -0 / -NaN
-                if (fx_is_neg(st0v) && !fx_is_nan(st0v)) begin
-                  // negative non-zero (and not NaN): QNaN + IE, plus C2.
-                  fpr[ftop]<= 80'hFFFFC000000000000000;
-                  fstat <= (fstat & ~16'h4700) | 16'h0400 | 16'h0001;  // C2 + IE
-                end else begin
-                  // -0 (or -NaN): sqrt returns the operand; C2 set, no IE here.
-                  ar = fx_sqrt(st0v, f_rc);
-                  fpr[ftop]<=ar[79:0];
-                  fstat <= (fstat & ~16'h4700) | 16'h0400;             // C2 only
-                end
-              end else begin
-                ar = fx_sqrt(st0v, f_rc); inexact=ar[80];
-                fpr[ftop]<=ar[79:0];
-                if (inexact) fstat<=fstat | 16'h0020;
-              end
-            end
             // ---- memory stores: defer to S_FSTORE ----
             // The store VALUE and its exception flags depend only on ST0/fctrl
-            // (stable across the store beats), so latch PE/IE (sticky) here at
-            // dispatch. FST m80 / FNSTCW / FNSTSW m16 are exact (flags stay 0).
+            // (stable across the store beats); the sticky PE/IE latch into fstat
+            // is driven by fp_we_* at this dispatch clock. FST m80 / FNSTCW /
+            // FNSTSW m16 are exact (flags stay 0).
             FX_FST_M32, FX_FST_M64, FX_FST_M80,
             FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
             FX_FNSTCW, FX_FNSTSW_M: begin
               f_do_store=1'b1; f_do_retire=1'b0;
-              if (fstore_ie)      fstat <= fstat | 16'h0001;   // IE (out-of-range FIST)
-              else if (fstore_pe) fstat <= fstat | 16'h0020;   // PE (inexact store)
             end
-            // ---- FNSTSW AX (writes AX, no memory) ----
+            // ---- FNSTSW AX (writes AX, no memory) — cross-leaf: reads fstat/ftop
+            // from u_fpu_state and writes the integer file (stays in the spine).
             FX_FNSTSW_AX: begin
               gpr[R_EAX] <= {gpr[R_EAX][31:16],
                              (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
             end
-            default: ;
+            default: ;   // all other fxops mutate only FP state (driven by fp_we_*)
           endcase
 
           // f_pc_bad already routed to S_HALT above (no retire); only commit the
@@ -5928,8 +5786,9 @@ module core
             if ((q_f_mbytes<=4'd4) ||
                 (q_f_mbytes==4'd8 && f_step==4'd1) ||
                 (q_f_mbytes==4'd10 && f_step==4'd2)) begin
-              // last beat: apply pop and retire
-              if (q_f_pop) begin fptag[ftop]<=1'b1; ftop<=ftop+3'd1; end
+              // last beat: the POP (fptag[ftop]<=1; ftop++) for FSTP/FISTP is
+              // driven onto u_fpu_state's we_pop port by fp_we_* (which re-derives
+              // this exact last-beat condition). Here we only retire + advance EIP.
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE; f_step<=4'd0;
             end else f_step<=f_step+4'd1;
           end
@@ -6068,7 +5927,7 @@ module core
     logic [32:0] r32;
     logic [64:0] r64;
     logic [65:0] ri;             // {invalid, inexact, value}
-    s0 = fpr[ftop];               // ST0
+    s0 = fp_st0_phys;             // ST0 (= fpr[ftop], u_fpu_state read port)
     r32 = 33'd0; r64 = 65'd0; ri = 66'd0;
     fstore_val = 80'd0; fstore_pe = 1'b0; fstore_ie = 1'b0;
     unique case (q_fxop)
@@ -6782,6 +6641,287 @@ module core
     .tch2_en   (ic_tch2_en),
     .tch2_set  (ic_tch2_set),
     .tch2_tag  (ic_tch2_tag)
+  );
+
+  // ===========================================================================
+  // x87 architectural STATE FILE (fpu_top, R2) — module ports + write driver.
+  //
+  // The STATE (fpr[8]/ftop/fctrl/fstat/fptag + the FNINIT reset + the st(i)
+  // read addressing) lives in u_fpu_state (rtl/fpu/fpu_top.sv). The spine reads
+  // it back combinationally (fp_st[i]/fp_st0_phys/ftop/fctrl/fstat/fptag aliases)
+  // and drives every state mutation onto the module's write ports through the
+  // fp_we_* combinational driver below — which re-derives BOTH writer arms and
+  // computes the same values via the same fpu_x87_pkg calls the inline code did:
+  //   * FAST arm = the M5 cycle-mode FP issue+commit clock (fp_fast_commit, the
+  //     SAME guard the icache ic_fp_commit touch uses — gate-proven).
+  //   * SLOW arm = S_FEXEC (when !f_pc_bad) + the S_FSTORE last-beat pop.
+  // The two arms are runtime-exclusive (S_PIPE fast vs S_FEXEC/S_FSTORE slow),
+  // so the per-category strobes are ORed; at most one fires any clock. The
+  // module owns the OLD-ftop NBA addressing (push uses ftop-1, etc.) so ordering
+  // is byte-identical. fstat is presented FULLY COMPUTED (the spine does all the
+  // masking/merge/sticky-OR), and exposed RAW (TOP not overlaid) so retire_fstat
+  // + FNSTSW stay byte-identical.
+  // ===========================================================================
+  logic        fp_we_push;   logic [79:0] fp_push_data;
+  logic        fp_we_top;    logic [79:0] fp_top_data;
+  logic        fp_we_fstat;  logic [15:0] fp_fstat_wval;
+  logic        fp_we_sti;    logic [2:0]  fp_wsti_idx;  logic [79:0] fp_wsti_data;
+  logic        fp_wsti_clr_tag;
+  logic        fp_we_fxch;   logic [2:0]  fp_fxch_idx;
+  logic [79:0] fp_fxch_a;    logic [79:0] fp_fxch_b;
+  logic        fp_we_pop;
+  logic        fp_we_pop2;
+  logic        fp_we_ffree;  logic [2:0]  fp_ffree_idx;
+  logic        fp_we_incstp; logic        fp_we_decstp;
+  logic        fp_we_fctrl;  logic [15:0] fp_fctrl_wval;
+  logic        fp_we_fninit;
+
+  always_comb begin
+    // ---- per-arm locals -------------------------------------------------------
+    logic        fp_in_pipe, fp_halt4, fp_fp_arm, fp_fast_commit;
+    logic [31:0] fp_dep_ready;
+    logic [82:0] fp_arf;          // {ie, ze, inexact, result} from f_eval (fast)
+    logic        slow_arm;        // S_FEXEC, op actually executes (not f_pc_bad)
+    logic        slow_pc_bad, slow_is_arith;
+    logic [79:0] s_opnd_f, s_argb, s_st0v, s_stiv;
+    logic [82:0] s_arf;
+    logic [80:0] s_ar;
+    logic [2:0]  s_codes;
+    logic [3:0]  s_xc;
+    logic        s_cmp_ie;
+    logic [1:0]  s_rc;
+    logic        fstore_last_beat;
+
+    // default: no writes this clock
+    fp_we_push=1'b0; fp_push_data=80'd0;
+    fp_we_top=1'b0;  fp_top_data=80'd0;
+    fp_we_fstat=1'b0; fp_fstat_wval=16'd0;
+    fp_we_sti=1'b0;  fp_wsti_idx=3'd0; fp_wsti_data=80'd0; fp_wsti_clr_tag=1'b0;
+    fp_we_fxch=1'b0; fp_fxch_idx=3'd0; fp_fxch_a=80'd0; fp_fxch_b=80'd0;
+    fp_we_pop=1'b0;  fp_we_pop2=1'b0;
+    fp_we_ffree=1'b0; fp_ffree_idx=3'd0;
+    fp_we_incstp=1'b0; fp_we_decstp=1'b0;
+    fp_we_fctrl=1'b0; fp_fctrl_wval=16'd0;
+    fp_we_fninit=1'b0;
+
+    // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
+    fp_in_pipe = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
+                 pipe_bytes_ok && (pending_mem_pen==7'd0);
+    fp_halt4   = u_d.is_fp && (u_d.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
+    fp_fp_arm  = fp_in_pipe && !fp_halt4 && u_d.is_fp;
+    fp_dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+    fp_fast_commit = fp_fp_arm &&
+                     !(!fp_occ_pending && ($signed(fp_dep_ready - core_cyc) > 0)) &&
+                     !(!fp_occ_pending && (u_d.fp_occ > 7'd1));
+    fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10], errata_en[ERR_FDIV]);
+    if (fp_fast_commit) begin
+      unique case (u_d.fp_kind)
+        FK_FLDC:   begin fp_we_push=1'b1; fp_push_data=fconst(u_d.fp_sti); end
+        FK_FLDSTI: begin fp_we_push=1'b1; fp_push_data=fst(u_d.fp_sti);    end
+        FK_ARITH:  begin
+          fp_we_top=1'b1;   fp_top_data=fp_arf[79:0];
+          fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, fp_arf);
+        end
+        FK_FSTP0:  begin fp_we_pop=1'b1; end
+        FK_FXCH:   begin
+          fp_we_fxch=1'b1; fp_fxch_idx=u_d.fp_sti;
+          fp_fxch_a=fst(u_d.fp_sti);   // -> fpr[ftop]
+          fp_fxch_b=fst(3'd0);         // -> fpr[ftop+idx]
+        end
+        default: ;
+      endcase
+    end
+
+    // ===== SLOW ARM (S_FEXEC) — recompute exactly what the inline case did.
+    slow_is_arith = (q_fxop==FX_AR_ST0_STI) || (q_fxop==FX_AR_STI_ST0) ||
+                    (q_fxop==FX_AR_M32)     || (q_fxop==FX_AR_M64)     ||
+                    (q_fxop==FX_AR_I16)     || (q_fxop==FX_AR_I32)     ||
+                    (q_fxop==FX_FSQRT);
+    slow_pc_bad = slow_is_arith && (fctrl[9:8] != 2'b11);
+    slow_arm    = (state==S_FEXEC) && !slow_pc_bad;
+    s_opnd_f = q_f_mem_read ? f_mem_as_float(f_mem80, q_f_mbytes) : 80'd0;
+    s_st0v   = fst(3'd0);
+    s_stiv   = fst(q_f_sti);
+    s_rc     = fctrl[11:10];
+    s_argb   = 80'd0; s_codes = 3'd0; s_xc = 4'd0; s_cmp_ie = 1'b0;
+    s_arf    = 83'd0; s_ar = 81'd0;
+    if (slow_arm) begin
+      unique case (q_fxop)
+        // ---- loads (push) ----
+        FX_FLD_M32, FX_FLD_M64, FX_FLD_M80: begin
+          fp_we_push=1'b1; fp_push_data=(q_fxop==FX_FLD_M80) ? f_mem80 : s_opnd_f;
+        end
+        FX_FILD_M16, FX_FILD_M32, FX_FILD_M64: begin
+          fp_we_push=1'b1; fp_push_data=f_mem_as_int(f_mem80, q_f_mbytes);
+        end
+        FX_FLDCONST: begin fp_we_push=1'b1; fp_push_data=fconst(q_f_const); end
+        FX_FLD_STI:  begin fp_we_push=1'b1; fp_push_data=s_stiv;            end
+        // ---- register moves / stack mgmt ----
+        FX_FST_STI: begin
+          fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=s_st0v; fp_wsti_clr_tag=1'b1;
+          if (q_f_pop) fp_we_pop=1'b1;
+        end
+        FX_FXCH: begin
+          fp_we_fxch=1'b1; fp_fxch_idx=q_f_sti;
+          fp_fxch_a=s_stiv;   // -> fpr[ftop]
+          fp_fxch_b=s_st0v;   // -> fpr[ftop+idx]
+        end
+        FX_FFREE:   begin fp_we_ffree=1'b1; fp_ffree_idx=q_f_sti; end
+        FX_FINCSTP: begin fp_we_incstp=1'b1; fp_we_fstat=1'b1; fp_fstat_wval=fstat & ~16'h4700; end
+        FX_FDECSTP: begin fp_we_decstp=1'b1; fp_we_fstat=1'b1; fp_fstat_wval=fstat & ~16'h4700; end
+        FX_FNOP:    begin /* no state change */ end
+        FX_FWAIT:   begin /* no unmasked exception in corpus */ end
+        FX_FNINIT:  begin fp_we_fninit=1'b1; end
+        FX_FNCLEX:  begin fp_we_fstat=1'b1; fp_fstat_wval=fstat & 16'h7f00; end
+        FX_FLDCW:   begin fp_we_fctrl=1'b1; fp_fctrl_wval=f_mem80[15:0]; end
+        // ---- sign / abs on ST0 ----
+        FX_FABS: begin fp_we_top=1'b1; fp_top_data={1'b0, s_st0v[78:0]}; end
+        FX_FCHS: begin fp_we_top=1'b1; fp_top_data={~s_st0v[79], s_st0v[78:0]}; end
+        // ---- compares ----
+        FX_FCOM_STI, FX_FCOM_M32, FX_FCOM_M64: begin
+          s_argb = (q_fxop==FX_FCOM_STI) ? s_stiv : s_opnd_f;
+          s_codes = fcom_codes(s_st0v, s_argb);
+          s_cmp_ie = fcom_ie(s_st0v, s_argb, 1'b1);     // signaling
+          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          if (q_f_pop) fp_we_pop=1'b1;
+        end
+        FX_FUCOM_STI: begin
+          s_codes = fcom_codes(s_st0v, s_stiv);
+          s_cmp_ie = fcom_ie(s_st0v, s_stiv, 1'b0);     // quiet
+          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          if (q_f_pop) fp_we_pop=1'b1;
+        end
+        FX_FCOMPP: begin
+          s_codes = fcom_codes(s_st0v, fst(3'd1));
+          s_cmp_ie = fcom_ie(s_st0v, fst(3'd1), 1'b1);  // FCOMPP signaling
+          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_pop2=1'b1;
+        end
+        FX_FUCOMPP: begin
+          s_codes = fcom_codes(s_st0v, fst(3'd1));
+          s_cmp_ie = fcom_ie(s_st0v, fst(3'd1), 1'b0);  // FUCOMPP quiet
+          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_pop2=1'b1;
+        end
+        FX_FTST: begin
+          s_codes = fcom_codes(s_st0v, 80'd0);          // ST0 vs +0.0
+          s_cmp_ie = fcom_ie(s_st0v, 80'd0, 1'b1);      // signaling
+          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+        end
+        FX_FXAM: begin
+          s_xc = fxam_codes(s_st0v, fptag[ftop]);
+          fp_we_fstat=1'b1;
+          fp_fstat_wval = (fstat & ~16'h4700) |
+                          ({1'd0,s_xc[3]}<<14) | ({5'd0,s_xc[2]}<<10) |
+                          ({6'd0,s_xc[1]}<<9)  | ({7'd0,s_xc[0]}<<8);
+        end
+        FX_FICOM_M16, FX_FICOM_M32: begin
+          s_argb = f_mem_as_int(f_mem80, q_f_mbytes);
+          s_codes = fcom_codes(s_st0v, s_argb);
+          s_cmp_ie = fcom_ie(s_st0v, s_argb, 1'b1);     // FICOM signaling
+          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          if (q_f_pop) fp_we_pop=1'b1;
+        end
+        // ---- arithmetic (f_eval -> {ie,ze,inexact,result}) ----
+        FX_AR_ST0_STI: begin
+          s_arf = f_eval(q_f_aluop, s_st0v, s_stiv, s_rc, errata_en[ERR_FDIV]);
+          fp_we_top=1'b1; fp_top_data=s_arf[79:0];
+          fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
+        end
+        FX_AR_STI_ST0: begin
+          // ST(i) op= ST0 : a=ST(i), b=ST0 (no tag write — only fpr[fri]).
+          s_arf = f_eval(q_f_aluop, s_stiv, s_st0v, s_rc, errata_en[ERR_FDIV]);
+          fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=s_arf[79:0]; fp_wsti_clr_tag=1'b0;
+          fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
+          if (q_f_pop) fp_we_pop=1'b1;
+        end
+        FX_AR_M32, FX_AR_M64: begin
+          s_arf = f_eval(q_f_aluop, s_st0v, s_opnd_f, s_rc, errata_en[ERR_FDIV]);
+          fp_we_top=1'b1; fp_top_data=s_arf[79:0];
+          fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
+        end
+        FX_AR_I16, FX_AR_I32: begin
+          s_arf = f_eval(q_f_aluop, s_st0v, f_mem_as_int(f_mem80, q_f_mbytes), s_rc, errata_en[ERR_FDIV]);
+          fp_we_top=1'b1; fp_top_data=s_arf[79:0];
+          fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
+        end
+        FX_FSQRT: begin
+          // QEMU helper_fsqrt (see the inline comment, preserved verbatim).
+          if (s_st0v[79]) begin
+            if (fx_is_neg(s_st0v) && !fx_is_nan(s_st0v)) begin
+              fp_we_top=1'b1;   fp_top_data=80'hFFFFC000000000000000;
+              fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400 | 16'h0001; // C2+IE
+            end else begin
+              s_ar = fx_sqrt(s_st0v, s_rc);
+              fp_we_top=1'b1;   fp_top_data=s_ar[79:0];
+              fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400;            // C2 only
+            end
+          end else begin
+            s_ar = fx_sqrt(s_st0v, s_rc);
+            fp_we_top=1'b1; fp_top_data=s_ar[79:0];
+            if (s_ar[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end    // PE
+          end
+        end
+        // ---- memory stores: sticky PE/IE latch at dispatch (the store value +
+        // pop happen later in S_FSTORE). FST m80/FNSTCW/FNSTSW m16 stay exact.
+        FX_FST_M32, FX_FST_M64, FX_FST_M80,
+        FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
+        FX_FNSTCW, FX_FNSTSW_M: begin
+          if (fstore_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end  // IE
+          else if (fstore_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end  // PE
+        end
+        // FX_FNSTSW_AX writes gpr[EAX] only (handled in the S_FEXEC spine arm).
+        default: ;
+      endcase
+    end
+
+    // ===== SLOW ARM (S_FSTORE last beat) — the FSTP/FISTP pop.
+    fstore_last_beat = (state==S_FSTORE) && mem_ack &&
+                       ((q_f_mbytes<=4'd4) ||
+                        (q_f_mbytes==4'd8 && f_step==4'd1) ||
+                        (q_f_mbytes==4'd10 && f_step==4'd2));
+    if (fstore_last_beat && q_f_pop) fp_we_pop=1'b1;
+  end
+
+  fpu_top u_fpu_state (
+    .clk          (clk),
+    .rst_n        (rst_n),
+    .st0          (fp_st[0]),
+    .st1          (fp_st[1]),
+    .st2          (fp_st[2]),
+    .st3          (fp_st[3]),
+    .st4          (fp_st[4]),
+    .st5          (fp_st[5]),
+    .st6          (fp_st[6]),
+    .st7          (fp_st[7]),
+    .ftop_o       (ftop),
+    .fstat_o      (fstat),
+    .fctrl_o      (fctrl),
+    .fptag_o      (fptag),
+    .rd_phys_top  (fp_st0_phys),
+    .we_push      (fp_we_push),
+    .push_data    (fp_push_data),
+    .we_top       (fp_we_top),
+    .top_data     (fp_top_data),
+    .we_fstat     (fp_we_fstat),
+    .fstat_wval   (fp_fstat_wval),
+    .we_sti       (fp_we_sti),
+    .wsti_idx     (fp_wsti_idx),
+    .wsti_data    (fp_wsti_data),
+    .wsti_clr_tag (fp_wsti_clr_tag),
+    .we_fxch      (fp_we_fxch),
+    .fxch_idx     (fp_fxch_idx),
+    .fxch_a       (fp_fxch_a),
+    .fxch_b       (fp_fxch_b),
+    .we_pop       (fp_we_pop),
+    .we_pop2      (fp_we_pop2),
+    .we_ffree     (fp_we_ffree),
+    .ffree_idx    (fp_ffree_idx),
+    .we_incstp    (fp_we_incstp),
+    .we_decstp    (fp_we_decstp),
+    .we_fctrl     (fp_we_fctrl),
+    .fctrl_wval   (fp_fctrl_wval),
+    .we_fninit    (fp_we_fninit)
   );
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
