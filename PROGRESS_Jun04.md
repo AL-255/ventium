@@ -207,6 +207,25 @@ M7.3 Win95 device-input replay + boot-prefix run.
   run went as far as the RTL's ISA coverage allows; the wall is real, not a harness
   artifact (everything before it is bit-exact). Next: implement `CMPXCHG` (0F B0/B1)
   to push the frontier (it also benefits Win95).
+- 2026-06-05 — **CMPXCHG (0F B0/B1) implemented + the Quake frontier is now a HARNESS
+  time-boundary, not a CPU gap.** Added `CMPXCHG r/m8,r8` + `r/m16/32,r16/32` (reg +
+  mem forms, all widths, LOCK=no-op on the in-order core) as a new `K_CMPXCHG` slow-FSM
+  RMW: flags = `CMP acc,temp`; equal⇒dest←src, ZF=1; not-equal⇒acc←temp, ZF=0 (mem
+  written back unchanged for atomicity, matching QEMU). The equality decision is latched
+  (`cmpxchg_wrsrc_r`) across S_EXEC→S_STORE so the not-equal acc update can't corrupt the
+  store-data resolver. **Validated:** targeted differential test `verif/tests/t_cmpxchg`
+  EQUIVALENT vs QEMU (both opcodes, reg+mem, equal+not-equal, 8/16/32-bit, LOCK form);
+  `make verify` PASS **57/57**; the Quake lock-step now **passes the old wall at
+  n=1106162** (the `lock cmpxchg [edi+0x33f4],edx` executes bit-exact) and runs the full
+  1.2M instructions. The next divergence (n≈1,106,793, `mov ecx,[esp+0x18]`) is **NOT a
+  CPU bug**: it reads `tv_nsec` from a **vDSO `__vdso_clock_gettime`** result — the vDSO
+  reads the kernel vvar time page directly in userspace (no syscall, so the proxy can't
+  replay it), and host wall-clock advances between golden-gen and the RTL run (tv_sec
+  matched, tv_nsec didn't). So the Quake user-mode frontier is now bounded by **vDSO
+  clock nondeterminism** (the documented harness time class), with the CPU proven
+  **bit-exact over ~1.106M instructions** of real Quake code. Pushing further would
+  require replaying the vvar-page reads as inputs (a harness feature, diminishing
+  CPU-verification returns) — deferred. Lint clean; sys gates green.
 - 2026-06-05 — **M7.2 DONE: VIRTUAL-8086 mode (method-1 / VME-OFF) RTL-diffs
   EQUIVALENT 949/949.** The `pv86` bare-metal gate boots real→protected→paging→TSS,
   ENTERS V86 by an IRET of a 9-word V86 frame (EFLAGS.VM 0→1, CPL 0→3, sel<<4 seg
