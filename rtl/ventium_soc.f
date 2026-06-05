@@ -8,11 +8,19 @@
 // the existing make-verify / sys-gate build (verif/tb/Makefile) is unchanged.
 // Paths are relative to this file's directory ($VENTIUM_ROOT/rtl).
 
+// ---- include dir for core_*.svh (RAW case-arm text `included by core.sv) ----
+// core.sv's giant always_ff `unique case (state)` is split across core_*.svh
+// files (R2 modularization); they are textually pasted at the original site, so
+// the netlist is identical. +incdir lets `include "core_*.svh" resolve.
++incdir+core
+
 // ---- packages (must precede every module that imports them) ----------------
 ventium_pkg.sv
 core/ventium_alu_pkg.sv
 core/ventium_decode_pkg.sv
 fpu/fpu_x87_pkg.sv
+core/ventium_sys_pkg.sv
+core/ventium_x87_pkg.sv
 
 // ---- SoC integration top ---------------------------------------------------
 soc/ventium_soc.sv
