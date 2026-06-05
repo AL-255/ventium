@@ -1150,3 +1150,21 @@ building `mb_div8`: a byte divide whose quotient exceeds 0xFF makes QEMU `#DE`).
   0/0. The divide family is now cycle-faithful (occupancy) AND architecturally
   complete (`#DE`); only a structural SRT datapath remains (no observable). RTL
   touched: `rtl/core/core_exec.svh`; `ventium-refs` untouched.
+
+### Multiply occupancy — MUL/IMUL cycle fidelity (2026-06-05, review Action 5)
+
+The multiply analogue of the divide occupancy (`docs/m5-mul-spec.md`). MUL/IMUL
+were native `*` in one execute clock (~7 cyc via the slow FSM) where the P5
+(p5model) charges **occ=10** (NP, U-pipe, all widths). Measured `mull` at p5model
+**+10** vs RTL **+7**, so the modeled occupancy = `occ − 7 = 3`, charged as a
+DEFERRED penalty (`pending_mem_pen <= 7'd3`) — the SAME mechanism + measured base
+as the divider — for ALL three multiply forms: 1-operand MUL (K_MULDIV q_md 4),
+1-operand IMUL (q_md 5), and the 2/3-operand IMUL (K_IMUL2). The native `*` still
+produces the bit-exact result (architectural vs timing separated). NEW gated bands
+`mb_mul` + `mb_imul2` (CPI-elevation AND abs-cyc within 10% of the p5model golden;
+wired into `verify.sh` + `run-m5.sh` as the `MUL` class) both **PASS: +0.31% /
++0.15% (occ 10)**. `make verify` PASS (func byte-identical — timing-only; the 63
+prior goldens unchanged), `make verify-sys` 10/10 EQUIVALENT, lint 0/0. The
+integer MUL+DIV families are now cycle-faithful; only structural multiplier/SRT
+datapaths remain (no observable). RTL touched: `rtl/core/core_exec.svh`;
+`ventium-refs` untouched.

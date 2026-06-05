@@ -1,11 +1,23 @@
-# M5 MUL/IMUL staged-timing design spec (DEFERRED)
+# M5 MUL/IMUL staged-timing design spec
 
-Status: **SPEC ONLY — not implemented in this change set.** Captures
-REVIEW_Jun5.md Limit #5, Actions 3/5/7/8 for the integer multiply family. It
-perturbs the calibrated M4/M5 cycle bands and needs a NEW microbenchmark, so it
-is tracked, not landed now.
+Status: **IMPLEMENTED + GATED (2026-06-05).** REVIEW_Jun5.md Limit #5,
+Actions 3/5/7/8 for the integer multiply family.
 
-Owner doc; touches no `rtl/` and no Makefile.
+MUL/IMUL were computed by native `*` in one execute clock (charging ~7 cyc via
+the slow FSM) where the P5 (p5model) charges **occ=10** (NP, U-pipe, all widths).
+Closed exactly like the divider occupancy: the native `*` still produces the
+bit-exact result; the modeled occupancy is charged as a DEFERRED penalty
+(`pending_mem_pen <= occ - 7 = 3`) in `rtl/core/core_exec.svh` for all three forms
+— 1-operand MUL (K_MULDIV q_md 4), 1-operand IMUL (q_md 5), and 2/3-operand IMUL
+(K_IMUL2). Holds the U pipe so a dependent consumer stalls the latency. NEW gated
+bands `mb_mul` + `mb_imul2` (CPI-elevation AND abs-cyc within 10% of the p5model
+golden, in `verif/m5_metrics.py`, wired into `verify.sh` + `run-m5.sh`) both PASS
+(+0.31% / +0.15%). Functional behaviour byte-unchanged (timing-only). The
+remaining multiply work is purely structural (a real staged Booth/array
+multiplier instead of native `*` — no architectural or timing observable).
+
+Owner doc; the occupancy edits are in `rtl/core/core_exec.svh` + the bands in
+`verif/m5_metrics.py` + `verif/tests/mb_mul`,`mb_imul2`.
 
 ---
 

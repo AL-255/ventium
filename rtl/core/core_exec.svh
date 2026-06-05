@@ -229,6 +229,11 @@
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                     eflags<=fl; flags_we=1'b0;
+                    // P5 MULTIPLY OCCUPANCY (cycle-modeled, p5model occ MUL=10, NP,
+                    // U-pipe). The native `*` above is the bit-exact result; the
+                    // modeled occupancy is the deferred penalty occ-7 = 3 (same
+                    // mechanism + measured slow-FSM base as the DIV occupancy below).
+                    pending_mem_pen <= 7'd3;
                   end
                   3'd5: begin // IMUL one-operand (signed)
                     logic signed [63:0] p; logic [31:0] lo; logic ovf; logic [31:0] fl;
@@ -243,6 +248,7 @@
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                     eflags<=fl; flags_we=1'b0;
+                    pending_mem_pen <= 7'd3;   // P5 IMUL occupancy (occ=10, occ-7)
                   end
                   3'd6: begin // DIV (unsigned) — with #DE (divide-by-zero / overflow)
                     logic dfault;
@@ -367,6 +373,7 @@
                 fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                 eflags<=fl;
                 flags_we=1'b0;
+                pending_mem_pen <= 7'd3;   // P5 IMUL (2/3-operand) occupancy (occ=10)
               end
 
               K_EXT: begin
