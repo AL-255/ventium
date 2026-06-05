@@ -1,4 +1,7 @@
-// ventium_soc.sv — Ventium M8.1 SoC integration top (core + 8259 PIC + 8254 PIT).
+// ventium_soc.sv — Ventium SoC integration top.
+//   M8.1: core + 8259 PIC + 8254 PIT (the on-die interrupt subsystem).
+//   M8.2: + MC146818 RTC (0x70/0x71), 8042 keyboard ctrl (0x60/0x64),
+//         port-92 fast-A20 (0x92), and the combined A20 address mask.
 //
 // The FIRST SoC-integration top (docs PROGRESS_Jun04.md "M8" + the M8.0 design).
 // It stands up the on-die interrupt subsystem the bare-metal pirqsoc test needs:
@@ -114,10 +117,57 @@ module ventium_soc
   logic        core_inta;        // core.inta       -> ven_pic.inta
   logic [7:0]  pic_inta_vector;  // ven_pic.inta_vector -> core.inta_vector
 
-  // PIT ch0 OUT -> PIC IRQ0.
-  logic        pit_out0;
-  logic [15:0] pic_irq_in;       // device IRQ lines IR0..IR15 (only IR0 = pit_out0)
-  assign pic_irq_in = {15'd0, pit_out0};
+  // ---- device interrupt lines into the cascaded PIC (IR0..IR15 levels) -------
+  // M8.1: PIT ch0 OUT -> master IR0.  M8.2 adds: i8042 keyboard -> master IR1,
+  // MC146818 RTC -> slave IR8 (cascaded through master IR2), i8042 mouse ->
+  // slave IR12.  IR1/IR8/IR12 have no autonomous stimulus in this minimal SoC
+  // (no key/mouse event source; the psocdev test leaves the RTC interrupt
+  // enables off), so they sit quiescent — the wiring is connectivity toward a
+  // future keystroke / RTC-periodic workload, while the IR0 delivery path is the
+  // one structurally exercised (the pirqsoc gate).  Quiescent inputs cannot
+  // perturb the M8.2 per-record device-register differential.
+  logic        pit_out0;     // PIT ch0 OUT  -> IR0
+  logic        rtc_irq8;     // RTC          -> IR8  (slave)
+  logic        kbd_irq1;     // i8042 kbd    -> IR1
+  logic        mouse_irq12;  // i8042 mouse  -> IR12 (slave)
+  logic [15:0] pic_irq_in;
+  always_comb begin
+    pic_irq_in        = 16'd0;
+    pic_irq_in[0]     = pit_out0;
+    pic_irq_in[1]     = kbd_irq1;
+    pic_irq_in[8]     = rtc_irq8;
+    pic_irq_in[12]    = mouse_irq12;
+  end
+
+  // ---- A20 gate (M8.2) -------------------------------------------------------
+  // The classic PC A20 mask is the combination of the i8042 controller output-
+  // port A20 bit and the port-92 "fast A20" bit; OR-combined here (the common
+  // chipset gating).  The psocdev test always drives BOTH sources to the SAME
+  // level, so this matches qemu-system's A20 line regardless of QEMU's last-
+  // writer-wins detail, and at reset the i8042 (outport=0xCF, A20=1) holds A20
+  // ENABLED — matching qemu's CPU a20_mask=~0 at reset.  When A20 is masked,
+  // physical address bit 20 is forced low (the 1 MiB wraparound) on the core's
+  // OUTGOING bus.  This is value-faithful: dcache_timing carries no data (load
+  // data always returns via mem_rdata for the masked address), so a masked load
+  // reads the wrapped location exactly as qemu-system does.
+  logic        kbc_a20;      // i8042 output-port A20 bit (1 = A20 enabled)
+  logic        p92_a20;      // port-92 bit1
+  logic        eff_a20;      // effective A20 enable (1 = bit20 passes)
+  assign eff_a20 = kbc_a20 | p92_a20;
+
+  // core physical address before the A20 mask; the masked address leaves the SoC.
+  logic [31:0] core_mem_addr;
+  assign mem_addr = eff_a20 ? core_mem_addr
+                            : (core_mem_addr & ~32'h0010_0000);
+
+  // Device side outputs the M8.2 SoC observes but does not act on (yet):
+  //  * rtc_nmi_dis : RTC index-port bit7 (NMI mask). NMI is tied off in this SoC.
+  //  * *_reset_req : port-92 / i8042 CPU-reset request pulses. A live machine
+  //    reset is not modeled here (the bare-metal psocdev never asserts them);
+  //    they are surfaced + lint-sunk, to be wired to a reset controller later.
+  logic        rtc_nmi_dis;
+  logic        p92_reset_req;
+  logic        kbd_reset_req;
 
   // ===========================================================================
   // The core: soc_en=1 (external-interrupt path LIVE), boot_mode from the port,
@@ -161,7 +211,7 @@ module ventium_soc
       .inta_valid   (1'b1),            // the master 8259 always supplies a vector
       .mem_req      (mem_req),
       .mem_we       (mem_we),
-      .mem_addr     (mem_addr),
+      .mem_addr     (core_mem_addr),   // A20-masked into mem_addr below
       .mem_wdata    (mem_wdata),
       .mem_wstrb    (mem_wstrb),
       .mem_rdata    (mem_rdata),
@@ -208,13 +258,17 @@ module ventium_soc
   // S_DECODE), and an undecoded port acks with rdata 0 (the test never reads one)
   // so the core never stalls.
   // ===========================================================================
-  logic        cs_pic, cs_pit;
+  logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92;
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
                         io_addr == 16'h00A0 || io_addr == 16'h00A1 ||
                         io_addr == 16'h04D0 || io_addr == 16'h04D1);
     cs_pit = io_req && (io_addr == 16'h0040 || io_addr == 16'h0041 ||
                         io_addr == 16'h0042 || io_addr == 16'h0043);
+    // ---- M8.2 PC-peripheral device selects --------------------------------
+    cs_rtc    = io_req && (io_addr == 16'h0070 || io_addr == 16'h0071);
+    cs_i8042  = io_req && (io_addr == 16'h0060 || io_addr == 16'h0064);
+    cs_port92 = io_req && (io_addr == 16'h0092);
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -225,6 +279,9 @@ module ventium_soc
   // device read-data (byte-wide; combinational off the registers).
   logic [7:0] pic_rdata;
   logic [7:0] pit_rdata;
+  logic [7:0] rtc_rdata;
+  logic [7:0] kbd_rdata;
+  logic [7:0] p92_rdata;
 
   ven_pic u_pic (
       .clk         (clk),
@@ -266,14 +323,74 @@ module ventium_soc
       .out0   (pit_out0)
   );
 
+  // ===========================================================================
+  // M8.2 PC-peripheral devices (RTC + 8042 keyboard + port-92 A20).
+  // ===========================================================================
+  // MC146818 RTC/CMOS at 0x70 (index) / 0x71 (data).  TICK_DIV is set huge so
+  // the (un-oracled, host-clock-derived) structural tick effectively never fires
+  // during the short psocdev run — and in any case the differential reads only
+  // TIME-INVARIANT registers (REG_D=0x80, REG_B, index-read=0xFF, a scratch CMOS
+  // byte round-trip), never the time bytes / REG_A.UIP / REG_C flags, so the
+  // tick can never perturb the per-record compare.
+  ven_rtc #(.TICK_DIV(32'd1_193_182)) u_rtc (
+      .clk         (clk),
+      .rst         (dev_rst),
+      .cs          (cs_rtc),
+      .we          (io_we),
+      .addr        (io_addr),
+      .wdata       (io_wdata[7:0]),
+      .rdata       (rtc_rdata),
+      .irq8        (rtc_irq8),
+      .nmi_disable (rtc_nmi_dis)
+  );
+
+  // 8042 PS/2 keyboard controller at 0x60 (data) / 0x64 (cmd/status).  Drives
+  // IRQ1/IRQ12 + the A20 line (output-port bit1) + a CPU-reset request.  Its
+  // keyboard/mouse OUTPUT-BUFFER path depends on an attached PS/2 device queue
+  // (qemu-system populates it with async power-on bytes; this controller-only
+  // model does not), so the per-record differential exercises ONLY the queue-
+  // independent controller paths: the A20 enable/disable commands (0xDF/0xDD)
+  // observed through the A20 mask, plus command writes that retire identically.
+  // The OBF/data read path is covered by the standalone unit self-check — a
+  // documented oracle boundary, like the LAPIC-eax-only / SMM-infeasible ones.
+  ven_i8042 u_i8042 (
+      .clk       (clk),
+      .rst       (dev_rst),
+      .cs        (cs_i8042),
+      .we        (io_we),
+      .addr      (io_addr),
+      .wdata     (io_wdata[7:0]),
+      .rdata     (kbd_rdata),
+      .irq1      (kbd_irq1),
+      .irq12     (mouse_irq12),
+      .a20_gate  (kbc_a20),
+      .reset_req (kbd_reset_req)
+  );
+
+  // Port-92 "fast A20" / System Control Port A at 0x92.
+  ven_port92 u_port92 (
+      .clk       (clk),
+      .rst       (dev_rst),
+      .cs        (cs_port92),
+      .we        (io_we),
+      .addr      (io_addr),
+      .wdata     (io_wdata[7:0]),
+      .rdata     (p92_rdata),
+      .a20_gate  (p92_a20),
+      .reset_req (p92_reset_req)
+  );
+
   // I/O response back to the core: combinational ack the same clock io_req is
   // up; the read data is the selected device's byte zero-extended to 32 bits.
   always_comb begin
     io_ack   = io_req;                 // single-beat, every request acks at once
     io_rdata = 32'd0;
-    if (cs_pic)      io_rdata = {24'd0, pic_rdata};
-    else if (cs_pit) io_rdata = {24'd0, pit_rdata};
-    // undecoded port: ack with 0 (the test never reads one; avoids a stall).
+    if      (cs_pic)    io_rdata = {24'd0, pic_rdata};
+    else if (cs_pit)    io_rdata = {24'd0, pit_rdata};
+    else if (cs_rtc)    io_rdata = {24'd0, rtc_rdata};
+    else if (cs_i8042)  io_rdata = {24'd0, kbd_rdata};
+    else if (cs_port92) io_rdata = {24'd0, p92_rdata};
+    // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
 
   // ===========================================================================
@@ -344,7 +461,8 @@ module ventium_soc
   // ===========================================================================
   // verilator lint_off UNUSED
   wire _unused_soc = &{1'b0, core_x87_touched, io_size, pit_rdata, pic_rdata,
-                       core_cpu_hung, core_syscall_active, core_syscall_n};
+                       core_cpu_hung, core_syscall_active, core_syscall_n,
+                       rtc_nmi_dis, p92_reset_req, kbd_reset_req};
   // verilator lint_on UNUSED
 
 endmodule : ventium_soc

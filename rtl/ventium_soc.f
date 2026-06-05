@@ -39,6 +39,11 @@ mem/dcache_timing.sv
 mem/icache.sv
 mem/tlb.sv
 
-// ---- M8 SoC PC-peripheral devices (the on-die interrupt subsystem) ---------
+// ---- M8 SoC PC-peripheral devices ------------------------------------------
+// M8.1 on-die interrupt subsystem:
 soc/ven_pic.sv
 soc/ven_pit.sv
+// M8.2 RTC + keyboard controller + fast-A20 (wired into ventium_soc):
+soc/ven_rtc.sv
+soc/ven_i8042.sv
+soc/ven_port92.sv

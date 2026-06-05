@@ -1,0 +1,36 @@
+{
+  "name": "psocdev",
+  "kind": "system",
+  "src": "psocdev.S",
+  "linker": "psocdev.ld",
+  "image": "psocdev.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 250,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-dev-gate.sh",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "MC146818 RTC (0x70/0x71): read REG_D=0x80, REG_B=0x02, write REG_B=0x82 + read 0x82, CMOS scratch index 0x50 round-trip (0x5A then 0xA5), index-port read=0xFF, NMI-disable bit (index 0x8D) reads REG_D=0x80 (no aliasing)",
+    "port-92 (0x92): reset read=0x00, write 0x02 (A20 on) read 0x02, write 0x00 (A20 off) read 0x00 (bit0 always 0 = no machine reset)",
+    "A20 mask: phase A (port92=0x02 + 8042 0xDF) A20 ON [hi]=0x11111111 distinct; phase B (8042 0xDD + port92=0x00) A20 OFF [hi] aliases [lo]=0x22222222, masked write seen at [lo]=0x33333333; phase C (re-enable) [hi]=0x11111111 untouched",
+    "deterministic compute (esi=0x80, edi=0x02, ebp=0x22222222, edx=ecx=0x201), isa-debug-exit code 133"
+  ],
+
+  "why_per_record_differential": "psocdev has NO interrupts — every device interaction is a synchronous IN/OUT or an A20-masked memory access — so qemu's gdbstub single-step (gen_trace.py --system) IS a valid per-record oracle (the SSTEP_NOIRQ limitation that forced pirqsoc to a checkpoint-differential does not apply). The gate is plain compare.py EQUIVALENT, running on ventium_soc with the M8.2 devices.",
+
+  "determinism_contract": "Reads ONLY time-invariant, queue-independent device state. EXCLUDED from the differential (host-clock-derived / attached-device-queue, not reproducible by a standalone register model, and never read here): RTC time bytes + REG_A.UIP + REG_C flags; the 8042 keyboard/mouse OBF/data path (qemu-system attaches a live PS/2 keyboard whose async power-on bytes a controller-only model does not reproduce — a documented oracle boundary, like the LAPIC-eax-only and SMM-infeasible precedents; covered instead by the standalone ven_i8042 unit self-check).",
+
+  "a20_model": "The PC A20 line is the OR of the 8042 output-port A20 bit (reset 1, from outport=0xCF) and port-92 bit1 (reset 0); ventium_soc OR-combines them and forces physical address bit 20 low when A20 is masked. At reset the 8042 holds A20 enabled, matching qemu's CPU a20_mask=~0. The test drives BOTH sources to the same level in every memory-observable phase, so the RTL OR-combine matches qemu's last-writer-wins a20 line (the one-instruction transition windows between the two source writes contain no bit-20 memory access). dcache_timing carries no data, so the wraparound is value-exact vs qemu.",
+
+  "comparison_plan": "verif/soc/run-soc-dev-gate.sh: builds psocdev.bin + the ventium_soc --soc TB, confirms the image reaches isa-debug-exit (133) under qemu-system-i386, regenerates the per-record golden via gen_trace.py --system (and drift-checks it vs the committed psocdev.sys.vtrace.golden), runs ventium_soc on the image, and diffs the two streams with compare.py --mode func -> EQUIVALENT over all retired instructions. EQUIVALENT = the RTC/port-92/8042-A20/A20-mask register + memory behaviour is byte-identical to qemu-system-i386 8.2.2.",
+
+  "description": "Bare-metal M8.2 SoC PC-peripheral device differential (NO paging, NO interrupts). Boots real->protected, then synchronously exercises the three devices M8.2 wires into ventium_soc — the MC146818 RTC/CMOS (0x70/0x71), the 8042 keyboard controller A20 commands (0x60/0x64), and the port-92 fast-A20 (0x92) — plus the combined A20 address mask (a 1 MiB wraparound aliasing test). Every interaction is a synchronous IN/OUT or A20-masked memory access, graded PER-RECORD against the qemu-system-i386 single-step golden (stronger than the pirqsoc checkpoint-differential). Reads only time-invariant, queue-independent state; the host-clock RTC time/UIP/REG_C and the attached-PS/2-keyboard OBF path are documented oracle boundaries off the differential surface (the latter covered by the ven_i8042 unit self-check). Proves the M8.2 device wiring byte-identical to qemu over every retired instruction."
+}
