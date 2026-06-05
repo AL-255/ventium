@@ -1120,10 +1120,33 @@ in one execute clock — charging **1 cycle** where the P5 (p5model) charges
   PASS; every prior band held), `make m3` 63/63, `make verify-sys` EQUIVALENT,
   `make m5` slow-gate green, lint both filelists 0/0. The `occ` numbers are
   p5model/Agner-derived (cycle-modeled, not silicon — Action 9 labeling).
-- **Next increment (deferred, spec'd):** the `#DE` divide-error (vector 0) on
-  divide-by-zero / quotient-overflow is still NOT raised (a byte divide whose
-  quotient exceeds 0xFF makes QEMU `#DE` but the RTL wraps + continues — seen live
-  while building `mb_div8`). It is a behavior change needing `tx_de_*` functional
-  tests; `docs/m5-div-spec.md` §3.3. MUL/IMUL staged occupancy
-  (`docs/m5-mul-spec.md`, occ 10) is the analogous fast-follow. RTL touched:
-  `rtl/core/core_exec.svh`; `ventium-refs` untouched.
+- **MUL/IMUL staged occupancy** (`docs/m5-mul-spec.md`, occ 10) is the analogous
+  fast-follow. RTL touched: `rtl/core/core_exec.svh`; `ventium-refs` untouched.
+
+### Divide-error #DE — the divide family's architectural completion (2026-06-05)
+
+The companion to the occupancy work (review Action 4): DIV/IDIV now **raise `#DE`
+(vector 0)** — previously a zero divisor evaluated native `/` (X-prone) and an
+overflowing quotient silently wrapped, both DIVERGING from QEMU (seen live while
+building `mb_div8`: a byte divide whose quotient exceeds 0xFF makes QEMU `#DE`).
+
+- **RTL** (`rtl/core/core_exec.svh`, K_MULDIV DIV/IDIV): detect **divide-by-zero**
+  (`srcv==0`) AND **quotient overflow** (DIV: the wide quotient's high bits
+  nonzero; IDIV: quotient outside the signed destination range, incl. the
+  `INT_MIN / -1` corner). On a fault the result write is skipped + EFLAGS left
+  unchanged; `sys_mode` DELIVERS through the verified `S_INT_GATE` IDT FSM
+  (`start_fault(8'd0, 1'b0, 32'd0, q_pc)` — FAULT semantics push the faulting EIP),
+  user mode loud-HALTs (no IDT). The non-faulting path is byte-unchanged.
+- **Test** `verif/sys/tests/pde` (NEW, non-paging real→protected): a vector-0 `#DE`
+  interrupt gate + two triggers (div-by-zero and quotient overflow), a handler
+  that counts + resumes past each divide, then a non-faulting divide + exit. `#DE`
+  is **synchronous**, so the qemu-system gdbstub single-step golden delivers it →
+  a **per-record differential**: RTL `--system` trace **EQUIVALENT, 78/78 records**
+  (the `#DE` frame-push → IDT[0] → handler → IRET-resume matches qemu byte-for-
+  byte). Registered in `verify-sys` + `INTR_TESTS` + `RTL_SYS_TESTS`.
+- **Verification.** `make verify` PASS (63/63, byte-identical — the `#DE` guards
+  don't touch non-faulting divides; the 4 DIV occupancy bands still PASS), `make
+  m3` 63/63, `make verify-sys` EQUIVALENT incl. the new `pde`, lint both filelists
+  0/0. The divide family is now cycle-faithful (occupancy) AND architecturally
+  complete (`#DE`); only a structural SRT datapath remains (no observable). RTL
+  touched: `rtl/core/core_exec.svh`; `ventium-refs` untouched.
