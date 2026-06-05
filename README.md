@@ -1,8 +1,12 @@
 # Ventium
 
-A high-fidelity RTL reconstruction of the original Intel **Pentium (P5 / P54C,
-non-MMX)** microarchitecture, written in synthesizable SystemVerilog, simulated
-with **Verilator**, and verified differentially against **QEMU**.
+An RTL reconstruction of the original Intel **Pentium (P5 / P54C, non-MMX)**
+microarchitecture, written in synthesizable SystemVerilog, simulated with
+**Verilator**, and verified differentially against **QEMU**. It is **ISA-exact
+and cycle-approximate for the broad subset it verifies** — high fidelity as an
+architectural + cycle model, medium fidelity as a full microarchitectural / pin-
+level clone (see **Honest scope** below and [`docs/isa-coverage.md`](docs/isa-coverage.md)
+/ [`docs/modeled-by-effect.md`](docs/modeled-by-effect.md)).
 
 📖 **Live instruction reference:** <https://al-255.github.io/ventium/>
 
@@ -23,13 +27,25 @@ with **Verilator**, and verified differentially against **QEMU**.
 
 - **Integer core** — a 5-stage in-order **dual-issue (U/V)** pipeline
   (PF/D1/D2/EX/WB), AP-500 U/V pairing (including the ADC/SBB = PU carry-chain
-  rule), the variable-length decoder, full integer ISA, AGI interlock, and a
-  256-entry / 4-way BTB with 2-bit predictors.
+  rule), the variable-length decoder, a **broad IA-32 integer ISA** (incl. the
+  BCD/ASCII adjusts AAA/AAS/DAA/DAS/AAM/AAD) with **documented HALT gaps** — every
+  unimplemented opcode HALTs loudly, never mis-executes; the coverage boundary is
+  machine-listed in [`docs/isa-coverage.md`](docs/isa-coverage.md). Plus AGI
+  interlock and a 256-entry / 4-way BTB with 2-bit predictors.
 - **x87 FPU** — an 80-bit `floatx80` datapath with the stack / status / control /
   tag words; data movement + normal-operand arithmetic bit-exact vs QEMU softfloat.
+  Transcendentals, BCD FP (`FBLD`/`FBSTP`), environment save/restore, and unmasked
+  numeric exceptions are **deferred and HALT** (see `docs/m3-fpu-spec.md`).
 - **Memory** — 8 KiB / 2-way / 32 B split L1 I/D caches (LRU), split 16-entry I/D
-  TLBs, the 2-level paging MMU (A/D bits, 4 KiB + 4 MiB pages), and a pin-level
-  **64-bit P5 bus** (`biu_p5`, integrated behind a default-off `bus_mode`).
+  TLBs, and the 2-level paging MMU (A/D bits, 4 KiB + 4 MiB pages). The L1 D-cache
+  is a **timing model** (hit/miss latency only — no data array, MESI, or write
+  buffers; load data returns via the memory model) and the TLB is a **correctness
+  model** (16-entry direct-mapped, not the P54C-structured TLB); both are
+  cycle/behaviour-faithful, not structural (`docs/cache-tlb-structural-spec.md`).
+  The **64-bit P5 bus** (`biu_p5`) is a faithful pin-level **protocol** engine
+  validated standalone (19 SVA + 76 checks); its integrated `bus_mode` is a
+  **protocol exerciser** — single non-burst cycles, and the pins do not carry the
+  data the core consumes (default-off; `docs/m5b-bus-spec.md`).
 - **System mode** — cold reset → real mode → protected-mode segmentation →
   paging → IDT-delivered interrupts/exceptions + `IRET`, TSS + cross-privilege +
   the **hardware task switch**, **SMM / `RSM`**, **debug registers + `#DB`**, and

@@ -1,8 +1,11 @@
 # Ventium — P5 (Pentium) microarchitecture replica in Verilog
 
-A high-fidelity RTL reconstruction of the original Intel Pentium (P5/P54C)
-microarchitecture, written in synthesizable SystemVerilog, simulated with
-**Verilator**, and verified differentially against **QEMU**.
+An RTL reconstruction of the original Intel Pentium (P5/P54C) microarchitecture,
+written in synthesizable SystemVerilog, simulated with **Verilator**, and verified
+differentially against **QEMU**. It is **ISA-exact and cycle-approximate for the
+broad verified subset** — not a gate-level or complete pin-level clone (cache/TLB
+are timing/correctness models; integer mul/div are native-arithmetic by effect;
+see `docs/isa-coverage.md` + `docs/modeled-by-effect.md` for the exact boundary).
 
 This document is the durable plan. Day-to-day status lives in
 [`PROGRESS.md`](PROGRESS.md).

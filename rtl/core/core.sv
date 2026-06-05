@@ -1501,6 +1501,25 @@ module core
         8'h9D: begin d_kind=K_STKMISC; d_sm=SM_POPF;  d_mem_read=1'b1;  d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'h9E: begin d_kind=K_STKMISC; d_sm=SM_SAHF; d_len=pfx_len+4'd1; end
         8'h9F: begin d_kind=K_STKMISC; d_sm=SM_LAHF; d_len=pfx_len+4'd1; end
+        // ---- BCD / ASCII-adjust (review fidelity closure; QEMU-exact in S_EXEC) ----
+        // All six write AX (d_w=2, dst=EAX) and flags; the BCD AX result + defined
+        // flags are computed combinationally below and override alu_out/flags_out.
+        // ASCII forms 0xD4/0xD5 take an imm8 "base" (ibuf[pfx_len+1]); 0x27/0x2F/
+        // 0x37/0x3F are 1-byte no-operand. (These previously fell to d_unknown/HALT.)
+        8'h37: begin d_kind=K_ALU; d_alu_op=ALU_AAA; d_writes_reg=1'b1; d_dst_reg=R_EAX;
+                     d_w=3'd2; d_writes_flags=1'b1; d_len=pfx_len+4'd1; end
+        8'h3F: begin d_kind=K_ALU; d_alu_op=ALU_AAS; d_writes_reg=1'b1; d_dst_reg=R_EAX;
+                     d_w=3'd2; d_writes_flags=1'b1; d_len=pfx_len+4'd1; end
+        8'h27: begin d_kind=K_ALU; d_alu_op=ALU_DAA; d_writes_reg=1'b1; d_dst_reg=R_EAX;
+                     d_w=3'd2; d_writes_flags=1'b1; d_len=pfx_len+4'd1; end
+        8'h2F: begin d_kind=K_ALU; d_alu_op=ALU_DAS; d_writes_reg=1'b1; d_dst_reg=R_EAX;
+                     d_w=3'd2; d_writes_flags=1'b1; d_len=pfx_len+4'd1; end
+        8'hD4: begin d_kind=K_ALU; d_alu_op=ALU_AAM; d_writes_reg=1'b1; d_dst_reg=R_EAX;
+                     d_w=3'd2; d_writes_flags=1'b1; d_use_imm=1'b1;
+                     d_imm={24'd0, ibuf[pfx_len+4'd1]}; d_len=pfx_len+4'd2; end
+        8'hD5: begin d_kind=K_ALU; d_alu_op=ALU_AAD; d_writes_reg=1'b1; d_dst_reg=R_EAX;
+                     d_w=3'd2; d_writes_flags=1'b1; d_use_imm=1'b1;
+                     d_imm={24'd0, ibuf[pfx_len+4'd1]}; d_len=pfx_len+4'd2; end
         // MOV moffs (A0-A3): the moffs (absolute displacement) width follows the
         // EFFECTIVE ADDRESS size — 2 bytes under 16-bit addressing (real mode / V86
         // without a 0x67 prefix; eff_addr==1), 4 bytes under 32-bit addressing.
@@ -2334,6 +2353,14 @@ module core
     alu_out   = alu_result(q_alu_op, a_op, b_op, eflags[0]);
     flags_out = flags_next(q_alu_op, a_op, b_op, alu_out, eflags, q_w);
 
+    // ---- BCD / ASCII-adjust override (AAA/AAS/DAA/DAS/AAM/AAD). The AX result +
+    // DEFINED flags are computed in the dedicated bcd_* always_comb below; here we
+    // just route them onto alu_out (written via q_w=2 -> AX) and flags_out.
+    if (q_alu_op >= ALU_AAA && q_alu_op <= ALU_AAD) begin
+      alu_out   = {16'd0, bcd_ax};
+      flags_out = bcd_flags;
+    end
+
     sh_val = (q_mem_read && q_mem_dst) ? wmask(mem_load_data,q_w) : reg_read(q_dst_reg,q_w,q_dst_high8);
     if (q_shift_one) sh_cnt = 6'd1;
     else if (q_shift_cl) sh_cnt = {1'b0, gpr[R_ECX][4:0]};
@@ -2342,6 +2369,79 @@ module core
     sh_cfout = shrot_cf(q_shrot, sh_val, sh_cnt, eflags[0], q_w);
     // shm1 = the operand shifted by (count-1), per QEMU CC_SRC for SHL/SHR/SAR.
     sh_shm1  = (sh_cnt==6'd0) ? sh_val : shrot_result(q_shrot, sh_val, sh_cnt-6'd1, eflags[0], q_w);
+  end
+
+  // ===========================================================================
+  // BCD / ASCII-adjust datapath (AAA/AAS/DAA/DAS/AAM/AAD) — matches QEMU
+  // int_helper.c helper_aaa/aas/daa/das/aam/aad EXACTLY. Computes the AX result
+  // (bcd_ax) + the DEFINED EFLAGS (bcd_flags); the EXEC block above routes these
+  // onto alu_out/flags_out when the op is BCD. Architecturally-undefined flags
+  // (OF always; SF/ZF/PF for AAA/AAS; CF/AF for AAM/AAD) are left cleared and are
+  // removed from the differential by tracefmt.eflags_undefined_mask. AAM base 0
+  // is a #DE this core defers (like native DIV-by-zero); the divide is guarded to
+  // avoid an X (the corpus never executes AAM 0). Outputs default unconditionally
+  // (no latch); the `default` arm computes AAA and also covers every non-BCD
+  // q_alu_op (harmless dead compute — bcd_* are consumed only for BCD ops).
+  // ===========================================================================
+  logic [15:0] bcd_ax;
+  logic [31:0] bcd_flags;
+  always_comb begin
+    logic [7:0]  al0, ah0, imm8, nal, nah;
+    logic        af0, cf0, icar;
+    logic [31:0] fl;
+    al0  = gpr[R_EAX][7:0];
+    ah0  = gpr[R_EAX][15:8];
+    imm8 = q_imm[7:0];
+    af0  = eflags[4];
+    cf0  = eflags[0];
+    icar = 1'b0;
+    fl   = eflags & 32'hFFFF_F72A;   // clear CF/PF/AF/ZF/SF/OF
+    fl[1]= 1'b1;                     // reserved bit 1 always 1
+    nal  = al0; nah = ah0;
+    case (q_alu_op)
+      ALU_AAS: begin
+        // QEMU carries SF/ZF/PF/OF THROUGH (only CF/AF change). Must match
+        // exactly: the undefined bits persist into later (unmasked) instructions.
+        fl = eflags; fl[1]=1'b1;
+        icar = (al0 < 8'd6);
+        if ((al0[3:0] > 4'd9) || af0) begin
+          nal = (al0 - 8'd6) & 8'h0F; nah = ah0 - 8'd1 - {7'd0,icar};
+          fl[0]=1'b1; fl[4]=1'b1;
+        end else begin nal = al0 & 8'h0F; fl[0]=1'b0; fl[4]=1'b0; end
+      end
+      ALU_DAA: begin
+        if ((al0[3:0] > 4'd9) || af0) begin nal = al0 + 8'd6;  fl[4]=1'b1; end
+        if ((al0 > 8'h99)     || cf0) begin nal = nal + 8'h60; fl[0]=1'b1; end
+        fl[6]=(nal==8'd0); fl[2]=~^nal; fl[7]=nal[7];          // ZF/PF/SF
+      end
+      ALU_DAS: begin
+        if ((al0[3:0] > 4'd9) || af0) begin
+          fl[4]=1'b1; if ((al0 < 8'd6) || cf0) fl[0]=1'b1; nal = al0 - 8'd6;
+        end
+        if ((al0 > 8'h99) || cf0) begin nal = nal - 8'h60; fl[0]=1'b1; end
+        fl[6]=(nal==8'd0); fl[2]=~^nal; fl[7]=nal[7];
+      end
+      ALU_AAM: begin
+        nah = (imm8==8'd0) ? 8'd0 : (al0 / imm8);   // AH = AL/base
+        nal = (imm8==8'd0) ? 8'd0 : (al0 % imm8);   // AL = AL%base
+        fl[6]=(nal==8'd0); fl[2]=~^nal; fl[7]=nal[7];          // CF/OF/AF undef
+      end
+      ALU_AAD: begin
+        nal = (ah0 * imm8) + al0; nah = 8'd0;       // AL = AH*base+AL; AH=0
+        fl[6]=(nal==8'd0); fl[2]=~^nal; fl[7]=nal[7];
+      end
+      default: begin // ALU_AAA (and every non-BCD op: harmless dead compute)
+        // QEMU carries SF/ZF/PF/OF THROUGH (only CF/AF change) — match exactly.
+        fl = eflags; fl[1]=1'b1;
+        icar = (al0 > 8'hF9);
+        if ((al0[3:0] > 4'd9) || af0) begin
+          nal = (al0 + 8'd6) & 8'h0F; nah = ah0 + 8'd1 + {7'd0,icar};
+          fl[0]=1'b1; fl[4]=1'b1;                   // CF=AF=1
+        end else begin nal = al0 & 8'h0F; fl[0]=1'b0; fl[4]=1'b0; end  // CF=AF=0
+      end
+    endcase
+    bcd_ax    = {nah, nal};
+    bcd_flags = fl;
   end
 
   // ---- CMPXCHG (0F B0/B1) combinational compute -----------------------------

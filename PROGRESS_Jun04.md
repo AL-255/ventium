@@ -1020,3 +1020,73 @@ the M8.1 pirqsoc checkpoint-differential.
   files). Files: `rtl/soc/ventium_soc.sv`, `rtl/ventium_soc.f`,
   `verif/sys/tests/psocdev/{psocdev.S,psocdev.ld,Makefile,manifest.json,psocdev.sys.vtrace.golden}`,
   `verif/soc/run-soc-dev-gate.sh`.
+
+### Expert fidelity review (REVIEW_Jun5.md) — response: BCD closure + honesty + boundary tests + plan (2026-06-05)
+
+An external expert produced `REVIEW_Jun5.md` (a P54C fidelity review). Verdict:
+credible ISA-exact + cycle-approximate replica over the tested subset; main risk =
+**wording overclaim**, plus real microarchitecture-fidelity gaps. Addressed with 9
+parallel analyst subagents (specs) → 4 parallel implementer subagents (disjoint
+docs/tests/bus-script) + the orchestrator (the RTL closure), then integrated +
+gated centrally. Two follow-on adversarial passes confirmed accuracy.
+
+- **REAL RTL CLOSURE — the 6 BCD/ASCII-adjust instructions (closes the "full
+  integer ISA" gap).** `AAA`(0x37)/`AAS`(0x3F)/`DAA`(0x27)/`DAS`(0x2F)/`AAM`(0xD4
+  ib)/`AAD`(0xD5 ib) — previously `d_unknown`→HALT — now execute, **bit-exact vs
+  QEMU `helper_aaa/aas/daa/das/aam/aad`** (`int_helper.c`). Decoded as `K_ALU`
+  `ALU_AAA..ALU_AAD` (each writes AX via `q_w=2`); a dedicated `bcd_ax`/`bcd_flags`
+  `always_comb` computes the AX result + DEFINED flags and overrides
+  `alu_out`/`flags_out`. The subtle part, found by the gate: the architecturally-
+  UNDEFINED flags **persist into the next instruction** (where they are not
+  masked), so AAA/AAS must **carry SF/ZF/PF/OF through** exactly as QEMU does
+  (only CF/AF change) — not clear them; DAA/DAS/AAM/AAD fully define their flags to
+  match QEMU (incl. OF=0, AAM/AAD CF=AF=0). `tracefmt.eflags_undefined_mask`
+  already carried the BCD masks (0x8C4 / 0x800 / 0x811). New differential test
+  `verif/tests/t_bcd/` (35 ops across every code path: low-nibble/AF/CF, the
+  `AL>0xF9` AAA-icarry, `old_AL>0x99` DAA/DAS high-adjust, non-standard AAM/AAD
+  bases) → **`make verify` 59/59 EQUIVALENT, the 57 pre-existing goldens
+  byte-identical (additive, zero regression)**. AAM base-0 `#DE` is deferred,
+  consistent with the existing native-DIV-by-zero (also no `#DE`).
+
+- **HONESTY — public claims re-scoped** (the review's #1 risk). README.md + PLAN.md:
+  "high-fidelity"→"ISA-exact and cycle-approximate for the broad verified subset";
+  "full integer ISA"→"broad IA-32 integer ISA with documented HALT gaps"; the
+  D-cache labelled a **timing model** (no data/MESI/writeback), the TLB a
+  **correctness model** (not P54C-structured), the integrated bus a **protocol
+  exerciser** (pins ≠ data, single non-burst cycles). New
+  **`docs/isa-coverage.md`** — a machine-derived family-by-family IMPLEMENTED/
+  PARTIAL/HALT matrix (the HALT set grepped from every `d_unknown=1'b1`; correctly
+  keeps LGDT/LIDT/LTR IMPLEMENTED, lists the genuine gaps: SLDT/LLDT, SMSW/LMSW,
+  CMPXCHG8B, MMX, transcendentals, …). New **`docs/modeled-by-effect.md`** — the
+  Action-1 inventory (native mul/div incl. no-#DE, string/stack/CALL-RET, x87
+  slow-path, task/SMM/walk, timing-dcache, correctness-TLB, protocol-BIU) with a
+  timing-visibility-first priority order.
+
+- **x87 boundary (machine-checkable).** `verif/tests/tx_deferred_halt/` +
+  `verif/tests/run_x87_boundary.sh`: a deferred transcendental (`FSIN`) must
+  **loud-HALT** at its boundary (PASS — nothing past it retires), pinning the
+  coverage edge so it cannot silently rot. `verif/tests/tx_fchs_fabs_special/`: a
+  differential confirming `FCHS`/`FABS` flip/clear only the sign bit on ±inf/NaN
+  (PASS, no RTL change needed). `docs/m3-fpu-spec.md` gains a deferred-x87 section.
+
+- **Bus SVA single command** (Recommended Step 2). New
+  `verif/bus/run_busmode_sva.sh` + `make bus` / `make bus-sva`: `bus-sva` builds
+  the SVA-assertion-enabled integrated model and runs the `bus_mode=1` corpus with
+  the 19 `biu_p5` protocol SVA LIVE (a program passes only if no assertion fired
+  AND it is func-equivalent vs QEMU) — closes the "build-only `rtl-sva` can be
+  misread" gap. `docs/m5b-bus-spec.md` §5.4 makes the integrated-bus caveat explicit.
+
+- **Deferred microarchitecture fidelity — SPEC'd, not landed** (these perturb the
+  calibrated M4/M5 cycle bands and need NEW microbenchmarks → incremental, gated
+  per family): `docs/m5-div-spec.md` (iterative DIV/IDIV: occupancy 17/25/41 +
+  IDIV, EDX:EAX, a real `#DE`), `docs/m5-mul-spec.md` (staged ~10-cycle U-pipe
+  MUL/IMUL), `docs/fastpath-coverage-spec.md` (AP-500 pairable forms that serialize
+  today), `docs/cache-tlb-structural-spec.md` (P54C-shaped split TLB + a D-cache
+  data/MESI/writeback model). **`docs/review-response-plan.md`** maps every review
+  finding → DONE / SPEC'd-deferred → the doc/test that addresses it.
+
+- **Verification.** `make verify` PASS (59/59), `make m3` PASS, `make verify-sys`
+  EQUIVALENT, `run_x87_boundary.sh` PASS, lint BOTH filelists 0/0, `make bus-sva`
+  (corpus + SVA). RTL touched: `rtl/core/core.sv` (BCD decode + `bcd_*` block),
+  `rtl/core/ventium_alu_pkg.sv` (the `ALU_AAA..ALU_AAD` encodings) — additive,
+  every other gate byte-identical. `ventium-refs` untouched.

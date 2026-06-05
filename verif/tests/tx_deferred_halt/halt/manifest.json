@@ -1,0 +1,16 @@
+{
+  "name": "tx_deferred_halt",
+  "src": "tx_deferred_halt/tx_deferred_halt.s",
+  "elf": "tx_deferred_halt/tx_deferred_halt.elf",
+  "image": "tx_deferred_halt/tx_deferred_halt.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 16,
+  "x87": true,
+  "expect": "halt",
+  "boundary": "x87-deferred",
+  "deferred_op": "FSIN (D9 FE) -- transcendental, m3-fpu-spec.md DEFERRED set",
+  "pre_marker_eax": "0xdead0001",
+  "post_marker_ebx": "0xdead0002",
+  "note": "NOT a differential func test: QEMU executes FSIN, the RTL must HALT. Gated by verif/tests/run_x87_boundary.sh, which asserts the loud HALT directly. This manifest lives one level deep (tx_deferred_halt/halt/) so verify.sh's depth-2 corpus discovery (find -mindepth 2 -maxdepth 2 -name manifest.json) does NOT pull it into the differential gate, where the QEMU-vs-RTL length mismatch would (incorrectly) read as a divergence."
+}
