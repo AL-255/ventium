@@ -1,3 +1,6 @@
 [submodule "ventium-refs"]
 	path = ventium-refs
 	url = git@github.com:AL-255/ventium-refs.git
+[submodule "3rd-party/opl3_fpga"]
+	path = 3rd-party/opl3_fpga
+	url = git@github.com:gtaylormb/opl3_fpga.git
