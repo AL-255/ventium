@@ -1168,3 +1168,32 @@ prior goldens unchanged), `make verify-sys` 10/10 EQUIVALENT, lint 0/0. The
 integer MUL+DIV families are now cycle-faithful; only structural multiplier/SRT
 datapaths remain (no observable). RTL touched: `rtl/core/core_exec.svh`;
 `ventium-refs` untouched.
+
+### AP-500 fast-path coverage — batch 1: accumulator-immediate ALU (2026-06-05, review Action 6)
+
+The first (and riskiest-category) coverage closure: the dual-issue fast path only
+recognised a whitelist of forms; AP-500-pairable forms it didn't recognise fell to
+the slow FSM and **serialized** (couldn't dual-issue). Batch 1 adds the
+accumulator-immediate ALU forms `05/0D/15/1D/25/2D/35/3D` (`ALU eAX, imm32`):
+ADD/OR/ADC/SBB/AND/SUB/XOR/CMP, mirroring the existing `A9` (TEST eAX,imm32) + `83`
+reg-imm arms (`rtl/core/decode.sv`, the `8'b00??_?101` arm; ADC/SBB=PU, CMP writes
+no reg). The lowest-risk batch (pure register/immediate, no memory/stack).
+
+- **Func byte-identical** — the hard requirement: the fast path now EXECUTES these
+  forms (instead of deferring to the slow FSM), so they must match QEMU exactly.
+  `make verify` reports **65/65 goldens unchanged (0 regenerated)** — bit-identical.
+- **They now pair.** NEW gated band `mb_accimm` (the `PAIR` class in
+  `verif/m5_metrics.py`: pairing% ≥ 40 AND abs-cyc within 10% of the p5model
+  golden; wired into `verify.sh` + `run-m5.sh`): the kernel interleaves an
+  accumulator-eAX op (U) with an independent `mov reg,reg` (V) → **RTL pairing 50%
+  (matching p5model exactly), abs-cyc +0.35%** (vs ~0% pairing / ~2× cycles before
+  the fix). PASS.
+- **No band perturbation.** Every existing M4/M5 band held (`mb_depadd`..`mb_imiss`,
+  the div/mul bands) — the converted forms aren't used by those kernels, and where
+  they would be, the RTL converges TOWARD the p5model golden (which pairs them).
+- **Verification.** `make verify` PASS, `make verify-sys` 10/10 EQUIVALENT (the
+  fast path is `!sys_mode`-gated, so system mode is untouched), lint both filelists
+  0/0. Batches 2-5 (byte forms, `81`/`C7` reg-imm, PUSH/POP, near branches, memory)
+  are ordered by risk in `docs/fastpath-coverage-spec.md` §3 — each needs its own
+  pairing microbenchmark + a re-run of all bands + the full func diff. RTL touched:
+  `rtl/core/decode.sv`; `ventium-refs` untouched.

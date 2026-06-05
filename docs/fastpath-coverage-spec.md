@@ -1,12 +1,28 @@
-# AP-500 fast-path coverage gap spec (DEFERRED)
+# AP-500 fast-path coverage gap spec
 
-Status: **SPEC ONLY — not implemented in this change set.** Captures
-REVIEW_Jun5.md Limit #5, Action 6 ("Expand AP-500 fast-path coverage"). Adding
-fast-path forms changes which kernels pair vs serialize, which perturbs the
-calibrated cycle bands and needs a new pairing microbenchmark, so it is tracked
-incremental work, not landed now.
+Status: **BATCH 1 IMPLEMENTED + GATED (2026-06-05); batches 2-5 deferred.**
+REVIEW_Jun5.md Limit #5, Action 6 ("Expand AP-500 fast-path coverage").
 
-Owner doc; touches no `rtl/` and no Makefile.
+- **DONE — Batch 1: accumulator-immediate ALU (imm32).** The `ALU eAX, imm32`
+  forms `05/0D/15/1D/25/2D/35/3D` (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP) are now
+  fast-pathed in `rtl/core/decode.sv` (the `8'b00??_?101` arm, mirroring the `A9`
+  TEST + `83` reg-imm arms): ADC/SBB=PU, CMP writes no reg. They now PAIR (issue
+  into V) where they previously fell to the slow FSM and serialized. **Func stays
+  byte-identical** (65/65 goldens unchanged — the fast-path execution matches
+  QEMU), every existing M4/M5 band held, and the NEW gated band `mb_accimm` (the
+  `PAIR` class in `verif/m5_metrics.py`: pairing% ≥ 40 AND abs-cyc within 10% of
+  the p5model golden) PASSES at **pairing 50% / abs-cyc +0.35%** (vs ~0% pairing /
+  ~2× cycles before). The 16-bit (66-prefixed) accumulator op keeps `0x66` as its
+  first byte so it never reaches the arm — it stays on the slow FSM.
+- **DEFERRED — batches 2-5** (the byte accumulator forms `04`/`A8`; `81`/`C7`
+  reg-imm; `D1` shift-by-1; PUSH/POP `50+r`/`58+r`; near branches `E8`/`E9`/`0F
+  8x`; memory/store forms). §3 below orders them by frequency × benefit, lowest
+  risk first; each needs its own pairing microbenchmark + a re-run of all bands +
+  the full func diff (byte forms add byte-width fast-path ALU; PUSH/POP + stores
+  add real memory/stack functional risk).
+
+Owner doc; the Batch-1 edit is in `rtl/core/decode.sv` + the band in
+`verif/m5_metrics.py` + `verif/tests/mb_accimm`.
 
 ---
 

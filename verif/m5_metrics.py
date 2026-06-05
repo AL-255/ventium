@@ -113,6 +113,15 @@ DIV_OCC = {"div8": 17, "div16": 25, "div32": 41, "idiv32": 46}
 MUL_CPI_MIN = 1.8
 MUL_OCC = {"mul": 10, "imul2": 10}
 
+# AP-500 fast-path PAIRING-coverage band (review-response, fastpath-coverage-spec
+# .md). A converted form must actually PAIR (issue into the V pipe) where it
+# previously serialized on the slow FSM. The kernel alternates a converted U-form
+# with an independent pairable V partner, so ~50% of records are paired when the
+# coverage works and ~0% when the form falls to the slow FSM. PAIR_MIN gates "the
+# form pairs"; abs-cyc-vs-p5model pins that the RTL converges to the oracle (which
+# also pairs these forms).
+PAIR_MIN = 40.0
+
 # Default tightened abs-cyc tolerance (overridable via --abs-tol-pct from
 # run-m5.sh, which owns the documented M5_TOL_PCT choice).
 DEFAULT_ABS_TOL_PCT = 10.0
@@ -277,6 +286,26 @@ def compute(kernel, rtl_path, golden_path, abs_tol_pct=DEFAULT_ABS_TOL_PCT):
         extra = f"abscyc={d:+.2f}%"
         detail = (f"multiply-occupancy present (CPI {cpi:.3f} >= {MUL_CPI_MIN})? "
                   f"{elevated}; abs-cyc {d:+.2f}% vs p5model (occ~{occ}) "
+                  f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
+        return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
+
+    if short in ("accimm",):
+        # PAIRING-coverage band: (1) the converted form pairs (pairing% above the
+        # serialized baseline); (2) abs-cyc tracks the p5model golden (which pairs
+        # these forms) within tolerance.
+        try:
+            gold = tracefmt.read_trace(golden_path)
+            gold_total = _total_cyc(gold)
+        except Exception as e:
+            return ("FAIL", cpi_s, pair_s, "abscyc=?",
+                    f"golden trace unreadable ({e}) — cannot check abs-cyc")
+        d = _abs_diff_pct(total, gold_total)
+        paired_ok = pairing >= PAIR_MIN
+        tracked = abs(d) <= abs_tol_pct
+        ok = paired_ok and tracked
+        extra = f"pair={pairing:.0f}%"
+        detail = (f"fast-path pairing present (pairing% {pairing:.1f} >= "
+                  f"{PAIR_MIN})? {paired_ok}; abs-cyc {d:+.2f}% vs p5model "
                   f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
         return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
 
