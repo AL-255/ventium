@@ -192,6 +192,21 @@ M7.3 Win95 device-input replay + boot-prefix run.
     EQUIVALENT, lint clean — the proxy/`%gs` path is inert without `--quake-image`.
   - Reproducer: `verif/m7/run-quake-lockstep.sh [N] [PORT]`. The run length is
     oracle-bound (gdbstub ~10k insn/s); a longer background prefix follows.
+- 2026-06-05 — **M7.1 LONGEST-RUN: Quake bit-exact to 1,106,162 instructions, then
+  a named ISA wall.** Ran a ~9.6M-record background golden (timeout-bounded) and the
+  RTL lock-step against it via a new O(1)-memory streaming comparator
+  (`verif/diff/compare_stream.py`, reuses compare.py's exact func+eflags grading;
+  24 MB RSS for 9.6M records vs compare.py loading all into RAM). Result: **1,106,162
+  instructions EQUIVALENT** (independently streamed; the 1M cross-check matches
+  compare.py; corrupt control DIVERGENT) — then the RTL HALTed (went quiescent) on
+  the instruction at n=1106162, pc=0x080a7810, bytes `f0 0f b1 97 f4 33 00 00` =
+  **`LOCK CMPXCHG dword ptr [edi+0x33f4], edx`** — `CMPXCHG` (0F B1) with a memory
+  operand, undecoded by the core (musl's atomic/lock path). A genuine, precisely-
+  named coverage gap — the **3rd** ISA gap the Quake macro-workload has surfaced
+  (after `TEST r/m,imm` mem-form + the `call gs:[]` operand segment in M7.1). The
+  run went as far as the RTL's ISA coverage allows; the wall is real, not a harness
+  artifact (everything before it is bit-exact). Next: implement `CMPXCHG` (0F B0/B1)
+  to push the frontier (it also benefits Win95).
 - 2026-06-05 — **M7.2 DONE: VIRTUAL-8086 mode (method-1 / VME-OFF) RTL-diffs
   EQUIVALENT 949/949.** The `pv86` bare-metal gate boots real→protected→paging→TSS,
   ENTERS V86 by an IRET of a 9-word V86 frame (EFLAGS.VM 0→1, CPL 0→3, sel<<4 seg
