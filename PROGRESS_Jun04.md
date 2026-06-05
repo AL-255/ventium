@@ -131,8 +131,9 @@ extraction that cannot be made bit-exact is reverted and documented as spine-bou
 3. Adversarial review (behavior-equivalence focus) + independent full-gate re-run.
 4. Commit + push.
 
-**Status:** ✅ done — 4 of 6 leaves extracted (the 4 with a single write port);
-regfile + fpu-state proven spine-bound and left inline (honest).
+**Status:** ✅ done — **5 of 6** leaves extracted bit-exact; regfile alone proven
+spine-bound and left inline (honest). (fpu-state, initially logged spine-bound, was
+re-attacked and extracted bit-exact in the follow-on below — see "fpu_top" R2 log.)
 
 ### R2 outcome
 
@@ -161,10 +162,16 @@ leaf was lifted one at a time, **full gate after every step**, commit-on-green.
 - **regfile `gpr[8]`** — 88 write statements; CONFIRMED 2-writes/clock (dual-issue U+V,
   XCHG, MUL/DIV EAX+EDX, CDQ/CWD, POP/LEAVE dst+ESP). Bit-exact extraction needs a
   2-write-port mux + re-routing all 88 arms = an FSM restructure, not a lift.
-- **fpu-state** (`fpr/ftop/fstat/fptag` + the M5 scoreboard) — written from two
-  runtime-exclusive FSM arms; `FNSTSW AX` writes `gpr[EAX]` from inside the x87 case
-  (cross-leaf into the regfile); the scoreboard is braided into the integer cycle model.
-  Needs an FSM rewrite. The pure x87 datapath already lives in `fpu_x87_pkg.sv`.
+
+**fpu-state — re-attacked and EXTRACTED bit-exact (was initially logged spine-bound).**
+The first R2 pass deferred fpu-state as "needs an FSM rewrite." A second analysis fan-out
+found that was over-conservative: the only 2-write-port patterns are FXCH (a 2-slot SWAP)
+and FCOMPP/FUCOMPP (2 adjacent tag bits) — both ISOLATED and expressible as dedicated
+`we_fxch`/`we_pop2` ports rather than a generic dual-write mux, and the two writer arms
+are RUNTIME-EXCLUSIVE (fast M5 cycle-mode vs slow S_FEXEC/S_FSTORE) so per-category
+strobes safely OR. The cross-leaf `FNSTSW AX`→`gpr[EAX]` and the scoreboard simply STAY
+in the spine (the module exposes `fstat_o`/`ftop_o` read ports). See the fpu_top entry in
+the R2 log for the full extracted-vs-stayed split + the byte-identical proof.
 
 **Honest note on size:** the leaf *logic* moved into 473 lines of self-contained,
 separately-readable modules, but `core.sv` did **not** shrink (5741 → 5990) — the
@@ -186,6 +193,72 @@ lint clean (0 warn/err). Adversarial review verdict: GENUINE + behavior-preservi
 - 2026-06-04 — R2 opened; roadmap snapshot recorded; leaf analysis launched.
 - 2026-06-04 — R2 done: dcache_timing/bpred_btb/tlb(×2)/icache extracted bit-exact
   (`ed573c3`/`f782700`/`544a365`/`6bb98ea`); regfile + fpu-state documented spine-bound.
+- 2026-06-05 — **fpu_top (the x87 STATE FILE) extracted bit-exact** — the 5th leaf;
+  reverses the earlier "fpu-state spine-bound" call (it was extractable after a richer
+  write-port design). Reviewed + gate-verified independently below.
+
+### fpu_top — x87 architectural STATE FILE extraction (2026-06-05, bit-exact)
+
+**What this is.** `rtl/fpu/fpu_top.sv` (the M0 empty placeholder, previously a no-op
+`fpu_top u_fpu(.clk,.rst_n)` stub in `ventium_top.sv`) is now the REAL x87 architectural
+STATE FILE, instantiated as `u_fpu_state` INSIDE `core.sv` (FP state interacts with the
+core FSM, so it is a core submodule — same pattern as the dcache/tlb in-core instances).
+The `ventium_top` stub is removed (like the earlier ucode/dcache/tlb stub removals).
+
+**EXTRACTED into `fpu_top` (the module owns):** the 8×80-bit physical stack `fpr[8]`, the
+3-bit TOP pointer `ftop`, the control/status/tag words `fctrl`/`fstat`/`fptag`; the
+synchronous FNINIT power-on reset (`ftop=0`/`fctrl=0x037f`/`fstat=0`/`fptag=0xFF`,
+`fpr[]=0`); the TOP-relative `st(i)` read addressing exposed as combinational read ports
+(`st0..st7` = `fpr[ftop+i]`, `rd_phys_top` = `fpr[ftop]`, raw `ftop_o/fstat_o/fctrl_o/
+fptag_o`); and a write-port set covering EVERY observed mutation pattern — `we_push`
+(ftop--/`fpr[ftop-1]`/tag-clear), `we_top`+`we_fstat`, `we_sti` (with `wsti_clr_tag`
+distinguishing FST_STI which clears the dest tag from AR_STI_ST0 which does not), the
+2-slot `we_fxch` SWAP, `we_pop`, `we_pop2` (FCOMPP/FUCOMPP), `we_ffree`, `we_incstp`/
+`we_decstp`, `we_fctrl` (FLDCW), `we_fninit`. The module owns the OLD-ftop NBA index
+arithmetic internally (push uses the registered `ftop-1`, pop uses `ftop`, sti uses
+`ftop+idx`, ftop bumped in the same `always_ff`), so the inline NBA ordering is
+reproduced VERBATIM.
+
+**STAYED in the spine (`core.sv`):** (a) the entire DATAPATH — every floatx80/fstat value
+is still computed by `fpu_x87_pkg` calls (`f_eval`/`fconst`/`apply_cmp`/`fcom_codes`/
+`fcom_ie`/`fxam_codes`/`fx_sqrt`/`f_mem_as_*`/`f_arith_fstat` + the `fstore_val` narrow),
+now in a new `fp_we_*` combinational driver that re-derives BOTH writer guards and drives
+the module's write ports (the module NEVER computes a floatx80 and NEVER masks fstat);
+(b) the M5 FP scoreboard (`fp_ready_cyc`/`fp_occ_pending`/`fp_issue_cyc`) + its reset +
+the issue-stall/occ-burn gates; (c) the S_FEXEC/S_FSTORE FSM sequencing + the
+`f_pc_bad`→S_HALT gate + the `f_do_store`/`f_do_retire` transition; (d) `FNSTSW AX` →
+`gpr[EAX]` (cross-leaf: reads `fstat_o`/`ftop_o`, writes the integer file); (e) the trace
+overlay `retire_fstat=(fstat&~0x3800)|(ftop<<11)` / `retire_ftag=0` / `x87_touched_r`.
+`fstat` is presented to the module FULLY COMPUTED (the spine does all masking/merge/
+sticky-OR) and exposed RAW (TOP not overlaid) so the overlay + FNSTSW stay byte-identical.
+
+**Bit-exact proof (independently re-run + reviewed 2026-06-05).** Established the
+pre-refactor BASELINE by reverting the 3 RTL files to HEAD, rebuilding, and capturing the
+RTL traces; then diffed against the refactored traces:
+- **`make m3` GREEN — 57 PASS / 0 FAIL**, and the 57 RTL `.vtrace` outputs are
+  **0/57 differing** (BYTE-IDENTICAL) vs the baseline snapshot — `retire_st0..st7`/
+  `fctrl`/`fstat`/`ftag` all identical across the 14 x87 programs + the integer suite.
+- **`make verify` GREEN + BYTE-IDENTICAL** — func 57/57; the 68 verify RTL traces are
+  **0/68 differing** vs baseline (incl. the M5 cycle-mode FP traces). Every cycle band
+  matches the baseline TO THE DIGIT: mb_faddchain CPI **3.010** (lat-3 chain), mb_fpindep
+  CPI **1.158** (< chain), mb_dmiss **2.504**, mb_imiss **6.009**; abs-cyc deltas
+  depadd +2.85% / indepadd +6.16% / agi +2.84% / brloop +0.23% / brrandom +0.27% /
+  dmiss +0.10% / imiss +0.14% — all unchanged. **Goldens regenerated: 0** (57/57 func
+  cache hits, 67 cached, 0 new — the `.s` sources are untouched).
+- **2-write-port FXCH + push/pop ftop/tag semantics PRESERVED** — exercised by tx_chain
+  (FXCH reorder) + tx_stack (`fxch %st(7)` deep-swap + bare-FXCH) + the load/store/pop
+  corpus; all byte-identical. The FST_STI-with-pop tag-bit corner (sti==0: `we_sti` tag-
+  clear then `we_pop` tag-set on the same bit) preserves the inline last-write-wins order
+  (the module's `we_pop` block is textually after `we_sti`, so pop wins — matches HEAD).
+- **Lint clean** — `verilator --lint-only -Wall` line-normalized diff vs HEAD: **0 NEW
+  warnings**, and one warning REMOVED (a dead `logic resv` local the refactor dropped).
+  ZERO non-UNUSED warnings (no MULTIDRIVEN/LATCH/UNOPTFLAT/WIDTH) — the spine `logic`
+  aliases `ftop/fctrl/fstat/fptag` are single-driver (the module `*_o` outputs), the
+  `fp_we_*` `always_comb` is fully defaulted (no latch), no comb loop through the read→
+  drive→write path. No NBA-order change.
+- **Scope clean** — only `rtl/core/core.sv`, `rtl/fpu/fpu_top.sv`, `rtl/ventium_top.sv`
+  touched; `rtl/soc`/`verif/soc`/`ventium-refs` and the M8 SoC files UNTOUCHED. Not
+  committed — the orchestrator verifies + commits.
 
 ## M2S.4b — HARDWARE TASK SWITCH (far `JMP` to a 32-bit TSS) — CLOSES the M2S.4 deferral
 
@@ -623,3 +696,40 @@ M7.3 Win95 device-input replay + boot-prefix run.
     `make m6` (Err79 §5) + `make verify` (the OFF bit-identical complement).
     `ventium-refs/` untouched (read-only). Not committed — the orchestrator
     verifies + commits.
+
+## M8 — self-contained SoC (PC peripherals in RTL) — OPENED 2026-06-05
+
+Goal (user-directed): implement the PC platform devices in synthesizable Verilog so
+Ventium boots + runs **without QEMU providing the platform**. The verification model
+shifts: register-level **differential vs `qemu-system-i386`** where deterministic +
+**structural** for device timing/IRQ cadence + **behavioral** boot-progress (no clean
+bit-exact oracle for the devices — QEMU's device timing ≠ ours).
+
+- **M8.0 — design/de-risk DONE.** Architecture: a NEW separate top `rtl/soc/ventium_soc.sv`
+  (the verification `ventium_top` stays untouched, so all existing gates are
+  bit-identical), the SAME core with new INTR/NMI/INTA pins, devices attached at the
+  EXISTING abstract `io_*`/`mem_*` seams (NOT the pin-level bus — `biu.sv` is
+  single-cycle loopback with no pin oracle + a multi-cycle device latency would corrupt
+  the cycle-accurate icache fill). Firmware: a CUSTOM minimal boot ROM first
+  (differentially checkable by running the same ROM under qemu-system); SeaBIOS deferred
+  (needs fwcfg/PCI/PAM). Staging: M8.1 INTR-pin + PIC + PIT → M8.2 RTC/A20/i8042 → M8.3
+  VGA + custom ROM → M8.4 IDE (deferred, largest) → M8.5 PCI (deferred). Device priority
+  from the M7.3a Win95-boot histogram (IDE dominant, then VGA, ACPI-timer, RTC, PCI, PIC/PIT).
+- **M8 device modules DONE (commit `af54d41`).** 7 standalone, synthesizable, lint-clean
+  device models, each with a directed unit self-check **bit-matched to the QEMU 8.2.2
+  device C source** (unit-level — NOT yet differential-vs-qemu-system; that arrives at
+  integration): `ven_pic` (8259 master+slave+ELCR, 42/42), `ven_pit` (8254, 59/59 — the
+  `count==0`⇒`0x10000` check made non-vacuous via the mode-0 OUT terminal-count timing),
+  `ven_rtc` (MC146818, 33/33), `ven_i8042` (kbd/A20), `ven_acpipm` (PM timer, 12/12),
+  `ven_port92` (A20/reset), `ven_vgaregs` (VGA register file, 49/49). Common register
+  interface (`clk/rst/cs/we/addr/wdata/rdata` + device-specific) so the M8.1 PMIO decoder
+  wires them uniformly; the `ven_pic` adds `irq_in[15:0]`/`int_out`/`inta`/`inta_vector`.
+  `verif/soc/` unit harnesses (per-target obj dirs, no parallel-build race); build
+  artifacts gitignored. Honest structural caveats (free-running cadence, PIC single-step
+  composition) documented in each module.
+- **Dependency landed:** `3rd-party/opl3_fpga` submodule (OPL3/YMF262 FM synth) added
+  (`523cafe`) for a future SoundBlaster device stage.
+- **NEXT: M8.1** — `ventium_soc` + the core INTR/NMI/INTA delta (drives the verified
+  `S_INT_GATE` IDT path from an external pin — closes the M7.3a interrupt-injection gap),
+  wiring PIC+PIT, gated `soc_en` (all existing gates bit-identical), with a bare-metal
+  differential-vs-qemu-system gate.
