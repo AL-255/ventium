@@ -447,10 +447,17 @@ module core
   // (8 word reads = imiss penalty) in S_PF, allocating the 2-way LRU victim.
   localparam int IC_SETS = 128;
   localparam int IC_LINE = 32;
-  logic [7:0]  ic_data [IC_SETS][2][IC_LINE];
-  logic [19:0] ic_tag  [IC_SETS][2];   // addr[31:12]
-  logic        ic_val  [IC_SETS][2];
-  logic        ic_lru  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
+  // The I-cache ARRAYS + per-word fill + fill-complete MRU + up-to-3 LRU touches
+  // + synchronous reset now live in the `icache` module (rtl/mem/icache.sv, R2
+  // extract), instantiated as u_icache below. The arrays are EXPOSED READ-ONLY as
+  // these outputs so the combinational probes (ic_present / ic_hit_way / ic_byte)
+  // read the REGISTERED PRE-edge state directly, UNCHANGED. The fill is sequenced
+  // by the spine regs below (pf_fill_addr/pf_fill_way/pf_word + the ~ic_lru_o
+  // victim, which STAY here); the module never recomputes the victim.
+  logic [7:0]  ic_data_o [IC_SETS][2][IC_LINE];
+  logic [19:0] ic_tag_o  [IC_SETS][2];   // addr[31:12]
+  logic        ic_val_o  [IC_SETS][2];
+  logic        ic_lru_o  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
   logic [31:0] pf_fill_addr;         // line base currently being filled
   logic        pf_fill_way;          // 2-way victim way chosen for the fill
   logic [2:0]  pf_word;              // refill word counter (8 words = 32 bytes)
@@ -2342,13 +2349,15 @@ module core
   // It takes the U decode + V candidate decode and drives `pipe_pair_ok`.
 
   // icache presence: is the 32-byte line containing `addr` resident in EITHER way
-  // of its set? (2-way, mirrors the oracle / the RTL D-cache lookup.)
+  // of its set? (2-way, mirrors the oracle / the RTL D-cache lookup.) Reads the
+  // module's READ-ONLY array outputs (ic_val_o/ic_tag_o) — PRE-edge registered
+  // state, VERBATIM the old inline probe (only the array names gained the _o).
   function automatic logic ic_present(input logic [31:0] addr);
     logic [6:0] set; logic [19:0] tag;
     begin
       set = addr[11:5]; tag = addr[31:12];
-      ic_present = (ic_val[set][0] && ic_tag[set][0]==tag) ||
-                   (ic_val[set][1] && ic_tag[set][1]==tag);
+      ic_present = (ic_val_o[set][0] && ic_tag_o[set][0]==tag) ||
+                   (ic_val_o[set][1] && ic_tag_o[set][1]==tag);
     end
   endfunction
   // which way holds the line (assumes ic_present(addr)); way 1 iff way0 misses.
@@ -2356,25 +2365,20 @@ module core
     logic [6:0] set; logic [19:0] tag;
     begin
       set = addr[11:5]; tag = addr[31:12];
-      ic_hit_way = !(ic_val[set][0] && ic_tag[set][0]==tag);
+      ic_hit_way = !(ic_val_o[set][0] && ic_tag_o[set][0]==tag);
     end
   endfunction
-  // icache byte read (assumes ic_present(addr)): from whichever way hit.
+  // icache byte read (assumes ic_present(addr)): from whichever way hit. STALE-BY-
+  // DESIGN: a speculative V-decode of a NON-RESIDENT line still reads ic_data_o
+  // (whatever is there); only ic_val_o gates correctness.
   function automatic logic [7:0] ic_byte(input logic [31:0] addr);
-    ic_byte = ic_data[addr[11:5]][ic_hit_way(addr)][addr[4:0]];
+    ic_byte = ic_data_o[addr[11:5]][ic_hit_way(addr)][addr[4:0]];
   endfunction
 
-  // icache LRU update on a confirmed HIT (the line's set marks the hit way MRU).
-  // Mirrors the oracle l1_access() hit path (s->lru = w) and the RTL D-cache
-  // dc_access hit path, so the I-cache replacement SEQUENCE matches the oracle.
-  task automatic ic_touch(input logic [31:0] addr);
-    logic [6:0] set; logic [19:0] tag;
-    begin
-      set = addr[11:5]; tag = addr[31:12];
-      for (int w=0; w<2; w++)
-        if (ic_val[set][w] && ic_tag[set][w]==tag) ic_lru[set]<=w[0];
-    end
-  endtask
+  // icache LRU update on a confirmed HIT now lives in the icache module: the spine
+  // drives up to 3 touch ports (U / U-straddle / V) on the issue arm — see the
+  // ic_tch*_* combinational driver near the u_icache instantiation. Each replaces
+  // an old ic_touch(addr) call (oracle l1_access() hit path: s->lru = hit way).
 
   // D-cache hit test + access/allocate now live in the dcache_timing module
   // (rtl/mem/dcache.sv): the comb lookup is dc_lu_hit (off dc_lu_addr) and the
@@ -2711,11 +2715,8 @@ module core
       retire2_pipe<=2'd0; retire2_paired<=1'b0;
       // BTB arrays (btb_tag/btb_ctr/btb_val/btb_rr) are reset inside the
       // bpred_btb module's own rst_n arm (rtl/core/bpred_btb.sv).
-      for (int s=0;s<IC_SETS;s++) begin
-        ic_lru[s]<=1'b0;
-        ic_val[s][0]<=1'b0; ic_val[s][1]<=1'b0;
-        ic_tag[s][0]<=20'd0; ic_tag[s][1]<=20'd0;
-      end
+      // I-cache arrays (ic_data/ic_tag/ic_val/ic_lru) are reset inside the icache
+      // module's own rst_n arm (rtl/mem/icache.sv) — u_icache.
       // M2S.2 paging: the TLB arrays are reset inside the tlb module's own rst_n
       // arm (rtl/mem/tlb.sv) — u_itlb / u_dtlb. Only the page-walk FSM regs (which
       // stay in the spine) are reset here.
@@ -2789,17 +2790,12 @@ module core
         // -------------------------------------------------------------------
         S_PF: begin
           if (mem_ack) begin
-            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+0]<=mem_rdata[7:0];
-            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+1]<=mem_rdata[15:8];
-            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+2]<=mem_rdata[23:16];
-            ic_data[pf_fill_addr[11:5]][pf_fill_way][{pf_word,2'b00}+3]<=mem_rdata[31:24];
+            // The word write into ic_data (+ the fill-complete tag/val/MRU on the
+            // last word) lands in the icache module via the ic_fill_* driver below
+            // (set=pf_fill_addr[11:5], way=pf_fill_way, off={pf_word,2'b00}). This
+            // arm keeps only the fill SEQUENCING (the word counter + state return).
             if (pf_word==3'd7) begin
               pf_word<=3'd0;
-              // allocate the chosen 2-way victim and mark it MRU (oracle l1_access
-              // miss path: s->val[victim]=1; s->tag[victim]=tag; s->lru=victim).
-              ic_tag[pf_fill_addr[11:5]][pf_fill_way]<=pf_fill_addr[31:12];
-              ic_val[pf_fill_addr[11:5]][pf_fill_way]<=1'b1;
-              ic_lru[pf_fill_addr[11:5]]<=pf_fill_way;
               state<=S_PIPE;
             end else pf_word<=pf_word+3'd1;
           end
@@ -2834,12 +2830,13 @@ module core
             // 0 here and S_PF fetches words 1..7 (7 clocks). Total = 1 + 7 = 8
             // clocks = imiss exactly, with NO wasted transition clock (the old code
             // burned a non-fetching detection clock before the 8 fill clocks -> 9).
-            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][0]<=mem_rdata[7:0];
-            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][1]<=mem_rdata[15:8];
-            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][2]<=mem_rdata[23:16];
-            ic_data[pf_miss_fa[11:5]][~ic_lru[pf_miss_fa[11:5]]][3]<=mem_rdata[31:24];
+            // The word-0 write into ic_data lands in the icache module via the
+            // ic_fill_* driver below (set=pf_miss_fa[11:5], way=victim, off=0). The
+            // victim (~ic_lru_o, the PRE-edge not-MRU way) is computed HERE in the
+            // spine and latched into pf_fill_way so S_PF fills words 1..7 + the
+            // fill-complete MRU into the SAME way (the module never recomputes it).
             pf_fill_addr <= pf_miss_fa;
-            pf_fill_way  <= ~ic_lru[pf_miss_fa[11:5]];
+            pf_fill_way  <= ~ic_lru_o[pf_miss_fa[11:5]];
             pf_word<=3'd1; state<=S_PF;
           end else if (pending_mem_pen!=7'd0) begin
             // M5: a previous load's D-cache miss/misalign penalty is DEFERRED to
@@ -2926,7 +2923,8 @@ module core
               fp_occ_pending <= 1'b0;
               // I-cache LRU: mark this fetched line MRU (2-way LRU, per the oracle
               // per-fetch l1_access). FP ops are 2 bytes (no straddle in practice).
-              ic_touch(flin);
+              // The touch lands in u_icache via tch0 (ic_tch0_* driver above, gated
+              // on this exact FP-issue+commit arm).
               eip<=eip + {28'd0,u_d.len};
               q_pc<=eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
               retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
@@ -2972,11 +2970,9 @@ module core
             // the oracle's per-instruction l1_access). U's line, U's straddle line
             // (only when it crosses the boundary), and the paired V's line are the
             // lines actually fetched this clock. Order matches the oracle (U then
-            // its straddle then V).
-            ic_touch(flin);
-            if (({1'b0,flin[4:0]} + {2'b0,u_d.len}) > 6'd32)
-              ic_touch(flin + {28'd0,u_d.len} - 32'd1);
-            if (do_v) ic_touch(flin + {28'd0,u_d.len});
+            // its straddle then V). These three touches now land in u_icache via the
+            // tch0/tch1/tch2 ports (ic_tch*_* driver above), gated on this exact
+            // integer-ISSUE arm, with the SAME U->straddle->V last-write-wins order.
 
             // ---- U commit ----
             if (u_d.is_lea) begin
@@ -5574,6 +5570,129 @@ module core
     .lu_hit    (dc_lu_hit),
     .acc_valid (dc_acc_valid),
     .acc_addr  (dc_acc_addr)
+  );
+
+  // ===========================================================================
+  // L1 I-cache module ports (the ARRAYS + fill + LRU touch + reset live in the
+  // icache module, below; this is the spine-side combinational driver). The arrays
+  // are read PRE-edge through u_icache's READ-ONLY outputs (ic_data_o/ic_tag_o/
+  // ic_val_o/ic_lru_o), which the ic_present/ic_hit_way/ic_byte probes consume
+  // UNCHANGED. The spine OWNS the fill SEQUENCING (pf_fill_addr/pf_fill_way/pf_word
+  // + the ~ic_lru_o victim) and drives the single fill word + up-to-3 LRU touches
+  // here, exactly mirroring the original inline NBA sites (same arm guards, same
+  // addresses, same textual U->straddle->V last-write-wins order).
+  // ===========================================================================
+  logic        ic_fill_en, ic_fill_done, ic_fill_way;
+  logic [6:0]  ic_fill_set;
+  logic [4:0]  ic_fill_off;
+  logic [31:0] ic_fill_data;
+  logic [19:0] ic_fill_tag;
+  logic        ic_tch0_en, ic_tch1_en, ic_tch2_en;
+  logic [6:0]  ic_tch0_set, ic_tch1_set, ic_tch2_set;
+  logic [19:0] ic_tch0_tag, ic_tch1_tag, ic_tch2_tag;
+  always_comb begin
+    // ---- fill port: the two MUTUALLY-EXCLUSIVE fill arms (S_PF words 0..7 vs the
+    // S_PIPE-miss word-0 path; different FSM states/arms => never concurrent).
+    logic ic_pf_miss_fill;
+    // S_PIPE word-0 fill arm: the 2nd S_PIPE else-if (stall_cnt==0, !pipe_bytes_ok),
+    // gated by the !xlate_miss page-walk diversion. The bus asserts the fill's
+    // word-0 read THIS clock (mem_addr = fill line base when pf_miss), so the word
+    // is captured here (no mem_ack guard, exactly the inline arm).
+    ic_pf_miss_fill = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
+                      !pipe_bytes_ok;
+
+    ic_fill_en   = 1'b0;
+    ic_fill_done = 1'b0;
+    ic_fill_set  = 7'd0;
+    ic_fill_way  = 1'b0;
+    ic_fill_off  = 5'd0;
+    ic_fill_data = 32'd0;
+    ic_fill_tag  = 20'd0;
+    if (state==S_PF && mem_ack) begin
+      // S_PF: fill the word covering pf_word; complete (allocate + MRU) on word 7.
+      ic_fill_en   = 1'b1;
+      ic_fill_set  = pf_fill_addr[11:5];
+      ic_fill_way  = pf_fill_way;
+      ic_fill_off  = {pf_word, 2'b00};
+      ic_fill_data = mem_rdata;
+      ic_fill_done = (pf_word==3'd7);
+      ic_fill_tag  = pf_fill_addr[31:12];
+    end else if (ic_pf_miss_fill) begin
+      // S_PIPE-miss word 0 into the not-MRU victim (~ic_lru_o, PRE-edge). NOT a
+      // completing fill — tag/val/MRU land when S_PF reaches word 7 (pf_fill_*).
+      ic_fill_en   = 1'b1;
+      ic_fill_set  = pf_miss_fa[11:5];
+      ic_fill_way  = ~ic_lru_o[pf_miss_fa[11:5]];
+      ic_fill_off  = 5'd0;
+      ic_fill_data = mem_rdata;
+    end
+
+    // ---- LRU touch ports (U / U-straddle / V), textual last-write-wins. Fire only
+    // when an instruction COMMITS this clock — the FP issue+commit arm (touches
+    // flin only) OR the integer ISSUE arm (flin, straddle when it crosses the line
+    // boundary, V when paired). These two arms are mutually exclusive; replicating
+    // their guards is the established pattern (cf. dc u_load_acc above).
+    begin
+      logic ic_in_pipe, ic_halt4, ic_fp_arm, ic_fp_commit, ic_int_issue;
+      logic [31:0] ic_dep_ready, ic_straddle_a, ic_v_a;
+      // common: reached the inner FP/issue else-chain (past stall/fill/defer).
+      ic_in_pipe = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
+                   pipe_bytes_ok && (pending_mem_pen==7'd0);
+      // FK_ARITH-under-bad-PC HALT arm (no touch).
+      ic_halt4   = u_d.is_fp && (u_d.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
+      ic_fp_arm  = ic_in_pipe && !ic_halt4 && u_d.is_fp;
+      ic_dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+      // FP issue+commit = the final else (not the dep-stall, not the occ-burn).
+      ic_fp_commit = ic_fp_arm &&
+                     !(!fp_occ_pending && ($signed(ic_dep_ready - core_cyc) > 0)) &&
+                     !(!fp_occ_pending && (u_d.fp_occ > 7'd1));
+      // integer ISSUE arm = final else of the chain (not-FP, simple, !sys_mode, no
+      // mispred bubble, no AGI). !u_d.is_fp already excludes ic_halt4/ic_fp_arm.
+      ic_int_issue = ic_in_pipe && !u_d.is_fp && !(!u_d.simple || sys_mode) &&
+                     (mispred_bubbles==3'd0) && !pipe_agi;
+
+      // tch0: U's line — touched on EITHER commit arm (set/tag from flin).
+      ic_tch0_en  = ic_fp_commit || ic_int_issue;
+      ic_tch0_set = flin[11:5];
+      ic_tch0_tag = flin[31:12];
+      // tch1: U's straddle line — integer ISSUE arm only, when flin crosses the
+      // 32-byte line boundary (addr = flin + u_d.len - 1). FP ops never straddle.
+      ic_straddle_a = flin + {28'd0,u_d.len} - 32'd1;
+      ic_tch1_en  = ic_int_issue &&
+                    (({1'b0,flin[4:0]} + {2'b0,u_d.len}) > 6'd32);
+      ic_tch1_set = ic_straddle_a[11:5];
+      ic_tch1_tag = ic_straddle_a[31:12];
+      // tch2: paired V's line — integer ISSUE arm only, when pipe_pair (= do_v).
+      ic_v_a      = flin + {28'd0,u_d.len};
+      ic_tch2_en  = ic_int_issue && pipe_pair;
+      ic_tch2_set = ic_v_a[11:5];
+      ic_tch2_tag = ic_v_a[31:12];
+    end
+  end
+
+  icache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE)) u_icache (
+    .clk       (clk),
+    .rst_n     (rst_n),
+    .ic_data_o (ic_data_o),
+    .ic_tag_o  (ic_tag_o),
+    .ic_val_o  (ic_val_o),
+    .ic_lru_o  (ic_lru_o),
+    .fill_en   (ic_fill_en),
+    .fill_set  (ic_fill_set),
+    .fill_way  (ic_fill_way),
+    .fill_off  (ic_fill_off),
+    .fill_data (ic_fill_data),
+    .fill_done (ic_fill_done),
+    .fill_tag  (ic_fill_tag),
+    .tch0_en   (ic_tch0_en),
+    .tch0_set  (ic_tch0_set),
+    .tch0_tag  (ic_tch0_tag),
+    .tch1_en   (ic_tch1_en),
+    .tch1_set  (ic_tch1_set),
+    .tch1_tag  (ic_tch1_tag),
+    .tch2_en   (ic_tch2_en),
+    .tch2_set  (ic_tch2_set),
+    .tch2_tag  (ic_tch2_tag)
   );
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a

@@ -250,7 +250,10 @@ module ventium_top
   // INSIDE the core as u_itlb (IS_D=0) and u_dtlb (IS_D=1), wired to the page-walk
   // FSM + the address-translate path. The old empty M0 `tlb` placeholder stub
   // here is gone (the arrays/lookup/fill/flush live in rtl/mem/tlb.sv now).
-  icache      u_icache  (.clk(clk), .rst_n(rst_n));
+  // R2: the L1 I-cache (the `icache` module: arrays + fill + LRU touch + reset) is
+  // likewise now instantiated INSIDE the core as u_icache, wired to the fast-path
+  // fetch/fill/decode. The old empty M0 `icache` placeholder stub here is gone
+  // (the arrays/probes/fill/touch live in rtl/mem/icache.sv now).
 
   // §6.10 Bus interface unit ---------------------------------------------------
   biu         u_biu     (.clk(clk), .rst_n(rst_n));
