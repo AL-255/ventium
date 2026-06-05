@@ -1295,3 +1295,73 @@ are NOT decode-only: each needs the fast-path EXECUTION datapath extended
 they are a separate, carefully-gated effort, not a quick decode add
 (`docs/fastpath-coverage-spec.md` §3). RTL touched: `rtl/core/decode.sv`;
 `ventium-refs` untouched.
+
+### M8.3 — VGA register file + ACPI PM timer into ventium_soc (2026-06-05, per-record differential)
+
+**What this is.** The M8.3 self-contained-SoC increment: the **last two** built-but-
+unwired device models (`ven_vgaregs`, `ven_acpipm`) are wired into `ventium_soc`,
+completing the **7-device set**. The VGA register file gets a **FULL per-record
+differential** (the substantial deliverable); the ACPI PM timer is wired for
+connectivity with a documented oracle boundary. Mirrors the M8.2 pattern
+(`psocdev`) exactly. **Empirically grounded:** every modeled VGA path was first
+observed under `qemu-system-i386 8.2.2` (a scratch probe) before the test was
+written, so the gate matched on the first run.
+
+- **`ventium_soc.sv` wiring (the ONLY RTL changed — the core / `ventium_top` /
+  `ventium.f` are byte-identical).** Two new chip-selects on the existing PMIO
+  seam: `cs_vga` for the legacy `0x3B0..0x3DF` window (the same window qemu's
+  std-vga decodes; the device internally returns `0xFF` for the mono/color-aliased
+  invalid sub-range, matching `vga_ioport_invalid`), `cs_acpipm` for `0x608`. Read
+  mux: VGA byte → `{24'd0,vga_rdata}`, ACPI PM → the native `rdata32`
+  (`{8'h0,count[23:0]}`). `ven_vgaregs` + `ven_acpipm` instantiated; both added to
+  `rtl/ventium_soc.f`. Lint **0 warnings** (`-Wno-UNUSED`); no new core build.
+
+- **VGA register file is FULLY per-record differentiable.** It is CPU-observable
+  register state ONLY (no framebuffer/scan-out), matched to qemu `hw/display/vga.c`
+  (`vga_ioport_read/write`). The `pvga` gate exercises + grades byte-identical vs
+  qemu-system over **292/292** retired instructions: MISC/ST00 reset reads;
+  SEQUENCER + GRAPHICS per-index write masks (`sr_mask`/`gr_mask`); the DAC 3-byte
+  palette write + read auto-increment; the ATTRIBUTE index/data flip-flop +
+  per-index masks (`ar_write_val`); the **color/mono port aliasing** (write
+  `0x3c2` bit0 flips which of `0x3b0..0x3bf` / `0x3d0..0x3df` read `0xFF`); CRTC
+  index/data in BOTH the color (`0x3d4/0x3d5`) and mono (`0x3b4/0x3b5`) banks; the
+  **CRTC CR0-7 write-lock** (CR11 bit7, incl. the CR7-bit4-always-writable case —
+  confirmed against qemu's `VGA_CR11_LOCK_CR0_CR7` source); and the **IS1 dumb-
+  retrace toggle** (`0x3da/0x3ba` reads alternate `0x09/0x00`, **verified
+  DETERMINISTIC across qemu runs** = dumb-not-precise retrace, so it is ON the
+  differential surface — unlike the host-clock RTC time bytes). `cs` pulses
+  exactly **one clock** per `S_IO` access (`io_ack=io_req`), so the DAC/IS1 read
+  side-effects commit exactly once.
+
+- **ACPI PM timer (`0x608`) — wired, write-inert differential + documented read
+  boundary.** Empirically: qemu's default `-machine pc` leaves the PIIX4 PM I/O
+  region **DISABLED** (PMBASE unprogrammed → `0x608` reads `0xFFFFFFFF` as
+  unassigned I/O), and even when enabled the PM value is **host-clock-derived**
+  (qemu samples a host virtual clock; the RTL samples `clk`) — not reproducible by
+  a `clk`-sampled register model, exactly like the **8042-OBF host-queue** and
+  **LAPIC-eax-only** precedents. So `pvga` never **READS** `0x608`; it does an
+  `OUT 0x608` (write-inert) — a no-op in BOTH qemu (`acpi_pm_tmr_write` does
+  nothing / unassigned-write-ignored) and the RTL — so it **retires identically**,
+  a genuine if narrow per-record differential of the write-inert + non-HALT
+  property. The PM value-read stays covered by the standalone `ven_acpipm` unit
+  self-check (`verif/soc/run_acpipm.sh`). Quiescent in the differential, so it
+  cannot perturb the VGA compare.
+
+- **The gate (`verif/soc/run-soc-vga-gate.sh`, test `verif/sys/tests/pvga/`):
+  PER-RECORD DIFFERENTIAL = EQUIVALENT 292/292.** Real→protected, then synchronous
+  VGA + ACPI-PM I/O, graded against the `gen_trace.py --system` single-step golden
+  (valid per-record oracle — NO interrupts, so the `pirqsoc` `SSTEP_NOIRQ`
+  limitation does not apply). Golden drift-checked vs the committed
+  `pvga.sys.vtrace.golden`: identical.
+
+- **No regression — all SoC + core gates GREEN.** `psocdev` (M8.2) **122/122
+  EQUIVALENT**, `pirqsoc` (M8.1) EQUIVALENT, `test386` external corpus **1500/1500
+  EQUIVALENT** (all run on the modified `ventium_soc`); `make verify` **69/69
+  golden cache hits, 0 regenerated** (the core is untouched, so func byte-
+  identical by construction). RTL touched: `rtl/soc/ventium_soc.sv` +
+  `rtl/ventium_soc.f`; `ventium-refs` untouched.
+
+**M8 device integration is now COMPLETE: all 7 device models are wired into
+`ventium_soc`** (PIC, PIT, RTC, i8042, port-92, VGA, ACPI-PM). The remaining M8
+follow-ons are unbuilt larger devices (8237 DMA, SoundBlaster/OPL3, IDE, PCI) and
+self-contained boot firmware — separate, larger efforts.
