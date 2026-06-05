@@ -38,9 +38,6 @@ mem/tlb.sv
 // ---- sys ------------------------------------------------------------------
 sys/sys_state.sv
 
-// ---- ucode ----------------------------------------------------------------
-ucode/ucode_rom.sv
-
 // ---- bus ------------------------------------------------------------------
 // M5B-int: biu_p5 (the standalone pin-level 64-bit P5 bus FSM, M5B) is now in
 // its canonical RTL home and in the build. `biu` is the gated bus SUBSYSTEM
