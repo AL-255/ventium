@@ -224,7 +224,10 @@ module ventium_top
 
   // §6.1 Front end -----------------------------------------------------------
   fetch       u_fetch   (.clk(clk), .rst_n(rst_n));
-  bpred_btb   u_bpred   (.clk(clk), .rst_n(rst_n));
+  // R2: the branch predictor (bpred_btb: 4-way BTB + 2-bit saturating counter)
+  // is now instantiated INSIDE the core (rtl/core/core.sv), wired to the two
+  // combinational predict ports + the single synchronous resolve port. The old
+  // empty M0 `bpred_btb` placeholder stub here is gone (the module is now real).
   // R1 phase-3: `decode` is now a REAL fast-path decoder leaf (rtl/core/decode.sv),
   // instantiated inside core.sv (u_decode / v_decode). No top-level block-map
   // stub instance — it is wired into the datapath, not tied off.
