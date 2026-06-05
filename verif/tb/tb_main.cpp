@@ -35,6 +35,7 @@
 
 #include "memmodel.h"
 #include "trace_writer.h"
+#include "quake_image.h"
 
 namespace {
 
@@ -67,6 +68,15 @@ struct Args {
     // --smm-dump is given (so it never perturbs the normal func/sys gates).
     std::string smm_dump;
     uint32_t smbase = 0x30000;   // default SMBASE (overridable via --smbase)
+
+    // M7.1 Quake user-mode lock-step (docs/m7-lockstep-spec.md). --quake-image
+    // loads the producer's initial-process-image JSON (regions + regs/segs) and
+    // ENABLES the int-0x80 proxy + %gs base path (proxy_en=1). --lockstep names
+    // the GOLDEN .vtrace whose per-record sys_call effects the proxy replays at
+    // each int-0x80 (writes -> bus memory; ret/resume-eip/gs -> core). Both off by
+    // default, so every existing user/sys/cycle gate is byte-identical.
+    std::string quake_image;
+    std::string lockstep;
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -75,7 +85,8 @@ struct Args {
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
         "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle] [--system]\n"
-        "          [--errata <hexmask>] [--smm-dump <file>] [--smbase <hexaddr>]\n", prog);
+        "          [--errata <hexmask>] [--smm-dump <file>] [--smbase <hexaddr>]\n"
+        "          [--quake-image <image.json> --lockstep <golden.vtrace>]\n", prog);
     std::exit(code);
 }
 
@@ -111,6 +122,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--system")     a.system     = true;
         else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
         else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
+        else if (k == "--quake-image") a.quake_image = need("--quake-image");
+        else if (k == "--lockstep")    a.lockstep    = need("--lockstep");
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -160,6 +173,34 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "tb: loaded %ld bytes at 0x%08x from %s%s\n",
                      n, load_at, args.image.c_str(),
                      args.system ? " (bios)" : "");
+    }
+
+    // ---- M7.1 Quake initial process image + int-0x80 proxy ----------------
+    // When --quake-image is given: map the producer's process image (PT_LOAD +
+    // stack + vDSO regions) into the bus memory at their vaddrs, seed the reset
+    // regs (entry/esp/eflags) + flat user selectors, and ENABLE proxy_en. The
+    // golden's sys_call effects (--lockstep) are replayed at each int-0x80.
+    bool                          proxy_mode = false;
+    std::vector<ventium::SyscallEffect> syscalls;
+    size_t                        sc_idx = 0;   // next syscall to replay (in order)
+    if (!args.quake_image.empty()) {
+        ventium::QuakeImage img = ventium::load_quake_image(args.quake_image, mem);
+        if (!img.ok) {
+            std::fprintf(stderr, "tb: failed to load --quake-image '%s'\n",
+                         args.quake_image.c_str());
+            return 2;
+        }
+        // Seed the core's reset architectural state from the image (the TB plays
+        // the loader: it establishes exactly QEMU's starting process image).
+        args.entry    = img.eip;
+        args.init_esp = img.esp;
+        proxy_mode    = true;
+        if (!args.lockstep.empty()) {
+            syscalls = ventium::load_syscall_replay(args.lockstep);
+        }
+        std::fprintf(stderr,
+            "tb: quake lock-step ON (proxy_en=1): entry=0x%08x esp=0x%08x, "
+            "%zu syscalls to replay\n", img.eip, img.esp, syscalls.size());
     }
 
     // ---- trace writer (opens file + writes header) ------------------------
@@ -226,6 +267,62 @@ int main(int argc, char** argv) {
         top->mem_ack   = ack;
     };
 
+    // ---- M7.1 int-0x80 proxy service (combinational, like the bus) ----------
+    // The core raises syscall_active for the S_DECODE clock it proxies an
+    // int-0x80. We then: (1) drive back the NEXT golden sys_call effect's
+    // ret/resume-eip/gs for the core to latch on the rising edge, and (2) apply
+    // that syscall's kernel memory WRITES to the bus memory exactly once. The
+    // writes are applied at most once per active pulse (write_applied_idx guards
+    // re-application across the multiple evals of one clock). Syscalls are
+    // consumed strictly in order; we cross-check syscall_n against the producer's
+    // recorded n. Inert when proxy_en==0 (syscall_active never asserts).
+    long write_applied_idx = -1;   // sc_idx whose writes are already in memory
+    auto service_proxy = [&]() {
+        if (!proxy_mode) return;
+        if (!top->syscall_active) return;
+        if (sc_idx >= syscalls.size()) {
+            // The core hit an int-0x80 with no golden effect left to replay: a
+            // genuine over-run (the RTL reached a syscall the golden prefix never
+            // recorded). Drive zeros + resume at cd80+2 so we don't hang; report.
+            top->syscall_resume_eip = (uint32_t)top->syscall_n;  // placeholder
+            top->syscall_eax        = 0;
+            top->syscall_apply_gs   = 0;
+            top->syscall_gs_base    = 0;
+            return;
+        }
+        const ventium::SyscallEffect& e = syscalls[sc_idx];
+        // Cross-check ordering: the core names the upcoming retire n; it MUST
+        // match the producer's recorded n for this syscall, else the streams
+        // desynced (a harness bug — report loudly, do not silently mis-replay).
+        if ((uint64_t)top->syscall_n != e.n) {
+            std::fprintf(stderr,
+                "tb: PROXY DESYNC: core syscall_n=%llu but next golden "
+                "sys_call is n=%llu (sc_idx=%zu)\n",
+                (unsigned long long)top->syscall_n,
+                (unsigned long long)e.n, sc_idx);
+        }
+        top->syscall_resume_eip = e.has_resume ? e.resume_eip : 0;
+        top->syscall_eax        = e.ret;
+        top->syscall_apply_gs   = e.apply_gs ? 1 : 0;
+        top->syscall_gs_base    = e.gs_base;
+        // Apply the kernel memory writes ONCE for this syscall.
+        if (write_applied_idx != (long)sc_idx) {
+            for (const auto& w : e.writes) {
+                if (w.zero) {
+                    // anon mmap2 / brk-grow zero region — MemModel reads unmapped
+                    // as 0, but the program may have dirtied these pages earlier
+                    // (mmap re-use), so explicitly zero the requested span.
+                    for (uint32_t i = 0; i < w.zlen; ++i)
+                        mem.write8(w.addr + i, 0);
+                } else {
+                    for (size_t i = 0; i < w.bytes.size(); ++i)
+                        mem.write8(w.addr + (uint32_t)i, w.bytes[i]);
+                }
+            }
+            write_applied_idx = (long)sc_idx;
+        }
+    };
+
     // ---- reset: hold rst_n low for a few clocks, then release -------------
     // The TB plays the loader: it establishes the architectural init state the
     // core latches at reset (docs/m1-core-spec.md "Initial architectural
@@ -238,6 +335,11 @@ int main(int argc, char** argv) {
     top->boot_mode  = args.system ? 1 : 0;  // M2S.1: system cold reset
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
     top->errata_en  = args.errata & 0xF;     // M6: errata-enable bus (default 0)
+    top->proxy_en   = proxy_mode ? 1 : 0;    // M7.1: int-0x80 proxy + %gs base
+    top->syscall_resume_eip = 0;
+    top->syscall_eax        = 0;
+    top->syscall_apply_gs   = 0;
+    top->syscall_gs_base    = 0;
     top->mem_rdata = 0;
     top->mem_ack   = 0;
     top->eval();
@@ -262,13 +364,21 @@ int main(int argc, char** argv) {
     uint32_t idle        = 0;        // consecutive clocks with no new retire
     int      exit_code   = 0;
 
+    uint64_t syscalls_replayed = 0;   // M7.1 diagnostics
     while (true) {
         uint64_t before = trace.retired();
 
         // -- clk low phase: combinational settle + serve bus --
         top->clk = 0;
         service_bus();
+        service_proxy();      // M7.1: drive int-0x80 effects if syscall_active
         top->eval();
+        // syscall_active settles combinationally this phase (state==S_DECODE);
+        // re-serve so the inputs propagate, then sample whether we proxied.
+        service_bus();
+        service_proxy();
+        top->eval();
+        bool saw_active = proxy_mode && (bool)top->syscall_active;
         dump(half++);
 
         // Cycle mode (M4): stamp the clock the about-to-fire retirements belong
@@ -281,11 +391,20 @@ int main(int argc, char** argv) {
         // -- clk high phase: rising edge; vtm_retire fires inside eval() --
         top->clk = 1;
         service_bus();
-        top->eval();          // <- DPI vtm_retire calls happen here
+        service_proxy();
+        top->eval();          // <- DPI vtm_retire calls happen here; the core
+                              //    latches the proxied syscall effects here too
         // Re-serve in case the edge changed the request (combinational ack).
         service_bus();
         top->eval();
         dump(half++);
+
+        // M7.1: a proxied int-0x80 has been latched by the core this clock —
+        // advance to the next golden sys_call effect (strict order).
+        if (saw_active && sc_idx < syscalls.size()) {
+            ++sc_idx;
+            ++syscalls_replayed;
+        }
 
         ++cycles;
 
@@ -379,6 +498,11 @@ int main(int argc, char** argv) {
         (unsigned long long)cycles,
         (unsigned long long)mem.reads(),
         (unsigned long long)mem.writes());
+    if (proxy_mode) {
+        std::fprintf(stderr,
+            "tb: M7.1 proxy: replayed %llu / %zu int-0x80 syscalls\n",
+            (unsigned long long)syscalls_replayed, syscalls.size());
+    }
 
     ventium::g_trace = nullptr;
     trace.close();

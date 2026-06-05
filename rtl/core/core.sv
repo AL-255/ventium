@@ -67,6 +67,35 @@ module core
     //   [3] MOV moffs A2/A3 non-pair   (Erratum 59, cycle-mode only)
     input  logic [3:0]  errata_en,
 
+    // ------------------------------------------------------------------------
+    // M7.1 Quake user-mode lock-step int-0x80 PROXY + %gs base
+    // (docs/m7-lockstep-spec.md). DEFAULT 0 = INERT — with proxy_en==0 the core
+    // is byte-identical to the M0-M6 user core (int 0x80 still HALTs; gs_base is
+    // unused; user %gs stays flat base 0), so `make verify` is bit-for-bit
+    // unaffected. When proxy_en==1 (TB --quake-image / --lockstep mode):
+    //   * an `int 0x80` (cd80) in USER mode does NOT halt: the core raises
+    //     syscall_active for one clock exposing the upcoming retire `n`
+    //     (syscall_n); the TB combinationally drives back the GOLDEN sys_call
+    //     effects for that record — syscall_eax (kernel ret -> eax),
+    //     syscall_resume_eip (the golden's NEXT-record pc; QEMU's one-insn-per-tb
+    //     step folds the instruction following cd80, so the resume EIP comes from
+    //     the golden, not from decoded length), and an OPTIONAL %gs TLS base
+    //     (syscall_apply_gs + syscall_gs_base from set_thread_area). The core
+    //     applies eax, the (latched) gs_base, advances eip to resume_eip, RETIRES
+    //     the int-0x80 record (so the RTL trace has the row compare.py grades),
+    //     and resumes — it never executes the kernel.
+    //   * a user-mode `mov gs, sel` with the TLS GDT selector (0x33) installs the
+    //     latched gs_base as seg_base[GS]; any other user selector stays flat
+    //     (base 0). The kernel writes are applied by the TB directly to its
+    //     memory model when it services syscall_active.
+    input  logic        proxy_en,         // M7.1: enable the int-0x80 proxy + %gs base
+    output logic        syscall_active,   // 1-clock: core hit cd80 in proxy mode
+    output logic [63:0] syscall_n,        // the retire `n` this int-0x80 will get
+    input  logic [31:0] syscall_resume_eip, // golden NEXT-record pc (post-syscall EIP)
+    input  logic [31:0] syscall_eax,      // golden sys_call.ret -> eax
+    input  logic        syscall_apply_gs, // 1: this syscall set a new %gs TLS base
+    input  logic [31:0] syscall_gs_base,  // the resulting %gs base (set_thread_area)
+
     output logic        mem_req,
     output logic        mem_we,
     output logic [31:0] mem_addr,
@@ -422,6 +451,31 @@ module core
   logic hung_r;
   assign cpu_hung = hung_r;
 
+  // M7.1 int-0x80 proxy state. gs_base_r holds the latched %gs TLS base captured
+  // from the proxy (set_thread_area's sys_call.gs_base); it is installed into
+  // seg_base[GS] the moment a user-mode `mov gs, 0x33` selector load happens.
+  // cn mirrors the retire counter so syscall_n can name the upcoming record (the
+  // TB cross-checks it against its own retire count). Both are INERT (untouched,
+  // base stays flat) unless proxy_en is set, so existing user tests are
+  // byte-identical. The combinational syscall_active pulse is produced in the
+  // S_DECODE int-0x80 arm (see below); the apply happens on that same clock.
+  logic [31:0] gs_base_r;          // latched %gs TLS base (0 = flat / unset)
+  logic [63:0] cn;                 // core-side retire counter (drives syscall_n)
+  // M7.1 folded-instruction state: after proxying an int-0x80 we execute the
+  // instruction following cd80 and emit ONE retire that stands in for the golden
+  // int-0x80 record. fold_pending_r marks "the next retire is that syscall record"
+  // and fold_pc_r holds the int's pc to stamp on it (so the retire's pc matches
+  // the golden, not the folded insn's address). Inert unless proxy_en.
+  logic        fold_pending_r;
+  logic [31:0] fold_pc_r;
+  logic        syscall_active_c;   // combinational: this clock decodes cd80 in proxy mode
+  assign syscall_n      = cn;
+  // syscall_active is high for exactly the S_DECODE clock that proxies an
+  // int-0x80: the TB samples it to apply the kernel writes + drive back the
+  // golden ret/resume-eip/gs effects this same clock (combinational, like the
+  // mem bus). Gated on proxy_en + d_int80 so it is 0 in every non-proxy run.
+  // (state/proxy_en/d_int80 are all declared above this point.)
+
   localparam int IWORDS = 4;
   logic [7:0]  ibuf [16];
   logic [2:0]  fetch_word;
@@ -551,6 +605,7 @@ module core
   // ===========================================================================
   logic [3:0]  d_len;
   logic        d_halt;
+  logic        d_int80;   // M7.1: decoded `int 0x80` (cd80) — the proxy site
   logic        d_unknown;
   // M2S.3 software/conditional interrupt + return decode (gated sys_mode in the
   // FSM; in user mode INT n still HALTs as before). d_int_n carries the vector.
@@ -860,7 +915,7 @@ module core
   // Combinational decoder
   // ===========================================================================
   always_comb begin
-    d_len=4'd1; d_halt=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
+    d_len=4'd1; d_halt=1'b0; d_int80=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
     d_rel=32'd0; d_alu_op=ALU_ADD; d_writes_reg=1'b0; d_writes_flags=1'b0;
     d_mem_read=1'b0; d_mem_write=1'b0; d_mem_dst=1'b0; d_dst_reg=3'd0; d_src_reg=3'd0;
     d_imm=32'd0; d_use_imm=1'b0; d_is_push=1'b0; d_is_pop=1'b0; d_is_lea=1'b0;
@@ -1407,7 +1462,28 @@ module core
                 if (d_w==3'd1) begin d_imm={24'd0,ibuf[m_idx+1]}; d_len=pfx_len+4'd3; end
                 else if (d_w==3'd2) begin d_imm={16'd0,ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd4; end
                 else begin d_imm={ibuf[m_idx+4],ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1]}; d_len=pfx_len+4'd6; end
-              end else d_unknown=1'b1;
+              end else begin
+                // TEST mem, imm — read the operand, AND with imm, set flags only
+                // (no write). The M1-M6 user corpus never used the memory form, so
+                // it previously HALTed (d_unknown); Quake's musl uses it (e.g.
+                // `test byte [esp+8], 0x10`). The imm follows the full ModR/M+SIB+
+                // disp, so its offset is the operand length minus the imm width.
+                d_mem_read=1'b1; d_mem_dst=1'b1;
+                begin
+                  logic [3:0] ml;
+                  ml = mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+                  if (d_w==3'd1) begin
+                    d_imm={24'd0,ibuf[m_idx+ml]};                 // imm8 after the operand
+                    d_len=m_idx+ml+4'd1;
+                  end else if (d_w==3'd2) begin
+                    d_imm={16'd0,ibuf[m_idx+ml+1],ibuf[m_idx+ml]};
+                    d_len=m_idx+ml+4'd2;
+                  end else begin
+                    d_imm={ibuf[m_idx+ml+3],ibuf[m_idx+ml+2],ibuf[m_idx+ml+1],ibuf[m_idx+ml]};
+                    d_len=m_idx+ml+4'd4;
+                  end
+                end
+              end
             end
             3'd2: begin // NOT
               d_alu_op=ALU_NOT;
@@ -1497,7 +1573,13 @@ module core
         8'hCD: begin
           d_len=pfx_len+4'd2;
           if (sys_mode) begin d_int=1'b1; d_int_vec=ibuf[pfx_len+1]; end
-          else d_halt=(ibuf[pfx_len+1]==8'h80);
+          else begin
+            // user mode: int 0x80 = the syscall site. Without the proxy it HALTs
+            // (M0-M6 behaviour, unchanged). d_int80 flags it so the S_DECODE arm
+            // can route it to the proxy when proxy_en is set.
+            d_halt  = (ibuf[pfx_len+1]==8'h80);
+            d_int80 = (ibuf[pfx_len+1]==8'h80);
+          end
         end
         8'hCE: begin // INTO (#OF, vector 4) — TRAP, conditional on OF
           d_len=pfx_len+4'd1;
@@ -1729,6 +1811,14 @@ module core
     if (d_dst_high8) d_dst_reg = {1'b0, d_dst_reg[1:0]};
     if (d_src_high8) d_src_reg = {1'b0, d_src_reg[1:0]};
   end
+
+  // M7.1: syscall_active pulses for the S_DECODE clock that proxies an int-0x80.
+  // The slow FSM reaches the d_halt/int-0x80 arm in S_DECODE; gating on
+  // (state==S_DECODE && d_int80 && proxy_en) makes this exactly the clock the
+  // proxy applies its effects, so the TB samples the same edge. 0 in all
+  // non-proxy runs (proxy_en==0).
+  assign syscall_active_c = (state==S_DECODE) && d_int80 && proxy_en;
+  assign syscall_active   = syscall_active_c;
 
   // ===========================================================================
   // Latched decoded fields
@@ -1971,12 +2061,21 @@ module core
       // unchanged (the constant SEG_* params the M0-M6 corpus expects).
       snap.cs=seg_sel[SG_CS]; snap.ss=seg_sel[SG_SS]; snap.ds=seg_sel[SG_DS];
       snap.es=seg_sel[SG_ES]; snap.fs=seg_sel[SG_FS]; snap.gs=seg_sel[SG_GS];
+    end else if (proxy_en) begin
+      // M7.1 proxy: report the LIVE user selectors (seeded to the SEG_* constants
+      // at reset, then updated by a user-mode `mov gs, 0x33` -> seg_sel[GS]=0x33).
+      // Quake only ever changes %gs (musl TLS); the others stay at SEG_*.
+      snap.cs=seg_sel[SG_CS]; snap.ss=seg_sel[SG_SS]; snap.ds=seg_sel[SG_DS];
+      snap.es=seg_sel[SG_ES]; snap.fs=seg_sel[SG_FS]; snap.gs=seg_sel[SG_GS];
     end else begin
       snap.cs=SEG_CS; snap.ss=SEG_SS; snap.ds=SEG_DS; snap.es=SEG_ES; snap.fs=SEG_FS; snap.gs=SEG_GS;
     end
   end
   assign retire_state=snap;
-  assign retire_pc=q_pc;
+  // M7.1: a folded-syscall retire (the instruction after cd80) is stamped with the
+  // int-0x80's pc (fold_pc_r) so it aligns with the golden int-0x80 record. Inert
+  // unless proxy_en && fold_pending_r, so non-proxy retires use q_pc verbatim.
+  assign retire_pc = (proxy_en && fold_pending_r) ? fold_pc_r : q_pc;
 
   // M2S.1 system retire payload. retire_sys mirrors retire_valid in system mode
   // (every retirement carries the control-register block); 0 in user mode.
@@ -2691,6 +2790,15 @@ module core
           seg_sel[s]<=16'h0000; seg_base[s]<=32'd0; seg_limit[s]<=32'hFFFF_FFFF;
           seg_attr[s]<=8'h93;   // flat present R/W (unused in user mode; benign)
         end
+        // M7.1 proxy: seed the LIVE selectors to the linux-user SEG_* constants so
+        // the proxy snap can report them live (a later `mov gs,0x33` updates GS).
+        // Bases stay 0 (flat) so addressing is byte-identical until GS is set.
+        // INERT when proxy_en==0: seg_sel[] stay 0 (the snap uses the SEG_*
+        // constants in that path), so non-proxy user runs are bit-identical.
+        if (proxy_en) begin
+          seg_sel[SG_CS]<=SEG_CS; seg_sel[SG_SS]<=SEG_SS; seg_sel[SG_DS]<=SEG_DS;
+          seg_sel[SG_ES]<=SEG_ES; seg_sel[SG_FS]<=SEG_FS; seg_sel[SG_GS]<=SEG_GS;
+        end
         seg_attr[SG_CS]<=8'h9B;
         cpl_r<=2'd0;
         gdt_base<=32'd0; gdt_limit<=16'd0; idt_base<=32'd0; idt_limit<=16'd0;
@@ -2701,6 +2809,8 @@ module core
       ftop<=3'd0; fctrl<=16'h037f; fstat<=16'h0000; fptag<=8'hFF;
       x87_touched_r<=1'b0; f_step<=4'd0;
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
+      gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
+      fold_pending_r<=1'b0; fold_pc_r<=32'd0;   // M7.1: no folded syscall in flight
       for (int fi=0; fi<8; fi++) fpr[fi]<=80'd0;
       // M4 pipeline state.
       pf_fill_addr<=32'd0; pf_word<=3'd0; pf_fill_way<=1'b0;
@@ -2744,6 +2854,18 @@ module core
       dr6<=DR6_FIXED_1; dr7<=DR7_FIXED_1;
       tf_at_issue<=1'b0; rf_at_issue<=1'b0; db_wp_extra<=1'b0;
     end else begin
+      // M7.1 proxy: mirror ventium_top's retire_n on the SAME posedge it counts
+      // (the registered retire_valid/retire2_valid of the PREVIOUS clock). cn thus
+      // equals the number of retirements already emitted, so an int-0x80 in
+      // S_DECODE this clock names its own upcoming record as syscall_n=cn. INERT
+      // when proxy_en==0 (cn is simply never read). The folded-syscall retire (the
+      // insn after cd80) is the one that clears fold_pending_r — after it the
+      // overridden pc is no longer needed.
+      if (retire_valid) begin
+        cn <= cn + (retire2_valid ? 64'd2 : 64'd1);
+        fold_pending_r <= 1'b0;
+      end
+
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
       retire_pipe_valid <= 1'b0;
@@ -3211,6 +3333,46 @@ module core
             int_sw      <= 1'b0;       // HW fault: bypass the gate DPL>=CPL check
             state       <= S_INT_GATE;
           end
+          // ---- M7.1 int-0x80 PROXY (user-mode Quake lock-step) ---------------
+          // When proxy_en is set, an `int 0x80` does NOT halt. We apply the GOLDEN
+          // kernel effects the TB drives back this clock (sampled off our
+          // syscall_active pulse) and resume WITHOUT executing the kernel:
+          //   * eax <- syscall_eax   (the kernel return value)
+          //   * if syscall_apply_gs: latch the %gs TLS base (installed into
+          //            seg_base[GS] when the program later does `mov gs,0x33`)
+          // The TB has already applied the kernel memory writes to its bus memory.
+          //
+          // FOLDED-INSTRUCTION semantics (the load-bearing subtlety): QEMU's
+          // -one-insn-per-tb single-step over `cd80` runs the kernel AND the guest
+          // instruction immediately after cd80 in ONE step, so the GOLDEN record at
+          // the int-0x80 carries pc=<int> but post-state = (kernel ret) + (that
+          // following instruction's effect). The following insn is either a plain
+          // op (e.g. `test eax,eax` / `xchg edx,ebx`) for a direct `int 0x80`, or a
+          // `ret` for the musl vDSO __kernel_vsyscall stub (`cd80; c3`). To
+          // reproduce this EXACTLY without a kernel, we do NOT retire the int here:
+          // we advance EIP past cd80 (eip+len) and let the core EXECUTE that
+          // following instruction through the normal FSM — its natural effect
+          // (register/flag write, or the `ret` pop+branch) lands on the SINGLE
+          // retire we then emit, whose pc we OVERRIDE back to the int's pc
+          // (fold_pc_r) so it aligns with the golden record. So one golden
+          // int-0x80 record == one RTL retire = (kernel eax) + (folded insn). The
+          // golden's next-record pc (syscall_resume_eip) is carried only as a TB
+          // cross-check; the RTL derives the resume EIP by actually running the
+          // folded insn. Gated entirely on proxy_en && d_int80.
+          else if (proxy_en && d_int80) begin
+            gpr[0] <= syscall_eax;               // eax = kernel ret (pre-folded-insn)
+            if (syscall_apply_gs)
+              gs_base_r <= syscall_gs_base;      // latch the TLS base for `mov gs`
+            eip <= eip + {28'd0, d_len};         // step past cd80 to the folded insn
+            fold_pending_r <= 1'b1;              // the next retire IS this syscall's
+            fold_pc_r      <= eip;               // ...and carries the int's pc
+            fetch_word     <= 3'd0;
+            state          <= S_FETCH;           // run the folded insn via the FSM
+`ifdef M7_PROXY_DEBUG
+            $display("[M7DBG] proxy int80 @0x%08x cn=%0d eax<=0x%08x apply_gs=%0d gs_base<=0x%08x",
+                     eip, cn, syscall_eax, syscall_apply_gs, syscall_gs_base);
+`endif
+          end
           else if (d_halt || d_unknown) begin
             // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
             // the terminating `int 0x80` (it is a retired instruction to the TCG
@@ -3284,7 +3446,11 @@ module core
                 // load a segment register. In REAL mode (or a null/PM-but-here
                 // we keep it simple) compute the hidden base directly; in
                 // PROTECTED mode read the 8-byte descriptor from the GDT first.
-                if (real_mode) state<=S_EXEC;       // base = sel<<4, no fetch
+                // M7.1 USER+proxy: a linux-user `mov sreg,r16` has NO GDT to walk
+                // (this user core never sets up a GDT) — handle it FLAT in S_EXEC:
+                // selector := value; base := (GS & sel==0x33) ? latched gs_base : 0.
+                // (Without proxy_en this stays the M2S.1 sys-only path, untouched.)
+                if (real_mode || (!sys_mode && proxy_en)) state<=S_EXEC;
                 else state<=S_SEGLD;                // PM: fetch descriptor
               end
               SYS_LJMP: begin
@@ -3458,6 +3624,28 @@ module core
             // STR r/m16 -> write the current TR selector (zero-extended) to reg.
             flags_we=1'b0;
             gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], {16'd0, tr_sel}, 3'd2, 1'b0);
+          end
+          else if (q_sysop==SYS_MOVSREG_TO && !sys_mode && proxy_en) begin
+            // M7.1 USER+proxy MOV Sreg, r16 (linux-user, no GDT): selector :=
+            // value; the hidden base is FLAT (0) EXCEPT a %gs load of the musl TLS
+            // GDT selector 0x33, which installs the latched gs_base (the
+            // set_thread_area TLS base the proxy captured). This is exactly QEMU's
+            // linux-user behaviour: `mov gs,0x33` makes %gs:off resolve at the TLS
+            // base; every other flat user selector keeps base 0. The limit/attr
+            // are the flat 4 GB data defaults (unused by the func compare).
+            flags_we=1'b0;
+            seg_sel [q_sys_sreg] <= gpr[q_src_reg][15:0];
+            if (q_sys_sreg == 3'(SG_GS) && gpr[q_src_reg][15:0]==16'h0033)
+              seg_base[q_sys_sreg] <= gs_base_r;        // TLS base for %gs:off
+            else
+              seg_base[q_sys_sreg] <= 32'd0;            // flat
+            seg_limit[q_sys_sreg]<= 32'hFFFF_FFFF;
+            seg_attr [q_sys_sreg]<= 8'h93;
+`ifdef M7_PROXY_DEBUG
+            $display("[M7DBG] mov sreg=%0d sel=0x%04x gs_base_r=0x%08x -> base=0x%08x",
+                     q_sys_sreg, gpr[q_src_reg][15:0], gs_base_r,
+                     (q_sys_sreg==3'(SG_GS) && gpr[q_src_reg][15:0]==16'h0033) ? gs_base_r : 32'd0);
+`endif
           end
           else if (q_sysop==SYS_MOVSREG_TO) begin
             // REAL-MODE MOV Sreg, r16: selector = value; hidden base = sel<<4.
@@ -3807,6 +3995,11 @@ module core
               end
 
               K_CTRL: begin
+`ifdef M7_PROXY_DEBUG
+                if (q_ct==CT_CALLIND)
+                  $display("[M7DBG] CALLIND @q_pc=0x%08x q_seg=%0d dbase=0x%08x q_ea=0x%08x mem_load_data=0x%08x target=0x%08x",
+                           q_pc, q_seg, dbase, q_ea, mem_load_data, call_target);
+`endif
                 unique case (q_ct)
                   CT_CALLREL, CT_CALLIND: begin do_store=1'b1; do_retire=1'b0; end
                   CT_JMPIND: new_eip = call_target;
@@ -5060,6 +5253,24 @@ module core
     dbase_edi = seg_base[SG_ES];   // string/[EDI] destination uses ES
   end
 
+  // M7.1: the OPERAND segment base for an indirect CALL/JMP's memory-operand READ.
+  // The dbase comb above forces SS for a CALL (its primary stack PUSH uses SS),
+  // but the indirect target is fetched from the OPERAND's own segment — which
+  // matters when the call carries a segment override, e.g. musl's vsyscall
+  // `call dword ptr gs:[0x10]`: the pointer is read at %gs (the TLS base), while
+  // the return address is still pushed on SS. opbase supplies seg_base[q_seg] for
+  // that operand read. GATED on (proxy_en && !sys_mode): in flat user/sys mode
+  // q_seg's base equals SS's base (both 0), so this is bit-identical everywhere
+  // the gates run; only the user-proxy gs-override call changes.
+  logic [31:0] opbase;
+  always_comb begin
+    if (proxy_en && !sys_mode &&
+        (q_ct==CT_CALLIND || q_ct==CT_JMPIND) && q_mem_read)
+      opbase = seg_base[q_seg];
+    else
+      opbase = dbase;   // unchanged path (SS for a call, etc.)
+  end
+
   // M2S.1 — protected-mode segment LIMIT-check DECISION (spec §3, computed not
   // delivered). For an expand-up data/code segment the last byte of an access at
   // segment offset `off` must satisfy off <= seg_limit. We compute this for the
@@ -5432,7 +5643,7 @@ module core
         else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+gpr[R_EBP];
         else if (q_kind==K_STR)
           cur_lin = (q_st==ST_SCAS) ? dbase+gpr[R_EDI] : dbase+gpr[R_ESI];
-        else                                           cur_lin = dbase+q_ea;
+        else                                           cur_lin = opbase+q_ea;  // M7.1 opbase
       end
       S_LOAD2: cur_lin = dbase_edi+gpr[R_EDI];
       S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
@@ -5757,7 +5968,8 @@ module core
           // load order: movs/lods/cmps -> [ESI]; scas -> [EDI]
           if (q_st==ST_SCAS) mem_addr=dbase+gpr[R_EDI];
           else               mem_addr=dbase+gpr[R_ESI];
-        end else mem_addr=dbase+q_ea;
+        end else mem_addr=opbase+q_ea;   // M7.1: opbase==dbase except a proxy
+                                          // gs-override indirect-call operand read
       end
       S_LOAD2: begin mem_req=1'b1; mem_addr=dbase_edi+gpr[R_EDI]; end
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.

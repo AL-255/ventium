@@ -176,10 +176,62 @@ def dumps(obj: dict) -> str:
     return json.dumps(obj, separators=(",", ":"))
 
 
+# --- M7.1 syscall-effect field (Quake input-replay lock-step) ----------------
+# The `sys_call` record field is a *producer-only environment-input* carried on
+# the record of an `int 0x80` site (Quake / linux-user). It describes the KERNEL
+# effects of the syscall that the RTL CPU cannot compute on its own, so the
+# lock-step testbench can REPLAY them (apply eax=ret + the kernel memory writes +
+# any TLS %gs base) and resume — the TB never executes the kernel. See
+# docs/m7-lockstep-spec.md "Trace-contract extension".
+#
+# IMPORTANT (non-negotiable additive invariant): `sys_call` is NEVER in
+# func_compare_keys(), so compare.py never grades it. An RTL trace that lacks
+# `sys_call` still compares clean on every arch field (compare.py iterates the
+# arch keys and ignores extra record fields). A normal instruction's record has
+# NO `sys_call` key at all (so all existing goldens are byte-for-byte identical).
+#
+# Shape:
+#   sys_call : {
+#     "nr"   : int,                         # syscall number (eax pre-step)
+#     "ret"  : "0x%08x" (hex32),            # eax post-step (kernel return value)
+#     "writes": [                           # kernel-written memory regions
+#         {"addr":"0x%08x", "hex":"<bytes>"},          # explicit bytes written
+#         {"addr":"0x%08x", "len":int, "zero":true},   # zero-filled region (anon)
+#     ],
+#     "gs_base": "0x%08x" (hex32)           # OPTIONAL: resulting %gs TLS base
+#                                           # (set_thread_area user_desc.base_addr)
+#   }
+def sys_call_field(nr: int, ret: int, writes=None, gs_base=None) -> dict:
+    """Build the optional `sys_call` record field (see the block comment above).
+
+    writes: iterable of dicts, each either
+        {"addr":int, "hex":str|bytes}      -> explicit bytes the kernel wrote
+        {"addr":int, "len":int, "zero":True}-> a zero-filled region (anon map/brk)
+      The addr is normalized to canonical hex32; "hex" is normalized to a lowercase
+      hex string. Empty/None writes -> an empty list (a syscall with no memory
+      effect, e.g. set_tid_address, still carries nr+ret).
+    gs_base (optional): the resulting %gs segment base (hex32), emitted only when
+      not None (e.g. the TLS base after set_thread_area).
+    """
+    w_out = []
+    for w in (writes or []):
+        addr = w["addr"]
+        if w.get("zero"):
+            w_out.append({"addr": h32(addr), "len": int(w["len"]), "zero": True})
+        else:
+            b = w["hex"]
+            hexstr = b if isinstance(b, str) else b.hex()
+            w_out.append({"addr": h32(addr), "hex": hexstr.lower()})
+    sc = {"nr": int(nr), "ret": h32(ret), "writes": w_out}
+    if gs_base is not None:
+        sc["gs_base"] = h32(gs_base)
+    return sc
+
+
 # --- record builders ---------------------------------------------------------
 def func_record(n, pc, eflags, gpr: dict, seg: dict,
                 bytes_=None, exc=None, x87: dict | None = None,
-                sysregs: dict | None = None) -> dict:
+                sysregs: dict | None = None, sys_call: dict | None = None) -> dict:
     """Build a functional-mode retire record.
 
     gpr: {name: int} over GPR_KEYS;  seg: {name: int} over SEG_KEYS.
@@ -188,6 +240,10 @@ def func_record(n, pc, eflags, gpr: dict, seg: dict,
         segment-hidden fields (cs_base, cs_attr, ...).  Only the keys present in
         the dict are emitted, formatted at their declared width.  Pass this only
         when the header has "sys":true.
+    sys_call (optional, M7.1): the {nr,ret,writes[,gs_base]} kernel-effect dict
+        built by sys_call_field(), present ONLY on an `int 0x80` record. It is a
+        producer-only environment input (replayed by the TB, NEVER graded by
+        compare.py — see the block comment above). Absent => a normal instruction.
     """
     r = {"n": int(n), "pc": h32(pc), "eflags": h32(eflags)}
     for k in GPR_KEYS:
@@ -212,6 +268,10 @@ def func_record(n, pc, eflags, gpr: dict, seg: dict,
         for k in SYS_SEG_HIDDEN:
             if k in sysregs:
                 r[k] = hx(sysregs[k], _WIDTH[k])
+    # M7.1: the producer-only syscall-effect field (NOT in func_compare_keys, so
+    # compare.py never grades it). Emitted only on `int 0x80` records.
+    if sys_call is not None:
+        r["sys_call"] = sys_call
     return r
 
 

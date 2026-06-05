@@ -56,6 +56,21 @@ module ventium_top
     input  logic [3:0]  errata_en,
     output logic        cpu_hung,
 
+    // M7.1: Quake user-mode int-0x80 proxy + %gs TLS base (docs/m7-lockstep-spec).
+    // DEFAULT 0 = INERT (proxy off; gs flat) so the M0-M6 user gate is
+    // byte-identical. The TB drives these in --quake-image / --lockstep mode: it
+    // samples syscall_active (a 1-clock pulse when the core proxies an int-0x80,
+    // naming the upcoming retire syscall_n), applies the golden kernel memory
+    // writes to its bus memory, and drives back the golden ret/resume-eip/gs
+    // effects for the core to replay. See rtl/core/core.sv for the contract.
+    input  logic        proxy_en,
+    output logic        syscall_active,
+    output logic [63:0] syscall_n,
+    input  logic [31:0] syscall_resume_eip,
+    input  logic [31:0] syscall_eax,
+    input  logic        syscall_apply_gs,
+    input  logic [31:0] syscall_gs_base,
+
     // M0/M1 bus-functional-model port group (docs/rtl-interface.md §3). Minimal
     // by design; M5 replaces it with the modeled 64-bit P5 bus FSM.
     output logic        mem_req,
@@ -102,6 +117,13 @@ module ventium_top
       .cycle_mode   (cycle_mode),
       .errata_en    (errata_en),
       .cpu_hung     (cpu_hung),
+      .proxy_en           (proxy_en),
+      .syscall_active     (syscall_active),
+      .syscall_n          (syscall_n),
+      .syscall_resume_eip (syscall_resume_eip),
+      .syscall_eax        (syscall_eax),
+      .syscall_apply_gs   (syscall_apply_gs),
+      .syscall_gs_base    (syscall_gs_base),
       .mem_req      (mem_req),
       .mem_we       (mem_we),
       .mem_addr     (mem_addr),
