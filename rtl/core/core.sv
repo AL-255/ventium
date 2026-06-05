@@ -454,12 +454,20 @@ module core
   logic [2:0]  pf_word;              // refill word counter (8 words = 32 bytes)
 
   // BTB: 64 sets x 4 ways, 2-bit saturating counters (Alpert & Avnon / AP-500).
+  // The arrays (btb_tag/btb_ctr/btb_val/btb_rr), the pure-comb btb_lookup() and
+  // the single btb_update_taken() now live in the bpred_btb module (R2 extract,
+  // rtl/core/bpred_btb.sv). The spine drives two combinational predict ports
+  // (btb_u_query_pc -> btb_u_pred / btb_v_query_pc -> btb_v_pred, PRE-update
+  // state) and the single synchronous resolve port (btb_resolve_valid/pc/taken).
   localparam int BTB_SETS = 64;
   localparam int BTB_WAYS = 4;
-  logic [25:0] btb_tag [BTB_SETS][BTB_WAYS];   // pc/64
-  logic [1:0]  btb_ctr [BTB_SETS][BTB_WAYS];   // 2-bit saturating
-  logic        btb_val [BTB_SETS][BTB_WAYS];
-  logic [1:0]  btb_rr  [BTB_SETS];             // round-robin replacement ptr
+  logic [31:0] btb_u_query_pc;   // comb U predict pc (= eip)
+  logic        btb_u_pred;       // comb: U predicted-taken (PRE-update state)
+  logic [31:0] btb_v_query_pc;   // comb V predict pc (= eip + u_d.len)
+  logic        btb_v_pred;       // comb: V predicted-taken (PRE-update state)
+  logic        btb_resolve_valid;// comb: a branch resolves this clock (U or V)
+  logic [31:0] btb_resolve_pc;   // comb: resolving branch pc
+  logic        btb_resolve_taken;// comb: resolving branch taken decision
 
   // AGI tracking: gpr index written in the immediately-PREVIOUS issue clock.
   // -1 (bit8 set) = none. Updated each fast-path issue clock.
@@ -2371,43 +2379,13 @@ module core
   // single posedge access fires when dc_acc_valid is high (on dc_acc_addr). The
   // combinational drivers for those ports are in the dc_acc_* always_comb below.
 
-  // BTB lookup: predicted-taken iff a valid matching entry has counter>=2.
-  function automatic logic btb_lookup(input logic [31:0] pc);
-    logic [5:0]  set; logic [25:0] tag; logic hit;
-    begin
-      set = pc[5:0]; tag = pc[31:6]; hit = 1'b0; btb_lookup = 1'b0;
-      for (int w=0; w<BTB_WAYS; w++)
-        if (btb_val[set][w] && btb_tag[set][w]==tag) begin
-          hit=1'b1; btb_lookup = (btb_ctr[set][w] >= 2'd2);
-        end
-    end
-  endfunction
-
-  // BTB update after a branch resolves (mirrors p5model btb_update): a hit
-  // saturates its 2-bit counter toward taken/not-taken; a miss on a TAKEN
-  // branch allocates a way (pseudo-random/round-robin replacement) with a
-  // weakly-taken counter; a miss on a not-taken branch allocates nothing.
-  task automatic btb_update_taken(input logic [31:0] pc, input logic taken);
-    logic [5:0]  set; logic [25:0] tag; logic hit; logic [1:0] way;
-    begin
-      set = pc[5:0]; tag = pc[31:6]; hit = 1'b0; way = 2'd0;
-      for (int w=0; w<BTB_WAYS; w++)
-        if (btb_val[set][w] && btb_tag[set][w]==tag) begin hit=1'b1; way=2'(w); end
-      if (hit) begin
-        if (taken && btb_ctr[set][way]!=2'd3) btb_ctr[set][way]<=btb_ctr[set][way]+2'd1;
-        if (!taken && btb_ctr[set][way]!=2'd0) btb_ctr[set][way]<=btb_ctr[set][way]-2'd1;
-      end else if (taken) begin
-        btb_val[set][btb_rr[set]]<=1'b1;
-        btb_tag[set][btb_rr[set]]<=tag;
-        // first-taken => STRONGLY taken (ctr=3), matching the p5model oracle
-        // (plugin/p5model.c:371 's->ctr[v]=3'). Allocating weakly-taken (2) would
-        // diverge after a loop-exit not-taken: 2->1 (predict not-taken) re-warms a
-        // mispredict on the next entry, whereas the oracle 3->2 stays predict-taken.
-        btb_ctr[set][btb_rr[set]]<=2'd3;     // allocate strongly-taken (oracle)
-        btb_rr[set]<=btb_rr[set]+2'd1;
-      end
-    end
-  endtask
+  // BTB lookup (pure-comb btb_lookup) + update (btb_update_taken) + the arrays
+  // now live in the bpred_btb module (R2 extract, rtl/core/bpred_btb.sv): the
+  // comb predicts are btb_u_pred (off btb_u_query_pc) and btb_v_pred (off
+  // btb_v_query_pc), reading PRE-update state; the single posedge resolve fires
+  // when btb_resolve_valid is high (on btb_resolve_pc/btb_resolve_taken). The
+  // combinational drivers for those ports are below (predict assigns at the
+  // u_pred_taken/v_pred_taken use sites; resolve in the branch-resolution arm).
 
   // ===========================================================================
   // M4 fast-path combinational pipeline evaluation (S_PIPE). Decodes the U
@@ -2561,7 +2539,10 @@ module core
     u_shcf  = shrot_cf(u_d.shrot, reg_read(u_d.dst,3'd4,1'b0),
                        {1'b0,u_d.shimm}, eflags[0], 3'd4);
     u_target = (eip + {28'd0,u_d.len}) + u_d.rel;
-    u_pred_taken = btb_lookup(eip);
+    // BTB U predict: drive the module's comb predict port at this clock's U pc
+    // (= eip) and read back its PRE-update predicted-taken (bpred_btb).
+    btb_u_query_pc = eip;
+    u_pred_taken = btb_u_pred;
 
     // V datapath (independent of U by the pairing rule, so reading the OLD gpr
     // state is correct for both).
@@ -2570,7 +2551,10 @@ module core
     v_flags = flags_next(v_d.alu_op, reg_read(v_d.dst,3'd4,1'b0),
                          fp_bop(v_d), v_alu, eflags, 3'd4);
     v_target = ((eip + {28'd0,u_d.len}) + {28'd0,v_d.len}) + v_d.rel;
-    v_pred_taken = btb_lookup(eip + {28'd0,u_d.len});
+    // BTB V predict: drive the module's comb predict port at the V pc
+    // (= eip + u_d.len) and read back its PRE-update predicted-taken (bpred_btb).
+    btb_v_query_pc = eip + {28'd0,u_d.len};
+    v_pred_taken = btb_v_pred;
 
     // Flags forwarding U->V (the P5 cmp/dec/test + jcc pairing case): when the
     // U member writes EFLAGS, the paired V branch must see U's RESULT flags, not
@@ -2588,6 +2572,65 @@ module core
     end
     v_br_taken_eff = v_d.br_cond ? cond_true(v_br_cc(v_d), u_flags_eff) : 1'b1;
   end
+
+  // ===========================================================================
+  // BTB resolve port (R2 extract, bpred_btb). The single per-clock BTB update
+  // fires on the posedge ONLY when the S_PIPE issue arm executes AND a branch
+  // resolves — exactly where the inline btb_update_taken() NBA used to fire.
+  // This comb block reconstructs that issue-gate (the S_PIPE else-if chain's
+  // final issue arm) and the VERIFIED mutually-exclusive U/V if-else-if mux,
+  // driving the single resolve port:
+  //   * U branch       -> resolve at (eip, u_taken)
+  //   * else paired-V branch -> resolve at (eip+u.len, v_taken)
+  // At most ONE write/clock (the if/else-if guarantees mutual exclusion; a
+  // paired V branch and a U branch cannot both resolve — a U branch is unpaired
+  // in this path). btb_lookup-vs-update is read-before-write: the predict ports
+  // above read the PRE-update arrays this clock; this resolve applies next edge.
+  always_comb begin
+    // Issue-arm gate: the final `else` of the S_PIPE chain (matches the spine).
+    // Branches are simple + non-FP, so the FP/precision/!simple arms never apply
+    // to a resolving branch; the guards below are the chain conditions that gate
+    // reaching the issue arm at all.
+    logic issue_arm;
+    logic u_res_taken, v_res_taken;
+    logic [31:0] v_res_pc;
+    issue_arm = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
+                pipe_bytes_ok && (pending_mem_pen==7'd0) && !u_d.is_fp &&
+                u_d.simple && !sys_mode && (mispred_bubbles==3'd0) && !pipe_agi;
+
+    // U taken: unconditional => 1, conditional => its architectural taken.
+    u_res_taken = u_d.br_cond ? u_d.br_taken : 1'b1;
+    // V member branch (paired): taken via U-forwarded flags (v_br_taken_eff).
+    v_res_pc    = eip + {28'd0,u_d.len};
+    v_res_taken = v_br_taken_eff;
+
+    btb_resolve_valid = 1'b0;
+    btb_resolve_pc    = 32'd0;
+    btb_resolve_taken = 1'b0;
+    if (issue_arm) begin
+      if (u_d.is_branch) begin
+        btb_resolve_valid = 1'b1;
+        btb_resolve_pc    = eip;
+        btb_resolve_taken = u_res_taken;
+      end else if (pipe_pair && v_d.is_branch) begin
+        btb_resolve_valid = 1'b1;
+        btb_resolve_pc    = v_res_pc;
+        btb_resolve_taken = v_res_taken;
+      end
+    end
+  end
+
+  bpred_btb #(.BTB_SETS(BTB_SETS), .BTB_WAYS(BTB_WAYS)) u_bpred_btb (
+    .clk            (clk),
+    .rst_n          (rst_n),
+    .u_query_pc     (btb_u_query_pc),
+    .u_predict_taken(btb_u_pred),
+    .v_query_pc     (btb_v_query_pc),
+    .v_predict_taken(btb_v_pred),
+    .resolve_valid  (btb_resolve_valid),
+    .resolve_pc     (btb_resolve_pc),
+    .resolve_taken  (btb_resolve_taken)
+  );
 
   // recover the 4-bit condition code of a V conditional branch from its decode
   // (Jcc rel8 opcode low nibble was consumed into br_cond/br_taken; we re-derive
@@ -2664,12 +2707,8 @@ module core
       retire2_valid<=1'b0; retire_pipe_valid<=1'b0;
       retire_pipe<=2'd0; retire_paired<=1'b0;
       retire2_pipe<=2'd0; retire2_paired<=1'b0;
-      for (int s=0;s<BTB_SETS;s++) begin
-        btb_rr[s]<=2'd0;
-        for (int w=0;w<BTB_WAYS;w++) begin
-          btb_val[s][w]<=1'b0; btb_tag[s][w]<=26'd0; btb_ctr[s][w]<=2'd0;
-        end
-      end
+      // BTB arrays (btb_tag/btb_ctr/btb_val/btb_rr) are reset inside the
+      // bpred_btb module's own rst_n arm (rtl/core/bpred_btb.sv).
       for (int s=0;s<IC_SETS;s++) begin
         ic_lru[s]<=1'b0;
         ic_val[s][0]<=1'b0; ic_val[s][1]<=1'b0;
@@ -3023,7 +3062,9 @@ module core
                 mispred_bubbles <= 3'd3;     // U-pipe mispredict penalty
                 redirect=1'b1;
               end else if (u_taken) redirect=1'b1;
-              btb_update_taken(eip, u_taken);
+              // BTB update for this U branch is applied by the bpred_btb module
+              // on this posedge via the comb resolve port (btb_resolve_valid/
+              // pc/taken), driven from the mirrored issue-gate + U arm above.
             end else if (do_v && v_d.is_branch) begin
               // V member is a simple branch (e.g. a jcc paired into V). Use the
               // flags FORWARDED from U (cmp/dec/test + jcc pairing case).
@@ -3041,7 +3082,9 @@ module core
                 mispred_bubbles <= v_d.br_cond ? 3'd4 : 3'd3;
                 redirect=1'b1;
               end else if (v_taken) redirect=1'b1;
-              btb_update_taken(vpc, v_taken);
+              // BTB update for this paired-V branch is applied by the bpred_btb
+              // module on this posedge via the comb resolve port (driven from
+              // the mirrored issue-gate + V arm above).
             end
 
             eip <= redirect ? redir_tgt : post_eip;
