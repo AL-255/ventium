@@ -168,3 +168,27 @@ M7.3 Win95 device-input replay + boot-prefix run.
   - Enabler landed: `gen_trace.py` `TCP_NODELAY` (speed-only; every existing golden
     bit-identical — pseg re-verified EQUIVALENT). Next: M7.1 (Quake harness:
     producer int-0x80 proxy + TB ELF/process-image loader + int-0x80 proxy).
+- 2026-06-04 — **M7.1 DONE: Quake lock-step is BIT-EXACT over a 30k-insn prefix.**
+  The full input-replay harness works end-to-end and grades only the CPU:
+  - **Producer** (`gen_trace.py --syscall-proxy` + `tracefmt.py` `sys_call` field):
+    single-steps `tyr-quake-p5` under `qemu-i386 -seed 1234`, captures each int-0x80
+    effect (eax=ret + kernel memory writes via the per-nr dispatch table; `%gs` TLS
+    base from `set_thread_area`) and the initial process image (PT_LOAD + stack +
+    vDSO stub). 9 syscalls captured in the prefix.
+  - **Consumer** (TB `quake_image.cpp` loader + the int-0x80 proxy + a `proxy_en`-gated
+    user-mode `%gs` base in `core.sv`/`ventium_top.sv`): loads QEMU's process image,
+    replays each `sys_call` effect at the int-0x80 boundary (writes→bus, eax+gs→core),
+    runs the RTL as the checked CPU. The proxy injects ONLY the kernel environment
+    effect — never CPU-computed state (review-audited HONEST).
+  - **Result: 30,000 / 30,000 records EQUIVALENT** (`compare.py` exit 0), independently
+    re-run from a clean TB rebuild + a fresh trace. Negative controls (corrupt eax/
+    ebx/gs, truncate) all correctly DIVERGENT — the grade is real. All 9 int-0x80
+    boundaries + the `%gs` 0x2b→0x33 TLS transition (correct for 28,551 records) match.
+  - **2 genuine ISA gaps found + fixed** (the payoff of a macro-workload): `TEST r/m,imm`
+    memory form (`F6/F7 /0,/1` mod≠11) and the operand-segment base for an indirect
+    `call gs:[0x10]` under a segment override — both forms the M1–M6 corpus never hit,
+    fixed additively + differentially re-validated by the lock-step.
+  - ADDITIVE: `make verify` GREEN (56/56 goldens byte-identical), all 9 sys gates
+    EQUIVALENT, lint clean — the proxy/`%gs` path is inert without `--quake-image`.
+  - Reproducer: `verif/m7/run-quake-lockstep.sh [N] [PORT]`. The run length is
+    oracle-bound (gdbstub ~10k insn/s); a longer background prefix follows.

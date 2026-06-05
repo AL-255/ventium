@@ -26,7 +26,8 @@ RTL_SRCS     := $(RTL_FILELIST)
 SELFTEST_SRCS := $(wildcard $(SELFTEST_DIR)/*.sv)
 
 # C++ sources owned by Producer C.
-CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp
+CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp \
+            $(TB_DIR)/quake_image.cpp
 
 # ---- verilator invocation ---------------------------------------------------
 VERILATOR ?= verilator
