@@ -14,7 +14,7 @@
 # EFLAGS-undefined mask. The bare core (ventium_top --system) HALTs at the first
 # POST `OUT DX,AL` (no PC platform), so the SoC is the correct vehicle.
 #
-# Result (2026-06-05): EQUIVALENT to 30,000 instructions (verified manually);
+# Result (2026-06-05): EQUIVALENT to 60,000 instructions (verified at 1.5k/30k/60k);
 # the committed reference golden is a 1,500-insn fast prefix. Raise MAXI for a
 # deeper run; the eventual frontier is expected where test386 uses an instruction
 # or platform device the Ventium RTL/SoC does not yet model (an honest gap-finder,
