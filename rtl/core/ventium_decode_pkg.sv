@@ -14,11 +14,14 @@ package ventium_decode_pkg;
   typedef enum logic [4:0] {
     K_ALU, K_SHIFT, K_SHLDRD, K_MULDIV, K_IMUL2, K_EXT, K_SETCC,
     K_BITTEST, K_BITSCAN, K_XCHG, K_BSWAP, K_CONV, K_STKMISC, K_STR, K_CTRL,
-    K_CMPXCHG
+    K_CMPXCHG,
+    K_CPUID   // M7.3c: CPUID (0F A2) — writes eax/ebx/ecx/edx from a fixed leaf table
   } kind_e;
 
   typedef enum logic [2:0] { SM_PUSHA, SM_POPA, SM_PUSHF, SM_POPF, SM_LAHF, SM_SAHF, SM_LEAVE } smk_e;
-  typedef enum logic [2:0] { ST_MOVS, ST_STOS, ST_LODS, ST_SCAS, ST_CMPS } st_e;
+  typedef enum logic [2:0] { ST_MOVS, ST_STOS, ST_LODS, ST_SCAS, ST_CMPS,
+                             ST_INS  // M7.3c: INS (6C/6D) — IN per element -> [EDI]
+                           } st_e;  // 6 values -> still fits [2:0]
   typedef enum logic [3:0] {
     CT_CALLREL, CT_RETN, CT_RETN_IMM, CT_CALLIND, CT_JMPIND,
     CT_LOOP, CT_LOOPE, CT_LOOPNE, CT_JECXZ

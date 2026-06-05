@@ -36,6 +36,9 @@
 #include "memmodel.h"
 #include "trace_writer.h"
 #include "quake_image.h"
+#include "win95_cosim.h"
+
+#include <vector>
 
 namespace {
 
@@ -77,6 +80,16 @@ struct Args {
     // default, so every existing user/sys/cycle gate is byte-identical.
     std::string quake_image;
     std::string lockstep;
+
+    // M7.3b Win95 system co-sim (docs/m7-lockstep-spec.md M7.3). --win95-image
+    // loads the producer's initial PHYSICAL-memory image (paddr-keyed regions),
+    // forces --system boot (cold reset at F000:FFF0), and ENABLES the port-I/O
+    // co-sim bus (cosim_en=1) so the core EXECUTES IN/OUT. --lockstep names the
+    // GOLDEN .vtrace whose dev_in[] read values the bus replays at each IN (the
+    // only environment input injected). Both off by default -> every existing
+    // gate is byte-identical. The RTL emits a --system retire trace graded by
+    // compare_stream.py (sys mode).
+    std::string win95_image;
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -86,7 +99,8 @@ struct Args {
         "          [--max-insn N] [--max-cycles M]\n"
         "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle] [--system]\n"
         "          [--errata <hexmask>] [--smm-dump <file>] [--smbase <hexaddr>]\n"
-        "          [--quake-image <image.json> --lockstep <golden.vtrace>]\n", prog);
+        "          [--quake-image <image.json> --lockstep <golden.vtrace>]\n"
+        "          [--win95-image <image.json> --lockstep <golden.vtrace>]\n", prog);
     std::exit(code);
 }
 
@@ -123,6 +137,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
         else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
         else if (k == "--quake-image") a.quake_image = need("--quake-image");
+        else if (k == "--win95-image") a.win95_image = need("--win95-image");
         else if (k == "--lockstep")    a.lockstep    = need("--lockstep");
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
@@ -203,6 +218,38 @@ int main(int argc, char** argv) {
             "%zu syscalls to replay\n", img.eip, img.esp, syscalls.size());
     }
 
+    // ---- M7.3b Win95 initial physical-memory image + port-I/O co-sim --------
+    // When --win95-image is given: map the producer's phys regions into bus
+    // memory (paddr-keyed), force --system boot (cold reset at F000:FFF0), and
+    // ENABLE cosim_en so the core EXECUTES IN/OUT through the io_* bus. The
+    // golden's dev_in read VALUES (--lockstep) are returned, in order, at each IN.
+    bool                       cosim_mode = false;
+    std::vector<ventium::DevIn> devins;
+    size_t                     devin_idx = 0;   // next dev_in value to return (in order)
+    bool                       devin_had_intr = false;
+    if (!args.win95_image.empty()) {
+        ventium::Win95Image img = ventium::load_win95_image(args.win95_image, mem);
+        if (!img.ok) {
+            std::fprintf(stderr, "tb: failed to load --win95-image '%s'\n",
+                         args.win95_image.c_str());
+            return 2;
+        }
+        // The co-sim boots in SYSTEM mode (cold reset F000:FFF0). The core's own
+        // reset arch state IS the golden record 0 (we do NOT inject CPU regs);
+        // cosim_en additionally selects the `-cpu pentium` reset EDX=0x543. We do
+        // NOT override args.entry/init_esp: boot_mode=system seeds CS:EIP itself.
+        args.system = true;
+        cosim_mode  = true;
+        if (!args.lockstep.empty()) {
+            devins = ventium::load_devin_replay(args.lockstep, &devin_had_intr);
+        }
+        std::fprintf(stderr,
+            "tb: WIN95 co-sim ON (cosim_en=1, system boot): %ld phys regions, "
+            "%zu dev_in values to replay%s\n",
+            img.n_regions, devins.size(),
+            devin_had_intr ? " [WARNING: intr in prefix — injection deferred!]" : "");
+    }
+
     // ---- trace writer (opens file + writes header) ------------------------
     ventium::TraceWriter trace;
     {
@@ -265,6 +312,62 @@ int main(int argc, char** argv) {
                     (uint8_t)top->mem_wstrb, &rdata, &ack);
         top->mem_rdata = rdata;
         top->mem_ack   = ack;
+    };
+
+    // ---- M7.3b Win95 port-I/O co-sim service (combinational, like the bus) ---
+    // The core raises io_req for the S_IO clock(s) of an IN/OUT. We ack it and:
+    //   * IN  (io_we=0): drive back the NEXT golden dev_in VALUE on io_rdata. The
+    //     value is the ONLY thing injected (the device-read the CPU cannot
+    //     compute); the core writes it width-aware into eAX itself. We CROSS-CHECK
+    //     the core's io_addr/io_size against the recorded dev_in port/size and
+    //     advance the cursor exactly once per IN (committed on the rising edge).
+    //   * OUT (io_we=1): consume the value (the CPU computed it). The existing
+    //     isa-debug-exit `out 0xf4` terminates the run (flagged via io_exit).
+    // INERT when cosim_mode==0 (io_req never asserts; io_rdata/io_ack stay 0).
+    bool     io_pending_in = false;   // an IN is being serviced this clock
+    bool     io_exit       = false;   // saw an `out 0xf4` (isa-debug-exit)
+    uint64_t io_in_count   = 0;       // diagnostics: IN reads serviced
+    uint64_t io_out_count  = 0;       // diagnostics: OUT writes consumed
+    int      io_desync     = 0;       // diagnostics: port/size mismatches (a bug)
+    auto service_io = [&]() {
+        if (!cosim_mode) { top->io_rdata = 0; top->io_ack = 0; return; }
+        if (!top->io_req) { top->io_rdata = 0; top->io_ack = 0; io_pending_in = false; return; }
+        const uint32_t port = (uint32_t)top->io_addr;
+        const uint32_t size = (uint32_t)top->io_size;
+        if (top->io_we) {
+            // OUT: the CPU drives the value out; we consume it. The isa-debug-exit
+            // port 0xf4 stops the run (matches qemu-system -device isa-debug-exit).
+            if (port == 0xf4) io_exit = true;
+            top->io_rdata = 0;
+            top->io_ack   = 1;
+            io_pending_in = false;
+        } else {
+            // IN: return the next recorded dev_in value (in order). Cross-check the
+            // port + size; a mismatch is a HARNESS/stream desync — report, do not
+            // silently mis-replay. Over-run (no value left) returns 0 (the run is
+            // bounded; the prefix exhausting dev_in just means we ran past it).
+            uint32_t v = 0;
+            if (devin_idx < devins.size()) {
+                const ventium::DevIn& d = devins[devin_idx];
+                if (d.port != port || d.size != size) {
+                    if (io_desync < 8)
+                        std::fprintf(stderr,
+                            "tb: WIN95 IO DESYNC: core IN port=0x%x size=%u but next "
+                            "golden dev_in is port=0x%x size=%u region=%s (idx=%zu)\n",
+                            port, size, d.port, d.size, d.region.c_str(), devin_idx);
+                    ++io_desync;
+                }
+                // Mask the value to the access width (e.g. the 0xFFFF.. -1 IN -> 0xFF).
+                uint64_t mv = d.val;
+                if (size == 1) mv &= 0xffull;
+                else if (size == 2) mv &= 0xffffull;
+                else mv &= 0xffffffffull;
+                v = (uint32_t)mv;
+            }
+            top->io_rdata = v;
+            top->io_ack   = 1;
+            io_pending_in = true;   // commit (advance) on the rising edge
+        }
     };
 
     // ---- M7.1 int-0x80 proxy service (combinational, like the bus) ----------
@@ -336,12 +439,15 @@ int main(int argc, char** argv) {
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
     top->errata_en  = args.errata & 0xF;     // M6: errata-enable bus (default 0)
     top->proxy_en   = proxy_mode ? 1 : 0;    // M7.1: int-0x80 proxy + %gs base
+    top->cosim_en   = cosim_mode ? 1 : 0;    // M7.3b: Win95 port-I/O co-sim bus
     top->syscall_resume_eip = 0;
     top->syscall_eax        = 0;
     top->syscall_apply_gs   = 0;
     top->syscall_gs_base    = 0;
     top->mem_rdata = 0;
     top->mem_ack   = 0;
+    top->io_rdata  = 0;
+    top->io_ack    = 0;
     top->eval();
 
     const int kResetClocks = 4;
@@ -349,11 +455,13 @@ int main(int argc, char** argv) {
         // clk low phase
         top->clk = 0;
         service_bus();
+        service_io();
         top->eval();
         dump(half++);
         // clk high phase (rising edge)
         top->clk = 1;
         service_bus();
+        service_io();
         top->eval();
         dump(half++);
     }
@@ -372,13 +480,20 @@ int main(int argc, char** argv) {
         top->clk = 0;
         service_bus();
         service_proxy();      // M7.1: drive int-0x80 effects if syscall_active
+        service_io();         // M7.3b: serve the port-I/O bus if io_req
         top->eval();
         // syscall_active settles combinationally this phase (state==S_DECODE);
         // re-serve so the inputs propagate, then sample whether we proxied.
         service_bus();
         service_proxy();
+        service_io();
         top->eval();
         bool saw_active = proxy_mode && (bool)top->syscall_active;
+        // Sample whether THIS clock the core is reading an IN off the io bus (so we
+        // advance the dev_in cursor exactly once per IN, after the rising edge
+        // commits the value). io_req && !io_we && io_ack identifies a serviced IN.
+        bool saw_io_in = cosim_mode && (bool)top->io_req && !(bool)top->io_we
+                         && (bool)top->io_ack;
         dump(half++);
 
         // Cycle mode (M4): stamp the clock the about-to-fire retirements belong
@@ -392,10 +507,12 @@ int main(int argc, char** argv) {
         top->clk = 1;
         service_bus();
         service_proxy();
+        service_io();
         top->eval();          // <- DPI vtm_retire calls happen here; the core
                               //    latches the proxied syscall effects here too
         // Re-serve in case the edge changed the request (combinational ack).
         service_bus();
+        service_io();
         top->eval();
         dump(half++);
 
@@ -406,7 +523,26 @@ int main(int argc, char** argv) {
             ++syscalls_replayed;
         }
 
+        // M7.3b: the core latched the IN value this clock — advance the dev_in
+        // cursor (strict retire order) so the next IN reads the next value.
+        if (saw_io_in) {
+            if (devin_idx < devins.size()) ++devin_idx;
+            ++io_in_count;
+        }
+        if (cosim_mode && (bool)top->io_req && (bool)top->io_we && (bool)top->io_ack)
+            ++io_out_count;
+
         ++cycles;
+
+        // M7.3b: the co-sim hit the isa-debug-exit `out 0xf4` — qemu-system would
+        // exit here; stop the run cleanly (matches the producer's termination).
+        if (io_exit) {
+            std::fprintf(stderr,
+                "tb: stop: WIN95 co-sim isa-debug-exit (out 0xf4) after %llu "
+                "retired in %llu clocks\n",
+                (unsigned long long)trace.retired(), (unsigned long long)cycles);
+            break;
+        }
 
         // quiescence / limit detection
         if (trace.retired() > before) {
@@ -502,6 +638,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
             "tb: M7.1 proxy: replayed %llu / %zu int-0x80 syscalls\n",
             (unsigned long long)syscalls_replayed, syscalls.size());
+    }
+    if (cosim_mode) {
+        std::fprintf(stderr,
+            "tb: M7.3b win95 co-sim: %llu IN reads serviced (%zu dev_in available, "
+            "cursor at %zu), %llu OUT writes consumed, %d port/size desync(s)%s\n",
+            (unsigned long long)io_in_count, devins.size(), devin_idx,
+            (unsigned long long)io_out_count, io_desync,
+            io_exit ? ", isa-debug-exit reached" : "");
     }
 
     ventium::g_trace = nullptr;

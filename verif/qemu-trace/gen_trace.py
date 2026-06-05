@@ -875,8 +875,24 @@ def _signal_to_vector(sig):
 # IVT + BIOS Data Area + low conventional RAM the bootloader uses (0..0x10000).
 _INIT_MEM_REGIONS = [
     (0x000000, 0x10000),   # IVT (0..0x3FF) + BDA (0x400) + low conventional RAM
-    (0x0C0000, 0x10000),   # video BIOS / option ROM window
-    (0x0F0000, 0x10000),   # system BIOS ROM (reset vector @ 0xFFFF0)
+    (0x0C0000, 0x40000),   # the LOW PAM/shadow window (C0000..FFFFF). At the reset
+                           # stop C0000..EFFFF is zero RAM (not yet shadowed) and
+                           # F0000..FFFFF holds the active system BIOS (reset vector @
+                           # FFFF0). The RTL needs F0000.. to fetch the reset code; the
+                           # zero C0000..EFFFF is the un-shadowed RAM the BIOS later
+                           # fills (matching the golden, which also starts it zero).
+    (0xFFFC0000, 0x40000), # the TOP-OF-4GB system-BIOS ROM (256 KiB, FFFC0000..
+                           # FFFFFFFF). This is the IMMUTABLE firmware ROM that the
+                           # qemu `pc` machine maps at the top of the 32-bit space; the
+                           # low C0000..FFFFF window is a SEPARATE PAM RAM aliasing the
+                           # same chip only when shadowing is enabled. SeaBIOS's PM POST
+                           # `rep movsb` (golden rec 53375+) copies this high ROM down
+                           # into the C0000..E0000 shadow RAM, then runs the shadowed
+                           # copy (e.g. the CALL at 0xE7823 -> 0xDA88B). The RTL EXECUTES
+                           # that copy itself, so it must read the true ROM bytes from
+                           # the high alias — captured here. Read-only firmware, never
+                           # written in the prefix; the BFM also exposes it at the high
+                           # addresses the code uses (win95_cosim mirrors it 1:1).
 ]
 
 
