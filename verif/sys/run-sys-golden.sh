@@ -41,6 +41,13 @@ INTR_TESTS="pintr pfault"
 XPRIV_TESTS="pcpl"
 TASK_TESTS="ptask"
 SMM_TESTS="psmm"
+#   V86_TESTS   — M7.2 virtual-8086-mode tests (extra 5e V86 validation: V86 entry
+#                 EFLAGS.VM 0->1 + CPL 0->3, an IOPL-sensitive #GP delivery to the
+#                 CPL0 monitor with the 9-word V86 frame + VM cleared, and the
+#                 return). The RTL --system V86 diff lands in Implement (the V86 RTL
+#                 delta is de-risk-specified, gated behind `v86` so it is INERT when
+#                 EFLAGS.VM=0); until then this is golden self-diff + the 5e check.
+V86_TESTS="pv86"
 
 say(){ echo; echo "=== $* ==="; }
 
@@ -369,6 +376,100 @@ print("  VALID: hardware task switch (outgoing state save + incoming state load 
 PYEOF
 fi
 
+# --- 5e. (M7.2) VIRTUAL-8086 MODE validation for the pv86 test -----------------
+# For pv86, additionally confirm the golden captures the V86 machinery the M7.2
+# stage adds:
+#   (1) V86 ENTRY: an IRET into V86 sets EFLAGS.VM 0->1, transfers CS:EIP into the
+#       V86 task (CS becomes the V86 segment 0x1000), and forces CPL 0 -> 3, with
+#       paging still live (CR0.PG stays 1).
+#   (2) an IOPL-SENSITIVE #GP DELIVERY from V86 to the CPL0 monitor: EFLAGS.VM
+#       1->0 (cleared on entry), CPL 3->0, the SS:ESP switches to the TSS.SS0:ESP0
+#       monitor stack (the 9-word V86 frame), and CS becomes the monitor code 0x08.
+#   (3) the RETURN: the monitor IRETs back into V86 (EFLAGS.VM 0->1 again, CPL
+#       0->3), and control resumes in the V86 task.
+# This is the Phase-1 evidence that the V86 entry -> IOPL #GP -> 9-word frame ->
+# monitor -> IRET-back sequence is present in the golden; the RTL --system V86 diff
+# is wired in Implement (the V86 RTL delta is de-risk-specified, gated behind `v86`
+# so it is INERT when EFLAGS.VM=0 -> all prior sys gates stay byte-identical).
+if echo " $V86_TESTS " | grep -q " $TEST "; then
+  say "5e. VIRTUAL-8086 validation (V86 entry VM 0->1 + IOPL #GP to the monitor + return)"
+  PYTHONPATH="$REPO/verif/diff" "$PY" - "$OUT" <<'PYEOF'
+import sys
+import tracefmt as t
+tr = t.read_trace(sys.argv[1])
+recs = tr.records
+def H(r, k): return int(r[k], 16)
+def vm(r):  return (H(r, "eflags") >> 17) & 1     # EFLAGS.VM (bit17)
+def pg(r):  return (H(r, "cr0") >> 31) & 1
+# In V86 mode the CPL is architecturally 3 but the CS selector is a real-mode
+# segment value (e.g. 0x1000), so `cs & 3` is NOT the CPL.  EFLAGS.VM is the
+# privilege signal the trace carries: VM=1 => running in V86 (effective CPL3);
+# VM=0 with the monitor's flat CS 0x08 (RPL0) => CPL0.  We label "priv" by VM.
+def in_v86(r): return vm(r) == 1
+def at_cpl0(r): return vm(r) == 0 and (H(r, "cs") & 3) == 0
+
+# Walk the trace and find, in order:
+#   entry:   VM 0->1   (the IRET into the V86 task)
+#   deliver: VM 1->0   (an IOPL-sensitive #GP from V86 to the CPL0 monitor)
+#   ret:     VM 0->1   (the monitor IRETs back into V86)
+entry = deliver = ret = None
+prev = None
+for r in recs:
+    if prev is not None:
+        if vm(prev) == 0 and vm(r) == 1:
+            if entry is None:
+                entry = (prev, r)
+            elif deliver is not None and ret is None:
+                ret = (prev, r)
+        elif vm(prev) == 1 and vm(r) == 0:
+            if entry is not None and deliver is None:
+                deliver = (prev, r)
+    prev = r
+
+assert entry is not None,   "no V86 ENTRY captured (EFLAGS.VM 0->1)"
+assert deliver is not None, "no IOPL-sensitive #GP delivery from V86 captured (EFLAGS.VM 1->0)"
+
+ep, en = entry
+xp, xn = deliver
+# V86 entry: VM must be set (effective CPL3) and paging must stay enabled (V86 is
+# PE=1/PG=1).  The CS becomes the V86 segment (here 0x1000) — a real-mode-style
+# selector, not a GDT selector.
+assert in_v86(en), "V86 entry did not set EFLAGS.VM (not in V86)"
+assert pg(en) == 1,  "paging not live at V86 entry (V86 must be PG=1)"
+# Delivery: from V86 (VM=1) to the CPL0 monitor (VM=0, flat CS 0x08 RPL0); a #GP
+# into the monitor switches to the TSS.SS0 stack, so SS must change (9-word frame).
+assert in_v86(xp), "delivery source was not in V86 (VM=1)"
+assert at_cpl0(xn), "delivery target was not the CPL0 monitor (VM=0, CS RPL0)"
+assert H(xp, "ss") != H(xn, "ss"), "V86->monitor delivery did not switch SS (no TSS stack switch)"
+
+print(f"  V86 ENTRY (VM 0->1)        : n={en['n']} cs {ep['cs']}->{en['cs']} "
+      f"eip->{en['pc']} eflags {ep['eflags']}->{en['eflags']}  "
+      f"(VM {vm(ep)}->{vm(en)} => CPL3, PG={pg(en)})")
+print(f"  IOPL #GP (VM 1->0, deliver): n={xn['n']} cs {xp['cs']}->{xn['cs']} "
+      f"ss {xp['ss']}->{xn['ss']} eflags {xp['eflags']}->{xn['eflags']}  "
+      f"(VM {vm(xp)}->{vm(xn)} => CPL3->0, 9-word V86 frame on TSS.SS0:ESP0, VM cleared)")
+if ret is not None:
+    rp, rn = ret
+    assert in_v86(rn), "monitor IRET did not return to V86 (VM=1)"
+    print(f"  RETURN  (VM 0->1, IRET)    : n={rn['n']} cs {rp['cs']}->{rn['cs']} "
+          f"eflags {rp['eflags']}->{rn['eflags']}  (VM {vm(rp)}->{vm(rn)}, back into V86)")
+else:
+    print("  RETURN  (VM 0->1, IRET)    : (the FIRST IOPL op also terminated; "
+          "see the success proof) ")
+
+# Count all the IOPL-sensitive #GP deliveries from V86 (every VM 1->0 transition
+# into the CPL0 monitor).
+ngp = sum(1 for i in range(1, len(recs))
+          if vm(recs[i-1]) == 1 and at_cpl0(recs[i]))
+print(f"  IOPL-sensitive #GP deliveries from V86 captured: {ngp} "
+      f"(CLI/STI/PUSHF/POPF/INT 0x21/INT 0x20 at IOPL<3)")
+assert ngp >= 1, "expected at least one IOPL-sensitive #GP from V86"
+print("  VALID: V86 entry (VM 0->1, CPL 0->3, PG live) + IOPL-sensitive #GP "
+      "delivery to the CPL0 monitor (9-word frame, VM cleared) + return all "
+      "captured in the golden")
+PYEOF
+fi
+
 # --- 6. comparator sys-diff path: golden self-diff sanity ----------------------
 # Confirms the comparator's sys-field path round-trips: the golden must self-diff
 # EQUIVALENT under compare.py --mode func with BOTH sides sys:true, so the cr0 +
@@ -429,7 +530,18 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 selectors + GPRs + eflags + eip). The HARDWARE TASK SWITCH (CALL/
 #                 JMP to a TSS / task gate = the "ptask" sibling) is the gnarliest
 #                 piece and is DEFERRED — ptask stays self-diff-only (documented).
-RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl pdebug"
+#   M7.2 (DONE — RTL diff lands here): "pv86" exercises VIRTUAL-8086
+#                 mode — V86 entry (EFLAGS.VM 0->1 + CPL 0->3 + sel<<4 seg bases) by
+#                 IRET, V86 segmentation, the IOPL guard (IOPL<3 -> CLI/STI/PUSHF/
+#                 POPF/INT n #GP to the CPL0 monitor = method-1 / VME-OFF), the
+#                 V86 interrupt/fault DELIVERY (the 9-word V86 frame on TSS.SS0:ESP0,
+#                 VM cleared, DS/ES/FS/GS zeroed), and the IRET back into V86. The
+#                 V86 RTL delta (core.sv: v86=sys_mode&&eflags[17], iopl guards, the
+#                 sel<<4 MOV-sreg/far-jump path, the S_INT_PUSH 9-word from_v86 frame +
+#                 the S_IRET return-into-V86) is gated behind `v86` so it is INERT when
+#                 EFLAGS.VM=0 (every prior sys gate stays byte-identical). pv86 is now
+#                 in RTL_SYS_TESTS for the real RTL --system V86 diff vs the golden.
+RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl pdebug pv86"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"
@@ -469,6 +581,16 @@ else
     echo "   RTL task-switch path lands in M2S.4 Phase 2, so this is golden"
     echo "   self-diff + the step-5d task-switch validation only. Phase 2 adds"
     echo "   $TEST to RTL_SYS_TESTS for a real RTL --system diff across the switch.)"
+  elif echo " $V86_TESTS " | grep -q " $TEST "; then
+    echo "  ($TEST exercises M7.2 VIRTUAL-8086 MODE (V86 entry EFLAGS.VM 0->1 +"
+    echo "   CPL 0->3 + sel<<4 bases; the IOPL guard CLI/STI/PUSHF/POPF/INT n #GP to"
+    echo "   the CPL0 monitor = method-1 / VME-OFF; the 9-word V86 frame on"
+    echo "   TSS.SS0:ESP0 with VM cleared; the IRET back into V86). The V86 RTL delta"
+    echo "   is de-risk-specified + gated behind a new 'v86' so it is INERT when"
+    echo "   EFLAGS.VM=0 (every prior sys gate stays byte-identical), and lands in"
+    echo "   IMPLEMENT — so this is golden self-diff + the step-5e V86 validation"
+    echo "   only. Implement adds $TEST to RTL_SYS_TESTS for the real RTL --system"
+    echo "   V86 diff across V86 entry -> IOPL #GP -> 9-word frame -> monitor -> IRET.)"
   else
     echo "  ($TEST exercises paging = M2S.2 RTL; not yet in the RTL, so golden"
     echo "   self-diff only. Phase 2 adds it to RTL_SYS_TESTS for a real RTL diff.)"

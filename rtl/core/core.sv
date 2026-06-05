@@ -304,6 +304,34 @@ module core
   logic        real_mode;
   assign real_mode = sys_mode && !creg0[0];
 
+  // ===========================================================================
+  // M7.2 VIRTUAL-8086 MODE (V86 / method-1, VME-OFF). docs/m7-lockstep-spec §M7.2.
+  // ===========================================================================
+  // v86 = system-mode core with EFLAGS.VM (bit17) set. V86 runs with PE=1 & PG=1
+  // (paging/TLB stay live — the M2S.2 walk path is unchanged) but uses real-mode
+  // sel<<4 segment bases and a FORCED architectural CPL of 3 (USER). EVERYTHING
+  // gated on `v86` is INERT when eflags[17]==0 (so make verify + every prior sys
+  // gate stays byte-identical): EFLAGS.VM is 0 across all of user mode and the
+  // whole pre-V86 sys corpus, so v86==0 there and all V86 arms below are dead.
+  // iopl = EFLAGS.IOPL (bits 13:12). Under v86 with iopl<3 the IOPL-sensitive ops
+  // (CLI/STI/PUSHF/POPF/INT n/IRET/IN/OUT) #GP(0) to the CPL0 monitor (method-1);
+  // at iopl==3 they execute normally. The pv86 corpus runs at IOPL=0 so all six
+  // IOPL-sensitive ops in the V86 task trap.
+  logic        v86;
+  assign v86 = sys_mode && eflags[17];
+  logic [1:0]  iopl;
+  assign iopl = eflags[13:12];
+  // seg_real = "addressing uses a sel<<4 segment base" — real mode OR V86. The
+  // MOV-sreg / far-jump base computation + the decode routing both key on this.
+  logic        seg_real;
+  assign seg_real = real_mode || v86;
+  // eff_cpl = the EFFECTIVE current privilege. In V86 it is architecturally 3
+  // (USER) regardless of the CS selector's RPL (the CS selector is a real-mode
+  // segment value, e.g. 0x1000, so cs&3 is NOT the CPL). Outside V86 it is cpl_r.
+  // Used wherever the privilege level governs a protection/paging decision.
+  logic [1:0]  eff_cpl;
+  assign eff_cpl = v86 ? 2'd3 : cpl_r;
+
   // cs_d = the CS descriptor D/B bit (code default operand+address size, 1=32).
   // It governs the EFFECTIVE operand/address size default, NOT real_mode: right
   // after CR0.PE=1 but BEFORE the far jump loads a 32-bit CS, the segment is
@@ -611,6 +639,10 @@ module core
   // FSM; in user mode INT n still HALTs as before). d_int_n carries the vector.
   logic        d_int;            // INT n / INT3 / INTO -> IDT delivery (a TRAP)
   logic [7:0]  d_int_vec;        // the vector for d_int
+  logic        d_int_imm;        // M7.2: this is the INT n IMMEDIATE form (0xCD ib)
+                                 // — the IOPL-sensitive one in V86 (INT3/INTO are
+                                 // NOT IOPL-controlled; they always vector to the
+                                 // monitor). Distinguishes 0xCD 0x03 from 0xCC.
   logic        d_int_cond_of;    // INTO: deliver only if OF (eflags bit 11) set
   logic        d_iret;           // IRET (CF): pop EIP/CS/EFLAGS
   logic        d_ud2;            // UD2 (0F 0B) -> #UD (vector 6) in sys mode
@@ -935,7 +967,7 @@ module core
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
     // M2S.3 interrupt/return decode defaults.
-    d_int=1'b0; d_int_vec=8'd0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
+    d_int=1'b0; d_int_vec=8'd0; d_int_imm=1'b0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
     d_rsm=1'b0;
 
     m_idx     = pfx_len + (two_byte ? 4'd2 : 4'd1);
@@ -1366,27 +1398,36 @@ module core
         8'h9D: begin d_kind=K_STKMISC; d_sm=SM_POPF;  d_mem_read=1'b1;  d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'h9E: begin d_kind=K_STKMISC; d_sm=SM_SAHF; d_len=pfx_len+4'd1; end
         8'h9F: begin d_kind=K_STKMISC; d_sm=SM_LAHF; d_len=pfx_len+4'd1; end
+        // MOV moffs (A0-A3): the moffs (absolute displacement) width follows the
+        // EFFECTIVE ADDRESS size — 2 bytes under 16-bit addressing (real mode / V86
+        // without a 0x67 prefix; eff_addr==1), 4 bytes under 32-bit addressing.
+        // Previously hardcoded 4-byte (d_len pfx_len+5), which over-consumed 2 bytes
+        // and desynced the stream for a 16-bit-address `66 a3 disp16` store — exactly
+        // the V86 task's `mov %eax,%ds:0`. M0-M6/sys gates only ever hit the 32-bit
+        // form, so the eff_addr branch is additive (bit-identical where eff_addr==0).
         8'hA0: begin // MOV AL, moffs8 (8-bit load, preserve [31:8])
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=R_EAX; d_mem_read=1'b1;
           d_w=3'd1;
-          d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]};
-          d_len=pfx_len+4'd5;
+          if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'hA1: begin // MOV eAX, moffs
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=R_EAX; d_mem_read=1'b1;
-          d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]};
-          d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd5;
+          d_w=eff_opsize?3'd2:3'd4;
+          if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'hA2: begin // MOV moffs8, AL (8-bit store)
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_mem_dst=1'b1; d_src_reg=R_EAX;
           d_w=3'd1;
-          d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]};
-          d_len=pfx_len+4'd5;
+          if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'hA3: begin // MOV moffs, eAX
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_mem_dst=1'b1; d_src_reg=R_EAX;
-          d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]};
-          d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd5;
+          d_w=eff_opsize?3'd2:3'd4;
+          if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+          else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'hA8: begin d_w=3'd1; d_alu_op=ALU_TEST; d_writes_flags=1'b1; d_dst_reg=R_EAX;
           d_use_imm=1'b1; d_imm={24'd0,ibuf[pfx_len+1]}; d_len=pfx_len+4'd2; end
@@ -1572,7 +1613,7 @@ module core
         end
         8'hCD: begin
           d_len=pfx_len+4'd2;
-          if (sys_mode) begin d_int=1'b1; d_int_vec=ibuf[pfx_len+1]; end
+          if (sys_mode) begin d_int=1'b1; d_int_imm=1'b1; d_int_vec=ibuf[pfx_len+1]; end
           else begin
             // user mode: int 0x80 = the syscall site. Without the proxy it HALTs
             // (M0-M6 behaviour, unchanged). d_int80 flags it so the S_DECODE arm
@@ -1940,7 +1981,8 @@ module core
                                   // record (the faulting/INT instruction's PC)
   logic        int_has_err;       // push a 32-bit error code for this vector
   logic [31:0] int_err;           // the error code value (selector / #PF bits)
-  logic [2:0]  int_step;          // beat counter within S_INT_GATE/_CS/_PUSH
+  logic [3:0]  int_step;          // beat counter within S_INT_GATE/_CS/_PUSH
+                                  // (4-bit: the M7.2 V86 push needs 10 beats 0..9)
   logic [31:0] int_gate_off;      // assembled handler offset from the IDT gate
   logic [15:0] int_gate_sel;      // gate's code selector
   logic        int_gate_trap;     // 1 = trap gate (leave IF), 0 = interrupt gate
@@ -1960,6 +2002,15 @@ module core
   logic [15:0] int_old_ss;        // the interrupted task's SS (pushed in the frame)
   logic [31:0] int_old_esp;       // the interrupted task's ESP (pushed in the frame)
   logic [15:0] int_old_cs;        // the interrupted task's CS (pushed in the frame)
+  // M7.2 V86 delivery scratch. from_v86 marks an in-flight delivery whose SOURCE
+  // was V86 (EFLAGS.VM was set when the fault/INT fired). It is latched at delivery
+  // start (S_INT_CS, where the cross-priv decision is made) so the S_INT_PUSH frame
+  // switches to the 9-WORD V86 layout (GS,FS,DS,ES,SS,ESP,EFLAGS,CS,EIP) and, on
+  // the final beat, EFLAGS.VM is cleared + DS/ES/FS/GS are zeroed (IA-32 V86 entry
+  // to a PM handler). The interrupted V86 segment selectors are frozen for the push.
+  logic        from_v86;          // this delivery's source was V86 (9-word frame)
+  logic [15:0] int_old_ds, int_old_es, int_old_fs, int_old_gs;  // V86 frame segs
+  logic [31:0] int_old_eflags;    // the V86 EFLAGS image pushed (VM still set)
   logic [1:0]  int_new_cpl;       // target privilege level (= target CS.DPL)
   logic [15:0] int_new_ss;        // new SS selector from TSS.ssN
   logic [31:0] int_new_esp;       // new ESP from TSS.espN
@@ -1969,6 +2020,12 @@ module core
   logic        iret_interpriv;    // this IRET returns to a lower privilege
   logic [15:0] iret_ss;           // IRET-popped SS selector (inter-priv)
   logic [31:0] iret_esp;          // IRET-popped ESP (inter-priv)
+  // M7.2: IRET from CPL0 with the popped EFLAGS.VM set = a RETURN INTO V86 (the
+  // monitor resumes the V86 task). Pops the full 9-word frame (EIP,CS,EFLAGS,ESP,
+  // SS,ES,DS,FS,GS), forces CPL=3, sets EFLAGS.VM, and loads every segment base as
+  // sel<<4 with NO descriptor read. iret_v86_* hold the popped V86 segments.
+  logic        iret_to_v86;       // this IRET returns into V86 (9-word pop)
+  logic [15:0] iret_v86_es, iret_v86_ds, iret_v86_fs, iret_v86_gs;
 
   // latched x87 decode
   fxop_e       q_fxop;
@@ -2835,7 +2892,7 @@ module core
       walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
       // M2S.3 IDT delivery state idle out of reset.
       int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
-      int_err<=32'd0; int_step<=3'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
+      int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_sw<=1'b0;
       // M2S.4 TR/TSS + cross-priv + inter-priv IRET state idle out of reset.
@@ -2843,6 +2900,11 @@ module core
       iret_eflags<=32'd0; xpl_active<=1'b0; int_old_ss<=16'd0; int_old_esp<=32'd0;
       int_old_cs<=16'd0; int_new_cpl<=2'd0; int_new_ss<=16'd0; int_new_esp<=32'd0;
       iret_interpriv<=1'b0; iret_ss<=16'd0; iret_esp<=32'd0;
+      // M7.2 V86 delivery scratch idle out of reset.
+      from_v86<=1'b0; int_old_ds<=16'd0; int_old_es<=16'd0; int_old_fs<=16'd0;
+      int_old_gs<=16'd0; int_old_eflags<=32'd0;
+      iret_to_v86<=1'b0; iret_v86_es<=16'd0; iret_v86_ds<=16'd0;
+      iret_v86_fs<=16'd0; iret_v86_gs<=16'd0;
       // M2S.5 SMM/RSM idle out of reset. SMBASE = the P5 default 0x30000; not in
       // SMM; no SMI pending. (RSM read-back regs are scratch — left uninit; they
       // are fully written by S_RSM before being committed.)
@@ -3329,9 +3391,35 @@ module core
             int_src_pc  <= eip;
             int_has_err <= 1'b0;       // #UD carries no error code
             int_err     <= 32'd0;
-            int_step    <= 3'd0;
+            int_step    <= 4'd0;
             int_sw      <= 1'b0;       // HW fault: bypass the gate DPL>=CPL check
             state       <= S_INT_GATE;
+          end
+          // ---- M7.2 V86 IOPL GUARD (method-1 / VME-OFF) ---------------------
+          // Under V86 (v86 = sys_mode && EFLAGS.VM) with IOPL < 3, the IOPL-
+          // SENSITIVE instructions CLI / STI / PUSHF / POPF / INT n / IRET (and
+          // IN/OUT — not in this core's decode, out-of-scope, see the manifest's
+          // documented follow-on) do NOT execute: they raise #GP(0) and trap to
+          // the CPL0 monitor (IA-32 SDM Vol.3 method-1). At IOPL==3 they would run
+          // normally (the `iopl < 3` guard makes this fall through). The #GP is a
+          // FAULT delivered through IDT[13]: it pushes the 9-word V86 frame on the
+          // monitor stack (S_INT_PUSH from_v86 path), an error code 0 (has_err=1,
+          // err=0 — the monitor discards it), and the FAULTING V86 EIP (eip) so the
+          // monitor can decode the opcode + advance EIP itself. This whole branch
+          // is INERT when EFLAGS.VM==0 (v86==0), so every prior gate is unchanged.
+          // INT3 (0xCC) and INTO (0xCE) are NOT trapped here: only the INT n
+          // IMMEDIATE form (0xCD ib, d_int_imm) is IOPL-sensitive in V86. INT3/INTO
+          // have distinct V86 semantics (#BP/#OF vectoring) that the golden never
+          // exercises — left as a documented follow-on rather than guessing an
+          // un-oracled behaviour. The pv86 corpus uses CLI/STI/PUSHF/POPF/INT n.
+          else if (v86 && iopl < 2'd3 &&
+                   (d_cli || d_sti ||
+                    (d_kind==K_STKMISC && (d_sm==SM_PUSHF || d_sm==SM_POPF)) ||
+                    d_int_imm || d_iret)) begin
+            // #GP(0) to the CPL0 monitor: vector 13, error code 0, FAULT (push the
+            // faulting V86 EIP so the monitor restarts/advances it). int_sw=0 so the
+            // hardware-fault path bypasses the gate DPL>=CPL check.
+            start_fault(8'd13, 1'b1, 32'd0, eip);
           end
           // ---- M7.1 int-0x80 PROXY (user-mode Quake lock-step) ---------------
           // When proxy_en is set, an `int 0x80` does NOT halt. We apply the GOLDEN
@@ -3422,7 +3510,7 @@ module core
               int_src_pc  <= eip;
               int_has_err <= 1'b0;      // INT/INT3/INTO/#UD: no error code
               int_err     <= 32'd0;
-              int_step    <= 3'd0;
+              int_step    <= 4'd0;
               // SOFTWARE INT n/INT3/INTO are subject to the gate DPL>=CPL check
               // (IA-32 6.12.1.2); #UD (d_ud2) is a HARDWARE fault that bypasses it.
               int_sw      <= d_int && !d_ud2;
@@ -3430,7 +3518,7 @@ module core
             end
           end
           else if (d_iret) begin
-            int_step <= 3'd0; int_src_pc <= eip; state <= S_IRET;
+            int_step <= 4'd0; int_src_pc <= eip; state <= S_IRET;
           end
           // ---- M2S.5 RSM (0F AA): leave SMM, restore the saved state ---------
           else if (d_rsm) begin
@@ -3450,13 +3538,19 @@ module core
                 // (this user core never sets up a GDT) — handle it FLAT in S_EXEC:
                 // selector := value; base := (GS & sel==0x33) ? latched gs_base : 0.
                 // (Without proxy_en this stays the M2S.1 sys-only path, untouched.)
-                if (real_mode || (!sys_mode && proxy_en)) state<=S_EXEC;
+                // M7.2 V86: a MOV Sreg, r16 under V86 (seg_real) loads the hidden
+                // base = sel<<4 with NO GDT descriptor read (IA-32 V86 segmentation),
+                // exactly like real mode — handled in S_EXEC by the SYS_MOVSREG_TO
+                // real-mode arm (sys_mode is 1 under V86, so the proxy arm is skipped).
+                if (seg_real || (!sys_mode && proxy_en)) state<=S_EXEC;
                 else state<=S_SEGLD;                // PM: fetch descriptor
               end
               SYS_LJMP: begin
-                // far jump. REAL mode: base=sel<<4, jump now. PM: load CS from
-                // the GDT descriptor (S_LJMP fetches it) then switch.
-                if (real_mode) state<=S_EXEC;
+                // far jump. REAL mode / V86: base=sel<<4, jump now. PM: load CS
+                // from the GDT descriptor (S_LJMP fetches it) then switch. Under V86
+                // (seg_real) the S_EXEC SYS_LJMP arm loads CS.base = sel<<4 with no
+                // descriptor read, matching real-mode V86 segmentation.
+                if (seg_real) state<=S_EXEC;
                 else state<=S_LJMP;
               end
               SYS_LTR: begin
@@ -4368,15 +4462,15 @@ module core
         // attr[3:0]: 0xE = 32-bit interrupt gate (clears IF), 0xF = trap gate.
         S_INT_GATE: begin
           if (mem_ack) begin
-            if (int_step == 3'd0) begin
-              int_lo <= mem_rdata; int_step <= 3'd1;
+            if (int_step == 4'd0) begin
+              int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [7:0] gattr;
               gattr        = mem_rdata[15:8];
               int_gate_off <= {mem_rdata[31:16], int_lo[15:0]};
               int_gate_sel <= int_lo[31:16];
               int_gate_trap<= gattr[0];   // 0xF trap -> leave IF; 0xE int -> clear IF
-              int_step     <= 3'd0;
+              int_step     <= 4'd0;
               // M2S.4 GATE PROTECTION (deferred from M2S.3):
               //   (1) gate not Present -> #NP(vec*8 + IDT bit). The error code for
               //       an IDT-sourced fault is (vec<<3)|2 (the IDT/EXT bits).
@@ -4409,8 +4503,8 @@ module core
         //     PRIV (DPL == CPL): push on the current stack as in M2S.3.
         S_INT_CS: begin
           if (mem_ack) begin
-            if (int_step == 3'd0) begin
-              int_lo <= mem_rdata; int_step <= 3'd1;
+            if (int_step == 4'd0) begin
+              int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [63:0] desc;
               logic [7:0]  cattr;
@@ -4419,13 +4513,14 @@ module core
               desc    = {mem_rdata, int_lo};
               cattr   = desc_attr(desc);
               tgt_dpl = desc_dpl(cattr);
-              // target CS must be present, a code segment, DPL <= CPL.
+              // target CS must be present, a code segment, DPL <= the EFFECTIVE
+              // CPL (V86 forces eff_cpl=3, so a DPL0 monitor CS is accepted).
               cs_bad  = !desc_present(cattr) || !desc_s(cattr) ||
-                        !seg_is_code(cattr) || (tgt_dpl > cpl_r);
+                        !seg_is_code(cattr) || (tgt_dpl > eff_cpl);
               if (cs_bad) begin
                 // bad target CS -> #NP(sel) if not present, else #GP(sel). Error
                 // code = the gate's code selector with the IDT/EXT bits.
-                int_step <= 3'd0;
+                int_step <= 4'd0;
                 start_fault(desc_present(cattr) ? 8'd13 : 8'd11, 1'b1,
                             {16'd0, int_gate_sel[15:3], 3'b010}, int_src_pc);
               end else begin
@@ -4435,16 +4530,38 @@ module core
                 seg_attr [SG_CS] <= cattr;
                 cpl_r            <= tgt_dpl;     // CPL = target CS.DPL
                 cs_d             <= desc[54];
-                int_step         <= 3'd0;
-                if (tgt_dpl < cpl_r) begin
-                  // CROSS-PRIV: freeze the interrupted task's CS:SS:ESP for the
-                  // frame (seg_sel[] here still hold the OLD values), record the
-                  // target CPL, and read TSS.ssN:espN.
+                int_step         <= 4'd0;
+                // M7.2: latch whether THIS delivery's source was V86 (eflags[17] is
+                // still set here — it is cleared on the S_INT_PUSH final beat). A V86
+                // source always crosses to a lower-priv PM handler, so it falls into
+                // the cross-priv arm; from_v86 makes S_INT_PUSH push the 9-word frame.
+                // ROBUSTNESS (M7.2 review): gate the latch on the SAME cross-priv
+                // predicate that loads int_new_esp/SS from the TSS. A correct V86
+                // monitor's IDT gate always targets a CPL0 handler (tgt_dpl<eff_cpl=3),
+                // so this is a no-op for every valid delivery (corpus stays 949/949).
+                // A malformed V86 gate to a DPL3 target would otherwise take the
+                // same-priv push arm yet still set from_v86=1, making S_INT_PUSH emit
+                // the 9-word frame off a never-loaded int_new_esp/SS base -> a corrupt
+                // frame at a stale address. Pinning from_v86 to the cross-priv arm
+                // closes that latent path with no functional change.
+                from_v86 <= v86 && (tgt_dpl < eff_cpl);
+                if (tgt_dpl < eff_cpl) begin
+                  // CROSS-PRIV (includes EVERY V86 delivery, eff_cpl=3): freeze the
+                  // interrupted task's CS:SS:ESP for the frame (seg_sel[] here still
+                  // hold the OLD values), record the target CPL, read TSS.ssN:espN.
                   xpl_active   <= 1'b1;
                   int_old_cs   <= seg_sel[SG_CS];
                   int_old_ss   <= seg_sel[SG_SS];
                   int_old_esp  <= gpr[R_ESP];
                   int_new_cpl  <= tgt_dpl;
+                  // M7.2 V86: freeze the four data selectors + the V86 EFLAGS image
+                  // (VM still set) so the 9-word frame pushes GS,FS,DS,ES + the V86
+                  // SS,ESP,EFLAGS,CS,EIP. (Harmless for a non-V86 cross-priv: unused.)
+                  int_old_ds   <= seg_sel[SG_DS];
+                  int_old_es   <= seg_sel[SG_ES];
+                  int_old_fs   <= seg_sel[SG_FS];
+                  int_old_gs   <= seg_sel[SG_GS];
+                  int_old_eflags <= eflags;
                   state        <= S_INT_TSS;
                 end else begin
                   xpl_active   <= 1'b0;          // SAME-PRIV: push on current stack
@@ -4466,13 +4583,24 @@ module core
             logic last;
             // last push beat: SAME-PRIV = 2 (EIP) / 3 (errcode); CROSS-PRIV = 4
             // (EIP) / 5 (errcode), since the larger frame adds old SS + old ESP.
-            if (xpl_active)
-              last = int_has_err ? (int_step == 3'd5) : (int_step == 3'd4);
+            // M7.2 V86 (from_v86, always cross-priv): the 9-WORD frame
+            //   beat 0 GS, 1 FS, 2 DS, 3 ES, 4 SS, 5 ESP, 6 EFLAGS, 7 CS, 8 EIP
+            //   (+ beat 9 errcode when int_has_err) — last = 8 (EIP) / 9 (errcode).
+            if (from_v86)
+              last = int_has_err ? (int_step == 4'd9) : (int_step == 4'd8);
+            else if (xpl_active)
+              last = int_has_err ? (int_step == 4'd5) : (int_step == 4'd4);
             else
-              last = int_has_err ? (int_step == 3'd3) : (int_step == 3'd2);
+              last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
             if (last) begin
               logic [31:0] fsz;
-              if (xpl_active) begin
+              if (from_v86) begin
+                // V86: 9-word frame (40 bytes w/ errcode, 36 without) on the TSS
+                // stack. The new (CPL0) SS:base were loaded in S_INT_SS; ESP drops to
+                // the top of the pushed frame.
+                fsz = int_has_err ? 32'd40 : 32'd36;
+                gpr[R_ESP] <= int_new_esp - fsz;
+              end else if (xpl_active) begin
                 // CROSS-PRIV: the new (CPL0) SS:base were already loaded in
                 // S_INT_SS; ESP now drops to the top of the pushed frame on the
                 // TSS stack. fsz = 20 (5 words) or 24 (6 words w/ errcode).
@@ -4491,23 +4619,39 @@ module core
               // additionally clears IF (bit9); a TRAP gate leaves IF. The pushed
               // EFLAGS (beat 0) is the PRE-clear value, so this only masks the live
               // eflags after the frame is on the stack. NT/RF/VM are 0 throughout
-              // the corpus (eflags = 0x202), so masking them is a no-op for the gate
-              // but makes the entry IA-32-correct for any future TF/NT/V8086 test.
+              // the non-V86 corpus, so masking them is a no-op there; under V86 the
+              // VM-clear is the LOAD-BEARING transition into the PM monitor.
               //   common mask = TF|NT|RF|VM = 0x0003_4100; +IF (0x200) for int gate.
               if (!int_gate_trap)
                 eflags <= eflags & ~32'h0003_4300;   // clear IF+TF+NT+RF+VM (int gate)
               else
                 eflags <= eflags & ~32'h0003_4100;   // clear TF+NT+RF+VM (trap gate)
+              // M7.2 V86: a V86->PM delivery ZEROES DS/ES/FS/GS (selector + hidden
+              // base/limit/attr) on entry (IA-32: the V86 data segments are not
+              // valid PM selectors; the monitor reloads flat ones). SS was loaded
+              // from TSS.SS0 in S_INT_SS; CS was loaded in S_INT_CS.
+              if (from_v86) begin
+                for (int s = 0; s < NUM_SEG; s++) begin
+                  if (s == int'(SG_DS) || s == int'(SG_ES) ||
+                      s == int'(SG_FS) || s == int'(SG_GS)) begin
+                    seg_sel  [s] <= 16'd0;
+                    seg_base [s] <= 32'd0;
+                    seg_limit[s] <= 32'd0;
+                    seg_attr [s] <= 8'd0;
+                  end
+                end
+              end
+              from_v86      <= 1'b0;
               q_pc          <= int_src_pc;   // stamp the delivering instruction's PC
               retire_valid  <= 1'b1;
-              int_step      <= 3'd0;
+              int_step      <= 4'd0;
               // M2S.6: a DATA-watchpoint #DB needs the extra handler-entry record
               // (the qemu watchpoint single-step quirk). Divert to S_DB_EXTRA to
               // emit it before the handler runs; all other deliveries go to S_PIPE.
               if (db_wp_extra) state <= S_DB_EXTRA;
               else             state <= S_PIPE;
             end else begin
-              int_step <= int_step + 3'd1;
+              int_step <= int_step + 4'd1;
             end
           end
         end
@@ -4534,42 +4678,98 @@ module core
         S_IRET: begin
           if (mem_ack) begin
             unique case (int_step)
-              3'd0: begin iret_eip   <= mem_rdata;        int_step <= 3'd1; end
-              3'd1: begin
+              4'd0: begin iret_eip   <= mem_rdata;        int_step <= 4'd1; end
+              4'd1: begin
                 iret_cs    <= mem_rdata[15:0];
                 // inter-priv iff the returned-to CS is less privileged than now.
                 iret_interpriv <= (mem_rdata[1:0] > cpl_r);
-                int_step <= 3'd2;
+                int_step <= 4'd2;
               end
-              3'd2: begin
+              4'd2: begin
                 // EFLAGS popped. Hold it; the actual eflags/eip/ESP commit happens
                 // on the final beat so an inter-priv pop can still read ESP/SS.
                 iret_eflags <= mem_rdata;
-                if (iret_interpriv) int_step <= 3'd3;   // keep popping ESP, SS
+                // M7.2: IRET from CPL0 with the popped EFLAGS.VM (bit17) set is a
+                // RETURN INTO V86. It always pops the full 9-word frame (ESP,SS +
+                // ES,DS,FS,GS follow) and switches stacks, regardless of the popped
+                // CS.RPL (the V86 CS is a real-mode selector, RPL=0). Only meaningful
+                // from CPL0 (the monitor); INERT for every non-V86 IRET (bit17=0).
+                if (mem_rdata[17] && cpl_r == 2'd0) begin
+                  iret_to_v86 <= 1'b1;
+                  int_step    <= 4'd3;             // pop ESP, SS, ES, DS, FS, GS
+                end else if (iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
                 else begin
                   // SAME-PRIV: commit now (ESP += 12), reload CS, retire via _RET.
                   gpr[R_ESP]   <= gpr[R_ESP] + 32'd12;
                   eip          <= iret_eip;
                   eflags       <= mem_rdata;
                   int_gate_sel <= iret_cs;
-                  int_step     <= 3'd0;
+                  int_step     <= 4'd0;
                   state        <= S_INT_CS_RET;
                 end
               end
-              3'd3: begin iret_esp <= mem_rdata;         int_step <= 3'd4; end
-              default: begin
-                // beat 4: SS popped. Commit the inter-priv return: EIP, EFLAGS, and
-                // the OUTER ESP/SS. seg_base[SG_SS] is still the inner base while we
-                // reload the CS (S_INT_CS_RET), then S_IRET_SS loads the outer SS
-                // descriptor. ESP <- popped outer ESP (the inner-frame consumption
-                // is irrelevant; we leave the inner stack entirely).
+              4'd3: begin iret_esp <= mem_rdata;         int_step <= 4'd4; end
+              4'd4: begin
                 iret_ss      <= mem_rdata[15:0];
-                eip          <= iret_eip;
-                eflags       <= iret_eflags;
-                gpr[R_ESP]   <= iret_esp;
-                int_gate_sel <= iret_cs;
-                int_step     <= 3'd0;
-                state        <= S_INT_CS_RET;
+                if (iret_to_v86) int_step <= 4'd5;   // V86: keep popping ES,DS,FS,GS
+                else begin
+                  // M2S.4 inter-priv (non-V86): SS popped. Commit the inter-priv
+                  // return: EIP, EFLAGS, and the OUTER ESP/SS. seg_base[SG_SS] is
+                  // still the inner base while we reload the CS (S_INT_CS_RET), then
+                  // S_IRET_SS loads the outer SS descriptor. ESP <- popped outer ESP.
+                  eip          <= iret_eip;
+                  eflags       <= iret_eflags;
+                  gpr[R_ESP]   <= iret_esp;
+                  int_gate_sel <= iret_cs;
+                  int_step     <= 4'd0;
+                  state        <= S_INT_CS_RET;
+                end
+              end
+              // ---- M7.2 V86-return tail: pop ES, DS, FS, GS (beats 5..8) --------
+              4'd5: begin iret_v86_es <= mem_rdata[15:0]; int_step <= 4'd6; end
+              4'd6: begin iret_v86_ds <= mem_rdata[15:0]; int_step <= 4'd7; end
+              4'd7: begin iret_v86_fs <= mem_rdata[15:0]; int_step <= 4'd8; end
+              default: begin
+                // beat 8: GS popped — COMMIT the return into V86. Load every segment
+                // (CS/SS/DS/ES/FS/GS) base = sel<<4 with NO descriptor read (V86
+                // segmentation), force CPL=3, restore EFLAGS (VM set), EIP, ESP. The
+                // V86 segment limit is the real-mode 64 KiB default; attr is the
+                // present R/W default. This retires the IRET directly (no S_INT_CS_RET
+                // descriptor reload — V86 has no GDT-backed CS).
+                iret_v86_gs <= mem_rdata[15:0];
+                eip         <= iret_eip;
+                eflags      <= iret_eflags;            // VM is set in the popped image
+                gpr[R_ESP]  <= iret_esp;
+                cpl_r       <= 2'd3;                   // V86 runs at CPL3
+                cs_d        <= 1'b0;                   // V86 is 16-bit default
+                // CS = popped selector, base = sel<<4.
+                seg_sel  [SG_CS] <= iret_cs;
+                seg_base [SG_CS] <= {12'd0, iret_cs, 4'd0};
+                seg_limit[SG_CS] <= 32'h0000_FFFF;
+                seg_attr [SG_CS] <= 8'h9B;
+                // SS:base = popped SS sel<<4.
+                seg_sel  [SG_SS] <= iret_ss;
+                seg_base [SG_SS] <= {12'd0, iret_ss, 4'd0};
+                seg_limit[SG_SS] <= 32'h0000_FFFF;
+                seg_attr [SG_SS] <= 8'h93;
+                // ES/DS/FS/GS:base = popped sel<<4 (the V86 data segments).
+                seg_sel  [SG_ES] <= iret_v86_es;
+                seg_base [SG_ES] <= {12'd0, iret_v86_es, 4'd0};
+                seg_limit[SG_ES] <= 32'h0000_FFFF; seg_attr[SG_ES] <= 8'h93;
+                seg_sel  [SG_DS] <= iret_v86_ds;
+                seg_base [SG_DS] <= {12'd0, iret_v86_ds, 4'd0};
+                seg_limit[SG_DS] <= 32'h0000_FFFF; seg_attr[SG_DS] <= 8'h93;
+                seg_sel  [SG_FS] <= iret_v86_fs;
+                seg_base [SG_FS] <= {12'd0, iret_v86_fs, 4'd0};
+                seg_limit[SG_FS] <= 32'h0000_FFFF; seg_attr[SG_FS] <= 8'h93;
+                seg_sel  [SG_GS] <= mem_rdata[15:0];
+                seg_base [SG_GS] <= {12'd0, mem_rdata[15:0], 4'd0};
+                seg_limit[SG_GS] <= 32'h0000_FFFF; seg_attr[SG_GS] <= 8'h93;
+                iret_to_v86  <= 1'b0;
+                int_step     <= 4'd0;
+                q_pc         <= int_src_pc;            // stamp the IRET insn's PC
+                retire_valid <= 1'b1;
+                state        <= S_PIPE;
               end
             endcase
           end
@@ -4582,8 +4782,8 @@ module core
         // not accessible at the new, lower privilege) before retiring.
         S_INT_CS_RET: begin
           if (mem_ack) begin
-            if (int_step == 3'd0) begin
-              int_lo <= mem_rdata; int_step <= 3'd1;
+            if (int_step == 4'd0) begin
+              int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [63:0] desc;
               desc = {mem_rdata, int_lo};
@@ -4593,7 +4793,7 @@ module core
               seg_attr [SG_CS] <= desc_attr(desc);
               cpl_r            <= int_gate_sel[1:0];
               cs_d             <= desc[54];
-              int_step         <= 3'd0;
+              int_step         <= 4'd0;
               if (iret_interpriv) begin
                 state          <= S_IRET_SS;   // reload outer SS, then retire
               end else begin
@@ -4619,8 +4819,8 @@ module core
         // #GP path; deferred with the other negative-path SS checks above.
         S_IRET_SS: begin
           if (mem_ack) begin
-            if (int_step == 3'd0) begin
-              int_lo <= mem_rdata; int_step <= 3'd1;
+            if (int_step == 4'd0) begin
+              int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [63:0] desc;
               desc = {mem_rdata, int_lo};
@@ -4640,7 +4840,7 @@ module core
                 end
               end
               iret_interpriv   <= 1'b0;
-              int_step         <= 3'd0;
+              int_step         <= 4'd0;
               q_pc             <= int_src_pc;
               retire_valid     <= 1'b1;
               state            <= S_PIPE;
@@ -4675,11 +4875,11 @@ module core
         // ESPn, beat 1 reads SSn. Then read the new SS descriptor (S_INT_SS).
         S_INT_TSS: begin
           if (mem_ack) begin
-            if (int_step == 3'd0) begin
-              int_new_esp <= mem_rdata; int_step <= 3'd1;
+            if (int_step == 4'd0) begin
+              int_new_esp <= mem_rdata; int_step <= 4'd1;
             end else begin
               int_new_ss  <= mem_rdata[15:0];
-              int_step    <= 3'd0;
+              int_step    <= 4'd0;
               state       <= S_INT_SS;
             end
           end
@@ -4700,8 +4900,8 @@ module core
         // TSS corpus test exists (see the tr_valid/tr_limit lint-sink note).
         S_INT_SS: begin
           if (mem_ack) begin
-            if (int_step == 3'd0) begin
-              int_lo <= mem_rdata; int_step <= 3'd1;
+            if (int_step == 4'd0) begin
+              int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [63:0] desc;
               desc = {mem_rdata, int_lo};
@@ -4709,7 +4909,7 @@ module core
               seg_base [SG_SS] <= desc_base(desc);
               seg_limit[SG_SS] <= desc_limit(desc);
               seg_attr [SG_SS] <= desc_attr(desc);
-              int_step         <= 3'd0;
+              int_step         <= 4'd0;
               state            <= S_INT_PUSH;
             end
           end
@@ -5087,10 +5287,11 @@ module core
                   // then vector. #PF is a FAULT -> push the FAULTING EIP (q_pc) so
                   // IRET restarts the access after the handler maps the page.
                   creg2  <= walk_lin;
-                  pf_errcode <= {cpl_r == 2'd3, walk_is_write, 1'b0};
+                  // US bit = the EFFECTIVE CPL (V86 forces 3) at the faulting access.
+                  pf_errcode <= {eff_cpl == 2'd3, walk_is_write, 1'b0};
                   walk_pf <= 1'b1;
                   start_fault(8'd14, 1'b1,
-                              {29'd0, cpl_r == 2'd3, walk_is_write, 1'b0}, q_pc);
+                              {29'd0, eff_cpl == 2'd3, walk_is_write, 1'b0}, q_pc);
                 end else if (is_big) begin
                   // 4 MiB large page: PDE is the leaf. Write A/D back if needed,
                   // else fill the TLB directly (reuse step-1's PDE writeback arm).
@@ -5133,10 +5334,11 @@ module core
                   // {US,RW,P=0}; push the FAULTING EIP (q_pc) so IRET restarts the
                   // access once the handler maps the page (the pfault demand-page).
                   creg2  <= walk_lin;
-                  pf_errcode <= {cpl_r == 2'd3, walk_is_write, 1'b0};
+                  // US bit = the EFFECTIVE CPL (V86 forces 3) at the faulting access.
+                  pf_errcode <= {eff_cpl == 2'd3, walk_is_write, 1'b0};
                   walk_pf <= 1'b1;
                   start_fault(8'd14, 1'b1,
-                              {29'd0, cpl_r == 2'd3, walk_is_write, 1'b0}, q_pc);
+                              {29'd0, eff_cpl == 2'd3, walk_is_write, 1'b0}, q_pc);
                 end else if (!pte[5] || (walk_is_write && !pte[6])) begin
                   walk_step <= 3'd3;   // set A (+D on write) in the PTE
                 end else begin
@@ -5494,7 +5696,7 @@ module core
       int_src_pc  <= fault_pc;
       int_has_err <= has_err;
       int_err     <= err;
-      int_step    <= 3'd0;
+      int_step    <= 4'd0;
       int_sw      <= 1'b0;        // HW fault: bypass the gate DPL>=CPL check
       state       <= S_INT_GATE;
     end
@@ -5519,7 +5721,7 @@ module core
       int_src_pc  <= src_pc;
       int_has_err <= 1'b0;
       int_err     <= 32'd0;
-      int_step    <= 3'd0;
+      int_step    <= 4'd0;
       int_sw      <= 1'b0;               // hardware #DB: bypass the gate DPL check
       state       <= S_INT_GATE;
     end
@@ -5927,7 +6129,7 @@ module core
   always_comb begin
     logic [2:0] p; logic usr, wp;
     p   = dtlb_lk_perm;   // {US, RW, P} (D-TLB lookup at cur_lin)
-    usr = (cpl_r == 2'd3);
+    usr = (eff_cpl == 2'd3);   // V86 forces effective CPL 3 (USER access)
     wp  = creg0[16];
     perm_fault = 1'b0;
     if (paging_on && cur_is_d && dtlb_lk_hit) begin
@@ -6051,7 +6253,28 @@ module core
                    + {29'd0, int_step[0], 2'b00};
       end
       S_INT_PUSH: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
-        if (xpl_active) begin
+        if (from_v86) begin
+          // M7.2 V86: push the 9-WORD V86 frame (+errcode) descending from the NEW
+          // (TSS.SS0) stack. seg_base[SG_SS] is the CPL0 SS base loaded in S_INT_SS.
+          // Beats, low->high stored value (matches the monitor's frame offsets):
+          //   0 GS @ esp-4, 1 FS @ esp-8, 2 DS @ esp-12, 3 ES @ esp-16,
+          //   4 SS @ esp-20, 5 ESP @ esp-24, 6 EFLAGS @ esp-28, 7 CS @ esp-32,
+          //   8 EIP @ esp-36, 9 errcode @ esp-40.
+          mem_addr = seg_base[SG_SS] + int_new_esp
+                     - ({28'd0, int_step} * 32'd4) - 32'd4;
+          unique case (int_step)
+            4'd0:    mem_wdata = {16'd0, int_old_gs};
+            4'd1:    mem_wdata = {16'd0, int_old_fs};
+            4'd2:    mem_wdata = {16'd0, int_old_ds};
+            4'd3:    mem_wdata = {16'd0, int_old_es};
+            4'd4:    mem_wdata = {16'd0, int_old_ss};
+            4'd5:    mem_wdata = int_old_esp;
+            4'd6:    mem_wdata = int_old_eflags;        // V86 EFLAGS (VM still set)
+            4'd7:    mem_wdata = {16'd0, int_old_cs};   // interrupted V86 CS
+            4'd8:    mem_wdata = int_ret_eip;           // V86 EIP (faulting)
+            default: mem_wdata = int_err;               // beat 9: #GP error code (0)
+          endcase
+        end else if (xpl_active) begin
           // M2S.4 CROSS-PRIV: push the LARGER 5-word (or 6-word w/ errcode) frame
           // descending from the NEW stack (TSS.espN). seg_base[SG_SS] is already
           // the new (CPL0) SS base after S_INT_SS. Beats, low->high stored value:
@@ -6060,11 +6283,11 @@ module core
           mem_addr = seg_base[SG_SS] + int_new_esp
                      - ({28'd0, int_step} * 32'd4) - 32'd4;
           unique case (int_step)
-            3'd0:    mem_wdata = {16'd0, int_old_ss};
-            3'd1:    mem_wdata = int_old_esp;
-            3'd2:    mem_wdata = eflags;
-            3'd3:    mem_wdata = {16'd0, int_old_cs};   // interrupted task's CS
-            3'd4:    mem_wdata = int_ret_eip;
+            4'd0:    mem_wdata = {16'd0, int_old_ss};
+            4'd1:    mem_wdata = int_old_esp;
+            4'd2:    mem_wdata = eflags;
+            4'd3:    mem_wdata = {16'd0, int_old_cs};   // interrupted task's CS
+            4'd4:    mem_wdata = int_ret_eip;
             default: mem_wdata = int_err;
           endcase
         end else begin
@@ -6073,9 +6296,9 @@ module core
           mem_addr = seg_base[SG_SS] + gpr[R_ESP]
                      - ({28'd0, int_step} * 32'd4) - 32'd4;
           unique case (int_step)
-            3'd0:    mem_wdata = eflags;
-            3'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
-            3'd2:    mem_wdata = int_ret_eip;
+            4'd0:    mem_wdata = eflags;
+            4'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
+            4'd2:    mem_wdata = int_ret_eip;
             default: mem_wdata = int_err;
           endcase
         end
