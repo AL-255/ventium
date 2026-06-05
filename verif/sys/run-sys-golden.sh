@@ -37,7 +37,7 @@ mkdir -p "$OUTDIR"
 #   SMM_TESTS   — M2S.5 SMM/RSM PARTIAL-ORACLE tests (structural self-check, NO
 #                 differential golden: the gdbstub single-step path masks SMI and
 #                 has no SMM awareness, so the golden is infeasible and not faked)
-INTR_TESTS="pintr pfault"
+INTR_TESTS="pintr pfault pde"
 XPRIV_TESTS="pcpl"
 TASK_TESTS="ptask"
 SMM_TESTS="psmm"
@@ -552,7 +552,7 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 the S_IRET return-into-V86) is gated behind `v86` so it is INERT when
 #                 EFLAGS.VM=0 (every prior sys gate stays byte-identical). pv86 is now
 #                 in RTL_SYS_TESTS for the real RTL --system V86 diff vs the golden.
-RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl ptask pdebug pv86"
+RTL_SYS_TESTS="pseg pmode ppage pintr pfault pde pcpl ptask pdebug pv86"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"

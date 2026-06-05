@@ -189,6 +189,7 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh ppage
 	bash verif/sys/run-sys-golden.sh pintr
 	bash verif/sys/run-sys-golden.sh pfault
+	bash verif/sys/run-sys-golden.sh pde
 	bash verif/sys/run-sys-golden.sh pcpl
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh psmm

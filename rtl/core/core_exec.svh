@@ -244,56 +244,105 @@
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                     eflags<=fl; flags_we=1'b0;
                   end
-                  3'd6: begin // DIV
+                  3'd6: begin // DIV (unsigned) — with #DE (divide-by-zero / overflow)
+                    logic dfault;
+                    dfault = 1'b0;
                     if (q_w==3'd1) begin
-                      logic [15:0] num; logic [15:0] qq, rr;
-                      num=gpr[R_EAX][15:0]; qq=num/{8'd0,srcv[7:0]}; rr=num%{8'd0,srcv[7:0]};
-                      gpr[R_EAX]<={gpr[R_EAX][31:16], rr[7:0], qq[7:0]};
+                      logic [15:0] num, qq, rr;
+                      num=gpr[R_EAX][15:0];
+                      if (srcv[7:0]==8'd0) dfault=1'b1;            // divide-by-zero
+                      else begin
+                        qq=num/{8'd0,srcv[7:0]}; rr=num%{8'd0,srcv[7:0]};
+                        if (qq[15:8]!=8'd0) dfault=1'b1;           // quotient > 0xFF
+                        else gpr[R_EAX]<={gpr[R_EAX][31:16], rr[7:0], qq[7:0]};
+                      end
                     end else if (q_w==3'd2) begin
                       logic [31:0] num,qq,rr;
-                      num={gpr[R_EDX][15:0],gpr[R_EAX][15:0]}; qq=num/{16'd0,srcv[15:0]}; rr=num%{16'd0,srcv[15:0]};
-                      gpr[R_EAX]<={gpr[R_EAX][31:16], qq[15:0]};
-                      gpr[R_EDX]<={gpr[R_EDX][31:16], rr[15:0]};
+                      num={gpr[R_EDX][15:0],gpr[R_EAX][15:0]};
+                      if (srcv[15:0]==16'd0) dfault=1'b1;
+                      else begin
+                        qq=num/{16'd0,srcv[15:0]}; rr=num%{16'd0,srcv[15:0]};
+                        if (qq[31:16]!=16'd0) dfault=1'b1;         // quotient > 0xFFFF
+                        else begin gpr[R_EAX]<={gpr[R_EAX][31:16], qq[15:0]};
+                                   gpr[R_EDX]<={gpr[R_EDX][31:16], rr[15:0]}; end
+                      end
                     end else begin
                       logic [63:0] num,qq,rr;
-                      num={gpr[R_EDX],gpr[R_EAX]}; qq=num/{32'd0,srcv}; rr=num%{32'd0,srcv};
-                      gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0];
+                      num={gpr[R_EDX],gpr[R_EAX]};
+                      if (srcv==32'd0) dfault=1'b1;
+                      else begin
+                        qq=num/{32'd0,srcv}; rr=num%{32'd0,srcv};
+                        if (qq[63:32]!=32'd0) dfault=1'b1;         // quotient > 0xFFFFFFFF
+                        else begin gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0]; end
+                      end
                     end
                     flags_we=1'b0;
-                    // P5 DIVIDE OCCUPANCY (cycle-modeled, p5model occ DIV
-                    // 17/25/41 for r/m8/16/32). The native helper above produces
-                    // the bit-exact quotient/remainder; the modeled non-pipelined
-                    // occupancy is charged as a DEFERRED penalty (occ minus the 7-
-                    // clock measured slow-FSM cost of one reg-form divide) burned
-                    // before the next issue — reusing the pending_mem_pen mechanism
-                    // (the same way a D-cache miss penalty is folded into the next
-                    // insn's pipe_free_at). Holds the U pipe so a dependent EDX:EAX
-                    // consumer cannot issue until the divide latency elapses.
-                    pending_mem_pen <= (q_w==3'd4) ? 7'd34 : (q_w==3'd2) ? 7'd18 : 7'd10;
+                    if (dfault) begin
+                      // #DE (vector 0): divide error. NO result write, EFLAGS
+                      // unchanged. sys_mode DELIVERS through the IDT (the verified
+                      // S_INT_GATE FSM, FAULT semantics = push the faulting EIP);
+                      // user mode loud-HALTs (no IDT). Matches QEMU, which raises
+                      // #DE on div-by-zero AND on a quotient that overflows the
+                      // destination width.
+                      do_retire=1'b0;
+                      if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
+                      else          state<=S_HALT;
+                    end else
+                      // P5 DIVIDE OCCUPANCY (cycle-modeled, p5model occ DIV
+                      // 17/25/41 for r/m8/16/32). The native helper above produces
+                      // the bit-exact quotient/remainder; the modeled non-pipelined
+                      // occupancy is charged as a DEFERRED penalty (occ minus the 7-
+                      // clock measured slow-FSM cost of one reg-form divide) burned
+                      // before the next issue — reusing the pending_mem_pen mechanism
+                      // (the same way a D-cache miss penalty is folded into the next
+                      // insn's pipe_free_at). Holds the U pipe so a dependent EDX:EAX
+                      // consumer cannot issue until the divide latency elapses.
+                      pending_mem_pen <= (q_w==3'd4) ? 7'd34 : (q_w==3'd2) ? 7'd18 : 7'd10;
                   end
-                  default: begin // IDIV /7
+                  default: begin // IDIV /7 (signed) — with #DE (div-by-zero / overflow)
+                    logic dfault;
+                    dfault = 1'b0;
                     if (q_w==3'd1) begin
                       logic signed [15:0] num,den,qq,rr;
                       num=$signed(gpr[R_EAX][15:0]); den=$signed({{8{srcv[7]}},srcv[7:0]});
-                      qq=num/den; rr=num%den;
-                      gpr[R_EAX]<={gpr[R_EAX][31:16], rr[7:0], qq[7:0]};
+                      if (srcv[7:0]==8'd0) dfault=1'b1;
+                      else begin
+                        qq=num/den; rr=num%den;
+                        // overflow: quotient outside signed 8-bit [-128,127]
+                        if (qq != $signed({{8{qq[7]}}, qq[7:0]})) dfault=1'b1;
+                        else gpr[R_EAX]<={gpr[R_EAX][31:16], rr[7:0], qq[7:0]};
+                      end
                     end else if (q_w==3'd2) begin
                       logic signed [31:0] num,den,qq,rr;
                       num=$signed({gpr[R_EDX][15:0],gpr[R_EAX][15:0]}); den=$signed({{16{srcv[15]}},srcv[15:0]});
-                      qq=num/den; rr=num%den;
-                      gpr[R_EAX]<={gpr[R_EAX][31:16], qq[15:0]};
-                      gpr[R_EDX]<={gpr[R_EDX][31:16], rr[15:0]};
+                      if (srcv[15:0]==16'd0) dfault=1'b1;
+                      else begin
+                        qq=num/den; rr=num%den;
+                        if (qq != $signed({{16{qq[15]}}, qq[15:0]})) dfault=1'b1;
+                        else begin gpr[R_EAX]<={gpr[R_EAX][31:16], qq[15:0]};
+                                   gpr[R_EDX]<={gpr[R_EDX][31:16], rr[15:0]}; end
+                      end
                     end else begin
                       logic signed [63:0] num,den,qq,rr;
                       num=$signed({gpr[R_EDX],gpr[R_EAX]}); den=$signed({{32{srcv[31]}},srcv});
-                      qq=num/den; rr=num%den;
-                      gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0];
+                      if (srcv==32'd0) dfault=1'b1;
+                      else begin
+                        qq=num/den; rr=num%den;
+                        if (qq != $signed({{32{qq[31]}}, qq[31:0]})) dfault=1'b1;
+                        else begin gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0]; end
+                      end
                     end
                     flags_we=1'b0;
-                    // P5 IDIV OCCUPANCY (cycle-modeled, p5model occ IDIV 22/30/46
-                    // for r/m8/16/32 — a few clocks over DIV for the sign handling).
-                    // Same deferred-penalty mechanism as DIV above (occ - 7).
-                    pending_mem_pen <= (q_w==3'd4) ? 7'd39 : (q_w==3'd2) ? 7'd23 : 7'd15;
+                    if (dfault) begin
+                      // #DE (vector 0). Same delivery/HALT policy as DIV above.
+                      do_retire=1'b0;
+                      if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
+                      else          state<=S_HALT;
+                    end else
+                      // P5 IDIV OCCUPANCY (cycle-modeled, p5model occ IDIV 22/30/46
+                      // for r/m8/16/32 — a few clocks over DIV for the sign handling).
+                      // Same deferred-penalty mechanism as DIV above (occ - 7).
+                      pending_mem_pen <= (q_w==3'd4) ? 7'd39 : (q_w==3'd2) ? 7'd23 : 7'd15;
                   end
                 endcase
               end

@@ -1,0 +1,24 @@
+{
+  "name": "pde",
+  "kind": "system",
+  "src": "pde.S",
+  "linker": "pde.ld",
+  "image": "pde.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 200,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT load (lidt base=0x1000) + 1 #DE gate (vector 0, 32-bit interrupt gate)",
+    "#DE divide-by-zero: DIV by ECX=0 -> #DE (vector 0, no error code) -> de_handler -> resume past the DIV",
+    "#DE quotient overflow: EDX:EAX=0x1_0000_0000 / 1 -> quotient 0x100000000 (>32b) -> #DE -> de_handler -> resume",
+    "non-faulting DIV (255/5) commits normally; deterministic result (edx=(#DE<<8)|quot=0x233), isa-debug-exit 133"
+  ],
+  "description": "Bare-metal #DE (divide-error) IDT-delivery test for the review-response divide-family closure. DIV/IDIV now raise #DE (vector 0) on divide-by-zero and on quotient overflow, delivered through the verified S_INT_GATE FSM (FAULT: faulting EIP pushed). Per-record differential vs qemu-system-i386 (#DE is synchronous, so the gdbstub single-step golden delivers it). Boots real->protected (no paging), one vector-0 interrupt gate, two #DE triggers (div-by-zero + quotient overflow), de_handler counts + resumes past each divide, then a non-faulting DIV commits, deterministic result + isa-debug-exit."
+}
