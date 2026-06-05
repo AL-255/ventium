@@ -1231,3 +1231,25 @@ differential coverage than the hand-written corpus — at the user's request to
   + pushing the `ventium-refs` submodule (their own reference repo) is left to the
   user. Main-repo files: `verif/external/test386/{run-test386-gate.sh,test386.bin,
   test386.golden.vtrace,README.md}`.
+
+### AP-500 fast-path coverage — batch 2: reg-form r/m32,imm32 (2026-06-05, review Action 6)
+
+The general-register sibling of batch 1: the reg-form immediate ops `81 /r`
+(`ALU r/m32, imm32` — the imm32 version of the existing `83` imm8 arm) and `C7 /0`
+(`MOV r/m32, imm32` — the ModRM sibling of `B8+r`), both **mod11 / register-only**
+(no memory) in `rtl/core/decode.sv`. ADC/SBB=PU, CMP writes no reg, `C7` only `/0`;
+the 16-bit (66-prefixed) forms keep `0x66` first so they stay on the slow FSM.
+
+- **Func byte-identical** — `make verify` 66/66 goldens unchanged (the fast-path
+  execution of these reg-imm forms matches QEMU exactly; mirrors the proven
+  `83`/`B8` arms).
+- **They now pair** — NEW gated band `mb_rmimm` (PAIR class, generalising the
+  `accimm` branch): a general-register `81`/`C7` op (U) interleaved with an
+  independent `mov reg,reg` (V) → **RTL pairing 50% (matching p5model), abs-cyc
+  +0.35%** (vs ~0% pairing before). PASS.
+- **No band perturbation** — every M4/M5 band held; `make verify-sys` 10/10
+  EQUIVALENT (the fast path is `!sys_mode`-gated). lint 0/0.
+- Batches 3-5 (byte forms `04`/`A8`, `D1` shift-by-1, PUSH/POP, near branches,
+  memory) remain ordered by risk in `docs/fastpath-coverage-spec.md` §3; `D1`
+  shift-by-1 (a trivial mirror of `C1`) is the next safe one. RTL touched:
+  `rtl/core/decode.sv`; `ventium-refs` untouched.

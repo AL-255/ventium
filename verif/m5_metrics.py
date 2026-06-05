@@ -289,7 +289,7 @@ def compute(kernel, rtl_path, golden_path, abs_tol_pct=DEFAULT_ABS_TOL_PCT):
                   f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
         return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
 
-    if short in ("accimm",):
+    if short in ("accimm", "rmimm"):
         # PAIRING-coverage band: (1) the converted form pairs (pairing% above the
         # serialized baseline); (2) abs-cyc tracks the p5model golden (which pairs
         # these forms) within tolerance.

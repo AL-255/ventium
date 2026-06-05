@@ -14,15 +14,23 @@ REVIEW_Jun5.md Limit #5, Action 6 ("Expand AP-500 fast-path coverage").
   the p5model golden) PASSES at **pairing 50% / abs-cyc +0.35%** (vs ~0% pairing /
   ~2× cycles before). The 16-bit (66-prefixed) accumulator op keeps `0x66` as its
   first byte so it never reaches the arm — it stays on the slow FSM.
-- **DEFERRED — batches 2-5** (the byte accumulator forms `04`/`A8`; `81`/`C7`
-  reg-imm; `D1` shift-by-1; PUSH/POP `50+r`/`58+r`; near branches `E8`/`E9`/`0F
-  8x`; memory/store forms). §3 below orders them by frequency × benefit, lowest
-  risk first; each needs its own pairing microbenchmark + a re-run of all bands +
-  the full func diff (byte forms add byte-width fast-path ALU; PUSH/POP + stores
-  add real memory/stack functional risk).
+- **DONE — Batch 2: reg-form r/m32,imm32 (`81 /r`, `C7 /0`).** The general-register
+  imm32 siblings of the batch-1 accumulator forms: `81 /r` (ALU r/m32,imm32, the
+  imm32 version of the existing `83` imm8 arm) and `C7 /0` (MOV r/m32,imm32, the
+  ModRM sibling of `B8+r`), both **reg form only (mod11, no memory)**. ADC/SBB=PU,
+  CMP writes no reg, `C7` only `/0`. **Func byte-identical** (66/66 goldens
+  unchanged), every band held, NEW gated band `mb_rmimm` (PAIR class) PASSES at
+  **pairing 50% / abs-cyc +0.35%**. The 16-bit (66-prefixed) forms keep `0x66`
+  first so they stay on the slow FSM.
+- **DEFERRED — batches 3-5** (the byte accumulator forms `04`/`A8`; `D1`
+  shift-by-1; PUSH/POP `50+r`/`58+r`; near branches `E8`/`E9`/`0F 8x`;
+  memory/store forms). §3 below orders them by frequency × benefit; each needs its
+  own pairing microbenchmark + a re-run of all bands + the full func diff (byte
+  forms add byte-width fast-path ALU; PUSH/POP + stores add real memory/stack
+  functional risk). `D1` shift-by-1 (trivial mirror of `C1`) is the next safe one.
 
-Owner doc; the Batch-1 edit is in `rtl/core/decode.sv` + the band in
-`verif/m5_metrics.py` + `verif/tests/mb_accimm`.
+Owner doc; the Batch-1/2 edits are in `rtl/core/decode.sv` + the `PAIR` band in
+`verif/m5_metrics.py` + `verif/tests/mb_accimm`,`mb_rmimm`.
 
 ---
 
