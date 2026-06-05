@@ -133,6 +133,41 @@ inputs, and the comparator grades only the CPU. Stages: M7.0 oracle/contract +
 de-risk (running) → M7.1 Quake (ELF loader + int-0x80 proxy) → M7.2 V86 mode →
 M7.3 Win95 device-input replay + boot-prefix run.
 
+### M7.3 log (Win95 system co-sim)
+
+- 2026-06-05 — **M7.3a DONE (producer half): a deterministic Win95 boot-prefix golden
+  exists.** Per the M7.0 partial-go, built the record/replay environment + the
+  `--system-replay` producer:
+  - **Record artifact** (`verif/m7/win95/record.sh` + `replay-verify.sh`): `rr=record`
+    over a **COW overlay** of the read-only `win95.qcow2` (base untouched — verified
+    sha unchanged), `-rtc base=utc`, `-net none`, bounded; → `replay.bin` (4.7 MB
+    deterministic event log). `rr=replay` is **bit-reproducible** — two replays
+    byte-identical (23 IRQ0 / 126,573 device reads / 40,186 writes, per-class identical).
+    Landmines fixed: `-boot order=c` is non-replayable (omit); QEMU needs a flush-grace
+    after stop or the rrfile truncates; `shift=auto` freezes replay at the first timer →
+    use `shift=4`.
+  - **De-risk CORRECTION:** the gdbstub does NOT answer under `-icount rr=replay` (the
+    replay engine blocks the stub). The working capture path is
+    `-accel tcg,one-insn-per-tb=on -d cpu` (full register dump per instruction) with
+    `int`+`memory_region_ops` in the SAME `-D` log so textual order = replay-icount
+    order. `gen_trace.py --system-replay` (two-pass: initial phys-mem at reset + the
+    aligned `-d cpu` stream) + `replaylog.py` (the alignment engine) implement it.
+  - **300,000-instruction system golden** (`win95-boot.vtrace`, 228 MB): full per-record
+    arch state (pc + GPRs + eflags + 6 sels + cr0..cr4 + segment-hidden base/limit/attr),
+    **byte-identical across two independent passes** (sha `c1486a6f…`), self-compares
+    EQUIVALENT through compare.py. Reaches reset F000:FFF0 → real-mode SeaBIOS POST →
+    **real→protected transition (CR0.PE 0→1 at record 23)** → PM BIOS + PCI enumeration.
+  - **Trace contract** (`tracefmt.py` dev_in/dma_wr/hwint/intr fields; all optional,
+    none in `func_compare_keys` ⇒ replayed, never graded): `dev_in:[{addr,val,size,region}]`,
+    `dma_wr:[…]`, `intr:{vec,err,…}`.
+  - **Consumer (M7.3b) plan + first RTL gaps (in prefix order):** GAP 2 (the FIRST wall)
+    — the core does NOT decode `IN`/`OUT` (E4–E7, EC–EF) at all → it would HALT at the
+    record-13 RTC `in`; must add IN/OUT decode + the co-sim `dev_in` bus. GAP 1 — no
+    async-interrupt injection port (the 300k prefix has **0 interrupts** — first IRQ0 is
+    at insn ~6.2M — so this is deferrable for the bounded bring-up). **Verdict: PARTIAL —
+    GO on the bounded 300k prefix; the interrupt region + full GUI boot stay
+    throughput-deferred (honest, never faked).**
+
 ### M7 log
 
 - 2026-06-04 — M7 opened; spec written; M7.0 oracle de-risk launched (Quake syscall
