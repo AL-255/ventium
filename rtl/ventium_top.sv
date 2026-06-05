@@ -149,6 +149,12 @@ module ventium_top
   logic [31:0] core_mem_rdata;
   logic        core_mem_ack;
 
+  // M8.1: the core's INTERRUPT-ACKNOWLEDGE strobe output is the M8 ventium_soc's
+  // (it drives the 8259). ventium_top (the verification top) ties off the
+  // external-interrupt path (soc_en=0), so this output is always 0 and unused
+  // here — sink it so -Wall stays clean.
+  logic        soc_inta_unused;
+
   core u_core (
       .clk          (clk),
       .rst_n        (rst_n),
@@ -173,6 +179,16 @@ module ventium_top
       .io_wdata     (io_wdata),
       .io_rdata     (io_rdata),
       .io_ack       (io_ack),
+      // M8.1: the external-interrupt path is the M8 ventium_soc's; ventium_top
+      // (the verification top) TIES IT OFF so every existing gate stays
+      // byte-identical. soc_en=0 makes the whole divert dead; the input pins are
+      // 0 and inta is left dangling (driven 0 by the core, never observed here).
+      .soc_en       (1'b0),
+      .intr         (1'b0),
+      .nmi          (1'b0),
+      .inta         (soc_inta_unused),
+      .inta_vector  (8'd0),
+      .inta_valid   (1'b0),
       .mem_req      (core_mem_req),
       .mem_we       (core_mem_we),
       .mem_addr     (core_mem_addr),
@@ -387,5 +403,10 @@ module ventium_top
 
   // §6.9 System state ----------------------------------------------------------
   sys_state   u_sys     (.clk(clk), .rst_n(rst_n));
+
+  // M8.1 lint sink: the tied-off core inta output (soc_en=0 here).
+  // verilator lint_off UNUSED
+  wire _unused_soc = &{1'b0, soc_inta_unused};
+  // verilator lint_on UNUSED
 
 endmodule : ventium_top

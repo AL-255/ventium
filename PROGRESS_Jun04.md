@@ -733,3 +733,117 @@ bit-exact oracle for the devices — QEMU's device timing ≠ ours).
   `S_INT_GATE` IDT path from an external pin — closes the M7.3a interrupt-injection gap),
   wiring PIC+PIT, gated `soc_en` (all existing gates bit-identical), with a bare-metal
   differential-vs-qemu-system gate.
+
+- **M8.1 — `ventium_soc` + core external-interrupt delta — DONE 2026-06-05** (closes the
+  M7.3a **GAP 1**: no path to inject a hardware interrupt — the core now takes a real
+  on-die device IRQ through the verified IDT FSM). Reviewed + verified end-to-end this
+  session; not yet committed (the orchestrator commits).
+
+  - **Core delta (`rtl/core/core.sv`, +190/−2), minimal + additive, gated on a NEW
+    `soc_en` input (defaults 0, tied 0 in `ventium_top`).** New ports: `soc_en`, `intr`
+    (level, 8259 master INT), `nmi` (edge), `inta` (1-clk INTA strobe out), `inta_vector`
+    [7:0], `inta_valid`. New latches (mirror the `smi_pending` block): `intr_pending`
+    (level mirror), `nmi_pending`/`nmi_prev` (edge-latch), `irq_shadow` (STI
+    one-instruction inhibit), `nmi_in_progress` (set on NMI delivery, cleared by IRET).
+    Combinational accept predicates with the **IA-32 priority SMI > NMI > maskable INTR**:
+    `nmi_take = soc_en && nmi_pending && !nmi_in_progress && !smi_take`;
+    `intr_take = soc_en && intr_pending && eflags[9](IF) && !irq_shadow && !nmi_take &&
+    !smi_take`; `assign inta = (state==S_DECODE) && intr_take`. The divert is two `else if`
+    branches in the existing S_DECODE priority chain **right after** the SMI# block, each
+    reusing the existing HW-fault task `start_fault` **verbatim** (`int_sw<=0`,
+    `state<=S_INT_GATE`): NMI → vector 2 + `nmi_in_progress<=1`; INTR → `inta_vector`. So
+    delivery flows through the SAME verified `S_INT_GATE → S_INT_CS → S_INT_PUSH` IDT FSM
+    (gate read, IF/TF clear on an interrupt gate, frame push, V86/IOPL via the existing
+    `from_v86` path) — **no new delivery logic**. A second additive edit routes IN/OUT
+    through the existing `S_IO` bus when `soc_en=1` (so the PMIO decoder can service
+    PIC/PIT over the `io_*` seam), **except `out 0xf4`** which still HALTs (the
+    isa-debug-exit terminator). When `soc_en=0` the whole divert + the IN/OUT branch are
+    dead and the existing `else state<=S_HALT` path is byte-identical.
+
+  - **`ventium_soc` (`rtl/soc/ventium_soc.sv`, `rtl/ventium_soc.f` filelist).** Instantiates
+    `core` (`soc_en=1`, `boot_mode` from a port; cosim/proxy/cycle/errata all inert) +
+    `ven_pic` (8259) + `ven_pit` (8254, `TICK_DIV=1024`) on a combinational PMIO decoder
+    over the `io_*` seam: `cs_pic` for 0x20/0x21/0xA0/0xA1/0x4D0/0x4D1, `cs_pit` for
+    0x40–0x43; single-beat combinational ack; undecoded ports ack `rdata=0`. Interrupt
+    wiring: `ven_pit.out0 → ven_pic.irq_in[0]`; `ven_pic.int_out → core.intr`;
+    `core.inta → ven_pic.inta`; `ven_pic.inta_vector → core.inta_vector`; nmi tied 0. The
+    DPI retire block is mirrored verbatim from `ventium_top` so the SAME trace writer emits
+    the system-mode `.vtrace`. `ventium_top` is NOT modified (only the tie-off). New `--soc`
+    TB driver (`verif/tb/tb_soc.cpp`, `verif/tb/Makefile` `soc` target into a separate
+    `obj_dir_soc` so it never clobbers the sys-gate build).
+
+  - **The INTR delivery is REAL (not faked), verified by reading the path end-to-end.**
+    The 8254 PIT ch0 (mode-0 one-shot, re-armed in the handler) raises `out0` → `ven_pic`
+    `irq_in[0]` → the PIC's `int_out` (= QEMU `pic_update_irq` on the master) → `core.intr`.
+    The core pulses `inta` the clock it accepts the INTR; `ven_pic` returns `inta_vector`
+    **combinationally** via the same logic as QEMU `pic_read_irq()` and applies the
+    `do_intack` side-effects (set ISR / clear IRR / advance priority) on the clocked edge
+    when `inta` strobes. The core latches that vector into `start_fault(inta_vector,…)`
+    and lands at IDT[0x20]'s target = the handler at `0x000f0190` — i.e. a wrong/faked
+    vector would land elsewhere, so the handler entry **proves** the vector return is
+    genuine. Verified: **N=4** real deliveries observed on the RTL trace, each entering
+    `0x000f0190` with **IF=0** (the interrupt gate cleared IF), interrupting the spin-loop
+    mainline (savedEIP 0x000f013b/0x000f0136), and **IRET-resuming the SAME mainline PC**
+    with IF=1.
+
+  - **The gate (`verif/soc/run-soc-gate.sh`, test `verif/sys/tests/pirqsoc/`):
+    CHECKPOINT-DIFFERENTIAL = EQUIVALENT.** Three checks, all PASS on a real `ventium_soc`
+    run (26828 retired, 4 IRQ0 deliveries): **(A) SETUP DIFFERENTIAL** — 94 setup records
+    vs the `gen_trace.py --system` golden, **90 byte-identical + 4 LAPIC eax-only**
+    (documented off-surface: the SPIV/LVT0 MMIO writes to 0xFEE000xx are RTL-inert in the
+    SoC; the test programs them only because qemu-system `-machine pc` routes the i8259
+    INTR through the LAPIC), **0 HARD diffs**, both reach the spin loop at the identical
+    setup length. **(B) CHECKPOINT DIFFERENTIAL** — the RTL end-state at EIP 0x000f017e
+    equals `pirqsoc.checkpoint.golden` **EXACTLY**: esi=4 (IRQ0 counter), edi=0x00 (PIC
+    master ISR readback after EOI), ebp=0xFF (IMR), edx=ecx=0x40FF (=N*0x1000+ISR+IMR),
+    eax=0xFF, esp=0x90000, mem[0x2000]=4 / mem[0x2004]=0x00 / mem[0x2008]=0xFF. This
+    end-state is **only reachable** if the handler genuinely ran N times, EOI'd each
+    delivery (so ISR reads 0x00 through the PIC's real intack/EOI logic), and re-armed the
+    PIT — it is the authoritative qemu full-speed end-state, boundary-independent. **(C)
+    STRUCTURAL/SVA** — the N=4 per-delivery effect (handler IF=0, mainline interrupt, IRET
+    resume IF=1). The compare is on **genuinely-deterministic CPU-observable state**, not
+    weakened/vacuous.
+
+  - **HONEST DIFFERENTIAL vs STRUCTURAL split.** **DIFFERENTIAL** = the setup prefix
+    (90/94 byte-identical) + the post-spin end-state checkpoint (GPRs + var memory ==
+    golden EXACTLY). **STRUCTURAL** = the **IRQ0 fire cadence** (which exact instruction
+    boundary each IRQ0 hits) — this is set by the PIT/CPU clock ratio (`TICK_DIV=1024`
+    prescaler) and is **provably NOT differential**: the qemu-system gdbstub single-step
+    oracle (`gen_trace.py --system`) masks `CPU_INTERRUPT_HARD` via `SSTEP_NOIRQ`, so it
+    CANNOT deliver a hardware INTR at all (it spins forever, 0 handler entries). The
+    single-step golden (`pirqsoc.sys.vtrace.golden`) is **retained as the documented proof**
+    that the oracle cannot deliver the HW INTR — so the per-delivery EFFECT is correctly
+    structural, **infeasible-not-faked**. The `TICK_DIV=1024` choice is purely structural:
+    it only has to be slow enough that the mainline runs the full handler + a spin-loop
+    check between edges, so the counter reaches exactly N before the (N+1)th edge; the
+    end-state checkpoint is independent of it.
+
+  - **INERTNESS PROOF (soc_en=0 / pins tied off is GENUINELY byte-identical).** `make verify`
+    is **GREEN**: 57/57 func PASS (incl. x87), all M4 integer cycle bands + all M5 FP/cache
+    bands met. The crux: **func golden cache hits 57/57 with misses regenerated: 0, and 0
+    goldens new this run** — the RTL traces matched the cached pre-change goldens
+    byte-for-byte, so the new external-interrupt divert + the `soc_en` IN/OUT branch are
+    dead with `soc_en=0`. **All 10 sys gates pass**: 9 EQUIVALENT via the real RTL
+    `--system` diff vs golden (RTL-SYS-DIFF-OK) — pseg 70, pmode 1084, ppage 128, pintr
+    171, pfault 348, pcpl 304, ptask 292, pdebug 239, pv86 949 records match; the
+    pintr=171 / pfault=348 / pcpl=304 / pv86=949 counts match the design-spec reference
+    numbers **exactly**, confirming the `S_INT_GATE → S_INT_CS → S_INT_PUSH` delivery FSM
+    is byte-for-byte unchanged by the additive divert. psmm is SMM-PARTIAL-OK (structural,
+    golden documented-infeasible).
+
+  - **Lint clean** (`verilator --lint-only -Wall -Wno-UNUSED`, the canonical TB flags) for
+    BOTH `ventium_soc` (`--top-module ventium_soc`) and `ventium_top` (`--top-module
+    ventium_top`) — zero warnings from any new signal. `ventium-refs` untouched (submodule
+    working tree clean; the pre-existing staged pointer bump is unrelated). `ventium_top`
+    behaviorally unmodified (only the `soc_en=0` tie-off + a lint sink for the dangling
+    `inta`). Files: `rtl/core/core.sv`, `rtl/ventium_top.sv`, `rtl/soc/ventium_soc.sv`,
+    `rtl/ventium_soc.f`, `verif/tb/tb_soc.cpp`, `verif/tb/Makefile`, `verif/soc/run-soc-gate.sh`,
+    `verif/sys/tests/pirqsoc/`.
+
+  - **Design-fidelity notes carried forward (minimal-scope, all soc_en-gated/inert):**
+    (1) `irq_shadow` is set on STI only (MOV-SS shadow not wired); (2) `nmi_in_progress`
+    masks only further NMI, not INTR (correct IA-32 — an NMI handler with IF=1 can take
+    INTR); (3) `inta_valid` is currently sunk (the master 8259 always supplies a vector) —
+    the documented home for a future spurious-IRQ7/IRQ15 refinement; (4) the LAPIC
+    SPIV/LVT0 writes are RTL-inert (no LAPIC in the SoC; `ven_pic.int_out → core.intr`
+    directly).

@@ -22,12 +22,20 @@ TB_DIR       := $(CURDIR)
 RTL_FILELIST := $(RTL_DIR)/ventium.f
 RTL_SRCS     := $(RTL_FILELIST)
 
+# M8.1 SoC integration filelist: the core set + ventium_soc + ven_pic + ven_pit
+# (ventium_top REPLACED by ventium_soc as the top). Used by the `soc` target.
+SOC_FILELIST := $(RTL_DIR)/ventium_soc.f
+
 # Self-test stub sources.
 SELFTEST_SRCS := $(wildcard $(SELFTEST_DIR)/*.sv)
 
 # C++ sources owned by Producer C.
 CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp \
             $(TB_DIR)/quake_image.cpp $(TB_DIR)/win95_cosim.cpp
+
+# M8.1 --soc TB: a dedicated driver (tb_soc.cpp) against the ventium_soc top. It
+# reuses the shared memory model + DPI retire path; no quake/win95 co-sim.
+SOC_CPP_SRCS := $(TB_DIR)/tb_soc.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp
 
 # ---- verilator invocation ---------------------------------------------------
 VERILATOR ?= verilator
@@ -70,6 +78,28 @@ rtl:
 	$(VERILATOR) $(VL_FLAGS) -Mdir obj_dir \
 	  -F $(RTL_FILELIST) $(CPP_SRCS)
 	@echo "built: $(CURDIR)/obj_dir/$(EXE)"
+
+# ---- soc: M8.1 SoC-integration build (ventium_soc + ven_pic + ven_pit) ------
+# Built into a SEPARATE obj dir so it never clobbers the default `rtl` build
+# (make verify / the sys gates keep using obj_dir/tb_ventium). The --soc TB
+# (tb_soc.cpp) runs the bare-metal pirqsoc image on ventium_soc and emits the
+# system-mode retire trace + the checkpoint memory dump.
+SOC_TOP := ventium_soc
+SOC_EXE := tb_soc
+.PHONY: soc
+soc:
+	@if [ ! -f "$(SOC_FILELIST)" ]; then \
+	  echo "ERROR: SoC filelist not found: $(SOC_FILELIST)."; exit 1; \
+	fi
+	$(VERILATOR) --cc --exe --build -j 0 \
+	  -sv --top-module $(SOC_TOP) \
+	  -Wall -Wno-UNUSED -Wno-fatal \
+	  $(VL_TRACE) \
+	  -CFLAGS "$(VL_CFLAGS)" \
+	  -o $(SOC_EXE) \
+	  -Mdir obj_dir_soc \
+	  -F $(SOC_FILELIST) $(SOC_CPP_SRCS)
+	@echo "built: $(CURDIR)/obj_dir_soc/$(SOC_EXE)"
 
 # ---- rtl-sva: integrated build with the biu_p5 SVA bound + --assert ---------
 # M5B-int: build the SAME integrated model into a SEPARATE obj dir, but with
@@ -124,5 +154,5 @@ selftest: selftest-build
 # ---- housekeeping -----------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -rf obj_dir obj_dir_selftest obj_dir_sva
+	rm -rf obj_dir obj_dir_selftest obj_dir_sva obj_dir_soc
 	rm -f selftest.vtrace
