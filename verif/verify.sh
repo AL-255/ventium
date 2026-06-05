@@ -86,6 +86,7 @@ M5_FP_KERNELS="mb_faddchain mb_fpindep"
 M5_CACHE_KERNELS="mb_dmiss mb_imiss"
 M5_DIV_KERNELS="mb_div8 mb_div16 mb_div32 mb_idiv32"
 M5_MUL_KERNELS="mb_mul mb_imul2"
+M5_PAIR_KERNELS="mb_accimm"
 INFO_KERNELS="mb_agiloop"
 
 # =============================================================================
@@ -137,6 +138,7 @@ class_of() {  # <name>
     case " $M5_CACHE_KERNELS " in *" $1 "*) echo CACHE; return;; esac
     case " $M5_DIV_KERNELS " in *" $1 "*) echo DIV; return;; esac
     case " $M5_MUL_KERNELS " in *" $1 "*) echo MUL; return;; esac
+    case " $M5_PAIR_KERNELS " in *" $1 "*) echo PAIR; return;; esac
     case " $INFO_KERNELS "   in *" $1 "*) echo INFO; return;; esac
     echo INT
 }
@@ -177,7 +179,7 @@ done
 
 # CYCLE jobs for the cycle kernels (in addition to their func job).
 CYCLE_TOTAL=0
-for k in $M4_INT_KERNELS $M5_FP_KERNELS $M5_CACHE_KERNELS $M5_DIV_KERNELS $M5_MUL_KERNELS $INFO_KERNELS; do
+for k in $M4_INT_KERNELS $M5_FP_KERNELS $M5_CACHE_KERNELS $M5_DIV_KERNELS $M5_MUL_KERNELS $M5_PAIR_KERNELS $INFO_KERNELS; do
     SRC="${SRC_OF[$k]:-}"; MAX="${MAX_OF[$k]:-}"; X87="${X87_OF[$k]:-0}"
     CLS="$(class_of "$k")"
     if [ -z "$SRC" ]; then
@@ -264,7 +266,7 @@ done
 declare -a K_NAME K_CLASS K_VERD K_CPI K_PAIR K_EXTRA K_BAND K_CMP K_ABS
 CYCLE_OK=1
 FADDCHAIN_CPI=""
-for k in $M4_INT_KERNELS $M5_FP_KERNELS $M5_CACHE_KERNELS $M5_DIV_KERNELS $M5_MUL_KERNELS $INFO_KERNELS; do
+for k in $M4_INT_KERNELS $M5_FP_KERNELS $M5_CACHE_KERNELS $M5_DIV_KERNELS $M5_MUL_KERNELS $M5_PAIR_KERNELS $INFO_KERNELS; do
     CLS="$(class_of "$k")"
     GATED=1; [ "$CLS" = "INFO" ] && GATED=0
     R="$WORKDIR/${k}.cycle.result"

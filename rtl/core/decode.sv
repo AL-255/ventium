@@ -82,6 +82,23 @@ module decode
             d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
           end
         end
+        // ---- ALU eAX, imm32 (accumulator short forms 05/0D/15/1D/25/2D/35/3D) -
+        // AP-500 fast-path coverage (review Action 6, batch 1): the accumulator-
+        // immediate forms. Pure register/immediate semantics (no memory) — the
+        // ALU op is b0[5:3] (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP); operand A = EAX,
+        // operand B = imm32 (use_imm). Mirrors the 83 reg-form imm arm + the A9
+        // (TEST eAX,imm32) arm. A 16-bit (66-prefixed) accumulator op carries the
+        // 0x66 prefix as b0, so it never reaches this arm — it stays on the slow
+        // FSM. ADC(op2)/SBB(op3) = PU (U-only-pairable); CMP(op7) writes no reg.
+        8'b00??_?101: begin
+          d.simple=1'b1; d.len=4'd5; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+          d.dst=R_EAX; d.src=R_EAX; d.use_imm=1'b1; d.imm={b4,b3,b2,b1};
+          d.wreg=(b0[5:3]!=3'b111);
+          d.reads = _onehot(R_EAX);
+          d.writes = d.wreg ? _onehot(R_EAX) : 8'd0;
+          d.pairs_first=1'b1;
+          d.pairs_second=!(b0[5:3]==3'b010 || b0[5:3]==3'b011);
+        end
         // ---- group1 r/m32, imm8 sign-ext (83 /r ib), reg form ----------------
         8'h83: begin
           if (mod==2'b11) begin

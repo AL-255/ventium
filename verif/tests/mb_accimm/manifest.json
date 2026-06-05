@@ -1,0 +1,15 @@
+{
+  "name": "mb_accimm",
+  "src": "mb_accimm/mb_accimm.s",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 6000,
+  "m5_cycle": true,
+  "m5_kind": "pair",
+  "m5_gated": true,
+  "m5_metric": "pairing+abscyc",
+  "m5_band": "accumulator-imm fast-path pairing: pairing% > 40 AND abs-cyc within 10% of p5model",
+  "golden_pairpct": 50.0,
+  "golden_cyc": 2027,
+  "golden_insns": 4006
+}

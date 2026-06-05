@@ -105,6 +105,7 @@ M5_FP_KERNELS="mb_faddchain mb_fpindep"
 M5_CACHE_KERNELS="mb_dmiss mb_imiss"
 M5_DIV_KERNELS="mb_div8 mb_div16 mb_div32 mb_idiv32"
 M5_MUL_KERNELS="mb_mul mb_imul2"
+M5_PAIR_KERNELS="mb_accimm"
 # INFO kernels: reported, never gate.
 INFO_KERNELS="mb_agiloop"
 
@@ -387,6 +388,7 @@ for k in $M5_CACHE_KERNELS; do run_kernel "$k" CACHE 1; done
 # (d) New M5 integer-DIVIDE occupancy bands (review-response, m5-div-spec.md).
 for k in $M5_DIV_KERNELS;   do run_kernel "$k" DIV   1; done
 for k in $M5_MUL_KERNELS;   do run_kernel "$k" MUL   1; done
+for k in $M5_PAIR_KERNELS;  do run_kernel "$k" PAIR  1; done
 # INFO kernels.
 for k in $INFO_KERNELS;     do run_kernel "$k" INFO  0; done
 
