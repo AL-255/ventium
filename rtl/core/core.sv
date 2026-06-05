@@ -129,6 +129,42 @@ module core
     input  logic [31:0] io_rdata,         // IN data (the golden dev_in value)
     input  logic        io_ack,           // I/O response strobe (combinational-OK)
 
+    // ------------------------------------------------------------------------
+    // M8.1 EXTERNAL INTERRUPT pins (docs PROGRESS_Jun04.md "M8" + the M8.0
+    // design). DEFAULT INERT: the whole external-interrupt divert below is
+    // gated on `soc_en` (a NEW input that defaults 0 here and is tied 0 in
+    // ventium_top), so with soc_en==0 these pins are dead — the core is
+    // byte-for-byte identical to the M0-M7 core (every existing gate +
+    // `make verify` unaffected). This is the proven additive pattern
+    // (boot_mode / cycle_mode / errata_en / proxy_en / cosim_en all default
+    // inert). When soc_en==1 (the M8 ventium_soc) an EXTERNAL maskable INTR
+    // from the 8259 master, or an edge NMI, is delivered at the next
+    // instruction boundary through the EXISTING verified S_INT_GATE ->
+    // S_INT_CS -> S_INT_PUSH IDT FSM via the int_sw=0 (hardware) path:
+    //   * intr        — LEVEL request from the 8259 master INT (held until
+    //                   serviced). Delivered only when EFLAGS.IF=1 and the
+    //                   one-instruction STI/MOV-SS shadow is clear.
+    //   * nmi         — NON-MASKABLE edge. Latched on a rising edge, delivered
+    //                   regardless of IF, vector 2, and blocks a further NMI
+    //                   until the IRET that ends the handler.
+    //   * inta        — 1-clock INTERRUPT-ACKNOWLEDGE strobe pulsed in the same
+    //                   clock the core accepts a maskable INTR. The PIC drives
+    //                   inta_vector COMBINATIONALLY off this strobe (its second
+    //                   INTA cycle), which the core latches as the delivered
+    //                   vector. NMI does NOT pulse inta (vector is fixed 2).
+    //   * inta_vector — the 8-bit vector the PIC supplies on the inta strobe.
+    //   * inta_valid  — the PIC asserts this with a meaningful inta_vector
+    //                   (reserved for a future spurious-IRQ refinement; the
+    //                   master 8259 always supplies a vector, so the current
+    //                   divert latches inta_vector unconditionally).
+    // ------------------------------------------------------------------------
+    input  logic        soc_en,           // M8.1: enable the external-interrupt divert
+    input  logic        intr,             // level: pending maskable INTR (8259 master)
+    input  logic        nmi,              // edge: non-maskable interrupt request
+    output logic        inta,             // 1-clock INTERRUPT-ACKNOWLEDGE strobe
+    input  logic [7:0]  inta_vector,      // PIC-supplied vector (combinational on inta)
+    input  logic        inta_valid,       // PIC has a meaningful inta_vector
+
     output logic        mem_req,
     output logic        mem_we,
     output logic [31:0] mem_addr,
@@ -271,6 +307,26 @@ module core
   logic [15:0] rsm_gdtl, rsm_idtl;
   // ({cs_d, cpl} are restored directly from the final read-back beat, not staged
   // in a holding reg — see S_RSM commit.)
+
+  // ===========================================================================
+  // M8.1 — EXTERNAL INTERRUPT recognition latches (mirror the smi_pending block).
+  // ALL of these are INERT when soc_en==0: they are only ever written inside a
+  // `soc_en`-gated branch, so with the pins tied off (ventium_top) they hold
+  // their reset value (0) forever and never affect the datapath — every existing
+  // gate stays bit-identical. (Like smi_pending, the recognition is sampled at
+  // the S_DECODE instruction boundary so an external interrupt is taken BEFORE
+  // the about-to-run instruction executes, i.e. it restarts at the current EIP.)
+  // ===========================================================================
+  logic        intr_pending;      // a maskable INTR (8259) is asserted (level-mirror)
+  logic        nmi_pending;       // an NMI edge has been latched, awaiting delivery
+  logic        nmi_prev;          // previous-clock nmi level, for rising-edge detect
+  logic        irq_shadow;        // the STI / MOV-SS one-instruction interrupt inhibit
+                                   // (HF_INHIBIT_IRQ): set for exactly the ONE
+                                   // instruction following an STI, cleared at the next
+                                   // S_DECODE boundary, so an INTR cannot interpose
+                                   // between STI and the next instruction.
+  logic        nmi_in_progress;   // an NMI handler is running: blocks a further NMI
+                                   // until the IRET that ends it (NMI masking, IA-32).
 
   // P5 SMRAM State Save Map — register offsets (Pentium Dev. Manual Vol.3
   // Table 20-1, 510\60 variant). The ABSOLUTE save-map address of a field is
@@ -2114,6 +2170,34 @@ module core
   assign syscall_active   = syscall_active_c;
 
   // ===========================================================================
+  // M8.1 — external-interrupt ACCEPT predicates (combinational). These mirror the
+  // exact priority of the S_DECODE divert (see below) so the `inta` strobe and the
+  // sequential delivery agree on the SAME clock. ALL are 0 when soc_en==0, so the
+  // core is byte-identical to the M0-M7 core.
+  //
+  // Priority at the instruction boundary: SMI# (smi_take) > NMI > maskable INTR.
+  //   smi_take : the recognised SMI# the S_DECODE smi_pending block takes FIRST.
+  //   nmi_take : an NMI edge, NON-maskable (ignores IF/irq_shadow), blocked only
+  //              while an NMI handler is already running (nmi_in_progress) or by a
+  //              pending SMI.
+  //   intr_take: a maskable INTR — only when EFLAGS.IF=1, the one-instruction
+  //              STI/MOV-SS shadow is clear (irq_shadow=0), and neither a higher-
+  //              priority NMI nor SMI is being taken this boundary. (NMI in progress
+  //              does NOT mask INTR — the IA-32 NMI block applies to NMI only.)
+  // The level INTR / NMI edge are sampled into intr_pending / nmi_pending (the
+  // sequential block) exactly like smi_pending, then consumed here.
+  // ===========================================================================
+  logic smi_take, nmi_take, intr_take;
+  assign smi_take  = smi_pending && sys_mode && !smm_active;
+  assign nmi_take  = soc_en && nmi_pending && !nmi_in_progress && !smi_take;
+  assign intr_take = soc_en && intr_pending && eflags[9] && !irq_shadow
+                     && !nmi_take && !smi_take;
+  // INTERRUPT-ACKNOWLEDGE strobe: pulse for exactly the S_DECODE clock the core
+  // accepts a maskable INTR (the PIC drives inta_vector combinationally off this).
+  // NMI carries the fixed vector 2 and does NOT pulse inta. 0 whenever soc_en==0.
+  assign inta = (state==S_DECODE) && intr_take;
+
+  // ===========================================================================
   // Latched decoded fields
   // ===========================================================================
   logic [3:0]  q_len;
@@ -3249,6 +3333,9 @@ module core
       // are fully written by S_RSM before being committed.)
       smbase<=32'h0003_0000; smm_active<=1'b0; smi_pending<=1'b0;
       smm_step<=6'd0; smm_resume_eip<=32'd0;
+      // M8.1 external-interrupt latches idle out of reset (all INERT when soc_en==0).
+      intr_pending<=1'b0; nmi_pending<=1'b0; nmi_prev<=1'b0;
+      irq_shadow<=1'b0; nmi_in_progress<=1'b0;
       // M2S.6 debug registers idle out of reset (Vol.3 power-on values). The DR
       // file resets identically in user mode — it is just never written there.
       dr0<=32'd0; dr1<=32'd0; dr2<=32'd0; dr3<=32'd0;
@@ -3282,6 +3369,27 @@ module core
       // cyc=clock-count-at-retire 1:1 (core_cyc is the count of completed clocks
       // before this edge; a retire on this edge stamps cyc=core_cyc+1).
       core_cyc <= core_cyc + 32'd1;
+
+      // -------------------------------------------------------------------
+      // M8.1 — sample the external-interrupt pins (mirror smi_pending). Done
+      // every non-reset clock, BEFORE the state machine, so the S_DECODE divert
+      // sees the current request. ALL gated on soc_en: with the pins tied off
+      // (soc_en==0, ventium_top) intr_pending/nmi_pending hold 0 forever and the
+      // divert is dead — the core is byte-identical to the M0-M7 core.
+      //   * intr is a LEVEL request (the 8259 holds INT until serviced): mirror it
+      //     into intr_pending. The divert consumes it (delivers) only when IF=1 +
+      //     no shadow; the PIC drops INT after the inta, so intr falls and
+      //     intr_pending clears naturally on the next sample.
+      //   * nmi is an EDGE request: latch nmi_pending on a rising edge (nmi_prev
+      //     remembers the last level). Once latched it is sticky until the NMI
+      //     divert consumes it; a further edge while a handler runs is held by
+      //     nmi_in_progress, re-armed by the IRET (S_DECODE d_iret).
+      // -------------------------------------------------------------------
+      if (soc_en) begin
+        intr_pending <= intr;                       // level mirror
+        nmi_prev     <= nmi;                        // remember the level for edge detect
+        if (nmi && !nmi_prev) nmi_pending <= 1'b1;  // latch a rising edge
+      end
 
       // -------------------------------------------------------------------
       // M2S.2 PAGING DIVERSION: when paging is on and the current state's
@@ -3665,6 +3773,14 @@ module core
           q_cld<=d_cld; q_std<=d_std; step<=4'd0;
           q_clc<=d_clc; q_stc<=d_stc; q_cmc<=d_cmc; q_cnt16<=d_cnt16;
           q_cli<=d_cli; q_sti<=d_sti; q_br16<=d_br16;
+          // M8.1: the STI/MOV-SS interrupt shadow lasts exactly ONE instruction.
+          // It was set in S_EXEC by the STI; this S_DECODE (the boundary BEFORE the
+          // shadowed instruction) still sees it set in the combinational intr_take
+          // (registered value), correctly masking INTR for this one boundary, and we
+          // clear it here so the NEXT boundary is open. Unconditional + harmless:
+          // INERT when soc_en==0 (irq_shadow is never read). The divert branches
+          // below only change `state`, never irq_shadow, so this is not clobbered.
+          irq_shadow <= 1'b0;
           // M7.3b IN/OUT latch: resolve the port (imm8 zero-extended, or DX[15:0]).
           q_io<=d_io; q_io_write<=d_io_write; q_io_w<=d_io_w;
           q_io_port<= d_io_imm ? {8'd0, d_io_port_imm} : gpr[R_EDX][15:0];
@@ -3692,6 +3808,39 @@ module core
             smm_resume_eip <= eip;          // restart this instruction after RSM
             smm_step       <= 6'd0;
             state          <= S_SMI_SAVE;
+          end
+          // ---- M8.1 EXTERNAL INTERRUPT divert (gated soc_en) -----------------
+          // ADDED to the existing instruction-boundary priority chain RIGHT AFTER
+          // the SMI# block (SMI > NMI > INTR). An external interrupt is taken
+          // BEFORE the about-to-run instruction executes (it does NOT retire) —
+          // exactly like the SMI# above and a hardware fault — and is delivered
+          // through the SAME verified S_INT_GATE -> S_INT_CS -> S_INT_PUSH IDT FSM
+          // via the int_sw=0 (hardware) entry, reusing start_fault VERBATIM:
+          //   * the pushed EIP = the CURRENT eip (the next instruction to run, so
+          //     IRET resumes it). This is the int_ret_eip a HW fault uses (restart).
+          //   * has_err=0, err=0 (external interrupts carry no error code).
+          //   * int_sw=0 -> the S_INT_GATE gate.DPL>=CPL check is bypassed (it
+          //     applies only to SOFTWARE INT n) AND the IF/TF clear on an
+          //     interrupt-gate entry happens in S_INT_PUSH from the gate type read
+          //     out of the IDT, just like every HW fault. V86/IOPL is handled by
+          //     the SAME downstream FSM (S_INT_CS from_v86 path), so no extra logic
+          //     is needed here.
+          // ENTIRELY INERT when soc_en==0 (nmi_take/intr_take are 0), so this whole
+          // branch is dead and every existing gate is byte-identical.
+          //
+          // NMI (vector 2) is non-maskable and sets nmi_in_progress (blocks a
+          // further NMI until the IRET that ends the handler — see S_DECODE d_iret);
+          // it does NOT pulse inta. A maskable INTR pulses inta this clock and the
+          // PIC supplies inta_vector COMBINATIONALLY, latched here as the vector.
+          else if (nmi_take) begin
+            nmi_pending     <= 1'b0;            // consume the latched edge
+            nmi_in_progress <= 1'b1;            // mask further NMI until IRET
+            start_fault(8'd2, 1'b0, 32'd0, eip);
+          end
+          else if (intr_take) begin
+            // inta pulsed combinationally THIS clock; the PIC has driven the vector
+            // back on inta_vector. Deliver through IDT[inta_vector], int_sw=0.
+            start_fault(inta_vector, 1'b0, 32'd0, eip);
           end
           // ---- M2S.6 GD general-detect (#DB before a MOV-DR access; gated
           // sys_mode + DBG_GD_ENABLE). This is the ONE #DB that fires BEFORE its
@@ -3787,9 +3936,29 @@ module core
           else if (d_io) begin
             // INS (string port-input) routes to its dedicated per-element handshake
             // S_INS (it is BOTH d_io and a K_STR); plain IN/OUT routes to S_IO.
+            // M8.1: the ventium_soc (soc_en=1) drives REAL device I/O — the PMIO
+            // decoder routes IN/OUT to ven_pic/ven_pit over the SAME io_* seam the
+            // co-sim uses (so soc_en, like cosim_en, EXECUTES IN/OUT through S_IO),
+            // with the SOLE exception of the isa-debug-exit terminator `out 0xf4`
+            // which still HALTs with no retire (the trace ends BEFORE the out, so
+            // the checkpoint is read at the post-readback point — matches qemu).
+            // The port at this boundary is the imm8 (E6) or DX[15:0] (EE); the
+            // exit uses `outb %al,%dx` with dx=0xF4. ENTIRELY INERT when both
+            // cosim_en==0 and soc_en==0: the existing !cosim path is unchanged
+            // (HALT on any IN/OUT), so every existing gate is byte-for-byte the
+            // same.
             if (cosim_en && d_kind==K_STR && d_st==ST_INS) state <= S_INS;
             else if (cosim_en)                             state <= S_IO;
-            // Outside co-sim: `out 0xf4` is the clean isa-debug-exit terminator
+            // SoC: execute device I/O via S_IO, except the `out 0xf4` exit -> HALT.
+            else if (soc_en) begin
+              if (d_io_write &&
+                  (d_io_imm ? ({8'd0, d_io_port_imm}==16'h00F4)
+                            : (gpr[R_EDX][15:0]==16'h00F4)))
+                state <= S_HALT;          // isa-debug-exit terminator (no retire)
+              else if (d_kind==K_STR && d_st==ST_INS) state <= S_INS;
+              else                                    state <= S_IO;
+            end
+            // Outside co-sim/SoC: `out 0xf4` is the clean isa-debug-exit terminator
             // (HALT, no retire); every other IN/OUT is a loud out-of-scope HALT.
             // Either way -> S_HALT with NO retire (matches the pre-M7.3b path
             // exactly, so the sys gates are byte-for-byte unchanged).
@@ -3893,6 +4062,10 @@ module core
           end
           else if (d_iret) begin
             int_step <= 4'd0; int_src_pc <= eip; state <= S_IRET;
+            // M8.1: IRET ends an interrupt/NMI handler -> re-arm NMI (clear the NMI
+            // block, IA-32). nmi_in_progress is only ever SET in the soc_en NMI
+            // divert, so this clear is a no-op (stays 0) when soc_en==0 — INERT.
+            nmi_in_progress <= 1'b0;
           end
           // ---- M2S.5 RSM (0F AA): leave SMM, restore the saved state ---------
           else if (d_rsm) begin
@@ -4018,7 +4191,14 @@ module core
           else if (q_stc) begin eflags<=eflags | 32'h0000_0001;  flags_we=1'b0; end // CF<-1
           else if (q_cmc) begin eflags<=eflags ^ 32'h0000_0001;  flags_we=1'b0; end // CF<-~CF
           else if (q_cli) begin eflags<=eflags & ~32'h0000_0200; flags_we=1'b0; end // IF<-0
-          else if (q_sti) begin eflags<=eflags | 32'h0000_0200;  flags_we=1'b0; end // IF<-1
+          else if (q_sti) begin eflags<=eflags | 32'h0000_0200;  flags_we=1'b0;     // IF<-1
+            // M8.1: STI sets IF but the interrupt window stays SHADOWED for exactly
+            // the one instruction that follows STI (IA-32 HF_INHIBIT_IRQ). Set the
+            // shadow here (in S_EXEC, the STI's retire clock); the next S_DECODE
+            // boundary sees it set (INTR blocked for that one instruction) and clears
+            // it. INERT when soc_en==0 (irq_shadow is only ever read by intr_take).
+            irq_shadow <= 1'b1;
+          end // IF<-1
           // ---- M2S.1 system ops with no memory operand --------------------
           else if (q_sysop==SYS_MOVCR_TO) begin
             // MOV CRn, r32. M2S.1 made CR0.PE active (real->protected); M2S.2 makes
@@ -7316,7 +7496,14 @@ module core
                    //                SS0:ESP0, so the bound never trips. Retained as
                    //                the home for the #TS bound check (documented
                    //                M2S.4 follow-on; needs a truncated-TSS test).
-                   tr_valid, tr_limit[0]};
+                   tr_valid, tr_limit[0],
+                   // M8.1 — inta_valid: the PIC asserts it with a meaningful
+                   // inta_vector. The master 8259 always supplies a vector on the
+                   // 2nd INTA cycle, so the divert latches inta_vector
+                   // unconditionally; inta_valid is the home for a future spurious-
+                   // IRQ7/IRQ15 refinement (deliver vector 7/15 with inta_valid=0).
+                   // Sunk so -Wall stays quiet while the pin exists for ventium_soc.
+                   inta_valid};
   // verilator lint_on UNUSED
 
 endmodule : core

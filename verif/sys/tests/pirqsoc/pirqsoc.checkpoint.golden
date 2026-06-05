@@ -1,0 +1,27 @@
+# Ventium M8.1 pirqsoc -- DETERMINISTIC END-STATE CHECKPOINT golden.
+#
+# The authoritative, boundary-INDEPENDENT post-spin architectural state, captured
+# from qemu-system-i386 8.2.2 running pirqsoc.bin AT FULL SPEED under the gdbstub
+# (continue, NOT single-step -- because the gdbstub single-step path masks the
+# hardware INTR via SSTEP_NOIRQ, so deliveries only happen at full speed), with a
+# HW breakpoint at the post-readback exit sequence (EIP 0x000f017e, the
+# `movl $0x42,%eax` that precedes the isa-debug-exit OUT). Reproducible across runs.
+#
+# This is the differential oracle the RTL ventium_soc END-STATE CHECKPOINT is
+# compared against. It is INDEPENDENT of WHEN each IRQ0 fired (the cadence is
+# structural). See pirqsoc.S for the determinism contract + manifest.json.
+checkpoint_eip = 0x000f017e
+# GPRs:
+esi = 0x00000004    # IRQ0_CTR == N (exactly N=4 deliveries, each EOIed)
+edi = 0x00000000    # PIC master ISR readback (0x00: all serviced + EOIed)
+ebp = 0x000000ff    # PIC master IMR readback (0xFF: all masked before readback)
+edx = 0x000040ff    # N*0x1000 + ISR + IMR = 4*0x1000 + 0x00 + 0xFF
+ecx = 0x000040ff    # mirrors edx
+eax = 0x000000ff    # = last IMR readback (in AL before the exit movl)
+esp = 0x00090000    # flat stack restored (IRET unwound every delivery frame)
+# memory vars:
+mem[0x2000] = 4     # IRQ0_CTR
+mem[0x2004] = 0x00  # ISR_READ
+mem[0x2008] = 0xff  # IMR_READ
+# process exit (full-speed, no breakpoint): isa-debug-exit code 0x42 -> status 133
+exit_status = 133

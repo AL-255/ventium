@@ -1,0 +1,57 @@
+{
+  "name": "pirqsoc",
+  "kind": "system",
+  "src": "pirqsoc.S",
+  "linker": "pirqsoc.ld",
+  "image": "pirqsoc.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 200,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "gate_shape": "checkpoint-differential",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT load (lidt base=0x1000 limit=0x7FF) + 1 IRQ0 interrupt gate (vector 0x20)",
+    "8259 PIC remap (master base 0x20, slave 0x28) + unmask IRQ0 only (IMR 0xFE/0xFF)",
+    "LAPIC software-enable (SPIV bit8) + LVT0=ExtINT (qemu-system platform; RTL-inert)",
+    "8254 PIT ch0 mode-0 one-shot armed (count 0x40), re-armed in the IRQ0 handler",
+    "sti -> N=4 IRQ0 deliveries each: INTR -> INTA -> interrupt gate -> handler (IF=0) -> EOI+re-arm -> IRET",
+    "spin to counter==N, mask IRQ0, read PIC ISR/IMR, deterministic compute, isa-debug-exit"
+  ],
+
+  "DE_RISK_FINDINGS": {
+    "summary": "Under qemu-system-i386 8.2.2 the standard gen_trace.py --system single-step oracle STRUCTURALLY CANNOT capture a hardware INTR delivery, so a per-record differential of the IRQ-delivery EFFECT via the standard golden is INFEASIBLE. The sound gate is CHECKPOINT-DIFFERENTIAL: the RTL ventium_soc end-state checkpoint is differenced against an authoritative deterministic end-state captured from qemu-system at FULL SPEED, plus structural/SVA on the per-delivery effect + IRQ cadence.",
+    "evidence_1_sstep_noirq": "qemu's gdbstub default sstep_flags = ENABLE|NOIRQ|NOTIMER (0x7) (gdbstub/gdbstub.c:73; qqemu.sstepbits reports ENABLE=1,NOIRQ=2,NOTIMER=4, qqemu.sstep reports 0x7). NOIRQ masks CPU_INTERRUPT_SSTEP_MASK which INCLUDES CPU_INTERRUPT_HARD (the maskable INTR path) for the stepped instruction (accel/tcg/cpu-exec.c:817; include/exec/cpu-all.h:319). So under gen_trace.py (plain 's') NO hardware INTR is ever delivered.",
+    "evidence_2_golden_has_no_delivery": "gen_trace.py --system on pirqsoc.bin (default sstep) produces 200 records that reach the setup + the spin loop (pc 0x000f0136/013b/013e cycling) and NEVER enter the handler (0 records at 0x000f0190); the IRQ0 counter stays 0. The free-running/bounded distinction is irrelevant -- the HW INTR is absent regardless.",
+    "evidence_3_sstep1_pathological": "With Qqemu.sstep=1 (NOIRQ|NOTIMER cleared) the timer-vs-step virtual-time ratio is pathological and UNTUNABLE: a free-running rate-gen (mode 2) re-fires every step and the handler makes ZERO forward progress (stuck at its first instruction); a bounded one-shot (mode 0) re-armed per handler OVERSHOOTS N massively at count 0x40 (35+ deliveries in 600 steps, counter never escapes the spin) and delivers ZERO at count 0xF000 in 500 steps. No PIT count yields exactly N under single-step. This is the timer/CPU clock-ratio nondeterminism in its purest form -- confirming the boundary is NOT differential.",
+    "evidence_4_lapic_extint": "Under qemu-system `-machine pc` the CPU INTR is driven by the LAPIC; the legacy i8259 INT line only reaches the CPU when LAPIC LVT0(LINT0)=ExtINT and the APIC is software-enabled. Without programming LVT0 the i8259 raises IRQ0 (info irq: isa-i8259 0: 55257) but the CPU NEVER takes it (empty -d int log, spins forever). The test programs SPIV bit8 + LVT0=ExtINT to get delivery under qemu. ventium_soc wires ven_pic.int_out->core.intr DIRECTLY (no LAPIC), so the two MMIO writes to 0xFEE000F0/0xFEE00350 are NO-OPS in the RTL (high-physical, not decoded as a device) -- a benign documented platform divergence off the differential surface.",
+    "evidence_5_fullspeed_deterministic": "At FULL SPEED (gdbstub 'c', not 's') IRQs DO deliver: the program reaches exactly N=4 deliveries, EOIs each, masks, reads back, and the post-spin architectural state is FULLY DETERMINISTIC + reproducible across 3 runs (checkpoint @EIP 0x000f017e: esi=N=4, edi=ISR=0x00, ebp=IMR=0xFF, edx=ecx=0x40FF=N*0x1000+0xFF; mem[0x2000]=4, mem[0x2004]=0x00, mem[0x2008]=0xFF; process exit 133). This is the boundary-INDEPENDENT oracle."
+  },
+
+  "delivery_effect_records": {
+    "note": "Captured at FULL SPEED (HW breakpoint at the handler entry); the single-step golden cannot show these. Boundary-independent SHAPE the RTL must reproduce per delivery.",
+    "handler_entry": "eip=0x000f0190 with IF=0 (32-bit interrupt gate clears IF on entry)",
+    "pushed_frame": "savedEIP=0x000f0136 (interrupted spin-loop mainline), savedCS=0x0008 (flat code), savedEFLAGS=0x00000297 (mainline IF=1)",
+    "iret_resume": "IRET (eip 0x000f01a8) pops EIP/CS/EFLAGS, resumes the mainline with IF=1",
+    "count": "exactly N=4 deliveries (one per PIT mode-0 arm), then IRQ0 masked"
+  },
+
+  "checkpoint_golden": {
+    "file": "pirqsoc.checkpoint.golden",
+    "oracle": "checkpoint_oracle.py -- qemu-system full-speed under gdbstub 'c', HW breakpoint at EIP 0x000f017e (post-readback, pre-isa-debug-exit)",
+    "esi": "0x00000004", "edi": "0x00000000", "ebp": "0x000000ff",
+    "edx": "0x000040ff", "ecx": "0x000040ff",
+    "mem_0x2000_ctr": 4, "mem_0x2004_isr": "0x00", "mem_0x2008_imr": "0xff",
+    "exit_status": 133
+  },
+
+  "comparison_plan": "The ventium_soc RTL phase (M8.1 Implement) satisfies this gate as CHECKPOINT-DIFFERENTIAL: (DIFFERENTIAL) the RTL --soc TB runs pirqsoc.bin on ventium_soc (core soc_en=1, ven_pic+ven_pit on the PMIO decoder, out0->irq_in[0], int_out->core.intr, core.inta->pic.inta, pic.inta_vector->core.inta_vector), delivers real IRQ0s, and its POST-SPIN END-STATE CHECKPOINT (the registers + the var memory at the post-readback point EIP 0x000f017e) must equal pirqsoc.checkpoint.golden EXACTLY (esi=4, edi=0x00, ebp=0xFF, edx=ecx=0x40FF, mem[0x2000]=4, mem[0x2004]=0x00, mem[0x2008]=0xFF) and the process must reach isa-debug-exit code 133 -- this is boundary-INDEPENDENT and matches qemu regardless of WHEN each IRQ fired. (STRUCTURAL/SVA) the per-delivery EFFECT is checked structurally on the RTL trace: each of the N deliveries shows CS:EIP entering the handler (0x000f0190) with IF=0, a pushed frame = (savedEIP in the spin region 0x000f0136, savedCS=0x08, savedEFLAGS IF=1), and an IRET resume; the IRQ0 cadence (which mainline boundary each IRQ hits) is STRUCTURAL, NOT differential. The standard gen_trace.py single-step golden (pirqsoc.sys.vtrace.golden) is retained as evidence that the deterministic SETUP + spin-entry match per-record, and as the documented proof that the single-step oracle cannot deliver the HW INTR (so the delivery itself is NOT per-record differential -- honest, not faked).",
+
+  "description": "Bare-metal M8.1 SoC-integration ON-DIE TIMER IRQ demonstrator (NO paging). Boots real->protected, builds an IDT with one IRQ0 (vector 0x20) 32-bit interrupt gate, remaps + programs the 8259 PIC (master base 0x20, IRQ0 unmasked), software-enables the LAPIC + sets LVT0=ExtINT so the legacy i8259 INTR reaches the CPU under qemu-system `-machine pc` (RTL-inert), arms the 8254 PIT ch0 in mode 0 (interrupt on terminal count) as a CPU-paced bounded one-shot re-armed in the handler, enables IRQs (sti), and spins until the IRQ0 handler has counted exactly N=4 deliveries (each: INTR->INTA->interrupt-gate->handler-with-IF=0->EOI+re-arm->IRET). It then masks IRQ0, reads back the PIC master ISR (0x00, all EOIed) and IMR (0xFF, all masked), computes a deterministic result (edx=N*0x1000+ISR+IMR=0x40FF) into fixed GPRs, and exits via isa-debug-exit (code 0x42 -> status 133). De-risked empirically under qemu-system-i386 8.2.2: the gdbstub single-step oracle (gen_trace.py) masks the hardware INTR (SSTEP_NOIRQ over CPU_INTERRUPT_HARD) so it structurally cannot capture the IRQ delivery, and Qqemu.sstep=1 (clearing NOIRQ|NOTIMER) gives an untunable pathological timer-vs-step cadence -- so the gate is CHECKPOINT-DIFFERENTIAL: the RTL end-state checkpoint is differenced against an authoritative deterministic full-speed checkpoint (boundary-independent), with the per-delivery effect + IRQ cadence checked structurally. Exercises the NEW M8.1 external-interrupt path (soc_en/intr/inta) driving the existing verified S_INT_GATE IDT delivery FSM from the on-die 8259/8254."
+}
