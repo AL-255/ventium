@@ -15,7 +15,8 @@ planned roadmap and the continuing **R2 leaf-module-extraction** refactor.
 | M2S.1 | Real→protected mode + segmentation (dual boot_mode) | `pseg` RTL sys-diff (70) | ✅ done-partial |
 | M2S.2 | 2-level paging MMU + split I/D TLBs + A/D + #PF decision | `pmode`(1084)/`ppage`(128) | ✅ done-partial |
 | M2S.3 | IDT-delivered interrupts/exceptions + IRET | `pintr`(171)/`pfault`(348) | ✅ done-partial |
-| M2S.4 | TSS + cross-priv delivery + inter-priv IRET | `pcpl`(304); `ptask` self-diff | ✅ done-partial |
+| M2S.4 | TSS + cross-priv delivery + inter-priv IRET | `pcpl`(304); HW task switch → M2S.4b | ✅ done-partial |
+| M2S.4b | HARDWARE TASK SWITCH (far `JMP` to a 32-bit TSS) — the deferred M2S.4 piece | `ptask` RTL `--system` sys-diff (292) | ✅ done-partial |
 | M2S.5 | SMM / RSM (partial oracle) | `psmm` structural self-check | ✅ done-partial |
 | M2S.6 | Debug registers DR0–DR7 + `#DB` (last system stage) | `pdebug` RTL sys-diff (239) | ✅ done-partial |
 | M3 | x87 FPU | x87 corpus diff-clean | ✅ |
@@ -31,6 +32,18 @@ system gates EQUIVALENT (pseg 70 / pmode 1084 / ppage 128 / pintr 171 / pfault 3
 pcpl 304); `ptask` self-diff (292) + `psmm` structural OK; verilator lint clean.
 Latest commit `2a00d06` (M2S.6) pushed to `origin/main`.
 
+**Verification re-run after M2S.4b (independently re-run 2026-06-05):** `make verify`
+(user) GREEN + bit-identical (exit 0; 57/57 func diff-clean, 0 goldens regenerated;
+all M4 integer + M5 FP/cache bands met). **`ptask` is now a REAL RTL `--system` diff
+EQUIVALENT to the golden, 292 records** (no longer self-diff-only) — RTL-SYS-DIFF-OK.
+All 9 differential sys gates EQUIVALENT — pseg 70 / pmode 1084 / ppage 128 / pintr
+171 / pfault 348 / pcpl 304 / **ptask 292** / pdebug 239 / pv86 949 — and psmm stays
+SMM-PARTIAL-OK (structural; differential oracle infeasible). Verilator lint clean
+(`--lint-only -sv -Wall -Wno-UNUSED -f ventium.f` → exit 0, 0 warn/err). Gate ports
+used: ptask 57310, pcpl 57320, pfault 57330, pv86 57340, pseg/pmode/ppage/pintr/
+pdebug/psmm 57350–57400 (all in 57000–57999). **Not committed** (the orchestrator
+verifies + commits).
+
 ## Deferred, no-oracle tracks (carried, not auto-started)
 
 - **R2 — leaf-module extraction** (this file's active work; the R1 deferral). Carve
@@ -41,7 +54,13 @@ Latest commit `2a00d06` (M2S.6) pushed to `origin/main`.
   must stay in the spine, and why.
 - **M5B-int** — wire the standalone pin-level bus into `rtl/` (would change M5 cycle
   timing; no bus oracle to re-verify).
-- **Full hardware task switch** (`ptask` differential) — the gnarliest M2S.4 piece.
+- **Hardware task switch** — the far-`JMP`-to-TSS variant is **CLOSED in M2S.4b**
+  (`ptask` is now a real RTL `--system` diff, 292 records EQUIVALENT). What stays
+  deferred (no corpus / no oracle): the `CALL`-far / `INT`-through-task-gate switch
+  (sets EFLAGS.NT + the TSS back-link@0x00 — a JMP does NOT), `IRET` with NT=1
+  (task-return), the round-trip switch-back (reloading the CPU-written outgoing TSS
+  image), LDTR descriptor reload (no LDT machinery), and the `tr_valid`/`tr_limit`
+  #TS-bound + TSS-descriptor type/present #GP/#NP negative paths.
 - **M6 system-errata family** (BTB-flush / SMM / APIC / DP) — reachable now, but most
   lack a differential oracle.
 
@@ -120,6 +139,89 @@ lint clean (0 warn/err). Adversarial review verdict: GENUINE + behavior-preservi
 - 2026-06-04 — R2 opened; roadmap snapshot recorded; leaf analysis launched.
 - 2026-06-04 — R2 done: dcache_timing/bpred_btb/tlb(×2)/icache extracted bit-exact
   (`ed573c3`/`f782700`/`544a365`/`6bb98ea`); regfile + fpu-state documented spine-bound.
+
+## M2S.4b — HARDWARE TASK SWITCH (far `JMP` to a 32-bit TSS) — CLOSES the M2S.4 deferral
+
+The gnarliest M2S.4 deferral — the **hardware task switch** — now lands as a real RTL
+`--system` differential, and `ptask` is **promoted from golden self-diff to a REAL RTL
+`--system` diff EQUIVALENT to the golden, 292 records**. M2S.4 had left a far
+`JMP`/`CALL` to a SYSTEM (TSS) descriptor HALTing cleanly in `S_LJMP` (no mis-delivery);
+`ptask` tracked the golden bit-for-bit to ~n=275 then halted at the ljmp-to-TSS, staying
+self-diff + the step-5d validation only and OUT of `RTL_SYS_TESTS`. M2S.4b implements
+the switch and promotes the gate.
+
+### What landed (RTL, gated `sys_mode`; IA-32 SDM Vol.3 §7.3)
+
+A far `JMP` whose target GDT descriptor is an available (type `0x9`) or busy (`0xB`)
+32-bit TSS dispatches out of the `S_LJMP` system-descriptor arm into a four-state
+task-switch micro-sequence (new states `S_TSW_SAVE/_READ/_SEG/_BUSY` in
+[`rtl/core/core.sv`](rtl/core/core.sv)):
+
+- **S_TSW_SAVE** — write the OUTGOING task state into the CURRENT TSS (`tr_base`), one
+  dword per beat at the documented 32-bit-TSS offsets: EIP@0x20 (= the insn after the
+  jmp = `next_eip`), EFLAGS@0x24, the 8 GPRs@0x28..0x44, the 6 segment selectors
+  ES@0x48/CS@0x4C/SS@0x50/DS@0x54/FS@0x58/GS@0x5C, LDTR@0x60.
+- **S_TSW_READ** — read the INCOMING state from the NEW TSS (named by the jump selector,
+  base from its GDT descriptor) into `tsw_*` holding regs: CR3@0x1C, EIP@0x20,
+  EFLAGS@0x24, the GPRs, the 6 selectors, LDTR.
+- **S_TSW_SEG** — reload each of the 6 incoming segment descriptors' hidden
+  base/limit/attr from the GDT (two reads per descriptor); CPL ← the new CS.RPL,
+  `cs_d` ← its D/B bit.
+- **S_TSW_BUSY** — toggle the descriptor busy bits (a JMP CLEARS the outgoing TSS busy
+  `B→9` and SETS the incoming one `9→B`, via single-byte GDT writes to the access byte),
+  then COMMIT atomically: new TR (`tr_base/limit/sel` + `tr_attr`), `CR0.TS=1`, the
+  incoming EIP/EFLAGS/GPRs/CR3, and retire ONCE (`q_pc` = the jmp PC).
+
+A JMP does **not** set EFLAGS.NT or the TSS back-link (only a CALL / interrupt-task-gate
+does). A new `tr_attr` reg captured at `S_LTR` holds the outgoing TSS descriptor access
+so its busy bit can be cleared on a switch without a re-read. The TSS/GDT accesses are
+excluded from the paging post-translate (identity-map convention, paging off in the
+corpus). One bring-up bug found+fixed: the `tsw_save_off`/`tsw_read_off` field-offset
+helpers first returned 6-bit values, so offsets ≥0x40 (the segment selectors at
+0x48..0x60) overflowed and aliased to low addresses (0x48→0x08), zeroing all 6 selectors
+(cs=0x0000 → wrong `cs_d` → 16-bit mis-decode). Widened the helpers to 8-bit; cs/ss/ds/
+es/fs/gs then reload correctly and the diff is EQUIVALENT.
+
+`ptask` is now in `RTL_SYS_TESTS` in [`verif/sys/run-sys-golden.sh`](verif/sys/run-sys-golden.sh)
+→ step-7 RTL-SYS-DIFF-OK; the `verify-sys` Makefile target already listed it.
+
+### ptask gate record (independently re-run 2026-06-05, PORT 57310)
+
+Golden 292 records; step-5d HARDWARE TASK SWITCH validation VALID (state save + reload
++ busy toggle); step-6 self-diff EQUIVALENT; **step-7 RTL `--system` diff EQUIVALENT
+292/292** (`compare.py` sys path engaged, cr0..cr4 + selectors + GPRs + eflags + eip).
+Proofs all matched in the golden AND reproduced by the RTL (the diff is byte-equivalent):
+- **n=275** — incoming reload: EAX=0xAAAAAAAA, EBX=0xBBBBBBBB, ESP=0x00070000, plus
+  `CR0.TS` set (cr0 0x60000011→0x60000019) and EFLAGS←TSS2.
+- **n=285/286** — outgoing SAVE proof: EDX=0x000F01D8 (TSS1 saved resume EIP), then
+  ESI=0x1A1A1A1A (the live EAX saved into TSS1, read back).
+- **n=289** — busy-toggle proof: EDI=0x0000898B (TSS1 access 0x89 *available*, TSS2
+  access 0x8B *busy*).
+
+### ADDITIVE proof (independently re-run 2026-06-05)
+
+- **`make verify` (user) GREEN + bit-identical** — exit 0; 57/57 func diff-clean
+  (0 goldens regenerated); all M4 integer + M5 FP/cache bands met. The whole task
+  switch is gated behind `sys_mode`, INERT in user mode — `S_LJMP` is only reached from
+  the protected-mode (`!seg_real`) far-jump slow-FSM path, itself `sys_mode`-only.
+- **All prior sys gates stay EQUIVALENT** (RTL `--system` diff, RTL-SYS-DIFF-OK): pseg
+  70 / pmode 1084 / ppage 128 / pintr 171 / pfault 348 / **pcpl 304** / pdebug 239 /
+  **pv86 949** — and **psmm SMM-PARTIAL-OK** (structural; differential oracle infeasible).
+  The cross-priv/TSS-adjacent ones (pcpl PORT 57320, pfault 57330, pv86 57340)
+  re-confirmed EQUIVALENT.
+- **Lint clean** — `cd rtl && verilator --lint-only -sv -Wall -Wno-UNUSED -f ventium.f`
+  → exit 0, 0 warn/err.
+- **Review findings:** none supplied for this close-out (empty set) — nothing to apply.
+- Ports 57310/57320/57330/57340 + 57350–57400 (all 57000–57999). **Not committed** —
+  the orchestrator verifies + commits. `ventium-refs/` untouched (read-only).
+
+### Deferred (honest done-partial; not in the `ptask` corpus — no oracle to differentially validate)
+
+The `CALL`-far / `INT`-through-task-gate task switch (sets EFLAGS.NT + the TSS
+back-link@0x00 — a JMP does NOT); `IRET` with NT=1 (the task-return); the round-trip
+switch-back (reloading the CPU-written outgoing TSS image — the gnarliest reload); LDTR
+descriptor reload (no LDT machinery — the LDTR slot is saved/skipped, 0 in the corpus);
+`tr_valid`/`tr_limit` #TS bound + TSS-descriptor type/present #GP/#NP negative paths.
 
 ## M7 — macro-workload lock-step (Quake + Win95) — OPENED 2026-06-04
 

@@ -235,6 +235,9 @@ module core
   logic [31:0] tr_base;
   logic [31:0] tr_limit;
   logic        tr_valid;
+  // M2S.4b — the OUTGOING TSS descriptor access byte (captured at LTR), so a task
+  // switch can clear its busy bit (type B->9) without re-reading the descriptor.
+  logic [7:0]  tr_attr;
   // M2S.5 — SMM / RSM (docs/m2s5-smm-spec.md). SMBASE holds the base of the SMRAM
   // region (reset default 0x30000; RSM may relocate it from the SMBASE save slot).
   // smm_active = the CPU is currently in System Management Mode (HF_SMM); set on
@@ -494,6 +497,21 @@ module core
     //   S_INT_SS  : cross-priv delivery — read + load the new SS descriptor.
     //   S_IRET_SS : inter-priv IRET — reload the popped (outer) SS descriptor.
     S_LTR, S_INT_TSS, S_INT_SS, S_IRET_SS,
+    // M2S.4b — HARDWARE TASK SWITCH micro-sequence (far JMP/CALL to a TSS, gated
+    // sys_mode; IA-32 SDM Vol.3 §7.3). A far JMP whose target GDT descriptor is a
+    // SYSTEM (S=0) available/busy 32-bit TSS (type 9/B) runs:
+    //   S_TSW_SAVE : SAVE the outgoing task state into the CURRENT TSS (tr_base):
+    //                EIP@0x20, EFLAGS@0x24, the 8 GPRs@0x28..0x44, the 6 segment
+    //                selectors@0x48..0x5C, LDTR@0x60 (one dword write per beat).
+    //   S_TSW_READ : LOAD the incoming task state from the NEW TSS (named by the
+    //                jump selector): CR3@0x1C, EIP@0x20, EFLAGS@0x24, GPRs, the 6
+    //                selectors, LDTR (one dword read per beat, latched in tsw_*).
+    //   S_TSW_SEG  : reload the hidden descriptor (base/limit/attr) of each of the
+    //                6 incoming segment selectors from the GDT (like a seg load).
+    //   S_TSW_BUSY : toggle the descriptor busy bits — a JMP CLEARS the outgoing
+    //                TSS busy bit (type B->9) and SETS the incoming one (9->B) —
+    //                then COMMIT (new TR, CR0.TS=1, incoming EIP) and retire ONCE.
+    S_TSW_SAVE, S_TSW_READ, S_TSW_SEG, S_TSW_BUSY,
     // M2S.5 — SMM / RSM (gated sys_mode; docs/m2s5-smm-spec.md):
     //   S_SMI_SAVE : SMI# entry — save the CPU state to the SMRAM save-state map
     //                (P5 Table 20-1 offsets @ SMBASE+0x8000+offset), then enter
@@ -919,6 +937,41 @@ module core
   endfunction
   function automatic logic seg_readable(input logic [7:0] a);  // data, or readable code
     seg_readable = desc_s(a) && (!a[3] || a[1]);
+  endfunction
+
+  // M2S.4b — 32-bit TSS field byte-offsets for the task-switch SAVE/READ phases
+  // (IA-32 SDM Vol.3 Fig.7-2). The SAVE phase writes 17 beats (no CR3); the READ
+  // phase reads 18 beats (CR3 first). The GPR order eax..edi matches gpr[0..7].
+  function automatic logic [7:0] tsw_save_off(input logic [4:0] beat);
+    unique case (beat)
+      5'd0:    tsw_save_off = 8'h20;  // EIP
+      5'd1:    tsw_save_off = 8'h24;  // EFLAGS
+      5'd2,5'd3,5'd4,5'd5,5'd6,5'd7,5'd8,5'd9:
+               tsw_save_off = 8'h28 + 8'({beat - 5'd2, 2'b00});  // EAX..EDI
+      5'd10:   tsw_save_off = 8'h48;  // ES
+      5'd11:   tsw_save_off = 8'h4C;  // CS
+      5'd12:   tsw_save_off = 8'h50;  // SS
+      5'd13:   tsw_save_off = 8'h54;  // DS
+      5'd14:   tsw_save_off = 8'h58;  // FS
+      5'd15:   tsw_save_off = 8'h5C;  // GS
+      default: tsw_save_off = 8'h60;  // beat 16: LDTR
+    endcase
+  endfunction
+  function automatic logic [7:0] tsw_read_off(input logic [4:0] beat);
+    unique case (beat)
+      5'd0:    tsw_read_off = 8'h1C;  // CR3
+      5'd1:    tsw_read_off = 8'h20;  // EIP
+      5'd2:    tsw_read_off = 8'h24;  // EFLAGS
+      5'd3,5'd4,5'd5,5'd6,5'd7,5'd8,5'd9,5'd10:
+               tsw_read_off = 8'h28 + 8'({beat - 5'd3, 2'b00});  // EAX..EDI
+      5'd11:   tsw_read_off = 8'h48;  // ES
+      5'd12:   tsw_read_off = 8'h4C;  // CS
+      5'd13:   tsw_read_off = 8'h50;  // SS
+      5'd14:   tsw_read_off = 8'h54;  // DS
+      5'd15:   tsw_read_off = 8'h58;  // FS
+      5'd16:   tsw_read_off = 8'h5C;  // GS
+      default: tsw_read_off = 8'h60;  // beat 17: LDTR
+    endcase
   endfunction
 
   // -------------------------------------------------------------------------
@@ -2225,6 +2278,26 @@ module core
   logic        iret_to_v86;       // this IRET returns into V86 (9-word pop)
   logic [15:0] iret_v86_es, iret_v86_ds, iret_v86_fs, iret_v86_gs;
 
+  // M2S.4b HARDWARE TASK SWITCH scratch (gated sys_mode; far JMP/CALL to a TSS).
+  // tsw_step beats through the SAVE (write current TSS) / READ (read new TSS) /
+  // SEG (reload incoming segment descriptors) / BUSY (toggle the GDT busy bits +
+  // commit) phases. The new TSS descriptor (base/limit/sel/access) is captured in
+  // S_LJMP from the GDT read; tr_attr holds the OUTGOING TSS descriptor access so
+  // its busy bit can be cleared without a re-read. The incoming task state is read
+  // into the tsw_* holding regs, then committed atomically on the final beat.
+  logic [4:0]  tsw_step;          // beat counter within the task-switch phases
+  logic [31:0] tsw_new_base;      // incoming TSS base (from its GDT descriptor)
+  logic [31:0] tsw_new_limit;     // incoming TSS limit
+  logic [15:0] tsw_new_sel;       // incoming TSS selector (the jump target)
+  logic [7:0]  tsw_new_attr;      // incoming TSS descriptor access (busy set => |2)
+  logic [31:0] tsw_save_eip;      // outgoing EIP to save (next insn after the jmp)
+  logic [31:0] tsw_eip;           // incoming EIP   (from new TSS @0x20)
+  logic [31:0] tsw_eflags;        // incoming EFLAGS(from new TSS @0x24)
+  logic [31:0] tsw_cr3;           // incoming CR3   (from new TSS @0x1C)
+  logic [31:0] tsw_gpr [NUM_GPR]; // incoming GPRs  (@0x28..0x44)
+  logic [15:0] tsw_sel [NUM_SEG]; // incoming selectors CS/SS/DS/ES/FS/GS (loaded)
+  logic [31:0] tsw_seg_lo;        // low dword latch for the SEG descriptor read
+
   // latched x87 decode
   fxop_e       q_fxop;
   logic        q_is_x87;
@@ -3125,7 +3198,12 @@ module core
       int_gate_trap<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_sw<=1'b0;
       // M2S.4 TR/TSS + cross-priv + inter-priv IRET state idle out of reset.
-      tr_sel<=16'd0; tr_base<=32'd0; tr_limit<=32'd0; tr_valid<=1'b0;
+      tr_sel<=16'd0; tr_base<=32'd0; tr_limit<=32'd0; tr_valid<=1'b0; tr_attr<=8'd0;
+      // M2S.4b task-switch scratch idle out of reset (the tsw_* holding regs are
+      // fully written by S_TSW_READ/_SEG before being committed in S_TSW_BUSY).
+      tsw_step<=5'd0; tsw_new_base<=32'd0; tsw_new_limit<=32'd0; tsw_new_sel<=16'd0;
+      tsw_new_attr<=8'd0; tsw_save_eip<=32'd0; tsw_eip<=32'd0; tsw_eflags<=32'd0;
+      tsw_cr3<=32'd0; tsw_seg_lo<=32'd0;
       iret_eflags<=32'd0; xpl_active<=1'b0; int_old_ss<=16'd0; int_old_esp<=32'd0;
       int_old_cs<=16'd0; int_new_cpl<=2'd0; int_new_ss<=16'd0; int_new_esp<=32'd0;
       iret_interpriv<=1'b0; iret_ss<=16'd0; iret_esp<=32'd0;
@@ -4805,17 +4883,31 @@ module core
               logic [7:0]  attr;
               desc = {mem_rdata, gdt_lo};
               attr = desc_attr(desc);
-              // M2S.4 — a far JMP whose target descriptor is a SYSTEM descriptor
-              // (S=0) is a HARDWARE TASK SWITCH (target = available TSS type 0x9 /
-              // busy TSS 0xB) or a task-gate jump (type 0x5). The full task switch
-              // (save outgoing state to the current TSS, load the incoming TSS
-              // state, toggle busy/NT/back-link, reload CR3/LDTR) is the gnarliest
-              // M2S.4 piece and is DEFERRED — HALT cleanly here (a loud, honest
-              // "not implemented") rather than mis-delivering a spurious #GP. The
-              // ptask stretch corpus stops exactly here (its RTL diff is NOT gated;
-              // the golden self-diff + step-5d validation cover the oracle side).
+              // M2S.4b — a far JMP whose target descriptor is a SYSTEM descriptor
+              // (S=0) is a HARDWARE TASK SWITCH when it names an available (type
+              // 0x9) or busy (0xB) 32-bit TSS: SAVE the outgoing state into the
+              // current TSS, LOAD the incoming state from the new TSS, reload the
+              // segments, toggle the descriptor busy bits, set the new TR + CR0.TS,
+              // and resume the incoming task. A JMP does NOT set NT / the back-link
+              // (only a CALL/interrupt-task-gate does — see the deferral note below).
+              // Capture the new TSS descriptor (base/limit/sel/access) here, then
+              // run the S_TSW_* micro-sequence. Other system descriptors (task gate
+              // 0x5, call gate, LDT, ...) are not in the corpus -> HALT cleanly.
               if (!desc_s(attr)) begin
-                state<=S_HALT; seg_step<=1'b0;
+                if (desc_present(attr) &&
+                    (desc_type(attr) == 4'h9 || desc_type(attr) == 4'hB)) begin
+                  // HARDWARE TASK SWITCH to a 32-bit TSS.
+                  tsw_new_base  <= desc_base(desc);
+                  tsw_new_limit <= desc_limit(desc);
+                  tsw_new_sel   <= q_ljmp_sel;
+                  tsw_new_attr  <= attr | 8'h02;     // incoming busy bit set (9->B)
+                  tsw_save_eip  <= next_eip;          // outgoing resume EIP (after jmp)
+                  tsw_step      <= 5'd0;
+                  seg_step      <= 1'b0;
+                  state         <= S_TSW_SAVE;
+                end else begin
+                  state<=S_HALT; seg_step<=1'b0;     // other system descriptors
+                end
               end else if (seg_load_fault(1'b1, 1'b0, q_ljmp_sel, attr, cpl_r)) begin
                 // #GP/#NP on a far-jump CS load -> DELIVER (error code = selector).
                 start_fault(seg_fault_vec(1'b1, 1'b0, q_ljmp_sel, attr), 1'b1,
@@ -5260,6 +5352,7 @@ module core
               tr_sel   <= gpr[q_src_reg][15:0];
               tr_base  <= desc_base(desc);
               tr_limit <= desc_limit(desc);
+              tr_attr  <= desc_attr(desc);   // M2S.4b: held for the busy-clear on a switch
               tr_valid <= 1'b1;
               seg_step <= 1'b0;
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
@@ -5308,6 +5401,117 @@ module core
               seg_attr [SG_SS] <= desc_attr(desc);
               int_step         <= 4'd0;
               state            <= S_INT_PUSH;
+            end
+          end
+        end
+
+        // ===================================================================
+        // M2S.4b — HARDWARE TASK SWITCH (gated sys_mode; IA-32 SDM Vol.3 §7.3).
+        // Reached from S_LJMP when a far JMP targets a 32-bit available/busy TSS.
+        // The micro-sequence: SAVE outgoing state -> READ incoming state -> reload
+        // incoming segment descriptors -> toggle the GDT busy bits -> COMMIT.
+        // The TSS / GDT are linear structures addressed PHYSICALLY under the
+        // M2S.1/.2 identity-map convention (paging is off in the ptask corpus), so
+        // these accesses are NOT re-translated (excluded in the post-translate).
+        // ===================================================================
+        // S_TSW_SAVE: write the OUTGOING task state into the CURRENT TSS (tr_base),
+        // one dword per beat at the documented 32-bit-TSS offsets. The store data +
+        // address are driven by the bus arm; this block only advances the beat and,
+        // after the last save, moves to read the incoming state.
+        S_TSW_SAVE: begin
+          if (mem_ack) begin
+            if (tsw_step == 5'd16) begin tsw_step <= 5'd0; state <= S_TSW_READ; end
+            else tsw_step <= tsw_step + 5'd1;
+          end
+        end
+
+        // S_TSW_READ: read the INCOMING task state from the NEW TSS (tsw_new_base)
+        // into the tsw_* holding regs. Beats: 0 CR3@0x1C, 1 EIP@0x20, 2 EFLAGS@0x24,
+        // 3..10 GPR[0..7]@0x28..0x44, 11..16 ES/CS/SS/DS/FS/GS@0x48..0x5C, 17 LDTR
+        // @0x60 (no LDT tracked in this RTL; the read result is discarded).
+        S_TSW_READ: begin
+          if (mem_ack) begin
+            unique case (tsw_step)
+              5'd0:  tsw_cr3    <= mem_rdata;
+              5'd1:  tsw_eip    <= mem_rdata;
+              5'd2:  tsw_eflags <= mem_rdata;
+              5'd3,5'd4,5'd5,5'd6,5'd7,5'd8,5'd9,5'd10:
+                     tsw_gpr[3'(tsw_step - 5'd3)] <= mem_rdata;
+              5'd11: tsw_sel[SG_ES] <= mem_rdata[15:0];
+              5'd12: tsw_sel[SG_CS] <= mem_rdata[15:0];
+              5'd13: tsw_sel[SG_SS] <= mem_rdata[15:0];
+              5'd14: tsw_sel[SG_DS] <= mem_rdata[15:0];
+              5'd15: tsw_sel[SG_FS] <= mem_rdata[15:0];
+              5'd16: tsw_sel[SG_GS] <= mem_rdata[15:0];
+              default: ;   // beat 17 = LDTR (no LDT machinery; discarded)
+            endcase
+            if (tsw_step == 5'd17) begin tsw_step <= 5'd0; state <= S_TSW_SEG; end
+            else tsw_step <= tsw_step + 5'd1;
+          end
+        end
+
+        // S_TSW_SEG: reload the hidden descriptor (base/limit/attr) of each of the
+        // 6 incoming segment selectors from the GDT, exactly like a normal segment
+        // load (two 4-byte reads per descriptor). beat = seg_idx*2 + half, segment
+        // order CS,SS,DS,ES,FS,GS (the seg_* array order). A null selector (index 0)
+        // reads GDT[0] = all-zeros -> a null (base/limit/attr 0) segment. The new
+        // selectors are committed here; CPL = the new CS.RPL, cs_d = its D/B bit.
+        S_TSW_SEG: begin
+          if (mem_ack) begin
+            if (!tsw_step[0]) begin
+              tsw_seg_lo <= mem_rdata; tsw_step <= tsw_step + 5'd1;
+            end else begin
+              logic [63:0] desc;
+              logic [2:0]  sidx;
+              logic [7:0]  sattr;
+              desc  = {mem_rdata, tsw_seg_lo};
+              sidx  = 3'(tsw_step[4:1]);     // 0..5 = CS,SS,DS,ES,FS,GS
+              sattr = desc_attr(desc);
+              seg_sel  [sidx] <= tsw_sel[sidx];
+              seg_base [sidx] <= desc_base(desc);
+              seg_limit[sidx] <= desc_limit(desc);
+              seg_attr [sidx] <= sattr;
+              if (sidx == 3'(SG_CS)) begin
+                cpl_r <= tsw_sel[SG_CS][1:0];  // CPL = new CS.RPL
+                cs_d  <= desc[54];              // D/B: 32-bit default op/addr size
+              end
+              if (tsw_step == 5'd11) begin tsw_step <= 5'd0; state <= S_TSW_BUSY; end
+              else tsw_step <= tsw_step + 5'd1;
+            end
+          end
+        end
+
+        // S_TSW_BUSY: toggle the descriptor busy bits in the GDT, then COMMIT the
+        // incoming task state + retire ONCE. For a JMP the OUTGOING TSS busy bit is
+        // CLEARED (type B->9, beat 0) and the INCOMING one is SET (9->B, beat 1).
+        // The busy bytes are written as a single byte (the access byte at descriptor
+        // +5) via mem_wstrb in the bus arm. On the final beat: load the incoming
+        // EIP/EFLAGS/GPRs/CR3, point TR at the new TSS, set CR0.TS=1 (every task
+        // switch sets TS), and retire with q_pc = the JMP's PC (held from S_LJMP).
+        // NT / the back-link are NOT touched (a JMP, not a CALL — see deferral).
+        S_TSW_BUSY: begin
+          if (mem_ack) begin
+            if (tsw_step == 5'd0) begin
+              tsw_step <= 5'd1;
+            end else begin
+              // ---- COMMIT the incoming task ----
+              eip     <= tsw_eip;
+              eflags  <= tsw_eflags;
+              for (int g = 0; g < NUM_GPR; g++) gpr[g] <= tsw_gpr[g];
+              creg3   <= tsw_cr3;                 // new task CR3 (0 here; paging off)
+              creg0   <= creg0 | 32'h0000_0008;   // CR0.TS = 1 on every task switch
+              // new TR <- the incoming TSS descriptor (now busy).
+              tr_sel  <= tsw_new_sel;
+              tr_base <= tsw_new_base;
+              tr_limit<= tsw_new_limit;
+              tr_attr <= tsw_new_attr;
+              tr_valid<= 1'b1;
+              tsw_step<= 5'd0;
+              // retire the task switch: q_pc still holds the JMP's PC (the golden
+              // stamps the switch record at the ljmp). The post-state row is the
+              // INCOMING task context (reloaded GPRs/segs/EIP + CR0.TS + new EFLAGS).
+              retire_valid <= 1'b1;
+              state        <= S_PIPE;
             end
           end
         end
@@ -6720,6 +6924,50 @@ module core
         mem_addr = gdt_base + {16'd0, int_new_ss[15:3], 3'd0}
                    + {29'd0, int_step[0], 2'b00};
       end
+      // M2S.4b — HARDWARE TASK SWITCH accesses. The TSS + GDT are addressed
+      // PHYSICALLY under the M2S.1/.2 identity-map convention (paging off in the
+      // ptask corpus), so (like the other descriptor/TSS reads) these are NOT
+      // re-translated by the post-stage below.
+      S_TSW_SAVE: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
+        // write the outgoing state into the CURRENT TSS (tr_base) at the 32-bit
+        // TSS offsets: 0 EIP@0x20, 1 EFLAGS@0x24, 2..9 GPR@0x28..0x44,
+        // 10..15 ES/CS/SS/DS/FS/GS@0x48..0x5C, 16 LDTR@0x60.
+        mem_addr = tr_base + {24'd0, tsw_save_off(tsw_step)};
+        unique case (tsw_step)
+          5'd0:    mem_wdata = tsw_save_eip;
+          5'd1:    mem_wdata = eflags;
+          5'd2,5'd3,5'd4,5'd5,5'd6,5'd7,5'd8,5'd9:
+                   mem_wdata = gpr[3'(tsw_step - 5'd2)];
+          5'd10:   mem_wdata = {16'd0, seg_sel[SG_ES]};
+          5'd11:   mem_wdata = {16'd0, seg_sel[SG_CS]};
+          5'd12:   mem_wdata = {16'd0, seg_sel[SG_SS]};
+          5'd13:   mem_wdata = {16'd0, seg_sel[SG_DS]};
+          5'd14:   mem_wdata = {16'd0, seg_sel[SG_FS]};
+          5'd15:   mem_wdata = {16'd0, seg_sel[SG_GS]};
+          default: mem_wdata = 32'd0;   // beat 16: LDTR (no LDT tracked => 0)
+        endcase
+      end
+      S_TSW_READ: begin mem_req=1'b1;            // read the incoming TSS state
+        mem_addr = tsw_new_base + {24'd0, tsw_read_off(tsw_step)};
+      end
+      S_TSW_SEG: begin mem_req=1'b1;             // reload incoming seg descriptors
+        // beat = seg_idx*2 + half; the selector for seg_idx is tsw_sel[seg_idx]
+        // (CS,SS,DS,ES,FS,GS order). Read GDT[sel] (two dword beats).
+        mem_addr = gdt_base + {16'd0, tsw_sel[3'(tsw_step[4:1])][15:3], 3'd0}
+                   + {29'd0, tsw_step[0], 2'b00};
+      end
+      S_TSW_BUSY: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b0010;
+        // toggle the descriptor busy bit (access byte @ descriptor+5 = dword
+        // descriptor+4, byte 1). beat 0 CLEARS the outgoing TSS busy (B->9),
+        // beat 1 SETS the incoming TSS busy (9->B). Single-byte write via wstrb.
+        if (tsw_step == 5'd0) begin
+          mem_addr  = gdt_base + {16'd0, tr_sel[15:3], 3'd0} + 32'd4;
+          mem_wdata = {16'd0, (tr_attr & ~8'h02), 8'd0};   // outgoing -> available
+        end else begin
+          mem_addr  = gdt_base + {16'd0, tsw_new_sel[15:3], 3'd0} + 32'd4;
+          mem_wdata = {16'd0, tsw_new_attr, 8'd0};         // incoming -> busy
+        end
+      end
       // M2S.5 — SMRAM save-map accesses. The SMRAM region is addressed PHYSICALLY
       // (SMBASE+0x8000+offset). SMM runs with paging off in the corpus, and the
       // save map is a fixed physical structure, so (like the descriptor/TSS reads)
@@ -6743,7 +6991,10 @@ module core
     if (paging_on && state != S_WALK &&
         state != S_LGDT && state != S_SEGLD && state != S_LJMP &&
         state != S_LTR && state != S_INT_SS && state != S_INT_TSS &&
-        state != S_SMI_SAVE && state != S_RSM) begin
+        state != S_SMI_SAVE && state != S_RSM &&
+        // M2S.4b task-switch TSS/GDT reads+writes address physical memory directly.
+        state != S_TSW_SAVE && state != S_TSW_READ &&
+        state != S_TSW_SEG && state != S_TSW_BUSY) begin
       // CRITICAL (Phase-3 [high] fix): on a TLB MISS this clock the FSM diverts to
       // S_WALK (the clocked block, gated on the same `xlate_miss`), so the bus this
       // clock belongs to the PAGE WALK, not to this state's access. But `state` is

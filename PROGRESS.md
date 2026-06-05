@@ -14,7 +14,8 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2S.1 | Real→protected mode + protected-mode SEGMENTATION (dual `boot_mode`) | `pseg` RTL sys-diff-clean vs qemu-system golden; `make verify` (user) GREEN | ✅ done-partial (cold reset + real mode + real→PM transition + flat & based GDT segment loads = RTL EQUIVALENT to the golden, 70 records; descriptor protection DECISION computed (present/type/DPL/limit, CPL=CS.RPL) but fault DELIVERY = M2S.3; 16-bit reg addressing modes, paging, IDT delivery, A20/real-mode wrap deferred) |
 | M2S.2 | 2-level paging MMU (CR3/CR0.PG/CR4.PSE, page walk, split I/D TLBs, A/D bits, #PF decision) | `pmode` + `ppage` RTL sys-diff-clean vs qemu-system golden; pseg stays green; `make verify` (user) GREEN | ✅ done-partial (CR3→PDE→PTE 2-level walk + split 16-entry I/D TLBs + A/D-bit table writes + P/RW/US permission DECISION + #PF DECISION/CR2/error-code: `pmode` (identity 4 MiB PSE, 1084 records) AND `ppage` (NON-IDENTITY 4 KiB, 128 records) = RTL EQUIVALENT to the golden; CR0.PG=0 ⇒ linear==physical. #PF DELIVERY through the IDT = M2S.3 (decision computed/HALTs); 4 MiB NON-identity translation + A/D differential read-back + page-split + global pages/INVLPG deferred; TLB is functional-not-cycle) |
 | M2S.3 | IDT-delivered interrupts/exceptions (gate read → exception frame push → handler → `IRET`); software `INT n`/`INT3`/`INTO`/`UD2` + the M2S.1/.2 hardware-fault DECISIONS now DELIVER | `pintr` + `pfault` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage stay green; `make verify` (user) GREEN | ✅ done-partial (SAME-PRIVILEGE CPL0 delivery: read IDT[v] gate → read gate CS descriptor → push EFLAGS/CS/EIP[/errcode] on SS:ESP → load CS:EIP → handler → `IRET` (pop EIP/CS/EFLAGS, reload CS); `pintr` (INT n/INT3/INTO trap+int gates, 171 records) AND `pfault` (#PF not-present DELIVERS via IDT[14]+CR2+errcode, #GP, #UD; 348 records) = RTL EQUIVALENT to the golden. FAULT pushes faulting EIP (restart), TRAP pushes next EIP; int gate clears IF, both clear TF/NT/RF/VM (IA-32 6.12.1); error code for #DF/#TS/#NP/#SS/#GP/#PF/#AC. user `int 0x80` STILL halts (IDT gated behind sys_mode). DEFERRED: cross-priv stack switch/TSS = M2S.4; gate-Present/gate-DPL/CS-descriptor protection checks (#NP/#GP-on-gate) + per-access perm #PF (perm_fault) + segment-limit #GP (seg_off_over_limit) computed-not-delivered; external/HW INTR + #DB single-step + BOUND not exercised) |
-| M2S.4 | TSS + cross-privilege delivery + inter-priv `IRET` + gate/CS protection (TSS/task switch) | `pcpl` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage/pintr/pfault stay green; `make verify` (user) GREEN | ✅ done-partial (PRIVILEGE MACHINERY: **TR/TSS** (`LTR` loads TR base/limit/sel from the GDT TSS descriptor, `STR`; `SS0:ESP0` privilege stack); **CROSS-PRIV delivery** — gate target CS.DPL < CPL ⇒ load SS:ESP from `TSS.ssN:espN`, push the LARGER 5-word frame (old SS, old ESP, EFLAGS, CS, EIP [+errcode]), CPL 3→0; **INTER-PRIV `IRET`** — pop EIP/CS/EFLAGS + ESP/SS, CPL 0→3, null DS/ES/FS/GS whose DPL < new CPL; **gate/CS protection** (deferred from M2S.3): gate Present→#NP, gate DPL<CPL for `INT n`→#GP, target CS present/code/DPL≤CPL→#NP/#GP. `pcpl` (CPL3 user `INT n` → cross-priv CPL0 handler stack switch → inter-priv `IRET` back to CPL3) = RTL EQUIVALENT to the golden, 304 records. user mode bit-identical (all gated behind `sys_mode`). DEFERRED (documented honest follow-ons): full HW TASK SWITCH (`CALL`/`JMP` to TSS / task gate, `INT` through task gate — `ptask` stays golden self-diff + step-5d validation, RTL --system far-JMP to a system descriptor HALTs cleanly in S_LJMP and is NOT in the RTL gate; tracks the golden bit-for-bit 275 records then halts at ljmp-to-TSS); TSS busy-bit writeback on `LTR` (memory-only, STR returns the selector = the only observed reg effect); `tr_valid`/`tr_limit` #TS bound checks (missing/truncated TSS); cross-priv new-SS protection (SS.DPL/RPL/writable/present #TS/#GP) + inter-priv `IRET` SS RPL/DPL re-validation #GP; per-access perm #PF (`perm_fault`) — all NEGATIVE paths with no triggering corpus test / no oracle) |
+| M2S.4 | TSS + cross-privilege delivery + inter-priv `IRET` + gate/CS protection (TSS/task switch) | `pcpl` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage/pintr/pfault stay green; `make verify` (user) GREEN | ✅ done-partial (PRIVILEGE MACHINERY: **TR/TSS** (`LTR` loads TR base/limit/sel from the GDT TSS descriptor, `STR`; `SS0:ESP0` privilege stack); **CROSS-PRIV delivery** — gate target CS.DPL < CPL ⇒ load SS:ESP from `TSS.ssN:espN`, push the LARGER 5-word frame (old SS, old ESP, EFLAGS, CS, EIP [+errcode]), CPL 3→0; **INTER-PRIV `IRET`** — pop EIP/CS/EFLAGS + ESP/SS, CPL 0→3, null DS/ES/FS/GS whose DPL < new CPL; **gate/CS protection** (deferred from M2S.3): gate Present→#NP, gate DPL<CPL for `INT n`→#GP, target CS present/code/DPL≤CPL→#NP/#GP. `pcpl` (CPL3 user `INT n` → cross-priv CPL0 handler stack switch → inter-priv `IRET` back to CPL3) = RTL EQUIVALENT to the golden, 304 records. user mode bit-identical (all gated behind `sys_mode`). DEFERRED (documented honest follow-ons): full HW TASK SWITCH (`CALL`/`JMP` to TSS / task gate, `INT` through task gate) — **the far-`JMP`-to-TSS variant LANDED in M2S.4b** (`ptask` now an RTL `--system` diff EQUIVALENT to the golden, 292 records; see the M2S.4b row); the `CALL`/`INT`-task-gate (NT+back-link) + round-trip switch-back remain deferred; TSS busy-bit writeback on `LTR` (memory-only, STR returns the selector = the only observed reg effect — the M2S.4b task switch instead toggles the busy bits on the SWITCH); `tr_valid`/`tr_limit` #TS bound checks (missing/truncated TSS); cross-priv new-SS protection (SS.DPL/RPL/writable/present #TS/#GP) + inter-priv `IRET` SS RPL/DPL re-validation #GP; per-access perm #PF (`perm_fault`) — all NEGATIVE paths with no triggering corpus test / no oracle) |
+| M2S.4b | HARDWARE TASK SWITCH (far `JMP`/`CALL` to a 32-bit TSS) — the deferred M2S.4 piece | `ptask` RTL `--system` sys-diff-clean vs qemu-system golden; all prior sys gates (pseg/pmode/ppage/pintr/pfault/pcpl + psmm/pdebug/pv86) stay green; `make verify` (user) GREEN | ✅ done-partial (HARDWARE TASK SWITCH on a far `JMP` to an available/busy 32-bit TSS descriptor (type 9/B). The `core.sv` micro-sequence (gated `sys_mode`): **S_TSW_SAVE** writes the OUTGOING task state into the current TSS (`tr_base`) at the documented 32-bit-TSS offsets — EIP@0x20 (= the insn after the jmp), EFLAGS@0x24, the 8 GPRs@0x28..0x44, the 6 segment selectors ES/CS/SS/DS/FS/GS@0x48..0x5C, LDTR@0x60; **S_TSW_READ** loads the INCOMING state from the new TSS (named by the jump selector, base from its GDT descriptor) — CR3@0x1C, EIP@0x20, EFLAGS@0x24, GPRs, the 6 selectors, LDTR — into holding regs; **S_TSW_SEG** reloads each incoming segment descriptor's hidden base/limit/attr from the GDT (CPL ← new CS.RPL, `cs_d` ← its D/B bit); **S_TSW_BUSY** toggles the descriptor busy bits (a JMP CLEARS the outgoing TSS busy B→9 and SETS the incoming one 9→B, single-byte GDT writes), then COMMITs — new TR (`tr_base/limit/sel`), `CR0.TS=1`, the incoming EIP/EFLAGS/GPRs/CR3 — and retires ONCE (q_pc = the jmp PC). `ptask` (far `JMP` to TSS2: outgoing save into TSS1 + incoming reload from TSS2 + busy toggle) = RTL EQUIVALENT to the golden, **292 records** (cr0..cr4 + selectors + GPRs + eflags + eip), incl. n=275 GPR/ESP/CR0.TS reload, the EDX=TSS1.EIP-save + ESI=0x1A1A1A1A live-EAX-save proofs, and EDI=0x898B busy-toggle. user mode bit-identical (all gated behind `sys_mode`). DEFERRED (honest, not in the corpus): a `CALL`-far / `INT`-through-task-gate switch (sets EFLAGS.NT + the TSS back-link@0x00 — a JMP does NOT); `IRET` with NT=1 (task-return); the round-trip switch-back (reloading the CPU-written TSS1 image); LDTR descriptor reload (no LDT machinery; the LDTR slot is saved/skipped); `tr_valid`/`tr_limit` #TS bound + TSS-descriptor-type/present #GP/#NP negative paths) |
 | M2S.5 | SMM / `RSM` (PARTIAL-ORACLE: `SMI#` → save CPU state to the P5 SMRAM save-map → real-mode-like SMM handler → `RSM` restore + resume) | `psmm` RTL `--system` STRUCTURAL self-check (differential golden INFEASIBLE — see below); pseg/pmode/ppage/pintr/pfault/pcpl stay sys-green; `make verify` (user) GREEN | ✅ done-partial (**STRUCTURAL, not differential** — the gdbstub single-step oracle masks `SMI#` via `SSTEP_NOIRQ` + has no SMM awareness ⇒ a differential golden is INFEASIBLE and is NOT fabricated). RTL (gated `sys_mode`): **SMBASE** reg (reset `0x30000`); **`SMI#` source** = the APIC self-IPI (store to `0xFEE00300`, delivery-mode SMI) latched + taken at the next insn boundary, exactly as qemu's APIC — so the SAME bare-metal `psmm.bin` drives it; **`SMI#` entry** saves the CPU state to the **P5** save-map at the documented offsets (CR0 `@SMBASE+0xFFFC`, EIP `+0xFFF0`, EFLAGS `+0xFFF4`, GPRs, the 6 segment selectors, GDT/IDT base, SMBASE slot `+0xFEF8`, rev-id `+0xFEFC` = `0x00020000` bit-17-set, auto-HALT word `+0xFF02`), clears `CR0` PE/PG/EM/TS, sets `CS` sel=`SMBASE>>4` base=`SMBASE` + 4-GiB limits, `EIP=0x8000`, CPL0, 16-bit default; **`RSM` (`0F AA`)** reads the whole map back + commits the restored architectural state (incl. a handler-relocatable SMBASE / resume-EIP) in one clock, resumes. `psmm` self-checked BOTH ways: (3c) qemu **free-run** + QMP memory readback ([0x2000]/[0x2004]/[0x2008] sentinels + the save area + `SMM=0` post-RSM), and (3d) the **RTL** trace (`CS=SMBASE>>4`, `CR0.PE` cleared, EIP `SMBASE+0x8000`; RSM restores CS/CR0.PE/EBX-witness/resume-EIP) + the P5 save-map dump at the documented offsets. user-mode bit-identical (RSM is `#UD` outside SMM/in user mode). DEFERRED (honest): the differential golden (oracle INFEASIBLE); I/O-restart + auto-HALT-restart slots (written 0 / not exercised); a handler that actually relocates SMBASE / modifies resume EIP (only round-trip-to-saved exercised); the exact P5 reserved-area encoding for the hidden descriptor state (RTL-internal convention); **DR6 `@+0xFFCC` / DR7 `@+0xFFC8` / TR `@+0xFFC4` / LDT-base `@+0xFFC0`** (Table 20-1 slots — NOT saved/restored: DR is M2S.6, no LDT-base reg yet, TR left unchanged through SMM; corpus does not touch them so the round-trip closes); FPU not auto-saved per Table 20-1) |
 | M2S.6 | debug registers / `#DB` (last system stage) | `pdebug` RTL `--system` sys-diff-clean vs qemu-system golden (PARTIAL oracle); pseg/pmode/ppage/pintr/pfault/pcpl stay sys-green; `make verify` (user) GREEN | ✅ done-partial (**DR0–DR7 file** (reset DR6=`0xFFFF0FF0`/DR7=`0x400`, reserved-1 fixed-bit masking on write; DR4/DR5 ALIAS DR6/DR7 when CR4.DE=0, **#UD when CR4.DE=1**); **MOV DRn↔GPR** (`0F 21`/`0F 23`, gated `sys_mode`, user-mode bit-identical); **`#DB` delivery** (vector 1, no errcode) through the M2S.3 IDT path via `arm_db()` from the triggering insn's RETIRE boundary (the qemu gdbstub fuses insn+synchronous #DB into ONE record). Three **DIFFERENTIAL** #DB causes: **TF single-step** (DR6.BS, TRAP) keyed off `tf_at_issue` sampled at S_DECODE — now wired on ALL the common retire paths (`do_retire` + every `S_STORE` case: PUSH/CALL/XCHG/PUSHF/string); **DR0–3 instruction-bp** (DR6.Bn, FAULT, honoring EFLAGS.RF suppress+auto-clear); **DR1–3 data-write-bp** (DR6.Bn, TRAP, + the qemu data-watchpoint extra handler-entry record via `S_DB_EXTRA`). `pdebug` (MOV-DR round-trip + 3 #DB deliveries) = RTL EQUIVALENT to the golden, **239 records**. user mode bit-identical (all gated behind `sys_mode`). **DEFERRED (honest):** **DR7.GD general-detect FIRING** — IMPLEMENTED-BUT-DISABLED behind `DBG_GD_ENABLE=1'b0` (qemu 8.2.2 does not model GD ⇒ a differential golden is INFEASIBLE; with the gate off the RTL takes EXACTLY 3 #DB like the golden, so the diff stays EQUIVALENT; **no wired structural self-check** — needs a TB hook for an RTL-only GD-enabled trace, which does not exist yet); BT task-switch debug trap (needs HW task switch, M2S.4 defer); I/O breakpoints (CR4.DE R/W=10); SMM save/restore of DR6/DR7; exotic single-stepped multi-cycle ops not in the corpus; reserved-DR-bit corners) |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
@@ -45,6 +46,67 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-05 — M2S.4b done-partial: HARDWARE TASK SWITCH (far JMP to a TSS) — the deferred M2S.4 piece lands
+
+The deferred M2S.4 piece — the **hardware task switch** — now lands as a real RTL
+`--system` differential. M2S.4 left a far `JMP`/`CALL` to a SYSTEM (TSS) descriptor
+HALTing cleanly in `S_LJMP` (no mis-delivery); the `ptask` stretch corpus (a far
+`JMP` to an available 32-bit TSS) tracked the golden bit-for-bit for ~275 records
+then halted at the ljmp-to-TSS, staying golden self-diff + the step-5d validation
+only. M2S.4b implements the switch and promotes `ptask` to a REAL RTL diff.
+
+**What landed (RTL EQUIVALENT to the golden, gated `sys_mode`; IA-32 SDM Vol.3 §7.3):**
+The `S_LJMP` system-descriptor arm now dispatches a far `JMP` whose target GDT
+descriptor is an available (type `0x9`) or busy (`0xB`) 32-bit TSS into a four-state
+task-switch micro-sequence (the new `S_TSW_SAVE/_READ/_SEG/_BUSY`):
+- **S_TSW_SAVE** — write the OUTGOING task state into the CURRENT TSS (`tr_base`),
+  one dword per beat at the documented 32-bit-TSS offsets: EIP@0x20 (= the insn
+  after the jmp = `next_eip`), EFLAGS@0x24, the 8 GPRs@0x28..0x44 (eax..edi map to
+  `gpr[0..7]`), the 6 segment selectors ES@0x48/CS@0x4C/SS@0x50/DS@0x54/FS@0x58/
+  GS@0x5C, LDTR@0x60. (CR3@0x1C is read on entry, not written.)
+- **S_TSW_READ** — read the INCOMING task state from the NEW TSS (named by the jump
+  selector, base from its GDT descriptor) into `tsw_*` holding regs: CR3@0x1C,
+  EIP@0x20, EFLAGS@0x24, the GPRs, the 6 selectors, LDTR.
+- **S_TSW_SEG** — reload each of the 6 incoming segment descriptors' hidden
+  base/limit/attr from the GDT (two reads per descriptor, like a normal segment
+  load); CPL ← the new CS.RPL, `cs_d` ← its D/B bit.
+- **S_TSW_BUSY** — toggle the descriptor busy bits (a JMP CLEARS the outgoing TSS
+  busy `B→9` and SETS the incoming one `9→B`, via single-byte GDT writes to the
+  access byte at descriptor+5), then COMMIT atomically: new TR (`tr_base/limit/sel`
+  ← the incoming TSS descriptor + `tr_attr`), `CR0.TS=1` (every task switch sets TS),
+  the incoming EIP/EFLAGS/GPRs/CR3, and retire ONCE (`q_pc` = the jmp PC, so the
+  switch record stamps at the ljmp exactly as the golden's n=275).
+A JMP does **not** set EFLAGS.NT or the TSS back-link (only a CALL / interrupt-task-
+gate does). The outgoing TSS descriptor access is captured into a new `tr_attr` reg
+at `S_LTR` so its busy bit can be cleared on a switch without a re-read. All the TSS/
+GDT accesses address physical memory under the M2S.1/.2 identity-map convention
+(paging off in the corpus) and are excluded from the paging post-translate.
+
+`ptask` = RTL `--system` EQUIVALENT to the golden, **292 records** (cr0..cr4 +
+selectors + GPRs + eflags + eip), across the far-JMP task switch + outgoing state
+save + incoming reload + busy toggle. The proofs all match: n=275 reloads
+EAX=0xAAAAAAAA/EBX=0xBBBBBBBB/ESP=0x00070000 + `CR0.TS` (cr0 0x60000011→0x60000019)
++ EFLAGS←TSS2 (0x46→0x2); EDX=0x000f01d8 (TSS1 saved resume EIP) + ESI=0x1A1A1A1A
+(the live EAX saved into TSS1) prove the outgoing SAVE; EDI=0x898B proves the
+busy-bit toggle (TSS1→0x89 available, TSS2→0x8B busy). `ptask` is now in
+`RTL_SYS_TESTS` (run-sys-golden.sh) → step-7 RTL-SYS-DIFF-OK; the `verify-sys`
+Makefile target already listed it.
+
+**`make verify` (user) stays GREEN + bit-identical** (the whole task switch is gated
+behind `sys_mode`, INERT in user mode). **All prior sys gates stay EQUIVALENT**:
+pseg/pmode/ppage/pintr/pfault/pcpl/pdebug/pv86 RTL-SYS-DIFF-OK + psmm SMM-PARTIAL-OK.
+Lint clean (`verilator --lint-only -Wall -Wno-UNUSED`, 0 warn/err).
+
+**Deferred (honest done-partial; not in the corpus — no oracle to differentially
+validate):** the `CALL`-far / `INT`-through-task-gate task switch (sets EFLAGS.NT +
+the TSS back-link@0x00); `IRET` with NT=1 (the task-return); the round-trip
+switch-back (reloading the CPU-written outgoing TSS image — the gnarliest reload);
+LDTR descriptor reload (no LDT machinery — the LDTR slot is saved/skipped, 0 here);
+`tr_valid`/`tr_limit` #TS bound + TSS descriptor type/present #GP/#NP negative paths.
+
+**Next: M2S.5/M2S.6** already done (above). The system-mode RTL deferrals that remain
+are the negative protection paths (no triggering corpus / no oracle).
 
 ### 2026-06-04 — M2S.6 done-partial: debug registers / `#DB` (PARTIAL-ORACLE; differential MOV-DR + 3 #DB causes, GD deferred) — LAST system-mode stage
 
@@ -284,16 +346,16 @@ pfault stay sys-green** (70/1084/128/171/348 records). Lint clean.
   at each code site (`S_INT_SS`, `S_IRET_SS`) and in the `tr_valid`/`tr_limit`
   lint-sink note.
 
-**Deferred (honest done-partial; documented):**
-- **Full hardware task switch** — `CALL`/`JMP` far to a TSS / task gate, `INT`
-  through a task gate (save/restore the full task state, NT + back-link, busy
-  bits, new CR3/LDTR). The gnarliest piece. The `ptask` stretch corpus exercises a
-  far `JMP` to a TSS; its golden captures the state save + reload + busy-bit toggle
-  (step 5d validates it), but `ptask` stays **golden self-diff + step-5d only** and
-  is NOT in `RTL_SYS_TESTS`. In the RTL, a far `JMP`/`CALL` to a SYSTEM descriptor
-  HALTs cleanly in `S_LJMP` (no mis-delivery); `ptask` tracks the golden bit-for-bit
-  for 275 records then halts at the ljmp-to-TSS. Honest partial — the cross-priv +
-  inter-priv + protection machinery is the verified deliverable.
+**Deferred (honest done-partial; documented) — UPDATED by M2S.4b (2026-06-05):**
+- **Full hardware task switch** — the far-`JMP`-to-TSS variant **LANDED in M2S.4b**
+  (see the dated entry below): the `S_LJMP` system-descriptor HALT now dispatches a
+  far `JMP` to an available/busy 32-bit TSS into the `S_TSW_SAVE/_READ/_SEG/_BUSY`
+  micro-sequence (save outgoing state, load incoming state + segments, set CR0.TS,
+  toggle busy bits, new TR). `ptask` is now in `RTL_SYS_TESTS` and is RTL `--system`
+  EQUIVALENT to the golden (292 records). STILL DEFERRED (not in the corpus): the
+  `CALL`-far / `INT`-through-task-gate switch (sets EFLAGS.NT + the TSS back-link —
+  a JMP does NOT), `IRET` with NT=1 (task-return), and the round-trip switch-back
+  (reloading the CPU-written outgoing TSS image).
 - **TSS busy-bit writeback on `LTR`** (type 9 → B in the GDT) — a memory-only side
   effect the corpus never reads back (STR returns the selector = the only observed
   register effect); omitted as a documented simplification.
