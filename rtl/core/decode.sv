@@ -189,6 +189,20 @@ module decode
             d.pairs_first=1'b1; d.pairs_second=1'b0;
           end
         end
+        // ---- shift by 1 (D1 /4,/5,/6,/7), reg form — fast-path batch 3 --------
+        // The implicit-count-1 sibling of C1: SHL/SHR/SAL/SAR r/m32, 1 (the x+x /
+        // halve idiom). Same datapath with shimm fixed at 1, no imm byte (len 2),
+        // reg form only; rotates (/0..3) keep the slow path. PU like C1. (OF for a
+        // 1-bit shift is DEFINED and emerges correctly from the shm1^result rule;
+        // the comparator masks it for shl/shr/sar regardless, so it cannot misgate.)
+        8'hD1: begin
+          if (mod==2'b11 && reg_f[2]) begin   // reg_f in 4..7
+            d.simple=1'b1; d.is_shift=1'b1; d.len=4'd2; d.wflags=1'b1;
+            d.shrot=reg_f; d.shimm=5'd1; d.dst=rm; d.wreg=1'b1;
+            d.reads=_onehot(rm); d.writes=_onehot(rm);
+            d.pairs_first=1'b1; d.pairs_second=1'b0;
+          end
+        end
         // ---- TEST eAX, imm32 (A9) --------------------------------------------
         8'hA9: begin
           d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_TEST; d.wflags=1'b1;
