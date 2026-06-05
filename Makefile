@@ -166,6 +166,12 @@ verify:
 #                  part documented + deferred (see tests/psmm/README.md).
 # For pintr/pfault step 5b additionally validates the IDT-delivery sequence
 # (handler entry + IRET return captured) before the RTL diff.
+#   pv86   (M7.2) VIRTUAL-8086 mode: V86 entry (EFLAGS.VM 0->1 + CPL 0->3 + sel<<4
+#                 bases) by IRET, V86 segmentation, the IOPL guard (CLI/STI/PUSHF/
+#                 POPF/INT n #GP to the CPL0 monitor at IOPL<3 = method-1/VME-OFF),
+#                 the 9-word V86 #GP frame on TSS.SS0:ESP0 (VM cleared, DS/ES/FS/GS
+#                 zeroed), and the IRET back into V86 — a REAL RTL --system diff vs
+#                 the golden (step 5e additionally validates the V86 transitions).
 verify-sys:
 	bash verif/sys/run-sys-golden.sh pseg
 	bash verif/sys/run-sys-golden.sh pmode
@@ -176,6 +182,7 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh psmm
 	bash verif/sys/run-sys-golden.sh pdebug
+	PORT=53220 bash verif/sys/run-sys-golden.sh pv86
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

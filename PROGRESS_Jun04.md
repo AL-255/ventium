@@ -192,3 +192,63 @@ M7.3 Win95 device-input replay + boot-prefix run.
     EQUIVALENT, lint clean — the proxy/`%gs` path is inert without `--quake-image`.
   - Reproducer: `verif/m7/run-quake-lockstep.sh [N] [PORT]`. The run length is
     oracle-bound (gdbstub ~10k insn/s); a longer background prefix follows.
+- 2026-06-05 — **M7.2 DONE: VIRTUAL-8086 mode (method-1 / VME-OFF) RTL-diffs
+  EQUIVALENT 949/949.** The `pv86` bare-metal gate boots real→protected→paging→TSS,
+  ENTERS V86 by an IRET of a 9-word V86 frame (EFLAGS.VM 0→1, CPL 0→3, sel<<4 seg
+  bases, paging still live), exercises V86 sel<<4 segmentation, and routes 6 IOPL-
+  sensitive ops (CLI/STI/PUSHF/POPF/INT 0x21/INT 0x20 at IOPL=0) as `#GP(0)` to the
+  CPL0 monitor, each pushing the 9-word V86 frame on TSS.SS0:ESP0 with VM cleared +
+  DS/ES/FS/GS zeroed, then IRETing back into V86.
+  - **What landed (RTL delta in `rtl/core/core.sv`, all gated behind
+    `v86=sys_mode&&eflags[17]` so it is INERT when EFLAGS.VM=0):** (a) `v86`/`iopl`/
+    `seg_real`/`eff_cpl` signals (`eff_cpl` feeds the #PF US-bit + perm_fault);
+    (b) MOV-sreg + far-jump `sel<<4` bases under `seg_real` (no GDT read); (c) the
+    IOPL guard at `S_DECODE` → `#GP(0)` to the monitor for CLI/STI/PUSHF/POPF/INT n/
+    IRET when `iopl<3`; (d) the 9-word V86 frame in `S_INT_PUSH` (`from_v86`: push
+    GS..EIP+errcode, clear VM, zero DS/ES/FS/GS) reusing the `xpl_active` TSS switch +
+    the cross-priv decision via `eff_cpl`, and `S_IRET` return-into-V86 (popped
+    EFLAGS.VM=1 from CPL0 → 9-word pop, force CPL3, sel<<4 bases). `int_step` widened
+    3→4 bits for the 10-beat push. Two corpus-surfaced fidelity fixes (additive):
+    MOV-moffs A0–A3 width now follows `eff_addr` (16-bit moffs under V86/real); the
+    `pv86.ld` `.reset` LMA pinned with `AT()` so the reset `ljmp` is not truncated
+    (golden regenerated 956→949).
+  - **M7.2 review finding applied (robustness, no functional change):** in `S_INT_CS`
+    the `from_v86` latch is now gated on the SAME cross-priv predicate that loads
+    `int_new_esp`/SS from the TSS — `from_v86 <= v86 && (tgt_dpl < eff_cpl)` (was
+    `from_v86 <= v86`). A correct V86 monitor's IDT gate always targets a CPL0
+    handler (`tgt_dpl<eff_cpl=3`), so this is a no-op for every valid delivery (the
+    corpus stays 949/949). It closes the latent path where a malformed V86 gate to a
+    DPL3 target would take the same-priv push arm yet still set `from_v86=1`, emitting
+    the 9-word frame off a never-loaded `int_new_esp`/SS base. Pure hardening.
+  - **pv86 gate record (re-run from a fresh TB build + fresh deterministic golden,
+    PORT 53310):** golden 949 records; step-5e V86 validation VALID (V86 entry VM 0→1
+    + CPL 0→3 + PG live at n=692; 6 IOPL-sensitive `#GP` deliveries to the CPL0
+    monitor with the TSS stack switch + VM cleared at n=698/736/777/820/865/903; IRET
+    back into V86 VM 0→1 at n=735/776/819/864/902); step-6 self-diff EQUIVALENT;
+    **step-7 RTL --system diff EQUIVALENT 949/949** (`compare.py` exit 0, cr0..cr4 +
+    selectors + GPRs + eflags + eip). Success proof matched: ecx=0x6 (6 deliveries),
+    eax=0x1 (CLI count), ebx=0x02010101, edx=0x20→0xf4, esi=0xcafebabe (V86 sel<<4
+    sentinel read back from linear 0x20000). The negative control (corrupt esi
+    sentinel) is correctly DIVERGENT, so the grade is real; the golden is
+    deterministic/byte-identical across regen.
+  - **ADDITIVE proof (independently re-run 2026-06-05):** `make verify` GREEN +
+    bit-identical (56/56 func goldens, 0 regenerated; all M4 integer bands + M5 FP/
+    cache bands met). All 7 differential sys gates stay EQUIVALENT — pseg 70 / pmode
+    1084 / ppage 128 / pintr 171 / pfault 348 / pcpl 304 / pdebug 239 — and the
+    structural gates stay green (ptask SELF-DIFF-OK + task-switch VALID, psmm
+    SMM-PARTIAL-OK). Lint clean (`verilator --lint-only -Wall -Wno-UNUSED` → 0
+    warn/err; the `int_step` 3→4 widening is width-clean). The V86 path is fully
+    inert without EFLAGS.VM=1, so the user gate is unaffected. Harness: `pv86` is in
+    `RTL_SYS_TESTS` in `run-sys-golden.sh` + a `PORT=53220 pv86` line in the
+    `verify-sys` Makefile target.
+  - **Deferred (out of scope per the brief, documented follow-on):** VME/VIF/VIP +
+    the interrupt-redirection bitmap (method-2). INT3 (0xCC) and INTO (0xCE) are not
+    IOPL-trapped under V86 (distinct #BP/#OF V86 semantics, never exercised by the
+    corpus — un-oracled, documented in-code). IN/OUT IOPL trapping is not wired
+    because this core does not decode the IN/OUT opcodes at all (no oracle in the
+    corpus; the V86 task uses CLI/STI/PUSHF/POPF/INT n) — documented in the IOPL-guard
+    comment + manifest. The non-V86 #DF nesting / SS-RPL revalidation deferrals from
+    M2S.4 are unchanged (pre-existing, not touched).
+  - Reproducer: `PORT=53xxx bash verif/sys/run-sys-golden.sh pv86`. The `pv86` test
+    dir is the Corpus-phase deliverable (currently git-untracked); `ventium-refs/`
+    untouched (read-only).
