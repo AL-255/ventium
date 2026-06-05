@@ -405,7 +405,11 @@ module core
     //   S_RSM      : RSM (0F AA) — read the whole save map back, then commit the
     //                restored state (honoring a handler-modified SMBASE/resume EIP)
     //                in one clock and resume the interrupted context.
-    S_SMI_SAVE, S_RSM
+    S_SMI_SAVE, S_RSM,
+    // M2S.6 — the extra data-watchpoint handler-entry record (the qemu gdbstub
+    // single-step quirk: a DATA breakpoint #DB re-reports the post-delivery state
+    // stamped at the handler entry PC before the handler's first instruction).
+    S_DB_EXTRA
   } state_e;
   state_e state;
   // M2S.2 page-walk return state (declared here so it can use state_e).
@@ -605,7 +609,10 @@ module core
     SYS_NONE, SYS_LGDT, SYS_LIDT, SYS_MOVCR_TO, SYS_MOVCR_FROM,
     SYS_MOVSREG_TO, SYS_MOVSREG_FROM, SYS_LJMP,
     // M2S.4 — LTR (load TR from a GDT TSS selector) and STR (store TR selector).
-    SYS_LTR, SYS_STR
+    SYS_LTR, SYS_STR,
+    // M2S.6 — MOV r32,DRn (0F 21) and MOV DRn,r32 (0F 23). The DR index is in
+    // d_sys_creg (reused: ModR/M.reg), the GPR in d_dst_reg / d_src_reg.
+    SYS_MOVDR_FROM, SYS_MOVDR_TO
   } sysop_e;
   sysop_e      d_sysop;
   logic [2:0]  d_sys_sreg;     // target/source segment register index (mov sreg)
@@ -953,6 +960,20 @@ module core
         8'h22: begin // 0F 22 /r MOV CRn, r32
           d_sysop=SYS_MOVCR_TO; d_sys_creg=modrm_reg; d_src_reg=modrm_rm;
           d_w=3'd4; d_len=pfx_len+4'd3;
+        end
+        8'h21: begin // 0F 21 /r MOV r32, DRn  (M2S.6; mod field ignored, always reg)
+          // Gated on sys_mode so USER mode is byte-identical: 0F 21 stays d_unknown
+          // (loud HALT) exactly as before M2S.6 — no new user-mode path.
+          if (sys_mode) begin
+            d_sysop=SYS_MOVDR_FROM; d_sys_creg=modrm_reg; d_dst_reg=modrm_rm;
+            d_writes_reg=1'b1; d_w=3'd4; d_len=pfx_len+4'd3;
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
+        end
+        8'h23: begin // 0F 23 /r MOV DRn, r32  (M2S.6)
+          if (sys_mode) begin
+            d_sysop=SYS_MOVDR_TO; d_sys_creg=modrm_reg; d_src_reg=modrm_rm;
+            d_w=3'd4; d_len=pfx_len+4'd3;
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
         end
         8'b1000_????: begin // Jcc rel32
           d_len=pfx_len+4'd6; d_is_branch=1'b1; d_branch_taken=cond_true(op1[3:0],eflags);
@@ -1739,6 +1760,65 @@ module core
   // same-privilege, so the current SS:ESP — cross-priv stack switch via TSS is
   // M2S.4). All of this is INERT when !sys_mode.
   // -------------------------------------------------------------------------
+  // ===========================================================================
+  // M2S.6 DEBUG REGISTERS + #DB (docs/m2s6-debug-spec.md). ALL of this is INERT
+  // when !sys_mode: the DR file is never written (MOV DRn is a SLOW-FSM-only
+  // sys op), the #DB delivery latches never arm, and TF/RF are only inspected on
+  // a system-mode core. User mode (boot_mode=0) is byte-identical.
+  //
+  // DR0..DR3 = linear breakpoint addresses; DR6 = debug status (B0..B3, BD, BS,
+  // BT + the 0xFFFF0FF0 reserved-1 read pattern); DR7 = control (Ln/Gn enables,
+  // LE/GE, GD, the R/Wn 2-bit type + LENn 2-bit length per breakpoint). DR4/DR5
+  // alias DR6/DR7 when CR4.DE=0. Reset (Vol.3): DR6=0xFFFF0FF0, DR7=0x00000400.
+  // ===========================================================================
+  logic [31:0] dr0, dr1, dr2, dr3;   // linear breakpoint addresses
+  logic [31:0] dr6;                  // debug status (sticky B0..B3/BD/BS/BT)
+  logic [31:0] dr7;                  // debug control (Ln/Gn, R/Wn, LENn, GD)
+  // DR6/DR7 reserved-bit fixed patterns (P5 Vol.3). On WRITE the CPU forces these
+  // reserved-1 bits; the read-back therefore always carries them. In 32-bit mode
+  // qemu's DR_RESERVED_MASK (upper 32 bits) never bites, so all 32 bits writable.
+  localparam logic [31:0] DR6_FIXED_1 = 32'hFFFF_0FF0;   // DR6 reserved-1 pattern
+  localparam logic [31:0] DR7_FIXED_1 = 32'h0000_0400;   // DR7 bit10 reserved-1
+  // DR6 status-bit positions.
+  localparam int DR6_B0 = 0, DR6_B1 = 1, DR6_B2 = 2, DR6_B3 = 3;
+  localparam int DR6_BD = 13, DR6_BS = 14;
+  // DR7.GD (general-detect) lives at bit 13 (mirrors DR6.BD).
+  localparam int DR7_GD = 13;
+
+  // ---- #DB delivery model (M2S.6). A #DB raised as a CONSEQUENCE of an
+  // instruction (TF single-step = DR6.BS, a data breakpoint = DR6.Bn, or an
+  // instruction breakpoint hit on the committed next-EIP = DR6.Bn) is launched
+  // FROM that instruction's RETIRE boundary via arm_db(): the qemu gdbstub
+  // single-step fuses the instruction and its synchronous #DB into ONE record
+  // (the instruction's PC + the post-delivery state), so the instruction does NOT
+  // emit a separate retire — arm_db() diverts straight to the IDT delivery FSM.
+  // ---- TF / RF issue-time snapshot. The #DB checks run at the triggering
+  // instruction's RETIRE boundary, but must use the flags the instruction RAN
+  // UNDER (sampled at its S_DECODE dispatch), not the post-modified ones — so a
+  // POPF that SETS TF does not itself step-trap (the trap fires after the NEXT
+  // instruction). RF (bit16) suppresses an instruction breakpoint for exactly one
+  // instruction; the CPU clears it once that instruction retires (we clear it at
+  // S_DECODE so the post-retire EFLAGS shows RF=0, matching qemu's
+  // x86_debug_check_breakpoint behaviour).
+  logic        tf_at_issue;       // TF the in-flight instruction runs under
+  logic        rf_at_issue;       // RF the in-flight instruction runs under (suppress)
+  // ---- Data-watchpoint extra-record flag. The qemu gdbstub single-step emits an
+  // EXTRA record for a DATA breakpoint #DB: after the delivery record (stamped at
+  // the store's PC, post-frame-push), it re-reports the SAME state stamped at the
+  // HANDLER entry PC (the resumption point, BEFORE the handler's first instruction
+  // runs), then the handler proceeds. (Instruction-bp / TF traps do NOT do this.)
+  // Set when arm_db is launched for a data-write breakpoint; consumed in
+  // S_INT_PUSH -> S_DB_EXTRA to emit that one extra fused-resumption record.
+  logic        db_wp_extra;       // emit the data-watchpoint handler-entry record
+  // GD general-detect FIRING is DEFERRED (documented). qemu 8.2.2 does NOT model
+  // DR7.GD, so the committed pdebug golden takes EXACTLY 3 #DB deliveries. Firing
+  // GD here would make the RTL take a 4th #DB the golden lacks -> the differential
+  // diff would DIVERGE, and there is no TB hook to run a separate GD-enabled
+  // structural trace. So the GD DECISION is computed below but its #DB fire is held
+  // behind this default-off localparam (a future structural self-check can flip it
+  // for an RTL-only trace, the psmm precedent). See StructuredOutput "deferred".
+  localparam logic DBG_GD_ENABLE = 1'b0;
+
   logic [7:0]  int_vec;           // the vector being delivered (0..255)
   logic [31:0] int_ret_eip;       // EIP to PUSH (faulting EIP for a FAULT, next
                                   // EIP for a TRAP / software INT)
@@ -2638,6 +2718,11 @@ module core
       // are fully written by S_RSM before being committed.)
       smbase<=32'h0003_0000; smm_active<=1'b0; smi_pending<=1'b0;
       smm_step<=6'd0; smm_resume_eip<=32'd0;
+      // M2S.6 debug registers idle out of reset (Vol.3 power-on values). The DR
+      // file resets identically in user mode — it is just never written there.
+      dr0<=32'd0; dr1<=32'd0; dr2<=32'd0; dr3<=32'd0;
+      dr6<=DR6_FIXED_1; dr7<=DR7_FIXED_1;
+      tf_at_issue<=1'b0; rf_at_issue<=1'b0; db_wp_extra<=1'b0;
     end else begin
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
@@ -3018,6 +3103,20 @@ module core
         end
 
         S_DECODE: begin
+          // M2S.6 (gated sys_mode): snapshot the TF/RF the about-to-execute
+          // instruction RUNS UNDER (so the #DB checks at its RETIRE boundary use
+          // the issue-time flags, not the post-modified ones — a POPF that SETS TF
+          // must not itself step-trap; the trap fires after the NEXT instruction).
+          // EFLAGS.RF (resume flag) suppresses an instruction breakpoint for
+          // exactly THIS one instruction and the CPU clears it once the instruction
+          // retires; clearing it here makes the post-retire EFLAGS show RF=0 (qemu
+          // does the same). A SMI/#DB diversion does not reach the normal dispatch,
+          // so these are still issue-time-correct.
+          if (sys_mode) begin
+            tf_at_issue <= eflags[8];
+            rf_at_issue <= eflags[16];
+            if (eflags[16]) eflags <= eflags & ~32'h0001_0000;  // RF clears after 1 insn
+          end
           q_len<=d_len; q_is_branch<=d_is_branch; q_branch_taken<=d_branch_taken;
           q_rel<=d_rel; q_alu_op<=d_alu_op; q_writes_reg<=d_writes_reg;
           q_writes_flags<=d_writes_flags; q_mem_read<=d_mem_read; q_mem_write<=d_mem_write;
@@ -3058,6 +3157,37 @@ module core
             smm_resume_eip <= eip;          // restart this instruction after RSM
             smm_step       <= 6'd0;
             state          <= S_SMI_SAVE;
+          end
+          // ---- M2S.6 GD general-detect (#DB before a MOV-DR access; gated
+          // sys_mode + DBG_GD_ENABLE). This is the ONE #DB that fires BEFORE its
+          // instruction (no preceding instruction to fuse with): a MOV to/from a DR
+          // while DR7.GD=1 faults (DR6.BD) before the access, restarting the MOV.
+          // qemu 8.2.2 does NOT model GD, so this is DEFERRED (DBG_GD_ENABLE=0) to
+          // keep the differential diff matching the golden's exactly-3 #DB; the
+          // decision is wired so a future structural self-check can flip the gate.
+          else if (DBG_GD_ENABLE && sys_mode &&
+                   (d_sysop==SYS_MOVDR_TO || d_sysop==SYS_MOVDR_FROM) && dr7[DR7_GD]) begin
+            arm_db(32'd1 << DR6_BD, eip, eip);   // FAULT before the MOV-DR access
+          end
+          // ---- M2S.6 DR4/DR5 alias vs #UD on CR4.DE (debug extensions). When
+          // CR4.DE (creg4[3]) == 0, DR4/DR5 ALIAS DR6/DR7 (legacy); when CR4.DE == 1
+          // (P5 debug-extensions enabled) a MOV to/from DR4 or DR5 is #UD (vector 6,
+          // no error code, a FAULT — push the faulting EIP). This matches qemu's
+          // helper_get_dr/helper_set_dr (raise EXCP06_ILLOP when DE && reg>=4). The
+          // alias path itself is handled in S_EXEC (CR4.DE==0). The corpus keeps
+          // CR4.DE==0 throughout so this #UD path is never taken there (the gate
+          // stays bit-identical) — it makes the RTL spec-faithful for DE=1.
+          else if (sys_mode && creg4[3] &&
+                   (d_sysop==SYS_MOVDR_TO || d_sysop==SYS_MOVDR_FROM) &&
+                   (d_sys_creg==3'd4 || d_sys_creg==3'd5)) begin
+            int_vec     <= 8'd6;       // #UD
+            int_ret_eip <= eip;        // FAULT: push the faulting EIP (restart)
+            int_src_pc  <= eip;
+            int_has_err <= 1'b0;       // #UD carries no error code
+            int_err     <= 32'd0;
+            int_step    <= 3'd0;
+            int_sw      <= 1'b0;       // HW fault: bypass the gate DPL>=CPL check
+            state       <= S_INT_GATE;
           end
           else if (d_halt || d_unknown) begin
             // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
@@ -3263,6 +3393,38 @@ module core
               3'd2: gpr[q_dst_reg]<=creg2;
               3'd3: gpr[q_dst_reg]<=creg3;
               default: gpr[q_dst_reg]<=creg4;
+            endcase
+          end
+          // ---- M2S.6 MOV DRn <-> GPR (gated sys_mode via the sysop decode) ----
+          // DR4/DR5 alias DR6/DR7 ONLY when CR4.DE=0 (P5 debug-extensions). When
+          // CR4.DE=1 a MOV DR4/DR5 is #UD and is diverted in S_DECODE BEFORE we get
+          // here, so reaching the 3'd4/3'd5 arms below implies CR4.DE=0 (legacy
+          // alias). On WRITE the reserved-1 bits are forced (DR6 |= 0xFFFF0FF0,
+          // DR7 |= 0x400) so the read-back is deterministic — qemu helper_set_dr does
+          // exactly this in 32-bit mode (the upper-32 reserved mask never bites). A
+          // GD-fault (DR7.GD set) is also taken BEFORE the access in S_DECODE, so by
+          // the time we get here GD is not a concern for this op.
+          else if (q_sysop==SYS_MOVDR_TO) begin
+            flags_we=1'b0;
+            unique case (q_sys_creg)
+              3'd0: dr0 <= gpr[q_src_reg];
+              3'd1: dr1 <= gpr[q_src_reg];
+              3'd2: dr2 <= gpr[q_src_reg];
+              3'd3: dr3 <= gpr[q_src_reg];
+              // DR4 aliases DR6, DR5 aliases DR7 (CR4.DE=0; the corpus keeps DE=0).
+              3'd4, 3'd6: dr6 <= gpr[q_src_reg] | DR6_FIXED_1;
+              default:    dr7 <= gpr[q_src_reg] | DR7_FIXED_1;  // DR5/DR7
+            endcase
+          end
+          else if (q_sysop==SYS_MOVDR_FROM) begin
+            flags_we=1'b0;
+            unique case (q_sys_creg)
+              3'd0: gpr[q_dst_reg] <= dr0;
+              3'd1: gpr[q_dst_reg] <= dr1;
+              3'd2: gpr[q_dst_reg] <= dr2;
+              3'd3: gpr[q_dst_reg] <= dr3;
+              3'd4, 3'd6: gpr[q_dst_reg] <= dr6;   // DR4 aliases DR6
+              default:    gpr[q_dst_reg] <= dr7;   // DR5/DR7
             endcase
           end
           else if (q_sysop==SYS_MOVSREG_FROM) begin
@@ -3667,12 +3829,30 @@ module core
 
           // commit (non-store, non-microseq path)
           if (do_retire) begin
+            logic [31:0] cmt_eip;       // the EIP this instruction commits / fetches next
+            logic [3:0]  xbp;           // instruction-breakpoint hit on the committed EIP
+            cmt_eip = (q_is_branch && q_branch_taken) ? (next_eip+q_rel) : new_eip;
             if (flags_we) eflags<=flags_val;
-            if (q_is_branch && q_branch_taken) eip<=next_eip+q_rel;
-            else if (q_kind==K_STR) eip<=new_eip;  // string single (non-store) / ECX==0
-            else eip<=new_eip;
-            retire_valid<=1'b1;
-            state<=S_PIPE;   // re-enter fast path
+            eip<=cmt_eip;
+            // ---- M2S.6 #DB at the retire boundary (gated sys_mode). Checked in P5
+            // priority: an INSTRUCTION breakpoint on the NEXT eip (FAULT, restart)
+            // takes precedence over a TF single-step trap (so RF can be honoured);
+            // else a TF single-step trap (TRAP, resume at cmt_eip). The triggering
+            // instruction does NOT retire separately — arm_db fuses it (q_pc stamp).
+            xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+cmt_eip, 1'b1)
+                                             : 4'd0;
+            if (sys_mode && xbp != 4'd0) begin
+              // FAULT before cmt_eip; push cmt_eip (restart), stamp this insn's PC.
+              arm_db({28'd0, xbp}, q_pc, cmt_eip);
+            end
+            else if (sys_mode && tf_at_issue) begin
+              // TF single-step TRAP after this instruction; push cmt_eip (resume).
+              arm_db(32'd1 << DR6_BS, q_pc, cmt_eip);
+            end
+            else begin
+              retire_valid<=1'b1;
+              state<=S_PIPE;   // re-enter fast path
+            end
           end else if (do_store) begin
             state<=S_STORE;
           end
@@ -3681,6 +3861,7 @@ module core
         // -------------------------------------------------------------------
         S_STORE: begin
           if (mem_ack) begin
+            logic [3:0] wr_hit;   // M2S.6: data-write breakpoint hit (DR6.Bn) bits
             // M2S.5 — SMI# source (gated sys_mode). The psmm corpus fires SMI by
             // writing the local-APIC ICR-low (physical 0xFEE00300) with delivery
             // mode = SMI (bits[10:8]==010). QEMU's APIC honours APIC_DM_SMI ->
@@ -3696,6 +3877,19 @@ module core
             if (sys_mode && !smm_active && mem_we &&
                 mem_addr == 32'hFEE0_0300 && mem_wdata[10:8] == 3'b010)
               smi_pending <= 1'b1;
+            // M2S.6 — DATA-WRITE breakpoint detection (gated sys_mode). This store
+            // is committing; if its LINEAR address matches an armed DR7 write
+            // breakpoint (R/W=01 or 11), the store completes but a #DB TRAP fires
+            // AFTER it (the trap pushes the NEXT eip — IRET resumes past the store).
+            // wr_hit selects the matched DR6.Bn bits; the default (K_ALU `mov
+            // mem,reg`) retire path below diverts to arm_db instead of retiring,
+            // fusing the store's record with the delivery (q_pc stamp, like the
+            // qemu gdbstub). mem_addr is post-translate physical, but paging is off
+            // in the corpus (linear==physical) and the breakpoint linear is the same
+            // cur_lin the access used, so compute it the same way.
+            wr_hit = sys_mode ? dr_match((q_kind==K_STR) ? (dbase_edi+str_store_addr)
+                                                         : (dbase+st_addr), 1'b0)
+                              : 4'd0;
             // M5 finding [med]: a STORE mutates the D-cache (read-allocate write-back
             // allocates/updates LRU) but adds NO miss penalty (oracle p5_mem:
             // `if (!hit && !store) pending += dmiss` — stores skip the penalty). A
@@ -3710,24 +3904,74 @@ module core
             unique case (q_kind)
               K_CTRL: begin // CALL: push done, set EIP (width-aware ESP adjust)
                 gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}; eip<=call_target;
-                retire_valid<=1'b1; state<=S_PIPE;
+                // M2S.6: a TF single-step trap (and/or a data-write breakpoint on
+                // the pushed return address) fuses with this CALL's record — qemu
+                // delivers a #DB on EVERY single-stepped instruction. Resume EIP is
+                // the CALL target (where execution continues). See the do_retire
+                // and `default` arms for the priority/fusing rationale.
+                if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
+                  arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
+                       | (tf_at_issue   ? (32'd1 << DR6_BS) : 32'd0),
+                         q_pc, call_target);
+                  if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
+                end
+                else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
               K_XCHG: begin // XCHG r/m,r mem: reg <- old mem
                 gpr[q_src_reg]<=reg_merge(gpr[q_src_reg], wmask(mem_load_data,q_w), q_w, q_src_high8);
-                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+                eip<=next_eip;
+                if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
+                  arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
+                       | (tf_at_issue   ? (32'd1 << DR6_BS) : 32'd0),
+                         q_pc, next_eip);
+                  if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
+                end
+                else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
               K_STKMISC: begin // PUSHF
                 gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}; eip<=next_eip;
-                retire_valid<=1'b1; state<=S_PIPE;
+                if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
+                  arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
+                       | (tf_at_issue   ? (32'd1 << DR6_BS) : 32'd0),
+                         q_pc, next_eip);
+                  if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
+                end
+                else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
               K_STR: begin // MOVS/STOS element stored
-                eip<=str_next_eip; retire_valid<=1'b1; state<=S_PIPE;
+                eip<=str_next_eip;
+                // String stores already computed wr_hit with the K_STR address; a
+                // mid-string TF step or a data-write breakpoint fuses here too. (The
+                // corpus single-steps only a nop, so wr_hit==0 && !tf_at_issue here
+                // today and this stays the bit-identical retire — but a stepped/
+                // watched string op now correctly delivers, matching qemu.)
+                if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
+                  arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
+                       | (tf_at_issue   ? (32'd1 << DR6_BS) : 32'd0),
+                         q_pc, str_next_eip);
+                  if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
+                end
+                else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
               default: begin
                 if (q_is_push) gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w};
                 if (q_is_pop)  gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};  // POP m
                 if (q_writes_flags && q_kind==K_ALU) eflags<=flags_out;
-                eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+                eip<=next_eip;
+                // M2S.6: a data-write breakpoint (TRAP, fires AFTER the store) or a
+                // TF single-step trap fuses this store's record with the #DB
+                // delivery (q_pc stamp, push next_eip = resume past the store). A
+                // data breakpoint additionally needs the qemu watchpoint extra
+                // handler-entry record (S_DB_EXTRA via db_wp_extra).
+                if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
+                  arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
+                       | (tf_at_issue   ? (32'd1 << DR6_BS) : 32'd0),
+                         q_pc, next_eip);
+                  if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
+                end
+                else begin
+                  retire_valid<=1'b1; state<=S_PIPE;
+                end
               end
             endcase
           end
@@ -4040,11 +4284,28 @@ module core
               q_pc          <= int_src_pc;   // stamp the delivering instruction's PC
               retire_valid  <= 1'b1;
               int_step      <= 3'd0;
-              state         <= S_PIPE;
+              // M2S.6: a DATA-watchpoint #DB needs the extra handler-entry record
+              // (the qemu watchpoint single-step quirk). Divert to S_DB_EXTRA to
+              // emit it before the handler runs; all other deliveries go to S_PIPE.
+              if (db_wp_extra) state <= S_DB_EXTRA;
+              else             state <= S_PIPE;
             end else begin
               int_step <= int_step + 3'd1;
             end
           end
+        end
+
+        // M2S.6 — S_DB_EXTRA: the data-watchpoint extra record. The S_INT_PUSH
+        // delivery above already committed eip <- handler entry + the pushed frame
+        // and retired ONCE (stamped at the store's PC). qemu's gdbstub then emits a
+        // SECOND record at the handler-entry PC with the SAME state (the resumption
+        // point, before the handler's first instruction). Re-stamp q_pc = eip (now
+        // the handler entry) and retire once more, unchanged, then run the handler.
+        S_DB_EXTRA: begin
+          q_pc         <= eip;        // handler entry PC (eip was set in S_INT_PUSH)
+          retire_valid <= 1'b1;
+          db_wp_extra  <= 1'b0;
+          state        <= S_PIPE;
         end
 
         // S_IRET: pop EIP, CS, EFLAGS. Beat 0 EIP @ ESP, 1 CS @ ESP+4,
@@ -4904,6 +5165,51 @@ module core
   // single delivery retire record. The micro-sequence then reads IDT[vec], the
   // gate's CS descriptor, pushes the frame, and loads CS:EIP. Only invoked when
   // sys_mode (faults can only arise from the system-mode states).
+  // ---- M2S.6 hardware-breakpoint match (gated sys_mode at the call sites) ----
+  // Return the DR6 status bits (B0..B3) for every ENABLED DRn (DR7 Ln or Gn set)
+  // whose linear address matches `lin` with the requested access type. `want_x`
+  // selects an instruction (execute, R/W=00) breakpoint; otherwise a data WRITE
+  // (R/W=01) or read-or-write (R/W=11) breakpoint. LEN matching: a DRn covers a
+  // 1/2/4/8-aligned region (LENn 00/01/11/10); the corpus uses LEN0=00 (execute,
+  // 1 byte) and LEN1=11 (4 bytes), so we honour the documented LEN masks. The
+  // length mask aligns `lin` and the breakpoint address before the equality test.
+  function automatic logic [3:0] dr_match(input logic [31:0] lin, input logic want_x);
+    logic [3:0] hit;
+    logic [31:0] addr [4];
+    logic [1:0]  rw   [4];
+    logic [1:0]  len  [4];
+    logic        en   [4];
+    logic [31:0] lenmask;
+    begin
+      addr[0]=dr0; addr[1]=dr1; addr[2]=dr2; addr[3]=dr3;
+      // DR7: Ln=bit(2n), Gn=bit(2n+1); R/Wn=bits(16+4n..17+4n); LENn=bits(18+4n..19+4n).
+      for (int i=0;i<4;i++) begin
+        en[i]  = dr7[2*i] | dr7[2*i+1];
+        rw[i]  = dr7[16+4*i +: 2];
+        len[i] = dr7[18+4*i +: 2];
+      end
+      hit = 4'd0;
+      for (int i=0;i<4;i++) begin
+        // LEN encoding -> alignment mask: 00=1B(0x0) 01=2B(0x1) 11=4B(0x3) 10=8B(0x7)
+        unique case (len[i])
+          2'b00:   lenmask = 32'h0000_0000;
+          2'b01:   lenmask = 32'h0000_0001;
+          2'b10:   lenmask = 32'h0000_0007;
+          default: lenmask = 32'h0000_0003;
+        endcase
+        if (en[i] && ((lin & ~lenmask) == (addr[i] & ~lenmask))) begin
+          // type match: execute wants R/W=00; data-write wants R/W=01 or 11.
+          if (want_x) begin
+            if (rw[i] == 2'b00) hit[i] = 1'b1;
+          end else begin
+            if (rw[i] == 2'b01 || rw[i] == 2'b11) hit[i] = 1'b1;
+          end
+        end
+      end
+      return hit;
+    end
+  endfunction
+
   task automatic start_fault(input logic [7:0] vec, input logic has_err,
                              input logic [31:0] err, input logic [31:0] fault_pc);
     begin
@@ -4914,6 +5220,31 @@ module core
       int_err     <= err;
       int_step    <= 3'd0;
       int_sw      <= 1'b0;        // HW fault: bypass the gate DPL>=CPL check
+      state       <= S_INT_GATE;
+    end
+  endtask
+
+  // ---- M2S.6 #DB delivery launched FROM a retire boundary (gated sys_mode at
+  // the call sites). Unlike start_fault, the triggering instruction does NOT emit
+  // its own retire record: the qemu gdbstub single-step fuses the instruction +
+  // the synchronous #DB into ONE record stamped with the instruction's PC and the
+  // post-delivery state. So the caller does NOT set retire_valid for the insn; it
+  // calls this INSTEAD, which sets DR6.Bn/BS (sticky) and diverts to S_INT_GATE.
+  // The delivery's single retire is then stamped with `src_pc` (the instruction
+  // that triggered the trap/fault) and pushes `ret_eip` (NEXT eip for a TRAP =
+  // resume; the FAULTING/breakpoint eip for a FAULT = restart). #DB: vector 1, no
+  // error code, delivered through IDT[1].
+  task automatic arm_db(input logic [31:0] dr6_bits,
+                        input logic [31:0] src_pc, input logic [31:0] ret_eip);
+    begin
+      dr6         <= dr6 | dr6_bits;     // sticky status bits
+      int_vec     <= 8'd1;
+      int_ret_eip <= ret_eip;
+      int_src_pc  <= src_pc;
+      int_has_err <= 1'b0;
+      int_err     <= 32'd0;
+      int_step    <= 3'd0;
+      int_sw      <= 1'b0;               // hardware #DB: bypass the gate DPL check
       state       <= S_INT_GATE;
     end
   endtask

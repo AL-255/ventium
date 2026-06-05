@@ -429,7 +429,7 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 selectors + GPRs + eflags + eip). The HARDWARE TASK SWITCH (CALL/
 #                 JMP to a TSS / task gate = the "ptask" sibling) is the gnarliest
 #                 piece and is DEFERRED — ptask stays self-diff-only (documented).
-RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl"
+RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl pdebug"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"
