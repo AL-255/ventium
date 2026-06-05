@@ -527,9 +527,20 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 these, so "pcpl" is in RTL_SYS_TESTS and its RTL --system trace is
 #                 DIFFED against the golden (no longer self-diff-only): EQUIVALENT
 #                 across the CPL transition + handler + inter-priv IRET (cr0..cr4 +
-#                 selectors + GPRs + eflags + eip). The HARDWARE TASK SWITCH (CALL/
-#                 JMP to a TSS / task gate = the "ptask" sibling) is the gnarliest
-#                 piece and is DEFERRED — ptask stays self-diff-only (documented).
+#                 selectors + GPRs + eflags + eip).
+#   M2S.4b (DONE — RTL diff lands here): "ptask" exercises the HARDWARE TASK SWITCH
+#                 (far JMP to a 32-bit TSS): SAVE the outgoing task state into the
+#                 current TSS (EIP/EFLAGS/GPRs/segs at the documented offsets), LOAD
+#                 the incoming state from the new TSS (CR3/EIP/EFLAGS/GPRs/segments),
+#                 reload the segment descriptors, set CR0.TS, toggle the descriptor
+#                 busy bits (JMP clears the outgoing B->9, sets the incoming 9->B),
+#                 and point TR at the new TSS. The core.sv S_TSW_SAVE/_READ/_SEG/
+#                 _BUSY micro-sequence (gated sys_mode) implements all of this, so
+#                 "ptask" is now in RTL_SYS_TESTS and its RTL --system trace is DIFFED
+#                 against the golden (no longer self-diff-only): EQUIVALENT across the
+#                 task switch + state save/reload + busy-bit toggle (292 records). A
+#                 JMP does NOT set NT/back-link; the CALL/INT-task-gate (NT+back-link)
+#                 and the round-trip switch-back remain documented deferrals.
 #   M7.2 (DONE — RTL diff lands here): "pv86" exercises VIRTUAL-8086
 #                 mode — V86 entry (EFLAGS.VM 0->1 + CPL 0->3 + sel<<4 seg bases) by
 #                 IRET, V86 segmentation, the IOPL guard (IOPL<3 -> CLI/STI/PUSHF/
@@ -541,7 +552,7 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 the S_IRET return-into-V86) is gated behind `v86` so it is INERT when
 #                 EFLAGS.VM=0 (every prior sys gate stays byte-identical). pv86 is now
 #                 in RTL_SYS_TESTS for the real RTL --system V86 diff vs the golden.
-RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl pdebug pv86"
+RTL_SYS_TESTS="pseg pmode ppage pintr pfault pcpl ptask pdebug pv86"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"
