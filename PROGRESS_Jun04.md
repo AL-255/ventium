@@ -1197,3 +1197,37 @@ no reg). The lowest-risk batch (pure register/immediate, no memory/stack).
   are ordered by risk in `docs/fastpath-coverage-spec.md` §3 — each needs its own
   pairing microbenchmark + a re-run of all bands + the full func diff. RTL touched:
   `rtl/core/decode.sv`; `ventium-refs` untouched.
+
+### External CPU testbench — test386.asm, differential vs qemu-system (2026-06-05)
+
+Added an EXTERNAL, independently-authored x86 CPU tester for much broader
+differential coverage than the hand-written corpus — at the user's request to
+"find suitable testbenches online and download them."
+
+- **Downloaded** [`test386.asm`](https://github.com/barotto/test386.asm) (GPL-3.0,
+  a comprehensive 80386+ CPU tester for emulators) into
+  `ventium-refs/09-external-cpu-tests/test386.asm/` (full source + `COPYING`).
+  Built with NASM into a 64 KiB BIOS image — exactly the Ventium system-mode image
+  model (reset 0xfffffff0 → f000:0045; `qemu-system-i386 -bios`).
+- **Differential vs QEMU.** Golden = `qemu-system-i386` single-step
+  (`gen_trace.py --system`); checked CPU = the Ventium RTL. The bare core
+  (`ventium_top --system`) HALTs at the FIRST instruction's POST-code `OUT DX,AL`
+  (n=4) — no PC platform — so **`ventium_soc`** (`tb_soc`, `soc_en=1`, whose PMIO
+  decoder acks the undecoded POST port) is the correct vehicle. Result:
+  **EQUIVALENT — `ventium_soc` matches qemu-system-i386 byte-for-byte over 30,000
+  instructions** of test386's prefix (conditional jumps, addressing modes, early
+  protected-mode/bit/string tests), per-record under the EFLAGS-undefined mask.
+- **Gate + artifacts** (`verif/external/test386/`): `run-test386-gate.sh` (build
+  the SoC TB → regen the golden + drift-check → run `ventium_soc` → `compare.py`
+  EQUIVALENT; `MAXI` controls the prefix), the committed `test386.bin` (nasm-built,
+  so the gate needs no nasm) + a 1,500-insn reference golden, and a README noting
+  the GPL-3.0 source location. This is an honest gap-finder like the M7 lock-step
+  (the first OUT was a platform-not-ISA finding; a deeper frontier — an
+  unimplemented opcode or the SoC's free-running PIT — is the next thing it will
+  surface).
+- **NOTE — `ventium-refs` (the user's reference submodule):** test386's source +
+  built image were downloaded INTO it per the request; the main-repo gate is
+  self-contained via the committed `verif/external/test386/test386.bin`. Committing
+  + pushing the `ventium-refs` submodule (their own reference repo) is left to the
+  user. Main-repo files: `verif/external/test386/{run-test386-gate.sh,test386.bin,
+  test386.golden.vtrace,README.md}`.
