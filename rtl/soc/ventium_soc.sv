@@ -2,6 +2,22 @@
 //   M8.1: core + 8259 PIC + 8254 PIT (the on-die interrupt subsystem).
 //   M8.2: + MC146818 RTC (0x70/0x71), 8042 keyboard ctrl (0x60/0x64),
 //         port-92 fast-A20 (0x92), and the combined A20 address mask.
+//   M8.3: + VGA register file (0x3B0..0x3DF) and ACPI PM timer (0x608).
+//         This wires the last two built-but-unwired device models, completing
+//         the 7-device set. The VGA register file is FULLY per-record
+//         differentiable vs qemu-system (ATTR/MISC/SEQ/DAC/GFX/CRTC/IS1 with
+//         write masks + the mono/color port aliasing), gated by the synchronous
+//         `pvga` test. The ACPI PM timer is wired for connectivity but its READ
+//         is a documented oracle boundary: qemu's default `-machine pc` leaves
+//         the PIIX4 PM I/O region DISABLED (PMBASE unprogrammed -> 0x608 reads
+//         0xFFFFFFFF as unassigned I/O), and even when enabled the PM-timer
+//         value is host-clock-derived (not reproducible by a clk-sampled model)
+//         -- exactly like the 8042-OBF host-queue boundary. Only the write-inert
+//         + non-HALT property of an OUT 0x608 is differentiable (a no-op in BOTH
+//         qemu (unassigned-write-ignored) and the RTL (acpi_pm_tmr_write does
+//         nothing)); the value-read is covered by the standalone ven_acpipm unit
+//         self-check (verif/soc/run_acpipm.sh). The pvga differential never READS
+//         0x608, so the PM timer stays quiescent and cannot perturb the compare.
 //
 // The FIRST SoC-integration top (docs PROGRESS_Jun04.md "M8" + the M8.0 design).
 // It stands up the on-die interrupt subsystem the bare-metal pirqsoc test needs:
@@ -258,7 +274,7 @@ module ventium_soc
   // S_DECODE), and an undecoded port acks with rdata 0 (the test never reads one)
   // so the core never stalls.
   // ===========================================================================
-  logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92;
+  logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
                         io_addr == 16'h00A0 || io_addr == 16'h00A1 ||
@@ -269,6 +285,16 @@ module ventium_soc
     cs_rtc    = io_req && (io_addr == 16'h0070 || io_addr == 16'h0071);
     cs_i8042  = io_req && (io_addr == 16'h0060 || io_addr == 16'h0064);
     cs_port92 = io_req && (io_addr == 16'h0092);
+    // ---- M8.3 device selects ----------------------------------------------
+    // VGA legacy register window (0x3B0..0x3DF) — the SAME window qemu's std-vga
+    // decodes; the device internally returns 0xFF for the mono/color-aliased
+    // invalid sub-range (matching qemu's vga_ioport_invalid), so the full window
+    // is selected and the device resolves validity.
+    cs_vga    = io_req && (io_addr >= 16'h03B0 && io_addr <= 16'h03DF);
+    // ACPI PM timer (PIIX4 PM base 0x600 + 0x08). Wired for connectivity; its
+    // read is a documented oracle boundary (see the M8.3 header note) — the pvga
+    // differential never reads it, only the write-inert OUT 0x608 is exercised.
+    cs_acpipm = io_req && (io_addr == 16'h0608);
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -282,6 +308,9 @@ module ventium_soc
   logic [7:0] rtc_rdata;
   logic [7:0] kbd_rdata;
   logic [7:0] p92_rdata;
+  logic [7:0] vga_rdata;       // M8.3 VGA register-file byte read
+  logic [7:0] acpipm_rdata;    // M8.3 ACPI PM byte view (unused on the diff path)
+  logic [31:0] acpipm_rdata32; // M8.3 ACPI PM native 32-bit value ({8'h0,count})
 
   ven_pic u_pic (
       .clk         (clk),
@@ -380,6 +409,44 @@ module ventium_soc
       .reset_req (p92_reset_req)
   );
 
+  // ===========================================================================
+  // M8.3 devices (VGA register file + ACPI PM timer).
+  // ===========================================================================
+  // VGA register file at the legacy 0x3B0..0x3DF window. CPU-observable register
+  // set ONLY (no framebuffer/scan-out): ATTR/MISC/SEQ/DAC/GFX/CRTC/IS1 with the
+  // per-index write masks and the mono/color port aliasing, matched to qemu
+  // hw/display/vga.c (vga_ioport_read/write).  FULLY per-record differentiable vs
+  // qemu-system (the `pvga` gate): the DAC 3-byte auto-increment, the ATTR
+  // index/data flip-flop, and the IS1 dumb-retrace toggle are all DETERMINISTIC
+  // (state-machine, not host-clock), and cs pulses exactly one clock per S_IO
+  // access (io_ack=io_req), so the read side-effects commit exactly once.
+  ven_vgaregs u_vga (
+      .clk    (clk),
+      .rst    (dev_rst),
+      .cs     (cs_vga),
+      .we     (io_we),
+      .addr   (io_addr),
+      .wdata  (io_wdata[7:0]),
+      .rdata  (vga_rdata)
+  );
+
+  // ACPI PM timer (PIIX4 PM base + 0x08 => 0x608).  Free-running 24-bit counter
+  // derived from clk by a fractional accumulator (average rate PM_TIMER_FREQ).
+  // Wired for connectivity + the OUT-0x608 write-inert differential; its READ
+  // value is a documented oracle boundary (host-clock-derived + qemu's default
+  // PM region disabled — see the M8.3 header note), covered by the standalone
+  // ven_acpipm unit self-check.  Quiescent in the pvga differential.
+  ven_acpipm u_acpipm (
+      .clk     (clk),
+      .rst     (dev_rst),
+      .cs      (cs_acpipm),
+      .we      (io_we),
+      .addr    (io_addr),
+      .wdata   (io_wdata[7:0]),
+      .rdata   (acpipm_rdata),
+      .rdata32 (acpipm_rdata32)
+  );
+
   // I/O response back to the core: combinational ack the same clock io_req is
   // up; the read data is the selected device's byte zero-extended to 32 bits.
   always_comb begin
@@ -390,6 +457,11 @@ module ventium_soc
     else if (cs_rtc)    io_rdata = {24'd0, rtc_rdata};
     else if (cs_i8042)  io_rdata = {24'd0, kbd_rdata};
     else if (cs_port92) io_rdata = {24'd0, p92_rdata};
+    else if (cs_vga)    io_rdata = {24'd0, vga_rdata};
+    // ACPI PM: return the native 32-bit value ({8'h0,count[23:0]}) so a future
+    // dword IN reads the counter. Off the differential surface (never read by
+    // pvga); present for connectivity / unit-check parity.
+    else if (cs_acpipm) io_rdata = acpipm_rdata32;
     // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
 
@@ -462,7 +534,7 @@ module ventium_soc
   // verilator lint_off UNUSED
   wire _unused_soc = &{1'b0, core_x87_touched, io_size, pit_rdata, pic_rdata,
                        core_cpu_hung, core_syscall_active, core_syscall_n,
-                       rtc_nmi_dis, p92_reset_req, kbd_reset_req};
+                       rtc_nmi_dis, p92_reset_req, kbd_reset_req, acpipm_rdata};
   // verilator lint_on UNUSED
 
 endmodule : ventium_soc

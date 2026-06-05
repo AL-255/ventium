@@ -47,3 +47,6 @@ soc/ven_pit.sv
 soc/ven_rtc.sv
 soc/ven_i8042.sv
 soc/ven_port92.sv
+// M8.3 VGA register file + ACPI PM timer (wired into ventium_soc):
+soc/ven_vgaregs.sv
+soc/ven_acpipm.sv

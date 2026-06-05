@@ -62,11 +62,14 @@ level clone (see **Honest scope** below and [`docs/isa-coverage.md`](docs/isa-co
   models (8259 PIC, 8254 PIT, MC146818 RTC, 8042 keyboard / A20, port-92, ACPI PM
   timer, VGA register file), toward booting without QEMU as the platform. The
   `ventium_soc` integration wires the core (an external INTR/INTA pin driving the
-  IDT-delivery FSM) to the **PIC + PIT** (M8.1, on-die IRQ0 — checkpoint-differential)
-  and to the **RTC + 8042 + port-92 + a combined A20 address mask** (M8.2 — a
+  IDT-delivery FSM) to the **PIC + PIT** (M8.1, on-die IRQ0 — checkpoint-differential),
+  to the **RTC + 8042 + port-92 + a combined A20 address mask** (M8.2 — a
   *full per-record* differential vs `qemu-system-i386` over every retired
-  instruction, incl. the 1 MiB A20 wraparound). An OPL3/SoundBlaster card, IDE, and
-  PCI follow.
+  instruction, incl. the 1 MiB A20 wraparound), and to the **VGA register file +
+  ACPI PM timer** (M8.3 — a full per-record VGA differential: SEQ/GFX/DAC/ATTR/CRTC
+  register masks, color/mono port aliasing, CRTC CR0-7 write-lock, IS1 dumb-retrace;
+  the ACPI PM read is a documented host-clock oracle boundary). **All 7 device
+  models are now wired.** An OPL3/SoundBlaster card, IDE, and PCI follow.
 
 ## Layout
 

@@ -1,0 +1,42 @@
+{
+  "name": "pvga",
+  "kind": "system",
+  "src": "pvga.S",
+  "linker": "pvga.ld",
+  "image": "pvga.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 400,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-vga-gate.sh",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "VGA MISC/ST00 reset reads (0x3cc=0x00, 0x3c2=0x00)",
+    "VGA SEQUENCER per-index write masks (sr[1]=0xFF&0x3d=0x3d, sr[4]=0xFF&0x0e=0x0e)",
+    "VGA GRAPHICS per-index write masks (gr[5]=0xFF&0x7b=0x7b, gr[8]=0xAA&0xff=0xAA)",
+    "VGA DAC 3-byte palette write (entries 0,1 = 0x11/0x22/0x33, 0x44/0x55/0x66) + read auto-increment of 6 bytes; dac_state=3, dac_write_index=2",
+    "VGA ATTRIBUTE index/data flip-flop + per-index masks (ar[0x0A]=0xFF&0x3f=0x3f, ar[0x10]=0xFF&~0x10=0xEF), 0x3c0 index-read with ff=0 -> 0x10; ff reset via 0x3ba mono IS1 read (=0x09)",
+    "VGA MISC color-mode switch (write 0x3c2=0x01 -> msr=0x01) + port aliasing: mono 0x3b5 now INVALID (0xff), color CRTC 0x3d5 valid (cr[1]=0x5A); IS1 0x3da dumb-retrace toggle 0x09 then 0x00",
+    "VGA switch back to mono (write 0x3c2=0x00) + mono CRTC bank valid (cr[2]=0xA5 via 0x3b4/0x3b5), color 0x3d5 now INVALID (0xff)",
+    "VGA CRTC CR0-7 write-lock: cr[0]=0x12 unlocked; set CR11 bit7 (lock); locked write 0x99 ignored (cr[0] still 0x12); CR7 write 0xFF takes only bit4 (cr[7]=0x10); clear lock; cr[0]=0x99 unlocked",
+    "ACPI PM write-inert: OUT 0x608 (32-bit, twice) = no-op in BOTH qemu and RTL, retires identically",
+    "deterministic compute (esi=0x5A, edi=0x99, ebp=0x10, ecx=0x011e), isa-debug-exit code 133"
+  ],
+
+  "why_per_record_differential": "pvga has NO interrupts — every device interaction is a synchronous IN/OUT — so qemu's gdbstub single-step (gen_trace.py --system) IS a valid per-record oracle (the SSTEP_NOIRQ limitation that forced pirqsoc to a checkpoint-differential does not apply). The gate is plain compare.py EQUIVALENT, running on ventium_soc with the M8.3 devices.",
+
+  "vga_model": "The VGA register file is CPU-observable register state ONLY (no framebuffer/scan-out), matched to qemu hw/display/vga.c vga_ioport_read/write (QEMU 8.2.2): ATTR/MISC/SEQ/DAC/GFX/CRTC/IS1 with the per-index sr_mask/gr_mask/ar_write_val write masks, the color/mono port-validity aliasing (vga_ioport_invalid, msr bit0), the CRTC CR0-7 write-lock (CR11 bit7 incl. CR7-bit4-always-writable), the DAC 3-byte palette cache + read/write auto-increment, the ATTR index/data flip-flop, and the IS1 dumb-retrace toggle. EVERY read in this test was first observed under qemu-system-i386 to confirm ven_vgaregs is byte-identical. The IS1 dumb retrace was verified DETERMINISTIC (0x09/0x00 alternation stable across qemu runs), i.e. dumb-not-precise retrace, so it is on the differential surface (unlike the host-clock RTC time bytes).",
+
+  "acpipm_boundary": "The ACPI PM timer (0x608) is wired for connectivity but its READ is a documented oracle boundary: qemu's default -machine pc leaves the PIIX4 PM I/O region DISABLED (PMBASE unprogrammed -> 0x608 reads 0xffffffff as unassigned I/O, empirically confirmed), and even when enabled the PM-timer value is host-clock-derived (qemu samples a host virtual clock; the RTL samples clk) — not reproducible by a clk-sampled register model, exactly like the 8042-OBF host-queue and LAPIC-eax-only precedents. So this test never READS 0x608; it only does an OUT 0x608 (write-inert): acpi_pm_tmr_write does nothing in qemu and the RTL ignores writes, so the OUT retires identically (a no-op) in both — a genuine, if narrow, per-record differential of the write-inert + non-HALT property. The PM value-read is covered by the standalone ven_acpipm unit self-check (verif/soc/run_acpipm.sh).",
+
+  "comparison_plan": "verif/soc/run-soc-vga-gate.sh: builds pvga.bin + the ventium_soc --soc TB, confirms the image reaches isa-debug-exit (133) under qemu-system-i386, regenerates the per-record golden via gen_trace.py --system (and drift-checks it vs the committed pvga.sys.vtrace.golden), runs ventium_soc on the image, and diffs the two streams with compare.py --mode func -> EQUIVALENT over all retired instructions. EQUIVALENT = the VGA register-file behaviour (+ ACPI PM write-inert) is byte-identical to qemu-system-i386 8.2.2.",
+
+  "description": "Bare-metal M8.3 SoC VGA-register-file differential (NO paging, NO interrupts). Boots real->protected, then synchronously exercises the VGA register file (0x3b0..0x3df) that M8.3 wires into ventium_soc — MISC/SEQ/GFX/DAC/ATTR/CRTC/IS1 with the per-index write masks, the color/mono port aliasing, the CRTC CR0-7 write-lock, the DAC 3-byte auto-increment, the ATTR flip-flop, and the IS1 dumb-retrace toggle — plus an ACPI PM (0x608) write-inert check. Every interaction is a synchronous IN/OUT, graded PER-RECORD against the qemu-system-i386 single-step golden. Proves the M8.3 VGA wiring byte-identical to qemu over every retired instruction; the ACPI PM value-read is a documented oracle boundary (host-clock + PM region disabled) off the differential surface, covered by the ven_acpipm unit self-check."
+}
