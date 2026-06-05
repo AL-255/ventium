@@ -1,7 +1,10 @@
-# Ventium M6 — documented P5/P54C silicon errata (selectable, default OFF)
+# Ventium M6 / M6B — documented P5/P54C silicon errata (selectable, default OFF)
 
-M6 reproduces four **documented** Intel Pentium (P5/P54C) silicon errata in the
+M6 reproduces five **documented** Intel Pentium (P5/P54C) silicon errata in the
 RTL, behind a per-erratum enable flag that defaults OFF. Run with `make m6`.
+(M6 landed the first four; **M6B** added Erratum 79 once the system-mode infra —
+V86 (M7.2), DR data breakpoints + #DB delivery (M2S.6), and the IDT #GP delivery
+FSM (M2S.3) — existed to reach it.)
 
 ## The oracle problem
 
@@ -13,7 +16,7 @@ matching) result. This is NOT a diff vs QEMU.
 
 ## Errata-enable mechanism
 
-The core (`rtl/core/core.sv`) takes a 4-bit `errata_en` input (plumbed through
+The core (`rtl/core/core.sv`) takes a 5-bit `errata_en` input (plumbed through
 `ventium_top` from the TB's `--errata <hexmask>`, default `0`). Each bit gates
 exactly one defect; with `errata_en == 0` the datapath is the clean M0–M5 core,
 so **`make verify` stays fully GREEN** (the HARD requirement). Bit assignment:
@@ -24,6 +27,7 @@ so **`make verify` stays fully GREEN** (the HARD requirement). Bit assignment:
 | 1 | `0x2` | FIST/FISTP overflow undetected | Erratum 20, 242480-022 p.75 |
 | 2 | `0x4` | F00F: LOCK CMPXCHG8B reg-dst hang | Erratum 81, 242480-041 p.51 |
 | 3 | `0x8` | MOV moffs A2/A3 fails to pair | Erratum 59, 242480-022 p.99 |
+| 4 | `0x10` | Erroneous #DB on V86 POPF/IRET w/ #GP | Erratum 79, 242480-041 p.50 |
 
 The core also exposes `cpu_hung` (latched) for the F00F hang.
 
@@ -78,6 +82,34 @@ The core also exposes `cpu_hung` (latched) for the F00F hang.
      own U clock. moffs is fast-pathed **cycle-mode only** (func mode keeps it on
      the proven slow FSM, so there is no functional risk).
 
+5. **Erroneous #DB on V86 POPF/IRET with a #GP (Err 79, M6B).** A **system-mode**
+   erratum. The `err_dbgp` `--system` image bootstraps real→protected + paging +
+   a TSS, arms a 4-byte data-WRITE breakpoint on the V86 SS:ESP **linear** address
+   (`0x2F000` = `SS<<4 + ESP` = `0x2000<<4 + 0xF000`), then enters V86 at IOPL=0
+   and executes a `POPF` — which, being IOPL-sensitive in V86, `#GP(0)`-traps to
+   the monitor **without accessing the stack**. There is **no QEMU oracle** (qemu
+   delivers the clean `#GP`; verified — the clean image reaches isa-debug-exit
+   under qemu-system with no spurious `#DB`), so this is self-checked vs the
+   documented 242480-041 Erratum 79 text (verbatim PROBLEM/IMPLICATION). The
+   monitor's `gp_handler` counts `#GP` deliveries; a vector-1 `db_handler` counts
+   `#DB` deliveries, reads DR6, and witnesses the saved EIP it popped. The exit
+   accumulates the witnesses into the visible GPRs (read from the trace record
+   where `edx == 0xcafe0079` and `eax != 0x42`, i.e. before the exit code clobbers
+   `eax`):
+   - errata OFF: only the `#GP` fires — `#DB` count `= 0`, DR6 cause bits clear,
+     saved EIP `= 0`. The data breakpoint does **not** trigger (the stack was
+     never touched) — the documented **Expected**.
+   - errata ON: the erroneous `#DB` **also** fires as the `#GP` handler is entered
+     — `#DB` count `= 1` (exactly one, not two), DR6.B0 set, and the `#DB`'s saved
+     CS:EIP `==` `gp_handler`'s first instruction. This is the documented
+     **Actual** + **Implication** (a `#DB` delivered in addition to the `#GP`,
+     saved state pointing at the `#GP` handler entry).
+   - **Negative control (implicit):** the breakpoint is on SS:ESP but `POPF` never
+     writes it (it traps first), so a faithful clean core must not fire (OFF). And
+     the erratum is documented **only** for POPF/IRET, so the RTL chain is gated to
+     POPF/IRET — the terminate `INT 0x20` (also an IOPL `#GP`) does **not**
+     spuriously fire the `#DB` even with the flag ON (the `#DB` count is exactly 1).
+
 ## Deferred errata (NOT verifiable here → tracked under M2S)
 
 These are documented but cannot be reproduced/self-checked in a user-mode
@@ -90,5 +122,7 @@ of M6 scope (m6-errata-spec.md):
 - CMPXCHG8B page-boundary #UD (Err 26), EIP corruption after FP + MOV Sreg
   (Err 32), 0F-misdecode (Err 42) — need the exception/segment/cache-line paths.
 - FBSTP A/D-bit on 16-bit wrap (Err 83) — needs paging A/D bits.
-- Debug-exception-on-POPF/IRET (Err 79) — needs debug + exceptions.
 - Timing / performance-counter errata (e.g. event-monitor counting) — no oracle.
+
+(Debug-exception-on-POPF/IRET, **Err 79**, was deferred at M6 pending debug +
+exceptions; it is now **reproduced** in M6B — see §5 above.)

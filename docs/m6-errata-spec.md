@@ -70,6 +70,15 @@ wrap (Err 83, needs paging A/D), debug-exception-on-POPF/IRET (Err 79, needs
 debug+exceptions), and the timing/perf-counter errata. List each in PROGRESS as
 deferred with its reason.
 
+**UPDATE (M6B):** Err 79 (erroneous #DB on V86 POPF/IRET with a #GP) is **no longer
+deferred** — once the system-mode infra existed (V86 = M7.2, DR data breakpoints +
+#DB delivery = M2S.6, IDT #GP delivery = M2S.3) it became reachable and is now
+reproduced behind `errata_en[4]` (`0x10`) and self-checked in `verif/errata/err_dbgp`
+vs the documented 242480-041 Erratum 79 Actual/Expected. It is the 5th M6 erratum.
+The remaining deferrals stand: Err 26/32/42 (no clear self-checkable operand /
+need bus/cache-line corners), Err 83 (paging A/D read-back differential), the
+BTB/SMM/NMI/APIC/DP/timing errata (no oracle / need bus/DP/perf-counter infra).
+
 ## Gate (`make m6`)
 
 - **Default (errata off): `make verify` stays fully GREEN** (M0–M5 unchanged) —

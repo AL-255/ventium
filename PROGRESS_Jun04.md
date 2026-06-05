@@ -468,3 +468,111 @@ M7.3 Win95 device-input replay + boot-prefix run.
   - Reproducer: `PORT=53xxx bash verif/sys/run-sys-golden.sh pv86`. The `pv86` test
     dir is the Corpus-phase deliverable (currently git-untracked); `ventium-refs/`
     untouched (read-only).
+
+## M6B — 5th selectable erratum: Erroneous #DB on V86 POPF/IRET with a #GP (Err 79) — OPENED + DONE 2026-06-05
+
+- 2026-06-05 — **M6B DONE: Erratum 79 (242480-041 printed p.50 / PDF p.58, NoFix)
+  reproduced behind `errata_en[4]` (`0x10`), DEFAULT OFF, and self-checked vs the
+  DOCUMENTED Spec-Update text — `make m6` is 15/15 PASS (was 11/11).** This is the
+  one M6B candidate whose required infra all already existed (V86 = M7.2, DR0–3 data
+  breakpoints + #DB delivery = M2S.6, IDT #GP delivery FSM = M2S.3) AND whose
+  documented behavior is a deterministic, witnessable Actual/Expected state delta —
+  so no value is fabricated.
+  - **Honest framing (NON-differential, no oracle — same as every M6 erratum).**
+    QEMU computes the CLEAN result (it never reproduces this P5 silicon bug), so this
+    is NOT a differential `--system` golden. It is self-checked against the documented
+    242480-041 Erratum 79 PROBLEM/IMPLICATION text, behind the errata flag: ON asserts
+    the documented Actual, OFF asserts the clean Expected. Empirically confirmed the
+    clean `err_dbgp` image boots to isa-debug-exit under real `qemu-system-i386`
+    delivering ONLY the `#GP` (no spurious `#DB`) — the no-oracle point, in-code.
+  - **Documented behavior reproduced (verbatim, verified against the PDF):** in
+    virtual-8086 mode at IOPL<3, `POPF`/`IRET` are IOPL-sensitive and `#GP(0)`-trap to
+    the monitor WITHOUT accessing the stack; a data breakpoint armed on the SS:ESP
+    linear address must NOT fire (the stack was never touched). PROBLEM: "...incorrectly
+    triggered as soon as the GP fault handler is entered." IMPLICATION: "...the saved
+    state (CS:EIP in the stack...) points to the first instruction of the GP Fault
+    handler." Every value used is from this text — `#DB` vector = 1, DR6.Bn set (the
+    armed breakpoint's status bit), saved CS:EIP == the `#GP` handler's first
+    instruction, the `#DB` delivered IN ADDITION to the `#GP`. **No fabricated value**
+    (the numeric `0x000f0260` gpEIP / `0xffff0ff1` DR6 / `0xcafe0079` sentinel are
+    properties of the TEST IMAGE — the handler link address, the DR6 reserved-1 base +
+    B0, a chosen sentinel — not invented erratum-behavior values; the erratum claim
+    asserted is the RELATIONSHIP, not a magic number).
+  - **RTL delta (`rtl/core/core.sv`, all gated `errata_en[ERR_DBGP=4]` AND `v86`):**
+    widened `errata_en` 4→5 bits; at the V86 IOPL `#GP` guard, for `POPF`/`IRET` ONLY
+    (not CLI/STI/PUSHF/INT n), compute `dr_match(seg_base[SG_SS]+ESP, want_x=0)` and
+    latch `err79_pending` + the matched DR6.Bn bits; at the `S_INT_PUSH` `from_v86`
+    last beat — after the `#GP` retires into the handler entry — chain `arm_db()` with
+    saved CS:EIP = `int_gate_off` (the `#GP` handler's first instruction) + DR6.Bn
+    sticky-set. The chain is additionally guarded on `(from_v86 && int_vec==13)` so a
+    stray latch can never mis-chain onto an unrelated delivery (defensive; the
+    well-formed corpus never hits it). Plumbed the wider port through `ventium_top.sv`
+    (`[4:0]`) and the TB mask (`tb_main.cpp`: `& 0xF` → `& 0x1F`). With the flag OFF
+    the whole compare is dead, so the clean path is unchanged.
+  - **Self-check (`verif/errata/err_dbgp/` + `run-m6.sh` §5, system-mode `--bios`
+    image):** real→PM→paging→TSS→V86 (modeled on `pv86`+`pdebug`), arms a 4-byte
+    data-write bp on the V86 SS:ESP linear (`0x2F000`), enters V86 at IOPL=0, executes
+    `POPF` (the documented trigger). A `#GP` monitor + a vector-1 `#DB` handler witness
+    counts / DR6 / saved-EIP into the visible GPRs (the M2S.1 hidden-state trick — the
+    trace carries no raw vec/DR6 field; the handlers read them into GPRs which ARE in
+    the trace). Read the witness-complete record (`edx==0xcafe0079 && eax!=0x42`).
+    - **OFF (default):** `#DB`=0, DR6 clear, saved EIP=0 — only the `#GP` (count 2: the
+      POPF `#GP` + the terminate INT 0x20 `#GP`). The clean documented Expected.
+    - **ON (`--errata 0x10`):** the erroneous `#DB` ALSO fires — `#DB`=**1** (exactly
+      one), DR6.B0 set (`0xffff0ff1`), and the `#DB`'s saved CS:EIP (`0x000f0260`) ==
+      `gp_handler`'s first instruction. The documented Actual + Implication.
+    - **Negative control (real):** the breakpoint is on SS:ESP but `POPF` never writes
+      it (it traps first) — a faithful clean core must not fire (OFF). And the erratum
+      is documented ONLY for POPF/IRET, so the chain is gated to POPF/IRET — the
+      terminate `INT 0x20` (also an IOPL `#GP`) does NOT spuriously fire the `#DB` even
+      with the flag ON: the `#DB` count is exactly 1, not 2 (the over-fire guard).
+  - **Gate record (independently re-run 2026-06-05):** `make m6` = **15/15 PASS / 0
+    FAIL** (+4 new Err79 self-checks: V86 task ran in both runs; OFF only `#GP`, no
+    `#DB`, DR6 clear; ON erroneous `#DB` also delivered count=1 + DR6.B0; ON `#DB`
+    saved EIP == `#GP` handler first instruction). **`make verify` (errata OFF) GREEN +
+    bit-identical** (57/57 func goldens, 0 regenerated; all M4 integer + M5 FP/cache
+    bands met). **All sys gates stay EQUIVALENT (errata OFF):** pv86 949/949, pdebug
+    239/239, pintr 171/171 — the new path is gated on `errata_en[ERR_DBGP]` AND
+    `from_v86` (both 0 across the entire non-V86 corpus), so it is doubly inert by
+    default and the whole non-V86 corpus is byte-identical. **Lint clean**
+    (`verilator --lint-only -Wall -Wno-UNUSED` → 0 warn/err; the `[4:0]` widening +
+    the in-block `logic [3:0] ssp_hit` are width-clean).
+  - **Still deferred (honest, unchanged reasons — the other M6B candidates have NO
+    reachable self-checkable oracle):**
+    - **Err 26** (CMPXCHG8B opcode-bytes crossing a page boundary → `#UD` instead of
+      `#PF`): the clean core does NOT implement CMPXCHG8B's MEMORY form at all
+      (`core.sv` 0F C7 sets `d_unknown` → loud HALT; only the F00F reg-dst hang of
+      Err 81 is modeled), AND there is no instruction-FETCH page-split detector. Needs
+      the CMPXCHG8B memory datapath + a fetch page-split path — neither built.
+    - **Err 32** (EIP altered after specific FP ops + MOV Sreg,Reg): NO published
+      corrupted-EIP value — the Spec-Update says only "an erroneous value... will most
+      frequently result in an invalid opcode exception," by definition unpredictable.
+      Any injected value would be fabricated (the exact M6 trap that got the invented
+      FDIV values removed). Also needs FXCH-forced-into-V-pipe pairing + a
+      descriptor-cache-MISS model. No oracle → deferred.
+    - **Err 42** (incorrect decode of certain 0F instructions): needs an ASYNC
+      cache-line-invalidation/snoop event within a narrow 3-clock window (bus/DP infra
+      not built) AND the documented result is vague ("execute invalid or erroneous
+      instructions" — no deterministic Actual). No self-checkable oracle even if the
+      async path existed → deferred.
+    - **Err 80** (CR2/CR4 not restored on RSM): SMM/RSM is already STRUCTURAL-only
+      (M2S.5 — the gdbstub single-step oracle masks SMI# and has no SMM awareness, so a
+      differential golden is infeasible and deliberately not fabricated), and the P5
+      SMRAM save-map does not save/restore CR2/CR4. An M2S.5 SMM follow-on, not an M6B
+      candidate. Deferred.
+    - **Err 82** (event-monitor counting discrepancy) — a performance-counter/timing
+      erratum; no cycle-exact P5 perf-event-counter model and QEMU does not model P5
+      perf counters → no oracle. Deferred.
+    - **Err 83** (FBSTP A/D bits on 16-bit address wrap): needs the FBSTP 80-bit BCD
+      store + a 16-bit-wrap-in-USE32 addressing corner + an A/D-bit differential
+      read-back (the read-back is itself an M2S.2 deferral) — none built. Deferred.
+    - Also unchanged: DR7.GD `#DB` firing stays IMPLEMENTED-BUT-DISABLED
+      (`DBG_GD_ENABLE=0`) per the M2S.6 deferral (qemu does not model GD → no oracle;
+      enabling it would make the RTL take a #DB the pdebug golden lacks).
+  - **Deliverables (build artifacts `.bin/.o`/`.elf` gitignored; sources tracked):**
+    `verif/errata/err_dbgp/err_dbgp.S` + `.ld` + `Makefile`, `verif/errata/run-m6.sh`
+    §5, `verif/errata/README.md` + `.gitignore`, `docs/m6-errata-spec.md`,
+    `rtl/core/core.sv`, `rtl/ventium_top.sv`, `verif/tb/tb_main.cpp`. Reproducer:
+    `make m6` (Err79 §5) + `make verify` (the OFF bit-identical complement).
+    `ventium-refs/` untouched (read-only). Not committed — the orchestrator
+    verifies + commits.

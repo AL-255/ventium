@@ -65,7 +65,8 @@ module core
     //   [1] FIST/FISTP overflow       (Erratum 20)
     //   [2] F00F LOCK CMPXCHG8B reg    hang (Erratum 81)
     //   [3] MOV moffs A2/A3 non-pair   (Erratum 59, cycle-mode only)
-    input  logic [3:0]  errata_en,
+    //   [4] erroneous #DB on V86 POPF/IRET with a #GP fault (Erratum 79, M6B)
+    input  logic [4:0]  errata_en,
 
     // ------------------------------------------------------------------------
     // M7.1 Quake user-mode lock-step int-0x80 PROXY + %gs base
@@ -461,6 +462,15 @@ module core
   localparam int ERR_FIST  = 1;   // Erratum 20  : FIST/FISTP overflow undetected
   localparam int ERR_F00F  = 2;   // Erratum 81  : LOCK CMPXCHG8B reg-dst hang
   localparam int ERR_MOFFS = 3;   // Erratum 59  : MOV moffs A2/A3 non-pairing
+  // M6B (242480-041 Erratum 79): "Erroneous Debug Exception on POPF/IRET
+  // Instructions with a GP Fault". In virtual-8086 mode at IOPL<3, a POPF or IRET
+  // is IOPL-sensitive and #GP(0)-traps to the monitor WITHOUT accessing the stack.
+  // If a DATA breakpoint is armed on the SS:ESP linear address, the breakpoint
+  // must NOT trigger (the stack was never touched) — but on the affected P5
+  // steppings an ERRONEOUS #DB is delivered IN ADDITION to the #GP, with the
+  // saved CS:EIP pointing at the FIRST instruction of the #GP handler (the
+  // documented Implication). Default OFF -> only the #GP is delivered (clean).
+  localparam int ERR_DBGP  = 4;   // Erratum 79  : erroneous #DB on V86 POPF/IRET #GP
 
   // ===========================================================================
   // FSM
@@ -2216,6 +2226,18 @@ module core
   // Set when arm_db is launched for a data-write breakpoint; consumed in
   // S_INT_PUSH -> S_DB_EXTRA to emit that one extra fused-resumption record.
   logic        db_wp_extra;       // emit the data-watchpoint handler-entry record
+  // ---- M6B Erratum 79 (errata_en[ERR_DBGP], default OFF). When a V86 POPF/IRET
+  // #GP(0)-traps at IOPL<3 (the IOPL guard below) AND a DATA breakpoint is armed
+  // on the SS:ESP linear address, the affected stepping ERRONEOUSLY delivers a
+  // #DB right after the #GP handler is entered, with the saved CS:EIP = the #GP
+  // handler's first instruction. We latch `err79_pending` + the matched DR6.Bn
+  // bits at the IOPL guard; the #GP delivery's S_INT_PUSH final beat then CHAINS
+  // an arm_db() (saved CS:EIP = int_gate_off = the #GP handler entry) instead of
+  // returning to S_PIPE. INERT unless errata_en[ERR_DBGP] is set (so make verify
+  // + every sys gate is byte-identical). It also requires v86 — which is 0 on the
+  // entire non-V86 corpus — so even ON it is dead outside a V86 task.
+  logic        err79_pending;     // chain an erroneous #DB after this V86 #GP
+  logic [3:0]  err79_dr6_bits;    // the SS:ESP data-bp DR6.Bn bits that "fire"
   // GD general-detect FIRING is DEFERRED (documented). qemu 8.2.2 does NOT model
   // DR7.GD, so the committed pdebug golden takes EXACTLY 3 #DB deliveries. Firing
   // GD here would make the RTL take a 4th #DB the golden lacks -> the differential
@@ -3222,6 +3244,8 @@ module core
       dr0<=32'd0; dr1<=32'd0; dr2<=32'd0; dr3<=32'd0;
       dr6<=DR6_FIXED_1; dr7<=DR7_FIXED_1;
       tf_at_issue<=1'b0; rf_at_issue<=1'b0; db_wp_extra<=1'b0;
+      // M6B Erratum 79: no erroneous-#DB chain pending out of reset.
+      err79_pending<=1'b0; err79_dr6_bits<=4'd0;
     end else begin
       // M7.1 proxy: mirror ventium_top's retire_n on the SAME posedge it counts
       // (the registered retire_valid/retire2_valid of the PREVIOUS clock). cn thus
@@ -3730,6 +3754,27 @@ module core
             // faulting V86 EIP so the monitor restarts/advances it). int_sw=0 so the
             // hardware-fault path bypasses the gate DPL>=CPL check.
             start_fault(8'd13, 1'b1, 32'd0, eip);
+            // ---- M6B Erratum 79 (errata_en[ERR_DBGP], default OFF) ------------
+            // The IOPL-sensitive POPF/IRET trapped to #GP WITHOUT accessing the
+            // stack, so a data breakpoint armed on SS:ESP must NOT fire. On the
+            // affected steppings it ERRONEOUSLY does: compute the SS:ESP linear
+            // address (V86 SS base = SS<<4, held in seg_base[SG_SS]) and ask
+            // dr_match for a DATA-write/read breakpoint hit (want_x=0). If the
+            // erratum is enabled and ONLY for POPF/IRET (the documented operands —
+            // NOT CLI/STI/PUSHF/INT n, which are the negative control), latch the
+            // matched DR6.Bn bits so the #GP delivery's last beat chains an
+            // erroneous #DB whose saved CS:EIP = the #GP handler's first
+            // instruction. With the flag OFF this whole compare is dead (no chain),
+            // so only the #GP is delivered — the documented clean Expected.
+            if (errata_en[ERR_DBGP] &&
+                ((d_kind==K_STKMISC && d_sm==SM_POPF) || d_iret)) begin
+              logic [3:0] ssp_hit;
+              ssp_hit = dr_match(seg_base[SG_SS] + gpr[R_ESP], 1'b0);
+              if (ssp_hit != 4'd0) begin
+                err79_pending  <= 1'b1;
+                err79_dr6_bits <= ssp_hit;
+              end
+            end
           end
           // ---- M7.3b PORT I/O dispatch (IN/OUT) ------------------------------
           // Three cases, in priority order:
@@ -5134,10 +5179,40 @@ module core
               q_pc          <= int_src_pc;   // stamp the delivering instruction's PC
               retire_valid  <= 1'b1;
               int_step      <= 4'd0;
+              // M6B Erratum 79: this #GP just delivered from a V86 POPF/IRET that
+              // trapped at IOPL<3, and a data breakpoint was armed on the (never-
+              // accessed) SS:ESP. On the affected stepping the #DB is erroneously
+              // delivered AS SOON AS the #GP handler is entered. Chain it now: the
+              // #GP retired ONCE (above) into the #GP handler entry; we immediately
+              // re-enter the IDT FSM for vector 1 (#DB), pushing the #GP handler's
+              // FIRST instruction (int_gate_off, just committed into eip) as the
+              // saved CS:EIP — the documented Implication. dr6 gets the matched
+              // Bn bits sticky-set. arm_db sets state<=S_INT_GATE itself, so it
+              // takes priority over the db_wp_extra/S_PIPE choice below. INERT
+              // unless err79_pending (only set with errata_en[ERR_DBGP] ON + a real
+              // SS:ESP data-bp on a V86 POPF/IRET), so the clean path is unchanged.
+              // ROBUSTNESS: only chain when THIS completing delivery is the V86
+              // #GP (from_v86 && int_vec==13) the latch was raised for, so a stray
+              // latch (a nested gate fault diverting this delivery before it
+              // reached here, which the well-formed corpus never hits) can never
+              // mis-chain the #DB onto an unrelated delivery — it just clears.
+              if (err79_pending && from_v86 && int_vec == 8'd13) begin
+                err79_pending <= 1'b0;
+                // saved CS:EIP = the #GP handler's first instruction (int_gate_off).
+                // #DB is a FAULT here (re-report of the handler entry), no errcode.
+                arm_db({28'd0, err79_dr6_bits}, int_gate_off, int_gate_off);
+              end
+              else if (err79_pending) begin
+                // not the matching delivery (defensive) — drop the stale latch and
+                // fall through to the normal completion below.
+                err79_pending <= 1'b0;
+                if (db_wp_extra) state <= S_DB_EXTRA;
+                else             state <= S_PIPE;
+              end
               // M2S.6: a DATA-watchpoint #DB needs the extra handler-entry record
               // (the qemu watchpoint single-step quirk). Divert to S_DB_EXTRA to
               // emit it before the handler runs; all other deliveries go to S_PIPE.
-              if (db_wp_extra) state <= S_DB_EXTRA;
+              else if (db_wp_extra) state <= S_DB_EXTRA;
               else             state <= S_PIPE;
             end else begin
               int_step <= int_step + 4'd1;

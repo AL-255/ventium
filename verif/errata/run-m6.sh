@@ -13,10 +13,11 @@
 #   2. FIST/FISTP overflow      (Erratum 20, 242480-022 p.75)
 #   3. F00F LOCK CMPXCHG8B reg  hang (Erratum 81, 242480-041 p.51)
 #   4. MOV moffs A2/A3 non-pair (Erratum 59, 242480-022 p.99)
+#   5. Erroneous #DB on V86 POPF/IRET w/ #GP (Erratum 79, 242480-041 p.50, M6B)
 #
-# Each errata bit (errata_en[3:0], --errata mask): [0]=FDIV [1]=FIST [2]=F00F
-# [3]=MOFFS. The HARD complement (clean core stays GREEN) is `make verify`, run
-# separately; this script asserts the ON behavior + the OFF behavior per test.
+# Each errata bit (errata_en[4:0], --errata mask): [0]=FDIV [1]=FIST [2]=F00F
+# [3]=MOFFS [4]=DBGP. The HARD complement (clean core stays GREEN) is `make
+# verify`, run separately; this script asserts the ON + the OFF behavior per test.
 #
 # Usage:  bash verif/errata/run-m6.sh   (or: make m6)
 # Exit 0 iff every documented self-check passes.
@@ -201,6 +202,93 @@ printf '    errata OFF follower-paired = %s (want 1)\n    errata ON  follower-pa
                    || bad "moffs errata ON: follower still paired (expected non-pairing)"
 
 # =============================================================================
+# 5. Erroneous #DB on V86 POPF/IRET with a #GP fault (Erratum 79, M6B). This is a
+#    SYSTEM-MODE erratum: it needs V86 (M7.2), DR data breakpoints + #DB delivery
+#    (M2S.6), and the IDT #GP delivery FSM (M2S.3). The err_dbgp image bootstraps
+#    real->protected + paging + a TSS, arms a 4-byte data-WRITE breakpoint on the
+#    V86 SS:ESP LINEAR address (0x2F000 = SS<<4 + ESP = 0x2000<<4 + 0xF000), then
+#    enters V86 at IOPL=0 and executes a POPF — which #GP-traps to the monitor
+#    WITHOUT accessing the stack. There is NO QEMU oracle (qemu computes the clean
+#    #GP), so this is self-checked vs the DOCUMENTED 242480-041 Erratum 79 text:
+#      errata ON  (--errata 0x10): the erroneous #DB ALSO fires as the #GP handler
+#                 is entered (#DB count == 1; DR6.B0 set; the #DB's saved EIP ==
+#                 gp_handler's first instruction) IN ADDITION to the #GP — the
+#                 documented Actual (a #DB delivered as well as the #GP).
+#      errata OFF (default):       ONLY the #GP fires; the SS:ESP data breakpoint
+#                 does NOT trigger (#DB count == 0; DR6 cause bits clear) — the
+#                 documented Expected (clean).
+#    NEGATIVE CONTROL (implicit): the breakpoint is on SS:ESP but POPF never writes
+#    it (it traps first) — a faithful clean core must NOT fire the #DB (OFF). And
+#    the erratum is documented ONLY for POPF/IRET, so the terminate INT 0x20 (also
+#    an IOPL #GP) must NOT spuriously fire the #DB even with the flag ON — the #DB
+#    count is exactly 1, not 2.
+# =============================================================================
+say "5. Erroneous #DB on V86 POPF/IRET with a #GP fault (Erratum 79, M6B)  -- system-mode"
+
+# Build the bare-metal --bios image (its own Makefile; not the user-mode flat path).
+make -C "$SCRIPT_DIR/err_dbgp" >"$TRACEDIR/err_dbgp_build.log" 2>&1 \
+    || die "build err_dbgp image failed (see $TRACEDIR/err_dbgp_build.log)"
+DBGP_IMG="$SCRIPT_DIR/err_dbgp/err_dbgp.bin"
+[ -f "$DBGP_IMG" ] || die "err_dbgp.bin not built: $DBGP_IMG"
+
+# Run the RTL in --system mode (cold reset at F000:FFF0, -bios image). No --load/
+# --entry: boot_mode=system seeds CS:EIP itself. Echoes the trace path.
+run_sys() {  # <out-tag> <extra-args...>
+    local tag="$1"; shift
+    local out="$TRACEDIR/err_dbgp_${tag}.vtrace"
+    "$TB_BIN" --image "$DBGP_IMG" --system --out "$out" \
+        --max-insn 20000 --quiesce 64 "$@" >"$TRACEDIR/err_dbgp_${tag}.log" 2>&1
+    echo "$out"
+}
+
+# Read the WITNESS-COMPLETE record: the gp_terminate body loads ecx(#GP),eax(#DB),
+# ebx(DR6),esi(savedEIP),edi(gpEIP),edx(sentinel) into the visible GPRs, THEN
+# clobbers eax with the 0x42 isa-debug-exit code. The record where edx==0xcafe0079
+# (the sentinel, just loaded) and eax!=0x42 is the one where ALL six are valid.
+# Echo the six fields space-separated.
+dbgp_witness() {  # <trace>  ->  "GP DB DR6 SAVED GPEIP SENT"
+    PYTHONPATH="$ROOT/verif/diff" "$PY" - "$1" <<'PY'
+import sys, tracefmt
+t = tracefmt.read_trace(sys.argv[1])
+sel = [r for r in t.records
+       if r["edx"].lower() == "0xcafe0079" and r["eax"].lower() != "0x00000042"]
+r = sel[-1] if sel else (t.records[-1] if t.records else {})
+def g(k): return r.get(k, "0x00000000")
+print(g("ecx"), g("eax"), g("ebx"), g("esi"), g("edi"), g("edx"))
+PY
+}
+
+tr=$(run_sys off);            read -r OFF_GP OFF_DB OFF_DR6 OFF_SAVED OFF_GPEIP OFF_SENT < <(dbgp_witness "$tr")
+tr=$(run_sys on --errata 0x10); read -r ON_GP  ON_DB  ON_DR6  ON_SAVED  ON_GPEIP  ON_SENT  < <(dbgp_witness "$tr")
+printf '    errata OFF: #GP=%s #DB=%s DR6=%s savedEIP=%s gpEIP=%s sentinel=%s\n' \
+       "$OFF_GP" "$OFF_DB" "$OFF_DR6" "$OFF_SAVED" "$OFF_GPEIP" "$OFF_SENT"
+printf '    errata ON : #GP=%s #DB=%s DR6=%s savedEIP=%s gpEIP=%s sentinel=%s\n' \
+       "$ON_GP" "$ON_DB" "$ON_DR6" "$ON_SAVED" "$ON_GPEIP" "$ON_SENT"
+
+# Sanity: the V86 task actually ran (the entered-sentinel reached the GPR) on BOTH.
+{ [ "$OFF_SENT" = "0xcafe0079" ] && [ "$ON_SENT" = "0xcafe0079" ]; } \
+    && ok "Err79 V86 task ran in BOTH runs (entered-sentinel 0xcafe0079 witnessed)" \
+    || bad "Err79: V86 entered-sentinel not witnessed (OFF=$OFF_SENT ON=$ON_SENT) -- V86 path did not run"
+
+# OFF: the #GP delivered (>=1) but NO #DB fired -- the documented clean Expected.
+{ [ "$OFF_GP" != "0x00000000" ] && [ "$OFF_DB" = "0x00000000" ] \
+    && [ "$OFF_DR6" = "0x00000000" ] && [ "$OFF_SAVED" = "0x00000000" ]; } \
+    && ok "Err79 errata OFF -> only #GP delivered; SS:ESP data bp did NOT fire (Expected)" \
+    || bad "Err79 errata OFF: expected #GP>=1 + NO #DB, got #GP=$OFF_GP #DB=$OFF_DB DR6=$OFF_DR6 savedEIP=$OFF_SAVED"
+
+# ON: the erroneous #DB ALSO fired (count exactly 1) with DR6.B0 set -- the Actual.
+{ [ "$ON_GP" != "0x00000000" ] && [ "$ON_DB" = "0x00000001" ] \
+    && [ $(( $(printf '%d' "$ON_DR6") & 1 )) = "1" ]; } \
+    && ok "Err79 errata ON  -> erroneous #DB ALSO delivered (count=1, DR6.B0 set) on the V86 POPF #GP (Actual)" \
+    || bad "Err79 errata ON: expected exactly one #DB + DR6.B0, got #DB=$ON_DB DR6=$ON_DR6"
+
+# ON: the #DB's saved CS:EIP points at the FIRST instruction of the #GP handler --
+# the documented Implication. esi (saved EIP) must equal edi (gp_handler entry).
+{ [ "$ON_SAVED" = "$ON_GPEIP" ] && [ "$ON_SAVED" != "0x00000000" ]; } \
+    && ok "Err79 errata ON  -> #DB saved EIP ($ON_SAVED) == #GP handler's first instruction (Implication)" \
+    || bad "Err79 errata ON: #DB saved EIP=$ON_SAVED != gp_handler entry=$ON_GPEIP (Implication not met)"
+
+# =============================================================================
 # VERDICT
 # =============================================================================
 say "M6 RESULT"
@@ -213,7 +301,7 @@ if [ "$FAIL" -ne 0 ]; then
     exit 1
 fi
 echo ""
-echo "M6 GATE: PASS -- all 4 documented P5 errata reproduced behind the flag and"
+echo "M6 GATE: PASS -- all 5 documented P5 errata reproduced behind the flag and"
 echo "         self-checked against the Specification-Update values (errata ON),"
 echo "         with the clean behavior confirmed (errata OFF). The HARD complement"
 echo "         is 'make verify' (errata OFF) staying GREEN -- run it separately."
