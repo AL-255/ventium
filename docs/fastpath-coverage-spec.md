@@ -1,6 +1,6 @@
 # AP-500 fast-path coverage gap spec
 
-Status: **BATCH 1 IMPLEMENTED + GATED (2026-06-05); batches 2-5 deferred.**
+Status: **BATCHES 1-3 IMPLEMENTED + GATED (2026-06-05); batches 4-5 deferred.**
 REVIEW_Jun5.md Limit #5, Action 6 ("Expand AP-500 fast-path coverage").
 
 - **DONE — Batch 1: accumulator-immediate ALU (imm32).** The `ALU eAX, imm32`
@@ -22,15 +22,15 @@ REVIEW_Jun5.md Limit #5, Action 6 ("Expand AP-500 fast-path coverage").
   unchanged), every band held, NEW gated band `mb_rmimm` (PAIR class) PASSES at
   **pairing 50% / abs-cyc +0.35%**. The 16-bit (66-prefixed) forms keep `0x66`
   first so they stay on the slow FSM.
-- **DEFERRED — batches 3-5** (the byte accumulator forms `04`/`A8`; `D1`
-  shift-by-1; PUSH/POP `50+r`/`58+r`; near branches `E8`/`E9`/`0F 8x`;
+- **DONE — Batch 3: shift-by-1 (`D1 /4..7`).** SHL/SHR/SAL/SAR r/m32,1 (the x+x/halve idiom), the implicit-count-1 sibling of `C1` (same datapath, shimm=1, len 2, reg form, PU). Func byte-identical (67/67), all bands held, NEW gated band `mb_sh1` PASSES at pairing 50% / abs-cyc +0.35%.
+- **DEFERRED — batches 4-5** (the byte accumulator forms `04`/`A8`; PUSH/POP `50+r`/`58+r`; near branches `E8`/`E9`/`0F 8x`;
   memory/store forms). §3 below orders them by frequency × benefit; each needs its
   own pairing microbenchmark + a re-run of all bands + the full func diff (byte
   forms add byte-width fast-path ALU; PUSH/POP + stores add real memory/stack
   functional risk). `D1` shift-by-1 (trivial mirror of `C1`) is the next safe one.
 
-Owner doc; the Batch-1/2 edits are in `rtl/core/decode.sv` + the `PAIR` band in
-`verif/m5_metrics.py` + `verif/tests/mb_accimm`,`mb_rmimm`.
+Owner doc; the Batch-1/2/3 edits are in `rtl/core/decode.sv` + the `PAIR` band in
+`verif/m5_metrics.py` + `verif/tests/mb_accimm`,`mb_rmimm`,`mb_sh1`.
 
 ---
 

@@ -105,7 +105,7 @@ M5_FP_KERNELS="mb_faddchain mb_fpindep"
 M5_CACHE_KERNELS="mb_dmiss mb_imiss"
 M5_DIV_KERNELS="mb_div8 mb_div16 mb_div32 mb_idiv32"
 M5_MUL_KERNELS="mb_mul mb_imul2"
-M5_PAIR_KERNELS="mb_accimm mb_rmimm"
+M5_PAIR_KERNELS="mb_accimm mb_rmimm mb_sh1"
 # INFO kernels: reported, never gate.
 INFO_KERNELS="mb_agiloop"
 

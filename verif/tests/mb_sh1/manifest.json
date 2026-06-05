@@ -1,0 +1,15 @@
+{
+  "name": "mb_sh1",
+  "src": "mb_sh1/mb_sh1.s",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 6000,
+  "m5_cycle": true,
+  "m5_kind": "pair",
+  "m5_gated": true,
+  "m5_metric": "pairing+abscyc",
+  "m5_band": "shift-by-1 (D1) fast-path pairing: pairing% > 40 AND abs-cyc within 10%",
+  "golden_pairpct": 50.0,
+  "golden_cyc": 2027,
+  "golden_insns": 4006
+}

@@ -1253,3 +1253,17 @@ the 16-bit (66-prefixed) forms keep `0x66` first so they stay on the slow FSM.
   memory) remain ordered by risk in `docs/fastpath-coverage-spec.md` §3; `D1`
   shift-by-1 (a trivial mirror of `C1`) is the next safe one. RTL touched:
   `rtl/core/decode.sv`; `ventium-refs` untouched.
+
+### AP-500 fast-path coverage — batch 3: shift-by-1 (D1) (2026-06-05, review Action 6)
+
+`SHL/SHR/SAL/SAR r/m32, 1` (`D1 /4..7`, the `x+x`/halve idiom) — the implicit-
+count-1 sibling of the existing `C1` (shift-by-imm8) arm: same shift datapath with
+`shimm` fixed at 1, no imm byte (len 2), reg form only (rotates `/0..3` stay on the
+slow path), PU (`rtl/core/decode.sv`). **Func byte-identical** (`make verify` 67/67
+goldens unchanged), every M4/M5 band held, NEW gated band `mb_sh1` (PAIR class)
+PASSES at **pairing 50% / abs-cyc +0.35%** (a D1 shift now leads a pair with an
+independent V partner; before it serialized on the slow FSM). `make verify-sys`
+10/10 EQUIVALENT, lint 0/0. Batches 4-5 (byte forms `04`/`A8`, PUSH/POP, near
+branches, memory) remain risk-ordered in `docs/fastpath-coverage-spec.md` §3 — the
+byte forms add byte-width fast-path ALU; PUSH/POP + stores add real stack/memory
+functional surface. RTL touched: `rtl/core/decode.sv`; `ventium-refs` untouched.
