@@ -1,0 +1,15 @@
+{
+  "name": "mb_div16",
+  "src": "mb_div16/mb_div16.s",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "m5_cycle": true,
+  "m5_kind": "div",
+  "m5_gated": true,
+  "m5_metric": "div_cpi+abscyc",
+  "m5_band": "divide occupancy: CPI elevated AND abs-cyc within 10% of p5model (occ=25)",
+  "golden_occ": 25,
+  "golden_cyc": 11618,
+  "golden_insns": 2404
+}

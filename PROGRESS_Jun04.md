@@ -1090,3 +1090,40 @@ gated centrally. Two follow-on adversarial passes confirmed accuracy.
   (corpus + SVA). RTL touched: `rtl/core/core.sv` (BCD decode + `bcd_*` block),
   `rtl/core/ventium_alu_pkg.sv` (the `ALU_AAA..ALU_AAD` encodings) — additive,
   every other gate byte-identical. `ventium-refs` untouched.
+
+### Iterative-divider OCCUPANCY — DIV/IDIV cycle fidelity (2026-06-05, review Limit #5)
+
+The first real **microarchitecture-fidelity** closure from the review (Actions
+3/4/7/8, `docs/m5-div-spec.md`). DIV/IDIV were computed by native Verilog `/`/`%`
+in one execute clock — charging **1 cycle** where the P5 (p5model) charges
+**17/25/41** (DIV r/m8/16/32) and **22/30/46** (IDIV). No existing band caught it
+(none used DIV). Closed empirically, gate-driven:
+
+- **Measured the gap** with a `divl`-loop microbenchmark: the p5model golden
+  charges the `divl` **+41** cyc; the RTL charged **+7** (the slow-FSM cost of one
+  reg-form divide). So the modeled occupancy to add = `occ − 7`.
+- **Implementation** (`rtl/core/core_exec.svh`, K_MULDIV DIV/IDIV arms): the native
+  helper still produces the bit-exact quotient/remainder (Action 8 — architectural
+  vs timing separated); the modeled occupancy is charged as a **deferred penalty**
+  via the existing `pending_mem_pen` mechanism (the same one that folds a D-cache
+  miss into the next insn's `pipe_free_at`): `pending_mem_pen <= occ − 7` (DIV
+  34/18/10, IDIV 39/23/15). This holds the U pipe so a dependent EDX:EAX consumer
+  cannot issue until the divide latency elapses (EDX:EAX latency coupling). No new
+  FSM state; no functional change (arch state per retire is identical → `make
+  verify` func stays byte-clean).
+- **NEW gated bands** `mb_div8/mb_div16/mb_div32/mb_idiv32` (`verif/tests/` + the
+  `div` band in `verif/m5_metrics.py`: CPI-elevation AND abs-cyc within 10% of the
+  p5model golden, wired into `verify.sh` + `run-m5.sh`). All PASS:
+  **div8 +0.20% (occ 17), div16 −3.31% (occ 25), div32 +0.09% (occ 41),
+  idiv32 +0.08% (occ 46).**
+- **Verification.** `make verify` PASS (func GREEN incl. `t_div`; the 4 DIV bands
+  PASS; every prior band held), `make m3` 63/63, `make verify-sys` EQUIVALENT,
+  `make m5` slow-gate green, lint both filelists 0/0. The `occ` numbers are
+  p5model/Agner-derived (cycle-modeled, not silicon — Action 9 labeling).
+- **Next increment (deferred, spec'd):** the `#DE` divide-error (vector 0) on
+  divide-by-zero / quotient-overflow is still NOT raised (a byte divide whose
+  quotient exceeds 0xFF makes QEMU `#DE` but the RTL wraps + continues — seen live
+  while building `mb_div8`). It is a behavior change needing `tx_de_*` functional
+  tests; `docs/m5-div-spec.md` §3.3. MUL/IMUL staged occupancy
+  (`docs/m5-mul-spec.md`, occ 10) is the analogous fast-follow. RTL touched:
+  `rtl/core/core_exec.svh`; `ventium-refs` untouched.
