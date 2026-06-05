@@ -214,6 +214,15 @@ class RSPClient:
         self._buf = b""
         self.sock = self._connect_with_retry(host, port, timeout)
         self.sock.settimeout(timeout)
+        # The RSP loop is one blocking request/response per single-step. Without
+        # TCP_NODELAY, Nagle + delayed-ACK injects ~40 ms per round-trip, capping
+        # the oracle at ~12 insn/s; disabling Nagle lifts it ~300-600x (~10k insn/s)
+        # which is what makes the M7 macro-workload prefixes feasible. Speed-only:
+        # the RSP byte stream is unchanged, so every existing golden is bit-identical.
+        try:
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
 
     # -- connection ----------------------------------------------------------
     @staticmethod

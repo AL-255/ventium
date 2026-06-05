@@ -137,3 +137,34 @@ M7.3 Win95 device-input replay + boot-prefix run.
 
 - 2026-06-04 — M7 opened; spec written; M7.0 oracle de-risk launched (Quake syscall
   capture / Win95 device+interrupt capture / throughput / V86 scope).
+- 2026-06-04 — **M7.0 de-risk DONE.** Verdicts:
+  - **Quake: GO.** `int 0x80` is dispatched inside QEMU's host `cpu_loop` (not as
+    stepped guest code), so ONE RSP `s` over a syscall site runs the whole kernel
+    emulation — the post-step `g`-packet already has `eax=ret` AND every kernel
+    memory write applied. Capture: read 2 bytes at EIP (`==cd80`, catches the
+    musl/vDSO `__kernel_vsyscall` stub a static-site set would miss), snapshot
+    nr+args, step, read `ret`=eax + the kernel-written region via RSP `m`+diff per a
+    per-nr dispatch table. Proven: 38 syscalls in exact `-strace` order; all 3
+    write classes (zero-fill anon `mmap2` 32 MB zone, struct-fill `clock_gettime64`,
+    read-buffer `readv` → `pak0.pak` 'PACK' magic). Deterministic via `-seed` +
+    static no-PIE EXEC. No qemu hook/plugin needed.
+  - **Win95: PARTIAL-GO.** All 3 input classes (PIO/MMIO read VALUE via the dest GPR;
+    interrupt VECTOR+BOUNDARY) capturable over the same gdbstub — but ONLY under
+    **record/replay** (`rr=record`→`rr=replay` + blkreplay COW overlay + drop
+    `-rtc base=localtime`), because plain `-icount` diverges at the first RTC read.
+    rr=replay is bit-identical across runs (33,511 ints / 2,232,434 reads identical
+    twice). Full boot is throughput-deferred.
+  - **V86: GO (lands 100%).** Method-1 (VME-off) subset — `v86=sys_mode&eflags[17]`,
+    IOPL guards (`CLI/STI/PUSHF/POPF/INT n/IRET/IN/OUT`→`#GP` when `iopl<3`), sel<<4
+    seg bases + forced CPL3 + the 9-word V86 exception frame. A closed ~400-insn
+    bare-metal gate, fully oracled by the existing sys contract.
+  - **Throughput (the binding limit):** RTL ~95k insns/s; gdbstub oracle was ~12
+    insns/s (latency-bound RSP), **fixed ~300–600× by adding `TCP_NODELAY`** to the
+    RSP socket (this commit) → ~10k insns/s. Feasible prefixes: Quake overnight
+    ~hundreds-of-k–few-M insns (covers full process init + the 38-syscall surface;
+    a full frame in a multi-hour window; a full timedemo is OFF the table); Win95 a
+    bounded boot prefix. **The harness is architecturally complete; the RUN is
+    throughput-capped — bounded honestly, never faked.**
+  - Enabler landed: `gen_trace.py` `TCP_NODELAY` (speed-only; every existing golden
+    bit-identical — pseg re-verified EQUIVALENT). Next: M7.1 (Quake harness:
+    producer int-0x80 proxy + TB ELF/process-image loader + int-0x80 proxy).
