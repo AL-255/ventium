@@ -53,7 +53,7 @@ module ventium_top
     // (M0-M5, bit-exact vs QEMU); each set bit reproduces one documented P5
     // silicon defect. The TB drives this from --errata (default 0). cpu_hung
     // reports the F00F hang (Erratum 81).
-    input  logic [3:0]  errata_en,
+    input  logic [4:0]  errata_en,
     output logic        cpu_hung,
 
     // M7.1: Quake user-mode int-0x80 proxy + %gs TLS base (docs/m7-lockstep-spec).

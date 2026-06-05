@@ -437,7 +437,7 @@ int main(int argc, char** argv) {
     top->init_esp  = args.init_esp;
     top->boot_mode  = args.system ? 1 : 0;  // M2S.1: system cold reset
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
-    top->errata_en  = args.errata & 0xF;     // M6: errata-enable bus (default 0)
+    top->errata_en  = args.errata & 0x1F;    // M6/M6B: errata-enable bus (default 0)
     top->proxy_en   = proxy_mode ? 1 : 0;    // M7.1: int-0x80 proxy + %gs base
     top->cosim_en   = cosim_mode ? 1 : 0;    // M7.3b: Win95 port-I/O co-sim bus
     top->syscall_resume_eip = 0;
