@@ -45,6 +45,20 @@ module ventium_top
     // CS:EIP=F000:FFF0, real mode). Default 0 keeps make verify unchanged.
     input  logic        boot_mode,
 
+    // M5B-int: bus-mode select (TB drives 1 in --bus-mode). DEFAULT 0 = the core
+    // memory port connects DIRECTLY to the top mem_* ports (the existing M0/M1
+    // bus-functional path — BYTE-IDENTICAL, the M4/M5-gated path; the gated bus
+    // subsystem is completely BYPASSED/inert). 1 = the core memory is routed
+    // through the gated pin-level 64-bit P5 bus subsystem (rtl/bus/biu.sv: a
+    // FRONT 32b adapter + the biu_p5 FSM + a loopback pin-level responder), whose
+    // abstract BACK side (mem2_*) then drives the top mem_* ports (so the TB
+    // memmodel still serves the data, unchanged). This proves the core's memory
+    // round-trips through the REAL pin protocol (FUNCTIONAL equivalence only;
+    // there is NO pin-level cycle oracle — docs/m5b-bus-spec.md §5.3). ADDITIVE:
+    // bus_mode=0 keeps every existing gate (incl. the M4/M5 cycle bands) bit-
+    // identical, respecting the M5B deferral constraint.
+    input  logic        bus_mode,
+
     // M4: cycle-mode select (TB drives 1 in --cycle mode). Enables dual U/V
     // issue + pipe/paired reporting. 0 = func mode (M1/M2/M3 gates, single issue).
     input  logic        cycle_mode,
@@ -122,6 +136,16 @@ module ventium_top
   logic        core_retire_sys;
   logic [31:0] core_cr0, core_cr2, core_cr3, core_cr4;
 
+  // M5B-int: the core's own memory port. In bus_mode=0 these connect DIRECTLY to
+  // the top mem_* ports (the existing path); in bus_mode=1 the request side goes
+  // to the bus subsystem FRONT and the response side comes back from it. The mux
+  // is below the core instance. (Declared here so the core can bind to them.)
+  logic        core_mem_req, core_mem_we;
+  logic [31:0] core_mem_addr, core_mem_wdata;
+  logic [3:0]  core_mem_wstrb;
+  logic [31:0] core_mem_rdata;
+  logic        core_mem_ack;
+
   core u_core (
       .clk          (clk),
       .rst_n        (rst_n),
@@ -146,13 +170,13 @@ module ventium_top
       .io_wdata     (io_wdata),
       .io_rdata     (io_rdata),
       .io_ack       (io_ack),
-      .mem_req      (mem_req),
-      .mem_we       (mem_we),
-      .mem_addr     (mem_addr),
-      .mem_wdata    (mem_wdata),
-      .mem_wstrb    (mem_wstrb),
-      .mem_rdata    (mem_rdata),
-      .mem_ack      (mem_ack),
+      .mem_req      (core_mem_req),
+      .mem_we       (core_mem_we),
+      .mem_addr     (core_mem_addr),
+      .mem_wdata    (core_mem_wdata),
+      .mem_wstrb    (core_mem_wstrb),
+      .mem_rdata    (core_mem_rdata),
+      .mem_ack      (core_mem_ack),
       .retire_valid (core_retire_valid),
       .retire_pc    (core_retire_pc),
       .retire_state (core_retire_state),
@@ -299,8 +323,59 @@ module ventium_top
   // fetch/fill/decode. The old empty M0 `icache` placeholder stub here is gone
   // (the arrays/probes/fill/touch live in rtl/mem/icache.sv now).
 
-  // §6.10 Bus interface unit ---------------------------------------------------
-  biu         u_biu     (.clk(clk), .rst_n(rst_n));
+  // §6.10 Bus interface unit (M5B-int) -----------------------------------------
+  // The gated bus SUBSYSTEM (rtl/bus/biu.sv): a FRONT 32b adapter + the verified
+  // pin-level biu_p5 FSM (M5B) + a loopback pin-level responder. The core's
+  // memory request enters the FRONT (c_*); the subsystem's abstract BACK side
+  // (m2_*) drives an internal memory port (bus_mem_*). It runs UNCONDITIONALLY
+  // (cheap, fully self-contained), but it only AFFECTS the core when bus_mode=1
+  // — the mux below selects whether the core (and the top mem_* ports) see the
+  // direct path or the bus path. In bus_mode=0 its FRONT request is held off
+  // (c_req=0), so it is inert.
+  logic        bus_mem_req, bus_mem_we;
+  logic [31:0] bus_mem_addr, bus_mem_wdata;
+  logic [3:0]  bus_mem_wstrb;
+  logic [31:0] bus_c_rdata;
+  logic        bus_c_ack;
+
+  biu u_biu (
+      .clk      (clk),
+      .rst_n    (rst_n),
+      // FRONT: core 32b request (gated by bus_mode so the subsystem is inert at 0)
+      .c_req    (bus_mode ? core_mem_req : 1'b0),
+      .c_we     (core_mem_we),
+      .c_addr   (core_mem_addr),
+      .c_wdata  (core_mem_wdata),
+      .c_wstrb  (core_mem_wstrb),
+      .c_rdata  (bus_c_rdata),
+      .c_ack    (bus_c_ack),
+      // BACK: abstract 32b memory -> the top mem_* ports (TB memmodel) in mode 1
+      .m2_req   (bus_mem_req),
+      .m2_we    (bus_mem_we),
+      .m2_addr  (bus_mem_addr),
+      .m2_wdata (bus_mem_wdata),
+      .m2_wstrb (bus_mem_wstrb),
+      .m2_rdata (mem_rdata),
+      .m2_ack   (mem_ack)
+  );
+
+  // ---- bus_mode mux ----------------------------------------------------------
+  // bus_mode=0 (DEFAULT): the top mem_* output ports = the CORE's mem outputs,
+  // and the core's mem_rdata/mem_ack = the top mem_* inputs. This is the EXACT
+  // existing path — byte-identical, the M4/M5-gated path (the subsystem is
+  // bypassed and inert). bus_mode=1: the top mem_* output ports = the bus
+  // subsystem's BACK side (m2_* -> the TB memmodel), and the core's mem inputs
+  // come from the subsystem FRONT response (c_rdata/c_ack). The core's REQUEST
+  // outputs are wired to the FRONT above (gated on bus_mode) — when bus_mode=1
+  // the direct mem_* output below is driven by the bus back side instead.
+  assign mem_req   = bus_mode ? bus_mem_req   : core_mem_req;
+  assign mem_we    = bus_mode ? bus_mem_we    : core_mem_we;
+  assign mem_addr  = bus_mode ? bus_mem_addr  : core_mem_addr;
+  assign mem_wdata = bus_mode ? bus_mem_wdata : core_mem_wdata;
+  assign mem_wstrb = bus_mode ? bus_mem_wstrb : core_mem_wstrb;
+
+  assign core_mem_rdata = bus_mode ? bus_c_rdata : mem_rdata;
+  assign core_mem_ack   = bus_mode ? bus_c_ack   : mem_ack;
 
   // §6.7 Microcode engine ------------------------------------------------------
   ucode_rom   u_ucode   (.clk(clk), .rst_n(rst_n));

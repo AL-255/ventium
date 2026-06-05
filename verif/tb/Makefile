@@ -71,6 +71,21 @@ rtl:
 	  -F $(RTL_FILELIST) $(CPP_SRCS)
 	@echo "built: $(CURDIR)/obj_dir/$(EXE)"
 
+# ---- rtl-sva: integrated build with the biu_p5 SVA bound + --assert ---------
+# M5B-int: build the SAME integrated model into a SEPARATE obj dir, but with
+# Verilator SVA enabled (--assert) and the 19 biu_p5 protocol-invariant SVA
+# bound into the live biu_p5 instance (verif/bus/biu_p5_sva.sv + its `bind`).
+# Used by the bus_mode=1 in-system SVA run: it confirms the SAME mutation-
+# validated invariants the standalone gate checks HOLD on real core traffic.
+# Kept out of the default `rtl` target so make verify / the normal gate path is
+# byte-identical and unburdened by assertion machinery.
+SVA_BIND := $(VENTIUM_ROOT)/verif/bus/biu_p5_sva.sv
+.PHONY: rtl-sva
+rtl-sva:
+	$(VERILATOR) $(VL_FLAGS) --assert -Wno-DECLFILENAME -Mdir obj_dir_sva \
+	  -F $(RTL_FILELIST) $(SVA_BIND) $(CPP_SRCS)
+	@echo "built (SVA): $(CURDIR)/obj_dir_sva/$(EXE)"
+
 # ---- selftest target: build against the throwaway stub ----------------------
 # Built into a separate obj dir so it never clobbers a real-core build. ENTRY
 # is set via -GENTRY so the stub's deterministic pc values track --entry; the
@@ -109,5 +124,5 @@ selftest: selftest-build
 # ---- housekeeping -----------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -rf obj_dir obj_dir_selftest
+	rm -rf obj_dir obj_dir_selftest obj_dir_sva
 	rm -f selftest.vtrace

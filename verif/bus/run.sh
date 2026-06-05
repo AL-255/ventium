@@ -20,18 +20,25 @@ mkdir -p "$OBJ" "$VTB"
 
 VERILATOR="${VERILATOR:-verilator}"
 
+# M5B-int: the biu_p5 DUT now lives in the canonical RTL home (rtl/bus/biu_p5.sv),
+# wired into rtl/ + the core via the gated bus subsystem (rtl/bus/biu.sv). This
+# standalone self-consistency gate still builds it DIRECTLY from there (the SVA
+# in tb_biu_p5.sv stay active), so the structural/SVA verification is unchanged
+# by integration. The repo root is HERE/../.. (verif/bus -> repo root).
+DUT="$(cd "$HERE/../.." && pwd)/rtl/bus/biu_p5.sv"
+
 # warnings that are stylistic-only for the *testbench* (DUT is lint-clean under -Wall)
 TB_WAIVERS=(-Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-BLKSEQ
             -Wno-PROCASSINIT -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-TIMESCALEMOD)
 
 echo "=== [1/2] lint biu_p5 (standalone, -Wall) ==="
-"$VERILATOR" --lint-only -Wall -Wno-DECLFILENAME --top-module biu_p5 "$HERE/biu_p5.sv"
+"$VERILATOR" --lint-only -Wall -Wno-DECLFILENAME --top-module biu_p5 "$DUT"
 echo "    lint OK"
 
 echo "=== [2/2] build + run SVA / self-consistency testbench ==="
 "$VERILATOR" --binary --assert --timing -Wall "${TB_WAIVERS[@]}" \
   --top-module tb_biu_p5 --Mdir "$VTB" \
-  "$HERE/biu_p5.sv" "$HERE/tb_biu_p5.sv" -o tb_biu_p5 >/dev/null
+  "$DUT" "$HERE/tb_biu_p5.sv" -o tb_biu_p5 >/dev/null
 
 "$VTB/tb_biu_p5"
 echo "=== run.sh: DONE ==="

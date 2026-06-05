@@ -8,6 +8,8 @@ obj_dir/
 
 # verilator / sim outputs
 verif/tb/obj_dir/
+verif/tb/obj_dir_sva/
+verif/tb/obj_dir_selftest/
 *.vcd
 *.fst
 
