@@ -1,0 +1,9 @@
+{
+  "name": "t_bcd",
+  "src": "t_bcd/t_bcd.s",
+  "elf": "t_bcd/t_bcd.elf",
+  "image": "t_bcd/t_bcd.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 160
+}

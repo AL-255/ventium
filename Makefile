@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 verify verify-clean rtl plugin tests clean help verify-sys
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys
 .DEFAULT_GOAL := help
 
 help:
@@ -121,6 +121,17 @@ m5:
 # builds the TB + each ELF itself.)
 m6:
 	bash verif/errata/run-m6.sh
+
+# --- bus gates --------------------------------------------------------------
+# `bus`     = the STANDALONE biu_p5 protocol gate (19 SVA + 76 directed checks).
+# `bus-sva` = builds the SVA-assertion-enabled INTEGRATED model and runs the
+#   bus_mode=1 corpus through it with the protocol SVA LIVE (closes the review's
+#   "build-only rtl-sva can be misread as running the corpus" gap). A program
+#   passes only if no biu_p5 assertion fired AND it is func-equivalent vs QEMU.
+bus:
+	$(MAKE) -C verif/bus run
+bus-sva:
+	bash verif/bus/run_busmode_sva.sh
 
 # --- FAST unified differential gate (verif/verify.sh) -----------------------
 # Reaches the SAME verdict as the slow `make m5` (which supersets m1..m4) — but

@@ -1,0 +1,10 @@
+{
+  "name": "tx_fchs_fabs_special",
+  "src": "tx_fchs_fabs_special/tx_fchs_fabs_special.s",
+  "elf": "tx_fchs_fabs_special/tx_fchs_fabs_special.elf",
+  "image": "tx_fchs_fabs_special/tx_fchs_fabs_special.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 35,
+  "x87": true
+}

@@ -25,6 +25,17 @@ package ventium_alu_pkg;
   localparam logic [4:0] ALU_MOV = 5'd11;
   localparam logic [4:0] ALU_NEG = 5'd12;
   localparam logic [4:0] ALU_NOT = 5'd13;
+  // BCD/ASCII-adjust ops (review fidelity closure). These do NOT use the generic
+  // alu_result()/flags_next() datapath — core.sv computes their AX result + flags
+  // combinationally (matching QEMU helper_aaa/aas/daa/das/aam/aad exactly) and
+  // overrides alu_out/flags_out. The encodings live here only so the decode can
+  // classify them; the contiguous range 14..19 lets core.sv test "is BCD".
+  localparam logic [4:0] ALU_AAA = 5'd14;  // 0x37 ASCII adjust after add
+  localparam logic [4:0] ALU_AAS = 5'd15;  // 0x3F ASCII adjust after sub
+  localparam logic [4:0] ALU_DAA = 5'd16;  // 0x27 decimal adjust after add
+  localparam logic [4:0] ALU_DAS = 5'd17;  // 0x2F decimal adjust after sub
+  localparam logic [4:0] ALU_AAM = 5'd18;  // 0xD4 ib ASCII adjust after mul
+  localparam logic [4:0] ALU_AAD = 5'd19;  // 0xD5 ib ASCII adjust before div
 
   // ===========================================================================
   // Width helpers

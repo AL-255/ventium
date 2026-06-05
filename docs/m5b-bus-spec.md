@@ -307,3 +307,70 @@ of ADS#/BRDY#/NA#/CACHE#/KEN#/HITM#/LOCK# (REF.md §4 measurement setup; §7 ite
 "Bus/protocol tests"). Until such traces exist, treat `biu_p5` as a
 protocol-correct, self-consistent model — **not** a cycle/pin-exact replica — and
 do not claim differential bus equivalence for M5B.
+
+### 5.4 Integrated-bus caveat: `biu_p5` is a PROTOCOL EXERCISER, not a data path
+
+The block above describes the **standalone** `biu_p5`. When `biu_p5` is wired into
+`rtl/` via the gated bus subsystem (`rtl/bus/biu.sv`, run with `--bus-mode` /
+`bus_mode=1`), it runs strictly as a **protocol exerciser** — it is **not** a
+faithful external memory data path. This is the single most important pin-level
+fidelity caveat for the integrated CPU, and it is exactly what the code comment in
+`rtl/bus/biu.sv:25–62` states. Make it explicit here so the integrated mode is
+never overread:
+
+1. **The pins do NOT carry the data the core consumes.** The core's data and ack
+   come **combinationally** from the back-side memory model (`mem2_*`), fully
+   independent of `biu_p5`. That combinational path — not the pin data — is what is
+   verified func-equivalent against the QEMU golden. `biu_p5` runs the real
+   ADS#/T1/T2/BRDY# pin protocol **in parallel** on the same request so its SVA can
+   be checked on real core traffic, but **there is no guarantee that the address
+   `biu_p5` drives on its pins and the word the loopback returns on `d_in`
+   correspond** (`rtl/bus/biu.sv:31–40`): because the core gets a combinational ack
+   it advances before `biu_p5`'s registered `req_ack` pulses, so the responder
+   generally replays the core's *subsequent* (not current) back-side word. "The
+   data round-trips through the real pin protocol" is true only in the sense that
+   *some* real back-side word traverses `d_in` — it does **not** mean the returned
+   word matches the address on the pins or the word the core consumed.
+
+2. **Single, non-burst, non-pipelined cycles only.** The integrated loopback
+   responder holds `KEN#` deasserted (so `biu_p5` never upgrades a read to a 4-beat
+   line fill), never asserts `NA#` (no pipelining), and never asserts
+   `HOLD/BOFF#/AHOLD/EADS#` (`rtl/bus/biu.sv:54–62`). The integrated traffic is
+   therefore **single-cycle bridging only**.
+
+3. **Burst / pipelined / locked / snoop / backoff / arbitration are validated
+   STANDALONE ONLY.** Because integrated mode never exercises those paths (point 2),
+   the burst line fill, pipelined (`NA#`/T12/T2P), locked-group (`LOCK#`/`SCYC`),
+   inquire/snoop (`AHOLD`/`EADS#`/`HIT#`/`HITM#`/writeback), `BOFF#` backoff, and
+   `HOLD`/`HLDA` arbitration behavior remain validated **only** by the standalone
+   self-consistency gate (`make bus` → `verif/bus/run.sh`: 19 SVA + 76 directed
+   checks). They are **not** reached by the in-system `bus_mode=1` run.
+
+4. **No pin-level cycle oracle in either mode** (§5.3). The integrated run makes a
+   **functional** equivalence claim (combinational data path vs QEMU) plus a
+   **protocol-SVA** claim (the FSM obeys the documented sequencing on real core
+   traffic). It makes **no** cycle/pin-exact timing claim through the bus.
+
+#### The integrated SVA corpus command (closing the "build-only `rtl-sva`" gap)
+
+`make -C verif/tb rtl-sva` only **builds** the SVA-assertion-enabled integrated
+model (`obj_dir_sva/tb_ventium`); a green build can be **misread** as "the
+in-system SVA passed" when in fact nothing has run. The single command
+
+```
+verif/bus/run_busmode_sva.sh        # orchestrator wires: make bus-sva
+```
+
+removes that ambiguity. It (1) builds the SVA model via the `rtl-sva` target, then
+(2) runs the **same 12-program `bus_mode=1` corpus** as `run_busmode_corpus.sh`
+through the assertion-enabled binary with the 19 mutation-validated `biu_p5`
+protocol SVA (`verif/bus/biu_p5_sva.sv`) **bound live** into the integrated
+`biu_p5`. A program passes only if **(a)** no SVA fires — a fired Verilator
+`--assert` aborts `tb_ventium` non-zero and logs `Assertion failed`, which the
+script reports as a distinct `SVA-FAIL` — **and (b)** it is func-equivalent vs
+QEMU (`compare.py --mode func` exits 0). The script prints a single
+`BUS-SVA-OK` / `BUS-SVA-FAIL` verdict with a matching exit code. Per points 1–4,
+this proves the documented protocol holds on real (single-cycle, non-burst,
+non-pipelined) core traffic and the data stays func-equivalent on the independent
+back-side path — it does **not** extend any cycle/pin-exact or
+burst/pipelined/snoop claim to integrated mode.

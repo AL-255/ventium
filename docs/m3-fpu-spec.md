@@ -98,3 +98,85 @@ func-diff-clean (exit 0), AND the M0/M1/M2 integer suites stay green (`make m2`
 exit 0). Tier-3 coverage and every deferred/HALT item are listed honestly in
 PROGRESS. Anything unimplemented HALTs the core — never silently mis-executes.
 ```
+
+## Deferred x87 — machine-checkable boundary
+
+The "DEFERRED — loud HALT" set above (transcendentals, BCD load/store, and the
+FP environment/state ops) was previously asserted only in prose. Per
+`REVIEW_Jun5.md` Recommended Step 4 + Limit #2, that coverage boundary is now
+**machine-checkable** so it cannot silently rot if a future change accidentally
+decodes one of those ops.
+
+### Verified deferred decode set (against `rtl/core/core.sv`)
+
+Each deferred family reaches a `d_unknown=1'b1` arm in the D8..DF escape decoder
+(core.sv ~1840–2007); `d_unknown` then takes the `S_DECODE` default to `S_HALT`
+(core.sv ~3139), and the core stops retiring (it never executes or retires the
+deferred op, nor anything after it). Confirmed encodings and the arm each hits:
+
+| Family (deferred) | Mnemonics | Encoding | `d_unknown` arm |
+|---|---|---|---|
+| Transcendentals | `FSIN FCOS FPTAN FPATAN F2XM1 FYL2X FSINCOS FYL2XP1` | `D9 F0..FF` (reg, mod==11) | core.sv:1889 (D9 reg `default`) |
+| BCD load/store | `FBLD` / `FBSTP` | `DF /4` / `DF /6` (mem) | core.sv:1998 (DF mem `default`) |
+| FP environment | `FLDENV` / `FNSTENV` | `D9 /4` / `D9 /6` (mem) | core.sv:1868 (D9 mem `default`) |
+| FP state save/restore | `FRSTOR` / `FNSAVE`/`FSAVE` | `DD /4` / `DD /6` (mem) | core.sv:1955 (DD mem `default`) |
+
+### `tx_deferred_halt` — the loud-HALT pin
+
+`verif/tests/tx_deferred_halt/tx_deferred_halt.s` executes a representative
+deferred op (**FSIN**, `D9 FE` — a transcendental; the canonical
+"QEMU-computes-an-approximation, real-P54C-microcode-differs" case) bracketed by
+sentinels:
+
+```
+mov $0xdead0001,%eax   ; PRE  sentinel — MUST retire (boundary reached)
+fldpi                  ; normal operand — MUST retire
+fsin                   ; DEFERRED — the RTL MUST HALT here (d_unknown -> S_HALT)
+mov $0xdead0002,%ebx   ; POST sentinel — MUST NOT retire
+mov $1,%eax; xor %ebx,%ebx; int $0x80   ; clean exit — MUST NOT be reached
+```
+
+The machine-checkable expectation is that the RTL **HALTs at FSIN** and does not
+retire it or anything after it. This is deliberately **not** a differential-vs-
+QEMU func test: QEMU has a full x87 and *does* execute FSIN (`helper_fsin`,
+`target/i386/fpu_helper.c`), so a `compare.py` run would see a length mismatch —
+which is exactly the correct boundary (RTL halts where QEMU continues). The
+manifest therefore lives at `tx_deferred_halt/halt/manifest.json` (one level
+deeper than the depth-2 path `verify.sh` scans) so the differential corpus does
+**not** pull it in, and it is gated instead by the dedicated harness:
+
+```
+bash verif/tests/run_x87_boundary.sh   # builds + runs on the RTL, asserts HALT
+```
+
+`run_x87_boundary.sh` builds the ELF/flat, runs `tb_ventium --x87`, and asserts
+on the RTL trace: (1) the PRE sentinel + `fldpi` retired (boundary reached),
+(2) no record at/after the FSIN pc exists (FSIN itself never retired), (3) the
+POST sentinel (`ebx=0xdead0002`) never appears, and (4) `tb_ventium` stopped via
+quiescence/hang — **not** by hitting `--max-insn` (which would mean the deferred
+op was wrongly executed). Any single failure aborts the gate with a precise
+diagnostic. FSIN stands in for the whole deferred set at the decode boundary; to
+re-pin a different family, swap the deferred op (e.g. `fbld (%eax)` / `fnsave
+(%eax)`) and update the manifest `deferred_op` note.
+
+### `tx_fchs_fabs_special` — in-scope sign ops on Inf/NaN (differential)
+
+`FCHS`/`FABS` are **in scope** (Tier-1) and must work on `+inf`/`-inf`/`NaN`,
+because the RTL implements them as pure operations on the **sign bit only**:
+
+```
+FX_FABS (core.sv:4011):  fp_top_data = {1'b0,    st0[78:0]}   ; clear  bit 79
+FX_FCHS (core.sv:4012):  fp_top_data = {~st0[79], st0[78:0]}  ; toggle bit 79
+```
+
+Bits 78:0 (exponent + mantissa) pass through verbatim and the `D9 E0`/`D9 E1`
+decode (core.sv:1875–1876) does not gate on operand class, so they execute (do
+not HALT) for inf/NaN and match QEMU's `helper_fchs`/`helper_fabs` (which also
+touch only the sign). `FLD m80` (`FLDT`) pushes the operand verbatim
+(core.sv:3985) — an SNaN is loaded **without** being quieted — so the test also
+proves FCHS/FABS preserve the SNaN payload. `verif/tests/tx_fchs_fabs_special/`
+is a normal differential-vs-QEMU func test (manifest at depth 2, `x87:true`,
+joined to the central `make verify` corpus): it loads `+inf`/`-inf`/`+QNaN`/
+`-QNaN`/`+SNaN` as m80 and checks the post-op `st0` (full 80-bit floatx80) bit-
+exact vs QEMU after each `FABS`/`FCHS`. No RTL change is required for it to pass.
+```
