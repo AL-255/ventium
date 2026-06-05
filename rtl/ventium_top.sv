@@ -71,6 +71,20 @@ module ventium_top
     input  logic        syscall_apply_gs,
     input  logic [31:0] syscall_gs_base,
 
+    // M7.3b: Win95 system co-sim port-I/O bus (docs/m7-lockstep-spec.md M7.3).
+    // DEFAULT 0 = INERT (the IN/OUT decode HALTs / the `out 0xf4` terminator is
+    // preserved, the io_* bus is never driven) so make verify + the sys gates are
+    // byte-identical. The TB drives cosim_en in --win95-image mode and services
+    // io_* by replaying the golden dev_in read values (the only env injection).
+    input  logic        cosim_en,
+    output logic        io_req,
+    output logic        io_we,
+    output logic [15:0] io_addr,
+    output logic [2:0]  io_size,
+    output logic [31:0] io_wdata,
+    input  logic [31:0] io_rdata,
+    input  logic        io_ack,
+
     // M0/M1 bus-functional-model port group (docs/rtl-interface.md §3). Minimal
     // by design; M5 replaces it with the modeled 64-bit P5 bus FSM.
     output logic        mem_req,
@@ -124,6 +138,14 @@ module ventium_top
       .syscall_eax        (syscall_eax),
       .syscall_apply_gs   (syscall_apply_gs),
       .syscall_gs_base    (syscall_gs_base),
+      .cosim_en     (cosim_en),
+      .io_req       (io_req),
+      .io_we        (io_we),
+      .io_addr      (io_addr),
+      .io_size      (io_size),
+      .io_wdata     (io_wdata),
+      .io_rdata     (io_rdata),
+      .io_ack       (io_ack),
       .mem_req      (mem_req),
       .mem_we       (mem_we),
       .mem_addr     (mem_addr),

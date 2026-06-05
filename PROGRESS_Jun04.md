@@ -168,6 +168,51 @@ M7.3 Win95 device-input replay + boot-prefix run.
     GO on the bounded 300k prefix; the interrupt region + full GUI boot stay
     throughput-deferred (honest, never faked).**
 
+- 2026-06-05 — **M7.3b DONE (consumer): Win95 boots bit-exact on the RTL to 213,859
+  instructions.** The co-sim consumer half — the RTL is the checked CPU, qemu's
+  recorded environment is replayed, the comparator grades only CPU arch state.
+  - **IN/OUT decode** (E4–E7 / EC–EF: IN/OUT imm8 + DX, byte/word/dword) as a new
+    S_IO bus-handshake state: an `IN` takes its value from the new co-sim `io_*` bus
+    (the recorded `dev_in`), an `OUT` drives `io_wdata` (the existing `out 0xf4`
+    isa-debug-exit is preserved). Plus **CPUID** (0F A2, a deterministic `-cpu pentium`
+    leaf table) and **INS/`rep insb`** (6C/6D), and two real-mode operand-size decode
+    fixes (Jcc 0F 8x / JMP E9 / near branches → rel16 + 16-bit target mask in 16-bit
+    mode). ALL gated on a new `cosim_en` (or 32-bit/non-cosim-inert), so every prior
+    gate is byte-identical. (A transient dropped-`A7`-CMPSD decode arm was caught +
+    fixed during the build.)
+  - **Co-sim bus** (`verif/tb/win95_cosim.{h,cpp}` + tb `--win95-image`/`--lockstep`):
+    loads the phys-mem/BIOS image, cold-resets at F000:FFF0 (the core's own system
+    reset = golden record 0), and on each RTL `IN` returns the next recorded `dev_in`
+    value (masked to size, order-checked). The ONLY injected state is the device-read
+    VALUE into eAX (audited HONEST — no CPU register/flag/eip is fabricated; the RTL
+    computes everything else, incl. the `OUT`s that drive fw_cfg). No DMA-into-RAM is
+    applied because every `dma_wr` in the prefix is a CPU-driven `OUT` to a port, which
+    the RTL executes itself.
+  - **Result (independently re-verified):** the RTL runs the full **300,000**-record
+    prefix without an ISA halt and is **bit-exact through record 213,859** — crossing
+    the real→PM transition (CR0.PE 0→1 @ record 23), the IN/OUT wall, CPUID, the BIOS
+    shadow-copy, and the fw_cfg `rep insb` — a **~6,700× reach increase**. The first
+    divergence (record 213860, `mov eax,[esp]`, golden `eax=0` vs RTL `0x0a001900`) is
+    **NOT a CPU bug**: it reads a fw_cfg **DMA-to-RAM** word the device cleared in
+    guest RAM — the producer's `memory_region_ops` capture traces device-REGION
+    accesses, not fw_cfg DMA into plain RAM, so the harness can't replay it; the RTL
+    correctly reads the value it itself wrote. A harness environment-capture gap,
+    characterized honestly (pushing past needs a guest-RAM-diff capture — a deferred
+    harness feature). `--dedup-golden` (compare_stream) collapses the 4–8 verbatim
+    full-arch re-dumps qemu's `one-insn-per-tb -d cpu` emits for `rep` re-entries
+    (audited: byte-identical on every graded field incl. pc ⇒ provably tracer
+    re-dumps, not retirements) — an alignment fix on a known producer artifact, NOT a
+    comparator weakening (default OFF; the per-field grading stays byte-strict).
+  - ADDITIVE: `make verify` 57/57 GREEN, all sys gates EQUIVALENT (pseg/pmode/ppage/
+    pintr/pfault/pcpl/pdebug/pv86 + ptask/psmm), Quake lock-step still bit-exact, lint
+    clean. Reproducer: `verif/m7/win95/run-win95-cosim.sh`.
+  - **M7 COMPLETE (honest):** both requested macro-workloads run in lock-step on the
+    RTL — Quake bit-exact to ~1.106M instructions (frontier = vDSO clock), Win95 boot
+    bit-exact to 213,859 instructions (frontier = fw_cfg DMA-to-RAM). 6 real ISA gaps
+    found + fixed across the two (TEST mem-form, call gs:[], LOCK CMPXCHG, IN/OUT,
+    CPUID, INS) + V86 mode. Both frontiers are documented HARNESS/throughput limits,
+    never CPU defects; a full Quake frame / Win95 GUI boot stays throughput-deferred.
+
 ### M7 log
 
 - 2026-06-04 — M7 opened; spec written; M7.0 oracle de-risk launched (Quake syscall

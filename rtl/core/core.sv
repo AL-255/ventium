@@ -96,6 +96,38 @@ module core
     input  logic        syscall_apply_gs, // 1: this syscall set a new %gs TLS base
     input  logic [31:0] syscall_gs_base,  // the resulting %gs base (set_thread_area)
 
+    // ------------------------------------------------------------------------
+    // M7.3b Win95 system co-sim port-I/O bus (docs/m7-lockstep-spec.md M7.3).
+    // DEFAULT 0 = INERT: with cosim_en==0 the core's IN/OUT decode is the
+    // M0-M6/M2S behaviour — an `out 0xf4` is the isa-debug-exit terminator (HALT,
+    // no extra retire, preserving every sys gate byte-for-byte) and any OTHER
+    // IN/OUT HALTs loudly (the corpus never uses port I/O), so the io_* bus below
+    // is never exercised and `make verify` + the sys gates are unaffected.
+    //
+    // When cosim_en==1 (TB --win95-image / --lockstep mode) the core EXECUTES
+    // IN/OUT through this bus, MIRRORING the mem_* protocol:
+    //   * an IN raises io_req with io_we=0, io_addr=<port>, io_size=<1/2/4>; the
+    //     TB drives back the matching golden dev_in[] VALUE on io_rdata + io_ack,
+    //     and the core writes it width-aware into AL/AX/eAX. This is the ONLY
+    //     environment input injected (the integrity crux — never a CPU register/
+    //     flag/eip is fabricated; only the device-read value the CPU cannot
+    //     compute on its own).
+    //   * an OUT raises io_req with io_we=1, io_addr=<port>, io_size, io_wdata=
+    //     <AL/AX/eAX>; the TB consumes it (and the cosim isa-debug-exit `out 0xf4`
+    //     keeps terminating the run there). The CPU COMPUTES the OUT value itself.
+    // The reset edx P5 stepping signature also follows the co-sim CPU model (see
+    // the reset arm): cosim uses qemu `-cpu pentium` (edx=0x543), the existing sys
+    // gates keep the unchanged 0x663. cosim_en implies boot_mode (system).
+    // ------------------------------------------------------------------------
+    input  logic        cosim_en,         // M7.3b: enable the Win95 co-sim port-I/O bus
+    output logic        io_req,           // I/O bus request (IN or OUT)
+    output logic        io_we,            // 1 = OUT (CPU drives), 0 = IN (CPU reads)
+    output logic [15:0] io_addr,          // the 16-bit I/O port
+    output logic [2:0]  io_size,          // access width in BYTES (1/2/4)
+    output logic [31:0] io_wdata,         // OUT data (AL/AX/eAX, width per io_size)
+    input  logic [31:0] io_rdata,         // IN data (the golden dev_in value)
+    input  logic        io_ack,           // I/O response strobe (combinational-OK)
+
     output logic        mem_req,
     output logic        mem_we,
     output logic [31:0] mem_addr,
@@ -430,9 +462,15 @@ module core
   // ===========================================================================
   // FSM
   // ===========================================================================
-  typedef enum logic [4:0] {
+  typedef enum logic [5:0] {   // M7.3c: widened 5->6 bits to admit S_INS (the prior
+                               // 32 states exactly filled a [4:0] enum)
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
     S_FLOAD, S_FEXEC, S_FSTORE,
+    // M7.3b Win95 co-sim port I/O: the IN/OUT bus handshake state (cosim only).
+    S_IO,
+    // M7.3c INS (port-input string): per-element IN handshake, then store to [EDI]
+    // (reuses the K_STR S_STORE element/retire/loop path). Cosim only.
+    S_INS,
     S_PF, S_PIPE, S_F00F_HANG,
     // M2S.1 system-mode descriptor + table micro-sequences:
     S_LGDT, S_SEGLD, S_LJMP,
@@ -707,6 +745,30 @@ module core
   logic        d_cli;          // CLI (FA): IF<-0  (M2S.1)
   logic        d_sti;          // STI (FB): IF<-1  (M2S.1)
   logic        d_cnt16;        // 0x67 address-size: LOOP/JCXZ use CX (low 16)
+  // M7.3b: a 16-bit-operand-size NEAR branch (real-mode Jcc/JMP rel16, or the
+  // rel8 forms in 16-bit mode). The taken target truncates EIP to 16 bits (IA-32:
+  // a near jump under a 16-bit operand size masks EIP to IP). 0 in 32-bit mode, so
+  // every prior gate is unchanged. Set by the operand-size-aware branch arms.
+  logic        d_br16;
+
+  // ---- M7.3b IN/OUT port-I/O decode (docs/m7-lockstep-spec.md M7.3) ----------
+  // The Win95 system co-sim needs real port I/O: IN reads a device value the CPU
+  // cannot compute (replayed from the golden's dev_in via the io bus), OUT drives
+  // a port/value out to the TB (consumed there; the existing isa-debug-exit `out
+  // 0xf4` terminator is preserved). Opcodes:
+  //   E4 ib  IN  AL, imm8        E5 ib  IN  eAX, imm8
+  //   E6 ib  OUT imm8, AL        E7 ib  OUT imm8, eAX
+  //   EC     IN  AL, DX          ED     IN  eAX, DX
+  //   EE     OUT DX, AL          EF     OUT DX, eAX
+  // Width: byte for the AL forms (E4/E6/EC/EE), else eff-opsize (word in real
+  // mode / dword in 32-bit). The port is an imm8 (E4-E7) or DX[15:0] (EC-EF).
+  // d_io_w reuses the wmask width code (1=byte, 2=word, 4=dword). These are 0 for
+  // every non-IN/OUT instruction, so the dispatch below is inert elsewhere.
+  logic        d_io;            // this instruction is IN/OUT
+  logic        d_io_write;      // 1 = OUT (CPU drives the port), 0 = IN (CPU reads)
+  logic        d_io_imm;        // 1 = port is the imm8 byte (E4-E7), 0 = DX (EC-EF)
+  logic [7:0]  d_io_port_imm;   // the imm8 port (when d_io_imm)
+  logic [2:0]  d_io_w;          // I/O width code (1=byte, 2=word, 4=dword)
 
   // ---- M2S.1 system-mode decode (docs/m2s1-segmentation-spec.md) ------------
   // d_seg : which segment the memory operand uses (SG_CS..SG_GS). Default DS
@@ -958,6 +1020,8 @@ module core
     d_sm=SM_PUSHA; d_st=ST_MOVS; d_str_loadsi=1'b0; d_str_storedi=1'b0; d_str_scandi=1'b0;
     d_ct=CT_CALLREL; d_ret_imm=16'd0; d_cld=1'b0; d_std=1'b0;
     d_clc=1'b0; d_stc=1'b0; d_cmc=1'b0; d_cli=1'b0; d_sti=1'b0; d_cnt16=eff_addr;
+    d_br16=1'b0;
+    d_io=1'b0; d_io_write=1'b0; d_io_imm=1'b0; d_io_port_imm=8'd0; d_io_w=3'd1;
     d_fxop=FX_NONE; d_is_x87=1'b0; d_f_mem_read=1'b0; d_f_mem_write=1'b0;
     d_f_msize=3'd0; d_f_mbytes=4'd0; d_f_pop=1'b0; d_f_pop2=1'b0; d_f_sti=3'd0;
     d_f_aluop=3'd0; d_f_const=3'd0;
@@ -1086,9 +1150,21 @@ module core
             d_w=3'd4; d_len=pfx_len+4'd3;
           end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
         end
-        8'b1000_????: begin // Jcc rel32
-          d_len=pfx_len+4'd6; d_is_branch=1'b1; d_branch_taken=cond_true(op1[3:0],eflags);
-          d_rel={ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1],ibuf[m_idx]};
+        8'b1000_????: begin // Jcc rel16/rel32 (0F 8x)
+          // Operand-size-aware (M7.3b): 32-bit mode (every prior user/PM gate,
+          // eff_opsize=0) = rel32 / length 6 — UNCHANGED. 16-bit operand mode (real
+          // mode without 0x66, or PM with 0x66; eff_opsize=1) = rel16 / length 4,
+          // and the taken target truncates EIP to 16 bits (d_br16). The Win95 boot's
+          // real-mode SeaBIOS POST uses the 0F 8x rel16 form (e.g. the jnz at
+          // 0xe062) — the prior hardcoded rel32 mis-decoded its length.
+          d_is_branch=1'b1; d_branch_taken=cond_true(op1[3:0],eflags);
+          if (eff_opsize) begin
+            d_rel={{16{ibuf[m_idx+1][7]}},ibuf[m_idx+1],ibuf[m_idx]};
+            d_br16=1'b1; d_len=pfx_len+4'd4;
+          end else begin
+            d_rel={ibuf[m_idx+3],ibuf[m_idx+2],ibuf[m_idx+1],ibuf[m_idx]};
+            d_len=pfx_len+4'd6;
+          end
         end
         8'b1001_????: begin // SETcc r/m8
           d_kind=K_SETCC; d_w=3'd1; d_cc=op1[3:0];
@@ -1191,6 +1267,23 @@ module core
         8'hC7: begin
           d_unknown=1'b1; d_len=pfx_len+4'd3;
           if (modrm_mod==2'b11 && modrm_reg==3'd1) d_f00f=1'b1;  // /1 reg-dst
+        end
+        // ---- 0F A2: CPUID -----------------------------------------------------
+        // CPUID is a no-operand instruction (no ModRM): leaf = eAX (subleaf = eCX,
+        // unused by the leaves this boot touches). It writes eax/ebx/ecx/edx and
+        // touches NO flags. The result is a pure FUNCTION of the leaf for the modeled
+        // CPU (qemu `-cpu pentium`), so this is a deterministic ISA implementation —
+        // NOT injected environment. The leaf->result table lives in S_EXEC (K_CPUID)
+        // and is gated on cosim_en so the existing corpus (which never executes
+        // CPUID) is byte-identical: outside co-sim CPUID stays the loud HALT
+        // (d_unknown) it has always been. Length is always pfx_len+2 (decode is
+        // unconditional, so even the gated HALT advances correctly is moot — HALT
+        // never retires — but the length is right for a clean characterization).
+        8'hA2: begin
+          d_len=pfx_len+4'd2;
+          if (cosim_en) begin
+            d_kind=K_CPUID; d_writes_reg=1'b1;  // EXEC writes all 4 GPRs directly
+          end else d_unknown=1'b1;              // out-of-scope outside co-sim -> HALT
         end
         // ---- 0F 0B: UD2, the architecturally-undefined opcode -> #UD (vector 6).
         // In SYSTEM mode it DELIVERS #UD through the IDT (a FAULT: pushes the
@@ -1471,6 +1564,28 @@ module core
         8'hAF: begin d_kind=K_STR; d_st=ST_SCAS; d_w=eff_opsize?3'd2:3'd4; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
         8'hA6: begin d_kind=K_STR; d_st=ST_CMPS; d_w=3'd1; d_str_loadsi=1'b1; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
         8'hA7: begin d_kind=K_STR; d_st=ST_CMPS; d_w=eff_opsize?3'd2:3'd4; d_str_loadsi=1'b1; d_str_scandi=1'b1; d_writes_flags=1'b1; d_mem_read=1'b1; d_len=pfx_len+4'd1; end
+        // ---- 6C/6D: INS — port-input string (the co-sim's only string-I/O op) ----
+        // INSB (6C) / INSW/D (6D): read a byte/word/dword from port DX and STORE it
+        // to ES:[EDI], then EDI += width (DF=0 forward). With a REP prefix it iterates
+        // ECX times — each element is its own retire record at the same PC (exactly
+        // like the golden's `rep insb` at 0xEBB07, ecx=4, port 0x511 fwcfg). It is a
+        // STRING op (K_STR / ST_INS, d_str_storedi) AND a port-input (d_io) so the
+        // co-sim's recorded dev_in value is the source of each element (the sole
+        // injected environment). The dedicated S_INS state does the per-element IO
+        // handshake; the existing K_STR S_STORE path writes [EDI] and loops/retires.
+        // Gated on cosim_en (mirrors the IN/OUT decode): outside co-sim INS HALTs
+        // loudly (out-of-scope, like every other port I/O) so the corpus is unchanged.
+        // Width: byte for 6C; eff-opsize (16/32) for 6D. The boot only uses 6C, but
+        // 6D is decoded identically for completeness (same S_INS path, wider element).
+        8'h6C, 8'h6D: begin
+          if (cosim_en) begin
+            d_kind=K_STR; d_st=ST_INS; d_str_storedi=1'b1; d_mem_write=1'b1;
+            d_w=(op0==8'h6C) ? 3'd1 : (eff_opsize?3'd2:3'd4);
+            d_io=1'b1; d_io_write=1'b0; d_io_imm=1'b0;  // port is DX (resolved at issue)
+            d_io_w=d_w;
+            d_len=pfx_len+4'd1;
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd1; end
+        end
         8'hC6: begin // MOV r/m8, imm8
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_use_imm=1'b1; d_w=3'd1;
           if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2];
@@ -1599,11 +1714,22 @@ module core
           endcase
         end
         8'hEB: begin d_len=pfx_len+4'd2; d_is_branch=1'b1; d_branch_taken=1'b1;
-          d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
-        8'hE9: begin d_len=pfx_len+4'd5; d_is_branch=1'b1; d_branch_taken=1'b1;
-          d_rel={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; end
+          d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; d_br16=eff_opsize; end
+        8'hE9: begin d_is_branch=1'b1; d_branch_taken=1'b1;
+          // JMP rel16/rel32 (M7.3b operand-size-aware). 32-bit (eff_opsize=0): rel32
+          // / length 5 — UNCHANGED. 16-bit (real-mode SeaBIOS, e.g. the jmp at
+          // 0xe076): rel16 / length 3, target truncated to 16 bits (d_br16).
+          if (eff_opsize) begin
+            d_rel={{16{ibuf[pfx_len+2][7]}},ibuf[pfx_len+2],ibuf[pfx_len+1]};
+            d_br16=1'b1; d_len=pfx_len+4'd3;
+          end else begin
+            d_rel={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]};
+            d_len=pfx_len+4'd5;
+          end
+        end
         8'b0111_????: begin d_len=pfx_len+4'd2; d_is_branch=1'b1;
-          d_branch_taken=cond_true(op0[3:0],eflags); d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
+          d_branch_taken=cond_true(op0[3:0],eflags); d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]};
+          d_br16=eff_opsize; end
         8'hE8: begin d_kind=K_CTRL; d_ct=CT_CALLREL; d_mem_write=1'b1; d_w=eff_opsize?3'd2:3'd4;
           // 0x66 near CALL: 16-bit rel (cw), push 16-bit next-IP, ESP-=2, and
           // EIP=(next_eip+rel16)&0xFFFF (operand-size-16 truncates EIP).
@@ -1679,6 +1805,37 @@ module core
         end
         8'hF4: begin // HLT — stop retiring (a clean spin in the bare-metal test)
           d_halt=1'b1; d_len=pfx_len+4'd1;
+        end
+
+        // -------------------------------------------------------------------
+        // M7.3b PORT I/O — IN/OUT (docs/m7-lockstep-spec.md M7.3). The decode is
+        // UNCONDITIONAL (not gated on sys/cosim) so the length is always right;
+        // the FSM (S_DECODE) decides what to DO: in --win95 co-sim mode an IN
+        // takes its value off the io bus + an OUT drives the port out; OUTSIDE
+        // co-sim the only legal use is the isa-debug-exit `out 0xf4` terminator
+        // (preserved — HALT, no extra retire), and any other IN/OUT HALTs loudly.
+        // Width: AL forms (E4/E6/EC/EE) = byte; eAX forms = eff-opsize (word in
+        // real mode, dword in 32-bit). Port: imm8 (E4-E7) or DX (EC-EF).
+        // -------------------------------------------------------------------
+        8'hE4, 8'hE5: begin   // IN AL/eAX, imm8
+          d_io=1'b1; d_io_write=1'b0; d_io_imm=1'b1; d_io_port_imm=ibuf[pfx_len+1];
+          d_io_w = (op0==8'hE4) ? 3'd1 : (eff_opsize ? 3'd2 : 3'd4);
+          d_len  = pfx_len + 4'd2;
+        end
+        8'hE6, 8'hE7: begin   // OUT imm8, AL/eAX
+          d_io=1'b1; d_io_write=1'b1; d_io_imm=1'b1; d_io_port_imm=ibuf[pfx_len+1];
+          d_io_w = (op0==8'hE6) ? 3'd1 : (eff_opsize ? 3'd2 : 3'd4);
+          d_len  = pfx_len + 4'd2;
+        end
+        8'hEC, 8'hED: begin   // IN AL/eAX, DX
+          d_io=1'b1; d_io_write=1'b0; d_io_imm=1'b0;
+          d_io_w = (op0==8'hEC) ? 3'd1 : (eff_opsize ? 3'd2 : 3'd4);
+          d_len  = pfx_len + 4'd1;
+        end
+        8'hEE, 8'hEF: begin   // OUT DX, AL/eAX
+          d_io=1'b1; d_io_write=1'b1; d_io_imm=1'b0;
+          d_io_w = (op0==8'hEE) ? 3'd1 : (eff_opsize ? 3'd2 : 3'd4);
+          d_len  = pfx_len + 4'd1;
         end
 
         // -------------------------------------------------------------------
@@ -1923,12 +2080,22 @@ module core
   smk_e        q_sm;
   st_e         q_st;
   logic        q_rep, q_repne, q_str_loadsi, q_str_storedi, q_str_scandi;
+  // M7.3c INS: the IN value captured in S_INS, carried into the S_STORE element.
+  logic [31:0] ins_data;
   ctk_e        q_ct;
   logic [15:0] q_ret_imm;
   logic        q_cld, q_std;
   logic        q_clc, q_stc, q_cmc;
   logic        q_cli, q_sti;
   logic        q_cnt16;
+  logic        q_br16;   // M7.3b: 16-bit near-branch (taken target masks to 16 bits)
+
+  // latched M7.3b IN/OUT port-I/O decode (see d_io_* above). q_io_port holds the
+  // resolved 16-bit port (imm8 zero-extended, or DX[15:0]); q_io_w the width.
+  logic        q_io;
+  logic        q_io_write;
+  logic [15:0] q_io_port;
+  logic [2:0]  q_io_w;
 
   // latched M2S.1 system decode
   sysop_e      q_sysop;
@@ -2298,6 +2465,7 @@ module core
     unique case (q_st)
       ST_MOVS: str_wdata = mem_load_data;
       ST_STOS: str_wdata = reg_read(R_EAX,q_w,1'b0);
+      ST_INS:  str_wdata = ins_data;   // M7.3c: the IN value captured in S_INS
       default: str_wdata = mem_load_data;
     endcase
     // SCAS: compare EAX(width) - [EDI];  CMPS: [ESI] - [EDI]
@@ -2877,7 +3045,15 @@ module core
         // 0x000F0000 here (fetch linear = 0x000F0000 + 0xFFF0 = 0x000FFFF0,
         // exactly where the TB loads the image's last 16 bytes).
         eip<=32'h0000_FFF0; eflags<=32'h0000_0002;
-        gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[2]<=32'h0000_0663; gpr[3]<=32'd0;
+        gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[3]<=32'd0;
+        // EDX reset = the CPUID family/model/stepping signature. The existing M2S
+        // sys gates oracle against qemu's default (qemu32) cold reset EDX=0x663 and
+        // MUST stay byte-identical; the M7.3b Win95 co-sim oracles against qemu
+        // `-cpu pentium` whose cold reset EDX=0x543 (golden record 0). cosim_en
+        // (set only in --win95-image mode) selects 0x543; every other system run
+        // keeps 0x663 unchanged. (EDX is the only reset-state delta between the two
+        // CPU models that the golden prefix observes.)
+        gpr[2]<= cosim_en ? 32'h0000_0543 : 32'h0000_0663;
         gpr[4]<=32'd0; gpr[5]<=32'd0; gpr[6]<=32'd0; gpr[7]<=32'd0;
         creg0<=32'h6000_0010; creg2<=32'd0; creg3<=32'd0; creg4<=32'd0;
         for (int s=0;s<NUM_SEG;s++) begin
@@ -3391,7 +3567,10 @@ module core
           q_str_scandi<=d_str_scandi; q_ct<=d_ct; q_ret_imm<=d_ret_imm;
           q_cld<=d_cld; q_std<=d_std; step<=4'd0;
           q_clc<=d_clc; q_stc<=d_stc; q_cmc<=d_cmc; q_cnt16<=d_cnt16;
-          q_cli<=d_cli; q_sti<=d_sti;
+          q_cli<=d_cli; q_sti<=d_sti; q_br16<=d_br16;
+          // M7.3b IN/OUT latch: resolve the port (imm8 zero-extended, or DX[15:0]).
+          q_io<=d_io; q_io_write<=d_io_write; q_io_w<=d_io_w;
+          q_io_port<= d_io_imm ? {8'd0, d_io_port_imm} : gpr[R_EDX][15:0];
           // latch x87 decode
           q_fxop<=d_fxop; q_is_x87<=d_is_x87; q_f_mem_read<=d_f_mem_read;
           q_f_mem_write<=d_f_mem_write; q_f_mbytes<=d_f_mbytes; q_f_pop<=d_f_pop;
@@ -3473,6 +3652,30 @@ module core
             // faulting V86 EIP so the monitor restarts/advances it). int_sw=0 so the
             // hardware-fault path bypasses the gate DPL>=CPL check.
             start_fault(8'd13, 1'b1, 32'd0, eip);
+          end
+          // ---- M7.3b PORT I/O dispatch (IN/OUT) ------------------------------
+          // Three cases, in priority order:
+          //  (1) cosim_en: EXECUTE the I/O through the io_* bus (S_IO). An IN takes
+          //      its value from the replayed golden dev_in; an OUT drives the CPU's
+          //      own AL/AX/eAX out. This is the ONLY place env input is injected.
+          //  (2) !cosim_en + `out <port>,al` to 0xf4: the isa-debug-exit terminator
+          //      (M2S sys tests). EXACTLY the prior behaviour — HALT with NO extra
+          //      retire (the golden ends BEFORE the out 0xf4, so retiring it would
+          //      desync the sys gate). The port is q_io_port-equivalent: an imm8
+          //      (E6) or DX (EE); the sys test uses `outb %al,%dx` with dx=0xF4.
+          //  (3) !cosim_en + any other IN/OUT: a genuine out-of-scope op outside
+          //      co-sim -> HALT LOUDLY (no retire), exactly as the pre-M7.3b
+          //      d_unknown path did (the corpus never uses port I/O elsewhere).
+          else if (d_io) begin
+            // INS (string port-input) routes to its dedicated per-element handshake
+            // S_INS (it is BOTH d_io and a K_STR); plain IN/OUT routes to S_IO.
+            if (cosim_en && d_kind==K_STR && d_st==ST_INS) state <= S_INS;
+            else if (cosim_en)                             state <= S_IO;
+            // Outside co-sim: `out 0xf4` is the clean isa-debug-exit terminator
+            // (HALT, no retire); every other IN/OUT is a loud out-of-scope HALT.
+            // Either way -> S_HALT with NO retire (matches the pre-M7.3b path
+            // exactly, so the sys gates are byte-for-byte unchanged).
+            else          state <= S_HALT;
           end
           // ---- M7.1 int-0x80 PROXY (user-mode Quake lock-step) ---------------
           // When proxy_en is set, an `int 0x80` does NOT halt. We apply the GOLDEN
@@ -4076,6 +4279,44 @@ module core
               K_BSWAP: begin logic [31:0] v; v=gpr[q_dst_reg];
                 gpr[q_dst_reg]<={v[7:0],v[15:8],v[23:16],v[31:24]}; end
 
+              // ---- CPUID (0F A2) — deterministic leaf table for `-cpu pentium` ----
+              // CPUID writes eax/ebx/ecx/edx as a pure function of the leaf (eAX).
+              // It touches NO flags. These constants are the EXACT values qemu
+              // `-cpu pentium` returns (verified against the golden's 261 CPUID
+              // retirements in the 300k Win95 boot prefix), so this is a faithful
+              // ISA model — NOT injected environment. The boot only ever needs three
+              // distinct results:
+              //   leaf 0x00000000 : max-basic-leaf=1 + "GenuineIntel" vendor string
+              //                     (ebx="Genu" ecx="ntel" edx="ineI").
+              //   leaf 0x40000000 : the TCG hypervisor leaf — max-hyp=0x40000001 +
+              //                     the "TCGTCGTCG" signature (ebx/ecx/edx).
+              //   everything else : qemu clamps to the leaf-1 Pentium result
+              //                     (eax=0x543 family5/model4/step3, the P5 feature
+              //                     flags edx=0x008003bd; ebx=0x800; ecx=0x80000000).
+              //                     This covers leaf 1, the extended base 0x80000000,
+              //                     and every unknown 0x4000_01xx..0x4000_ffxx leaf the
+              //                     SeaBIOS hypervisor scan probes. ECX (subleaf) is
+              //                     not consulted by any leaf this boot touches.
+              // Reached only under cosim_en (the decode gates K_CPUID on cosim_en); the
+              // existing corpus never executes CPUID, so this arm is inert there.
+              K_CPUID: begin
+                unique case (gpr[R_EAX])
+                  32'h0000_0000: begin
+                    gpr[R_EAX]<=32'h0000_0001; gpr[R_EBX]<=32'h756e_6547;
+                    gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69;
+                  end
+                  32'h4000_0000: begin
+                    gpr[R_EAX]<=32'h4000_0001; gpr[R_EBX]<=32'h5447_4354;
+                    gpr[R_ECX]<=32'h4354_4743; gpr[R_EDX]<=32'h4743_5447;
+                  end
+                  default: begin
+                    gpr[R_EAX]<=32'h0000_0543; gpr[R_EBX]<=32'h0000_0800;
+                    gpr[R_ECX]<=32'h8000_0000; gpr[R_EDX]<=32'h0080_03bd;
+                  end
+                endcase
+                flags_we=1'b0;   // CPUID modifies no flags
+              end
+
               K_CONV: begin
                 if (!q_conv_cdq) begin
                   if (q_w==3'd2) gpr[R_EAX]<={gpr[R_EAX][31:16], {8{gpr[R_EAX][7]}}, gpr[R_EAX][7:0]};
@@ -4219,6 +4460,11 @@ module core
             logic [31:0] cmt_eip;       // the EIP this instruction commits / fetches next
             logic [3:0]  xbp;           // instruction-breakpoint hit on the committed EIP
             cmt_eip = (q_is_branch && q_branch_taken) ? (next_eip+q_rel) : new_eip;
+            // M7.3b: a 16-bit-operand-size near branch masks the taken target to 16
+            // bits (IA-32: a near JMP/Jcc under a 16-bit operand size truncates EIP
+            // to IP). q_br16 is 0 in 32-bit mode, so every prior gate is unchanged.
+            if (q_br16 && q_is_branch && q_branch_taken)
+              cmt_eip = {16'd0, cmt_eip[15:0]};
             if (flags_we) eflags<=flags_val;
             eip<=cmt_eip;
             // ---- M2S.6 #DB at the retire boundary (gated sys_mode). Checked in P5
@@ -4242,6 +4488,79 @@ module core
             end
           end else if (do_store) begin
             state<=S_STORE;
+          end
+        end
+
+        // -------------------------------------------------------------------
+        // M7.3b PORT I/O — the IN/OUT bus handshake (entered only under cosim_en).
+        // Single-beat, combinational-OK ack (mirrors the mem bus). On io_ack:
+        //   * IN  (q_io_write=0): write the io_rdata VALUE the TB replayed from the
+        //     golden dev_in into AL/AX/eAX, width-aware via reg_merge. This is the
+        //     sole environment injection — no CPU register/flag/eip is fabricated.
+        //   * OUT (q_io_write=1): nothing to write back; the value already went out
+        //     combinationally on io_wdata. (The TB's cosim isa-debug-exit `out 0xf4`
+        //     stops the run there.)
+        // Then advance EIP past the IN/OUT and RETIRE one record (so the RTL trace
+        // carries the row compare_stream.py grades against the golden). IN/OUT do
+        // NOT touch EFLAGS. #DB checks mirror the normal retire path for fidelity.
+        // -------------------------------------------------------------------
+        S_IO: begin
+          if (io_ack) begin
+            logic [31:0] io_eip;
+            logic [3:0]  io_xbp;
+            io_eip = next_eip;
+            if (!q_io_write)
+              gpr[R_EAX] <= reg_merge(gpr[R_EAX], wmask(io_rdata, q_io_w), q_io_w, 1'b0);
+            eip <= io_eip;
+            io_xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+io_eip, 1'b1)
+                                                : 4'd0;
+            if (sys_mode && io_xbp != 4'd0)
+              arm_db({28'd0, io_xbp}, q_pc, io_eip);     // instr breakpoint at next eip
+            else if (sys_mode && tf_at_issue)
+              arm_db(32'd1 << DR6_BS, q_pc, io_eip);     // TF single-step trap
+            else begin
+              retire_valid <= 1'b1;
+              state <= S_PIPE;
+            end
+          end
+        end
+
+        // -------------------------------------------------------------------
+        // M7.3c INS (port-input string) — per-element IN handshake (cosim only).
+        // Each element: IN a byte/word/dword from port DX (the co-sim replays the
+        // recorded dev_in value on io_rdata), then STORE it to ES:[EDI] via the
+        // existing K_STR S_STORE path (which advances EIP / loops on the REP). The
+        // string bookkeeping (EDI += step, ECX -= 1 under REP, last-iter EIP) is set
+        // up HERE, mirroring the K_STR S_EXEC element arm, so S_STORE just writes
+        // str_store_data to [EDI] and retires/loops exactly as MOVS/STOS do. INS
+        // touches NO flags. The IN value is the ONLY injected environment.
+        S_INS: begin
+          logic [31:0] cx;
+          logic        rep_active, last_iter;
+          cx = gpr[R_ECX];
+          rep_active = (q_rep || q_repne);
+          if (rep_active && cx==32'd0) begin
+            // Degenerate REP INS with ECX==0: no port read, no store — advance EIP
+            // and retire one no-op record (matches qemu's degenerate-REP record).
+            eip <= next_eip;
+            if (sys_mode && tf_at_issue) arm_db(32'd1 << DR6_BS, q_pc, next_eip);
+            else begin retire_valid <= 1'b1; state <= S_PIPE; end
+          end else if (io_ack) begin
+            // Capture the IN value, set up THIS element's store + pointer/count
+            // update, then go to S_STORE (str_store_addr/data latched below).
+            ins_data <= wmask(io_rdata, q_io_w);   // width-masked device value
+            gpr[R_EDI] <= gpr[R_EDI] + str_step;   // EDI += width (DF direction)
+            if (rep_active) begin
+              cx = cx - 32'd1;
+              gpr[R_ECX] <= cx;
+              last_iter = (cx==32'd0);
+              str_next_eip <= last_iter ? next_eip : q_pc;  // loop at q_pc if more
+            end else begin
+              str_next_eip <= next_eip;            // non-REP: single element
+            end
+            str_store_addr <= gpr[R_EDI];          // pre-increment [EDI]
+            str_store_data <= wmask(io_rdata, q_io_w);
+            state <= S_STORE;
           end
         end
 
@@ -6440,6 +6759,40 @@ module core
       end else if (mem_req) begin
         mem_addr = mem_xlate(mem_addr, cur_is_d);
       end
+    end
+  end
+
+  // ===========================================================================
+  // M7.3b port-I/O bus driver (separate combinational driver, mirrors mem_*).
+  // Active ONLY in S_IO (which is only ever entered under cosim_en — see the
+  // S_DECODE dispatch), so io_req is 0 every clock in every non-cosim run and the
+  // bus is fully inert there. For an IN (q_io_write=0) the TB returns the golden
+  // dev_in value on io_rdata; for an OUT (q_io_write=1) we drive AL/AX/eAX out on
+  // io_wdata (width per q_io_w). The port is q_io_port (a physical I/O port — NOT
+  // a linear address, so it is never translated).
+  // ===========================================================================
+  always_comb begin
+    io_req   = 1'b0;
+    io_we    = 1'b0;
+    io_addr  = 16'd0;
+    io_size  = 3'd1;
+    io_wdata = 32'd0;
+    if (state==S_IO) begin
+      io_req   = 1'b1;
+      io_we    = q_io_write;
+      io_addr  = q_io_port;
+      io_size  = q_io_w;
+      // OUT drives the source eAX masked to the access width (the CPU's own datum).
+      io_wdata = (q_io_w==3'd1) ? {24'd0, gpr[R_EAX][7:0]}  :
+                 (q_io_w==3'd2) ? {16'd0, gpr[R_EAX][15:0]} : gpr[R_EAX];
+    end
+    // M7.3c INS: each element issues an IN (read) from port DX (q_io_port). Suppress
+    // the request on a degenerate REP INS with ECX==0 (no element -> no port read).
+    else if (state==S_INS && !((q_rep||q_repne) && gpr[R_ECX]==32'd0)) begin
+      io_req   = 1'b1;
+      io_we    = 1'b0;            // INS is always a port READ
+      io_addr  = q_io_port;
+      io_size  = q_io_w;
     end
   end
 
