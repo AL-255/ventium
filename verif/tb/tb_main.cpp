@@ -56,6 +56,14 @@ struct Args {
     uint32_t quiesce    = 64;     // K consecutive no-retire cycles => done
     bool     x87        = false;  // emit x87 fields + header x87:true (M3)
     bool     cycle      = false;  // emit cycle-mode trace + header mode:cycle (M4)
+    // M5B-int: --bus-mode drives the top bus_mode=1, routing the core memory
+    // through the gated pin-level 64-bit P5 bus subsystem (rtl/bus/biu.sv ->
+    // biu_p5). DEFAULT 0 = the direct mem_* path (byte-identical, the M4/M5-gated
+    // path). No new C++ memory responder is needed: the loopback responder is in
+    // RTL, and this same TB memmodel is the bus subsystem's abstract BACK side.
+    // Only FUNCTIONAL equivalence is meaningful through the bus (no pin-level
+    // cycle oracle — docs/m5b-bus-spec.md §5.3), so --bus-mode is for func runs.
+    bool     bus_mode   = false;
     uint32_t errata     = 0;      // M6 errata-enable bus (default 0 = clean core)
     // M2S.1: --system selects boot_mode=system (cold reset at F000:FFF0, real
     // mode) and emits the sys fields + header sys:true. A -bios image is loaded
@@ -97,7 +105,7 @@ struct Args {
         "usage: %s --out <trace.vtrace> [--image <blob> --load <hexaddr>]\n"
         "          [--entry <hexaddr>] [--init-esp <hexaddr>]\n"
         "          [--max-insn N] [--max-cycles M]\n"
-        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle] [--system]\n"
+        "          [--trace-vcd f] [--quiesce K] [--x87] [--cycle] [--bus-mode] [--system]\n"
         "          [--errata <hexmask>] [--smm-dump <file>] [--smbase <hexaddr>]\n"
         "          [--quake-image <image.json> --lockstep <golden.vtrace>]\n"
         "          [--win95-image <image.json> --lockstep <golden.vtrace>]\n", prog);
@@ -133,6 +141,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--quiesce")    a.quiesce    = parse_u32(need("--quiesce"));
         else if (k == "--x87")        a.x87        = true;
         else if (k == "--cycle")      a.cycle      = true;
+        else if (k == "--bus-mode")   a.bus_mode   = true;   // M5B-int
         else if (k == "--system")     a.system     = true;
         else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
         else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
@@ -437,6 +446,7 @@ int main(int argc, char** argv) {
     top->init_esp  = args.init_esp;
     top->boot_mode  = args.system ? 1 : 0;  // M2S.1: system cold reset
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
+    top->bus_mode   = args.bus_mode ? 1 : 0; // M5B-int: route mem via the bus subsystem
     top->errata_en  = args.errata & 0x1F;    // M6/M6B: errata-enable bus (default 0)
     top->proxy_en   = proxy_mode ? 1 : 0;    // M7.1: int-0x80 proxy + %gs base
     top->cosim_en   = cosim_mode ? 1 : 0;    // M7.3b: Win95 port-I/O co-sim bus

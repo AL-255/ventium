@@ -15,7 +15,10 @@ VERILATOR ?= verilator
 HERE      := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OBJ       := $(HERE)/obj
 VTB       := $(OBJ)/vtb
-DUT       := $(HERE)/biu_p5.sv
+# M5B-int: biu_p5 now lives in the canonical RTL home (rtl/bus/biu_p5.sv); this
+# standalone gate builds it DIRECTLY from there (SVA in tb_biu_p5.sv stay active).
+ROOT      := $(abspath $(HERE)/../..)
+DUT       := $(ROOT)/rtl/bus/biu_p5.sv
 TB        := $(HERE)/tb_biu_p5.sv
 
 # testbench-only stylistic waivers (DUT is -Wall clean on its own)

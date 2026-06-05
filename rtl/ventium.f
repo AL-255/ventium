@@ -42,4 +42,10 @@ sys/sys_state.sv
 ucode/ucode_rom.sv
 
 // ---- bus ------------------------------------------------------------------
+// M5B-int: biu_p5 (the standalone pin-level 64-bit P5 bus FSM, M5B) is now in
+// its canonical RTL home and in the build. `biu` is the gated bus SUBSYSTEM
+// (front 32b adapter + biu_p5 instance + loopback pin-level responder),
+// instantiated by ventium_top under bus_mode (default 0 = inert/bypassed).
+// biu_p5 is self-contained (its own localparams, no ventium_pkg import).
+bus/biu_p5.sv
 bus/biu.sv

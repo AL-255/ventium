@@ -23,6 +23,7 @@ planned roadmap and the continuing **R2 leaf-module-extraction** refactor.
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench bands match p5model | ✅ |
 | M5 | Cache-cycle + FP-cycle accuracy | FP/cache bands track p5model | ✅ |
 | M5B | Pin-level 64-bit bus protocol (standalone) | structural + SVA (no oracle) | ✅ standalone |
+| M5B-int | Wire the standalone bus into `rtl/` behind a default-OFF `bus_mode` | bus_mode=0 bit-identical; bus_mode=1 func-EQUIVALENT + SVA hold; standalone still green | ✅ done (2026-06-05) |
 | M6 | Errata & stepping fidelity (stretch) | targeted errata behind a flag | ✅ partial |
 | R1 | RTL modularization + fast gate (`make verify` ~2 s) | all m1–m5 + sys stay green | ✅ |
 
@@ -44,6 +45,40 @@ used: ptask 57310, pcpl 57320, pfault 57330, pv86 57340, pseg/pmode/ppage/pintr/
 pdebug/psmm 57350–57400 (all in 57000–57999). **Not committed** (the orchestrator
 verifies + commits).
 
+**Verification re-run after M5B-int close-out (independently re-run 2026-06-05):**
+gates re-run by me, ACTUAL results:
+- **bus_mode=0 (DEFAULT) — BIT-IDENTICAL (HARD gate):** `make verify` GREEN, exit 0 —
+  **57/57 func PASS** (every program diff-clean vs QEMU incl. x87), all 5 M4 integer
+  bands + all M5 FP/cache bands met, 0 goldens regenerated. Abs-cyc numbers UNCHANGED
+  vs the recorded baseline: mb_depadd C=3497 (+2.85%), mb_indepadd C=1913 (+6.16%),
+  mb_dmiss C=20544 (+0.10%), mb_imiss C=24149 (+0.14%). The bus subsystem is wholly
+  inert in mode 0 (`ventium_top.sv:345` gates `c_req`→0): VCD probe shows **0 real
+  ADS# pulses + 0 BRDY# beats** in mode 0, and the back-side bus access counts are
+  identical to mode 1 (t_stack 592 reads / 48 writes / 308 clocks / 36 insns in BOTH).
+- **bus_mode=1 — FUNCTIONAL + SVA:** the 12-program corpus through `tb_ventium
+  --bus-mode` (`verif/bus/run_busmode_corpus.sh`, reusing the shared func goldens) is
+  **12/12 func-EQUIVALENT vs QEMU** (`compare.py --mode func` exit 0; smoke,t_mem,
+  t_stack,t_string,t_mul,t_loop,t_callret,t_rep,t_rotate,t_div + x87 tx_addsub,tx_ldst).
+  Pins genuinely toggle (VCD: t_stack **73 ADS# pulses + 72 BRDY# data beats** in mode 1).
+  The **19 biu_p5 SVA HOLD in-system**: the `make -C verif/tb rtl-sva` build (`--assert`
+  + `bind biu_p5 biu_p5_sva`) ran the full corpus 12/12 with **ZERO assertion fires**.
+- **STANDALONE bus gate GREEN:** `verif/bus/run.sh` — lint OK + **76 directed checks
+  PASS, 0 FAIL** + the 19 SVA active → RESULT: ALL GREEN.
+- **A couple sys gates EQUIVALENT (bus_mode=0):** pseg RTL-SYS-DIFF-OK (70 records) +
+  pmode RTL-SYS-DIFF-OK (1084 records), both EQUIVALENT to the golden.
+- **Lint clean:** `cd rtl && verilator --lint-only -sv -Wall -Wno-UNUSED -f ventium.f`
+  → 0 warn/err (biu_p5 in the build; only the localized `lint_off UNUSED` for inert
+  biu_p5 pin outputs + a `PINMISSING` around the unconnected dbg_* ports — no new waivers).
+- **Review fix applied (med, honest-doc option a):** the false "bit-identical data
+  carried by the bus / faithful carrier" invariant text in `rtl/bus/biu.sv` (header +
+  the FRONT / bus_rdata_q / responder / unused-net comments) corrected to state
+  `biu_p5` runs as a PROTOCOL EXERCISER only — the address on its pins and the data the
+  loopback returns on d_in are NOT guaranteed to correspond (the responder generally
+  replays the core's subsequent back-side word, since the core's ack is combinational).
+  Comment-only change; the func-equivalent path (`c_rdata = m2_rdata`, combinational +
+  independent of biu_p5), the SVA (protocol-timing, not data), and bus_mode=0 (bypass)
+  are all unaffected — so no gated result changed. **Not committed** (orchestrator commits).
+
 ## Deferred, no-oracle tracks (carried, not auto-started)
 
 - **R2 — leaf-module extraction** (this file's active work; the R1 deferral). Carve
@@ -52,8 +87,20 @@ verifies + commits).
   bit-exact after every step). R1 left these in because they are entangled with the
   shared pipeline FSM; R2 extracts what is mechanically separable and documents what
   must stay in the spine, and why.
-- **M5B-int** — wire the standalone pin-level bus into `rtl/` (would change M5 cycle
-  timing; no bus oracle to re-verify).
+- **M5B-int** — **CLOSED 2026-06-05.** The standalone pin-level bus is now wired into
+  `rtl/` behind a default-OFF `bus_mode`, ADDITIVELY: bus_mode=0 (default) keeps every
+  existing gate BIT-IDENTICAL (the subsystem is wholly inert — `c_req` gated to 0,
+  0 ADS# pulses, M4/M5 cycle bands unchanged), and bus_mode=1 routes the core memory
+  through the real `biu_p5` pin protocol and is func-EQUIVALENT vs QEMU on a 12-program
+  corpus with the 19 SVA holding in-system. Deferral respected: the core still sees the
+  M0 same-cycle ack (its cycle-accurate icache fill is preserved), so the absence of a
+  pin-level cycle oracle costs nothing — NO cycle/pin-timing claim is made through the
+  bus. Per the close-out review, `biu_p5` in-system is documented HONESTLY as a PROTOCOL
+  EXERCISER (it returns a real back-side word on d_in but, because the core's ack is
+  combinational, generally the core's NEXT access, not the word at the address on its
+  pins — benign: the core's data is the independent combinational `c_rdata`, the SVA
+  check protocol not data, bus_mode=0 bypasses it). See the M5B-int verification run
+  below + the PROGRESS.md M5B row.
 - **Hardware task switch** — the far-`JMP`-to-TSS variant is **CLOSED in M2S.4b**
   (`ptask` is now a real RTL `--system` diff, 292 records EQUIVALENT). What stays
   deferred (no corpus / no oracle): the `CALL`-far / `INT`-through-task-gate switch
