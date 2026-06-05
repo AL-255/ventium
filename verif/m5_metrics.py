@@ -103,6 +103,16 @@ DIV_CPI_MIN = 2.5
 # expected p5model per-op occupancy by kernel (for the informational detail).
 DIV_OCC = {"div8": 17, "div16": 25, "div32": 41, "idiv32": 46}
 
+# Integer MULTIPLY occupancy band (review-response, m5-mul-spec.md). MUL/IMUL are
+# non-pipelined microcoded ops the p5model charges occ=10 (all widths). The RTL
+# charges the modeled occupancy as a deferred penalty, so a multiply-dominated
+# kernel's CPI rises above the fast-path baseline. MUL_CPI_MIN gates "the
+# occupancy is present" (a 1-cycle native multiply lands near ~1.5 incl. the
+# loop; the occupancy lifts it to ~2.0), and the abs-cyc-vs-p5model check pins
+# the exact occ=10.
+MUL_CPI_MIN = 1.8
+MUL_OCC = {"mul": 10, "imul2": 10}
+
 # Default tightened abs-cyc tolerance (overridable via --abs-tol-pct from
 # run-m5.sh, which owns the documented M5_TOL_PCT choice).
 DEFAULT_ABS_TOL_PCT = 10.0
@@ -245,6 +255,27 @@ def compute(kernel, rtl_path, golden_path, abs_tol_pct=DEFAULT_ABS_TOL_PCT):
         ok = elevated and tracked
         extra = f"abscyc={d:+.2f}%"
         detail = (f"divide-occupancy present (CPI {cpi:.3f} >= {DIV_CPI_MIN})? "
+                  f"{elevated}; abs-cyc {d:+.2f}% vs p5model (occ~{occ}) "
+                  f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
+        return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
+
+    if short in ("mul", "imul2"):
+        # TWO-part band (mirrors div): (1) multiply occupancy present (CPI above
+        # the fast-path baseline); (2) abs-cyc tracks the p5model golden within
+        # tolerance — pins the modeled occ=10.
+        try:
+            gold = tracefmt.read_trace(golden_path)
+            gold_total = _total_cyc(gold)
+        except Exception as e:
+            return ("FAIL", cpi_s, pair_s, "abscyc=?",
+                    f"golden trace unreadable ({e}) — cannot check abs-cyc")
+        d = _abs_diff_pct(total, gold_total)
+        occ = MUL_OCC.get(short, 0)
+        elevated = cpi >= MUL_CPI_MIN
+        tracked = abs(d) <= abs_tol_pct
+        ok = elevated and tracked
+        extra = f"abscyc={d:+.2f}%"
+        detail = (f"multiply-occupancy present (CPI {cpi:.3f} >= {MUL_CPI_MIN})? "
                   f"{elevated}; abs-cyc {d:+.2f}% vs p5model (occ~{occ}) "
                   f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
         return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail

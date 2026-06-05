@@ -1,0 +1,15 @@
+{
+  "name": "mb_mul",
+  "src": "mb_mul/mb_mul.s",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "m5_cycle": true,
+  "m5_kind": "mul",
+  "m5_gated": true,
+  "m5_metric": "mul_cpi+abscyc",
+  "m5_band": "multiply occupancy: CPI elevated AND abs-cyc within 10% of p5model (occ=10)",
+  "golden_occ": 10,
+  "golden_cyc": 4819,
+  "golden_insns": 2404
+}
