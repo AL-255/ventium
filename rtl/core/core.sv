@@ -499,9 +499,16 @@ module core
   // miss adds dmiss; a misaligned access adds +3 (AP-500). Matches p5_mem() +
   // l1_access() in verif/qemu-plugins/p5trace.c (read-allocate, 2-way LRU).
   localparam int DC_SETS = 128;
-  logic [19:0] dc_tag [DC_SETS][2];   // addr/32/128
-  logic        dc_val [DC_SETS][2];
-  logic        dc_lru [DC_SETS];      // 2-way LRU: way most-recently-used
+  // The dc_tag/dc_val/dc_lru state + the dc_hit() lookup + the dc_access()
+  // allocate/LRU SM + the synchronous reset now live in the dcache_timing module
+  // (rtl/mem/dcache.sv), instantiated below. The spine keeps the penalty policy
+  // (pending_mem_pen / P5_DMISS / P5_MISALIGN) + the cycle_mode gating, and drives
+  // the module's combinational lookup (dc_lu_addr -> dc_lu_hit) + the single
+  // funnelled posedge access port (dc_acc_valid / dc_acc_addr).
+  logic [31:0] dc_lu_addr;   // comb lookup address (= this clock's access address)
+  logic        dc_lu_hit;    // comb: line resident in its set (PRE-access state)
+  logic        dc_acc_valid; // comb: an access/allocate fires this clock
+  logic [31:0] dc_acc_addr;  // comb: the access address
   // I-cache miss penalty (imiss=8) is materialised EMERGENTLY by the existing
   // S_PF line-fill (8 word reads = 8 clocks), so it needs no constant here.
   localparam logic [6:0] P5_DMISS = 7'd8;   // D-cache miss penalty (plugin arg)
@@ -2359,33 +2366,10 @@ module core
     end
   endtask
 
-  // D-cache hit test (timing only): is the 32-byte line containing `addr`
-  // resident in either way of its set? Mirrors p5model l1_access() lookup. Does
-  // NOT mutate state (the allocate/LRU update is done in the sequential block on
-  // a confirmed access, so the model is a true LRU SM, not a combinational peek).
-  function automatic logic dc_hit(input logic [31:0] addr);
-    logic [6:0]  set; logic [19:0] tag;
-    begin
-      set = addr[11:5]; tag = addr[31:12];
-      dc_hit = (dc_val[set][0] && dc_tag[set][0]==tag) ||
-               (dc_val[set][1] && dc_tag[set][1]==tag);
-    end
-  endfunction
-
-  // D-cache access: update LRU on a hit, else allocate the not-MRU way (2-way
-  // LRU replacement, exactly p5model l1_access()). Called once per load access
-  // from the sequential block (so it advances the real cache SM, emergent).
-  task automatic dc_access(input logic [31:0] addr);
-    logic [6:0]  set; logic [19:0] tag; logic hit; logic victim;
-    begin
-      set = addr[11:5]; tag = addr[31:12]; hit = 1'b0; victim = ~dc_lru[set];
-      for (int w=0; w<2; w++)
-        if (dc_val[set][w] && dc_tag[set][w]==tag) begin hit=1'b1; dc_lru[set]<=w[0]; end
-      if (!hit) begin
-        dc_val[set][victim]<=1'b1; dc_tag[set][victim]<=tag; dc_lru[set]<=victim;
-      end
-    end
-  endtask
+  // D-cache hit test + access/allocate now live in the dcache_timing module
+  // (rtl/mem/dcache.sv): the comb lookup is dc_lu_hit (off dc_lu_addr) and the
+  // single posedge access fires when dc_acc_valid is high (on dc_acc_addr). The
+  // combinational drivers for those ports are in the dc_acc_* always_comb below.
 
   // BTB lookup: predicted-taken iff a valid matching entry has counter>=2.
   function automatic logic btb_lookup(input logic [31:0] pc);
@@ -2675,10 +2659,8 @@ module core
       // M5 cycle-accuracy state.
       core_cyc<=32'd0; fp_ready_cyc<=32'd0; pending_mem_pen<=7'd0; stall_cnt<=7'd0;
       fp_occ_pending<=1'b0; fp_issue_cyc<=32'd0;
-      for (int s=0;s<DC_SETS;s++) begin
-        dc_lru[s]<=1'b0; dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0;
-        dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
-      end
+      // D-cache timing arrays (dc_tag/dc_val/dc_lru) are reset inside the
+      // dcache_timing module's own rst_n arm (rtl/mem/dcache.sv).
       retire2_valid<=1'b0; retire_pipe_valid<=1'b0;
       retire_pipe<=2'd0; retire_paired<=1'b0;
       retire2_pipe<=2'd0; retire2_paired<=1'b0;
@@ -2970,12 +2952,15 @@ module core
               // (mem_rdata, above); here we run the real 2-way LRU hit/miss SM and
               // DEFER any miss penalty (read-allocate +dmiss) / misalign (+3) to
               // the next instruction, exactly as p5_mem()/p5model does. A line
-              // that misses is allocated now (dc_access) so re-references hit.
-              dc_access(gpr[u_d.base]);
+              // that misses is allocated now (dc_acc_valid below) so re-references
+              // hit. dc_lu_hit reads the PRE-access state (dc_lu_addr ==
+              // gpr[u_d.base] this clock); the allocate is the dcache_timing
+              // posedge driven by dc_acc_valid/dc_acc_addr (UNGATED — this U-pipe
+              // load runs the SM in func and cycle mode alike).
               begin
                 logic [6:0] pen;
                 pen = 7'd0;
-                if (!dc_hit(gpr[u_d.base]))         pen = pen + P5_DMISS;
+                if (!dc_lu_hit)                     pen = pen + P5_DMISS;
                 if (gpr[u_d.base][1:0] != 2'b00)    pen = pen + P5_MISALIGN;
                 pending_mem_pen <= pen;
               end
@@ -3305,9 +3290,9 @@ module core
             if (cycle_mode) begin
               logic [31:0] la; logic [6:0] pen;
               la = slow_dmem_addr; pen = 7'd0;
-              if (!dc_hit(la))           pen = pen + P5_DMISS;
+              // dc_lu_hit/dc_acc_* are driven to `la` (slow_dmem_addr) this clock.
+              if (!dc_lu_hit)            pen = pen + P5_DMISS;
               if (la[1:0] != 2'b00)      pen = pen + P5_MISALIGN;
-              dc_access(la);
               pending_mem_pen <= pen;
             end
             if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
@@ -3318,11 +3303,11 @@ module core
           if (mem_ack) begin
             mem_load_data2<=mem_rdata; state<=S_EXEC;
             // CMPS second operand [EDI] is also a data load -> D-cache access.
+            // dc_lu_hit/dc_acc_* are driven to gpr[R_EDI] this clock (S_LOAD2).
             if (cycle_mode) begin
               logic [6:0] pen; pen=7'd0;
-              if (!dc_hit(gpr[R_EDI]))      pen = pen + P5_DMISS;
+              if (!dc_lu_hit)               pen = pen + P5_DMISS;
               if (gpr[R_EDI][1:0]!=2'b00)   pen = pen + P5_MISALIGN;
-              dc_access(gpr[R_EDI]);
               pending_mem_pen <= pen;
             end
           end
@@ -3898,7 +3883,9 @@ module core
             if (cycle_mode) begin
               logic [31:0] sa;
               sa = (q_kind==K_STR) ? str_store_addr : st_addr;
-              dc_access(sa);
+              // The LRU access is the dcache_timing posedge (dc_acc_valid driven
+              // to this S_STORE access, dc_acc_addr == sa). Stores add no miss
+              // penalty (skip the dc_lu_hit test) but a misaligned store costs +3.
               if (sa[1:0] != 2'b00) pending_mem_pen <= pending_mem_pen + P5_MISALIGN;
             end
             unique case (q_kind)
@@ -5446,6 +5433,66 @@ module core
                        (cur_is_w && !dtlb_dirty[tlb_idx(cur_lin)]))
                     : !itlb_hit(cur_lin));
   end
+
+  // ===========================================================================
+  // L1 D-cache TIMING model ports (the state/SM live in dcache_timing, below).
+  // dc_acc_valid/dc_acc_addr funnel the SINGLE per-clock LRU access (at most one
+  // by construction: the FSM is a unique-case on `state`, and only the S_PIPE
+  // U-load issue arm, S_LOAD, S_LOAD2, and S_STORE access the cache — never two in
+  // one clock). dc_lu_addr drives the combinational pre-access lookup (dc_lu_hit),
+  // always at the same address as this clock's access so the spine's miss penalty
+  // sees PRE-access state (the dc_hit-then-dc_access read-before-write). All these
+  // mirror the original inline `dc_access(X)` call sites EXACTLY (same guards, same
+  // address, same cycle_mode gating; the U-pipe load is UNGATED). A page-walk
+  // diversion (xlate_miss) skips the FSM body this clock, so it gates every site.
+  // ===========================================================================
+  always_comb begin
+    // U-pipe fast-path load commit (S_PIPE issue arm, is_load). UNGATED by
+    // cycle_mode — the SM runs in func and cycle mode alike, exactly as the
+    // original inline dc_access(gpr[u_d.base]). pipe_load_req already folds in
+    // (state==S_PIPE && pipe_bytes_ok && u_d.simple && u_d.is_load && !pipe_agi &&
+    // mispred_bubbles==0); reaching the issue+commit branch additionally requires
+    // stall_cnt==0, pending_mem_pen==0, not-FP, and !sys_mode.
+    logic u_load_acc;
+    u_load_acc = !xlate_miss && pipe_load_req && (stall_cnt==7'd0) &&
+                 (pending_mem_pen==7'd0) && !u_d.is_fp && !sys_mode;
+
+    dc_acc_valid = 1'b0;
+    dc_acc_addr  = 32'd0;
+    unique case (state)
+      S_PIPE: begin
+        dc_acc_valid = u_load_acc;
+        dc_acc_addr  = gpr[u_d.base];
+      end
+      // Slow-path data accesses: all gated on mem_ack && cycle_mode, mirroring the
+      // original inline `if (cycle_mode) ... dc_access(...)` under `if (mem_ack)`.
+      S_LOAD: begin
+        dc_acc_valid = !xlate_miss && mem_ack && cycle_mode;
+        dc_acc_addr  = slow_dmem_addr;
+      end
+      S_LOAD2: begin
+        dc_acc_valid = !xlate_miss && mem_ack && cycle_mode;
+        dc_acc_addr  = gpr[R_EDI];
+      end
+      S_STORE: begin
+        dc_acc_valid = !xlate_miss && mem_ack && cycle_mode;
+        dc_acc_addr  = (q_kind==K_STR) ? str_store_addr : st_addr;
+      end
+      default: ;
+    endcase
+    // The pre-access lookup is always at this clock's access address (each call
+    // site's dc_hit() used the SAME address as its dc_access()).
+    dc_lu_addr = dc_acc_addr;
+  end
+
+  dcache_timing #(.DC_SETS(DC_SETS)) u_dcache_tm (
+    .clk       (clk),
+    .rst_n     (rst_n),
+    .lu_addr   (dc_lu_addr),
+    .lu_hit    (dc_lu_hit),
+    .acc_valid (dc_acc_valid),
+    .acc_addr  (dc_acc_addr)
+  );
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
   // TLB-resident data access the effective {US,RW,P} (perm) is checked against

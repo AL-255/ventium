@@ -240,8 +240,10 @@ module ventium_top
   fpu_top     u_fpu     (.clk(clk), .rst_n(rst_n));
 
   // §6.1/§6.5 Memory subsystem -------------------------------------------------
+  // R2: the L1 D-cache TIMING model (dcache_timing) is now instantiated INSIDE
+  // the core (rtl/core/core.sv), wired to the load/store SM. The old empty M0
+  // `dcache` placeholder stub here is gone (the module is now dcache_timing).
   icache      u_icache  (.clk(clk), .rst_n(rst_n));
-  dcache      u_dcache  (.clk(clk), .rst_n(rst_n));
   tlb         u_tlb     (.clk(clk), .rst_n(rst_n));
 
   // §6.10 Bus interface unit ---------------------------------------------------

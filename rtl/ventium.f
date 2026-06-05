@@ -31,7 +31,7 @@ core/regfile.sv
 fpu/fpu_top.sv
 
 // ---- mem ------------------------------------------------------------------
-mem/dcache.sv
+mem/dcache_timing.sv
 mem/icache.sv
 mem/tlb.sv
 
