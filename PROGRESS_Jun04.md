@@ -1214,7 +1214,7 @@ differential coverage than the hand-written corpus — at the user's request to
   (`ventium_top --system`) HALTs at the FIRST instruction's POST-code `OUT DX,AL`
   (n=4) — no PC platform — so **`ventium_soc`** (`tb_soc`, `soc_en=1`, whose PMIO
   decoder acks the undecoded POST port) is the correct vehicle. Result:
-  **EQUIVALENT — `ventium_soc` matches qemu-system-i386 byte-for-byte over 30,000
+  **EQUIVALENT — `ventium_soc` matches qemu-system-i386 byte-for-byte over 60,000
   instructions** of test386's prefix (conditional jumps, addressing modes, early
   protected-mode/bit/string tests), per-record under the EFLAGS-undefined mask.
 - **Gate + artifacts** (`verif/external/test386/`): `run-test386-gate.sh` (build

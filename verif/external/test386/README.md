@@ -38,10 +38,10 @@ reference golden (drift-checked by the gate).
 
 ## Status (2026-06-05)
 
-**EQUIVALENT to 30,000 instructions** — `ventium_soc` matches `qemu-system-i386`
-byte-for-byte across the first 30k instructions of test386's prefix (verified;
-the committed reference golden is the fast 1,500-insn prefix). Raise `MAXI` for a
-deeper run. The eventual frontier is expected where test386 reaches an instruction
+**EQUIVALENT to 60,000 instructions** — `ventium_soc` matches `qemu-system-i386`
+byte-for-byte across the first 60k instructions of test386's prefix (verified
+at 1.5k / 30k / 60k; no divergence yet — the committed reference golden is the
+fast 1,500-insn prefix). Raise `MAXI` for a deeper run. The eventual frontier is expected where test386 reaches an instruction
 or platform device the Ventium RTL/SoC does not yet model — an honest gap to triage
 incrementally (the SoC's free-running PIT, or an unimplemented opcode), exactly the
 kind of finding this external corpus is here to surface.
