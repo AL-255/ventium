@@ -1,0 +1,7 @@
+# Build dependencies for the Ventium Sphinx documentation (docs/sphinx/).
+# Pure reStructuredText + the built-in 'alabaster' theme — no extra extensions.
+# Range pin: the doc was authored/verified clean (sphinx-build -W) on Sphinx
+# 9.1.0; this range keeps CI reproducible while allowing patch updates. The
+# catalog uses only long-stable RST constructs (sections, list-table, toctree,
+# simple tables), so warnings-as-errors (-W) stays stable across this range.
+sphinx>=8.2,<10
