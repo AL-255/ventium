@@ -17,9 +17,12 @@
 //     ventium_top calls vtm_retire(n, pc, ...) here, maintaining the monotonic
 //     retire counter n.
 //
-// The remaining PLAN §6 blocks (bpred/issue/caches/tlb/fpu/biu/ucode/sys) are
+// The remaining PLAN §6 blocks (bpred/issue/caches/tlb/fpu/biu/sys) are
 // still M0-style stubs instantiated for a coherent block map; they land in
-// M2..M6.  The integer regfile/fetch/decode/exec are realised inside
+// M2..M6.  (There is no microcode-ROM block: the P5 executes x86 directly —
+// complex/serializing ops are microcode-SEQUENCED by the slow FSM in core.sv,
+// not fetched as P6-style uops from a uop ROM — so the ucode_rom stub was
+// removed.)  The integer regfile/fetch/decode/exec are realised inside
 // core.sv (a coherent functional FSM); the standalone block stubs
 // remain as the future home of the pipelined versions.
 //
@@ -376,9 +379,6 @@ module ventium_top
 
   assign core_mem_rdata = bus_mode ? bus_c_rdata : mem_rdata;
   assign core_mem_ack   = bus_mode ? bus_c_ack   : mem_ack;
-
-  // §6.7 Microcode engine ------------------------------------------------------
-  ucode_rom   u_ucode   (.clk(clk), .rst_n(rst_n));
 
   // §6.9 System state ----------------------------------------------------------
   sys_state   u_sys     (.clk(clk), .rst_n(rst_n));
