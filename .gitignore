@@ -26,6 +26,10 @@ verif/sys/tests/**/*.elf
 verif/sys/tests/**/*.bin
 verif/sys/tests/**/*.o
 
+# sphinx docs build output (sources under docs/sphinx/ are tracked)
+docs/sphinx/_build/
+/_site/
+
 # python
 __pycache__/
 *.pyc
