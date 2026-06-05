@@ -22,10 +22,7 @@ ventium_top.sv
 core/core.sv
 core/bpred_btb.sv
 core/decode.sv
-core/exec_int.sv
-core/fetch.sv
 core/issue_uv.sv
-core/regfile.sv
 
 // ---- fpu ------------------------------------------------------------------
 fpu/fpu_top.sv
@@ -34,9 +31,6 @@ fpu/fpu_top.sv
 mem/dcache_timing.sv
 mem/icache.sv
 mem/tlb.sv
-
-// ---- sys ------------------------------------------------------------------
-sys/sys_state.sv
 
 // ---- bus ------------------------------------------------------------------
 // M5B-int: biu_p5 (the standalone pin-level 64-bit P5 bus FSM, M5B) is now in

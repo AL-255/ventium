@@ -21,10 +21,7 @@ soc/ventium_soc.sv
 core/core.sv
 core/bpred_btb.sv
 core/decode.sv
-core/exec_int.sv
-core/fetch.sv
 core/issue_uv.sv
-core/regfile.sv
 
 // ---- fpu -------------------------------------------------------------------
 fpu/fpu_top.sv
