@@ -45,8 +45,12 @@ with **Verilator**, and verified differentially against **QEMU**.
 - **Self-contained SoC (M8, in progress)** — synthesizable PC-platform device
   models (8259 PIC, 8254 PIT, MC146818 RTC, 8042 keyboard / A20, port-92, ACPI PM
   timer, VGA register file), toward booting without QEMU as the platform. The
-  `ventium_soc` integration (an external INTR/INTA pin + the device fabric), an
-  OPL3/SoundBlaster card, IDE, and PCI follow.
+  `ventium_soc` integration wires the core (an external INTR/INTA pin driving the
+  IDT-delivery FSM) to the **PIC + PIT** (M8.1, on-die IRQ0 — checkpoint-differential)
+  and to the **RTC + 8042 + port-92 + a combined A20 address mask** (M8.2 — a
+  *full per-record* differential vs `qemu-system-i386` over every retired
+  instruction, incl. the 1 MiB A20 wraparound). An OPL3/SoundBlaster card, IDE, and
+  PCI follow.
 
 ## Layout
 
