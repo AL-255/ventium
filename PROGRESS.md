@@ -16,7 +16,7 @@ Newest entries at the top. Dates are ISO (YYYY-MM-DD).
 | M2S.3 | IDT-delivered interrupts/exceptions (gate read → exception frame push → handler → `IRET`); software `INT n`/`INT3`/`INTO`/`UD2` + the M2S.1/.2 hardware-fault DECISIONS now DELIVER | `pintr` + `pfault` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage stay green; `make verify` (user) GREEN | ✅ done-partial (SAME-PRIVILEGE CPL0 delivery: read IDT[v] gate → read gate CS descriptor → push EFLAGS/CS/EIP[/errcode] on SS:ESP → load CS:EIP → handler → `IRET` (pop EIP/CS/EFLAGS, reload CS); `pintr` (INT n/INT3/INTO trap+int gates, 171 records) AND `pfault` (#PF not-present DELIVERS via IDT[14]+CR2+errcode, #GP, #UD; 348 records) = RTL EQUIVALENT to the golden. FAULT pushes faulting EIP (restart), TRAP pushes next EIP; int gate clears IF, both clear TF/NT/RF/VM (IA-32 6.12.1); error code for #DF/#TS/#NP/#SS/#GP/#PF/#AC. user `int 0x80` STILL halts (IDT gated behind sys_mode). DEFERRED: cross-priv stack switch/TSS = M2S.4; gate-Present/gate-DPL/CS-descriptor protection checks (#NP/#GP-on-gate) + per-access perm #PF (perm_fault) + segment-limit #GP (seg_off_over_limit) computed-not-delivered; external/HW INTR + #DB single-step + BOUND not exercised) |
 | M2S.4 | TSS + cross-privilege delivery + inter-priv `IRET` + gate/CS protection (TSS/task switch) | `pcpl` RTL sys-diff-clean vs qemu-system golden; pseg/pmode/ppage/pintr/pfault stay green; `make verify` (user) GREEN | ✅ done-partial (PRIVILEGE MACHINERY: **TR/TSS** (`LTR` loads TR base/limit/sel from the GDT TSS descriptor, `STR`; `SS0:ESP0` privilege stack); **CROSS-PRIV delivery** — gate target CS.DPL < CPL ⇒ load SS:ESP from `TSS.ssN:espN`, push the LARGER 5-word frame (old SS, old ESP, EFLAGS, CS, EIP [+errcode]), CPL 3→0; **INTER-PRIV `IRET`** — pop EIP/CS/EFLAGS + ESP/SS, CPL 0→3, null DS/ES/FS/GS whose DPL < new CPL; **gate/CS protection** (deferred from M2S.3): gate Present→#NP, gate DPL<CPL for `INT n`→#GP, target CS present/code/DPL≤CPL→#NP/#GP. `pcpl` (CPL3 user `INT n` → cross-priv CPL0 handler stack switch → inter-priv `IRET` back to CPL3) = RTL EQUIVALENT to the golden, 304 records. user mode bit-identical (all gated behind `sys_mode`). DEFERRED (documented honest follow-ons): full HW TASK SWITCH (`CALL`/`JMP` to TSS / task gate, `INT` through task gate — `ptask` stays golden self-diff + step-5d validation, RTL --system far-JMP to a system descriptor HALTs cleanly in S_LJMP and is NOT in the RTL gate; tracks the golden bit-for-bit 275 records then halts at ljmp-to-TSS); TSS busy-bit writeback on `LTR` (memory-only, STR returns the selector = the only observed reg effect); `tr_valid`/`tr_limit` #TS bound checks (missing/truncated TSS); cross-priv new-SS protection (SS.DPL/RPL/writable/present #TS/#GP) + inter-priv `IRET` SS RPL/DPL re-validation #GP; per-access perm #PF (`perm_fault`) — all NEGATIVE paths with no triggering corpus test / no oracle) |
 | M2S.5 | SMM / `RSM` (PARTIAL-ORACLE: `SMI#` → save CPU state to the P5 SMRAM save-map → real-mode-like SMM handler → `RSM` restore + resume) | `psmm` RTL `--system` STRUCTURAL self-check (differential golden INFEASIBLE — see below); pseg/pmode/ppage/pintr/pfault/pcpl stay sys-green; `make verify` (user) GREEN | ✅ done-partial (**STRUCTURAL, not differential** — the gdbstub single-step oracle masks `SMI#` via `SSTEP_NOIRQ` + has no SMM awareness ⇒ a differential golden is INFEASIBLE and is NOT fabricated). RTL (gated `sys_mode`): **SMBASE** reg (reset `0x30000`); **`SMI#` source** = the APIC self-IPI (store to `0xFEE00300`, delivery-mode SMI) latched + taken at the next insn boundary, exactly as qemu's APIC — so the SAME bare-metal `psmm.bin` drives it; **`SMI#` entry** saves the CPU state to the **P5** save-map at the documented offsets (CR0 `@SMBASE+0xFFFC`, EIP `+0xFFF0`, EFLAGS `+0xFFF4`, GPRs, the 6 segment selectors, GDT/IDT base, SMBASE slot `+0xFEF8`, rev-id `+0xFEFC` = `0x00020000` bit-17-set, auto-HALT word `+0xFF02`), clears `CR0` PE/PG/EM/TS, sets `CS` sel=`SMBASE>>4` base=`SMBASE` + 4-GiB limits, `EIP=0x8000`, CPL0, 16-bit default; **`RSM` (`0F AA`)** reads the whole map back + commits the restored architectural state (incl. a handler-relocatable SMBASE / resume-EIP) in one clock, resumes. `psmm` self-checked BOTH ways: (3c) qemu **free-run** + QMP memory readback ([0x2000]/[0x2004]/[0x2008] sentinels + the save area + `SMM=0` post-RSM), and (3d) the **RTL** trace (`CS=SMBASE>>4`, `CR0.PE` cleared, EIP `SMBASE+0x8000`; RSM restores CS/CR0.PE/EBX-witness/resume-EIP) + the P5 save-map dump at the documented offsets. user-mode bit-identical (RSM is `#UD` outside SMM/in user mode). DEFERRED (honest): the differential golden (oracle INFEASIBLE); I/O-restart + auto-HALT-restart slots (written 0 / not exercised); a handler that actually relocates SMBASE / modifies resume EIP (only round-trip-to-saved exercised); the exact P5 reserved-area encoding for the hidden descriptor state (RTL-internal convention); **DR6 `@+0xFFCC` / DR7 `@+0xFFC8` / TR `@+0xFFC4` / LDT-base `@+0xFFC0`** (Table 20-1 slots — NOT saved/restored: DR is M2S.6, no LDT-base reg yet, TR left unchanged through SMM; corpus does not touch them so the round-trip closes); FPU not auto-saved per Table 20-1) |
-| M2S.6 | debug registers / `#DB` (last system stage) | per-stage system corpus diff-clean | ☐ not started (NEXT) |
+| M2S.6 | debug registers / `#DB` (last system stage) | `pdebug` RTL `--system` sys-diff-clean vs qemu-system golden (PARTIAL oracle); pseg/pmode/ppage/pintr/pfault/pcpl stay sys-green; `make verify` (user) GREEN | ✅ done-partial (**DR0–DR7 file** (reset DR6=`0xFFFF0FF0`/DR7=`0x400`, reserved-1 fixed-bit masking on write; DR4/DR5 ALIAS DR6/DR7 when CR4.DE=0, **#UD when CR4.DE=1**); **MOV DRn↔GPR** (`0F 21`/`0F 23`, gated `sys_mode`, user-mode bit-identical); **`#DB` delivery** (vector 1, no errcode) through the M2S.3 IDT path via `arm_db()` from the triggering insn's RETIRE boundary (the qemu gdbstub fuses insn+synchronous #DB into ONE record). Three **DIFFERENTIAL** #DB causes: **TF single-step** (DR6.BS, TRAP) keyed off `tf_at_issue` sampled at S_DECODE — now wired on ALL the common retire paths (`do_retire` + every `S_STORE` case: PUSH/CALL/XCHG/PUSHF/string); **DR0–3 instruction-bp** (DR6.Bn, FAULT, honoring EFLAGS.RF suppress+auto-clear); **DR1–3 data-write-bp** (DR6.Bn, TRAP, + the qemu data-watchpoint extra handler-entry record via `S_DB_EXTRA`). `pdebug` (MOV-DR round-trip + 3 #DB deliveries) = RTL EQUIVALENT to the golden, **239 records**. user mode bit-identical (all gated behind `sys_mode`). **DEFERRED (honest):** **DR7.GD general-detect FIRING** — IMPLEMENTED-BUT-DISABLED behind `DBG_GD_ENABLE=1'b0` (qemu 8.2.2 does not model GD ⇒ a differential golden is INFEASIBLE; with the gate off the RTL takes EXACTLY 3 #DB like the golden, so the diff stays EQUIVALENT; **no wired structural self-check** — needs a TB hook for an RTL-only GD-enabled trace, which does not exist yet); BT task-switch debug trap (needs HW task switch, M2S.4 defer); I/O breakpoints (CR4.DE R/W=10); SMM save/restore of DR6/DR7; exotic single-stepped multi-cycle ops not in the corpus; reserved-DR-bit corners) |
 | M3 | x87 FPU | x87 corpus diff-clean vs QEMU (`make m3` exit 0) | ✅ done (x87 functional core: stack/status/control/tag + 80-bit datapath, data movement + normal-operand arithmetic bit-exact vs QEMU; 14-program x87 corpus + 28 integer = 42/42 PASS. Transcendentals, BCD, FSAVE/FRSTOR/FLDENV, unmasked #MF, and non-default **precision** control (PC≠64-bit) are DEFERRED and HALT loudly) |
 | M4 | Dual-issue U/V + pairing + branch prediction | µbench CPI/pairing/mispredict match p5model | ✅ done (real 5-stage U/V fast path + serialized slow path; M1/M2/M3 func gates stay green; all 5 integer cycle bands met EMERGENT from the RTL pipeline — depadd CPI 1.080/pair 0.6%, indepadd CPI 0.590/pair 49.5%, agi 49.9%, brloop mispred 0.2% (7/3004), brrandom mispred 61.0% (244/400). Cycle oracle is an ESTIMATE (PLAN §8); FP/cache cycle accuracy = M5) |
 | M5 | Cache-cycle + x87/FP-cycle accuracy (re-scoped; pin-level bus → M5B) | faddchain gated CPI≈3 + I$/D$-miss kernels track p5model; tightened abs-cyc; func+M4 bands green | ✅ done (FP latency+throughput+occupancy + L1 I$/D$ (2-way/128/LRU) miss timing — all EMERGENT, matching the p5model oracle. m1/m2/m3 stay green (53/53 func-diff-clean); all 5 M4 integer bands met; all 4 new M5 bands met (faddchain CPI 3.01, fpindep 1.16 < chain, dmiss/imiss miss-elevated). Tightened abs-cyc at **M5_TOL_PCT=10%**, achieved: FP/cache kernels ≤0.14% (faddchain +0.5%, fpindep +2%, dmiss +0.10%, imiss +0.14%), integer worst-case +6.16% (indepadd). Cycle oracle is an ESTIMATE (PLAN §8); miss penalty is a p5model assumption. Pin-level bus = M5B (no oracle)) |
@@ -45,6 +45,101 @@ Legend: ☐ not started · ▶ in progress · ✅ done · ⚠ blocked
   1–2. **No RTL exists yet.**
 
 ## Log
+
+### 2026-06-04 — M2S.6 done-partial: debug registers / `#DB` (PARTIAL-ORACLE; differential MOV-DR + 3 #DB causes, GD deferred) — LAST system-mode stage
+
+The sixth and **final system-mode RTL** stage adds the **debug registers (DR0–DR7)**
+and **`#DB` (vector 1) delivery**: MOV to/from a DR, the TF single-step trap, and
+hardware instruction/data breakpoints, all delivered through the M2S.3 IDT path.
+New corpus **`pdebug`** (real→protected, NO paging, a #DB TRAP gate at vector 1):
+(a) MOV DRn↔GPR round-trips, (b) TF single-step a `nop`, (c) a DR0 instruction
+breakpoint, (d) a DR1 data-write breakpoint, (e) a DR7.GD general-detect probe.
+
+**Verification mode — PARTIAL oracle, mostly DIFFERENTIAL (honest).** Unlike psmm,
+the bulk of M2S.6 **IS** differentially observable: `#DB` is a SYNCHRONOUS exception
+raised inside the TB (`raise_exception(EXCP01_DB)`), NOT an `interrupt_request`, so
+`SSTEP_NOIRQ` does **not** mask it — qemu's gdbstub single-step delivers it through
+the guest IDT *before* returning `EXCP_DEBUG` to gdb. So `pdebug` is a REAL RTL
+`--system` differential against the qemu-system golden (**239 records, EQUIVALENT**)
+covering: the MOV-DR round-trip (DR values observed THROUGH the GPRs/memory the
+handlers read — the M2S.1 hidden-base trick; DR values are HMP-only, not in the
+g-packet), the TF single-step `#DB` (DR6.BS, TRAP, resume at next EIP), the DR0
+instruction-breakpoint `#DB` (DR6.B0, FAULT, restart the faulting EIP, RF resume-
+flag honored), and the DR1 data-write `#DB` (DR6.B1, TRAP, incl. the qemu data-
+watchpoint **extra** handler-entry record). The ONE structural corner is **DR7.GD
+general-detect**, which qemu 8.2.2 does NOT model — kept DIFFERENTIAL-EQUIVALENT by
+holding the GD `#DB` fire DISABLED (see DEFERRED).
+
+**What landed (RTL, gated `sys_mode`):**
+- **DR0–DR7 register file** — reset DR6=`0xFFFF0FF0` / DR7=`0x00000400`; on write the
+  reserved-1 fixed bits are forced (DR6 |= `0xFFFF0FF0`, DR7 |= `0x400`) so the read-
+  back is deterministic, exactly matching qemu's `helper_set_dr` in 32-bit mode (the
+  upper-32 reserved mask never bites). **DR4/DR5 ALIAS DR6/DR7 when CR4.DE=0**, and
+  raise **`#UD` when CR4.DE=1** (the P5 debug-extensions semantics; matches qemu's
+  `helper_get/set_dr` `EXCP06_ILLOP`).
+- **MOV DRn↔GPR** — `0F 21` (MOV r32,DRn) / `0F 23` (MOV DRn,r32) decoded mirroring
+  `0F 20`/`0F 22` and **gated on `sys_mode`** (user mode keeps the prior
+  `d_unknown`→HALT, so `make verify` is byte-identical).
+- **`#DB` delivery** — vector 1, no error code, through the M2S.3 `S_INT_GATE` path
+  via a new `arm_db()` task launched FROM the triggering instruction's RETIRE
+  boundary (the qemu gdbstub single-step FUSES the instruction + its synchronous
+  `#DB` into ONE record stamped at the instruction PC). DR6 status bits are sticky.
+- **TF single-step** (DR6.BS, TRAP, pushes next EIP) keyed off `tf_at_issue` sampled
+  at S_DECODE (so a POPF that SETS TF does not self-trap) — wired on `do_retire` AND
+  every `S_STORE` retire case (PUSH/CALL/XCHG/PUSHF/string), so an attempted single-
+  step of ANY common retiring instruction is eligible for the trap (qemu delivers a
+  `#DB` on every stepped insn). **DR0–3 instruction breakpoints** (DR6.Bn, FAULT on
+  the committed next-EIP via `dr_match()` honoring DR7 Ln/Gn + R/Wn + LENn alignment)
+  honor **EFLAGS.RF** suppression + auto-clear. **DR1–3 data-write breakpoints**
+  (DR6.Bn, TRAP, detected at S_STORE) plus the qemu data-watchpoint **extra**
+  handler-entry record (new `S_DB_EXTRA` state via `db_wp_extra`).
+
+`pdebug` = RTL `--system` **EQUIVALENT** to the golden, **239 records** (cr0..cr4 +
+the 6 selectors + GPRs + eflags + eip). Golden self-diff also EQUIVALENT.
+
+**Adversarial-review fixes this phase:** (1) **TF single-step now fires on all the
+common retire paths** — `tf_at_issue` (and the data-write breakpoint) was previously
+honored only on the `do_retire` path and the `K_ALU mov mem,reg` `S_STORE` case; the
+`K_CTRL`/`K_XCHG`/`K_STKMISC`/`K_STR` `S_STORE` cases (CALL/XCHG/PUSHF/string)
+retired WITHOUT checking it, so single-stepping a PUSH/CALL/PUSHF/string under TF=1
+would have missed the `#DB`. Now all of them divert to `arm_db()` when `tf_at_issue`
+(or a data-write hit) is set, matching qemu's per-step delivery. (The corpus single-
+steps only a `nop` ⇒ those paths run with `tf_at_issue=0` today, so this is a
+coverage extension that stays bit-identical on the existing gate.) (2) **MOV DR4/DR5
+now `#UD`s when CR4.DE=1** — previously the DR4→DR6 / DR5→DR7 alias was
+unconditional with no `CR4.DE` test; the alias is correct only for CR4.DE=0, and
+CR4.DE=1 must `#UD`. Added the `creg4[3]` test in S_DECODE (delivers vector 6, no
+errcode, a FAULT). The corpus keeps CR4.DE=0 throughout, so the gate is unchanged;
+the RTL is now spec-faithful for CR4.DE=1. (3) **Manifest GD claim corrected** — the
+committed `pdebug/manifest.json` claimed the GD path is "self-checked STRUCTURALLY
+(the RTL trace MUST show a 4th `#DB` + the `0x2038`/`0x203c` witnesses set)", which
+NO gate performs and which is mutually exclusive with the as-built RTL
+(`DBG_GD_ENABLE=0` ⇒ 3 `#DB`, witnesses 0; flipping it to 1 DIVERGES the only wired
+gate). Reworded lines 32/52/55 to the honest state: GD is IMPLEMENTED-BUT-DISABLED
+and DEFERRED, NOT structurally self-checked (a TB hook for an RTL-only GD-enabled
+trace does not yet exist).
+
+**DEFERRED (honest done-partial):** **DR7.GD general-detect FIRING** — the GD
+decision + `#DB`-fire path is fully CODED but held behind a default-off localparam
+`DBG_GD_ENABLE=1'b0`. qemu 8.2.2 does NOT model GD (`DR7_GD`/`DR6_BD` are defined but
+never tested/set in `target/i386` — grep-confirmed; empirically MOV %dr0 with
+DR7.GD=1 did NOT fault), so a differential golden is **INFEASIBLE** and is NOT
+fabricated; with the gate off the RTL takes EXACTLY 3 `#DB` like the golden, keeping
+the diff EQUIVALENT, and the corpus's section-(e) GD probe runs IDENTICALLY in both
+oracles. There is **no wired structural self-check** of GD firing (it needs a TB hook
+to build an RTL-only `DBG_GD_ENABLE=1` trace, which does not exist — a psmm-style
+3c/3d confirmation is future work). Also deferred: the BT task-switch debug trap
+(needs a HW task switch, M2S.4 defer); I/O breakpoints beyond decode (CR4.DE + R/W=10);
+SMM save/restore of DR6/DR7 (the M2S.5/M2S.6 seam, not exercised by `pdebug`); exotic
+single-stepped multi-cycle ops outside the corpus; exotic P5 reserved-DR-bit corners.
+
+**Gates after the fixes:** `make verify` (user) GREEN + bit-identical (56/56 func +
+all M4/M5 cycle bands); all prior sys tests sys-green — pseg 70 / pmode 1084 /
+ppage 128 / pintr 171 / pfault 348 / pcpl 304 RTL `--system` EQUIVALENT; ptask self-
+diff EQUIVALENT (292); psmm structural self-check PASS both ways; `pdebug` RTL
+`--system` EQUIVALENT (239). verilator lint clean. **M2S.6 is the LAST system-mode
+stage** — the M2S arc (segmentation → paging → IDT delivery → cross-priv/TSS → SMM →
+debug) is complete; the deferred M6 debug/stepping errata become reachable from here.
 
 ### 2026-06-04 — M2S.5 done-partial: SMM / RSM (PARTIAL-ORACLE; STRUCTURAL self-check, not differential)
 
@@ -123,7 +218,8 @@ state (stepping-specific / not publicly documented ⇒ RTL-internal convention a
 `SMBASE+0xFE00`); DR6/DR7/TR/LDT-base save-map slots (above); FPU/DR3–DR0 not
 auto-saved per Table 20-1; APIC-SMI *sourcing* corner cases in the front end.
 
-**Next: M2S.6** — debug registers / `#DB` (the last system-mode stage).
+**Next: M2S.6** — debug registers / `#DB` (the last system-mode stage). _(Done —
+see the M2S.6 entry above.)_
 
 ### 2026-06-04 — M2S.4 done-partial: TSS + cross-privilege delivery + inter-priv IRET + gate/CS protection
 

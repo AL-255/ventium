@@ -175,6 +175,7 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pcpl
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh psmm
+	bash verif/sys/run-sys-golden.sh pdebug
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:
