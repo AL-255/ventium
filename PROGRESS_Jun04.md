@@ -208,6 +208,13 @@ lint clean (0 warn/err). Adversarial review verdict: GENUINE + behavior-preservi
   `ucode_rom` removal). Also FIXES the `ventium_soc.f` MULTITOP lint warning (the stubs
   were uninstantiated extra tops). `make verify` bit-identical (0 goldens regenerated —
   the stubs were no-ops); ventium.f + ventium_soc.f both lint 0; SoC gate still EQUIVALENT.
+- 2026-06-05 — **core.sv DECOMPOSITION** (navigability pass): `core.sv` SPINE 7509 → 4267
+  (−3242, −43 %) via 2 new pure-fn packages (`ventium_sys_pkg` 15 fns / `ventium_x87_pkg`
+  16 fns, 31 verbatim moves) + a 16-file `core_*.svh` include-split of the `unique case`
+  arms (still ONE module / ONE always_ff / ONE case — Verilator concatenates includes pre-
+  elaboration). `reg_read`/`fp_bop`/`fri`/`fst`/`sreg_idx` correctly LEFT in the spine
+  (impure). All 5 gates GREEN + byte-identical (0 goldens regenerated); both filelists lint
+  0; SoC gate EQUIVALENT; ZERO reverts. Reviewed + independently re-run; details below.
 
 ### fpu_top — x87 architectural STATE FILE extraction (2026-06-05, bit-exact)
 
@@ -271,6 +278,88 @@ RTL traces; then diffed against the refactored traces:
 - **Scope clean** — only `rtl/core/core.sv`, `rtl/fpu/fpu_top.sv`, `rtl/ventium_top.sv`
   touched; `rtl/soc`/`verif/soc`/`ventium-refs` and the M8 SoC files UNTOUCHED. Not
   committed — the orchestrator verifies + commits.
+
+### core.sv DECOMPOSITION — pure-fn packages + FSM include-split (2026-06-05, bit-exact)
+
+**What this is.** The R2 navigability pass that finally shrinks the `core.sv` SPINE:
+**7509 → 4267 lines (−3242, −43 %)**, with **zero** behavior change. Two mechanisms,
+both netlist no-ops by construction (verbatim text relocation), each gate-proven:
+1. **Pure-function extraction to two NEW packages.** 31 truly-pure helpers moved
+   VERBATIM out of the module into packages (no module state captured in any body):
+   - `rtl/core/ventium_sys_pkg.sv` (170 lines, `import ventium_decode_pkg::*` for
+     `mfl`) — the 15 segmentation/descriptor/fault/TSS-offset helpers: `mfl_e`,
+     `desc_base`/`desc_limit`/`desc_attr`/`desc_present`/`desc_dpl`/`desc_s`/
+     `desc_type`, `seg_is_code`/`seg_writable`/`seg_readable`, `tsw_save_off`/
+     `tsw_read_off`, `seg_load_fault`, `seg_fault_vec`.
+   - `rtl/core/ventium_x87_pkg.sv` (229 lines, `import fpu_x87_pkg::*`) — the 16 x87
+     instruction-level helpers: `fcom_codes`/`fst_eq`/`fst_lt`, `fx_is_nan`/
+     `fx_is_snan`/`fcom_ie`, `apply_cmp`, `fconst`, `fxam_codes`, `f_mem_as_float`/
+     `f_mem_as_int`, `f_arith`/`f_div_by_zero`/`f_zero_over_zero`/`f_eval`/
+     `f_arith_fstat`. Each body uses only its args + literals + imported `fx_*` ops.
+2. **FSM include-split (the bulk of the reduction).** The one giant `always_ff`'s
+   `unique case (state)` arms are relocated as RAW case-arm text into **14**
+   `core_*.svh` files \`include`d at the original site INSIDE the case; the 2
+   contiguous module-scope combinational drivers go to 2 more `.svh` — 16 files,
+   3045 lines total (each carries a banner "RAW case-arm text … NOT a standalone
+   unit"): `core_fastpath` (S_RESET/S_PF/S_PIPE), `core_fetch_decode`,
+   `core_load`, `core_exec` (S_EXEC, the 619-line largest), `core_io`,
+   `core_store_useq`, `core_seg_ljmp`, `core_int_deliver`, `core_iret`,
+   `core_tss_priv`, `core_tsw`, `core_smm`, `core_fp_exec`, `core_walk`, +
+   `core_bus_driver` / `core_io_driver` (module-scope `always_comb`).
+
+**STAYED in the spine — and why it is STILL ONE FSM module.** `core.sv` remains ONE
+module / ONE `always_ff` / ONE `unique case (state)`: Verilator concatenates the
+include text BEFORE elaboration, so the split is purely textual (source byte-size
+3.39 MB unchanged before/after the include split). The per-clock **FSM prologue**
+(retire bookkeeping + soc intr/nmi sampling + the `xlate_miss`→S_WALK paging
+diversion + the `unique case` header) MUST run before the case every clock, so it
+stays inline (`core.sv:3045-3074`), as do `S_HALT`/`S_F00F_HANG`/`default`/`endcase`
+and the scattered/interleaved tail `always_comb` blocks + function defs + the
+itlb/dtlb instances (not contiguous, low value). Impure helpers correctly LEFT in
+the module (verified present in `core.sv`, absent from both packages): **`reg_read`**
+(reads module `gpr[]` — the brief's mis-listed "pure datapath helper", correctly
+NOT moved), **`fp_bop`** (calls `reg_read` → transitively impure), **`fri`/`fst`**
+(read module `ftop`/`fp_st[]`), **`sreg_idx`** (references the module-local
+`SG_CS..SG_GS` localparams), plus `mem_xlate`/`dr_match`/`smm_off`/`smm_save_data`
+(read CRx/DRx/creg/gpr/seg or module localparams). Step 3 of the plan (moving
+`reg_merge`+`strb_of`) was deliberately **skipped** (not reverted): both are pure
+but their sibling `reg_read` must stay, so a 2-function package was near-zero value.
+
+**Compile/import order (lint-proven).** `+incdir+core` added to BOTH
+`rtl/ventium.f` and `rtl/ventium_soc.f` so the `\`include "core_*.svh"` resolve; the
+two packages inserted AFTER `fpu_x87_pkg.sv` (after `ventium_decode_pkg.sv`) and
+before any module — `ventium_sys_pkg` follows `ventium_decode_pkg` (for `mfl`),
+`ventium_x87_pkg` follows `fpu_x87_pkg` (for `fx_*`). The 4 new imports sit at
+`core.sv:24-27`. Lint passing on both full filelists is the definitive
+elaboration-order proof.
+
+**Bit-exact proof (independently re-run + reviewed 2026-06-05).**
+- **Source-level structural proof (netlist no-op).** Expanded every `\`include` in
+  the new `core.sv` and diffed vs `HEAD:rtl/core/core.sv`: the ONLY added executable
+  lines are the **2 package imports**; ALL 259 removed executable (non-comment) lines
+  appear **verbatim** in the two packages; everything else in the diff is comment
+  banners/pointers. All 16 `.svh` bodies (after banner) are verbatim contiguous
+  substrings of HEAD `core.sv`; all 31 package function bodies are verbatim in HEAD.
+- **`make verify` GREEN + BYTE-IDENTICAL** — func **57/57** PASS, **golden cache hits
+  57/57 (misses regenerated: 0)** = byte-identical traces; all M4 integer + M5 FP/
+  cache bands met to the digit (mb_depadd C=3497 +2.85%, mb_indepadd 1913, mb_dmiss
+  2.504, mb_imiss 6.009, mb_faddchain CPI 3.010, mb_fpindep 1.158 — all unchanged).
+- **`make m3` GREEN — 57 PASS / 0 FAIL** (every `tx_*` x87 program func-diff-clean).
+- **`make verify-sys` exit 0 — 10/10**: pseg/pmode/ppage/pintr/pfault/pcpl/ptask/
+  pdebug/pv86 all RTL-SYS-DIFF-OK EQUIVALENT (9 real RTL `--system` differentials) +
+  psmm SMM-PARTIAL-OK (documented partial-oracle, structural).
+- **SoC gate** (`bash verif/soc/run-soc-gate.sh`) exit 0 — **SOC-GATE-OK
+  CHECKPOINT-DIFFERENTIAL EQUIVALENT** (setup 90/94 byte-identical + 4 documented
+  LAPIC eax-only; checkpoint GPRs+memory MATCH; 4 IRQ0 deliveries structural-OK).
+- **Lint** — `verilator --lint-only -sv -Wall -Wno-UNUSED` on `-f ventium.f` AND
+  `-f ventium_soc.f` both exit 0, **0 warn / 0 err**, 18 modules each.
+- **ZERO reverts** — every check passed first try; nothing regressed.
+- **Scope clean** — only `rtl/core/core.sv` + `rtl/ventium.f` + `rtl/ventium_soc.f`
+  modified, plus 18 new files under `rtl/core/` (2 packages + 16 `.svh`). NO M8 SoC
+  device modules (`rtl/soc/ven_*.sv`) and NO `ventium_soc.sv` logic touched (only its
+  `.f` filelist); `ventium-refs` untouched (its submodule-pointer drift
+  `83a9d2c→8fb9ed0` pre-dates this work — present in the conversation-start snapshot —
+  and affects no gate). Not committed — the orchestrator verifies + commits.
 
 ## M2S.4b — HARDWARE TASK SWITCH (far `JMP` to a 32-bit TSS) — CLOSES the M2S.4 deferral
 
