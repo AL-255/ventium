@@ -13,7 +13,8 @@ package ventium_decode_pkg;
   // op classes
   typedef enum logic [4:0] {
     K_ALU, K_SHIFT, K_SHLDRD, K_MULDIV, K_IMUL2, K_EXT, K_SETCC,
-    K_BITTEST, K_BITSCAN, K_XCHG, K_BSWAP, K_CONV, K_STKMISC, K_STR, K_CTRL
+    K_BITTEST, K_BITSCAN, K_XCHG, K_BSWAP, K_CONV, K_STKMISC, K_STR, K_CTRL,
+    K_CMPXCHG
   } kind_e;
 
   typedef enum logic [2:0] { SM_PUSHA, SM_POPA, SM_PUSHF, SM_POPF, SM_LAHF, SM_SAHF, SM_LEAVE } smk_e;

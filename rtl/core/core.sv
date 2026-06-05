@@ -1156,6 +1156,31 @@ module core
         8'b1100_1???: begin // BSWAP r32
           d_kind=K_BSWAP; d_writes_reg=1'b1; d_dst_reg=op1[2:0]; d_len=pfx_len+4'd2;
         end
+        // ---- 0F B0/B1: CMPXCHG r/m, r ----------------------------------------
+        // CMPXCHG r/m,r (accumulator = AL for 0F B0, eAX for 0F B1). It is an RMW:
+        //   temp = r/m;  CMP accumulator,temp (sets ZF/CF/PF/AF/SF/OF as the
+        //   accumulator-minus-temp subtraction);  if accumulator==temp then
+        //   r/m <- src (the reg operand) and ZF=1; else accumulator <- temp and
+        //   ZF=0 (the memory dst is written back UNCHANGED to keep the locked RMW
+        //   atomic — matches QEMU). q_src_reg carries the reg operand to store;
+        //   the destination is q_dst_reg (reg form) or q_ea (memory form). The
+        //   compare/flags reuse the ALU_CMP path with a=accumulator, b=temp.
+        // The LOCK prefix (F0) is a functional no-op here (already consumed in the
+        // prefix loop into pfx_lock); on this in-order single-core the RMW is
+        // already atomic. Kept on the proven slow FSM (NP / microcoded). Not gated
+        // on proxy_en — a general ISA fix valid in all modes.
+        8'hB0,8'hB1: begin
+          d_kind=K_CMPXCHG; d_writes_flags=1'b1;
+          d_w=(op1==8'hB0)?3'd1:(eff_opsize?3'd2:3'd4);
+          d_src_reg=modrm_reg; d_src_high8=(op1==8'hB0)&&modrm_reg[2];
+          if (modrm_mod==2'b11) begin
+            d_dst_reg=modrm_rm; d_dst_high8=(op1==8'hB0)&&modrm_rm[2];
+            d_writes_reg=1'b1; d_len=pfx_len+4'd3;
+          end else begin
+            d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1;
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end
+        end
         // ---- 0F C7: CMPXCHG8B (/1, memory only) ------------------------------
         // The ONLY valid form is a MEMORY destination (mod != 11). A REGISTER
         // destination (mod == 11) is an invalid opcode (#UD). The clean core does
@@ -1875,6 +1900,12 @@ module core
   logic [31:0] q_ea, q_pc;
   logic [2:0]  q_w;
   logic        q_dst_high8, q_src_high8;
+  // CMPXCHG (0F B0/B1) mem-form: latched equality decision. Computed in S_EXEC
+  // (before the conditional accumulator update mutates EAX) and consumed in
+  // S_STORE's store-operand resolution, so the write data stays stable across
+  // the S_EXEC->S_STORE clock even though gpr[R_EAX] changes on the not-equal
+  // path. 1 => store src (equal); 0 => write the original temp back unchanged.
+  logic        cmpxchg_wrsrc_r;
   kind_e       q_kind;
   logic [2:0]  q_shrot;
   logic        q_shift_cl, q_shift_one;
@@ -2101,6 +2132,21 @@ module core
     sh_shm1  = (sh_cnt==6'd0) ? sh_val : shrot_result(q_shrot, sh_val, sh_cnt-6'd1, eflags[0], q_w);
   end
 
+  // ---- CMPXCHG (0F B0/B1) combinational compute -----------------------------
+  // accumulator = AL/eAX; temp = the destination operand (memory load for the
+  // mem form, the GPR for the reg form). Flags = CMP accumulator,temp (i.e.
+  // accumulator - temp), reusing the canonical ALU_CMP flag computation.
+  logic [31:0] cmpxchg_acc, cmpxchg_temp, cmpxchg_flags;
+  logic        cmpxchg_eq;
+  always_comb begin
+    cmpxchg_acc  = reg_read(R_EAX, q_w, 1'b0);
+    cmpxchg_temp = (q_mem_read && q_mem_dst) ? wmask(mem_load_data, q_w)
+                                             : reg_read(q_dst_reg, q_w, q_dst_high8);
+    cmpxchg_eq   = (cmpxchg_acc == cmpxchg_temp);
+    cmpxchg_flags= flags_next(ALU_CMP, cmpxchg_acc, cmpxchg_temp,
+                              cmpxchg_acc - cmpxchg_temp, eflags, q_w);
+  end
+
   // ===========================================================================
   // Retire snapshot
   // ===========================================================================
@@ -2212,6 +2258,13 @@ module core
       st_data = sh_out;
     end else if (q_kind==K_XCHG) begin
       st_data = reg_read(q_src_reg,q_w,q_src_high8);
+    end else if (q_kind==K_CMPXCHG) begin
+      // CMPXCHG mem-dst: store src (reg operand) if equal, else write the
+      // original temp back UNCHANGED (keeps the locked RMW atomic, per QEMU).
+      // Uses the LATCHED equality (cmpxchg_wrsrc_r) — by S_STORE gpr[R_EAX] may
+      // have been updated on the not-equal path, so the live cmpxchg_eq is stale.
+      st_data = cmpxchg_wrsrc_r ? reg_read(q_src_reg,q_w,q_src_high8)
+                                : wmask(mem_load_data,q_w);
     end else if (q_is_pop) begin
       // POP m: write the popped stack word to the memory destination.
       st_data = mem_load_data;
@@ -3993,6 +4046,31 @@ module core
                   gpr[q_src_reg]<=reg_merge(gpr[q_src_reg], a, q_w, q_src_high8);
                 end
                 flags_we=1'b0;
+              end
+
+              K_CMPXCHG: begin
+                // Flags = CMP accumulator,temp (always written, both forms). The
+                // conditional accumulator update (acc <- temp when NOT equal) is
+                // committed here for both forms. Source store / dst-reg write is
+                // conditional on equality.
+                eflags<=cmpxchg_flags; flags_we=1'b0;
+                if (!cmpxchg_eq)
+                  gpr[R_EAX]<=reg_merge(gpr[R_EAX], cmpxchg_temp, q_w, 1'b0);
+                if (q_mem_write) begin
+                  // memory form: write src (equal) or temp-unchanged (not equal)
+                  // in S_STORE. Latch the decision NOW — the accumulator update
+                  // above changes EAX, so the live cmpxchg_eq is no longer valid
+                  // by the S_STORE clock.
+                  cmpxchg_wrsrc_r<=cmpxchg_eq;
+                  do_store=1'b1; do_retire=1'b0;
+                end else begin
+                  // register form: on equality the dst GPR gets src; otherwise it
+                  // is left unchanged (the accumulator already took temp above).
+                  if (cmpxchg_eq)
+                    gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg],
+                                              reg_read(q_src_reg,q_w,q_src_high8),
+                                              q_w, q_dst_high8);
+                end
               end
 
               K_BSWAP: begin logic [31:0] v; v=gpr[q_dst_reg];
