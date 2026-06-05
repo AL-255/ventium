@@ -210,6 +210,18 @@ module decode
           d.reads=_onehot(R_EAX);
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
+        // ---- TEST r/m32, r32 (85 /r), reg form — fast-path batch 4 -----------
+        // Reuses the ALU_TEST datapath (like A9): AND-for-flags only, writes no
+        // reg. UV-pairable. (The byte form 84 is left to the slow FSM — byte-width
+        // flags are not in the 32-bit fast-path datapath.)
+        8'h85: begin
+          if (mod==2'b11) begin
+            d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_TEST; d.wflags=1'b1;
+            d.dst=rm; d.src=reg_f;
+            d.reads=_onehot(rm)|_onehot(reg_f);
+            d.pairs_first=1'b1; d.pairs_second=1'b1;
+          end
+        end
         // ---- NOP (90) --------------------------------------------------------
         8'h90: begin
           d.simple=1'b1; d.is_nop=1'b1; d.len=4'd1;
@@ -248,6 +260,26 @@ module decode
           // a pair (e.g. `<UV op>; jmp`) but cannot LEAD a pair. Matching this pairs
           // the `<mov>; jmp` groups the assembler's p2align filler emits (mb_imiss).
           d.pairs_first=1'b0; d.pairs_second=1'b1;
+        end
+        // ---- JMP rel32 (E9) — fast-path batch 4 ------------------------------
+        // The near (32-bit displacement) sibling of EB; same branch datapath with
+        // rel = b4..b1 (len 5). PV (V-only-pairable, like EB).
+        8'hE9: begin
+          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b0; d.len=4'd5;
+          d.br_taken=1'b1; d.rel={b4,b3,b2,b1};
+          d.pairs_first=1'b0; d.pairs_second=1'b1;
+        end
+        // ---- Jcc rel32 (0F 8x) — fast-path batch 4 ---------------------------
+        // The near (32-bit displacement) sibling of the 7x Jcc rel8 arm. b0=0x0F,
+        // b1 in 80..8F selects the condition (cc=b1[3:0]); rel = b5..b2 (len 6).
+        // PV like 7x. Only the 8x sub-range is fast-pathed; every other 0F two-byte
+        // op leaves simple=0 and falls to the slow FSM.
+        8'h0F: begin
+          if (b1[7:4]==4'h8) begin
+            d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd6;
+            d.cc=b1[3:0]; d.br_taken=cond_true(b1[3:0],flags_in); d.rel={b5,b4,b3,b2};
+            d.pairs_first=1'b0; d.pairs_second=1'b1;
+          end
         end
         // ---- M5: x87 register-form FP whitelist (cycle-mode only) ------------
         // These are recognised by the fast path so the FP latency/throughput

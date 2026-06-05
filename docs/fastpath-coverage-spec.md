@@ -1,6 +1,6 @@
 # AP-500 fast-path coverage gap spec
 
-Status: **BATCHES 1-3 IMPLEMENTED + GATED (2026-06-05); batches 4-5 deferred.**
+Status: **BATCHES 1-4 IMPLEMENTED + GATED (2026-06-05); remaining forms need fast-path EXECUTION work.**
 REVIEW_Jun5.md Limit #5, Action 6 ("Expand AP-500 fast-path coverage").
 
 - **DONE — Batch 1: accumulator-immediate ALU (imm32).** The `ALU eAX, imm32`
@@ -23,14 +23,26 @@ REVIEW_Jun5.md Limit #5, Action 6 ("Expand AP-500 fast-path coverage").
   **pairing 50% / abs-cyc +0.35%**. The 16-bit (66-prefixed) forms keep `0x66`
   first so they stay on the slow FSM.
 - **DONE — Batch 3: shift-by-1 (`D1 /4..7`).** SHL/SHR/SAL/SAR r/m32,1 (the x+x/halve idiom), the implicit-count-1 sibling of `C1` (same datapath, shimm=1, len 2, reg form, PU). Func byte-identical (67/67), all bands held, NEW gated band `mb_sh1` PASSES at pairing 50% / abs-cyc +0.35%.
-- **DEFERRED — batches 4-5** (the byte accumulator forms `04`/`A8`; PUSH/POP `50+r`/`58+r`; near branches `E8`/`E9`/`0F 8x`;
-  memory/store forms). §3 below orders them by frequency × benefit; each needs its
-  own pairing microbenchmark + a re-run of all bands + the full func diff (byte
-  forms add byte-width fast-path ALU; PUSH/POP + stores add real memory/stack
-  functional risk). `D1` shift-by-1 (trivial mirror of `C1`) is the next safe one.
+- **DONE — Batch 4: near branches + TEST-reg (decode-only, reuse execution).**
+  `E9` (JMP rel32, mirrors `EB`), `0F 8x` (Jcc rel32 — a new two-byte `0F`
+  sub-decode in `fp_decode`, mirrors the `7x` Jcc rel8 arm; only the `8x`
+  sub-range is fast-pathed, every other `0F` op stays on the slow FSM), and
+  `85 /r` (TEST r/m32,r32 reg form, reuses the `ALU_TEST` datapath like `A9`).
+  All reuse the existing branch/ALU EXECUTION, so **func byte-identical** (68/68
+  goldens unchanged); NEW gated band `mb_nearbr` (the `cmp/test`→`jcc` idiom with
+  a >128-byte loop body forcing the `0F 85` rel32 back-edge) PASSES at **pairing
+  50% / abs-cyc +1.16%**.
+- **REMAINING — need fast-path EXECUTION, not just a decode arm** (so NOT in the
+  decode-only batches above): the **byte** forms (`04`/`A8`/`84`, byte-width ALU
+  — the fast-path GP writeback is 32-bit-only, no `reg_merge`), **PUSH/POP**
+  (`50+r`/`58+r` — the fast path does no memory stores + needs the ESP micro-
+  update), and the general **memory/store** forms. Each requires extending the
+  fast-path datapath (width-aware writeback / a store path / ESP), carries real
+  functional risk, and must keep the func diff byte-identical — a separate effort,
+  not a quick decode add. §3 orders them by frequency × risk.
 
-Owner doc; the Batch-1/2/3 edits are in `rtl/core/decode.sv` + the `PAIR` band in
-`verif/m5_metrics.py` + `verif/tests/mb_accimm`,`mb_rmimm`,`mb_sh1`.
+Owner doc; the Batch-1..4 edits are in `rtl/core/decode.sv` + the `PAIR` band in
+`verif/m5_metrics.py` + `verif/tests/mb_accimm`,`mb_rmimm`,`mb_sh1`,`mb_nearbr`.
 
 ---
 

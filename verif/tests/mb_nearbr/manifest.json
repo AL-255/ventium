@@ -1,0 +1,12 @@
+{
+  "name": "mb_nearbr",
+  "src": "mb_nearbr/mb_nearbr.s",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "m5_cycle": true,
+  "m5_kind": "pair",
+  "m5_gated": true,
+  "m5_metric": "pairing+abscyc",
+  "m5_band": "near-branch (0F 8x Jcc rel32) + TEST-reg (85) fast-path pairing: pairing% > 40 AND abs-cyc within 10%"
+}
