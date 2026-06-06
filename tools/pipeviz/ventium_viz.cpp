@@ -19,11 +19,27 @@
 #include <unordered_map>
 #include <vector>
 
+// The visualizer can wrap either the verification top (ventium_top, default) or
+// the full SoC (ventium_soc, -DVV_SOC) so bare-metal images that need the SoC's
+// internal port-I/O / PIC / PIT (e.g. test386) actually run. Both instantiate
+// the SAME `core u_core`, so only the top type + the __DOT__ prefix change.
 #include "verilated.h"
-#include "Vventium_top.h"
-#include "Vventium_top___024root.h"   // full root struct -> internal-signal access
-#if __has_include("Vventium_top__Dpi.h")
-#  include "Vventium_top__Dpi.h"      // generated DPI prototypes (signature check)
+#ifdef VV_SOC
+#  include "Vventium_soc.h"
+#  include "Vventium_soc___024root.h"
+#  if __has_include("Vventium_soc__Dpi.h")
+#    include "Vventium_soc__Dpi.h"
+#  endif
+typedef Vventium_soc VTop;
+#  define ROOT_PFX(f) ventium_soc__DOT__u_core__DOT__##f
+#else
+#  include "Vventium_top.h"
+#  include "Vventium_top___024root.h"  // full root struct -> internal-signal access
+#  if __has_include("Vventium_top__Dpi.h")
+#    include "Vventium_top__Dpi.h"     // generated DPI prototypes (signature check)
+#  endif
+typedef Vventium_top VTop;
+#  define ROOT_PFX(f) ventium_top__DOT__u_core__DOT__##f
 #endif
 
 #include "memmodel.h"                 // verif/tb/memmodel.h (reused BFM memory)
@@ -35,12 +51,12 @@ using ventium::MemModel;
 // Hierarchical-signal access helpers. With --public-flat-rw every RTL signal is
 // a public member of the root struct, named <path>__DOT__<sig> with '.' -> __DOT__.
 // ---------------------------------------------------------------------------
-#define CORE(f)   (R->ventium_top__DOT__u_core__DOT__##f)
-#define ICACHE(f) (R->ventium_top__DOT__u_core__DOT__u_icache__DOT__##f)
-#define DCACHE(f) (R->ventium_top__DOT__u_core__DOT__u_dcache_tm__DOT__##f)
-#define ITLB(f)   (R->ventium_top__DOT__u_core__DOT__u_itlb__DOT__##f)
-#define DTLB(f)   (R->ventium_top__DOT__u_core__DOT__u_dtlb__DOT__##f)
-#define FPU(f)    (R->ventium_top__DOT__u_core__DOT__u_fpu_state__DOT__##f)
+#define CORE(f)   (R->ROOT_PFX(f))
+#define ICACHE(f) (R->ROOT_PFX(u_icache__DOT__##f))
+#define DCACHE(f) (R->ROOT_PFX(u_dcache_tm__DOT__##f))
+#define ITLB(f)   (R->ROOT_PFX(u_itlb__DOT__##f))
+#define DTLB(f)   (R->ROOT_PFX(u_dtlb__DOT__##f))
+#define FPU(f)    (R->ROOT_PFX(u_fpu_state__DOT__##f))
 
 // ---- fpd_t packed-struct bit offsets (ventium_decode_pkg.sv, LSB-relative) --
 // fpd_t is 160 bits; the first declared field is the MSB. These are the LSB
@@ -78,7 +94,7 @@ struct RawRetire {           // assembled across the per-n DPI calls
 };
 
 struct Viz {
-  Vventium_top* top = nullptr;
+  VTop* top = nullptr;
   MemModel      mem;
 
   bool     in_reset = true;
@@ -87,6 +103,8 @@ struct Viz {
   int      system     = 0;
   uint64_t clk        = 0;     // completed clocks since reset
   uint64_t cur_cyc    = 0;     // clock index being evaluated (for retire stamping)
+  uint8_t  cur_d32    = 1;     // CS.D pre-edge this clock (retire disasm width)
+  uint32_t cur_cs_base = 0;    // CS base pre-edge (bytes live at cs_base + EIP)
   uint32_t idle       = 0;     // consecutive clocks with no retirement
   uint32_t quiesce    = 256;
 
@@ -175,11 +193,14 @@ extern "C" void vtm_retire(
   r.gpr[0]=eax; r.gpr[1]=ecx; r.gpr[2]=edx; r.gpr[3]=ebx;
   r.gpr[4]=esp; r.gpr[5]=ebp; r.gpr[6]=esi; r.gpr[7]=edi;
   r.seg[0]=cs; r.seg[1]=ss; r.seg[2]=ds; r.seg[3]=es; r.seg[4]=fs; r.seg[5]=gs;
-  // instruction bytes: read up to 16 from the BFM memory at the fetch PC (code
-  // is stable post-commit). In flat user mode pc==linear==physical; capstone in
-  // the GUI refines the true length. (System-mode paged code is best-effort.)
+  r.d32 = v->cur_d32;
+  // instruction bytes: read up to 16 from the BFM memory at the LINEAR fetch
+  // address cs_base + EIP (real mode / based segments need the base; flat user
+  // mode has cs_base==0). capstone refines the true length. Non-identity paged
+  // code is best-effort (no linear->physical translation here).
   r.nbytes = VV_MAXBYTES;
-  for (int i = 0; i < VV_MAXBYTES; ++i) r.bytes[i] = v->mem.read8(pc + (uint32_t)i);
+  for (int i = 0; i < VV_MAXBYTES; ++i)
+    r.bytes[i] = v->mem.read8(v->cur_cs_base + pc + (uint32_t)i);
   v->clk_retires.push_back(r);
 }
 
@@ -189,7 +210,7 @@ extern "C" void vtm_retire(
 namespace {
 
 void service_bus(Viz* v) {
-  Vventium_top* top = v->top;
+  VTop* top = v->top;
   uint32_t rdata = 0; bool ack = false;
   v->mem.service((bool)top->mem_req, (bool)top->mem_we,
                  (uint32_t)top->mem_addr, (uint32_t)top->mem_wdata,
@@ -200,7 +221,10 @@ void service_bus(Viz* v) {
 
 // Drive every optional/secondary input to its inert value (no proxy, no cosim,
 // no pin-level bus, no errata, no external interrupts).
-void tie_off_inputs(Vventium_top* top) {
+void tie_off_inputs(VTop* top) {
+#ifndef VV_SOC
+  // ventium_top exposes the optional feature pins; the SoC top has none of these
+  // (they are driven internally), so only mem_* is tied off there.
   top->bus_mode  = 0;
   top->errata_en = 0;
   top->proxy_en  = 0;
@@ -211,6 +235,7 @@ void tie_off_inputs(Vventium_top* top) {
   top->syscall_gs_base    = 0;
   top->io_rdata = 0;
   top->io_ack   = 0;
+#endif
   top->mem_rdata = 0;
   top->mem_ack   = 0;
 }
@@ -231,7 +256,7 @@ void push_cycle(Viz* v, const vv_cycle_t& c) {
 // One full core clock (low phase settle + rising-edge work), matching tb_main.
 // Returns true if a retirement fired this clock.
 bool clock_once(Viz* v) {
-  Vventium_top* top = v->top;
+  VTop* top = v->top;
   v->clk_retires.clear();
 
   // clk low: combinational settle + serve the bus
@@ -242,6 +267,11 @@ bool clock_once(Viz* v) {
   // stamp the clock the about-to-fire retirements belong to (1-based, matching
   // the TB: core_cyc is the count of completed clocks before this edge).
   v->cur_cyc = v->clk + 1;
+  // CS.D as it stands BEFORE this edge — the operand/addr size the retiring
+  // instruction executed under (so the trace disassembles real vs 32-bit code).
+  { auto* R = top->rootp;
+    v->cur_d32 = CORE(cs_d) ? 1 : 0;
+    v->cur_cs_base = CORE(seg_base)[0]; }   // SG_CS = 0
 
   // clk high: rising edge; the vtm_retire* DPI calls fire inside eval()
   top->clk = 1;
@@ -272,7 +302,7 @@ bool clock_once(Viz* v) {
   }
   push_cycle(v, c);
 
-  if (top->cpu_hung) v->done = true;
+  if (CORE(cpu_hung)) v->done = true;   // core's hang signal (top-agnostic)
   return retired;
 }
 
@@ -287,7 +317,7 @@ void* vv_create(void) {
   Viz* v = new Viz();
   static bool inited = false;
   if (!inited) { const char* a[] = {"ventium_viz"}; Verilated::commandArgs(1, a); inited = true; }
-  v->top = new Vventium_top();
+  v->top = new VTop();
   return v;
 }
 
@@ -334,7 +364,7 @@ uint32_t vv_sizeof(int which) {
 void vv_reset(void* h, uint32_t entry, uint32_t esp, int cycle_mode, int system) {
   Viz* v = (Viz*)h;
   g_viz = v;                 // route DPI callbacks to this instance
-  Vventium_top* top = v->top;
+  VTop* top = v->top;
 
   v->cycle_mode = cycle_mode;
   v->system = system;
@@ -349,7 +379,9 @@ void vv_reset(void* h, uint32_t entry, uint32_t esp, int cycle_mode, int system)
   top->init_eip = entry;
   top->init_esp = esp;
   top->boot_mode = system ? 1 : 0;
-  top->cycle_mode = cycle_mode ? 1 : 0;
+#ifndef VV_SOC
+  top->cycle_mode = cycle_mode ? 1 : 0;   // SoC wires cycle_mode=0 internally
+#endif
   tie_off_inputs(top);
   top->eval();
 
@@ -388,7 +420,7 @@ void vv_get_state(void* h, vv_state_t* out) {
   out->clk = v->clk;
   out->core_cyc = CORE(core_cyc);
   out->state = CORE(state);
-  out->cpu_hung = v->top->cpu_hung ? 1 : 0;
+  out->cpu_hung = CORE(cpu_hung) ? 1 : 0;
 
   out->eip = CORE(eip);
   out->flin = CORE(flin);
@@ -410,6 +442,8 @@ void vv_get_state(void* h, vv_state_t* out) {
   out->sys_mode = CORE(sys_mode);
   out->cpl = CORE(cpl_r);
   out->smm_active = CORE(smm_active);
+  out->cs_d = CORE(cs_d);
+  out->cs_base = CORE(seg_base)[0];   // SG_CS = 0
 
   out->stall_cnt = CORE(stall_cnt);
   out->mispred_bubbles = CORE(mispred_bubbles);

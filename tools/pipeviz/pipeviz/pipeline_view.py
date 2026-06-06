@@ -2,29 +2,30 @@
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 """The main pipeline panel.
 
-Two complementary views of the Ventium core's three pipelines (U / V / FP):
+  * StageBoard — a LIVE snapshot of the classic P5 in-order stages
+    (PF -> D1 -> D2 -> EX -> WB, plus the FP X1/X2/WF/ER stages) as U / V / FP
+    lanes, the cell(s) the core works in THIS clock lit + labelled with the
+    occupying instruction. Derived from the FSM `state` (rtl/core/core.sv).
 
-  * StageBoard  — a LIVE snapshot. The classic P5 in-order stages
-    (PF -> D1 -> D2 -> EX -> WB, plus the FP X1/X2/WF/ER stages) drawn as a
-    grid of U / V / FP lanes, with the cell(s) the core is working in THIS clock
-    lit and labelled with the occupying instruction. Derived from the FSM
-    `state` (rtl/core/core.sv) via disasm.STATE_STAGE.
-
-  * Timeline    — a SCROLLING cycle history (Konata/gem5-pipeview style). One
-    column per core clock: a top band coloured by FSM state (fills, walks, FP,
-    interrupts), thin bubble markers (AGI / mispredict / D-miss / FP-occupancy),
-    and U / V lanes where each retired instruction is placed at its retire cycle
-    with its mnemonic. This is where dual issue, stalls, and cache-fill gaps are
-    visible over time.
+  * Waterfall — the cycle history as a pipeline waterfall: **Y axis = time**
+    (cycles flowing downward), **X axis = stages**, laid out as three side-by-side
+    groups U | V | FP. Each cycle is a row; the stage cell(s) a lane occupies that
+    cycle are filled and labelled. A slow (multi-cycle) instruction streaks
+    diagonally down-and-right through PF->D1->D2->EX->WB; the fast path lights
+    EX+WB in a single row; the FP pipe streaks through X1/X2/ER. Cache fills,
+    stalls, mispredicts and page walks read directly off the colours.
 """
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QSizePolicy, QHBoxLayout
-from PySide6.QtGui import QPainter, QColor, QFont, QPen, QBrush, QFontMetrics
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea,
+                               QSizePolicy, QHBoxLayout)
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics
 from PySide6.QtCore import Qt, QRect, QSize
 
 from . import disasm
+from .disasm import (C_PIPE, C_FILL, C_SLOW, C_FP, C_WALK, C_SYS, C_HALT)
 
 INT_STAGES = ["PF", "D1", "D2", "EX", "WB"]
 FP_STAGES = ["X1", "X2", "WF", "ER"]
+GROUPS = [("U", INT_STAGES, C_PIPE), ("V", INT_STAGES, C_PIPE), ("FP", FP_STAGES, C_FP)]
 _BG = "#0d1117"
 _GRID = "#30363d"
 _DIM = "#161b22"
@@ -50,7 +51,6 @@ class StageBoard(QWidget):
         self._statecol = _DIM
 
     def _blank(self):
-        # value = (list_of_lit_stage_indices, text)
         return {"U": ([], ""), "V": ([], ""), "FP": ([], "")}
 
     def set_state(self, s, backend, bits):
@@ -59,17 +59,19 @@ class StageBoard(QWidget):
         self._statecol = color
         cells = self._blank()
 
+        base = s.cs_base
+
         def dis(addr):
-            t, sz = disasm.text(backend.mem_read(addr, 16), addr, bits)
+            t, sz = disasm.text(backend.mem_read(base + addr, 16), addr, bits)
             return t
 
         issuing = (name == "S_PIPE" and s.stall_cnt == 0 and s.mispred_bubbles == 0
                    and s.pending_mem_pen == 0)
         if name == "S_PIPE":
             if s.ud_is_fp:
-                cells["FP"] = ([0, 1, 3], dis(s.eip))      # FP issue (whole pipe)
+                cells["FP"] = ([0, 1, 3], dis(s.eip))
             elif issuing:
-                cells["U"] = ([3, 4], dis(s.eip))          # EX + WB
+                cells["U"] = ([3, 4], dis(s.eip))
                 if s.pipe_pair:
                     cells["V"] = ([3, 4], dis(s.eip + s.ud_len))
             else:
@@ -104,7 +106,7 @@ class StageBoard(QWidget):
         if s.fp_occ_pending: haz.append("fp-occupancy")
         hz = ("   ⚠ " + ", ".join(haz)) if haz else ""
         pair = "  ⇄ paired" if (name == "S_PIPE" and s.pipe_pair) else ""
-        self._status = (f"{name}  ({desc})   eip=0x{s.eip:08x}   cyc={s.core_cyc}{pair}{hz}")
+        self._status = f"{name}  ({desc})   eip=0x{s.eip:08x}   cyc={s.core_cyc}{pair}{hz}"
         self.update()
 
     def reset(self):
@@ -114,49 +116,42 @@ class StageBoard(QWidget):
     def paintEvent(self, ev):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(_BG))
-        p.setRenderHint(QPainter.Antialiasing, False)
         W = self.width()
         lane_h = 34
         top = 26
         lane_label_w = 38
-        # integer block occupies left ~62%, FP block the rest
         int_w = int((W - lane_label_w - 16) * 0.62)
         fp_x0 = lane_label_w + int_w + 16
 
-        p.setFont(_mono(9, True))
-        p.setPen(QColor(_MUT))
+        p.setFont(_mono(9, True)); p.setPen(QColor(_MUT))
         p.drawText(QRect(0, 4, W, 18), Qt.AlignLeft, "  Integer pipeline (U / V)")
         p.drawText(QRect(fp_x0, 4, W - fp_x0, 18), Qt.AlignLeft, "FP pipeline")
 
-        # stage headers
         icw = int_w / len(INT_STAGES)
         fcw = (W - fp_x0 - 6) / len(FP_STAGES)
-        p.setFont(_mono(8))
-        p.setPen(QColor(_MUT))
+        p.setFont(_mono(8)); p.setPen(QColor(_MUT))
         for i, st in enumerate(INT_STAGES):
-            x = lane_label_w + i * icw
-            p.drawText(QRect(int(x), top - 14, int(icw), 12), Qt.AlignCenter, st)
+            p.drawText(QRect(int(lane_label_w + i * icw), top - 14, int(icw), 12),
+                       Qt.AlignCenter, st)
         for i, st in enumerate(FP_STAGES):
-            x = fp_x0 + i * fcw
-            p.drawText(QRect(int(x), top - 14, int(fcw), 12), Qt.AlignCenter, st)
+            p.drawText(QRect(int(fp_x0 + i * fcw), top - 14, int(fcw), 12),
+                       Qt.AlignCenter, st)
 
-        lanes = [("U", "U", INT_STAGES, lane_label_w, icw, int_w),
-                 ("V", "V", INT_STAGES, lane_label_w, icw, int_w),
-                 ("FP", "FP", FP_STAGES, fp_x0, fcw, W - fp_x0 - 6)]
-        # U and V share the integer block; FP is its own row but we stack all 3
-        for r, (key, label, stages, x0, cw, blockw) in enumerate(lanes):
+        lanes = [("U", "U", INT_STAGES, lane_label_w, icw),
+                 ("V", "V", INT_STAGES, lane_label_w, icw),
+                 ("FP", "FP", FP_STAGES, fp_x0, fcw)]
+        for r, (key, label, stages, x0, cw) in enumerate(lanes):
             y = top + r * lane_h
             p.setFont(_mono(9, True)); p.setPen(QColor(_MUT))
-            p.drawText(QRect(2, y, lane_label_w - 4, lane_h), Qt.AlignVCenter | Qt.AlignRight, label)
+            p.drawText(QRect(2, y, lane_label_w - 4, lane_h),
+                       Qt.AlignVCenter | Qt.AlignRight, label)
             lit_idxs, text = self._cells.get(key, ([], ""))
             for i, st in enumerate(stages):
                 cx = x0 + i * cw
                 cell = QRect(int(cx) + 1, y + 2, int(cw) - 2, lane_h - 6)
-                lit = (i in lit_idxs)
-                col = QColor(self._statecol) if lit else QColor(_DIM)
+                col = QColor(self._statecol) if (i in lit_idxs) else QColor(_DIM)
                 p.fillRect(cell, col)
                 p.setPen(QColor(_GRID)); p.drawRect(cell)
-            # draw the instruction text spanning the lit cells (one label per lane)
             if lit_idxs and text:
                 lo, hi = min(lit_idxs), max(lit_idxs)
                 span = QRect(int(x0 + lo * cw) + 2, y + 2,
@@ -167,193 +162,242 @@ class StageBoard(QWidget):
                 fm = QFontMetrics(p.font())
                 p.drawText(span, Qt.AlignVCenter | Qt.AlignHCenter,
                            fm.elidedText(text, Qt.ElideRight, span.width() - 4))
-
-        # status line
-        p.setFont(_mono(9))
-        p.setPen(QColor(_TXT))
+        p.setFont(_mono(9)); p.setPen(QColor(_TXT))
         p.drawText(QRect(4, top + 3 * lane_h + 4, W - 8, 18), Qt.AlignLeft, self._status)
         p.end()
 
 
 # ===========================================================================
-# Scrolling cycle timeline
+# Waterfall geometry (shared by the header bar + canvas)
 # ===========================================================================
-class _TimelineCanvas(QWidget):
-    COL_W = 13
-    STATE_H = 22
-    BUB_H = 8
-    LANE_H = 20
+GUTTER = 58          # cycle number + state swatch
+STAGE_W = 42
+GAP = 14
+ROW_H = 16
 
+
+def group_x0(gi):
+    x = GUTTER
+    for i in range(gi):
+        x += len(GROUPS[i][1]) * STAGE_W + GAP
+    return x
+
+
+def total_width():
+    last = len(GROUPS) - 1
+    return group_x0(last) + len(GROUPS[last][1]) * STAGE_W + 8
+
+
+def stage_rect_x(gi, lo, hi):
+    x0 = group_x0(gi) + lo * STAGE_W
+    return x0, (hi - lo + 1) * STAGE_W
+
+
+# ===========================================================================
+# Waterfall header bar (sticky column labels above the scrolling canvas)
+# ===========================================================================
+class _WaterfallHeader(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.samples = []            # list of dicts (lightweight copies)
-        self._pc_text = {}           # pc -> mnemonic cache
+        self.setFixedHeight(30)
+        self.setFixedWidth(total_width())
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#161b22"))
+        p.setPen(QColor(_MUT)); p.setFont(_mono(8, True))
+        p.drawText(QRect(0, 0, GUTTER, 30), Qt.AlignCenter, "cyc")
+        for gi, (gname, stages, gcol) in enumerate(GROUPS):
+            gx = group_x0(gi)
+            gw = len(stages) * STAGE_W
+            p.setPen(QColor(gcol)); p.setFont(_mono(9, True))
+            p.drawText(QRect(gx, 0, gw, 14), Qt.AlignCenter, gname)
+            p.setPen(QColor(_MUT)); p.setFont(_mono(7))
+            for i, st in enumerate(stages):
+                p.drawText(QRect(gx + i * STAGE_W, 15, STAGE_W, 13), Qt.AlignCenter, st)
+        p.end()
+
+
+# ===========================================================================
+# Waterfall canvas — Y = time (down), X = stages grouped U | V | FP
+# ===========================================================================
+class _WaterfallCanvas(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.rows = []           # per-cycle dicts
+        self._pc_text = {}
         self.bits = 32
+        self.cs_base = 0
         self.backend = None
-        self._total_h = self.STATE_H + self.BUB_H + 2 * self.LANE_H + 24
-        self.setMinimumHeight(self._total_h)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setFixedWidth(total_width())
         self.setMouseTracking(True)
-        self._hover = -1
+        # live stats
+        self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0, sysm=0)
 
     def reset(self, backend, bits):
-        self.samples = []
-        self._pc_text = {}
-        self.backend = backend
-        self.bits = bits
-        self._resize()
+        self.rows = []; self._pc_text = {}; self.backend = backend; self.bits = bits
+        self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0, sysm=0)
+        self.setFixedHeight(ROW_H + 2)
 
-    def _mnemonic(self, pc):
-        t = self._pc_text.get(pc)
+    def _mn(self, pc):
+        key = (pc, self.cs_base, self.bits)
+        t = self._pc_text.get(key)
         if t is None and self.backend is not None:
-            sz, mn, ops, _ = disasm.disasm_one(self.backend.mem_read(pc, 16), pc, self.bits)
-            t = mn
-            self._pc_text[pc] = t
+            _, mn, _, _ = disasm.disasm_one(
+                self.backend.mem_read(self.cs_base + pc, 16), pc, self.bits)
+            t = mn; self._pc_text[key] = t
         return t or "?"
 
     def ingest(self, backend, since_cyc):
         new = backend.get_cycles(since_cyc, 8192)
         for c in new:
-            self.samples.append({
-                "cyc": c.cyc, "state": c.state,
-                "name": backend.state_name(c.state),
-                "stall": (c.stall_cnt > 0 or c.mispred_bubbles > 0 or c.pending_mem_pen > 0),
-                "mispred": c.mispred_bubbles > 0,
-                "fp": c.fp_occ_pending > 0,
-                "retU": c.retU, "retV": c.retV,
-                "nU": c.nU, "nV": c.nV, "pcU": c.pcU, "pcV": c.pcV,
-            })
-        # rolling cap
-        if len(self.samples) > 40000:
-            self.samples = self.samples[-40000:]
-        self._resize()
-        return self.samples[-1]["cyc"] if self.samples else since_cyc
+            name = backend.state_name(c.state)
+            d = {"cyc": c.cyc, "name": name, "eip": c.eip, "pf_word": c.pf_word,
+                 "retU": c.retU, "retV": c.retV, "pcU": c.pcU, "pcV": c.pcV,
+                 "stall": (c.stall_cnt > 0 or c.pending_mem_pen > 0),
+                 "mispred": c.mispred_bubbles > 0, "fp": c.fp_occ_pending > 0}
+            self.rows.append(d)
+            # stats
+            if c.retU: self.stat["uret"] += 1
+            if c.retV: self.stat["vret"] += 1
+            if name == "S_PF": self.stat["fill"] += 1
+            if d["mispred"]: self.stat["mispred"] += 1
+            if name == "S_WALK": self.stat["walk"] += 1
+            if d["stall"] and name == "S_PIPE": self.stat["stall"] += 1
+        if len(self.rows) > 24000:
+            self.rows = self.rows[-24000:]
+        self.setFixedHeight(max(ROW_H + 2, len(self.rows) * ROW_H + 2))
+        return self.rows[-1]["cyc"] if self.rows else since_cyc
 
-    def _resize(self):
-        w = max(self.parent().width() if self.parent() else 600,
-                len(self.samples) * self.COL_W + 4)
-        self.setFixedSize(w, self._total_h)
-
-    def sizeHint(self):
-        return QSize(len(self.samples) * self.COL_W + 4, self._total_h)
+    def _cells_for(self, s):
+        """Return list of (group_index, lo_stage, hi_stage, text, colour)."""
+        gi = {"U": 0, "V": 1, "FP": 2}
+        name = s["name"]
+        out = []
+        if name == "S_PIPE":
+            any_ret = False
+            if s["retU"]:
+                t = self._mn(s["pcU"])
+                if t[:1] == "f":
+                    out.append((gi["FP"], 0, 3, t, C_FP))
+                else:
+                    out.append((gi["U"], 3, 4, t, C_PIPE))
+                any_ret = True
+            if s["retV"]:
+                out.append((gi["V"], 3, 4, self._mn(s["pcV"]), C_PIPE))
+                any_ret = True
+            if not any_ret:
+                col = C_WALK if s["mispred"] else "#6e7681"
+                lbl = "flush" if s["mispred"] else ("stall" if s["stall"] else "·")
+                out.append((gi["U"], 3, 3, lbl, col))
+        elif name == "S_PF":
+            out.append((gi["U"], 0, 0, f"fill{s['pf_word']}", C_FILL))
+        elif name == "S_FETCH":
+            out.append((gi["U"], 0, 0, self._mn(s["eip"]), C_SLOW))
+        elif name == "S_DECODE":
+            out.append((gi["U"], 1, 2, self._mn(s["eip"]), C_SLOW))
+        elif name in ("S_LOAD", "S_LOAD2"):
+            out.append((gi["U"], 3, 3, "ld", C_SLOW))
+        elif name == "S_EXEC":
+            out.append((gi["U"], 3, 3, self._mn(s["eip"]), C_SLOW))
+        elif name in ("S_STORE", "S_USEQ", "S_IO", "S_INS"):
+            out.append((gi["U"], 4, 4, "st", C_SLOW))
+        elif name == "S_FLOAD":
+            out.append((gi["FP"], 0, 0, "ld", C_FP))
+        elif name == "S_FEXEC":
+            out.append((gi["FP"], 0, 1, self._mn(s["eip"]), C_FP))
+        elif name in ("S_FSTORE", "S_FENV_ST", "S_FENV_LD"):
+            out.append((gi["FP"], 3, 3, "st", C_FP))
+        elif name == "S_WALK":
+            out.append((gi["U"], 0, 4, "page-walk", C_WALK))
+        elif name in ("S_HALT", "S_F00F_HANG"):
+            out.append((gi["U"], 0, 0, "halt", C_HALT))
+        else:
+            # system / interrupt / task / SMM microcode — span the U group
+            out.append((gi["U"], 0, 4, name.replace("S_", "").lower(), C_SYS))
+        return out
 
     def paintEvent(self, ev):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(_BG))
-        if not self.samples:
+        p.fillRect(ev.rect(), QColor(_BG))
+        if not self.rows:
             p.setPen(QColor(_MUT)); p.setFont(_mono(10))
-            p.drawText(self.rect(), Qt.AlignCenter, "step the core to populate the timeline")
+            p.drawText(self.rect(), Qt.AlignTop | Qt.AlignHCenter, "\n step the core to fill the waterfall")
             p.end(); return
 
-        cw = self.COL_W
-        y_state = 2
-        y_bub = y_state + self.STATE_H
-        y_u = y_bub + self.BUB_H
-        y_v = y_u + self.LANE_H
-        base_cyc = self.samples[0]["cyc"]
+        # faint group separators (vertical)
+        p.setPen(QColor(_GRID))
+        for gi in range(len(GROUPS)):
+            x = group_x0(gi)
+            p.drawLine(x - GAP // 2, ev.rect().top(), x - GAP // 2, ev.rect().bottom())
 
-        # only paint visible columns
-        vis = ev.rect()
-        i0 = max(0, vis.left() // cw - 1)
-        i1 = min(len(self.samples), vis.right() // cw + 2)
-
-        p.setFont(_mono(8))
-        for i in range(i0, i1):
-            s = self.samples[i]
-            x = i * cw
-            col = QColor(disasm.STATE_STAGE.get(s["name"], ("", "", "#8b949e", ""))[2])
-            # state band
-            r = QRect(x, y_state, cw - 1, self.STATE_H)
-            p.fillRect(r, col)
-            if s["stall"]:
-                # hatch the stalled clocks darker so bubbles read even within S_PIPE
-                p.fillRect(QRect(x, y_state, cw - 1, self.STATE_H),
-                           QColor(0, 0, 0, 90))
-            # bubble marker row
-            if s["mispred"]:
-                p.fillRect(QRect(x, y_bub, cw - 1, self.BUB_H), QColor(disasm.C_WALK))
-            elif s["stall"]:
-                p.fillRect(QRect(x, y_bub, cw - 1, self.BUB_H), QColor("#6e7681"))
-            elif s["fp"]:
-                p.fillRect(QRect(x, y_bub, cw - 1, self.BUB_H), QColor(disasm.C_FP))
-            # U / V retire blocks
-            if s["retU"]:
-                rr = QRect(x, y_u, cw - 1, self.LANE_H - 1)
-                p.fillRect(rr, QColor(disasm.C_PIPE))
-                p.setPen(QColor("#0d1117"))
-                p.drawText(rr, Qt.AlignCenter, self._mnemonic(s["pcU"])[:4])
-            if s["retV"]:
-                rr = QRect(x, y_v, cw - 1, self.LANE_H - 1)
-                p.fillRect(rr, QColor(disasm.C_PIPE))
-                p.setPen(QColor("#0d1117"))
-                p.drawText(rr, Qt.AlignCenter, self._mnemonic(s["pcV"])[:4])
-
-            # cycle tick every 10
-            if s["cyc"] % 10 == 0:
-                p.setPen(QColor(_GRID))
-                p.drawLine(x, 0, x, self._total_h)
-                p.setPen(QColor(_MUT))
-                p.drawText(QRect(x + 1, y_v + self.LANE_H, 40, 12), Qt.AlignLeft, str(s["cyc"]))
-
-        # hover highlight + tooltip handled in mouseMove
+        base = self.rows[0]["cyc"]
+        r0 = max(0, ev.rect().top() // ROW_H - 1)
+        r1 = min(len(self.rows), ev.rect().bottom() // ROW_H + 2)
+        fm8 = QFontMetrics(_mono(8, True))
+        for r in range(r0, r1):
+            s = self.rows[r]
+            y = r * ROW_H
+            statecol = disasm.STATE_STAGE.get(s["name"], ("", "", _MUT, ""))[2]
+            # gutter: cycle number + state swatch
+            if s["cyc"] % 5 == 0:
+                p.setPen(QColor(_MUT)); p.setFont(_mono(7))
+                p.drawText(QRect(2, y, GUTTER - 14, ROW_H), Qt.AlignVCenter | Qt.AlignRight,
+                           str(s["cyc"]))
+            p.fillRect(QRect(GUTTER - 10, y + 1, 8, ROW_H - 2), QColor(statecol))
+            # lit stage cells
+            for gidx, lo, hi, text, col in self._cells_for(s):
+                x0, w = stage_rect_x(gidx, lo, hi)
+                cell = QRect(int(x0) + 1, y + 1, int(w) - 2, ROW_H - 2)
+                p.fillRect(cell, QColor(col))
+                if text:
+                    p.setPen(QColor("#0d1117") if QColor(col).lightness() > 140 else QColor(_TXT))
+                    p.setFont(_mono(8, True))
+                    p.drawText(cell, Qt.AlignVCenter | Qt.AlignHCenter,
+                               fm8.elidedText(text, Qt.ElideRight, cell.width() - 2))
         p.end()
 
     def mouseMoveEvent(self, ev):
-        i = ev.position().x() // self.COL_W if hasattr(ev, "position") else ev.x() // self.COL_W
-        i = int(i)
-        if 0 <= i < len(self.samples):
-            s = self.samples[i]
+        r = int((ev.position().y() if hasattr(ev, "position") else ev.y()) // ROW_H)
+        if 0 <= r < len(self.rows):
+            s = self.rows[r]
             tip = f"cyc {s['cyc']}  {s['name']}"
             if s["retU"]:
-                tip += f"\nU: n={s['nU']} {self._mnemonic(s['pcU'])} @{s['pcU']:#x}"
+                tip += f"\nU: {self._mn(s['pcU'])} @{s['pcU']:#x}"
             if s["retV"]:
-                tip += f"\nV: n={s['nV']} {self._mnemonic(s['pcV'])} @{s['pcV']:#x}"
-            if s["stall"]:
-                tip += "\n(stall / bubble)"
+                tip += f"\nV: {self._mn(s['pcV'])} @{s['pcV']:#x}"
             self.setToolTip(tip)
 
 
-class Timeline(QWidget):
+class Waterfall(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         v = QVBoxLayout(self); v.setContentsMargins(2, 2, 2, 2); v.setSpacing(2)
         head = QHBoxLayout()
-        title = QLabel("Cycle timeline"); title.setStyleSheet("font-weight:bold;")
-        head.addWidget(title)
-        head.addStretch(1)
-        self.legend = QLabel(); self.legend.setFont(_mono(8))
+        title = QLabel("Pipeline waterfall  (time ↓,  stages →  U | V | FP)")
+        title.setStyleSheet("font-weight:bold;")
+        head.addWidget(title); head.addStretch(1)
         head.addWidget(self._legend_widget())
         v.addLayout(head)
-        # row labels overlaying the scroll area
-        body = QHBoxLayout(); body.setSpacing(0)
-        labels = QVBoxLayout(); labels.setContentsMargins(0, 2, 0, 0); labels.setSpacing(0)
-        for txt, h in [("state", 22), ("bub", 8), ("U", 20), ("V", 20)]:
-            l = QLabel(txt); l.setFixedHeight(h); l.setFixedWidth(34)
-            l.setStyleSheet("color:#8b949e; font-size:8px;")
-            l.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            labels.addWidget(l)
-        labels.addStretch(1)
-        lw = QWidget(); lw.setLayout(labels); lw.setFixedWidth(34)
-        body.addWidget(lw)
+
+        self.header = _WaterfallHeader()
+        hb = QHBoxLayout(); hb.setContentsMargins(0, 0, 0, 0)
+        hb.addWidget(self.header); hb.addStretch(1)
+        v.addLayout(hb)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(False)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.canvas = _TimelineCanvas(self.scroll)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.canvas = _WaterfallCanvas(self.scroll)
         self.scroll.setWidget(self.canvas)
-        self.scroll.setFixedHeight(self.canvas._total_h + 20)
-        lw.setFixedHeight(self.canvas._total_h + 20)
-        body.addWidget(self.scroll, 1)
-        v.addLayout(body, 0)
-        v.addStretch(1)
+        v.addWidget(self.scroll, 1)
         self._last_cyc = 0
-        self._follow = True
 
     def _legend_widget(self):
         w = QWidget(); h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(8)
         for txt, col in disasm.LEGEND:
-            sw = QLabel("  "); sw.setStyleSheet(
-                f"background:{col}; border:1px solid #30363d;")
+            sw = QLabel(); sw.setStyleSheet(f"background:{col}; border:1px solid #30363d;")
             sw.setFixedSize(12, 12)
             lab = QLabel(txt); lab.setStyleSheet("color:#8b949e; font-size:8px;")
             h.addWidget(sw); h.addWidget(lab)
@@ -363,11 +407,17 @@ class Timeline(QWidget):
         self.canvas.reset(backend, bits)
         self._last_cyc = 0
 
+    def set_bits(self, bits):
+        self.canvas.bits = bits
+
+    def stats(self):
+        return self.canvas.stat
+
     def update_from(self, backend):
         total = backend.cycle_count()
         if total <= self._last_cyc:
             return
-        sb = self.scroll.horizontalScrollBar()
+        sb = self.scroll.verticalScrollBar()
         following = sb.value() >= sb.maximum() - 4
         self._last_cyc = self.canvas.ingest(backend, self._last_cyc + 1)
         self.canvas.update()
@@ -387,17 +437,21 @@ class PipelineView(QWidget):
         v.addWidget(bt)
         self.board = StageBoard()
         v.addWidget(self.board)
-        self.timeline = Timeline()
-        v.addWidget(self.timeline, 1)
+        self.waterfall = Waterfall()
+        v.addWidget(self.waterfall, 1)
         self._bits = 32
 
     def set_bits(self, bits):
         self._bits = bits
+        self.waterfall.set_bits(bits)
 
     def reset(self, backend):
         self.board.reset()
-        self.timeline.reset(backend, self._bits)
+        self.waterfall.reset(backend, self._bits)
 
     def update_from(self, backend, state):
-        self.board.set_state(state, backend, self._bits)
-        self.timeline.update_from(backend)
+        bits = 32 if state.cs_d else 16
+        self.waterfall.canvas.bits = bits
+        self.waterfall.canvas.cs_base = state.cs_base
+        self.board.set_state(state, backend, bits)
+        self.waterfall.update_from(backend)

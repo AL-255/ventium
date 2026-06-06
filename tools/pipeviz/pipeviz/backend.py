@@ -30,7 +30,8 @@ class VVState(C.Structure):
         ("seg_sel", u16 * NSEG), ("seg_base", u32 * NSEG),
         ("seg_limit", u32 * NSEG), ("seg_attr", u8 * NSEG),
         ("cr0", u32), ("cr2", u32), ("cr3", u32), ("cr4", u32),
-        ("sys_mode", u8), ("cpl", u8), ("smm_active", u8),
+        ("sys_mode", u8), ("cpl", u8), ("smm_active", u8), ("cs_d", u8),
+        ("cs_base", u32),
         ("stall_cnt", u8), ("mispred_bubbles", u8), ("pending_mem_pen", u8),
         ("pipe_pair", u8), ("pipe_pair_ok", u8),
         ("pf_word", u8), ("pf_fill_addr", u32), ("pf_fill_way", u8),
@@ -60,7 +61,7 @@ class VVCline(C.Structure):
 class VVRetire(C.Structure):
     _fields_ = [("n", u64), ("cyc", u64), ("pc", u32), ("eflags", u32),
                 ("gpr", u32 * NGPR), ("seg", u16 * NSEG),
-                ("pipe", u8), ("paired", u8), ("nbytes", u8), ("bytes", u8 * 16),
+                ("pipe", u8), ("paired", u8), ("d32", u8), ("nbytes", u8), ("bytes", u8 * 16),
                 ("x87_valid", u8), ("fctrl", u16), ("fstat", u16), ("ftag", u16),
                 ("st", (u8 * 10) * NFPR)]
 
@@ -72,16 +73,20 @@ class VVCycle(C.Structure):
                 ("nU", u64), ("nV", u64), ("pcU", u32), ("pcV", u32)]
 
 
-def _default_lib_path():
+def _default_lib_path(soc=False):
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(here, "libventium_viz.so")
+    name = "libventium_viz_soc.so" if soc else "libventium_viz.so"
+    return os.path.join(here, name)
 
 
 class Backend:
-    """Thin pythonic wrapper around the libventium_viz handle."""
+    """Thin pythonic wrapper around the libventium_viz handle. soc=True loads the
+    full-SoC model (libventium_viz_soc.so) so bare-metal images that need the
+    SoC's internal port-I/O / PIC / PIT (e.g. test386) run."""
 
-    def __init__(self, libpath=None):
-        libpath = libpath or _default_lib_path()
+    def __init__(self, libpath=None, soc=False):
+        self.soc = soc
+        libpath = libpath or _default_lib_path(soc)
         if not os.path.exists(libpath):
             raise FileNotFoundError(
                 f"{libpath} not found — run tools/pipeviz/build.sh first.")
