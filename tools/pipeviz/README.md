@@ -56,14 +56,17 @@ a C++17 compiler, `python3` with **PySide6** and **capstone**
     cell(s) the core is working in this clock are lit and labelled with the
     occupying instruction. Derived live from the FSM `state` in
     `rtl/core/core.sv`.
-  * *Pipeline waterfall* — the cycle history as a **waterfall**: **Y axis = time**
-    (cycles flowing down), **X axis = stages**, laid out as three side-by-side
-    groups **U | V | FP**. Each row is one core clock; the stage cell(s) a lane
-    occupies that cycle are filled and labelled. A slow multi-cycle instruction
-    streaks diagonally down-and-right through PF→D1→D2→EX→WB; the fast path
-    lights EX+WB in one row; the FP pipe streaks through X1/X2/ER. Cache fills
-    (amber), stalls (grey), mispredict flushes (red) and page walks read off the
-    colours. Hover a row for the retiring instruction(s).
+  * *Pipeline view* — a **gem5/Konata-style** per-instruction timing diagram:
+    **Y axis = instructions** (one row each, retire order), **X axis = cycles**
+    (time →). Each instruction's lifecycle is reconstructed from the per-cycle
+    FSM trace and drawn as a run of coloured stage cells — **F** fetch/fill,
+    **D** decode, **X** execute, **M** mem, **W** writeback, **=** stall,
+    **!** mispredict-flush — so consecutive instructions cascade diagonally
+    (the classic superscalar pipeline diagram). Integer execute is green,
+    x87 FP execute purple; a stalled instruction's stage stretches (e.g. a
+    D-cache miss shows as a long amber `= = =` run before its `X`). A frozen
+    left gutter holds the instruction labels (n / U·V pipe / PC / mnemonic) and
+    a synced top axis shows cycle ticks. Hover a row for its cycle span.
 * **Memory tables** (top-right) — tabs for the **Code cache** (resident I-cache
   lines + their 32 bytes), **Data cache** (resident D-cache lines; timing model,
   no data array), **TLB** (valid split I/D entries — only populated under paging),
