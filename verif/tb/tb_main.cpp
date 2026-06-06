@@ -576,6 +576,7 @@ int main(int argc, char** argv) {
     int      exit_code   = 0;
     uint64_t next_ckpt   = args.checkpoint_every;   // M14 next checkpoint threshold
     int      ckpt_ring   = 0;                        // 2-deep ring index
+    uint64_t next_vflush = 4000000ull;               // M14 periodic video-stream flush
 
     uint64_t syscalls_replayed = 0;   // M7.1 diagnostics
     while (true) {
@@ -684,6 +685,19 @@ int main(int argc, char** argv) {
             }
             ckpt_ring ^= 1;
             next_ckpt += args.checkpoint_every;
+        }
+
+        // M14 periodic video flush: write the captured P5Q1 stream to --video-out
+        // every ~4M retired insns so a long render run can be converted to PNG
+        // MID-RUN (the first frame is reachable without waiting for exit).
+        if (emu && !args.video_out.empty() && trace.retired() >= next_vflush) {
+            next_vflush += 4000000ull;
+            if (!emu->video().empty()) {
+                if (FILE* vf = std::fopen(args.video_out.c_str(), "wb")) {
+                    std::fwrite(emu->video().data(), 1, emu->video().size(), vf);
+                    std::fclose(vf);
+                }
+            }
         }
 
         // quiescence / limit detection
