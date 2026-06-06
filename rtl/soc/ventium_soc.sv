@@ -179,10 +179,35 @@ module ventium_soc
   logic        eff_a20;      // effective A20 enable (1 = bit20 passes)
   assign eff_a20 = kbc_a20 | p92_a20;
 
-  // core physical address before the A20 mask; the masked address leaves the SoC.
+  // ---- M8.4f memory bus: a 2-master priority mux (core vs IDE bus-master DMA) --
+  // The single mem_* port to the TB is shared. The core's outputs are renamed
+  // core_mem_*; the IDE DMA engine's master port is ide_dma_mem_*. While the DMA
+  // is busy (ide_dma_busy) it OWNS the bus — and the core is parked in the held
+  // BMIC-START OUT (io_ack gated below), so it is not issuing a memory request,
+  // making a simple priority selector correct (no mid-beat corruption). The A20 gate
+  // masks ONLY the core address (the DMA bypasses it — see the mem_addr assign below).
   logic [31:0] core_mem_addr;
-  assign mem_addr = eff_a20 ? core_mem_addr
-                            : (core_mem_addr & ~32'h0010_0000);
+  logic        core_mem_req, core_mem_we;
+  logic [31:0] core_mem_wdata;
+  logic [3:0]  core_mem_wstrb;
+  logic        core_mem_ack;
+  logic        ide_dma_busy;
+  logic        ide_dma_mem_req, ide_dma_mem_we;
+  logic [31:0] ide_dma_mem_addr, ide_dma_mem_wdata;
+  logic [3:0]  ide_dma_mem_wstrb;
+
+  assign mem_req        = ide_dma_busy ? ide_dma_mem_req   : core_mem_req;
+  assign mem_we         = ide_dma_busy ? ide_dma_mem_we    : core_mem_we;
+  assign mem_wdata      = ide_dma_busy ? ide_dma_mem_wdata : core_mem_wdata;
+  assign mem_wstrb      = ide_dma_busy ? ide_dma_mem_wstrb : core_mem_wstrb;
+  // ack routing: to the DMA engine while it owns the bus, else to the core.
+  assign core_mem_ack   = ide_dma_busy ? 1'b0    : mem_ack;
+  // The CPU A20 gate masks ONLY the core's address; PCI bus-master DMA addresses the
+  // physical bus directly (qemu pci_dma_read/write bypass A20), so the DMA address is
+  // muxed in UN-masked. (The <1MiB test buffer makes this a no-op, but it is the
+  // faithful behavior — M8.4f review fold-back.)
+  assign mem_addr = ide_dma_busy ? ide_dma_mem_addr
+                  : (eff_a20 ? core_mem_addr : (core_mem_addr & ~32'h0010_0000));
 
   // Device side outputs the M8.2 SoC observes but does not act on (yet):
   //  * rtc_nmi_dis : RTC index-port bit7 (NMI mask). NMI is tied off in this SoC.
@@ -233,13 +258,13 @@ module ventium_soc
       .inta         (core_inta),
       .inta_vector  (pic_inta_vector),
       .inta_valid   (1'b1),            // the master 8259 always supplies a vector
-      .mem_req      (mem_req),
-      .mem_we       (mem_we),
-      .mem_addr     (core_mem_addr),   // A20-masked into mem_addr below
-      .mem_wdata    (mem_wdata),
-      .mem_wstrb    (mem_wstrb),
-      .mem_rdata    (mem_rdata),
-      .mem_ack      (mem_ack),
+      .mem_req      (core_mem_req),
+      .mem_we       (core_mem_we),
+      .mem_addr     (core_mem_addr),   // muxed (vs DMA) + A20-masked into mem_addr
+      .mem_wdata    (core_mem_wdata),
+      .mem_wstrb    (core_mem_wstrb),
+      .mem_rdata    (mem_rdata),       // shared read bus (core consumes when unparked)
+      .mem_ack      (core_mem_ack),
       .retire_valid (core_retire_valid),
       .retire_pc    (core_retire_pc),
       .retire_state (core_retire_state),
@@ -285,6 +310,8 @@ module ventium_soc
   logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
   logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
   logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
+  logic        cs_bmide;                    // M8.4f: bus-master IDE register block
+  logic [31:0] ide_bm_rdata;                // M8.4f: BMIDE register read value
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
                         io_addr == 16'h00A0 || io_addr == 16'h00A1 ||
@@ -318,6 +345,11 @@ module ventium_soc
     // function shim — just enough to map the bus-master IDE BAR4 (M8.4f).
     cs_pci_addr = io_req && (io_addr == 16'h0CF8);
     cs_pci_data = io_req && (io_addr >= 16'h0CFC && io_addr <= 16'h0CFF);
+    // M8.4f bus-master IDE (BMIDE) register block: the 8-byte PRIMARY-channel window
+    // at the PCI BAR4 base, decoded ONLY when PCI_COMMAND.IO (pci_cmd[0]) is set
+    // (qemu unmaps the I/O BAR otherwise). bmide_base = pci_bar4[15:4]<<4; the
+    // window base..base+7 -> io_addr[15:3] == {pci_bar4[15:4], 1'b0}.
+    cs_bmide = io_req && pci_cmd[0] && (io_addr[15:3] == {pci_bar4[15:4], 1'b0});
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -484,7 +516,8 @@ module ventium_soc
   // -DVEN_IDE_DISK_HEX +define on the obj_dir_soc Verilator build line (the SoC
   // TB Makefile `soc:` target). DISK_SECTORS/CYLS/HEADS/SECS are pinned to the
   // pide 64 KiB image geometry (qemu guess_chs_for_size(128) = 2/16/63).
-  ven_ide #(.DISK_SECTORS(128), .CYLS(2), .HEADS(16), .SECS(63)) u_ide (
+  ven_ide #(.DISK_SECTORS(128), .CYLS(2), .HEADS(16), .SECS(63),
+            .HAS_DMA(1'b1)) u_ide (
       .clk    (clk),
       .rst    (dev_rst),
       .cs     (cs_ide),
@@ -495,7 +528,19 @@ module ventium_soc
       // (M8.4b, written via `outw`); the task-file registers use only [7:0].
       .wdata  (io_wdata[15:0]),
       .rdata  (ide_rdata),
-      .irq14  (ide_irq14)
+      .irq14  (ide_irq14),
+      // M8.4f bus-master DMA: the BMIDE register block + the memory-master port.
+      .cs_bm         (cs_bmide),
+      .bm_wdata      (io_wdata),
+      .bm_rdata      (ide_bm_rdata),
+      .dma_busy      (ide_dma_busy),
+      .dma_mem_req   (ide_dma_mem_req),
+      .dma_mem_we    (ide_dma_mem_we),
+      .dma_mem_addr  (ide_dma_mem_addr),
+      .dma_mem_wdata (ide_dma_mem_wdata),
+      .dma_mem_wstrb (ide_dma_mem_wstrb),
+      .dma_mem_rdata (mem_rdata),
+      .dma_mem_ack   (ide_dma_busy & mem_ack)   // ack only while the DMA owns the bus
   );
 
   // M8.4e: the SECONDARY channel's master — the empty ATAPI CD-ROM qemu's
@@ -515,7 +560,23 @@ module ventium_soc
       .addr   (io_addr),
       .wdata  (io_wdata[15:0]),
       .rdata  (ide2_rdata),
-      .irq14  (ide_irq15)
+      .irq14  (ide_irq15),
+      // M8.4f: the secondary ATAPI CD has no bus-master DMA (HAS_DMA=0 -> the engine
+      // is synthesized away and stays inert). The BMIDE/DMA outputs are intentionally
+      // unconnected (the lint waiver scopes only these tie-offs).
+      /* verilator lint_off PINCONNECTEMPTY */
+      .cs_bm         (1'b0),
+      .bm_wdata      (32'd0),
+      .bm_rdata      (),
+      .dma_busy      (),
+      .dma_mem_req   (),
+      .dma_mem_we    (),
+      .dma_mem_addr  (),
+      .dma_mem_wdata (),
+      .dma_mem_wstrb (),
+      /* verilator lint_on PINCONNECTEMPTY */
+      .dma_mem_rdata (32'd0),
+      .dma_mem_ack   (1'b0)
   );
 
   // ===========================================================================
@@ -577,7 +638,11 @@ module ventium_soc
   // I/O response back to the core: combinational ack the same clock io_req is
   // up; the read data is the selected device's byte zero-extended to 32 bits.
   always_comb begin
-    io_ack   = io_req;                 // single-beat, every request acks at once
+    // M8.4f: every I/O acks the same clock — EXCEPT the BMIC-START OUT that launches
+    // a DMA, which is HELD (io_ack=0) for the whole burst so the core parks in S_IO
+    // (mem bus free) until the engine completes, exactly like qemu's synchronous
+    // bmdma_cmd_writeb. ide_dma_busy is high for the launch clock + the run.
+    io_ack   = io_req && !ide_dma_busy;
     io_rdata = 32'd0;
     if      (cs_pic)    io_rdata = {24'd0, pic_rdata};
     else if (cs_pit)    io_rdata = {24'd0, pit_rdata};
@@ -597,6 +662,7 @@ module ventium_soc
     // window (0xCFC); the core masks to io_size for a byte/word IN.
     else if (cs_pci_addr)            io_rdata = pci_cfg_addr;
     else if (cs_pci_data)            io_rdata = pci_cfg_rdata;
+    else if (cs_bmide)               io_rdata = ide_bm_rdata;   // M8.4f BMIDE regs
     // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
 

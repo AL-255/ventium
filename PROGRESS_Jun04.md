@@ -1714,6 +1714,62 @@ grows to **EQUIVALENT 22947/22947** (first RTL run, oracle-first).
   (under nIEN, `ide_bus_set_irq` is gated so BMIS-INT is never set), proven non-vacuously
   by a CPU read-back of the DMA'd buffer.
 
+### M8.4f — IDE bus-master DMA engine (single-PRD READ DMA) (2026-06-06)
+
+**What this is.** The second M8.4f increment: a working IDE BUS-MASTER DMA path — the
+Win95-boot mechanism — on top of the M8.4f-pre PCI/BAR4 seam. The `pide` gate grows to
+**EQUIVALENT 24040/24040** (first RTL run, oracle-first; all DMA values pinned to the
+live golden before the RTL was written).
+
+- **`ven_ide.sv` (HAS_DMA=1 on the primary).** The BMIDE register file — BMIC (off0,
+  `cmd & 0x09`), BMIS (off2, DMAING RO-to-sw / ERROR·INT write-1-clear / bits5-6 R/W),
+  BMIDTP (off4, dword, low-2 forced 0); a READ DMA (0xC8) arm capturing the LBA; and a
+  PRD-walk + single-sector copy FSM (`DMA_IDLE→PRD0→PRD1→XFER`) driving a NEW
+  single-beat **memory-master port** (`dma_mem_req/we/addr/wdata/wstrb` + `rdata/ack`).
+  On the BMIC START (bit0) 0→1 edge with a DMA armed, it reads one 8-byte EOT PRD from
+  RAM at BMIDTP, copies 512 B (128 dwords, little-endian from `disk[]` — byte-identical
+  to a PIO read) to RAM at the PRD base, then clears DMAING + sets status 0x50 +
+  `advance_lba_regs`. Under nIEN the completion IRQ is gated, so **BMIS-INT is never
+  set** (the test polls DMAING).
+- **`ventium_soc.sv` (the architecturally-sensitive part).** A 2-master **priority mux**
+  on the single `mem_*` port (`core_mem_*` vs `ide_dma_mem_*`, by `ide_dma_busy`), the
+  A20 mask applied to the muxed address, and **`io_ack = io_req && !ide_dma_busy`** — the
+  BMIC-START OUT is HELD for the whole burst so the core parks in S_IO (mem bus free),
+  exactly mirroring qemu's synchronous `bmdma_cmd_writeb`→`dma_cb`. So every instruction
+  after START sees DMA-done state; the golden's BMIS poll loops once and the RTL matches.
+  `cs_bmide` decodes the BAR4 window only when `PCI_COMMAND.IO` is set.
+- **Non-vacuous gate.** The DMA target buffer is pre-filled with a `0xFFFFFFFF` sentinel
+  (distinct from disk content + the PIO buffers); the CPU read-back of all 128 dwords is
+  graded byte-identical to disk LBA0 (word255=0xAA55) — a no-op DMA would fail. BMIDTP
+  readback 0x5000, BMIC 0x09, final BMIS 0x00, status 0x50, LBA advance (nsector 0 /
+  sector 1) — all per-record EQUIVALENT.
+- **Adversarial review (3-agent workflow, 18 confirmed / 5 rejected).** The
+  architecturally-sensitive parts were ADVERSARIALLY VERIFIED SOUND: NO combinational
+  loop (`io_req` is driven off the registered S_IO `state`, not `io_ack`; verilator
+  `-Wall` finds no UNOPTFLAT), the 2-master mem-mux is race-free (the core drives
+  `core_mem_req` only in memory states, never S_IO, and the DMA launches only from a
+  held BMIC-START OUT which is itself an S_IO access), write-vs-read ordering holds, and
+  the gate is non-vacuous (the `0xFFFFFFFF` sentinel would fail a no-op DMA). **Folded
+  back three real fidelity fixes:** (A, 3 reviewers) the task-file status reads **0x58**
+  (DRQ) in the window between `0xC8` and BMIC-START (qemu's `ide_sector_start_dma`
+  returns false so the dispatch never clears it) — now set + gate-proven; (C) the DMA
+  address **bypasses the CPU A20 gate** (PCI bus-master DMA addresses the physical bus
+  directly; A20 now masks only the core address); (D) a true START **0→1 edge guard**
+  on the launch. Documented as KNOWN deferred divergences: OOR-LBA DMA (currently
+  aliases mod-128 vs qemu's range-abort), BMIC STOP / no-armed-START DMAING, the
+  sub-dword BMIC/BMIS access-width replies, and the PRD-count/multi-PRD/WRITE-DMA/LBA48
+  surface.
+- **No regression** (the mem-mux sits on the core's critical path). `make verify-soc`
+  **5/5 PASS** (pide 24040/24040 — the mux passes `core_mem_*` through unchanged when
+  the DMA is idle); `make verify` **69/69 cache hits, 0 regenerated**; SoC lints clean.
+  RTL: `rtl/soc/ven_ide.sv`, `rtl/soc/ventium_soc.sv`; test: `pide.S`; `ventium-refs`
+  untouched.
+- **Deferred (documented, the test issues none):** WRITE DMA (0xCA), multi-PRD
+  scatter-gather, multi-sector (nsector>1), LBA48 DMA (0x25/0x35), the IRQ-driven
+  (nIEN=0) completion + BMIS-INT path, the PRD error branches + BM_STATUS_ERROR, OOR-LBA
+  DMA abort, mid-flight BMIC STOP, secondary-channel DMA, and the full PCI host bridge
+  (M8.5). The engine transfers exactly 128 dwords (the PRD count field is assumed 512).
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the

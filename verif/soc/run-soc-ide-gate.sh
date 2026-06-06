@@ -54,7 +54,7 @@ RTL_OUT="$OUTDIR/pide.rtl.soc.vtrace"
 # RTL in-memory disk[] provide that). An md5 PRE==POST assert (below) enforces it.
 DRIVE="-drive if=ide,format=raw,index=0,file=$IMG_DISK,snapshot=on"
 PORT="${PORT:-51200}"
-MAXI=24000   # M8.4a-e + M8.4e2 review-hardening (guest exits ~22897; headroom)
+MAXI=26000   # M8.4a-e2 + M8.4f-pre PCI + M8.4f READ DMA (guest exits ~24000; headroom)
 
 say(){ echo; echo "=== $* ==="; }
 

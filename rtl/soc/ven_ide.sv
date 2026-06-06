@@ -13,6 +13,12 @@
 //          READ/WRITE MULTIPLE + the register-trajectory lag + LBA48 deferred.
 //   M8.4e: + parameterized as the SECONDARY channel's EMPTY ATAPI CD-ROM
 //          (IS_ATAPI=1 / HAS_DISK=0): the 0xEB14 signature, DIAGNOSTIC status 0x00.
+//   M8.4f: + IDE BUS-MASTER DMA (HAS_DMA=1 on the primary): the BMIDE register
+//          block (BMIC/BMIS/BMIDTP at the PCI BAR4 window) + a memory-master port
+//          + a single-PRD single-sector READ DMA (0xC8). The BMIC-START OUT is held
+//          (the SoC gates io_ack on dma_busy) so the core parks in S_IO while the
+//          engine walks the PRD + copies 512 B disk[]->RAM — matching qemu's
+//          synchronous bmdma_cmd_writeb. Polled via BMIS DMAING (nIEN gates INT).
 //   M8.4e2: + (review fold-back) the ATAPI command surface made command-specific
 //          (NOT a blanket abort): DEVICE RESET (0x08) -> ide_reset+signature/status
 //          0x00/no-IRQ; SET FEATURES (0xEF) completes; FLUSH CACHE (0xE7) ABORTS at
@@ -77,6 +83,12 @@
 //     cached w62/63/88, 0x02/0x82 write-cache patch w85 to 0x4021/0x4001, no-op
 //     group, unsupported abort); SRST (0x3F6 bit2 edge, synchronous signature
 //     restore, no BSY). All gate-proven vs a re-IDENTIFY / status read.
+//   - M8.4f BUS-MASTER DMA (HAS_DMA): the BMIDE registers (BMIC cmd&0x09 / BMIS
+//     DMAING+W1C / BMIDTP dword), READ DMA 0xC8, the PRD-walk + single-sector copy.
+//     Gate-proven: BMIDTP readback (0x5000), BMIC (0x09), the post-completion BMIS
+//     (0x00, no INT under nIEN), task status 0x50, the LBA advance (nsector 0 /
+//     sector 1), and the CPU read-back of the DMA'd buffer byte-identical to disk
+//     LBA0 (word255=0xAA55) — the non-vacuous proof the engine moved the sector.
 // OFF-SURFACE (documented oracle boundaries, never read in a way that exposes
 // them): the IRQ14 line-edge instruction boundary (the test sets nIEN so NO IRQ
 // is ever raised -- like the quiescent IR1/IR8/IR12 precedent) and the
@@ -130,6 +142,13 @@
 //     This is the deferred full-ATAPI-command milestone; the directed test issues
 //     NEITHER 0xA0 nor 0xA1, so the per-record EQUIVALENT remains honest. (Every
 //     OTHER CD command IS modeled: 0x08/0x90/0xE7/0xEF/0xEC/0x20/0x21 + bare aborts.)
+//   * BUS-MASTER DMA is bounded to ONE EOT PRD, ONE in-range sector, READ direction
+//     (0xC8), polled (nIEN). DEFERRED (the test issues none): WRITE DMA (0xCA),
+//     multi-PRD scatter-gather, multi-sector (nsector>1), LBA48 DMA (0x25/0x35), the
+//     IRQ-driven (nIEN=0) completion + BMIS-INT path, the PRD-too-short/long +
+//     BM_STATUS_ERROR branches, OOR-LBA DMA abort, a mid-flight BMIC STOP (1->0; the
+//     held-OUT synchronous model has no mid-flight window), and secondary-channel DMA.
+//     The engine transfers exactly 128 dwords (the PRD count field is assumed 512).
 // See verif/sys/tests/pide/manifest.json for the full boundary accounting.
 //
 // DATA PORT (0x1F0): the directed test READS it with `inw %dx,%ax` and WRITES it
@@ -160,7 +179,10 @@ module ven_ide #(
     // data command ABORT (the full PACKET/IDENTIFY-PACKET surface is deferred).
     // HAS_DISK=0 suppresses the $readmemh (the empty CD has no media).
     parameter bit          IS_ATAPI     = 1'b0,
-    parameter bit          HAS_DISK     = 1'b1
+    parameter bit          HAS_DISK     = 1'b1,
+    // M8.4f: HAS_DMA=1 instantiates the bus-master DMA engine (BMIDE registers +
+    // a memory-master port + READ DMA 0xC8). Only the primary ATA HD master sets it.
+    parameter bit          HAS_DMA      = 1'b0
 ) (
     input  logic        clk,
     input  logic        rst,        // synchronous, active-high (PC RESET)
@@ -172,7 +194,22 @@ module ven_ide #(
                                     // WRITE SECTORS); task-file regs use wdata[7:0]
 
     output logic [15:0] rdata,      // 16-bit: data-port word, else {8'h0, regbyte}
-    output logic        irq14       // primary IDE interrupt (ISA IRQ14)
+    output logic        irq14,      // primary IDE interrupt (ISA IRQ14)
+
+    // ---- M8.4f bus-master DMA: the BMIDE register block (decoded at the PCI
+    //      BAR4 window by the SoC) + a memory-master port the DMA engine drives.
+    //      addr[3:0] selects the BMIDE register (0=BMIC, 2=BMIS, 4-7=BMIDTP).
+    input  logic        cs_bm,        // BMIDE register access (BAR4 window)
+    input  logic [31:0] bm_wdata,     // 32-bit write data (BMIDTP is a dword)
+    output logic [31:0] bm_rdata,     // BMIDE register read value
+    output logic        dma_busy,     // 1 while the DMA engine masters memory
+    output logic        dma_mem_req,  // single-beat memory-master handshake
+    output logic        dma_mem_we,
+    output logic [31:0] dma_mem_addr,
+    output logic [31:0] dma_mem_wdata,
+    output logic [3:0]  dma_mem_wstrb,
+    input  logic [31:0] dma_mem_rdata,
+    input  logic        dma_mem_ack
 );
 
     // ---- ATA status bits (BSY is never set in M8.4a: reads settle within the
@@ -220,6 +257,36 @@ module ven_ide #(
     logic        in_write;     // current PIO transfer is host->device (WRITE SECTORS)
     logic [27:0] xfer_lba;     // current sector LBA (LBA28)
     logic [8:0]  nsec_left;    // sectors remaining in the multi-sector transfer
+
+    // ---- M8.4f bus-master DMA: BMIDE register block + a PRD-walk/sector-copy FSM.
+    //   BMIC  (off 0): bit0 START (SSBM), bit3 RWCON (1=device->memory READ DMA).
+    //   BMIS  (off 2): bit0 DMAING (RO to sw), bit1 ERROR, bit2 INT (set only via
+    //                  IRQ, gated by nIEN), bits 5/6 sw-R/W (DMA-capable).
+    //   BMIDTP(off 4): the 32-bit PRD-table physical pointer (low 2 bits forced 0).
+    // The single-PRD single-sector READ DMA: read one 8-byte EOT PRD (base+count)
+    // from RAM at BMIDTP, then copy 512 bytes (128 dwords) from disk[] to RAM at the
+    // PRD base. The START-write OUT is held (dma_busy gates io_ack at the SoC) for
+    // the whole burst, so the core parks in S_IO with the mem bus free — exactly
+    // like qemu's bmdma_cmd_writeb running dma_cb synchronously within the OUT.
+    logic [7:0]  r_bmic;       // BMIC  (cmd & 0x09)
+    logic [7:0]  r_bmis;       // BMIS
+    logic [31:0] r_bmidtp;     // BMIDTP
+    logic        dma_pending;  // a READ DMA (0xC8) is armed, awaiting START
+    logic [27:0] dma_lba;      // the LBA captured at 0xC8
+    typedef enum logic [1:0] { DMA_IDLE, DMA_PRD0, DMA_PRD1, DMA_XFER } dma_state_e;
+    dma_state_e  dma_state;
+    logic [31:0] prd_base;     // PRD entry: physical base of the target buffer
+    logic [6:0]  dma_beat;     // dword beat 0..127 within the 512-byte sector
+    // byte offset into disk[] for the current dword = LBA*512 + beat*4
+    wire  [15:0] dma_doff = {dma_lba[6:0], 9'd0} + {7'd0, dma_beat, 2'b00};
+    // launching THIS clock: a START 0->1 EDGE write to BMIC with a DMA armed while
+    // idle (the !r_bmic[0] term makes it a true 0->1 edge, matching qemu's
+    // keep-old-value-on-no-change; dma_state==IDLE already prevents re-launch).
+    wire         dma_launch = HAS_DMA && cs_bm && we && (addr[3:0] == 4'd0) &&
+                              bm_wdata[0] && !r_bmic[0] && dma_pending &&
+                              (dma_state == DMA_IDLE);
+    // busy = the OUT must be held / the DMA owns the mem bus (launch clock + run).
+    assign       dma_busy = HAS_DMA && ((dma_state != DMA_IDLE) || dma_launch);
 
     // ---- backing stores --------------------------------------------------
     logic [7:0]  disk [0:DISK_SECTORS*512-1];   // raw image, $readmemh
@@ -344,6 +411,37 @@ module ven_ide #(
         end
     end
 
+    // ---- M8.4f BMIDE register reads + the DMA engine's memory-master port ----
+    always_comb begin
+        // BMIDE register read (addr[3:0] selects; the SoC masks to io_size).
+        unique case (addr[3:0])
+            4'd0:                   bm_rdata = {24'd0, r_bmic};   // BMIC
+            4'd2:                   bm_rdata = {24'd0, r_bmis};   // BMIS
+            4'd4, 4'd5, 4'd6, 4'd7: bm_rdata = r_bmidtp;          // BMIDTP (dword)
+            default:                bm_rdata = 32'd0;             // 1/3 reserved
+        endcase
+        // single-beat memory-master port: driven ONLY while the FSM is active.
+        dma_mem_req   = 1'b0;
+        dma_mem_we    = 1'b0;
+        dma_mem_addr  = 32'd0;
+        dma_mem_wdata = 32'd0;
+        dma_mem_wstrb = 4'd0;
+        unique case (dma_state)
+            DMA_PRD0: begin dma_mem_req = 1'b1; dma_mem_addr = r_bmidtp;          end
+            DMA_PRD1: begin dma_mem_req = 1'b1; dma_mem_addr = r_bmidtp + 32'd4;  end
+            DMA_XFER: begin
+                dma_mem_req   = 1'b1;
+                dma_mem_we    = 1'b1;
+                dma_mem_wstrb = 4'hF;
+                dma_mem_addr  = prd_base + {23'd0, dma_beat, 2'b00};   // base + beat*4
+                // little-endian dword from disk[] (byte-identical to a PIO READ)
+                dma_mem_wdata = {disk[dma_doff + 16'd3], disk[dma_doff + 16'd2],
+                                 disk[dma_doff + 16'd1], disk[dma_doff]};
+            end
+            default: ;  // DMA_IDLE: bus idle
+        endcase
+    end
+
     // ---- LBA / CHS addressing from the task file (M8.4c) ------------------
     // LBA mode (devhead bit6=1): {head[3:0], hcyl, lcyl, sector} = LBA28.
     // CHS mode (devhead bit6=0): qemu ide_get_sector (core.c:631) translates
@@ -396,6 +494,14 @@ module ven_ide #(
             r_w63     <= 16'h0007;
             r_w85     <= 16'h4021;
             r_w88     <= 16'h203F;
+            r_bmic      <= 8'h00;        // M8.4f BMIDE + DMA engine
+            r_bmis      <= 8'h00;
+            r_bmidtp    <= 32'h0000_0000;
+            dma_pending <= 1'b0;
+            dma_lba     <= 28'd0;
+            dma_state   <= DMA_IDLE;
+            prd_base    <= 32'd0;
+            dma_beat    <= 7'd0;
         end else begin
             if (cs && we) begin
                 // ----- command-block register writes / command dispatch -----
@@ -567,6 +673,23 @@ module ven_ide #(
                                     r_status    <= STAT_DRQ;  // 0x58 immediately
                                     irq14       <= ~nien;
                                 end
+                                8'hC8: begin              // READ DMA (M8.4f)
+                                    // ARM only (NO PIO data-port phase); the engine
+                                    // runs on the BMIC START write. qemu's cmd_read_dma
+                                    // -> ide_sector_start_dma sets status READY|SEEK|DRQ
+                                    // = 0x58 here (returns false, so it persists until
+                                    // the DMA completes -> 0x50). Single-sector, in-range
+                                    // (the directed scope). Without HAS_DMA this is an
+                                    // unsupported opcode -> the default abort below.
+                                    if (HAS_DMA) begin
+                                        dma_pending <= 1'b1;
+                                        dma_lba     <= issue_lba;
+                                        r_status    <= STAT_DRQ;   // 0x58 (DRQ, no BSY)
+                                    end else begin
+                                        r_status <= STAT_ABORT; r_error <= ERR_ABRT;
+                                        irq14    <= ~nien;
+                                    end
+                                end
                                 8'h90: begin              // EXECUTE DIAGNOSTIC
                                     r_error   <= 8'h01;   // device 0 passed
                                     r_nsector <= 8'h01;
@@ -731,6 +854,55 @@ module ven_ide #(
                 irq14 <= 1'b0;                            // status read lowers IRQ
             end
             // (0x3F6 alt-status read does NOT lower IRQ)
+
+            // ===== M8.4f bus-master DMA: BMIDE register writes + the engine =====
+            // cs_bm is a DISTINCT decode (the PCI BAR4 window) from cs/cs_ctl, so
+            // these never overlap the task-file I/O above. During the DMA burst the
+            // core is parked in the held START-OUT (cs/cs_ctl = 0), so the FSM below
+            // is the only writer of r_status / the task file in those clocks.
+            if (HAS_DMA) begin
+                if (cs_bm && we) begin
+                    if (addr[3:0] == 4'd0) begin              // BMIC
+                        r_bmic <= bm_wdata[7:0] & 8'h09;      // store cmd & 0x09
+                        if (dma_launch) begin                 // START 0->1, DMA armed
+                            dma_state <= DMA_PRD0;            // walk the PRD then copy
+                            r_bmis[0] <= 1'b1;                // DMAING
+                            dma_beat  <= 7'd0;
+                        end
+                    end else if (addr[3:0] == 4'd2) begin     // BMIS
+                        r_bmis[6:5] <= bm_wdata[6:5];         // DMA-capable bits R/W
+                        if (bm_wdata[1]) r_bmis[1] <= 1'b0;   // ERROR write-1-clear
+                        if (bm_wdata[2]) r_bmis[2] <= 1'b0;   // INT   write-1-clear
+                    end else if (addr[3] || addr[2]) begin    // BMIDTP (off 4-7)
+                        r_bmidtp <= bm_wdata & ~32'h0000_0003; // dword-aligned
+                    end
+                end
+                // the PRD-walk + single-sector copy FSM (single-beat mem-master).
+                unique case (dma_state)
+                    DMA_PRD0: if (dma_mem_ack) begin          // dword0 = PRD base
+                        prd_base  <= dma_mem_rdata;
+                        dma_state <= DMA_PRD1;
+                    end
+                    DMA_PRD1: if (dma_mem_ack) begin          // dword1 = count|EOT
+                        dma_state <= DMA_XFER;                // (count=512 in scope)
+                        dma_beat  <= 7'd0;
+                    end
+                    DMA_XFER: if (dma_mem_ack) begin          // copy 128 dwords
+                        if (dma_beat == 7'd127) begin         // last dword -> done
+                            dma_state   <= DMA_IDLE;
+                            r_bmis[0]   <= 1'b0;              // DMAING clear
+                            r_status    <= STAT_IDLE;        // 0x50 (DMA complete)
+                            dma_pending <= 1'b0;
+                            advance_lba_regs(dma_lba + 28'd1); // LBA advance (qemu)
+                            // BMIS-INT (bit2) stays 0: under nIEN ide_bus_set_irq is
+                            // gated, so the DMA-completion IRQ is never delivered.
+                        end else begin
+                            dma_beat <= dma_beat + 7'd1;
+                        end
+                    end
+                    default: ;  // DMA_IDLE
+                endcase
+            end
         end
     end
 

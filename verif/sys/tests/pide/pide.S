@@ -146,7 +146,19 @@
     .equ R_PCI_BAR0,   0x0000217C /* reg0x20 BAR4 pre-program    = 0x00000001   */
     .equ R_PCI_BAR1,   0x00002180 /* reg0x20 BAR4 after 0xC000   = 0x0000C001   */
     .equ R_PCI_CMD1,   0x00002184 /* reg0x04 command after IO|BM = 0x0005       */
+    /* --- M8.4f single-PRD READ DMA (0xC8) result slots --- */
+    .equ R_DMA_DTP,    0x00002188 /* BMIDTP readback (low-2 masked) = 0x00005000 */
+    .equ R_DMA_BMIC,   0x0000218C /* BMIC readback (cmd & 0x09)     = 0x09        */
+    .equ R_DMA_BMIS,   0x00002190 /* BMIS after completion (nIEN: no INT)         */
+    .equ R_DMA_ST,     0x00002194 /* task-file status after DMA     = 0x50        */
+    .equ R_DMA_NS,     0x00002198 /* nsector after DMA (advance)    = 0x00        */
+    .equ R_DMA_SEC,    0x0000219C /* sector  after DMA (LBA0->1)    = 0x01        */
+    .equ R_DMA_W0,     0x000021A0 /* DMA'd buffer word0   = 0x0000  (LBA0 w0)     */
+    .equ R_DMA_W255,   0x000021A4 /* DMA'd buffer word255 = 0xAA55  (boot sig)    */
+    .equ R_DMA_C8ST,   0x000021A8 /* status after 0xC8, pre-START = 0x58 (DRQ)    */
 
+    .equ PRD_TBL,    0x00005000  /* PRD table (8 bytes, dword-aligned) */
+    .equ DMA_BUF,    0x00006000  /* DMA target buffer (512 bytes)      */
     .equ BUF_ID,     0x00004000  /* IDENTIFY 512-byte block       */
     .equ BUF_S0,     0x00004200  /* sector 0   block              */
     .equ BUF_S127,   0x00004400  /* sector 127 block              */
@@ -972,6 +984,64 @@ pm32_entry:
     movw    $0x0005, %ax; movw $0xCFC, %dx; outw %ax, %dx
     movl    $0x80000904, %eax; movw $0xCF8, %dx; outl %eax, %dx
     movw    $0xCFC, %dx; inw %dx, %ax; andl $0xFFFF, %eax; movl %eax, R_PCI_CMD1
+
+    /* =============== M8.4f single-PRD READ DMA (0xC8) ==================== */
+    /* The BMIDE block is now decodable (PCI_COMMAND.IO set, BAR4=0xC000). Build one
+     * EOT PRD describing a 512-byte buffer, issue READ DMA of LBA0, poll BMIS to
+     * completion, then CPU-read the buffer back byte-identical to the disk — the
+     * non-vacuous proof the engine moved the sector into the RAM the CPU sees.
+     * nIEN is set, so BMIS-INT (bit2) is NEVER raised -> poll DMAING (bit0). */
+
+    /* PRD @0x5000: dword0 = buffer base 0x6000 ; dword1 = EOT|count(512)=0x80000200 */
+    movl    $DMA_BUF,     PRD_TBL
+    movl    $0x80000200,  PRD_TBL+4
+
+    /* pre-fill the DMA target buffer with a 0xFFFFFFFF sentinel (distinct from the
+     * disk content 0x0000..0xAA55 and the PIO buffers) so a no-op DMA is caught */
+    movl    $128, %ecx
+    movl    $DMA_BUF, %edi
+    movl    $0xFFFFFFFF, %eax
+1:  movl    %eax, (%edi); addl $4, %edi; decl %ecx; jnz 1b
+
+    /* program BMIDTP = PRD table addr ; read back (low-2 masked) -> 0x00005000 */
+    movl    $PRD_TBL, %eax; movw $0xC004, %dx; outl %eax, %dx
+    movw    $0xC004, %dx; inl %dx, %eax; movl %eax, R_DMA_DTP
+
+    /* task file: nsector=1, LBA=0, devhead 0xE0 (LBA|master) ; issue READ DMA */
+    movb    $0x01, %al; movw $0x1F2, %dx; outb %al, %dx
+    xorb    %al, %al
+    movw    $0x1F3, %dx; outb %al, %dx
+    movw    $0x1F4, %dx; outb %al, %dx
+    movw    $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx
+    movb    $0xC8, %al; movw $0x1F7, %dx; outb %al, %dx
+
+    /* M8.4f review: after 0xC8 (BEFORE the BMIC-START), qemu's ide_sector_start_dma
+     * leaves the task-file status = READY|SEEK|DRQ = 0x58 (DRQ set, no BUSY/BSY) —
+     * cmd_read_dma returns false so the dispatch never clears it. Grade it. */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_DMA_C8ST  /* 0x58 */
+    movw    $0x3F6, %dx; inb %dx, %al; andl $0xFF, %eax                         /* 0x58 alt-status */
+
+    /* launch: BMIC = START(0x01)|RWCON-READ(0x08) = 0x09 ; read back (cmd&0x09) */
+    movb    $0x09, %al; movw $0xC000, %dx; outb %al, %dx
+    movw    $0xC000, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_DMA_BMIC
+
+    /* poll BMIS until DMAING (bit0) clears, then grade the final BMIS */
+1:  movw    $0xC002, %dx; inb %dx, %al; testb $0x01, %al; jnz 1b
+    movw    $0xC002, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_DMA_BMIS
+
+    /* task-file status (0x50) + the LBA-register advance after the DMA */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_DMA_ST
+    movw    $0x1F2, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_DMA_NS
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_DMA_SEC
+
+    /* CPU read-back: grade every dword of the DMA'd buffer (=disk LBA0) + pin the
+     * first word (0x0000) and the boot-signature word255 (0xAA55) */
+    movl    $128, %ecx
+    movl    $DMA_BUF, %esi
+1:  movl    (%esi), %eax; addl $4, %esi; decl %ecx; jnz 1b
+    movl    DMA_BUF,     %eax; andl $0xFFFF, %eax; movl %eax, R_DMA_W0
+    movl    DMA_BUF+508, %eax; shrl $16, %eax;     movl %eax, R_DMA_W255
 
     /* ====================== deterministic end-state ===================== */
     movl    BUF_ID+2,   %esi            /* IDENTIFY word 1 (cyls = 2)        */
