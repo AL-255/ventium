@@ -1517,3 +1517,58 @@ oracle-first → **EQUIVALENT on the first RTL run**.
   **69/69 cache hits, 0 regenerated** (core untouched). RTL touched:
   `rtl/soc/ven_ide.sv` + `rtl/soc/ventium_soc.sv` (the 16-bit `wdata` wire) +
   `verif/tb/Makefile` unchanged. `ventium-refs` untouched.
+
+### M8.4c — IDE PIO fidelity hardening (OOR-abort, CHS, reg-advance, guards, misc cmds) (2026-06-06)
+
+**What this is.** Closes the IDE PIO fidelity gaps the M8.4a/b adversarial reviews
+mapped — converting six documented-boundary divergences into modeled, **gate-proven**
+behavior. Same arc: a research/design workflow grounded each in qemu (esp. the OOR
+multi-sector partial-abort timing), an adversarial review checked the corners;
+implemented + brought to EQUIVALENT.
+
+- **`ven_ide.sv` edits (all in the existing FSM, lint 0).** (1) **OOR-LBA clean
+  abort** — the one real correctness gap (was a silent mod-128 alias/corruption):
+  a READ past the last sector aborts UPFRONT (0x41/0x04, no DRQ, regs unchanged);
+  a WRITE / multi-sector transfer crossing the boundary commits the in-range
+  sectors then aborts on the OOR sector's last word, with the OOR sector's words
+  DROPPED (disk[] gated on `xfer_lba < DISK_SECTORS`) — matching qemu's
+  `ide_sect_range_ok` deferred-check timing exactly. (2) **LBA-register advance**
+  (`ide_set_sector`): after a completed transfer the task file shows start+count,
+  nsector=0. (3) **CHS addressing** (devhead bit6=0): `chs_lba =
+  (cyl*HEADS+head)*SECS + sector-1`. (4) **command-while-DRQ guard**: a non-RESET
+  command issued mid-transfer is dropped (`if (!r_status[3])`). (5)
+  **read-during-write guard**: a data-port read in a write window returns 0x0000
+  and consumes no slot. (6) **misc commands** 0x70 SEEK / 0x10 RECAL / 0x91
+  INIT-DEV-PARAMS complete 0x50/0x00. Plus: every accepted command now **clears
+  the error register** (qemu core.c:2168, "needed by Windows") — the one bring-up
+  fix (a prior abort's 0x04 was lingering into a later command's error read).
+
+- **The `pide` gate grows to EQUIVALENT 20728/20728.** Ten new directed sequences,
+  each non-vacuous: OOR READ @128 (+ follow-up LBA0 read proves the disk untouched
+  + the reg-advance); OOR WRITE @129 (+ alias LBA1 read proves no corruption);
+  multi-READ crossing @127 (in-range sector delivered, abort at the boundary,
+  sector reg = OOR LBA); multi-WRITE crossing @127 (+ LBA127 read-back proves
+  commit-before-abort); CHS C0/H1/S2 → LBA64 data; command-while-DRQ (a mid-DRQ
+  IDENTIFY is dropped, the original READ's data intact); read-during-write (a stray
+  inw=0x0000 consumes no slot, the 256-word fill stays aligned); and the three misc
+  commands. Every value first observed under qemu, graded per-record.
+
+- **Adversarial review (4-agent workflow): verdict SOUND** — fidelity FAITHFUL on
+  the gate surface (the 20728/20728 is real + non-vacuous, all 6 items independently
+  re-verified vs `core.c`), NO gate-reachable must-fix. Its findings were folded in:
+  the **mid-DRQ task-file-register WRITE drop** (qemu `core.c:1287`) is now also
+  modeled (0x1F1-0x1F6 writes gated on `!DRQ`); and the precise residuals it mapped
+  are documented as boundaries — the LBA-mode **multi-sector register trajectory**
+  (nsector forced to 0 at the first boundary vs qemu's per-sector decrement; the
+  READ visible LBA regs lag qemu by one sector *during* a transfer, agreeing only
+  on the POST-transfer value which IS gate-proven), the misc-command state
+  side-effects (0x91 geometry also drives CHS translation), and the CHS-mode
+  register-advance off-by-one. All gate-unreachable (the test reads task-file regs
+  only post-transfer / at the crossing-abort, never mid-transfer).
+
+- **No regression.** `make verify-soc` **5/5 PASS** (pirqsoc, psocdev 122/122, pvga
+  292/292, **pide 20728/20728**, test386 1500/1500); `make verify` **69/69 cache
+  hits, 0 regenerated**. snapshot=on + the md5 PRE==POST assert keep `pide.img`
+  pristine across the new WRITEs. Deferred: SET FEATURES/SET MULTIPLE + other misc
+  commands, the boundaries above, LBA48, bus-master DMA, SRST. RTL touched:
+  `rtl/soc/ven_ide.sv`. `ventium-refs` untouched.
