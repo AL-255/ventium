@@ -40,8 +40,10 @@
 #include "trace_writer.h"
 #include "quake_image.h"
 #include "win95_cosim.h"
+#include "syscall_emu.h"   // M14 free-run syscall emulator
 
 #include <vector>
+#include <memory>
 
 namespace {
 
@@ -101,6 +103,13 @@ struct Args {
     // gate is byte-identical. The RTL emits a --system retire trace graded by
     // compare_stream.py (sys mode).
     std::string win95_image;
+
+    // M14 free-run syscall EMULATION (with --quake-image, WITHOUT --lockstep):
+    // the TB emulates int-0x80 directly so the RTL runs the ELF to completion.
+    bool        emulate     = false;   // --emulate-syscalls
+    std::string user_stdin;            // --user-stdin <file>  (bytes for read())
+    std::string user_stdout;           // --user-stdout <file> (captured fd 1/2)
+    uint32_t    brk_base    = 0;       // --brk-base <hexaddr> (initial program break)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -151,6 +160,10 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--quake-image") a.quake_image = need("--quake-image");
         else if (k == "--win95-image") a.win95_image = need("--win95-image");
         else if (k == "--lockstep")    a.lockstep    = need("--lockstep");
+        else if (k == "--emulate-syscalls") a.emulate = true;
+        else if (k == "--user-stdin")  a.user_stdin  = need("--user-stdin");
+        else if (k == "--user-stdout") a.user_stdout = need("--user-stdout");
+        else if (k == "--brk-base")    a.brk_base    = parse_u32(need("--brk-base"));
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -210,6 +223,12 @@ int main(int argc, char** argv) {
     bool                          proxy_mode = false;
     std::vector<ventium::SyscallEffect> syscalls;
     size_t                        sc_idx = 0;   // next syscall to replay (in order)
+    // M14 free-run emulator state (captured by service_proxy + the run loop).
+    std::unique_ptr<ventium::SyscallEmulator> emu;
+    bool      emu_exit = false, emu_unsupported = false;
+    int       emu_code = 0;  uint32_t emu_bad_nr = 0;
+    uint64_t  last_emu_n = ~0ull;
+    uint32_t  emu_eax = 0, emu_gs = 0;  bool emu_apply_gs = false;
     if (!args.quake_image.empty()) {
         ventium::QuakeImage img = ventium::load_quake_image(args.quake_image, mem);
         if (!img.ok) {
@@ -222,12 +241,29 @@ int main(int argc, char** argv) {
         args.entry    = img.eip;
         args.init_esp = img.esp;
         proxy_mode    = true;
-        if (!args.lockstep.empty()) {
-            syscalls = ventium::load_syscall_replay(args.lockstep);
+        if (args.emulate) {
+            // M14 free-run: EMULATE int-0x80 (no golden). Slurp the optional stdin
+            // feed; pick a safe default program break if the harness gave none.
+            std::vector<uint8_t> sin;
+            if (!args.user_stdin.empty()) {
+                if (FILE* f = std::fopen(args.user_stdin.c_str(), "rb")) {
+                    int c; while ((c = std::fgetc(f)) != EOF) sin.push_back((uint8_t)c);
+                    std::fclose(f);
+                }
+            }
+            uint32_t brk0 = args.brk_base ? args.brk_base : 0x0a000000u;
+            emu.reset(new ventium::SyscallEmulator(mem, std::move(sin), brk0));
+            std::fprintf(stderr,
+                "tb: FREE-RUN emulate ON (proxy_en=1): entry=0x%08x esp=0x%08x "
+                "brk_base=0x%08x stdin=%zuB\n", img.eip, img.esp, brk0,
+                args.user_stdin.empty() ? (size_t)0 : (size_t)1);
+        } else {
+            if (!args.lockstep.empty())
+                syscalls = ventium::load_syscall_replay(args.lockstep);
+            std::fprintf(stderr,
+                "tb: quake lock-step ON (proxy_en=1): entry=0x%08x esp=0x%08x, "
+                "%zu syscalls to replay\n", img.eip, img.esp, syscalls.size());
         }
-        std::fprintf(stderr,
-            "tb: quake lock-step ON (proxy_en=1): entry=0x%08x esp=0x%08x, "
-            "%zu syscalls to replay\n", img.eip, img.esp, syscalls.size());
     }
 
     // ---- M7.3b Win95 initial physical-memory image + port-I/O co-sim --------
@@ -392,9 +428,42 @@ int main(int argc, char** argv) {
     // consumed strictly in order; we cross-check syscall_n against the producer's
     // recorded n. Inert when proxy_en==0 (syscall_active never asserts).
     long write_applied_idx = -1;   // sc_idx whose writes are already in memory
+    static const bool kSyscallProbe = (std::getenv("TB_SYSCALL_PROBE") != nullptr);
     auto service_proxy = [&]() {
         if (!proxy_mode) return;
         if (!top->syscall_active) return;
+        if (kSyscallProbe) {
+            std::fprintf(stderr,
+                "[probe] syscall_active n=%llu nr(eax)=%u ebx=0x%x ecx=0x%x "
+                "edx=0x%x esi=0x%x edi=0x%x ebp=0x%x\n",
+                (unsigned long long)top->syscall_n, top->syscall_arg_eax,
+                top->syscall_arg_ebx, top->syscall_arg_ecx, top->syscall_arg_edx,
+                top->syscall_arg_esi, top->syscall_arg_edi, top->syscall_arg_ebp);
+        }
+        // M14 FREE-RUN: emulate the syscall directly (no golden). Service ONCE per
+        // syscall_active pulse (keyed on the upcoming-retire n, stable across the
+        // multiple evals of one clock); re-drive the cached result on re-evals so
+        // the kernel effect (stdin consumed / stdout appended / clock advanced) is
+        // applied exactly once. Then drive eax/gs back for the core to latch.
+        if (emu) {
+            if (last_emu_n != top->syscall_n) {
+                ventium::SyscallEmuResult r = emu->service(
+                    top->syscall_arg_eax, top->syscall_arg_ebx, top->syscall_arg_ecx,
+                    top->syscall_arg_edx, top->syscall_arg_esi, top->syscall_arg_edi,
+                    top->syscall_arg_ebp);
+                last_emu_n   = top->syscall_n;
+                emu_eax      = r.eax;
+                emu_apply_gs = r.apply_gs;
+                emu_gs       = r.gs_base;
+                if (r.unsupported) { emu_unsupported = true; emu_bad_nr = top->syscall_arg_eax; }
+                if (r.should_exit) { emu_exit = true; emu_code = r.exit_code; }
+            }
+            top->syscall_resume_eip = 0;
+            top->syscall_eax        = emu_eax;
+            top->syscall_apply_gs   = emu_apply_gs ? 1 : 0;
+            top->syscall_gs_base    = emu_gs;
+            return;
+        }
         if (sc_idx >= syscalls.size()) {
             // The core hit an int-0x80 with no golden effect left to replay: a
             // genuine over-run (the RTL reached a syscall the golden prefix never
@@ -557,6 +626,24 @@ int main(int argc, char** argv) {
             break;
         }
 
+        // M14 free-run: the guest called exit_group/exit — stop exactly as the
+        // kernel would end the process (the captured stdout is already complete:
+        // musl's exit() flushed stdio before issuing the raw exit_group).
+        if (emu_exit) {
+            std::fprintf(stderr,
+                "tb: stop: FREE-RUN guest exit_group(%d) after %llu retired in "
+                "%llu clocks\n", emu_code, (unsigned long long)trace.retired(),
+                (unsigned long long)cycles);
+            break;
+        }
+        if (emu_unsupported) {
+            std::fprintf(stderr,
+                "tb: stop: FREE-RUN UNIMPLEMENTED syscall nr=%u after %llu retired "
+                "(LOUD stop — never a silent wrong answer; add it to syscall_emu)\n",
+                emu_bad_nr, (unsigned long long)trace.retired());
+            break;
+        }
+
         // quiescence / limit detection
         if (trace.retired() > before) {
             idle = 0;
@@ -647,10 +734,27 @@ int main(int argc, char** argv) {
         (unsigned long long)cycles,
         (unsigned long long)mem.reads(),
         (unsigned long long)mem.writes());
-    if (proxy_mode) {
+    if (proxy_mode && !emu) {
         std::fprintf(stderr,
             "tb: M7.1 proxy: replayed %llu / %zu int-0x80 syscalls\n",
             (unsigned long long)syscalls_replayed, syscalls.size());
+    }
+    if (emu) {
+        std::fprintf(stderr,
+            "tb: FREE-RUN: %llu syscalls emulated, %zu bytes stdout captured%s\n",
+            (unsigned long long)emu->syscalls_serviced(),
+            emu->captured_stdout().size(),
+            emu_exit ? "" : " (NOTE: guest did not reach exit_group)");
+        if (!args.user_stdout.empty()) {
+            if (FILE* f = std::fopen(args.user_stdout.c_str(), "wb")) {
+                std::fwrite(emu->captured_stdout().data(), 1,
+                            emu->captured_stdout().size(), f);
+                std::fclose(f);
+            }
+        }
+        std::fprintf(stderr, "----- guest stdout -----\n%s------------------------\n",
+                     emu->captured_stdout().c_str());
+        if (emu_exit) exit_code = emu_code;
     }
     if (cosim_mode) {
         std::fprintf(stderr,

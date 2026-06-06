@@ -1249,7 +1249,12 @@ def _syscall_effect(rsp, nr, args, ret):
             grab(ecx, sret)                       # recvfrom(fd, buf=ecx, len, ...) -> ret
     elif nr in (_NR["clock_gettime64"], _NR["clock_getres_time64"]):
         if sret == 0:
-            grab(ecx, 8)                          # struct timespec64-low (tv_sec,tv_nsec) @ ecx
+            # __kernel_timespec on 32-bit = {s64 tv_sec; s64 tv_nsec} = 16 BYTES.
+            # (An earlier 8-byte grab dropped tv_nsec[0:8], so any guest that READ
+            # back tv_nsec — e.g. coremark's get_time() @ 0x80550c8 — saw 0 in the
+            # RTL replay and diverged. The CPU was correct; the oracle under-captured
+            # the kernel write. Capturing the full 16 bytes fixes the golden.)
+            grab(ecx, 16)                         # struct __kernel_timespec @ ecx
     elif nr in (_NR["clock_gettime"], _NR["clock_getres"]):
         if sret == 0:
             grab(ecx, 8)                          # 32-bit struct timespec @ ecx

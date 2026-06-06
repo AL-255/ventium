@@ -102,6 +102,20 @@ module core
     input  logic        syscall_apply_gs, // 1: this syscall set a new %gs TLS base
     input  logic [31:0] syscall_gs_base,  // the resulting %gs base (set_thread_area)
 
+    // M14: syscall ARGS exposed at the syscall_active pulse (read-only). For the
+    // TB's free-run syscall EMULATOR (--emulate-syscalls): the TB samples these
+    // the same clock as syscall_active to compute the real kernel effect, instead
+    // of replaying a golden. Pure combinational regfile reads — completely INERT
+    // to core behaviour (no feedback path), so every existing gate is unchanged.
+    // i386 Linux syscall ABI: nr=eax, args=(ebx,ecx,edx,esi,edi,ebp).
+    output logic [31:0] syscall_arg_eax,  // gpr[EAX] = syscall number
+    output logic [31:0] syscall_arg_ebx,  // arg0
+    output logic [31:0] syscall_arg_ecx,  // arg1
+    output logic [31:0] syscall_arg_edx,  // arg2
+    output logic [31:0] syscall_arg_esi,  // arg3
+    output logic [31:0] syscall_arg_edi,  // arg4
+    output logic [31:0] syscall_arg_ebp,  // arg5
+
     // ------------------------------------------------------------------------
     // M7.3b Win95 system co-sim port-I/O bus (docs/m7-lockstep-spec.md M7.3).
     // DEFAULT 0 = INERT: with cosim_en==0 the core's IN/OUT decode is the
@@ -2059,6 +2073,18 @@ module core
   // non-proxy runs (proxy_en==0).
   assign syscall_active_c = (state==S_DECODE) && d_int80 && proxy_en;
   assign syscall_active   = syscall_active_c;
+
+  // M14: expose the syscall args (regfile values at the cd80 decode) so the TB
+  // free-run emulator can read nr+args off the same edge as syscall_active. Pure
+  // combinational reads of gpr (layout: eax ecx edx ebx esp ebp esi edi) — no
+  // feedback into the core, inert in every replay/non-proxy run.
+  assign syscall_arg_eax = gpr[0];
+  assign syscall_arg_ecx = gpr[1];
+  assign syscall_arg_edx = gpr[2];
+  assign syscall_arg_ebx = gpr[3];
+  assign syscall_arg_ebp = gpr[5];
+  assign syscall_arg_esi = gpr[6];
+  assign syscall_arg_edi = gpr[7];
 
   // ===========================================================================
   // M8.1 — external-interrupt ACCEPT predicates (combinational). These mirror the
