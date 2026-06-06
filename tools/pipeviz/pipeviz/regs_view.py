@@ -127,9 +127,18 @@ class RegsView(QWidget):
         efl_chg = prev is not None and prev["eflags"] != s.eflags
         self.efl_lbl.setText(f"{s.eflags:08x}")
         self.efl_lbl.setStyleSheet(chg if efl_chg else same)
+        # full named-bit grid: every flag shown (set = amber, clear = dim); a bit
+        # that changed since the previous step is underlined.
+        prev_efl = prev["eflags"] if prev is not None else None
+        parts = []
+        for bit, nm in _FLAGS:
+            f_on = (s.eflags >> bit) & 1
+            f_chg = prev_efl is not None and ((prev_efl >> bit) & 1) != f_on
+            col = "#e3b341" if f_on else "#4b535d"
+            style = f"color:{col}" + (";text-decoration:underline" if f_chg else "")
+            parts.append(f"<span style='{style}'>{nm}{f_on}</span>")
+        self.flags_lbl.setText("&nbsp;".join(parts))
         self._prev = {"gpr": list(s.gpr), "eip": s.eip, "eflags": s.eflags}
-        on = [n for bit, n in _FLAGS if (s.eflags >> bit) & 1]
-        self.flags_lbl.setText("[" + " ".join(on) + "]")
         for i, name in enumerate(SEG_NAMES):
             sel, base, lim = self.seg_lbls[name]
             sel.setText(f"{s.seg_sel[i]:04x}")

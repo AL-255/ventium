@@ -19,7 +19,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea,
                                QSizePolicy, QHBoxLayout, QGridLayout)
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics
-from PySide6.QtCore import Qt, QRect, QSize
+from PySide6.QtCore import Qt, QRect, QSize, Signal
 
 from . import disasm
 from .disasm import (C_PIPE, C_FILL, C_SLOW, C_FP, C_WALK, C_SYS, C_HALT,
@@ -200,12 +200,23 @@ GUTTER_W = 246
 HDR_H = 18
 
 
+# Per-stage colours for the Konata cells — each P5 stage gets a DISTINCT hue so
+# fetch/decode/exec/mem/writeback are tellable apart by colour, not just letter.
+C_STG_FILL = "#e0a72e"    # I-cache fill          (amber)
+C_STG_FETCH = "#4a9eff"   # slow front-end fetch  (blue)
+C_STG_DEC = "#39c5cf"     # decode                (teal)
+C_STG_MEM = "#f0883e"     # load/store address    (orange)
+C_STG_WB = "#d264c9"      # writeback             (magenta)
+C_STG_EXEC = C_PIPE       # execute (integer)     (green)
+C_STG_STALL = "#7a828d"   # stall / bubble        (grey — distinct from amber fill)
+
+
 def _recolor_fp(cells, mnem):
     """Cycle-mode x87 ops execute on the S_PIPE fast path (green X); recolour
     their execute cells to the FP purple when the mnemonic is an x87 op."""
     if not (mnem[:1] == "f" and mnem[:2] not in ("fs", "gs")):
         return list(cells)
-    return [(cy, ch, C_FP if co == C_PIPE else co) for (cy, ch, co) in cells]
+    return [(cy, ch, C_FP if co == C_STG_EXEC else co) for (cy, ch, co) in cells]
 
 
 def _stage_cell(name, ret, stall, mispred):
@@ -214,20 +225,20 @@ def _stage_cell(name, ret, stall, mispred):
         if mispred:
             return ("!", C_MISPRED)
         if ret:
-            return ("X", C_PIPE)        # issue + execute + writeback (fast path)
-        return ("=", C_STALL)           # materialised stall / bubble
+            return ("X", C_STG_EXEC)    # issue + execute + writeback (fast path)
+        return ("=", C_STG_STALL)       # materialised stall / bubble
     if name == "S_PF":
-        return ("F", C_FILL)            # I-cache line fill
+        return ("F", C_STG_FILL)        # I-cache line fill
     if name == "S_FETCH":
-        return ("F", C_SLOW)
+        return ("F", C_STG_FETCH)
     if name == "S_DECODE":
-        return ("D", C_SLOW)
+        return ("D", C_STG_DEC)
     if name in ("S_LOAD", "S_LOAD2"):
-        return ("M", C_SLOW)
+        return ("M", C_STG_MEM)
     if name == "S_EXEC":
-        return ("X", C_SLOW)
+        return ("X", C_STG_EXEC)
     if name in ("S_STORE", "S_USEQ", "S_IO", "S_INS"):
-        return ("W", C_SLOW)
+        return ("W", C_STG_WB)
     if name == "S_FLOAD":
         return ("F", C_FP)
     if name == "S_FEXEC":
@@ -244,6 +255,8 @@ def _stage_cell(name, ret, stall, mispred):
 class _KonataPlot(QWidget):
     """The cell grid (cycles x instructions). Reconstructs per-instruction
     lifecycles from the per-cycle trace and paints only the visible region."""
+    rowClicked = Signal(int)     # emits the retire n of the clicked instruction
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.bits = 32
@@ -371,6 +384,14 @@ class _KonataPlot(QWidget):
                 f"cycles {ins['c0']}..{ins['c1']}  (commit @ {ins['c1']}, "
                 f"{ins['c1'] - ins['c0'] + 1} cyc)")
 
+    def mousePressEvent(self, ev):
+        y = (ev.position().y() if hasattr(ev, "position") else ev.y())
+        r = int(y // ROW_H)
+        if 0 <= r < len(self.insns):
+            self.sel_row = r
+            self.update()
+            self.rowClicked.emit(int(self.insns[r]["n"]))
+
 
 class _KonataGutter(QWidget):
     """Frozen left column: instruction labels (n / pipe / PC / mnemonic),
@@ -380,6 +401,15 @@ class _KonataGutter(QWidget):
         self.plot = plot
         self.scroll = scroll
         self.setFixedWidth(GUTTER_W)
+
+    def mousePressEvent(self, ev):
+        voff = self.scroll.verticalScrollBar().value()
+        y = (ev.position().y() if hasattr(ev, "position") else ev.y())
+        r = int((y + voff) // ROW_H)
+        if 0 <= r < len(self.plot.insns):
+            self.plot.sel_row = r
+            self.plot.update(); self.update()
+            self.plot.rowClicked.emit(int(self.plot.insns[r]["n"]))
 
     def paintEvent(self, ev):
         p = QPainter(self)
@@ -409,10 +439,10 @@ class _KonataGutter(QWidget):
             span = it["c1"] - it["c0"] + 1
             mnem_w = GUTTER_W - 120
             if span > 2:
-                bw = 30
+                bw = 36
                 mnem_w -= bw
                 p.setPen(QColor(C_STALL))
-                p.drawText(QRect(GUTTER_W - bw - 2, y, bw, ROW_H),
+                p.drawText(QRect(GUTTER_W - bw - 6, y, bw, ROW_H),
                            Qt.AlignVCenter | Qt.AlignRight, f"{span}c")
             _, icol = disasm.insn_class(it["mnem"].split(" ")[0])
             p.setPen(QColor(icol))
@@ -454,12 +484,14 @@ class Konata(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         v = QVBoxLayout(self); v.setContentsMargins(2, 2, 2, 2); v.setSpacing(2)
-        head = QHBoxLayout()
         title = QLabel("Pipeline view  (gem5/Konata — instruction × cycle)")
         title.setStyleSheet("font-weight:bold;")
-        head.addWidget(title); head.addStretch(1)
-        head.addWidget(self._legend_widget())
-        v.addLayout(head)
+        v.addWidget(title)
+        # legend on its OWN line so it can't clip off the right edge
+        lw = self._legend_widget()
+        lh = QHBoxLayout(); lh.setContentsMargins(0, 0, 0, 0)
+        lh.addWidget(lw); lh.addStretch(1)
+        v.addLayout(lh)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(False)
@@ -482,9 +514,10 @@ class Konata(QWidget):
 
     def _legend_widget(self):
         w = QWidget(); h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(5)
-        items = [("F fetch", C_FILL), ("D dec", C_SLOW), ("X exec", C_PIPE),
-                 ("W wb", C_SLOW), ("= stall", C_STALL), ("! flush", C_MISPRED),
-                 ("FP", C_FP), ("walk", C_WALK)]
+        items = [("F fetch", C_STG_FETCH), ("F fill", C_STG_FILL), ("D dec", C_STG_DEC),
+                 ("M mem", C_STG_MEM), ("X exec", C_STG_EXEC), ("W wb", C_STG_WB),
+                 ("= stall", C_STG_STALL), ("! flush", C_MISPRED), ("FP", C_FP),
+                 ("walk", C_WALK)]
         for txt, col in items:
             sw = QLabel(); sw.setStyleSheet(f"background:{col}; border:1px solid #30363d;")
             sw.setFixedSize(13, 13)

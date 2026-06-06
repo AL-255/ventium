@@ -19,17 +19,23 @@ not repeat itself.
   F/D/X/M/W + `=` stall / `!` flush cells cascading diagonally; integer X green,
   x87 X purple; frozen instruction-label gutter showing n / U·V pipe / PC /
   mnemonic + an amber **`Nc` stall badge** = the instruction's cycle span; synced
-  cycle axis; click a trace row → highlights its instruction row).
+  cycle axis; **distinct per-stage colours** — F-fetch blue, F-fill amber,
+  D-decode teal, M-mem orange, X-exec green (FP purple), W-wb magenta, `=` stall
+  grey, `!` flush red; legend on its own line. Two-way selection: click a Konata
+  instruction (cell or label) → selects + centres its trace row.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
   truncated); split TLB; prefetch buffer (ibuf + decode).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction; x86 byte-field colouring (prefix gray / opcode blue / ModRM green
-  / SIB purple / disp+rel yellow / imm red); U=blue V=amber pipe; zebra; Δ amber
-  on a stall gap; capstone disasm (16/32-bit per live CS.D). Click a row →
-  highlights that instruction's row in the Konata view.
-- **Register panel**: GPR/flags/seg/CR/x87, changed-since-last-step values amber.
+  / SIB purple / memory-offset yellow / immediate red / **branch-rel orange**),
+  clipped with `…` so long encodings never collide with the disasm; U=blue
+  V=amber pipe; zebra; Δ amber on a stall gap; capstone disasm (16/32-bit per
+  live CS.D). Click a row → highlights its Konata instruction row (two-way).
+- **Register panel**: GPRs/segs/CR/x87; **EFLAGS as a full named-bit grid** (all
+  9 flags, set = amber, changed-this-step underlined); GPR/EIP values that
+  changed since the last step are amber.
 - **Status bar** (grouped, coloured): cyc · state/mode · ret/IPC/pair%/mispred ·
   I$/D$ occupancy/fills/walks · eip.
 - **Toolbar** (grouped file | config | transport, accented Run).
@@ -37,6 +43,27 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 5 — distinct stage palette, branch-byte colour, two-way selection
+- **New feature — two-way Konata↔trace selection:** click a trace row →
+  highlights its instruction row in the pipeline view (existing); click a Konata
+  cell or gutter label → selects + centre-scrolls its trace row (new).
+- **Konata distinct per-stage palette** (was the #1 finding): fetch blue, fill
+  amber, decode teal, mem orange, exec green/FP-purple, writeback magenta, stall
+  grey — fixes the old "decode==writeback==blue, fill==stall==amber" ambiguity.
+- **Konata legend** moved to its own line so it no longer clips off the right;
+  widened the gutter stall badge so `11c`/`17c` render fully.
+- **Trace:** a dedicated **orange "branch" colour** for rel8/16/32 jump/call/loop
+  targets (distinct from yellow memory offsets); the bytes column now **clips
+  with `…`** so 9–15-byte encodings can't collide with the disassembly.
+- **Registers:** EFLAGS rendered as a **full named-bit grid** (all 9 flags shown,
+  set = amber, changed-this-step underlined) instead of only the set bits.
+Note: the watermarked review again self-corrected — its source-verification
+dropped repeat "branch byte is red" perception errors (already orange).
+
+Outstanding for next iterations (synthesis-flagged): per-PC hotspot/stall-cost
+profile, Branches/BTB panel, draggable cycle playhead over the Konata view,
+two-row/ragged cache line-byte dump cleanup.
 
 ### Iteration 4 — sparkline + Konata polish (anti-staleness review confirmed working)
 First review with the new watermarked harness: all critics reported the correct
