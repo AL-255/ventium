@@ -33,7 +33,7 @@ verif/sys/tests/**/*.o
 # committed single source of truth gen_disk.py (the gate's Stage 0), so they are
 # build artifacts, not tracked references.
 verif/sys/tests/**/*.img
-verif/sys/tests/**/pide.disk.hex
+verif/sys/tests/**/*.disk.hex
 
 # sphinx docs build output (sources under docs/sphinx/ are tracked)
 docs/sphinx/_build/
