@@ -1379,3 +1379,88 @@ future SoC work (the IDE/PCI/DMA builds) re-checks the whole track with one
 command. Verified: `make verify-soc` → **4/4 PASS** (pirqsoc EQUIVALENT, psocdev
 122/122, pvga 292/292, test386 1500/1500). Touches only `Makefile` + the new
 aggregate script — no RTL, no behavior change. `ventium-refs` untouched.
+
+### M8.4a — IDE/ATA controller (primary master, PIO) into ventium_soc (2026-06-05, per-record differential)
+
+**What this is.** The first NET-NEW SoC device build beyond the device-integration
+track: a synthesizable IDE/ATA controller (`rtl/soc/ven_ide.sv`), PIO mode, primary
+channel, MASTER drive — the most-impactful remaining device (Win95-boot histogram:
+IDE dominant). Preceded by a multi-agent **understand-phase workflow** (ground the
+ATA device in qemu 8.2.2, pin the differentiable surface + oracle boundaries + the
+disk-backend strategy) and an **adversarial design critique**; implemented oracle-
+first (extract qemu's IDENTIFY/disk values, build the RTL to match) so the gate was
+EQUIVALENT on the FIRST RTL run.
+
+- **The disk value-match (the crux).** `verif/sys/tests/pide/gen_disk.py` is the
+  SINGLE SOURCE OF TRUTH: from one byte buffer it emits BOTH `pide.img` (fed to
+  qemu via `-drive if=ide,format=raw,index=0`) and `pide.disk.hex` (fed to
+  `ven_ide` via `$readmemh`), so the qemu backing image and the RTL backing store
+  cannot drift (a Stage-0 drift assert reconstructs + compares). qemu's
+  `ide_data_readw` is `cpu_to_le16` (identity on the LE host), so a 16-bit data-
+  port read = `(buf[2j+1]<<8)|buf[2j]`; the RTL returns `{disk[2j+1],disk[2j]}`
+  for the same j → **READ SECTORS data byte-identical by construction**. 128-sector
+  (64 KiB) image → qemu `guess_chs_for_size` = cyls 2/heads 16/secs 63; `ven_ide`
+  is parameterized identically so IDENTIFY geometry and image size cannot disagree.
+
+- **`ven_ide.sv` (PIO, primary master).** ATA task-file registers (0x1F0-0x1F7) +
+  control block (0x3F6); a command FSM for IDENTIFY DEVICE (0xEC), READ SECTORS
+  (0x20, single + MULTI-sector), EXECUTE DEVICE DIAGNOSTIC (0x90), and
+  command-abort; the 16-bit data-port word + a clocked drain (each `inw` advances
+  one word — `insw`/`rep insw` is NOT used: the core gates INS decode on `cosim_en`
+  so it would HALT under `soc_en`; plain `inw` (66 ED) goes through S_IO); the
+  reset signature; the absent-slave masking (ONLY error/status/alt-status read 0x00
+  for the selected absent slave — matching qemu `core.c` `ide_ioport_read`);
+  DIAGNOSTIC's `select<=0xA0` (ATA_DEV_ALWAYS_ON) + `error<=0x01`; LBA28 addressing.
+  The IDENTIFY 256-word block: geometry words COMPUTED from the geometry parameters;
+  the model/serial/firmware strings + feature/capability words are config-pinned
+  constants captured from qemu 8.2.2 (e.g. `w85` WCE = `0x4021`, the OBSERVED value,
+  NOT the design's `0x6021` guess — extracted from the golden). Lint **0 warnings**.
+
+- **FULLY per-record differentiable (the `pide` gate, EQUIVALENT 5335/5335).** The
+  test sets nIEN (0x3F6 bit1) FIRST → NO IRQ14 ever delivered → every interaction
+  is a synchronous IN/OUT or a polled-status read → qemu's single-step golden is a
+  valid per-record oracle (SSTEP_NOIRQ is structurally irrelevant: no IRQ raised).
+  Grades byte-identical vs qemu-system over all 5335 instructions: reset signature,
+  absent-slave masking, IDENTIFY (256 words), READ SECTORS LBA 0 + 127 (proves
+  LBA→offset addressing; sector-0 word 255 = 0xAA55 boot sig), a **multi-sector**
+  read (nsector=2 @ LBA 0, drains 512 words across the sector boundary — GATE-PROVES
+  the `data_idx==255 && nsec_left>1 → xfer_lba+1` PIO continuation matches qemu's
+  per-sector DRQ re-arm), and DIAGNOSTIC. The IDENTIFY pinning keeps the
+  differential REAL — the committed RTL constants are graded against a FRESHLY
+  generated golden each run, so qemu drift is caught.
+
+- **Adversarial review (multi-agent workflow, 5 agents): verdict SOUND, no must-fix.**
+  Four lenses (read-path, register/abort, IDENTIFY+honesty, boundary/scope) built
+  their own qemu probes for paths the directed test does NOT cover and confirmed:
+  the differential is REAL (no faked/weakened/vacuous compare — the golden is fresh
+  each run, `compare.py --mode func` grades every IDENTIFY/READ word via eax); the
+  IDENTIFY pinning is correct (all 256 words re-derived from a fresh golden, 0
+  mismatches — geometry computed, strings/features build-pinned-and-graded); the
+  off-surface boundaries hold (IRQ14 quiescent under nIEN, no transient BSY). Every
+  divergence it found is on a path the gate provably cannot reach (data-port read
+  while DRQ=0, absent-slave lcyl/hcyl, out-of-range LBA, non-{EC/20/21/90} commands,
+  CHS, SRST, secondary channel). Its recommendations were folded in: the
+  multi-sector read above (was 3256 records, now 5335, the FSM converted from
+  source-asserted to gate-proven) and prose tightenings documenting the
+  single-shared-register-file absent-slave model, the data-port DRQ=0 behavior, the
+  command-abort being value-verified-not-gate-exercised, and the secondary channel's
+  real 0x50 divergence (in `ven_ide.sv` + the `pide` manifest).
+
+- **Oracle boundaries (documented, off the differential surface).** (1) the IRQ14
+  line-edge instruction boundary — nIEN-polled, no IRQ raised, the line wired to
+  PIC IR14 quiescent (the IR1/IR8/IR12 precedent). (2) the inter-instruction async-
+  BSY-vs-synchronous timing — qemu's block read settles in an async BH before the
+  next single-step (the golden never shows a lingering BSY), the RTL settles within
+  the S_IO window → the poll loop runs the same count (empirically: 3256 records,
+  same count). Deferred to M8.4b: WRITE SECTORS, SET FEATURES/SET MULTIPLE, SRST
+  (an async BH in qemu), the secondary channel (left undecoded), bus-master DMA.
+
+- **Gate + no-regression.** `verif/soc/run-soc-ide-gate.sh` (disk-gen+drift → build
+  → qemu-exit WITH -drive → golden WITH -drive + record-drift → run tb_soc →
+  compare EQUIVALENT), added to `make verify-soc`. **`make verify-soc` → 5/5 PASS**
+  (pirqsoc, psocdev 122/122, pvga 292/292, **pide 5335/5335**, test386 1500/1500 —
+  the IDE wiring's new cs windows 0x1F0-0x1F7/0x3F6 + the quiescent IR14 do not
+  perturb the others). `make verify` **69/69 cache hits, 0 regenerated** (the core
+  is untouched). RTL touched: `rtl/soc/ven_ide.sv` (new) + `rtl/soc/ventium_soc.sv`
+  + `rtl/ventium_soc.f` + `verif/tb/Makefile` (the `-DVEN_IDE_DISK_HEX` define).
+  `ventium-refs` untouched.
