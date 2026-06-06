@@ -15,7 +15,8 @@
 #   4. pide     (M8.4/d2/e/e2/f + M8.5) — IDE/ATAPI/DMA/block-PIO + PCI enum
 #   5. pboot    (M9)   — first boot: firmware chain-loads a boot sector from disk (PIO)
 #   6. pbootdma (M9b)  — first boot, but the chain-load uses bus-master DMA
-#   7. test386         — external x86 CPU tester    : per-record differential
+#   7. pbootrm  (M9-rm)— canonical real-mode boot: stays 16-bit real, loads to 0000:7C00
+#   8. test386         — external x86 CPU tester    : per-record differential
 #
 # Sequential (NOT parallel): the gates share the tb_soc obj_dir + the build/soc
 # output dir + a qemu gdbstub port, so concurrent runs would race. Each gate is
@@ -34,6 +35,7 @@ GATES=(
   "pide    (M8.4 IDE/ATA primary master PIO)|verif/soc/run-soc-ide-gate.sh"
   "pboot   (M9 first boot: chain-load from disk)|verif/soc/run-soc-boot-gate.sh"
   "pbootdma (M9b first boot: DMA chain-load)|verif/soc/run-soc-bootdma-gate.sh"
+  "pbootrm  (M9-rm canonical real-mode boot @0000:7C00)|verif/soc/run-soc-bootrm-gate.sh"
   "test386 (external CPU tester)|verif/external/test386/run-test386-gate.sh"
 )
 

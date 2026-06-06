@@ -1940,6 +1940,45 @@ far-jmps in and fetches from it.
   mem mux + the flat TB memory. SoC aggregate **7/7 PASS**; `make verify` **69/69 cache hits, 0
   regenerated**. `ventium-refs` untouched.
 
+### Gate hygiene — `verify-all` umbrella + `ppci` orphan cleanup (2026-06-06)
+
+- **`make verify-all`** (`verif/run-verify-all.sh`): one command that runs EVERY routinely-runnable
+  gate — `verify` (m1-m5 func+cycle) + `verify-sys` + `verify-soc` + `verify-srt` + `m6` (errata) +
+  `bus` + `bus-sva` — with a single pass/fail summary, so a regression in the bus-protocol SVA, the
+  errata flag, or the SRT divider can no longer slip through by only running the differential
+  aggregates. The m7 macro co-sims (Quake/Win95) are **excluded-and-logged** (not silently dropped):
+  they need gitignored producer artifacts unbuildable from a clean checkout; the driver prints how to
+  run them manually. **Validated green: VERIFY-ALL-OK, all 7 gates PASS.**
+- Removed the untracked `verif/sys/tests/ppci/` scratch dir — an M8.5 PCI config-space **probe**
+  (dumped over COM1 for empirical ground-truth capture), wired into no gate and superseded by the
+  inline PCI enumeration in `pide.S`.
+
+### M9-rm — CANONICAL real-mode boot: chain-load to 0000:7C00 (2026-06-06)
+
+**What this is.** The boot the way a PC BIOS actually does it: a -bios firmware that **stays in
+16-bit real mode** the whole time and chain-loads the boot sector to the canonical **0000:7C00**,
+then far-jmps in. The third boot variant (after M9 PIO→0x8000 and M9b DMA→0x8000), and the only one
+that never leaves real mode. New `pbootrm` gate: **EQUIVALENT 1065/1065** (first RTL run), with
+**zero new RTL**.
+
+- **The boot flow** (`verif/sys/tests/pboot/pboot_rm_stub.S`, all synchronous → single-step-diff):
+  reset F000:FFF0 → 16-bit real mode (NO GDT, NO CR0.PE, NO PM far-jmp) → **nIEN FIRST** → `READ
+  SECTORS 0x20` disk LBA0 via 16-bit PIO (`inw`/`stosw` into `es:di=0000:7C00`) → **far-jmp
+  0x0000:0x7C00**. The 16-bit boot sector (`pboot_rm_mbr.S`, disk LBA0) executes from RAM at cs=0/
+  ip=0x7C00, writes a distinct signature (0x7C00B007/0x600DF00D @0x9000) → isa-debug-exit.
+- **`cr0` stays the reset `0x60000010` on every record** (never enters PM) — strictly simpler than
+  M9, yet exercises a path the PM boots never did: **real-mode IDE PIO + the canonical 0000:7C00
+  handoff**. Non-vacuous gate (`run-soc-bootrm-gate.sh`, SoC aggregate #7, PORT 51262): per-record
+  EQUIVALENT **plus** the `pc=0x00007c00` handoff assertion on BOTH traces (the trace pc is the raw
+  eip offset; cs.base=0 ⇒ offset==linear==0x7C00) + disk-pristine md5 + exit-133.
+- **Encoding care** (a read-only design workflow grounded these in the core's 16-bit decode): the
+  drain pointer uses `movl $0x7C00,%edi` to zero-extend EDI so it tracks qemu's truncated `es:di`;
+  `inw`/`stosw`/`decw` stay bare 16-bit ops (no stray 0x66); only `[disp16]`-direct ModR/M is used
+  (the only real-mode addressing form the core decodes). Uses a **distinct disk**
+  (`pboot_rm.img`/`pboot_rm.disk.hex`) so the three boot gates never share an image.
+- **No regression:** SoC aggregate **8/8 PASS**; `make verify` **69/69 cache hits, 0 regenerated**.
+  `ventium-refs` untouched.
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
