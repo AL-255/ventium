@@ -1625,3 +1625,54 @@ to **EQUIVALENT 21875/21875**.
   restructures the graded data core), READ/WRITE MULTIPLE (0xC4/0xC5, the N-sector
   DRQ window), LBA48 (0x24/0x34), and SET FEATURES 0x82 (async flush). RTL touched:
   `rtl/soc/ven_ide.sv`. `ventium-refs` untouched.
+
+### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
+
+**What this is.** The *real* Pentium division datapath — base-4 SRT with the
+quotient-selection PLA reverse-engineered from the die photo (Ken Shirriff,
+righto.com Dec 2024) and formalised by Coe-Tang / Edelman (SIAM Rev. 1997) —
+added as an **optional compile-time feature** behind `fpu_x87_pkg::fx_srt_div`.
+Where the prior M6 FDIV erratum could only return a *hard-coded* documented
+vector (no oracle for the general flaw), the SRT engine reproduces the famous
+FDIV bug **algorithmically, no operand special-cased**, and the canonical
+flaw *emerges* from the five missing PLA entries.
+
+- **`fpu_x87_pkg.sv` (new `fx_srt_pla` + `fx_srt_div`; `fx_div` is now a
+  compile-time dispatcher).** The partial remainder is kept in **ones-complement
+  carry-save** (sum + carry words) exactly as the chip does, with the delayed
+  `+1` correction injected into the carry LSB after a complemented (positive-
+  digit) subtract; the quotient digit is chosen from a **4-integer-bit truncated
+  index** (`xxxx.yyy`) into the reverse-engineered selection PLA. That truncation
+  plus the ones-complement modular wraparound is precisely what lets a divide land
+  on a *missing* cell. Five PLA cells that should hold `+2` read `0`
+  (`8·P_Bad ∈ {23,27,31,35,39}` in columns `D ∈ {17,20,23,26,29}/16`); a remainder-
+  sign-aware final rounding packs to the 64-bit floatx80 significand.
+
+- **Optional, default OFF (matches the user's "compile-time parameter" choice).**
+  `+define+VEN_SRT_DIV` routes FDIV/FDIVR through the genuine SRT engine (correct
+  PLA → still bit-exact vs QEMU); adding `+define+VEN_SRT_FDIV_BUG` selects the
+  buggy PLA → the flaw is reproduced for **all** operands. With no defines the
+  divider is the fast `fx_div_exact` and **nothing changes**.
+
+- **The bug, from first principles (validated bit-exact).** `4195835/3145727`
+  → flawed floatx80 `0x3FFF_AAB7F6392A768638` (rounds to the documented double
+  `0x3FF556FEC7254ED1` = `1.3337390689…`, wrong at the 13th significant bit),
+  bug hit at iteration 8 (Edelman §7 "≥9 steps to failure"). The model also flaws
+  the second published pair `5505001/294911` (D=17), while the negative controls
+  `7654321/3145727` (triggering divisor, non-published pair) and `4195835/3.0`
+  divide **clean** — a triggering divisor is necessary but not sufficient.
+
+- **New gate `make verify-srt`** (`verif/srt/`, Verilator, independent of the
+  core/SoC build): drives golden vectors from the single-source model
+  `tools/srt/srt_model.py` (validated correctly-rounded over a 10 000-divide
+  corpus) and asserts `fx_srt_div` is bit-exact for **both** PLAs — **609 vectors
+  × 2 PLAs, SRT-GATE-OK**. The model bug found during bring-up was in the *Python*
+  side (out-of-range index returning ±3 instead of clamping to ±2 during the
+  post-bug excursion); the RTL ladder PLA was correct throughout.
+
+- **No regression.** `make verify` **69/69 cache hits, 0 regenerated**;
+  `make verify-soc` **5/5 PASS**. The M6 runtime erratum (`fx_div_errata`) is
+  unchanged and stays the documented default-build anchor; its comment now points
+  at `fx_srt_div` as the oracle it previously lacked. RTL touched:
+  `rtl/fpu/fpu_x87_pkg.sv`. New: `tools/srt/srt_model.py`, `verif/srt/*`.
+  `ventium-refs` untouched.
