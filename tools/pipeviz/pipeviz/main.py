@@ -52,7 +52,10 @@ def _apply_dark(app):
         "QLineEdit{background:#0d1117;border:1px solid #30363d;padding:2px;}"
         "QPushButton{background:#21262d;border:1px solid #30363d;padding:3px 8px;}"
         "QPushButton:hover{background:#30363d;}"
-        "QPushButton:disabled{color:#6e7681;}")
+        "QPushButton:disabled{color:#6e7681;}"
+        "QSplitter::handle{background:#30363d;}"
+        "QSplitter::handle:hover{background:#484f58;}"
+        "QToolBar QLabel{color:#8b949e;}")
 
 
 def _hex_edit(val, width=92):
@@ -103,6 +106,7 @@ class MainWindow(QMainWindow):
         self.load_e = _hex_edit(DEF_ENTRY); tb.addWidget(self.load_e)
         tb.addWidget(QLabel(" esp "))
         self.esp_e = _hex_edit(DEF_ESP); tb.addWidget(self.esp_e)
+        tb.addSeparator()   # file/load | config
 
         self.cyc_cb = QCheckBox("cycle (dual-issue)"); self.cyc_cb.setChecked(True)
         tb.addWidget(self.cyc_cb)
@@ -136,6 +140,9 @@ class MainWindow(QMainWindow):
         self.run_btn = QPushButton(" Run")
         self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.run_btn.clicked.connect(self.on_run_toggle)
+        self.run_btn.setStyleSheet(
+            "QPushButton{background:#238636;color:#ffffff;font-weight:bold;border:1px "
+            "solid #2ea043;padding:3px 12px;} QPushButton:hover{background:#2ea043;}")
         tb.addWidget(self.run_btn)
         tb.addWidget(QLabel(" speed "))
         self.speed = QSpinBox(); self.speed.setRange(1, 20000); self.speed.setValue(200)
@@ -173,7 +180,11 @@ class MainWindow(QMainWindow):
         right.setStretchFactor(0, 3); right.setStretchFactor(1, 1)
         outer.addWidget(left); outer.addWidget(right)
         outer.setStretchFactor(0, 3); outer.setStretchFactor(1, 2)
+        for sp in (outer, left, right):
+            sp.setHandleWidth(4)
         self.setCentralWidget(outer)
+        # link: selecting a trace row highlights that cycle in the waterfall
+        self.trace.rowSelected.connect(self.pipeline.highlight_cycle)
 
     # ---- image loading ----
     def on_open(self):
@@ -313,23 +324,37 @@ class MainWindow(QMainWindow):
             self.status_lbl.setText("  no image loaded — Open an image (e.g. build/m2/mb_brloop.flat)  ")
             return
         name = self.backend.state_name(s.state)
-        done = "  [DONE]" if self.backend.is_done() else ""
-        hung = "  [HUNG]" if s.cpu_hung else ""
         ret = self.backend.retire_count()
         cyc = max(1, s.core_cyc)
         st = self.pipeline.waterfall.stats()
         ipc = ret / cyc
-        paired = st["vret"]                      # V (paired) retirements so far
-        prate = (2 * paired / ret * 100) if ret else 0.0   # % of insns that paired
-        # cache occupancy from the heatmaps the tables panel just refreshed
+        prate = (2 * st["vret"] / ret * 100) if ret else 0.0   # % of insns that paired
         icn = sum(1 for v, _ in self.tables.ic_map.cells if v)
         dcn = sum(1 for v, _ in self.tables.dc_map.cells if v)
         mode = "SYS" if s.sys_mode else "USR"
-        self.status_lbl.setText(
-            f"  clk={s.clk}  cyc={s.core_cyc}  {name}  {mode}  ret={ret}  "
-            f"IPC={ipc:.2f}  pair={prate:.0f}%  mispred={st['mispred']}  "
-            f"I$={icn}/256 D$={dcn}/256  fills={st['fill']}  walks={st['walk']}  "
-            f"eip=0x{s.eip:08x}{done}{hung}  ")
+
+        def chip(lab, val, alert=False):
+            col = "#e3b341" if alert else "#e6edf3"
+            return (f"<span style='color:#6e7681'>{lab}</span>"
+                    f"<span style='color:{col}'>&nbsp;{val}</span>")
+        sep = " <span style='color:#30363d'>&#9474;</span> "
+        groups = [
+            chip("cyc", s.core_cyc),
+            f"<span style='color:#79c0ff'>{name}</span> <span style='color:#6e7681'>{mode}</span>",
+            chip("ret", ret) + "&nbsp;&nbsp;" + chip("IPC", f"{ipc:.2f}")
+                + "&nbsp;&nbsp;" + chip("pair", f"{prate:.0f}%")
+                + "&nbsp;&nbsp;" + chip("mispred", st["mispred"], st["mispred"] > 0),
+            chip("I$", f"{icn}/256") + "&nbsp;&nbsp;" + chip("D$", f"{dcn}/256")
+                + "&nbsp;&nbsp;" + chip("fills", st["fill"])
+                + "&nbsp;&nbsp;" + chip("walks", st["walk"], st["walk"] > 0),
+            chip("eip", f"0x{s.eip:08x}"),
+        ]
+        html = "&nbsp;" + sep.join(groups)
+        if self.backend.is_done():
+            html += " <span style='color:#3fb950;font-weight:bold'>[DONE]</span>"
+        if s.cpu_hung:
+            html += " <span style='color:#f85149;font-weight:bold'>[HUNG]</span>"
+        self.status_lbl.setText(html)
 
 
 def main():
