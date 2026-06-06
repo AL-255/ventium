@@ -34,7 +34,8 @@ SELFTEST_SRCS := $(wildcard $(SELFTEST_DIR)/*.sv)
 
 # C++ sources owned by Producer C.
 CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp \
-            $(TB_DIR)/quake_image.cpp $(TB_DIR)/win95_cosim.cpp
+            $(TB_DIR)/quake_image.cpp $(TB_DIR)/win95_cosim.cpp \
+            $(TB_DIR)/syscall_emu.cpp   # M14 free-run emulator (inert unless --emulate-syscalls)
 
 # M8.1 --soc TB: a dedicated driver (tb_soc.cpp) against the ventium_soc top. It
 # reuses the shared memory model + DPI retire path; no quake/win95 co-sim.
@@ -125,6 +126,19 @@ rtl-sva:
 	$(VERILATOR) $(VL_FLAGS) --assert -Wno-DECLFILENAME -Mdir obj_dir_sva \
 	  -F $(RTL_FILELIST) $(SVA_BIND) $(CPP_SRCS)
 	@echo "built (SVA): $(CURDIR)/obj_dir_sva/$(EXE)"
+
+# ---- emu: M14 free-run build (TB emulates int-0x80 instead of replaying) -----
+# SEPARATE obj dir so it never clobbers obj_dir/tb_ventium (make verify keeps
+# using that). Same RTL + tb_main; tb_main's --emulate-syscalls path is additive
+# and inert by default, so this builds the very same model with the syscall
+# emulator linked in (syscall_emu.cpp).
+# emu: the SAME build as `rtl` (the emulator is in CPP_SRCS now) but into a
+# SEPARATE obj dir, so it can be built while obj_dir/tb_ventium is busy with a run.
+.PHONY: emu
+emu:
+	$(VERILATOR) $(VL_FLAGS) -Mdir obj_dir_emu \
+	  -F $(RTL_FILELIST) $(CPP_SRCS)
+	@echo "built: $(CURDIR)/obj_dir_emu/$(EXE)"
 
 # ---- selftest target: build against the throwaway stub ----------------------
 # Built into a separate obj dir so it never clobbers a real-core build. ENTRY

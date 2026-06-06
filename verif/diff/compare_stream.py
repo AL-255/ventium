@@ -80,9 +80,12 @@ def main() -> int:
     ap.add_argument("--dedup-golden", action="store_true",
                     help="collapse exact consecutive duplicate golden records "
                          "(qemu one-insn-per-tb re-dump artifact); see module doc")
+    ap.add_argument("--x87", action="store_true",
+                    help="also grade x87 state (st0..st7/fctrl/fstat/ftag); both "
+                         "traces must carry x87 fields (produced with --x87)")
     a = ap.parse_args()
 
-    keys = tracefmt.func_compare_keys(x87=False, sys=a.sys)
+    keys = tracefmt.func_compare_keys(x87=a.x87, sys=a.sys)
     base_mask = tracefmt.EFLAGS_DEFAULT_MASK
     n = 0
     collapsed = 0

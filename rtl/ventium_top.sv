@@ -90,6 +90,14 @@ module ventium_top
     input  logic [31:0] syscall_eax,
     input  logic        syscall_apply_gs,
     input  logic [31:0] syscall_gs_base,
+    // M14: syscall args exposed for the TB free-run emulator (inert otherwise).
+    output logic [31:0] syscall_arg_eax,
+    output logic [31:0] syscall_arg_ebx,
+    output logic [31:0] syscall_arg_ecx,
+    output logic [31:0] syscall_arg_edx,
+    output logic [31:0] syscall_arg_esi,
+    output logic [31:0] syscall_arg_edi,
+    output logic [31:0] syscall_arg_ebp,
 
     // M7.3b: Win95 system co-sim port-I/O bus (docs/m7-lockstep-spec.md M7.3).
     // DEFAULT 0 = INERT (the IN/OUT decode HALTs / the `out 0xf4` terminator is
@@ -174,6 +182,13 @@ module ventium_top
       .syscall_eax        (syscall_eax),
       .syscall_apply_gs   (syscall_apply_gs),
       .syscall_gs_base    (syscall_gs_base),
+      .syscall_arg_eax    (syscall_arg_eax),
+      .syscall_arg_ebx    (syscall_arg_ebx),
+      .syscall_arg_ecx    (syscall_arg_ecx),
+      .syscall_arg_edx    (syscall_arg_edx),
+      .syscall_arg_esi    (syscall_arg_esi),
+      .syscall_arg_edi    (syscall_arg_edi),
+      .syscall_arg_ebp    (syscall_arg_ebp),
       .cosim_en     (cosim_en),
       .io_req       (io_req),
       .io_we        (io_we),
