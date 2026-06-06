@@ -42,6 +42,16 @@
 
 namespace ventium {
 
+// M14 checkpoint: the latest retired architectural state (regs + segs), updated
+// every vtm_retire (dpi_retire.cpp). The periodic-checkpoint path pairs this with
+// a MemModel snapshot to save complete state at a retirement boundary.
+struct LastArch {
+    uint64_t n = 0;
+    uint32_t pc = 0, eflags = 0, gpr[8] = {0};   // eax ecx edx ebx esp ebp esi edi
+    uint16_t seg[6] = {0};                        // cs ss ds es fs gs
+};
+extern LastArch g_last_arch;
+
 // Post-commit x87 architectural state for one retirement, in the canonical
 // floatx80 encoding the trace compares against (gen_trace.py / tracefmt.py):
 //   st<i> 80-bit = (hi<<64)|lo, hi = sign|exp [79:64], lo = mantissa [63:0].

@@ -110,6 +110,13 @@ struct Args {
     std::string user_stdin;            // --user-stdin <file>  (bytes for read())
     std::string user_stdout;           // --user-stdout <file> (captured fd 1/2)
     uint32_t    brk_base    = 0;       // --brk-base <hexaddr> (initial program break)
+
+    // M14 periodic complete-state checkpoints (free-run "replay mechanism"):
+    // every N retired insns, dump {arch regs + full MemModel} to a 2-deep ring in
+    // --checkpoint-dir. The newest checkpoint before a divergence is the restart /
+    // inspect point.
+    uint64_t    checkpoint_every = 0;  // --checkpoint-every N (0 = off)
+    std::string checkpoint_dir;        // --checkpoint-dir D
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -164,6 +171,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--user-stdin")  a.user_stdin  = need("--user-stdin");
         else if (k == "--user-stdout") a.user_stdout = need("--user-stdout");
         else if (k == "--brk-base")    a.brk_base    = parse_u32(need("--brk-base"));
+        else if (k == "--checkpoint-every") a.checkpoint_every = parse_u64(need("--checkpoint-every"));
+        else if (k == "--checkpoint-dir")   a.checkpoint_dir   = need("--checkpoint-dir");
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -556,6 +565,8 @@ int main(int argc, char** argv) {
     cycles = 0;
     uint32_t idle        = 0;        // consecutive clocks with no new retire
     int      exit_code   = 0;
+    uint64_t next_ckpt   = args.checkpoint_every;   // M14 next checkpoint threshold
+    int      ckpt_ring   = 0;                        // 2-deep ring index
 
     uint64_t syscalls_replayed = 0;   // M7.1 diagnostics
     while (true) {
@@ -645,6 +656,25 @@ int main(int argc, char** argv) {
                 "(LOUD stop — never a silent wrong answer; add it to syscall_emu)\n",
                 emu_bad_nr, (unsigned long long)trace.retired());
             break;
+        }
+
+        // M14 periodic complete-state checkpoint: every K retired insns, dump the
+        // latest arch state + full MemModel to a 2-deep ring (newest before a
+        // divergence = the restart/inspect point). Written at a retirement
+        // boundary (this in-order core's pipeline is empty between retirements).
+        if (args.checkpoint_every && trace.retired() >= next_ckpt) {
+            char path[1024];
+            std::snprintf(path, sizeof(path), "%s/ckpt.%d.bin",
+                          args.checkpoint_dir.c_str(), ckpt_ring);
+            if (FILE* cf = std::fopen(path, "wb")) {
+                std::fwrite(&ventium::g_last_arch, sizeof(ventium::g_last_arch), 1, cf);
+                mem.snapshot(cf);
+                std::fclose(cf);
+                std::fprintf(stderr, "tb: checkpoint @ %llu retired -> %s\n",
+                             (unsigned long long)trace.retired(), path);
+            }
+            ckpt_ring ^= 1;
+            next_ckpt += args.checkpoint_every;
         }
 
         // quiescence / limit detection

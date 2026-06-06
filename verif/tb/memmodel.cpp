@@ -82,4 +82,31 @@ void MemModel::service(bool req, bool we, uint32_t addr, uint32_t wdata,
     *ack = true;               // single-beat: ack immediately (M0, §3)
 }
 
+// ---- checkpoint snapshot / restore -----------------------------------------
+// Format: [u32 magic][u32 npages] then npages * ([u32 pagenum][4096 bytes]).
+void MemModel::snapshot(FILE* f) const {
+    uint32_t magic = 0x564D454Du;   // 'VMEM'
+    uint32_t np = (uint32_t)pages_.size();
+    std::fwrite(&magic, 4, 1, f);
+    std::fwrite(&np, 4, 1, f);
+    for (const auto& kv : pages_) {
+        uint32_t pn = kv.first;
+        std::fwrite(&pn, 4, 1, f);
+        std::fwrite(kv.second.b, 1, PAGE_SIZE, f);
+    }
+}
+void MemModel::restore(FILE* f) {
+    uint32_t magic = 0, np = 0;
+    if (std::fread(&magic, 4, 1, f) != 1 || magic != 0x564D454Du) return;
+    if (std::fread(&np, 4, 1, f) != 1) return;
+    pages_.clear();
+    for (uint32_t i = 0; i < np; ++i) {
+        uint32_t pn = 0;
+        if (std::fread(&pn, 4, 1, f) != 1) break;
+        Page pg;
+        if (std::fread(pg.b, 1, PAGE_SIZE, f) != PAGE_SIZE) break;
+        pages_[pn] = pg;
+    }
+}
+
 }  // namespace ventium
