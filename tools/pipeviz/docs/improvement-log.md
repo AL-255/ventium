@@ -19,14 +19,20 @@ not repeat itself.
   F/D/X/M/W + `=` stall / `!` flush cells cascading diagonally; integer X green,
   x87 X purple; frozen instruction-label gutter showing n / U·V pipe / PC /
   mnemonic + an amber **`Nc` stall badge** = the instruction's cycle span; synced
-  cycle axis; **distinct per-stage colours** — F-fetch blue, F-fill amber,
-  D-decode teal, M-mem orange, X-exec green (FP purple), W-wb magenta, `=` stall
-  grey, `!` flush red; legend on its own line. Two-way selection: click a Konata
-  instruction (cell or label) → selects + centres its trace row.
+  cycle axis; **distinct per-stage colours + glyphs** — `F` fetch blue, `L`
+  I-cache-fill amber, `D` decode teal, `M` mem orange, `X` exec green (FP
+  purple), `W` wb magenta, `=` stall grey, `!` flush red; legend on its own line
+  with each swatch tightly paired to its label. The stage board is a COMPACT
+  snapshot (the Konata view gets the height — ~29 rows visible). Two-way
+  selection: click a Konata instruction (cell or label) → selects + centres its
+  trace row, and vice-versa.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
-  truncated); split TLB; prefetch buffer (ibuf + decode).
+  truncated); split TLB; prefetch buffer (ibuf + decode); **Hotspots** = a
+  per-PC cycle-cost profile (PC | hits | cycles | cyc% | amber cost bar |
+  instruction, sorted by total cycles — stalls inflate the cost so the stalled
+  load/branch PCs bubble to the top, perf/VTune-style).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction; x86 byte-field colouring (prefix gray / opcode blue / ModRM green
   / SIB purple / memory-offset yellow / immediate red / **branch-rel orange**),
@@ -43,6 +49,24 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 6 — Hotspots profile + reclaim Konata height + glyph/legend fixes
+- **New feature — per-PC Hotspots tab** (perf/VTune-style): aggregates each PC's
+  hit count + total cycles occupied (stalls inflate it), sorted by cost with an
+  amber cost bar. Correctly surfaces the stalled `dec ecx` as 72% of cycles on
+  `mb_dmiss`.
+- **Reclaimed Konata height** (the recurring "only ~6 rows visible" / "stage
+  board is dead space" finding): shrank the snapshot stage board (compact 22px
+  lanes) and rebalanced the splitter → the Konata view now shows ~29 instruction
+  rows.
+- **Stage board stall cell** was exec-green; now grey (distinct from exec).
+- **Konata glyph fix:** I-cache line-fill now uses `L` (amber), distinct from
+  `F` slow-fetch (blue) — they no longer share the `F` glyph.
+- **Legend pairing fix** (the recurring "legend colours don't match the bytes"
+  perception): each swatch is now tightly coupled to ITS label with a clear gap
+  between entries, in both the trace byte legend and the Konata stage legend, so
+  the swatch→label mapping can't be misread as rotated. (Verified the byte
+  colours themselves are correct: rel=orange, disp=yellow, opcode=blue, etc.)
 
 ### Iteration 5 — distinct stage palette, branch-byte colour, two-way selection
 - **New feature — two-way Konata↔trace selection:** click a trace row →

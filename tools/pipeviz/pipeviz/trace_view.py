@@ -95,16 +95,18 @@ class TraceView(QWidget):
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
         self.tbl.currentCellChanged.connect(self._on_row)
         lay.addWidget(self.tbl)
-        # field-colour legend
-        leg = QHBoxLayout(); leg.setSpacing(10)
+        # field-colour legend — swatch tightly coupled to ITS label (no rotation)
+        leg = QHBoxLayout(); leg.setSpacing(12)
         leg.addWidget(self._k("bytes:"))
         for name, lab in [("prefix", "prefix"), ("opcode", "opcode"), ("modrm", "ModRM"),
                           ("sib", "SIB"), ("disp", "offset"), ("imm", "immediate"),
                           ("rel", "branch")]:
-            sw = QLabel("  "); sw.setFixedSize(11, 11)
+            it = QWidget(); ih = QHBoxLayout(it); ih.setContentsMargins(0, 0, 0, 0); ih.setSpacing(3)
+            sw = QLabel(); sw.setFixedSize(11, 11)
             sw.setStyleSheet(f"background:{FIELD_COLOR[name]};border:1px solid #30363d;")
             t = QLabel(lab); t.setStyleSheet("color:#8b949e;font-size:8px;")
-            leg.addWidget(sw); leg.addWidget(t)
+            ih.addWidget(sw); ih.addWidget(t)
+            leg.addWidget(it)
         leg.addStretch(1)
         lay.addLayout(leg)
         self._seen = 0      # next retire n to fetch

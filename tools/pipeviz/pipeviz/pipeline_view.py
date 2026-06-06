@@ -46,7 +46,7 @@ def _mono(pt=9, bold=False):
 class StageBoard(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(164)
+        self.setFixedHeight(122)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._cells = self._blank()
         self._status = "no image loaded"
@@ -77,7 +77,8 @@ class StageBoard(QWidget):
                 if s.pipe_pair:
                     cells["V"] = ([3, 4], dis(s.eip + s.ud_len))
             else:
-                cells["U"] = ([3], "· stall")
+                cells["U"] = ([3], "stall")
+                self._statecol = C_STG_STALL    # not exec-green
         elif name == "S_PF":
             cells["U"] = ([0], f"I-fill {s.pf_word}/8")
         elif name == "S_FETCH":
@@ -120,10 +121,10 @@ class StageBoard(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(_BG))
         W = self.width()
-        lane_h = 30
-        title_y = 8          # section titles band (lowered so it isn't clipped)
-        hdr_y = 26           # stage-label band (separated from titles -> no collision)
-        top = 44             # cells start
+        lane_h = 22          # compact: this snapshot is sparse, give rows to Konata
+        title_y = 4          # section titles band (lowered so it isn't clipped)
+        hdr_y = 20           # stage-label band (separated from titles -> no collision)
+        top = 34             # cells start
         lane_label_w = 38
         # collapse the FP group when idle so the integer stages get the width.
         fp_idle = not self._cells.get("FP", ([], ""))[0]
@@ -228,7 +229,7 @@ def _stage_cell(name, ret, stall, mispred):
             return ("X", C_STG_EXEC)    # issue + execute + writeback (fast path)
         return ("=", C_STG_STALL)       # materialised stall / bubble
     if name == "S_PF":
-        return ("F", C_STG_FILL)        # I-cache line fill
+        return ("L", C_STG_FILL)        # I-cache Line fill (distinct glyph from fetch)
     if name == "S_FETCH":
         return ("F", C_STG_FETCH)
     if name == "S_DECODE":
@@ -513,16 +514,20 @@ class Konata(QWidget):
         self._last_cyc = 0
 
     def _legend_widget(self):
-        w = QWidget(); h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(5)
-        items = [("F fetch", C_STG_FETCH), ("F fill", C_STG_FILL), ("D dec", C_STG_DEC),
+        # Each swatch is tightly coupled to ITS label (3px), with a clear gap
+        # between entries (14px) so the swatch->label pairing is unambiguous.
+        w = QWidget(); h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(14)
+        items = [("F fetch", C_STG_FETCH), ("L fill", C_STG_FILL), ("D dec", C_STG_DEC),
                  ("M mem", C_STG_MEM), ("X exec", C_STG_EXEC), ("W wb", C_STG_WB),
                  ("= stall", C_STG_STALL), ("! flush", C_MISPRED), ("FP", C_FP),
                  ("walk", C_WALK)]
         for txt, col in items:
+            it = QWidget(); ih = QHBoxLayout(it); ih.setContentsMargins(0, 0, 0, 0); ih.setSpacing(3)
             sw = QLabel(); sw.setStyleSheet(f"background:{col}; border:1px solid #30363d;")
-            sw.setFixedSize(13, 13)
+            sw.setFixedSize(12, 12)
             lab = QLabel(txt); lab.setStyleSheet("color:#9aa3ad; font-size:9px;")
-            h.addWidget(sw); h.addWidget(lab)
+            ih.addWidget(sw); ih.addWidget(lab)
+            h.addWidget(it)
         return w
 
     def reset(self, backend, bits):
