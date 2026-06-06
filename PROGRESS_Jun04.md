@@ -1626,6 +1626,62 @@ to **EQUIVALENT 21875/21875**.
   DRQ window), LBA48 (0x24/0x34), and SET FEATURES 0x82 (async flush). RTL touched:
   `rtl/soc/ven_ide.sv`. `ventium-refs` untouched.
 
+### M8.4e — Secondary channel + absent slave + empty ATAPI CD-ROM (2026-06-06)
+
+**What this is.** `ven_ide` parameterized so the SoC can instantiate the SECONDARY
+channel's master as the empty ATAPI CD-ROM qemu's `-machine pc` auto-creates
+(`ide1-cd0`), decoded at 0x170-0x177 + control 0x376. Two new params: `IS_ATAPI`
+(0xEB14 signature, DIAGNOSTIC status 0x00, the ATAPI command surface) and `HAS_DISK`
+(suppresses the `$readmemh` — the empty CD has no media). The `pide` gate grows to
+**EQUIVALENT 21996/21996** (it then becomes 22897 with the M8.4e2 fold-back below).
+
+- **`ven_ide.sv`.** `IS_ATAPI`/`HAS_DISK` params + `SIG_LCYL/SIG_HCYL` (0x14/0xEB vs
+  0x00/0x00); the absent slave's independent lcyl/hcyl shadow (reset 0xFF, broadcast-
+  tracked); an ATAPI command branch. **`ventium_soc.sv`.** The `u_ide2` instance
+  (IS_ATAPI=1, HAS_DISK=0), `cs_ide2`/`cs_ide2_ctl` decode, `ide_irq15` → PIC IR15
+  (quiescent, nIEN), the read mux. NO second `-drive` (qemu auto-creates ide1-cd0).
+- **Gate.** SEC-1 signature 0xEB14, SEC-2 DIAGNOSTIC 0x00, SEC-3 IDENTIFY abort +
+  signature, SEC-4 READ abort (no DRQ), SEC-5 secondary absent-slave masking +
+  lcyl/hcyl=0xFF; plus the PRIMARY absent-slave lcyl/hcyl=0xFF read placed EARLY
+  (fresh shadow, before any LBA write broadcasts over it).
+
+### M8.4e2 — ATAPI command-surface fidelity (4-dimension review fold-back) (2026-06-06)
+
+**What this is.** The M8.4e adversarial review (4-dimension Workflow, **30 findings
+confirmed / 4 rejected** after independent adversarial verification) found the
+IS_ATAPI dispatch was a coarse "abort everything but 0x90", whereas qemu treats
+several CD-permitted commands as completions, and the boundary docs OVERCLAIMED that
+qemu aborts them. Folded back **oracle-first** (extend the test to probe each, read
+the golden, build the RTL to match): `pide` grows to **EQUIVALENT 22897/22897**.
+
+- **ATAPI command surface made command-specific (`ven_ide.sv`), every value pinned to
+  the golden:** **DEVICE RESET (0x08)** → `ide_reset`+signature, status 0x00 / error
+  0x00 / nsector·sector=1 / 0xEB14 / devhead 0xA0 (head cleared), NO IRQ
+  (`cmd_device_reset` returns false). **SET FEATURES (0xEF)** → COMPLETES 0x50 (the
+  empty CD still has a BlockBackend). **FLUSH CACHE (0xE7)** → ABORTS 0x41/0x04 at
+  RUNTIME (the no-medium `blk_aio_flush` error via `ide_flush_cb`) — the golden
+  overturned the review's "completes 0x50" guess, a clean oracle-first catch.
+  **IDENTIFY/READ (0xEC/0x20/0x21)** → full `ide_set_signature` THEN abort (now also
+  resets nsector·sector + clears the head bits, not just lcyl/hcyl). **Unsupported
+  opcodes (e.g. 0xB0 SMART, NOT CD_OK)** → BARE `ide_abort_command`, task file LEFT
+  UNTOUCHED (a pre-written lcyl=0x55 SURVIVES). **ATAPI SRST** → status 0x00 (not
+  0x50). **Absent slave** gains an INDEPENDENT nsector/sector shadow (reset 1,
+  broadcast-tracked, never advanced by a master command). **Data-port reads** outside
+  a read-DRQ window return 0x0000 (idle/write-window/empty-CD, no X-leak). `HAS_DISK`
+  lint sink.
+- **Honest docs (the mandatory part).** Corrected the header + manifest claim that
+  qemu "aborts 0xA0/0xA1 (matches qemu)" — it does NOT: 0xA0 PACKET / 0xA1
+  IDENTIFY-PACKET are CD_OK and qemu DRQ-enters them (status 0x58). The RTL's bare
+  abort is now an ACKNOWLEDGED, documented divergence on the deferred full-ATAPI-PACKET
+  surface; the directed test issues NEITHER, so the EQUIVALENT stays honest. The stale
+  "secondary channel UNDECODED" boundary is removed (now decoded + gate-proven).
+- **No regression.** `make verify-soc` **5/5 PASS** (pide 22897/22897); `make verify`
+  **69/69 cache hits, 0 regenerated**. Both standalone lint configs (ATA / +DISK_HEX)
+  0 warnings. RTL touched: `rtl/soc/ven_ide.sv`, `rtl/soc/ventium_soc.sv`. Test:
+  `verif/sys/tests/pide/pide.S`. `ventium-refs` untouched.
+- **Still deferred:** the full ATAPI PACKET protocol (0xA0 12-byte CDB + `ide_atapi_cmd`
+  + sense; 0xA1 256-word ATAPI identify) — a dedicated future milestone.
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
