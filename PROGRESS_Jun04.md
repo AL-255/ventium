@@ -1682,6 +1682,38 @@ the golden, build the RTL to match): `pide` grows to **EQUIVALENT 22897/22897**.
 - **Still deferred:** the full ATAPI PACKET protocol (0xA0 12-byte CDB + `ide_atapi_cmd`
   + sense; 0xA1 256-word ATAPI identify) — a dedicated future milestone.
 
+### M8.4f-pre — Minimal PCI config shim (maps the bus-master IDE BAR4) (2026-06-06)
+
+**What this is.** The first of the two M8.4f (bus-master DMA) increments, recommended by
+a 4-investigation research Workflow that **empirically probed the gate's own
+qemu-system-i386**: the PIIX3 IDE is at PCI 00:01.1, its bus-master BAR4 is UNMAPPED at
+reset and a fixed-port BMIDE decode reads 0xFF until the guest programs BAR4 via
+0xCF8/0xCFC AND sets `PCI_COMMAND.IO` — so a fixed-port hard-decode is NOT differentiable.
+A minimal single-function PCI config shim is therefore a HARD PREREQUISITE. The `pide` gate
+grows to **EQUIVALENT 22947/22947** (first RTL run, oracle-first).
+
+- **`ventium_soc.sv` (the shim, folded in — not a full host bridge).** Decodes
+  CONFIG_ADDRESS (0xCF8, dword latch, enable bit31) + the CONFIG_DATA window
+  (0xCFC..0xCFF, 1/2/4-byte) for **bus0/dev1/fn1 only**. Models exactly what a driver
+  touches, pinned to the live golden: vendor/device `0x70108086` (RO), class/prog-if
+  `0x01018000` (RO), `PCI_COMMAND` (R/W IO/MEM/MASTER, reset 0), BAR4 (R/W, low 4 bits RO
+  → write 0xC000 reads back `0xC001`, reset `0x00000001`). Absent functions / unmodeled
+  offsets read all-ones (the qemu reply); the test reads only modeled offsets.
+- **`pide.S`.** A PCI block (after all existing graded sections) reading vendor/device,
+  class, the pre-enable command, the pre-program + post-program BAR4, and the post-enable
+  command — all per-record graded. This is the **first exercise of the 32-bit `outl`/`inl`
+  (`io_size=4`) I/O path under `soc_en`**: the no-shim run confirmed the mechanics retire
+  byte-identical (only the config DATA diverged), de-risking the research's top concern.
+- **No regression.** `make verify-soc` **5/5 PASS** (pide 22947/22947); `make verify`
+  **69/69 cache hits, 0 regenerated**. SoC lints clean (beyond the pre-existing
+  `fpu_x87_pkg` WIDTHEXPAND). RTL touched: `rtl/soc/ventium_soc.sv`; test: `pide.S`;
+  `ventium-refs` untouched.
+- **Next (M8.4f proper):** the DMA engine — a ven_ide mem-master port + a 2-master
+  priority mux on the SoC `mem_*` seam + the BMIC/BMIS/BMIDTP register file at the BAR4
+  base + a single-PRD single-sector READ DMA (0xC8), polled via BMIS bit0 + status 0x50
+  (under nIEN, `ide_bus_set_irq` is gated so BMIS-INT is never set), proven non-vacuously
+  by a CPU read-back of the DMA'd buffer.
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
