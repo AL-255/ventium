@@ -54,7 +54,9 @@ package ventium_decode_pkg;
     FX_AR_STI_ST0,           // ST(i) op= ST0
     FX_AR_M32, FX_AR_M64,    // ST0 op= mem float
     FX_AR_I16, FX_AR_I32,    // ST0 op= mem int (FIADD..)
-    FX_FSQRT
+    FX_FSQRT,
+    // M10: packed-BCD load (FBLD, DF /4) / round-store-and-pop (FBSTP, DF /6)
+    FX_FBLD, FX_FBSTP
   } fxop_e;
 
   // ===========================================================================

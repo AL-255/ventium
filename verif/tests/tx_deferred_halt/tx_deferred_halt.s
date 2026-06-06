@@ -5,8 +5,10 @@
 #   gcc -m32 -nostdlib -static -Wl,--build-id=none -Wl,-Ttext=0x08048000
 #
 # Pins the x87 COVERAGE BOUNDARY (REVIEW_Jun5.md Recommended Step 4, Limit #2):
-# the transcendental / BCD / FP-environment ops are DEFERRED (m3-fpu-spec.md
-# "DEFERRED — loud HALT, never fake"). The machine-checkable expectation is that
+# the transcendental / FP-environment ops are DEFERRED (m3-fpu-spec.md
+# "DEFERRED — loud HALT, never fake"). (BCD FBLD/FBSTP were deferred too but are
+# now IMPLEMENTED in M10; FSIN below stands in for the still-deferred set.) The
+# machine-checkable expectation is that
 # the RTL core enters S_HALT on the deferred decode (d_unknown -> S_HALT, see
 # rtl/core/core.sv:1889 + the S_DECODE default -> S_HALT at :3139) and DOES NOT
 # retire the deferred op or anything after it. That is the *correct* behavior for

@@ -964,4 +964,55 @@ package fpu_x87_pkg;
     end
   endfunction
 
+  // ---------------------------------------------------------------------------
+  // M10 packed-BCD conversions (FBLD / FBSTP), mirroring QEMU's helper_fbld_ST0
+  // / helper_fbst_ST0. Packed-BCD m80 layout (little-endian): bytes[0..8] hold 18
+  // decimal digits, 2 per byte (low nibble = less significant); byte9 = sign
+  // (bit7: 1=negative). digit i (10^i place) = bcd[i*4 +: 4].
+  // ---------------------------------------------------------------------------
+  // FBLD: packed BCD -> floatx80. 18 digits <= ~1e18 < 2^63, so the int64 ->
+  // floatx80 conversion (fx_from_int, the same RNE path FILD uses) is EXACT.
+  function automatic logic [79:0] fx_bcd_to_fx(input logic [79:0] bcd);
+    logic [63:0]        mag;
+    logic signed [63:0] sval;
+    int                 i;
+    begin
+      mag = 64'd0;
+      for (i=17; i>=0; i--) mag = mag*64'd10 + {60'd0, bcd[i*4 +: 4]};   // MSD-first
+      sval = bcd[79] ? -$signed(mag) : $signed(mag);                     // byte9 bit7 = sign
+      fx_bcd_to_fx = fx_from_int(sval);
+    end
+  endfunction
+
+  // FBSTP: floatx80 -> packed BCD. Round ST0 to int64 honoring RC, then pack 18
+  // digits + sign byte. Returns {ie, pe, bcd[79:0]}:
+  //   ie -> set IE; bcd = the BCD indefinite image (QEMU: bytes 00..00 C0 FF FF).
+  //         Fires when the int64 conversion overflows OR |rounded| >= 1e18 -- the
+  //         18-digit BCD range, which is TIGHTER than fx_to_int_ex's 2^63 bound,
+  //         so a value in [1e18, 2^63) is a valid int64 yet an invalid BCD.
+  //   pe -> set PE on an inexact round-to-int (only when NOT invalid), matching
+  //         QEMU's helper_fbst_ST0 (oracle-confirmed: FBSTP of 2.5 -> 2 sets PE).
+  function automatic logic [81:0] fx_fx_to_bcd(input logic [79:0] v, input logic [1:0] rc);
+    logic [65:0]        ri;       // {invalid, inexact, value[63:0]} from fx_to_int_ex
+    logic signed [63:0] sval;
+    logic [63:0]        mag, q;
+    logic [79:0]        bcd;
+    int                 i;
+    begin
+      ri   = fx_to_int_ex(v, 64, rc);
+      sval = $signed(ri[63:0]);
+      mag  = sval[63] ? (~sval + 64'd1) : sval[63:0];           // |value|
+      // int64-overflow (ri[65]) OR BCD-range overflow (|val| >= 10^18) -> indefinite
+      if (ri[65] || (mag >= 64'd1000000000000000000)) begin
+        fx_fx_to_bcd = {1'b1, 1'b0, 80'hFFFFC000000000000000};  // {ie=1, pe=0, indefinite}
+      end else begin
+        bcd = 80'd0;
+        q   = mag;
+        for (i=0; i<18; i++) begin bcd[i*4 +: 4] = (q % 64'd10); q = q / 64'd10; end
+        bcd[79:72] = {sval[63], 7'd0};                          // sign byte: 0x80 / 0x00
+        fx_fx_to_bcd = {1'b0, ri[64], bcd};                     // {ie=0, pe=inexact, bcd}
+      end
+    end
+  endfunction
+
 endpackage : fpu_x87_pkg
