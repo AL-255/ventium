@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-all
 .DEFAULT_GOAL := help
 
 help:
@@ -28,7 +28,9 @@ help:
 	@echo "  make verify-srt radix-4 SRT divider gate: fx_srt_div bit-exact vs the golden model"
 	@echo "                  (correct PLA == QEMU; buggy PLA == documented Pentium FDIV flaw)"
 	@echo "  make verify-soc M8 SoC regression aggregate: run EVERY ventium_soc differential gate"
-	@echo "                  (pirqsoc + psocdev + pvga + test386), pass/fail summary"
+	@echo "                  (pirqsoc + psocdev + pvga + pide + pboot + pbootdma + test386)"
+	@echo "  make verify-all UMBRELLA: every routinely-runnable gate (verify + verify-sys +"
+	@echo "                  verify-soc + verify-srt + m6 + bus + bus-sva); one pass/fail summary"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -206,6 +208,16 @@ verify-sys:
 # any change to rtl/soc/ventium_soc.sv or a wired device model.
 verify-soc:
 	bash verif/soc/run-all-soc-gates.sh
+
+# --- verify-all umbrella (verif/run-verify-all.sh) --------------------------
+# One command that runs EVERY routinely-runnable gate (verify + verify-sys +
+# verify-soc + verify-srt + m6 + bus + bus-sva) and reports a single pass/fail
+# summary, so a regression in the bus-protocol SVA, the errata flag, or the SRT
+# divider cannot slip through by only running the differential aggregates. The
+# m7 macro co-sims (Quake/Win95) are EXCLUDED-and-logged: they need gitignored
+# producer artifacts that cannot be regenerated from a clean checkout.
+verify-all:
+	bash verif/run-verify-all.sh
 
 # --- SRT divider gate (verif/srt/run-srt-gate.sh) ---------------------------
 # Standalone Verilator unit gate for the genuine radix-4 SRT divider
