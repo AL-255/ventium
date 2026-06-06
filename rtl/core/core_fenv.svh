@@ -28,3 +28,19 @@
             end else f_seq_step <= f_seq_step + 5'd1;
           end
         end
+
+        // ===================================================================
+        // M11b — x87 env/state LOAD (S_FENV_LD: FLDENV / FRSTOR). Latch each read
+        // dword into env_tmp[]; on the last beat the fp_we_* block commits CW/SW/
+        // TOP/tags (+ regs for FRSTOR) and we retire. CW/SW are loaded verbatim
+        // (no masking); the tag word is re-derived from the loaded FTW.
+        // ===================================================================
+        S_FENV_LD: begin
+          if (mem_ack) begin
+            env_tmp[f_seq_step] <= mem_rdata;
+            if (f_seq_step == ((q_fxop==FX_FRSTOR) ? 5'd26 : 5'd6)) begin
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
+              state<=S_PIPE; f_seq_step<=5'd0;
+            end else f_seq_step <= f_seq_step + 5'd1;
+          end
+        end

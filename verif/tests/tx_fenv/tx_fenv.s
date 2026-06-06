@@ -35,11 +35,36 @@ _start:
     movl    env28+20, %edi  # FDP (= address of dval)
     movl    env28+24, %ebp  # FDS
 
+    # --- FLDENV round-trip: clobber TOP + CW, reload, verify restored ----------
+    fstp    %st(0)          # pop (TOP 5->6, phys5 tagged empty; fpr[5] value kept)
+    movw    $0x027F, clob_cw
+    fldcw   clob_cw         # CW clobbered to 0x027F
+    fldenv  env28           # reload CW=0x037F + SW(TOP=5) + tags from the saved env
+    fnstsw  %ax
+    movzwl  %ax, %eax       # eax = restored SW = 0x2800 (TOP=5)
+    fnstcw  cw_back
+    movzwl  cw_back, %ecx   # ecx = restored CW = 0x037F (FLDENV overwrote 0x027F)
+    fnstenv env28b          # re-save to confirm the tag word was restored
+    movl    env28b+8, %edx  # edx = restored FTW = 0x43FF
+
+    # --- B-bit: FLDENV an image with SW B=1 (0x8000) / SE=0 -> qemu re-derives B
+    #     from SE (=0), so the live SW must read 0x0000, NOT the verbatim 0x8000. ---
+    fldenv  bbit_env
+    fnstsw  %ax
+    movzwl  %ax, %edi       # edi = live SW after FLDENV = 0x0000 (B cleared)
+
     movl    $1, %eax
     xorl    %ebx, %ebx
     int     $0x80
 
     .data
     .align 16
-dval:  .double 3.5
-env28: .fill 28, 1, 0
+dval:    .double 3.5
+clob_cw: .word 0x027F
+cw_back: .word 0
+env28:   .fill 28, 1, 0
+env28b:  .fill 28, 1, 0
+bbit_env: .long 0x0000037F   # CW
+          .long 0x00008000   # SW: B=1, SE=0, TOP=0
+          .long 0x0000FFFF   # FTW: all empty
+          .fill 16, 1, 0

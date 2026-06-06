@@ -2008,6 +2008,35 @@ QEMU on the first RTL run**.
   FSIN stands in for the still-deferred transcendentals/FP-environment ops). Docs updated
   (`m3-fpu-spec.md`, the boundary-test comment). `ventium-refs` untouched.
 
+### M11 — x87 environment/state: FNSTENV/FLDENV/FNSAVE/FRSTOR (2026-06-06)
+
+**What this is.** The last deferred x87 family, and the largest single x87 RTL addition: the
+environment (28-byte) and full-state (108-byte) save/restore ops, previously loud-HALT. EQUIVALENT
+vs qemu-i386 across `tx_fenv` (FNSTENV+FLDENV) and `tx_fsave` (FNSAVE+FRSTOR). A 6-agent parallel
+qemu-probe workflow pinned every field rule oracle-first; the implementation staged as M11a
+(inert state) → M11b-1 (FNSTENV) → M11b-2 (FLDENV/FNSAVE/FRSTOR).
+
+- **New architectural state + tracking (M11a):** `fip`/`fcs`/`fdp`/`fds` in `u_fpu_state` + the latch
+  driver — FIP/FCS latch on every non-control FP op (incl the `FNSTSW %ax` quirk), FDP/FDS only on
+  memory-operand ops, FNINIT clears all. Plus `ftw_field()` (the 2-bit-per-reg tag). **Proven inert
+  to grading** before any decode landed (the graded trace pointer/tag fields are constant 0 in both
+  producers — real FIP/FCS/FTW go *only* into the memory image, read back via GPRs).
+- **The variable-length sequencer (M11b):** new states `S_FENV_ST`/`S_FENV_LD` + a wide beat counter
+  (the existing load/store FSM caps at 10 bytes) mirroring the SMM template; a flat `fenv_image[863:0]`
+  MUX (dword *j* = `image[j*32+:32]`; dwords 0–6 = the env, 7–26 = the 8 ST slots in logical order, the
+  10-byte slots straddling dword boundaries handled by the flat slice); the FLDENV/FRSTOR commit
+  (CW/SW/TOP verbatim + tag re-derive; FRSTOR reloads the 8 regs, dword 26 read live to avoid the NBA
+  race); FNSAVE's FNINIT-after-save side effect.
+- **Oracle-first + adversarial review caught two real defects** (both fixed, both confirmed by
+  re-probing qemu): (1) FNSAVE must dump the **stale raw bytes** of empty ST slots (qemu's `do_fstt`
+  is unconditional), not zero them; (2) FLDENV/FRSTOR must **clear the B bit (0x8000) and re-derive it
+  from SE** (`cpu_set_fpus`), not load SW verbatim. Both got dedicated non-vacuous test cases (a
+  stale-empty-slot FNSAVE read-back; a B=1/SE=0 FLDENV).
+- **No regression:** `make verify` **74/74**; full `verify-all` **7/7 PASS**; the FSIN loud-HALT
+  boundary still PASSES (the env ops decode cleanly; FSIN/transcendentals stay deferred). With M11 the
+  **entire deferred-x87 backlog is closed** except the genuinely-unoracled corners (transcendentals =
+  libm gap; OE/UE = unreachable from these operands; PC≠11 = loud-HALT). `ventium-refs` untouched.
+
 ### M12 — x87 special-operand arithmetic: Inf/NaN masked results + IE/ZE (2026-06-06)
 
 **What this is.** Closed a *silently-wrong* hole: the `fx_add`/`fx_mul`/`fx_div` datapath did mantissa
