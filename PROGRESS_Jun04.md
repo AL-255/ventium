@@ -1874,6 +1874,42 @@ the SoC-track M8.5.)
   `make verify` **69/69 cache hits, 0 regenerated**; SoC lints clean. RTL: `rtl/soc/ventium_soc.sv`;
   test: `pide.S`. `ventium-refs` untouched.
 
+### M9 — FIRST REAL BOOT: firmware chain-loads a boot sector from disk (2026-06-06)
+
+**What this is.** The smallest thing that is genuinely **booting** — and the milestone the whole
+M8 SoC build was for. A research workflow empirically proved (and PoC'd) that, with **zero new
+RTL**, `ventium_soc` can run a reset-vector firmware that **chain-loads a real boot sector off the
+IDE disk and executes it**. Unlike `pide` (a hand-written firmware that drives devices *in place*),
+`pboot` runs **real boot code loaded from the disk at run time** — the BIOS→MBR handoff. New
+`pboot` gate: **EQUIVALENT 1084/1084** (first productized run).
+
+- **The boot flow** (`verif/sys/tests/pboot/`, all synchronous so single-step-differentiable):
+  `pboot_stub.bin` (the 64 KiB -bios) boots at F000:FFF0 → real→protected (flat GDT) → sets **nIEN
+  FIRST** (no IRQ14 ever) → `READ SECTORS` disk **LBA0** via PIO into RAM at **0x8000** → **far-jmps
+  into it**. The boot sector (`pboot_mbr.bin`, disk LBA0, ending in the `0x55 0xAA` signature) then
+  **executes from RAM** (cs=0x08): writes a 64-bit signature (0xB007B007 / 0x600DCAFE) → isa-debug-exit.
+- **Single-source disk** (`gen_disk.py`): the boot sector is at LBA0 of BOTH `pboot.img` (qemu
+  `-drive`) and `pboot.disk.hex` (ven_ide `$readmemh`), drift-asserted; the rest zero.
+- **Non-vacuous gate** (`run-soc-boot-gate.sh`, wired into the SoC aggregate as gate #5): per-record
+  EQUIVALENT vs the qemu-system single-step golden, **plus** a hard assertion that BOTH the golden and
+  the RTL trace **reach pc=0x00008000** (the boot sector executing from RAM — proving the handoff
+  actually happened, not a silent early halt) and that the disk stays md5-pristine. The
+  self-modifying fetch (firmware writes 0x8000 then jmps into it) is gate-confirmed hazard-free.
+- **Zero new RTL** — runs on the existing core + `ven_ide` PIO read path + the flat TB memory + the
+  M8.x device set. `make verify-soc` **6/6 PASS** (pboot 1084/1084); `make verify` **69/69 cache
+  hits, 0 regenerated**. `ventium-refs` untouched.
+- **The path to a fuller boot (documented, NOT done — a separate, much larger track).** A real
+  SeaBIOS POST / OS boot is **not single-step-differentiable** today. Blocking gaps: (ISA) CPUID is
+  gated off under `soc_en` (a 1-line ungate; the first SeaBIOS HALT), and far CALL/RETF, LES/LDS,
+  LSS/LFS/LGS, RDTSC, WBINVD/INVD, SGDT/SIDT/SLDT/LLDT, CMPXCHG8B, ENTER, BOUND are unimplemented
+  (loud HALT); (MEMORY/CHIPSET) no i440FX PAM shadow registers (0x58-0x5F) or a ROM-shadow-aware
+  memory model for SeaBIOS's relocate-to-shadow-RAM, no port-0x61 refresh-toggle, no 0xB8000/0xA0000
+  VGA framebuffer; (ORACLE) `gen_trace` single-steps with no main-loop pump, so IRQ-driven / async
+  progress never advances and a 100K-1M-instruction POST has no checkpoint — needing a replay-log
+  oracle (the repo's Win95 `-d cpu` mechanism) before any POST-scale or IRQ-driven boot can be gated.
+  Near-term differentiable follow-ons: a 16-bit-real-mode boot sector at 0000:7C00 (M9-rm) and a
+  bus-master DMA chain-load (M9b, reusing the M8.4f single-PRD READ DMA).
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
