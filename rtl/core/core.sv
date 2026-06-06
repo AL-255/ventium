@@ -522,6 +522,7 @@ module core
   logic [7:0]  fptag;            // = u_fpu_state.fptag_o (bit i = tag for fpr[i])
   logic [31:0] fip, fdp;         // = u_fpu_state.fip_o/fdp_o (M11 env-image only)
   logic [15:0] fcs, fds;         // = u_fpu_state.fcs_o/fds_o
+  logic [639:0] fpr_flat;        // = u_fpu_state.fpr_flat_o (physical fpr[7..0])
   logic        x87_touched_r;   // retired insn touched the FPU (drives DPI call)
 
   // ===========================================================================
@@ -549,6 +550,7 @@ module core
                                // 32 states exactly filled a [4:0] enum)
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
     S_FLOAD, S_FEXEC, S_FSTORE,
+    S_FENV_ST, S_FENV_LD,   // M11b: env/state store (FNSTENV/FNSAVE) & load (FLDENV/FRSTOR)
     // M7.3b Win95 co-sim port I/O: the IN/OUT bus handshake state (cosim only).
     S_IO,
     // M7.3c INS (port-input string): per-element IN handshake, then store to [EDI]
@@ -1888,8 +1890,9 @@ module core
                   3'd2: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; end
                   3'd3: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; d_f_pop=1'b1; end
                   3'd5: begin d_fxop=FX_FLDCW;    d_f_mem_read=1'b1;  d_f_mbytes=4'd2; end
+                  3'd6: d_fxop=FX_FNSTENV;        // M11b: 28-byte env store (S_FENV_ST owns the beats)
                   3'd7: begin d_fxop=FX_FNSTCW;   d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
-                  default: d_unknown=1'b1;   // /4 FLDENV /6 FNSTENV deferred
+                  default: d_unknown=1'b1;   // /4 FLDENV deferred (M11b loads)
                 endcase
               end else begin
                 unique casez (mrm)
@@ -2304,6 +2307,8 @@ module core
   logic        q_f_pop, q_f_pop2;
   logic [2:0]  q_f_sti, q_f_aluop, q_f_const;
   logic [3:0]  f_step;             // x87 memory beat counter
+  logic [4:0]  f_seq_step;         // M11b: wide beat counter for FNSTENV/FNSAVE (0..26)
+  logic [31:0] env_tmp [27];       // M11b: FLDENV/FRSTOR read-back holding regs (dwords)
   logic [79:0] f_mem80;            // assembled memory operand (m16/32/64/80)
 
   logic [31:0] mem_load_data, mem_load_data2;
@@ -3046,7 +3051,7 @@ module core
       // x87 reset = FNINIT state (control 0x037f, status 0, TOP 0, all empty) now
       // lives in u_fpu_state's own rst_n arm (rtl/fpu/fpu_top.sv) — ftop/fctrl/
       // fstat/fptag/fpr[] are reset there. Only the spine-side touch flag here.
-      x87_touched_r<=1'b0; f_step<=4'd0;
+      x87_touched_r<=1'b0; f_step<=4'd0; f_seq_step<=5'd0;
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
       gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
       fold_pending_r<=1'b0; fold_pc_r<=32'd0;   // M7.1: no folded syscall in flight
@@ -3228,6 +3233,9 @@ module core
         // core_fp_exec.svh (RAW case-arms, pasted here in the FSM).
         `include "core_fp_exec.svh"
 
+        // M11b x87 env/state save+restore arms (S_FENV_ST / S_FENV_LD).
+        `include "core_fenv.svh"
+
         // -------------------------------------------------------------------
         // M2S.2 page-table walk arm (S_WALK) — relocated VERBATIM into
         // core_walk.svh (RAW case-arm, pasted here in the FSM).
@@ -3310,6 +3318,36 @@ module core
       FX_FNSTSW_M: fstore_val = {64'd0, (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
       default:     fstore_val = 80'd0;
     endcase
+  end
+
+  // ===========================================================================
+  // M11b: the FNSTENV/FNSAVE environment+state image, assembled as a flat 864-bit
+  // little-endian byte vector (dword j = fenv_image[j*32 +: 32]). Dwords 0..6 are
+  // the 28-byte protected-mode env (CW/SW/FTW/FIP/FCS|FOP/FDP/FDS); dwords 7..26
+  // are the 8 ST registers (logical order ST0..ST7, 10 bytes each, empty->0). The
+  // 10-byte slots straddle dword boundaries -- the flat-vector dword slice handles
+  // it. FOP is hardwired 0 (oracle). The graded trace is unaffected (this feeds
+  // only the store bus arm, read back from memory into a GPR).
+  // ===========================================================================
+  logic [863:0] fenv_image;
+  logic [15:0]  fenv_ftw;
+  logic [639:0] fenv_streg;
+  always_comb begin
+    int pidx;
+    for (int p = 0; p < 8; p++)
+      fenv_ftw[p*2 +: 2] = ftw_field(fptag[p], fpr_flat[p*80 +: 80]);
+    for (int i = 0; i < 8; i++) begin
+      pidx = (ftop + i) & 7;                                  // ST(i) = physical fpr[ftop+i]
+      fenv_streg[i*80 +: 80] = fptag[pidx] ? 80'd0 : fpr_flat[pidx*80 +: 80];
+    end
+    fenv_image = { fenv_streg,                                       // dw7..26 (ST0..7)
+                   {16'd0, fds},                                     // dw6 +24 FDS
+                   fdp,                                              // dw5 +20 FDP
+                   {5'd0, 11'd0, fcs},                               // dw4 +16 {FOP=0, FCS}
+                   fip,                                              // dw3 +12 FIP
+                   {16'd0, fenv_ftw},                                // dw2 +8  FTW
+                   {16'd0, (fstat & ~16'h3800) | ({13'd0,ftop}<<11)},// dw1 +4  SW (TOP overlaid)
+                   {16'd0, fctrl} };                                 // dw0 +0  CW
   end
 
   // ===========================================================================
@@ -3733,6 +3771,8 @@ module core
       S_LOAD2: cur_lin = dbase_edi+gpr[R_EDI];
       S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
       S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end
+      S_FENV_ST: begin cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00}; cur_is_w = 1'b1; end
+      S_FENV_LD:       cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00};
       S_STORE: begin
         cur_is_w = 1'b1;
         cur_lin = (q_kind==K_STR) ? dbase_edi+str_store_addr : dbase+st_addr;
@@ -4315,7 +4355,8 @@ module core
     .fip_o        (fip),
     .fcs_o        (fcs),
     .fdp_o        (fdp),
-    .fds_o        (fds)
+    .fds_o        (fds),
+    .fpr_flat_o   (fpr_flat)
   );
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
