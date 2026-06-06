@@ -10,12 +10,16 @@ records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
 ## Current UI (keep this in sync each iteration — critics read it)
-- **Pipeline panel** = a small LIVE *stage board* snapshot on top (3 lanes U/V/FP
-  × P5 stages, current clock only) + the main **gem5/Konata pipeline view**
-  below (one row per retired instruction, columns = cycles, each instruction's
-  lifecycle drawn as F/D/X/M/W + `=` stall / `!` flush cells cascading
-  diagonally; integer X green, x87 X purple; frozen instruction-label gutter +
-  synced cycle axis).
+- **Pipeline panel** = (a) a small LIVE *stage board* snapshot on top (3 lanes
+  U/V/FP × P5 stages, current clock only; the FP group collapses to a thin "FP
+  idle" rail when x87 is idle so the integer stages get the width); (b) an
+  **IPC/stall sparkline strip** (windowed IPC track + per-cycle event pixels:
+  mispredict/stall/I-fill/walk); (c) the main **gem5/Konata pipeline view**
+  (one row per retired instruction, columns = cycles, lifecycle drawn as
+  F/D/X/M/W + `=` stall / `!` flush cells cascading diagonally; integer X green,
+  x87 X purple; frozen instruction-label gutter showing n / U·V pipe / PC /
+  mnemonic + an amber **`Nc` stall badge** = the instruction's cycle span; synced
+  cycle axis; click a trace row → highlights its instruction row).
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
@@ -33,6 +37,22 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 4 — sparkline + Konata polish (anti-staleness review confirmed working)
+First review with the new watermarked harness: all critics reported the correct
+build sha and described the REAL UI; the synthesis source-verified and **dropped
+the two "branch byte is red" findings as critic perception errors** (the trace
+already colours rel8/disp yellow — confirmed by screenshot). Shipped:
+- **New feature — IPC/stall sparkline strip** between the stage board and the
+  Konata view: windowed-IPC track (0..2) + per-cycle event pixels
+  (mispredict/stall/I-fill/walk), with a live IPC readout.
+- **Stage board:** fixed the clipped top title/headers (top padding); **collapse
+  the idle FP group** to a thin rail so the integer U/V stages get the width.
+- **Konata view:** bigger cells (more legible stage letters), wider instruction
+  gutter, **amber `Nc` stall badge** per instruction (its cycle span — instantly
+  shows D-miss/fill stalls), legend enlarged so the FP entry no longer clips.
+- **Cache heatmap:** stop the last set-tick (128) + way labels clipping the edge.
+- **Trace:** narrowed the bytes column to cut the dead gap before the disasm.
 
 ### Iteration 3 — anti-staleness review harness + trace filter + byte-colour fix
 The previous review's critics described a pre-iteration-1 UI (old waterfall /
