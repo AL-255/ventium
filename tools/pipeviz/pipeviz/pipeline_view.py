@@ -197,7 +197,7 @@ class StageBoard(QWidget):
 # ===========================================================================
 ROW_H = 16
 CELL_W = 16
-GUTTER_W = 246
+GUTTER_W = 300
 HDR_H = 18
 
 
@@ -353,10 +353,21 @@ class _KonataPlot(QWidget):
             p.drawText(self.rect(), Qt.AlignCenter, "step the core to fill the pipeline view")
             p.end(); return
         vis = ev.rect()
+        # faint vertical gridlines every 10 cycles so a cell's cycle is readable
+        p.setPen(QColor("#171c24"))
+        gc = self.base_cyc + ((10 - self.base_cyc % 10) % 10)
+        while True:
+            gx = self._x(gc)
+            if gx > vis.right():
+                break
+            if gx >= vis.left():
+                p.drawLine(gx, vis.top(), gx, vis.bottom())
+            gc += 10
+            if gc > self.max_cyc + 10:
+                break
         r0 = max(0, vis.top() // ROW_H - 1)
         r1 = min(len(self.insns), vis.bottom() // ROW_H + 2)
         xlo, xhi = vis.left() - CELL_W, vis.right() + CELL_W
-        p.setFont(_mono(8, True))
         for r in range(r0, r1):
             ins = self.insns[r]
             y = r * ROW_H
@@ -364,14 +375,31 @@ class _KonataPlot(QWidget):
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#0f141b"))
             if r == self.sel_row:
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#1c2531"))
-            for (cyc, ch, col) in ins["cells"]:
-                x = self._x(cyc)
-                if x < xlo or x > xhi:
-                    continue
-                cell = QRect(x, y + 1, CELL_W - 1, ROW_H - 2)
-                p.fillRect(cell, QColor(col))
-                p.setPen(QColor("#0d1117") if QColor(col).lightness() > 130 else QColor(_TXT))
-                p.drawText(cell, Qt.AlignCenter, ch)
+            cells = ins["cells"]
+            i = 0
+            while i < len(cells):
+                cyc, ch, col = cells[i]
+                if ch == "=":            # collapse a contiguous stall run into one block
+                    j = i
+                    while j < len(cells) and cells[j][1] == "=":
+                        j += 1
+                    x0 = self._x(cells[i][0]); x1 = self._x(cells[j - 1][0]) + CELL_W - 1
+                    if x1 >= xlo and x0 <= xhi:
+                        span = QRect(x0, y + 1, max(CELL_W - 1, x1 - x0), ROW_H - 2)
+                        p.fillRect(span, QColor(col))
+                        p.setPen(QColor("#1b1f26")); p.drawRect(span)
+                        p.setFont(_mono(8, True)); p.setPen(QColor("#0d1117"))
+                        p.drawText(span, Qt.AlignCenter, f"={j - i}" if j - i > 1 else "=")
+                    i = j
+                else:
+                    x = self._x(cyc)
+                    if xlo <= x <= xhi:
+                        cell = QRect(x, y + 1, CELL_W - 1, ROW_H - 2)
+                        p.fillRect(cell, QColor(col))
+                        p.setFont(_mono(8, True))
+                        p.setPen(QColor("#0d1117") if QColor(col).lightness() > 130 else QColor(_TXT))
+                        p.drawText(cell, Qt.AlignCenter, ch)
+                    i += 1
         p.end()
 
     def mouseMoveEvent(self, ev):

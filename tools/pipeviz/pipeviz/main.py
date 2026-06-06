@@ -317,6 +317,7 @@ class MainWindow(QMainWindow):
         self.pipeline.update_from(self.backend, s)
         self.tables.update_from(self.backend, s)
         self.tables.set_hotspots(self.pipeline.konata.plot.insns)
+        self.tables.mem.set_state(self.backend, s)
         self.regs.update_from(s)
         self.trace.update_from(self.backend)
         self._refresh_status(s)
