@@ -105,7 +105,22 @@ module fpu_top (
     // (9) DIRECT scalar writes: fctrl<=fctrl_wval (FLDCW); FNINIT (full reset).
     input  logic        we_fctrl,
     input  logic [15:0] fctrl_wval,
-    input  logic        we_fninit
+    input  logic        we_fninit,
+
+    // (10) M11 env-pointer latches. The FPU instruction pointer (FIP/FCS) latches
+    // on every NON-control FP op; the data pointer (FDP/FDS) only on memory-operand
+    // FP ops. These feed ONLY the FNSTENV/FNSAVE store image (read via *_o), NEVER
+    // the graded trace pointer fields (which are constant 0 in both producers).
+    input  logic        we_eptr,
+    input  logic [31:0] eptr_fip,
+    input  logic [15:0] eptr_fcs,
+    input  logic        we_dptr,
+    input  logic [31:0] dptr_fdp,
+    input  logic [15:0] dptr_fds,
+    output logic [31:0] fip_o,
+    output logic [15:0] fcs_o,
+    output logic [31:0] fdp_o,
+    output logic [15:0] fds_o
 );
 
   // ---- the architectural state file (VERBATIM the inline declarations) -------
@@ -119,6 +134,10 @@ module fpu_top (
   logic [15:0] fctrl;        // control word; reset 0x037f
   logic [15:0] fstat;        // condition codes + exception flags; TOP not overlaid
   logic [7:0]  fptag;        // bit i = tag for fpr[i] (1=empty)
+  // M11: FPU instruction/data pointers (env-image only; never the graded trace).
+  // FOP is always 0 in this oracle, so it is not stored (hardwired 0 at emit).
+  logic [31:0] fip, fdp;     // instruction-ptr offset / data-ptr offset
+  logic [15:0] fcs, fds;     // code selector / data selector
 
   // ---- combinational read ports: mirror the registered fpr/ftop, ZERO latency.
   // These reflect PRE-edge state the same clock a posedge write below updates it
@@ -136,6 +155,8 @@ module fpu_top (
   assign fstat_o = fstat;
   assign fctrl_o = fctrl;
   assign fptag_o = fptag;
+  assign fip_o = fip; assign fcs_o = fcs;
+  assign fdp_o = fdp; assign fds_o = fds;
 
   // ---- the synchronous state update. ALL write indices are computed from the
   // REGISTERED `ftop` here, and ftop is updated in this same block, so the
@@ -153,6 +174,7 @@ module fpu_top (
       fstat <= 16'h0000;
       fptag <= 8'hFF;
       for (int fi = 0; fi < 8; fi++) fpr[fi] <= 80'd0;
+      fip <= 32'd0; fcs <= 16'd0; fdp <= 32'd0; fds <= 16'd0;
     end else begin
       // FNINIT (full reset state) — takes priority, same shape as the rst arm
       // but does NOT clear fpr[] (matches the inline FX_FNINIT, which only resets
@@ -162,6 +184,7 @@ module fpu_top (
         fctrl <= 16'h037f;
         fstat <= 16'h0000;
         fptag <= 8'hFF;
+        fip <= 32'd0; fcs <= 16'd0; fdp <= 32'd0; fds <= 16'd0;
       end
 
       // (1) PUSH — ftop--, fpr[ftop-1]<=push_data, fptag[ftop-1]<=0 (OLD ftop).
@@ -212,6 +235,13 @@ module fpu_top (
       // (9) DIRECT scalar writes — fctrl<=fctrl_wval (FLDCW); fstat replace.
       if (we_fctrl) fctrl <= fctrl_wval;
       if (we_fstat) fstat <= fstat_wval;
+
+      // (10) M11 env-pointer latches. we_eptr fires on every non-control FP op
+      // (FIP=instr addr, FCS=code sel); we_dptr only on memory-operand FP ops
+      // (FDP=operand addr, FDS=data sel). Both are cleared by FNINIT above (admin
+      // ops never assert we_eptr/we_dptr, so there is no same-clock conflict).
+      if (we_eptr) begin fip <= eptr_fip; fcs <= eptr_fcs; end
+      if (we_dptr) begin fdp <= dptr_fdp; fds <= dptr_fds; end
     end
   end
 
