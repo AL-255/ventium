@@ -1114,6 +1114,18 @@ module core
             d_unknown=1'b1; d_len=pfx_len+4'd2;  // SLDT/LLDT/VERR/VERW/mem deferred
           end
         end
+        // ---- 0F 1E / 0F 1F: CET endbr + multi-byte NOP -> NOP --------------
+        // 0F 1F /r is the canonical multi-byte NOP; F3 0F 1E FB/FA are the CET
+        // endbr32/endbr64 markers (F3 is a legacy prefix here, in pfx_len). On a
+        // non-CET CPU these are hint-NOPs, and qemu (our oracle, any -cpu) retires
+        // them as NOPs. The core previously hit d_unknown -> HALT, which stranded
+        // CET-compiled binaries: musl's __divmoddi4 begins with endbr32, so Quake
+        // hung at its first 64-bit divide. Decode the whole 0F 1E/1F space as a
+        // NOP, consuming the modrm(+SIB/disp) via mfl_e so the length is exact.
+        8'h1E, 8'h1F: begin
+          d_is_nop=1'b1;
+          d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+        end
         // ---- M2S.5 RSM (0F AA): resume from System Management Mode ----------
         // RSM restores the CPU state from the SMRAM save-state map and resumes
         // the interrupted program. It is ONLY valid while the CPU is in SMM

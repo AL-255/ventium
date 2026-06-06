@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -64,11 +65,22 @@ public:
     // differ from qemu's host clock (masked at grade time); only that it elapses.
     void               set_cycles(uint64_t c) { cycles_ = c; }
 
+    // Real host file I/O (so a guest can open/read/lseek/fstat actual files,
+    // e.g. Quake's pak0.pak). The guest paths are real host paths (the loader's
+    // -basedir is a host path), so we open them directly, read-only.
+    // The video stream: if the guest opens video_path (Quake's $P5Q_VIDEO FIFO),
+    // its writes are CAPTURED here instead of going to a pipe (the P5Q1 frame
+    // stream: magic+w+h, then per-frame palette[768]+pixels[w*h]).
+    void               set_video_path(const std::string& p) { video_path_ = p; }
+    const std::vector<uint8_t>& video() const { return video_; }
+
     // Everything the guest wrote to fd 1/2, in order (the graded output).
     const std::string& captured_stdout() const { return out_; }
     uint64_t           syscalls_serviced() const { return n_; }
 
 private:
+    std::string          read_cstr(uint32_t addr) const;   // NUL-terminated guest string
+
     // memory helpers (little-endian guest)
     std::vector<uint8_t> rd(uint32_t addr, uint32_t len) const;
     void                 wr(uint32_t addr, const uint8_t* p, uint32_t len);
@@ -84,6 +96,12 @@ private:
     uint64_t             cycles_ = 0;     // RTL cycle count (drives the wall clock)
     std::string          out_;            // captured fd 1/2 output
     uint64_t             n_ = 0;          // syscalls serviced
+    // host file I/O + video capture
+    std::map<int, FILE*> hostfd_;         // guest fd -> host file
+    int                  next_fd_ = 16;   // next guest fd to hand out
+    std::string          video_path_;     // the $P5Q_VIDEO path (captured, not opened)
+    int                  video_fd_ = -1;  // guest fd bound to the video stream
+    std::vector<uint8_t> video_;          // captured P5Q1 frame stream
 };
 
 }  // namespace ventium

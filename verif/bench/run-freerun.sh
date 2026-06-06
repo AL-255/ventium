@@ -96,7 +96,7 @@ echo "== 3. RTL free-run (--emulate-syscalls) =="
 MAXCYC=$(( N * 16 ))
 "$TB" --out /dev/null --quake-image "$IMAGE" --emulate-syscalls \
       --user-stdin "$STDINF" --user-stdout "$RTLOUT" --brk-base "$BRK" \
-      --max-insn "$N" --max-cycles "$MAXCYC" --x87 > "$OUT/tb.log" 2>&1
+      --max-insn "$N" --max-cycles "$MAXCYC" --quiesce 100000 --x87 > "$OUT/tb.log" 2>&1
 TRC=$?
 echo "   rtl exit=$TRC, $(wc -l < "$RTLOUT" 2>/dev/null || echo 0) lines captured"
 
