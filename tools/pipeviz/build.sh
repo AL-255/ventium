@@ -39,43 +39,50 @@ fi
 }
 echo "[pipeviz] verilator runtime include: $VINC"
 
-# ---- 1. generate the verilated C++ (public-flat-rw, no exe) -----------------
-echo "[pipeviz] verilating ventium_top (--public-flat-rw) ..."
-rm -rf "$OBJ"
-"$VERILATOR" --cc --public-flat-rw \
-  -sv --top-module ventium_top \
-  -Wall -Wno-UNUSED -Wno-fatal -Wno-DECLFILENAME -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-LATCH \
-  -Mdir "$OBJ" \
-  -F "$RTL_F"
+# build_variant <top-module> <filelist> <objdir> <extra-define> <out.so>
+build_variant() {
+  local top="$1" flist="$2" objd="$3" define="$4" out="$5"
+  local objo="$objd.o"
+  echo "[pipeviz] verilating $top (--public-flat-rw) ..."
+  rm -rf "$objd"
+  "$VERILATOR" --cc --public-flat-rw \
+    -sv --top-module "$top" \
+    -Wall -Wno-UNUSED -Wno-fatal -Wno-DECLFILENAME -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-LATCH \
+    -Mdir "$objd" \
+    -F "$flist"
 
-# ---- 2. compile everything -fPIC (parallel) ---------------------------------
-echo "[pipeviz] compiling bridge + verilated model (-fPIC, -j$JOBS) ..."
-rm -rf "$OBJO"; mkdir -p "$OBJO"
-INCS=(-I"$OBJ" -I"$VINC" -I"$VINC/vltstd" -I"$TB" -I"$HERE")
-CXXFLAGS=(-std=c++17 -O1 -fPIC -fno-strict-aliasing -Wno-attributes "${INCS[@]}")
+  echo "[pipeviz] compiling $top bridge + model (-fPIC, -j$JOBS) ..."
+  rm -rf "$objo"; mkdir -p "$objo"
+  local CXXFLAGS=(-std=c++17 -O1 -fPIC -fno-strict-aliasing -Wno-attributes
+                  -I"$objd" -I"$VINC" -I"$VINC/vltstd" -I"$TB" -I"$HERE")
+  [ -n "$define" ] && CXXFLAGS+=("$define")
+  local SRCS=( "$objd"/*.cpp "$VINC/verilated.cpp" "$VINC/verilated_threads.cpp"
+               "$VINC/verilated_dpi.cpp" "$HERE/ventium_viz.cpp" "$TB/memmodel.cpp" )
+  local fail=0
+  for src in "${SRCS[@]}"; do
+    local o="$objo/$(printf '%s' "$src" | md5sum | cut -c1-16)_$(basename "$src").o"
+    ( g++ "${CXXFLAGS[@]}" -c "$src" -o "$o" || { echo "[pipeviz] COMPILE FAILED: $src" >&2; exit 1; } ) &
+    while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n || fail=1; done
+  done
+  wait || fail=1
+  [ "$fail" -eq 0 ] || { echo "[pipeviz] ERROR: compile failed for $top." >&2; exit 1; }
 
-# the sources: generated model + verilator runtime + our bridge + the BFM memory
-SRCS=( "$OBJ"/*.cpp
-       "$VINC/verilated.cpp"
-       "$VINC/verilated_threads.cpp"
-       "$VINC/verilated_dpi.cpp"
-       "$HERE/ventium_viz.cpp"
-       "$TB/memmodel.cpp" )
+  echo "[pipeviz] linking $out ..."
+  g++ -shared -fPIC "$objo"/*.o -o "$out" -lpthread -latomic 2>/dev/null \
+    || g++ -shared -fPIC "$objo"/*.o -o "$out" -lpthread
+  echo "[pipeviz] OK -> $out"
+}
 
-# robust parallel compile: one object per source, throttled to $JOBS workers.
-fail=0
-for src in "${SRCS[@]}"; do
-  o="$OBJO/$(printf '%s' "$src" | md5sum | cut -c1-16)_$(basename "$src").o"
-  ( g++ "${CXXFLAGS[@]}" -c "$src" -o "$o" || { echo "[pipeviz] COMPILE FAILED: $src" >&2; exit 1; } ) &
-  while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n || fail=1; done
-done
-wait || fail=1
-[ "$fail" -eq 0 ] || { echo "[pipeviz] ERROR: one or more compiles failed." >&2; exit 1; }
+# default: build the ventium_top library; with `--soc` (or SOC=1) ALSO build the
+# full-SoC library (libventium_viz_soc.so) so bare-metal images like test386 run.
+build_variant ventium_top "$RTL_F" "$OBJ" "" "$HERE/libventium_viz.so"
 
-# ---- 3. link the shared library --------------------------------------------
-echo "[pipeviz] linking libventium_viz.so ..."
-g++ -shared -fPIC "$OBJO"/*.o -o "$HERE/libventium_viz.so" -lpthread -latomic 2>/dev/null \
-  || g++ -shared -fPIC "$OBJO"/*.o -o "$HERE/libventium_viz.so" -lpthread
-
-echo "[pipeviz] OK -> $HERE/libventium_viz.so"
-ls -la "$HERE/libventium_viz.so"
+SOC_F="$ROOT/rtl/ventium_soc.f"
+if [ "${1:-}" = "--soc" ] || [ "${SOC:-0}" = "1" ] || [ "${BUILD_SOC:-0}" = "1" ]; then
+  if [ -f "$SOC_F" ]; then
+    build_variant ventium_soc "$SOC_F" "$HERE/obj_dir_soc" "-DVV_SOC" "$HERE/libventium_viz_soc.so"
+  else
+    echo "[pipeviz] WARNING: $SOC_F not found; skipping SoC library." >&2
+  fi
+fi
+ls -la "$HERE"/libventium_viz*.so

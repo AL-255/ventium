@@ -107,6 +107,11 @@ class MainWindow(QMainWindow):
         self.cyc_cb = QCheckBox("cycle (dual-issue)"); self.cyc_cb.setChecked(True)
         tb.addWidget(self.cyc_cb)
         self.sys_cb = QCheckBox("system"); tb.addWidget(self.sys_cb)
+        self.soc_cb = QCheckBox("SoC")
+        self.soc_cb.setToolTip("Run the full ventium_soc (internal port-I/O / PIC / "
+                               "PIT) — needed for bare-metal images like test386. "
+                               "Requires build.sh --soc.")
+        tb.addWidget(self.soc_cb)
         tb.addSeparator()
 
         self.reset_btn = QPushButton(" Reset")
@@ -199,32 +204,63 @@ class MainWindow(QMainWindow):
                 pass
         self.image_path = path
         self.image_bytes = data
+        # heuristic: bare-metal/system images (.bin under sys/, ~64 KiB) boot in
+        # system mode (real-mode reset at F000:FFF0). Auto-tick `system` so they
+        # "just work"; the user can override.
+        looks_system = (("/sys/tests/" in path or path.endswith(".bin"))
+                        and len(data) >= 0x8000)
+        # test386 / external CPU tests drive the SoC's port-I/O (POST codes),
+        # so they need the full ventium_soc — auto-tick SoC for those.
+        looks_soc = any(k in path for k in ("test386", "09-external", "/soc/"))
+        self.sys_cb.setChecked(looks_system or looks_soc)
+        self.soc_cb.setChecked(looks_soc)
         self.entry_e.setText(f"0x{entry:08x}")
         self.load_e.setText(f"0x{load:08x}")
         self.setWindowTitle(f"Ventium pipeline visualizer — {os.path.basename(path)}")
         self.on_reset()
 
     # ---- driving ----
-    def _fresh_backend(self):
+    def _fresh_backend(self, soc=False):
         try:
             self.backend.close()
         except Exception:
             pass
-        self.backend = Backend(self._libpath)
+        try:
+            self.backend = Backend(self._libpath, soc=soc)
+        except FileNotFoundError as e:
+            if soc:
+                QMessageBox.warning(self, "SoC model missing",
+                                    f"{e}\n\nFalling back to ventium_top. Run "
+                                    "`tools/pipeviz/build.sh --soc` to build it.")
+                self.soc_cb.setChecked(False)
+                self.backend = Backend(self._libpath, soc=False)
+            else:
+                raise
 
     def on_reset(self):
         self.stop_run()
         if self.image_bytes is None:
             return
-        load = _parse_hex(self.load_e, DEF_ENTRY)
-        entry = _parse_hex(self.entry_e, DEF_ENTRY)
-        esp = _parse_hex(self.esp_e, DEF_ESP)
-        bits = 16 if self.sys_cb.isChecked() else 32
+        soc = self.soc_cb.isChecked()
+        system = self.sys_cb.isChecked() or soc      # SoC always boots system mode
         # fresh model => clean memory
-        self._fresh_backend()
-        self.backend.load_bytes(self.image_bytes, load)
-        self.backend.reset(entry, esp, cycle_mode=self.cyc_cb.isChecked(),
-                           system=self.sys_cb.isChecked())
+        self._fresh_backend(soc=soc)
+        soc = self.backend.soc                        # may have fallen back
+        if system:
+            # -bios placement: the image's LAST byte sits at 0x000FFFFF so the
+            # reset vector F000:FFF0 -> 0x000FFFF0 lands in it (matches tb_main /
+            # qemu-system -bios). entry/esp are seeded by boot_mode in the core.
+            load = (0x00100000 - len(self.image_bytes)) & 0xFFFFFFFF
+            self.load_e.setText(f"0x{load:08x}")
+            self.backend.load_bytes(self.image_bytes, load)
+            self.backend.reset(0, 0, cycle_mode=self.cyc_cb.isChecked(), system=1)
+        else:
+            load = _parse_hex(self.load_e, DEF_ENTRY)
+            entry = _parse_hex(self.entry_e, DEF_ENTRY)
+            esp = _parse_hex(self.esp_e, DEF_ESP)
+            self.backend.load_bytes(self.image_bytes, load)
+            self.backend.reset(entry, esp, cycle_mode=self.cyc_cb.isChecked(), system=0)
+        bits = 16 if system else 32
         for v in (self.pipeline, self.trace, self.tables):
             if hasattr(v, "set_bits"):
                 v.set_bits(bits)
@@ -279,10 +315,21 @@ class MainWindow(QMainWindow):
         name = self.backend.state_name(s.state)
         done = "  [DONE]" if self.backend.is_done() else ""
         hung = "  [HUNG]" if s.cpu_hung else ""
+        ret = self.backend.retire_count()
+        cyc = max(1, s.core_cyc)
+        st = self.pipeline.waterfall.stats()
+        ipc = ret / cyc
+        paired = st["vret"]                      # V (paired) retirements so far
+        prate = (2 * paired / ret * 100) if ret else 0.0   # % of insns that paired
+        # cache occupancy from the heatmaps the tables panel just refreshed
+        icn = sum(1 for v, _ in self.tables.ic_map.cells if v)
+        dcn = sum(1 for v, _ in self.tables.dc_map.cells if v)
+        mode = "SYS" if s.sys_mode else "USR"
         self.status_lbl.setText(
-            f"  clk={s.clk}  core_cyc={s.core_cyc}  state={name}  "
-            f"retired={self.backend.retire_count()}  eip=0x{s.eip:08x}  "
-            f"pair={'Y' if s.pipe_pair else 'n'}{done}{hung}  ")
+            f"  clk={s.clk}  cyc={s.core_cyc}  {name}  {mode}  ret={ret}  "
+            f"IPC={ipc:.2f}  pair={prate:.0f}%  mispred={st['mispred']}  "
+            f"I$={icn}/256 D$={dcn}/256  fills={st['fill']}  walks={st['walk']}  "
+            f"eip=0x{s.eip:08x}{done}{hung}  ")
 
 
 def main():

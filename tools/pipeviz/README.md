@@ -24,12 +24,23 @@ loop the production testbench (`verif/tb/tb_main.cpp`) uses.
 # build the backend (verilate + link libventium_viz.so) and launch the GUI
 tools/pipeviz/run.sh
 
-# or load a specific flat image / entry
-tools/pipeviz/run.sh build/m2/mb_brloop.flat
-tools/pipeviz/run.sh build/m2/mb_fpindep.flat        # exercises the FP pipe
-tools/pipeviz/run.sh build/m2/mb_dstore.flat         # exercises the D-cache
+# user-mode examples
+tools/pipeviz/run.sh build/m2/mb_brloop.flat         # dual-issue loop
+tools/pipeviz/run.sh build/m2/mb_dmiss.flat          # D-cache thrash (fills the D$)
+tools/pipeviz/run.sh build/m2/mb_imiss.flat          # I-cache misses (fills the I$)
+tools/pipeviz/run.sh build/m2/mb_fpindep.flat        # x87 FP pipe
+tools/pipeviz/run.sh build/m2/mb_brrandom.flat       # random-branch mispredicts
 
-# force a rebuild of the backend
+# system / paging examples (slow-path waterfall + TLB + page walks)
+tools/pipeviz/run.sh verif/sys/tests/ppage/ppage.bin
+tools/pipeviz/run.sh verif/sys/tests/ptask/ptask.bin
+
+# full-SoC bare-metal test (needs the SoC port-I/O): the test386.asm CPU test.
+# build the SoC model once, then load it (auto-detected as a SoC image):
+tools/pipeviz/build.sh --soc
+tools/pipeviz/run.sh ventium-refs/09-external-cpu-tests/test386.asm/test386.bin
+
+# force a rebuild of the backend (add --soc to also build the SoC model)
 tools/pipeviz/run.sh --build
 ```
 
@@ -45,20 +56,28 @@ a C++17 compiler, `python3` with **PySide6** and **capstone**
     cell(s) the core is working in this clock are lit and labelled with the
     occupying instruction. Derived live from the FSM `state` in
     `rtl/core/core.sv`.
-  * *Cycle timeline* — a scrolling per-clock history (Konata/gem5-pipeview
-    style): a state band coloured by what the pipe did each cycle (dual issue,
-    I-cache fill, slow microcode, FP, page-walk, interrupt/SMM), a bubble row
-    (AGI / mispredict / D-miss / FP-occupancy), and U / V lanes where each
-    retired instruction sits at its retire cycle. Dual issue, branch
-    mispredicts, and cache-fill gaps are all visible over time. Hover a column
-    for details.
+  * *Pipeline waterfall* — the cycle history as a **waterfall**: **Y axis = time**
+    (cycles flowing down), **X axis = stages**, laid out as three side-by-side
+    groups **U | V | FP**. Each row is one core clock; the stage cell(s) a lane
+    occupies that cycle are filled and labelled. A slow multi-cycle instruction
+    streaks diagonally down-and-right through PF→D1→D2→EX→WB; the fast path
+    lights EX+WB in one row; the FP pipe streaks through X1/X2/ER. Cache fills
+    (amber), stalls (grey), mispredict flushes (red) and page walks read off the
+    colours. Hover a row for the retiring instruction(s).
 * **Memory tables** (top-right) — tabs for the **Code cache** (resident I-cache
   lines + their 32 bytes), **Data cache** (resident D-cache lines; timing model,
-  no data array), **TLB** (valid split I/D entries — only populated under paging,
-  i.e. `system` mode), and the **Prefetch buffer** (`ibuf[16]` + the fast-path
-  fetch window, with a live decode).
+  no data array), **TLB** (valid split I/D entries — only populated under paging),
+  and the **Prefetch buffer** (`ibuf[16]` + the fast-path fetch window, live
+  decode). The I$/D$ tabs show a **256-cell occupancy heatmap** (one cell per
+  set×way) above the table for an instant picture of how full the cache is.
 * **Trace panel** (bottom-left) — one row per retired instruction: `n`, retire
   cycle, issuing pipe (U/V), PC, raw **bytes**, and the capstone disassembly.
+  The bytes are coloured by x86 field: **light-gray prefix, blue opcode, green
+  ModRM, purple SIB, yellow displacement, red immediate**. The disassembly is
+  16- or 32-bit per instruction (driven by the live CS.D), so real-mode and
+  protected-mode code both decode correctly.
+* **Status bar** — live `IPC`, dual-issue `pair%`, `mispred` count, I$/D$
+  occupancy, I-cache `fills`, page-table `walks`, and the current FSM state/mode.
 * **Registers panel** (bottom-right) — GPRs, decoded EFLAGS, segments, control
   registers, and the x87 stack (logical ST(0..7) with decoded `floatx80` values).
 
@@ -70,6 +89,7 @@ a C++17 compiler, `python3` with **PySide6** and **capstone**
 | entry / load / esp | reset-time architectural state (hex) |
 | **cycle (dual-issue)** | enable the U/V fast path — **on by default** (the V pipe only issues in cycle mode) |
 | **system** | cold-boot in system mode (real-mode reset at `F000:FFF0`; needed for paging/TLB) |
+| **SoC** | run the full `ventium_soc` (internal port-I/O / PIC / PIT) — needed for bare-metal images like test386. Requires `build.sh --soc`; auto-ticked for test386. |
 | **Reset** | re-cold-reset on a fresh model (clears memory) |
 | **Step clk** (`.`) | advance one core clock |
 | **Step insn** (`Space`) | advance until the next retirement |

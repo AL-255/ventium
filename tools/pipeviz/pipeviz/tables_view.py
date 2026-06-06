@@ -5,11 +5,48 @@ D-cache, the split I/D TLB, and the slow-path prefetch buffer. Each is a table,
 refreshed in full each frame (all are small: <=256 lines / 32 TLB entries)."""
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QTableWidget, QTableWidgetItem, QHeaderView,
-                               QAbstractItemView, QLabel, QGridLayout)
-from PySide6.QtGui import QFont, QColor, QBrush
-from PySide6.QtCore import Qt
+                               QAbstractItemView, QLabel, QGridLayout, QSizePolicy)
+from PySide6.QtGui import QFont, QColor, QBrush, QPainter
+from PySide6.QtCore import Qt, QRect
 
 from . import disasm
+
+
+class CacheMap(QWidget):
+    """A 256-cell occupancy heatmap of a 2-way / 128-set L1 cache (one cell per
+    (set, way); empty = dark, resident = green, MRU way brightened). Gives an
+    instant picture of how full the cache is."""
+    COLS = 64
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.cells = [(False, False)] * 256   # (valid, is_mru) by idx = set*2+way
+        self.setFixedHeight(64)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_lines(self, lines):
+        cells = [(False, False)] * 256
+        for l in lines:
+            idx = l.set * 2 + l.way
+            cells[idx] = (True, l.lru == l.way)
+        self.cells = cells
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#0d1117"))
+        rows = 256 // self.COLS
+        cw = self.width() / self.COLS
+        ch = self.height() / rows
+        for idx, (valid, mru) in enumerate(self.cells):
+            c = idx % self.COLS
+            r = idx // self.COLS
+            cell = QRect(int(c * cw) + 1, int(r * ch) + 1, int(cw) - 1, int(ch) - 1)
+            if valid:
+                p.fillRect(cell, QColor("#3fb950" if mru else "#1f7a36"))
+            else:
+                p.fillRect(cell, QColor("#161b22"))
+        p.end()
 
 
 def _mono(pt=9):
@@ -52,15 +89,17 @@ class TablesView(QWidget):
 
         # --- I-cache (code) ---
         self.ic_lbl = QLabel()
+        self.ic_map = CacheMap()
         self.ic = _mk_table(["set", "way", "LRU", "tag", "line addr", "32 line bytes"],
                             [44, 40, 40, 70, 90, 9999])
-        self.tabs.addTab(self._wrap(self.ic_lbl, self.ic), "Code $ (I)")
+        self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code $ (I)")
 
         # --- D-cache (data, timing-only) ---
         self.dc_lbl = QLabel()
+        self.dc_map = CacheMap()
         self.dc = _mk_table(["set", "way", "LRU", "tag", "line addr"],
                             [50, 50, 50, 90, 9999])
-        self.tabs.addTab(self._wrap(self.dc_lbl, self.dc), "Data $ (D)")
+        self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data $ (D)")
 
         # --- TLB (I + D) ---
         self.tlb_lbl = QLabel()
@@ -77,16 +116,23 @@ class TablesView(QWidget):
     def set_bits(self, bits):
         self._bits = bits
 
-    def _wrap(self, label, table):
+    def _wrap(self, label, table, cmap=None):
         w = QWidget(); v = QVBoxLayout(w); v.setContentsMargins(4, 4, 4, 4)
         label.setStyleSheet("color:#8b949e;")
-        v.addWidget(label); v.addWidget(table)
+        v.addWidget(label)
+        if cmap is not None:
+            v.addWidget(cmap)
+        v.addWidget(table)
         return w
 
     def update_from(self, backend, state):
+        self._bits = 32 if state.cs_d else 16
         # I-cache
         ic = backend.icache()
-        self.ic_lbl.setText(f"{len(ic)} resident lines  (8 KB, 2-way, 32-byte line, 128 sets)")
+        self.ic_map.set_lines(ic)
+        self.ic_lbl.setText(
+            f"{len(ic)} / 256 lines resident ({100*len(ic)//256}% full)  "
+            f"— 8 KB, 2-way, 32-byte line, 128 sets")
         rows = []
         for l in ic:
             base = (l.tag << 12) | (l.set << 5)
@@ -97,7 +143,10 @@ class TablesView(QWidget):
 
         # D-cache
         dc = backend.dcache()
-        self.dc_lbl.setText(f"{len(dc)} resident lines  (8 KB, 2-way, 32-byte line — timing model, no data array)")
+        self.dc_map.set_lines(dc)
+        self.dc_lbl.setText(
+            f"{len(dc)} / 256 lines resident ({100*len(dc)//256}% full)  "
+            f"— 8 KB, 2-way, 32-byte line, timing model (no data array)")
         rows = []
         for l in dc:
             base = (l.tag << 12) | (l.set << 5)

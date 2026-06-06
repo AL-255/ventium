@@ -68,6 +68,8 @@ typedef struct {
   uint8_t  sys_mode;
   uint8_t  cpl;
   uint8_t  smm_active;
+  uint8_t  cs_d;           // CS default operand/address size (0=16-bit, 1=32-bit)
+  uint32_t cs_base;        // CS segment base (bytes live at cs_base + EIP)
 
   // dual-issue fast-path pipeline scalars
   uint8_t  stall_cnt;          // remaining materialised stall clocks
@@ -135,6 +137,7 @@ typedef struct {
   uint16_t seg[VV_NSEG];     // CS SS DS ES FS GS
   uint8_t  pipe;             // 0=U, 1=V, 2=none
   uint8_t  paired;           // issued paired with its sibling
+  uint8_t  d32;              // CS.D at execute time (0=16-bit, 1=32-bit) for disasm
   uint8_t  nbytes;           // instruction length (from memory at pc; capstone refines)
   uint8_t  bytes[VV_MAXBYTES];
   // x87 post-commit snapshot (logical ST(0..7) order), valid when x87_valid

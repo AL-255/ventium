@@ -16,6 +16,76 @@ _md16 = Cs(CS_ARCH_X86, CS_MODE_16)
 for _m in (_md32, _md16):
     _m.detail = False
 
+# detail-enabled disassemblers for per-byte field segmentation (trace bytes).
+_md32d = Cs(CS_ARCH_X86, CS_MODE_32)
+_md16d = Cs(CS_ARCH_X86, CS_MODE_16)
+for _m in (_md32d, _md16d):
+    _m.detail = True
+
+# x86 instruction-field colours (per the requested scheme).
+FIELD_COLOR = {
+    "prefix": "#b6b6b6",   # light gray
+    "opcode": "#4ea1ff",   # blue
+    "modrm":  "#3fb950",   # green
+    "sib":    "#bc8cff",   # purple
+    "disp":   "#e3b341",   # yellow (offset / displacement)
+    "imm":    "#f85149",   # red
+}
+_PREFIX_BYTES = {0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65}
+
+
+def byte_fields(code: bytes, addr: int = 0, bits: int = 32):
+    """Segment one instruction's bytes into x86 fields. Returns a list of
+    (byte_value, field_name) for prefix / opcode / modrm / sib / disp / imm.
+    Falls back to a single 'opcode' byte on decode failure."""
+    md = _md16d if bits == 16 else _md32d
+    insn = None
+    try:
+        for i in md.disasm(code, addr):
+            insn = i
+            break
+    except Exception:
+        insn = None
+    if insn is None:
+        return [((code[0] if code else 0), "opcode")]
+    n = insn.size
+    bs = list(insn.bytes)[:n]
+    fields = ["opcode"] * n
+    # leading legacy prefixes
+    p = 0
+    while p < n and bs[p] in _PREFIX_BYTES:
+        fields[p] = "prefix"
+        p += 1
+    enc = getattr(insn, "encoding", None)
+    modrm_off = getattr(enc, "modrm_offset", 0) if enc else 0
+    disp_off = getattr(enc, "disp_offset", 0) if enc else 0
+    disp_sz = getattr(enc, "disp_size", 0) if enc else 0
+    imm_off = getattr(enc, "imm_offset", 0) if enc else 0
+    imm_sz = getattr(enc, "imm_size", 0) if enc else 0
+    # opcode spans from end-of-prefixes to the first of modrm/disp/imm
+    ends = [n]
+    if modrm_off > 0:
+        ends.append(modrm_off)
+    if disp_sz > 0:
+        ends.append(disp_off)
+    if imm_sz > 0:
+        ends.append(imm_off)
+    opcode_end = min(ends)
+    for i in range(p, min(opcode_end, n)):
+        fields[i] = "opcode"
+    if 0 < modrm_off < n:
+        fields[modrm_off] = "modrm"
+        b = bs[modrm_off]
+        if (b >> 6) != 3 and (b & 7) == 4 and modrm_off + 1 < n:   # SIB present
+            fields[modrm_off + 1] = "sib"
+    for i in range(disp_off, min(disp_off + disp_sz, n)):
+        if disp_sz > 0:
+            fields[i] = "disp"
+    for i in range(imm_off, min(imm_off + imm_sz, n)):
+        if imm_sz > 0:
+            fields[i] = "imm"
+    return [(bs[i], fields[i]) for i in range(n)]
+
 
 def disasm_one(code: bytes, addr: int = 0, bits: int = 32):
     """Disassemble the first instruction in `code`. Returns
@@ -95,6 +165,41 @@ STATE_STAGE = {
 
 def stage_of(state_name):
     return STATE_STAGE.get(state_name, ("FE", state_name, C_HALT, state_name))
+
+
+# ---------------------------------------------------------------------------
+# Instruction-class colouring (by mnemonic) for the trace + timeline blocks.
+# ---------------------------------------------------------------------------
+CC_BRANCH = "#e3b341"   # control transfer
+CC_FP = "#bc8cff"       # x87
+CC_MEM = "#58a6ff"      # load/store/stack
+CC_ALU = "#3fb950"      # arithmetic / data
+CC_SYS = "#f0883e"      # privileged / system
+CC_OTHER = "#8b949e"
+
+_BR = {"jmp", "call", "ret", "retn", "retf", "iret", "iretd", "loop", "loope",
+       "loopne", "loopz", "loopnz", "jcxz", "jecxz", "int", "int3", "into", "syscall"}
+_MEM = {"push", "pop", "pusha", "popa", "pushf", "pushfd", "popf", "popfd",
+        "movs", "stos", "lods", "scas", "cmps", "lea", "xchg", "leave", "enter",
+        "in", "out", "ins", "outs"}
+_SYS = {"mov", "lgdt", "lidt", "ltr", "lldt", "hlt", "cli", "sti", "rsm",
+        "wrmsr", "rdmsr", "invlpg", "cpuid", "clts"}
+
+
+def insn_class(mnemonic: str):
+    m = (mnemonic or "").lower()
+    if not m:
+        return ("other", CC_OTHER)
+    if m[0] == "j" or m in _BR:
+        return ("branch", CC_BRANCH)
+    if m[0] == "f" and m not in ("fs", "gs"):
+        return ("fp", CC_FP)
+    if m in _MEM:
+        return ("mem", CC_MEM)
+    if m in ("lgdt", "lidt", "ltr", "lldt", "hlt", "rsm", "invlpg", "cpuid", "clts",
+             "wrmsr", "rdmsr"):
+        return ("sys", CC_SYS)
+    return ("alu", CC_ALU)
 
 
 # legend entries for the timeline / board

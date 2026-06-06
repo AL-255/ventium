@@ -29,7 +29,7 @@ app.processEvents()
 s = win.backend.state()
 print(f"image={img} stepped={clocks} core_cyc={s.core_cyc} state={win.backend.state_name(s.state)} "
       f"retired={win.backend.retire_count()} icache_lines={len(win.backend.icache())} "
-      f"timeline_samples={len(win.pipeline.timeline.canvas.samples)} trace_rows={win.trace.tbl.rowCount()}")
+      f"waterfall_rows={len(win.pipeline.waterfall.canvas.rows)} trace_rows={win.trace.tbl.rowCount()}")
 
 # force layout then grab
 win.repaint(); app.processEvents()
