@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M2S.3 — build the bare-metal SOFTWARE-INTERRUPT demonstrator.
 #
 # Output: pintr.bin, a flat 64 KiB image loadable with

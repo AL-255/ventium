@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M2S.3 — bare-metal HARDWARE-FAULT (IDT delivery) demonstrator.
  *
  * This is the M2S.3 pfault gate test: it bootstraps real->protected + PAGING

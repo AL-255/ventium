@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M6B errata test: err_dbgp — Erratum 79 (erroneous #DB on V86 POPF/IRET
 # with a #GP fault).  Builds err_dbgp.bin, a flat 64 KiB -bios image.  Same flow
 # as the M7.2 pv86 demonstrator (real->protected + paging + TSS + V86 entry), with

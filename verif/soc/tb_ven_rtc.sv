@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ============================================================================
 // verif/soc/tb_ven_rtc.sv -- directed UNIT self-check for ven_rtc (M8 RTC/CMOS).
 //

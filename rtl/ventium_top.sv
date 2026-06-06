@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ventium_top.sv — Ventium top level (M1 single-issue in-order integer core).
 //
 // Ventium: a synthesizable SystemVerilog replica of the Intel Pentium (P5/P54C).

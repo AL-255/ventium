@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # =============================================================================
 # Ventium M3 x87 test: tx_storeflags -- store-path PE/IE status (Tier 1)
 # =============================================================================

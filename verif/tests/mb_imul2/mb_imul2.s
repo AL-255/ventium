@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_imul2 — 2-operand IMUL r32,r/m32,imm occupancy microbenchmark (occ=10).
 # Validates the K_IMUL2 arm carries the same P5 multiply occupancy as 1-op MUL.
     .text

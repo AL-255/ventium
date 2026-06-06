@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/tb/quake_image.h
 //
 // M7.1 Quake user-mode lock-step consumer (docs/m7-lockstep-spec.md).

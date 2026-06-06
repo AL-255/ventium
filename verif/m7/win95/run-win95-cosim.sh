@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # M7.3b — Win95 system co-sim input-replay lock-step (docs/m7-lockstep-spec.md M7.3).
 #
 # qemu-system-i386 (under rr=replay) was the golden + ENVIRONMENT (the M7.3a

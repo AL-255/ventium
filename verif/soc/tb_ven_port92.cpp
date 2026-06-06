@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/soc/tb_ven_port92.cpp — directed unit self-check for rtl/soc/ven_port92.sv
 //
 // Unit-level self-check vs the DOCUMENTED QEMU 8.2.2 hw/i386/port92.c semantics.

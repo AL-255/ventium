@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ============================================================================
 // ven_ide.sv -- Ventium SoC (M8.4a/b/c) IDE/ATA controller: PIO, primary master.
 //   M8.4a: IDENTIFY + READ SECTORS + DIAGNOSTIC + signature + absent-slave.

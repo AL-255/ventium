@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M8.1 — bare-metal ON-DIE TIMER IRQ (8259 PIC + 8254 PIT -> IRQ0)
  * SoC-integration differential-gate demonstrator.
  *

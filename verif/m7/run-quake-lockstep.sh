@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # M7.1 — Quake input-replay lock-step (docs/m7-lockstep-spec.md).
 #
 # Runs TyrQuake (the P5 static-ELF build in ventium-refs) on the Ventium RTL in

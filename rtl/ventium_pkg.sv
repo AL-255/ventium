@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ventium_pkg.sv — shared architectural types + the DPI retire import.
 //
 // Ventium: a high-fidelity Verilog replica of the Intel Pentium (P5/P54C).

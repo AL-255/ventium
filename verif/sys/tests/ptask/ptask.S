@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M2S.4 — bare-metal HARDWARE TASK SWITCH demonstrator (STRETCH).
  *
  * This is the M2S.4 ptask STRETCH test.  pcpl exercises the cross-privilege

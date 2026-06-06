@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M2S.5 — bare-metal SMM / RSM demonstrator (PARTIAL-ORACLE stage).
  *
  * SMM mechanism: SMI# -> the CPU saves its state to the SMRAM save-state map at

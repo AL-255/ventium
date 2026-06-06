@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Authoritative end-state CHECKPOINT oracle: run pirqsoc at FULL SPEED under the
 # gdbstub (continue, not single-step), with a breakpoint at the deterministic
 # post-readback point (just before isa-debug-exit). IRQs DO deliver at full speed,

@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_div16 — DIV r/m16 occupancy microbenchmark (p5model occ=25, NP, U-pipe held).
 # DX:AX = 0x0000:0xC0DE / 7 -> AX=quot, DX=rem (no overflow).
     .text

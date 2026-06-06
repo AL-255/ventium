@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """M7.3a phase 1 — Win95 environment-input PARSER (docs/m7-lockstep-spec.md §M7.3).
 
 Turns the two raw QEMU logs that record.sh emits, into the structured

@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/core.sv — the Ventium integer/pipeline spine (R1 modularization,
 // docs/rtl-refactor-plan.md). Renamed from intcore.sv: it now wires the
 // extracted blocks (decode / issue_uv / ventium_alu_pkg / ventium_decode_pkg /

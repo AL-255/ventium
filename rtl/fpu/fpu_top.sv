@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // fpu/fpu_top.sv — x87 architectural STATE FILE
 //                  (extracted from core.sv, R2; behaviour-preserving).
 //

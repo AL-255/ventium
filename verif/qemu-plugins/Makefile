@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium Producer B — QEMU TCG cycle-trace plugin build.
 #
 # Mirrors ventium-refs/07-p5-emulation-harness/scripts/30-build-plugin.sh:

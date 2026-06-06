@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // soc/ven_port92.sv — Ventium SoC PC peripheral: System Control Port A (M8).
 //
 // I/O port 0x92 — the "Fast A20" / System Control Port A. 8-bit register.

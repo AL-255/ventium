@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/bpred_btb.sv — Branch prediction: 256-entry 4-way BTB + 2-bit predictor
 //                     (extracted from core.sv, R2; behaviour-preserving).
 //

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Ventium Producer A — QEMU gdbstub golden architectural-state trace generator.
 
 This is the *functional oracle* of the whole Ventium differential-testing stack

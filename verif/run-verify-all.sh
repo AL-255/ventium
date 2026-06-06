@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # run-verify-all.sh — Ventium TOP-LEVEL verification umbrella.
 #
 # One command that runs EVERY routinely-runnable gate and reports a single

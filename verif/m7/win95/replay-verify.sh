@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # M7.3a phase 1 — rr=replay DETERMINISM verifier (docs/m7-lockstep-spec.md §M7.3).
 #
 # Re-runs the recorded boot prefix (replay.bin from record.sh) under rr=replay TWICE

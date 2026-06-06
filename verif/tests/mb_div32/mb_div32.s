@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_div32 — independent DIV r/m32 occupancy microbenchmark.
 # Each iteration reloads EDX:EAX + divisor and does one DIVL (32/32). p5model
 # charges DIV r/m32 occ=41 (NP, U-pipe held). The surrounding mov/xor/dec/jnz are

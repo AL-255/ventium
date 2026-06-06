@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Streaming functional comparator for LARGE lock-step traces (M7 macro-workloads).
 
 compare.py loads both traces fully into memory; a multi-million-record Quake/Win95

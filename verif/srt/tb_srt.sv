@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ===========================================================================
 // verif/srt/tb_srt.sv — standalone Verilator gate for the radix-4 SRT divider
 // (fpu_x87_pkg::fx_srt_div). Drives golden vectors generated from the single-

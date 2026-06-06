@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # =============================================================================
 # Ventium M2 test: t_shift  --  SHL/SHR/SAR/SAL by 1, imm8, CL; count masking
 # =============================================================================

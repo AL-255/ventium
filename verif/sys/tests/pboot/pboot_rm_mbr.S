@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M9-rm — the 16-bit REAL-MODE BOOT SECTOR (disk LBA0, 512 bytes, pboot_rm_mbr.bin).
  *
  * The "OS" the real-mode firmware boots: a real boot sector that lives on the IDE disk at

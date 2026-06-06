@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """m4_metrics.py — RTL-trace aggregate cycle metrics + 55-validate band check.
 
 Used by verif/run-m4.sh. Computes, FROM THE RTL --cycle trace, the aggregate

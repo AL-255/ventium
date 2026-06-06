@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ============================================================================
 // tb_biu_p5.sv -- standalone self-consistency testbench + SVA protocol
 // invariants for the Ventium M5B Bus Interface Unit (biu_p5).

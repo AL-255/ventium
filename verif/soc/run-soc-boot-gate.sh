@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M9 — SoC FIRST-BOOT gate (firmware stub chain-loads a real boot sector
 # from the IDE disk and executes it), FULL PER-RECORD DIFFERENTIAL vs qemu-system.
 #

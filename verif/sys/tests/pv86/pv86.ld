@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M7.2 — linker script for the bare-metal VIRTUAL-8086 (V86) image.
  *
  * Identical layout strategy to the M2S.3 pfault / M2S.4 pcpl / M2S.6 pdebug

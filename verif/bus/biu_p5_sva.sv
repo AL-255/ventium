@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ============================================================================
 // biu_p5_sva.sv -- bind-able SVA protocol-invariant checker for biu_p5.
 //

@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_div8 — DIV r/m8 occupancy microbenchmark (p5model occ=17, NP, U-pipe held).
 # Fast-pathed movl setup isolates the divide; AX=0xFE / 7 = 36 r 2 (no quotient
 # overflow, so QEMU does not #DE — the occupancy, not the fault, is under test).

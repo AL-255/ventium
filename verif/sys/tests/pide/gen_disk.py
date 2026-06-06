@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Ventium M8.4 IDE — single-source-of-truth disk image generator.
 
 Emits BOTH artifacts from ONE in-memory byte buffer, so the qemu-system backing

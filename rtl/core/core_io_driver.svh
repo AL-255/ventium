@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/core_io_driver.svh — RAW MODULE-SCOPE text `included by core.sv (R2
 // modularization). NOT a standalone unit (no module wrapper): it is the M7.3b
 // port-I/O bus-request driver `always_comb (io_req/io_we/io_addr/io_size/

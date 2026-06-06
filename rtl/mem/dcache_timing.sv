@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // mem/dcache_timing.sv — L1 data-cache TIMING model (extracted from core.sv, R2).
 //
 // PLAN.md §6.5 (Data memory): 8 KB, 2-way, 32-byte line, 128 sets, LRU. This is

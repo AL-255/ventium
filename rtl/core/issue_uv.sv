@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/issue_uv.sv — U/V dual-issue pairing checker (AP-500 pairing classes).
 //
 // Extracted VERBATIM from intcore.sv (R1 modularization phase 3,

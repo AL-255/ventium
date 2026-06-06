@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M8.2 — linker script for the bare-metal SoC device differential image.
  *
  * Same flat 64 KiB -bios layout as pirqsoc/pintr/pmode: qemu-system-i386 -bios

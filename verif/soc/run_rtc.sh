@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # ============================================================================
 # verif/soc/run_rtc.sh -- standalone build+run of the ven_rtc (M8 RTC/CMOS)
 # directed unit self-check.

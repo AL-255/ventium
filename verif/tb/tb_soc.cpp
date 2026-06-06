@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/tb/tb_soc.cpp
 //
 // Ventium M8.1 --soc TB driver: the Verilator C++ testbench for the SoC

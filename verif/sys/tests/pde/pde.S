@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium — bare-metal #DE (divide-error) IDT-delivery demonstrator.
  *
  * Closes the divide family's architectural gap (REVIEW_Jun5.md Limit #5 / Action

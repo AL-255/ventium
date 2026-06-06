@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ============================================================================
 // ven_i8042.sv -- Intel 8042 PS/2 keyboard/mouse controller for the Ventium SoC
 //                 (M8 PC-peripheral device set).

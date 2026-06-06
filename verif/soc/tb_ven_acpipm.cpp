@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/soc/tb_ven_acpipm.cpp — directed unit self-check for rtl/soc/ven_acpipm.sv
 //
 // Unit-level self-check vs the DOCUMENTED QEMU 8.2.2 hw/acpi/core.c semantics

@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M8.3 — bare-metal SoC VGA-register-file differential test (+ ACPI PM
  * write-inert).  This is the M8.3 SoC-integration gate test. It exercises the
  * two devices M8.3 wires into ventium_soc — the VGA register file (0x3B0..0x3DF)

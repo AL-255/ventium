@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M8.3 — SoC VGA-register-file gate (VGA 0x3B0..0x3DF + ACPI PM 0x608).
 #
 # FULL PER-RECORD DIFFERENTIAL — like the M8.2 psocdev gate. Every interaction is

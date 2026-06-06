@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ============================================================================
 // ven_acpipm.sv -- Ventium SoC (M8) ACPI PM Timer device (PIIX4 PM base+0x08)
 // ============================================================================

@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/ventium_sys_pkg.sv — SYSTEM-mode pure helpers (R2 modularization,
 // docs/rtl-refactor-plan.md): x86 GDT/LDT descriptor field extraction, segment
 // type/attribute predicates, the protected-mode descriptor-load fault DECISION

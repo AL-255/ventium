@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Ventium trace format (v1) — shared parser/emitter.
 
 This module is the *executable* definition of docs/trace-format.md. The QEMU

@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // fpu/fpu_x87_pkg.sv — x87 floatx80 datapath helpers (M3).
 //
 // A self-contained, bit-exact-vs-QEMU floatx80 engine for the x87 FPU, covering

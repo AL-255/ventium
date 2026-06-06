@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M8.2 — SoC PC-PERIPHERAL device gate (RTC + 8042 + port-92 + A20 mask).
 #
 # FULL PER-RECORD DIFFERENTIAL — stronger than the M8.1 pirqsoc checkpoint gate.

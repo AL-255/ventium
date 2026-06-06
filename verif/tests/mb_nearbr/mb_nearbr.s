@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_nearbr — AP-500 near-branch (rel32) + TEST-reg fast-path pairing microbench
 # (review Action 6, batch 4). The loop body is padded >128 bytes so the back-edge
 # `jnz` is a Jcc rel32 (0F 85, now fast-pathed); inside, `test %ebx,%ebx` (85, U)

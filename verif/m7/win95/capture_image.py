@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """M7.3b harness fix: re-run ONLY PASS A (initial phys-mem image capture) of the
 M7.3a producer, so the image.json covers the extended _INIT_MEM_REGIONS (now
 including the 0xE0000..0xEFFFF PM-POST BIOS shadow that golden record 31's

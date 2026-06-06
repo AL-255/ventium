@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # ============================================================================
 # run_pit.sh -- standalone build+run for the Ventium M8 8254 PIT device
 # (ven_pit). DEDICATED run glue for this device so it does NOT touch the shared

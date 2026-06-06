@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M9-rm — SoC CANONICAL REAL-MODE BOOT gate (a real-mode firmware stub chain-loads
 # a real boot sector from the IDE disk to 0000:7C00 and executes it), FULL PER-RECORD
 # DIFFERENTIAL vs qemu-system.

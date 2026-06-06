@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/ventium_x87_pkg.sv — x87 INSTRUCTION-LEVEL helpers (R2 modularization,
 // docs/rtl-refactor-plan.md). These are the PURE combinational helpers that wrap
 // the floatx80 datapath ops of fpu_x87_pkg (fx_add/fx_mul/fx_div/...) into the

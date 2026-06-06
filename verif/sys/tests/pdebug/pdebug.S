@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M2S.6 — bare-metal DEBUG-REGISTER / #DB (IDT delivery) demonstrator.
  *
  * PROBE/CORPUS for the M2S.6 partial-oracle stage.  Bootstraps real->protected

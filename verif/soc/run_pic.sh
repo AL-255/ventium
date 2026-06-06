@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # run_pic.sh — STANDALONE build+run+lint for the Ventium M8 8259A PIC device
 # (rtl/soc/ven_pic.sv) and its directed unit self-check
 # (verif/soc/tb_ven_pic.cpp). Self-contained: builds ONLY these two files into

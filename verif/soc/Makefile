@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # verif/soc/Makefile — standalone Verilator unit tests for Ventium SoC PC
 # peripheral device modules (rtl/soc/ven_*.sv). Each device is built + run
 # independently of the main Ventium build; this Makefile does NOT touch

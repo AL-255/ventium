@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M9 — boot-firmware STUB (the -bios image, pboot_stub.bin).
  *
  * The smallest thing that is genuinely "BOOTING": a reset-vector firmware that

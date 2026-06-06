@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # run-all-soc-gates.sh — Ventium M8 SoC regression aggregate.
 #
 # Runs EVERY ventium_soc differential gate in sequence and reports a pass/fail

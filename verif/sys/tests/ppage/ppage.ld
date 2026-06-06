@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M2S.2 — linker script for the bare-metal PAGING image.
  *
  * Identical layout strategy to the M2S.0 pmode / M2S.1 pseg images: a flat

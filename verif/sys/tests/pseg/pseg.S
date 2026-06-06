@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M2S.1 — bare-metal protected-mode SEGMENTATION-ONLY demonstrator.
  *
  * This is the M2S.1 gate test: it exercises the real->protected transition and

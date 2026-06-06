@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Emit golden vectors for the SRT Verilator gate, from the single-source model.
 import sys, os, struct, random
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'srt'))

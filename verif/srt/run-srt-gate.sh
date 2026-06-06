@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Radix-4 SRT divider gate: regenerate golden vectors from the single-source
 # model, build the Verilator TB against the real fpu_x87_pkg, run, assert OK.
 set -euo pipefail

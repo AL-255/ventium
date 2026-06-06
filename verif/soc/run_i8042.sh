@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # ============================================================================
 # run_i8042.sh -- standalone build+run for the Ventium M8 i8042 PS/2 keyboard
 # controller device (ven_i8042). DEDICATED run glue for this device so it does

@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ventium_soc.sv — Ventium SoC integration top.
 //   M8.1: core + 8259 PIC + 8254 PIT (the on-die interrupt subsystem).
 //   M8.2: + MC146818 RTC (0x70/0x71), 8042 keyboard ctrl (0x60/0x64),

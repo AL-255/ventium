@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // ============================================================================
 // ven_pit.sv -- Intel 8254 Programmable Interval Timer (PIT) for the Ventium SoC
 //

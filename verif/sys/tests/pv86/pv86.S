@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M7.2 — bare-metal VIRTUAL-8086 MODE (V86) demonstrator.
  *
  * This is the M7.2 pv86 gate test: it bootstraps real->protected + PAGING + a TSS

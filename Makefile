@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium top-level build. Targets are wired during M0 integration.
 # Paths to the prebuilt QEMU golden harness (in the submodule).
 REFS        := ventium-refs/07-p5-emulation-harness
