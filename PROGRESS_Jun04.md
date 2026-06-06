@@ -1365,3 +1365,17 @@ written, so the gate matched on the first run.
 `ventium_soc`** (PIC, PIT, RTC, i8042, port-92, VGA, ACPI-PM). The remaining M8
 follow-ons are unbuilt larger devices (8237 DMA, SoundBlaster/OPL3, IDE, PCI) and
 self-contained boot firmware — separate, larger efforts.
+
+### M8.3b — `make verify-soc` SoC regression aggregate (2026-06-05, infra)
+
+With four `ventium_soc` differential gates now in the tree (pirqsoc/psocdev/pvga/
+test386) and **no** single command to run them, a SoC regression could slip
+through by running only one gate. Added `verif/soc/run-all-soc-gates.sh` + a
+`make verify-soc` target (the SoC analogue of `make verify` / `verify-sys`): runs
+EVERY SoC gate in sequence (sequential, not parallel — they share the `tb_soc`
+obj_dir + `build/soc` + a gdbstub port), prints a pass/fail summary, exits 0 only
+if all pass. Codifies the no-regression check that M8.3 had to run by hand, so
+future SoC work (the IDE/PCI/DMA builds) re-checks the whole track with one
+command. Verified: `make verify-soc` → **4/4 PASS** (pirqsoc EQUIVALENT, psocdev
+122/122, pvga 292/292, test386 1500/1500). Touches only `Makefile` + the new
+aggregate script — no RTL, no behavior change. `ventium-refs` untouched.
