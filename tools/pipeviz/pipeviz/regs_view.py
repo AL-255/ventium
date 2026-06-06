@@ -114,10 +114,20 @@ class RegsView(QWidget):
         return l
 
     def update_from(self, s):
+        prev = getattr(self, "_prev", None)
+        chg = "color:#e3b341;font-weight:bold;"   # changed since last step (amber)
+        same = "color:#c9d1d9;"
         for i, name in enumerate(GPR_NAMES):
+            changed = prev is not None and prev["gpr"][i] != s.gpr[i]
             self.gpr_lbls[name].setText(f"{s.gpr[i]:08x}")
+            self.gpr_lbls[name].setStyleSheet(chg if changed else same)
+        eip_chg = prev is not None and prev["eip"] != s.eip
         self.eip_lbl.setText(f"{s.eip:08x}")
+        self.eip_lbl.setStyleSheet(chg if eip_chg else same)
+        efl_chg = prev is not None and prev["eflags"] != s.eflags
         self.efl_lbl.setText(f"{s.eflags:08x}")
+        self.efl_lbl.setStyleSheet(chg if efl_chg else same)
+        self._prev = {"gpr": list(s.gpr), "eip": s.eip, "eflags": s.eflags}
         on = [n for bit, n in _FLAGS if (s.eflags >> bit) & 1]
         self.flags_lbl.setText("[" + " ".join(on) + "]")
         for i, name in enumerate(SEG_NAMES):

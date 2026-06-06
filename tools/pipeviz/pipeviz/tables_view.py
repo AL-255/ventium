@@ -13,39 +13,69 @@ from . import disasm
 
 
 class CacheMap(QWidget):
-    """A 256-cell occupancy heatmap of a 2-way / 128-set L1 cache (one cell per
-    (set, way); empty = dark, resident = green, MRU way brightened). Gives an
-    instant picture of how full the cache is."""
-    COLS = 64
+    """Occupancy heatmap of a 2-way / 128-set L1 cache laid out as a real 2D
+    grid: 128 columns (sets, X) x 2 rows (ways, Y). Empty = dark, resident =
+    green, the MRU way of a set is brightened. Axis ticks + a legend make the
+    geometry self-evident."""
+    SETS = 128
+    LX = 34          # left margin for "way 0 / way 1" labels
+    TOP = 13         # top band for the title/legend
+    WAYH = 13        # height of each way row
+    BOT = 12         # bottom band for set ticks
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.cells = [(False, False)] * 256   # (valid, is_mru) by idx = set*2+way
-        self.setFixedHeight(64)
+        self.n_valid = 0
+        self.setFixedHeight(self.TOP + 2 * self.WAYH + self.BOT)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_lines(self, lines):
         cells = [(False, False)] * 256
         for l in lines:
-            idx = l.set * 2 + l.way
-            cells[idx] = (True, l.lru == l.way)
+            cells[l.set * 2 + l.way] = (True, l.lru == l.way)
         self.cells = cells
+        self.n_valid = len(lines)
         self.update()
 
     def paintEvent(self, ev):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#0d1117"))
-        rows = 256 // self.COLS
-        cw = self.width() / self.COLS
-        ch = self.height() / rows
-        for idx, (valid, mru) in enumerate(self.cells):
-            c = idx % self.COLS
-            r = idx // self.COLS
-            cell = QRect(int(c * cw) + 1, int(r * ch) + 1, int(cw) - 1, int(ch) - 1)
-            if valid:
-                p.fillRect(cell, QColor("#3fb950" if mru else "#1f7a36"))
-            else:
-                p.fillRect(cell, QColor("#161b22"))
+        f = QFont("monospace"); f.setStyleHint(QFont.Monospace); f.setPointSize(7)
+        p.setFont(f)
+        plot_w = self.width() - self.LX - 4
+        cw = plot_w / self.SETS
+        # title + legend (right-aligned swatches)
+        p.setPen(QColor("#8b949e"))
+        p.drawText(QRect(0, 0, self.LX + 80, self.TOP - 1), Qt.AlignVCenter | Qt.AlignLeft,
+                   f" {self.n_valid}/256")
+        lx = self.width() - 4
+        for lab, col in (("MRU", "#56d364"), ("resident", "#1f7a36"), ("empty", "#161b22")):
+            tw = 6 + 7 * len(lab)
+            lx -= tw
+            p.fillRect(QRect(lx, 3, 7, 7), QColor(col))
+            p.setPen(QColor("#6e7681"))
+            p.drawText(QRect(lx + 9, 0, tw, self.TOP - 1), Qt.AlignVCenter | Qt.AlignLeft, lab)
+            lx -= 6
+        # way labels + cells
+        for way in range(2):
+            y = self.TOP + way * self.WAYH
+            p.setPen(QColor("#6e7681"))
+            p.drawText(QRect(0, y, self.LX - 4, self.WAYH), Qt.AlignVCenter | Qt.AlignRight,
+                       f"way{way}")
+            for s in range(self.SETS):
+                valid, mru = self.cells[s * 2 + way]
+                x = self.LX + s * cw
+                cell = QRect(int(x), y + 1, max(1, int(cw) - 0), self.WAYH - 2)
+                p.fillRect(cell, QColor("#56d364" if (valid and mru)
+                                        else "#1f7a36" if valid else "#161b22"))
+        # set axis ticks every 16
+        p.setPen(QColor("#586069"))
+        ty = self.TOP + 2 * self.WAYH
+        for s in range(0, self.SETS + 1, 16):
+            x = int(self.LX + s * cw)
+            p.drawText(QRect(x - 8, ty, 20, self.BOT), Qt.AlignHCenter | Qt.AlignTop, str(s))
+        p.drawText(QRect(self.LX, ty, plot_w, self.BOT), Qt.AlignRight | Qt.AlignTop, "set")
         p.end()
 
 
@@ -87,18 +117,19 @@ class TablesView(QWidget):
         self.tabs = QTabWidget()
         lay.addWidget(self.tabs)
 
-        # --- I-cache (code) ---
+        # --- I-cache (code). 'way' shows '*' for the MRU way (LRU dropped). ---
         self.ic_lbl = QLabel()
         self.ic_map = CacheMap()
-        self.ic = _mk_table(["set", "way", "LRU", "tag", "line addr", "32 line bytes"],
-                            [44, 40, 40, 70, 90, 9999])
+        self.ic = _mk_table(["set", "way", "tag", "line addr", "32 line bytes"],
+                            [46, 44, 60, 86, 9999])
+        self.ic.setWordWrap(True)
         self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code $ (I)")
 
         # --- D-cache (data, timing-only) ---
         self.dc_lbl = QLabel()
         self.dc_map = CacheMap()
-        self.dc = _mk_table(["set", "way", "LRU", "tag", "line addr"],
-                            [50, 50, 50, 90, 9999])
+        self.dc = _mk_table(["set", "way", "tag", "line addr"],
+                            [56, 56, 90, 9999])
         self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data $ (D)")
 
         # --- TLB (I + D) ---
@@ -136,10 +167,13 @@ class TablesView(QWidget):
         rows = []
         for l in ic:
             base = (l.tag << 12) | (l.set << 5)
-            data = " ".join(f"{l.data[b]:02x}" for b in range(32))
-            mru = "*" if l.lru == l.way else " "
-            rows.append([l.set, l.way, mru, f"{l.tag:05x}", f"{base:08x}", data])
-        _fill(self.ic, rows, dim_cols=(0, 1, 3, 4))
+            # 32 line bytes on two 16-byte rows so nothing is ellipsis-truncated.
+            b = [f"{l.data[i]:02x}" for i in range(32)]
+            data = " ".join(b[:16]) + "\n" + " ".join(b[16:])
+            way = f"{l.way}{'*' if l.lru == l.way else ''}"
+            rows.append([l.set, way, f"{l.tag:05x}", f"{base:08x}", data])
+        _fill(self.ic, rows, dim_cols=(0, 2, 3))
+        self.ic.resizeRowsToContents()
 
         # D-cache
         dc = backend.dcache()
@@ -150,9 +184,9 @@ class TablesView(QWidget):
         rows = []
         for l in dc:
             base = (l.tag << 12) | (l.set << 5)
-            mru = "*" if l.lru == l.way else " "
-            rows.append([l.set, l.way, mru, f"{l.tag:05x}", f"{base:08x}"])
-        _fill(self.dc, rows, dim_cols=(0, 1, 3))
+            way = f"{l.way}{'*' if l.lru == l.way else ''}"
+            rows.append([l.set, way, f"{l.tag:05x}", f"{base:08x}"])
+        _fill(self.dc, rows, dim_cols=(0, 2))
 
         # TLB (both sides, valid entries only)
         rows = []

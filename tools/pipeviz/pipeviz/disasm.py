@@ -22,14 +22,15 @@ _md16d = Cs(CS_ARCH_X86, CS_MODE_16)
 for _m in (_md32d, _md16d):
     _m.detail = True
 
-# x86 instruction-field colours (per the requested scheme).
+# x86 instruction-field colours (per the requested scheme; tuned for contrast
+# on the near-black canvas so prefixes are legible).
 FIELD_COLOR = {
-    "prefix": "#b6b6b6",   # light gray
+    "prefix": "#aab4c0",   # light slate-gray (brighter than before)
     "opcode": "#4ea1ff",   # blue
-    "modrm":  "#3fb950",   # green
-    "sib":    "#bc8cff",   # purple
+    "modrm":  "#56d364",   # green
+    "sib":    "#c89bff",   # purple
     "disp":   "#e3b341",   # yellow (offset / displacement)
-    "imm":    "#f85149",   # red
+    "imm":    "#ff7b72",   # red
 }
 _PREFIX_BYTES = {0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65}
 
@@ -168,13 +169,15 @@ def stage_of(state_name):
 
 
 # ---------------------------------------------------------------------------
-# Instruction-class colouring (by mnemonic) for the trace + timeline blocks.
+# Instruction-class colouring (by mnemonic). Green is RESERVED for the
+# dual-issue/S_PIPE meaning in the pipeline panel, so ALU/data mnemonics use a
+# neutral off-white here and only branches/fp/mem/sys carry an accent.
 # ---------------------------------------------------------------------------
-CC_BRANCH = "#e3b341"   # control transfer
-CC_FP = "#bc8cff"       # x87
-CC_MEM = "#58a6ff"      # load/store/stack
-CC_ALU = "#3fb950"      # arithmetic / data
-CC_SYS = "#f0883e"      # privileged / system
+CC_BRANCH = "#e3b341"   # control transfer (yellow)
+CC_FP = "#c89bff"       # x87 (purple)
+CC_MEM = "#79c0ff"      # load/store/stack (blue)
+CC_ALU = "#d9dee3"      # arithmetic / data (neutral off-white)
+CC_SYS = "#ff9e64"      # privileged / system (orange)
 CC_OTHER = "#8b949e"
 
 _BR = {"jmp", "call", "ret", "retn", "retf", "iret", "iretd", "loop", "loope",
@@ -202,13 +205,20 @@ def insn_class(mnemonic: str):
     return ("alu", CC_ALU)
 
 
-# legend entries for the timeline / board
+# waterfall event colours (stalls / mispredict flushes are the most common
+# events in these traces and previously had no legend entry).
+C_STALL = "#d2a24c"     # pipeline stall / bubble (amber)
+C_MISPRED = "#f85149"   # mispredict flush (red)
+
+# legend entries for the waterfall / board
 LEGEND = [
-    ("dual-issue (S_PIPE)", C_PIPE),
-    ("I-cache fill (S_PF)", C_FILL),
+    ("dual-issue", C_PIPE),
+    ("I-cache fill", C_FILL),
     ("slow microcode", C_SLOW),
-    ("x87 FP pipe", C_FP),
-    ("page-table walk", C_WALK),
+    ("x87 FP", C_FP),
+    ("page walk", C_WALK),
     ("int/task/SMM", C_SYS),
-    ("halt/hang", C_HALT),
+    ("stall/bubble", C_STALL),
+    ("mispredict", C_MISPRED),
+    ("halt", C_HALT),
 ]

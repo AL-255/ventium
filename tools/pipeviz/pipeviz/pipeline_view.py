@@ -21,7 +21,8 @@ from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics
 from PySide6.QtCore import Qt, QRect, QSize
 
 from . import disasm
-from .disasm import (C_PIPE, C_FILL, C_SLOW, C_FP, C_WALK, C_SYS, C_HALT)
+from .disasm import (C_PIPE, C_FILL, C_SLOW, C_FP, C_WALK, C_SYS, C_HALT,
+                     C_STALL, C_MISPRED)
 
 INT_STAGES = ["PF", "D1", "D2", "EX", "WB"]
 FP_STAGES = ["X1", "X2", "WF", "ER"]
@@ -44,7 +45,7 @@ def _mono(pt=9, bold=False):
 class StageBoard(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(190)
+        self.setFixedHeight(150)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._cells = self._blank()
         self._status = "no image loaded"
@@ -104,8 +105,9 @@ class StageBoard(QWidget):
         if s.mispred_bubbles: haz.append(f"mispredict-bubble={s.mispred_bubbles}")
         if s.pending_mem_pen: haz.append(f"D$-pen={s.pending_mem_pen}")
         if s.fp_occ_pending: haz.append("fp-occupancy")
-        hz = ("   ⚠ " + ", ".join(haz)) if haz else ""
-        pair = "  ⇄ paired" if (name == "S_PIPE" and s.pipe_pair) else ""
+        hz = ("    " + ", ".join(haz)) if haz else ""
+        pair = "  [paired]" if (name == "S_PIPE" and s.pipe_pair) else (
+            "  [single]" if name == "S_PIPE" else "")
         self._status = f"{name}  ({desc})   eip=0x{s.eip:08x}   cyc={s.core_cyc}{pair}{hz}"
         self.update()
 
@@ -117,41 +119,51 @@ class StageBoard(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(_BG))
         W = self.width()
-        lane_h = 34
-        top = 26
+        lane_h = 30
+        title_y = 2          # section titles band
+        hdr_y = 20           # stage-label band (separated from titles -> no collision)
+        top = 36             # cells start
         lane_label_w = 38
         int_w = int((W - lane_label_w - 16) * 0.62)
         fp_x0 = lane_label_w + int_w + 16
 
-        p.setFont(_mono(9, True)); p.setPen(QColor(_MUT))
-        p.drawText(QRect(0, 4, W, 18), Qt.AlignLeft, "  Integer pipeline (U / V)")
-        p.drawText(QRect(fp_x0, 4, W - fp_x0, 18), Qt.AlignLeft, "FP pipeline")
+        fp_idle = not self._cells.get("FP", ([], ""))[0]
+        p.setFont(_mono(9, True)); p.setPen(QColor(C_PIPE))
+        p.drawText(QRect(lane_label_w, title_y, int_w, 14), Qt.AlignLeft,
+                   "Integer pipeline  (U / V)")
+        p.setPen(QColor(_MUT if fp_idle else C_FP))
+        p.drawText(QRect(fp_x0, title_y, W - fp_x0, 14), Qt.AlignLeft,
+                   "FP pipeline" + ("  (idle)" if fp_idle else ""))
 
         icw = int_w / len(INT_STAGES)
         fcw = (W - fp_x0 - 6) / len(FP_STAGES)
-        p.setFont(_mono(8)); p.setPen(QColor(_MUT))
+        p.setFont(_mono(8, True)); p.setPen(QColor("#7d8590"))
         for i, st in enumerate(INT_STAGES):
-            p.drawText(QRect(int(lane_label_w + i * icw), top - 14, int(icw), 12),
+            p.drawText(QRect(int(lane_label_w + i * icw), hdr_y, int(icw), 12),
                        Qt.AlignCenter, st)
         for i, st in enumerate(FP_STAGES):
-            p.drawText(QRect(int(fp_x0 + i * fcw), top - 14, int(fcw), 12),
+            p.drawText(QRect(int(fp_x0 + i * fcw), hdr_y, int(fcw), 12),
                        Qt.AlignCenter, st)
 
-        lanes = [("U", "U", INT_STAGES, lane_label_w, icw),
-                 ("V", "V", INT_STAGES, lane_label_w, icw),
-                 ("FP", "FP", FP_STAGES, fp_x0, fcw)]
-        for r, (key, label, stages, x0, cw) in enumerate(lanes):
+        lanes = [("U", "U", INT_STAGES, lane_label_w, icw, False),
+                 ("V", "V", INT_STAGES, lane_label_w, icw, False),
+                 ("FP", "FP", FP_STAGES, fp_x0, fcw, fp_idle)]
+        for r, (key, label, stages, x0, cw, idle) in enumerate(lanes):
             y = top + r * lane_h
-            p.setFont(_mono(9, True)); p.setPen(QColor(_MUT))
+            p.setFont(_mono(9, True)); p.setPen(QColor("#5b6470" if idle else _MUT))
             p.drawText(QRect(2, y, lane_label_w - 4, lane_h),
                        Qt.AlignVCenter | Qt.AlignRight, label)
             lit_idxs, text = self._cells.get(key, ([], ""))
             for i, st in enumerate(stages):
                 cx = x0 + i * cw
                 cell = QRect(int(cx) + 1, y + 2, int(cw) - 2, lane_h - 6)
-                col = QColor(self._statecol) if (i in lit_idxs) else QColor(_DIM)
-                p.fillRect(cell, col)
-                p.setPen(QColor(_GRID)); p.drawRect(cell)
+                if i in lit_idxs:
+                    p.fillRect(cell, QColor(self._statecol))
+                    p.setPen(QColor(self._statecol).lighter(130)); p.drawRect(cell)
+                else:
+                    # de-emphasise empty cells: faint fill, no hard border, so the
+                    # single active stage is what the eye lands on.
+                    p.fillRect(cell, QColor("#0f141b" if idle else _DIM))
             if lit_idxs and text:
                 lo, hi = min(lit_idxs), max(lit_idxs)
                 span = QRect(int(x0 + lo * cw) + 2, y + 2,
@@ -229,6 +241,7 @@ class _WaterfallCanvas(QWidget):
         self.bits = 32
         self.cs_base = 0
         self.backend = None
+        self._sel_cyc = None     # highlighted cycle (linked trace selection)
         self.setFixedWidth(total_width())
         self.setMouseTracking(True)
         # live stats
@@ -287,8 +300,8 @@ class _WaterfallCanvas(QWidget):
                 out.append((gi["V"], 3, 4, self._mn(s["pcV"]), C_PIPE))
                 any_ret = True
             if not any_ret:
-                col = C_WALK if s["mispred"] else "#6e7681"
-                lbl = "flush" if s["mispred"] else ("stall" if s["stall"] else "·")
+                col = C_MISPRED if s["mispred"] else C_STALL
+                lbl = "flush" if s["mispred"] else "stall"
                 out.append((gi["U"], 3, 3, lbl, col))
         elif name == "S_PF":
             out.append((gi["U"], 0, 0, f"fill{s['pf_word']}", C_FILL))
@@ -325,26 +338,32 @@ class _WaterfallCanvas(QWidget):
             p.drawText(self.rect(), Qt.AlignTop | Qt.AlignHCenter, "\n step the core to fill the waterfall")
             p.end(); return
 
-        # faint group separators (vertical)
-        p.setPen(QColor(_GRID))
-        for gi in range(len(GROUPS)):
-            x = group_x0(gi)
-            p.drawLine(x - GAP // 2, ev.rect().top(), x - GAP // 2, ev.rect().bottom())
+        top, bot = ev.rect().top(), ev.rect().bottom()
+        # subtle alternating group background tints so U | V | FP read as bands
+        group_tint = ["#10151c", "#0d1218", "#141019"]
+        for gi, (gname, stages, gcol) in enumerate(GROUPS):
+            gx = group_x0(gi)
+            p.fillRect(QRect(int(gx), top, len(stages) * STAGE_W, bot - top + 1),
+                       QColor(group_tint[gi % 3]))
+        # 2px group separators
+        for gi in range(1, len(GROUPS)):
+            x = group_x0(gi) - GAP // 2
+            p.fillRect(QRect(x, top, 2, bot - top + 1), QColor("#3d444d"))
 
-        base = self.rows[0]["cyc"]
-        r0 = max(0, ev.rect().top() // ROW_H - 1)
-        r1 = min(len(self.rows), ev.rect().bottom() // ROW_H + 2)
+        r0 = max(0, top // ROW_H - 1)
+        r1 = min(len(self.rows), bot // ROW_H + 2)
         fm8 = QFontMetrics(_mono(8, True))
         for r in range(r0, r1):
             s = self.rows[r]
             y = r * ROW_H
             statecol = disasm.STATE_STAGE.get(s["name"], ("", "", _MUT, ""))[2]
-            # gutter: cycle number + state swatch
-            if s["cyc"] % 5 == 0:
-                p.setPen(QColor(_MUT)); p.setFont(_mono(7))
-                p.drawText(QRect(2, y, GUTTER - 14, ROW_H), Qt.AlignVCenter | Qt.AlignRight,
-                           str(s["cyc"]))
-            p.fillRect(QRect(GUTTER - 10, y + 1, 8, ROW_H - 2), QColor(statecol))
+            # gutter: cycle number on EVERY row (multiples of 5 brighter) + state swatch
+            mult5 = (s["cyc"] % 5 == 0)
+            p.setPen(QColor("#9aa3ad" if mult5 else "#4b535d"))
+            p.setFont(_mono(7, mult5))
+            p.drawText(QRect(2, y, GUTTER - 14, ROW_H), Qt.AlignVCenter | Qt.AlignRight,
+                       str(s["cyc"]))
+            p.fillRect(QRect(GUTTER - 10, y + 1, 7, ROW_H - 2), QColor(statecol))
             # lit stage cells
             for gidx, lo, hi, text, col in self._cells_for(s):
                 x0, w = stage_rect_x(gidx, lo, hi)
@@ -355,6 +374,13 @@ class _WaterfallCanvas(QWidget):
                     p.setFont(_mono(8, True))
                     p.drawText(cell, Qt.AlignVCenter | Qt.AlignHCenter,
                                fm8.elidedText(text, Qt.ElideRight, cell.width() - 2))
+        # selection highlight (set by linked trace selection)
+        if self._sel_cyc is not None and self.rows:
+            fc = self.rows[0]["cyc"]
+            sr = self._sel_cyc - fc
+            if 0 <= sr < len(self.rows):
+                p.setPen(QColor("#f0f6fc"));
+                p.drawRect(QRect(0, sr * ROW_H, self.width() - 1, ROW_H - 1))
         p.end()
 
     def mouseMoveEvent(self, ev):
@@ -410,6 +436,17 @@ class Waterfall(QWidget):
     def set_bits(self, bits):
         self.canvas.bits = bits
 
+    def highlight_cycle(self, cyc):
+        """Scroll to + outline the waterfall row for `cyc` (linked from the
+        trace selection)."""
+        self.canvas._sel_cyc = cyc
+        if self.canvas.rows:
+            fc = self.canvas.rows[0]["cyc"]
+            row = cyc - fc
+            if 0 <= row < len(self.canvas.rows):
+                self.scroll.ensureVisible(0, row * ROW_H, 0, 60)
+        self.canvas.update()
+
     def stats(self):
         return self.canvas.stat
 
@@ -448,6 +485,9 @@ class PipelineView(QWidget):
     def reset(self, backend):
         self.board.reset()
         self.waterfall.reset(backend, self._bits)
+
+    def highlight_cycle(self, cyc):
+        self.waterfall.highlight_cycle(cyc)
 
     def update_from(self, backend, state):
         bits = 32 if state.cs_d else 16
