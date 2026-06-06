@@ -36,6 +36,12 @@ issue to and why*, and an honest implementation status.
 
 .. toctree::
    :maxdepth: 2
+   :caption: Overview
+
+   architecture
+
+.. toctree::
+   :maxdepth: 2
    :caption: Reference
 
    isa/index

@@ -1,7 +1,11 @@
 # Build dependencies for the Ventium Sphinx documentation (docs/sphinx/).
-# Pure reStructuredText + the built-in 'alabaster' theme — no extra extensions.
-# Range pin: the doc was authored/verified clean (sphinx-build -W) on Sphinx
-# 9.1.0; this range keeps CI reproducible while allowing patch updates. The
-# catalog uses only long-stable RST constructs (sections, list-table, toctree,
-# simple tables), so warnings-as-errors (-W) stays stable across this range.
+# reStructuredText + the built-in 'alabaster' theme. The only extension is
+# 'sphinx.ext.graphviz', which ships WITH Sphinx (no extra pip package) and
+# renders the architecture diagrams — it needs the system Graphviz `dot` binary
+# at build time (apt: graphviz). Range pin: authored/verified clean
+# (sphinx-build -nW) on Sphinx 9.1.0; this range keeps CI reproducible while
+# allowing patch updates. The pages use only long-stable RST constructs
+# (sections, list-table, toctree, simple tables, graphviz), so warnings-as-errors
+# stays stable across this range.
 sphinx>=8.2,<10
+# Non-pip system dependency: graphviz (provides `dot`).
