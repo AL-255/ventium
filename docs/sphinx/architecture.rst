@@ -19,8 +19,12 @@ The core microarchitecture
 ==========================
 
 The core implements the classic Pentium **five-stage, in-order, dual-issue**
-pipeline. Instructions flow left to right; the memory subsystem (caches, TLB and
-the bus interface) feeds the front end and the execute stage.
+pipeline. The diagram below follows the layout of the Pentium Processor manual's
+block diagram (Fig. 1) — instructions flow top to bottom from the instruction
+cache down through decode, the control unit and the execution units, with the
+Bus Unit and Page Unit on the left and the memory subsystem at the bottom. Each
+block is annotated with the **RTL file** that implements it (per
+``rtl/README.md``).
 
 .. graphviz:: diagrams/ventium-core.dot
 
@@ -60,12 +64,20 @@ writebacks.
 
 .. note::
 
-   Today the integer, x87, cache and FP **timing** all live inside the
-   ``core.sv`` *spine*; several blocks above (``fetch``, ``exec_int``,
-   ``regfile``, ``fpu_top``, ``icache``, ``dcache``) are drawn as distinct units
-   for clarity but are, in this revision, still being extracted from the spine
-   (the differential gate, not the file boundary, is the authority). See
-   ``rtl/README.md`` for the live block-by-block status.
+   The file label on each block is the RTL unit that implements it. The R2
+   refactor extracted behaviour-preserving **leaf modules** from the ``core.sv``
+   spine: ``bpred_btb.sv`` (BTB arrays + predictor), ``icache.sv`` (I-cache
+   arrays + fill + LRU), ``tlb.sv`` (split I/D TLB arrays + lookup), and
+   ``dcache_timing.sv`` (D-cache *timing* model — no data array; load data still
+   comes from the bus), alongside ``decode.sv`` / ``issue_uv.sv`` (decode +
+   pairing), the x87 state file ``fpu_top.sv``, and the pure-function packages
+   ``ventium_alu_pkg.sv`` / ``fpu_x87_pkg.sv``. The spine ``core.sv`` still runs
+   the pipeline FSM, the prefetch path, the slow-path microsequencer, the
+   page-table walk, the execution datapath and the FPU scoreboard — which is why
+   *Prefetch Buffers*, *Microcode / µseq*, the *Control Unit*, the *Integer
+   Datapath* and the *Page Unit* are labelled ``core.sv``. ``biu_p5.sv`` is the
+   standalone pin-level 64-bit P5 bus FSM (``biu.sv`` is its default-OFF
+   integration wrapper). See ``rtl/README.md`` for the authoritative file list.
 
 
 The SoC integration

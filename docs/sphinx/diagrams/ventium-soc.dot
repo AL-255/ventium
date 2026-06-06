@@ -1,52 +1,60 @@
-// Ventium SoC integration — the core plus the PC-platform peripheral set.
-// Rendered by sphinx.ext.graphviz into docs/sphinx/architecture.rst.
+// Ventium SoC — drawn in the Pentium-manual block-diagram style (top-down,
+// square boxes, orthogonal connectors) to match the core diagram. The core sits
+// on the memory bus and the PMIO I/O bus; the ven_* peripheral models tap the
+// PMIO bus, and device IRQs funnel through the 8259A PIC to the core.
 digraph ventium_soc {
-  rankdir=LR;
-  graph [fontname="Helvetica", fontsize=12, labelloc=t,
+  rankdir=TB;
+  splines=ortho;
+  graph [fontname="Helvetica", fontsize=13, labelloc=t,
          label="Ventium SoC — core + PC-platform peripherals (ventium_soc.sv)",
-         nodesep=0.30, ranksep=0.85, bgcolor="white", splines=spline];
-  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10,
-         fillcolor="#eef3fb", color="#3b6ea5", margin="0.12,0.07"];
-  edge  [fontname="Helvetica", fontsize=9, color="#555555"];
+         bgcolor="white", nodesep=0.30, ranksep=0.55];
+  node  [shape=box, style=filled, fontname="Helvetica", fontsize=10,
+         color="black", fillcolor="white", penwidth=1.1, margin="0.10,0.07"];
+  edge  [fontname="Helvetica", fontsize=9, color="black", arrowsize=0.7, penwidth=1.1];
 
-  core [label="Ventium core\n(ventium_top / core.sv, soc_en=1)", fillcolor="#dde8f7"];
-  mem  [label="System memory\n(64-bit P5 bus via BIU)", fillcolor="#e7eee7"];
-  pmio [label="PMIO I/O bus", shape=box, style="filled", fillcolor="#e4e4dc",
-        color="#998866", fontsize=11];
+  // ---- core + memory ----
+  core [label="Ventium core\n(ventium_top / core.sv, soc_en=1)", fillcolor="#bfe3f0",
+        width=3.2, height=0.8];
+  mem  [label="System memory\n(64-bit P5 bus via BIU)", fillcolor="#f6a6a6", width=2.2];
 
-  // ---- programmed-I/O peripherals ----
-  subgraph cluster_pmio {
-    label="PC-platform peripheral models (rtl/soc/ven_*.sv)";
-    fontname="Helvetica"; fontsize=11;
-    style="rounded,filled"; fillcolor="#faf7f0"; color="#998866";
-    pic  [label="8259A PIC\nmaster + slave\n(0x20/0x21, 0xA0/0xA1)", fillcolor="#fdeeee"];
-    pit  [label="8254 PIT\n(0x40-0x43)"];
-    rtc  [label="MC146818 RTC\n(0x70/0x71)"];
-    kbd  [label="8042 kbd/mouse\n(0x60/0x64)"];
-    p92  [label="Port 92\nfast A20 (0x92)"];
-    vga  [label="VGA registers\n(0x3B0-0x3DF)"];
-    acpi [label="ACPI PM timer\n(0x608)"];
-    ide1 [label="IDE primary\nmaster disk (0x1F0/0x3F6)"];
-    ide2 [label="IDE secondary\nATAPI CD-ROM (0x170/0x376)"];
-  }
+  // ---- the PMIO I/O bus (wide bar, like the Control Unit) ----
+  pmio [label=<PMIO I/O bus &#160;&#160;(IN / OUT)<BR/><FONT POINT-SIZE="8">port decode in ventium_soc.sv</FONT>>, fillcolor="#f3c07a", width=9.0, height=0.55];
+
+  // ---- peripheral models (rtl/soc/ven_*.sv) ----
+  pic  [label=<<B>8259A PIC</B>  master + slave<BR/>0x20/0x21, 0xA0/0xA1<BR/><FONT POINT-SIZE="8">ven_pic.sv</FONT>>, fillcolor="#ef5350", fontcolor="white"];
+  pit  [label=<8254 PIT<BR/>0x40-0x43<BR/><FONT POINT-SIZE="8">ven_pit.sv</FONT>>, fillcolor="#fbe0bf"];
+  rtc  [label=<MC146818 RTC<BR/>0x70/0x71<BR/><FONT POINT-SIZE="8">ven_rtc.sv</FONT>>, fillcolor="#fbe0bf"];
+  kbd  [label=<8042 kbd/mouse<BR/>0x60/0x64<BR/><FONT POINT-SIZE="8">ven_i8042.sv</FONT>>, fillcolor="#fbe0bf"];
+  p92  [label=<Port 92  fast A20<BR/>0x92<BR/><FONT POINT-SIZE="8">ven_port92.sv</FONT>>, fillcolor="#f6d6d6"];
+  vga  [label=<VGA registers<BR/>0x3B0-0x3DF<BR/><FONT POINT-SIZE="8">ven_vgaregs.sv</FONT>>, fillcolor="#fbe0bf"];
+  acpi [label=<ACPI PM timer<BR/>0x608<BR/><FONT POINT-SIZE="8">ven_acpipm.sv</FONT>>, fillcolor="#ecd5b8"];
+  ide1 [label=<IDE primary  master disk<BR/>0x1F0/0x3F6<BR/><FONT POINT-SIZE="8">ven_ide.sv</FONT>>, fillcolor="#f8c9a0"];
+  ide2 [label=<IDE secondary  ATAPI CD-ROM<BR/>0x170/0x376<BR/><FONT POINT-SIZE="8">ven_ide.sv</FONT>>, fillcolor="#f8c9a0"];
+
+  // ---- ranks ----
+  { rank=same; core; mem; }
+  { rank=same; pic; pit; rtc; kbd; p92; vga; acpi; ide1; ide2; }
 
   // ---- buses ----
-  core -> mem  [dir=both, label="memory bus"];
-  core -> pmio [dir=both, label="IN/OUT"];
-  pmio -> pic;  pmio -> pit;  pmio -> rtc;  pmio -> kbd;
-  pmio -> p92;  pmio -> vga;  pmio -> acpi; pmio -> ide1; pmio -> ide2;
+  core -> pmio [dir=both, xlabel="IN/OUT"];
+  core -> mem  [dir=both, xlabel="64-bit memory bus", constraint=false];
+  pmio -> pic;  pmio -> pit;  pmio -> rtc;  pmio -> kbd;  pmio -> p92;
+  pmio -> vga;  pmio -> acpi; pmio -> ide1; pmio -> ide2;
 
-  // ---- interrupt delivery ----
-  edge [color="#aa3333", fontcolor="#aa3333", style=dashed];
-  pit  -> pic [label="IRQ0"];
-  kbd  -> pic [label="IRQ1/12"];
-  rtc  -> pic [label="IRQ8"];
-  ide1 -> pic [label="IRQ14"];
-  ide2 -> pic [label="IRQ15"];
-  pic  -> core [label="INTR / INTA / vector"];
+  // keep the peripheral row in port order (invisible)
+  pic -> pit -> rtc -> kbd -> p92 -> vga -> acpi -> ide1 -> ide2 [style=invis];
+
+  // ---- interrupt delivery (8259A) ----
+  edge [color="#aa3333", fontcolor="#aa3333", style=dashed, constraint=false, penwidth=1.2];
+  pit  -> pic [xlabel="IRQ0"];
+  kbd  -> pic [xlabel="IRQ1/12"];
+  rtc  -> pic [xlabel="IRQ8"];
+  ide1 -> pic [xlabel="IRQ14"];
+  ide2 -> pic [xlabel="IRQ15"];
+  pic  -> core [xlabel="INTR / INTA / vector"];
 
   // ---- A20 mask ----
-  edge [color="#3b8a3b", fontcolor="#3b8a3b", style=dotted];
-  p92 -> core [label="A20 mask"];
-  kbd -> core [label="A20 (port 64)"];
+  edge [color="#2f7d2f", fontcolor="#2f7d2f", style=dotted, constraint=false, penwidth=1.2];
+  p92 -> core [xlabel="A20 mask"];
+  kbd -> core [xlabel="A20 (port 64)"];
 }

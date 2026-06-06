@@ -1,80 +1,105 @@
-// Ventium core microarchitecture — the P5/P54C dual-issue integer+x87 pipeline.
-// Rendered by sphinx.ext.graphviz into docs/sphinx/architecture.rst.
+// Ventium core — drawn in the style of the Pentium Processor manual block
+// diagram (Fig. 1): top-down, square boxes, nested colored units, orthogonal
+// connectors, bus-width labels. Each block is annotated with the RTL file that
+// implements it (rtl/README.md block map). Rendered by sphinx.ext.graphviz.
 digraph ventium_core {
-  rankdir=LR;
-  graph [fontname="Helvetica", fontsize=12, labelloc=t,
-         label="Ventium core — P5/P54C in-order dual-issue pipeline (ventium_top / core.sv)",
-         nodesep=0.30, ranksep=0.75, bgcolor="white", splines=spline];
-  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10,
-         fillcolor="#eef3fb", color="#3b6ea5", margin="0.12,0.07"];
-  edge  [fontname="Helvetica", fontsize=9, color="#555555"];
+  rankdir=TB;
+  splines=ortho;
+  graph [fontname="Helvetica", fontsize=13, labelloc=t,
+         label="Ventium core — Pentium (P5/P54C) block diagram  (block — RTL file)",
+         bgcolor="white", nodesep=0.35, ranksep=0.40];
+  node  [shape=box, style=filled, fontname="Helvetica", fontsize=10,
+         color="black", fillcolor="white", penwidth=1.1, margin="0.10,0.06"];
+  edge  [fontname="Helvetica", fontsize=9, color="black", arrowsize=0.7, penwidth=1.1];
 
-  // ---- front end (PF) ----
-  subgraph cluster_fe {
-    label="PF — front end"; fontname="Helvetica"; fontsize=11;
-    style="rounded,filled"; fillcolor="#eef3fb"; color="#3b6ea5";
-    btb [label="BTB + 2-bit predictor\n(bpred_btb.sv)"];
-    pf  [label="Prefetch /\ninstruction buffer"];
-  }
+  // ---- external interface (left rail) ----
+  busunit  [label=<Bus<BR/>Unit<BR/><FONT POINT-SIZE="8">biu.sv / biu_p5.sv</FONT>>, fillcolor="#bfe3f0", width=1.15, height=3.0];
+  pageunit [label=<Page<BR/>Unit<BR/><FONT POINT-SIZE="8">core.sv / tlb.sv</FONT>>, fillcolor="#f6d6d6", width=1.2];
+  // plain text labels (white fill so SVG never renders a black box)
+  databus [shape=plaintext, style=filled, fillcolor=white, label="64-bit\nData Bus"];
+  addrbus [shape=plaintext, style=filled, fillcolor=white, label="32-bit\nAddress Bus"];
+  ctrlbus [shape=plaintext, style=filled, fillcolor=white, label="Control"];
 
-  // ---- decode + pairing (D1) ----
-  subgraph cluster_dec {
-    label="D1 — decode & pairing"; fontname="Helvetica"; fontsize=11;
-    style="rounded,filled"; fillcolor="#eef7ef"; color="#4a8a4a";
-    dec   [label="fast-path decoder x2\n(decode.sv) -> fpd_t"];
-    issue [label="U/V pairing checker\n(issue_uv.sv, AP-500)"];
-  }
+  // ---- front end ----
+  btb    [label=<Branch<BR/>Target Buffer<BR/><FONT POINT-SIZE="8">bpred_btb.sv</FONT>>, fillcolor="#cfcfcf", width=1.3];
+  itlb   [label=<TLB<BR/><FONT POINT-SIZE="8">tlb.sv</FONT>>, fillcolor="#f0c674", width=0.7];
+  icache [label=<Instruction Cache<BR/>8 KB, 2-way<BR/><FONT POINT-SIZE="8">icache.sv</FONT>>, fillcolor="#f6a6a6", width=2.1];
 
-  // ---- operands + address gen (D2) ----
-  subgraph cluster_d2 {
-    label="D2 — operands & AGU"; fontname="Helvetica"; fontsize=11;
-    style="rounded,filled"; fillcolor="#fbf3ee"; color="#a5683b";
-    rf  [label="GPR register file\n+ partial-reg + bypass"];
-    agu [label="AGU — effective address\n(AGI interlock)"];
-  }
+  prefetch [label=<Prefetch Buffers<BR/><FONT POINT-SIZE="8">core.sv (spine)</FONT>>, fillcolor="#fbe0bf", width=2.6];
+  decode   [label=<Instruction Decode<BR/><FONT POINT-SIZE="8">decode.sv / issue_uv.sv</FONT>>, fillcolor="#fbe0bf", width=2.6];
+  ucode    [label=<Microcode / &#181;seq<BR/><FONT POINT-SIZE="8">core.sv (slow&#8209;path FSM)</FONT>>, fillcolor="#ecd5b8", width=1.7];
+  control  [label=<Control Unit<BR/><FONT POINT-SIZE="8">core.sv (pipeline FSM)</FONT>>, fillcolor="#f3c07a", width=5.0, height=0.6];
 
-  // ---- execute (EX) ----
-  subgraph cluster_ex {
-    label="EX — execute (up to 2/clock)"; fontname="Helvetica"; fontsize=11;
-    style="rounded,filled"; fillcolor="#f3eefb"; color="#6a4aa5";
-    upipe [label="U pipe\nALU / shift / mul-div / branch"];
-    vpipe [label="V pipe\nALU / shift / branch"];
-    fpu   [label="x87 FPU — floatx80\n(fpu_x87_pkg / fpu_top)\nincl. radix-4 SRT divider"];
-  }
+  // ---- integer datapath (nested, manual-style gray container) ----
+  intdp [shape=plaintext label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="3" CELLPADDING="6" COLOR="black" BGCOLOR="#9fa6a6">
+      <TR><TD COLSPAN="2"><B>Integer Datapath</B> &#160;<FONT POINT-SIZE="8">core.sv / ventium_alu_pkg.sv</FONT></TD></TR>
+      <TR>
+        <TD BGCOLOR="#d9d9d9">Address&#160;Generate<BR/>U&#8209;pipe</TD>
+        <TD BGCOLOR="#d9d9d9">Address&#160;Generate<BR/>V&#8209;pipe</TD>
+      </TR>
+      <TR><TD COLSPAN="2" BGCOLOR="#ef5350"><FONT COLOR="white"><B>Integer Register File</B></FONT></TD></TR>
+      <TR>
+        <TD BGCOLOR="#f4978e">ALU<BR/>U&#8209;pipe</TD>
+        <TD BGCOLOR="#f4978e">ALU<BR/>V&#8209;pipe</TD>
+      </TR>
+      <TR><TD COLSPAN="2" BGCOLOR="#f8c9a0">Barrel Shifter</TD></TR>
+    </TABLE>>];
 
-  // ---- writeback (WB) ----
-  wb [label="WB — writeback\n+ EX/WB bypass network", fillcolor="#eef3fb"];
+  // ---- FPU (nested, manual-style red container) ----
+  fpu [shape=plaintext label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="3" CELLPADDING="6" COLOR="black" BGCOLOR="#ef5350">
+      <TR><TD><FONT COLOR="white"><B>Floating&#160;Point&#160;Unit</B></FONT><BR/><FONT COLOR="white" POINT-SIZE="8">fpu_top.sv / fpu_x87_pkg.sv</FONT></TD></TR>
+      <TR><TD BGCOLOR="#fde1e1">Control</TD></TR>
+      <TR><TD BGCOLOR="#fcdada">FP Register File</TD></TR>
+      <TR><TD BGCOLOR="#f5a623">Add</TD></TR>
+      <TR><TD BGCOLOR="#f5a623">Divide&#160;(radix&#8209;4 SRT)</TD></TR>
+      <TR><TD BGCOLOR="#f5a623">Multiply</TD></TR>
+    </TABLE>>];
 
-  // ---- memory subsystem ----
-  subgraph cluster_mem {
-    label="Memory subsystem"; fontname="Helvetica"; fontsize=11;
-    style="rounded,filled"; fillcolor="#f6f6ee"; color="#998866";
-    icache [label="L1 I-cache\n8 KB / 2-way / 32 B\n(icache.sv)"];
-    dcache [label="L1 D-cache\nbanked, dual-port, MESI\n(dcache_timing.sv)"];
-    tlb    [label="I/D TLB + paging\n(tlb.sv)"];
-    biu    [label="Bus interface unit\n64-bit P5 bus\n(biu / biu_p5.sv)", fillcolor="#e7eee7"];
-  }
+  // ---- data cache ----
+  dcache [shape=plaintext label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6" COLOR="black" BGCOLOR="#f6a6a6">
+      <TR><TD>Dual&#8209;Access Data Cache &#160; 8 KB, 2&#8209;way<BR/><FONT POINT-SIZE="8">dcache_timing.sv</FONT></TD>
+          <TD BGCOLOR="#f0c674">TLB<BR/><FONT POINT-SIZE="8">tlb.sv</FONT></TD></TR>
+    </TABLE>>];
 
-  // ---- pipeline dataflow ----
-  icache -> pf;
-  btb -> pf;
-  pf -> dec -> issue;
-  issue -> rf;
-  issue -> agu;
-  agu -> tlb;
-  rf -> upipe;
-  rf -> vpipe;
-  rf -> fpu;
-  agu -> upipe [label="addr"];
-  upipe -> wb;
-  vpipe -> wb;
-  fpu -> wb;
-  wb -> rf [style=dashed, label="bypass", constraint=false];
+  // ================= vertical spine (defines the ranks) =================
+  icache   -> prefetch [label="256", dir=both];
+  prefetch -> decode;
+  decode   -> control;
+  control  -> intdp;
+  control  -> fpu;
+  intdp    -> dcache [label="32", dir=both];
 
-  // ---- memory side ----
-  biu -> icache [dir=both];
-  biu -> dcache [dir=both];
-  tlb -> dcache [style=dotted, label="phys addr"];
-  dcache -> upipe [label="load", constraint=false];
-  upipe -> dcache [style=dashed, label="store", constraint=false];
+  // ================= same-rank rows (mirror the manual floorplan) =======
+  { rank=same; databus; btb; itlb; icache; }
+  { rank=same; addrbus; busunit; decode; ucode; }
+  { rank=same; ctrlbus; pageunit; intdp; fpu; }
+
+  // left-right ordering within those rows (invisible)
+  databus -> btb [style=invis];
+  btb -> itlb [style=invis];
+  itlb -> icache [dir=both];                 // TLB -- Instruction Cache
+  addrbus -> busunit [style=invis];
+  busunit -> decode [style=invis];
+  decode  -> ucode  [dir=both];             // Instruction Decode -- Microcode ROM
+  ctrlbus -> pageunit [style=invis];
+  pageunit -> intdp [style=invis];
+  intdp -> fpu [style=invis];
+
+  // ================= external bus arrows (off-chip, into Bus Unit) =======
+  databus -> busunit [dir=both, constraint=false];
+  addrbus -> busunit [dir=both, constraint=false];
+  ctrlbus -> busunit [dir=both, constraint=false];
+
+  // ================= non-spine connections (constraint=false) ===========
+  btb -> prefetch [label="target\naddress", constraint=false];
+  ucode -> control [constraint=false];
+  busunit -> icache  [xlabel="64", dir=both, constraint=false];
+  busunit -> pageunit [dir=both, constraint=false];
+  pageunit -> intdp  [xlabel="address", dir=both, constraint=false];
+  fpu   -> dcache    [label="80", dir=both, constraint=false];
+  dcache -> busunit  [xlabel="64", dir=both, constraint=false];
+  intdp -> btb [label="branch verif.\n& target addr", style=dashed, constraint=false];
 }
