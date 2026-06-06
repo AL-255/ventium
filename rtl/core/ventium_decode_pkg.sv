@@ -59,7 +59,9 @@ package ventium_decode_pkg;
     FX_AR_I16, FX_AR_I32,    // ST0 op= mem int (FIADD..)
     FX_FSQRT,
     // M10: packed-BCD load (FBLD, DF /4) / round-store-and-pop (FBSTP, DF /6)
-    FX_FBLD, FX_FBSTP
+    FX_FBLD, FX_FBSTP,
+    // M11: x87 environment / state save & restore
+    FX_FNSTENV, FX_FLDENV, FX_FNSAVE, FX_FRSTOR
   } fxop_e;
 
   // ===========================================================================

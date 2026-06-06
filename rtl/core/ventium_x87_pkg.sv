@@ -77,6 +77,18 @@ package ventium_x87_pkg;
     return {v[79:63], 1'b1, v[61:0]};
   endfunction
 
+  // M11: the architectural 2-bit tag for ONE physical x87 register, derived from
+  // its 1-bit internal empty flag + contents (FNSTENV/FNSAVE FTW word, FLDENV/
+  // FRSTOR re-derivation). 11=empty, 01=zero, 10=special (Inf/NaN/denormal/
+  // unnormal), 00=valid. Oracle-pinned (FTW=0x43FF for zero/valid/empty mix).
+  function automatic logic [1:0] ftw_field(input logic empty, input logic [79:0] v);
+    if (empty)                                          return 2'b11; // EMPTY
+    else if (fx_exp(v)==15'd0 && fx_man(v)==64'd0)      return 2'b01; // ZERO
+    else if (fx_exp(v)==15'h7fff || fx_exp(v)==15'd0 || !v[63])
+                                                        return 2'b10; // SPECIAL
+    else                                                return 2'b00; // VALID
+  endfunction
+
   // M12: masked-default special-operand result for FADD/FSUB/FMUL/FDIV when an
   // operand is Inf or NaN. Returns {hit, ie, result[79:0]} -- hit=1 means the
   // datapath (fx_*) MUST be bypassed (it would do mantissa math on Inf/NaN and

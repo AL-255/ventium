@@ -520,6 +520,8 @@ module core
   logic [15:0] fctrl;            // = u_fpu_state.fctrl_o (control word; reset 0x037f)
   logic [15:0] fstat;            // = u_fpu_state.fstat_o (RAW; TOP not overlaid)
   logic [7:0]  fptag;            // = u_fpu_state.fptag_o (bit i = tag for fpr[i])
+  logic [31:0] fip, fdp;         // = u_fpu_state.fip_o/fdp_o (M11 env-image only)
+  logic [15:0] fcs, fds;         // = u_fpu_state.fcs_o/fds_o
   logic        x87_touched_r;   // retired insn touched the FPU (drives DPI call)
 
   // ===========================================================================
@@ -4021,10 +4023,15 @@ module core
   logic        fp_we_incstp; logic        fp_we_decstp;
   logic        fp_we_fctrl;  logic [15:0] fp_fctrl_wval;
   logic        fp_we_fninit;
+  // M11 env-pointer latch driver (write-only -> u_fpu_state; read back via the
+  // fip/fcs/fdp/fds aliases below for FNSTENV/FNSAVE).
+  logic        fp_we_eptr;   logic [31:0] fp_eptr_fip;  logic [15:0] fp_eptr_fcs;
+  logic        fp_we_dptr;   logic [31:0] fp_eptr_fdp;  logic [15:0] fp_eptr_fds;
 
   always_comb begin
     // ---- per-arm locals -------------------------------------------------------
     logic        fp_in_pipe, fp_halt4, fp_fp_arm, fp_fast_commit;
+    logic        f_is_admin;
     logic [31:0] fp_dep_ready;
     logic [82:0] fp_arf;          // {ie, ze, inexact, result} from f_eval (fast)
     logic        slow_arm;        // S_FEXEC, op actually executes (not f_pc_bad)
@@ -4049,6 +4056,8 @@ module core
     fp_we_incstp=1'b0; fp_we_decstp=1'b0;
     fp_we_fctrl=1'b0; fp_fctrl_wval=16'd0;
     fp_we_fninit=1'b0;
+    fp_we_eptr=1'b0; fp_eptr_fip=32'd0; fp_eptr_fcs=16'd0;
+    fp_we_dptr=1'b0; fp_eptr_fdp=32'd0; fp_eptr_fds=16'd0;
 
     // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
     fp_in_pipe = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
@@ -4085,6 +4094,23 @@ module core
                     (q_fxop==FX_FSQRT);
     slow_pc_bad = slow_is_arith && (fctrl[9:8] != 2'b11);
     slow_arm    = (state==S_FEXEC) && !slow_pc_bad;
+
+    // ===== M11 env-pointer latch (func path = the slow arm; one S_FEXEC commit
+    // per FP op). FIP=instr addr (q_pc) + FCS latch on every NON-control FP op
+    // (incl FNSTSW %ax); FDP=operand addr (dbase+q_ea) + FDS only on memory-
+    // operand FP ops. Control/admin ops below do NOT update the pointers; FNINIT
+    // CLEARS them (via fp_we_fninit -> u_fpu_state). (M11a: inert -- nothing reads
+    // fip/fcs/fdp/fds until M11b decodes FNSTENV/FNSAVE.)
+    f_is_admin = (q_fxop==FX_FNINIT) || (q_fxop==FX_FNCLEX) || (q_fxop==FX_FNSTCW) ||
+                 (q_fxop==FX_FNSTSW_M) || (q_fxop==FX_FLDCW) || (q_fxop==FX_FWAIT) ||
+                 (q_fxop==FX_FNSTENV) || (q_fxop==FX_FLDENV) ||
+                 (q_fxop==FX_FNSAVE)  || (q_fxop==FX_FRSTOR);
+    if (slow_arm && !f_is_admin) begin
+      fp_we_eptr  = 1'b1; fp_eptr_fip = q_pc; fp_eptr_fcs = SEG_CS;
+      if (q_f_mem_read || q_f_mem_write) begin
+        fp_we_dptr = 1'b1; fp_eptr_fdp = dbase + q_ea; fp_eptr_fds = SEG_DS;
+      end
+    end
     s_opnd_f = q_f_mem_read ? f_mem_as_float(f_mem80, q_f_mbytes) : 80'd0;
     s_st0v   = fst(3'd0);
     s_stiv   = fst(q_f_sti);
@@ -4279,7 +4305,17 @@ module core
     .we_decstp    (fp_we_decstp),
     .we_fctrl     (fp_we_fctrl),
     .fctrl_wval   (fp_fctrl_wval),
-    .we_fninit    (fp_we_fninit)
+    .we_fninit    (fp_we_fninit),
+    .we_eptr      (fp_we_eptr),
+    .eptr_fip     (fp_eptr_fip),
+    .eptr_fcs     (fp_eptr_fcs),
+    .we_dptr      (fp_we_dptr),
+    .dptr_fdp     (fp_eptr_fdp),
+    .dptr_fds     (fp_eptr_fds),
+    .fip_o        (fip),
+    .fcs_o        (fcs),
+    .fdp_o        (fdp),
+    .fds_o        (fds)
   );
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
