@@ -29,8 +29,9 @@ FIELD_COLOR = {
     "opcode": "#4ea1ff",   # blue
     "modrm":  "#56d364",   # green
     "sib":    "#c89bff",   # purple
-    "disp":   "#e3b341",   # yellow (offset / displacement)
-    "imm":    "#ff7b72",   # red
+    "disp":   "#e3b341",   # yellow (memory offset / displacement)
+    "imm":    "#ff7b72",   # red (immediate operand)
+    "rel":    "#f0883e",   # orange (relative branch/jump/call target)
 }
 _PREFIX_BYTES = {0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65}
 
@@ -85,14 +86,14 @@ def byte_fields(code: bytes, addr: int = 0, bits: int = 32):
     for i in range(imm_off, min(imm_off + imm_sz, n)):
         if imm_sz > 0:
             fields[i] = "imm"
-    # A relative branch's rel8/rel16/rel32 target is a displacement (offset),
-    # not an immediate operand — capstone reports it via the imm field, so
-    # recolour it yellow for jmp/jcc/call/loop forms.
+    # A relative branch's rel8/rel16/rel32 target is a control-flow displacement,
+    # not a data immediate (capstone reports it via the imm field) and not a
+    # memory offset — give it its own 'rel' colour for jmp/jcc/call/loop forms.
     mn = (insn.mnemonic or "")
     if imm_sz > 0 and (mn[:1] == "j" or mn.split(" ")[0] in
                        ("call", "loop", "loope", "loopne", "loopz", "loopnz")):
         for i in range(imm_off, min(imm_off + imm_sz, n)):
-            fields[i] = "disp"
+            fields[i] = "rel"
     return [(bs[i], fields[i]) for i in range(n)]
 
 

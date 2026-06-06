@@ -183,8 +183,9 @@ class MainWindow(QMainWindow):
         for sp in (outer, left, right):
             sp.setHandleWidth(4)
         self.setCentralWidget(outer)
-        # link: selecting a trace row highlights that cycle in the waterfall
+        # two-way link: trace row <-> Konata instruction row
         self.trace.rowSelected.connect(self.pipeline.highlight_cycle)
+        self.pipeline.konata.plot.rowClicked.connect(self.trace.select_n)
 
     # ---- image loading ----
     def on_open(self):

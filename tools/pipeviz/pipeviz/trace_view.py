@@ -35,11 +35,19 @@ class BytesDelegate(QStyledItemDelegate):
         if not fields:
             return
         painter.save()
+        painter.setClipRect(option.rect)            # never paint into the disasm column
         painter.setFont(self.font)
         fm = QFontMetrics(self.font)
         adv = fm.horizontalAdvance("00 ")
-        x = option.rect.x() + 4
-        for b, fld in fields:
+        x0 = option.rect.x() + 4
+        limit = option.rect.right() - 8             # keep a hard right margin
+        x = x0
+        for i, (b, fld) in enumerate(fields):
+            if x + adv > limit and i < len(fields):
+                painter.setPen(QColor("#6e7681"))
+                painter.drawText(QRect(x, option.rect.y(), adv + 4, option.rect.height()),
+                                 Qt.AlignVCenter | Qt.AlignLeft, "…")
+                break
             painter.setPen(QColor(FIELD_COLOR.get(fld, "#c9d1d9")))
             painter.drawText(QRect(x, option.rect.y(), adv, option.rect.height()),
                              Qt.AlignVCenter | Qt.AlignLeft, f"{b:02x}")
@@ -91,7 +99,8 @@ class TraceView(QWidget):
         leg = QHBoxLayout(); leg.setSpacing(10)
         leg.addWidget(self._k("bytes:"))
         for name, lab in [("prefix", "prefix"), ("opcode", "opcode"), ("modrm", "ModRM"),
-                          ("sib", "SIB"), ("disp", "offset"), ("imm", "immediate")]:
+                          ("sib", "SIB"), ("disp", "offset"), ("imm", "immediate"),
+                          ("rel", "branch")]:
             sw = QLabel("  "); sw.setFixedSize(11, 11)
             sw.setStyleSheet(f"background:{FIELD_COLOR[name]};border:1px solid #30363d;")
             t = QLabel(lab); t.setStyleSheet("color:#8b949e;font-size:8px;")
@@ -116,6 +125,17 @@ class TraceView(QWidget):
             cyc = it.data(_CYC_ROLE)
             if cyc is not None:
                 self.rowSelected.emit(int(cyc))
+
+    def select_n(self, n):
+        """Select + scroll to the trace row for retire `n` (linked from a click
+        in the Konata pipeline view)."""
+        target = str(int(n))
+        for row in range(self.tbl.rowCount()):
+            it = self.tbl.item(row, 0)
+            if it is not None and it.text() == target:
+                self.tbl.setCurrentCell(row, 0)
+                self.tbl.scrollToItem(it, QAbstractItemView.PositionAtCenter)
+                return
 
     def reset(self):
         self.tbl.setRowCount(0)
