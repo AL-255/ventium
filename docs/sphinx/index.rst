@@ -19,11 +19,12 @@ compared for bit-identity. Where the real silicon has documented quirks, the
 replica reproduces them faithfully: the Pentium FDIV flaw, the F00F (Erratum
 81) lock-up, the FIST conversion erratum, and the AP-500 instruction-pairing
 rules are all modelled, gated behind explicit errata flags so a "clean" core
-and an "erratum-accurate" core can both be exercised.
+and an "erratum-accurate" core can both be exercised. The FDIV flaw goes a step
+further: an optional, genuine **radix-4 SRT divider** reproduces it from first
+principles out of the reverse-engineered quotient-selection table — see
+:doc:`microarch/srt-divider`.
 
-This page is, for now, the first of the project's reference documents; more
-will follow as the model and its verification flow are written up. The
-**Instruction Catalog** below is the heart of the reference: it walks every
+The **Instruction Catalog** below is the heart of the reference: it walks every
 instruction category the integer and x87 cores decode, and for each
 instruction records *what it computes*, *how it drives the pipeline datapath*
 (fast path vs. slow microsequenced FSM, the AGU/ALU/shifter/FPU blocks it
@@ -35,3 +36,9 @@ issue to and why*, and an honest implementation status.
    :caption: Reference
 
    isa/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Microarchitecture deep dives
+
+   microarch/srt-divider
