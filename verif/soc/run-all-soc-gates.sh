@@ -13,8 +13,9 @@
 #   2. psocdev  (M8.2) — RTC+8042+port92+A20        : per-record differential
 #   3. pvga     (M8.3) — VGA regfile + ACPI-PM      : per-record differential
 #   4. pide     (M8.4/d2/e/e2/f + M8.5) — IDE/ATAPI/DMA/block-PIO + PCI enum
-#   5. pboot    (M9)   — first boot: firmware chain-loads a boot sector from disk
-#   6. test386         — external x86 CPU tester    : per-record differential
+#   5. pboot    (M9)   — first boot: firmware chain-loads a boot sector from disk (PIO)
+#   6. pbootdma (M9b)  — first boot, but the chain-load uses bus-master DMA
+#   7. test386         — external x86 CPU tester    : per-record differential
 #
 # Sequential (NOT parallel): the gates share the tb_soc obj_dir + the build/soc
 # output dir + a qemu gdbstub port, so concurrent runs would race. Each gate is
@@ -32,6 +33,7 @@ GATES=(
   "pvga    (M8.3 VGA + ACPI-PM)|verif/soc/run-soc-vga-gate.sh"
   "pide    (M8.4 IDE/ATA primary master PIO)|verif/soc/run-soc-ide-gate.sh"
   "pboot   (M9 first boot: chain-load from disk)|verif/soc/run-soc-boot-gate.sh"
+  "pbootdma (M9b first boot: DMA chain-load)|verif/soc/run-soc-bootdma-gate.sh"
   "test386 (external CPU tester)|verif/external/test386/run-test386-gate.sh"
 )
 

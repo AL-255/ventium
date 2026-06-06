@@ -1910,6 +1910,36 @@ IDE disk and executes it**. Unlike `pide` (a hand-written firmware that drives d
   Near-term differentiable follow-ons: a 16-bit-real-mode boot sector at 0000:7C00 (M9-rm) and a
   bus-master DMA chain-load (M9b, reusing the M8.4f single-PRD READ DMA).
 
+### M9b — DMA chain-load boot: the BIOS→MBR handoff via bus-master DMA (2026-06-06)
+
+**What this is.** The M9 boot again, but the firmware chain-loads the boot sector with **bus-master
+DMA** instead of PIO — combining two already-gate-proven pieces (the M8.4f single-PRD READ DMA + the
+M9 boot/handoff) into one boot, with **zero new RTL**. New `pbootdma` gate: **EQUIVALENT 592/592**
+(first RTL run). Beyond proving the boot handoff, it proves **DMA-write/instruction-fetch
+coherency**: the bus-master engine writes the executed region (0x8000) and the CPU immediately
+far-jmps in and fetches from it.
+
+- **The boot flow** (`verif/sys/tests/pboot/pboot_dma_stub.S`, a second -bios alongside the PIO
+  `pboot_stub.bin`, all synchronous → single-step-differentiable): boot F000:FFF0 → real→protected
+  (flat GDT) → **nIEN FIRST** (no IRQ14 ever) → enable `PCI_COMMAND.IO|bus-master` + map BMIDE
+  `BAR4=0xC000` (0xCF8/0xCFC, devfn 0x09) → build one **EOT PRD @0x5000** pointing at RAM **0x8000**
+  (`dword1=0x80000200`) → `BMIDTP=0x5000` (0xC004) → task-file nsector=1/LBA0/devhead 0xE0 +
+  **READ DMA 0xC8** → `BMIC=0x09` START|RWCON-READ (0xC000) → poll `BMIS` DMAING (0xC002) to 0 →
+  **far-jmp 0x08:0x8000** into the DMA-loaded boot sector. The target 0x8000 is pre-filled with a
+  `0xFFFFFFFF` sentinel first, so a no-op DMA would fetch garbage and diverge (non-vacuous).
+- **Same disk, same boot sector** as M9 (`pboot_mbr.bin` at LBA0, single-source `gen_disk.py`); only
+  the -bios firmware differs. The DMA recipe is byte-for-byte the proven M8.4f single-PRD READ DMA —
+  the **only** DMA shape single-step-differentiable (a single-PRD single-sector cached READ completes
+  INLINE in qemu's block layer; multi-sector/multi-PRD/WRITE never advance under `gen_trace`'s
+  no-AIO-pump single-step — see `memory/m84f-dma-plan.md`).
+- **Non-vacuous gate** (`run-soc-bootdma-gate.sh`, wired into the SoC aggregate as gate #6, PORT
+  51261): fresh qemu single-step golden each run, per-record EQUIVALENT, **plus** the hard
+  pc=0x00008000 handoff assertion on BOTH the golden and the RTL trace, the disk-pristine md5 check,
+  and the exit-133 check. 592 records (vs 1084 for PIO — the DMA offloads the 256-word `inw` drain).
+- **Zero new RTL** — runs on the existing core + `ven_ide` DMA engine + the PCI shim + the 2-master
+  mem mux + the flat TB memory. SoC aggregate **7/7 PASS**; `make verify` **69/69 cache hits, 0
+  regenerated**. `ventium-refs` untouched.
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
