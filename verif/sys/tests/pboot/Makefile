@@ -19,7 +19,7 @@ CFLAGS  := -m32 -ffreestanding -nostdlib -fno-pic -fno-pie -Wall
 IMG_BYTES := 65536      # the -bios image is exactly 64 KiB (reset vector F000:FFF0)
 MBR_BYTES := 512        # one sector
 
-all: pboot_stub.bin pboot_dma_stub.bin pboot_mbr.bin
+all: pboot_stub.bin pboot_dma_stub.bin pboot_rm_stub.bin pboot_mbr.bin pboot_rm_mbr.bin
 
 pboot_stub.o: pboot_stub.S
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -46,6 +46,30 @@ pboot_dma_stub.bin: pboot_dma_stub.elf
 	@truncate -s $(IMG_BYTES) pboot_dma_stub.bin
 	@echo "pboot_dma_stub.bin: $$(stat -c%s pboot_dma_stub.bin) bytes (want $(IMG_BYTES))"
 
+# --- M9-rm: the real-mode firmware (stays 16-bit real mode) + its 16-bit boot sector
+pboot_rm_stub.o: pboot_rm_stub.S
+	$(CC) $(CFLAGS) -c $< -o $@
+
+pboot_rm_stub.elf: pboot_rm_stub.o pboot.ld
+	$(CC) $(CFLAGS) -static -no-pie -nostdlib -Wl,-T,pboot.ld -Wl,--build-id=none \
+	    pboot_rm_stub.o -o pboot_rm_stub.elf
+
+pboot_rm_stub.bin: pboot_rm_stub.elf
+	$(OBJCOPY) -O binary pboot_rm_stub.elf pboot_rm_stub.bin
+	@truncate -s $(IMG_BYTES) pboot_rm_stub.bin
+	@echo "pboot_rm_stub.bin: $$(stat -c%s pboot_rm_stub.bin) bytes (want $(IMG_BYTES))"
+
+pboot_rm_mbr.o: pboot_rm_mbr.S
+	$(CC) $(CFLAGS) -c $< -o $@
+
+pboot_rm_mbr.elf: pboot_rm_mbr.o pboot_mbr.ld
+	$(CC) $(CFLAGS) -static -no-pie -nostdlib -Wl,-T,pboot_mbr.ld -Wl,--build-id=none \
+	    pboot_rm_mbr.o -o pboot_rm_mbr.elf
+
+pboot_rm_mbr.bin: pboot_rm_mbr.elf
+	$(OBJCOPY) -O binary pboot_rm_mbr.elf pboot_rm_mbr.bin
+	@echo "pboot_rm_mbr.bin: $$(stat -c%s pboot_rm_mbr.bin) bytes (want $(MBR_BYTES))"
+
 pboot_mbr.o: pboot_mbr.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -60,6 +84,8 @@ pboot_mbr.bin: pboot_mbr.elf
 clean:
 	rm -f pboot_stub.o pboot_stub.elf pboot_stub.bin \
 	      pboot_dma_stub.o pboot_dma_stub.elf pboot_dma_stub.bin \
-	      pboot_mbr.o pboot_mbr.elf pboot_mbr.bin
+	      pboot_rm_stub.o pboot_rm_stub.elf pboot_rm_stub.bin \
+	      pboot_mbr.o pboot_mbr.elf pboot_mbr.bin \
+	      pboot_rm_mbr.o pboot_rm_mbr.elf pboot_rm_mbr.bin
 
 .PHONY: all clean
