@@ -91,6 +91,23 @@
     .equ R_SEEK_ER,  0x000020B4  /* SEEK error             = 0x00              */
     .equ R_RECAL_ST, 0x000020B8  /* RECALIBRATE status     = 0x50              */
     .equ R_INIT_ST,  0x000020BC  /* INIT-DEV-PARAMS status = 0x50              */
+    /* --- M8.4d Tier 1 result slots --- */
+    .equ R_SM_ST,    0x000020C0  /* SET MULTIPLE 8 status   = 0x50             */
+    .equ R_SM3_ST,   0x000020C4  /* SET MULTIPLE 3 (abort)  = 0x41             */
+    .equ R_SM32_ST,  0x000020C8  /* SET MULTIPLE 32 (abort) = 0x41             */
+    .equ R_SF03_ST,  0x000020CC  /* SET FEATURES 0x03 status= 0x50             */
+    .equ R_SF02_ST,  0x000020D0  /* SET FEATURES 0x02 status= 0x50             */
+    .equ R_SF82_ST,  0x000020F8  /* SET FEATURES 0x82 status= 0x50 (completes) */
+    .equ R_SF99_ST,  0x000020D4  /* SET FEATURES 0x99 abort = 0x41             */
+    .equ R_ID_W59,   0x000020D8  /* IDENTIFY w59 = 0x0110 (SET MULT does NOT    */
+                                 /*   patch the cached IDENTIFY — qemu fidelity) */
+    .equ R_ID_W88,   0x000020DC  /* IDENTIFY w88 = 0x043F (udma2)              */
+    .equ R_ID_W85,   0x000020E0  /* IDENTIFY w85 = 0x4001 (after 0x82 wcache off)*/
+    .equ R_SR_PRE,   0x000020E4  /* SRST: dirty status pre  = 0x41             */
+    .equ R_SR_ST,    0x000020E8  /* SRST: status post       = 0x50             */
+    .equ R_SR_ER,    0x000020EC  /* SRST: error post        = 0x01             */
+    .equ R_SR_SEC,   0x000020F0  /* SRST: sector post       = 0x01             */
+    .equ R_SR_SEL,   0x000020F4  /* SRST: devhead post      = 0xA0             */
 
     .equ BUF_ID,     0x00004000  /* IDENTIFY 512-byte block       */
     .equ BUF_S0,     0x00004200  /* sector 0   block              */
@@ -707,6 +724,54 @@ pm32_entry:
      * the visible sector reg at DRQ-window-open via ide_sector_read_cb, the RTL
      * at end-of-drain), a documented boundary. The two agree on the POST-transfer
      * value (R_RA_SEC=1 above), which IS gate-proven. */
+
+    /* ===================== M8.4d ATA command-set (Tier 1) ============== */
+    /* --- SET MULTIPLE (0xC6): accept 8 (-> IDENTIFY w59=0x0108), abort 3/32 -- */
+    movb    $8, %al;   movw $0x1F2, %dx; outb %al, %dx   /* nsector=8 (pow2 <=16) */
+    movb    $0xC6, %al;movw $0x1F7, %dx; outb %al, %dx
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SM_ST   /* 0x50 */
+    movb    $3, %al;   movw $0x1F2, %dx; outb %al, %dx   /* nsector=3 (not pow2) */
+    movb    $0xC6, %al;movw $0x1F7, %dx; outb %al, %dx
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SM3_ST  /* 0x41 */
+    movb    $32, %al;  movw $0x1F2, %dx; outb %al, %dx   /* nsector=32 (>16) */
+    movb    $0xC6, %al;movw $0x1F7, %dx; outb %al, %dx
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SM32_ST /* 0x41 */
+
+    /* --- SET FEATURES (0xEF): 0x03 udma2 (-> w62/63/88), 0x02 wcache (-> w85),
+     *     0x99 unsupported (-> abort) -------------------------------------- */
+    movb    $0x03, %al;movw $0x1F1, %dx; outb %al, %dx   /* feature 0x03 = set transfer */
+    movb    $0x42, %al;movw $0x1F2, %dx; outb %al, %dx   /* mode 0x42 = UDMA2 */
+    movb    $0xEF, %al;movw $0x1F7, %dx; outb %al, %dx
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SF03_ST /* 0x50 */
+    movb    $0x02, %al;movw $0x1F1, %dx; outb %al, %dx   /* feature 0x02 = wcache enable */
+    movb    $0xEF, %al;movw $0x1F7, %dx; outb %al, %dx
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SF02_ST /* 0x50 */
+    movb    $0x82, %al;movw $0x1F1, %dx; outb %al, %dx   /* feature 0x82 = wcache DISABLE */
+    movb    $0xEF, %al;movw $0x1F7, %dx; outb %al, %dx   /* qemu COMPLETES it -> w85=0x4001 */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SF82_ST /* 0x50 */
+    movb    $0x99, %al;movw $0x1F1, %dx; outb %al, %dx   /* feature 0x99 = unsupported */
+    movb    $0xEF, %al;movw $0x1F7, %dx; outb %al, %dx
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SF99_ST /* 0x41 */
+
+    /* --- IDENTIFY: grade the mutated words per-record (drain into BUF_ID) --- */
+    movb    $0xEC, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movl $BUF_ID, %edi; movw $0x1F0, %dx
+2:  inw     %dx, %ax; stosw; decl %ecx; jnz 2b           /* w59=0x0110 (unchanged), w88=0x043F, w85=0x4001 */
+    movl    BUF_ID+118, %eax; andl $0xFFFF, %eax; movl %eax, R_ID_W59  /* word 59 */
+    movl    BUF_ID+176, %eax; andl $0xFFFF, %eax; movl %eax, R_ID_W88  /* word 88 */
+    movl    BUF_ID+170, %eax; andl $0xFFFF, %eax; movl %eax, R_ID_W85  /* word 85 */
+
+    /* --- SRST (0x3F6 bit2): dirty the state, soft-reset, read the signature -- */
+    movb    $0xFF, %al;movw $0x1F7, %dx; outb %al, %dx   /* bogus cmd -> abort (dirty) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_PRE  /* 0x41 */
+    movb    $0x06, %al;movw $0x3F6, %dx; outb %al, %dx   /* SRST(bit2)+nIEN(bit1) assert */
+    movb    $0x02, %al;movw $0x3F6, %dx; outb %al, %dx   /* deassert SRST, keep nIEN */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_ST   /* 0x50 */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_ER   /* 0x01 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_SEC  /* 0x01 */
+    movw    $0x1F6, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_SEL  /* 0xA0 */
 
     /* ====================== deterministic end-state ===================== */
     movl    BUF_ID+2,   %esi            /* IDENTIFY word 1 (cyls = 2)        */

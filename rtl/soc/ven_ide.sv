@@ -6,6 +6,11 @@
 //   M8.4c: + PIO fidelity — OOR-LBA clean abort, LBA-register advance, CHS
 //          addressing, command-while-DRQ + read-during-write guards, the misc
 //          commands 0x70/0x10/0x91, and the per-command error-register clear.
+//   M8.4d: + SET MULTIPLE (0xC6), SET FEATURES (0xEF, incl 0x03 transfer-mode /
+//          0x02+0x82 write-cache patching the cached IDENTIFY words 62/63/85/88),
+//          and SRST (0x3F6 bit2). SET MULTIPLE is status-only (qemu does NOT patch
+//          the cached IDENTIFY w59). Tier 2 (0x91 geometry, CHS reg-advance) +
+//          READ/WRITE MULTIPLE + the register-trajectory lag + LBA48 deferred.
 // ============================================================================
 //
 // DEVICE: a single ATA hard disk on the PRIMARY channel, MASTER (unit 0), PIO
@@ -56,6 +61,11 @@
 //     separately gate-tested, see the trajectory boundary); the misc commands
 //     0x70/0x10/0x91 completing 0x50/0x00; and the error-register clear on every
 //     accepted command (qemu core.c:2168).
+//   - M8.4d ATA command-set: SET MULTIPLE (0xC6, accept pow2<=16 / abort, status-
+//     only — w59 stays cached); SET FEATURES (0xEF — 0x03 transfer-mode patches the
+//     cached w62/63/88, 0x02/0x82 write-cache patch w85 to 0x4021/0x4001, no-op
+//     group, unsupported abort); SRST (0x3F6 bit2 edge, synchronous signature
+//     restore, no BSY). All gate-proven vs a re-IDENTIFY / status read.
 // OFF-SURFACE (documented oracle boundaries, never read in a way that exposes
 // them): the IRQ14 line-edge instruction boundary (the test sets nIEN so NO IRQ
 // is ever raised -- like the quiescent IR1/IR8/IR12 precedent) and the
@@ -162,6 +172,9 @@ module ven_ide #(
     logic [7:0] r_ctrl;      // 0x3F6  device control (bit1 nIEN, bit2 SRST)
     wire        unit1_sel = r_select[4];   // selected drive = slave (absent)
     wire        nien      = r_ctrl[1];     // 1 = IRQ disabled (polled)
+    // ---- M8.4d SET FEATURES-mutable IDENTIFY words (qemu patches the cached
+    //      identify_data for 0xEF subcmds 0x02/0x03; SET MULTIPLE does NOT) -----
+    logic [15:0] r_w62, r_w63, r_w85, r_w88;
 
     // ---- PIO data-transfer state -----------------------------------------
     logic [8:0]  data_idx;     // word index 0..255 within the 512-byte buffer
@@ -246,8 +259,22 @@ module ven_ide #(
     // ---- combinational READ (same-cycle ack) -----------------------------
     logic [15:0] data_word;
     always_comb begin
-        if (in_identify) data_word = identify_words[data_idx[7:0]];
-        else             data_word = {disk[disk_byte + 16'd1], disk[disk_byte]};
+        if (in_identify) begin
+            // M8.4d: the SET MULTIPLE / SET FEATURES-mutable words come from
+            // registers; all other IDENTIFY words are the build-pinned constants.
+            // NOTE: SET MULTIPLE (0xC6) does NOT patch the cached IDENTIFY in qemu
+            // (cmd_set_multiple_mode updates only s->mult_sectors; ide_identify is
+            // cached after the first call), so w59 stays the constant 0x0110 here.
+            // SET FEATURES (0xEF) DOES patch the cached words 62/63/85/88
+            // (put_le16 into s->identify_data), so those are register-backed.
+            unique case (data_idx[7:0])
+                8'd62:   data_word = r_w62;            // single-word DMA (SET FEATURES)
+                8'd63:   data_word = r_w63;            // multiword DMA
+                8'd85:   data_word = r_w85;            // enabled features (write cache)
+                8'd88:   data_word = r_w88;            // ultra DMA
+                default: data_word = identify_words[data_idx[7:0]];
+            endcase
+        end else data_word = {disk[disk_byte + 16'd1], disk[disk_byte]};
     end
 
     always_comb begin
@@ -315,6 +342,10 @@ module ven_ide #(
             xfer_lba  <= 28'd0;
             nsec_left <= 9'd0;
             irq14     <= 1'b0;
+            r_w62     <= 16'h0007;
+            r_w63     <= 16'h0007;
+            r_w85     <= 16'h4021;
+            r_w88     <= 16'h203F;
         end else begin
             if (cs && we) begin
                 // ----- command-block register writes / command dispatch -----
@@ -430,11 +461,87 @@ module ven_ide #(
                                     r_status  <= STAT_IDLE;
                                     irq14     <= ~nien;
                                 end
+                                8'hC6: begin              // SET MULTIPLE MODE
+                                    // 0 (disable) or a power-of-two <= 16 accepts
+                                    // (mult <- nsector); else abort (qemu
+                                    // cmd_set_multiple_mode).
+                                    if ((r_nsector != 8'd0) &&
+                                        ((r_nsector > 8'd16) ||
+                                         ((r_nsector & (r_nsector - 8'd1)) != 8'd0)))
+                                    begin
+                                        r_status <= STAT_ABORT;
+                                        r_error  <= ERR_ABRT;
+                                        irq14    <= ~nien;
+                                    end else begin
+                                        // accept (runtime mult_sectors updates,
+                                        // but the cached IDENTIFY w59 is NOT
+                                        // patched by qemu -- status-only here).
+                                        r_status <= STAT_IDLE;
+                                        irq14    <= ~nien;
+                                    end
+                                end
+                                8'hEF: begin              // SET FEATURES (sub=r_feature)
+                                    unique case (r_feature)
+                                        8'h03: begin       // SET TRANSFER MODE
+                                            // r_nsector[7:3] = mode group, [2:0] = mode#
+                                            unique case (r_nsector[7:3])
+                                              5'h00, 5'h01: begin  // PIO
+                                                  r_w62 <= 16'h0007; r_w63 <= 16'h0007;
+                                                  r_w88 <= 16'h003F; r_status <= STAT_IDLE;
+                                              end
+                                              5'h02: begin         // single-word DMA
+                                                  r_w62 <= 16'h0007 | (16'h0001 << (r_nsector[2:0] + 4'd8));
+                                                  r_w63 <= 16'h0007; r_w88 <= 16'h003F;
+                                                  r_status <= STAT_IDLE;
+                                              end
+                                              5'h04: begin         // multiword DMA
+                                                  r_w62 <= 16'h0007;
+                                                  r_w63 <= 16'h0007 | (16'h0001 << (r_nsector[2:0] + 4'd8));
+                                                  r_w88 <= 16'h003F; r_status <= STAT_IDLE;
+                                              end
+                                              5'h08: begin         // ultra DMA
+                                                  r_w62 <= 16'h0007; r_w63 <= 16'h0007;
+                                                  r_w88 <= 16'h003F | (16'h0001 << (r_nsector[2:0] + 4'd8));
+                                                  r_status <= STAT_IDLE;
+                                              end
+                                              default: begin
+                                                  r_status <= STAT_ABORT; r_error <= ERR_ABRT;
+                                              end
+                                            endcase
+                                            irq14 <= ~nien;
+                                        end
+                                        8'h02: begin       // enable write cache -> w85
+                                            r_w85    <= 16'h4021;  // (1<<14)|(1<<5)|1
+                                            r_status <= STAT_IDLE; irq14 <= ~nien;
+                                        end
+                                        8'h82: begin       // disable write cache -> w85
+                                            // qemu completes 0x82 (NOT an abort):
+                                            // w85 = (1<<14)|1 = 0x4001 + an async
+                                            // flush (off-surface, settles before the
+                                            // next single-step).
+                                            r_w85    <= 16'h4001;
+                                            r_status <= STAT_IDLE; irq14 <= ~nien;
+                                        end
+                                        // no-op completions. NOTE: 0xCC/0x66 also
+                                        // set/clear qemu's reset_reverts flag (a
+                                        // SRST-revert side-effect) which this RTL
+                                        // does not model; only 0x91 geometry would
+                                        // make it observable (deferred to M8.4d2).
+                                        8'hAA, 8'h55, 8'h05, 8'h85, 8'h69, 8'h67,
+                                        8'h96, 8'h9A, 8'h42, 8'hC2, 8'hCC, 8'h66: begin
+                                            r_status <= STAT_IDLE; irq14 <= ~nien;
+                                        end
+                                        default: begin     // genuinely unsupported subcmd
+                                            r_status <= STAT_ABORT; r_error <= ERR_ABRT;
+                                            irq14    <= ~nien;
+                                        end
+                                    endcase
+                                end
                                 // ---- non-data commands qemu completes 0x50/0x00 -
                                 // SEEK (cmd_seek), RECALIBRATE + INIT DEVICE PARAMS
                                 // (cmd_nop/cmd_specify) — all return true with no
-                                // PIO phase; the geometry/seek side effects are not
-                                // CPU-observable in the M8.4c surface.
+                                // PIO phase. (M8.4d Tier 1: 0x91's geometry side
+                                // effect is added in Tier 2; here it just completes.)
                                 8'h70,                    // SEEK
                                 8'h10,                    // RECALIBRATE
                                 8'h91: begin              // INIT DEVICE PARAMS
@@ -453,8 +560,22 @@ module ven_ide #(
                     end
                 endcase
             end else if (cs_ctl && we) begin
-                r_ctrl <= wdata[7:0];                     // device control (nIEN)
-                // SRST (bit2) handling deferred (synchronous, documented)
+                // SRST (bit2) assert edge -> synchronous signature restore (reuses
+                // the DIAGNOSTIC result: error 0x01, signature, status 0x50). qemu
+                // does this in an async soft-reset BH that sets a transient BUSY,
+                // but the BH settles before the next single-step (collapsed, like
+                // the READ/WRITE async-BH boundary), so a synchronous restore is
+                // per-record EQUIVALENT and NEVER raises BSY here.
+                if (!r_ctrl[2] && wdata[2]) begin
+                    r_error   <= 8'h01;
+                    r_nsector <= 8'h01;
+                    r_sector  <= 8'h01;
+                    r_lcyl    <= 8'h00;
+                    r_hcyl    <= 8'h00;
+                    r_select  <= 8'hA0;
+                    r_status  <= STAT_IDLE;
+                end
+                r_ctrl <= wdata[7:0];                     // device control (nIEN, SRST)
             end else if (cs && !we && addr[2:0] == 3'd0 && r_status[3] && !in_write) begin
                 // ----- data-port READ drain (the !in_write guard drops a read in
                 //       a WRITE-DRQ window so it consumes no slot) --------------
@@ -493,6 +614,6 @@ module ven_ide #(
     // No unused outputs to sink (irq14 -> PIC IR14, rdata -> SoC read mux).
     // r_feature is a write-only shadow in M8.4a (SET FEATURES deferred).
     logic _unused;
-    assign _unused = &{1'b0, r_feature, addr[15:3], r_ctrl[7:2], r_ctrl[0]};
+    assign _unused = &{1'b0, addr[15:3], r_ctrl[7:3], r_ctrl[0]};
 
 endmodule
