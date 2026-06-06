@@ -21,6 +21,17 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 2 — gem5/Konata per-instruction pipeline view
+Replaced the per-stage "waterfall" (which only showed the live EX latch repeated
+downward) with a true **gem5/Konata superscalar timing diagram**: **Y = instructions**
+(one row each), **X = cycles**. Each instruction's lifecycle is reconstructed
+from the per-cycle FSM trace and drawn as a run of stage cells (F/D/X/M/W, `=`
+stall, `!` flush) so consecutive instructions **cascade diagonally**. Integer
+execute = green, x87 FP = purple; a D-cache-miss stall stretches as a long amber
+`= = =` run before the `X`. Frozen left gutter (n / U·V pipe / PC / mnemonic) +
+synced top cycle axis; click-to-link and hover preserved. (Addresses the review's
+#1 high finding "per-instruction lifecycle (Konata-style) waterfall".)
+
 ### Iteration 1 — legibility, density & cross-panel linking
 Driven by a 5-critic adversarial review (45 findings). Shipped:
 - **Pipeline:** fixed the stage-board header/label collision; de-emphasised empty
