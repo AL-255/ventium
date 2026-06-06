@@ -185,6 +185,27 @@
     .equ R_RMX_ST,     0x00002210 /* RD-MULT straddling-block OOR: status = 0x41  */
     .equ R_RMX_ER,     0x00002214 /* RD-MULT straddling-block OOR: error  = 0x04  */
     .equ R_RMX_SEC,    0x00002218 /* RD-MULT straddling-block OOR: sector reg unmoved = 0x7E (126) */
+    /* --- M8.5 PCI bus-0 enumeration (controlled subset) result slots --- */
+    .equ R_PCI_H00,    0x0000221C /* 00:00.0 i440FX vendor/device = 0x12378086    */
+    .equ R_PCI_H08,    0x00002220 /* 00:00.0 class/prog-if/rev    = 0x06000002    */
+    .equ R_PCI_I00,    0x00002224 /* 00:01.0 PIIX3 ISA vendor/dev = 0x70008086    */
+    .equ R_PCI_I04,    0x00002228 /* 00:01.0 status<<16|cmd       = 0x02000000    */
+    .equ R_PCI_I08,    0x0000222C /* 00:01.0 class (ISA bridge)   = 0x06010000    */
+    .equ R_PCI_I0C,    0x00002230 /* 00:01.0 header-type (multifn)= 0x00800000    */
+    .equ R_PCI_D00,    0x00002234 /* 00:01.1 IDE vendor/device    = 0x70108086    */
+    .equ R_PCI_D04,    0x00002238 /* 00:01.1 IDE status<<16|cmd = 0x02800005 (status 0x0280|cmd 0x0005, IO|BM set by M8.4f-pre) */
+    .equ R_PCI_D08,    0x0000223C /* 00:01.1 IDE class            = 0x01018000    */
+    .equ R_PCI_D2C,    0x00002240 /* 00:01.1 subsystem            = 0x11001AF4    */
+    .equ R_PCI_PM00,   0x00002244 /* 00:01.3 PIIX4-PM vendor/dev  = 0x71138086    */
+    .equ R_PCI_PM08,   0x00002248 /* 00:01.3 PM class             = 0x06800003    */
+    .equ R_PCI_PM3C,   0x00002268 /* 00:01.3 PM reg0x3C int-pin   = 0x00000100 (pin A) */
+    .equ R_PCI_VG00,   0x0000224C /* 00:02.0 std-VGA vendor/dev   = 0x11111234    */
+    .equ R_PCI_VG08,   0x00002250 /* 00:02.0 VGA class            = 0x03000002    */
+    .equ R_PCI_BARSZ,  0x00002254 /* IDE BAR4 sizing (write ~0)   = 0xFFFFFFF1    */
+    .equ R_PCI_BARRE,  0x00002258 /* IDE BAR4 restored (0xC000)   = 0x0000C001    */
+    .equ R_PCI_ABS1,   0x0000225C /* absent 00:00.1 (devfn 0x01)  = 0xFFFFFFFF    */
+    .equ R_PCI_ABS2,   0x00002260 /* absent 00:01.2 (devfn 0x0A)  = 0xFFFFFFFF    */
+    .equ R_PCI_OFF,    0x00002264 /* CONFIG_ADDRESS bit31=0 (disabled) = 0xFFFFFFFF */
 
     .equ PRD_TBL,    0x00005000  /* PRD table (8 bytes, dword-aligned) */
     .equ DMA_BUF,    0x00006000  /* DMA target buffer (512 bytes)      */
@@ -1212,6 +1233,75 @@ pm32_entry:
     movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMX_ST  /* 0x41 */
     movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMX_ER  /* 0x04 */
     movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMX_SEC /* 0x7E (126, unmoved) */
+
+    /* =============== M8.5 PCI bus-0 enumeration (controlled subset) ===== */
+    /* Scan the chipset-core functions qemu's -machine pc creates on bus 0, read
+     * their config IDs via 0xCF8/0xCFC (32-bit), size the IDE BAR4, and confirm
+     * the genuinely-absent slots read 0xFFFFFFFF. A CONTROLLED subset (NOT a blind
+     * dev 0..31 sweep): the unmodeled-but-present e1000 (00:03.0) + the VGA mem-BAR
+     * + chipset quirk regs are never read, so they cannot diverge (documented). All
+     * config IDs were captured from the live gate qemu; every inl is graded.
+     * CONFIG_ADDRESS = 0x80000000 | (devfn<<8) | (reg & 0xFC). */
+
+    /* 00:00.0 i440FX host bridge */
+    movl    $0x80000000, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* devfn 0x00, reg 0x00 */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_H00       /* 0x12378086 */
+    movl    $0x80000008, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* reg 0x08 */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_H08       /* 0x06000002 */
+
+    /* 00:01.0 PIIX3 ISA bridge (devfn 0x08, multifunction header) */
+    movl    $0x80000800, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* devfn 0x08, reg 0x00 */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_I00       /* 0x70008086 */
+    movl    $0x80000804, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* reg 0x04 status|cmd */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_I04       /* 0x02000000 */
+    movl    $0x80000808, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* reg 0x08 class */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_I08       /* 0x06010000 */
+    movl    $0x8000080C, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* reg 0x0C header-type */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_I0C       /* 0x00800000 (multifn bit7) */
+
+    /* 00:01.1 PIIX3 IDE (devfn 0x09) */
+    movl    $0x80000900, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_D00       /* 0x70108086 */
+    movl    $0x80000904, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* reg 0x04 dword (status fix) */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_D04       /* 0x02800005 (status 0x0280 | cmd 0x0005 set by M8.4f-pre) */
+    movl    $0x80000908, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_D08       /* 0x01018000 */
+    movl    $0x8000092C, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* reg 0x2C subsystem */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_D2C       /* 0x11001AF4 */
+
+    /* 00:01.3 PIIX4 PM (devfn 0x0B) */
+    movl    $0x80000B00, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_PM00      /* 0x71138086 */
+    movl    $0x80000B08, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_PM08      /* 0x06800003 */
+    movl    $0x80000B3C, %eax; movw $0xCF8, %dx; outl %eax, %dx   /* reg 0x3C interrupt pin */
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_PM3C      /* 0x00000100 (pin A) */
+
+    /* 00:02.0 std-VGA (devfn 0x10) */
+    movl    $0x80001000, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_VG00      /* 0x11111234 */
+    movl    $0x80001008, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_VG08      /* 0x03000002 */
+
+    /* IDE BAR4 (reg 0x20) sizing: write all-ones -> read the size mask 0xFFFFFFF1
+     * (16-byte I/O BAR), then restore 0xC000 -> 0xC001 (BMIDE window stays benign) */
+    movl    $0x80000920, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movl    $0xFFFFFFFF, %eax; movw $0xCFC, %dx; outl %eax, %dx
+    movl    $0x80000920, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_BARSZ     /* 0xFFFFFFF1 */
+    movl    $0x80000920, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movl    $0x0000C000, %eax; movw $0xCFC, %dx; outl %eax, %dx
+    movl    $0x80000920, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_BARRE     /* 0x0000C001 */
+
+    /* genuinely-absent functions -> 0xFFFFFFFF (00:00.1 devfn 0x01, 00:01.2 devfn 0x0A) */
+    movl    $0x80000100, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_ABS1      /* 0xFFFFFFFF */
+    movl    $0x80000A00, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_ABS2      /* 0xFFFFFFFF */
+    /* CONFIG_ADDRESS bit31=0 (mechanism disabled) -> CONFIG_DATA reads 0xFFFFFFFF */
+    movl    $0x00000900, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_OFF       /* 0xFFFFFFFF */
 
     /* ====================== deterministic end-state ===================== */
     movl    BUF_ID+2,   %esi            /* IDENTIFY word 1 (cyls = 2)        */

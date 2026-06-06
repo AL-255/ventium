@@ -593,14 +593,23 @@ module ventium_soc
   // CONFIG_ADDRESS[31]=enable, [23:16]=bus, [15:11]=dev, [10:8]=fn, [7:2]=reg.
   // Sub-dword CONFIG_DATA access: the core masks io_rdata to io_size on a read and
   // supplies the byte/word in io_wdata on a write (the test writes PCI_COMMAND as a
-  // word and BAR4/CONFIG_ADDRESS as dwords). NOT a PCI host bridge — full
-  // enumeration / other functions / memory BARs are the deferred M8.5 PCI milestone.
+  // word and BAR4/CONFIG_ADDRESS as dwords). M8.5 generalizes the single-function
+  // shim into a bus-0 enumeration: a per-devfn config table for the chipset-core
+  // functions qemu's -machine pc creates (00:00.0 i440FX host, 00:01.0 PIIX3 ISA,
+  // 00:01.1 IDE, 00:01.3 PIIX4-PM, 00:02.0 std-VGA) — vendor/device, status|command,
+  // class, header-type (incl the 0x80 multifunction bit), subsystem; only the IDE
+  // function's command + BAR4 are R/W. Any other devfn / bus!=0 / disabled reads
+  // 0xFFFFFFFF (the absent-function reply). DEFERRED (a controlled enumeration never
+  // reads them, so they cannot diverge): the e1000 NIC (00:03.0) + cap-list, the VGA
+  // /e1000 memory BARs, and the chipset quirk registers (PAM/SMRAM/PIRQ/PMBASE).
   logic [31:0] pci_cfg_addr;     // CONFIG_ADDRESS latch (0xCF8)
-  logic [15:0] pci_cmd;          // PCI_COMMAND (reg 0x04 low word)
-  logic [31:0] pci_bar4;         // BAR4 (reg 0x20)
-  // the selected config dword targets bus0/dev1/fn1 with the enable bit set
-  wire         pci_sel_idefn = pci_cfg_addr[31] && (pci_cfg_addr[23:8] == 16'h0009);
-  wire [7:0]   pci_reg       = {pci_cfg_addr[7:2], 2'b00};   // dword register number
+  logic [15:0] pci_cmd;          // PCI_COMMAND (IDE reg 0x04 low word; R/W)
+  logic [31:0] pci_bar4;         // IDE BAR4 (reg 0x20; R/W)
+  // a config access targets bus 0 with the enable bit set; pci_devfn selects the
+  // function, pci_reg the dword register.
+  wire         pci_sel   = pci_cfg_addr[31] && (pci_cfg_addr[23:16] == 8'h00);
+  wire [7:0]   pci_devfn = pci_cfg_addr[15:8];
+  wire [7:0]   pci_reg   = {pci_cfg_addr[7:2], 2'b00};   // dword register number
 
   always_ff @(posedge clk) begin
     if (dev_rst) begin
@@ -609,28 +618,62 @@ module ventium_soc
       pci_bar4     <= 32'h0000_0001;   // I/O BAR, unmapped (bit0 = I/O indicator)
     end else begin
       if (cs_pci_addr && io_we) pci_cfg_addr <= io_wdata;          // outl 0xCF8
-      else if (cs_pci_data && io_we && pci_sel_idefn) begin
-        // CONFIG_DATA write to the IDE function. The core delivers the written
-        // byte/word in io_wdata[low]; the test writes the full low word for
-        // PCI_COMMAND and the full dword for BAR4 (both at offset 0 of the dword).
+      else if (cs_pci_data && io_we && pci_sel && pci_devfn == 8'h09) begin
+        // CONFIG_DATA write to the IDE function (00:01.1) — the ONLY writable function
+        // here (all others are RO enumeration rows; writes to them are no-ops). The
+        // core delivers the written byte/word/dword in io_wdata[low].
         if (pci_reg == 8'h04) pci_cmd  <= io_wdata[15:0] & 16'h0007;          // IO|MEM|MASTER
         if (pci_reg == 8'h20) pci_bar4 <= {io_wdata[31:4], 4'b0001};          // 16B I/O BAR
       end
     end
   end
 
-  // combinational CONFIG_DATA read value for the IDE function (else all-ones, the
-  // qemu reply for an absent function — the test reads only the modeled offsets).
+  // combinational CONFIG_DATA read: a per-devfn config table for the modeled bus-0
+  // functions (values empirically pinned to the live gate qemu). An absent devfn /
+  // bus!=0 / disabled-mechanism reads 0xFFFFFFFF; an unmodeled register OF A PRESENT
+  // function reads 0 (the controlled test reads only the modeled registers).
   logic [31:0] pci_cfg_rdata;
   always_comb begin
-    pci_cfg_rdata = 32'hFFFF_FFFF;
-    if (pci_sel_idefn) begin
-      unique case (pci_reg)
-        8'h00:   pci_cfg_rdata = 32'h7010_8086;          // vendor/device
-        8'h04:   pci_cfg_rdata = {16'h0000, pci_cmd};    // status(0)+command
-        8'h08:   pci_cfg_rdata = 32'h0101_8000;          // class/prog-if/rev
-        8'h20:   pci_cfg_rdata = pci_bar4;               // BAR4
-        default: pci_cfg_rdata = 32'h0000_0000;          // unmodeled IDE-fn offset
+    pci_cfg_rdata = 32'hFFFF_FFFF;                       // absent function / bus!=0 / disabled
+    if (pci_sel) begin
+      unique case (pci_devfn)
+        8'h00: unique case (pci_reg)                     // 00:00.0 i440FX host bridge
+                 8'h00:   pci_cfg_rdata = 32'h1237_8086; // vendor/device
+                 8'h08:   pci_cfg_rdata = 32'h0600_0002; // class (host bridge) / rev
+                 8'h2C:   pci_cfg_rdata = 32'h1100_1AF4; // subsystem
+                 default: pci_cfg_rdata = 32'h0000_0000;
+               endcase
+        8'h08: unique case (pci_reg)                     // 00:01.0 PIIX3 ISA bridge
+                 8'h00:   pci_cfg_rdata = 32'h7000_8086;
+                 8'h04:   pci_cfg_rdata = 32'h0200_0000; // status 0x0200 | command 0 (RO)
+                 8'h08:   pci_cfg_rdata = 32'h0601_0000; // class (ISA bridge)
+                 8'h0C:   pci_cfg_rdata = 32'h0080_0000; // header-type 0x80 (multifunction)
+                 8'h2C:   pci_cfg_rdata = 32'h1100_1AF4;
+                 default: pci_cfg_rdata = 32'h0000_0000;
+               endcase
+        8'h09: unique case (pci_reg)                     // 00:01.1 PIIX3 IDE (R/W cmd + BAR4)
+                 8'h00:   pci_cfg_rdata = 32'h7010_8086;
+                 8'h04:   pci_cfg_rdata = {16'h0280, pci_cmd}; // status 0x0280 | command (R/W)
+                 8'h08:   pci_cfg_rdata = 32'h0101_8000; // class (IDE) / prog-if 0x80
+                 8'h20:   pci_cfg_rdata = pci_bar4;       // BAR4
+                 8'h2C:   pci_cfg_rdata = 32'h1100_1AF4;
+                 default: pci_cfg_rdata = 32'h0000_0000;
+               endcase
+        8'h0B: unique case (pci_reg)                     // 00:01.3 PIIX4 ACPI/PM
+                 8'h00:   pci_cfg_rdata = 32'h7113_8086;
+                 8'h04:   pci_cfg_rdata = 32'h0280_0000; // status 0x0280 | command 0
+                 8'h08:   pci_cfg_rdata = 32'h0680_0003; // class (other bridge) / rev
+                 8'h2C:   pci_cfg_rdata = 32'h1100_1AF4;
+                 8'h3C:   pci_cfg_rdata = 32'h0000_0100; // interrupt pin A (byte 0x3D=1)
+                 default: pci_cfg_rdata = 32'h0000_0000;
+               endcase
+        8'h10: unique case (pci_reg)                     // 00:02.0 std-VGA
+                 8'h00:   pci_cfg_rdata = 32'h1111_1234;
+                 8'h08:   pci_cfg_rdata = 32'h0300_0002; // class (VGA display)
+                 8'h2C:   pci_cfg_rdata = 32'h1100_1AF4;
+                 default: pci_cfg_rdata = 32'h0000_0000;
+               endcase
+        default: pci_cfg_rdata = 32'hFFFF_FFFF;          // unmodeled devfn -> absent reply
       endcase
     end
   end
