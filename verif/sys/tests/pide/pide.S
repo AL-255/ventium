@@ -53,6 +53,17 @@
     .equ R_SLV_ST,   0x00002020  /* absent slave status  = 0x00 */
     .equ R_SLV_ERR,  0x00002024  /* absent slave error   = 0x00 */
     .equ R_SLV_ALT,  0x00002028  /* absent slave altstat = 0x00 */
+    .equ R_SLV_LC,   0x000020FC  /* absent slave lcyl    = 0xFF (M8.4e indep shadow) */
+    .equ R_SLV_HC,   0x00002100  /* absent slave hcyl    = 0xFF (M8.4e indep shadow) */
+    /* --- M8.4e secondary-channel (empty ATAPI CD) result slots --- */
+    .equ R_SEC_ST,     0x00002104 /* SEC master status    = 0x50 */
+    .equ R_SEC_SIG_L,  0x00002108 /* SEC ATAPI sig lcyl   = 0x14 */
+    .equ R_SEC_SIG_H,  0x0000210C /* SEC ATAPI sig hcyl   = 0xEB */
+    .equ R_SEC_DIAG_ST,0x00002110 /* SEC DIAGNOSTIC status= 0x00 (ATAPI, not 0x50) */
+    .equ R_SEC_EC_ST,  0x00002114 /* SEC 0xEC abort status= 0x41 */
+    .equ R_SEC_EC_ER,  0x00002118 /* SEC 0xEC abort error = 0x04 */
+    .equ R_SEC_RD_ST,  0x0000211C /* SEC READ abort status= 0x41 (not 0x58) */
+    .equ R_SEC_SLV_LC, 0x00002120 /* SEC slave lcyl       = 0xFF */
     .equ R_ID_ST,    0x0000202C  /* status after IDENTIFY drain = 0x50 */
     .equ R_RD0_ST,   0x00002030  /* status after READ LBA0 drain = 0x50 */
     .equ R_RD127_ST, 0x00002034  /* status after READ LBA127 drain = 0x50 */
@@ -108,6 +119,26 @@
     .equ R_SR_ER,    0x000020EC  /* SRST: error post        = 0x01             */
     .equ R_SR_SEC,   0x000020F0  /* SRST: sector post       = 0x01             */
     .equ R_SR_SEL,   0x000020F4  /* SRST: devhead post      = 0xA0             */
+    /* --- M8.4e2 review-hardening result slots (primary + secondary ATAPI) --- */
+    .equ R_DP_IDLE,  0x00002124  /* primary IDLE 0x1F0 read  = 0x0000 (!DRQ->0) */
+    .equ R_SLV_NS,   0x00002128  /* absent-slave nsector (indep of master adv)  */
+    .equ R_SLV_SEC2, 0x0000212C  /* absent-slave sector  (indep of master adv)  */
+    .equ R_SEC_DR_ST,  0x00002130 /* SEC 0x08 DEVICE RESET status (ATAPI 0x00)  */
+    .equ R_SEC_DR_ER,  0x00002134 /* SEC 0x08 error                             */
+    .equ R_SEC_DR_NS,  0x00002138 /* SEC 0x08 nsector = 0x01 (ide_set_signature)*/
+    .equ R_SEC_DR_SEC, 0x0000213C /* SEC 0x08 sector  = 0x01                    */
+    .equ R_SEC_DR_LC,  0x00002140 /* SEC 0x08 lcyl    = 0x14                    */
+    .equ R_SEC_DR_HC,  0x00002144 /* SEC 0x08 hcyl    = 0xEB                    */
+    .equ R_SEC_DR_DH,  0x00002148 /* SEC 0x08 devhead = 0xA0 (head cleared)     */
+    .equ R_SEC_FC_ST,  0x0000214C /* SEC 0xE7 FLUSH CACHE status (completes)    */
+    .equ R_SEC_FC_ER,  0x00002150 /* SEC 0xE7 error                             */
+    .equ R_SEC_EF_ST,  0x00002154 /* SEC 0xEF SET FEATURES status               */
+    .equ R_SEC_EF_ER,  0x00002158 /* SEC 0xEF error                             */
+    .equ R_SEC_BA_ST,  0x0000215C /* SEC 0xB0 SMART (unsupported) status = 0x41 */
+    .equ R_SEC_BA_ER,  0x00002160 /* SEC 0xB0 error = 0x04                      */
+    .equ R_SEC_BA_LC,  0x00002164 /* SEC bare-abort: lcyl unchanged = 0x55      */
+    .equ R_SEC_SR_ST,  0x00002168 /* SEC SRST status post (ATAPI = 0x00)        */
+    .equ R_SEC_SR_ER,  0x0000216C /* SEC SRST error post = 0x01                 */
 
     .equ BUF_ID,     0x00004000  /* IDENTIFY 512-byte block       */
     .equ BUF_S0,     0x00004200  /* sector 0   block              */
@@ -218,6 +249,16 @@ pm32_entry:
     inb     %dx, %al
     andl    $0xFF, %eax
     movl    %eax, R_SLV_ALT
+    /* M8.4e: the absent slave's INDEPENDENT lcyl/hcyl = 0xFF (fresh signature
+     * shadow, before any LBA write broadcasts over it) — NOT the master's 0x00. */
+    movw    $0x1F4, %dx                 /* slave lcyl -> 0xFF */
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_SLV_LC
+    movw    $0x1F5, %dx                 /* slave hcyl -> 0xFF */
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_SLV_HC
     movb    $0xA0, %al                  /* reselect master */
     movw    $0x1F6, %dx
     outb    %al, %dx
@@ -772,6 +813,123 @@ pm32_entry:
     movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_ER   /* 0x01 */
     movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_SEC  /* 0x01 */
     movw    $0x1F6, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SR_SEL  /* 0xA0 */
+
+    /* =============== M8.4e2 PRIMARY review-hardening =================== */
+    /* (a) an IDLE data-port (0x1F0) read returns 0x0000 in qemu (ide_data_readw
+     *     returns 0 whenever DRQ is clear) — proves the RTL no longer leaks a
+     *     stale buffer word off the read-DRQ window (tightens boundary (b)).
+     * (b) the absent slave's nsector/sector are INDEPENDENT of a MASTER command's
+     *     register advance (qemu per-IDEState regs): after a master READ drives the
+     *     MASTER nsector->0 / sector->1, the absent slave still reads its last
+     *     broadcast-written value (nsector=1 / sector=0). */
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx   /* LBA master */
+    movb    $0x01, %al; movw $0x1F2, %dx; outb %al, %dx   /* nsector=1 (bcast -> slave=1) */
+    xorb    %al, %al
+    movw    $0x1F3, %dx; outb %al, %dx                    /* LBA[7:0]=0 (bcast sector -> slave=0) */
+    movw    $0x1F4, %dx; outb %al, %dx                    /* LBA[15:8]=0 */
+    movw    $0x1F5, %dx; outb %al, %dx                    /* LBA[23:16]=0 */
+    movb    $0x20, %al; movw $0x1F7, %dx; outb %al, %dx   /* READ SECTORS LBA0 */
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail                           /* DRQ set */
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b                   /* drain 256 (MASTER advances) */
+    /* (a) idle data-port read -> 0x0000 (status now 0x50, DRQ clear) */
+    movw    $0x1F0, %dx; inw %dx, %ax; andl $0xFFFF, %eax; movl %eax, R_DP_IDLE
+    /* (b) absent slave: independent nsector/sector (NOT the master's advanced regs) */
+    movb    $0xB0, %al; movw $0x1F6, %dx; outb %al, %dx   /* select absent slave */
+    movw    $0x1F2, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SLV_NS   /* slave nsector */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SLV_SEC2 /* slave sector */
+    movb    $0xA0, %al; movw $0x1F6, %dx; outb %al, %dx   /* reselect master */
+
+    /* =============== M8.4e SECONDARY CHANNEL (empty ATAPI CD) ========== */
+    /* The secondary master is qemu's auto-created empty ide1-cd0 (ATAPI). Every
+     * read below is graded per-record; the key discriminators are stored. */
+    movb    $0x02, %al; movw $0x376, %dx; outb %al, %dx   /* nIEN on the secondary */
+
+    /* SEC-1 signature: 0xEB14 marks ATAPI (vs the HD's 0x0000) */
+    movb    $0xA0, %al; movw $0x176, %dx; outb %al, %dx   /* select secondary master */
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_ST   /* 0x50 */
+    movw    $0x376, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x50 altstat */
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x00 error */
+    movw    $0x172, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x01 nsector */
+    movw    $0x173, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x01 sector */
+    movw    $0x174, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_SIG_L /* 0x14 */
+    movw    $0x175, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_SIG_H /* 0xEB */
+    movw    $0x176, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0xA0 devhead */
+
+    /* SEC-2 DIAGNOSTIC: ATAPI clears READY_STAT -> status 0x00 (NOT 0x50) */
+    movb    $0x90, %al; movw $0x177, %dx; outb %al, %dx
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x01 error */
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DIAG_ST /* 0x00 */
+    movw    $0x174, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x14 sig */
+    movw    $0x175, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0xEB sig */
+
+    /* SEC-3 IDENTIFY DEVICE (0xEC) on an ATAPI device -> ABORT + signature */
+    movb    $0xA0, %al; movw $0x176, %dx; outb %al, %dx
+    movb    $0xEC, %al; movw $0x177, %dx; outb %al, %dx
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_EC_ST /* 0x41 */
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_EC_ER /* 0x04 */
+    movw    $0x174, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x14 (sig re-set) */
+    movw    $0x175, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0xEB */
+
+    /* SEC-4 HD command (READ SECTORS) on ATAPI -> ABORT (no DRQ; an HD gives 0x58) */
+    movb    $0x01, %al; movw $0x172, %dx; outb %al, %dx
+    movb    $0xA0, %al; movw $0x176, %dx; outb %al, %dx
+    movb    $0x20, %al; movw $0x177, %dx; outb %al, %dx
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_RD_ST /* 0x41 */
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x04 */
+
+    /* SEC-5 secondary SLAVE (absent): masked status/error + indep lcyl/hcyl=0xFF */
+    movb    $0xB0, %al; movw $0x176, %dx; outb %al, %dx
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x00 masked */
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x00 masked */
+    movw    $0x376, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x00 masked */
+    movw    $0x172, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x01 shared */
+    movw    $0x173, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0x01 shared */
+    movw    $0x174, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_SLV_LC /* 0xFF */
+    movw    $0x175, %dx; inb %dx, %al; andl $0xFF, %eax                        /* 0xFF */
+
+    /* SEC-6 DEVICE RESET (0x08): CD_OK -> ide_reset + signature, status 0x00, NO
+     * IRQ (cmd_device_reset returns false; the dispatch leaves status untouched).
+     * qemu does NOT abort it — the canonical ATAPI reset primitive. */
+    movb    $0xA0, %al; movw $0x176, %dx; outb %al, %dx   /* reselect secondary master */
+    movb    $0x08, %al; movw $0x177, %dx; outb %al, %dx   /* DEVICE RESET */
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DR_ST
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DR_ER
+    movw    $0x172, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DR_NS
+    movw    $0x173, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DR_SEC
+    movw    $0x174, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DR_LC
+    movw    $0x175, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DR_HC
+    movw    $0x176, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_DR_DH
+
+    /* SEC-7 FLUSH CACHE (0xE7): ALL_OK -> cmd_flush_cache COMPLETES (not abort). */
+    movb    $0xE7, %al; movw $0x177, %dx; outb %al, %dx
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_FC_ST
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_FC_ER
+
+    /* SEC-8 SET FEATURES (0xEF, sub=0x02): ALL_OK -> cmd_set_features (the golden
+     * decides complete-vs-abort on the empty CD; the RTL is built to match it). */
+    movb    $0x02, %al; movw $0x171, %dx; outb %al, %dx   /* feature sub = 0x02 */
+    movb    $0xEF, %al; movw $0x177, %dx; outb %al, %dx
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_EF_ST
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_EF_ER
+
+    /* SEC-9 unsupported opcode bare abort (0xB0 SMART = HD_CFA_OK, NOT CD_OK ->
+     * ide_abort_command WITHOUT ide_set_signature): a lcyl pre-written to 0x55 must
+     * SURVIVE (qemu leaves the task file untouched on a permission-denied abort). */
+    movb    $0x55, %al; movw $0x174, %dx; outb %al, %dx   /* lcyl <- 0x55 (broadcast) */
+    movb    $0xB0, %al; movw $0x177, %dx; outb %al, %dx   /* SMART (unsupported on CD) */
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_BA_ST  /* 0x41 */
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_BA_ER  /* 0x04 */
+    movw    $0x174, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_BA_LC  /* 0x55 kept */
+
+    /* SEC-10 SRST on the secondary (0x376 bit2 edge): ATAPI post-reset status (qemu
+     * sets the CD status — the golden pins it), error 0x01, signature restored. */
+    movb    $0x06, %al; movw $0x376, %dx; outb %al, %dx   /* nIEN(2)|SRST(4) assert */
+    movb    $0x02, %al; movw $0x376, %dx; outb %al, %dx   /* SRST deassert, nIEN kept */
+    movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_SR_ST
+    movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_SR_ER
+    movb    $0xA0, %al; movw $0x176, %dx; outb %al, %dx   /* reselect master */
 
     /* ====================== deterministic end-state ===================== */
     movl    BUF_ID+2,   %esi            /* IDENTIFY word 1 (cyls = 2)        */

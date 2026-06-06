@@ -11,6 +11,17 @@
 //          and SRST (0x3F6 bit2). SET MULTIPLE is status-only (qemu does NOT patch
 //          the cached IDENTIFY w59). Tier 2 (0x91 geometry, CHS reg-advance) +
 //          READ/WRITE MULTIPLE + the register-trajectory lag + LBA48 deferred.
+//   M8.4e: + parameterized as the SECONDARY channel's EMPTY ATAPI CD-ROM
+//          (IS_ATAPI=1 / HAS_DISK=0): the 0xEB14 signature, DIAGNOSTIC status 0x00.
+//   M8.4e2: + (review fold-back) the ATAPI command surface made command-specific
+//          (NOT a blanket abort): DEVICE RESET (0x08) -> ide_reset+signature/status
+//          0x00/no-IRQ; SET FEATURES (0xEF) completes; FLUSH CACHE (0xE7) ABORTS at
+//          runtime on the empty CD (no medium); IDENTIFY/READ (0xEC/0x20/0x21) ->
+//          full-signature abort; unsupported opcodes -> BARE abort (regs untouched);
+//          ATAPI SRST status 0x00. The absent slave's INDEPENDENT nsector/sector
+//          shadow (was shared). Idle/write-window data-port reads return 0. The full
+//          PACKET surface (0xA0 / 0xA1, which qemu DRQ-enters) is still deferred — a
+//          DOCUMENTED divergence the directed test issues neither of.
 // ============================================================================
 //
 // DEVICE: a single ATA hard disk on the PRIMARY channel, MASTER (unit 0), PIO
@@ -76,14 +87,18 @@
 // MODELING BOUNDARIES (surfaced by the adversarial reviews; all on paths the
 // directed test provably does NOT reach, so the EQUIVALENT result is honest --
 // documented here, not hidden):
-//   * ABSENT SLAVE is a SINGLE-SHARED-REGISTER-FILE model: qemu masks ONLY
-//     error/status/alt-status to 0 for the selected absent slave (the test reads
-//     exactly those -> match), but returns the slave's INDEPENDENT signature
-//     shadow (lcyl/hcyl=0xFF) for 0x1F2-0x1F6, whereas this RTL returns the
-//     shared master value (0x00). The test never reads those slave registers.
-//   * a data-port read while DRQ=0 AND no write window returns the stale buffer
-//     word here vs 0x0000 in qemu (core.c:2429); the test reads 0x1F0 only inside
-//     DRQ-gated loops (the in-write-window subcase IS modeled, returning 0x0000).
+//   * ABSENT SLAVE (M8.4e/e2, now MODELED + GATE-PROVEN, no longer a boundary):
+//     qemu masks ONLY error/status/alt-status to 0 for the selected absent slave,
+//     and returns the slave's INDEPENDENT register shadow for the rest. This RTL
+//     models that shadow for lcyl/hcyl=0xFF AND nsector/sector (reset 1, tracking
+//     the broadcast write but NOT a master command's advance) — gate-proven by
+//     reading the slave's nsector(=1)/sector(=0) after a master READ advanced the
+//     MASTER to nsector=0/sector=1. select needs no shadow (switching drives re-
+//     writes 0x1F6, re-broadcasting it). Residual: the slave's error/status HOB
+//     paths are unmodeled (the test reads only the masked 0).
+//   * a data-port read OUTSIDE a read-DRQ window returns 0x0000 (qemu ide_data_readw
+//     returns 0 unless DRQ && pio-out) -- MODELED (M8.4e2) for the idle, write-window,
+//     and empty-CD (HAS_DISK=0, no X-leak) cases alike, gate-proven by an idle read.
 //   * the WRITE data path commits each word to disk[] on its own clock, whereas
 //     qemu buffers the 256 words in io_buffer and commits the whole 512 bytes at
 //     end-of-sector (the async write-back); identical CPU-observable result --
@@ -106,10 +121,15 @@
 //     1-based CHS sector (ide_set_sector CHS branch core.c:657) whereas this RTL
 //     writes the LBA28 decomposition; the test reads no task-file reg after a CHS
 //     transfer.
-//   * COMMAND-ABORT for the remaining unsupported commands (anything other than
-//     EC/20/21/30/31/70/10/91/90) is the default 0x41/0x04 arm -- qemu completes
-//     some of those (SET FEATURES 0xEF / SET MULTIPLE 0xC6 with 0x50); deferred to
-//     a later ATA-misc-commands milestone, the test issues none of them.
+//   * ATA HD unsupported commands (anything other than EC/20/21/30/31/70/10/91/90/
+//     C6/EF) take the default 0x41/0x04 arm; the test issues none beyond those.
+//   * ATAPI FULL-PACKET SURFACE (IS_ATAPI=1) is the one ACKNOWLEDGED DIVERGENCE:
+//     0xA0 PACKET (cmd_packet core.c:1779) and 0xA1 IDENTIFY-PACKET (cmd_identify_
+//     packet core.c:1743) are CD_OK and qemu opens a DRQ packet/identify phase for
+//     them (status 0x58), whereas this RTL takes the bare-abort default (0x41/0x04).
+//     This is the deferred full-ATAPI-command milestone; the directed test issues
+//     NEITHER 0xA0 nor 0xA1, so the per-record EQUIVALENT remains honest. (Every
+//     OTHER CD command IS modeled: 0x08/0x90/0xE7/0xEF/0xEC/0x20/0x21 + bare aborts.)
 // See verif/sys/tests/pide/manifest.json for the full boundary accounting.
 //
 // DATA PORT (0x1F0): the directed test READS it with `inw %dx,%ax` and WRITES it
@@ -134,7 +154,13 @@ module ven_ide #(
     parameter int unsigned DISK_SECTORS = 128,   // 64 KiB image (single-source)
     parameter int unsigned CYLS         = 2,     // qemu guess_chs_for_size(128)
     parameter int unsigned HEADS        = 16,
-    parameter int unsigned SECS         = 63
+    parameter int unsigned SECS         = 63,
+    // M8.4e: IS_ATAPI=1 = the empty ATAPI CD-ROM (secondary master) — ATAPI
+    // signature 0xEB14, DIAGNOSTIC status 0x00/no-IRQ, IDENTIFY 0xEC + every HD
+    // data command ABORT (the full PACKET/IDENTIFY-PACKET surface is deferred).
+    // HAS_DISK=0 suppresses the $readmemh (the empty CD has no media).
+    parameter bit          IS_ATAPI     = 1'b0,
+    parameter bit          HAS_DISK     = 1'b1
 ) (
     input  logic        clk,
     input  logic        rst,        // synchronous, active-high (PC RESET)
@@ -157,6 +183,9 @@ module ven_ide #(
     localparam logic [7:0] ST_ERR  = 8'h01;
     localparam logic [7:0] STAT_IDLE  = ST_DRDY | ST_DSC;            // 0x50
     localparam logic [7:0] STAT_DRQ   = ST_DRDY | ST_DSC | ST_DRQ;   // 0x58
+    // reset/signature lcyl:hcyl — 0xEB14 marks an ATAPI device, 0x0000 an ATA HD
+    localparam logic [7:0] SIG_LCYL   = IS_ATAPI ? 8'h14 : 8'h00;
+    localparam logic [7:0] SIG_HCYL   = IS_ATAPI ? 8'hEB : 8'h00;
     localparam logic [7:0] STAT_ABORT = ST_DRDY | ST_ERR;            // 0x41
     localparam logic [7:0] ERR_ABRT   = 8'h04;                       // ABRT
 
@@ -167,6 +196,15 @@ module ven_ide #(
     logic [7:0] r_sector;    // 0x1F3  LBA[7:0]
     logic [7:0] r_lcyl;      // 0x1F4  LBA[15:8]
     logic [7:0] r_hcyl;      // 0x1F5  LBA[23:16]
+    // M8.4e: the absent slave's INDEPENDENT register shadow. qemu broadcasts
+    // task-file writes to BOTH drives (ide_ioport_write writes ifs[0] AND ifs[1]),
+    // but a *command* advances only the SELECTED drive (ide_set_sector touches the
+    // active s). So an unwritten/unadvanced absent slave reads its own reset
+    // signature: lcyl/hcyl=0xFF (vs the master's 0x00) and nsector/sector=1 —
+    // diverging from the master once a master command advances the master's regs.
+    // (select needs no shadow: you must re-write 0x1F6 to switch drives, which
+    // re-broadcasts it.) The masked status/error/altstatus are handled separately.
+    logic [7:0] r_slv_lcyl, r_slv_hcyl, r_slv_nsector, r_slv_sector;
     logic [7:0] r_select;    // 0x1F6  device/head (reset 0xA0)
     logic [7:0] r_status;    // 0x1F7
     logic [7:0] r_ctrl;      // 0x3F6  device control (bit1 nIEN, bit2 SRST)
@@ -187,7 +225,8 @@ module ven_ide #(
     logic [7:0]  disk [0:DISK_SECTORS*512-1];   // raw image, $readmemh
     logic [15:0] identify_words [0:255];        // built at time 0 (constants)
 `ifdef VEN_IDE_DISK_HEX
-    initial $readmemh(`VEN_IDE_DISK_HEX, disk);
+    // HAS_DISK=0 (the empty ATAPI CD) -> no backing image to load.
+    initial if (HAS_DISK) $readmemh(`VEN_IDE_DISK_HEX, disk);
 `endif
 
     // ---- IDENTIFY DEVICE block (qemu 8.2.2 ide_identify, this -drive config) --
@@ -284,14 +323,21 @@ module ven_ide #(
             rdata = unit1_sel ? 16'h0000 : {8'h00, r_status};
         end else if (cs && !we) begin
             unique case (addr[2:0])
-                // 0x1F0 data port: a READ during a WRITE-DRQ window returns
-                // 0x0000 (qemu ide_data_readw guard core.c:2429, !ide_is_pio_out).
-                3'd0: rdata = (in_write && r_status[3]) ? 16'h0000 : data_word;
+                // 0x1F0 data port: qemu ide_data_readw returns 0 UNLESS DRQ is set
+                // AND the transfer is PIO-OUT (device->host READ). So a read returns
+                // the buffer word ONLY inside a read-DRQ window; an idle read or a
+                // read in a WRITE-DRQ window returns 0 (this also avoids leaking the
+                // never-loaded disk[] X on the HAS_DISK=0 empty CD).
+                3'd0: rdata = (r_status[3] && !in_write) ? data_word : 16'h0000;
                 3'd1: rdata = unit1_sel ? 16'h0000 : {8'h00, r_error};    // 0x1F1
-                3'd2: rdata = {8'h00, r_nsector};                         // 0x1F2
-                3'd3: rdata = {8'h00, r_sector};                          // 0x1F3
-                3'd4: rdata = {8'h00, r_lcyl};                            // 0x1F4
-                3'd5: rdata = {8'h00, r_hcyl};                            // 0x1F5
+                3'd2: rdata = unit1_sel ? {8'h00, r_slv_nsector}          // 0x1F2
+                                        : {8'h00, r_nsector};
+                3'd3: rdata = unit1_sel ? {8'h00, r_slv_sector}           // 0x1F3
+                                        : {8'h00, r_sector};
+                3'd4: rdata = unit1_sel ? {8'h00, r_slv_lcyl}             // 0x1F4
+                                        : {8'h00, r_lcyl};
+                3'd5: rdata = unit1_sel ? {8'h00, r_slv_hcyl}             // 0x1F5
+                                        : {8'h00, r_hcyl};
                 3'd6: rdata = {8'h00, r_select};                          // 0x1F6
                 default: rdata = unit1_sel ? 16'h0000 : {8'h00, r_status};// 0x1F7
             endcase
@@ -331,8 +377,12 @@ module ven_ide #(
             r_feature <= 8'h00;
             r_nsector <= 8'h01;
             r_sector  <= 8'h01;
-            r_lcyl    <= 8'h00;
-            r_hcyl    <= 8'h00;
+            r_lcyl    <= SIG_LCYL;       // 0x00 (ATA) / 0x14 (ATAPI signature)
+            r_hcyl    <= SIG_HCYL;       // 0x00 (ATA) / 0xEB (ATAPI signature)
+            r_slv_lcyl <= 8'hFF;         // absent slave's independent signature
+            r_slv_hcyl <= 8'hFF;
+            r_slv_nsector <= 8'h01;      // ide_set_signature: nsector/sector = 1
+            r_slv_sector  <= 8'h01;
             r_select  <= 8'hA0;          // ATA_DEV_ALWAYS_ON, master
             r_status  <= STAT_IDLE;      // 0x50
             r_ctrl    <= 8'h00;
@@ -398,10 +448,14 @@ module ven_ide #(
                     // never set here so the live bit is DRQ (r_status[3]). The
                     // data port (0x1F0) is NOT gated (it IS the active transfer).
                     3'd1: if (!r_status[3]) r_feature <= wdata[7:0];       // 0x1F1
-                    3'd2: if (!r_status[3]) r_nsector <= wdata[7:0];       // 0x1F2
-                    3'd3: if (!r_status[3]) r_sector  <= wdata[7:0];       // 0x1F3
-                    3'd4: if (!r_status[3]) r_lcyl    <= wdata[7:0];       // 0x1F4
-                    3'd5: if (!r_status[3]) r_hcyl    <= wdata[7:0];       // 0x1F5
+                    // qemu broadcasts task-file writes to BOTH drives, so each slave
+                    // shadow tracks the master write (same DRQ gate); a *command*
+                    // later advances only the master (advance_lba_regs), leaving the
+                    // shadows at their last-broadcast value.
+                    3'd2: if (!r_status[3]) begin r_nsector <= wdata[7:0]; r_slv_nsector <= wdata[7:0]; end // 0x1F2
+                    3'd3: if (!r_status[3]) begin r_sector  <= wdata[7:0]; r_slv_sector  <= wdata[7:0]; end // 0x1F3
+                    3'd4: if (!r_status[3]) begin r_lcyl <= wdata[7:0]; r_slv_lcyl <= wdata[7:0]; end // 0x1F4
+                    3'd5: if (!r_status[3]) begin r_hcyl <= wdata[7:0]; r_slv_hcyl <= wdata[7:0]; end // 0x1F5
                     3'd6: if (!r_status[3]) r_select  <= wdata[7:0] | 8'hA0;// 0x1F6
                     default: begin                       // 0x1F7 command
                       // COMMAND-WHILE-DRQ: qemu ignores a non-RESET command while
@@ -415,6 +469,68 @@ module ven_ide #(
                             // prior abort's 0x04 does not linger; the DIAGNOSTIC
                             // (0x01) and abort (0x04) arms override this below.
                             r_error <= 8'h00;
+                            if (IS_ATAPI) begin
+                              // Empty ATAPI CD-ROM command surface. qemu does NOT
+                              // blanket-abort: several CD_OK/ALL_OK commands complete
+                              // (the cmd table flags them permitted for IDE_CD). The
+                              // genuinely-DEFERRED full-PACKET surface is 0xA0 PACKET /
+                              // 0xA1 IDENTIFY-PACKET — qemu opens a DRQ packet phase
+                              // for those (cmd_packet core.c:1779 / cmd_identify_packet
+                              // core.c:1743); this RTL aborts them instead, a KNOWN,
+                              // documented divergence the directed test issues NEITHER
+                              // of (so the per-record EQUIVALENT is honest).
+                              unique case (wdata[7:0])
+                                8'h90: begin             // EXECUTE DEVICE DIAGNOSTIC
+                                    // cmd_exec_dev_diagnostic: signature + status 0x00
+                                    // (clears READY_STAT), error 0x01, NO IRQ.
+                                    r_error   <= 8'h01;
+                                    r_nsector <= 8'h01; r_sector <= 8'h01;
+                                    r_lcyl    <= SIG_LCYL; r_hcyl <= SIG_HCYL;
+                                    r_select  <= r_select & 8'hF0;   // ide_set_signature
+                                    r_status  <= 8'h00;
+                                end
+                                8'h08: begin             // DEVICE RESET (CD_OK)
+                                    // cmd_device_reset: ide_reset + signature, error 0,
+                                    // status 0x00, returns false -> NO IRQ.
+                                    r_error   <= 8'h00;
+                                    r_nsector <= 8'h01; r_sector <= 8'h01;
+                                    r_lcyl    <= SIG_LCYL; r_hcyl <= SIG_HCYL;
+                                    r_select  <= r_select & 8'hF0;
+                                    r_status  <= 8'h00;
+                                end
+                                // FLUSH CACHE (0xE7) is permission-ALL_OK but ABORTS
+                                // at RUNTIME on the empty CD: blk_aio_flush hits a
+                                // no-medium error -> ide_flush_cb -> ide_handle_rw_
+                                // error sets status 0x41 / error 0x04 (OBSERVED in the
+                                // golden, NOT the 0x50 completion a populated drive
+                                // gives). It falls through to the bare-abort default.
+                                8'hEF: begin             // SET FEATURES (ALL_OK)
+                                    // cmd_set_features completes on the CD (the empty
+                                    // tray still has a BlockBackend); the patched
+                                    // identify words are unobservable (0xEC aborts).
+                                    r_status <= STAT_IDLE; irq14 <= ~nien;
+                                end
+                                8'hEC, 8'h20, 8'h21: begin
+                                    // cmd_identify / cmd_read_pio for IDE_CD call
+                                    // ide_set_signature THEN ide_abort_command: full
+                                    // signature (nsector/sector=1, lcyl/hcyl=0xEB14,
+                                    // head cleared) + status 0x41 / error 0x04 + IRQ.
+                                    r_nsector <= 8'h01; r_sector <= 8'h01;
+                                    r_lcyl    <= SIG_LCYL; r_hcyl <= SIG_HCYL;
+                                    r_select  <= r_select & 8'hF0;
+                                    r_status  <= STAT_ABORT; r_error <= ERR_ABRT;
+                                    irq14     <= ~nien;
+                                end
+                                default: begin
+                                    // not-permitted opcodes (e.g. 0xB0 SMART) AND the
+                                    // deferred 0xA0/0xA1: a BARE ide_abort_command —
+                                    // status 0x41 / error 0x04 + IRQ, task-file regs
+                                    // LEFT UNTOUCHED (no ide_set_signature).
+                                    r_status <= STAT_ABORT; r_error <= ERR_ABRT;
+                                    irq14    <= ~nien;
+                                end
+                              endcase
+                            end else begin
                             unique case (wdata[7:0])
                                 8'hEC: begin             // IDENTIFY DEVICE
                                     in_identify <= 1'b1;
@@ -555,6 +671,7 @@ module ven_ide #(
                                     irq14    <= ~nien;
                                 end
                             endcase
+                            end   // else (!IS_ATAPI)
                         end
                       end
                     end
@@ -570,10 +687,16 @@ module ven_ide #(
                     r_error   <= 8'h01;
                     r_nsector <= 8'h01;
                     r_sector  <= 8'h01;
-                    r_lcyl    <= 8'h00;
-                    r_hcyl    <= 8'h00;
+                    r_lcyl    <= SIG_LCYL;   // 0x00 (ATA) / 0x14 (ATAPI signature)
+                    r_hcyl    <= SIG_HCYL;   // 0x00 (ATA) / 0xEB (ATAPI signature)
                     r_select  <= 8'hA0;
-                    r_status  <= STAT_IDLE;
+                    // ATAPI post-reset status is 0x00 (the CD clears READY_STAT, like
+                    // DIAGNOSTIC); an ATA HD restores 0x50.
+                    r_status  <= IS_ATAPI ? 8'h00 : STAT_IDLE;
+                    // the soft reset also re-runs ide_set_signature on the absent
+                    // slave (ifs[1]) -> its independent shadow returns to 0xFF / 1.
+                    r_slv_lcyl    <= 8'hFF; r_slv_hcyl   <= 8'hFF;
+                    r_slv_nsector <= 8'h01; r_slv_sector <= 8'h01;
                 end
                 r_ctrl <= wdata[7:0];                     // device control (nIEN, SRST)
             end else if (cs && !we && addr[2:0] == 3'd0 && r_status[3] && !in_write) begin
@@ -613,7 +736,9 @@ module ven_ide #(
 
     // No unused outputs to sink (irq14 -> PIC IR14, rdata -> SoC read mux).
     // r_feature is a write-only shadow in M8.4a (SET FEATURES deferred).
+    // HAS_DISK is referenced only inside `ifdef VEN_IDE_DISK_HEX (the $readmemh
+    // guard); sink it so a standalone lint without that define stays UNUSEDPARAM-clean.
     logic _unused;
-    assign _unused = &{1'b0, addr[15:3], r_ctrl[7:3], r_ctrl[0]};
+    assign _unused = &{1'b0, addr[15:3], r_ctrl[7:3], r_ctrl[0], HAS_DISK};
 
 endmodule

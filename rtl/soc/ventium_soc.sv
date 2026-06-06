@@ -146,7 +146,8 @@ module ventium_soc
   logic        rtc_irq8;     // RTC          -> IR8  (slave)
   logic        kbd_irq1;     // i8042 kbd    -> IR1
   logic        mouse_irq12;  // i8042 mouse  -> IR12 (slave)
-  logic        ide_irq14;    // primary IDE  -> IR14 (M8.4; polled-quiescent)
+  logic        ide_irq14;    // primary IDE   -> IR14 (M8.4; polled-quiescent)
+  logic        ide_irq15;    // secondary IDE -> IR15 (M8.4e; polled-quiescent)
   logic [15:0] pic_irq_in;
   always_comb begin
     pic_irq_in        = 16'd0;
@@ -159,6 +160,7 @@ module ventium_soc
     // future interrupt-driven IDE workload, exactly like the IR1/IR8/IR12
     // quiescent precedent; a quiescent input cannot perturb the differential.
     pic_irq_in[14]    = ide_irq14;
+    pic_irq_in[15]    = ide_irq15;   // secondary IDE (slave-PIC IR7); quiescent (nIEN)
   end
 
   // ---- A20 gate (M8.2) -------------------------------------------------------
@@ -281,7 +283,7 @@ module ventium_soc
   // so the core never stalls.
   // ===========================================================================
   logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
-  logic        cs_ide, cs_ide_ctl;
+  logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
                         io_addr == 16'h00A0 || io_addr == 16'h00A1 ||
@@ -304,9 +306,12 @@ module ventium_soc
     cs_acpipm = io_req && (io_addr == 16'h0608);
     // ---- M8.4 IDE/ATA primary channel -------------------------------------
     // Command block 0x1F0-0x1F7 + control block 0x3F6 (primary master, PIO).
-    // The secondary channel (0x170-0x177/0x376) is left UNDECODED (out of scope).
+    // The secondary channel (0x170-0x177/0x376) is decoded below (M8.4e).
     cs_ide     = io_req && (io_addr >= 16'h01F0 && io_addr <= 16'h01F7);
     cs_ide_ctl = io_req && (io_addr == 16'h03F6);
+    // M8.4e secondary channel (empty ATAPI CD-ROM master): 0x170-0x177 + 0x376.
+    cs_ide2     = io_req && (io_addr >= 16'h0170 && io_addr <= 16'h0177);
+    cs_ide2_ctl = io_req && (io_addr == 16'h0376);
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -324,6 +329,7 @@ module ventium_soc
   logic [7:0] acpipm_rdata;    // M8.3 ACPI PM byte view (unused on the diff path)
   logic [31:0] acpipm_rdata32; // M8.3 ACPI PM native 32-bit value ({8'h0,count})
   logic [15:0] ide_rdata;      // M8.4 IDE: data-port word, else {8'h0,regbyte}
+  logic [15:0] ide2_rdata;     // M8.4e secondary IDE (empty ATAPI CD)
 
   ven_pic u_pic (
       .clk         (clk),
@@ -486,6 +492,26 @@ module ventium_soc
       .irq14  (ide_irq14)
   );
 
+  // M8.4e: the SECONDARY channel's master — the empty ATAPI CD-ROM qemu's
+  // -machine pc auto-creates (ide1-cd0). IS_ATAPI=1 (0xEB14 signature, DIAGNOSTIC
+  // status 0x00, IDENTIFY + all HD commands abort); HAS_DISK=0 (no media, so no
+  // $readmemh — the disk[] array is allocated but never loaded or read). irq14
+  // port carries IRQ15. The full ATAPI PACKET/IDENTIFY-PACKET surface is deferred.
+  // DISK_SECTORS=128 matches the primary so the (unused) disk_byte index stays in
+  // range; CYLS/HEADS/SECS are irrelevant (every CD data/IDENTIFY command aborts).
+  ven_ide #(.DISK_SECTORS(128), .CYLS(2), .HEADS(16), .SECS(63),
+            .IS_ATAPI(1'b1), .HAS_DISK(1'b0)) u_ide2 (
+      .clk    (clk),
+      .rst    (dev_rst),
+      .cs     (cs_ide2),
+      .cs_ctl (cs_ide2_ctl),
+      .we     (io_we),
+      .addr   (io_addr),
+      .wdata  (io_wdata[15:0]),
+      .rdata  (ide2_rdata),
+      .irq14  (ide_irq15)
+  );
+
   // I/O response back to the core: combinational ack the same clock io_req is
   // up; the read data is the selected device's byte zero-extended to 32 bits.
   always_comb begin
@@ -503,7 +529,8 @@ module ventium_soc
     else if (cs_acpipm) io_rdata = acpipm_rdata32;
     // IDE: 16-bit value (data-port word for 0x1F0; zero-extended register byte
     // otherwise). The pide test reads the data port with `inw` (16-bit).
-    else if (cs_ide || cs_ide_ctl) io_rdata = {16'd0, ide_rdata};
+    else if (cs_ide || cs_ide_ctl)   io_rdata = {16'd0, ide_rdata};
+    else if (cs_ide2 || cs_ide2_ctl) io_rdata = {16'd0, ide2_rdata};
     // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
 
