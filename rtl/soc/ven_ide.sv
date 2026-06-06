@@ -9,8 +9,9 @@
 //   M8.4d: + SET MULTIPLE (0xC6), SET FEATURES (0xEF, incl 0x03 transfer-mode /
 //          0x02+0x82 write-cache patching the cached IDENTIFY words 62/63/85/88),
 //          and SRST (0x3F6 bit2). SET MULTIPLE is status-only (qemu does NOT patch
-//          the cached IDENTIFY w59). Tier 2 (0x91 geometry, CHS reg-advance) +
-//          READ/WRITE MULTIPLE + the register-trajectory lag + LBA48 deferred.
+//          the cached IDENTIFY w59 — but M8.4d2 makes 0xC6 store the runtime block
+//          size). Tier 2 (0x91 geometry, CHS reg-advance) + the register-trajectory
+//          lag + LBA48 deferred (READ/WRITE MULTIPLE landed in M8.4d2).
 //   M8.4e: + parameterized as the SECONDARY channel's EMPTY ATAPI CD-ROM
 //          (IS_ATAPI=1 / HAS_DISK=0): the 0xEB14 signature, DIAGNOSTIC status 0x00.
 //   M8.4f: + IDE BUS-MASTER DMA (HAS_DMA=1 on the primary): the BMIDE register
@@ -28,6 +29,14 @@
 //          shadow (was shared). Idle/write-window data-port reads return 0. The full
 //          PACKET surface (0xA0 / 0xA1, which qemu DRQ-enters) is still deferred — a
 //          DOCUMENTED divergence the directed test issues neither of.
+//   M8.4d2: + READ MULTIPLE (0xC4) / WRITE MULTIPLE (0xC5) block-mode PIO. SET
+//          MULTIPLE (0xC6) now STORES the block size (mult_sectors, reset 16);
+//          0xC4/0xC5 transfer MIN(nsector,mult_sectors) sectors per DRQ window (one
+//          n*512-byte window, DRQ held across the sectors), mult==0 -> abort. The
+//          per-window block r_blk_size is 1 for 0x20/0x30 (so the single-sector
+//          baseline is byte-identical) and mult_sectors for 0xC4/0xC5. w59 stays the
+//          cached 0x0110. (DMA hardening beyond single-sector READ is ORACLE-BLOCKED:
+//          qemu's async DMA completion never runs under the gen_trace single-step.)
 // ============================================================================
 //
 // DEVICE: a single ATA hard disk on the PRIMARY channel, MASTER (unit 0), PIO
@@ -149,6 +158,17 @@
 //     BM_STATUS_ERROR branches, OOR-LBA DMA abort, a mid-flight BMIC STOP (1->0; the
 //     held-OUT synchronous model has no mid-flight window), and secondary-channel DMA.
 //     The engine transfers exactly 128 dwords (the PRD count field is assumed 512).
+//   * BLOCK-MODE (0xC4/0xC5) OOR-CROSSING: qemu range-checks the WHOLE block atomically
+//     (ide_sect_range_ok with n=MIN(nsector,mult) sectors). The FIRST-block straddle is
+//     MODELED + GATE-PROVEN (first_blk_oor -> upfront abort, regs unmoved, matching
+//     qemu). DEFERRED divergences (the test issues none): (1) a WRITE MULTIPLE block
+//     that straddles -- qemu fills the whole block then atomically rejects (no commit),
+//     whereas this RTL aborts per-sector at the first OOR sector (different fill cadence
+//     + commits the in-range prefix); (2) a MULTI-block transfer whose LATER block
+//     straddles -- the re-arm uses the per-sector OOR check, and the nsector reg follows
+//     the documented mid-transfer trajectory (forced 0 vs qemu's remaining). A future
+//     IDE-OOR-fidelity pass would add the WRITE atomic-block-reject + the multi-block
+//     whole-block re-arm check.
 // See verif/sys/tests/pide/manifest.json for the full boundary accounting.
 //
 // DATA PORT (0x1F0): the directed test READS it with `inw %dx,%ax` and WRITES it
@@ -257,6 +277,14 @@ module ven_ide #(
     logic        in_write;     // current PIO transfer is host->device (WRITE SECTORS)
     logic [27:0] xfer_lba;     // current sector LBA (LBA28)
     logic [8:0]  nsec_left;    // sectors remaining in the multi-sector transfer
+    // ---- M8.4d2 block-mode PIO (READ/WRITE MULTIPLE 0xC4/0xC5) ------------
+    // mult_sectors = the SET MULTIPLE (0xC6) block size (reset 16 = MAX_MULT_SECTORS,
+    // qemu ide_reset). r_blk_size = the per-DRQ-window block (1 for 0x20/0x30 SECTORS,
+    // mult_sectors for 0xC4/0xC5 MULTIPLE). blk_left = sectors left in the CURRENT
+    // window: the window holds blk_left*256 words and DRQ stays set across them.
+    logic [7:0]  mult_sectors; // SET MULTIPLE block size (0 = disabled)
+    logic [8:0]  r_blk_size;   // per-window block sectors (1 or mult_sectors)
+    logic [8:0]  blk_left;     // sectors remaining in the current DRQ window
 
     // ---- M8.4f bus-master DMA: BMIDE register block + a PRD-walk/sector-copy FSM.
     //   BMIC  (off 0): bit0 START (SSBM), bit3 RWCON (1=device->memory READ DMA).
@@ -455,6 +483,17 @@ module ven_ide #(
     // (=128) is the sector count; valid LBAs are 0..DISK_SECTORS-1.
     localparam logic [27:0] NSECT28 = 28'(DISK_SECTORS);
     wire oor_read = (issue_lba >= NSECT28);
+    // ---- M8.4d2 block-mode helpers: the transfer's total sector count (nsector,
+    //      0 -> 256) and the first window's block = MIN(total, mult_sectors). ----
+    wire [8:0] init_nsec = (r_nsector == 8'd0) ? 9'd256 : {1'b0, r_nsector};
+    wire [8:0] blk_min   = (init_nsec < {1'b0, mult_sectors})
+                           ? init_nsec : {1'b0, mult_sectors};
+    // M8.4d2: READ MULTIPLE range-checks the WHOLE first block atomically (qemu
+    // ide_sect_range_ok with n=blk_min sectors) -> a block whose start is in-range
+    // but whose end straddles the last LBA aborts ENTIRELY upfront. (The per-sector
+    // oor_read covers SECTORS 0x20; this covers the 0xC4 block. WRITE-side block
+    // straddle + a multi-block LATER straddle stay documented divergences.)
+    wire first_blk_oor = ({1'b0, issue_lba} + {20'd0, blk_min}) > {1'b0, NSECT28};
 
     // ---- task-file LBA-register advance (qemu ide_set_sector, LBA28) -------
     // After a completed sector transfer qemu rewrites the task file to the NEXT
@@ -489,6 +528,9 @@ module ven_ide #(
             in_write  <= 1'b0;
             xfer_lba  <= 28'd0;
             nsec_left <= 9'd0;
+            mult_sectors <= 8'd16;       // ide_reset: MAX_MULT_SECTORS (16)
+            r_blk_size   <= 9'd1;        // default per-window block = 1 sector
+            blk_left     <= 9'd1;
             irq14     <= 1'b0;
             r_w62     <= 16'h0007;
             r_w63     <= 16'h0007;
@@ -530,13 +572,24 @@ module ven_ide #(
                                     r_status <= STAT_ABORT;         // 0x41 / 0x04
                                     r_error  <= ERR_ABRT;           // (regs NOT
                                     irq14    <= ~nien;              //  advanced)
-                                end else if (nsec_left > 9'd1) begin // in-range,more
-                                    xfer_lba  <= xfer_lba + 28'd1;  // next sector
+                                end else if (blk_left > 9'd1) begin // M8.4d2 INTRA-block
+                                    // WRITE MULTIPLE: next sector in the SAME window;
+                                    // DRQ stays, no IRQ, no reg advance (0x30: blk=1,
+                                    // never taken). The per-word disk[] commit above
+                                    // already targeted this sector via xfer_lba.
+                                    data_idx  <= 9'd0;
+                                    xfer_lba  <= xfer_lba + 28'd1;
                                     nsec_left <= nsec_left - 9'd1;
-                                    data_idx  <= 9'd0;              // re-arm DRQ
-                                    irq14     <= ~nien;             // (nIEN: 0)
+                                    blk_left  <= blk_left - 9'd1;
+                                end else if (nsec_left > 9'd1) begin // BLOCK boundary: re-arm
+                                    xfer_lba  <= xfer_lba + 28'd1;
+                                    nsec_left <= nsec_left - 9'd1;
+                                    blk_left  <= ((nsec_left - 9'd1) < r_blk_size)
+                                                 ? (nsec_left - 9'd1) : r_blk_size;
+                                    data_idx  <= 9'd0;              // re-arm DRQ window
+                                    irq14     <= ~nien;             // one IRQ per block
                                     advance_lba_regs(xfer_lba + 28'd1);
-                                end else begin                       // in-range,last
+                                end else begin                       // FINAL
                                     data_idx <= 9'd0;
                                     in_write <= 1'b0;
                                     r_status <= STAT_IDLE;          // DRQ cleared
@@ -643,6 +696,8 @@ module ven_ide #(
                                     in_write    <= 1'b0;
                                     data_idx    <= 9'd0;
                                     r_status    <= STAT_DRQ;
+                                    blk_left    <= 9'd1;     // single 256-word window
+                                    r_blk_size  <= 9'd1;
                                     irq14       <= ~nien;
                                 end
                                 8'h20, 8'h21: begin       // READ SECTOR(S)
@@ -658,6 +713,8 @@ module ven_ide #(
                                         in_write    <= 1'b0;
                                         data_idx    <= 9'd0;
                                         r_status    <= STAT_DRQ;
+                                        blk_left    <= 9'd1;   // SECTORS: 1 sector/window
+                                        r_blk_size  <= 9'd1;
                                         irq14       <= ~nien;
                                     end
                                 end
@@ -671,7 +728,49 @@ module ven_ide #(
                                     in_write    <= 1'b1;  // host->device DRQ
                                     data_idx    <= 9'd0;
                                     r_status    <= STAT_DRQ;  // 0x58 immediately
+                                    blk_left    <= 9'd1;   // SECTORS: 1 sector/window
+                                    r_blk_size  <= 9'd1;
                                     irq14       <= ~nien;
+                                end
+                                // ---- M8.4d2 READ/WRITE MULTIPLE (block mode) ----
+                                // The block size is mult_sectors (SET MULTIPLE); the
+                                // DRQ window holds MIN(nsector,mult)*256 words. mult==0
+                                // (no SET MULTIPLE / disabled) -> abort BEFORE any range
+                                // check (qemu cmd_read/write_multiple core.c:1499/1515).
+                                8'hC4: begin              // READ MULTIPLE
+                                    if (mult_sectors == 8'd0) begin
+                                        r_status <= STAT_ABORT; r_error <= ERR_ABRT;
+                                        irq14    <= ~nien;
+                                    end else if (first_blk_oor) begin // whole-block OOR:
+                                        r_status <= STAT_ABORT; r_error <= ERR_ABRT;
+                                        irq14    <= ~nien;            // abort, regs unmoved
+                                    end else begin
+                                        xfer_lba    <= issue_lba;
+                                        nsec_left   <= init_nsec;
+                                        r_blk_size  <= {1'b0, mult_sectors};
+                                        blk_left    <= blk_min;        // MIN(init_nsec,mult)
+                                        in_identify <= 1'b0;
+                                        in_write    <= 1'b0;
+                                        data_idx    <= 9'd0;
+                                        r_status    <= STAT_DRQ;
+                                        irq14       <= ~nien;
+                                    end
+                                end
+                                8'hC5: begin              // WRITE MULTIPLE
+                                    if (mult_sectors == 8'd0) begin
+                                        r_status <= STAT_ABORT; r_error <= ERR_ABRT;
+                                        irq14    <= ~nien;
+                                    end else begin        // no upfront range check (deferred)
+                                        xfer_lba    <= issue_lba;
+                                        nsec_left   <= init_nsec;
+                                        r_blk_size  <= {1'b0, mult_sectors};
+                                        blk_left    <= blk_min;
+                                        in_identify <= 1'b0;
+                                        in_write    <= 1'b1;
+                                        data_idx    <= 9'd0;
+                                        r_status    <= STAT_DRQ;
+                                        irq14       <= ~nien;
+                                    end
                                 end
                                 8'hC8: begin              // READ DMA (M8.4f)
                                     // ARM only (NO PIO data-port phase); the engine
@@ -712,9 +811,12 @@ module ven_ide #(
                                         r_error  <= ERR_ABRT;
                                         irq14    <= ~nien;
                                     end else begin
-                                        // accept (runtime mult_sectors updates,
-                                        // but the cached IDENTIFY w59 is NOT
-                                        // patched by qemu -- status-only here).
+                                        // accept: store the runtime block size that
+                                        // 0xC4/0xC5 consume (qemu mult_sectors =
+                                        // nsector&0xff; nsector==0 -> 0 = disabled).
+                                        // The cached IDENTIFY w59 is NOT patched (qemu
+                                        // caches it on the first 0xEC -> stays 0x0110).
+                                        mult_sectors <= r_nsector;
                                         r_status <= STAT_IDLE;
                                         irq14    <= ~nien;
                                     end
@@ -826,18 +928,31 @@ module ven_ide #(
                 // ----- data-port READ drain (the !in_write guard drops a read in
                 //       a WRITE-DRQ window so it consumes no slot) --------------
                 if (data_idx == 9'd255) begin
-                    if (!in_identify && nsec_left > 9'd1) begin
+                    if (blk_left > 9'd1) begin
+                        // M8.4d2 INTRA-block (READ/WRITE MULTIPLE): advance to the next
+                        // sector WITHIN the same DRQ window -> DRQ stays set, NO IRQ, NO
+                        // reg advance (qemu holds the n*512-byte window open). For
+                        // 0x20/0x21/0xEC blk_left==1 so this branch is never taken.
+                        data_idx  <= 9'd0;
+                        xfer_lba  <= xfer_lba + 28'd1;
+                        nsec_left <= nsec_left - 9'd1;
+                        blk_left  <= blk_left - 9'd1;
+                    end else if (!in_identify && nsec_left > 9'd1) begin
                         if ((xfer_lba + 28'd1) >= NSECT28) begin // next sector OOR:
                             data_idx <= 9'd0;                    // abort AFTER this
                             r_status <= STAT_ABORT;              // in-range sector
                             r_error  <= ERR_ABRT;                // is delivered
                             irq14    <= ~nien;
                             advance_lba_regs(xfer_lba + 28'd1);  // regs -> OOR LBA
-                        end else begin                           // in-range: re-arm
-                            xfer_lba  <= xfer_lba + 28'd1;       // next sector
+                        end else begin                           // BLOCK boundary: re-arm
+                            xfer_lba  <= xfer_lba + 28'd1;       // next window's start
                             nsec_left <= nsec_left - 9'd1;
-                            data_idx  <= 9'd0;                   // new DRQ buffer
-                            irq14     <= ~nien;
+                            // next window block = MIN(remaining, r_blk_size); for
+                            // SECTORS (r_blk_size=1) this is always 1 (per-sector re-arm).
+                            blk_left  <= ((nsec_left - 9'd1) < r_blk_size)
+                                         ? (nsec_left - 9'd1) : r_blk_size;
+                            data_idx  <= 9'd0;                   // new DRQ window
+                            irq14     <= ~nien;                  // one IRQ per block
                             advance_lba_regs(xfer_lba + 28'd1);
                         end
                     end else begin

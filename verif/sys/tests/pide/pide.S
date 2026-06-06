@@ -156,9 +156,39 @@
     .equ R_DMA_W0,     0x000021A0 /* DMA'd buffer word0   = 0x0000  (LBA0 w0)     */
     .equ R_DMA_W255,   0x000021A4 /* DMA'd buffer word255 = 0xAA55  (boot sig)    */
     .equ R_DMA_C8ST,   0x000021A8 /* status after 0xC8, pre-START = 0x58 (DRQ)    */
+    /* --- M8.4d2 READ/WRITE MULTIPLE (0xC4/0xC5) block-mode PIO slots --- */
+    .equ R_RMSM_ST,    0x000021AC /* SET MULTIPLE 4 status = 0x50                 */
+    .equ R_RM_MID,     0x000021B0 /* RD-MULT: status after 256 words = 0x58 (DRQ) */
+    .equ R_RM_W0,      0x000021B4 /* RD-MULT word0   = 0x0000 (LBA0)              */
+    .equ R_RM_W255,    0x000021B8 /* RD-MULT word255 = 0xAA55 (LBA0 boot sig)     */
+    .equ R_RM_W256,    0x000021BC /* RD-MULT word256 = 0x0100 (LBA1 w0)           */
+    .equ R_RM_W512,    0x000021C0 /* RD-MULT word512 = 0x0200 (LBA2 w0)           */
+    .equ R_RM_W768,    0x000021C4 /* RD-MULT word768 = 0x0300 (LBA3 w0)           */
+    .equ R_RM_ST,      0x000021C8 /* RD-MULT post status = 0x50                   */
+    .equ R_RM_NS,      0x000021CC /* RD-MULT nsector after = 0x00                 */
+    .equ R_RM_SEC,     0x000021D0 /* RD-MULT sector after = 0x04 (LBA0+4)         */
+    .equ R_RMP_MID,    0x000021D4 /* RD-MULT partial: status at block bndry = 0x58*/
+    .equ R_RMP_W1024,  0x000021D8 /* RD-MULT partial: block2 word0 = 0x0400 (LBA4)*/
+    .equ R_RMP_W1280,  0x000021DC /* RD-MULT partial: block2 word256 = 0x0500     */
+    .equ R_RMP_ST,     0x000021E0 /* RD-MULT partial: post status = 0x50          */
+    .equ R_RMP_NS,     0x000021E4 /* RD-MULT partial: nsector = 0x00              */
+    .equ R_RMP_SEC,    0x000021E8 /* RD-MULT partial: sector = 0x06 (LBA0+6)      */
+    .equ R_RM_ABRT_ST, 0x000021EC /* RD-MULT mult=0 abort status = 0x41           */
+    .equ R_RM_ABRT_ER, 0x000021F0 /* RD-MULT mult=0 abort error  = 0x04           */
+    .equ R_WM_DRQ,     0x000021F4 /* WR-MULT: status after 0xC5 = 0x58            */
+    .equ R_WM_ST,      0x000021F8 /* WR-MULT post status = 0x50                   */
+    .equ R_WM_NS,      0x000021FC /* WR-MULT nsector after = 0x00                 */
+    .equ R_WM_SEC,     0x00002200 /* WR-MULT sector after = 0x72 (LBA112+2=114)   */
+    .equ R_WM_RB0,     0x00002204 /* WR-MULT read-back LBA112 word0 = 0xE000      */
+    .equ R_WM_RB256,   0x00002208 /* WR-MULT read-back LBA113 word0 = 0xE100      */
+    .equ R_RM_W59,     0x0000220C /* re-IDENTIFY w59 = 0x0110 (cache freeze)      */
+    .equ R_RMX_ST,     0x00002210 /* RD-MULT straddling-block OOR: status = 0x41  */
+    .equ R_RMX_ER,     0x00002214 /* RD-MULT straddling-block OOR: error  = 0x04  */
+    .equ R_RMX_SEC,    0x00002218 /* RD-MULT straddling-block OOR: sector reg unmoved = 0x7E (126) */
 
     .equ PRD_TBL,    0x00005000  /* PRD table (8 bytes, dword-aligned) */
     .equ DMA_BUF,    0x00006000  /* DMA target buffer (512 bytes)      */
+    .equ BUF_RM,     0x00008000  /* M8.4d2 block-mode drain buffer (4 KiB, < stack 0x90000) */
     .equ BUF_ID,     0x00004000  /* IDENTIFY 512-byte block       */
     .equ BUF_S0,     0x00004200  /* sector 0   block              */
     .equ BUF_S127,   0x00004400  /* sector 127 block              */
@@ -1042,6 +1072,146 @@ pm32_entry:
 1:  movl    (%esi), %eax; addl $4, %esi; decl %ecx; jnz 1b
     movl    DMA_BUF,     %eax; andl $0xFFFF, %eax; movl %eax, R_DMA_W0
     movl    DMA_BUF+508, %eax; shrl $16, %eax;     movl %eax, R_DMA_W255
+
+    /* =============== M8.4d2 READ/WRITE MULTIPLE (0xC4/0xC5) ============= */
+    /* Block-mode PIO: SET MULTIPLE (0xC6) sets the block size; 0xC4/0xC5 transfer
+     * MIN(nsector, mult_sectors) sectors per DRQ window (one window of n*512 B),
+     * vs one-sector-per-window for 0x20/0x30. The ONLY qemu difference is
+     * req_nb_sectors (mult vs 1); the drain/fill engine is shared. */
+
+    /* TEST A: SET MULTIPLE 4, then READ MULTIPLE 4 @ LBA0 (single 4-sector block) */
+    movb    $4, %al;    movw $0x1F2, %dx; outb %al, %dx       /* nsector=4 */
+    movb    $0xC6, %al; movw $0x1F7, %dx; outb %al, %dx       /* SET MULTIPLE */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMSM_ST /* 0x50 */
+    movb    $4, %al;    movw $0x1F2, %dx; outb %al, %dx       /* nsector=4 */
+    xorb    %al, %al
+    movw    $0x1F3, %dx; outb %al, %dx                        /* LBA[7:0]=0 */
+    movw    $0x1F4, %dx; outb %al, %dx
+    movw    $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx       /* LBA master */
+    movb    $0xC4, %al; movw $0x1F7, %dx; outb %al, %dx       /* READ MULTIPLE */
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail                               /* DRQ set (0x58) */
+    /* drain sector 0 (256 words) into BUF_RM */
+    movl    $256, %ecx; movl $BUF_RM, %edi; movw $0x1F0, %dx
+2:  inw     %dx, %ax; stosw; decl %ecx; jnz 2b
+    /* DISCRIMINATOR: the block window does NOT re-arm at the sector-0/1 boundary
+     * (DRQ still set, status 0x58) -- a per-sector-window RTL would diverge here */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RM_MID  /* 0x58 */
+    /* drain sectors 1-3 (768 words), continuing into BUF_RM */
+    movl    $768, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; stosw; decl %ecx; jnz 2b
+    movl    BUF_RM,      %eax; andl $0xFFFF, %eax; movl %eax, R_RM_W0    /* 0x0000 */
+    movl    BUF_RM+508,  %eax; shrl $16, %eax;     movl %eax, R_RM_W255  /* 0xAA55 */
+    movl    BUF_RM+512,  %eax; andl $0xFFFF, %eax; movl %eax, R_RM_W256  /* 0x0100 */
+    movl    BUF_RM+1024, %eax; andl $0xFFFF, %eax; movl %eax, R_RM_W512  /* 0x0200 */
+    movl    BUF_RM+1536, %eax; andl $0xFFFF, %eax; movl %eax, R_RM_W768  /* 0x0300 */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RM_ST  /* 0x50 */
+    movw    $0x1F2, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RM_NS  /* 0x00 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RM_SEC /* 0x04 */
+
+    /* TEST B: partial last block -- READ MULTIPLE nsector=6 @ LBA0, mult still 4
+     * -> block1 = 4 sectors (1024 words), block2 = MIN(2,4) = 2 sectors (512 words) */
+    movb    $6, %al; movw $0x1F2, %dx; outb %al, %dx
+    xorb    %al, %al
+    movw    $0x1F3, %dx; outb %al, %dx
+    movw    $0x1F4, %dx; outb %al, %dx
+    movw    $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx
+    movb    $0xC4, %al; movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    /* drain block1 (4 sectors = 1024 words), graded per-record (discard) */
+    movl    $1024, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b
+    /* block boundary: window RE-ARMED for block2 (DRQ still set, 0x58) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMP_MID /* 0x58 */
+    /* drain block2 (2 sectors = 512 words) into BUF_RM */
+    movl    $512, %ecx; movl $BUF_RM, %edi; movw $0x1F0, %dx
+2:  inw     %dx, %ax; stosw; decl %ecx; jnz 2b
+    movl    BUF_RM,     %eax; andl $0xFFFF, %eax; movl %eax, R_RMP_W1024 /* 0x0400 (LBA4 w0) */
+    movl    BUF_RM+512, %eax; andl $0xFFFF, %eax; movl %eax, R_RMP_W1280 /* 0x0500 (LBA5 w0) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMP_ST  /* 0x50 */
+    movw    $0x1F2, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMP_NS  /* 0x00 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMP_SEC /* 0x06 */
+
+    /* TEST C: READ MULTIPLE with mult_sectors=0 -> abort (no SET MULTIPLE block).
+     * Disable via SET MULTIPLE 0, then 0xC4 must abort 0x41/0x04 with NO DRQ. */
+    xorb    %al, %al;   movw $0x1F2, %dx; outb %al, %dx       /* nsector=0 */
+    movb    $0xC6, %al; movw $0x1F7, %dx; outb %al, %dx       /* SET MULTIPLE 0 (disable) */
+    movb    $4, %al;    movw $0x1F2, %dx; outb %al, %dx       /* nsector=4 */
+    xorb    %al, %al;   movw $0x1F3, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx
+    movb    $0xC4, %al; movw $0x1F7, %dx; outb %al, %dx       /* READ MULTIPLE (mult=0) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RM_ABRT_ST /* 0x41 */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RM_ABRT_ER /* 0x04 */
+    /* restore the block size for TEST D */
+    movb    $4, %al;    movw $0x1F2, %dx; outb %al, %dx
+    movb    $0xC6, %al; movw $0x1F7, %dx; outb %al, %dx
+
+    /* TEST D: WRITE MULTIPLE 0xC5 @ scratch LBA 112, nsector=2, mult=4 (one 2-sector
+     * window). Fill 0xE0xx then PIO read-back -> proves the block write moved data. */
+    movb    $2, %al;  movw $0x1F2, %dx; outb %al, %dx
+    movb    $112, %al; movw $0x1F3, %dx; outb %al, %dx        /* LBA[7:0]=112 */
+    xorb    %al, %al
+    movw    $0x1F4, %dx; outb %al, %dx
+    movw    $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx
+    movb    $0xC5, %al; movw $0x1F7, %dx; outb %al, %dx        /* WRITE MULTIPLE */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_WM_DRQ /* 0x58 */
+    /* fill 2 sectors (512 words): sector0 = 0xE000+j, sector1 = 0xE100+j */
+    movl    $256, %ecx; movw $0x1F0, %dx; movw $0xE000, %ax
+2:  outw    %ax, %dx; incw %ax; decl %ecx; jnz 2b              /* LBA112: 0xE000..0xE0FF */
+    movl    $256, %ecx; movw $0x1F0, %dx; movw $0xE100, %ax
+2:  outw    %ax, %dx; incw %ax; decl %ecx; jnz 2b              /* LBA113: 0xE100..0xE1FF */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_WM_ST  /* 0x50 */
+    movw    $0x1F2, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_WM_NS  /* 0x00 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_WM_SEC /* 0x72=114 */
+    /* read-back LBA112 (0x20) -> 0xE000 (proves the block write); then LBA113 -> 0xE100 */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $112, %al; movw $0x1F3, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al; movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movl $BUF_RM, %edi; movw $0x1F0, %dx
+2:  inw     %dx, %ax; stosw; decl %ecx; jnz 2b
+    movl    BUF_RM, %eax; andl $0xFFFF, %eax; movl %eax, R_WM_RB0  /* 0xE000 */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $113, %al; movw $0x1F3, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al; movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movl $BUF_RM, %edi; movw $0x1F0, %dx
+2:  inw     %dx, %ax; stosw; decl %ecx; jnz 2b
+    movl    BUF_RM, %eax; andl $0xFFFF, %eax; movl %eax, R_WM_RB256 /* 0xE100 */
+
+    /* TEST E: re-IDENTIFY after SET MULTIPLE -> w59 stays 0x0110 (qemu caches the
+     * IDENTIFY block; cmd_set_multiple_mode never re-patches w59) */
+    movb    $0xEC, %al; movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movl $BUF_RM, %edi; movw $0x1F0, %dx
+2:  inw     %dx, %ax; stosw; decl %ecx; jnz 2b
+    movl    BUF_RM+118, %eax; andl $0xFFFF, %eax; movl %eax, R_RM_W59 /* word59 = 0x0110 */
+
+    /* TEST F: READ MULTIPLE whose BLOCK STRADDLES the last LBA. qemu range-checks the
+     * WHOLE block atomically (ide_sect_range_ok with n=MIN(nsector,mult) sectors): a
+     * block whose start is in-range but end is past the last sector aborts ENTIRELY
+     * (0x41/0x04, NO DRQ, regs UNMOVED), delivering zero sectors. mult is 4 (restored
+     * in TEST C); 0xC4 @ LBA126 nsec=4 -> the 4-sector block [126..129] straddles
+     * (128,129 OOR with DISK_SECTORS=128). */
+    movb    $4, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $126, %al; movw $0x1F3, %dx; outb %al, %dx        /* LBA[7:0]=126 */
+    xorb    %al, %al
+    movw    $0x1F4, %dx; outb %al, %dx
+    movw    $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al; movw $0x1F6, %dx; outb %al, %dx
+    movb    $0xC4, %al; movw $0x1F7, %dx; outb %al, %dx        /* READ MULTIPLE (straddles) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMX_ST  /* 0x41 */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMX_ER  /* 0x04 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RMX_SEC /* 0x7E (126, unmoved) */
 
     /* ====================== deterministic end-state ===================== */
     movl    BUF_ID+2,   %esi            /* IDENTIFY word 1 (cyls = 2)        */

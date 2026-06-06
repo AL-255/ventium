@@ -1770,6 +1770,67 @@ live golden before the RTL was written).
   DMA abort, mid-flight BMIC STOP, secondary-channel DMA, and the full PCI host bridge
   (M8.5). The engine transfers exactly 128 dwords (the PRD count field is assumed 512).
 
+### M8.4g — DMA hardening: ORACLE-BLOCKED (investigated, no RTL change) (2026-06-06)
+
+**Finding (not a milestone — a documented limit).** Asked to harden the DMA (WRITE DMA,
+multi-sector, multi-PRD), a research workflow + empirical probing established that **only a
+single-PRD single-sector READ DMA is differentiable under the `gen_trace` single-step
+oracle.** `gen_trace` single-steps with pure `vCont;s` and **never pumps qemu's main loop /
+block-AIO**, so qemu's async DMA completion does not run during a trace; the M8.4f
+single-sector READ works only because qemu's block layer completes that small cached read
+*inline*. WRITE DMA (0xCA), multi-sector READ (nsector=2), and multi-PRD single-sector (2
+PRDs) **all** leave status 0x58 / regs unadvanced / buffer untransferred even after 256 polls
+(DMAING clears but the ATA command never completes) — an oracle limitation, not an RTL gap.
+No RTL change can make qemu produce a completed state to match. The probe was reverted (repo
+stays green at M8.4f); the user chose to **pivot to PIO fidelity (M8.4d2)** rather than invest
+in a risky `gen_trace` AIO-pump that would touch all SoC goldens. Recorded so it is not
+re-attempted.
+
+### M8.4d2 — READ MULTIPLE / WRITE MULTIPLE (0xC4/0xC5) block-mode PIO (2026-06-06)
+
+**What this is.** The highest-Win95-value deferred PIO item (a research workflow picked it over
+the riskier 0x91-geometry / CHS-reg-advance / LBA-trajectory items). Block-mode PIO: SET
+MULTIPLE (0xC6) sets the block size; 0xC4/0xC5 transfer `MIN(nsector, mult_sectors)` sectors per
+DRQ window (one `n*512`-byte window, DRQ held across the sectors) vs one-sector-per-window for
+0x20/0x30. The `pide` gate grows to **EQUIVALENT 38656/38656** (first RTL run, oracle-first).
+
+- **`ven_ide.sv` (additive — the only qemu difference vs 0x20/0x30 is `req_nb_sectors`).** A
+  `mult_sectors` reg (reset 16 = `MAX_MULT_SECTORS`); the existing 0xC6 accept branch now STORES
+  `mult_sectors <= nsector` (w59 stays the cached constant 0x0110 — qemu freezes the IDENTIFY on
+  the first 0xEC). A per-window `r_blk_size` (1 for 0x20/0x21/0x30/0x31/0xEC; `mult_sectors` for
+  0xC4/0xC5) + `blk_left` counter. The 0xC4/0xC5 arms (mult==0 → abort *before* the range check).
+  The READ-drain + WRITE-fill wraps became **two-level**: intra-block (`blk_left>1`) advances the
+  sector but KEEPS the DRQ window open (no IRQ, no reg advance); block boundary re-arms; final
+  clears DRQ. **Seeding `blk_left=1` for the existing commands makes the pre-M8.4d2 24040-record
+  baseline byte-identical** (the new intra-block branch is provably never taken for them — gate-proven).
+- **Gate (EQUIVALENT 38656/38656), all non-vacuous.** TEST A (READ MULTIPLE 4 @ LBA0): the
+  status stays **0x58 after draining sector 0** (the block window does NOT re-arm at the
+  sector-0/1 boundary — a per-sector-window RTL would diverge), 1024 words byte-identical to disk
+  LBA0-3, post sector 0x04. TEST B (partial, nsec=6 mult=4): block1=4 sectors, then re-arm
+  (0x58), block2=`MIN(2,4)`=2 sectors (word0=0x0400 LBA4), post sector 0x06. TEST C: 0xC4 with
+  mult=0 → abort 0x41/0x04. TEST D (WRITE MULTIPLE @ LBA112 nsec=2): read-back 0xE000/0xE100
+  proves the block write moved 2 sectors. TEST E: re-IDENTIFY w59 stays 0x0110 (cache freeze).
+- **Adversarial review (3-agent workflow, 9 confirmed / 3 rejected).** Verified the two-level
+  wrap preserves the 0x20/0x30/0xEC baseline byte-identically (no regression). Found one real
+  **HIGH** divergence: block-mode (0xC4/0xC5) OOR was range-checked **per-sector**, but qemu
+  checks the **whole block atomically** (`ide_sect_range_ok` with n=`MIN(nsector,mult)`) — a block
+  *straddling* the last LBA aliases data (READ) / commits a partial prefix (WRITE) and completes
+  0x50, where qemu rejects the whole block. **Folded back** the clean READ-side fix: a
+  `first_blk_oor` whole-block check at the 0xC4 arm → upfront abort (status 0x41, error 0x04, regs
+  unmoved), gate-proven by **TEST F** (0xC4 @ LBA126 nsec=4, the 4-sector block straddles → abort,
+  sector reg unmoved 0x7E). The WRITE-side straddle (qemu fills-then-atomic-rejects vs the RTL's
+  per-sector abort) and the multi-block later-straddle (entangled with the documented nsector
+  trajectory) are honestly documented as KNOWN divergences (the test issues none) for a future
+  IDE-OOR-fidelity pass. Also fixed a header overclaim (the "matches ide_sect_range_ok" note is
+  scoped to the per-sector 0x20/0x30 path).
+- **No regression** (the change edits the load-bearing READ/WRITE drain). `make verify-soc`
+  **5/5 PASS** (pide 38656/38656); `make verify` **69/69 cache hits, 0 regenerated**; SoC lints
+  clean. RTL: `rtl/soc/ven_ide.sv`; test: `pide.S` (MAXI 26000→42000). `ventium-refs` untouched.
+- **Deferred to M8.4d3 (the test issues none):** the 0x91 INIT-DEV-PARAMS geometry side-effect
+  + the CHS-mode register-advance (share `r_heads/r_sectors`; legacy/Win95-irrelevant), the
+  LBA-mode mid-transfer register trajectory (agrees post-transfer; the mid-transfer flip is
+  gdbstub-timing-fragile), and LBA48 (0x24/0x34/0x29/0x39).
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
