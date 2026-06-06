@@ -5,7 +5,8 @@ D-cache, the split I/D TLB, and the slow-path prefetch buffer. Each is a table,
 refreshed in full each frame (all are small: <=256 lines / 32 TLB entries)."""
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QTableWidget, QTableWidgetItem, QHeaderView,
-                               QAbstractItemView, QLabel, QGridLayout, QSizePolicy)
+                               QAbstractItemView, QLabel, QGridLayout, QSizePolicy,
+                               QLineEdit, QPushButton, QCheckBox)
 from PySide6.QtGui import QFont, QColor, QBrush, QPainter
 from PySide6.QtCore import Qt, QRect
 
@@ -148,6 +149,10 @@ class TablesView(QWidget):
         self.hot = _mk_table(["PC", "hits", "cycles", "cyc%", "cost", "instruction"],
                              [76, 50, 64, 50, 120, 9999])
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
+
+        # --- Memory hex/ASCII inspector (follow EIP/ESP) ---
+        self.mem = MemoryView()
+        self.tabs.addTab(self.mem, "Memory")
         self._bits = 32
 
     def set_bits(self, bits):
@@ -285,3 +290,125 @@ class _PrefetchView(QWidget):
             self.byte_lbls[i].setText(f"{ib[i]:02x}")
         txt, sz = disasm.text(ib, s.eip, bits)
         self.decode.setText(f"ibuf decode @ eip:  <b>{txt}</b>  ({sz} bytes)")
+
+
+class _HexDump(QWidget):
+    """Classic 16-bytes-per-row hex + ASCII dump, painted; highlights the bytes
+    at EIP (cyan) and ESP (amber) when they fall in the viewed window."""
+    ROW_H = 15
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data = b""
+        self.base = 0
+        self.eip = 0
+        self.esp = 0
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set(self, backend, base, eip, esp):
+        rows = max(8, self.height() // self.ROW_H)
+        self.base = base & 0xFFFFFFFF
+        self.data = backend.mem_read(self.base, rows * 16)
+        self.eip = eip
+        self.esp = esp
+        self.update()
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#0b0f14"))
+        p.setFont(_mono(9))
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(p.font())
+        cw = fm.horizontalAdvance("0")
+        ax = 4
+        hx = ax + 9 * cw                    # hex column start
+        asc = hx + (16 * 3 + 1) * cw + cw   # ascii column start
+        rows = len(self.data) // 16
+        for r in range(rows):
+            y = r * self.ROW_H
+            a = self.base + r * 16
+            p.setPen(QColor("#586069"))
+            p.drawText(QRect(ax, y, 9 * cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{a:08x}")
+            for c in range(16):
+                b = self.data[r * 16 + c]
+                addr = a + c
+                gap = 1 if c >= 8 else 0
+                x = hx + (c * 3 + gap) * cw
+                if addr == self.eip or (self.eip <= addr < self.eip + 1):
+                    pass
+                if self.eip <= addr < self.eip + 4:
+                    p.fillRect(QRect(x - 1, y + 1, 2 * cw + 1, self.ROW_H - 2), QColor(40, 70, 90))
+                elif self.esp <= addr < self.esp + 4:
+                    p.fillRect(QRect(x - 1, y + 1, 2 * cw + 1, self.ROW_H - 2), QColor(80, 64, 24))
+                p.setPen(QColor("#c9d1d9" if b else "#3d444d"))
+                p.drawText(QRect(x, y, 2 * cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{b:02x}")
+                ch = chr(b) if 32 <= b < 127 else "."
+                p.setPen(QColor("#79c0ff" if 32 <= b < 127 else "#3d444d"))
+                p.drawText(QRect(asc + c * cw, y, cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, ch)
+        p.end()
+
+
+class MemoryView(QWidget):
+    """Arbitrary-memory hex/ASCII inspector: type an address, or follow EIP/ESP."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.backend = None
+        self.addr = 0x08048000
+        self.follow = None        # None | 'eip' | 'esp'
+        v = QVBoxLayout(self); v.setContentsMargins(4, 4, 4, 4); v.setSpacing(4)
+        bar = QHBoxLayout(); bar.setSpacing(5)
+        bar.addWidget(QLabel("addr"))
+        self.addr_e = QLineEdit("0x08048000"); self.addr_e.setFixedWidth(96)
+        self.addr_e.setFont(_mono(9))
+        self.addr_e.returnPressed.connect(self._go)
+        bar.addWidget(self.addr_e)
+        go = QPushButton("Go"); go.clicked.connect(self._go); bar.addWidget(go)
+        be = QPushButton("→EIP"); be.clicked.connect(lambda: self._set_follow("eip")); bar.addWidget(be)
+        bs = QPushButton("→ESP"); bs.clicked.connect(lambda: self._set_follow("esp")); bar.addWidget(bs)
+        for d, lab in ((-256, "◀"), (256, "▶")):
+            b = QPushButton(lab); b.setFixedWidth(28)
+            b.clicked.connect(lambda _=0, dd=d: self._page(dd)); bar.addWidget(b)
+        self.follow_lbl = QLabel(""); self.follow_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
+        bar.addWidget(self.follow_lbl); bar.addStretch(1)
+        v.addLayout(bar)
+        self.dump = _HexDump()
+        v.addWidget(self.dump, 1)
+
+    def _go(self):
+        try:
+            self.addr = int(self.addr_e.text(), 0) & 0xFFFFFFF0
+        except ValueError:
+            return
+        self.follow = None
+        self._refresh()
+
+    def _set_follow(self, which):
+        self.follow = which
+        if which == "eip":
+            self.addr = getattr(self, "_eip", self.addr) & 0xFFFFFFF0
+        elif which == "esp":
+            self.addr = getattr(self, "_esp", self.addr) & 0xFFFFFFF0
+        self._refresh()
+
+    def _page(self, delta):
+        self.follow = None
+        self.addr = (self.addr + delta) & 0xFFFFFFF0
+        self._refresh()
+
+    def set_state(self, backend, state):
+        self.backend = backend
+        self._eip = state.eip
+        self._esp = state.gpr[4]
+        if self.follow == "eip":
+            self.addr = self._eip & 0xFFFFFFF0
+        elif self.follow == "esp":
+            self.addr = self._esp & 0xFFFFFFF0
+        self._refresh()
+
+    def _refresh(self):
+        if self.backend is None:
+            return
+        self.addr_e.setText(f"0x{self.addr:08x}")
+        self.follow_lbl.setText(f"following {self.follow.upper()}" if self.follow else
+                                "cyan=EIP  amber=ESP")
+        self.dump.set(self.backend, self.addr, getattr(self, "_eip", 0), getattr(self, "_esp", 0))

@@ -22,17 +22,21 @@ not repeat itself.
   cycle axis; **distinct per-stage colours + glyphs** — `F` fetch blue, `L`
   I-cache-fill amber, `D` decode teal, `M` mem orange, `X` exec green (FP
   purple), `W` wb magenta, `=` stall grey, `!` flush red; legend on its own line
-  with each swatch tightly paired to its label. The stage board is a COMPACT
-  snapshot (the Konata view gets the height — ~29 rows visible). Two-way
-  selection: click a Konata instruction (cell or label) → selects + centres its
-  trace row, and vice-versa.
+  with each swatch tightly paired to its label; walk = pink (distinct from the
+  flush red). **Contiguous stall runs collapse into one `=N` block** (N = stall
+  cycles) instead of a wall of grey cells; **per-cycle vertical gridlines** every
+  10 cycles; the instruction gutter is wide enough for full mnemonics. The stage
+  board is a COMPACT snapshot (the Konata view gets the height — ~29 rows). Two-
+  way selection: click a Konata instruction (cell or label) ↔ trace row.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
   truncated); split TLB; prefetch buffer (ibuf + decode); **Hotspots** = a
   per-PC cycle-cost profile (PC | hits | cycles | cyc% | amber cost bar |
   instruction, sorted by total cycles — stalls inflate the cost so the stalled
-  load/branch PCs bubble to the top, perf/VTune-style).
+  load/branch PCs bubble to the top, perf/VTune-style); **Memory** = a hex/ASCII
+  inspector (type an address or click →EIP/→ESP to follow, ◀/▶ to page; EIP bytes
+  cyan, ESP bytes amber).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction; x86 byte-field colouring (prefix gray / opcode blue / ModRM green
   / SIB purple / memory-offset yellow / immediate red / **branch-rel orange**),
@@ -49,6 +53,20 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 7 — Memory inspector + stall-run collapse + cycle gridlines
+- **New feature — Memory hex/ASCII inspector tab:** type an address or click
+  →EIP / →ESP to follow them, ◀/▶ to page; EIP bytes highlighted cyan, ESP amber.
+- **Konata stall runs now collapse** into one `=N` block (N = stall cycles) — a
+  D-cache miss reads as `=7` instead of seven indistinct grey cells.
+- **Per-cycle vertical gridlines** every 10 cycles on the Konata view so a cell's
+  exact cycle is readable.
+- **Widened the instruction gutter** so full mnemonics show
+  (`mov eax, dword ptr [esi]` no longer `…`-truncated).
+- **Real bug fix:** page-walk colour was identical to flush (`C_WALK ==
+  C_MISPRED == #f85149`); walk is now pink, distinct from the flush red.
+- **Trace:** widened the bytes column so common 9–10-byte encodings show in full
+  before the `…` clip kicks in (balancing iter5's anti-collision clip).
 
 ### Iteration 6 — Hotspots profile + reclaim Konata height + glyph/legend fixes
 - **New feature — per-PC Hotspots tab** (perf/VTune-style): aggregates each PC's
