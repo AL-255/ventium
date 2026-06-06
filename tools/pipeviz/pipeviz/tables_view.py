@@ -142,10 +142,47 @@ class TablesView(QWidget):
         # --- Prefetch buffer (ibuf) ---
         self.pf = _PrefetchView()
         self.tabs.addTab(self.pf, "Prefetch")
+
+        # --- Hotspots (per-PC cycle-cost profile, perf/VTune-style) ---
+        self.hot_lbl = QLabel()
+        self.hot = _mk_table(["PC", "hits", "cycles", "cyc%", "cost", "instruction"],
+                             [76, 50, 64, 50, 120, 9999])
+        self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
         self._bits = 32
 
     def set_bits(self, bits):
         self._bits = bits
+
+    def set_hotspots(self, insns):
+        """Per-PC cycle-cost profile (perf-style): aggregate the reconstructed
+        instruction lifecycles by PC -> hit count + total cycles occupied; the
+        top consumers (often stalled loads/branches) bubble to the top."""
+        agg = {}
+        total = 0
+        for it in insns:
+            span = it["c1"] - it["c0"] + 1
+            total += span
+            e = agg.get(it["pc"])
+            if e is None:
+                agg[it["pc"]] = [1, span, it["mnem"]]
+            else:
+                e[0] += 1; e[1] += span
+        ranked = sorted(agg.items(), key=lambda kv: -kv[1][1])[:300]
+        self.hot_lbl.setText(
+            f"{len(agg)} distinct PCs, {total} cycles total — top consumers first "
+            f"(cycles = total clocks each PC occupied; stalls inflate it)")
+        rows = []
+        maxc = ranked[0][1][1] if ranked else 1
+        for pc, (hits, cyc, mnem) in ranked:
+            pct = (100.0 * cyc / total) if total else 0.0
+            bar = "█" * max(1, int(round(12 * cyc / maxc))) if cyc else ""
+            rows.append([f"{pc:08x}", hits, cyc, f"{pct:.1f}", bar, mnem])
+        _fill(self.hot, rows, dim_cols=(0, 1))
+        # colour the cost bar amber
+        for r in range(self.hot.rowCount()):
+            it = self.hot.item(r, 4)
+            if it is not None:
+                it.setForeground(QBrush(QColor("#d2a24c")))
 
     def _wrap(self, label, table, cmap=None):
         w = QWidget(); v = QVBoxLayout(w); v.setContentsMargins(4, 4, 4, 4)
