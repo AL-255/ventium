@@ -46,7 +46,7 @@ def _mono(pt=9, bold=False):
 class StageBoard(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(150)
+        self.setFixedHeight(164)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._cells = self._blank()
         self._status = "no image loaded"
@@ -121,20 +121,22 @@ class StageBoard(QWidget):
         p.fillRect(self.rect(), QColor(_BG))
         W = self.width()
         lane_h = 30
-        title_y = 2          # section titles band
-        hdr_y = 20           # stage-label band (separated from titles -> no collision)
-        top = 36             # cells start
+        title_y = 8          # section titles band (lowered so it isn't clipped)
+        hdr_y = 26           # stage-label band (separated from titles -> no collision)
+        top = 44             # cells start
         lane_label_w = 38
-        int_w = int((W - lane_label_w - 16) * 0.62)
+        # collapse the FP group when idle so the integer stages get the width.
+        fp_idle = not self._cells.get("FP", ([], ""))[0]
+        int_frac = 0.86 if fp_idle else 0.62
+        int_w = int((W - lane_label_w - 16) * int_frac)
         fp_x0 = lane_label_w + int_w + 16
 
-        fp_idle = not self._cells.get("FP", ([], ""))[0]
         p.setFont(_mono(9, True)); p.setPen(QColor(C_PIPE))
         p.drawText(QRect(lane_label_w, title_y, int_w, 14), Qt.AlignLeft,
                    "Integer pipeline  (U / V)")
         p.setPen(QColor(_MUT if fp_idle else C_FP))
         p.drawText(QRect(fp_x0, title_y, W - fp_x0, 14), Qt.AlignLeft,
-                   "FP pipeline" + ("  (idle)" if fp_idle else ""))
+                   "FP" + ("  idle" if fp_idle else " pipeline"))
 
         icw = int_w / len(INT_STAGES)
         fcw = (W - fp_x0 - 6) / len(FP_STAGES)
@@ -142,9 +144,10 @@ class StageBoard(QWidget):
         for i, st in enumerate(INT_STAGES):
             p.drawText(QRect(int(lane_label_w + i * icw), hdr_y, int(icw), 12),
                        Qt.AlignCenter, st)
-        for i, st in enumerate(FP_STAGES):
-            p.drawText(QRect(int(fp_x0 + i * fcw), hdr_y, int(fcw), 12),
-                       Qt.AlignCenter, st)
+        if not fp_idle:
+            for i, st in enumerate(FP_STAGES):
+                p.drawText(QRect(int(fp_x0 + i * fcw), hdr_y, int(fcw), 12),
+                           Qt.AlignCenter, st)
 
         lanes = [("U", "U", INT_STAGES, lane_label_w, icw, False),
                  ("V", "V", INT_STAGES, lane_label_w, icw, False),
@@ -191,9 +194,9 @@ class StageBoard(QWidget):
 # timing diagram. Dual-issued U+V instructions each get a row and share their
 # execute/commit cycle column.
 # ===========================================================================
-ROW_H = 15
-CELL_W = 14
-GUTTER_W = 218
+ROW_H = 16
+CELL_W = 16
+GUTTER_W = 246
 HDR_H = 18
 
 
@@ -397,15 +400,24 @@ class _KonataGutter(QWidget):
             if r == self.plot.sel_row:
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#1c2531"))
             p.setPen(QColor("#586069"))
-            p.drawText(QRect(2, y, 46, ROW_H), Qt.AlignVCenter | Qt.AlignRight, str(it["n"]))
+            p.drawText(QRect(2, y, 42, ROW_H), Qt.AlignVCenter | Qt.AlignRight, str(it["n"]))
             p.setPen(QColor("#79c0ff" if it["pipe"] == "U" else "#e3b341"))
-            p.drawText(QRect(52, y, 12, ROW_H), Qt.AlignVCenter | Qt.AlignHCenter, it["pipe"])
+            p.drawText(QRect(46, y, 12, ROW_H), Qt.AlignVCenter | Qt.AlignHCenter, it["pipe"])
             p.setPen(QColor("#6e7681"))
-            p.drawText(QRect(66, y, 60, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{it['pc']:08x}")
+            p.drawText(QRect(60, y, 56, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{it['pc']:08x}")
+            # stall badge: total cycles this instruction occupied (>2 = it stalled)
+            span = it["c1"] - it["c0"] + 1
+            mnem_w = GUTTER_W - 120
+            if span > 2:
+                bw = 30
+                mnem_w -= bw
+                p.setPen(QColor(C_STALL))
+                p.drawText(QRect(GUTTER_W - bw - 2, y, bw, ROW_H),
+                           Qt.AlignVCenter | Qt.AlignRight, f"{span}c")
             _, icol = disasm.insn_class(it["mnem"].split(" ")[0])
             p.setPen(QColor(icol))
-            p.drawText(QRect(128, y, GUTTER_W - 130, ROW_H), Qt.AlignVCenter | Qt.AlignLeft,
-                       fm.elidedText(it["mnem"], Qt.ElideRight, GUTTER_W - 132))
+            p.drawText(QRect(118, y, mnem_w, ROW_H), Qt.AlignVCenter | Qt.AlignLeft,
+                       fm.elidedText(it["mnem"], Qt.ElideRight, mnem_w - 2))
         p.end()
 
 
@@ -469,14 +481,14 @@ class Konata(QWidget):
         self._last_cyc = 0
 
     def _legend_widget(self):
-        w = QWidget(); h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(7)
-        items = [("F fetch/fill", C_FILL), ("D decode", C_SLOW), ("X exec", C_PIPE),
+        w = QWidget(); h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(5)
+        items = [("F fetch", C_FILL), ("D dec", C_SLOW), ("X exec", C_PIPE),
                  ("W wb", C_SLOW), ("= stall", C_STALL), ("! flush", C_MISPRED),
                  ("FP", C_FP), ("walk", C_WALK)]
         for txt, col in items:
             sw = QLabel(); sw.setStyleSheet(f"background:{col}; border:1px solid #30363d;")
-            sw.setFixedSize(11, 11)
-            lab = QLabel(txt); lab.setStyleSheet("color:#8b949e; font-size:8px;")
+            sw.setFixedSize(13, 13)
+            lab = QLabel(txt); lab.setStyleSheet("color:#9aa3ad; font-size:9px;")
             h.addWidget(sw); h.addWidget(lab)
         return w
 
@@ -515,17 +527,121 @@ class Konata(QWidget):
 
 
 # ===========================================================================
+# IPC / stall / event sparkline strip — a compact performance-over-time view.
+# X = cycles (newest at right, 1px/cycle), top track = windowed IPC (0..2),
+# bottom track = per-cycle event pixels (mispredict / stall / I-fill / walk).
+# ===========================================================================
+class SparklineStrip(QWidget):
+    CAP = 12000
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(46)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.backend = None
+        self._last_cyc = 0
+        self.ret = []        # retirements per cycle (0/1/2)
+        self.ev = []         # '' | 'm' mispred | 's' stall | 'f' fill | 'w' walk
+        self.setMouseTracking(True)
+        self._hover = -1
+
+    def reset(self, backend):
+        self.backend = backend
+        self._last_cyc = 0
+        self.ret = []; self.ev = []
+        self.update()
+
+    def ingest(self):
+        if self.backend is None:
+            return
+        for c in self.backend.get_cycles(self._last_cyc + 1, 8192):
+            self.ret.append((1 if c.retU else 0) + (1 if c.retV else 0))
+            name = self.backend.state_name(c.state)
+            if c.mispred_bubbles > 0:
+                e = "m"
+            elif name == "S_WALK":
+                e = "w"
+            elif name == "S_PF":
+                e = "f"
+            elif c.stall_cnt > 0 or c.pending_mem_pen > 0:
+                e = "s"
+            else:
+                e = ""
+            self.ev.append(e)
+            self._last_cyc = c.cyc
+        if len(self.ret) > self.CAP:
+            self.ret = self.ret[-self.CAP:]; self.ev = self.ev[-self.CAP:]
+        self.update()
+
+    _EVCOL = {"m": C_MISPRED, "s": C_STALL, "f": C_FILL, "w": C_WALK}
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#0b0f14"))
+        W, H = self.width(), self.height()
+        n = len(self.ret)
+        labelw = 40
+        ipc_h, ipc_y0 = 28, 2
+        evt_y0, evt_h = 33, 11
+        plotw = max(1, W - labelw - 4)
+        p.setPen(QColor("#30363d"))
+        for lvl in (1.0, 2.0):                      # IPC=1 and IPC=2 (dual-issue) rules
+            y = ipc_y0 + ipc_h - int(lvl / 2.0 * ipc_h)
+            p.drawLine(labelw, y, W - 2, y)
+        if n == 0:
+            p.setPen(QColor(_MUT)); p.setFont(_mono(8))
+            p.drawText(self.rect(), Qt.AlignCenter, "IPC / stall sparkline")
+            p.end(); return
+        start = max(0, n - plotw)
+        win = 16
+        for i in range(start, n):
+            x = labelw + (i - start)
+            lo = max(0, i - win + 1)
+            ipc = sum(self.ret[lo:i + 1]) / (i - lo + 1)
+            bh = int(min(2.0, ipc) / 2.0 * ipc_h)
+            p.fillRect(QRect(x, ipc_y0 + ipc_h - bh, 1, bh), QColor("#2ea043"))
+            e = self.ev[i]
+            if e:
+                p.fillRect(QRect(x, evt_y0, 1, evt_h), QColor(self._EVCOL[e]))
+        # labels: current windowed IPC (last 64 cyc)
+        cur = sum(self.ret[max(0, n - 64):]) / min(64, n)
+        p.setPen(QColor("#9aa3ad")); p.setFont(_mono(8, True))
+        p.drawText(QRect(2, ipc_y0, labelw - 4, ipc_h), Qt.AlignRight | Qt.AlignVCenter,
+                   f"IPC\n{cur:.2f}")
+        p.setPen(QColor("#586069")); p.setFont(_mono(7))
+        p.drawText(QRect(2, evt_y0 - 1, labelw - 4, evt_h + 2),
+                   Qt.AlignRight | Qt.AlignVCenter, "events")
+        # axis caps
+        p.setPen(QColor("#3d444d")); p.setFont(_mono(6))
+        p.drawText(QRect(labelw, ipc_y0 - 1, 16, 8), Qt.AlignLeft, "2")
+        p.end()
+
+    def mouseMoveEvent(self, ev):
+        x = int(ev.position().x() if hasattr(ev, "position") else ev.x())
+        n = len(self.ret)
+        labelw = 40
+        start = max(0, n - max(1, self.width() - labelw - 4))
+        i = start + (x - labelw)
+        if 0 <= i < n:
+            cyc = self._last_cyc - (n - 1 - i)
+            ev_name = {"m": "mispredict", "s": "stall", "f": "I-fill", "w": "page-walk"}.get(self.ev[i], "")
+            self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired" + (f", {ev_name}" if ev_name else ""))
+
+
+# ===========================================================================
 # Composite panel
 # ===========================================================================
 class PipelineView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        v = QVBoxLayout(self); v.setContentsMargins(2, 2, 2, 2); v.setSpacing(4)
+        v = QVBoxLayout(self); v.setContentsMargins(2, 6, 2, 2); v.setSpacing(4)
         bt = QLabel("Pipelines — U / V (integer dual-issue) + FP (x87)")
         bt.setStyleSheet("font-weight:bold;")
         v.addWidget(bt)
         self.board = StageBoard()
         v.addWidget(self.board)
+        self.spark = SparklineStrip()
+        v.addWidget(self.spark)
         self.konata = Konata()
         v.addWidget(self.konata, 1)
         self._bits = 32
@@ -541,6 +657,7 @@ class PipelineView(QWidget):
 
     def reset(self, backend):
         self.board.reset()
+        self.spark.reset(backend)
         self.konata.reset(backend, self._bits)
 
     def stats(self):
@@ -554,4 +671,5 @@ class PipelineView(QWidget):
         self.konata.plot.bits = bits
         self.konata.plot.cs_base = state.cs_base
         self.board.set_state(state, backend, bits)
+        self.spark.ingest()
         self.konata.update_from(backend)

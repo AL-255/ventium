@@ -69,13 +69,13 @@ class CacheMap(QWidget):
                 cell = QRect(int(x), y + 1, max(1, int(cw) - 0), self.WAYH - 2)
                 p.fillRect(cell, QColor("#56d364" if (valid and mru)
                                         else "#1f7a36" if valid else "#161b22"))
-        # set axis ticks every 16
+        # set axis ticks every 16 (0..112; 128 would clip the right edge)
         p.setPen(QColor("#586069"))
         ty = self.TOP + 2 * self.WAYH
-        for s in range(0, self.SETS + 1, 16):
+        for s in range(0, self.SETS, 16):
             x = int(self.LX + s * cw)
             p.drawText(QRect(x - 8, ty, 20, self.BOT), Qt.AlignHCenter | Qt.AlignTop, str(s))
-        p.drawText(QRect(self.LX, ty, plot_w, self.BOT), Qt.AlignRight | Qt.AlignTop, "set")
+        p.drawText(QRect(self.LX, ty, plot_w, self.BOT), Qt.AlignRight | Qt.AlignTop, "set →")
         p.end()
 
 

@@ -81,7 +81,7 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((56, 58, 42, 40, 76, 232)):
+        for i, w in enumerate((52, 54, 40, 38, 74, 188)):
             self.tbl.setColumnWidth(i, w)
         hh.setSectionResizeMode(len(_COLS) - 1, QHeaderView.Stretch)
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
