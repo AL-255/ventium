@@ -1572,3 +1572,56 @@ implemented + brought to EQUIVALENT.
   pristine across the new WRITEs. Deferred: SET FEATURES/SET MULTIPLE + other misc
   commands, the boundaries above, LBA48, bus-master DMA, SRST. RTL touched:
   `rtl/soc/ven_ide.sv`. `ventium-refs` untouched.
+
+### M8.4d — ATA command-set additions: SET MULTIPLE / SET FEATURES / SRST (2026-06-06)
+
+**What this is.** The bounded, first-try-passable subset of the deferred IDE
+command set (the research/design workflow recommended a tiered scope; this is its
+Tier 1 — localized, no data-path touch, fully synchronous). The `pide` gate grows
+to **EQUIVALENT 21875/21875**.
+
+- **`ven_ide.sv` (lint 0, no data-path/FSM change).** SET MULTIPLE (0xC6): accept a
+  power-of-two ≤ 16 (or 0) → 0x50, else abort 0x41/0x04 — and, faithfully, does
+  NOT patch the cached IDENTIFY w59 (qemu `cmd_set_multiple_mode` updates only the
+  runtime `mult_sectors`; `ide_identify` is cached after the first call). SET
+  FEATURES (0xEF): subcommand in the FEATURE register — 0x03 set-transfer-mode
+  patches the **cached** IDENTIFY words 62/63/88 (`put_le16` into `identify_data`,
+  so a re-IDENTIFY DOES reflect it), 0x02 write-cache-enable patches w85→0x4021,
+  **0x82 write-cache-disable patches w85→0x4001** (qemu *completes* 0x82 — it is NOT
+  an abort), a no-op group → 0x50, genuinely-unsupported → abort. The mutable words
+  are register-backed
+  (`r_w62/63/85/88`). SRST (0x3F6 bit2 assert-edge): synchronous signature restore
+  (reuses the DIAGNOSTIC result), never raising BSY — the qemu soft-reset BH
+  collapses before the next single-step (same async-BH boundary as READ/WRITE).
+
+- **Gate (EQUIVALENT 21875/21875), all non-vacuous.** SET MULTIPLE 8 (accept) +
+  3/32 (abort, not-pow2 / >16); the post-commands IDENTIFY shows **w59=0x0110
+  unchanged** (proving SET MULTIPLE does NOT touch the cached block — a faithful
+  differential) and **w88=0x043F** (proving SET FEATURES 0x03 udma2 DID patch the
+  cached block, 0x203F→0x043F); SET FEATURES 0x02/0x99; and the SRST signature
+  restore (dirty 0x41 → post 0x50/error 0x01/signature). The bring-up caught the
+  IDENTIFY-cache nuance: my first attempt made w59 register-backed (0x0108), but
+  qemu's `cmd_set_multiple_mode` never patches the cached w59 — corrected so w59
+  stays 0x0110 (cached) while w62/63/85/88 are register-backed (SET FEATURES does
+  patch those).
+
+- **Adversarial review (3-agent workflow): verdict SOUND** — every tested path
+  byte-exact (transfer-mode groups incl the `1<<(val+8)` shift, invalid-group
+  aborts, all 12 no-ops, the pow2≤16 boundary, w59-not-patched, SET-FEATURES words
+  surviving SRST, synchronous SRST with no transient BSY). It caught one real
+  divergence I'd mislabeled: SET FEATURES **0x82** is NOT unsupported — qemu
+  completes it (w85→0x4001). Rather than document it as a boundary, I **fixed the
+  RTL** (0x82 now completes + patches w85) and added it to the gate (status 0x50 +
+  the re-IDENTIFY w85=0x4001). The `reset_reverts` side-effect of 0xCC/0x66 is noted
+  as unmodeled (unobservable without the deferred 0x91-geometry).
+
+- **No regression.** `make verify-soc` **5/5 PASS** (pide 21875/21875); `make
+  verify` **69/69 cache hits, 0 regenerated**.
+
+- **Deferred to M8.4d2 (the design's Tier 2 + the FSM-restructure items, all still
+  documented boundaries):** the 0x91 INIT-DEV-PARAMS geometry side-effect + the
+  CHS-mode register-advance (legacy-niche, add combinational divides), the LBA-mode
+  multi-sector register trajectory (advance-at-window-open + nsector countdown —
+  restructures the graded data core), READ/WRITE MULTIPLE (0xC4/0xC5, the N-sector
+  DRQ window), LBA48 (0x24/0x34), and SET FEATURES 0x82 (async flush). RTL touched:
+  `rtl/soc/ven_ide.sv`. `ventium-refs` untouched.
