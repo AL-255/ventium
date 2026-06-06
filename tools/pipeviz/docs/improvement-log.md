@@ -9,17 +9,47 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
-## Baseline (before the loop)
-- Live P5 stage board (U/V/FP) + **pipeline waterfall** (Y=time, X=stages U|V|FP).
-- Memory tables: I$/D$ (with occupancy heatmaps), split TLB, prefetch buffer.
-- Retired-instruction trace with **x86 byte-field colouring** (prefix/opcode/
-  ModRM/SIB/disp/imm) + capstone disasm (16/32-bit per live CS.D).
-- Register panel (GPR/flags/seg/CR/x87).
-- Status bar: IPC, pair%, mispred, I$/D$ occupancy, fills, walks.
+## Current UI (keep this in sync each iteration — critics read it)
+- **Pipeline panel** = a small LIVE *stage board* snapshot on top (3 lanes U/V/FP
+  × P5 stages, current clock only) + the main **gem5/Konata pipeline view**
+  below (one row per retired instruction, columns = cycles, each instruction's
+  lifecycle drawn as F/D/X/M/W + `=` stall / `!` flush cells cascading
+  diagonally; integer X green, x87 X purple; frozen instruction-label gutter +
+  synced cycle axis).
+- **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
+  heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
+  column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
+  truncated); split TLB; prefetch buffer (ibuf + decode).
+- **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
+  instruction; x86 byte-field colouring (prefix gray / opcode blue / ModRM green
+  / SIB purple / disp+rel yellow / imm red); U=blue V=amber pipe; zebra; Δ amber
+  on a stall gap; capstone disasm (16/32-bit per live CS.D). Click a row →
+  highlights that instruction's row in the Konata view.
+- **Register panel**: GPR/flags/seg/CR/x87, changed-since-last-step values amber.
+- **Status bar** (grouped, coloured): cyc · state/mode · ret/IPC/pair%/mispred ·
+  I$/D$ occupancy/fills/walks · eip.
+- **Toolbar** (grouped file | config | transport, accented Run).
 - Backends: `ventium_top` (user + system) and `ventium_soc` (test386 etc.).
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 3 — anti-staleness review harness + trace filter + byte-colour fix
+The previous review's critics described a pre-iteration-1 UI (old waterfall /
+1-row heatmap) because **the workflow's own critic prompts still described the
+old layout** and a stale "Baseline" here primed them. Fixed the *review process*
+so critics always anchor on the latest:
+- **gen_review_shots** now stamps every screenshot with a build watermark
+  (`pipeviz build <sha>[+dirty] <time>`); the workflow **regenerates the shots
+  itself** (new *Render* phase) so images can't drift from HEAD; critics must
+  report the watermark + a "what I actually see" inventory, and the synthesis
+  **discards findings whose watermark ≠ the current build**. Removed all stale
+  UI descriptions from the prompts; rewrote this doc's UI section to match HEAD.
+- **Trace byte colour fix (real bug):** relative-branch rel8/rel16/rel32 targets
+  (jmp/jcc/call/loop) were coloured red (immediate); they're displacements →
+  now yellow. Real immediates (mov/int/push imm) stay red.
+- **New feature — trace search/filter box:** substring + `pc:`, `cyc>=`/`<=`/`=`,
+  `pipe:U|V`, and `stall`, with a live match count.
 
 ### Iteration 2 — gem5/Konata per-instruction pipeline view
 Replaced the per-stage "waterfall" (which only showed the live EX latch repeated

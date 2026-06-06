@@ -85,6 +85,14 @@ def byte_fields(code: bytes, addr: int = 0, bits: int = 32):
     for i in range(imm_off, min(imm_off + imm_sz, n)):
         if imm_sz > 0:
             fields[i] = "imm"
+    # A relative branch's rel8/rel16/rel32 target is a displacement (offset),
+    # not an immediate operand — capstone reports it via the imm field, so
+    # recolour it yellow for jmp/jcc/call/loop forms.
+    mn = (insn.mnemonic or "")
+    if imm_sz > 0 and (mn[:1] == "j" or mn.split(" ")[0] in
+                       ("call", "loop", "loope", "loopne", "loopz", "loopnz")):
+        for i in range(imm_off, min(imm_off + imm_sz, n)):
+            fields[i] = "disp"
     return [(bs[i], fields[i]) for i in range(n)]
 
 
