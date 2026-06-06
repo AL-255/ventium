@@ -4,7 +4,7 @@
 the issuing pipe (U/V), and a capstone disassembly. Appends incrementally."""
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTableWidgetItem, QHeaderView, QAbstractItemView,
-                               QLabel, QStyledItemDelegate, QStyle)
+                               QLabel, QStyledItemDelegate, QStyle, QLineEdit)
 from PySide6.QtGui import QColor, QFont, QBrush, QFontMetrics
 from PySide6.QtCore import Qt, QRect, Signal
 
@@ -16,6 +16,7 @@ _BYTES_COL = 5
 _MAX_ROWS = 6000   # rolling cap on displayed rows
 _BYTES_ROLE = Qt.UserRole + 1
 _CYC_ROLE = Qt.UserRole + 2
+_FILT_ROLE = Qt.UserRole + 3   # (haystack, cyc, pipe, stall) for the filter box
 _U_COL = "#79c0ff"   # U pipe (blue)
 _V_COL = "#e3b341"   # V pipe (amber)
 
@@ -52,11 +53,23 @@ class TraceView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._last_cyc = None
+        self._tokens = []
         lay = QVBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
+        top = QHBoxLayout(); top.setSpacing(6)
         self.title = QLabel("Retired-instruction trace")
         self.title.setStyleSheet("font-weight:bold;")
-        lay.addWidget(self.title)
+        top.addWidget(self.title)
+        self.filt = QLineEdit()
+        self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:V   stall")
+        self.filt.setClearButtonEnabled(True)
+        mfilt = QFont("monospace"); mfilt.setStyleHint(QFont.Monospace); mfilt.setPointSize(9)
+        self.filt.setFont(mfilt)
+        self.filt.textChanged.connect(self._on_filter)
+        top.addWidget(self.filt, 1)
+        self.match_lbl = QLabel(""); self.match_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
+        top.addWidget(self.match_lbl)
+        lay.addLayout(top)
         self.tbl = QTableWidget(0, len(_COLS))
         self.tbl.setHorizontalHeaderLabels(_COLS)
         self.tbl.verticalHeader().setVisible(False)
@@ -139,12 +152,14 @@ class TraceView(QWidget):
             pipe = "U" if r.pipe == 0 else ("V" if r.pipe == 1 else "-")
             vals = [str(r.n), str(r.cyc), dcyc, pipe, f"{r.pc:08x}",
                     " ".join(f"{b:02x}" for b in shown), txt]
+            hay = f"{r.pc:08x} {vals[5]} {txt}".lower()
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(v)
                 if c in (0, 1, 4):
                     it.setForeground(QBrush(QColor("#8b949e")))
                 if c == 0:
                     it.setData(_CYC_ROLE, int(r.cyc))   # for click-to-link
+                    it.setData(_FILT_ROLE, (hay, int(r.cyc), pipe, stall))
                 if c == 2:                              # delta cyc
                     it.setTextAlignment(Qt.AlignCenter)
                     it.setForeground(QBrush(QColor("#d2a24c" if stall else "#586069")))
@@ -162,5 +177,54 @@ class TraceView(QWidget):
         if excess > 0:
             for _ in range(excess):
                 self.tbl.removeRow(0)
-        if at_bottom:
+        if self._tokens:
+            self._apply_filter()
+        if at_bottom and not self._tokens:
             self.tbl.scrollToBottom()
+
+    # ---- filter box ----
+    def _on_filter(self, text):
+        self._tokens = [t for t in text.strip().lower().split() if t]
+        self._apply_filter()
+
+    @staticmethod
+    def _match(filt, tokens):
+        hay, cyc, pipe, stall = filt
+        for tok in tokens:
+            try:
+                if tok.startswith("pipe:"):
+                    if pipe.lower() != tok[5:]:
+                        return False
+                elif tok.startswith("cyc>="):
+                    if cyc < int(tok[5:], 0):
+                        return False
+                elif tok.startswith("cyc<="):
+                    if cyc > int(tok[5:], 0):
+                        return False
+                elif tok.startswith("cyc="):
+                    if cyc != int(tok[4:], 0):
+                        return False
+                elif tok.startswith("pc:"):
+                    if tok[3:] not in hay:
+                        return False
+                elif tok == "stall":
+                    if not stall:
+                        return False
+                elif tok not in hay:
+                    return False
+            except ValueError:
+                if tok not in hay:
+                    return False
+        return True
+
+    def _apply_filter(self):
+        toks = self._tokens
+        n = self.tbl.rowCount()
+        shown = 0
+        for row in range(n):
+            it = self.tbl.item(row, 0)
+            filt = it.data(_FILT_ROLE) if it is not None else None
+            ok = (not toks) or (filt is not None and self._match(filt, toks))
+            self.tbl.setRowHidden(row, not ok)
+            shown += ok
+        self.match_lbl.setText("" if not toks else f"{shown}/{n} match")
