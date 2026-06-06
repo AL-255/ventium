@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # =============================================================================
 # verif/run-m4.sh — Ventium M4 cycle-accuracy gate (docs/m4-pipeline-spec.md).
 #

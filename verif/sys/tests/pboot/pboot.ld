@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M9 — linker script for the boot-firmware STUB (-bios image).
  *
  * Same flat 64 KiB -bios layout as pide.ld: qemu-system-i386 -bios maps the image

@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/tb/win95_cosim.h
 //
 // M7.3b Win95 system co-sim CONSUMER (docs/m7-lockstep-spec.md M7.3). The

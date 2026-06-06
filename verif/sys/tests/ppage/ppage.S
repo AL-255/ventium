@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M2S.2 — bare-metal 2-level PAGING demonstrator (NON-IDENTITY map).
  *
  * This is the focused M2S.2 paging gate test: real->protected (reusing the

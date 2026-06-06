@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Ventium M2S.5 — RTL-ONLY structural self-check for SMM / RSM.
 
 This is the RTL-phase (Phase 2) analogue of psmm-selfcheck.py (which proves the

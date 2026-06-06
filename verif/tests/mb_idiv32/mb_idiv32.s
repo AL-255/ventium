@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_idiv32 — IDIV r/m32 occupancy microbenchmark (p5model occ=46, NP, U-pipe held;
 # a few clocks over DIV r/m32's 41 for the sign handling). EDX:EAX / EBX signed.
     .text

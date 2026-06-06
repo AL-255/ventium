@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Ventium differential trace comparator (Consumer) — docs/trace-format.md §3.
 
 Reads two `.vtrace` files and diffs them, in one of two modes:

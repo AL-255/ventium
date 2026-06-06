@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M6B errata test: err_dbgp — Erratum 79 (242480-041 doc p.50):
  * "Erroneous Debug Exception on POPF/IRET Instructions with a GP Fault" (NoFix).
  *

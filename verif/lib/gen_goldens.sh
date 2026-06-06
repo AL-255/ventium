@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # verif/lib/gen_goldens.sh — PARALLEL golden-trace generator for the Ventium gates.
 #
 # The differential gates' dominant cost is regenerating QEMU golden traces, done

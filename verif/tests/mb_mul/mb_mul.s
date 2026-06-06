@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_mul — MUL r/m32 occupancy microbenchmark (p5model occ=10, NP, U-pipe held).
 # The native `*` is the bit-exact result; the modeled 10-cycle non-pipelined
 # occupancy is the fidelity target (was 1-cycle / +7 before the review-response).

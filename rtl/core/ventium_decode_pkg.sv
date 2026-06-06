@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/ventium_decode_pkg.sv — decode TYPES + pure decode helpers, extracted
 // verbatim from intcore.sv (R1 modularization, docs/rtl-refactor-plan.md).
 //

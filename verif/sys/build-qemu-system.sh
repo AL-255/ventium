@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M2S.0 — build qemu-system-i386 (i386-softmmu) for the SYSTEM-MODE oracle.
 #
 # The user-mode roadmap (M0..M6) verifies against qemu-i386 (linux-user), built by

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M2S.0 — generate + validate the SYSTEM-MODE golden trace.
 #
 # End-to-end demonstrator of the system-mode oracle (NO RTL — that starts at

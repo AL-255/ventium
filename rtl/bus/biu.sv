@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // bus/biu.sv — Ventium gated BUS SUBSYSTEM (M5B-int).
 //
 // PLAN.md §6.10 / docs/m5b-bus-spec.md. This is the ADDITIVE, default-OFF

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Ventium M9 boot — single-source-of-truth disk image generator.
 
 The boot disk: LBA0 is the BOOT SECTOR (pboot_mbr.bin, ending in 0x55 0xAA), and

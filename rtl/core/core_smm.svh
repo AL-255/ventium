@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/core_smm.svh — RAW case-arm text `included inside core.sv's always_ff
 // `unique case (state)` (R2 modularization). NOT a standalone unit: it has no
 // module/always wrapper and is textually pasted into the FSM at the original

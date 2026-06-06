@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """m5_metrics.py — RTL-trace aggregate cycle metrics + M5 band check.
 
 Used by verif/run-m5.sh. M5 extends the M4 cycle gate with the two pieces M4

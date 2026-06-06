@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # =============================================================================
 # verif/run-m5.sh — Ventium M5 cycle-accuracy gate (docs/m5-cycle-spec.md).
 #

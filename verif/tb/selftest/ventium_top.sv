@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/tb/selftest/ventium_top.sv
 //
 // THROWAWAY self-test stub for Producer C (the Verilator C++ testbench).

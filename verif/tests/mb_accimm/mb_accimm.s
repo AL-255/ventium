@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_accimm — AP-500 accumulator-immediate fast-path pairing microbenchmark
 # (review Action 6, batch 1). Each `<ALU eAX,imm32>` (U) is interleaved with an
 # independent `mov reg,reg` (V): with the accumulator short forms (05/0D/25/35..)

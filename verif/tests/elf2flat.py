@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """elf2flat.py -- extract the loadable bytes of a static i386 ELF into a flat
 memory image for the Ventium Verilator testbench.
 

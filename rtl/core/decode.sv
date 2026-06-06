@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/decode.sv — M4/M5 fast-path variable-length x86 decoder.
 //
 // Extracted VERBATIM from intcore.sv (R1 modularization phase 3,

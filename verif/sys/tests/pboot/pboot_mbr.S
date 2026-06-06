@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M9 — the BOOT SECTOR (disk LBA0, 512 bytes, pboot_mbr.bin).
  *
  * This is the "OS" the firmware boots: a real boot sector that lives on the IDE

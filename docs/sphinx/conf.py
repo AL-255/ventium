@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Configuration file for the Sphinx documentation builder.
 #
 # Ventium — P5/P54C non-MMX microarchitecture replica documentation.

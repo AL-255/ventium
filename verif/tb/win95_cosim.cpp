@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/tb/win95_cosim.cpp
 //
 // M7.3b minimal loaders for the Win95 producer's initial physical-memory image

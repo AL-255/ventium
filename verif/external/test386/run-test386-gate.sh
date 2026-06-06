@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium — test386.asm external differential gate (prefix vs qemu-system-i386).
 #
 # test386.asm (barotto/test386.asm, GPL-3.0) is a comprehensive freestanding x86

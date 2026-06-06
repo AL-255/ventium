@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # Ventium M7.2 — build the bare-metal VIRTUAL-8086 (V86) demonstrator.
 #
 # Output: pv86.bin, a flat 64 KiB image loadable with

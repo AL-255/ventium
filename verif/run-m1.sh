@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # =============================================================================
 # verif/run-m1.sh — Ventium M1 differential gate (PLAN.md §7, docs/m1-core-spec.md).
 #

@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // core/ventium_alu_pkg.sv — pure integer ALU datapath: result + EFLAGS
 // computation and the width/flag helpers, extracted verbatim from intcore.sv
 // (R1 modularization, docs/rtl-refactor-plan.md). These are PURE functions

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # =============================================================================
 # run_x87_boundary.sh -- standalone gate for the x87 DEFERRED-OP boundary test
 # (REVIEW_Jun5.md Recommended Step 4 + Limit #2). DEDICATED run glue so it does

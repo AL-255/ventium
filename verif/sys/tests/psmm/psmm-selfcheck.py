@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """Ventium M2S.5 — STRUCTURAL self-check for the SMM / RSM demonstrator.
 
 This is the PARTIAL-ORACLE substitute for a differential golden.  The

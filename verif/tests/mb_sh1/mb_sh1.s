@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_sh1 — AP-500 shift-by-1 (D1 /4../7) fast-path pairing microbenchmark
 # (review Action 6, batch 3). Each SHL/SHR/SAR r/m32,1 (D1 — the x+x/halve idiom)
 # is U (PU: leads a pair) interleaved with an independent `mov reg,reg` (V): with

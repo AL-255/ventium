@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # =============================================================================
 # Ventium M6 errata test: err_fdiv -- Pentium FDIV / SRT divide flaw (Erratum 23)
 # =============================================================================

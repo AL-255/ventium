@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 """M7.3 Win95 system-replay combined-log parser (the alignment engine).
 
 This is the shared parser that turns the SINGLE combined QEMU replay log

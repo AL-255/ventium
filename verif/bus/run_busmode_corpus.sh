@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # M5B-int gate (2): bus_mode=1 FUNCTIONAL corpus.
 #
 # Replicates the verify.sh/verify_worker.sh func pipeline (gcc -> isa_verify ->

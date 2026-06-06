@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // mem/icache.sv — L1 instruction cache ARRAYS + fill + LRU-touch
 //                 (extracted from core.sv, R2; behaviour-preserving).
 //

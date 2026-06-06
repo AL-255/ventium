@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M9-rm — REAL-MODE boot-firmware STUB (the -bios image, pboot_rm_stub.bin).
  *
  * The CANONICAL real-mode boot. Unlike M9/pboot (which goes real->protected and loads

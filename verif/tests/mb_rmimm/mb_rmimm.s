@@ -1,3 +1,6 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 # mb_rmimm — AP-500 reg-form r/m32,imm32 fast-path pairing microbenchmark
 # (review Action 6, batch 2). Each general-register `ALU r/m32,imm32` (81 /r) or
 # `MOV r/m32,imm32` (C7 /0) — U — is interleaved with an independent `mov reg,reg`

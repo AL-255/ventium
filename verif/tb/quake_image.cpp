@@ -1,3 +1,6 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
 // verif/tb/quake_image.cpp
 //
 // M7.1 minimal loaders for the producer's initial-image JSON + the golden

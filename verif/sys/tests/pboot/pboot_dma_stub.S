@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M9b — DMA boot-firmware STUB (the -bios image, pboot_dma_stub.bin).
  *
  * Same "smallest real boot" idea as pboot_stub.S (M9), but the firmware chain-loads

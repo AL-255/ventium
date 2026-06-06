@@ -1,3 +1,7 @@
+/* Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+ * SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+ */
+
 /* Ventium M9 — linker for the BOOT SECTOR (pboot_mbr.bin), exactly 512 bytes.
  *
  * The firmware stub loads this at RAM 0x8000 and far-jmps to it (cs=0x08, flat
