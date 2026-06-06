@@ -136,8 +136,8 @@ class StageBoard(QWidget):
         p.drawText(QRect(lane_label_w, title_y, int_w, 14), Qt.AlignLeft,
                    "Integer pipeline  (U / V)")
         p.setPen(QColor(_MUT if fp_idle else C_FP))
-        p.drawText(QRect(fp_x0, title_y, W - fp_x0, 14), Qt.AlignLeft,
-                   "FP" + ("  idle" if fp_idle else " pipeline"))
+        p.drawText(QRect(fp_x0, title_y, W - fp_x0 - 8, 14), Qt.AlignRight,
+                   "FP idle" if fp_idle else "FP pipeline")
 
         icw = int_w / len(INT_STAGES)
         fcw = (W - fp_x0 - 6) / len(FP_STAGES)
@@ -170,15 +170,16 @@ class StageBoard(QWidget):
                     # single active stage is what the eye lands on.
                     p.fillRect(cell, QColor("#0f141b" if idle else _DIM))
             if lit_idxs and text:
-                lo, hi = min(lit_idxs), max(lit_idxs)
-                span = QRect(int(x0 + lo * cw) + 2, y + 2,
-                             int((hi - lo + 1) * cw) - 4, lane_h - 6)
+                # draw the label in the LAST occupied stage cell only (one column),
+                # so it never straddles a column divider.
+                hi = max(lit_idxs)
+                cell = QRect(int(x0 + hi * cw) + 1, y + 2, int(cw) - 2, lane_h - 6)
                 p.setPen(QColor("#0d1117") if QColor(self._statecol).lightness() > 140
                          else QColor(_TXT))
                 p.setFont(_mono(8, True))
                 fm = QFontMetrics(p.font())
-                p.drawText(span, Qt.AlignVCenter | Qt.AlignHCenter,
-                           fm.elidedText(text, Qt.ElideRight, span.width() - 4))
+                p.drawText(cell, Qt.AlignVCenter | Qt.AlignHCenter,
+                           fm.elidedText(text, Qt.ElideRight, cell.width() - 3))
         p.setFont(_mono(9)); p.setPen(QColor(_TXT))
         p.drawText(QRect(4, top + 3 * lane_h + 4, W - 8, 18), Qt.AlignLeft, self._status)
         p.end()
@@ -207,7 +208,7 @@ C_STG_FILL = "#e0a72e"    # I-cache fill          (amber)
 C_STG_FETCH = "#4a9eff"   # slow front-end fetch  (blue)
 C_STG_DEC = "#39c5cf"     # decode                (teal)
 C_STG_MEM = "#f0883e"     # load/store address    (orange)
-C_STG_WB = "#d264c9"      # writeback             (magenta)
+C_STG_WB = "#7d8fc9"      # writeback (slate-blue — out of the wb/FP/walk purple cluster)
 C_STG_EXEC = C_PIPE       # execute (integer)     (green)
 C_STG_STALL = "#7a828d"   # stall / bubble        (grey — distinct from amber fill)
 
@@ -218,6 +219,20 @@ def _recolor_fp(cells, mnem):
     if not (mnem[:1] == "f" and mnem[:2] not in ("fs", "gs")):
         return list(cells)
     return [(cy, ch, C_FP if co == C_STG_EXEC else co) for (cy, ch, co) in cells]
+
+
+def _add_frontend(cells):
+    """The dual-issue fast path collapses fetch/decode/execute into one clock, so
+    a fast-path op reconstructs as a single 'X' cell. The Ventium is still a P5
+    5-stage pipeline, so synthesise the in-flight Fetch + Decode stages in the two
+    cycles preceding the commit — this makes consecutive instructions cascade
+    through F -> D -> X like a real superscalar pipeline diagram, instead of a
+    lone X. Only added when the op has NO real front-end cells already (an
+    I-cache fill 'L' or slow-path F/D); a stall '=' or bare 'X' gets the shadow."""
+    if not cells or cells[0][1] in ("L", "F", "D", "M", "W"):
+        return cells
+    a0 = cells[0][0]
+    return [(a0 - 2, "F", C_STG_FETCH), (a0 - 1, "D", C_STG_DEC)] + cells
 
 
 def _stage_cell(name, ret, stall, mispred):
@@ -316,7 +331,7 @@ class _KonataPlot(QWidget):
                 self.stat["stall"] += 1
             if c.retU:
                 mn = self._mn(c.pcU)
-                cells = _recolor_fp(self._pending, mn)
+                cells = _add_frontend(_recolor_fp(self._pending, mn))
                 self.insns.append(dict(n=c.nU, pc=c.pcU, pipe="U", mnem=mn,
                                        cells=cells, c0=cells[0][0], c1=c.cyc))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
@@ -324,10 +339,10 @@ class _KonataPlot(QWidget):
                 self._pending = []
             if c.retV:
                 mn = self._mn(c.pcV)
-                vch = "X"
                 vcol = C_FP if (mn[:1] == "f" and mn[:2] not in ("fs", "gs")) else C_PIPE
+                cells = _add_frontend([(c.cyc, "X", vcol)])
                 self.insns.append(dict(n=c.nV, pc=c.pcV, pipe="V", mnem=mn,
-                                       cells=[(c.cyc, vch, vcol)], c0=c.cyc, c1=c.cyc))
+                                       cells=cells, c0=cells[0][0], c1=c.cyc))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
                 self.stat["vret"] += 1
         if len(self.insns) > 9000:          # rolling cap

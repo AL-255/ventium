@@ -3,6 +3,7 @@
 """Memory-subsystem tables panel — what is resident in the I-cache (code cache),
 D-cache, the split I/D TLB, and the slow-path prefetch buffer. Each is a table,
 refreshed in full each frame (all are small: <=256 lines / 32 TLB entries)."""
+import re
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QTableWidget, QTableWidgetItem, QHeaderView,
                                QAbstractItemView, QLabel, QGridLayout, QSizePolicy,
@@ -150,10 +151,57 @@ class TablesView(QWidget):
                              [76, 50, 64, 50, 120, 9999])
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
 
+        # --- Branches (per-branch-PC taken/not-taken profile) ---
+        self.br_lbl = QLabel()
+        self.br = _mk_table(["PC", "branch", "target", "hits", "taken", "T%", "bias"],
+                            [70, 64, 76, 46, 46, 46, 9999])
+        self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
+
         # --- Memory hex/ASCII inspector (follow EIP/ESP) ---
         self.mem = MemoryView()
         self.tabs.addTab(self.mem, "Memory")
         self._bits = 32
+
+    def set_branches(self, insns):
+        """Per-branch-PC profile: identify branch instructions and infer taken vs
+        not-taken from whether the NEXT retired instruction landed on the parsed
+        branch target (direct) or fell through. Indirect/ret count as taken."""
+        agg = {}
+        n = len(insns)
+        for i, it in enumerate(insns):
+            mn = it["mnem"]
+            cls, _ = disasm.insn_class(mn.split(" ")[0])
+            if cls != "branch":
+                continue
+            e = agg.get(it["pc"])
+            if e is None:
+                e = {"mn": mn.split(" ")[0], "tgt": "", "hits": 0, "taken": 0}
+                agg[it["pc"]] = e
+            e["hits"] += 1
+            m = re.search(r"0x([0-9a-fA-F]+)", mn)
+            tgt = int(m.group(1), 16) if m else None
+            if tgt is not None:
+                e["tgt"] = f"{tgt:08x}"
+            if i + 1 < n:
+                nxt = insns[i + 1]["pc"]
+                taken = (nxt == tgt) if tgt is not None else (nxt != it["pc"])
+                if taken:
+                    e["taken"] += 1
+        ranked = sorted(agg.items(), key=lambda kv: -kv[1]["hits"])[:300]
+        self.br_lbl.setText(f"{len(agg)} branch sites — taken inferred from the next "
+                            f"retired PC (direct: == target; indirect/ret: transferred)")
+        rows = []
+        for pc, e in ranked:
+            pct = (100.0 * e["taken"] / e["hits"]) if e["hits"] else 0.0
+            nb = max(0, min(10, round(pct / 10)))
+            bias = "T" * nb + "·" * (10 - nb)
+            rows.append([f"{pc:08x}", e["mn"], e["tgt"] or "—", e["hits"],
+                         e["taken"], f"{pct:.0f}", bias])
+        _fill(self.br, rows, dim_cols=(0, 2, 3))
+        for r in range(self.br.rowCount()):
+            it = self.br.item(r, 6)
+            if it is not None:
+                it.setForeground(QBrush(QColor("#e3b341")))
 
     def set_bits(self, bits):
         self._bits = bits

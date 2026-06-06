@@ -89,7 +89,7 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((52, 54, 40, 38, 74, 232)):
+        for i, w in enumerate((52, 54, 40, 38, 74, 196)):
             self.tbl.setColumnWidth(i, w)
         hh.setSectionResizeMode(len(_COLS) - 1, QHeaderView.Stretch)
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
@@ -166,8 +166,9 @@ class TraceView(QWidget):
             _, icol = disasm.insn_class(mn)
             # delta cycles since the previous retirement (surfaces stalls); a
             # paired V retires in the same cycle as its U (delta 0).
-            dcyc = "" if self._last_cyc is None else str(int(r.cyc) - self._last_cyc)
             stall = (self._last_cyc is not None and int(r.cyc) - self._last_cyc > 1)
+            # only surface Δ on a stall gap (+N) — the steady-state 0/1 is noise
+            dcyc = f"+{int(r.cyc) - self._last_cyc}" if stall else ""
             self._last_cyc = int(r.cyc)
             row = self.tbl.rowCount()
             self.tbl.insertRow(row)

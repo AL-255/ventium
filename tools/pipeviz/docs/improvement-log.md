@@ -22,8 +22,12 @@ not repeat itself.
   cycle axis; **distinct per-stage colours + glyphs** — `F` fetch blue, `L`
   I-cache-fill amber, `D` decode teal, `M` mem orange, `X` exec green (FP
   purple), `W` wb magenta, `=` stall grey, `!` flush red; legend on its own line
-  with each swatch tightly paired to its label; walk = pink (distinct from the
-  flush red). **Contiguous stall runs collapse into one `=N` block** (N = stall
+  with each swatch tightly paired to its label; walk = pink, wb = slate-blue
+  (kept out of the FP/walk purple cluster). Fast-path ops **synthesise their
+  P5 F→D→X pipeline depth** (the dual-issue path collapses fetch/decode into one
+  clock, so the two preceding cycles are drawn as Fetch+Decode) → consecutive
+  instructions cascade diagonally through F→D→X like a real superscalar diagram,
+  not a lone X. **Contiguous stall runs collapse into one `=N` block** (N = stall
   cycles) instead of a wall of grey cells; **per-cycle vertical gridlines** every
   10 cycles; the instruction gutter is wide enough for full mnemonics. The stage
   board is a COMPACT snapshot (the Konata view gets the height — ~29 rows). Two-
@@ -34,11 +38,14 @@ not repeat itself.
   truncated); split TLB; prefetch buffer (ibuf + decode); **Hotspots** = a
   per-PC cycle-cost profile (PC | hits | cycles | cyc% | amber cost bar |
   instruction, sorted by total cycles — stalls inflate the cost so the stalled
-  load/branch PCs bubble to the top, perf/VTune-style); **Memory** = a hex/ASCII
+  load/branch PCs bubble to the top, perf/VTune-style); **Branches** = a
+  per-branch-PC BTB profile (PC | type | target | hits | taken | taken% | bias
+  bar; taken inferred from whether the next retired PC hit the target); **Memory**
+  = a hex/ASCII
   inspector (type an address or click →EIP/→ESP to follow, ◀/▶ to page; EIP bytes
   cyan, ESP bytes amber).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
-  instruction; x86 byte-field colouring (prefix gray / opcode blue / ModRM green
+  instruction (Δ shows `+N` only on a stall gap — steady-state 0/1 suppressed); x86 byte-field colouring (prefix gray / opcode blue / ModRM green
   / SIB purple / memory-offset yellow / immediate red / **branch-rel orange**),
   clipped with `…` so long encodings never collide with the disasm; U=blue
   V=amber pipe; zebra; Δ amber on a stall gap; capstone disasm (16/32-bit per
@@ -53,6 +60,21 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 8 — Branches/BTB panel + synthesised F→D→X pipeline cascade
+- **New feature — Branches/BTB inspector tab:** per-branch-PC profile (type,
+  target, hits, taken, taken%, bias bar; taken inferred from the next retired PC
+  vs the parsed target). 103 sites on `mb_brrandom`.
+- **Konata fast-path pipeline depth** (the recurring "all single X" finding):
+  fast-path ops now synthesise their P5 Fetch+Decode stages in the two cycles
+  before commit, so instructions cascade diagonally `F→D→X` like a real
+  superscalar diagram instead of a lone X cell.
+- **Colour fix:** wb/FP/walk were all in the purple-pink family; wb moved to
+  slate-blue so the three are separable at the 12px cell size.
+- **Stage board:** the instruction label now sits in ONE stage cell (no longer
+  straddling the EX/WB column divider); fixed the clipped "FP idle" corner label.
+- **Trace:** narrowed the bytes column back toward the common case, and the Δ
+  column now shows `+N` only on a stall gap (steady-state 0/1 is suppressed).
 
 ### Iteration 7 — Memory inspector + stall-run collapse + cycle gridlines
 - **New feature — Memory hex/ASCII inspector tab:** type an address or click
