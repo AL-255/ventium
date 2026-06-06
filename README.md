@@ -1,28 +1,21 @@
-<p align="center">
-  <img src="docs/ventium.png" alt="Ventium" width="440">
-</p>
-
 # Ventium
 
-[![Ventium](docs/ventium.png)](https://al-255.github.io/ventium/)
+<p>
+  <img src="docs/ventium.png" alt="Ventium" width="440">
+</p>
 
 An RTL reconstruction of the original Intel **Pentium (P5 / P54C, non-MMX)**
 microarchitecture, written in synthesizable SystemVerilog, simulated with
 **Verilator**, and verified differentially against **QEMU**. It is **ISA-exact
 and cycle-approximate for the broad subset it verifies** — high fidelity as an
 architectural + cycle model, medium fidelity as a full microarchitectural / pin-
-level clone (see **Honest scope** below and [`docs/isa-coverage.md`](docs/isa-coverage.md)
+level clone (see [`docs/isa-coverage.md`](docs/isa-coverage.md)
 / [`docs/modeled-by-effect.md`](docs/modeled-by-effect.md)).
 
 - **reference:** <https://al-255.github.io/ventium/>
 - **Reference library + golden model:** [`ventium-refs/`](ventium-refs/) submodule
   (Intel manuals, Alpert & Avnon, Agner Fog, datasheet, spec updates, and a
   working QEMU `-cpu pentium` functional + cycle golden harness).
-
-**Scope:** This is an **ISA-exact + cycle-approximate** clone, not a gate-for-gate copy. 
-Verification is differential against QEMU wherever an oracle exists, and clearly-labelled
-structural / self-checked where one does not (the pin-level bus, SMM, silicon
-errata, device timing).
 
 ## What's implemented
 
@@ -103,21 +96,6 @@ docs/               trace-format.md (the producer/consumer contract), the
                     m*-spec.md design docs, and sphinx/ (the live catalog)
 3rd-party/          opl3_fpga submodule (OPL3 FM synth, for a SoundBlaster card)
 ```
-
-## Verification model
-
-QEMU 8.2.2 plugins cannot read register values, so the **functional oracle** is
-single-stepping `qemu-i386 -g` (user mode) / `qemu-system-i386 -g` (system mode)
-over the GDB remote protocol — full architectural state per retired instruction
-(the i386 g-packet register layout is corrected by a tail-anchor fix). The RTL
-emits the **same `.vtrace` format** ([`docs/trace-format.md`](docs/trace-format.md))
-via a DPI retire hook ([`docs/rtl-interface.md`](docs/rtl-interface.md)), and
-`verif/diff/compare.py` (or `compare_stream.py` for multi-million-record runs)
-diffs the streams under an EFLAGS-undefined mask. The **cycle model** (M4/M5) is
-checked against the `p5model` estimate mined in `ventium-refs/`. For the
-macro-workloads, QEMU also supplies the **environment inputs the CPU can't compute**
-(syscall effects for Quake; device reads + interrupts for Win95), which the
-testbench replays while the comparator grades only the CPU.
 
 ## Build & verify
 
