@@ -1464,3 +1464,56 @@ EQUIVALENT on the FIRST RTL run.
   is untouched). RTL touched: `rtl/soc/ven_ide.sv` (new) + `rtl/soc/ventium_soc.sv`
   + `rtl/ventium_soc.f` + `verif/tb/Makefile` (the `-DVEN_IDE_DISK_HEX` define).
   `ventium-refs` untouched.
+
+### M8.4b — IDE WRITE SECTORS (PIO, single + multi-sector) (2026-06-05, per-record differential)
+
+**What this is.** The symmetric WRITE data-path completing the M8.4a READ: `ven_ide`
+now handles **WRITE SECTORS (0x30/0x31)**, single + multi-sector — the data-port
+*host→device* fill (the M8.4a stub `3'd0: ;` no-op is now a real write path). Same
+arc: a research/design workflow grounded the WRITE handshake + the snapshot
+strategy, an adversarial review checked the write edge-cases; implemented
+oracle-first → **EQUIVALENT on the first RTL run**.
+
+- **`ven_ide.sv` WRITE path.** `wdata` widened to 16-bit (the data port carries a
+  full word; task-file regs use `[7:0]`); `ventium_soc` wires `io_wdata[15:0]`. A
+  new `in_write` flag + the `0x30/0x31` dispatch arm (DRQ set **immediately**, no
+  BSY — qemu `cmd_write_pio` sets DRQ in `ide_transfer_start`). The data-port write
+  arm (guarded `r_status[3] && in_write`, mirroring qemu's `ide_data_writew`
+  DRQ/PIO-out guard) stores each `outw` word into `disk[]` at the **same**
+  `disk_byte` the READ uses (little-endian: `disk[base]<=wdata[7:0]`,
+  `disk[base+1]<=wdata[15:8]`), advances `data_idx`, and on the last word commits /
+  re-arms the next sector — the exact inverse of the READ drain. `insw`/`rep
+  outsw` are NOT used (INS/OUTS are cosim-gated in the decoder → HALT under
+  `soc_en`); plain `outw` (`66 EF`, decoded unconditionally) through S_IO. Lint 0.
+
+- **FULLY per-record differentiable (the `pide` gate grows to EQUIVALENT 10854/10854).**
+  The test (nIEN-polled, synchronous) now also: WRITE SECTORS single @ **scratch
+  LBA 64** (pattern `0xC000+j`, distinct from the native `0x4000+j`) then **reads
+  it back** (returns `0xC0xx` per-record — proving the write took effect,
+  **non-vacuous**: a no-op/broken write would read back `0x40xx` and FAIL); and a
+  **multi-sector** WRITE @ LBA 70 nsec=2 (status `0x58` re-armed at the sector
+  boundary — the load-bearing continuation record) then reads back LBA 70-71 (512
+  words = `0xC000..0xC1FF`), GATE-PROVING the WRITE continuation FSM + both
+  sectors' data. The write status handshake (0x58-immediate / 0x58-re-arm /
+  0x50-commit) is a NEW differential surface the READ did not exercise.
+
+- **Snapshot strategy (so differential writes don't corrupt the single source).**
+  `-drive ...,snapshot=on` routes qemu's guest writes to an anonymous temp overlay
+  (the committed `pide.img` is opened read-only); the write only needs to survive
+  within one run, which both the qemu overlay and the RTL's in-memory `disk[]`
+  provide. A gate **md5 PRE==POST assert** enforces `pide.img` stays byte-pristine.
+
+- **Oracle boundaries (documented, off-surface, gate-unreachable).** The async
+  write-back BH settles before the next single-step (golden never shows a transient
+  BSY/0xD0 — verified; the RTL commits synchronously → same poll-count parity); the
+  RTL commits word-by-word to `disk[]` vs qemu's buffer-then-end-of-sector commit
+  (identical CPU-observable result — the LBA isn't re-read until a later READ); a
+  stray data-port write while DRQ=0 is dropped (guard matches qemu). Deferred to a
+  later ATA-misc milestone: out-of-range-LBA abort, CHS, the misc commands, SRST.
+
+- **Gate + no-regression.** `run-soc-ide-gate.sh`: `snapshot=on` + `MAXI=14000` +
+  the md5-pristine assert. **`make verify-soc` → 5/5 PASS** (pirqsoc, psocdev
+  122/122, pvga 292/292, **pide 10854/10854**, test386 1500/1500); `make verify`
+  **69/69 cache hits, 0 regenerated** (core untouched). RTL touched:
+  `rtl/soc/ven_ide.sv` + `rtl/soc/ventium_soc.sv` (the 16-bit `wdata` wire) +
+  `verif/tb/Makefile` unchanged. `ventium-refs` untouched.

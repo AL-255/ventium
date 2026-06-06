@@ -65,10 +65,11 @@ level clone (see [`docs/isa-coverage.md`](docs/isa-coverage.md)
   register masks, color/mono port aliasing, CRTC CR0-7 write-lock, IS1 dumb-retrace;
   the ACPI PM read is a documented host-clock oracle boundary), and to an **IDE/ATA
   disk** (M8.4 — a PIO primary-master controller: a full per-record differential of
-  the reset signature, IDENTIFY, READ SECTORS byte-identical to a single-source disk
-  image, and DIAGNOSTIC; `gen_disk.py` feeds the *same* image to QEMU's `-drive` and
-  the RTL's `$readmemh`). A bus-master DMA engine, an OPL3/SoundBlaster card, and
-  PCI follow.
+  the reset signature, IDENTIFY, READ + WRITE SECTORS (single + multi-sector,
+  byte-identical to a single-source disk image, with writes proved by read-back),
+  and DIAGNOSTIC; `gen_disk.py` feeds the *same* image to QEMU's `-drive` and the
+  RTL's `$readmemh`). A bus-master DMA engine, an OPL3/SoundBlaster card, and PCI
+  follow.
 
 ## Layout
 
