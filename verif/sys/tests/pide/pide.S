@@ -67,6 +67,30 @@
     .equ R_W2_POST,  0x00002058  /* WRITE multi : status after both  = 0x50 */
     .equ R_RB1_ST,   0x0000205C  /* read-back single: status after   = 0x50 */
     .equ R_RB2_ST,   0x00002060  /* read-back multi : status after   = 0x50 */
+    /* --- M8.4c IDE PIO fidelity result slots --- */
+    .equ R_OORR_ST,  0x00002064  /* OOR READ @128 status   = 0x41 (abort)      */
+    .equ R_OORR_ER,  0x00002068  /* OOR READ error         = 0x04 (ABRT)       */
+    .equ R_OORR_SEC, 0x0000206C  /* OOR READ sector reg    = 0x80 (unchanged)  */
+    .equ R_RA_NS,    0x00002070  /* reg-advance nsector    = 0x00 (after READ) */
+    .equ R_RA_SEC,   0x00002074  /* reg-advance sector     = 0x01 (LBA0->1)    */
+    .equ R_RA_SEL,   0x00002078  /* reg-advance select     = 0xE0              */
+    .equ R_OORW_DRQ, 0x0000207C  /* OOR WRITE @129 DRQ     = 0x58 (armed)      */
+    .equ R_OORW_ST,  0x00002080  /* OOR WRITE status       = 0x41 (abort)      */
+    .equ R_OORW_ER,  0x00002084  /* OOR WRITE error        = 0x04              */
+    .equ R_OORW_SEC, 0x00002088  /* OOR WRITE sector reg   = 0x81 (no advance) */
+    .equ R_MRC_ST,   0x0000208C  /* multi-READ cross status= 0x41 (boundary)   */
+    .equ R_MRC_ER,   0x00002090  /* multi-READ cross error = 0x04              */
+    .equ R_MRC_SEC,  0x00002094  /* multi-READ cross sector= 0x80 (OOR LBA)    */
+    .equ R_MWC_MID,  0x00002098  /* multi-WRITE cross mid   = 0x58 (re-armed)  */
+    .equ R_MWC_ST,   0x0000209C  /* multi-WRITE cross status= 0x41 (final)     */
+    .equ R_CHS_ST,   0x000020A0  /* CHS read status        = 0x50              */
+    .equ R_CWD_ST,   0x000020A4  /* command-while-DRQ status= 0x58 (unchanged) */
+    .equ R_CWD_ER,   0x000020A8  /* command-while-DRQ error = 0x00 (no abort)  */
+    .equ R_RDW_ST,   0x000020AC  /* read-during-write status= 0x58 (no advance)*/
+    .equ R_SEEK_ST,  0x000020B0  /* SEEK status            = 0x50              */
+    .equ R_SEEK_ER,  0x000020B4  /* SEEK error             = 0x00              */
+    .equ R_RECAL_ST, 0x000020B8  /* RECALIBRATE status     = 0x50              */
+    .equ R_INIT_ST,  0x000020BC  /* INIT-DEV-PARAMS status = 0x50              */
 
     .equ BUF_ID,     0x00004000  /* IDENTIFY 512-byte block       */
     .equ BUF_S0,     0x00004200  /* sector 0   block              */
@@ -509,6 +533,180 @@ pm32_entry:
     inb     %dx, %al
     andl    $0xFF, %eax
     movl    %eax, R_DIAG_DH
+
+    /* ===================== M8.4c IDE PIO FIDELITY ====================== */
+    /* All new scratch LBAs (128/129/127/100/CHS) run AFTER the existing graded
+     * reads/writes so they cannot disturb them. WRITEs go to the snapshot=on
+     * overlay; the committed pide.img stays pristine (gate md5 PRE==POST). */
+
+    /* --- (1) OOR single READ @ LBA 128: upfront abort (no DRQ) --------- */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $128, %al; movw $0x1F3, %dx; outb %al, %dx   /* LBA 128 (0x80) = OOR */
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx   /* READ -> OOR upfront abort */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_OORR_ST  /* 0x41 */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_OORR_ER  /* 0x04 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_OORR_SEC /* 0x80 */
+
+    /* follow-up READ LBA 0 proves the disk is UNTOUCHED (no aliasing) + the
+     * LBA-register advance (after this in-range nsec=1 read, regs -> LBA 1). */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F3, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b               /* word0=0x0000..w255=0xAA55 native */
+    movw    $0x1F2, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RA_NS  /* nsector=0 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RA_SEC /* sector=1 */
+    movw    $0x1F6, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RA_SEL /* select=0xE0 */
+
+    /* --- (2) OOR single WRITE @ LBA 129: fill, abort on last word, alias intact - */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $129, %al; movw $0x1F3, %dx; outb %al, %dx   /* LBA 129 (0x81) = OOR */
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x30, %al;movw $0x1F7, %dx; outb %al, %dx   /* WRITE -> arms 0x58 (abort deferred) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_OORW_DRQ /* 0x58 */
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movw    $0xE000, %ax; movl $256, %ecx; movw $0x1F0, %dx
+2:  outw    %ax, %dx; incw %ax; decl %ecx; jnz 2b       /* fill 256 (DROPPED: OOR sector) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_OORW_ST  /* 0x41 */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_OORW_ER  /* 0x04 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_OORW_SEC /* 0x81 no advance */
+    /* prove the alias target LBA 1 (129 mod 128) is NOT corrupted */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $1, %al;   movw $0x1F3, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b               /* word0=0x0100 native (NOT 0xE0xx) */
+
+    /* --- (3) multi-READ crossing @ LBA 127 nsec=2: deliver 127, abort at 128 - */
+    movb    $2, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $127, %al; movw $0x1F3, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b               /* sector 127 real data (w0=0x7F00) */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_MRC_ST  /* 0x41 at boundary */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_MRC_ER  /* 0x04 */
+    movw    $0x1F3, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_MRC_SEC /* 0x80 advanced to OOR */
+
+    /* --- (4) multi-WRITE crossing @ LBA 127 nsec=2: commit 127, abort at 128 - */
+    movb    $2, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $127, %al; movw $0x1F3, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x30, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movw    $0xB000, %ax; movl $256, %ecx; movw $0x1F0, %dx   /* sector 127: 0xB000+j */
+2:  outw    %ax, %dx; incw %ax; decl %ecx; jnz 2b
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_MWC_MID /* 0x58 re-armed */
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movw    $0xF000, %ax; movl $256, %ecx; movw $0x1F0, %dx   /* sector 128 OOR (dropped) */
+2:  outw    %ax, %dx; incw %ax; decl %ecx; jnz 2b
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_MWC_ST  /* 0x41 final */
+    /* prove sector 127 COMMITTED before the OOR abort: read LBA 127 -> 0xB000+j */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $127, %al; movw $0x1F3, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b               /* word0=0xB000 (committed pre-abort) */
+
+    /* --- (5) CHS addressing: C0/H1/S2 -> LBA 64 (devhead bit6=0) -------- */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $2, %al;   movw $0x1F3, %dx; outb %al, %dx   /* sector = 2 (1-based) */
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx   /* cyl lo = 0 */
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx   /* cyl hi = 0 */
+    movb    $0xA1, %al;movw $0x1F6, %dx; outb %al, %dx   /* bit6=0 CHS, master, head=1 */
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b               /* C0/H1/S2 -> LBA 64: w0=0x4000 */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_CHS_ST   /* 0x50 */
+
+    /* --- (6) command-while-DRQ: a 2nd command mid-DRQ is DROPPED -------- */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F3, %dx; outb %al, %dx   /* LBA 0 */
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx   /* READ LBA0 -> DRQ */
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movb    $0xEC, %al;movw $0x1F7, %dx; outb %al, %dx   /* mid-DRQ IDENTIFY -> DROPPED */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_CWD_ST  /* still 0x58 */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_CWD_ER  /* 0x00 no abort */
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b               /* LBA0 data (w0=0x0000), NOT IDENTIFY 0x0040 */
+
+    /* --- (7) read-during-write-DRQ: a stray inw returns 0 + consumes no slot - */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $100, %al; movw $0x1F3, %dx; outb %al, %dx   /* scratch LBA 100 */
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x30, %al;movw $0x1F7, %dx; outb %al, %dx   /* WRITE -> 0x58 */
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movw    $0x1F0, %dx; inw %dx, %ax                    /* stray READ in write window -> 0x0000 */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RDW_ST  /* still 0x58, no advance */
+    movw    $0xD000, %ax; movl $256, %ecx; movw $0x1F0, %dx
+2:  outw    %ax, %dx; incw %ax; decl %ecx; jnz 2b        /* fill all 256 (the stray read took no slot) */
+    /* read back LBA 100 -> 0xD000+j (all 256 words present/correct) */
+    movb    $1, %al;   movw $0x1F2, %dx; outb %al, %dx
+    movb    $100, %al; movw $0x1F3, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F4, %dx; outb %al, %dx
+    movb    $0, %al;   movw $0x1F5, %dx; outb %al, %dx
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x20, %al;movw $0x1F7, %dx; outb %al, %dx
+1:  movw    $0x1F7, %dx; inb %dx, %al; testb $0x80, %al; jnz 1b
+    testb   $0x08, %al; jz fail
+    movl    $256, %ecx; movw $0x1F0, %dx
+2:  inw     %dx, %ax; decl %ecx; jnz 2b               /* w0=0xD000..w255=0xD0FF */
+
+    /* --- (8) misc non-data commands complete 0x50/0x00 ----------------- */
+    movb    $0xE0, %al;movw $0x1F6, %dx; outb %al, %dx
+    movb    $0x70, %al;movw $0x1F7, %dx; outb %al, %dx   /* SEEK */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEEK_ST  /* 0x50 */
+    movw    $0x1F1, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEEK_ER  /* 0x00 */
+    movb    $0x10, %al;movw $0x1F7, %dx; outb %al, %dx   /* RECALIBRATE */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_RECAL_ST /* 0x50 */
+    movb    $63, %al;  movw $0x1F2, %dx; outb %al, %dx   /* sectors/track for INIT-DEV-PARAMS */
+    movb    $0x91, %al;movw $0x1F7, %dx; outb %al, %dx   /* INIT DEVICE PARAMS */
+    movw    $0x1F7, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_INIT_ST  /* 0x50 */
+    /* NOTE: the mid-DRQ task-file-register WRITE drop (qemu core.c:1287) IS
+     * modeled (ven_ide.sv gates 0x1F1-0x1F6 writes on !r_status[3]), but is NOT
+     * separately gate-tested here: any mid-DRQ register READ that would observe
+     * the drop also samples the off-surface register-advance LAG (qemu advances
+     * the visible sector reg at DRQ-window-open via ide_sector_read_cb, the RTL
+     * at end-of-drain), a documented boundary. The two agree on the POST-transfer
+     * value (R_RA_SEC=1 above), which IS gate-proven. */
 
     /* ====================== deterministic end-state ===================== */
     movl    BUF_ID+2,   %esi            /* IDENTIFY word 1 (cyls = 2)        */
