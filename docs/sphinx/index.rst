@@ -22,7 +22,10 @@ rules are all modelled, gated behind explicit errata flags so a "clean" core
 and an "erratum-accurate" core can both be exercised. The FDIV flaw goes a step
 further: an optional, genuine **radix-4 SRT divider** reproduces it from first
 principles out of the reverse-engineered quotient-selection table — see
-:doc:`microarch/srt-divider`.
+:doc:`microarch/srt-divider`. The full set of sources behind the replica — Intel
+manuals and errata, the pipeline and timing literature, die-photo reverse
+engineering, and the emulators used as differential oracles — is cataloged in
+:doc:`reference-library`.
 
 The **Instruction Catalog** below is the heart of the reference: it walks every
 instruction category the integer and x87 cores decode, and for each
@@ -42,3 +45,9 @@ issue to and why*, and an honest implementation status.
    :caption: Microarchitecture deep dives
 
    microarch/srt-divider
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Project resources
+
+   reference-library
