@@ -42,6 +42,9 @@ jobs:
           cache: pip
           cache-dependency-path: docs/sphinx/requirements.txt
 
+      - name: Install Graphviz (provides `dot` for the architecture diagrams)
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
       - name: Install Sphinx
         run: pip install -r docs/sphinx/requirements.txt
 
