@@ -52,8 +52,9 @@ effectively impossible (against QEMU) for transcendentals. So M3 is tiered:
     QEMU computes these with its own approximation; matching it bit-exact ≠
     matching a real Pentium, so deferred to a later milestone with an
     ulp-tolerance oracle (REF.md §8). HALT for now.
-  - BCD `FBLD`/`FBSTP`; environment/state `FSAVE/FRSTOR/FLDENV/FNSTENV` (28/108-
-    byte memory images) — deferred; HALT.
+  - Environment/state `FSAVE/FRSTOR/FLDENV/FNSTENV` (28/108-byte memory images)
+    — deferred; HALT. (BCD `FBLD`/`FBSTP` were deferred here but are now
+    IMPLEMENTED in M10 — see below — and are NO LONGER in the loud-HALT set.)
   - x87 numeric exceptions actually *raised* (unmasked → #MF): the corpus keeps
     exceptions masked (default cw) and avoids faulting operands.
 
@@ -101,11 +102,20 @@ PROGRESS. Anything unimplemented HALTs the core — never silently mis-executes.
 
 ## Deferred x87 — machine-checkable boundary
 
-The "DEFERRED — loud HALT" set above (transcendentals, BCD load/store, and the
-FP environment/state ops) was previously asserted only in prose. Per
-`REVIEW_Jun5.md` Recommended Step 4 + Limit #2, that coverage boundary is now
-**machine-checkable** so it cannot silently rot if a future change accidentally
-decodes one of those ops.
+The "DEFERRED — loud HALT" set above (transcendentals and the FP
+environment/state ops; **BCD load/store is now IMPLEMENTED in M10**, see the
+note below) was previously asserted only in prose. Per `REVIEW_Jun5.md`
+Recommended Step 4 + Limit #2, that coverage boundary is now **machine-checkable**
+so it cannot silently rot if a future change accidentally decodes one of those ops.
+
+> **M10 update — BCD `FBLD`/`FBSTP` implemented (no longer deferred).** `DF /4`
+> (FBLD) and `DF /6` (FBSTP) now decode to `FX_FBLD`/`FX_FBSTP` and are
+> per-record EQUIVALENT vs QEMU (`verif/tests/tx_bcd_ld`, `tx_bcd_st`, both
+> `x87:true` in `make verify`): FBLD packed-BCD→floatx80 (exact), FBSTP
+> round-to-int→18-digit packed-BCD + sign byte, with PE on inexact rounding and
+> the BCD-indefinite image + IE on `|val| >= 1e18` overflow (oracle-pinned to
+> QEMU's `helper_fbst_ST0`). The boundary test below uses **FSIN** (still
+> deferred), so it is unaffected.
 
 ### Verified deferred decode set (against `rtl/core/core.sv`)
 
@@ -117,7 +127,6 @@ deferred op, nor anything after it). Confirmed encodings and the arm each hits:
 | Family (deferred) | Mnemonics | Encoding | `d_unknown` arm |
 |---|---|---|---|
 | Transcendentals | `FSIN FCOS FPTAN FPATAN F2XM1 FYL2X FSINCOS FYL2XP1` | `D9 F0..FF` (reg, mod==11) | core.sv:1889 (D9 reg `default`) |
-| BCD load/store | `FBLD` / `FBSTP` | `DF /4` / `DF /6` (mem) | core.sv:1998 (DF mem `default`) |
 | FP environment | `FLDENV` / `FNSTENV` | `D9 /4` / `D9 /6` (mem) | core.sv:1868 (D9 mem `default`) |
 | FP state save/restore | `FRSTOR` / `FNSAVE`/`FSAVE` | `DD /4` / `DD /6` (mem) | core.sv:1955 (DD mem `default`) |
 

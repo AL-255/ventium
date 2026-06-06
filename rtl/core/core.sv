@@ -2012,9 +2012,11 @@ module core
                   3'd0: begin d_fxop=FX_FILD_M16; d_f_mem_read=1'b1;  d_f_mbytes=4'd2; end
                   3'd2: begin d_fxop=FX_FIST_M16; d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
                   3'd3: begin d_fxop=FX_FIST_M16; d_f_mem_write=1'b1; d_f_mbytes=4'd2; d_f_pop=1'b1; end
+                  3'd4: begin d_fxop=FX_FBLD;  d_f_mem_read=1'b1;  d_f_mbytes=4'd10; end          // FBLD m80 (packed BCD)
                   3'd5: begin d_fxop=FX_FILD_M64; d_f_mem_read=1'b1;  d_f_mbytes=4'd8; end
+                  3'd6: begin d_fxop=FX_FBSTP; d_f_mem_write=1'b1; d_f_mbytes=4'd10; d_f_pop=1'b1; end // FBSTP m80 + pop
                   3'd7: begin d_fxop=FX_FIST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; d_f_pop=1'b1; end
-                  default: d_unknown=1'b1;   // FBLD/FBSTP deferred
+                  default: d_unknown=1'b1;
                 endcase
               end else begin
                 if (mrm==8'hE0) d_fxop=FX_FNSTSW_AX;
@@ -3273,6 +3275,14 @@ module core
         fstore_val = {16'd0, r64[63:0]}; fstore_pe = r64[64];
       end
       FX_FST_M80:  fstore_val = s0;
+      // M10 FBSTP: round ST0 to int (per RC), pack 18-digit BCD + sign byte.
+      // {ie,pe,bcd} -> IE on BCD-range overflow (indefinite image), PE on an
+      // inexact round-to-int (oracle-confirmed: FBSTP of 2.5 sets PE).
+      FX_FBSTP: begin
+        logic [81:0] rb;
+        rb = fx_fx_to_bcd(s0, fctrl[11:10]);
+        fstore_val = rb[79:0]; fstore_pe = rb[80]; fstore_ie = rb[81];
+      end
       // M6 Erratum 20: FIST[P] m16int/m32int (NOT m64) miss the overflow on
       // the documented positive operands in nearest/up rounding -> store ZERO,
       // no IE. fx_to_int_errata reproduces that when errata_en[ERR_FIST] is set;
@@ -4087,6 +4097,9 @@ module core
         FX_FILD_M16, FX_FILD_M32, FX_FILD_M64: begin
           fp_we_push=1'b1; fp_push_data=f_mem_as_int(f_mem80, q_f_mbytes);
         end
+        FX_FBLD: begin   // M10: packed-BCD m80 -> floatx80 (exact, <=18 digits)
+          fp_we_push=1'b1; fp_push_data=fx_bcd_to_fx(f_mem80);
+        end
         FX_FLDCONST: begin fp_we_push=1'b1; fp_push_data=fconst(q_f_const); end
         FX_FLD_STI:  begin fp_we_push=1'b1; fp_push_data=s_stiv;            end
         // ---- register moves / stack mgmt ----
@@ -4199,6 +4212,7 @@ module core
         // pop happen later in S_FSTORE). FST m80/FNSTCW/FNSTSW m16 stay exact.
         FX_FST_M32, FX_FST_M64, FX_FST_M80,
         FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
+        FX_FBSTP,
         FX_FNSTCW, FX_FNSTSW_M: begin
           if (fstore_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end  // IE
           else if (fstore_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end  // PE

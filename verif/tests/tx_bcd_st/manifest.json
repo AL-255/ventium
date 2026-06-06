@@ -1,0 +1,10 @@
+{
+  "name": "tx_bcd_st",
+  "src": "tx_bcd_st/tx_bcd_st.s",
+  "elf": "tx_bcd_st/tx_bcd_st.elf",
+  "image": "tx_bcd_st/tx_bcd_st.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 40,
+  "x87": true
+}

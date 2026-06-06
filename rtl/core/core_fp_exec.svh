@@ -46,6 +46,7 @@
             // FNSTSW m16 are exact (flags stay 0).
             FX_FST_M32, FX_FST_M64, FX_FST_M80,
             FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
+            FX_FBSTP,
             FX_FNSTCW, FX_FNSTSW_M: begin
               f_do_store=1'b1; f_do_retire=1'b0;
             end

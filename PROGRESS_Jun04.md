@@ -1979,6 +1979,35 @@ that never leaves real mode. New `pbootrm` gate: **EQUIVALENT 1065/1065** (first
 - **No regression:** SoC aggregate **8/8 PASS**; `make verify` **69/69 cache hits, 0 regenerated**.
   `ventium-refs` untouched.
 
+### M10 — x87 packed-BCD FBLD/FBSTP (a deferred family, now implemented) (2026-06-06)
+
+**What this is.** The first deferred x87 family lifted out of the loud-HALT set. A research workflow
+scoped the whole deferred-x87 backlog and recommended **FBLD/FBSTP** (packed-BCD load/store) as the
+cleanest first increment: genuinely P5 (BCD dates to the 8087), deterministic + single-step
+differentiable (pure integer/softfloat, no libm), and maximally self-contained — it reuses the
+existing 10-byte (m80) load/store micro-sequences with **zero new FSM state and no FIP/FDP/FOP
+tracking**. (It also unblocks Erratum 83.) Two new `x87:true` directed tests, both **EQUIVALENT vs
+QEMU on the first RTL run**.
+
+- **Oracle-first paid off.** The research *guessed* FBSTP sets no PE; the regenerated qemu golden
+  showed FBSTP **does** set PE on inexact rounding (2.5→2 and 3.5→4 both set fstat bit5). Building to
+  the read bytes — not the guess — got it right first try. Likewise the BCD-indefinite image
+  (`00..00 C0 FF FF`) and the `|val| ≥ 1e18` overflow threshold (tighter than `fx_to_int_ex`'s 2^63
+  bound — a value in `[1e18, 2^63)` is a valid int64 yet an invalid BCD) were oracle-pinned.
+- **RTL** (core + FPU package only): two `fxop_e` members (`FX_FBLD`/`FX_FBSTP`); the `DF /4`/`DF /6`
+  decode arms (were `d_unknown`→HALT); a `fstore_val` arm + the push dispatch; the existing PE/IE
+  latch and last-beat-pop lists extended. New pure functions `fx_bcd_to_fx` (BCD→floatx80 via the
+  same exact `fx_from_int` FILD uses) and `fx_fx_to_bcd` (floatx80→18-digit BCD via `fx_to_int_ex`,
+  with the separate 1e18 check, the indefinite image, and PE from the inexact bit).
+- **Tests** (`verif/tests/tx_bcd_ld`, `tx_bcd_st`, auto-discovered by `make verify`): FBLD of
+  +1234567/−1234567/+123456789012/+0 (st0 live-graded as 80-bit + a FISTP→GPR cross-check); FBSTP of
+  +42/−42 (sign byte), 2.5→2 / 3.5→4 (round-to-even + PE), and 5e18→indefinite+IE — the 10 BCD bytes
+  read back into eax/edx/ecx (memory isn't graded) so the bytes are compared.
+- **No regression / boundary intact:** `make verify` **71/71** (69 cache hits + the 2 new), the FSIN
+  loud-HALT boundary (`run_x87_boundary.sh`) still PASSES (FBLD/FBSTP removed from the deferred set;
+  FSIN stands in for the still-deferred transcendentals/FP-environment ops). Docs updated
+  (`m3-fpu-spec.md`, the boundary-test comment). `ventium-refs` untouched.
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
