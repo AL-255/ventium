@@ -120,7 +120,10 @@ module fpu_top (
     output logic [31:0] fip_o,
     output logic [15:0] fcs_o,
     output logic [31:0] fdp_o,
-    output logic [15:0] fds_o
+    output logic [15:0] fds_o,
+    // M11b: the 8 PHYSICAL registers flattened (fpr[0] in the low 80 bits), for the
+    // FNSTENV/FNSAVE env-image FTW assembly + the FNSAVE ST-register slots.
+    output logic [639:0] fpr_flat_o
 );
 
   // ---- the architectural state file (VERBATIM the inline declarations) -------
@@ -157,6 +160,7 @@ module fpu_top (
   assign fptag_o = fptag;
   assign fip_o = fip; assign fcs_o = fcs;
   assign fdp_o = fdp; assign fds_o = fds;
+  assign fpr_flat_o = {fpr[7],fpr[6],fpr[5],fpr[4],fpr[3],fpr[2],fpr[1],fpr[0]};
 
   // ---- the synchronous state update. ALL write indices are computed from the
   // REGISTERED `ftop` here, and ftop is updated in this same block, so the

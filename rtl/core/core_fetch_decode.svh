@@ -308,7 +308,10 @@
               state<=S_HALT;
           end
           else if (d_is_x87) begin
-            if (d_f_mem_read) state<=S_FLOAD;       // read mem operand first
+            // M11b: env/state ops own a dedicated wide-beat sequencer.
+            if (d_fxop==FX_FNSTENV || d_fxop==FX_FNSAVE)  begin f_seq_step<=5'd0; state<=S_FENV_ST; end
+            else if (d_fxop==FX_FLDENV || d_fxop==FX_FRSTOR) begin f_seq_step<=5'd0; state<=S_FENV_LD; end
+            else if (d_f_mem_read) state<=S_FLOAD;  // read mem operand first
             else state<=S_FEXEC;                    // reg/const/control op
           end
           // ---- M2S.3 IDT delivery: software INT n / INT3 / INTO / UD2 --------

@@ -53,6 +53,15 @@
       S_FLOAD: begin
         mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
       end
+      // M11b: env/state transfers — one full dword per wide beat (f_seq_step).
+      S_FENV_ST: begin
+        mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
+        mem_addr = dbase+q_ea + {25'd0, f_seq_step, 2'b00};
+        mem_wdata = fenv_image[f_seq_step*32 +: 32];
+      end
+      S_FENV_LD: begin
+        mem_req=1'b1; mem_addr=dbase+q_ea + {25'd0, f_seq_step, 2'b00};
+      end
       S_FSTORE: begin
         mem_req=1'b1; mem_we=1'b1;
         mem_addr = dbase+q_ea + {26'd0, f_step, 2'b00};
