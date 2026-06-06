@@ -117,6 +117,12 @@ struct Args {
     // inspect point.
     uint64_t    checkpoint_every = 0;  // --checkpoint-every N (0 = off)
     std::string checkpoint_dir;        // --checkpoint-dir D
+
+    // M14 video capture (Quake): the guest's $P5Q_VIDEO path; the emulator
+    // captures writes to it (the P5Q1 frame stream) and we dump them to
+    // --video-out for offline PNG conversion.
+    std::string video_path;            // --video-path <guest $P5Q_VIDEO value>
+    std::string video_out;             // --video-out <file> (raw P5Q1 stream)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -173,6 +179,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--brk-base")    a.brk_base    = parse_u32(need("--brk-base"));
         else if (k == "--checkpoint-every") a.checkpoint_every = parse_u64(need("--checkpoint-every"));
         else if (k == "--checkpoint-dir")   a.checkpoint_dir   = need("--checkpoint-dir");
+        else if (k == "--video-path") a.video_path = need("--video-path");
+        else if (k == "--video-out")  a.video_out  = need("--video-out");
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -262,6 +270,7 @@ int main(int argc, char** argv) {
             }
             uint32_t brk0 = args.brk_base ? args.brk_base : 0x0a000000u;
             emu.reset(new ventium::SyscallEmulator(mem, std::move(sin), brk0));
+            if (!args.video_path.empty()) emu->set_video_path(args.video_path);
             std::fprintf(stderr,
                 "tb: FREE-RUN emulate ON (proxy_en=1): entry=0x%08x esp=0x%08x "
                 "brk_base=0x%08x stdin=%zuB\n", img.eip, img.esp, brk0,
@@ -787,6 +796,14 @@ int main(int argc, char** argv) {
         }
         std::fprintf(stderr, "----- guest stdout -----\n%s------------------------\n",
                      emu->captured_stdout().c_str());
+        if (!args.video_out.empty() && !emu->video().empty()) {
+            if (FILE* vf = std::fopen(args.video_out.c_str(), "wb")) {
+                std::fwrite(emu->video().data(), 1, emu->video().size(), vf);
+                std::fclose(vf);
+                std::fprintf(stderr, "tb: wrote %zu bytes of P5Q1 video stream to %s\n",
+                             emu->video().size(), args.video_out.c_str());
+            }
+        }
         if (emu_exit) exit_code = emu_code;
     }
     if (cosim_mode) {
