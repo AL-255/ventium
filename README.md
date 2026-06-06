@@ -1,4 +1,10 @@
+<p align="center">
+  <img src="docs/ventium.png" alt="Ventium" width="440">
+</p>
+
 # Ventium
+
+[![Ventium](docs/ventium.png)](https://al-255.github.io/ventium/)
 
 An RTL reconstruction of the original Intel **Pentium (P5 / P54C, non-MMX)**
 microarchitecture, written in synthesizable SystemVerilog, simulated with
@@ -8,20 +14,15 @@ architectural + cycle model, medium fidelity as a full microarchitectural / pin-
 level clone (see **Honest scope** below and [`docs/isa-coverage.md`](docs/isa-coverage.md)
 / [`docs/modeled-by-effect.md`](docs/modeled-by-effect.md)).
 
-📖 **Live instruction reference:** <https://al-255.github.io/ventium/>
-
-- **Plan & scope:** [`PLAN.md`](PLAN.md)
-- **Status / changelog:** [`PROGRESS.md`](PROGRESS.md) (+ the dated
-  [`PROGRESS_Jun04.md`](PROGRESS_Jun04.md))
+- **reference:** <https://al-255.github.io/ventium/>
 - **Reference library + golden model:** [`ventium-refs/`](ventium-refs/) submodule
   (Intel manuals, Alpert & Avnon, Agner Fog, datasheet, spec updates, and a
   working QEMU `-cpu pentium` functional + cycle golden harness).
 
-> **Honest scope.** Intel never released the Pentium RTL/microcode, so this is an
-> **ISA-exact + cycle-approximate** clone, not a gate-for-gate copy. Verification
-> is **differential against QEMU wherever an oracle exists**, and clearly-labelled
-> **structural / self-checked** where one does not (the pin-level bus, SMM, silicon
-> errata, device timing). No gate is weakened and no result is faked.
+**Scope:** This is an **ISA-exact + cycle-approximate** clone, not a gate-for-gate copy. 
+Verification is differential against QEMU wherever an oracle exists, and clearly-labelled
+structural / self-checked where one does not (the pin-level bus, SMM, silicon
+errata, device timing).
 
 ## What's implemented
 
