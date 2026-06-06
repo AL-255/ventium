@@ -58,11 +58,15 @@ SyscallEmuResult SyscallEmulator::service(uint32_t nr, uint32_t ebx, uint32_t ec
     SyscallEmuResult r;
     ++n_;
 
-    // advance the synthetic monotonic clock on EVERY syscall (so any timer poll
-    // makes progress regardless of which time call it uses).
-    vns_ += 1000000ull;   // +1 ms
-    const uint64_t sec  = vns_ / 1000000000ull;
-    const uint64_t nsec = vns_ % 1000000000ull;
+    // Synthetic monotonic clock: track the RTL cycle count at 60 MHz (1 cycle =
+    // 16.667 ns) so a long compute shows a realistic elapsed time, with a +1ms
+    // per-call floor so it strictly advances even when cycles_ is flat (keeps any
+    // wall-clock-polling loop terminating).
+    vns_ += 1000000ull;   // +1 ms floor
+    const uint64_t cyc_ns = (cycles_ * 50ull) / 3ull;     // cycles / 60e6 * 1e9
+    const uint64_t now  = cyc_ns > vns_ ? cyc_ns : vns_;
+    const uint64_t sec  = now / 1000000000ull;
+    const uint64_t nsec = now % 1000000000ull;
 
     switch (nr) {
     case NR_set_thread_area: {

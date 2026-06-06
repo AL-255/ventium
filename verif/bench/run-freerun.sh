@@ -103,7 +103,9 @@ echo "   rtl exit=$TRC, $(wc -l < "$RTLOUT" 2>/dev/null || echo 0) lines capture
 # -- 4. grade: compare DATA lines (mask timing/throughput-only lines) ----------
 echo "== 4. grade: RTL stdout vs qemu-native (timing lines masked) =="
 # mask lines whose value is wall-clock/throughput-derived (differ by construction).
-mask() { sed -E '/[Tt]ime|secs|sec\.|MIPS|MFLOPS|Iterations\/Sec|ticks|Duration|elapsed|Rate|per second|KIPS/d'; }
+# Mask ONLY wall-clock/throughput-derived lines (they differ by construction:
+# synthetic clock vs host clock). Keep all DATA lines (CRCs, counts, results).
+mask() { sed -E '/[Tt]ime|secs|sec\.|MIPS|MFLOPS|Iterations\/Sec|ticks|Duration|elapsed|Rate|per second|KIPS|CoreMark [0-9]/d'; }
 mask < "$REF"    > "$OUT/qemu.masked"
 mask < "$RTLOUT" > "$OUT/rtl.masked"
 if diff -u "$OUT/qemu.masked" "$OUT/rtl.masked" > "$OUT/diff.txt" 2>&1; then
