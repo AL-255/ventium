@@ -269,17 +269,3 @@ bug, …)"):
    * - **Intel Spec Update 242480-022** (§1 archive)
      - The documented erratum: trigger pattern and worst-case severity (13th
        significant bit), the anchor for the M6 runtime model.
-
-
-Accessing the archive
-=====================
-
-``ventium-refs`` is a git submodule. To populate it::
-
-    git submodule update --init ventium-refs
-
-Then start at ``ventium-refs/00-index/INDEX.md`` (topic map → per-document
-page-referenced index → open the PDF at the cited page), and verify integrity
-with ``sha256sum -c CHECKSUMS.txt`` from inside the submodule. Items deliberately
-*not* archived (out-of-print books, live emulator source, EULA-gated binaries)
-are listed with their upstreams in ``MANIFEST.md``.
