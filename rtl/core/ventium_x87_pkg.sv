@@ -64,6 +64,76 @@ package ventium_x87_pkg;
     return (fx_exp(v)==15'h7fff) && !fx_man(v)[62] &&
            (({fx_man(v)[63], 1'b0, fx_man(v)[61:0]} << 1) != 64'd0);
   endfunction
+  // Infinity: exp all-ones with the pure-infinity mantissa (integer bit only).
+  function automatic logic fx_is_inf(input logic [79:0] v);
+    return (fx_exp(v)==15'h7fff) && (fx_man(v)==64'h8000000000000000);
+  endfunction
+  // Quiet an SNaN -> QNaN by setting the mantissa quiet bit (62); payload kept
+  // (oracle: SNaN 0x7fffa000.. -> QNaN 0x7fffe000..).
+  function automatic logic [79:0] fx_quietize(input logic [79:0] v);
+    return {v[79:63], 1'b1, v[61:0]};
+  endfunction
+
+  // M12: masked-default special-operand result for FADD/FSUB/FMUL/FDIV when an
+  // operand is Inf or NaN. Returns {hit, ie, result[79:0]} -- hit=1 means the
+  // datapath (fx_*) MUST be bypassed (it would do mantissa math on Inf/NaN and
+  // return garbage). Mirrors QEMU softfloat under masked default control (CW=037F,
+  // PC=11), oracle-pinned in verif/tests/tx_fp_special:
+  //   any SNaN -> that NaN quieted, IE        (SNaN+1 -> QNaN, IE)
+  //   any QNaN -> that NaN propagated, no IE  (QNaN+1 -> QNaN, no IE)
+  //   Inf(+/-)Inf same/opp sign per op -> signed Inf / real-indefinite+IE
+  //   Inf*0 -> indefinite+IE ; Inf*finite -> signed Inf
+  //   Inf/Inf -> indefinite+IE ; Inf/finite -> signed Inf ; finite/Inf -> signed 0
+  // (a,b) are in f_arith canonical order: add a+b, sub a-b, subr b-a, div a/b,
+  // divr b/a. sub indices: 0 add, 1 mul, 4 sub, 5 subr, 6 div, 7 divr.
+  function automatic logic [81:0] f_special(input logic [2:0] sub,
+                                            input logic [79:0] a, input logic [79:0] b);
+    logic sa, sb, pick_a, ie_nan;
+    logic [63:0] ma, mb;
+    begin
+      sa = fx_sign(a); sb = fx_sign(b);
+      ma = fx_man(a);  mb = fx_man(b);
+      f_special = 82'd0;                                   // hit=0 -> use the datapath
+      if (fx_is_nan(a) || fx_is_nan(b)) begin
+        // NaN result selection per QEMU x87 pickNaN (oracle-pinned, tx_fp_special):
+        // the operand with the LARGER 64-bit significand wins (the quiet bit makes a
+        // QNaN outrank an SNaN of similar payload); ties -> positive sign; ties with
+        // equal sign -> b. IE iff either is SNaN; the winner is quieted iff SNaN.
+        if      (fx_is_nan(a) && !fx_is_nan(b)) pick_a = 1'b1;
+        else if (!fx_is_nan(a) && fx_is_nan(b)) pick_a = 1'b0;
+        else if (ma > mb)                       pick_a = 1'b1;
+        else if (ma < mb)                       pick_a = 1'b0;
+        else                                    pick_a = (sa==1'b0 && sb==1'b1);
+        ie_nan = fx_is_snan(a) || fx_is_snan(b);
+        if (pick_a) f_special = {1'b1, ie_nan, (fx_is_snan(a) ? fx_quietize(a) : a)};
+        else        f_special = {1'b1, ie_nan, (fx_is_snan(b) ? fx_quietize(b) : b)};
+      end
+      else unique case (sub)
+        3'd0: if (fx_is_inf(a) && fx_is_inf(b))
+                   f_special = (sa==sb) ? {1'b1,1'b0,a} : {1'b1,1'b1,80'hFFFFC000000000000000};
+              else if (fx_is_inf(a)) f_special = {1'b1,1'b0,a};
+              else if (fx_is_inf(b)) f_special = {1'b1,1'b0,b};
+        3'd4: if (fx_is_inf(a) && fx_is_inf(b))                                   // a - b
+                   f_special = (sa!=sb) ? {1'b1,1'b0,a} : {1'b1,1'b1,80'hFFFFC000000000000000};
+              else if (fx_is_inf(a)) f_special = {1'b1,1'b0,a};
+              else if (fx_is_inf(b)) f_special = {1'b1,1'b0,{~b[79],b[78:0]}};
+        3'd5: if (fx_is_inf(a) && fx_is_inf(b))                                   // b - a
+                   f_special = (sa!=sb) ? {1'b1,1'b0,b} : {1'b1,1'b1,80'hFFFFC000000000000000};
+              else if (fx_is_inf(b)) f_special = {1'b1,1'b0,b};
+              else if (fx_is_inf(a)) f_special = {1'b1,1'b0,{~a[79],a[78:0]}};
+        3'd1: if ((fx_is_inf(a) && fx_is_zero(b)) || (fx_is_inf(b) && fx_is_zero(a)))
+                   f_special = {1'b1,1'b1,80'hFFFFC000000000000000};             // Inf*0
+              else if (fx_is_inf(a) || fx_is_inf(b))
+                   f_special = {1'b1,1'b0, {sa^sb, 15'h7fff, 64'h8000000000000000}};
+        3'd6: if (fx_is_inf(a) && fx_is_inf(b)) f_special = {1'b1,1'b1,80'hFFFFC000000000000000};
+              else if (fx_is_inf(a)) f_special = {1'b1,1'b0, {sa^sb, 15'h7fff, 64'h8000000000000000}};
+              else if (fx_is_inf(b)) f_special = {1'b1,1'b0, {sa^sb, 15'd0, 64'd0}};
+        default: if (fx_is_inf(a) && fx_is_inf(b)) f_special = {1'b1,1'b1,80'hFFFFC000000000000000};
+              else if (fx_is_inf(b)) f_special = {1'b1,1'b0, {sa^sb, 15'h7fff, 64'h8000000000000000}};
+              else if (fx_is_inf(a)) f_special = {1'b1,1'b0, {sa^sb, 15'd0, 64'd0}};
+      endcase
+    end
+  endfunction
 
   // Compare-time invalid (#IA) per QEMU: FCOM/FTST/FICOM use floatx80_compare
   // (SIGNALING) -> IE on ANY NaN operand; FUCOM uses floatx80_compare_quiet ->
@@ -200,8 +270,12 @@ package ventium_x87_pkg;
                                          input logic [1:0] rc,
                                          input logic fdiv_err);
     logic [80:0] r;
+    logic [81:0] sp;
     begin
-      if (f_zero_over_zero(sub, a, b))
+      sp = f_special(sub, a, b);
+      if (sp[81])                                                // Inf/NaN special operand
+        f_eval = {sp[80], 1'b0, 1'b0, sp[79:0]};                // {ie, ze=0, inexact=0, result}
+      else if (f_zero_over_zero(sub, a, b))
         f_eval = {1'b1, 1'b0, 1'b0, 80'hFFFFC000000000000000};   // IE, indefinite
       else if (f_div_by_zero(sub, a, b)) begin
         r = f_arith(sub, a, b, rc, fdiv_err);                   // fx_div -> signed Inf

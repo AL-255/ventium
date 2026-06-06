@@ -4192,17 +4192,25 @@ module core
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
         end
         FX_FSQRT: begin
-          // QEMU helper_fsqrt (see the inline comment, preserved verbatim).
-          if (s_st0v[79]) begin
-            if (fx_is_neg(s_st0v) && !fx_is_nan(s_st0v)) begin
+          // QEMU helper_fsqrt. M12: intercept NaN FIRST (the bare fx_sqrt would do
+          // mantissa math on a NaN and return garbage); sqrt(+Inf) is handled by
+          // fx_sqrt's own +Inf guard. Everything else preserves the prior, gate-
+          // proven sign-bit / C2 logic verbatim.
+          if (fx_is_snan(s_st0v)) begin                       // SNaN -> QNaN, IE
+            fp_we_top=1'b1;   fp_top_data=fx_quietize(s_st0v);
+            fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001;
+          end else if (fx_is_nan(s_st0v)) begin               // QNaN -> propagate, no flag
+            fp_we_top=1'b1;   fp_top_data=s_st0v;
+          end else if (s_st0v[79]) begin
+            if (fx_is_neg(s_st0v)) begin                      // sqrt(neg non-zero) incl -Inf
               fp_we_top=1'b1;   fp_top_data=80'hFFFFC000000000000000;
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400 | 16'h0001; // C2+IE
-            end else begin
+            end else begin                                    // -0
               s_ar = fx_sqrt(s_st0v, s_rc);
               fp_we_top=1'b1;   fp_top_data=s_ar[79:0];
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400;            // C2 only
             end
-          end else begin
+          end else begin                                      // +0, +normal, +Inf
             s_ar = fx_sqrt(s_st0v, s_rc);
             fp_we_top=1'b1; fp_top_data=s_ar[79:0];
             if (s_ar[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end    // PE

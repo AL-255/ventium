@@ -664,6 +664,8 @@ package fpu_x87_pkg;
     begin
       if (fx_is_zero(a)) begin
         fx_sqrt = {1'b0, a};   // sqrt(+0)=+0, sqrt(-0)=-0
+      end else if (fx_exp(a)==15'h7fff) begin
+        fx_sqrt = {1'b0, a};   // sqrt(+Inf)=+Inf (NaN / negative handled by the caller)
       end else begin
         ma=fx_man(a);
         ua=fx_uexp(a);

@@ -1,0 +1,10 @@
+{
+  "name": "tx_fp_special",
+  "src": "tx_fp_special/tx_fp_special.s",
+  "elf": "tx_fp_special/tx_fp_special.elf",
+  "image": "tx_fp_special/tx_fp_special.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 200,
+  "x87": true
+}
