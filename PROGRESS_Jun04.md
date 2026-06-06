@@ -1831,6 +1831,49 @@ DRQ window (one `n*512`-byte window, DRQ held across the sectors) vs one-sector-
   LBA-mode mid-transfer register trajectory (agrees post-transfer; the mid-transfer flip is
   gdbstub-timing-fragile), and LBA48 (0x24/0x34/0x29/0x39).
 
+### M8.5 — PCI host bridge: bus-0 enumeration + BAR sizing (SoC) (2026-06-06)
+
+**What this is.** The full PCI host bridge / enumeration — the natural extension of the M8.4f-pre
+single-function shim into a bus-0 config-space the way a real BIOS/OS enumerates. A research
+workflow **empirically probed the live gate qemu** (`-machine pc`) to capture the exact config of
+every bus-0 function. The `pide` gate grows to **EQUIVALENT 38788/38788** (first RTL run,
+oracle-first). (Distinct from the FPU "M8.5 SRT divider" below — a numbering coincidence; this is
+the SoC-track M8.5.)
+
+- **`ventium_soc.sv` (additive — generalizes the shim, no new module).** `pci_sel` (bus 0 +
+  enable bit31), `pci_devfn`, `pci_reg`; a per-devfn config-read table for the 5 chipset-core
+  functions `-machine pc` creates — **00:00.0** i440FX host (0x12378086 / class 0x06000002),
+  **00:01.0** PIIX3 ISA (0x70008086 / status 0x0200 / class 0x06010000 / header-type **0x80
+  multifunction**), **00:01.1** IDE (0x70108086 / reg0x04 = status **0x0280** | command / class
+  0x01018000 / BAR4), **00:01.3** PIIX4-PM (0x71138086), **00:02.0** std-VGA (0x11111234) — all
+  values pinned to the live golden. Only the IDE function is config-writable (command + BAR4); the
+  rest are RO. Absent devfn / bus≠0 / disabled-mechanism → 0xFFFFFFFF. **Fixed a latent bug:** the
+  IDE reg0x04 high word was 0x0000, qemu returns the status 0x0280 — the prior M8.4f-pre test reads
+  command via `inw` (low word), so the 38656 baseline is unaffected (the fix is gate-proven by the
+  new DWORD read = 0x02800005).
+- **Gate (non-vacuous, oracle-first).** A PCI-enumeration block reads the 5 functions' IDs + class
+  + the ISA multifunction header + the IDE status DWORD (the fix) + the IDE BAR4 **sizing** (write
+  0xFFFFFFFF → read the 16-byte mask **0xFFFFFFF1**, restore 0xC000 → 0xC001) + the genuinely-absent
+  devfns {0x01, 0x0A} and a bit31-disabled probe (all → 0xFFFFFFFF).
+- **Controlled subset, honestly documented.** The test reads ONLY the modeled functions + curated
+  absent slots — NOT a blind dev 0..31 sweep. The gate qemu (`-machine pc`, no `-net none`) also has
+  an **e1000 NIC (00:03.0)** + the VGA/e1000 **memory BARs** + chipset quirk regs (PAM/SMRAM/PIRQ/
+  PMBASE) that are **unmodeled and never read** — a full blind scan WOULD diverge on them (a
+  documented deferral / future work).
+- **Adversarial review (3-agent workflow, 10 confirmed / 8 rejected) — clean.** Every confirmed
+  finding was doc-severity (no RTL bugs): verified the 38656 IDE prefix is architecturally
+  byte-identical (the bytes-only diffs are jump-displacement re-encodings from the longer binary),
+  the write-gate generalization is logically identical, the config values + BAR sizing + absent
+  semantics match the live qemu, the controlled-subset is honestly documented, lint clean.
+  **Folded back:** the modeled **PM reg0x3C interrupt-pin** (0x00000100 pin A — the one
+  modeled-function gap the review found) is now modeled + gate-proven via a new test read, and a
+  stale `0x02800000` comment was corrected to the live `0x02800005` (status 0x0280 | command 0x0005,
+  IO|BM set by the prior M8.4f-pre block). Final gate EQUIVALENT **38788/38788**.
+- **No regression** (the generalized decode underlies the 38656 IDE prefix + the `cs_bmide` DMA
+  window, which still keys off the IDE `pci_cmd[0]`/`pci_bar4`). `make verify-soc` **5/5 PASS**;
+  `make verify` **69/69 cache hits, 0 regenerated**; SoC lints clean. RTL: `rtl/soc/ventium_soc.sv`;
+  test: `pide.S`. `ventium-refs` untouched.
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
