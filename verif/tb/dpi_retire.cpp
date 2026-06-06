@@ -41,6 +41,11 @@
 // Verilator calls DPI imports synchronously from eval().
 namespace ventium {
 TraceWriter* g_trace = nullptr;
+
+// M14 checkpoint support: the latest retired architectural state (struct in
+// trace_writer.h), updated every vtm_retire so the periodic-checkpoint path
+// (free-run) can save complete state (these regs + the MemModel snapshot).
+LastArch g_last_arch;
 }  // namespace ventium
 
 // Match the SystemVerilog import signatures from docs/rtl-interface.md §2.
@@ -155,6 +160,14 @@ extern "C" void vtm_retire(
     unsigned short ds, unsigned short es,
     unsigned short fs, unsigned short gs) {
     using namespace ventium;
+    // M14: stash the latest arch state for the periodic checkpoint (independent
+    // of g_trace — works even when the trace goes to /dev/null in free-run).
+    g_last_arch.n = n; g_last_arch.pc = pc; g_last_arch.eflags = eflags;
+    g_last_arch.gpr[0]=eax; g_last_arch.gpr[1]=ecx; g_last_arch.gpr[2]=edx;
+    g_last_arch.gpr[3]=ebx; g_last_arch.gpr[4]=esp; g_last_arch.gpr[5]=ebp;
+    g_last_arch.gpr[6]=esi; g_last_arch.gpr[7]=edi;
+    g_last_arch.seg[0]=cs; g_last_arch.seg[1]=ss; g_last_arch.seg[2]=ds;
+    g_last_arch.seg[3]=es; g_last_arch.seg[4]=fs; g_last_arch.seg[5]=gs;
     if (!g_trace || !g_trace->ok()) return;
 
     // --- cycle mode (M4): emit a cycle-mode record instead of the func one ---

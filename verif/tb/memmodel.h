@@ -14,6 +14,7 @@
 #define VENTIUM_MEMMODEL_H
 
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -59,6 +60,14 @@ public:
     //   ack   : value to drive on mem_ack
     void service(bool req, bool we, uint32_t addr, uint32_t wdata,
                  uint8_t wstrb, uint32_t* rdata, bool* ack);
+
+    // ---- checkpoint snapshot / restore (M14 periodic-state replay) ---------
+    // Dump/load every mapped page (page number + 4 KiB) to/from an open binary
+    // file. Sparse: only touched pages are written, so the size tracks the
+    // working set, not the address space. snapshot() is const; restore() clears
+    // existing pages first so the model exactly matches the saved state.
+    void snapshot(FILE* f) const;
+    void restore(FILE* f);
 
     // Diagnostics
     uint64_t reads()  const { return reads_;  }
