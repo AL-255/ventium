@@ -2008,6 +2008,37 @@ QEMU on the first RTL run**.
   FSIN stands in for the still-deferred transcendentals/FP-environment ops). Docs updated
   (`m3-fpu-spec.md`, the boundary-test comment). `ventium-refs` untouched.
 
+### M12 — x87 special-operand arithmetic: Inf/NaN masked results + IE/ZE (2026-06-06)
+
+**What this is.** Closed a *silently-wrong* hole: the `fx_add`/`fx_mul`/`fx_div` datapath did mantissa
+math on Inf/NaN operands and returned garbage (the helpers themselves admitted "not bit-exact"). M12
+adds QEMU-faithful masked-default special-operand handling — EQUIVALENT vs qemu-i386 over a new
+`tx_fp_special` directed test. A research workflow scoped both remaining x87 milestones; M12 (the more
+self-contained) landed first.
+
+- **Minimal-blast-radius design.** Rather than the heavier tuple-widening the design first proposed,
+  the fix is a new `f_special(sub,a,b)` classifier in `ventium_x87_pkg`, **prepended in `f_eval`**
+  (which already intercepted 0/0 and x/0 before the datapath). When an operand is Inf/NaN it returns
+  the masked result + IE and the `fx_*` datapath is bypassed entirely — so there are **zero tuple/bus
+  width changes** (`f_eval`/`f_arith_fstat`/`s_arf`/the FX_AR_* arms are untouched, normal-operand ops
+  bit-identical). Plus a one-line `fx_sqrt` +Inf guard and a NaN-first intercept in the FSQRT arm
+  (the prior sign-bit/C2 logic preserved verbatim).
+- **Oracle-first twice over.** Probing qemu pinned: invalid (Inf−Inf, 0/0, Inf/Inf, Inf×0, sqrt(neg))
+  → real-indefinite `0xffffc000000000000000` + IE; finite/0 → signed Inf + ZE; Inf±finite → signed
+  Inf; x/Inf → signed 0; QNaN propagates (no IE); SNaN → QNaN (set bit62) + IE; sqrt(+Inf)→+Inf;
+  sqrt(−4)→indefinite+C2+IE. **The adversarial review then caught a real defect** — two-NaN operand
+  selection was positional, but qemu x87 picks by **larger 64-bit significand** (the quiet bit makes a
+  QNaN outrank an SNaN), **tie → positive sign**, winner **quieted iff SNaN**. Re-probed qemu to pin
+  the exact rule, fixed `f_special`, and added two-NaN test cases (SNaN+QNaN, two QNaNs, two SNaNs,
+  ± tie) so the path is no longer vacuous.
+- **Scope (honest deferrals, all still loud-HALT or unreachable):** OE/UE are not triggerable from
+  these operands (fx80's 15-bit exponent dwarfs double's range — needs an fx80-extreme corpus); DE
+  (denormal-operand) had no oracle (qemu normalized the subnormal-double probe); PC≠11 reduced
+  precision stays loud-HALTed. These remain Tier-3 deferrals, never silently faked.
+- **No regression:** `make verify` **72/72** (tx_fp_special EQUIVALENT, all existing x87 green); full
+  `verify-all` **7/7 PASS**; the FSIN loud-HALT boundary still PASSES. RTL touched:
+  `rtl/core/ventium_x87_pkg.sv`, `rtl/fpu/fpu_x87_pkg.sv`, `rtl/core/core.sv`. `ventium-refs` untouched.
+
 ### M8.5 — Genuine radix-4 SRT divider + the FDIV bug from first principles (2026-06-06)
 
 **What this is.** The *real* Pentium division datapath — base-4 SRT with the
