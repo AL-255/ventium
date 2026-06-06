@@ -428,6 +428,8 @@ int main(int argc, char** argv) {
     // consumed strictly in order; we cross-check syscall_n against the producer's
     // recorded n. Inert when proxy_en==0 (syscall_active never asserts).
     long write_applied_idx = -1;   // sc_idx whose writes are already in memory
+    uint64_t cycles = 0;           // clock count (declared here so service_proxy,
+                                   // M14 emulate clock, can read it by reference)
     static const bool kSyscallProbe = (std::getenv("TB_SYSCALL_PROBE") != nullptr);
     auto service_proxy = [&]() {
         if (!proxy_mode) return;
@@ -447,6 +449,7 @@ int main(int argc, char** argv) {
         // applied exactly once. Then drive eax/gs back for the core to latch.
         if (emu) {
             if (last_emu_n != top->syscall_n) {
+                emu->set_cycles(cycles);   // drive the synthetic wall clock
                 ventium::SyscallEmuResult r = emu->service(
                     top->syscall_arg_eax, top->syscall_arg_ebx, top->syscall_arg_ecx,
                     top->syscall_arg_edx, top->syscall_arg_esi, top->syscall_arg_edi,
@@ -550,7 +553,7 @@ int main(int argc, char** argv) {
     top->rst_n = 1;   // deassert reset (synchronous; §1)
 
     // ---- run loop ---------------------------------------------------------
-    uint64_t cycles      = 0;
+    cycles = 0;
     uint32_t idle        = 0;        // consecutive clocks with no new retire
     int      exit_code   = 0;
 
