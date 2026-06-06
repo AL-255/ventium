@@ -224,8 +224,13 @@ package fpu_x87_pkg;
   // ---------------------------------------------------------------------------
   // Divide a/b. Returns {inexact, result}. Normal operands, b != 0.
   // ---------------------------------------------------------------------------
-  function automatic logic [80:0] fx_div(input logic [79:0] a, input logic [79:0] b,
-                                         input logic [1:0] rc);
+  // fx_div_exact: the fast behavioral divider — a plain wide integer divide that
+  // yields the correctly-rounded floatx80 quotient. This is the DEFAULT division
+  // datapath (M0–M5 stay bit-exact vs QEMU). The genuine radix-4 SRT engine
+  // (fx_srt_div, below) is an OPTIONAL compile-time feature; fx_div dispatches to
+  // one or the other (see fx_div at the end of this group).
+  function automatic logic [80:0] fx_div_exact(input logic [79:0] a, input logic [79:0] b,
+                                               input logic [1:0] rc);
     logic        sa, sb, sign;
     logic [63:0] ma, mb;
     logic signed [31:0] ua, ub, msbpos;
@@ -243,9 +248,9 @@ package fpu_x87_pkg;
         // Divide by zero: x/0 -> signed Inf (caller latches ZE). Guarded so the
         // datapath never performs an undefined /0. 0/0 is handled by the caller
         // (special-cased to real-indefinite QNaN before reaching here).
-        fx_div = {1'b0, fx_make(sign, 15'h7fff, 64'h8000000000000000)};
+        fx_div_exact = {1'b0, fx_make(sign, 15'h7fff, 64'h8000000000000000)};
       end else if (fx_is_zero(a)) begin
-        fx_div = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+        fx_div_exact = {1'b0, fx_make(sign, 15'd0, 64'd0)};
       end else begin
         ma=fx_man(a); mb=fx_man(b);
         ua=fx_uexp(a); ub=fx_uexp(b);
@@ -259,9 +264,198 @@ package fpu_x87_pkg;
         qlo = q[127:0];
         // value(ma/mb) ~ q * 2^-P ; weight of q's MSB = msbpos - P.
         // total value = (ma/mb)*2^(ua-ub) -> unbiased of MSB:
-        fx_div = fx_round_pack(sign, (msbpos - P) + (ua - ub), qlo, 1'b0, rc);
+        fx_div_exact = fx_round_pack(sign, (msbpos - P) + (ua - ub), qlo, 1'b0, rc);
       end
     end
+  endfunction
+
+  // ===========================================================================
+  // RADIX-4 SRT DIVIDER — the genuine Pentium division datapath (OPTIONAL).
+  //
+  // This is the *real* algorithm the Pentium implements in silicon: base-4 SRT
+  // with the quotient-digit-selection PLA reverse-engineered from the die photo
+  // (Ken Shirriff, righto.com 2024) and the formal model of Coe & Tang / Alan
+  // Edelman, "The Mathematics of the Pentium Division Bug" (SIAM Rev. 1997).
+  //
+  // Two bits of quotient per step (digits in {-2,-1,0,1,2}); the partial
+  // remainder is kept in ONES-COMPLEMENT carry-save (sum word S + carry word C)
+  // exactly as the chip does (Edelman §4.1, §5), with the delayed +1 correction
+  // injected into the carry LSB after a complemented (positive-digit) subtract.
+  // The digit is chosen from a 4-integer-bit (xxxx.yyy) truncated index — and
+  // that truncation, with the ones-complement modular wraparound, is precisely
+  // what lets a divide land on a missing PLA entry and trigger the FDIV flaw.
+  //
+  // The famous FDIV bug: five cells that should hold +2 were never programmed
+  // into the PLA, so they read 0 (Edelman §4: 8*P_Bad in {23,27,31,35,39} for
+  // the five divisor columns D in {17,20,23,26,29}/16, i.e. significand prefixes
+  // 1.0001/1.0100/1.0111/1.1010/1.1101). With `buggy`=1 those cells return 0 and
+  // the flaw EMERGES FROM FIRST PRINCIPLES — no operand is special-cased.
+  //
+  // COMPILE-TIME FEATURE (user-selectable, default OFF — see fx_div dispatcher):
+  //   +define+VEN_SRT_DIV       route every FDIV/FDIVR through this SRT engine
+  //   +define+VEN_SRT_FDIV_BUG  (implies VEN_SRT_DIV) use the buggy PLA so the
+  //                             FDIV flaw is reproduced for all operands.
+  //
+  // Validated bit-exact against the Python golden model tools/srt/srt_ref.py:
+  //   correct PLA -> correctly-rounded floatx80 (8000/8000 random corpus == the
+  //                  IEEE result == fx_div_exact == QEMU);
+  //   buggy   PLA -> 4195835.0/3145727.0 = 0x3FFF_AAB7F6392A768638  (rounds to
+  //                  the documented double 0x3FF556FEC7254ED1 = 1.3337390689…,
+  //                  wrong at the 13th significant bit), bug hit at iteration 8
+  //                  (Edelman §7 "at least nine steps to failure"); the negative
+  //                  controls 7654321/3145727 and 4195835/3.0 do NOT flaw.
+  // ---------------------------------------------------------------------------
+
+  // Quotient-digit selection PLA (Edelman Fig 4.1, thresholds in 1/8 units).
+  //   P_idx : 7-bit signed truncated partial-remainder index (4 int + 3 frac).
+  //   d4    : divisor fraction bits mb[62:59]; column D = 16 + d4 (range 16..31).
+  //   buggy : when 1 the five missing +2 cells return 0 (the FDIV flaw).
+  // Returns the radix-4 quotient digit in {-2,-1,0,1,2} (signed 3-bit).
+  // Per-column thresholds generated by tools/srt/gen_pla.py.
+  function automatic logic signed [2:0] fx_srt_pla(
+      input logic signed [6:0] P_idx, input logic [3:0] d4, input logic buggy);
+    logic signed [6:0] t2, t1, t0, tm1, pb;
+    logic              bad;
+    begin
+      unique case (d4)
+        4'd0 : begin t2= 7'sd12; t1= 7'sd3; t0= -7'sd4; tm1= -7'sd13; bad=1'b0; pb= 7'sd0;  end
+        4'd1 : begin t2= 7'sd12; t1= 7'sd3; t0= -7'sd4; tm1= -7'sd13; bad=1'b1; pb= 7'sd23; end
+        4'd2 : begin t2= 7'sd13; t1= 7'sd4; t0= -7'sd5; tm1= -7'sd14; bad=1'b0; pb= 7'sd0;  end
+        4'd3 : begin t2= 7'sd14; t1= 7'sd4; t0= -7'sd5; tm1= -7'sd15; bad=1'b0; pb= 7'sd0;  end
+        4'd4 : begin t2= 7'sd14; t1= 7'sd4; t0= -7'sd5; tm1= -7'sd15; bad=1'b1; pb= 7'sd27; end
+        4'd5 : begin t2= 7'sd15; t1= 7'sd4; t0= -7'sd5; tm1= -7'sd16; bad=1'b0; pb= 7'sd0;  end
+        4'd6 : begin t2= 7'sd16; t1= 7'sd4; t0= -7'sd5; tm1= -7'sd17; bad=1'b0; pb= 7'sd0;  end
+        4'd7 : begin t2= 7'sd16; t1= 7'sd4; t0= -7'sd5; tm1= -7'sd17; bad=1'b1; pb= 7'sd31; end
+        4'd8 : begin t2= 7'sd17; t1= 7'sd5; t0= -7'sd6; tm1= -7'sd18; bad=1'b0; pb= 7'sd0;  end
+        4'd9 : begin t2= 7'sd18; t1= 7'sd5; t0= -7'sd6; tm1= -7'sd19; bad=1'b0; pb= 7'sd0;  end
+        4'd10: begin t2= 7'sd18; t1= 7'sd5; t0= -7'sd6; tm1= -7'sd19; bad=1'b1; pb= 7'sd35; end
+        4'd11: begin t2= 7'sd19; t1= 7'sd5; t0= -7'sd6; tm1= -7'sd20; bad=1'b0; pb= 7'sd0;  end
+        4'd12: begin t2= 7'sd20; t1= 7'sd5; t0= -7'sd6; tm1= -7'sd21; bad=1'b0; pb= 7'sd0;  end
+        4'd13: begin t2= 7'sd20; t1= 7'sd5; t0= -7'sd6; tm1= -7'sd21; bad=1'b1; pb= 7'sd39; end
+        4'd14: begin t2= 7'sd21; t1= 7'sd6; t0= -7'sd7; tm1= -7'sd22; bad=1'b0; pb= 7'sd0;  end
+        4'd15: begin t2= 7'sd22; t1= 7'sd6; t0= -7'sd7; tm1= -7'sd23; bad=1'b0; pb= 7'sd0;  end
+        default: begin t2=7'sd0; t1=7'sd0; t0=7'sd0; tm1=7'sd0; bad=1'b0; pb=7'sd0; end
+      endcase
+      if      (buggy && bad && (P_idx == pb)) fx_srt_pla =  3'sd0;  // missing +2 cell
+      else if (P_idx >= t2)                   fx_srt_pla =  3'sd2;
+      else if (P_idx >= t1)                   fx_srt_pla =  3'sd1;
+      else if (P_idx >= t0)                   fx_srt_pla =  3'sd0;
+      else if (P_idx >= tm1)                  fx_srt_pla = -3'sd1;
+      else                                    fx_srt_pla = -3'sd2;
+    end
+  endfunction
+
+  // The SRT divide itself. Fixed-point carry-save format: 8 integer bits + 72
+  // fraction bits (W=80) per word; index field is the top 4 int + 3 frac bits
+  // (Edelman "xxxx.yyy"). NSTEP=36 radix-4 steps -> 72 quotient bits, rounded to
+  // the 64-bit floatx80 significand using the final partial-remainder sign as the
+  // round-to-nearest tiebreaker (the hardware-realistic final rounding).
+  function automatic logic [80:0] fx_srt_div(input logic [79:0] a, input logic [79:0] b,
+                                             input logic [1:0] rc, input logic buggy);
+    localparam int NSTEP = 36;
+    logic        sa, sb, sign;
+    logic [63:0] ma, mb;
+    logic signed [31:0] ua, ub, e, ebiased;
+    logic [3:0]  d4;
+    logic [79:0] S, C, T, dfx, sxor, cmaj;
+    logic [6:0]  psum;
+    logic signed [6:0] P_idx;
+    logic signed [2:0] q;
+    logic        cf;
+    logic signed [127:0] qacc, qext;
+    logic [127:0] uq, keep, remv, half;
+    logic [80:0] rsum;
+    logic        rem_neg, rem_nz, rs_pos, rs_neg, up, inexact;
+    int          msb, extra;
+    begin
+      sa=fx_sign(a); sb=fx_sign(b); sign=sa^sb;
+      if (fx_is_zero(b))
+        fx_srt_div = {1'b0, fx_make(sign, 15'h7fff, 64'h8000000000000000)};
+      else if (fx_is_zero(a))
+        fx_srt_div = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+      else begin
+        ma=fx_man(a); mb=fx_man(b); ua=fx_uexp(a); ub=fx_uexp(b);
+        d4  = mb[62:59];                 // column D = 16 + d4
+        dfx = {7'b0, mb, 9'b0};          // d_significand * 2^72  (mb << 9)
+        S   = {7'b0, ma, 9'b0};          // p_significand * 2^72  -> sum word
+        C   = 80'd0;                     // carry word starts 0
+        qacc = 128'sd0;
+        for (int k=0; k<NSTEP; k++) begin
+          // 4-int.3-frac truncated index (bits 75:69), ones-complement modular
+          // sum of the two words -> the chip's "one cell low" index.
+          psum  = S[75:69] + C[75:69];   // 7-bit wrap == mod 128 re-center
+          P_idx = $signed(psum);
+          q     = fx_srt_pla(P_idx, d4, buggy);
+          // accumulate Q = sum q_k / 4^k : digit weight 4^-k = 2^-2k, scaled 2^70
+          qext  = q;                     // sign-extend 3-bit signed -> 128
+          qacc  = qacc + (qext <<< (70 - 2*k));
+          // form T = -q*d in ones complement; cf marks a complemented (q>0) term
+          cf = (q > 0);
+          unique case (q)
+            3'sd2:   T = ~(dfx << 1);
+            3'sd1:   T = ~dfx;
+            3'sd0:   T = 80'd0;
+            -3'sd1:  T = dfx;
+            -3'sd2:  T = dfx << 1;
+            default: T = 80'd0;
+          endcase
+          // 3:2 carry-save add (S,C,T), delayed +1 correction, then x4 (<<2).
+          sxor = S ^ C ^ T;
+          cmaj = ((S & C) | (S & T) | (C & T)) << 1;
+          if (cf) cmaj[0] = 1'b1;
+          S = sxor << 2;
+          C = cmaj << 2;
+        end
+        // final partial remainder sign (the round tiebreaker). value of C+S
+        // mod 2^80; the integer field's top bit (bit79) is the centered sign.
+        rsum    = {1'b0, C} + {1'b0, S};
+        rem_neg = rsum[79];
+        rem_nz  = (rsum[79:0] != 80'd0);
+        rs_neg  = rem_neg;
+        rs_pos  = !rem_neg && rem_nz;
+        // round the (positive) quotient accumulator to 64-bit significand.
+        uq  = qacc;                      // qacc is positive for normal operands
+        msb = 0;
+        for (int i=127; i>=0; i--) if (uq[i]) begin msb=i; break; end
+        extra = msb - 63;
+        keep  = uq >> extra;
+        remv  = uq & ((128'd1 << extra) - 128'd1);
+        half  = 128'd1 << (extra-1);
+        inexact = (remv != 128'd0) || rs_pos || rs_neg;
+        unique case (rc)
+          2'd0:    // round to nearest even (remainder sign breaks exact ties)
+            if      (remv > half) up = 1'b1;
+            else if (remv < half) up = 1'b0;
+            else                  up = rs_pos ? 1'b1 : (rs_neg ? 1'b0 : keep[0]);
+          2'd1:    up = inexact &&  sign;   // toward -inf
+          2'd2:    up = inexact && !sign;   // toward +inf
+          default: up = 1'b0;               // toward zero
+        endcase
+        if (up) begin
+          keep = keep + 128'd1;
+          if (keep[64]) begin keep = keep >> 1; msb = msb + 1; end
+        end
+        e       = (msb - 70) + (ua - ub);
+        ebiased = e + 32'sd16383;
+        fx_srt_div = {inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
+      end
+    end
+  endfunction
+
+  // fx_div: the division entry point used everywhere (f_arith, helper_fdiv).
+  // Dispatches to the fast exact divider by default, or to the genuine radix-4
+  // SRT engine when the optional compile-time feature is enabled.
+  function automatic logic [80:0] fx_div(input logic [79:0] a, input logic [79:0] b,
+                                         input logic [1:0] rc);
+`ifdef VEN_SRT_DIV
+  `ifdef VEN_SRT_FDIV_BUG
+    fx_div = fx_srt_div(a, b, rc, 1'b1);   // genuine SRT, buggy PLA (FDIV flaw)
+  `else
+    fx_div = fx_srt_div(a, b, rc, 1'b0);   // genuine SRT, correct PLA
+  `endif
+`else
+    fx_div = fx_div_exact(a, b, rc);       // default: fast exact divider
+`endif
   endfunction
 
   // ===========================================================================
@@ -326,6 +520,14 @@ package fpu_x87_pkg;
   // covers all operands") would require bit-reproducing Intel's exact buggy SRT
   // iteration -- not faithfully verifiable without that oracle. We therefore take
   // the spec's explicit fallback: "reproduce the PUBLISHED failing operands."
+  //
+  // UPDATE (M8.5): that "gold-standard path" now EXISTS as the optional radix-4
+  // SRT engine fx_srt_div (above, +define+VEN_SRT_DIV+VEN_SRT_FDIV_BUG). It bit-
+  // reproduces Intel's buggy SRT iteration from first principles -- the canonical
+  // 4195835/3145727 flaw (and a second published pair) emerge from the missing
+  // PLA entries, validated by verif/srt. This runtime errata model is kept as the
+  // documented, default-build anchor (M6 tests stay green); fx_srt_div is the
+  // opt-in, no-special-case reproduction. See verif/srt/README.md.
   //
   // This function reproduces flawed quotients ONLY for operand pairs that have an
   // EXACT, bit-precise published flawed result, via the DOC_VEC table below. The

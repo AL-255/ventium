@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt
 .DEFAULT_GOAL := help
 
 help:
@@ -25,6 +25,8 @@ help:
 	@echo "  make verify-clean  drop the golden cache (forces a cold regen on the next make verify)"
 	@echo "  make verify-sys M2S.0 system-mode ORACLE check: build qemu-system, gen + validate the"
 	@echo "                  bare-metal protected-mode/paging golden trace (no RTL yet; M2S.1 starts that)"
+	@echo "  make verify-srt radix-4 SRT divider gate: fx_srt_div bit-exact vs the golden model"
+	@echo "                  (correct PLA == QEMU; buggy PLA == documented Pentium FDIV flaw)"
 	@echo "  make verify-soc M8 SoC regression aggregate: run EVERY ventium_soc differential gate"
 	@echo "                  (pirqsoc + psocdev + pvga + test386), pass/fail summary"
 	@echo "  make rtl        verilate + build the RTL testbench"
@@ -204,6 +206,17 @@ verify-sys:
 # any change to rtl/soc/ventium_soc.sv or a wired device model.
 verify-soc:
 	bash verif/soc/run-all-soc-gates.sh
+
+# --- SRT divider gate (verif/srt/run-srt-gate.sh) ---------------------------
+# Standalone Verilator unit gate for the genuine radix-4 SRT divider
+# (fpu_x87_pkg::fx_srt_div, the optional +define+VEN_SRT_DIV feature). Drives
+# golden vectors from the single-source model tools/srt/srt_model.py and asserts
+# the RTL is bit-exact for BOTH the correct PLA (== correctly-rounded floatx80 ==
+# QEMU) and the buggy PLA (the documented Pentium FDIV flaw, reproduced from
+# first principles). Does NOT touch the core/SoC build, so the default `make
+# verify`/`verify-soc` tracks are unaffected.
+verify-srt:
+	bash verif/srt/run-srt-gate.sh
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:
