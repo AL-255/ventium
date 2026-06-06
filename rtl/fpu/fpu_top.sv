@@ -123,7 +123,17 @@ module fpu_top (
     output logic [15:0] fds_o,
     // M11b: the 8 PHYSICAL registers flattened (fpr[0] in the low 80 bits), for the
     // FNSTENV/FNSAVE env-image FTW assembly + the FNSAVE ST-register slots.
-    output logic [639:0] fpr_flat_o
+    output logic [639:0] fpr_flat_o,
+
+    // (11) M11b FLDENV/FRSTOR commit: reload CW/SW/TOP + the per-reg empty bits
+    // (we_envld); FRSTOR additionally reloads the 8 physical registers (we_envregs).
+    input  logic        we_envld,
+    input  logic [15:0] env_fctrl,
+    input  logic [2:0]  env_ftop,
+    input  logic [15:0] env_fstat,    // raw (TOP bits already cleared)
+    input  logic [7:0]  env_fptag,    // bit p = 1 (empty) iff loaded FTW field == 11
+    input  logic        we_envregs,
+    input  logic [639:0] env_fpr_flat // fpr[0] in the low 80 bits (physical)
 );
 
   // ---- the architectural state file (VERBATIM the inline declarations) -------
@@ -246,6 +256,17 @@ module fpu_top (
       // ops never assert we_eptr/we_dptr, so there is no same-clock conflict).
       if (we_eptr) begin fip <= eptr_fip; fcs <= eptr_fcs; end
       if (we_dptr) begin fdp <= dptr_fdp; fds <= dptr_fds; end
+
+      // (11) M11b FLDENV/FRSTOR commit: CW/SW/TOP/tags loaded verbatim (no masking);
+      // FRSTOR also reloads the 8 physical register values.
+      if (we_envld) begin
+        fctrl <= env_fctrl;
+        ftop  <= env_ftop;
+        fstat <= env_fstat;
+        fptag <= env_fptag;
+      end
+      if (we_envregs)
+        for (int fi = 0; fi < 8; fi++) fpr[fi] <= env_fpr_flat[fi*80 +: 80];
     end
   end
 

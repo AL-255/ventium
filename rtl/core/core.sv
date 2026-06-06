@@ -1889,10 +1889,11 @@ module core
                   3'd0: begin d_fxop=FX_FLD_M32;  d_f_mem_read=1'b1;  d_f_mbytes=4'd4; end
                   3'd2: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; end
                   3'd3: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; d_f_pop=1'b1; end
+                  3'd4: d_fxop=FX_FLDENV;        // M11b: 28-byte env load (S_FENV_LD owns the beats)
                   3'd5: begin d_fxop=FX_FLDCW;    d_f_mem_read=1'b1;  d_f_mbytes=4'd2; end
                   3'd6: d_fxop=FX_FNSTENV;        // M11b: 28-byte env store (S_FENV_ST owns the beats)
                   3'd7: begin d_fxop=FX_FNSTCW;   d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
-                  default: d_unknown=1'b1;   // /4 FLDENV deferred (M11b loads)
+                  default: d_unknown=1'b1;
                 endcase
               end else begin
                 unique casez (mrm)
@@ -1978,8 +1979,10 @@ module core
                   3'd0: begin d_fxop=FX_FLD_M64; d_f_mem_read=1'b1;  d_f_mbytes=4'd8; end
                   3'd2: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; end
                   3'd3: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; d_f_pop=1'b1; end
+                  3'd4: d_fxop=FX_FRSTOR;        // M11b: 108-byte state load + reg reload
+                  3'd6: d_fxop=FX_FNSAVE;        // M11b: 108-byte state store + FNINIT reinit
                   3'd7: begin d_fxop=FX_FNSTSW_M; d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
-                  default: d_unknown=1'b1;   // FRSTOR/FSAVE deferred
+                  default: d_unknown=1'b1;
                 endcase
               end else begin
                 unique casez (mrm)
@@ -3338,7 +3341,9 @@ module core
       fenv_ftw[p*2 +: 2] = ftw_field(fptag[p], fpr_flat[p*80 +: 80]);
     for (int i = 0; i < 8; i++) begin
       pidx = (ftop + i) & 7;                                  // ST(i) = physical fpr[ftop+i]
-      fenv_streg[i*80 +: 80] = fptag[pidx] ? 80'd0 : fpr_flat[pidx*80 +: 80];
+      // qemu do_fsave dumps the RAW register bytes for every slot, even empty ones
+      // (do_fstt is unconditional) -- an empty reg keeps its stale floatx80 content.
+      fenv_streg[i*80 +: 80] = fpr_flat[pidx*80 +: 80];
     end
     fenv_image = { fenv_streg,                                       // dw7..26 (ST0..7)
                    {16'd0, fds},                                     // dw6 +24 FDS
@@ -4067,11 +4072,17 @@ module core
   // fip/fcs/fdp/fds aliases below for FNSTENV/FNSAVE).
   logic        fp_we_eptr;   logic [31:0] fp_eptr_fip;  logic [15:0] fp_eptr_fcs;
   logic        fp_we_dptr;   logic [31:0] fp_eptr_fdp;  logic [15:0] fp_eptr_fds;
+  // M11b FLDENV/FRSTOR commit driver (computed from env_tmp on the last load beat).
+  logic        fp_we_envld;  logic [15:0] fp_env_fctrl; logic [2:0] fp_env_ftop;
+  logic [15:0] fp_env_fstat; logic [7:0]  fp_env_fptag;
+  logic        fp_we_envregs; logic [639:0] fp_env_fpr_flat;
 
   always_comb begin
     // ---- per-arm locals -------------------------------------------------------
     logic        fp_in_pipe, fp_halt4, fp_fp_arm, fp_fast_commit;
     logic        f_is_admin;
+    logic [639:0] frstor_streg;   // M11b FRSTOR: loaded ST region (logical ST0..7)
+    int          frli;            // M11b FRSTOR: logical index for a physical reg
     logic [31:0] fp_dep_ready;
     logic [82:0] fp_arf;          // {ie, ze, inexact, result} from f_eval (fast)
     logic        slow_arm;        // S_FEXEC, op actually executes (not f_pc_bad)
@@ -4098,6 +4109,8 @@ module core
     fp_we_fninit=1'b0;
     fp_we_eptr=1'b0; fp_eptr_fip=32'd0; fp_eptr_fcs=16'd0;
     fp_we_dptr=1'b0; fp_eptr_fdp=32'd0; fp_eptr_fds=16'd0;
+    fp_we_envld=1'b0; fp_env_fctrl=16'd0; fp_env_ftop=3'd0; fp_env_fstat=16'd0; fp_env_fptag=8'd0;
+    fp_we_envregs=1'b0; fp_env_fpr_flat=640'd0;
 
     // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
     fp_in_pipe = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
@@ -4151,6 +4164,41 @@ module core
         fp_we_dptr = 1'b1; fp_eptr_fdp = dbase + q_ea; fp_eptr_fds = SEG_DS;
       end
     end
+
+    // M11b FLDENV/FRSTOR commit on the LAST load beat: reload CW/SW/TOP verbatim +
+    // re-derive the per-reg empty bits from the loaded FTW (env_tmp[] holds the read
+    // dwords; 0=CW,1=SW,2=FTW). FRSTOR also reloads the 8 ST regs (see below).
+    if (state==S_FENV_LD && mem_ack &&
+        f_seq_step == ((q_fxop==FX_FRSTOR) ? 5'd26 : 5'd6)) begin
+      fp_we_envld  = 1'b1;
+      fp_env_fctrl = env_tmp[0][15:0];
+      fp_env_ftop  = env_tmp[1][13:11];
+      // qemu cpu_set_fpus: clear TOP (0x3800) AND the B bit (0x8000), then re-derive
+      // B from SE (bit7) -- B is NOT loaded verbatim (FERR# busy mirrors SE).
+      fp_env_fstat = (env_tmp[1][15:0] & ~16'h3800 & ~16'h8000)
+                     | (env_tmp[1][7] ? 16'h8000 : 16'd0);
+      for (int p = 0; p < 8; p++) fp_env_fptag[p] = (env_tmp[2][p*2 +: 2] == 2'b11);
+      // FRSTOR also reloads the 8 ST registers. The ST region (image dwords 7..26)
+      // is env_tmp[7..25] plus mem_rdata for dword 26 (latched THIS beat as an NBA,
+      // so read it live, not from env_tmp). Logical slot i -> physical fpr[(ftop+i)],
+      // i.e. fpr[p] = logical ST((p - loaded_ftop)&7).
+      if (q_fxop==FX_FRSTOR) begin
+        fp_we_envregs = 1'b1;
+        for (int j = 0; j < 20; j++)
+          frstor_streg[j*32 +: 32] = (j==19) ? mem_rdata : env_tmp[7+j];
+        for (int p = 0; p < 8; p++) begin
+          frli = (p - int'(env_tmp[1][13:11])) & 7;
+          fp_env_fpr_flat[p*80 +: 80] = frstor_streg[frli*80 +: 80];
+        end
+      end
+    end
+
+    // M11b FNSAVE reinitializes the FPU (= FNINIT) AFTER the last store beat. The
+    // store data on that beat is combinational from the CURRENT (pre-reinit) state,
+    // and fp_we_fninit is an NBA applied at the same edge -> the image captures the
+    // pre-reinit state and the live state reinitializes. (FNSTENV has no side effect.)
+    if (state==S_FENV_ST && mem_ack && q_fxop==FX_FNSAVE && f_seq_step==5'd26)
+      fp_we_fninit = 1'b1;
     s_opnd_f = q_f_mem_read ? f_mem_as_float(f_mem80, q_f_mbytes) : 80'd0;
     s_st0v   = fst(3'd0);
     s_stiv   = fst(q_f_sti);
@@ -4356,7 +4404,14 @@ module core
     .fcs_o        (fcs),
     .fdp_o        (fdp),
     .fds_o        (fds),
-    .fpr_flat_o   (fpr_flat)
+    .fpr_flat_o   (fpr_flat),
+    .we_envld     (fp_we_envld),
+    .env_fctrl    (fp_env_fctrl),
+    .env_ftop     (fp_env_ftop),
+    .env_fstat    (fp_env_fstat),
+    .env_fptag    (fp_env_fptag),
+    .we_envregs   (fp_we_envregs),
+    .env_fpr_flat (fp_env_fpr_flat)
   );
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a

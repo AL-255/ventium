@@ -5,6 +5,6 @@
   "image": "tx_fenv/tx_fenv.flat",
   "load_addr": "0x08048000",
   "entry": "0x08048000",
-  "max_insn": 40,
+  "max_insn": 60,
   "x87": true
 }

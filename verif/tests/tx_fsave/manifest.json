@@ -1,0 +1,10 @@
+{
+  "name": "tx_fsave",
+  "src": "tx_fsave/tx_fsave.s",
+  "elf": "tx_fsave/tx_fsave.elf",
+  "image": "tx_fsave/tx_fsave.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60,
+  "x87": true
+}
