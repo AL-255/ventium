@@ -284,6 +284,7 @@ module ventium_soc
   // ===========================================================================
   logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
   logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
+  logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
                         io_addr == 16'h00A0 || io_addr == 16'h00A1 ||
@@ -312,6 +313,11 @@ module ventium_soc
     // M8.4e secondary channel (empty ATAPI CD-ROM master): 0x170-0x177 + 0x376.
     cs_ide2     = io_req && (io_addr >= 16'h0170 && io_addr <= 16'h0177);
     cs_ide2_ctl = io_req && (io_addr == 16'h0376);
+    // M8.4f-pre PCI config mechanism (PIIX3 IDE 00:01.1): CONFIG_ADDRESS (0xCF8,
+    // dword) + CONFIG_DATA (0xCFC..0xCFF, 1/2/4-byte window). A minimal single-
+    // function shim — just enough to map the bus-master IDE BAR4 (M8.4f).
+    cs_pci_addr = io_req && (io_addr == 16'h0CF8);
+    cs_pci_data = io_req && (io_addr >= 16'h0CFC && io_addr <= 16'h0CFF);
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -512,6 +518,62 @@ module ventium_soc
       .irq14  (ide_irq15)
   );
 
+  // ===========================================================================
+  // M8.4f-pre — minimal PCI config shim (PIIX3 IDE function 00:01.1)
+  // ---------------------------------------------------------------------------
+  // The ONLY purpose is to map the bus-master IDE BAR4 (consumed by the M8.4f DMA
+  // engine). Models exactly the b0/d1/f1 config registers a bare-metal driver
+  // touches, with values empirically pinned to qemu-system-i386 8.2.2:
+  //   reg 0x00 vendor/device = 0x70108086 (RO)
+  //   reg 0x08 class/prog-if = 0x01018000 (class 0x0101 IDE, prog-if 0x80) (RO)
+  //   reg 0x04 PCI_COMMAND   = R/W bits 0(IO)/1(MEM)/2(BUS-MASTER); reset 0x0000
+  //   reg 0x20 BAR4          = R/W, low 4 bits read-only (bit0=1 I/O ind, 16-byte
+  //                            region); reset 0x00000001; write 0xC000 -> 0xC001
+  // CONFIG_ADDRESS[31]=enable, [23:16]=bus, [15:11]=dev, [10:8]=fn, [7:2]=reg.
+  // Sub-dword CONFIG_DATA access: the core masks io_rdata to io_size on a read and
+  // supplies the byte/word in io_wdata on a write (the test writes PCI_COMMAND as a
+  // word and BAR4/CONFIG_ADDRESS as dwords). NOT a PCI host bridge — full
+  // enumeration / other functions / memory BARs are the deferred M8.5 PCI milestone.
+  logic [31:0] pci_cfg_addr;     // CONFIG_ADDRESS latch (0xCF8)
+  logic [15:0] pci_cmd;          // PCI_COMMAND (reg 0x04 low word)
+  logic [31:0] pci_bar4;         // BAR4 (reg 0x20)
+  // the selected config dword targets bus0/dev1/fn1 with the enable bit set
+  wire         pci_sel_idefn = pci_cfg_addr[31] && (pci_cfg_addr[23:8] == 16'h0009);
+  wire [7:0]   pci_reg       = {pci_cfg_addr[7:2], 2'b00};   // dword register number
+
+  always_ff @(posedge clk) begin
+    if (dev_rst) begin
+      pci_cfg_addr <= 32'd0;
+      pci_cmd      <= 16'h0000;
+      pci_bar4     <= 32'h0000_0001;   // I/O BAR, unmapped (bit0 = I/O indicator)
+    end else begin
+      if (cs_pci_addr && io_we) pci_cfg_addr <= io_wdata;          // outl 0xCF8
+      else if (cs_pci_data && io_we && pci_sel_idefn) begin
+        // CONFIG_DATA write to the IDE function. The core delivers the written
+        // byte/word in io_wdata[low]; the test writes the full low word for
+        // PCI_COMMAND and the full dword for BAR4 (both at offset 0 of the dword).
+        if (pci_reg == 8'h04) pci_cmd  <= io_wdata[15:0] & 16'h0007;          // IO|MEM|MASTER
+        if (pci_reg == 8'h20) pci_bar4 <= {io_wdata[31:4], 4'b0001};          // 16B I/O BAR
+      end
+    end
+  end
+
+  // combinational CONFIG_DATA read value for the IDE function (else all-ones, the
+  // qemu reply for an absent function — the test reads only the modeled offsets).
+  logic [31:0] pci_cfg_rdata;
+  always_comb begin
+    pci_cfg_rdata = 32'hFFFF_FFFF;
+    if (pci_sel_idefn) begin
+      unique case (pci_reg)
+        8'h00:   pci_cfg_rdata = 32'h7010_8086;          // vendor/device
+        8'h04:   pci_cfg_rdata = {16'h0000, pci_cmd};    // status(0)+command
+        8'h08:   pci_cfg_rdata = 32'h0101_8000;          // class/prog-if/rev
+        8'h20:   pci_cfg_rdata = pci_bar4;               // BAR4
+        default: pci_cfg_rdata = 32'h0000_0000;          // unmodeled IDE-fn offset
+      endcase
+    end
+  end
+
   // I/O response back to the core: combinational ack the same clock io_req is
   // up; the read data is the selected device's byte zero-extended to 32 bits.
   always_comb begin
@@ -531,6 +593,10 @@ module ventium_soc
     // otherwise). The pide test reads the data port with `inw` (16-bit).
     else if (cs_ide || cs_ide_ctl)   io_rdata = {16'd0, ide_rdata};
     else if (cs_ide2 || cs_ide2_ctl) io_rdata = {16'd0, ide2_rdata};
+    // M8.4f-pre PCI config: CONFIG_ADDRESS read-back (0xCF8) + the CONFIG_DATA
+    // window (0xCFC); the core masks to io_size for a byte/word IN.
+    else if (cs_pci_addr)            io_rdata = pci_cfg_addr;
+    else if (cs_pci_data)            io_rdata = pci_cfg_rdata;
     // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
 

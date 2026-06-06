@@ -139,6 +139,13 @@
     .equ R_SEC_BA_LC,  0x00002164 /* SEC bare-abort: lcyl unchanged = 0x55      */
     .equ R_SEC_SR_ST,  0x00002168 /* SEC SRST status post (ATAPI = 0x00)        */
     .equ R_SEC_SR_ER,  0x0000216C /* SEC SRST error post = 0x01                 */
+    /* --- M8.4f-pre PCI config (PIIX3 IDE 00:01.1) result slots (32-bit) --- */
+    .equ R_PCI_VID,    0x00002170 /* reg0x00 vendor/device = 0x70108086         */
+    .equ R_PCI_CLASS,  0x00002174 /* reg0x08 class/prog-if  = 0x01018000        */
+    .equ R_PCI_CMD0,   0x00002178 /* reg0x04 command pre-enable  = 0x0000       */
+    .equ R_PCI_BAR0,   0x0000217C /* reg0x20 BAR4 pre-program    = 0x00000001   */
+    .equ R_PCI_BAR1,   0x00002180 /* reg0x20 BAR4 after 0xC000   = 0x0000C001   */
+    .equ R_PCI_CMD1,   0x00002184 /* reg0x04 command after IO|BM = 0x0005       */
 
     .equ BUF_ID,     0x00004000  /* IDENTIFY 512-byte block       */
     .equ BUF_S0,     0x00004200  /* sector 0   block              */
@@ -930,6 +937,41 @@ pm32_entry:
     movw    $0x177, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_SR_ST
     movw    $0x171, %dx; inb %dx, %al; andl $0xFF, %eax; movl %eax, R_SEC_SR_ER
     movb    $0xA0, %al; movw $0x176, %dx; outb %al, %dx   /* reselect master */
+
+    /* =============== M8.4f-pre PCI config (PIIX3 IDE 00:01.1) ============ */
+    /* Program the bus-master IDE BAR4 via the 0xCF8/0xCFC config mechanism so the
+     * BMIDE register block (M8.4f) becomes addressable. Empirically validated vs
+     * the live qemu-system golden: vendor/device 0x70108086, class 0x01018000,
+     * BAR4 unmapped (0x00000001) until written -> 0xC001, command IO|BM. Uses the
+     * 32-bit outl/inl I/O path (io_size=4) — first exercise of it under soc_en. */
+
+    /* vendor/device id (reg 0x00) -> 0x70108086 */
+    movl    $0x80000900, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_VID
+
+    /* class code / prog-if (reg 0x08) -> 0x01018000 */
+    movl    $0x80000908, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_CLASS
+
+    /* PCI_COMMAND (reg 0x04) pre-enable word -> 0x0000 */
+    movl    $0x80000904, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inw %dx, %ax; andl $0xFFFF, %eax; movl %eax, R_PCI_CMD0
+
+    /* BAR4 (reg 0x20) pre-program -> 0x00000001 (unmapped, I/O indicator) */
+    movl    $0x80000920, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_BAR0
+
+    /* program BAR4 = 0xC000 ; read back -> 0x0000C001 */
+    movl    $0x80000920, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movl    $0x0000C000, %eax; movw $0xCFC, %dx; outl %eax, %dx
+    movl    $0x80000920, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inl %dx, %eax; movl %eax, R_PCI_BAR1
+
+    /* enable PCI_COMMAND.IO (bit0) + bus-master (bit2) = 0x0005 ; read back */
+    movl    $0x80000904, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0x0005, %ax; movw $0xCFC, %dx; outw %ax, %dx
+    movl    $0x80000904, %eax; movw $0xCF8, %dx; outl %eax, %dx
+    movw    $0xCFC, %dx; inw %dx, %ax; andl $0xFFFF, %eax; movl %eax, R_PCI_CMD1
 
     /* ====================== deterministic end-state ===================== */
     movl    BUF_ID+2,   %esi            /* IDENTIFY word 1 (cyls = 2)        */
