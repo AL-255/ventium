@@ -28,6 +28,7 @@ GATES=(
   "pirqsoc (M8.1 PIC+PIT)|verif/soc/run-soc-gate.sh"
   "psocdev (M8.2 RTC/8042/port92/A20)|verif/soc/run-soc-dev-gate.sh"
   "pvga    (M8.3 VGA + ACPI-PM)|verif/soc/run-soc-vga-gate.sh"
+  "pide    (M8.4 IDE/ATA primary master PIO)|verif/soc/run-soc-ide-gate.sh"
   "test386 (external CPU tester)|verif/external/test386/run-test386-gate.sh"
 )
 

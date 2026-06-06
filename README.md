@@ -60,16 +60,21 @@ level clone (see **Honest scope** below and [`docs/isa-coverage.md`](docs/isa-co
   (`TEST r/m,imm` mem-form, `call gs:[]`, `LOCK CMPXCHG`, `IN`/`OUT`, `CPUID`, `INS`).
 - **Self-contained SoC (M8, in progress)** — synthesizable PC-platform device
   models (8259 PIC, 8254 PIT, MC146818 RTC, 8042 keyboard / A20, port-92, ACPI PM
-  timer, VGA register file), toward booting without QEMU as the platform. The
+  timer, VGA register file, IDE/ATA disk), toward booting without QEMU as the
+  platform. The
   `ventium_soc` integration wires the core (an external INTR/INTA pin driving the
   IDT-delivery FSM) to the **PIC + PIT** (M8.1, on-die IRQ0 — checkpoint-differential),
   to the **RTC + 8042 + port-92 + a combined A20 address mask** (M8.2 — a
   *full per-record* differential vs `qemu-system-i386` over every retired
-  instruction, incl. the 1 MiB A20 wraparound), and to the **VGA register file +
+  instruction, incl. the 1 MiB A20 wraparound), to the **VGA register file +
   ACPI PM timer** (M8.3 — a full per-record VGA differential: SEQ/GFX/DAC/ATTR/CRTC
   register masks, color/mono port aliasing, CRTC CR0-7 write-lock, IS1 dumb-retrace;
-  the ACPI PM read is a documented host-clock oracle boundary). **All 7 device
-  models are now wired.** An OPL3/SoundBlaster card, IDE, and PCI follow.
+  the ACPI PM read is a documented host-clock oracle boundary), and to an **IDE/ATA
+  disk** (M8.4 — a PIO primary-master controller: a full per-record differential of
+  the reset signature, IDENTIFY, READ SECTORS byte-identical to a single-source disk
+  image, and DIAGNOSTIC; `gen_disk.py` feeds the *same* image to QEMU's `-drive` and
+  the RTL's `$readmemh`). A bus-master DMA engine, an OPL3/SoundBlaster card, and
+  PCI follow.
 
 ## Layout
 

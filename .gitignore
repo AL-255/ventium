@@ -29,6 +29,11 @@ verif/tests/**/*.flat
 verif/sys/tests/**/*.elf
 verif/sys/tests/**/*.bin
 verif/sys/tests/**/*.o
+# M8.4 IDE: the disk image + RTL backing-store hex are regenerated from the
+# committed single source of truth gen_disk.py (the gate's Stage 0), so they are
+# build artifacts, not tracked references.
+verif/sys/tests/**/*.img
+verif/sys/tests/**/pide.disk.hex
 
 # sphinx docs build output (sources under docs/sphinx/ are tracked)
 docs/sphinx/_build/

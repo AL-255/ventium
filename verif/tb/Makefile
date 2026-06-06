@@ -86,6 +86,12 @@ rtl:
 # system-mode retire trace + the checkpoint memory dump.
 SOC_TOP := ventium_soc
 SOC_EXE := tb_soc
+# M8.4: ven_ide's disk backing store ($readmemh at sim-start). Absolute path so
+# tb_soc finds it regardless of CWD; the path is embedded at build time but the
+# file is read at runtime (the pide gate's Stage 0 generates it before running).
+# ven_ide guards the $readmemh on `ifdef VEN_IDE_DISK_HEX, so non-IDE builds are
+# unaffected (disk[] simply stays uninitialized — never read by other tests).
+VEN_IDE_DISK_HEX ?= $(abspath $(CURDIR)/../sys/tests/pide/pide.disk.hex)
 .PHONY: soc
 soc:
 	@if [ ! -f "$(SOC_FILELIST)" ]; then \
@@ -94,6 +100,7 @@ soc:
 	$(VERILATOR) --cc --exe --build -j 0 \
 	  -sv --top-module $(SOC_TOP) \
 	  -Wall -Wno-UNUSED -Wno-fatal \
+	  -DVEN_IDE_DISK_HEX='"$(VEN_IDE_DISK_HEX)"' \
 	  $(VL_TRACE) \
 	  -CFLAGS "$(VL_CFLAGS)" \
 	  -o $(SOC_EXE) \

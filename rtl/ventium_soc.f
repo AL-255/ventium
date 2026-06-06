@@ -50,3 +50,5 @@ soc/ven_port92.sv
 // M8.3 VGA register file + ACPI PM timer (wired into ventium_soc):
 soc/ven_vgaregs.sv
 soc/ven_acpipm.sv
+// M8.4 IDE/ATA controller (primary master, PIO):
+soc/ven_ide.sv

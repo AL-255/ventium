@@ -146,6 +146,7 @@ module ventium_soc
   logic        rtc_irq8;     // RTC          -> IR8  (slave)
   logic        kbd_irq1;     // i8042 kbd    -> IR1
   logic        mouse_irq12;  // i8042 mouse  -> IR12 (slave)
+  logic        ide_irq14;    // primary IDE  -> IR14 (M8.4; polled-quiescent)
   logic [15:0] pic_irq_in;
   always_comb begin
     pic_irq_in        = 16'd0;
@@ -153,6 +154,11 @@ module ventium_soc
     pic_irq_in[1]     = kbd_irq1;
     pic_irq_in[8]     = rtc_irq8;
     pic_irq_in[12]    = mouse_irq12;
+    // M8.4 primary IDE = ISA IRQ14 (pci.c port_info {0x1f0,0x3f6,14}). The pide
+    // test sets nIEN, so ide_irq14 stays 0 (polled) — connectivity toward a
+    // future interrupt-driven IDE workload, exactly like the IR1/IR8/IR12
+    // quiescent precedent; a quiescent input cannot perturb the differential.
+    pic_irq_in[14]    = ide_irq14;
   end
 
   // ---- A20 gate (M8.2) -------------------------------------------------------
@@ -275,6 +281,7 @@ module ventium_soc
   // so the core never stalls.
   // ===========================================================================
   logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
+  logic        cs_ide, cs_ide_ctl;
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
                         io_addr == 16'h00A0 || io_addr == 16'h00A1 ||
@@ -295,6 +302,11 @@ module ventium_soc
     // read is a documented oracle boundary (see the M8.3 header note) — the pvga
     // differential never reads it, only the write-inert OUT 0x608 is exercised.
     cs_acpipm = io_req && (io_addr == 16'h0608);
+    // ---- M8.4 IDE/ATA primary channel -------------------------------------
+    // Command block 0x1F0-0x1F7 + control block 0x3F6 (primary master, PIO).
+    // The secondary channel (0x170-0x177/0x376) is left UNDECODED (out of scope).
+    cs_ide     = io_req && (io_addr >= 16'h01F0 && io_addr <= 16'h01F7);
+    cs_ide_ctl = io_req && (io_addr == 16'h03F6);
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -311,6 +323,7 @@ module ventium_soc
   logic [7:0] vga_rdata;       // M8.3 VGA register-file byte read
   logic [7:0] acpipm_rdata;    // M8.3 ACPI PM byte view (unused on the diff path)
   logic [31:0] acpipm_rdata32; // M8.3 ACPI PM native 32-bit value ({8'h0,count})
+  logic [15:0] ide_rdata;      // M8.4 IDE: data-port word, else {8'h0,regbyte}
 
   ven_pic u_pic (
       .clk         (clk),
@@ -447,6 +460,30 @@ module ventium_soc
       .rdata32 (acpipm_rdata32)
   );
 
+  // ===========================================================================
+  // M8.4 IDE/ATA controller — primary channel, MASTER (unit 0), PIO mode.
+  // ===========================================================================
+  // Command block 0x1F0-0x1F7 + control block 0x3F6. One drive (the primary
+  // master), PIO only (no DMA/PCI BAR4). FULLY per-record differentiable vs
+  // qemu-system (the `pide` gate): the task-file registers + reset signature,
+  // the IDENTIFY block, the READ SECTORS data (byte-identical to the single-
+  // source disk image ven_ide $readmemh's + qemu -drive's), the absent-slave
+  // masking, and DIAGNOSTIC. The disk hex path is supplied via the
+  // -DVEN_IDE_DISK_HEX +define on the obj_dir_soc Verilator build line (the SoC
+  // TB Makefile `soc:` target). DISK_SECTORS/CYLS/HEADS/SECS are pinned to the
+  // pide 64 KiB image geometry (qemu guess_chs_for_size(128) = 2/16/63).
+  ven_ide #(.DISK_SECTORS(128), .CYLS(2), .HEADS(16), .SECS(63)) u_ide (
+      .clk    (clk),
+      .rst    (dev_rst),
+      .cs     (cs_ide),
+      .cs_ctl (cs_ide_ctl),
+      .we     (io_we),
+      .addr   (io_addr),
+      .wdata  (io_wdata[7:0]),
+      .rdata  (ide_rdata),
+      .irq14  (ide_irq14)
+  );
+
   // I/O response back to the core: combinational ack the same clock io_req is
   // up; the read data is the selected device's byte zero-extended to 32 bits.
   always_comb begin
@@ -462,6 +499,9 @@ module ventium_soc
     // dword IN reads the counter. Off the differential surface (never read by
     // pvga); present for connectivity / unit-check parity.
     else if (cs_acpipm) io_rdata = acpipm_rdata32;
+    // IDE: 16-bit value (data-port word for 0x1F0; zero-extended register byte
+    // otherwise). The pide test reads the data port with `inw` (16-bit).
+    else if (cs_ide || cs_ide_ctl) io_rdata = {16'd0, ide_rdata};
     // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
 
