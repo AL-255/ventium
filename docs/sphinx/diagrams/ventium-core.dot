@@ -1,0 +1,80 @@
+// Ventium core microarchitecture — the P5/P54C dual-issue integer+x87 pipeline.
+// Rendered by sphinx.ext.graphviz into docs/sphinx/architecture.rst.
+digraph ventium_core {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=12, labelloc=t,
+         label="Ventium core — P5/P54C in-order dual-issue pipeline (ventium_top / core.sv)",
+         nodesep=0.30, ranksep=0.75, bgcolor="white", splines=spline];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10,
+         fillcolor="#eef3fb", color="#3b6ea5", margin="0.12,0.07"];
+  edge  [fontname="Helvetica", fontsize=9, color="#555555"];
+
+  // ---- front end (PF) ----
+  subgraph cluster_fe {
+    label="PF — front end"; fontname="Helvetica"; fontsize=11;
+    style="rounded,filled"; fillcolor="#eef3fb"; color="#3b6ea5";
+    btb [label="BTB + 2-bit predictor\n(bpred_btb.sv)"];
+    pf  [label="Prefetch /\ninstruction buffer"];
+  }
+
+  // ---- decode + pairing (D1) ----
+  subgraph cluster_dec {
+    label="D1 — decode & pairing"; fontname="Helvetica"; fontsize=11;
+    style="rounded,filled"; fillcolor="#eef7ef"; color="#4a8a4a";
+    dec   [label="fast-path decoder x2\n(decode.sv) -> fpd_t"];
+    issue [label="U/V pairing checker\n(issue_uv.sv, AP-500)"];
+  }
+
+  // ---- operands + address gen (D2) ----
+  subgraph cluster_d2 {
+    label="D2 — operands & AGU"; fontname="Helvetica"; fontsize=11;
+    style="rounded,filled"; fillcolor="#fbf3ee"; color="#a5683b";
+    rf  [label="GPR register file\n+ partial-reg + bypass"];
+    agu [label="AGU — effective address\n(AGI interlock)"];
+  }
+
+  // ---- execute (EX) ----
+  subgraph cluster_ex {
+    label="EX — execute (up to 2/clock)"; fontname="Helvetica"; fontsize=11;
+    style="rounded,filled"; fillcolor="#f3eefb"; color="#6a4aa5";
+    upipe [label="U pipe\nALU / shift / mul-div / branch"];
+    vpipe [label="V pipe\nALU / shift / branch"];
+    fpu   [label="x87 FPU — floatx80\n(fpu_x87_pkg / fpu_top)\nincl. radix-4 SRT divider"];
+  }
+
+  // ---- writeback (WB) ----
+  wb [label="WB — writeback\n+ EX/WB bypass network", fillcolor="#eef3fb"];
+
+  // ---- memory subsystem ----
+  subgraph cluster_mem {
+    label="Memory subsystem"; fontname="Helvetica"; fontsize=11;
+    style="rounded,filled"; fillcolor="#f6f6ee"; color="#998866";
+    icache [label="L1 I-cache\n8 KB / 2-way / 32 B\n(icache.sv)"];
+    dcache [label="L1 D-cache\nbanked, dual-port, MESI\n(dcache_timing.sv)"];
+    tlb    [label="I/D TLB + paging\n(tlb.sv)"];
+    biu    [label="Bus interface unit\n64-bit P5 bus\n(biu / biu_p5.sv)", fillcolor="#e7eee7"];
+  }
+
+  // ---- pipeline dataflow ----
+  icache -> pf;
+  btb -> pf;
+  pf -> dec -> issue;
+  issue -> rf;
+  issue -> agu;
+  agu -> tlb;
+  rf -> upipe;
+  rf -> vpipe;
+  rf -> fpu;
+  agu -> upipe [label="addr"];
+  upipe -> wb;
+  vpipe -> wb;
+  fpu -> wb;
+  wb -> rf [style=dashed, label="bypass", constraint=false];
+
+  // ---- memory side ----
+  biu -> icache [dir=both];
+  biu -> dcache [dir=both];
+  tlb -> dcache [style=dotted, label="phys addr"];
+  dcache -> upipe [label="load", constraint=false];
+  upipe -> dcache [style=dashed, label="store", constraint=false];
+}

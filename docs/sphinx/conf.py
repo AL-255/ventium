@@ -16,13 +16,18 @@ release = "0.1"
 
 # -- General configuration ---------------------------------------------------
 
-# No extensions: the docs are written in plain reStructuredText, which Sphinx
-# parses natively. This avoids any pip-only dependency (e.g. MyST) so the
-# build is reproducible from a bare Sphinx install.
-extensions = []
+# Only first-party (Sphinx-bundled) extensions, so the build stays free of any
+# pip-only dependency (no MyST, no third-party theme). `sphinx.ext.graphviz`
+# ships with Sphinx itself; it renders the architecture block diagrams and needs
+# only the system `dot` binary (Graphviz) at build time.
+extensions = ["sphinx.ext.graphviz"]
 
-# Patterns to ignore when looking for source files.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# Render diagrams as SVG (crisp at any zoom) rather than the default PNG.
+graphviz_output_format = "svg"
+
+# Patterns to ignore when looking for source files. ``*.dot`` are diagram sources
+# referenced by the graphviz directive, not standalone documents.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**/*.dot"]
 
 # -- Options for HTML output -------------------------------------------------
 
