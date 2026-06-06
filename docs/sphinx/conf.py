@@ -32,3 +32,14 @@ html_theme = "alabaster"
 
 # A short, descriptive title shown in the browser tab / sidebar.
 html_title = "Ventium — P5/P54C Replica Reference"
+
+# Project logo, shown atop the alabaster sidebar. Path is relative to this
+# configuration directory (docs/sphinx/), pointing at the single source of truth
+# docs/ventium.png; Sphinx copies it into the output _static/ on build.
+html_logo = "../ventium.png"
+
+# alabaster: keep the project name visible beneath the logo (logo_name) rather
+# than letting the image replace the title text entirely.
+html_theme_options = {
+    "logo_name": True,
+}
