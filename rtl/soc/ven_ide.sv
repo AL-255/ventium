@@ -1,5 +1,8 @@
 // ============================================================================
-// ven_ide.sv -- Ventium SoC (M8.4a) IDE/ATA controller: PIO, primary master.
+// ven_ide.sv -- Ventium SoC (M8.4a/b) IDE/ATA controller: PIO, primary master.
+//   M8.4a: IDENTIFY + READ SECTORS + DIAGNOSTIC + signature + absent-slave.
+//   M8.4b: + WRITE SECTORS (0x30/0x31, single + multi-sector) — the data-port
+//          host->device fill, symmetric to the READ drain.
 // ============================================================================
 //
 // DEVICE: a single ATA hard disk on the PRIMARY channel, MASTER (unit 0), PIO
@@ -13,7 +16,8 @@
 //   ide_ioport_read/write (the task-file register decode + the absent-drive
 //     mask: only ERROR/STATUS read 0 for the selected absent slave),
 //   ide_exec_cmd (command dispatch), ide_identify (the 256-word IDENTIFY block),
-//   ide_sector_read / the data-port PIO transfer (BSY->DRQ, drain, end),
+//   ide_sector_read + cmd_write_pio/ide_sector_write/ide_data_writew (the data-
+//     port PIO READ + WRITE transfers: BSY->DRQ, drain/fill, commit, end),
 //   cmd_exec_dev_diagnostic (error=0x01, select=ATA_DEV_ALWAYS_ON=0xA0),
 //   ide_abort_command (status=0x41, error=0x04), ide_reset (signature).
 // Every value this device produces was first OBSERVED under qemu-system-i386 (a
@@ -31,15 +35,19 @@
 //   - the READ SECTORS data words (single + MULTI-sector, byte-identical to the
 //     single-source disk image; LBA->offset addressing + the per-sector PIO
 //     continuation modeled and GATE-PROVEN),
+//   - the WRITE SECTORS path (M8.4b, single + MULTI-sector): the write-direction
+//     DRQ status handshake (0x58 immediate, re-armed per sector, 0x50 on commit)
+//     + the write-then-read-back (a known pattern written to a scratch LBA reads
+//     back byte-identical -- the disk[] mutation is the inverse of the READ),
 //   - the absent-slave masking (status/error/alt-status) + DIAGNOSTIC.
 // OFF-SURFACE (documented oracle boundaries, never read in a way that exposes
 // them): the IRQ14 line-edge instruction boundary (the test sets nIEN so NO IRQ
 // is ever raised -- like the quiescent IR1/IR8/IR12 precedent) and the
-// inter-instruction async-BSY-vs-synchronous timing (qemu's block read settles
-// in an async BH before the next single-step, so the golden never observes a
-// lingering BSY; the RTL settles synchronously within the S_IO window -> the
-// same poll sequence).
-// MODELING BOUNDARIES (M8.4a, surfaced by the adversarial review; all on paths
+// inter-instruction async-BSY-vs-synchronous timing (qemu's block READ and the
+// WRITE-completion write-back both settle in an async BH before the next single-
+// step, so the golden never observes a lingering BSY/0xD0; the RTL settles
+// synchronously within the S_IO window -> the same poll sequence).
+// MODELING BOUNDARIES (M8.4a/b, surfaced by the adversarial reviews; all on paths
 // the directed test provably does NOT reach, so the EQUIVALENT result is honest
 // -- documented here, not hidden):
 //   * ABSENT SLAVE is a SINGLE-SHARED-REGISTER-FILE model: qemu masks ONLY
@@ -51,15 +59,40 @@
 //     in qemu (core.c:2429); the test reads 0x1F0 only inside DRQ-gated loops.
 //   * COMMAND-ABORT (the default arm, status 0x41/error 0x04) is implemented and
 //     value-verified out-of-band, but is NOT gate-exercised (the test issues only
-//     EC/20/21/90); ALL other ATA commands hit this arm and abort, whereas qemu
-//     completes many (e.g. 0x91/0x10 with 0x50/0x00) -- deferred to M8.4b.
+//     EC/20/21/30/31/90); the other ATA commands hit this arm and abort, whereas
+//     qemu completes many (e.g. 0x91/0x10 with 0x50/0x00) -- deferred to a later
+//     ATA-misc-commands milestone.
+//   * the WRITE data path commits each word to disk[] on its own clock, whereas
+//     qemu buffers the 256 words in io_buffer and commits the whole 512 bytes at
+//     end-of-sector (the async write-back); identical CPU-observable result --
+//     the written LBA is not re-read until a later READ command, so the
+//     intermediate disk[] state is never observed.
+//   * OUT-OF-RANGE LBA (>= DISK_SECTORS): NO range check -- disk_byte uses only
+//     xfer_lba[6:0], so LBA>=128 ALIASES mod-128 (a READ returns the wrong
+//     sector; a WRITE silently corrupts the in-range sector + completes 0x50/0x00)
+//     whereas qemu range-checks (ide_sect_range_ok core.c:405) and cleanly ABORTS
+//     0x41/0x04 leaving the disk untouched. The test uses only in-range LBAs
+//     (0/1/64/70/71/127). Deferred to the ATA-misc milestone (with CHS addressing).
+//   * LBA-REGISTER ADVANCE: qemu's ide_set_sector (core.c:638) updates
+//     sector/lcyl/hcyl/select to start+count AFTER a completed transfer; this RTL
+//     leaves them at the issued values. The test never reads the task-file LBA
+//     registers after a transfer (only the signature/diagnostic blocks read them).
+//   * COMMAND-WHILE-DRQ/BSY: qemu (ide_bus_exec_cmd core.c:2155) ignores a non-
+//     RESET command while a transfer is active; this RTL's command arm has no such
+//     guard. The test fully drains/fills + polls DRQ before every new command.
+//   * READ-DURING-WRITE-DRQ: a data-port READ during a write window advances +
+//     returns disk[] here (the read arm guards only r_status[3], not direction)
+//     vs qemu returning 0x0000 (ide_data_readw core.c:2429); the test issues only
+//     outw in write windows, inw only in read/identify windows.
 // See verif/sys/tests/pide/manifest.json for the full boundary accounting.
 //
-// DATA PORT (0x1F0): the directed test reads it with `inw %dx,%ax` (16-bit). The
-// SoC read mux returns the 16-bit data word zero-extended; each data-port read
-// advances the word pointer by one (matching qemu's 16-bit data-port advance).
-// `insw`/`rep insw` is NOT used (the core gates INS decode on cosim_en, so it
-// HALTs under soc_en) -- the plain `inw` (66 ED) path through S_IO is used.
+// DATA PORT (0x1F0): the directed test READS it with `inw %dx,%ax` and WRITES it
+// with `outw %ax,%dx` (both 16-bit, 66 ED / 66 EF -- decoded unconditionally
+// under soc_en). The SoC read mux returns the 16-bit data word zero-extended; the
+// SoC drives the full 16-bit `wdata` for the WRITE. Each data-port access advances
+// the word pointer by one (matching qemu's 16-bit data-port advance/commit).
+// `insw`/`rep insw`/`rep outsw` are NOT used (the core gates INS/OUTS decode on
+// cosim_en, so they HALT under soc_en) -- the plain inw/outw paths through S_IO.
 //
 // INTERFACE: the common Ventium SoC device contract.
 //   rst : SYNCHRONOUS, ACTIVE-HIGH (PC RESET).
@@ -83,7 +116,8 @@ module ven_ide #(
     input  logic        cs_ctl,     // control block 0x3F6
     input  logic        we,         // 1 = OUT (write), 0 = IN (read)
     input  logic [15:0] addr,       // I/O port address (addr[2:0] for cmd block)
-    input  logic [7:0]  wdata,      // write data (byte)
+    input  logic [15:0] wdata,      // write data: 16-bit data-port word (0x1F0,
+                                    // WRITE SECTORS); task-file regs use wdata[7:0]
 
     output logic [15:0] rdata,      // 16-bit: data-port word, else {8'h0, regbyte}
     output logic        irq14       // primary IDE interrupt (ISA IRQ14)
@@ -116,6 +150,7 @@ module ven_ide #(
     // ---- PIO data-transfer state -----------------------------------------
     logic [8:0]  data_idx;     // word index 0..255 within the 512-byte buffer
     logic        in_identify;  // current PIO-in source: IDENTIFY table vs disk
+    logic        in_write;     // current PIO transfer is host->device (WRITE SECTORS)
     logic [27:0] xfer_lba;     // current sector LBA (LBA28)
     logic [8:0]  nsec_left;    // sectors remaining in the multi-sector transfer
 
@@ -236,6 +271,7 @@ module ven_ide #(
             r_ctrl    <= 8'h00;
             data_idx  <= 9'd0;
             in_identify <= 1'b0;
+            in_write  <= 1'b0;
             xfer_lba  <= 28'd0;
             nsec_left <= 9'd0;
             irq14     <= 1'b0;
@@ -243,20 +279,46 @@ module ven_ide #(
             if (cs && we) begin
                 // ----- command-block register writes / command dispatch -----
                 unique case (addr[2:0])
-                    3'd0: ;                              // data port write (WRITE
-                                                         // SECTORS) deferred (M8.4b)
-                    3'd1: r_feature <= wdata;            // 0x1F1 features
-                    3'd2: r_nsector <= wdata;            // 0x1F2
-                    3'd3: r_sector  <= wdata;            // 0x1F3
-                    3'd4: r_lcyl    <= wdata;            // 0x1F4
-                    3'd5: r_hcyl    <= wdata;            // 0x1F5
-                    3'd6: r_select  <= wdata | 8'hA0;    // 0x1F6 (ALWAYS_ON bits)
+                    // ---- data port write (0x1F0): WRITE SECTORS fill ---------
+                    // Each outw stores one 16-bit word into disk[] at the SAME
+                    // disk_byte the READ uses (little-endian: low byte first),
+                    // then advances/commits exactly like the READ drain. Honored
+                    // ONLY while a write DRQ is active (r_status[3] && in_write),
+                    // mirroring qemu's ide_data_writew guard (DRQ set + PIO-out).
+                    3'd0: begin
+                        if (r_status[3] && in_write) begin
+                            disk[disk_byte]         <= wdata[7:0];
+                            disk[disk_byte + 16'd1] <= wdata[15:8];
+                            if (data_idx == 9'd255) begin
+                                if (nsec_left > 9'd1) begin
+                                    xfer_lba  <= xfer_lba + 28'd1;  // next sector
+                                    nsec_left <= nsec_left - 9'd1;
+                                    data_idx  <= 9'd0;              // re-arm DRQ
+                                    irq14     <= ~nien;             // (nIEN: 0)
+                                end else begin
+                                    data_idx <= 9'd0;
+                                    in_write <= 1'b0;
+                                    r_status <= STAT_IDLE;          // DRQ cleared
+                                    irq14    <= ~nien;
+                                end
+                            end else begin
+                                data_idx <= data_idx + 9'd1;
+                            end
+                        end
+                    end
+                    3'd1: r_feature <= wdata[7:0];       // 0x1F1 features
+                    3'd2: r_nsector <= wdata[7:0];       // 0x1F2
+                    3'd3: r_sector  <= wdata[7:0];       // 0x1F3
+                    3'd4: r_lcyl    <= wdata[7:0];       // 0x1F4
+                    3'd5: r_hcyl    <= wdata[7:0];       // 0x1F5
+                    3'd6: r_select  <= wdata[7:0] | 8'hA0; // 0x1F6 (ALWAYS_ON bits)
                     default: begin                       // 0x1F7 command
                         if (!unit1_sel) begin            // commands to absent
                                                          // slave are dropped
-                            unique case (wdata)
+                            unique case (wdata[7:0])
                                 8'hEC: begin             // IDENTIFY DEVICE
                                     in_identify <= 1'b1;
+                                    in_write    <= 1'b0;
                                     data_idx    <= 9'd0;
                                     r_status    <= STAT_DRQ;
                                     irq14       <= ~nien;
@@ -266,8 +328,19 @@ module ven_ide #(
                                     nsec_left   <= (r_nsector == 8'd0)
                                                    ? 9'd256 : {1'b0, r_nsector};
                                     in_identify <= 1'b0;
+                                    in_write    <= 1'b0;
                                     data_idx    <= 9'd0;
                                     r_status    <= STAT_DRQ;
+                                    irq14       <= ~nien;
+                                end
+                                8'h30, 8'h31: begin       // WRITE SECTOR(S)
+                                    xfer_lba    <= lba28;
+                                    nsec_left   <= (r_nsector == 8'd0)
+                                                   ? 9'd256 : {1'b0, r_nsector};
+                                    in_identify <= 1'b0;
+                                    in_write    <= 1'b1;  // host->device DRQ
+                                    data_idx    <= 9'd0;
+                                    r_status    <= STAT_DRQ;  // 0x58 immediately
                                     irq14       <= ~nien;
                                 end
                                 8'h90: begin              // EXECUTE DIAGNOSTIC
@@ -290,8 +363,8 @@ module ven_ide #(
                     end
                 endcase
             end else if (cs_ctl && we) begin
-                r_ctrl <= wdata;                          // device control (nIEN)
-                // SRST (bit2) handling deferred to M8.4b (synchronous, documented)
+                r_ctrl <= wdata[7:0];                     // device control (nIEN)
+                // SRST (bit2) handling deferred (synchronous, documented)
             end else if (cs && !we && addr[2:0] == 3'd0 && r_status[3]) begin
                 // ----- data-port read: advance one word; end-of-buffer logic ---
                 if (data_idx == 9'd255) begin

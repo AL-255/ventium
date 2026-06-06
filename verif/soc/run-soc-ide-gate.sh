@@ -48,9 +48,13 @@ DISK_HEX="$TDIR/pide.disk.hex"                 # the RTL $readmemh backing store
 GOLD_REF="$TDIR/pide.sys.vtrace.golden"        # committed reference (evidence)
 GOLD_GEN="$OUTDIR/pide.sys.vtrace.golden"      # freshly regenerated this run
 RTL_OUT="$OUTDIR/pide.rtl.soc.vtrace"
-DRIVE="-drive if=ide,format=raw,index=0,file=$IMG_DISK"
+# snapshot=on: M8.4b WRITE SECTORS mutates the disk; route guest writes to an
+# anonymous temp overlay so the committed single-source pide.img stays read-only
+# (the write only needs to survive within one run — both the qemu overlay and the
+# RTL in-memory disk[] provide that). An md5 PRE==POST assert (below) enforces it.
+DRIVE="-drive if=ide,format=raw,index=0,file=$IMG_DISK,snapshot=on"
 PORT="${PORT:-51200}"
-MAXI=7000
+MAXI=14000   # M8.4a reads (~5335) + the M8.4b write+read-back block (~5450)
 
 say(){ echo; echo "=== $* ==="; }
 
@@ -68,6 +72,11 @@ make -C "$REPO/verif/tb" soc VEN_IDE_DISK_HEX="$DISK_HEX" >/dev/null 2>&1
 SOC_TB="$REPO/verif/tb/obj_dir_soc/tb_soc"
 [[ -x "$SOC_TB" ]] || { echo "FATAL: SoC TB $SOC_TB not built"; exit 1; }
 echo "soc TB: $SOC_TB"
+
+# Capture the pristine disk md5 BEFORE any qemu run; M8.4b's WRITE SECTORS must
+# NOT persist to the committed pide.img (snapshot=on routes writes to a temp
+# overlay). The POST check after Stage 3 enforces it.
+PRE_MD5="$(md5sum "$IMG_DISK" | cut -d' ' -f1)"
 
 # --- 2. confirm the image reaches isa-debug-exit under qemu-system (WITH drive) -
 say "2. confirm pide.bin runs to isa-debug-exit (code 133) under qemu-system-i386 + the IDE drive"
@@ -101,6 +110,13 @@ if [[ -f "$GOLD_REF" ]]; then
     echo "      authoritative. Inspect if unexpected."
   fi
 fi
+
+# snapshot guard: the committed pide.img must be byte-pristine after the qemu
+# WRITE runs (Stage 2 + Stage 3). If it changed, snapshot=on is missing and the
+# single-source invariant is broken.
+POST_MD5="$(md5sum "$IMG_DISK" | cut -d' ' -f1)"
+[[ "$POST_MD5" == "$PRE_MD5" ]] || { echo "FATAL: pide.img MUTATED by a differential WRITE ($PRE_MD5 -> $POST_MD5); is snapshot=on on the -drive?"; exit 1; }
+echo "disk pristine check: pide.img md5 unchanged after the WRITE runs ($POST_MD5): OK"
 
 # --- 4. run ventium_soc on pide.bin ---------------------------------------------
 say "4. run ventium_soc on pide.bin (IDE/ATA primary master, PIO)"

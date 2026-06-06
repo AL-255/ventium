@@ -479,7 +479,9 @@ module ventium_soc
       .cs_ctl (cs_ide_ctl),
       .we     (io_we),
       .addr   (io_addr),
-      .wdata  (io_wdata[7:0]),
+      // 16-bit: the data port (0x1F0) carries a full word for WRITE SECTORS
+      // (M8.4b, written via `outw`); the task-file registers use only [7:0].
+      .wdata  (io_wdata[15:0]),
       .rdata  (ide_rdata),
       .irq14  (ide_irq14)
   );

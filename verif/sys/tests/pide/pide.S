@@ -60,6 +60,13 @@
     .equ R_DIAG_ST,  0x0000203C  /* diagnostic status    = 0x50 */
     .equ R_DIAG_DH,  0x00002040  /* diagnostic devhead   = 0xA0 */
     .equ R_MS_ST,    0x00002044  /* status after multi-sector drain = 0x50 */
+    .equ R_W1_DRQ,   0x00002048  /* WRITE single: status after 0x30  = 0x58 */
+    .equ R_W1_POST,  0x0000204C  /* WRITE single: status after drain = 0x50 */
+    .equ R_W2_DRQ0,  0x00002050  /* WRITE multi : status after 0x30  = 0x58 */
+    .equ R_W2_MID,   0x00002054  /* WRITE multi : status at boundary = 0x58 (re-armed) */
+    .equ R_W2_POST,  0x00002058  /* WRITE multi : status after both  = 0x50 */
+    .equ R_RB1_ST,   0x0000205C  /* read-back single: status after   = 0x50 */
+    .equ R_RB2_ST,   0x00002060  /* read-back multi : status after   = 0x50 */
 
     .equ BUF_ID,     0x00004000  /* IDENTIFY 512-byte block       */
     .equ BUF_S0,     0x00004200  /* sector 0   block              */
@@ -312,6 +319,179 @@ pm32_entry:
     inb     %dx, %al
     andl    $0xFF, %eax
     movl    %eax, R_MS_ST
+
+    /* ============ WRITE SECTORS (0x30) single @ scratch LBA 64 ========== */
+    /* Scratch LBA 64 does NOT overlap any READ-tested LBA (0/1/127). The write
+     * pattern word j = 0xC000+j is distinct from the native content (0x4000+j),
+     * so the later read-back returning 0xC0xx (not 0x40xx) PROVES the write took
+     * effect (non-vacuous). outw %ax,%dx (66 EF) drives the full 16-bit word. */
+    movb    $1, %al                     /* nsector = 1 */
+    movw    $0x1F2, %dx
+    outb    %al, %dx
+    movb    $64, %al                    /* LBA[7:0] = 64 */
+    movw    $0x1F3, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F4, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F5, %dx
+    outb    %al, %dx
+    movb    $0xE0, %al                  /* LBA, master */
+    movw    $0x1F6, %dx
+    outb    %al, %dx
+    movb    $0x30, %al                  /* WRITE SECTORS */
+    movw    $0x1F7, %dx
+    outb    %al, %dx
+    movw    $0x1F7, %dx                 /* DRQ-out set immediately -> 0x58 */
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_W1_DRQ
+1:  movw    $0x1F7, %dx
+    inb     %dx, %al
+    testb   $0x80, %al
+    jnz     1b
+    testb   $0x08, %al
+    jz      fail
+    movw    $0xC000, %ax                /* pattern word j = 0xC000 + j */
+    movl    $256, %ecx
+    movw    $0x1F0, %dx
+2:  outw    %ax, %dx                    /* write word (graded via read-back) */
+    incw    %ax
+    decl    %ecx
+    jnz     2b
+    movw    $0x1F7, %dx                 /* DRQ cleared after commit -> 0x50 */
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_W1_POST
+
+    /* ============ WRITE SECTORS (0x30) multi @ LBA 70 (nsector=2) ======= */
+    movb    $2, %al
+    movw    $0x1F2, %dx
+    outb    %al, %dx
+    movb    $70, %al                    /* LBA[7:0] = 70 */
+    movw    $0x1F3, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F4, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F5, %dx
+    outb    %al, %dx
+    movb    $0xE0, %al
+    movw    $0x1F6, %dx
+    outb    %al, %dx
+    movb    $0x30, %al
+    movw    $0x1F7, %dx
+    outb    %al, %dx
+    movw    $0x1F7, %dx                 /* -> 0x58 */
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_W2_DRQ0
+1:  movw    $0x1F7, %dx
+    inb     %dx, %al
+    testb   $0x80, %al
+    jnz     1b
+    testb   $0x08, %al
+    jz      fail
+    movw    $0xC000, %ax                /* sector 0 words: 0xC000..0xC0FF */
+    movl    $256, %ecx
+    movw    $0x1F0, %dx
+2:  outw    %ax, %dx
+    incw    %ax
+    decl    %ecx
+    jnz     2b
+    movw    $0x1F7, %dx                 /* sector boundary: DRQ RE-ARMED -> 0x58 */
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_W2_MID
+1:  movw    $0x1F7, %dx
+    inb     %dx, %al
+    testb   $0x80, %al
+    jnz     1b
+    testb   $0x08, %al
+    jz      fail
+    movw    $0xC100, %ax                /* sector 1 words: 0xC100..0xC1FF */
+    movl    $256, %ecx
+    movw    $0x1F0, %dx
+2:  outw    %ax, %dx
+    incw    %ax
+    decl    %ecx
+    jnz     2b
+    movw    $0x1F7, %dx                 /* both sectors committed -> 0x50 */
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_W2_POST
+
+    /* ============ read-back LBA 64 (single) — proves the write took ===== */
+    movb    $1, %al
+    movw    $0x1F2, %dx
+    outb    %al, %dx
+    movb    $64, %al
+    movw    $0x1F3, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F4, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F5, %dx
+    outb    %al, %dx
+    movb    $0xE0, %al
+    movw    $0x1F6, %dx
+    outb    %al, %dx
+    movb    $0x20, %al                  /* READ SECTORS */
+    movw    $0x1F7, %dx
+    outb    %al, %dx
+1:  movw    $0x1F7, %dx
+    inb     %dx, %al
+    testb   $0x80, %al
+    jnz     1b
+    testb   $0x08, %al
+    jz      fail
+    movl    $256, %ecx                  /* each inw word = 0xC000+j (NOT 0x40xx) */
+    movw    $0x1F0, %dx
+2:  inw     %dx, %ax
+    decl    %ecx
+    jnz     2b
+    movw    $0x1F7, %dx
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_RB1_ST
+
+    /* ============ read-back LBA 70-71 (multi) — proves multi write data = */
+    movb    $2, %al
+    movw    $0x1F2, %dx
+    outb    %al, %dx
+    movb    $70, %al
+    movw    $0x1F3, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F4, %dx
+    outb    %al, %dx
+    movb    $0, %al
+    movw    $0x1F5, %dx
+    outb    %al, %dx
+    movb    $0xE0, %al
+    movw    $0x1F6, %dx
+    outb    %al, %dx
+    movb    $0x20, %al
+    movw    $0x1F7, %dx
+    outb    %al, %dx
+1:  movw    $0x1F7, %dx
+    inb     %dx, %al
+    testb   $0x80, %al
+    jnz     1b
+    testb   $0x08, %al
+    jz      fail
+    movl    $512, %ecx                  /* sector 70 (0xC000..) + 71 (0xC100..) */
+    movw    $0x1F0, %dx
+2:  inw     %dx, %ax
+    decl    %ecx
+    jnz     2b
+    movw    $0x1F7, %dx
+    inb     %dx, %al
+    andl    $0xFF, %eax
+    movl    %eax, R_RB2_ST
 
     /* ============ EXECUTE DEVICE DIAGNOSTIC (0x90) ====================== */
     movb    $0x90, %al
