@@ -9,7 +9,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc
 .DEFAULT_GOAL := help
 
 help:
@@ -25,6 +25,8 @@ help:
 	@echo "  make verify-clean  drop the golden cache (forces a cold regen on the next make verify)"
 	@echo "  make verify-sys M2S.0 system-mode ORACLE check: build qemu-system, gen + validate the"
 	@echo "                  bare-metal protected-mode/paging golden trace (no RTL yet; M2S.1 starts that)"
+	@echo "  make verify-soc M8 SoC regression aggregate: run EVERY ventium_soc differential gate"
+	@echo "                  (pirqsoc + psocdev + pvga + test386), pass/fail summary"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -195,6 +197,13 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh psmm
 	bash verif/sys/run-sys-golden.sh pdebug
 	PORT=53220 bash verif/sys/run-sys-golden.sh pv86
+
+# M8 SoC regression aggregate — run every ventium_soc differential gate
+# (pirqsoc + psocdev + pvga + test386) and report a pass/fail summary. The SoC
+# analogue of `make verify`: re-checks the whole self-contained-SoC track after
+# any change to rtl/soc/ventium_soc.sv or a wired device model.
+verify-soc:
+	bash verif/soc/run-all-soc-gates.sh
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:
