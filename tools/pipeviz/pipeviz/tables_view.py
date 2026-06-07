@@ -697,14 +697,23 @@ class AccessMap(QWidget):
     retired load/store (X = retire order n, Y = effective address with low at the
     bottom), loads blue / stores gold. Reveals the ACCESS PATTERN as a SHAPE that the
     per-row trace address list can't: a strided walk is a straight diagonal, a hot
-    location is a horizontal band, random access scatters. Pure client-side from the
-    trace's already-resolved effective addresses."""
+    location is a horizontal band, random access scatters. CLICKING a point reads out
+    its n/cyc/address/kind and emits `pointSelected(n)` to jump the trace to that
+    instruction — so an outlier or a stripe is one click from its source row. Pure
+    client-side from the trace's already-resolved effective addresses."""
+    pointSelected = Signal(int)     # retire-n of the clicked access -> drill to trace
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.accesses = []
+        self.accesses = []          # [(n, cyc, addr, is_store)]
+        self.sel = None             # index of the clicked access
+        self._pts = []              # cached [(px, py, idx)] from the last paint, for hit-test
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMouseTracking(True)
 
     def set_accesses(self, accs):
+        if accs is not self.accesses:
+            self.sel = None          # a fresh stream invalidates the selection
         self.accesses = accs
         self.update()
 
@@ -713,25 +722,32 @@ class AccessMap(QWidget):
         p.fillRect(self.rect(), QColor("#0b0f14"))
         W, H = self.width(), self.height()
         accs = self.accesses
+        self._pts = []
         if not accs:
             p.setPen(QColor("#586069")); p.setFont(_mono(10))
             p.drawText(self.rect(), Qt.AlignCenter,
                        "no memory accesses yet — step a workload that loads/stores")
             p.end(); return
-        ns = [a[0] for a in accs]; addrs = [a[1] for a in accs]
+        ns = [a[0] for a in accs]; addrs = [a[2] for a in accs]
         n0, n1 = min(ns), max(ns); a0, a1 = min(addrs), max(addrs)
         nspan = max(1, n1 - n0); aspan = max(1, a1 - a0)
-        nloads = sum(1 for a in accs if not a[2]); nstores = len(accs) - nloads
+        nloads = sum(1 for a in accs if not a[3]); nstores = len(accs) - nloads
         hf = _mono(8); hf.setBold(True)
         p.setPen(QColor("#8b949e")); p.setFont(hf)
-        p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
-                   f"{len(accs)} accesses · 0x{a0:x}..0x{a1:x} (span 0x{aspan:x}) · "
-                   f"loads={nloads} stores={nstores}   [blue=load · gold=store]")
+        if self.sel is not None and 0 <= self.sel < len(accs):
+            sn, scy, sa, sst = accs[self.sel]
+            p.setPen(QColor("#e3b341" if sst else "#79c0ff"))
+            p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
+                       f"selected  n={sn} cyc={scy} @{sa:08x} {'store' if sst else 'load'}"
+                       f"   ·   {len(accs)} accesses · 0x{a0:x}..0x{a1:x}")
+        else:
+            p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
+                       f"{len(accs)} accesses · 0x{a0:x}..0x{a1:x} (span 0x{aspan:x}) · "
+                       f"loads={nloads} stores={nstores}   [blue=load · gold=store · click a point]")
         L, R, T, B = 76, 8, 20, 16
         pw, ph = max(1, W - L - R), max(1, H - T - B)
         def yof(addr): return T + ph - int((addr - a0) * ph / aspan)
         def xof(n): return L + int((n - n0) * pw / nspan)
-        # Y address gridlines + ticks (low address at the bottom)
         p.setFont(_mono(7))
         for k in range(5):
             av = a0 + aspan * k // 4
@@ -739,17 +755,39 @@ class AccessMap(QWidget):
             p.setPen(QColor("#1c232b")); p.drawLine(L, y, W - R, y)
             p.setPen(QColor("#6e7681"))
             p.drawText(QRect(0, y - 6, L - 4, 12), Qt.AlignVCenter | Qt.AlignRight, f"{av:08x}")
-        # X sequence ticks
         for k in range(5):
             nv = n0 + nspan * k // 4
             x = xof(nv)
             p.setPen(QColor("#6e7681"))
             p.drawText(QRect(x - 24, H - B + 1, 48, 12), Qt.AlignHCenter | Qt.AlignTop, f"n{nv}")
-        # points
-        for (n, addr, st) in accs:
-            p.fillRect(QRect(xof(n) - 1, yof(addr) - 1, 3, 3),
-                       QColor("#e3b341") if st else QColor("#79c0ff"))
+        for i, (n, _cy, addr, st) in enumerate(accs):
+            px, py = xof(n), yof(addr)
+            self._pts.append((px, py, i))
+            p.fillRect(QRect(px - 1, py - 1, 3, 3), QColor("#e3b341") if st else QColor("#79c0ff"))
+        # selection crosshair ring on top
+        if self.sel is not None and 0 <= self.sel < len(accs):
+            n, _cy, addr, _st = accs[self.sel]
+            px, py = xof(n), yof(addr)
+            p.setPen(QColor("#f0f0f0"))
+            p.drawLine(L, py, W - R, py); p.drawLine(px, T, px, T + ph)
+            p.drawEllipse(px - 4, py - 4, 8, 8)
         p.end()
+
+    def mousePressEvent(self, ev):
+        if not self._pts:
+            return
+        cx = ev.position().x() if hasattr(ev, "position") else ev.x()
+        cy = ev.position().y() if hasattr(ev, "position") else ev.y()
+        # nearest point within a small radius
+        best, bd = None, 1e9
+        for (px, py, i) in self._pts:
+            d = (px - cx) ** 2 + (py - cy) ** 2
+            if d < bd:
+                bd, best = d, i
+        if best is not None and bd <= 18 * 18:
+            self.sel = best
+            self.update()
+            self.pointSelected.emit(int(self.accesses[best][0]))
 
 
 class MemoryView(QWidget):
