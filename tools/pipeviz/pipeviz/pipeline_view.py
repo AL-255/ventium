@@ -209,6 +209,17 @@ class StageBoard(QWidget):
                 fm = QFontMetrics(p.font())
                 p.drawText(cell, Qt.AlignVCenter | Qt.AlignHCenter,
                            fm.elidedText(text, Qt.ElideRight, cell.width() - 3))
+        # redraw the INTERNAL column gridlines ON TOP of the lane cells so the
+        # PF|D1|D2|EX|WB boundaries stay crisp even where a fast-path uop lights two
+        # adjacent stages (EX+WB) as same-colour blocks with no visible break.
+        p.setPen(QColor("#5a6573"))
+        for i in range(1, len(INT_STAGES)):
+            gx = int(lane_label_w + i * icw)
+            p.drawLine(gx, top, gx, top + 3 * lane_h)
+        if not fp_idle:
+            for i in range(1, len(FP_STAGES)):
+                gx = int(fp_x0 + i * fcw)
+                p.drawLine(gx, top, gx, top + 3 * lane_h)
         p.setFont(_mono(9)); p.setPen(QColor(_TXT))
         p.drawText(QRect(4, top + 3 * lane_h + 2, W - 8, 14), Qt.AlignLeft, self._status)
         p.end()
@@ -229,7 +240,7 @@ ROW_H = 16
 CELL_W = 20      # per-cycle column width — wide enough for a legible F/D/X glyph
                  # AND so the steep dual-issue diagonal fills more of the panel
                  # (fewer cycles per viewport-width) instead of a thin right strip.
-GUTTER_W = 300
+GUTTER_W = 340   # widened to fit full mnemonics (e.g. 'mov eax, dword ptr [esi]')
 HDR_H = 18
 
 
@@ -805,6 +816,7 @@ class SparklineStrip(QWidget):
         self._last_cyc = 0
         self.ret = []        # retirements per cycle (0/1/2)
         self.ev = []         # '' | 'm' mispred | 's' stall | 'f' fill | 'w' walk
+        self._last_state = ""
         self.setMouseTracking(True)
         self._hover_x = -1
         self.setCursor(Qt.PointingHandCursor)
@@ -813,6 +825,7 @@ class SparklineStrip(QWidget):
         self.backend = backend
         self._last_cyc = 0
         self.ret = []; self.ev = []
+        self._last_state = ""
         self.update()
 
     def ingest(self):
@@ -833,6 +846,7 @@ class SparklineStrip(QWidget):
                 e = ""
             self.ev.append(e)
             self._last_cyc = c.cyc
+            self._last_state = name
         if len(self.ret) > self.CAP:
             self.ret = self.ret[-self.CAP:]; self.ev = self.ev[-self.CAP:]
         self.update()
@@ -893,6 +907,17 @@ class SparklineStrip(QWidget):
         if self._hover_x >= labelw:
             p.setPen(QColor("#39c5cf"))
             p.drawLine(self._hover_x, ipc_y0, self._hover_x, evt_y0 + evt_h)
+        # 'stuck' diagnostic: a long trailing run of zero-retire cycles in a
+        # front-end state (S_DECODE/S_FETCH livelock) — the strip would otherwise
+        # read as a dead flat band rather than "the core is wedged, not idle".
+        k = 0
+        while k < n and self.ret[n - 1 - k] == 0:
+            k += 1
+        if k >= 64 and self._last_state in ("S_DECODE", "S_FETCH", "S_HALT", "S_F00F_HANG"):
+            p.fillRect(QRect(labelw, ipc_y0, plotw, ipc_h), QColor(40, 12, 12))
+            p.setPen(QColor(C_MISPRED)); p.setFont(_mono(8, True))
+            p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
+                       f"⚠ stuck in {self._last_state} — {k}c, 0 retired")
         # left labels: current windowed IPC (last 64 cyc)
         cur = sum(self.ret[max(0, n - 64):]) / min(64, n)
         p.setPen(QColor("#9aa3ad")); p.setFont(_mono(8, True))
