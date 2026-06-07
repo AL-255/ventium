@@ -132,8 +132,16 @@ class InsnDelegate(QStyledItemDelegate):
             mw = fm.horizontalAdvance(mn + " ")
             ox, limit = x + mw, r.right() - 4
             is_br = (icol == disasm.CC_BRANCH)
+            ell = fm.horizontalAdvance("…")
             for txt, col in disasm.operand_segments(ops, is_br, icol):
-                if ox >= limit:
+                # if the next segment won't fully fit, stop with an ellipsis instead of
+                # hard-clipping a glyph mid-immediate — the bytes column already does
+                # this; without it a long imm (ppage's `mov [ebx+0x14], 0xcf90000`)
+                # truncated to `0xcf9` with NO `…`, silently dropping the value.
+                if ox + fm.horizontalAdvance(txt) > limit:
+                    painter.setPen(QColor("#6e7681"))
+                    painter.drawText(QRect(min(ox, limit - ell), r.y(), ell + 6, r.height()),
+                                     Qt.AlignVCenter | Qt.AlignLeft, "…")
                     break
                 painter.setPen(QColor(col))
                 painter.drawText(QRect(ox, r.y(), limit - ox, r.height()),
