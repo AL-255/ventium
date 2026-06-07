@@ -84,6 +84,7 @@ class RegsView(QWidget):
             lim = QLabel("00000000"); lim.setFont(_mono(9))
             self.seg_lbls[name] = (sel, base, lim)
             g2.addWidget(sel, i + 1, 1); g2.addWidget(base, i + 1, 2); g2.addWidget(lim, i + 1, 3)
+        g2.addWidget(QWidget(), 0, 4); g2.setColumnStretch(4, 1)   # absorb slack on the right
         col2.addWidget(sg)
         cr = QGroupBox("Control / mode")
         g3 = QGridLayout(cr); g3.setSpacing(2)
@@ -93,7 +94,8 @@ class RegsView(QWidget):
             v = QLabel("00000000"); v.setFont(_mono(9)); self.cr_lbls[name] = v
             g3.addWidget(v, i, 1)
         self.mode_lbl = QLabel(""); self.mode_lbl.setFont(_mono(9))
-        g3.addWidget(self.mode_lbl, 4, 0, 1, 2)
+        g3.addWidget(self.mode_lbl, 4, 0, 1, 3)         # span the absorber column too
+        g3.setColumnStretch(2, 1)                       # pack CR name+value on the left
         col2.addWidget(cr)
 
         # --- x87 column ---
@@ -147,12 +149,10 @@ class RegsView(QWidget):
         for i, name in enumerate(SEG_NAMES):
             sel, base, lim = self.seg_lbls[name]
             sel.setText(f"{s.seg_sel[i]:04x}")
-            base.setText(f"{s.seg_base[i]:08x}")
-            lim.setText(f"{s.seg_limit[i]:08x}")
-        self.cr_lbls["CR0"].setText(f"{s.cr0:08x}")
-        self.cr_lbls["CR2"].setText(f"{s.cr2:08x}")
-        self.cr_lbls["CR3"].setText(f"{s.cr3:08x}")
-        self.cr_lbls["CR4"].setText(f"{s.cr4:08x}")
+            base.setText(f"{s.seg_base[i]:08x}"); base.setStyleSheet("")   # clear pinned n/a
+            lim.setText(f"{s.seg_limit[i]:08x}"); lim.setStyleSheet("")
+        for k, val in (("CR0", s.cr0), ("CR2", s.cr2), ("CR3", s.cr3), ("CR4", s.cr4)):
+            self.cr_lbls[k].setText(f"{val:08x}"); self.cr_lbls[k].setStyleSheet("")
         self.mode_lbl.setText(
             f"{'SYS' if s.sys_mode else 'USER'}  CPL={s.cpl}"
             f"{'  SMM' if s.smm_active else ''}")
@@ -192,11 +192,16 @@ class RegsView(QWidget):
             style = f"color:{col}" + (";text-decoration:underline" if f_chg else "")
             parts.append(f"<span style='{style}'>{nm}{f_on}</span>")
         self.flags_lbl.setText("&nbsp;".join(parts))
+        # base/limit + CRs aren't in the retire record: dim italic "n/a" reads as
+        # "not captured" rather than a bright dot-run that looks like real data.
+        na = "color:#4b535d;font-style:italic;"
         for i, name in enumerate(SEG_NAMES):
             sel, base, lim = self.seg_lbls[name]
-            sel.setText(f"{rec.seg[i]:04x}"); base.setText("········"); lim.setText("········")
+            sel.setText(f"{rec.seg[i]:04x}")
+            base.setText("n/a"); base.setStyleSheet(na)
+            lim.setText("n/a"); lim.setStyleSheet(na)
         for k in ("CR0", "CR2", "CR3", "CR4"):
-            self.cr_lbls[k].setText("········")
+            self.cr_lbls[k].setText("n/a"); self.cr_lbls[k].setStyleSheet(na)
         self.mode_lbl.setText(f"PINNED n={rec.n} cyc={rec.cyc}")
         self.mode_lbl.setStyleSheet("color:#e3b341;")
         if rec.x87_valid:

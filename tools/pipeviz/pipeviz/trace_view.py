@@ -157,9 +157,12 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((52, 54, 40, 38, 74, 200, 246)):
+        for i, w in enumerate((52, 54, 40, 38, 74, 200)):          # n cyc Δ pipe PC bytes
             self.tbl.setColumnWidth(i, w)
-        hh.setSectionResizeMode(_EFFECT_COL, QHeaderView.Stretch)   # effect fills the rest
+        self.tbl.setColumnWidth(_EFFECT_COL, 168)                  # effect: fixed (short)
+        # the INSTRUCTION column stretches (full operands, no truncation while the
+        # short effect column sat on a wide stretch) — effect is short and fixed.
+        hh.setSectionResizeMode(_INSN_COL, QHeaderView.Stretch)
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
         self.tbl.setItemDelegateForColumn(_INSN_COL, InsnDelegate(mono, self.tbl))
         self.tbl.currentCellChanged.connect(self._on_row)

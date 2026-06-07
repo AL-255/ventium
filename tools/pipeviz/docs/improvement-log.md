@@ -41,7 +41,8 @@ not repeat itself.
   snapshot (the Konata view gets the height — ~29 rows). Two-way selection: click
   a Konata instruction (cell or label) ↔ trace row, which also **pins the register
   panel** to that instruction's post-commit state and drops a **cyan cycle
-  playhead** down the Konata view; stepping unpins. **Shift-click** a second row to
+  playhead** down the Konata view (labelled with a `cyc N` chip at the top);
+  stepping unpins. **Shift-click** a second row to
   drop an amber **measurement anchor** — the band between it and the playhead is
   shaded and labelled `Δ<n>cyc` (latency between two instructions; shift-click the
   same row again to clear it). Selecting an instruction also **PC-group highlights**
@@ -103,6 +104,31 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 16 — sparkline fills width, playhead cycle callout, palette/layout polish
+Verify confirmed 3 of 7 picks; ground-truthing the unpicked HIGH findings caught
+two self-inflicted issues (a recolour collision and a column-stretch regression).
+- **New feature — playhead cycle callout.** The cyan Konata playhead now carries a
+  `cyc N` label in a teal chip pinned to the top of the visible region, so the
+  marked cycle is readable without cross-referencing the ruler.
+- **Fix (CONFIRMED) — sparkline fills the panel width.** Bars were drawn 1px/cycle
+  from the left, so a ~160-cycle run filled only the left ~20%. Now each cycle's
+  bar/event pixel is scaled to `plotw/shown` px (contiguous, gap-free) so the strip
+  uses the whole width; `_cyc_at`/hover updated to the same scale so click-to-seek
+  still lands right (verified: a mid-strip click maps to the middle cycle).
+- **Fix (recurring root cause) — system-op colour, ended.** Iter 13 moved sys ops
+  off branch-orange to red `#f4766e`; that red then collided with the immediate-byte
+  red (lgdt "looked like an error"). Every warm accent collides with a legend
+  colour, so sys is now **neutral** (same as ALU) — the mnemonic itself signals it.
+- **Fix (iter-15 regression) — trace column stretch.** Iter 15 made the short
+  `effect` column the stretch column, so `instruction` was fixed-width and truncated
+  while `effect` sat on a wide empty stretch. Swapped: `instruction` stretches (full
+  operands), `effect` is fixed/narrow.
+- **Fix (CONFIRMED) — register-panel gaps + pinned placeholders.** Applied iter-15's
+  pack-left trick to the Segments and Control/mode grids (trailing stretch column),
+  so `CR0 00000000` packs instead of `CR0 ⟨gap⟩ 00000000`. Pinned seg-base/limit +
+  CRs now show dim-italic `n/a` (not in the retire record) instead of a bright dot
+  run that read as real data; the style resets to live values on the next step.
 
 ### Iteration 15 — trace effect column + register-gap + branch-colour consistency
 Verify confirmed 0 of 6 picks again; the value came from ground-truthing the
