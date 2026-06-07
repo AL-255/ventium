@@ -59,7 +59,8 @@ not repeat itself.
   **producer→consumer DEPENDENCY EDGES**: a thin line from each source register's
   PRODUCER (the most-recent prior instruction that wrote it — a pure def-use join
   over the read/write reg-sets capstone already exposes) at its commit cell to the
-  selected consumer's first cell, labelled with the register (`esi`); the edge is
+  selected consumer's first cell (the arrowhead dot anchors at the cell's LEFT EDGE so it
+  never overdraws the F/D/X glyph), labelled with the register (`esi`); the edge is
   amber + thick only when the producer's result arrives right as the consumer's stall
   LIFTS (its commit lands within ±1 cycle of the last `=` stall cell — a true
   RAW/load-use), and dim otherwise. That precision is deliberate: dmiss's `dec ecx`
@@ -190,6 +191,33 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 41 — dependency arrowhead off the glyph + Mem-map origin-corner declutter
+Review confirmed the live watermark (`ad2fdce`) on all 6 critics and surfaced **2
+confirmed visual defects** (the adversarial Verify/synthesis dropped 3: the
+already-REFUTED pinned-Segments header, a subjective "30% dead panel space" layout
+preference, and an "x87 flush-right" perception error). Both confirmed picks were
+independently re-zoomed before fixing and re-verified after by a fresh adversarial
+verifier (2/2 resolved, no regression). Two small targeted fixes:
+- **Fix (LOW, CONFIRMED) — the dependency-edge arrowhead dot no longer overdraws a Konata
+  stage glyph.** The edge's arrowhead (a filled dot) was drawn at the SELECTED consumer's
+  first-cell *centre*, so a short near-vertical edge landed the dot right on top of the
+  centred `F` fetch glyph (fp inst 262, dmiss's `jne` at the frontier) — reducing it to a
+  partial letter. Anchored the arrowhead + edge terminus to the cell's LEFT EDGE instead
+  (the inter-cell gutter), CELL_W/2 clear of the centred glyph; the edges still visibly
+  connect producer→consumer (verified the lines aren't detached). The `F` now reads
+  cleanly while the dot still marks the consumer.
+- **Fix (LOW, CONFIRMED) — the Mem-map origin corner no longer piles three elements into
+  ~30px.** The bottom-most y-tick (`08049000`), centred on its gridline, dropped half its
+  height INTO the x-tick row and collided with the leftmost x-tick (`n3`), which itself
+  overlapped the y-axis label gutter and the origin data point. Now the bottom y-tick
+  label sits just ABOVE its gridline (the others keep their centred placement) and the
+  leftmost x-tick is left-aligned FROM the axis (not centred on it) — so the address
+  label, the `n0` label and the origin marker are cleanly separated. The other ticks,
+  scatter points and selection crosshair render pixel-identically (regression-checked).
+- **Re-validated the refuted finding by source review:** the pinned-mode Segments
+  `base`/`limit` "n/a" layout (a critic's recurring pick) is a deliberate compact layout
+  with clear header spacing, not a collision — confirmed at the pixel level; left as-is.
 
 ### Iteration 40 — honest instruction-column elision + dependency-label placement off the cells
 Review confirmed the live watermark (`7780a5a`) on all 6 critics and — breaking the

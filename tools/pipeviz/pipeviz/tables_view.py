@@ -863,12 +863,21 @@ class AccessMap(QWidget):
             y = yof(av)
             p.setPen(QColor("#1c232b")); p.drawLine(L, y, W - R, y)
             p.setPen(QColor("#6e7681"))
-            p.drawText(QRect(0, y - 6, L - 4, 12), Qt.AlignVCenter | Qt.AlignRight, f"{av:08x}")
+            # the bottom-most label, centred on its gridline, would drop INTO the x-tick
+            # row and collide with the leftmost 'n' tick at the origin — sit it just ABOVE
+            # its gridline instead (the others keep their centred placement).
+            ly = (y - 12) if k == 0 else (y - 6)
+            p.drawText(QRect(0, ly, L - 4, 12), Qt.AlignVCenter | Qt.AlignRight, f"{av:08x}")
         for k in range(5):
             nv = n0 + nspan * k // 4
             x = xof(nv)
             p.setPen(QColor("#6e7681"))
-            p.drawText(QRect(x - 24, H - B + 1, 48, 12), Qt.AlignHCenter | Qt.AlignTop, f"n{nv}")
+            # left-align the leftmost tick from the axis (not centred on it) so 'n0' clears
+            # the y-axis label gutter / origin point instead of overlapping them.
+            if k == 0:
+                p.drawText(QRect(x + 2, H - B + 1, 48, 12), Qt.AlignLeft | Qt.AlignTop, f"n{nv}")
+            else:
+                p.drawText(QRect(x - 24, H - B + 1, 48, 12), Qt.AlignHCenter | Qt.AlignTop, f"n{nv}")
         for i, a in enumerate(accs):
             n, addr, st = a[0], a[2], a[3]
             px, py = xof(n), yof(addr)
