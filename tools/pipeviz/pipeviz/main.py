@@ -383,11 +383,12 @@ class MainWindow(QMainWindow):
     def _refresh_all(self):
         s = self.backend.state()
         self.pipeline.update_from(self.backend, s)
+        self.trace.update_from(self.backend)   # FIRST: refreshes the access stream the
+        #   Hotspots D$-miss column + Mem map + →access all read this same frame
         self.tables.update_from(self.backend, s)
-        self.tables.set_hotspots(self.pipeline.konata.plot.insns)
+        self.tables.set_hotspots(self.pipeline.konata.plot.insns, self.trace.accesses)
         self.tables.set_branches(self.pipeline.konata.plot.insns)
         self.tables.set_instr_mix(self.pipeline.konata.plot.insns)
-        self.trace.update_from(self.backend)   # before mem, so '→access' has the newest addr
         self.tables.mem.set_state(self.backend, s, self.trace.last_access)
         self.tables.accmap.set_accesses(self.trace.accesses)
         self.tables.set_dcache_replay(self.trace.accesses)   # append D$ miss-rate to Data$ header

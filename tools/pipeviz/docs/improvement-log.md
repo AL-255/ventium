@@ -96,12 +96,15 @@ not repeat itself.
   data loads/stores yet", "TLB empty — paging is off or no translations resolved
   yet") so an empty tab reads as 'no activity yet' rather than a broken/blank panel.
   **Hotspots** = a
-  per-PC cycle-cost profile (PC | hits | cycles | cyc% | amber cost bar |
+  per-PC cycle-cost profile (PC | hits | cycles | cyc% | **D$ miss** | amber cost bar |
   **field-coloured** instruction, sorted by total cycles — stalls inflate the cost
   so the stalled load/branch PCs bubble to the top, perf/VTune-style; the
   instruction column uses the same `operand_segments` field-colouring as the trace
   + Konata gutter; the numeric columns **right-align** (header + data) so digit
-  places line up for magnitude scanning); **Branches** = a
+  places line up for magnitude scanning; the **D$ miss** column attributes the
+  replayed D-cache misses to each PC — `misses/accesses` coloured red ≥50% / amber
+  >0 / green 0%, so dmiss's `mov eax,[esi]` reads a red `14/14` (the missing load is
+  NAMED) while test386's `[eax*4]` reads `3/17` but its `[eax*4+2]` `0/17`); **Branches** = a
   per-branch-PC BTB profile (PC | type | target | hits | taken | taken% | bias
   bar; taken inferred from whether the next retired PC hit the target; numeric
   columns right-aligned like Hotspots); **Instr
@@ -183,6 +186,26 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 38 — per-PC D-cache miss column in Hotspots
+Review confirmed the live watermark (`90fc2ba`) on all 6 critics and **confirmed 0 of
+0** picks (the iter37 D-cache feature was a one-off; back to a saturated review). The
+deliverable is the complementary surface the iter37 verifier itself named — and which
+I GROUND-TRUTHED feasible/meaningful before building.
+- **New feature — per-PC D-cache MISS column in Hotspots.** Where iter37's Data$ header
+  gives the AGGREGATE miss-rate, this attributes each replayed miss to the load/store
+  PC that made it: a new `_dcache_per_pc` runs the access stream through the same
+  128×2×32B LRU model and tallies (accesses, misses) per PC via the access tuple's
+  retire-`n` → the Konata insns' PC map. A new `D$ miss` column shows `misses/accesses`
+  for memory PCs (blank otherwise), coloured by miss-rate (red ≥50% / amber >0 / green
+  0%) so the missing load is NAMED at a glance: dmiss's `mov eax,[esi]` reads a red
+  `14/14`, while test386's two stores read `3/17` (amber) vs `0/17` (green) — the kind
+  of per-instruction miss attribution a perf tool exists for. GROUND-TRUTHED first:
+  probed that every access-`n` resolves to a PC (0 unrecoverable) and the per-PC rates
+  are distinct/meaningful. Reordered `_refresh_all` so the trace (access stream)
+  updates BEFORE the Hotspots build, and shifted the instruction delegate / cost-bar /
+  numeric-header indices for the inserted column. Smoke-tested the values + colours +
+  that the row-click PC drill-down and field-coloured instruction column still work.
 
 ### Iteration 37 — D-cache replay miss-rate + Memory-pin reset-on-load fix
 After SIX straight 0-pick rounds the review surfaced a genuinely-new CONFIRMED pick
