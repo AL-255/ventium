@@ -110,6 +110,23 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 25 — colour-coded effect column, latency grading, legible cells
+Verify confirmed 1 pick (effect-column colour split). Ground-truthing settled the
+recurring stage-board/trace findings and the "U/V is dim grey" claim (they're
+already blue/amber).
+- **Fix (CONFIRMED) — colour-code the effect column.** `eax=60000011  ZF0  FP:ZE`
+  was one flat blue blob. A new `EffectDelegate` now paints register writes
+  (`eax=…`) blue, integer flag changes (`ZF1 SF0`) teal, and x87 exception groups
+  (`FP:ZE`) amber, so the three write kinds are distinguishable at a glance.
+- **New feature — latency badges colour-graded by magnitude.** The Konata gutter's
+  per-row `Nc` latency badge is now dim grey for a normal fast op, amber for a
+  moderate stall, and red for a heavy one (≥10c) — so the slow instructions pop out
+  of the gutter (dmiss's stalled `dec ecx` reads bright-red `11c` against the dim
+  `3c` of its loop-mates). Also labelled the column `lat` in the header.
+- **Fix (HIGH, recurring) — Konata cell glyphs hard to read.** Bumped the per-cell
+  F/D/X/= glyph font 8→9pt (the cells are already CELL_W=20 wide, so 9pt fits with
+  padding); the stage letters now read without zooming.
+
 ### Iteration 24 — per-instruction cycle breakdown, wider bytes, brighter operand split
 Verify confirmed 0 picks; ground-truthing (zoomed crops) drove four real fixes.
 - **New feature — per-instruction cycle breakdown in the Konata tooltip.** Hovering

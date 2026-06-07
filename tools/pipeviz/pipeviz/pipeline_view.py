@@ -481,7 +481,7 @@ class _KonataPlot(QWidget):
                         # light border so the stall span stands out on any row
                         # background (incl. the amber Δ band / zebra stripe).
                         p.setPen(QColor("#aab4c0")); p.drawRect(span)
-                        p.setFont(_mono(8, True)); p.setPen(QColor("#0d1117"))
+                        p.setFont(_mono(9, True)); p.setPen(QColor("#0d1117"))
                         p.drawText(span, Qt.AlignCenter, f"={j - i}" if j - i > 1 else "=")
                     i = j
                 else:
@@ -489,7 +489,7 @@ class _KonataPlot(QWidget):
                     if xlo <= x <= xhi:
                         cell = QRect(x, y + 1, CELL_W - 1, ROW_H - 2)
                         p.fillRect(cell, QColor(col))
-                        p.setFont(_mono(8, True))
+                        p.setFont(_mono(9, True))    # 9pt: the F/D/X glyphs read at CELL_W=20
                         p.setPen(QColor("#0d1117") if QColor(col).lightness() > 130 else QColor(_TXT))
                         p.drawText(cell, Qt.AlignCenter, ch)
                     i += 1
@@ -627,7 +627,11 @@ class _KonataGutter(QWidget):
             if span > 2:
                 bw = 36
                 mnem_w -= bw
-                p.setPen(QColor(C_STALL))
+                # colour-grade the latency by magnitude — dim for a normal fast-path
+                # op, amber for a moderate stall, red for a heavy one — so the slow
+                # instructions pop out of the gutter at a glance.
+                lc = "#6e7681" if span <= 4 else (C_STALL if span < 10 else C_MISPRED)
+                p.setPen(QColor(lc))
                 p.drawText(QRect(GUTTER_W - bw - 6, y, bw, ROW_H),
                            Qt.AlignVCenter | Qt.AlignRight, f"{span}c")
             # split-colour: a NEUTRAL-grey mnemonic (same for every op) + the
@@ -664,6 +668,9 @@ class _KonataHeader(QWidget):
         p.setPen(QColor("#8b949e"))
         p.drawText(QRect(2, 0, GUTTER_W - 4, HDR_H), Qt.AlignVCenter | Qt.AlignLeft,
                    "inst ↓ / cycle →")
+        # label the per-row latency column (the '3c'/'11c' badges) in the gutter band
+        p.setPen(QColor("#6e7681"))
+        p.drawText(QRect(GUTTER_W - 50, 0, 44, HDR_H), Qt.AlignVCenter | Qt.AlignRight, "lat")
         c = base + ((10 - base % 10) % 10)
         while c <= maxc + 10:
             x = GUTTER_W + (c - base) * CELL_W - hoff
