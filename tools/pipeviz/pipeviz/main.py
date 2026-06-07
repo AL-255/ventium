@@ -193,7 +193,9 @@ class MainWindow(QMainWindow):
         # give the register/FPU panel real vertical room (was a crammed 25% bottom
         # strip) and shrink the cache-table area's dead void when it's sparse.
         right.setStretchFactor(0, 3); right.setStretchFactor(1, 2)
-        right.setSizes([520, 380])
+        # the register panel sizes to its (now-compact) content ~300px; give the
+        # rest to the cache/tables panel which benefits from more visible rows.
+        right.setSizes([600, 300])
         outer.addWidget(left); outer.addWidget(right)
         outer.setStretchFactor(0, 3); outer.setStretchFactor(1, 2)
         for sp in (outer, left, right):

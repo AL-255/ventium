@@ -230,6 +230,12 @@ C_STG_WB = "#7d8fc9"      # writeback (slate-blue — out of the wb/FP/walk purp
 C_STG_EXEC = C_PIPE       # execute (integer)     (green)
 C_STG_STALL = "#7a828d"   # stall / bubble        (grey — distinct from amber fill)
 
+# Konata cell glyph -> full stage name, for the per-cell hover tooltip.
+_GLYPH_STAGE = {"F": "Fetch", "L": "I-cache line fill", "D": "Decode",
+                "X": "Execute", "M": "Mem (load/store)", "W": "Writeback",
+                "=": "Stall / bubble", "!": "Mispredict flush", "w": "Page-walk",
+                ".": "Halt", "S": "System / microcode"}
+
 
 def _recolor_fp(cells, mnem):
     """Cycle-mode x87 ops execute on the S_PIPE fast path (green X); recolour
@@ -485,10 +491,15 @@ class _KonataPlot(QWidget):
         r = int(y // ROW_H)
         if 0 <= r < len(self.insns):
             ins = self.insns[r]
+            # which exact cell is under the cursor → its cycle + full stage name
+            cyc = int(x // CELL_W) + self.base_cyc
+            cell = next((c for c in ins["cells"] if c[0] == cyc), None)
+            cellinfo = (f"\ncycle {cyc}: {_GLYPH_STAGE.get(cell[1], cell[1])}"
+                        if cell else "")
             self.setToolTip(
                 f"n={ins['n']}  {ins['pipe']}  {ins['pc']:#010x}  {ins['mnem']}\n"
                 f"cycles {ins['c0']}..{ins['c1']}  (commit @ {ins['c1']}, "
-                f"{ins['c1'] - ins['c0'] + 1} cyc)\n"
+                f"{ins['c1'] - ins['c0'] + 1} cyc){cellinfo}\n"
                 f"click: pin regs · shift-click: set Δ-measure anchor")
 
     def mousePressEvent(self, ev):

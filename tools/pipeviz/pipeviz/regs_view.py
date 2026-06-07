@@ -120,6 +120,12 @@ class RegsView(QWidget):
             g4.addWidget(val, i + 2, 3, alignment=Qt.AlignRight)
         col3.addWidget(fp)
 
+        # trailing stretch on every column so the group boxes size to their CONTENT
+        # (compact rows) and the spare panel height collects below them, instead of
+        # stretching each register row to ~2x its text height (the "wasted gaps").
+        for _c in (col1, col2, col3):
+            _c.addStretch(1)
+
     def _k(self, t):
         l = QLabel(t); l.setStyleSheet("color:#8b949e;"); l.setFont(_mono(9, True))
         return l

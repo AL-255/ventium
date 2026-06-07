@@ -110,6 +110,26 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 19 — compact register rows, redder branch-orange, per-cell Konata tooltip
+Verify confirmed 0 picks (all perception / already-shipped); the value came from
+ground-truthing the unpicked HIGH findings by *measuring* the layout.
+- **Fix (HIGH) — register rows wasted ~half their height on gaps.** Measured: the
+  GPR rows had a 32px pitch for ~14px text because the group boxes stretched to
+  fill the tall panel. Added a trailing stretch to each register column so the
+  boxes size to their CONTENT (compact rows) and the spare height collects below;
+  rebalanced the right splitter to `[600, 300]` so the (now-compact) register panel
+  isn't over-tall and the cache table gets the height. (Also confirmed the
+  "GPR name↔value gap" finding is stale — it's ~4px, fixed back in iter 15.)
+- **Fix (recurring perception) — branch-orange pushed redder.** The rel8/rel32 byte
+  is correctly classified `rel` (verified `75 f8 → f8 rel`), but at 9px AA the old
+  `#ff8c00` blended toward the offset-yellow and critics kept reading it as yellow.
+  Pushed `rel` + `CC_BRANCH` to a red-orange `#ff6a00` (RGB dist from disp-yellow
+  81→102, still clear of the salmon immediate-red) so it can't be read as yellow.
+- **New feature — per-cell Konata hover tooltip.** Hovering a cell now reports the
+  exact cycle and full stage name (`cycle 82: Fetch`, `Stall / bubble`, `Execute`…)
+  on top of the per-row instruction info, so a dense F/D/X/= run is decodable
+  cell-by-cell without counting glyphs against the legend.
+
 ### Iteration 18 — neutral mnemonics, wider Konata cells, x87 exceptions, playhead column
 Verify confirmed 1 pick; ground-truthing the HIGH findings caught a colour
 regression from my own iter-15 change and two recurring legibility issues.
