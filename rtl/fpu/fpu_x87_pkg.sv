@@ -377,6 +377,14 @@ package fpu_x87_pkg;
       else if (fx_is_zero(a))
         fx_srt_div = {1'b0, fx_make(sign, 15'd0, 64'd0)};
       else begin
+`ifdef VEN_SRT_ITER
+        // D8b: the 36-step radix-4 loop is performed by the iterative engine
+        // (rtl/fpu/fpu_srt_div.sv). All finite-nonzero divides are engine-routed
+        // (core.sv fp_div_elig), so this combinational path is never committed
+        // under +VEN_SRT_ITER — stub it so the 126x256-bit-adder cone is not
+        // synthesized. (The zero/Inf guards above remain for the x/0 path.)
+        fx_srt_div = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+`else
         ma=fx_man(a); mb=fx_man(b); ua=fx_uexp(a); ub=fx_uexp(b);
         d4  = mb[62:59];                 // column D = 16 + d4
         dfx = {7'b0, mb, 9'b0};          // d_significand * 2^72  (mb << 9)
@@ -441,6 +449,7 @@ package fpu_x87_pkg;
         e       = (msb - 70) + (ua - ub);
         ebiased = e + 32'sd16383;
         fx_srt_div = {inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
+`endif
       end
     end
   endfunction
@@ -450,14 +459,19 @@ package fpu_x87_pkg;
   // SRT engine when the optional compile-time feature is enabled.
   function automatic logic [80:0] fx_div(input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc);
-`ifdef VEN_SRT_DIV
+`ifdef VEN_DIV_EXACT
+    // opt-OUT: the fast behavioral divider (a plain wide integer divide). Kept as
+    // a fast-sim escape hatch; NOT the hardware path.
+    fx_div = fx_div_exact(a, b, rc);
+`else
   `ifdef VEN_SRT_FDIV_BUG
     fx_div = fx_srt_div(a, b, rc, 1'b1);   // genuine SRT, buggy PLA (FDIV flaw)
   `else
-    fx_div = fx_srt_div(a, b, rc, 1'b0);   // genuine SRT, correct PLA
+    // DEFAULT: the genuine radix-4 Pentium SRT engine (correct PLA). This is the
+    // canonical hardware algorithm; the iterative/microcoded engine (fpga/ rework
+    // targets T1..T7) is built from this. Bit-exact vs fx_div_exact/QEMU.
+    fx_div = fx_srt_div(a, b, rc, 1'b0);
   `endif
-`else
-    fx_div = fx_div_exact(a, b, rc);       // default: fast exact divider
 `endif
   endfunction
 
@@ -670,6 +684,14 @@ package fpu_x87_pkg;
       end else if (fx_exp(a)==15'h7fff) begin
         fx_sqrt = {1'b0, a};   // sqrt(+Inf)=+Inf (NaN / negative handled by the caller)
       end else begin
+`ifdef VEN_SRT_ITER
+        // D8b: the 128-step restoring isqrt + r*r is performed by the iterative
+        // engine (rtl/fpu/fpu_sqrt_iter.sv). All +finite-nonzero sqrts are
+        // engine-routed (core.sv fp_sqrt_elig), so this combinational path is
+        // never committed under +VEN_SRT_ITER — stub it out of synthesis.
+        // (The +0/-0/+Inf guards above remain.)
+        fx_sqrt = {1'b0, a};
+`else
         ma=fx_man(a);
         ua=fx_uexp(a);
         // value = ma * 2^(ua-63). exponent of the integer ma:
@@ -686,6 +708,7 @@ package fpu_x87_pkg;
         msbpos = msb;
         // r ~ sqrt(ma2)*2^Fb ; value = (r*2^-Fb)*2^(e/2)
         fx_sqrt = fx_round_pack(1'b0, (msbpos - Fb) + (e >>> 1), r[127:0], 1'b0, rc);
+`endif
       end
     end
   endfunction

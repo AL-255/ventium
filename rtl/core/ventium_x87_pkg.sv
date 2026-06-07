@@ -64,8 +64,12 @@ package ventium_x87_pkg;
   endfunction
   function automatic logic fx_is_snan(input logic [79:0] v);
     // exp all-ones, quiet bit (62) clear, and (low<<1) with bit62 masked != 0.
-    return (fx_exp(v)==15'h7fff) && !fx_man(v)[62] &&
-           (({fx_man(v)[63], 1'b0, fx_man(v)[61:0]} << 1) != 64'd0);
+    // (Bind fx_man(v) to a temp first: IEEE 1800 forbids a bit-select directly
+    // on a function-call result, which Vivado synth enforces.)
+    logic [63:0] m;
+    m = fx_man(v);
+    return (fx_exp(v)==15'h7fff) && !m[62] &&
+           (({m[63], 1'b0, m[61:0]} << 1) != 64'd0);
   endfunction
   // Infinity: exp all-ones with the pure-infinity mantissa (integer bit only).
   function automatic logic fx_is_inf(input logic [79:0] v);

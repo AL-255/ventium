@@ -60,10 +60,13 @@ endif
 # for clarity). CFLAGS go to the C++ compile of our .cpp files.
 VL_CFLAGS := -I$(TB_DIR) -std=c++17
 
+# VL_EXTRA_DEFINES: optional +define+... passthrough (e.g. +define+VEN_SRT_ITER to
+# build the core with the iterative SRT FDIV/FSQRT engines wired in).
+VL_EXTRA_DEFINES ?=
 VL_FLAGS := --cc --exe --build -j 0 \
             -sv --top-module $(TOP) \
             -Wall -Wno-UNUSED -Wno-fatal \
-            $(VL_TRACE) \
+            $(VL_TRACE) $(VL_EXTRA_DEFINES) \
             -CFLAGS "$(VL_CFLAGS)" \
             -o $(EXE)
 

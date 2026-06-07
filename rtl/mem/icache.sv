@@ -52,12 +52,20 @@ module icache #(
     input  logic        clk,
     input  logic        rst_n,
 
-    // ---- READ-ONLY array outputs: the spine's combinational probes (ic_present /
-    // ic_hit_way / ic_byte) read these directly, reflecting the REGISTERED PRE-edge
-    // state this clock (the fill/touch below land on posedge). The speculative
-    // V-decode reads of NON-RESIDENT lines keep returning stale ic_data_o; only
-    // ic_val_o gates correctness.
-    output logic [7:0]  ic_data_o [IC_SETS][2][IC_LINE],
+    // ---- READ-ONLY array outputs: ic_tag/val/lru stay small combinational
+    // mirrors (the spine's ic_present/ic_hit_way probes read them directly,
+    // PRE-edge). The 8 KB DATA array is NOT exposed whole-array any more (that
+    // whole-array combinational dump + the spine's ~12 full-array byte muxes
+    // cost ~309 K LUTs / defeated RAM inference, fpga/TIMING_PROBLEMS.md P0-3);
+    // instead the data is read through TWO ADDRESSED async line ports (the
+    // fetch window spans at most 2 consecutive 32-byte lines), so Vivado infers
+    // distributed RAM. Behaviour/cycles are IDENTICAL (still same-cycle async).
+    input  logic [6:0]  rd_setA,        // line A = the fetch line (flin[11:5])
+    input  logic        rd_wayA,
+    output logic [IC_LINE*8-1:0] rd_lineA,
+    input  logic [6:0]  rd_setB,        // line B = the next line (for straddles)
+    input  logic        rd_wayB,
+    output logic [IC_LINE*8-1:0] rd_lineB,
     output logic [19:0] ic_tag_o  [IC_SETS][2],
     output logic        ic_val_o  [IC_SETS][2],
     output logic        ic_lru_o  [IC_SETS],
@@ -92,19 +100,27 @@ module icache #(
     input  logic [19:0] tch2_tag
 );
 
-  logic [7:0]  ic_data [IC_SETS][2][IC_LINE];
+  // Data array as packed 256-bit lines, FLAT-indexed {set,way} for clean RAM
+  // inference; the ram_style hint pushes Vivado to distributed RAM (async read +
+  // partial word write) instead of flip-flops + read muxes.
+  (* ram_style = "distributed" *)
+  logic [IC_LINE*8-1:0] ic_line [IC_SETS*2];
   logic [19:0] ic_tag  [IC_SETS][2];   // addr[31:12]
   logic        ic_val  [IC_SETS][2];
   logic        ic_lru  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
 
-  // READ-ONLY array outputs (combinational mirror of the registered arrays).
+  // Addressed async line reads (the two fetch-window lines). Distributed-RAM
+  // read ports — replace the old 12 full-array byte muxes in the spine.
+  assign rd_lineA = ic_line[{rd_setA, rd_wayA}];
+  assign rd_lineB = ic_line[{rd_setB, rd_wayB}];
+
+  // READ-ONLY tag/val/lru mirrors (small; the presence/way probes read these).
   always_comb begin
     for (int s=0; s<IC_SETS; s++) begin
       ic_lru_o[s] = ic_lru[s];
       for (int w=0; w<2; w++) begin
         ic_tag_o[s][w] = ic_tag[s][w];
         ic_val_o[s][w] = ic_val[s][w];
-        for (int b=0; b<IC_LINE; b++) ic_data_o[s][w][b] = ic_data[s][w][b];
       end
     end
   end
@@ -128,10 +144,10 @@ module icache #(
     end else begin
       // ---- per-word line fill (S_PF + S_PIPE word-0 path; one/clock) ----
       if (fill_en) begin
-        ic_data[fill_set][fill_way][fill_off+5'd0]<=fill_data[7:0];
-        ic_data[fill_set][fill_way][fill_off+5'd1]<=fill_data[15:8];
-        ic_data[fill_set][fill_way][fill_off+5'd2]<=fill_data[23:16];
-        ic_data[fill_set][fill_way][fill_off+5'd3]<=fill_data[31:24];
+        // write the 32-bit word as a slice of the flat-indexed packed line (byte
+        // off+0 at the low 8 bits, little-endian). With ram_style="distributed"
+        // Vivado maps the partial word write to LUTRAM.
+        ic_line[{fill_set,fill_way}][{fill_off,3'b000} +: 32] <= fill_data;
         if (fill_done) begin
           // oracle l1_access() miss path: val[victim]=1; tag[victim]=tag;
           // lru=victim. (fill_done implies fill_en.)

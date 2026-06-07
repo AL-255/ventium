@@ -564,6 +564,16 @@ module core
                                // 32 states exactly filled a [4:0] enum)
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
     S_FLOAD, S_FEXEC, S_FSTORE,
+`ifdef VEN_SRT_ITER
+    S_FP_BUSY,   // wait for the iterative SRT FDIV/FSQRT engine
+`endif
+`ifdef VEN_IDIV_ITER
+    S_DIV_BUSY,  // wait for the iterative integer DIV/IDIV engine
+`endif
+`ifdef VEN_BCD_ITER
+    S_BCD_BUSY,  // wait for the iterative FP->packed-BCD (FBSTP) engine
+`endif
+
     S_FENV_ST, S_FENV_LD,   // M11b: env/state store (FNSTENV/FNSAVE) & load (FLDENV/FRSTOR)
     // M7.3b Win95 co-sim port I/O: the IN/OUT bus handshake state (cosim only).
     S_IO,
@@ -688,7 +698,11 @@ module core
   // read the REGISTERED PRE-edge state directly, UNCHANGED. The fill is sequenced
   // by the spine regs below (pf_fill_addr/pf_fill_way/pf_word + the ~ic_lru_o
   // victim, which STAY here); the module never recomputes the victim.
-  logic [7:0]  ic_data_o [IC_SETS][2][IC_LINE];
+  // icache addressed line-read interface (replaces the whole-array ic_data_o:
+  // the fetch window spans only 2 consecutive lines — A=flin's line, B=next).
+  logic [6:0]  ic_rd_setA, ic_rd_setB;
+  logic        ic_rd_wayA, ic_rd_wayB;
+  logic [IC_LINE*8-1:0] ic_rd_lineA, ic_rd_lineB;
   logic [19:0] ic_tag_o  [IC_SETS][2];   // addr[31:12]
   logic        ic_val_o  [IC_SETS][2];
   logic        ic_lru_o  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
@@ -2747,7 +2761,12 @@ module core
   // DESIGN: a speculative V-decode of a NON-RESIDENT line still reads ic_data_o
   // (whatever is there); only ic_val_o gates correctness.
   function automatic logic [7:0] ic_byte(input logic [31:0] addr);
-    ic_byte = ic_data_o[addr[11:5]][ic_hit_way(addr)][addr[4:0]];
+    // read from the addressed line buffers (rd_lineA = flin's line, rd_lineB =
+    // next line); the fetch window spans only these two sets and the hit way is
+    // baked into each line (ic_rd_wayA/B), so there is no per-byte way mux.
+    logic [IC_LINE*8-1:0] ln;
+    ln = (addr[11:5] == ic_rd_setA) ? ic_rd_lineA : ic_rd_lineB;
+    ic_byte = ln[{addr[4:0],3'b000} +: 8];
   endfunction
 
   // icache LRU update on a confirmed HIT now lives in the icache module: the spine
@@ -2809,6 +2828,17 @@ module core
   logic [31:0] fbase, flin;
   assign fbase = seg_base[SG_CS];
   assign flin  = fbase + eip;
+
+  // icache addressed line-read drives: line A = flin's 32-byte line, line B = the
+  // next line (the fetch/V window can straddle into it). The per-line hit way is
+  // baked in (stale-by-design on a miss, matching the old ic_byte). flin is a
+  // stable continuous signal, so flin -> addr -> line -> ic_byte settles cleanly.
+  logic [31:0] flin_nl;
+  assign flin_nl    = {flin[31:5], 5'd0} + 32'd32;     // next aligned 32-byte line
+  assign ic_rd_setA = flin[11:5];
+  assign ic_rd_wayA = ic_hit_way(flin);
+  assign ic_rd_setB = flin_nl[11:5];
+  assign ic_rd_wayB = ic_hit_way(flin_nl);
 
   // R1 phase-3: the fast-path decoder is now the `decode` leaf module
   // (rtl/core/decode.sv), instantiated once per slot (U + V candidate). The
@@ -3239,6 +3269,40 @@ module core
         // into core_exec.svh (RAW case-arm, pasted here in the FSM).
         `include "core_exec.svh"
 
+`ifdef VEN_IDIV_ITER
+        // -----------------------------------------------------------------
+        // S_DIV_BUSY: wait for the iterative integer DIV/IDIV engine, then
+        // commit quotient/remainder to EAX/EDX (or deliver #DE on a zero
+        // divisor / quotient overflow). Mirrors S_FP_BUSY; the busy-wait
+        // serialises so the next insn reads the committed EDX:EAX.
+        // -----------------------------------------------------------------
+        S_DIV_BUSY: begin
+          if (eng_int_done) begin
+            if (eng_int_derr) begin
+              // #DE (vector 0): no result, EFLAGS unchanged. sys_mode delivers
+              // through the IDT; user mode loud-HALTs (matches the inline path).
+              if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
+              else          state<=S_HALT;
+            end else begin
+              if (q_w==3'd1)
+                gpr[R_EAX] <= {gpr[R_EAX][31:16], eng_int_rem[7:0], eng_int_quot[7:0]};
+              else if (q_w==3'd2) begin
+                gpr[R_EAX] <= {gpr[R_EAX][31:16], eng_int_quot[15:0]};
+                gpr[R_EDX] <= {gpr[R_EDX][31:16], eng_int_rem[15:0]};
+              end else begin
+                gpr[R_EAX] <= eng_int_quot[31:0];
+                gpr[R_EDX] <= eng_int_rem[31:0];
+              end
+              // P5 occupancy residual so issue->next-issue == occ (DIV 17/25/41,
+              // IDIV 22/30/46). The engine's real clocks cover most of it; top up
+              // (tuned vs make m5). q_md 3'd7 = IDIV.
+              pending_mem_pen <= (q_md==3'd7) ? 7'd6 : 7'd1;
+              eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+            end
+          end
+        end
+`endif
+
         // M7.3 port-I/O arms (S_IO / S_INS) — relocated VERBATIM into
         // core_io.svh (RAW case-arms, pasted here in the FSM).
         `include "core_io.svh"
@@ -3333,9 +3397,14 @@ module core
       // {ie,pe,bcd} -> IE on BCD-range overflow (indefinite image), PE on an
       // inexact round-to-int (oracle-confirmed: FBSTP of 2.5 sets PE).
       FX_FBSTP: begin
+`ifdef VEN_BCD_ITER
+        // iterative engine result, latched in S_BCD_BUSY (see ven_bcd).
+        fstore_val = fbcd_result_q[79:0]; fstore_pe = fbcd_result_q[80]; fstore_ie = fbcd_result_q[81];
+`else
         logic [81:0] rb;
         rb = fx_fx_to_bcd(s0, fctrl[11:10]);
         fstore_val = rb[79:0]; fstore_pe = rb[80]; fstore_ie = rb[81];
+`endif
       end
       // M6 Erratum 20: FIST[P] m16int/m32int (NOT m64) miss the overflow on
       // the documented positive operands in nearest/up rounding -> store ZERO,
@@ -4052,7 +4121,12 @@ module core
   icache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE)) u_icache (
     .clk       (clk),
     .rst_n     (rst_n),
-    .ic_data_o (ic_data_o),
+    .rd_setA   (ic_rd_setA),
+    .rd_wayA   (ic_rd_wayA),
+    .rd_lineA  (ic_rd_lineA),
+    .rd_setB   (ic_rd_setB),
+    .rd_wayB   (ic_rd_wayB),
+    .rd_lineB  (ic_rd_lineB),
     .ic_tag_o  (ic_tag_o),
     .ic_val_o  (ic_val_o),
     .ic_lru_o  (ic_lru_o),
@@ -4106,6 +4180,16 @@ module core
   logic        fp_we_incstp; logic        fp_we_decstp;
   logic        fp_we_fctrl;  logic [15:0] fp_fctrl_wval;
   logic        fp_we_fninit;
+  // --- iterative SRT FDIV/FSQRT engine integration (VEN_SRT_ITER) -----------
+  // Eligibility / handshake (module-level so the always_comb driver, the always_ff
+  // FSM, and the engine instances all share them). All 0 in the default build, so
+  // the `if(!fp_*_elig)` guards stay always-true and S_FP_BUSY is never entered.
+  logic        fp_div_elig, fp_sqrt_elig, fp_iter_go, fp_iter_done;
+  logic [79:0] eng_div_a, eng_div_b, eng_sqrt_in;
+  logic [1:0]  eng_rc;
+  logic        eng_div_start, eng_sqrt_start;
+  logic        eng_div_busy, eng_div_done;   logic [80:0] eng_div_result;
+  logic        eng_sqrt_busy, eng_sqrt_done;  logic [80:0] eng_sqrt_result;
   // M11 env-pointer latch driver (write-only -> u_fpu_state; read back via the
   // fip/fcs/fdp/fds aliases below for FNSTENV/FNSAVE).
   logic        fp_we_eptr;   logic [31:0] fp_eptr_fip;  logic [15:0] fp_eptr_fcs;
@@ -4145,6 +4229,10 @@ module core
     fp_we_incstp=1'b0; fp_we_decstp=1'b0;
     fp_we_fctrl=1'b0; fp_fctrl_wval=16'd0;
     fp_we_fninit=1'b0;
+    // iterative SRT engine defaults (0 => combinational path, default build)
+    fp_div_elig=1'b0; fp_sqrt_elig=1'b0; fp_iter_go=1'b0; fp_iter_done=1'b0;
+    eng_div_a=80'd0; eng_div_b=80'd0; eng_sqrt_in=80'd0; eng_rc=2'd0;
+    eng_div_start=1'b0; eng_sqrt_start=1'b0;
     fp_we_eptr=1'b0; fp_eptr_fip=32'd0; fp_eptr_fcs=16'd0;
     fp_we_dptr=1'b0; fp_eptr_fdp=32'd0; fp_eptr_fds=16'd0;
     fp_we_envld=1'b0; fp_env_fctrl=16'd0; fp_env_ftop=3'd0; fp_env_fstat=16'd0; fp_env_fptag=8'd0;
@@ -4243,6 +4331,45 @@ module core
     s_rc     = fctrl[11:10];
     s_argb   = 80'd0; s_codes = 3'd0; s_xc = 4'd0; s_cmp_ie = 1'b0;
     s_arf    = 83'd0; s_ar = 81'd0;
+`ifdef VEN_SRT_ITER
+    // ----- iterative SRT FDIV/FSQRT eligibility + engine inputs -------------
+    // Route NORMAL-operand divides and +normal sqrt through the multi-cycle
+    // engine; everything else (zero/Inf/NaN/denormal, runtime FDIV-errata) stays
+    // on the combinational path (its flag/special logic below is preserved).
+    begin
+      logic na, nb;
+      logic [79:0] opA, opB;
+      unique case (q_fxop)
+        FX_AR_ST0_STI:        begin opA=s_st0v; opB=s_stiv; end
+        FX_AR_STI_ST0:        begin opA=s_stiv; opB=s_st0v; end
+        FX_AR_M32, FX_AR_M64: begin opA=s_st0v; opB=s_opnd_f; end
+        FX_AR_I16, FX_AR_I32: begin opA=s_st0v; opB=f_mem_as_int(f_mem80, q_f_mbytes); end
+        default:              begin opA=80'd0;  opB=80'd0; end
+      endcase
+      // FINITE-NONZERO operands: exactly the set that reaches fx_srt_div's /
+      // fx_isqrt's loop in f_eval's else (zero/Inf/NaN hit cheap guards). Routing
+      // ALL of these to the engine lets the combinational loops be stubbed out of
+      // synthesis (D8b); the engine == fx_srt_div / fx_sqrt for every operand.
+      na = !fx_is_zero(opA) && (fx_exp(opA)!=15'h7fff);
+      nb = !fx_is_zero(opB) && (fx_exp(opB)!=15'h7fff);
+      fp_div_elig = slow_arm && !errata_en[ERR_FDIV] &&
+                    ((q_fxop==FX_AR_ST0_STI)||(q_fxop==FX_AR_STI_ST0)||
+                     (q_fxop==FX_AR_M32)||(q_fxop==FX_AR_M64)||
+                     (q_fxop==FX_AR_I16)||(q_fxop==FX_AR_I32)) &&
+                    ((q_f_aluop==3'd6)||(q_f_aluop==3'd7)) && na && nb;
+      fp_sqrt_elig = slow_arm && (q_fxop==FX_FSQRT) &&
+                     !fx_is_zero(s_st0v) && (fx_exp(s_st0v)!=15'h7fff) && !s_st0v[79];
+      fp_iter_go   = fp_div_elig || fp_sqrt_elig;
+      // div: a/b as passed to fx_div (divr, aluop 7, swaps operands)
+      eng_div_a    = (q_f_aluop==3'd7) ? opB : opA;
+      eng_div_b    = (q_f_aluop==3'd7) ? opA : opB;
+      eng_sqrt_in  = s_st0v;
+      eng_rc       = s_rc;
+      eng_div_start  = fp_div_elig;
+      eng_sqrt_start = fp_sqrt_elig;
+      fp_iter_done = (q_fxop==FX_FSQRT) ? eng_sqrt_done : eng_div_done;
+    end
+`endif
     if (slow_arm) begin
       unique case (q_fxop)
         // ---- loads (push) ----
@@ -4324,24 +4451,24 @@ module core
           if (q_f_pop) fp_we_pop=1'b1;
         end
         // ---- arithmetic (f_eval -> {ie,ze,inexact,result}) ----
-        FX_AR_ST0_STI: begin
+        FX_AR_ST0_STI: if (!fp_div_elig) begin
           s_arf = f_eval(q_f_aluop, s_st0v, s_stiv, s_rc, errata_en[ERR_FDIV]);
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
         end
-        FX_AR_STI_ST0: begin
+        FX_AR_STI_ST0: if (!fp_div_elig) begin
           // ST(i) op= ST0 : a=ST(i), b=ST0 (no tag write — only fpr[fri]).
           s_arf = f_eval(q_f_aluop, s_stiv, s_st0v, s_rc, errata_en[ERR_FDIV]);
           fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=s_arf[79:0]; fp_wsti_clr_tag=1'b0;
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
           if (q_f_pop) fp_we_pop=1'b1;
         end
-        FX_AR_M32, FX_AR_M64: begin
+        FX_AR_M32, FX_AR_M64: if (!fp_div_elig) begin
           s_arf = f_eval(q_f_aluop, s_st0v, s_opnd_f, s_rc, errata_en[ERR_FDIV]);
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
         end
-        FX_AR_I16, FX_AR_I32: begin
+        FX_AR_I16, FX_AR_I32: if (!fp_div_elig) begin
           s_arf = f_eval(q_f_aluop, s_st0v, f_mem_as_int(f_mem80, q_f_mbytes), s_rc, errata_en[ERR_FDIV]);
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
@@ -4365,7 +4492,7 @@ module core
               fp_we_top=1'b1;   fp_top_data=s_ar[79:0];
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400;            // C2 only
             end
-          end else begin                                      // +0, +normal, +Inf
+          end else if (!fp_sqrt_elig) begin                   // +0, +Inf (+normal -> engine)
             s_ar = fx_sqrt(s_st0v, s_rc);
             fp_we_top=1'b1; fp_top_data=s_ar[79:0];
             if (s_ar[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end    // PE
@@ -4377,13 +4504,54 @@ module core
         FX_FIST_M16, FX_FIST_M32, FX_FIST_M64,
         FX_FBSTP,
         FX_FNSTCW, FX_FNSTSW_M: begin
+`ifdef VEN_BCD_ITER
+          // iterative FBSTP defers its IE/PE sticky to the S_BCD_BUSY done clock
+          // (fstore_ie/pe come from the engine, not valid yet here at S_FEXEC).
+          if (q_fxop != FX_FBSTP) begin
+`endif
           if (fstore_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end  // IE
           else if (fstore_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end  // PE
+`ifdef VEN_BCD_ITER
+          end
+`endif
         end
         // FX_FNSTSW_AX writes gpr[EAX] only (handled in the S_FEXEC spine arm).
         default: ;
       endcase
     end
+
+`ifdef VEN_BCD_ITER
+    // iterative FBSTP: drive the deferred IE/PE fstat sticky on the engine-done
+    // clock (the store value/flags only become known when the BCD engine finishes).
+    if (state==S_BCD_BUSY && eng_bcd_done) begin
+      if (eng_bcd_result[81])      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end // IE
+      else if (eng_bcd_result[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end // PE
+    end
+`endif
+
+`ifdef VEN_SRT_ITER
+    // ===== iterative engine result commit (S_FP_BUSY, when the engine is done).
+    // Re-derives the dest write-port from q_fxop (which persists across the wait)
+    // and uses the engine's registered {inexact,result}. normal/normal divide and
+    // +normal sqrt only (so ie=ze=0; sqrt sets PE on inexact, like the comb arm).
+    if (state==S_FP_BUSY && fp_iter_done) begin
+      if (q_fxop==FX_FSQRT) begin
+        fp_we_top=1'b1; fp_top_data=eng_sqrt_result[79:0];
+        if (eng_sqrt_result[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
+      end else begin
+        logic [82:0] earf;
+        earf = {2'b00, eng_div_result[80], eng_div_result[79:0]};
+        if (q_fxop==FX_AR_STI_ST0) begin
+          fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=eng_div_result[79:0]; fp_wsti_clr_tag=1'b0;
+          fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, earf);
+          if (q_f_pop) fp_we_pop=1'b1;
+        end else begin
+          fp_we_top=1'b1; fp_top_data=eng_div_result[79:0];
+          fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, earf);
+        end
+      end
+    end
+`endif
 
     // ===== SLOW ARM (S_FSTORE last beat) — the FSTP/FISTP pop.
     fstore_last_beat = (state==S_FSTORE) && mem_ack &&
@@ -4451,6 +4619,91 @@ module core
     .we_envregs   (fp_we_envregs),
     .env_fpr_flat (fp_env_fpr_flat)
   );
+
+`ifdef VEN_SRT_ITER
+  // iterative SRT FDIV / FSQRT engines — the FPGA-synthesizable multi-cycle form
+  // of fx_srt_div / fx_sqrt. Started from S_FEXEC for normal-operand divides /
+  // +normal sqrts; their {inexact,result} commits in S_FP_BUSY (fp_we_* driver).
+  // buggy-PLA select mirrors the compile-time VEN_SRT_FDIV_BUG (== fx_div default).
+  `ifdef VEN_SRT_FDIV_BUG
+  localparam logic ENG_DIV_BUGGY = 1'b1;
+  `else
+  localparam logic ENG_DIV_BUGGY = 1'b0;
+  `endif
+  fpu_srt_div u_srt_div (
+    .clk(clk), .rst_n(rst_n), .start(eng_div_start),
+    .a(eng_div_a), .b(eng_div_b), .rc(eng_rc), .buggy(ENG_DIV_BUGGY),
+    .busy(eng_div_busy), .done(eng_div_done), .result(eng_div_result)
+  );
+  fpu_sqrt_iter u_sqrt_iter (
+    .clk(clk), .rst_n(rst_n), .start(eng_sqrt_start),
+    .a(eng_sqrt_in), .rc(eng_rc),
+    .busy(eng_sqrt_busy), .done(eng_sqrt_done), .result(eng_sqrt_result)
+  );
+`else
+  assign eng_div_busy=1'b0;  assign eng_div_done=1'b0;  assign eng_div_result='0;
+  assign eng_sqrt_busy=1'b0; assign eng_sqrt_done=1'b0; assign eng_sqrt_result='0;
+`endif
+
+  // --- iterative integer DIV/IDIV engine (VEN_IDIV_ITER) -------------------
+  // The FPGA-synthesizable multi-cycle form of the native '/'/'%' in
+  // core_exec.svh's K_MULDIV DIV/IDIV arms. Started from S_EXEC for DIV/IDIV
+  // (q_md 6/7); the FSM waits in S_DIV_BUSY and commits EAX/EDX + #DE on `done`.
+  logic        eng_int_start, eng_int_signed;
+  logic [2:0]  eng_int_w;
+  logic [63:0] eng_int_num;
+  logic [31:0] eng_int_den;
+  logic        eng_int_busy, eng_int_done, eng_int_derr;
+  logic [31:0] eng_int_quot, eng_int_rem;
+`ifdef VEN_IDIV_ITER
+  always_comb begin
+    logic [31:0] srcv_drv;
+    eng_int_start=1'b0; eng_int_signed=1'b0; eng_int_w=q_w;
+    eng_int_num=64'd0; eng_int_den=32'd0;
+    srcv_drv = q_mem_read ? wmask(mem_load_data, q_w) : reg_read(q_src_reg, q_w, q_src_high8);
+    if (state==S_EXEC && q_kind==K_MULDIV && (q_md==3'd6 || q_md==3'd7)) begin
+      eng_int_start  = 1'b1;
+      eng_int_signed = (q_md==3'd7);
+      eng_int_w      = q_w;
+      eng_int_num    = (q_w==3'd1) ? {48'd0, gpr[R_EAX][15:0]} :
+                       (q_w==3'd2) ? {32'd0, gpr[R_EDX][15:0], gpr[R_EAX][15:0]} :
+                                     {gpr[R_EDX], gpr[R_EAX]};
+      eng_int_den    = srcv_drv;
+    end
+  end
+  ven_idiv u_idiv (
+    .clk(clk), .rst_n(rst_n), .start(eng_int_start), .is_signed(eng_int_signed),
+    .w(eng_int_w), .dividend(eng_int_num), .divisor(eng_int_den),
+    .busy(eng_int_busy), .done(eng_int_done),
+    .quotient(eng_int_quot), .remainder(eng_int_rem), .derr(eng_int_derr)
+  );
+`else
+  always_comb begin
+    eng_int_start=1'b0; eng_int_signed=1'b0; eng_int_w=3'd0;
+    eng_int_num=64'd0;  eng_int_den=32'd0;
+  end
+  assign eng_int_busy=1'b0; assign eng_int_done=1'b0; assign eng_int_derr=1'b0;
+  assign eng_int_quot=32'd0; assign eng_int_rem=32'd0;
+`endif
+
+  // --- iterative FP->packed-BCD (FBSTP) engine (VEN_BCD_ITER) --------------
+  // The 18-chained-/10 fx_fx_to_bcd was the core's worst timing path. On FBSTP,
+  // run the engine (started in S_FEXEC), wait in S_BCD_BUSY, latch the BCD store
+  // value (fbcd_result_q) + defer the fstat sticky to the engine-done clock.
+  logic        eng_bcd_start, eng_bcd_busy, eng_bcd_done;
+  logic [81:0] eng_bcd_result;
+  logic [81:0] fbcd_result_q;       // latched {ie,pe,bcd} store value
+`ifdef VEN_BCD_ITER
+  assign eng_bcd_start = (state==S_FEXEC) && (q_fxop==FX_FBSTP);
+  ven_bcd u_bcd (
+    .clk(clk), .rst_n(rst_n), .start(eng_bcd_start),
+    .v(fst(3'd0)), .rc(fctrl[11:10]),
+    .busy(eng_bcd_busy), .done(eng_bcd_done), .result(eng_bcd_result)
+  );
+`else
+  assign eng_bcd_start=1'b0; assign eng_bcd_busy=1'b0; assign eng_bcd_done=1'b0;
+  assign eng_bcd_result=82'd0;
+`endif
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
   // TLB-resident data access the effective {US,RW,P} (perm) is checked against
