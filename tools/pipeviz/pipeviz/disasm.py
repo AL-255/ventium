@@ -10,7 +10,8 @@ task/SMM microcode. STATE_STAGE maps each to a (lane, P5-stage, colour) so the
 visualizer can render the classic Prefetch->D1->D2->EX->WB picture faithfully.
 """
 import re
-from capstone import Cs, CS_ARCH_X86, CS_MODE_16, CS_MODE_32
+from capstone import Cs, CS_ARCH_X86, CS_MODE_16, CS_MODE_32, CS_AC_WRITE
+from capstone.x86 import X86_OP_MEM
 
 _md32 = Cs(CS_ARCH_X86, CS_MODE_32)
 _md16 = Cs(CS_ARCH_X86, CS_MODE_16)
@@ -160,6 +161,33 @@ def read_regs(code: bytes, addr: int = 0, bits: int = 32):
     except Exception:
         pass
     return [], False
+
+
+def mem_operand(code: bytes, addr: int = 0, bits: int = 32):
+    """The instruction's first explicit memory operand that is actually accessed
+    (a load/store, NOT an `lea` address computation), as the raw material for
+    resolving the effective address it touched from the committed register file:
+    `(base_gpr_idx, index_gpr_idx, scale, disp, is_store)` with -1 for an absent
+    base/index — or None when the instruction makes no memory access."""
+    md = _md16d if bits == 16 else _md32d
+    try:
+        for insn in md.disasm(code, addr):
+            # `lea`/`nop [mem]` carry a memory operand (reported access==read) but
+            # never actually TOUCH memory — they compute/ignore the address, so an
+            # '@addr' on them would falsely claim a load.
+            if insn.mnemonic in ("lea", "nop"):
+                return None
+            for o in insn.operands:
+                if o.type == X86_OP_MEM and o.access:
+                    m = o.mem
+                    bnm = (insn.reg_name(m.base) or "").lower() if m.base else ""
+                    inm = (insn.reg_name(m.index) or "").lower() if m.index else ""
+                    return (_GPR_OF.get(bnm, -1), _GPR_OF.get(inm, -1),
+                            m.scale, m.disp, bool(o.access & CS_AC_WRITE))
+            return None
+    except Exception:
+        pass
+    return None
 
 
 _OPTOK = re.compile(r'0x[0-9a-fA-F]+|\d+|[A-Za-z_]\w*|.')
