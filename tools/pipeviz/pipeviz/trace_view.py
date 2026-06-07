@@ -17,6 +17,7 @@ _MAX_ROWS = 6000   # rolling cap on displayed rows
 _BYTES_ROLE = Qt.UserRole + 1
 _CYC_ROLE = Qt.UserRole + 2
 _FILT_ROLE = Qt.UserRole + 3   # (haystack, cyc, pipe, stall) for the filter box
+_INSN_ROLE = Qt.UserRole + 4   # (mnemonic, operands, class-colour) for split paint
 _U_COL = "#79c0ff"   # U pipe (blue)
 _V_COL = "#e3b341"   # V pipe (amber)
 
@@ -55,8 +56,44 @@ class BytesDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class InsnDelegate(QStyledItemDelegate):
+    """Paints the disassembly with a DIMMED class-coloured mnemonic and the
+    operand(s) in the full class accent — so a branch's target (or a load's
+    address) is what pops, not the whole instruction painted one flat colour."""
+    def __init__(self, font, parent=None):
+        super().__init__(parent)
+        self.font = font
+
+    def paint(self, painter, option, index):
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+        data = index.data(_INSN_ROLE)
+        if not data:
+            return
+        mn, ops, icol = data
+        painter.save()
+        painter.setClipRect(option.rect)
+        painter.setFont(self.font)
+        fm = QFontMetrics(self.font)
+        r = option.rect
+        x = r.x() + 4
+        avail = r.width() - 8
+        painter.setPen(QColor(icol).darker(150))
+        painter.drawText(QRect(x, r.y(), avail, r.height()),
+                         Qt.AlignVCenter | Qt.AlignLeft, mn)
+        if ops:
+            mw = fm.horizontalAdvance(mn + " ")
+            if mw < avail:
+                painter.setPen(QColor(icol))
+                painter.drawText(QRect(x + mw, r.y(), avail - mw, r.height()),
+                                 Qt.AlignVCenter | Qt.AlignLeft,
+                                 fm.elidedText(ops, Qt.ElideRight, avail - mw))
+        painter.restore()
+
+
 class TraceView(QWidget):
     rowSelected = Signal(int)     # emits the retire cycle of the selected row
+    instSelected = Signal(int)    # emits the retire n of the selected row (for pinning)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -86,6 +123,7 @@ class TraceView(QWidget):
         self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tbl.setShowGrid(False)
         self.tbl.setAlternatingRowColors(True)     # zebra striping
+        self.tbl.setVerticalScrollMode(QAbstractItemView.ScrollPerItem)  # whole-row snap
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
@@ -93,6 +131,7 @@ class TraceView(QWidget):
             self.tbl.setColumnWidth(i, w)
         hh.setSectionResizeMode(len(_COLS) - 1, QHeaderView.Stretch)
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
+        self.tbl.setItemDelegateForColumn(6, InsnDelegate(mono, self.tbl))
         self.tbl.currentCellChanged.connect(self._on_row)
         lay.addWidget(self.tbl)
         # field-colour legend — swatch tightly coupled to ITS label (no rotation)
@@ -127,6 +166,10 @@ class TraceView(QWidget):
             cyc = it.data(_CYC_ROLE)
             if cyc is not None:
                 self.rowSelected.emit(int(cyc))
+            try:
+                self.instSelected.emit(int(it.text()))
+            except ValueError:
+                pass
 
     def select_n(self, n):
         """Select + scroll to the trace row for retire `n` (linked from a click
@@ -191,8 +234,10 @@ class TraceView(QWidget):
                     it.setForeground(QBrush(QColor(_V_COL if r.pipe == 1 else _U_COL)))
                 if c == _BYTES_COL:
                     it.setData(_BYTES_ROLE, fields)     # painted by BytesDelegate
-                if c == 6:
-                    it.setForeground(QBrush(QColor(icol)))
+                if c == 6:                              # painted by InsnDelegate
+                    parts = txt.split(" ", 1)
+                    it.setData(_INSN_ROLE,
+                               (parts[0], parts[1] if len(parts) > 1 else "", icol))
                 self.tbl.setItem(row, c, it)
         self._seen = total
         # rolling cap

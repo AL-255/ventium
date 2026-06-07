@@ -12,7 +12,9 @@ not repeat itself.
 ## Current UI (keep this in sync each iteration — critics read it)
 - **Pipeline panel** = (a) a small LIVE *stage board* snapshot on top (3 lanes
   U/V/FP × P5 stages, current clock only; the FP group collapses to a thin "FP
-  idle" rail when x87 is idle so the integer stages get the width); (b) an
+  idle" rail when x87 is idle so the integer stages get the width; faint
+  **per-stage column gridlines** anchor each lit cell to its PF/D1/D2/EX/WB
+  column, and the stage captions are legend-white); (b) an
   **IPC/stall sparkline strip** (windowed IPC track + per-cycle event pixels:
   mispredict/stall/I-fill/walk); (c) the main **gem5/Konata pipeline view**
   (one row per retired instruction, columns = cycles, lifecycle drawn as
@@ -29,9 +31,15 @@ not repeat itself.
   instructions cascade diagonally through F→D→X like a real superscalar diagram,
   not a lone X. **Contiguous stall runs collapse into one `=N` block** (N = stall
   cycles) instead of a wall of grey cells; **per-cycle vertical gridlines** every
-  10 cycles; the instruction gutter is wide enough for full mnemonics. The stage
-  board is a COMPACT snapshot (the Konata view gets the height — ~29 rows). Two-
-  way selection: click a Konata instruction (cell or label) ↔ trace row.
+  10 cycles; the instruction gutter is wide enough for full mnemonics and
+  **split-colours each label** (dimmed mnemonic + the operand / branch-target in
+  the full class accent, so the target pops). Scrolling **snaps to whole rows /
+  cycle-columns** (one row of bottom slack keeps the newest instruction fully
+  visible — no clipped half-row at the top edge). The stage board is a COMPACT
+  snapshot (the Konata view gets the height — ~29 rows). Two-way selection: click
+  a Konata instruction (cell or label) ↔ trace row, which also **pins the register
+  panel** to that instruction's post-commit state and drops a **cyan cycle
+  playhead** down the Konata view; stepping unpins.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
@@ -47,12 +55,18 @@ not repeat itself.
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction (Δ shows `+N` only on a stall gap — steady-state 0/1 suppressed); x86 byte-field colouring (prefix gray / opcode blue / ModRM green
   / SIB purple / memory-offset yellow / immediate red / **branch-rel orange**),
-  clipped with `…` so long encodings never collide with the disasm; U=blue
-  V=amber pipe; zebra; Δ amber on a stall gap; capstone disasm (16/32-bit per
-  live CS.D). Click a row → highlights its Konata instruction row (two-way).
+  clipped with `…` so long encodings never collide with the disasm; the
+  **instruction column is split-coloured** (dimmed mnemonic + operand/target in
+  the class accent, matching the Konata gutter); U=blue V=amber pipe; zebra; Δ
+  amber on a stall gap; whole-row scroll snap; capstone disasm (16/32-bit per
+  live CS.D). Click a row → highlights its Konata instruction row + pins the
+  register panel to its post-commit state (two-way).
 - **Register panel**: GPRs/segs/CR/x87; **EFLAGS as a full named-bit grid** (all
   9 flags, set = amber, changed-this-step underlined); GPR/EIP values that
-  changed since the last step are amber.
+  changed since the last step are amber. Can be **pinned AS-OF a retired
+  instruction** (click a trace row / Konata cell): shows that instruction's
+  post-commit GPRs/EFLAGS/seg-selectors/x87 with an amber `PINNED n=… cyc=…`
+  banner; the next step unpins back to the live state.
 - **Status bar** (grouped, coloured): cyc · state/mode · ret/IPC/pair%/mispred ·
   I$/D$ occupancy/fills/walks · eip.
 - **Toolbar** (grouped file | config | transport, accented Run).
@@ -60,6 +74,35 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 9 — register pinning + playhead, split-colour labels, stage gridlines
+- **New feature — pin the register panel AS-OF a retired instruction + cycle
+  playhead:** clicking a trace row or a Konata cell/label now pins the register
+  panel to *that instruction's* post-commit architectural state (GPRs / EFLAGS /
+  segment selectors / x87 stack, from the retire record), banners it
+  `PINNED n=… cyc=…` in amber, and drops a cyan vertical **playhead** down the
+  Konata view at the commit cycle. The next step/run unpins back to live. Lets
+  you inspect the machine state at any point in the trace without re-running.
+- **Split-colour instruction labels** (synthesis: "colour only the target
+  operand, not the whole mnemonic"): both the Konata gutter and the trace
+  instruction column now draw the mnemonic in a *dimmed* class hue and the
+  operand(s) — a branch's target, a load's address — in the full class accent, so
+  the target pops instead of the whole instruction being one flat slab.
+- **Stage-board column gridlines + legend-white captions** (synthesis: "boxes
+  float with no stage anchoring" + "raise stage-header contrast"): faint vertical
+  gridlines now anchor each lit cell to its PF/D1/D2/EX/WB (and FP X1/X2/WF/ER)
+  column, and the stage captions were brightened to match the colour legend.
+- **Whole-row scroll snap** (recurring "clipped half-row at the top" finding):
+  the Konata view snaps wheel/keyboard scrolling to whole rows + cycle-columns
+  and adds one row of bottom slack so a bottom-follow scroll lands row-aligned
+  (newest instruction stays fully visible); the trace table scrolls per-item.
+- **Review-harness bug fix:** the screenshot watermark's `+dirty` marker never
+  fired — `_ROOT` pointed at `tools/` (two `dirname`s) instead of the repo root,
+  so `git status --porcelain tools/pipeviz` ran from the wrong cwd and always
+  came back empty. Fixed to the repo root; uncommitted working-tree renders now
+  correctly stamp `<sha>+dirty`, restoring the anti-staleness guarantee.
+- (Re-verified, again, that the branch byte colours are correct: `loop e2 fc` →
+  `e2` opcode-blue, `fc` rel-orange — a repeat critic mis-sample, source-dropped.)
 
 ### Iteration 8 — Branches/BTB panel + synthesised F→D→X pipeline cascade
 - **New feature — Branches/BTB inspector tab:** per-branch-PC profile (type,

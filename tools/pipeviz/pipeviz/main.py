@@ -186,6 +186,10 @@ class MainWindow(QMainWindow):
         # two-way link: trace row <-> Konata instruction row
         self.trace.rowSelected.connect(self.pipeline.highlight_cycle)
         self.pipeline.konata.plot.rowClicked.connect(self.trace.select_n)
+        # selecting an instruction (either side) PINS the register panel to its
+        # post-commit architectural state + drops a playhead at its cycle.
+        self.trace.instSelected.connect(self._pin_to)
+        self.pipeline.konata.plot.rowClicked.connect(self._pin_to)
 
     # ---- image loading ----
     def on_open(self):
@@ -278,11 +282,29 @@ class MainWindow(QMainWindow):
                 v.set_bits(bits)
         self.pipeline.reset(self.backend)
         self.trace.reset()
+        self._unpin()
         self._refresh_all()
+
+    # ---- register pinning (AS-OF a retired instruction) + playhead ----
+    def _pin_to(self, n):
+        recs = self.backend.get_retires(max(0, n - 1), 2)
+        rec = next((r for r in recs if r.n == n), None)
+        if rec is None:
+            return
+        prev = next((r for r in recs if r.n == n - 1), None)
+        self._pinned_n = n
+        self.regs.show_retire(rec, prev)
+
+    def _unpin(self):
+        if getattr(self, "_pinned_n", None) is not None:
+            self._pinned_n = None
+            self.regs.unpin()
+            self.pipeline.clear_playhead()
 
     def do_step(self, n, stop_on_retire):
         if self.image_bytes is None:
             return
+        self._unpin()
         self.backend.step(n, stop_on_retire)
         self._refresh_all()
         if self.backend.is_done():
@@ -306,6 +328,7 @@ class MainWindow(QMainWindow):
     def _on_run_tick(self):
         if self.image_bytes is None or self.backend.is_done():
             self.stop_run(); self._refresh_all(); return
+        self._unpin()
         self.backend.step(self.speed.value(), False)
         self._refresh_all()
         if self.backend.is_done():
@@ -319,7 +342,8 @@ class MainWindow(QMainWindow):
         self.tables.set_hotspots(self.pipeline.konata.plot.insns)
         self.tables.set_branches(self.pipeline.konata.plot.insns)
         self.tables.mem.set_state(self.backend, s)
-        self.regs.update_from(s)
+        if getattr(self, "_pinned_n", None) is None:
+            self.regs.update_from(s)   # else keep the pinned AS-OF display
         self.trace.update_from(self.backend)
         self._refresh_status(s)
 

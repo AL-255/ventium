@@ -141,7 +141,20 @@ class StageBoard(QWidget):
 
         icw = int_w / len(INT_STAGES)
         fcw = (W - fp_x0 - 6) / len(FP_STAGES)
-        p.setFont(_mono(8, True)); p.setPen(QColor("#7d8590"))
+        # faint vertical gridlines anchoring every stage column, so the lit cell
+        # reads as "the work is in stage EX" rather than a box floating in space.
+        grid_top, grid_bot = hdr_y - 1, top + 3 * lane_h + 1
+        p.setPen(QColor("#222c37"))
+        for i in range(len(INT_STAGES) + 1):
+            gx = int(lane_label_w + i * icw)
+            p.drawLine(gx, grid_top, gx, grid_bot)
+        if not fp_idle:
+            for i in range(len(FP_STAGES) + 1):
+                gx = int(fp_x0 + i * fcw)
+                p.drawLine(gx, grid_top, gx, grid_bot)
+        # stage-header band — raised to legend-white so the PF/D1/D2/EX/WB
+        # column captions are as legible as the colour legend below.
+        p.setFont(_mono(8, True)); p.setPen(QColor("#aab4c0"))
         for i, st in enumerate(INT_STAGES):
             p.drawText(QRect(int(lane_label_w + i * icw), hdr_y, int(icw), 12),
                        Qt.AlignCenter, st)
@@ -283,6 +296,7 @@ class _KonataPlot(QWidget):
         self.base_cyc = 1
         self.max_cyc = 1
         self.sel_row = None
+        self.playhead = None     # pinned cycle (vertical marker)
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
         self._pending = []       # accumulated cells since the last retirement
         self._cyc_row = {}       # retire cyc -> row index
@@ -353,7 +367,9 @@ class _KonataPlot(QWidget):
                 self.sel_row -= drop
         self.base_cyc = self.insns[0]["c0"] if self.insns else 1
         w = (self.max_cyc - self.base_cyc + 3) * CELL_W
-        h = max(1, len(self.insns) * ROW_H)
+        # one row of bottom slack so a row-aligned bottom-follow scroll keeps the
+        # newest instruction fully visible (never a clipped half-row at the top).
+        h = max(1, len(self.insns) * ROW_H + ROW_H)
         self.setFixedSize(max(1, w), h)
         return self.max_cyc
 
@@ -415,6 +431,12 @@ class _KonataPlot(QWidget):
                         p.setPen(QColor("#0d1117") if QColor(col).lightness() > 130 else QColor(_TXT))
                         p.drawText(cell, Qt.AlignCenter, ch)
                     i += 1
+        # playhead: a vertical cyan marker at the pinned cycle
+        if self.playhead is not None:
+            px = self._x(self.playhead) + CELL_W // 2
+            if vis.left() - 2 <= px <= vis.right() + 2:
+                p.setPen(QColor("#39c5cf"))
+                p.drawLine(px, vis.top(), px, vis.bottom())
         p.end()
 
     def mouseMoveEvent(self, ev):
@@ -433,6 +455,7 @@ class _KonataPlot(QWidget):
         r = int(y // ROW_H)
         if 0 <= r < len(self.insns):
             self.sel_row = r
+            self.playhead = self.insns[r]["c1"]
             self.update()
             self.rowClicked.emit(int(self.insns[r]["n"]))
 
@@ -488,10 +511,20 @@ class _KonataGutter(QWidget):
                 p.setPen(QColor(C_STALL))
                 p.drawText(QRect(GUTTER_W - bw - 6, y, bw, ROW_H),
                            Qt.AlignVCenter | Qt.AlignRight, f"{span}c")
-            _, icol = disasm.insn_class(it["mnem"].split(" ")[0])
-            p.setPen(QColor(icol))
-            p.drawText(QRect(118, y, mnem_w, ROW_H), Qt.AlignVCenter | Qt.AlignLeft,
-                       fm.elidedText(it["mnem"], Qt.ElideRight, mnem_w - 2))
+            # split-colour: the mnemonic in a dimmed class hue, the operand(s)
+            # (a branch's target, a load's address) in the full class accent — so
+            # the *target* pops instead of the whole instruction being one slab.
+            parts = it["mnem"].split(" ", 1)
+            mn = parts[0]; ops = parts[1] if len(parts) > 1 else ""
+            _, icol = disasm.insn_class(mn)
+            p.setPen(QColor(icol).darker(150))
+            p.drawText(QRect(118, y, mnem_w, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, mn)
+            mw = fm.horizontalAdvance(mn + " ")
+            if ops and mw < mnem_w:
+                p.setPen(QColor(icol))
+                p.drawText(QRect(118 + mw, y, mnem_w - mw, ROW_H),
+                           Qt.AlignVCenter | Qt.AlignLeft,
+                           fm.elidedText(ops, Qt.ElideRight, mnem_w - mw - 2))
         p.end()
 
 
@@ -552,6 +585,10 @@ class Konata(QWidget):
         grid.addWidget(self.scroll, 1, 1)
         v.addLayout(grid, 1)
 
+        # snap wheel/keyboard scrolling to whole rows / whole cycle-columns so a
+        # row is never sliced in half at the viewport edge.
+        self.scroll.verticalScrollBar().setSingleStep(ROW_H)
+        self.scroll.horizontalScrollBar().setSingleStep(CELL_W)
         self.scroll.verticalScrollBar().valueChanged.connect(self.gutter.update)
         self.scroll.horizontalScrollBar().valueChanged.connect(self.header.update)
         self._last_cyc = 0
@@ -585,12 +622,17 @@ class Konata(QWidget):
         return self.plot.stat
 
     def highlight_cycle(self, cyc):
+        self.plot.playhead = cyc
         row = self.plot._cyc_row.get(cyc)
         if row is None:
-            return
+            self.plot.update(); return
         self.plot.sel_row = row
         self.scroll.ensureVisible(self.plot._x(cyc), row * ROW_H + ROW_H // 2, 40, 60)
         self.plot.update(); self.gutter.update()
+
+    def clear_playhead(self):
+        self.plot.playhead = None
+        self.plot.update()
 
     def update_from(self, backend):
         total = backend.cycle_count()
@@ -602,7 +644,7 @@ class Konata(QWidget):
         self._last_cyc = self.plot.ingest(backend, self._last_cyc + 1)
         self.plot.update(); self.gutter.update(); self.header.update()
         if follow_v:
-            vb.setValue(vb.maximum())
+            vb.setValue((vb.maximum() // ROW_H) * ROW_H)   # row-aligned bottom
         if follow_h:
             hb.setValue(hb.maximum())
 
@@ -746,6 +788,9 @@ class PipelineView(QWidget):
 
     def highlight_cycle(self, cyc):
         self.konata.highlight_cycle(cyc)
+
+    def clear_playhead(self):
+        self.konata.clear_playhead()
 
     def update_from(self, backend, state):
         bits = 32 if state.cs_d else 16
