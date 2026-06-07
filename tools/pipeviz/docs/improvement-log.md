@@ -192,6 +192,26 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 44 — GUI clean (2nd straight); close the status-bar review blind spot
+The adversarial review confirmed the live watermark (`2790fdd`) on all 6 critics and again
+produced **0 actionable GUI picks** (2nd consecutive clean review). All 3 raw findings were
+pixel-refuted: (1) an IPC-tick "collision" — a perception error (the bright value text ends
+at x≈38, a dark gutter follows, the dim ticks start at x≈42 — measured clean separation,
+same class as the long-refuted "rel byte is yellow"); (2) the recurring pinned-Segments
+claim; (3) a stat-header "lone `e`" — a CRITIC-CROP ARTIFACT, not a GUI defect. The GUI was,
+correctly, left untouched.
+- **Review-harness refinement — dedicated status-bar crop (closes a blind spot + kills a
+  recurring false-positive).** Finding (3) arose because the info-dense status bar
+  (`cyc · state/mode · ret/IPC/pair/mispred · I$·D$·fills·walks · eip`) only appears tiny in
+  the `*_full` shots, so critics fabricated their own narrow crops — and because the `eip`
+  QLabel's natural width exceeds the window, a naive label-rect crop "loses" the eip,
+  manufacturing a phantom truncation. `gen_review_shots.py` now emits a `dmiss_statbar.png`
+  framing the whole status row at the REAL window width, and the Layout critic is pointed at
+  it (and told not to fabricate its own). Ground-truthed: the status bar renders the full
+  `eip 0x08048015` with whitespace to spare — no truncation. This is the same class of
+  review-coverage fix as iter25's all-9-tabs sweep and iter42's watermark ASCII fix; the GUI
+  itself needed nothing.
+
 ### Iteration 43 — clean 0-pick review (converged); recurring Segments false-positive held in REFUTED
 A genuinely clean iteration — no code change shipped, by design. The adversarial review
 confirmed the live watermark (`88e92f6`) on all 6 critics and produced **0 actionable

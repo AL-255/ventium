@@ -142,6 +142,18 @@ for tag, img, steps, soc in SHOTS:
         cp = os.path.join(OUT, f"{tag}_{sub}.png")
         im.crop(_box(win, widget)).save(cp)
         _watermark(cp, f"{tag} · {sub}")
+    # dedicated status-bar crop for ONE info-rich workload: the cyc/state/IPC/pair/mispred/
+    # I$·D$·fills·walks/eip header is dense but only appears tiny in the *_full shots, so the
+    # review couldn't scrutinise it and kept fabricating truncated ad-hoc crops (the eip
+    # QLabel's natural width exceeds the window, so a naive label-rect crop "loses" the eip).
+    # Frame the whole status row at the REAL window width so the header reads exactly as shown.
+    if tag == "dmiss":
+        sl = win.status_lbl
+        tl = sl.mapTo(win, sl.rect().topLeft()); br = sl.mapTo(win, sl.rect().bottomRight())
+        sy0 = max(0, tl.y() - 2); sy1 = min(win.height(), br.y() + 3)
+        sbar = os.path.join(OUT, f"{tag}_statbar.png")
+        im.crop((0, sy0, win.width(), sy1)).save(sbar)
+        _watermark(sbar, f"{tag} · status bar")
     _watermark(full, tag)
     # also capture the register panel PINNED to a mid-trace instruction, so the
     # review covers the "pin regs AS-OF a retired insn" feature (live shots can't
