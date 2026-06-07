@@ -111,6 +111,11 @@ class RegsView(QWidget):
         self.fphdr = QLabel(""); self.fphdr.setFont(_mono(9))
         self.fphdr.setWordWrap(True)   # guard the header against width overrun
         g4.addWidget(self.fphdr, 0, 0, 1, 4)
+        # col 0 (the ST label) gets a fixed min width so the exponent hex never butts
+        # against the label: the live path padded col 0 only incidentally, via the
+        # empty-slot '·', so a full stack (or the pinned path, which dropped the '·')
+        # rendered 'ST13fff' with no gap. A fixed width pads it in EVERY mode/state.
+        g4.setColumnMinimumWidth(0, 30)
         # col 2 is a fixed-width spacer so the decoded value never fuses with the
         # 20-hex-digit 80-bit mantissa; the value column (3) is right-aligned.
         g4.setColumnMinimumWidth(2, 12); g4.setColumnStretch(2, 1)
@@ -229,7 +234,7 @@ class RegsView(QWidget):
                 b10 = bytes(rec.st[i][k] for k in range(10))   # logical ST(i) in the record
                 empty = (b10 == b"\x00" * 10)
                 tag, hexv, val = self.st_lbls[i]
-                tag.setText(f"ST{i}")
+                tag.setText(f"ST{i}" + ("·" if empty else ""))   # match the live empty marker
                 hexv.setText(_fmt80(b10[::-1].hex()))
                 hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
                 val.setText("—" if empty else f"{floatx80_to_float(b10):.6g}")
