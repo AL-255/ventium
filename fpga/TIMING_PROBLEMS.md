@@ -391,3 +391,34 @@ logic but leave the ~18 ns routing. To clear 66 MHz: (a) drive util down toward
 trims) so placement is compact, and/or (b) floorplan/Pblock the FP datapath; THEN
 (c) pipeline FBLD via an iterative `ven_bcd_to_fp` engine (the load‑side twin of
 ven_bcd) for the last logic tier. _Captured 2026‑06‑07._
+
+## P0‑6 — iterative FBLD + BTB‑update pipeline → the ROUTING wall (synth 33→59.5 MHz)
+After P0‑5 (FP execute pipeline), the worst paths were the FP LOADS (`f_mem80 → fpr`,
+dominantly FBLD `fx_bcd_to_fx`) then the branch predictor.
+
+* **Iterative FBLD** (`75a1c0c`, `rtl/fpu/ven_bcd_to_fp.sv`, +VEN_BCD_ITER): the
+  load‑side twin of ven_bcd — accumulates 18 BCD digits MSD‑first, two *10/clk
+  (~9 clk), S_FBLD_BUSY pushes+retires same‑clock (functional‑safe). Gate
+  `make verify-fbld` bit‑exact. **Removing the FBLD cone jumped synth 46 → ~58 MHz**;
+  all remaining worst paths became the BTB, NOT FP — the FP datapath is fully off
+  the critical path.
+
+* **BTB‑update pipeline** (`ab3001e`, +VEN_BTB_PIPE): a 3‑agent investigation found
+  BRAM is the WRONG fix for the `eip → btb_ctr_reg` path: the BTB is 64‑deep
+  (shallow → won't infer BRAM, like icache) AND only 13 of its 63 levels (21%) are
+  the BTB — the other 50 (79%) are the upstream `eip → icache → decode → issue_arm`
+  front‑end gate, which can't be deferred (single‑cycle dual‑issue). The cycle‑safe
+  lever: register the BTB resolve inputs so the counter UPDATE (a state side‑effect;
+  predict reads PRE‑update state) leaves the issue_arm net. Cycle‑neutral
+  (mb_brloop/brrandom abscyc IDENTICAL to baseline). **Synth 58 → 59.5 MHz.**
+
+**The ROUTING wall (definitive).** The new worst path is the **EIP self‑update loop**
+(`eip_reg → eip_reg`, the fetch→decode→PC‑advance loop): 16.8 ns, but **logic only
+6.0 ns (36 %) / routing 10.8 ns (64 %)**. The LOGIC is done — 6 ns closes at
+~166 MHz. The remaining gap to 66 MHz is **pure routing/congestion**: the core fills
+the device (OOC, no floorplan) so `eip` + fanout spread far apart. Every cone this
+session (FP pipe, FBLD, BTB) drove logic depth down successfully; there is no logic
+cone left to cut. **To reach 66 MHz the lever is now PLACEMENT, not RTL** —
+floorplan/Pblock the front‑end + FP datapaths into compact regions and/or close
+timing during full‑SoC integration with real clocking constraints. Synth Fmax
+journey this session: 3.6 → 14.6 → 37.5 → 46 → 58 → **59.5 MHz**. _Captured 2026‑06‑07._
