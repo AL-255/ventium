@@ -455,12 +455,20 @@ class _KonataPlot(QWidget):
             p.setFont(_mono(8, True)); p.setPen(QColor("#f0c674"))
             p.drawText(QRect(lo, vis.top() + 1, max(28, hi - lo), 12),
                        Qt.AlignHCenter | Qt.AlignTop, f"Δ{dn}cyc")
-        # playhead: a vertical cyan marker at the pinned cycle
+        # playhead: a vertical cyan marker at the pinned cycle, with a cycle-number
+        # callout pinned to the top of the visible region.
         if self.playhead is not None:
             px = self._x(self.playhead) + CELL_W // 2
             if vis.left() - 2 <= px <= vis.right() + 2:
                 p.setPen(QColor("#39c5cf"))
                 p.drawLine(px, vis.top(), px, vis.bottom())
+                lbl = f"cyc {self.playhead}"
+                p.setFont(_mono(8, True))
+                tw = QFontMetrics(p.font()).horizontalAdvance(lbl) + 8
+                bx = min(max(px - tw // 2, vis.left()), max(vis.left(), vis.right() - tw))
+                p.fillRect(QRect(bx, vis.top(), tw, 13), QColor("#0b3036"))
+                p.setPen(QColor("#7ce0e8"))
+                p.drawText(QRect(bx, vis.top(), tw, 13), Qt.AlignCenter, lbl)
         p.end()
 
     def mouseMoveEvent(self, ev):
@@ -806,18 +814,21 @@ class SparklineStrip(QWidget):
                        "IPC / stall sparkline — click to seek")
             p.end(); return
         start = max(0, n - plotw)
+        shown = n - start
+        bw = plotw / shown          # px per cycle — widen so the bars FILL the panel
         win = 16
-        for i in range(start, n):
-            x = labelw + (i - start)
+        for idx, i in enumerate(range(start, n)):
+            x = labelw + int(idx * bw)
+            cw = max(1, int((idx + 1) * bw) - int(idx * bw))   # contiguous, gap-free
             lo = max(0, i - win + 1)
             ipc = sum(self.ret[lo:i + 1]) / (i - lo + 1)
             # cap the drawable height at ipc_h-2 so a sustained IPC=2.0 keeps 2px
             # of headroom and never saturates flush to the band's top edge.
             bh = int(min(2.0, ipc) / 2.0 * (ipc_h - 2))
-            p.fillRect(QRect(x, ipc_y0 + ipc_h - bh, 1, bh), QColor("#2ea043"))
+            p.fillRect(QRect(x, ipc_y0 + ipc_h - bh, cw, bh), QColor("#2ea043"))
             e = self.ev[i]
             if e:
-                p.fillRect(QRect(x, evt_y0, 1, evt_h), QColor(self._EVCOL[e]))
+                p.fillRect(QRect(x, evt_y0, cw, evt_h), QColor(self._EVCOL[e]))
         # IPC=1 / IPC=2 rule lines drawn AFTER the bars so a peaked bar can't
         # paint over its own reference line.
         p.setPen(QColor("#30363d"))
@@ -863,8 +874,11 @@ class SparklineStrip(QWidget):
         n = len(self.ret)
         if n == 0:
             return None
-        start = max(0, n - max(1, self.width() - self._LABELW - 4))
-        i = start + (int(x) - self._LABELW)
+        plotw = max(1, self.width() - self._LABELW - 4)
+        start = max(0, n - plotw)
+        shown = n - start
+        bw = plotw / shown                          # must match paintEvent's scale
+        i = start + int((int(x) - self._LABELW) / bw)
         return self._last_cyc - (n - 1 - i) if 0 <= i < n else None
 
     def mousePressEvent(self, ev):
@@ -879,11 +893,9 @@ class SparklineStrip(QWidget):
     def mouseMoveEvent(self, ev):
         x = int(ev.position().x() if hasattr(ev, "position") else ev.x())
         self._hover_x = x
-        n = len(self.ret)
-        start = max(0, n - max(1, self.width() - self._LABELW - 4))
-        i = start + (x - self._LABELW)
-        if 0 <= i < n:
-            cyc = self._last_cyc - (n - 1 - i)
+        cyc = self._cyc_at(x)
+        if cyc is not None:
+            i = len(self.ev) - 1 - (self._last_cyc - cyc)
             ev_name = {"m": "mispredict", "s": "stall", "f": "I-fill", "w": "page-walk"}.get(self.ev[i], "")
             self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired"
                             + (f", {ev_name}" if ev_name else "") + "  ·  click to seek")

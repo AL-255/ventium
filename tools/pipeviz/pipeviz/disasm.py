@@ -226,11 +226,11 @@ CC_BRANCH = "#ff8c00"   # control transfer (orange) — SAME orange as the rel8/
 CC_FP = "#c89bff"       # x87 (purple)
 CC_MEM = "#79c0ff"      # load/store/stack (blue)
 CC_ALU = "#d9dee3"      # arithmetic / data (neutral off-white)
-CC_SYS = "#f4766e"      # privileged / system (red) — was a warm orange that
-                        # critics repeatedly read as a branch accent; red is
-                        # unambiguously distinct from the gold branch colour and
-                        # reads as "privileged", so lgdt/lidt/hlt/cr-moves no
-                        # longer look like control transfers.
+CC_SYS = "#d9dee3"      # privileged / system — NEUTRAL (same as ALU). Every warm
+                        # accent collided with a legend colour (orange read as the
+                        # branch accent, red as the immediate-byte colour), so
+                        # lgdt/lidt/hlt/cr-moves now render plain; the mnemonic
+                        # itself is the signal that it's a system op.
 CC_OTHER = "#8b949e"
 
 _BR = {"jmp", "call", "ret", "retn", "retf", "iret", "iretd", "loop", "loope",
