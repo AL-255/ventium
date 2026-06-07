@@ -178,6 +178,31 @@ def _dcache_replay(accs):
     return len(accs), hits, cold + conflict, cold, conflict
 
 
+def _dcache_per_pc(accs, n2pc):
+    """Per-PC (accesses, misses) from the SAME LRU replay, attributing each miss to
+    its retire-n's PC — so the Hotspots profile can name WHICH load/store PC misses
+    (dmiss's `mov eax,[esi]` = 14/14, vs test386's `[eax*4]` 3/17 while `[eax*4+2]`
+    0/17), not just how many cycles each PC burned."""
+    sets = [[] for _ in range(DC_SETS)]
+    stat = {}
+    for a in accs:
+        line = a[2] >> _LINE_SHIFT
+        s = line & _SET_MASK
+        tag = line >> (_SET_MASK.bit_length())
+        ways = sets[s]
+        if tag in ways:
+            ways.remove(tag); ways.insert(0, tag); miss = False
+        else:
+            if len(ways) >= WAYS:
+                ways.pop()
+            ways.insert(0, tag); miss = True
+        pc = n2pc.get(a[0])
+        if pc is not None:
+            e = stat.setdefault(pc, [0, 0])
+            e[0] += 1; e[1] += 1 if miss else 0
+    return stat
+
+
 def _align_headers(table, cols, align):
     """Align the given header labels so a header caption never sits visually
     divorced from its data: numeric columns right-align (digits line up), glyph-bar
@@ -378,13 +403,13 @@ class TablesView(QWidget):
 
         # --- Hotspots (per-PC cycle-cost profile, perf/VTune-style) ---
         self.hot_lbl = QLabel()
-        self.hot = _mk_table(["PC", "hits", "cycles", "cyc%", "cost", "instruction"],
-                             [76, 50, 64, 50, 120, 9999],
+        self.hot = _mk_table(["PC", "hits", "cycles", "cyc%", "D$ miss", "cost", "instruction"],
+                             [76, 50, 64, 50, 62, 120, 9999],
                              hint="no instructions retired yet — step the core")
         # field-colour the instruction column to match the trace / Konata gutter
-        self.hot.setItemDelegateForColumn(5, InsnCellDelegate(_mono(), self.hot))
-        _right_align_headers(self.hot, (1, 2, 3))   # hits / cycles / cyc% match the data
-        _align_headers(self.hot, (4,), Qt.AlignLeft)  # 'cost' sits over its left-pinned bar
+        self.hot.setItemDelegateForColumn(6, InsnCellDelegate(_mono(), self.hot))
+        _right_align_headers(self.hot, (1, 2, 3, 4))  # hits/cycles/cyc%/D$miss match data
+        _align_headers(self.hot, (5,), Qt.AlignLeft)  # 'cost' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
 
         # --- Branches (per-branch-PC taken/not-taken profile) ---
@@ -515,10 +540,12 @@ class TablesView(QWidget):
     def set_bits(self, bits):
         self._bits = bits
 
-    def set_hotspots(self, insns):
+    def set_hotspots(self, insns, accesses=()):
         """Per-PC cycle-cost profile (perf-style): aggregate the reconstructed
         instruction lifecycles by PC -> hit count + total cycles occupied; the
-        top consumers (often stalled loads/branches) bubble to the top."""
+        top consumers (often stalled loads/branches) bubble to the top. The
+        'D$ miss' column attributes the replayed D-cache misses to each PC (red when
+        a load/store PC misses heavily) so the missing load is named, not just costly."""
         agg = {}
         total = 0
         for it in insns:
@@ -530,6 +557,7 @@ class TablesView(QWidget):
             else:
                 e[0] += 1; e[1] += span
         ranked = sorted(agg.items(), key=lambda kv: -kv[1][1])[:300]
+        miss_by_pc = _dcache_per_pc(accesses, {it["n"]: it["pc"] for it in insns}) if accesses else {}
         self.hot_lbl.setText(
             f"{len(agg)} distinct PC{'' if len(agg) == 1 else 's'}, {total} cycles total "
             f"— top consumers first "
@@ -539,13 +567,20 @@ class TablesView(QWidget):
         for pc, (hits, cyc, mnem) in ranked:
             pct = (100.0 * cyc / total) if total else 0.0
             bar = "█" * max(1, int(round(12 * cyc / maxc))) if cyc else ""
-            rows.append([f"{pc:08x}", hits, cyc, f"{pct:.1f}", bar, mnem])
-        _fill(self.hot, rows, dim_cols=(0, 1), right_cols=(1, 2, 3))
-        # colour the cost bar amber
-        for r in range(self.hot.rowCount()):
-            it = self.hot.item(r, 4)
-            if it is not None:
-                it.setForeground(QBrush(QColor("#d2a24c")))
+            ma = miss_by_pc.get(pc)
+            miss = f"{ma[1]}/{ma[0]}" if ma else ""    # D$ misses / accesses for a mem PC
+            rows.append([f"{pc:08x}", hits, cyc, f"{pct:.1f}", miss, bar, mnem])
+        _fill(self.hot, rows, dim_cols=(0, 1), right_cols=(1, 2, 3, 4))
+        for r, (pc, _e) in enumerate(ranked):
+            cb = self.hot.item(r, 5)                   # cost bar -> amber
+            if cb is not None:
+                cb.setForeground(QBrush(QColor("#d2a24c")))
+            ma = miss_by_pc.get(pc)                     # D$ miss -> colour by miss-rate
+            mi = self.hot.item(r, 4)
+            if ma and ma[0] and mi is not None:
+                rate = ma[1] / ma[0]
+                mi.setForeground(QBrush(QColor(
+                    "#f85149" if rate >= 0.5 else ("#d29922" if rate > 0 else "#3fb950"))))
 
     def _wrap(self, label, table, cmap=None):
         w = QWidget(); v = QVBoxLayout(w); v.setContentsMargins(4, 4, 4, 4)
