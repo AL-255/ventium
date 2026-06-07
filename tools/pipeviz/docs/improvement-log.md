@@ -110,6 +110,27 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 23 — 'stuck' livelock banner, wider gutter, crisp stage gridlines
+Verify confirmed 1 pick (the stuck banner). Ground-truthing the rest: the
+stage-board EX|WB "no break" was mostly perception (the fast-path correctly lights
+EX+WB and a gridline IS between them), but the gutter-mnemonic and gridline-crispness
+findings were real.
+- **New feature — 'stuck' livelock diagnostic.** When the sparkline's trailing run
+  of zero-retire cycles exceeds 64 AND the core is wedged in a front-end / halt state
+  (`S_DECODE` / `S_FETCH` / `S_HALT` / `S_F00F_HANG`), it overlays a red
+  `⚠ stuck in S_DECODE — 86c, 0 retired` banner over the IPC band, so a genuine hang
+  reads as "the core is wedged", not a dead-looking flat strip. Correctly stays OFF
+  for a normal slow decode (test386's 7c loop never trips the 64c threshold) — it's
+  a hang detector, not a slow-IPC indicator.
+- **Fix (HIGH, recurring) — gutter mnemonic truncation.** `mov eax, dword ptr [esi]`
+  was clipped to `… […`. Widened the Konata instruction gutter 300→340px (borrowed
+  from the often-under-filled timeline) so full mnemonics show; the per-row tooltip
+  still covers anything longer.
+- **Fix — crisp stage-board column gridlines.** A fast-path uop lights EX+WB as two
+  same-colour green cells; the boundary gridline (drawn behind the cells) read as
+  faint. Re-drew the internal PF|D1|D2|EX|WB gridlines ON TOP of the lane cells in a
+  brighter `#5a6573`, so the column a stage occupies is unmistakable.
+
 ### Iteration 22 — reclaim Konata height, stall contrast, narrower bytes, drill-down
 Verify confirmed 0 picks; ground-truthing (MEASURING the panel) drove the layout
 fixes that several HIGH findings kept circling.
