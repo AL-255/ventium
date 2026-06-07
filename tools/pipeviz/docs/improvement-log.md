@@ -88,11 +88,41 @@ not repeat itself.
   unpins back to the live state.
 - **Status bar** (grouped, coloured): cyc · state/mode · ret/IPC/pair%/mispred ·
   I$/D$ occupancy/fills/walks · eip.
-- **Toolbar** (grouped file | config | transport, accented Run).
+- **Toolbar** (grouped file | config | transport, accented Run, + **event-jump**
+  ◀/▶ that move the Konata playhead to the prev/next pipeline event —
+  mispredict/stall/I-fill/page-walk — for fast "jump to the action" navigation).
 - Backends: `ventium_top` (user + system) and `ventium_soc` (test386 etc.).
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 14 — event-jump nav + review-harness wrong-panel fix
+A trace critic caught a real harness bug (one I'd have dismissed as a perception
+error): `dmiss_trace.png` showed the PIPELINE panel, not the trace. Ground-truthing
+the on-disk crops confirmed it — `dmiss_trace (2000x400)`, `dmiss_regs (1280x1190)`,
+`fp_pipeline (2000x410)` were impossible sizes (bigger than the 1640x980 window).
+- **Review-harness fix — settle layout before cropping.** The geometry-accurate
+  crops (iter 12) read `widget.rect()`, but a `QSplitter` can take an extra
+  event-loop pass to constrain a panel after a content change; cropping while a
+  panel still held its unconstrained size-hint framed the WRONG region
+  (intermittently, ~2 of 5 workloads). Added a `_settle()` that spins the event
+  loop until every panel reports an in-window geometry, plus a window-clamp in
+  `_box()` as a final guard. Verified: 3 consecutive full renders, 0 bad crops.
+- **New feature — event-jump navigation.** Toolbar ◀/▶ "event" buttons move the
+  Konata playhead to the previous/next pipeline event (mispredict / stall / I-fill
+  / page-walk) by scanning the sparkline's per-cycle event array outward from the
+  current playhead. Lands directly on the next stall/miss instead of hunting by eye.
+  (Fixed an index-math edge case: the Konata `base_cyc` can be negative — the
+  synthesised front-end extends 2 cycles before cycle 1 — so the scan start index
+  is now clamped into the strip's range.)
+- **Fix (CONFIRMED) — sparkline stall colour.** The evt-strip stall pixel was amber
+  `C_STALL`, indistinguishable from the amber I-fill pixel. Recoloured to the grey
+  `C_STG_STALL` that the Konata `=` stall band already uses, so a stall reads the
+  same grey in both views and is distinct from I-fill.
+- **Fix — trace header alignment.** The `bytes`/`instruction` (and n/cyc/PC) column
+  headers were centred over their geometric middle while the data is left-aligned,
+  so captions floated far right of their columns. Left-aligned those headers so each
+  sits over its column's first glyph.
 
 ### Iteration 13 — PC-group highlight + sparkline headroom + system-op colour
 The Verify phase confirmed two of seven picks; ground-truthing the unpicked HIGH

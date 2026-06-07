@@ -775,7 +775,9 @@ class SparklineStrip(QWidget):
             self.ret = self.ret[-self.CAP:]; self.ev = self.ev[-self.CAP:]
         self.update()
 
-    _EVCOL = {"m": C_MISPRED, "s": C_STALL, "f": C_FILL, "w": C_WALK}
+    # stall = grey (C_STG_STALL), matching the Konata '=' stall convention and
+    # distinct from the amber I-fill (they were both amber and indistinguishable).
+    _EVCOL = {"m": C_MISPRED, "s": C_STG_STALL, "f": C_FILL, "w": C_WALK}
     _EVKEY = [("m", "mispred"), ("s", "stall"), ("f", "I-fill"), ("w", "walk")]
     _LABELW = 40
 
@@ -840,6 +842,22 @@ class SparklineStrip(QWidget):
         p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h // 2 - 4, 12, 8), Qt.AlignLeft, "1")
         p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h - 8, 12, 8), Qt.AlignLeft, "0")
         p.end()
+
+    def next_event(self, from_cyc, direction, cls="any"):
+        """Cycle of the next (direction +1) / previous (-1) event — a mispredict
+        'm', stall 's', I-fill 'f' or page-walk 'w' (or 'any') — scanning outward
+        from from_cyc. Returns the cycle, or None if there's no further event."""
+        n = len(self.ev)
+        if n == 0:
+            return None
+        i = (n - 1 - (self._last_cyc - int(from_cyc))) + direction
+        i = max(0, min(i, n - 1))    # a from_cyc outside the strip starts at an edge
+        while 0 <= i < n:
+            e = self.ev[i]
+            if e and (cls == "any" or e == cls):
+                return self._last_cyc - (n - 1 - i)
+            i += direction
+        return None
 
     def _cyc_at(self, x):
         n = len(self.ret)

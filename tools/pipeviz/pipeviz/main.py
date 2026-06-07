@@ -149,6 +149,19 @@ class MainWindow(QMainWindow):
         self.speed.setSuffix(" clk/tick"); self.speed.setFixedWidth(110)
         tb.addWidget(self.speed)
 
+        tb.addSeparator()   # transport | event-jump
+        tb.addWidget(QLabel(" event "))
+        self.evprev_btn = QPushButton("◀")
+        self.evprev_btn.setToolTip("Jump the playhead to the PREVIOUS pipeline event "
+                                   "(mispredict / stall / I-fill / page-walk)")
+        self.evprev_btn.clicked.connect(lambda: self._jump_event(-1))
+        tb.addWidget(self.evprev_btn)
+        self.evnext_btn = QPushButton("▶")
+        self.evnext_btn.setToolTip("Jump the playhead to the NEXT pipeline event "
+                                   "(mispredict / stall / I-fill / page-walk)")
+        self.evnext_btn.clicked.connect(lambda: self._jump_event(1))
+        tb.addWidget(self.evnext_btn)
+
         # status toolbar (second row)
         self.addToolBarBreak()
         sb = QToolBar("status"); sb.setMovable(False); self.addToolBar(sb)
@@ -303,6 +316,17 @@ class MainWindow(QMainWindow):
             self._pinned_n = None
             self.regs.unpin()
             self.pipeline.clear_playhead()
+
+    def _jump_event(self, direction):
+        """Move the Konata playhead to the next/prev pipeline event (mispredict /
+        stall / I-fill / page-walk) — fast navigation to where the action is."""
+        plot = self.pipeline.konata.plot
+        cur = plot.playhead
+        if cur is None:                         # no playhead yet: start at an edge
+            cur = plot.base_cyc - 1 if direction > 0 else plot.max_cyc + 1
+        cyc = self.pipeline.spark.next_event(cur, direction)
+        if cyc is not None:
+            self.pipeline.highlight_cycle(cyc)
 
     def do_step(self, n, stop_on_retire):
         if self.image_bytes is None:

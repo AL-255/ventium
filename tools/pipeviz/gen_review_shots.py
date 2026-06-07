@@ -35,12 +35,34 @@ except Exception:
 _STAMP = f"pipeviz build {_SHA}  {datetime.datetime.now().strftime('%H:%M:%S')}"
 
 
+def _panels(win):
+    return (win.pipeline, win.trace, win.tables, win.regs)
+
+
+def _settle(win, app, tries=12):
+    """Spin the event loop until every panel reports an IN-WINDOW geometry. The
+    QSplitter can take an extra pass to constrain a panel after a content change;
+    if we crop while a panel still holds its unconstrained size hint we frame the
+    WRONG region (e.g. a 2000x400 'trace' crop that actually shows the pipeline).
+    """
+    for _ in range(tries):
+        W, H = win.width(), win.height()
+        if all(50 <= w.rect().width() <= W and 50 <= w.rect().height() <= H
+               for w in _panels(win)):
+            return
+        app.processEvents()
+
+
 def _box(win, widget):
     """The on-screen (left, top, right, bottom) of a panel within the window —
-    so panel crops always frame the real widget, regardless of splitter sizes."""
+    so panel crops always frame the real widget, regardless of splitter sizes.
+    Clamped to the window as a final guard against any unsettled geometry."""
+    W, H = win.width(), win.height()
     tl = widget.mapTo(win, widget.rect().topLeft())
     br = widget.mapTo(win, widget.rect().bottomRight())
-    return (tl.x(), tl.y(), br.x(), br.y())
+    x0 = max(0, min(tl.x(), W)); y0 = max(0, min(tl.y(), H))
+    x1 = max(x0 + 1, min(br.x(), W)); y1 = max(y0 + 1, min(br.y(), H))
+    return (x0, y0, x1, y1)
 
 
 def _watermark(path, tag):
@@ -80,6 +102,7 @@ for tag, img, steps, soc in SHOTS:
     win.do_step(steps, False)
     app.processEvents()
     win.repaint(); app.processEvents()
+    _settle(win, app)          # ensure splitter geometry is constrained before cropping
     full = os.path.join(OUT, f"{tag}_full.png")
     win.grab().save(full)
     # crop the RAW grab first (crop boxes assume the un-banded coords), THEN band
