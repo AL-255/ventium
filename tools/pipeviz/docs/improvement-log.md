@@ -110,6 +110,27 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 21 — x87 hex split, FP-lane cleanup, keyboard shortcuts
+Verify confirmed 1 pick. I also **pixel-sampled the trace** to finally close the
+perennial "rel byte is yellow" finding: the f8 byte renders red-orange
+(`166,52,34`, R/G=3.2, B=34 — vs the salmon immediate at B≈107), 271 red-orange
+pixels in the bytes column. It is a CONCLUSIVE perception error; the colour stands.
+- **Fix (CONFIRMED) — split the x87 80-bit hex + dim empty slots.** The 20-hex
+  blob is now `4005 ae00000000000000` (sign/exp word ␣ 64-bit mantissa) so the
+  floatx80 fields are readable, and an empty stack slot's all-zero hex is dimmed to
+  `#4b535d` (live and pinned) so it reads as empty, not as data.
+- **Fix (HIGH, recurring) — stage-board FP lane.** The FP lane label was a
+  near-invisible grey, the "FP idle" status was orphaned in the top-right corner,
+  and idle FP showed 4 unexplained ghost stage cells. Now: the FP label is as bright
+  as U/V (FP-purple when busy), and an idle FP pipe draws a single flat `x87 FP idle`
+  strip in its own lane instead of the orphaned label + ghost cells. (Ground-truthed
+  + dropped the sibling "stage board has no gridlines" finding — they're clearly at
+  `#454f5d`, spanning the lanes.)
+- **New feature — keyboard-driven stepping/navigation.** `.` steps one clock, `i`
+  steps one instruction, and `]` / `[` jump the playhead to the next / previous
+  pipeline event (mispredict / stall / I-fill / page-walk) — so the whole debug loop
+  is drivable from the keyboard.
+
 ### Iteration 20 — playhead-behind-cells, stall-bar inset, amber Δ-band, off-screen chevron
 Verify confirmed 0 picks; ground-truthing (2x-zoomed Konata crops) caught two HIGH
 regressions from my own recent features.

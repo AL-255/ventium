@@ -13,7 +13,7 @@ import argparse
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QToolBar, QLabel,
                                QLineEdit, QPushButton, QCheckBox, QSpinBox, QSplitter,
                                QFileDialog, QMessageBox, QStyle)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QShortcut
 from PySide6.QtCore import Qt, QTimer
 
 from .backend import Backend
@@ -208,6 +208,15 @@ class MainWindow(QMainWindow):
         # post-commit architectural state + drops a playhead at its cycle.
         self.trace.instSelected.connect(self._pin_to)
         self.pipeline.konata.plot.rowClicked.connect(self._pin_to)
+
+        # keyboard-driven stepping / navigation (a debugger should be drivable from
+        # the keyboard): . = step 1 clk, i = step 1 instruction, ] / [ = jump to the
+        # next / previous pipeline event (mispredict / stall / I-fill / page-walk).
+        for keys, fn in [(".", lambda: self.do_step(1, False)),
+                         ("i", lambda: self.do_step(1, True)),
+                         ("]", lambda: self._jump_event(1)),
+                         ("[", lambda: self._jump_event(-1))]:
+            QShortcut(QKeySequence(keys), self).activated.connect(fn)
 
     # ---- image loading ----
     def on_open(self):

@@ -19,6 +19,12 @@ def _mono(pt=10, bold=False):
     return f
 
 
+def _fmt80(hexs: str) -> str:
+    """Split a 20-hex-char big-endian floatx80 into its sign/exponent word and
+    64-bit mantissa (`c001 8000000000000000`) so the fields are readable."""
+    return hexs[:4] + " " + hexs[4:]
+
+
 def floatx80_to_float(b10: bytes):
     """Decode a 10-byte little-endian floatx80 to a Python float for display."""
     if len(b10) < 10:
@@ -175,7 +181,8 @@ class RegsView(QWidget):
             empty = bool((s.fptag >> phys) & 1)   # fptag bit i: 1 = empty
             tag, hexv, val = self.st_lbls[i]
             tag.setText(f"ST{i}" + ("·" if empty else ""))
-            hexv.setText(hexs)
+            hexv.setText(_fmt80(hexs))
+            hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
             fv = floatx80_to_float(b10)
             val.setText("—" if empty else f"{fv:.6g}")
 
@@ -220,10 +227,12 @@ class RegsView(QWidget):
             self.fphdr.setText(f"pin ctrl={rec.fctrl:04x} stat={rec.fstat:04x} tag={rec.ftag:04x}")
             for i in range(8):
                 b10 = bytes(rec.st[i][k] for k in range(10))   # logical ST(i) in the record
+                empty = (b10 == b"\x00" * 10)
                 tag, hexv, val = self.st_lbls[i]
                 tag.setText(f"ST{i}")
-                hexv.setText(b10[::-1].hex())
-                val.setText(f"{floatx80_to_float(b10):.6g}")
+                hexv.setText(_fmt80(b10[::-1].hex()))
+                hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
+                val.setText("—" if empty else f"{floatx80_to_float(b10):.6g}")
         self._prev = None   # next live refresh re-highlights from scratch
 
     def unpin(self):

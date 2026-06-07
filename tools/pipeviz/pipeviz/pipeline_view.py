@@ -135,9 +135,10 @@ class StageBoard(QWidget):
         p.setFont(_mono(9, True)); p.setPen(QColor(C_PIPE))
         p.drawText(QRect(lane_label_w, title_y, int_w, 14), Qt.AlignLeft,
                    "Integer pipeline  (U / V)")
-        p.setPen(QColor(_MUT if fp_idle else C_FP))
-        p.drawText(QRect(fp_x0, title_y, W - fp_x0 - 8, 14), Qt.AlignRight,
-                   "FP idle" if fp_idle else "FP pipeline")
+        if not fp_idle:                              # busy: title here; idle: in-lane
+            p.setPen(QColor(C_FP))
+            p.drawText(QRect(fp_x0, title_y, W - fp_x0 - 8, 14), Qt.AlignRight,
+                       "FP pipeline")
 
         icw = int_w / len(INT_STAGES)
         fcw = (W - fp_x0 - 6) / len(FP_STAGES)
@@ -171,9 +172,21 @@ class StageBoard(QWidget):
                  ("FP", "FP", FP_STAGES, fp_x0, fcw, fp_idle)]
         for r, (key, label, stages, x0, cw, idle) in enumerate(lanes):
             y = top + r * lane_h
-            p.setFont(_mono(9, True)); p.setPen(QColor("#5b6470" if idle else _MUT))
+            # lane label: as bright as U/V even when idle (was a near-invisible grey),
+            # FP-purple when the FP pipe is actually busy.
+            p.setFont(_mono(9, True))
+            p.setPen(QColor(C_FP if (key == "FP" and not idle) else _MUT))
             p.drawText(QRect(2, y, lane_label_w - 4, lane_h),
                        Qt.AlignVCenter | Qt.AlignRight, label)
+            if key == "FP" and idle:
+                # one flat 'idle' strip + inline label, NOT 4 ghost empty stage cells
+                # floating with no context off to the right.
+                strip = QRect(int(x0) + 1, y + 2, int(W - x0 - 8), lane_h - 6)
+                p.fillRect(strip, QColor("#12161d"))
+                p.setPen(QColor("#6b7480")); p.setFont(_mono(8))
+                p.drawText(strip.adjusted(0, 0, -5, 0),
+                           Qt.AlignVCenter | Qt.AlignRight, "x87 FP idle")
+                continue
             lit_idxs, text = self._cells.get(key, ([], ""))
             for i, st in enumerate(stages):
                 cx = x0 + i * cw
