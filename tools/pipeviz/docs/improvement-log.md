@@ -112,7 +112,12 @@ not repeat itself.
   →access tracks the address of the newest retired memory op and gold-outlines its
   exact byte span, so you can watch the memory the program is touching and jump
   straight from a trace `@<ea>` to the data there, e.g. follow dmiss's striding load
-  frontier `@08049180`→`@080491a0`→…).
+  frontier `@08049180`→`@080491a0`→…); **Mem map** = an **address-vs-sequence
+  SCATTER** of the access stream — one point per retired load/store (X = retire order,
+  Y = effective address, low at the bottom), loads blue / stores gold — so the access
+  PATTERN reads as a shape the per-row trace list can't show: a strided walk is a
+  straight diagonal (dmiss's loads), a hot location a horizontal band, random access
+  scatters (header gives count / address span / load·store split).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
@@ -161,6 +166,27 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 32 — Mem-map access-pattern scatter (address vs sequence)
+Review confirmed the live watermark (`f90851b`) on all 6 critics and **confirmed 0 of
+0** picks — for the second straight round the adversarial review found nothing
+actionable (the UI is saturated). The features critic returned "None worth shipping",
+and amusingly its reasoning cited my own in-progress `AccessMapView` source (it read
+`tools/pipeviz/pipeviz/` mid-run while I was building this very feature) — independent
+confirmation that the access-pattern scatter is exactly the gap that remained.
+- **New feature — Mem map (address-vs-sequence access scatter).** A new `AccessMap`
+  widget + tab plots the memory-access stream the trace already resolves: one point
+  per retired load/store, X = retire order `n`, Y = effective address (low at the
+  bottom), loads blue / stores gold, with auto-scaled axes + an empty-state hint. The
+  access PATTERN finally reads as a SHAPE — dmiss's strided loads render as a clean
+  diagonal (`@8049000`→`@80491a0` by 0x20), a hot location would be a horizontal band,
+  random access scatters — none of which the per-row trace `@<ea>` list conveys. The
+  trace collects the `(n, addr, is_store)` stream (capped, rolling); `main` plumbs it
+  to the tab. GROUND-TRUTHED first: dmiss (14, clean stride), test386 (34, tight
+  cluster) and ppage (10, one huge-span outlier auto-scale absorbs) all have usable
+  data; brloop/fp (0 accesses) show the empty-state hint. Verified the collected
+  addresses match the trace `@<ea>` EXACTLY, retire-order monotonic, all workloads
+  paint without crash, reset clears the stream.
 
 ### Iteration 31 — Memory '→access' follow mode (watch the program's memory frontier)
 Review confirmed the live watermark (`605762e`) on all 6 critics but **confirmed 0 of

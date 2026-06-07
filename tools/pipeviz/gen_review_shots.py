@@ -162,7 +162,7 @@ for tag, img, steps, soc in SHOTS:
     # covers the new "follow the most-recent load/store address + gold-highlight the
     # accessed bytes" feature (only renders once →access is engaged).
     if tag == "dmiss" and win.trace.last_access is not None:
-        win.tables.tabs.setCurrentIndex(win.tables.tabs.count() - 1)   # Memory is the last tab
+        win.tables.tabs.setCurrentIndex(win.tables.tabs.indexOf(win.tables.mem))
         win.tables.mem._set_follow("access")
         app.processEvents(); win.repaint(); app.processEvents()
         _settle(win, app)
@@ -172,6 +172,15 @@ for tag, img, steps, soc in SHOTS:
         Image.open(mfull).crop(_box(win, win.tables)).save(ma)
         _watermark(ma, f"{tag} · Memory →access @{win.trace.last_access[0]:08x}")
         win.tables.mem.follow = None
+        # the access-pattern map (dmiss's strided loads => a clean diagonal scatter)
+        win.tables.tabs.setCurrentIndex(win.tables.tabs.indexOf(win.tables.accmap.parent()))
+        app.processEvents(); win.repaint(); app.processEvents()
+        _settle(win, app)
+        amfull = os.path.join(OUT, f"{tag}_memmap_full.png")
+        win.grab().save(amfull)
+        am = os.path.join(OUT, f"{tag}_memmap.png")
+        Image.open(amfull).crop(_box(win, win.tables)).save(am)
+        _watermark(am, f"{tag} · Mem map ({len(win.trace.accesses)} accesses)")
         win.tables.tabs.setCurrentIndex(0)
         app.processEvents()
     # all-9-tabs sweep for ONE rich workload — the per-workload `_tables.png` crop

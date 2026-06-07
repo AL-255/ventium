@@ -192,6 +192,7 @@ class TraceView(QWidget):
         super().__init__(parent)
         self._last_cyc = None
         self.last_access = None
+        self.accesses = []        # [(retire_n, address, is_store)] for the access map
         self._tokens = []
         lay = QVBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
@@ -306,6 +307,7 @@ class TraceView(QWidget):
         self._prev_fstat = None
         self._prev_gpr = None     # prior retirement's committed GPRs (pre-state for EA)
         self.last_access = None   # newest resolved load/store address (Memory '→access')
+        self.accesses = []        # access stream for the access map
 
     def update_from(self, backend):
         total = backend.retire_count()
@@ -360,6 +362,11 @@ class TraceView(QWidget):
                     ea &= mask
                     mem_ea = (f"@{ea:08x}" if bits == 32 else f"@{ea:04x}")
                     self.last_access = (ea, size)   # newest access -> Memory '→access'
+                    # accumulate the (retire-n, address, is_store) access stream for
+                    # the address-vs-sequence access-pattern map (capped, rolling).
+                    self.accesses.append((int(r.n), ea, _store))
+                    if len(self.accesses) > 4000:
+                        del self.accesses[:len(self.accesses) - 4000]
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
                           xv, fsw, getattr(self, "_prev_fstat", None), fp_write, mem_ea)
             self._prev_eff = efl

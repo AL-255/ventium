@@ -378,6 +378,14 @@ class TablesView(QWidget):
         # --- Memory hex/ASCII inspector (follow EIP/ESP) ---
         self.mem = MemoryView()
         self.tabs.addTab(self.mem, "Memory")
+
+        # --- Memory-access map (address-vs-sequence scatter / access pattern) ---
+        self.accmap = AccessMap()
+        amw = QWidget(); amv = QVBoxLayout(amw); amv.setContentsMargins(4, 4, 4, 4)
+        self.accmap_lbl = QLabel("memory access pattern — load/store address vs retire order")
+        self.accmap_lbl.setStyleSheet("color:#8b949e;")
+        amv.addWidget(self.accmap_lbl); amv.addWidget(self.accmap, 1)
+        self.tabs.addTab(amw, "Mem map")
         # drill-down: clicking a Hotspots / Branches row jumps the trace to that PC.
         self.hot.cellClicked.connect(lambda r, _c: self._emit_pc(self.hot, r))
         self.br.cellClicked.connect(lambda r, _c: self._emit_pc(self.br, r))
@@ -681,6 +689,66 @@ class _HexDump(QWidget):
                 ch = chr(b) if 32 <= b < 127 else "."
                 p.setPen(QColor("#79c0ff" if 32 <= b < 127 else "#3d444d"))
                 p.drawText(QRect(asc + c * cw, y, cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, ch)
+        p.end()
+
+
+class AccessMap(QWidget):
+    """Address-vs-sequence SCATTER of the program's memory accesses — one point per
+    retired load/store (X = retire order n, Y = effective address with low at the
+    bottom), loads blue / stores gold. Reveals the ACCESS PATTERN as a SHAPE that the
+    per-row trace address list can't: a strided walk is a straight diagonal, a hot
+    location is a horizontal band, random access scatters. Pure client-side from the
+    trace's already-resolved effective addresses."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.accesses = []
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set_accesses(self, accs):
+        self.accesses = accs
+        self.update()
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#0b0f14"))
+        W, H = self.width(), self.height()
+        accs = self.accesses
+        if not accs:
+            p.setPen(QColor("#586069")); p.setFont(_mono(10))
+            p.drawText(self.rect(), Qt.AlignCenter,
+                       "no memory accesses yet — step a workload that loads/stores")
+            p.end(); return
+        ns = [a[0] for a in accs]; addrs = [a[1] for a in accs]
+        n0, n1 = min(ns), max(ns); a0, a1 = min(addrs), max(addrs)
+        nspan = max(1, n1 - n0); aspan = max(1, a1 - a0)
+        nloads = sum(1 for a in accs if not a[2]); nstores = len(accs) - nloads
+        hf = _mono(8); hf.setBold(True)
+        p.setPen(QColor("#8b949e")); p.setFont(hf)
+        p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
+                   f"{len(accs)} accesses · 0x{a0:x}..0x{a1:x} (span 0x{aspan:x}) · "
+                   f"loads={nloads} stores={nstores}   [blue=load · gold=store]")
+        L, R, T, B = 76, 8, 20, 16
+        pw, ph = max(1, W - L - R), max(1, H - T - B)
+        def yof(addr): return T + ph - int((addr - a0) * ph / aspan)
+        def xof(n): return L + int((n - n0) * pw / nspan)
+        # Y address gridlines + ticks (low address at the bottom)
+        p.setFont(_mono(7))
+        for k in range(5):
+            av = a0 + aspan * k // 4
+            y = yof(av)
+            p.setPen(QColor("#1c232b")); p.drawLine(L, y, W - R, y)
+            p.setPen(QColor("#6e7681"))
+            p.drawText(QRect(0, y - 6, L - 4, 12), Qt.AlignVCenter | Qt.AlignRight, f"{av:08x}")
+        # X sequence ticks
+        for k in range(5):
+            nv = n0 + nspan * k // 4
+            x = xof(nv)
+            p.setPen(QColor("#6e7681"))
+            p.drawText(QRect(x - 24, H - B + 1, 48, 12), Qt.AlignHCenter | Qt.AlignTop, f"n{nv}")
+        # points
+        for (n, addr, st) in accs:
+            p.fillRect(QRect(xof(n) - 1, yof(addr) - 1, 3, 3),
+                       QColor("#e3b341") if st else QColor("#79c0ff"))
         p.end()
 
 
