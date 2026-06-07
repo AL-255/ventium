@@ -600,7 +600,10 @@ class _KonataPlot(QWidget):
         if self._dep_edges and self.sel_row is not None and 0 <= self.sel_row < len(self.insns):
             p.save()
             cons = self.insns[self.sel_row]
-            cx = self._x(cons["c0"]) + CELL_W // 2
+            # anchor the arrowhead to the LEFT EDGE of the consumer's first cell (not its
+            # centre) so the dot + edge terminus never overdraw the centred F/D/X glyph —
+            # a near-vertical short edge used to land the dot right on top of the 'F'.
+            cx = self._x(cons["c0"])
             cy = self.sel_row * ROW_H + ROW_H // 2
             p.setFont(_mono(8, True))
             for (j, reg, gating) in self._dep_edges:
