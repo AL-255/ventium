@@ -117,6 +117,13 @@ class TraceView(QWidget):
         lay.addLayout(top)
         self.tbl = QTableWidget(0, len(_COLS))
         self.tbl.setHorizontalHeaderLabels(_COLS)
+        # left-align the headers whose data is left-aligned (n/cyc/PC/bytes/instr)
+        # so a caption sits directly over its column's first glyph instead of
+        # floating centred over the wide bytes/instruction gutter.
+        for _c in (0, 1, 4, 5, 6):
+            _hi = self.tbl.horizontalHeaderItem(_c)
+            if _hi is not None:
+                _hi.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
