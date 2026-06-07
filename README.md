@@ -128,6 +128,48 @@ At the FPGA target of **66 MHz** the cycle model estimates **~15 FPS** at 320×2
 regression-tested by `t_endbr`) and two QEMU-golden producer-fidelity bugs
 (`clock_gettime64` capture width, the i386 `recvfrom` syscall number).
 
+## FPGA synthesis (KV260)
+
+The core + FPU are fully synthesizable. Below is the **real Vivado placement** of
+the `core` (out-of-context) on the KV260's **XCK26** (Zynq UltraScale+ ZU5EV,
+`xck26-sfvc784-2LV-c`), with every placed leaf cell colored by its RTL module —
+you can see the physical clusters (I-cache, FP datapath, branch predictor, the
+iterative FP engines, the core spine, …).
+
+![Ventium core placed on the KV260, colored by RTL module](docs/fpga-device-view.png)
+
+**Best numbers so far** — OOC `core`, `+VTM_NO_DPI`, all configurations **bit-exact
+vs QEMU** (75/75 functional + the cycle micro-gates green):
+
+| Resource | Used | Available | Util |
+|---|---:|---:|---:|
+| **CLB LUTs** | **89,661** | 117,120 | **76.6 %** ✅ fits |
+| &nbsp;&nbsp;LUT as logic | 85,565 | 117,120 | 73.1 % |
+| &nbsp;&nbsp;LUT as memory (the L1 caches) | 4,096 | 57,600 | 7.1 % |
+| CLB Registers | 29,460 | 234,240 | 12.6 % |
+| CARRY8 | 2,067 | 14,640 | 14.1 % |
+| DSP48E2 | 95 | 1,248 | 7.6 % |
+| Block RAM | 0 | 144 | 0 % |
+
+- **Area: 518 % → 76.6 % LUTs (≈6.8× reduction).** The as-is single-cycle
+  combinational Pentium datapath was 5.2× too big for the device; **iterative
+  FDIV / FSQRT / integer-DIV / FBSTP / FBLD engines**, **LUTRAM caches**, and
+  **FP-datapath consolidation** brought it comfortably under the XCK26.
+- **Fmax: synth ≈ 59.5 MHz** (worst-path *logic* down to ~6 ns), **placed ≈ 47 MHz**
+  (ExtraTimingOpt). The **66 MHz** target is **not yet met out-of-context** — the
+  remaining gap is **routing/congestion**, not logic: the worst path is the
+  architectural fetch loop (`eip → eip`) at ~62 % routing on a device-filling core,
+  to be closed with floorplanning during full-SoC integration. Synth journey:
+  3.6 → 14.6 → 37.5 → 46 → 58 → 59.5 MHz.
+- A **2-stage FP execute pipeline** (`+VEN_FP_PIPE`) and a **BTB-update pipeline**
+  (`+VEN_BTB_PIPE`, independently removable) move FP and the branch predictor off
+  the critical path while keeping **both FP cycle bands and the branch-mispredict
+  bands bit-identical** (they fit inside the modeled latency windows).
+
+Reproduce: `vivado -mode batch -source fpga/scripts/device_view.tcl` →
+`python3 fpga/scripts/render_device_view.py …`. Full timing backlog +
+methodology in [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
+
 ## Status
 
 The planned roadmap is **complete** — M0–M6, the M2S.0–.6 system-mode track + the
