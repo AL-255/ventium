@@ -77,16 +77,18 @@ not repeat itself.
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
   architecturally WROTE — the destination GPR(s) with their committed value plus
-  any changed flags (`eax=60000011  ZF0`); writes are attributed per-instruction
-  via capstone register-access analysis, so a dual-issue U/V pair's writes land on
-  the correct rows even though the commit snapshot is per-cycle. x86 byte-field
+  any changed flags (`eax=60000011  ZF0`) plus any **x87 exception** newly raised
+  by an FP op (`FP:ZE`); writes are attributed per-instruction via capstone
+  register-access analysis, so a dual-issue U/V pair's writes land on the correct
+  rows even though the commit snapshot is per-cycle. x86 byte-field
   colouring (prefix gray / opcode blue / ModRM green
   / SIB purple / memory-offset yellow / immediate red / **branch-rel vivid-orange**
   `#ff8c00`, pulled well clear of the offset-yellow), clipped with `…` only past
   ~11 bytes with the **full encoding on hover** (tooltip) so no bytes are lost; the
-  **instruction column is split-coloured** (dimmed mnemonic + operand/target in
-  the class accent, matching the Konata gutter; the branch accent is the same
-  vivid-orange as the rel byte so a branch target reads one hue everywhere);
+  **instruction column is split-coloured** (a NEUTRAL-grey mnemonic — the same grey
+  for every op — + operand/target in the class accent, matching the Konata gutter;
+  so only the operand/target is coloured and a branch's `jne` is grey like any
+  other mnemonic while just its target stays orange);
   U=blue V=amber pipe; zebra; Δ
   amber on a stall gap; whole-row scroll snap; capstone disasm (16/32-bit per
   live CS.D). Click a row → highlights its Konata instruction row + pins the
@@ -107,6 +109,32 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 18 — neutral mnemonics, wider Konata cells, x87 exceptions, playhead column
+Verify confirmed 1 pick; ground-truthing the HIGH findings caught a colour
+regression from my own iter-15 change and two recurring legibility issues.
+- **Fix (HIGH, self-inflicted) — branch "orange blob".** Iter 15 unified
+  `CC_BRANCH` to the rel-orange, which (with the split-colour delegate dimming the
+  mnemonic by *hue*) made a branch's `jne` mnemonic dim-orange — inconsistent with
+  the grey mnemonics of every other op. The mnemonic is now a single **neutral grey
+  `#939ba6` for ALL instructions** (trace InsnDelegate + Konata gutter); only the
+  operand/target carries the class accent, so `jne` is grey and just `0x8048010` is
+  orange. This is the cleaner "the target is the only coloured token" contract.
+- **Fix (recurring) — wider Konata cells.** Bumped `CELL_W` 16→20 so the F/D/X
+  glyphs are legible (was "tiny specks") AND the steep dual-issue diagonal fills
+  more of the panel width (fewer cycles per viewport ⇒ less empty-left strip).
+- **Fix (CONFIRMED) — x87 exception flags in the effect column.** FP ops now surface
+  any newly-raised FSW exception (`FP:IE/DE/ZE/OE/UE/PE`), diffed (the FSW bits are
+  sticky) and gated so only the raising op shows it. Verified it ignores the TOP
+  field churn (mb_fpindep moves TOP 6→7 but raises no exceptions ⇒ shows none,
+  correctly).
+- **New feature — playhead cycle-column highlight.** The cyan playhead now tints
+  its whole cycle column (translucent cyan) across all rows, so the current cycle's
+  cells stand out, not just a hairline.
+- **Review-harness — demonstrate the playhead/Δ-band in captures.** They only render
+  after a click, so static shots kept drawing "no playhead" HIGH findings. The
+  render now drops a playhead + Δ-anchor a few rows back, so both features appear in
+  the pipeline crop and critics review the real thing.
 
 ### Iteration 17 — Instr-mix tab + Konata gridlines + x87 value-column separation
 Verify confirmed 3 of 7 picks; all three were real and clean to land.

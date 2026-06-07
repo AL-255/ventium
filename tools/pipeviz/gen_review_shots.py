@@ -101,6 +101,17 @@ for tag, img, steps, soc in SHOTS:
     app.processEvents()
     win.do_step(steps, False)
     app.processEvents()
+    # demonstrate the cyan playhead + amber Δ-measure band in the capture — they
+    # only render after a user click, so a static shot otherwise shows neither and
+    # critics keep reporting them "absent". Drop a playhead + a Δ-anchor a few rows
+    # back so both features appear in the pipeline crop.
+    try:
+        pl = win.pipeline.konata.plot
+        if len(pl.insns) > 12:
+            pl.anchor = pl.insns[-10]["c1"]
+            win.pipeline.highlight_cycle(pl.insns[-4]["c1"])
+    except Exception:
+        pass
     win.repaint(); app.processEvents()
     _settle(win, app)          # ensure splitter geometry is constrained before cropping
     full = os.path.join(OUT, f"{tag}_full.png")

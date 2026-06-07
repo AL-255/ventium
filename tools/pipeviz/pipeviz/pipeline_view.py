@@ -213,7 +213,9 @@ class StageBoard(QWidget):
 # execute/commit cycle column.
 # ===========================================================================
 ROW_H = 16
-CELL_W = 16
+CELL_W = 20      # per-cycle column width — wide enough for a legible F/D/X glyph
+                 # AND so the steep dual-issue diagonal fills more of the panel
+                 # (fewer cycles per viewport-width) instead of a thin right strip.
 GUTTER_W = 300
 HDR_H = 18
 
@@ -457,10 +459,14 @@ class _KonataPlot(QWidget):
             p.setFont(_mono(8, True)); p.setPen(QColor("#f0c674"))
             p.drawText(QRect(lo, vis.top() + 1, max(28, hi - lo), 12),
                        Qt.AlignHCenter | Qt.AlignTop, f"Δ{dn}cyc")
-        # playhead: a vertical cyan marker at the pinned cycle, with a cycle-number
-        # callout pinned to the top of the visible region.
+        # playhead: a tinted cycle COLUMN + vertical cyan marker at the pinned
+        # cycle, with a cycle-number callout pinned to the top of the visible region.
         if self.playhead is not None:
             px = self._x(self.playhead) + CELL_W // 2
+            colx = self._x(self.playhead)
+            if colx <= vis.right() and colx + CELL_W >= vis.left():
+                p.fillRect(QRect(colx, vis.top(), CELL_W, vis.height()),
+                           QColor(57, 197, 207, 24))     # translucent column tint
             if vis.left() - 2 <= px <= vis.right() + 2:
                 p.setPen(QColor("#39c5cf"))
                 p.drawLine(px, vis.top(), px, vis.bottom())
@@ -558,13 +564,13 @@ class _KonataGutter(QWidget):
                 p.setPen(QColor(C_STALL))
                 p.drawText(QRect(GUTTER_W - bw - 6, y, bw, ROW_H),
                            Qt.AlignVCenter | Qt.AlignRight, f"{span}c")
-            # split-colour: the mnemonic in a dimmed class hue, the operand(s)
-            # (a branch's target, a load's address) in the full class accent — so
-            # the *target* pops instead of the whole instruction being one slab.
+            # split-colour: a NEUTRAL-grey mnemonic (same for every op) + the
+            # operand(s) (a branch's target, a load's address) in the class accent,
+            # so only the target is coloured (a branch's 'jne' is grey, not orange).
             parts = it["mnem"].split(" ", 1)
             mn = parts[0]; ops = parts[1] if len(parts) > 1 else ""
             _, icol = disasm.insn_class(mn)
-            p.setPen(QColor(icol).darker(150))
+            p.setPen(QColor("#939ba6"))
             p.drawText(QRect(118, y, mnem_w, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, mn)
             mw = fm.horizontalAdvance(mn + " ")
             if ops and mw < mnem_w:
