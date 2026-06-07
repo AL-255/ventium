@@ -130,16 +130,29 @@ def _mk_table(cols, widths=None, hint=""):
     return t
 
 
-def _fill(table, rows, dim_cols=()):
+def _fill(table, rows, dim_cols=(), right_cols=()):
     table.setRowCount(len(rows))
     for r, row in enumerate(rows):
         for c, v in enumerate(row):
             it = QTableWidgetItem(str(v))
             if c in dim_cols:
                 it.setForeground(QBrush(QColor("#8b949e")))
+            if c in right_cols:
+                # numeric columns right-align so digit places line up for
+                # at-a-glance magnitude scanning (the whole job of a profiler table)
+                it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             table.setItem(r, c, it)
     if isinstance(table, _HintTable):
         table.sync_hint()
+
+
+def _right_align_headers(table, cols):
+    """Right-align the header labels of numeric columns so a centered 'cycles'
+    caption doesn't sit visually divorced from its right-aligned data column."""
+    for c in cols:
+        hi = table.horizontalHeaderItem(c)
+        if hi is not None:
+            hi.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
 
 class InsnCellDelegate(QStyledItemDelegate):
@@ -332,6 +345,7 @@ class TablesView(QWidget):
                              hint="no instructions retired yet — step the core")
         # field-colour the instruction column to match the trace / Konata gutter
         self.hot.setItemDelegateForColumn(5, InsnCellDelegate(_mono(), self.hot))
+        _right_align_headers(self.hot, (1, 2, 3))   # hits / cycles / cyc% match the data
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
 
         # --- Branches (per-branch-PC taken/not-taken profile) ---
@@ -340,6 +354,7 @@ class TablesView(QWidget):
                             [70, 64, 76, 46, 46, 46, 9999],
                             hint="no branches retired yet — step the core through a "
                                  "jump/call/loop")
+        _right_align_headers(self.br, (3, 4, 5))     # hits / taken / T% match the data
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
 
         # --- Instruction mix (class histogram + U/V issue-port split) ---
@@ -438,7 +453,7 @@ class TablesView(QWidget):
             bias = "T" * nb + "·" * (10 - nb)
             rows.append([f"{pc:08x}", e["mn"], e["tgt"] or "—", e["hits"],
                          e["taken"], f"{pct:.0f}", bias])
-        _fill(self.br, rows, dim_cols=(0, 2, 3))
+        _fill(self.br, rows, dim_cols=(0, 2, 3), right_cols=(3, 4, 5))
         for r in range(self.br.rowCount()):
             it = self.br.item(r, 6)
             if it is not None:
@@ -471,7 +486,7 @@ class TablesView(QWidget):
             pct = (100.0 * cyc / total) if total else 0.0
             bar = "█" * max(1, int(round(12 * cyc / maxc))) if cyc else ""
             rows.append([f"{pc:08x}", hits, cyc, f"{pct:.1f}", bar, mnem])
-        _fill(self.hot, rows, dim_cols=(0, 1))
+        _fill(self.hot, rows, dim_cols=(0, 1), right_cols=(1, 2, 3))
         # colour the cost bar amber
         for r in range(self.hot.rowCount()):
             it = self.hot.item(r, 4)

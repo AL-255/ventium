@@ -25,8 +25,10 @@ not repeat itself.
   mnemonic + an amber **`Nc` stall badge** = the instruction's cycle span; synced
   cycle axis; **distinct per-stage colours + glyphs** — `F` fetch blue, `L`
   I-cache-fill amber, `D` decode teal, `M` mem orange, `X` exec green (FP
-  purple), `W` wb magenta, `=` stall grey, `!` flush red; legend on its own line
-  with each swatch tightly paired to its label; walk = pink, wb = slate-blue
+  purple), `W` wb magenta, `=` stall grey, `!` flush red, **`S` sys/microcode
+  bronze** (a DEDICATED `#a87f55`, pulled clear of the L-fill amber it used to
+  share so the glyph is decodable + has its own legend swatch); legend on its own
+  line with each swatch tightly paired to its label; walk = pink, wb = slate-blue
   (kept out of the FP/walk purple cluster). Fast-path ops **synthesise their
   P5 F→D→X pipeline depth** (the dual-issue path collapses fetch/decode into one
   clock, so the two preceding cycles are drawn as Fetch+Decode) → consecutive
@@ -53,7 +55,20 @@ not repeat itself.
   cleanly even when a cell occupies the final column (it no longer muddies
   amber-on-blue INSIDE that edge cell). Selecting an instruction also **PC-group highlights**
   every other execution of the same PC (loop iterations) with a tint + a blue
-  left-edge marker, so a stalled iteration stands out among its repeats. Auto-follow
+  left-edge marker, so a stalled iteration stands out among its repeats, AND draws
+  **producer→consumer DEPENDENCY EDGES**: a thin line from each source register's
+  PRODUCER (the most-recent prior instruction that wrote it — a pure def-use join
+  over the read/write reg-sets capstone already exposes) at its commit cell to the
+  selected consumer's first cell, labelled with the register (`esi`); the edge is
+  amber + thick only when the producer's result arrives right as the consumer's stall
+  LIFTS (its commit lands within ±1 cycle of the last `=` stall cell — a true
+  RAW/load-use), and dim otherwise. That precision is deliberate: dmiss's `dec ecx`
+  stalls BEHIND a cache-miss load, not on its ecx producer (which committed long
+  before the stall lifted), so its ecx edge stays dim — the overlay never falsely
+  blames a dependency that merely happens to commit somewhere inside a structural
+  stall. A loop-carried induction (`add esi` ← `esi` ← prior `add esi`) shows as a
+  dim def-use trace.
+  The per-row tooltip also lists the instruction's `reads`/`writes` registers. Auto-follow
   ("stick to the newest row/cycle") is explicit state toggled only by a user scroll,
   so the viewport tracks live
   retirement without stranding on stale rows; the **horizontal** follow anchors to
@@ -76,9 +91,11 @@ not repeat itself.
   **field-coloured** instruction, sorted by total cycles — stalls inflate the cost
   so the stalled load/branch PCs bubble to the top, perf/VTune-style; the
   instruction column uses the same `operand_segments` field-colouring as the trace
-  + Konata gutter); **Branches** = a
+  + Konata gutter; the numeric columns **right-align** (header + data) so digit
+  places line up for magnitude scanning); **Branches** = a
   per-branch-PC BTB profile (PC | type | target | hits | taken | taken% | bias
-  bar; taken inferred from whether the next retired PC hit the target); **Instr
+  bar; taken inferred from whether the next retired PC hit the target; numeric
+  columns right-aligned like Hotspots); **Instr
   mix** = an instruction-class histogram (branch/fp/mem/alu/sys with %-bars) plus
   the U/V issue-port split as a realised-dual-issue proxy (`50% via the V-port`);
   **Cycles**
@@ -133,6 +150,39 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 28 — producer→consumer dependency edges, right-aligned profiler columns, 'S sys' legend
+Review confirmed the live watermark (`12fa635`) on all 6 critics. Verify **confirmed
+2 of 6** and refuted 4 with code-cited reasoning (filter-placeholder contrast = a
+sampling error, ink is *lighter* ~1.5:1 + intentional placeholder dimming; x87 tag
+2-vs-4-hex live/pinned = different data sources — live `fptag` is the real 8-bit
+empty-mask, pinned `ftag` is a hardcoded `0x0000` placeholder, each format string
+matches its field width; Instr-mix uniform-gold bars = the deliberate table
+convention, all three glyph-bar tabs put colour in the text and gold in the bar;
+TLB bare `D` header = a conventional MMU status bit exactly like the `V` beside it).
+Both confirmed picks were independently ground-truthed before the fix.
+- **New feature — producer→consumer dependency edges (the carried idea, the features
+  critic's top pick two iterations running).** A new `disasm.read_regs()` (the mirror
+  of `written_regs`, keeping capstone's read-set) feeds a per-Konata-insn read/write
+  reg-set; selecting an instruction now walks `insns[]` backward to the most-recent
+  writer of each source register and draws a thin edge from that producer's commit
+  cell to the consumer's first cell, labelled with the register. The edge is amber +
+  thick when the producer commits DURING the consumer's lifecycle (a live dep that
+  plausibly gated it) and dim when satisfied early — a pure def-use trace, so it
+  never falsely attributes a stall (verified on dmiss, where `dec ecx` stalls behind
+  a load, NOT on its ecx producer, and correctly shows only a dim ecx edge). The
+  tooltip also lists each instruction's `reads`/`writes`. Fully client-side, no
+  backend change. Smoke-tested the producer join + the no-reads (`jne`) empty case.
+- **Fix (CONFIRMED, HIGH) — right-align the numeric columns in Hotspots & Branches.**
+  `_fill()` built every cell left-aligned, so `1` sat far left of `105`'s units place
+  and magnitude scanning (the whole job of a profiler table) was defeated. Numeric
+  columns (hits/cycles/cyc% ; hits/taken/T%) now right-align, header + data, via a
+  `right_cols` arg + a `_right_align_headers` helper.
+- **Fix (CONFIRMED, MEDIUM) — the Konata `S` (sys/microcode) glyph is now decodable.**
+  It had no legend entry and reused the L-fill amber (`C_SYS`), so a gold `S` cell
+  (ppage's microcoded `add [eax],al`) looked up to the wrong swatch. Gave it a
+  DEDICATED bronze `C_STG_SYS = #a87f55` (colour distance 79 from the L-fill amber)
+  and an `S sys` legend swatch, leaving the shared `C_SYS` class colour untouched.
 
 ### Iteration 27 — x87 ST(0) writes in the trace, pinned-x87 column fix, prefetch idle guard, empty-table hints
 Review confirmed the live watermark (`1829ec6`) on all 6 critics (now including the
