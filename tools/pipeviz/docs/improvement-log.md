@@ -58,8 +58,12 @@ not repeat itself.
   instruction, sorted by total cycles — stalls inflate the cost so the stalled
   load/branch PCs bubble to the top, perf/VTune-style); **Branches** = a
   per-branch-PC BTB profile (PC | type | target | hits | taken | taken% | bias
-  bar; taken inferred from whether the next retired PC hit the target); **Memory**
-  = a hex/ASCII
+  bar; taken inferred from whether the next retired PC hit the target); **Cycles**
+  = a perf/VTune-style **cycle-attribution breakdown** — every cycle classified by
+  FSM state into retire / issue-stall / mispredict / I-fill / decode / load-store /
+  page-walk / x87 / system / halt, drawn as %-bars sorted biggest-first with a live
+  IPC readout, so the tallest bar is the bottleneck (answers "why is IPC low?");
+  **Memory** = a hex/ASCII
   inspector (type an address or click →EIP/→ESP to follow, ◀/▶ to page; EIP bytes
   cyan, ESP bytes amber).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
@@ -86,6 +90,35 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 12 — cycle-attribution tab + crop-accuracy fix + readable stage grid
+The Verify phase confirmed ZERO of 6 synthesis picks (all perception/low-value);
+ground-truthing the unpicked HIGH findings myself separated the real from the noise
+(the "fp cache shows 16 not 32 bytes" was a perception error — the rows ARE 28px /
+two 16-byte sub-rows, verified by row height; "cells don't align to headers" was the
+decode legitimately spanning D1+D2). Two real root causes surfaced:
+- **Review-harness root-cause fix — crop accuracy.** The screenshot crop boxes were
+  hardcoded (right column at x=1010), but the outer splitter is 3:2 so the right
+  column actually starts at **x=922** — the crops had been slicing ~88px off the
+  left of the tables/regs panels EVERY round. *That* is why critics kept "seeing"
+  clipped register names (a perception error driven by a real harness bug). Crops
+  are now computed from live `widget.mapTo(win, …)` geometry, so they always frame
+  the real panel regardless of splitter sizes. The regs/x87 names now show in full.
+- **New feature — Cycles (cycle-attribution) tab.** A perf/VTune-style breakdown:
+  every cycle is classified by FSM state into retire / issue-stall / mispredict /
+  I-fill / decode / load-store / page-walk / x87 / system / halt, tallied
+  incrementally (auto-resets when the backend restarts), and drawn as %-bars sorted
+  biggest-first with a live IPC readout. On `mb_dmiss` it correctly attributes the
+  IPC-0.356 to **71.9% issue-stall** (the D-cache-miss bottleneck) — answers "why is
+  IPC low?" at a glance.
+- **Stage-board gridlines made readable.** Three review rounds reported the column
+  separators as "absent"; they were drawn at near-black `#222c37`. Bumped to
+  `#454f5d` so the PF/D1/D2/EX/WB columns read and each lit cell is unambiguously
+  anchored to its stage even when the rest of the board is empty.
+- **Register panel given real vertical room.** The right splitter was 3:1
+  (tables:regs), cramming the registers into a 25% bottom strip while a sparse cache
+  left a huge void above. Rebalanced to 3:2 + initial sizes so the GPR/EFLAGS/seg/
+  CR/x87 panel breathes and the dead void shrinks.
 
 ### Iteration 11 — fix Konata horizontal framing + sparkline navigation overview
 The Verify phase refuted 5 of 6 synthesis picks (perception errors / low-value),

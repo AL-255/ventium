@@ -111,6 +111,107 @@ def _fill(table, rows, dim_cols=()):
             table.setItem(r, c, it)
 
 
+class CycleBreakdown(QWidget):
+    """perf/VTune-style attribution of WHERE the cycles go: every cycle is
+    classified by the core FSM state into a category (retire / issue-stall /
+    mispredict / I-fill / decode / load-store / page-walk / x87 / system /
+    halt), tallied incrementally, and drawn as %-bars sorted biggest-first.
+    Answers 'why is IPC low?' at a glance — the tall bar is the bottleneck."""
+    CATS = [("retire", "#3fb950"), ("issue-stall", "#7a828d"),
+            ("mispredict", "#f85149"), ("I-fill", "#e0a72e"), ("decode", "#39c5cf"),
+            ("load/store", "#f0883e"), ("page-walk", "#f778ba"), ("x87 FP", "#bc8cff"),
+            ("system", "#e3b341"), ("halt", "#8b949e")]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.backend = None
+        self._zero()
+
+    def _zero(self):
+        self._last_cyc = 0
+        self.counts = {k: 0 for k, _ in self.CATS}
+        self.total_ret = 0
+
+    def reset(self, backend=None):
+        self.backend = backend
+        self._zero()
+        self.update()
+
+    @staticmethod
+    def _classify(name, c):
+        if name == "S_PIPE":
+            if c.mispred_bubbles > 0:
+                return "mispredict"
+            if c.retU or c.retV:
+                return "retire"
+            return "issue-stall"
+        if name == "S_PF":
+            return "I-fill"
+        if name in ("S_FETCH", "S_DECODE"):
+            return "decode"
+        if name in ("S_LOAD", "S_LOAD2", "S_STORE", "S_EXEC", "S_USEQ", "S_IO", "S_INS"):
+            return "load/store"
+        if name == "S_WALK":
+            return "page-walk"
+        if name in ("S_FLOAD", "S_FEXEC", "S_FSTORE", "S_FENV_ST", "S_FENV_LD"):
+            return "x87 FP"
+        if name in ("S_HALT", "S_F00F_HANG"):
+            return "halt"
+        return "system"
+
+    def ingest(self, backend):
+        self.backend = backend
+        total = backend.cycle_count()
+        if total < self._last_cyc:          # backend was reset under us
+            self._zero()
+        if total <= self._last_cyc:
+            return
+        for c in backend.get_cycles(self._last_cyc + 1, 8192):
+            self.counts[self._classify(backend.state_name(c.state), c)] += 1
+            self.total_ret += (1 if c.retU else 0) + (1 if c.retV else 0)
+            self._last_cyc = c.cyc
+        self.update()
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#0d1117"))
+        W, H = self.width(), self.height()
+        total = sum(self.counts.values())
+        f = QFont("monospace"); f.setStyleHint(QFont.Monospace); f.setPointSize(9)
+        fb = QFont(f); fb.setBold(True)
+        ipc = (self.total_ret / total) if total else 0.0
+        p.setFont(fb); p.setPen(QColor("#c9d1d9"))
+        p.drawText(QRect(8, 6, W - 16, 16), Qt.AlignLeft,
+                   f"cycle attribution — {total} cyc · {self.total_ret} retired · IPC {ipc:.3f}")
+        if total == 0:
+            p.setPen(QColor("#8b949e")); p.setFont(f)
+            p.drawText(self.rect(), Qt.AlignCenter, "step the core to attribute cycles")
+            p.end(); return
+        colmap = dict(self.CATS)
+        rows = sorted(((k, v) for k, v in self.counts.items() if v),
+                      key=lambda kv: -kv[1])
+        p.setFont(f)
+        y, rowh, labelw = 30, 22, 92
+        barx = 8 + labelw + 54
+        barw = max(40, W - barx - 60)
+        for k, v in rows:
+            pct = v / total
+            p.setPen(QColor("#adbac7"))
+            p.drawText(QRect(8, y, labelw, rowh), Qt.AlignVCenter | Qt.AlignLeft, k)
+            p.setPen(QColor("#8b949e"))
+            p.drawText(QRect(8 + labelw, y, 50, rowh), Qt.AlignVCenter | Qt.AlignRight, str(v))
+            p.fillRect(QRect(barx, y + 4, barw, rowh - 8), QColor("#161b22"))
+            p.fillRect(QRect(barx, y + 4, int(barw * pct), rowh - 8), QColor(colmap[k]))
+            p.setPen(QColor("#c9d1d9"))
+            p.drawText(QRect(barx + barw + 6, y, 52, rowh), Qt.AlignVCenter | Qt.AlignLeft,
+                       f"{pct * 100:.1f}%")
+            y += rowh
+            if y > H - rowh:
+                break
+        p.end()
+
+
 class TablesView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -156,6 +257,10 @@ class TablesView(QWidget):
         self.br = _mk_table(["PC", "branch", "target", "hits", "taken", "T%", "bias"],
                             [70, 64, 76, 46, 46, 46, 9999])
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
+
+        # --- Cycle attribution (where the cycles go / why IPC is low) ---
+        self.cyc = CycleBreakdown()
+        self.tabs.addTab(self.cyc, "Cycles")
 
         # --- Memory hex/ASCII inspector (follow EIP/ESP) ---
         self.mem = MemoryView()
@@ -248,6 +353,7 @@ class TablesView(QWidget):
 
     def update_from(self, backend, state):
         self._bits = 32 if state.cs_d else 16
+        self.cyc.ingest(backend)        # accumulate the cycle-attribution breakdown
         # I-cache
         ic = backend.icache()
         self.ic_map.set_lines(ic)
