@@ -299,6 +299,7 @@ class _KonataPlot(QWidget):
         self.base_cyc = 1
         self.max_cyc = 1
         self.sel_row = None
+        self.sel_pc = None       # selected PC → tint all its other executions (loop)
         self.playhead = None     # pinned cycle (vertical marker)
         self.anchor = None       # shift-click second marker → cycle-range Δ measure
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
@@ -314,6 +315,7 @@ class _KonataPlot(QWidget):
         self.base_cyc = 1
         self.max_cyc = 1
         self.sel_row = None
+        self.sel_pc = None
         self.playhead = None
         self.anchor = None
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
@@ -412,6 +414,8 @@ class _KonataPlot(QWidget):
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#0f141b"))
             if r == self.sel_row:
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#1c2531"))
+            elif self.sel_pc is not None and ins["pc"] == self.sel_pc:
+                p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#172230"))
             cells = ins["cells"]
             i = 0
             while i < len(cells):
@@ -483,6 +487,7 @@ class _KonataPlot(QWidget):
             self.update()
             return
         self.sel_row = r
+        self.sel_pc = self.insns[r]["pc"]
         self.playhead = cyc
         self.update()
         self.rowClicked.emit(int(self.insns[r]["n"]))
@@ -503,6 +508,7 @@ class _KonataGutter(QWidget):
         r = int((y + voff) // ROW_H)
         if 0 <= r < len(self.plot.insns):
             self.plot.sel_row = r
+            self.plot.sel_pc = self.plot.insns[r]["pc"]
             self.plot.update(); self.update()
             self.plot.rowClicked.emit(int(self.plot.insns[r]["n"]))
 
@@ -524,6 +530,9 @@ class _KonataGutter(QWidget):
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#0f141b"))
             if r == self.plot.sel_row:
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#1c2531"))
+            elif self.plot.sel_pc is not None and it["pc"] == self.plot.sel_pc:
+                p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#172230"))
+                p.fillRect(QRect(0, y, 2, ROW_H), QColor("#3b82c4"))  # same-PC marker
             p.setPen(QColor("#586069"))
             p.drawText(QRect(2, y, 42, ROW_H), Qt.AlignVCenter | Qt.AlignRight, str(it["n"]))
             p.setPen(QColor("#79c0ff" if it["pipe"] == "U" else "#e3b341"))
@@ -780,10 +789,6 @@ class SparklineStrip(QWidget):
         evt_y0, evt_h = 30, 9
         key_y = 43
         plotw = max(1, W - labelw - 4)
-        p.setPen(QColor("#30363d"))
-        for lvl in (1.0, 2.0):                      # IPC=1 and IPC=2 (dual-issue) rules
-            y = ipc_y0 + ipc_h - int(lvl / 2.0 * ipc_h)
-            p.drawLine(labelw, y, W - 2, y)
         # event-colour KEY (always drawn, so the event pixels are decodable)
         p.setFont(_mono(7)); kx = labelw
         for code, lbl in self._EVKEY:
@@ -804,11 +809,19 @@ class SparklineStrip(QWidget):
             x = labelw + (i - start)
             lo = max(0, i - win + 1)
             ipc = sum(self.ret[lo:i + 1]) / (i - lo + 1)
-            bh = int(min(2.0, ipc) / 2.0 * ipc_h)
+            # cap the drawable height at ipc_h-2 so a sustained IPC=2.0 keeps 2px
+            # of headroom and never saturates flush to the band's top edge.
+            bh = int(min(2.0, ipc) / 2.0 * (ipc_h - 2))
             p.fillRect(QRect(x, ipc_y0 + ipc_h - bh, 1, bh), QColor("#2ea043"))
             e = self.ev[i]
             if e:
                 p.fillRect(QRect(x, evt_y0, 1, evt_h), QColor(self._EVCOL[e]))
+        # IPC=1 / IPC=2 rule lines drawn AFTER the bars so a peaked bar can't
+        # paint over its own reference line.
+        p.setPen(QColor("#30363d"))
+        for lvl in (1.0, 2.0):
+            y = ipc_y0 + ipc_h - int(lvl / 2.0 * (ipc_h - 2))
+            p.drawLine(labelw, y, W - 2, y)
         # hover seek-marker
         if self._hover_x >= labelw:
             p.setPen(QColor("#39c5cf"))

@@ -223,16 +223,16 @@ class TablesView(QWidget):
         # --- I-cache (code). 'way' shows '*' for the MRU way (LRU dropped). ---
         self.ic_lbl = QLabel()
         self.ic_map = CacheMap()
-        self.ic = _mk_table(["set", "way", "tag", "line addr", "32 line bytes"],
-                            [46, 44, 60, 86, 9999])
+        self.ic = _mk_table(["set", "way *=MRU", "tag", "line addr", "32 line bytes"],
+                            [46, 74, 60, 86, 9999])
         self.ic.setWordWrap(True)
         self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code $ (I)")
 
         # --- D-cache (data, timing-only) ---
         self.dc_lbl = QLabel()
         self.dc_map = CacheMap()
-        self.dc = _mk_table(["set", "way", "tag", "line addr"],
-                            [56, 56, 90, 9999])
+        self.dc = _mk_table(["set", "way *=MRU", "tag", "line addr"],
+                            [56, 74, 90, 9999])
         self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data $ (D)")
 
         # --- TLB (I + D) ---

@@ -44,8 +44,11 @@ not repeat itself.
   playhead** down the Konata view; stepping unpins. **Shift-click** a second row to
   drop an amber **measurement anchor** — the band between it and the playhead is
   shaded and labelled `Δ<n>cyc` (latency between two instructions; shift-click the
-  same row again to clear it). Auto-follow ("stick to the newest row/cycle") is
-  explicit state toggled only by a user scroll, so the viewport tracks live
+  same row again to clear it). Selecting an instruction also **PC-group highlights**
+  every other execution of the same PC (loop iterations) with a tint + a blue
+  left-edge marker, so a stalled iteration stands out among its repeats. Auto-follow
+  ("stick to the newest row/cycle") is explicit state toggled only by a user scroll,
+  so the viewport tracks live
   retirement without stranding on stale rows; the **horizontal** follow anchors to
   the topmost visible row's first cell (not the raw FSM max-cycle), so a long
   non-retiring tail (S_DECODE/S_PF/S_WALK) can't scroll the visible rows' cells
@@ -90,6 +93,32 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 13 — PC-group highlight + sparkline headroom + system-op colour
+The Verify phase confirmed two of seven picks; ground-truthing the unpicked HIGH
+findings settled the rest (the "lgdt looks like a branch" recurrence was real-ish —
+a colour-proximity problem, not a classification bug).
+- **New feature — PC-group highlight.** Clicking an instruction (Konata cell or
+  gutter label) now tints every other row with the SAME PC — i.e. every loop
+  iteration of that instruction — with a subtle fill + a blue left-edge marker. On
+  `mb_brloop` clicking `dec ecx` lights all 105 of its iterations, so the one
+  iteration that stalled 7c instead of 3c is instantly findable among its repeats.
+- **Fix (CONFIRMED) — IPC sparkline top headroom.** A sustained IPC=2.0 bar filled
+  the band to the absolute top edge and painted over its own 2.0 reference rule.
+  Capped the drawable bar height at `ipc_h-2` (2px headroom) and moved the 1.0/2.0
+  rule lines to draw AFTER the bars, so the ceiling is always visible.
+- **Fix (CONFIRMED) — cache MRU glyph legend.** The `way` column shows `1*` for the
+  MRU way, but `*` was only documented in a code comment. Renamed the header to
+  `way *=MRU` (both I$ and D$) so the glyph decodes itself in-place.
+- **Fix (recurring root cause) — system-op instruction colour.** `lgdt`/`lidt`/
+  `hlt`/CR-moves were painted in a warm orange (`CC_SYS #ff9e64`) that several
+  rounds of critics read as the gold branch accent. Moved system ops to a distinct
+  red `#f4766e` — unambiguously not a control transfer, and "privileged" reads as
+  red anyway. (The instruction was always correctly *classified* as `sys`; the bug
+  was purely colour proximity to branch-gold.)
+- (Ground-truthed and dropped: the GPR label↔value "dead gap" — a `setColumnStretch`
+  attempt was a no-op because the EFLAGS bit-row spans both columns and fixes their
+  width; not worth invasive layout surgery for a low-value cosmetic.)
 
 ### Iteration 12 — cycle-attribution tab + crop-accuracy fix + readable stage grid
 The Verify phase confirmed ZERO of 6 synthesis picks (all perception/low-value);

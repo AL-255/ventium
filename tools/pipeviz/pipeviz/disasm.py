@@ -184,11 +184,15 @@ def stage_of(state_name):
 # dual-issue/S_PIPE meaning in the pipeline panel, so ALU/data mnemonics use a
 # neutral off-white here and only branches/fp/mem/sys carry an accent.
 # ---------------------------------------------------------------------------
-CC_BRANCH = "#e3b341"   # control transfer (yellow)
+CC_BRANCH = "#e3b341"   # control transfer (gold)
 CC_FP = "#c89bff"       # x87 (purple)
 CC_MEM = "#79c0ff"      # load/store/stack (blue)
 CC_ALU = "#d9dee3"      # arithmetic / data (neutral off-white)
-CC_SYS = "#ff9e64"      # privileged / system (orange)
+CC_SYS = "#f4766e"      # privileged / system (red) — was a warm orange that
+                        # critics repeatedly read as a branch accent; red is
+                        # unambiguously distinct from the gold branch colour and
+                        # reads as "privileged", so lgdt/lidt/hlt/cr-moves no
+                        # longer look like control transfers.
 CC_OTHER = "#8b949e"
 
 _BR = {"jmp", "call", "ret", "retn", "retf", "iret", "iretd", "loop", "loope",
