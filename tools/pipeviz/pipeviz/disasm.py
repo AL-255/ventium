@@ -31,9 +31,10 @@ FIELD_COLOR = {
     "sib":    "#c89bff",   # purple
     "disp":   "#e3b341",   # yellow (memory offset / displacement)
     "imm":    "#ff7b72",   # red (immediate operand)
-    "rel":    "#ff8c00",   # vivid orange (relative branch target) — pulled away
-                           # from the golden disp-yellow (RGB dist 45 -> 81) so the
-                           # branch displacement is unmistakably NOT a data offset.
+    "rel":    "#ff6a00",   # red-orange (relative branch target) — pushed further
+                           # from the golden disp-yellow (RGB dist now ~102, was 81)
+                           # because at 9px AA the old #ff8c00 still blended toward
+                           # the offset-yellow; a red-orange can't be read as yellow.
 }
 _PREFIX_BYTES = {0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65}
 
@@ -219,10 +220,10 @@ def stage_of(state_name):
 # dual-issue/S_PIPE meaning in the pipeline panel, so ALU/data mnemonics use a
 # neutral off-white here and only branches/fp/mem/sys carry an accent.
 # ---------------------------------------------------------------------------
-CC_BRANCH = "#ff8c00"   # control transfer (orange) — SAME orange as the rel8/rel32
+CC_BRANCH = "#ff6a00"   # control transfer — SAME red-orange as the rel8/rel32
                         # branch-target BYTE colour, so a branch target reads the
-                        # same hue in the bytes column and the disassembly (was a
-                        # gold that conflated it with the yellow memory-displacement).
+                        # same hue in the bytes column and the disassembly (kept in
+                        # lock-step with FIELD_COLOR['rel']).
 CC_FP = "#c89bff"       # x87 (purple)
 CC_MEM = "#79c0ff"      # load/store/stack (blue)
 CC_ALU = "#d9dee3"      # arithmetic / data (neutral off-white)
