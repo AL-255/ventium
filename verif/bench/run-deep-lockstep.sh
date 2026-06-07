@@ -40,7 +40,7 @@ GEN="$REPO/verif/qemu-trace/gen_trace.py"
 # compare.py --all loads ALL records of BOTH traces into RAM (millions of dicts),
 # which OOMs at depth — never use it for deep runs.
 CMP="$REPO/verif/diff/compare_stream.py"
-TB="$REPO/verif/tb/obj_dir/tb_ventium"
+TB="${TB_OVERRIDE:-$REPO/verif/tb/obj_dir/tb_ventium}"   # TB_OVERRIDE for debug builds
 PY=/usr/bin/python3; command -v "$PY" >/dev/null || PY="$(command -v python3)"
 ZSTD="$(command -v zstd)"; : "${ZSTD:?need zstd}"
 

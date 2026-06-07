@@ -1172,7 +1172,7 @@ _NR = {
     "lstat64": 196, "uname": 122, "gettimeofday": 78, "clock_gettime": 265,
     "clock_gettime64": 403, "set_thread_area": 243, "set_tid_address": 258,
     "rt_sigaction": 174, "rt_sigprocmask": 175, "getrandom": 355,
-    "recvfrom": 517, "recv": 517, "openat": 295, "statx": 383,
+    "recvfrom": 371, "recv": 371, "socketcall": 102, "openat": 295, "statx": 383,
     "mprotect": 125, "munmap": 91, "access": 33, "fcntl64": 221,
     "_llseek": 140, "lseek": 19, "getpid": 20, "exit_group": 252,
     "clock_getres": 266, "clock_getres_time64": 406, "time": 13,
@@ -1247,6 +1247,17 @@ def _syscall_effect(rsp, nr, args, ret):
     elif nr in (_NR["recvfrom"], _NR["recv"]):
         if sret > 0:
             grab(ecx, sret)                       # recvfrom(fd, buf=ecx, len, ...) -> ret
+    elif nr == _NR["socketcall"]:
+        # socketcall(call=ebx, args=ecx). i386 musl falls back to this when the
+        # direct socket syscalls return -ENOSYS. For the data-IN calls (RECV=10,
+        # RECVFROM=12, RECVMSG=17) the kernel writes into args[1]=buf, so capture
+        # that span (sret bytes) — exactly the netlink interface-enumeration recv
+        # that musl's __netlink_enumerate uses (else the RTL replays a stale buf).
+        SC_RECV, SC_RECVFROM = 10, 12
+        if ebx in (SC_RECV, SC_RECVFROM) and sret > 0:
+            m = rsp.read_mem(_u32(ecx + 4), 4)    # args[1] = buf pointer
+            if m and len(m) >= 4:
+                grab(int.from_bytes(m[:4], "little"), sret)
     elif nr in (_NR["clock_gettime64"], _NR["clock_getres_time64"]):
         if sret == 0:
             # __kernel_timespec on 32-bit = {s64 tv_sec; s64 tv_nsec} = 16 BYTES.
