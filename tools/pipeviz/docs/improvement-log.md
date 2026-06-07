@@ -67,8 +67,11 @@ not repeat itself.
   before the stall lifted), so its ecx edge stays dim — the overlay never falsely
   blames a dependency that merely happens to commit somewhere inside a structural
   stall. A loop-carried induction (`add esi` ← `esi` ← prior `add esi`) shows as a
-  dim def-use trace.
-  The per-row tooltip also lists the instruction's `reads`/`writes` registers. Auto-follow
+  dim def-use trace. The edges cover **EFLAGS** dependencies too, so a conditional
+  branch traces to its flag-setter (`jne` ← `flags` ← `dec ecx`/`cmp`) — the single
+  most common dependency in any loop; the register label flips to the LEFT of the
+  producer cell when it would otherwise clip past the right viewport edge.
+  The per-row tooltip also lists the instruction's `reads`/`writes` (incl. `flags`). Auto-follow
   ("stick to the newest row/cycle") is explicit state toggled only by a user scroll,
   so the viewport tracks live
   retirement without stranding on stale rows; the **horizontal** follow anchors to
@@ -150,6 +153,34 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 29 — flag-dependency edges, left-aligned bar-column headers
+Review confirmed the live watermark (`5b41520`) on all 6 critics. Verify **confirmed
+1 of 6** and refuted 5 with code-cited reasoning (trace top-row sliver = the same
+already-refuted scroll-overflow at the top edge from tail-following auto-scroll;
+pinned Segments "baselimit" collision = false, a measured 11px gap + no manual
+x-positioning, just grid compaction; ppage 'eax' overprint/clipped = the
+settled-intentional dependency-edge label, measured to end inside the plot; Data$
+'line addr' over-stretch = the uniform last-column-stretch convention already
+accepted for the TLB 'D'; effect-column radix collision st0=84-vs-eax-hex =
+disambiguated by colour + 8-hex width + register-name + tool-wide convention).
+- **New feature — dependency edges now cover EFLAGS.** `disasm.read_regs` now also
+  reports flags-read (symmetric with `written_regs`), and the Konata model carries a
+  reads-flags/writes-flags pair per instruction. Selecting a conditional branch now
+  draws a `flags` edge to its most-recent flag-setter (`jne` ← `flags` ← `dec ecx`) —
+  THE most common dependency in any loop, and previously invisible (a `jne` reads no
+  GPRs so it showed no edge at all). The register label flips to the LEFT of the
+  producer cell when it would clip past the right viewport edge (producers near the
+  playhead frontier). The tooltip's reads/writes lists now include `flags`. Smoke-
+  tested the producer join (jne→dec ecx flag edge), the no-flags case (mov), and the
+  capstone read/write-flags units; the demo shot now selects a branch to surface it.
+- **Fix (CONFIRMED, LOW) — bar-column headers left-align over their bars.** The
+  `cost`/`bias`/`bar` glyph-bar columns are the stretched last column with left-pinned
+  bars, but their headers defaulted to centered, so e.g. Branches' `bias` floated far
+  right in the column's empty half while its `TTTT…` bar hugged the left. Generalised
+  the iter28 header-align helper and left-aligned the three bar-column headers so each
+  caption sits directly over its bar (matching the same header↔data principle that
+  already right-aligns the numeric columns).
 
 ### Iteration 28 — producer→consumer dependency edges, right-aligned profiler columns, 'S sys' legend
 Review confirmed the live watermark (`12fa635`) on all 6 critics. Verify **confirmed
