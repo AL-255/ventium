@@ -512,9 +512,10 @@ class _KonataPlot(QWidget):
             lbl = f"Δ{dn}cyc"
             lw = QFontMetrics(p.font()).horizontalAdvance(lbl) + 6
             lx = max(lo, min((lo + hi) // 2 - lw // 2, hi - lw))
-            p.fillRect(QRect(lx, vis.top() + 1, lw, 12), QColor("#241c08"))
+            ly = vis.top() + 16            # below the cyan 'cyc N' badge strip so the
+            p.fillRect(QRect(lx, ly, lw, 12), QColor("#241c08"))   # two never abut
             p.setPen(QColor("#f0c674"))
-            p.drawText(QRect(lx, vis.top() + 1, lw, 12), Qt.AlignCenter, lbl)
+            p.drawText(QRect(lx, ly, lw, 12), Qt.AlignCenter, lbl)
         # playhead MARKER (the column tint was drawn behind the cells): a vertical
         # cyan line + a cycle-number callout pinned to the top of the visible region.
         if self.playhead is not None:
@@ -542,10 +543,18 @@ class _KonataPlot(QWidget):
             cell = next((c for c in ins["cells"] if c[0] == cyc), None)
             cellinfo = (f"\ncycle {cyc}: {_GLYPH_STAGE.get(cell[1], cell[1])}"
                         if cell else "")
+            # per-instruction cycle breakdown: where this op's cycles went (the
+            # stall count is the diagnostic — '8×Stall' means 8 cyc lost).
+            cnt = {}
+            for c in ins["cells"]:
+                cnt[c[1]] = cnt.get(c[1], 0) + 1
+            brk = "  ".join(f"{n}×{_GLYPH_STAGE.get(g, g)}"
+                            for g, n in sorted(cnt.items(), key=lambda gn: -gn[1]))
             self.setToolTip(
                 f"n={ins['n']}  {ins['pipe']}  {ins['pc']:#010x}  {ins['mnem']}\n"
                 f"cycles {ins['c0']}..{ins['c1']}  (commit @ {ins['c1']}, "
                 f"{ins['c1'] - ins['c0'] + 1} cyc){cellinfo}\n"
+                f"breakdown: {brk}\n"
                 f"click: pin regs · shift-click: set Δ-measure anchor")
 
     def mousePressEvent(self, ev):
@@ -627,7 +636,7 @@ class _KonataGutter(QWidget):
             parts = it["mnem"].split(" ", 1)
             mn = parts[0]; ops = parts[1] if len(parts) > 1 else ""
             _, icol = disasm.insn_class(mn)
-            p.setPen(QColor("#939ba6"))
+            p.setPen(QColor("#828c99"))   # dim mnemonic — matches trace _MNEM_GREY
             p.drawText(QRect(118, y, mnem_w, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, mn)
             mw = fm.horizontalAdvance(mn + " ")
             if ops and mw < mnem_w:

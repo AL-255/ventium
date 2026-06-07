@@ -110,6 +110,23 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 24 — per-instruction cycle breakdown, wider bytes, brighter operand split
+Verify confirmed 0 picks; ground-truthing (zoomed crops) drove four real fixes.
+- **New feature — per-instruction cycle breakdown in the Konata tooltip.** Hovering
+  an instruction now shows where its cycles went — `breakdown: 7×Stall  2×Mispredict
+  flush  1×Fetch  1×Decode` for an 11-cyc `dec ecx` — so you can read *why* an
+  instruction was slow (the stall count is the diagnostic), on top of the existing
+  per-cell stage and the row info.
+- **Fix (HIGH, recurring) — bytes column truncation.** Widened bytes 140→176px (the
+  stretching instruction column still gets ~273px); more of each encoding shows
+  before the `…`, with the tooltip covering the longest ones.
+- **Fix (med) — operand-accent split too subtle for non-branch ops.** The shared
+  mnemonic grey was only marginally dimmer than a neutral operand. Dimmed it
+  `#939ba6`→`#828c99` (trace + Konata gutter) so the operand reads as the brighter,
+  accented token even when its class colour is the neutral off-white.
+- **Fix — Δ-measure label crowded the playhead `cyc N` badge.** Dropped the
+  `Δ<n>cyc` label one row below the cyan badge strip so the two never abut.
+
 ### Iteration 23 — 'stuck' livelock banner, wider gutter, crisp stage gridlines
 Verify confirmed 1 pick (the stuck banner). Ground-truthing the rest: the
 stage-board EX|WB "no break" was mostly perception (the fast-path correctly lights
