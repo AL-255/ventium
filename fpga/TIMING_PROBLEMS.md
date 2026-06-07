@@ -97,6 +97,32 @@ infers **512× RAM256X1D distributed RAM** for `ic_line` (LUT‑as‑Memory 0 �
 cycle‑identical + Quake lockstep 1 M EQUIVALENT. _(The RMW attempt was a regression
 and was reverted; the partial word write + ram_style hint is the keeper.)_
 
+**Registered‑BRAM follow‑up — MEASURED & REJECTED (2026‑06‑07).** Tempting to push
+`ic_line` into true RAMB36 to "free the 4,096 LUTRAM + the read mux" and pipeline
+the async read off the worst path. Built a registered‑read variant
+(`ram_style="block"`, `rd_lineA/B` clocked; the icache MODULE alone is probed by
+`fpga/scripts/probe_icache_standalone.tcl`) and synthesised it standalone both
+ways (the registered/`block` throwaway has since been removed — numbers below):
+
+| standalone icache | async (keeper) | registered "BRAM" |
+|---|---:|---:|
+| Total LUTs | **10,712** | 11,004 (+292) |
+| LUT as Memory | 4,096 | 4,096 (unchanged) |
+| **RAMB36** | 0 | **0 — did NOT infer** |
+| CLB Registers | 5,504 | 6,016 |
+
+Two conclusions: **(1)** the `u_icache=45 K` in the full‑core hier report is a
+`‑flatten_hierarchy rebuilt` ATTRIBUTION artifact (the core's same‑cycle decode
+window folds into the instance) — the icache's intrinsic storage+read cost is only
+~10.7 K. **(2)** BRAM will NOT infer for this array no matter the hint: Vivado
+8‑7082 *"implemented as Block RAM but is better mapped onto distributed LUT RAM …
+the depth (8 address bits) is shallow."* `ic_line` is **256 lines × 256 bits —
+shallow‑and‑wide**, the textbook distributed‑RAM case; a RAMB36 (1 K+ deep) would
+waste its depth. The registered read added flops and **zero** BRAM. So the
+distributed‑RAM keeper is already optimal; a fetch‑pipeline stage would buy nothing
+and risk the cycle bands. **icache→BRAM is closed.** The LUT levers are fpu_top
+(58.6 K, P0‑4) and the integer/decode combinational logic, not the cache.
+
 ## Critical‑path investigation (after FPU/idiv/icache reworks — core at 149 K LUTs)
 From `fpga/build/synthprobe_core_full/timing_paths.rpt` (WNS −59.4 ns ≈ 14.6 MHz):
 1. **WORST (−59.4 ns, 182‑deep CARRY8):** `fx_fx_to_bcd` — the **FBSTP** (FP→packed
