@@ -4266,6 +4266,9 @@ module core
     logic [2:0]  s_codes;
     logic [3:0]  s_xc;
     logic        s_cmp_ie;
+    logic [79:0] s_cmp_b;            // shared FP-compare operand (mux-then-eval)
+    logic        s_cmp_sig;          // signaling vs quiet for fcom_ie
+    logic [15:0] s_cmp_fstat;        // shared apply_cmp result
     logic [1:0]  s_rc;
     logic        fstore_last_beat;
 
@@ -4454,6 +4457,23 @@ module core
 `else
     s_arf = f_eval(q_f_aluop, s_fa, s_fb, s_rc, errata_en[ERR_FDIV]);
 `endif
+    // R-area: ONE shared FP compare. The six compare arms (FCOM/FUCOM/FCOMPP/
+    // FUCOMPP/FTST/FICOM) each called fcom_codes+fcom_ie+apply_cmp with their own
+    // operand — synth built SIX compare cones then muxed. Mux the operand+signaling
+    // per q_fxop, compute ONCE; each arm just routes s_cmp_fstat to fp_fstat_wval.
+    unique case (q_fxop)
+      FX_FCOM_STI:               begin s_cmp_b = s_stiv;    s_cmp_sig = 1'b1; end
+      FX_FCOM_M32, FX_FCOM_M64:  begin s_cmp_b = s_opnd_f;  s_cmp_sig = 1'b1; end
+      FX_FUCOM_STI:              begin s_cmp_b = s_stiv;    s_cmp_sig = 1'b0; end
+      FX_FCOMPP:                 begin s_cmp_b = fst(3'd1); s_cmp_sig = 1'b1; end
+      FX_FUCOMPP:                begin s_cmp_b = fst(3'd1); s_cmp_sig = 1'b0; end
+      FX_FTST:                   begin s_cmp_b = 80'd0;     s_cmp_sig = 1'b1; end
+      FX_FICOM_M16, FX_FICOM_M32:begin s_cmp_b = f_mem_as_int(f_mem80, q_f_mbytes); s_cmp_sig = 1'b1; end
+      default:                   begin s_cmp_b = s_stiv;    s_cmp_sig = 1'b1; end
+    endcase
+    s_codes     = fcom_codes(s_st0v, s_cmp_b);
+    s_cmp_ie    = fcom_ie(s_st0v, s_cmp_b, s_cmp_sig);
+    s_cmp_fstat = apply_cmp(fstat, s_codes, s_cmp_ie);
 `ifdef VEN_SRT_ITER
     // ----- iterative SRT FDIV/FSQRT eligibility + engine inputs -------------
     // Route NORMAL-operand divides and +normal sqrt through the multi-cycle
@@ -4526,35 +4546,26 @@ module core
         FX_FABS: begin fp_we_top=1'b1; fp_top_data={1'b0, s_st0v[78:0]}; end
         FX_FCHS: begin fp_we_top=1'b1; fp_top_data={~s_st0v[79], s_st0v[78:0]}; end
         // ---- compares ----
+        // compares — s_cmp_fstat (== apply_cmp of the muxed s_cmp_b) is shared,
+        // computed once above; each arm routes it + does its own pop/pop2.
         FX_FCOM_STI, FX_FCOM_M32, FX_FCOM_M64: begin
-          s_argb = (q_fxop==FX_FCOM_STI) ? s_stiv : s_opnd_f;
-          s_codes = fcom_codes(s_st0v, s_argb);
-          s_cmp_ie = fcom_ie(s_st0v, s_argb, 1'b1);     // signaling
-          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_fstat=1'b1; fp_fstat_wval=s_cmp_fstat;
           if (q_f_pop) fp_we_pop=1'b1;
         end
         FX_FUCOM_STI: begin
-          s_codes = fcom_codes(s_st0v, s_stiv);
-          s_cmp_ie = fcom_ie(s_st0v, s_stiv, 1'b0);     // quiet
-          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_fstat=1'b1; fp_fstat_wval=s_cmp_fstat;
           if (q_f_pop) fp_we_pop=1'b1;
         end
         FX_FCOMPP: begin
-          s_codes = fcom_codes(s_st0v, fst(3'd1));
-          s_cmp_ie = fcom_ie(s_st0v, fst(3'd1), 1'b1);  // FCOMPP signaling
-          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_fstat=1'b1; fp_fstat_wval=s_cmp_fstat;
           fp_we_pop2=1'b1;
         end
         FX_FUCOMPP: begin
-          s_codes = fcom_codes(s_st0v, fst(3'd1));
-          s_cmp_ie = fcom_ie(s_st0v, fst(3'd1), 1'b0);  // FUCOMPP quiet
-          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_fstat=1'b1; fp_fstat_wval=s_cmp_fstat;
           fp_we_pop2=1'b1;
         end
         FX_FTST: begin
-          s_codes = fcom_codes(s_st0v, 80'd0);          // ST0 vs +0.0
-          s_cmp_ie = fcom_ie(s_st0v, 80'd0, 1'b1);      // signaling
-          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_fstat=1'b1; fp_fstat_wval=s_cmp_fstat;
         end
         FX_FXAM: begin
           s_xc = fxam_codes(s_st0v, fptag[ftop]);
@@ -4564,10 +4575,7 @@ module core
                           ({6'd0,s_xc[1]}<<9)  | ({7'd0,s_xc[0]}<<8);
         end
         FX_FICOM_M16, FX_FICOM_M32: begin
-          s_argb = f_mem_as_int(f_mem80, q_f_mbytes);
-          s_codes = fcom_codes(s_st0v, s_argb);
-          s_cmp_ie = fcom_ie(s_st0v, s_argb, 1'b1);     // FICOM signaling
-          fp_we_fstat=1'b1; fp_fstat_wval=apply_cmp(fstat, s_codes, s_cmp_ie);
+          fp_we_fstat=1'b1; fp_fstat_wval=s_cmp_fstat;
           if (q_f_pop) fp_we_pop=1'b1;
         end
         // ---- arithmetic (f_eval -> {ie,ze,inexact,result}) ----
