@@ -121,10 +121,15 @@ not repeat itself.
   STRIDE** — the mode of the consecutive-access deltas with its %, e.g. dmiss reads
   `stride +0x20 (100%)` = exactly the 32-byte cache line, so every access misses;
   `irregular stride` when no delta dominates). **Clicking a point** rings it with a
-  crosshair, reads out its `n / cyc / @address / load|store` in the header, and jumps
-  the trace (+ pins regs) to that instruction — so an outlier or a stripe in the
-  scatter is one click from its source row.
-- **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
+  crosshair, reads out its `n / cyc / @address / load|store` in the header, jumps
+  the trace (+ pins regs) to that instruction, AND pins the **Memory** tab to that
+  access's bytes (navigates + gold-outlines the exact span, "showing clicked access"
+  — no forced tab switch, so switching to Memory shows precisely what that load/store
+  hit) — so an outlier or a stripe in the scatter is one click from its source row
+  AND its memory.
+- **Trace panel**: search/filter box (`mov` / `pc:08048` / `cyc>=133` / `pipe:V` /
+  `stall` / **`@`** to isolate memory-accessing rows — the placeholder advertises it);
+  columns n | cyc | Δ | pipe | PC | bytes |
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
   architecturally WROTE — the destination GPR(s) with their committed value (blue)
@@ -172,6 +177,27 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 35 — Mem-map → Memory click link + "@" filter discoverability
+Review confirmed the live watermark (`29bca32`) on all 6 critics and **confirmed 0 of
+0** picks — the FIFTH straight 0-pick round ("None"). Maintenance mode; two small,
+ground-truthed additions. I first GROUND-TRUTHED two dead candidates: a trace `mem`
+filter token is redundant (typing `@` already isolates exactly the memory rows, since
+the filter substring-matches the effect text's `@<ea>`), and store→load edges stay at
+one pair — so I picked the genuinely-new links instead.
+- **Refinement — Mem-map point click also pins the Memory tab to that access.** A
+  click already ringed the point + jumped the trace; it now ALSO navigates the Memory
+  inspector to that access's address and gold-outlines its EXACT byte span (size from
+  `mem_operand`, carried in the access tuple), labelled "showing clicked access". It
+  does NOT force a tab switch (the crosshair stays visible; switch to Memory to see
+  the bytes), and the pin clears the moment you navigate away (Go / a follow button /
+  paging). So a scatter point is now one click from BOTH its source instruction (left)
+  and its memory contents (right) — completing the scatter→trace→Konata→regs→Memory
+  drill. Smoke-tested: click navigates+highlights the right (addr,size), no tab switch,
+  navigate-away clears the pin.
+- **Polish — surface the `@` memory-access filter.** Verified the trace filter already
+  isolates memory rows when you type `@` (it matches the `@<ea>` in the effect text);
+  the filter placeholder now advertises `@  (mem)` so the capability is discoverable.
 
 ### Iteration 34 — Mem-map dominant-stride annotation
 Review confirmed the live watermark (`56efc9f`) on all 6 critics and **confirmed 0 of
