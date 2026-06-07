@@ -79,6 +79,9 @@ def _watermark(path, tag):
     d.text((4, 2), f"{_STAMP}  |  {tag}", fill=(240, 200, 80))
     canvas.save(path)
 
+# the workload whose table tabs get the full 9-tab sweep (richest table data)
+TAB_SWEEP = "brloop"
+
 # (tag, image, steps, soc) — representative workloads
 SHOTS = [
     ("dmiss",   "build/m2/mb_dmiss.flat",                                     160,  False),
@@ -144,6 +147,26 @@ for tag, img, steps, soc in SHOTS:
             Image.open(pfull).crop(_box(win, win.regs)).save(pf)
             _watermark(pf, f"{tag} · regs pinned n={npin}")
             win._unpin(); app.processEvents()
+    # all-9-tabs sweep for ONE rich workload — the per-workload `_tables.png` crop
+    # only ever shows the DEFAULT (Code$) tab, so the review never saw the other 8
+    # (Data$/TLB/Prefetch/Hotspots/Branches/Instr-mix/Cycles/Memory). brloop's tight
+    # branch loop populates Hotspots/Branches/Cycles/Instr-mix + the I-cache richly,
+    # so its tab sweep gives the critics real per-tab rendering to scrutinise.
+    if tag == TAB_SWEEP:
+        tabs = win.tables.tabs
+        for ti in range(tabs.count()):
+            tabs.setCurrentIndex(ti)
+            app.processEvents(); win.repaint(); app.processEvents()
+            _settle(win, app)
+            name = tabs.tabText(ti).split("(")[0].strip().replace(" ", "").replace("$", "")
+            tfull = os.path.join(OUT, f"{tag}_tabfull_{ti}.png")
+            win.grab().save(tfull)
+            tp = os.path.join(OUT, f"{tag}_tab_{ti:d}_{name}.png")
+            Image.open(tfull).crop(_box(win, win.tables)).save(tp)
+            _watermark(tp, f"{tag} · tab {ti}: {tabs.tabText(ti)}")
+            os.remove(tfull)
+        tabs.setCurrentIndex(0)
+        app.processEvents()
     s = win.backend.state()
     print(f"{tag:9s} ret={win.backend.retire_count():6d} "
           f"state={win.backend.state_name(s.state):9s} -> {full}")

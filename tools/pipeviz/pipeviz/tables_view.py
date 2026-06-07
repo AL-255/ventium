@@ -7,8 +7,9 @@ import re
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QTableWidget, QTableWidgetItem, QHeaderView,
                                QAbstractItemView, QLabel, QGridLayout, QSizePolicy,
-                               QLineEdit, QPushButton, QCheckBox)
-from PySide6.QtGui import QFont, QColor, QBrush, QPainter
+                               QLineEdit, QPushButton, QCheckBox,
+                               QStyledItemDelegate, QStyle)
+from PySide6.QtGui import QFont, QColor, QBrush, QPainter, QFontMetrics
 from PySide6.QtCore import Qt, QRect, Signal
 
 from . import disasm
@@ -109,6 +110,48 @@ def _fill(table, rows, dim_cols=()):
             if c in dim_cols:
                 it.setForeground(QBrush(QColor("#8b949e")))
             table.setItem(r, c, it)
+
+
+class InsnCellDelegate(QStyledItemDelegate):
+    """Field-colours a disassembly table cell (e.g. the Hotspots 'instruction'
+    column) so it speaks the SAME palette as the trace + Konata gutter: a neutral
+    grey mnemonic, then operands class-coloured — immediate=salmon, displacement
+    (inside [..])=gold, branch-target=orange, registers neutral. Reads the cell's
+    display text directly ('mnem ops'), so it drops onto any plain-text column."""
+    def __init__(self, font, parent=None):
+        super().__init__(parent)
+        self.font = font
+
+    def paint(self, painter, option, index):
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+        text = index.data(Qt.DisplayRole) or ""
+        if not text:
+            return
+        parts = text.split(" ", 1)
+        mn = parts[0]; ops = parts[1] if len(parts) > 1 else ""
+        _, icol = disasm.insn_class(mn)
+        painter.save()
+        painter.setClipRect(option.rect)
+        painter.setFont(self.font)
+        fm = QFontMetrics(self.font)
+        r = option.rect
+        x = r.x() + 4
+        painter.setPen(QColor("#828c99"))          # neutral mnemonic (trace _MNEM_GREY)
+        painter.drawText(QRect(x, r.y(), r.width() - 8, r.height()),
+                         Qt.AlignVCenter | Qt.AlignLeft, mn)
+        if ops:
+            mw = fm.horizontalAdvance(mn + " ")
+            ox, limit = x + mw, r.right() - 4
+            is_br = (icol == disasm.CC_BRANCH)
+            for txt, col in disasm.operand_segments(ops, is_br, icol):
+                if ox >= limit:
+                    break
+                painter.setPen(QColor(col))
+                painter.drawText(QRect(ox, r.y(), limit - ox, r.height()),
+                                 Qt.AlignVCenter | Qt.AlignLeft, txt)
+                ox += fm.horizontalAdvance(txt)
+        painter.restore()
 
 
 class CycleBreakdown(QWidget):
@@ -252,6 +295,8 @@ class TablesView(QWidget):
         self.hot_lbl = QLabel()
         self.hot = _mk_table(["PC", "hits", "cycles", "cyc%", "cost", "instruction"],
                              [76, 50, 64, 50, 120, 9999])
+        # field-colour the instruction column to match the trace / Konata gutter
+        self.hot.setItemDelegateForColumn(5, InsnCellDelegate(_mono(), self.hot))
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
 
         # --- Branches (per-branch-PC taken/not-taken profile) ---

@@ -45,7 +45,13 @@ not repeat itself.
   stepping unpins. **Shift-click** a second row to
   drop an amber **measurement anchor** — the band between it and the playhead is
   shaded and labelled `Δ<n>cyc` (latency between two instructions; shift-click the
-  same row again to clear it). Selecting an instruction also **PC-group highlights**
+  same row again to clear it). The playhead/Δ **lines + column tint + Δ-band all
+  draw BEHIND the cells** (cells paint on top) so a vertical marker never punches a
+  stripe through an F/D/X glyph — only the `cyc N` / `Δ<n>cyc` labels sit on top.
+  A row whose lifecycle runs past the right edge shows an amber **`›` continuation
+  chevron** painted on a small opaque chip in the row's own bg colour, so it reads
+  cleanly even when a cell occupies the final column (it no longer muddies
+  amber-on-blue INSIDE that edge cell). Selecting an instruction also **PC-group highlights**
   every other execution of the same PC (loop iterations) with a tint + a blue
   left-edge marker, so a stalled iteration stands out among its repeats. Auto-follow
   ("stick to the newest row/cycle") is explicit state toggled only by a user scroll,
@@ -59,8 +65,10 @@ not repeat itself.
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
   truncated); split TLB; prefetch buffer (ibuf + decode); **Hotspots** = a
   per-PC cycle-cost profile (PC | hits | cycles | cyc% | amber cost bar |
-  instruction, sorted by total cycles — stalls inflate the cost so the stalled
-  load/branch PCs bubble to the top, perf/VTune-style); **Branches** = a
+  **field-coloured** instruction, sorted by total cycles — stalls inflate the cost
+  so the stalled load/branch PCs bubble to the top, perf/VTune-style; the
+  instruction column uses the same `operand_segments` field-colouring as the trace
+  + Konata gutter); **Branches** = a
   per-branch-PC BTB profile (PC | type | target | hits | taken | taken% | bias
   bar; taken inferred from whether the next retired PC hit the target); **Instr
   mix** = an instruction-class histogram (branch/fp/mem/alu/sys with %-bars) plus
@@ -81,14 +89,17 @@ not repeat itself.
   by an FP op (`FP:ZE`); writes are attributed per-instruction via capstone
   register-access analysis, so a dual-issue U/V pair's writes land on the correct
   rows even though the commit snapshot is per-cycle. x86 byte-field
-  colouring (prefix gray / opcode blue / ModRM green
-  / SIB purple / memory-offset yellow / immediate red / **branch-rel vivid-orange**
-  `#ff8c00`, pulled well clear of the offset-yellow), clipped with `…` only past
-  ~11 bytes with the **full encoding on hover** (tooltip) so no bytes are lost; the
-  **instruction column is split-coloured** (a NEUTRAL-grey mnemonic — the same grey
-  for every op — + operand/target in the class accent, matching the Konata gutter;
-  so only the operand/target is coloured and a branch's `jne` is grey like any
-  other mnemonic while just its target stays orange);
+  colouring (prefix gray `#aab4c0` / opcode blue `#4ea1ff` / ModRM green `#56d364`
+  / SIB purple `#c89bff` / displacement gold `#e3b341` / immediate salmon `#ff7b72`
+  / **branch-rel red-orange** `#ff6a00`, pulled well clear of the gold), clipped
+  with `…` only past ~11 bytes with the **full encoding on hover** (tooltip) so no
+  bytes are lost; the **instruction column is FIELD-coloured** to match the bytes
+  legend AND the Konata gutter AND the Hotspots instruction column — a NEUTRAL-grey
+  mnemonic (the same grey for every op) then each operand token coloured by its
+  field via `disasm.operand_segments`: immediate=salmon, displacement (inside
+  `[...]`)=gold, branch-target=red-orange, registers/brackets neutral; so a `mov
+  ax, 0x10` shows its `0x10` salmon exactly like its immediate byte, and a branch's
+  `jne` stays grey while only its target carries the orange;
   U=blue V=amber pipe; zebra; Δ
   amber on a stall gap; whole-row scroll snap; capstone disasm (16/32-bit per
   live CS.D). Click a row → highlights its Konata instruction row + pins the
@@ -109,6 +120,44 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 26 — operand field-colouring everywhere, playhead lines behind cells, chip-backed overflow chevron, 9-tab review sweep
+Review confirmed the live watermark (`bca2a4e+dirty`) on all 6 critics. Verify
+refuted 5 of 6 picks with code-cited reasoning (bytes-truncation = tooltip+resize
+preserve full encoding; right-column "dead space" = faithful sparse-cache render +
+intrinsic Konata scroll; non-contiguous cache sets = occupancy strip+header+addr
+column already signal gaps; sliced last cache row = standard scroll-overflow
+clipping; pinned-x87 `pin` = TOP still lives in the status word + `PINNED` badge)
+and **confirmed 1** (the overflow chevron). Ground-truthing (zoom + pixel-sample)
+verified that one and drove the rest.
+- **Fix (CONFIRMED) — overflow `›` chevron no longer muddies the edge cell.** When
+  a row's lifecycle ran past the right edge the amber `›` continuation cue rendered
+  INSIDE the last cell's right sliver (an unreadable amber-on-blue `F›` collision);
+  rows with no cell at the edge placed it cleanly on the dark margin. It now paints
+  on a small opaque chip in the row's own bg colour (9px, so it masks only the
+  cell's rightmost sliver), so the chevron reads crisply over any cell colour while
+  the boundary glyph stays recognisable. Verified by re-zooming ppage's right edge.
+- **Fix (carried, ground-truthed) — playhead/Δ lines draw BEHIND the cells.** Iter
+  20 moved the playhead column *tint* behind the cells but the cyan playhead LINE
+  and amber Δ-anchor LINE were still drawn on top, punching vertical stripes
+  through the F/D/X glyphs. Both lines (and the Δ band fill) now draw in the
+  behind-cells block; only the `cyc N` / `Δ<n>cyc` labels sit on top. Verified by
+  zooming brloop's playhead at cyc 119 — glyphs crisp, no stripe.
+- **New feature — operand FIELD-colouring across every disassembly view.** A new
+  `disasm.operand_segments` tokeniser colours each operand token by its x86 field —
+  immediate=salmon, displacement (inside `[...]`)=gold, branch-target=red-orange,
+  registers/brackets neutral — so the decoded operands speak the SAME palette as
+  the bytes legend. Wired into the trace instruction column, the Konata gutter, AND
+  the Hotspots instruction column (a new reusable `InsnCellDelegate`). A `mov ax,
+  0x10` now shows its `0x10` salmon exactly like its immediate byte; `mov dword ptr
+  [0x482], 0x500` shows the `[0x482]` gold and the `0x500` salmon. Unit-checked the
+  tokeniser + zoom-verified all three views.
+- **Review-harness — all-9-tabs sweep.** The review only ever saw the DEFAULT
+  (Code$) table tab for 25 iterations; the other 8 (Data$/TLB/Prefetch/Hotspots/
+  Branches/Instr-mix/Cycles/Memory) were invisible to every critic. `gen_review_shots`
+  now sweeps all 9 tabs for one rich workload (brloop) and writes a watermarked crop
+  per tab, closing a long-standing review blind spot (this is exactly how the
+  Hotspots colour-inconsistency above surfaced).
 
 ### Iteration 25 — colour-coded effect column, latency grading, legible cells
 Verify confirmed 1 pick (effect-column colour split). Ground-truthing settled the

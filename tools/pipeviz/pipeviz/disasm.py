@@ -9,6 +9,7 @@ page-table walk, and the S_INT*/S_IRET/S_TSW*/S_SMI* arms are fault/interrupt/
 task/SMM microcode. STATE_STAGE maps each to a (lane, P5-stage, colour) so the
 visualizer can render the classic Prefetch->D1->D2->EX->WB picture faithfully.
 """
+import re
 from capstone import Cs, CS_ARCH_X86, CS_MODE_16, CS_MODE_32
 
 _md32 = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -133,6 +134,31 @@ def written_regs(code: bytes, addr: int = 0, bits: int = 32):
     except Exception:
         pass
     return [], False
+
+
+_OPTOK = re.compile(r'0x[0-9a-fA-F]+|\d+|[A-Za-z_]\w*|.')
+
+
+def operand_segments(ops: str, is_branch: bool, reg_col: str = "#c9d1d9"):
+    """Tokenise an operand string into (text, colour) runs so the disassembly is
+    FIELD-coloured to match the bytes column: immediate=salmon, displacement
+    (inside `[...]`)=gold, branch-target=orange, registers/keywords neutral. So a
+    `mov ax, 0x10` shows its `0x10` salmon, exactly like its immediate byte."""
+    segs, depth = [], 0
+    for m in _OPTOK.finditer(ops):
+        tok = m.group(0)
+        if tok == "[":
+            depth += 1; col = reg_col
+        elif tok == "]":
+            depth = max(0, depth - 1); col = reg_col
+        elif tok[0].isdigit():                       # a number literal (0x.. or dec)
+            col = (FIELD_COLOR["rel"] if is_branch
+                   else FIELD_COLOR["disp"] if depth > 0
+                   else FIELD_COLOR["imm"])
+        else:
+            col = reg_col
+        segs.append((tok, col))
+    return segs
 
 
 def disasm_one(code: bytes, addr: int = 0, bits: int = 32):
