@@ -694,7 +694,19 @@ class Konata(QWidget):
         if self._stick_v:
             vb.setValue((vb.maximum() // ROW_H) * ROW_H)   # row-aligned bottom
         if self._stick_h:
-            hb.setValue(hb.maximum())
+            # Anchor the left edge to the topmost VISIBLE row's first cell — NOT
+            # the raw FSM max-cycle. A long non-retiring tail (S_DECODE / S_PF /
+            # S_WALK) runs max_cyc far past the last drawn cell, so following to
+            # hb.maximum() scrolls every visible row's cells off the left into
+            # blank space (the diagram reads as broken). Clamp to maximum so a
+            # fast path whose cascade already fits still follows the newest cycle.
+            ins = self.plot.insns
+            if ins:
+                top_row = min(len(ins) - 1, max(0, vb.value() // ROW_H))
+                left_x = self.plot._x(ins[top_row]["c0"]) - 6
+                hb.setValue(min(hb.maximum(), max(0, left_x)))
+            else:
+                hb.setValue(hb.maximum())
         self._adjusting = False
 
 
@@ -704,18 +716,24 @@ class Konata(QWidget):
 # bottom track = per-cycle event pixels (mispredict / stall / I-fill / walk).
 # ===========================================================================
 class SparklineStrip(QWidget):
+    """Performance-over-time strip AND a navigation overview: click anywhere to
+    drop the Konata playhead at that cycle. X = cycles (newest at right,
+    1px/cycle); top track = windowed IPC (0..2), middle = per-cycle event pixels,
+    bottom = the event-colour key."""
     CAP = 12000
+    cycleClicked = Signal(int)     # emits the cycle under a click (seek)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(46)
+        self.setFixedHeight(58)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.backend = None
         self._last_cyc = 0
         self.ret = []        # retirements per cycle (0/1/2)
         self.ev = []         # '' | 'm' mispred | 's' stall | 'f' fill | 'w' walk
         self.setMouseTracking(True)
-        self._hover = -1
+        self._hover_x = -1
+        self.setCursor(Qt.PointingHandCursor)
 
     def reset(self, backend):
         self.backend = backend
@@ -746,23 +764,36 @@ class SparklineStrip(QWidget):
         self.update()
 
     _EVCOL = {"m": C_MISPRED, "s": C_STALL, "f": C_FILL, "w": C_WALK}
+    _EVKEY = [("m", "mispred"), ("s", "stall"), ("f", "I-fill"), ("w", "walk")]
+    _LABELW = 40
 
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#0b0f14"))
         W, H = self.width(), self.height()
         n = len(self.ret)
-        labelw = 40
-        ipc_h, ipc_y0 = 28, 2
-        evt_y0, evt_h = 33, 11
+        labelw = self._LABELW
+        ipc_y0, ipc_h = 2, 26
+        evt_y0, evt_h = 30, 9
+        key_y = 43
         plotw = max(1, W - labelw - 4)
         p.setPen(QColor("#30363d"))
         for lvl in (1.0, 2.0):                      # IPC=1 and IPC=2 (dual-issue) rules
             y = ipc_y0 + ipc_h - int(lvl / 2.0 * ipc_h)
             p.drawLine(labelw, y, W - 2, y)
+        # event-colour KEY (always drawn, so the event pixels are decodable)
+        p.setFont(_mono(7)); kx = labelw
+        for code, lbl in self._EVKEY:
+            p.fillRect(QRect(kx, key_y + 2, 8, 8), QColor(self._EVCOL[code]))
+            p.setPen(QColor("#8b949e"))
+            p.drawText(QRect(kx + 11, key_y, 50, 12), Qt.AlignVCenter | Qt.AlignLeft, lbl)
+            kx += 11 + len(lbl) * 6 + 14
+        p.setPen(QColor("#586069")); p.setFont(_mono(7))
+        p.drawText(QRect(2, key_y, labelw - 4, 12), Qt.AlignVCenter | Qt.AlignRight, "key")
         if n == 0:
             p.setPen(QColor(_MUT)); p.setFont(_mono(8))
-            p.drawText(self.rect(), Qt.AlignCenter, "IPC / stall sparkline")
+            p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
+                       "IPC / stall sparkline — click to seek")
             p.end(); return
         start = max(0, n - plotw)
         win = 16
@@ -775,29 +806,54 @@ class SparklineStrip(QWidget):
             e = self.ev[i]
             if e:
                 p.fillRect(QRect(x, evt_y0, 1, evt_h), QColor(self._EVCOL[e]))
-        # labels: current windowed IPC (last 64 cyc)
+        # hover seek-marker
+        if self._hover_x >= labelw:
+            p.setPen(QColor("#39c5cf"))
+            p.drawLine(self._hover_x, ipc_y0, self._hover_x, evt_y0 + evt_h)
+        # left labels: current windowed IPC (last 64 cyc)
         cur = sum(self.ret[max(0, n - 64):]) / min(64, n)
         p.setPen(QColor("#9aa3ad")); p.setFont(_mono(8, True))
         p.drawText(QRect(2, ipc_y0, labelw - 4, ipc_h), Qt.AlignRight | Qt.AlignVCenter,
                    f"IPC\n{cur:.2f}")
         p.setPen(QColor("#586069")); p.setFont(_mono(7))
         p.drawText(QRect(2, evt_y0 - 1, labelw - 4, evt_h + 2),
-                   Qt.AlignRight | Qt.AlignVCenter, "events")
-        # axis caps
+                   Qt.AlignRight | Qt.AlignVCenter, "evt")
+        # IPC y-axis caps: 2 (top), 1 (mid), 0 (bottom)
         p.setPen(QColor("#3d444d")); p.setFont(_mono(6))
-        p.drawText(QRect(labelw, ipc_y0 - 1, 16, 8), Qt.AlignLeft, "2")
+        p.drawText(QRect(labelw + 1, ipc_y0 - 1, 12, 8), Qt.AlignLeft, "2")
+        p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h // 2 - 4, 12, 8), Qt.AlignLeft, "1")
+        p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h - 8, 12, 8), Qt.AlignLeft, "0")
         p.end()
+
+    def _cyc_at(self, x):
+        n = len(self.ret)
+        if n == 0:
+            return None
+        start = max(0, n - max(1, self.width() - self._LABELW - 4))
+        i = start + (int(x) - self._LABELW)
+        return self._last_cyc - (n - 1 - i) if 0 <= i < n else None
+
+    def mousePressEvent(self, ev):
+        cyc = self._cyc_at(ev.position().x() if hasattr(ev, "position") else ev.x())
+        if cyc is not None:
+            self.cycleClicked.emit(int(cyc))     # seek the Konata playhead here
+
+    def leaveEvent(self, _ev):
+        self._hover_x = -1
+        self.update()
 
     def mouseMoveEvent(self, ev):
         x = int(ev.position().x() if hasattr(ev, "position") else ev.x())
+        self._hover_x = x
         n = len(self.ret)
-        labelw = 40
-        start = max(0, n - max(1, self.width() - labelw - 4))
-        i = start + (x - labelw)
+        start = max(0, n - max(1, self.width() - self._LABELW - 4))
+        i = start + (x - self._LABELW)
         if 0 <= i < n:
             cyc = self._last_cyc - (n - 1 - i)
             ev_name = {"m": "mispredict", "s": "stall", "f": "I-fill", "w": "page-walk"}.get(self.ev[i], "")
-            self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired" + (f", {ev_name}" if ev_name else ""))
+            self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired"
+                            + (f", {ev_name}" if ev_name else "") + "  ·  click to seek")
+        self.update()
 
 
 # ===========================================================================
@@ -816,6 +872,8 @@ class PipelineView(QWidget):
         v.addWidget(self.spark)
         self.konata = Konata()
         v.addWidget(self.konata, 1)
+        # click the sparkline overview to seek the Konata playhead to that cycle
+        self.spark.cycleClicked.connect(self.konata.highlight_cycle)
         self._bits = 32
 
     # back-compat alias (the status bar reads pipeline.waterfall.stats()).

@@ -127,7 +127,7 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((52, 54, 40, 38, 74, 196)):
+        for i, w in enumerate((52, 54, 40, 38, 74, 236)):
             self.tbl.setColumnWidth(i, w)
         hh.setSectionResizeMode(len(_COLS) - 1, QHeaderView.Stretch)
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
@@ -234,6 +234,7 @@ class TraceView(QWidget):
                     it.setForeground(QBrush(QColor(_V_COL if r.pipe == 1 else _U_COL)))
                 if c == _BYTES_COL:
                     it.setData(_BYTES_ROLE, fields)     # painted by BytesDelegate
+                    it.setToolTip(v)                    # full bytes — never lost to the … clip
                 if c == 6:                              # painted by InsnDelegate
                     parts = txt.split(" ", 1)
                     it.setData(_INSN_ROLE,

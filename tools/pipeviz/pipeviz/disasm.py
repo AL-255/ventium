@@ -31,7 +31,9 @@ FIELD_COLOR = {
     "sib":    "#c89bff",   # purple
     "disp":   "#e3b341",   # yellow (memory offset / displacement)
     "imm":    "#ff7b72",   # red (immediate operand)
-    "rel":    "#f0883e",   # orange (relative branch/jump/call target)
+    "rel":    "#ff8c00",   # vivid orange (relative branch target) — pulled away
+                           # from the golden disp-yellow (RGB dist 45 -> 81) so the
+                           # branch displacement is unmistakably NOT a data offset.
 }
 _PREFIX_BYTES = {0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65}
 
