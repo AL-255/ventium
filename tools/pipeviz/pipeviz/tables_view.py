@@ -732,6 +732,19 @@ class AccessMap(QWidget):
         n0, n1 = min(ns), max(ns); a0, a1 = min(addrs), max(addrs)
         nspan = max(1, n1 - n0); aspan = max(1, a1 - a0)
         nloads = sum(1 for a in accs if not a[3]); nstores = len(accs) - nloads
+        # dominant access STRIDE (mode of the consecutive-access deltas) — surfaces a
+        # strided walk numerically, which the scatter's slope shows only as a shape;
+        # e.g. dmiss strides +0x20 = exactly the 32-byte cache line, so every access
+        # misses. Shown only when one delta clearly dominates, else "irregular".
+        stride_str = ""
+        if len(addrs) >= 2:
+            deltas = [addrs[i + 1] - addrs[i] for i in range(len(addrs) - 1)]
+            freq = {}
+            for d in deltas:
+                freq[d] = freq.get(d, 0) + 1
+            mode = max(freq, key=freq.get); pct = round(100 * freq[mode] / len(deltas))
+            stride_str = (f" · stride {'+' if mode >= 0 else '-'}0x{abs(mode):x} ({pct}%)"
+                          if pct >= 40 else " · irregular stride")
         hf = _mono(8); hf.setBold(True)
         p.setPen(QColor("#8b949e")); p.setFont(hf)
         if self.sel is not None and 0 <= self.sel < len(accs):
@@ -739,11 +752,11 @@ class AccessMap(QWidget):
             p.setPen(QColor("#e3b341" if sst else "#79c0ff"))
             p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
                        f"selected  n={sn} cyc={scy} @{sa:08x} {'store' if sst else 'load'}"
-                       f"   ·   {len(accs)} accesses · 0x{a0:x}..0x{a1:x}")
+                       f"   ·   {len(accs)} accesses · 0x{a0:x}..0x{a1:x}{stride_str}")
         else:
             p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
-                       f"{len(accs)} accesses · 0x{a0:x}..0x{a1:x} (span 0x{aspan:x}) · "
-                       f"loads={nloads} stores={nstores}   [blue=load · gold=store · click a point]")
+                       f"{len(accs)} accesses · 0x{a0:x}..0x{a1:x}{stride_str} · "
+                       f"loads={nloads} stores={nstores}   [blue=load · gold=store · click]")
         L, R, T, B = 76, 8, 20, 16
         pw, ph = max(1, W - L - R), max(1, H - T - B)
         def yof(addr): return T + ph - int((addr - a0) * ph / aspan)
