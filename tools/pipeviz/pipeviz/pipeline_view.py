@@ -615,12 +615,20 @@ class _KonataPlot(QWidget):
                 p.setBrush(Qt.NoBrush)
                 lbl = "flags" if reg == _FLAG_REG else (_GPR_NAMES[reg] if 0 <= reg < 8 else "?")
                 lw = QFontMetrics(p.font()).horizontalAdvance(lbl) + 4
-                # default the label to the RIGHT of the producer cell, but flip it to
-                # the LEFT when that would run past the viewport edge (the producer is
-                # often near the playhead frontier) so it never clips into the gutter.
-                lx = ex + 3
-                if lx + lw > vis.right() - 2:
-                    lx = ex - 3 - lw
+                # place the label in CLEAR space, never over the producer's own F/D/X
+                # cells: prefer just RIGHT of its last cell; if that would clip the
+                # viewport, tuck it just LEFT of its FIRST cell (the empty pre-fetch
+                # columns); only if neither fits, clamp into view. The old code flipped
+                # left ONTO the cells, occluding the F glyph when the producer sat near
+                # the right frontier (brloop row 210), or left it clipped at the edge.
+                rx = self._x(prod["c1"]) + CELL_W + 3
+                lx_left = self._x(prod["c0"]) - 3 - lw
+                if rx + lw <= vis.right() - 2:
+                    lx = rx
+                elif lx_left >= vis.left() + 2:
+                    lx = lx_left
+                else:
+                    lx = max(vis.left() + 2, vis.right() - 2 - lw)
                 p.fillRect(QRect(lx, ey - 6, lw, 11), QColor("#0d1117"))
                 p.setPen(col)
                 p.drawText(QRect(lx, ey - 6, lw, 11), Qt.AlignCenter, lbl)

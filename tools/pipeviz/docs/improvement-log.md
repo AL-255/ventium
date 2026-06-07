@@ -69,8 +69,10 @@ not repeat itself.
   stall. A loop-carried induction (`add esi` ← `esi` ← prior `add esi`) shows as a
   dim def-use trace. The edges cover **EFLAGS** dependencies too, so a conditional
   branch traces to its flag-setter (`jne` ← `flags` ← `dec ecx`/`cmp`) — the single
-  most common dependency in any loop; the register label flips to the LEFT of the
-  producer cell when it would otherwise clip past the right viewport edge.
+  most common dependency in any loop; the register label is placed in CLEAR space —
+  just right of the producer's last cell, else tucked just left of its first cell (the
+  empty pre-fetch columns), else clamped into view — so it never overlays the producer's
+  own F/D/X glyphs nor clips past the right viewport edge.
   The per-row tooltip also lists the instruction's `reads`/`writes` (incl. `flags`). Auto-follow
   ("stick to the newest row/cycle") is explicit state toggled only by a user scroll,
   so the viewport tracks live
@@ -162,7 +164,9 @@ not repeat itself.
   field via `disasm.operand_segments`: immediate=salmon, displacement (inside
   `[...]`)=gold, branch-target=red-orange, registers/brackets neutral; so a `mov
   ax, 0x10` shows its `0x10` salmon exactly like its immediate byte, and a branch's
-  `jne` stays grey while only its target carries the orange;
+  `jne` stays grey while only its target carries the orange; an operand that overflows
+  the column **elides with a gray `…`** (like the bytes column) rather than hard-clipping
+  a glyph mid-immediate, so a long imm is never silently lost;
   U=blue V=amber pipe; zebra; Δ
   amber on a stall gap; whole-row scroll snap; capstone disasm (16/32-bit per
   live CS.D). Click a row → highlights its Konata instruction row + pins the
@@ -186,6 +190,45 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 40 — honest instruction-column elision + dependency-label placement off the cells
+Review confirmed the live watermark (`7780a5a`) on all 6 critics and — breaking the
+long 0-pick convergence — surfaced **3 confirmed visual defects** (the adversarial
+Verify refuted a 4th, a "pinned Segments header collision", and synthesis dropped a
+"wasted-whitespace" non-defect as a normal column gutter). All three were independently
+re-zoomed BEFORE fixing and re-verified AFTER by a fresh adversarial verifier (3/3
+resolved, no regression). Two genuine fixes (the 2nd covers two findings with one root
+cause):
+- **Fix (MED, CONFIRMED) — the trace instruction column now elides with `…` instead of
+  silently hard-clipping a glyph.** `InsnDelegate` drew each operand segment in the
+  remaining cell width with a hard `setClipRect`, so a long immediate inside a long
+  memory operand (ppage's `mov dword ptr [ebx + 0x14], 0xcf90000`) truncated to `0xcf9`
+  with NO ellipsis and abutted the effect column — the value was silently lost, while
+  the *bytes* column on the very same row truncated honestly with `…`. Mirrored the
+  bytes-column behaviour: when the next segment won't fully fit, stop and draw a gray
+  `…`. Ground-truthed that it triggers ONLY on genuine overflow (rows whose operands fit
+  — `mov word ptr [0x480], 0x17` — still show the full immediate, no spurious `…`).
+- **Fix (LOW ×2, CONFIRMED — one root cause) — dependency-edge register labels no longer
+  overlay the producer's own F/D/X cells or clip the viewport edge.** The producer-source
+  label (`flags`/`eax`/`ebx`) defaulted to the right of the producer's last cell but,
+  when that ran past the viewport, flipped LEFT onto the producer's own lifecycle cells —
+  occluding the white `F` glyph when the producer sat near the playhead frontier (brloop
+  row 210), or (the un-flipped sibling) clipping at the right edge as `Feax` with a sliced
+  glyph (ppage row 22). Replaced the binary right/flip-onto-cells rule with: prefer just
+  RIGHT of the last cell → else tuck just LEFT of the FIRST cell (the empty pre-fetch
+  columns, clear of the lifecycle) → else clamp into view. Verified the common case is
+  preserved (fp row 260's `ebx` still sits cleanly to the right of its cells) and the
+  frontier cases now read `flags  F D X` / `eax  F F F D X` with every glyph visible; the
+  toughest case (dmiss row 53's `flags` over a long `=8` stall) also relocates clear.
+- **Ground-truth REJECTIONS (recorded so the loop doesn't re-explore):** (a) an indirect-
+  branch displacement mis-parse in `set_branches` (the `0x…` regex would read an indirect
+  branch's displacement as its target) — probed and it fires on **0** branches across all
+  5 workloads (dmiss/brloop/test386 have only direct branches; fp/ppage have none), so a
+  fix would be dead code with zero observable effect; (b) colouring Mem-map points by D$
+  hit/miss — redundant (the Mem-map is captured only for dmiss @ 100% miss → uniform) and
+  invisible where it'd matter (test386/ppage Mem-maps aren't in the review set). Also
+  audited every `/`-division and empty-sequence op in the table setters — all guarded; no
+  latent crash.
 
 ### Iteration 39 — per-PC D$ attribution robustness (carry PC in the access tuple)
 Review confirmed the live watermark on all 6 critics and **confirmed 0 of 0** picks —
