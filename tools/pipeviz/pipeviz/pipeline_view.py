@@ -141,10 +141,13 @@ class StageBoard(QWidget):
 
         icw = int_w / len(INT_STAGES)
         fcw = (W - fp_x0 - 6) / len(FP_STAGES)
-        # faint vertical gridlines anchoring every stage column, so the lit cell
-        # reads as "the work is in stage EX" rather than a box floating in space.
+        # vertical gridlines anchoring every stage column, so the lit cell reads
+        # as "the work is in stage EX" rather than a box floating in space. Drawn
+        # at a clearly-visible luminance (three review rounds reported the old
+        # near-black #222c37 lines as "absent" — the column structure must read
+        # even when every cell is empty).
         grid_top, grid_bot = hdr_y - 1, top + 3 * lane_h + 1
-        p.setPen(QColor("#222c37"))
+        p.setPen(QColor("#454f5d"))
         for i in range(len(INT_STAGES) + 1):
             gx = int(lane_label_w + i * icw)
             p.drawLine(gx, grid_top, gx, grid_bot)

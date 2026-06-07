@@ -35,6 +35,14 @@ except Exception:
 _STAMP = f"pipeviz build {_SHA}  {datetime.datetime.now().strftime('%H:%M:%S')}"
 
 
+def _box(win, widget):
+    """The on-screen (left, top, right, bottom) of a panel within the window —
+    so panel crops always frame the real widget, regardless of splitter sizes."""
+    tl = widget.mapTo(win, widget.rect().topLeft())
+    br = widget.mapTo(win, widget.rect().bottomRight())
+    return (tl.x(), tl.y(), br.x(), br.y())
+
+
 def _watermark(path, tag):
     # Stamp the build into a DEDICATED 15px band ABOVE the screenshot rather than
     # painting over the top-left corner (which obscured the toolbar in full-window
@@ -76,11 +84,15 @@ for tag, img, steps, soc in SHOTS:
     win.grab().save(full)
     # crop the RAW grab first (crop boxes assume the un-banded coords), THEN band
     # the full image — so the 15px watermark band never shifts the crop regions.
+    # Boxes are computed from LIVE widget geometry (not hardcoded): the outer
+    # splitter is 3:2 so the right column starts at ~x=922, NOT 1010 — hardcoded
+    # boxes were slicing ~88px off the left of the tables/regs panels, which is
+    # what made critics keep "seeing" clipped register names every round.
     im = Image.open(full)
-    for sub, box in [("pipeline", (0, 86, 1010, 516)), ("trace", (0, 516, 1010, 980)),
-                     ("tables", (1010, 86, 1640, 560)), ("regs", (1010, 560, 1640, 980))]:
+    for sub, widget in [("pipeline", win.pipeline), ("trace", win.trace),
+                        ("tables", win.tables), ("regs", win.regs)]:
         cp = os.path.join(OUT, f"{tag}_{sub}.png")
-        im.crop(box).save(cp)
+        im.crop(_box(win, widget)).save(cp)
         _watermark(cp, f"{tag} · {sub}")
     _watermark(full, tag)
     # also capture the register panel PINNED to a mid-trace instruction, so the
@@ -95,7 +107,7 @@ for tag, img, steps, soc in SHOTS:
             pfull = os.path.join(OUT, f"{tag}_pinned_full.png")
             win.grab().save(pfull)
             pf = os.path.join(OUT, f"{tag}_regs_pinned.png")
-            Image.open(pfull).crop((1010, 560, 1640, 980)).save(pf)
+            Image.open(pfull).crop(_box(win, win.regs)).save(pf)
             _watermark(pf, f"{tag} · regs pinned n={npin}")
             win._unpin(); app.processEvents()
     s = win.backend.state()

@@ -177,7 +177,10 @@ class MainWindow(QMainWindow):
         self.regs = RegsView()
         right.addWidget(self.tables)
         right.addWidget(self.regs)
-        right.setStretchFactor(0, 3); right.setStretchFactor(1, 1)
+        # give the register/FPU panel real vertical room (was a crammed 25% bottom
+        # strip) and shrink the cache-table area's dead void when it's sparse.
+        right.setStretchFactor(0, 3); right.setStretchFactor(1, 2)
+        right.setSizes([520, 380])
         outer.addWidget(left); outer.addWidget(right)
         outer.setStretchFactor(0, 3); outer.setStretchFactor(1, 2)
         for sp in (outer, left, right):
