@@ -62,7 +62,10 @@ not repeat itself.
   instruction, sorted by total cycles — stalls inflate the cost so the stalled
   load/branch PCs bubble to the top, perf/VTune-style); **Branches** = a
   per-branch-PC BTB profile (PC | type | target | hits | taken | taken% | bias
-  bar; taken inferred from whether the next retired PC hit the target); **Cycles**
+  bar; taken inferred from whether the next retired PC hit the target); **Instr
+  mix** = an instruction-class histogram (branch/fp/mem/alu/sys with %-bars) plus
+  the U/V issue-port split as a realised-dual-issue proxy (`50% via the V-port`);
+  **Cycles**
   = a perf/VTune-style **cycle-attribution breakdown** — every cycle classified by
   FSM state into retire / issue-stall / mispredict / I-fill / decode / load-store /
   page-walk / x87 / system / halt, drawn as %-bars sorted biggest-first with a live
@@ -104,6 +107,30 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 17 — Instr-mix tab + Konata gridlines + x87 value-column separation
+Verify confirmed 3 of 7 picks; all three were real and clean to land.
+- **New feature — "Instr mix" tab.** A retired-instruction-class histogram
+  (branch/fp/mem/alu/sys) with %-bars, plus the **U/V issue-port split** as a
+  realised-dual-issue proxy. brloop reads `50% via the V-port` (perfect pairing of
+  its dec/jne loop); fp shows the `fp` class; dmiss shows alu+branch+mem. Answers
+  "what is this workload made of, and how well does it dual-issue?".
+- **Fix (CONFIRMED, HIGH) — Konata cycle gridlines legible.** The per-cycle
+  gridlines were `#171c24` (near-black, effectively invisible against the dark
+  plot), so you couldn't tie an F/D/X cell or a `=8` stall to a cycle number.
+  Raised to `#2b3340` (~2x contrast) — kept below the stage board's `#454f5d` so
+  they read without fighting the dense 16px cells. The cascade now sits on a
+  readable grid.
+- **Fix (CONFIRMED, HIGH) — x87 value column separation.** The decoded ST(i)
+  value sat 2px from the 20-hex-digit 80-bit mantissa and fused with it. Added a
+  fixed spacer column + right-aligned the value, so `ST0  000…000   1.5` has a
+  clear gutter.
+- (Ground-truthed and dropped: "GPR names↔values gap" and "instruction↔effect
+  dead gap" — both addressed in iters 15/16; the screenshots show the integer grid
+  packed and the instruction column stretched. The "FP lane idle / playhead absent"
+  findings are screenshot-timing artifacts — the FP lane DOES light on `ud_is_fp`
+  and the playhead only renders once a cell/row is clicked, which the static render
+  never does.)
 
 ### Iteration 16 — sparkline fills width, playhead cycle callout, palette/layout polish
 Verify confirmed 3 of 7 picks; ground-truthing the unpicked HIGH findings caught
