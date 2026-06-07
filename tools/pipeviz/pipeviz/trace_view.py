@@ -88,7 +88,9 @@ class BytesDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-_MNEM_GREY = "#939ba6"   # all mnemonics share one neutral grey
+_MNEM_GREY = "#828c99"   # all mnemonics share one neutral grey — dim enough that
+                         # even a neutral (off-white) operand reads as the brighter,
+                         # accented token, not just-barely-distinguishable from it
 
 
 class InsnDelegate(QStyledItemDelegate):
@@ -170,7 +172,7 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((52, 54, 40, 38, 74, 140)):          # n cyc Δ pipe PC bytes
+        for i, w in enumerate((52, 54, 40, 38, 74, 176)):          # n cyc Δ pipe PC bytes
             self.tbl.setColumnWidth(i, w)
         self.tbl.setColumnWidth(_EFFECT_COL, 168)                  # effect: fixed (short)
         # the INSTRUCTION column stretches (full operands, no truncation while the
