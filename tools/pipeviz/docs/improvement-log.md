@@ -81,7 +81,13 @@ not repeat itself.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
-  truncated); split TLB; prefetch buffer (ibuf + decode — but when the ibuf is
+  truncated); the **Data$ header also reports a replayed D-cache MISS-RATE** — the
+  resolved access stream run through the real 128-set×2-way×32B LRU geometry, tallied
+  hit/cold/conflict (`D$ replay: 100% miss (14/14 · 14 cold, 0 conflict)` for dmiss),
+  the hit/miss OUTCOME the resident-line snapshot and the Mem-map geometric stride
+  can't give — and it disambiguates the stride (dmiss +0x20 = the line size = all
+  miss, vs test386 +0x2 < the line = ~91% hit, which both read as 'stride 100%');
+  split TLB; prefetch buffer (ibuf + decode — but when the ibuf is
   all-zero the decode line shows **"ibuf idle — fast-path fetch from the I-cache;
   slow-path decoder not engaged"** instead of decoding the zeros into a bogus
   `00 00`→`add [eax],al` that would falsely claim to be the instruction "@ eip").
@@ -177,6 +183,29 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 37 — D-cache replay miss-rate + Memory-pin reset-on-load fix
+After SIX straight 0-pick rounds the review surfaced a genuinely-new CONFIRMED pick
+(MEDIUM): no panel reported a D-cache hit/miss OUTCOME, even though the resolved access
+stream and the cache geometry are both already on hand. I GROUND-TRUTHED it first
+(replayed the stream through a 2-way-LRU model: dmiss 100% miss, test386 9%, ppage 30%
+— all distinct and meaningful) before building.
+- **New feature (CONFIRMED) — replayed D-cache miss-rate in the Data$ header.** A new
+  `_dcache_replay` runs `trace.accesses` through a client-side `DC_SETS×WAYS×LINE`
+  (128×2×32B) LRU model — the same geometry as the hardware `dcache_timing` — tagging
+  each access hit / cold-miss / conflict-evict, and appends `D$ replay: X% miss (M/N ·
+  K cold, J conflict)` to the Data$ header. This names the cause of the load-stall
+  bubbles the pipeline draws and the dmiss stride only implies, and crucially
+  DISAMBIGUATES the geometric stride: dmiss `+0x20` = the 32B line ⇒ 100% miss, while
+  test386 `+0x2` < the line ⇒ ~91% HIT — yet both read `stride … (100%)`. Pure
+  derivation from data already captured; unit-tested (set-conflict eviction + spatial
+  locality) and matched against the per-workload probe.
+- **Correctness fix — the Memory tab's Mem-map-click pin now clears on image load.**
+  iter35's `_click_hl` (set when a Mem-map point pins the Memory tab) was NOT reset by
+  `load_image`, so loading a new program left a stale "showing clicked access" gold
+  highlight at the OLD program's address. Added `MemoryView.reset()` (called in
+  `load_image`); smoke-tested that the pin clears across a load yet still works
+  in-session. Found by my own source review, not a critic.
 
 ### Iteration 36 — Mem-map selection robustness (track stable retire-n, not a volatile index)
 Review confirmed the live watermark (`90f235d`) on all 6 critics and **confirmed 0 of

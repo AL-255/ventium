@@ -315,6 +315,7 @@ class MainWindow(QMainWindow):
                 v.set_bits(bits)
         self.pipeline.reset(self.backend)
         self.trace.reset()
+        self.tables.mem.reset()        # drop any stale Mem-map-click pin from the old image
         self._unpin()
         self._refresh_all()
 
@@ -389,6 +390,7 @@ class MainWindow(QMainWindow):
         self.trace.update_from(self.backend)   # before mem, so '→access' has the newest addr
         self.tables.mem.set_state(self.backend, s, self.trace.last_access)
         self.tables.accmap.set_accesses(self.trace.accesses)
+        self.tables.set_dcache_replay(self.trace.accesses)   # append D$ miss-rate to Data$ header
         if getattr(self, "_pinned_n", None) is None:
             self.regs.update_from(s)   # else keep the pinned AS-OF display
         self._refresh_status(s)
