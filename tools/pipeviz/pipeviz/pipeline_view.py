@@ -46,7 +46,7 @@ def _mono(pt=9, bold=False):
 class StageBoard(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(122)
+        self.setFixedHeight(100)   # tightened so the starved Konata view gets the rows
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._cells = self._blank()
         self._status = "no image loaded"
@@ -121,10 +121,10 @@ class StageBoard(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(_BG))
         W = self.width()
-        lane_h = 22          # compact: this snapshot is sparse, give rows to Konata
-        title_y = 4          # section titles band (lowered so it isn't clipped)
-        hdr_y = 20           # stage-label band (separated from titles -> no collision)
-        top = 34             # cells start
+        lane_h = 18          # compact: this snapshot is sparse, give rows to Konata
+        title_y = 3          # section titles band (lowered so it isn't clipped)
+        hdr_y = 16           # stage-label band (separated from titles -> no collision)
+        top = 28             # cells start
         lane_label_w = 38
         # collapse the FP group when idle so the integer stages get the width.
         fp_idle = not self._cells.get("FP", ([], ""))[0]
@@ -210,7 +210,7 @@ class StageBoard(QWidget):
                 p.drawText(cell, Qt.AlignVCenter | Qt.AlignHCenter,
                            fm.elidedText(text, Qt.ElideRight, cell.width() - 3))
         p.setFont(_mono(9)); p.setPen(QColor(_TXT))
-        p.drawText(QRect(4, top + 3 * lane_h + 4, W - 8, 18), Qt.AlignLeft, self._status)
+        p.drawText(QRect(4, top + 3 * lane_h + 2, W - 8, 14), Qt.AlignLeft, self._status)
         p.end()
 
 
@@ -467,7 +467,9 @@ class _KonataPlot(QWidget):
                         # abuts / clips the preceding lettered cell's glyph.
                         span = QRect(x0 + 2, y + 1, max(CELL_W - 4, x1 - x0 - 3), ROW_H - 2)
                         p.fillRect(span, QColor(col))
-                        p.setPen(QColor("#1b1f26")); p.drawRect(span)
+                        # light border so the stall span stands out on any row
+                        # background (incl. the amber Δ band / zebra stripe).
+                        p.setPen(QColor("#aab4c0")); p.drawRect(span)
                         p.setFont(_mono(8, True)); p.setPen(QColor("#0d1117"))
                         p.drawText(span, Qt.AlignCenter, f"={j - i}" if j - i > 1 else "=")
                     i = j

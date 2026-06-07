@@ -170,7 +170,7 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((52, 54, 40, 38, 74, 200)):          # n cyc Δ pipe PC bytes
+        for i, w in enumerate((52, 54, 40, 38, 74, 140)):          # n cyc Δ pipe PC bytes
             self.tbl.setColumnWidth(i, w)
         self.tbl.setColumnWidth(_EFFECT_COL, 168)                  # effect: fixed (short)
         # the INSTRUCTION column stretches (full operands, no truncation while the
@@ -223,6 +223,17 @@ class TraceView(QWidget):
         target = str(int(n))
         for row in range(self.tbl.rowCount()):
             it = self.tbl.item(row, 0)
+            if it is not None and it.text() == target:
+                self.tbl.setCurrentCell(row, 0)
+                self.tbl.scrollToItem(it, QAbstractItemView.PositionAtCenter)
+                return
+
+    def select_pc(self, pc):
+        """Select + scroll to the FIRST trace row at PC `pc` — the drill-down from
+        clicking a row in the Hotspots / Branches analysis tabs."""
+        target = f"{int(pc):08x}"
+        for row in range(self.tbl.rowCount()):
+            it = self.tbl.item(row, 4)            # PC column
             if it is not None and it.text() == target:
                 self.tbl.setCurrentCell(row, 0)
                 self.tbl.scrollToItem(it, QAbstractItemView.PositionAtCenter)

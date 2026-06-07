@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QAbstractItemView, QLabel, QGridLayout, QSizePolicy,
                                QLineEdit, QPushButton, QCheckBox)
 from PySide6.QtGui import QFont, QColor, QBrush, QPainter
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt, QRect, Signal
 
 from . import disasm
 
@@ -213,6 +213,8 @@ class CycleBreakdown(QWidget):
 
 
 class TablesView(QWidget):
+    pcClicked = Signal(int)     # a Hotspots/Branches PC row clicked -> drill to trace
+
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
@@ -270,7 +272,18 @@ class TablesView(QWidget):
         # --- Memory hex/ASCII inspector (follow EIP/ESP) ---
         self.mem = MemoryView()
         self.tabs.addTab(self.mem, "Memory")
+        # drill-down: clicking a Hotspots / Branches row jumps the trace to that PC.
+        self.hot.cellClicked.connect(lambda r, _c: self._emit_pc(self.hot, r))
+        self.br.cellClicked.connect(lambda r, _c: self._emit_pc(self.br, r))
         self._bits = 32
+
+    def _emit_pc(self, table, row):
+        it = table.item(row, 0)   # the PC column holds an 8-hex-digit address
+        if it is not None:
+            try:
+                self.pcClicked.emit(int(it.text(), 16))
+            except ValueError:
+                pass
 
     _CLS_COLOR = {"branch": disasm.CC_BRANCH, "fp": disasm.CC_FP, "mem": disasm.CC_MEM,
                   "alu": disasm.CC_ALU, "sys": disasm.CC_SYS, "other": disasm.CC_OTHER}

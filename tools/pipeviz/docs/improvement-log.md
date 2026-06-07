@@ -110,6 +110,26 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 22 — reclaim Konata height, stall contrast, narrower bytes, drill-down
+Verify confirmed 0 picks; ground-truthing (MEASURING the panel) drove the layout
+fixes that several HIGH findings kept circling.
+- **Fix (HIGH ×2) — Konata was starved of height.** Measured: the StageBoard ate
+  122px and the sparkline 58px, leaving the headline Konata view only an 188px
+  viewport (11 rows). Tightened the (sparse) stage board to 100px (18px lanes) —
+  the Konata viewport is now 210px / 13 rows, with no clipping.
+- **Fix (HIGH, recurring) — stall bars near-invisible.** The collapsed `=N` stall
+  bar's border was a near-black `#1b1f26` that vanished on the dark/amber-Δ-band
+  row backgrounds. Gave it a light `#aab4c0` border so the stall span — the most
+  diagnostically important event — stands out on any background.
+- **Fix (HIGH, recurring) — wasted bytes↔instruction gap.** The bytes column was
+  hard-sized to 200px for the worst case while almost every row is 1–3 bytes,
+  leaving a huge whitespace band. Narrowed it to 140px (still ~6 bytes, tooltip for
+  the rest); the freed width goes to the stretching instruction column (249→309px),
+  cutting both the gap and the instruction truncations.
+- **New feature — analysis→trace drill-down.** Clicking a PC row in the Hotspots or
+  Branches tab now jumps the trace to that PC's first occurrence, so you can go from
+  "this PC is 72% of cycles" straight to seeing it in the instruction stream.
+
 ### Iteration 21 — x87 hex split, FP-lane cleanup, keyboard shortcuts
 Verify confirmed 1 pick. I also **pixel-sampled the trace** to finally close the
 perennial "rel byte is yellow" finding: the f8 byte renders red-orange
