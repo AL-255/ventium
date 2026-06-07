@@ -622,7 +622,8 @@ class _PrefetchView(QWidget):
 
 class _HexDump(QWidget):
     """Classic 16-bytes-per-row hex + ASCII dump, painted; highlights the bytes
-    at EIP (cyan) and ESP (amber) when they fall in the viewed window."""
+    at EIP (cyan fill) and ESP (amber fill), and the most-recent load/store ACCESS
+    (gold outline + its exact byte span) when they fall in the viewed window."""
     ROW_H = 15
 
     def __init__(self, parent=None):
@@ -631,14 +632,17 @@ class _HexDump(QWidget):
         self.base = 0
         self.eip = 0
         self.esp = 0
+        self.acc_addr = None     # (start) of the most-recent memory access
+        self.acc_size = 0
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-    def set(self, backend, base, eip, esp):
+    def set(self, backend, base, eip, esp, access=None):
         rows = max(8, self.height() // self.ROW_H)
         self.base = base & 0xFFFFFFFF
         self.data = backend.mem_read(self.base, rows * 16)
         self.eip = eip
         self.esp = esp
+        self.acc_addr, self.acc_size = access if access else (None, 0)
         self.update()
 
     def paintEvent(self, _ev):
@@ -662,12 +666,16 @@ class _HexDump(QWidget):
                 addr = a + c
                 gap = 1 if c >= 8 else 0
                 x = hx + (c * 3 + gap) * cw
-                if addr == self.eip or (self.eip <= addr < self.eip + 1):
-                    pass
                 if self.eip <= addr < self.eip + 4:
                     p.fillRect(QRect(x - 1, y + 1, 2 * cw + 1, self.ROW_H - 2), QColor(40, 70, 90))
                 elif self.esp <= addr < self.esp + 4:
                     p.fillRect(QRect(x - 1, y + 1, 2 * cw + 1, self.ROW_H - 2), QColor(80, 64, 24))
+                # the most-recent memory ACCESS: a gold outline over its exact byte
+                # span (the load/store the program just made), distinct from the EIP/
+                # ESP fills so the three never read as the same marker.
+                if self.acc_addr is not None and self.acc_addr <= addr < self.acc_addr + self.acc_size:
+                    p.setPen(QColor("#e3b341"))
+                    p.drawRect(QRect(x - 1, y + 1, 2 * cw, self.ROW_H - 3))
                 p.setPen(QColor("#c9d1d9" if b else "#3d444d"))
                 p.drawText(QRect(x, y, 2 * cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{b:02x}")
                 ch = chr(b) if 32 <= b < 127 else "."
@@ -693,6 +701,9 @@ class MemoryView(QWidget):
         go = QPushButton("Go"); go.clicked.connect(self._go); bar.addWidget(go)
         be = QPushButton("→EIP"); be.clicked.connect(lambda: self._set_follow("eip")); bar.addWidget(be)
         bs = QPushButton("→ESP"); bs.clicked.connect(lambda: self._set_follow("esp")); bar.addWidget(bs)
+        ba = QPushButton("→access"); ba.setToolTip("follow the most-recent load/store address")
+        ba.clicked.connect(lambda: self._set_follow("access")); bar.addWidget(ba)
+        self._access = None       # (addr, size) of the newest memory access
         for d, lab in ((-256, "◀"), (256, "▶")):
             b = QPushButton(lab); b.setFixedWidth(28)
             b.clicked.connect(lambda _=0, dd=d: self._page(dd)); bar.addWidget(b)
@@ -716,6 +727,8 @@ class MemoryView(QWidget):
             self.addr = getattr(self, "_eip", self.addr) & 0xFFFFFFF0
         elif which == "esp":
             self.addr = getattr(self, "_esp", self.addr) & 0xFFFFFFF0
+        elif which == "access" and self._access is not None:
+            self.addr = self._access[0] & 0xFFFFFFF0
         self._refresh()
 
     def _page(self, delta):
@@ -723,14 +736,17 @@ class MemoryView(QWidget):
         self.addr = (self.addr + delta) & 0xFFFFFFF0
         self._refresh()
 
-    def set_state(self, backend, state):
+    def set_state(self, backend, state, access=None):
         self.backend = backend
         self._eip = state.eip
         self._esp = state.gpr[4]
+        self._access = access
         if self.follow == "eip":
             self.addr = self._eip & 0xFFFFFFF0
         elif self.follow == "esp":
             self.addr = self._esp & 0xFFFFFFF0
+        elif self.follow == "access" and access is not None:
+            self.addr = access[0] & 0xFFFFFFF0
         self._refresh()
 
     def _refresh(self):
@@ -738,5 +754,6 @@ class MemoryView(QWidget):
             return
         self.addr_e.setText(f"0x{self.addr:08x}")
         self.follow_lbl.setText(f"following {self.follow.upper()}" if self.follow else
-                                "cyan=EIP  amber=ESP")
-        self.dump.set(self.backend, self.addr, getattr(self, "_eip", 0), getattr(self, "_esp", 0))
+                                "cyan=EIP  amber=ESP  gold=access")
+        self.dump.set(self.backend, self.addr, getattr(self, "_eip", 0),
+                      getattr(self, "_esp", 0), self._access)
