@@ -266,8 +266,12 @@ PY
     info "init ESP (from golden n=0) : $INIT_ESP"
 
     # --- 5) RTL FUNC trace via tb_ventium (pass --x87 for x87 programs) ---
+    # QUIESCE (default 64) is overridable: the iterative SRT FDIV/FSQRT engine
+    # (+define+VEN_SRT_ITER) legitimately idles ~66 clocks during a square root, so
+    # a larger idle-window is needed there (e.g. QUIESCE=512). Default unchanged.
     if ! "$TB_BIN" --image "$FLAT" --load "$LOAD" --entry "$ENTRY" \
             --init-esp "$INIT_ESP" --out "$RTL_VT" --max-insn "$MAX" $X87_FLAG \
+            --quiesce "${QUIESCE:-64}" \
             > "$M3/${NAME}_rtl.log" 2>&1; then
         info "tb_ventium run failed (see $M3/${NAME}_rtl.log):"
         sed 's/^/      /' "$M3/${NAME}_rtl.log" | head -8

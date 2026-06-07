@@ -31,9 +31,20 @@ core/core.sv
 core/bpred_btb.sv
 core/decode.sv
 core/issue_uv.sv
+// iterative integer DIV/IDIV engine (the FPGA-synthesizable form of the native
+// '/'/'%'). Instantiated by core.sv only under +define+VEN_IDIV_ITER; harmless
+// (uninstantiated) in the default build.
+core/ven_idiv.sv
 
 // ---- fpu ------------------------------------------------------------------
 fpu/fpu_top.sv
+// iterative radix-4 SRT FDIV + iterative FSQRT engines (the FPGA-synthesizable
+// one-step-per-clock form of fx_srt_div/fx_sqrt). Instantiated by core.sv only
+// under +define+VEN_SRT_ITER; harmless (uninstantiated) in the default build.
+fpu/fpu_srt_div.sv
+fpu/fpu_sqrt_iter.sv
+// iterative FP->packed-BCD (FBSTP) engine — instantiated under +VEN_BCD_ITER.
+fpu/ven_bcd.sv
 
 // ---- mem ------------------------------------------------------------------
 mem/dcache_timing.sv

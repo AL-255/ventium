@@ -65,13 +65,54 @@
           // f_pc_bad already routed to S_HALT above (no retire); only commit the
           // EIP/retire when we actually executed the op.
           if (!f_pc_bad) begin
+`ifdef VEN_SRT_ITER
+            // normal-operand FDIV/FSQRT: hand off to the iterative SRT engine and
+            // wait in S_FP_BUSY (the result commits there via the fp_we_* driver).
+            if (fp_iter_go) begin
+              state<=S_FP_BUSY;
+            end else
+`endif
             if (f_do_retire) begin
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
             end else begin
+`ifdef VEN_BCD_ITER
+              // FBSTP: run the iterative FP->BCD engine first (S_BCD_BUSY) so the
+              // 18-chained-/10 conversion is multi-cycle, then store.
+              if (q_fxop==FX_FBSTP) state<=S_BCD_BUSY;
+              else begin state<=S_FSTORE; f_step<=4'd0; end
+`else
               state<=S_FSTORE; f_step<=4'd0;
+`endif
             end
           end
         end
+
+`ifdef VEN_BCD_ITER
+        // S_BCD_BUSY: wait for the iterative FP->packed-BCD engine; latch its
+        // {ie,pe,bcd} store value (consumed by fstore_val + the fstat sticky in the
+        // fp_we_* driver), then run the store (S_FSTORE).
+        S_BCD_BUSY: begin
+          if (eng_bcd_done) begin
+            fbcd_result_q <= eng_bcd_result;
+            state<=S_FSTORE; f_step<=4'd0;
+          end
+        end
+`endif
+
+`ifdef VEN_SRT_ITER
+        // -------------------------------------------------------------------
+        // S_FP_BUSY: wait for the iterative SRT FDIV/FSQRT engine. The 80-bit
+        // result + fstat are driven onto u_fpu_state by the fp_we_* driver on the
+        // engine's `done` clock; here we only retire + advance EIP (mirrors the
+        // S_FEXEC retire). The busy-wait serialises, so a dependent next insn
+        // reads the committed result correctly.
+        // -------------------------------------------------------------------
+        S_FP_BUSY: begin
+          if (fp_iter_done) begin
+            eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+          end
+        end
+`endif
 
         // -------------------------------------------------------------------
         // S_FSTORE: write the x87 store operand to memory over 1..3 bus beats,

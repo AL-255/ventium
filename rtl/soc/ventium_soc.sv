@@ -64,20 +64,20 @@
 module ventium_soc
   import ventium_pkg::*;
 (
-    input  logic        clk,
-    input  logic        rst_n,     // active-low synchronous reset (core convention)
+    input  wire logic        clk,
+    input  wire logic        rst_n,     // active-low synchronous reset (core convention)
 
     // Reset-time architectural init (the TB drives these during reset). In SoC
     // mode the core boots in SYSTEM mode (boot_mode=1) so it cold-resets at
     // CS:EIP=F000:FFF0 itself; init_eip/init_esp are carried for parity with
     // ventium_top (the system reset seeds CS:EIP/regs internally).
-    input  logic [31:0] init_eip,
-    input  logic [31:0] init_esp,
+    input  wire logic [31:0] init_eip,
+    input  wire logic [31:0] init_esp,
 
     // boot-mode select. The SoC bare-metal image is a -bios at F000:FFF0, so the
     // TB drives 1 (system cold reset). Default-carried so the port list matches
     // the TB's expectations; 0 would be the user cold reset (unused here).
-    input  logic        boot_mode,
+    input  wire logic        boot_mode,
 
     // M0/M1 bus-functional-model memory port group (docs/rtl-interface.md §3).
     // The TB serves these from its flat memory (the BIOS image + RAM). The SoC
@@ -87,8 +87,8 @@ module ventium_soc
     output logic [31:0] mem_addr,
     output logic [31:0] mem_wdata,
     output logic [3:0]  mem_wstrb,
-    input  logic [31:0] mem_rdata,
-    input  logic        mem_ack
+    input  wire logic [31:0] mem_rdata,
+    input  wire logic        mem_ack
 );
 
   // ===========================================================================

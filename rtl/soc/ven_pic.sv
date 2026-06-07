@@ -34,20 +34,20 @@
 `default_nettype none
 
 module ven_pic (
-    input  logic        clk,
-    input  logic        rst,          // synchronous, active-high (PC RESET)
+    input  wire logic        clk,
+    input  wire logic        rst,          // synchronous, active-high (PC RESET)
 
     // ---- SoC common register interface -------------------------------------
-    input  logic        cs,           // chip-select (decoder asserts on our ports)
-    input  logic        we,           // 1 = OUT (CPU write), 0 = IN (CPU read)
-    input  logic [15:0] addr,         // I/O port address
-    input  logic [7:0]  wdata,        // write data
+    input  wire logic        cs,           // chip-select (decoder asserts on our ports)
+    input  wire logic        we,           // 1 = OUT (CPU write), 0 = IN (CPU read)
+    input  wire logic [15:0] addr,         // I/O port address
+    input  wire logic [7:0]  wdata,        // write data
     output logic [7:0]  rdata,        // read data (combinational off regs)
 
     // ---- PIC-specific interface --------------------------------------------
-    input  logic [15:0] irq_in,       // device IRQ lines IR0..IR15 (levels)
+    input  wire logic [15:0] irq_in,       // device IRQ lines IR0..IR15 (levels)
     output logic        int_out,      // -> core INTR
-    input  logic        inta,         // 1-clk interrupt-acknowledge strobe
+    input  wire logic        inta,         // 1-clk interrupt-acknowledge strobe
     output logic [7:0]  inta_vector   // vector returned for this acknowledge
 );
 
@@ -103,11 +103,21 @@ module ven_pic (
             if (mask == 8'h00) begin
                 get_priority = 4'd8;
             end else begin
+                // Smallest p in 0..7 such that bit ((p+padd)&7) of mask is set
+                // (mask != 0 guarantees a hit). A while-loop with a runtime
+                // condition is not statically unrollable by Vivado synth, so use
+                // a bounded for with a found-flag (semantics identical).
                 p = 4'd0;
-                // while ((mask & (1 << ((p+padd)&7))) == 0) p++;
-                // bounded loop: mask != 0 guarantees termination within 8.
-                while ((mask & (8'h01 << ((p[2:0] + padd) & 3'h7))) == 8'h00) begin
-                    p = p + 4'd1;
+                begin
+                    logic found;
+                    found = 1'b0;
+                    for (int k = 0; k < 8; k++) begin
+                        if (!found &&
+                            (mask & (8'h01 << ((k[2:0] + padd) & 3'h7))) != 8'h00) begin
+                            p = k[3:0];
+                            found = 1'b1;
+                        end
+                    end
                 end
                 get_priority = p;
             end

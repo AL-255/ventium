@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-all
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-all
 .DEFAULT_GOAL := help
 
 help:
@@ -29,6 +29,7 @@ help:
 	@echo "  make verify-sys M2S.0 system-mode ORACLE check: build qemu-system, gen + validate the"
 	@echo "                  bare-metal protected-mode/paging golden trace (no RTL yet; M2S.1 starts that)"
 	@echo "  make verify-srt radix-4 SRT divider gate: fx_srt_div bit-exact vs the golden model"
+	@echo "  make verify-srt-iter  iterative (1-step/clk) SRT divider engine: bit-exact vs the golden"
 	@echo "                  (correct PLA == QEMU; buggy PLA == documented Pentium FDIV flaw)"
 	@echo "  make verify-soc M8 SoC regression aggregate: run EVERY ventium_soc differential gate"
 	@echo "                  (pirqsoc + psocdev + pvga + pide + pboot + pbootdma + test386)"
@@ -232,6 +233,31 @@ verify-all:
 # verify`/`verify-soc` tracks are unaffected.
 verify-srt:
 	bash verif/srt/run-srt-gate.sh
+
+# --- iterative SRT divider gate (verif/srt/run-srt-iter-gate.sh) -------------
+# Standalone clocked gate for the multi-cycle, one-step-per-clock iterative SRT
+# divider (rtl/fpu/fpu_srt_div.sv) — the FPGA-synthesizable form of fx_srt_div.
+# Reuses the same single-source golden vectors and asserts the engine is
+# bit-exact for BOTH PLAs (== fx_srt_div == QEMU), i.e. equivalent to the proven
+# combinational divider. Needs Verilator --timing.
+verify-srt-iter:
+	bash verif/srt/run-srt-iter-gate.sh
+	bash verif/srt/run-sqrt-iter-gate.sh
+
+# --- iterative integer divider gate (verif/idiv/run-idiv-gate.sh) ------------
+# Standalone clocked gate for the multi-cycle integer DIV/IDIV engine
+# (rtl/core/ven_idiv.sv) — the FPGA-synthesizable form of the native '/'/'%'.
+# Bit-exact (quotient/remainder/#DE) vs the native per-width predicates over all
+# six forms (DIV/IDIV x r8/r16/r32). Needs Verilator --timing.
+verify-idiv:
+	bash verif/idiv/run-idiv-gate.sh
+
+# --- iterative FP->packed-BCD (FBSTP) engine gate ----------------------------
+# Standalone clocked gate for the multi-cycle FP->BCD engine (rtl/fpu/ven_bcd.sv)
+# — the FPGA-synthesizable form of fx_fx_to_bcd (whose 18 chained combinational
+# /10 stages were the core's worst timing path). Bit-exact vs fx_fx_to_bcd.
+verify-bcd:
+	bash verif/bcd/run-bcd-gate.sh
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

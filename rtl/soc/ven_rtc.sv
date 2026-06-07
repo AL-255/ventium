@@ -84,13 +84,13 @@ module ven_rtc #(
     // observe a tick quickly; the SoC instance overrides to CLK_HZ.
     parameter int unsigned TICK_DIV = 16
 ) (
-    input  logic        clk,
-    input  logic        rst,        // SYNCHRONOUS, ACTIVE-HIGH (PC RESET)
+    input  wire logic        clk,
+    input  wire logic        rst,        // SYNCHRONOUS, ACTIVE-HIGH (PC RESET)
 
-    input  logic        cs,         // chip-select (decoder asserts for 0x70/0x71)
-    input  logic        we,         // 1 = OUT (CPU write), 0 = IN (CPU read)
-    input  logic [15:0] addr,       // I/O port address (bit0 selects index/data)
-    input  logic [7:0]  wdata,      // write data
+    input  wire logic        cs,         // chip-select (decoder asserts for 0x70/0x71)
+    input  wire logic        we,         // 1 = OUT (CPU write), 0 = IN (CPU read)
+    input  wire logic [15:0] addr,       // I/O port address (bit0 selects index/data)
+    input  wire logic [7:0]  wdata,      // write data
     output logic [7:0]  rdata,      // read data (COMBINATIONAL off the registers)
 
     output logic        irq8,       // RTC interrupt line (level, 1 = asserting)

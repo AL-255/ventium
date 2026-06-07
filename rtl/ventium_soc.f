@@ -30,9 +30,15 @@ core/core.sv
 core/bpred_btb.sv
 core/decode.sv
 core/issue_uv.sv
+core/ven_idiv.sv
 
 // ---- fpu -------------------------------------------------------------------
 fpu/fpu_top.sv
+// iterative SRT FDIV + FSQRT engines (instantiated by core.sv under
+// +define+VEN_SRT_ITER; harmless when not).
+fpu/fpu_srt_div.sv
+fpu/fpu_sqrt_iter.sv
+fpu/ven_bcd.sv
 
 // ---- mem -------------------------------------------------------------------
 mem/dcache_timing.sv

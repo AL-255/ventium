@@ -37,12 +37,12 @@
 `default_nettype none
 
 module ven_port92 (
-    input  logic        clk,
-    input  logic        rst,     // synchronous, ACTIVE-HIGH (PC RESET): clears bit0
-    input  logic        cs,      // chip-select: addressed port hit (0x92)
-    input  logic        we,      // 1 = OUT (CPU write), 0 = IN (CPU read)
-    input  logic [15:0] addr,    // I/O port address (unused: single-port device)
-    input  logic [7:0]  wdata,   // write data (8-bit)
+    input  wire logic        clk,
+    input  wire logic        rst,     // synchronous, ACTIVE-HIGH (PC RESET): clears bit0
+    input  wire logic        cs,      // chip-select: addressed port hit (0x92)
+    input  wire logic        we,      // 1 = OUT (CPU write), 0 = IN (CPU read)
+    input  wire logic [15:0] addr,    // I/O port address (unused: single-port device)
+    input  wire logic [7:0]  wdata,   // write data (8-bit)
     output logic [7:0]  rdata,   // read data — COMBINATIONAL off outport
 
     // device-specific outputs

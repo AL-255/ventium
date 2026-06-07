@@ -331,6 +331,11 @@ module decode
                     d.fp_lat = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 : 7'd3;
                     d.fp_occ = (b1[5:3]==3'd6||b1[5:3]==3'd7) ? 7'd39 :
                                (b1[5:3]==3'd1)                ? 7'd2  : 7'd1;
+`ifdef VEN_SRT_ITER
+                    // div/divr take the slow FSM (S_FEXEC -> iterative SRT engine);
+                    // drop the fast-path FP classification so they fall through.
+                    if (b1[5:3]==3'd6 || b1[5:3]==3'd7) d.is_fp=1'b0;
+`endif
                   end
                   default: ;  // FCOM/FCOMP reg-form stay slow-path
                 endcase

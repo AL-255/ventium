@@ -43,16 +43,16 @@
 `default_nettype none
 
 module ven_i8042 (
-    input  logic        clk,
-    input  logic        rst,        // synchronous, active-high
-    input  logic        cs,
-    input  logic        we,
+    input  wire logic        clk,
+    input  wire logic        rst,        // synchronous, active-high
+    input  wire logic        cs,
+    input  wire logic        we,
     // Common-interface port mandates the full 16-bit I/O address; this device
     // only needs addr[2] to discriminate 0x60 (data) from 0x64 (cmd/status).
     /* verilator lint_off UNUSEDSIGNAL */
-    input  logic [15:0] addr,
+    input  wire logic [15:0] addr,
     /* verilator lint_on UNUSEDSIGNAL */
-    input  logic [7:0]  wdata,
+    input  wire logic [7:0]  wdata,
     output logic [7:0]  rdata,       // combinational
 
     output logic        irq1,        // keyboard IRQ1

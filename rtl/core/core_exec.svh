@@ -254,6 +254,11 @@
                     pending_mem_pen <= 7'd3;   // P5 IMUL occupancy (occ=10, occ-7)
                   end
                   3'd6: begin // DIV (unsigned) — with #DE (divide-by-zero / overflow)
+`ifdef VEN_IDIV_ITER
+                    // route to the iterative integer divider (ven_idiv); EAX/EDX +
+                    // #DE commit on `done` in S_DIV_BUSY (engine started in core.sv).
+                    flags_we=1'b0; do_retire=1'b0; state<=S_DIV_BUSY;
+`else
                     logic dfault;
                     dfault = 1'b0;
                     if (q_w==3'd1) begin
@@ -307,8 +312,12 @@
                       // insn's pipe_free_at). Holds the U pipe so a dependent EDX:EAX
                       // consumer cannot issue until the divide latency elapses.
                       pending_mem_pen <= (q_w==3'd4) ? 7'd34 : (q_w==3'd2) ? 7'd18 : 7'd10;
+`endif
                   end
                   default: begin // IDIV /7 (signed) — with #DE (div-by-zero / overflow)
+`ifdef VEN_IDIV_ITER
+                    flags_we=1'b0; do_retire=1'b0; state<=S_DIV_BUSY;   // -> ven_idiv
+`else
                     logic dfault;
                     dfault = 1'b0;
                     if (q_w==3'd1) begin
@@ -352,6 +361,7 @@
                       // for r/m8/16/32 — a few clocks over DIV for the sign handling).
                       // Same deferred-penalty mechanism as DIV above (occ - 7).
                       pending_mem_pen <= (q_w==3'd4) ? 7'd39 : (q_w==3'd2) ? 7'd23 : 7'd15;
+`endif
                   end
                 endcase
               end
@@ -397,7 +407,7 @@
               end
 
               K_BITTEST: begin
-                logic [4:0] idx; logic bv; logic [31:0] cur,res;
+                logic [4:0] idx; logic bv; logic [31:0] cur,res,srcv;
                 // Register-direct / immediate bit index is taken modulo the
                 // operand size: mod 16 for a 0x66-prefixed (16-bit) operand,
                 // mod 32 otherwise. (Memory-operand bit-string forms, which use
@@ -405,7 +415,10 @@
                 // here — they HALT — so masking the index is correct for all
                 // forms reaching this block.)
                 cur=wmask(dst_cur,q_w);
-                idx = q_bit_imm ? q_imm[4:0] : reg_read(q_src_reg,3'd4,1'b0)[4:0];
+                // (Bind reg_read() to a temp first: IEEE 1800 forbids a
+                // bit-select directly on a function-call result; Vivado enforces.)
+                srcv = reg_read(q_src_reg,3'd4,1'b0);
+                idx = q_bit_imm ? q_imm[4:0] : srcv[4:0];
                 if (q_w==3'd2) idx = {1'b0, idx[3:0]};   // mod 16
                 bv = cur[idx];
                 unique case (q_bit_op)
@@ -429,8 +442,12 @@
                 s = wmask(q_mem_read ? mem_load_data : reg_read(q_src_reg,q_w,1'b0), q_w);
                 hi = (q_w==3'd2) ? 15 : 31;
                 zero=(s==32'd0); idx=32'd0;
-                if (!q_shrd) begin for (int i=hi;i>=0;i--) if (s[i]) idx=i[31:0]; end // BSF lowest
-                else         begin for (int i=0;i<=hi;i++) if (s[i]) idx=i[31:0]; end // BSR highest
+                // Constant loop bounds (0..31) with a runtime i<=hi guard: a
+                // variable loop bound ('hi') is not statically unrollable by
+                // Vivado synth (loop-convergence error), though Verilator accepts
+                // it. Semantics are identical (only bits <=hi are considered).
+                if (!q_shrd) begin for (int i=31;i>=0;i--) if (i<=hi && s[i]) idx=i[31:0]; end // BSF lowest
+                else         begin for (int i=0;i<=31;i++) if (i<=hi && s[i]) idx=i[31:0]; end // BSR highest
                 if (!zero) gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], idx, q_w, 1'b0);  // dest unchanged on src==0 (QEMU)
                 // QEMU sets CC_OP_LOGIC with CC_DST = the SOURCE operand:
                 //   ZF=(src==0) [defined]; SF=MSB(src); PF=parity(src); CF=OF=AF=0.
