@@ -1,0 +1,9 @@
+{
+  "name": "t_endbr",
+  "src": "t_endbr/t_endbr.s",
+  "elf": "t_endbr/t_endbr.elf",
+  "image": "t_endbr/t_endbr.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 48
+}
