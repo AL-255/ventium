@@ -15,8 +15,10 @@ not repeat itself.
   idle" rail when x87 is idle so the integer stages get the width; faint
   **per-stage column gridlines** anchor each lit cell to its PF/D1/D2/EX/WB
   column, and the stage captions are legend-white); (b) an
-  **IPC/stall sparkline strip** (windowed IPC track + per-cycle event pixels:
-  mispredict/stall/I-fill/walk); (c) the main **gem5/Konata pipeline view**
+  **IPC/stall sparkline strip** (windowed IPC track with a 0/1/2 y-axis + per-cycle
+  event pixels with an inline colour key: mispredict/stall/I-fill/walk) that
+  doubles as a **clickable navigation overview** — click anywhere to seek the
+  Konata playhead to that cycle; (c) the main **gem5/Konata pipeline view**
   (one row per retired instruction, columns = cycles, lifecycle drawn as
   F/D/X/M/W + `=` stall / `!` flush cells cascading diagonally; integer X green,
   x87 X purple; frozen instruction-label gutter showing n / U·V pipe / PC /
@@ -44,7 +46,10 @@ not repeat itself.
   shaded and labelled `Δ<n>cyc` (latency between two instructions; shift-click the
   same row again to clear it). Auto-follow ("stick to the newest row/cycle") is
   explicit state toggled only by a user scroll, so the viewport tracks live
-  retirement without stranding on stale rows.
+  retirement without stranding on stale rows; the **horizontal** follow anchors to
+  the topmost visible row's first cell (not the raw FSM max-cycle), so a long
+  non-retiring tail (S_DECODE/S_PF/S_WALK) can't scroll the visible rows' cells
+  off-screen into blank space.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
@@ -59,8 +64,9 @@ not repeat itself.
   cyan, ESP bytes amber).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction (Δ shows `+N` only on a stall gap — steady-state 0/1 suppressed); x86 byte-field colouring (prefix gray / opcode blue / ModRM green
-  / SIB purple / memory-offset yellow / immediate red / **branch-rel orange**),
-  clipped with `…` so long encodings never collide with the disasm; the
+  / SIB purple / memory-offset yellow / immediate red / **branch-rel vivid-orange**
+  `#ff8c00`, pulled well clear of the offset-yellow), clipped with `…` only past
+  ~11 bytes with the **full encoding on hover** (tooltip) so no bytes are lost; the
   **instruction column is split-coloured** (dimmed mnemonic + operand/target in
   the class accent, matching the Konata gutter); U=blue V=amber pipe; zebra; Δ
   amber on a stall gap; whole-row scroll snap; capstone disasm (16/32-bit per
@@ -80,6 +86,34 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 11 — fix Konata horizontal framing + sparkline navigation overview
+The Verify phase refuted 5 of 6 synthesis picks (perception errors / low-value),
+confirming one; ground-truthing the unpicked HIGH findings myself surfaced two more
+real ones the synthesis under-rated.
+- **Fix (CONFIRMED, HIGH) — Konata horizontal framing:** the horizontal follow
+  pinned to the raw FSM `max_cyc` while vertical follow tracked the bottom rows.
+  For a workload with a long non-retiring tail (test386 ends in S_DECODE, max_cyc
+  runs ~50 cycles past the last retirement) this scrolled the visible rows' cells
+  clean off the left edge — rows listed, timeline **blank**. It's the horizontal
+  twin of iteration-10's vertical regression. Fix: the horizontal stick now anchors
+  the left edge to the topmost visible row's first cell (clamped to max so a
+  fast-path cascade still follows the newest cycle). test386 now renders the full
+  `F F F D X = F` slow-path cascade as a clean diagonal.
+- **New feature — sparkline as a clickable navigation overview:** the IPC/stall
+  strip now seeks the Konata playhead to any cycle on click (with a hover marker),
+  gained an **inline event-colour key** (mispred/stall/I-fill/walk) and a 0/1/2 IPC
+  y-axis, and is a touch taller — addressing the recurring "sparkline scale is
+  cryptic / events have no key" findings while adding real navigation.
+- **Fix (recurring root cause) — branch-rel byte colour:** every iteration a critic
+  reports the rel8/rel32 branch-displacement byte as "yellow not orange". The code
+  was always correct (tagged `rel`), but the rel-orange `#f0883e` sat only RGB-dist
+  45 from the offset-yellow `#e3b341` — genuinely too close at 9px. Bumped rel to a
+  vivid `#ff8c00` (dist 81), so the perception error should finally stop recurring.
+- **Fix (recurring) — trace bytes truncation:** long encodings (ppage's 9–10-byte
+  movs) were `…`-clipped with data lost. Widened the bytes column (196→236px, fits
+  ~11 bytes) and added a **full-bytes hover tooltip** so the complete encoding is
+  always recoverable.
 
 ### Iteration 10 — fix Konata auto-follow regression + cycle-Δ measurement cursor
 This iteration's review collapsed 43 raw findings to ONE confirmed code change after
