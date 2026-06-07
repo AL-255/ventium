@@ -129,6 +129,43 @@ class InsnDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class EffectDelegate(QStyledItemDelegate):
+    """Colour-codes the effect column's three write kinds so they don't read as one
+    flat blob: register writes (`eax=…`) blue, integer flag changes (`ZF1 SF0`) teal,
+    and x87 exception groups (`FP:ZE`) amber. Groups are the 3-space-separated parts
+    that `_effect()` emits."""
+    def __init__(self, font, parent=None):
+        super().__init__(parent)
+        self.font = font
+
+    def paint(self, painter, option, index):
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+        txt = index.data(Qt.DisplayRole)
+        if not txt:
+            return
+        painter.save()
+        painter.setClipRect(option.rect)
+        painter.setFont(self.font)
+        fm = QFontMetrics(self.font)
+        r = option.rect
+        x = r.x() + 4
+        for part in txt.split("   "):
+            if not part:
+                continue
+            if part.startswith("FP:"):
+                col = "#d29922"          # x87 exception (amber)
+            elif "=" in part:
+                col = "#79c0ff"          # register write (blue)
+            else:
+                col = "#39c5cf"          # integer flag changes (teal)
+            painter.setPen(QColor(col))
+            painter.drawText(QRect(x, r.y(), r.right() - x, r.height()),
+                             Qt.AlignVCenter | Qt.AlignLeft, part)
+            x += fm.horizontalAdvance(part + "   ")
+        painter.restore()
+
+
 class TraceView(QWidget):
     rowSelected = Signal(int)     # emits the retire cycle of the selected row
     instSelected = Signal(int)    # emits the retire n of the selected row (for pinning)
@@ -180,6 +217,7 @@ class TraceView(QWidget):
         hh.setSectionResizeMode(_INSN_COL, QHeaderView.Stretch)
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
         self.tbl.setItemDelegateForColumn(_INSN_COL, InsnDelegate(mono, self.tbl))
+        self.tbl.setItemDelegateForColumn(_EFFECT_COL, EffectDelegate(mono, self.tbl))
         self.tbl.currentCellChanged.connect(self._on_row)
         lay.addWidget(self.tbl)
         # field-colour legend — swatch tightly coupled to ITS label (no rotation)
@@ -311,9 +349,8 @@ class TraceView(QWidget):
                     it.setData(_INSN_ROLE,
                                (parts[0], parts[1] if len(parts) > 1 else "", icol))
                     it.setToolTip(txt)                  # full disasm (col is now fixed-width)
-                if c == _EFFECT_COL:                    # register/flag writes
-                    it.setForeground(QBrush(QColor("#79c0ff")))
-                    if v:
+                if c == _EFFECT_COL:                    # painted by EffectDelegate
+                    if v:                               # (reg=blue / flags=teal / FP=amber)
                         it.setToolTip(v)
                 self.tbl.setItem(row, c, it)
         self._seen = total
