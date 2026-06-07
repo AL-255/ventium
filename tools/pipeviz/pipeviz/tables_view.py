@@ -258,6 +258,11 @@ class TablesView(QWidget):
                             [70, 64, 76, 46, 46, 46, 9999])
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
 
+        # --- Instruction mix (class histogram + U/V issue-port split) ---
+        self.mix_lbl = QLabel()
+        self.mix = _mk_table(["class", "count", "%", "bar"], [88, 60, 56, 9999])
+        self.tabs.addTab(self._wrap(self.mix_lbl, self.mix), "Instr mix")
+
         # --- Cycle attribution (where the cycles go / why IPC is low) ---
         self.cyc = CycleBreakdown()
         self.tabs.addTab(self.cyc, "Cycles")
@@ -266,6 +271,42 @@ class TablesView(QWidget):
         self.mem = MemoryView()
         self.tabs.addTab(self.mem, "Memory")
         self._bits = 32
+
+    _CLS_COLOR = {"branch": disasm.CC_BRANCH, "fp": disasm.CC_FP, "mem": disasm.CC_MEM,
+                  "alu": disasm.CC_ALU, "sys": disasm.CC_SYS, "other": disasm.CC_OTHER}
+
+    def set_instr_mix(self, insns):
+        """Histogram of retired instructions by class (branch/fp/mem/alu/sys) with
+        %-bars, plus the U/V issue-port split (a proxy for realised dual-issue)."""
+        cls, pipe = {}, {"U": 0, "V": 0}
+        for it in insns:
+            name = disasm.insn_class(it["mnem"].split(" ")[0])[0]
+            cls[name] = cls.get(name, 0) + 1
+            if it["pipe"] in pipe:
+                pipe[it["pipe"]] += 1
+        total = sum(cls.values())
+        self.mix.setRowCount(0)
+        if total == 0:
+            self.mix_lbl.setText("no instructions yet")
+            return
+        maxc = max(cls.values())
+        order = sorted(cls.items(), key=lambda kv: -kv[1])
+        self.mix.setRowCount(len(order))
+        for r, (name, n) in enumerate(order):
+            bar = "█" * max(1, round(14 * n / maxc))
+            for c, v in enumerate([name, str(n), f"{100 * n / total:.1f}%", bar]):
+                it = QTableWidgetItem(v)
+                if c == 0:
+                    it.setForeground(QBrush(QColor(self._CLS_COLOR.get(name, "#c9d1d9"))))
+                elif c == 1:
+                    it.setForeground(QBrush(QColor("#8b949e")))
+                elif c == 3:
+                    it.setForeground(QBrush(QColor("#d2a24c")))
+                self.mix.setItem(r, c, it)
+        u, v = pipe["U"], pipe["V"]
+        self.mix_lbl.setText(
+            f"{total} retired   ·   U-port {u}   V-port {v}   ·   "
+            f"{100 * v / total:.0f}% via the V-port (realised dual-issue)")
 
     def set_branches(self, insns):
         """Per-branch-PC profile: identify branch instructions and infer taken vs

@@ -104,16 +104,20 @@ class RegsView(QWidget):
         g4 = QGridLayout(fp); g4.setSpacing(2)
         self.fphdr = QLabel(""); self.fphdr.setFont(_mono(9))
         self.fphdr.setWordWrap(True)   # guard the header against width overrun
-        g4.addWidget(self.fphdr, 0, 0, 1, 3)
+        g4.addWidget(self.fphdr, 0, 0, 1, 4)
+        # col 2 is a fixed-width spacer so the decoded value never fuses with the
+        # 20-hex-digit 80-bit mantissa; the value column (3) is right-aligned.
+        g4.setColumnMinimumWidth(2, 12); g4.setColumnStretch(2, 1)
         g4.addWidget(self._k("reg"), 1, 0); g4.addWidget(self._k("80-bit"), 1, 1)
-        g4.addWidget(self._k("value"), 1, 2)
+        g4.addWidget(self._k("value"), 1, 3, alignment=Qt.AlignRight)
         self.st_lbls = []
         for i in range(8):
             tag = QLabel(f"ST{i}"); tag.setFont(_mono(9))
             hexv = QLabel("0" * 20); hexv.setFont(_mono(9))
             val = QLabel("0.0"); val.setFont(_mono(9))
             self.st_lbls.append((tag, hexv, val))
-            g4.addWidget(tag, i + 2, 0); g4.addWidget(hexv, i + 2, 1); g4.addWidget(val, i + 2, 2)
+            g4.addWidget(tag, i + 2, 0); g4.addWidget(hexv, i + 2, 1)
+            g4.addWidget(val, i + 2, 3, alignment=Qt.AlignRight)
         col3.addWidget(fp)
 
     def _k(self, t):

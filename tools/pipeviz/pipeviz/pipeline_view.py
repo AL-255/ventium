@@ -392,8 +392,10 @@ class _KonataPlot(QWidget):
             p.drawText(self.rect(), Qt.AlignCenter, "step the core to fill the pipeline view")
             p.end(); return
         vis = ev.rect()
-        # faint vertical gridlines every 10 cycles so a cell's cycle is readable
-        p.setPen(QColor("#171c24"))
+        # vertical gridlines every 10 cycles so a cell's cycle is readable —
+        # dim-but-legible (#2b3340 ≈ 2x the old near-black #171c24 contrast),
+        # kept below the stage board's #454f5d so they don't fight the dense cells.
+        p.setPen(QColor("#2b3340"))
         gc = self.base_cyc + ((10 - self.base_cyc % 10) % 10)
         while True:
             gx = self._x(gc)

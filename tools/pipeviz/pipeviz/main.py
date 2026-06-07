@@ -368,6 +368,7 @@ class MainWindow(QMainWindow):
         self.tables.update_from(self.backend, s)
         self.tables.set_hotspots(self.pipeline.konata.plot.insns)
         self.tables.set_branches(self.pipeline.konata.plot.insns)
+        self.tables.set_instr_mix(self.pipeline.konata.plot.insns)
         self.tables.mem.set_state(self.backend, s)
         if getattr(self, "_pinned_n", None) is None:
             self.regs.update_from(s)   # else keep the pinned AS-OF display
