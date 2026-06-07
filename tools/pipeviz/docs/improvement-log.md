@@ -192,6 +192,26 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 43 — clean 0-pick review (converged); recurring Segments false-positive held in REFUTED
+A genuinely clean iteration — no code change shipped, by design. The adversarial review
+confirmed the live watermark (`88e92f6`) on all 6 critics and produced **0 actionable
+picks**: both raw findings were the SAME pinned-mode Segments `base`/`limit` "crowding"
+claim, which synthesis correctly dropped against the REFUTED list (now refuted a 4th
+time). Re-examined it at 4× zoom to be sure it isn't a genuine-but-small readability
+issue hiding behind the "refuted" label: the `base`/`limit` headers are clearly
+space-separated (no collision — it's a Qt `QGridLayout`, the headers can't overlap), and
+the per-row `n/a` values are already dimmed italic so they read as "not captured" rather
+than data. The pin snapshot carries selectors, not descriptor base/limit, so `n/a` is the
+honest value; the presentation is correct. Manufacturing a change here purely to silence
+the recurring critic would violate the no-manufacture discipline, so nothing was changed.
+- **Source review (no firing bug):** scanned `regs_view.py` — the `floatx80_to_float`
+  decode handles inf/NaN/denormal/±0 correctly. One theoretical edge case: the PINNED x87
+  path detects an empty slot via all-zero bytes, which would misclassify a genuine `+0.0`
+  (a valid all-zero floatx80) as empty, whereas the LIVE path uses the proper tag bit. But
+  it fires on 0 captured workloads (the fp stack holds non-zero fadd results; dmiss has no
+  x87), so — like the iter39 indirect-branch mis-parse — a fix would be dead code with no
+  observable effect. Left unbuilt; recorded so the loop doesn't re-explore it.
+
 ### Iteration 42 — GUI clean; fix the review-harness watermark tofu box (U+2192 → ASCII)
 Review confirmed the live watermark (`3ad2ec2`) on all 6 critics and **confirmed 0 GUI
 defects** — a healthy converged outcome after iter40/41's run of real picks. Of the 3 raw
