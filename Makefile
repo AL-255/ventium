@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-all
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fppipe verify-all
 .DEFAULT_GOAL := help
 
 help:
@@ -258,6 +258,14 @@ verify-idiv:
 # /10 stages were the core's worst timing path). Bit-exact vs fx_fx_to_bcd.
 verify-bcd:
 	bash verif/bcd/run-bcd-gate.sh
+
+# --- 2-stage FP arithmetic split gate (verif/fppipe/run-fppipe-gate.sh) -------
+# Combinational gate proving f_eval_s2(f_eval_s1(...)) == f_eval(...) bit-exact
+# for the add/sub/mul groups + all rounding modes + normal/zero/Inf/NaN operands
+# — the datapath split that the +VEN_FP_PIPE 3-stage FP execute pipeline is built
+# on. No clock (pure function composition).
+verify-fppipe:
+	bash verif/fppipe/run-fppipe-gate.sh
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

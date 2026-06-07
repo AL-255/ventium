@@ -306,6 +306,58 @@ package ventium_x87_pkg;
     end
   endfunction
 
+  // ===========================================================================
+  // PIPELINED f_eval SPLIT (for +VEN_FP_PIPE). f_eval_s1 (stage 1) does the
+  // special-operand detection (f_special / 0-over-0 / x-over-0) and the add/sub/
+  // mul FRONT (fx_add_s1/fx_mul_s1); f_eval_s2 (stage 2) does fx_round_pack and
+  // assembles {ie,ze,pe,result}. f_eval_s2(f_eval_s1(sub,a,b,rc,err),rc) is
+  // BIT-EXACT vs f_eval(sub,a,b,rc,err) for the add/sub/mul groups (sub 0/1/4/5)
+  // — the only groups the pipelined fast arm uses (normal divides go to the SRT
+  // engine; non-normal divides hit the early special cases). Verified by
+  // verif/fppipe. Carries fx_pipe_t (fpu_x87_pkg) between the two cycles.
+  function automatic fx_pipe_t f_eval_s1(input logic [2:0] sub,
+                                         input logic [79:0] a, input logic [79:0] b,
+                                         input logic [1:0] rc,
+                                         input logic fdiv_err);
+    logic [80:0] r;
+    logic [81:0] sp;
+    fx_pipe_t    p;
+    begin
+      p = '0;
+      sp = f_special(sub, a, b);
+      if (sp[81]) begin                                          // Inf/NaN special operand
+        p.early = 1'b1; p.result = {sp[80], 1'b0, 1'b0, sp[79:0]};
+      end else if (f_zero_over_zero(sub, a, b)) begin
+        p.early = 1'b1; p.result = {1'b1, 1'b0, 1'b0, 80'hFFFFC000000000000000};
+      end else if (f_div_by_zero(sub, a, b)) begin
+        r = f_arith(sub, a, b, rc, fdiv_err);                    // signed Inf
+        p.early = 1'b1; p.result = {1'b0, 1'b1, 1'b0, r[79:0]};
+      end else begin
+        unique case (sub)
+          3'd0: p = fx_add_s1(a, b, rc);                          // add
+          3'd1: p = fx_mul_s1(a, b);                              // mul
+          3'd4: p = fx_add_s1(a, {~b[79], b[78:0]}, rc);          // sub: a - b
+          3'd5: p = fx_add_s1(b, {~a[79], a[78:0]}, rc);          // subr: b - a
+          // div/divr (6/7) never reach here in the pipelined fast arm (normal
+          // divides are SRT-engine-routed; non-normal hit the early cases above).
+          default: begin p.early = 1'b1; p.result = 83'd0; end
+        endcase
+      end
+      f_eval_s1 = p;
+    end
+  endfunction
+
+  function automatic logic [82:0] f_eval_s2(input fx_pipe_t p, input logic [1:0] rc);
+    logic [80:0] rp;
+    begin
+      if (p.early) f_eval_s2 = p.result;
+      else begin
+        rp = fx_round_pack(p.sign, p.unbiased, p.sig, p.pre_inexact, rc);
+        f_eval_s2 = {1'b0, 1'b0, rp[80], rp[79:0]};               // PE = inexact
+      end
+    end
+  endfunction
+
   // Latch arithmetic status flags (sticky) into fstat from f_eval's flag bits.
   function automatic logic [15:0] f_arith_fstat(input logic [15:0] cur,
                                                 input logic [82:0] arf);

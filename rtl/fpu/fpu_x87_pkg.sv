@@ -224,6 +224,112 @@ package fpu_x87_pkg;
     end
   endfunction
 
+  // ===========================================================================
+  // PIPELINED add/mul SPLIT (for +VEN_FP_PIPE). fx_add/fx_mul are split at their
+  // shared fx_round_pack boundary into a FRONT (fx_*_s1: unpack/align/add or
+  // multiply -> the round_pack args, OR a direct special result) and a BACK
+  // (fx_round_pack, called in f_eval_s2). fx_pipe_t carries the intermediate
+  // between the two pipeline cycles. The composition is BIT-EXACT vs the
+  // single-cycle fx_add/fx_mul (verified by verif/fppipe). early=1 means the
+  // result is already final (signed-zero / exact-cancellation specials), so the
+  // back stage just forwards it. The f_eval-level flag wrapping ({ie,ze,pe}) is
+  // applied in f_eval_s1/f_eval_s2 (ventium_x87_pkg). `result` is the 83-bit
+  // f_eval value {ie,ze,pe,floatx80}; for an arith special ie=ze=pe=0.
+  // ===========================================================================
+  typedef struct packed {
+    logic        early;            // result already final (special / cancellation)
+    logic [82:0] result;           // {ie,ze,pe,floatx80} when early
+    logic        sign;             // round_pack args when !early
+    logic signed [31:0] unbiased;
+    logic [127:0] sig;
+    logic        pre_inexact;
+  } fx_pipe_t;
+
+  // fx_add front (a + b on normal/zero operands). Mirrors fx_add up to the
+  // fx_round_pack call; the round_pack itself is deferred to the back stage.
+  function automatic fx_pipe_t fx_add_s1(input logic [79:0] a, input logic [79:0] b,
+                                         input logic [1:0] rc);
+    logic        sa, sb, sign;
+    logic [63:0] ma, mb;
+    logic signed [31:0] ua, ub, topexp, msbpos;
+    logic [127:0] A, B, s;
+    int          shift;
+    int          msb;
+    fx_pipe_t    p;
+    begin
+      p = '0;
+      sa=fx_sign(a); sb=fx_sign(b); ma=fx_man(a); mb=fx_man(b);
+      if (fx_is_zero(a) && fx_is_zero(b)) begin
+        p.early=1'b1;
+        if (sa == sb) p.result = {3'b0, fx_make(sa, 15'd0, 64'd0)};
+        else          p.result = {3'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
+      end else if (fx_is_zero(a)) begin
+        p.early=1'b1; p.result = {3'b0, b};
+      end else if (fx_is_zero(b)) begin
+        p.early=1'b1; p.result = {3'b0, a};
+      end else begin
+        ua = fx_uexp(a); ub = fx_uexp(b);
+        A = {1'b0, ma, 63'd0};
+        B = {1'b0, mb, 63'd0};
+        if (ua >= ub) begin
+          shift = ua - ub;
+          if (shift > 127) B = 128'd0; else B = B >> shift;
+          topexp = ua;
+        end else begin
+          shift = ub - ua;
+          if (shift > 127) A = 128'd0; else A = A >> shift;
+          topexp = ub;
+        end
+        if (sa == sb)        begin s = A + B; sign = sa; end
+        else if (A >= B)     begin s = A - B; sign = sa; end
+        else                 begin s = B - A; sign = sb; end
+        if (s == 128'd0) begin
+          p.early=1'b1; p.result = {3'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
+        end else begin
+          msb = 0;
+          for (int i=127; i>=0; i--) if (s[i]) begin msb=i; break; end
+          msbpos = msb;
+          p.early       = 1'b0;
+          p.sign        = sign;
+          p.unbiased    = topexp + (msbpos - 126);
+          p.sig         = s;
+          p.pre_inexact = 1'b0;
+        end
+      end
+      fx_add_s1 = p;
+    end
+  endfunction
+
+  // fx_mul front (a * b on normal/zero operands).
+  function automatic fx_pipe_t fx_mul_s1(input logic [79:0] a, input logic [79:0] b);
+    logic        sa, sb, sign;
+    logic [63:0] ma, mb;
+    logic signed [31:0] ua, ub, msbpos;
+    logic [127:0] prod;
+    int          msb;
+    fx_pipe_t    p;
+    begin
+      p = '0;
+      sa=fx_sign(a); sb=fx_sign(b); sign=sa^sb;
+      if (fx_is_zero(a) || fx_is_zero(b)) begin
+        p.early=1'b1; p.result = {3'b0, fx_make(sign, 15'd0, 64'd0)};
+      end else begin
+        ma=fx_man(a); mb=fx_man(b);
+        ua=fx_uexp(a); ub=fx_uexp(b);
+        prod = {64'd0, ma} * {64'd0, mb};
+        msb = 0;
+        for (int i=127; i>=0; i--) if (prod[i]) begin msb=i; break; end
+        msbpos = msb;
+        p.early       = 1'b0;
+        p.sign        = sign;
+        p.unbiased    = (ua-63) + (ub-63) + msbpos;
+        p.sig         = prod;
+        p.pre_inexact = 1'b0;
+      end
+      fx_mul_s1 = p;
+    end
+  endfunction
+
   // ---------------------------------------------------------------------------
   // Divide a/b. Returns {inexact, result}. Normal operands, b != 0.
   // ---------------------------------------------------------------------------
