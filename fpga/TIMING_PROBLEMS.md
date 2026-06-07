@@ -422,3 +422,19 @@ cone left to cut. **To reach 66 MHz the lever is now PLACEMENT, not RTL** —
 floorplan/Pblock the front‑end + FP datapaths into compact regions and/or close
 timing during full‑SoC integration with real clocking constraints. Synth Fmax
 journey this session: 3.6 → 14.6 → 37.5 → 46 → 58 → **59.5 MHz**. _Captured 2026‑06‑07._
+
+## Floorplan / route attempt — the OOC core-only flow is CONGESTION-BOUND (2026‑06‑07)
+With the logic optimized (worst‑path logic 6 ns), tried to close the routing gap
+via place+route + floorplanning (`fpga/scripts/impl_route_fppipe.tcl`, VEN_PBLOCK):
+* Placed Fmax (ExtraTimingOpt): **~42.5 MHz** (no Pblock) → **~44.2 MHz** (soft
+  Pblock compaction) — floorplanning helps placement only marginally (+1.7 MHz).
+* **Full ROUTE does NOT converge at 82.85 % util** — both Explore and the default
+  route directive timed out (>90–100 min). The device‑filling core is
+  congestion‑bound; the router can't close it and the placed→routed gap means the
+  real number is lower still.
+**Conclusion:** floorplanning alone can't fix a device‑filling core (no room to
+compact). The lever to 66 MHz is **LOWER UTIL** — drive 82.85 % → ~70 % via the
+deferred behaviour‑preserving consolidations (apply_cmp×6 / fcom_codes×6, like the
+f_eval win) so the design is routable AND routes short — and/or close timing at
+full‑SoC integration with the core as one floorplanned block + real MMCM clocking.
+The RTL logic‑side Fmax work is COMPLETE. _Captured 2026‑06‑07._
