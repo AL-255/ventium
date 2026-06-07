@@ -117,10 +117,13 @@ not repeat itself.
   Y = effective address, low at the bottom), loads blue / stores gold — so the access
   PATTERN reads as a shape the per-row trace list can't show: a strided walk is a
   straight diagonal (dmiss's loads), a hot location a horizontal band, random access
-  scatters (header gives count / address span / load·store split). **Clicking a
-  point** rings it with a crosshair, reads out its `n / cyc / @address / load|store`
-  in the header, and jumps the trace (+ pins regs) to that instruction — so an
-  outlier or a stripe in the scatter is one click from its source row.
+  scatters (header gives count / address span / load·store split + the **dominant
+  STRIDE** — the mode of the consecutive-access deltas with its %, e.g. dmiss reads
+  `stride +0x20 (100%)` = exactly the 32-byte cache line, so every access misses;
+  `irregular stride` when no delta dominates). **Clicking a point** rings it with a
+  crosshair, reads out its `n / cyc / @address / load|store` in the header, and jumps
+  the trace (+ pins regs) to that instruction — so an outlier or a stripe in the
+  scatter is one click from its source row.
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
@@ -169,6 +172,23 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 34 — Mem-map dominant-stride annotation
+Review confirmed the live watermark (`56efc9f`) on all 6 critics and **confirmed 0 of
+0** picks — the FOURTH straight 0-pick round (features critic: "None"). The UI is
+saturated; per the converged-loop discipline this iteration is a small, ground-truthed
+enhancement to a recent feature, not a forced new surface.
+- **Refinement — dominant-stride annotation on the Mem map.** The scatter's slope
+  shows a strided walk as a *shape*; the header now also states the **numeric stride**
+  — the mode of the consecutive-access address deltas with its share, e.g. dmiss reads
+  `stride +0x20 (100%)`. That value is the cache-analysis punchline: 0x20 is exactly
+  the 32-byte cache line, so a 0x20 stride means every load lands on a fresh line and
+  misses — the whole dmiss story in three tokens. Shows `irregular stride` when no
+  delta reaches 40%. GROUND-TRUTHED before building (the iter30+ discipline): probed
+  the delta distribution — dmiss +0x20 100%, test386 +0x2 100%, ppage +0x4 56% — all
+  meaningful; rounds the % (so 5/9 reads 56%, not a floored 55%). Pure client-side
+  from the already-collected access stream. Smoke-tested the stride values across
+  three workloads, the click still selects/emits, and the no-access map is inert.
 
 ### Iteration 33 — interactive Mem map (click a point → readout + trace jump)
 Review confirmed the live watermark (`3689302`) on all 6 critics and **confirmed 0 of
