@@ -146,13 +146,19 @@ def _fill(table, rows, dim_cols=(), right_cols=()):
         table.sync_hint()
 
 
-def _right_align_headers(table, cols):
-    """Right-align the header labels of numeric columns so a centered 'cycles'
-    caption doesn't sit visually divorced from its right-aligned data column."""
+def _align_headers(table, cols, align):
+    """Align the given header labels so a header caption never sits visually
+    divorced from its data: numeric columns right-align (digits line up), glyph-bar
+    columns (cost/bias/bar) left-align so the caption sits over its left-pinned bar
+    instead of floating centered in the stretched column's empty right half."""
     for c in cols:
         hi = table.horizontalHeaderItem(c)
         if hi is not None:
-            hi.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            hi.setTextAlignment(align | Qt.AlignVCenter)
+
+
+def _right_align_headers(table, cols):
+    _align_headers(table, cols, Qt.AlignRight)
 
 
 class InsnCellDelegate(QStyledItemDelegate):
@@ -346,6 +352,7 @@ class TablesView(QWidget):
         # field-colour the instruction column to match the trace / Konata gutter
         self.hot.setItemDelegateForColumn(5, InsnCellDelegate(_mono(), self.hot))
         _right_align_headers(self.hot, (1, 2, 3))   # hits / cycles / cyc% match the data
+        _align_headers(self.hot, (4,), Qt.AlignLeft)  # 'cost' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
 
         # --- Branches (per-branch-PC taken/not-taken profile) ---
@@ -355,11 +362,13 @@ class TablesView(QWidget):
                             hint="no branches retired yet — step the core through a "
                                  "jump/call/loop")
         _right_align_headers(self.br, (3, 4, 5))     # hits / taken / T% match the data
+        _align_headers(self.br, (6,), Qt.AlignLeft)   # 'bias' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
 
         # --- Instruction mix (class histogram + U/V issue-port split) ---
         self.mix_lbl = QLabel()
         self.mix = _mk_table(["class", "count", "%", "bar"], [88, 60, 56, 9999])
+        _align_headers(self.mix, (3,), Qt.AlignLeft)  # 'bar' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.mix_lbl, self.mix), "Instr mix")
 
         # --- Cycle attribution (where the cycles go / why IPC is low) ---

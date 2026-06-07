@@ -113,14 +113,17 @@ for tag, img, steps, soc in SHOTS:
         if len(pl.insns) > 12:
             pl.anchor = pl.insns[-10]["c1"]
             win.pipeline.highlight_cycle(pl.insns[-4]["c1"])
-            # select an instruction WITH source registers (skip the no-reads jne/branch
-            # the playhead may land on) so the producer→consumer dependency edges render
-            # in the capture, not just the playhead.
-            for k in range(len(pl.insns) - 1, max(0, len(pl.insns) - 12), -1):
-                if pl.insns[k].get("reads"):
-                    pl.sel_row = k
-                    pl._dep_for_row = -1
-                    break
+            # select an instruction so the producer→consumer dependency edges render in
+            # the capture: PREFER a conditional branch (reads EFLAGS) so the new flag
+            # edge (`jne` ← flags ← cmp/dec) shows; else any op with source registers.
+            pick = next((k for k in range(len(pl.insns) - 1, max(0, len(pl.insns) - 16), -1)
+                         if pl.insns[k].get("rfl")), None)
+            if pick is None:
+                pick = next((k for k in range(len(pl.insns) - 1, max(0, len(pl.insns) - 16), -1)
+                             if pl.insns[k].get("reads")), None)
+            if pick is not None:
+                pl.sel_row = pick
+                pl._dep_for_row = -1
     except Exception:
         pass
     win.repaint(); app.processEvents()

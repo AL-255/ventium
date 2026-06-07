@@ -258,6 +258,7 @@ C_STG_SYS = "#a87f55"     # system / microcode    (bronze — a DEDICATED Konata
                           # via C_SYS so the 'S' glyph is decodable + has a legend swatch)
 
 _GPR_NAMES = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]  # by GPR index
+_FLAG_REG = 8         # dependency-edge sentinel for an EFLAGS dependency (label 'flags')
 
 # Konata cell glyph -> full stage name, for the per-cell hover tooltip.
 _GLYPH_STAGE = {"F": "Fetch", "L": "I-cache line fill", "D": "Decode",
@@ -377,17 +378,18 @@ class _KonataPlot(QWidget):
         return t or "?"
 
     def _regs(self, pc):
-        """(read_gpr_idxs, write_gpr_idxs) for the instruction at pc, cached — the
-        raw material for the producer→consumer dependency overlay."""
+        """(read_gprs, write_gprs, reads_flags, writes_flags) for the instruction at
+        pc, cached — the raw material for the producer→consumer dependency overlay
+        (the flags pair drives the conditional-branch `jne` ← flags ← cmp/dec edge)."""
         key = (pc, self.cs_base, self.bits)
         rw = self._rw_cache.get(key)
         if rw is None and self.backend is not None:
             code = self.backend.mem_read(self.cs_base + pc, 16)
-            reads = disasm.read_regs(code, pc, self.bits)
-            writes, _ = disasm.written_regs(code, pc, self.bits)
-            rw = (reads, writes)
+            reads, rflags = disasm.read_regs(code, pc, self.bits)
+            writes, wflags = disasm.written_regs(code, pc, self.bits)
+            rw = (reads, writes, rflags, wflags)
             self._rw_cache[key] = rw
-        return rw or ([], [])
+        return rw or ([], [], False, False)
 
     def _compute_deps(self, row):
         """For the selected consumer row, find the PRODUCER of each source GPR — the
@@ -402,14 +404,19 @@ class _KonataPlot(QWidget):
             return
         cons = self.insns[row]
         need = set(cons.get("reads", ()))
-        if not need:
+        need_flags = bool(cons.get("rfl"))    # conditional branch / adc / etc. read EFLAGS
+        if not need and not need_flags:
             return
-        found = {}
+        found = {}                            # GPR index -> producer row
+        flag_prod = None                      # producer row of the EFLAGS value
         for j in range(row - 1, max(-1, row - 400), -1):
-            for w in self.insns[j].get("writes", ()):
+            pj = self.insns[j]
+            for w in pj.get("writes", ()):
                 if w in need and w not in found:
                     found[w] = j
-            if len(found) == len(need):
+            if need_flags and flag_prod is None and pj.get("wfl"):
+                flag_prod = j
+            if len(found) == len(need) and (not need_flags or flag_prod is not None):
                 break
         # amber 'gating' is RELIABLE only when the producer's result arrives right as
         # the consumer's stall LIFTS — i.e. its commit lands within ±1 cycle of the
@@ -419,10 +426,12 @@ class _KonataPlot(QWidget):
         # its ecx producer — that edge stays dim, no false stall-cause claim).
         stalls = [cyc for (cyc, ch, _) in cons["cells"] if ch == "="]
         s_end = max(stalls) if stalls else None
+        def _gating(jrow):
+            return s_end is not None and (s_end - 1 <= self.insns[jrow]["c1"] <= s_end + 2)
         for reg, j in found.items():
-            prod = self.insns[j]
-            gating = s_end is not None and (s_end - 1 <= prod["c1"] <= s_end + 2)
-            self._dep_edges.append((j, reg, gating))
+            self._dep_edges.append((j, reg, _gating(j)))
+        if flag_prod is not None:             # _FLAG_REG=8 sentinel -> labelled 'flags'
+            self._dep_edges.append((flag_prod, _FLAG_REG, _gating(flag_prod)))
 
     def ingest(self, backend, since_cyc):
         new = backend.get_cycles(since_cyc, 8192)
@@ -444,22 +453,22 @@ class _KonataPlot(QWidget):
                 self.stat["stall"] += 1
             if c.retU:
                 mn = self._mn(c.pcU)
-                reads, writes = self._regs(c.pcU)
+                reads, writes, rfl, wfl = self._regs(c.pcU)
                 cells = _add_frontend(_recolor_fp(self._pending, mn))
                 self.insns.append(dict(n=c.nU, pc=c.pcU, pipe="U", mnem=mn,
                                        cells=cells, c0=cells[0][0], c1=c.cyc,
-                                       reads=reads, writes=writes))
+                                       reads=reads, writes=writes, rfl=rfl, wfl=wfl))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
                 self.stat["uret"] += 1
                 self._pending = []
             if c.retV:
                 mn = self._mn(c.pcV)
-                reads, writes = self._regs(c.pcV)
+                reads, writes, rfl, wfl = self._regs(c.pcV)
                 vcol = C_FP if (mn[:1] == "f" and mn[:2] not in ("fs", "gs")) else C_PIPE
                 cells = _add_frontend([(c.cyc, "X", vcol)])
                 self.insns.append(dict(n=c.nV, pc=c.pcV, pipe="V", mnem=mn,
                                        cells=cells, c0=cells[0][0], c1=c.cyc,
-                                       reads=reads, writes=writes))
+                                       reads=reads, writes=writes, rfl=rfl, wfl=wfl))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
                 self.stat["vret"] += 1
         if len(self.insns) > 9000:          # rolling cap
@@ -604,11 +613,17 @@ class _KonataPlot(QWidget):
                 p.drawLine(ex, ey, cx, cy)
                 p.setBrush(col); p.drawEllipse(QPoint(cx, cy), 2, 2)    # arrowhead at consumer
                 p.setBrush(Qt.NoBrush)
-                lbl = _GPR_NAMES[reg] if 0 <= reg < 8 else "?"
+                lbl = "flags" if reg == _FLAG_REG else (_GPR_NAMES[reg] if 0 <= reg < 8 else "?")
                 lw = QFontMetrics(p.font()).horizontalAdvance(lbl) + 4
-                p.fillRect(QRect(ex + 3, ey - 6, lw, 11), QColor("#0d1117"))
+                # default the label to the RIGHT of the producer cell, but flip it to
+                # the LEFT when that would run past the viewport edge (the producer is
+                # often near the playhead frontier) so it never clips into the gutter.
+                lx = ex + 3
+                if lx + lw > vis.right() - 2:
+                    lx = ex - 3 - lw
+                p.fillRect(QRect(lx, ey - 6, lw, 11), QColor("#0d1117"))
                 p.setPen(col)
-                p.drawText(QRect(ex + 3, ey - 6, lw, 11), Qt.AlignCenter, lbl)
+                p.drawText(QRect(lx, ey - 6, lw, 11), Qt.AlignCenter, lbl)
             p.restore()
         # Δ-measure LABEL only (the band fill + amber anchor line are drawn BEHIND
         # the cells so they can't punch through a glyph); the label sits on top.
@@ -656,8 +671,10 @@ class _KonataPlot(QWidget):
                 cnt[c[1]] = cnt.get(c[1], 0) + 1
             brk = "  ".join(f"{n}×{_GLYPH_STAGE.get(g, g)}"
                             for g, n in sorted(cnt.items(), key=lambda gn: -gn[1]))
-            src = ",".join(_GPR_NAMES[s] for s in ins.get("reads", ())) or "—"
-            dst = ",".join(_GPR_NAMES[d] for d in ins.get("writes", ())) or "—"
+            src = ",".join([_GPR_NAMES[s] for s in ins.get("reads", ())]
+                           + (["flags"] if ins.get("rfl") else [])) or "—"
+            dst = ",".join([_GPR_NAMES[d] for d in ins.get("writes", ())]
+                           + (["flags"] if ins.get("wfl") else [])) or "—"
             self.setToolTip(
                 f"n={ins['n']}  {ins['pipe']}  {ins['pc']:#010x}  {ins['mnem']}\n"
                 f"cycles {ins['c0']}..{ins['c1']}  (commit @ {ins['c1']}, "
