@@ -99,6 +99,41 @@ def byte_fields(code: bytes, addr: int = 0, bits: int = 32):
     return [(bs[i], fields[i]) for i in range(n)]
 
 
+# reg-name (incl. 16/8-bit sub-registers) -> architectural GPR index 0..7.
+_GPR_OF = {}
+for _i, _names in enumerate([("eax", "ax", "al", "ah"), ("ecx", "cx", "cl", "ch"),
+                             ("edx", "dx", "dl", "dh"), ("ebx", "bx", "bl", "bh"),
+                             ("esp", "sp", "spl"), ("ebp", "bp", "bpl"),
+                             ("esi", "si", "sil"), ("edi", "di", "dil")]):
+    for _n in _names:
+        _GPR_OF[_n] = _i
+
+
+def written_regs(code: bytes, addr: int = 0, bits: int = 32):
+    """Which architectural GPRs (and EFLAGS) an instruction WRITES, via capstone's
+    register-access analysis. Returns (gpr_index_list, flags_written). Used to
+    attribute each retirement's effect to the instruction that caused it — the
+    per-cycle commit snapshot alone can't separate a dual-issue U/V pair's writes."""
+    md = _md16d if bits == 16 else _md32d
+    try:
+        for insn in md.disasm(code, addr):
+            try:
+                _, wr = insn.regs_access()
+            except Exception:
+                wr = getattr(insn, "regs_write", []) or []
+            gprs, flags = [], False
+            for rid in wr:
+                nm = (insn.reg_name(rid) or "").lower()
+                if nm in _GPR_OF and _GPR_OF[nm] not in gprs:
+                    gprs.append(_GPR_OF[nm])
+                elif "flags" in nm:
+                    flags = True
+            return gprs, flags
+    except Exception:
+        pass
+    return [], False
+
+
 def disasm_one(code: bytes, addr: int = 0, bits: int = 32):
     """Disassemble the first instruction in `code`. Returns
     (size, mnemonic, op_str, bytes). On failure returns (1, 'db', '0xNN', ...)."""
@@ -184,7 +219,10 @@ def stage_of(state_name):
 # dual-issue/S_PIPE meaning in the pipeline panel, so ALU/data mnemonics use a
 # neutral off-white here and only branches/fp/mem/sys carry an accent.
 # ---------------------------------------------------------------------------
-CC_BRANCH = "#e3b341"   # control transfer (gold)
+CC_BRANCH = "#ff8c00"   # control transfer (orange) — SAME orange as the rel8/rel32
+                        # branch-target BYTE colour, so a branch target reads the
+                        # same hue in the bytes column and the disassembly (was a
+                        # gold that conflated it with the yellow memory-displacement).
 CC_FP = "#c89bff"       # x87 (purple)
 CC_MEM = "#79c0ff"      # load/store/stack (blue)
 CC_ALU = "#d9dee3"      # arithmetic / data (neutral off-white)
