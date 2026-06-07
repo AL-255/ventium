@@ -36,12 +36,18 @@ _STAMP = f"pipeviz build {_SHA}  {datetime.datetime.now().strftime('%H:%M:%S')}"
 
 
 def _watermark(path, tag):
+    # Stamp the build into a DEDICATED 15px band ABOVE the screenshot rather than
+    # painting over the top-left corner (which obscured the toolbar in full-window
+    # shots and a panel title in the crops). The band overlaps no UI, and the
+    # stamp stays top-left + findable for the anti-staleness check.
     im = Image.open(path).convert("RGB")
-    d = ImageDraw.Draw(im)
-    txt = f"{_STAMP}  |  {tag}"
-    d.rectangle((0, 0, 8 + 7 * len(txt), 14), fill=(20, 24, 31))
-    d.text((4, 2), txt, fill=(240, 200, 80))
-    im.save(path)
+    w, h = im.size
+    band = 15
+    canvas = Image.new("RGB", (w, h + band), (20, 24, 31))
+    canvas.paste(im, (0, band))
+    d = ImageDraw.Draw(canvas)
+    d.text((4, 2), f"{_STAMP}  |  {tag}", fill=(240, 200, 80))
+    canvas.save(path)
 
 # (tag, image, steps, soc) — representative workloads
 SHOTS = [
@@ -68,15 +74,30 @@ for tag, img, steps, soc in SHOTS:
     win.repaint(); app.processEvents()
     full = os.path.join(OUT, f"{tag}_full.png")
     win.grab().save(full)
-    _watermark(full, tag)
-    # panel crops for closer inspection (layout: toolbar ~85px; left splitter
-    # pipeline:trace ~ [430,540]; right splitter tables:regs)
+    # crop the RAW grab first (crop boxes assume the un-banded coords), THEN band
+    # the full image — so the 15px watermark band never shifts the crop regions.
     im = Image.open(full)
     for sub, box in [("pipeline", (0, 86, 1010, 516)), ("trace", (0, 516, 1010, 980)),
                      ("tables", (1010, 86, 1640, 560)), ("regs", (1010, 560, 1640, 980))]:
         cp = os.path.join(OUT, f"{tag}_{sub}.png")
         im.crop(box).save(cp)
         _watermark(cp, f"{tag} · {sub}")
+    _watermark(full, tag)
+    # also capture the register panel PINNED to a mid-trace instruction, so the
+    # review covers the "pin regs AS-OF a retired insn" feature (live shots can't
+    # show it). dmiss exercises GPR deltas, fp the x87 stack.
+    if tag in ("dmiss", "fp"):
+        nret = win.backend.retire_count()
+        if nret > 6:
+            npin = nret - 4
+            win._pin_to(npin)
+            app.processEvents(); win.repaint(); app.processEvents()
+            pfull = os.path.join(OUT, f"{tag}_pinned_full.png")
+            win.grab().save(pfull)
+            pf = os.path.join(OUT, f"{tag}_regs_pinned.png")
+            Image.open(pfull).crop((1010, 560, 1640, 980)).save(pf)
+            _watermark(pf, f"{tag} · regs pinned n={npin}")
+            win._unpin(); app.processEvents()
     s = win.backend.state()
     print(f"{tag:9s} ret={win.backend.retire_count():6d} "
           f"state={win.backend.state_name(s.state):9s} -> {full}")
