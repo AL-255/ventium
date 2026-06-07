@@ -572,6 +572,7 @@ module core
 `endif
 `ifdef VEN_BCD_ITER
     S_BCD_BUSY,  // wait for the iterative FP->packed-BCD (FBSTP) engine
+    S_FBLD_BUSY, // wait for the iterative packed-BCD->FP (FBLD) engine
 `endif
 `ifdef VEN_FP_PIPE
     S_FEXEC_EX,  // slow-arm FP-execute 2nd stage: f_eval from the registered
@@ -4495,7 +4496,11 @@ module core
           fp_we_push=1'b1; fp_push_data=f_mem_as_int(f_mem80, q_f_mbytes);
         end
         FX_FBLD: begin   // M10: packed-BCD m80 -> floatx80 (exact, <=18 digits)
+`ifndef VEN_BCD_ITER
           fp_we_push=1'b1; fp_push_data=fx_bcd_to_fx(f_mem80);
+`endif
+          // under VEN_BCD_ITER: deferred to S_FBLD_BUSY (iterative ven_bcd_to_fp);
+          // the push lands there with the engine result, same clock as the retire.
         end
         FX_FLDCONST: begin fp_we_push=1'b1; fp_push_data=fconst(q_f_const); end
         FX_FLD_STI:  begin fp_we_push=1'b1; fp_push_data=s_stiv;            end
@@ -4664,6 +4669,11 @@ module core
     if (state==S_BCD_BUSY && eng_bcd_done) begin
       if (eng_bcd_result[81])      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end // IE
       else if (eng_bcd_result[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end // PE
+    end
+    // iterative FBLD: push the converted floatx80 on the engine-done clock (the
+    // same clock S_FBLD_BUSY retires -> the per-retire arch state is exact).
+    if (state==S_FBLD_BUSY && eng_fbld_done) begin
+      fp_we_push=1'b1; fp_push_data=eng_fbld_result;
     end
 `endif
 
@@ -4837,6 +4847,11 @@ module core
   logic        eng_bcd_start, eng_bcd_busy, eng_bcd_done;
   logic [81:0] eng_bcd_result;
   logic [81:0] fbcd_result_q;       // latched {ie,pe,bcd} store value
+  // FBLD (packed-BCD m80 -> floatx80): the 18-chained-*10 fx_bcd_to_fx was the
+  // core's worst LOGIC path once the FP arith was pipelined. Run the iterative
+  // engine (started in S_FEXEC), wait in S_FBLD_BUSY, then push the result + retire.
+  logic        eng_fbld_start, eng_fbld_busy, eng_fbld_done;
+  logic [79:0] eng_fbld_result;
 `ifdef VEN_BCD_ITER
   assign eng_bcd_start = (state==S_FEXEC) && (q_fxop==FX_FBSTP);
   ven_bcd u_bcd (
@@ -4844,9 +4859,17 @@ module core
     .v(fst(3'd0)), .rc(fctrl[11:10]),
     .busy(eng_bcd_busy), .done(eng_bcd_done), .result(eng_bcd_result)
   );
+  assign eng_fbld_start = (state==S_FEXEC) && (q_fxop==FX_FBLD);
+  ven_bcd_to_fp u_bcd2fp (
+    .clk(clk), .rst_n(rst_n), .start(eng_fbld_start),
+    .bcd(f_mem80),
+    .busy(eng_fbld_busy), .done(eng_fbld_done), .result(eng_fbld_result)
+  );
 `else
   assign eng_bcd_start=1'b0; assign eng_bcd_busy=1'b0; assign eng_bcd_done=1'b0;
   assign eng_bcd_result=82'd0;
+  assign eng_fbld_start=1'b0; assign eng_fbld_busy=1'b0; assign eng_fbld_done=1'b0;
+  assign eng_fbld_result=80'd0;
 `endif
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a

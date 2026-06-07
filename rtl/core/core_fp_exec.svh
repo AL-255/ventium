@@ -73,6 +73,14 @@
             end else
 `endif
             if (f_do_retire) begin
+`ifdef VEN_BCD_ITER
+              // FBLD: run the iterative packed-BCD->FP engine first (S_FBLD_BUSY),
+              // then push the floatx80 result + retire there (the 18-chained-*10
+              // fx_bcd_to_fx was the worst LOGIC path under +VEN_FP_PIPE).
+              if (q_fxop==FX_FBLD) begin
+                state<=S_FBLD_BUSY;
+              end else begin
+`endif
 `ifdef VEN_FP_PIPE
               // +VEN_FP_PIPE: a slow-arm arith that CAPTURED this clock (fp_pipe_cap)
               // defers its commit+retire to S_FEXEC_EX (the registered-operand
@@ -85,6 +93,9 @@
               end
 `else
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+`endif
+`ifdef VEN_BCD_ITER
+              end
 `endif
             end else begin
 `ifdef VEN_BCD_ITER
@@ -119,6 +130,16 @@
           if (eng_bcd_done) begin
             fbcd_result_q <= eng_bcd_result;
             state<=S_FSTORE; f_step<=4'd0;
+          end
+        end
+
+        // S_FBLD_BUSY: wait for the iterative packed-BCD->floatx80 engine. The push
+        // of eng_fbld_result is driven onto u_fpu_state's we_push port by the
+        // fp_we_* driver on THIS (done) clock; here we retire + advance EIP in the
+        // same clock, so the per-retire architectural state is exact.
+        S_FBLD_BUSY: begin
+          if (eng_fbld_done) begin
+            eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end
 `endif

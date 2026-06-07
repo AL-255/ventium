@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fppipe verify-all
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-all
 .DEFAULT_GOAL := help
 
 help:
@@ -258,6 +258,13 @@ verify-idiv:
 # /10 stages were the core's worst timing path). Bit-exact vs fx_fx_to_bcd.
 verify-bcd:
 	bash verif/bcd/run-bcd-gate.sh
+
+# --- iterative packed-BCD->floatx80 (FBLD) engine gate ----------------------
+# Standalone clocked gate for the multi-cycle BCD->FP engine
+# (rtl/fpu/ven_bcd_to_fp.sv) — the FPGA-synthesizable form of fx_bcd_to_fx (whose
+# 18 chained *10 stages were the worst LOGIC path under +VEN_FP_PIPE). Bit-exact.
+verify-fbld:
+	bash verif/fbld/run-fbld-gate.sh
 
 # --- 2-stage FP arithmetic split gate (verif/fppipe/run-fppipe-gate.sh) -------
 # Combinational gate proving f_eval_s2(f_eval_s1(...)) == f_eval(...) bit-exact

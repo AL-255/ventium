@@ -39,6 +39,7 @@ fpu/fpu_top.sv
 fpu/fpu_srt_div.sv
 fpu/fpu_sqrt_iter.sv
 fpu/ven_bcd.sv
+fpu/ven_bcd_to_fp.sv
 
 // ---- mem -------------------------------------------------------------------
 mem/dcache_timing.sv
