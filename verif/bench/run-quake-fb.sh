@@ -26,7 +26,12 @@ PY=/usr/bin/python3; command -v "$PY" >/dev/null || PY="$(command -v python3)"
 N="${1:-120000000}"; EVERY="${2:-1}"
 VIDP="/p5q_video_capture"          # sentinel $P5Q_VIDEO path (matched, never opened)
 OUT="$REPO/build/quake-fb"; mkdir -p "$OUT"; IMG="$OUT/image.json"
-GA=(-basedir "$H/quake" -noconinput -nosound -mem 32 +map start)
+# No "+map start": loading a map precaches every model and converts each skin via
+# qpal_24to8 (per-pixel 256-entry nearest-colour search) = billions of insns at
+# free-run speed. Without a map, Quake renders its CONSOLE/attract screen first —
+# a real RTL-rendered frame, reachable far sooner. (Set MAP=start to force a map.)
+GA=(-basedir "$H/quake" -noconinput -nosound -mem 32)
+[[ -n "${MAP:-}" ]] && GA+=(+map "$MAP")
 
 [[ -x "$ELF" && -f "$H/quake/id1/pak0.pak" ]] || { echo "missing quake guest/data"; exit 1; }
 
