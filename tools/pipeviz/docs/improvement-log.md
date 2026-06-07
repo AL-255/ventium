@@ -63,7 +63,15 @@ not repeat itself.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
-  truncated); split TLB; prefetch buffer (ibuf + decode); **Hotspots** = a
+  truncated); split TLB; prefetch buffer (ibuf + decode — but when the ibuf is
+  all-zero the decode line shows **"ibuf idle — fast-path fetch from the I-cache;
+  slow-path decoder not engaged"** instead of decoding the zeros into a bogus
+  `00 00`→`add [eax],al` that would falsely claim to be the instruction "@ eip").
+  Every cache/TLB/Hotspots/Branches table shows a centered, muted **empty-state
+  hint** when it has zero rows (e.g. "D-cache empty — this workload has issued no
+  data loads/stores yet", "TLB empty — paging is off or no translations resolved
+  yet") so an empty tab reads as 'no activity yet' rather than a broken/blank panel.
+  **Hotspots** = a
   per-PC cycle-cost profile (PC | hits | cycles | cyc% | amber cost bar |
   **field-coloured** instruction, sorted by total cycles — stalls inflate the cost
   so the stalled load/branch PCs bubble to the top, perf/VTune-style; the
@@ -84,9 +92,11 @@ not repeat itself.
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
-  architecturally WROTE — the destination GPR(s) with their committed value plus
-  any changed flags (`eax=60000011  ZF0`) plus any **x87 exception** newly raised
-  by an FP op (`FP:ZE`); writes are attributed per-instruction via capstone
+  architecturally WROTE — the destination GPR(s) with their committed value (blue)
+  plus any changed flags (`eax=60000011  ZF0`, teal) plus the **x87 ST(0) result**
+  of an FP op (`st0=86`, purple — diffed vs the previous retirement so a non-faulting
+  `fadd`/`fld`/`fmul` no longer reads as a blank no-op) plus any **x87 exception**
+  newly raised (`FP:ZE`, amber); writes are attributed per-instruction via capstone
   register-access analysis, so a dual-issue U/V pair's writes land on the correct
   rows even though the commit snapshot is per-cycle. x86 byte-field
   colouring (prefix gray `#aab4c0` / opcode blue `#4ea1ff` / ModRM green `#56d364`
@@ -110,7 +120,10 @@ not repeat itself.
   instruction** (click a trace row / Konata cell): shows that instruction's
   post-commit GPRs/EFLAGS/seg-selectors/x87 with an amber `PINNED n=… cyc=…`
   banner (the pinned x87 header wraps so ctrl/stat/tag never clip); the next step
-  unpins back to the live state.
+  unpins back to the live state. The x87 stack's ST-label column has a fixed min
+  width so a populated row never butts the exponent against the label (`ST1 3fff`,
+  not `ST13fff`) in any mode/state, and the empty-slot `·` marker renders in pinned
+  mode too — so the pinned stack matches the live layout exactly.
 - **Status bar** (grouped, coloured): cyc · state/mode · ret/IPC/pair%/mispred ·
   I$/D$ occupancy/fills/walks · eip.
 - **Toolbar** (grouped file | config | transport, accented Run, + **event-jump**
@@ -120,6 +133,43 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 27 — x87 ST(0) writes in the trace, pinned-x87 column fix, prefetch idle guard, empty-table hints
+Review confirmed the live watermark (`1829ec6`) on all 6 critics (now including the
+new all-9-tab sweep). Verify **confirmed 3 of 6** picks and refuted 3 with code-cited
+reasoning (the empty-slot dot drop = redundant + same root cause as the confirmed
+pinned-x87 fix; Hotspots "650 cycles" vs Cycles "120 cyc" = intentional profiler
+per-PC occupancy vs wall-clock, both labelled inline; Run-button green ≈ exec-cell
+green = a sampling error — Run is forest `#238636`, exec is brighter `#3fb950`). All
+three confirmed picks were independently ground-truthed (zoom + pixel-sample) before
+the fix.
+- **Fix (CONFIRMED, HIGH) — Prefetch no longer decodes the idle all-zero ibuf into a
+  lie.** On the fast dual-issue path the slow-path ibuf is unused/all-zero, yet the
+  tab decoded those zeros into `add byte ptr [eax], al` and labelled it "@ eip" —
+  directly contradicting the real EIP byte (`dec ecx`) shown in the Memory tab. Now
+  an all-zero ibuf shows a dim "ibuf idle — fast-path fetch from the I-cache;
+  slow-path decoder not engaged" instead of a bogus decode.
+- **Fix (CONFIRMED, MEDIUM) — x87 FP ops now show their result in the effect column.**
+  A non-faulting `fadd`/`fld`/`fmul` was completely blank under the header literally
+  reading "effect (writes)", reading as a no-op. `_effect()` now diffs the logical
+  ST(0) vs the previous retirement and, for an FP op that changed it, surfaces
+  `st0=<value>` (decoded via `floatx80_to_float`) in the x87 purple `#c89bff` — so
+  the FP result is visible like a GPR write but distinct from one. Verified the fp
+  workload's `fadd` rows show `st0=84/85/86/87` and no integer op gets a spurious one.
+- **Fix (CONFIRMED, cosmetic-but-real) — pinned x87 'ST13fff' collision.** The live
+  path padded the ST-label grid column only incidentally (via the empty-slot `·`);
+  the pinned path dropped the `·`, collapsing column 0 so a populated row rendered
+  `ST13fff` with no gap. Gave the label column a fixed min width (pads it in every
+  mode, even a full stack) AND restored the `·` in pinned mode — the pinned stack now
+  matches the live layout exactly.
+- **New feature — empty-state hints on the cache/TLB/Hotspots/Branches tables.** An
+  empty table used to render as a large blank void that read as broken/stuck. Each
+  now shows a centered, muted explanatory hint when it has zero rows (e.g. "D-cache
+  empty — this workload has issued no data loads/stores yet", "TLB empty — paging is
+  off or no translations have been resolved yet"), mirroring the Konata view's
+  existing "step the core to fill the pipeline view" empty-state. Implemented as a
+  click-transparent `_HintTable` overlay that shows/hides on row count, so it never
+  interferes with selection once data arrives.
 
 ### Iteration 26 — operand field-colouring everywhere, playhead lines behind cells, chip-backed overflow chevron, 9-tab review sweep
 Review confirmed the live watermark (`bca2a4e+dirty`) on all 6 critics. Verify

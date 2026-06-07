@@ -87,8 +87,36 @@ def _mono(pt=9):
     return f
 
 
-def _mk_table(cols, widths=None):
-    t = QTableWidget(0, len(cols))
+class _HintTable(QTableWidget):
+    """A QTableWidget that paints a centered, muted explanatory hint over its body
+    when it has ZERO rows — so an empty cache / TLB / branch table reads as 'no
+    activity yet' instead of a blank panel that looks broken or stuck. Mirrors the
+    Konata view's existing 'step the core to fill the pipeline view' empty-state.
+    The hint is a child label of the viewport, raised + transparent to clicks, so
+    it never interferes with row selection once data arrives."""
+    def __init__(self, rows, cols, hint=""):
+        super().__init__(rows, cols)
+        self._hint = QLabel(hint, self.viewport())
+        self._hint.setAlignment(Qt.AlignCenter)
+        self._hint.setWordWrap(True)
+        self._hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._hint.setStyleSheet("color:#586069; font-style:italic; background:transparent;")
+        self._hint.hide()
+
+    def sync_hint(self):
+        if self.rowCount() == 0 and self._hint.text():
+            self._hint.setGeometry(0, 0, self.viewport().width(), self.viewport().height())
+            self._hint.show(); self._hint.raise_()
+        else:
+            self._hint.hide()
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._hint.setGeometry(0, 0, self.viewport().width(), self.viewport().height())
+
+
+def _mk_table(cols, widths=None, hint=""):
+    t = _HintTable(0, len(cols), hint)
     t.setHorizontalHeaderLabels(cols)
     t.verticalHeader().setVisible(False)
     t.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -110,6 +138,8 @@ def _fill(table, rows, dim_cols=()):
             if c in dim_cols:
                 it.setForeground(QBrush(QColor("#8b949e")))
             table.setItem(r, c, it)
+    if isinstance(table, _HintTable):
+        table.sync_hint()
 
 
 class InsnCellDelegate(QStyledItemDelegate):
@@ -269,7 +299,8 @@ class TablesView(QWidget):
         self.ic_lbl = QLabel()
         self.ic_map = CacheMap()
         self.ic = _mk_table(["set", "way *=MRU", "tag", "line addr", "32 line bytes"],
-                            [46, 74, 60, 86, 9999])
+                            [46, 74, 60, 86, 9999],
+                            hint="I-cache empty — step the core to fetch code into it")
         self.ic.setWordWrap(True)
         self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code $ (I)")
 
@@ -277,14 +308,17 @@ class TablesView(QWidget):
         self.dc_lbl = QLabel()
         self.dc_map = CacheMap()
         self.dc = _mk_table(["set", "way *=MRU", "tag", "line addr"],
-                            [56, 74, 90, 9999])
+                            [56, 74, 90, 9999],
+                            hint="D-cache empty — this workload has issued no data "
+                                 "loads/stores yet")
         self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data $ (D)")
 
         # --- TLB (I + D) ---
         self.tlb_lbl = QLabel()
         self.tlb = _mk_table(
             ["side", "idx", "V", "page (4K/4M)", "vpn->pfn", "perm U/W/P", "big", "D"],
-            [44, 40, 30, 110, 150, 90, 40, 9999])
+            [44, 40, 30, 110, 150, 90, 40, 9999],
+            hint="TLB empty — paging is off or no translations have been resolved yet")
         self.tabs.addTab(self._wrap(self.tlb_lbl, self.tlb), "TLB (I/D)")
 
         # --- Prefetch buffer (ibuf) ---
@@ -294,7 +328,8 @@ class TablesView(QWidget):
         # --- Hotspots (per-PC cycle-cost profile, perf/VTune-style) ---
         self.hot_lbl = QLabel()
         self.hot = _mk_table(["PC", "hits", "cycles", "cyc%", "cost", "instruction"],
-                             [76, 50, 64, 50, 120, 9999])
+                             [76, 50, 64, 50, 120, 9999],
+                             hint="no instructions retired yet — step the core")
         # field-colour the instruction column to match the trace / Konata gutter
         self.hot.setItemDelegateForColumn(5, InsnCellDelegate(_mono(), self.hot))
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
@@ -302,7 +337,9 @@ class TablesView(QWidget):
         # --- Branches (per-branch-PC taken/not-taken profile) ---
         self.br_lbl = QLabel()
         self.br = _mk_table(["PC", "branch", "target", "hits", "taken", "T%", "bias"],
-                            [70, 64, 76, 46, 46, 46, 9999])
+                            [70, 64, 76, 46, 46, 46, 9999],
+                            hint="no branches retired yet — step the core through a "
+                                 "jump/call/loop")
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
 
         # --- Instruction mix (class histogram + U/V issue-port split) ---
@@ -541,8 +578,20 @@ class _PrefetchView(QWidget):
         ib = bytes(s.ibuf[i] for i in range(16))
         for i in range(16):
             self.byte_lbls[i].setText(f"{ib[i]:02x}")
-        txt, sz = disasm.text(ib, s.eip, bits)
-        self.decode.setText(f"ibuf decode @ eip:  <b>{txt}</b>  ({sz} bytes)")
+        if not any(ib):
+            # An all-zero ibuf is the IDLE slow-path buffer — the core is on the fast
+            # dual-issue path, fetching straight from the I-cache, so the slow-path
+            # decoder is not engaged. Decoding the zeros would render the classic
+            # `00 00` -> `add byte ptr [eax], al` artifact and falsely label it
+            # '@ eip', contradicting the real instruction at eip (shown in Memory).
+            self.decode.setText(
+                "<i>ibuf idle — fast-path fetch from the I-cache; "
+                "slow-path decoder not engaged</i>")
+            self.decode.setStyleSheet("color:#6e7681;")
+        else:
+            txt, sz = disasm.text(ib, s.eip, bits)
+            self.decode.setText(f"ibuf decode @ eip:  <b>{txt}</b>  ({sz} bytes)")
+            self.decode.setStyleSheet("color:#c9d1d9;")
 
 
 class _HexDump(QWidget):

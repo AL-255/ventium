@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QRect, Signal
 
 from . import disasm
 from .disasm import C_PIPE, C_FP, FIELD_COLOR
+from .regs_view import floatx80_to_float
 
 _COLS = ["n", "cyc", "Δ", "pipe", "PC", "bytes", "instruction", "effect (writes)"]
 _BYTES_COL = 5
@@ -25,18 +26,22 @@ _FSW_EXC = [(0, "IE"), (1, "DE"), (2, "ZE"), (3, "OE"), (4, "UE"), (5, "PE")]
 
 
 def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags,
-            x87_valid=False, fstat=0, prev_fstat=None):
+            x87_valid=False, fstat=0, prev_fstat=None, fp_write=None):
     """Compact 'what this instruction WROTE' string (e.g. 'ecx=000003f2  ZF1 SF0').
     GPR writes are decoded from capstone (`written_gprs`) and shown with their
     committed value, so a dual-issue pair's writes land on the right rows (the
     per-cycle snapshot can't separate them). Flag changes are diffed vs the
-    previous retirement's EFLAGS, but only surfaced when the op writes flags."""
+    previous retirement's EFLAGS, but only surfaced when the op writes flags.
+    `fp_write` (e.g. 'st0=86') is the pre-formatted x87 top-of-stack result so an
+    FP op no longer reads as a no-op in the column literally headed 'writes'."""
     parts = [f"{_GPR[k]}={gpr[k] & 0xffffffff:08x}" for k in written_gprs]
     if flags_written and prev_eflags is not None and eflags != prev_eflags:
         fl = [f"{nm}{(eflags >> bit) & 1}" for bit, nm in _FLAGBITS
               if ((eflags >> bit) & 1) != ((prev_eflags >> bit) & 1)]
         if fl:
             parts.append(" ".join(fl))
+    if fp_write:                               # x87 ST(0) result write (e.g. 'st0=86')
+        parts.append(fp_write)
     # x87 exception flags NEWLY raised this retirement (FSW IE/DE/ZE/OE/UE/PE) —
     # diffed (the FSW bits are sticky) so only the op that raised one shows it.
     if x87_valid and prev_fstat is not None and fstat != prev_fstat:
@@ -134,10 +139,10 @@ class InsnDelegate(QStyledItemDelegate):
 
 
 class EffectDelegate(QStyledItemDelegate):
-    """Colour-codes the effect column's three write kinds so they don't read as one
-    flat blob: register writes (`eax=…`) blue, integer flag changes (`ZF1 SF0`) teal,
-    and x87 exception groups (`FP:ZE`) amber. Groups are the 3-space-separated parts
-    that `_effect()` emits."""
+    """Colour-codes the effect column's write kinds so they don't read as one flat
+    blob: GPR writes (`eax=…`) blue, integer flag changes (`ZF1 SF0`) teal, x87 ST(0)
+    result writes (`st0=…`) purple, and x87 exception groups (`FP:ZE`) amber. Groups
+    are the 3-space-separated parts that `_effect()` emits."""
     def __init__(self, font, parent=None):
         super().__init__(parent)
         self.font = font
@@ -159,6 +164,8 @@ class EffectDelegate(QStyledItemDelegate):
                 continue
             if part.startswith("FP:"):
                 col = "#d29922"          # x87 exception (amber)
+            elif part.startswith("st") and "=" in part:
+                col = "#c89bff"          # x87 ST(0) result write (purple, the FP accent)
             elif "=" in part:
                 col = "#79c0ff"          # register write (blue)
             else:
@@ -315,8 +322,17 @@ class TraceView(QWidget):
             wgpr, wflags = disasm.written_regs(bs, r.pc, bits)
             efl = int(r.eflags)
             xv = bool(r.x87_valid); fsw = int(r.fstat)
+            # x87 ST(0) result: FP ops aren't in the GPR/flag/exception channels, so a
+            # non-faulting fadd/fld/fmul reads as a no-op. Diff the (logical) ST(0) vs
+            # the previous retirement; for an FP op that CHANGED it, surface 'st0=<v>'.
+            fp_write = None
+            if xv:
+                st0 = bytes(r.st[0][k] for k in range(10))
+                if mn.startswith("f") and st0 != getattr(self, "_prev_st0", None):
+                    fp_write = f"st0={floatx80_to_float(st0):.6g}"
+                self._prev_st0 = st0
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
-                          xv, fsw, getattr(self, "_prev_fstat", None))
+                          xv, fsw, getattr(self, "_prev_fstat", None), fp_write)
             self._prev_eff = efl
             if xv:
                 self._prev_fstat = fsw
