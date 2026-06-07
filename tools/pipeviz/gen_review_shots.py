@@ -22,7 +22,7 @@ os.makedirs(OUT, exist_ok=True)
 
 # Build stamp drawn onto every screenshot so a reviewer can PROVE which build
 # they are looking at (and the loop can detect stale images).
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     _SHA = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
                                    cwd=_ROOT).decode().strip()

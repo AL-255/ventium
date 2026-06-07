@@ -163,3 +163,46 @@ class RegsView(QWidget):
             hexv.setText(hexs)
             fv = floatx80_to_float(b10)
             val.setText("—" if empty else f"{fv:.6g}")
+
+    def show_retire(self, rec, prev):
+        """Pin the panel to a retired instruction's post-commit architectural
+        state (from the retire record), highlighting what changed vs the previous
+        retirement. Segment bases/limits + CRs aren't in the record (shown dim)."""
+        chg = "color:#e3b341;font-weight:bold;"
+        same = "color:#c9d1d9;"
+        for i, name in enumerate(GPR_NAMES):
+            changed = prev is not None and prev.gpr[i] != rec.gpr[i]
+            self.gpr_lbls[name].setText(f"{rec.gpr[i]:08x}")
+            self.gpr_lbls[name].setStyleSheet(chg if changed else same)
+        self.eip_lbl.setText(f"{rec.pc:08x}"); self.eip_lbl.setStyleSheet(same)
+        efl_chg = prev is not None and prev.eflags != rec.eflags
+        self.efl_lbl.setText(f"{rec.eflags:08x}")
+        self.efl_lbl.setStyleSheet(chg if efl_chg else same)
+        prev_efl = prev.eflags if prev is not None else None
+        parts = []
+        for bit, nm in _FLAGS:
+            f_on = (rec.eflags >> bit) & 1
+            f_chg = prev_efl is not None and ((prev_efl >> bit) & 1) != f_on
+            col = "#e3b341" if f_on else "#4b535d"
+            style = f"color:{col}" + (";text-decoration:underline" if f_chg else "")
+            parts.append(f"<span style='{style}'>{nm}{f_on}</span>")
+        self.flags_lbl.setText("&nbsp;".join(parts))
+        for i, name in enumerate(SEG_NAMES):
+            sel, base, lim = self.seg_lbls[name]
+            sel.setText(f"{rec.seg[i]:04x}"); base.setText("········"); lim.setText("········")
+        for k in ("CR0", "CR2", "CR3", "CR4"):
+            self.cr_lbls[k].setText("········")
+        self.mode_lbl.setText(f"PINNED n={rec.n} cyc={rec.cyc}")
+        self.mode_lbl.setStyleSheet("color:#e3b341;")
+        if rec.x87_valid:
+            self.fphdr.setText(f"(pinned)  ctrl={rec.fctrl:04x}  stat={rec.fstat:04x}  tag={rec.ftag:04x}")
+            for i in range(8):
+                b10 = bytes(rec.st[i][k] for k in range(10))   # logical ST(i) in the record
+                tag, hexv, val = self.st_lbls[i]
+                tag.setText(f"ST{i}")
+                hexv.setText(b10[::-1].hex())
+                val.setText(f"{floatx80_to_float(b10):.6g}")
+        self._prev = None   # next live refresh re-highlights from scratch
+
+    def unpin(self):
+        self.mode_lbl.setStyleSheet("color:#8b949e;")
