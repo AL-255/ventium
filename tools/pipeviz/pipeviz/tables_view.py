@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
 from PySide6.QtGui import QFont, QColor, QBrush, QPainter, QFontMetrics
 from PySide6.QtCore import Qt, QRect, Signal
 
+from .backend import DC_SETS, WAYS, LINE
+
 from . import disasm
 
 
@@ -144,6 +146,36 @@ def _fill(table, rows, dim_cols=(), right_cols=()):
             table.setItem(r, c, it)
     if isinstance(table, _HintTable):
         table.sync_hint()
+
+
+_LINE_SHIFT = LINE.bit_length() - 1          # 32B line -> 5
+_SET_MASK = DC_SETS - 1                       # 128 sets -> 0x7f
+
+
+def _dcache_replay(accs):
+    """Replay the resolved load/store address stream through a client-side model of
+    the real D-cache geometry (DC_SETS sets × WAYS-way × LINE-byte, LRU) and tally
+    hit / cold-miss / conflict-evict per access. The hardware (rtl/mem/dcache_timing)
+    is exactly this 2-way-LRU model, so the miss-rate is faithful — and it answers a
+    question the geometric STRIDE can't: dmiss strides +0x20 = the line size (100%
+    miss) while test386 strides +0x2 < the line size (~92% HIT), yet both read
+    'stride (100%)'. Returns (accesses, hits, misses, cold, conflict)."""
+    sets = [[] for _ in range(DC_SETS)]       # each set: tags, MRU first
+    hits = cold = conflict = 0
+    for a in accs:
+        line = a[2] >> _LINE_SHIFT
+        s = line & _SET_MASK
+        tag = line >> (_SET_MASK.bit_length())
+        ways = sets[s]
+        if tag in ways:
+            ways.remove(tag); ways.insert(0, tag); hits += 1
+        else:
+            if len(ways) < WAYS:
+                cold += 1
+            else:
+                conflict += 1; ways.pop()     # evict the LRU way
+            ways.insert(0, tag)
+    return len(accs), hits, cold + conflict, cold, conflict
 
 
 def _align_headers(table, cols, align):
@@ -324,7 +356,7 @@ class TablesView(QWidget):
         self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code $ (I)")
 
         # --- D-cache (data, timing-only) ---
-        self.dc_lbl = QLabel()
+        self.dc_lbl = QLabel(); self.dc_lbl.setWordWrap(True)
         self.dc_map = CacheMap()
         self.dc = _mk_table(["set", "way *=MRU", "tag", "line addr"],
                             [56, 74, 90, 9999],
@@ -578,6 +610,19 @@ class TablesView(QWidget):
 
         # Prefetch buffer
         self.pf.update_from(state, self._bits)
+
+    def set_dcache_replay(self, accs):
+        """Append the replayed D-cache miss-rate (the resolved access stream run
+        through the real 2-way-LRU geometry) to the Data$ header — the hit/miss
+        OUTCOME that the resident-line snapshot and the Mem-map geometric stride
+        never report. Re-appends each frame onto the residency text update_from just
+        set, so it never accumulates."""
+        n, _hits, miss, cold, conflict = _dcache_replay(accs)
+        if n:
+            self.dc_lbl.setText(
+                self.dc_lbl.text() +
+                f"   ·   D$ replay: {round(100 * miss / n)}% miss "
+                f"({miss}/{n} · {cold} cold, {conflict} conflict)")
 
 
 class _PrefetchView(QWidget):
@@ -852,6 +897,11 @@ class MemoryView(QWidget):
         v.addLayout(bar)
         self.dump = _HexDump()
         v.addWidget(self.dump, 1)
+
+    def reset(self):
+        """Clear the transient Mem-map-click pin on a new image load, so the panel
+        never shows a stale 'showing clicked access' highlight from the old program."""
+        self._click_hl = None
 
     def goto_access(self, addr, size):
         """Jump to (and gold-highlight) a SPECIFIC access — a Mem-map point click
