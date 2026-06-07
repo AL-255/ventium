@@ -116,9 +116,13 @@ not repeat itself.
   plus any changed flags (`eax=60000011  ZF0`, teal) plus the **x87 ST(0) result**
   of an FP op (`st0=86`, purple — diffed vs the previous retirement so a non-faulting
   `fadd`/`fld`/`fmul` no longer reads as a blank no-op) plus any **x87 exception**
-  newly raised (`FP:ZE`, amber); writes are attributed per-instruction via capstone
-  register-access analysis, so a dual-issue U/V pair's writes land on the correct
-  rows even though the commit snapshot is per-cycle. x86 byte-field
+  newly raised (`FP:ZE`, amber) plus the **resolved memory-access address** of a
+  load/store (`@08049160`, gold — base+index*scale+disp evaluated on the
+  pre-instruction register file, exact for a U-pipe op; so a cache-missing load's
+  access stride is visible right in the trace, e.g. dmiss steps `@08049000`,
+  `@08049020`, `@08049040`, … by 0x20); writes are attributed per-instruction via
+  capstone register-access analysis, so a dual-issue U/V pair's writes land on the
+  correct rows even though the commit snapshot is per-cycle. x86 byte-field
   colouring (prefix gray `#aab4c0` / opcode blue `#4ea1ff` / ModRM green `#56d364`
   / SIB purple `#c89bff` / displacement gold `#e3b341` / immediate salmon `#ff7b72`
   / **branch-rel red-orange** `#ff6a00`, pulled well clear of the gold), clipped
@@ -153,6 +157,31 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 30 — resolved memory-access address in the trace, singular/plural subtitle
+Review confirmed the live watermark (`7563011`) on all 6 critics. Verify **confirmed
+1 of 2** and refuted the other. Notably the features-critic's top pick (per-stall
+CAUSE attribution on the `=N` bubble) was REFUTED — and my own ground-truth had
+already found `pending_mem_pen` reads 0 on every dmiss stall (all are `stall_cnt`
+"issue" stalls), so the proposed "D$-miss" tint would never have fired; the verifier
+separately noted it would duplicate the StageBoard split + dep-edge gating + lat
+grading. So I picked a genuinely-new, reliable feature instead.
+- **New feature — resolved memory-access address in the trace.** A new
+  `disasm.mem_operand` extracts a load/store's addressing (base/index/scale/disp,
+  skipping `lea`/`nop` which carry a non-accessing memory operand), and the trace
+  resolves the effective address = base+index*scale+disp on the PRE-instruction
+  register file — the prior retirement's committed GPRs, which is the exact input
+  state for a U-pipe op (always the senior of its dual-issue pair; V-pipe reg-based
+  ops are skipped to stay correct). It surfaces as a gold `@<ea>` in the effect
+  column, so a cache-missing load's access STRIDE is finally visible right in the
+  trace (dmiss: `@08049000 @08049020 @08049040 …` by 0x20; ppage 16-bit: `@0480`,
+  `@0514`). Correctness was cross-checked: every resolved load address+0x20 equals a
+  later committed `esi` value, proving it's the true pre-state, not a stale read.
+  Widened the effect column 168→192px to fit `reg=val + @addr`.
+- **Fix (CONFIRMED, LOW) — singular/plural subtitle.** The Branches subtitle
+  hard-concatenated "branch sites", rendering the ungrammatical "1 branch sites" for
+  a single-branch loop (brloop). Added a count guard ("1 branch site"); applied the
+  same guard to the Hotspots "distinct PC(s)" label.
 
 ### Iteration 29 — flag-dependency edges, left-aligned bar-column headers
 Review confirmed the live watermark (`5b41520`) on all 6 critics. Verify **confirmed

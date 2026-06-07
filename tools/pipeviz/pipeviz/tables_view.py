@@ -453,8 +453,9 @@ class TablesView(QWidget):
                 if taken:
                     e["taken"] += 1
         ranked = sorted(agg.items(), key=lambda kv: -kv[1]["hits"])[:300]
-        self.br_lbl.setText(f"{len(agg)} branch sites — taken inferred from the next "
-                            f"retired PC (direct: == target; indirect/ret: transferred)")
+        self.br_lbl.setText(f"{len(agg)} branch site{'' if len(agg) == 1 else 's'} — taken "
+                            f"inferred from the next retired PC "
+                            f"(direct: == target; indirect/ret: transferred)")
         rows = []
         for pc, e in ranked:
             pct = (100.0 * e["taken"] / e["hits"]) if e["hits"] else 0.0
@@ -487,7 +488,8 @@ class TablesView(QWidget):
                 e[0] += 1; e[1] += span
         ranked = sorted(agg.items(), key=lambda kv: -kv[1][1])[:300]
         self.hot_lbl.setText(
-            f"{len(agg)} distinct PCs, {total} cycles total — top consumers first "
+            f"{len(agg)} distinct PC{'' if len(agg) == 1 else 's'}, {total} cycles total "
+            f"— top consumers first "
             f"(cycles = total clocks each PC occupied; stalls inflate it)")
         rows = []
         maxc = ranked[0][1][1] if ranked else 1

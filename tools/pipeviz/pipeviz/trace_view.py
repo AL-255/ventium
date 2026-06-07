@@ -26,14 +26,16 @@ _FSW_EXC = [(0, "IE"), (1, "DE"), (2, "ZE"), (3, "OE"), (4, "UE"), (5, "PE")]
 
 
 def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags,
-            x87_valid=False, fstat=0, prev_fstat=None, fp_write=None):
+            x87_valid=False, fstat=0, prev_fstat=None, fp_write=None, mem_ea=None):
     """Compact 'what this instruction WROTE' string (e.g. 'ecx=000003f2  ZF1 SF0').
     GPR writes are decoded from capstone (`written_gprs`) and shown with their
     committed value, so a dual-issue pair's writes land on the right rows (the
     per-cycle snapshot can't separate them). Flag changes are diffed vs the
     previous retirement's EFLAGS, but only surfaced when the op writes flags.
     `fp_write` (e.g. 'st0=86') is the pre-formatted x87 top-of-stack result so an
-    FP op no longer reads as a no-op in the column literally headed 'writes'."""
+    FP op no longer reads as a no-op in the column literally headed 'writes'.
+    `mem_ea` (e.g. '@08049180') is the resolved effective address a load/store
+    touched, so a cache-missing load's access stride is visible in the trace."""
     parts = [f"{_GPR[k]}={gpr[k] & 0xffffffff:08x}" for k in written_gprs]
     if flags_written and prev_eflags is not None and eflags != prev_eflags:
         fl = [f"{nm}{(eflags >> bit) & 1}" for bit, nm in _FLAGBITS
@@ -49,6 +51,8 @@ def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags,
                if ((fstat >> bit) & 1) and not ((prev_fstat >> bit) & 1)]
         if exc:
             parts.append("FP:" + " ".join(exc))
+    if mem_ea:                                 # resolved load/store address (e.g. '@08049180')
+        parts.append(mem_ea)
     return "   ".join(parts)
 _MAX_ROWS = 6000   # rolling cap on displayed rows
 _BYTES_ROLE = Qt.UserRole + 1
@@ -141,8 +145,9 @@ class InsnDelegate(QStyledItemDelegate):
 class EffectDelegate(QStyledItemDelegate):
     """Colour-codes the effect column's write kinds so they don't read as one flat
     blob: GPR writes (`eax=…`) blue, integer flag changes (`ZF1 SF0`) teal, x87 ST(0)
-    result writes (`st0=…`) purple, and x87 exception groups (`FP:ZE`) amber. Groups
-    are the 3-space-separated parts that `_effect()` emits."""
+    result writes (`st0=…`) purple, x87 exception groups (`FP:ZE`) amber, and the
+    resolved memory-access address (`@08049180`) gold. Groups are the 3-space-
+    separated parts that `_effect()` emits."""
     def __init__(self, font, parent=None):
         super().__init__(parent)
         self.font = font
@@ -164,6 +169,8 @@ class EffectDelegate(QStyledItemDelegate):
                 continue
             if part.startswith("FP:"):
                 col = "#d29922"          # x87 exception (amber)
+            elif part.startswith("@"):
+                col = "#e3b341"          # resolved memory-access address (gold, like a disp)
             elif part.startswith("st") and "=" in part:
                 col = "#c89bff"          # x87 ST(0) result write (purple, the FP accent)
             elif "=" in part:
@@ -222,7 +229,7 @@ class TraceView(QWidget):
         hh = self.tbl.horizontalHeader()
         for i, w in enumerate((52, 54, 40, 38, 74, 176)):          # n cyc Δ pipe PC bytes
             self.tbl.setColumnWidth(i, w)
-        self.tbl.setColumnWidth(_EFFECT_COL, 168)                  # effect: fixed (short)
+        self.tbl.setColumnWidth(_EFFECT_COL, 192)                  # effect: fits 'reg=val + @addr'
         # the INSTRUCTION column stretches (full operands, no truncation while the
         # short effect column sat on a wide stretch) — effect is short and fixed.
         hh.setSectionResizeMode(_INSN_COL, QHeaderView.Stretch)
@@ -296,6 +303,7 @@ class TraceView(QWidget):
         self._last_cyc = None
         self._prev_eff = None
         self._prev_fstat = None
+        self._prev_gpr = None     # prior retirement's committed GPRs (pre-state for EA)
 
     def update_from(self, backend):
         total = backend.retire_count()
@@ -331,9 +339,27 @@ class TraceView(QWidget):
                 if mn.startswith("f") and st0 != getattr(self, "_prev_st0", None):
                     fp_write = f"st0={floatx80_to_float(st0):.6g}"
                 self._prev_st0 = st0
+            # resolved memory-access address: a load/store's effective address =
+            # base + index*scale + disp evaluated on the PRE-instruction register file
+            # (the prior retirement's committed GPRs — exact for a U-pipe op, which is
+            # always the senior of its dual-issue pair, so its inputs are the prior
+            # commit). Surfaced as '@<ea>' so a cache-missing load's stride is visible.
+            mem_ea = None
+            mo = disasm.mem_operand(bs, r.pc, bits)
+            if mo is not None:
+                base, index, scale, disp, _store = mo
+                needs_reg = base >= 0 or index >= 0
+                pre = getattr(self, "_prev_gpr", None)
+                if not needs_reg or (r.pipe == 0 and pre is not None):
+                    g = pre if pre is not None else [0] * 8
+                    ea = ((g[base] if base >= 0 else 0)
+                          + (g[index] if index >= 0 else 0) * scale + disp)
+                    mask = 0xffffffff if bits == 32 else 0xffff
+                    mem_ea = (f"@{ea & mask:08x}" if bits == 32 else f"@{ea & mask:04x}")
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
-                          xv, fsw, getattr(self, "_prev_fstat", None), fp_write)
+                          xv, fsw, getattr(self, "_prev_fstat", None), fp_write, mem_ea)
             self._prev_eff = efl
+            self._prev_gpr = list(r.gpr)
             if xv:
                 self._prev_fstat = fsw
             # delta cycles since the previous retirement (surfaces stalls); a
