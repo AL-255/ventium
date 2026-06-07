@@ -172,8 +172,11 @@ for tag, img, steps, soc in SHOTS:
         Image.open(mfull).crop(_box(win, win.tables)).save(ma)
         _watermark(ma, f"{tag} · Memory →access @{win.trace.last_access[0]:08x}")
         win.tables.mem.follow = None
-        # the access-pattern map (dmiss's strided loads => a clean diagonal scatter)
+        # the access-pattern map (dmiss's strided loads => a clean diagonal scatter);
+        # select a mid point so the click-readout crosshair + detail line also render.
         win.tables.tabs.setCurrentIndex(win.tables.tabs.indexOf(win.tables.accmap.parent()))
+        if win.trace.accesses:
+            win.tables.accmap.sel = len(win.trace.accesses) // 2
         app.processEvents(); win.repaint(); app.processEvents()
         _settle(win, app)
         amfull = os.path.join(OUT, f"{tag}_memmap_full.png")

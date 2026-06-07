@@ -117,7 +117,10 @@ not repeat itself.
   Y = effective address, low at the bottom), loads blue / stores gold — so the access
   PATTERN reads as a shape the per-row trace list can't show: a strided walk is a
   straight diagonal (dmiss's loads), a hot location a horizontal band, random access
-  scatters (header gives count / address span / load·store split).
+  scatters (header gives count / address span / load·store split). **Clicking a
+  point** rings it with a crosshair, reads out its `n / cyc / @address / load|store`
+  in the header, and jumps the trace (+ pins regs) to that instruction — so an
+  outlier or a stripe in the scatter is one click from its source row.
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
@@ -166,6 +169,24 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 33 — interactive Mem map (click a point → readout + trace jump)
+Review confirmed the live watermark (`3689302`) on all 6 critics and **confirmed 0 of
+0** picks — the THIRD straight 0-pick round. The features critic explicitly returned
+"None remains … No new actionable feature idea survives", listing every surface as
+settled. The UI is saturated, so this iteration is the anticipated honest outcome: a
+modest REFINEMENT of the just-shipped Mem map rather than a brand-new surface.
+- **Refinement — make the Mem map interactive.** The access scatter's points are now
+  clickable: a click rings the nearest point with a white crosshair, reads out its
+  `n / cyc / @address / load|store` in the header (in the point's own load-blue /
+  store-gold), and emits `pointSelected(n)` → the trace jumps to that retire-n row and
+  pins the registers (mirroring the Konata/Hotspots drill-downs). So an outlier point
+  or a stripe in the pattern is one click from its source instruction — closing the
+  scatter→trace→Konata→regs navigation loop. The access stream now carries `cyc` too
+  (`(n, cyc, addr, is_store)`). A nearest-point hit-test with an 18px radius guard
+  ignores empty-area clicks. Smoke-tested: clicking access idx5's pixel selects it +
+  emits its n + jumps the trace; empty-area clicks no-op; an empty (no-mem) map
+  doesn't crash on click.
 
 ### Iteration 32 — Mem-map access-pattern scatter (address vs sequence)
 Review confirmed the live watermark (`f90851b`) on all 6 critics and **confirmed 0 of

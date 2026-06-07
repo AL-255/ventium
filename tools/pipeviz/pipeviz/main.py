@@ -210,6 +210,10 @@ class MainWindow(QMainWindow):
         self.pipeline.konata.plot.rowClicked.connect(self._pin_to)
         # drill-down: click a Hotspots / Branches PC row -> jump the trace to it
         self.tables.pcClicked.connect(self.trace.select_pc)
+        # drill-down: click a Mem-map access point -> jump the trace to that retire n
+        # (+ pin regs), so an outlier/stripe in the scatter is one click from its row.
+        self.tables.accmap.pointSelected.connect(self.trace.select_n)
+        self.tables.accmap.pointSelected.connect(self._pin_to)
 
         # keyboard-driven stepping / navigation (a debugger should be drivable from
         # the keyboard): . = step 1 clk, i = step 1 instruction, ] / [ = jump to the

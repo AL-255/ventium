@@ -362,9 +362,9 @@ class TraceView(QWidget):
                     ea &= mask
                     mem_ea = (f"@{ea:08x}" if bits == 32 else f"@{ea:04x}")
                     self.last_access = (ea, size)   # newest access -> Memory '→access'
-                    # accumulate the (retire-n, address, is_store) access stream for
-                    # the address-vs-sequence access-pattern map (capped, rolling).
-                    self.accesses.append((int(r.n), ea, _store))
+                    # accumulate the (retire-n, cyc, address, is_store) access stream
+                    # for the address-vs-sequence access-pattern map (capped, rolling).
+                    self.accesses.append((int(r.n), int(r.cyc), ea, _store))
                     if len(self.accesses) > 4000:
                         del self.accesses[:len(self.accesses) - 4000]
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
