@@ -77,6 +77,14 @@
             stall_cnt<=pending_mem_pen-7'd1;
             pending_mem_pen<=7'd0;
             agi_wr0<=9'h100; agi_wr1<=9'h100;
+`ifdef VEN_FP_PIPE
+          end else if (fp_pipe_rd_haz) begin
+            // +VEN_FP_PIPE: the deferred arith result is being committed to fpr
+            // THIS clock (we_wabs); an FP op that reads that target must wait one
+            // clock to see it. Burn a no-issue bubble — the commit lands on this
+            // edge, so next clock fpp_valid=0 and the op issues with fresh data.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+`endif
           end else if (u_d.is_fp && u_d.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin
             // M5 finding [low]: an FK_ARITH (D8 reg-form fadd/fsub/fmul/fdiv) under
             // a non-extended precision control word (PC != 11) must NOT silently

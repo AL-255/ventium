@@ -133,7 +133,20 @@ module fpu_top (
     input  logic [15:0] env_fstat,    // raw (TOP bits already cleared)
     input  logic [7:0]  env_fptag,    // bit p = 1 (empty) iff loaded FTW field == 11
     input  logic        we_envregs,
-    input  logic [639:0] env_fpr_flat // fpr[0] in the low 80 bits (physical)
+    input  logic [639:0] env_fpr_flat, // fpr[0] in the low 80 bits (physical)
+
+    // (12) +VEN_FP_PIPE delayed-arith commit: write fpr[wabs_idx] (ABSOLUTE phys
+    // index, captured at issue so it is immune to ftop changes between issue and
+    // the deferred commit) <= wabs_data, and fstat <= wabs_fstat (full replace,
+    // already merged by the spine). Independent of we_top/we_sti/we_fstat — those
+    // are NOT asserted for a pipelined arith op (its same-cycle commit is
+    // suppressed). Applied LAST so a pipelined result wins a same-clock fstat race
+    // only if the spine routed it here (it never co-asserts both for one op).
+    input  logic        we_wabs,
+    input  logic [2:0]  wabs_idx,
+    input  logic [79:0] wabs_data,
+    input  logic        we_wabs_fstat,
+    input  logic [15:0] wabs_fstat
 );
 
   // ---- the architectural state file (VERBATIM the inline declarations) -------
@@ -267,6 +280,13 @@ module fpu_top (
       end
       if (we_envregs)
         for (int fi = 0; fi < 8; fi++) fpr[fi] <= env_fpr_flat[fi*80 +: 80];
+
+      // (12) +VEN_FP_PIPE deferred-arith commit (absolute phys index). Inert when
+      // we_wabs/we_wabs_fstat are tied 0 (the default, non-pipelined build). A
+      // pipelined arith op suppresses its same-cycle we_top/we_fstat, so there is
+      // no double-write to fpr[wabs_idx] / fstat from one op.
+      if (we_wabs)       fpr[wabs_idx] <= wabs_data;
+      if (we_wabs_fstat) fstat         <= wabs_fstat;
     end
   end
 

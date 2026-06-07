@@ -3133,6 +3133,9 @@ module core
       // M5 cycle-accuracy state.
       core_cyc<=32'd0; fp_ready_cyc<=32'd0; pending_mem_pen<=7'd0; stall_cnt<=7'd0;
       fp_occ_pending<=1'b0; fp_issue_cyc<=32'd0;
+`ifdef VEN_FP_PIPE
+      fpp_valid<=1'b0;
+`endif
       // D-cache timing arrays (dc_tag/dc_val/dc_lru) are reset inside the
       // dcache_timing module's own rst_n arm (rtl/mem/dcache.sv).
       retire2_valid<=1'b0; retire_pipe_valid<=1'b0;
@@ -3209,6 +3212,19 @@ module core
       // cyc=clock-count-at-retire 1:1 (core_cyc is the count of completed clocks
       // before this edge; a retire on this edge stamps cyc=core_cyc+1).
       core_cyc <= core_cyc + 32'd1;
+
+`ifdef VEN_FP_PIPE
+      // +VEN_FP_PIPE: advance the 1-deep FP-execute pipeline. A pipelined FK_ARITH
+      // issued this clock (fp_pipe_cap) latches its operands; fpp_valid is the
+      // in-flight bit consumed next clock by the we_wabs deferred commit. Exactly
+      // one capture per clock (the fast arm issues at most one FP op), so the
+      // register is consumed (committed) and reloaded in the same clock cleanly.
+      fpp_valid <= fp_pipe_cap;
+      if (fp_pipe_cap) begin
+        fpp_aluop <= fp_cap_aluop; fpp_a <= fp_cap_a; fpp_b <= fp_cap_b;
+        fpp_rc    <= fp_cap_rc;    fpp_err <= fp_cap_err; fpp_dst <= fp_cap_dst;
+      end
+`endif
 
       // -------------------------------------------------------------------
       // M8.1 — sample the external-interrupt pins (mirror smi_pending). Done
@@ -4198,6 +4214,34 @@ module core
   logic        fp_we_envld;  logic [15:0] fp_env_fctrl; logic [2:0] fp_env_ftop;
   logic [15:0] fp_env_fstat; logic [7:0]  fp_env_fptag;
   logic        fp_we_envregs; logic [639:0] fp_env_fpr_flat;
+  // +VEN_FP_PIPE: the deferred-arith commit port drivers (tied 0 unless piped) +
+  // the 1-deep FP-execute pipeline register. A fast-arm FK_ARITH op captures its
+  // operands at issue (cycle N), retires normally, and its fpr/fstat write is
+  // committed one cycle later (N+1) via the absolute-indexed we_wabs port — so
+  // the eip->icache->decode->f_eval->fpr critical cone is split across two clocks.
+  // The scoreboard already publishes the result at issue+lat (fadd lat 3), so the
+  // result (committed at N+1) is in fpr well before any dependent consumer reads
+  // it at issue+3 — both FP cycle bands are preserved by construction.
+  logic        fp_we_wabs, fp_we_wabs_fstat;
+  logic [2:0]  fp_wabs_idx;
+  logic [79:0] fp_wabs_data;
+  logic [15:0] fp_wabs_fstat;
+`ifdef VEN_FP_PIPE
+  logic        fpp_valid;            // a pipelined arith result is in flight (N+1)
+  logic [2:0]  fpp_aluop;            // captured f_eval inputs / target
+  logic [79:0] fpp_a, fpp_b;
+  logic [1:0]  fpp_rc;
+  logic        fpp_err;
+  logic [2:0]  fpp_dst;              // ABSOLUTE fpr index (ftop at issue)
+  // combinational capture lines (driven by the fast-arm FK_ARITH issue, latched
+  // into fpp_* by the always_ff):
+  logic        fp_pipe_cap;
+  logic [2:0]  fp_cap_aluop, fp_cap_dst;
+  logic [79:0] fp_cap_a, fp_cap_b;
+  logic [1:0]  fp_cap_rc;
+  logic        fp_cap_err;
+  logic        fp_pipe_rd_haz;       // next op reads the in-flight target -> stall
+`endif
 
   always_comb begin
     // ---- per-arm locals -------------------------------------------------------
@@ -4238,6 +4282,34 @@ module core
     fp_we_dptr=1'b0; fp_eptr_fdp=32'd0; fp_eptr_fds=16'd0;
     fp_we_envld=1'b0; fp_env_fctrl=16'd0; fp_env_ftop=3'd0; fp_env_fstat=16'd0; fp_env_fptag=8'd0;
     fp_we_envregs=1'b0; fp_env_fpr_flat=640'd0;
+    fp_we_wabs=1'b0; fp_wabs_idx=3'd0; fp_wabs_data=80'd0;
+    fp_we_wabs_fstat=1'b0; fp_wabs_fstat=16'd0;
+`ifdef VEN_FP_PIPE
+    fp_pipe_cap=1'b0; fp_cap_aluop=3'd0; fp_cap_dst=3'd0;
+    fp_cap_a=80'd0; fp_cap_b=80'd0; fp_cap_rc=2'd0; fp_cap_err=1'b0;
+    // Read-after-write hazard on the in-flight arith target: an FP op issuing the
+    // SAME clock the deferred result is being written (we_wabs) would read the
+    // PRE-edge stale fpr[fpp_dst]. Stall its issue 1 clock (the result lands this
+    // edge, fresh next clock). Role>=2 consumers are already scoreboard-stalled
+    // past this window, so this only bites role-0/1 readers (FXCH/FLDSTI/slow FST/
+    // FCOM) — none of which appear in the throughput microbench, so the FP cycle
+    // bands are preserved. Checks both ST0 (ftop) and ST(i) against the target.
+    fp_pipe_rd_haz = fpp_valid && u_d.is_fp &&
+                     ((ftop==fpp_dst) || (((ftop + u_d.fp_sti) & 3'd7)==fpp_dst));
+    // Deferred FK_ARITH commit (cycle N+1): the captured op's f_eval is computed
+    // HERE (from the registered fpp_* operands — the short, post-register path)
+    // and written to the absolute target via we_wabs. f_arith_fstat merges into
+    // the CURRENT fstat (sticky-OR; nothing else writes fstat this clock because a
+    // consumer that would is scoreboard-stalled past the in-flight window).
+    if (fpp_valid) begin
+      automatic logic [82:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err);
+      fp_we_wabs       = 1'b1;
+      fp_wabs_idx      = fpp_dst;
+      fp_wabs_data     = pp_arf[79:0];
+      fp_we_wabs_fstat = 1'b1;
+      fp_wabs_fstat    = f_arith_fstat(fstat, pp_arf);
+    end
+`endif
 
     // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
     fp_in_pipe = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
@@ -4248,14 +4320,35 @@ module core
     fp_fast_commit = fp_fp_arm &&
                      !(!fp_occ_pending && ($signed(fp_dep_ready - core_cyc) > 0)) &&
                      !(!fp_occ_pending && (u_d.fp_occ > 7'd1));
+`ifdef VEN_FP_PIPE
+    // Fast-arm arith is DEFERRED: the live-operand f_eval is removed from the
+    // issue cone (that is the whole point — the eip->icache->decode->f_eval->fpr
+    // path is what we are splitting). The result is computed one clock later from
+    // the REGISTERED fpp_* operands in the we_wabs deferred-commit block above.
+    fp_arf = 83'd0;
+`else
     fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10], errata_en[ERR_FDIV]);
+`endif
     if (fp_fast_commit) begin
       unique case (u_d.fp_kind)
         FK_FLDC:   begin fp_we_push=1'b1; fp_push_data=fconst(u_d.fp_sti); end
         FK_FLDSTI: begin fp_we_push=1'b1; fp_push_data=fst(u_d.fp_sti);    end
         FK_ARITH:  begin
+`ifdef VEN_FP_PIPE
+          // DEFERRED: capture operands (signalled to the always_ff) and commit one
+          // clock later via we_wabs — the same-cycle fpr/fstat write is suppressed
+          // so the eip->...->f_eval->fpr cone is split across two clocks.
+          fp_pipe_cap  = 1'b1;
+          fp_cap_aluop = u_d.fp_aluop;
+          fp_cap_a     = fst(3'd0);
+          fp_cap_b     = fst(u_d.fp_sti);
+          fp_cap_rc    = fctrl[11:10];
+          fp_cap_err   = errata_en[ERR_FDIV];
+          fp_cap_dst   = ftop;            // ST0 absolute physical index
+`else
           fp_we_top=1'b1;   fp_top_data=fp_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, fp_arf);
+`endif
         end
         FK_FSTP0:  begin fp_we_pop=1'b1; end
         FK_FXCH:   begin
@@ -4623,7 +4716,13 @@ module core
     .env_fstat    (fp_env_fstat),
     .env_fptag    (fp_env_fptag),
     .we_envregs   (fp_we_envregs),
-    .env_fpr_flat (fp_env_fpr_flat)
+    .env_fpr_flat (fp_env_fpr_flat),
+    // +VEN_FP_PIPE deferred-arith commit port (inert / tied 0 when not piped).
+    .we_wabs      (fp_we_wabs),
+    .wabs_idx     (fp_wabs_idx),
+    .wabs_data    (fp_wabs_data),
+    .we_wabs_fstat(fp_we_wabs_fstat),
+    .wabs_fstat   (fp_wabs_fstat)
   );
 
 `ifdef VEN_SRT_ITER
