@@ -4210,6 +4210,7 @@ module core
     logic        slow_arm;        // S_FEXEC, op actually executes (not f_pc_bad)
     logic        slow_pc_bad, slow_is_arith;
     logic [79:0] s_opnd_f, s_argb, s_st0v, s_stiv;
+    logic [79:0] s_fa, s_fb;      // shared arith operands (mux-then-eval, R-area)
     logic [82:0] s_arf;
     logic [80:0] s_ar;
     logic [2:0]  s_codes;
@@ -4330,7 +4331,21 @@ module core
     s_stiv   = fst(q_f_sti);
     s_rc     = fctrl[11:10];
     s_argb   = 80'd0; s_codes = 3'd0; s_xc = 4'd0; s_cmp_ie = 1'b0;
-    s_arf    = 83'd0; s_ar = 81'd0;
+    s_ar = 81'd0;
+    // R-area: ONE shared arithmetic eval. The four S_FEXEC arith commit arms used
+    // to each call f_eval with their own operands — synth built FOUR full add/mul/
+    // round cones (~6K LUT each) then muxed the outputs. Mux the OPERANDS per
+    // q_fxop here, then call f_eval ONCE (compute-then-mux -> mux-then-compute).
+    // Behaviour-identical: each arm's (a,b) is reproduced exactly; s_arf is only
+    // consumed by those arms (and harmlessly computed for non-arith ops). The
+    // VEN_SRT_ITER divide-eligibility block below also reuses s_fa/s_fb.
+    unique case (q_fxop)
+      FX_AR_STI_ST0:        begin s_fa = s_stiv; s_fb = s_st0v; end
+      FX_AR_M32, FX_AR_M64: begin s_fa = s_st0v; s_fb = s_opnd_f; end
+      FX_AR_I16, FX_AR_I32: begin s_fa = s_st0v; s_fb = f_mem_as_int(f_mem80, q_f_mbytes); end
+      default:              begin s_fa = s_st0v; s_fb = s_stiv; end  // FX_AR_ST0_STI + non-arith
+    endcase
+    s_arf = f_eval(q_f_aluop, s_fa, s_fb, s_rc, errata_en[ERR_FDIV]);
 `ifdef VEN_SRT_ITER
     // ----- iterative SRT FDIV/FSQRT eligibility + engine inputs -------------
     // Route NORMAL-operand divides and +normal sqrt through the multi-cycle
@@ -4338,20 +4353,13 @@ module core
     // on the combinational path (its flag/special logic below is preserved).
     begin
       logic na, nb;
-      logic [79:0] opA, opB;
-      unique case (q_fxop)
-        FX_AR_ST0_STI:        begin opA=s_st0v; opB=s_stiv; end
-        FX_AR_STI_ST0:        begin opA=s_stiv; opB=s_st0v; end
-        FX_AR_M32, FX_AR_M64: begin opA=s_st0v; opB=s_opnd_f; end
-        FX_AR_I16, FX_AR_I32: begin opA=s_st0v; opB=f_mem_as_int(f_mem80, q_f_mbytes); end
-        default:              begin opA=80'd0;  opB=80'd0; end
-      endcase
+      // operands are the shared s_fa/s_fb (the per-q_fxop mux computed above).
       // FINITE-NONZERO operands: exactly the set that reaches fx_srt_div's /
       // fx_isqrt's loop in f_eval's else (zero/Inf/NaN hit cheap guards). Routing
       // ALL of these to the engine lets the combinational loops be stubbed out of
       // synthesis (D8b); the engine == fx_srt_div / fx_sqrt for every operand.
-      na = !fx_is_zero(opA) && (fx_exp(opA)!=15'h7fff);
-      nb = !fx_is_zero(opB) && (fx_exp(opB)!=15'h7fff);
+      na = !fx_is_zero(s_fa) && (fx_exp(s_fa)!=15'h7fff);
+      nb = !fx_is_zero(s_fb) && (fx_exp(s_fb)!=15'h7fff);
       fp_div_elig = slow_arm && !errata_en[ERR_FDIV] &&
                     ((q_fxop==FX_AR_ST0_STI)||(q_fxop==FX_AR_STI_ST0)||
                      (q_fxop==FX_AR_M32)||(q_fxop==FX_AR_M64)||
@@ -4361,8 +4369,8 @@ module core
                      !fx_is_zero(s_st0v) && (fx_exp(s_st0v)!=15'h7fff) && !s_st0v[79];
       fp_iter_go   = fp_div_elig || fp_sqrt_elig;
       // div: a/b as passed to fx_div (divr, aluop 7, swaps operands)
-      eng_div_a    = (q_f_aluop==3'd7) ? opB : opA;
-      eng_div_b    = (q_f_aluop==3'd7) ? opA : opB;
+      eng_div_a    = (q_f_aluop==3'd7) ? s_fb : s_fa;
+      eng_div_b    = (q_f_aluop==3'd7) ? s_fa : s_fb;
       eng_sqrt_in  = s_st0v;
       eng_rc       = s_rc;
       eng_div_start  = fp_div_elig;
@@ -4451,25 +4459,23 @@ module core
           if (q_f_pop) fp_we_pop=1'b1;
         end
         // ---- arithmetic (f_eval -> {ie,ze,inexact,result}) ----
+        // arith commit arms — s_arf (== f_eval of the muxed s_fa/s_fb) is shared,
+        // computed once above; each arm just routes it to the right write port.
         FX_AR_ST0_STI: if (!fp_div_elig) begin
-          s_arf = f_eval(q_f_aluop, s_st0v, s_stiv, s_rc, errata_en[ERR_FDIV]);
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
         end
         FX_AR_STI_ST0: if (!fp_div_elig) begin
           // ST(i) op= ST0 : a=ST(i), b=ST0 (no tag write — only fpr[fri]).
-          s_arf = f_eval(q_f_aluop, s_stiv, s_st0v, s_rc, errata_en[ERR_FDIV]);
           fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=s_arf[79:0]; fp_wsti_clr_tag=1'b0;
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
           if (q_f_pop) fp_we_pop=1'b1;
         end
         FX_AR_M32, FX_AR_M64: if (!fp_div_elig) begin
-          s_arf = f_eval(q_f_aluop, s_st0v, s_opnd_f, s_rc, errata_en[ERR_FDIV]);
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
         end
         FX_AR_I16, FX_AR_I32: if (!fp_div_elig) begin
-          s_arf = f_eval(q_f_aluop, s_st0v, f_mem_as_int(f_mem80, q_f_mbytes), s_rc, errata_en[ERR_FDIV]);
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
         end

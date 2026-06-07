@@ -168,16 +168,43 @@ VEN_IDIV_ITER VEN_BCD_ITER}`). Reports: `fpga/build/synthprobe_core_bcd/`.
 
 Both rare‑but‑combinational monsters (FBSTP BCD chain, sqrt `r*r`) are gone; the
 core now **nearly fits** (LUT 111%, CARRY8 24%, FF 12%, DSP 7.6%, F7/F8 ~25%).
-The **new worst path is the fetch→FP combinational chain**: `eip_reg →
-u_icache/ic_line_reg` (the **distributed‑RAM async line read**, P0‑3 keeper) →
-`fp_ready_cyc` issue → `fx_add`/`fx_mul` → `u_fpu_state/fpr_reg[0][77]`. 108 levels,
-only 38% logic / **62% routing** (congestion from 111% LUT over‑capacity). Two
-remaining wins, now coupled: **(a) icache → registered BRAM** frees ~41 K LUTs
-(`u_icache` = 45,091 LUTs) AND breaks the async read out of the path into a fetch
-pipeline stage; **(b) P0‑4 pipeline FADD/FMUL** (`u_fpu_state` = 58,618 LUTs) for
-the carry tail. Either alone gets under 100% LUTs; both → real Fmax headroom.
-Verified bit‑exact at every step (lint clean ×3 configs; default `make verify`
-74/74 + all cycle bands; `+VEN_BCD_ITER` `make m3` 74/74). _Captured 2026‑06‑07._
+The new worst path is the fetch→FP chain ending at `u_fpu_state/fpr_reg`.
+_Captured 2026‑06‑07._
+
+### After P0‑4 = f_eval CONSOLIDATION — **CORE FITS (91.7%)** ✅
+P0‑4 was originally "pipeline FADD/FMUL," but per‑function area probes
+(`fpga/scripts/probe_fp_fn.tcl`) overturned that premise: each FP fn is tiny
+(`fx_add` 2.9K, `fx_mul` 1.9K, `fx_round` 1.3K) — pipelining wouldn't shrink area
+(it adds flops) and the −16.7 ns path is a serial CHAIN (icache read → dispatch →
+`fx_add` → fpr), not `fx_add` alone (which closes at ~−3.9 ns standalone). The
+REAL FP hog: **`f_eval` was instantiated 5× in core.sv** — the four S_FEXEC arith
+commit arms (FX_AR_ST0_STI / STI_ST0 / M32M64 / I16I32) each built a FULL
+add/mul/round cone, then the outputs were muxed (compute‑then‑mux). Fix
+(behaviour‑preserving, DEFAULT, no define): mux the **operands** per `q_fxop`
+(reusing the `s_fa/s_fb` the SRT‑eligibility block already computed) → call
+`f_eval` **ONCE** (mux‑then‑compute). The four arms just route the shared `s_arf`
+to their write port; the fast‑arm `fp_arf` (decode‑time operands) is left as the
+one separate eval.
+
+| Resource | +BCD +sqrtFIN | **+ f_eval consolidate** | Δ |
+|---|---:|---:|---:|
+| **CLB LUTs** | 130,222 (111.2%) | **107,418 (91.7% ✅ FITS)** | **−22,804** |
+| &nbsp;&nbsp;LUT as logic | 126,126 | **103,322 (88.2%)** | −22,804 |
+| `u_fpu_state` (FP datapath) | 58,618 | **33,856** | **−24,762 (−42%)** |
+| **CARRY8** | 3,585 (24.5%) | **2,611 (17.8%)** | −27% |
+| DSP48E2 / FF | 95 / 28,152 | 95 / 28,085 | ~same |
+| Worst path | 26.7 ns | **24.2 ns / 101 lvl (33 CARRY8)** | −9% |
+| Est. Fmax | ~37.5 MHz | **~41.2 MHz** | +10% |
+
+**The core now fits the XCK26 (107,418 / 117,120 = 91.7% LUTs)** — from 518 %
+(5.2× over) at the start of the fpga effort to fitting, all bit‑exact. Verified:
+lint clean ×3 configs; default `make verify` **75/75 + every cycle band unchanged**
+(FP CPI 2.985/1.152 identical → the refactor is cycle‑neutral); iter `make m3`
+**75/75** incl. tx_addsub/muldiv/chain/sqrt/bcd. New worst path: still the fetch→FP
+chain `eip_reg → u_icache async read → fp_ready_cyc → fx_add/fx_mul →
+u_fpu_state/fpr_reg[0][76]` (101 lvl). Headroom now exists; further area/Fmax
+candidates: consolidate `apply_cmp`×6 / `fcom_codes`×6 the same way; the integer
+datapath. _Captured 2026‑06‑07._
 
 ## P0‑4 — FMUL is a single‑cycle 64×64 multiply + 128‑bit normalize
 **Problem.** `fx_mul` does a 64×64→128 multiply (`fpu_x87_pkg.sv:217`) plus a
