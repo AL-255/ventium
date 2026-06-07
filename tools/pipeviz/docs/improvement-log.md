@@ -70,12 +70,20 @@ not repeat itself.
   inspector (type an address or click →EIP/→ESP to follow, ◀/▶ to page; EIP bytes
   cyan, ESP bytes amber).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
-  instruction (Δ shows `+N` only on a stall gap — steady-state 0/1 suppressed); x86 byte-field colouring (prefix gray / opcode blue / ModRM green
+  instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
+  suppressed); the **effect column** shows what each retired instruction
+  architecturally WROTE — the destination GPR(s) with their committed value plus
+  any changed flags (`eax=60000011  ZF0`); writes are attributed per-instruction
+  via capstone register-access analysis, so a dual-issue U/V pair's writes land on
+  the correct rows even though the commit snapshot is per-cycle. x86 byte-field
+  colouring (prefix gray / opcode blue / ModRM green
   / SIB purple / memory-offset yellow / immediate red / **branch-rel vivid-orange**
   `#ff8c00`, pulled well clear of the offset-yellow), clipped with `…` only past
   ~11 bytes with the **full encoding on hover** (tooltip) so no bytes are lost; the
   **instruction column is split-coloured** (dimmed mnemonic + operand/target in
-  the class accent, matching the Konata gutter); U=blue V=amber pipe; zebra; Δ
+  the class accent, matching the Konata gutter; the branch accent is the same
+  vivid-orange as the rel byte so a branch target reads one hue everywhere);
+  U=blue V=amber pipe; zebra; Δ
   amber on a stall gap; whole-row scroll snap; capstone disasm (16/32-bit per
   live CS.D). Click a row → highlights its Konata instruction row + pins the
   register panel to its post-commit state (two-way).
@@ -95,6 +103,32 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 15 — trace effect column + register-gap + branch-colour consistency
+Verify confirmed 0 of 6 picks again; the value came from ground-truthing the
+unpicked HIGH findings and a recurring feature request.
+- **New feature — trace "effect (writes)" column.** A retired-instruction trace
+  now shows what each instruction architecturally WROTE: the destination GPR(s)
+  with their committed value plus any changed flags (`eax=60000011  ZF0`,
+  `xor ax,ax → eax=00000000  PF1 ZF1`). Critical subtlety found by inspecting the
+  raw records: the commit GPR snapshot is **per-cycle**, so naively diffing
+  consecutive retirements smears a dual-issue U/V pair's writes onto the U row
+  (`mov eax,[esi]` wrongly showed `esi=…`). Fixed by attributing writes
+  per-instruction via **capstone register-access analysis** (`written_regs`) and
+  showing those registers' committed values — so `mov`→eax and the paired `add`→esi
+  land on the right rows. Flags are diffed vs the previous retirement, gated on the
+  op actually writing flags.
+- **Fix — branch-colour consistency.** A branch *target* was orange in the bytes
+  column (`rel` `#ff8c00`) but gold in the disassembly (`CC_BRANCH #e3b341`),
+  conflating it with the yellow memory-displacement. Unified `CC_BRANCH` to the
+  same `#ff8c00`, so a branch target reads one hue across both columns.
+- **Fix — register name↔value gap (retry that stuck this time).** Iter 13's
+  `setColumnStretch` was a no-op because the spanning EFLAGS row pinned the column
+  widths. Fixed by spanning the flag row across a 3rd column and giving THAT column
+  the stretch, so the name+value pack tightly on the left. Verified visually
+  (unlike iter 13, where I reverted a no-op).
+- (Ground-truthed and dropped: "stage board has no gridlines" — they're clearly
+  drawn at `#454f5d`; perception error.)
 
 ### Iteration 14 — event-jump nav + review-harness wrong-panel fix
 A trace critic caught a real harness bug (one I'd have dismissed as a perception

@@ -11,8 +11,31 @@ from PySide6.QtCore import Qt, QRect, Signal
 from . import disasm
 from .disasm import C_PIPE, C_FP, FIELD_COLOR
 
-_COLS = ["n", "cyc", "Δ", "pipe", "PC", "bytes", "instruction"]
+_COLS = ["n", "cyc", "Δ", "pipe", "PC", "bytes", "instruction", "effect (writes)"]
 _BYTES_COL = 5
+_INSN_COL = 6
+_EFFECT_COL = 7
+
+# architectural-effect decoding: diff a retirement's committed GPRs/EFLAGS against
+# the previous retirement's, so each row shows what the instruction actually WROTE.
+_GPR = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
+_FLAGBITS = [(0, "CF"), (2, "PF"), (4, "AF"), (6, "ZF"), (7, "SF"),
+             (11, "OF"), (10, "DF"), (9, "IF")]
+
+
+def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags):
+    """Compact 'what this instruction WROTE' string (e.g. 'ecx=000003f2  ZF1 SF0').
+    GPR writes are decoded from capstone (`written_gprs`) and shown with their
+    committed value, so a dual-issue pair's writes land on the right rows (the
+    per-cycle snapshot can't separate them). Flag changes are diffed vs the
+    previous retirement's EFLAGS, but only surfaced when the op writes flags."""
+    parts = [f"{_GPR[k]}={gpr[k] & 0xffffffff:08x}" for k in written_gprs]
+    if flags_written and prev_eflags is not None and eflags != prev_eflags:
+        fl = [f"{nm}{(eflags >> bit) & 1}" for bit, nm in _FLAGBITS
+              if ((eflags >> bit) & 1) != ((prev_eflags >> bit) & 1)]
+        if fl:
+            parts.append(" ".join(fl))
+    return "   ".join(parts)
 _MAX_ROWS = 6000   # rolling cap on displayed rows
 _BYTES_ROLE = Qt.UserRole + 1
 _CYC_ROLE = Qt.UserRole + 2
@@ -120,7 +143,7 @@ class TraceView(QWidget):
         # left-align the headers whose data is left-aligned (n/cyc/PC/bytes/instr)
         # so a caption sits directly over its column's first glyph instead of
         # floating centred over the wide bytes/instruction gutter.
-        for _c in (0, 1, 4, 5, 6):
+        for _c in (0, 1, 4, 5, 6, 7):
             _hi = self.tbl.horizontalHeaderItem(_c)
             if _hi is not None:
                 _hi.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -134,11 +157,11 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((52, 54, 40, 38, 74, 236)):
+        for i, w in enumerate((52, 54, 40, 38, 74, 200, 246)):
             self.tbl.setColumnWidth(i, w)
-        hh.setSectionResizeMode(len(_COLS) - 1, QHeaderView.Stretch)
+        hh.setSectionResizeMode(_EFFECT_COL, QHeaderView.Stretch)   # effect fills the rest
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
-        self.tbl.setItemDelegateForColumn(6, InsnDelegate(mono, self.tbl))
+        self.tbl.setItemDelegateForColumn(_INSN_COL, InsnDelegate(mono, self.tbl))
         self.tbl.currentCellChanged.connect(self._on_row)
         lay.addWidget(self.tbl)
         # field-colour legend — swatch tightly coupled to ITS label (no rotation)
@@ -193,6 +216,7 @@ class TraceView(QWidget):
         self.tbl.setRowCount(0)
         self._seen = 0
         self._last_cyc = None
+        self._prev_eff = None
 
     def update_from(self, backend):
         total = backend.retire_count()
@@ -214,6 +238,12 @@ class TraceView(QWidget):
             shown = bs[:sz] if sz else bs[:1]
             fields = disasm.byte_fields(bs, r.pc, bits)
             _, icol = disasm.insn_class(mn)
+            # architectural effect: which GPR/flags THIS instruction wrote (capstone
+            # attribution) shown with their committed values
+            wgpr, wflags = disasm.written_regs(bs, r.pc, bits)
+            efl = int(r.eflags)
+            eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None))
+            self._prev_eff = efl
             # delta cycles since the previous retirement (surfaces stalls); a
             # paired V retires in the same cycle as its U (delta 0).
             stall = (self._last_cyc is not None and int(r.cyc) - self._last_cyc > 1)
@@ -224,8 +254,8 @@ class TraceView(QWidget):
             self.tbl.insertRow(row)
             pipe = "U" if r.pipe == 0 else ("V" if r.pipe == 1 else "-")
             vals = [str(r.n), str(r.cyc), dcyc, pipe, f"{r.pc:08x}",
-                    " ".join(f"{b:02x}" for b in shown), txt]
-            hay = f"{r.pc:08x} {vals[5]} {txt}".lower()
+                    " ".join(f"{b:02x}" for b in shown), txt, eff]
+            hay = f"{r.pc:08x} {vals[5]} {txt} {eff}".lower()
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(v)
                 if c in (0, 1, 4):
@@ -242,10 +272,15 @@ class TraceView(QWidget):
                 if c == _BYTES_COL:
                     it.setData(_BYTES_ROLE, fields)     # painted by BytesDelegate
                     it.setToolTip(v)                    # full bytes — never lost to the … clip
-                if c == 6:                              # painted by InsnDelegate
+                if c == _INSN_COL:                      # painted by InsnDelegate
                     parts = txt.split(" ", 1)
                     it.setData(_INSN_ROLE,
                                (parts[0], parts[1] if len(parts) > 1 else "", icol))
+                    it.setToolTip(txt)                  # full disasm (col is now fixed-width)
+                if c == _EFFECT_COL:                    # register/flag writes
+                    it.setForeground(QBrush(QColor("#79c0ff")))
+                    if v:
+                        it.setToolTip(v)
                 self.tbl.setItem(row, c, it)
         self._seen = total
         # rolling cap

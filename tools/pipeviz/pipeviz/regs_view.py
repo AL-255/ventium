@@ -63,7 +63,11 @@ class RegsView(QWidget):
         self.efl_lbl = QLabel("00000000"); self.efl_lbl.setFont(_mono())
         g.addWidget(self.efl_lbl, len(GPR_NAMES) + 1, 1)
         self.flags_lbl = QLabel(""); self.flags_lbl.setFont(_mono(9))
-        g.addWidget(self.flags_lbl, len(GPR_NAMES) + 2, 0, 1, 2)
+        # span the flag row across 3 columns and let the 3rd absorb the panel's
+        # slack, so the name (col 0) + hex value (col 1) pack tightly on the left
+        # instead of the value drifting to the far right of a stretched column.
+        g.addWidget(self.flags_lbl, len(GPR_NAMES) + 2, 0, 1, 3)
+        g.setColumnStretch(2, 1)
         col1.addWidget(gp)
 
         # --- segment + control column ---
