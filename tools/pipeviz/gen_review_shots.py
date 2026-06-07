@@ -113,6 +113,14 @@ for tag, img, steps, soc in SHOTS:
         if len(pl.insns) > 12:
             pl.anchor = pl.insns[-10]["c1"]
             win.pipeline.highlight_cycle(pl.insns[-4]["c1"])
+            # select an instruction WITH source registers (skip the no-reads jne/branch
+            # the playhead may land on) so the producer→consumer dependency edges render
+            # in the capture, not just the playhead.
+            for k in range(len(pl.insns) - 1, max(0, len(pl.insns) - 12), -1):
+                if pl.insns[k].get("reads"):
+                    pl.sel_row = k
+                    pl._dep_for_row = -1
+                    break
     except Exception:
         pass
     win.repaint(); app.processEvents()

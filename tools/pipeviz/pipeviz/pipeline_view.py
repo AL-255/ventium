@@ -18,11 +18,11 @@
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea,
                                QSizePolicy, QHBoxLayout, QGridLayout)
-from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics
-from PySide6.QtCore import Qt, QRect, QSize, Signal
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
+from PySide6.QtCore import Qt, QRect, QSize, QPoint, Signal
 
 from . import disasm
-from .disasm import (C_PIPE, C_FILL, C_SLOW, C_FP, C_WALK, C_SYS, C_HALT,
+from .disasm import (C_PIPE, C_FILL, C_SLOW, C_FP, C_WALK, C_HALT,
                      C_STALL, C_MISPRED)
 
 INT_STAGES = ["PF", "D1", "D2", "EX", "WB"]
@@ -253,6 +253,11 @@ C_STG_MEM = "#f0883e"     # load/store address    (orange)
 C_STG_WB = "#7d8fc9"      # writeback (slate-blue — out of the wb/FP/walk purple cluster)
 C_STG_EXEC = C_PIPE       # execute (integer)     (green)
 C_STG_STALL = "#7a828d"   # stall / bubble        (grey — distinct from amber fill)
+C_STG_SYS = "#a87f55"     # system / microcode    (bronze — a DEDICATED Konata-cell
+                          # colour, pulled clear of the L-fill amber it used to share
+                          # via C_SYS so the 'S' glyph is decodable + has a legend swatch)
+
+_GPR_NAMES = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]  # by GPR index
 
 # Konata cell glyph -> full stage name, for the per-cell hover tooltip.
 _GLYPH_STAGE = {"F": "Fetch", "L": "I-cache line fill", "D": "Decode",
@@ -313,7 +318,7 @@ def _stage_cell(name, ret, stall, mispred):
         return ("w", C_WALK)
     if name in ("S_HALT", "S_F00F_HANG"):
         return (".", C_HALT)
-    return ("S", C_SYS)
+    return ("S", C_STG_SYS)
 
 
 class _KonataPlot(QWidget):
@@ -327,11 +332,14 @@ class _KonataPlot(QWidget):
         self.cs_base = 0
         self.backend = None
         self._mn_cache = {}
-        self.insns = []          # [{n,pc,pipe,mnem,cells:[(cyc,ch,color)],c0,c1}]
+        self._rw_cache = {}      # pc -> (read_gpr_idxs, write_gpr_idxs) for dep edges
+        self.insns = []          # [{n,pc,pipe,mnem,cells:[(cyc,ch,color)],c0,c1,reads,writes}]
         self.base_cyc = 1
         self.max_cyc = 1
         self.sel_row = None
         self.sel_pc = None       # selected PC → tint all its other executions (loop)
+        self._dep_edges = []     # [(prod_row, reg_idx, gating?)] producers of sel_row's sources
+        self._dep_for_row = -1   # sel_row the edges were computed for (recompute on change)
         self.playhead = None     # pinned cycle (vertical marker)
         self.anchor = None       # shift-click second marker → cycle-range Δ measure
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
@@ -343,11 +351,14 @@ class _KonataPlot(QWidget):
         self.backend = backend
         self.bits = bits
         self._mn_cache = {}
+        self._rw_cache = {}
         self.insns = []
         self.base_cyc = 1
         self.max_cyc = 1
         self.sel_row = None
         self.sel_pc = None
+        self._dep_edges = []
+        self._dep_for_row = -1
         self.playhead = None
         self.anchor = None
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
@@ -364,6 +375,54 @@ class _KonataPlot(QWidget):
             t = f"{mn} {ops}".strip()
             self._mn_cache[key] = t
         return t or "?"
+
+    def _regs(self, pc):
+        """(read_gpr_idxs, write_gpr_idxs) for the instruction at pc, cached — the
+        raw material for the producer→consumer dependency overlay."""
+        key = (pc, self.cs_base, self.bits)
+        rw = self._rw_cache.get(key)
+        if rw is None and self.backend is not None:
+            code = self.backend.mem_read(self.cs_base + pc, 16)
+            reads = disasm.read_regs(code, pc, self.bits)
+            writes, _ = disasm.written_regs(code, pc, self.bits)
+            rw = (reads, writes)
+            self._rw_cache[key] = rw
+        return rw or ([], [])
+
+    def _compute_deps(self, row):
+        """For the selected consumer row, find the PRODUCER of each source GPR — the
+        most-recent prior instruction that wrote it — by a bounded backward scan of
+        insns[]. An edge is 'gating' (drawn amber) when its producer commits DURING
+        the consumer's lifecycle (the value arrived late, so it plausibly caused the
+        wait); otherwise the dependency was satisfied early and is drawn dim. This is
+        a pure dataflow fact (def-use), so a dim edge never falsely claims to be a
+        stall cause — it just shows where the value came from."""
+        self._dep_edges = []
+        if not (row is not None and 0 <= row < len(self.insns)):
+            return
+        cons = self.insns[row]
+        need = set(cons.get("reads", ()))
+        if not need:
+            return
+        found = {}
+        for j in range(row - 1, max(-1, row - 400), -1):
+            for w in self.insns[j].get("writes", ()):
+                if w in need and w not in found:
+                    found[w] = j
+            if len(found) == len(need):
+                break
+        # amber 'gating' is RELIABLE only when the producer's result arrives right as
+        # the consumer's stall LIFTS — i.e. its commit lands within ±1 cycle of the
+        # last '=' stall cell. That distinguishes a true RAW/load-use (the value was
+        # the thing being waited on) from a producer that merely commits somewhere in
+        # a long structural stall (e.g. dmiss 'dec ecx' stalls BEHIND a load, not on
+        # its ecx producer — that edge stays dim, no false stall-cause claim).
+        stalls = [cyc for (cyc, ch, _) in cons["cells"] if ch == "="]
+        s_end = max(stalls) if stalls else None
+        for reg, j in found.items():
+            prod = self.insns[j]
+            gating = s_end is not None and (s_end - 1 <= prod["c1"] <= s_end + 2)
+            self._dep_edges.append((j, reg, gating))
 
     def ingest(self, backend, since_cyc):
         new = backend.get_cycles(since_cyc, 8192)
@@ -385,18 +444,22 @@ class _KonataPlot(QWidget):
                 self.stat["stall"] += 1
             if c.retU:
                 mn = self._mn(c.pcU)
+                reads, writes = self._regs(c.pcU)
                 cells = _add_frontend(_recolor_fp(self._pending, mn))
                 self.insns.append(dict(n=c.nU, pc=c.pcU, pipe="U", mnem=mn,
-                                       cells=cells, c0=cells[0][0], c1=c.cyc))
+                                       cells=cells, c0=cells[0][0], c1=c.cyc,
+                                       reads=reads, writes=writes))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
                 self.stat["uret"] += 1
                 self._pending = []
             if c.retV:
                 mn = self._mn(c.pcV)
+                reads, writes = self._regs(c.pcV)
                 vcol = C_FP if (mn[:1] == "f" and mn[:2] not in ("fs", "gs")) else C_PIPE
                 cells = _add_frontend([(c.cyc, "X", vcol)])
                 self.insns.append(dict(n=c.nV, pc=c.pcV, pipe="V", mnem=mn,
-                                       cells=cells, c0=cells[0][0], c1=c.cyc))
+                                       cells=cells, c0=cells[0][0], c1=c.cyc,
+                                       reads=reads, writes=writes))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
                 self.stat["vret"] += 1
         if len(self.insns) > 9000:          # rolling cap
@@ -405,6 +468,7 @@ class _KonataPlot(QWidget):
             self._cyc_row = {v["c1"]: i for i, v in enumerate(self.insns)}
             if self.sel_row is not None:
                 self.sel_row -= drop
+            self._dep_for_row = -1        # row indices shifted → recompute dep edges
         self.base_cyc = self.insns[0]["c0"] if self.insns else 1
         w = (self.max_cyc - self.base_cyc + 3) * CELL_W
         # one row of bottom slack so a row-aligned bottom-follow scroll keeps the
@@ -424,6 +488,9 @@ class _KonataPlot(QWidget):
             p.drawText(self.rect(), Qt.AlignCenter, "step the core to fill the pipeline view")
             p.end(); return
         vis = ev.rect()
+        if self._dep_for_row != self.sel_row:        # recompute dep edges on re-select
+            self._compute_deps(self.sel_row)
+            self._dep_for_row = self.sel_row
         # vertical gridlines every 10 cycles so a cell's cycle is readable —
         # dim-but-legible (#2b3340 ≈ 2x the old near-black #171c24 contrast),
         # kept below the stage board's #454f5d so they don't fight the dense cells.
@@ -515,6 +582,34 @@ class _KonataPlot(QWidget):
                 p.setFont(_mono(10, True)); p.setPen(QColor("#d29922"))   # amber 'more →'
                 p.drawText(QRect(vis.right() - 11, y, 11, ROW_H),
                            Qt.AlignVCenter | Qt.AlignRight, "›")
+        # producer→consumer DEPENDENCY EDGES for the selected instruction: a thin line
+        # from each source register's PRODUCER (its commit cell) to this consumer's
+        # first cell, labelled with the register. Amber + thick when the producer
+        # commits DURING the consumer's lifecycle (a live dep that plausibly gated it);
+        # dim when the value was ready early — a pure def-use trace that shows where an
+        # input came from and never falsely claims to be the stall cause.
+        if self._dep_edges and self.sel_row is not None and 0 <= self.sel_row < len(self.insns):
+            p.save()
+            cons = self.insns[self.sel_row]
+            cx = self._x(cons["c0"]) + CELL_W // 2
+            cy = self.sel_row * ROW_H + ROW_H // 2
+            p.setFont(_mono(8, True))
+            for (j, reg, gating) in self._dep_edges:
+                prod = self.insns[j]
+                ex = self._x(prod["c1"]) + CELL_W // 2
+                ey = j * ROW_H + ROW_H // 2
+                col = QColor("#e3b341" if gating else "#6e7681")
+                pen = QPen(col); pen.setWidth(2 if gating else 1)
+                p.setPen(pen)
+                p.drawLine(ex, ey, cx, cy)
+                p.setBrush(col); p.drawEllipse(QPoint(cx, cy), 2, 2)    # arrowhead at consumer
+                p.setBrush(Qt.NoBrush)
+                lbl = _GPR_NAMES[reg] if 0 <= reg < 8 else "?"
+                lw = QFontMetrics(p.font()).horizontalAdvance(lbl) + 4
+                p.fillRect(QRect(ex + 3, ey - 6, lw, 11), QColor("#0d1117"))
+                p.setPen(col)
+                p.drawText(QRect(ex + 3, ey - 6, lw, 11), Qt.AlignCenter, lbl)
+            p.restore()
         # Δ-measure LABEL only (the band fill + amber anchor line are drawn BEHIND
         # the cells so they can't punch through a glyph); the label sits on top.
         if self.playhead is not None and self.anchor is not None:
@@ -561,12 +656,15 @@ class _KonataPlot(QWidget):
                 cnt[c[1]] = cnt.get(c[1], 0) + 1
             brk = "  ".join(f"{n}×{_GLYPH_STAGE.get(g, g)}"
                             for g, n in sorted(cnt.items(), key=lambda gn: -gn[1]))
+            src = ",".join(_GPR_NAMES[s] for s in ins.get("reads", ())) or "—"
+            dst = ",".join(_GPR_NAMES[d] for d in ins.get("writes", ())) or "—"
             self.setToolTip(
                 f"n={ins['n']}  {ins['pipe']}  {ins['pc']:#010x}  {ins['mnem']}\n"
                 f"cycles {ins['c0']}..{ins['c1']}  (commit @ {ins['c1']}, "
                 f"{ins['c1'] - ins['c0'] + 1} cyc){cellinfo}\n"
                 f"breakdown: {brk}\n"
-                f"click: pin regs · shift-click: set Δ-measure anchor")
+                f"reads {src} · writes {dst}\n"
+                f"click: pin regs + trace data deps · shift-click: Δ-measure anchor")
 
     def mousePressEvent(self, ev):
         y = (ev.position().y() if hasattr(ev, "position") else ev.y())
@@ -763,8 +861,8 @@ class Konata(QWidget):
         w = QWidget(); h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(14)
         items = [("F fetch", C_STG_FETCH), ("L fill", C_STG_FILL), ("D dec", C_STG_DEC),
                  ("M mem", C_STG_MEM), ("X exec", C_STG_EXEC), ("W wb", C_STG_WB),
-                 ("= stall", C_STG_STALL), ("! flush", C_MISPRED), ("FP", C_FP),
-                 ("walk", C_WALK)]
+                 ("= stall", C_STG_STALL), ("! flush", C_MISPRED), ("S sys", C_STG_SYS),
+                 ("FP", C_FP), ("walk", C_WALK)]
         for txt, col in items:
             it = QWidget(); ih = QHBoxLayout(it); ih.setContentsMargins(0, 0, 0, 0); ih.setSpacing(3)
             sw = QLabel(); sw.setStyleSheet(f"background:{col}; border:1px solid #30363d;")

@@ -136,6 +136,29 @@ def written_regs(code: bytes, addr: int = 0, bits: int = 32):
     return [], False
 
 
+def read_regs(code: bytes, addr: int = 0, bits: int = 32):
+    """Which architectural GPRs an instruction READS (source operands), via
+    capstone's register-access analysis — the first element of regs_access(), the
+    mirror of written_regs(). Used to find the producer of each source value (the
+    most-recent prior instruction that wrote it) for the dependency overlay."""
+    md = _md16d if bits == 16 else _md32d
+    try:
+        for insn in md.disasm(code, addr):
+            try:
+                rd, _ = insn.regs_access()
+            except Exception:
+                rd = getattr(insn, "regs_read", []) or []
+            gprs = []
+            for rid in rd:
+                nm = (insn.reg_name(rid) or "").lower()
+                if nm in _GPR_OF and _GPR_OF[nm] not in gprs:
+                    gprs.append(_GPR_OF[nm])
+            return gprs
+    except Exception:
+        pass
+    return []
+
+
 _OPTOK = re.compile(r'0x[0-9a-fA-F]+|\d+|[A-Za-z_]\w*|.')
 
 
