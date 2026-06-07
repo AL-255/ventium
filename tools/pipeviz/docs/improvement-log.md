@@ -192,6 +192,31 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 42 — GUI clean; fix the review-harness watermark tofu box (U+2192 → ASCII)
+Review confirmed the live watermark (`3ad2ec2`) on all 6 critics and **confirmed 0 GUI
+defects** — a healthy converged outcome after iter40/41's run of real picks. Of the 3 raw
+findings, two were refuted in source (the FP-exec `X` is a deliberate glyph=phase ×
+colour=pipe encoding — the legend's `FP` is a colour key, not a glyph field; the pinned
+Segments header is a Qt `QGridLayout` with no string-spacing to collide — the
+thrice-refuted entry). The lone survivor was a real rendering defect, but in the
+*screenshot harness itself*, not the GUI:
+- **Fix (harness correctness) — the watermark band rendered `→` (U+2192) as a tofu box.**
+  `gen_review_shots.py` draws the amber anti-staleness band with `ImageDraw.text(...)` and
+  NO `font=` argument, so it falls back to PIL's default bitmap font, which has no glyph
+  for `→` — the `Memory →access` tag rendered as `Memory ▯access`, the box fused into the
+  leading `a`. Since the band is pure review scaffolding (the GUI's own arrows are Qt
+  TrueType and render correctly — toolbar `→access`/`→EIP`/`→ESP`, the Mem-map `set →`),
+  swapped the literal `→` for ASCII `->` in the one rendered tag string (the other `→`
+  are code comments). Ground-truthed by zooming the band before (tofu) and after (clean
+  `Memory ->access`). This declutters the watermark that EVERY critic reads each round,
+  removing a recurring distraction. The GUI under review was, correctly, untouched.
+- **Feature candidate ground-truth-REJECTED — per-PC branch mispredict attribution.** The
+  obvious Branches-tab enhancement (which branch PC mispredicts most) is NOT cleanly
+  derivable: the backend reports mispredicts per-CYCLE (`mispred_bubbles`), not per branch
+  PC, so attributing one to a branch needs a fragile "most-recent retired branch before
+  the bubble cycle" correlation — and it would partly duplicate the already-drawn Konata
+  `!` flush cells + sparkline `m` pixels + Cycles-tab aggregate. Left unbuilt.
+
 ### Iteration 41 — dependency arrowhead off the glyph + Mem-map origin-corner declutter
 Review confirmed the live watermark (`ad2fdce`) on all 6 critics and surfaced **2
 confirmed visual defects** (the adversarial Verify/synthesis dropped 3: the

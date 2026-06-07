@@ -170,7 +170,10 @@ for tag, img, steps, soc in SHOTS:
         win.grab().save(mfull)
         ma = os.path.join(OUT, f"{tag}_mem_access.png")
         Image.open(mfull).crop(_box(win, win.tables)).save(ma)
-        _watermark(ma, f"{tag} · Memory →access @{win.trace.last_access[0]:08x}")
+        # ASCII '->' not '→': the watermark band is drawn with PIL's default bitmap font
+        # (no font= on d.text), which has no U+2192 glyph and rendered it as a tofu box
+        # fused into 'access'. The band is pure review scaffolding, so ASCII is the fix.
+        _watermark(ma, f"{tag} · Memory ->access @{win.trace.last_access[0]:08x}")
         win.tables.mem.follow = None
         # the access-pattern map (dmiss's strided loads => a clean diagonal scatter);
         # select a mid point so the click-readout crosshair + detail line also render.
