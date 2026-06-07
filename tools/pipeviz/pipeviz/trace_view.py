@@ -21,9 +21,11 @@ _EFFECT_COL = 7
 _GPR = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
 _FLAGBITS = [(0, "CF"), (2, "PF"), (4, "AF"), (6, "ZF"), (7, "SF"),
              (11, "OF"), (10, "DF"), (9, "IF")]
+_FSW_EXC = [(0, "IE"), (1, "DE"), (2, "ZE"), (3, "OE"), (4, "UE"), (5, "PE")]
 
 
-def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags):
+def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags,
+            x87_valid=False, fstat=0, prev_fstat=None):
     """Compact 'what this instruction WROTE' string (e.g. 'ecx=000003f2  ZF1 SF0').
     GPR writes are decoded from capstone (`written_gprs`) and shown with their
     committed value, so a dual-issue pair's writes land on the right rows (the
@@ -35,6 +37,13 @@ def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags):
               if ((eflags >> bit) & 1) != ((prev_eflags >> bit) & 1)]
         if fl:
             parts.append(" ".join(fl))
+    # x87 exception flags NEWLY raised this retirement (FSW IE/DE/ZE/OE/UE/PE) —
+    # diffed (the FSW bits are sticky) so only the op that raised one shows it.
+    if x87_valid and prev_fstat is not None and fstat != prev_fstat:
+        exc = [nm for bit, nm in _FSW_EXC
+               if ((fstat >> bit) & 1) and not ((prev_fstat >> bit) & 1)]
+        if exc:
+            parts.append("FP:" + " ".join(exc))
     return "   ".join(parts)
 _MAX_ROWS = 6000   # rolling cap on displayed rows
 _BYTES_ROLE = Qt.UserRole + 1
@@ -79,10 +88,14 @@ class BytesDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+_MNEM_GREY = "#939ba6"   # all mnemonics share one neutral grey
+
+
 class InsnDelegate(QStyledItemDelegate):
-    """Paints the disassembly with a DIMMED class-coloured mnemonic and the
-    operand(s) in the full class accent — so a branch's target (or a load's
-    address) is what pops, not the whole instruction painted one flat colour."""
+    """Paints the disassembly with a neutral-grey mnemonic (the SAME grey for every
+    instruction) and the operand(s) in the class accent — so the operand/target is
+    the only coloured token. A branch's mnemonic is grey like every other op; only
+    its rel target carries the orange, instead of the whole 'jne …' going orange."""
     def __init__(self, font, parent=None):
         super().__init__(parent)
         self.font = font
@@ -101,7 +114,7 @@ class InsnDelegate(QStyledItemDelegate):
         r = option.rect
         x = r.x() + 4
         avail = r.width() - 8
-        painter.setPen(QColor(icol).darker(150))
+        painter.setPen(QColor(_MNEM_GREY))
         painter.drawText(QRect(x, r.y(), avail, r.height()),
                          Qt.AlignVCenter | Qt.AlignLeft, mn)
         if ops:
@@ -220,6 +233,7 @@ class TraceView(QWidget):
         self._seen = 0
         self._last_cyc = None
         self._prev_eff = None
+        self._prev_fstat = None
 
     def update_from(self, backend):
         total = backend.retire_count()
@@ -245,8 +259,12 @@ class TraceView(QWidget):
             # attribution) shown with their committed values
             wgpr, wflags = disasm.written_regs(bs, r.pc, bits)
             efl = int(r.eflags)
-            eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None))
+            xv = bool(r.x87_valid); fsw = int(r.fstat)
+            eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
+                          xv, fsw, getattr(self, "_prev_fstat", None))
             self._prev_eff = efl
+            if xv:
+                self._prev_fstat = fsw
             # delta cycles since the previous retirement (surfaces stalls); a
             # paired V retires in the same cycle as its U (delta 0).
             stall = (self._last_cyc is not None and int(r.cyc) - self._last_cyc > 1)
