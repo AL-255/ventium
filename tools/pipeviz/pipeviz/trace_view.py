@@ -121,11 +121,15 @@ class InsnDelegate(QStyledItemDelegate):
                          Qt.AlignVCenter | Qt.AlignLeft, mn)
         if ops:
             mw = fm.horizontalAdvance(mn + " ")
-            if mw < avail:
-                painter.setPen(QColor(icol))
-                painter.drawText(QRect(x + mw, r.y(), avail - mw, r.height()),
-                                 Qt.AlignVCenter | Qt.AlignLeft,
-                                 fm.elidedText(ops, Qt.ElideRight, avail - mw))
+            ox, limit = x + mw, r.right() - 4
+            is_br = (icol == disasm.CC_BRANCH)
+            for txt, col in disasm.operand_segments(ops, is_br, icol):
+                if ox >= limit:
+                    break
+                painter.setPen(QColor(col))
+                painter.drawText(QRect(ox, r.y(), limit - ox, r.height()),
+                                 Qt.AlignVCenter | Qt.AlignLeft, txt)
+                ox += fm.horizontalAdvance(txt)
         painter.restore()
 
 
