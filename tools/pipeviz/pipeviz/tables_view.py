@@ -386,6 +386,9 @@ class TablesView(QWidget):
         self.accmap_lbl.setStyleSheet("color:#8b949e;")
         amv.addWidget(self.accmap_lbl); amv.addWidget(self.accmap, 1)
         self.tabs.addTab(amw, "Mem map")
+        # a Mem-map point click also pins the Memory tab to that access's bytes (no
+        # forced tab switch — switch to Memory to see exactly what the load/store hit).
+        self.accmap.accessClicked.connect(self.mem.goto_access)
         # drill-down: clicking a Hotspots / Branches row jumps the trace to that PC.
         self.hot.cellClicked.connect(lambda r, _c: self._emit_pc(self.hot, r))
         self.br.cellClicked.connect(lambda r, _c: self._emit_pc(self.br, r))
@@ -702,10 +705,11 @@ class AccessMap(QWidget):
     instruction — so an outlier or a stripe is one click from its source row. Pure
     client-side from the trace's already-resolved effective addresses."""
     pointSelected = Signal(int)     # retire-n of the clicked access -> drill to trace
+    accessClicked = Signal(int, int)  # (addr, size) of the clicked access -> Memory tab
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.accesses = []          # [(n, cyc, addr, is_store)]
+        self.accesses = []          # [(n, cyc, addr, is_store, size)]
         self.sel = None             # index of the clicked access
         self._pts = []              # cached [(px, py, idx)] from the last paint, for hit-test
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -748,7 +752,7 @@ class AccessMap(QWidget):
         hf = _mono(8); hf.setBold(True)
         p.setPen(QColor("#8b949e")); p.setFont(hf)
         if self.sel is not None and 0 <= self.sel < len(accs):
-            sn, scy, sa, sst = accs[self.sel]
+            sn, scy, sa, sst = accs[self.sel][:4]
             p.setPen(QColor("#e3b341" if sst else "#79c0ff"))
             p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
                        f"selected  n={sn} cyc={scy} @{sa:08x} {'store' if sst else 'load'}"
@@ -773,14 +777,15 @@ class AccessMap(QWidget):
             x = xof(nv)
             p.setPen(QColor("#6e7681"))
             p.drawText(QRect(x - 24, H - B + 1, 48, 12), Qt.AlignHCenter | Qt.AlignTop, f"n{nv}")
-        for i, (n, _cy, addr, st) in enumerate(accs):
+        for i, a in enumerate(accs):
+            n, addr, st = a[0], a[2], a[3]
             px, py = xof(n), yof(addr)
             self._pts.append((px, py, i))
             p.fillRect(QRect(px - 1, py - 1, 3, 3), QColor("#e3b341") if st else QColor("#79c0ff"))
         # selection crosshair ring on top
         if self.sel is not None and 0 <= self.sel < len(accs):
-            n, _cy, addr, _st = accs[self.sel]
-            px, py = xof(n), yof(addr)
+            sa = accs[self.sel]
+            px, py = xof(sa[0]), yof(sa[2])
             p.setPen(QColor("#f0f0f0"))
             p.drawLine(L, py, W - R, py); p.drawLine(px, T, px, T + ph)
             p.drawEllipse(px - 4, py - 4, 8, 8)
@@ -800,7 +805,9 @@ class AccessMap(QWidget):
         if best is not None and bd <= 18 * 18:
             self.sel = best
             self.update()
-            self.pointSelected.emit(int(self.accesses[best][0]))
+            a = self.accesses[best]
+            self.pointSelected.emit(int(a[0]))                 # -> jump the trace
+            self.accessClicked.emit(int(a[2]), int(a[4]))      # -> Memory tab (addr, size)
 
 
 class MemoryView(QWidget):
@@ -823,6 +830,7 @@ class MemoryView(QWidget):
         ba = QPushButton("→access"); ba.setToolTip("follow the most-recent load/store address")
         ba.clicked.connect(lambda: self._set_follow("access")); bar.addWidget(ba)
         self._access = None       # (addr, size) of the newest memory access
+        self._click_hl = None     # (addr, size) pinned by a Mem-map point click
         for d, lab in ((-256, "◀"), (256, "▶")):
             b = QPushButton(lab); b.setFixedWidth(28)
             b.clicked.connect(lambda _=0, dd=d: self._page(dd)); bar.addWidget(b)
@@ -832,16 +840,28 @@ class MemoryView(QWidget):
         self.dump = _HexDump()
         v.addWidget(self.dump, 1)
 
+    def goto_access(self, addr, size):
+        """Jump to (and gold-highlight) a SPECIFIC access — a Mem-map point click
+        navigates here without forcing a tab switch, so switching to this tab shows
+        exactly what that load/store touched. The pinned highlight clears the moment
+        the user navigates away (Go / a follow button / paging)."""
+        self.follow = None
+        self.addr = addr & 0xFFFFFFF0
+        self._click_hl = (addr, size)
+        self._refresh()
+
     def _go(self):
         try:
             self.addr = int(self.addr_e.text(), 0) & 0xFFFFFFF0
         except ValueError:
             return
         self.follow = None
+        self._click_hl = None
         self._refresh()
 
     def _set_follow(self, which):
         self.follow = which
+        self._click_hl = None
         if which == "eip":
             self.addr = getattr(self, "_eip", self.addr) & 0xFFFFFFF0
         elif which == "esp":
@@ -852,6 +872,7 @@ class MemoryView(QWidget):
 
     def _page(self, delta):
         self.follow = None
+        self._click_hl = None
         self.addr = (self.addr + delta) & 0xFFFFFFF0
         self._refresh()
 
@@ -871,8 +892,10 @@ class MemoryView(QWidget):
     def _refresh(self):
         if self.backend is None:
             return
+        hl = self._click_hl or self._access      # a clicked access pins over the live one
         self.addr_e.setText(f"0x{self.addr:08x}")
-        self.follow_lbl.setText(f"following {self.follow.upper()}" if self.follow else
-                                "cyan=EIP  amber=ESP  gold=access")
+        self.follow_lbl.setText("showing clicked access" if self._click_hl else
+                                (f"following {self.follow.upper()}" if self.follow else
+                                 "cyan=EIP  amber=ESP  gold=access"))
         self.dump.set(self.backend, self.addr, getattr(self, "_eip", 0),
-                      getattr(self, "_esp", 0), self._access)
+                      getattr(self, "_esp", 0), hl)

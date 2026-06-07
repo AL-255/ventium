@@ -201,7 +201,7 @@ class TraceView(QWidget):
         self.title.setStyleSheet("font-weight:bold;")
         top.addWidget(self.title)
         self.filt = QLineEdit()
-        self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:V   stall")
+        self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:V   stall   @  (mem)")
         self.filt.setClearButtonEnabled(True)
         mfilt = QFont("monospace"); mfilt.setStyleHint(QFont.Monospace); mfilt.setPointSize(9)
         self.filt.setFont(mfilt)
@@ -362,9 +362,9 @@ class TraceView(QWidget):
                     ea &= mask
                     mem_ea = (f"@{ea:08x}" if bits == 32 else f"@{ea:04x}")
                     self.last_access = (ea, size)   # newest access -> Memory '→access'
-                    # accumulate the (retire-n, cyc, address, is_store) access stream
-                    # for the address-vs-sequence access-pattern map (capped, rolling).
-                    self.accesses.append((int(r.n), int(r.cyc), ea, _store))
+                    # accumulate the (retire-n, cyc, address, is_store, size) access
+                    # stream for the address-vs-sequence access map (capped, rolling).
+                    self.accesses.append((int(r.n), int(r.cyc), ea, _store, size))
                     if len(self.accesses) > 4000:
                         del self.accesses[:len(self.accesses) - 4000]
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
