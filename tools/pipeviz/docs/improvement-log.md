@@ -187,6 +187,41 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 39 — per-PC D$ attribution robustness (carry PC in the access tuple)
+Review confirmed the live watermark on all 6 critics and **confirmed 0 of 0** picks —
+the iter37–38 "derive D-cache analysis over the already-captured access stream"
+surface is the gold-standard pattern and is now fully shipped, so the review is
+saturated again. This iteration is a **ground-truth rejection + a source-review
+robustness fix**, exactly the legitimate outcome for a deeply-converged tool.
+- **Feature GROUND-TRUTH-REJECTED — replayed I-cache miss-rate.** The obvious next
+  "derive over captured data" candidate was an I-cache replay mirroring the D-cache
+  one. I probed it before building and it failed BOTH bars: (a) *inaccurate* — a
+  client-side replay of the fetch stream diverged 5–10× from the hardware's actual
+  I-fill count (dmiss 1 replay-miss vs 7 real fills; brloop 1 vs 7; ppage 6 vs 35;
+  test386 19 vs 140), because the model can't see the real prefetch/line-fill
+  granularity the way it can for the resolved load/store addresses; (b) *redundant* —
+  the per-fill `L` cells are ALREADY drawn in the Konata view and the aggregate fill
+  count is ALREADY in the status bar. Shipping it would have been a misleading
+  duplicate, so it was dropped. (Recording the rejection so the loop doesn't
+  re-propose it.)
+- **Robustness fix (found by source review) — per-PC D$ miss attribution no longer
+  depends on the Konata insns window.** iter38's `_dcache_per_pc` attributed each
+  replayed miss to a PC by mapping the access's retire-`n` through the *Konata insns'*
+  `{n: pc}` table. But the Konata insns list is capped/rolls at 9000 while the access
+  stream (capped 4000, but spanning a larger retire-`n` range for sparse-memory
+  workloads) can reference a retire-`n` that has already scrolled out of the insns
+  window — so an in-table memory PC's older accesses could be silently UNDER-counted
+  (the `n→pc` lookup missed). Fixed at the source: `trace.accesses` now carries the
+  PC directly — the tuple grew `(n, cyc, addr, is_store, size)` → `(n, cyc, addr,
+  is_store, size, pc)` (the trace already has `r.pc`), and `_dcache_per_pc` attributes
+  each miss to the access's OWN `a[5]` PC, independent of the insns window. Also
+  simplified the helper from 2 args to 1 (dropped the now-unneeded `n→pc` dict and the
+  dict-comprehension at the call site). Verified: py_compile clean; a headless smoke
+  test confirms dmiss's `mov eax,[esi]` still reads `14/14` (now via the tuple PC) and
+  that the AccessMap, Memory click-pin, and the `set_hotspots` build path all run
+  unchanged on the 6-tuple; rendered all 5 workloads (watermark `fd58d1b+dirty`) and
+  zoom-checked the Hotspots + Mem-map crops show no visual regression.
+
 ### Iteration 38 — per-PC D-cache miss column in Hotspots
 Review confirmed the live watermark (`90fc2ba`) on all 6 critics and **confirmed 0 of
 0** picks (the iter37 D-cache feature was a one-off; back to a saturated review). The
