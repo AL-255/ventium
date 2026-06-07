@@ -208,6 +208,8 @@ class MainWindow(QMainWindow):
         # post-commit architectural state + drops a playhead at its cycle.
         self.trace.instSelected.connect(self._pin_to)
         self.pipeline.konata.plot.rowClicked.connect(self._pin_to)
+        # drill-down: click a Hotspots / Branches PC row -> jump the trace to it
+        self.tables.pcClicked.connect(self.trace.select_pc)
 
         # keyboard-driven stepping / navigation (a debugger should be drivable from
         # the keyboard): . = step 1 clk, i = step 1 instruction, ] / [ = jump to the
