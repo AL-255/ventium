@@ -97,6 +97,7 @@ class RegsView(QWidget):
         fp = QGroupBox("x87 FPU")
         g4 = QGridLayout(fp); g4.setSpacing(2)
         self.fphdr = QLabel(""); self.fphdr.setFont(_mono(9))
+        self.fphdr.setWordWrap(True)   # guard the header against width overrun
         g4.addWidget(self.fphdr, 0, 0, 1, 3)
         g4.addWidget(self._k("reg"), 1, 0); g4.addWidget(self._k("80-bit"), 1, 1)
         g4.addWidget(self._k("value"), 1, 2)
@@ -195,7 +196,9 @@ class RegsView(QWidget):
         self.mode_lbl.setText(f"PINNED n={rec.n} cyc={rec.cyc}")
         self.mode_lbl.setStyleSheet("color:#e3b341;")
         if rec.x87_valid:
-            self.fphdr.setText(f"(pinned)  ctrl={rec.fctrl:04x}  stat={rec.fstat:04x}  tag={rec.ftag:04x}")
+            # tight single-space header (the "PINNED" banner already flags the
+            # mode) so the 4-digit tag value never clips off the panel's right edge.
+            self.fphdr.setText(f"pin ctrl={rec.fctrl:04x} stat={rec.fstat:04x} tag={rec.ftag:04x}")
             for i in range(8):
                 b10 = bytes(rec.st[i][k] for k in range(10))   # logical ST(i) in the record
                 tag, hexv, val = self.st_lbls[i]

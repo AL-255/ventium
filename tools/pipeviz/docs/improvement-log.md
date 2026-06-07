@@ -39,7 +39,12 @@ not repeat itself.
   snapshot (the Konata view gets the height — ~29 rows). Two-way selection: click
   a Konata instruction (cell or label) ↔ trace row, which also **pins the register
   panel** to that instruction's post-commit state and drops a **cyan cycle
-  playhead** down the Konata view; stepping unpins.
+  playhead** down the Konata view; stepping unpins. **Shift-click** a second row to
+  drop an amber **measurement anchor** — the band between it and the playhead is
+  shaded and labelled `Δ<n>cyc` (latency between two instructions; shift-click the
+  same row again to clear it). Auto-follow ("stick to the newest row/cycle") is
+  explicit state toggled only by a user scroll, so the viewport tracks live
+  retirement without stranding on stale rows.
 - **Memory tables panel** (tabbed): I$/D$ each with a **2D set×way occupancy
   heatmap** (way0/way1 rows, set-axis ticks, legend) above a line table (no LRU
   column; MRU shown as `*` on the way; 32 line bytes wrapped to two rows, not
@@ -66,7 +71,8 @@ not repeat itself.
   changed since the last step are amber. Can be **pinned AS-OF a retired
   instruction** (click a trace row / Konata cell): shows that instruction's
   post-commit GPRs/EFLAGS/seg-selectors/x87 with an amber `PINNED n=… cyc=…`
-  banner; the next step unpins back to the live state.
+  banner (the pinned x87 header wraps so ctrl/stat/tag never clip); the next step
+  unpins back to the live state.
 - **Status bar** (grouped, coloured): cyc · state/mode · ret/IPC/pair%/mispred ·
   I$/D$ occupancy/fills/walks · eip.
 - **Toolbar** (grouped file | config | transport, accented Run).
@@ -74,6 +80,36 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 10 — fix Konata auto-follow regression + cycle-Δ measurement cursor
+This iteration's review collapsed 43 raw findings to ONE confirmed code change after
+the new adversarial Verify phase refuted the rest (3 perception errors, 1 already-
+shipped = iter-9's gridlines, 1 low-value). But ground-truthing the unpicked HIGH
+findings myself caught a **regression I shipped in iteration 9**:
+- **Konata auto-follow regression (HIGH, self-inflicted):** iter-9's row-aligned
+  bottom-snap (`setValue((max//ROW_H)*ROW_H)`) left the at-rest scroll value *below*
+  max, so the next tick's `value >= max-4` follow check read "not at bottom" and
+  auto-follow died. For any workload that overflows the viewport (fp, brloop) the
+  vertical view stranded on early rows while cycles ran ahead — the Konata grid
+  rendered **completely blank** (instructions listed, zero cells). dmiss/test386
+  fit without scrolling so they masked it. Fix: auto-follow is now **explicit stick
+  state** toggled only by a user scroll (guarded against our own programmatic
+  scrolls), so following never breaks; the row-snap is kept for whole-row top/bottom
+  alignment. Verified fp + brloop now render the full F→D→X cascade again.
+- **New feature — cycle-range Δ measurement cursor:** shift-click a Konata row to
+  drop an amber anchor; the band between it and the cyan playhead is shaded and
+  labelled `Δ<n>cyc` (measure latency between any two instructions — e.g. across a
+  D-cache-miss stall). Shift-click the same row to clear. Builds on iter-9's playhead.
+- **Pinned x87 header clip (CONFIRMED by Verify):** the pinned regs x87 header was 5
+  chars wider than the live one (`(pinned)` prefix + 4-digit tag) and clipped the
+  `tag=` value off the panel's right edge. Shortened to a tight `pin ctrl=… stat=…
+  tag=…` + `setWordWrap(True)` guard, so all three fields stay in-panel.
+- **Review-harness — watermark moved to a dedicated band:** the build-stamp used to
+  paint over the top-left, obscuring the toolbar in full-window shots (a recurring
+  layout-critic complaint). It now lives in a 15px band *above* the screenshot
+  (crops taken from the raw grab first, so crop boxes are unaffected) — overlaps no
+  UI, still top-left + findable for the anti-staleness check. Also added pinned-regs
+  screenshots (dmiss/fp) so the review can actually see the register-pinning feature.
 
 ### Iteration 9 — register pinning + playhead, split-colour labels, stage gridlines
 - **New feature — pin the register panel AS-OF a retired instruction + cycle

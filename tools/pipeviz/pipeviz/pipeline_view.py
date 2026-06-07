@@ -297,6 +297,7 @@ class _KonataPlot(QWidget):
         self.max_cyc = 1
         self.sel_row = None
         self.playhead = None     # pinned cycle (vertical marker)
+        self.anchor = None       # shift-click second marker → cycle-range Δ measure
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
         self._pending = []       # accumulated cells since the last retirement
         self._cyc_row = {}       # retire cyc -> row index
@@ -310,6 +311,8 @@ class _KonataPlot(QWidget):
         self.base_cyc = 1
         self.max_cyc = 1
         self.sel_row = None
+        self.playhead = None
+        self.anchor = None
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
         self._pending = []
         self._cyc_row = {}
@@ -431,6 +434,20 @@ class _KonataPlot(QWidget):
                         p.setPen(QColor("#0d1117") if QColor(col).lightness() > 130 else QColor(_TXT))
                         p.drawText(cell, Qt.AlignCenter, ch)
                     i += 1
+        # cycle-range measurement: shade the band between the playhead and a
+        # shift-click anchor, label it Δ<n>cyc (latency between two instructions).
+        if self.playhead is not None and self.anchor is not None:
+            xa = self._x(self.anchor) + CELL_W // 2
+            xp = self._x(self.playhead) + CELL_W // 2
+            lo, hi = sorted((xa, xp))
+            p.fillRect(QRect(lo, vis.top(), max(1, hi - lo), vis.height()),
+                       QColor(57, 197, 207, 30))         # translucent cyan band
+            p.setPen(QColor("#e3b341"))                  # anchor marker (amber)
+            p.drawLine(xa, vis.top(), xa, vis.bottom())
+            dn = abs(self.playhead - self.anchor)
+            p.setFont(_mono(8, True)); p.setPen(QColor("#f0c674"))
+            p.drawText(QRect(lo, vis.top() + 1, max(28, hi - lo), 12),
+                       Qt.AlignHCenter | Qt.AlignTop, f"Δ{dn}cyc")
         # playhead: a vertical cyan marker at the pinned cycle
         if self.playhead is not None:
             px = self._x(self.playhead) + CELL_W // 2
@@ -448,16 +465,24 @@ class _KonataPlot(QWidget):
             self.setToolTip(
                 f"n={ins['n']}  {ins['pipe']}  {ins['pc']:#010x}  {ins['mnem']}\n"
                 f"cycles {ins['c0']}..{ins['c1']}  (commit @ {ins['c1']}, "
-                f"{ins['c1'] - ins['c0'] + 1} cyc)")
+                f"{ins['c1'] - ins['c0'] + 1} cyc)\n"
+                f"click: pin regs · shift-click: set Δ-measure anchor")
 
     def mousePressEvent(self, ev):
         y = (ev.position().y() if hasattr(ev, "position") else ev.y())
         r = int(y // ROW_H)
-        if 0 <= r < len(self.insns):
-            self.sel_row = r
-            self.playhead = self.insns[r]["c1"]
+        if not (0 <= r < len(self.insns)):
+            return
+        cyc = self.insns[r]["c1"]
+        if ev.modifiers() & Qt.ShiftModifier:
+            # second marker: measure the cycle range to the current playhead.
+            self.anchor = None if self.anchor == cyc else cyc
             self.update()
-            self.rowClicked.emit(int(self.insns[r]["n"]))
+            return
+        self.sel_row = r
+        self.playhead = cyc
+        self.update()
+        self.rowClicked.emit(int(self.insns[r]["n"]))
 
 
 class _KonataGutter(QWidget):
@@ -589,9 +614,28 @@ class Konata(QWidget):
         # row is never sliced in half at the viewport edge.
         self.scroll.verticalScrollBar().setSingleStep(ROW_H)
         self.scroll.horizontalScrollBar().setSingleStep(CELL_W)
-        self.scroll.verticalScrollBar().valueChanged.connect(self.gutter.update)
-        self.scroll.horizontalScrollBar().valueChanged.connect(self.header.update)
+        # Auto-follow ("stick to the newest row/cycle") is EXPLICIT state, toggled
+        # only by a user scroll. Inferring it each tick from value>=max-eps is
+        # fragile: iter-9 row-snapped the at-rest position below max, so the next
+        # tick read "not at bottom" and follow died — the viewport stranded on old
+        # rows while cycles ran ahead, leaving the grid blank. The guard flag keeps
+        # our own programmatic scrolls from clearing the stick.
+        self._stick_v = True
+        self._stick_h = True
+        self._adjusting = False
+        self.scroll.verticalScrollBar().valueChanged.connect(self._on_vscroll)
+        self.scroll.horizontalScrollBar().valueChanged.connect(self._on_hscroll)
         self._last_cyc = 0
+
+    def _on_vscroll(self, val):
+        self.gutter.update()
+        if not self._adjusting:
+            self._stick_v = val >= self.scroll.verticalScrollBar().maximum() - ROW_H
+
+    def _on_hscroll(self, val):
+        self.header.update()
+        if not self._adjusting:
+            self._stick_h = val >= self.scroll.horizontalScrollBar().maximum() - CELL_W
 
     def _legend_widget(self):
         # Each swatch is tightly coupled to ITS label (3px), with a clear gap
@@ -613,6 +657,8 @@ class Konata(QWidget):
     def reset(self, backend, bits):
         self.plot.reset(backend, bits)
         self._last_cyc = 0
+        self._stick_v = True
+        self._stick_h = True
         self.gutter.update(); self.header.update()
 
     def set_bits(self, bits):
@@ -632,21 +678,24 @@ class Konata(QWidget):
 
     def clear_playhead(self):
         self.plot.playhead = None
+        self.plot.anchor = None
         self.plot.update()
 
     def update_from(self, backend):
         total = backend.cycle_count()
         if total <= self._last_cyc:
             return
-        vb = self.scroll.verticalScrollBar(); hb = self.scroll.horizontalScrollBar()
-        follow_v = vb.value() >= vb.maximum() - 4
-        follow_h = hb.value() >= hb.maximum() - 4
         self._last_cyc = self.plot.ingest(backend, self._last_cyc + 1)
         self.plot.update(); self.gutter.update(); self.header.update()
-        if follow_v:
+        # re-stick to the newest row/cycle unless the user scrolled away. Guard so
+        # these programmatic scrolls don't clear the stick via the scroll handlers.
+        self._adjusting = True
+        vb = self.scroll.verticalScrollBar(); hb = self.scroll.horizontalScrollBar()
+        if self._stick_v:
             vb.setValue((vb.maximum() // ROW_H) * ROW_H)   # row-aligned bottom
-        if follow_h:
+        if self._stick_h:
             hb.setValue(hb.maximum())
+        self._adjusting = False
 
 
 # ===========================================================================
