@@ -347,3 +347,47 @@ compare** logic (P0‑4). LUTs are still 351% because the **icache is FF/LUT‑R
 mapped, BRAM=0** (P0‑3) and the F7/F8 muxes (196%/190%) come from the same
 whole‑array combinational read. Next biggest wins: **P0‑3 (icache→BRAM)** for LUTs
 and **P0‑4 (pipeline FMUL/FADD)** for the remaining carry path. _Captured 2026‑06‑06._
+
+## P0‑5 — FP execute PIPELINE (+VEN_FP_PIPE) + the ROUTING‑BOUND finding
+After the f_eval consolidation (core fits, 91.7 % LUT, ~37.5 MHz synth / ~33 MHz
+post‑place), the worst path was the same‑cycle FP execute: fetch/decode →
+`f_eval` (fx_add/fx_mul) → `fpr`, ~24–30 ns. `fx_add` alone is ~14 ns of LOGIC, so
+NO single‑cycle FP execute can clear 66 MHz — it must be pipelined. The scoreboard
+already models fadd latency = **3**, so a 2‑stage execute fits the modeled window
+and keeps BOTH FP cycle bands.
+
+**Built (3 commits, all bit‑exact + cycle‑accurate, behind +VEN_FP_PIPE so default
+is byte‑identical):**
+* **Foundation** (`fb507aa`): 2‑stage split of fx_add/fx_mul/f_eval at the shared
+  `fx_round_pack` boundary (fx_*_s1 front / f_eval_s2 back, fx_pipe_t carrier).
+  `verif/fppipe` gate: f_eval_s2(f_eval_s1)==f_eval over 1 M vectors.
+* **Fast arm** (`117c73d`): cycle‑mode S_PIPE FK_ARITH defers — capture operands at
+  issue, commit one clock later via a new ABSOLUTE‑indexed `we_wabs` port on
+  fpu_top; a S_PIPE read‑hazard bubble (`fp_pipe_rd_haz`) stalls a same‑clock
+  reader of the in‑flight target. Validated by **cycle‑mode verify**.
+* **Slow arm** (`5d3e524`): S_FEXEC memory‑operand arith. **KEY:** the differential
+  harness in FUNCTIONAL mode (what `make m3` uses, and where ALL FP ops take the
+  slow FSM) checks arch state AT RETIRE — so the slow arm can NOT defer (the
+  deferred write lands one clock after retire → stale check). It uses a new
+  **S_FEXEC_EX** state that commits (we_wabs) AND retires in the SAME clock.
+  Validated by **functional m3**.
+
+**Verified:** default `make verify` 75/75 (unaffected); +VEN_FP_PIPE `make m3`
+75/75 + `make verify` 75/75 + mb_faddchain CPI 2.989 + mb_fpindep 1.152 (both
+bands). The deferred single‑eval also CUT AREA: **LUT 91.7 % → 82.85 %**, CARRY8
+2,611 → 2,268.
+
+**Synth (15 ns target):** WNS −6.7 ns → **~46 MHz** (was ~33 baseline). Failing
+endpoints 71 K → 9.7 K.
+
+**Post‑place (the real number) — ROUTING‑BOUND at ~34.7 MHz.** WNS −13.8 ns /
+28.8 ns, but **64 % of that is ROUTING (18.5 ns)**. All top worst paths are
+`f_mem80 → fpr` — the FP **loads** (FLD/FILD/**FBLD** `fx_bcd_to_fx`, the deepest,
+NOT pipelined) — and the 18.5 ns routing is because the core fills 82.85 % of the
+device so OOC placement spreads `f_mem80`/`fpr` far apart. **The wall is now
+congestion/placement, not logic depth** — pipelining FBLD would cut its ~10 ns
+logic but leave the ~18 ns routing. To clear 66 MHz: (a) drive util down toward
+~60–70 % (the deferred apply_cmp×6 / fcom_codes×6 consolidations, integer‑datapath
+trims) so placement is compact, and/or (b) floorplan/Pblock the FP datapath; THEN
+(c) pipeline FBLD via an iterative `ven_bcd_to_fp` engine (the load‑side twin of
+ven_bcd) for the last logic tier. _Captured 2026‑06‑07._
