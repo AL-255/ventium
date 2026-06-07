@@ -710,16 +710,28 @@ class AccessMap(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.accesses = []          # [(n, cyc, addr, is_store, size)]
-        self.sel = None             # index of the clicked access
+        self.sel_n = None           # retire-n of the clicked access (a STABLE identity,
+                                    # so the selection survives the trace's rolling cap
+                                    # dropping older accesses off the front of the list)
         self._pts = []              # cached [(px, py, idx)] from the last paint, for hit-test
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
 
     def set_accesses(self, accs):
         if accs is not self.accesses:
-            self.sel = None          # a fresh stream invalidates the selection
+            self.sel_n = None        # a fresh stream invalidates the selection
         self.accesses = accs
         self.update()
+
+    def _sel_idx(self):
+        """Current index of the selected access (by its stable retire-n), or None if
+        it's been dropped off the front by the rolling cap / never set."""
+        if self.sel_n is None:
+            return None
+        for i, a in enumerate(self.accesses):
+            if a[0] == self.sel_n:
+                return i
+        return None
 
     def paintEvent(self, _ev):
         p = QPainter(self)
@@ -749,10 +761,11 @@ class AccessMap(QWidget):
             mode = max(freq, key=freq.get); pct = round(100 * freq[mode] / len(deltas))
             stride_str = (f" · stride {'+' if mode >= 0 else '-'}0x{abs(mode):x} ({pct}%)"
                           if pct >= 40 else " · irregular stride")
+        si = self._sel_idx()         # resolve the stable sel_n to a current index
         hf = _mono(8); hf.setBold(True)
         p.setPen(QColor("#8b949e")); p.setFont(hf)
-        if self.sel is not None and 0 <= self.sel < len(accs):
-            sn, scy, sa, sst = accs[self.sel][:4]
+        if si is not None:
+            sn, scy, sa, sst = accs[si][:4]
             p.setPen(QColor("#e3b341" if sst else "#79c0ff"))
             p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
                        f"selected  n={sn} cyc={scy} @{sa:08x} {'store' if sst else 'load'}"
@@ -783,8 +796,8 @@ class AccessMap(QWidget):
             self._pts.append((px, py, i))
             p.fillRect(QRect(px - 1, py - 1, 3, 3), QColor("#e3b341") if st else QColor("#79c0ff"))
         # selection crosshair ring on top
-        if self.sel is not None and 0 <= self.sel < len(accs):
-            sa = accs[self.sel]
+        if si is not None:
+            sa = accs[si]
             px, py = xof(sa[0]), yof(sa[2])
             p.setPen(QColor("#f0f0f0"))
             p.drawLine(L, py, W - R, py); p.drawLine(px, T, px, T + ph)
@@ -803,9 +816,9 @@ class AccessMap(QWidget):
             if d < bd:
                 bd, best = d, i
         if best is not None and bd <= 18 * 18:
-            self.sel = best
-            self.update()
             a = self.accesses[best]
+            self.sel_n = int(a[0])                             # stable identity
+            self.update()
             self.pointSelected.emit(int(a[0]))                 # -> jump the trace
             self.accessClicked.emit(int(a[2]), int(a[4]))      # -> Memory tab (addr, size)
 

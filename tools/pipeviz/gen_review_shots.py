@@ -176,7 +176,7 @@ for tag, img, steps, soc in SHOTS:
         # select a mid point so the click-readout crosshair + detail line also render.
         win.tables.tabs.setCurrentIndex(win.tables.tabs.indexOf(win.tables.accmap.parent()))
         if win.trace.accesses:
-            win.tables.accmap.sel = len(win.trace.accesses) // 2
+            win.tables.accmap.sel_n = win.trace.accesses[len(win.trace.accesses) // 2][0]
         app.processEvents(); win.repaint(); app.processEvents()
         _settle(win, app)
         amfull = os.path.join(OUT, f"{tag}_memmap_full.png")

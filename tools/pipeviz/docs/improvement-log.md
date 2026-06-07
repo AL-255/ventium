@@ -178,6 +178,27 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 36 — Mem-map selection robustness (track stable retire-n, not a volatile index)
+Review confirmed the live watermark (`90f235d`) on all 6 critics and **confirmed 0 of
+0** picks — the SIXTH straight 0-pick round ("None remains"). The tool is finished;
+this iteration is a genuine small CORRECTNESS fix I found by my own code review (the
+loop weights my ground-truthing over critic nitpicks), not a cosmetic tweak. First
+verified the cross-panel drill-downs are already consistent: `select_n`/`select_pc`
+both call `setCurrentCell` → `currentCellChanged` → `_on_row`, which emits both
+`rowSelected` (Konata) and `instSelected` (regs pin), so Hotspots/Branches/Konata/
+Mem-map clicks ALL pin regs symmetrically — no bug there.
+- **Correctness fix — the Mem-map selection now survives the access-stream rolling
+  cap.** The scatter stored its clicked selection as a list INDEX, but the trace caps
+  the access stream at 4000 and drops older accesses off the FRONT (in place), which
+  shifts every index — so after a long run a stored selection would silently point to
+  the WRONG access (crosshair + readout on a different point). The selection is now
+  keyed on the clicked access's stable retire-`n` and the current index is resolved
+  each paint (`_sel_idx`), so it tracks the same access across front-drops and cleanly
+  disappears (no stale crosshair) if that access is itself dropped. Smoke-tested by
+  simulating a front-drop: a selection of index 8 correctly follows its access to the
+  shifted index 3 (same n/@addr), where the old code would have drifted to a different
+  point; a dropped selection resolves to None; a fresh stream clears it.
+
 ### Iteration 35 — Mem-map → Memory click link + "@" filter discoverability
 Review confirmed the live watermark (`29bca32`) on all 6 critics and **confirmed 0 of
 0** picks — the FIFTH straight 0-pick round ("None"). Maintenance mode; two small,
