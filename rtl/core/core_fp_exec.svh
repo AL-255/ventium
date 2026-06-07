@@ -73,7 +73,19 @@
             end else
 `endif
             if (f_do_retire) begin
+`ifdef VEN_FP_PIPE
+              // +VEN_FP_PIPE: a slow-arm arith that CAPTURED this clock (fp_pipe_cap)
+              // defers its commit+retire to S_FEXEC_EX (the registered-operand
+              // f_eval -> we_wabs path), splitting the f_mem80->f_eval->fpr cone.
+              // Non-arith retiring ops (compares / FNSTSW_AX / loads) committed
+              // same-cycle and retire here as before.
+              if (fp_pipe_cap) state<=S_FEXEC_EX;
+              else begin
+                eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+              end
+`else
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+`endif
             end else begin
 `ifdef VEN_BCD_ITER
               // FBSTP: run the iterative FP->BCD engine first (S_BCD_BUSY) so the
@@ -86,6 +98,18 @@
             end
           end
         end
+
+`ifdef VEN_FP_PIPE
+        // S_FEXEC_EX: slow-arm FP-execute 2nd stage. The result was computed from
+        // the REGISTERED fpp_* operands and is written to fpr via we_wabs (which
+        // the fp_we_* driver asserts unconditionally while fpp_valid) THIS clock —
+        // the same edge we retire on, so the per-retire architectural state is
+        // exact. eip/q_fxop are unchanged since S_FEXEC (we did not retire there),
+        // so next_eip is still correct.
+        S_FEXEC_EX: begin
+          eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+        end
+`endif
 
 `ifdef VEN_BCD_ITER
         // S_BCD_BUSY: wait for the iterative FP->packed-BCD engine; latch its

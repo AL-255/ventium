@@ -573,6 +573,11 @@ module core
 `ifdef VEN_BCD_ITER
     S_BCD_BUSY,  // wait for the iterative FP->packed-BCD (FBSTP) engine
 `endif
+`ifdef VEN_FP_PIPE
+    S_FEXEC_EX,  // slow-arm FP-execute 2nd stage: f_eval from the registered
+                 // operands (captured in S_FEXEC) -> commit (we_wabs) + retire IN
+                 // THE SAME CLOCK, so the per-retire arch-state check is exact.
+`endif
 
     S_FENV_ST, S_FENV_LD,   // M11b: env/state store (FNSTENV/FNSAVE) & load (FLDENV/FRSTOR)
     // M7.3b Win95 co-sim port I/O: the IN/OUT bus handshake state (cosim only).
@@ -4438,7 +4443,16 @@ module core
       FX_AR_I16, FX_AR_I32: begin s_fa = s_st0v; s_fb = f_mem_as_int(f_mem80, q_f_mbytes); end
       default:              begin s_fa = s_st0v; s_fb = s_stiv; end  // FX_AR_ST0_STI + non-arith
     endcase
+`ifdef VEN_FP_PIPE
+    // Slow-arm arith is SPLIT: S_FEXEC captures s_fa/s_fb into fpp_*, then
+    // S_FEXEC_EX computes f_eval (from the registered operands) and commits via
+    // we_wabs IN THE SAME CLOCK AS THE RETIRE (so the per-retire arch check is
+    // exact — unlike a retire-before-commit defer). The combinational s_arf cone
+    // (f_mem80->f_eval->fpr, the worst path) is dropped here.
+    s_arf = 83'd0;
+`else
     s_arf = f_eval(q_f_aluop, s_fa, s_fb, s_rc, errata_en[ERR_FDIV]);
+`endif
 `ifdef VEN_SRT_ITER
     // ----- iterative SRT FDIV/FSQRT eligibility + engine inputs -------------
     // Route NORMAL-operand divides and +normal sqrt through the multi-cycle
@@ -4554,23 +4568,48 @@ module core
         // ---- arithmetic (f_eval -> {ie,ze,inexact,result}) ----
         // arith commit arms — s_arf (== f_eval of the muxed s_fa/s_fb) is shared,
         // computed once above; each arm just routes it to the right write port.
+        // +VEN_FP_PIPE: capture s_fa/s_fb + the absolute dest into fpp_*; S_FEXEC
+        // routes to S_FEXEC_EX where we_wabs commits (from the registered operands)
+        // in the SAME clock as the retire. The pop for STI_ST0 stays here (cheap).
         FX_AR_ST0_STI: if (!fp_div_elig) begin
+`ifdef VEN_FP_PIPE
+          fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
+          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
+`else
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
+`endif
         end
         FX_AR_STI_ST0: if (!fp_div_elig) begin
           // ST(i) op= ST0 : a=ST(i), b=ST0 (no tag write — only fpr[fri]).
+`ifdef VEN_FP_PIPE
+          fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
+          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV];
+          fp_cap_dst=(ftop + q_f_sti) & 3'd7;
+          if (q_f_pop) fp_we_pop=1'b1;
+`else
           fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=s_arf[79:0]; fp_wsti_clr_tag=1'b0;
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
           if (q_f_pop) fp_we_pop=1'b1;
+`endif
         end
         FX_AR_M32, FX_AR_M64: if (!fp_div_elig) begin
+`ifdef VEN_FP_PIPE
+          fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
+          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
+`else
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
+`endif
         end
         FX_AR_I16, FX_AR_I32: if (!fp_div_elig) begin
+`ifdef VEN_FP_PIPE
+          fp_pipe_cap=1'b1; fp_cap_aluop=q_f_aluop; fp_cap_a=s_fa; fp_cap_b=s_fb;
+          fp_cap_rc=s_rc; fp_cap_err=errata_en[ERR_FDIV]; fp_cap_dst=ftop;
+`else
           fp_we_top=1'b1; fp_top_data=s_arf[79:0];
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, s_arf);
+`endif
         end
         FX_FSQRT: begin
           // QEMU helper_fsqrt. M12: intercept NaN FIRST (the bare fx_sqrt would do
