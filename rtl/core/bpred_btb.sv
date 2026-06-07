@@ -81,6 +81,26 @@ module bpred_btb #(
     v_predict_taken = btb_lookup(v_query_pc);
   end
 
+  // +VEN_BTB_PIPE: register the resolve inputs one clock so the BTB counter
+  // UPDATE leaves the eip->icache->decode->issue_arm->btb_ctr critical path (the
+  // ~63-level worst path, of which the BTB tail is ~13 levels). The btb_ctr CE
+  // then comes from a flop (rv_use), not the combinational issue_arm net. The BTB
+  // counter is a STATE side-effect (the predict ports read PRE-update state
+  // read-before-write), so applying it one clock later only shifts WHEN the
+  // predictor warms — the loose cycle bands (mb_brloop mispredict<2%, mb_brrandom
+  // >20%) absorb it. Without the define, the update is combinational as before.
+`ifdef VEN_BTB_PIPE
+  logic        rv_use; logic [31:0] rpc_use; logic rt_use;
+  always_ff @(posedge clk) begin
+    if (!rst_n) rv_use <= 1'b0;
+    else begin rv_use <= resolve_valid; rpc_use <= resolve_pc; rt_use <= resolve_taken; end
+  end
+`else
+  wire         rv_use  = resolve_valid;
+  wire [31:0]  rpc_use = resolve_pc;
+  wire         rt_use  = resolve_taken;
+`endif
+
   // BTB update after a branch resolves (mirrors p5model btb_update): a hit
   // saturates its 2-bit counter toward taken/not-taken; a miss on a TAKEN
   // branch allocates a way (round-robin replacement) with a strongly-taken
@@ -94,15 +114,15 @@ module bpred_btb #(
           btb_val[s][w]<=1'b0; btb_tag[s][w]<=26'd0; btb_ctr[s][w]<=2'd0;
         end
       end
-    end else if (resolve_valid) begin
+    end else if (rv_use) begin
       logic [5:0]  set; logic [25:0] tag; logic hit; logic [1:0] way;
-      set = resolve_pc[5:0]; tag = resolve_pc[31:6]; hit = 1'b0; way = 2'd0;
+      set = rpc_use[5:0]; tag = rpc_use[31:6]; hit = 1'b0; way = 2'd0;
       for (int w=0; w<BTB_WAYS; w++)
         if (btb_val[set][w] && btb_tag[set][w]==tag) begin hit=1'b1; way=2'(w); end
       if (hit) begin
-        if (resolve_taken && btb_ctr[set][way]!=2'd3) btb_ctr[set][way]<=btb_ctr[set][way]+2'd1;
-        if (!resolve_taken && btb_ctr[set][way]!=2'd0) btb_ctr[set][way]<=btb_ctr[set][way]-2'd1;
-      end else if (resolve_taken) begin
+        if (rt_use && btb_ctr[set][way]!=2'd3) btb_ctr[set][way]<=btb_ctr[set][way]+2'd1;
+        if (!rt_use && btb_ctr[set][way]!=2'd0) btb_ctr[set][way]<=btb_ctr[set][way]-2'd1;
+      end else if (rt_use) begin
         btb_val[set][btb_rr[set]]<=1'b1;
         btb_tag[set][btb_rr[set]]<=tag;
         // first-taken => STRONGLY taken (ctr=3), matching the p5model oracle
