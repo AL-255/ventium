@@ -191,6 +191,7 @@ class TraceView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._last_cyc = None
+        self.last_access = None
         self._tokens = []
         lay = QVBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
@@ -304,6 +305,7 @@ class TraceView(QWidget):
         self._prev_eff = None
         self._prev_fstat = None
         self._prev_gpr = None     # prior retirement's committed GPRs (pre-state for EA)
+        self.last_access = None   # newest resolved load/store address (Memory '→access')
 
     def update_from(self, backend):
         total = backend.retire_count()
@@ -347,7 +349,7 @@ class TraceView(QWidget):
             mem_ea = None
             mo = disasm.mem_operand(bs, r.pc, bits)
             if mo is not None:
-                base, index, scale, disp, _store = mo
+                base, index, scale, disp, _store, size = mo
                 needs_reg = base >= 0 or index >= 0
                 pre = getattr(self, "_prev_gpr", None)
                 if not needs_reg or (r.pipe == 0 and pre is not None):
@@ -355,7 +357,9 @@ class TraceView(QWidget):
                     ea = ((g[base] if base >= 0 else 0)
                           + (g[index] if index >= 0 else 0) * scale + disp)
                     mask = 0xffffffff if bits == 32 else 0xffff
-                    mem_ea = (f"@{ea & mask:08x}" if bits == 32 else f"@{ea & mask:04x}")
+                    ea &= mask
+                    mem_ea = (f"@{ea:08x}" if bits == 32 else f"@{ea:04x}")
+                    self.last_access = (ea, size)   # newest access -> Memory '→access'
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
                           xv, fsw, getattr(self, "_prev_fstat", None), fp_write, mem_ea)
             self._prev_eff = efl

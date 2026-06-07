@@ -107,8 +107,12 @@ not repeat itself.
   page-walk / x87 / system / halt, drawn as %-bars sorted biggest-first with a live
   IPC readout, so the tallest bar is the bottleneck (answers "why is IPC low?");
   **Memory** = a hex/ASCII
-  inspector (type an address or click →EIP/→ESP to follow, ◀/▶ to page; EIP bytes
-  cyan, ESP bytes amber).
+  inspector (type an address or click →EIP/→ESP/**→access** to follow, ◀/▶ to page;
+  EIP bytes cyan, ESP bytes amber, and the **most-recent load/store ACCESS** gold —
+  →access tracks the address of the newest retired memory op and gold-outlines its
+  exact byte span, so you can watch the memory the program is touching and jump
+  straight from a trace `@<ea>` to the data there, e.g. follow dmiss's striding load
+  frontier `@08049180`→`@080491a0`→…).
 - **Trace panel**: search/filter box; columns n | cyc | Δ | pipe | PC | bytes |
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
@@ -157,6 +161,28 @@ not repeat itself.
 
 ## Iterations
 <!-- newest first; appended by the loop -->
+
+### Iteration 31 — Memory '→access' follow mode (watch the program's memory frontier)
+Review confirmed the live watermark (`605762e`) on all 6 critics but **confirmed 0 of
+4** picks — the UI is genuinely mature: every pick was refuted as already-surfaced
+(per-PC latency dispersion = the Konata `lat` column already shows per-occurrence span
+colour-graded + one-click drill-down; per-visit latency sparkline = same `lat` column;
+register value timeline = the trace effect column already shows the value sequence +
+the filter isolates a PC; Hotspots cost-bar min-1 floor = the intentional ASCII-bar
+convention, exact value in the adjacent cycles/cyc% columns). So no fixes this round;
+I picked a genuinely-new feature that survives scrutiny.
+- **New feature — Memory tab '→access' follow + gold access highlight.** Building on
+  iter30's resolved `@<ea>`, the Memory inspector gains a fourth follow button
+  (→EIP/→ESP/**→access**): →access tracks the address of the most-recent retired
+  load/store and gold-outlines its EXACT accessed byte span (the size now comes from
+  `disasm.mem_operand`, e.g. 4 bytes for a dword load, 1 for a byte). This closes the
+  loop the @addr opened — you can now jump from "this load read @08049160" straight to
+  the data there, and watch the program's memory frontier advance as you step (dmiss's
+  striding loads walk the highlight by 0x20). Before building it I GROUND-TRUTHED the
+  signal (the trace's resolved EA fires on every dmiss load; store→load pairs occur
+  only once across all workloads, so a memory-dependency-edge feature was correctly
+  rejected as too thin). Smoke-tested: →access navigates to the newest access address,
+  highlights the correct span, and a no-memory workload (brloop) leaves it inert.
 
 ### Iteration 30 — resolved memory-access address in the trace, singular/plural subtitle
 Review confirmed the live watermark (`7563011`) on all 6 critics. Verify **confirmed

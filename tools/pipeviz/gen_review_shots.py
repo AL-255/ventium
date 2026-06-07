@@ -158,6 +158,22 @@ for tag, img, steps, soc in SHOTS:
             Image.open(pfull).crop(_box(win, win.regs)).save(pf)
             _watermark(pf, f"{tag} · regs pinned n={npin}")
             win._unpin(); app.processEvents()
+    # capture the Memory tab in '→access' mode for a memory workload, so the review
+    # covers the new "follow the most-recent load/store address + gold-highlight the
+    # accessed bytes" feature (only renders once →access is engaged).
+    if tag == "dmiss" and win.trace.last_access is not None:
+        win.tables.tabs.setCurrentIndex(win.tables.tabs.count() - 1)   # Memory is the last tab
+        win.tables.mem._set_follow("access")
+        app.processEvents(); win.repaint(); app.processEvents()
+        _settle(win, app)
+        mfull = os.path.join(OUT, f"{tag}_memaccess_full.png")
+        win.grab().save(mfull)
+        ma = os.path.join(OUT, f"{tag}_mem_access.png")
+        Image.open(mfull).crop(_box(win, win.tables)).save(ma)
+        _watermark(ma, f"{tag} · Memory →access @{win.trace.last_access[0]:08x}")
+        win.tables.mem.follow = None
+        win.tables.tabs.setCurrentIndex(0)
+        app.processEvents()
     # all-9-tabs sweep for ONE rich workload — the per-workload `_tables.png` crop
     # only ever shows the DEFAULT (Code$) tab, so the review never saw the other 8
     # (Data$/TLB/Prefetch/Hotspots/Branches/Instr-mix/Cycles/Memory). brloop's tight

@@ -382,10 +382,10 @@ class MainWindow(QMainWindow):
         self.tables.set_hotspots(self.pipeline.konata.plot.insns)
         self.tables.set_branches(self.pipeline.konata.plot.insns)
         self.tables.set_instr_mix(self.pipeline.konata.plot.insns)
-        self.tables.mem.set_state(self.backend, s)
+        self.trace.update_from(self.backend)   # before mem, so '→access' has the newest addr
+        self.tables.mem.set_state(self.backend, s, self.trace.last_access)
         if getattr(self, "_pinned_n", None) is None:
             self.regs.update_from(s)   # else keep the pinned AS-OF display
-        self.trace.update_from(self.backend)
         self._refresh_status(s)
 
     def _refresh_status(self, s=None):
