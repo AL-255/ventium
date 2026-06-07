@@ -178,9 +178,10 @@ def _dcache_replay(accs):
     return len(accs), hits, cold + conflict, cold, conflict
 
 
-def _dcache_per_pc(accs, n2pc):
+def _dcache_per_pc(accs):
     """Per-PC (accesses, misses) from the SAME LRU replay, attributing each miss to
-    its retire-n's PC — so the Hotspots profile can name WHICH load/store PC misses
+    the access's own PC (carried in the tuple, so it's robust to the Konata insns
+    rolling window) — so the Hotspots profile can name WHICH load/store PC misses
     (dmiss's `mov eax,[esi]` = 14/14, vs test386's `[eax*4]` 3/17 while `[eax*4+2]`
     0/17), not just how many cycles each PC burned."""
     sets = [[] for _ in range(DC_SETS)]
@@ -196,10 +197,8 @@ def _dcache_per_pc(accs, n2pc):
             if len(ways) >= WAYS:
                 ways.pop()
             ways.insert(0, tag); miss = True
-        pc = n2pc.get(a[0])
-        if pc is not None:
-            e = stat.setdefault(pc, [0, 0])
-            e[0] += 1; e[1] += 1 if miss else 0
+        e = stat.setdefault(a[5], [0, 0])    # a[5] = the access's own PC
+        e[0] += 1; e[1] += 1 if miss else 0
     return stat
 
 
@@ -557,7 +556,7 @@ class TablesView(QWidget):
             else:
                 e[0] += 1; e[1] += span
         ranked = sorted(agg.items(), key=lambda kv: -kv[1][1])[:300]
-        miss_by_pc = _dcache_per_pc(accesses, {it["n"]: it["pc"] for it in insns}) if accesses else {}
+        miss_by_pc = _dcache_per_pc(accesses) if accesses else {}
         self.hot_lbl.setText(
             f"{len(agg)} distinct PC{'' if len(agg) == 1 else 's'}, {total} cycles total "
             f"— top consumers first "
@@ -789,7 +788,7 @@ class AccessMap(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.accesses = []          # [(n, cyc, addr, is_store, size)]
+        self.accesses = []          # [(n, cyc, addr, is_store, size, pc)]
         self.sel_n = None           # retire-n of the clicked access (a STABLE identity,
                                     # so the selection survives the trace's rolling cap
                                     # dropping older accesses off the front of the list)

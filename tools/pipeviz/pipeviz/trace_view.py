@@ -362,9 +362,12 @@ class TraceView(QWidget):
                     ea &= mask
                     mem_ea = (f"@{ea:08x}" if bits == 32 else f"@{ea:04x}")
                     self.last_access = (ea, size)   # newest access -> Memory '→access'
-                    # accumulate the (retire-n, cyc, address, is_store, size) access
-                    # stream for the address-vs-sequence access map (capped, rolling).
-                    self.accesses.append((int(r.n), int(r.cyc), ea, _store, size))
+                    # accumulate the (retire-n, cyc, address, is_store, size, pc) access
+                    # stream for the access-pattern map + the per-PC D$-miss attribution.
+                    # pc is carried HERE so the attribution doesn't depend on the Konata
+                    # insns rolling window (which can drop a PC the access stream still
+                    # holds for a long, sparse-memory run). Capped, rolling.
+                    self.accesses.append((int(r.n), int(r.cyc), ea, _store, size, int(r.pc)))
                     if len(self.accesses) > 4000:
                         del self.accesses[:len(self.accesses) - 4000]
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
