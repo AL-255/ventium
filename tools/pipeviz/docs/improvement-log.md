@@ -110,6 +110,27 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 20 — playhead-behind-cells, stall-bar inset, amber Δ-band, off-screen chevron
+Verify confirmed 0 picks; ground-truthing (2x-zoomed Konata crops) caught two HIGH
+regressions from my own recent features.
+- **Fix (HIGH, self-inflicted) — playhead washed out the cells it crossed.** Iter
+  18's playhead cycle-column tint was alpha-blended OVER the cell layer, so a green
+  `X` or teal `D` under the current-cycle marker desaturated to a faint white glyph.
+  Moved the column tint (and the Δ-band fill) to draw BEHIND the cells: opaque cells
+  paint on top, so the tint shows only through the inter-cell gaps and never washes
+  a glyph. Confirmed at 2x zoom the playhead `X` cells are now fully opaque.
+- **Fix (HIGH) — stall bar overran the preceding `D` cell.** The collapsed `=N`
+  stall bar (+ its 1px border) started flush at the next column, abutting the `D`
+  glyph (`D[ =8`). Inset the bar 3px on the left so there's a clear gap; the `D`
+  reads cleanly.
+- **Fix (recurring) — Δ-measure band made visible + amber.** It was a faint cyan
+  wash (same family as the playhead) with a floating label. Now a translucent
+  AMBER band between the anchor and playhead, with an amber endpoint line and the
+  `Δ<n>cyc` label boxed + centred on the span — distinct from the cyan playhead.
+- **New feature — off-screen continuation chevron.** When an instruction's
+  lifecycle runs past the right viewport edge, a `›` chevron now marks that row, so
+  a clipped `… X = F` reads as "scroll right for more" instead of "truncated".
+
 ### Iteration 19 — compact register rows, redder branch-orange, per-cell Konata tooltip
 Verify confirmed 0 picks (all perception / already-shipped); the value came from
 ground-truthing the unpicked HIGH findings by *measuring* the layout.

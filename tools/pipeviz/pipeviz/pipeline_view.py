@@ -414,6 +414,20 @@ class _KonataPlot(QWidget):
             gc += 10
             if gc > self.max_cyc + 10:
                 break
+        # column highlights drawn BEHIND the cells — opaque cells then paint on top,
+        # so the tint only shows through the inter-cell gaps and never washes a
+        # glyph out (the playhead used to alpha-blend OVER the cells it crossed).
+        if self.playhead is not None and self.anchor is not None:
+            xa = self._x(self.anchor) + CELL_W // 2
+            xp = self._x(self.playhead) + CELL_W // 2
+            blo, bhi = sorted((xa, xp))
+            p.fillRect(QRect(blo, vis.top(), max(1, bhi - blo), vis.height()),
+                       QColor(240, 180, 70, 30))        # translucent AMBER Δ band
+        if self.playhead is not None:
+            pcolx = self._x(self.playhead)
+            if pcolx <= vis.right() and pcolx + CELL_W >= vis.left():
+                p.fillRect(QRect(pcolx, vis.top(), CELL_W, vis.height()),
+                           QColor(57, 197, 207, 34))    # playhead column tint
         r0 = max(0, vis.top() // ROW_H - 1)
         r1 = min(len(self.insns), vis.bottom() // ROW_H + 2)
         xlo, xhi = vis.left() - CELL_W, vis.right() + CELL_W
@@ -436,7 +450,9 @@ class _KonataPlot(QWidget):
                         j += 1
                     x0 = self._x(cells[i][0]); x1 = self._x(cells[j - 1][0]) + CELL_W - 1
                     if x1 >= xlo and x0 <= xhi:
-                        span = QRect(x0, y + 1, max(CELL_W - 1, x1 - x0), ROW_H - 2)
+                        # inset the bar (3px gap on the left) so its border never
+                        # abuts / clips the preceding lettered cell's glyph.
+                        span = QRect(x0 + 2, y + 1, max(CELL_W - 4, x1 - x0 - 3), ROW_H - 2)
                         p.fillRect(span, QColor(col))
                         p.setPen(QColor("#1b1f26")); p.drawRect(span)
                         p.setFont(_mono(8, True)); p.setPen(QColor("#0d1117"))
@@ -451,28 +467,32 @@ class _KonataPlot(QWidget):
                         p.setPen(QColor("#0d1117") if QColor(col).lightness() > 130 else QColor(_TXT))
                         p.drawText(cell, Qt.AlignCenter, ch)
                     i += 1
-        # cycle-range measurement: shade the band between the playhead and a
-        # shift-click anchor, label it Δ<n>cyc (latency between two instructions).
+            # off-screen continuation cue: a chevron when this row's lifecycle runs
+            # past the right viewport edge (scroll right for the rest).
+            if self._x(ins["c1"]) > vis.right():
+                p.setFont(_mono(10, True)); p.setPen(QColor("#7d8590"))
+                p.drawText(QRect(vis.right() - 11, y, 11, ROW_H),
+                           Qt.AlignVCenter | Qt.AlignRight, "›")
+        # Δ-measure MARKERS (the amber band fill itself was drawn behind the cells):
+        # an amber endpoint line at the anchor + the Δ<n>cyc label centred on the band.
         if self.playhead is not None and self.anchor is not None:
             xa = self._x(self.anchor) + CELL_W // 2
             xp = self._x(self.playhead) + CELL_W // 2
             lo, hi = sorted((xa, xp))
-            p.fillRect(QRect(lo, vis.top(), max(1, hi - lo), vis.height()),
-                       QColor(57, 197, 207, 30))         # translucent cyan band
-            p.setPen(QColor("#e3b341"))                  # anchor marker (amber)
+            p.setPen(QColor("#e3b341"))                  # anchor endpoint marker (amber)
             p.drawLine(xa, vis.top(), xa, vis.bottom())
             dn = abs(self.playhead - self.anchor)
-            p.setFont(_mono(8, True)); p.setPen(QColor("#f0c674"))
-            p.drawText(QRect(lo, vis.top() + 1, max(28, hi - lo), 12),
-                       Qt.AlignHCenter | Qt.AlignTop, f"Δ{dn}cyc")
-        # playhead: a tinted cycle COLUMN + vertical cyan marker at the pinned
-        # cycle, with a cycle-number callout pinned to the top of the visible region.
+            p.setFont(_mono(8, True))
+            lbl = f"Δ{dn}cyc"
+            lw = QFontMetrics(p.font()).horizontalAdvance(lbl) + 6
+            lx = max(lo, min((lo + hi) // 2 - lw // 2, hi - lw))
+            p.fillRect(QRect(lx, vis.top() + 1, lw, 12), QColor("#241c08"))
+            p.setPen(QColor("#f0c674"))
+            p.drawText(QRect(lx, vis.top() + 1, lw, 12), Qt.AlignCenter, lbl)
+        # playhead MARKER (the column tint was drawn behind the cells): a vertical
+        # cyan line + a cycle-number callout pinned to the top of the visible region.
         if self.playhead is not None:
             px = self._x(self.playhead) + CELL_W // 2
-            colx = self._x(self.playhead)
-            if colx <= vis.right() and colx + CELL_W >= vis.left():
-                p.fillRect(QRect(colx, vis.top(), CELL_W, vis.height()),
-                           QColor(57, 197, 207, 24))     # translucent column tint
             if vis.left() - 2 <= px <= vis.right() + 2:
                 p.setPen(QColor("#39c5cf"))
                 p.drawLine(px, vis.top(), px, vis.bottom())
