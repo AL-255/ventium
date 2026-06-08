@@ -192,6 +192,25 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Post-loop fix — Pipeline-view scroll glitches (blit-smeared viewport overlays)
+A user-reported **interactive** bug the static-screenshot review loop could never catch
+(it renders frames but never scrolls): scrolling the Konata pipeline view left/right or
+up/down left visual glitches. Root cause: the plot's `paintEvent` takes `vis = ev.rect()`
+and positions its **viewport-anchored overlays** from it — the playhead `cyc N` callout
+(`QRect(bx, vis.top(), …)`), the Δ-measure label (`vis.top()+16`), and the column tints —
+assuming `ev.rect()` is the full visible viewport. But `QScrollArea` optimises scrolling by
+**blitting** the existing pixels and issuing a paint event for only the newly-exposed strip,
+so `ev.rect()` is a thin band: the overlays got redrawn in the wrong place (or clipped out)
+while the old ones stayed blitted → smear/ghost. The header and gutter never glitched
+because `_on_vscroll`/`_on_hscroll` already `.update()` them in full — but the plot was
+never explicitly repainted, so it rode the glitchy blit. Fix: `_on_vscroll`/`_on_hscroll`
+now also `self.plot.update()`, forcing a full repaint of the plot's visible area on every
+scroll (Qt coalesces it with the blit's strip paint, so no extra flicker), which restores
+`ev.rect()` to the whole viewport and re-anchors the overlays correctly. Verified: a
+headless scroll to a mid offset drives the new path without crashing and renders the
+content + synced gutter/header correctly (the on-screen blit smear itself only reproduces
+in a live window, where the fix's full-repaint eliminates it).
+
 ### Loop concluded (after iteration 46)
 The self-improving visual loop was stopped here by request. The tool reached a stable
 terminal equilibrium: the GUI itself needed no change for the final five iterations
