@@ -112,7 +112,20 @@ module icache #(
   // Addressed async line reads (the two fetch-window lines). Distributed-RAM
   // read ports — replace the old 12 full-array byte muxes in the spine.
   assign rd_lineA = ic_line[{rd_setA, rd_wayA}];
+`ifdef VEN_IC_NARROWB
+  // +VEN_IC_NARROWB: rd_lineB is the NEXT (straddle) line, and the spine slices it
+  // (ic_byte) only at LOW byte positions — the fast-path window reads
+  // ub[i]=byte(flin+i) and vb[i]=byte(flin+u_d.len+i) with i<=5, u_d.len<=6 (the
+  // decoder never emits len>6), so the worst-case straddle byte is
+  // flin[4:0]=31 + len 6 + i 5 - 32 = position 10. Drive only the LOW 128 bits
+  // (16 bytes) and leave the high 128 constant 0, so Vivado prunes HALF of this
+  // 256-deep distributed-RAM read — the F7/F8 MUXF read-mux tree that is the
+  // routing-congestion hotspot (fpga/TIMING_PROBLEMS.md congestion analysis). The
+  // pruned high bytes are NEVER sliced, so the fetched bytes are BIT-IDENTICAL.
+  assign rd_lineB = {128'd0, ic_line[{rd_setB, rd_wayB}][127:0]};
+`else
   assign rd_lineB = ic_line[{rd_setB, rd_wayB}];
+`endif
 
   // READ-ONLY tag/val/lru mirrors (small; the presence/way probes read these).
   always_comb begin
