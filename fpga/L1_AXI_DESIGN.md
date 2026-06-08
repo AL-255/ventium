@@ -172,3 +172,37 @@ M4/M5 cycle bands), the mode-0 canary**.
   as the protocol-validation companion; the AXI master is a separate path.
 * Verify in `ventium_top` (the bus_mode mux home), NOT `ventium_soc` (which routes
   mem_* directly) — port the L1+AXI to the soc top afterward.
+
+## 6. Adversarial review (23-agent fan-out, 2026-06-08)
+A multi-dimension adversarial review (AXI protocol / ven_l1d data / core mem-gating
+completeness / cosim slave / FPGA coherency) confirmed **6 real bugs — ALL latent**:
+none can trigger in the verified path (the behavioral slave never errors, mis-asserts
+RLAST, or stalls; the corpus is syscall-light; the shipped remap is identity), proven
+by L1AXI-VERIFY-OK (77/77 user vs QEMU + 10 system mode-2==mode-0). They are
+real-HARDWARE robustness gaps.
+
+**Fixed now (behavior-preserving — gates + 77/77 + 10/10 unchanged):**
+* **Read-beat counter** (`ven_axi_master`): R_DATA exits on the accepted-beat count vs
+  ARLEN, NOT a (possibly mis-asserted) RLAST — a non-compliant slave's early RLAST can
+  no longer freeze ven_l1d's fill mid-line. Identical timing for a compliant slave.
+* **RRESP/BRESP detection**: sticky `rresp_err`/`bresp_err` flags + bound SVAs
+  (`rresp_okay`/`bresp_okay`/`no_resp_err`) — a SLVERR/DECERR is now caught in sim
+  instead of silently stored. **`rlast_align`** SVA flags a misaligned RLAST;
+  **`ar/awaddr_window`** SVAs flag an access outside ADDR_MASK (the remap-alias guard).
+* cosim: drive the AXI slave outputs before eval 0 (hygiene).
+
+**Deferred (need a design decision, scoped follow-ups):**
+* **AXI watchdog + error reporting to the core** (#3/#1 full fix): a stuck DDR/bridge
+  currently deadlocks forever (the gate only DETECTS via --quiesce). The clean fix is
+  a per-FSM timeout + an error pin that the core turns into a machine-check (#MC) /
+  halt — a CPU-architecture decision, not a local patch. Plumb `*_timeout` +
+  `rresp_err`/`bresp_err` out of ventium_l1_axi → ventium_top → the core's exception
+  path.
+* **L1 external-invalidation port** (#4): the int-0x80 proxy / syscall emulator writes
+  the MemModel directly (bypassing the L1), so a `--emulate-syscalls` `read()`-into-
+  buffer program (Quake) can read a stale cached line. Add a flush port to ven_l1d
+  (set/way or address) the TB pulses after each syscall write; on real HW this is the
+  CCI snoop (HPC0 is coherent, but a non-AXI kernel write path would need it).
+* **Narrow-ADDR_MASK alias** (#5): inert in the shipped identity remap; the
+  `ar/awaddr_window` SVAs above now flag it if a future integrator sets a small
+  carveout mask and feeds out-of-window addresses.

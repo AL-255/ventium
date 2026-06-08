@@ -76,5 +76,36 @@ while IFS= read -r line; do
 done < "$JOBS"
 
 echo
-echo "=== L1AXI-VERIFY (mode-2 functional vs QEMU): PASS=$PASS FAIL=$FAIL / $TOTAL ==="
-if [ "$FAIL" -eq 0 ]; then echo "L1AXI-VERIFY-OK"; else echo "FAILING:$FAILED"; echo "L1AXI-VERIFY-FAIL"; fi
+echo "=== L1AXI-VERIFY user-mode (mode-2 functional vs QEMU): PASS=$PASS FAIL=$FAIL / $TOTAL ==="
+
+# ---- SYSTEM-MODE equivalence: mode-0 vs mode-2 retire trace -----------------
+# The user-mode corpus does NOT exercise the slow-FSM arms (page-walk, descriptor/
+# TSS reads, IDT delivery, SMRAM). Those address PHYSICAL memory through the same
+# mem port, so a stalling L1 must not corrupt them. The system golden is infeasible
+# for some (SMM), but mode-0 --system is already proven vs QEMU (the sys gate), so
+# mode-0-vs-mode-2 equivalence is the right check here.
+SYS_DIR="$ROOT/verif/sys/tests"
+SYS_TESTS="pmode ppage pseg ptask pde pcpl pfault pv86 pintr pdebug"
+TB0="$ROOT/verif/tb/obj_dir/tb_ventium"
+[ -x "$TB0" ] || make -C "$ROOT/verif/tb" rtl > "$WORKDIR/build0.log" 2>&1 || true
+SPASS=0; SFAIL=0; SFAILED=""
+if [ -x "$TB0" ]; then
+  for t in $SYS_TESTS; do
+    img="$SYS_DIR/$t/$t.bin"; [ -f "$img" ] || continue
+    mx=$(grep -oP '"max_insn":\s*\K[0-9]+' "$SYS_DIR/$t/manifest.json" 2>/dev/null || echo 4000)
+    "$TB0" --image "$img" --system --out "$WORKDIR/${t}.m0" --max-insn "$mx" --quiesce 200000 >/dev/null 2>&1 || { SFAIL=$((SFAIL+1)); SFAILED="$SFAILED $t(m0)"; continue; }
+    "$TB_BIN" --image "$img" --system --l1-axi --out "$WORKDIR/${t}.m2" --max-insn "$mx" --quiesce 200000 >/dev/null 2>&1
+    grep '^{' "$WORKDIR/${t}.m2" > "$WORKDIR/${t}.m2c" 2>/dev/null
+    if diff -q "$WORKDIR/${t}.m0" "$WORKDIR/${t}.m2c" >/dev/null 2>&1; then SPASS=$((SPASS+1)); else SFAIL=$((SFAIL+1)); SFAILED="$SFAILED $t"; fi
+  done
+  echo "=== L1AXI-VERIFY system-mode (mode-0 vs mode-2 equiv): PASS=$SPASS FAIL=$SFAIL ==="
+fi
+
+echo
+if [ "$FAIL" -eq 0 ] && [ "$SFAIL" -eq 0 ]; then
+  echo "L1AXI-VERIFY-OK  (user $PASS/$TOTAL vs QEMU + system $SPASS mode-2==mode-0)"
+else
+  [ "$FAIL"  -ne 0 ] && echo "USER FAILING:$FAILED"
+  [ "$SFAIL" -ne 0 ] && echo "SYS FAILING:$SFAILED"
+  echo "L1AXI-VERIFY-FAIL"
+fi

@@ -126,6 +126,9 @@ module ven_axi_master #(
   typedef enum logic [1:0] { R_IDLE, R_AR, R_DATA } rstate_e;
   rstate_e          rst;
   logic [ADDR_W-1:0] araddr_q;     // line-aligned burst base (registered, stable)
+  logic [7:0]        r_beat;       // accepted-R-beat counter (exit on count, not RLAST)
+  logic              rresp_err;    // sticky: a read beat returned non-OKAY RRESP
+  logic              bresp_err;    // sticky: a write returned non-OKAY BRESP
 
   // ---- WRITE FSM (single-beat write-through, decoupled AW/W) -----------------
   typedef enum logic [1:0] { W_IDLE, W_RUN, W_RESP } wstate_e;
@@ -179,16 +182,26 @@ module ven_axi_master #(
   // ---- READ sequencing -------------------------------------------------------
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
-      rst <= R_IDLE; araddr_q <= '0;
+      rst <= R_IDLE; araddr_q <= '0; r_beat <= 8'd0; rresp_err <= 1'b0;
     end else begin
       unique case (rst)
         R_IDLE: if (m_req && !m_we) begin
                   // a backing read == a full line fill: latch the 32B-aligned base.
                   araddr_q <= remap({m_addr[31:5], 5'd0});
+                  r_beat <= 8'd0; rresp_err <= 1'b0;
                   rst <= R_AR;
                 end
         R_AR:   if (m_axi_arready) rst <= R_DATA;             // AR accepted
-        R_DATA: if (m_axi_rvalid && m_axi_rlast) rst <= R_IDLE; // burst complete
+        R_DATA: if (m_axi_rvalid && m_axi_rready) begin       // beat accepted
+                  // DEFENSIVE: exit on the BEAT COUNT vs ARLEN, NOT a (possibly
+                  // mis-asserted) RLAST — a non-compliant slave's early RLAST then
+                  // cannot freeze ven_l1d's fill mid-line. Identical timing for a
+                  // compliant slave (RLAST lands exactly at r_beat==LINE_BEATS-1, the
+                  // rlast_align SVA below checks it). Sticky-flag a non-OKAY RRESP.
+                  if (m_axi_rresp != 2'b00)        rresp_err <= 1'b1;
+                  if (r_beat == 8'(LINE_BEATS-1))  rst <= R_IDLE;  // burst complete
+                  r_beat <= r_beat + 8'd1;
+                end
         default: rst <= R_IDLE;
       endcase
     end
@@ -198,13 +211,13 @@ module ven_axi_master #(
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       wst <= W_IDLE; awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
-      aw_done <= 1'b0; w_done <= 1'b0;
+      aw_done <= 1'b0; w_done <= 1'b0; bresp_err <= 1'b0;
     end else begin
       unique case (wst)
         W_IDLE: if (m_req && m_we) begin
                   awaddr_q <= remap(m_addr);
                   wdata_q  <= m_wdata; wstrb_q <= m_wstrb;
-                  aw_done  <= 1'b0;    w_done  <= 1'b0;
+                  aw_done  <= 1'b0;    w_done  <= 1'b0;  bresp_err <= 1'b0;
                   wst <= W_RUN;
                 end
         W_RUN: begin
@@ -215,7 +228,10 @@ module ven_axi_master #(
               (w_done  || (m_axi_wvalid  && m_axi_wready)))
             wst <= W_RESP;
         end
-        W_RESP: if (m_axi_bvalid) wst <= W_IDLE;  // m_ack pulsed (comb) this cycle
+        W_RESP: if (m_axi_bvalid) begin           // m_ack pulsed (comb) this cycle
+                  if (m_axi_bresp != 2'b00) bresp_err <= 1'b1;  // sticky non-OKAY BRESP
+                  wst <= W_IDLE;
+                end
         default: wst <= W_IDLE;
       endcase
     end
@@ -241,13 +257,33 @@ module ven_axi_master #(
   // no AR while a write is outstanding (single-outstanding in-order guarantee).
   no_rw_overlap: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       !(m_axi_arvalid && (wst != W_IDLE)));
+  // RLAST must land exactly on the last beat (catches a slave's early/late RLAST —
+  // the beat counter now ignores RLAST for the FSM exit, this SVA flags the abuse).
+  rlast_align: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (rst==R_DATA && m_axi_rvalid && m_axi_rready && m_axi_rlast)
+      |-> (r_beat == 8'(LINE_BEATS-1)));
+  // every consumed response is OKAY (a SLVERR/DECERR would silently corrupt a line /
+  // a store — sticky-flagged in rresp_err/bresp_err; an error pin to the core is a
+  // documented follow-up, see fpga/L1_AXI_DESIGN.md).
+  rresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (rst==R_DATA && m_axi_rvalid && m_axi_rready) |-> (m_axi_rresp == 2'b00));
+  bresp_okay: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (wst==W_RESP && m_axi_bvalid) |-> (m_axi_bresp == 2'b00));
+  no_resp_err: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (!rresp_err && !bresp_err));
+  // every access fits the remap window (a bit outside ADDR_MASK would alias in DDR —
+  // inert for the shipped ADDR_MASK=0xFFFF_FFFF where ~ADDR_MASK==0).
+  araddr_window: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (rst==R_IDLE && m_req && !m_we) |-> ((m_addr & ~ADDR_MASK) == 32'd0));
+  awaddr_window: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (wst==W_IDLE && m_req &&  m_we) |-> ((m_addr & ~ADDR_MASK) == 32'd0));
 `endif
 
-  // lint sinks: RID/RRESP/BID/BRESP not consulted (single in-flight, AxID=0); the
-  // axi_clk/axi_rst_n ports are tied to the core domain in the CDC_BYPASS build.
+  // lint sinks: RID/BID not consulted (single in-flight, AxID=0); axi_clk/axi_rst_n
+  // are tied to the core domain in the CDC_BYPASS build. (RRESP/BRESP ARE consulted
+  // now — the sticky rresp_err/bresp_err flags + the resp SVAs above.)
   // verilator lint_off UNUSED
-  wire _unused = &{1'b0, m_axi_bid, m_axi_bresp, m_axi_rid, m_axi_rresp,
-                   m_axi_rid, axi_clk, axi_rst_n};
+  wire _unused = &{1'b0, m_axi_bid, m_axi_rid, axi_clk, axi_rst_n};
   // verilator lint_on UNUSED
 
 endmodule : ven_axi_master
