@@ -134,9 +134,17 @@ module ven_l1d #(
           end else if (c_req && !c_we && hit) begin
             // read HIT → 2-way LRU touch (mark the hit way MRU).
             dc_lru[set_c] <= hit_way;
-          end else if (c_req && c_we && hit && m_ack) begin
+          end else if (c_req && c_we && hit) begin
             // write HIT (write-through) → update the array word (byte strobes) +
-            // LRU touch. The backing already saw the write via the comb driver.
+            // LRU touch as soon as the write HITS — decoupled from the backing ack.
+            // The backing write-through proceeds in parallel (comb driver -> AXI),
+            // and the core still STALLS (c_ack=m_ack, below) until that completes;
+            // so committing the array now is correct (the core cannot re-read during
+            // its own stalled write) AND robust to multi-cycle backing latency: a
+            // real AXI write acks (m_ack) many clocks later, possibly after the core
+            // has dropped c_req, so gating the array write on m_ack would lose it.
+            // Same-cycle backing (the L1D unit gate) acks in clock 1 -> identical.
+            // Idempotent if it re-fires across a multi-clock write (same bytes/LRU).
             // Read-modify-write the addressed 32-bit word: keep the old byte where
             // the strobe is 0, take c_wdata where it is 1.
             logic [31:0] oldw, neww;
