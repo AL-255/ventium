@@ -146,8 +146,11 @@ except Exception:
 PY
 )"
 
+    # TB_EXTRA_FLAGS: optional passthrough (e.g. "--l1-axi --quiesce 100000" for the
+    # P1-1 mode-2 func gate, which runs a different TB_BIN against the SAME golden).
     if ! "$TB_BIN" --image "$FLAT" --load "$LOAD" --entry "$ENTRY" \
             --init-esp "$INIT_ESP" --out "$RTL" --max-insn "$MAX" $X87_FLAG \
+            ${TB_EXTRA_FLAGS:-} \
             > "$W/${TAG}_rtl.log" 2>&1; then
         emit_func FAIL "tb_ventium run failed" "$CACHEHIT"
         exit 0
