@@ -148,6 +148,7 @@ static struct {
     int64_t  fp_ready;       /* cycle x87 top-of-stack result is ready (FP chains) */
     int64_t  fp_busy_until;  /* GAP1: cycle the single x87 exec unit is free again */
     bool     fp_overlap;     /* GAP1/VEN_FP_OVERLAP gate (argv fpovl=1). default 0 */
+    bool     fxch_free;      /* GAP2/VEN_FXCH_FREE gate (argv fxchfree=1). default 0 */
     uint64_t pending_mem_pen;/* D-cache penalty from prev insn's mem access        */
     /* deferred branch resolution */
     bool     pend_branch;
@@ -312,7 +313,12 @@ static void classify(cs_insn *in, insn_t *ii)
     case X86_INS_FBSTP:
         ii->pclass=NP; ii->occ=1; ii->lat=1; ii->fp_role=2; break;
     case X86_INS_FXCH:
-        ii->pclass=NP; ii->occ=1; ii->lat=1; ii->fp_role=0; break;
+        /* GAP2: the P5 FXCH is a stack-pointer/tag RENAME that executes in parallel
+         * with an adjacent FP op (~0 cycles) — the register flexibility Quake leans on.
+         * With g.fxch_free, occ=0 so it does not advance pipe_free_at: its retire folds
+         * onto the adjacent group's cycle (forward-collapse). fp_role stays 0 (it neither
+         * reads nor writes the fp_ready top-of-stack slot). Default keeps occ=1. */
+        ii->pclass=NP; ii->occ = g.fxch_free ? 0 : 1; ii->lat=1; ii->fp_role=0; break;
     case X86_INS_FLDZ: case X86_INS_FLD1: case X86_INS_FLDPI:
     case X86_INS_FLDL2E: case X86_INS_FLDL2T: case X86_INS_FLDLG2: case X86_INS_FLDLN2:
         ii->pclass=NP; ii->occ=2; ii->lat=2; ii->fp_role=1; break;
@@ -614,6 +620,7 @@ int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_t *info,
         else if (!strncmp(a,"cache=",6)) g.model_cache = atoi(a+6);
         else if (!strncmp(a,"bytes=",6)) g.emit_bytes = atoi(a+6);
         else if (!strncmp(a,"fpovl=",6)) g.fp_overlap = atoi(a+6);
+        else if (!strncmp(a,"fxchfree=",9)) g.fxch_free = atoi(a+9);
     }
     g.out = outpath ? fopen(outpath,"w") : stderr;
     if (!g.out) { fprintf(stderr,"p5trace: cannot open out=%s\n", outpath?outpath:""); g.out = stderr; }

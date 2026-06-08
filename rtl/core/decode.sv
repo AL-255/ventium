@@ -304,6 +304,13 @@ module decode
                   8'b1100_1???: begin   // D9 C8+i  FXCH ST(i)
                     d.is_fp=1'b1; d.fp_kind=FK_FXCH; d.len=4'd2;
                     d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
+`ifdef VEN_FXCH_FREE
+                    // GAP2: the P5 FXCH is a free stack rename — it folds into the
+                    // preceding push's commit clock (occ 0). Marked here; the spine's
+                    // FP push-commit arm absorbs it. (A lone/unfoldable FXCH still
+                    // costs its own clock via the normal commit, matching occ=1.)
+                    d.is_fxch_free=1'b1; d.fp_occ=7'd0;
+`endif
                   end
                   8'hE8,8'hE9,8'hEA,8'hEB,8'hEC,8'hED,8'hEE: begin // FLD const (E8=FLD1..)
                     d.is_fp=1'b1; d.fp_kind=FK_FLDC; d.len=4'd2;

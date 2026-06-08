@@ -179,10 +179,24 @@
               // per-fetch l1_access). FP ops are 2 bytes (no straddle in practice).
               // The touch lands in u_icache via tch0 (ic_tch0_* driver above, gated
               // on this exact FP-issue+commit arm).
-              eip<=eip + {28'd0,u_d.len};
               q_pc<=eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
               retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
               agi_wr0<=9'h100; agi_wr1<=9'h100;   // FP writes no GP reg
+`ifdef VEN_FXCH_FREE
+              // GAP2: a free FXCH directly FOLLOWING this PUSH (FK_FLDC/FK_FLDSTI)
+              // folds into THIS commit clock for ZERO added cycles (the P5 stack
+              // rename). Its swap is driven by the folded fp_we_push+fp_we_sti below;
+              // here we retire it as the V member and advance eip past BOTH. Only a
+              // push absorbs it (the arith path defers under VEN_FP_PIPE); a lone or
+              // post-arith FXCH falls through to its own occ=1 commit next clock.
+              if ((u_d.fp_kind==FK_FLDC || u_d.fp_kind==FK_FLDSTI)
+                  && v_d.is_fxch_free && v_bytes_ok && v_d.fp_sti!=3'd0) begin
+                eip            <= eip + {28'd0,u_d.len} + {28'd0,v_d.len};
+                q_pc2          <= eip + {28'd0,u_d.len};   // the FXCH's own pc (V retire)
+                retire2_valid  <= 1'b1; retire2_pipe<=2'd1; retire2_paired<=1'b1;
+              end else
+`endif
+              eip<=eip + {28'd0,u_d.len};
             end
           end else if (!u_d.simple || sys_mode) begin
             // hand this one instruction to the slow functional FSM. Clear the

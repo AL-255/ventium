@@ -4605,8 +4605,29 @@ module core
 `endif
     if (fp_fast_commit) begin
       unique case (u_d.fp_kind)
-        FK_FLDC:   begin fp_we_push=1'b1; fp_push_data=fconst(u_d.fp_sti); end
-        FK_FLDSTI: begin fp_we_push=1'b1; fp_push_data=fst(u_d.fp_sti);    end
+        FK_FLDC:   begin
+`ifdef VEN_FXCH_FREE
+          // GAP2 fold: fld-const + a following free FXCH %st(i) in ONE write — the
+          // pushed const lands in st(i), the old st(i-1) becomes the new st0 (pre-edge
+          // ftop addressing: we_push->fpr[ftop-1], we_sti(i-1)->fpr[ftop+i-1]).
+          if (v_d.is_fxch_free && v_bytes_ok && v_d.fp_sti!=3'd0) begin
+            fp_we_push=1'b1; fp_push_data=fst(v_d.fp_sti - 3'd1);
+            fp_we_sti=1'b1;  fp_wsti_idx=v_d.fp_sti - 3'd1;
+            fp_wsti_data=fconst(u_d.fp_sti); fp_wsti_clr_tag=1'b1;
+          end else
+`endif
+          begin fp_we_push=1'b1; fp_push_data=fconst(u_d.fp_sti); end
+        end
+        FK_FLDSTI: begin
+`ifdef VEN_FXCH_FREE
+          if (v_d.is_fxch_free && v_bytes_ok && v_d.fp_sti!=3'd0) begin
+            fp_we_push=1'b1; fp_push_data=fst(v_d.fp_sti - 3'd1);
+            fp_we_sti=1'b1;  fp_wsti_idx=v_d.fp_sti - 3'd1;
+            fp_wsti_data=fst(u_d.fp_sti); fp_wsti_clr_tag=1'b1;
+          end else
+`endif
+          begin fp_we_push=1'b1; fp_push_data=fst(u_d.fp_sti); end
+        end
         FK_ARITH:  begin
 `ifdef VEN_FP_PIPE
           // DEFERRED: capture operands (signalled to the always_ff) and commit one
