@@ -2961,30 +2961,45 @@ module core
     iq_covers = (off < 32'd16) && ((off + 32'd12) <= {27'd0, iq_cnt});
   end
 
-  // registered prefetch: slide the base toward flin, refill ahead, flush on redirect.
+  // 8:1 WORD select off the icache line (the prefetch fill primitive — replaces the
+  // 32:1 byte shift). a is word-aligned; a[4:2] picks 1 of 8 words in the 256-bit line.
+  function automatic logic [31:0] dp_word(input logic [31:0] a);
+    logic [IC_LINE*8-1:0] ln;
+`ifdef VEN_IC_BRAM
+    ln = (a[11:5] == rdA_set_q) ? ic_rd_lineA : ic_rd_lineB;
+`else
+    ln = (a[11:5] == ic_rd_setA) ? ic_rd_lineA : ic_rd_lineB;
+`endif
+    dp_word = ln[{a[4:2], 5'b00000} +: 32];
+  endfunction
+
+  // registered prefetch: WORD-aligned base, WORD-granular slide (keeps iq_head=off[1:0]
+  // in 0..3 -> the decode extract is a 4:1 mux over 16 flops, not 32:1-over-256), and a
+  // WORD-granular refill (up to 3 words/clock = 12 B, to keep pace with max dual-issue
+  // consume). Flush on a redirect (flin out of the window). All 32:1-over-256 muxing is
+  // GONE from this path: fill = 8:1 word select (registered, off the eip loop).
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       iq_base <= 32'd0; iq_cnt <= 5'd0; pfpc <= 32'd0;
       for (int i=0;i<16;i++) iq[i] <= 8'd0;
     end else begin
-      logic [31:0] off, nb, p2; logic [4:0] sl, c2; logic [7:0] tmp [16];
+      logic [31:0] off, nb, p2, w; logic [4:0] sl, c2; logic [7:0] tmp [16];
       off = flin - iq_base;
       if (off >= 32'd16) begin                      // FLUSH (redirect / cold / first fetch)
-        nb = flin; c2 = 5'd0;
+        nb = {flin[31:2], 2'b00}; c2 = 5'd0;        // rebase to flin's word
         for (int i=0;i<16;i++) tmp[i] = 8'd0;
-      end else begin                                 // SLIDE base by off (drop consumed) once off>=4
-        sl = (off >= 32'd4) ? off[4:0] : 5'd0;
+      end else begin                                 // WORD-SLIDE: drop whole consumed words
+        sl = {off[4:2], 2'b00};                      // off rounded down to a word multiple
         nb = iq_base + {27'd0, sl};
         c2 = (iq_cnt > sl) ? (iq_cnt - sl) : 5'd0;
         for (int i=0;i<16;i++) tmp[i] = ((i + sl) < 16) ? iq[i + sl] : 8'd0;
       end
-      p2 = nb + {27'd0, c2};
-      // PREFETCH present bytes from p2 to fill 16 (greedy shadow; step 4 caps the rate
-      // to a word/clock). Presence is a contiguous prefix (per-line), so stop at the
-      // first non-present byte — iq then holds exactly the resident prefix, == ub[].
-      for (int k=0;k<16;k++)
-        if (c2 < 5'd16 && ic_present(p2)) begin
-          tmp[c2] = ic_byte(p2); c2 = c2 + 5'd1; p2 = p2 + 32'd1;
+      p2 = nb + {27'd0, c2};                          // next word to fetch (word-aligned)
+      for (int wd=0; wd<3; wd++)
+        if (c2 <= 5'd12 && ic_present(p2)) begin      // room for a word + the line resident
+          w = dp_word(p2);
+          tmp[c2+5'd0]=w[7:0]; tmp[c2+5'd1]=w[15:8]; tmp[c2+5'd2]=w[23:16]; tmp[c2+5'd3]=w[31:24];
+          c2 = c2 + 5'd4; p2 = p2 + 32'd4;
         end
       for (int i=0;i<16;i++) iq[i] <= tmp[i];
       iq_base <= nb; iq_cnt <= c2; pfpc <= p2;
