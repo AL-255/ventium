@@ -102,6 +102,16 @@ The most important sources for reconstructing the *microarchitecture*.
    * - **Microprocessor Report, "Intel Reveals Pentium Implementation Details",
        1993** (``mpr-pentium-implementation-1993``)
      - Secondary source on early P5 internals, pairing exceptions, rationale.
+   * - **RTL Engineering — P5/Pentium microarchitecture video transcripts**
+       (``rtl-engineering-transcripts/``)
+     - Independent deep-dives that reconstruct the P5/MMX front end from the
+       public record: the U/V dual decoder, the 1-byte length guess + length
+       cache, ``0F``-as-prefix handling, U/V pairability, the eight-stage FPU with
+       FXCH pairing, and the FDIV/integer overlap ("early-exception" logic) that
+       made Quake fast on the P5. Secondary analysis — speculative where Intel
+       never disclosed internals — cross-checked against §1–§3; the basis for the
+       cycle-model fidelity notes in ``rtl-engineering-transcripts/
+       _GAPS_vs_ventium.md``.
 
 
 §3 — Optimization guides and timing tables
@@ -216,9 +226,21 @@ categories), the archive vendors:
    * - **P5 emulation harness** (``07-p5-emulation-harness/``)
      - A reproducible "golden reference" environment that runs P5/P54C code,
        enforces the P5-only instruction set, estimates Pentium clock cycles, and
-       drives free benchmarks — the functional + cycle-estimate layer that must be
-       right before the RTL can be checked against it (honest about stopping short
-       of bus/errata/stepping accuracy).
+       drives a benchmark suite — **CoreMark, Dhrystone, Whetstone, STREAM,
+       LINPACK** plus integer ``kernels`` and a ``microbench`` (SPEC95 is a
+       placeholder). It now also carries two endurance workloads. **Quake**
+       (``quake/``): a TyrQuake P5 build — shareware Quake running on the emulator
+       with the P5-clean x86-assembly path enabled. **Windows 95**
+       (``win95/``): an automated unattended install plus a ``C:\SW`` workload
+       library (``software.sh`` / ``SOFTWARE.md``) that injects shareware games
+       (DOOM, Wolfenstein 3D, Heretic, Jazz Jackrabbit — fixed-point integer 3D)
+       and 2D/3D CAD apps (ProDesign II, RAD CAD — x87-FPU geometry) to exercise
+       wide swaths of the ISA, driven headless over the QEMU monitor / VNC.
+       Supporting tools (``tools/``) include a static ISA verifier
+       (``isa_verify.py``) and a resynchronizing trace comparator
+       (``trace_compare.py``). The functional + cycle-estimate layer that must be
+       right before the RTL can be checked against it — honest about stopping
+       short of bus/errata/stepping accuracy.
 
 
 §8 — RTL implementation and verification stack
