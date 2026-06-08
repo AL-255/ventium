@@ -119,6 +119,13 @@ public:
         return true;
     }
 
+    // --no-trace fast path: no file is opened, but ok() stays true so the
+    // retire counter (note_retire/retired) still advances — the free-run loop
+    // drives termination off retired(). dpi_retire sees discard() and returns
+    // BEFORE formatting any record (the per-instruction cost). g_last_arch is
+    // still maintained, so --checkpoint-* keeps working.
+    void open_discard() { discard_ = true; }
+
     void close() {
         if (fp_) {
             std::fflush(fp_);
@@ -127,8 +134,9 @@ public:
         }
     }
 
-    bool   ok()    const { return fp_ != nullptr; }
-    FILE*  fp()    const { return fp_; }
+    bool   ok()      const { return fp_ != nullptr || discard_; }
+    bool   discard() const { return discard_; }
+    FILE*  fp()      const { return fp_; }
     bool   x87()   const { return x87_; }
     bool   cycle() const { return cycle_; }
     bool   sys()   const { return sys_; }
@@ -231,6 +239,7 @@ private:
     bool     x87_     = false;
     bool     cycle_   = false;
     bool     sys_     = false;
+    bool     discard_ = false;   // --no-trace: count retires, skip formatting
 
     X87State x87_pending_;
     uint64_t x87_pending_n_   = 0;

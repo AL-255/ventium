@@ -103,7 +103,7 @@ extern "C" void vtm_retire_x87(
     unsigned long long st6_lo, unsigned short st6_hi,
     unsigned long long st7_lo, unsigned short st7_hi) {
     using namespace ventium;
-    if (!g_trace) return;
+    if (!g_trace || g_trace->discard()) return;   // --no-trace: skip the stash
     X87State s;
     s.st_lo[0] = st0_lo; s.st_hi[0] = st0_hi;
     s.st_lo[1] = st1_lo; s.st_hi[1] = st1_hi;
@@ -128,7 +128,7 @@ extern "C" void vtm_retire_x87(
 extern "C" void vtm_retire_cycle(
     unsigned long long n, unsigned int pipe, unsigned int paired) {
     using namespace ventium;
-    if (!g_trace) return;
+    if (!g_trace || g_trace->discard()) return;   // --no-trace: skip the stash
     CycleInfo ci;
     ci.pipe   = (unsigned char)(pipe > 2u ? 2u : pipe);  // clamp to {0,1,2}
     ci.paired = (paired != 0u);
@@ -142,7 +142,7 @@ extern "C" void vtm_retire_sys(
     unsigned long long n, unsigned int cr0, unsigned int cr2,
     unsigned int cr3, unsigned int cr4) {
     using namespace ventium;
-    if (!g_trace) return;
+    if (!g_trace || g_trace->discard()) return;   // --no-trace: skip the stash
     SysState s;
     s.cr0 = cr0; s.cr2 = cr2; s.cr3 = cr3; s.cr4 = cr4;
     g_trace->stash_sys(n, s);
@@ -169,6 +169,9 @@ extern "C" void vtm_retire(
     g_last_arch.seg[0]=cs; g_last_arch.seg[1]=ss; g_last_arch.seg[2]=ds;
     g_last_arch.seg[3]=es; g_last_arch.seg[4]=fs; g_last_arch.seg[5]=gs;
     if (!g_trace || !g_trace->ok()) return;
+    // --no-trace (free-run fast path): count the retirement so the TB loop can
+    // make progress, but skip ALL record formatting (the per-instruction cost).
+    if (g_trace->discard()) { g_trace->note_retire(); return; }
 
     // --- cycle mode (M4): emit a cycle-mode record instead of the func one ---
     // The integer/system architectural state is irrelevant in cycle mode; we

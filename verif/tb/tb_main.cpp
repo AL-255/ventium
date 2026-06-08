@@ -69,6 +69,11 @@ struct Args {
     // Only FUNCTIONAL equivalence is meaningful through the bus (no pin-level
     // cycle oracle — docs/m5b-bus-spec.md §5.3), so --bus-mode is for func runs.
     bool     bus_mode   = false;
+    // P1-1: --l1-axi drives the top l1axi_en=1 (bus_mode=2), routing the core mem
+    // port through ventium_l1_axi (ven_l1d + ven_axi_master) to an AXI4 master that
+    // this TB's behavioral DDR slave services off the SAME MemModel. Only meaningful
+    // in the +VEN_L1_AXI build; FUNCTIONAL equivalence vs mode 0 (timing emergent).
+    bool     l1_axi     = false;
     uint32_t errata     = 0;      // M6 errata-enable bus (default 0 = clean core)
     // M2S.1: --system selects boot_mode=system (cold reset at F000:FFF0, real
     // mode) and emits the sys fields + header sys:true. A -bios image is loaded
@@ -110,6 +115,13 @@ struct Args {
     std::string user_stdin;            // --user-stdin <file>  (bytes for read())
     std::string user_stdout;           // --user-stdout <file> (captured fd 1/2)
     uint32_t    brk_base    = 0;       // --brk-base <hexaddr> (initial program break)
+
+    // --no-trace: do NOT open a TraceWriter (leave g_trace == nullptr). The
+    // per-retire DPI then early-returns BEFORE the ~718-byte fprintf record
+    // (g_last_arch is still maintained, so --checkpoint-* keeps working). This
+    // is a large free-run speedup for runs that discard the trace anyway (e.g.
+    // the Quake framebuffer demo, which only wants the captured frame stream).
+    bool        no_trace    = false;   // --no-trace
 
     // M14 periodic complete-state checkpoints (free-run "replay mechanism"):
     // every N retired insns, dump {arch regs + full MemModel} to a 2-deep ring in
@@ -167,6 +179,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--x87")        a.x87        = true;
         else if (k == "--cycle")      a.cycle      = true;
         else if (k == "--bus-mode")   a.bus_mode   = true;   // M5B-int
+        else if (k == "--l1-axi")     a.l1_axi     = true;   // P1-1 bus_mode=2
         else if (k == "--system")     a.system     = true;
         else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
         else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
@@ -174,6 +187,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--win95-image") a.win95_image = need("--win95-image");
         else if (k == "--lockstep")    a.lockstep    = need("--lockstep");
         else if (k == "--emulate-syscalls") a.emulate = true;
+        else if (k == "--no-trace")         a.no_trace = true;
         else if (k == "--user-stdin")  a.user_stdin  = need("--user-stdin");
         else if (k == "--user-stdout") a.user_stdout = need("--user-stdout");
         else if (k == "--brk-base")    a.brk_base    = parse_u32(need("--brk-base"));
@@ -188,8 +202,8 @@ Args parse_args(int argc, char** argv) {
             usage(argv[0], 2);
         }
     }
-    if (a.out.empty()) {
-        std::fprintf(stderr, "%s: --out is required\n", argv[0]);
+    if (a.out.empty() && !a.no_trace) {
+        std::fprintf(stderr, "%s: --out is required (or pass --no-trace)\n", argv[0]);
         usage(argv[0], 2);
     }
     return a;
@@ -317,8 +331,15 @@ int main(int argc, char** argv) {
     }
 
     // ---- trace writer (opens file + writes header) ------------------------
+    // --no-trace leaves g_trace == nullptr: the per-retire DPI early-returns
+    // before formatting/writing any record (see dpi_retire.cpp), a large
+    // free-run speedup. g_last_arch is still updated, so --checkpoint-* works.
     ventium::TraceWriter trace;
-    {
+    if (args.no_trace) {
+        // Count retirements (the loop's progress/termination signal) but skip
+        // all per-instruction record formatting — the big free-run speedup.
+        trace.open_discard();
+    } else {
         char note[256];
         std::snprintf(note, sizeof note,
                       "ventium tb; entry=0x%08x load=0x%08x image=%s%s%s",
@@ -366,6 +387,57 @@ int main(int argc, char** argv) {
 #endif
     };
 
+#ifdef VEN_L1_AXI
+    // ---- behavioral AXI4 DDR slave (P1-1 --l1-axi / bus_mode=2) -------------
+    // Services the core's m_axi master off the SAME MemModel `mem`. Synchronous:
+    // its outputs are driven combinationally from registered state (axi_drive,
+    // called from service_bus so every bus-service phase drives them), and the
+    // state advances ONCE per rising edge using PRE-EDGE handshakes — axi_capture()
+    // right after clk=1 (reads the DUT's pre-edge m_axi outputs + the slave's own
+    // pre-advance state), axi_advance() after the edge eval (using those captured
+    // values). This pre-edge capture is required: a synchronous slave and the DUT
+    // master each decide their handshake from the OTHER side's pre-edge value.
+    // REMAP_BASE=0 in ventium_top, so m_axi addr == x86 phys (direct MemModel index).
+    // Inert in modes 0/1 (the master never issues -> the slave stays IDLE).
+    int      axr = 0;                  // read FSM: 0=IDLE, 1=BEAT
+    int      axw = 0;                  // write FSM: 0=IDLE, 1=DATA, 2=RESP
+    uint32_t axr_addr = 0, axw_addr = 0, axr_cnt = 0;
+    struct { bool ar,r,aw,w,b; uint32_t araddr,arlen,awaddr,wdata,wstrb; } axhs{};
+    auto axi_drive = [&]() {
+        top->m_axi_arready = (axr==0);
+        top->m_axi_rvalid  = (axr==1);
+        top->m_axi_rdata   = (axr==1) ? mem.read32(axr_addr) : 0u;
+        top->m_axi_rlast   = (axr==1) && (axr_cnt==0);
+        top->m_axi_rid = 0; top->m_axi_rresp = 0;
+        top->m_axi_awready = (axw==0);
+        top->m_axi_wready  = (axw==1);
+        top->m_axi_bvalid  = (axw==2);
+        top->m_axi_bid = 0; top->m_axi_bresp = 0;
+    };
+    auto axi_capture = [&]() {
+        axhs.ar = (axr==0) && (bool)top->m_axi_arvalid;
+        axhs.r  = (axr==1) && (bool)top->m_axi_rready;
+        axhs.aw = (axw==0) && (bool)top->m_axi_awvalid;
+        axhs.w  = (axw==1) && (bool)top->m_axi_wvalid;
+        axhs.b  = (axw==2) && (bool)top->m_axi_bready;
+        axhs.araddr = (uint32_t)top->m_axi_araddr; axhs.arlen = (uint32_t)top->m_axi_arlen;
+        axhs.awaddr = (uint32_t)top->m_axi_awaddr;
+        axhs.wdata  = (uint32_t)top->m_axi_wdata;  axhs.wstrb = (uint32_t)top->m_axi_wstrb;
+    };
+    auto axi_advance = [&]() {
+        if (!top->rst_n) { axr=0; axw=0; return; }
+        if (axr==0) { if (axhs.ar) { axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr=1; } }
+        else        { if (axhs.r)  { if (axr_cnt==0) axr=0; else { axr_cnt--; axr_addr+=4; } } }
+        if (axw==0) { if (axhs.aw) { axw_addr=axhs.awaddr; axw=1; } }
+        else if (axw==1) { if (axhs.w) {
+            uint32_t old=mem.read32(axw_addr), nw=0;
+            for (int b=0;b<4;b++){ uint32_t by=((axhs.wstrb>>b)&1)?((axhs.wdata>>(b*8))&0xff)
+                                                                  :((old>>(b*8))&0xff); nw|=by<<(b*8); }
+            mem.write32(axw_addr,nw); axw=2; } }
+        else { if (axhs.b) axw=0; }
+    };
+#endif
+
     // ---- service the bus + step one half-cycle ----------------------------
     // The mem_* protocol is single-beat / combinational-OK at M0: we compute
     // (rdata, ack) from the core's current bus outputs, drive them back, and
@@ -378,6 +450,9 @@ int main(int argc, char** argv) {
                     (uint8_t)top->mem_wstrb, &rdata, &ack);
         top->mem_rdata = rdata;
         top->mem_ack   = ack;
+#ifdef VEN_L1_AXI
+        axi_drive();   // keep the AXI slave outputs driven every bus-service phase
+#endif
     };
 
     // ---- M7.3b Win95 port-I/O co-sim service (combinational, like the bus) ---
@@ -540,6 +615,10 @@ int main(int argc, char** argv) {
     top->boot_mode  = args.system ? 1 : 0;  // M2S.1: system cold reset
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
     top->bus_mode   = args.bus_mode ? 1 : 0; // M5B-int: route mem via the bus subsystem
+#ifdef VEN_L1_AXI
+    top->l1axi_en   = args.l1_axi ? 1 : 0;   // P1-1: route mem via ventium_l1_axi (mode 2)
+    if (args.l1_axi) top->bus_mode = 0;      // mode 2 supersedes the biu (kept inert)
+#endif
     top->errata_en  = args.errata & 0x1F;    // M6/M6B: errata-enable bus (default 0)
     top->proxy_en   = proxy_mode ? 1 : 0;    // M7.1: int-0x80 proxy + %gs base
     top->cosim_en   = cosim_mode ? 1 : 0;    // M7.3b: Win95 port-I/O co-sim bus
@@ -563,9 +642,15 @@ int main(int argc, char** argv) {
         dump(half++);
         // clk high phase (rising edge)
         top->clk = 1;
+#ifdef VEN_L1_AXI
+        axi_capture();               // pre-edge handshake snapshot
+#endif
         service_bus();
         service_io();
         top->eval();
+#ifdef VEN_L1_AXI
+        axi_advance();               // advance the AXI slave on the rising edge
+#endif
         dump(half++);
     }
     top->rst_n = 1;   // deassert reset (synchronous; §1)
@@ -611,11 +696,17 @@ int main(int argc, char** argv) {
 
         // -- clk high phase: rising edge; vtm_retire fires inside eval() --
         top->clk = 1;
+#ifdef VEN_L1_AXI
+        axi_capture();        // snapshot the PRE-edge AXI handshakes (DUT + slave state)
+#endif
         service_bus();
         service_proxy();
         service_io();
         top->eval();          // <- DPI vtm_retire calls happen here; the core
                               //    latches the proxied syscall effects here too
+#ifdef VEN_L1_AXI
+        axi_advance();        // advance the AXI slave on the rising edge (pre-edge snap)
+#endif
         // Re-serve in case the edge changed the request (combinational ack).
         service_bus();
         service_io();

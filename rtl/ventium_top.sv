@@ -122,6 +122,51 @@ module ventium_top
     output logic [3:0]  mem_wstrb,
     input  logic [31:0] mem_rdata,
     input  logic        mem_ack
+`ifdef VEN_L1_AXI
+    // P1-1 bus_mode=2 (l1axi_en): route the core's mem port through ventium_l1_axi
+    // (ven_l1d + ven_axi_master) to an AXI4 master that the TB's behavioral DDR
+    // slave (or the PS S_AXI_HPC0) services. ALL of this is behind +VEN_L1_AXI so
+    // the default build is byte-identical (no extra ports, no mode-2 leg).
+    ,
+    input  logic        l1axi_en,           // 1 = mode 2 (L1+AXI); 0 = modes 0/1
+    output logic [3:0]  m_axi_awid,
+    output logic [39:0] m_axi_awaddr,
+    output logic [7:0]  m_axi_awlen,
+    output logic [2:0]  m_axi_awsize,
+    output logic [1:0]  m_axi_awburst,
+    output logic        m_axi_awlock,
+    output logic [3:0]  m_axi_awcache,
+    output logic [2:0]  m_axi_awprot,
+    output logic [3:0]  m_axi_awqos,
+    output logic        m_axi_awvalid,
+    input  logic        m_axi_awready,
+    output logic [31:0] m_axi_wdata,
+    output logic [3:0]  m_axi_wstrb,
+    output logic        m_axi_wlast,
+    output logic        m_axi_wvalid,
+    input  logic        m_axi_wready,
+    input  logic [3:0]  m_axi_bid,
+    input  logic [1:0]  m_axi_bresp,
+    input  logic        m_axi_bvalid,
+    output logic        m_axi_bready,
+    output logic [3:0]  m_axi_arid,
+    output logic [39:0] m_axi_araddr,
+    output logic [7:0]  m_axi_arlen,
+    output logic [2:0]  m_axi_arsize,
+    output logic [1:0]  m_axi_arburst,
+    output logic        m_axi_arlock,
+    output logic [3:0]  m_axi_arcache,
+    output logic [2:0]  m_axi_arprot,
+    output logic [3:0]  m_axi_arqos,
+    output logic        m_axi_arvalid,
+    input  logic        m_axi_arready,
+    input  logic [3:0]  m_axi_rid,
+    input  logic [31:0] m_axi_rdata,
+    input  logic [1:0]  m_axi_rresp,
+    input  logic        m_axi_rlast,
+    input  logic        m_axi_rvalid,
+    output logic        m_axi_rready
+`endif
 );
 
   // ---------------------------------------------------------------------------
@@ -173,6 +218,9 @@ module ventium_top
       .init_esp     (init_esp),
       .boot_mode    (boot_mode),
       .cycle_mode   (cycle_mode),
+`ifdef VEN_L1_AXI
+      .real_bus     (l1axi_en),
+`endif
       .errata_en    (errata_en),
       .cpu_hung     (cpu_hung),
       .proxy_en           (proxy_en),
@@ -400,6 +448,47 @@ module ventium_top
   // come from the subsystem FRONT response (c_rdata/c_ack). The core's REQUEST
   // outputs are wired to the FRONT above (gated on bus_mode) — when bus_mode=1
   // the direct mem_* output below is driven by the bus back side instead.
+`ifdef VEN_L1_AXI
+  // ---- bus_mode=2 (l1axi_en): the L1+AXI subsystem ---------------------------
+  // ventium_l1_axi sits between the core's mem port and the AXI4 master (the TB
+  // behavioral DDR slave / PS S_AXI_HPC0). On l1axi_en the core's responses come
+  // from it (l1_c_rdata/l1_c_ack) and the direct mem_* output is held INERT so the
+  // TB's same-cycle MemModel does not double-service (all memory goes via m_axi).
+  // REMAP_BASE=0 (identity) for the cosim: the MemModel is x86-phys-indexed.
+  logic [31:0] l1_c_rdata; logic l1_c_ack;
+  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(40'h0), .ADDR_MASK(32'hFFFF_FFFF)) u_l1axi (
+      .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
+      .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
+      .core_we   (core_mem_we),
+      .core_addr (core_mem_addr),
+      .core_wdata(core_mem_wdata),
+      .core_wstrb(core_mem_wstrb),
+      .core_rdata(l1_c_rdata),
+      .core_ack  (l1_c_ack),
+      .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
+      .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst), .m_axi_awlock(m_axi_awlock),
+      .m_axi_awcache(m_axi_awcache), .m_axi_awprot(m_axi_awprot), .m_axi_awqos(m_axi_awqos),
+      .m_axi_awvalid(m_axi_awvalid), .m_axi_awready(m_axi_awready), .m_axi_wdata(m_axi_wdata),
+      .m_axi_wstrb(m_axi_wstrb), .m_axi_wlast(m_axi_wlast), .m_axi_wvalid(m_axi_wvalid),
+      .m_axi_wready(m_axi_wready), .m_axi_bid(m_axi_bid), .m_axi_bresp(m_axi_bresp),
+      .m_axi_bvalid(m_axi_bvalid), .m_axi_bready(m_axi_bready), .m_axi_arid(m_axi_arid),
+      .m_axi_araddr(m_axi_araddr), .m_axi_arlen(m_axi_arlen), .m_axi_arsize(m_axi_arsize),
+      .m_axi_arburst(m_axi_arburst), .m_axi_arlock(m_axi_arlock), .m_axi_arcache(m_axi_arcache),
+      .m_axi_arprot(m_axi_arprot), .m_axi_arqos(m_axi_arqos), .m_axi_arvalid(m_axi_arvalid),
+      .m_axi_arready(m_axi_arready), .m_axi_rid(m_axi_rid), .m_axi_rdata(m_axi_rdata),
+      .m_axi_rresp(m_axi_rresp), .m_axi_rlast(m_axi_rlast), .m_axi_rvalid(m_axi_rvalid),
+      .m_axi_rready(m_axi_rready)
+  );
+
+  assign mem_req   = l1axi_en ? 1'b0 : (bus_mode ? bus_mem_req   : core_mem_req);
+  assign mem_we    = l1axi_en ? 1'b0 : (bus_mode ? bus_mem_we    : core_mem_we);
+  assign mem_addr  = l1axi_en ? 32'd0 : (bus_mode ? bus_mem_addr  : core_mem_addr);
+  assign mem_wdata = l1axi_en ? 32'd0 : (bus_mode ? bus_mem_wdata : core_mem_wdata);
+  assign mem_wstrb = l1axi_en ? 4'd0 : (bus_mode ? bus_mem_wstrb : core_mem_wstrb);
+
+  assign core_mem_rdata = l1axi_en ? l1_c_rdata : (bus_mode ? bus_c_rdata : mem_rdata);
+  assign core_mem_ack   = l1axi_en ? l1_c_ack   : (bus_mode ? bus_c_ack   : mem_ack);
+`else
   assign mem_req   = bus_mode ? bus_mem_req   : core_mem_req;
   assign mem_we    = bus_mode ? bus_mem_we    : core_mem_we;
   assign mem_addr  = bus_mode ? bus_mem_addr  : core_mem_addr;
@@ -408,6 +497,7 @@ module ventium_top
 
   assign core_mem_rdata = bus_mode ? bus_c_rdata : mem_rdata;
   assign core_mem_ack   = bus_mode ? bus_c_ack   : mem_ack;
+`endif
 
   // M8.1 lint sink: the tied-off core inta output (soc_en=0 here).
   // verilator lint_off UNUSED

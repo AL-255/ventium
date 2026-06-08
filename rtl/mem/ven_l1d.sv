@@ -77,11 +77,38 @@ module ven_l1d #(
   assign hit     = hit0 || hit1;
   assign hit_way = hit1;                 // way 1 iff way0 misses (assumes hit)
 
-  // addressed line read (the hit way) + the addressed word within it.
-  logic [LW-1:0] rd_line;
-  logic [2:0]    word_c;
-  assign rd_line = dc_line[{set_c, hit_way}];
-  assign word_c  = c_addr[4:2];
+  // ---- next-line lookup: a 4-byte access whose bytes cross the 32-byte line end
+  // (c_addr[4:0] > 28) needs the NEXT line too. The core's mem port is byte-
+  // addressable (the BFM reads 4 bytes at any byte addr — e.g. a slow-path S_FETCH
+  // of an instruction that straddles a line boundary), so the L1 must serve such
+  // reads from {next_line, line}. For a read to HIT, BOTH lines must be resident;
+  // a miss fills whichever line is missing (L first, then L+1).
+  logic [31:0] addr_n;
+  logic [6:0]  set_n; logic [19:0] tag_n;
+  logic        hit_n0, hit_n1, hit_n, hit_way_n, xline, rd_hit;
+  assign addr_n    = c_addr + 32'd32;          // the next 32-byte line
+  assign set_n     = addr_n[11:5];
+  assign tag_n     = addr_n[31:12];
+  assign hit_n0    = dc_val[set_n][0] && dc_tag[set_n][0]==tag_n;
+  assign hit_n1    = dc_val[set_n][1] && dc_tag[set_n][1]==tag_n;
+  assign hit_n     = hit_n0 || hit_n1;
+  assign hit_way_n = hit_n1;
+  assign xline     = (c_addr[4:0] > 5'd28);    // 4-byte access spills into the next line
+  assign rd_hit    = hit && (!xline || hit_n); // a READ hits iff both needed lines resident
+
+  // addressed line read (the hit way) + the BYTE offset within it. The core's mem
+  // port is BYTE-addressable (the sim BFM reads the 4 bytes starting at the exact
+  // byte address — e.g. an unaligned slow-path S_FETCH at the instruction address),
+  // so the L1 must extract the 4 bytes at c_addr[4:0], NOT the aligned word at
+  // c_addr[4:2]. (Aligned accesses — every L1D/L1AXI gate read + the line fill — have
+  // c_addr[1:0]=0, so {boff,3'b0} == {word_c,5'b0} and they are unchanged.) A read
+  // whose 4 bytes cross the 32-byte line end (c_addr[4:0] > 28) is NOT handled here
+  // (it would need the next line too) — see the cross-line note in P1-1.
+  logic [LW-1:0] rd_line, rd_line_next;
+  logic [4:0]    boff;
+  assign rd_line      = dc_line[{set_c, hit_way}];
+  assign rd_line_next = dc_line[{set_n, hit_way_n}];   // the L+1 line (for a cross-line read)
+  assign boff         = c_addr[4:0];
 
   // ---- fill FSM --------------------------------------------------------------
   typedef enum logic [1:0] { L1_IDLE, L1_FILL, L1_DONE } l1_state_e;
@@ -106,11 +133,13 @@ module ven_l1d #(
   // core-side response: HIT (read) returns combinationally; a write acks with the
   // backing; a read miss deasserts c_ack and kicks the fill (handled in the FF).
   always_comb begin
-    c_rdata = rd_line[{word_c,5'b00000} +: 32];   // addressed word of the hit line
+    // 4 bytes at the addressed byte offset, from the {L+1, L} window so a read that
+    // crosses the line end (boff > 28) takes its high bytes from the next line.
+    c_rdata = {rd_line_next, rd_line}[{1'b0,boff,3'b000} +: 32];
     c_ack   = 1'b0;
     if (c_req) begin
       if (c_we)            c_ack = m_ack;          // write-through ack = backing ack
-      else if (hit && st==L1_IDLE) c_ack = 1'b1;   // read hit: same-cycle
+      else if (rd_hit && st==L1_IDLE) c_ack = 1'b1; // read hit (both needed lines): same-cycle
       // read miss: c_ack stays 0 (core stalls) until the fill completes + retries.
     end
   end
@@ -126,33 +155,47 @@ module ven_l1d #(
     end else begin
       unique case (st)
         L1_IDLE: begin
-          if (c_req && !c_we && !hit) begin
-            // read MISS → start a line fill into the not-MRU victim way.
-            fset  <= set_c;  fway <= ~dc_lru[set_c];  ftag <= tag_c;
-            fbase <= c_addr;  fw <= 3'd0;
-            st    <= L1_FILL;
-          end else if (c_req && !c_we && hit) begin
-            // read HIT → 2-way LRU touch (mark the hit way MRU).
+          if (c_req && !c_we && !rd_hit) begin
+            // read MISS → fill the MISSING line into its not-MRU victim way. On a
+            // xline-line read where L is resident but L+1 is not, fill L+1; the core
+            // holds the request so the retry then fills L (if needed) -> L+1 -> hits.
+            if (!hit) begin
+              fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
+            end else begin            // hit_L but xline && !hit_n -> fill the next line
+              fset <= set_n; fway <= ~dc_lru[set_n]; ftag <= tag_n; fbase <= addr_n;
+            end
+            fw <= 3'd0;  st <= L1_FILL;
+          end else if (c_req && !c_we && rd_hit) begin
+            // read HIT → 2-way LRU touch (both lines on a xline-line hit).
             dc_lru[set_c] <= hit_way;
+            if (xline) dc_lru[set_n] <= hit_way_n;
           end else if (c_req && c_we && hit) begin
-            // write HIT (write-through) → update the array word (byte strobes) +
-            // LRU touch as soon as the write HITS — decoupled from the backing ack.
-            // The backing write-through proceeds in parallel (comb driver -> AXI),
-            // and the core still STALLS (c_ack=m_ack, below) until that completes;
-            // so committing the array now is correct (the core cannot re-read during
-            // its own stalled write) AND robust to multi-cycle backing latency: a
-            // real AXI write acks (m_ack) many clocks later, possibly after the core
-            // has dropped c_req, so gating the array write on m_ack would lose it.
-            // Same-cycle backing (the L1D unit gate) acks in clock 1 -> identical.
-            // Idempotent if it re-fires across a multi-clock write (same bytes/LRU).
-            // Read-modify-write the addressed 32-bit word: keep the old byte where
-            // the strobe is 0, take c_wdata where it is 1.
+            // write HIT (write-through) → update the array + LRU touch as soon as the
+            // write HITS — decoupled from the backing ack. The backing write-through
+            // proceeds in parallel (comb driver -> AXI), and the core still STALLS
+            // (c_ack=m_ack, below) until that completes; so committing the array now
+            // is correct (the core cannot re-read during its own stalled write) AND
+            // robust to multi-cycle backing latency: a real AXI write acks (m_ack)
+            // many clocks later, possibly after the core has dropped c_req, so gating
+            // the array write on m_ack would lose it. Same-cycle backing (the L1D unit
+            // gate) acks in clock 1 -> identical. Idempotent across a multi-clock write.
             logic [31:0] oldw, neww;
-            oldw = dc_line[{set_c,hit_way}][{word_c,5'b00000} +: 32];
-            for (int b=0;b<4;b++)
-              neww[b*8 +: 8] = c_wstrb[b] ? c_wdata[b*8 +: 8] : oldw[b*8 +: 8];
-            dc_line[{set_c,hit_way}][{word_c,5'b00000} +: 32] <= neww;
             dc_lru[set_c] <= hit_way;
+            if (xline) begin
+              // xline-line write HIT: the backing got the 4 bytes byte-accurately
+              // (comb driver), but the within-line array RMW cannot span the line
+              // end -> INVALIDATE the cached line(s) so a re-read refills correct
+              // data from the backing. (Rare; correctness over a stale hit.)
+              dc_val[set_c][hit_way] <= 1'b0;
+              if (hit_n) dc_val[set_n][hit_way_n] <= 1'b0;
+            end else begin
+              // within-line RMW the 4 bytes at the addressed BYTE offset (boff):
+              // keep the old byte where the strobe is 0, take c_wdata where it is 1.
+              oldw = dc_line[{set_c,hit_way}][{boff,3'b000} +: 32];
+              for (int b=0;b<4;b++)
+                neww[b*8 +: 8] = c_wstrb[b] ? c_wdata[b*8 +: 8] : oldw[b*8 +: 8];
+              dc_line[{set_c,hit_way}][{boff,3'b000} +: 32] <= neww;
+            end
           end
         end
         L1_FILL: begin

@@ -67,7 +67,19 @@ VL_EXTRA_DEFINES ?=
 # make verify / m1..m5). A define-variant build (e.g. +VEN_FP_OVERLAP for the M5
 # fdivint band) passes OBJDIR=obj_dir_<variant> so it never clobbers obj_dir/tb_ventium.
 OBJDIR ?= obj_dir
+# Host-compiler optimization for the Verilated model. verilated.mk hard-sets
+# OPT_FAST=-Os (conservative), which the environment cannot override — only a
+# command-line make assignment can, which is exactly what Verilator's -MAKEFLAGS
+# injects. We bump the optimisation level (OPT_FAST) and add -march=native via
+# OPT (verilated.mk does `CPPFLAGS += $(OPT)`, applied before OPT_FAST, so the
+# single -O comes from OPT_FAST with no conflict). Pure sim-speed (~2-3x); the
+# results are bit-identical/deterministic — this only changes how the generated
+# C++ is compiled. Tokens must be space-free (each -MAKEFLAGS is one make arg).
+VL_OPT_FAST  ?= -O3
+VL_OPT_MARCH ?= -march=native
+VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH)
 VL_FLAGS := --cc --exe --build -j 0 \
+            $(VL_MAKEFLAGS) \
             -sv --top-module $(TOP) \
             -Wall -Wno-UNUSED -Wno-fatal \
             $(VL_TRACE) $(VL_EXTRA_DEFINES) \
@@ -88,7 +100,22 @@ rtl:
 	fi
 	$(VERILATOR) $(VL_FLAGS) -Mdir $(OBJDIR) \
 	  -F $(RTL_FILELIST) $(CPP_SRCS)
-	@echo "built: $(CURDIR)/$(OBJDIR)/$(EXE)"
+	@echo "built: $(CURDIR)/$(OBJDIR)/$(EXE)  (OPT_FAST=$(VL_OPT_FAST) $(VL_OPT_MARCH))"
+
+# ---- l1axi: P1-1 bus_mode=2 build (+VEN_L1_AXI) -----------------------------
+# Routes the core mem port through ventium_l1_axi (ven_l1d + ven_axi_master) to an
+# AXI4 master serviced by the TB's behavioral DDR slave (tb_main.cpp, #ifdef'd).
+# Built into a SEPARATE obj dir so make verify / every gate keeps using
+# obj_dir/tb_ventium (byte-identical default). The L1+AXI leaf modules are appended
+# ONLY here (they are not in ventium.f); -DVEN_L1_AXI reaches the C++ TB too.
+# Run: make l1axi && ./obj_dir_l1axi/tb_ventium --l1-axi <image> ...
+L1AXI_RTL := $(RTL_DIR)/mem/ven_l1d.sv $(RTL_DIR)/mem/ven_axi_master.sv \
+             $(RTL_DIR)/mem/ventium_l1_axi.sv
+.PHONY: l1axi
+l1axi:
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/obj_dir_l1axi/$(EXE)"
 
 # ---- soc: M8.1 SoC-integration build (ventium_soc + ven_pic + ven_pit) ------
 # Built into a SEPARATE obj dir so it never clobbers the default `rtl` build

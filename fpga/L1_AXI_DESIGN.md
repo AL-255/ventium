@@ -132,22 +132,35 @@ core (core clk)                         |  AXI / PS clk (from MMCM)
    `make verify --l1-axi` 75/75 + Quake lockstep) is the NEXT step (see §4a).
 4. **Clocking:** MMCM (core clk + AXI clk) + reset sync (P1-3).
 
-## 4a. Remaining: full-core bus_mode=2 wiring (the on-chip boot path)
-The L1+AXI subsystem + its PS connection are verified standalone. To boot the WHOLE
-Ventium core through it (functional equivalence vs bus_mode=0, timing emergent):
-* `ventium_top` `bus_mode` → `[1:0]`; add the mode-2 leg (instantiate `ventium_l1_axi`
-  between `core_mem_*` and a new `m_axi_*` top port); 3-way mux; biu FRONT gated
-  `==2'd1`. All behind `` `ifdef VEN_L1_AXI `` so modes 0/1 stay byte-identical.
-* core D-side fast-path MISS-STALL gate (mirror the `!ic_fetch_ready` bubble) on
-  `bus_mode==2'd2 && pipe_load_req && !mem_ack` (core_fastpath.svh), + suppress
-  `pending_mem_pen` in mode 2 (real DDR latency is the only timing source).
-* **[BLOCKER] the icache word-0 fill latch (`core.sv:4260 ic_pf_miss_fill`) captures
-  `mem_rdata` with NO mem_ack guard** — fine for the same-cycle BFM, but under a real
-  stalling L1 it latches garbage from a not-yet-filled line on EVERY cold I-line. Gate
-  it with `mem_ack` + a bubble arm (or route fetch around the L1 to a separate AXI
-  read channel). Verify with an icache-fill TB scenario through the multi-cycle slave.
-* Mode-0 CANARY: `make verify` + the M4/M5 cycle bands stay byte-identical (the
-  `==2'd1`/`==2'd2` widening is complete iff a band never drifts).
+## 4a. Full-core bus_mode=2 boot (the on-chip path): ✅ WIRED + 76/77 VERIFIED
+The WHOLE Ventium core now boots through the L1+AXI subsystem (`+VEN_L1_AXI` build,
+`--l1-axi` / `l1axi_en`), functionally equivalent to bus_mode=0 (timing emergent).
+All behind `` `ifdef VEN_L1_AXI `` (+ a `real_bus` core input tied 0 in modes 0/1) so
+the DEFAULT build is byte-identical — **`make verify` stays GREEN (75/75 func + all
+M4/M5 cycle bands), the mode-0 canary**.
+* `ventium_top`: a mode-2 leg (`l1axi_en`) instantiates `ventium_l1_axi` between
+  `core_mem_*` and the new `m_axi_*` top ports; the bus mux is 3-way (the existing
+  modes 0/1 `else` branch is the exact original code); the direct mem_* port is held
+  inert in mode 2 (all memory via m_axi). `verif/tb/Makefile` adds the `l1axi` target
+  (`+VEN_L1_AXI` + `-DVEN_L1_AXI`); `tb_main.cpp` adds `--l1-axi` + a behavioral C++
+  AXI4 DDR slave (pre-edge-capture synchronous model) off the same MemModel.
+* core (all `` `ifdef VEN_L1_AXI ``): D-side fast-path MISS-STALL gate
+  (`real_bus && pipe_load_req && !mem_ack` -> bubble); the I-side icache word-0 fill
+  gate (`ic_pf_miss_fill` + the S_PIPE->S_PF launch now require `mem_ack` under
+  real_bus — the BLOCKER, fixed); `pending_mem_pen` suppressed in mode 2.
+* **ROOT-CAUSE fix in `ven_l1d` (the big one):** the core's mem port is
+  BYTE-addressable (the BFM reads the 4 bytes at the exact byte addr — e.g. a
+  slow-path `S_FETCH` of an instruction that straddles a 32-byte line). The L1 now
+  extracts from the `{next_line, line}` 512-bit window at `c_addr[4:0]`, serving
+  UNALIGNED and CROSS-LINE reads (a cross-line miss fills L then L+1); aligned
+  accesses are unchanged (L1D/L1AXI gates stay green). This took mode-2 equivalence
+  from 34/77 (aligned-only) -> 76/77.
+* **VERIFY:** mode-0 vs mode-2 retire-trace equivalence across the microbench corpus
+  = **76/77 bit-identical** (incl. the t_*/tx_* ISA tests). The lone failure is
+  `tx_fsave` (FNSAVE: the 27-beat x87 state store stalls at beat ~12 in the cosim
+  AXI handshake — to isolate as RTL-master vs C++-slave; the RTL alone is
+  `L1AXI-GATE-OK`). Cross-line WRITES are handled conservatively (invalidate the
+  cached line; the backing got the bytes) — a write-back path is the later refinement.
 
 ## 5. Reuse / replace
 * `dcache_timing.sv` — REUSE the tag/val/LRU SM; ADD the data array (its data path
