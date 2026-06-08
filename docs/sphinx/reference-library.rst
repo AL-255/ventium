@@ -113,6 +113,49 @@ The most important sources for reconstructing the *microarchitecture*.
        cycle-model fidelity notes in ``rtl-engineering-transcripts/
        _GAPS_vs_ventium.md``.
 
+The archived transcripts correspond to these videos (channel:
+`@RTLEngineering <https://www.youtube.com/@RTLEngineering>`_). The P5/Pentium
+and x86 front-end titles most relevant to Ventium:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 52 48
+
+   * - Video
+     - What it covers
+   * - `x86 Front End Complexity, Part 1 — Pentium P5
+       <https://www.youtube.com/watch?v=Ju8BTMJb5Kc>`_
+     - The dual U/V decoders, the 1-byte length guess + length cache, prefetch
+       buffers, AGI/prefix costs — the front-end model behind the §3 pairing
+       table.
+   * - `x86 Decoding Simulation in the Pentium P5
+       <https://www.youtube.com/watch?v=f--MBGeVSSg>`_
+     - Cycle-by-cycle P5 decode: ``0F``-as-prefix, V-decoder prefix accumulation,
+       length-cache priming on loops (also the F00F front-end mechanism).
+   * - `x86 Decoding Simulation in the 486
+       <https://www.youtube.com/watch?v=O3ZVStCbOd4>`_
+     - The 3-byte 486 decoder baseline the P5 builds on.
+   * - `Quake, Floating Point, and the Intel Pentium
+       <https://www.youtube.com/watch?v=DWVhIvZlytc>`_
+     - Why Quake flew on the P5: free FXCH pairing and the FDIV/integer overlap
+       ("early-exception" logic) — the basis for the cycle-model gap notes.
+   * - `MicroOps in the Pentium MMX
+       <https://www.youtube.com/watch?v=4SV2GNbZf50>`_
+     - Temporal vs spatial micro-op packing; P5/MMX two-issue scheduling.
+   * - `x86 Front End Complexity, Part 2 — Pentium MMX
+       <https://www.youtube.com/watch?v=7xBKHGLMkr4>`_
+     - The MMX predecoder + transparent FIFO (out of scope for P54C; a useful
+       delta).
+   * - `x86 Decoding Simulation in the Pentium MMX
+       <https://www.youtube.com/watch?v=0KBocdVHjIc>`_
+     - MMX ``0F``-as-opcode dual decode.
+   * - `Pentium MMX Predecoding in a FPGA
+       <https://www.youtube.com/watch?v=smBkt2vFKWo>`_
+     - An FPGA mapping of the MMX-era predecoder.
+
+The channel's MIPS/VR4300/N64/GPU deep-dives are archived in the same directory
+but are off-core for Ventium.
+
 
 §3 — Optimization guides and timing tables
 ==========================================
