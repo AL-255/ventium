@@ -105,65 +105,6 @@ package ventium_decode_pkg;
   endfunction
 
   // ===========================================================================
-  // fp_len — LENGTH-ONLY projection of decode.sv's fp_decode (+VEN_DEC_PIPE, D1).
-  // Returns the EXACT .len fp_decode would emit, for every fast-path opcode, as a
-  // function of ONLY (b0, b1, cycle_mode). This is sound because NO fp_decode arm's
-  // length depends on b2..b5 or the flags — every .len is a constant set from the
-  // opcode (b0) + the ModRM mod/reg (b1) + cycle_mode (the A2/A3 moffs + the x87
-  // reg-form whitelist). The decode pipeline's D1 stage uses this to locate the V
-  // candidate (queue[head+lenU]) WITHOUT running the full decoder. It MUST stay a
-  // bit-identical projection — a 1-byte mismatch mis-positions V and silently
-  // diverges; verif/decpipe/tb_fplen.sv proves fp_len(b0,b1,cyc) == fp_decode(...).len
-  // exhaustively over all (b0,b1,cyc). Default of 4'd1 mirrors fp_decode's
-  // `d.len=4'd1` initial value (held whenever an arm's guard fails -> simple=0).
-  function automatic logic [3:0] fp_len(input logic [7:0] b0, input logic [7:0] b1,
-                                        input logic cyc);
-    logic [1:0] mod; logic [2:0] reg_f, rm;
-    logic [3:0] len;
-    begin
-      mod = b1[7:6]; reg_f = b1[5:3]; rm = b1[2:0];
-      len = 4'd1;                                            // fp_decode d.len init
-      unique casez (b0)
-        8'b1011_1???: len = 4'd5;                            // B8+r  MOV r32,imm32
-        8'b00??_?001: if (mod==2'b11) len = 4'd2;            // ALU r/m32,r32 reg form
-        8'b00??_?011: if (mod==2'b11) len = 4'd2;            // ALU r32,r/m32 reg form
-        8'b00??_?101: len = 4'd5;                            // ALU eAX,imm32
-        8'h83:        if (mod==2'b11) len = 4'd3;            // grp1 r/m32,imm8
-        8'h81:        if (mod==2'b11) len = 4'd6;            // grp1 r/m32,imm32
-        8'hC7:        if (mod==2'b11 && reg_f==3'b000) len = 4'd6;   // MOV r/m32,imm32
-        8'b0100_????: len = 4'd1;                            // INC/DEC r32
-        8'h89:        if (mod==2'b11) len = 4'd2;            // MOV r/m32,r32
-        8'h8B:        if (mod==2'b11) len = 4'd2;            // MOV r32,r/m32 (reg)
-                      else if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) len = 4'd2; // load
-        8'h8D:        if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) len = 4'd2;       // LEA
-        8'hC1:        if (mod==2'b11 && reg_f[2]) len = 4'd3; // shift r/m32,imm8
-        8'hD1:        if (mod==2'b11 && reg_f[2]) len = 4'd2; // shift r/m32,1
-        8'hA9:        len = 4'd5;                            // TEST eAX,imm32
-        8'h85:        if (mod==2'b11) len = 4'd2;            // TEST r/m32,r32
-        8'h90:        len = 4'd1;                            // NOP
-        8'hA2,8'hA3:  if (cyc) len = 4'd5;                   // MOV moffs (cycle-mode)
-        8'b0111_????: len = 4'd2;                            // Jcc rel8
-        8'hEB:        len = 4'd2;                            // JMP rel8
-        8'hE9:        len = 4'd5;                            // JMP rel32
-        8'h0F:        if (b1[7:4]==4'h8) len = 4'd6;         // Jcc rel32 (0F 8x)
-        // x87 reg-form whitelist (cycle-mode, mod==11). ONLY the recognised
-        // D9/D8/DD sub-ops are len 2; every other D8..DF reg-form keeps len 1
-        // (fp_decode's inner casez defaults leave d.len at its 4'd1 init).
-        8'b1101_1???: if (cyc && mod==2'b11) begin
-          unique case (b0)
-            8'hD9: if (b1[7:4]==4'hC || (b1>=8'hE8 && b1<=8'hEE)) len = 4'd2; // FLD ST(i)/FXCH/FLD const
-            8'hD8: if (reg_f!=3'd2 && reg_f!=3'd3)               len = 4'd2; // FADD/FMUL/FSUB/FSUBR/FDIV/FDIVR (not FCOM/FCOMP)
-            8'hDD: if (b1[7:3]==5'b1101_1)                       len = 4'd2; // FSTP ST(i) (D8..DF)
-            default: ;
-          endcase
-        end
-        default: ;
-      endcase
-      return len;
-    end
-  endfunction
-
-  // ===========================================================================
   // Fast-path decoded-uop struct (M4/M5 dual-issue pipe). A packed struct so two
   // can be evaluated in one always_comb. See intcore.sv fp_decode for producer.
   // ===========================================================================
