@@ -143,26 +143,32 @@ vs QEMU** (75/75 functional + the cycle micro-gates green):
 
 | Resource | Used | Available | Util |
 |---|---:|---:|---:|
-| **CLB LUTs** | **89,661** | 117,120 | **76.6 %** ✅ fits |
-| &nbsp;&nbsp;LUT as logic | 85,565 | 117,120 | 73.1 % |
-| &nbsp;&nbsp;LUT as memory (the L1 caches) | 4,096 | 57,600 | 7.1 % |
-| CLB Registers | 29,460 | 234,240 | 12.6 % |
-| CARRY8 | 2,067 | 14,640 | 14.1 % |
-| DSP48E2 | 95 | 1,248 | 7.6 % |
+| **CLB LUTs** | **90,010** | 117,120 | **76.9 %** ✅ fits |
+| &nbsp;&nbsp;LUT as logic | 86,938 | 117,120 | 74.2 % |
+| &nbsp;&nbsp;LUT as memory (the 8 KB icache) | 3,072 | 57,600 | 5.3 % |
+| CLB Registers | 29,196 | 234,240 | 12.5 % |
+| CARRY8 | 2,054 | 14,640 | 14.0 % |
+| DSP48E2 | 31 | 1,248 | 2.5 % |
 | Block RAM | 0 | 144 | 0 % |
 
-- **Area: 518 % → 76.6 % LUTs (≈6.8× reduction).** The as-is single-cycle
+- **Area: 518 % → 76.9 % LUTs (≈6.7× reduction).** The as-is single-cycle
   combinational Pentium datapath was 5.2× too big for the device; **iterative
   FDIV / FSQRT / integer-DIV / FBSTP / FBLD engines**, **LUTRAM caches**, and
   **FP-datapath consolidation** brought it comfortably under the XCK26.
-- **Fmax: synth ≈ 64.1 MHz** (worst-path *logic* down to ~6.8 ns; the icache is off
-  the synth critical path, which is now the pipelined FP commit), **placed ≈ 47.6 MHz**
-  (AltSpreadLogic_high). The **66 MHz** target is **not yet met out-of-context** — the
-  remaining gap is **routing/congestion**, not logic: the placed wall is the icache's
-  same-cycle distributed-RAM read-mux (level-5, 99 % `u_icache` MUXF) on a
-  device-filling OOC core, to be closed with floorplanning during full-SoC integration
-  (where the core is one block with slack around it). Synth journey:
-  3.6 → 14.6 → 37.5 → 46 → 58 → 59.5 → 64.1 MHz.
+- **Fmax: synth ≈ 64.1 MHz** (worst-path *logic* ~6.8 ns), **place MET ≈ 46.5 MHz**
+  at 22 ns (AltSpreadLogic_high, 0 failing endpoints). The **66 MHz** target is **not
+  met out-of-context**, and a rigorous Vivado strategy sweep — ~10 untried directives
+  (`-muxf_remap`, AlternateRoutability, AltSpreadLogic, the canned congestion strategies)
+  at a meetable clock with a full route, [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md)
+  P0-9 — confirms **no synth/place/route directive closes it**: `-muxf_remap` *regresses*
+  to 35 MHz, and the device-filling design does **not route legally** at the ~46 MHz the
+  placer estimates (the router gives up with thousands of congestion overlaps). The
+  honest OOC **routable** Fmax is ≈ **35–42 MHz**. The binding constraint is **routing
+  congestion** from the single-cycle x86 byte-window decoder (12×32:1 muxes over 256-bit
+  cache lines), dense whether mapped to MUXF or LUT — an architectural property, not a
+  tooling choice. The real levers are **RTL** (pipeline the decode window, the class of
+  the validated `+VEN_IC_BRAM` fetch pipeline) or a lower-utilization device. Synth
+  journey: 3.6 → 14.6 → 37.5 → 46 → 58 → 59.5 → 64.1 MHz.
 - A **2-stage FP execute pipeline** (`+VEN_FP_PIPE`) and a **BTB-update pipeline**
   (`+VEN_BTB_PIPE`, independently removable) move FP and the branch predictor off
   the critical path while keeping **both FP cycle bands and the branch-mispredict

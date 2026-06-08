@@ -598,3 +598,56 @@ DECODE‑STAGE pipeline (register `ub`/`vb`, decode next clock — another cycle
 change, same class as this fetch pipeline) OR the full‑SoC floorplan (core no longer
 device‑filling), which the README already commits the 66 MHz closure to.
 _Captured 2026‑06‑07._
+
+## P0‑9 — alternative Vivado synth/APR strategy sweep: does any directive break the wall?
+Question: can a DIFFERENT Vivado strategy reach 66 MHz with NO RTL change? A 6‑agent
+workflow (`wf_8911a8b0`) enumerated ~10 UNTRIED strategies, de‑duped against every prior
+attempt, and ranked them into an experiment matrix; the top candidates were then tested
+EMPIRICALLY at a MEETABLE clock with a FULL route — not the 15 ns placed estimate.
+
+**The methodology correction (the big finding).** Every prior Fmax number — including the
+README's "placed ≈ 47.6 MHz" — is a PLACER ESTIMATE at 15 ns. A full ROUTE shows the
+MUXF‑dense design does NOT route legally there; the placer is satisfied but the router
+physically cannot complete:
+
+| flow | clock | placer WNS (est MHz) | ROUTE result |
+|---|---:|---|---|
+| default | 15 ns | −6.0 (47.6) | estimate only (README number) |
+| default | 18 ns | — | **FAILED — 15,971 node overlaps** |
+| AltSpreadLogic_high + AggressiveExplore | 18 ns | — | **FAILED — 4,524 overlaps** |
+| **+ opt_design −muxf_remap** | 18 ns | — | **ROUTED, WNS −10.6 ns = 35 MHz** |
+| AltSpreadLogic_high + AggressiveExplore | 20 ns | −0.52 (48.7) | **FAILED — 9,459 overlaps** |
+| AltSpreadLogic_high + AggressiveExplore | 21 ns | +0.04 (47.6) | **FAILED — 15,110 overlaps** |
+| AltSpreadLogic_high + AlternateCLBRouting | 22 ns | +0.517 (46.5, placement MET) | **FAILED — 6,651 signals / 11,905 overlaps** |
+| AltSpreadLogic_high + AggressiveExplore (24/26 ns) | 24-26 ns | — | inconclusive — route thrashed >2 h, killed (AggressiveExplore worsened congestion) |
+
+**Findings:**
+1. **No directive breaks the wall.** The MUXF‑dense design will not route legally at the
+   clock the placer estimates (47–49 MHz) — placed estimates are optimistic by several MHz
+   vs the real routed number. Even AltSpreadLogic_high (the routability lever, which cut
+   overlaps 15,971→4,524 at 18 ns) cannot make a tight clock route.
+2. **`opt_design −muxf_remap` (the panel's rank‑1 lever) REGRESSES to 35 MHz.** It demotes
+   the F7/F8 byte‑window muxes to LUT3 trees — which ARE routable (the ONLY flow that
+   routed at 18 ns) — but (a) the LUT mux trees add logic depth (worst path 28 ns) and
+   (b) the congestion just MOVES from MUXF to LUT (level‑6, 95 % LUT in the band). This is
+   the definitive proof that the density is intrinsic to the byte‑window mux FABRIC, not
+   to the MUXF resource: you cannot remap your way out of it.
+3. The synth‑side MUXF reducers (`-directive AlternateRoutability`, `BLOCK_SYNTH.
+   MUXF_MAPPING 0`) are the same MUXF→LUT trade and were not expected to differ.
+
+**Conclusion (definitive).** No Vivado synth/place/route strategy reaches 66 MHz. The
+congestion is an architectural property of the single‑cycle x86 byte‑window decoder
+(12×32:1 muxes over 256‑bit lines), dense whether mapped to MUXF or LUT. The honest
+ROUTED Fmax is **below the ~46–49 MHz placer estimate**: the best (narrowB) config
+PLACES MET at 22 ns (46.5 MHz) but does NOT route legally at 18–22 ns (the router
+gives up with thousands of congestion overlaps); the ONLY legally‑routed result in the
+entire sweep was `‑muxf_remap` at **35 MHz**. So the real OOC routable Fmax is ≈
+**35–42 MHz** (a relaxed clock or the muxf_remap LUT trade), NOT the 46–49 MHz placed
+estimate. The only real
+levers are: (a) **RTL** — pipeline/register the byte‑window alignment so the decode is
+multi‑cycle, not one combinational 12×32:1 fold (a cycle‑model change, the same class as
+the validated `+VEN_IC_BRAM` fetch pipeline); or (b) a lower‑utilization device / a manual
+in‑context floorplan. CAVEAT on the "full‑SoC closes 66 MHz" hope: the core fills 76‑82 %
+of the PL die regardless of OOC vs in‑context, so full‑SoC integration does NOT by itself
+relax the byte‑window congestion — OOC whole‑die place already gives it maximum spreading
+room. _Captured 2026‑06‑08._
