@@ -2861,12 +2861,16 @@ module core
   // base forward to keep flin near the window start; a redirect (flin jumps out of
   // the window) FLUSHES + refills. D1/D2 (steps 3-4) read iq[iq_head+0..11] instead of
   // the 256-bit line — that is where the MUXF congestion leaves the critical cone.
-  logic [7:0]  iq [16];              // registered byte window, iq[i] = present byte at iq_base+i
-  logic [4:0]  iq_cnt;               // leading present bytes held (0..16)
+  // 32 bytes: the word-granular slide lags this clock's consume by one edge, so
+  // off = (prev_off & 3) + consume can reach ~15 (a 6+6 paired consume); the window
+  // flin..flin+11 then ends at off+11 <= 26, so 32 covers it (16 would deadlock).
+  logic [7:0]  iq [32];              // registered byte window, iq[i] = present byte at iq_base+i
+  logic [5:0]  iq_cnt;               // leading present bytes held (0..32)
   logic [31:0] iq_base;              // linear addr of iq[0]
   logic [31:0] pfpc;                 // next linear byte to prefetch (= iq_base + iq_cnt)
   logic [4:0]  iq_head;              // flin's offset into the window (= flin - iq_base), comb
-  logic        iq_covers;            // iq holds flin..flin+11 (the decode window; assertion valid)
+  logic        iq_covers;            // iq holds U's 6-byte window flin..flin+5 (the issue gate)
+  logic        iq_covers_v;          // iq also holds V's window flin+lenU..+lenU+5 (pairing gate)
 `endif
 
   // M2S.1: the FETCH LINEAR address. The architectural `eip` carries the
@@ -2947,8 +2951,20 @@ module core
   // exactly as the in-line `fp_decode(...)` calls read them. u_d/v_d are driven
   // by the instances; everything downstream consumes them unchanged.
   always_comb begin
+`ifdef VEN_DEC_PIPE
+    // +VEN_DEC_PIPE step 4b: re-source the decode window from the byte-aligned queue —
+    // a 4:1 mux over 16 flops (iq_head in 0..3), NOT the 32:1-over-256 line read. This
+    // is THE cut: the byte-window MUXF leaves the combinational eip cone (the line read
+    // + 8:1 word select now live in the REGISTERED prefetch). Valid when iq_covers
+    // (enforced by the iq_covers stall in S_PIPE); the [3:0] mask keeps the index in
+    // range when momentarily un-covered (stale-but-unissued; V is stale-by-design).
+    logic [5:0] uix, vix;
+    for (int i=0;i<6;i++) begin uix = {1'b0,iq_head} + {2'b0,i[3:0]};                 ub[i] = iq[uix[4:0]]; end
+    for (int i=0;i<6;i++) begin vix = {1'b0,iq_head} + {2'b0,u_d.len} + {2'b0,i[3:0]}; vb[i] = iq[vix[4:0]]; end
+`else
     for (int i=0;i<6;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
     for (int i=0;i<6;i++) vb[i] = ic_byte(flin+{28'd0,u_d.len}+i[31:0]);
+`endif
   end
 
 `ifdef VEN_DEC_PIPE
@@ -2957,8 +2973,12 @@ module core
   always_comb begin
     logic [31:0] off;
     off = flin - iq_base;
-    iq_head   = off[4:0];
-    iq_covers = (off < 32'd16) && ((off + 32'd12) <= {27'd0, iq_cnt});
+    iq_head     = off[4:0];
+    // U issues once its 6-byte decode window is in the queue (mirrors pipe_bytes_ok's
+    // 6-byte window-straddle gate, so a short insn near a line end never deadlocks on a
+    // cold next line). V pairs only when ITS window (at flin+lenU) is also queued.
+    iq_covers   = (off < 32'd20) && ((off + 32'd6)               <= {26'd0, iq_cnt});
+    iq_covers_v = (off < 32'd20) && ((off + {28'd0,u_d.len} + 32'd6) <= {26'd0, iq_cnt});
   end
 
   // 8:1 WORD select off the icache line (the prefetch fill primitive — replaces the
@@ -2980,45 +3000,42 @@ module core
   // GONE from this path: fill = 8:1 word select (registered, off the eip loop).
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      iq_base <= 32'd0; iq_cnt <= 5'd0; pfpc <= 32'd0;
-      for (int i=0;i<16;i++) iq[i] <= 8'd0;
+      iq_base <= 32'd0; iq_cnt <= 6'd0; pfpc <= 32'd0;
+      for (int i=0;i<32;i++) iq[i] <= 8'd0;
     end else begin
-      logic [31:0] off, nb, p2, w; logic [4:0] sl, c2; logic [7:0] tmp [16];
+      logic [31:0] off, nb, p2, w; logic [5:0] sl, c2; logic [7:0] tmp [32];
       off = flin - iq_base;
-      if (off >= 32'd16) begin                      // FLUSH (redirect / cold / first fetch)
-        nb = {flin[31:2], 2'b00}; c2 = 5'd0;        // rebase to flin's word
-        for (int i=0;i<16;i++) tmp[i] = 8'd0;
-      end else begin                                 // WORD-SLIDE: drop whole consumed words
-        sl = {off[4:2], 2'b00};                      // off rounded down to a word multiple
-        nb = iq_base + {27'd0, sl};
-        c2 = (iq_cnt > sl) ? (iq_cnt - sl) : 5'd0;
-        for (int i=0;i<16;i++) tmp[i] = ((i + sl) < 16) ? iq[i + sl] : 8'd0;
+      if (off[31] || off >= 32'd20) begin           // FLUSH (backward / too deep / cold / first)
+        nb = {flin[31:2], 2'b00}; c2 = 6'd0;        // rebase to flin's word
+        for (int i=0;i<32;i++) tmp[i] = 8'd0;
+      end else begin                                 // WORD-SLIDE: drop the words before flin's word
+        sl = {off[4:2], 2'b00};                      // off rounded down to a word multiple (0..16)
+        nb = iq_base + {26'd0, sl};
+        c2 = (iq_cnt > sl) ? (iq_cnt - sl) : 6'd0;
+        for (int i=0;i<32;i++) tmp[i] = ((i + sl) < 32) ? iq[i + sl] : 8'd0;
       end
-      p2 = nb + {27'd0, c2};                          // next word to fetch (word-aligned)
-      for (int wd=0; wd<3; wd++)
-        if (c2 <= 5'd12 && ic_present(p2)) begin      // room for a word + the line resident
+      p2 = nb + {26'd0, c2};                          // next word to fetch (word-aligned)
+      for (int wd=0; wd<8; wd++)                      // greedy refill toward 32 (off the eip loop)
+        if (c2 <= 6'd28 && ic_present(p2)) begin
           w = dp_word(p2);
-          tmp[c2+5'd0]=w[7:0]; tmp[c2+5'd1]=w[15:8]; tmp[c2+5'd2]=w[23:16]; tmp[c2+5'd3]=w[31:24];
-          c2 = c2 + 5'd4; p2 = p2 + 32'd4;
+          tmp[c2+6'd0]=w[7:0]; tmp[c2+6'd1]=w[15:8]; tmp[c2+6'd2]=w[23:16]; tmp[c2+6'd3]=w[31:24];
+          c2 = c2 + 6'd4; p2 = p2 + 32'd4;
         end
-      for (int i=0;i<16;i++) iq[i] <= tmp[i];
+      for (int i=0;i<32;i++) iq[i] <= tmp[i];
       iq_base <= nb; iq_cnt <= c2; pfpc <= p2;
     end
   end
 
-  // sim-only MIRROR assertion: while the window covers the decode span, the queue
-  // bytes MUST equal the old ub/vb stream (proves the prefetch tracks the bytes before
-  // any decode rewires to it). u_d.len<=6 so iq[head+len..+5] is inside the covered 12.
+  // sim-only: the QUEUE-sourced decode window must equal the ORIGINAL icache byte
+  // stream while covered — proves the word-prefetch + queue reproduce the 32:1
+  // byte-mux result exactly (the bit-exact correctness net behind the cut).
   // synopsys translate_off
   always_ff @(posedge clk) if (rst_n && iq_covers && state==S_PIPE) begin
-    logic [4:0] iu, iv;
     for (int i=0;i<6;i++) begin
-      iu = iq_head + i[4:0];
-      iv = iq_head + u_d.len[3:0] + i[4:0];
-      if (ic_present(flin+i[31:0]) && iq[iu] !== ub[i])
-        $error("DEC_PIPE mirror U: iq[%0d]=%02x ub[%0d]=%02x @flin=%08x", iu, iq[iu], i, ub[i], flin);
-      if (ic_present(flin+{28'd0,u_d.len}+i[31:0]) && iq[iv] !== vb[i])
-        $error("DEC_PIPE mirror V: iq[%0d]=%02x vb[%0d]=%02x len=%0d", iv, iq[iv], i, vb[i], u_d.len);
+      if (ic_present(flin+i[31:0]) && ub[i] !== ic_byte(flin+i[31:0]))
+        $error("DEC_PIPE Q!=IC U[%0d]: q=%02x ic=%02x @flin=%08x", i, ub[i], ic_byte(flin+i[31:0]), flin);
+      if (iq_covers_v && ic_present(flin+{28'd0,u_d.len}+i[31:0]) && vb[i] !== ic_byte(flin+{28'd0,u_d.len}+i[31:0]))
+        $error("DEC_PIPE Q!=IC V[%0d]: q=%02x ic=%02x len=%0d", i, vb[i], ic_byte(flin+{28'd0,u_d.len}+i[31:0]), u_d.len);
     end
   end
   // synopsys translate_on
@@ -3051,10 +3068,22 @@ module core
     // length to decide whether a straddle miss is genuinely charged.
     pipe_bytes_ok = ic_present(flin)
                     // window-straddle: need the next line present to decode safely
+                    // (byte-INDEPENDENT — uses the max 6-byte window, valid even when the
+                    // +VEN_DEC_PIPE queue is still refilling).
                     && (({1'b0,flin[4:0]} + 6'd5 < 6'd32) || ic_present(flin + 32'd5))
-                    // instruction-straddle: its last byte's line must be resident
+                    // instruction-straddle: its last byte's line must be resident. This
+                    // term uses u_d.len, so under +VEN_DEC_PIPE it is only trustworthy
+                    // when iq_covers (u_d decoded from a full queue window); while the
+                    // queue refills (present-but-!covers) suppress it — the iq_covers
+                    // stall handles that clock, and a real straddle re-checks once covered.
+`ifdef VEN_DEC_PIPE
+                    && (!iq_covers
+                        || ({1'b0,flin[4:0]} + {2'b0,u_d.len} <= 6'd32)
+                        || ic_present(flin + {28'd0,u_d.len} - 32'd1));
+`else
                     && (({1'b0,flin[4:0]} + {2'b0,u_d.len} <= 6'd32)
                         || ic_present(flin + {28'd0,u_d.len} - 32'd1));
+`endif
     // V candidate sits right after U (decoded by the v_decode instance above,
     // from the vb[] byte window gathered at flin+lenU).
 
@@ -3093,6 +3122,11 @@ module core
     v_bytes_ok = ic_present(flin + {28'd0,u_d.len}) &&
                  ic_present(flin + {28'd0,u_d.len} + {28'd0,v_d.len} - 32'd1);
     pipe_pair = cycle_mode && v_bytes_ok && pipe_pair_ok;
+`ifdef VEN_DEC_PIPE
+    // V's decode bytes must also be in the byte queue (not just resident) — else v_d is
+    // stale; a not-yet-queued V simply does not pair this clock (becomes next U).
+    pipe_pair = pipe_pair && iq_covers_v;
+`endif
 
     // M6 Erratum 59 (MOV moffs A2/A3 fails to pair): when errata enabled, an
     // A2/A3 moffs store (the U member) followed by an instruction that uses
