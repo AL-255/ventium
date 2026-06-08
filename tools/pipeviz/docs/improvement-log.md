@@ -192,6 +192,25 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 46 — clean 0-pick review (4th straight); pinned-Segments refuted at the source level
+Another clean iteration — nothing shipped, by design. The review confirmed the live
+watermark (`ad92fbb`) on all 6 critics and produced **0 actionable picks** (4th straight
+0-GUI-defect review). Syncing the review's SETTLED/REFUTED list with the recently-settled
+items (status-bar crop, trace row-snap, the IPC-tick/stat-header/row-sliver perception
+errors) paid off: raw findings dropped from 4 to **1** — and that one was the perennial
+pinned-Segments base/limit "collision", which a critic this round demolished at the SOURCE
+level: `regs_view.py` proves the live and pinned views share ONE `QGridLayout` whose
+alignment is layout-driven (not font-metric-driven), and the pinned path merely
+`setText("n/a")` on the same base/limit cells — so the "header tuned for full-hex metrics"
+premise describes code that does not exist. (The verify also claimed the pinned crops were
+absent; they are in fact on disk — `dmiss_regs_pinned.png` et al. — a minor note inaccuracy
+that did not change the correct 0-pick outcome.)
+- **No change shippable.** The base/limit being `n/a` in a pin snapshot can't be fixed from
+  the Python side — the retire record is populated by the C bridge (outside `tools/pipeviz/`),
+  so it carries selectors but not descriptor base/limit; `n/a` is the honest value. The GUI
+  has now needed no change for FIVE iterations (since iter41); the loop's steady-state value
+  is regression monitoring + keeping the review's own false-positive set pinned in REFUTED.
+
 ### Iteration 45 — clean 0-pick review (3rd straight); trace row-snap re-verified
 Another genuinely clean iteration — nothing shipped, by design. The review confirmed the
 live watermark (`6366d28`) on all 6 critics (the new `dmiss_statbar.png` crop reviewed
