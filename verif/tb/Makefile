@@ -63,6 +63,10 @@ VL_CFLAGS := -I$(TB_DIR) -std=c++17
 # VL_EXTRA_DEFINES: optional +define+... passthrough (e.g. +define+VEN_SRT_ITER to
 # build the core with the iterative SRT FDIV/FSQRT engines wired in).
 VL_EXTRA_DEFINES ?=
+# OBJDIR: build dir for the `rtl` target. Default obj_dir (the canonical tb used by
+# make verify / m1..m5). A define-variant build (e.g. +VEN_FP_OVERLAP for the M5
+# fdivint band) passes OBJDIR=obj_dir_<variant> so it never clobbers obj_dir/tb_ventium.
+OBJDIR ?= obj_dir
 VL_FLAGS := --cc --exe --build -j 0 \
             -sv --top-module $(TOP) \
             -Wall -Wno-UNUSED -Wno-fatal \
@@ -82,9 +86,9 @@ rtl:
 	  echo "       to exercise this testbench in isolation."; \
 	  exit 1; \
 	fi
-	$(VERILATOR) $(VL_FLAGS) -Mdir obj_dir \
+	$(VERILATOR) $(VL_FLAGS) -Mdir $(OBJDIR) \
 	  -F $(RTL_FILELIST) $(CPP_SRCS)
-	@echo "built: $(CURDIR)/obj_dir/$(EXE)"
+	@echo "built: $(CURDIR)/$(OBJDIR)/$(EXE)"
 
 # ---- soc: M8.1 SoC-integration build (ventium_soc + ven_pic + ven_pit) ------
 # Built into a SEPARATE obj dir so it never clobbers the default `rtl` build

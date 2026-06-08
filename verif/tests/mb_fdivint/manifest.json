@@ -1,0 +1,22 @@
+{
+  "name": "mb_fdivint",
+  "src": "mb_fdivint/mb_fdivint.s",
+  "elf": "mb_fdivint/mb_fdivint.elf",
+  "image": "mb_fdivint/mb_fdivint.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "x87": true,
+  "m5_cycle": true,
+  "m5_kind": "fp",
+  "m5_gated": true,
+  "m5_metric": "cpi",
+  "m5_band": "CPI 1.20-1.47 — VEN_FP_OVERLAP (GAP1): an FDIV (occ 39) shadow overlaps 32 independent integer adds (paired U/V); the integer pipe is freed after the +2 dispatch slot while the FP unit stays busy 39c, so the adds retire IN the shadow and only the trailing fld1 FP producer pays the FP-unit-busy wait. CPI well below the serialized-occupancy default (~1.73).",
+  "fpovl": true,
+  "golden_cpi": 1.334,
+  "golden_insns": 1484,
+  "golden_cyc": 1980,
+  "golden_cpi_noovl": 1.726,
+  "golden_cyc_noovl": 2563,
+  "note": "GAP1 demo (gaps doc _GAPS_vs_ventium.md). GATED on VEN_FP_OVERLAP: golden generated with the split-timeline oracle (p5trace fpovl=1) AND the RTL built with +define+VEN_FP_OVERLAP (separate obj_dir_fpovl). The 32 adds retire (paired) in the fdiv shadow; the trailing fld1 pays the FP-unit-busy wait. Validated RTL-vs-oracle per-instruction in steady state (compare.py --mode cycle: only cold-start/exit transients differ, all within the 10% band). DEFAULT (no define) is byte/cycle-identical -> the existing FP bands are untouched. APPROXIMATIONS: masked-#DE exception ORDERING not modeled (independent integers retire in the shadow; sound under masked #DE since QEMU already retired this exact stream); the FDIV quotient is committed to fpr at issue+2 (early), gated for FP dependents by the unchanged fp_ready latency."
+}

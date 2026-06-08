@@ -124,6 +124,16 @@
             // RAW on the x87 top-of-stack: a consumer/rmw (fp_role>=2) must wait
             // until the most recent FP producer's result is ready (fp_ready_cyc).
             dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+`ifdef VEN_FP_OVERLAP
+            // GAP1: a FOLLOWING FP op (any is_fp that uses the x87 exec unit — i.e.
+            // everything in this arm EXCEPT FXCH, which is a rename) waits until the
+            // unit is free (fp_busy_cyc). Mirrors oracle ready=max(...,fp_busy_until)
+            // for is_fp (fp_role>=1). Integer ops never reach this arm, so they overlap.
+            if (u_d.fp_kind != FK_FXCH
+                && $signed(fp_busy_cyc - core_cyc) > 0
+                && $signed(fp_busy_cyc - dep_ready) > 0)
+              dep_ready = fp_busy_cyc;
+`endif
             if (!fp_occ_pending && $signed(dep_ready - core_cyc) > 0) begin
               // stall until core_cyc reaches dep_ready (materialise the latency).
               stall_cnt <= 7'(dep_ready - core_cyc) - 7'd1;
@@ -137,7 +147,17 @@
               // `occ` clocks after issue (oracle pipe_free_at = issue + occ).
               fp_issue_cyc <= core_cyc;
               fp_occ_pending <= 1'b1;
+`ifdef VEN_FP_OVERLAP
+              // GAP1 SPLIT: hold the INTEGER pipe only P5_FP_ISSUE_OCC clocks (this op
+              // retires at issue+2, exactly oracle pipe_free_at=issue+P5_FP_ISSUE_OCC),
+              // and put the real occ-long exec window on fp_busy_cyc so the FOLLOWING
+              // integer ops issue in the FDIV shadow. Reuses the PROVEN occ-burn cadence
+              // (retire after the burn), just with effective occ=2.
+              stall_cnt   <= P5_FP_ISSUE_OCC - 7'd2;        // = 0 -> commit on issue+2
+              fp_busy_cyc <= core_cyc + {25'd0, u_d.fp_occ}; // exec window (issue+39 for fdiv)
+`else
               stall_cnt <= u_d.fp_occ - 7'd2;   // occ>=2 here; occ==2 => no stall
+`endif
               agi_wr0<=9'h100; agi_wr1<=9'h100;
             end else begin
               // ---- issue + commit the FP op (retires at issue+occ) -----------

@@ -786,6 +786,16 @@ module core
   // the cycle occupancy began (so fp_ready = issue + lat is anchored correctly).
   logic        fp_occ_pending;
   logic [31:0] fp_issue_cyc;
+`ifdef VEN_FP_OVERLAP
+  // GAP1 (FDIV/integer overlap, mirrors p5trace.c g.fp_busy_until): the cycle the
+  // single x87 exec unit is free again. A FOLLOWING FP op (is_fp, NOT FXCH) waits
+  // on it; integer ops never reach the FP arm, so they overlap the FDIV shadow.
+  // The FP op itself holds the INTEGER pipe only P5_FP_ISSUE_OCC clocks (retires at
+  // issue+2 like oracle pipe_free_at=issue+P5_FP_ISSUE_OCC), while the real occ-long
+  // exec window lives on fp_busy_cyc.
+  logic [31:0] fp_busy_cyc;
+  localparam logic [6:0] P5_FP_ISSUE_OCC = 7'd2;
+`endif
 
   // L1 D-cache TIMING model: 8 KB / 2-way / 32 B line / 128 sets, LRU. Data still
   // comes from the BFM (mem_rdata); this only gates WHEN a load completes. A read
@@ -3312,6 +3322,9 @@ module core
       // M5 cycle-accuracy state.
       core_cyc<=32'd0; fp_ready_cyc<=32'd0; pending_mem_pen<=7'd0; stall_cnt<=7'd0;
       fp_occ_pending<=1'b0; fp_issue_cyc<=32'd0;
+`ifdef VEN_FP_OVERLAP
+      fp_busy_cyc<=32'd0;
+`endif
 `ifdef VEN_FP_PIPE
       fpp_valid<=1'b0;
 `endif
@@ -4288,6 +4301,14 @@ module core
       ic_halt4   = u_d.is_fp && (u_d.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
       ic_fp_arm  = ic_in_pipe && !ic_halt4 && u_d.is_fp;
       ic_dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+`ifdef VEN_FP_OVERLAP
+      // GAP1 mirror (matches core_fastpath.svh): a following FP op (not FXCH) waits on
+      // the x87 exec unit (fp_busy_cyc), so spine + driver agree on the commit clock.
+      if (u_d.fp_kind != FK_FXCH
+          && $signed(fp_busy_cyc - core_cyc) > 0
+          && $signed(fp_busy_cyc - ic_dep_ready) > 0)
+        ic_dep_ready = fp_busy_cyc;
+`endif
       // FP issue+commit = the final else (not the dep-stall, not the occ-burn).
       ic_fp_commit = ic_fp_arm &&
                      !(!fp_occ_pending && ($signed(ic_dep_ready - core_cyc) > 0)) &&
@@ -4562,6 +4583,14 @@ module core
     fp_halt4   = u_d.is_fp && (u_d.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
     fp_fp_arm  = fp_in_pipe && !fp_halt4 && u_d.is_fp;
     fp_dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
+`ifdef VEN_FP_OVERLAP
+    // GAP1 mirror (matches core_fastpath.svh + ic_dep_ready): following FP op waits
+    // on the x87 exec unit (fp_busy_cyc); FXCH (a rename) is exempt.
+    if (u_d.fp_kind != FK_FXCH
+        && $signed(fp_busy_cyc - core_cyc) > 0
+        && $signed(fp_busy_cyc - fp_dep_ready) > 0)
+      fp_dep_ready = fp_busy_cyc;
+`endif
     fp_fast_commit = fp_fp_arm &&
                      !(!fp_occ_pending && ($signed(fp_dep_ready - core_cyc) > 0)) &&
                      !(!fp_occ_pending && (u_d.fp_occ > 7'd1));
