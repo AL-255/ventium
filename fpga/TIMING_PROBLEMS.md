@@ -651,3 +651,112 @@ in‑context floorplan. CAVEAT on the "full‑SoC closes 66 MHz" hope: the core 
 of the PL die regardless of OOC vs in‑context, so full‑SoC integration does NOT by itself
 relax the byte‑window congestion — OOC whole‑die place already gives it maximum spreading
 room. _Captured 2026‑06‑08._
+
+## P0‑10 — decode‑stage pipeline (+VEN_DEC_PIPE) BUILT, MEASURED, REVERTED
+Lever (a) from P0‑9 — pipeline the byte‑window alignment so the 12×32:1 mux leaves the
+combinational eip cone. Designed by a 6‑agent workflow (decoupled PF→D1→D2 + a byte‑aligned
+prefetch queue), built incrementally + gated: fp_len length‑only sub‑decoder (proven
+fp_len==fp_decode.len over all 131,072 (b0,b1,cyc)); a 32‑byte sliding‑window prefetch queue
+(8:1 word‑select fill, mirror‑verified iq==ic_byte over make verify + Quake 200k); then the
+CUT — re‑source ub/vb from the queue. **Functionally bit‑exact (make verify 75/75, no hang,
+queue == icache).** But the OOC SYNTH probe (+VEN_IC_BRAM +VEN_DEC_PIPE, 18 ns) was a clear
+NEGATIVE:
+* **MUXF went UP, not down: F7 14,457 → 17,342, F8 6,202 → 7,066; LUTs 76.9 % → 87.9 %.**
+* **Synth WNS −7.0 ns @ 18 ns ⇒ ~40 MHz (worse than narrowB 64.1).** Worst path =
+  `eip_reg → iq_reg` (the prefetch FILL), 24.9 ns / 95 logic levels.
+
+Two findings: **(1)** the byte‑alignment mux is CONSERVED — re‑sourcing ub/vb removes the old
+12×32:1 but ADDS the queue slide barrel‑shift + the extract + the word‑prefetch, which sum to
+MORE MUXF. Aligning 12 bytes from a 32‑position window is a ~12×32:1 mux no matter the phrasing
+(shift / circular‑extract / original); pipelining RELOCATES it (off the critical path → better
+LOGIC Fmax) but does NOT reduce its DENSITY, which is the congestion. **(2)** the shadow shortcut
+(queue slide derived from the live `flin`=eip) put the whole fill cone ON the eip path → the
+`eip→iq` 95‑level path; a true decoupled `pfpc` (the full D1/D2 `dpc` restructure) would fix that
+LOGIC path but still not the congestion. So the decode‑pipe cannot break the wall; **REVERTED**
+(commits cce408b/7ea0464/6eff7f9/1397db0 undone). This is the THIRD independent confirmation —
+after the tooling sweep (P0‑9) and BRAM (P0‑8) — that the x86 byte‑window decode MUXF density is
+the architectural OOC floor (~45 MHz). The genuine remaining levers are a fundamentally
+different front‑end (a PRE‑DECODED / µop instruction cache — predecode once at fill, the textbook
+x86 Fmax fix), a faster/bigger device, or accept ~45 MHz. _Captured 2026‑06‑08._
+
+## P0‑11 — PREDECODE‑ON‑FILL µop‑cache (+VEN_UOPCACHE): MUXF drops for the FIRST time, but OOC congestion holds (DIFFUSE)
+The textbook fix P0‑10 pointed at, and the user's P5‑decode insight (predecode prefixes ~1 byte/cycle,
+pipeline the SIB length decode). Built behind `+VEN_UOPCACHE` (default build byte‑identical): a new
+`rtl/mem/uopcache.sv` runs the EXISTING `decode` leaf on the multi‑cycle line fill — decoding the
+FIXED bottom 6 bytes of a `residual` register and SHIFTING it right by the decoded `len` each cycle
+(a ≤48‑bit barrel shift, never a flin‑indexed 32:1 byte select) — and stores fixed‑width `fpd_t`
+per SLOT + a byte→slot map in a registered‑read (BRAM) store. The fast path then DELETES the twelve
+32:1 byte selects (the `ub[]/vb[]` gather, core.sv:2930‑31) and reads `u_d = slots[slot(flin)]` via
+an ~8:1 slot mux; because predecode CHAINED the boundaries, `v_d` is literally U's NEXT slot, so the
+`flin+lenU` V‑base serialization is gone too. `br_taken` (the only flag‑dependent field) is re‑evaluated
+from the stored `cc` against live `eflags` (as the V path already does). Synth probe (`synth_paths_uopcache.tcl`,
++VEN_IC_BRAM +VEN_UOPCACHE, 15 ns OOC):
+* **MUXF7 14,457 → 11,291 (−22 %), MUXF8 6,202 → 4,152 (−33 %) — the FIRST EVER MUXF REDUCTION**
+  (P0‑3/8/9/10 all CONSERVED it). Confirms: DELETING the gather (vs relocating) does reduce MUXF.
+  LUT flat (76.9 → 76.5 %), FF +1 %, +40 BRAM tiles (URAM still 0 — store can move to the 64 idle URAMs).
+* **Synth WNS −2.783 @ 15 ns ⇒ 56 MHz** — but the worst path is `fpp_b_reg → u_fpu_state/fpr_reg`,
+  the SAME x87 FP‑mantissa CARRY8 chain that was narrowB's 64.1 ceiling (P0‑7). Logic 6.56 ns ≈ unchanged;
+  the +2.4 ns is the FP path's synth ROUTE ESTIMATE drifting with the added BRAM/store cells. **The byte
+  gather was the CONGESTION limiter, never the synth‑Fmax limiter (the FP datapath is).**
+* **Placed congestion UNCHANGED — level‑5, u_icache 97 %, MUXF 59‑63 %** (vs narrowB level‑5/99 %/58‑62 %).
+
+Why removing the BIGGEST single contributor didn't move OOC congestion — a per‑hierarchy MUXF attribution
+(`probe_muxf_attrib.tcl` flatten none + `probe_muxf_buckets.tcl` name buckets) shows the remaining 11,291 F7
+is **DIFFUSE across the coupled front‑end**, no single dominant structure:
+**BTB 2,592 (23 %, a FF‑array combinational 64:1 lookup mux — the icache‑BRAM pattern, untouched) ·
+icache 2,060 (18 %) · core‑inline "other"/issue 2,880 (25 %) · slow‑path ibuf decoder ≥1,444 (13 %) ·
+the new fast‑slot read 1,147 (10 %) · ALU 89 · FP 268.** Every front‑end block hangs off `eip`/`flin`,
+so the **OOC placer (no PS8 anchor, no floorplan) smears the whole cluster into one clock region** →
+the band re‑saturates from whatever's left after any single lever. **FOURTH confirmation** the OOC wall
+is robust to front‑end MUXF removal, now with the mechanism: it is DIFFUSE + PLACEMENT‑COUPLED, not one
+mux tree. Implications: (1) piecemeal RTL MUXF removal has hit diminishing returns — slow‑decode (13 %,
+riskiest) won't clear it; the BTB (23 %, clean RAM‑conversion) is the best remaining RTL target. (2) The
+cure for diffuse‑coupled congestion is FLOORPLAN / IN‑CONTEXT place (spread the cluster across regions
+near PS8 — the brainstorm rank‑2, also the real‑chip number we must measure to ship). The µop‑cache is
+KEPT (non‑default, the first MUXF win + textbook fix) pending verify‑hardening. _Captured 2026‑06‑08._
+
+## P0‑13 — FP datapath AREA: −9,635 LUT (−10.7 % of the core), bit‑exact
+The FP datapath was ~⅓ of the core (NOT half): inline `f_eval` arith ≈ 11,043 LUT (measured by stubbing
+`f_eval` to passthrough → the synth delta) + the dedicated modules (u_bcd 5,320, u_sqrt_iter 3,289,
+u_fpu_state 3,138, u_srt_div 1,521, u_bcd2fp 1,080) + inline compares/conv. The 64×64 mantissa multiply
+is **already in DSP** (16 of the 31 DSP48s; `use_dsp` was a no‑op — the rest are integer MUL/IMUL), so the
+multiply was never the LUT cost. The 128‑bit `f_eval` add/round width is load‑bearing (bit‑exact x87
+cancellation + denormal normalize) → mostly irreducible. Two SAFE bit‑exact wins (µop‑cache config,
+flatten none, `probe_lut_quick.tcl`):
+* **`fx_to_int_ex` 128→64‑bit (fpu_x87_pkg.sv): −8,636 LUT.** The conversion value is a 64‑bit mantissa
+  shifted by ≤63, so `big`/`fpart`/`half`/`ish`'s high 64 bits are ALWAYS zero — narrowing them drops
+  *no* information. The function is duplicated across FIST_M16/M32/M64 + fx_to_int_errata + ven_bcd
+  (FBSTP), so the narrowing halved the 128‑bit barrel shifter in EVERY instance at once. The single
+  biggest area win of the session.
+* **shared‑round f_eval split (+VEN_FP_PIPE deferred commit, core.sv): −999 LUT.** The full `f_eval`
+  builds `fx_add`'s AND `fx_mul`'s `fx_round_pack` cones; the verified `f_eval_s2(f_eval_s1(...))` split
+  muxes the two fronts → one shared round_pack. Guarded on +VEN_SRT_ITER (div is engine‑routed there, so
+  s1's div‑default‑0 is unreachable; without it the full f_eval is kept).
+
+**89,634 → 79,999 LUT** (µop‑cache config); the SAME win lands in narrowb/default (the conversion is in
+the default build via FIST). Verified bit‑exact: `make verify` 75/75 + cycle bands + m3 75/75 + verify‑bcd
++ verify‑fbld + verify‑fppipe (1M vectors). Default build affected (fx_to_int_ex) but byte‑equivalent in
+behaviour. NEGATIVE follow‑up (TRIED, REVERTED): merging the three per‑width FIST conversions
+(M16/M32/M64) into ONE runtime‑width `fx_to_int_ex` call REGRESSED +8,809 LUT (79,999→88,808) — a runtime
+`width` defeats the constant‑folding of each conversion's range‑check that makes the three constant‑width
+calls cheap; KEEP them separate. _Captured 2026‑06‑08._
+
+## P0‑14 — FULL APR ROUTE: the µop‑cache ROUTES at 15 ns where narrowb cannot (corrects P0‑11)
+A full synth→place→**route** run of both configs at a 15 ns target (`apr_run.tcl`, post FP‑area win)
+delivered the first clean ROUTED number — and a correction to P0‑11. The placer's *congestion‑level*
+metric is a coarse estimate that stayed **level‑5 for BOTH** configs (which is why P0‑11 concluded "the
+µop‑cache doesn't move OOC congestion"); the **router is the real judge**, and it tells a different story:
+* **narrowb+FP @ 15 ns: does NOT route** — the router stalls at Phase‑5 global iteration 1 with
+  **42,392 nodes‑with‑overlaps** (congestion it cannot resolve). Placed 46.0 MHz, but unroutable at 15 ns.
+* **+VEN_UOPCACHE+FP @ 15 ns: ROUTES CLEAN — 0 failed nets, routed WNS −4.354 ns ⇒ 51.7 MHz routed.**
+  The router drove overlaps to 0 by iteration ~8. The lower byte‑window MUXF (F7 14,311→11,101,
+  F8 6,216→4,181) gives the router the channels it lacked under narrowb.
+
+So the µop‑cache (P0‑11) + the FP‑area win (P0‑13) **broke the OOC routing wall**: the design routes
+legally OOC for the first time, at **51.7 MHz** (vs the prior ~35–42 MHz *estimate* for the unroutable
+narrowb). The earlier "MUXF removal doesn't help congestion" reading was an artifact of trusting the
+placer's level metric over an actual route. **The route is the judge.** Remaining gap to 66 MHz is now
+plausibly closable by in‑context place + floorplan (P0‑12) on top of the µop‑cache — once it is
+verify‑hardened (the `uop_ready` stall + branch‑into‑middle re‑predecode are still unbuilt). Util:
+narrowb 93,883 LUT (80.2 %) / µop‑cache 79,442 (67.8 %); both bit‑exact for the FP changes (`make verify`
+75/75), µop‑cache front‑end functional‑hardening pending. _Captured 2026‑06‑08._
