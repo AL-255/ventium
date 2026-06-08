@@ -67,6 +67,18 @@
             pf_fill_addr <= pf_miss_fa;
             pf_fill_way  <= ~ic_lru_o[pf_miss_fa[11:5]];
             pf_word<=3'd1; state<=S_PF;
+`ifdef VEN_IC_BRAM
+          end else if (!ic_fetch_ready) begin
+            // +VEN_IC_BRAM: the line(s) for this insn are RESIDENT (pipe_bytes_ok) but
+            // not yet in the registered BRAM read buffer (the synchronous read of them
+            // is in flight THIS clock; the data lands on the next edge). Burn a
+            // no-issue bubble; next clock the buffer tag matches flin and the insn
+            // issues. Sequential fetch NEVER reaches here — a sequential line crossing
+            // finds the new line already in buffer B (it prefetched flin's next line
+            // last clock). This fires only on a REDIRECT to an un-buffered line
+            // (sub-step 2b prefetches predicted-taken targets to remove even that).
+            agi_wr0<=9'h100; agi_wr1<=9'h100;   // bubble writes nothing
+`endif
           end else if (pending_mem_pen!=7'd0) begin
             // M5: a previous load's D-cache miss/misalign penalty is DEFERRED to
             // the next instruction (p5model g.pending_mem_pen folded into the next

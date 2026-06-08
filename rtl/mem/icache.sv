@@ -101,14 +101,44 @@ module icache #(
 );
 
   // Data array as packed 256-bit lines, FLAT-indexed {set,way} for clean RAM
-  // inference; the ram_style hint pushes Vivado to distributed RAM (async read +
-  // partial word write) instead of flip-flops + read muxes.
+  // inference.
+`ifdef VEN_IC_BRAM
+  // +VEN_IC_BRAM: force the line store into Block RAM (RAMB36) to DISSOLVE the
+  // distributed-RAM 256:1 read-mux MUXF congestion (the placed-Fmax wall, 99 %
+  // u_icache MUXF — fpga/TIMING_PROBLEMS.md P0-7). BRAM mandates a SYNCHRONOUS read,
+  // so rd_lineA/B are REGISTERED here (valid the clock AFTER the address) — the
+  // spine's registered-line fetch front-end (core, +VEN_IC_BRAM) prefetches ahead so
+  // sequential fetch is bubble-free and only redirects pay the +1-cycle line refill
+  // (which maps onto the branch penalty the cycle oracle already models). A RAMB has
+  // only 2 ports, but this array needs 2 READ ports + 1 WRITE port, so the line store
+  // is REPLICATED (ic_line_a serves port A, ic_line_b serves port B); both copies see
+  // the identical fill write, so they hold identical data. 256 lines × 256 bits per
+  // copy => ~4 RAMB36 each (SDP 512×72), 8 total of 144.
+  (* ram_style = "block" *) logic [IC_LINE*8-1:0] ic_line_a [IC_SETS*2];
+  (* ram_style = "block" *) logic [IC_LINE*8-1:0] ic_line_b [IC_SETS*2];
+  // byte-write-enable for the BRAM fill: the 4 contiguous bytes of the word-aligned
+  // fill word at fill_off (fill_off is always word-aligned, so this is 4 bytes at a
+  // word boundary). Only meaningful when fill_en.
+  logic [IC_LINE-1:0] fill_be;
+  assign fill_be = {{(IC_LINE-4){1'b0}}, 4'b1111} << fill_off;
+`else
+  // Default: distributed RAM — the ram_style hint pushes Vivado to LUTRAM (async
+  // read + partial word write) instead of flip-flops + read muxes.
   (* ram_style = "distributed" *)
   logic [IC_LINE*8-1:0] ic_line [IC_SETS*2];
+`endif
   logic [19:0] ic_tag  [IC_SETS][2];   // addr[31:12]
   logic        ic_val  [IC_SETS][2];
   logic        ic_lru  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
 
+`ifdef VEN_IC_BRAM
+  // Registered (synchronous) BRAM reads — rd_lineA/B are valid the clock AFTER the
+  // address. The replicated copies make the 2 read ports each a single-read SDP BRAM.
+  always_ff @(posedge clk) begin
+    rd_lineA <= ic_line_a[{rd_setA, rd_wayA}];
+    rd_lineB <= ic_line_b[{rd_setB, rd_wayB}];
+  end
+`else
   // Addressed async line reads (the two fetch-window lines). Distributed-RAM
   // read ports — replace the old 12 full-array byte muxes in the spine.
   assign rd_lineA = ic_line[{rd_setA, rd_wayA}];
@@ -126,6 +156,7 @@ module icache #(
 `else
   assign rd_lineB = ic_line[{rd_setB, rd_wayB}];
 `endif
+`endif // VEN_IC_BRAM
 
   // READ-ONLY tag/val/lru mirrors (small; the presence/way probes read these).
   always_comb begin
@@ -160,7 +191,25 @@ module icache #(
         // write the 32-bit word as a slice of the flat-indexed packed line (byte
         // off+0 at the low 8 bits, little-endian). With ram_style="distributed"
         // Vivado maps the partial word write to LUTRAM.
+`ifdef VEN_IC_BRAM
+        // +VEN_IC_BRAM: the CANONICAL UltraScale byte-write-enable template — write
+        // the 256-bit line as 32 byte lanes, each lane gated by its byte-enable
+        // (fill_be = the 4 bytes of the word-aligned fill word at fill_off). din
+        // replicates fill_data across all 8 word lanes so byte lane bl takes
+        // fill_data[(bl%4)] — for the enabled word-aligned lanes that is exactly
+        // byte (bl-fill_off). This lets Vivado use the BRAM ByteWide feature (one
+        // shared write enable per RAM) instead of splitting into one narrow
+        // separately-enabled RAM per 2 bits (the 8-6841 / 16x-tile blowup). Both
+        // replicated copies (port A / port B store) get the identical write.
+        for (int bl=0; bl<32; bl++) begin
+          if (fill_be[bl]) begin
+            ic_line_a[{fill_set,fill_way}][bl*8 +: 8] <= fill_data[(bl%4)*8 +: 8];
+            ic_line_b[{fill_set,fill_way}][bl*8 +: 8] <= fill_data[(bl%4)*8 +: 8];
+          end
+        end
+`else
         ic_line[{fill_set,fill_way}][{fill_off,3'b000} +: 32] <= fill_data;
+`endif
         if (fill_done) begin
           // oracle l1_access() miss path: val[victim]=1; tag[victim]=tag;
           // lru=victim. (fill_done implies fill_en.)
