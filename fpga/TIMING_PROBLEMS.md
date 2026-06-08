@@ -511,3 +511,90 @@ A barrel‑shift restructure of the ub/vb byte windows was analysed and REJECTED
 shared 12‑byte aligned window is itself 12×32:1 (the shift) PLUS 6×7:1 (the vb
 extract) = MORE MUXF than the current 12×32:1 independent selects. The 12 byte
 windows for 12 needed bytes are already minimal. _Captured 2026‑06‑07._
+
+## P0‑8 — icache → BRAM + registered‑line prefetch fetch front‑end (+VEN_IC_BRAM)
+Lever #2 of P0‑7, BUILT. The P0‑3 "registered‑BRAM" rejection was wrong on two counts
+it never tried: (a) a RAMB has only 2 ports but `ic_line` needs 2 reads + 1 write, so
+the store must be REPLICATED (`ic_line_a`/`ic_line_b`, one per read port, both written
+identically); (b) the variable‑offset 32‑bit fill write must use the CANONICAL
+byte‑write‑enable idiom or Vivado emulates the partial write with one narrow RAM per
+2 bits (the 8‑6841 / 16×‑tile blowup). With both fixed, the standalone icache infers
+clean BRAM:
+
+| standalone icache | async (keeper) | BRAM bad‑write | **BRAM byte‑enable** |
+|---|---:|---:|---:|
+| CLB LUTs | 10,712 | 8,877 | **6,720** (−37 %) |
+| LUT as Memory | 4,096 | 2,048 | **0** |
+| MUXF7 | 4,163 | 2,854 | **2,052** (−51 %) |
+| MUXF8 | 1,906 | 1,069 | **693** (−64 %) |
+| RAMB tiles | 0 | 128 (88 %) | **5 (3.5 %)** |
+
+The MUXF read‑mux congestion ROOT is dissolved (MUXF8 −64 %, LUTRAM→0) for **5 BRAM
+tiles** — leaving 139 for the D‑cache + AXI FIFOs.
+
+**The fetch front‑end (the hard part — keeping it cycle‑exact).** BRAM mandates a
+SYNCHRONOUS read, so `rd_lineA/B` are valid the clock AFTER the address. A naive
+registered read would add +1 cycle to EVERY fetch (≈12 % IPC, breaks every band). Two
+mechanisms keep it bubble‑free:
+* **Content‑addressed line buffers.** The spine registers the read ADDRESS as a tag
+  (`rdA_set_q`/`rdB_set_q`) in lock‑step with the icache's registered data, and
+  `ic_byte` selects whichever buffer's tag matches the needed set. Because buffer B
+  reads flin's NEXT line every clock, a sequential line‑crossing finds the new current
+  line ALREADY in buffer B → **zero bubble** (every straight‑line band stays perfect).
+  A new `ic_fetch_ready` gate stalls one clock only when the needed line is resident
+  but not yet buffered.
+* **BTB‑predicted‑target prefetch (2b).** A redirect to an un‑buffered line costs the
+  one residual bubble — which showed up ONLY on tight pairing loops whose back‑edge
+  jumps to a now‑evicted loop top (`mb_accimm/rmimm/sh1` at +20 %; big loops like
+  `mb_nearbr` amortised it to +3 %). Fixed by repurposing the straddle read port to
+  prefetch the predicted‑taken TARGET line (gated on `!ic_win_straddle`, so the read
+  port is free) — the line is buffered before the back‑edge, so the redirect costs no
+  bubble. This is literally the real P5's BTB‑driven prefetch.
+
+**Verified (all behind `+VEN_IC_BRAM`, default build byte‑identical):**
+* `make verify`: **functional 75/75 bit‑exact** + **all 20 cycle bands PASS** —
+  including `mb_accimm/rmimm/sh1` (+20 % → **+0.39 %** after 2b), branches
+  (`mb_brloop` +0.23 %, `mb_brrandom` +1.85 %), and `mb_imiss` +3.97 % (the +1
+  buffer‑fill clock after S_PF, well within the 10 % band).
+* **Quake 300,000‑insn lockstep EQUIVALENT** (deep fetch‑path: real branch/loop/
+  straddle/redirect patterns, RTL bit‑exact vs QEMU).
+* Default build (no define): `make verify` 75/75 byte‑identical — fully gated/removable.
+
+**PLACED PAYOFF — MEASURED, and it does NOT break the wall (the key finding).**
+Full‑core synth+place (`synth_paths_icbram.tcl`, 15 ns, AltSpreadLogic_high):
+
+| full core | narrowB (best) | +VEN_IC_BRAM |
+|---|---:|---:|
+| F7 / F8 Muxes | 14457 / 6202 | **14478 / 5715** (≈unchanged) |
+| LUT as Memory | 3072 | **0** |
+| RAMB36 tiles | 0 | **5** |
+| CLB LUTs | 90,060 (76.9 %) | **96,787 (82.6 %)** ↑ |
+| Synth WNS @15ns | −0.587 (64.1 MHz) | **−4.136 (52.3 MHz)** ↓ |
+| **Placed WNS @15ns** | −6.008 (**47.6 MHz**) | **−5.523 (48.7 MHz)** |
+| **Placed congestion** | L5, 99 % u_icache, MUXF 58‑62 % | **L5, 98 % u_icache, MUXF 68 %** |
+
+The standalone icache MUXF dropped 51‑64 % (P0‑3‑style probe), but in the FULL CORE
+F7/F8 barely move and **the placed congestion wall is UNCHANGED** (still level‑5, still
+≈98 % "u_icache", MUXF if anything denser). Placed Fmax 47.6 → 48.7 MHz = within noise.
+Synth Fmax REGRESSED (64→52) and LUTs grew (+6.7 K) from the front‑end logic, which
+inflated the FP‑commit path's route.
+
+**Root‑cause correction (the lesson):** the "99 % u_icache MUXF" congestion was the
+`‑flatten_hierarchy rebuilt` ATTRIBUTION ARTIFACT — it folds the SPINE's
+variable‑length‑decode **byte‑window muxes** (`ub`/`vb`, 12×32:1 selecting instruction
+bytes at any `flin[4:0]`) into the `u_icache` instance. Proof: the standalone icache
+has F7=2,052, the full core F7=14,478 — so ≈12.4 K F7 muxes live in the SPINE decode,
+not the cache. Moving the icache STORAGE to BRAM removes the LUTRAM read mux (a
+minority) but leaves the byte‑window MUXF — the real congestion mass — untouched.
+
+**Verdict on the lever:** `+VEN_IC_BRAM` is a fully‑validated, removable option that
+does NOT improve OOC placed Fmax. It is KEPT (not default, not in the best config)
+because it (a) proves a registered‑read L1 fetch pipeline is BIT‑EXACT +
+CYCLE‑ACCURATE — directly de‑risking the L1/AXI subsystem's registered‑read D‑cache —
+and (b) trades 3,072 LUTRAM for 5 BRAM tiles, useful if a future floorplan is
+LUT/LUTRAM‑bound. The REAL congestion lever is the byte‑window decode MUXF, which is
+fundamental to the single‑cycle x86 fast‑path decoder: relieving it needs a
+DECODE‑STAGE pipeline (register `ub`/`vb`, decode next clock — another cycle‑model
+change, same class as this fetch pipeline) OR the full‑SoC floorplan (core no longer
+device‑filling), which the README already commits the 66 MHz closure to.
+_Captured 2026‑06‑07._

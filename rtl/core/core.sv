@@ -709,6 +709,28 @@ module core
   logic [6:0]  ic_rd_setA, ic_rd_setB;
   logic        ic_rd_wayA, ic_rd_wayB;
   logic [IC_LINE*8-1:0] ic_rd_lineA, ic_rd_lineB;
+`ifdef VEN_IC_BRAM
+  // +VEN_IC_BRAM: the icache read ports are REGISTERED (BRAM mandates a synchronous
+  // read), so ic_rd_lineA/B in cycle T hold the line for the read ADDRESS presented
+  // in cycle T-1. We register that address as a TAG (rdA_set_q/rdA_way_q for A,
+  // rdB_* for B) so ic_byte can CONTENT-ADDRESS the two registered line buffers
+  // (pick whichever buffer holds the needed set) instead of comparing against the
+  // live ic_rd_setA. A line is "fetch-ready" iff a buffer's tag matches what flin
+  // needs THIS cycle. Sequential fetch keeps flin in one line for ~8 insns (tag
+  // matches, no stall), and a sequential line-crossing finds the new line ALREADY in
+  // buffer B (it read flin's next line last cycle) — so sequential fetch is
+  // bubble-free; only a redirect to an un-buffered line costs a 1-cycle refill.
+  logic [6:0]  rdA_set_q, rdB_set_q;
+  logic        rdA_way_q, rdB_way_q;
+  logic        ic_fetch_ready;   // the line(s) the current decode window needs are buffered
+  // 2b — predicted-taken-target PREFETCH: when a predicted-taken branch sits in the
+  // current (non-straddling) window, we're about to REDIRECT, so the sequential next
+  // line (port B's normal job) won't be needed — repurpose port B to read the branch
+  // TARGET line, so it is buffered BEFORE the redirect and the back-edge costs no
+  // bubble. Driven in the fast-path comb block (where the BTB prediction is known).
+  logic        pf_redir;
+  logic [31:0] pf_redir_tgt;
+`endif
   logic [19:0] ic_tag_o  [IC_SETS][2];   // addr[31:12]
   logic        ic_val_o  [IC_SETS][2];
   logic        ic_lru_o  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
@@ -2771,7 +2793,15 @@ module core
     // next line); the fetch window spans only these two sets and the hit way is
     // baked into each line (ic_rd_wayA/B), so there is no per-byte way mux.
     logic [IC_LINE*8-1:0] ln;
+`ifdef VEN_IC_BRAM
+    // content-addressed: pick whichever REGISTERED buffer holds addr's set (the two
+    // buffers always hold different sets, so a set match is unambiguous). If neither
+    // matches (line not buffered) the result is stale — that case is gated by
+    // ic_fetch_ready (no issue) / the existing V-candidate stale-by-design.
+    ln = (addr[11:5] == rdA_set_q) ? ic_rd_lineA : ic_rd_lineB;
+`else
     ln = (addr[11:5] == ic_rd_setA) ? ic_rd_lineA : ic_rd_lineB;
+`endif
     ic_byte = ln[{addr[4:0],3'b000} +: 8];
   endfunction
 
@@ -2843,8 +2873,53 @@ module core
   assign flin_nl    = {flin[31:5], 5'd0} + 32'd32;     // next aligned 32-byte line
   assign ic_rd_setA = flin[11:5];
   assign ic_rd_wayA = ic_hit_way(flin);
+`ifdef VEN_IC_BRAM
+  // port B normally prefetches flin's next (straddle) line; 2b repurposes it to the
+  // predicted branch target when pf_redir (set in the fast-path comb block). The read
+  // is REGISTERED in the icache module, so this drives NEXT clock's rd_lineB — no
+  // combinational loop through the decode that computes pf_redir.
+  assign ic_rd_setB = pf_redir ? pf_redir_tgt[11:5]      : flin_nl[11:5];
+  assign ic_rd_wayB = pf_redir ? ic_hit_way(pf_redir_tgt) : ic_hit_way(flin_nl);
+`else
   assign ic_rd_setB = flin_nl[11:5];
   assign ic_rd_wayB = ic_hit_way(flin_nl);
+`endif
+
+`ifdef VEN_IC_BRAM
+  // Register the read ADDRESS as a tag, in lock-step with the icache module's
+  // registered data (both clocked by clk on the same edge): in cycle T, ic_rd_lineA
+  // holds the line for (rdA_set_q, rdA_way_q). Reset to a sentinel so a cold buffer
+  // never false-matches a real flin (presence is gated separately by pipe_bytes_ok).
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      rdA_set_q <= 7'h7F; rdA_way_q <= 1'b1;
+      rdB_set_q <= 7'h7F; rdB_way_q <= 1'b1;
+    end else begin
+      rdA_set_q <= ic_rd_setA; rdA_way_q <= ic_rd_wayA;
+      rdB_set_q <= ic_rd_setB; rdB_way_q <= ic_rd_wayB;
+    end
+  end
+  // fetch-ready: the line containing flin (and, when the decode window straddles, the
+  // next line) is currently held in one of the two registered buffers. A buffer holds
+  // a line iff its registered tag (set+way) equals what flin needs now. The two
+  // buffers always hold DIFFERENT sets (flin's line and flin's next line differ by 1),
+  // so a set match uniquely identifies the buffer; the way is checked to reject a
+  // post-fill way change. ic_byte (below) does the matching content-addressed select.
+  logic ic_fa_avail, ic_fb_avail, ic_win_straddle;
+  always_comb begin
+    logic [6:0] fa_set, fb_set; logic fa_way, fb_way;
+    fa_set = flin[11:5];        fa_way = ic_hit_way(flin);
+    fb_set = flin_nl[11:5];     fb_way = ic_hit_way(flin_nl);
+    ic_fa_avail = (rdA_set_q==fa_set && rdA_way_q==fa_way)
+                || (rdB_set_q==fa_set && rdB_way_q==fa_way);
+    ic_fb_avail = (rdA_set_q==fb_set && rdA_way_q==fb_way)
+                || (rdB_set_q==fb_set && rdB_way_q==fb_way);
+    // the fast-path decode window is at most 12 bytes (ub 6 + vb up to len 6 + 6);
+    // it straddles into the next line iff flin's byte offset + 12 > 32.
+    ic_win_straddle = ({1'b0,flin[4:0]} + 6'd12) > 6'd32;
+    ic_fetch_ready  = ic_fa_avail && (!ic_win_straddle || ic_fb_avail);
+  end
+`endif
 
   // R1 phase-3: the fast-path decoder is now the `decode` leaf module
   // (rtl/core/decode.sv), instantiated once per slot (U + V candidate). The
@@ -2972,6 +3047,25 @@ module core
     // (= eip + u_d.len) and read back its PRE-update predicted-taken (bpred_btb).
     btb_v_query_pc = eip + {28'd0,u_d.len};
     v_pred_taken = btb_v_pred;
+
+`ifdef VEN_IC_BRAM
+    // 2b — predicted-taken-target PREFETCH driver. When a predicted-taken branch is in
+    // the current window AND the window does not straddle (so port B is not needed for
+    // this clock's decode), repurpose port B to read the predicted TARGET line so it is
+    // registered BEFORE the redirect — the back-edge of a hot loop then costs no fetch
+    // bubble. A U branch is unpaired (a U branch never leads a pair); a paired V branch
+    // uses v_target. Gated on !ic_win_straddle so a straddling branch keeps port B for
+    // its own (correct) decode, and so a prefetch that does not redirect cannot strand
+    // the straddle line. The read is registered (next-clock effect) — no comb loop.
+    pf_redir = 1'b0; pf_redir_tgt = 32'd0;
+    if (!ic_win_straddle) begin
+      if (u_d.is_branch && u_pred_taken) begin
+        pf_redir = 1'b1; pf_redir_tgt = u_target;
+      end else if (pipe_pair && v_d.is_branch && v_pred_taken) begin
+        pf_redir = 1'b1; pf_redir_tgt = v_target;
+      end
+    end
+`endif
 
     // Flags forwarding U->V (the P5 cmp/dec/test + jcc pairing case): when the
     // U member writes EFLAGS, the paired V branch must see U's RESULT flags, not
