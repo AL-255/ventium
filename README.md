@@ -134,19 +134,28 @@ The core + FPU are fully synthesizable. Below is the **real Vivado placement** o
 the `core` (out-of-context) on the KV260's **XCK26** (Zynq UltraScale+ ZU5EV,
 `xck26-sfvc784-2LV-c`), with every placed leaf cell colored by its RTL module —
 you can see the physical clusters (I-cache, FP datapath, branch predictor, the
-iterative FP engines, the core spine, …).
+iterative FP engines, the core spine, …). This is the **u_icache-rebalanced
+floorplan** (a Pblock that spreads the byte-window decode logic across the upper
+die), which **places MET at 22 ns (46.5 MHz, 0 failing endpoints)**.
 
 ![Ventium core placed on the KV260, colored by RTL module](docs/fpga-device-view.png)
+
+The byte-window decode muxes (`u_icache`, the `-flatten_hierarchy rebuilt` instance
+that absorbs the spine's 12×32:1 alignment fabric) are the level-5 routing-congestion
+hotspot. Forcing them to spread (left) vs the default concentration (below) cuts the
+peak MUXF density **63–65 % → 52–57 %**:
+
+![u_icache placement: baseline concentration vs rebalanced spread](docs/fpga-rebalance-compare.png)
 
 **Best numbers so far** — OOC `core`, `+VTM_NO_DPI`, all configurations **bit-exact
 vs QEMU** (75/75 functional + the cycle micro-gates green):
 
 | Resource | Used | Available | Util |
 |---|---:|---:|---:|
-| **CLB LUTs** | **90,010** | 117,120 | **76.9 %** ✅ fits |
-| &nbsp;&nbsp;LUT as logic | 86,938 | 117,120 | 74.2 % |
+| **CLB LUTs** | **90,083** | 117,120 | **76.9 %** ✅ fits |
+| &nbsp;&nbsp;LUT as logic | 87,011 | 117,120 | 74.3 % |
 | &nbsp;&nbsp;LUT as memory (the 8 KB icache) | 3,072 | 57,600 | 5.3 % |
-| CLB Registers | 29,196 | 234,240 | 12.5 % |
+| CLB Registers | 28,864 | 234,240 | 12.3 % |
 | CARRY8 | 2,054 | 14,640 | 14.0 % |
 | DSP48E2 | 31 | 1,248 | 2.5 % |
 | Block RAM | 0 | 144 | 0 % |
@@ -169,6 +178,14 @@ vs QEMU** (75/75 functional + the cycle micro-gates green):
   tooling choice. The real levers are **RTL** (pipeline the decode window, the class of
   the validated `+VEN_IC_BRAM` fetch pipeline) or a lower-utilization device. Synth
   journey: 3.6 → 14.6 → 37.5 → 46 → 58 → 59.5 → 64.1 MHz.
+- **Floorplan (the device view above):** a **u_icache-rebalance Pblock** that forces
+  the byte-window decode logic to spread across the upper die cuts the peak MUXF
+  congestion **63–65 % → 52–57 %** and **places MET at 22 ns (46.5 MHz)** — but the
+  routing remains congestion-limited (the router thrashes), confirming floorplanning
+  alone cannot break the wall. The genuine fix is the in-progress **decode-stage
+  pipeline** (`+VEN_DEC_PIPE`, [`fpga/DEC_PIPE_DESIGN.md`](fpga/DEC_PIPE_DESIGN.md)):
+  a decoupled prefetch→D1→D2 byte queue that moves the 12×32:1 alignment muxes off the
+  combinational critical cone — the one RTL lever with a real shot at 66 MHz.
 - A **2-stage FP execute pipeline** (`+VEN_FP_PIPE`) and a **BTB-update pipeline**
   (`+VEN_BTB_PIPE`, independently removable) move FP and the branch predictor off
   the critical path while keeping **both FP cycle bands and the branch-mispredict
