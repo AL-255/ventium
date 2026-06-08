@@ -874,11 +874,21 @@ class Konata(QWidget):
         self._last_cyc = 0
 
     def _on_vscroll(self, val):
+        # Force a FULL repaint of the plot's visible area on every scroll. The
+        # QScrollArea optimises scrolling by blitting the existing pixels and only
+        # repainting the newly-exposed strip — but the plot draws viewport-anchored
+        # overlays (the playhead `cyc N` callout, the Δ-measure label, the column
+        # tints) positioned from `ev.rect()`, which during a blit is just that thin
+        # strip, so those overlays smeared / ghosted as you scrolled. A full update
+        # makes ev.rect() cover the whole viewport again; Qt coalesces it with the
+        # blit's strip paint, so there is no extra flicker.
+        self.plot.update()
         self.gutter.update()
         if not self._adjusting:
             self._stick_v = val >= self.scroll.verticalScrollBar().maximum() - ROW_H
 
     def _on_hscroll(self, val):
+        self.plot.update()        # full repaint — see _on_vscroll (blit smears the overlays)
         self.header.update()
         if not self._adjusting:
             self._stick_h = val >= self.scroll.horizontalScrollBar().maximum() - CELL_W
