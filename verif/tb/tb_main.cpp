@@ -630,6 +630,9 @@ int main(int argc, char** argv) {
     top->mem_ack   = 0;
     top->io_rdata  = 0;
     top->io_ack    = 0;
+#ifdef VEN_L1_AXI
+    axi_drive();   // drive the AXI slave outputs to their reset values before eval 0
+#endif
     top->eval();
 
     const int kResetClocks = 4;
