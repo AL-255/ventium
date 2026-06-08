@@ -192,6 +192,20 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Loop concluded (after iteration 46)
+The self-improving visual loop was stopped here by request. The tool reached a stable
+terminal equilibrium: the GUI itself needed no change for the final five iterations
+(since iter41), and iter43–46 were four straight reviews with **0 GUI defects** — the
+adversarial critics now produce only perception errors and one source-level-impossible
+false-positive (pinned-Segments), all correctly refuted. Over the run the loop shipped
+genuine, ground-truthed fixes when they existed (the D-cache miss-rate + per-PC analyses,
+the dependency-arrowhead and Mem-map placement fixes, the instruction-column elision) and,
+once the GUI converged, sharpened the review apparatus (watermark ASCII fix, status-bar
+review crop) — while the ground-truthing discipline correctly rejected every dead or
+redundant change (the indirect-branch mis-parse, Mem-map miss-colouring, per-PC mispredict,
+pinned-+0.0). On exit, `README.md` and `docs/overview.png` were refreshed to reflect the
+final, mature feature set.
+
 ### Iteration 46 — clean 0-pick review (4th straight); pinned-Segments refuted at the source level
 Another clean iteration — nothing shipped, by design. The review confirmed the live
 watermark (`ad92fbb`) on all 6 critics and produced **0 actionable picks** (4th straight
