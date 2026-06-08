@@ -438,3 +438,30 @@ deferred behaviour‑preserving consolidations (apply_cmp×6 / fcom_codes×6, li
 f_eval win) so the design is routable AND routes short — and/or close timing at
 full‑SoC integration with the core as one floorplanned block + real MMCM clocking.
 The RTL logic‑side Fmax work is COMPLETE. _Captured 2026‑06‑07._
+
+## Congestion analysis & better floorplanning (2026‑06‑07) — root cause = icache MUXF
+Why the OOC route won't converge: `report_design_analysis -congestion` on the
+placed best‑config DCP shows **level‑5 congestion that is 99 % `u_icache`** in a
+band (≈X9‑23, Y161‑205), and the congested cells are **58‑67 % MUXF (F7/F8)** —
+the icache's wide SAME‑CYCLE read‑mux trees (the decode‑window byte muxes ub/vb +
+ic_present/ic_hit_way at many positions, all slicing the 256‑bit lines). Every
+module is already spread FULL‑DIE (u_icache X=0..60 Y=0..239), so there is nothing
+to compact — a Pblock can't help.
+
+Congestion‑driven impl (`fpga/scripts/impl_floorplan.tcl`:
+`place_design -directive AltSpreadLogic_high` + `route_design -directive
+AlternateCLBRouting`, 22 ns meetable clock):
+* **Placement MET timing** at 22 ns (WNS +0.501 ns, 0 failing) — AltSpreadLogic
+  beat the timing‑directive place (which was −0.570 ns), and spread the LUTRAM
+  (4‑13 % → 31‑40 %).
+* **But congestion stayed level‑5/6** — AltSpreadLogic cannot spread the F7/F8
+  MUXF (they are architecturally bound to their LUTs). The router reported
+  *"Estimated routing congestion level 6"*.
+
+**Conclusion:** floorplanning/placement directives have hit their ceiling — the
+congestion is an RTL/architectural property of the icache's same‑cycle multi‑
+position decode‑window read (the 12 byte windows + the 2‑port 256‑bit line mux),
+NOT a placement problem. The real congestion lever is RTL: narrow that read (fewer
+combinational read positions / a fetch‑buffer stage), which is the same
+front‑end‑pipelining class flagged for the eip loop — or close timing at full‑SoC
+integration where the core is one floorplanned block. _Captured 2026‑06‑07._
