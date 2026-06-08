@@ -96,12 +96,58 @@ core (core clk)                         |  AXI / PS clk (from MMCM)
      The cycle BANDS verify the bus_mode=0 abstract model; the bus_mode=2 real-latency
      path is verified FUNCTIONALLY (make verify func 75/75 + Quake lockstep), its timing
      emergent (real DDR latency ≠ the abstract P5 L2 penalty).
-2. **AXI4 master + CDC:** the miss-fill engine + the AXI4-master FSM (burst
-   read/write) + the async FIFO CDC. Verify against an AXI VIP / a behavioral
-   DDR model in the TB.
-3. **Integration:** `ventium_top` `bus_mode=2` selects the L1+AXI path (keep
-   `bus_mode=0` inert as today); wire `S_AXI_HPC0`. Re-run the full gates.
+2. **AXI4 master: ✅ BUILT + verified (`rtl/mem/ven_axi_master.sv`,
+   `rtl/mem/ventium_l1_axi.sv`, `verif/l1/run-l1axi-gate.sh` → L1AXI-GATE-OK).**
+   The master converts ven_l1d's word-granular backing port into AXI4: a backing
+   READ (always a full 32 B line) COALESCES into ONE INCR8 burst (ARLEN=7, ARSIZE=2,
+   AxCACHE=0xF coherent), each R beat metered back as one `m_ack`+`m_rdata` in fw
+   order (`m_ack = RVALID && RREADY`); a WRITE is a single-beat write-through, AW/W
+   DECOUPLED (independent done-latches, no AW-before-W deadlock), `m_ack` on BVALID.
+   40-bit address; `ddr_addr = REMAP_BASE + (phys & ADDR_MASK)` done in ADDR_W width;
+   bound SVA (VALID-stable, 32 B-aligned base, 4 KiB-safe burst, no R/W overlap).
+   `ventium_l1_axi` wraps ven_l1d + the master; single clock (CDC_BYPASS, the clean
+   first bring-up). The gate runs all four L1D scenarios THROUGH the AXI path against
+   a MULTI-cycle behavioral DDR slave (RD/WR latency + mid-burst RVALID bubbles) plus
+   store-miss→dependent-load ordering and the x86-phys→carveout remap end-to-end.
+   * ven_l1d change (keeps L1D-GATE-OK): the write-HIT array commit is decoupled from
+     the backing `m_ack` (commits as soon as it HITS) so a multi-cycle AXI write
+     ack — which may arrive after the core drops c_req — never loses the array
+     update. Same-cycle backing (the unit gate) is identical (commit clock == ack).
+   * CDC: dual-clock (core clk vs a faster AXI clk via MMCM + a clean-license async
+     FIFO) is a later optimization; a single PL clock to S_AXI_HPC0 is the low-risk
+     first step and what ships here.
+3. **PS integration: ✅ PROVEN (`fpga/scripts/bd_l1axi.tcl` → BD-L1AXI-OK).** A
+   Vivado PS8 block design (`zynq_ultra_ps_e` board-preset + `ventium_l1_axi_top`
+   [Verilog BD-reference wrapper, AXI X_INTERFACE attrs] → SmartConnect 32→128 →
+   `S_AXI_HPC0_FPD`, AFI0 coherent, one PL clock) on `xck26-sfvc784-2LV-c`:
+   `validate_bd_design` = 0 errors / **0 critical warnings**; `synth_design` =
+   100% / 0 errors / 0 critical warnings (my RTL: 0/0/0); DRC related-violations
+   `<none>` (only the expected UCIO unassigned-pin-LOC note — no board pinout, this
+   is a subsystem-to-PS connectivity+synth proof, not a bitstream target). The L1
+   256-bit lines map to LUT distributed RAM (0 BRAM), matching the icache P0-3
+   finding. NOTE: this certifies "connects + elaborates + synthesizes cleanly to
+   S_AXI_HPC0"; on-wire AXI protocol + coherency are certified by the Verilator gate
+   + SVA (L1AXI-GATE-OK). The full-core `bus_mode=2` boot (the D-side miss-stall
+   gate + the icache word-0 fill gate + pending_mem_pen suppression in core.sv, then
+   `make verify --l1-axi` 75/75 + Quake lockstep) is the NEXT step (see §4a).
 4. **Clocking:** MMCM (core clk + AXI clk) + reset sync (P1-3).
+
+## 4a. Remaining: full-core bus_mode=2 wiring (the on-chip boot path)
+The L1+AXI subsystem + its PS connection are verified standalone. To boot the WHOLE
+Ventium core through it (functional equivalence vs bus_mode=0, timing emergent):
+* `ventium_top` `bus_mode` → `[1:0]`; add the mode-2 leg (instantiate `ventium_l1_axi`
+  between `core_mem_*` and a new `m_axi_*` top port); 3-way mux; biu FRONT gated
+  `==2'd1`. All behind `` `ifdef VEN_L1_AXI `` so modes 0/1 stay byte-identical.
+* core D-side fast-path MISS-STALL gate (mirror the `!ic_fetch_ready` bubble) on
+  `bus_mode==2'd2 && pipe_load_req && !mem_ack` (core_fastpath.svh), + suppress
+  `pending_mem_pen` in mode 2 (real DDR latency is the only timing source).
+* **[BLOCKER] the icache word-0 fill latch (`core.sv:4260 ic_pf_miss_fill`) captures
+  `mem_rdata` with NO mem_ack guard** — fine for the same-cycle BFM, but under a real
+  stalling L1 it latches garbage from a not-yet-filled line on EVERY cold I-line. Gate
+  it with `mem_ack` + a bubble arm (or route fetch around the L1 to a separate AXI
+  read channel). Verify with an icache-fill TB scenario through the multi-cycle slave.
+* Mode-0 CANARY: `make verify` + the M4/M5 cycle bands stay byte-identical (the
+  `==2'd1`/`==2'd2` widening is complete iff a band never drifts).
 
 ## 5. Reuse / replace
 * `dcache_timing.sv` — REUSE the tag/val/LRU SM; ADD the data array (its data path
