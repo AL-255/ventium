@@ -77,11 +77,25 @@ core (core clk)                         |  AXI / PS clk (from MMCM)
   page-remap correctness is the core's existing concern, not the L1's.
 
 ## 4. Integration + build order
-1. **L1 data array (task #10):** add the 8KB data array to a new `ven_l1d` (or
-   extend dcache_timing) — same-cycle hit returns real data; miss falls through to
-   the existing back-side `mem_*` (the TB / AXI). Verify `make verify` cycle-
-   identical (the timing SM is unchanged; only the data source moves from the
-   backdoor to the cache on hits). This is the first, independently-verifiable step.
+1. **L1 data array (task #10): ✅ BUILT + unit-verified (`rtl/mem/ven_l1d.sv`,
+   `verif/l1/run-l1d-gate.sh` → L1D-GATE-OK).** 8 KB / 2-way / 32 B, packed 256-bit
+   lines in distributed RAM (icache pattern → async read for the same-cycle hit),
+   tag/val/lru == dcache_timing. READ HIT returns the addressed word combinationally
+   (c_ack=1 same clock); READ MISS deasserts c_ack and the fill FSM bursts the 32-byte
+   line (8 words) from the backing into the not-MRU victim, then the retry hits; WRITE
+   is write-through (array on hit + backing). Standalone gate covers cold-miss→fill→
+   hit, whole-line fill, write-through, 2-way LRU eviction. Backing = BFM now, AXI later.
+   * **KEY FINDING (the central challenge for step 3):** the core's FAST-PATH load
+     latches `mem_rdata` UNCONDITIONALLY — `core_fastpath.svh` ~L215 `gpr[dst]<=mem_rdata`
+     does NOT gate on `mem_ack` (it assumes the BFM's same-cycle data and DEFERS the
+     miss penalty via `pending_mem_pen`). So a REAL stalling L1 (c_ack=0 on miss) needs
+     a fast-path MISS-STALL gate — exactly the `ic_fetch_ready` pattern just built for
+     the icache (+VEN_IC_BRAM): don't issue the load until c_ack, mirror the line into
+     the buffer. AND under bus_mode=2 the core's deferred `pending_mem_pen` penalty
+     must be SUPPRESSED (else the real fill stall + the modeled penalty double-count).
+     The cycle BANDS verify the bus_mode=0 abstract model; the bus_mode=2 real-latency
+     path is verified FUNCTIONALLY (make verify func 75/75 + Quake lockstep), its timing
+     emergent (real DDR latency ≠ the abstract P5 L2 penalty).
 2. **AXI4 master + CDC:** the miss-fill engine + the AXI4-master FSM (burst
    read/write) + the async FIFO CDC. Verify against an AXI VIP / a behavioral
    DDR model in the TB.
