@@ -192,6 +192,22 @@ not repeat itself.
 ## Iterations
 <!-- newest first; appended by the loop -->
 
+### Iteration 45 — clean 0-pick review (3rd straight); trace row-snap re-verified
+Another genuinely clean iteration — nothing shipped, by design. The review confirmed the
+live watermark (`6366d28`) on all 6 critics (the new `dmiss_statbar.png` crop reviewed
+cleanly — full status row, complete `eip`, no fabricated truncation, validating iter44's
+fix) and produced **0 actionable picks** — the 3rd straight 0-GUI-defect review. All 4 raw
+findings were refuted: 3 were the recurring pinned-Segments compact-`n/a` claim (held in
+REFUTED, re-confirmed at 5× zoom — clear gaps, no collision), and 1 was a NEW perception
+error — a trace "scrolled-off row sliver". Independently disproved it two ways: the verify's
+row-brightness profiling found spread=0 (a uniform empty row gutter, not glyph tails), and a
+3× zoom just below the sticky header shows the column header seated directly against the
+first FULL data row — the apparent "coloured fragments" are the anti-aliased TOPS of that
+row's glyphs where the crop cuts it. The table is whole-row snapped exactly as documented;
+no half-row at the top edge. No harness gap was revealed this round (the trace is already
+well-covered by the `*_trace.png` crops), so — heeding diminishing returns — the harness was
+left untouched too. The GUI has needed no change since iter41 (four iterations).
+
 ### Iteration 44 — GUI clean (2nd straight); close the status-bar review blind spot
 The adversarial review confirmed the live watermark (`2790fdd`) on all 6 critics and again
 produced **0 actionable GUI picks** (2nd consecutive clean review). All 3 raw findings were
