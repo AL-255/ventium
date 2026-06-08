@@ -158,6 +158,8 @@ package ventium_decode_pkg;
     logic [2:0]  fp_role;     // p5model fp_role: 0 none,1 producer,2 consumer,3 rmw
     logic [6:0]  fp_lat;      // FP result latency (cycles) for the scoreboard
     logic [6:0]  fp_occ;      // FP pipe OCCUPANCY (cycles the in-order pipe is held)
+    logic        is_fxch_free;// GAP2/VEN_FXCH_FREE: a FREE FXCH (occ 0) — folds into
+                              // the preceding push's commit clock (no own cycle)
   } fpd_t;
 
   // FP fast-path op kinds (the cycle-mode x87 whitelist).

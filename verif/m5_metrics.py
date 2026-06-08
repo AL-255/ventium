@@ -124,6 +124,13 @@ MUL_OCC = {"mul": 10, "imul2": 10}
 # half pins the RTL to the fpovl=1 golden (a non-overlap RTL is ~+29% -> also FAIL).
 FDIVINT_CPI_MAX = 1.50
 
+# GAP2 free-FXCH band (VEN_FXCH_FREE, mb_fxch). 7 throughput-bound fld1 producers
+# each followed by an FXCH. With the FXCH folded into the preceding fld's commit
+# (occ 0) CPI ~0.98; the DEFAULT (each FXCH a full clock, no latency gap to hide in)
+# lands at CPI ~1.29. The ceiling sits between them so a non-folding RTL fails the
+# "FXCH free" half; the abs-cyc half pins the RTL to the fxchfree=1 golden.
+FXCH_CPI_MAX = 1.10
+
 # AP-500 fast-path PAIRING-coverage band (review-response, fastpath-coverage-spec
 # .md). A converted form must actually PAIR (issue into the V pipe) where it
 # previously serialized on the slow FSM. The kernel alternates a converted U-form
@@ -340,6 +347,26 @@ def compute(kernel, rtl_path, golden_path, abs_tol_pct=DEFAULT_ABS_TOL_PCT):
         detail = (f"FDIV/int overlap present (CPI {cpi:.3f} <= {FDIVINT_CPI_MAX}, "
                   f"vs ~1.73 serialized)? {overlapped}; abs-cyc {d:+.2f}% vs fpovl=1 "
                   f"p5model (<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
+        return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
+
+    if short == "fxch":
+        # GAP2 TWO-part band (VEN_FXCH_FREE): (1) the FXCH is FREE — CPI below the
+        # serialized-default ceiling (a non-folding RTL charges each FXCH a clock ->
+        # CPI ~1.29 > ceiling); (2) abs-cyc tracks the fxchfree=1 golden within tol.
+        try:
+            gold = tracefmt.read_trace(golden_path)
+            gold_total = _total_cyc(gold)
+        except Exception as e:
+            return ("FAIL", cpi_s, pair_s, "abscyc=?",
+                    f"golden trace unreadable ({e}) — cannot check abs-cyc")
+        d = _abs_diff_pct(total, gold_total)
+        freed = cpi <= FXCH_CPI_MAX
+        tracked = abs(d) <= abs_tol_pct
+        ok = freed and tracked
+        extra = f"abscyc={d:+.2f}%"
+        detail = (f"FXCH free (CPI {cpi:.3f} <= {FXCH_CPI_MAX}, vs ~1.29 serialized)? "
+                  f"{freed}; abs-cyc {d:+.2f}% vs fxchfree=1 p5model (<= {abs_tol_pct:.0f}%)? "
+                  f"{tracked}; both? {ok}")
         return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
 
     # Unknown kernel: report metrics, no band (INFO).

@@ -90,6 +90,9 @@ TB_BIN="$TB_DIR/obj_dir/tb_ventium"
 # clobbers the canonical obj_dir/tb_ventium). Used ONLY by kernels whose manifest
 # sets "fpovl": true (mb_fdivint) — graded against the fpovl=1 oracle golden.
 TB_BIN_FPOVL="$TB_DIR/obj_dir_fpovl/tb_ventium"
+# GAP2: a tb built with +VEN_FXCH_FREE (free-FXCH fold), used only by manifest
+# "fxchfree": true kernels (mb_fxch), graded against the fxchfree=1 oracle golden.
+TB_BIN_FXCH="$TB_DIR/obj_dir_fxch/tb_ventium"
 
 M5_METRICS="$ROOT/verif/m5_metrics.py"
 
@@ -116,6 +119,9 @@ M5_PAIR_KERNELS="mb_accimm mb_rmimm mb_sh1 mb_nearbr"
 # GAP1 FP/integer-overlap kernels (manifest fpovl:true) — graded against the
 # fpovl=1 oracle with the +VEN_FP_OVERLAP tb (TB_BIN_FPOVL).
 M5_FPOVL_KERNELS="mb_fdivint"
+# GAP2 free-FXCH kernels (manifest fxchfree:true) — graded against the fxchfree=1
+# oracle with the +VEN_FXCH_FREE tb (TB_BIN_FXCH).
+M5_FXCH_KERNELS="mb_fxch"
 # INFO kernels: reported, never gate.
 INFO_KERNELS="mb_agiloop"
 
@@ -231,8 +237,9 @@ run_kernel() {
     # oracle (p5trace fpovl=1) using the +VEN_FP_OVERLAP tb (TB_BIN_FPOVL, built on
     # demand into obj_dir_fpovl). Every other kernel keeps the default golden + tb,
     # so the existing bands are byte/cycle-identical.
-    local FPOVL P5_EXTRA KTB
+    local FPOVL FXCHFREE P5_EXTRA KTB
     FPOVL="$(manifest_get "$MF" fpovl)" || FPOVL="false"
+    FXCHFREE="$(manifest_get "$MF" fxchfree)" || FXCHFREE="false"
     P5_EXTRA=""; KTB="$TB_BIN"
     if [ "$FPOVL" = "True" ] || [ "$FPOVL" = "true" ]; then
         P5_EXTRA=",fpovl=1"; KTB="$TB_BIN_FPOVL"
@@ -244,6 +251,20 @@ run_kernel() {
                 K_NAME+=("$NAME"); K_CLASS+=("$CLASS"); K_VERD+=("FAIL")
                 K_CPI+=("-"); K_PAIR+=("-"); K_EXTRA+=("-"); K_ABS+=("-")
                 K_BAND+=("overlap tb build failed"); K_CMP+=("-")
+                [ "$GATED" = "1" ] && CYCLE_OK=0
+                return
+            }
+        fi
+    elif [ "$FXCHFREE" = "True" ] || [ "$FXCHFREE" = "true" ]; then
+        P5_EXTRA=",fxchfree=1"; KTB="$TB_BIN_FXCH"
+        if [ ! -x "$KTB" ]; then
+            info "building +VEN_FXCH_FREE tb (obj_dir_fxch)…"
+            ( cd "$TB_DIR" && make rtl VL_EXTRA_DEFINES="+define+VEN_FXCH_FREE" \
+                  OBJDIR=obj_dir_fxch ) > "$M5/${NAME}_tbbuild.log" 2>&1 || {
+                info "fxch tb build failed:"; sed 's/^/      /' "$M5/${NAME}_tbbuild.log" | head -6
+                K_NAME+=("$NAME"); K_CLASS+=("$CLASS"); K_VERD+=("FAIL")
+                K_CPI+=("-"); K_PAIR+=("-"); K_EXTRA+=("-"); K_ABS+=("-")
+                K_BAND+=("fxch tb build failed"); K_CMP+=("-")
                 [ "$GATED" = "1" ] && CYCLE_OK=0
                 return
             }
@@ -424,6 +445,8 @@ for k in $M5_MUL_KERNELS;   do run_kernel "$k" MUL   1; done
 for k in $M5_PAIR_KERNELS;  do run_kernel "$k" PAIR  1; done
 # (g) GAP1 FP/integer-overlap band (VEN_FP_OVERLAP, fpovl=1 oracle + obj_dir_fpovl tb).
 for k in $M5_FPOVL_KERNELS; do run_kernel "$k" FP    1; done
+# (h) GAP2 free-FXCH band (VEN_FXCH_FREE, fxchfree=1 oracle + obj_dir_fxch tb).
+for k in $M5_FXCH_KERNELS;  do run_kernel "$k" FP    1; done
 # INFO kernels.
 for k in $INFO_KERNELS;     do run_kernel "$k" INFO  0; done
 

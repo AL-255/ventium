@@ -1,0 +1,22 @@
+{
+  "name": "mb_fxch",
+  "src": "mb_fxch/mb_fxch.s",
+  "elf": "mb_fxch/mb_fxch.elf",
+  "image": "mb_fxch/mb_fxch.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 4000,
+  "x87": true,
+  "m5_cycle": true,
+  "m5_kind": "fp",
+  "m5_gated": true,
+  "m5_metric": "cpi",
+  "m5_band": "CPI <= 1.10 — VEN_FXCH_FREE (GAP2): 7 throughput-bound fld1 producers each followed by an FXCH. The FXCH folds into its preceding fld's commit clock (occ 0, the P5 stack rename) -> CPI ~0.98; DEFAULT charges each FXCH a full clock (no latency gap to hide in) -> CPI ~1.29.",
+  "fxchfree": true,
+  "golden_cpi": 0.983,
+  "golden_insns": 923,
+  "golden_cyc": 907,
+  "golden_cpi_nofree": 1.285,
+  "golden_cyc_nofree": 1187,
+  "note": "GAP2 demo (gaps doc _GAPS_vs_ventium.md). GATED on VEN_FXCH_FREE: golden generated with the oracle fxchfree=1 (FXCH occ=0) AND the RTL built with +define+VEN_FXCH_FREE (separate obj_dir_fxch). The FXCH folds into the preceding push via a combined fp_we_push + fp_we_sti write in fpu_top (pre-edge ftop addressing: old st(i-1) -> new st0, fld value -> st(i)). Validated: (a) free-fxch TIMING (RTL fold matches the fxchfree golden per-instruction in steady state, compare.py --mode cycle); (b) x87 SWAP CORRECTNESS via a distinct-value fldpi/fld1/fxch + fcomp/branch kernel whose control flow matches the golden (a buggy swap diverges the pc). DEFAULT (no define) is byte/cycle-identical -> existing FP bands untouched. SCOPE: only the <push>;fxch fold is implemented (the throughput case); a post-arith fxch is latency-bound and already ~free (the model handles it via the fadd latency gap), and a lone/consecutive fxch correctly keeps occ=1."
+}
