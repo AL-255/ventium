@@ -132,68 +132,79 @@ regression-tested by `t_endbr`) and two QEMU-golden producer-fidelity bugs
 
 The core + FPU are fully synthesizable. Below is the **real Vivado placement** of
 the `core` (out-of-context) on the KV260's **XCK26** (Zynq UltraScale+ ZU5EV,
-`xck26-sfvc784-2LV-c`), with every placed leaf cell colored by its RTL module —
-you can see the physical clusters (I-cache, FP datapath, branch predictor, the
-iterative FP engines, the core spine, …). This is the **u_icache-rebalanced
-floorplan** (a Pblock that spreads the byte-window decode logic across the upper
-die), which **places MET at 22 ns (46.5 MHz, 0 failing endpoints)**.
+`xck26-sfvc784-2LV-c`), every placed leaf cell colored by its RTL module — the
+physical clusters (I-cache + the folded byte-window decode spine, FP datapath,
+branch predictor, the iterative FP engines, the core spine, …):
 
 ![Ventium core placed on the KV260, colored by RTL module](docs/fpga-device-view.png)
 
 The byte-window decode muxes (`u_icache`, the `-flatten_hierarchy rebuilt` instance
-that absorbs the spine's 12×32:1 alignment fabric) are the level-5 routing-congestion
-hotspot. Forcing them to spread (left) vs the default concentration (below) cuts the
-peak MUXF density **63–65 % → 52–57 %**:
+that absorbs the spine's 12×32:1 alignment fabric) are the **level-5 routing-congestion
+hotspot** — the bright band in the placement-density map (peak ≈ 340 cells / 4×4-tile bin):
 
-![u_icache placement: baseline concentration vs rebalanced spread](docs/fpga-rebalance-compare.png)
+![placement density — the byte-window MUXF congestion band](docs/fpga-congestion-hotspot.png)
 
-**Best numbers so far** — OOC `core`, `+VTM_NO_DPI`, all configurations **bit-exact
-vs QEMU** (75/75 functional + the cycle micro-gates green):
+**Best numbers** — OOC `core`, `+VTM_NO_DPI`, 15 ns target. Two configs: the
+**verified production** config (narrowb, **bit-exact vs QEMU 75/75 + cycle bands**)
+and the **experimental predecoded µop-cache** (`+VEN_UOPCACHE`, synth/APR-valid;
+not yet verify-hardened) which deletes the byte-window decoder for a slot read:
 
-| Resource | Used | Available | Util |
+| Resource | narrowb (production) | `+VEN_UOPCACHE` | Available |
 |---|---:|---:|---:|
-| **CLB LUTs** | **90,083** | 117,120 | **76.9 %** ✅ fits |
-| &nbsp;&nbsp;LUT as logic | 87,011 | 117,120 | 74.3 % |
-| &nbsp;&nbsp;LUT as memory (the 8 KB icache) | 3,072 | 57,600 | 5.3 % |
-| CLB Registers | 28,864 | 234,240 | 12.3 % |
-| CARRY8 | 2,054 | 14,640 | 14.0 % |
-| DSP48E2 | 31 | 1,248 | 2.5 % |
-| Block RAM | 0 | 144 | 0 % |
+| **CLB LUTs (synth)** | 93,883 (80.2 %) | **79,442 (67.8 %)** | 117,120 |
+| MUXF7 / MUXF8 | 14,311 / 6,216 | **11,101 / 4,181** | 58,560 / 29,280 |
+| CARRY8 | 2,119 | 1,861 | 14,640 |
+| DSP48E2 | 31 | 31 | 1,248 |
+| Block RAM | 0 | 40 | 144 |
+| **Fmax — logic only** | ~147 MHz (6.8 ns FP cone) | ~145 MHz | — |
+| **Fmax — placed** (WNS@15 ns) | 46.0 MHz | 52.4 MHz | — |
+| **Full route @ 15 ns** | ✗ does **not** route (42,392 overlaps) | ✅ **0 failed nets** | — |
+| **Fmax — routed** (real OOC) | — (congestion wall) | **51.7 MHz** | — |
 
-- **Area: 518 % → 76.9 % LUTs (≈6.7× reduction).** The as-is single-cycle
-  combinational Pentium datapath was 5.2× too big for the device; **iterative
-  FDIV / FSQRT / integer-DIV / FBSTP / FBLD engines**, **LUTRAM caches**, and
-  **FP-datapath consolidation** brought it comfortably under the XCK26.
-- **Fmax: synth ≈ 64.1 MHz** (worst-path *logic* ~6.8 ns), **place MET ≈ 46.5 MHz**
-  at 22 ns (AltSpreadLogic_high, 0 failing endpoints). The **66 MHz** target is **not
-  met out-of-context**, and a rigorous Vivado strategy sweep — ~10 untried directives
-  (`-muxf_remap`, AlternateRoutability, AltSpreadLogic, the canned congestion strategies)
-  at a meetable clock with a full route, [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md)
-  P0-9 — confirms **no synth/place/route directive closes it**: `-muxf_remap` *regresses*
-  to 35 MHz, and the device-filling design does **not route legally** at the ~46 MHz the
-  placer estimates (the router gives up with thousands of congestion overlaps). The
-  honest OOC **routable** Fmax is ≈ **35–42 MHz**. The binding constraint is **routing
-  congestion** from the single-cycle x86 byte-window decoder (12×32:1 muxes over 256-bit
-  cache lines), dense whether mapped to MUXF or LUT — an architectural property, not a
-  tooling choice. The real levers are **RTL** (pipeline the decode window, the class of
-  the validated `+VEN_IC_BRAM` fetch pipeline) or a lower-utilization device. Synth
-  journey: 3.6 → 14.6 → 37.5 → 46 → 58 → 59.5 → 64.1 MHz.
-- **Floorplan (the device view above):** a **u_icache-rebalance Pblock** that forces
-  the byte-window decode logic to spread across the upper die cuts the peak MUXF
-  congestion **63–65 % → 52–57 %** and **places MET at 22 ns (46.5 MHz)** — but the
-  routing remains congestion-limited (the router thrashes), confirming floorplanning
-  alone cannot break the wall. The genuine fix is the in-progress **decode-stage
-  pipeline** (`+VEN_DEC_PIPE`, [`fpga/DEC_PIPE_DESIGN.md`](fpga/DEC_PIPE_DESIGN.md)):
-  a decoupled prefetch→D1→D2 byte queue that moves the 12×32:1 alignment muxes off the
-  combinational critical cone — the one RTL lever with a real shot at 66 MHz.
-- A **2-stage FP execute pipeline** (`+VEN_FP_PIPE`) and a **BTB-update pipeline**
-  (`+VEN_BTB_PIPE`, independently removable) move FP and the branch predictor off
-  the critical path while keeping **both FP cycle bands and the branch-mispredict
-  bands bit-identical** (they fit inside the modeled latency windows).
+![byte-window MUXF density: narrowb vs predecoded µop-cache, shared scale](docs/fpga-rebalance-compare.png)
 
-Reproduce: `vivado -mode batch -source fpga/scripts/device_view.tcl` →
-`python3 fpga/scripts/render_device_view.py …`. Full timing backlog +
-methodology in [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
+**The headline APR result:** at a 15 ns target the **predecoded µop-cache routes cleanly to a
+real 51.7 MHz** (0 failed nets, routed WNS −4.35 ns) — while the production byte-window config
+**cannot route at all** (the router gives up with 42,392 congestion overlaps). The µop-cache is
+the **first config to route the design legally at a tight clock**, vs the prior ~35–42 MHz
+*estimate*. Caveat: `+VEN_UOPCACHE` is an Fmax/APR demonstrator — it is **synth/route-valid and
+its FP/area changes are bit-exact, but the slot-read front-end is not yet functionally
+verify-hardened** (the `uop_ready` stall + branch-into-middle re-predecode are unbuilt); the
+**narrowb config is the verified-bit-exact 75/75 production build**.
+
+- **Area — the FP datapath shrink ([`TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md) P0-13):
+  −9,635 LUT (−10.7 %), bit-exact.** `fx_to_int_ex` (the FP→int conversion under FIST +
+  FBSTP) carried a 128-bit barrel shifter where only 64 bits are ever non-zero — narrowing
+  it bit-exactly (verified `make verify` 75/75) halved it across all five FIST/FBSTP
+  instances (−8,636), plus a shared-round `f_eval` split (−999). The mantissa multiply was
+  already in DSP (16 of 31 DSP48s), so it was never the LUT cost. Earlier wins: iterative
+  FDIV/FSQRT/integer-DIV/FBSTP/FBLD engines + LUTRAM/BRAM caches brought the as-is 518 %
+  single-cycle datapath under the device.
+- **The predecoded µop-cache (P0-11) is the first lever to *reduce* the byte-window MUXF**
+  (−22 % F7 / −33 % F8) instead of relocating it — by running the decoder on the multi-cycle
+  fill walk and reading fixed-width µops by slot (the textbook P6/Sandy-Bridge fix; the user's
+  "predecode prefixes 1 byte/cycle, pipeline the SIB length" insight). The *placer's* congestion
+  level still reads level-5 (its density estimate is diffuse across the coupled front-end —
+  BTB 23 %, icache 18 %, slow-path decoder 13 %, …), but that metric is misleading: the **actual
+  router converges (0 overlaps) for the µop-cache and not for narrowb (42,392)** — the lower MUXF
+  gives the router the channels it lacked. The route is the judge ([P0-14](fpga/TIMING_PROBLEMS.md)).
+- **Fmax: the design is routing-congestion-bound, not logic-bound.** The worst path is the FP
+  deferred-commit cone `fpp_reg → fpr` at ~6.8 ns *logic* (≈147 MHz) but **65 % routing** — the
+  byte-window/front-end MUXF cluster has no spare channels. Placed: **46.0 MHz (narrowb) /
+  52.4 MHz (µop-cache)**. A full Vivado strategy sweep (P0-9: `-muxf_remap`, AltSpreadLogic,
+  AlternateRoutability, the congestion strategies) closes **none** of it — an architectural
+  property of the single-cycle x86 byte-window decode, not a tooling choice.
+- **The honest path to 66 MHz** (P0-12): the OOC placer has no PS8 anchor / floorplan, so it
+  smears the whole `eip`-coupled front-end into one clock region. The cure for *diffuse-coupled*
+  congestion is **in-context place + floorplan** (spread the cluster across regions near the
+  PS8) — the real-chip number we must measure to ship — or a lower-utilization / higher-grade
+  device. A **2-stage FP execute pipeline** (`+VEN_FP_PIPE`) and a **BTB-update pipeline**
+  (`+VEN_BTB_PIPE`) keep FP + branch-predict off the critical path with **both FP and
+  branch-mispredict cycle bands bit-identical**.
+
+Reproduce: `CONFIG=narrowb MODE=full vivado -mode batch -source fpga/scripts/apr_run.tcl` →
+`python3 fpga/scripts/render_device_view.py …` / `render_congestion.py` / `render_compare.py`.
+Full timing backlog + methodology in [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
 
 ## Status
 

@@ -50,6 +50,9 @@ fpu/ven_bcd_to_fp.sv
 // ---- mem ------------------------------------------------------------------
 mem/dcache_timing.sv
 mem/icache.sv
+// predecoded micro-op cache (predecode-on-fill, P0-11). Instantiated by core.sv
+// only under +define+VEN_UOPCACHE; harmless (uninstantiated) in the default build.
+mem/uopcache.sv
 mem/tlb.sv
 
 // ---- bus ------------------------------------------------------------------

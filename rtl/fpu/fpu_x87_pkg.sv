@@ -1051,7 +1051,11 @@ package fpu_x87_pkg;
     logic        s;
     logic signed [31:0] ue;
     logic [63:0] m;
-    logic [127:0] big, fpart, half;
+    // P0-13 FP area: these were 128-bit but the value is a 64-bit mantissa shifted
+    // by <=63, so the high 64 bits are ALWAYS zero -> narrowed to 64-bit. Bit-exact
+    // (no information is dropped) and halves the barrel shifter / masks here, in
+    // BOTH the FIST path AND the FBSTP (ven_bcd) engine that share this function.
+    logic [63:0] big, fpart, half;
     logic [63:0] ipart, mag;
     int          shift;
     logic        inex, ovf, up;
@@ -1074,15 +1078,15 @@ package fpu_x87_pkg;
           else   ovf = 1'b1;                  // +2^63 doesn't fit signed 64
         end
       end else begin
-        logic [127:0] ish;
-        shift = 63 - ue;                      // bits below the point
-        big   = {64'd0, m};
+        logic [63:0] ish;
+        shift = 63 - ue;                      // bits below the point (1..63)
+        big   = m;
         ish   = big >> shift;
-        ipart = ish[63:0];
-        fpart = (shift==0) ? 128'd0 : (big & ((128'd1<<shift)-128'd1));
-        half  = (shift==0) ? 128'd0 : (128'd1 << (shift-1));
-        inex  = (fpart != 128'd0);
-        up    = fx_dir_up(fpart[63:0], half[63:0], ipart[0], s, rc);
+        ipart = ish;
+        fpart = (shift==0) ? 64'd0 : (big & ((64'd1<<shift)-64'd1));
+        half  = (shift==0) ? 64'd0 : (64'd1 << (shift-1));
+        inex  = (fpart != 64'd0);
+        up    = fx_dir_up(fpart, half, ipart[0], s, rc);
         if (up) ipart = ipart + 64'd1;
         mag  = ipart;
         sval = s ? -$signed(mag) : $signed(mag);

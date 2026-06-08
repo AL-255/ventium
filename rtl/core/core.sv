@@ -2848,6 +2848,17 @@ module core
   logic [31:0] u_flags_eff;          // U's resulting flags (post-commit) for fwd
   logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
   logic [7:0]  vb [6];               // V candidate decode bytes (at eip+lenU)
+`ifdef VEN_UOPCACHE
+  // P0-11 predecoded µop-cache fast-path read wires (driven by u_uopcache). NSLOT
+  // fast-path insns covered per 32-byte line; a denser line overflows -> those
+  // offsets read uc_bv*=0 and the spine re-predecodes (perf, not correctness).
+  localparam int NSLOT = 8;
+  fpd_t        uc_slotsA [NSLOT], uc_slotsB [NSLOT];
+  logic        uc_bvA [IC_LINE],  uc_bvB [IC_LINE];   // byte offset is a boundary
+  logic [2:0]  uc_bsA [IC_LINE],  uc_bsB [IC_LINE];   // ...maps to this slot
+  logic        uc_pdvA, uc_pdvB;                      // line is predecoded-valid
+  logic        uop_hit, uc_v_avail;                   // flin on boundary / V resident
+`endif
 
   // M2S.1: the FETCH LINEAR address. The architectural `eip` carries the
   // segment OFFSET (the value reported as `pc` in the trace); the bytes are
@@ -2921,6 +2932,73 @@ module core
   end
 `endif
 
+`ifdef VEN_UOPCACHE
+  // ===========================================================================
+  // P0-11 PREDECODE-ON-FILL: the twelve 32:1 byte selects (the ub[]/vb[] gather
+  // above) — the architectural MUXF congestion wall — are DELETED from the fast
+  // path. decode.sv ran on the multi-cycle fill walker (u_uopcache below) and the
+  // results are stored as fixed-width fpd_t indexed by SLOT. Here the fast path
+  // just READS the slot the current flin lands in (an ~8:1 slot mux over the
+  // registered uop-line), and because predecode CHAINED the boundaries, the V
+  // candidate is literally U's NEXT slot — so the flin+lenU V-base serialization
+  // is gone too. The only flin-indexed select left is the small byte->slot map
+  // lookup (uc_bsA[flin[4:0]], 32:1 over 3 bits) — not a 32:1 over 256-bit data.
+  //
+  // br_taken is the ONLY flag-dependent decode field (cond_true): predecode froze
+  // it with the fill-time EFLAGS, so re-evaluate it from the opcode-derived cc
+  // against the LIVE eflags — exactly what the V resolution path already does
+  // (v_br_taken_eff). Every other fpd_t field is opcode/operand-derived => the
+  // stored value IS the live value (structural bit-exactness).
+  fpd_t        u_d_raw, v_d_raw;
+  logic [4:0]  uc_uoff, uc_voff;
+  logic [2:0]  uc_uslot, uc_vslot;
+  logic        uc_v_in_a;
+  always_comb begin
+    uc_uoff  = flin[4:0];
+    uc_uslot = uc_bsA[uc_uoff];
+    u_d_raw  = uc_slotsA[uc_uslot];
+    // V begins right after U; predecode put it in the next slot of the SAME line,
+    // unless U+lenU crosses the 32-byte line boundary (then V's first byte is in
+    // line B, looked up by its in-B offset).
+    uc_voff  = uc_uoff + {1'b0, u_d_raw.len};
+    uc_v_in_a = ({1'b0,uc_uoff} + {2'b0,u_d_raw.len}) < 6'd32;
+    if (uc_v_in_a) begin
+      uc_vslot = uc_uslot + 3'd1;
+      v_d_raw  = uc_slotsA[uc_vslot];
+    end else begin
+      uc_vslot = uc_bsB[uc_voff];
+      v_d_raw  = uc_slotsB[uc_vslot];
+    end
+    // re-evaluate the flag-dependent Jcc taken bit against the LIVE eflags.
+    u_d = u_d_raw;
+    if (u_d_raw.is_branch && u_d_raw.br_cond) u_d.br_taken = cond_true(u_d_raw.cc, eflags);
+    v_d = v_d_raw;
+    if (v_d_raw.is_branch && v_d_raw.br_cond) v_d.br_taken = cond_true(v_d_raw.cc, eflags);
+  end
+  // uop_hit: flin's line is predecoded AND flin lands on a recorded instruction
+  // boundary. A miss (cold predecode, or a branch INTO the middle of an insn as
+  // walked-from-line-start) is handled by the spine: stall + re-predecode (the
+  // S_PIPE !uop_ready arm). uc_v_avail mirrors the old v_bytes_ok residency for
+  // the chained/straddle V slot.
+  assign uop_hit    = uc_pdvA && uc_bvA[flin[4:0]];
+  assign uc_v_avail = uc_v_in_a ? (uc_uslot != 3'(NSLOT-1))
+                                : (uc_pdvB && uc_bvB[uc_voff]);
+`ifdef VEN_UOPCACHE_CHECK
+  // Structural-equivalence gate: keep the live ub/vb gather + reference decoders
+  // and assert the slot read matches them for every issued flin. SIM-ONLY (this
+  // path is NOT in the synth-probe build — that build defines VEN_UOPCACHE alone,
+  // so the byte gather is truly absent from the netlist).
+  fpd_t u_d_ref, v_d_ref;
+  always_comb begin
+    for (int i=0;i<6;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
+    for (int i=0;i<6;i++) vb[i] = ic_byte(flin+{28'd0,u_d_ref.len}+i[31:0]);
+  end
+  decode u_decode_ref (.ib0(ub[0]),.ib1(ub[1]),.ib2(ub[2]),.ib3(ub[3]),.ib4(ub[4]),.ib5(ub[5]),
+                       .iflags(eflags), .cycle_mode(cycle_mode), .uop(u_d_ref));
+  decode v_decode_ref (.ib0(vb[0]),.ib1(vb[1]),.ib2(vb[2]),.ib3(vb[3]),.ib4(vb[4]),.ib5(vb[5]),
+                       .iflags(eflags), .cycle_mode(cycle_mode), .uop(v_d_ref));
+`endif
+`else
   // R1 phase-3: the fast-path decoder is now the `decode` leaf module
   // (rtl/core/decode.sv), instantiated once per slot (U + V candidate). The
   // byte windows are gathered combinationally below (U at flin, V at flin+lenU),
@@ -2939,6 +3017,7 @@ module core
       .ib0(vb[0]), .ib1(vb[1]), .ib2(vb[2]), .ib3(vb[3]), .ib4(vb[4]), .ib5(vb[5]),
       .iflags(eflags), .cycle_mode(cycle_mode), .uop(v_d)
   );
+`endif
 
   // R1 phase-3: the pairing checker is now the `issue_uv` leaf module
   // (rtl/core/issue_uv.sv). pipe_pair_ok is the bare can-pair RULES decision;
@@ -3525,7 +3604,10 @@ module core
       // M6 Erratum 20: FIST[P] m16int/m32int (NOT m64) miss the overflow on
       // the documented positive operands in nearest/up rounding -> store ZERO,
       // no IE. fx_to_int_errata reproduces that when errata_en[ERR_FIST] is set;
-      // otherwise it is identical to fx_to_int_ex (clean core unchanged).
+      // otherwise it is identical to fx_to_int_ex (clean core unchanged). The
+      // three widths are kept as SEPARATE constant-width calls on purpose: the
+      // constant `width` lets synth constant-fold each conversion's range-check
+      // (a runtime-width merge measured +8.8K LUT, defeating that folding).
       FX_FIST_M16: begin
         ri = errata_en[ERR_FIST] ? fx_to_int_errata(s0, 16, fctrl[11:10])
                                  : fx_to_int_ex     (s0, 16, fctrl[11:10]);
@@ -4264,6 +4346,53 @@ module core
     .tch2_tag  (ic_tch2_tag)
   );
 
+`ifdef VEN_UOPCACHE
+  // ===========================================================================
+  // P0-11 PREDECODE-ON-FILL plumbing + the µop-cache instance.
+  //
+  // Accumulate the S_PF refill burst (word 0 from the S_PIPE-miss arm, words 1..7
+  // from S_PF) into a 256-bit line buffer; when the fill COMPLETES (ic_fill_done,
+  // word 7), pulse the predecode walker NEXT clock with the assembled line — by
+  // then word 7 has landed in pf_line_buf. The walker re-runs decode.sv over the
+  // line boundary-by-boundary (off the fast path), so this latency is part of the
+  // cold-line imiss tail. inv_en at fill_done clears the (set,way) predecode-valid
+  // so the resident-but-not-yet-predecoded window correctly reads uop_hit=0.
+  // ===========================================================================
+  logic [IC_LINE*8-1:0] pf_line_buf;
+  logic                 pd_start_r;
+  logic [6:0]           pd_set_r;
+  logic                 pd_way_r;
+  logic [31:0]          pd_flags_r;
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      pd_start_r <= 1'b0;
+    end else begin
+      pd_start_r <= 1'b0;
+      if (ic_fill_en) begin
+        pf_line_buf[{ic_fill_off,3'b000} +: 32] <= ic_fill_data;
+        if (ic_fill_done) begin
+          pd_start_r <= 1'b1;
+          pd_set_r   <= ic_fill_set;
+          pd_way_r   <= ic_fill_way;
+          pd_flags_r <= eflags;
+        end
+      end
+    end
+  end
+
+  uopcache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE), .NSLOT(NSLOT)) u_uopcache (
+    .clk(clk), .rst_n(rst_n),
+    .rd_setA(ic_rd_setA), .rd_wayA(ic_rd_wayA),
+    .rd_slotsA(uc_slotsA), .rd_bvalidA(uc_bvA), .rd_bslotA(uc_bsA), .rd_pdvalidA(uc_pdvA),
+    .rd_setB(ic_rd_setB), .rd_wayB(ic_rd_wayB),
+    .rd_slotsB(uc_slotsB), .rd_bvalidB(uc_bvB), .rd_bslotB(uc_bsB), .rd_pdvalidB(uc_pdvB),
+    .pd_start(pd_start_r), .pd_set(pd_set_r), .pd_way(pd_way_r),
+    .pd_line(pf_line_buf), .pd_flags(pd_flags_r), .pd_cycle_mode(cycle_mode),
+    .inv_en(ic_fill_done), .inv_set(ic_fill_set), .inv_way(ic_fill_way),
+    .pd_busy()
+  );
+`endif
+
   // ===========================================================================
   // x87 architectural STATE FILE (fpu_top, R2) — module ports + write driver.
   //
@@ -4405,7 +4534,20 @@ module core
     // the CURRENT fstat (sticky-OR; nothing else writes fstat this clock because a
     // consumer that would is scoreboard-stalled past the in-flight window).
     if (fpp_valid) begin
+`ifdef VEN_SRT_ITER
+      // P0-13 FP area: use the SPLIT eval (f_eval_s1 front -> f_eval_s2 round).
+      // The full f_eval builds fx_add's AND fx_mul's fx_round_pack cones (two
+      // 128-bit normalize/round trees); the split muxes the two FRONTS and runs
+      // ONE shared round_pack -> drops a whole round cone. BIT-EXACT for add/sub/
+      // mul (verif/fppipe gate, 1M vectors). SAFE ONLY under +VEN_SRT_ITER: there
+      // the iterative engine OWNS divide (normal divides are engine-routed; div is
+      // never deferred to this commit port), so f_eval_s1's div-returns-0 default
+      // is unreachable. Without VEN_SRT_ITER, divide DOES defer here -> keep the
+      // full f_eval (below). Combinational s1->s2, same 1-clock defer as before.
+      automatic logic [82:0] pp_arf = f_eval_s2(f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err), fpp_rc);
+`else
       automatic logic [82:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err);
+`endif
       fp_we_wabs       = 1'b1;
       fp_wabs_idx      = fpp_dst;
       fp_wabs_data     = pp_arf[79:0];
