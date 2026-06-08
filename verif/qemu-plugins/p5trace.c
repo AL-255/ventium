@@ -60,6 +60,10 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #define P5_MISPREDICT_U       3     /* cond mispredict, branch in U-pipe         */
 #define P5_MISPREDICT_V       4     /* cond mispredict, branch in V-pipe         */
 #define P5_MISPREDICT_UNCOND  3     /* taken JMP/CALL mispredict                  */
+#define P5_FP_ISSUE_OCC       2     /* GAP1/VEN_FP_OVERLAP: U-pipe dispatch slot an
+                                       FP op consumes (the integer pipe is held only
+                                       this long; the long FP exec window lives on
+                                       fp_busy_until so integer ops overlap it).   */
 
 /* L1 geometry (P54C): 8 KB, 2-way, 32-byte line => 128 sets each. */
 #define L1_SIZE      8192
@@ -142,6 +146,8 @@ static struct {
     int64_t  reg_ready[R_N]; /* cycle each GP reg value is ready (RAW)             */
     int64_t  reg_wcycle[R_N];/* cycle each GP reg was last written (AGI)           */
     int64_t  fp_ready;       /* cycle x87 top-of-stack result is ready (FP chains) */
+    int64_t  fp_busy_until;  /* GAP1: cycle the single x87 exec unit is free again */
+    bool     fp_overlap;     /* GAP1/VEN_FP_OVERLAP gate (argv fpovl=1). default 0 */
     uint64_t pending_mem_pen;/* D-cache penalty from prev insn's mem access        */
     /* deferred branch resolution */
     bool     pend_branch;
@@ -435,8 +441,12 @@ static void p5_insn_exec(unsigned int cpu, void *ud)
 
     /* operand readiness (RAW) */
     int64_t ready = 0;
+    bool is_fp = (ii->fp_role >= 1);   /* any x87 producer/consumer/rmw (NOT FXCH=0) */
     for (int r=0;r<R_N;r++) if ((ii->reads>>r)&1) if (g.reg_ready[r]>ready) ready=g.reg_ready[r];
     if (ii->fp_role>=2 && g.fp_ready>ready) ready=g.fp_ready;  /* x87 top-of-stack dep */
+    /* GAP1: a FOLLOWING FP op waits until the single x87 exec unit is free (the FDIV
+       shadow). Integer ops never enter this branch, so they overlap the shadow. */
+    if (g.fp_overlap && is_fp && g.fp_busy_until>ready) ready=g.fp_busy_until;
 
     /* try to pair into the current group's V slot */
     bool paired = false;
@@ -468,7 +478,20 @@ static void p5_insn_exec(unsigned int cpu, void *ud)
         g.grp_cycle = issue;
         g.grp_u = ii;
         g.grp_vfree = ii->pairs_first;
-        g.pipe_free_at = issue + ii->occ;
+        if (g.fp_overlap && is_fp) {
+            /* GAP1 SPLIT: the integer pipe is freed after only the short dispatch
+               slot (min(occ, P5_FP_ISSUE_OCC) — short FP ops like fld/fst occ<=2 are
+               unchanged; only the long FDIV/FSQRT cap to the +2 dispatch), while the
+               full occ-long exec window lives on fp_busy_until -> the following
+               INTEGER groups issue in the FDIV shadow. (x87 ops are NP, so this
+               new-group path is the only place fp_busy_until is written.) */
+            int64_t isl = (ii->occ < (uint32_t)P5_FP_ISSUE_OCC) ? (int64_t)ii->occ
+                                                                : (int64_t)P5_FP_ISSUE_OCC;
+            g.fp_busy_until = (int64_t)issue + ii->occ;      /* exec window (39 for fdiv) */
+            g.pipe_free_at  = issue + isl;                   /* integer pipe free at +min */
+        } else {
+            g.pipe_free_at = issue + ii->occ;                /* UNCHANGED default path    */
+        }
         for (int r=0;r<R_N;r++) if((ii->writes>>r)&1){
             g.reg_ready[r]=issue+ii->lat; g.reg_wcycle[r]=issue;
         }
@@ -590,6 +613,7 @@ int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_t *info,
         else if (!strncmp(a,"dmiss=",6)) g.dmiss = atoi(a+6);
         else if (!strncmp(a,"cache=",6)) g.model_cache = atoi(a+6);
         else if (!strncmp(a,"bytes=",6)) g.emit_bytes = atoi(a+6);
+        else if (!strncmp(a,"fpovl=",6)) g.fp_overlap = atoi(a+6);
     }
     g.out = outpath ? fopen(outpath,"w") : stderr;
     if (!g.out) { fprintf(stderr,"p5trace: cannot open out=%s\n", outpath?outpath:""); g.out = stderr; }

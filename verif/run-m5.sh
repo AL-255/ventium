@@ -86,6 +86,10 @@ BUILD="$ROOT/build"
 M5="$BUILD/m5"
 TB_DIR="$ROOT/verif/tb"
 TB_BIN="$TB_DIR/obj_dir/tb_ventium"
+# GAP1: a SECOND tb built with +VEN_FP_OVERLAP (separate obj_dir so it never
+# clobbers the canonical obj_dir/tb_ventium). Used ONLY by kernels whose manifest
+# sets "fpovl": true (mb_fdivint) — graded against the fpovl=1 oracle golden.
+TB_BIN_FPOVL="$TB_DIR/obj_dir_fpovl/tb_ventium"
 
 M5_METRICS="$ROOT/verif/m5_metrics.py"
 
@@ -109,6 +113,9 @@ M5_CACHE_KERNELS="mb_dmiss mb_imiss"
 M5_DIV_KERNELS="mb_div8 mb_div16 mb_div32 mb_idiv32"
 M5_MUL_KERNELS="mb_mul mb_imul2"
 M5_PAIR_KERNELS="mb_accimm mb_rmimm mb_sh1 mb_nearbr"
+# GAP1 FP/integer-overlap kernels (manifest fpovl:true) — graded against the
+# fpovl=1 oracle with the +VEN_FP_OVERLAP tb (TB_BIN_FPOVL).
+M5_FPOVL_KERNELS="mb_fdivint"
 # INFO kernels: reported, never gate.
 INFO_KERNELS="mb_agiloop"
 
@@ -220,6 +227,29 @@ run_kernel() {
     X87="$(manifest_get "$MF" x87)"         || X87="false"
     SRC="$TESTS_DIR/$SRC_REL"
 
+    # GAP1: kernels with manifest "fpovl": true are graded against the SPLIT-timeline
+    # oracle (p5trace fpovl=1) using the +VEN_FP_OVERLAP tb (TB_BIN_FPOVL, built on
+    # demand into obj_dir_fpovl). Every other kernel keeps the default golden + tb,
+    # so the existing bands are byte/cycle-identical.
+    local FPOVL P5_EXTRA KTB
+    FPOVL="$(manifest_get "$MF" fpovl)" || FPOVL="false"
+    P5_EXTRA=""; KTB="$TB_BIN"
+    if [ "$FPOVL" = "True" ] || [ "$FPOVL" = "true" ]; then
+        P5_EXTRA=",fpovl=1"; KTB="$TB_BIN_FPOVL"
+        if [ ! -x "$KTB" ]; then
+            info "building +VEN_FP_OVERLAP tb (obj_dir_fpovl)…"
+            ( cd "$TB_DIR" && make rtl VL_EXTRA_DEFINES="+define+VEN_FP_OVERLAP" \
+                  OBJDIR=obj_dir_fpovl ) > "$M5/${NAME}_tbbuild.log" 2>&1 || {
+                info "overlap tb build failed:"; sed 's/^/      /' "$M5/${NAME}_tbbuild.log" | head -6
+                K_NAME+=("$NAME"); K_CLASS+=("$CLASS"); K_VERD+=("FAIL")
+                K_CPI+=("-"); K_PAIR+=("-"); K_EXTRA+=("-"); K_ABS+=("-")
+                K_BAND+=("overlap tb build failed"); K_CMP+=("-")
+                [ "$GATED" = "1" ] && CYCLE_OK=0
+                return
+            }
+        fi
+    fi
+
     ELF="$M5/${NAME}.elf"; FLAT="$M5/${NAME}.flat"
     GOLD="$M5/${NAME}_gold.vtrace"; RTL="$M5/${NAME}_rtl.vtrace"
     CMP="$M5/${NAME}_cmp.txt";      MET="$M5/${NAME}_metrics.txt"
@@ -270,7 +300,7 @@ run_kernel() {
     }
 
     # 2) GOLDEN cycle vtrace via p5trace.so (the cycle oracle). FAST (no gdbstub).
-    if ! "$QEMU" -cpu pentium -plugin "$P5TRACE,out=$GOLD" "$ELF" \
+    if ! "$QEMU" -cpu pentium -plugin "$P5TRACE,out=$GOLD$P5_EXTRA" "$ELF" \
             > "$M5/${NAME}_gold.log" 2>&1; then
         info "p5trace golden generation failed:"; sed 's/^/      /' "$M5/${NAME}_gold.log" | head -6
         K_NAME+=("$NAME"); K_CLASS+=("$CLASS"); K_VERD+=("FAIL")
@@ -311,7 +341,7 @@ except Exception:
 PY
 )"
     info "golden records : $GN"
-    if ! "$TB_BIN" --image "$FLAT" --load "$LOAD" --entry "$ENTRY" \
+    if ! "$KTB" --image "$FLAT" --load "$LOAD" --entry "$ENTRY" \
             --init-esp "$INIT_ESP" --cycle $TB_X87FLAG --out "$RTL" \
             --max-insn "$GN" --max-cycles 80000000 \
             > "$M5/${NAME}_rtl.log" 2>&1; then
@@ -392,6 +422,8 @@ for k in $M5_CACHE_KERNELS; do run_kernel "$k" CACHE 1; done
 for k in $M5_DIV_KERNELS;   do run_kernel "$k" DIV   1; done
 for k in $M5_MUL_KERNELS;   do run_kernel "$k" MUL   1; done
 for k in $M5_PAIR_KERNELS;  do run_kernel "$k" PAIR  1; done
+# (g) GAP1 FP/integer-overlap band (VEN_FP_OVERLAP, fpovl=1 oracle + obj_dir_fpovl tb).
+for k in $M5_FPOVL_KERNELS; do run_kernel "$k" FP    1; done
 # INFO kernels.
 for k in $INFO_KERNELS;     do run_kernel "$k" INFO  0; done
 

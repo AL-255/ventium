@@ -116,6 +116,14 @@ DIV_OCC = {"div8": 17, "div16": 25, "div32": 41, "idiv32": 46}
 MUL_CPI_MIN = 1.8
 MUL_OCC = {"mul": 10, "imul2": 10}
 
+# GAP1 FP/integer-overlap band (VEN_FP_OVERLAP, mb_fdivint). The kernel is an FDIV
+# (occ 39) followed by 32 independent integer adds + a trailing FP producer. With
+# the overlap modeled the adds retire IN the FDIV shadow -> CPI ~1.33; the
+# SERIALIZED default (adds behind occ=39) lands at CPI ~1.73. The ceiling sits
+# between them so a non-overlap RTL fails the "overlap present" half; the abs-cyc
+# half pins the RTL to the fpovl=1 golden (a non-overlap RTL is ~+29% -> also FAIL).
+FDIVINT_CPI_MAX = 1.50
+
 # AP-500 fast-path PAIRING-coverage band (review-response, fastpath-coverage-spec
 # .md). A converted form must actually PAIR (issue into the V pipe) where it
 # previously serialized on the slow FSM. The kernel alternates a converted U-form
@@ -310,6 +318,28 @@ def compute(kernel, rtl_path, golden_path, abs_tol_pct=DEFAULT_ABS_TOL_PCT):
         detail = (f"fast-path pairing present (pairing% {pairing:.1f} >= "
                   f"{PAIR_MIN})? {paired_ok}; abs-cyc {d:+.2f}% vs p5model "
                   f"(<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
+        return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
+
+    if short == "fdivint":
+        # GAP1 TWO-part band (VEN_FP_OVERLAP): (1) the FDIV/integer OVERLAP is present
+        # — CPI below the serialized-default ceiling (a non-overlap RTL serializes the
+        # 32 adds behind the FDIV occ=39 -> CPI ~1.73 > the ceiling); (2) abs-cyc
+        # tracks the fpovl=1 split-timeline golden within tolerance (a non-overlap RTL
+        # is ~+29% -> also fails). Both pin the overlap quantitatively.
+        try:
+            gold = tracefmt.read_trace(golden_path)
+            gold_total = _total_cyc(gold)
+        except Exception as e:
+            return ("FAIL", cpi_s, pair_s, "abscyc=?",
+                    f"golden trace unreadable ({e}) — cannot check abs-cyc")
+        d = _abs_diff_pct(total, gold_total)
+        overlapped = cpi <= FDIVINT_CPI_MAX
+        tracked = abs(d) <= abs_tol_pct
+        ok = overlapped and tracked
+        extra = f"abscyc={d:+.2f}%"
+        detail = (f"FDIV/int overlap present (CPI {cpi:.3f} <= {FDIVINT_CPI_MAX}, "
+                  f"vs ~1.73 serialized)? {overlapped}; abs-cyc {d:+.2f}% vs fpovl=1 "
+                  f"p5model (<= {abs_tol_pct:.0f}%)? {tracked}; both? {ok}")
         return ("PASS" if ok else "FAIL"), cpi_s, pair_s, extra, detail
 
     # Unknown kernel: report metrics, no band (INFO).
