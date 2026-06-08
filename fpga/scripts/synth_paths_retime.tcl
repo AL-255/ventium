@@ -5,17 +5,17 @@
 # -nworst gives DISTINCT cones, not N endpoints of one cone). Synth-only (no
 # place) — fast; 15 ns target so slack reads against 66.7 MHz.
 #
-# Run:  vivado -mode batch -source fpga/scripts/synth_paths_narrowb.tcl -notrace
+# Run:  vivado -mode batch -source fpga/scripts/synth_paths_retime.tcl -notrace
 # =====================================================================
 set ROOT [pwd]
 if {![file exists $ROOT/rtl/core/core.sv]} {
     set ROOT [file normalize [file join [file dirname [info script]] .. ..]]
 }
 set RTL  $ROOT/rtl
-set OUT  $ROOT/fpga/build/paths_narrowb
+set OUT  $ROOT/fpga/build/paths_retime
 file mkdir $OUT
 set PART xck26-sfvc784-2LV-c
-create_project -in_memory -part $PART probe_paths_narrowb
+create_project -in_memory -part $PART probe_paths_retime
 
 set svfiles {
     ventium_pkg.sv core/ventium_alu_pkg.sv core/ventium_decode_pkg.sv
@@ -30,8 +30,8 @@ set fh [open $xdc w]; puts $fh "create_clock -period 15.000 -name clk \[get_port
 read_xdc $xdc
 
 synth_design -top core -part $PART -mode out_of_context -include_dirs $RTL/core \
-    -verilog_define {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE VEN_IC_NARROWB} \
-    -flatten_hierarchy rebuilt
+    -verilog_define {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE} \
+    -flatten_hierarchy rebuilt -retiming
 report_utilization -file $OUT/util.rpt
 report_timing_summary -max_paths 10 -delay_type max -file $OUT/timing_summary.rpt
 # DISTINCT cones: -unique_pins => at most one path per unique pin set; -nworst 1
@@ -39,8 +39,3 @@ report_timing_summary -max_paths 10 -delay_type max -file $OUT/timing_summary.rp
 report_timing -max_paths 40 -nworst 1 -unique_pins -sort_by group -input_pins \
     -delay_type max -file $OUT/timing_paths_distinct.rpt
 puts "PROBE_PATHS_FPPIPE_DONE"
-opt_design
-place_design -directive AltSpreadLogic_high
-report_design_analysis -congestion -file $OUT/congestion_placed.rpt
-report_timing_summary -max_paths 4 -delay_type max -file $OUT/timing_placed_fp.rpt
-puts "NARROWB_PLACED_DONE"

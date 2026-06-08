@@ -33,7 +33,7 @@ read_xdc $xdc
 # BEST config: all iter engines + FP pipeline + BTB pipeline (+VEN_BTB_PIPE is the
 # removable option). Compare-consolidation is in the default RTL.
 synth_design -top core -part $PART -mode out_of_context -include_dirs $RTL/core \
-    -verilog_define {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE} \
+    -verilog_define {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE VEN_IC_NARROWB} \
     -flatten_hierarchy rebuilt
 opt_design
 place_design -directive ExtraTimingOpt

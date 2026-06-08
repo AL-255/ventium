@@ -465,3 +465,49 @@ NOT a placement problem. The real congestion lever is RTL: narrow that read (few
 combinational read positions / a fetch‑buffer stage), which is the same
 front‑end‑pipelining class flagged for the eip loop — or close timing at full‑SoC
 integration where the core is one floorplanned block. _Captured 2026‑06‑07._
+
+## P0‑7 — narrow icache rd_lineB (+VEN_IC_NARROWB) → SYNTH 59.5→64.1 MHz, placed wall holds
+The straddle line `rd_lineB` is only ever sliced by `ic_byte` at LOW byte positions:
+the fast‑path window reads `ub[i]=byte(flin+i)` (i≤5) and `vb[i]=byte(flin+u_d.len+i)`
+(u_d.len≤6, i≤5), so the worst‑case straddle byte is `flin[4:0]=31 + len 6 + i 5 −
+32 = position 10`. Behind `+VEN_IC_NARROWB` (rtl/mem/icache.sv) we drive only the
+LOW 128 bits of `rd_lineB` and tie the high 128 to 0, so Vivado prunes HALF of that
+256‑deep distributed‑RAM read port. The pruned high bytes are NEVER sliced → fetched
+bytes BIT‑IDENTICAL (verified `make verify` + `make m3` cycle‑identical; mb_imiss
++0.03 % noise).
+
+Measured (best config + `+VEN_IC_NARROWB`, 15 ns OOC, `synth_paths_narrowb.tcl`):
+* **LUT as memory 4096 → 3072** (‑1024, the dropped high‑128 LUTRAM); **MUXF7 16235
+  → 14457, MUXF8 7147 → 6202** (‑12 %).
+* **Synth WNS −1.808 → −0.587 ns ⇒ 59.5 → 64.1 MHz.** The icache is now OFF the
+  synth critical path — the worst synth cone is the FP deferred‑commit
+  `fpp_a_reg[68] → u_fpu_state/fpr_reg[*][78]` (15.584 ns, logic 6.75 / route 8.83).
+* **Placed Fmax UNCHANGED — 47.6 MHz** (WNS −6.008 @ 15 ns, AltSpreadLogic_high) and
+  **congestion still level‑5 / 99 % u_icache, MUXF 58‑62 %.** Narrowing rd_lineB cut
+  the read‑port WIDTH (the synth win) but not the 256:1 read‑mux DEPTH, and the
+  binding cone is the irreducible `rd_lineA` 256:1 read (every byte position 0..31 of
+  line A is reachable depending on `flin[4:0]`, so it can't be statically narrowed
+  like the straddle line).
+
+**Read‑narrowing is now exhausted at the PLACED level.** The remaining levers, in
+order of fidelity‑safety:
+1. **Full‑SoC context (recommended, no fidelity risk):** OOC places the device‑filling
+   core (76 % LUTs) with the icache MUXF crammed into one band and nowhere to spread.
+   In the full SoC the PS owns most peripherals/L1 backing, the core is one
+   floorplanned region with slack around it, and the MUXF congestion relaxes. The
+   README already commits the 66 MHz closure to integration. _This does not require
+   any RTL change._
+2. **Microarchitectural fetch pipeline (BRAM + registered read):** move the L1 data
+   array to BRAM (RAMB, 144 free, currently 0) with a SYNCHRONOUS read — this
+   dissolves the MUXF congestion entirely (MUXF→0). The cost is +1 fetch‑latency
+   cycle, so the fast path must register the fetched window and the cycle oracle
+   (p5trace) must model the prefetch‑stage latency. This is arguably MORE faithful to
+   the real P5 (which pipelines PF→D1) than the current same‑cycle async read, but it
+   is a substantial change: restructure the fast path + re‑verify EVERY cycle band.
+   The same‑cycle‑ack distributed‑RAM contract (fpga/L1_AXI_DESIGN.md §1) was chosen
+   for simplicity; this is the one place where breaking it buys real Fmax.
+
+A barrel‑shift restructure of the ub/vb byte windows was analysed and REJECTED: a
+shared 12‑byte aligned window is itself 12×32:1 (the shift) PLUS 6×7:1 (the vb
+extract) = MORE MUXF than the current 12×32:1 independent selects. The 12 byte
+windows for 12 needed bytes are already minimal. _Captured 2026‑06‑07._

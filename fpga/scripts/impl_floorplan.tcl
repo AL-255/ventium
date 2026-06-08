@@ -32,7 +32,7 @@ set fh [open $xdc w]; puts $fh "create_clock -period 22.000 -name clk \[get_port
 read_xdc $xdc
 
 synth_design -top core -part $PART -mode out_of_context -include_dirs $RTL/core \
-    -verilog_define {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE} \
+    -verilog_define {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE VEN_IC_NARROWB} \
     -flatten_hierarchy rebuilt
 opt_design
 puts "FLOORPLAN: place_design -directive AltSpreadLogic_high ..."

@@ -155,12 +155,14 @@ vs QEMU** (75/75 functional + the cycle micro-gates green):
   combinational Pentium datapath was 5.2× too big for the device; **iterative
   FDIV / FSQRT / integer-DIV / FBSTP / FBLD engines**, **LUTRAM caches**, and
   **FP-datapath consolidation** brought it comfortably under the XCK26.
-- **Fmax: synth ≈ 59.5 MHz** (worst-path *logic* down to ~6 ns), **placed ≈ 47 MHz**
-  (ExtraTimingOpt). The **66 MHz** target is **not yet met out-of-context** — the
-  remaining gap is **routing/congestion**, not logic: the worst path is the
-  architectural fetch loop (`eip → eip`) at ~62 % routing on a device-filling core,
-  to be closed with floorplanning during full-SoC integration. Synth journey:
-  3.6 → 14.6 → 37.5 → 46 → 58 → 59.5 MHz.
+- **Fmax: synth ≈ 64.1 MHz** (worst-path *logic* down to ~6.8 ns; the icache is off
+  the synth critical path, which is now the pipelined FP commit), **placed ≈ 47.6 MHz**
+  (AltSpreadLogic_high). The **66 MHz** target is **not yet met out-of-context** — the
+  remaining gap is **routing/congestion**, not logic: the placed wall is the icache's
+  same-cycle distributed-RAM read-mux (level-5, 99 % `u_icache` MUXF) on a
+  device-filling OOC core, to be closed with floorplanning during full-SoC integration
+  (where the core is one block with slack around it). Synth journey:
+  3.6 → 14.6 → 37.5 → 46 → 58 → 59.5 → 64.1 MHz.
 - A **2-stage FP execute pipeline** (`+VEN_FP_PIPE`) and a **BTB-update pipeline**
   (`+VEN_BTB_PIPE`, independently removable) move FP and the branch predictor off
   the critical path while keeping **both FP cycle bands and the branch-mispredict
