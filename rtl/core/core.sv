@@ -2849,6 +2849,26 @@ module core
   logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
   logic [7:0]  vb [6];               // V candidate decode bytes (at eip+lenU)
 
+`ifdef VEN_DEC_PIPE
+  // +VEN_DEC_PIPE step 2: the PREFETCH byte queue (shadow — the OLD single-cycle
+  // ub/vb decode stays authoritative this step; we only prove the queue tracks the
+  // exact byte stream). A 16-byte registered window [iq_base, iq_base+16): iq[i] holds
+  // the (present) byte at linear iq_base+i for i < iq_cnt. The READ offset is DERIVED
+  // COMBINATIONALLY each clock — iq_head = flin - iq_base — so the extracted window
+  // iq[iq_head+0..11] is ALWAYS aligned to the current flin (no one-cycle lag, no
+  // invasive next-eip weaving). The registered side prefetches WORDS ahead from pfpc
+  // (an 8:1 word select off the icache line, NOT the 32:1 byte shift) and SLIDES the
+  // base forward to keep flin near the window start; a redirect (flin jumps out of
+  // the window) FLUSHES + refills. D1/D2 (steps 3-4) read iq[iq_head+0..11] instead of
+  // the 256-bit line — that is where the MUXF congestion leaves the critical cone.
+  logic [7:0]  iq [16];              // registered byte window, iq[i] = present byte at iq_base+i
+  logic [4:0]  iq_cnt;               // leading present bytes held (0..16)
+  logic [31:0] iq_base;              // linear addr of iq[0]
+  logic [31:0] pfpc;                 // next linear byte to prefetch (= iq_base + iq_cnt)
+  logic [4:0]  iq_head;              // flin's offset into the window (= flin - iq_base), comb
+  logic        iq_covers;            // iq holds flin..flin+11 (the decode window; assertion valid)
+`endif
+
   // M2S.1: the FETCH LINEAR address. The architectural `eip` carries the
   // segment OFFSET (the value reported as `pc` in the trace); the bytes are
   // fetched from linear = CS.base + eip. In user mode (and any flat segment)
@@ -2930,6 +2950,64 @@ module core
     for (int i=0;i<6;i++) ub[i] = ic_present(flin+i[31:0]) ? ic_byte(flin+i[31:0]) : 8'd0;
     for (int i=0;i<6;i++) vb[i] = ic_byte(flin+{28'd0,u_d.len}+i[31:0]);
   end
+
+`ifdef VEN_DEC_PIPE
+  // ---- +VEN_DEC_PIPE step 2: prefetch queue (shadow; old ub/vb stays authoritative)
+  // combinational read offset + coverage at the CURRENT flin (no one-cycle lag).
+  always_comb begin
+    logic [31:0] off;
+    off = flin - iq_base;
+    iq_head   = off[4:0];
+    iq_covers = (off < 32'd16) && ((off + 32'd12) <= {27'd0, iq_cnt});
+  end
+
+  // registered prefetch: slide the base toward flin, refill ahead, flush on redirect.
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      iq_base <= 32'd0; iq_cnt <= 5'd0; pfpc <= 32'd0;
+      for (int i=0;i<16;i++) iq[i] <= 8'd0;
+    end else begin
+      logic [31:0] off, nb, p2; logic [4:0] sl, c2; logic [7:0] tmp [16];
+      off = flin - iq_base;
+      if (off >= 32'd16) begin                      // FLUSH (redirect / cold / first fetch)
+        nb = flin; c2 = 5'd0;
+        for (int i=0;i<16;i++) tmp[i] = 8'd0;
+      end else begin                                 // SLIDE base by off (drop consumed) once off>=4
+        sl = (off >= 32'd4) ? off[4:0] : 5'd0;
+        nb = iq_base + {27'd0, sl};
+        c2 = (iq_cnt > sl) ? (iq_cnt - sl) : 5'd0;
+        for (int i=0;i<16;i++) tmp[i] = ((i + sl) < 16) ? iq[i + sl] : 8'd0;
+      end
+      p2 = nb + {27'd0, c2};
+      // PREFETCH present bytes from p2 to fill 16 (greedy shadow; step 4 caps the rate
+      // to a word/clock). Presence is a contiguous prefix (per-line), so stop at the
+      // first non-present byte — iq then holds exactly the resident prefix, == ub[].
+      for (int k=0;k<16;k++)
+        if (c2 < 5'd16 && ic_present(p2)) begin
+          tmp[c2] = ic_byte(p2); c2 = c2 + 5'd1; p2 = p2 + 32'd1;
+        end
+      for (int i=0;i<16;i++) iq[i] <= tmp[i];
+      iq_base <= nb; iq_cnt <= c2; pfpc <= p2;
+    end
+  end
+
+  // sim-only MIRROR assertion: while the window covers the decode span, the queue
+  // bytes MUST equal the old ub/vb stream (proves the prefetch tracks the bytes before
+  // any decode rewires to it). u_d.len<=6 so iq[head+len..+5] is inside the covered 12.
+  // synopsys translate_off
+  always_ff @(posedge clk) if (rst_n && iq_covers && state==S_PIPE) begin
+    logic [4:0] iu, iv;
+    for (int i=0;i<6;i++) begin
+      iu = iq_head + i[4:0];
+      iv = iq_head + u_d.len[3:0] + i[4:0];
+      if (ic_present(flin+i[31:0]) && iq[iu] !== ub[i])
+        $error("DEC_PIPE mirror U: iq[%0d]=%02x ub[%0d]=%02x @flin=%08x", iu, iq[iu], i, ub[i], flin);
+      if (ic_present(flin+{28'd0,u_d.len}+i[31:0]) && iq[iv] !== vb[i])
+        $error("DEC_PIPE mirror V: iq[%0d]=%02x vb[%0d]=%02x len=%0d", iv, iq[iv], i, vb[i], u_d.len);
+    end
+  end
+  // synopsys translate_on
+`endif
 
   decode u_decode (
       .ib0(ub[0]), .ib1(ub[1]), .ib2(ub[2]), .ib3(ub[3]), .ib4(ub[4]), .ib5(ub[5]),
