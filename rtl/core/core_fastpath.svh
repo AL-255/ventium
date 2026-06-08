@@ -79,6 +79,17 @@
             // (sub-step 2b prefetches predicted-taken targets to remove even that).
             agi_wr0<=9'h100; agi_wr1<=9'h100;   // bubble writes nothing
 `endif
+`ifdef VEN_DEC_PIPE
+          end else if (!iq_covers) begin
+            // +VEN_DEC_PIPE: the line is RESIDENT (pipe_bytes_ok) but the 12-byte decode
+            // window is not yet fully in the byte queue (the prefetch is refilling after
+            // a redirect / line fill). Burn a no-issue bubble; the prefetch appends 12
+            // B/clock so coverage returns in ~1 clock. In steady straight-line code the
+            // queue is always ahead (iq_covers stays high), so this never fires there —
+            // it is the decode-pipe fill bubble at redirects, the same class as the
+            // +VEN_IC_BRAM fetch bubble (hidden by the BTB-target prefetch + mispred bubbles).
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+`endif
           end else if (pending_mem_pen!=7'd0) begin
             // M5: a previous load's D-cache miss/misalign penalty is DEFERRED to
             // the next instruction (p5model g.pending_mem_pen folded into the next
