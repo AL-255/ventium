@@ -45,7 +45,11 @@
             // cannot create a phantom AGI hazard next clock.
             stall_cnt<=stall_cnt-7'd1;
             agi_wr0<=9'h100; agi_wr1<=9'h100;
-          end else if (!pipe_bytes_ok) begin
+          end else if (!pipe_bytes_ok
+`ifdef VEN_L1_AXI
+                       && !(real_bus && !mem_ack)   // word-0 not ready -> bubble arm below
+`endif
+                      ) begin
             // icache miss on the line(s) covering the current insn: fill the
             // missing line (eip's line first, else the straddle line — the line of
             // either the decode-window end or the instruction's last byte). Each
@@ -67,6 +71,16 @@
             pf_fill_addr <= pf_miss_fa;
             pf_fill_way  <= ~ic_lru_o[pf_miss_fa[11:5]];
             pf_word<=3'd1; state<=S_PF;
+`ifdef VEN_L1_AXI
+          end else if (!pipe_bytes_ok) begin
+            // P1-1 (real_bus): an icache miss whose fill WORD 0 the L1 has not yet
+            // returned (mem_ack=0 while ven_l1d bursts the line from AXI). Bubble in
+            // S_PIPE — capture nothing (ic_pf_miss_fill is gated the same way), do
+            // NOT launch S_PF — until mem_ack. This is the I-side mirror of the
+            // D-side load miss-stall. Reached only when real_bus && !mem_ack (the
+            // condition above excludes it); inert in modes 0/1, absent by default.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+`endif
 `ifdef VEN_IC_BRAM
           end else if (!ic_fetch_ready) begin
             // +VEN_IC_BRAM: the line(s) for this insn are RESIDENT (pipe_bytes_ok) but
@@ -89,6 +103,16 @@
             stall_cnt<=pending_mem_pen-7'd1;
             pending_mem_pen<=7'd0;
             agi_wr0<=9'h100; agi_wr1<=9'h100;
+`ifdef VEN_L1_AXI
+          end else if (real_bus && pipe_load_req && !mem_ack) begin
+            // P1-1: bus_mode=2 stalling L1 — a register-base load MISSED (mem_ack=0
+            // while ven_l1d fills its line from AXI). The ISSUE arm below latches
+            // gpr<=mem_rdata UNCONDITIONALLY (the same-cycle-BFM assumption), so
+            // bubble the WHOLE issue until the fill completes and mem_ack rises; then
+            // the load issues with valid data. Mirrors the !ic_fetch_ready bubble.
+            // Inert in modes 0/1 (real_bus=0), absent in the default build.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+`endif
 `ifdef VEN_FP_PIPE
           end else if (fp_pipe_rd_haz) begin
             // +VEN_FP_PIPE: the deferred arith result is being committed to fpr
@@ -263,7 +287,15 @@
                 pen = 7'd0;
                 if (!dc_lu_hit)                     pen = pen + P5_DMISS;
                 if (gpr[u_d.base][1:0] != 2'b00)    pen = pen + P5_MISALIGN;
+`ifdef VEN_L1_AXI
+                // bus_mode=2: the REAL DDR latency is the only timing source — the
+                // miss-stall gate already held the load for the actual fill. Suppress
+                // the MODELED P5 penalty so it doesn't double-count (and stall-pile
+                // toward the cosim cycle budget). mode-2 timing is functional-only.
+                pending_mem_pen <= real_bus ? 7'd0 : pen;
+`else
                 pending_mem_pen <= pen;
+`endif
               end
             end else if (u_d.is_shift) begin
               gpr[u_d.dst]<=u_sh;

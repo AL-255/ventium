@@ -61,6 +61,16 @@ module core
     // bit-for-bit unaffected by the pipeline. Tied 0 by default (lint-safe).
     input  logic        cycle_mode,
 
+`ifdef VEN_L1_AXI
+    // P1-1: high when the core's mem port sits behind the REAL (stalling) L1+AXI
+    // subsystem (ventium_top l1axi_en / bus_mode=2). It arms the fast-path
+    // MISS-STALL gates — the dual-issue fast path otherwise latches mem_rdata the
+    // same clock it asserts the request (the BFM's same-cycle-ack assumption), which
+    // a real L1 cannot honor on a miss. Tied 0 in bus modes 0/1; the whole port +
+    // its gates are absent in the default build (no VEN_L1_AXI) -> byte-identical.
+    input  logic        real_bus,
+`endif
+
     // M6: errata-enable bus (docs/m6-errata-spec.md). DEFAULT 0 = clean core
     // (M0-M5, bit-exact vs QEMU). When a bit is set, the core reproduces the
     // corresponding DOCUMENTED P5/P54C silicon defect (a "buggy stepping"). The
@@ -4256,9 +4266,18 @@ module core
     // S_PIPE word-0 fill arm: the 2nd S_PIPE else-if (stall_cnt==0, !pipe_bytes_ok),
     // gated by the !xlate_miss page-walk diversion. The bus asserts the fill's
     // word-0 read THIS clock (mem_addr = fill line base when pf_miss), so the word
-    // is captured here (no mem_ack guard, exactly the inline arm).
+    // is captured here. With a same-cycle BFM (modes 0/1) mem_ack is high this clock
+    // so no guard is needed; under the REAL stalling L1 (real_bus) the ven_l1d miss
+    // returns mem_ack=0 + combinational garbage for several clocks, so the capture
+    // (and the S_PIPE->S_PF advance, core_fastpath.svh) MUST wait for mem_ack — else
+    // every cold I-line latches garbage at boot. The `(!real_bus||mem_ack)` term is
+    // inert in modes 0/1 and absent in the default build.
     ic_pf_miss_fill = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
-                      !pipe_bytes_ok;
+                      !pipe_bytes_ok
+`ifdef VEN_L1_AXI
+                      && (!real_bus || mem_ack)
+`endif
+                      ;
 
     ic_fill_en   = 1'b0;
     ic_fill_done = 1'b0;
