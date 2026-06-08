@@ -155,12 +155,15 @@ M4/M5 cycle bands), the mode-0 canary**.
   UNALIGNED and CROSS-LINE reads (a cross-line miss fills L then L+1); aligned
   accesses are unchanged (L1D/L1AXI gates stay green). This took mode-2 equivalence
   from 34/77 (aligned-only) -> 76/77.
-* **VERIFY:** mode-0 vs mode-2 retire-trace equivalence across the microbench corpus
-  = **76/77 bit-identical** (incl. the t_*/tx_* ISA tests). The lone failure is
-  `tx_fsave` (FNSAVE: the 27-beat x87 state store stalls at beat ~12 in the cosim
-  AXI handshake — to isolate as RTL-master vs C++-slave; the RTL alone is
-  `L1AXI-GATE-OK`). Cross-line WRITES are handled conservatively (invalidate the
-  cached line; the backing got the bytes) — a write-back path is the later refinement.
+* **VERIFY: `verif/l1/run-l1axi-verify.sh` → L1AXI-VERIFY-OK = 77/77** mode-2 RTL
+  retire trace **bit-exact vs the QEMU golden** (the proper functional gate; reuses
+  `verify_worker.sh` + the mode-0 golden cache, TB_BIN=obj_dir_l1axi, `--l1-axi
+  --quiesce 200000`). A HIGH `--quiesce` is REQUIRED: a multi-cycle mode-2 access (an
+  L1 fill, the 27-beat FNSAVE) goes many clocks without a retire, which the default
+  `--quiesce 64` mistakes for an idle core (this — not any AXI stall — was the lone
+  ad-hoc-sweep "failure"; the AXI handshake completes cleanly every beat). Cross-line
+  WRITES are handled conservatively (invalidate the cached line; the backing got the
+  bytes byte-accurately) — a write-back path is the later refinement.
 
 ## 5. Reuse / replace
 * `dcache_timing.sv` — REUSE the tag/val/LRU SM; ADD the data array (its data path
