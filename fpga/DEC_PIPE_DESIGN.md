@@ -53,9 +53,13 @@ boundary at prefetch time, so the decoder never sees a boundary.
    exhaustively proven `fp_len==fp_decode.len` over all (b0,b1,cyc). ✅ DONE
    (`ventium_decode_pkg::fp_len`, `verif/decpipe/run-fplen-gate.sh` → FPLEN-GATE-OK;
    default build 75/75 byte-identical). The #1 silent-bug footgun is guarded.
-2. **Prefetch unit** — pfpc-driven 4-B/clock enqueue into `iq`; decode still on the OLD
-   path; sim-only assert `iq[head..+11]==old ub/vb` every issuing clock. Gate: queue-mirror
-   across bands + Quake 300k; zero cycle change.
+2. **Prefetch unit** ✅ DONE — a free-running 16-byte sliding-window queue (`iq`/`iq_cnt`/
+   `iq_base`/`pfpc` under `+VEN_DEC_PIPE`, core.sv); read offset `iq_head = flin - iq_base`
+   derived COMBINATIONALLY (no one-cycle lag, no next-eip weaving); prefetch refills ahead
+   + slides the base toward flin + flushes on redirect; decode STILL on the old path. The
+   sim-only MIRROR assertion (`iq[head+i]==ub/vb` while `iq_covers`) held with ZERO trips
+   across all 20 bands + 75 func programs + a Quake 200k lockstep (EQUIVALENT); zero cycle
+   change; default build byte-identical.
 3. **D1 capture** — register `d1_ub`/`d1_vb`, still issue from the live window; assert
    `d1_ub==ub`. No cycle change.
 4. **D2 switch + cut loose** — route decode/issue_uv from the REGISTERED window; advance
