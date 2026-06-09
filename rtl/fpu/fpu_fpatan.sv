@@ -112,7 +112,7 @@ module fpu_fpatan
       if (b<=a0) estDiv=64'hFFFFFFFFFFFFFFFF;
       else begin
         b0=b>>32;
-        z=({b0,32'd0} <= a0) ? 64'hFFFFFFFF00000000 : ((a0/b0)<<32);
+        z=((b0<<32) <= a0) ? 64'hFFFFFFFF00000000 : ((a0/b0)<<32);
         t128={64'd0,b}*{64'd0,z}; term0=t128[127:64]; term1=t128[63:0];
         rem128={a0,a1}-{term0,term1}; rem0=rem128[127:64]; rem1=rem128[63:0];
         for (int it=0; it<6; it++) begin
@@ -121,7 +121,7 @@ module fpu_fpatan
           rem128={rem0,rem1}+{b0,b1}; rem0=rem128[127:64]; rem1=rem128[63:0];
         end
         rem0=(rem0<<32)|(rem1>>32);
-        z = z | (({b0,32'd0} <= rem0) ? 64'h00000000FFFFFFFF : (rem0/b0));
+        z = z | (((b0<<32) <= rem0) ? 64'h00000000FFFFFFFF : (rem0/b0));
         estDiv=z;
       end
     end

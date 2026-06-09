@@ -51,6 +51,7 @@ fpu/ven_bcd_to_fp.sv
 // iterative x87 transcendental engine (F2XM1, #11) — instantiated by core.sv only
 // under +define+VEN_TRANSCENDENTAL; harmless (uninstantiated) in the default build.
 fpu/fpu_f2xm1.sv
+fpu/fpu_fpatan.sv
 
 // ---- mem ------------------------------------------------------------------
 mem/dcache_timing.sv

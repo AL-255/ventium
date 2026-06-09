@@ -1,0 +1,10 @@
+{
+  "name": "tx_fpatan",
+  "src": "tx_fpatan/tx_fpatan.s",
+  "elf": "tx_fpatan/tx_fpatan.elf",
+  "image": "tx_fpatan/tx_fpatan.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 80,
+  "x87": true
+}
