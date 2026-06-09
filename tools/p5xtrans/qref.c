@@ -550,6 +550,11 @@ static long double qfyl2x(long double st1_y, long double st0_x, int rc){
 static long double qfyl2xp1(long double st1_y, long double st0_x, int rc){
     uint64_t a0sig=x80_frac(st0_x); int32_t a0exp=x80_exp(st0_x); int a0sign=x80_sign(st0_x);
     uint64_t a1sig=x80_frac(st1_y); int32_t a1exp=x80_exp(st1_y); int a1sign=x80_sign(st1_y);
+    // out of range: |ST0| must be < 1-sqrt(2)/2 = 0.292... -> invalid (default NaN).
+    if (a0exp > 0x3ffd ||
+        (a0exp == 0x3ffd && a0sig > (a0sign ? 0x95f619980c4336f7ULL : 0xd413cccfe7799211ULL))){
+        return mk(0xffff, 0xc000000000000000ULL);
+    }
     if (x80_is_zero(st0_x) || x80_is_zero(st1_y) || a1exp==0x7fff){
         long double r; set_round(rc); r = st0_x * st1_y; set_round(0); return r;
     }

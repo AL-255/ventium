@@ -2026,7 +2026,9 @@ module core
                   8'hFA:        d_fxop=FX_FSQRT;              // D9 FA FSQRT
 `ifdef VEN_TRANSCENDENTAL
                   8'hF0:        d_fxop=FX_F2XM1;              // D9 F0 F2XM1 (#11)
+                  8'hF1:        d_fxop=FX_FYL2X;              // D9 F1 FYL2X (#11)
                   8'hF3:        d_fxop=FX_FPATAN;             // D9 F3 FPATAN (#11)
+                  8'hF9:        d_fxop=FX_FYL2XP1;            // D9 F9 FYL2XP1 (#11)
 `endif
                   default:      d_unknown=1'b1;  // transcendentals/F2XM1/etc deferred
                 endcase
@@ -5074,11 +5076,12 @@ module core
     // F2XM1 overwrites ST0 in place; FPATAN writes ST1 and POPS (result ends in
     // the new ST0), exactly like FDIVP ST1,ST0 (we_sti idx=1 + we_pop).
     if (state==S_TRSC_BUSY && eng_trsc_done) begin
-      if (q_fxop==FX_FPATAN) begin
+      if (q_fxop==FX_F2XM1) begin
+        fp_we_top=1'b1; fp_top_data=eng_trsc_result;            // in-place ST0
+      end else begin
+        // FPATAN / FYL2X / FYL2XP1: write ST1, then pop (result -> new ST0).
         fp_we_sti=1'b1; fp_wsti_idx=3'd1; fp_wsti_data=eng_trsc_result; fp_wsti_clr_tag=1'b0;
         fp_we_pop=1'b1;
-      end else begin
-        fp_we_top=1'b1; fp_top_data=eng_trsc_result;
       end
       if (eng_trsc_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end
       else if (eng_trsc_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
@@ -5271,8 +5274,11 @@ module core
   logic [79:0] eng_f2_result;
   logic        eng_fa_start, eng_fa_busy, eng_fa_done, eng_fa_pe, eng_fa_ie;
   logic [79:0] eng_fa_result;
+  logic        eng_fy_start, eng_fy_busy, eng_fy_done, eng_fy_pe, eng_fy_ie;
+  logic [79:0] eng_fy_result;
   assign eng_f2_start = (state==S_FEXEC) && (q_fxop==FX_F2XM1);
   assign eng_fa_start = (state==S_FEXEC) && (q_fxop==FX_FPATAN);
+  assign eng_fy_start = (state==S_FEXEC) && (q_fxop==FX_FYL2X || q_fxop==FX_FYL2XP1);
   fpu_f2xm1 u_f2xm1 (
     .clk(clk), .rst_n(rst_n), .start(eng_f2_start),
     .x(fst(3'd0)), .rc(fctrl[11:10]),
@@ -5285,10 +5291,20 @@ module core
     .busy(eng_fa_busy), .done(eng_fa_done), .result(eng_fa_result),
     .inexact(eng_fa_pe), .invalid(eng_fa_ie)
   );
-  assign eng_trsc_done   = (q_fxop==FX_FPATAN) ? eng_fa_done   : eng_f2_done;
-  assign eng_trsc_result = (q_fxop==FX_FPATAN) ? eng_fa_result : eng_f2_result;
-  assign eng_trsc_pe     = (q_fxop==FX_FPATAN) ? eng_fa_pe     : eng_f2_pe;
-  assign eng_trsc_ie     = (q_fxop==FX_FPATAN) ? eng_fa_ie     : eng_f2_ie;
+  fpu_fyl2x u_fyl2x (
+    .clk(clk), .rst_n(rst_n), .start(eng_fy_start),
+    .mode(q_fxop==FX_FYL2XP1), .y(fst(3'd1)), .x(fst(3'd0)), .rc(fctrl[11:10]),
+    .busy(eng_fy_busy), .done(eng_fy_done), .result(eng_fy_result),
+    .inexact(eng_fy_pe), .invalid(eng_fy_ie)
+  );
+  assign eng_trsc_done   = (q_fxop==FX_F2XM1) ? eng_f2_done :
+                           (q_fxop==FX_FPATAN) ? eng_fa_done : eng_fy_done;
+  assign eng_trsc_result = (q_fxop==FX_F2XM1) ? eng_f2_result :
+                           (q_fxop==FX_FPATAN) ? eng_fa_result : eng_fy_result;
+  assign eng_trsc_pe     = (q_fxop==FX_F2XM1) ? eng_f2_pe :
+                           (q_fxop==FX_FPATAN) ? eng_fa_pe : eng_fy_pe;
+  assign eng_trsc_ie     = (q_fxop==FX_F2XM1) ? eng_f2_ie :
+                           (q_fxop==FX_FPATAN) ? eng_fa_ie : eng_fy_ie;
 `else
   assign eng_trsc_done=1'b0; assign eng_trsc_result=80'd0;
   assign eng_trsc_pe=1'b0; assign eng_trsc_ie=1'b0;

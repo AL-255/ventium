@@ -1,0 +1,10 @@
+{
+  "name": "tx_fyl2xp1",
+  "src": "tx_fyl2xp1/tx_fyl2xp1.s",
+  "elf": "tx_fyl2xp1/tx_fyl2xp1.elf",
+  "image": "tx_fyl2xp1/tx_fyl2xp1.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 40,
+  "x87": true
+}
