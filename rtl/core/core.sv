@@ -2029,6 +2029,8 @@ module core
                   8'hF1:        d_fxop=FX_FYL2X;              // D9 F1 FYL2X (#11)
                   8'hF3:        d_fxop=FX_FPATAN;             // D9 F3 FPATAN (#11)
                   8'hF9:        d_fxop=FX_FYL2XP1;            // D9 F9 FYL2XP1 (#11)
+                  8'hFE:        d_fxop=FX_FSIN;               // D9 FE FSIN (#11)
+                  8'hFF:        d_fxop=FX_FCOS;               // D9 FF FCOS (#11)
 `endif
                   default:      d_unknown=1'b1;  // transcendentals/F2XM1/etc deferred
                 endcase
@@ -5076,15 +5078,27 @@ module core
     // F2XM1 overwrites ST0 in place; FPATAN writes ST1 and POPS (result ends in
     // the new ST0), exactly like FDIVP ST1,ST0 (we_sti idx=1 + we_pop).
     if (state==S_TRSC_BUSY && eng_trsc_done) begin
-      if (q_fxop==FX_F2XM1) begin
+      if (q_fxop==FX_FSIN || q_fxop==FX_FCOS) begin
+        // FSIN/FCOS: in-place ST0. Out-of-range (|x|>=2^63) -> set C2, ST0
+        // unchanged; else write result, clear C2, set PE (matches qemu's C2 flag
+        // handling; the VALUE is the silicon model, more accurate than qemu's double).
+        if (eng_trsc_c2) begin
+          fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0400;     // C2 <- 1
+        end else begin
+          fp_we_top=1'b1; fp_top_data=eng_trsc_result;
+          fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h0400) | 16'h0020;  // C2<-0, PE<-1
+        end
+      end else if (q_fxop==FX_F2XM1) begin
         fp_we_top=1'b1; fp_top_data=eng_trsc_result;            // in-place ST0
+        if (eng_trsc_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end
+        else if (eng_trsc_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
       end else begin
         // FPATAN / FYL2X / FYL2XP1: write ST1, then pop (result -> new ST0).
         fp_we_sti=1'b1; fp_wsti_idx=3'd1; fp_wsti_data=eng_trsc_result; fp_wsti_clr_tag=1'b0;
         fp_we_pop=1'b1;
+        if (eng_trsc_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end
+        else if (eng_trsc_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
       end
-      if (eng_trsc_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end
-      else if (eng_trsc_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
     end
 `endif
 
@@ -5266,7 +5280,7 @@ module core
   // accuracy-faithful one, so both modes share the datapath.
   logic        eng_trsc_done;
   logic [79:0] eng_trsc_result;
-  logic        eng_trsc_pe, eng_trsc_ie;
+  logic        eng_trsc_pe, eng_trsc_ie, eng_trsc_c2;
 `ifdef VEN_TRANSCENDENTAL
   // F2XM1 (unary, in-place ST0) + FPATAN (ST1=y/ST0=x, result->ST1 then pop) each
   // get their own engine; S_TRSC_BUSY waits on whichever q_fxop selected.
@@ -5297,17 +5311,33 @@ module core
     .busy(eng_fy_busy), .done(eng_fy_done), .result(eng_fy_result),
     .inexact(eng_fy_pe), .invalid(eng_fy_ie)
   );
+  // FSIN/FCOS: one engine computes sin AND cos; FSIN commits sin_o, FCOS cos_o.
+  logic        eng_fs_start, eng_fs_busy, eng_fs_done, eng_fs_c2;
+  logic [79:0] eng_fs_sin, eng_fs_cos;
+  assign eng_fs_start = (state==S_FEXEC) && (q_fxop==FX_FSIN || q_fxop==FX_FCOS);
+  fpu_fsincos u_fsincos (
+    .clk(clk), .rst_n(rst_n), .start(eng_fs_start), .x(fst(3'd0)),
+    .busy(eng_fs_busy), .done(eng_fs_done),
+    .sin_o(eng_fs_sin), .cos_o(eng_fs_cos), .c2_o(eng_fs_c2)
+  );
+  wire is_trig = (q_fxop==FX_FSIN) || (q_fxop==FX_FCOS);
   assign eng_trsc_done   = (q_fxop==FX_F2XM1) ? eng_f2_done :
-                           (q_fxop==FX_FPATAN) ? eng_fa_done : eng_fy_done;
+                           (q_fxop==FX_FPATAN) ? eng_fa_done :
+                           is_trig ? eng_fs_done : eng_fy_done;
   assign eng_trsc_result = (q_fxop==FX_F2XM1) ? eng_f2_result :
-                           (q_fxop==FX_FPATAN) ? eng_fa_result : eng_fy_result;
+                           (q_fxop==FX_FPATAN) ? eng_fa_result :
+                           (q_fxop==FX_FSIN)  ? eng_fs_sin :
+                           (q_fxop==FX_FCOS)  ? eng_fs_cos : eng_fy_result;
   assign eng_trsc_pe     = (q_fxop==FX_F2XM1) ? eng_f2_pe :
-                           (q_fxop==FX_FPATAN) ? eng_fa_pe : eng_fy_pe;
+                           (q_fxop==FX_FPATAN) ? eng_fa_pe :
+                           is_trig ? 1'b1 : eng_fy_pe;       // sin/cos always inexact
   assign eng_trsc_ie     = (q_fxop==FX_F2XM1) ? eng_f2_ie :
-                           (q_fxop==FX_FPATAN) ? eng_fa_ie : eng_fy_ie;
+                           (q_fxop==FX_FPATAN) ? eng_fa_ie :
+                           is_trig ? 1'b0 : eng_fy_ie;
+  assign eng_trsc_c2     = is_trig ? eng_fs_c2 : 1'b0;
 `else
   assign eng_trsc_done=1'b0; assign eng_trsc_result=80'd0;
-  assign eng_trsc_pe=1'b0; assign eng_trsc_ie=1'b0;
+  assign eng_trsc_pe=1'b0; assign eng_trsc_ie=1'b0; assign eng_trsc_c2=1'b0;
 `endif
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
