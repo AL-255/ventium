@@ -15,13 +15,15 @@ proc env_or {n d} { if {[info exists ::env($n)] && $::env($n) ne ""} { return $:
 set CONFIG [env_or CONFIG narrowb]
 set MODE   [env_or MODE   full]
 set CLK    [env_or CLK    15]
+set PART   [env_or PART   xck26-sfvc784-2LV-c]
+# OUTTAG lets a non-default PART write to its own build dir (e.g. apr_narrowb_full_zu15eg)
+set OUTTAG [env_or OUTTAG ""]
 
 set ROOT [pwd]
 if {![file exists $ROOT/rtl/core/core.sv]} { set ROOT [file normalize [file join [file dirname [info script]] .. ..]] }
 set RTL  $ROOT/rtl
-set OUT  $ROOT/fpga/build/apr_${CONFIG}_${MODE}
+set OUT  $ROOT/fpga/build/apr_${CONFIG}_${MODE}${OUTTAG}
 file mkdir $OUT
-set PART xck26-sfvc784-2LV-c
 create_project -in_memory -part $PART apr_${CONFIG}_${MODE}
 
 set svfiles {

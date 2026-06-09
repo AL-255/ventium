@@ -207,7 +207,42 @@ verify-hardened** (the `uop_ready` stall + branch-into-middle re-predecode are u
   (`+VEN_BTB_PIPE`) keep FP + branch-predict off the critical path with **both FP and
   branch-mispredict cycle bands bit-identical**.
 
-Reproduce: `CONFIG=narrowb MODE=full vivado -mode batch -source fpga/scripts/apr_run.tcl` →
+### On a larger device (ZU15EG): the verified production config routes
+
+The **same verified `narrowb` production RTL**, OOC on a **Zynq UltraScale+ ZU15EG**
+(`xczu15eg-ffvb1156-2LV-e`, same `-2LV` speed grade as the KV260, but ~3× the fabric:
+341,280 LUTs), placed by module:
+
+![Ventium core placed on the ZU15EG, colored by RTL module](docs/fpga-device-view-zu15eg.png)
+
+**The headline:** at the *same* 15 ns target, the production `narrowb` config — which is
+**bit-exact-verified but cannot route on the KV260** (42,392 congestion overlaps, router
+gives up) — **routes cleanly on the ZU15EG** (router converges: **0 overlaps, 0 unrouted
+nets**). The 3× routing fabric gives the byte-window front-end the escape channels it lacks
+on the small part. This is the first clean route of the *verified* build at a tight clock.
+
+| Resource | KV260 `narrowb` (XCK26 / ZU5EV) | **ZU15EG `narrowb`** (`xczu15eg-…-2LV`) |
+|---|---:|---:|
+| CLB LUTs | 93,883 (**80.2 %** of 117,120) | 93,961 (**27.5 %** of 341,280) |
+| CLB Registers | 28,675 | 29,394 (4.3 %) |
+| MUXF7 / MUXF8 | 14,311 / 6,216 | 14,312 / 6,216 |
+| CARRY8 / DSP48E2 / BRAM | 2,119 / 31 / 0 | 2,119 / 31 / 0 |
+| Placer congestion | level 6 (wall) | level 5 (local, `u_icache` byte-window) |
+| **Full route @ 15 ns** | ✗ **does not route** (42,392 overlaps) | ✅ **routes — 0 overlaps / 0 unrouted** |
+| Fmax — placed (WNS@15 ns) | 46.0 MHz | 51.1 MHz (WNS −4.56 ns) |
+| **Fmax — routed (real OOC)** | — (never routed) | **40.6 MHz** (WNS −9.60 ns) |
+
+The routed **40.6 MHz** is the honest critical-path number — lower than the placer's 51 MHz
+*estimate* because actually wiring the congested byte-window region costs real routing delay,
+and lower than the ~148 MHz logic-only ceiling (the FP cone is **6.74 ns**). The placer still
+flags **level-5 congestion local to `u_icache`** even on the big device — confirming the wall
+is the **single-cycle x86 byte-window decode itself**, an architectural property, not a device
+or tooling limit. The bigger part buys *routability* (and a clean, shippable bitstream path),
+not a dramatically higher clock; closing toward 66 MHz still needs the µop-cache front-end
+([P0-11](fpga/TIMING_PROBLEMS.md)) and in-context floorplanning ([P0-12](fpga/TIMING_PROBLEMS.md)).
+
+Reproduce — KV260: `CONFIG=narrowb MODE=full vivado -mode batch -source fpga/scripts/apr_run.tcl`;
+ZU15EG: prepend `PART=xczu15eg-ffvb1156-2LV-e OUTTAG=_zu15eg`. Then
 `python3 fpga/scripts/render_device_view.py …` / `render_congestion.py` / `render_compare.py`.
 Full timing backlog + methodology in [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
 
