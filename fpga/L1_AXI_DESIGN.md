@@ -226,3 +226,54 @@ full Quake `--l1-axi --emulate-syscalls` coherency soak is exercised by F4 (#40)
 * **Narrow-ADDR_MASK alias** (#5): inert in the shipped identity remap; the
   `ar/awaddr_window` SVAs above now flag it if a future integrator sets a small
   carveout mask and feeds out-of-window addresses.
+
+## 7. Dual-clock CDC (`+VEN_AXI_CDC`): ✅ RTL DONE + VERIFIED (P1-3 / #36)
+The default build runs ven_l1d + ven_axi_master on ONE PL clock (CDC_BYPASS — §3). To
+let the core run at its (slow, Fmax-limited) `core_clk` while the AXI link to the PS DDR
+runs at a faster MMCM `axi_clk` (hiding DDR latency at full S_AXI_HPC0 bandwidth), the
+`+VEN_AXI_CDC` build inserts a clock-domain-crossing bridge. **All gated behind the
+define; the default build is byte/cycle-identical (a pure net-alias passthrough) —
+77/77 + 10/10 unchanged, all three L1 unit gates green.**
+
+**Structure (3 new modules, ven_l1d + ven_axi_master UNTOUCHED).** ven_axi_master only
+ever used its `core_clk` port (axi_clk was a lint-sink), so the CDC build simply hands
+it `axi_clk` and inserts `ven_axi_cdc` between ven_l1d's backing port (core domain) and
+ven_axi_master's (axi domain):
+* **`ven_cdc_afifo`** — the one CDC primitive: a 2-FF Gray-pointer async FIFO (canonical
+  Cummings; full/empty from the REGISTERED pointer to avoid a comb loop; FWFT read so
+  the consumer latches the head the cycle it sees its ack — matching ven_l1d exactly).
+* **`ven_axi_cdc`** — the bridge: a command afifo (core→axi, `{we,addr,wdata,wstrb}`,
+  single-outstanding) + a response afifo (axi→core, 32-bit rdata/beat, depth 16 ≥ the
+  8-beat burst) + a 2-FF level sync for sticky `bus_err`. The core-side FSM completes a
+  transaction ON its last response (NOT on `!c_req`) and re-samples immediately — ven_l1d
+  holds `m_req` CONTINUOUSLY across back-to-back transactions (FNSAVE's 27 sequential
+  stores, stack pushes), so a wait-for-`!c_req` would DEADLOCK; this mirrors
+  ven_axi_master's own one-cycle-after-ack re-sample (already proven in the 77/77 direct
+  build).
+* **`ven_reset_sync`** — async-assert/sync-deassert reset bridge, one per domain. The two
+  syncs are driven by the **AND of the raw resets** so a reset in EITHER domain resets
+  BOTH (an asymmetric reset mid-transaction would orphan the in-flight command and wedge
+  ven_l1d with the #34 watchdog — in the just-reset axi domain — unable to fire).
+
+**Verified:**
+* `verif/l1/run-l1axi-cdc-gate.sh` → **L1AXICDC-GATE-OK**: data-coherent across FOUR
+  core:axi ratios (axi-fast 5:2, axi-slow 2:5, equal 4:4, coprime 5:3) including a
+  back-to-back-write-burst regression (the deadlock) and an asymmetric-reset-mid-fill
+  regression (the wedge).
+* `verif/l1/run-l1axi-cdc-verify.sh` → **77/77 user vs QEMU + 10/10 system** — the WHOLE
+  program suite (incl. FNSAVE/BCD/x87-state, page-walks) boots through the bridge
+  (cosim: `core_clk==axi_clk`, the degenerate equal-clock ratio).
+* A 12-agent adversarial CDC review (metastability / FIFO pointers / bridge FSM / reset /
+  contract-timing / synth) confirmed the structural crossing is sound; its two real
+  findings are FIXED (the vacuous `cmd_no_full` SVA → checks the ungated intent; the
+  asymmetric-reset wedge → AND-coupled resets). The back-to-back deadlock was found+fixed
+  independently via the cosim before the review.
+* `fpga/scripts/synth_cdc.tcl` → OOC synth on `xck26` with two async clocks (no comb
+  loop, async FIFO + ASYNC_REG inferred, clocks async-grouped).
+
+**For the real MMCM build (#37):** `fpga/constraints/ven_cdc.xdc` carries the CDC timing
+constraints — the load-bearing `set_clock_groups -asynchronous` between core_clk/axi_clk
+(false-paths every crossing; correctness is then structural — Gray code + FWFT stability)
+plus scoped `set_max_delay -datapath_only` / `set_bus_skew` on the Gray syncs for MTBF.
+These are written but NOT yet timing-validated (no dual-clock BD exists yet — the current
+`bd_l1axi.tcl` is single-clock); apply them when `axi_clk` becomes a separate MMCM clock.

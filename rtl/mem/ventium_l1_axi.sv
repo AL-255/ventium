@@ -141,15 +141,75 @@ module ventium_l1_axi #(
 );
 
   // ---- internal word-granular backing port (L1 <-> AXI master) --------------
+  // ven_l1d's backing master (always in core_clk). In the default single-clock
+  // build these wire STRAIGHT to ven_axi_master; in +VEN_AXI_CDC they cross to the
+  // axi_clk domain through ven_axi_cdc first (see below).
   logic        m_req, m_we;
   logic [31:0] m_addr, m_wdata;
   logic [3:0]  m_wstrb;
   logic [31:0] m_rdata;
   logic        m_ack;
 
+  // ven_axi_master's backing slave + its clock/reset — a COMPILE-TIME (ifdef) alias
+  // of either the core domain (default) or the axi domain (+VEN_AXI_CDC). Static
+  // selection: exactly one `assign` exists per build, so axm_clk is a direct net
+  // alias (no runtime clock mux / gated clock), and ven_axi_master stays UNTOUCHED
+  // (it is single-clock on whichever clock it is handed).
+  logic        axm_clk, axm_rst_n;
+  logic        axm_req, axm_we;
+  logic [31:0] axm_addr, axm_wdata;
+  logic [3:0]  axm_wstrb;
+  logic [31:0] axm_rdata;
+  logic        axm_ack, axm_bus_err;
+
+  // l1d uses a domain-synchronized reset in the CDC build, the raw reset otherwise.
+  logic        l1d_rst_n;
+
+`ifdef VEN_AXI_CDC
+  // ---- dual-clock: synchronize each domain's reset, then bridge the backing port.
+  // #36 RESET COUPLING (review HIGH): a reset in EITHER domain must reset BOTH. An
+  // asymmetric reset mid-transaction (e.g. an AXI soft-reset / MMCM lock loss drops
+  // ONLY axi_rst_n) would wipe the producer state of an in-flight transaction: the
+  // command was already popped, so no response is ever pushed, ven_l1d hangs in its
+  // fill forever, AND the #34 watchdog (living in the just-reset axi domain) cannot
+  // fire -> an undetectable deadlock. AND the raw resets so the UNION of reset events
+  // async-asserts both per-domain synchronizers together (glitch-safe for a level
+  // async-assert; each domain still sync-DEASSERTS cleanly in its own clock, and on
+  // deassertion the FIFOs/FSMs are idle so the sync-latency skew is benign).
+  logic rst_comb_n;
+  assign rst_comb_n = core_rst_n & axi_rst_n;
+  logic core_rst_sync_n, axi_rst_sync_n;
+  ven_reset_sync u_rs_core (.clk(core_clk), .arst_n(rst_comb_n), .srst_n(core_rst_sync_n));
+  ven_reset_sync u_rs_axi  (.clk(axi_clk),  .arst_n(rst_comb_n), .srst_n(axi_rst_sync_n));
+  assign l1d_rst_n = core_rst_sync_n;
+  assign axm_clk   = axi_clk;
+  assign axm_rst_n = axi_rst_sync_n;
+
+  ven_axi_cdc #(.LINE_BEATS(L1_LINE/4)) u_cdc (
+      .core_clk   (core_clk),        .core_rst_n (core_rst_sync_n),
+      .axi_clk    (axi_clk),         .axi_rst_n  (axi_rst_sync_n),
+      // core side: ven_l1d's backing master
+      .c_req      (m_req),  .c_we    (m_we),    .c_addr  (m_addr),
+      .c_wdata    (m_wdata),.c_wstrb (m_wstrb), .c_rdata (m_rdata),
+      .c_ack      (m_ack),  .bus_err (bus_err),
+      // axi side: drives ven_axi_master's backing slave
+      .a_req      (axm_req),  .a_we    (axm_we),    .a_addr  (axm_addr),
+      .a_wdata    (axm_wdata),.a_wstrb (axm_wstrb), .a_rdata (axm_rdata),
+      .a_ack      (axm_ack),  .a_bus_err(axm_bus_err)
+  );
+`else
+  // ---- default single-clock (CDC_BYPASS): wire the backing port straight through.
+  assign l1d_rst_n = core_rst_n;
+  assign axm_clk   = core_clk;
+  assign axm_rst_n = core_rst_n;
+  assign axm_req   = m_req;   assign axm_we    = m_we;
+  assign axm_addr  = m_addr;  assign axm_wdata = m_wdata;  assign axm_wstrb = m_wstrb;
+  assign m_rdata   = axm_rdata; assign m_ack   = axm_ack;  assign bus_err   = axm_bus_err;
+`endif
+
   ven_l1d #(.L1_SETS(L1_SETS), .L1_LINE(L1_LINE)) u_l1d (
       .clk      (core_clk),
-      .rst_n    (core_rst_n),
+      .rst_n    (l1d_rst_n),
       .flush_all(flush_all),
       .c_req   (core_req),
       .c_we    (core_we),
@@ -175,18 +235,18 @@ module ventium_l1_axi #(
       .AXI_ID     (AXI_ID),
       .WATCHDOG   (WATCHDOG)
   ) u_axi (
-      .core_clk    (core_clk),
-      .core_rst_n  (core_rst_n),
+      .core_clk    (axm_clk),
+      .core_rst_n  (axm_rst_n),
       .axi_clk     (axi_clk),
       .axi_rst_n   (axi_rst_n),
-      .m_req       (m_req),
-      .m_we        (m_we),
-      .m_addr      (m_addr),
-      .m_wdata     (m_wdata),
-      .m_wstrb     (m_wstrb),
-      .m_rdata     (m_rdata),
-      .m_ack       (m_ack),
-      .bus_err     (bus_err),
+      .m_req       (axm_req),
+      .m_we        (axm_we),
+      .m_addr      (axm_addr),
+      .m_wdata     (axm_wdata),
+      .m_wstrb     (axm_wstrb),
+      .m_rdata     (axm_rdata),
+      .m_ack       (axm_ack),
+      .bus_err     (axm_bus_err),
       .m_axi_awid    (m_axi_awid),
       .m_axi_awaddr  (m_axi_awaddr),
       .m_axi_awlen   (m_axi_awlen),

@@ -117,6 +117,21 @@ l1axi:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/obj_dir_l1axi/$(EXE)"
 
+# ---- l1axi_cdc: P1-3 dual-clock build (+VEN_L1_AXI +VEN_AXI_CDC) -------------
+# Same bus_mode=2 path, but the L1<->AXI backing port crosses through ven_axi_cdc
+# (the async-FIFO CDC bridge). In the cosim core_clk==axi_clk==top->clk, so this
+# exercises the CDC at the degenerate equal-clock ratio across the FULL 77-program
+# suite (the multi-ratio data-integrity proof is verif/l1/run-l1axi-cdc-gate.sh).
+# SEPARATE obj dir; default obj_dir/tb_ventium stays byte-identical.
+L1AXICDC_RTL := $(RTL_DIR)/mem/ven_cdc_afifo.sv $(RTL_DIR)/mem/ven_reset_sync.sv \
+                $(RTL_DIR)/mem/ven_axi_cdc.sv $(L1AXI_RTL)
+.PHONY: l1axi_cdc
+l1axi_cdc:
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_AXI_CDC \
+	  -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi_cdc \
+	  -F $(RTL_FILELIST) $(L1AXICDC_RTL) $(CPP_SRCS)
+	@echo "built (L1+AXI dual-clock CDC): $(CURDIR)/obj_dir_l1axi_cdc/$(EXE)"
+
 # ---- soc: M8.1 SoC-integration build (ventium_soc + ven_pic + ven_pit) ------
 # Built into a SEPARATE obj dir so it never clobbers the default `rtl` build
 # (make verify / the sys gates keep using obj_dir/tb_ventium). The --soc TB
