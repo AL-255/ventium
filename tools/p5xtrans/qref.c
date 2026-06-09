@@ -652,6 +652,8 @@ static void qsincos(long double x, long double*so, long double*co, int*c2){
 }
 static long double qfsin(long double x, int*c2){ long double s,c; qsincos(x,&s,&c,c2); return s; }
 static long double qfcos(long double x, int*c2){ long double s,c; qsincos(x,&s,&c,c2); return c; }
+// FPTAN value = sin/cos (floatx80 division == the core's fx_div). c2 passthrough.
+static long double qftan(long double x, int*c2){ long double s,c; qsincos(x,&s,&c,c2); return *c2 ? x : (s / c); }
 
 // ---- CLI --------------------------------------------------------------------
 //   qref f2xm1 <se_hex> <frac_hex>   -> prints the 80-bit result as se:frac
@@ -668,9 +670,11 @@ static void emit3(long double a, long double b){
 int main(int argc, char**argv){
     fesetround(FE_TONEAREST);
     init_trig();
-    if (argc >= 3 && (!strcmp(argv[1],"fsin")||!strcmp(argv[1],"fcos"))){
+    if (argc >= 3 && (!strcmp(argv[1],"fsin")||!strcmp(argv[1],"fcos")||!strcmp(argv[1],"fptan"))){
         int c2; long double x=mk((uint16_t)strtoul(argv[2],0,16), argc>=4?strtoull(argv[3],0,16):0);
-        emit(!strcmp(argv[1],"fsin")?qfsin(x,&c2):qfcos(x,&c2)); return 0;
+        if (!strcmp(argv[1],"fptan")) emit(qftan(x,&c2));
+        else emit(!strcmp(argv[1],"fsin")?qfsin(x,&c2):qfcos(x,&c2));
+        return 0;
     }
     if (argc >= 2 && (!strcmp(argv[1],"--sweep-fsin")||!strcmp(argv[1],"--sweep-fcos"))){
         int isc = !strcmp(argv[1],"--sweep-fcos"); int c2;

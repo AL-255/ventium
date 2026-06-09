@@ -2031,6 +2031,8 @@ module core
                   8'hF9:        d_fxop=FX_FYL2XP1;            // D9 F9 FYL2XP1 (#11)
                   8'hFE:        d_fxop=FX_FSIN;               // D9 FE FSIN (#11)
                   8'hFF:        d_fxop=FX_FCOS;               // D9 FF FCOS (#11)
+                  8'hFB:        d_fxop=FX_FSINCOS;            // D9 FB FSINCOS (#11)
+                  8'hF2:        d_fxop=FX_FPTAN;              // D9 F2 FPTAN (#11)
 `endif
                   default:      d_unknown=1'b1;  // transcendentals/F2XM1/etc deferred
                 endcase
@@ -5088,6 +5090,19 @@ module core
           fp_we_top=1'b1; fp_top_data=eng_trsc_result;
           fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h0400) | 16'h0020;  // C2<-0, PE<-1
         end
+      end else if (q_fxop==FX_FSINCOS || q_fxop==FX_FPTAN) begin
+        // FSINCOS: ST0<-sin, push cos.  FPTAN: ST0<-tan(=sin/cos), push 1.0.
+        // (we_top writes the OLD top = new ST1; we_push writes the new ST0.) C2
+        // out-of-range -> no write, no push, ST0 unchanged.
+        if (eng_trsc_c2) begin
+          fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0400;
+        end else begin
+          fp_we_top=1'b1;
+          fp_top_data=(q_fxop==FX_FPTAN) ? fx_div(eng_fs_sin, eng_fs_cos, 2'd0)[79:0] : eng_fs_sin;
+          fp_we_push=1'b1;
+          fp_push_data=(q_fxop==FX_FPTAN) ? 80'h3fff8000000000000000 : eng_fs_cos;  // FPTAN pushes +1.0
+          fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h0400) | 16'h0020;
+        end
       end else if (q_fxop==FX_F2XM1) begin
         fp_we_top=1'b1; fp_top_data=eng_trsc_result;            // in-place ST0
         if (eng_trsc_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end
@@ -5314,13 +5329,14 @@ module core
   // FSIN/FCOS: one engine computes sin AND cos; FSIN commits sin_o, FCOS cos_o.
   logic        eng_fs_start, eng_fs_busy, eng_fs_done, eng_fs_c2;
   logic [79:0] eng_fs_sin, eng_fs_cos;
-  assign eng_fs_start = (state==S_FEXEC) && (q_fxop==FX_FSIN || q_fxop==FX_FCOS);
+  wire is_trig = (q_fxop==FX_FSIN) || (q_fxop==FX_FCOS) ||
+                 (q_fxop==FX_FSINCOS) || (q_fxop==FX_FPTAN);
+  assign eng_fs_start = (state==S_FEXEC) && is_trig;
   fpu_fsincos u_fsincos (
     .clk(clk), .rst_n(rst_n), .start(eng_fs_start), .x(fst(3'd0)),
     .busy(eng_fs_busy), .done(eng_fs_done),
     .sin_o(eng_fs_sin), .cos_o(eng_fs_cos), .c2_o(eng_fs_c2)
   );
-  wire is_trig = (q_fxop==FX_FSIN) || (q_fxop==FX_FCOS);
   assign eng_trsc_done   = (q_fxop==FX_F2XM1) ? eng_f2_done :
                            (q_fxop==FX_FPATAN) ? eng_fa_done :
                            is_trig ? eng_fs_done : eng_fy_done;
