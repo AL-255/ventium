@@ -17,7 +17,7 @@ validate: $(TARGET)
 # qref.c reproduces qemu-8.2 helper_f2xm1 bit-for-bit; qref-validate closes the
 # loop to the actual pinned qemu-i386 (QREF-F2XM1-QEMU-OK).
 qref: qref.c qref_f2xm1_table.inc
-	$(CC) $(CFLAGS) -o $@ qref.c -lm
+	$(CC) $(CFLAGS) -o $@ qref.c -lquadmath -lm
 
 .PHONY: qref-validate
 qref-validate: qref
