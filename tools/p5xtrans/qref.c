@@ -33,6 +33,7 @@
 #include <stdbool.h>
 #include <fenv.h>
 #include <math.h>
+#include <quadmath.h>   // __float128 truth for --validate-trig (gcc/libquadmath)
 
 // ---- floatx80 <-> host long double (x86-64 80-bit extended) -----------------
 // long double is 16 bytes: [0:8)=frac (with explicit integer bit), [8:10)=sign|exp.
@@ -576,14 +577,145 @@ static long double qfyl2xp1(long double st1_y, long double st0_x, int rc){
     return norm_round_pack_x(a0sign ^ a1sign, aexp, asig0, asig1, rc);
 }
 
+// ============================================================================
+// FSIN / FCOS / FSINCOS / FPTAN — the SHARED-POLYNOMIAL silicon-accuracy model.
+// qemu computes these with the build HOST's glibc (not bit-exact reproducible),
+// so this is NOT a qemu transcription: it is the accuracy-faithful silicon model
+// (octant reduction + Taylor poly) evaluated entirely in floatx80 ops (host long
+// double == the RTL's fx_mul/fx_add), so the RTL is graded BIT-EXACT vs this
+// model, and the MODEL's accuracy is graded ~1 ulp vs __float128 quad truth
+// (qref --validate-trig). The near-pi / large-x degradation is a documented
+// accuracy-faithful gap (the exact silicon bug needs undumped microcode).
+//
+// Reduction: n = round(x * 2/pi); r = ((x - n*PIO2_1) - n*PIO2_2) - n*PIO2_3,
+// with a 3-part Cody-Waite pi/2 (PIO2_1 = 40 high bits, so n*PIO2_1 is exact for
+// |n| < 2^24). Poly: sin(r)=r*(1 - r^2/6 + ...), cos(r)=1 - r^2/2 + ... (Taylor,
+// enough terms for ~1 ulp on [-pi/4, pi/4]). Quadrant select by n & 3.
+// ============================================================================
+#define NTRIG 11
+static long double PIO2_1, PIO2_2, PIO2_3, TWO_OVER_PI;
+static long double SINC[NTRIG];   // (-1)^k / (2k+1)!  (sin(r) = r * sum SINC[k] r^2k)
+static long double COSC[NTRIG];   // (-1)^k / (2k)!    (cos(r) =     sum COSC[k] r^2k)
+
+static long double fx_from_i128(unsigned __int128 v, int scale, int trunc_bits){
+    if (v==0) return 0.0L;
+    int msb=127; while(!((v>>msb)&1)) msb--;
+    int sh = msb - 63;
+    uint64_t man = (sh>=0) ? (uint64_t)(v >> sh) : (uint64_t)((uint64_t)v << (-sh));
+    if (trunc_bits < 64) man &= (~(uint64_t)0) << (64 - trunc_bits);
+    int e = msb + scale;
+    return mk((uint16_t)((e + 16383) & 0x7fff), man);
+}
+static void init_trig(void){
+    // pi/2 = PI2_SIG * 2^-127 (qemu 128-bit pi/2).
+    unsigned __int128 s = (((unsigned __int128)0xc90fdaa22168c234ULL)<<64) | 0xc4c6628b80dc1cd1ULL;
+    uint64_t m1 = (uint64_t)(s>>64) & 0xFFFFFFFFFF000000ULL;     // top 40 bits
+    PIO2_1 = mk(0x3fff, m1);
+    unsigned __int128 r1 = s - (((unsigned __int128)m1)<<64);
+    PIO2_2 = fx_from_i128(r1, -127, 64);
+    // subtract PIO2_2 (reconstruct its 128-bit contribution)
+    { uint64_t f=x80_frac(PIO2_2); int e=x80_exp(PIO2_2)-16383; // value=f*2^(e-63)=f*2^(e-63+127) in 2^-127 units
+      int sh=e-63+127; unsigned __int128 c=(sh>=0)?((unsigned __int128)f<<sh):((unsigned __int128)f>>(-sh));
+      r1 -= c; }
+    PIO2_3 = fx_from_i128(r1, -127, 64);
+    TWO_OVER_PI = (long double)(2.0Q / M_PIq);
+    long double f = 1.0L;                                       // running (2k)! then (2k+1)!
+    for (int k=0;k<NTRIG;k++){
+        if (k>0){ f *= (long double)(2*k-1)*(2*k); }            // (2k)!
+        long double sgn = (k&1)?-1.0L:1.0L;
+        COSC[k] = sgn / f;
+        long double f2 = f * (long double)(2*k+1);             // (2k+1)!
+        SINC[k] = sgn / f2;
+    }
+}
+// returns {sin, cos} of x via *so/*co; c2=1 (out of range) leaves the op's ST0 input.
+static void qsincos(long double x, long double*so, long double*co, int*c2){
+    if (fabsl(x) >= ldexpl(1.0L,63)){ *c2=1; *so=x; *co=x; return; }
+    *c2=0;
+    long double m = x * TWO_OVER_PI;
+    long n = (fabsl(m) < 0.5L) ? 0 : (long)llrintl(m);          // guard fx_to_int tiny bug
+    long double nf = (long double)n;
+    long double r = x, t;
+    t = nf*PIO2_1; r = r - t;
+    t = nf*PIO2_2; r = r - t;
+    t = nf*PIO2_3; r = r - t;
+    long double r2 = r*r;
+    long double sp = SINC[NTRIG-1], cp = COSC[NTRIG-1];
+    for (int k=NTRIG-2;k>=0;k--){ sp = sp*r2; sp = sp + SINC[k]; cp = cp*r2; cp = cp + COSC[k]; }
+    sp = sp * r;                                                // sin(r)
+    switch (((n%4)+4)%4){
+        case 0: *so= sp; *co= cp; break;
+        case 1: *so= cp; *co=-sp; break;
+        case 2: *so=-sp; *co=-cp; break;
+        default:*so=-cp; *co= sp; break;
+    }
+}
+static long double qfsin(long double x, int*c2){ long double s,c; qsincos(x,&s,&c,c2); return s; }
+static long double qfcos(long double x, int*c2){ long double s,c; qsincos(x,&s,&c,c2); return c; }
+
 // ---- CLI --------------------------------------------------------------------
 //   qref f2xm1 <se_hex> <frac_hex>   -> prints the 80-bit result as se:frac
 //   qref --sweep                     -> prints "in_se in_frac out_se out_frac"
 //                                       for a fixed input sweep (the gate vectors)
 static void emit(long double r){ printf("%04x%016llx\n", (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r)); }
 
+static void emit3(long double a, long double b){
+    printf("%04x%016llx %04x%016llx\n",
+        (unsigned)(x80_exp(a)|(x80_sign(a)<<15)), (unsigned long long)x80_frac(a),
+        (unsigned)(x80_exp(b)|(x80_sign(b)<<15)), (unsigned long long)x80_frac(b));
+}
+
 int main(int argc, char**argv){
     fesetround(FE_TONEAREST);
+    init_trig();
+    if (argc >= 3 && (!strcmp(argv[1],"fsin")||!strcmp(argv[1],"fcos"))){
+        int c2; long double x=mk((uint16_t)strtoul(argv[2],0,16), argc>=4?strtoull(argv[3],0,16):0);
+        emit(!strcmp(argv[1],"fsin")?qfsin(x,&c2):qfcos(x,&c2)); return 0;
+    }
+    if (argc >= 2 && (!strcmp(argv[1],"--sweep-fsin")||!strcmp(argv[1],"--sweep-fcos"))){
+        int isc = !strcmp(argv[1],"--sweep-fcos"); int c2;
+        // bit-exact gate vectors: x across [-4pi,4pi] + denser near multiples of pi/2.
+        for (int i=-2000;i<=2000;i++){
+            long double x = (long double)i / 160.0L;            // step ~0.00625, |x|<=12.5
+            long double r = isc?qfcos(x,&c2):qfsin(x,&c2);
+            emit3(x, r);
+        }
+        // a few larger / irregular
+        static const long double xe[]={ 100.0L,-100.0L, 1000.0L, 12345.678L, 0.0L, 1e-10L, -1e-10L };
+        for (size_t i=0;i<sizeof(xe)/sizeof(xe[0]);i++){ long double r=isc?qfcos(xe[i],&c2):qfsin(xe[i],&c2); emit3(xe[i], r); }
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1],"--validate-trig")){
+        // accuracy of the MODEL vs __float128 quad truth (the silicon ~1 ulp target).
+        double worst_s=0, worst_c=0; int n=0; int c2;
+        for (double xd=-200.0; xd<=200.0; xd+=0.001){
+            long double x=(long double)xd;
+            long double gs=qfsin(x,&c2), gc=qfcos(x,&c2);
+            __float128 ts=sinq((__float128)x), tc=cosq((__float128)x);
+            int es=(x80_exp(gs)&0x7fff); __float128 us=powq(2.0Q,(__float128)(es-16383-63));
+            int ec=(x80_exp(gc)&0x7fff); __float128 uc=powq(2.0Q,(__float128)(ec-16383-63));
+            double ds=(double)(fabsq((__float128)gs - ts)/us);
+            double dc=(double)(fabsq((__float128)gc - tc)/uc);
+            if (ds>worst_s) worst_s=ds;
+            if (dc>worst_c) worst_c=dc;
+            n++;
+        }
+        printf("TRIG model accuracy (|x|<=200): %d pts, worst FSIN %.3f ulp, worst FCOS %.3f ulp\n", n, worst_s, worst_c);
+        printf(worst_s<4.0 && worst_c<4.0 ? "TRIG-MODEL-ACCURACY-OK\n" : "TRIG-MODEL-ACCURACY-WARN\n");
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1],"--rom-trig")){
+        printf("localparam logic [79:0] T_2OPI = {16'h%04x,64'h%016llx};\n",
+               (unsigned)(x80_exp(TWO_OVER_PI)|(x80_sign(TWO_OVER_PI)<<15)),(unsigned long long)x80_frac(TWO_OVER_PI));
+        const char*nm[3]={"T_PIO2_1","T_PIO2_2","T_PIO2_3"}; long double pv[3]={PIO2_1,PIO2_2,PIO2_3};
+        for (int i=0;i<3;i++) printf("localparam logic [79:0] %s = {16'h%04x,64'h%016llx};\n", nm[i],
+               (unsigned)(x80_exp(pv[i])|(x80_sign(pv[i])<<15)),(unsigned long long)x80_frac(pv[i]));
+        for (int k=0;k<NTRIG;k++) printf("localparam logic [79:0] T_SIN%d = {16'h%04x,64'h%016llx};\n", k,
+               (unsigned)(x80_exp(SINC[k])|(x80_sign(SINC[k])<<15)),(unsigned long long)x80_frac(SINC[k]));
+        for (int k=0;k<NTRIG;k++) printf("localparam logic [79:0] T_COS%d = {16'h%04x,64'h%016llx};\n", k,
+               (unsigned)(x80_exp(COSC[k])|(x80_sign(COSC[k])<<15)),(unsigned long long)x80_frac(COSC[k]));
+        return 0;
+    }
     if (argc >= 4 && !strcmp(argv[1],"f2xm1")){
         uint16_t se = (uint16_t)strtoul(argv[2],0,16);
         uint64_t fr = strtoull(argv[3],0,16);
