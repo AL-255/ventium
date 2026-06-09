@@ -168,6 +168,10 @@ module ventium_top
     input  logic        m_axi_rvalid,
     output logic        m_axi_rready,
     output logic        bus_err          // #34 fatal AXI fault (PS observes -> reset)
+`ifdef VEN_KV260_SOC
+    ,
+    output logic [63:0] retire_count      // F2: live retire counter for PS observability
+`endif
 `endif
 );
 
@@ -370,6 +374,13 @@ module ventium_top
       retire_n <= retire_n + (core_retire2_valid ? 64'd2 : 64'd1);
     end
   end
+
+`ifdef VEN_KV260_SOC
+  // F2: expose the retire counter so the PS can observe forward progress (the DPI
+  // vtm_retire path above is sim-only). Gated to the KV260 SoC build — the cosim /
+  // L1AXI builds (no VEN_KV260_SOC) don't get this port, staying byte-identical.
+  assign retire_count = retire_n;
+`endif
 
   // ---------------------------------------------------------------------------
   // Block decomposition (PLAN §6) — NO top-level stubs remain. The §6 leaf
