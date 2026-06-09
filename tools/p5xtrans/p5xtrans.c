@@ -265,6 +265,24 @@ static int validate_f2xm1(void) {
 }
 
 int main(int argc, char** argv) {
+    // emit the F2XM1 constant ROM as floatx80 hex for the RTL engine (provably from the
+    // validated model): the 65-entry 2^t / 2^t-1 table (t=n/32, n=-32..32) + the 8
+    // Horner coeffs of (2^y-1)/y = sum ln2^(k+1)/(k+1)! * y^k (Taylor; <1 ulp on |y|<=1/64).
+    if (argc >= 2 && !strcmp(argv[1], "--rom-f2xm1")) {
+        for (int n = -32; n <= 32; n++) {
+            __float128 t = (__float128)n / 32.0Q;
+            fx80_t a = q_to_fx80(exp2q(t)), b = q_to_fx80(exp2q(t) - 1.0Q);
+            printf("T2[%2d]={16'h%04x,64'h%016llx}; T2M1[%2d]={16'h%04x,64'h%016llx};\n",
+                   n+32, a.se,(unsigned long long)a.m, n+32, b.se,(unsigned long long)b.m);
+        }
+        __float128 ln2 = M_LN2q, term = ln2, fact = 1.0Q;
+        for (int k = 0; k < 8; k++) {
+            fx80_t c = q_to_fx80(term / fact);
+            printf("C2[%d]={16'h%04x,64'h%016llx};\n", k, c.se, (unsigned long long)c.m);
+            term *= ln2; fact *= (__float128)(k + 2);   // ln2^(k+1)/(k+1)!  (next term)
+        }
+        return 0;
+    }
     if (argc >= 2 && !strcmp(argv[1], "--validate")) {
         int f = validate_f2xm1() + validate_fpatan() + validate_fyl2x() + validate_trig();
         if (f == 0) { printf("P5XTRANS-OK (all transcendentals accuracy-faithful)\n"); return 0; }
