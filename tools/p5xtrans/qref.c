@@ -224,11 +224,12 @@ int main(int argc, char**argv){
         return 0;
     }
     if (argc >= 2 && !strcmp(argv[1],"--sweep")){
+        int rc = (argc >= 3) ? atoi(argv[2]) : 0;   // 0 RNE, 1 down, 2 up, 3 trunc
         // A representative sweep over [-1,1]: the table breakpoints, midpoints,
         // tiny args (ln2 path), the +-1 corners, signed zero, and irregular bits.
         for (int n = -32; n <= 32; n++){
             long double x = (long double)n / 32.0L;        // exact breakpoints
-            long double r = qf2xm1(x, 0);
+            long double r = qf2xm1(x, rc);
             printf("%04x%016llx %04x%016llx\n",
                 (unsigned)(x80_exp(x)|(x80_sign(x)<<15)), (unsigned long long)x80_frac(x),
                 (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
@@ -239,8 +240,20 @@ int main(int argc, char**argv){
             0.7071067811865475244L, -0.123456789L, 0.987654321L,
             1e-8L, -1e-8L, 1e-20L, 0.5000001L, -0.9999999L,
         };
+        // genuinely tiny args (exp < 0x3fb0, |x| < 2^-79) -> the ln2 fast path.
+        static const struct { uint16_t se; uint64_t fr; } tiny[] = {
+            {0x3f9b, 0x8000000000000000ULL}, {0xbf9b, 0xc90fdaa22168c235ULL},
+            {0x3f50, 0x9249249249249249ULL}, {0x3e00, 0xfedcba9876543210ULL},
+            {0xbf00, 0x8000000000000001ULL}, {0x3faf, 0xffffffffffffffffULL},
+        };
+        for (size_t i=0;i<sizeof(tiny)/sizeof(tiny[0]);i++){
+            long double x = mk(tiny[i].se, tiny[i].fr), r = qf2xm1(x, rc);
+            printf("%04x%016llx %04x%016llx\n",
+                (unsigned)(x80_exp(x)|(x80_sign(x)<<15)), (unsigned long long)x80_frac(x),
+                (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
+        }
         for (size_t i=0;i<sizeof(extra)/sizeof(extra[0]);i++){
-            long double x = extra[i], r = qf2xm1(x, 0);
+            long double x = extra[i], r = qf2xm1(x, rc);
             printf("%04x%016llx %04x%016llx\n",
                 (unsigned)(x80_exp(x)|(x80_sign(x)<<15)), (unsigned long long)x80_frac(x),
                 (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
@@ -249,7 +262,7 @@ int main(int argc, char**argv){
         for (int n=0; n<=64; n++){
             long double x = mk(TBL[n].t_se, TBL[n].t_f);
             if (x == 0.0L) continue;                       // n==32 is +0, covered above
-            long double r = qf2xm1(x, 0);
+            long double r = qf2xm1(x, rc);
             printf("%04x%016llx %04x%016llx\n",
                 (unsigned)(x80_exp(x)|(x80_sign(x)<<15)), (unsigned long long)x80_frac(x),
                 (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
@@ -264,7 +277,7 @@ int main(int argc, char**argv){
             uint64_t fr = 0x8000000000000000ULL | (st >> 1);
             uint16_t se = (uint16_t)(((st>>40)&1)<<15 | e);
             long double x = mk(se, fr);
-            long double r = qf2xm1(x, 0);
+            long double r = qf2xm1(x, rc);
             printf("%04x%016llx %04x%016llx\n",
                 (unsigned)(x80_exp(x)|(x80_sign(x)<<15)), (unsigned long long)x80_frac(x),
                 (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));

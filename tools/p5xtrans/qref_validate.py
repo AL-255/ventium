@@ -28,9 +28,9 @@ def parse80(tok):  # "SSSSFFFFFFFFFFFFFFFF" (4 hex se + 16 hex frac) -> (se, fra
 def emit_bytes_80(se, frac):  # floatx80 in memory: frac (8 LE) then se (2 LE)
     return struct.pack("<QH", frac, se)
 
-def main():
+def validate_rc(rc):
     qref = os.path.join(HERE, "qref")
-    sweep = subprocess.run([qref, "--sweep"], capture_output=True, text=True, check=True).stdout
+    sweep = subprocess.run([qref, "--sweep", str(rc)], capture_output=True, text=True, check=True).stdout
     pairs = []  # (in_se,in_frac, exp_se,exp_frac)
     for line in sweep.splitlines():
         a, b = line.split()
@@ -42,10 +42,15 @@ def main():
     data = bytearray()
     for (ise, ifr, _, _) in pairs:
         data += emit_bytes_80(ise, ifr)
+    # x87 control word per RC: default 0x037f, RC field = bits[11:10].
+    cw = 0x037f | (rc << 10)
     s = []
     s.append('    .text')
     s.append('    .globl _start')
     s.append('_start:')
+    s.append(f'    movw $0x{cw:04x}, %ax')
+    s.append('    movw %ax, ctlw')
+    s.append('    fldcw ctlw')
     for i in range(len(pairs)):
         s.append(f'    fldt invals+{i*10}')
         s.append('    f2xm1')
@@ -54,6 +59,7 @@ def main():
     s.append('    xorl %ebx, %ebx')
     s.append('    int $0x80')
     s.append('    .data')
+    s.append('ctlw:   .word 0')
     s.append('invals:')
     # one .byte line per input (10 bytes)
     for i in range(len(pairs)):
@@ -66,7 +72,7 @@ def main():
         open(sp, "w").write(asm)
         subprocess.run([CC, "-m32", "-march=pentium", "-nostdlib", "-static",
                         "-Wl,--build-id=none", f"-Wl,-Ttext={hex(LOAD)}", "-o", ep, sp], check=True)
-        maxins = len(pairs)*3 + 4
+        maxins = len(pairs)*3 + 8     # +3 control-word setup insns + exit
         subprocess.run([sys.executable, GEN, "--qemu", QEMU, "--elf", ep,
                         "--out", vp, "--max-insn", str(maxins), "--x87"], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -88,11 +94,18 @@ def main():
         n += 1; idx += 1
     if idx != len(pairs):
         print(f"  WARN: matched {idx} f2xm1 records but had {len(pairs)} inputs")
-    print(f"qref f2xm1: {n} inputs traced through qemu-i386, {fails} mismatches")
-    if fails == 0 and n == len(pairs):
+    print(f"qref f2xm1 rc={rc}: {n} inputs traced through qemu-i386, {fails} mismatches")
+    return 0 if (fails == 0 and n == len(pairs)) else 1
+
+def main():
+    # validate all four rounding modes (RNE / down / up / truncate) vs qemu-i386.
+    rcs = [int(a) for a in sys.argv[1:]] or [0, 1, 2, 3]
+    rv = 0
+    for rc in rcs:
+        rv |= validate_rc(rc)
+    if rv == 0:
         print("QREF-F2XM1-QEMU-OK")
-        return 0
-    return 1
+    return rv
 
 if __name__ == "__main__":
     sys.exit(main())
