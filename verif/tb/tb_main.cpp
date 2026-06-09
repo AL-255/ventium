@@ -535,6 +535,15 @@ int main(int argc, char** argv) {
                                    // (mode 2) may hold a stale copy. Arm a one-cycle
                                    // flush_all pulse; consumed in the run-loop clk=0
                                    // phase. Inert unless VEN_L1_AXI + --l1-axi.
+#ifdef VEN_PS_PROXY
+    // F4 PS-bridge model: with +VEN_PS_PROXY the core STALLS in S_SYSCALL_WAIT on an
+    // int-0x80 and commits only when syscall_resp_valid arrives. The TB plays the PS:
+    // it latches the proxy response service_proxy() drove at the syscall_active pulse,
+    // then holds it on the ports and asserts resp_valid after an 8-clock "service"
+    // latency — proving the gated stall reproduces the zero-latency proxy's trace.
+    bool     pp_armed = false; int pp_delay = 0;
+    uint32_t pp_eax = 0, pp_resume = 0, pp_gs = 0; bool pp_apply = false;
+#endif
     uint64_t cycles = 0;           // clock count (declared here so service_proxy,
                                    // M14 emulate clock, can read it by reference)
     static const bool kSyscallProbe = (std::getenv("TB_SYSCALL_PROBE") != nullptr);
@@ -649,6 +658,9 @@ int main(int argc, char** argv) {
     top->syscall_eax        = 0;
     top->syscall_apply_gs   = 0;
     top->syscall_gs_base    = 0;
+#ifdef VEN_PS_PROXY
+    top->syscall_resp_valid = 0;
+#endif
     top->mem_rdata = 0;
     top->mem_ack   = 0;
     top->io_rdata  = 0;
@@ -706,6 +718,20 @@ int main(int argc, char** argv) {
         top->flush_all = flush_l1_pending ? 1 : 0;
         flush_l1_pending = false;
 #endif
+#ifdef VEN_PS_PROXY
+        // PS-bridge: while armed, HOLD the latched response on the ports and assert
+        // resp_valid once the "service latency" elapses (the core's S_SYSCALL_WAIT
+        // commits on it). Inert when not armed (proxy idle / non-proxy runs).
+        if (pp_armed) {
+            top->syscall_eax        = pp_eax;
+            top->syscall_resume_eip = pp_resume;
+            top->syscall_apply_gs   = pp_apply ? 1 : 0;
+            top->syscall_gs_base    = pp_gs;
+            top->syscall_resp_valid = (pp_delay == 0) ? 1 : 0;
+        } else {
+            top->syscall_resp_valid = 0;
+        }
+#endif
         service_bus();
         service_proxy();      // M7.1: drive int-0x80 effects if syscall_active
                               //       (may re-arm flush_l1_pending for next clock)
@@ -757,6 +783,22 @@ int main(int argc, char** argv) {
             ++sc_idx;
             ++syscalls_replayed;
         }
+
+#ifdef VEN_PS_PROXY
+        // F4 PS-bridge: on the syscall_active pulse, LATCH the response service_proxy
+        // just drove (the core hasn't committed it — it parked in S_SYSCALL_WAIT); then
+        // count down the service latency and disarm once resp_valid has been asserted
+        // (the core committed). One transaction in flight (the next int-0x80 cannot
+        // fire until this one resumes), so a single armed slot is sufficient.
+        if (saw_active && !pp_armed) {
+            pp_eax   = top->syscall_eax;     pp_resume = top->syscall_resume_eip;
+            pp_apply = (bool)top->syscall_apply_gs; pp_gs = top->syscall_gs_base;
+            pp_armed = true; pp_delay = 8;
+        } else if (pp_armed) {
+            if (pp_delay > 0) pp_delay--;
+            else { pp_armed = false; top->syscall_resp_valid = 0; }
+        }
+#endif
 
         // M7.3b: the core latched the IN value this clock — advance the dev_in
         // cursor (strict retire order) so the next IN reads the next value.

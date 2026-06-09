@@ -90,6 +90,9 @@ module ventium_top
     input  logic [31:0] syscall_eax,
     input  logic        syscall_apply_gs,
     input  logic [31:0] syscall_gs_base,
+`ifdef VEN_PS_PROXY
+    input  logic        syscall_resp_valid,  // F4 PS-bridge: int-0x80 response ready
+`endif
     // M14: syscall args exposed for the TB free-run emulator (inert otherwise).
     output logic [31:0] syscall_arg_eax,
     output logic [31:0] syscall_arg_ebx,
@@ -237,6 +240,9 @@ module ventium_top
       .syscall_eax        (syscall_eax),
       .syscall_apply_gs   (syscall_apply_gs),
       .syscall_gs_base    (syscall_gs_base),
+`ifdef VEN_PS_PROXY
+      .syscall_resp_valid (syscall_resp_valid),
+`endif
       .syscall_arg_eax    (syscall_arg_eax),
       .syscall_arg_ebx    (syscall_arg_ebx),
       .syscall_arg_ecx    (syscall_arg_ecx),

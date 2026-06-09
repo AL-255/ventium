@@ -132,6 +132,18 @@ l1axi_cdc:
 	  -F $(RTL_FILELIST) $(L1AXICDC_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI dual-clock CDC): $(CURDIR)/obj_dir_l1axi_cdc/$(EXE)"
 
+# ---- proxy: F4 PS-bridge int-0x80 STALL build (+VEN_PS_PROXY) ----------------
+# Same cosim, but the core parks in S_SYSCALL_WAIT on int-0x80 and commits only on
+# syscall_resp_valid (tb_main plays the PS: latch the response, assert resp_valid after
+# an 8-clock service latency). Proves the gated stall reproduces the zero-latency proxy
+# trace on a real int-0x80 stream (verif/m7/run-quake-lockstep-proxy.sh). SEPARATE obj
+# dir; the default obj_dir/tb_ventium stays byte-identical.
+.PHONY: proxy
+proxy:
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_PS_PROXY -CFLAGS "-DVEN_PS_PROXY" \
+	  -Mdir obj_dir_proxy -F $(RTL_FILELIST) $(CPP_SRCS)
+	@echo "built (F4 PS-proxy stall): $(CURDIR)/obj_dir_proxy/$(EXE)"
+
 # ---- soc: M8.1 SoC-integration build (ventium_soc + ven_pic + ven_pit) ------
 # Built into a SEPARATE obj dir so it never clobbers the default `rtl` build
 # (make verify / the sys gates keep using obj_dir/tb_ventium). The --soc TB
