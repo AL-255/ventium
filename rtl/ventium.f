@@ -53,6 +53,7 @@ fpu/ven_bcd_to_fp.sv
 fpu/fpu_f2xm1.sv
 fpu/fpu_fpatan.sv
 fpu/fpu_fyl2x.sv
+fpu/fpu_fsincos.sv
 
 // ---- mem ------------------------------------------------------------------
 mem/dcache_timing.sv
