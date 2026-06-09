@@ -25,11 +25,6 @@ set CARVEOUT_BASE 0x0000000040000000
 set CARVEOUT_SIZE 0x0000000010000000
 set HPM0_BASE     0x00000000A0000000
 set HPM0_SIZE     0x0000000000010000
-# env overrides: KV260_PL_FREQ (pl_clk0 MHz; the core is ~35 MHz routing-bound at this
-# util, so a first WORKING bitstream uses a conservative clock), KV260_DO_IMPL (1 =
-# place+route+bitstream after synth).
-set PL_FREQ [expr {[info exists ::env(KV260_PL_FREQ)] ? $::env(KV260_PL_FREQ) : 100}]
-set DO_IMPL [expr {[info exists ::env(KV260_DO_IMPL)] ? $::env(KV260_DO_IMPL) : 0}]
 
 file mkdir $OUTDIR
 create_project -force ventium_kv260 $OUTDIR/proj -part $PART
@@ -84,7 +79,7 @@ set_property -dict [list \
     CONFIG.PSU__USE__M_AXI_GP2 {0} \
     CONFIG.PSU__USE__IRQ0 {1} \
     CONFIG.PSU__FPGA_PL0_ENABLE {1} \
-    CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ $PL_FREQ ] [get_bd_cells ps8]
+    CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {100} ] [get_bd_cells ps8]
 
 # ventium_kv260_top (the Verilog wrapper) as a Module Reference. Its X_INTERFACE attrs
 # must infer the master `m_axi`, the slave `s_axil`, and the interrupt `irq_out`.
@@ -167,30 +162,3 @@ set pr [get_property PROGRESS [get_runs synth_1]]
 puts "=== synth_1 status=$st progress=$pr ==="
 if {$pr ne "100%"} { error "FAIL: synth_design did not complete (progress=$pr)" }
 puts "=== BD-KV260-SOC-OK: validate + full-core synth clean (see $OUTDIR/{drc,util,timing}.rpt) ==="
-
-# ---- BAR-3 (optional): place + route + bitstream -------------------------------
-if {$DO_IMPL} {
-    puts "=== BAR-3: impl (place+route+bitstream) @ pl_clk0 = $PL_FREQ MHz ==="
-    reset_run impl_1
-    launch_runs impl_1 -to_step write_bitstream -jobs 8
-    wait_on_run impl_1
-    set ist [get_property STATUS   [get_runs impl_1]]
-    set ipr [get_property PROGRESS [get_runs impl_1]]
-    set wns [get_property STATS.WNS [get_runs impl_1]]
-    open_run impl_1
-    report_timing_summary -file $OUTDIR/impl_timing.rpt
-    report_utilization    -file $OUTDIR/impl_util.rpt
-    report_drc            -file $OUTDIR/impl_drc.rpt
-    set bit $OUTDIR/proj/ventium_kv260.runs/impl_1/design_kv260_wrapper.bit
-    puts "=== impl_1 status=$ist progress=$ipr WNS=$wns ns @ $PL_FREQ MHz ==="
-    if {[file exists $bit]} {
-        file copy -force $bit $OUTDIR/ventium_kv260.bit
-        if {$wns >= 0} {
-            puts "=== BIT-KV260-OK: bitstream written + TIMING MET (WNS=$wns ns @ $PL_FREQ MHz) -> $OUTDIR/ventium_kv260.bit ==="
-        } else {
-            puts "=== BIT-KV260-TIMING-FAIL: bitstream written but WNS=$wns ns < 0 @ $PL_FREQ MHz (lower KV260_PL_FREQ) ==="
-        }
-    } else {
-        puts "=== BIT-KV260-FAIL: no bitstream (impl progress=$ipr — likely unroutable congestion) ==="
-    }
-}
