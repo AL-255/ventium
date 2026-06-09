@@ -38,6 +38,7 @@ module ventium_l1_axi_top #(
     input  wire [3:0]        core_wstrb,
     output wire [31:0]       core_rdata,
     output wire              core_ack,
+    output wire              bus_err,    // #34 fatal AXI fault (PS observes -> reset)
 
     // ---- AXI4 master bundle `m_axi` (-> S_AXI_HPC0_FPD) ------------------------
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi AWID" *)
@@ -126,6 +127,7 @@ module ventium_l1_axi_top #(
       .core_req    (core_req),   .core_we     (core_we),    .core_addr  (core_addr),
       .core_wdata  (core_wdata), .core_wstrb  (core_wstrb), .core_rdata (core_rdata),
       .core_ack    (core_ack),
+      .bus_err     (bus_err),
       .m_axi_awid    (m_axi_awid),    .m_axi_awaddr  (m_axi_awaddr),
       .m_axi_awlen   (m_axi_awlen),   .m_axi_awsize  (m_axi_awsize),
       .m_axi_awburst (m_axi_awburst), .m_axi_awlock  (m_axi_awlock),

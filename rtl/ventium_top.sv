@@ -165,7 +165,8 @@ module ventium_top
     input  logic [1:0]  m_axi_rresp,
     input  logic        m_axi_rlast,
     input  logic        m_axi_rvalid,
-    output logic        m_axi_rready
+    output logic        m_axi_rready,
+    output logic        bus_err          // #34 fatal AXI fault (PS observes -> reset)
 `endif
 );
 
@@ -220,6 +221,7 @@ module ventium_top
       .cycle_mode   (cycle_mode),
 `ifdef VEN_L1_AXI
       .real_bus     (l1axi_en),
+      .bus_err      (l1_bus_err),
 `endif
       .errata_en    (errata_en),
       .cpu_hung     (cpu_hung),
@@ -455,7 +457,8 @@ module ventium_top
   // from it (l1_c_rdata/l1_c_ack) and the direct mem_* output is held INERT so the
   // TB's same-cycle MemModel does not double-service (all memory goes via m_axi).
   // REMAP_BASE=0 (identity) for the cosim: the MemModel is x86-phys-indexed.
-  logic [31:0] l1_c_rdata; logic l1_c_ack;
+  logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
+  assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(40'h0), .ADDR_MASK(32'hFFFF_FFFF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
@@ -465,6 +468,7 @@ module ventium_top
       .core_wstrb(core_mem_wstrb),
       .core_rdata(l1_c_rdata),
       .core_ack  (l1_c_ack),
+      .bus_err   (l1_bus_err),
       .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
       .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst), .m_axi_awlock(m_axi_awlock),
       .m_axi_awcache(m_axi_awcache), .m_axi_awprot(m_axi_awprot), .m_axi_awqos(m_axi_awqos),
