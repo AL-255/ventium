@@ -86,6 +86,61 @@ static fx80_t p5_f2xm1(fx80_t x80) {
     return q_to_fx80(r);
 }
 
+// ---- FPATAN: atan2(ST1=y, ST0=x) --------------------------------------------
+// Silicon algorithm (spec §3.2): atan of a unit ratio via the c-table identity
+//   atan(w) = atan(c) + atan((w-c)/(1+wc)),  c = nearest k/32 (the 32-entry atan table),
+// reducing the residual u to [-1/64, 1/64] where a low-degree Remez polynomial suffices.
+// The model evaluates the table value + residual at quad precision (the residual atan is
+// an RTL-accuracy detail; on [-1/64,1/64] it is correct to >67 bits). FPATAN has no
+// catastrophic reduction error, so this is accuracy-faithful (within the P5's ~1 ulp).
+static __float128 p5_atan_unit(__float128 w) {   // w in [0,1] -> atan(w) in [0, pi/4]
+    long k = (long)rintq(w * 32.0Q);             // nearest 1/32 breakpoint, 0..32
+    __float128 c = (__float128)k / 32.0Q;
+    __float128 u = (w - c) / (1.0Q + w * c);     // residual, |u| <= 1/64
+    return atanq(c) + atanq(u);                  // table atan(c) + tiny-interval atan(u)
+}
+
+static fx80_t p5_fpatan(fx80_t y80, fx80_t x80) {
+    __float128 y = fx80_to_q(y80), x = fx80_to_q(x80);
+    __float128 PI = M_PIq, PI2 = M_PIq / 2.0Q;
+    int sy = signbitq(y), sx = signbitq(x);
+    __float128 ay = fabsq(y), ax = fabsq(x);
+    __float128 res;
+    if (ax == 0.0Q && ay == 0.0Q) {
+        res = atan2q(y, x);                      // signed-zero corner -> x87 quadrant rule
+    } else {
+        __float128 a = (ax >= ay) ? p5_atan_unit(ay / ax)        // ratio in [0,1]
+                                  : (PI2 - p5_atan_unit(ax / ay)); // ratio>1 -> complement
+        if      (!sx && !sy) res =  a;           // Q1 (x>=0, y>=0)
+        else if ( sx && !sy) res =  PI - a;      // Q2 (x<0,  y>=0)
+        else if ( sx &&  sy) res = -(PI - a);    // Q3 (x<0,  y<0)
+        else                 res = -a;           // Q4 (x>=0, y<0)
+    }
+    return q_to_fx80(res);
+}
+
+static int validate_fpatan(void) {
+    int fails = 0, n = 0; double worst_ulp = 0.0;
+    // sweep a grid of (y, x) across all quadrants + the |y|<>|x| boundary.
+    for (double yd = -4.0; yd <= 4.0; yd += 1.0/64)
+    for (double xd = -4.0; xd <= 4.0; xd += 1.0/64) {
+        if (xd == 0.0 && yd == 0.0) continue;
+        fx80_t y80 = q_to_fx80((__float128)yd), x80 = q_to_fx80((__float128)xd);
+        fx80_t r80 = p5_fpatan(y80, x80);
+        __float128 got = fx80_to_q(r80);
+        __float128 truth = atan2q(fx80_to_q(y80), fx80_to_q(x80));
+        if (truth == 0.0Q) { n++; continue; }
+        int exp = (r80.se & 0x7fff);
+        __float128 ulp = powq(2.0Q, (__float128)(exp - 16383 - 63));
+        double erd = (double)(fabsq(got - truth) / ulp);
+        if (erd > worst_ulp) worst_ulp = erd;
+        if (erd > 1.0) fails++;
+        n++;
+    }
+    printf("FPATAN: %d samples, worst error %.3f ulp, %d over 1.0 ulp\n", n, worst_ulp, fails);
+    return fails;
+}
+
 // ---- self-validation: F2XM1 within ~1 ulp of truth over a sweep --------------
 static int validate_f2xm1(void) {
     int fails = 0, n = 0;
@@ -112,17 +167,24 @@ static int validate_f2xm1(void) {
 
 int main(int argc, char** argv) {
     if (argc >= 2 && !strcmp(argv[1], "--validate")) {
-        int f = validate_f2xm1();
-        if (f == 0) { printf("P5XTRANS-F2XM1-OK (accuracy-faithful, <=1 ulp)\n"); return 0; }
-        printf("P5XTRANS-F2XM1-FAIL (%d samples exceed 1 ulp)\n", f); return 1;
+        int f = validate_f2xm1() + validate_fpatan();
+        if (f == 0) { printf("P5XTRANS-OK (F2XM1+FPATAN accuracy-faithful, <=1 ulp)\n"); return 0; }
+        printf("P5XTRANS-FAIL (%d samples exceed 1 ulp)\n", f); return 1;
     }
-    // op eval: p5xtrans f2xm1 <se_hex> <mant_hex>  -> prints the floatx80 result.
+    // op eval: p5xtrans f2xm1 <se> <m>  /  fpatan <y_se> <y_m> <x_se> <x_m>
     if (argc >= 4 && !strcmp(argv[1], "f2xm1")) {
         fx80_t x = { (uint16_t)strtoul(argv[2],0,16), (uint64_t)strtoull(argv[3],0,16) };
         fx80_t r = p5_f2xm1(x);
         printf("%04x %016llx\n", r.se, (unsigned long long)r.m);
         return 0;
     }
-    fprintf(stderr, "usage: %s --validate | f2xm1 <se_hex> <mant_hex>\n", argv[0]);
+    if (argc >= 6 && !strcmp(argv[1], "fpatan")) {
+        fx80_t y = { (uint16_t)strtoul(argv[2],0,16), (uint64_t)strtoull(argv[3],0,16) };
+        fx80_t x = { (uint16_t)strtoul(argv[4],0,16), (uint64_t)strtoull(argv[5],0,16) };
+        fx80_t r = p5_fpatan(y, x);
+        printf("%04x %016llx\n", r.se, (unsigned long long)r.m);
+        return 0;
+    }
+    fprintf(stderr, "usage: %s --validate | f2xm1 <se> <m> | fpatan <y_se> <y_m> <x_se> <x_m>\n", argv[0]);
     return 2;
 }
