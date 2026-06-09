@@ -207,3 +207,26 @@ The IO seam (F2/F3) is **independent** of the proxy seam (F4) and is already sta
 ---
 
 **Key files referenced (all absolute):** `/home/yukidama/github/ventium/rtl/core/core_io.svh`, `/home/yukidama/github/ventium/rtl/core/core_io_driver.svh`, `/home/yukidama/github/ventium/rtl/core/core_fetch_decode.svh` (proxy arm `:269-282`, soc_en dispatch `:229-235`), `/home/yukidama/github/ventium/rtl/core/core.sv` (state enum `:578-604`, `syscall_active_c` `:2153`, response ports `:113-118`), `/home/yukidama/github/ventium/rtl/ventium_top.sv`, `/home/yukidama/github/ventium/fpga/scripts/bd_l1axi.tcl` (HPM disable `:65-67`, carveout `:26-28`), `/home/yukidama/github/ventium/verif/tb/tb_main.cpp` (`service_io` `:482-521`, `service_proxy` `:541-626`). New files to create: `/home/yukidama/github/ventium/rtl/soc/ven_soc_axil.sv`, `/home/yukidama/github/ventium/rtl/ventium_kv260_top.sv`, `/home/yukidama/github/ventium/fpga/scripts/bd_kv260_soc.tcl`, `/home/yukidama/github/ventium/sw/ps/ven_soc_app/`.
+---
+
+## Build status (F2 in progress)
+
+| Deliverable | File(s) | Verified |
+|---|---|---|
+| **A1** ven_soc_axil (control + IO bridge slave) | `rtl/soc/ven_soc_axil.sv` | ✅ `run-soc-axil-gate.sh` SOCAXIL-GATE-OK; OOC synth VEN-AXIL-SYNTH-OK (no latch/loop) |
+| **A2** KV260 PL core (ventium_top + slave) | `rtl/soc/ventium_kv260_core.sv`, `ventium_kv260_top.v`; `ventium_top.sv` gated `retire_count` | ✅ Verilator elaboration clean (`+VEN_L1_AXI +VEN_KV260_SOC`) |
+| **A3** full-system BD | `fpga/scripts/bd_kv260_soc.tcl` | ✅ BAR-1 validate (0 err/crit); BAR-2 full-core synth on xck26 |
+| **A4** PS bring-up app | `sw/ps/ven_soc_app/` | host compile-clean; **untested on hardware** (no board in the loop yet) |
+
+**Wiring decisions (F2):** `cosim_en=1` routes ALL IN/OUT (and INS) to `S_IO`/the io bridge
+(`core_fetch_decode.svh:226-227`), `l1axi_en=1` routes memory via L1/AXI to the DDR carveout.
+The core latches `init_eip`/`init_esp`/`boot_mode` at its reset edge (the slave's `core_rst_n
+= aresetn & CORE_RUN` gates it); mode bits are read live (the PS writes MODE then releases
+CORE_RUN, AXI-Lite-ordered). Default cosim/L1AXI builds define neither `VEN_KV260_SOC` nor
+the SoC files, so they stay byte-identical (77/77 + all gates).
+
+**Known F3 gap (interrupt injection):** `cosim_en=1` does NOT enable the core's external-
+interrupt path (that is `soc_en`-gated, `core_fetch_decode.svh:88-104`). F2 (boot + polled
+console) needs no IRQs, but FreeDOS (F3) needs PIT/keyboard interrupts → F3 must add a gated
+PS→core interrupt-injection seam (expose `soc_en` + the `intr`/`inta`/vector ports, driven by
+the slave from the PS's emulated PIC). Tracked for F3.
