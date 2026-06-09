@@ -807,6 +807,18 @@ module core
   // readable. A dependent FP consumer (fp_role>=2) must stall until then; this is
   // what turns a dependent fadd chain into CPI~3 (lat 3) while independent FP
   // pipelines at throughput 1 (the latency is overlapped by other work).
+  //
+  // #6 DESIGN DECISION (owner-confirmed 2026-06-09, "keep fixed P5 lat"): the
+  // scoreboard is driven by the FIXED P5 latencies `u_d.fp_lat`/`fp_occ` (the
+  // p5trace.c oracle's per-op constants), NOT by the iterative engines' real
+  // `done`. The two are RUNTIME-EXCLUSIVE arms: this fast/cycle arm is the M4/M5
+  // cycle-accuracy model graded against the p5model golden (the mb_* bands), while
+  // the iterative SRT/BCD/transcendental engines live on the SLOW functional arm
+  // (S_FP_BUSY/S_BCD_BUSY/S_TRSC_BUSY). Those engines' done-latency is an
+  // implementation artifact (radix-4 SRT count, ~20-clk microcode), tuned for
+  // bit-exactness/area — NOT real-P5 cycle timing — so feeding it back here would
+  // diverge from the oracle and move the bands. The fixed `fp_lat`/`fp_occ`
+  // constants stay the cycle-fidelity source of truth. (#6 closed as by-design.)
   logic [31:0] fp_ready_cyc;
 
   // FP pipe OCCUPANCY hold (p5model pipe_free_at = issue + occ). An FP op holds
