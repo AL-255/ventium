@@ -13,6 +13,16 @@ $(TARGET): p5xtrans.c
 validate: $(TARGET)
 	./$(TARGET) --validate
 
+# --- QEMU-mode bit-exact reference (the `make verify` x87 gate target) --------
+# qref.c reproduces qemu-8.2 helper_f2xm1 bit-for-bit; qref-validate closes the
+# loop to the actual pinned qemu-i386 (QREF-F2XM1-QEMU-OK).
+qref: qref.c qref_f2xm1_table.inc
+	$(CC) $(CFLAGS) -o $@ qref.c -lm
+
+.PHONY: qref-validate
+qref-validate: qref
+	python3 qref_validate.py
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) qref
 .PHONY: clean
