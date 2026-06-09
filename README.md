@@ -1,5 +1,9 @@
 # Ventium
 
+[![Documentation](https://img.shields.io/badge/docs-Sphinx-green)][docs]
+
+[docs]: https://al-255.github.io/ventium/
+
 <p>
   <img src="docs/ventium.png" alt="Ventium" width="440">
 </p>
