@@ -23,11 +23,14 @@ export M5_METRICS="$ROOT/verif/m5_metrics.py"
 export PYTHON="${PYTHON:-python3}"
 export CC="${CC:-gcc}"
 export CFLAGS_BASE="-m32 -march=pentium -nostdlib -static -Wl,--build-id=none"
-export WORKDIR="$ROOT/build/verify-l1axi"
+# env overrides let run-l1axi-cdc-verify.sh reuse this script verbatim for the
+# dual-clock build (L1AXI_TARGET=l1axi_cdc, a separate obj dir + workdir + portbase).
+export WORKDIR="${L1AXI_WORKDIR:-$ROOT/build/verify-l1axi}"
 export CACHE_DIR="$ROOT/build/golden-cache"          # REUSE the mode-0 QEMU goldens
 export PORTBASE="${PORTBASE:-27000}"
-export TB_BIN="$ROOT/verif/tb/obj_dir_l1axi/tb_ventium"
+export TB_BIN="${L1AXI_TB_BIN:-$ROOT/verif/tb/obj_dir_l1axi/tb_ventium}"
 export TB_EXTRA_FLAGS="--l1-axi --quiesce ${L1AXI_QUIESCE:-200000}"
+L1AXI_TARGET="${L1AXI_TARGET:-l1axi}"
 TESTS_DIR="$ROOT/verif/tests"
 WORKER="$ROOT/verif/lib/verify_worker.sh"
 NCPU="$(nproc 2>/dev/null || echo 4)"; [ "$NCPU" -gt 3 ] && NCPU=$(( NCPU - 2 ))
@@ -37,8 +40,8 @@ NCPU="$(nproc 2>/dev/null || echo 4)"; [ "$NCPU" -gt 3 ] && NCPU=$(( NCPU - 2 ))
 mkdir -p "$WORKDIR"
 rm -f "$WORKDIR"/*.result 2>/dev/null || true
 
-echo "== build the +VEN_L1_AXI tb (obj_dir_l1axi) =="
-make -C "$ROOT/verif/tb" l1axi > "$WORKDIR/build.log" 2>&1 \
+echo "== build the +VEN_L1_AXI tb ($L1AXI_TARGET) =="
+make -C "$ROOT/verif/tb" "$L1AXI_TARGET" > "$WORKDIR/build.log" 2>&1 \
     || { echo "L1AXI-VERIFY-FAIL (build)"; tail -15 "$WORKDIR/build.log"; exit 1; }
 
 # ---- build the FUNC job list (one per manifest) ----------------------------
