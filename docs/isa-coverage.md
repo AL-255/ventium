@@ -138,13 +138,22 @@ wrong answer (Tier-3 deferral, `docs/m3-fpu-spec.md`).
 
 ### x87 HALT (deferred) gaps
 
+The **8 transcendentals** `F2XM1/FYL2X/FPTAN/FPATAN/FYL2XP1/FSINCOS/FSIN/FCOS`
+(D9 F0/F1/F2/F3/F9/FB/FE/FF) are **IMPLEMENTED under `+VEN_TRANSCENDENTAL`** (M11/#11,
+`docs/m11-transcendental-spec.md`): iterative microcoded engines, Group B bit-exact vs
+qemu-i386 and Group A bit-exact vs a shared-poly silicon model. They still appear below
+because the **DEFAULT build leaves them `d_unknown` → HALT** (so it stays byte-identical;
+the gate is opt-in). Likewise BCD `FBLD`/`FBSTP` are IMPLEMENTED (M10) but the table is
+the *default-build* HALT set.
+
 | Mnemonic | Opcode | Why it HALTs |
 | --- | --- | --- |
 | FLDENV / FNSTENV | D9 /4,/6 | `default d_unknown` (`core.sv:1887`) |
-| Transcendentals / F2XM1 / FYL2X / FPTAN / FPATAN / FSIN / FCOS / FSCALE / FPREM / FRNDINT etc. | D9 F0–FF (non-impl) | `default d_unknown` (`core.sv:1908`) |
+| Transcendentals F2XM1/FYL2X/FPTAN/FPATAN/FYL2XP1/FSINCOS/FSIN/FCOS | D9 F0–FF | implemented under `+VEN_TRANSCENDENTAL`; default build `d_unknown` (`core.sv:2024`) |
+| FSCALE / FPREM / FPREM1 / FRNDINT / FXTRACT | D9 F4/F5/F7/F8/FC/FD, D9 F1… | still deferred — `default d_unknown` |
 | FCMOVcc / FCOMI / FUCOMI | DA/DB reg forms | `d_unknown` (`core.sv:1922,1940`) |
 | FRSTOR / FSAVE / FNSAVE | DD /4,/6 | `default d_unknown` (`core.sv:1974`) |
-| FBLD / FBSTP (BCD FP) | DF /4,/6 | `default d_unknown` (`core.sv:2017`) |
+| FBLD / FBSTP (BCD FP) | DF /4,/6 | IMPLEMENTED (M10, `FX_FBLD`/`FX_FBSTP`) — listed for the default-build boundary |
 | Any other escape sub-form (Inf/NaN/denormal-producing or non-default RC/PC paths) | D8–DF | per-escape `default d_unknown`; `if (d_unknown) d_is_x87=1'b0` (`core.sv:2026`) |
 
 ---

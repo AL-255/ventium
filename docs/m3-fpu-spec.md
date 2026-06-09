@@ -47,11 +47,16 @@ effectively impossible (against QEMU) for transcendentals. So M3 is tiered:
 - **Tier 3 — best-effort, documented:** non-default rounding (RC) and precision
   (PC) control, signed zeros / infinities / NaN propagation, denormals, `FPREM`/
   `FPREM1`, `FRNDINT`, `FSCALE`, `FXTRACT`. Cover what passes; document divergences.
-- **DEFERRED — loud HALT, never fake:**
-  - **Transcendentals** `FSIN FCOS FSINCOS FPTAN FPATAN F2XM1 FYL2X FYL2XP1`:
-    QEMU computes these with its own approximation; matching it bit-exact ≠
-    matching a real Pentium, so deferred to a later milestone with an
-    ulp-tolerance oracle (REF.md §8). HALT for now.
+- **DEFERRED — loud HALT, never fake** (in the DEFAULT build):
+  - **Transcendentals** `FSIN FCOS FSINCOS FPTAN FPATAN F2XM1 FYL2X FYL2XP1` —
+    **now IMPLEMENTED under `+VEN_TRANSCENDENTAL` (M11/#11, see
+    `docs/m11-transcendental-spec.md`).** The default build still decodes them to
+    `d_unknown` → HALT (so it stays byte-identical), but the gated build adds
+    iterative microcoded engines: F2XM1/FPATAN/FYL2X/FYL2XP1 are **bit-exact vs
+    qemu-i386** (verbatim softfloat transcription, all 4 RC); FSIN/FCOS/FSINCOS/
+    FPTAN are **bit-exact vs a shared-polynomial silicon model** (~1.8 ulp vs quad
+    — qemu computes those at double precision via host glibc, so it can't be the
+    oracle). Gates in `verif/trsc/`.
   - Environment/state `FSAVE/FRSTOR/FLDENV/FNSTENV` (28/108-byte memory images)
     — deferred; HALT. (BCD `FBLD`/`FBSTP` were deferred here but are now
     IMPLEMENTED in M10 — see below — and are NO LONGER in the loud-HALT set.)
