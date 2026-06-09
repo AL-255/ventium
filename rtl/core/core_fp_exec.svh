@@ -76,8 +76,10 @@
 `ifdef VEN_TRANSCENDENTAL
               // Transcendentals (#11): run the iterative engine first
               // (S_TRSC_BUSY), then commit + retire there. F2XM1 overwrites ST0
-              // in place; FPATAN writes ST1 and pops (commit driver distinguishes).
-              if (q_fxop==FX_F2XM1 || q_fxop==FX_FPATAN) begin
+              // in place; FPATAN/FYL2X/FYL2XP1 write ST1 and pop (commit driver
+              // distinguishes the two patterns).
+              if (q_fxop==FX_F2XM1 || q_fxop==FX_FPATAN ||
+                  q_fxop==FX_FYL2X || q_fxop==FX_FYL2XP1) begin
                 state<=S_TRSC_BUSY;
               end else begin
 `endif

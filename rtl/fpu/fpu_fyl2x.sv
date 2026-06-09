@@ -117,7 +117,11 @@ module fpu_fyl2x
             end
           end else begin
             // ---- FYL2XP1 ----
-            if (x_is_zero || y_is_zero || a1e==32'sd32767) begin
+            // out of range: |ST0| must be < 1-sqrt(2)/2 -> invalid (default NaN).
+            if (x_exp > 15'h3ffd ||
+                (x_exp == 15'h3ffd && x_man > (x_sign ? 64'h95f619980c4336f7 : 64'hd413cccfe7799211))) begin
+              result_q <= {16'hffff, 64'hc000000000000000}; pe_q<=1'b0; ie_q<=1'b1; st<=S_DONE;
+            end else if (x_is_zero || y_is_zero || a1e==32'sd32767) begin
               automatic logic [80:0] mr; mr=fx_mul(x_q,y_q,rc_q);
               result_q<=mr[79:0]; pe_q<=mr[80]; st<=S_DONE;
             end else if (a0e < 32'sd16304) begin              // exp < 0x3fb0: log2e tiny path
