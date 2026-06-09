@@ -61,7 +61,13 @@ package ventium_decode_pkg;
     // M10: packed-BCD load (FBLD, DF /4) / round-store-and-pop (FBSTP, DF /6)
     FX_FBLD, FX_FBSTP,
     // M11: x87 environment / state save & restore
-    FX_FNSTENV, FX_FLDENV, FX_FNSAVE, FX_FRSTOR
+    FX_FNSTENV, FX_FLDENV, FX_FNSAVE, FX_FRSTOR,
+    // M11 #11: x87 transcendentals (D9 group) — iterative engines, gated behind
+    // +VEN_TRANSCENDENTAL (the decode that PRODUCES these is gated; the default
+    // build keeps treating D9 F0/F1/F2/F3/F9/FB/FE/FF as d_unknown -> HALT, so the
+    // 77/77 corpus stays byte-identical). Appended at the END so every existing
+    // fxop's enum encoding is unchanged.
+    FX_F2XM1
   } fxop_e;
 
   // ===========================================================================

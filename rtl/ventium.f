@@ -14,6 +14,8 @@
 // files (R2 modularization); they are textually pasted at the original site, so
 // the netlist is identical. +incdir lets `include "core_*.svh" resolve.
 +incdir+core
+// +incdir for fpu_f2xm1_rom.svh (the F2XM1 constant ROM `included by fpu_f2xm1.sv).
++incdir+fpu
 
 // ---- packages (must precede every module that imports them) ----------------
 ventium_pkg.sv
@@ -46,6 +48,9 @@ fpu/fpu_sqrt_iter.sv
 // iterative FP->packed-BCD (FBSTP) engine — instantiated under +VEN_BCD_ITER.
 fpu/ven_bcd.sv
 fpu/ven_bcd_to_fp.sv
+// iterative x87 transcendental engine (F2XM1, #11) — instantiated by core.sv only
+// under +define+VEN_TRANSCENDENTAL; harmless (uninstantiated) in the default build.
+fpu/fpu_f2xm1.sv
 
 // ---- mem ------------------------------------------------------------------
 mem/dcache_timing.sv
