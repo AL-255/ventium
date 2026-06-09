@@ -80,8 +80,79 @@ already exist on `fpu_top.sv` — no new port.
   the `compare.py` ulp-tolerance harness (§1). FSINCOS/FPTAN reuse FSIN/FCOS; the C2
   out-of-range flag (|x|>2^63) IS reproducible and graded exactly even here.
 
-## 3. Status
+## 3. CHOSEN TARGET — accuracy-faithful to the real Pentium silicon
 
-Design complete (this doc). Implementation: Phase 0 starting. Default build + every
-existing gate stay byte-identical (all behind `+VEN_TRANSCENDENTAL`); the `tx_deferred_halt`
-boundary keeps pinning whatever stays `d_unknown`.
+(Owner decision, 2026-06-09.) §0–§2 above describe the *QEMU-faithful* axis (bit-exact
+vs the pinned oracle). The actual goal is to match the **real Pentium P5/P54C silicon**.
+Grounded by the `pentium-fpu-silicon-recon` workflow reading Ken Shirriff's die-level
+constant-ROM extraction (righto.com/2025/01/pentium-floating-point-ROM.html) + Intel docs.
+
+### 3.1 Feasibility verdict (honest)
+**Bit-exact-to-silicon is NOT achievable from public data:** (a) the transcendental
+*microcode* ROM is undumped (the op-sequence/rounding that fixes the low bits is unknown);
+(b) the Remez polynomial *coefficient* words are unpublished (only anchor constants +
+"differs <1% from 1/k!" qualitative notes); (c) the 68th-significand "flag bit" semantics
+are unknown. AND there is **no bit-exact oracle** for the silicon target anyway (QEMU ≠ the
+Pentium; for FSIN/FCOS QEMU uses host glibc, not even self-consistent across hosts).
+**Achievable = accuracy-faithful:** the documented algorithm + silicon reduction constants,
+correct to the P5's ~1 ulp envelope AND reproducing its characteristic errors (the famous
+near-π FSIN catastrophe). "Behaviorally the Pentium," not provably its last ulp.
+
+### 3.2 The silicon algorithm (Remez polynomials, NOT CORDIC — that was the 8087/387)
+ROM = 304 × 86-bit (18-bit exp incl. sign, bias `0x0FFFF`; 68-bit sig = flag + integer +
+66 frac = 67 sig bits). Verified anchor: ROM π sig `0x6487ed5110b4611a6` (67-bit) ==
+QEMU π `0xc90fdaa22168c234` (64-bit) ≪3 + `110`.
+- **FSIN/FCOS/FSINCOS/FPTAN**: reduce by ROM π/π2/π4 (the 67-bit π → the near-π error),
+  then finer table reduction with sin/cos(n/64) via `sin(a+b)=sin a cos b+cos a sin b`;
+  4-term & 6-term Remez Horner on `[-π/4,π/4]`-ish. FPTAN = sin/cos.
+- **FPATAN**: `atan(x)=atan((x−c)/(1+xc))+atan(c)`, c=nearest n/32 from the 32-entry
+  atan(n/32) table (entry156 = π/4), reduce to `[-1/64,1/64]`, odd-power Remez Horner.
+- **F2XM1**: reduce by ROM `2^(n/128)−1` (64-entry, irregular spacing) to `[-1/128,1/128]`,
+  e^x series (1/n!, entries 33–49) scaled by ln2, subtract 1 separately; 6-/11-term.
+- **FYL2X/FYL2XP1**: x→[1,2], divide by `1+n/64`, add split-precision log₂(1+n/64)
+  (40-bit "top" entries 206–237 + 67-bit "bottom" 238–269 = 107-bit), atanh odd Horner,
+  fuse-multiply by y at extended precision.
+
+### 3.3 The build is from-first-principles (constants computable)
+The silicon reduction constants ARE π, ln2, log₂e/log₂10, arctan(n/32), log₂(1+n/64),
+2^(n/128)−1, sin/cos(n/64) **rounded to the ROM's 67-bit precision** — generate them at
+high precision and round (the recon's extracted hex is the cross-check; π already matches).
+Only the polynomial coefficients are reconstructed (minimax/Remez fit to the documented
+degree + reduced interval). The near-π behavior emerges naturally from reducing an 80-bit
+arg with the 67-bit π.
+
+### 3.4 DUAL-MODE — silicon is the ship target, QEMU mode keeps the bit-exact gate
+(Owner decision, 2026-06-09: "make this an option, so we can still run verification.")
+The engine is built ONCE and parameterized by `+VEN_TRSC_SILICON`; both modes share the
+algorithm STRUCTURE (the reduction identities + the Horner form) and differ only in the
+constant/coefficient ROM and the internal precision/rounding:
+
+| | **QEMU mode** (default under `+VEN_TRANSCENDENTAL`) | **Silicon mode** (`+VEN_TRSC_SILICON`) |
+|---|---|---|
+| Group B (F2XM1/FYL2X/FYL2XP1/FPATAN) | reproduce QEMU's exact softfloat (its coeffs + wide-int datapath + round-pack) → **BIT-EXACT vs the pinned oracle** | the P5 constants (67-bit) + reconstructed Remez coeffs + 67-bit internal → the silicon behavior |
+| Group A (FSIN/FCOS/FSINCOS/FPTAN) | un-gradeable (QEMU=host glibc) → stay `d_unknown`/HALT, OR run + tolerance-checked vs the model | the P5 reduction (67-bit π → near-π signature) + Remez |
+| Oracle | `make verify` x87 diff vs QEMU, **exact st0** (the project's bedrock gate) | the C model (§ below) + ulp-tolerance |
+
+So **`make verify` stays a real bit-exact gate** (run the QEMU-mode build: F2XM1/FYL2X/
+FYL2XP1/FPATAN diff-clean vs QEMU, incl. Quake's FPATAN), and the shipped silicon-mode
+build delivers the authentic P5 behavior, verified against the model below.
+
+### 3.4a Verification (silicon mode — no silicon oracle → a C reference model is the spec)
+1. **`tools/p5xtrans/p5xtrans.c`** = the executable silicon spec: the algorithm + the
+   67-bit-rounded constants + the reconstructed coefficients, in `long double`/wider with
+   explicit guards, rounded to floatx80. **Validated** to ~1 ulp vs mpmath/`long double`
+   truth AND it must reproduce the known error signatures (near-π, the Intel-documented
+   worst cases). This is the authority for the silicon mode.
+2. **RTL (silicon mode) bit-exact vs `p5xtrans`** — the "RTL faithfully implements the
+   spec" gate, full project rigor (the model, not QEMU, is the oracle for these ops).
+3. `make verify` x87 diff vs QEMU in silicon mode uses a **documented ulp-tolerance band**
+   (FPATAN/F2XM1 agree with the silicon to ~1 ulp; FSIN/FCOS diverge near π exactly as the
+   silicon does vs glibc). Honest (computes + validates), NOT injecting QEMU's answer.
+
+### 3.5 Implementation order
+C model first (it's the spec, validatable in software), then the matching RTL engine + a
+`tx_*` bit-exact-vs-model gate, per op: **F2XM1** (validator) → **FPATAN** (Quake's only
+transcendental; silicon ≈ QEMU within ~1 ulp so it's also near-bit-exact there) →
+**FYL2X/FYL2XP1** → **FSIN/FCOS/FSINCOS/FPTAN** (the near-π signature). All behind
+`+VEN_TRANSCENDENTAL` / `S_TRSC_BUSY`; default build + every existing gate byte-identical;
+`tx_deferred_halt` keeps pinning whatever is still `d_unknown`.
