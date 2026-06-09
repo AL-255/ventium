@@ -116,6 +116,12 @@ module core
     input  logic [31:0] syscall_eax,      // golden sys_call.ret -> eax
     input  logic        syscall_apply_gs, // 1: this syscall set a new %gs TLS base
     input  logic [31:0] syscall_gs_base,  // the resulting %gs base (set_thread_area)
+`ifdef VEN_PS_PROXY
+    // PS-bridge (F4): on real HW the PS answers the int-0x80 microseconds later, so
+    // the proxy must STALL (S_SYSCALL_WAIT) and commit only when the PS has filled
+    // syscall_eax/gs/resume AND written the kernel memory effects to the DDR carveout.
+    input  logic        syscall_resp_valid,
+`endif
 
     // M14: syscall ARGS exposed at the syscall_active pulse (read-only). For the
     // TB's free-run syscall EMULATOR (--emulate-syscalls): the TB samples these
@@ -595,6 +601,9 @@ module core
                  // THE SAME CLOCK, so the per-retire arch-state check is exact.
 `endif
 
+`ifdef VEN_PS_PROXY
+    S_SYSCALL_WAIT,   // PS-bridge (F4): hold the int-0x80 proxy until syscall_resp_valid
+`endif
     S_FENV_ST, S_FENV_LD,   // M11b: env/state store (FNSTENV/FNSAVE) & load (FLDENV/FRSTOR)
     // M7.3b Win95 co-sim port I/O: the IN/OUT bus handshake state (cosim only).
     S_IO,
@@ -672,6 +681,11 @@ module core
   // S_DECODE int-0x80 arm (see below); the apply happens on that same clock.
   logic [31:0] gs_base_r;          // latched %gs TLS base (0 = flat / unset)
   logic [63:0] cn;                 // core-side retire counter (drives syscall_n)
+`ifdef VEN_PS_PROXY
+  logic [3:0]  q_proxy_len;        // int80 length latched at S_SYSCALL_WAIT entry (eip
+                                   // parks at cd80, so this is the only thing the wait
+                                   // arm needs to advance eip on the late commit).
+`endif
   // M7.1 folded-instruction state: after proxying an int-0x80 we execute the
   // instruction following cd80 and emit ONE retire that stands in for the golden
   // int-0x80 record. fold_pending_r marks "the next retire is that syscall record"
@@ -3329,6 +3343,9 @@ module core
       x87_touched_r<=1'b0; f_step<=4'd0; f_seq_step<=5'd0;
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
       gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
+`ifdef VEN_PS_PROXY
+      q_proxy_len<=4'd0;
+`endif
       fold_pending_r<=1'b0; fold_pc_r<=32'd0;   // M7.1: no folded syscall in flight
       // (fpr[] cleared in u_fpu_state's rst_n arm.)
       // M4 pipeline state.
@@ -3529,6 +3546,24 @@ module core
         // M7.3 port-I/O arms (S_IO / S_INS) — relocated VERBATIM into
         // core_io.svh (RAW case-arms, pasted here in the FSM).
         `include "core_io.svh"
+`ifdef VEN_PS_PROXY
+        // PS-bridge (F4): the int-0x80 proxy parks here until the PS fills the
+        // response. Commit only on syscall_resp_valid — IDENTICAL to the zero-latency
+        // S_DECODE arm (eip still at cd80, so fold_pc_r<=eip and eip<=eip+q_proxy_len
+        // are the same), just deferred. Else spin, consuming nothing (no retire_valid
+        // -> cn frozen -> syscall_n/args stable for the PS the whole wait).
+        S_SYSCALL_WAIT: begin
+          if (syscall_resp_valid) begin
+            gpr[0] <= syscall_eax;
+            if (syscall_apply_gs) gs_base_r <= syscall_gs_base;
+            eip            <= eip + {28'd0, q_proxy_len};
+            fold_pending_r <= 1'b1;
+            fold_pc_r      <= eip;
+            fetch_word     <= 3'd0;
+            state          <= S_FETCH;
+          end
+        end
+`endif
         // store / micro-sequence arms (S_STORE / S_USEQ) — relocated VERBATIM
         // into core_store_useq.svh (RAW case-arms, pasted here in the FSM).
         `include "core_store_useq.svh"

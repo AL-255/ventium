@@ -267,6 +267,16 @@
           // cross-check; the RTL derives the resume EIP by actually running the
           // folded insn. Gated entirely on proxy_en && d_int80.
           else if (proxy_en && d_int80) begin
+`ifdef VEN_PS_PROXY
+            // PS-bridge (F4): the PS answers microseconds later, so commit NOTHING
+            // now — park eip at cd80, leave fold disarmed and gpr/gs unlatched, and
+            // wait in S_SYSCALL_WAIT for syscall_resp_valid (mirrors the S_IO stall
+            // discipline). syscall_active still pulses this one S_DECODE clock; the
+            // args/n stay stable across the wait (no retire ticks cn). Latch only the
+            // int80 length so the wait arm can advance eip on the late commit.
+            q_proxy_len <= d_len;
+            state       <= S_SYSCALL_WAIT;
+`else
             gpr[0] <= syscall_eax;               // eax = kernel ret (pre-folded-insn)
             if (syscall_apply_gs)
               gs_base_r <= syscall_gs_base;      // latch the TLS base for `mov gs`
@@ -278,6 +288,7 @@
 `ifdef M7_PROXY_DEBUG
             $display("[M7DBG] proxy int80 @0x%08x cn=%0d eax<=0x%08x apply_gs=%0d gs_base<=0x%08x",
                      eip, cn, syscall_eax, syscall_apply_gs, syscall_gs_base);
+`endif
 `endif
           end
           else if (d_halt || d_unknown) begin
