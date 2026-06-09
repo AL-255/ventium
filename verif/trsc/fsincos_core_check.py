@@ -78,8 +78,50 @@ def fx_to_float(v):
     if e==0 and fr==0: return 0.0
     return sign * fr * (2.0**(e-16383-63))
 
+def run2(op, mnem, prefix):
+    # push variants: FSINCOS (ST0=cos, ST1=sin) / FPTAN (ST0=1.0, ST1=tan).
+    xs=[i/16.0 for i in range(-24,25)] + [3.14159,-3.14159,0.0,0.7,-1.3]
+    data=bytearray()
+    for v in xs:
+        se,fr=x80(v); data+=struct.pack("<QH",fr,se)
+    s=['    .text','    .globl _start','_start:']
+    for i in range(len(xs)):
+        s += [f'    fldt invals+{i*10}', f'    {mnem}', '    fstp %st(0)', '    fstp %st(0)']  # pop both
+    s += ['    movl $1,%eax','    xorl %ebx,%ebx','    int $0x80','    .data','invals:']
+    for i in range(len(xs)):
+        s.append('    .byte '+','.join(f'0x{c:02x}' for c in data[i*10:(i+1)*10]))
+    asm="\n".join(s)+"\n"
+    ep=f"{W}/{op}.elf"; fp=f"{W}/{op}.flat"; gp=f"{W}/{op}.gold"; rp=f"{W}/{op}.rtl"; sp=f"{W}/{op}.s"
+    open(sp,"w").write(asm); maxins=len(xs)*4+4
+    subprocess.run([CC,"-m32","-march=pentium","-nostdlib","-static","-Wl,--build-id=none",
+                    f"-Wl,-Ttext={hex(LOAD)}","-o",ep,sp],check=True)
+    subprocess.run([sys.executable,ELF2FLAT,ep,"--out",fp,"--base",hex(LOAD)],check=True,stdout=subprocess.DEVNULL)
+    subprocess.run([sys.executable,GEN,"--qemu",QEMU,"--elf",ep,"--out",gp,"--max-insn",str(maxins),"--x87"],
+                   check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    gold=[json.loads(l) for l in open(gp) if l.strip() and not l.startswith("#")]
+    esp=gold[1]["esp"]
+    subprocess.run([TB,"--image",fp,"--load",hex(LOAD),"--entry",hex(LOAD),"--init-esp",esp,
+                    "--out",rp,"--max-insn",str(maxins),"--x87"],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    rtl=[json.loads(l) for l in open(rp) if l.strip() and not l.startswith("#")]
+    rtl_by_n={r["n"]:r for r in rtl if "n" in r}
+    op_ns=[r["n"] for r in gold if "n" in r and r.get("bytes","").lower().startswith(prefix)]
+    fails=0; ONE=0x3fff8000000000000000
+    for i,n in enumerate(op_ns):
+        v=xs[i]; se,fr=x80(v)
+        st0=int(rtl_by_n[n]["st0"],16)&((1<<80)-1); st1=int(rtl_by_n[n]["st1"],16)&((1<<80)-1)
+        if op=="fsincos":
+            exp0=model("fcos",se,fr); exp1=model("fsin",se,fr)
+        else:
+            exp0=ONE; exp1=model("fptan",se,fr)
+        if st0!=exp0 or st1!=exp1:
+            fails+=1
+            if fails<=8: print(f"  MISMATCH x={v} st0={st0:020x}(exp {exp0:020x}) st1={st1:020x}(exp {exp1:020x})")
+    print(f"{op}: {len(op_ns)} cases | core==model: {len(op_ns)-fails}/{len(op_ns)} (ST0+ST1 bit-exact)")
+    return fails
+
 def main():
     f = run("fsin","fsin","d9fe") + run("fcos","fcos","d9ff")
+    f += run2("fsincos","fsincos","d9fb") + run2("fptan","fptan","d9f2")
     if f==0:
         print("FSINCOS-CORE-GATE-OK  (core st0 == silicon model, bit-exact)")
         print("FSINCOS-CORE-GATE: PASS")

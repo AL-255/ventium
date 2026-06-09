@@ -80,7 +80,8 @@
               // distinguishes the two patterns).
               if (q_fxop==FX_F2XM1 || q_fxop==FX_FPATAN ||
                   q_fxop==FX_FYL2X || q_fxop==FX_FYL2XP1 ||
-                  q_fxop==FX_FSIN  || q_fxop==FX_FCOS) begin
+                  q_fxop==FX_FSIN  || q_fxop==FX_FCOS    ||
+                  q_fxop==FX_FSINCOS || q_fxop==FX_FPTAN) begin
                 state<=S_TRSC_BUSY;
               end else begin
 `endif
