@@ -20,7 +20,7 @@ module tb_l1d;
   logic        m_req, m_we; logic [31:0] m_addr, m_wdata; logic [3:0] m_wstrb;
   logic [31:0] m_rdata; logic m_ack;
 
-  ven_l1d dut (.clk, .rst_n, .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
+  ven_l1d dut (.clk, .rst_n, .flush_all(1'b0), .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
                .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack);
 
   // ---- behavioral backing: byte-addressable, same-cycle ack -----------------

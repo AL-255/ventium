@@ -132,7 +132,7 @@ core (core clk)                         |  AXI / PS clk (from MMCM)
    `make verify --l1-axi` 75/75 + Quake lockstep) is the NEXT step (see §4a).
 4. **Clocking:** MMCM (core clk + AXI clk) + reset sync (P1-3).
 
-## 4a. Full-core bus_mode=2 boot (the on-chip path): ✅ WIRED + 76/77 VERIFIED
+## 4a. Full-core bus_mode=2 boot (the on-chip path): ✅ WIRED + 77/77 VERIFIED
 The WHOLE Ventium core now boots through the L1+AXI subsystem (`+VEN_L1_AXI` build,
 `--l1-axi` / `l1axi_en`), functionally equivalent to bus_mode=0 (timing emergent).
 All behind `` `ifdef VEN_L1_AXI `` (+ a `real_bus` core input tied 0 in modes 0/1) so
@@ -204,12 +204,25 @@ hang); NO false-fire (77/77+10/10 at WATCHDOG=1024); default build byte-identica
 behind `+VEN_L1_AXI`). REFINEMENT: deliver a real #MC exception (vector 18) instead of a
 bare halt — needs the IDT up + the exception path.
 
+**#35 L1 external-invalidation port: ✅ DONE (verif/l1/run-l1axi-gate.sh scenario [7]
+→ L1AXI-GATE-OK; 77/77 + 10/10 unchanged; default build byte-identical).** The
+int-0x80 proxy / syscall emulator writes the MemModel DIRECTLY (bypassing the L1), so a
+`--emulate-syscalls` `read()`-into-buffer program (Quake) could read a STALE cached
+line. A new `flush_all` input on `ven_l1d` clears every `dc_val` bit in one cycle
+(last-write-wins over the FSM's tag/val writes, so an invalidation always wins); it
+routes `ventium_l1_axi` → `ventium_l1_axi_top` / `ventium_top`. The cosim
+(`tb_main.cpp`) arms a one-cycle `flush_all` pulse the clock AFTER `service_proxy()`
+applies a syscall's MemModel writes (1-clock latency is ample — the core is still
+resuming from the int-0x80 and cannot issue the buffer load for several clocks). On
+real silicon `flush_all` is tied 0 (the S_AXI_HPC0 CCI snoop covers PS-side writes —
+the `bd_l1axi.tcl` BD drives it from an `xlconstant` 0). VERIFIED: the L1AXI gate
+scenario [7] proves BOTH the hole (a backing write bypassing the L1 → re-read HITS the
+stale line) AND the fix (pulse `flush_all` → next read misses + refills the new value);
+77/77 + 10/10 stay green (the corpus has no proxy writes, so `flush_all` is never armed
+— the plumbing is inert); default build byte-identical (all behind `+VEN_L1_AXI`). The
+full Quake `--l1-axi --emulate-syscalls` coherency soak is exercised by F4 (#40).
+
 **Deferred (need a design decision, scoped follow-ups):**
-* **L1 external-invalidation port** (#4): the int-0x80 proxy / syscall emulator writes
-  the MemModel directly (bypassing the L1), so a `--emulate-syscalls` `read()`-into-
-  buffer program (Quake) can read a stale cached line. Add a flush port to ven_l1d
-  (set/way or address) the TB pulses after each syscall write; on real HW this is the
-  CCI snoop (HPC0 is coherent, but a non-AXI kernel write path would need it).
 * **Narrow-ADDR_MASK alias** (#5): inert in the shipped identity remap; the
   `ar/awaddr_window` SVAs above now flag it if a future integrator sets a small
   carveout mask and feeds out-of-window addresses.

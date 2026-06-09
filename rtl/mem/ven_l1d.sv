@@ -36,6 +36,14 @@ module ven_l1d #(
     input  logic        clk,
     input  logic        rst_n,
 
+    // ---- #35 external invalidation: clear ALL valid bits (a conservative flush)
+    // for the cosim — the int-0x80 proxy / syscall emulator writes the backing
+    // MemModel DIRECTLY (bypassing the L1), so without this a re-read after a
+    // syscall-filled buffer (Quake) would hit a STALE cached line. Pulse flush_all
+    // after each such write; the next reads miss and refill from the backing. On
+    // real HW the HPC0 CCI snoop covers AXI writes; tied 0 in modes 0/1.
+    input  logic        flush_all,
+
     // ---- core side (the same-cycle-ack contract; mirrors core mem_*) ----------
     input  logic        c_req,
     input  logic        c_we,
@@ -216,6 +224,11 @@ module ven_l1d #(
         end
         default: st<=L1_IDLE;
       endcase
+      // #35 external flush: clear every valid bit (last-write-wins over the case's
+      // tag/val writes, so an invalidation always takes priority). The next reads
+      // miss + refill the now-current backing. Tags/data are left (val gates them).
+      if (flush_all)
+        for (int s=0;s<L1_SETS;s++) begin dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0; end
     end
   end
 

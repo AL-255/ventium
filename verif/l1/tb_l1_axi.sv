@@ -37,9 +37,10 @@ module tb_l1_axi;
   logic [2:0]        arprot; logic [3:0] arqos; logic arvalid, arready;
   logic [3:0]        rid;    logic [31:0] rdata; logic [1:0] rresp; logic rlast, rvalid, rready;
 
-  logic bus_err;
+  logic bus_err; logic flush = 1'b0;
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK)) dut (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
+      .flush_all(flush),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
@@ -133,6 +134,16 @@ module tb_l1_axi;
     // (implicitly proven: the slave indexes (araddr-REMAP_BASE); every read above
     //  returned the correct seeded word, so REMAP_BASE+phys addressed DDR correctly.)
     chk("remap base nonzero", REMAP_BASE[31:0], 32'h4000_0000);
+
+    $display("[7] #35 external flush: a backing write that BYPASSES the L1 + flush -> re-read sees it");
+    // model the int-0x80 proxy / syscall emulator: it writes the DDR directly (not
+    // through the core mem port), so the L1's cached copy goes stale. Without flush a
+    // re-read HITS the stale line; with flush it misses + refills the new value.
+    do_read(32'h0000_1000, d); chk("cache line@1000", d, 32'h1000 ^ 32'hA5A5_0000);   // now cached
+    slv.poke(32'h0000_1000, 32'hC0FF_EE00);                          // proxy-style backing write (bypasses L1)
+    do_read(32'h0000_1000, d); chk("STALE hit (no flush yet)", d, 32'h1000 ^ 32'hA5A5_0000);  // still the old cached value
+    @(negedge clk); flush <= 1'b1; @(posedge clk); @(negedge clk); flush <= 1'b0;     // pulse the L1 flush
+    do_read(32'h0000_1000, d); chk("post-flush refill (coherent)", d, 32'hC0FF_EE00); // miss -> refill -> new value
 
     if (errors==0) $display("L1AXI-GATE-OK (all checks pass)");
     else           $display("L1AXI-GATE-FAIL (%0d errors)", errors);

@@ -28,7 +28,7 @@ module tb_l1axi_wd;
 
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(40'h0), .ADDR_MASK(32'hFFFF_FFFF), .WATCHDOG(16)) dut (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
-      .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .core_wdata(c_wdata),
+      .flush_all(1'b0), .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
       .m_axi_awburst(awburst), .m_axi_awlock(awlock), .m_axi_awcache(awcache),

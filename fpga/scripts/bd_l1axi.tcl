@@ -80,6 +80,14 @@ if {[llength [get_bd_intf_pins u_l1axi/m_axi]] == 0} {
 foreach p {core_req core_we core_addr core_wdata core_wstrb core_rdata core_ack} {
     make_bd_pins_external [get_bd_pins u_l1axi/$p]
 }
+# #35 flush_all: external L1 invalidation. It is a COSIM-only coherency hook (the
+# int-0x80 proxy writes DDR behind the L1); on real silicon the S_AXI_HPC0 CCI snoop
+# covers PS-side writes, so flush_all is tied 0 here (a constant-0 driver — also
+# clears the BD 41-759 unconnected-input critical warning that would fail BAR-1).
+# bus_err (#34) is an OUTPUT, so a dangling pin needs no driver (no critical warning).
+create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 flush_tie
+set_property -dict [list CONFIG.CONST_WIDTH {1} CONFIG.CONST_VAL {0}] [get_bd_cells flush_tie]
+connect_bd_net [get_bd_pins flush_tie/dout] [get_bd_pins u_l1axi/flush_all]
 
 create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 sc0
 set_property -dict [list CONFIG.NUM_SI {1} CONFIG.NUM_MI {1}] [get_bd_cells sc0]
