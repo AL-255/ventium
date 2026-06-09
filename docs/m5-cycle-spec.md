@@ -40,7 +40,10 @@ RTL must use the **same** `imiss/dmiss/geometry` as p5model so the cycle
      independent FP ops pipeline (tput 1). Latencies from
      `docs/p5-timing-model.md` / `p5_timing_canonical.json`:
      `fadd/fsub` lat 3 / tput 1; `fmul` lat 3 / tput 2; `fdiv` 19/33/39
-     (precision-dependent); `fsqrt` 70. (Transcendentals stay HALT — M3 deferral.)
+     (precision-dependent); `fsqrt` 70. (Transcendentals are now IMPLEMENTED under
+     `+VEN_TRANSCENDENTAL` (M11/#11) but are NOT cycle-modeled — they HALT in the
+     default/cycle build, and per #6 the scoreboard keeps fixed P5 latencies, not
+     the engines' real `done`. See `docs/m11-transcendental-spec.md` §4.)
   3. **Tighten the cycle gate:** lower `M4_TOL_PCT` toward a tight, documented
      value once cache+FP timing close the offset, and **promote `faddchain` from
      INFO to a GATED band** (CPI in a band around 3.0).
