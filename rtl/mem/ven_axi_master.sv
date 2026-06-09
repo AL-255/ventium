@@ -46,7 +46,12 @@ module ven_axi_master #(
     parameter int          ADDR_W     = 40,                // PS8 HPC0 master addr
     parameter logic [39:0] REMAP_BASE = 40'h00_0000_0000,  // DDR carveout base
     parameter logic [31:0] ADDR_MASK  = 32'hFFFF_FFFF,     // phys window mask
-    parameter logic [3:0]  AXI_ID     = 4'd0
+    parameter logic [3:0]  AXI_ID     = 4'd0,
+    // #34: per-transaction watchdog. If a read/write makes no progress for WATCHDOG
+    // core clocks (a stuck DDR/bridge), the FSM ABORTS — synthesizes the acks ven_l1d
+    // expects (so the core never deadlocks) + raises bus_err. Default huge (a normal
+    // line fill is <~50 clocks); tests override it small.
+    parameter int unsigned WATCHDOG = 1024
 ) (
     input  logic        core_clk,
     input  logic        core_rst_n,
@@ -61,6 +66,7 @@ module ven_axi_master #(
     input  logic [3:0]  m_wstrb,
     output logic [31:0] m_rdata,
     output logic        m_ack,
+    output logic        bus_err,        // #34: sticky FATAL fault (timeout or SLVERR/DECERR)
 
     // ---- AXI4 master port (-> S_AXI_HPC0_FPD, 32-bit data) --------------------
     // write address channel
@@ -129,6 +135,9 @@ module ven_axi_master #(
   logic [7:0]        r_beat;       // accepted-R-beat counter (exit on count, not RLAST)
   logic              rresp_err;    // sticky: a read beat returned non-OKAY RRESP
   logic              bresp_err;    // sticky: a write returned non-OKAY BRESP
+  logic              wd_err_r;     // sticky: a READ watchdog timeout aborted (read-FF driven)
+  logic              wd_err_w;     // sticky: a WRITE watchdog timeout aborted (write-FF driven)
+  logic [15:0]       r_wd, w_wd;   // #34 read/write watchdog cycle counters (since last progress)
 
   // ---- WRITE FSM (single-beat write-through, decoupled AW/W) -----------------
   typedef enum logic [1:0] { W_IDLE, W_RUN, W_RESP } wstate_e;
@@ -172,27 +181,36 @@ module ven_axi_master #(
     // write response channel
     m_axi_bready  = (wst == W_RESP);
 
-    // backing response: a read beat hands RDATA back as one m_ack; the write acks
-    // on BVALID. m_rdata is the live RDATA (captured by ven_l1d when m_ack pulses).
+    // backing response: a read beat hands RDATA back as one m_ack; the write acks on
+    // BVALID. On a watchdog timeout the AXI handshake is HELD (a master cannot retract
+    // VALID — AXI has no cancel), bus_err is raised, and the core's bus_err->S_HALT
+    // override abandons the stuck access + halts (the PS then resets). No protocol-
+    // violating abort, no drain.
     m_rdata = m_axi_rdata;
     m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready) ||
               ((wst == W_RESP) && m_axi_bvalid);
+    bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err;  // #34 sticky fatal-fault to core
   end
 
   // ---- READ sequencing -------------------------------------------------------
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       rst <= R_IDLE; araddr_q <= '0; r_beat <= 8'd0; rresp_err <= 1'b0;
+      r_wd <= 16'd0; wd_err_r <= 1'b0;
     end else begin
       unique case (rst)
         R_IDLE: if (m_req && !m_we) begin
                   // a backing read == a full line fill: latch the 32B-aligned base.
                   araddr_q <= remap({m_addr[31:5], 5'd0});
-                  r_beat <= 8'd0; rresp_err <= 1'b0;
+                  r_beat <= 8'd0; rresp_err <= 1'b0; r_wd <= 16'd0;
                   rst <= R_AR;
                 end
-        R_AR:   if (m_axi_arready) rst <= R_DATA;             // AR accepted
-        R_DATA: if (m_axi_rvalid && m_axi_rready) begin       // beat accepted
+        R_AR:   if (m_axi_arready) begin rst <= R_DATA; r_wd <= 16'd0; end // AR accepted
+                // #34 watchdog: a stall of WATCHDOG cycles with no progress -> raise
+                // the sticky fault (bus_err) but HOLD arvalid (AXI: VALID can't retract).
+                else if (r_wd >= 16'(WATCHDOG)) wd_err_r <= 1'b1;
+                else r_wd <= r_wd + 16'd1;
+        R_DATA: if (m_axi_rvalid && m_axi_rready) begin       // beat accepted (progress)
                   // DEFENSIVE: exit on the BEAT COUNT vs ARLEN, NOT a (possibly
                   // mis-asserted) RLAST — a non-compliant slave's early RLAST then
                   // cannot freeze ven_l1d's fill mid-line. Identical timing for a
@@ -200,8 +218,10 @@ module ven_axi_master #(
                   // rlast_align SVA below checks it). Sticky-flag a non-OKAY RRESP.
                   if (m_axi_rresp != 2'b00)        rresp_err <= 1'b1;
                   if (r_beat == 8'(LINE_BEATS-1))  rst <= R_IDLE;  // burst complete
-                  r_beat <= r_beat + 8'd1;
+                  r_beat <= r_beat + 8'd1; r_wd <= 16'd0;
                 end
+                else if (r_wd >= 16'(WATCHDOG)) wd_err_r <= 1'b1;  // #34 stall watchdog
+                else r_wd <= r_wd + 16'd1;
         default: rst <= R_IDLE;
       endcase
     end
@@ -211,13 +231,13 @@ module ven_axi_master #(
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       wst <= W_IDLE; awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
-      aw_done <= 1'b0; w_done <= 1'b0; bresp_err <= 1'b0;
+      aw_done <= 1'b0; w_done <= 1'b0; bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
       unique case (wst)
         W_IDLE: if (m_req && m_we) begin
                   awaddr_q <= remap(m_addr);
                   wdata_q  <= m_wdata; wstrb_q <= m_wstrb;
-                  aw_done  <= 1'b0;    w_done  <= 1'b0;  bresp_err <= 1'b0;
+                  aw_done  <= 1'b0;    w_done  <= 1'b0;  bresp_err <= 1'b0; w_wd <= 16'd0;
                   wst <= W_RUN;
                 end
         W_RUN: begin
@@ -226,12 +246,16 @@ module ven_axi_master #(
           if (m_axi_wvalid  && m_axi_wready)  w_done  <= 1'b1;
           if ((aw_done || (m_axi_awvalid && m_axi_awready)) &&
               (w_done  || (m_axi_wvalid  && m_axi_wready)))
-            wst <= W_RESP;
+                                              begin wst <= W_RESP; w_wd <= 16'd0; end
+          else if (w_wd >= 16'(WATCHDOG)) wd_err_w <= 1'b1;  // #34 stall watchdog (hold VALID)
+          else w_wd <= w_wd + 16'd1;
         end
         W_RESP: if (m_axi_bvalid) begin           // m_ack pulsed (comb) this cycle
                   if (m_axi_bresp != 2'b00) bresp_err <= 1'b1;  // sticky non-OKAY BRESP
                   wst <= W_IDLE;
                 end
+                else if (w_wd >= 16'(WATCHDOG)) wd_err_w <= 1'b1;  // #34 stall watchdog
+                else w_wd <= w_wd + 16'd1;
         default: wst <= W_IDLE;
       endcase
     end

@@ -22,7 +22,8 @@ module axi_slave_bfm #(
     parameter logic [39:0] REMAP_BASE = 40'h00_0000_0000,
     parameter int          RD_LAT     = 4,        // AR accept -> first R beat
     parameter int          WR_LAT     = 3,        // last W -> B
-    parameter int          BUBBLE     = 0         // >0: drop RVALID for 1 cyc mid-burst
+    parameter int          BUBBLE     = 0,        // >0: drop RVALID for 1 cyc mid-burst
+    parameter int          STUCK      = 0         // 1: NEVER respond (exercise the #34 watchdog)
 ) (
     input  logic              clk,
     input  logic              rst_n,
@@ -85,7 +86,7 @@ module axi_slave_bfm #(
   logic [ADDR_W-1:0] r_addr;  logic [7:0] r_cnt; logic [3:0] r_id; int r_timer;
   logic             bubbled;            // BUBBLE already spent this burst
 
-  assign arready = (rst_s == R_IDLE);
+  assign arready = (rst_s == R_IDLE) && (STUCK==0);   // #34: STUCK -> never ready
   always_comb begin
     rvalid = 1'b0; rdata = 32'd0; rlast = 1'b0; rid = r_id; rresp = 2'b00;
     if (rst_s == R_BEAT) begin
@@ -98,7 +99,7 @@ module axi_slave_bfm #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin rst_s <= R_IDLE; r_addr<=0; r_cnt<=0; r_id<=0; r_timer<=0; bubbled<=0; end
     else unique case (rst_s)
-      R_IDLE: if (arvalid) begin
+      R_IDLE: if (arvalid && STUCK==0) begin
                 r_addr <= araddr; r_cnt <= arlen; r_id <= arid;
                 r_timer <= RD_LAT; bubbled <= 1'b0; rst_s <= R_WAIT;
               end
@@ -124,7 +125,7 @@ module axi_slave_bfm #(
   wstate_e          wst_s;
   logic [ADDR_W-1:0] w_addr; logic [3:0] w_id; int w_timer;
 
-  assign awready = (wst_s == W_IDLE);
+  assign awready = (wst_s == W_IDLE) && (STUCK==0);
   assign wready  = (wst_s == W_DATA);
   assign bvalid  = (wst_s == W_RESP);
   assign bid     = w_id;
@@ -133,7 +134,7 @@ module axi_slave_bfm #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin wst_s <= W_IDLE; w_addr<=0; w_id<=0; w_timer<=0; end
     else unique case (wst_s)
-      W_IDLE: if (awvalid) begin w_addr <= awaddr; w_id <= awid; wst_s <= W_DATA; end
+      W_IDLE: if (awvalid && STUCK==0) begin w_addr <= awaddr; w_id <= awid; wst_s <= W_DATA; end
       W_DATA: if (wvalid) begin
                 automatic logic [ADDR_W-1:0] ix = unmap(w_addr);
                 for (int b=0;b<4;b++) if (wstrb[b]) mem[ix+b] <= wdata[b*8 +: 8];

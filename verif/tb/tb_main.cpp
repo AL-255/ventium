@@ -403,7 +403,15 @@ int main(int argc, char** argv) {
     int      axw = 0;                  // write FSM: 0=IDLE, 1=DATA, 2=RESP
     uint32_t axr_addr = 0, axw_addr = 0, axr_cnt = 0;
     struct { bool ar,r,aw,w,b; uint32_t araddr,arlen,awaddr,wdata,wstrb; } axhs{};
+    // #34: AXI_STUCK=1 freezes the slave (a dead DDR/bridge) to exercise the master
+    // watchdog -> bus_err -> the core's S_HALT override (cpu_hung), end-to-end.
+    const bool axi_stuck = (std::getenv("AXI_STUCK") != nullptr);
     auto axi_drive = [&]() {
+        if (axi_stuck) {  // never ready/valid
+            top->m_axi_arready=0; top->m_axi_rvalid=0; top->m_axi_rdata=0; top->m_axi_rlast=0;
+            top->m_axi_rid=0; top->m_axi_rresp=0; top->m_axi_awready=0; top->m_axi_wready=0;
+            top->m_axi_bvalid=0; top->m_axi_bid=0; top->m_axi_bresp=0; return;
+        }
         top->m_axi_arready = (axr==0);
         top->m_axi_rvalid  = (axr==1);
         top->m_axi_rdata   = (axr==1) ? mem.read32(axr_addr) : 0u;
@@ -415,6 +423,7 @@ int main(int argc, char** argv) {
         top->m_axi_bid = 0; top->m_axi_bresp = 0;
     };
     auto axi_capture = [&]() {
+        if (axi_stuck) { axhs = {}; return; }   // frozen: no handshakes
         axhs.ar = (axr==0) && (bool)top->m_axi_arvalid;
         axhs.r  = (axr==1) && (bool)top->m_axi_rready;
         axhs.aw = (axw==0) && (bool)top->m_axi_awvalid;
@@ -817,8 +826,8 @@ int main(int argc, char** argv) {
         // self-check (which greps this line) without waiting out the full quiesce.
         if (top->cpu_hung) {
             std::fprintf(stderr,
-                "tb: stop: CPU HUNG (F00F: LOCK CMPXCHG8B reg-dst, Erratum 81) "
-                "after %llu retired in %llu clocks\n",
+                "tb: stop: CPU HUNG (cpu_hung asserted: F00F Erratum 81, OR a #34 "
+                "bus_err fatal AXI fault -> S_HALT) after %llu retired in %llu clocks\n",
                 (unsigned long long)trace.retired(),
                 (unsigned long long)cycles);
             break;

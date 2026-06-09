@@ -191,13 +191,20 @@ real-HARDWARE robustness gaps.
   **`ar/awaddr_window`** SVAs flag an access outside ADDR_MASK (the remap-alias guard).
 * cosim: drive the AXI slave outputs before eval 0 (hygiene).
 
+**#34 AXI watchdog + bus-error → halt: ✅ DONE (verif/l1/run-l1axi-wd-gate.sh →
+L1AXIWD-GATE-OK).** ven_axi_master has a per-FSM stall watchdog (WATCHDOG cycles with no
+progress) that raises a sticky `bus_err` (= timeout | rresp_err | bresp_err) WITHOUT
+retracting the AXI handshake (a master cannot un-assert VALID — AXI has no cancel, so
+the FSM HOLDS). `bus_err` routes ventium_l1_axi → ventium_top → a new core `bus_err`
+input → a last-write-wins `S_HALT`+`cpu_hung` override (the core abandons the stuck
+access + halts; the PS observes cpu_hung/bus_err and resets). VERIFIED: the unit gate
+(stuck slave, WATCHDOG=16 → bus_err in ~17 clocks, handshake held, no fake ack); the
+cosim end-to-end (`AXI_STUCK=1` → dead DDR → watchdog @~1024 → core HALTs, cpu_hung, no
+hang); NO false-fire (77/77+10/10 at WATCHDOG=1024); default build byte-identical (all
+behind `+VEN_L1_AXI`). REFINEMENT: deliver a real #MC exception (vector 18) instead of a
+bare halt — needs the IDT up + the exception path.
+
 **Deferred (need a design decision, scoped follow-ups):**
-* **AXI watchdog + error reporting to the core** (#3/#1 full fix): a stuck DDR/bridge
-  currently deadlocks forever (the gate only DETECTS via --quiesce). The clean fix is
-  a per-FSM timeout + an error pin that the core turns into a machine-check (#MC) /
-  halt — a CPU-architecture decision, not a local patch. Plumb `*_timeout` +
-  `rresp_err`/`bresp_err` out of ventium_l1_axi → ventium_top → the core's exception
-  path.
 * **L1 external-invalidation port** (#4): the int-0x80 proxy / syscall emulator writes
   the MemModel directly (bypassing the L1), so a `--emulate-syscalls` `read()`-into-
   buffer program (Quake) can read a stale cached line. Add a flush port to ven_l1d

@@ -36,7 +36,8 @@ module ventium_l1_axi #(
     parameter int          ADDR_W     = 40,                // PS8 HPC0 master addr
     parameter logic [39:0] REMAP_BASE = 40'h00_0000_0000,
     parameter logic [31:0] ADDR_MASK  = 32'hFFFF_FFFF,
-    parameter logic [3:0]  AXI_ID     = 4'd0
+    parameter logic [3:0]  AXI_ID     = 4'd0,
+    parameter int unsigned WATCHDOG   = 1024            // #34 AXI stall watchdog cycles
 ) (
     (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 core_clk CLK" *)
     (* X_INTERFACE_PARAMETER = "ASSOCIATED_RESET core_rst_n" *)
@@ -59,6 +60,7 @@ module ventium_l1_axi #(
     input  logic [3:0]  core_wstrb,
     output logic [31:0] core_rdata,
     output logic        core_ack,
+    output logic        bus_err,        // #34 fatal AXI fault (watchdog timeout / SLVERR)
 
     // ---- AXI4 master port (-> S_AXI_HPC0_FPD), bundle `m_axi` ------------------
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi AWID" *)
@@ -168,7 +170,8 @@ module ventium_l1_axi #(
       .ADDR_W     (ADDR_W),
       .REMAP_BASE (REMAP_BASE),
       .ADDR_MASK  (ADDR_MASK),
-      .AXI_ID     (AXI_ID)
+      .AXI_ID     (AXI_ID),
+      .WATCHDOG   (WATCHDOG)
   ) u_axi (
       .core_clk    (core_clk),
       .core_rst_n  (core_rst_n),
@@ -181,6 +184,7 @@ module ventium_l1_axi #(
       .m_wstrb     (m_wstrb),
       .m_rdata     (m_rdata),
       .m_ack       (m_ack),
+      .bus_err     (bus_err),
       .m_axi_awid    (m_axi_awid),
       .m_axi_awaddr  (m_axi_awaddr),
       .m_axi_awlen   (m_axi_awlen),

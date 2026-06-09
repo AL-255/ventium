@@ -69,6 +69,11 @@ module core
     // a real L1 cannot honor on a miss. Tied 0 in bus modes 0/1; the whole port +
     // its gates are absent in the default build (no VEN_L1_AXI) -> byte-identical.
     input  logic        real_bus,
+    // P1-1 #34: a FATAL bus fault from ven_axi_master (a watchdog timeout on a stuck
+    // DDR/bridge, or a SLVERR/DECERR response). The core PARKS in S_HALT + asserts
+    // cpu_hung (the PS observes it + resets) instead of executing the aborted line's
+    // garbage. A #MC exception delivery is a later refinement (needs the IDT up).
+    input  logic        bus_err,
 `endif
 
     // M6: errata-enable bus (docs/m6-errata-spec.md). DEFAULT 0 = clean core
@@ -3576,6 +3581,12 @@ module core
 
         default: state<=S_HALT;
       endcase
+`ifdef VEN_L1_AXI
+      // P1-1 #34: a fatal bus fault overrides every state arm (last-write-wins NBA) —
+      // park in S_HALT + assert cpu_hung. Inert when bus_err=0 (the entire verified
+      // 77/77+10/10 path), so it is byte-identical; absent in the default build.
+      if (real_bus && bus_err) begin hung_r <= 1'b1; state <= S_HALT; end
+`endif
     end
   end
 
