@@ -29,7 +29,8 @@ module tb_f2xm1;
   logic        busy, done;
   logic [79:0] result;
 
-  fpu_f2xm1 dut (.clk,.rst_n,.start,.x,.rc,.busy,.done,.result);
+  logic ex_pe, ex_ie;
+  fpu_f2xm1 dut (.clk,.rst_n,.start,.x,.rc,.busy,.done,.result,.inexact(ex_pe),.invalid(ex_ie));
 
   initial forever #5 clk = ~clk;
 

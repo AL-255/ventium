@@ -73,6 +73,14 @@
             end else
 `endif
             if (f_do_retire) begin
+`ifdef VEN_TRANSCENDENTAL
+              // F2XM1 (#11): run the iterative transcendental engine first
+              // (S_TRSC_BUSY), then commit ST0 + retire there. Mirrors FSQRT's
+              // hand-off, but uses its own engine/state (off the SRT path).
+              if (q_fxop==FX_F2XM1) begin
+                state<=S_TRSC_BUSY;
+              end else begin
+`endif
 `ifdef VEN_BCD_ITER
               // FBLD: run the iterative packed-BCD->FP engine first (S_FBLD_BUSY),
               // then push the floatx80 result + retire there (the 18-chained-*10
@@ -95,6 +103,9 @@
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
 `endif
 `ifdef VEN_BCD_ITER
+              end
+`endif
+`ifdef VEN_TRANSCENDENTAL
               end
 `endif
             end else begin
@@ -139,6 +150,18 @@
         // same clock, so the per-retire architectural state is exact.
         S_FBLD_BUSY: begin
           if (eng_fbld_done) begin
+            eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+          end
+        end
+`endif
+
+`ifdef VEN_TRANSCENDENTAL
+        // S_TRSC_BUSY: wait for the iterative x87 transcendental engine (F2XM1).
+        // The floatx80 result + fstat PE are driven onto u_fpu_state's we_top /
+        // we_fstat ports by the fp_we_* driver on the engine's `done` clock; here
+        // we retire + advance EIP the same clock (per-retire arch state exact).
+        S_TRSC_BUSY: begin
+          if (eng_trsc_done) begin
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end

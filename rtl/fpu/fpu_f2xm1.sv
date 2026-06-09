@@ -42,7 +42,9 @@ module fpu_f2xm1
     input  wire logic [1:0]  rc,       // rounding control fctrl[11:10]
     output logic             busy,
     output logic             done,     // 1-clk strobe: result valid
-    output logic [79:0]      result    // floatx80 (== qemu helper_f2xm1)
+    output logic [79:0]      result,   // floatx80 (== qemu helper_f2xm1)
+    output logic             inexact,  // PE: result rounded (qemu float_flag_inexact)
+    output logic             invalid   // IE: out-of-range / invalid encoding
 );
   // localparam ROM (table + coefficients), generated from the qemu source.
   `include "fpu_f2xm1_rom.svh"
@@ -148,11 +150,13 @@ module fpu_f2xm1
   logic signed [31:0] aexp_q;
   logic        asign_q;
   logic [63:0] asig0_q, asig1_q;
-  logic        done_q;
+  logic        done_q, pe_q, ie_q;
 
-  assign busy   = (st != S_IDLE);
-  assign done   = done_q;
-  assign result = result_q;
+  assign busy    = (st != S_IDLE);
+  assign done    = done_q;
+  assign result  = result_q;
+  assign inexact = pe_q;
+  assign invalid = ie_q;
 
   // input-field shorthands
   wire [14:0] x_exp  = x[78:64];
@@ -175,15 +179,19 @@ module fpu_f2xm1
         end
         // ---- classify + range-reduce ------------------------------------
         S_SETUP: begin
+          pe_q <= 1'b1; ie_q <= 1'b0;                       // default: inexact result
           if (x_exp > 15'h3fff || (x_exp == 15'h3fff && x_man != 64'h8000000000000000)) begin
             result_q <= {16'hffff, 64'hc000000000000000};   // out of range -> default NaN
+            pe_q <= 1'b0; ie_q <= 1'b1;
             st <= S_DONE;
           end else if (x_exp == 15'h3fff) begin
             result_q <= x_sign ? {16'hbffe, 64'h8000000000000000} : x_q;  // f2xm1(-+1)
+            pe_q <= 1'b0;                                   // exact (1 or -0.5)
             st <= S_DONE;
           end else if (x_exp < 15'h3fb0) begin
             if (fx_is_zero(x_q)) begin
               result_q <= x_q;                              // +-0 unchanged
+              pe_q <= 1'b0;                                 // exact
               st <= S_DONE;
             end else begin
               // tiny: result ~ x*ln2 (extended) -> normalizeRoundAndPack.

@@ -595,6 +595,9 @@ module core
     S_BCD_BUSY,  // wait for the iterative FP->packed-BCD (FBSTP) engine
     S_FBLD_BUSY, // wait for the iterative packed-BCD->FP (FBLD) engine
 `endif
+`ifdef VEN_TRANSCENDENTAL
+    S_TRSC_BUSY, // wait for the iterative x87 transcendental engine (F2XM1, #11)
+`endif
 `ifdef VEN_FP_PIPE
     S_FEXEC_EX,  // slow-arm FP-execute 2nd stage: f_eval from the registered
                  // operands (captured in S_FEXEC) -> commit (we_wabs) + retire IN
@@ -2021,6 +2024,9 @@ module core
                   8'hF6:        d_fxop=FX_FDECSTP;            // D9 F6
                   8'hF7:        d_fxop=FX_FINCSTP;            // D9 F7
                   8'hFA:        d_fxop=FX_FSQRT;              // D9 FA FSQRT
+`ifdef VEN_TRANSCENDENTAL
+                  8'hF0:        d_fxop=FX_F2XM1;              // D9 F0 F2XM1 (#11)
+`endif
                   default:      d_unknown=1'b1;  // transcendentals/F2XM1/etc deferred
                 endcase
               end
@@ -5060,6 +5066,17 @@ module core
     end
 `endif
 
+`ifdef VEN_TRANSCENDENTAL
+    // iterative F2XM1 (#11): commit ST0 + fstat on the engine-done clock (the same
+    // clock S_TRSC_BUSY retires -> per-retire arch state exact). IE has priority
+    // over PE (mirrors FBSTP); the engine asserts PE for every inexact result.
+    if (state==S_TRSC_BUSY && eng_trsc_done) begin
+      fp_we_top=1'b1; fp_top_data=eng_trsc_result;
+      if (eng_trsc_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end
+      else if (eng_trsc_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
+    end
+`endif
+
     // ===== SLOW ARM (S_FSTORE last beat) — the FSTP/FISTP pop.
     fstore_last_beat = (state==S_FSTORE) && mem_ack &&
                        ((q_f_mbytes<=4'd4) ||
@@ -5229,6 +5246,27 @@ module core
   assign eng_bcd_result=82'd0;
   assign eng_fbld_start=1'b0; assign eng_fbld_busy=1'b0; assign eng_fbld_done=1'b0;
   assign eng_fbld_result=80'd0;
+`endif
+
+  // --- iterative x87 transcendental engine (F2XM1, #11; VEN_TRANSCENDENTAL) ---
+  // Started in S_FEXEC on FX_F2XM1, busy-wait in S_TRSC_BUSY, commit ST0 +
+  // fstat PE/IE on `done`. Bit-exact vs qemu helper_f2xm1 (verif/trsc gate). The
+  // engine is dual-mode-ready (SILICON param) but F2XM1's qemu algorithm is the
+  // accuracy-faithful one, so both modes share the datapath.
+  logic        eng_trsc_start, eng_trsc_busy, eng_trsc_done;
+  logic [79:0] eng_trsc_result;
+  logic        eng_trsc_pe, eng_trsc_ie;
+`ifdef VEN_TRANSCENDENTAL
+  assign eng_trsc_start = (state==S_FEXEC) && (q_fxop==FX_F2XM1);
+  fpu_f2xm1 u_f2xm1 (
+    .clk(clk), .rst_n(rst_n), .start(eng_trsc_start),
+    .x(fst(3'd0)), .rc(fctrl[11:10]),
+    .busy(eng_trsc_busy), .done(eng_trsc_done), .result(eng_trsc_result),
+    .inexact(eng_trsc_pe), .invalid(eng_trsc_ie)
+  );
+`else
+  assign eng_trsc_start=1'b0; assign eng_trsc_busy=1'b0; assign eng_trsc_done=1'b0;
+  assign eng_trsc_result=80'd0; assign eng_trsc_pe=1'b0; assign eng_trsc_ie=1'b0;
 `endif
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
