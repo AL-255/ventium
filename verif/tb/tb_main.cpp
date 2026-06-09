@@ -530,6 +530,11 @@ int main(int argc, char** argv) {
     // consumed strictly in order; we cross-check syscall_n against the producer's
     // recorded n. Inert when proxy_en==0 (syscall_active never asserts).
     long write_applied_idx = -1;   // sc_idx whose writes are already in memory
+    bool flush_l1_pending = false; // #35: a proxy/emulator write bypassed the core
+                                   // mem port and wrote MemModel directly, so the L1
+                                   // (mode 2) may hold a stale copy. Arm a one-cycle
+                                   // flush_all pulse; consumed in the run-loop clk=0
+                                   // phase. Inert unless VEN_L1_AXI + --l1-axi.
     uint64_t cycles = 0;           // clock count (declared here so service_proxy,
                                    // M14 emulate clock, can read it by reference)
     static const bool kSyscallProbe = (std::getenv("TB_SYSCALL_PROBE") != nullptr);
@@ -609,6 +614,14 @@ int main(int argc, char** argv) {
                 }
             }
             write_applied_idx = (long)sc_idx;
+#ifdef VEN_L1_AXI
+            // #35: these writes hit MemModel behind the L1's back. In mode 2 the
+            // L1 may cache the pre-write line; arm an external invalidation so the
+            // core's next read of the syscall buffer refills coherently. No-op
+            // unless there were writes AND mode 2 is active (flush_all is tied 0
+            // in the RTL when !l1axi_en, so this is also harmless in modes 0/1).
+            if (!e.writes.empty()) flush_l1_pending = true;
+#endif
         }
     };
 
@@ -627,6 +640,7 @@ int main(int argc, char** argv) {
 #ifdef VEN_L1_AXI
     top->l1axi_en   = args.l1_axi ? 1 : 0;   // P1-1: route mem via ventium_l1_axi (mode 2)
     if (args.l1_axi) top->bus_mode = 0;      // mode 2 supersedes the biu (kept inert)
+    top->flush_all  = 0;                     // #35: external L1 invalidation (idle until armed)
 #endif
     top->errata_en  = args.errata & 0x1F;    // M6/M6B: errata-enable bus (default 0)
     top->proxy_en   = proxy_mode ? 1 : 0;    // M7.1: int-0x80 proxy + %gs base
@@ -681,8 +695,20 @@ int main(int argc, char** argv) {
 
         // -- clk low phase: combinational settle + serve bus --
         top->clk = 0;
+#ifdef VEN_L1_AXI
+        // #35: consume a pending external-invalidation request as a one-cycle
+        // flush_all pulse. service_proxy() applied a MemModel write LAST clock
+        // (behind the L1's back), so the L1 may hold a stale line; held high for
+        // this whole iteration, the single rising edge below invalidates the L1.
+        // The 1-clock latency is ample — the core is still resuming from the
+        // int-0x80 and cannot issue the buffer load for several clocks. Tied 0 in
+        // the RTL when !l1axi_en, so this is inert in modes 0/1 / the 77-corpus.
+        top->flush_all = flush_l1_pending ? 1 : 0;
+        flush_l1_pending = false;
+#endif
         service_bus();
         service_proxy();      // M7.1: drive int-0x80 effects if syscall_active
+                              //       (may re-arm flush_l1_pending for next clock)
         service_io();         // M7.3b: serve the port-I/O bus if io_req
         top->eval();
         // syscall_active settles combinationally this phase (state==S_DECODE);

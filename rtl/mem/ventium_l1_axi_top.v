@@ -31,6 +31,7 @@ module ventium_l1_axi_top #(
     input  wire              axi_rst_n,
 
     // ---- core side (driven by a test harness / the Ventium core mem_* port) ----
+    input  wire              flush_all,   // #35 external L1 invalidation
     input  wire              core_req,
     input  wire              core_we,
     input  wire [31:0]       core_addr,
@@ -124,6 +125,7 @@ module ventium_l1_axi_top #(
   ) u_l1axi (
       .core_clk    (core_clk),   .core_rst_n  (core_rst_n),
       .axi_clk     (axi_clk),    .axi_rst_n   (axi_rst_n),
+      .flush_all   (flush_all),
       .core_req    (core_req),   .core_we     (core_we),    .core_addr  (core_addr),
       .core_wdata  (core_wdata), .core_wstrb  (core_wstrb), .core_rdata (core_rdata),
       .core_ack    (core_ack),

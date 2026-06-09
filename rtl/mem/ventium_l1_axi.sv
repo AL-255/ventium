@@ -53,6 +53,7 @@ module ventium_l1_axi #(
     input  logic        axi_rst_n,
 
     // ---- core side (the same-cycle-ack contract; mirrors core mem_*) ----------
+    input  logic        flush_all,       // #35 external L1 invalidation (clear all val)
     input  logic        core_req,
     input  logic        core_we,
     input  logic [31:0] core_addr,
@@ -147,8 +148,9 @@ module ventium_l1_axi #(
   logic        m_ack;
 
   ven_l1d #(.L1_SETS(L1_SETS), .L1_LINE(L1_LINE)) u_l1d (
-      .clk     (core_clk),
-      .rst_n   (core_rst_n),
+      .clk      (core_clk),
+      .rst_n    (core_rst_n),
+      .flush_all(flush_all),
       .c_req   (core_req),
       .c_we    (core_we),
       .c_addr  (core_addr),

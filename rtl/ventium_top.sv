@@ -129,6 +129,7 @@ module ventium_top
     // the default build is byte-identical (no extra ports, no mode-2 leg).
     ,
     input  logic        l1axi_en,           // 1 = mode 2 (L1+AXI); 0 = modes 0/1
+    input  logic        flush_all,           // #35 pulse to invalidate the L1 (cosim coherency)
     output logic [3:0]  m_axi_awid,
     output logic [39:0] m_axi_awaddr,
     output logic [7:0]  m_axi_awlen,
@@ -461,6 +462,7 @@ module ventium_top
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(40'h0), .ADDR_MASK(32'hFFFF_FFFF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
+      .flush_all (flush_all),
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
       .core_we   (core_mem_we),
       .core_addr (core_mem_addr),
