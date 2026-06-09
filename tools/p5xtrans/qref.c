@@ -305,7 +305,12 @@ static long double qfpatan(long double st1_y, long double st0_x, int rc){
         return st1_y;                              // pass zero through
     } else if (arg0_exp - arg1_exp >= 80 && !arg0_sign){
         // ST1/ST0 (avoid spurious underflow); exact result -> adjust for inexact.
-        long double q = st1_y / st0_x;             // floatx80_div, precision_x
+        // qemu uses the USER rounding mode for this divide (it is OUTSIDE the
+        // force-RNE block), so honor rc on the host division.
+        int fe = (rc==1)?FE_DOWNWARD : (rc==2)?FE_UPWARD : (rc==3)?FE_TOWARDZERO : FE_TONEAREST;
+        fesetround(fe);
+        long double q = st1_y / st0_x;             // floatx80_div, precision_x, user rc
+        fesetround(FE_TONEAREST);
         // (the exact-result adjust at qemu 1337-1356 nudges the significand; for the
         //  finite comparable-exponent sweep this branch is exercised only by the
         //  explicit far-apart cases — emulate the adjust faithfully.)
