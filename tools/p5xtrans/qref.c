@@ -460,6 +460,117 @@ static long double qfpatan(long double st1_y, long double st0_x, int rc){
     return norm_round_pack_x(rsign, rexp, rsig0, rsig1, rc);
 }
 
+// ============================================================================
+// FYL2X / FYL2XP1 — y*log2(x), y*log2(x+1). Verbatim port of qemu-8.2.2
+// helper_fyl2x / helper_fyl2xp1 + the shared helper_fyl2x_common.
+// ============================================================================
+#define log2e_hi 0xb8aa3b295c17f0bbULL
+#define log2e_lo 0xbe87fed0691d3e89ULL
+#define fyc0     mk(0x4000,0xb8aa3b295c17f0bcULL)
+#define fyc0_low mk(0xbfbf,0x834972fe2d7bab1bULL)
+#define fyc1     mk(0x3ffe,0xf6384ee1d01febb8ULL)
+#define fyc2     mk(0x3ffe,0x93bb62877cdfa2e3ULL)
+#define fyc3     mk(0x3ffd,0xd30bb153d808f269ULL)
+#define fyc4     mk(0x3ffd,0xa42589eaf451499eULL)
+#define fyc5     mk(0x3ffd,0x864d42c0f8f17517ULL)
+#define fyc6     mk(0x3ffc,0xe3476578adf26272ULL)
+#define fyc7     mk(0x3ffc,0xc506c5f874e6d80fULL)
+#define fyc8     mk(0x3ffc,0xac5cf50cc57d6372ULL)
+#define fyc9     mk(0x3ffc,0xb1ed0066d971a103ULL)
+
+// log2(1+arg), arg in [sqrt2/2-1, sqrt2-1]. Returns (exp, sig0, sig1) MAGNITUDE;
+// caller applies the sign. Runs in forced-RNE (host default).
+static void qfyl2x_common(long double arg, int32_t*rexp, uint64_t*rsig0o, uint64_t*rsig1o){
+    uint64_t a0sig=x80_frac(arg); int32_t a0exp=x80_exp(arg); int a0sign=x80_sign(arg);
+    int asign; int32_t dexp,texp,aexp;
+    uint64_t dsig0,dsig1,tsig0,tsig1,rsig0,rsig1,rsig2,msig0,msig1,msig2;
+    uint64_t t2s0,t2s1,t2s2,t2s3,as0,as1,as2,as3,bsig0,bsig1;
+    long double t2, accum;
+    if (a0sign){ dexp=0x3fff; shift128RightJamming(a0sig,0,dexp-a0exp,&dsig0,&dsig1); sub128(0,0,dsig0,dsig1,&dsig0,&dsig1); }
+    else       { dexp=0x4000; shift128RightJamming(a0sig,0,dexp-a0exp,&dsig0,&dsig1); dsig0|=0x8000000000000000ULL; }
+    texp=a0exp-dexp+0x3ffe; rsig0=a0sig; rsig1=0; rsig2=0;
+    if (dsig0<=rsig0){ shift128Right(rsig0,rsig1,1,&rsig0,&rsig1); ++texp; }
+    tsig0=estimateDiv128To64(rsig0,rsig1,dsig0);
+    mul128By64To192(dsig0,dsig1,tsig0,&msig0,&msig1,&msig2);
+    sub192(rsig0,rsig1,rsig2,msig0,msig1,msig2,&rsig0,&rsig1,&rsig2);
+    while(((int64_t)rsig0)<0){ --tsig0; add192(rsig0,rsig1,rsig2,0,dsig0,dsig1,&rsig0,&rsig1,&rsig2); }
+    tsig1=estimateDiv128To64(rsig1,rsig2,dsig0);
+    mul128To256(tsig0,tsig1,tsig0,tsig1,&t2s0,&t2s1,&t2s2,&t2s3);
+    t2=norm_round_pack_x(0, texp+texp-0x3ffe, t2s0, t2s1, 0);
+    accum=fyc9*t2; accum=fyc8+accum; accum=accum*t2; accum=fyc7+accum;
+    accum=accum*t2; accum=fyc6+accum; accum=accum*t2; accum=fyc5+accum;
+    accum=accum*t2; accum=fyc4+accum; accum=accum*t2; accum=fyc3+accum;
+    accum=accum*t2; accum=fyc2+accum; accum=accum*t2; accum=fyc1+accum;
+    accum=accum*t2; accum=fyc0_low+accum;
+    aexp=x80_exp(fyc0); asign=x80_sign(fyc0);
+    shift128RightJamming(x80_frac(accum),0, aexp-x80_exp(accum), &as0,&as1);
+    bsig0=x80_frac(fyc0); bsig1=0;
+    if (asign==x80_sign(accum)) add128(bsig0,bsig1,as0,as1,&as0,&as1);
+    else                        sub128(bsig0,bsig1,as0,as1,&as0,&as1);
+    mul128To256(as0,as1, tsig0,tsig1, &as0,&as1,&as2,&as3);
+    aexp += texp - 0x3ffe;
+    *rexp=aexp; *rsig0o=as0; *rsig1o=as1;
+    (void)a0sign;
+}
+
+static void set_round(int rc){
+    fesetround((rc==1)?FE_DOWNWARD : (rc==2)?FE_UPWARD : (rc==3)?FE_TOWARDZERO : FE_TONEAREST);
+}
+
+static long double qfyl2x(long double st1_y, long double st0_x, int rc){
+    uint64_t a0sig=x80_frac(st0_x); int32_t a0exp=x80_exp(st0_x); int a0sign=x80_sign(st0_x);
+    uint64_t a1sig=x80_frac(st1_y); int32_t a1exp=x80_exp(st1_y); int a1sign=x80_sign(st1_y);
+    if (a0exp==0) normalizeFloatx80Subnormal(a0sig,&a0exp,&a0sig);
+    if (a1exp==0) normalizeFloatx80Subnormal(a1sig,&a1exp,&a1sig);
+    int32_t int_exp = a0exp - 0x3fff;
+    if (a0sig > 0xb504f333f9de6484ULL) ++int_exp;
+    long double scaled = ldexpl(st0_x, -int_exp);   // floatx80_scalbn(ST0,-int_exp), exact
+    long double arg0_m1 = scaled - 1.0L;             // RNE
+    if (arg0_m1 == 0.0L){
+        long double r; set_round(rc); r = (long double)int_exp * st1_y; set_round(0); return r;
+    }
+    int asign = x80_sign(arg0_m1); int32_t aexp; uint64_t asig0,asig1,asig2;
+    qfyl2x_common(arg0_m1, &aexp, &asig0, &asig1);
+    if (int_exp != 0){
+        int isign = (int_exp<0); int32_t iexp; uint64_t isig; int shift;
+        int ie = isign ? -int_exp : int_exp;
+        shift = __builtin_clz((unsigned)ie) + 32; isig=(uint64_t)ie<<shift; iexp=0x403e - shift;
+        shift128RightJamming(asig0,asig1, iexp-aexp, &asig0,&asig1);
+        if (asign==isign) add128(isig,0,asig0,asig1,&asig0,&asig1);
+        else              sub128(isig,0,asig0,asig1,&asig0,&asig1);
+        aexp=iexp; asign=isign;
+    }
+    mul128By64To192(asig0,asig1, a1sig, &asig0,&asig1,&asig2);
+    aexp += a1exp - 0x3ffe;
+    asig1 |= 1;
+    return norm_round_pack_x(asign ^ a1sign, aexp, asig0, asig1, rc);
+    (void)a0sign;
+}
+
+static long double qfyl2xp1(long double st1_y, long double st0_x, int rc){
+    uint64_t a0sig=x80_frac(st0_x); int32_t a0exp=x80_exp(st0_x); int a0sign=x80_sign(st0_x);
+    uint64_t a1sig=x80_frac(st1_y); int32_t a1exp=x80_exp(st1_y); int a1sign=x80_sign(st1_y);
+    if (x80_is_zero(st0_x) || x80_is_zero(st1_y) || a1exp==0x7fff){
+        long double r; set_round(rc); r = st0_x * st1_y; set_round(0); return r;
+    }
+    if (a0exp < 0x3fb0){
+        uint64_t s0,s1,s2; int32_t e;
+        if (a0exp==0) normalizeFloatx80Subnormal(a0sig,&a0exp,&a0sig);
+        if (a1exp==0) normalizeFloatx80Subnormal(a1sig,&a1exp,&a1sig);
+        mul128By64To192(log2e_hi, log2e_lo, a0sig, &s0,&s1,&s2);
+        e = a0exp + 1;
+        mul128By64To192(s0,s1, a1sig, &s0,&s1,&s2);
+        e += a1exp - 0x3ffe; s1 |= 1;
+        return norm_round_pack_x(a0sign ^ a1sign, e, s0, s1, rc);
+    }
+    int32_t aexp; uint64_t asig0,asig1,asig2;
+    qfyl2x_common(st0_x, &aexp, &asig0, &asig1);
+    if (a1exp==0) normalizeFloatx80Subnormal(a1sig,&a1exp,&a1sig);
+    mul128By64To192(asig0,asig1, a1sig, &asig0,&asig1,&asig2);
+    aexp += a1exp - 0x3ffe; asig1 |= 1;
+    return norm_round_pack_x(a0sign ^ a1sign, aexp, asig0, asig1, rc);
+}
+
 // ---- CLI --------------------------------------------------------------------
 //   qref f2xm1 <se_hex> <frac_hex>   -> prints the 80-bit result as se:frac
 //   qref --sweep                     -> prints "in_se in_frac out_se out_frac"
@@ -569,6 +680,42 @@ int main(int argc, char**argv){
         }
         return 0;
     }
-    fprintf(stderr, "usage: %s f2xm1 <se> <fr> | fpatan <yse> <yfr> <xse> <xfr> | --sweep [rc] | --sweep-fpatan [rc]\n", argv[0]);
+    if (argc >= 6 && (!strcmp(argv[1],"fyl2x") || !strcmp(argv[1],"fyl2xp1"))){
+        long double yv = mk((uint16_t)strtoul(argv[2],0,16), strtoull(argv[3],0,16));
+        long double xv = mk((uint16_t)strtoul(argv[4],0,16), strtoull(argv[5],0,16));
+        emit(!strcmp(argv[1],"fyl2x") ? qfyl2x(yv,xv,0) : qfyl2xp1(yv,xv,0));
+        return 0;
+    }
+    if (argc >= 2 && (!strcmp(argv[1],"--sweep-fyl2x") || !strcmp(argv[1],"--sweep-fyl2xp1"))){
+        int isp1 = !strcmp(argv[1],"--sweep-fyl2xp1");
+        int rc = (argc >= 3) ? atoi(argv[2]) : 0;
+        // y over a spread, x over the op's valid domain. Emits "y80 x80 out80".
+        static const long double ys[] = { 1.0L,-1.0L, 2.5L,-0.5L, 0.123L, 7.0L, 100.0L, 1e-5L };
+        for (size_t i=0;i<sizeof(ys)/sizeof(ys[0]);i++){
+            for (int xi=1; xi<=40; xi++){
+                long double xv, yv=ys[i];
+                if (isp1) xv = (long double)(xi-20) / 80.0L;          // (-0.2375, 0.25)
+                else      xv = (long double)xi / 8.0L;                 // (0.125, 5.0]
+                if (!isp1 && xv==1.0L) continue;
+                long double r = isp1 ? qfyl2xp1(yv,xv,rc) : qfyl2x(yv,xv,rc);
+                printf("%04x%016llx %04x%016llx %04x%016llx\n",
+                    (unsigned)(x80_exp(yv)|(x80_sign(yv)<<15)), (unsigned long long)x80_frac(yv),
+                    (unsigned)(x80_exp(xv)|(x80_sign(xv)<<15)), (unsigned long long)x80_frac(xv),
+                    (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
+            }
+        }
+        // corners: x=1 (fyl2x -> +-0), x=2/0.5 (exact powers), x=0 (fyl2xp1 passthrough)
+        static const long double cy[]={1.0L,-1.0L, 3.0L, 2.0L};
+        for (size_t i=0;i<sizeof(cy)/sizeof(cy[0]);i++){
+            long double xv = isp1 ? 0.0L : ((i&1)?0.5L:2.0L), yv=cy[i];
+            long double r = isp1 ? qfyl2xp1(yv,xv,rc) : qfyl2x(yv,xv,rc);
+            printf("%04x%016llx %04x%016llx %04x%016llx\n",
+                (unsigned)(x80_exp(yv)|(x80_sign(yv)<<15)), (unsigned long long)x80_frac(yv),
+                (unsigned)(x80_exp(xv)|(x80_sign(xv)<<15)), (unsigned long long)x80_frac(xv),
+                (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
+        }
+        return 0;
+    }
+    fprintf(stderr, "usage: %s f2xm1|fpatan|fyl2x|fyl2xp1 ... | --sweep[-fpatan|-fyl2x|-fyl2xp1] [rc]\n", argv[0]);
     return 2;
 }
