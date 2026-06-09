@@ -97,14 +97,74 @@ def validate_rc(rc):
     print(f"qref f2xm1 rc={rc}: {n} inputs traced through qemu-i386, {fails} mismatches")
     return 0 if (fails == 0 and n == len(pairs)) else 1
 
+def validate_rc_fpatan(rc):
+    qref = os.path.join(HERE, "qref")
+    sweep = subprocess.run([qref, "--sweep-fpatan", str(rc)], capture_output=True, text=True, check=True).stdout
+    cases = []  # (y_se,y_fr, x_se,x_fr, exp_se,exp_fr)
+    for line in sweep.splitlines():
+        a, b, c = line.split()
+        cases.append((parse80(a), parse80(b), parse80(c)))
+    cw = 0x037f | (rc << 10)
+    s = ['    .text', '    .globl _start', '_start:',
+         f'    movw $0x{cw:04x}, %ax', '    movw %ax, ctlw', '    fldcw ctlw']
+    for i in range(len(cases)):
+        s.append(f'    fldt yvals+{i*10}')   # ST0=y
+        s.append(f'    fldt xvals+{i*10}')   # ST0=x, ST1=y
+        s.append('    fpatan')               # -> ST0 = atan(y/x)
+        s.append('    fstp %st(0)')
+    s += ['    movl $1, %eax', '    xorl %ebx, %ebx', '    int $0x80', '    .data', 'ctlw:   .word 0']
+    s.append('yvals:')
+    for (yse, yfr), _, _ in cases:
+        s.append('    .byte ' + ','.join(f'0x{c:02x}' for c in emit_bytes_80(yse, yfr)))
+    s.append('xvals:')
+    for _, (xse, xfr), _ in cases:
+        s.append('    .byte ' + ','.join(f'0x{c:02x}' for c in emit_bytes_80(xse, xfr)))
+    asm = "\n".join(s) + "\n"
+    with tempfile.TemporaryDirectory() as td:
+        sp = os.path.join(td, "p.s"); ep = os.path.join(td, "p.elf"); vp = os.path.join(td, "p.vtrace")
+        open(sp, "w").write(asm)
+        subprocess.run([CC, "-m32", "-march=pentium", "-nostdlib", "-static",
+                        "-Wl,--build-id=none", f"-Wl,-Ttext={hex(LOAD)}", "-o", ep, sp], check=True)
+        maxins = len(cases)*4 + 8
+        subprocess.run([sys.executable, GEN, "--qemu", QEMU, "--elf", ep,
+                        "--out", vp, "--max-insn", str(maxins), "--x87"], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        recs = [json.loads(l) for l in open(vp) if l.strip() and not l.startswith("#")]
+    fails = 0; n = 0; idx = 0
+    for r in recs:
+        if not r.get("bytes", "").lower().startswith("d9f3"):
+            continue
+        st0 = int(r["st0"], 16) & ((1 << 80) - 1)
+        (yse, yfr), (xse, xfr), (ese, efr) = cases[idx]
+        qexp = (ese << 64) | efr
+        if st0 != qexp:
+            fails += 1
+            if fails <= 8:
+                print(f"  MISMATCH y={yse:04x}{yfr:016x} x={xse:04x}{xfr:016x}  qref={qexp:020x}  qemu={st0:020x}")
+        n += 1; idx += 1
+    print(f"qref fpatan rc={rc}: {n} cases traced through qemu-i386, {fails} mismatches")
+    return 0 if (fails == 0 and n == len(cases)) else 1
+
 def main():
     # validate all four rounding modes (RNE / down / up / truncate) vs qemu-i386.
-    rcs = [int(a) for a in sys.argv[1:]] or [0, 1, 2, 3]
+    args = sys.argv[1:]
+    op = "all"
+    if args and args[0] in ("f2xm1", "fpatan", "all"):
+        op = args.pop(0)
+    rcs = [int(a) for a in args] or [0, 1, 2, 3]
     rv = 0
-    for rc in rcs:
-        rv |= validate_rc(rc)
-    if rv == 0:
-        print("QREF-F2XM1-QEMU-OK")
+    if op in ("f2xm1", "all"):
+        for rc in rcs:
+            rv |= validate_rc(rc)
+        if rv == 0:
+            print("QREF-F2XM1-QEMU-OK")
+    if op in ("fpatan", "all"):
+        rvf = 0
+        for rc in rcs:
+            rvf |= validate_rc_fpatan(rc)
+        if rvf == 0:
+            print("QREF-FPATAN-QEMU-OK")
+        rv |= rvf
     return rv
 
 if __name__ == "__main__":

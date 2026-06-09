@@ -209,6 +209,252 @@ static long double qf2xm1(long double x, int rc){
     }
 }
 
+// ============================================================================
+// FPATAN — atan2(ST1, ST0). A verbatim port of qemu-8.2.2 helper_fpatan +
+// the softfloat.c routines it calls. Quake's ONLY transcendental.
+// ============================================================================
+static void mul64To128(uint64_t a, uint64_t b, uint64_t*z0, uint64_t*z1){
+    unsigned __int128 p = (unsigned __int128)a * b; *z0 = (uint64_t)(p>>64); *z1 = (uint64_t)p;
+}
+static void add192(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t b0,uint64_t b1,uint64_t b2,
+                   uint64_t*z0,uint64_t*z1,uint64_t*z2){
+    unsigned __int128 t = (unsigned __int128)a2 + b2; uint64_t c = (uint64_t)(t>>64); *z2=(uint64_t)t;
+    t = (unsigned __int128)a1 + b1 + c; c = (uint64_t)(t>>64); *z1=(uint64_t)t;
+    *z0 = a0 + b0 + c;
+}
+static void sub192(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t b0,uint64_t b1,uint64_t b2,
+                   uint64_t*z0,uint64_t*z1,uint64_t*z2){
+    uint64_t bo0,bo1;
+    *z2 = a2 - b2; bo1 = (a2 < b2);
+    *z1 = a1 - b1 - bo1; bo0 = (a1 < b1) || (a1==b1 && bo1);
+    *z0 = a0 - b0 - bo0;
+}
+static void shift128Right(uint64_t a0,uint64_t a1,int count,uint64_t*z0,uint64_t*z1){
+    uint64_t zz0,zz1; int8_t negc = (-count)&63;
+    if (count==0){ zz1=a1; zz0=a0; }
+    else if (count<64){ zz1=(a0<<negc)|(a1>>count); zz0=a0>>count; }
+    else { zz1=(count<128)?(a0>>(count&63)):0; zz0=0; }
+    *z1=zz1; *z0=zz0;
+}
+static void shift128Left(uint64_t a0,uint64_t a1,int count,uint64_t*z0,uint64_t*z1){
+    if (count<64){ *z1=a1<<count; *z0=(count==0)?a0:((a0<<count)|(a1>>((-count)&63))); }
+    else { *z1=0; *z0=a1<<(count-64); }
+}
+static void mul128To256(uint64_t a0,uint64_t a1,uint64_t b0,uint64_t b1,
+                        uint64_t*z0,uint64_t*z1,uint64_t*z2,uint64_t*z3){
+    uint64_t zz0,zz1,zz2,m0,m1,m2,n1,n2;
+    mul64To128(a1,b0,&m1,&m2);
+    mul64To128(a0,b1,&n1,&n2);
+    mul64To128(a1,b1,&zz2,z3);
+    mul64To128(a0,b0,&zz0,&zz1);
+    add192(0,m1,m2, 0,n1,n2, &m0,&m1,&m2);
+    add192(m0,m1,m2, zz0,zz1,zz2, z0,z1,z2);
+}
+static uint64_t estimateDiv128To64(uint64_t a0,uint64_t a1,uint64_t b){
+    uint64_t b0,b1,rem0,rem1,term0,term1,z;
+    if (b<=a0) return 0xFFFFFFFFFFFFFFFFULL;
+    b0=b>>32;
+    z=(b0<<32 <= a0) ? 0xFFFFFFFF00000000ULL : (a0/b0)<<32;
+    mul64To128(b,z,&term0,&term1);
+    sub128(a0,a1,term0,term1,&rem0,&rem1);
+    while (((int64_t)rem0)<0){ z-=0x100000000ULL; b1=b<<32; add128(rem0,rem1,b0,b1,&rem0,&rem1); }
+    rem0=(rem0<<32)|(rem1>>32);
+    z |= (b0<<32 <= rem0) ? 0xFFFFFFFFULL : rem0/b0;
+    return z;
+}
+static void normalizeFloatx80Subnormal(uint64_t aSig,int32_t*zExp,uint64_t*zSig){
+    int sc = __builtin_clzll(aSig);
+    *zSig = aSig<<sc; *zExp = 1 - sc;
+}
+static int x80_is_zero(long double v){ return (x80_exp(v)==0) && (x80_frac(v)==0); }
+
+// pi / pi2 / pi4 / 3pi4 (128-bit), and the fpatan coeffs + 9-entry atan c-table.
+#define PI_EXP   0x4000
+#define PI_H     0xc90fdaa22168c234ULL
+#define PI_L     0xc4c6628b80dc1cd1ULL
+#define PI2_EXP  0x3fff
+#define PI4_EXP  0x3ffe
+#define PI34_EXP 0x4000
+#define PI34_H   0x96cbe3f9990e91a7ULL
+#define PI34_L   0x9394c9e8a0a5159dULL
+#define fac0 mk(0x3fff,0x8000000000000000ULL)
+#define fac1 mk(0xbffd,0xaaaaaaaaaaaaaa43ULL)
+#define fac2 mk(0x3ffc,0xccccccccccbfe4f8ULL)
+#define fac3 mk(0xbffc,0x92492491fbab2e66ULL)
+#define fac4 mk(0x3ffb,0xe38e372881ea1e0bULL)
+#define fac5 mk(0xbffb,0xba2c0104bbdd0615ULL)
+#define fac6 mk(0x3ffb,0x9baf7ebf898b42efULL)
+static const struct { uint16_t hi_se; uint64_t hi_f; uint16_t lo_se; uint64_t lo_f; } FATBL[9] = {
+    {0x0000,0x0000000000000000ULL, 0x0000,0x0000000000000000ULL},
+    {0x3ffb,0xfeadd4d5617b6e33ULL, 0xbfb9,0xdda19d8305ddc420ULL},
+    {0x3ffc,0xfadbafc96406eb15ULL, 0x3fbb,0xdb8f3debef442fccULL},
+    {0x3ffd,0xb7b0ca0f26f78474ULL, 0xbfbc,0xeab9bdba460376faULL},
+    {0x3ffd,0xed63382b0dda7b45ULL, 0x3fbc,0xdfc88bd978751a06ULL},
+    {0x3ffe,0x8f005d5ef7f59f9bULL, 0x3fbd,0xb906bc2ccb886e90ULL},
+    {0x3ffe,0xa4bc7d1934f70924ULL, 0x3fbb,0xcd43f9522bed64f8ULL},
+    {0x3ffe,0xb8053e2bc2319e74ULL, 0xbfbc,0xd3496ab7bd6eef0cULL},
+    {0x3ffe,0xc90fdaa22168c235ULL, 0xbfbc,0xece675d1fc8f8cbcULL},
+};
+
+static long double qfpatan(long double st1_y, long double st0_x, int rc){
+    uint64_t arg0_sig = x80_frac(st0_x); int32_t arg0_exp = x80_exp(st0_x); int arg0_sign = x80_sign(st0_x);
+    uint64_t arg1_sig = x80_frac(st1_y); int32_t arg1_exp = x80_exp(st1_y); int arg1_sign = x80_sign(st1_y);
+    int rsign; int32_t rexp; uint64_t rsig0, rsig1;
+
+    if (x80_is_zero(st1_y) && !arg0_sign){
+        return st1_y;                              // pass zero through
+    } else if (arg0_exp - arg1_exp >= 80 && !arg0_sign){
+        // ST1/ST0 (avoid spurious underflow); exact result -> adjust for inexact.
+        long double q = st1_y / st0_x;             // floatx80_div, precision_x
+        // (the exact-result adjust at qemu 1337-1356 nudges the significand; for the
+        //  finite comparable-exponent sweep this branch is exercised only by the
+        //  explicit far-apart cases — emulate the adjust faithfully.)
+        if (!x80_is_zero(q)){
+            uint64_t sig=x80_frac(q); int32_t e=x80_exp(q); int s=x80_sign(q);
+            if (e==0) normalizeFloatx80Subnormal(sig,&e,&sig);
+            // only when the division was exact (no inexact). We can't read softfloat
+            // flags here; recompute exactly: y == q*x ? If exact, apply the nudge.
+            long double back = q * st0_x;
+            if (back == st1_y)
+                return norm_round_pack_x(s, e, sig-1, (uint64_t)-1, rc);
+        }
+        return q;
+    }
+
+    // result is inexact
+    rsign = arg1_sign;
+    if (x80_is_zero(st1_y)){                        // ST0<0 -> +-pi
+        rexp=PI_EXP; rsig0=PI_H; rsig1=PI_L;
+    } else if (x80_is_zero(st0_x) || arg1_exp - arg0_exp >= 80){
+        rexp=PI2_EXP; rsig0=PI_H; rsig1=PI_L;      // pi/2
+    } else if (arg0_exp - arg1_exp >= 80){
+        rexp=PI_EXP; rsig0=PI_H; rsig1=PI_L;       // ST0<0 -> pi
+    } else {
+        int32_t adj_exp,num_exp,den_exp,xexp,yexp,n,texp,zexp,aexp,azexp,axexp;
+        int adj_sub,ysign,zsign;
+        uint64_t adj_sig0,adj_sig1,num_sig,den_sig,xsig0,xsig1;
+        uint64_t msig0,msig1,msig2,remsig0,remsig1,remsig2;
+        uint64_t ysig0,ysig1,tsig,zsig0,zsig1,asig0,asig1;
+        uint64_t azsig0,azsig1,azsig2,azsig3,axsig0,axsig1;
+        if (arg0_exp==0) normalizeFloatx80Subnormal(arg0_sig,&arg0_exp,&arg0_sig);
+        if (arg1_exp==0) normalizeFloatx80Subnormal(arg1_sig,&arg1_exp,&arg1_sig);
+        if (arg0_exp>arg1_exp || (arg0_exp==arg1_exp && arg0_sig>=arg1_sig)){
+            num_exp=arg1_exp; num_sig=arg1_sig; den_exp=arg0_exp; den_sig=arg0_sig;
+            if (arg0_sign){ adj_exp=PI_EXP; adj_sig0=PI_H; adj_sig1=PI_L; adj_sub=1; }
+            else          { adj_exp=0; adj_sig0=0; adj_sig1=0; adj_sub=0; }
+        } else {
+            num_exp=arg0_exp; num_sig=arg0_sig; den_exp=arg1_exp; den_sig=arg1_sig;
+            adj_exp=PI2_EXP; adj_sig0=PI_H; adj_sig1=PI_L; adj_sub=!arg0_sign;
+        }
+        // x = num/den in (0,1]
+        xexp = num_exp - den_exp + 0x3ffe;
+        remsig0=num_sig; remsig1=0;
+        if (den_sig<=remsig0){ shift128Right(remsig0,remsig1,1,&remsig0,&remsig1); ++xexp; }
+        xsig0 = estimateDiv128To64(remsig0,remsig1,den_sig);
+        mul64To128(den_sig,xsig0,&msig0,&msig1);
+        sub128(remsig0,remsig1,msig0,msig1,&remsig0,&remsig1);
+        while (((int64_t)remsig0)<0){ --xsig0; add128(remsig0,remsig1,0,den_sig,&remsig0,&remsig1); }
+        xsig1 = estimateDiv128To64(remsig1,0,den_sig);
+        // x = t + y, t = n/8 nearest
+        long double x8v = norm_round_pack_x(0, xexp+3, xsig0, xsig1, 0);
+        n = (int32_t)llrintl(x8v);
+        if (n==0){ ysign=0; yexp=xexp; ysig0=xsig0; ysig1=xsig1; texp=0; tsig=0; }
+        else {
+            int shift = __builtin_clz((unsigned)n) + 32;
+            texp = 0x403b - shift; tsig=(uint64_t)n; tsig<<=shift;
+            if (texp==xexp){
+                sub128(xsig0,xsig1,tsig,0,&ysig0,&ysig1);
+                if (((int64_t)ysig0)>=0){
+                    ysign=0;
+                    if (ysig0==0){
+                        if (ysig1==0) yexp=0;
+                        else { shift=__builtin_clzll(ysig1)+64; yexp=xexp-shift; shift128Left(ysig0,ysig1,shift,&ysig0,&ysig1); }
+                    } else { shift=__builtin_clzll(ysig0); yexp=xexp-shift; shift128Left(ysig0,ysig1,shift,&ysig0,&ysig1); }
+                } else {
+                    ysign=1; sub128(0,0,ysig0,ysig1,&ysig0,&ysig1);
+                    shift = (ysig0==0)?(__builtin_clzll(ysig1)+64):__builtin_clzll(ysig0);
+                    yexp=xexp-shift; shift128Left(ysig0,ysig1,shift,&ysig0,&ysig1);
+                }
+            } else {
+                uint64_t usig0,usig1;
+                shift128RightJamming(xsig0,xsig1,texp-xexp,&usig0,&usig1);
+                ysign=1; sub128(tsig,0,usig0,usig1,&ysig0,&ysig1);
+                shift = (ysig0==0)?(__builtin_clzll(ysig1)+64):__builtin_clzll(ysig0);
+                yexp=texp-shift; shift128Left(ysig0,ysig1,shift,&ysig0,&ysig1);
+            }
+        }
+        // z = y/(1+tx)
+        zsign=ysign;
+        if (texp==0 || yexp==0){ zexp=yexp; zsig0=ysig0; zsig1=ysig1; }
+        else {
+            int32_t dexp = texp+xexp-0x3ffe; uint64_t dsig0,dsig1,dsig2;
+            mul128By64To192(xsig0,xsig1,tsig,&dsig0,&dsig1,&dsig2);
+            shift128RightJamming(dsig0,dsig1,0x3fff-dexp,&dsig0,&dsig1);
+            dsig0 |= 0x8000000000000000ULL;
+            zexp=yexp-1; remsig0=ysig0; remsig1=ysig1; remsig2=0;
+            if (dsig0<=remsig0){ shift128Right(remsig0,remsig1,1,&remsig0,&remsig1); ++zexp; }
+            zsig0 = estimateDiv128To64(remsig0,remsig1,dsig0);
+            mul128By64To192(dsig0,dsig1,zsig0,&msig0,&msig1,&msig2);
+            sub192(remsig0,remsig1,remsig2,msig0,msig1,msig2,&remsig0,&remsig1,&remsig2);
+            while (((int64_t)remsig0)<0){ --zsig0; add192(remsig0,remsig1,remsig2,0,dsig0,dsig1,&remsig0,&remsig1,&remsig2); }
+            zsig1 = estimateDiv128To64(remsig1,remsig2,dsig0);
+        }
+        if (zexp==0){ azexp=0; azsig0=0; azsig1=0; }
+        else {
+            uint64_t z2s0,z2s1,z2s2,z2s3;
+            mul128To256(zsig0,zsig1,zsig0,zsig1,&z2s0,&z2s1,&z2s2,&z2s3);
+            long double z2 = norm_round_pack_x(0, zexp+zexp-0x3ffe, z2s0, z2s1, 0);
+            long double accum;
+            accum = fac6 * z2; accum = fac5 + accum;
+            accum = accum * z2; accum = fac4 + accum;
+            accum = accum * z2; accum = fac3 + accum;
+            accum = accum * z2; accum = fac2 + accum;
+            accum = accum * z2; accum = fac1 + accum;
+            accum = accum * z2;
+            aexp = x80_exp(fac0);
+            shift128RightJamming(x80_frac(accum),0, aexp - x80_exp(accum), &asig0,&asig1);
+            sub128(x80_frac(fac0),0, asig0,asig1, &asig0,&asig1);
+            azexp = aexp + zexp - 0x3ffe;
+            mul128To256(asig0,asig1, zsig0,zsig1, &azsig0,&azsig1,&azsig2,&azsig3);
+        }
+        // atan(x) = atan(t) + atan(z)
+        if (texp==0){ axexp=azexp; axsig0=azsig0; axsig1=azsig1; }
+        else {
+            int low_sign = (FATBL[n].lo_se>>15); int32_t low_exp = FATBL[n].lo_se & 0x7fff;
+            uint64_t low_sig0 = FATBL[n].lo_f, low_sig1 = 0;
+            axexp = FATBL[n].hi_se & 0x7fff; axsig0 = FATBL[n].hi_f; axsig1 = 0;
+            shift128RightJamming(low_sig0,low_sig1, axexp-low_exp, &low_sig0,&low_sig1);
+            if (low_sign) sub128(axsig0,axsig1,low_sig0,low_sig1,&axsig0,&axsig1);
+            else          add128(axsig0,axsig1,low_sig0,low_sig1,&axsig0,&axsig1);
+            if (azexp>=axexp){
+                shift128RightJamming(axsig0,axsig1, azexp-axexp+1, &axsig0,&axsig1);
+                axexp=azexp+1; shift128RightJamming(azsig0,azsig1,1,&azsig0,&azsig1);
+            } else {
+                shift128RightJamming(axsig0,axsig1,1,&axsig0,&axsig1);
+                shift128RightJamming(azsig0,azsig1, axexp-azexp+1, &azsig0,&azsig1);
+                ++axexp;
+            }
+            if (zsign) sub128(axsig0,axsig1,azsig0,azsig1,&axsig0,&axsig1);
+            else       add128(axsig0,axsig1,azsig0,azsig1,&axsig0,&axsig1);
+        }
+        if (adj_exp==0){ rexp=axexp; rsig0=axsig0; rsig1=axsig1; }
+        else {
+            if (adj_exp>=axexp){
+                shift128RightJamming(axsig0,axsig1, adj_exp-axexp+1, &axsig0,&axsig1);
+                rexp=adj_exp+1; shift128RightJamming(adj_sig0,adj_sig1,1,&adj_sig0,&adj_sig1);
+            } else {
+                shift128RightJamming(axsig0,axsig1,1,&axsig0,&axsig1);
+                shift128RightJamming(adj_sig0,adj_sig1, axexp-adj_exp+1, &adj_sig0,&adj_sig1);
+                rexp=axexp+1;
+            }
+            if (adj_sub) sub128(adj_sig0,adj_sig1,axsig0,axsig1,&rsig0,&rsig1);
+            else         add128(adj_sig0,adj_sig1,axsig0,axsig1,&rsig0,&rsig1);
+        }
+    }
+    rsig1 |= 1;                                    // inexact
+    return norm_round_pack_x(rsign, rexp, rsig0, rsig1, rc);
+}
+
 // ---- CLI --------------------------------------------------------------------
 //   qref f2xm1 <se_hex> <frac_hex>   -> prints the 80-bit result as se:frac
 //   qref --sweep                     -> prints "in_se in_frac out_se out_frac"
@@ -234,7 +480,7 @@ int main(int argc, char**argv){
                 (unsigned)(x80_exp(x)|(x80_sign(x)<<15)), (unsigned long long)x80_frac(x),
                 (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
         }
-        // off-grid / irregular значения
+        // off-grid / irregular values
         static const long double extra[] = {
             0.3333333333333333333L, -0.3333333333333333333L,
             0.7071067811865475244L, -0.123456789L, 0.987654321L,
@@ -284,6 +530,40 @@ int main(int argc, char**argv){
         }
         return 0;
     }
-    fprintf(stderr, "usage: %s f2xm1 <se_hex> <frac_hex> | --sweep\n", argv[0]);
+    if (argc >= 6 && !strcmp(argv[1],"fpatan")){
+        // qref fpatan <y_se> <y_frac> <x_se> <x_frac>
+        long double y = mk((uint16_t)strtoul(argv[2],0,16), strtoull(argv[3],0,16));
+        long double x = mk((uint16_t)strtoul(argv[4],0,16), strtoull(argv[5],0,16));
+        emit(qfpatan(y, x, 0));
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1],"--sweep-fpatan")){
+        int rc = (argc >= 3) ? atoi(argv[2]) : 0;
+        // grid of (y,x) over all four quadrants + the |y|<>|x| boundary, plus the
+        // signed-zero / axis corners (pi, pi/2). Emits "y80 x80 out80" per line.
+        for (int yi=-8; yi<=8; yi++)
+        for (int xi=-8; xi<=8; xi++){
+            long double y = (long double)yi / 8.0L * 1.3L;   // off-grid scale (irregular bits)
+            long double x = (long double)xi / 8.0L * 0.9L;
+            if (yi==0 && xi==0) continue;
+            long double r = qfpatan(y, x, rc);
+            printf("%04x%016llx %04x%016llx %04x%016llx\n",
+                (unsigned)(x80_exp(y)|(x80_sign(y)<<15)), (unsigned long long)x80_frac(y),
+                (unsigned)(x80_exp(x)|(x80_sign(x)<<15)), (unsigned long long)x80_frac(x),
+                (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
+        }
+        // axis / sign corners: y=0 & x<0 -> +-pi ; x=0 -> +-pi/2 ; +-1,+-1 -> +-pi/4,3pi/4
+        static const long double yy[] = { 0.0L, -0.0L, 1.0L, -1.0L, 0.0L, 2.0L, -2.0L, 1e-30L };
+        static const long double xx[] = {-1.0L, -1.0L, 0.0L,  0.0L, 1.0L,-2.0L, -2.0L, 5.0L };
+        for (size_t i=0;i<sizeof(yy)/sizeof(yy[0]);i++){
+            long double r = qfpatan(yy[i], xx[i], rc);
+            printf("%04x%016llx %04x%016llx %04x%016llx\n",
+                (unsigned)(x80_exp(yy[i])|(x80_sign(yy[i])<<15)), (unsigned long long)x80_frac(yy[i]),
+                (unsigned)(x80_exp(xx[i])|(x80_sign(xx[i])<<15)), (unsigned long long)x80_frac(xx[i]),
+                (unsigned)(x80_exp(r)|(x80_sign(r)<<15)), (unsigned long long)x80_frac(r));
+        }
+        return 0;
+    }
+    fprintf(stderr, "usage: %s f2xm1 <se> <fr> | fpatan <yse> <yfr> <xse> <xfr> | --sweep [rc] | --sweep-fpatan [rc]\n", argv[0]);
     return 2;
 }
