@@ -74,10 +74,10 @@
 `endif
             if (f_do_retire) begin
 `ifdef VEN_TRANSCENDENTAL
-              // F2XM1 (#11): run the iterative transcendental engine first
-              // (S_TRSC_BUSY), then commit ST0 + retire there. Mirrors FSQRT's
-              // hand-off, but uses its own engine/state (off the SRT path).
-              if (q_fxop==FX_F2XM1) begin
+              // Transcendentals (#11): run the iterative engine first
+              // (S_TRSC_BUSY), then commit + retire there. F2XM1 overwrites ST0
+              // in place; FPATAN writes ST1 and pops (commit driver distinguishes).
+              if (q_fxop==FX_F2XM1 || q_fxop==FX_FPATAN) begin
                 state<=S_TRSC_BUSY;
               end else begin
 `endif
