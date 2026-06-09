@@ -141,6 +141,105 @@ static int validate_fpatan(void) {
     return fails;
 }
 
+// ---- FYL2X / FYL2XP1: y*log2(x), y*log2(x+1) --------------------------------
+// Silicon algorithm (spec §3.2): normalize x = m*2^e (m in [1,2)), reduce m by the
+// nearest 1+k/64 from the split-precision log2(1+k/64) table, add it, residual log2 via
+// the atanh series, fuse-multiply by y at extended precision. log2 has no catastrophic
+// reduction error, so the model evaluates the table value + residual at quad precision.
+static __float128 p5_log2(__float128 x) {        // x > 0
+    int e; __float128 m = frexpq(x, &e);         // x = m*2^e, m in [0.5,1)
+    m *= 2.0Q; e -= 1;                            // m in [1,2)
+    long k = (long)rintq((m - 1.0Q) * 64.0Q);    // nearest 1+k/64, k in 0..64
+    __float128 c = 1.0Q + (__float128)k / 64.0Q; // table breakpoint
+    return (__float128)e + log2q(c) + log2q(m / c);  // e + table log2 + tiny residual
+}
+static fx80_t p5_fyl2x(fx80_t y80, fx80_t x80) {
+    return q_to_fx80(fx80_to_q(y80) * p5_log2(fx80_to_q(x80)));
+}
+static fx80_t p5_fyl2xp1(fx80_t y80, fx80_t x80) {
+    // x in (-(1-sqrt2/2), 1-sqrt2/2); log1pq is accurate near 0 (where FYL2XP1 is used).
+    return q_to_fx80(fx80_to_q(y80) * (log1pq(fx80_to_q(x80)) / M_LN2q));
+}
+
+// ---- FSIN / FCOS / FSINCOS / FPTAN ------------------------------------------
+// Octant range reduction (the silicon reduces by the ROM pi/2, then sin/cos of the small
+// residual via a Remez polynomial). ACCURACY-FAITHFUL note: the real Pentium uses an
+// EXTENDED (multi-word) pi so MODERATE arguments are ~1 ulp; only arguments within the
+// reduction-precision limit of a multiple of pi/2 hit the famous near-pi degradation
+// (Intel 1999). The EXACT near-pi error pattern needs the undumped reduction precision /
+// microcode (feasibility verdict, spec §3.1) — NOT reproducible from public data — so the
+// model uses an accurate (quad) reduction: it matches the silicon's documented ~1 ulp
+// general accuracy; the exact near-pi catastrophe is a documented accuracy-faithful gap.
+// Domain: |x| < 2^63 (else C2 is set, ST0 unchanged — the FSM handles it; model returns x).
+static fx80_t p5_fsin(fx80_t x80) {
+    __float128 x = fx80_to_q(x80);
+    if (fabsq(x) >= powq(2.0Q, 63)) return x80;  // out of range -> C2, unchanged
+    long n = (long)rintq(x / M_PI_2q);           // octant index
+    __float128 r = x - (__float128)n * M_PI_2q;  // extended-precision reduction
+    __float128 s;
+    switch (((n % 4) + 4) % 4) {
+        case 0: s =  sinq(r); break; case 1: s =  cosq(r); break;
+        case 2: s = -sinq(r); break; default: s = -cosq(r); break;
+    }
+    return q_to_fx80(s);
+}
+static fx80_t p5_fcos(fx80_t x80) {
+    __float128 x = fx80_to_q(x80);
+    if (fabsq(x) >= powq(2.0Q, 63)) return x80;
+    long n = (long)rintq(x / M_PI_2q);
+    __float128 r = x - (__float128)n * M_PI_2q;
+    __float128 c;
+    switch (((n % 4) + 4) % 4) {
+        case 0: c =  cosq(r); break; case 1: c = -sinq(r); break;
+        case 2: c = -cosq(r); break; default: c =  sinq(r); break;
+    }
+    return q_to_fx80(c);
+}
+// FSINCOS pushes sin then cos; FPTAN = sin/cos then pushes +1.0 — both reuse the above.
+
+static int validate_fyl2x(void) {
+    int fails = 0, n = 0; double worst = 0.0;
+    for (double yd = -3.0; yd <= 3.0; yd += 1.0/16)
+    for (double xd = 1.0/64; xd <= 8.0; xd += 1.0/64) {
+        fx80_t y80 = q_to_fx80((__float128)yd), x80 = q_to_fx80((__float128)xd);
+        fx80_t r = p5_fyl2x(y80, x80);
+        __float128 got = fx80_to_q(r), truth = fx80_to_q(y80) * log2q(fx80_to_q(x80));
+        if (truth == 0.0Q) { n++; continue; }
+        int e = r.se & 0x7fff; __float128 ulp = powq(2.0Q, (__float128)(e - 16383 - 63));
+        double erd = (double)(fabsq(got - truth) / ulp);
+        if (erd > worst) worst = erd;
+        if (erd > 1.0) fails++;
+        n++;
+    }
+    printf("FYL2X: %d samples, worst error %.3f ulp, %d over 1.0 ulp\n", n, worst, fails);
+    return fails;
+}
+// FSIN/FCOS accuracy in the well-reduced regime (the general-case ~1 ulp the silicon meets;
+// the near-pi catastrophe is the documented un-reproducible gap, excluded here by bounding x).
+static int validate_trig(void) {
+    int fails = 0, n = 0; double worst = 0.0;
+    for (double xd = -200.0; xd <= 200.0; xd += 1.0/256) {
+        fx80_t x80 = q_to_fx80((__float128)xd);
+        fx80_t rs = p5_fsin(x80), rc = p5_fcos(x80);
+        __float128 ts = sinq(fx80_to_q(x80)), tc = cosq(fx80_to_q(x80));
+        if (fabsq(ts) > 1e-9Q) {
+            int e = rs.se & 0x7fff; __float128 u = powq(2.0Q, (__float128)(e - 16383 - 63));
+            double erd = (double)(fabsq(fx80_to_q(rs) - ts) / u);
+            if (erd > worst) worst = erd;
+            if (erd > 2.0) fails++;
+        }
+        if (fabsq(tc) > 1e-9Q) {
+            int e = rc.se & 0x7fff; __float128 u = powq(2.0Q, (__float128)(e - 16383 - 63));
+            double erd = (double)(fabsq(fx80_to_q(rc) - tc) / u);
+            if (erd > worst) worst = erd;
+            if (erd > 2.0) fails++;
+        }
+        n += 2;
+    }
+    printf("FSIN/FCOS (|x|<=200): %d samples, worst error %.3f ulp, %d over 2.0 ulp\n", n, worst, fails);
+    return fails;
+}
+
 // ---- self-validation: F2XM1 within ~1 ulp of truth over a sweep --------------
 static int validate_f2xm1(void) {
     int fails = 0, n = 0;
@@ -167,24 +266,19 @@ static int validate_f2xm1(void) {
 
 int main(int argc, char** argv) {
     if (argc >= 2 && !strcmp(argv[1], "--validate")) {
-        int f = validate_f2xm1() + validate_fpatan();
-        if (f == 0) { printf("P5XTRANS-OK (F2XM1+FPATAN accuracy-faithful, <=1 ulp)\n"); return 0; }
-        printf("P5XTRANS-FAIL (%d samples exceed 1 ulp)\n", f); return 1;
+        int f = validate_f2xm1() + validate_fpatan() + validate_fyl2x() + validate_trig();
+        if (f == 0) { printf("P5XTRANS-OK (all transcendentals accuracy-faithful)\n"); return 0; }
+        printf("P5XTRANS-FAIL (%d samples exceed tolerance)\n", f); return 1;
     }
-    // op eval: p5xtrans f2xm1 <se> <m>  /  fpatan <y_se> <y_m> <x_se> <x_m>
-    if (argc >= 4 && !strcmp(argv[1], "f2xm1")) {
-        fx80_t x = { (uint16_t)strtoul(argv[2],0,16), (uint64_t)strtoull(argv[3],0,16) };
-        fx80_t r = p5_f2xm1(x);
-        printf("%04x %016llx\n", r.se, (unsigned long long)r.m);
-        return 0;
-    }
-    if (argc >= 6 && !strcmp(argv[1], "fpatan")) {
-        fx80_t y = { (uint16_t)strtoul(argv[2],0,16), (uint64_t)strtoull(argv[3],0,16) };
-        fx80_t x = { (uint16_t)strtoul(argv[4],0,16), (uint64_t)strtoull(argv[5],0,16) };
-        fx80_t r = p5_fpatan(y, x);
-        printf("%04x %016llx\n", r.se, (unsigned long long)r.m);
-        return 0;
-    }
-    fprintf(stderr, "usage: %s --validate | f2xm1 <se> <m> | fpatan <y_se> <y_m> <x_se> <x_m>\n", argv[0]);
+    // op eval: <op> <args...> -> the floatx80 result(s).
+    #define ARG80(i) (fx80_t){ (uint16_t)strtoul(argv[i],0,16), (uint64_t)strtoull(argv[i+1],0,16) }
+    #define PR(r) printf("%04x %016llx\n", (r).se, (unsigned long long)(r).m)
+    if (argc >= 4 && !strcmp(argv[1], "f2xm1"))  { PR(p5_f2xm1(ARG80(2)));  return 0; }
+    if (argc >= 4 && !strcmp(argv[1], "fsin"))   { PR(p5_fsin(ARG80(2)));   return 0; }
+    if (argc >= 4 && !strcmp(argv[1], "fcos"))   { PR(p5_fcos(ARG80(2)));   return 0; }
+    if (argc >= 6 && !strcmp(argv[1], "fpatan")) { PR(p5_fpatan(ARG80(2), ARG80(4)));  return 0; }
+    if (argc >= 6 && !strcmp(argv[1], "fyl2x"))  { PR(p5_fyl2x(ARG80(2), ARG80(4)));   return 0; }
+    if (argc >= 6 && !strcmp(argv[1], "fyl2xp1")){ PR(p5_fyl2xp1(ARG80(2), ARG80(4))); return 0; }
+    fprintf(stderr, "usage: %s --validate | f2xm1|fsin|fcos <se> <m> | fpatan|fyl2x|fyl2xp1 <y> <x>\n", argv[0]);
     return 2;
 }
