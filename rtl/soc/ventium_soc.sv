@@ -197,6 +197,9 @@ module ventium_soc
   logic [31:0] core_mem_wdata;
   logic [3:0]  core_mem_wstrb;
   logic        core_mem_ack;
+  // M8.6: the core's read bus is the TB's mem_rdata EXCEPT when the M8.6 VGA
+  // chain-4 framebuffer intercepts the access (cs_vram) -> then it is VRAM data.
+  logic [31:0] core_mem_rdata;
   logic        ide_dma_busy;
   logic        ide_dma_mem_req, ide_dma_mem_we;
   logic [31:0] ide_dma_mem_addr, ide_dma_mem_wdata;
@@ -269,7 +272,7 @@ module ventium_soc
       .mem_addr     (core_mem_addr),   // muxed (vs DMA) + A20-masked into mem_addr
       .mem_wdata    (core_mem_wdata),
       .mem_wstrb    (core_mem_wstrb),
-      .mem_rdata    (mem_rdata),       // shared read bus (core consumes when unparked)
+      .mem_rdata    (core_mem_rdata),  // TB read bus, or VRAM data when cs_vram (M8.6)
       .mem_ack      (core_mem_ack),
       .retire_valid (core_retire_valid),
       .retire_pc    (core_retire_pc),
@@ -515,6 +518,7 @@ module ventium_soc
   // index/data flip-flop, and the IS1 dumb-retrace toggle are all DETERMINISTIC
   // (state-machine, not host-clock), and cs pulses exactly one clock per S_IO
   // access (io_ack=io_req), so the read side-effects commit exactly once.
+  logic [7:0] vga_seq_plane_mask, vga_seq_mem_mode, vga_gfx_mode, vga_gfx_misc;
   ven_vgaregs u_vga (
       .clk    (clk),
       .rst    (dev_rst),
@@ -522,8 +526,50 @@ module ventium_soc
       .we     (io_we),
       .addr   (io_addr),
       .wdata  (io_wdata[7:0]),
-      .rdata  (vga_rdata)
+      .rdata  (vga_rdata),
+      .o_seq_plane_mask (vga_seq_plane_mask),
+      .o_seq_mem_mode   (vga_seq_mem_mode),
+      .o_gfx_mode       (vga_gfx_mode),
+      .o_gfx_misc       (vga_gfx_misc)
   );
+
+  // ===========================================================================
+  // M8.6 VGA mode-13h CHAIN-4 framebuffer (ven_vga_fb) — 64 KiB VRAM @ 0xA0000.
+  // Spliced into the CPU memory path: when the VGA is in chain-4 mode and the
+  // (A20-masked) core address falls in 0xA0000-0xAFFFF and no IDE DMA owns the
+  // bus, the access is served by the VRAM module instead of backing RAM. The
+  // intercept is GATED on chain4_en, so every non-chain-4 access (every existing
+  // test/boot path) bypasses it untouched. Reads are combinational (single-beat).
+  //
+  // chain4_en mirrors qemu's chain-4 dispatch: SR4.CHN_4M (bit3) set AND the
+  // memory-map window (GFX[6] bits 3:2) covers 0xA0000 (mode 0 = 0xA0000-0xBFFFF,
+  // mode 1 = 0xA0000-0xAFFFF; both include this 64 KiB aperture).
+  // ===========================================================================
+  logic        chain4_en;
+  logic        cs_vram;
+  logic [31:0] vram_rdata;
+  logic [15:0] masked_mem_addr;
+  assign masked_mem_addr = mem_addr[15:0];   // window offset (0xA0000 base is 64K-aligned)
+  assign chain4_en = vga_seq_mem_mode[3] && (vga_gfx_misc[3:2] inside {2'b00, 2'b01});
+  assign cs_vram   = core_mem_req && !ide_dma_busy && chain4_en &&
+                     (mem_addr >= 32'h000A_0000) && (mem_addr <= 32'h000A_FFFF);
+
+  ven_vga_fb u_vga_fb (
+      .clk        (clk),
+      .rst        (dev_rst),
+      .sel        (cs_vram),
+      .we         (core_mem_we),
+      .addr       (masked_mem_addr),
+      .wdata      (core_mem_wdata),
+      .wstrb      (core_mem_wstrb),
+      .plane_mask (vga_seq_plane_mask[3:0]),
+      .rdata      (vram_rdata),
+      .scan_addr  (16'd0),          // board scan-out seam (PS/HDMI); idle in sim
+      .scan_rdata (/* unconnected */)
+  );
+
+  // The core's read bus: VRAM data on a chain-4 framebuffer hit, else the TB's.
+  assign core_mem_rdata = cs_vram ? vram_rdata : mem_rdata;
 
   // ACPI PM timer (PIIX4 PM base + 0x08 => 0x608).  Free-running 24-bit counter
   // derived from clk by a fractional accumulator (average rate PM_TIMER_FREQ).

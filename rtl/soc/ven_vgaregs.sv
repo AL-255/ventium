@@ -46,7 +46,16 @@ module ven_vgaregs (
     input  logic        we,         // 1 = OUT (CPU write), 0 = IN (CPU read)
     input  logic [15:0] addr,       // I/O port address
     input  logic [7:0]  wdata,      // write data (byte device)
-    output logic [7:0]  rdata       // read data -- COMBINATIONAL off the regs
+    output logic [7:0]  rdata,      // read data -- COMBINATIONAL off the regs
+
+    // ---- M8.6: live mode bits exposed for the chain-4 framebuffer (ven_vga_fb).
+    // Additive, outputs only -- the rdata-graded register differential (pvga) is
+    // unaffected. SEQ[2]=plane-write mask, SEQ[4]=memory mode (bit3 CHN_4M),
+    // GFX[5]=mode, GFX[6]=misc (bits3:2 memory-map mode).
+    output logic [7:0]  o_seq_plane_mask, // SEQ idx 2
+    output logic [7:0]  o_seq_mem_mode,   // SEQ idx 4
+    output logic [7:0]  o_gfx_mode,       // GFX idx 5
+    output logic [7:0]  o_gfx_misc        // GFX idx 6
 );
 
     // ---- QEMU register port addresses (vga_regs.h) ------------------------
@@ -328,5 +337,11 @@ module ven_vgaregs (
             end
         end
     end
+
+    // ---- M8.6: live mode bits for ven_vga_fb (combinational off the regs) ----
+    assign o_seq_plane_mask = sr[2];
+    assign o_seq_mem_mode   = sr[4];
+    assign o_gfx_mode       = gr[5];
+    assign o_gfx_misc       = gr[6];
 
 endmodule
