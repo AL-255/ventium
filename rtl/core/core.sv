@@ -727,7 +727,23 @@ module core
   // — agrees. set = addr[11:5] (128 sets), tag = addr[31:12] (20 bits). The fast
   // path decodes combinationally out of the cache; a miss triggers a line fill
   // (8 word reads = imiss penalty) in S_PF, allocating the 2-way LRU victim.
+  //
+  // +VEN_CACHE_HALF (FPGA area/congestion experiment, NOT a verification config):
+  // halve both L1s to 64 sets => 4 KB I$ + 4 KB D$. This changes the index/tag
+  // geometry (idx 6 / tag 21 instead of idx 7 / tag 20) and therefore the miss
+  // SEQUENCE, so it does NOT match the fixed-128-set cycle oracle (the M4/M5
+  // mb_* bands are only claimed for the default build). It STAYS functionally
+  // bit-exact (the cache is a hit/miss + data store; smaller => more fills, same
+  // bytes), validated by `VL_EXTRA_DEFINES=+define+VEN_CACHE_HALF make verify`.
+  // The default build is byte/cycle-identical: with IC_IDXW=7, addr[5 +: 7] is
+  // exactly addr[11:5] and addr[12 +: 20] is exactly addr[31:12].
+`ifdef VEN_CACHE_HALF
+  localparam int IC_SETS = 64;
+`else
   localparam int IC_SETS = 128;
+`endif
+  localparam int IC_IDXW = $clog2(IC_SETS);     // set-index width: 7 full / 6 half
+  localparam int IC_TAGW = 32 - 5 - IC_IDXW;    // tag width:      20 full / 21 half
   localparam int IC_LINE = 32;
   // The I-cache ARRAYS + per-word fill + fill-complete MRU + up-to-3 LRU touches
   // + synchronous reset now live in the `icache` module (rtl/mem/icache.sv, R2
@@ -738,7 +754,7 @@ module core
   // victim, which STAY here); the module never recomputes the victim.
   // icache addressed line-read interface (replaces the whole-array ic_data_o:
   // the fetch window spans only 2 consecutive lines — A=flin's line, B=next).
-  logic [6:0]  ic_rd_setA, ic_rd_setB;
+  logic [IC_IDXW-1:0]  ic_rd_setA, ic_rd_setB;
   logic        ic_rd_wayA, ic_rd_wayB;
   logic [IC_LINE*8-1:0] ic_rd_lineA, ic_rd_lineB;
 `ifdef VEN_IC_BRAM
@@ -752,7 +768,7 @@ module core
   // matches, no stall), and a sequential line-crossing finds the new line ALREADY in
   // buffer B (it read flin's next line last cycle) — so sequential fetch is
   // bubble-free; only a redirect to an un-buffered line costs a 1-cycle refill.
-  logic [6:0]  rdA_set_q, rdB_set_q;
+  logic [IC_IDXW-1:0]  rdA_set_q, rdB_set_q;
   logic        rdA_way_q, rdB_way_q;
   logic        ic_fetch_ready;   // the line(s) the current decode window needs are buffered
   // 2b — predicted-taken-target PREFETCH: when a predicted-taken branch sits in the
@@ -763,7 +779,7 @@ module core
   logic        pf_redir;
   logic [31:0] pf_redir_tgt;
 `endif
-  logic [19:0] ic_tag_o  [IC_SETS][2];   // addr[31:12]
+  logic [IC_TAGW-1:0] ic_tag_o  [IC_SETS][2];   // addr[31:5+idx]
   logic        ic_val_o  [IC_SETS][2];
   logic        ic_lru_o  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
   logic [31:0] pf_fill_addr;         // line base currently being filled
@@ -845,7 +861,11 @@ module core
   // comes from the BFM (mem_rdata); this only gates WHEN a load completes. A read
   // miss adds dmiss; a misaligned access adds +3 (AP-500). Matches p5_mem() +
   // l1_access() in verif/qemu-plugins/p5trace.c (read-allocate, 2-way LRU).
+`ifdef VEN_CACHE_HALF
+  localparam int DC_SETS = 64;   // +VEN_CACHE_HALF: 4 KB D$ (see IC_SETS note above)
+`else
   localparam int DC_SETS = 128;
+`endif
   // The dc_tag/dc_val/dc_lru state + the dc_hit() lookup + the dc_access()
   // allocate/LRU SM + the synchronous reset now live in the dcache_timing module
   // (rtl/mem/dcache.sv), instantiated below. The spine keeps the penalty policy
@@ -2834,18 +2854,18 @@ module core
   // module's READ-ONLY array outputs (ic_val_o/ic_tag_o) — PRE-edge registered
   // state, VERBATIM the old inline probe (only the array names gained the _o).
   function automatic logic ic_present(input logic [31:0] addr);
-    logic [6:0] set; logic [19:0] tag;
+    logic [IC_IDXW-1:0] set; logic [IC_TAGW-1:0] tag;
     begin
-      set = addr[11:5]; tag = addr[31:12];
+      set = addr[5 +: IC_IDXW]; tag = addr[5+IC_IDXW +: IC_TAGW];
       ic_present = (ic_val_o[set][0] && ic_tag_o[set][0]==tag) ||
                    (ic_val_o[set][1] && ic_tag_o[set][1]==tag);
     end
   endfunction
   // which way holds the line (assumes ic_present(addr)); way 1 iff way0 misses.
   function automatic logic ic_hit_way(input logic [31:0] addr);
-    logic [6:0] set; logic [19:0] tag;
+    logic [IC_IDXW-1:0] set; logic [IC_TAGW-1:0] tag;
     begin
-      set = addr[11:5]; tag = addr[31:12];
+      set = addr[5 +: IC_IDXW]; tag = addr[5+IC_IDXW +: IC_TAGW];
       ic_hit_way = !(ic_val_o[set][0] && ic_tag_o[set][0]==tag);
     end
   endfunction
@@ -2862,9 +2882,9 @@ module core
     // buffers always hold different sets, so a set match is unambiguous). If neither
     // matches (line not buffered) the result is stale — that case is gated by
     // ic_fetch_ready (no issue) / the existing V-candidate stale-by-design.
-    ln = (addr[11:5] == rdA_set_q) ? ic_rd_lineA : ic_rd_lineB;
+    ln = (addr[5 +: IC_IDXW] == rdA_set_q) ? ic_rd_lineA : ic_rd_lineB;
 `else
-    ln = (addr[11:5] == ic_rd_setA) ? ic_rd_lineA : ic_rd_lineB;
+    ln = (addr[5 +: IC_IDXW] == ic_rd_setA) ? ic_rd_lineA : ic_rd_lineB;
 `endif
     ic_byte = ln[{addr[4:0],3'b000} +: 8];
   endfunction
@@ -2946,17 +2966,17 @@ module core
   // stable continuous signal, so flin -> addr -> line -> ic_byte settles cleanly.
   logic [31:0] flin_nl;
   assign flin_nl    = {flin[31:5], 5'd0} + 32'd32;     // next aligned 32-byte line
-  assign ic_rd_setA = flin[11:5];
+  assign ic_rd_setA = flin[5 +: IC_IDXW];
   assign ic_rd_wayA = ic_hit_way(flin);
 `ifdef VEN_IC_BRAM
   // port B normally prefetches flin's next (straddle) line; 2b repurposes it to the
   // predicted branch target when pf_redir (set in the fast-path comb block). The read
   // is REGISTERED in the icache module, so this drives NEXT clock's rd_lineB — no
   // combinational loop through the decode that computes pf_redir.
-  assign ic_rd_setB = pf_redir ? pf_redir_tgt[11:5]      : flin_nl[11:5];
+  assign ic_rd_setB = pf_redir ? pf_redir_tgt[5 +: IC_IDXW] : flin_nl[5 +: IC_IDXW];
   assign ic_rd_wayB = pf_redir ? ic_hit_way(pf_redir_tgt) : ic_hit_way(flin_nl);
 `else
-  assign ic_rd_setB = flin_nl[11:5];
+  assign ic_rd_setB = flin_nl[5 +: IC_IDXW];
   assign ic_rd_wayB = ic_hit_way(flin_nl);
 `endif
 
@@ -2967,8 +2987,8 @@ module core
   // never false-matches a real flin (presence is gated separately by pipe_bytes_ok).
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      rdA_set_q <= 7'h7F; rdA_way_q <= 1'b1;
-      rdB_set_q <= 7'h7F; rdB_way_q <= 1'b1;
+      rdA_set_q <= '1; rdA_way_q <= 1'b1;
+      rdB_set_q <= '1; rdB_way_q <= 1'b1;
     end else begin
       rdA_set_q <= ic_rd_setA; rdA_way_q <= ic_rd_wayA;
       rdB_set_q <= ic_rd_setB; rdB_way_q <= ic_rd_wayB;
@@ -2982,9 +3002,9 @@ module core
   // post-fill way change. ic_byte (below) does the matching content-addressed select.
   logic ic_fa_avail, ic_fb_avail, ic_win_straddle;
   always_comb begin
-    logic [6:0] fa_set, fb_set; logic fa_way, fb_way;
-    fa_set = flin[11:5];        fa_way = ic_hit_way(flin);
-    fb_set = flin_nl[11:5];     fb_way = ic_hit_way(flin_nl);
+    logic [IC_IDXW-1:0] fa_set, fb_set; logic fa_way, fb_way;
+    fa_set = flin[5 +: IC_IDXW];        fa_way = ic_hit_way(flin);
+    fb_set = flin_nl[5 +: IC_IDXW];     fb_way = ic_hit_way(flin_nl);
     ic_fa_avail = (rdA_set_q==fa_set && rdA_way_q==fa_way)
                 || (rdB_set_q==fa_set && rdB_way_q==fa_way);
     ic_fb_avail = (rdA_set_q==fb_set && rdA_way_q==fb_way)
@@ -4323,13 +4343,13 @@ module core
   // addresses, same textual U->straddle->V last-write-wins order).
   // ===========================================================================
   logic        ic_fill_en, ic_fill_done, ic_fill_way;
-  logic [6:0]  ic_fill_set;
+  logic [IC_IDXW-1:0]  ic_fill_set;
   logic [4:0]  ic_fill_off;
   logic [31:0] ic_fill_data;
-  logic [19:0] ic_fill_tag;
+  logic [IC_TAGW-1:0] ic_fill_tag;
   logic        ic_tch0_en, ic_tch1_en, ic_tch2_en;
-  logic [6:0]  ic_tch0_set, ic_tch1_set, ic_tch2_set;
-  logic [19:0] ic_tch0_tag, ic_tch1_tag, ic_tch2_tag;
+  logic [IC_IDXW-1:0]  ic_tch0_set, ic_tch1_set, ic_tch2_set;
+  logic [IC_TAGW-1:0] ic_tch0_tag, ic_tch1_tag, ic_tch2_tag;
   always_comb begin
     // ---- fill port: the two MUTUALLY-EXCLUSIVE fill arms (S_PF words 0..7 vs the
     // S_PIPE-miss word-0 path; different FSM states/arms => never concurrent).
@@ -4352,26 +4372,26 @@ module core
 
     ic_fill_en   = 1'b0;
     ic_fill_done = 1'b0;
-    ic_fill_set  = 7'd0;
+    ic_fill_set  = '0;
     ic_fill_way  = 1'b0;
     ic_fill_off  = 5'd0;
     ic_fill_data = 32'd0;
-    ic_fill_tag  = 20'd0;
+    ic_fill_tag  = '0;
     if (state==S_PF && mem_ack) begin
       // S_PF: fill the word covering pf_word; complete (allocate + MRU) on word 7.
       ic_fill_en   = 1'b1;
-      ic_fill_set  = pf_fill_addr[11:5];
+      ic_fill_set  = pf_fill_addr[5 +: IC_IDXW];
       ic_fill_way  = pf_fill_way;
       ic_fill_off  = {pf_word, 2'b00};
       ic_fill_data = mem_rdata;
       ic_fill_done = (pf_word==3'd7);
-      ic_fill_tag  = pf_fill_addr[31:12];
+      ic_fill_tag  = pf_fill_addr[5+IC_IDXW +: IC_TAGW];
     end else if (ic_pf_miss_fill) begin
       // S_PIPE-miss word 0 into the not-MRU victim (~ic_lru_o, PRE-edge). NOT a
       // completing fill — tag/val/MRU land when S_PF reaches word 7 (pf_fill_*).
       ic_fill_en   = 1'b1;
-      ic_fill_set  = pf_miss_fa[11:5];
-      ic_fill_way  = ~ic_lru_o[pf_miss_fa[11:5]];
+      ic_fill_set  = pf_miss_fa[5 +: IC_IDXW];
+      ic_fill_way  = ~ic_lru_o[pf_miss_fa[5 +: IC_IDXW]];
       ic_fill_off  = 5'd0;
       ic_fill_data = mem_rdata;
     end
@@ -4410,20 +4430,20 @@ module core
 
       // tch0: U's line — touched on EITHER commit arm (set/tag from flin).
       ic_tch0_en  = ic_fp_commit || ic_int_issue;
-      ic_tch0_set = flin[11:5];
-      ic_tch0_tag = flin[31:12];
+      ic_tch0_set = flin[5 +: IC_IDXW];
+      ic_tch0_tag = flin[5+IC_IDXW +: IC_TAGW];
       // tch1: U's straddle line — integer ISSUE arm only, when flin crosses the
       // 32-byte line boundary (addr = flin + u_d.len - 1). FP ops never straddle.
       ic_straddle_a = flin + {28'd0,u_d.len} - 32'd1;
       ic_tch1_en  = ic_int_issue &&
                     (({1'b0,flin[4:0]} + {2'b0,u_d.len}) > 6'd32);
-      ic_tch1_set = ic_straddle_a[11:5];
-      ic_tch1_tag = ic_straddle_a[31:12];
+      ic_tch1_set = ic_straddle_a[5 +: IC_IDXW];
+      ic_tch1_tag = ic_straddle_a[5+IC_IDXW +: IC_TAGW];
       // tch2: paired V's line — integer ISSUE arm only, when pipe_pair (= do_v).
       ic_v_a      = flin + {28'd0,u_d.len};
       ic_tch2_en  = ic_int_issue && pipe_pair;
-      ic_tch2_set = ic_v_a[11:5];
-      ic_tch2_tag = ic_v_a[31:12];
+      ic_tch2_set = ic_v_a[5 +: IC_IDXW];
+      ic_tch2_tag = ic_v_a[5+IC_IDXW +: IC_TAGW];
     end
   end
 
@@ -4471,7 +4491,7 @@ module core
   // ===========================================================================
   logic [IC_LINE*8-1:0] pf_line_buf;
   logic                 pd_start_r;
-  logic [6:0]           pd_set_r;
+  logic [IC_IDXW-1:0]   pd_set_r;
   logic                 pd_way_r;
   logic [31:0]          pd_flags_r;
   always_ff @(posedge clk) begin

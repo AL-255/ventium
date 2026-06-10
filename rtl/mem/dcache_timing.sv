@@ -22,7 +22,12 @@
 // exclusive across S_PIPE U-load / S_LOAD / S_LOAD2 / S_STORE).
 
 module dcache_timing #(
-    parameter int DC_SETS = 128
+    parameter int DC_SETS = 128,
+    // Derived: idx = log2(sets), tag = 32-5-idx (32 B line => 5-bit offset).
+    // 128 sets => idx 7 / tag 20; the +VEN_CACHE_HALF variant passes DC_SETS=64
+    // => idx 6 / tag 21. Not overridden at instantiation.
+    parameter int DC_IDXW = $clog2(DC_SETS),
+    parameter int DC_TAGW = 32 - 5 - DC_IDXW
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -41,7 +46,7 @@ module dcache_timing #(
     input  logic [31:0] acc_addr
 );
 
-  logic [19:0] dc_tag [DC_SETS][2];   // addr/32/128
+  logic [DC_TAGW-1:0] dc_tag [DC_SETS][2];   // addr[31:5+idx]
   logic        dc_val [DC_SETS][2];
   logic        dc_lru [DC_SETS];      // 2-way LRU: way most-recently-used
 
@@ -49,8 +54,8 @@ module dcache_timing #(
   // either way of its set? Mirrors p5model l1_access() lookup. Pure-comb off the
   // registered arrays (does NOT mutate state).
   always_comb begin
-    logic [6:0] set; logic [19:0] tag;
-    set = lu_addr[11:5]; tag = lu_addr[31:12];
+    logic [DC_IDXW-1:0] set; logic [DC_TAGW-1:0] tag;
+    set = lu_addr[5 +: DC_IDXW]; tag = lu_addr[5+DC_IDXW +: DC_TAGW];
     lu_hit = (dc_val[set][0] && dc_tag[set][0]==tag) ||
              (dc_val[set][1] && dc_tag[set][1]==tag);
   end
@@ -61,11 +66,11 @@ module dcache_timing #(
     if (!rst_n) begin
       for (int s=0;s<DC_SETS;s++) begin
         dc_lru[s]<=1'b0; dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0;
-        dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
+        dc_tag[s][0]<='0; dc_tag[s][1]<='0;
       end
     end else if (acc_valid) begin
-      logic [6:0] set; logic [19:0] tag; logic hit; logic victim;
-      set = acc_addr[11:5]; tag = acc_addr[31:12]; hit = 1'b0; victim = ~dc_lru[set];
+      logic [DC_IDXW-1:0] set; logic [DC_TAGW-1:0] tag; logic hit; logic victim;
+      set = acc_addr[5 +: DC_IDXW]; tag = acc_addr[5+DC_IDXW +: DC_TAGW]; hit = 1'b0; victim = ~dc_lru[set];
       for (int w=0; w<2; w++)
         if (dc_val[set][w] && dc_tag[set][w]==tag) begin hit=1'b1; dc_lru[set]<=w[0]; end
       if (!hit) begin
