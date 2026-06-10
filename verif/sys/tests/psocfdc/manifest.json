@@ -1,0 +1,35 @@
+{
+  "name": "psocfdc",
+  "kind": "system",
+  "src": "psocfdc.S",
+  "linker": "psocfdc.ld",
+  "image": "psocfdc.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 300,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-fdc-gate.sh",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "FDC software reset via DOR (0x3F2): write 0x00 (reset asserted) then 0x0C (DMA-en + drive 0 + reset released); read DOR -> 0x0C (dor | cur_drv); read MSR (0x3F4) -> 0x80 (RQM ready)",
+    "post-reset 4-drive SENSE INTERRUPT polling (cmd 0x08 to FIFO 0x3F5): MSR -> 0xD0 (result), ST0 = 0xC0/0xC1/0xC2/0xC3 across the 4 calls, PCN = 0x00",
+    "VERSION (0x10) -> 0x90; PART ID (0x18) -> 0x41; LOCK on (0x94) -> 0x10, LOCK off (0x14) -> 0x00",
+    "SPECIFY (0x03 + 2 params) -> no result, MSR back to 0x80; CONFIGURE (0x13 + 3) + PERPENDICULAR (0x12 + 1) -> no result",
+    "isa-debug-exit code 133"
+  ],
+
+  "why_per_record_differential": "psocfdc drives the FDC command/result FIFO with only the SYNCHRONOUS, no-disk, no-DMA, no-seek commands (the FDC state machine for these advances entirely inside the I/O read/write handler with no timer/BH), and takes NO interrupts (CLI). So every interaction is a synchronous IN/OUT and qemu's gdbstub single-step (gen_trace.py --system) is a valid per-record oracle; the gate is plain compare.py EQUIVALENT on ventium_soc with the M8.9 ven_i8272. compare.py --mode func grades GPRs per retired instruction, so the MSR/result-byte read-backs into eax are directly diffable.",
+
+  "determinism_contract": "Models the CPU-visible synchronous FDC register surface at 0x3F1-0x3F5 + 0x3F7 (NOT 0x3F0; NOT 0x3F6 = IDE alt-status): DOR (0x3F2) software reset + read-back (dor|cur_drv), the MSR (0x3F4) RQM/DIO/CB command-FIFO handshake (0x80 idle -> 0x90 accumulating -> 0xD0 result -> 0x80), and the deterministic commands SENSE INTERRUPT STATUS (post-reset 4-drive poll ST0=0xC0..0xC3), VERSION (0x90), PART ID (0x41), LOCK (0x10/0x00), SPECIFY/CONFIGURE/PERPENDICULAR (no result). EXCLUDED (oracle boundary, like the 8042 OBF host-queue): the disk READ/WRITE/FORMAT/READ-ID transfers (need disk + DMA), RECALIBRATE/SEEK (async seek timing + IRQ via a host-clock timer), the DIR media-change bit, and motor spin-up. The IRQ6 raised on reset-release is wired to PIC IR6 but stays quiescent on the diff (the test runs with interrupts disabled).",
+
+  "comparison_plan": "verif/soc/run-soc-fdc-gate.sh: builds psocfdc.bin + the ventium_soc --soc TB, confirms the image reaches isa-debug-exit (133) under qemu-system-i386, regenerates the per-record golden via gen_trace.py --system (drift-checked vs the committed psocfdc.sys.vtrace.golden), runs ventium_soc on the image, and diffs the two streams with compare.py --mode func -> EQUIVALENT over all retired instructions. EQUIVALENT = the 82077 FDC register/command-FIFO behaviour is byte-identical to qemu-system-i386 8.2.2.",
+
+  "description": "Bare-metal M8.9 82077/8272A floppy disk controller differential (NO paging, NO interrupts, NO disk/DMA/seek). Boots real->protected, software-resets the FDC via DOR, then exercises the CPU-visible synchronous register surface at 0x3F1-0x3F5/0x3F7 that M8.9 wires into ventium_soc (ven_i8272): DOR read-back, the MSR RQM/DIO/CB command-FIFO handshake, the post-reset 4-drive SENSE INTERRUPT polling (ST0=0xC0..0xC3), VERSION/PART-ID/LOCK result commands, and the SPECIFY/CONFIGURE/PERPENDICULAR no-result commands. Graded PER-RECORD against the qemu-system-i386 single-step golden. The disk/DMA/seek path + media-change are documented oracle boundaries. This is the last major standard PC peripheral toward a floppy boot path on a fully bootable system."
+}

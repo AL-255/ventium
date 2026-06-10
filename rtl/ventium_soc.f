@@ -61,6 +61,8 @@ soc/ven_acpipm.sv
 soc/ven_vga_fb.sv
 // M8.7 Intel 8237A DMA controller 0 (0x00-0x0F + page regs):
 soc/ven_i8237.sv
+// M8.9 82077/8272A floppy disk controller (0x3F0-0x3F5,0x3F7):
+soc/ven_i8272.sv
 // M8.4 IDE/ATA controller (primary master, PIO):
 soc/ven_ide.sv
 // M8.5 NS16550A COM1 serial UART (0x3F8-0x3FF, IRQ4):

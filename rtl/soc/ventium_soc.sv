@@ -159,6 +159,7 @@ module ventium_soc
     // M8.5 COM1 UART = ISA IRQ4. Quiescent on the differential path (IER=0 / no
     // serial RX), like the IR1/IR8/IR12 precedent; live for board console use.
     pic_irq_in[4]     = uart_irq4;
+    pic_irq_in[6]     = fdc_irq6;   // M8.9 floppy (quiescent on the diff: CLI)
     pic_irq_in[8]     = rtc_irq8;
     pic_irq_in[12]    = mouse_irq12;
     // M8.4 primary IDE = ISA IRQ14 (pci.c port_info {0x1f0,0x3f6,14}). The pide
@@ -320,6 +321,7 @@ module ventium_soc
   logic        cs_uart;                     // M8.5 COM1 UART (0x3F8..0x3FF)
   logic        cs_dma;                       // M8.7 8237 DMA ctrl0 (0x00-0x0F + pages)
   logic        cs_dma2;                      // M8.8 8237 DMA ctrl1 (0xC0-0xDF + pages)
+  logic        cs_fdc;                       // M8.9 floppy controller (0x3F0-0x3F5,0x3F7)
   logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
   logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
   logic        cs_bmide;                    // M8.4f: bus-master IDE register block
@@ -365,6 +367,11 @@ module ventium_soc
     cs_dma2   = io_req && ((io_addr >= 16'h00C0 && io_addr <= 16'h00DF) ||
                            io_addr == 16'h0089 || io_addr == 16'h008A ||
                            io_addr == 16'h008B || io_addr == 16'h008F);
+    // ---- M8.9 floppy controller (82077): 0x3F1-0x3F5 + 0x3F7. NOT 0x3F0, and
+    // NOT 0x3F6 (that is the IDE alt-status, already decoded by cs_ide_ctl) —
+    // matches qemu's FDC portio registration exactly.
+    cs_fdc    = io_req && ((io_addr >= 16'h03F1 && io_addr <= 16'h03F5) ||
+                           io_addr == 16'h03F7);
     // ---- M8.4 IDE/ATA primary channel -------------------------------------
     // Command block 0x1F0-0x1F7 + control block 0x3F6 (primary master, PIO).
     // The secondary channel (0x170-0x177/0x376) is decoded below (M8.4e).
@@ -401,6 +408,8 @@ module ventium_soc
   logic [7:0] uart_rdata;      // M8.5 COM1 UART byte read
   logic [7:0] dma_rdata;       // M8.7 8237 DMA ctrl0 byte read
   logic [7:0] dma2_rdata;      // M8.8 8237 DMA ctrl1 byte read
+  logic [7:0] fdc_rdata;       // M8.9 floppy controller byte read
+  logic       fdc_irq6;        // M8.9 floppy -> PIC IR6
   logic       uart_irq4;       // M8.5 COM1 -> master PIC IR4
   logic       uart_tx_valid;   // M8.5 THR-written strobe (board console seam)
   logic [7:0] uart_tx_data;
@@ -542,6 +551,18 @@ module ventium_soc
       .addr  (io_addr),
       .wdata (io_wdata[7:0]),
       .rdata (dma_rdata)
+  );
+
+  // M8.9 floppy disk controller (82077) — 0x3F1-0x3F5 + 0x3F7.
+  ven_i8272 u_fdc (
+      .clk   (clk),
+      .rst   (dev_rst),
+      .cs    (cs_fdc),
+      .we    (io_we),
+      .addr  (io_addr),
+      .wdata (io_wdata[7:0]),
+      .rdata (fdc_rdata),
+      .irq   (fdc_irq6)
   );
 
   // M8.8 secondary controller — same module, NORMALIZED address (dshift cancels).
@@ -832,6 +853,7 @@ module ventium_soc
     else if (cs_uart)   io_rdata = {24'd0, uart_rdata};   // M8.5 COM1
     else if (cs_dma)    io_rdata = {24'd0, dma_rdata};    // M8.7 8237 DMA ctrl0
     else if (cs_dma2)   io_rdata = {24'd0, dma2_rdata};   // M8.8 8237 DMA ctrl1
+    else if (cs_fdc)    io_rdata = {24'd0, fdc_rdata};    // M8.9 floppy controller
     else if (cs_vga)    io_rdata = {24'd0, vga_rdata};
     // ACPI PM: return the native 32-bit value ({8'h0,count[23:0]}) so a future
     // dword IN reads the counter. Off the differential surface (never read by
