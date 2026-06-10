@@ -72,16 +72,28 @@ write_checkpoint -force $OUT/placed.dcp
 puts "APR_${CONFIG}_${MODE}_PLACED_DONE"
 
 # ---- per-module placed-cell CSV (colored device view) ---------------------
+# Coordinates are the TILE grid (COLUMN, ROW) — one uniform device-wide grid for ALL
+# site types. (Do NOT parse the SITE name's X/Y: SLICE / DSP / RAMB each have their
+# own independent index grid and the X:Y pitch is non-physical, which distorts the
+# scatter badly on large parts. cf. fpga/scripts/dump_cells_loc.tcl.)
 set fh [open $OUT/cells_loc.csv w]
 puts $fh "module,x,y"
 set n 0
-foreach c [get_cells -hierarchical -filter {IS_PRIMITIVE==1}] {
+set tilecache [dict create]
+foreach c [get_cells -hierarchical -filter {IS_PRIMITIVE==1 && LOC != ""}] {
     set loc [get_property LOC $c]
     if {$loc eq ""} continue
-    if {![regexp {[A-Z_]+X([0-9]+)Y([0-9]+)} $loc -> x y]} continue
+    if {![dict exists $tilecache $loc]} {
+        set t [get_tiles -quiet -of_objects [get_sites -quiet $loc]]
+        if {$t eq ""} { dict set tilecache $loc ""; continue }
+        dict set tilecache $loc "[get_property COLUMN $t] [get_property ROW $t]"
+    }
+    set cr [dict get $tilecache $loc]
+    if {$cr eq ""} continue
+    lassign $cr col row
     set nm [get_property NAME $c]
     if {[regexp {^(u_[A-Za-z0-9_]+)/} $nm -> inst]} { set mod $inst } else { set mod "core_spine" }
-    puts $fh "$mod,$x,$y"; incr n
+    puts $fh "$mod,$col,$row"; incr n
 }
 close $fh
 puts "APR_${CONFIG}_${MODE}_CSV_DONE cells=$n"

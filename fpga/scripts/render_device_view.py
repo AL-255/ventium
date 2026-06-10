@@ -47,8 +47,8 @@ for i, m in enumerate(order):
     xs, ys = pts[m]
     ax.scatter(xs, ys, s=2, color=cmap(i % 20),
                label=f"{LABEL.get(m, m)}  ({len(xs)} cells)", rasterized=True)
-ax.set_xlabel("SLICE / tile column (X)")
-ax.set_ylabel("SLICE / tile row (Y)")
+ax.set_xlabel("tile column (X)")
+ax.set_ylabel("tile row (Y)")
 ax.set_title(title)
 ax.set_aspect("equal", adjustable="box")
 leg = ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), markerscale=6,
