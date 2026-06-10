@@ -39,7 +39,8 @@ CPP_SRCS := $(TB_DIR)/tb_main.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cp
 
 # M8.1 --soc TB: a dedicated driver (tb_soc.cpp) against the ventium_soc top. It
 # reuses the shared memory model + DPI retire path; no quake/win95 co-sim.
-SOC_CPP_SRCS := $(TB_DIR)/tb_soc.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp
+SOC_CPP_SRCS := $(TB_DIR)/tb_soc.cpp $(TB_DIR)/memmodel.cpp $(TB_DIR)/dpi_retire.cpp \
+                $(wildcard $(VENTIUM_ROOT)/sw/ps_periph/*.c)
 
 # ---- verilator invocation ---------------------------------------------------
 VERILATOR ?= verilator
@@ -157,6 +158,9 @@ SOC_EXE := tb_soc
 # ven_ide guards the $readmemh on `ifdef VEN_IDE_DISK_HEX, so non-IDE builds are
 # unaffected (disk[] simply stays uninitialized — never read by other tests).
 VEN_IDE_DISK_HEX ?= $(abspath $(CURDIR)/../sys/tests/pide/pide.disk.hex)
+# SOC_OBJDIR lets a variant build (e.g. a +VEN_<DEV>_PS PS-offload cosim) use its
+# own obj dir so it does not clobber the default obj_dir_soc the other gates use.
+SOC_OBJDIR ?= obj_dir_soc
 .PHONY: soc
 soc:
 	@if [ ! -f "$(SOC_FILELIST)" ]; then \
@@ -166,12 +170,12 @@ soc:
 	  -sv --top-module $(SOC_TOP) \
 	  -Wall -Wno-UNUSED -Wno-fatal \
 	  -DVEN_IDE_DISK_HEX='"$(VEN_IDE_DISK_HEX)"' \
-	  $(VL_TRACE) \
+	  $(VL_TRACE) $(VL_EXTRA_DEFINES) \
 	  -CFLAGS "$(VL_CFLAGS)" \
 	  -o $(SOC_EXE) \
-	  -Mdir obj_dir_soc \
+	  -Mdir $(SOC_OBJDIR) \
 	  -F $(SOC_FILELIST) $(SOC_CPP_SRCS)
-	@echo "built: $(CURDIR)/obj_dir_soc/$(SOC_EXE)"
+	@echo "built: $(CURDIR)/$(SOC_OBJDIR)/$(SOC_EXE)"
 
 # ---- rtl-sva: integrated build with the biu_p5 SVA bound + --assert ---------
 # M5B-int: build the SAME integrated model into a SEPARATE obj dir, but with

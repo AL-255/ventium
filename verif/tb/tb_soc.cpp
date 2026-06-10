@@ -47,7 +47,21 @@
 #include "memmodel.h"
 #include "trace_writer.h"
 
+#include <vector>
+// PS-offload peripheral C models (sw/ps_periph/): when a device is +VEN_<DEV>_PS,
+// its forwarded io_ps_* requests are serviced HERE by its C model, proving the C
+// model bit-exact vs qemu (the same psoc<dev> per-record gate). On the board these
+// same .c files run on the A53 behind ven_soc_axil. Inert when no device is PS
+// (io_ps_req stays 0). The .c files are plain C that is ALSO valid C++, so the TB
+// build (g++ compiles .c as C++) and the A53 build (gcc, C) are each self-consistent
+// — the ctor is declared with default (matching-compiler) linkage on each side.
+#include "../../sw/ps_periph/ven_periph.h"
+ven_periph_t* ven_uart16550_new(void);
+
 namespace {
+
+// (dev, lo, hi) -> the C model servicing that forwarded I/O port range.
+struct PsDev { ven_periph_t* dev; uint16_t lo, hi; };
 
 struct Args {
     std::string image;
@@ -168,7 +182,24 @@ int main(int argc, char** argv) {
 #endif
     };
 
+    // ---- PS-offload peripheral C models (registered regardless of build; only
+    // the +VEN_<DEV>_PS-configured ports ever reach io_ps_*, so unselected models
+    // are simply never called). The board uses the same models via ven_soc_axil.
+    std::vector<PsDev> ps_devs;
+    ps_devs.push_back({ ven_uart16550_new(), 0x3F8, 0x3FF });  // COM1 16550
+    for (auto& d : ps_devs) d.dev->reset(d.dev);
+    top->io_ps_rdata = 0;
+    top->io_ps_ack   = 0;
+    bool ps_busy = false;   // an io_ps access has been serviced, awaiting io_ps_req drop
+
     // ---- mem_* bus service (single-beat, combinational-OK, like tb_main) ----
+    // service_bus is called several times per clock (both phases, settle x2). The
+    // mem bus is idempotent. The PS C models have READ side-effects (LSR clear,
+    // FIFO advance), so — like the RTL devices' clocked side-effects — they are
+    // applied EXACTLY ONCE per access: the `ps_busy` latch serves the model on the
+    // first observation of an io_ps_req pulse, holds io_ps_rdata + acks while the
+    // request is up (matching the RTL's combinational io_ack), and rearms when the
+    // core drops io_ps_req (the access retired).
     auto service_bus = [&]() {
         uint32_t rdata = 0;
         bool ack = false;
@@ -177,6 +208,26 @@ int main(int argc, char** argv) {
                     (uint8_t)top->mem_wstrb, &rdata, &ack);
         top->mem_rdata = rdata;
         top->mem_ack   = ack;
+
+        if (top->io_ps_req) {
+            if (!ps_busy) {                  // serve this forwarded access ONCE
+                uint16_t port = (uint16_t)top->io_ps_addr;
+                uint8_t  rd   = 0;
+                for (auto& d : ps_devs) {
+                    if (port >= d.lo && port <= d.hi) {
+                        if (top->io_ps_we) d.dev->io_write(d.dev, port, (uint8_t)top->io_ps_wdata);
+                        else               rd = d.dev->io_read(d.dev, port);
+                        break;
+                    }
+                }
+                top->io_ps_rdata = rd;
+                ps_busy = true;
+            }
+            top->io_ps_ack = 1;
+        } else {
+            ps_busy = false;
+            top->io_ps_ack = 0;
+        }
     };
 
     // ---- reset: hold rst_n low, boot_mode=1 (system cold reset F000:FFF0) ---

@@ -88,7 +88,20 @@ module ventium_soc
     output logic [31:0] mem_wdata,
     output logic [3:0]  mem_wstrb,
     input  wire logic [31:0] mem_rdata,
-    input  wire logic        mem_ack
+    input  wire logic        mem_ack,
+
+    // PS-offload port-I/O bridge seam: when a peripheral is PS-placed (+VEN_<DEV>_PS,
+    // fpga/periph_split.config), its I/O port range is NOT serviced by a local RTL
+    // device — it is forwarded here (to ven_soc_axil -> the A53 C model on the board;
+    // to the C dispatch in tb_soc for verification). io_ps_ack/io_ps_rdata return the
+    // result; the core stalls in S_IO until io_ps_ack, so the model's latency cannot
+    // perturb the per-record stream. INERT in the all-RTL default (io_ps_req tied 0).
+    output logic        io_ps_req,    // a PS-placed port is being accessed this clock
+    output logic        io_ps_we,
+    output logic [15:0] io_ps_addr,
+    output logic [7:0]  io_ps_wdata,
+    input  wire logic [7:0]  io_ps_rdata,
+    input  wire logic        io_ps_ack
 );
 
   // ===========================================================================
@@ -522,6 +535,7 @@ module ventium_soc
   // stream THR bytes out (to a PS UART / FPGA pins) and rx_valid/rx_data feed
   // received bytes in. No serial input on the diff path -> rx held quiescent.
   // ===========================================================================
+`ifndef VEN_UART_PS
   ven_uart16550 u_uart (
       .clk       (clk),
       .rst       (dev_rst),
@@ -536,6 +550,11 @@ module ventium_soc
       .rx_valid  (1'b0),
       .rx_data   (8'h00)
   );
+`else
+  // UART is PS-placed: no RTL module; the cs_uart range forwards to the bridge.
+  assign uart_rdata = 8'h00; assign uart_irq4 = 1'b0;
+  assign uart_tx_valid = 1'b0; assign uart_tx_data = 8'h00;
+`endif
 
   // ===========================================================================
   // M8.7 Intel 8237A DMA controller 0 (channels 0-3) + AT page registers. The
@@ -836,6 +855,27 @@ module ventium_soc
     end
   end
 
+  // ---- PS-offload select: is the accessed port a PS-placed peripheral? -------
+  // (Per +VEN_<DEV>_PS from fpga/periph_split.config. 0 in the all-RTL default.)
+  logic io_ps_sel;
+  always_comb begin
+    io_ps_sel = 1'b0;
+`ifdef VEN_PIC_PS    io_ps_sel = io_ps_sel | cs_pic;    `endif
+`ifdef VEN_PIT_PS    io_ps_sel = io_ps_sel | cs_pit;    `endif
+`ifdef VEN_RTC_PS    io_ps_sel = io_ps_sel | cs_rtc;    `endif
+`ifdef VEN_I8042_PS  io_ps_sel = io_ps_sel | cs_i8042;  `endif
+`ifdef VEN_PORT92_PS io_ps_sel = io_ps_sel | cs_port92; `endif
+`ifdef VEN_VGA_PS    io_ps_sel = io_ps_sel | cs_vga;     `endif
+`ifdef VEN_ACPIPM_PS io_ps_sel = io_ps_sel | cs_acpipm; `endif
+`ifdef VEN_UART_PS   io_ps_sel = io_ps_sel | cs_uart;   `endif
+`ifdef VEN_FDC_PS    io_ps_sel = io_ps_sel | cs_fdc;    `endif
+  end
+  // forward the PS-selected access to the bridge (ven_soc_axil / the TB C dispatch).
+  assign io_ps_req   = io_req && io_ps_sel;
+  assign io_ps_we    = io_we;
+  assign io_ps_addr  = io_addr;
+  assign io_ps_wdata = io_wdata[7:0];
+
   // I/O response back to the core: combinational ack the same clock io_req is
   // up; the read data is the selected device's byte zero-extended to 32 bits.
   always_comb begin
@@ -843,9 +883,11 @@ module ventium_soc
     // a DMA, which is HELD (io_ack=0) for the whole burst so the core parks in S_IO
     // (mem bus free) until the engine completes, exactly like qemu's synchronous
     // bmdma_cmd_writeb. ide_dma_busy is high for the launch clock + the run.
-    io_ack   = io_req && !ide_dma_busy;
+    // A PS-placed port instead waits on the bridge's io_ps_ack with io_ps_rdata.
+    io_ack   = io_ps_sel ? io_ps_ack : (io_req && !ide_dma_busy);
     io_rdata = 32'd0;
-    if      (cs_pic)    io_rdata = {24'd0, pic_rdata};
+    if      (io_ps_sel) io_rdata = {24'd0, io_ps_rdata};
+    else if (cs_pic)    io_rdata = {24'd0, pic_rdata};
     else if (cs_pit)    io_rdata = {24'd0, pit_rdata};
     else if (cs_rtc)    io_rdata = {24'd0, rtc_rdata};
     else if (cs_i8042)  io_rdata = {24'd0, kbd_rdata};
