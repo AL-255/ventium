@@ -737,25 +737,42 @@ module core
   // bytes), validated by `VL_EXTRA_DEFINES=+define+VEN_CACHE_HALF make verify`.
   // The default build is byte/cycle-identical: with IC_IDXW=7, addr[5 +: 7] is
   // exactly addr[11:5] and addr[12 +: 20] is exactly addr[31:12].
-`ifdef VEN_CACHE_HALF
+  // L1 I-cache geometry knobs (default 128 sets × 2 ways = 8 KB, the silicon /
+  // cycle-validated config). Override per-cache (VEN_IC_SETS / VEN_IC_WAYS) or
+  // for both L1s at once (VEN_L1_SETS / VEN_L1_WAYS); +VEN_CACHE_HALF = 64 sets.
+  // Non-default geometries stay FUNCTIONALLY correct but are not matched by the
+  // fixed-2-way/128-set p5trace.so cycle oracle (area/perf experiments).
+`ifdef VEN_IC_SETS
+  localparam int IC_SETS = `VEN_IC_SETS;
+`elsif VEN_L1_SETS
+  localparam int IC_SETS = `VEN_L1_SETS;
+`elsif VEN_CACHE_HALF
   localparam int IC_SETS = 64;
 `else
   localparam int IC_SETS = 128;
 `endif
-  localparam int IC_IDXW = $clog2(IC_SETS);     // set-index width: 7 full / 6 half
-  localparam int IC_TAGW = 32 - 5 - IC_IDXW;    // tag width:      20 full / 21 half
+`ifdef VEN_IC_WAYS
+  localparam int IC_WAYS = `VEN_IC_WAYS;
+`elsif VEN_L1_WAYS
+  localparam int IC_WAYS = `VEN_L1_WAYS;
+`else
+  localparam int IC_WAYS = 2;
+`endif
+  localparam int IC_IDXW = $clog2(IC_SETS);     // set-index width: 7 @128 / 6 @64
+  localparam int IC_TAGW = 32 - 5 - IC_IDXW;    // tag width:      20 @128 / 21 @64
   localparam int IC_LINE = 32;
+  localparam int IC_WAYW = (IC_WAYS <= 1) ? 1 : $clog2(IC_WAYS);  // way-index width (1 @2-way)
   // The I-cache ARRAYS + per-word fill + fill-complete MRU + up-to-3 LRU touches
   // + synchronous reset now live in the `icache` module (rtl/mem/icache.sv, R2
   // extract), instantiated as u_icache below. The arrays are EXPOSED READ-ONLY as
   // these outputs so the combinational probes (ic_present / ic_hit_way / ic_byte)
   // read the REGISTERED PRE-edge state directly, UNCHANGED. The fill is sequenced
-  // by the spine regs below (pf_fill_addr/pf_fill_way/pf_word + the ~ic_lru_o
+  // by the spine regs below (pf_fill_addr/pf_fill_way/pf_word + the ic_victim_o
   // victim, which STAY here); the module never recomputes the victim.
   // icache addressed line-read interface (replaces the whole-array ic_data_o:
   // the fetch window spans only 2 consecutive lines — A=flin's line, B=next).
   logic [IC_IDXW-1:0]  ic_rd_setA, ic_rd_setB;
-  logic        ic_rd_wayA, ic_rd_wayB;
+  logic [IC_WAYW-1:0] ic_rd_wayA, ic_rd_wayB;
   logic [IC_LINE*8-1:0] ic_rd_lineA, ic_rd_lineB;
 `ifdef VEN_IC_BRAM
   // +VEN_IC_BRAM: the icache read ports are REGISTERED (BRAM mandates a synchronous
@@ -769,7 +786,7 @@ module core
   // buffer B (it read flin's next line last cycle) — so sequential fetch is
   // bubble-free; only a redirect to an un-buffered line costs a 1-cycle refill.
   logic [IC_IDXW-1:0]  rdA_set_q, rdB_set_q;
-  logic        rdA_way_q, rdB_way_q;
+  logic [IC_WAYW-1:0] rdA_way_q, rdB_way_q;
   logic        ic_fetch_ready;   // the line(s) the current decode window needs are buffered
   // 2b — predicted-taken-target PREFETCH: when a predicted-taken branch sits in the
   // current (non-straddling) window, we're about to REDIRECT, so the sequential next
@@ -779,11 +796,11 @@ module core
   logic        pf_redir;
   logic [31:0] pf_redir_tgt;
 `endif
-  logic [IC_TAGW-1:0] ic_tag_o  [IC_SETS][2];   // addr[31:5+idx]
-  logic        ic_val_o  [IC_SETS][2];
-  logic        ic_lru_o  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
+  logic [IC_TAGW-1:0] ic_tag_o  [IC_SETS][IC_WAYS];   // addr[31:5+idx]
+  logic        ic_val_o  [IC_SETS][IC_WAYS];
+  logic [IC_WAYW-1:0] ic_victim_o [IC_SETS]; // replacement (LRU) way per set (== ~ic_lru @2-way)
   logic [31:0] pf_fill_addr;         // line base currently being filled
-  logic        pf_fill_way;          // 2-way victim way chosen for the fill
+  logic [IC_WAYW-1:0] pf_fill_way;     // victim way chosen for the fill (LRU)
   logic [2:0]  pf_word;              // refill word counter (8 words = 32 bytes)
 
   // BTB: 64 sets x 4 ways, 2-bit saturating counters (Alpert & Avnon / AP-500).
@@ -861,10 +878,21 @@ module core
   // comes from the BFM (mem_rdata); this only gates WHEN a load completes. A read
   // miss adds dmiss; a misaligned access adds +3 (AP-500). Matches p5_mem() +
   // l1_access() in verif/qemu-plugins/p5trace.c (read-allocate, 2-way LRU).
-`ifdef VEN_CACHE_HALF
+`ifdef VEN_DC_SETS
+  localparam int DC_SETS = `VEN_DC_SETS;
+`elsif VEN_L1_SETS
+  localparam int DC_SETS = `VEN_L1_SETS;
+`elsif VEN_CACHE_HALF
   localparam int DC_SETS = 64;   // +VEN_CACHE_HALF: 4 KB D$ (see IC_SETS note above)
 `else
   localparam int DC_SETS = 128;
+`endif
+`ifdef VEN_DC_WAYS
+  localparam int DC_WAYS = `VEN_DC_WAYS;
+`elsif VEN_L1_WAYS
+  localparam int DC_WAYS = `VEN_L1_WAYS;
+`else
+  localparam int DC_WAYS = 2;
 `endif
   // The dc_tag/dc_val/dc_lru state + the dc_hit() lookup + the dc_access()
   // allocate/LRU SM + the synchronous reset now live in the dcache_timing module
@@ -2854,19 +2882,26 @@ module core
   // module's READ-ONLY array outputs (ic_val_o/ic_tag_o) — PRE-edge registered
   // state, VERBATIM the old inline probe (only the array names gained the _o).
   function automatic logic ic_present(input logic [31:0] addr);
-    logic [IC_IDXW-1:0] set; logic [IC_TAGW-1:0] tag;
+    logic [IC_IDXW-1:0] set; logic [IC_TAGW-1:0] tag; logic p;
     begin
       set = addr[5 +: IC_IDXW]; tag = addr[5+IC_IDXW +: IC_TAGW];
-      ic_present = (ic_val_o[set][0] && ic_tag_o[set][0]==tag) ||
-                   (ic_val_o[set][1] && ic_tag_o[set][1]==tag);
+      p = 1'b0;
+      for (int w=0; w<IC_WAYS; w++)
+        if (ic_val_o[set][w] && ic_tag_o[set][w]==tag) p = 1'b1;
+      ic_present = p;
     end
   endfunction
-  // which way holds the line (assumes ic_present(addr)); way 1 iff way0 misses.
-  function automatic logic ic_hit_way(input logic [31:0] addr);
-    logic [IC_IDXW-1:0] set; logic [IC_TAGW-1:0] tag;
+  // which way holds the line (assumes ic_present(addr)). The hitting way wins; if
+  // none hits (speculative/stale read) it defaults to the last way (IC_WAYS-1) —
+  // at IC_WAYS==2 this is exactly the old `!(way0 hit)` (0 iff way0 hits, else 1).
+  function automatic logic [IC_WAYW-1:0] ic_hit_way(input logic [31:0] addr);
+    logic [IC_IDXW-1:0] set; logic [IC_TAGW-1:0] tag; logic [IC_WAYW-1:0] hw;
     begin
       set = addr[5 +: IC_IDXW]; tag = addr[5+IC_IDXW +: IC_TAGW];
-      ic_hit_way = !(ic_val_o[set][0] && ic_tag_o[set][0]==tag);
+      hw = IC_WAYW'(IC_WAYS-1);
+      for (int w=0; w<IC_WAYS; w++)
+        if (ic_val_o[set][w] && ic_tag_o[set][w]==tag) hw = IC_WAYW'(w);
+      ic_hit_way = hw;
     end
   endfunction
   // icache byte read (assumes ic_present(addr)): from whichever way hit. STALE-BY-
@@ -2987,8 +3022,8 @@ module core
   // never false-matches a real flin (presence is gated separately by pipe_bytes_ok).
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      rdA_set_q <= '1; rdA_way_q <= 1'b1;
-      rdB_set_q <= '1; rdB_way_q <= 1'b1;
+      rdA_set_q <= '1; rdA_way_q <= '1;
+      rdB_set_q <= '1; rdB_way_q <= '1;
     end else begin
       rdA_set_q <= ic_rd_setA; rdA_way_q <= ic_rd_wayA;
       rdB_set_q <= ic_rd_setB; rdB_way_q <= ic_rd_wayB;
@@ -3002,7 +3037,7 @@ module core
   // post-fill way change. ic_byte (below) does the matching content-addressed select.
   logic ic_fa_avail, ic_fb_avail, ic_win_straddle;
   always_comb begin
-    logic [IC_IDXW-1:0] fa_set, fb_set; logic fa_way, fb_way;
+    logic [IC_IDXW-1:0] fa_set, fb_set; logic [IC_WAYW-1:0] fa_way, fb_way;
     fa_set = flin[5 +: IC_IDXW];        fa_way = ic_hit_way(flin);
     fb_set = flin_nl[5 +: IC_IDXW];     fb_way = ic_hit_way(flin_nl);
     ic_fa_avail = (rdA_set_q==fa_set && rdA_way_q==fa_way)
@@ -3394,7 +3429,7 @@ module core
       fold_pending_r<=1'b0; fold_pc_r<=32'd0;   // M7.1: no folded syscall in flight
       // (fpr[] cleared in u_fpu_state's rst_n arm.)
       // M4 pipeline state.
-      pf_fill_addr<=32'd0; pf_word<=3'd0; pf_fill_way<=1'b0;
+      pf_fill_addr<=32'd0; pf_word<=3'd0; pf_fill_way<='0;
       agi_wr0<=9'h100; agi_wr1<=9'h100; mispred_bubbles<=3'd0;
       // M5 cycle-accuracy state.
       core_cyc<=32'd0; fp_ready_cyc<=32'd0; pending_mem_pen<=7'd0; stall_cnt<=7'd0;
@@ -4323,7 +4358,7 @@ module core
     dc_lu_addr = dc_acc_addr;
   end
 
-  dcache_timing #(.DC_SETS(DC_SETS)) u_dcache_tm (
+  dcache_timing #(.DC_SETS(DC_SETS), .DC_WAYS(DC_WAYS)) u_dcache_tm (
     .clk       (clk),
     .rst_n     (rst_n),
     .lu_addr   (dc_lu_addr),
@@ -4338,11 +4373,12 @@ module core
   // are read PRE-edge through u_icache's READ-ONLY outputs (ic_data_o/ic_tag_o/
   // ic_val_o/ic_lru_o), which the ic_present/ic_hit_way/ic_byte probes consume
   // UNCHANGED. The spine OWNS the fill SEQUENCING (pf_fill_addr/pf_fill_way/pf_word
-  // + the ~ic_lru_o victim) and drives the single fill word + up-to-3 LRU touches
+  // + the ic_victim_o LRU victim) and drives the single fill word + up-to-3 LRU touches
   // here, exactly mirroring the original inline NBA sites (same arm guards, same
   // addresses, same textual U->straddle->V last-write-wins order).
   // ===========================================================================
-  logic        ic_fill_en, ic_fill_done, ic_fill_way;
+  logic        ic_fill_en, ic_fill_done;
+  logic [IC_WAYW-1:0] ic_fill_way;
   logic [IC_IDXW-1:0]  ic_fill_set;
   logic [4:0]  ic_fill_off;
   logic [31:0] ic_fill_data;
@@ -4373,7 +4409,7 @@ module core
     ic_fill_en   = 1'b0;
     ic_fill_done = 1'b0;
     ic_fill_set  = '0;
-    ic_fill_way  = 1'b0;
+    ic_fill_way  = '0;
     ic_fill_off  = 5'd0;
     ic_fill_data = 32'd0;
     ic_fill_tag  = '0;
@@ -4387,11 +4423,11 @@ module core
       ic_fill_done = (pf_word==3'd7);
       ic_fill_tag  = pf_fill_addr[5+IC_IDXW +: IC_TAGW];
     end else if (ic_pf_miss_fill) begin
-      // S_PIPE-miss word 0 into the not-MRU victim (~ic_lru_o, PRE-edge). NOT a
+      // S_PIPE-miss word 0 into the LRU victim (ic_victim_o, PRE-edge). NOT a
       // completing fill — tag/val/MRU land when S_PF reaches word 7 (pf_fill_*).
       ic_fill_en   = 1'b1;
       ic_fill_set  = pf_miss_fa[5 +: IC_IDXW];
-      ic_fill_way  = ~ic_lru_o[pf_miss_fa[5 +: IC_IDXW]];
+      ic_fill_way  = ic_victim_o[pf_miss_fa[5 +: IC_IDXW]];
       ic_fill_off  = 5'd0;
       ic_fill_data = mem_rdata;
     end
@@ -4447,7 +4483,7 @@ module core
     end
   end
 
-  icache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE)) u_icache (
+  icache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE), .IC_WAYS(IC_WAYS)) u_icache (
     .clk       (clk),
     .rst_n     (rst_n),
     .rd_setA   (ic_rd_setA),
@@ -4458,7 +4494,7 @@ module core
     .rd_lineB  (ic_rd_lineB),
     .ic_tag_o  (ic_tag_o),
     .ic_val_o  (ic_val_o),
-    .ic_lru_o  (ic_lru_o),
+    .ic_victim_o (ic_victim_o),
     .fill_en   (ic_fill_en),
     .fill_set  (ic_fill_set),
     .fill_way  (ic_fill_way),

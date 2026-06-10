@@ -65,11 +65,11 @@
             // burned a non-fetching detection clock before the 8 fill clocks -> 9).
             // The word-0 write into ic_data lands in the icache module via the
             // ic_fill_* driver below (set=pf_miss_fa[11:5], way=victim, off=0). The
-            // victim (~ic_lru_o, the PRE-edge not-MRU way) is computed HERE in the
+            // victim (ic_victim_o, the PRE-edge LRU way) is computed HERE in the
             // spine and latched into pf_fill_way so S_PF fills words 1..7 + the
             // fill-complete MRU into the SAME way (the module never recomputes it).
             pf_fill_addr <= pf_miss_fa;
-            pf_fill_way  <= ~ic_lru_o[pf_miss_fa[11:5]];
+            pf_fill_way  <= ic_victim_o[pf_miss_fa[5 +: IC_IDXW]];
             pf_word<=3'd1; state<=S_PF;
 `ifdef VEN_L1_AXI
           end else if (!pipe_bytes_ok) begin
