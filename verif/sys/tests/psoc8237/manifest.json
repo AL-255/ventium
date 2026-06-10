@@ -1,0 +1,36 @@
+{
+  "name": "psoc8237",
+  "kind": "system",
+  "src": "psoc8237.S",
+  "linker": "psoc8237.ld",
+  "image": "psoc8237.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 250,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-dma-gate.sh",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "8237 master reset (OUT 0x0D), then reads: status(0x08)=0x00, mask(0x09)=0xFF",
+    "channel-0 base ADDRESS round-trip via the flip-flop: clear ff (0x0C), write 0x34 then 0x12 to 0x00 (LSB/MSB; the MSB write runs init_chan so now[ADDR]=base), clear ff, read 0x00 twice -> 0x34/0x12",
+    "channel-0 base COUNT round-trip: write 0x78/0x56 to 0x01, read back 0x78/0x56 (count = base[COUNT]-now[COUNT], now[COUNT]=0)",
+    "mode write (OUT 0x0B=0x45) inert (no read-back); mask: clear-all (OUT 0x0E)->read 0x09=0x00, single-mask set ch1 (OUT 0x0A=0x05)->read 0x09=0x02, write-all (OUT 0x0F=0x0A)->read 0x09=0x0A",
+    "page registers: OUT 0x81=0xAB (ch2) / 0x83=0xCD (ch1) / 0x87=0xEF (ch0), read back identical",
+    "isa-debug-exit code 133"
+  ],
+
+  "why_per_record_differential": "psoc8237 has NO interrupts and NO DMA transfer — the request register (0x09 write) is never used and no channel is left unmasked with a pending request, so now[COUNT] stays 0 and i8257_dma_run never attempts a transfer. Every interaction is a synchronous IN/OUT, so qemu's gdbstub single-step (gen_trace.py --system) is a valid per-record oracle and the gate is plain compare.py EQUIVALENT, running on ventium_soc with the M8.7 ven_i8237. compare.py --mode func grades GPRs per retired instruction, so the IN read-backs into eax are directly diffable.",
+
+  "determinism_contract": "Models the CPU-visible 8237A register surface of controller 0 (channels 0-3, ports 0x00-0x0F) + the AT page registers it owns (0x81->ch2, 0x82->ch3, 0x83->ch1, 0x87->ch0): the channel base address/count accessed LSB-then-MSB through the shared flip-flop (the MSB write runs init_chan, so a write-then-read ROUND-TRIPS), the status register (read-clears the low nibble), the mask register (read at 0x09; set via single/clear-all/write-all), the mode/command registers (write-only, no read-back), and the flip-flop clear/master-reset. EXCLUDED from the differential (oracle boundary, like the 8042 OBF host-queue): the actual DMA memory transfer (i8257_dma_run / transfer_handler), DREQ/DACK signalling, and terminal-count generation — they need a peripheral asserting DREQ + a host-clock loop the single-step golden cannot reproduce. The secondary controller (0xC0-0xDF, channels 4-7) is a follow-up.",
+
+  "comparison_plan": "verif/soc/run-soc-dma-gate.sh: builds psoc8237.bin + the ventium_soc --soc TB, confirms the image reaches isa-debug-exit (133) under qemu-system-i386, regenerates the per-record golden via gen_trace.py --system (drift-checked vs the committed psoc8237.sys.vtrace.golden), runs ventium_soc on the image, and diffs the two streams with compare.py --mode func -> EQUIVALENT over all retired instructions. EQUIVALENT = the 8237A controller-0 register behaviour is byte-identical to qemu-system-i386 8.2.2.",
+
+  "description": "Bare-metal M8.7 Intel 8237A DMA controller differential (NO paging, NO interrupts, NO DMA transfer). Boots real->protected, then synchronously exercises the primary DMA controller (channels 0-3, ports 0x00-0x0F) + AT page registers (0x81/0x83/0x87) that M8.7 wires into ventium_soc (ven_i8237): reset status/mask values, channel-0 base address+count round-trip through the LSB/MSB flip-flop (the MSB write runs init_chan so the read-back matches), the mask register via clear-all/single/write-all, and the page registers. Graded PER-RECORD against the qemu-system-i386 single-step golden. The actual DMA transfer / DREQ / DACK / TC is a documented oracle boundary. Completes the legacy PC chipset's DMA controller toward a fully bootable system."
+}

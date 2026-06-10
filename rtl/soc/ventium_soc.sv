@@ -318,6 +318,7 @@ module ventium_soc
   // ===========================================================================
   logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
   logic        cs_uart;                     // M8.5 COM1 UART (0x3F8..0x3FF)
+  logic        cs_dma;                       // M8.7 8237 DMA ctrl0 (0x00-0x0F + pages)
   logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
   logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
   logic        cs_bmide;                    // M8.4f: bus-master IDE register block
@@ -346,6 +347,14 @@ module ventium_soc
     // The 8-register command block at 0x3F8..0x3FF (ISA IRQ4). Full window
     // selected; the device resolves the offset (addr[2:0]) + DLAB banking.
     cs_uart   = io_req && (io_addr >= 16'h03F8 && io_addr <= 16'h03FF);
+    // ---- M8.7 8237 DMA controller 0 (channels 0-3) + AT page registers ----
+    // Ports 0x00-0x0F (channel + control block) + the page registers qemu's
+    // i8257 actually services (0x81/0x82/0x83/0x87 -> ch2/3/1/0). The unmapped
+    // page ports (0x80/0x84-0x86) are NOT claimed (left to the default decode,
+    // unchanged), matching qemu's portio registration exactly.
+    cs_dma    = io_req && ((io_addr <= 16'h000F) ||
+                           io_addr == 16'h0081 || io_addr == 16'h0082 ||
+                           io_addr == 16'h0083 || io_addr == 16'h0087);
     // ---- M8.4 IDE/ATA primary channel -------------------------------------
     // Command block 0x1F0-0x1F7 + control block 0x3F6 (primary master, PIO).
     // The secondary channel (0x170-0x177/0x376) is decoded below (M8.4e).
@@ -380,6 +389,7 @@ module ventium_soc
   logic [7:0] vga_rdata;       // M8.3 VGA register-file byte read
   logic [7:0] acpipm_rdata;    // M8.3 ACPI PM byte view (unused on the diff path)
   logic [7:0] uart_rdata;      // M8.5 COM1 UART byte read
+  logic [7:0] dma_rdata;       // M8.7 8237 DMA byte read
   logic       uart_irq4;       // M8.5 COM1 -> master PIC IR4
   logic       uart_tx_valid;   // M8.5 THR-written strobe (board console seam)
   logic [7:0] uart_tx_data;
@@ -505,6 +515,22 @@ module ventium_soc
       .tx_data   (uart_tx_data),
       .rx_valid  (1'b0),
       .rx_data   (8'h00)
+  );
+
+  // ===========================================================================
+  // M8.7 Intel 8237A DMA controller 0 (channels 0-3) + AT page registers. The
+  // synchronous register surface (channel addr/count via the flip-flop, command/
+  // status/mask/mode, page regs) is per-record differentiable vs qemu-system
+  // (`psoc8237`); the actual DMA transfer / DREQ / TC is the oracle boundary.
+  // ===========================================================================
+  ven_i8237 u_dma (
+      .clk   (clk),
+      .rst   (dev_rst),
+      .cs    (cs_dma),
+      .we    (io_we),
+      .addr  (io_addr),
+      .wdata (io_wdata[7:0]),
+      .rdata (dma_rdata)
   );
 
   // ===========================================================================
@@ -777,6 +803,7 @@ module ventium_soc
     else if (cs_i8042)  io_rdata = {24'd0, kbd_rdata};
     else if (cs_port92) io_rdata = {24'd0, p92_rdata};
     else if (cs_uart)   io_rdata = {24'd0, uart_rdata};   // M8.5 COM1
+    else if (cs_dma)    io_rdata = {24'd0, dma_rdata};    // M8.7 8237 DMA
     else if (cs_vga)    io_rdata = {24'd0, vga_rdata};
     // ACPI PM: return the native 32-bit value ({8'h0,count[23:0]}) so a future
     // dword IN reads the counter. Off the differential surface (never read by

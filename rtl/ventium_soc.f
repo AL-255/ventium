@@ -59,6 +59,8 @@ soc/ven_vgaregs.sv
 soc/ven_acpipm.sv
 // M8.6 VGA mode-13h chain-4 framebuffer (64 KiB VRAM @ 0xA0000):
 soc/ven_vga_fb.sv
+// M8.7 Intel 8237A DMA controller 0 (0x00-0x0F + page regs):
+soc/ven_i8237.sv
 // M8.4 IDE/ATA controller (primary master, PIO):
 soc/ven_ide.sv
 // M8.5 NS16550A COM1 serial UART (0x3F8-0x3FF, IRQ4):
