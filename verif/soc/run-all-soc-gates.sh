@@ -39,6 +39,7 @@ GATES=(
   "psocuart (M8.5 COM1 NS16550A UART)|verif/soc/run-soc-uart-gate.sh"
   "pvgafb  (M8.6 VGA mode-13h chain-4 framebuffer)|verif/soc/run-soc-vgafb-gate.sh"
   "psoc8237 (M8.7 8237A DMA controller ctrl0)|verif/soc/run-soc-dma-gate.sh"
+  "psoc8237b (M8.8 8237A DMA controller ctrl1)|verif/soc/run-soc-dma2-gate.sh"
   "pboot   (M9 first boot: chain-load from disk)|verif/soc/run-soc-boot-gate.sh"
   "pbootdma (M9b first boot: DMA chain-load)|verif/soc/run-soc-bootdma-gate.sh"
   "pbootrm  (M9-rm canonical real-mode boot @0000:7C00)|verif/soc/run-soc-bootrm-gate.sh"

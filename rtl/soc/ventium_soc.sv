@@ -319,6 +319,7 @@ module ventium_soc
   logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
   logic        cs_uart;                     // M8.5 COM1 UART (0x3F8..0x3FF)
   logic        cs_dma;                       // M8.7 8237 DMA ctrl0 (0x00-0x0F + pages)
+  logic        cs_dma2;                      // M8.8 8237 DMA ctrl1 (0xC0-0xDF + pages)
   logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
   logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
   logic        cs_bmide;                    // M8.4f: bus-master IDE register block
@@ -355,6 +356,15 @@ module ventium_soc
     cs_dma    = io_req && ((io_addr <= 16'h000F) ||
                            io_addr == 16'h0081 || io_addr == 16'h0082 ||
                            io_addr == 16'h0083 || io_addr == 16'h0087);
+    // ---- M8.8 secondary 8237 (ctrl 1, channels 4-7, dshift=1) -------------
+    // Channel+control block 0xC0-0xDF (registers 2-apart) + page regs at
+    // 0x89/0x8A/0x8B/0x8F. Because dshift=1 cancels (init_chan <<1 vs read >>1),
+    // the CPU-visible behaviour is identical to ctrl0 — a second ven_i8237 sees
+    // the NORMALIZED address (0xC0-0xDF -> 0x00-0x0F via (a-0xC0)>>1; the page
+    // ports -> 0x81/0x82/0x83/0x87 via 0x80|(a&7)).
+    cs_dma2   = io_req && ((io_addr >= 16'h00C0 && io_addr <= 16'h00DF) ||
+                           io_addr == 16'h0089 || io_addr == 16'h008A ||
+                           io_addr == 16'h008B || io_addr == 16'h008F);
     // ---- M8.4 IDE/ATA primary channel -------------------------------------
     // Command block 0x1F0-0x1F7 + control block 0x3F6 (primary master, PIO).
     // The secondary channel (0x170-0x177/0x376) is decoded below (M8.4e).
@@ -389,7 +399,8 @@ module ventium_soc
   logic [7:0] vga_rdata;       // M8.3 VGA register-file byte read
   logic [7:0] acpipm_rdata;    // M8.3 ACPI PM byte view (unused on the diff path)
   logic [7:0] uart_rdata;      // M8.5 COM1 UART byte read
-  logic [7:0] dma_rdata;       // M8.7 8237 DMA byte read
+  logic [7:0] dma_rdata;       // M8.7 8237 DMA ctrl0 byte read
+  logic [7:0] dma2_rdata;      // M8.8 8237 DMA ctrl1 byte read
   logic       uart_irq4;       // M8.5 COM1 -> master PIC IR4
   logic       uart_tx_valid;   // M8.5 THR-written strobe (board console seam)
   logic [7:0] uart_tx_data;
@@ -531,6 +542,22 @@ module ventium_soc
       .addr  (io_addr),
       .wdata (io_wdata[7:0]),
       .rdata (dma_rdata)
+  );
+
+  // M8.8 secondary controller — same module, NORMALIZED address (dshift cancels).
+  logic [15:0] dma2_addr;
+  // page ports are 0x89/0x8A/0x8B/0x8F (< 0xC0); chan/cont is 0xC0-0xDF. (Both have
+  // bit7=1, so use the 0xC0 boundary, not bit7, to tell them apart.)
+  assign dma2_addr = (io_addr < 16'h00C0) ? (16'h0080 | {13'd0, io_addr[2:0]})  // page -> 0x8x
+                                          : {12'd0, 4'((io_addr - 16'h00C0) >> 1)}; // chan/cont -> 0x0x
+  ven_i8237 u_dma2 (
+      .clk   (clk),
+      .rst   (dev_rst),
+      .cs    (cs_dma2),
+      .we    (io_we),
+      .addr  (dma2_addr),
+      .wdata (io_wdata[7:0]),
+      .rdata (dma2_rdata)
   );
 
   // ===========================================================================
@@ -803,7 +830,8 @@ module ventium_soc
     else if (cs_i8042)  io_rdata = {24'd0, kbd_rdata};
     else if (cs_port92) io_rdata = {24'd0, p92_rdata};
     else if (cs_uart)   io_rdata = {24'd0, uart_rdata};   // M8.5 COM1
-    else if (cs_dma)    io_rdata = {24'd0, dma_rdata};    // M8.7 8237 DMA
+    else if (cs_dma)    io_rdata = {24'd0, dma_rdata};    // M8.7 8237 DMA ctrl0
+    else if (cs_dma2)   io_rdata = {24'd0, dma2_rdata};   // M8.8 8237 DMA ctrl1
     else if (cs_vga)    io_rdata = {24'd0, vga_rdata};
     // ACPI PM: return the native 32-bit value ({8'h0,count[23:0]}) so a future
     // dword IN reads the counter. Off the differential surface (never read by
