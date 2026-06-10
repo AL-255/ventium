@@ -41,7 +41,7 @@ GATES=(
   "psoc8237 (M8.7 8237A DMA controller ctrl0)|verif/soc/run-soc-dma-gate.sh"
   "psoc8237b (M8.8 8237A DMA controller ctrl1)|verif/soc/run-soc-dma2-gate.sh"
   "psocfdc  (M8.9 82077 floppy disk controller)|verif/soc/run-soc-fdc-gate.sh"
-  "ps-uart  (PS-offload UART C model cosim)|verif/soc/run-soc-uart-ps-gate.sh"
+  "ps-cosims (PS-offload C models: uart/rtc/i8042/acpipm/fdc/vga)|verif/soc/run-soc-ps-cosim-all.sh"
   "pboot   (M9 first boot: chain-load from disk)|verif/soc/run-soc-boot-gate.sh"
   "pbootdma (M9b first boot: DMA chain-load)|verif/soc/run-soc-bootdma-gate.sh"
   "pbootrm  (M9-rm canonical real-mode boot @0000:7C00)|verif/soc/run-soc-bootrm-gate.sh"

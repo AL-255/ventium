@@ -14,11 +14,15 @@ set -euo pipefail
 DEV="${1:-uart}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# dev -> (PS define, test name). Extend as C models land.
+# dev -> (PS define, the per-record test that exercises it).
 case "$DEV" in
-  uart) DEFINE=VEN_UART_PS;   TEST=psocuart ;;
-  rtc)  DEFINE=VEN_RTC_PS;    TEST=psocdev  ;;
-  *) echo "unknown dev '$DEV' (uart|rtc|...)"; exit 2 ;;
+  uart)   DEFINE=VEN_UART_PS;   TEST=psocuart ;;
+  rtc)    DEFINE=VEN_RTC_PS;    TEST=psocdev  ;;
+  i8042)  DEFINE=VEN_I8042_PS;  TEST=psocdev  ;;
+  acpipm) DEFINE=VEN_ACPIPM_PS; TEST=pvga     ;;
+  fdc)    DEFINE=VEN_FDC_PS;    TEST=psocfdc  ;;
+  vga)    DEFINE=VEN_VGA_PS;    TEST=pvga     ;;
+  *) echo "unknown dev '$DEV' (uart|rtc|i8042|acpipm|fdc|vga)"; exit 2 ;;
 esac
 
 QSYS="$REPO/ventium-refs/07-p5-emulation-harness/build/qemu/build-sys/qemu-system-i386"

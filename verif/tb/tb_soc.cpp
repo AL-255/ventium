@@ -57,6 +57,11 @@
 // — the ctor is declared with default (matching-compiler) linkage on each side.
 #include "../../sw/ps_periph/ven_periph.h"
 ven_periph_t* ven_uart16550_new(void);
+ven_periph_t* ven_rtc_new(void);
+ven_periph_t* ven_i8042_new(void);
+ven_periph_t* ven_acpipm_new(void);
+ven_periph_t* ven_i8272_new(void);
+ven_periph_t* ven_vgaregs_new(void);
 
 namespace {
 
@@ -187,6 +192,11 @@ int main(int argc, char** argv) {
     // are simply never called). The board uses the same models via ven_soc_axil.
     std::vector<PsDev> ps_devs;
     ps_devs.push_back({ ven_uart16550_new(), 0x3F8, 0x3FF });  // COM1 16550
+    ps_devs.push_back({ ven_rtc_new(),       0x070, 0x071 });  // MC146818 RTC
+    ps_devs.push_back({ ven_i8042_new(),     0x060, 0x064 });  // 8042 kbd/mouse
+    ps_devs.push_back({ ven_acpipm_new(),    0x608, 0x608 });  // ACPI PM timer
+    ps_devs.push_back({ ven_i8272_new(),     0x3F1, 0x3F7 });  // 82077 FDC (0x3F6=IDE never forwarded)
+    ps_devs.push_back({ ven_vgaregs_new(),   0x3B0, 0x3DF });  // VGA register file
     for (auto& d : ps_devs) d.dev->reset(d.dev);
     top->io_ps_rdata = 0;
     top->io_ps_ack   = 0;

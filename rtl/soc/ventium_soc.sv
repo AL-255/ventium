@@ -479,6 +479,7 @@ module ventium_soc
   // TIME-INVARIANT registers (REG_D=0x80, REG_B, index-read=0xFF, a scratch CMOS
   // byte round-trip), never the time bytes / REG_A.UIP / REG_C flags, so the
   // tick can never perturb the per-record compare.
+`ifndef VEN_RTC_PS
   ven_rtc #(.TICK_DIV(32'd1_193_182)) u_rtc (
       .clk         (clk),
       .rst         (dev_rst),
@@ -490,6 +491,9 @@ module ventium_soc
       .irq8        (rtc_irq8),
       .nmi_disable (rtc_nmi_dis)
   );
+`else  // RTC on PS: the 0x70/0x71 range forwards to ven_rtc.c via the io-bridge.
+  assign rtc_rdata = 8'h00; assign rtc_irq8 = 1'b0; assign rtc_nmi_dis = 1'b0;
+`endif
 
   // 8042 PS/2 keyboard controller at 0x60 (data) / 0x64 (cmd/status).  Drives
   // IRQ1/IRQ12 + the A20 line (output-port bit1) + a CPU-reset request.  Its
@@ -500,6 +504,7 @@ module ventium_soc
   // observed through the A20 mask, plus command writes that retire identically.
   // The OBF/data read path is covered by the standalone unit self-check — a
   // documented oracle boundary, like the LAPIC-eax-only / SMM-infeasible ones.
+`ifndef VEN_I8042_PS
   ven_i8042 u_i8042 (
       .clk       (clk),
       .rst       (dev_rst),
@@ -513,6 +518,13 @@ module ventium_soc
       .a20_gate  (kbc_a20),
       .reset_req (kbd_reset_req)
   );
+`else  // 8042 on PS: 0x60/0x64 forward to ven_i8042.c. NOTE the A20 gate output is
+  // a PL-consumed signal — on the board the PS must drive the i8042 A20 state back
+  // to eff_a20; here it ties off (port-92 still gates A20 in the diff, which drives
+  // both A20 sources together, so the A20-mask test tracks port-92).
+  assign kbd_rdata = 8'h00; assign kbd_irq1 = 1'b0; assign mouse_irq12 = 1'b0;
+  assign kbc_a20 = 1'b0;    assign kbd_reset_req = 1'b0;
+`endif
 
   // Port-92 "fast A20" / System Control Port A at 0x92.
   ven_port92 u_port92 (
@@ -573,6 +585,7 @@ module ventium_soc
   );
 
   // M8.9 floppy disk controller (82077) — 0x3F1-0x3F5 + 0x3F7.
+`ifndef VEN_FDC_PS
   ven_i8272 u_fdc (
       .clk   (clk),
       .rst   (dev_rst),
@@ -583,6 +596,9 @@ module ventium_soc
       .rdata (fdc_rdata),
       .irq   (fdc_irq6)
   );
+`else  // FDC on PS: 0x3F1-0x3F5+0x3F7 forward to ven_i8272.c.
+  assign fdc_rdata = 8'h00; assign fdc_irq6 = 1'b0;
+`endif
 
   // M8.8 secondary controller — same module, NORMALIZED address (dshift cancels).
   logic [15:0] dma2_addr;
@@ -612,6 +628,7 @@ module ventium_soc
   // (state-machine, not host-clock), and cs pulses exactly one clock per S_IO
   // access (io_ack=io_req), so the read side-effects commit exactly once.
   logic [7:0] vga_seq_plane_mask, vga_seq_mem_mode, vga_gfx_mode, vga_gfx_misc;
+`ifndef VEN_VGA_PS
   ven_vgaregs u_vga (
       .clk    (clk),
       .rst    (dev_rst),
@@ -625,6 +642,14 @@ module ventium_soc
       .o_gfx_mode       (vga_gfx_mode),
       .o_gfx_misc       (vga_gfx_misc)
   );
+`else  // VGA registers on PS: 0x3B0-0x3DF forward to ven_vgaregs.c. The mode bits
+  // feed the RTL chain-4 framebuffer (ven_vga_fb) — on the board the PS must drive
+  // them back; here they tie off (chain4_en=0 -> the FB is dormant, which is fine
+  // for the pvga register diff, but VGA-regs-PS + framebuffer-RTL needs the PS path).
+  assign vga_rdata = 8'h00;
+  assign vga_seq_plane_mask = 8'h00; assign vga_seq_mem_mode = 8'h00;
+  assign vga_gfx_mode = 8'h00;       assign vga_gfx_misc = 8'h00;
+`endif
 
   // ===========================================================================
   // M8.6 VGA mode-13h CHAIN-4 framebuffer (ven_vga_fb) — 64 KiB VRAM @ 0xA0000.
@@ -670,6 +695,7 @@ module ventium_soc
   // value is a documented oracle boundary (host-clock-derived + qemu's default
   // PM region disabled — see the M8.3 header note), covered by the standalone
   // ven_acpipm unit self-check.  Quiescent in the pvga differential.
+`ifndef VEN_ACPIPM_PS
   ven_acpipm u_acpipm (
       .clk     (clk),
       .rst     (dev_rst),
@@ -680,6 +706,9 @@ module ventium_soc
       .rdata   (acpipm_rdata),
       .rdata32 (acpipm_rdata32)
   );
+`else  // ACPI PM on PS: 0x608 forwards to ven_acpipm.c.
+  assign acpipm_rdata = 8'h00; assign acpipm_rdata32 = 32'd0;
+`endif
 
   // ===========================================================================
   // M8.4 IDE/ATA controller — primary channel, MASTER (unit 0), PIO mode.

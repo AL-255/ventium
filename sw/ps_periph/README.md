@@ -46,14 +46,21 @@ no-arg wrapper the soc-gate aggregate runs.)
 3. Flip the device to `ps` in `fpga/periph_split.config`.
 4. `bash verif/soc/run-soc-ps-cosim-gate.sh <dev>` → EQUIVALENT.
 
-## Status
+## Status — all slow peripherals have a verified C model
 
-| device | placement | C model | cosim |
-|--------|-----------|---------|-------|
-| uart   | **ps**    | ✅ `ven_uart16550.c` | ✅ EQUIVALENT (110) |
+| device | placement | C model | cosim gate |
+|--------|-----------|---------|------------|
+| uart   | **ps** | `ven_uart16550.c` | ✅ EQUIVALENT (110) |
+| rtc    | **ps** | `ven_rtc.c`        | ✅ EQUIVALENT (122) |
+| i8042  | **ps** | `ven_i8042.c`      | ✅ EQUIVALENT (122) |
+| acpipm | **ps** | `ven_acpipm.c`     | ✅ EQUIVALENT (292) |
+| vga    | **ps** | `ven_vgaregs.c`    | ✅ EQUIVALENT (292) |
+| fdc    | **ps** | `ven_i8272.c`      | ✅ EQUIVALENT (116) |
 | pic/pit/port92/ide/dma/dma2 | rtl | — (bus-critical, stay in PL) | — |
-| rtc/i8042/vga/acpipm/fdc | rtl (→ps) | pending C model | — |
 
-The framework + the io-bridge seam are verified end-to-end on the UART; the
-remaining slow peripherals move to PS as their C models land (mechanical ports,
-each proven by the same cosim gate).
+`bash verif/soc/run-soc-ps-cosim-all.sh` runs every cosim. Each EQUIVALENT means
+the C model is byte-identical to qemu over every retired instruction — the same
+bar the RTL module met. The default all-RTL build is unchanged (`make verify`
+77/77; the io-bridge seam is inert). Three devices have a PL-consumed output
+(8042 A20 gate, VGA mode bits, device IRQs) that needs the PS→PL path on the
+board — see the Sphinx page *SoC peripherals — configurable RTL/software split*.

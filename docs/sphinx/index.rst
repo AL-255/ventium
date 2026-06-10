@@ -55,6 +55,12 @@ issue to and why*, and an honest implementation status.
    microarch/l1-parametric
 
 .. toctree::
+   :maxdepth: 2
+   :caption: SoC / Peripherals
+
+   soc/peripheral-split
+
+.. toctree::
    :maxdepth: 1
    :caption: Project resources
 
