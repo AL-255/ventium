@@ -66,3 +66,4 @@ __pycache__/
 # editor
 *.swp
 .DS_Store
+verif/tb/ps_periph_table.inc
