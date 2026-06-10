@@ -51,6 +51,7 @@ issue to and why*, and an honest implementation status.
    :caption: Microarchitecture deep dives
 
    microarch/srt-divider
+   microarch/l1-cache-performance
 
 .. toctree::
    :maxdepth: 1
