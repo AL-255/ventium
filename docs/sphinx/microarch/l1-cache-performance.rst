@@ -119,14 +119,16 @@ the shipping cache exactly.
 Panel B — resolving the knee (and the 2-way fingerprint)
 ========================================================
 
-The cache size is **quantized**: with a fixed 2-way / 32-byte-line geometry the
-set count must be a power of two (the index is a clean bit-slice,
-``addr[5 +: $clog2(SETS)]``), so the only buildable D-caches are 16 KB, 32 KB,
-64 KB… There is no 20 KB or 24 KB cache to build without changing
-*associativity*, which would mean rewriting the LRU/victim logic. But the knee
-is governed by **working set ÷ capacity**, so it can be resolved at arbitrary
-resolution by the dual experiment: hold the cache fixed and sweep the *working
-set* (just recompiled ``mb_dmiss`` variants — no RTL rebuild).
+The cache size is **quantized**: with a 32-byte line the set count and the
+associativity are each a power of two (the index is a clean bit-slice,
+``addr[5 +: $clog2(SETS)]``), so a D-cache size is always ``sets × ways × 32 B``
+with both factors powers of two — there is no *arbitrary* 20 KB or 24 KB point.
+Associativity itself **is** now a compile-time knob (``VEN_L1_WAYS`` — see
+:doc:`l1-parametric`), which adds geometry points (e.g. 128 sets at 2/4/8-way =
+8/16/32 KB), but the knee is most cleanly resolved by its **dual**: since it is
+governed by **working set ÷ capacity**, hold the cache fixed and sweep the
+*working set* at arbitrary resolution (just recompiled ``mb_dmiss`` variants — no
+RTL rebuild).
 
 Doing so at a fixed 16 KB cache exposes the internal structure the coarse sweep
 hid:

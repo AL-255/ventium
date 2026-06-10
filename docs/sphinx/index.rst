@@ -52,6 +52,7 @@ issue to and why*, and an honest implementation status.
 
    microarch/srt-divider
    microarch/l1-cache-performance
+   microarch/l1-parametric
 
 .. toctree::
    :maxdepth: 1
