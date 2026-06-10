@@ -156,6 +156,9 @@ module ventium_soc
     pic_irq_in        = 16'd0;
     pic_irq_in[0]     = pit_out0;
     pic_irq_in[1]     = kbd_irq1;
+    // M8.5 COM1 UART = ISA IRQ4. Quiescent on the differential path (IER=0 / no
+    // serial RX), like the IR1/IR8/IR12 precedent; live for board console use.
+    pic_irq_in[4]     = uart_irq4;
     pic_irq_in[8]     = rtc_irq8;
     pic_irq_in[12]    = mouse_irq12;
     // M8.4 primary IDE = ISA IRQ14 (pci.c port_info {0x1f0,0x3f6,14}). The pide
@@ -311,6 +314,7 @@ module ventium_soc
   // so the core never stalls.
   // ===========================================================================
   logic        cs_pic, cs_pit, cs_rtc, cs_i8042, cs_port92, cs_vga, cs_acpipm;
+  logic        cs_uart;                     // M8.5 COM1 UART (0x3F8..0x3FF)
   logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
   logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
   logic        cs_bmide;                    // M8.4f: bus-master IDE register block
@@ -335,6 +339,10 @@ module ventium_soc
     // read is a documented oracle boundary (see the M8.3 header note) — the pvga
     // differential never reads it, only the write-inert OUT 0x608 is exercised.
     cs_acpipm = io_req && (io_addr == 16'h0608);
+    // ---- M8.5 COM1 serial UART (NS16550A) ---------------------------------
+    // The 8-register command block at 0x3F8..0x3FF (ISA IRQ4). Full window
+    // selected; the device resolves the offset (addr[2:0]) + DLAB banking.
+    cs_uart   = io_req && (io_addr >= 16'h03F8 && io_addr <= 16'h03FF);
     // ---- M8.4 IDE/ATA primary channel -------------------------------------
     // Command block 0x1F0-0x1F7 + control block 0x3F6 (primary master, PIO).
     // The secondary channel (0x170-0x177/0x376) is decoded below (M8.4e).
@@ -368,6 +376,10 @@ module ventium_soc
   logic [7:0] p92_rdata;
   logic [7:0] vga_rdata;       // M8.3 VGA register-file byte read
   logic [7:0] acpipm_rdata;    // M8.3 ACPI PM byte view (unused on the diff path)
+  logic [7:0] uart_rdata;      // M8.5 COM1 UART byte read
+  logic       uart_irq4;       // M8.5 COM1 -> master PIC IR4
+  logic       uart_tx_valid;   // M8.5 THR-written strobe (board console seam)
+  logic [7:0] uart_tx_data;
   logic [31:0] acpipm_rdata32; // M8.3 ACPI PM native 32-bit value ({8'h0,count})
   logic [15:0] ide_rdata;      // M8.4 IDE: data-port word, else {8'h0,regbyte}
   logic [15:0] ide2_rdata;     // M8.4e secondary IDE (empty ATAPI CD)
@@ -467,6 +479,29 @@ module ventium_soc
       .rdata     (p92_rdata),
       .a20_gate  (p92_a20),
       .reset_req (p92_reset_req)
+  );
+
+  // ===========================================================================
+  // M8.5 COM1 serial UART (NS16550A) — 0x3F8..0x3FF, ISA IRQ4. The synchronous
+  // register surface is per-record differentiable vs qemu-system (`psocuart`);
+  // the RX/loopback/IRQ-delivery paths are the host-chardev oracle boundary (unit
+  // self-check). The tx/rx seam is the real board-console hook: tx_valid/tx_data
+  // stream THR bytes out (to a PS UART / FPGA pins) and rx_valid/rx_data feed
+  // received bytes in. No serial input on the diff path -> rx held quiescent.
+  // ===========================================================================
+  ven_uart16550 u_uart (
+      .clk       (clk),
+      .rst       (dev_rst),
+      .cs        (cs_uart),
+      .we        (io_we),
+      .addr      (io_addr),
+      .wdata     (io_wdata[7:0]),
+      .rdata     (uart_rdata),
+      .irq       (uart_irq4),
+      .tx_valid  (uart_tx_valid),
+      .tx_data   (uart_tx_data),
+      .rx_valid  (1'b0),
+      .rx_data   (8'h00)
   );
 
   // ===========================================================================
@@ -695,6 +730,7 @@ module ventium_soc
     else if (cs_rtc)    io_rdata = {24'd0, rtc_rdata};
     else if (cs_i8042)  io_rdata = {24'd0, kbd_rdata};
     else if (cs_port92) io_rdata = {24'd0, p92_rdata};
+    else if (cs_uart)   io_rdata = {24'd0, uart_rdata};   // M8.5 COM1
     else if (cs_vga)    io_rdata = {24'd0, vga_rdata};
     // ACPI PM: return the native 32-bit value ({8'h0,count[23:0]}) so a future
     // dword IN reads the counter. Off the differential surface (never read by
@@ -781,7 +817,8 @@ module ventium_soc
   // verilator lint_off UNUSED
   wire _unused_soc = &{1'b0, core_x87_touched, io_size, pit_rdata, pic_rdata,
                        core_cpu_hung, core_syscall_active, core_syscall_n,
-                       rtc_nmi_dis, p92_reset_req, kbd_reset_req, acpipm_rdata};
+                       rtc_nmi_dis, p92_reset_req, kbd_reset_req, acpipm_rdata,
+                       uart_tx_valid, uart_tx_data};
   // verilator lint_on UNUSED
 
 endmodule : ventium_soc

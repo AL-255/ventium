@@ -59,3 +59,5 @@ soc/ven_vgaregs.sv
 soc/ven_acpipm.sv
 // M8.4 IDE/ATA controller (primary master, PIO):
 soc/ven_ide.sv
+// M8.5 NS16550A COM1 serial UART (0x3F8-0x3FF, IRQ4):
+soc/ven_uart16550.sv

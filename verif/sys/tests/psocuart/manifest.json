@@ -1,0 +1,38 @@
+{
+  "name": "psocuart",
+  "kind": "system",
+  "src": "psocuart.S",
+  "linker": "psocuart.ld",
+  "image": "psocuart.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 250,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-uart-gate.sh",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "UART reset reads: LSR (0x3FD)=0x60 (TEMT|THRE), IIR (0x3FA)=0x01 (NO_INT)",
+    "SCR (0x3FF) round-trip 0x5A then 0xA5 (full byte scratch)",
+    "LCR (0x3FB) round-trip 0x03 (8N1, DLAB=0)",
+    "IER (0x3F9) round-trip 0x05 (mask 0x0F; bits RX-data+RX-line-status, never live), then 0x00",
+    "divisor latch via LCR.DLAB: write LCR=0x83, DLL(0x3F8)=0x0C, DLM(0x3F9)=0x01, read back 0x0C/0x01, LCR=0x03",
+    "MCR (0x3FC) round-trip 0x0F then 0xE7->0x07 (mask 0x1F), then 0x00",
+    "FCR (0x3FA) bit0=1 -> IIR reads 0xC1 (FIFO-enabled | NO_INT)",
+    "LSR re-read=0x60, THR (0x3F8) write 0x41 accepted (no HALT), isa-debug-exit code 133"
+  ],
+
+  "why_per_record_differential": "psocuart has NO interrupts — IER never enables a source whose condition is met (no RX data, no line errors, no modem delta), so IRQ4 is never raised — and every UART interaction is a synchronous IN/OUT. qemu's gdbstub single-step (gen_trace.py --system) is therefore a valid per-record oracle and the gate is plain compare.py EQUIVALENT, running on ventium_soc with the M8.5 UART.",
+
+  "determinism_contract": "Reads ONLY synchronous, host-clock/queue-independent UART state: the reset LSR/IIR values, register round-trips (SCR/LCR/IER/MCR with their write masks), the LCR.DLAB divisor-latch banking, and the FCR->IIR FIFO-enabled bits. EXCLUDED from the differential (host-chardev / transmit-timer dependent, not reproducible by a standalone register model): the async RX-data path (RBR / LSR.DR), the modem-status register MSR, loopback (MCR.LOOP), the TX-drain THRE/TEMT phase after a THR write, and IRQ4 delivery — documented oracle boundaries (like the 8042 OBF host-queue boundary), exercised instead by the board tx/rx seam.",
+
+  "comparison_plan": "verif/soc/run-soc-uart-gate.sh: builds psocuart.bin + the ventium_soc --soc TB, confirms the image reaches isa-debug-exit (133) under qemu-system-i386, regenerates the per-record golden via gen_trace.py --system (drift-checked vs the committed psocuart.sys.vtrace.golden), runs ventium_soc on the image, and diffs the two streams with compare.py --mode func -> EQUIVALENT over all retired instructions. EQUIVALENT = the NS16550A register read/write behaviour is byte-identical to qemu-system-i386 8.2.2.",
+
+  "description": "Bare-metal M8.5 COM1 UART (NS16550A) differential (NO paging, NO interrupts). Boots real->protected, then synchronously exercises the serial UART at 0x3F8..0x3FF that M8.5 wires into ventium_soc: reset LSR/IIR values, SCR/LCR/IER/MCR register round-trips with their write masks, LCR.DLAB divisor-latch banking (DLL/DLM), the FCR->IIR FIFO-enabled bits, and THR-write acceptance. Graded PER-RECORD against the qemu-system-i386 single-step golden. The async RX / loopback / MSR / IRQ4 paths are documented oracle boundaries off the differential surface (the board tx/rx seam). Proves the M8.5 UART wiring byte-identical to qemu over every retired instruction."
+}
