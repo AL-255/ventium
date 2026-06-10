@@ -58,6 +58,7 @@ issue to and why*, and an honest implementation status.
    :maxdepth: 2
    :caption: SoC / Peripherals
 
+   soc/theory-of-operation
    soc/peripheral-split
 
 .. toctree::
