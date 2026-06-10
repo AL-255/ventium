@@ -47,7 +47,13 @@
 
 module icache #(
     parameter int IC_SETS = 128,
-    parameter int IC_LINE = 32
+    parameter int IC_LINE = 32,
+    // Derived geometry: index width = log2(sets), tag width = 32-5-idx (the line
+    // offset is always 5 bits / 32 B). 128 sets => idx 7 / tag 20; the
+    // +VEN_CACHE_HALF variant passes IC_SETS=64 => idx 6 / tag 21. NOT overridden
+    // at instantiation — purely a function of IC_SETS.
+    parameter int IC_IDXW = $clog2(IC_SETS),
+    parameter int IC_TAGW = 32 - 5 - IC_IDXW
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -60,13 +66,13 @@ module icache #(
     // instead the data is read through TWO ADDRESSED async line ports (the
     // fetch window spans at most 2 consecutive 32-byte lines), so Vivado infers
     // distributed RAM. Behaviour/cycles are IDENTICAL (still same-cycle async).
-    input  logic [6:0]  rd_setA,        // line A = the fetch line (flin[11:5])
+    input  logic [IC_IDXW-1:0]  rd_setA, // line A = the fetch line (flin[idx])
     input  logic        rd_wayA,
     output logic [IC_LINE*8-1:0] rd_lineA,
-    input  logic [6:0]  rd_setB,        // line B = the next line (for straddles)
+    input  logic [IC_IDXW-1:0]  rd_setB, // line B = the next line (for straddles)
     input  logic        rd_wayB,
     output logic [IC_LINE*8-1:0] rd_lineB,
-    output logic [19:0] ic_tag_o  [IC_SETS][2],
+    output logic [IC_TAGW-1:0] ic_tag_o  [IC_SETS][2],
     output logic        ic_val_o  [IC_SETS][2],
     output logic        ic_lru_o  [IC_SETS],
 
@@ -75,7 +81,7 @@ module icache #(
     // sequenced by the spine (pf_fill_addr/pf_fill_way/pf_word for S_PF; pf_miss_fa
     // /victim/0 for the S_PIPE word-0 path). At most one fill/clock.
     input  logic        fill_en,
-    input  logic [6:0]  fill_set,
+    input  logic [IC_IDXW-1:0]  fill_set,
     input  logic        fill_way,
     input  logic [4:0]  fill_off,
     input  logic [31:0] fill_data,
@@ -83,21 +89,21 @@ module icache #(
     // ---- Fill complete (last word of an S_PF line, pf_word==7): allocate the
     // chosen victim way (tag/val) and mark it MRU. fill_done implies fill_en.
     input  logic        fill_done,
-    input  logic [19:0] fill_tag,
+    input  logic [IC_TAGW-1:0] fill_tag,
 
     // ---- Up to 3 confirmed-HIT LRU touch ports (U / U-straddle / V), applied in
     // textual order tch0 -> tch1 -> tch2 (LAST-WRITE-WINS for same-set touches).
     // Each scans the set's two ways and sets ic_lru[set] to the way that holds
     // tch*_tag — the old ic_touch(addr) with set=addr[11:5], tag=addr[31:12].
     input  logic        tch0_en,
-    input  logic [6:0]  tch0_set,
-    input  logic [19:0] tch0_tag,
+    input  logic [IC_IDXW-1:0]  tch0_set,
+    input  logic [IC_TAGW-1:0] tch0_tag,
     input  logic        tch1_en,
-    input  logic [6:0]  tch1_set,
-    input  logic [19:0] tch1_tag,
+    input  logic [IC_IDXW-1:0]  tch1_set,
+    input  logic [IC_TAGW-1:0] tch1_tag,
     input  logic        tch2_en,
-    input  logic [6:0]  tch2_set,
-    input  logic [19:0] tch2_tag
+    input  logic [IC_IDXW-1:0]  tch2_set,
+    input  logic [IC_TAGW-1:0] tch2_tag
 );
 
   // Data array as packed 256-bit lines, FLAT-indexed {set,way} for clean RAM
@@ -127,7 +133,7 @@ module icache #(
   (* ram_style = "distributed" *)
   logic [IC_LINE*8-1:0] ic_line [IC_SETS*2];
 `endif
-  logic [19:0] ic_tag  [IC_SETS][2];   // addr[31:12]
+  logic [IC_TAGW-1:0] ic_tag  [IC_SETS][2];   // addr[31:5+idx]
   logic        ic_val  [IC_SETS][2];
   logic        ic_lru  [IC_SETS];      // 2-way LRU: way most-recently-used (== D$)
 
@@ -171,7 +177,7 @@ module icache #(
 
   // LRU touch body (confirmed HIT): set the set's LRU to whichever of the two
   // ways holds `tag`. VERBATIM the old ic_touch() scan.
-  task automatic do_touch(input logic [6:0] set, input logic [19:0] tag);
+  task automatic do_touch(input logic [IC_IDXW-1:0] set, input logic [IC_TAGW-1:0] tag);
     for (int w=0; w<2; w++)
       if (ic_val[set][w] && ic_tag[set][w]==tag) ic_lru[set]<=w[0];
   endtask
@@ -183,7 +189,7 @@ module icache #(
       for (int s=0;s<IC_SETS;s++) begin
         ic_lru[s]<=1'b0;
         ic_val[s][0]<=1'b0; ic_val[s][1]<=1'b0;
-        ic_tag[s][0]<=20'd0; ic_tag[s][1]<=20'd0;
+        ic_tag[s][0]<='0; ic_tag[s][1]<='0;
       end
     end else begin
       // ---- per-word line fill (S_PF + S_PIPE word-0 path; one/clock) ----

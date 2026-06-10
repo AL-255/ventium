@@ -50,7 +50,8 @@ module uopcache
 #(
     parameter int IC_SETS = 128,
     parameter int IC_LINE = 32,
-    parameter int NSLOT   = 8        // fast-path insns covered per 32-byte line
+    parameter int NSLOT   = 8,       // fast-path insns covered per 32-byte line
+    parameter int IC_IDXW = $clog2(IC_SETS)  // set-index width (7 full / 6 half)
 ) (
     input  logic        clk,
     input  logic        rst_n,
@@ -58,13 +59,13 @@ module uopcache
     // ---- registered slot-read ports (mirror icache rd_lineA/rd_lineB timing:
     // present (set,way) on clock T, the slot line + byte->slot map are valid on
     // T+1).  Port A = flin's line; port B = the next (straddle) line.
-    input  logic [6:0]  rd_setA,
+    input  logic [IC_IDXW-1:0]  rd_setA,
     input  logic        rd_wayA,
     output fpd_t        rd_slotsA [NSLOT],
     output logic        rd_bvalidA [IC_LINE],   // byte-offset is an insn boundary
     output logic [2:0]  rd_bslotA  [IC_LINE],   // ...and maps to this slot
     output logic        rd_pdvalidA,            // this line has been predecoded
-    input  logic [6:0]  rd_setB,
+    input  logic [IC_IDXW-1:0]  rd_setB,
     input  logic        rd_wayB,
     output fpd_t        rd_slotsB [NSLOT],
     output logic        rd_bvalidB [IC_LINE],
@@ -75,7 +76,7 @@ module uopcache
     // 256-bit line (assembled from the S_PF burst) + its (set,way) + the EFLAGS /
     // cycle_mode the `decode` leaf needs (matches u_decode/v_decode inputs).
     input  logic         pd_start,
-    input  logic [6:0]   pd_set,
+    input  logic [IC_IDXW-1:0]   pd_set,
     input  logic         pd_way,
     input  logic [IC_LINE*8-1:0] pd_line,
     input  logic [31:0]  pd_flags,
@@ -83,7 +84,7 @@ module uopcache
     // invalidate a (set,way)'s predecode validity (refill/SMC) — the spine pulses
     // this on allocate so a stale predecode never reads back valid.
     input  logic         inv_en,
-    input  logic [6:0]   inv_set,
+    input  logic [IC_IDXW-1:0]   inv_set,
     input  logic         inv_way,
     output logic         pd_busy
 );
@@ -141,7 +142,7 @@ module uopcache
   logic [IC_LINE*8-1:0]  residual;     // line, shifted as bytes are consumed
   logic [5:0]            woff;         // current byte offset within the line (0..32)
   logic [3:0]            wslot;        // current slot index
-  logic [6:0]            wset; logic wway;
+  logic [IC_IDXW-1:0]     wset; logic wway;
   logic [31:0]           wflags; logic wcyc;
 
   // walker working buffers (written into the store on W_WRITE)

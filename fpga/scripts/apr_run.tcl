@@ -18,6 +18,16 @@ set CLK    [env_or CLK    15]
 set PART   [env_or PART   xck26-sfvc784-2LV-c]
 # OUTTAG lets a non-default PART write to its own build dir (e.g. apr_narrowb_full_zu15eg)
 set OUTTAG [env_or OUTTAG ""]
+# HALF=1 adds +VEN_CACHE_HALF (4 KB I$ + 4 KB D$, 64 sets) on top of CONFIG's DEFS
+# — the half-cache area/congestion experiment. Composes with either base config.
+set HALF   [env_or HALF   0]
+
+# THREADS: Vivado multithreading cap (default 8). The host has 32 cores, so bump
+# it. CAVEAT: synth_design caps internally at 8 threads regardless; place/route/
+# phys_opt/timing honor higher values but P&R is partly sequential, so 8->16
+# typically shaves ~10-25% off P&R wall-clock, NOT 2x. Range is 1..64 in 2025.2.
+set THREADS [env_or THREADS 16]
+set_param general.maxThreads $THREADS
 
 set ROOT [pwd]
 if {![file exists $ROOT/rtl/core/core.sv]} { set ROOT [file normalize [file join [file dirname [info script]] .. ..]] }
@@ -43,6 +53,7 @@ if {$CONFIG eq "uopcache"} {
 } else {
     set DEFS {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_BTB_PIPE VEN_IC_NARROWB}
 }
+if {$HALF} { lappend DEFS VEN_CACHE_HALF }
 set FLAT [expr {$MODE eq "view" ? "none" : "rebuilt"}]
 
 synth_design -top core -part $PART -mode out_of_context -include_dirs $RTL/core \
