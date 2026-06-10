@@ -71,17 +71,29 @@ report_design_analysis -congestion -file $OUT/congestion_placed.rpt
 write_checkpoint -force $OUT/placed.dcp
 puts "APR_${CONFIG}_${MODE}_PLACED_DONE"
 
-# ---- per-module placed-cell CSV (colored device view) ---------------------
+# ---- per-cell placed CSV for the 2-level colored device view --------------
+# Columns: module, sub, x, y. `module` = top instance under core (u_*/core_spine);
+# `sub` = the signal-GROUP inside it (the leaf name with bit-indices / synth suffixes
+# stripped) — the renderer hues by module and varies luminance by sub. x/y = SITE LOC.
 set fh [open $OUT/cells_loc.csv w]
-puts $fh "module,x,y"
+puts $fh "module,sub,x,y"
 set n 0
-foreach c [get_cells -hierarchical -filter {IS_PRIMITIVE==1}] {
+foreach c [get_cells -hierarchical -filter {IS_PRIMITIVE==1 && LOC != ""}] {
     set loc [get_property LOC $c]
-    if {$loc eq ""} continue
     if {![regexp {[A-Z_]+X([0-9]+)Y([0-9]+)} $loc -> x y]} continue
-    set nm [get_property NAME $c]
-    if {[regexp {^(u_[A-Za-z0-9_]+)/} $nm -> inst]} { set mod $inst } else { set mod "core_spine" }
-    puts $fh "$mod,$x,$y"; incr n
+    set nm    [get_property NAME $c]
+    set parts [split $nm /]
+    set p0    [lindex $parts 0]
+    if {[string match u_* $p0]} {
+        set mod $p0; set sub [lindex $parts 1]
+        if {$sub eq ""} { set sub "(top)" }
+    } else { set mod core_spine; set sub "(spine)" }
+    regsub -all {\[[^\]]*\]} $sub "" sub
+    regsub {_i_[0-9].*$}     $sub "" sub
+    regsub {_reg.*$}         $sub "" sub
+    regsub {(_[0-9]+)+$}     $sub "" sub
+    if {$sub eq ""} { set sub "misc" }
+    puts $fh "$mod,$sub,$x,$y"; incr n
 }
 close $fh
 puts "APR_${CONFIG}_${MODE}_CSV_DONE cells=$n"
