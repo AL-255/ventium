@@ -157,6 +157,18 @@
                   if (q_dst_reg!=R_ESP) gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};
                 end else if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
                 else if (q_writes_reg) gpr[q_dst_reg]<=reg_merge(dst_cur, alu_out, q_w, q_dst_high8);
+                // M9.5 LES/LDS/LSS/LFS/LGS: on top of the GPR (offset) write above,
+                // load the target segment register from the HIGH half of the SAME
+                // 4-byte far-pointer read (raw mem_load_data, not the width-masked
+                // alu_out). Real mode: base = sel<<4, the present R/W data default.
+                // Only decoded under seg_real + 16-bit operand (else HALT), so this
+                // real-mode load is the only path reached.
+                if (q_seg_load) begin
+                  seg_sel  [q_lseg] <= mem_load_data[31:16];
+                  seg_base [q_lseg] <= {12'd0, mem_load_data[31:16], 4'd0};
+                  seg_limit[q_lseg] <= 32'h0000_FFFF;
+                  seg_attr [q_lseg] <= 8'h93;
+                end
               end
 
               K_SHIFT: begin
