@@ -914,7 +914,13 @@ module ventium_soc
     // bmdma_cmd_writeb. ide_dma_busy is high for the launch clock + the run.
     // A PS-placed port instead waits on the bridge's io_ps_ack with io_ps_rdata.
     io_ack   = io_ps_sel ? io_ps_ack : (io_req && !ide_dma_busy);
-    io_rdata = 32'd0;
+    // OPEN BUS: an unmodeled / unassigned port reads back all-ones on a real PC and
+    // in qemu (unassigned_io_read returns ~0), NOT 0. SeaBIOS probes absent ports
+    // (e.g. `in 0x402` for the debug console) and branches on 0xFF; a 0 default
+    // diverged. The modeled-device arms below overwrite this for claimed ports. Only
+    // the SoC top uses this decode (ventium_top/make verify never instances it), and
+    // the M8 gates only read CLAIMED ports, so they are unaffected.
+    io_rdata = 32'hFFFF_FFFF;
     if      (io_ps_sel) io_rdata = {24'd0, io_ps_rdata};
     else if (cs_pic)    io_rdata = {24'd0, pic_rdata};
     else if (cs_pit)    io_rdata = {24'd0, pit_rdata};

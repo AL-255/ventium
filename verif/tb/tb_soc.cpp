@@ -234,7 +234,11 @@ int main(int argc, char** argv) {
         if (top->io_ps_req) {
             if (!ps_busy) {                  // serve this forwarded access ONCE
                 uint16_t port = (uint16_t)top->io_ps_addr;
-                uint8_t  rd   = 0;
+                // OPEN BUS: an unmodeled port reads back all-ones on a real PC (and in
+                // qemu), NOT 0. SeaBIOS probes absent ports (e.g. the 0x402 debug port)
+                // and branches on 0xFF; returning 0 diverged. Matches the PS app's
+                // service_in default. (Modeled ports below overwrite rd.)
+                uint8_t  rd   = 0xFF;
                 for (auto& d : ps_devs) {
                     if (port >= d.lo && port <= d.hi) {
                         if (top->io_ps_we) d.dev->io_write(d.dev, port, (uint8_t)top->io_ps_wdata);
