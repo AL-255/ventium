@@ -1450,16 +1450,19 @@ module core
         // touches NO flags. The result is a pure FUNCTION of the leaf for the modeled
         // CPU (qemu `-cpu pentium`), so this is a deterministic ISA implementation —
         // NOT injected environment. The leaf->result table lives in S_EXEC (K_CPUID)
-        // and is gated on cosim_en so the existing corpus (which never executes
-        // CPUID) is byte-identical: outside co-sim CPUID stays the loud HALT
-        // (d_unknown) it has always been. Length is always pfx_len+2 (decode is
+        // and is gated on cosim_en OR soc_en so the existing user-mode corpus (which
+        // never executes CPUID, both off) is byte-identical: outside co-sim AND outside
+        // the SoC, CPUID stays the loud HALT (d_unknown) it has always been. The SoC
+        // (soc_en=1, cosim_en=0) ungates it because real boot firmware probes CPUID on
+        // entry; the leaf table is the same qemu `-cpu pentium` model the SoC golden uses
+        // (verif/sys/tests/psoccpuid). Length is always pfx_len+2 (decode is
         // unconditional, so even the gated HALT advances correctly is moot — HALT
         // never retires — but the length is right for a clean characterization).
         8'hA2: begin
           d_len=pfx_len+4'd2;
-          if (cosim_en) begin
+          if (cosim_en || soc_en) begin
             d_kind=K_CPUID; d_writes_reg=1'b1;  // EXEC writes all 4 GPRs directly
-          end else d_unknown=1'b1;              // out-of-scope outside co-sim -> HALT
+          end else d_unknown=1'b1;              // out-of-scope in user mode -> HALT
         end
         // ---- 0F 0B: UD2, the architecturally-undefined opcode -> #UD (vector 6).
         // In SYSTEM mode it DELIVERS #UD through the IDT (a FAULT: pushes the

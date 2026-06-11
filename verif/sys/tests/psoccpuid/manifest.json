@@ -1,0 +1,31 @@
+{
+  "name": "psoccpuid",
+  "kind": "system",
+  "src": "psoccpuid.S",
+  "linker": "psoccpuid.ld",
+  "image": "psoccpuid.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 80,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-cpuid-gate.sh",
+  "what_this_is": "M9.5 -- the CPUID (0F A2) boot-ISA gap. Real boot firmware (SeaBIOS / DOS) probes CPUID on entry, but CPUID was gated off outside the Win95 co-sim (decode K_CPUID under cosim_en only), so it HALTed loudly in the SoC. This ungates it for soc_en too (decode now fires under cosim_en||soc_en) and verifies the leaf table against the live qemu-system-i386 -cpu pentium oracle.",
+  "transitions": [
+    "reset (CS:EIP=F000:FFF0) -> 16-bit real mode (CLI/CLD, segments=0, sp=0x7000); cr0 stays 0x60000010 (no PM, no paging)",
+    "execute CPUID for the standard boot leaf-set with ecx(subleaf)=0: 0x0,0x1,0x2,0x3,0x4, 0x40000000,0x40000001, 0x80000000,0x80000001,0x80000002,0x80000003,0x80000004",
+    "isa-debug-exit (out 0xf4, al=0x42 -> status 133)"
+  ],
+  "why_per_record_differential": "CPUID is a synchronous, deterministic, no-operand instruction (result is a pure function of the leaf; touches no flags, no memory, no device, no IRQ), so the standard gen_trace.py --system single-step golden is a valid per-record oracle (unlike the IRQ gates). compare.py --mode func checks eax/ebx/ecx/edx the instant each CPUID retires, diffing all 12 results vs qemu over the 46 retired instructions.",
+  "non_vacuous": "The gate asserts BOTH the golden AND the RTL trace reach the LAST CPUID site (pc=0x0000008c, the 12th leaf). If CPUID HALTed (the pre-ungate behaviour) the trace would stop at the first one (pc=0x13) and never reach there -- so a silent early-halt vacuous pass is impossible.",
+  "cpu_model_note": "qemu-system-i386 8.2.2 -cpu pentium returns a DIFFERENT CPUID than the Win95 co-sim's qemu (leaf-0 max-basic-leaf=4 not 1; leaf-1 signature=0x663 not 0x543 -- 0x663 matches the SoC's non-cosim reset EDX). So the RTL K_CPUID table branches on soc_en: the SoC arm is this verified standard boot leaf-set; the cosim arm is the UNCHANGED Win95 model (the M7 lockstep stays byte-identical). soc_en and cosim_en are mutually exclusive. Reserved/unprobed leaves return 0 (unverified beyond the tested set, documented). Brand string (0x80000002..4) = 'QEMU Virtual CPU version 2.5+'.",
+  "zero_new_rtl": "No new RTL beyond the 1-line decode ungate (cosim_en -> cosim_en||soc_en) + the soc_en branch of the existing K_CPUID leaf table. The user-mode corpus (both enables off) is byte-identical (make verify 77/77).",
+  "description": "Bare-metal M9.5 SoC CPUID differential. A real-mode -bios firmware executes CPUID for the standard boot leaf-set and exits; proves the newly-ungated CPUID is byte-identical to qemu-system-i386 -cpu pentium over all 46 retired instructions, per-record, with a non-vacuous last-CPUID-reached assertion on both traces. The first F3 (real-firmware boot) ISA-gap closed."
+}
