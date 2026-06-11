@@ -270,8 +270,16 @@ So `+VEN_FE_PIPE` takes the full SoC from *no legal route at all* to a clean **~
 the `eip`/TLB translate cone leaves the critical path exactly as designed. The **new** worst path
 is `u_uopcache/store_bmap → eip_reg[26]` (19.81 ns, **62 % routing** / 38 % logic, 47 levels) — the
 *same* µop-cache fill→front-end cluster the OOC 65.3 MHz build hit. The remaining wall is therefore
-**route-bound, not logic-bound**: the cure is in-context placement/floorplanning of the fill→`eip`
-cluster (P0-12), not more RTL pipelining.
+**route-bound, not logic-bound** — diffuse fill→`eip` routing congestion at ~68–71 % LUT, not a cone
+P&R or floorplanning can shorten.
+
+**Decision: 50 MHz is the deployable target on the XCK26; 60 MHz is dropped as infeasible.** The
+OOC core ceiling is 65.3 MHz, but the full SoC's extra L1/AXI + BD interconnect spends the margin,
+and the residual congestion is diffuse (not a single cone), so no realistic in-context floorplan
+closes 60 on this small ZU5EV die. `pl_clk0` is set to **50 MHz** (`impl_kv260_soc.tcl`), which the
+`+VEN_FE_PIPE` build routes with positive WNS — a clean, timing-met board image. A larger part (the
+ZU15EG, which clears the OOC build comfortably) would reach 60+; on the K26, **50 MHz is the result
+we keep.**
 
 Every leaf cell of the routed full SoC, colored by RTL module (core blocks + the L1/AXI + PS-bridge
 + BD interconnect that OOC views omit):

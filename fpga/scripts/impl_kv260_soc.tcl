@@ -4,16 +4,20 @@
 # Extends bd_kv260_soc.tcl (validate + synth only) to the deployable artifacts:
 #   synth_1 -> impl_1 (place + route + write_bitstream) -> write_hw_platform (.xsa).
 #
-# DELIBERATE config choices for a 60 MHz board image (vs the validate script):
+# DELIBERATE config choices for the deployable board image (vs the validate script).
+# NOTE: pl_clk0 = 50 MHz, NOT 60. A 60 MHz full-SoC close is not feasible on the small
+# XCK26 (ZU5EV): the OOC core ceiling is 65.3 MHz, but the full SoC's extra L1/AXI + BD
+# fabric leaves diffuse fill->eip routing congestion that no P&R/floorplan clears, so the
+# routed Fmax tops out ~50 MHz (FE_PIPE). 50 MHz closes with positive margin; a larger
+# part (ZU15EG) would clear 60+.
 #   * CONFIG = uop-cache + half-cache + FP_PIPE2 (VEN_UOPCACHE + VEN_IC_BRAM +
 #     VEN_CACHE_HALF + VEN_FP_PIPE2), NOT narrowb: narrowb hits the single-cycle
 #     byte-window MUXF congestion wall and does NOT route on the small xck26; the
 #     uop-cache deletes that decoder (routable), FP_PIPE2 splits the FADD-commit cone
 #     (cycle-safe, make verify-fppipe2), and the BCD ÷100 step is already in ven_bcd.
 #     This is the config that routes the OOC core at 65.3 MHz — ~5 MHz over the target.
-#   * pl_clk0 = 60 MHz: the requested target; the 65.3 MHz OOC ceiling leaves margin,
-#     though the full SoC adds L1/AXI + BD interconnect, so the in-context WNS is the
-#     real number this run produces.
+#   * pl_clk0 = 50 MHz: the achievable in-context target (see the note above); the
+#     +VEN_FE_PIPE build routes it with positive WNS.
 #   * impl strategy Performance_NetDelay_high (the ExtraNetDelay placement that won
 #     the OOC sweeps for this route-bound design).
 #
@@ -33,7 +37,7 @@ set CARVEOUT_BASE 0x0000000040000000
 set CARVEOUT_SIZE 0x0000000010000000
 set HPM0_BASE     0x00000000A0000000
 set HPM0_SIZE     0x0000000000010000
-set PL0_MHZ       60
+set PL0_MHZ       50
 set THREADS       [expr {[info exists ::env(THREADS)] ? $::env(THREADS) : 16}]
 set_param general.maxThreads $THREADS
 
