@@ -1,0 +1,14 @@
+{
+  "name": "psocbios",
+  "kind": "system",
+  "src": "psocbios.S", "linker": "psocbios.ld", "image": "psocbios.bin",
+  "image_mode": "bios", "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit", "exit_port": "0xf4", "exit_code": 133,
+  "max_insn": 700, "sys": true, "paging": false, "soc": true, "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-bios-gate.sh",
+  "what_this_is": "F3 -- a minimal BIOS firmware that USES the INT-service mechanism (now that real-mode IVT INT/IRET works). It installs an INT 10h teletype handler (AH=0Eh -> write AL to the COM1 console) in the IVT, then prints a banner by calling INT 10h per character. Each char round-trips through real-mode interrupt delivery (push FLAGS:CS:IP, IVT vector to the F000 handler) + IRET. qemu runs the same -bios, so the gate verifies OUR BIOS routine + the delivery, not a qemu-provided BIOS.",
+  "non_vacuous": "Asserts both traces RUN the INT 10h handler (pc=0x3c, the COM1 write) AND finish the banner (pc=0x2a).",
+  "zero_new_rtl_note": "No new RTL: built entirely on the real-mode INT/IRET delivery (commit 6f07377) + the existing 16550 UART + string engine. Prints 'Ventium BIOS: INT 10h teletype up'.",
+  "description": "Bare-metal F3 BIOS-firmware differential. Proves the app -> INT 10h -> handler -> IRET BIOS-service flow byte-identical to qemu-system-i386 -cpu pentium over all 472 retired instructions, per-record. First real use of the interrupt-service mechanism -- the path to a bootloader + DOS."
+}
