@@ -1070,6 +1070,8 @@ module core
   logic [2:0]  d_sys_creg;     // CR index (0/2/3/4) for MOV CRn
   logic [31:0] d_ljmp_off;     // far-jump target offset
   logic [15:0] d_ljmp_sel;     // far-jump target selector
+  logic        d_seg_load;     // M9.5 LES/LDS/LSS/LFS/LGS: also load a seg reg from [mem]+2
+  logic [2:0]  d_lseg;         //   target segment register index for the seg-load
   logic        d_pfx_seg_en;   // a segment-override prefix is present
   logic [2:0]  d_pfx_seg_idx;  // which segment the override selects
 
@@ -1199,6 +1201,7 @@ module core
     // ops override to SS in their handlers below); a segment-override prefix wins.
     d_sysop=SYS_NONE; d_sys_sreg=3'd0; d_sys_creg=3'd0;
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
+    d_seg_load=1'b0; d_lseg=3'd0;
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
     // M2S.3 interrupt/return decode defaults.
     d_int=1'b0; d_int_vec=8'd0; d_int_imm=1'b0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
@@ -1357,6 +1360,17 @@ module core
             d_mem_write=1'b1; d_mem_dst=1'b1;
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end
+        end
+        // M9.5 — LSS (0F B2) / LFS (0F B4) / LGS (0F B5): load r16 + SS/FS/GS from a
+        // m16:16 far pointer. Same real-mode-16-bit mechanism as LES/LDS (single
+        // 4-byte read {sel,off}; GPR<-off, seg<-sel base=sel<<4). Out of scope -> HALT.
+        8'hB2, 8'hB4, 8'hB5: begin
+          if (modrm_mod!=2'b11 && seg_real && eff_opsize) begin
+            d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
+            d_mem_read=1'b1; d_w=3'd2; d_seg_load=1'b1;
+            d_lseg=(op1==8'hB2)?3'(SG_SS):(op1==8'hB4)?3'(SG_FS):3'(SG_GS);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd3; end
         end
         8'hB6,8'hB7,8'hBE,8'hBF: begin // MOVZX/MOVSX
           d_kind=K_EXT; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
@@ -1667,6 +1681,19 @@ module core
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
           if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
           else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+        end
+        // M9.5 — LES (0xC4) / LDS (0xC5): load r16 + a segment register from a
+        // m16:16 far pointer. REAL-MODE 16-bit only: a single 4-byte read returns
+        // {sel, off}; the GPR gets off (a normal MOV writeback), the segment reg
+        // gets sel (base=sel<<4) via the q_seg_load exec hook. The reg form is #UD,
+        // and 32-bit (0x66) / protected-mode are out of scope -> HALT loudly.
+        8'hC4, 8'hC5: begin
+          if (modrm_mod!=2'b11 && seg_real && eff_opsize) begin
+            d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
+            d_mem_read=1'b1; d_w=3'd2;
+            d_seg_load=1'b1; d_lseg=(op0==8'hC4)?3'(SG_ES):3'(SG_DS);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
         end
         8'h8C: begin // MOV r/m16, Sreg  (M2S.1)
           // store the selector value of segment modrm_reg into r/m16. Reg form
@@ -2383,6 +2410,8 @@ module core
   logic [2:0]  q_sys_sreg, q_sys_creg, q_seg;
   logic [31:0] q_ljmp_off;
   logic [15:0] q_ljmp_sel;
+  logic        q_seg_load;        // M9.5 LES/LDS/LSS/LFS/LGS: also load a seg reg
+  logic [2:0]  q_lseg;            //   target segment register index for the seg-load
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
   logic [31:0] retf_off;          // M9.5 RETF: the popped IP/EIP held between beats
   logic [31:0] gdt_lo;            // first dword of the in-flight 8-byte descriptor

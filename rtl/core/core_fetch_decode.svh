@@ -68,6 +68,7 @@
           // M2S.1 system decode latch.
           q_sysop<=d_sysop; q_sys_sreg<=d_sys_sreg; q_sys_creg<=d_sys_creg;
           q_seg<=d_seg; q_ljmp_off<=d_ljmp_off; q_ljmp_sel<=d_ljmp_sel;
+          q_seg_load<=d_seg_load; q_lseg<=d_lseg;   // M9.5 LES/LDS/LSS/LFS/LGS
           seg_step<=1'b0;
           // M2S.3 INT/IRET/UD2 are dispatched directly from the d_* decode below
           // (they begin their micro-sequence in S_DECODE), so no q_* latch is

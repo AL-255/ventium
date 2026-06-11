@@ -1,0 +1,32 @@
+{
+  "name": "psoclseg",
+  "kind": "system",
+  "src": "psoclseg.S",
+  "linker": "psoclseg.ld",
+  "image": "psoclseg.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 40,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-lseg-gate.sh",
+  "what_this_is": "M9.5 -- the LES/LDS/LSS/LFS/LGS far-pointer load family. These load a GPR + a segment register from a m16:16 far pointer and are pervasive in real-mode boot/DOS code (far pointers everywhere); all five previously HALTed (d_unknown). This implements the real-mode 16-bit forms and verifies them against the live qemu-system-i386 -cpu pentium oracle.",
+  "transitions": [
+    "reset (F000:FFF0) -> 16-bit real mode (segments=0, sp=0x7000); cr0 stays 0x60000010",
+    "build a far pointer {off=0x1234, sel=0x5678} at 0:0x0600 via two [disp16]-direct word writes",
+    "LES bx -> bx=0x1234, ES=0x5678; LFS si -> FS; LGS di -> GS; LSS bp -> SS; LDS cx -> DS (DS/SS loaded LAST so the changed seg never breaks a later access)",
+    "isa-debug-exit (out 0xf4, al=0x42 -> status 133)"
+  ],
+  "implementation": "decode 0xC4/0xC5 (LES/LDS) + 0F B2/B4/B5 (LSS/LFS/LGS) as a MOV r16,[mem] (writes the offset to the GPR) plus d_seg_load + d_lseg (the target segment). REAL-MODE 16-bit only (gated on seg_real && eff_opsize; reg-form / 32-bit / PM -> HALT loudly). A single 4-byte read returns {sel, off}; the GPR gets off via the normal MOV writeback, and the exec q_seg_load hook (core_exec.svh K_ALU arm) loads the segment register from the RAW mem_load_data[31:16] (NOT the width-masked alu_out): seg_sel=sel, seg_base=sel<<4, seg_limit=0xFFFF, seg_attr=0x93.",
+  "why_per_record_differential": "Each segment load is a synchronous, deterministic memory read + register writeback (no IRQ, no async I/O), so the gen_trace.py --system single-step golden is a valid per-record oracle. compare.py --mode func checks the GPR (offset) + the loaded segment SELECTOR at each step vs qemu over all 17 retired instructions.",
+  "non_vacuous": "The gate asserts BOTH traces reach the final LDS (pc=0x2c). If any seg-load HALTed (the pre-implementation behaviour) the trace would stop earlier and never reach it.",
+  "zero_new_rtl_note": "Real-mode 16-bit only by design (DOS far pointers are 16-bit real-mode). 32-bit (0x66) and protected-mode forms (descriptor load) are out of scope -> HALT. The user-mode corpus is not seg_real, so LES/LDS/etc. stay HALT there and the build is byte-identical (make verify 77/77).",
+  "description": "Bare-metal M9.5 SoC LES/LDS/LSS/LFS/LGS differential. A real-mode -bios firmware builds a far pointer and loads it with all five segment-load instructions; proves each loads the GPR (offset) + segment register (selector, base=sel<<4) byte-identical to qemu-system-i386 -cpu pentium over all 17 retired instructions, per-record, with a non-vacuous final-LDS-reached assertion on both traces."
+}

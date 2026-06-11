@@ -47,6 +47,7 @@ GATES=(
   "pbootrm  (M9-rm canonical real-mode boot @0000:7C00)|verif/soc/run-soc-bootrm-gate.sh"
   "psoccpuid (M9.5 CPUID boot-leaf set)|verif/soc/run-soc-cpuid-gate.sh"
   "psocfarcall (M9.5 real-mode far CALL/RETF)|verif/soc/run-soc-farcall-gate.sh"
+  "psoclseg (M9.5 LES/LDS/LSS/LFS/LGS)|verif/soc/run-soc-lseg-gate.sh"
   "test386 (external CPU tester)|verif/external/test386/run-test386-gate.sh"
 )
 
