@@ -14,7 +14,7 @@
 # indented with their luminance swatches; small modules collapse to a header only.
 #
 #   python3 fpga/scripts/render_device_view.py <cells.csv> <out.png> ["title"]
-import sys, csv, re, colorsys
+import sys, os, csv, re, colorsys
 from collections import defaultdict, Counter
 import numpy as np
 import matplotlib
@@ -27,6 +27,11 @@ from matplotlib.lines import Line2D
 csv_path = sys.argv[1] if len(sys.argv) > 1 else "fpga/build/device_view/cells_loc.csv"
 out_png  = sys.argv[2] if len(sys.argv) > 2 else "fpga/build/device_view/device_view.png"
 title    = sys.argv[3] if len(sys.argv) > 3 else "Ventium core — placement, colored by RTL module"
+
+# FOCUS (env, space/comma-separated module names): highlight ONLY these in colour;
+# every other module is painted flat GRAY and dropped from the legend. Empty = all.
+FOCUS = set(os.environ.get("FOCUS", "").replace(",", " ").split())
+GRAY  = "#d4d4d4"
 
 # ---- FIXED module -> base hue (SHARED across all device views) --------------
 MODULE_COLOR = {
@@ -43,6 +48,16 @@ MODULE_COLOR = {
     "u_dtlb":      "#393b79",  # indigo
     "u_bcd2fp":    "#e7ba52",  # gold
     "u_itlb":      "#843c39",  # maroon
+    # SoC device-view module names (full-SoC dump). Core blocks reuse the curated
+    # hues; the L1/AXI + BD blocks get their own. (core/outside render in separate
+    # FOCUS views, so hue reuse between the two groups is harmless.)
+    "icache":      "#1f77b4",  "fpu":        "#ff7f0e",  "btb":     "#2ca02c",
+    "uopcache":    "#8c564b",  "dcache_tm":  "#17becf",  "bcd":     "#e377c2",
+    "sqrt_iter":   "#d62728",  "srt_div":    "#c5b0d5",  "idiv":    "#bcbd22",
+    "dtlb":        "#393b79",  "itlb":       "#843c39",  "bcd2fp":  "#e7ba52",
+    # outside-the-core blocks
+    "l1d":         "#1f77b4",  "l1axi":      "#2ca02c",  "axi_master": "#ff7f0e",
+    "soc_axil":    "#d62728",  "smartconnect": "#9467bd",
 }
 _FALLBACK = ["#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173"]
 LABEL = {
@@ -52,14 +67,33 @@ LABEL = {
     "u_idiv": "iterative integer DIV", "u_sqrt_iter": "iterative FSQRT",
     "u_srt_div": "iterative SRT FDIV", "u_bcd": "FBSTP engine (FP→BCD)",
     "u_bcd2fp": "FBLD engine (BCD→FP)", "core_spine": "core spine (decode/issue/ALU)",
+    # SoC names
+    "icache": "I-cache", "fpu": "FP datapath / regfile", "btb": "branch predictor / BTB",
+    "uopcache": "µop-cache", "dcache_tm": "D-cache timing", "bcd": "FBSTP engine (FP→BCD)",
+    "bcd2fp": "FBLD engine (BCD→FP)", "sqrt_iter": "iterative FSQRT",
+    "srt_div": "iterative SRT FDIV", "idiv": "iterative integer DIV",
+    "dtlb": "D-TLB", "itlb": "I-TLB",
+    "l1d": "L1 data cache", "l1axi": "L1/AXI glue", "axi_master": "AXI master → PS-DDR",
+    "soc_axil": "PS control / IO bridge", "smartconnect": "BD interconnect",
 }
 BREAKOUT_MIN = 4000  # modules >= this many cells get their sub-groups shown; else header-only
 
+# Vibrancy: scale every module hue's saturation up (with a floor so muted base hues
+# still pop) and keep lightness in a vivid mid-band (pure-pale washes saturation out).
+SAT_BOOST = 1.6
+SAT_FLOOR = 0.85
+
+def vivid(hex_base):
+    """Saturation-boosted version of a base hue (for flat fills + legend swatches)."""
+    h, l, s = colorsys.rgb_to_hls(*mcolors.to_rgb(hex_base))
+    s = min(1.0, max(s * SAT_BOOST, SAT_FLOOR))
+    return mcolors.to_hex(colorsys.hls_to_rgb(h, min(0.60, max(0.42, l)), s))
+
 def shade(hex_base, t):
-    """hue/sat of hex_base, lightness lerped by t in [0,1] (0=dark .. 1=light)."""
-    r, g, b = mcolors.to_rgb(hex_base)
-    h, _, s = colorsys.rgb_to_hls(r, g, b)
-    return colorsys.hls_to_rgb(h, 0.34 + 0.46 * t, min(1.0, s))
+    """hue of hex_base at boosted saturation, lightness lerped by t (0=dark..1=light).
+    Tighter band (0.30..0.72) than before so the luminance steps stay vibrant."""
+    h, _, s = colorsys.rgb_to_hls(*mcolors.to_rgb(hex_base))
+    return colorsys.hls_to_rgb(h, 0.30 + 0.42 * t, min(1.0, max(s * SAT_BOOST, SAT_FLOOR)))
 
 def clean_sub(s):
     """Reduce a flattened leaf name to its signal token(s): drop [..] bit indices,
@@ -122,9 +156,17 @@ def emit(col, xs, ys):
     return li
 
 for m in order:
+    if FOCUS and m not in FOCUS:
+        # not in focus: paint flat gray for context, exclude from the legend
+        gx, gy = [], []
+        for xs, ys in data[m].values():
+            gx += xs; gy += ys
+        emit(GRAY, gx, gy)
+        continue
     base = MODULE_COLOR.get(m)
     if base is None:
         base = _FALLBACK[fb % len(_FALLBACK)]; fb += 1
+    base = vivid(base)   # saturation-boosted hue for a vibrant view
     subs = data[m]
     leg = []
     if mod_total[m] >= BREAKOUT_MIN and len(subs) > 1:
