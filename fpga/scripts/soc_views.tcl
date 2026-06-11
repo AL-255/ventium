@@ -1,27 +1,30 @@
 # =====================================================================
-# Per-placed-cell CSV (module,sub,x,y) for the FULL-SoC routed checkpoint, for the
-# colored device view. The BD wraps the core deep (design_kv260_i/u_kv260/inst/...
-# u_core/u_core/<mod>), so attribute by KEYWORD match on the hierarchical name rather
-# than the first path component. Shows the L1/AXI memory subsystem + ven_soc_axil
-# alongside the core blocks (icache/uopcache/fpu/btb/tlb/engines/spine).
+# fpga/scripts/soc_views.tcl — one-shot extraction for the FULL-SoC device views
+# + congestion map from a ROUTED checkpoint. Opens the (large) routed .dcp ONCE and
+# emits both products so the render_*.py scripts can draw without re-opening Vivado:
+#   * OUT/cells_loc_soc.csv     (module,sub,x,y per placed leaf — dump_cells_loc_soc logic)
+#   * OUT/congestion_router.rpt (report_design_analysis -congestion, router-level)
 #
-# Env:  DCP = routed checkpoint ; OUT = csv path
-# Run:  DCP=.../design_kv260_wrapper_routed.dcp OUT=.../cells_loc.csv \
-#         vivado -mode batch -source fpga/scripts/dump_cells_loc_soc.tcl -notrace
+# Env:  DCP = routed checkpoint ; OUT = output dir
+# Run:  DCP=.../design_kv260_wrapper_routed.dcp OUT=fpga/build/kv260_soc_impl_fe \
+#         /tools/Xilinx/2025.2/Vivado/bin/vivado -mode batch -source fpga/scripts/soc_views.tcl -notrace
 # =====================================================================
 proc env_or {n d} { if {[info exists ::env($n)] && $::env($n) ne ""} { return $::env($n) } else { return $d } }
 set DCP [env_or DCP ""]
 set OUT [env_or OUT ""]
 if {$DCP eq "" || $OUT eq ""} { puts "ERROR: set DCP and OUT"; exit 1 }
+file mkdir $OUT
 open_checkpoint $DCP
-set fh [open $OUT w]
+
+# ---- 1. per-cell CSV (keyword-based BD-hierarchy module attribution) ----------------
+set csv $OUT/cells_loc_soc.csv
+set fh [open $csv w]
 puts $fh "module,sub,x,y"
 set n 0
 foreach c [get_cells -hierarchical -filter {IS_PRIMITIVE==1 && LOC != ""}] {
     set loc [get_property LOC $c]
     if {![regexp {[A-Z_]+X([0-9]+)Y([0-9]+)} $loc -> x y]} continue
     set nm [get_property NAME $c]
-    # keyword-based module attribution (most specific first: l1d before l1axi)
     if {[regexp {u_l1d|ven_l1d}            $nm]} { set mod l1d \
     } elseif {[regexp {soc_axil|/u_axil/}  $nm]} { set mod soc_axil \
     } elseif {[regexp {axi_master|/u_axi/} $nm]} { set mod axi_master \
@@ -42,7 +45,6 @@ foreach c [get_cells -hierarchical -filter {IS_PRIMITIVE==1 && LOC != ""}] {
     } elseif {[regexp {u_decode}           $nm]} { set mod decode \
     } elseif {[regexp {u_issue}            $nm]} { set mod issue \
     } else { set mod core_spine }
-    # sub = leaf signal group (bit-indices + synth suffixes stripped) for luminance
     set sub [lindex [split $nm /] end]
     regsub -all {\[[^\]]*\]} $sub "" sub
     regsub {_i_[0-9].*$}     $sub "" sub
@@ -52,4 +54,8 @@ foreach c [get_cells -hierarchical -filter {IS_PRIMITIVE==1 && LOC != ""}] {
     puts $fh "$mod,$sub,$x,$y"; incr n
 }
 close $fh
-puts "DUMP_SOC_DONE cells=$n out=$OUT"
+puts "DUMP_SOC_DONE cells=$n out=$csv"
+
+# ---- 2. router congestion (the deliverable congestion map source) -------------------
+report_design_analysis -congestion -file $OUT/congestion_router.rpt
+puts "SOC_VIEWS_DONE"

@@ -221,3 +221,77 @@ replication both place it worse) — the diffuse front-end congestion that P0-12
 floorplan) targets, not a single combinational cone. Reproduce: `STAGE=pnr FP_PIPE2=1
 STRAT=fp2b_netdelay PLACE_DIR=ExtraNetDelay_high ROUTE_DIR=Explore`; `make verify-bcd`.
 
+> The ÷100 step is now **opt-in (`+VEN_BCD_DIV100`)**: it only helps when `u_bcd` is the worst
+> path (this OOC half-cache config), and in the full SoC below the front-end cluster binds long
+> before `u_bcd` does — so the default leaves it off (back to two chained ÷10), keeping `u_bcd`
+> smaller where it isn't critical. Both forms are bit-exact (`make verify-bcd` either way).
+
+## Full SoC, in-context: the front-end pipeline (`+VEN_FE_PIPE`) → ~50 MHz
+
+Everything above is **out-of-context** (the `core` alone, virtual I/O). The deployable image is
+the **full KV260 block design**: the core + FPU wrapped with the **L1/AXI memory subsystem**
+(`ventium_l1_axi`: `ven_l1d` → `ven_axi_master` → AXI4 to PS-DDR), the **`ven_soc_axil`** PS↔PL
+control / port-I/O bridge, and the SmartConnect interconnect — all placed *in context* against the
+PS8 hard block and routed to a **bitstream + `.xsa`** at a 60 MHz `pl_clk0` target
+(`fpga/scripts/impl_kv260_soc.tcl`). The in-context routing demand is much higher than OOC, and a
+new module (the front-end translate path) binds.
+
+**The dcache-timing removal (prerequisite).** Under `VEN_L1_AXI` the old `dcache_timing` block
+(~4.4 k cells) only fed the cycle-mode D-miss penalty, which `real_bus` suppresses — it never
+touches data. Gating it out (`ifndef VEN_L1_AXI`) is inert (default build identical) and drops the
+post-place LUT congestion **79 % → 76 %**. Necessary, not sufficient: it does not, by itself,
+route.
+
+**The wall, and the cut.** With dcache-timing gone the full SoC still would **not legally route**
+at 60 MHz — Vivado abandons routing with *"Design is not legally routed. There are 8766 node
+overlaps."* The binder is the `eip` fetch cone: every fetch re-runs the 16-entry I-TLB
+carry-chain compare (`itlb hit_of → xlate_miss → eip`) combinationally, and in context that cone's
+fanout congests the front-end region past what the router can resolve. **`+VEN_FE_PIPE`** breaks
+it with a **page-keyed micro-TLB**: a 1-entry register (`fe_itlb_q`/`fe_dtlb_q`) keyed on
+`cur_lin[31:12]` holds the resolved translation for the current 4 KiB page, so steady-state fetch
+reads a registered phys page instead of re-walking the TLB compare. A page crossing asserts
+`fe_xlate_pend` for exactly **one clock** while the register re-samples (the only added latency;
+zero within a page, zero in real mode). It is `ifdef`-gated — default build byte/cycle-identical,
+`make verify` GREEN — and an **Fmax-only demonstrator** (cycle bands not claimed with it on, since
+the page-crossing stall perturbs cycle counts by < ~1 %; architecturally bit-exact throughout).
+
+The same SoC, same 60 MHz target, the cut on vs off:
+
+| Full-SoC impl (in-context, KV260, `pl_clk0` 60 MHz) | dcache-removal only | **`+VEN_FE_PIPE`** |
+|---|---|---|
+| Route result | **FAILED** — 8766 node overlaps (illegal) | **Router Completed Successfully** |
+| WNS @ 60 MHz | — (never closed) | **−3.195 ns** |
+| **Routed Fmax** | — (~41 MHz wall, no legal route) | **~50.4 MHz** |
+| CLB LUTs | — | 83,117 (71.0 %) |
+| CLB Registers / BRAM / DSP | — | 31,178 (13.3 %) / 40 / 31 |
+| Bitstream + `.xsa` | not produced | **produced** (deployable) |
+
+So `+VEN_FE_PIPE` takes the full SoC from *no legal route at all* to a clean **~50 MHz** image —
+the `eip`/TLB translate cone leaves the critical path exactly as designed. The **new** worst path
+is `u_uopcache/store_bmap → eip_reg[26]` (19.81 ns, **62 % routing** / 38 % logic, 47 levels) — the
+*same* µop-cache fill→front-end cluster the OOC 65.3 MHz build hit. The remaining wall is therefore
+**route-bound, not logic-bound**: the cure is in-context placement/floorplanning of the fill→`eip`
+cluster (P0-12), not more RTL pipelining.
+
+Every leaf cell of the routed full SoC, colored by RTL module (core blocks + the L1/AXI + PS-bridge
++ BD interconnect that OOC views omit):
+
+![Ventium full SoC on the KV260, +VEN_FE_PIPE routed ~50 MHz, colored by module](fpga-device-view-soc.png)
+
+The two halves separated — the CPU core + FPU (memory/BD grayed), and the memory/PS/BD outside it
+(core grayed):
+
+![Full SoC — CPU core + FPU highlighted](fpga-device-view-soc-core.png)
+![Full SoC — L1/AXI memory + PS bridge + BD highlighted](fpga-device-view-soc-outside.png)
+
+Placement density and router-congestion concentration of the routed image — the bright band is the
+µop-cache fill→`eip` front-end cluster that now binds:
+
+![Full SoC — placement density](fpga-congestion-soc.png)
+![Full SoC — router congestion concentration](fpga-congestion-router-soc.png)
+
+Reproduce: `FE_PIPE=1 OUTTAG=_fe /tools/Xilinx/2025.2/Vivado/bin/vivado -mode batch -source
+fpga/scripts/impl_kv260_soc.tcl` (bitstream + `.xsa`); device views + congestion from the routed
+checkpoint via `DCP=<...>_routed.dcp OUT=<...> vivado -mode batch -source fpga/scripts/soc_views.tcl`
+then the `render_device_view.py` / `render_congestion*.py` scripts.
+
