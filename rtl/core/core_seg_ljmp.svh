@@ -185,3 +185,17 @@
           end
         end
 
+        // -------------------------------------------------------------------
+        // M9.5 — S_SGDT: 2-beat store of the GDTR/IDTR pseudo-descriptor (the bus
+        // driver supplies the address/data/strobe per beat). beat 0 writes the
+        // {base[15:0],limit} word, beat 1 the base[31:16] half; then retire.
+        // -------------------------------------------------------------------
+        S_SGDT: begin
+          if (mem_ack) begin
+            if (!seg_step) seg_step <= 1'b1;
+            else begin
+              eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
+            end
+          end
+        end
+
