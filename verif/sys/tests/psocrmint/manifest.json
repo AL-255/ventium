@@ -1,0 +1,20 @@
+{
+  "name": "psocrmint",
+  "kind": "system",
+  "src": "psocrmint.S",
+  "linker": "psocrmint.ld",
+  "image": "psocrmint.bin",
+  "image_mode": "bios",
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 40,
+  "sys": true, "paging": false, "soc": true, "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-rmint-gate.sh",
+  "what_this_is": "F3 -- REAL-MODE IVT interrupt delivery (INT n / IRET), the BIOS/DOS service mechanism (INT 10h/13h/16h/21h). Previously INT n in sys_mode routed ONLY to the protected-mode 8-byte IDT-gate path; pure real mode (PE=0) now delivers through the 4-byte IVT. The firmware installs an IVT entry, does INT 0x40 into a handler, and the handler IRETs back.",
+  "implementation": "routing branches on real_mode (sys_mode && !CR0.PE): d_int/d_ud2 -> S_RMINT_RD (else S_INT_GATE); d_iret -> S_RMIRET (else S_IRET). S_RMINT_RD reads the 4-byte IVT entry {CS,IP} @ idt_base+vec*4; S_RMINT_PUSH does the descending 16-bit push FLAGS/CS/IP (SP-=6), loads CS (base=sel<<4) + EIP, clears IF|TF|RF|AC, retires; S_RMIRET pops IP/CS/FLAGS (SP+=6), restores the low-16 settable EFLAGS. V86 (PE=1) + protected mode keep the existing 8-byte-gate path unchanged.",
+  "non_vacuous": "Asserts both traces ENTER the handler (pc=0x2a) AND RETURN via IRET (pc=0x1e).",
+  "description": "Bare-metal F3 real-mode INT/IRET differential. Proves real-mode IVT interrupt delivery (push FLAGS:CS:IP, IVT vector, CS.base=sel<<4) + IRET restore byte-identical to qemu-system-i386 -cpu pentium over all 17 retired instructions, per-record. The firmware-foundation feature for INT-based BIOS services. make verify 77/77 + verify-sys 20/20 (PM/V86 delivery unaffected, real_mode=0 there)."
+}

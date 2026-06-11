@@ -50,6 +50,7 @@ GATES=(
   "psoclseg (M9.5 LES/LDS/LSS/LFS/LGS)|verif/soc/run-soc-lseg-gate.sh"
   "psocsgdt (M9.5 SGDT/SIDT)|verif/soc/run-soc-sgdt-gate.sh"
   "psocfw (F2 SoC boot firmware: COM1 banner)|verif/soc/run-soc-fw-gate.sh"
+  "psocrmint (F3 real-mode IVT INT n / IRET)|verif/soc/run-soc-rmint-gate.sh"
   "test386 (external CPU tester)|verif/external/test386/run-test386-gate.sh"
 )
 
