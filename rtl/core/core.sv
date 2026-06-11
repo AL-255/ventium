@@ -4374,6 +4374,7 @@ module core
     dc_lu_addr = dc_acc_addr;
   end
 
+`ifndef VEN_L1_AXI
   dcache_timing #(.DC_SETS(DC_SETS), .DC_WAYS(DC_WAYS)) u_dcache_tm (
     .clk       (clk),
     .rst_n     (rst_n),
@@ -4382,6 +4383,20 @@ module core
     .acc_valid (dc_acc_valid),
     .acc_addr  (dc_acc_addr)
   );
+`else
+  // VEN_L1_AXI (bus_mode=2): the D-cache TIMING model is redundant. Its only output,
+  // dc_lu_hit, feeds the modeled D-miss PENALTY (`if(!dc_lu_hit) pen += P5_DMISS`) and
+  // NEVER the load data/result. Under the real AXI/DDR bus that penalty is already
+  // suppressed (core_fastpath.svh `pending_mem_pen <= real_bus ? 0 : pen`) and the
+  // slow-path penalty is cycle_mode-gated (dead at the board's cycle_mode=0) — "mode-2
+  // timing is functional-only". So dropping the ~4.4k-cell dcache_timing instance is
+  // functionally INERT here and relieves the in-context congestion (the model survived
+  // synth only because cfg_cycle_mode is a runtime input). Tie dc_lu_hit=1 (always-hit
+  // => no modeled D-miss penalty); the dc_acc_*/dc_lu_addr drivers prune as dead. The
+  // DEFAULT (non-L1_AXI) build keeps the model, so make verify's D-cache bands are
+  // unchanged. The dc_acc_valid below is consumed nowhere now -> harmless dead net.
+  assign dc_lu_hit = 1'b1;
+`endif
 
   // ===========================================================================
   // L1 I-cache module ports (the ARRAYS + fill + LRU touch + reset live in the
