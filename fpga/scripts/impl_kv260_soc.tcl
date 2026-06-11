@@ -21,7 +21,12 @@
 # Run: /tools/Xilinx/2025.2/Vivado/bin/vivado -mode batch -source fpga/scripts/impl_kv260_soc.tcl
 # =====================================================================
 set ROOT      [file normalize [file dirname [info script]]/../..]
-set OUTDIR    $ROOT/fpga/build/kv260_soc_impl
+# FE_PIPE=1 adds +VEN_FE_PIPE (page-keyed micro-TLB) to break the eip/TLB fetch cone;
+# OUTTAG gives it its own build dir so it doesn't clobber the baseline impl.
+proc envor {n d} { if {[info exists ::env($n)] && $::env($n) ne ""} { return $::env($n) } else { return $d } }
+set FEP       [envor FE_PIPE 0]
+set OUTTAG    [envor OUTTAG ""]
+set OUTDIR    $ROOT/fpga/build/kv260_soc_impl$OUTTAG
 set PART      xck26-sfvc784-2LV-c
 set BOARDPART xilinx.com:kv260_som:part0:1.4
 set CARVEOUT_BASE 0x0000000040000000
@@ -54,9 +59,11 @@ add_files -norecurse [glob $ROOT/rtl/core/*.svh]
 set_property file_type {Verilog Header} [get_files *.svh]
 set_property include_dirs [list $ROOT/rtl/core] [current_fileset]
 # uop-cache + half-cache + 2-stage FP commit (routable, 65.3 MHz OOC) + SoC seams.
-set_property verilog_define {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
+set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
     VEN_FP_PIPE VEN_FP_PIPE2 VEN_BTB_PIPE VEN_IC_BRAM VEN_UOPCACHE VEN_CACHE_HALF \
-    VEN_L1_AXI VEN_KV260_SOC} [current_fileset]
+    VEN_L1_AXI VEN_KV260_SOC}
+if {$FEP} { lappend DEFS VEN_FE_PIPE }
+set_property verilog_define $DEFS [current_fileset]
 update_compile_order -fileset sources_1
 
 # ---- block design (identical topology to bd_kv260_soc.tcl) ----------------------
