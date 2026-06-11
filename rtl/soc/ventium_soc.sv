@@ -338,6 +338,7 @@ module ventium_soc
   logic        cs_ide, cs_ide_ctl, cs_ide2, cs_ide2_ctl;
   logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
   logic        cs_bmide;                    // M8.4f: bus-master IDE register block
+  logic        cs_fwcfg_sel, cs_fwcfg_data; // F3: QEMU fw_cfg (0x510 sel / 0x511 data)
   logic [31:0] ide_bm_rdata;                // M8.4f: BMIDE register read value
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
@@ -403,6 +404,10 @@ module ventium_soc
     // (qemu unmaps the I/O BAR otherwise). bmide_base = pci_bar4[15:4]<<4; the
     // window base..base+7 -> io_addr[15:3] == {pci_bar4[15:4], 1'b0}.
     cs_bmide = io_req && pci_cmd[0] && (io_addr[15:3] == {pci_bar4[15:4], 1'b0});
+    // F3 — QEMU fw_cfg (firmware config): 0x510 = selector (16-bit write), 0x511 =
+    // data (read/write, auto-incrementing). SeaBIOS probes it via the "QEMU" signature.
+    cs_fwcfg_sel  = io_req && (io_addr == 16'h0510);
+    cs_fwcfg_data = io_req && (io_addr == 16'h0511);
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -884,6 +889,63 @@ module ventium_soc
     end
   end
 
+  // ===========================================================================
+  // F3 — QEMU fw_cfg (firmware configuration interface), enough for SeaBIOS POST.
+  // 0x510 = a 16-bit SELECTOR (write); 0x511 = a DATA port whose read returns the
+  // next byte of the selected item and AUTO-INCREMENTS a per-item offset (reset by a
+  // selector write). SeaBIOS detects it via the "QEMU" signature (item 0x0000) and
+  // then reads small config items. Items are walked in via the SeaBIOS gap-diff:
+  // each `fwcfg_byte` row is the EXACT byte stream qemu returns for that selector
+  // (so the per-record differential stays bit-exact). The big blobs (file dir, ACPI,
+  // SMBIOS) come later in POST and are added as the walk reaches them.
+  //   item 0x0000 FW_CFG_SIGNATURE : "QEMU"        (4 bytes 0x51 0x45 0x4D 0x55)
+  // A one-shot access pulse (io_req rising edge) drives the offset auto-increment so
+  // it advances exactly once per access regardless of how long io_req is held.
+  // ===========================================================================
+  logic [15:0] fwcfg_sel;
+  logic [15:0] fwcfg_off;
+  logic        io_req_d;
+  wire         io_acc = io_req && !io_req_d;          // one-shot per access
+
+  // byte stream per (selector, offset). Unmodeled item / past end -> 0x00.
+  function automatic logic [7:0] fwcfg_byte(input logic [15:0] sel, input logic [15:0] off);
+    fwcfg_byte = 8'h00;
+    unique case (sel)
+      16'h0000: unique case (off)                     // FW_CFG_SIGNATURE = "QEMU"
+                  16'd0: fwcfg_byte = 8'h51;          // 'Q'
+                  16'd1: fwcfg_byte = 8'h45;          // 'E'
+                  16'd2: fwcfg_byte = 8'h4D;          // 'M'
+                  16'd3: fwcfg_byte = 8'h55;          // 'U'
+                  default: fwcfg_byte = 8'h00;
+                endcase
+      16'h0001: fwcfg_byte = (off == 16'd0) ? 8'h03 : 8'h00;  // FW_CFG_ID = 0x03 (trad+DMA)
+      // Other items qemu's bare `-machine pc -m 32` exposes (file_dir count, numa,
+      // max_cpus, acpi_tables, smbios_entries, ...) all read back 0 here -> the
+      // default 0x00 already matches. Non-zero blobs are added as the walk reaches them.
+      default: fwcfg_byte = 8'h00;
+    endcase
+  endfunction
+
+  // CONFIG_DATA-style little-endian assembly for byte/word/dword reads at 0x511.
+  wire [31:0] fwcfg_rdata = { fwcfg_byte(fwcfg_sel, fwcfg_off + 16'd3),
+                              fwcfg_byte(fwcfg_sel, fwcfg_off + 16'd2),
+                              fwcfg_byte(fwcfg_sel, fwcfg_off + 16'd1),
+                              fwcfg_byte(fwcfg_sel, fwcfg_off + 16'd0) };
+
+  always_ff @(posedge clk) begin
+    if (dev_rst) begin
+      fwcfg_sel <= 16'd0; fwcfg_off <= 16'd0; io_req_d <= 1'b0;
+    end else begin
+      io_req_d <= io_req;
+      if (io_acc && cs_fwcfg_sel && io_we) begin
+        fwcfg_sel <= io_wdata[15:0];                  // outw 0x510: select item, rewind
+        fwcfg_off <= 16'd0;
+      end else if (io_acc && cs_fwcfg_data && !io_we) begin
+        fwcfg_off <= fwcfg_off + {13'd0, io_size};    // a data read advances by io_size
+      end
+    end
+  end
+
   // ---- PS-offload select: is the accessed port a PS-placed peripheral? -------
   // (Per +VEN_<DEV>_PS from fpga/periph_split.config. 0 in the all-RTL default.)
   logic io_ps_sel;
@@ -949,6 +1011,7 @@ module ventium_soc
     else if (cs_pci_addr)            io_rdata = pci_cfg_addr;
     else if (cs_pci_data)            io_rdata = pci_cfg_rdata >> {io_addr[1:0], 3'b000};
     else if (cs_bmide)               io_rdata = ide_bm_rdata;   // M8.4f BMIDE regs
+    else if (cs_fwcfg_data)          io_rdata = fwcfg_rdata;    // F3 QEMU fw_cfg data
     // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
 

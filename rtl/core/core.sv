@@ -1825,7 +1825,10 @@ module core
         // Width: byte for 6C; eff-opsize (16/32) for 6D. The boot only uses 6C, but
         // 6D is decoded identically for completeness (same S_INS path, wider element).
         8'h6C, 8'h6D: begin
-          if (cosim_en) begin
+          // INS/REP INS uses the SAME S_INS per-element IO handshake as the single IN,
+          // so it works under soc_en too (SeaBIOS bulk-reads fw_cfg via `rep insb`).
+          // Outside both (user mode) it stays the loud HALT. Default build unaffected.
+          if (cosim_en || soc_en) begin
             d_kind=K_STR; d_st=ST_INS; d_str_storedi=1'b1; d_mem_write=1'b1;
             d_w=(op0==8'h6C) ? 3'd1 : (eff_opsize?3'd2:3'd4);
             d_io=1'b1; d_io_write=1'b0; d_io_imm=1'b0;  // port is DX (resolved at issue)
