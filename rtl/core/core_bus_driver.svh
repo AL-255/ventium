@@ -87,6 +87,30 @@
                                           : {16'd0, idt_base[31:16]};
         end
       end
+      // F3 — real-mode IVT delivery. S_RMINT_RD: read the 4-byte IVT entry
+      // {CS,IP} @ idt_base + vec*4 (one beat).
+      S_RMINT_RD: begin
+        mem_req=1'b1;
+        mem_addr = idt_base + {22'd0, int_vec, 2'b00};
+      end
+      // S_RMINT_PUSH: descending 16-bit push of FLAGS (beat0 @SS:SP-2), CS
+      // (beat1 @SS:SP-4), return IP (beat2 @SS:SP-6). ESP holds the OLD SP until
+      // the S_RMINT_PUSH commit.
+      S_RMINT_PUSH: begin
+        mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b0011;
+        mem_addr = seg_base[SG_SS] + (gpr[R_ESP] - {27'd0, (int_step+4'd1), 1'b0});
+        unique case (int_step)
+          4'd0:    mem_wdata = {16'd0, eflags[15:0]};
+          4'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
+          default: mem_wdata = {16'd0, int_ret_eip[15:0]};
+        endcase
+      end
+      // S_RMIRET: ascending 16-bit pop of IP (beat0 @SS:SP), CS (beat1 @SS:SP+2),
+      // FLAGS (beat2 @SS:SP+4).
+      S_RMIRET: begin
+        mem_req=1'b1;
+        mem_addr = seg_base[SG_SS] + (gpr[R_ESP] + {27'd0, int_step, 1'b0});
+      end
       S_FLOAD: begin
         mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
       end

@@ -635,6 +635,10 @@ module core
     S_LCALL, S_RETF,
     // M9.5 SGDT/SIDT: 2-beat store of the 6-byte GDTR/IDTR pseudo-descriptor.
     S_SGDT,
+    // F3 real-mode IVT interrupt delivery: read the 4-byte IVT entry, push the
+    // 16-bit FLAGS:CS:IP frame, then IRET pops it back. (Pure real mode, PE=0;
+    // V86/PM keep the existing 8-byte-gate S_INT_* / S_IRET path.)
+    S_RMINT_RD, S_RMINT_PUSH, S_RMIRET,
     // M2S.2 paging: the 2-level page-walk micro-sequence (PDE read -> PTE read ->
     // optional A/D writeback -> TLB fill -> resume the diverted memory state).
     S_WALK,
@@ -3765,6 +3769,9 @@ module core
         // IRET pop + CS/SS reload arms (S_IRET / S_INT_CS_RET / S_IRET_SS) —
         // relocated VERBATIM into core_iret.svh (RAW case-arms, FSM-pasted).
         `include "core_iret.svh"
+
+        // F3 real-mode IVT delivery + IRET arms (S_RMINT_RD/_PUSH / S_RMIRET).
+        `include "core_rmint.svh"
 
         // LTR + cross-priv stack/SS arms (S_LTR / S_INT_TSS / S_INT_SS) —
         // relocated VERBATIM into core_tss_priv.svh (RAW case-arms, FSM-pasted).

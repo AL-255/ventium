@@ -348,11 +348,15 @@
               // SOFTWARE INT n/INT3/INTO are subject to the gate DPL>=CPL check
               // (IA-32 6.12.1.2); #UD (d_ud2) is a HARDWARE fault that bypasses it.
               int_sw      <= d_int && !d_ud2;
-              state       <= S_INT_GATE;
+              // F3: PURE real mode (PE=0) delivers through the 4-byte IVT (S_RMINT_RD);
+              // V86 + protected mode keep the 8-byte IDT-gate path (S_INT_GATE).
+              state       <= real_mode ? S_RMINT_RD : S_INT_GATE;
             end
           end
           else if (d_iret) begin
-            int_step <= 4'd0; int_src_pc <= eip; state <= S_IRET;
+            // F3: real-mode IRET pops a 16-bit FLAGS:CS:IP frame (S_RMIRET); V86/PM
+            // keep the 32-bit S_IRET pop (incl. the descriptor reload / priv return).
+            int_step <= 4'd0; int_src_pc <= eip; state <= real_mode ? S_RMIRET : S_IRET;
             // M8.1: IRET ends an interrupt/NMI handler -> re-arm NMI (clear the NMI
             // block, IA-32). nmi_in_progress is only ever SET in the soc_en NMI
             // divert, so this clear is a no-op (stays 0) when soc_en==0 — INERT.
