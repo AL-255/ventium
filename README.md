@@ -172,6 +172,13 @@ TLB compare (1-cycle stall only on a page crossing; `ifdef`-gated, default build
 With it, the full SoC routes clean at **WNS −3.195 ns → ~50.4 MHz** (the translate cone leaves the
 critical path; the new worst path is the same µop-cache fill→`eip` cluster, route-bound).
 
+**Deployable clock = 50 MHz.** A 60 MHz full-SoC close is *not feasible on the XCK26* — the small
+ZU5EV die runs ~68–71 % LUT and the remaining wall is diffuse fill→`eip` routing congestion, not a
+cone P&R or floorplanning can shorten (the OOC ceiling is 65.3 MHz; the full SoC's extra L1/AXI + BD
+fabric costs the rest). So the board image targets **`pl_clk0` = 50 MHz**, which the `+VEN_FE_PIPE`
+build closes with positive margin. A larger part (e.g. the ZU15EG) would clear 60+; on the K26, 50 MHz
+is the deployable result.
+
 ![Ventium full SoC placed on the KV260, colored by RTL module](docs/fpga-device-view-soc.png)
 
 📄 **Full results, device views, congestion maps, the full-SoC `+VEN_FE_PIPE` image, the ZU15EG +
