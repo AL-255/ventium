@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-all
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all
 .DEFAULT_GOAL := help
 
 help:
@@ -273,6 +273,15 @@ verify-fbld:
 # on. No clock (pure function composition).
 verify-fppipe:
 	bash verif/fppipe/run-fppipe-gate.sh
+
+# --- 2-stage FP-commit cycle-equivalence gate (verif/fppipe/run-fp-pipe2-ab.sh) ---
+# Proves +VEN_FP_PIPE2 (the K26 60 MHz FADD-commit split) is CYCLE-SAFE: builds two
+# cycle TBs differing only by VEN_FP_PIPE2 and asserts the --cycle traces are
+# equivalent (faddchain byte-identical; fpindep same final arch state, CPI in the M5
+# band) + band-checks vs the p5trace golden. The split moves the deferred fpr commit
+# N+1 -> N+2, still <= the scoreboard's issue+lat(3) publish, so behaviour is held.
+verify-fppipe2:
+	bash verif/fppipe/run-fp-pipe2-ab.sh
 
 # Drop the golden cache (forces a cold regeneration on the next `make verify`).
 verify-clean:

@@ -136,21 +136,30 @@ regression-tested by `t_endbr`) and two QEMU-golden producer-fidelity bugs
 ## FPGA synthesis (KV260)
 
 The core + FPU are fully synthesizable and place-and-route cleanly out-of-context on
-the KV260 (**XCK26**, Zynq UltraScale+ ZU5EV). Headline, OOC `core` at a 15 ns target:
+the KV260 (**XCK26**, Zynq UltraScale+ ZU5EV). The routed placement of the 63 MHz
+half-cache build, every leaf cell colored by its RTL module (luminance = sub-block):
 
-| Config | Routes @ 15 ns? | Fmax (routed OOC) | Notes |
-|---|---|---:|---|
-| `narrowb` (verified production) | ✗ congestion wall (KV260) | — | routes on **ZU15EG** → 40.6 MHz |
-| `+VEN_UOPCACHE` (µop-cache) | ✅ 0 failed nets | **51.7 MHz** | first clean route at a tight clock |
-| `+VEN_UOPCACHE +VEN_CACHE_HALF` | ✅ | 50.1 MHz | 4 KB L1s — area/congestion ↓, Fmax flat |
+![Ventium core placed on the KV260 (XCK26), colored by RTL module](docs/fpga-device-view.png)
 
-The wall is the **single-cycle x86 byte-window decoder** (`u_icache` MUXF cluster), an
-architectural property — the µop-cache deletes it (predecode-on-fill, slot reads) and is
-the first config to route legally. The worst *path* is the FP deferred-commit cone
-(`fpp_reg → fpr`), so it — not the cache — gates Fmax toward 66 MHz.
+Headline OOC `core` results (`xck26-sfvc784-2LV-c`, `+VTM_NO_DPI`, 15 ns target):
 
-📄 **Full results, device views, congestion maps, the ZU15EG + half-cache experiments,
-and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
+| Config | LUTs | FF | BRAM | DSP | Synth Fmax | **Routed Fmax** | Worst path |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `+VEN_UOPCACHE` (µop-cache, 8 KB L1s) | 79.4k (68%) | 25.6k | 40 | 31 | — | 51.7 MHz | FADD commit cone |
+| `+VEN_CACHE_HALF` (4 KB L1s) | 78.0k (67%) | 25.6k | 40 | 31 | 59.4 | 52.6 MHz | FADD `fpp→fpr` cone |
+| **`+VEN_FP_PIPE2`** (2-stage FADD commit) | 76.7k (65%) | 25.8k | 40 | 31 | 78.4 | **63.0 MHz** | `u_bcd` (FBSTP) engine |
+
+Two architectural walls, both broken. The **single-cycle x86 byte-window decoder**
+(`u_icache` MUXF cluster) — the µop-cache deletes it (predecode-on-fill, slot reads),
+the first config to route legally. And the **latency-1 ~80-level FADD deferred-commit
+cone** (`fpp → fx_round_pack → fpr`): `+VEN_FP_PIPE2` splits it across the FP
+scoreboard's existing 3-cycle latency window (the result still publishes at issue+lat),
+so it is **cycle-safe** — `make verify` GREEN, the M5 FP cycle bands held, default build
+byte/cycle-identical (`make verify-fppipe2`). That clears the **60 MHz** target on the
+K26 (63 MHz); the worst path is now the rare BCD/FBSTP engine.
+
+📄 **Full results, device views, congestion maps, the ZU15EG + half-cache + FP_PIPE2
+experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
 [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
 
 ## Status

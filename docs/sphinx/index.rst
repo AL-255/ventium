@@ -51,6 +51,7 @@ issue to and why*, and an honest implementation status.
    :caption: Microarchitecture deep dives
 
    microarch/srt-divider
+   microarch/fp-commit-pipeline
    microarch/l1-cache-performance
    microarch/l1-parametric
 
