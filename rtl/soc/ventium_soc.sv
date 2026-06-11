@@ -941,9 +941,13 @@ module ventium_soc
     else if (cs_ide || cs_ide_ctl)   io_rdata = {16'd0, ide_rdata};
     else if (cs_ide2 || cs_ide2_ctl) io_rdata = {16'd0, ide2_rdata};
     // M8.4f-pre PCI config: CONFIG_ADDRESS read-back (0xCF8) + the CONFIG_DATA
-    // window (0xCFC); the core masks to io_size for a byte/word IN.
+    // window (0xCFC). The byte offset WITHIN the selected dword is the CONFIG_DATA
+    // port's low 2 bits (0xCFC+k reads byte k), so shift the dword right by 8*k
+    // before the core masks it to io_size. SeaBIOS reads the device-ID word via
+    // `inw 0xCFE` (offset 2) -> dword>>16; without the shift it got the vendor (off 0).
+    // Offset-0 accesses (0xCFC, the pide test) are the shift==0 identity, unchanged.
     else if (cs_pci_addr)            io_rdata = pci_cfg_addr;
-    else if (cs_pci_data)            io_rdata = pci_cfg_rdata;
+    else if (cs_pci_data)            io_rdata = pci_cfg_rdata >> {io_addr[1:0], 3'b000};
     else if (cs_bmide)               io_rdata = ide_bm_rdata;   // M8.4f BMIDE regs
     // undecoded port: ack with 0 (the tests never read one; avoids a stall).
   end
