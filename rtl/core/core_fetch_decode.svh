@@ -395,6 +395,19 @@
                 // TR hidden base/limit + sets the descriptor busy bit).
                 seg_step<=1'b0; state<=S_LTR;
               end
+              // M9.5 — real-mode far CALL / RETF. The S_LCALL/S_RETF micro-sequences
+              // push/pop CS:IP on SS:SP and do the real-mode CS load (base=sel<<4).
+              // Scoped to real mode / V86 (seg_real); a PROTECTED-mode far CALL/RETF
+              // (call gates / privilege change) is out of scope -> HALT loudly (never
+              // mis-executes) exactly like the other unimplemented system forms.
+              SYS_LCALL: begin
+                if (seg_real && !paging_on) begin seg_step<=1'b0; state<=S_LCALL; end
+                else state<=S_HALT;
+              end
+              SYS_RETF: begin
+                if (seg_real && !paging_on) begin seg_step<=1'b0; state<=S_RETF; end
+                else state<=S_HALT;
+              end
               default: state<=S_EXEC;  // MOV CRn to/from, MOV/STR sreg: no fetch
             endcase
           end

@@ -141,3 +141,47 @@
           end
         end
 
+        // -------------------------------------------------------------------
+        // M9.5 — S_LCALL: REAL-MODE far CALL (0x9A). Two descending stack writes
+        // (the bus driver supplies the address/data per beat): beat 0 pushes CS,
+        // beat 1 pushes the return IP. On beat 1's ack, drop ESP by 2*w, load CS
+        // (real-mode base=sel<<4), set EIP=off, and retire. (PM far CALL is gated
+        // out in core_fetch_decode.svh -> HALT; this arm is real-mode only.)
+        // -------------------------------------------------------------------
+        S_LCALL: begin
+          if (mem_ack) begin
+            if (!seg_step) seg_step <= 1'b1;          // CS pushed (beat 0)
+            else begin
+              gpr[R_ESP]      <= gpr[R_ESP] - {27'd0, q_w, 1'b0};  // SP -= 2w
+              seg_sel [SG_CS] <= q_ljmp_sel;
+              seg_base[SG_CS] <= {12'd0, q_ljmp_sel, 4'd0};        // base = sel<<4
+              seg_attr[SG_CS] <= 8'h9B;
+              eip <= q_ljmp_off; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
+            end
+          end
+        end
+
+        // -------------------------------------------------------------------
+        // M9.5 — S_RETF: REAL-MODE far return (0xCB / 0xCA imm16). Two ascending
+        // stack reads: beat 0 pops the IP (held in retf_off), beat 1 pops CS. On
+        // beat 1's ack, load CS (base=sel<<4), set EIP from the popped IP (16- or
+        // 32-bit per operand size), bump ESP by 2*w + imm16, and retire.
+        // -------------------------------------------------------------------
+        S_RETF: begin
+          if (mem_ack) begin
+            if (!seg_step) begin
+              retf_off <= mem_rdata;                  // popped IP (beat 0)
+              seg_step <= 1'b1;
+            end else begin
+              logic [15:0] new_cs;
+              new_cs = mem_rdata[15:0];               // popped CS (beat 1)
+              seg_sel [SG_CS] <= new_cs;
+              seg_base[SG_CS] <= {12'd0, new_cs, 4'd0};
+              seg_attr[SG_CS] <= 8'h9B;
+              gpr[R_ESP] <= gpr[R_ESP] + {27'd0, q_w, 1'b0} + {16'd0, q_ret_imm};
+              eip <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
+              retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
+            end
+          end
+        end
+

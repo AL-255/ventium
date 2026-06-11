@@ -630,6 +630,9 @@ module core
     S_PF, S_PIPE, S_F00F_HANG,
     // M2S.1 system-mode descriptor + table micro-sequences:
     S_LGDT, S_SEGLD, S_LJMP,
+    // M9.5 real-mode far CALL / RETF (2-beat stack push / pop of CS:IP). Reuse
+    // seg_step as the beat counter (mutually exclusive with the seg/ljmp states).
+    S_LCALL, S_RETF,
     // M2S.2 paging: the 2-level page-walk micro-sequence (PDE read -> PTE read ->
     // optional A/D writeback -> TLB fill -> resume the diverted memory state).
     S_WALK,
@@ -1057,7 +1060,10 @@ module core
     SYS_LTR, SYS_STR,
     // M2S.6 — MOV r32,DRn (0F 21) and MOV DRn,r32 (0F 23). The DR index is in
     // d_sys_creg (reused: ModR/M.reg), the GPR in d_dst_reg / d_src_reg.
-    SYS_MOVDR_FROM, SYS_MOVDR_TO
+    SYS_MOVDR_FROM, SYS_MOVDR_TO,
+    // M9.5 — real-mode far CALL ptr16:16/32 (0x9A) and RETF (0xCB / 0xCA imm16).
+    // Reuse d_ljmp_off/d_ljmp_sel for the call target and d_ret_imm for RETF imm16.
+    SYS_LCALL, SYS_RETF
   } sysop_e;
   sysop_e      d_sysop;
   logic [2:0]  d_sys_sreg;     // target/source segment register index (mov sreg)
@@ -1937,6 +1943,13 @@ module core
         8'hC3: begin d_kind=K_CTRL; d_ct=CT_RETN; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'hC2: begin d_kind=K_CTRL; d_ct=CT_RETN_IMM; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
           d_ret_imm={ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
+        // M9.5 — RETF (far return): pop IP then CS (2 beats), ESP += 2w (+imm16). The
+        // S_RETF state does the stack pops + the real-mode CS load (base=sel<<4). The
+        // routing (real-mode only; PM RETF HALTs) is in core_fetch_decode.svh.
+        8'hCB: begin d_sysop=SYS_RETF; d_ret_imm=16'd0; d_w=eff_opsize?3'd2:3'd4;
+          d_len=pfx_len+4'd1; end
+        8'hCA: begin d_sysop=SYS_RETF; d_ret_imm={ibuf[pfx_len+2],ibuf[pfx_len+1]};
+          d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd3; end
         8'hC9: begin d_kind=K_STKMISC; d_sm=SM_LEAVE; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'hE2: begin d_kind=K_CTRL; d_ct=CT_LOOP;   d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
         8'hE1: begin d_kind=K_CTRL; d_ct=CT_LOOPE;  d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
@@ -1999,6 +2012,20 @@ module core
             d_ljmp_off={ibuf[pfx_len+4], ibuf[pfx_len+3], ibuf[pfx_len+2], ibuf[pfx_len+1]};
             d_ljmp_sel={ibuf[pfx_len+6], ibuf[pfx_len+5]};
             d_len=pfx_len+4'd7;
+          end
+        end
+        8'h9A: begin // far CALL ptr16:16 (9A off16 sel16) / ptr16:32 under 0x66.
+          // M9.5: push CS then the return IP (S_LCALL), then real-mode CS load
+          // (base=sel<<4) + EIP=off. Operand size selects the offset/push width.
+          d_sysop=SYS_LCALL;
+          if (eff_opsize) begin
+            d_ljmp_off={16'd0, ibuf[pfx_len+2], ibuf[pfx_len+1]};
+            d_ljmp_sel={ibuf[pfx_len+4], ibuf[pfx_len+3]};
+            d_w=3'd2; d_len=pfx_len+4'd5;
+          end else begin
+            d_ljmp_off={ibuf[pfx_len+4], ibuf[pfx_len+3], ibuf[pfx_len+2], ibuf[pfx_len+1]};
+            d_ljmp_sel={ibuf[pfx_len+6], ibuf[pfx_len+5]};
+            d_w=3'd4; d_len=pfx_len+4'd7;
           end
         end
         8'hF4: begin // HLT — stop retiring (a clean spin in the bare-metal test)
@@ -2357,6 +2384,7 @@ module core
   logic [31:0] q_ljmp_off;
   logic [15:0] q_ljmp_sel;
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
+  logic [31:0] retf_off;          // M9.5 RETF: the popped IP/EIP held between beats
   logic [31:0] gdt_lo;            // first dword of the in-flight 8-byte descriptor
 
   // -------------------------------------------------------------------------

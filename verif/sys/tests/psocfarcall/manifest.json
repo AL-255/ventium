@@ -1,0 +1,32 @@
+{
+  "name": "psocfarcall",
+  "kind": "system",
+  "src": "psocfarcall.S",
+  "linker": "psocfarcall.ld",
+  "image": "psocfarcall.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 40,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-farcall-gate.sh",
+  "what_this_is": "M9.5 -- real-mode far CALL (0x9A) + RETF (0xCB) boot-ISA gap. 16-bit far procedure calls (and their RETF return) are pervasive in real-mode boot/DOS code; both opcodes previously HALTed loudly (d_unknown). This implements the real-mode forms (push/pop CS:IP on SS:SP, CS.base=sel<<4) and verifies them against the live qemu-system-i386 -cpu pentium oracle.",
+  "transitions": [
+    "reset (CS:EIP=F000:FFF0) -> 16-bit real mode (CLI/CLD, segments=0, sp=0x7000); cr0 stays 0x60000010",
+    "far CALL F000:0x1e (9A 1e 00 00 f0): push CS(=0xF000) then return IP(=0x12), load CS=0xF000 / EIP=0x1e",
+    "the routine writes CX=0x2222, RETF (0xCB): pop IP(=0x12) then CS(=0xF000), return to the call site",
+    "the call site writes BX=0x1111, isa-debug-exit (out 0xf4, al=0x42 -> status 133)"
+  ],
+  "implementation": "decode 0x9A -> SYS_LCALL, 0xCB/0xCA -> SYS_RETF (core.sv); routing gated on (seg_real && !paging_on) -> S_LCALL/S_RETF (else HALT: PM / V86+paging far CALL/RETF out of scope, never mis-executes); the S_LCALL (2-beat descending push CS then IP) and S_RETF (2-beat ascending pop IP then CS) micro-sequences reuse seg_step as the beat counter and the real-mode CS load (base=sel<<4) idiom from the SYS_LJMP far-jump arm. retf_off holds the popped IP between beats. Operand width q_w (2 real-mode default / 4 under 0x66) selects the strobe + SP steps.",
+  "why_per_record_differential": "far CALL and RETF are synchronous, deterministic control transfers (no IRQ, no async I/O), so the gen_trace.py --system single-step golden is a valid per-record oracle. compare.py --mode func checks CS/EIP/ESP + the pushed stack at each step, diffing the push (CS:IP) and pop directly vs qemu over all 14 retired instructions.",
+  "non_vacuous": "The gate asserts BOTH traces REACH the far-called routine (pc=0x1e, the CALL landed) AND RETURN to the call site (pc=0x12, the RETF popped back). A silent HALT (the pre-implementation behaviour) reaches neither.",
+  "zero_new_rtl_note": "Real-mode only by design (DOS boot is real mode). Protected-mode far CALL/RETF (call gates, privilege change) and V86+paging are deliberately out of scope -> HALT loudly. The user-mode corpus never executes far CALL/RETF and is not seg_real, so it stays byte-identical (make verify 77/77).",
+  "description": "Bare-metal M9.5 SoC real-mode far CALL/RETF differential. A real-mode -bios firmware far-CALLs a routine and the routine RETFs back; proves the newly-implemented far CALL (push CS:IP) and RETF (pop CS:IP) are byte-identical to qemu-system-i386 -cpu pentium over all 14 retired instructions, per-record, with non-vacuous call-landed + returned assertions on both traces."
+}

@@ -50,6 +50,27 @@
       S_LJMP: begin mem_req=1'b1;
         mem_addr=gdt_base+{16'd0,q_ljmp_sel[15:3],3'd0}+{29'd0,seg_step,2'b00};
       end
+      // M9.5 — real-mode far CALL: 2-beat descending push on SS:SP. beat 0 pushes CS
+      // at [SS:SP-w], beat 1 pushes the return IP at [SS:SP-2w]. ESP is unchanged
+      // until the S_LCALL commit, so BOTH beats reference the OLD ESP. Width q_w
+      // (2 real-mode default / 4 under 0x66) selects the byte-strobe + the SP steps.
+      S_LCALL: begin
+        mem_req=1'b1; mem_we=1'b1; mem_wstrb=(q_w==3'd2)?4'b0011:4'b1111;
+        if (!seg_step) begin
+          mem_addr  = seg_base[SG_SS] + (gpr[R_ESP] - {28'd0,q_w});         // SP - w
+          mem_wdata = {16'd0, seg_sel[SG_CS]};                             // push CS
+        end else begin
+          mem_addr  = seg_base[SG_SS] + (gpr[R_ESP] - {27'd0,q_w,1'b0});   // SP - 2w
+          mem_wdata = next_eip;                                           // push ret IP
+        end
+      end
+      // M9.5 — RETF: 2-beat ascending pop on SS:SP. beat 0 pops IP at [SS:SP], beat 1
+      // pops CS at [SS:SP+w]. ESP is unchanged until the S_RETF commit.
+      S_RETF: begin
+        mem_req=1'b1;
+        if (!seg_step) mem_addr = seg_base[SG_SS] + gpr[R_ESP];            // pop IP
+        else           mem_addr = seg_base[SG_SS] + (gpr[R_ESP]+{28'd0,q_w}); // pop CS
+      end
       S_FLOAD: begin
         mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
       end
