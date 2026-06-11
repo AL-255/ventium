@@ -281,7 +281,12 @@
       // write to the linear==physical alias before the walk fills the TLB. SQUASH
       // the access entirely on a miss: the walk owns the bus, and the access is
       // re-driven (now TLB-resident, correct physical) when the FSM resumes.
-      if (xlate_miss) begin
+      // +VEN_FE_PIPE: also squash during the page-crossing stall (fe_xlate_pend) —
+      // the registered micro-TLB doesn't yet hold this page, so no request leaves with
+      // a stale physical address; the FSM holds and re-drives next clock with the
+      // freshly-registered translate. fe_xlate_pend is tied 0 in the default build, so
+      // this is exactly the existing squash there.
+      if (xlate_miss || fe_xlate_pend) begin
         mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
       end else if (mem_req) begin
         mem_addr = mem_xlate(mem_addr, cur_is_d);
