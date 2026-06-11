@@ -162,8 +162,20 @@ byte/cycle-identical (`make verify-fppipe2`). (3) The **FBSTP BCD engine** (`u_b
 now the µop-cache fill→front-end cluster (route-bound — the diffuse-congestion case the
 docs flag for in-context floorplanning).
 
-📄 **Full results, device views, congestion maps, the ZU15EG + half-cache + FP_PIPE2
-experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
+**Full SoC, in-context → deployable bitstream.** The numbers above are out-of-context (the
+`core` alone). The actual KV260 image wraps the core + FPU with the L1/AXI memory subsystem
+(→ PS-DDR), the `ven_soc_axil` PS bridge, and the BD interconnect, placed against the PS8 and
+routed to a **bitstream + `.xsa`**. In context the **`eip`/TLB fetch cone** binds: the SoC will
+**not legally route** at 60 MHz (8766 node overlaps) until **`+VEN_FE_PIPE`** — a page-keyed
+micro-TLB that registers the current page's translation so steady-state fetch stops re-walking the
+TLB compare (1-cycle stall only on a page crossing; `ifdef`-gated, default build cycle-identical).
+With it, the full SoC routes clean at **WNS −3.195 ns → ~50.4 MHz** (the translate cone leaves the
+critical path; the new worst path is the same µop-cache fill→`eip` cluster, route-bound).
+
+![Ventium full SoC placed on the KV260, colored by RTL module](docs/fpga-device-view-soc.png)
+
+📄 **Full results, device views, congestion maps, the full-SoC `+VEN_FE_PIPE` image, the ZU15EG +
+half-cache + FP_PIPE2 experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
 [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
 
 ## Status
