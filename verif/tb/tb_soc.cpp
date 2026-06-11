@@ -147,6 +147,18 @@ int main(int argc, char** argv) {
         }
         std::fprintf(stderr, "tb_soc: loaded %ld bytes at 0x%08x from %s (bios)\n",
                      n, load_at, args.image.c_str());
+        // 4 GiB-TOP ALIAS: a real PC chipset mirrors the BIOS ROM at the top of the
+        // 32-bit address space (the last `sz` bytes ending at 0xFFFFFFFF) as well as
+        // the 1 MiB alias above. SeaBIOS runs its 32-bit POST from the high alias
+        // (jmp 0xFFFFxxxx), so without this it fetches 0 there and wanders. Only
+        // images larger than the 64 KiB bare-metal stubs (i.e. a real BIOS) need it;
+        // those stubs never touch the high alias, so they are unaffected. (Cosim
+        // memory-map convenience; the real SoC provides the alias via the PS / decode.)
+        if (sz > 0x10000) {
+            uint32_t hi_at = (uint32_t)(0u - (uint32_t)sz);   // 0xFFFE0000 for 128 KiB
+            mem.load_image(args.image, hi_at);
+            std::fprintf(stderr, "tb_soc: BIOS 4G-top alias at 0x%08x\n", hi_at);
+        }
     }
 
     // ---- trace writer (system-mode .vtrace: x87=false, cycle=false, sys=true) --
