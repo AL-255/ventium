@@ -205,3 +205,19 @@ all new logic is under `ifdef VEN_FP_PIPE2`. Reproduce: `STAGE=synth FP_PIPE2=1`
 `STAGE=pnr FP_PIPE2=1 STRAT=fp2_timingopt PLACE_DIR=ExtraTimingOpt ROUTE_DIR=Explore vivado
 -mode batch -source fpga/scripts/apr_hc_pnr.tcl`; cycle-safety via `make verify-fppipe2`.
 
+#### Next worst path: the BCD step (÷100, not two ÷10) → 65.3 MHz
+
+With the FADD cone gone, the `u_bcd` engine (FBSTP, FP→packed-BCD) becomes the worst path:
+its per-clock step ran **two chained divide-by-10** (`q/10` then `q1/10`), ~54 levels / ~41
+CARRY8 in series. Computing **one divide-by-100** instead and taking the two low digits from
+`q%100` (a 0..99 value → a 7-bit extract) halves that cone — **bit-exact and cycle-neutral**
+(same 2-digits/clock cadence, `make verify-bcd` 40 k vectors). Synth rises **78.4 → 80.6 MHz**
+and the binder moves to the FP_PIPE2 stage-1 front (`fpp → fpp2_s1`). Routed, with
+`ExtraNetDelay_high` placement (the right placer once the wall is route-bound), the half-cache
+build reaches **65.3 MHz** — the worst path now the **µop-cache fill → front-end cluster**
+(`store_bmap → eip`/`ic_age`/`store_slots`, 64–73 % routing). That cluster is route-bound and
+**placement-variable** (45–65 MHz across directives; `ExtraTimingOpt` and forced fanout
+replication both place it worse) — the diffuse front-end congestion that P0-12 (in-context
+floorplan) targets, not a single combinational cone. Reproduce: `STAGE=pnr FP_PIPE2=1
+STRAT=fp2b_netdelay PLACE_DIR=ExtraNetDelay_high ROUTE_DIR=Explore`; `make verify-bcd`.
+

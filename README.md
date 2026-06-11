@@ -136,7 +136,7 @@ regression-tested by `t_endbr`) and two QEMU-golden producer-fidelity bugs
 ## FPGA synthesis (KV260)
 
 The core + FPU are fully synthesizable and place-and-route cleanly out-of-context on
-the KV260 (**XCK26**, Zynq UltraScale+ ZU5EV). The routed placement of the 63 MHz
+the KV260 (**XCK26**, Zynq UltraScale+ ZU5EV). The routed placement of the 65 MHz
 half-cache build, every leaf cell colored by its RTL module (luminance = sub-block):
 
 ![Ventium core placed on the KV260 (XCK26), colored by RTL module](docs/fpga-device-view.png)
@@ -147,16 +147,20 @@ Headline OOC `core` results (`xck26-sfvc784-2LV-c`, `+VTM_NO_DPI`, 15 ns target)
 |---|---:|---:|---:|---:|---:|---:|---|
 | `+VEN_UOPCACHE` (µop-cache, 8 KB L1s) | 79.4k (68%) | 25.6k | 40 | 31 | — | 51.7 MHz | FADD commit cone |
 | `+VEN_CACHE_HALF` (4 KB L1s) | 78.0k (67%) | 25.6k | 40 | 31 | 59.4 | 52.6 MHz | FADD `fpp→fpr` cone |
-| **`+VEN_FP_PIPE2`** (2-stage FADD commit) | 76.7k (65%) | 25.8k | 40 | 31 | 78.4 | **63.0 MHz** | `u_bcd` (FBSTP) engine |
+| `+VEN_FP_PIPE2` (2-stage FADD commit) | 76.7k (65%) | 25.8k | 40 | 31 | 78.4 | 63.0 MHz | `u_bcd` (FBSTP) engine |
+| **+ BCD ÷100 step** (`ven_bcd`) | 76.6k (65%) | 25.8k | 40 | 31 | 80.6 | **65.3 MHz** | µop-cache fill→front-end |
 
-Two architectural walls, both broken. The **single-cycle x86 byte-window decoder**
-(`u_icache` MUXF cluster) — the µop-cache deletes it (predecode-on-fill, slot reads),
-the first config to route legally. And the **latency-1 ~80-level FADD deferred-commit
-cone** (`fpp → fx_round_pack → fpr`): `+VEN_FP_PIPE2` splits it across the FP
-scoreboard's existing 3-cycle latency window (the result still publishes at issue+lat),
+Three architectural walls, broken in turn. (1) The **single-cycle x86 byte-window
+decoder** (`u_icache` MUXF cluster) — the µop-cache deletes it (predecode-on-fill, slot
+reads), the first config to route legally. (2) The **latency-1 ~80-level FADD
+deferred-commit cone** (`fpp → fx_round_pack → fpr`): `+VEN_FP_PIPE2` splits it across the
+FP scoreboard's existing 3-cycle latency window (the result still publishes at issue+lat),
 so it is **cycle-safe** — `make verify` GREEN, the M5 FP cycle bands held, default build
-byte/cycle-identical (`make verify-fppipe2`). That clears the **60 MHz** target on the
-K26 (63 MHz); the worst path is now the rare BCD/FBSTP engine.
+byte/cycle-identical (`make verify-fppipe2`). (3) The **FBSTP BCD engine** (`u_bcd`): one
+÷100 per step instead of two chained ÷10 halves its cone — bit-exact + cycle-neutral
+(`make verify-bcd`). That takes the K26 to **65.3 MHz** (`ExtraNetDelay_high`); the wall is
+now the µop-cache fill→front-end cluster (route-bound — the diffuse-congestion case the
+docs flag for in-context floorplanning).
 
 📄 **Full results, device views, congestion maps, the ZU15EG + half-cache + FP_PIPE2
 experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·

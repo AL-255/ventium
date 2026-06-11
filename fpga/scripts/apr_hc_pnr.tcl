@@ -149,6 +149,15 @@ if {$PBLOCK ne ""} {
 
 place_design -directive $PLACE_DIR
 if {$PHYSOPT_DIR ne ""} { phys_opt_design -directive $PHYSOPT_DIR }
+# FANOUT_REPL=1: placement-aware replication of the high-fanout uopcache-fill ->
+# icache-LRU nets (the store_bmap -> ic_age cluster routes 65-73 % because one driver
+# fans out to every icache set). Replicating per placement cluster shortens those
+# routes — cycle-neutral (same logic, duplicated drivers).
+if {[env_or FANOUT_REPL 0]} {
+    set hi [get_nets -hier -quiet -filter {FLAT_PIN_COUNT > 80 && (NAME =~ *store_bmap* || NAME =~ *store_slots* || NAME =~ *ic_age* || NAME =~ *uop*)}]
+    puts "FANOUT_REPL: [llength $hi] high-fanout uopcache/icache nets"
+    if {[llength $hi] > 0} { catch { phys_opt_design -force_replication_on_nets $hi } }
+}
 report_design_analysis -congestion -file $OUT/congestion_placed.rpt
 report_timing_summary -max_paths 4 -delay_type max -file $OUT/timing_placed.rpt
 puts "HC_PNR_PLACED_DONE $STRAT"

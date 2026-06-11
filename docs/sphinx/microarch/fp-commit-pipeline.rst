@@ -151,6 +151,15 @@ the 60 MHz target on the K26 — for the price of **one ``fx_pipe_t`` stage regi
 engine** (``ven_bcd``, the FBLD/FBSTP packed-decimal conversion), with the
 µop-cache fill-to-PC path just below it — both well above 60 MHz.
 
+A follow-up cycle-neutral fix takes the next worst path too: ``ven_bcd``'s per-clock
+step ran **two chained divide-by-10**; computing **one divide-by-100** and extracting
+the two low digits from ``q % 100`` (a 0..99 value) halves that cone, bit-exact
+(``make verify-bcd``). Synthesis rises to **80.6 MHz** and the routed half-cache build
+to **65.3 MHz** (``ExtraNetDelay_high`` placement). The remaining wall is the
+**route-bound µop-cache fill → front-end cluster** (``store_bmap → eip``/``ic_age``),
+which is placement-variable — the diffuse front-end congestion that in-context
+floorplanning, not a single-cone fix, addresses.
+
 See :doc:`/microarch/l1-parametric` for the ``+VEN_CACHE_HALF`` geometry knob this
 build sits on, and ``docs/fpga-synthesis.md`` for the full place-and-route sweep,
 device views, and reproduction commands.
