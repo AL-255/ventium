@@ -513,6 +513,20 @@ module core
   logic        dtlb_lk_hit;   logic [31:0] dtlb_lk_phys;
   logic [2:0]  dtlb_lk_perm;  logic        dtlb_lk_dirty;
 
+  // +VEN_FE_PIPE: page-keyed micro-TLB register. Translation is per-4 KiB-page, so
+  // we register the {i,d}tlb lookup keyed on the page (cur_lin[31:12]); xlate_miss /
+  // mem_xlate then read the REGISTERED result, lifting the combinational hit_of
+  // carry-chain off the issue path (the ~41 MHz full-SoC eip-cone binder). A page
+  // crossing sets fe_xlate_pend for 1 clock (the only added latency) while the
+  // register samples the new page. fe_xlate_pend is tied 0 in the default build, so
+  // every `... && !fe_xlate_pend` gate folds away -> default is byte/cycle-identical.
+  // Fmax-only demonstrator contract (cycle bands not claimed); functionally arch-exact.
+  logic fe_xlate_pend;
+`ifdef VEN_FE_PIPE
+  logic [19:0] fe_itlb_page, fe_itlb_phys;  logic fe_itlb_hit,  fe_itlb_v;
+  logic [19:0] fe_dtlb_page, fe_dtlb_phys;  logic fe_dtlb_hit,  fe_dtlb_dirty, fe_dtlb_v;
+`endif
+
   // Page-walk micro-sequence registers. The walk is a small FSM living inside
   // S_WALK: it reads the PDE, then the PTE (4 KiB) — writing A/D bits back to the
   // page tables as memory writes — fills the proper TLB, then returns to the
@@ -3586,6 +3600,11 @@ module core
         // PDE physical address = (CR3 & ~0xFFF) + PDIndex*4, PDIndex = lin[31:22].
         walk_pde_addr  <= {creg3[31:12], cur_lin[31:22], 2'b00};
         state          <= S_WALK;
+      end else if (fe_xlate_pend) begin
+        // +VEN_FE_PIPE page-crossing stall: HOLD 1 clock (no state/eip/issue/bus this
+        // edge) while the fe_*_q micro-TLB register samples cur_lin's translate (the
+        // separate always_ff below). Next edge the register is valid -> proceed.
+        // Inert in the default build (fe_xlate_pend tied 0 -> this arm is unreachable).
       end else
       unique case (state)
         // dual-issue fast-path + icache-fill arms (S_RESET / S_PF / S_PIPE) —
@@ -3916,10 +3935,20 @@ module core
   // on miss/paging-off the actual `lin` (mem_addr) is passed through unchanged.
   function automatic logic [31:0] mem_xlate(input logic [31:0] lin, input logic is_d);
     begin
+`ifdef VEN_FE_PIPE
+      // FE_PIPE: physical = {registered page-frame, this access's page offset}. Only
+      // reached when !fe_xlate_pend (the bus driver squashes during the stall), so the
+      // registered page matches lin[31:12] and fe_*_q is valid.
+      if (!paging_on)                  mem_xlate = lin;
+      else if (is_d  &&  fe_dtlb_hit)   mem_xlate = {fe_dtlb_phys, lin[11:0]};
+      else if (!is_d &&  fe_itlb_hit)   mem_xlate = {fe_itlb_phys, lin[11:0]};
+      else                              mem_xlate = lin;   // miss: value unused
+`else
       if (!paging_on)                  mem_xlate = lin;
       else if (is_d  &&  dtlb_lk_hit)   mem_xlate = dtlb_lk_phys;
       else if (!is_d &&  itlb_lk_hit)   mem_xlate = itlb_lk_phys;
       else                              mem_xlate = lin;   // miss: value unused
+`endif
     end
   endfunction
 
@@ -4031,6 +4060,41 @@ module core
       .fill_big(tlb_fill_big), .fill_dirty(tlb_fill_dirty),
       .flush_en(tlb_flush)
   );
+
+`ifdef VEN_FE_PIPE
+  // +VEN_FE_PIPE: the page-keyed micro-TLB register. On the page-crossing stall clock
+  // (fe_xlate_pend) it samples the combinational {i,d}tlb lookup for cur_lin's page;
+  // thereafter xlate_miss / mem_xlate read it (off the hit_of critical path). Coherence:
+  //  * a CR3 write (tlb_flush) clears both arrays -> invalidate both fe_*_q.
+  //  * a page-walk fill (tlb_fill_en) replaces ONE side's translation (incl. set-D on
+  //    a write) -> invalidate that side so it re-registers the fresh entry next access.
+  // Invalidate wins over (re-)register this edge, so a freshly-flushed/filled page is
+  // never cached stale. Mirrors the access split: fetch (cur_is_d=0) -> itlb, data -> dtlb.
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      fe_itlb_v <= 1'b0; fe_dtlb_v <= 1'b0;
+    end else begin
+      if (tlb_flush) begin fe_itlb_v <= 1'b0; fe_dtlb_v <= 1'b0; end
+      else begin
+        // I-side
+        if (tlb_fill_en && !tlb_fill_is_d) fe_itlb_v <= 1'b0;
+        else if (paging_on && !cur_is_d &&
+                 (!fe_itlb_v || (fe_itlb_page != cur_lin[31:12]))) begin
+          fe_itlb_page <= cur_lin[31:12]; fe_itlb_phys <= itlb_lk_phys[31:12];
+          fe_itlb_hit  <= itlb_lk_hit;    fe_itlb_v    <= 1'b1;
+        end
+        // D-side
+        if (tlb_fill_en && tlb_fill_is_d) fe_dtlb_v <= 1'b0;
+        else if (paging_on && cur_is_d &&
+                 (!fe_dtlb_v || (fe_dtlb_page != cur_lin[31:12]))) begin
+          fe_dtlb_page  <= cur_lin[31:12]; fe_dtlb_phys  <= dtlb_lk_phys[31:12];
+          fe_dtlb_hit   <= dtlb_lk_hit;    fe_dtlb_dirty <= dtlb_lk_dirty;
+          fe_dtlb_v     <= 1'b1;
+        end
+      end
+    end
+  end
+`endif
 
   // M2S.3 — begin IDT delivery of a HARDWARE fault (#GP/#NP/#SS/#PF/#UD raised
   // from a fault DECISION that prior stages only computed). A fault always
@@ -4316,11 +4380,25 @@ module core
     // A data access misses if the D-TLB lacks the page OR (for a WRITE) the page
     // is TLB-resident but its Dirty bit has not yet been set in memory — that
     // first write must re-walk to set D (matching qemu's set-D-on-first-write).
+    fe_xlate_pend = 1'b0;
+`ifdef VEN_FE_PIPE
+    // page crossing -> the registered micro-TLB doesn't yet hold cur_lin's page;
+    // stall 1 clock while the fe_*_q always_ff samples it (separate, runs this edge).
+    if (paging_on && translatable)
+      fe_xlate_pend = cur_is_d ? !(fe_dtlb_v && (fe_dtlb_page == cur_lin[31:12]))
+                               : !(fe_itlb_v && (fe_itlb_page == cur_lin[31:12]));
+    // xlate_miss from the REGISTERED hit (off the critical path); 0 during the pend
+    // stall (the FSM holds, no premature walk).
+    xlate_miss = paging_on && translatable && !fe_xlate_pend &&
+                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !fe_dtlb_dirty))
+                           : !fe_itlb_hit);
+`else
     xlate_miss = paging_on && translatable &&
                  (cur_is_d
                     ? (!dtlb_lk_hit ||
                        (cur_is_w && !dtlb_lk_dirty))
                     : !itlb_lk_hit);
+`endif
   end
 
   // ===========================================================================
