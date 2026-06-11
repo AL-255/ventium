@@ -219,17 +219,20 @@ module ventium_soc
   logic [31:0] ide_dma_mem_addr, ide_dma_mem_wdata;
   logic [3:0]  ide_dma_mem_wstrb;
 
-  assign mem_req        = ide_dma_busy ? ide_dma_mem_req   : core_mem_req;
-  assign mem_we         = ide_dma_busy ? ide_dma_mem_we    : core_mem_we;
-  assign mem_wdata      = ide_dma_busy ? ide_dma_mem_wdata : core_mem_wdata;
-  assign mem_wstrb      = ide_dma_busy ? ide_dma_mem_wstrb : core_mem_wstrb;
-  // ack routing: to the DMA engine while it owns the bus, else to the core.
-  assign core_mem_ack   = ide_dma_busy ? 1'b0    : mem_ack;
-  // The CPU A20 gate masks ONLY the core's address; PCI bus-master DMA addresses the
+  // Two bus masters share the mem bus with the core: the IDE DMA (M8.4f) and the
+  // fw_cfg DMA (F3). They are mutually exclusive; IDE has priority, then fw_cfg.
+  assign mem_req        = ide_dma_busy ? ide_dma_mem_req   : fwcfg_dma_busy ? fwcfg_dma_mem_req   : core_mem_req;
+  assign mem_we         = ide_dma_busy ? ide_dma_mem_we    : fwcfg_dma_busy ? fwcfg_dma_mem_we    : core_mem_we;
+  assign mem_wdata      = ide_dma_busy ? ide_dma_mem_wdata : fwcfg_dma_busy ? fwcfg_dma_mem_wdata : core_mem_wdata;
+  assign mem_wstrb      = ide_dma_busy ? ide_dma_mem_wstrb : fwcfg_dma_busy ? fwcfg_dma_mem_wstrb : core_mem_wstrb;
+  // ack routing: to a DMA engine while it owns the bus, else to the core.
+  assign core_mem_ack   = (ide_dma_busy || fwcfg_dma_busy) ? 1'b0 : mem_ack;
+  // The CPU A20 gate masks ONLY the core's address; bus-master DMA addresses the
   // physical bus directly (qemu pci_dma_read/write bypass A20), so the DMA address is
   // muxed in UN-masked. (The <1MiB test buffer makes this a no-op, but it is the
   // faithful behavior — M8.4f review fold-back.)
-  assign mem_addr = ide_dma_busy ? ide_dma_mem_addr
+  assign mem_addr = ide_dma_busy   ? ide_dma_mem_addr
+                  : fwcfg_dma_busy ? fwcfg_dma_mem_addr
                   : (eff_a20 ? core_mem_addr : (core_mem_addr & ~32'h0010_0000));
 
   // Device side outputs the M8.2 SoC observes but does not act on (yet):
@@ -339,6 +342,7 @@ module ventium_soc
   logic        cs_pci_addr, cs_pci_data;   // M8.4f-pre: PCI config mechanism
   logic        cs_bmide;                    // M8.4f: bus-master IDE register block
   logic        cs_fwcfg_sel, cs_fwcfg_data; // F3: QEMU fw_cfg (0x510 sel / 0x511 data)
+  logic        cs_fwdma_hi, cs_fwdma_lo;     // F3: fw_cfg DMA address (0x514 / 0x518)
   logic [31:0] ide_bm_rdata;                // M8.4f: BMIDE register read value
   always_comb begin
     cs_pic = io_req && (io_addr == 16'h0020 || io_addr == 16'h0021 ||
@@ -408,6 +412,10 @@ module ventium_soc
     // data (read/write, auto-incrementing). SeaBIOS probes it via the "QEMU" signature.
     cs_fwcfg_sel  = io_req && (io_addr == 16'h0510);
     cs_fwcfg_data = io_req && (io_addr == 16'h0511);
+    // fw_cfg DMA address register (BE64): high half at 0x514, low half at 0x518; the
+    // low-half write triggers the transfer. (FW_CFG_ID=0x03 advertises this interface.)
+    cs_fwdma_hi   = io_req && (io_addr == 16'h0514);
+    cs_fwdma_lo   = io_req && (io_addr == 16'h0518);
   end
 
   // PC RESET for the devices is synchronous active-HIGH; the core's rst_n is
@@ -907,6 +915,27 @@ module ventium_soc
   logic        io_req_d;
   wire         io_acc = io_req && !io_req_d;          // one-shot per access
 
+  // fw_cfg DMA engine (a bus master). On the 0x518 trigger it reads the 16-byte
+  // FWCfgDmaAccess struct {control BE32, length BE32, address BE64} from guest memory
+  // at the latched control address, decodes control (SELECT 0x08 / READ 0x02 /
+  // SKIP 0x04 / WRITE 0x10), transfers `length` bytes of the selected item to the
+  // target address (READ) or advances the offset (SKIP), and clears control back to 0.
+  // The core is parked (io_ack held) for the whole transfer (synchronous, like the
+  // IDE bus-master DMA). All struct fields are BIG-ENDIAN.
+  typedef enum logic [2:0] { FWD_IDLE, FWD_C, FWD_L, FWD_AH, FWD_AL, FWD_X, FWD_WB } fwd_e;
+  fwd_e         fwd_st;
+  logic [31:0]  fwdma_actl;     // control-struct guest address (latched, native)
+  logic [31:0]  fwdma_ctl, fwdma_len, fwdma_tgt, fwdma_xoff;
+  logic         fwdma_pend;     // a 0x518 trigger is being served (hold the io ack)
+  logic         fwcfg_dma_busy;
+  logic         fwcfg_dma_mem_req, fwcfg_dma_mem_we;
+  logic [31:0]  fwcfg_dma_mem_addr, fwcfg_dma_mem_wdata;
+  logic [3:0]   fwcfg_dma_mem_wstrb;
+  function automatic logic [31:0] bswap32(input logic [31:0] x);
+    bswap32 = {x[7:0], x[15:8], x[23:16], x[31:24]};
+  endfunction
+  assign fwcfg_dma_busy = (fwd_st != FWD_IDLE);
+
   // byte stream per (selector, offset). Unmodeled item / past end -> 0x00.
   function automatic logic [7:0] fwcfg_byte(input logic [15:0] sel, input logic [15:0] off);
     fwcfg_byte = 8'h00;
@@ -932,17 +961,66 @@ module ventium_soc
                               fwcfg_byte(fwcfg_sel, fwcfg_off + 16'd1),
                               fwcfg_byte(fwcfg_sel, fwcfg_off + 16'd0) };
 
+  // fw_cfg DMA engine bus-master memory drive (combinational; the FSM sequences it).
+  always_comb begin
+    fwcfg_dma_mem_req=1'b0; fwcfg_dma_mem_we=1'b0; fwcfg_dma_mem_addr=32'd0;
+    fwcfg_dma_mem_wdata=32'd0; fwcfg_dma_mem_wstrb=4'b0000;
+    unique case (fwd_st)
+      FWD_C:  begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_addr=fwdma_actl;          end
+      FWD_L:  begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_addr=fwdma_actl+32'd4;    end
+      FWD_AH: begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_addr=fwdma_actl+32'd8;    end
+      FWD_AL: begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_addr=fwdma_actl+32'd12;   end
+      FWD_X:  begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_we=1'b1;          // 1 byte
+                    fwcfg_dma_mem_addr  = fwdma_tgt + fwdma_xoff;
+                    fwcfg_dma_mem_wstrb = 4'b0001;
+                    fwcfg_dma_mem_wdata = {24'd0, fwcfg_byte(fwcfg_sel, fwcfg_off + fwdma_xoff[15:0])}; end
+      FWD_WB: begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_we=1'b1;          // clear control
+                    fwcfg_dma_mem_addr=fwdma_actl; fwcfg_dma_mem_wstrb=4'b1111; fwcfg_dma_mem_wdata=32'd0; end
+      default: ;
+    endcase
+  end
+
   always_ff @(posedge clk) begin
     if (dev_rst) begin
       fwcfg_sel <= 16'd0; fwcfg_off <= 16'd0; io_req_d <= 1'b0;
+      fwd_st <= FWD_IDLE; fwdma_actl<=32'd0; fwdma_ctl<=32'd0; fwdma_len<=32'd0;
+      fwdma_tgt<=32'd0; fwdma_xoff<=32'd0; fwdma_pend<=1'b0;
     end else begin
       io_req_d <= io_req;
+      // ---- non-DMA fw_cfg: selector write (0x510) + data-port auto-increment (0x511)
       if (io_acc && cs_fwcfg_sel && io_we) begin
         fwcfg_sel <= io_wdata[15:0];                  // outw 0x510: select item, rewind
         fwcfg_off <= 16'd0;
       end else if (io_acc && cs_fwcfg_data && !io_we) begin
         fwcfg_off <= fwcfg_off + {13'd0, io_size};    // a data read advances by io_size
       end
+      // ---- DMA engine FSM (the 0x518 trigger starts it; mem_rdata returns reads) ----
+      // (0x514, the address high half, is ignored: the carveout is < 4 GiB.)
+      unique case (fwd_st)
+        FWD_IDLE: if (io_acc && cs_fwdma_lo && io_we) begin
+                    fwdma_actl <= bswap32(io_wdata);  // BE low half = the struct address
+                    fwdma_xoff <= 32'd0; fwdma_pend <= 1'b1; fwd_st <= FWD_C;
+                  end
+        FWD_C:  if (mem_ack) begin fwdma_ctl <= bswap32(mem_rdata); fwd_st <= FWD_L;  end
+        FWD_L:  if (mem_ack) begin fwdma_len <= bswap32(mem_rdata); fwd_st <= FWD_AH; end
+        FWD_AH: if (mem_ack) begin                    /* address high (assumed 0) */ fwd_st <= FWD_AL; end
+        FWD_AL: if (mem_ack) begin
+                  fwdma_tgt <= bswap32(mem_rdata);    // address low half (the buffer)
+                  if (fwdma_ctl[3]) begin fwcfg_sel <= fwdma_ctl[31:16]; fwcfg_off <= 16'd0; end // SELECT
+                  if (fwdma_ctl[1] && fwdma_len != 32'd0) fwd_st <= FWD_X;            // READ
+                  else begin
+                    if (fwdma_ctl[2]) fwcfg_off <= fwcfg_off + fwdma_len[15:0];        // SKIP
+                    fwd_st <= FWD_WB;
+                  end
+                end
+        FWD_X:  if (mem_ack) begin
+                  if (fwdma_xoff + 32'd1 >= fwdma_len) begin
+                    fwcfg_off <= fwcfg_off + fwdma_len[15:0]; fwd_st <= FWD_WB;
+                  end else fwdma_xoff <= fwdma_xoff + 32'd1;
+                end
+        FWD_WB: if (mem_ack) begin fwdma_pend <= 1'b0; fwd_st <= FWD_IDLE; end
+        default: fwd_st <= FWD_IDLE;
+      endcase
     end
   end
 
@@ -975,7 +1053,10 @@ module ventium_soc
     // (mem bus free) until the engine completes, exactly like qemu's synchronous
     // bmdma_cmd_writeb. ide_dma_busy is high for the launch clock + the run.
     // A PS-placed port instead waits on the bridge's io_ps_ack with io_ps_rdata.
-    io_ack   = io_ps_sel ? io_ps_ack : (io_req && !ide_dma_busy);
+    // The fw_cfg DMA trigger (write 0x518) is held un-acked (fwdma_pend) for the whole
+    // transfer, so the core's OUT completes only after the DMA finishes (synchronous,
+    // like the IDE bus-master write held during ide_dma_busy).
+    io_ack   = io_ps_sel ? io_ps_ack : (io_req && !ide_dma_busy && !fwdma_pend);
     // OPEN BUS: an unmodeled / unassigned port reads back all-ones on a real PC and
     // in qemu (unassigned_io_read returns ~0), NOT 0. SeaBIOS probes absent ports
     // (e.g. `in 0x402` for the debug console) and branches on 0xFF; a 0 default
