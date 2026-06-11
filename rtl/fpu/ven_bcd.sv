@@ -71,18 +71,29 @@ module ven_bcd
           end
         end
         ST_RUN: begin
-          // Two BCD digits per clock (digit i at bit i*4, LSB-first). Extracted with
-          // ONE divide-by-100 instead of two CHAINED divide-by-10: q2 = q/100 is the
-          // only wide (reciprocal-multiply) operation on the q feedback, and the two
-          // low digits come from q%100 (a 0..99 value -> a tiny 7-bit extract). That
-          // halves the per-clock cone vs `q/10 -> q1/10` in series — the FBSTP engine
-          // (u_bcd) was the K26 worst path after +VEN_FP_PIPE2. Bit-exact and SAME
-          // clock count (d0=q%10, d1=(q/10)%10, q2=q/100), so it is cycle-neutral.
+          // Two BCD digits per clock (digit i at bit i*4, LSB-first).
+`ifdef VEN_BCD_DIV100
+          // +VEN_BCD_DIV100 (OPTIONAL, default OFF): extract with ONE divide-by-100
+          // instead of two CHAINED divide-by-10 — q2 = q/100 is the only wide
+          // (reciprocal-multiply) op on the q feedback; the two low digits come from
+          // q%100 (a 0..99 value -> a tiny 7-bit extract). Halves the per-clock cone.
+          // Bit-exact + cycle-neutral (d0=q%10, d1=(q/10)%10, q2=q/100). It only helps
+          // when u_bcd is the worst path (the OOC half-cache+FP_PIPE2 65.3 MHz config);
+          // in the full SoC the eip/TLB cone binds, so it is OFF by default there.
           automatic logic [63:0] q2  = q / 64'd100;
           automatic logic [63:0] rem = q - (q2 * 64'd100);   // q mod 100, 0..99
           automatic logic [6:0]  r   = rem[6:0];
           automatic logic [3:0]  d0  = r % 7'd10;            // q % 10
           automatic logic [3:0]  d1  = r / 7'd10;            // (q / 10) % 10
+`else
+          // DEFAULT: two CHAINED divide-by-10 (the original form).
+          automatic logic [3:0]  d0 = q[3:0]  ; // placeholder, recomputed below
+          automatic logic [63:0] q1;
+          automatic logic [3:0]  d1;
+          automatic logic [63:0] q2;
+          d0 = q  % 64'd10;  q1 = q  / 64'd10;
+          d1 = q1 % 64'd10;  q2 = q1 / 64'd10;
+`endif
           bcd_acc[{i,        2'b00} +: 4] <= d0;   // digit i
           bcd_acc[{(i+5'd1), 2'b00} +: 4] <= d1;   // digit i+1
           q <= q2;

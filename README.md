@@ -148,7 +148,7 @@ Headline OOC `core` results (`xck26-sfvc784-2LV-c`, `+VTM_NO_DPI`, 15 ns target)
 | `+VEN_UOPCACHE` (µop-cache, 8 KB L1s) | 79.4k (68%) | 25.6k | 40 | 31 | — | 51.7 MHz | FADD commit cone |
 | `+VEN_CACHE_HALF` (4 KB L1s) | 78.0k (67%) | 25.6k | 40 | 31 | 59.4 | 52.6 MHz | FADD `fpp→fpr` cone |
 | `+VEN_FP_PIPE2` (2-stage FADD commit) | 76.7k (65%) | 25.8k | 40 | 31 | 78.4 | 63.0 MHz | `u_bcd` (FBSTP) engine |
-| **+ BCD ÷100 step** (`ven_bcd`) | 76.6k (65%) | 25.8k | 40 | 31 | 80.6 | **65.3 MHz** | µop-cache fill→front-end |
+| **+ BCD ÷100 step** (`ven_bcd`, opt-in `+VEN_BCD_DIV100`) | 76.6k (65%) | 25.8k | 40 | 31 | 80.6 | **65.3 MHz** | µop-cache fill→front-end |
 
 Three architectural walls, broken in turn. (1) The **single-cycle x86 byte-window
 decoder** (`u_icache` MUXF cluster) — the µop-cache deletes it (predecode-on-fill, slot
