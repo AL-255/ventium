@@ -152,3 +152,56 @@ needs the FP cone pipelined, not less cache — and shrinking the cache is a rea
 that's free to keep (functionally verified), just not the Fmax lever. Reproduce:
 `HALF=1 CONFIG=uopcache MODE=full OUTTAG=_half vivado -mode batch -source fpga/scripts/apr_run.tcl`.
 
+### Half-cache to 60 MHz: the 2-stage FP commit (`+VEN_FP_PIPE2`)
+
+The half-cache section above ends on the diagnosis that the Fmax wall is the FP
+deferred-commit cone, not the cache. This closes it. Every leaf cell of the **63 MHz**
+build, colored by RTL module (luminance = sub-block):
+
+![Ventium core on the KV260, half-cache + FP_PIPE2, routed 63 MHz](fpga-device-view.png)
+
+**The lever — measured, not guessed.** A timing-driven P&R sweep over the half-cache
+checkpoint (one synth, many place/route directives, all over-constrained @ 15 ns) lifts
+the routed Fmax from the production congestion directives' **50.1 → 52.6 MHz**
+(`ExtraNetDelay_high` place + `Explore` route) — but no directive, Pblock, or retiming
+clears the wall, because the binder is **logic depth, not routing**: the deferred FADD
+commit runs the *entire* `f_eval` (`f_eval_s1` front → `f_eval_s2` round-pack) in one
+clock — a **latency-1, ~80-level / ~43-CARRY8** cone `fpp → fx_round_pack → fpr`. P&R can
+only redistribute route delay on it; retiming can't split a latency-1 path (one register
+layer, nothing to balance); synthesis itself caps at 59.4 MHz.
+
+`+VEN_FP_PIPE2` splits the cone. It inserts **one register** (the `fx_pipe_t` carrier) at
+the `f_eval_s1`/`f_eval_s2` boundary, so the fast-arm commit becomes two clocks — `s1` at
+N+1, the round-pack + `fpr` write at N+2. The key enabler is that the **FP scoreboard
+already publishes the result at issue+latency (FADD = 3)** independent of when the deferred
+commit physically writes `fpr` (`core.sv`): the commit moves N+1 → N+2, still ≤ issue+3, so
+every dependent reads the value in time. That makes it **cycle-safe by construction** — not
+a cycle-model change:
+
+| Check | Result |
+|---|---|
+| `make verify` (default build, no `VEN_FP_PIPE2`) | **GREEN** — default byte/cycle-identical |
+| A/B cycle trace, `mb_faddchain` (`make verify-fppipe2`) | **byte-identical** to the validated 1-stage |
+| A/B `mb_fpindep` | **identical final arch state**; +0.09 % cyc (in M5 band) |
+| M5 FP cycle bands (faddchain CPI ~3, fpindep < that) | **held** |
+| 1M-vector `f_eval_s2∘f_eval_s1 == f_eval` | **bit-exact** |
+
+The result (same 15 ns target, half-cache µop-cache base):
+
+| Metric (routed OOC, KV260) | half (1-stage `VEN_FP_PIPE`) | half **`+VEN_FP_PIPE2`** | Δ |
+|---|---:|---:|---:|
+| CLB LUTs (synth) | 77,975 (66.6 %) | 76,700 (65.5 %) | −1.6 % |
+| CLB Registers | 25,565 | 25,838 | +273 FF (the pipe reg) |
+| CARRY8 / DSP / BRAM | 1,862 / 31 / 40 | 1,866 / 31 / 40 | ≈ 0 |
+| **Fmax — synth** (WNS@15 ns) | 59.4 MHz | **78.4 MHz** | **+32 %** |
+| **Fmax — routed** | 52.6 MHz (best directive) | **63.0 MHz** | **+20 %** |
+| Worst path | `fpp → fx_round_pack → fpr` | `u_bcd` (BCD/FBSTP engine) | cone gone |
+
+So the FADD cone leaves the critical path entirely (synth 59→78 MHz), and the routed build
+clears **60 MHz at 63.0** — the worst path is now the rare iterative **BCD engine** (`u_bcd`,
+FBLD/FBSTP), with the µop-cache `store_bmap → eip` fill path just below it. Cost: ~**+273
+flip-flops** (one `fx_pipe_t` stage register), LUT-neutral. The default build is untouched —
+all new logic is under `ifdef VEN_FP_PIPE2`. Reproduce: `STAGE=synth FP_PIPE2=1` then
+`STAGE=pnr FP_PIPE2=1 STRAT=fp2_timingopt PLACE_DIR=ExtraTimingOpt ROUTE_DIR=Explore vivado
+-mode batch -source fpga/scripts/apr_hc_pnr.tcl`; cycle-safety via `make verify-fppipe2`.
+

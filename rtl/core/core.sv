@@ -3439,6 +3439,9 @@ module core
 `endif
 `ifdef VEN_FP_PIPE
       fpp_valid<=1'b0;
+`ifdef VEN_FP_PIPE2
+      fpp2_valid<=1'b0;
+`endif
 `endif
       // D-cache timing arrays (dc_tag/dc_val/dc_lru) are reset inside the
       // dcache_timing module's own rst_n arm (rtl/mem/dcache.sv).
@@ -3528,6 +3531,19 @@ module core
         fpp_aluop <= fp_cap_aluop; fpp_a <= fp_cap_a; fpp_b <= fp_cap_b;
         fpp_rc    <= fp_cap_rc;    fpp_err <= fp_cap_err; fpp_dst <= fp_cap_dst;
       end
+`ifdef VEN_FP_PIPE2
+      // Stage 1 -> stage 2: register the f_eval_s1 result one clock after capture.
+      // A captured op (fpp_valid this clock) advances into the stage-2 slot; its
+      // we_wabs commit fires the NEXT clock from fpp2_s1. At most one op per clock
+      // enters each slot (the fast arm issues <=1 FP op), so the two stages never
+      // collide.
+      fpp2_valid <= fpp_valid;
+      if (fpp_valid) begin
+        fpp2_s1  <= fp_s1_next;
+        fpp2_rc  <= fpp_rc;
+        fpp2_dst <= fpp_dst;
+      end
+`endif
 `endif
 
       // -------------------------------------------------------------------
@@ -4637,6 +4653,25 @@ module core
   logic [1:0]  fp_cap_rc;
   logic        fp_cap_err;
   logic        fp_pipe_rd_haz;       // next op reads the in-flight target -> stall
+`ifdef VEN_FP_PIPE2
+  // 2-STAGE FP-commit split (Fmax: K26 half-cache 60 MHz). The 1-stage +VEN_FP_PIPE
+  // defer still runs the WHOLE f_eval (f_eval_s1 front -> f_eval_s2 round) in the
+  // single commit clock N+1 -> an ~80-level / ~43-CARRY8 cone (fpp_*->fx_round_pack
+  // ->fpr) that caps the routed Fmax ~52 MHz. This inserts ONE register at the
+  // f_eval_s1/f_eval_s2 boundary, so the cone is split across TWO clocks:
+  //   N+1: fp_s1_next = f_eval_s1(fpp_*)  -> registered into fpp2_s1   (front half)
+  //   N+2: f_eval_s2(fpp2_s1)             -> committed via we_wabs      (back half)
+  // The result lands in fpr at issue+2; the FP scoreboard already publishes it at
+  // issue+lat (fadd lat 3 = issue+3), so EVERY role>=2 dependent reads it no earlier
+  // than issue+3 -> the commit is still in fpr in time and the per-retire arch state
+  // + the FP cycle bands are IDENTICAL to +VEN_FP_PIPE (no oracle change). Requires
+  // VEN_FP_PIPE + the SPLIT eval (VEN_SRT_ITER, the same guard as the 1-stage split).
+  logic        fpp2_valid;           // a stage-1 result is in flight (commits N+2)
+  fx_pipe_t    fpp2_s1;              // registered f_eval_s1 output (the split point)
+  logic [1:0]  fpp2_rc;
+  logic [2:0]  fpp2_dst;             // ABSOLUTE fpr index carried from stage 0
+  fx_pipe_t    fp_s1_next;           // comb f_eval_s1 result feeding the stage reg
+`endif
 `endif
 
   always_comb begin
@@ -4693,6 +4728,35 @@ module core
     // past this window, so this only bites role-0/1 readers (FXCH/FLDSTI/slow FST/
     // FCOM) — none of which appear in the throughput microbench, so the FP cycle
     // bands are preserved. Checks both ST0 (ftop) and ST(i) against the target.
+`ifdef VEN_FP_PIPE2
+    // ===== 2-STAGE split commit (see the fpp2_* declarations) ================
+    // Stage 1 (combinational; registered into fpp2_s1 at this edge): the f_eval_s1
+    // FRONT of the captured op. Only sampled when fpp_valid, so the unconditional
+    // assign is safe and latch-free. VEN_FP_PIPE2 REQUIRES VEN_SRT_ITER (the engine
+    // owns divide, so the split eval's div default is unreachable — same guard the
+    // 1-stage split relies on).
+    fp_s1_next = f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err);
+    // The in-flight result is now 2 clocks deep, so the RAW hazard spans BOTH slots:
+    // stall a role-0/1 reader of the stage-0 target (fpp_dst, commits in 2 clocks)
+    // OR the stage-1 target (fpp2_dst, commits THIS edge — the same pre-edge stale
+    // read the 1-stage guarded). Role>=2 consumers are scoreboard-stalled to issue+3
+    // (= this commit clock), so the throughput kernels never hit it and the FP bands
+    // are preserved; it only bites FXCH/FLDSTI/slow FST/FCOM, as before.
+    fp_pipe_rd_haz = u_d.is_fp &&
+        ( (fpp_valid  && ((ftop==fpp_dst)  || (((ftop + u_d.fp_sti) & 3'd7)==fpp_dst)))
+        ||(fpp2_valid && ((ftop==fpp2_dst) || (((ftop + u_d.fp_sti) & 3'd7)==fpp2_dst))) );
+    // Stage 2 (cycle N+2): finish f_eval_s2 from the REGISTERED stage-1 result and
+    // commit to the absolute target. This is the SHORT back-half cone (round_pack
+    // only); the front half was spent the previous clock — that is the whole split.
+    if (fpp2_valid) begin
+      automatic logic [82:0] pp_arf = f_eval_s2(fpp2_s1, fpp2_rc);
+      fp_we_wabs       = 1'b1;
+      fp_wabs_idx      = fpp2_dst;
+      fp_wabs_data     = pp_arf[79:0];
+      fp_we_wabs_fstat = 1'b1;
+      fp_wabs_fstat    = f_arith_fstat(fstat, pp_arf);
+    end
+`else
     fp_pipe_rd_haz = fpp_valid && u_d.is_fp &&
                      ((ftop==fpp_dst) || (((ftop + u_d.fp_sti) & 3'd7)==fpp_dst));
     // Deferred FK_ARITH commit (cycle N+1): the captured op's f_eval is computed
@@ -4721,6 +4785,7 @@ module core
       fp_we_wabs_fstat = 1'b1;
       fp_wabs_fstat    = f_arith_fstat(fstat, pp_arf);
     end
+`endif
 `endif
 
     // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
