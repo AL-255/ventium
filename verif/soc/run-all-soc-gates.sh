@@ -49,6 +49,7 @@ GATES=(
   "psocfarcall (M9.5 real-mode far CALL/RETF)|verif/soc/run-soc-farcall-gate.sh"
   "psoclseg (M9.5 LES/LDS/LSS/LFS/LGS)|verif/soc/run-soc-lseg-gate.sh"
   "psocsgdt (M9.5 SGDT/SIDT)|verif/soc/run-soc-sgdt-gate.sh"
+  "psocfw (F2 SoC boot firmware: COM1 banner)|verif/soc/run-soc-fw-gate.sh"
   "test386 (external CPU tester)|verif/external/test386/run-test386-gate.sh"
 )
 

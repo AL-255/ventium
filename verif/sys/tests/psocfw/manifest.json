@@ -1,0 +1,32 @@
+{
+  "name": "psocfw",
+  "kind": "system",
+  "src": "psocfw.S",
+  "linker": "psocfw.ld",
+  "image": "psocfw.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 600,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-fw-gate.sh",
+  "what_this_is": "F2 -- the SoC boot FIRMWARE (the guest half of 'boot + console output + clean exit', the milestone sw/ps/ven_soc_app documents). Unlike the pboot test stubs, this is a real firmware: it initialises the COM1 16550 UART and prints a banner to it, then exits. On the board the PS app's service_out routes the COM1 THR bytes (0x3F8) to the Linux console.",
+  "transitions": [
+    "reset (F000:FFF0) -> 16-bit real mode; DS=0xF000 so the banner (in the -bios segment) is addressable; cr0 stays 0x60000010",
+    "init COM1 16550: DLAB=1 / divisor=1 (115200) / 8N1 / DTR+RTS",
+    "print the banner 'Ventium SoC: Pentium (P54C) core alive on KV260\\r\\n' char-by-char via LODSB (DS:SI) -> OUT COM1 THR (0x3F8)",
+    "isa-debug-exit (out 0xf4, al=0x42 -> status 133)"
+  ],
+  "why_per_record_differential": "Every step is synchronous + deterministic (the PS-emulated / RTL-modeled COM1 THR always accepts a byte, so the bytes are written back-to-back with no LSR poll -> no I/O timing nondeterminism). The gen_trace.py --system single-step golden is a valid per-record oracle; compare.py --mode func checks the boot + every UART OUT per-record over all 324 retired instructions. The banner text ('Ventium SoC: Pentium (P54C) core alive on KV260') is reproduced byte-identical on qemu-system's serial.",
+  "non_vacuous": "The gate asserts BOTH traces reach the exit (pc=0x3c) AFTER the full print loop -- a HALT or a short banner would never get there.",
+  "zero_new_rtl_note": "No new RTL: runs on the existing ventium_soc 16550 UART + the LODSB string engine + flat real-mode memory. The banner read uses the string engine (DS:SI) because register-indirect [si] is not decoded (only [disp16] + the string engine are); the F000-segment DS makes the in-image banner reachable.",
+  "next": "F3 adds INT-based BIOS services (INT 10h/13h/16h/21h), which need real-mode IVT INT n / IRET delivery (currently only the protected-mode 8-byte IDT gate path exists) -- the next firmware-foundation RTL feature.",
+  "description": "Bare-metal F2 SoC boot firmware. A real-mode -bios firmware inits COM1 and prints a banner, then exits; proves the SoC boots + does console output byte-identical to qemu-system-i386 -cpu pentium over all 324 retired instructions, per-record, with a non-vacuous banner-printed-then-exit assertion. The guest half of the F2 'boot + console + clean exit' milestone."
+}
