@@ -633,6 +633,8 @@ module core
     // M9.5 real-mode far CALL / RETF (2-beat stack push / pop of CS:IP). Reuse
     // seg_step as the beat counter (mutually exclusive with the seg/ljmp states).
     S_LCALL, S_RETF,
+    // M9.5 SGDT/SIDT: 2-beat store of the 6-byte GDTR/IDTR pseudo-descriptor.
+    S_SGDT,
     // M2S.2 paging: the 2-level page-walk micro-sequence (PDE read -> PTE read ->
     // optional A/D writeback -> TLB fill -> resume the diverted memory state).
     S_WALK,
@@ -1063,7 +1065,10 @@ module core
     SYS_MOVDR_FROM, SYS_MOVDR_TO,
     // M9.5 — real-mode far CALL ptr16:16/32 (0x9A) and RETF (0xCB / 0xCA imm16).
     // Reuse d_ljmp_off/d_ljmp_sel for the call target and d_ret_imm for RETF imm16.
-    SYS_LCALL, SYS_RETF
+    SYS_LCALL, SYS_RETF,
+    // M9.5 — SGDT (0F 01 /0) / SIDT (0F 01 /1): store the 6-byte GDTR/IDTR
+    // pseudo-descriptor to memory (the reverse of LGDT/LIDT's S_LGDT read).
+    SYS_SGDT, SYS_SIDT
   } sysop_e;
   sysop_e      d_sysop;
   logic [2:0]  d_sys_sreg;     // target/source segment register index (mov sreg)
@@ -1306,10 +1311,17 @@ module core
           if (sys_mode && smm_active) d_rsm=1'b1; else d_unknown=1'b1;
         end
         // ---- M2S.1 system 0F opcodes ---------------------------------------
-        8'h01: begin // 0F 01 /2 LGDT, /3 LIDT (memory operand = 6 bytes)
+        8'h01: begin // 0F 01 /2 LGDT, /3 LIDT, /0 SGDT, /1 SIDT (mem operand = 6 bytes)
           if (modrm_reg==3'd2 || modrm_reg==3'd3) begin
             d_sysop=(modrm_reg==3'd2)?SYS_LGDT:SYS_LIDT;
             d_mem_read=1'b1;       // read the 6-byte pseudo-descriptor from memory
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else if ((modrm_reg==3'd0 || modrm_reg==3'd1) && modrm_mod!=2'b11 && !paging_on) begin
+            // M9.5 SGDT (/0) / SIDT (/1): STORE the 6-byte pseudo-descriptor. Not
+            // privileged (any CPL). Scoped to !paging_on (the SoC boot path; the
+            // 2-beat S_SGDT store does not integrate page translation) -> else HALT.
+            d_sysop=(modrm_reg==3'd0)?SYS_SGDT:SYS_SIDT;
+            d_mem_write=1'b1;
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end else d_unknown=1'b1;  // /4 SMSW /6 LMSW etc deferred
         end

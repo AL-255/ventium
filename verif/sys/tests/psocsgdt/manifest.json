@@ -1,0 +1,33 @@
+{
+  "name": "psocsgdt",
+  "kind": "system",
+  "src": "psocsgdt.S",
+  "linker": "psocsgdt.ld",
+  "image": "psocsgdt.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 40,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-sgdt-gate.sh",
+  "what_this_is": "M9.5 -- SGDT (0F 01 /0) / SIDT (0F 01 /1): store the 6-byte GDTR/IDTR pseudo-descriptor to memory (the reverse of LGDT/LIDT). Used by OS/driver/memory-manager init to read the descriptor-table registers; both previously HALTed (only /2 LGDT /3 LIDT were decoded). Not privileged (any CPL).",
+  "transitions": [
+    "reset (F000:FFF0) -> 16-bit real mode; cr0 stays 0x60000010 (no paging)",
+    "build + LGDT a known GDT pseudo-descriptor {limit=0x0123, base=0x00456789}; LIDT {limit=0x07FF, base=0x00001000}",
+    "SGDT -> 0x620, SIDT -> 0x628 (the 2-beat S_SGDT store)",
+    "read the stored bytes back into GPRs (ax/bx/cx = gdt limit/base15:0/base31:16; di/si/bp = idt) so the per-record differential sees them",
+    "isa-debug-exit (out 0xf4, al=0x42 -> status 133)"
+  ],
+  "implementation": "decode extends the 0F 01 arm: /0 -> SYS_SGDT, /1 -> SYS_SIDT (mem form, d_mem_write), gated on !paging_on (the 2-beat S_SGDT store does not integrate page translation -> else HALT). S_SGDT mirrors S_LGDT's read layout as a WRITE: beat 0 @[mem] = {base[15:0], limit[15:0]} (wstrb 1111), beat 1 @[mem+4] = base[31:16] (wstrb 0011). SYS_SGDT selects gdt_base/gdt_limit, else idt. base[31:24]=0 in the test keeps the 16-bit (24-bit base) and 32-bit forms identical so the gate is unambiguous.",
+  "why_per_record_differential": "SGDT/SIDT are synchronous, deterministic stores; the per-record compare cannot see arbitrary memory, so the firmware reads the stored bytes back into GPRs (incl. a MOV-moffs accumulator load) which the compare DOES check vs qemu over all 26 retired instructions.",
+  "non_vacuous": "The gate asserts BOTH traces reach the final readback (pc=0x58, idt base31:16 -> bp). If SGDT/SIDT HALTed the trace would stop earlier and never reach it.",
+  "zero_new_rtl_note": "Scoped to !paging_on (the SoC boot path). The user-mode corpus never executes SGDT/SIDT and runs with paging configurations off the decoded path, so the build is byte-identical (make verify 77/77 + verify-sys 20/20).",
+  "description": "Bare-metal M9.5 SoC SGDT/SIDT differential. A real-mode -bios firmware LGDT/LIDTs known values, SGDT/SIDTs them back to memory, and reads the stored bytes into GPRs; proves the store is byte-identical to qemu-system-i386 -cpu pentium over all 26 retired instructions, per-record, with a non-vacuous final-readback-reached assertion on both traces. Completes the M9.5 boot-ISA gap set (CPUID, far CALL/RETF, LES/LDS family, SGDT/SIDT)."
+}

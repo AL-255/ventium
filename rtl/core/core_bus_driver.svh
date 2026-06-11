@@ -71,6 +71,22 @@
         if (!seg_step) mem_addr = seg_base[SG_SS] + gpr[R_ESP];            // pop IP
         else           mem_addr = seg_base[SG_SS] + (gpr[R_ESP]+{28'd0,q_w}); // pop CS
       end
+      // M9.5 — SGDT/SIDT: 2-beat store of the 6-byte pseudo-descriptor (the exact
+      // reverse of S_LGDT's read layout). beat 0 @[mem] = {base[15:0], limit[15:0]}
+      // (4 bytes); beat 1 @[mem+4] = base[31:16] (2 bytes). SYS_SGDT -> GDTR, else IDTR.
+      S_SGDT: begin
+        mem_req=1'b1; mem_we=1'b1;
+        mem_addr = dbase + q_ea + {29'd0, seg_step, 2'b00};
+        if (!seg_step) begin
+          mem_wstrb = 4'b1111;
+          mem_wdata = (q_sysop==SYS_SGDT) ? {gdt_base[15:0], gdt_limit}
+                                          : {idt_base[15:0], idt_limit};
+        end else begin
+          mem_wstrb = 4'b0011;
+          mem_wdata = (q_sysop==SYS_SGDT) ? {16'd0, gdt_base[31:16]}
+                                          : {16'd0, idt_base[31:16]};
+        end
+      end
       S_FLOAD: begin
         mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
       end

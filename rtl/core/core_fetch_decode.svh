@@ -409,6 +409,9 @@
                 if (seg_real && !paging_on) begin seg_step<=1'b0; state<=S_RETF; end
                 else state<=S_HALT;
               end
+              // M9.5 — SGDT/SIDT: 2-beat store of the GDTR/IDTR pseudo-descriptor.
+              // Decode already gated on !paging_on; mode-agnostic otherwise.
+              SYS_SGDT, SYS_SIDT: begin seg_step<=1'b0; state<=S_SGDT; end
               default: state<=S_EXEC;  // MOV CRn to/from, MOV/STR sreg: no fetch
             endcase
           end
