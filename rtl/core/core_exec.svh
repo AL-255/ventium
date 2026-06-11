@@ -514,23 +514,65 @@
               //                     and every unknown 0x4000_01xx..0x4000_ffxx leaf the
               //                     SeaBIOS hypervisor scan probes. ECX (subleaf) is
               //                     not consulted by any leaf this boot touches.
-              // Reached only under cosim_en (the decode gates K_CPUID on cosim_en); the
-              // existing corpus never executes CPUID, so this arm is inert there.
+              // Reached under cosim_en (Win95 co-sim) OR soc_en (the M8/M9 SoC, where
+              // real boot firmware probes CPUID); the decode gates K_CPUID on
+              // (cosim_en||soc_en). The user-mode corpus has both off, so this arm is
+              // inert there and that build stays byte-identical.
+              // The leaf->result table is CPU-MODEL-SPECIFIC, and the SoC oracle
+              // (qemu-system-i386 8.2.2 `-cpu pentium`) returns DIFFERENT CPUID than
+              // the Win95 co-sim's qemu did (e.g. leaf-0 max=4 not 1, leaf-1 sig=0x663
+              // not 0x543 — note 0x663 matches the SoC's non-cosim reset EDX). So the
+              // table branches on soc_en: the SoC arm is the verified standard boot
+              // leaf-set captured from the live qemu-system golden
+              // (verif/sys/tests/psoccpuid); the cosim arm is the UNCHANGED Win95 model
+              // (so the M7 lockstep stays byte-identical). soc_en and cosim_en are
+              // mutually exclusive (tb_soc vs the Win95 co-sim TB).
               K_CPUID: begin
-                unique case (gpr[R_EAX])
-                  32'h0000_0000: begin
-                    gpr[R_EAX]<=32'h0000_0001; gpr[R_EBX]<=32'h756e_6547;
-                    gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69;
-                  end
-                  32'h4000_0000: begin
-                    gpr[R_EAX]<=32'h4000_0001; gpr[R_EBX]<=32'h5447_4354;
-                    gpr[R_ECX]<=32'h4354_4743; gpr[R_EDX]<=32'h4743_5447;
-                  end
-                  default: begin
-                    gpr[R_EAX]<=32'h0000_0543; gpr[R_EBX]<=32'h0000_0800;
-                    gpr[R_ECX]<=32'h8000_0000; gpr[R_EDX]<=32'h0080_03bd;
-                  end
-                endcase
+                if (soc_en) begin
+                  // qemu-system-i386 8.2.2 `-cpu pentium`, verified per-record vs the
+                  // psoccpuid golden over leaves {0..4, 0x4000_0000..1, 0x8000_0000..4}
+                  // (the brand string is "QEMU Virtual CPU version 2.5+"). Reserved /
+                  // unprobed leaves return 0 (unverified beyond this set, documented).
+                  unique case (gpr[R_EAX])
+                    32'h0000_0000: begin gpr[R_EAX]<=32'h0000_0004; gpr[R_EBX]<=32'h756e_6547;
+                                         gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69; end
+                    32'h0000_0001: begin gpr[R_EAX]<=32'h0000_0663; gpr[R_EBX]<=32'h0000_0800;
+                                         gpr[R_ECX]<=32'h8000_0001; gpr[R_EDX]<=32'h0781_abfd; end
+                    32'h0000_0002: begin gpr[R_EAX]<=32'h0000_0001; gpr[R_EBX]<=32'h0000_0000;
+                                         gpr[R_ECX]<=32'h0000_004d; gpr[R_EDX]<=32'h002c_307d; end
+                    32'h0000_0004: begin gpr[R_EAX]<=32'h0000_0121; gpr[R_EBX]<=32'h01c0_003f;
+                                         gpr[R_ECX]<=32'h0000_003f; gpr[R_EDX]<=32'h0000_0001; end
+                    32'h4000_0000: begin gpr[R_EAX]<=32'h4000_0001; gpr[R_EBX]<=32'h5447_4354;
+                                         gpr[R_ECX]<=32'h4354_4743; gpr[R_EDX]<=32'h4743_5447; end
+                    32'h8000_0000: begin gpr[R_EAX]<=32'h8000_0004; gpr[R_EBX]<=32'h756e_6547;
+                                         gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69; end
+                    32'h8000_0001: begin gpr[R_EAX]<=32'h0000_0663; gpr[R_EBX]<=32'h0000_0000;
+                                         gpr[R_ECX]<=32'h0000_0000; gpr[R_EDX]<=32'h0000_0000; end
+                    32'h8000_0002: begin gpr[R_EAX]<=32'h554d_4551; gpr[R_EBX]<=32'h7269_5620;
+                                         gpr[R_ECX]<=32'h6c61_7574; gpr[R_EDX]<=32'h5550_4320; end
+                    32'h8000_0003: begin gpr[R_EAX]<=32'h7265_7620; gpr[R_EBX]<=32'h6e6f_6973;
+                                         gpr[R_ECX]<=32'h352e_3220; gpr[R_EDX]<=32'h0000_002b; end
+                    // leaf 3, 0x4000_0001, 0x8000_0004, and all reserved leaves -> 0.
+                    default:       begin gpr[R_EAX]<=32'h0000_0000; gpr[R_EBX]<=32'h0000_0000;
+                                         gpr[R_ECX]<=32'h0000_0000; gpr[R_EDX]<=32'h0000_0000; end
+                  endcase
+                end else begin
+                  // Win95 co-sim model (cosim_en) — UNCHANGED.
+                  unique case (gpr[R_EAX])
+                    32'h0000_0000: begin
+                      gpr[R_EAX]<=32'h0000_0001; gpr[R_EBX]<=32'h756e_6547;
+                      gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69;
+                    end
+                    32'h4000_0000: begin
+                      gpr[R_EAX]<=32'h4000_0001; gpr[R_EBX]<=32'h5447_4354;
+                      gpr[R_ECX]<=32'h4354_4743; gpr[R_EDX]<=32'h4743_5447;
+                    end
+                    default: begin
+                      gpr[R_EAX]<=32'h0000_0543; gpr[R_EBX]<=32'h0000_0800;
+                      gpr[R_ECX]<=32'h8000_0000; gpr[R_EDX]<=32'h0080_03bd;
+                    end
+                  endcase
+                end
                 flags_we=1'b0;   // CPUID modifies no flags
               end
 
