@@ -80,7 +80,15 @@ struct Args {
     bool     peek_pc    = false;   // on stop, dump opcode bytes at the last retired PC
     bool     peek_vga   = false;   // on stop, decode the 0xB8000 VGA text buffer
     uint32_t peek_mem   = 0;       // on stop, hexdump 64 bytes at this linear address (0=off)
+    uint32_t watch_write= 0;       // log every mem write into [addr, addr+16) (0=off; gap-walk)
 };
+
+// --watch-write debug hook: the mem service lambda is defined before the `cycles`
+// counter is in scope, so the watch state lives at file scope. Logs each write whose
+// 4-byte-aligned address overlaps the 16-byte window, deduped across same-clock settles.
+uint32_t g_watch_addr   = 0;
+uint64_t g_watch_cycles = 0;
+uint32_t g_wlast_a = 0xffffffffu, g_wlast_d = 0u; uint64_t g_wlast_c = ~0ull;
 
 [[noreturn]] void usage(const char* a0, int code) {
     std::fprintf(stderr,
@@ -115,6 +123,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--peek-vga")        a.peek_vga   = true;
         else if (k == "--vga-bios")        a.vga_bios   = need("--vga-bios");
         else if (k == "--peek-mem")        a.peek_mem   = parse_u32(need("--peek-mem"));
+        else if (k == "--watch-write")     a.watch_write= parse_u32(need("--watch-write"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -131,6 +140,7 @@ Args parse_args(int argc, char** argv) {
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     Args args = parse_args(argc, argv);
+    g_watch_addr = args.watch_write;
 
     // ---- backing memory + BIOS image --------------------------------------
     // System cold reset: a -bios image is mapped so its LAST byte lands at
@@ -251,6 +261,20 @@ int main(int argc, char** argv) {
         top->mem_rdata = rdata;
         top->mem_ack   = ack;
 
+        // --watch-write: report writes that land in the watched 16-byte window.
+        if (g_watch_addr && top->mem_req && top->mem_we) {
+            uint32_t wa = (uint32_t)top->mem_addr & ~3u;
+            if (wa + 3 >= g_watch_addr && wa < g_watch_addr + 16) {
+                uint32_t wd = (uint32_t)top->mem_wdata;
+                if (!(wa == g_wlast_a && wd == g_wlast_d && g_watch_cycles == g_wlast_c)) {
+                    std::fprintf(stderr,
+                        "tb_soc: WATCH-WRITE cyc=%llu addr=0x%08x wdata=0x%08x wstrb=0x%x\n",
+                        (unsigned long long)g_watch_cycles, wa, wd, (unsigned)top->mem_wstrb);
+                    g_wlast_a = wa; g_wlast_d = wd; g_wlast_c = g_watch_cycles;
+                }
+            }
+        }
+
         if (top->io_ps_req) {
             if (!ps_busy) {                  // serve this forwarded access ONCE
                 uint16_t port = (uint16_t)top->io_ps_addr;
@@ -300,6 +324,7 @@ int main(int argc, char** argv) {
 
     while (true) {
         uint64_t before = trace.retired();
+        g_watch_cycles = cycles;          // for the --watch-write hook
 
         // clk low: combinational settle + serve bus
         top->clk = 0; service_bus(); top->eval();
