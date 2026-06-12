@@ -36,11 +36,21 @@ level clone (see [`docs/isa-coverage.md`](docs/isa-coverage.md)
   `POPF`/`IRET` `#DB`) reproduced behind a default-off flag, self-checked against
   the Intel Specification Updates (never against QEMU, which computes correctly).
 - **Macro-workload lock-step (M7)** -- real programs run on the RTL in lock-step
-  vs QEMU: **Quake** is bit-exact over **~1.1M instructions**, and a **Windows 95
+  vs QEMU: **Quake** is bit-exact through **~1.83M instructions** (to a documented
+  QEMU-environment boundary, not a CPU divergence — see below), and a **Windows 95
   boot** is bit-exact to **213,859 instructions** (input-replay: QEMU is the golden
   + environment, the RTL is the checked CPU). This found + fixed **6 real ISA gaps**
   (`TEST r/m,imm` mem-form, `call gs:[]`, `LOCK CMPXCHG`, `IN`/`OUT`, `CPUID`, `INS`).
-- **FPGA full-SoC implementation:** WIP - Targeting KV260 (Xilinx ZU5EV equivalent). The L1$ and peripherals are partially implemented in the PS to save FPGA resources, but the core + FPU are fully RTL.
+- **A self-contained PC SoC (M8/M9/F-track):** PIC/PIT/RTC/i8042/port92/UART/VGA/
+  IDE/DMA/FDC device models, pinned to `qemu-system-i386` by per-record differential
+  gates (`verif/soc/run-all-soc-gates.sh`: **24 gates** = 23 SoC differentials + the
+  external `test386` tester; plus a standalone SeaBIOS boot gate). The **unmodified
+  QEMU SeaBIOS `bios.bin`** completes its full POST on the RTL and boots **FreeDOS to
+  an interactive `C:\>` prompt** — in Verilator simulation (see below).
+- **FPGA full SoC (KV260):** a routed, deployable **40 MHz** bitstream for the Kria
+  KV260 (XCK26) — core + FPU + L1/AXI fully in the PL, the slow peripherals emulated
+  by the PS A53 under Linux. **No board has been attached yet** — the image is
+  structurally verified (timing/DRC/unit gates), not hardware-tested.
 - **PipeViz Visualizer:** A Custom PyQt5-based trace visualizer.
 
 ## Layout
@@ -64,9 +74,12 @@ verif/
                       free-run syscall-emulation; coremark/whetstone/.../Quake)
   sys/                bare-metal system-mode tests + qemu-system goldens
   m7/                 Quake + Win95 lock-step harnesses
-  soc/                device-module unit self-checks
-  bus/                biu_p5 standalone self-consistency + 19 SVA gate
-  errata/             errata self-checks (make m6)
+  soc/                the SoC differential gates (run-all-soc-gates.sh) + unit checks
+  bus/ errata/        biu_p5 standalone + 19 SVA gate; errata self-checks (make m6)
+fpga/               KV260 build scripts (BD + impl → bit/.xsa), the microSD
+                    boot-image pipeline (sd/), timing + architecture notes
+sw/                 PS-side software — ven_soc_app + the HID/VNC daemons (ps/),
+                    the PS-offload peripheral C models (ps_periph/)
 docs/               trace-format.md (the producer/consumer contract), the
                     m*-spec.md design docs, and sphinx/ (the live catalog)
 3rd-party/          opl3_fpga submodule (OPL3 FM synth, for a SoundBlaster card)
@@ -83,9 +96,11 @@ make verify-sys      # system-mode gates (pseg/pmode/ppage/pintr/pfault/pcpl/
                      # ptask/pdebug/pv86 + psmm structural)
 make m1 m2 m3 m4 m5 m6    # per-milestone gates (m3 = x87, m6 = errata behind a flag)
 
-# macro-workload lock-step (oracle-bound prefixes; see docs/m7-lockstep-spec.md):
-bash verif/m7/run-quake-lockstep.sh 1000000     # Quake, 1M-instruction prefix
-bash verif/m7/win95/run-win95-cosim.sh          # Win95 boot prefix
+bash verif/soc/run-all-soc-gates.sh   # the SoC battery: 24 gates (23 per-record
+                                      # qemu-system differentials + test386)
+
+bash verif/m7/run-quake-lockstep.sh 1000000     # macro lock-step (Quake prefix;
+bash verif/m7/win95/run-win95-cosim.sh          #  + Win95 boot — see docs/m7-*)
 
 cd rtl && verilator --lint-only -sv -Wall -Wno-UNUSED -f ventium.f   # lint
 ```
@@ -104,7 +119,10 @@ two ways, both graded against QEMU `-cpu pentium`:
   every retired instruction's full architectural + x87 state is compared vs the
   QEMU gdbstub golden, deep (tens of millions of instructions per config) and
   parallel, with zstd-compressed goldens streamed through `compare_stream.py`
-  (O(1) disk + memory). **18/18 configs are bit-exact (EQUIVALENT).**
+  (O(1) disk + memory). **18 of the 19 configs are bit-exact (EQUIVALENT)**; the
+  19th, a 30M-instruction Quake prefix, is bit-exact through **1.83M instructions**,
+  up to a documented environmental boundary (musl's netlink interface enumeration
+  branches on the host QEMU PID — producer nondeterminism, not a CPU divergence).
 - **Free-run to completion** (`--emulate-syscalls`, `verif/bench/run-freerun.sh`):
   the testbench emulates `int 0x80` directly, so the RTL runs a whole program at
   full Verilator speed, graded by its output vs QEMU-native. **coremark** runs its
@@ -127,11 +145,58 @@ sit lower (multi-cycle `imul`/`FSIN`, U-pipe-only FP, branch mispredicts).
 
 **Quake** (the TyrQuake P5 build) also free-runs on the RTL: it boots fully (pak
 load, palette, renderer) and renders its console frame via the software rasteriser.
-At the FPGA target of **66 MHz** the cycle model estimates **~15 FPS** at 320×200
-(cycles-per-frame), in line with a real Pentium-66. Getting all this clean cost
+From cycles-per-frame the cycle model estimates **~15 FPS** at 320×200 at 66 MHz
+(in line with a real Pentium-66) — **~9 FPS** at the KV260 image's 40 MHz; both are
+cycle-model estimates, not hardware measurements. Getting all this clean cost
 **three fixes**: a CET `endbr32` / multi-byte-NOP decode gap (a real RTL miss,
 regression-tested by `t_endbr`) and two QEMU-golden producer-fidelity bugs
 (`clock_gettime64` capture width, the i386 `recvfrom` syscall number).
+
+## Booting the real PC stack: SeaBIOS → FreeDOS (RTL, Verilator simulation)
+
+The F3 milestone: the **unmodified QEMU SeaBIOS** `bios.bin` (rel-1.16.3) runs its
+entire power-on self-test on the RTL (real → 32-bit protected mode → back, ~5.55M
+instructions), chain-loads via `INT 13h` from the `ven_ide` disk model, and boots
+**FreeDOS** (kernel ke2045, FreeCom 0.86) to an **interactive prompt**. Keystrokes
+(set-1 scancodes injected into the i8042 model by the testbench) traverse the full PC
+input path — i8042 → IRQ1 → 8259 PIC → `INT 9` → BIOS keyboard buffer → FreeCom — and
+the typed commands run through `INT 21h` → FAT16 → IDE, with output drawn by SeaVGABIOS
+`INT 10h` into text VRAM at `0xB8000`. The actual screen, dumped from VRAM at
+**195,000,000 retired instructions / 1,511,243,707 clocks**:
+
+```
+VGA BIOS initialized.
+C:\>ver
+
+FreeCom version 0.86 - WATCOMC - XMS_Swap [Dec 30 2024 22:10:51]
+C:\>dir
+ Volume in drive C is FREEDOS
+ Volume Serial Number is 1C6C-E236
+ Directory of C:\
+
+KERNEL   SYS        48,856  06-11-26 10:55p
+COMMAND  COM        87,772  06-11-26 10:55p
+AUTOEXEC BAT             9  06-12-26 12:24p
+VGAINIT  COM           113  06-12-26  3:32p
+VGABIOS  BIN        38,912  06-12-26 12:24p
+         5 file(s)        175,662 bytes
+         0 dir(s)       2,845,696 bytes free
+C:\>
+```
+
+This is **simulation, not hardware** — and it earned its keep: the boot stalled at
+6.844M instructions on a corrupted kernel, root-caused to the 32-bit ModRM EA decode
+missing the SDM's **SS-segment defaults** for `ESP`/`EBP`-based addressing — SeaBIOS's
+IRQ trampoline `mov ds,[esp+8]` read `DS:` garbage and saved an interrupt frame over
+the freshly loaded `kernel.sys`. QEMU never expresses it (its PIT takes ~zero IRQs in
+that window), and the fix is invisible to every flat-segment gate — the whole battery
+(77/77 + the 24 SoC gates) stayed green throughout.
+
+**F4 (DOS Quake) is in progress — no RTL-Quake claim is made.** A Quake 1.06 shareware
+disk image (official `quake106.zip`: `QUAKE.EXE` + CWSDPMI + `PAK0.PAK` on FreeDOS/FAT16)
+boots fully unattended **under qemu-system** to the in-game `demo1` timedemo — that
+validates the disk/asset/DPMI chain, *not the RTL*. The RTL run of the same image is
+underway and still mid-boot, with no rendered frame yet.
 
 ## FPGA synthesis (KV260)
 
@@ -150,46 +215,87 @@ Headline OOC `core` results (`xck26-sfvc784-2LV-c`, `+VTM_NO_DPI`, 15 ns target)
 | `+VEN_FP_PIPE2` (2-stage FADD commit) | 76.7k (65%) | 25.8k | 40 | 31 | 78.4 | 63.0 MHz | `u_bcd` (FBSTP) engine |
 | **+ BCD ÷100 step** (`ven_bcd`, opt-in `+VEN_BCD_DIV100`) | 76.6k (65%) | 25.8k | 40 | 31 | 80.6 | **65.3 MHz** | µop-cache fill→front-end |
 
-Three architectural walls, broken in turn. (1) The **single-cycle x86 byte-window
-decoder** (`u_icache` MUXF cluster) — the µop-cache deletes it (predecode-on-fill, slot
-reads), the first config to route legally. (2) The **latency-1 ~80-level FADD
-deferred-commit cone** (`fpp → fx_round_pack → fpr`): `+VEN_FP_PIPE2` splits it across the
-FP scoreboard's existing 3-cycle latency window (the result still publishes at issue+lat),
-so it is **cycle-safe** — `make verify` GREEN, the M5 FP cycle bands held, default build
-byte/cycle-identical (`make verify-fppipe2`). (3) The **FBSTP BCD engine** (`u_bcd`): one
-÷100 per step instead of two chained ÷10 halves its cone — bit-exact + cycle-neutral
-(`make verify-bcd`). That takes the K26 to **65.3 MHz** (`ExtraNetDelay_high`); the wall is
-now the µop-cache fill→front-end cluster (route-bound — the diffuse-congestion case the
-docs flag for in-context floorplanning).
+Three architectural walls, broken in turn: the **single-cycle x86 byte-window decoder**
+(deleted by the µop-cache — predecode-on-fill, the first config to route legally); the
+**latency-1 ~80-level FADD deferred-commit cone** (split **cycle-safely** across the FP
+scoreboard's existing 3-cycle latency window by `+VEN_FP_PIPE2` — `make verify` GREEN, M5
+FP bands held, default build byte/cycle-identical); and the **FBSTP BCD engine** (one ÷100
+per step instead of two chained ÷10 — bit-exact + cycle-neutral). That takes the K26 core
+to **65.3 MHz**; the remaining wall is route-bound µop-cache fill→front-end congestion.
 
-**Full SoC, in-context → deployable bitstream.** The numbers above are out-of-context (the
-`core` alone). The actual KV260 image wraps the core + FPU with the L1/AXI memory subsystem
-(→ PS-DDR), the `ven_soc_axil` PS bridge, and the BD interconnect, placed against the PS8 and
-routed to a **bitstream + `.xsa`**. In context the **`eip`/TLB fetch cone** binds: the SoC will
-**not legally route** at 60 MHz (8766 node overlaps) until **`+VEN_FE_PIPE`** — a page-keyed
-micro-TLB that registers the current page's translation so steady-state fetch stops re-walking the
-TLB compare (1-cycle stall only on a page crossing; `ifdef`-gated, default build cycle-identical).
-With it, the full SoC routes clean at **WNS −3.195 ns → ~50.4 MHz** (the translate cone leaves the
-critical path; the new worst path is the same µop-cache fill→`eip` cluster, route-bound).
+**Full SoC, in-context → deployable bitstream.** The numbers above are out-of-context.
+The actual KV260 image adds the L1/AXI memory subsystem (→ PS-DDR), the `ven_soc_axil`
+PS bridge, and the BD interconnect, routed to a **bitstream + `.xsa`**. In context the
+`eip`/TLB fetch cone binds: the SoC does not legally route at 60 MHz until
+**`+VEN_FE_PIPE`** — a page-keyed micro-TLB (1-cycle stall only on a page crossing;
+`ifdef`-gated, default build cycle-identical) — after which it routes clean at **~50.4 MHz**.
 
-**Deployable clock = 50 MHz.** A 60 MHz full-SoC close is *not feasible on the XCK26* — the small
-ZU5EV die runs ~68–71 % LUT and the remaining wall is diffuse fill→`eip` routing congestion, not a
-cone P&R or floorplanning can shorten (the OOC ceiling is 65.3 MHz; the full SoC's extra L1/AXI + BD
-fabric costs the rest). So the board image targets **`pl_clk0` = 50 MHz**, which the `+VEN_FE_PIPE`
-build closes with positive margin. A larger part (e.g. the ZU15EG) would clear 60+; on the K26, 50 MHz
-is the deployable result.
+**Deployable clock = 40 MHz.** A 60 MHz full-SoC close is *not feasible on the XCK26* (the
+OOC ceiling is 65.3 MHz; the SoC's extra fabric leaves diffuse fill→`eip` congestion no
+floorplan clears). The FE_PIPE build closed 50 MHz until the F3 ISA-completeness work
+(16-bit ModRM EAs, FF-group far forms, interruptible `HLT`, real-mode IVT delivery) cost
+~3.5 ns on the high-fanout µop-cache fill net (WNS −3.225 ns, ~43 MHz achievable). The
+shipped image targets **`pl_clk0` = 40 MHz**, routed at **WNS +0.104 ns** (timing met); the
+PS owns the PL clock, and `venclk.sh` can step it 40 → 50 MHz on silicon with a firmware
+smoke test per step. A larger part (e.g. the ZU15EG) would clear 60+.
 
 ![Ventium full SoC placed on the KV260, colored by RTL module](docs/fpga-device-view-soc.png)
 
-📄 **Full results, device views, congestion maps, the full-SoC `+VEN_FE_PIPE` image, the ZU15EG +
-half-cache + FP_PIPE2 experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
+📄 **Full results, device views (incl. the core-only crop
+[`fpga-device-view-soc-core.png`](docs/fpga-device-view-soc-core.png) and the non-core fabric
+[`-soc-outside`](docs/fpga-device-view-soc-outside.png)), congestion maps, the ZU15EG + half-cache +
+FP_PIPE2 experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
 [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
+
+## The KV260 board image
+
+The current deployable build (`fpga/build/kv260_soc_impl_linux_40/`, config = µop-cache +
+half-cache + FP_PIPE2 + FE_PIPE) is routed to a bitstream + `.xsa`, post-route:
+
+| Resource (XCK26) | Used | Available | Util |
+|---|---:|---:|---:|
+| CLB LUTs | 94,712 | 117,120 | 80.9 % |
+| CLB registers | 31,208 | 234,240 | 13.3 % |
+| Block RAM tiles | 40 | 144 | 27.8 % |
+| DSPs | 31 | 1,248 | 2.5 % |
+
+Timing at `pl_clk0` = **40 MHz** (25.000 ns): setup **WNS +0.104 ns**, hold WHS +0.008 ns,
+**0 failing endpoints** of 112,136; DRC carries advisory warnings only (DSP-pipelining
+suggestions). The design occupies 98.3 % of the CLBs — the diffuse-congestion regime
+described above. Reports (`timing_impl.rpt`/`util_impl.rpt`/`drc_impl.rpt`) are on disk.
+
+**Architecture: the PS as the I/O processor.** Only the latency-critical elements live
+in the PL: core + FPU, L1 + AXI master into the PS DDR (carveout at `REMAP_BASE =
+0x4000_0000`), and the `ven_soc_axil` control slave. The slow PC peripherals run as
+**C models on the A53 under Linux** — the same C models the `ps-cosims` gate holds to
+*C model == RTL == qemu*. `ven_soc_app --dos` routes the PIC, i8042 and VGA-register
+ports to the PS and injects interrupts through the `R_INTR` seam (the PS stages
+{vector, level}; the core's INTA strobe auto-clears it and latches a sticky `INTA_SEEN`
+bit, mirroring the 8259's INTA boundary); `hid_kbd` turns USB-keyboard evdev events
+into set-1 scancodes; `fb_vnc` serves the mode-13h framebuffer + live DAC palette over
+VNC (a dependency-free RFB 3.3 server).
+
+Two flashable microSD images exist:
+
+- **Primary — Kria Ubuntu 24.04** (`ventium_kv260_ubuntu.img`, built out-of-repo in
+  `ventium-refs/kria-ubuntu/`): the stock Kria server image with the Ventium package
+  injected (bitstream + `ven_soc_app`/`hid_kbd`/`ven_fb_vnc`/`venclk.sh`); SSH and
+  USB-HID work out of the box.
+- **Baremetal** (`fpga/sd/`, no PetaLinux): `BOOT.BIN` = FSBL + PMUFW + bitstream +
+  `ven_boot.elf` on FAT32; an IDENT smoke test, then the gate-proven COM1-banner
+  firmware on the UART1 (MIO36/37) console.
+
+**Hardware status, stated plainly: no board has been attached.** Everything in this
+section is *structural* evidence (routed timing, DRC, the unit-gated register seam,
+host-smoke-tested daemons) — none of it has yet executed on silicon.
 
 ## Status
 
-The planned roadmap is **complete** — M0–M6, the M2S.0–.6 system-mode track + the
-M2S.4b hardware task switch, M5B + its M5B-int integration, the M6B system errata,
-and the R1/R2 RTL refactors. **M7** (macro-workload lock-step — Quake + Win95)
-landed, and **M8** (the self-contained SoC) is in progress. See
-[`PROGRESS.md`](PROGRESS.md) and [`PROGRESS_Jun04.md`](PROGRESS_Jun04.md) for the
-full, dated detail.
+The original roadmap (M0–M6, the M2S system-mode track, M5B, M6B, R1/R2) is
+**complete**, as are **M7** (macro-workload lock-step), **M8–M9.5** (the
+self-contained PC SoC + first boot), **M11** (x87 transcendentals) and the
+benchmark stack (M13/M14). On the F-track, **F2** (boot firmware) and **F3**
+(interactive FreeDOS) are done *in Verilator simulation*, and the **40 MHz KV260
+board image** is built and structurally verified; **F4** (DOS Quake on the RTL) is
+in progress. See [`PROGRESS.md`](PROGRESS.md) and
+[`PROGRESS_Jun04.md`](PROGRESS_Jun04.md) for the full, dated detail.
