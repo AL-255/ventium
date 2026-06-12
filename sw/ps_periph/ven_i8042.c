@@ -67,6 +67,7 @@ typedef struct {
     uint8_t write_cmd;  // pending controller command awaiting a 0x60 data byte
     uint8_t cbdata;     // controller-sourced output buffer (the "cbdata" path)
     uint8_t obdata;     // last byte handed to the CPU at 0x60
+    uint8_t kbd_bat_pending; // PS/2 kbd RESET: BAT-OK (0xAA) follows the ACK
 } i8042_state_t;
 
 // kbd_reset(): mode = KBD_INT|MOUSE_INT, status = CMD|UNLOCKED,
@@ -79,6 +80,7 @@ static void i8042_reset(ven_periph_t* p) {
     s->write_cmd = 0x00u;
     s->cbdata    = 0x00u;
     s->obdata    = 0x00u;
+    s->kbd_bat_pending = 0u;
 }
 
 // Normalize the 0xF0-0xFF "pulse output port bits 3-0" command (pckbd.c
@@ -122,8 +124,16 @@ static uint8_t i8042_read(ven_periph_t* p, uint16_t port) {
             v = s->cbdata;
             // kbd_read_data side effect: dequeue + deassert IRQ.
             s->obdata  = s->cbdata;
-            s->status  = (uint8_t)(s->status  & ~(STAT_OBF | STAT_MOUSE_OBF));
-            s->outport = (uint8_t)(s->outport & ~(OUT_OBF | OUT_MOUSE_OBF));
+            if (s->kbd_bat_pending) {
+                // RESET's BAT-OK follows the ACK: refill instead of clearing.
+                s->cbdata  = 0xAAu;
+                s->status  = (uint8_t)((s->status  | STAT_OBF) & ~STAT_MOUSE_OBF);
+                s->outport = (uint8_t)((s->outport | OUT_OBF) & ~OUT_MOUSE_OBF);
+                s->kbd_bat_pending = 0u;
+            } else {
+                s->status  = (uint8_t)(s->status  & ~(STAT_OBF | STAT_MOUSE_OBF));
+                s->outport = (uint8_t)(s->outport & ~(OUT_OBF | OUT_MOUSE_OBF));
+            }
         } else {
             v = s->obdata;
         }
@@ -240,11 +250,33 @@ static void i8042_write(ven_periph_t* p, uint16_t port, uint8_t val) {
                 s->mode = (uint8_t)(s->mode & ~MODE_DISABLE_MOUSE);
                 break;
             default:
-                // write_cmd == 0: byte sent to the keyboard. Re-enables kbd iface.
-                s->mode = (uint8_t)(s->mode & ~MODE_DISABLE_KBD);
+                // write_cmd == 0: byte sent to the PS/2 keyboard DEVICE. Respond
+                // like qemu's keyboard: ACK (0xFA); RESET (0xFF) queues BAT-OK
+                // (0xAA) behind the ACK. Mirrors ven_i8042.sv. Re-enables iface.
+                s->mode    = (uint8_t)(s->mode & ~MODE_DISABLE_KBD);
+                s->cbdata  = 0xFAu;
+                s->status  = (uint8_t)(((s->status & ~STAT_CMD) | STAT_OBF) & ~STAT_MOUSE_OBF);
+                s->outport = (uint8_t)((s->outport | OUT_OBF) & ~OUT_MOUSE_OBF);
+                s->kbd_bat_pending = (val == 0xFFu) ? 1u : 0u;
                 break;
         }
     }
+}
+
+// F3 board path (sw/ps/ven_soc_app/hid_kbd.c): inject ONE keyboard-sourced
+// scancode byte into the controller output buffer — the kbd_queue(val, 0) /
+// RTL kbd_inj_* analogue for the PS-placed controller. Honors the single-byte
+// OBF the model exposes: returns 0 (rejected) while a previous byte (or a
+// pending device ACK/BAT response) is still un-read, so the caller keeps its
+// own FIFO and re-tries after the guest's next port-0x60 read. Returns 1 when
+// the byte was accepted (OBF set, kbd-sourced -> IRQ1 per the irq() rule).
+int ven_i8042_kbd_inject(ven_periph_t* p, uint8_t sc) {
+    i8042_state_t* s = (i8042_state_t*)p->state;
+    if ((s->status & STAT_OBF) != 0u || s->kbd_bat_pending) return 0;
+    s->cbdata  = sc;
+    s->status  = (uint8_t)((s->status  | STAT_OBF) & ~STAT_MOUSE_OBF);
+    s->outport = (uint8_t)((s->outport | OUT_OBF) & ~OUT_MOUSE_OBF);
+    return 1;
 }
 
 ven_periph_t* ven_i8042_new(void) {

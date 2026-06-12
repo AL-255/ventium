@@ -40,6 +40,7 @@
 
 #include "verilated.h"
 #include "Vventium_soc.h"
+#include "Vventium_soc___024root.h"   // F4: rootp access for the vram fb dump
 #if VM_TRACE
 #  include "verilated_vcd_c.h"
 #endif
@@ -94,6 +95,10 @@ struct Args {
     // i8042 (set-1 make/break scancodes via the kbd_inj_* ports). '~' = Enter.
     uint64_t type_at_n  = 0;
     std::string type_text;
+    // --dump-fb-every M,prefix : every M retired insns (first dump at M), write
+    // the ven_vga_fb VRAM (mode-13h: first 64000 bytes) to prefix_<n>.bin.
+    uint64_t fb_every   = 0;
+    std::string fb_prefix;
 };
 
 // ASCII -> set-1 scancode (0 = unsupported). '~' maps to Enter.
@@ -160,6 +165,13 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--peek-mem")        a.peek_mem   = parse_u32(need("--peek-mem"));
         else if (k == "--watch-write")     a.watch_write= parse_u32(need("--watch-write"));
         else if (k == "--exec-written-check") { a.exec_check = true; a.exec_floor = parse_u64(need("--exec-written-check")); }
+        else if (k == "--dump-fb-every") {
+            std::string v = need("--dump-fb-every");
+            size_t p1 = v.find(',');
+            if (p1 == std::string::npos) { std::fprintf(stderr, "%s: --dump-fb-every needs M,prefix\n", argv[0]); usage(argv[0], 2); }
+            a.fb_every  = std::strtoull(v.substr(0, p1).c_str(), nullptr, 0);
+            a.fb_prefix = v.substr(p1+1);
+        }
         else if (k == "--type-at") {
             std::string v = need("--type-at");
             size_t p1 = v.find(',');
@@ -455,6 +467,26 @@ int main(int argc, char** argv) {
         } else if (type_hold) { top->kbd_inj_valid = 0; type_hold = false; }
 
         if (trace.retired() > before) idle = 0; else ++idle;
+
+        // --dump-fb-every: periodic mode-13h framebuffer snapshots from ven_vga_fb.
+        if (args.fb_every) {
+            static uint64_t next_fb = 0;
+            static int      fb_n    = 0;
+            if (next_fb == 0) next_fb = args.fb_every;
+            if (trace.retired() >= next_fb) {
+                char fn[512];
+                std::snprintf(fn, sizeof fn, "%s_%04d.bin", args.fb_prefix.c_str(), fb_n);
+                if (FILE* ff = std::fopen(fn, "wb")) {
+                    for (int i = 0; i < 64000; ++i)
+                        std::fputc(top->rootp->ventium_soc__DOT__u_vga_fb__DOT__vram[i], ff);
+                    std::fclose(ff);
+                    std::fprintf(stderr, "tb_soc: fb dump #%d at n=%llu -> %s\n",
+                                 fb_n, (unsigned long long)trace.retired(), fn);
+                }
+                ++fb_n;
+                next_fb += args.fb_every;
+            }
+        }
 
         // --dump-mem-at: first time retire count reaches N, snapshot the range.
         if (args.dump_at_n && trace.retired() >= args.dump_at_n) {

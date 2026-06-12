@@ -30,6 +30,16 @@
 #include "ven_periph.h"
 #include <stdlib.h>
 
+// F4 (DOS Quake prep): OPTIONAL extended-memory CMOS seeding — the 1:1 mirror
+// of the RTL's `VEN_RTC_EXTMEM_KB (see rtl/soc/ven_rtc.sv header). KB of RAM
+// above 1 MiB; 0 (default) = LEGACY: the memory registers keep their all-0x00
+// reset value (every existing gate byte-identical). Nonzero seeds the qemu
+// pc_cmos_init (hw/i386/pc.c) memory registers at reset. Runtime override:
+// ven_rtc_set_extmem_kb() below (takes effect immediately + sticks over reset).
+#ifndef VEN_RTC_EXTMEM_KB
+#define VEN_RTC_EXTMEM_KB 0
+#endif
+
 // CMOS register indices (mc146818rtc_regs.h).
 #define RTC_SECONDS       0x00
 #define RTC_MINUTES       0x02
@@ -52,11 +62,32 @@
 #define REG_C_MASK  0x70   // PF|AF|UF (interrupt sources)
 
 typedef struct {
-    uint8_t cmos_data[128];   // 128-byte CMOS
-    uint8_t cmos_index;       // latched index (wdata & 0x7f), 7-bit
-    uint8_t nmi_disable;      // bit7 of last index write (stored separately)
-    uint8_t irq8;             // registered irq8 level (1 = asserting)
+    uint8_t  cmos_data[128];  // 128-byte CMOS
+    uint8_t  cmos_index;      // latched index (wdata & 0x7f), 7-bit
+    uint8_t  nmi_disable;     // bit7 of last index write (stored separately)
+    uint8_t  irq8;            // registered irq8 level (1 = asserting)
+    uint32_t extmem_kb;       // F4: KB above 1 MiB to seed at reset (0 = legacy)
 } rtc_state_t;
+
+// F4: seed the qemu pc_cmos_init memory-size registers (hw/i386/pc.c) with
+// below_4g = 1 MiB + extmem_kb KB and no >4GiB memory. Mirrors the RTL's
+// SEED_EXT_KB / SEED_EXT64K localparams exactly. No-op when extmem_kb == 0.
+static void rtc_seed_extmem(rtc_state_t* s) {
+    uint32_t ext_kb, b4g_kb, ext64k;
+    if (s->extmem_kb == 0) return;
+    b4g_kb = 1024u + s->extmem_kb;                       // total <4G mem in KB
+    ext_kb = (s->extmem_kb > 65535u) ? 65535u : s->extmem_kb;
+    ext64k = (b4g_kb > 16u*1024u) ? ((b4g_kb - 16u*1024u) / 64u) : 0u;
+    if (ext64k > 65535u) ext64k = 65535u;
+    s->cmos_data[0x15] = 0x80;                           // base mem 640 = 0x0280
+    s->cmos_data[0x16] = 0x02;
+    s->cmos_data[0x17] = (uint8_t)(ext_kb & 0xFF);       // legacy alias of 0x30/31
+    s->cmos_data[0x18] = (uint8_t)(ext_kb >> 8);
+    s->cmos_data[0x30] = (uint8_t)(ext_kb & 0xFF);       // CMOS_MEM_EXTMEM: KB >1MiB
+    s->cmos_data[0x31] = (uint8_t)(ext_kb >> 8);
+    s->cmos_data[0x34] = (uint8_t)(ext64k & 0xFF);       // CMOS_MEM_EXTMEM2: 64KB >16MiB
+    s->cmos_data[0x35] = (uint8_t)(ext64k >> 8);
+}
 
 // effective index for this access (PS/2 century 0x37 aliases to 0x32).
 static uint8_t rtc_eff_index(uint8_t idx) {
@@ -81,6 +112,7 @@ static void rtc_reset(ven_periph_t* p) {
     s->cmos_data[RTC_MONTH]        = 0x06;
     s->cmos_data[RTC_YEAR]         = 0x26;  // year %100 = 26
     s->cmos_data[RTC_CENTURY]      = 0x20;  // 20xx
+    rtc_seed_extmem(s);                     // F4 (no-op when extmem_kb == 0)
     s->cmos_index   = 0x00;
     s->nmi_disable  = 0x00;
     s->irq8         = 0x00;
@@ -175,6 +207,22 @@ static int rtc_irq(ven_periph_t* p) {
     return s->irq8 ? 1 : 0;
 }
 
+// F4: runtime extended-memory override (e.g. the A53 PS app sizing the CMOS to
+// the actual DDR carve-out). Re-seeds the memory registers immediately and the
+// new size sticks across subsequent reset() calls. kb == 0 restores legacy.
+void ven_rtc_set_extmem_kb(ven_periph_t* p, uint32_t kb) {
+    rtc_state_t* s = (rtc_state_t*)p->state;
+    s->extmem_kb = kb;
+    if (kb == 0) {                          // legacy: memory regs read 0x00
+        s->cmos_data[0x15] = s->cmos_data[0x16] = 0x00;
+        s->cmos_data[0x17] = s->cmos_data[0x18] = 0x00;
+        s->cmos_data[0x30] = s->cmos_data[0x31] = 0x00;
+        s->cmos_data[0x34] = s->cmos_data[0x35] = 0x00;
+    } else {
+        rtc_seed_extmem(s);
+    }
+}
+
 ven_periph_t* ven_rtc_new(void) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(ven_periph_t));
     p->state    = calloc(1, sizeof(rtc_state_t));
@@ -182,6 +230,7 @@ ven_periph_t* ven_rtc_new(void) {
     p->io_read  = rtc_read;
     p->io_write = rtc_write;
     p->irq      = rtc_irq;
+    ((rtc_state_t*)p->state)->extmem_kb = VEN_RTC_EXTMEM_KB;  // compile-time default
     rtc_reset(p);
     return p;
 }

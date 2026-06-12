@@ -52,7 +52,7 @@ module ven_vga_fb (
   // 64 KiB linear VRAM. Not reset-cleared (chain-4 reads only ever follow a write,
   // exactly like the icache data array — only the access pattern gates correctness).
   // verilator lint_off MULTIDRIVEN
-  logic [7:0] vram [0:65535];
+  logic [7:0] vram [0:65535] /* verilator public_flat_rd */;  // F4: TB framebuffer dump
   // verilator lint_on MULTIDRIVEN
 
   // ---- combinational read: the 4 little-endian bytes at addr..addr+3 ----------

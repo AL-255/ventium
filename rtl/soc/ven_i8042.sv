@@ -132,6 +132,7 @@ module ven_i8042 (
   logic [7:0] write_cmd;  // pending controller command awaiting a 0x60 data byte
                           // (0 = none; otherwise the CMD_* that armed it)
   logic [7:0] cbdata;     // controller-sourced output buffer (the "cbdata" path)
+  logic       kbd_bat_pending;  // PS/2 kbd RESET: BAT-OK (0xAA) follows the ACK
   logic [7:0] obdata;     // last byte handed to the CPU at 0x60
 
   // --------------------------------------------------------------------------
@@ -226,6 +227,7 @@ module ven_i8042 (
       write_cmd <= 8'h00;
       cbdata    <= 8'h00;
       obdata    <= 8'h00;
+      kbd_bat_pending <= 1'b0;
     end else if (inj_valid && ((status & STAT_OBF) == 8'h00) && !cs) begin
       // TB keystroke: controller-sourced byte path (kbd scancode -> OBF/IRQ1).
       cbdata <= inj_data;
@@ -341,9 +343,17 @@ module ven_i8042 (
           mode <= mode & ~MODE_DISABLE_MOUSE;
         end
         default: begin
-          // write_cmd == 0: a byte sent to the keyboard. PS/2 kbd response
-          // queue is deferred (minimal model). Re-enables kbd interface.
-          mode <= mode & ~MODE_DISABLE_KBD;
+          // write_cmd == 0: a byte sent to the PS/2 keyboard DEVICE. Respond
+          // like qemu's keyboard: ACK (0xFA) every byte; RESET (0xFF) returns
+          // BAT-OK (0xAA) after the ACK drains. Without this SeaBIOS's
+          // keyboard_init times out, its soft Ps2ctr never gains KBDINT, and
+          // handle_09 silently DISCARDS every scancode (keys read, dropped).
+          // Re-enables the kbd interface (qemu kbd_write_data does the same).
+          mode   <= mode & ~MODE_DISABLE_KBD;
+          cbdata <= 8'hFA;                              // device ACK
+          status <= ((status & ~STAT_CMD) | STAT_OBF) & ~STAT_MOUSE_OBF;
+          outport <= (outport | OUT_OBF) & ~OUT_MOUSE_OBF;
+          kbd_bat_pending <= (wdata == 8'hFF);
         end
       endcase
     end else if (cs && !we && is_data_port) begin
@@ -353,8 +363,16 @@ module ven_i8042 (
       // ---------------------------------------------------------------------
       if ((status & STAT_OBF) != 8'h00) begin
         obdata  <= cbdata;
-        status  <= status  & ~(STAT_OBF | STAT_MOUSE_OBF);
-        outport <= outport & ~(OUT_OBF | OUT_MOUSE_OBF);
+        if (kbd_bat_pending) begin
+          // RESET's BAT-OK follows the ACK: refill the OBF instead of clearing.
+          cbdata  <= 8'hAA;
+          status  <= (status  | STAT_OBF) & ~STAT_MOUSE_OBF;
+          outport <= (outport | OUT_OBF) & ~OUT_MOUSE_OBF;
+          kbd_bat_pending <= 1'b0;
+        end else begin
+          status  <= status  & ~(STAT_OBF | STAT_MOUSE_OBF);
+          outport <= outport & ~(OUT_OBF | OUT_MOUSE_OBF);
+        end
       end
     end
     // read of 0x64 (status): no side effect.

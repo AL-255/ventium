@@ -78,6 +78,19 @@
 // ============================================================================
 `default_nettype none
 
+// F4 (DOS Quake prep): OPTIONAL extended-memory CMOS seeding. SeaBIOS with no
+// fw_cfg (our SoC: ports 0x510/0x511 read open-bus 0xFF, so qemu_cfg_detect
+// fails) sizes RAM from CMOS only (src/fw/paravirt.c qemu_preinit):
+//   rs = (cmos[0x34]<<16)|(cmos[0x35]<<24); if (rs) rs += 16MiB;
+//   else rs = (cmos[0x30]<<10)|(cmos[0x31]<<18) + 1MiB;
+// VEN_RTC_EXTMEM_KB = KB of RAM above 1 MiB. 0 (default) = LEGACY: the memory
+// registers keep their all-0x00 reset value (SeaBIOS computes RamSize = 1MiB),
+// byte-identical to every existing gate. Nonzero seeds the qemu pc_cmos_init
+// (hw/i386/pc.c) memory registers at reset -- see the localparams below.
+`ifndef VEN_RTC_EXTMEM_KB
+  `define VEN_RTC_EXTMEM_KB 0
+`endif
+
 module ven_rtc #(
     // Structural tick prescaler: one 1 Hz "update" tick every TICK_DIV clocks.
     // Cadence is NOT oracled (see header). Default tiny so the unit TB can
@@ -113,6 +126,32 @@ module ven_rtc #(
   localparam logic [6:0] RTC_REG_D         = 7'h0D;
   localparam logic [6:0] RTC_CENTURY       = 7'h32;
   localparam logic [6:0] RTC_PS2_CENTURY   = 7'h37;
+
+  // F4 memory-size registers (qemu pc_cmos_init writes these; SeaBIOS
+  // src/hw/rtc.h names in comments). Plain CMOS RAM bytes -- no side effects.
+  localparam logic [6:0] CMOS_BASEMEM_LOW  = 7'h15;  // base mem KB lo (<=640)
+  localparam logic [6:0] CMOS_BASEMEM_HIGH = 7'h16;
+  localparam logic [6:0] CMOS_EXTMEM_LOW   = 7'h17;  // legacy alias of 0x30/0x31
+  localparam logic [6:0] CMOS_EXTMEM_HIGH  = 7'h18;
+  localparam logic [6:0] CMOS_EXTMEM_LOW2  = 7'h30;  // CMOS_MEM_EXTMEM: KB above 1MiB
+  localparam logic [6:0] CMOS_EXTMEM_HIGH2 = 7'h31;
+  localparam logic [6:0] CMOS_EXTMEM2_LOW  = 7'h34;  // CMOS_MEM_EXTMEM2: 64KB units >16MiB
+  localparam logic [6:0] CMOS_EXTMEM2_HIGH = 7'h35;
+
+  // F4 seed values, qemu pc_cmos_init formulas (hw/i386/pc.c) with
+  // below_4g = 1 MiB + VEN_RTC_EXTMEM_KB KB and no >4GiB memory:
+  //   0x15/16 = MIN(below_4g/KiB, 640)            = 640 (below_4g >= 1 MiB here)
+  //   0x17/18 = 0x30/31 = (below_4g - 1MiB)/KiB   capped 65535
+  //   0x34/35 = (below_4g - 16MiB)/64KiB (if >16M) capped 65535
+  // (0x5b-0x5d above-4G regs stay 0 -- qemu writes 0 for above_4g == 0.)
+  localparam int unsigned EXTMEM_KB   = `VEN_RTC_EXTMEM_KB;   // KB above 1 MiB; 0 = legacy
+  localparam int unsigned BELOW4G_KB  = 32'd1024 + EXTMEM_KB; // total <4G mem in KB
+  localparam logic [15:0] SEED_EXT_KB = (EXTMEM_KB > 32'd65535) ? 16'd65535
+                                                                : 16'(EXTMEM_KB);
+  localparam int unsigned EXT64K_RAW  = (BELOW4G_KB > 32'd16384)
+                                        ? ((BELOW4G_KB - 32'd16384) / 32'd64) : 32'd0;
+  localparam logic [15:0] SEED_EXT64K = (EXT64K_RAW > 32'd65535) ? 16'd65535
+                                                                 : 16'(EXT64K_RAW);
 
   // Bit masks (mc146818rtc_regs.h). Bit-position aliases are referenced by index
   // ([7]/[6]/.. ) elsewhere; the masks below are the ones used as 8-bit values.
@@ -265,6 +304,18 @@ module ven_rtc #(
       cmos_data[RTC_MONTH]        <= 8'h06;
       cmos_data[RTC_YEAR]         <= 8'h26;  // year %100 = 26
       cmos_data[RTC_CENTURY]      <= 8'h20;  // 20xx
+      // F4: seed the qemu pc_cmos_init memory-size registers (constant-false
+      // when VEN_RTC_EXTMEM_KB == 0 -> folds away, legacy all-0x00 preserved).
+      if (EXTMEM_KB != 0) begin
+        cmos_data[CMOS_BASEMEM_LOW]  <= 8'h80;              // 640 = 0x0280
+        cmos_data[CMOS_BASEMEM_HIGH] <= 8'h02;
+        cmos_data[CMOS_EXTMEM_LOW]   <= SEED_EXT_KB[7:0];
+        cmos_data[CMOS_EXTMEM_HIGH]  <= SEED_EXT_KB[15:8];
+        cmos_data[CMOS_EXTMEM_LOW2]  <= SEED_EXT_KB[7:0];
+        cmos_data[CMOS_EXTMEM_HIGH2] <= SEED_EXT_KB[15:8];
+        cmos_data[CMOS_EXTMEM2_LOW]  <= SEED_EXT64K[7:0];
+        cmos_data[CMOS_EXTMEM2_HIGH] <= SEED_EXT64K[15:8];
+      end
       cmos_index    <= 7'h00;
       nmi_disable_q <= 1'b0;
       irq8_q        <= 1'b0;
