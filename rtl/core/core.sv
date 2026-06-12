@@ -1267,6 +1267,19 @@ module core
                (modrm_mod==2'b00 && has_sib && sib_base==3'b101))
         disp_val={ibuf[disp_idx+3],ibuf[disp_idx+2],ibuf[disp_idx+1],ibuf[disp_idx]};
       d_ea=(no_base?32'd0:base_val)+(no_index?32'd0:index_val)+disp_val;
+      // F3 — 32-bit EBP/ESP-based forms default to SS (SDM Table 2-2/2-3): SIB
+      // base=ESP (any mod), SIB base=EBP with mod!=00 (mod==00 is disp32 -> DS),
+      // and non-SIB [EBP+disp] (mod 01/10). A segment-override prefix wins. This
+      // was MISSING: `mov ds,[esp+8]` (SeaBIOS's extra-stack IRQ trampoline,
+      // a32 SIB) read DS:[esp+8] instead of SS:[esp+8] in real mode, loaded a
+      // garbage segment, and saved the IRQ context over the freshly-loaded
+      // FreeDOS kernel image (the F3 depack 43-byte slip). Invisible in every
+      // flat gate (all segment bases equal), so make verify stays byte-identical.
+      if (!d_pfx_seg_en && !eff_addr &&
+          ((has_sib && (sib_base==3'b100 ||
+                        (sib_base==3'b101 && modrm_mod!=2'b00))) ||
+           (!has_sib && modrm_rm==3'b101 && modrm_mod!=2'b00)))
+        d_seg = 3'(SG_SS);
     end
 
     // F3 — 16-bit ADDRESSING (eff_addr==1, i.e. real mode w/o a 0x67 prefix). The
@@ -2061,7 +2074,12 @@ module core
               else begin d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
             3'd2: begin // CALL r/m near
-              d_kind=K_CTRL; d_ct=CT_CALLIND; d_mem_write=1'b1; d_w=3'd4;
+              // F3: push width follows the operand size (16-bit real-mode `call
+              // r/m16` pushes 2 bytes / SP-=2, exactly like E8 CALLREL). Was a
+              // hard-coded d_w=4, which leaked SP by 2 per call/ret pair in
+              // 16-bit code. eff_opsize=0 in every flat gate -> byte-identical.
+              d_kind=K_CTRL; d_ct=CT_CALLIND; d_mem_write=1'b1;
+              d_w=eff_opsize?3'd2:3'd4;
               if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
               else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
@@ -3034,8 +3052,14 @@ module core
     end
 
     // CALL/JMP indirect target
-    if (q_ct==CT_CALLIND || q_ct==CT_JMPIND)
+    if (q_ct==CT_CALLIND || q_ct==CT_JMPIND) begin
       call_target = q_mem_read ? mem_load_data : gpr[q_src_reg];
+      // F3: a 16-bit-operand indirect CALL/JMP loads IP from r/m16 and zeroes
+      // EIP[31:16] (same convention as CT_RETN below). Without the mask, EIP's
+      // high half took table-adjacent memory bytes / stale upper register bits.
+      // q_w==2 only under eff_opsize -> every flat gate is byte-identical.
+      if (q_w==3'd2) call_target = {16'd0, call_target[15:0]};
+    end
     else if (q_kind==K_CTRL && q_ct==CT_CALLREL && q_w==3'd2)
       // 0x66 near CALL: operand-size-16 truncates the target EIP to 16 bits.
       call_target = {16'd0, call_t16[15:0]};
@@ -4155,8 +4179,12 @@ module core
     // seg_base[q_seg]==seg_base[SS] (both 0) so make verify is bit-identical.
     if (q_is_push && q_mem_read)
       opbase = seg_base[q_seg];
-    else if (proxy_en && !sys_mode &&
-        (q_ct==CT_CALLIND || q_ct==CT_JMPIND) && q_mem_read)
+    else if ((q_ct==CT_CALLIND || q_ct==CT_JMPIND) && q_mem_read)
+      // F3: the function-pointer READ of an indirect call/jmp uses the operand's
+      // own segment (DS default / override / the new EBP->SS rule), NOT the SS
+      // that dbase forces for the return-address PUSH. Was gated proxy_en &&
+      // !sys_mode, so the SoC (sys_mode=1) read `call word [bx]` pointers from
+      // SS:EA. Flat gates: seg_base[q_seg]==seg_base[SS] -> byte-identical.
       opbase = seg_base[q_seg];
     else
       opbase = dbase;   // unchanged path (SS for a call, etc.)
