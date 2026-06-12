@@ -71,6 +71,7 @@
           q_seg_load<=d_seg_load; q_lseg<=d_lseg;   // M9.5 LES/LDS/LSS/LFS/LGS
           q_push_sreg<=d_push_sreg; q_pop_sreg<=d_pop_sreg;   // F3 PUSH/POP sreg
           q_seg_load_lo<=d_seg_load_lo;                       // F3 MOV Sreg,[mem]
+          q_store_sreg<=d_store_sreg;                         // F3 MOV [mem],Sreg
           seg_step<=1'b0;
           // M2S.3 INT/IRET/UD2 are dispatched directly from the d_* decode below
           // (they begin their micro-sequence in S_DECODE), so no q_* latch is

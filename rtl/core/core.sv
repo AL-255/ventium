@@ -708,6 +708,10 @@ module core
   logic [31:0] gs_base_r;          // latched %gs TLS base (0 = flat / unset)
   logic [63:0] cn;                 // core-side retire counter (drives syscall_n)
   logic [63:0] tsc;                // F3: free-running time-stamp counter (RDTSC 0F 31)
+`ifdef VEN_DBG_WD
+  logic [23:0] dbg_stall;          // sim-only: cycles since last retire (hang watchdog)
+  logic        dbg_printed;        // sim-only: one-shot for the watchdog dump
+`endif
 `ifdef VEN_PS_PROXY
   logic [3:0]  q_proxy_len;        // int80 length latched at S_SYSCALL_WAIT entry (eip
                                    // parks at cd80, so this is the only thing the wait
@@ -1085,6 +1089,7 @@ module core
   logic        d_push_sreg;    // F3 PUSH sreg (06/0E/16/1E): push data = seg_sel[d_sys_sreg]
   logic        d_pop_sreg;     // F3 POP sreg (07/17/1F): pop writes seg_sel/base[d_sys_sreg]
   logic        d_seg_load_lo;  // F3 MOV Sreg,[mem]: selector = LOW 16b of the 2-byte read
+  logic        d_store_sreg;   // F3 MOV [mem],Sreg: store data = seg_sel[d_sys_sreg]
   logic        d_pfx_seg_en;   // a segment-override prefix is present
   logic [2:0]  d_pfx_seg_idx;  // which segment the override selects
 
@@ -1215,7 +1220,7 @@ module core
     d_sysop=SYS_NONE; d_sys_sreg=3'd0; d_sys_creg=3'd0;
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
     d_seg_load=1'b0; d_lseg=3'd0;
-    d_push_sreg=1'b0; d_pop_sreg=1'b0; d_seg_load_lo=1'b0;
+    d_push_sreg=1'b0; d_pop_sreg=1'b0; d_seg_load_lo=1'b0; d_store_sreg=1'b0;
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
     // M2S.3 interrupt/return decode defaults.
     d_int=1'b0; d_int_vec=8'd0; d_int_imm=1'b0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
@@ -1754,11 +1759,23 @@ module core
           end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
         end
         8'h8C: begin // MOV r/m16, Sreg  (M2S.1)
-          // store the selector value of segment modrm_reg into r/m16. Reg form
-          // only here (the corpus uses reg-form); a memory dest defers (HALT).
-          d_sysop=SYS_MOVSREG_FROM; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
-          if (modrm_mod==2'b11) begin d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+          // store the selector value of segment modrm_reg into r/m16. Reg form =
+          // SYS_MOVSREG_FROM (writes a GPR). F3 MEMORY-dest form (mod!=11): real
+          // boot firmware (SeaBIOS's call16/call32 trampoline SAVES es/ss/etc into a
+          // struct). Storing a selector is mode-independent (no descriptor), so it
+          // routes as a normal MOV-store (d_is_mov + d_mem_write) with the data taken
+          // from seg_sel via d_store_sreg. Gated sys_mode so the user-mode corpus keeps
+          // its HALT (byte-identical); reg form unchanged.
+          if (modrm_mod==2'b11) begin
+            d_sysop=SYS_MOVSREG_FROM; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
+            d_writes_reg=1'b1; d_dst_reg=modrm_rm; d_len=pfx_len+4'd2;
+          end else if (sys_mode) begin
+            d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_w=3'd2;
+            d_store_sreg=1'b1; d_sys_sreg=sreg_idx(modrm_reg);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else begin
+            d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end
         end
         8'h8D: begin // LEA
           d_is_lea=1'b1; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
@@ -2489,6 +2506,7 @@ module core
   logic        q_push_sreg;       // F3 PUSH sreg latch
   logic        q_pop_sreg;        // F3 POP sreg latch
   logic        q_seg_load_lo;     // F3 MOV Sreg,[mem] low-half seg-load latch
+  logic        q_store_sreg;      // F3 MOV [mem],Sreg store-selector latch
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
   logic [31:0] retf_off;          // M9.5 RETF: the popped IP/EIP held between beats
   logic [31:0] gdt_lo;            // first dword of the in-flight 8-byte descriptor
@@ -2942,7 +2960,9 @@ module core
       // POP m: write the popped stack word to the memory destination.
       st_data = mem_load_data;
     end else if (q_is_mov) begin
-      st_data = q_use_imm ? q_imm : reg_read(q_src_reg,q_w,q_src_high8);
+      // F3 MOV [mem],Sreg: store the 16-bit selector (strb_of(q_w=2) writes 2 bytes).
+      st_data = q_store_sreg ? {16'd0, seg_sel[q_sys_sreg]}
+              : q_use_imm    ? q_imm : reg_read(q_src_reg,q_w,q_src_high8);
     end else begin
       // ALU RMW / NEG / NOT / INC / DEC to memory
       st_data = alu_out;
@@ -3578,6 +3598,9 @@ module core
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
       gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
       tsc<=64'd0;                    // F3: time-stamp counter zeroed at reset (RDTSC)
+`ifdef VEN_DBG_WD
+      dbg_stall<=24'd0; dbg_printed<=1'b0;
+`endif
 `ifdef VEN_PS_PROXY
       q_proxy_len<=4'd0;
 `endif
@@ -3665,6 +3688,19 @@ module core
       // independent of retirement. RDTSC samples it. INERT for the user-mode corpus
       // (no test executes RDTSC, so the reg is never read and the trace is identical).
       tsc <= tsc + 64'd1;
+
+`ifdef VEN_DBG_WD
+      // sim-only hang watchdog (opt-in via +define+VEN_DBG_WD): dump the wedged FSM
+      // state once after a long no-retire stall (boot bring-up gap-walk diagnostic).
+      if (retire_valid || retire2_valid) begin dbg_stall<=24'd0; end
+      else dbg_stall <= dbg_stall + 24'd1;
+      if (dbg_stall == 24'd1500 && !dbg_printed) begin
+        dbg_printed <= 1'b1;
+        $display("[VEN-WD] STUCK state=%s mem_addr=%08h | cr0=%08h sys_mode=%b v86=%b real_mode=%b eflags=%08h | idt_base=%08h gdt_base=%08h int_vec=%02h cpl=%0d | csbase=%08h eip=%08h",
+                 state.name(), mem_addr, creg0, sys_mode, v86, real_mode, eflags,
+                 idt_base, gdt_base, int_vec, cpl_r, seg_base[SG_CS], eip);
+      end
+`endif
 
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;
@@ -4307,7 +4343,13 @@ module core
       int_err     <= err;
       int_step    <= 4'd0;
       int_sw      <= 1'b0;        // HW fault: bypass the gate DPL>=CPL check
-      state       <= S_INT_GATE;
+      // F3: in PURE real mode (PE=0) a hardware interrupt / exception delivers through
+      // the 4-byte IVT (S_RMINT_RD), exactly like a software INT n — NOT the 8-byte
+      // protected-mode gate. Without this, the first IRQ after SeaBIOS sets IF=1 (or any
+      // real-mode fault) walked a garbage "IDT", #NP'd, and hung. The IVT push carries no
+      // error code (real-mode semantics; S_RMINT_PUSH drops int_err). V86 + PM keep the
+      // S_INT_GATE path (real_mode==0 there).
+      state       <= real_mode ? S_RMINT_RD : S_INT_GATE;
     end
   endtask
 
@@ -4332,7 +4374,8 @@ module core
       int_err     <= 32'd0;
       int_step    <= 4'd0;
       int_sw      <= 1'b0;               // hardware #DB: bypass the gate DPL check
-      state       <= S_INT_GATE;
+      // F3: real-mode #DB also delivers through the IVT (see start_fault).
+      state       <= real_mode ? S_RMINT_RD : S_INT_GATE;
     end
   endtask
 
