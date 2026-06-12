@@ -201,12 +201,7 @@ underway and still mid-boot, with no rendered frame yet.
 ## FPGA synthesis (KV260)
 
 The core + FPU are fully synthesizable and place-and-route cleanly out-of-context on
-the KV260 (**XCK26**, Zynq UltraScale+ ZU5EV). The routed placement of the 65 MHz
-half-cache build, every leaf cell colored by its RTL module (luminance = sub-block):
-
-![Ventium core placed on the KV260 (XCK26), colored by RTL module](docs/fpga-device-view.png)
-
-Headline OOC `core` results (`xck26-sfvc784-2LV-c`, `+VTM_NO_DPI`, 15 ns target):
+the KV260 (**XCK26**, Zynq UltraScale+ ZU5EV). Headline OOC `core` results (`xck26-sfvc784-2LV-c`, `+VTM_NO_DPI`, 15 ns target):
 
 | Config | LUTs | FF | BRAM | DSP | Synth Fmax | **Routed Fmax** | Worst path |
 |---|---:|---:|---:|---:|---:|---:|---|
@@ -239,11 +234,13 @@ shipped image targets **`pl_clk0` = 40 MHz**, routed at **WNS +0.104 ns** (timin
 PS owns the PL clock, and `venclk.sh` can step it 40 → 50 MHz on silicon with a firmware
 smoke test per step. A larger part (e.g. the ZU15EG) would clear 60+.
 
-![Ventium full SoC placed on the KV260, colored by RTL module](docs/fpga-device-view-soc.png)
+The routed 40 MHz image, split into its two halves — the CPU core + FPU (left, memory/BD
+grayed) and the L1/AXI memory + PS bridge + BD interconnect (right, core grayed), every leaf
+cell colored by RTL module with per-panel legends:
 
-📄 **Full results, device views (incl. the core-only crop
-[`fpga-device-view-soc-core.png`](docs/fpga-device-view-soc-core.png) and the non-core fabric
-[`-soc-outside`](docs/fpga-device-view-soc-outside.png)), congestion maps, the ZU15EG + half-cache +
+![Ventium full SoC on the KV260 — CPU core + FPU (left) and the surrounding memory/PS fabric (right)](docs/fpga-device-view-soc-split.png)
+
+📄 **Full results, the all-modules device view, congestion maps, the ZU15EG + half-cache +
 FP_PIPE2 experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
 [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
 
