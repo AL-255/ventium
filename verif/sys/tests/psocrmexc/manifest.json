@@ -1,0 +1,20 @@
+{
+  "name": "psocrmexc",
+  "kind": "system",
+  "src": "psocrmexc.S",
+  "linker": "psocrmexc.ld",
+  "image": "psocrmexc.bin",
+  "image_mode": "bios",
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 60,
+  "sys": true, "paging": false, "soc": true, "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-rmexc-gate.sh",
+  "what_this_is": "F3 -- REAL-MODE HARDWARE EXCEPTION (#DE) delivery through the 4-byte IVT. Companion to psocrmint (software INT n): proves a SYNCHRONOUS fault in pure real mode (PE=0) vectors through the IVT, NOT the protected-mode 8-byte IDT gate. The firmware installs IVT[0] (#DE), DIVWs by a memory divisor set to 0 (-> #DE), the handler fixes the divisor + IRETs, and the fault-restart re-executes the now-valid div. Because #DE is synchronous (gdbstub NOIRQ|NOTIMER masks only INTR/timer), this is a clean PER-RECORD differential -- unlike a maskable IRQ (nondeterministic boundary + a LAPIC unreachable in real mode).",
+  "implementation": "start_fault() (through which ALL exception/IRQ/NMI delivery funnels, incl. the PIC IRQ at core_fetch_decode.svh:122) + arm_db() now route state <= real_mode ? S_RMINT_RD : S_INT_GATE. S_RMINT_RD reads the 4-byte IVT entry {CS,IP} @ idt_base+vec*4; S_RMINT_PUSH pushes the 16-bit FLAGS:CS:IP frame (the FAULTING IP via int_ret_eip = restart) and DROPS the protected-mode error code (real-mode semantics), loads CS (base=sel<<4) + EIP, clears IF/TF; S_RMIRET pops the frame. V86 (PE=1) + protected mode keep the 8-byte-gate path (real_mode==0).",
+  "non_vacuous": "Asserts both traces DELIVER the #DE (handler ran -> EBX=0x2222) AND RESUME past the div via the fault-restart (ECX=0x3333). A regressed real-mode fault (-> the PM gate) would walk a garbage IDT/#NP-hang and never set these.",
+  "description": "Bare-metal F3 real-mode #DE differential. Proves real-mode hardware-exception delivery (IVT vector, FLAGS:CS:IP push, no error code, IF/TF clear, fault-restart) byte-identical to qemu-system-i386 -cpu pentium over all 22 retired instructions, per-record. The validation for the start_fault real-mode routing that also serves real-mode hardware IRQs (e.g. the BIOS timer INT 0x08). make verify 77/77 + all SoC gates (PM/V86 delivery unaffected, real_mode=0 there)."
+}
