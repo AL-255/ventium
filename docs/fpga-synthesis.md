@@ -226,7 +226,7 @@ STRAT=fp2b_netdelay PLACE_DIR=ExtraNetDelay_high ROUTE_DIR=Explore`; `make verif
 > before `u_bcd` does — so the default leaves it off (back to two chained ÷10), keeping `u_bcd`
 > smaller where it isn't critical. Both forms are bit-exact (`make verify-bcd` either way).
 
-## Full SoC, in-context: the front-end pipeline (`+VEN_FE_PIPE`) → ~50 MHz
+## Full SoC, in-context: the front-end pipeline (`+VEN_FE_PIPE`) → the deployable image
 
 Everything above is **out-of-context** (the `core` alone, virtual I/O). The deployable image is
 the **full KV260 block design**: the core + FPU wrapped with the **L1/AXI memory subsystem**
@@ -273,18 +273,30 @@ is `u_uopcache/store_bmap → eip_reg[26]` (19.81 ns, **62 % routing** / 38 % lo
 **route-bound, not logic-bound** — diffuse fill→`eip` routing congestion at ~68–71 % LUT, not a cone
 P&R or floorplanning can shorten.
 
-**Decision: 50 MHz is the deployable target on the XCK26; 60 MHz is dropped as infeasible.** The
-OOC core ceiling is 65.3 MHz, but the full SoC's extra L1/AXI + BD interconnect spends the margin,
-and the residual congestion is diffuse (not a single cone), so no realistic in-context floorplan
-closes 60 on this small ZU5EV die. `pl_clk0` is set to **50 MHz** (`impl_kv260_soc.tcl`), which the
-`+VEN_FE_PIPE` build routes with positive WNS — a clean, timing-met board image. A larger part (the
-ZU15EG, which clears the OOC build comfortably) would reach 60+; on the K26, **50 MHz is the result
-we keep.**
+**Decision history: 60 MHz dropped as infeasible; 50 MHz closed; the F3 boot-ISA growth then
+moved the deployable to 40 MHz.** The OOC core ceiling is 65.3 MHz, but the full SoC's extra
+L1/AXI + BD interconnect spends the margin, and the residual congestion is diffuse (not a single
+cone), so no realistic in-context floorplan closes 60 on this small ZU5EV die. The `+VEN_FE_PIPE`
+build first closed **50 MHz** (WNS +0.19 ns — razor thin). The F3 real-mode decode work (16-bit
+ModR/M EA, FF-group far transfers, SS-defaults, a16 string semantics) then grew the decoder
+enough that the same high-fanout `u_uopcache/store_bmap` net routes ~3.5 ns slower and 50 MHz
+stopped closing (WNS −3.2 ns). `pl_clk0` is now **40 MHz** (`PL0_MHZ`, `impl_kv260_soc.tcl`),
+which routes with margin. A larger part (the ZU15EG, which clears the OOC build comfortably)
+would hold 60+; on the K26, **40 MHz is the deployable we keep** — with `sw/ps/ven_soc_app/
+venclk.sh` as the PS-side silicon-margin probe (steps the PL0 divider 40→50 MHz with a
+gate-proven firmware smoke test per step).
+
+**The current deployable** (`fpga/build/kv260_soc_impl_linux_40/`, the image the SD cards carry —
+uop-cache + IC-BRAM + half-cache + FP_PIPE2 + FE_PIPE + L1_AXI + the PS→core IRQ seam, with
+`REMAP_BASE=0x4000_0000`): routed at the 40 MHz target with **WNS +0.104 ns / WHS +0.008 ns, 0
+failing endpoints** — CLB LUTs **94,712 / 117,120 (80.9 %)**, registers 31,208 (13.3 %), BRAM 40
+(27.8 %), DSP 31 (2.5 %), CLB occupancy 98.3 %. The device views below are rendered from this
+routed checkpoint.
 
 Every leaf cell of the routed full SoC, colored by RTL module (core blocks + the L1/AXI + PS-bridge
 + BD interconnect that OOC views omit):
 
-![Ventium full SoC on the KV260, +VEN_FE_PIPE routed ~50 MHz, colored by module](fpga-device-view-soc.png)
+![Ventium full SoC on the KV260, routed @ 40 MHz, colored by module](fpga-device-view-soc.png)
 
 The two halves separated — the CPU core + FPU (memory/BD grayed), and the memory/PS/BD outside it
 (core grayed):
