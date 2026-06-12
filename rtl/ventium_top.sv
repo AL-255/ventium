@@ -173,7 +173,17 @@ module ventium_top
     output logic        bus_err          // #34 fatal AXI fault (PS observes -> reset)
 `ifdef VEN_KV260_SOC
     ,
-    output logic [63:0] retire_count      // F2: live retire counter for PS observability
+    output logic [63:0] retire_count,     // F2: live retire counter for PS observability
+    // F3: PS-driven external-interrupt injection seam (ven_soc_axil R_INTR).
+    // soc_en (MODE.SOCEN, default 0 -> the whole divert is dead and the KV260 build
+    // behaves exactly as F2) ungates the core's external-interrupt path; intr is the
+    // 8259-INT-analogue LEVEL, inta_vector the PS-staged vector the core latches on
+    // its inta strobe, inta the 1-clock INTA pulse back to the slave (clears the
+    // R_INTR assert + sets its seen bit). NMI has no PS source and stays tied off.
+    input  logic        soc_en,
+    input  logic        intr,
+    input  logic [7:0]  inta_vector,
+    output logic        inta
 `endif
 `endif
 );
@@ -217,8 +227,11 @@ module ventium_top
   // M8.1: the core's INTERRUPT-ACKNOWLEDGE strobe output is the M8 ventium_soc's
   // (it drives the 8259). ventium_top (the verification top) ties off the
   // external-interrupt path (soc_en=0), so this output is always 0 and unused
-  // here — sink it so -Wall stays clean.
+  // here — sink it so -Wall stays clean. In the KV260 SoC build the path is REAL
+  // (the F3 PS-injection seam drives it), so the sink only exists otherwise.
+`ifndef VEN_KV260_SOC
   logic        soc_inta_unused;
+`endif
 
   core u_core (
       .clk          (clk),
@@ -258,6 +271,19 @@ module ventium_top
       .io_wdata     (io_wdata),
       .io_rdata     (io_rdata),
       .io_ack       (io_ack),
+`ifdef VEN_KV260_SOC
+      // F3 KV260: the PS injects maskable INTR through ven_soc_axil R_INTR. soc_en
+      // comes from MODE bit 6 (default 0 -> this whole path is dead and the F2 KV260
+      // behavior is unchanged). inta_valid mirrors the intr level: the staged vector
+      // is meaningful exactly while the injection is asserted (the divert latches
+      // inta_vector unconditionally anyway, like the always-valid master 8259).
+      .soc_en       (soc_en),
+      .intr         (intr),
+      .nmi          (1'b0),
+      .inta         (inta),
+      .inta_vector  (inta_vector),
+      .inta_valid   (intr),
+`else
       // M8.1: the external-interrupt path is the M8 ventium_soc's; ventium_top
       // (the verification top) TIES IT OFF so every existing gate stays
       // byte-identical. soc_en=0 makes the whole divert dead; the input pins are
@@ -268,6 +294,7 @@ module ventium_top
       .inta         (soc_inta_unused),
       .inta_vector  (8'd0),
       .inta_valid   (1'b0),
+`endif
       .mem_req      (core_mem_req),
       .mem_we       (core_mem_we),
       .mem_addr     (core_mem_addr),
@@ -475,9 +502,18 @@ module ventium_top
   // from it (l1_c_rdata/l1_c_ack) and the direct mem_* output is held INERT so the
   // TB's same-cycle MemModel does not double-service (all memory goes via m_axi).
   // REMAP_BASE=0 (identity) for the cosim: the MemModel is x86-phys-indexed.
+  // On the KV260 the core's x86 physical space must land in the reserved DDR
+  // carveout at 0x4000_0000 (the BD's SEG_carveout + the PetaLinux/Ubuntu
+  // reserved-memory node) — KV260_SOC_DESIGN.md "REMAP_BASE override". Without
+  // it the PL emits raw low addresses on HPC0, outside the declared segment.
+`ifdef VEN_KV260_SOC
+  localparam logic [39:0] L1AXI_REMAP_BASE = 40'h0_4000_0000;
+`else
+  localparam logic [39:0] L1AXI_REMAP_BASE = 40'h0;
+`endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
-  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(40'h0), .ADDR_MASK(32'hFFFF_FFFF)) u_l1axi (
+  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(32'hFFFF_FFFF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all),
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
@@ -522,9 +558,12 @@ module ventium_top
   assign core_mem_ack   = bus_mode ? bus_c_ack   : mem_ack;
 `endif
 
-  // M8.1 lint sink: the tied-off core inta output (soc_en=0 here).
+  // M8.1 lint sink: the tied-off core inta output (soc_en=0 here; in the KV260 SoC
+  // build the inta strobe is a REAL output port, so there is nothing to sink).
+`ifndef VEN_KV260_SOC
   // verilator lint_off UNUSED
   wire _unused_soc = &{1'b0, soc_inta_unused};
   // verilator lint_on UNUSED
+`endif
 
 endmodule : ventium_top
