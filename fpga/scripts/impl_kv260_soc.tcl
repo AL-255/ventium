@@ -37,7 +37,7 @@ set CARVEOUT_BASE 0x0000000040000000
 set CARVEOUT_SIZE 0x0000000010000000
 set HPM0_BASE     0x00000000A0000000
 set HPM0_SIZE     0x0000000000010000
-set PL0_MHZ       50
+set PL0_MHZ       [envor PL0_MHZ 50]
 set THREADS       [expr {[info exists ::env(THREADS)] ? $::env(THREADS) : 16}]
 set_param general.maxThreads $THREADS
 
