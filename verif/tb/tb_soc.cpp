@@ -48,6 +48,7 @@
 #include "trace_writer.h"
 
 #include <vector>
+#include <unordered_map>
 // PS-offload peripheral C models (sw/ps_periph/): when a device is +VEN_<DEV>_PS,
 // its forwarded io_ps_* requests are serviced HERE by its C model, proving the C
 // model bit-exact vs qemu (the same psoc<dev> per-record gate). On the board these
@@ -81,6 +82,8 @@ struct Args {
     bool     peek_vga   = false;   // on stop, decode the 0xB8000 VGA text buffer
     uint32_t peek_mem   = 0;       // on stop, hexdump 64 bytes at this linear address (0=off)
     uint32_t watch_write= 0;       // log every mem write into [addr, addr+16) (0=off; gap-walk)
+    bool     exec_check = false;   // flag first execute-from-recently-written (F3 divergence)
+    uint64_t exec_floor = 0;       // ignore writes before this cycle (skip kernel load)
 };
 
 // --watch-write debug hook: the mem service lambda is defined before the `cycles`
@@ -124,6 +127,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--vga-bios")        a.vga_bios   = need("--vga-bios");
         else if (k == "--peek-mem")        a.peek_mem   = parse_u32(need("--peek-mem"));
         else if (k == "--watch-write")     a.watch_write= parse_u32(need("--watch-write"));
+        else if (k == "--exec-written-check") { a.exec_check = true; a.exec_floor = parse_u64(need("--exec-written-check")); }
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -137,10 +141,22 @@ Args parse_args(int argc, char** argv) {
 
 }  // namespace
 
+// --exec-written-check state. DEFINED in dpi_retire.cpp (the TU every testbench
+// links); here we extern + populate it. g_wcyc maps a byte linear address -> the
+// cycle it was last written (only writes at/after g_exec_floor are recorded, to
+// skip the early kernel load). vtm_retire flags the first retired insn whose fetch
+// lin addr is in g_wcyc — the first execution of recently-written DATA as code.
+extern std::unordered_map<uint32_t, uint64_t> g_wcyc;
+extern uint64_t g_exec_floor;
+extern bool     g_exec_check;
+extern uint64_t g_now_cycle;
+
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     Args args = parse_args(argc, argv);
     g_watch_addr = args.watch_write;
+    g_exec_check = args.exec_check;
+    g_exec_floor = args.exec_floor;
 
     // ---- backing memory + BIOS image --------------------------------------
     // System cold reset: a -bios image is mapped so its LAST byte lands at
@@ -275,6 +291,15 @@ int main(int argc, char** argv) {
             }
         }
 
+        // --exec-written-check: record the cycle each byte was written (>= floor),
+        // so vtm_retire can flag the first fetch from recently-written DATA.
+        if (g_exec_check && top->mem_req && top->mem_we && g_now_cycle >= g_exec_floor) {
+            uint32_t base = (uint32_t)top->mem_addr;
+            uint8_t  strb = (uint8_t)top->mem_wstrb;
+            for (int i = 0; i < 4; ++i)
+                if (strb & (1u << i)) g_wcyc[base + (uint32_t)i] = g_now_cycle;
+        }
+
         if (top->io_ps_req) {
             if (!ps_busy) {                  // serve this forwarded access ONCE
                 uint16_t port = (uint16_t)top->io_ps_addr;
@@ -325,6 +350,7 @@ int main(int argc, char** argv) {
     while (true) {
         uint64_t before = trace.retired();
         g_watch_cycles = cycles;          // for the --watch-write hook
+        g_now_cycle    = cycles;          // for the --exec-written-check hook
 
         // clk low: combinational settle + serve bus
         top->clk = 0; service_bus(); top->eval();

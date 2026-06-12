@@ -16,8 +16,19 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <unordered_map>
 
 #include "trace_writer.h"
+
+// --exec-written-check: flag the first retired insn fetched from a byte that was
+// written (as data) at/after g_exec_floor — the F3 divergence point where the core
+// starts executing recently-written data as code. DEFINED here (dpi_retire.cpp is
+// linked by EVERY testbench, incl. the core tb that make verify builds); tb_soc.cpp
+// externs + populates these. Default-off, so a no-op everywhere but the soc gap-walk.
+std::unordered_map<uint32_t, uint64_t> g_wcyc;
+uint64_t g_exec_floor = 0;
+bool     g_exec_check = false;
+uint64_t g_now_cycle  = 0;
 
 // Verilator emits the DPI-C prototype for vtm_retire into
 // obj_dir/Vventium_top__Dpi.h after verilating. We include it (when present)
@@ -168,6 +179,23 @@ extern "C" void vtm_retire(
     g_last_arch.gpr[6]=esi; g_last_arch.gpr[7]=edi;
     g_last_arch.seg[0]=cs; g_last_arch.seg[1]=ss; g_last_arch.seg[2]=ds;
     g_last_arch.seg[3]=es; g_last_arch.seg[4]=fs; g_last_arch.seg[5]=gs;
+
+    // --exec-written-check: the first retire whose fetch lin addr was written as
+    // DATA (>= floor) is where the core began executing recently-written data as
+    // code — the F3 control-flow divergence. Report the onset (first ~20 hits).
+    if (g_exec_check) {
+        static int reported = 0;
+        uint32_t lin = ((uint32_t)cs << 4) + pc;
+        auto it = g_wcyc.find(lin);
+        if (it != g_wcyc.end() && reported < 20) {
+            std::fprintf(stderr,
+                "EXEC-FROM-WRITTEN n=%llu cs:ip=%04x:%08x lin=0x%06x  written@cyc=%llu now=%llu\n",
+                (unsigned long long)n, (unsigned)cs, pc, lin,
+                (unsigned long long)it->second, (unsigned long long)g_now_cycle);
+            ++reported;
+        }
+    }
+
     if (!g_trace || !g_trace->ok()) return;
     // --no-trace (free-run fast path): count the retirement so the TB loop can
     // make progress, but skip ALL record formatting (the per-instruction cost).
