@@ -1524,6 +1524,16 @@ module core
             d_kind=K_RDTSC; d_writes_reg=1'b1;  // EXEC writes EDX:EAX from `tsc`
           end else d_unknown=1'b1;              // out-of-scope in user mode -> HALT
         end
+        // ---- 0F 08 INVD / 0F 09 WBINVD: cache invalidate / write-back+invalidate.
+        // Privileged (CPL0) cache-management ops with NO architectural register/flag
+        // effect — qemu's TCG treats both as NOPs (no modeled cache writeback), and
+        // Ventium's caches stay coherent with the flat memory model, so they retire as
+        // NOPs. Real boot firmware (SeaBIOS shadows the BIOS / sets caching) uses WBINVD.
+        // Ungated like CPUID/RDTSC (cosim_en || soc_en); user-mode corpus keeps the HALT.
+        8'h08, 8'h09: begin
+          d_len=pfx_len+4'd2;
+          if (cosim_en || soc_en) d_is_nop=1'b1; else d_unknown=1'b1;
+        end
         // ---- 0F 0B: UD2, the architecturally-undefined opcode -> #UD (vector 6).
         // In SYSTEM mode it DELIVERS #UD through the IDT (a FAULT: pushes the
         // faulting EIP); in user mode there is no IDT, so it HALTs loudly as an
@@ -4066,11 +4076,31 @@ module core
   // the gates run; only the user-proxy gs-override call changes.
   logic [31:0] opbase;
   always_comb begin
-    if (proxy_en && !sys_mode &&
+    // F3: PUSH r/m (FF /6) with a MEMORY source reads the operand from its OWN
+    // segment (DS default, or an override) — only the stack WRITE uses SS. The dbase
+    // comb forces SS for every push, which is correct for the stack but wrong for the
+    // source read: SeaBIOS's __farcall16 does `push dword [eax+0x20]` with DS!=SS and
+    // got 0 (reading SS:off instead of DS:off) -> iret to 0:0. Flat user/sys mode has
+    // seg_base[q_seg]==seg_base[SS] (both 0) so make verify is bit-identical.
+    if (q_is_push && q_mem_read)
+      opbase = seg_base[q_seg];
+    else if (proxy_en && !sys_mode &&
         (q_ct==CT_CALLIND || q_ct==CT_JMPIND) && q_mem_read)
       opbase = seg_base[q_seg];
     else
       opbase = dbase;   // unchanged path (SS for a call, etc.)
+  end
+
+  // F3: the STORE-side mirror of opbase. POP r/m (8F) reads the stack word (SS, via
+  // the S_LOAD q_is_pop branch) but WRITES the popped value to its memory OPERAND,
+  // which uses the operand's own segment (DS default / override) — not SS. dbase
+  // forces SS for every pop, so a `pop word [eax]` with DS!=SS (SeaBIOS's call32
+  // forward path) wrote the struct to the wrong segment. Flat mode: q_seg base == SS
+  // base (0), so make verify is bit-identical. Every other store keeps dbase.
+  logic [31:0] stbase;
+  always_comb begin
+    if (q_is_pop && q_mem_write) stbase = seg_base[q_seg];
+    else                         stbase = dbase;
   end
 
   // M2S.1 — protected-mode segment LIMIT-check DECISION (spec §3, computed not

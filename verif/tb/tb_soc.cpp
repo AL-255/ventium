@@ -78,6 +78,7 @@ struct Args {
     uint64_t max_cycles = 1ull << 24;
     uint32_t quiesce    = 64;
     bool     peek_pc    = false;   // on stop, dump opcode bytes at the last retired PC
+    uint32_t peek_mem   = 0;       // on stop, hexdump 64 bytes at this linear address (0=off)
 };
 
 [[noreturn]] void usage(const char* a0, int code) {
@@ -111,6 +112,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--quiesce")         a.quiesce    = parse_u32(need("--quiesce"));
         else if (k == "--peek-pc")         a.peek_pc    = true;
         else if (k == "--vga-bios")        a.vga_bios   = need("--vga-bios");
+        else if (k == "--peek-mem")        a.peek_mem   = parse_u32(need("--peek-mem"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -387,6 +389,16 @@ int main(int argc, char** argv) {
         // a HALT. mem_req=0 = the core is in S_HALT (unknown opcode / hlt).
         std::fprintf(stderr, "\n  bus: mem_req=%d we=%d addr=0x%08x  (req=1 -> unacked bus wait)\n",
                      (int)top->mem_req, (int)top->mem_we, (uint32_t)top->mem_addr);
+    }
+
+    if (args.peek_mem) {
+        std::fprintf(stderr, "tb_soc: peek-mem @0x%08x:\n", args.peek_mem);
+        for (int row = 0; row < 4; ++row) {
+            std::fprintf(stderr, "  0x%08x: ", args.peek_mem + row*16);
+            for (int i = 0; i < 16; ++i)
+                std::fprintf(stderr, "%02x ", mem.read8(args.peek_mem + row*16 + i));
+            std::fprintf(stderr, "\n");
+        }
     }
 
     top->final();
