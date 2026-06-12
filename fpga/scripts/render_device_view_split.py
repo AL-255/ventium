@@ -150,22 +150,17 @@ def build_panel(focus):
     return img, (minx, maxx, miny, maxy), legend_blocks
 
 # ---- compact 2-panel figure: [die][legend] [die][legend] ----------------------
-fig = plt.figure(figsize=(11.2, 6.4))
-gs = fig.add_gridspec(1, 4, width_ratios=[1.0, 1.18, 1.0, 1.18], wspace=0.04,
-                      left=0.045, right=0.995, top=0.86, bottom=0.075)
+# The die is ~4:1 tall (H~243 x W~60 sites); the figure width is sized to the
+# CONTENT (two ~1.6in dies + two ~1.8in single-column legends), not to a wide
+# canvas — that's what kills the blank space.
+# Panel 1 (dense die) gets a side legend column; panel 2's die is mostly gray
+# at the top (the core is grayed out), so its legend sits INSIDE the axes over
+# that gray region — the whole fourth column disappears.
+fig = plt.figure(figsize=(5.9, 6.4))
+gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.18, 1.05], wspace=0.03,
+                      left=0.075, right=0.995, top=0.875, bottom=0.08)
 
-for p, (focus, subtitle) in enumerate(PANELS):
-    img, (minx, maxx, miny, maxy), legend_blocks = build_panel(focus)
-    ax = fig.add_subplot(gs[0, 2 * p])
-    ax.imshow(img, origin="lower", interpolation="nearest", aspect="equal",
-              extent=[minx - 0.5, maxx + 0.5, miny - 0.5, maxy + 0.5])
-    ax.set_title(subtitle, fontsize=9.5, pad=6)
-    ax.set_xlabel("SLICE column (X)", fontsize=7.5)
-    if p == 0:
-        ax.set_ylabel("SLICE row (Y)", fontsize=7.5)
-    ax.tick_params(labelsize=6.5)
-
-    lax = fig.add_subplot(gs[0, 2 * p + 1]); lax.axis("off")
+def legend_items(legend_blocks):
     handles, labels = [], []
     for m, base, leg in legend_blocks:
         handles.append(Patch(facecolor=base, edgecolor="black", linewidth=0.4))
@@ -174,15 +169,41 @@ for p, (focus, subtitle) in enumerate(PANELS):
             handles.append(Line2D([0], [0], marker="s", linestyle="", markersize=5.5,
                                   markerfacecolor=col, markeredgecolor="none"))
             labels.append(f"   {sname} ({cnt:,})")
-    lg = lax.legend(handles, labels, loc="center left", bbox_to_anchor=(-0.08, 0.5),
-                    fontsize=6.0, framealpha=0.0, handlelength=1.0,
-                    labelspacing=0.22, borderpad=0.2,
-                    title="module ▸ sub-block (cells)")
+    return handles, labels
+
+def style_legend(lg, handles):
     lg.get_title().set_fontsize(7)
     lg.get_title().set_fontweight("bold")
     for txt, h in zip(lg.get_texts(), handles):
         if isinstance(h, Patch):
             txt.set_fontweight("bold")
+
+axes = []
+for p, (focus, subtitle) in enumerate(PANELS):
+    img, (minx, maxx, miny, maxy), legend_blocks = build_panel(focus)
+    ax = fig.add_subplot(gs[0, 0 if p == 0 else 2])
+    axes.append(ax)
+    ax.imshow(img, origin="lower", interpolation="nearest", aspect="equal",
+              extent=[minx - 0.5, maxx + 0.5, miny - 0.5, maxy + 0.5])
+    ax.set_title(subtitle, fontsize=8.5, pad=5)
+    ax.set_xlabel("SLICE column (X)", fontsize=7.5)
+    if p == 0:
+        ax.set_ylabel("SLICE row (Y)", fontsize=7.5)
+    ax.tick_params(labelsize=6.5)
+    handles, labels = legend_items(legend_blocks)
+    if p == 0:
+        lax = fig.add_subplot(gs[0, 1]); lax.axis("off")
+        lg = lax.legend(handles, labels, loc="center left", bbox_to_anchor=(-0.16, 0.5),
+                        fontsize=6.0, framealpha=0.0, handlelength=1.0,
+                        labelspacing=0.22, borderpad=0.1, handletextpad=0.5,
+                        title="module ▸ sub-block (cells)")
+    else:
+        # inset over the grayed-core region (upper half of the right die)
+        lg = ax.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.995, 0.995),
+                       fontsize=6.0, framealpha=0.92, edgecolor="#999999",
+                       handlelength=1.0, labelspacing=0.22, borderpad=0.45,
+                       handletextpad=0.5, title="module ▸ sub-block (cells)")
+    style_legend(lg, handles)
 
 fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=0.965)
 fig.savefig(out_png, dpi=150, bbox_inches="tight", pad_inches=0.08)
