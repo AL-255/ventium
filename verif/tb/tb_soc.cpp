@@ -78,6 +78,7 @@ struct Args {
     uint64_t max_cycles = 1ull << 24;
     uint32_t quiesce    = 64;
     bool     peek_pc    = false;   // on stop, dump opcode bytes at the last retired PC
+    bool     peek_vga   = false;   // on stop, decode the 0xB8000 VGA text buffer
     uint32_t peek_mem   = 0;       // on stop, hexdump 64 bytes at this linear address (0=off)
 };
 
@@ -111,6 +112,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--max-cycles")      a.max_cycles = parse_u64(need("--max-cycles"));
         else if (k == "--quiesce")         a.quiesce    = parse_u32(need("--quiesce"));
         else if (k == "--peek-pc")         a.peek_pc    = true;
+        else if (k == "--peek-vga")        a.peek_vga   = true;
         else if (k == "--vga-bios")        a.vga_bios   = need("--vga-bios");
         else if (k == "--peek-mem")        a.peek_mem   = parse_u32(need("--peek-mem"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
@@ -359,6 +361,23 @@ int main(int argc, char** argv) {
         } else {
             std::fprintf(stderr, "tb_soc: WARNING cannot open --checkpoint-dump '%s'\n",
                          args.ckpt_dump.c_str());
+        }
+    }
+
+    // ---- diagnostic: decode the VGA text buffer (0xB8000, 80x25, char @ even off)
+    // shows what the booted firmware/OS printed via INT 10h (FreeDOS banner / C:\ etc).
+    if (args.peek_vga) {
+        std::fprintf(stderr, "tb_soc: VGA text buffer @0xB8000:\n");
+        for (int row = 0; row < 25; ++row) {
+            char line[81]; bool any = false;
+            for (int c = 0; c < 80; ++c) {
+                uint8_t ch = mem.read8(0xB8000 + (row*80 + c)*2);
+                line[c] = (ch >= 32 && ch < 127) ? (char)ch : ' ';
+                if (line[c] != ' ') any = true;
+            }
+            line[80] = 0;
+            int e = 79; while (e >= 0 && line[e] == ' ') line[e--] = 0;
+            if (any) std::fprintf(stderr, "  %2d| %s\n", row, line);
         }
     }
 

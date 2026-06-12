@@ -308,8 +308,10 @@ module ven_ide #(
     dma_state_e  dma_state;
     logic [31:0] prd_base;     // PRD entry: physical base of the target buffer
     logic [6:0]  dma_beat;     // dword beat 0..127 within the 512-byte sector
-    // byte offset into disk[] for the current dword = LBA*512 + beat*4
-    wire  [15:0] dma_doff = {dma_lba[6:0], 9'd0} + {7'd0, dma_beat, 2'b00};
+    // byte offset into disk[] for the current dword = LBA*512 + beat*4 (F3: DBW-wide
+    // so a >64 KiB disk does not alias; dma_lba is LBA28, slice [DBW-10:0] = the byte
+    // address's sector field). Default 128-sector disk => DBW=16 => byte-identical.
+    wire  [DBW-1:0] dma_doff = {dma_lba[DBW-10:0], 9'd0} + {dma_beat, 2'b00};
     // launching THIS clock: a START 0->1 EDGE write to BMIC with a DMA armed while
     // idle (the !r_bmic[0] term makes it a true 0->1 edge, matching qemu's
     // keep-old-value-on-no-change; dma_state==IDLE already prevents re-launch).
@@ -322,6 +324,11 @@ module ven_ide #(
     // ---- backing stores --------------------------------------------------
     logic [7:0]  disk [0:DISK_SECTORS*512-1];   // raw image, $readmemh
     logic [15:0] identify_words [0:255];        // built at time 0 (constants)
+    // F3: byte-address width into disk[]. For the default 128-sector (64 KiB) disk
+    // this is 16, so the pre-F3 [15:0] addressing is byte-identical; a larger FreeDOS
+    // disk (DISK_SECTORS overridden via +define) widens it so sector N no longer
+    // aliases to N&127 (the xfer_lba[6:0]/16-bit cap was the 64 KiB ceiling).
+    localparam int DBW = $clog2(DISK_SECTORS*512);
 `ifdef VEN_IDE_DISK_HEX
     // HAS_DISK=0 (the empty ATAPI CD) -> no backing image to load.
     initial if (HAS_DISK) $readmemh(`VEN_IDE_DISK_HEX, disk);
@@ -390,8 +397,10 @@ module ven_ide #(
     end
 
     // ---- disk byte address for the current PIO data word -----------------
-    // byte_base = xfer_lba*512 + data_idx*2  (LBA in [0,DISK_SECTORS-1]).
-    wire [15:0] disk_byte = {xfer_lba[6:0], 9'd0} + {6'd0, data_idx, 1'b0};
+    // byte_base = xfer_lba*512 + data_idx*2  (LBA in [0,DISK_SECTORS-1]). F3: DBW-wide
+    // (xfer_lba slice [DBW-10:0]) so a >64 KiB FreeDOS disk addresses every sector
+    // instead of aliasing N->N&127. Default 128-sector disk => DBW=16 => byte-identical.
+    wire [DBW-1:0] disk_byte = {xfer_lba[DBW-10:0], 9'd0} + {data_idx, 1'b0};
 
     // ---- combinational READ (same-cycle ack) -----------------------------
     logic [15:0] data_word;

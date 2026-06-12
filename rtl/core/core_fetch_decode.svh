@@ -72,6 +72,7 @@
           q_push_sreg<=d_push_sreg; q_pop_sreg<=d_pop_sreg;   // F3 PUSH/POP sreg
           q_seg_load_lo<=d_seg_load_lo;                       // F3 MOV Sreg,[mem]
           q_store_sreg<=d_store_sreg;                         // F3 MOV [mem],Sreg
+          q_callf_mem<=d_callf_mem; q_jmpf_mem<=d_jmpf_mem;   // F3 FF /3 CALLF / FF /5 JMPF
           seg_step<=1'b0;
           // M2S.3 INT/IRET/UD2 are dispatched directly from the d_* decode below
           // (they begin their micro-sequence in S_DECODE), so no q_* latch is
@@ -296,31 +297,32 @@
 `endif
           end
           else if (d_halt || d_unknown) begin
-            // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
-            // the terminating `int 0x80` (it is a retired instruction to the TCG
-            // plugin), so the RTL must too — otherwise the cycle trace is one
-            // record short of the golden and compare.py reports a LENGTH MISMATCH
-            // (harmless under the current gate, which ignores compare's exit code,
-            // but it would fail a tightened gate that honored it). Emit ONE retire
-            // for a genuine HALT syscall (d_halt) and THEN stop. d_unknown (an
-            // out-of-scope opcode) stays a LOUD no-retire HALT — never a record, so
-            // an unsupported opcode can never masquerade as a clean run. Func mode
-            // keeps the M0/QEMU-gdbstub convention (no post-state row for the exit
-            // syscall), so this extra retire is cycle-mode only and cannot perturb
-            // the functional gates.
-            if (cycle_mode && d_halt && !d_unknown) begin
+            // F3 INTERRUPTIBLE HLT (system mode only): in sys_mode `d_halt` is ONLY the
+            // HLT opcode (INT n decodes to d_int there, never d_halt). A real CPU's HLT
+            // halts until an interrupt, then the IRET resumes AFTER the HLT — SeaBIOS's
+            // yield() (sti;hlt;cli) busy-waits on the timer IRQ exactly this way during
+            // its INT 13h disk wait. So retire the HLT, step EIP past it, and park in
+            // S_HLTWAIT (which delivers the next INTR/NMI). USER mode keeps the terminal
+            // no-wake S_HALT below (no retire), so make verify is byte-identical.
+            if (sys_mode && d_halt && !d_unknown) begin
               q_pc<=eip; retire_valid<=1'b1;
-              retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
+              eip<=eip+{28'd0,d_len};
+              state<=S_HLTWAIT;
+            end else begin
+              // M5 finding [low]: in CYCLE mode the oracle emits a retire record for
+              // the terminating `int 0x80` (a retired instruction to the TCG plugin),
+              // so the RTL must too. Emit ONE retire for a genuine HALT syscall
+              // (d_halt) then stop. d_unknown stays a LOUD no-retire HALT.
+              if (cycle_mode && d_halt && !d_unknown) begin
+                q_pc<=eip; retire_valid<=1'b1;
+                retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
+              end
+              // M6 Erratum 81 (F00F): the locked CMPXCHG8B reg-dst HANG.
+              if (d_f00f && errata_en[ERR_F00F] && pfx_lock)
+                state<=S_F00F_HANG;
+              else
+                state<=S_HALT;
             end
-            // M6 Erratum 81 (F00F): the invalid LOCK CMPXCHG8B reg-dst form. With
-            // errata enabled AND the LOCK prefix present, reproduce the documented
-            // HANG (the bus stays locked so the #UD handler never starts) instead
-            // of the clean loud HALT. The non-locked invalid form, and the valid
-            // memory form (mod!=11, never d_f00f), still take the clean HALT path.
-            if (d_f00f && errata_en[ERR_F00F] && pfx_lock)
-              state<=S_F00F_HANG;
-            else
-              state<=S_HALT;
           end
           else if (d_is_x87) begin
             // M11b: env/state ops own a dedicated wide-beat sequencer.

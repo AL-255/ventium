@@ -639,6 +639,11 @@ module core
     // 16-bit FLAGS:CS:IP frame, then IRET pops it back. (Pure real mode, PE=0;
     // V86/PM keep the existing 8-byte-gate S_INT_* / S_IRET path.)
     S_RMINT_RD, S_RMINT_PUSH, S_RMIRET,
+    // F3 interruptible HLT (system mode): HLT retires + parks here until a maskable
+    // INTR / NMI wakes the core and is delivered (IRET resumes after the HLT). Real
+    // firmware (SeaBIOS yield = sti;hlt) busy-waits on the timer IRQ this way. User
+    // mode keeps the loud terminal S_HALT (no wake) so make verify is byte-identical.
+    S_HLTWAIT,
     // M2S.2 paging: the 2-level page-walk micro-sequence (PDE read -> PTE read ->
     // optional A/D writeback -> TLB fill -> resume the diverted memory state).
     S_WALK,
@@ -1090,6 +1095,8 @@ module core
   logic        d_pop_sreg;     // F3 POP sreg (07/17/1F): pop writes seg_sel/base[d_sys_sreg]
   logic        d_seg_load_lo;  // F3 MOV Sreg,[mem]: selector = LOW 16b of the 2-byte read
   logic        d_store_sreg;   // F3 MOV [mem],Sreg: store data = seg_sel[d_sys_sreg]
+  logic        d_callf_mem;    // F3 FF /3 CALLF m16:16 (far indirect call through memory)
+  logic        d_jmpf_mem;     // F3 FF /5 JMPF  m16:16 (far indirect jump through memory)
   logic        d_pfx_seg_en;   // a segment-override prefix is present
   logic [2:0]  d_pfx_seg_idx;  // which segment the override selects
 
@@ -1221,6 +1228,7 @@ module core
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
     d_seg_load=1'b0; d_lseg=3'd0;
     d_push_sreg=1'b0; d_pop_sreg=1'b0; d_seg_load_lo=1'b0; d_store_sreg=1'b0;
+    d_callf_mem=1'b0; d_jmpf_mem=1'b0;
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
     // M2S.3 interrupt/return decode defaults.
     d_int=1'b0; d_int_vec=8'd0; d_int_imm=1'b0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
@@ -1261,20 +1269,45 @@ module core
       d_ea=(no_base?32'd0:base_val)+(no_index?32'd0:index_val)+disp_val;
     end
 
-    // M2S.1 — 16-bit ADDRESSING (eff_addr==1, i.e. real mode w/o a 0x67 prefix).
-    // The bare-metal bootstrap uses ONLY the direct form `[disp16]` (modrm
-    // mod=00, rm=110) for the GDT-pointer writes + LGDT; recompute d_ea + the
-    // ModR/M length contribution for it. Other 16-bit modes ([bx+si] etc) are a
-    // DEFERRED corner (the pseg gate never uses them) -> d_unknown (loud HALT).
-    // `amode16_len` is the ModR/M+disp byte count under 16-bit addressing; the
-    // opcode handlers below use mfl() (32-bit) so we correct d_len when amode16.
+    // F3 — 16-bit ADDRESSING (eff_addr==1, i.e. real mode w/o a 0x67 prefix). The
+    // 32-bit EA block above used the 32-bit ModR/M model (base_val=gpr[rm], SIB),
+    // which is WRONG for 16-bit forms — so recompute d_ea here from the 16-bit
+    // base/index table (no SIB in 16-bit addressing). Until now only the direct
+    // `[disp16]` form was handled; every register form ([bx],[si],[bp+disp],[bx+si]..)
+    // silently used the 32-bit gpr[rm] EA, which broke hand-written 16-bit real-mode
+    // asm (gcc/SeaBIOS use a 0x67 a32 prefix so eff_addr=0 and were unaffected; the
+    // FreeDOS MBR's `test byte [bx],0x80` partition scan hit it). mfl_e(eff_addr,..)
+    // already gives the right LENGTH, so only d_ea (and the BP->SS default) need work.
+    //   rm: 000 BX+SI  001 BX+DI  010 BP+SI  011 BP+DI  100 SI  101 DI
+    //       110 (mod==00) disp16 / (else) BP   111 BX
+    //   disp: mod=01 disp8(sext), mod=10 disp16, mod=00/rm=110 disp16, else none.
+    //   16-bit GPRs: BX=gpr[3], BP=gpr[5], SI=gpr[6], DI=gpr[7] (low 16).
     if (eff_addr) begin
-      if (modrm_mod==2'b00 && modrm_rm==3'b110) begin
-        // [disp16] direct: 2-byte displacement at m_idx+1.
-        d_ea = {16'd0, ibuf[m_idx+2], ibuf[m_idx+1]};
-      end
-      // other 16-bit forms not needed by the gate -> flagged unknown below via
-      // the per-opcode handler (which sees mod!=11 mem but we have no EA).
+      logic [15:0] ea16_base, ea16_disp;
+      unique case (modrm_rm)
+        3'b000:  ea16_base = gpr[3][15:0] + gpr[6][15:0];                 // BX+SI
+        3'b001:  ea16_base = gpr[3][15:0] + gpr[7][15:0];                 // BX+DI
+        3'b010:  ea16_base = gpr[5][15:0] + gpr[6][15:0];                 // BP+SI
+        3'b011:  ea16_base = gpr[5][15:0] + gpr[7][15:0];                 // BP+DI
+        3'b100:  ea16_base = gpr[6][15:0];                                // SI
+        3'b101:  ea16_base = gpr[7][15:0];                                // DI
+        3'b110:  ea16_base = (modrm_mod==2'b00) ? 16'd0 : gpr[5][15:0];   // disp16 / BP
+        default: ea16_base = gpr[3][15:0];                               // BX (rm=111)
+      endcase
+      if (modrm_mod==2'b01)
+        ea16_disp = {{8{ibuf[m_idx+1][7]}}, ibuf[m_idx+1]};              // disp8 (sext)
+      else if (modrm_mod==2'b10 || (modrm_mod==2'b00 && modrm_rm==3'b110))
+        ea16_disp = {ibuf[m_idx+2], ibuf[m_idx+1]};                      // disp16
+      else
+        ea16_disp = 16'd0;
+      d_ea = {16'd0, (ea16_base + ea16_disp)};   // 16-bit wrap, zero-extended
+      // BP-based 16-bit forms default to SS (stack); others keep DS. A segment-
+      // override prefix (already in d_seg) wins. rm=010/011 (BP+idx) and rm=110 with
+      // mod!=00 (BP+disp) are BP-relative.
+      if (!d_pfx_seg_en &&
+          (modrm_rm==3'b010 || modrm_rm==3'b011 ||
+           (modrm_rm==3'b110 && modrm_mod!=2'b00)))
+        d_seg = 3'(SG_SS);
     end
 
     d_w = eff_opsize ? 3'd2 : 3'd4;
@@ -2042,6 +2075,26 @@ module core
               if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
               else begin d_mem_read=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
             end
+            // F3 — FF /3 CALLF m16:16 / FF /5 JMPF m16:16 (far indirect call/jump
+            // THROUGH MEMORY): read the 4-byte {offset,selector} far pointer from
+            // [mem], then a far transfer. (FreeDOS does `jmp far [bp+0x5a]`.) These
+            // are MEMORY-ONLY (reg form mod=11 is invalid -> #UD/HALT). Gated real
+            // mode (seg_real && !paging_on) like the direct far CALL/JMP; PM call/jmp
+            // gates are out of scope. d_callf_mem/d_jmpf_mem are serviced after the
+            // S_LOAD reads the pointer: JMPF loads CS:IP inline, CALLF stages it then
+            // S_LCALL pushes CS:next_eip + loads.
+            3'd3: begin // CALLF m16:16
+              if (modrm_mod!=2'b11 && seg_real && !paging_on) begin
+                d_callf_mem=1'b1; d_mem_read=1'b1; d_w=3'd2;
+                d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+              end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
+            end
+            3'd5: begin // JMPF m16:16
+              if (modrm_mod!=2'b11 && seg_real && !paging_on) begin
+                d_jmpf_mem=1'b1; d_mem_read=1'b1; d_w=3'd2;
+                d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+              end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
+            end
             default: begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
           endcase
         end
@@ -2450,7 +2503,7 @@ module core
   // INTERRUPT-ACKNOWLEDGE strobe: pulse for exactly the S_DECODE clock the core
   // accepts a maskable INTR (the PIC drives inta_vector combinationally off this).
   // NMI carries the fixed vector 2 and does NOT pulse inta. 0 whenever soc_en==0.
-  assign inta = (state==S_DECODE) && intr_take;
+  assign inta = ((state==S_DECODE) || (state==S_HLTWAIT)) && intr_take;
 
   // ===========================================================================
   // Latched decoded fields
@@ -2517,6 +2570,8 @@ module core
   logic        q_pop_sreg;        // F3 POP sreg latch
   logic        q_seg_load_lo;     // F3 MOV Sreg,[mem] low-half seg-load latch
   logic        q_store_sreg;      // F3 MOV [mem],Sreg store-selector latch
+  logic        q_callf_mem;       // F3 FF /3 CALLF m16:16 latch
+  logic        q_jmpf_mem;        // F3 FF /5 JMPF  m16:16 latch
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
   logic [31:0] retf_off;          // M9.5 RETF: the popped IP/EIP held between beats
   logic [31:0] gdt_lo;            // first dword of the in-flight 8-byte descriptor
@@ -3704,7 +3759,7 @@ module core
       // state once after a long no-retire stall (boot bring-up gap-walk diagnostic).
       if (retire_valid || retire2_valid) begin dbg_stall<=24'd0; end
       else dbg_stall <= dbg_stall + 24'd1;
-      if (dbg_stall == 24'd1500 && !dbg_printed) begin
+      if (dbg_stall == 24'd150000 && !dbg_printed) begin
         dbg_printed <= 1'b1;
         $display("[VEN-WD] STUCK state=%s mem_addr=%08h | cr0=%08h sys_mode=%b v86=%b real_mode=%b eflags=%08h | idt_base=%08h gdt_base=%08h int_vec=%02h cpl=%0d | csbase=%08h eip=%08h",
                  state.name(), mem_addr, creg0, sys_mode, v86, real_mode, eflags,
@@ -3915,6 +3970,22 @@ module core
         `include "core_walk.svh"
 
         S_HALT: state<=S_HALT;
+
+        // F3 INTERRUPTIBLE HLT wait (system mode). EIP already points past the HLT
+        // (advanced when it retired), so start_fault's pushed return = the instruction
+        // after HLT. Mirror the S_DECODE instruction-boundary divert priority
+        // NMI > maskable INTR; the `inta` strobe also pulses here (see assign inta).
+        // Stay parked until one fires. SMI from HLT is out of scope (FreeDOS path).
+        S_HLTWAIT: begin
+          if (nmi_take) begin
+            nmi_pending     <= 1'b0;
+            nmi_in_progress <= 1'b1;
+            start_fault(8'd2, 1'b0, 32'd0, eip);
+          end else if (intr_take) begin
+            start_fault(inta_vector, 1'b0, 32'd0, eip);
+          end
+          // else remain in S_HLTWAIT (halted, awaiting an interrupt).
+        end
 
         // M6 Erratum 81 (F00F): the locked CMPXCHG8B-with-register-destination
         // form never starts the #UD handler because the bus stays locked — the

@@ -471,7 +471,14 @@ module ventium_soc
   // 1024 core clocks (count 0x40 => ~65k clocks ≈ ~8k instructions per IRQ0)
   // gives a wide margin. The post-spin checkpoint is INDEPENDENT of this choice;
   // only the (excluded-from-differential) cadence depends on it.
-  localparam int unsigned PIT_TICK_DIV = 1024;
+  // F3: overridable via +define so the FreeDOS sim can use a FAST timer (SeaBIOS's
+  // yield/sti-hlt disk wait spins on the timer IRQ; at 1024 the IRQ0 period is ~67M
+  // clk which is glacial + trips the TB quiescence detector). Absent => 1024 => the
+  // pirqsoc gate is byte-identical. Sim-only (set only on the tb_soc Verilator line).
+`ifndef VEN_PIT_TICK_DIV
+  `define VEN_PIT_TICK_DIV 1024
+`endif
+  localparam int unsigned PIT_TICK_DIV = `VEN_PIT_TICK_DIV;
   ven_pit #(.TICK_DIV(PIT_TICK_DIV), .TICK_INC(1)) u_pit (
       .clk    (clk),
       .rst    (dev_rst),
@@ -733,9 +740,28 @@ module ventium_soc
   // source disk image ven_ide $readmemh's + qemu -drive's), the absent-slave
   // masking, and DIAGNOSTIC. The disk hex path is supplied via the
   // -DVEN_IDE_DISK_HEX +define on the obj_dir_soc Verilator build line (the SoC
-  // TB Makefile `soc:` target). DISK_SECTORS/CYLS/HEADS/SECS are pinned to the
-  // pide 64 KiB image geometry (qemu guess_chs_for_size(128) = 2/16/63).
-  ven_ide #(.DISK_SECTORS(128), .CYLS(2), .HEADS(16), .SECS(63),
+  // TB Makefile `soc:` target). DISK_SECTORS/CYLS/HEADS/SECS default to the pide
+  // 64 KiB image geometry (qemu guess_chs_for_size(128) = 2/16/63) and are
+  // OVERRIDABLE via +define (F3 FreeDOS boot needs a multi-MB disk). Verilator -G
+  // can't reach a submodule param, so thread it through `ifndef-defaulted macros:
+  // absent => 128/2/16/63 => the pide/pboot/seabios-boot gates are byte-identical;
+  // the FreeDOS build passes e.g. +define+VEN_IDE_DISK_SECTORS=20160 (+CYLS=20).
+  // SIM-ONLY: the macros are set only on the tb_soc Verilator line, never synthesis,
+  // so the FPGA build keeps the 64 KiB disk.
+`ifndef VEN_IDE_DISK_SECTORS
+  `define VEN_IDE_DISK_SECTORS 128
+`endif
+`ifndef VEN_IDE_CYLS
+  `define VEN_IDE_CYLS 2
+`endif
+`ifndef VEN_IDE_HEADS
+  `define VEN_IDE_HEADS 16
+`endif
+`ifndef VEN_IDE_SECS
+  `define VEN_IDE_SECS 63
+`endif
+  ven_ide #(.DISK_SECTORS(`VEN_IDE_DISK_SECTORS), .CYLS(`VEN_IDE_CYLS),
+            .HEADS(`VEN_IDE_HEADS), .SECS(`VEN_IDE_SECS),
             .HAS_DMA(1'b1)) u_ide (
       .clk    (clk),
       .rst    (dev_rst),
