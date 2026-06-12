@@ -149,16 +149,14 @@ def build_panel(focus):
         img[y - miny, x - minx] = layer_colors[cnt.most_common(1)[0][0]]
     return img, (minx, maxx, miny, maxy), legend_blocks
 
-# ---- compact 2-panel figure: [die][legend] [die][legend] ----------------------
+# ---- compact 2-panel figure: [die][legend][die][legend] -----------------------
 # The die is ~4:1 tall (H~243 x W~60 sites); the figure width is sized to the
-# CONTENT (two ~1.6in dies + two ~1.8in single-column legends), not to a wide
-# canvas — that's what kills the blank space.
-# Panel 1 (dense die) gets a side legend column; panel 2's die is mostly gray
-# at the top (the core is grayed out), so its legend sits INSIDE the axes over
-# that gray region — the whole fourth column disappears.
-fig = plt.figure(figsize=(5.9, 6.4))
-gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.18, 1.05], wspace=0.03,
-                      left=0.075, right=0.995, top=0.875, bottom=0.08)
+# CONTENT (two ~1.6in dies + two slim single-column legends) — compact without
+# overlap: an inset legend over the right die clipped its BD/interconnect cells,
+# so both legends keep their own (slim) columns.
+fig = plt.figure(figsize=(6.9, 6.4))
+gs = fig.add_gridspec(1, 4, width_ratios=[1.0, 1.14, 1.0, 1.02], wspace=0.03,
+                      left=0.066, right=0.998, top=0.875, bottom=0.08)
 
 def legend_items(legend_blocks):
     handles, labels = [], []
@@ -181,7 +179,7 @@ def style_legend(lg, handles):
 axes = []
 for p, (focus, subtitle) in enumerate(PANELS):
     img, (minx, maxx, miny, maxy), legend_blocks = build_panel(focus)
-    ax = fig.add_subplot(gs[0, 0 if p == 0 else 2])
+    ax = fig.add_subplot(gs[0, 2 * p])
     axes.append(ax)
     ax.imshow(img, origin="lower", interpolation="nearest", aspect="equal",
               extent=[minx - 0.5, maxx + 0.5, miny - 0.5, maxy + 0.5])
@@ -191,18 +189,11 @@ for p, (focus, subtitle) in enumerate(PANELS):
         ax.set_ylabel("SLICE row (Y)", fontsize=7.5)
     ax.tick_params(labelsize=6.5)
     handles, labels = legend_items(legend_blocks)
-    if p == 0:
-        lax = fig.add_subplot(gs[0, 1]); lax.axis("off")
-        lg = lax.legend(handles, labels, loc="center left", bbox_to_anchor=(-0.16, 0.5),
-                        fontsize=6.0, framealpha=0.0, handlelength=1.0,
-                        labelspacing=0.22, borderpad=0.1, handletextpad=0.5,
-                        title="module ▸ sub-block (cells)")
-    else:
-        # inset over the grayed-core region (upper half of the right die)
-        lg = ax.legend(handles, labels, loc="upper right", bbox_to_anchor=(0.995, 0.995),
-                       fontsize=6.0, framealpha=0.92, edgecolor="#999999",
-                       handlelength=1.0, labelspacing=0.22, borderpad=0.45,
-                       handletextpad=0.5, title="module ▸ sub-block (cells)")
+    lax = fig.add_subplot(gs[0, 2 * p + 1]); lax.axis("off")
+    lg = lax.legend(handles, labels, loc="center left", bbox_to_anchor=(-0.16, 0.5),
+                    fontsize=6.0, framealpha=0.0, handlelength=1.0,
+                    labelspacing=0.22, borderpad=0.1, handletextpad=0.5,
+                    title="module ▸ sub-block (cells)")
     style_legend(lg, handles)
 
 fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=0.965)
