@@ -707,6 +707,7 @@ module core
   // S_DECODE int-0x80 arm (see below); the apply happens on that same clock.
   logic [31:0] gs_base_r;          // latched %gs TLS base (0 = flat / unset)
   logic [63:0] cn;                 // core-side retire counter (drives syscall_n)
+  logic [63:0] tsc;                // F3: free-running time-stamp counter (RDTSC 0F 31)
 `ifdef VEN_PS_PROXY
   logic [3:0]  q_proxy_len;        // int80 length latched at S_SYSCALL_WAIT entry (eip
                                    // parks at cd80, so this is the only thing the wait
@@ -1081,6 +1082,9 @@ module core
   logic [15:0] d_ljmp_sel;     // far-jump target selector
   logic        d_seg_load;     // M9.5 LES/LDS/LSS/LFS/LGS: also load a seg reg from [mem]+2
   logic [2:0]  d_lseg;         //   target segment register index for the seg-load
+  logic        d_push_sreg;    // F3 PUSH sreg (06/0E/16/1E): push data = seg_sel[d_sys_sreg]
+  logic        d_pop_sreg;     // F3 POP sreg (07/17/1F): pop writes seg_sel/base[d_sys_sreg]
+  logic        d_seg_load_lo;  // F3 MOV Sreg,[mem]: selector = LOW 16b of the 2-byte read
   logic        d_pfx_seg_en;   // a segment-override prefix is present
   logic [2:0]  d_pfx_seg_idx;  // which segment the override selects
 
@@ -1211,6 +1215,7 @@ module core
     d_sysop=SYS_NONE; d_sys_sreg=3'd0; d_sys_creg=3'd0;
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
     d_seg_load=1'b0; d_lseg=3'd0;
+    d_push_sreg=1'b0; d_pop_sreg=1'b0; d_seg_load_lo=1'b0;
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
     // M2S.3 interrupt/return decode defaults.
     d_int=1'b0; d_int_vec=8'd0; d_int_imm=1'b0; d_int_cond_of=1'b0; d_iret=1'b0; d_ud2=1'b0;
@@ -1500,6 +1505,20 @@ module core
             d_kind=K_CPUID; d_writes_reg=1'b1;  // EXEC writes all 4 GPRs directly
           end else d_unknown=1'b1;              // out-of-scope in user mode -> HALT
         end
+        // ---- 0F 31: RDTSC — read the 64-bit time-stamp counter into EDX:EAX.
+        // Ungated like CPUID (cosim_en || soc_en): real boot firmware (SeaBIOS
+        // calibrates the TSC against PIT ch2) needs it; our CPUID advertises the
+        // TSC feature (leaf-1 EDX bit 4 = 1). The user-mode corpus has both off, so
+        // it stays the loud HALT there — and the TSC value is a free-running cycle
+        // count, inherently not per-record-diffable vs qemu (the SeaBIOS path that
+        // uses it is free-run graded, not single-step). CR4.TSD privilege check is
+        // not modeled (firmware runs CPL0 with TSD=0). EXEC writes EDX:EAX directly.
+        8'h31: begin
+          d_len=pfx_len+4'd2;
+          if (cosim_en || soc_en) begin
+            d_kind=K_RDTSC; d_writes_reg=1'b1;  // EXEC writes EDX:EAX from `tsc`
+          end else d_unknown=1'b1;              // out-of-scope in user mode -> HALT
+        end
         // ---- 0F 0B: UD2, the architecturally-undefined opcode -> #UD (vector 6).
         // In SYSTEM mode it DELIVERS #UD through the IDT (a FAULT: pushes the
         // faulting EIP); in user mode there is no IDT, so it HALTs loudly as an
@@ -1538,6 +1557,29 @@ module core
           d_len=pfx_len+4'd1; d_is_pop=1'b1; d_mem_read=1'b1; d_writes_reg=1'b1;
           d_dst_reg=op0[2:0]; d_w=eff_opsize?3'd2:3'd4;
         end
+        // ---- F3: one-byte PUSH/POP segment register (06/0E/16/1E push es/cs/ss/ds,
+        // 07/17/1F pop es/ss/ds — there is no POP CS, 0x0F is the 0F escape). Real
+        // boot firmware (SeaBIOS's 16<->32 call32 trampoline) pushes CS to build an
+        // iret far-return frame. The push value is the 16-bit selector (zero-extended
+        // to 32 under a 0x66 operand-size prefix); POP reloads the selector and, in
+        // real/v86, the base = sel<<4 (the only path these reach in firmware). They
+        // were d_unknown->HALT before; the user corpus never executes them, so the
+        // default `make verify` build stays byte-identical. K_ALU (default kind) so the
+        // push data-mux / pop writeback below service them.
+        8'h06: begin d_len=pfx_len+4'd1; d_is_push=1'b1; d_mem_write=1'b1;
+                     d_push_sreg=1'b1; d_sys_sreg=3'(SG_ES); d_w=eff_opsize?3'd2:3'd4; end
+        8'h0E: begin d_len=pfx_len+4'd1; d_is_push=1'b1; d_mem_write=1'b1;
+                     d_push_sreg=1'b1; d_sys_sreg=3'(SG_CS); d_w=eff_opsize?3'd2:3'd4; end
+        8'h16: begin d_len=pfx_len+4'd1; d_is_push=1'b1; d_mem_write=1'b1;
+                     d_push_sreg=1'b1; d_sys_sreg=3'(SG_SS); d_w=eff_opsize?3'd2:3'd4; end
+        8'h1E: begin d_len=pfx_len+4'd1; d_is_push=1'b1; d_mem_write=1'b1;
+                     d_push_sreg=1'b1; d_sys_sreg=3'(SG_DS); d_w=eff_opsize?3'd2:3'd4; end
+        8'h07: begin d_len=pfx_len+4'd1; d_is_pop=1'b1; d_mem_read=1'b1;
+                     d_pop_sreg=1'b1; d_sys_sreg=3'(SG_ES); d_w=eff_opsize?3'd2:3'd4; end
+        8'h17: begin d_len=pfx_len+4'd1; d_is_pop=1'b1; d_mem_read=1'b1;
+                     d_pop_sreg=1'b1; d_sys_sreg=3'(SG_SS); d_w=eff_opsize?3'd2:3'd4; end
+        8'h1F: begin d_len=pfx_len+4'd1; d_is_pop=1'b1; d_mem_read=1'b1;
+                     d_pop_sreg=1'b1; d_sys_sreg=3'(SG_DS); d_w=eff_opsize?3'd2:3'd4; end
         8'h60: begin d_kind=K_STKMISC; d_sm=SM_PUSHA; d_len=pfx_len+4'd1; d_w=eff_opsize?3'd2:3'd4; end
         8'h61: begin d_kind=K_STKMISC; d_sm=SM_POPA;  d_len=pfx_len+4'd1; d_w=eff_opsize?3'd2:3'd4; end
         8'h68: begin // PUSH imm
@@ -1723,11 +1765,24 @@ module core
           d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
         end
         8'h8E: begin // MOV Sreg, r/m16  (M2S.1)
-          // load segment register modrm_reg from r/m16. Reg-form source only
-          // here (the corpus loads sregs from a GPR); memory source defers.
-          d_sysop=SYS_MOVSREG_TO; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
-          if (modrm_mod==2'b11) begin d_src_reg=modrm_rm; d_len=pfx_len+4'd2; end
-          else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+          // load segment register modrm_reg from r/m16. Reg-form source: the M2S.1
+          // SYS_MOVSREG_TO path (real -> base=sel<<4 in S_EXEC; PM -> S_SEGLD GDT walk).
+          // F3 MEMORY-source form (mod!=11): real/v86 boot firmware (SeaBIOS's call32
+          // return loads ds/es from a saved struct). Read the 2-byte selector and load
+          // it via the LES/LDS seg-load hook's LOW-half variant (base=sel<<4). Gated
+          // seg_real: a PM mov-sreg-from-mem would need the GDT walk and still defers
+          // to HALT (out of scope, never hit by the firmware path). The user corpus
+          // never uses the mem form, so `make verify` stays byte-identical.
+          if (modrm_mod==2'b11) begin
+            d_sysop=SYS_MOVSREG_TO; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
+            d_src_reg=modrm_rm; d_len=pfx_len+4'd2;
+          end else if (seg_real) begin
+            d_mem_read=1'b1; d_w=3'd2;
+            d_seg_load=1'b1; d_seg_load_lo=1'b1; d_lseg=sreg_idx(modrm_reg);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else begin
+            d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end
         end
         8'h8F: begin // POP r/m
           d_is_pop=1'b1; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
@@ -2431,6 +2486,9 @@ module core
   logic [15:0] q_ljmp_sel;
   logic        q_seg_load;        // M9.5 LES/LDS/LSS/LFS/LGS: also load a seg reg
   logic [2:0]  q_lseg;            //   target segment register index for the seg-load
+  logic        q_push_sreg;       // F3 PUSH sreg latch
+  logic        q_pop_sreg;        // F3 POP sreg latch
+  logic        q_seg_load_lo;     // F3 MOV Sreg,[mem] low-half seg-load latch
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
   logic [31:0] retf_off;          // M9.5 RETF: the popped IP/EIP held between beats
   logic [31:0] gdt_lo;            // first dword of the in-flight 8-byte descriptor
@@ -2852,7 +2910,10 @@ module core
     // resolve store data by op kind
     if (q_is_push) begin
       st_addr = gpr[R_ESP] - {28'd0,q_w};
-      st_data = q_use_imm ? q_imm
+      // F3 PUSH sreg: data = the 16-bit selector (zero-extended; strb_of(q_w) keeps
+      // 2 bytes for a 16-bit push, 4 for a 0x66-prefixed 32-bit push).
+      st_data = q_push_sreg ? {16'd0, seg_sel[q_sys_sreg]}
+              : q_use_imm   ? q_imm
               : (q_mem_read ? mem_load_data : reg_read(q_src_reg,q_w,1'b0));
     end else if (q_kind==K_CTRL && (q_ct==CT_CALLREL || q_ct==CT_CALLIND)) begin
       // Near CALL pushes the next-IP at the operand width: 4 bytes (32-bit) or
@@ -3516,6 +3577,7 @@ module core
       x87_touched_r<=1'b0; f_step<=4'd0; f_seq_step<=5'd0;
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
       gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
+      tsc<=64'd0;                    // F3: time-stamp counter zeroed at reset (RDTSC)
 `ifdef VEN_PS_PROXY
       q_proxy_len<=4'd0;
 `endif
@@ -3598,6 +3660,11 @@ module core
         cn <= cn + (retire2_valid ? 64'd2 : 64'd1);
         fold_pending_r <= 1'b0;
       end
+
+      // F3: the time-stamp counter free-runs at the core clock (one tick / clk),
+      // independent of retirement. RDTSC samples it. INERT for the user-mode corpus
+      // (no test executes RDTSC, so the reg is never read and the trace is identical).
+      tsc <= tsc + 64'd1;
 
       retire_valid <= 1'b0;
       retire2_valid <= 1'b0;

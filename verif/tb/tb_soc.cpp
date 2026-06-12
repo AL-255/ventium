@@ -76,6 +76,7 @@ struct Args {
     uint64_t max_insn   = 1ull << 20;
     uint64_t max_cycles = 1ull << 24;
     uint32_t quiesce    = 64;
+    bool     peek_pc    = false;   // on stop, dump opcode bytes at the last retired PC
 };
 
 [[noreturn]] void usage(const char* a0, int code) {
@@ -107,6 +108,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--max-insn")        a.max_insn   = parse_u64(need("--max-insn"));
         else if (k == "--max-cycles")      a.max_cycles = parse_u64(need("--max-cycles"));
         else if (k == "--quiesce")         a.quiesce    = parse_u32(need("--quiesce"));
+        else if (k == "--peek-pc")         a.peek_pc    = true;
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -342,6 +344,35 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "tb_soc: WARNING cannot open --checkpoint-dump '%s'\n",
                          args.ckpt_dump.c_str());
         }
+    }
+
+    // ---- diagnostic: dump opcode bytes at the last retired PC --------------
+    // On a quiescence stop this tells HLT-waiting (F4 hlt) from a stuck access.
+    if (args.peek_pc) {
+        uint32_t p  = ventium::g_last_arch.pc;
+        uint32_t cs = ventium::g_last_arch.seg[0];
+        uint32_t lin_pm = p;                 // PM-flat (cs.base=0)
+        uint32_t lin_rm = (cs << 4) + (p & 0xffff);  // real-mode (cs<<4)+ip
+        std::fprintf(stderr, "tb_soc: peek @ last retired pc=0x%08x cs=0x%04x\n", p, cs);
+        std::fprintf(stderr, "  PM-flat @0x%08x: ", lin_pm);
+        for (int i = 0; i < 20; ++i) std::fprintf(stderr, "%02x ", mem.read8(lin_pm + i));
+        std::fprintf(stderr, "\n  real-md @0x%08x: ", lin_rm);
+        for (int i = 0; i < 20; ++i) std::fprintf(stderr, "%02x ", mem.read8(lin_rm + i));
+        // If the stall sits just past an IRET (CF), the target = the frame it popped:
+        // [SS:SP-6]=IP, [SS:SP-4]=CS, [SS:SP-2]=FLAGS (16-bit real-mode iret).
+        uint32_t ss  = ventium::g_last_arch.seg[1];
+        uint32_t esp = ventium::g_last_arch.gpr[4];
+        uint32_t fb  = (ss << 4) + ((esp - 6) & 0xffff);
+        uint32_t tip = mem.read8(fb) | (mem.read8(fb + 1) << 8);
+        uint32_t tcs = mem.read8(fb + 2) | (mem.read8(fb + 3) << 8);
+        uint32_t tlin = (tcs << 4) + tip;
+        std::fprintf(stderr, "\n  iret-target %04x:%04x @0x%08x: ", tcs, tip, tlin);
+        for (int i = 0; i < 20; ++i) std::fprintf(stderr, "%02x ", mem.read8(tlin + i));
+        // Bus state AT the stall: mem_req=1 means the core is parked waiting for an
+        // ACK on mem_addr (e.g. an IVT read at a bad idt_base) — a bus-wait stall, not
+        // a HALT. mem_req=0 = the core is in S_HALT (unknown opcode / hlt).
+        std::fprintf(stderr, "\n  bus: mem_req=%d we=%d addr=0x%08x  (req=1 -> unacked bus wait)\n",
+                     (int)top->mem_req, (int)top->mem_we, (uint32_t)top->mem_addr);
     }
 
     top->final();

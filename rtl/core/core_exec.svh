@@ -152,6 +152,12 @@
                 else if (q_is_pop && q_mem_write) begin
                   // POP m: stack value (mem_load_data) -> memory dest; ESP += w.
                   do_store=1'b1; do_retire=1'b0;
+                end else if (q_is_pop && q_pop_sreg) begin
+                  // F3 POP sreg (07/17/1F): load the selector from the stack and, in
+                  // real/v86, recompute base = sel<<4 (the firmware path). ESP += w.
+                  seg_sel [q_sys_sreg] <= mem_load_data[15:0];
+                  seg_base[q_sys_sreg] <= {12'd0, mem_load_data[15:0], 4'd0};
+                  gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};
                 end else if (q_is_pop) begin
                   gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], wmask(mem_load_data,q_w), q_w, 1'b0);
                   if (q_dst_reg!=R_ESP) gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};
@@ -164,8 +170,12 @@
                 // Only decoded under seg_real + 16-bit operand (else HALT), so this
                 // real-mode load is the only path reached.
                 if (q_seg_load) begin
-                  seg_sel  [q_lseg] <= mem_load_data[31:16];
-                  seg_base [q_lseg] <= {12'd0, mem_load_data[31:16], 4'd0};
+                  // F3 MOV Sreg,[mem]: the 2-byte read IS the selector (LOW half);
+                  // LES/LDS read a 4-byte far pointer and take the selector from the
+                  // HIGH half. Both load base=sel<<4 (real/v86), limit 0xFFFF, attr 0x93.
+                  seg_sel  [q_lseg] <= q_seg_load_lo ? mem_load_data[15:0]  : mem_load_data[31:16];
+                  seg_base [q_lseg] <= q_seg_load_lo ? {12'd0, mem_load_data[15:0],  4'd0}
+                                                     : {12'd0, mem_load_data[31:16], 4'd0};
                   seg_limit[q_lseg] <= 32'h0000_FFFF;
                   seg_attr [q_lseg] <= 8'h93;
                 end
@@ -586,6 +596,16 @@
                   endcase
                 end
                 flags_we=1'b0;   // CPUID modifies no flags
+              end
+
+              // F3: RDTSC (0F 31) — EDX:EAX <= the 64-bit time-stamp counter. EAX is
+              // the low 32 bits, EDX the high 32. Sampled the clock the instruction
+              // executes (the same `tsc` the always_ff free-runs). No flags. Reached
+              // only under cosim_en||soc_en (the decode gate); inert for user mode.
+              K_RDTSC: begin
+                gpr[R_EAX]<=tsc[31:0];
+                gpr[R_EDX]<=tsc[63:32];
+                flags_we=1'b0;
               end
 
               K_CONV: begin
