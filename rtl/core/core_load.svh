@@ -26,7 +26,22 @@
               if (la[1:0] != 2'b00)      pen = pen + P5_MISALIGN;
               pending_mem_pen <= pen;
             end
-            if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
+            // F3 — FF /5 JMPF / FF /3 CALLF (far indirect through memory): mem_rdata
+            // is the 4-byte {selector[31:16], offset[15:0]} far pointer just read.
+            if (q_jmpf_mem) begin
+              // real-mode far JMP: CS.sel=sel, CS.base=sel<<4, EIP=off; retire now.
+              seg_sel [SG_CS] <= mem_rdata[31:16];
+              seg_base[SG_CS] <= {12'd0, mem_rdata[31:16], 4'd0};
+              seg_attr[SG_CS] <= 8'h9B;
+              eip <= {16'd0, mem_rdata[15:0]};
+              retire_valid <= 1'b1; state <= S_PIPE;
+            end else if (q_callf_mem) begin
+              // stage the target; S_LCALL then pushes CS:next_eip + loads CS:off.
+              q_ljmp_off <= {16'd0, mem_rdata[15:0]};
+              q_ljmp_sel <= mem_rdata[31:16];
+              seg_step   <= 1'b0; state <= S_LCALL;
+            end
+            else if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
             else state<=S_EXEC;
           end
         end
