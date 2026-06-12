@@ -323,6 +323,13 @@ static void vga_write(ven_periph_t* p, uint16_t port, uint8_t val) {
     }
 }
 
+// F3 board path (sw/ps/ven_soc_app): expose the live 768-byte DAC palette
+// (256 x 3, 6-bit R/G/B as the guest wrote them) so the VNC framebuffer
+// bridge can colorize the mode-13h VRAM. Read-only view of model state.
+const uint8_t* ven_vgaregs_dac(ven_periph_t* p) {
+    return ((vga_state_t*)p->state)->palette;
+}
+
 ven_periph_t* ven_vgaregs_new(void) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(ven_periph_t));
     p->state    = calloc(1, sizeof(vga_state_t));

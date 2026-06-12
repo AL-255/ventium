@@ -61,6 +61,7 @@ module ven_soc_axil #(
     output logic        l1axi_en,
     output logic        proxy_en,
     output logic        cosim_en,
+    output logic        soc_en,                 // F3: core soc_en (MODE.SOCEN, bit 6)
     output logic [4:0]  errata_en,
     output logic        flush_all,              // W1P pulse from CTRL.FLUSH_ALL_REQ
 
@@ -77,6 +78,17 @@ module ven_soc_axil #(
     input  logic [31:0] io_wdata,
     output logic [31:0] io_rdata,
     output logic        io_ack,
+
+    // ---- PS -> core interrupt-injection seam (F3, R_INTR) --------------------------
+    // The PS-side 8259 C model (sw/ps_periph/ven_pic.c) is the PIC; this seam is its
+    // INT/INTA wire pair to the core. The PS writes {assert, vector} -> intr_out is
+    // the level on the core's intr pin and intr_vec the staged vector the core
+    // latches on its 1-clock inta strobe. The inta strobe auto-clears the assert
+    // (the 8259 drops INT at the INTA boundary) and sets a sticky W1C "seen" bit the
+    // PS polls (or receives via irq_out) to intack its PIC model + stage the next.
+    output logic        intr_out,               // level -> core intr
+    output logic [7:0]  intr_vec,               // staged vector -> core inta_vector
+    input  logic        inta,                   // 1-clock INTA strobe <- core
 
     // ---- interrupt to PS (GIC pl_ps_irq0) -----------------------------------------
     output logic        irq_out
@@ -96,7 +108,8 @@ module ven_soc_axil #(
   localparam logic [7:0] R_IO_WDATA  = 8'h2C;
   localparam logic [7:0] R_IO_RDATA  = 8'h30;
   localparam logic [7:0] R_IO_CTRL   = 8'h34;  // W1P: [0]ACK [1]IRQ_CLR
-  localparam logic [7:0] R_IRQ_STAT  = 8'h70;  // R/W1C
+  localparam logic [7:0] R_INTR      = 8'h38;  // F3: [7:0]vector [8]assert [9]inta-seen(R/W1C) [16]inta-irq-en
+  localparam logic [7:0] R_IRQ_STAT  = 8'h70;  // R/W1C: [0]io [1]inta-seen
   localparam logic [7:0] R_IDENT     = 8'h7C;
 
   // ---- control / config registers ----------------------------------------------
@@ -104,9 +117,18 @@ module ven_soc_axil #(
   logic        irq_en;
   logic [31:0] init_eip_r, init_esp_r;
   logic        boot_mode_r, cycle_mode_r, bus_mode_r, l1axi_en_r, proxy_en_r, cosim_en_r;
+  logic        soc_en_r;
   logic [4:0]  errata_en_r;
   logic [31:0] io_rdata_r;       // PS-written IN return value (staged for the ack)
   logic [31:0] hi_snap;          // retire_n[63:32] snapshot, latched on RETIRE_LO read
+
+  // F3 interrupt-injection seam state (R_INTR). All reset to 0, written only via
+  // R_INTR / the core's inta strobe, so the seam is INERT unless the PS uses it
+  // (and the core ignores intr/intr_vec entirely unless MODE.SOCEN is also set).
+  logic [7:0]  intr_vec_r;       // staged vector (core latches it on its inta strobe)
+  logic        intr_pend_r;      // assert level on the core's intr pin
+  logic        intr_seen_r;      // sticky: the core pulsed inta (R/W1C)
+  logic        intr_irq_en_r;    // 1 = intr_seen_r also raises irq_out (GIC notify)
 
   assign core_rst_n = aresetn & core_run;
   assign init_eip   = init_eip_r;
@@ -117,7 +139,10 @@ module ven_soc_axil #(
   assign l1axi_en   = l1axi_en_r;
   assign proxy_en   = proxy_en_r;
   assign cosim_en   = cosim_en_r;
+  assign soc_en     = soc_en_r;
   assign errata_en  = errata_en_r;
+  assign intr_out   = intr_pend_r;
+  assign intr_vec   = intr_vec_r;
 
   // ---- port-I/O capture/release FSM ---------------------------------------------
   // IDLE -> (io_req) capture + raise irq, WAIT_PS (io_ack held 0) -> (PS ACK) RELEASE
@@ -136,7 +161,10 @@ module ven_soc_axil #(
 
   assign io_ack   = io_ack_r;
   assign io_rdata = io_rdata_r;
-  assign irq_out  = irq_en & irq_pending;
+  // irq_out: io-bridge pending (F2, unchanged) OR — only when the PS opted in via
+  // R_INTR.INTA_IRQ_EN — the inta-seen latch (so the PS daemon can sleep on the GIC
+  // and wake to intack its PIC model + stage the next vector).
+  assign irq_out  = irq_en & (irq_pending | (intr_irq_en_r & intr_seen_r));
 
   // ================= AXI4-Lite write channel =================
   logic [7:0] waddr;             // low byte of awaddr (word-decoded)
@@ -184,7 +212,7 @@ module ven_soc_axil #(
           R_STATUS:    s_axil_rdata <= {22'd0, 1'b0 /*sys_pend*/, io_pending, 5'd0, ~aresetn, bus_err, cpu_hung};
           R_INIT_EIP:  s_axil_rdata <= init_eip_r;
           R_INIT_ESP:  s_axil_rdata <= init_esp_r;
-          R_MODE:      s_axil_rdata <= {19'd0, errata_en_r, 2'd0, cosim_en_r, proxy_en_r, l1axi_en_r, bus_mode_r, cycle_mode_r, boot_mode_r};
+          R_MODE:      s_axil_rdata <= {19'd0, errata_en_r, 1'b0, soc_en_r, cosim_en_r, proxy_en_r, l1axi_en_r, bus_mode_r, cycle_mode_r, boot_mode_r};
           R_RETIRE_LO: s_axil_rdata <= retire_n[31:0];   // (HI snapshot handled below)
           R_RETIRE_HI: s_axil_rdata <= hi_snap;
           R_IO_STATUS: s_axil_rdata <= {28'd0, 1'b0 /*is_ins*/, io_pending /*busy*/, io_we_q, io_pending};
@@ -192,7 +220,8 @@ module ven_soc_axil #(
           R_IO_SIZE:   s_axil_rdata <= {29'd0, io_size_q};
           R_IO_WDATA:  s_axil_rdata <= io_wdata_q;
           R_IO_RDATA:  s_axil_rdata <= io_rdata_r;
-          R_IRQ_STAT:  s_axil_rdata <= {31'd0, irq_pending};
+          R_INTR:      s_axil_rdata <= {15'd0, intr_irq_en_r, 6'd0, intr_seen_r, intr_pend_r, intr_vec_r};
+          R_IRQ_STAT:  s_axil_rdata <= {30'd0, intr_seen_r, irq_pending};
           R_IDENT:     s_axil_rdata <= IDENT;
           default:     s_axil_rdata <= 32'h0;
         endcase
@@ -214,6 +243,8 @@ module ven_soc_axil #(
       init_eip_r <= 32'd0; init_esp_r <= 32'd0;
       boot_mode_r <= 1'b0; cycle_mode_r <= 1'b0; bus_mode_r <= 1'b0;
       l1axi_en_r <= 1'b0; proxy_en_r <= 1'b0; cosim_en_r <= 1'b0; errata_en_r <= 5'd0;
+      soc_en_r <= 1'b0;
+      intr_vec_r <= 8'd0; intr_pend_r <= 1'b0; intr_seen_r <= 1'b0; intr_irq_en_r <= 1'b0;
       io_rdata_r <= 32'd0;
       flush_all <= 1'b0; ps_ack_pulse <= 1'b0; irq_clr_pulse <= 1'b0;
     end else begin
@@ -246,6 +277,7 @@ module ven_soc_axil #(
             boot_mode_r <= s_axil_wdata[0]; cycle_mode_r <= s_axil_wdata[1];
             bus_mode_r  <= s_axil_wdata[2]; l1axi_en_r   <= s_axil_wdata[3];
             proxy_en_r  <= s_axil_wdata[4]; cosim_en_r   <= s_axil_wdata[5];
+            soc_en_r    <= s_axil_wdata[6];  // F3: SOCEN (ungates the core's intr divert)
             if (s_axil_wstrb[1]) errata_en_r <= s_axil_wdata[12:8];
           end
           R_IO_RDATA: begin
@@ -258,9 +290,34 @@ module ven_soc_axil #(
             if (s_axil_wdata[0]) ps_ack_pulse  <= 1'b1;        // commit RDATA + ack the core
             if (s_axil_wdata[1]) irq_clr_pulse <= 1'b1;        // clear the IRQ latch
           end
-          R_IRQ_STAT: if (s_axil_wstrb[0] && s_axil_wdata[0]) irq_clr_pulse <= 1'b1; // W1C
+          // F3 interrupt-injection seam: the PS (acting as the 8259) stages a vector
+          // and asserts/deasserts the level. Writing assert=0 withdraws the request
+          // (e.g. the PIC model's IMR masked it before the core took it).
+          R_INTR: begin
+            if (s_axil_wstrb[0]) intr_vec_r <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) begin
+              intr_pend_r <= s_axil_wdata[8];
+              if (s_axil_wdata[9]) intr_seen_r <= 1'b0;        // W1C inta-seen
+            end
+            if (s_axil_wstrb[2]) intr_irq_en_r <= s_axil_wdata[16];
+          end
+          R_IRQ_STAT: if (s_axil_wstrb[0]) begin
+            if (s_axil_wdata[0]) irq_clr_pulse <= 1'b1;        // W1C io irq
+            if (s_axil_wdata[1]) intr_seen_r   <= 1'b0;        // W1C inta-seen
+          end
           default: ;
         endcase
+      end
+      // ---- core INTA boundary (mirrors the 8259 dropping INT at the intack) ------
+      // The core pulses inta for exactly ONE clock when it accepts the maskable INTR
+      // (S_DECODE/S_HLTWAIT intr_take) and latches intr_vec that same clock. Clear
+      // the level here so the core cannot re-take the same injection after IRET, and
+      // latch the sticky seen bit so the PS knows to intack its PIC model and stage
+      // the next vector. Placed AFTER the write decode: a same-cycle AXI write to
+      // R_INTR loses to the inta consume (the PS re-syncs off intr_seen_r).
+      if (inta) begin
+        intr_pend_r <= 1'b0;
+        intr_seen_r <= 1'b1;
       end
     end
   end
@@ -305,6 +362,13 @@ module ven_soc_axil #(
   // never ack without a captured pending request.
   ioack_pending: assert property (@(posedge clk) disable iff (!aresetn)
       io_ack_r |-> io_pending);
+  // F3 seam: the inta strobe always drops the assert level on the next clock
+  // (the 8259-INT-drops-at-INTA semantics) and always latches the seen bit
+  // (a same-cycle W1C must not lose an intack).
+  inta_clears_pend: assert property (@(posedge clk) disable iff (!aresetn)
+      inta |=> !intr_pend_r);
+  inta_sets_seen: assert property (@(posedge clk) disable iff (!aresetn)
+      inta |=> intr_seen_r);
   // AXI-Lite: BVALID/RVALID hold until accepted.
   b_hold: assert property (@(posedge clk) disable iff (!aresetn)
       (s_axil_bvalid && !s_axil_bready) |=> s_axil_bvalid);

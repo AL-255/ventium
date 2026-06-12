@@ -23,12 +23,14 @@ module tb_ven_soc_axil;
 
   // control/config out
   logic core_rst_n; logic [31:0] init_eip, init_esp; logic boot_mode, cycle_mode, bus_mode;
-  logic l1axi_en, proxy_en, cosim_en; logic [4:0] errata_en; logic flush_all;
+  logic l1axi_en, proxy_en, cosim_en, soc_en; logic [4:0] errata_en; logic flush_all;
   // status in
   logic cpu_hung=0, bus_err=0; logic [63:0] retire_n=64'd0;
   // io bus
   logic io_req=0, io_we=0; logic [15:0] io_addr=0; logic [2:0] io_size=0; logic [31:0] io_wdata=0;
   logic [31:0] io_rdata; logic io_ack;
+  // F3 interrupt-injection seam
+  logic intr_out; logic [7:0] intr_vec; logic inta=0;
   logic irq_out;
 
   ven_soc_axil dut (
@@ -40,10 +42,12 @@ module tb_ven_soc_axil;
     .s_axil_rdata(rdata), .s_axil_rresp(rresp), .s_axil_rvalid(rvalid), .s_axil_rready(rready),
     .core_rst_n(core_rst_n), .init_eip(init_eip), .init_esp(init_esp), .boot_mode(boot_mode),
     .cycle_mode(cycle_mode), .bus_mode(bus_mode), .l1axi_en(l1axi_en), .proxy_en(proxy_en),
-    .cosim_en(cosim_en), .errata_en(errata_en), .flush_all(flush_all),
+    .cosim_en(cosim_en), .soc_en(soc_en), .errata_en(errata_en), .flush_all(flush_all),
     .cpu_hung(cpu_hung), .bus_err(bus_err), .retire_n(retire_n),
     .io_req(io_req), .io_we(io_we), .io_addr(io_addr), .io_size(io_size), .io_wdata(io_wdata),
-    .io_rdata(io_rdata), .io_ack(io_ack), .irq_out(irq_out)
+    .io_rdata(io_rdata), .io_ack(io_ack),
+    .intr_out(intr_out), .intr_vec(intr_vec), .inta(inta),
+    .irq_out(irq_out)
   );
 
   int errors = 0;
@@ -144,6 +148,43 @@ module tb_ven_soc_axil;
     $display("[8] status reflects cpu_hung / bus_err");
     cpu_hung <= 1'b1; bus_err <= 1'b1; @(posedge clk);
     axil_read(16'h04, d); chk("STATUS cpu_hung|bus_err", d[1:0], 2'b11);
+
+    $display("[9] F3 PS->core interrupt-injection seam (R_INTR + MODE.SOCEN)");
+    // default: never written -> fully inert (soc_en low, no level, vector 0)
+    chk("intr_out idle low (reset)", intr_out, 1'b0);
+    chk("soc_en idle low (reset)", soc_en, 1'b0);
+    axil_read(16'h38, d); chk("R_INTR reset value", d, 32'h0);
+    // MODE bit 6 drives soc_en (and only bit 6 — earlier MODE writes left it 0)
+    axil_write(16'h10, 32'h0000_1F49, 4'hF);   // [2] MODE value + SOCEN (bit 6)
+    chk("soc_en out (MODE.SOCEN)", soc_en, 1'b1);
+    axil_read(16'h10, d); chk("MODE rb with SOCEN", d, 32'h0000_1F49);
+    // write {assert, vector} -> intr level + staged vector observable at the core pins
+    axil_write(16'h38, 32'h0000_0109, 4'hF);   // vector 0x09 (IRQ1 @ base 08h), ASSERT
+    chk("intr_out asserted", intr_out, 1'b1);
+    chk("intr_vec staged", intr_vec, 8'h09);
+    axil_read(16'h38, d); chk("R_INTR rb {assert,vec}", d, 32'h0000_0109);
+    // the core's 1-clock inta strobe -> pending clears in HW + seen latches
+    @(negedge clk); inta<=1'b1; @(negedge clk); inta<=1'b0; @(posedge clk); #1;
+    chk("intr_out dropped by inta", intr_out, 1'b0);
+    axil_read(16'h38, d); chk("R_INTR rb after inta (seen=1 assert=0)", d, 32'h0000_0209);
+    axil_read(16'h70, d); chk("IRQ_STAT[1] inta-seen", d[1], 1'b1);
+    // W1C via IRQ_STAT[1]
+    axil_write(16'h70, 32'h0000_0002, 4'hF);
+    axil_read(16'h38, d); chk("inta-seen W1C (IRQ_STAT)", d, 32'h0000_0009);
+    // INTA_IRQ_EN: the next inta raises irq_out (GIC notify) until W1C
+    axil_write(16'h38, 32'h0001_0170, 4'hF);   // vec 0x70, ASSERT, INTA_IRQ_EN
+    chk("intr_out asserted (2nd inject)", intr_out, 1'b1);
+    chk("irq_out low before inta", irq_out, 1'b0);
+    @(negedge clk); inta<=1'b1; @(negedge clk); inta<=1'b0; @(posedge clk); #1;
+    chk("irq_out raised by inta (INTA_IRQ_EN)", irq_out, 1'b1);
+    axil_write(16'h38, 32'h0000_0200, 4'h2);   // W1C seen via R_INTR[9] (wstrb[1] only)
+    @(posedge clk);
+    chk("irq_out cleared by R_INTR[9] W1C", irq_out, 1'b0);
+    // the PS can withdraw an un-taken assert (PIC IMR masked it)
+    axil_write(16'h38, 32'h0000_0108, 4'hF);
+    chk("re-assert (vec 0x08)", intr_out, 1'b1);
+    axil_write(16'h38, 32'h0000_0008, 4'hF);
+    chk("PS deassert withdraws the level", intr_out, 1'b0);
 
     if (errors==0) $display("SOCAXIL-GATE-OK (control + status + retire + IO-bridge handshake all pass)");
     else           $display("SOCAXIL-GATE-FAIL (%0d errors)", errors);

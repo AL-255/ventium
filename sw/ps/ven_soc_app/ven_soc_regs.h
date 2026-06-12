@@ -30,7 +30,8 @@
 #define VEN_R_IO_WDATA   0x2C   // RO
 #define VEN_R_IO_RDATA   0x30   // RW (PS writes the IN return value)
 #define VEN_R_IO_CTRL    0x34   // W1P: [0]ACK [1]IRQ_CLR
-#define VEN_R_IRQ_STAT   0x70   // R/W1C
+#define VEN_R_INTR       0x38   // RW: PS->core interrupt-injection seam (F3)
+#define VEN_R_IRQ_STAT   0x70   // R/W1C: [0]io [1]inta-seen
 #define VEN_R_IDENT      0x7C   // RO == 0x5654_4D43 "VTMC"
 
 // ---- CTRL bits ------------------------------------------------------------
@@ -53,7 +54,25 @@
 #define VEN_MODE_L1AXI      (1u << 3)   // l1axi_en: 1 = route memory via L1/AXI to DDR
 #define VEN_MODE_PROXY      (1u << 4)   // proxy_en: 1 = int-0x80 proxy (F4 only)
 #define VEN_MODE_COSIM      (1u << 5)   // cosim_en: 1 = route IN/OUT to the io bridge
+#define VEN_MODE_SOCEN      (1u << 6)   // soc_en: 1 = ungate the core's external-INTR
+                                        //   divert (F3; also selects the SoC CPUID arm)
 #define VEN_MODE_ERRATA_SH  8           // errata_en[4:0] at bits [12:8]
+
+// ---- INTR bits (R_INTR, the F3 PS->core interrupt-injection seam) ----------
+// The PS-side 8259 C model (sw/ps_periph/ven_pic.c) drives this register as its
+// INT/INTA wire pair: write {ASSERT | vector} to raise the core's intr level with
+// the staged vector; the core's 1-clock inta strobe (taken at S_DECODE/S_HLTWAIT
+// when IF=1) clears ASSERT in hardware and sets INTA_SEEN (sticky, W1C). On seeing
+// INTA_SEEN the PS calls its PIC model's intack (ISR set / IRR clear), clears the
+// bit, and stages the next vector (or leaves the level down). Requires MODE_SOCEN.
+#define VEN_INTR_VEC_MASK   0xFFu       // [7:0] staged vector (latched on inta)
+#define VEN_INTR_ASSERT     (1u << 8)   // level on the core's intr pin
+#define VEN_INTR_INTA_SEEN  (1u << 9)   // R: core pulsed inta; W1C
+#define VEN_INTR_IRQ_EN     (1u << 16)  // 1 = INTA_SEEN also raises irq_out (GIC)
+
+// ---- IRQ_STAT bits ----------------------------------------------------------
+#define VEN_IRQSTAT_IO      (1u << 0)   // io-bridge request latch (W1C)
+#define VEN_IRQSTAT_INTA    (1u << 1)   // inta-seen latch (W1C, alias of R_INTR[9])
 
 // ---- IO_STATUS bits -------------------------------------------------------
 #define VEN_IO_PENDING      (1u << 0)

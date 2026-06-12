@@ -90,12 +90,14 @@ module ventium_kv260_core #(
   logic        core_rst_n;
   logic [31:0] cfg_init_eip, cfg_init_esp;
   logic        cfg_boot_mode, cfg_cycle_mode, cfg_bus_mode, cfg_l1axi_en;
-  logic        cfg_proxy_en, cfg_cosim_en, cfg_flush_all;
+  logic        cfg_proxy_en, cfg_cosim_en, cfg_soc_en, cfg_flush_all;
   logic [4:0]  cfg_errata_en;
   logic        st_cpu_hung, st_bus_err;
   logic [63:0] st_retire_n;
   logic        io_req, io_we; logic [15:0] io_addr; logic [2:0] io_size;
   logic [31:0] io_wdata, io_rdata; logic io_ack;
+  // F3 PS->core interrupt-injection seam (ven_soc_axil R_INTR <-> ventium_top).
+  logic        core_intr; logic [7:0] core_intr_vec; logic core_inta;
 
   ven_soc_axil #(.AXIL_AW(AXIL_AW)) u_axil (
       .clk(clk), .aresetn(aresetn),
@@ -111,11 +113,13 @@ module ventium_kv260_core #(
       .core_rst_n(core_rst_n),
       .init_eip(cfg_init_eip), .init_esp(cfg_init_esp), .boot_mode(cfg_boot_mode),
       .cycle_mode(cfg_cycle_mode), .bus_mode(cfg_bus_mode), .l1axi_en(cfg_l1axi_en),
-      .proxy_en(cfg_proxy_en), .cosim_en(cfg_cosim_en), .errata_en(cfg_errata_en),
+      .proxy_en(cfg_proxy_en), .cosim_en(cfg_cosim_en), .soc_en(cfg_soc_en),
+      .errata_en(cfg_errata_en),
       .flush_all(cfg_flush_all),
       .cpu_hung(st_cpu_hung), .bus_err(st_bus_err), .retire_n(st_retire_n),
       .io_req(io_req), .io_we(io_we), .io_addr(io_addr), .io_size(io_size),
       .io_wdata(io_wdata), .io_rdata(io_rdata), .io_ack(io_ack),
+      .intr_out(core_intr), .intr_vec(core_intr_vec), .inta(core_inta),
       .irq_out(irq_out)
   );
 
@@ -159,7 +163,11 @@ module ventium_kv260_core #(
       .m_axi_rid(m_axi_rid), .m_axi_rdata(m_axi_rdata), .m_axi_rresp(m_axi_rresp),
       .m_axi_rlast(m_axi_rlast), .m_axi_rvalid(m_axi_rvalid), .m_axi_rready(m_axi_rready),
       .bus_err(st_bus_err),
-      .retire_count(st_retire_n)
+      .retire_count(st_retire_n),
+      // F3 PS-driven interrupt injection (R_INTR): inert until the PS sets
+      // MODE.SOCEN and writes R_INTR — the F2 boot flow never touches either.
+      .soc_en(cfg_soc_en),
+      .intr(core_intr), .inta_vector(core_intr_vec), .inta(core_inta)
   );
   // verilator lint_on PINCONNECTEMPTY
 
