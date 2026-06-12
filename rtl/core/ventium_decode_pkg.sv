@@ -18,7 +18,8 @@ package ventium_decode_pkg;
     K_ALU, K_SHIFT, K_SHLDRD, K_MULDIV, K_IMUL2, K_EXT, K_SETCC,
     K_BITTEST, K_BITSCAN, K_XCHG, K_BSWAP, K_CONV, K_STKMISC, K_STR, K_CTRL,
     K_CMPXCHG,
-    K_CPUID   // M7.3c: CPUID (0F A2) — writes eax/ebx/ecx/edx from a fixed leaf table
+    K_CPUID,  // M7.3c: CPUID (0F A2) — writes eax/ebx/ecx/edx from a fixed leaf table
+    K_RDTSC   // F3: RDTSC (0F 31) — writes edx:eax from the 64-bit time-stamp counter
   } kind_e;
 
   typedef enum logic [2:0] { SM_PUSHA, SM_POPA, SM_PUSHF, SM_POPF, SM_LAHF, SM_SAHF, SM_LEAVE } smk_e;
