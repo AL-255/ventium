@@ -73,6 +73,7 @@ struct Args {
     std::string out;
     std::string vcd;
     std::string ckpt_dump;
+    std::string vga_bios;   // optional VGA option ROM loaded at 0xC0000
     uint64_t max_insn   = 1ull << 20;
     uint64_t max_cycles = 1ull << 24;
     uint32_t quiesce    = 64;
@@ -109,6 +110,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--max-cycles")      a.max_cycles = parse_u64(need("--max-cycles"));
         else if (k == "--quiesce")         a.quiesce    = parse_u32(need("--quiesce"));
         else if (k == "--peek-pc")         a.peek_pc    = true;
+        else if (k == "--vga-bios")        a.vga_bios   = need("--vga-bios");
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -161,6 +163,18 @@ int main(int argc, char** argv) {
             mem.load_image(args.image, hi_at);
             std::fprintf(stderr, "tb_soc: BIOS 4G-top alias at 0x%08x\n", hi_at);
         }
+    }
+
+    // VGA option ROM at 0xC0000 (real PCs map the video BIOS there; SeaBIOS scans
+    // 0xC0000.. for the 0x55AA signature, copies the ROM, runs its init entry, and
+    // the init installs INT 10h). Without it SeaBIOS's int10 call16 lands on an
+    // uninitialized vector -> 0:0. Optional (a bare-metal stub never needs it).
+    if (!args.vga_bios.empty()) {
+        long n = mem.load_image(args.vga_bios, 0x000C0000);
+        if (n < 0) std::fprintf(stderr, "tb_soc: WARNING failed to load --vga-bios '%s'\n",
+                                args.vga_bios.c_str());
+        else std::fprintf(stderr, "tb_soc: loaded %ld bytes at 0x000c0000 from %s (vga option ROM)\n",
+                          n, args.vga_bios.c_str());
     }
 
     // ---- trace writer (system-mode .vtrace: x87=false, cycle=false, sys=true) --

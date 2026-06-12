@@ -1,0 +1,20 @@
+{
+  "name": "psocsregmem",
+  "kind": "system",
+  "src": "psocsregmem.S",
+  "linker": "psocsregmem.ld",
+  "image": "psocsregmem.bin",
+  "image_mode": "bios",
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 80,
+  "sys": true, "paging": false, "soc": true, "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-sregmem-gate.sh",
+  "what_this_is": "F3 -- the segment-register MOVE + STACK forms the SeaBIOS call32 trampoline uses to save/restore es/ds/ss into a struct (with a 0x67 address-size prefix). Exercises, in real mode, all of: MOV [mem16],Sreg (8C disp16) + MOV [eax],Sreg (8C a32); MOV Sreg,[mem16] (8E disp16) + MOV Sreg,[eax] (8E a32); and one-byte PUSH ES/CS (06/0E) + POP DS/ES (1F/07). All synchronous/deterministic -> a clean per-record differential.",
+  "implementation": "8C mem-form (mod!=11, gated sys_mode) routes as a MOV-store with d_store_sreg -> st_data = {16'd0, seg_sel[sreg]}, strb_of(2)=0011 (2-byte). 8E mem-form (mod!=11, gated seg_real) reuses the LES/LDS d_seg_load hook with a LOW-half variant (d_seg_load_lo: selector = the 2-byte read's [15:0]). PUSH sreg (06/0E/16/1E) = d_push_sreg -> push {16'd0, seg_sel[sreg]}; POP sreg (07/17/1F) = d_pop_sreg -> seg_sel/base[sreg] = stack (base=sel<<4 real-mode). Reg-form 8C/8E unchanged (SYS_MOVSREG).",
+  "non_vacuous": "Asserts all six results land in the expected GPRs: EBX=0x1234 (store ES + readback), ECX=0x0 (a32 store SS + readback), EDX=0x9ABC (8E load FS), ESI=0xDEF0 (8E a32 load GS), EBP=0x4321 (PUSH ES + POP DS), EDI=0xF000 (PUSH CS + POP ES).",
+  "description": "Bare-metal F3 directed differential for every segment-register memory-move + stack form, byte-identical to qemu-system-i386 -cpu pentium over all 32 retired instructions, per-record. Locks in the SeaBIOS-call32 segment ISA (MOV [mem]/[eax],Sreg + MOV Sreg,[mem]/[eax] + PUSH/POP sreg). make verify 77/77 + all SoC gates (user mode keeps the HALT, real_mode=0 / sys_mode=0 there)."
+}

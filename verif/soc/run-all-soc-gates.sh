@@ -52,6 +52,7 @@ GATES=(
   "psocfw (F2 SoC boot firmware: COM1 banner)|verif/soc/run-soc-fw-gate.sh"
   "psocrmint (F3 real-mode IVT INT n / IRET)|verif/soc/run-soc-rmint-gate.sh"
   "psocrmexc (F3 real-mode #DE IVT exception)|verif/soc/run-soc-rmexc-gate.sh"
+  "psocsregmem (F3 seg-reg mem-move + PUSH/POP sreg)|verif/soc/run-soc-sregmem-gate.sh"
   "psocbios (F3 BIOS firmware: INT 10h teletype)|verif/soc/run-soc-bios-gate.sh"
   "test386 (external CPU tester)|verif/external/test386/run-test386-gate.sh"
 )
