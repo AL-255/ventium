@@ -21,13 +21,19 @@
         S_DECODE: begin
 `ifdef VEN_DBG_SSBASE
           // F3 gap-walk probe: in real mode every sreg base must equal sel<<4.
-          // The instruction retired just before this decode is the desync culprit.
+          // (SeaBIOS unreal-mode transition stretches fire this legitimately —
+          // PM selectors with base 0 surviving into real mode; read with care.)
           if (seg_real && (seg_base[SG_SS] != {12'd0, seg_sel[SG_SS], 4'd0}
                         || seg_base[SG_DS] != {12'd0, seg_sel[SG_DS], 4'd0}
                         || seg_base[SG_ES] != {12'd0, seg_sel[SG_ES], 4'd0}))
             $display("SSBASE-DESYNC eip=%08x ss=%04x ss.base=%08x ds=%04x ds.base=%08x es=%04x es.base=%08x",
                      eip, seg_sel[SG_SS], seg_base[SG_SS],
                      seg_sel[SG_DS], seg_base[SG_DS], seg_sel[SG_ES], seg_base[SG_ES]);
+          // F3 probe 2: 16-bit code never legitimately carries ESP[31:16]!=0.
+          // High bits here mean a 32-bit-ESP stack op leaked past 64K (the
+          // missing real-mode SP wrap) — the audit's remaining finding.
+          if (seg_real && gpr[R_ESP][31:16] != 16'd0)
+            $display("ESP-HIGH eip=%08x esp=%08x ss=%04x", eip, gpr[R_ESP], seg_sel[SG_SS]);
 `endif
           // M2S.6 (gated sys_mode): snapshot the TF/RF the about-to-execute
           // instruction RUNS UNDER (so the #DB checks at its RETIRE boundary use

@@ -36,12 +36,13 @@
           mem_addr=dbase+gpr[R_EBP];     // LEAVE reads [EBP] (the saved frame ptr)
         else if (q_kind==K_STR) begin
           // load order: movs/lods/cmps -> [ESI]; scas -> [EDI]
-          if (q_st==ST_SCAS) mem_addr=dbase+gpr[R_EDI];
-          else               mem_addr=dbase+gpr[R_ESI];
+          // F3: a16 string EA uses SI/DI low-16 (str_esi/str_edi mask).
+          if (q_st==ST_SCAS) mem_addr=dbase+str_edi;
+          else               mem_addr=dbase+str_esi;
         end else mem_addr=opbase+q_ea;   // M7.1: opbase==dbase except a proxy
                                           // gs-override indirect-call operand read
       end
-      S_LOAD2: begin mem_req=1'b1; mem_addr=dbase_edi+gpr[R_EDI]; end
+      S_LOAD2: begin mem_req=1'b1; mem_addr=dbase_edi+str_edi; end
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
       S_LGDT: begin mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
       S_SEGLD: begin mem_req=1'b1;

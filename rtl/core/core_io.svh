@@ -54,7 +54,8 @@
           logic        rep_active, last_iter;
           cx = gpr[R_ECX];
           rep_active = (q_rep || q_repne);
-          if (rep_active && cx==32'd0) begin
+          // F3: a16 REP INS counts in CX (low 16) — see the K_STR arm.
+          if (rep_active && (q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0))) begin
             // Degenerate REP INS with ECX==0: no port read, no store — advance EIP
             // and retire one no-op record (matches qemu's degenerate-REP record).
             eip <= next_eip;
@@ -64,16 +65,18 @@
             // Capture the IN value, set up THIS element's store + pointer/count
             // update, then go to S_STORE (str_store_addr/data latched below).
             ins_data <= wmask(io_rdata, q_io_w);   // width-masked device value
-            gpr[R_EDI] <= gpr[R_EDI] + str_step;   // EDI += width (DF direction)
+            gpr[R_EDI] <= q_cnt16                  // F3: a16 wraps DI mod 64K
+                ? {gpr[R_EDI][31:16], gpr[R_EDI][15:0]+str_step[15:0]}
+                : gpr[R_EDI] + str_step;               // EDI += width (DF direction)
             if (rep_active) begin
-              cx = cx - 32'd1;
+              cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
               gpr[R_ECX] <= cx;
-              last_iter = (cx==32'd0);
+              last_iter = q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0);
               str_next_eip <= last_iter ? next_eip : q_pc;  // loop at q_pc if more
             end else begin
               str_next_eip <= next_eip;            // non-REP: single element
             end
-            str_store_addr <= gpr[R_EDI];          // pre-increment [EDI]
+            str_store_addr <= str_edi;             // pre-increment [DI] (a16-masked)
             str_store_data <= wmask(io_rdata, q_io_w);
             state <= S_STORE;
           end

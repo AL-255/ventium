@@ -653,22 +653,33 @@
                 cx = gpr[R_ECX];
                 rep_active = (q_rep || q_repne);
                 // ECX==0 degenerate REP: no element, just advance EIP, one record.
-                if (rep_active && cx==32'd0) begin
+                // F3: a16 (q_cnt16) REP counts in CX (low 16) — test/decrement
+                // must ignore stale ECX[31:16] (SeaBIOS POST leaves big values).
+                if (rep_active && (q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0))) begin
                   // no memory effect; retire as a no-op (handled by do_retire below)
                   do_retire=1'b1; flags_we=1'b0; new_eip=next_eip;
                 end else begin
                   // execute one element this cycle
                   store_needed = q_str_storedi; // MOVS/STOS write [EDI]
                   // update pointers / flags / regs for this element:
-                  if (q_str_loadsi)  gpr[R_ESI]<=gpr[R_ESI]+str_step;
-                  if (q_str_storedi) gpr[R_EDI]<=gpr[R_EDI]+str_step;
-                  if (q_str_scandi)  gpr[R_EDI]<=gpr[R_EDI]+str_step;
+                  // F3: a16 (q_cnt16) string updates touch ONLY SI/DI — the
+                  // low 16 bits wrap mod 64K and ESI/EDI[31:16] are preserved
+                  // (a DF=1 copy crossing 0 must wrap to 0xFFFF, not 32-bit -1).
+                  if (q_str_loadsi)  gpr[R_ESI]<=q_cnt16
+                      ? {gpr[R_ESI][31:16], gpr[R_ESI][15:0]+str_step[15:0]}
+                      : gpr[R_ESI]+str_step;
+                  if (q_str_storedi) gpr[R_EDI]<=q_cnt16
+                      ? {gpr[R_EDI][31:16], gpr[R_EDI][15:0]+str_step[15:0]}
+                      : gpr[R_EDI]+str_step;
+                  if (q_str_scandi)  gpr[R_EDI]<=q_cnt16
+                      ? {gpr[R_EDI][31:16], gpr[R_EDI][15:0]+str_step[15:0]}
+                      : gpr[R_EDI]+str_step;
                   if (q_st==ST_LODS) gpr[R_EAX]<=reg_merge(gpr[R_EAX], wmask(mem_load_data,q_w), q_w, 1'b0);
                   if (q_str_scandi) begin eflags<=str_flags; end
                   flags_we=1'b0;
 
                   if (rep_active) begin
-                    cx = cx - 32'd1;
+                    cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
                     gpr[R_ECX]<=cx;
                     // termination: ECX reaches 0, or (REPE/REPNE) ZF condition.
                     cmp_term = 1'b0;
@@ -676,7 +687,7 @@
                       if (q_rep)   cmp_term = (str_flags[6]==1'b0); // REPE: stop when ZF=0
                       if (q_repne) cmp_term = (str_flags[6]==1'b1); // REPNE: stop when ZF=1
                     end
-                    last_iter = (cx==32'd0) || cmp_term;
+                    last_iter = (q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0)) || cmp_term;
                     // Each REP iteration is its OWN retire record at the same PC.
                     // We retire here and, if not last, re-enter at the same PC.
                     if (last_iter) new_eip = next_eip;
@@ -691,7 +702,7 @@
                   // latch pre-increment [EDI] + data for the store stage (EDI is
                   // being incremented this cycle via NBA, so S_STORE must not
                   // re-read gpr[EDI]).
-                  str_store_addr <= gpr[R_EDI];
+                  str_store_addr <= str_edi;   // F3: a16-masked DI
                   str_store_data <= str_wdata;
                   // remember the eip we want after this element commit
                   str_next_eip <= new_eip;

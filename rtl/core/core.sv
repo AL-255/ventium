@@ -2973,6 +2973,14 @@ module core
   assign df = eflags[10];
   logic [31:0] str_step;        // +/- width
   assign str_step = df ? (32'd0 - {29'd0,q_w}) : {29'd0,q_w};
+  // F3 — a16 string pointers (q_cnt16 == latched eff_addr): with 16-bit
+  // addressing the EA uses SI/DI (low 16 bits, mod-64K wrap) and the high
+  // halves of ESI/EDI are NOT address inputs. Without the mask, a backward
+  // (DF=1) copy whose SI/DI crossed 0 went 32-bit negative and every later
+  // string EA landed 64 KiB low (FreeDOS SYSINIT's relocate-high copy left
+  // holes the flow later fell into). q_cnt16=0 in every 32-bit flat gate.
+  wire [31:0] str_esi = q_cnt16 ? {16'd0, gpr[R_ESI][15:0]} : gpr[R_ESI];
+  wire [31:0] str_edi = q_cnt16 ? {16'd0, gpr[R_EDI][15:0]} : gpr[R_EDI];
 
   // ===========================================================================
   // Store-operand resolution (combinational) used in S_STORE.
@@ -2994,8 +3002,8 @@ module core
         (q_kind==K_STKMISC && q_sm==SM_POPF))      slow_dmem_addr = gpr[R_ESP];
     else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  slow_dmem_addr = gpr[R_EBP];
     else if (q_kind==K_STR) begin
-      if (q_st==ST_SCAS)                           slow_dmem_addr = gpr[R_EDI];
-      else                                         slow_dmem_addr = gpr[R_ESI];
+      if (q_st==ST_SCAS)                           slow_dmem_addr = str_edi;
+      else                                         slow_dmem_addr = str_esi;
     end else                                       slow_dmem_addr = q_ea;
   end
 
@@ -4625,10 +4633,10 @@ module core
             (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+gpr[R_ESP];
         else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+gpr[R_EBP];
         else if (q_kind==K_STR)
-          cur_lin = (q_st==ST_SCAS) ? dbase+gpr[R_EDI] : dbase+gpr[R_ESI];
+          cur_lin = (q_st==ST_SCAS) ? dbase+str_edi : dbase+str_esi;
         else                                           cur_lin = opbase+q_ea;  // M7.1 opbase
       end
-      S_LOAD2: cur_lin = dbase_edi+gpr[R_EDI];
+      S_LOAD2: cur_lin = dbase_edi+str_edi;
       S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
       S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end
       S_FENV_ST: begin cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00}; cur_is_w = 1'b1; end
@@ -4760,7 +4768,7 @@ module core
       end
       S_LOAD2: begin
         dc_acc_valid = !xlate_miss && mem_ack && cycle_mode;
-        dc_acc_addr  = gpr[R_EDI];
+        dc_acc_addr  = str_edi;
       end
       S_STORE: begin
         dc_acc_valid = !xlate_miss && mem_ack && cycle_mode;
