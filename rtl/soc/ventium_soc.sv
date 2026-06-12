@@ -79,6 +79,12 @@ module ventium_soc
     // the TB's expectations; 0 would be the user cold reset (unused here).
     input  wire logic        boot_mode,
 
+    // F3 TB keystroke injection (sim-only top; the KV260 bitstream does not use
+    // this module). Tie kbd_inj_valid=0 for byte-identical default behavior.
+    input  wire logic        kbd_inj_valid,
+    input  wire logic [7:0]  kbd_inj_data,
+    output logic             kbd_inj_ready,
+
     // M0/M1 bus-functional-model memory port group (docs/rtl-interface.md §3).
     // The TB serves these from its flat memory (the BIOS image + RAM). The SoC
     // does NOT route memory through the PIC/PIT — those are PMIO-only devices.
@@ -536,7 +542,10 @@ module ventium_soc
       .irq1      (kbd_irq1),
       .irq12     (mouse_irq12),
       .a20_gate  (kbc_a20),
-      .reset_req (kbd_reset_req)
+      .reset_req (kbd_reset_req),
+      .inj_valid (kbd_inj_valid),
+      .inj_data  (kbd_inj_data),
+      .inj_ready (kbd_inj_ready)
   );
 `else  // 8042 on PS: 0x60/0x64 forward to ven_i8042.c. NOTE the A20 gate output is
   // a PL-consumed signal — on the board the PS must drive the i8042 A20 state back
@@ -544,6 +553,7 @@ module ventium_soc
   // both A20 sources together, so the A20-mask test tracks port-92).
   assign kbd_rdata = 8'h00; assign kbd_irq1 = 1'b0; assign mouse_irq12 = 1'b0;
   assign kbc_a20 = 1'b0;    assign kbd_reset_req = 1'b0;
+  assign kbd_inj_ready = 1'b0;   // no RTL kbd: TB injection unavailable
 `endif
 
   // Port-92 "fast A20" / System Control Port A at 0x92.

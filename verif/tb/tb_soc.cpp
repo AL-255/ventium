@@ -90,7 +90,33 @@ struct Args {
     uint32_t dump_addr  = 0;
     uint32_t dump_len   = 0;
     std::string dump_file;
+    // --type-at N,TEXT : once retire count reaches N, type TEXT on the RTL
+    // i8042 (set-1 make/break scancodes via the kbd_inj_* ports). '~' = Enter.
+    uint64_t type_at_n  = 0;
+    std::string type_text;
 };
+
+// ASCII -> set-1 scancode (0 = unsupported). '~' maps to Enter.
+static uint8_t sc1_of(char c, bool* shift) {
+    *shift = false;
+    static const char* L = "abcdefghijklmnopqrstuvwxyz";
+    static const uint8_t LS[26] = {0x1E,0x30,0x2E,0x20,0x12,0x21,0x22,0x23,0x17,0x24,
+                                   0x25,0x26,0x32,0x31,0x18,0x19,0x10,0x13,0x1F,0x14,
+                                   0x16,0x2F,0x11,0x2D,0x15,0x2C};
+    if (c >= 'A' && c <= 'Z') { *shift = true; c = (char)(c - 'A' + 'a'); }
+    for (int i = 0; L[i]; ++i) if (L[i] == c) return LS[i];
+    if (c >= '1' && c <= '9') return (uint8_t)(0x02 + (c - '1'));
+    switch (c) {
+        case '0': return 0x0B;
+        case ' ': return 0x39;
+        case '.': return 0x34;
+        case '-': return 0x0C;
+        case '/': return 0x35;
+        case ':': *shift = true; return 0x27;   // shift+';'
+        case '~': return 0x1C;                  // Enter
+    }
+    return 0;
+}
 
 // --watch-write debug hook: the mem service lambda is defined before the `cycles`
 // counter is in scope, so the watch state lives at file scope. Logs each write whose
@@ -134,6 +160,13 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--peek-mem")        a.peek_mem   = parse_u32(need("--peek-mem"));
         else if (k == "--watch-write")     a.watch_write= parse_u32(need("--watch-write"));
         else if (k == "--exec-written-check") { a.exec_check = true; a.exec_floor = parse_u64(need("--exec-written-check")); }
+        else if (k == "--type-at") {
+            std::string v = need("--type-at");
+            size_t p1 = v.find(',');
+            if (p1 == std::string::npos) { std::fprintf(stderr, "%s: --type-at needs N,TEXT\n", argv[0]); usage(argv[0], 2); }
+            a.type_at_n = std::strtoull(v.substr(0, p1).c_str(), nullptr, 0);
+            a.type_text = v.substr(p1+1);
+        }
         else if (k == "--dump-mem-at") {
             // N,addr,len,file
             std::string v = need("--dump-mem-at");
@@ -370,6 +403,24 @@ int main(int argc, char** argv) {
     uint32_t idle      = 0;
     int      exit_code = 0;
 
+    // --type-at: prebuild the make/break scancode stream.
+    std::vector<uint8_t> type_codes;
+    if (args.type_at_n && !args.type_text.empty()) {
+        for (char c : args.type_text) {
+            bool sh = false; uint8_t m = sc1_of(c, &sh);
+            if (!m) { std::fprintf(stderr, "tb_soc: --type-at: unsupported char '%c'\n", c); continue; }
+            if (sh) type_codes.push_back(0x2A);
+            type_codes.push_back(m);
+            type_codes.push_back((uint8_t)(m | 0x80));
+            if (sh) type_codes.push_back(0xAA);
+        }
+        std::fprintf(stderr, "tb_soc: type-at n=%llu: %zu scancodes queued\n",
+                     (unsigned long long)args.type_at_n, type_codes.size());
+    }
+    size_t   type_idx = 0;
+    uint32_t type_gap = 0;
+    bool     type_hold = false;   // inj_valid currently asserted
+
     while (true) {
         uint64_t before = trace.retired();
         g_watch_cycles = cycles;          // for the --watch-write hook
@@ -388,6 +439,20 @@ int main(int argc, char** argv) {
         dump(half++);
 
         ++cycles;
+
+        // --type-at typist: one scancode at a time through the i8042 inj port.
+        if (type_idx < type_codes.size() && trace.retired() >= args.type_at_n) {
+            if (type_gap) {
+                --type_gap;
+            } else if (type_hold && !top->kbd_inj_ready) {
+                // accepted on the last edge (OBF set): release, pace the next.
+                top->kbd_inj_valid = 0; type_hold = false;
+                ++type_idx; type_gap = 60000;
+            } else if (!type_hold && top->kbd_inj_ready) {
+                top->kbd_inj_data  = type_codes[type_idx];
+                top->kbd_inj_valid = 1; type_hold = true;
+            }
+        } else if (type_hold) { top->kbd_inj_valid = 0; type_hold = false; }
 
         if (trace.retired() > before) idle = 0; else ++idle;
 

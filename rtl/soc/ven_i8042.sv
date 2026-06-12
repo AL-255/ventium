@@ -58,7 +58,16 @@ module ven_i8042 (
     output logic        irq1,        // keyboard IRQ1
     output logic        irq12,       // mouse IRQ12
     output logic        a20_gate,    // A20 enable (1 = on)
-    output logic        reset_req    // 1-cycle pulse on CPU reset request
+    output logic        reset_req,   // 1-cycle pulse on CPU reset request
+
+    // F3 TB keystroke injection (sim-only; the KV260 build does not instantiate
+    // this module). When inj_valid && inj_ready, the scancode enters the output
+    // buffer exactly like a controller-sourced byte: OBF sets, IRQ1 asserts via
+    // the normal rule, the INT9 read of 0x60 dequeues it. Tie inj_valid=0 for
+    // the differential gates (no behavior change).
+    input  wire logic        inj_valid,
+    input  wire logic [7:0]  inj_data,
+    output logic             inj_ready   // OBF clear: a new byte can enter
 );
 
   // --------------------------------------------------------------------------
@@ -163,6 +172,8 @@ module ven_i8042 (
     end
   end
 
+  assign inj_ready = (status & STAT_OBF) == 8'h00;
+
   // --------------------------------------------------------------------------
   // IRQ line generation (combinational, mirrors kbd_update_irq_lines).
   //   irq_kbd   = OBF & ~MOUSE_OBF & MODE_KBD_INT & ~MODE_DISABLE_KBD
@@ -215,6 +226,10 @@ module ven_i8042 (
       write_cmd <= 8'h00;
       cbdata    <= 8'h00;
       obdata    <= 8'h00;
+    end else if (inj_valid && ((status & STAT_OBF) == 8'h00) && !cs) begin
+      // TB keystroke: controller-sourced byte path (kbd scancode -> OBF/IRQ1).
+      cbdata <= inj_data;
+      status <= (status | STAT_OBF) & ~STAT_MOUSE_OBF;
     end else if (cs && we && is_cmd_port) begin
       // ---------------------------------------------------------------------
       // WRITE to 0x64 (command). status bit3 (CMD) reflects last-write-was-cmd.
