@@ -142,7 +142,7 @@
           // string store [EDI] uses ES.
           mem_wstrb=strb_of(q_w); mem_addr=dbase_edi+str_store_addr; mem_wdata=str_store_data;
         end else begin
-          mem_wstrb=st_strb; mem_addr=dbase+st_addr; mem_wdata=st_data;
+          mem_wstrb=st_strb; mem_addr=stbase+st_addr; mem_wdata=st_data;
         end
       end
       S_USEQ: begin
