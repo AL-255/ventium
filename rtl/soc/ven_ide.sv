@@ -718,6 +718,12 @@ module ven_ide #(
                                         r_error  <= ERR_ABRT;    // regs UNCHANGED
                                         irq14    <= ~nien;
                                     end else begin
+`ifdef VEN_IDE_TRACE
+                                        $display("ven_ide: READ%0x lba_mode=%0d issue_lba=%0d nsec=%0d (sec=%0d lcyl=%0d hcyl=%0d hd=%0d)",
+                                                 wdata[7:0], r_select[6], issue_lba,
+                                                 (r_nsector==8'd0) ? 9'd256 : {1'b0, r_nsector},
+                                                 r_sector, r_lcyl, r_hcyl, r_select[3:0]);
+`endif
                                         xfer_lba    <= issue_lba;  // LBA or CHS
                                         nsec_left   <= (r_nsector == 8'd0)
                                                        ? 9'd256 : {1'b0, r_nsector};
@@ -914,6 +920,10 @@ module ven_ide #(
                     end
                 endcase
             end else if (cs_ctl && we) begin
+`ifdef VEN_IDE_TRACE
+                $display("ven_ide: CTRL(0x3F6) write=0x%02x (prev=0x%02x) status=0x%02x data_idx=%0d nsec_left=%0d xfer_lba=%0d",
+                         wdata[7:0], r_ctrl, r_status, data_idx, nsec_left, xfer_lba);
+`endif
                 // SRST (bit2) assert edge -> synchronous signature restore (reuses
                 // the DIAGNOSTIC result: error 0x01, signature, status 0x50). qemu
                 // does this in an async soft-reset BH that sets a transient BUSY,
@@ -936,9 +946,20 @@ module ven_ide #(
                     r_slv_nsector <= 8'h01; r_slv_sector <= 8'h01;
                 end
                 r_ctrl <= wdata[7:0];                     // device control (nIEN, SRST)
+`ifdef VEN_IDE_TRACE
+            end else if (cs && !we && addr[2:0] == 3'd0 && !r_status[3]) begin
+                // data-port read OUTSIDE a DRQ window -> rdata=0 (the zero-source!)
+                $display("ven_ide: ZERO-READ data-port read with DRQ clear: status=0x%02x data_idx=%0d nsec_left=%0d xfer_lba=%0d",
+                         r_status, data_idx, nsec_left, xfer_lba);
+`endif
             end else if (cs && !we && addr[2:0] == 3'd0 && r_status[3] && !in_write) begin
                 // ----- data-port READ drain (the !in_write guard drops a read in
                 //       a WRITE-DRQ window so it consumes no slot) --------------
+`ifdef VEN_IDE_TRACE
+                if (data_idx < 9'd12 && !in_identify)
+                    $display("ven_ide: DATA lba=%0d idx=%0d disk_byte=0x%0x word=0x%04x",
+                             xfer_lba, data_idx, disk_byte, data_word);
+`endif
                 if (data_idx == 9'd255) begin
                     if (blk_left > 9'd1) begin
                         // M8.4d2 INTRA-block (READ/WRITE MULTIPLE): advance to the next
@@ -957,6 +978,9 @@ module ven_ide #(
                             irq14    <= ~nien;
                             advance_lba_regs(xfer_lba + 28'd1);  // regs -> OOR LBA
                         end else begin                           // BLOCK boundary: re-arm
+`ifdef VEN_IDE_TRACE
+                            $display("ven_ide: READ re-arm next_lba=%0d nsec_left=%0d", xfer_lba + 28'd1, nsec_left - 9'd1);
+`endif
                             xfer_lba  <= xfer_lba + 28'd1;       // next window's start
                             nsec_left <= nsec_left - 9'd1;
                             // next window block = MIN(remaining, r_blk_size); for

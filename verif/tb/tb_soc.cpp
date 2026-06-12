@@ -84,6 +84,12 @@ struct Args {
     uint32_t watch_write= 0;       // log every mem write into [addr, addr+16) (0=off; gap-walk)
     bool     exec_check = false;   // flag first execute-from-recently-written (F3 divergence)
     uint64_t exec_floor = 0;       // ignore writes before this cycle (skip kernel load)
+    // --dump-mem-at N,addr,len,file : at retire N (first reach), write len bytes
+    // of physical memory starting at addr to file (gap-walk memory snapshots).
+    uint64_t dump_at_n  = 0;
+    uint32_t dump_addr  = 0;
+    uint32_t dump_len   = 0;
+    std::string dump_file;
 };
 
 // --watch-write debug hook: the mem service lambda is defined before the `cycles`
@@ -128,6 +134,18 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--peek-mem")        a.peek_mem   = parse_u32(need("--peek-mem"));
         else if (k == "--watch-write")     a.watch_write= parse_u32(need("--watch-write"));
         else if (k == "--exec-written-check") { a.exec_check = true; a.exec_floor = parse_u64(need("--exec-written-check")); }
+        else if (k == "--dump-mem-at") {
+            // N,addr,len,file
+            std::string v = need("--dump-mem-at");
+            size_t p1 = v.find(','), p2 = v.find(',', p1+1), p3 = v.find(',', p2+1);
+            if (p1 == std::string::npos || p2 == std::string::npos || p3 == std::string::npos) {
+                std::fprintf(stderr, "%s: --dump-mem-at needs N,addr,len,file\n", argv[0]); usage(argv[0], 2);
+            }
+            a.dump_at_n = std::strtoull(v.substr(0, p1).c_str(), nullptr, 0);
+            a.dump_addr = (uint32_t)std::strtoull(v.substr(p1+1, p2-p1-1).c_str(), nullptr, 0);
+            a.dump_len  = (uint32_t)std::strtoull(v.substr(p2+1, p3-p2-1).c_str(), nullptr, 0);
+            a.dump_file = v.substr(p3+1);
+        }
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
@@ -284,8 +302,13 @@ int main(int argc, char** argv) {
                 uint32_t wd = (uint32_t)top->mem_wdata;
                 if (!(wa == g_wlast_a && wd == g_wlast_d && g_watch_cycles == g_wlast_c)) {
                     std::fprintf(stderr,
-                        "tb_soc: WATCH-WRITE cyc=%llu addr=0x%08x wdata=0x%08x wstrb=0x%x\n",
-                        (unsigned long long)g_watch_cycles, wa, wd, (unsigned)top->mem_wstrb);
+                        "tb_soc: WATCH-WRITE cyc=%llu addr=0x%08x wdata=0x%08x wstrb=0x%x"
+                        " last_n=%llu last_cs:ip=%04x:%08x ecx=0x%x esi=0x%x edi=0x%x\n",
+                        (unsigned long long)g_watch_cycles, wa, wd, (unsigned)top->mem_wstrb,
+                        (unsigned long long)ventium::g_last_arch.n,
+                        ventium::g_last_arch.seg[0], ventium::g_last_arch.pc,
+                        ventium::g_last_arch.gpr[1], ventium::g_last_arch.gpr[6],
+                        ventium::g_last_arch.gpr[7]);
                     g_wlast_a = wa; g_wlast_d = wd; g_wlast_c = g_watch_cycles;
                 }
             }
@@ -367,6 +390,22 @@ int main(int argc, char** argv) {
         ++cycles;
 
         if (trace.retired() > before) idle = 0; else ++idle;
+
+        // --dump-mem-at: first time retire count reaches N, snapshot the range.
+        if (args.dump_at_n && trace.retired() >= args.dump_at_n) {
+            FILE* df = std::fopen(args.dump_file.c_str(), "wb");
+            if (df) {
+                for (uint32_t i = 0; i < args.dump_len; ++i)
+                    std::fputc(mem.read8(args.dump_addr + i), df);
+                std::fclose(df);
+                std::fprintf(stderr, "tb_soc: dump-mem-at n=%llu wrote 0x%x bytes @0x%08x -> %s\n",
+                             (unsigned long long)trace.retired(), args.dump_len,
+                             args.dump_addr, args.dump_file.c_str());
+            } else {
+                std::fprintf(stderr, "tb_soc: dump-mem-at: cannot open %s\n", args.dump_file.c_str());
+            }
+            args.dump_at_n = 0;   // once
+        }
 
         if (trace.retired() >= args.max_insn) {
             std::fprintf(stderr, "tb_soc: stop: reached --max-insn (%llu)\n",
