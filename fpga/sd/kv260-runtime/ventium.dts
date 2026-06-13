@@ -1,0 +1,76 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * ventium.dts — Kria KV260 runtime overlay for the Ventium P5 SoC PL firmware.
+ * Hand-written (auditable) instead of xsct-createdts output; pairs with
+ * fpga/build/kv260_soc_impl_final_40/ventium_kv260.bit.bin (bootgen -process_bitstream bin).
+ *
+ * Loaded by:  xmutil loadapp ventium   (dfx-mgr applies this overlay, then the
+ * of-fpga-region core programs the PL from firmware-name via zynqmp-fpga).
+ *
+ * What the PS app (ven_soc_app) relies on, and where it is declared:
+ *  - DDR carveout 0x4000_0000 + 256 MiB  -> fragment@1 reserved-memory (no-map).
+ *    The core's S_AXI_HPC0 master reads/writes this window; Linux must not own it.
+ *    NOTE: reserved-memory in a RUNTIME overlay is not re-scanned by memblock
+ *    (reservations are boot-time-only on Linux) — see VENTIUM-README.md for the
+ *    boot-time mitigation; the node is still the correct, self-documenting form.
+ *  - AXI-Lite control slave at 0xA000_0000 (M_AXI_HPM0_FPD, 64 KiB): the app maps
+ *    it via /dev/mem, so no driver node is required. fragment@2's ventium-soc node
+ *    documents the region anyway and exposes the IRQ for the future UIO path
+ *    (compatible "generic-uio" binds only if uio_pdrv_genirq.of_id=generic-uio
+ *    is added to the kernel cmdline — inert by default).
+ *  - pl_ps_irq0 -> GIC SPI 89 (IRQ_TYPE_LEVEL_HIGH), the IO-bridge/syscall IRQ.
+ *  - pl_clk0 must run at 40 MHz: the impl_final_40 build closes timing at 40 MHz
+ *    (WNS +0.265 ns); the SOM boot firmware leaves pl0 at its own default, so
+ *    fragment@2's clocking0 (xlnx,fclk, zynqmp_clk 71 = pl0_ref) pins 40 MHz.
+ *  - PS-PL port widths (xilinx-afi): S_AXI_HPC0/AFIFM0 128-bit (entries 0,1 = 0b00),
+ *    M_AXI_HPM0 32-bit (entry 14: fpd afi_fs dw_ss0_sel = 0b00). Both equal the
+ *    power-on defaults; pinned here so a previously-loaded app cannot leave
+ *    different widths behind.
+ */
+
+/ {
+	/* --- PL bitstream binding ------------------------------------------ */
+	fragment@0 {
+		target = <&fpga_full>;
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+			firmware-name = "ventium.bit.bin";
+			resets = <&zynqmp_reset 116>, <&zynqmp_reset 117>,
+				 <&zynqmp_reset 118>, <&zynqmp_reset 119>;
+		};
+	};
+
+
+	/* --- PS-PL plumbing: 40 MHz fabric clock, AFI widths, control slave - */
+	fragment@2 {
+		target = <&amba>;
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			clocking0: clocking0 {
+				compatible = "xlnx,fclk";
+				#clock-cells = <0>;
+				clocks = <&zynqmp_clk 71>;
+				assigned-clocks = <&zynqmp_clk 71>;
+				assigned-clock-rates = <40000000>;
+				clock-output-names = "fabric_clk";
+			};
+
+			afi0: afi0 {
+				compatible = "xlnx,afi-fpga";
+				config-afi = <0 0>, <1 0>, <14 0x0>;
+			};
+
+			ventium_soc: ventium-soc@a0000000 {
+				compatible = "xlnx,ventium-soc-1.0", "generic-uio";
+				reg = <0x0 0xa0000000 0x0 0x10000>;
+				interrupt-parent = <&gic>;
+				interrupts = <0 89 4>;
+			};
+		};
+	};
+};
