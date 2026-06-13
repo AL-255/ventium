@@ -32,6 +32,28 @@ module tb_ven_soc_axil;
   // F3 interrupt-injection seam
   logic intr_out; logic [7:0] intr_vec; logic inta=0;
   logic irq_out;
+  // AXI clean-shutdown quiesce seam (de8f2ec): shutdown is an output (CTRL.SHUTDOWN
+  // level), axi_idle an input (ven_axi_master drained). The directed AXI-master
+  // quiesce is covered by tb_l1_axi phase [8]; here we just round-trip the bits.
+  logic shutdown; logic axi_idle=1'b0;
+
+`ifdef VEN_PS_PROXY
+  // F4 int-0x80 syscall window seam. Driven side (core -> slave doorbell + args):
+  logic        t_sc_active=1'b0; logic [63:0] t_sc_n=64'd0;
+  logic [31:0] t_sc_eax=32'd0, t_sc_ebx=32'd0, t_sc_ecx=32'd0, t_sc_edx=32'd0;
+  logic [31:0] t_sc_esi=32'd0, t_sc_edi=32'd0, t_sc_ebp=32'd0;
+  // Observed side (slave -> core response):
+  logic        o_sc_resp_valid; logic [31:0] o_sc_eax; logic o_sc_apply_gs;
+  logic [31:0] o_sc_gs, o_sc_resume;
+  // resp_valid monitor: count pulses + capture the committed response values.
+  int          sc_resp_pulses=0;
+  logic [31:0] sc_cap_eax=32'd0, sc_cap_gs=32'd0;
+  logic        sc_cap_apply=1'b0;
+  always @(posedge clk) if (o_sc_resp_valid) begin
+    sc_resp_pulses <= sc_resp_pulses + 1;
+    sc_cap_eax <= o_sc_eax; sc_cap_gs <= o_sc_gs; sc_cap_apply <= o_sc_apply_gs;
+  end
+`endif
 
   ven_soc_axil dut (
     .clk(clk), .aresetn(aresetn),
@@ -46,6 +68,15 @@ module tb_ven_soc_axil;
     .cpu_hung(cpu_hung), .bus_err(bus_err), .retire_n(retire_n),
     .io_req(io_req), .io_we(io_we), .io_addr(io_addr), .io_size(io_size), .io_wdata(io_wdata),
     .io_rdata(io_rdata), .io_ack(io_ack),
+    .shutdown(shutdown), .axi_idle(axi_idle),
+`ifdef VEN_PS_PROXY
+    .syscall_active(t_sc_active), .syscall_n(t_sc_n),
+    .syscall_arg_eax(t_sc_eax), .syscall_arg_ebx(t_sc_ebx), .syscall_arg_ecx(t_sc_ecx),
+    .syscall_arg_edx(t_sc_edx), .syscall_arg_esi(t_sc_esi), .syscall_arg_edi(t_sc_edi),
+    .syscall_arg_ebp(t_sc_ebp),
+    .syscall_resp_valid(o_sc_resp_valid), .syscall_eax(o_sc_eax),
+    .syscall_apply_gs(o_sc_apply_gs), .syscall_gs_base(o_sc_gs), .syscall_resume_eip(o_sc_resume),
+`endif
     .intr_out(intr_out), .intr_vec(intr_vec), .inta(inta),
     .irq_out(irq_out)
   );
@@ -185,6 +216,53 @@ module tb_ven_soc_axil;
     chk("re-assert (vec 0x08)", intr_out, 1'b1);
     axil_write(16'h38, 32'h0000_0008, 4'hF);
     chk("PS deassert withdraws the level", intr_out, 1'b0);
+
+    $display("[10] AXI clean-shutdown bits (CTRL.SHUTDOWN / STATUS.AXI_IDLE)");
+    chk("shutdown low at reset", shutdown, 1'b0);
+    axil_write(16'h00, 32'h0000_0109, 4'hF);   // CORE_RUN=1, SHUTDOWN(bit3)=1, IRQ_EN=1
+    chk("shutdown asserted (CTRL[3])", shutdown, 1'b1);
+    axil_read(16'h00, d); chk("CTRL[3] readback", d[3], 1'b1);
+    axi_idle <= 1'b1; @(posedge clk);
+    axil_read(16'h04, d); chk("STATUS.AXI_IDLE[3]", d[3], 1'b1);
+    axil_write(16'h00, 32'h0000_0101, 4'hF);   // clear SHUTDOWN (keep CORE_RUN/IRQ_EN)
+    chk("shutdown deasserted", shutdown, 1'b0);
+    axi_idle <= 1'b0;
+
+`ifdef VEN_PS_PROXY
+    $display("[11] int-0x80 syscall window (doorbell -> args -> response commit)");
+    chk("no resp_valid at idle", o_sc_resp_valid, 1'b0);
+    // the core's 1-clock syscall_active doorbell: brk(45) with distinct args.
+    @(negedge clk);
+      t_sc_active<=1'b1; t_sc_n<=64'd7; t_sc_eax<=32'd45; t_sc_ebx<=32'h0000_1234;
+      t_sc_ecx<=32'h1111_2222; t_sc_edx<=32'h3333_4444; t_sc_esi<=32'h5555_6666;
+      t_sc_edi<=32'h7777_8888; t_sc_ebp<=32'h9999_AAAA;
+    @(negedge clk); t_sc_active<=1'b0;
+    @(posedge clk); #1;
+    axil_read(16'h04, d); chk("STATUS.SYS_PEND[9]", d[9], 1'b1);
+    axil_read(16'h40, d); chk("R_SYS_STATUS pending", d[0], 1'b1);
+    chk("irq_out raised by sys_pending", irq_out, 1'b1);
+    axil_read(16'h44, d); chk("R_SYS_NR",        d, 32'd45);
+    axil_read(16'h48, d); chk("R_SYS_ARG0(ebx)", d, 32'h0000_1234);
+    axil_read(16'h4C, d); chk("R_SYS_ARG1(ecx)", d, 32'h1111_2222);
+    axil_read(16'h50, d); chk("R_SYS_ARG2(edx)", d, 32'h3333_4444);
+    axil_read(16'h54, d); chk("R_SYS_ARG3(esi)", d, 32'h5555_6666);
+    axil_read(16'h58, d); chk("R_SYS_ARG4(edi)", d, 32'h7777_8888);
+    axil_read(16'h5C, d); chk("R_SYS_ARG5(ebp)", d, 32'h9999_AAAA);
+    // PS posts the response then W1P CTRL.RESP_VALID|APPLY_GS (ordering: RET/GS first).
+    sc_resp_pulses = 0;
+    axil_write(16'h68, 32'h0000_9000, 4'hF);   // R_SYS_RET  -> syscall_eax
+    axil_write(16'h6C, 32'hCAFE_BABE, 4'hF);   // R_SYS_GS   -> syscall_gs_base
+    axil_write(16'h64, 32'h0, 4'hF);           // R_SYS_RESUME (informational)
+    axil_write(16'h60, 32'h0000_0003, 4'hF);   // R_SYS_CTRL: RESP_VALID|APPLY_GS
+    repeat(4) @(posedge clk); #1;
+    chk("resp_valid pulsed exactly once", sc_resp_pulses, 32'd1);
+    chk("syscall_eax committed",      sc_cap_eax, 32'h0000_9000);
+    chk("syscall_apply_gs committed", {31'd0, sc_cap_apply}, 32'd1);
+    chk("syscall_gs_base committed",  sc_cap_gs, 32'hCAFE_BABE);
+    axil_read(16'h40, d); chk("R_SYS_STATUS cleared", d[0], 1'b0);
+    axil_read(16'h04, d); chk("STATUS.SYS_PEND cleared", d[9], 1'b0);
+    @(posedge clk); chk("irq_out dropped after commit", irq_out, 1'b0);
+`endif
 
     if (errors==0) $display("SOCAXIL-GATE-OK (control + status + retire + IO-bridge handshake all pass)");
     else           $display("SOCAXIL-GATE-FAIL (%0d errors)", errors);

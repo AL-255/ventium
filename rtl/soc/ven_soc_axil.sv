@@ -82,6 +82,28 @@ module ven_soc_axil #(
     output logic [31:0] io_rdata,
     output logic        io_ack,
 
+`ifdef VEN_PS_PROXY
+    // ---- int-0x80 syscall proxy window (0x40-0x6C) <-> core syscall_* seam --------
+    // On a cd80 with proxy_en=1 the core stalls in S_SYSCALL_WAIT; this slave captures
+    // {nr, args} on the 1-clock syscall_active, raises sys_pending (+ irq_out), and on
+    // the PS's W1P commit pulses syscall_resp_valid for one cycle with eax/gs filled.
+    // Mirrors the io_* bridge discipline exactly (single pl_clk0 domain, no CDC).
+    input  logic        syscall_active,     // core -> slave: 1-clock doorbell
+    input  logic [63:0] syscall_n,          // upcoming retire index (diagnostic)
+    input  logic [31:0] syscall_arg_eax,    // nr
+    input  logic [31:0] syscall_arg_ebx,    // arg0
+    input  logic [31:0] syscall_arg_ecx,    // arg1
+    input  logic [31:0] syscall_arg_edx,    // arg2
+    input  logic [31:0] syscall_arg_esi,    // arg3
+    input  logic [31:0] syscall_arg_edi,    // arg4
+    input  logic [31:0] syscall_arg_ebp,    // arg5
+    output logic        syscall_resp_valid, // slave -> core: 1-cycle commit strobe
+    output logic [31:0] syscall_eax,        // kernel ret -> gpr[0]
+    output logic        syscall_apply_gs,   // 1: install a new %gs TLS base
+    output logic [31:0] syscall_gs_base,    // the %gs base (set_thread_area)
+    output logic [31:0] syscall_resume_eip, // informational on HW (core derives it)
+`endif
+
     // ---- PS -> core interrupt-injection seam (F3, R_INTR) --------------------------
     // The PS-side 8259 C model (sw/ps_periph/ven_pic.c) is the PIC; this seam is its
     // INT/INTA wire pair to the core. The PS writes {assert, vector} -> intr_out is
@@ -153,6 +175,21 @@ module ven_soc_axil #(
   localparam logic [7:0] R_INTR      = 8'h38;  // F3: [7:0]vector [8]assert [9]inta-seen(R/W1C) [16]inta-irq-en
   localparam logic [7:0] R_IRQ_STAT  = 8'h70;  // R/W1C: [0]io [1]inta-seen
   localparam logic [7:0] R_IDENT     = 8'h7C;
+`ifdef VEN_PS_PROXY
+  // ---- int-0x80 syscall window (0x40-0x6C; 12 words, the RESERVED aperture) ------
+  localparam logic [7:0] R_SYS_STATUS = 8'h40;  // RO  [0]sys_pending
+  localparam logic [7:0] R_SYS_NR     = 8'h44;  // RO  syscall number (=arg_eax)
+  localparam logic [7:0] R_SYS_ARG0   = 8'h48;  // RO  ebx (arg0)
+  localparam logic [7:0] R_SYS_ARG1   = 8'h4C;  // RO  ecx (arg1)
+  localparam logic [7:0] R_SYS_ARG2   = 8'h50;  // RO  edx (arg2)
+  localparam logic [7:0] R_SYS_ARG3   = 8'h54;  // RO  esi (arg3)
+  localparam logic [7:0] R_SYS_ARG4   = 8'h58;  // RO  edi (arg4)
+  localparam logic [7:0] R_SYS_ARG5   = 8'h5C;  // RO  ebp (arg5)
+  localparam logic [7:0] R_SYS_CTRL   = 8'h60;  // W1P [0]RESP_VALID [1]APPLY_GS; RO [0]sys_pending
+  localparam logic [7:0] R_SYS_RESUME = 8'h64;  // RW  resume_eip (informational)
+  localparam logic [7:0] R_SYS_RET    = 8'h68;  // RW  -> syscall_eax
+  localparam logic [7:0] R_SYS_GS     = 8'h6C;  // RW  -> syscall_gs_base
+`endif
 `ifdef VEN_DBG_CORE
   // ---- VEN_DBG_CORE debug/trace window (0x80..0xD4; clear of the 0x40-0x6C proxy)
   localparam logic [7:0] R_DBG_CAP        = 8'h80;  // RO {magic 0xDB, ver, DEPTH}
@@ -200,6 +237,19 @@ module ven_soc_axil #(
   logic        intr_seen_r;      // sticky: the core pulsed inta (R/W1C)
   logic        intr_irq_en_r;    // 1 = intr_seen_r also raises irq_out (GIC notify)
 
+`ifdef VEN_PS_PROXY
+  // ---- int-0x80 syscall proxy state ---------------------------------------------
+  logic        sys_pending;      // sticky: a syscall is captured + awaiting PS service
+  logic        sys_resp_pulse;   // 1-cycle W1P -> syscall_resp_valid
+  logic [31:0] sys_eax_r;        // PS-written kernel ret -> syscall_eax
+  logic [31:0] sys_gs_r;         // PS-written %gs base -> syscall_gs_base
+  logic [31:0] sys_resume_r;     // PS-written resume_eip (informational)
+  logic        sys_apply_gs_r;   // PS-written apply-gs flag
+  // snapshot of {nr,args,n} latched at the syscall_active edge (stable for the PS).
+  logic [31:0] sys_nr_q, sys_a0_q, sys_a1_q, sys_a2_q, sys_a3_q, sys_a4_q, sys_a5_q;
+  logic [63:0] sys_n_q;
+`endif
+
 `ifdef VEN_DBG_CORE
   logic [4:0]  dbg_trace_idx_r;  // ring read index (N-back), PS-written
   logic [31:0] dbg_freeze_th_r;  // freeze stall threshold, PS-written
@@ -228,6 +278,17 @@ module ven_soc_axil #(
   assign intr_out   = intr_pend_r;
   assign intr_vec   = intr_vec_r;
 
+`ifdef VEN_PS_PROXY
+  assign syscall_resp_valid = sys_resp_pulse;
+  assign syscall_eax        = sys_eax_r;
+  assign syscall_apply_gs   = sys_apply_gs_r;
+  assign syscall_gs_base    = sys_gs_r;
+  assign syscall_resume_eip = sys_resume_r;
+  wire   sys_pend_status    = sys_pending;   // R_STATUS[9] mirror
+`else
+  wire   sys_pend_status    = 1'b0;
+`endif
+
   // ---- port-I/O capture/release FSM ---------------------------------------------
   // IDLE -> (io_req) capture + raise irq, WAIT_PS (io_ack held 0) -> (PS ACK) RELEASE
   // (io_ack=1 one cycle, io_rdata valid) -> DONE (clear pending) -> IDLE.
@@ -248,7 +309,11 @@ module ven_soc_axil #(
   // irq_out: io-bridge pending (F2, unchanged) OR — only when the PS opted in via
   // R_INTR.INTA_IRQ_EN — the inta-seen latch (so the PS daemon can sleep on the GIC
   // and wake to intack its PIC model + stage the next vector).
-  assign irq_out  = irq_en & (irq_pending | (intr_irq_en_r & intr_seen_r));
+  assign irq_out  = irq_en & (irq_pending | (intr_irq_en_r & intr_seen_r)
+`ifdef VEN_PS_PROXY
+                              | sys_pending   // a serviced int-0x80 awaits the PS daemon
+`endif
+                             );
 
   // ================= AXI4-Lite write channel =================
   logic [7:0] waddr;             // low byte of awaddr (word-decoded)
@@ -293,7 +358,7 @@ module ven_soc_axil #(
         s_axil_rvalid <= 1'b1;
         unique case (raddr)
           R_CTRL:      s_axil_rdata <= {23'd0, irq_en, 4'd0, shutdown /*[3] level*/, 1'b0 /*rst_req W1P*/, 1'b0 /*flush W1P*/, core_run};
-          R_STATUS:    s_axil_rdata <= {22'd0, 1'b0 /*sys_pend*/, io_pending, 4'd0, axi_idle /*[3]*/, ~aresetn, bus_err, cpu_hung};
+          R_STATUS:    s_axil_rdata <= {22'd0, sys_pend_status /*[9]*/, io_pending, 4'd0, axi_idle /*[3]*/, ~aresetn, bus_err, cpu_hung};
           R_INIT_EIP:  s_axil_rdata <= init_eip_r;
           R_INIT_ESP:  s_axil_rdata <= init_esp_r;
           R_MODE:      s_axil_rdata <= {19'd0, errata_en_r, 1'b0, soc_en_r, cosim_en_r, proxy_en_r, l1axi_en_r, bus_mode_r, cycle_mode_r, boot_mode_r};
@@ -307,6 +372,20 @@ module ven_soc_axil #(
           R_INTR:      s_axil_rdata <= {15'd0, intr_irq_en_r, 6'd0, intr_seen_r, intr_pend_r, intr_vec_r};
           R_IRQ_STAT:  s_axil_rdata <= {30'd0, intr_seen_r, irq_pending};
           R_IDENT:     s_axil_rdata <= IDENT;
+`ifdef VEN_PS_PROXY
+          R_SYS_STATUS: s_axil_rdata <= {31'd0, sys_pending};
+          R_SYS_NR:     s_axil_rdata <= sys_nr_q;
+          R_SYS_ARG0:   s_axil_rdata <= sys_a0_q;
+          R_SYS_ARG1:   s_axil_rdata <= sys_a1_q;
+          R_SYS_ARG2:   s_axil_rdata <= sys_a2_q;
+          R_SYS_ARG3:   s_axil_rdata <= sys_a3_q;
+          R_SYS_ARG4:   s_axil_rdata <= sys_a4_q;
+          R_SYS_ARG5:   s_axil_rdata <= sys_a5_q;
+          R_SYS_CTRL:   s_axil_rdata <= {31'd0, sys_pending};
+          R_SYS_RESUME: s_axil_rdata <= sys_resume_r;
+          R_SYS_RET:    s_axil_rdata <= sys_eax_r;
+          R_SYS_GS:     s_axil_rdata <= sys_gs_r;
+`endif
 `ifdef VEN_DBG_CORE
           R_DBG_CAP:        s_axil_rdata <= {8'hDB, 8'd1, 16'd32};  // magic, ver, ring DEPTH
           R_DBG_EIP:        s_axil_rdata <= dbg_last_eip;
@@ -359,6 +438,10 @@ module ven_soc_axil #(
       io_rdata_r <= 32'd0;
       flush_all <= 1'b0; ps_ack_pulse <= 1'b0; irq_clr_pulse <= 1'b0;
       shutdown  <= 1'b0;
+`ifdef VEN_PS_PROXY
+      sys_eax_r <= 32'd0; sys_gs_r <= 32'd0; sys_resume_r <= 32'd0;
+      sys_apply_gs_r <= 1'b0; sys_resp_pulse <= 1'b0;
+`endif
 `ifdef VEN_DBG_CORE
       dbg_trace_idx_r <= 5'd0; dbg_freeze_th_r <= 32'd0; dbg_clear <= 1'b0;
       dbg_bp_addr_r <= 32'd0; dbg_bp_en_r <= 1'b0; dbg_halt_req_r <= 1'b0;
@@ -368,6 +451,9 @@ module ven_soc_axil #(
       flush_all     <= 1'b0;     // W1P: default low, pulse one cycle on the write
       ps_ack_pulse  <= 1'b0;
       irq_clr_pulse <= 1'b0;
+`ifdef VEN_PS_PROXY
+      sys_resp_pulse <= 1'b0;    // W1P
+`endif
 `ifdef VEN_DBG_CORE
       dbg_clear     <= 1'b0;     // W1P
       dbg_step      <= 1'b0;     // W1P
@@ -428,6 +514,33 @@ module ven_soc_axil #(
             if (s_axil_wdata[0]) irq_clr_pulse <= 1'b1;        // W1C io irq
             if (s_axil_wdata[1]) intr_seen_r   <= 1'b0;        // W1C inta-seen
           end
+`ifdef VEN_PS_PROXY
+          // int-0x80 response: the PS posts RET/GS/RESUME, then W1P CTRL.RESP_VALID.
+          // The AXI-Lite write order IS the contract (RET/GS before CTRL) — the core
+          // latches syscall_eax/gs combinationally on the resp_valid clock.
+          R_SYS_RET: begin
+            if (s_axil_wstrb[0]) sys_eax_r[7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) sys_eax_r[15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) sys_eax_r[23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) sys_eax_r[31:24] <= s_axil_wdata[31:24];
+          end
+          R_SYS_GS: begin
+            if (s_axil_wstrb[0]) sys_gs_r[7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) sys_gs_r[15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) sys_gs_r[23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) sys_gs_r[31:24] <= s_axil_wdata[31:24];
+          end
+          R_SYS_RESUME: begin
+            if (s_axil_wstrb[0]) sys_resume_r[7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) sys_resume_r[15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) sys_resume_r[23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) sys_resume_r[31:24] <= s_axil_wdata[31:24];
+          end
+          R_SYS_CTRL: if (s_axil_wstrb[0]) begin
+            if (s_axil_wdata[0]) sys_resp_pulse <= 1'b1;       // W1P commit -> resp_valid
+            sys_apply_gs_r <= s_axil_wdata[1];                 // latch apply-gs (level)
+          end
+`endif
 `ifdef VEN_DBG_CORE
           R_DBG_TRACE_IDX: if (s_axil_wstrb[0]) dbg_trace_idx_r <= s_axil_wdata[4:0];
           R_DBG_CTRL:      if (s_axil_wstrb[0] && s_axil_wdata[0]) dbg_clear <= 1'b1; // W1P
@@ -500,6 +613,34 @@ module ven_soc_axil #(
     end
   end
 
+`ifdef VEN_PS_PROXY
+  // ================= int-0x80 syscall capture/release =================
+  // On the core's 1-clock syscall_active doorbell, snapshot {nr,args,n} and raise
+  // sys_pending (which also raises irq_out). The core then spins in S_SYSCALL_WAIT
+  // holding syscall_* stable; the PS reads the snapshot, stages the kernel memory
+  // effects into the DDR carveout, writes the response regs, then W1P
+  // R_SYS_CTRL.RESP_VALID -> sys_resp_pulse fires syscall_resp_valid for ONE cycle
+  // and clears sys_pending. Mirrors the io_* bridge (the core holds the request
+  // stable for the whole stall — no retire ticks cn — so no IO_WAIT/RELEASE FSM is
+  // needed; the snapshot + the single-cycle resp_pulse are the whole handshake).
+  always_ff @(posedge clk) begin
+    if (!aresetn) begin
+      sys_pending <= 1'b0;
+      sys_nr_q <= 32'd0; sys_a0_q <= 32'd0; sys_a1_q <= 32'd0; sys_a2_q <= 32'd0;
+      sys_a3_q <= 32'd0; sys_a4_q <= 32'd0; sys_a5_q <= 32'd0; sys_n_q <= 64'd0;
+    end else begin
+      if (syscall_active) begin
+        sys_pending <= 1'b1;
+        sys_nr_q <= syscall_arg_eax; sys_a0_q <= syscall_arg_ebx;
+        sys_a1_q <= syscall_arg_ecx; sys_a2_q <= syscall_arg_edx;
+        sys_a3_q <= syscall_arg_esi; sys_a4_q <= syscall_arg_edi;
+        sys_a5_q <= syscall_arg_ebp; sys_n_q  <= syscall_n;
+      end
+      if (sys_resp_pulse) sys_pending <= 1'b0;  // commit clears the latch
+    end
+  end
+`endif
+
 `ifndef SYNTHESIS
   // io_ack is exactly one cycle per release (the core needs precisely one ack edge).
   ioack_pulse: assert property (@(posedge clk) disable iff (!aresetn)
@@ -507,6 +648,14 @@ module ven_soc_axil #(
   // never ack without a captured pending request.
   ioack_pending: assert property (@(posedge clk) disable iff (!aresetn)
       io_ack_r |-> io_pending);
+`ifdef VEN_PS_PROXY
+  // syscall_resp_valid is exactly one cycle per commit (the core needs one edge).
+  sysresp_pulse: assert property (@(posedge clk) disable iff (!aresetn)
+      sys_resp_pulse |=> !sys_resp_pulse);
+  // never commit a response without a pending captured syscall.
+  sysresp_pending: assert property (@(posedge clk) disable iff (!aresetn)
+      sys_resp_pulse |-> sys_pending);
+`endif
   // F3 seam: the inta strobe always drops the assert level on the next clock
   // (the 8259-INT-drops-at-INTA semantics) and always latches the seen bit
   // (a same-cycle W1C must not lose an intack).

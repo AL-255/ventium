@@ -77,6 +77,14 @@ if {$FEP} { lappend DEFS VEN_FE_PIPE }
 # the ven_soc_axil 0x80+ window). Costs a little BRAM + routing, so it is OFF for
 # the timing-critical production close; turn on for a forensic/bring-up bitstream.
 if {[envor DBG_CORE 0]} { lappend DEFS VEN_DBG_CORE }
+# PS_PROXY=1 builds the F4 USERSPACE-QUAKE BITSTREAM: the int-0x80 syscall window
+# (ven_soc_axil 0x40-0x6C) + the gated S_SYSCALL_WAIT core stall, so the PS daemon
+# (ven_soc_app --quake) services Linux syscalls for a userspace ELF. The macro only
+# ADDS a stall arm that is dead when proxy_en=0, so a PS_PROXY=1 build stays
+# byte/cycle-identical to production unless the PS sets MODE.PROXY_EN; the module
+# port list is unchanged (the seam is internal to ventium_kv260_core), so the BD/
+# address map need no change. OFF by default.
+if {[envor PS_PROXY 0]} { lappend DEFS VEN_PS_PROXY }
 set_property verilog_define $DEFS [current_fileset]
 update_compile_order -fileset sources_1
 

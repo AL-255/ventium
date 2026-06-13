@@ -1,0 +1,6 @@
+# build artifacts (compiled on the dev host / cross-compiled for the board)
+/build/
+/ven_soc_app
+/ven_fb_vnc
+/test_quake_glue
+*.o

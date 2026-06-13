@@ -101,6 +101,14 @@ module ventium_kv260_core #(
   // F3 PS->core interrupt-injection seam (ven_soc_axil R_INTR <-> ventium_top).
   logic        core_intr; logic [7:0] core_intr_vec; logic core_inta;
 
+`ifdef VEN_PS_PROXY
+  // F4 int-0x80 syscall proxy seam (ven_soc_axil 0x40-0x6C <-> ventium_top/core).
+  logic        sc_active, sc_resp_valid, sc_apply_gs;
+  logic [63:0] sc_n;
+  logic [31:0] sc_arg_eax, sc_arg_ebx, sc_arg_ecx, sc_arg_edx, sc_arg_esi, sc_arg_edi, sc_arg_ebp;
+  logic [31:0] sc_eax, sc_gs_base, sc_resume_eip;
+`endif
+
 `ifdef VEN_DBG_CORE
   // VEN_DBG_CORE bundle: ventium_top debug taps -> ven_soc_dbg -> ven_soc_axil regs.
   logic        dbg_retire_valid;
@@ -144,6 +152,18 @@ module ventium_kv260_core #(
       .io_wdata(io_wdata), .io_rdata(io_rdata), .io_ack(io_ack),
       .intr_out(core_intr), .intr_vec(core_intr_vec), .inta(core_inta),
       .irq_out(irq_out)
+`ifdef VEN_PS_PROXY
+      ,
+      // int-0x80 syscall window <-> core seam (the response/commit side).
+      .syscall_active(sc_active), .syscall_n(sc_n),
+      .syscall_arg_eax(sc_arg_eax), .syscall_arg_ebx(sc_arg_ebx),
+      .syscall_arg_ecx(sc_arg_ecx), .syscall_arg_edx(sc_arg_edx),
+      .syscall_arg_esi(sc_arg_esi), .syscall_arg_edi(sc_arg_edi),
+      .syscall_arg_ebp(sc_arg_ebp),
+      .syscall_resp_valid(sc_resp_valid), .syscall_eax(sc_eax),
+      .syscall_apply_gs(sc_apply_gs), .syscall_gs_base(sc_gs_base),
+      .syscall_resume_eip(sc_resume_eip)
+`endif
 `ifdef VEN_DBG_CORE
       ,
       .dbg_clear(d_clear), .dbg_freeze_thresh(d_freeze_th), .dbg_trace_idx(d_trace_idx),
@@ -168,14 +188,27 @@ module ventium_kv260_core #(
       .init_eip(cfg_init_eip), .init_esp(cfg_init_esp), .boot_mode(cfg_boot_mode),
       .bus_mode(cfg_bus_mode), .cycle_mode(cfg_cycle_mode), .errata_en(cfg_errata_en),
       .cpu_hung(st_cpu_hung),
-      // int-0x80 proxy (F2/F3: proxy_en=0, inert; the response inputs tied off — the
-      // syscall bridge + the gated S_SYSCALL_WAIT core change are F4/+VEN_PS_PROXY).
+      // int-0x80 proxy. +VEN_PS_PROXY: the core stalls in S_SYSCALL_WAIT and the
+      // syscall_* seam is wired to ven_soc_axil's 0x40-0x6C window (the PS daemon
+      // services it). Otherwise (F2/F3): proxy_en=0, inert; the response inputs
+      // tied off (and there is no syscall_resp_valid port to connect).
       .proxy_en(cfg_proxy_en),
+`ifdef VEN_PS_PROXY
+      .syscall_active(sc_active), .syscall_n(sc_n),
+      .syscall_resume_eip(sc_resume_eip), .syscall_eax(sc_eax),
+      .syscall_apply_gs(sc_apply_gs), .syscall_gs_base(sc_gs_base),
+      .syscall_resp_valid(sc_resp_valid),
+      .syscall_arg_eax(sc_arg_eax), .syscall_arg_ebx(sc_arg_ebx),
+      .syscall_arg_ecx(sc_arg_ecx), .syscall_arg_edx(sc_arg_edx),
+      .syscall_arg_esi(sc_arg_esi), .syscall_arg_edi(sc_arg_edi),
+      .syscall_arg_ebp(sc_arg_ebp),
+`else
       .syscall_active(), .syscall_n(),
       .syscall_resume_eip(32'd0), .syscall_eax(32'd0),
       .syscall_apply_gs(1'b0), .syscall_gs_base(32'd0),
       .syscall_arg_eax(), .syscall_arg_ebx(), .syscall_arg_ecx(), .syscall_arg_edx(),
       .syscall_arg_esi(), .syscall_arg_edi(), .syscall_arg_ebp(),
+`endif
       // port-I/O bridge (cosim_en routes IN/OUT to this bus; the slave services it).
       .cosim_en(cfg_cosim_en),
       .io_req(io_req), .io_we(io_we), .io_addr(io_addr), .io_size(io_size),

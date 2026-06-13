@@ -31,6 +31,21 @@
 #define VEN_R_IO_RDATA   0x30   // RW (PS writes the IN return value)
 #define VEN_R_IO_CTRL    0x34   // W1P: [0]ACK [1]IRQ_CLR
 #define VEN_R_INTR       0x38   // RW: PS->core interrupt-injection seam (F3)
+// int-0x80 syscall window (0x40-0x6C; present only in a +VEN_PS_PROXY bitstream).
+// The core stalls in S_SYSCALL_WAIT on a cd80; the PS reads {nr,args}, stages the
+// kernel memory effects into the DDR carveout, writes RET/GS, then W1P SYS_CTRL.
+#define VEN_R_SYS_STATUS 0x40   // RO  [0]sys_pending (mirror of STATUS[9])
+#define VEN_R_SYS_NR     0x44   // RO  syscall number (=eax)
+#define VEN_R_SYS_ARG0   0x48   // RO  ebx (arg0)
+#define VEN_R_SYS_ARG1   0x4C   // RO  ecx (arg1)
+#define VEN_R_SYS_ARG2   0x50   // RO  edx (arg2)
+#define VEN_R_SYS_ARG3   0x54   // RO  esi (arg3)
+#define VEN_R_SYS_ARG4   0x58   // RO  edi (arg4)
+#define VEN_R_SYS_ARG5   0x5C   // RO  ebp (arg5)
+#define VEN_R_SYS_CTRL   0x60   // W1P [0]RESP_VALID [1]APPLY_GS; RO [0]sys_pending
+#define VEN_R_SYS_RESUME 0x64   // RW  resume_eip (write 0; the core derives it)
+#define VEN_R_SYS_RET    0x68   // RW  -> syscall_eax (kernel return value)
+#define VEN_R_SYS_GS     0x6C   // RW  -> syscall_gs_base (set_thread_area TLS base)
 #define VEN_R_IRQ_STAT   0x70   // R/W1C: [0]io [1]inta-seen
 #define VEN_R_IDENT      0x7C   // RO == 0x5654_4D43 "VTMC"
 
@@ -116,6 +131,12 @@
 // ---- IO_CTRL bits ---------------------------------------------------------
 #define VEN_IO_ACK          (1u << 0)   // commit IO_RDATA + pulse io_ack (release core)
 #define VEN_IO_IRQ_CLR      (1u << 1)   // clear the interrupt latch
+
+// ---- SYS_CTRL bits (R_SYS_CTRL, the int-0x80 response commit) --------------
+#define VEN_SYS_RESP_VALID  (1u << 0)   // W1P: pulse syscall_resp_valid (release core)
+#define VEN_SYS_APPLY_GS    (1u << 1)   // 1 = install syscall_gs_base as %gs (set_thread_area)
+// ---- SYS_STATUS bits ------------------------------------------------------
+#define VEN_SYS_PENDING     (1u << 0)   // an int-0x80 is captured + awaiting service
 
 #define VEN_IDENT_MAGIC     0x56544D43u
 

@@ -30,6 +30,7 @@
 #include <sys/mman.h>
 #include "ven_soc_regs.h"
 #include "hid_kbd.h"
+#include "ven_quake.h"
 #include "../../ps_periph/ven_periph.h"
 
 // F3 PS-placed peripheral C models (sw/ps_periph/, same files the cosim gates
@@ -103,6 +104,18 @@ static void dbg_dump_core(void) {
     }
     fflush(stderr);
 }
+
+// ---- F4 (--quake) state ------------------------------------------------------
+// Userspace Quake via the int-0x80 proxy (needs a +VEN_PS_PROXY bitstream): the
+// core stalls in S_SYSCALL_WAIT on each cd80; this app reads {nr,args} from the
+// 0x40-0x6C syscall window, emulates the i386 Linux call (ven_quake.*), writes
+// the kernel memory effects into the carveout, then commits the response.
+static int          g_quake     = 0;     // --quake <image.json>
+static const char  *g_qimage    = 0;     // the gen_trace.py --image-out JSON
+static const char  *g_video_out = 0;     // --video <out.p5q>: capture the P5Q1 stream
+static const char  *g_vidpath   = "/p5q_video_capture";  // $P5Q_VIDEO sentinel (match the image)
+static uint32_t      g_brk      = 0x0a000000u;  // --brk: initial break (run-quake-fb computes it)
+static int           g_video_fd = -1;
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
@@ -226,12 +239,18 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];  // SeaBIOS image
         else if (!strcmp(argv[i], "--vgabios") && i + 1 < argc) vgabios = argv[++i]; // VGA option ROM @0xC0000
         else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk = argv[++i];  // IDE disk image
+        else if (!strcmp(argv[i], "--quake")   && i + 1 < argc) { g_quake = 1; g_qimage = argv[++i]; }
+        else if (!strcmp(argv[i], "--video")   && i + 1 < argc) g_video_out = argv[++i];
+        else if (!strcmp(argv[i], "--vidpath") && i + 1 < argc) g_vidpath   = argv[++i];
+        else if (!strcmp(argv[i], "--brk")     && i + 1 < argc) g_brk = strtoul(argv[++i], 0, 0);
         else if (!img)      img = argv[i];
         else if (npos < 3)  pos[npos++] = strtoul(argv[i], 0, 0);
     }
-    if (!img && !bios) {
+    if (!img && !bios && !g_quake) {
         fprintf(stderr, "usage: %s <program.bin> [load_off] [entry] [esp] [--sys] [--dos]\n"
-                        "       [--kbd /dev/input/eventN] [--bios seabios.bin --disk hd.img]\n", argv[0]);
+                        "       [--kbd /dev/input/eventN] [--bios seabios.bin --disk hd.img]\n"
+                        "       [--quake image.json [--video out.p5q] [--vidpath /p5q_video_capture]\n"
+                        "        [--brk 0x...]]  (--quake needs a +VEN_PS_PROXY bitstream)\n", argv[0]);
         return 2;
     }
     if (bios) sysmode = 1;   // a BIOS boots from the reset vector F000:FFF0
@@ -249,7 +268,26 @@ int main(int argc, char **argv) {
 
     // hold the core in reset (CORE_RUN=0 by default at slave reset), stage the image.
     wr(VEN_R_CTRL, 0);                                   // ensure CORE_RUN=0
-    if (bios) {
+    if (g_quake) {
+        // F4: stage the Quake process image into the carveout + build the syscall
+        // emulator. The image's regions are written via the g_ddr-backed MemModel,
+        // and entry/esp come from its reset regs (the core boots in USER mode at
+        // the ELF entry with the pre-baked argv/envp stack).
+        uint32_t q_eip = 0, q_esp = 0;
+        if (ven_quake_init(g_ddr, (uint32_t)(VEN_CARVEOUT_SIZE - 1), g_qimage,
+                           g_vidpath, g_brk, &q_eip, &q_esp) != 0) {
+            fprintf(stderr, "ven_soc: --quake image load failed (%s)\n", g_qimage);
+            return 1;
+        }
+        __sync_synchronize();                            // flush the staged image to DRAM
+        entry = q_eip; esp = q_esp;
+        if (g_video_out) {
+            g_video_fd = open(g_video_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (g_video_fd < 0) perror(g_video_out);
+        }
+        fprintf(stderr, "ven_soc: quake staged; entry=0x%x esp=0x%x brk=0x%x [user+proxy]\n",
+                entry, esp, g_brk);
+    } else if (bios) {
         // FreeDOS: stage the SeaBIOS image at the low shadow (0xE0000) AND the
         // top-of-4G shadow, which the L1/AXI ADDR_MASK wrap folds to carveout offset
         // 0x0FFE0000 (phys 0xFFFE0000 & 0x0FFF_FFFF). SeaBIOS runs its 32-bit POST from
@@ -311,9 +349,16 @@ int main(int argc, char **argv) {
     wr(VEN_R_INTR, 0);                    // (else a stale ASSERT|vec derails the fresh core)
     wr(VEN_R_INIT_EIP, entry);
     wr(VEN_R_INIT_ESP, esp);
-    wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_COSIM
-                 | (sysmode ? VEN_MODE_BOOT_SYS : 0)
-                 | (g_dos   ? VEN_MODE_SOCEN    : 0));
+    // F4 (--quake): user mode + int-0x80 proxy, memory via L1/AXI. No IO bridge
+    // (userspace issues no IN/OUT), no SOCEN, no BOOT_SYS. Otherwise the F2/F3
+    // boot mode (L1AXI + IO bridge + optional system/SOCEN).
+    if (g_quake) {
+        wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_PROXY);
+    } else {
+        wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_COSIM
+                     | (sysmode ? VEN_MODE_BOOT_SYS : 0)
+                     | (g_dos   ? VEN_MODE_SOCEN    : 0));
+    }
     wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN);                   // release reset -> run
 
     // service loop (F2: poll; F3+ can switch to the GIC interrupt on irq_out).
@@ -366,6 +411,43 @@ int main(int argc, char **argv) {
             serviced++;
         }
 
+        // ---- F4 int-0x80 syscall proxy (the PS *is* the Linux kernel) ----------
+        // The core stalls in S_SYSCALL_WAIT on a cd80; read {nr,args}, emulate the
+        // syscall against the carveout (kernel memory effects land in g_ddr), then
+        // post RET/GS and W1P SYS_CTRL.RESP_VALID to release the core. ORDERING is
+        // the contract: stage DDR (incl. a flush of the core's L1) BEFORE commit,
+        // and write RET/GS BEFORE SYS_CTRL (the core latches eax/gs on resp_valid).
+        if (g_quake && (st & VEN_ST_SYS_PEND)) {
+            uint32_t nr  = rd(VEN_R_SYS_NR);
+            uint32_t ebx = rd(VEN_R_SYS_ARG0), ecx = rd(VEN_R_SYS_ARG1), edx = rd(VEN_R_SYS_ARG2);
+            uint32_t esi = rd(VEN_R_SYS_ARG3), edi = rd(VEN_R_SYS_ARG4), ebp = rd(VEN_R_SYS_ARG5);
+            uint64_t cyc = ((uint64_t)rd(VEN_R_RETIRE_HI) << 32) | rd(VEN_R_RETIRE_LO);
+            struct ven_sys_result r;
+            ven_quake_service(nr, ebx, ecx, edx, esi, edi, ebp, cyc, &r);
+            __sync_synchronize();                            // make the DDR writes visible
+            // invalidate the core's L1 (PS writes bypass it; ven_l1d is write-through
+            // for PS reads but the core may hold a stale line of a written buffer).
+            wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN | VEN_CTRL_FLUSH_REQ);
+            wr(VEN_R_SYS_RET, r.eax);
+            wr(VEN_R_SYS_RESUME, 0);                         // the core derives resume EIP
+            uint32_t sysctrl = VEN_SYS_RESP_VALID;
+            if (r.apply_gs) { wr(VEN_R_SYS_GS, r.gs_base); sysctrl |= VEN_SYS_APPLY_GS; }
+            wr(VEN_R_SYS_CTRL, sysctrl);                     // commit -> release S_SYSCALL_WAIT
+            if (g_video_fd >= 0) {                           // stream captured frames to file
+                static uint8_t vbuf[65536]; uint32_t got;
+                while ((got = ven_quake_video_drain(vbuf, sizeof(vbuf))) > 0)
+                    if (write(g_video_fd, vbuf, got) != (ssize_t)got) { /* best effort */ }
+            }
+            if (dbg && (serviced % 2000 == 0))
+                fprintf(stderr, "[sys %llu] nr=%u eax=0x%x%s\n",
+                        (unsigned long long)serviced, nr, r.eax, r.apply_gs ? " +gs" : "");
+            serviced++;
+            if (r.unsupported) { fprintf(stderr, "\nven_soc: UNSUPPORTED syscall nr=%u (#%llu)\n",
+                                         nr, (unsigned long long)serviced); dbg_dump_core(); break; }
+            if (r.should_exit) { fprintf(stderr, "\nven_soc: guest exit(%d) after %llu syscalls\n",
+                                         r.exit_code, (unsigned long long)serviced); break; }
+        }
+
         // ---- F3 interrupt pump (the PS *is* the PIC + keyboard) ---------------
         if (g_dos) {
             uint32_t seam, desired;
@@ -405,6 +487,18 @@ int main(int argc, char **argv) {
         // (no busy-spin throttle here; F3 sleeps on the GIC irq via UIO instead.)
     }
     if (g_dos) { if (g_dac_dirty) export_dac(); hid_kbd_close(); }
+    if (g_quake) {
+        if (g_video_fd >= 0) {                           // flush any tail frames + close
+            static uint8_t vbuf[65536]; uint32_t got;
+            while ((got = ven_quake_video_drain(vbuf, sizeof(vbuf))) > 0)
+                if (write(g_video_fd, vbuf, got) != (ssize_t)got) { /* best effort */ }
+            close(g_video_fd);
+        }
+        fprintf(stderr, "ven_soc: quake done — %llu syscalls, %llu P5Q1 bytes captured%s\n",
+                (unsigned long long)ven_quake_syscalls(),
+                (unsigned long long)ven_quake_video_total(),
+                g_video_out ? "" : " (no --video; not written)");
+    }
     ven_shutdown_quiesce();        // leave the PL→PS AXI clean for xmutil unloadapp
     return 0;
 }
