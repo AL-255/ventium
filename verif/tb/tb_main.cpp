@@ -42,6 +42,23 @@
 #include "win95_cosim.h"
 #include "syscall_emu.h"   // M14 free-run syscall emulator
 
+#ifdef VEN_DOS_MODELS
+// Faithful FreeDOS repro: the SAME PS-side peripheral C models ven_soc_app drives
+// on the KV260, wired to tb_main's io_* bridge so SeaBIOS POST follows the board's
+// EXACT path through L1/AXI — to pinpoint a board-only memory-path freeze in sim.
+// Declared exactly like tb_soc.cpp (Verilator builds the .c models as C++).
+#include "ven_periph.h"
+ven_periph_t* ven_i8042_new(void);
+ven_periph_t* ven_pic_new(void);
+ven_periph_t* ven_vgaregs_new(void);
+ven_periph_t* ven_pit_new(void);
+ven_periph_t* ven_rtc_new(void);
+ven_periph_t* ven_ide_new(const char* disk_path);
+void          ven_pic_set_irq(ven_periph_t*, int irq, int level);
+uint8_t       ven_pic_peek_vector(ven_periph_t*);
+uint8_t       ven_pic_intack(ven_periph_t*);
+#endif
+
 #include <vector>
 #include <memory>
 
@@ -87,6 +104,8 @@ struct Args {
     // OUT bytes are printed so SAAAZ-style output is visible; lets us reproduce the
     // deployed-config CALL/RET failure in sim through the L1AXI+REMAP path.
     bool     cosim       = false;
+    bool     dos         = false;        // VEN_DOS_MODELS: wire the PS peripheral C models
+    std::string disk;                    // --disk <img> for the IDE C model (--dos)
     // M2S.5 SMM structural self-check: after the run, dump the SMM-relevant
     // physical memory (the handler sentinels @ 0x2000.. AND the P5 save-state
     // map @ SMBASE+0xFE00..) to this JSON file so the RTL-only self-check can
@@ -188,6 +207,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--l1-axi")     a.l1_axi     = true;   // P1-1 bus_mode=2
         else if (k == "--system")     a.system     = true;
         else if (k == "--cosim")    { a.cosim = true; a.system = true; }   // P2 repro
+        else if (k == "--dos")      { a.dos = true; a.cosim = true; a.system = true; }
+        else if (k == "--disk")       a.disk       = need("--disk");
         else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
         else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
         else if (k == "--quake-image") a.quake_image = need("--quake-image");
@@ -357,6 +378,39 @@ int main(int argc, char** argv) {
 
     // P2 repro: plain -bios co-sim (no win95 golden) — execute IN/OUT via the io bus.
     if (args.cosim) cosim_mode = true;
+
+#ifdef VEN_DOS_MODELS
+    // --dos: instantiate the PS peripheral C models (same code ven_soc_app runs on
+    // the KV260) so SeaBIOS POST gets faithful device responses + follows the board's
+    // exact path through L1/AXI. Lets a board-only memory-path freeze be found in sim.
+    ven_periph_t *g_pit=nullptr,*g_rtc=nullptr,*g_ide=nullptr,*g_pic=nullptr,
+                 *g_i8042=nullptr,*g_vga=nullptr;
+    if (args.dos) {
+        g_pit=ven_pit_new(); g_rtc=ven_rtc_new(); g_pic=ven_pic_new();
+        g_i8042=ven_i8042_new(); g_vga=ven_vgaregs_new();
+        g_ide = args.disk.empty() ? nullptr : ven_ide_new(args.disk.c_str());
+        std::fprintf(stderr, "tb: --dos PS peripheral C models wired (disk=%s)\n",
+                     args.disk.empty() ? "(none)" : args.disk.c_str());
+    }
+    auto dos_model_of = [&](uint16_t port) -> ven_periph_t* {
+        if (!args.dos) return nullptr;
+        if (port==0x60 || port==0x64) return g_i8042;
+        if (port==0x20||port==0x21||port==0xA0||port==0xA1||port==0x4D0||port==0x4D1) return g_pic;
+        if (port>=0x3B0 && port<=0x3DF) return g_vga;
+        if (port>=0x40 && port<=0x43) return g_pit;
+        if (port==0x70 || port==0x71) return g_rtc;
+        if ((port>=0x1F0 && port<=0x1F7) || port==0x3F6) return g_ide;
+        return nullptr;
+    };
+    // IRQ0 (timer) pump — CYCLE-paced (deterministic; advances during HLT, unlike the
+    // board's wall-clock pacing, so a STI;HLT timer wait wakes). Mirrors ven_soc_app's
+    // PIC pump: raise IRQ0 every IRQ0_PERIOD cycles, present the PIC's vector on the
+    // core's intr seam ONLY once the PIC is programmed (vector>=0x08), intack on inta.
+    const uint64_t DOS_IRQ0_PERIOD =
+        std::getenv("VEN_IRQ0_PERIOD") ? (uint64_t)strtoull(std::getenv("VEN_IRQ0_PERIOD"),0,0) : 8000;
+    uint64_t dos_irq0_next = DOS_IRQ0_PERIOD;
+    int      dos_pit_pending = 0;
+#endif
 
     // ---- trace writer (opens file + writes header) ------------------------
     // --no-trace leaves g_trace == nullptr: the per-retire DPI early-returns
@@ -541,6 +595,11 @@ int main(int argc, char** argv) {
             // OUT: the CPU drives the value out; we consume it. The isa-debug-exit
             // port 0xf4 stops the run (matches qemu-system -device isa-debug-exit).
             if (port == 0xf4) io_exit = true;
+#ifdef VEN_DOS_MODELS
+            else if (ven_periph_t* m = dos_model_of((uint16_t)port)) {
+                m->io_write(m, (uint16_t)port, (uint8_t)(top->io_wdata & 0xff));
+            }
+#endif
             else if (args.cosim && (port == 0x3f8 || port == 0xe9)) {
                 std::putchar((int)(top->io_wdata & 0xff)); std::fflush(stdout);
             }
@@ -554,6 +613,14 @@ int main(int argc, char** argv) {
             // return OPEN BUS 0xFF.. — a real PC (and qemu) float an unmodeled port
             // high, and SeaBIOS branches on 0xFF; returning 0 derails POST.
             uint32_t v = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
+#ifdef VEN_DOS_MODELS
+            if (ven_periph_t* m = dos_model_of((uint16_t)port)) {
+                v = (size >= 2 && m->io_read16) ? m->io_read16(m, (uint16_t)port)
+                                                : m->io_read(m, (uint16_t)port);
+            } else if (args.dos && port == 0x3fd) { v = 0x60;   // COM1 LSR: THR+TSR empty
+            } else if (args.dos && port == 0x3f8) { v = 0x00;   // COM1 RBR: no input byte
+            } else
+#endif
             if (devin_idx < devins.size()) {
                 const ventium::DevIn& d = devins[devin_idx];
                 if (d.port != port || d.size != size) {
@@ -769,6 +836,18 @@ int main(int argc, char** argv) {
     while (true) {
         uint64_t before = trace.retired();
 
+#ifdef VEN_DOS_MODELS
+        // F3 IRQ pump: present the PIC's timer vector on the core's intr seam.
+        if (args.dos) {
+            if (cycles >= dos_irq0_next) { dos_pit_pending = 1; dos_irq0_next = cycles + DOS_IRQ0_PERIOD; }
+            ven_pic_set_irq(g_pic, 0, dos_pit_pending);
+            uint8_t pv = ven_pic_peek_vector(g_pic);
+            top->soc_en = 1;
+            if (g_pic->irq(g_pic) && pv >= 0x08) { top->intr = 1; top->inta_vector = pv; }
+            else                                 { top->intr = 0; }
+        }
+#endif
+
         // -- clk low phase: combinational settle + serve bus --
         top->clk = 0;
 #ifdef VEN_L1_AXI
@@ -840,6 +919,15 @@ int main(int argc, char** argv) {
         service_io();
         top->eval();
         dump(half++);
+
+#ifdef VEN_DOS_MODELS
+        // INTA boundary: the core took our injected vector this clock -> intack the
+        // PIC model (ISR set / IRR clear); clear IRQ0's pending if it was the timer.
+        if (args.dos && top->inta) {
+            uint8_t vec = ven_pic_intack(g_pic);
+            if (vec == 0x08) dos_pit_pending = 0;
+        }
+#endif
 
         // M7.1: a proxied int-0x80 has been latched by the core this clock —
         // advance to the next golden sys_call effect (strict order).

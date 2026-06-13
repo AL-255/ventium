@@ -142,6 +142,20 @@ l1axi_kv_full:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (deployed linux_40 config): $(CURDIR)/obj_dir_l1axi_kvf/$(EXE)"
 
+# ---- l1axi_kv_dos: l1axi_kv_full + the PS peripheral C models wired into the io
+# bridge (--dos). A FAITHFUL FreeDOS repro — SeaBIOS POST gets the SAME device
+# responses ven_soc_app gives on the KV260, so it follows the board's exact path
+# through L1/AXI and a board-only memory-path freeze reproduces in sim (where the PC
+# IS visible). Links sw/ps_periph/*.c; VEN_DOS_MODELS arms the routing in tb_main.
+DOS_PERIPH := $(wildcard $(VENTIUM_ROOT)/sw/ps_periph/*.c)
+.PHONY: l1axi_kv_dos
+l1axi_kv_dos:
+	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir obj_dir_l1axi_kvdos \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)
+	@echo "built (deployed config + PS DOS models): $(CURDIR)/obj_dir_l1axi_kvdos/$(EXE)"
+
 # ---- l1axi_cdc: P1-3 dual-clock build (+VEN_L1_AXI +VEN_AXI_CDC) -------------
 # Same bus_mode=2 path, but the L1<->AXI backing port crosses through ven_axi_cdc
 # (the async-FIFO CDC bridge). In the cosim core_clk==axi_clk==top->clk, so this
