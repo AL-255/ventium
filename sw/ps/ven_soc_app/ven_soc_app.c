@@ -175,6 +175,7 @@ static int service_out(uint16_t port, uint32_t val) {
     }
     switch (port) {
         case 0x00E9:                       // bochs/qemu debug console
+        case 0x0402:                       // SeaBIOS debug port (CONFIG_DEBUG_IO_PORT) — POST log
         case 0x03F8: putchar((int)(val & 0xFF)); fflush(stdout); return 0;
         case 0x00F4: return 1;             // isa-debug-exit -> stop the run
         default:     return 0;             // ignore unmodeled OUTs (F3 fills these in)
