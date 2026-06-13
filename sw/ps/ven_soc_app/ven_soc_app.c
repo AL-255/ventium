@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include "ven_soc_regs.h"
 #include "hid_kbd.h"
@@ -118,6 +119,33 @@ static void export_dac(void) {
     close(fd);
 }
 
+// VGA text-buffer snapshot: decode the 80x25 color-text page at core-physical
+// 0xB8000 (carveout+0xB8000; ven_l1d is write-through so DDR is current). Each
+// cell is {char, attr}; we print the chars. SIGTERM/SIGINT (e.g. from `timeout`)
+// dumps the live console then exits — the only way to SEE the SeaBIOS/FreeDOS
+// screen on a headless board without a VGABIOS-driven framebuffer path. Async-
+// signal use is best-effort diagnostic (g_ddr is a stable mmap).
+static void vga_textdump(void) {
+    if (!g_ddr) return;
+    const volatile uint8_t *t = g_ddr + 0x000B8000;
+    fprintf(stderr, "\n===== VGA text @0xB8000 (80x25) =====\n");
+    int any = 0;
+    for (int row = 0; row < 25; row++) {
+        char line[81];
+        for (int col = 0; col < 80; col++) {
+            uint8_t c = t[(row*80 + col)*2];
+            line[col] = (c >= 32 && c < 127) ? (char)c : ' ';
+        }
+        line[80] = 0;
+        int n = 80; while (n > 0 && line[n-1] == ' ') line[--n] = 0;
+        if (n) { fprintf(stderr, "%2d|%s\n", row, line); any = 1; }
+    }
+    if (!any) fprintf(stderr, "(text buffer all-blank)\n");
+    fprintf(stderr, "=====================================\n");
+    fflush(stderr);
+}
+static void on_term(int sig) { (void)sig; vga_textdump(); _exit(0); }
+
 // --- console / device emulation (the part that grows for F3/F4) --------------
 // F2: a tiny UART. OUT to 0x3F8 (COM1 THR) or 0xE9 (debug) -> stdout. IN from the
 // COM1 LSR (0x3FD) returns "THR empty, data ready" so a UART-poll loop proceeds.
@@ -168,7 +196,7 @@ static uint32_t service_in(uint16_t port, uint8_t size) {
 int main(int argc, char **argv) {
     // positional args exactly as F2 (<program.bin> [load_off] [entry] [esp]);
     // flags may appear anywhere: --sys, --dos, --kbd <evdev-path>.
-    const char *img = 0, *kbd_path = 0, *bios = 0, *disk = 0;
+    const char *img = 0, *kbd_path = 0, *bios = 0, *disk = 0, *vgabios = 0;
     uint32_t pos[3] = {0x0, 0x0, 0x000FFFF0};    // load_off, entry, esp
     int      npos = 0, sysmode = 0, i;
     for (i = 1; i < argc; i++) {
@@ -176,6 +204,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--dos")) g_dos   = 1;
         else if (!strcmp(argv[i], "--kbd")  && i + 1 < argc) kbd_path = argv[++i];
         else if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];  // SeaBIOS image
+        else if (!strcmp(argv[i], "--vgabios") && i + 1 < argc) vgabios = argv[++i]; // VGA option ROM @0xC0000
         else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk = argv[++i];  // IDE disk image
         else if (!img)      img = argv[i];
         else if (npos < 3)  pos[npos++] = strtoul(argv[i], 0, 0);
@@ -193,6 +222,7 @@ int main(int argc, char **argv) {
     g_reg = mmap(0, VEN_HPM0_SIZE,     PROT_READ|PROT_WRITE, MAP_SHARED, fd, VEN_HPM0_BASE);
     g_ddr = mmap(0, VEN_CARVEOUT_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fd, VEN_CARVEOUT_BASE);
     if (g_reg == MAP_FAILED || g_ddr == MAP_FAILED) { perror("mmap"); return 1; }
+    signal(SIGTERM, on_term); signal(SIGINT, on_term);   // dump the VGA screen on stop
 
     uint32_t ident = rd(VEN_R_IDENT);
     if (ident != VEN_IDENT_MAGIC) { fprintf(stderr, "bad IDENT 0x%08x (slave not present?)\n", ident); return 1; }
@@ -215,6 +245,22 @@ int main(int argc, char **argv) {
         __sync_synchronize();
         fprintf(stderr, "ven_soc: staged %zu-byte BIOS at 0xE0000 + 0x0FFE0000 (4G alias); disk=%s\n",
                 bn, disk ? disk : "(none)");
+        // VGA option ROM @ 0xC0000: SeaBIOS scans 0xC0000 for a 0x55AA option ROM
+        // during POST and far-calls its init -> installs INT 10h video so SeaBIOS +
+        // FreeDOS console text renders into the 0xB8000 text buffer (visible via the
+        // ven_vgaregs model + ven_fb_vnc). Without it INT 10h is a no-op and the
+        // screen stays blank even though the guest boots. Staged low only (the ROM
+        // scan reads physical 0xC0000, not the 4G shadow).
+        if (vgabios) {
+            FILE *vf = fopen(vgabios, "rb");
+            if (!vf) { perror(vgabios); return 1; }
+            static uint8_t vbuf[131072];         // VGA option ROM (<=128 KiB) at 0xC0000
+            size_t vn = fread(vbuf, 1, sizeof(vbuf), vf);
+            fclose(vf);
+            memcpy((void *)(g_ddr + 0x000C0000), vbuf, vn);
+            __sync_synchronize();
+            fprintf(stderr, "ven_soc: staged %zu-byte VGA BIOS at 0xC0000\n", vn);
+        }
     } else {
         FILE *f = fopen(img, "rb");
         if (!f) { perror(img); return 1; }
