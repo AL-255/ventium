@@ -508,12 +508,21 @@ module ventium_top
   // it the PL emits raw low addresses on HPC0, outside the declared segment.
 `ifdef VEN_KV260_SOC
   localparam logic [39:0] L1AXI_REMAP_BASE = 40'h0_4000_0000;
+  // 256 MiB-wrap ADDR_MASK: folds the whole x86 phys space (incl. the top-of-4G BIOS
+  // shadow 0xFFFE_0000-0xFFFF_FFFF that SeaBIOS's 32-bit POST runs from) into the
+  // 256 MiB carveout — phys 0xFFFE_0000 & 0x0FFF_FFFF = 0x0FFE_0000 -> DDR 0x4FFE_0000.
+  // The PS stages a 2nd BIOS copy there (carveout off 0x0FFE_0000). Lets the PROVEN
+  // stock SeaBIOS+FreeDOS stack boot on the board without the 4G alias faulting (all
+  // FreeDOS accesses are < 256 MiB, so the wrap only affects the BIOS shadow). Cosim/
+  // L1AXI-verify builds (no KV260_SOC) keep the full 0xFFFFFFFF mask, unchanged.
+  localparam logic [31:0] L1AXI_ADDR_MASK = 32'h0FFF_FFFF;
 `else
   localparam logic [39:0] L1AXI_REMAP_BASE = 40'h0;
+  localparam logic [31:0] L1AXI_ADDR_MASK  = 32'hFFFF_FFFF;
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
-  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(32'hFFFF_FFFF)) u_l1axi (
+  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all),
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
