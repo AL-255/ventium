@@ -81,6 +81,12 @@ struct Args {
     // matching qemu-system-i386 -bios; the reset vector F000:FFF0 = 0x000FFFF0
     // then lands on the image's last 16 bytes.
     bool     system     = false;
+    // P2 repro: --cosim enables the port-I/O co-sim bus (cosim_en=1) for a plain
+    // -bios run (no win95 golden) — services OUT/IN so a real-mode test image
+    // (e.g. calltest) executes its COM1 writes + isa-debug-exit. COM1 (0x3F8/0xE9)
+    // OUT bytes are printed so SAAAZ-style output is visible; lets us reproduce the
+    // deployed-config CALL/RET failure in sim through the L1AXI+REMAP path.
+    bool     cosim       = false;
     // M2S.5 SMM structural self-check: after the run, dump the SMM-relevant
     // physical memory (the handler sentinels @ 0x2000.. AND the P5 save-state
     // map @ SMBASE+0xFE00..) to this JSON file so the RTL-only self-check can
@@ -181,6 +187,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--bus-mode")   a.bus_mode   = true;   // M5B-int
         else if (k == "--l1-axi")     a.l1_axi     = true;   // P1-1 bus_mode=2
         else if (k == "--system")     a.system     = true;
+        else if (k == "--cosim")    { a.cosim = true; a.system = true; }   // P2 repro
         else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
         else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
         else if (k == "--quake-image") a.quake_image = need("--quake-image");
@@ -330,6 +337,9 @@ int main(int argc, char** argv) {
             devin_had_intr ? " [WARNING: intr in prefix — injection deferred!]" : "");
     }
 
+    // P2 repro: plain -bios co-sim (no win95 golden) — execute IN/OUT via the io bus.
+    if (args.cosim) cosim_mode = true;
+
     // ---- trace writer (opens file + writes header) ------------------------
     // --no-trace leaves g_trace == nullptr: the per-retire DPI early-returns
     // before formatting/writing any record (see dpi_retire.cpp), a large
@@ -406,44 +416,61 @@ int main(int argc, char** argv) {
     // #34: AXI_STUCK=1 freezes the slave (a dead DDR/bridge) to exercise the master
     // watchdog -> bus_err -> the core's S_HALT override (cpu_hung), end-to-end.
     const bool axi_stuck = (std::getenv("AXI_STUCK") != nullptr);
+    // P2 repro: AXI_RLAT/AXI_WLAT add read/write response latency (wait states) so the
+    // sim slave behaves like the real smartconnect + PS DDR (multi-cycle, not immediate)
+    // — exposes any L1/AXI fetch-redirect race the immediate-response slave masks.
+    const uint32_t AXI_RLAT = std::getenv("AXI_RLAT") ? (uint32_t)atoi(std::getenv("AXI_RLAT")) : 0;
+    const uint32_t AXI_WLAT = std::getenv("AXI_WLAT") ? (uint32_t)atoi(std::getenv("AXI_WLAT")) : 0;
+    uint32_t axr_lat = 0, axw_lat = 0;   // remaining wait cycles before R / B
+    // P2 repro: under VEN_KV260_SOC the L1/AXI master remaps x86 phys into the DDR
+    // carveout (m_axi addr = 0x4000_0000 + phys, ventium_top L1AXI_REMAP_BASE). The
+    // MemModel is x86-phys-indexed, so subtract the carveout base off every AXI addr.
+#ifdef VEN_KV260_SOC
+    const uint32_t AXI_REMAP = 0x40000000u;
+#else
+    const uint32_t AXI_REMAP = 0u;
+#endif
     auto axi_drive = [&]() {
         if (axi_stuck) {  // never ready/valid
             top->m_axi_arready=0; top->m_axi_rvalid=0; top->m_axi_rdata=0; top->m_axi_rlast=0;
             top->m_axi_rid=0; top->m_axi_rresp=0; top->m_axi_awready=0; top->m_axi_wready=0;
             top->m_axi_bvalid=0; top->m_axi_bid=0; top->m_axi_bresp=0; return;
         }
+        const bool r_rdy = (axr==1) && (axr_lat==0);   // data ready only after RLAT waits
+        const bool b_rdy = (axw==2) && (axw_lat==0);
         top->m_axi_arready = (axr==0);
-        top->m_axi_rvalid  = (axr==1);
-        top->m_axi_rdata   = (axr==1) ? mem.read32(axr_addr) : 0u;
-        top->m_axi_rlast   = (axr==1) && (axr_cnt==0);
+        top->m_axi_rvalid  = r_rdy;
+        top->m_axi_rdata   = r_rdy ? mem.read32(axr_addr) : 0u;
+        top->m_axi_rlast   = r_rdy && (axr_cnt==0);
         top->m_axi_rid = 0; top->m_axi_rresp = 0;
         top->m_axi_awready = (axw==0);
         top->m_axi_wready  = (axw==1);
-        top->m_axi_bvalid  = (axw==2);
+        top->m_axi_bvalid  = b_rdy;
         top->m_axi_bid = 0; top->m_axi_bresp = 0;
     };
     auto axi_capture = [&]() {
         if (axi_stuck) { axhs = {}; return; }   // frozen: no handshakes
         axhs.ar = (axr==0) && (bool)top->m_axi_arvalid;
-        axhs.r  = (axr==1) && (bool)top->m_axi_rready;
+        axhs.r  = (axr==1) && (axr_lat==0) && (bool)top->m_axi_rready;
         axhs.aw = (axw==0) && (bool)top->m_axi_awvalid;
         axhs.w  = (axw==1) && (bool)top->m_axi_wvalid;
-        axhs.b  = (axw==2) && (bool)top->m_axi_bready;
-        axhs.araddr = (uint32_t)top->m_axi_araddr; axhs.arlen = (uint32_t)top->m_axi_arlen;
-        axhs.awaddr = (uint32_t)top->m_axi_awaddr;
+        axhs.b  = (axw==2) && (axw_lat==0) && (bool)top->m_axi_bready;
+        axhs.araddr = (uint32_t)top->m_axi_araddr - AXI_REMAP; axhs.arlen = (uint32_t)top->m_axi_arlen;
+        axhs.awaddr = (uint32_t)top->m_axi_awaddr - AXI_REMAP;
         axhs.wdata  = (uint32_t)top->m_axi_wdata;  axhs.wstrb = (uint32_t)top->m_axi_wstrb;
     };
     auto axi_advance = [&]() {
-        if (!top->rst_n) { axr=0; axw=0; return; }
-        if (axr==0) { if (axhs.ar) { axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr=1; } }
-        else        { if (axhs.r)  { if (axr_cnt==0) axr=0; else { axr_cnt--; axr_addr+=4; } } }
+        if (!top->rst_n) { axr=0; axw=0; axr_lat=0; axw_lat=0; return; }
+        if (axr==0) { if (axhs.ar) { axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr=1; axr_lat=AXI_RLAT; } }
+        else        { if (axr_lat>0) axr_lat--;
+                      else if (axhs.r)  { if (axr_cnt==0) axr=0; else { axr_cnt--; axr_addr+=4; axr_lat=AXI_RLAT; } } }
         if (axw==0) { if (axhs.aw) { axw_addr=axhs.awaddr; axw=1; } }
         else if (axw==1) { if (axhs.w) {
             uint32_t old=mem.read32(axw_addr), nw=0;
             for (int b=0;b<4;b++){ uint32_t by=((axhs.wstrb>>b)&1)?((axhs.wdata>>(b*8))&0xff)
                                                                   :((old>>(b*8))&0xff); nw|=by<<(b*8); }
-            mem.write32(axw_addr,nw); axw=2; } }
-        else { if (axhs.b) axw=0; }
+            mem.write32(axw_addr,nw); axw=2; axw_lat=AXI_WLAT; } }
+        else { if (axw_lat>0) axw_lat--; else if (axhs.b) axw=0; }
     };
 #endif
 
@@ -488,6 +515,9 @@ int main(int argc, char** argv) {
             // OUT: the CPU drives the value out; we consume it. The isa-debug-exit
             // port 0xf4 stops the run (matches qemu-system -device isa-debug-exit).
             if (port == 0xf4) io_exit = true;
+            else if (args.cosim && (port == 0x3f8 || port == 0xe9)) {
+                std::putchar((int)(top->io_wdata & 0xff)); std::fflush(stdout);
+            }
             top->io_rdata = 0;
             top->io_ack   = 1;
             io_pending_in = false;
@@ -645,6 +675,13 @@ int main(int argc, char** argv) {
     top->init_esp  = args.init_esp;
     top->boot_mode  = args.system ? 1 : 0;  // M2S.1: system cold reset
     top->cycle_mode = args.cycle ? 1 : 0;   // M4: enable dual U/V issue
+#ifdef VEN_KV260_SOC
+    // P2 repro: KV260 build adds the PS->core interrupt-injection ports. calltest
+    // takes no interrupts, so drive them inert (soc_en=0 keeps the divert dead).
+    top->soc_en      = 0;
+    top->intr        = 0;
+    top->inta_vector = 0;
+#endif
     top->bus_mode   = args.bus_mode ? 1 : 0; // M5B-int: route mem via the bus subsystem
 #ifdef VEN_L1_AXI
     top->l1axi_en   = args.l1_axi ? 1 : 0;   // P1-1: route mem via ventium_l1_axi (mode 2)

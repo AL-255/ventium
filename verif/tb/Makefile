@@ -118,6 +118,30 @@ l1axi:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/obj_dir_l1axi/$(EXE)"
 
+# ---- l1axi_kv: the DEPLOYED KV260 memory config (+VEN_L1_AXI +VEN_KV260_SOC) ---
+# Same as l1axi but REMAP_BASE=0x4000_0000 (the carveout) — reproduces the
+# deployed-bitstream CALL/RET / interrupt-delivery behavior the on-board build hits.
+.PHONY: l1axi_kv
+l1axi_kv:
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_KV260_SOC \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir obj_dir_l1axi_kv \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (L1+AXI + KV260 REMAP): $(CURDIR)/obj_dir_l1axi_kv/$(EXE)"
+
+# ---- l1axi_kv_full: the EXACT deployed linux_40 define set ------------------
+# L1AXI + KV260 REMAP + ALL fetch/cache/FP features (FE_PIPE, UOPCACHE, BTB_PIPE,
+# IC_BRAM, CACHE_HALF, FP_PIPE/2, SRT/IDIV/BCD_ITER). Reproduces the on-board build.
+KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
+  +define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_CACHE_HALF \
+  +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
+  +define+VEN_BCD_ITER
+.PHONY: l1axi_kv_full
+l1axi_kv_full:
+	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir obj_dir_l1axi_kvf \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (deployed linux_40 config): $(CURDIR)/obj_dir_l1axi_kvf/$(EXE)"
+
 # ---- l1axi_cdc: P1-3 dual-clock build (+VEN_L1_AXI +VEN_AXI_CDC) -------------
 # Same bus_mode=2 path, but the L1<->AXI backing port crosses through ven_axi_cdc
 # (the async-FIFO CDC bridge). In the cosim core_clk==axi_clk==top->clk, so this

@@ -64,8 +64,13 @@ set_property file_type {Verilog Header} [get_files *.svh]
 set_property include_dirs [list $ROOT/rtl/core] [current_fileset]
 # uop-cache + half-cache + 2-stage FP commit (routable, 65.3 MHz OOC) + SoC seams.
 set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
-    VEN_FP_PIPE VEN_FP_PIPE2 VEN_BTB_PIPE VEN_IC_BRAM VEN_UOPCACHE VEN_CACHE_HALF \
+    VEN_FP_PIPE VEN_FP_PIPE2 VEN_IC_BRAM VEN_CACHE_HALF \
     VEN_L1_AXI VEN_KV260_SOC}
+# Fetch-path feature defines are env-controllable (default ON, matching linux_40)
+# so a CALL/RET / fetch-redirect synth bug can be bisected by dropping one at a time:
+#   BTB_PIPE=0 (pipelined BTB), UOPCACHE=0 (micro-op cache), FE_PIPE=1 (fetch pipe).
+if {[envor BTB_PIPE 1]} { lappend DEFS VEN_BTB_PIPE }
+if {[envor UOPCACHE 1]} { lappend DEFS VEN_UOPCACHE }
 if {$FEP} { lappend DEFS VEN_FE_PIPE }
 set_property verilog_define $DEFS [current_fileset]
 update_compile_order -fileset sources_1
