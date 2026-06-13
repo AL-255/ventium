@@ -421,7 +421,9 @@ int main(int argc, char **argv) {
             uint32_t nr  = rd(VEN_R_SYS_NR);
             uint32_t ebx = rd(VEN_R_SYS_ARG0), ecx = rd(VEN_R_SYS_ARG1), edx = rd(VEN_R_SYS_ARG2);
             uint32_t esi = rd(VEN_R_SYS_ARG3), edi = rd(VEN_R_SYS_ARG4), ebp = rd(VEN_R_SYS_ARG5);
-            uint64_t cyc = ((uint64_t)rd(VEN_R_RETIRE_HI) << 32) | rd(VEN_R_RETIRE_LO);
+            // torn-read-free: read RETIRE_LO FIRST (it snapshots HI in the RTL), then HI.
+            uint32_t rlo = rd(VEN_R_RETIRE_LO);
+            uint64_t cyc = ((uint64_t)rd(VEN_R_RETIRE_HI) << 32) | rlo;
             struct ven_sys_result r;
             ven_quake_service(nr, ebx, ecx, edx, esi, edi, ebp, cyc, &r);
             __sync_synchronize();                            // make the DDR writes visible
