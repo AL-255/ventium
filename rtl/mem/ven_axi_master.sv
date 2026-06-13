@@ -139,12 +139,24 @@ module ven_axi_master #(
   logic              wd_err_w;     // sticky: a WRITE watchdog timeout aborted (write-FF driven)
   logic [15:0]       r_wd, w_wd;   // #34 read/write watchdog cycle counters (since last progress)
 
-  // ---- WRITE FSM (single-beat write-through, decoupled AW/W) -----------------
+  // ---- WRITE FSM (write-through, decoupled AW/W; up to 2 word beats) ----------
+  // A core store is byte-addressed: the byte at m_addr is lane 0 of m_wstrb/m_wdata.
+  // Mapped onto a 32-bit AXI bus it occupies lanes [boff .. boff+nbytes-1]; when that
+  // range spills past lane 3 (an unaligned 16/32-bit store, e.g. a dword to ..0x..2)
+  // the store straddles TWO 32-bit words and must be issued as TWO single-beat AXI
+  // writes (word A = m_addr&~3, word B = +4). The core is acked only after BOTH land,
+  // so ven_l1d's c_ack (= m_ack) completes the store exactly once. SeaBIOS POST does
+  // these unaligned stores; the byte-addressed sim BFM masked the bug on silicon.
   typedef enum logic [1:0] { W_IDLE, W_RUN, W_RESP } wstate_e;
   wstate_e          wst;
-  logic [ADDR_W-1:0] awaddr_q;
-  logic [31:0]       wdata_q;
-  logic [3:0]        wstrb_q;
+  logic [ADDR_W-1:0] awaddr_q;       // current beat's word-aligned AXI address
+  logic [31:0]       wdata_q;        // current beat's data (lane-shifted)
+  logic [3:0]        wstrb_q;        // current beat's strobe (lane-shifted)
+  logic [ADDR_W-1:0] awaddr2_q;      // beat B address (m_addr&~3 + 4)
+  logic [31:0]       wdata2_q;       // beat B data  (high 32 of the 64-bit shift)
+  logic [3:0]        wstrb2_q;       // beat B strobe (high 4  of the 8-bit  shift)
+  logic              xword_q;        // 1 = the store straddles a word -> need beat B
+  logic              wbeat;          // 0 = beat A in flight, 1 = beat B in flight
   logic              aw_done, w_done;  // independent handshake latches
 
   // ---- AXI combinational drive ----------------------------------------------
@@ -187,8 +199,11 @@ module ven_axi_master #(
     // override abandons the stuck access + halts (the PS then resets). No protocol-
     // violating abort, no drain.
     m_rdata = m_axi_rdata;
+    // ack the core write only after the FINAL beat (beat A of an aligned store, or
+    // beat B of a straddling one) — a per-beat ack would complete the core's store
+    // after only the first word landed.
     m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready) ||
-              ((wst == W_RESP) && m_axi_bvalid);
+              ((wst == W_RESP) && m_axi_bvalid && (!xword_q || wbeat));
     bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err;  // #34 sticky fatal-fault to core
   end
 
@@ -231,24 +246,36 @@ module ven_axi_master #(
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       wst <= W_IDLE; awaddr_q <= '0; wdata_q <= 32'd0; wstrb_q <= 4'd0;
+      awaddr2_q <= '0; wdata2_q <= 32'd0; wstrb2_q <= 4'd0; xword_q <= 1'b0; wbeat <= 1'b0;
       aw_done <= 1'b0; w_done <= 1'b0; bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
       unique case (wst)
         W_IDLE: if (m_req && m_we) begin
                   // BYTE-LANE ALIGN (P2 fix): the core's mem port is byte-addressed —
                   // the byte at m_addr sits in LANE 0 of m_wdata/m_wstrb (symmetric with
-                  // the read window c_rdata = line[boff*8 +: 32]). But a 32-bit AXI write
-                  // places byte lane b at the WORD-ALIGNED address + b, so the master MUST
-                  // word-align awaddr and shift the data/strobes left by m_addr[1:0] bytes
+                  // the read window c_rdata = line[boff*8 +: 32]). A 32-bit AXI write
+                  // places byte lane b at the WORD-ALIGNED address + b, so the master
+                  // word-aligns awaddr and shifts data/strobes left by m_addr[1:0] bytes
                   // onto the correct lanes. Forwarding the raw byte address + lane-0 data
-                  // wrote the WRONG DDR bytes on silicon (a sub-word write to a non-word-
-                  // aligned byte address) — the stack / CALL-RET / IVT coherence failure;
-                  // the byte-addressed sim BFM masked it. (Within-32b-word writes; the core
-                  // does not emit a write whose bytes cross a 32-bit word for this path —
-                  // SP is even-aligned, and the no_xword assertion below guards it.)
-                  awaddr_q <= remap({m_addr[31:2], 2'b00});
-                  wdata_q  <= m_wdata << {m_addr[1:0], 3'b000};   // << boff*8 bits
-                  wstrb_q  <= 4'(m_wstrb << m_addr[1:0]);         // << boff bytes
+                  // wrote the WRONG DDR bytes on silicon (the stack / CALL-RET / IVT
+                  // coherence failure); the byte-addressed sim BFM masked it.
+                  //
+                  // 2-BEAT SPLIT (P2b): shift the store into a 64-bit / 8-bit lane field.
+                  // The low 32b/4b are beat A (word m_addr&~3); if any strobe spilled into
+                  // the high 4b the store straddles the next word, captured as beat B
+                  // (word +4). SeaBIOS POST emits such unaligned (16/32-bit) stores.
+                  begin
+                    automatic logic [63:0] dsh = {32'd0, m_wdata} << {m_addr[1:0], 3'b000};
+                    automatic logic [7:0]  ssh = {4'd0, m_wstrb} << m_addr[1:0];
+                    awaddr_q  <= remap({m_addr[31:2], 2'b00});
+                    wdata_q   <= dsh[31:0];
+                    wstrb_q   <= ssh[3:0];
+                    awaddr2_q <= remap({m_addr[31:2], 2'b00} + 32'd4);
+                    wdata2_q  <= dsh[63:32];
+                    wstrb2_q  <= ssh[7:4];
+                    xword_q   <= (ssh[7:4] != 4'd0);
+                  end
+                  wbeat    <= 1'b0;
                   aw_done  <= 1'b0;    w_done  <= 1'b0;  bresp_err <= 1'b0; w_wd <= 16'd0;
                   wst <= W_RUN;
                 end
@@ -264,7 +291,14 @@ module ven_axi_master #(
         end
         W_RESP: if (m_axi_bvalid) begin           // m_ack pulsed (comb) this cycle
                   if (m_axi_bresp != 2'b00) bresp_err <= 1'b1;  // sticky non-OKAY BRESP
-                  wst <= W_IDLE;
+                  if (!wbeat && xword_q) begin
+                    // straddling store: beat A landed -> issue beat B (next word).
+                    awaddr_q <= awaddr2_q; wdata_q <= wdata2_q; wstrb_q <= wstrb2_q;
+                    wbeat <= 1'b1; aw_done <= 1'b0; w_done <= 1'b0; w_wd <= 16'd0;
+                    wst <= W_RUN;
+                  end else begin
+                    wst <= W_IDLE;
+                  end
                 end
                 else if (w_wd >= 16'(WATCHDOG)) wd_err_w <= 1'b1;  // #34 stall watchdog
                 else w_wd <= w_wd + 16'd1;
@@ -293,12 +327,11 @@ module ven_axi_master #(
   // no AR while a write is outstanding (single-outstanding in-order guarantee).
   no_rw_overlap: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       !(m_axi_arvalid && (wst != W_IDLE)));
-  // P2 byte-lane fix is within-32b-word only: a write whose strobed bytes, shifted by
-  // the byte offset m_addr[1:0], spill past lane 3 would need a 2-beat split (NOT done).
-  // The core never emits such a write on the L1/AXI path (SP even-aligned; sub-word
-  // accesses stay within a word). Fire if that invariant is ever violated.
-  no_xword_wr: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      (wst==W_IDLE && m_req && m_we) |-> ((({4'd0, m_wstrb} << m_addr[1:0]) >> 4) == 4'd0));
+  // P2b: a store straddling a 32-bit word is now SPLIT into beat A (word) + beat B
+  // (word+4). A 4-byte store shifted by at most 3 bytes touches at most 8 lanes, so it
+  // can never spill past beat B — guard that the strobe is exhausted by two words.
+  no_3word_wr: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (wst==W_IDLE && m_req && m_we) |-> ((({4'd0, m_wstrb} << m_addr[1:0]) >> 8) == 8'd0));
   // RLAST must land exactly on the last beat (catches a slave's early/late RLAST —
   // the beat counter now ignores RLAST for the FSM exit, this SVA flags the abuse).
   rlast_align: assert property (@(posedge core_clk) disable iff (!core_rst_n)
@@ -313,12 +346,16 @@ module ven_axi_master #(
       (wst==W_RESP && m_axi_bvalid) |-> (m_axi_bresp == 2'b00));
   no_resp_err: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       (!rresp_err && !bresp_err));
-  // every access fits the remap window (a bit outside ADDR_MASK would alias in DDR —
-  // inert for the shipped ADDR_MASK=0xFFFF_FFFF where ~ADDR_MASK==0).
+  // every access fits the remap window — but ONLY when no aliasing is configured
+  // (~ADDR_MASK==0). Under the KV260 4 GiB-top alias (ADDR_MASK=0x0FFF_FFFF) the high
+  // bits ARE intentionally folded by remap() (SeaBIOS POSTs from 0xFFFFxxxx -> the
+  // staged carveout copy), so the window check would be a FALSE positive; gate it off.
   araddr_window: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      (rst==R_IDLE && m_req && !m_we) |-> ((m_addr & ~ADDR_MASK) == 32'd0));
+      (rst==R_IDLE && m_req && !m_we && (~ADDR_MASK == 32'd0))
+      |-> ((m_addr & ~ADDR_MASK) == 32'd0));
   awaddr_window: assert property (@(posedge core_clk) disable iff (!core_rst_n)
-      (wst==W_IDLE && m_req &&  m_we) |-> ((m_addr & ~ADDR_MASK) == 32'd0));
+      (wst==W_IDLE && m_req &&  m_we && (~ADDR_MASK == 32'd0))
+      |-> ((m_addr & ~ADDR_MASK) == 32'd0));
 `endif
 
   // lint sinks: RID/BID not consulted (single in-flight, AxID=0); axi_clk/axi_rst_n

@@ -251,6 +251,24 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "tb: loaded %ld bytes at 0x%08x from %s%s\n",
                      n, load_at, args.image.c_str(),
                      args.system ? " (bios)" : "");
+#ifdef VEN_KV260_SOC
+        // 4 GiB-TOP ALIAS, KV260 form: the deployed bitstream folds the high BIOS
+        // ROM window (0xFFFE0000.. for a 128 KiB ROM) into the DDR carveout via
+        // ventium_top's L1AXI_ADDR_MASK=0x0FFF_FFFF wrap, and the PS stages a 2nd
+        // BIOS copy at carveout offset 0x0FFE0000 to back it. After the BFM strips
+        // AXI_REMAP it sees that MASKED phys, so we stage the same copy here. Only
+        // a real BIOS (>64 KiB) POSTs from the high alias; smaller stubs are inert.
+        if (args.system) {
+            long sz = 0;
+            { FILE* f = std::fopen(args.image.c_str(), "rb");
+              if (f) { std::fseek(f, 0, SEEK_END); sz = std::ftell(f); std::fclose(f); } }
+            if (sz > 0x10000) {
+                uint32_t hi_masked = (uint32_t)((0u - (uint32_t)sz) & 0x0FFFFFFFu);
+                mem.load_image(args.image, hi_masked);
+                std::fprintf(stderr, "tb: KV260 4G-top alias (masked) at 0x%08x\n", hi_masked);
+            }
+        }
+#endif
     }
 
     // ---- M7.1 Quake initial process image + int-0x80 proxy ----------------
@@ -532,9 +550,10 @@ int main(int argc, char** argv) {
         } else {
             // IN: return the next recorded dev_in value (in order). Cross-check the
             // port + size; a mismatch is a HARNESS/stream desync — report, do not
-            // silently mis-replay. Over-run (no value left) returns 0 (the run is
-            // bounded; the prefix exhausting dev_in just means we ran past it).
-            uint32_t v = 0;
+            // silently mis-replay. Over-run / plain --cosim (no golden dev_in stream):
+            // return OPEN BUS 0xFF.. — a real PC (and qemu) float an unmodeled port
+            // high, and SeaBIOS branches on 0xFF; returning 0 derails POST.
+            uint32_t v = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
             if (devin_idx < devins.size()) {
                 const ventium::DevIn& d = devins[devin_idx];
                 if (d.port != port || d.size != size) {
