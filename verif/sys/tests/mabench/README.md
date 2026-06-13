@@ -31,3 +31,20 @@ do not use it for Fmax.
   emits ModRM `[disp16]`.
 - No `CALL/RET`, no interrupts (the hex printer is inlined). `probe.S` /
   `finittest.S` are the instruction-support probes used to find the above.
+
+## mabench2 — U/V/FP pipeline stress (dual-issue)
+
+`mabench2.S` adds a thorough dual-issue exerciser run via `ven_bench --cycle`
+(cycle_mode): Block A integer U/V pairing + cross-pipe forwarding (ALU/LEA/IMUL/DIV),
+Block B the x87 FADD/FMUL/FSUB pipeline + FXCH, Block C long-latency FDIV/FSQRT
+overlapped with integer work. cycle_mode is functionally correct on silicon
+(single- and dual-issue give the same CK).
+
+Boundary on the live XCK26 (corroborates mabench's 40→71.4 MHz / 76.9 MHz):
+- **71.4 MHz (div 14): rock-solid** — 3/3 correct, both issue modes.
+- **76.9 MHz (div 13): marginal/flaky** — non-deterministic wrong CKs, and **dual-issue
+  fails where single-issue sometimes still passes** (the U/V path is the more sensitive
+  stressor). Not a hard wall — a marginal-timing edge.
+
+`ven_bench` (`sw/ps/ven_soc_app/ven_bench.c`) is the runner: stages the image, toggles
+cycle_mode (`--cycle`), services COM1, reports the exit reason.
