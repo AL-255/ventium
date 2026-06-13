@@ -170,7 +170,12 @@ module ventium_top
     input  logic        m_axi_rlast,
     input  logic        m_axi_rvalid,
     output logic        m_axi_rready,
-    output logic        bus_err          // #34 fatal AXI fault (PS observes -> reset)
+    output logic        bus_err,         // #34 fatal AXI fault (PS observes -> reset)
+    // clean-shutdown quiesce: R_CTRL.SHUTDOWN stops new AXI txns + drains in-flight;
+    // the PS polls m_idle (R_STATUS.AXI_IDLE) before xmutil unloadapp so the PL→PS AXI
+    // master is protocol-clean (no outstanding burst) when the overlay is torn down.
+    input  logic        shutdown,
+    output logic        m_idle
 `ifdef VEN_KV260_SOC
     ,
     output logic [63:0] retire_count,     // F2: live retire counter for PS observability
@@ -571,6 +576,7 @@ module ventium_top
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all),
+      .shutdown  (shutdown), .m_idle (m_idle),
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
       .core_we   (core_mem_we),
       .core_addr (core_mem_addr),

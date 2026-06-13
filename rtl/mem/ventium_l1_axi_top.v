@@ -40,6 +40,8 @@ module ventium_l1_axi_top #(
     output wire [31:0]       core_rdata,
     output wire              core_ack,
     output wire              bus_err,    // #34 fatal AXI fault (PS observes -> reset)
+    input  wire              shutdown,   // clean-shutdown quiesce -> ven_axi_master
+    output wire              m_idle,     // AXI master drained (safe to remove overlay)
 
     // ---- AXI4 master bundle `m_axi` (-> S_AXI_HPC0_FPD) ------------------------
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi AWID" *)
@@ -126,6 +128,7 @@ module ventium_l1_axi_top #(
       .core_clk    (core_clk),   .core_rst_n  (core_rst_n),
       .axi_clk     (axi_clk),    .axi_rst_n   (axi_rst_n),
       .flush_all   (flush_all),
+      .shutdown    (shutdown),   .m_idle      (m_idle),
       .core_req    (core_req),   .core_we     (core_we),    .core_addr  (core_addr),
       .core_wdata  (core_wdata), .core_wstrb  (core_wstrb), .core_rdata (core_rdata),
       .core_ack    (core_ack),
