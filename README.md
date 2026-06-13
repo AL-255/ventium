@@ -175,8 +175,43 @@ The actual K26 image adds the L1/AXI memory subsystem (PS-DDR), the `ven_soc_axi
 60 MHz full-SoC close is not feasible on the XCK26 due to resource limits: the OOC ceiling (i.e. just the core itself) is 65.3 MHz; the SoC's extra fabric leaves diffuse fill `eip` congestion. To fix congestion, the current image implements a **half-cache** (4 KiB 2-way per L1, 64 sets of 32 B lines) instead of the full 8 KiB; this reduces congestion enough to meet timing at 40 MHz.
 
 Shipped image targets **`pl_clk0` = 40 MHz**, routed at **WNS +0.104 ns** (timing met); the
-PS owns the PL clock, and `venclk.sh` can step it 40 → 50 MHz on silicon with a firmware
-smoke test per step. A larger part (e.g. the ZU15EG) would clear 60+ with all features enabled with flying colors.
+PS owns the PL clock (`CRL_APB.PL0_REF_CTRL`), and `venclk.sh` can step it from the PS at
+runtime. A larger part (e.g. the ZU15EG) would clear 60+ with all features enabled with flying
+colors.
+
+### On silicon (live KV260) — first light + overclock
+
+The image has now run on a real **XCK26**. First light: the PS (`ven_soc_app`) stages the F2
+firmware into the DDR carveout, releases the core, and the core executes real-mode x86 from the
+reset vector, printing over the io-bridge — `Ventium SoC: Pentium (P54C) core alive on KV260`,
+clean `isa-debug-exit`. The control slave reads back `IDENT = 0x5654_4D43` ("VTMC"). Loading the
+PL on the stock Kria Ubuntu uses the supported dfx-mgr path (`xmutil loadapp ventium`, DMA-heap
+programming); the recipe and the bring-up gotchas are in
+[`fpga/sd/kv260-runtime/`](fpga/sd/kv260-runtime/).
+
+**Overclock characterization** (`verif/sys/tests/mabench` — a deterministic FP+BCD+integer
+checksum kernel that stresses the Fmax-critical x87 FADD/FMUL/FSQRT cone, the FBSTP BCD engine,
+and integer mul/div; corroborated by `mabench2`, a dual-issue U/V/FP exerciser):
+
+| `pl_clk0` | result |
+|---|---:|
+| 40.0 MHz (sign-off) | correct |
+| up to **71.4 MHz** | correct — rock-solid, single *and* dual issue |
+| **76.9 MHz** | **marginal/flaky** — non-deterministic wrong results; dual-issue fails where single sometimes passes |
+
+So the silicon computes correctly to **~71.4 MHz (≈1.79× the 40 MHz routed sign-off** — the part
+runs far past the worst-case STA corner), with marginal failures beginning at 76.9 MHz. The
+dual-issue U/V path is the most sensitive stressor. `cycle_mode` (dual-issue) is functionally
+correct on hardware (identical checksum to single-issue). A conservative tested overclock is
+~66.7 MHz; 40 MHz remains the only signed-off corner. Note the trivial boot-firmware smoke is
+*insensitive* (it "passes" to 83+ MHz) — Fmax must be validated with a critical-path workload.
+
+Live-board ISA/coherence findings (all at 40 MHz, not overclock-induced): `FWAIT` (0x9B) hangs
+(use the no-wait x87 forms; bare x87 arithmetic works); `MOV`-moffs (A0–A3) direct addressing
+isn't decoded (the core uses ModRM `[disp16]`); and the core's interrupt-delivery reads the IVT
+uncached from DDR while guest writes sit in the write-back L1 — a coherence gap that blocks
+interrupt-driven real-mode guests (SeaBIOS/FreeDOS) on hardware until an RTL fix. The I/O bridge
+and the PS→core interrupt-injection seam are both proven working on silicon.
 
 The routed 40 MHz image, split into its two halves — the CPU core + FPU (left, memory/BD
 grayed) and the L1/AXI memory + PS bridge + BD interconnect (right, core grayed), every leaf
@@ -207,6 +242,7 @@ The original roadmap (M0–M6, the M2S system-mode track, M5B, M6B, R1/R2) is
 self-contained PC SoC + first boot), **M11** (x87 transcendentals) and the
 benchmark stack (M13/M14). On the F-track, **F2** (boot firmware) and **F3**
 (interactive FreeDOS) are done *in Verilator simulation*, and the **40 MHz KV260
-board image** is built and structurally verified; **F4** (DOS Quake on the RTL) is
-in progress. See [`PROGRESS.md`](PROGRESS.md) and
-[`PROGRESS_Jun04.md`](PROGRESS_Jun04.md) for the full, dated detail.
+board image now runs on real silicon** (first light + an overclock characterization to
+~71.4 MHz; see *On silicon* above); **F4** (DOS Quake on the RTL) is in progress. See
+[`PROGRESS.md`](PROGRESS.md) and [`PROGRESS_Jun04.md`](PROGRESS_Jun04.md) for the full,
+dated detail.
