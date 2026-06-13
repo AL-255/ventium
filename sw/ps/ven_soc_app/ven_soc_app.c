@@ -18,12 +18,14 @@
 // NOTE: untested on hardware — there is no board in the dev loop yet. The register
 // protocol is the one the Verilator unit gate (run-soc-axil-gate.sh) proves.
 
+#define _GNU_SOURCE 1
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/mman.h>
 #include "ven_soc_regs.h"
 #include "hid_kbd.h"
@@ -49,6 +51,13 @@ static volatile uint8_t  *g_ddr;     // mmap'd DDR carveout
 
 static inline uint32_t rd(uint32_t off)          { return g_reg[off >> 2]; }
 static inline void     wr(uint32_t off, uint32_t v) { g_reg[off >> 2] = v; }
+
+// VEN_DBG=1: print the retire trajectory + status/last-io every ~250 ms so a
+// silent stall (status=0, retire frozen) is visible (no CPU_HUNG is raised).
+static long dbg_now_ms(void) {
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+    return (long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
@@ -188,6 +197,8 @@ int main(int argc, char **argv) {
     // boot config: route memory via L1/AXI (mode 2) + IN/OUT via the io bridge.
     // --dos additionally sets SOCEN: it ungates the core's external-interrupt
     // divert (and selects the qemu-system CPUID arm the FreeDOS golden used).
+    wr(VEN_R_INTR, VEN_INTR_INTA_SEEN);  // clear any leftover injection from a prior run
+    wr(VEN_R_INTR, 0);                    // (else a stale ASSERT|vec derails the fresh core)
     wr(VEN_R_INIT_EIP, entry);
     wr(VEN_R_INIT_ESP, esp);
     wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_COSIM
@@ -199,8 +210,21 @@ int main(int argc, char **argv) {
     uint64_t serviced = 0;
     uint32_t intr_shadow = 0;        // last R_INTR value we wrote (vector|assert)
     uint32_t housekeep   = 0;
+    static int  dbg = -1;
+    static long dbg_last = 0;
+    if (dbg < 0) dbg = getenv("VEN_DBG") ? 1 : 0;
     for (;;) {
         uint32_t st = rd(VEN_R_STATUS);
+        if (dbg) {
+            long now = dbg_now_ms();
+            if (now - dbg_last >= 250) {
+                dbg_last = now;
+                uint32_t lo = rd(VEN_R_RETIRE_LO), hi = rd(VEN_R_RETIRE_HI);
+                fprintf(stderr, "[dbg t=%ldms] retire=0x%x%08x st=0x%x ioaddr=0x%x iostat=0x%x intr=0x%x io=%llu\n",
+                        now, hi, lo, st, rd(VEN_R_IO_ADDR), rd(VEN_R_IO_STATUS), rd(VEN_R_INTR),
+                        (unsigned long long)serviced);
+            }
+        }
         if (st & VEN_ST_CPU_HUNG) { fprintf(stderr, "\nven_soc: CPU HUNG (bus_err=%d) after %llu io\n",
                                             !!(st & VEN_ST_BUS_ERR), (unsigned long long)serviced); break; }
         if (st & VEN_ST_IO_REQ) {
@@ -227,8 +251,11 @@ int main(int argc, char **argv) {
             // 1. USB keyboard -> scancode FIFO -> i8042 OBF (one byte at a time)
             hid_kbd_poll();
             hid_kbd_pump(g_i8042);
-            // 2. PIT: each elapsed timer period is one IRQ0 edge, latched until serviced
-            //    (period-count, not OUT-edge, so a slow poll never drops a tick).
+            // 2. PIT IRQ0 on WALL-CLOCK (must fire even while the core is HLT-waiting for
+            //    the timer — a retire-paced tick deadlocks, since a HLT freezes the retire
+            //    count below the threshold). ~18.2 Hz; the ISR is ~us of a 55 ms period so
+            //    the mainline is never starved. The PIC-programmed gate (step 5) blocks the
+            //    pre-pic_setup vector-0 that would otherwise derail early POST.
             if (ven_pit_irq0_ticks(g_pit) > 0) pit_pending = 1;
             // 3. drive the 8259 IR lines: IRQ0 (timer), IRQ1 (kbd), IRQ14 (IDE)
             ven_pic_set_irq(g_pic, 0,  pit_pending);
@@ -244,9 +271,11 @@ int main(int argc, char **argv) {
                 wr(VEN_R_INTR, VEN_INTR_INTA_SEEN);      // W1C (and deassert)
                 intr_shadow = 0;
             }
-            // 5. mirror the PIC INT level + would-be vector into the seam
-            desired = g_pic->irq(g_pic)
-                    ? (VEN_INTR_ASSERT | ven_pic_peek_vector(g_pic)) : 0;
+            // 5. mirror the PIC INT level + vector into the seam — but ONLY once the PIC
+            //    is programmed (vector >= 0x08). An unprogrammed PIC (early POST, ICW2=0)
+            //    would present vector 0; injecting that derails the core. Gate it off.
+            uint8_t pv = ven_pic_peek_vector(g_pic);
+            desired = (g_pic->irq(g_pic) && pv >= 0x08) ? (VEN_INTR_ASSERT | pv) : 0;
             if (desired != intr_shadow) { wr(VEN_R_INTR, desired); intr_shadow = desired; }
             // 6. periodic: publish the DAC for the fb_vnc daemon
             if ((++housekeep & 0xFFFF) == 0 && g_dac_dirty) { export_dac(); g_dac_dirty = 0; }

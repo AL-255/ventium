@@ -376,6 +376,20 @@ int main(int argc, char** argv) {
                 // and branches on 0xFF; returning 0 diverged. Matches the PS app's
                 // service_in default. (Modeled ports below overwrite rd.)
                 uint8_t  rd   = 0xFF;
+                // SeaBIOS debug log: port 0xE9 (the "debugcon" hack) and 0x402
+                // (isa-debugcon) are byte-write character sinks. Echo them to stderr
+                // so the boot log is visible when chasing a POST hang.
+                if (top->io_ps_we && (port == 0xE9 || port == 0x402)) {
+                    std::fputc((int)(top->io_ps_wdata & 0xFF), stderr);
+                }
+                // VEN_IOLOG: trace every forwarded port access (port/dir/data) to
+                // pinpoint what POST did right before a hang.
+                if (std::getenv("VEN_IOLOG")) {
+                    static unsigned long iolog_n = 0;
+                    std::fprintf(stderr, "[io %lu] %s port=0x%03x data=0x%02x\n",
+                                 iolog_n++, top->io_ps_we ? "OUT" : "IN ",
+                                 port, top->io_ps_we ? (unsigned)(top->io_ps_wdata & 0xFF) : 0);
+                }
                 for (auto& d : ps_devs) {
                     if (port >= d.lo && port <= d.hi) {
                         if (top->io_ps_we) d.dev->io_write(d.dev, port, (uint8_t)top->io_ps_wdata);
