@@ -232,13 +232,18 @@ int main(int argc, char **argv) {
             uint16_t port = (uint16_t)rd(VEN_R_IO_ADDR);
             if (ios & VEN_IO_IS_WRITE) {
                 uint32_t v = rd(VEN_R_IO_WDATA);
+                if (dbg) fprintf(stderr, "[io %llu] OUT 0x%03x = 0x%x\n",
+                                 (unsigned long long)serviced, port, v);
                 if (service_out(port, v)) {              // out 0xf4 -> done
                     wr(VEN_R_IO_CTRL, VEN_IO_ACK | VEN_IO_IRQ_CLR);
                     fprintf(stderr, "\nven_soc: isa-debug-exit after %llu io\n", (unsigned long long)serviced);
                     break;
                 }
             } else {
-                wr(VEN_R_IO_RDATA, service_in(port, (uint8_t)rd(VEN_R_IO_SIZE)));
+                uint32_t rv = service_in(port, (uint8_t)rd(VEN_R_IO_SIZE));
+                if (dbg) fprintf(stderr, "[io %llu] IN  0x%03x -> 0x%x\n",
+                                 (unsigned long long)serviced, port, rv);
+                wr(VEN_R_IO_RDATA, rv);
             }
             wr(VEN_R_IO_CTRL, VEN_IO_ACK | VEN_IO_IRQ_CLR);   // release the stalled core
             serviced++;
