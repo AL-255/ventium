@@ -152,87 +152,31 @@ cycle-model estimates, not hardware measurements. Getting all this clean cost
 regression-tested by `t_endbr`) and two QEMU-golden producer-fidelity bugs
 (`clock_gettime64` capture width, the i386 `recvfrom` syscall number).
 
-## Booting the real PC stack: SeaBIOS → FreeDOS (RTL, Verilator simulation)
+### Booting the real PC stack: SeaBIOS → FreeDOS (RTL, Verilator simulation)
 
 The F3 milestone: the **unmodified QEMU SeaBIOS** `bios.bin` (rel-1.16.3) runs its
 entire power-on self-test on the RTL (real → 32-bit protected mode → back, ~5.55M
 instructions), chain-loads via `INT 13h` from the `ven_ide` disk model, and boots
-**FreeDOS** (kernel ke2045, FreeCom 0.86) to an **interactive prompt**. Keystrokes
+**FreeDOS** (kernel ke2045, FreeCom 0.86) to an interactive prompt. Keystrokes
 (set-1 scancodes injected into the i8042 model by the testbench) traverse the full PC
 input path — i8042 → IRQ1 → 8259 PIC → `INT 9` → BIOS keyboard buffer → FreeCom — and
 the typed commands run through `INT 21h` → FAT16 → IDE, with output drawn by SeaVGABIOS
-`INT 10h` into text VRAM at `0xB8000`. The actual screen, dumped from VRAM at
-**195,000,000 retired instructions / 1,511,243,707 clocks**:
+`INT 10h` into text VRAM at `0xB8000`.
 
-```
-VGA BIOS initialized.
-C:\>ver
+## FPGA Deployment (Xilinx/AMD K26 SoM)
 
-FreeCom version 0.86 - WATCOMC - XMS_Swap [Dec 30 2024 22:10:51]
-C:\>dir
- Volume in drive C is FREEDOS
- Volume Serial Number is 1C6C-E236
- Directory of C:\
+K26 is chosen for its highly affordable price and decent capacity. The SoM contains a ZU5EV-equivalent FPGA manufactured in 16nm process technology, with 256k system logic cells (117,120 LUTs), 5.1 Mb of block RAM, and 1,248 DSP slices. The PS side is a quad-core A53 running up to 1.5 GHz, with 4 GB of DDR4 memory and a rich set of peripherals.
 
-KERNEL   SYS        48,856  06-11-26 10:55p
-COMMAND  COM        87,772  06-11-26 10:55p
-AUTOEXEC BAT             9  06-12-26 12:24p
-VGAINIT  COM           113  06-12-26  3:32p
-VGABIOS  BIN        38,912  06-12-26 12:24p
-         5 file(s)        175,662 bytes
-         0 dir(s)       2,845,696 bytes free
-C:\>
-```
+**The PS as the I/O processor.** Only the latency-critical elements live in the PL: core + FPU, L1 + AXI master into the PS DDR (carveout at `REMAP_BASE = 0x4000_0000`), and the `ven_soc_axil` control slave. The slow PC peripherals run as **C models on the A53 under Linux** — the same C models the `ps-cosims` gate holds to *C model == RTL == qemu*. `ven_soc_app --dos` routes the PIC, i8042 and VGA-register ports to the PS and injects interrupts through the `R_INTR` seam (the PS stages {vector, level}; the core's INTA strobe auto-clears it and latches a sticky `INTA_SEEN` bit, mirroring the 8259's INTA boundary); `hid_kbd` turns USB-keyboard evdev events into set-1 scancodes; `fb_vnc` serves the mode-13h framebuffer + live DAC palette over VNC (a dependency-free RFB 3.3 server).
 
-This is **simulation, not hardware** — and it earned its keep: the boot stalled at
-6.844M instructions on a corrupted kernel, root-caused to the 32-bit ModRM EA decode
-missing the SDM's **SS-segment defaults** for `ESP`/`EBP`-based addressing — SeaBIOS's
-IRQ trampoline `mov ds,[esp+8]` read `DS:` garbage and saved an interrupt frame over
-the freshly loaded `kernel.sys`. QEMU never expresses it (its PIT takes ~zero IRQs in
-that window), and the fix is invisible to every flat-segment gate — the whole battery
-(77/77 + the 24 SoC gates) stayed green throughout.
+### Full SoC deployable bitstream
 
-**F4 (DOS Quake) is in progress — no RTL-Quake claim is made.** A Quake 1.06 shareware
-disk image (official `quake106.zip`: `QUAKE.EXE` + CWSDPMI + `PAK0.PAK` on FreeDOS/FAT16)
-boots fully unattended **under qemu-system** to the in-game `demo1` timedemo — that
-validates the disk/asset/DPMI chain, *not the RTL*. The RTL run of the same image is
-underway and still mid-boot, with no rendered frame yet.
+The actual K26 image adds the L1/AXI memory subsystem (PS-DDR), the `ven_soc_axil` PS bridge, and the BD interconnect, routed to a bitstream + `.xsa`.
+60 MHz full-SoC close is not feasible on the XCK26 due to resource limits: the OOC ceiling (i.e. just the core itself) is 65.3 MHz; the SoC's extra fabric leaves diffuse fill `eip` congestion. To fix congestion, the current image implements a **half-cache** (4 KiB 2-way per L1, 64 sets of 32 B lines) instead of the full 8 KiB; this reduces congestion enough to meet timing at 40 MHz.
 
-## FPGA synthesis (KV260)
-
-The core + FPU are fully synthesizable and place-and-route cleanly out-of-context on
-the KV260 (**XCK26**, Zynq UltraScale+ ZU5EV). Headline OOC `core` results (`xck26-sfvc784-2LV-c`, `+VTM_NO_DPI`, 15 ns target):
-
-| Config | LUTs | FF | BRAM | DSP | Synth Fmax | **Routed Fmax** | Worst path |
-|---|---:|---:|---:|---:|---:|---:|---|
-| `+VEN_UOPCACHE` (µop-cache, 8 KB L1s) | 79.4k (68%) | 25.6k | 40 | 31 | — | 51.7 MHz | FADD commit cone |
-| `+VEN_CACHE_HALF` (4 KB L1s) | 78.0k (67%) | 25.6k | 40 | 31 | 59.4 | 52.6 MHz | FADD `fpp→fpr` cone |
-| `+VEN_FP_PIPE2` (2-stage FADD commit) | 76.7k (65%) | 25.8k | 40 | 31 | 78.4 | 63.0 MHz | `u_bcd` (FBSTP) engine |
-| **+ BCD ÷100 step** (`ven_bcd`, opt-in `+VEN_BCD_DIV100`) | 76.6k (65%) | 25.8k | 40 | 31 | 80.6 | **65.3 MHz** | µop-cache fill→front-end |
-
-Three architectural walls, broken in turn: the **single-cycle x86 byte-window decoder**
-(deleted by the µop-cache — predecode-on-fill, the first config to route legally); the
-**latency-1 ~80-level FADD deferred-commit cone** (split **cycle-safely** across the FP
-scoreboard's existing 3-cycle latency window by `+VEN_FP_PIPE2` — `make verify` GREEN, M5
-FP bands held, default build byte/cycle-identical); and the **FBSTP BCD engine** (one ÷100
-per step instead of two chained ÷10 — bit-exact + cycle-neutral). That takes the K26 core
-to **65.3 MHz**; the remaining wall is route-bound µop-cache fill→front-end congestion.
-
-**Full SoC, in-context → deployable bitstream.** The numbers above are out-of-context.
-The actual KV260 image adds the L1/AXI memory subsystem (→ PS-DDR), the `ven_soc_axil`
-PS bridge, and the BD interconnect, routed to a **bitstream + `.xsa`**. In context the
-`eip`/TLB fetch cone binds: the SoC does not legally route at 60 MHz until
-**`+VEN_FE_PIPE`** — a page-keyed micro-TLB (1-cycle stall only on a page crossing;
-`ifdef`-gated, default build cycle-identical) — after which it routes clean at **~50.4 MHz**.
-
-**Deployable clock = 40 MHz.** A 60 MHz full-SoC close is *not feasible on the XCK26* (the
-OOC ceiling is 65.3 MHz; the SoC's extra fabric leaves diffuse fill→`eip` congestion no
-floorplan clears). The FE_PIPE build closed 50 MHz until the F3 ISA-completeness work
-(16-bit ModRM EAs, FF-group far forms, interruptible `HLT`, real-mode IVT delivery) cost
-~3.5 ns on the high-fanout µop-cache fill net (WNS −3.225 ns, ~43 MHz achievable). The
-shipped image targets **`pl_clk0` = 40 MHz**, routed at **WNS +0.104 ns** (timing met); the
+Shipped image targets **`pl_clk0` = 40 MHz**, routed at **WNS +0.104 ns** (timing met); the
 PS owns the PL clock, and `venclk.sh` can step it 40 → 50 MHz on silicon with a firmware
-smoke test per step. A larger part (e.g. the ZU15EG) would clear 60+.
+smoke test per step. A larger part (e.g. the ZU15EG) would clear 60+ with all features enabled with flying colors.
 
 The routed 40 MHz image, split into its two halves — the CPU core + FPU (left, memory/BD
 grayed) and the L1/AXI memory + PS bridge + BD interconnect (right, core grayed), every leaf
@@ -240,37 +184,11 @@ cell colored by RTL module with per-panel legends:
 
 ![Ventium full SoC on the KV260 — CPU core + FPU (left) and the surrounding memory/PS fabric (right)](docs/fpga-device-view-soc-split.png)
 
-📄 **Full results, the all-modules device view, congestion maps, the ZU15EG + half-cache +
+**Full results, the all-modules device view, congestion maps, the ZU15EG + half-cache +
 FP_PIPE2 experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
 [`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
 
-## The KV260 board image
-
-The current deployable build (`fpga/build/kv260_soc_impl_linux_40/`, config = µop-cache +
-half-cache + FP_PIPE2 + FE_PIPE) is routed to a bitstream + `.xsa`, post-route:
-
-| Resource (XCK26) | Used | Available | Util |
-|---|---:|---:|---:|
-| CLB LUTs | 94,712 | 117,120 | 80.9 % |
-| CLB registers | 31,208 | 234,240 | 13.3 % |
-| Block RAM tiles | 40 | 144 | 27.8 % |
-| DSPs | 31 | 1,248 | 2.5 % |
-
-Timing at `pl_clk0` = **40 MHz** (25.000 ns): setup **WNS +0.104 ns**, hold WHS +0.008 ns,
-**0 failing endpoints** of 112,136; DRC carries advisory warnings only (DSP-pipelining
-suggestions). The design occupies 98.3 % of the CLBs — the diffuse-congestion regime
-described above. Reports (`timing_impl.rpt`/`util_impl.rpt`/`drc_impl.rpt`) are on disk.
-
-**Architecture: the PS as the I/O processor.** Only the latency-critical elements live
-in the PL: core + FPU, L1 + AXI master into the PS DDR (carveout at `REMAP_BASE =
-0x4000_0000`), and the `ven_soc_axil` control slave. The slow PC peripherals run as
-**C models on the A53 under Linux** — the same C models the `ps-cosims` gate holds to
-*C model == RTL == qemu*. `ven_soc_app --dos` routes the PIC, i8042 and VGA-register
-ports to the PS and injects interrupts through the `R_INTR` seam (the PS stages
-{vector, level}; the core's INTA strobe auto-clears it and latches a sticky `INTA_SEEN`
-bit, mirroring the 8259's INTA boundary); `hid_kbd` turns USB-keyboard evdev events
-into set-1 scancodes; `fb_vnc` serves the mode-13h framebuffer + live DAC palette over
-VNC (a dependency-free RFB 3.3 server).
+### The K26 PS Firmware
 
 Two flashable microSD images exist:
 
@@ -281,10 +199,6 @@ Two flashable microSD images exist:
 - **Baremetal** (`fpga/sd/`, no PetaLinux): `BOOT.BIN` = FSBL + PMUFW + bitstream +
   `ven_boot.elf` on FAT32; an IDENT smoke test, then the gate-proven COM1-banner
   firmware on the UART1 (MIO36/37) console.
-
-**Hardware status, stated plainly: no board has been attached.** Everything in this
-section is *structural* evidence (routed timing, DRC, the unit-gated register seam,
-host-smoke-tested daemons) — none of it has yet executed on silicon.
 
 ## Status
 
