@@ -150,7 +150,7 @@ l1axi_kv_full:
 DOS_PERIPH := $(wildcard $(VENTIUM_ROOT)/sw/ps_periph/*.c)
 .PHONY: l1axi_kv_dos
 l1axi_kv_dos:
-	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) +define+VEN_DBG_CORE \
+	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) +define+VEN_DBG_CORE $(VL_EXTRA_DEFINES) \
 	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -I$(VENTIUM_ROOT)/sw/ps_periph" \
 	  -Mdir obj_dir_l1axi_kvdos \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)

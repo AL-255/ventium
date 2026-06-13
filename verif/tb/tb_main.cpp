@@ -553,7 +553,16 @@ int main(int argc, char** argv) {
             uint32_t old=mem.read32(aligned), nw=0;
             for (int b=0;b<4;b++){ uint32_t by=((axhs.wstrb>>b)&1)?((axhs.wdata>>(b*8))&0xff)
                                                                   :((old>>(b*8))&0xff); nw|=by<<(b*8); }
-            mem.write32(aligned,nw); axw=2; axw_lat=AXI_WLAT; } }
+            mem.write32(aligned,nw);
+#ifdef VEN_DBG_CORE
+            { static uint32_t wbase = std::getenv("VEN_WATCH")
+                  ? (uint32_t)strtoul(std::getenv("VEN_WATCH"), 0, 0) : 0xFFFFFFFFu;
+              if (wbase != 0xFFFFFFFFu && aligned >= (wbase & ~0x1fu) && aligned < ((wbase & ~0x1fu) + 0x40))
+                std::fprintf(stderr, "tb: [watch] WR [%05x] strb=%x wdata=%08x : %08x -> %08x  (last retire EIP=%08x)\n",
+                             aligned, (unsigned)axhs.wstrb, (uint32_t)axhs.wdata, old, nw,
+                             (uint32_t)ventium::g_last_arch.pc); }
+#endif
+            axw=2; axw_lat=AXI_WLAT; } }
         else { if (axw_lat>0) axw_lat--; else if (axhs.b) axw=0; }
     };
 #endif

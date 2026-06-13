@@ -789,6 +789,11 @@ module core
   logic [23:0] dbg_stall;          // sim-only: cycles since last retire (hang watchdog)
   logic        dbg_printed;        // sim-only: one-shot for the watchdog dump
 `endif
+`ifdef VEN_TRACE_IRQ
+  logic        dbg_if_q;            // sim-only: prev EFLAGS.IF, for IF-transition trace
+  logic [15:0] dbg_cs_q;           // sim-only: prev CS selector, for CS-change trace
+  logic [31:0] dbg_csb_q;          // sim-only: prev CS base, for CS-change trace
+`endif
 `ifdef VEN_PS_PROXY
   logic [3:0]  q_proxy_len;        // int80 length latched at S_SYSCALL_WAIT entry (eip
                                    // parks at cd80, so this is the only thing the wait
@@ -3767,6 +3772,9 @@ module core
       hung_r<=1'b0;   // M6 Erratum 81: not hung out of reset.
       gs_base_r<=32'd0; cn<=64'd0;   // M7.1 proxy: no TLS base yet; retire count 0
       tsc<=64'd0;                    // F3: time-stamp counter zeroed at reset (RDTSC)
+`ifdef VEN_TRACE_IRQ
+      dbg_if_q<=1'b0; dbg_cs_q<=16'hF000; dbg_csb_q<=32'h000F_0000;
+`endif
 `ifdef VEN_DBG_WD
       dbg_stall<=24'd0; dbg_printed<=1'b0;
 `endif
@@ -3868,6 +3876,42 @@ module core
         $display("[VEN-WD] STUCK state=%s mem_addr=%08h | cr0=%08h sys_mode=%b v86=%b real_mode=%b eflags=%08h | idt_base=%08h gdt_base=%08h int_vec=%02h cpl=%0d | csbase=%08h eip=%08h",
                  state.name(), mem_addr, creg0, sys_mode, v86, real_mode, eflags,
                  idt_base, gdt_base, int_vec, cpl_r, seg_base[SG_CS], eip);
+      end
+`endif
+
+`ifdef VEN_TRACE_IRQ
+      // sim-only IRQ-entry forensic trace (opt-in via +define+VEN_TRACE_IRQ): the
+      // FreeDOS interrupt-delivery derail. Print the EXACT state at each maskable-IRQ
+      // accept (state==S_DECODE && intr_take), so we can see whether the interrupted
+      // eip exceeds the CS limit (the no-wrap / big-real question) and whether IF was
+      // legitimately 1. Also log every IF transition with its eip to find the last
+      // STI/CLI before the fatal frame. Inert unless the define is set.
+      if (state==S_DECODE && intr_take) begin
+        $display("[IRQ-TAKE] t=%0t vec=%02x eip=%08x cs_sel=%04x cs_base=%08x cs_lim=%08x cs_attr=%02x eflags=%08x IF=%b ip_trunc=%b",
+                 $time, inta_vector, eip, seg_sel[SG_CS], seg_base[SG_CS],
+                 seg_limit[SG_CS], seg_attr[SG_CS], eflags, eflags[9], |eip[31:16]);
+      end
+      if (eflags[9] != dbg_if_q) begin
+        $display("[IF-CHG]  t=%0t IF %b->%b eip=%08x cs_sel=%04x", $time, dbg_if_q, eflags[9], eip, seg_sel[SG_CS]);
+        dbg_if_q <= eflags[9];
+      end
+      if (seg_sel[SG_CS] != dbg_cs_q || seg_base[SG_CS] != dbg_csb_q) begin
+        $display("[CS-CHG]  t=%0t state=%s cs_sel %04x->%04x cs_base %08x->%08x eip=%08x eax=%08x edx=%08x dsb=%08x",
+                 $time, state.name(), dbg_cs_q, seg_sel[SG_CS], dbg_csb_q, seg_base[SG_CS], eip,
+                 gpr[R_EAX], gpr[R_EDX], seg_base[SG_DS]);
+        dbg_cs_q  <= seg_sel[SG_CS];
+        dbg_csb_q <= seg_base[SG_CS];
+      end
+      // real-mode IRET pop: show the CS/IP/FLAGS it restored + the stack it read from.
+      if (state==S_RMIRET && mem_ack && int_step==4'd2) begin
+        $display("[RMIRET]  t=%0t pop cs=%04x ip=%04x flags=%04x  (SS:SP read @ %08x)",
+                 $time, iret_cs, iret_eip[15:0], mem_rdata[15:0],
+                 seg_base[SG_SS] + (gpr[R_ESP] + {27'd0, int_step, 1'b0}));
+      end
+      // real-mode INT push: show the CS/IP it pushed onto the stack.
+      if (state==S_RMINT_PUSH && mem_ack && int_step==4'd2) begin
+        $display("[RMPUSH]  t=%0t push cs=%04x ip=%04x (int_ret_eip=%08x) -> resume gate cs=%04x:%04x",
+                 $time, seg_sel[SG_CS], int_ret_eip[15:0], int_ret_eip, int_gate_sel, int_gate_off[15:0]);
       end
 `endif
 
