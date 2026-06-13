@@ -177,33 +177,37 @@ module ven_l1d #(
             // read HIT → 2-way LRU touch (both lines on a xline-line hit).
             dc_lru[set_c] <= hit_way;
             if (xline) dc_lru[set_n] <= hit_way_n;
-          end else if (c_req && c_we && hit) begin
-            // write HIT (write-through) → update the array + LRU touch as soon as the
-            // write HITS — decoupled from the backing ack. The backing write-through
-            // proceeds in parallel (comb driver -> AXI), and the core still STALLS
-            // (c_ack=m_ack, below) until that completes; so committing the array now
-            // is correct (the core cannot re-read during its own stalled write) AND
-            // robust to multi-cycle backing latency: a real AXI write acks (m_ack)
-            // many clocks later, possibly after the core has dropped c_req, so gating
-            // the array write on m_ack would lose it. Same-cycle backing (the L1D unit
-            // gate) acks in clock 1 -> identical. Idempotent across a multi-clock write.
+          end else if (c_req && c_we) begin
+            // WRITE (write-through). The backing received the full byte-accurate store
+            // via the comb driver (ven_axi_master splits a cross-word / cross-line
+            // store into per-word AXI beats); the core STALLS (c_ack=m_ack, below)
+            // until that completes, so committing the array now is correct and robust
+            // to multi-cycle backing latency. Keep the cached copy coherent:
             logic [31:0] oldw, neww;
-            dc_lru[set_c] <= hit_way;
             if (xline) begin
-              // xline-line write HIT: the backing got the 4 bytes byte-accurately
-              // (comb driver), but the within-line array RMW cannot span the line
-              // end -> INVALIDATE the cached line(s) so a re-read refills correct
-              // data from the backing. (Rare; correctness over a stale hit.)
-              dc_val[set_c][hit_way] <= 1'b0;
+              // cross-LINE store (4 bytes span the 32-byte line end): the within-line
+              // array RMW cannot cross the boundary, so INVALIDATE every RESIDENT line
+              // the store touches -> a re-read refills the full, correct data from the
+              // backing. This MUST run even when the ADDRESSED line missed (hit==0):
+              // the spilled HIGH bytes land in the NEXT line, and if only that next
+              // line is resident (hit==0, hit_n==1) its STALE copy would be served by a
+              // later cross-line read. This was the FreeDOS __call16 iret-frame
+              // corruption: a `pushl` to ...x7E spilled the return CS into a resident
+              // next line that was never updated, so the iret popped CS=0 and derailed.
+              if (hit)   begin dc_val[set_c][hit_way]   <= 1'b0; dc_lru[set_c] <= hit_way; end
               if (hit_n) dc_val[set_n][hit_way_n] <= 1'b0;
-            end else begin
-              // within-line RMW the 4 bytes at the addressed BYTE offset (boff):
-              // keep the old byte where the strobe is 0, take c_wdata where it is 1.
+            end else if (hit) begin
+              // within-line write HIT → RMW the 4 bytes at the addressed BYTE offset
+              // (boff): keep the old byte where the strobe is 0, take c_wdata where 1.
+              // Decoupled from the backing ack (the core cannot re-read during its own
+              // stalled write); idempotent across a multi-clock backing write.
+              dc_lru[set_c] <= hit_way;
               oldw = dc_line[{set_c,hit_way}][{boff,3'b000} +: 32];
               for (int b=0;b<4;b++)
                 neww[b*8 +: 8] = c_wstrb[b] ? c_wdata[b*8 +: 8] : oldw[b*8 +: 8];
               dc_line[{set_c,hit_way}][{boff,3'b000} +: 32] <= neww;
             end
+            // (within-line write MISS: no cached copy → nothing to update; write-through.)
           end
         end
         L1_FILL: begin
