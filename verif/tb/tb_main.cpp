@@ -106,6 +106,8 @@ struct Args {
     bool     cosim       = false;
     bool     dos         = false;        // VEN_DOS_MODELS: wire the PS peripheral C models
     std::string disk;                    // --disk <img> for the IDE C model (--dos)
+    uint32_t dbg_step_n  = 0;            // VEN_DBG_CORE: single-step N instructions + log each
+    uint32_t dbg_bp      = 0;            // VEN_DBG_CORE: --dbg-bp <eip> hardware breakpoint
     // M2S.5 SMM structural self-check: after the run, dump the SMM-relevant
     // physical memory (the handler sentinels @ 0x2000.. AND the P5 save-state
     // map @ SMBASE+0xFE00..) to this JSON file so the RTL-only self-check can
@@ -209,6 +211,8 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--cosim")    { a.cosim = true; a.system = true; }   // P2 repro
         else if (k == "--dos")      { a.dos = true; a.cosim = true; a.system = true; }
         else if (k == "--disk")       a.disk       = need("--disk");
+        else if (k == "--dbg-step")   a.dbg_step_n = parse_u32(need("--dbg-step"));
+        else if (k == "--dbg-bp")     a.dbg_bp     = parse_u32(need("--dbg-bp"));
         else if (k == "--smm-dump")   a.smm_dump    = need("--smm-dump");
         else if (k == "--smbase")     a.smbase      = parse_u32(need("--smbase"));
         else if (k == "--quake-image") a.quake_image = need("--quake-image");
@@ -776,6 +780,12 @@ int main(int argc, char** argv) {
     top->intr        = 0;
     top->inta_vector = 0;
 #endif
+#ifdef VEN_DBG_CORE
+    // Debug single-step/breakpoint inputs: inert by default (the hold never
+    // engages), so a normal run is cycle-identical. --dbg-step arms them below.
+    top->dbg_halt_req = 0; top->dbg_step = 0; top->dbg_bp_en = 0;
+    top->dbg_bp_addr  = 0; top->dbg_bp_clr = 0;
+#endif
     top->bus_mode   = args.bus_mode ? 1 : 0; // M5B-int: route mem via the bus subsystem
 #ifdef VEN_L1_AXI
     top->l1axi_en   = args.l1_axi ? 1 : 0;   // P1-1: route mem via ventium_l1_axi (mode 2)
@@ -833,8 +843,33 @@ int main(int argc, char** argv) {
     uint64_t next_vflush = 4000000ull;               // M14 periodic video-stream flush
 
     uint64_t syscalls_replayed = 0;   // M7.1 diagnostics
+#ifdef VEN_DBG_CORE
+    // VEN_DBG_CORE single-step / breakpoint selftest: --dbg-step N parks from reset
+    // and grants one instruction per re-park (logging the committed EIP each time, so
+    // the printed sequence IS the executed instruction stream); --dbg-bp <eip> arms a
+    // PC breakpoint and runs free until the core parks at it.
+    uint32_t dbg_steps_done = 0;
+    bool     dbg_step_inflight = false;
+    if (args.dbg_step_n) top->dbg_halt_req = 1;                  // park at the first boundary
+    if (args.dbg_bp)   { top->dbg_bp_en = 1; top->dbg_bp_addr = args.dbg_bp; }
+#endif
     while (true) {
         uint64_t before = trace.retired();
+#ifdef VEN_DBG_CORE
+        top->dbg_step = 0;
+        if (args.dbg_step_n) {
+            if (!top->dbg_halted) dbg_step_inflight = false;     // a step is executing
+            else if (dbg_steps_done < args.dbg_step_n && !dbg_step_inflight) {
+                std::fprintf(stderr, "tb: [dbg-step %2u] EIP=%08x CS=%04x ESP=%08x FSM=0x%02x\n",
+                             dbg_steps_done, (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs,
+                             (uint32_t)top->dbg_esp, (unsigned)top->dbg_state);
+                top->dbg_step = 1; dbg_step_inflight = true; dbg_steps_done++;
+            }
+        }
+        if (args.dbg_bp && top->dbg_halted)
+            std::fprintf(stderr, "tb: [dbg-bp] core parked: EIP=%08x bp=%08x FSM=0x%02x\n",
+                         (uint32_t)top->dbg_eip, args.dbg_bp, (unsigned)top->dbg_state);
+#endif
 
 #ifdef VEN_DOS_MODELS
         // F3 IRQ pump: present the PIC's timer vector on the core's intr seam.
@@ -1062,6 +1097,33 @@ int main(int argc, char** argv) {
             break;
         }
     }
+
+#ifdef VEN_DBG_CORE
+    // VEN_DBG_CORE: print the core debug bundle at the stop point. On a freeze this
+    // names WHERE + WHY the core stopped (FSM micro-state, mode, last fault) and the
+    // committed state of the last retired instruction — what previously took a
+    // faithful-sim build to recover. The vtrace is the per-PC trail alongside it.
+    {
+        static const char* SN[] = {
+            "RESET","FETCH","DECODE","LOAD","LOAD2","EXEC","STORE","USEQ","HALT","FLOAD",
+            "FEXEC","FSTORE","FP_BUSY","DIV_BUSY","BCD_BUSY","FBLD_BUSY","TRSC_BUSY",
+            "FEXEC_EX","SYSCALL_WAIT","FENV_ST","FENV_LD","IO","INS","PF","PIPE",
+            "F00F_HANG","LGDT","SEGLD","LJMP","LCALL","RETF","SGDT","RMINT_RD",
+            "RMINT_PUSH","RMIRET","HLTWAIT","WALK","INT_GATE","INT_CS","INT_PUSH","IRET",
+            "INT_CS_RET","LTR","INT_TSS","INT_SS","IRET_SS","TSW_SAVE","TSW_READ",
+            "TSW_SEG","TSW_BUSY","SMI_SAVE","RSM","DB_EXTRA" };
+        unsigned s = (unsigned)top->dbg_state;
+        const char* sn = (s < sizeof(SN)/sizeof(SN[0])) ? SN[s] : "?";
+        std::fprintf(stderr,
+            "tb: [VEN_DBG] EIP=%08x CS=%04x ESP=%08x EFLAGS=%08x\n"
+            "tb: [VEN_DBG] FSM=S_%s(0x%02x) mode=%s%s vec=0x%02x fault_pc=%08x CR0=%08x halted=%d\n",
+            (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs, (uint32_t)top->dbg_esp,
+            (uint32_t)top->dbg_eflags, sn, s,
+            (top->dbg_cr0 & 1u) ? "PE" : "real", (top->dbg_cr0 & 0x80000000u) ? "+PG" : "",
+            (unsigned)top->dbg_int_vec, (uint32_t)top->dbg_fault_pc, (uint32_t)top->dbg_cr0,
+            (int)top->dbg_halted);
+    }
+#endif
 
     // ---- M2S.5: dump SMM-relevant physical memory for the structural check --
     // The RTL analogue of psmm-selfcheck.py's QMP readback: the handler sentinels

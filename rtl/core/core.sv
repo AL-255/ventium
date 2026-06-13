@@ -265,6 +265,36 @@ module core
     // ------------------------------------------------------------------------
     output logic        retire_sys,          // this retirement carries system state
     output logic [31:0] retire_cr0, retire_cr2, retire_cr3, retire_cr4
+`ifdef VEN_DBG_CORE
+    ,
+    // ------------------------------------------------------------------------
+    // Debug observability taps (VEN_DBG_CORE). PURE OBSERVERS of existing FSM/
+    // arch registers — add no logic to any datapath, never feed back, so a
+    // +VEN_DBG_CORE build is cycle-identical. With no define, none of this exists
+    // and the default/deploy build is byte/cycle-identical.
+    //   dbg_state    — FSM micro-state (state_e): WHERE/why the core is parked.
+    //   dbg_int_vec  — last delivered exception/interrupt vector (#UD=6/#GP=13/
+    //                  #PF=14/ext IRQ); holds the last value.
+    //   dbg_fault_pc — source EIP of that exception/interrupt (int_src_pc).
+    //   dbg_cr0      — live CR0: PE(bit0)/PG(bit31) reveal real/protected/paging.
+    // (single-step / breakpoint control ports are added below once the FSM
+    //  issue-boundary hold is wired — see the dbg_hold block.)
+    // ------------------------------------------------------------------------
+    output logic [5:0]  dbg_state,
+    output logic [7:0]  dbg_int_vec,
+    output logic [31:0] dbg_fault_pc,
+    output logic [31:0] dbg_cr0,
+    // Single-step / instruction-breakpoint control (the ONLY debug signals that
+    // affect execution, and ONLY when the PS arms them — see the dbg_hold block).
+    // Park is at the S_DECODE instruction boundary, LOWER priority than SMI/NMI/
+    // INTR so no interrupt is lost, modeled on the S_HLTWAIT resumable halt.
+    input  logic        dbg_halt_req,   // level: park at the next instruction boundary
+    input  logic        dbg_step,       // pulse: release for exactly ONE instruction
+    input  logic        dbg_bp_en,      // enable the PC breakpoint
+    input  logic [31:0] dbg_bp_addr,    // park when the about-to-issue EIP == this
+    input  logic        dbg_bp_clr,     // pulse: clear a latched breakpoint (resume)
+    output logic        dbg_halted      // 1 = parked at an instruction boundary
+`endif
 );
 
   // ===========================================================================
@@ -701,6 +731,48 @@ module core
   // until reset). Drives the cpu_hung output and keeps the FSM parked.
   logic hung_r;
   assign cpu_hung = hung_r;
+
+`ifdef VEN_DBG_CORE
+  // ---- VEN_DBG_CORE observability taps (pure combinational observers) -------
+  // No logic added to any datapath; these never feed back into the FSM.
+  assign dbg_state    = 6'(state);
+  assign dbg_int_vec  = int_vec;
+  assign dbg_fault_pc = int_src_pc;
+  assign dbg_cr0      = creg0;
+
+  // ---- single-step / instruction-breakpoint hold ---------------------------
+  // dbg_block_issue, when 1, makes the S_DECODE boundary PARK (stay in S_DECODE,
+  // eip unchanged) instead of dispatching — see the injection in
+  // core_fetch_decode.svh. The park is below SMI/NMI/INTR so interrupts are never
+  // lost; in-flight loads/stores/fills + the L1/AXI fill FSM advance in their own
+  // states untouched (parking only suppresses ISSUING a NEW instruction).
+  logic dbg_bp_latched;   // breakpoint fired; sticky until the PS pulses dbg_bp_clr
+  logic dbg_step_q;       // permit exactly ONE issue while parked (single-step)
+  logic dbg_bp_hit;
+  logic dbg_block_issue;  // 1 = park the S_DECODE boundary (consumed in the FSM)
+  // pre-execution PC breakpoint: the instruction about to issue sits at `eip`,
+  // at the S_DECODE boundary. Suppressed during a step so we can step OFF it.
+  assign dbg_bp_hit = dbg_bp_en && (eip == dbg_bp_addr) && (state == S_DECODE) && !dbg_step_q;
+  wire   dbg_park   = dbg_halt_req | dbg_bp_latched;
+  assign dbg_block_issue = (dbg_park | dbg_bp_hit) & ~dbg_step_q;
+  assign dbg_halted      = dbg_block_issue & (state == S_DECODE);
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      dbg_bp_latched <= 1'b0;
+      dbg_step_q     <= 1'b0;
+    end else begin
+      if (dbg_bp_hit)        dbg_bp_latched <= 1'b1;        // latch a breakpoint hit
+      else if (dbg_bp_clr)   dbg_bp_latched <= 1'b0;        // PS clears it to resume
+      if (dbg_step && dbg_park) dbg_step_q <= 1'b1;         // arm one single-step
+      else if (dbg_step_q && retire_valid) dbg_step_q <= 1'b0; // consume after one retire
+    end
+  end
+`else
+  // No debug build: the S_DECODE issue-hold can never engage -> the injected
+  // `else if (dbg_block_issue)` arm is dead, keeping the FSM byte/cycle-identical.
+  wire dbg_block_issue = 1'b0;
+`endif
 
   // M7.1 int-0x80 proxy state. gs_base_r holds the latched %gs TLS base captured
   // from the proxy (set_thread_area's sys_call.gs_base); it is installed into

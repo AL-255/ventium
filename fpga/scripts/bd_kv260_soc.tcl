@@ -40,7 +40,7 @@ set svfiles {
     mem/dcache_timing.sv mem/icache.sv mem/uopcache.sv mem/tlb.sv
     bus/biu_p5.sv bus/biu.sv
     mem/ven_l1d.sv mem/ven_axi_master.sv mem/ventium_l1_axi.sv
-    soc/ven_soc_axil.sv soc/ventium_kv260_core.sv
+    soc/ven_soc_axil.sv soc/ven_soc_dbg.sv soc/ventium_kv260_core.sv
 }
 foreach f $svfiles { add_files -norecurse $ROOT/rtl/$f }
 add_files -norecurse $ROOT/rtl/soc/ventium_kv260_top.v   ;# Verilog BD-reference TOP

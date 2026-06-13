@@ -54,7 +54,7 @@ set svfiles {
     mem/dcache_timing.sv mem/icache.sv mem/uopcache.sv mem/tlb.sv
     bus/biu_p5.sv bus/biu.sv
     mem/ven_l1d.sv mem/ven_axi_master.sv mem/ventium_l1_axi.sv
-    soc/ven_soc_axil.sv soc/ventium_kv260_core.sv
+    soc/ven_soc_axil.sv soc/ven_soc_dbg.sv soc/ventium_kv260_core.sv
 }
 foreach f $svfiles { add_files -norecurse $ROOT/rtl/$f }
 add_files -norecurse $ROOT/rtl/soc/ventium_kv260_top.v
@@ -72,6 +72,11 @@ set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
 if {[envor BTB_PIPE 1]} { lappend DEFS VEN_BTB_PIPE }
 if {[envor UOPCACHE 1]} { lappend DEFS VEN_UOPCACHE }
 if {$FEP} { lappend DEFS VEN_FE_PIPE }
+# DBG_CORE=1 builds a DEBUG BITSTREAM: the on-die debug/trace unit (committed
+# state + PC ring + freeze detector + perf counters + single-step/breakpoint via
+# the ven_soc_axil 0x80+ window). Costs a little BRAM + routing, so it is OFF for
+# the timing-critical production close; turn on for a forensic/bring-up bitstream.
+if {[envor DBG_CORE 0]} { lappend DEFS VEN_DBG_CORE }
 set_property verilog_define $DEFS [current_fileset]
 update_compile_order -fileset sources_1
 

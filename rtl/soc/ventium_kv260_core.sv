@@ -99,6 +99,26 @@ module ventium_kv260_core #(
   // F3 PS->core interrupt-injection seam (ven_soc_axil R_INTR <-> ventium_top).
   logic        core_intr; logic [7:0] core_intr_vec; logic core_inta;
 
+`ifdef VEN_DBG_CORE
+  // VEN_DBG_CORE bundle: ventium_top debug taps -> ven_soc_dbg -> ven_soc_axil regs.
+  logic        dbg_retire_valid;
+  logic [31:0] dbg_eip, dbg_esp, dbg_eflags, dbg_fault_pc, dbg_cr0;
+  logic [15:0] dbg_cs;
+  logic [5:0]  dbg_state;  logic [7:0] dbg_int_vec;
+  // ven_soc_dbg readback + control nets (d_*):
+  logic        d_clear, d_frozen;
+  logic [31:0] d_freeze_th, d_last_eip, d_last_esp, d_last_eflags, d_frozen_eip;
+  logic [31:0] d_trace_pc, d_trace_aux, d_perf_stall, d_perf_io, d_perf_irq;
+  logic [15:0] d_last_cs;
+  logic [4:0]  d_trace_idx;
+  logic [5:0]  d_frozen_state, d_trace_count;
+  logic [7:0]  d_frozen_vec;
+  logic [63:0] d_perf_cyc, d_perf_ret;
+  // single-step / breakpoint control (ven_soc_axil <-> ventium_top/core)
+  logic        d_halt_req, d_step, d_bp_en, d_bp_clr, d_halted;
+  logic [31:0] d_bp_addr;
+`endif
+
   ven_soc_axil #(.AXIL_AW(AXIL_AW)) u_axil (
       .clk(clk), .aresetn(aresetn),
       .s_axil_awaddr(s_axil_awaddr), .s_axil_awprot(s_axil_awprot),
@@ -121,6 +141,20 @@ module ventium_kv260_core #(
       .io_wdata(io_wdata), .io_rdata(io_rdata), .io_ack(io_ack),
       .intr_out(core_intr), .intr_vec(core_intr_vec), .inta(core_inta),
       .irq_out(irq_out)
+`ifdef VEN_DBG_CORE
+      ,
+      .dbg_clear(d_clear), .dbg_freeze_thresh(d_freeze_th), .dbg_trace_idx(d_trace_idx),
+      .dbg_last_eip(d_last_eip), .dbg_last_cs(d_last_cs), .dbg_last_esp(d_last_esp),
+      .dbg_last_eflags(d_last_eflags), .dbg_frozen(d_frozen), .dbg_frozen_eip(d_frozen_eip),
+      .dbg_frozen_state(d_frozen_state), .dbg_frozen_vec(d_frozen_vec),
+      .dbg_trace_pc(d_trace_pc), .dbg_trace_aux(d_trace_aux), .dbg_trace_count(d_trace_count),
+      .dbg_live_state(dbg_state), .dbg_live_vec(dbg_int_vec), .dbg_live_fault_pc(dbg_fault_pc),
+      .dbg_live_cr0(dbg_cr0), .dbg_cpu_hung(st_cpu_hung),
+      .dbg_perf_cyc(d_perf_cyc), .dbg_perf_retired(d_perf_ret), .dbg_perf_stall(d_perf_stall),
+      .dbg_perf_io(d_perf_io), .dbg_perf_irq(d_perf_irq),
+      .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
+      .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted)
+`endif
   );
 
   // verilator lint_off PINCONNECTEMPTY
@@ -168,7 +202,35 @@ module ventium_kv260_core #(
       // MODE.SOCEN and writes R_INTR — the F2 boot flow never touches either.
       .soc_en(cfg_soc_en),
       .intr(core_intr), .inta_vector(core_intr_vec), .inta(core_inta)
+`ifdef VEN_DBG_CORE
+      ,
+      .dbg_retire_valid(dbg_retire_valid), .dbg_eip(dbg_eip), .dbg_cs(dbg_cs),
+      .dbg_esp(dbg_esp), .dbg_eflags(dbg_eflags), .dbg_state(dbg_state),
+      .dbg_int_vec(dbg_int_vec), .dbg_fault_pc(dbg_fault_pc), .dbg_cr0(dbg_cr0),
+      .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
+      .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted)
+`endif
   );
   // verilator lint_on PINCONNECTEMPTY
+
+`ifdef VEN_DBG_CORE
+  // On-die debug/trace unit: PC ring + freeze detector + perf counters, fed by the
+  // ventium_top debug bundle. Reset with the core (core_rst_n) so a window aligns
+  // with a run; survives a hang (core_run stays 1) so the PS can read the snapshot.
+  ven_soc_dbg #(.DEPTH(32)) u_dbg (
+      .clk(clk), .rst_n(core_rst_n),
+      .dbg_retire_valid(dbg_retire_valid), .dbg_eip(dbg_eip), .dbg_cs(dbg_cs),
+      .dbg_esp(dbg_esp), .dbg_eflags(dbg_eflags), .dbg_state(dbg_state),
+      .dbg_int_vec(dbg_int_vec), .dbg_fault_pc(dbg_fault_pc), .dbg_cr0(dbg_cr0),
+      .io_pending(io_req), .inta(core_inta),
+      .ctrl_clear(d_clear), .freeze_thresh(d_freeze_th), .trace_rd_idx(d_trace_idx),
+      .last_eip(d_last_eip), .last_cs(d_last_cs), .last_esp(d_last_esp),
+      .last_eflags(d_last_eflags), .frozen(d_frozen), .frozen_eip(d_frozen_eip),
+      .frozen_state(d_frozen_state), .frozen_vec(d_frozen_vec),
+      .trace_pc(d_trace_pc), .trace_aux(d_trace_aux), .trace_count(d_trace_count),
+      .perf_cyc(d_perf_cyc), .perf_retired(d_perf_ret), .perf_stall(d_perf_stall),
+      .perf_io(d_perf_io), .perf_irq(d_perf_irq)
+  );
+`endif
 
 endmodule : ventium_kv260_core

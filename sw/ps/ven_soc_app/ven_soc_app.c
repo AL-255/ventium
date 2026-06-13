@@ -59,6 +59,50 @@ static long dbg_now_ms(void) {
     return (long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
 
+// VEN_DBG_CORE: dump the on-die debug/trace unit (committed regs + FSM state +
+// fault + freeze snapshot + perf counters + the last-N retired-PC ring). On a
+// freeze this shows the INSTRUCTION TRAIL into the derail — what took a faithful
+// sim to find. No-op on a non-DBG_CORE bitstream (R_DBG_CAP != magic).
+static void dbg_dump_core(void) {
+    uint32_t cap = rd(VEN_R_DBG_CAP);
+    if (cap != VEN_DBG_CAP_MAGIC) {
+        fprintf(stderr, "ven_dbg: no on-die debug unit (cap=0x%08x; rebuild bitstream DBG_CORE=1)\n", cap);
+        return;
+    }
+    int depth = (int)(cap & 0xFFFF);
+    uint32_t st = rd(VEN_R_DBG_STATE);
+    uint64_t cyc = ((uint64_t)rd(VEN_R_DBG_PERF_CYCHI) << 32) | rd(VEN_R_DBG_PERF_CYCLO);
+    uint64_t ret = ((uint64_t)rd(VEN_R_DBG_PERF_RETHI) << 32) | rd(VEN_R_DBG_PERF_RETLO);
+    fprintf(stderr,
+        "\n=== VEN_DBG core state ===\n"
+        " EIP=%08x CS=%04x ESP=%08x EFLAGS=%08x\n"
+        " FSM=0x%02x mode=%s%s vec=0x%02x  io=%d hung=%d frozen=%d\n"
+        " fault_pc=%08x CR0=%08x  halted=%d\n",
+        rd(VEN_R_DBG_EIP), rd(VEN_R_DBG_CS) & 0xFFFF, rd(VEN_R_DBG_ESP), rd(VEN_R_DBG_EFLAGS),
+        st & 0x3F, (st & 0x40) ? "PE" : "real", (st & 0x80) ? "+PG" : "", (st >> 8) & 0xFF,
+        (st >> 16) & 1, (st >> 17) & 1, (st >> 18) & 1,
+        rd(VEN_R_DBG_FAULT_PC), rd(VEN_R_DBG_CR0), rd(VEN_R_DBG_RUNCTL) >> 8 & 1);
+    if (st & (1u << 18)) {
+        uint32_t fs = rd(VEN_R_DBG_FROZEN_ST);
+        fprintf(stderr, " FROZEN snapshot: EIP=%08x FSM=0x%02x vec=0x%02x\n",
+                rd(VEN_R_DBG_FROZEN_EIP), fs & 0x3F, (fs >> 8) & 0xFF);
+    }
+    fprintf(stderr, " perf: cyc=%llu retired=%llu stall=%u io=%u irq=%u CPI=%.2f\n",
+            (unsigned long long)cyc, (unsigned long long)ret, rd(VEN_R_DBG_PERF_STALL),
+            rd(VEN_R_DBG_PERF_IO), rd(VEN_R_DBG_PERF_IRQ),
+            ret ? (double)cyc / (double)ret : 0.0);
+    int n = (int)((rd(VEN_R_DBG_TRACE_IDX) >> 8) & 0x3F);
+    if (n > depth) n = depth;
+    fprintf(stderr, " PC ring (newest first, %d of %d):\n", n, depth);
+    for (int i = 0; i < n; i++) {
+        wr(VEN_R_DBG_TRACE_IDX, (uint32_t)i);
+        (void)rd(VEN_R_DBG_TRACE_PC);          // flush the 1-clock BRAM read latency
+        uint32_t pc = rd(VEN_R_DBG_TRACE_PC), aux = rd(VEN_R_DBG_TRACE_AUX);
+        fprintf(stderr, "  [-%2d] %04x:%08x  fsm=0x%02x\n", i, aux & 0xFFFF, pc, (aux >> 16) & 0x3F);
+    }
+    fflush(stderr);
+}
+
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
 static ven_periph_t *g_i8042, *g_pic, *g_vga, *g_pit, *g_rtc, *g_ide;
@@ -223,10 +267,17 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "[dbg t=%ldms] retire=0x%x%08x st=0x%x ioaddr=0x%x iostat=0x%x intr=0x%x io=%llu\n",
                         now, hi, lo, st, rd(VEN_R_IO_ADDR), rd(VEN_R_IO_STATUS), rd(VEN_R_INTR),
                         (unsigned long long)serviced);
+                // silent-stall auto-dump: if retire is frozen for ~2.5s, dump the
+                // on-die debug unit ONCE (the PC ring shows the trail into the stall).
+                static uint64_t last_ret = 0; static int stall_n = 0, dumped = 0;
+                uint64_t cur = ((uint64_t)hi << 32) | lo;
+                if (cur == last_ret) { if (++stall_n == 10 && !dumped) { dbg_dump_core(); dumped = 1; } }
+                else { stall_n = 0; dumped = 0; last_ret = cur; }
             }
         }
         if (st & VEN_ST_CPU_HUNG) { fprintf(stderr, "\nven_soc: CPU HUNG (bus_err=%d) after %llu io\n",
-                                            !!(st & VEN_ST_BUS_ERR), (unsigned long long)serviced); break; }
+                                            !!(st & VEN_ST_BUS_ERR), (unsigned long long)serviced);
+                                    dbg_dump_core(); break; }
         if (st & VEN_ST_IO_REQ) {
             uint32_t ios  = rd(VEN_R_IO_STATUS);
             uint16_t port = (uint16_t)rd(VEN_R_IO_ADDR);

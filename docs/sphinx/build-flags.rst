@@ -2303,3 +2303,41 @@ pre-uopcache config (``VEN_IC_NARROWB`` instead of
 ``fpga/build/periph_split.vdefs`` yet — the board path runs all peripherals on
 the PS via ``ven_soc_axil``, so the ``VEN_<DEV>_PS`` flags are exercised only
 in the Verilator SoC builds today.
+
+``VEN_DBG_CORE`` — on-die debug / trace / step / breakpoint
+-----------------------------------------------------------
+
+A single opt-in flag arms a comprehensive forensic unit. It is **OFF by
+default** (``make verify`` stays 77/77 byte/cycle-identical; the FPGA close is
+unchanged). Turn it on for a *debug bitstream* (``DBG_CORE=1`` in
+``fpga/scripts/impl_kv260_soc.tcl``) or a debug sim (``+define+VEN_DBG_CORE``;
+the ``l1axi_kv_dos`` tb target carries it).
+
+What it adds (all observers except step/breakpoint, which only act once the PS
+arms them — so even a ``VEN_DBG_CORE`` build is cycle-identical until then):
+
+* **Committed-state taps** — the EIP / CS / ESP / EFLAGS of the last retired
+  instruction, the FSM micro-state (``state_e``), the last exception/IRQ vector
+  and its source EIP, and live CR0 (PE/PG = real/protected/paging). Surfaced as
+  ``ventium_top`` debug-bundle ports (read directly by ``tb_main``; on a stop it
+  prints a one-line ``[VEN_DBG]`` dump naming *where and why* the core stopped).
+* **PC ring buffer** (``ven_soc_dbg``, 32 × {state,CS,EIP}, BRAM) — the last N
+  retired PCs, read back N-back via ``R_DBG_TRACE_IDX``/``_PC``/``_AUX``. On a
+  board freeze this is the instruction *trail* into a derail.
+* **Freeze detector** — a stall counter (reset on each retire); crossing the
+  PS-set ``R_DBG_FREEZE_TH`` latches a snapshot (EIP/FSM/vector) + a sticky
+  ``frozen`` bit, distinguishing a silent stall from a clean halt.
+* **Performance counters** — cycles, retired, no-retire (stall) cycles, S_IO
+  cycles, external IRQs (``R_DBG_PERF_*``). CPI = cyc/retired.
+* **Single-step / breakpoint** — ``R_DBG_RUNCTL`` parks the core at the S_DECODE
+  instruction boundary (``halt_req``), grants one instruction (``step``), or a
+  PC breakpoint (``bp_en`` + ``R_DBG_BP_ADDR``) halts at the target. The park
+  sits *below* SMI/NMI/INTR (no interrupt is lost) and is modeled on the
+  resumable S_HLTWAIT halt; in-flight loads/fills advance untouched.
+
+The PS reads it all through the ``ven_soc_axil`` 0x80+ window (mirrored in
+``sw/ps/ven_soc_app/ven_soc_regs.h``); ``ven_soc_app`` probes ``R_DBG_CAP`` ==
+``0xDB01_0020`` and ``dbg_dump_core()`` prints the full state + ring on a
+``CPU_HUNG`` or a silent-stall auto-trigger. Verified: the deployed top lints +
+``make verify`` 77/77 (off); in sim ``--dbg-step N`` walks the EIP stream one
+instruction at a time and ``--dbg-bp <eip>`` parks at the target.

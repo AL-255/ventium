@@ -92,6 +92,45 @@ module ven_soc_axil #(
 
     // ---- interrupt to PS (GIC pl_ps_irq0) -----------------------------------------
     output logic        irq_out
+`ifdef VEN_DBG_CORE
+    ,
+    // ---- VEN_DBG_CORE: debug/trace register window (0x80+) <-> ven_soc_dbg ----
+    // Control out (PS-written) -> ven_soc_dbg:
+    output logic        dbg_clear,         // W1P: zero perf counters + clear freeze/ring
+    output logic [31:0] dbg_freeze_thresh, // stall cycles before a freeze snapshot (0=off)
+    output logic [4:0]  dbg_trace_idx,     // ring read index: 0=newest retired PC, N back
+    // Readback in (from ven_soc_dbg):
+    input  logic [31:0] dbg_last_eip,
+    input  logic [15:0] dbg_last_cs,
+    input  logic [31:0] dbg_last_esp,
+    input  logic [31:0] dbg_last_eflags,
+    input  logic        dbg_frozen,
+    input  logic [31:0] dbg_frozen_eip,
+    input  logic [5:0]  dbg_frozen_state,
+    input  logic [7:0]  dbg_frozen_vec,
+    input  logic [31:0] dbg_trace_pc,
+    input  logic [31:0] dbg_trace_aux,
+    input  logic [5:0]  dbg_trace_count,
+    // live core taps (combinational, stable when the core is frozen):
+    input  logic [5:0]  dbg_live_state,
+    input  logic [7:0]  dbg_live_vec,
+    input  logic [31:0] dbg_live_fault_pc,
+    input  logic [31:0] dbg_live_cr0,
+    input  logic        dbg_cpu_hung,
+    // performance counters:
+    input  logic [63:0] dbg_perf_cyc,
+    input  logic [63:0] dbg_perf_retired,
+    input  logic [31:0] dbg_perf_stall,
+    input  logic [31:0] dbg_perf_io,
+    input  logic [31:0] dbg_perf_irq,
+    // single-step / breakpoint control out -> core (via ventium_top):
+    output logic        dbg_halt_req,      // level: park at the next instruction boundary
+    output logic        dbg_step,          // W1P: release for exactly one instruction
+    output logic        dbg_bp_en,         // enable the PC breakpoint
+    output logic [31:0] dbg_bp_addr,       // breakpoint EIP
+    output logic        dbg_bp_clr,        // W1P: clear a latched breakpoint (resume)
+    input  logic        dbg_halted         // status: core parked at a boundary
+`endif
 );
 
   // ---- register offsets (word addresses; low bits of awaddr/araddr) -------------
@@ -111,6 +150,34 @@ module ven_soc_axil #(
   localparam logic [7:0] R_INTR      = 8'h38;  // F3: [7:0]vector [8]assert [9]inta-seen(R/W1C) [16]inta-irq-en
   localparam logic [7:0] R_IRQ_STAT  = 8'h70;  // R/W1C: [0]io [1]inta-seen
   localparam logic [7:0] R_IDENT     = 8'h7C;
+`ifdef VEN_DBG_CORE
+  // ---- VEN_DBG_CORE debug/trace window (0x80..0xD4; clear of the 0x40-0x6C proxy)
+  localparam logic [7:0] R_DBG_CAP        = 8'h80;  // RO {magic 0xDB, ver, DEPTH}
+  localparam logic [7:0] R_DBG_EIP        = 8'h84;  // RO last-retired EIP
+  localparam logic [7:0] R_DBG_CS         = 8'h88;  // RO last-retired CS
+  localparam logic [7:0] R_DBG_ESP        = 8'h8C;  // RO last-retired ESP
+  localparam logic [7:0] R_DBG_EFLAGS     = 8'h90;  // RO last-retired EFLAGS
+  localparam logic [7:0] R_DBG_STATE      = 8'h94;  // RO live {frozen,hung,io,vec,cr0pg/pe,state}
+  localparam logic [7:0] R_DBG_FAULT_PC   = 8'h98;  // RO live exception/IRQ source EIP
+  localparam logic [7:0] R_DBG_CR0        = 8'h9C;  // RO live CR0
+  localparam logic [7:0] R_DBG_FROZEN_EIP = 8'hA0;  // RO snapshot EIP at the freeze
+  localparam logic [7:0] R_DBG_FROZEN_ST  = 8'hA4;  // RO {frozen,vec,state} at the freeze
+  localparam logic [7:0] R_DBG_TRACE_IDX  = 8'hA8;  // RW [4:0]=N-back idx; RO [13:8]=count
+  localparam logic [7:0] R_DBG_TRACE_PC   = 8'hAC;  // RO ring[idx] EIP
+  localparam logic [7:0] R_DBG_TRACE_AUX  = 8'hB0;  // RO ring[idx] {state,cs}
+  localparam logic [7:0] R_DBG_CTRL       = 8'hB4;  // W1P [0]=clear perf/freeze/ring
+  localparam logic [7:0] R_DBG_FREEZE_TH  = 8'hB8;  // RW stall-cycles -> freeze (0=off)
+  localparam logic [7:0] R_DBG_PERF_CYCLO = 8'hBC;  // RO cycles[31:0]
+  localparam logic [7:0] R_DBG_PERF_CYCHI = 8'hC0;  // RO cycles[63:32]
+  localparam logic [7:0] R_DBG_PERF_RETLO = 8'hC4;  // RO retired[31:0]
+  localparam logic [7:0] R_DBG_PERF_RETHI = 8'hC8;  // RO retired[63:32]
+  localparam logic [7:0] R_DBG_PERF_STALL = 8'hCC;  // RO no-retire cycles
+  localparam logic [7:0] R_DBG_PERF_IO    = 8'hD0;  // RO S_IO cycles
+  localparam logic [7:0] R_DBG_PERF_IRQ   = 8'hD4;  // RO external IRQs taken
+  localparam logic [7:0] R_DBG_BP_ADDR    = 8'hD8;  // RW breakpoint EIP
+  localparam logic [7:0] R_DBG_RUNCTL     = 8'hDC;  // RW [0]halt_req [1]W1P step
+                                                    //    [2]bp_en [3]W1P bp_clr; RO [8]halted
+`endif
 
   // ---- control / config registers ----------------------------------------------
   logic        core_run;
@@ -129,6 +196,20 @@ module ven_soc_axil #(
   logic        intr_pend_r;      // assert level on the core's intr pin
   logic        intr_seen_r;      // sticky: the core pulsed inta (R/W1C)
   logic        intr_irq_en_r;    // 1 = intr_seen_r also raises irq_out (GIC notify)
+
+`ifdef VEN_DBG_CORE
+  logic [4:0]  dbg_trace_idx_r;  // ring read index (N-back), PS-written
+  logic [31:0] dbg_freeze_th_r;  // freeze stall threshold, PS-written
+  logic [31:0] dbg_bp_addr_r;    // breakpoint EIP, PS-written
+  logic        dbg_bp_en_r;      // breakpoint enable
+  logic        dbg_halt_req_r;   // single-step/park level
+  assign dbg_trace_idx     = dbg_trace_idx_r;
+  assign dbg_freeze_thresh = dbg_freeze_th_r;
+  assign dbg_bp_addr       = dbg_bp_addr_r;
+  assign dbg_bp_en         = dbg_bp_en_r;
+  assign dbg_halt_req      = dbg_halt_req_r;
+  // dbg_step / dbg_bp_clr are W1P pulses, driven in the write-decode block.
+`endif
 
   assign core_rst_n = aresetn & core_run;
   assign init_eip   = init_eip_r;
@@ -223,6 +304,33 @@ module ven_soc_axil #(
           R_INTR:      s_axil_rdata <= {15'd0, intr_irq_en_r, 6'd0, intr_seen_r, intr_pend_r, intr_vec_r};
           R_IRQ_STAT:  s_axil_rdata <= {30'd0, intr_seen_r, irq_pending};
           R_IDENT:     s_axil_rdata <= IDENT;
+`ifdef VEN_DBG_CORE
+          R_DBG_CAP:        s_axil_rdata <= {8'hDB, 8'd1, 16'd32};  // magic, ver, ring DEPTH
+          R_DBG_EIP:        s_axil_rdata <= dbg_last_eip;
+          R_DBG_CS:         s_axil_rdata <= {16'd0, dbg_last_cs};
+          R_DBG_ESP:        s_axil_rdata <= dbg_last_esp;
+          R_DBG_EFLAGS:     s_axil_rdata <= dbg_last_eflags;
+          R_DBG_STATE:      s_axil_rdata <= {13'd0, dbg_frozen, dbg_cpu_hung, io_pending,
+                                             dbg_live_vec, dbg_live_cr0[31], dbg_live_cr0[0],
+                                             dbg_live_state};
+          R_DBG_FAULT_PC:   s_axil_rdata <= dbg_live_fault_pc;
+          R_DBG_CR0:        s_axil_rdata <= dbg_live_cr0;
+          R_DBG_FROZEN_EIP: s_axil_rdata <= dbg_frozen_eip;
+          R_DBG_FROZEN_ST:  s_axil_rdata <= {15'd0, dbg_frozen, dbg_frozen_vec, 2'd0, dbg_frozen_state};
+          R_DBG_TRACE_IDX:  s_axil_rdata <= {18'd0, dbg_trace_count, 3'd0, dbg_trace_idx_r};
+          R_DBG_TRACE_PC:   s_axil_rdata <= dbg_trace_pc;
+          R_DBG_TRACE_AUX:  s_axil_rdata <= dbg_trace_aux;
+          R_DBG_FREEZE_TH:  s_axil_rdata <= dbg_freeze_th_r;
+          R_DBG_PERF_CYCLO: s_axil_rdata <= dbg_perf_cyc[31:0];
+          R_DBG_PERF_CYCHI: s_axil_rdata <= dbg_perf_cyc[63:32];
+          R_DBG_PERF_RETLO: s_axil_rdata <= dbg_perf_retired[31:0];
+          R_DBG_PERF_RETHI: s_axil_rdata <= dbg_perf_retired[63:32];
+          R_DBG_PERF_STALL: s_axil_rdata <= dbg_perf_stall;
+          R_DBG_PERF_IO:    s_axil_rdata <= dbg_perf_io;
+          R_DBG_PERF_IRQ:   s_axil_rdata <= dbg_perf_irq;
+          R_DBG_BP_ADDR:    s_axil_rdata <= dbg_bp_addr_r;
+          R_DBG_RUNCTL:     s_axil_rdata <= {23'd0, dbg_halted, 5'd0, dbg_bp_en_r, 1'b0, dbg_halt_req_r};
+`endif
           default:     s_axil_rdata <= 32'h0;
         endcase
       end else if (s_axil_rvalid && s_axil_rready) begin
@@ -247,10 +355,20 @@ module ven_soc_axil #(
       intr_vec_r <= 8'd0; intr_pend_r <= 1'b0; intr_seen_r <= 1'b0; intr_irq_en_r <= 1'b0;
       io_rdata_r <= 32'd0;
       flush_all <= 1'b0; ps_ack_pulse <= 1'b0; irq_clr_pulse <= 1'b0;
+`ifdef VEN_DBG_CORE
+      dbg_trace_idx_r <= 5'd0; dbg_freeze_th_r <= 32'd0; dbg_clear <= 1'b0;
+      dbg_bp_addr_r <= 32'd0; dbg_bp_en_r <= 1'b0; dbg_halt_req_r <= 1'b0;
+      dbg_step <= 1'b0; dbg_bp_clr <= 1'b0;
+`endif
     end else begin
       flush_all     <= 1'b0;     // W1P: default low, pulse one cycle on the write
       ps_ack_pulse  <= 1'b0;
       irq_clr_pulse <= 1'b0;
+`ifdef VEN_DBG_CORE
+      dbg_clear     <= 1'b0;     // W1P
+      dbg_step      <= 1'b0;     // W1P
+      dbg_bp_clr    <= 1'b0;     // W1P
+`endif
       if (wr_fire) begin
         unique case (waddr)
           R_CTRL: begin
@@ -305,6 +423,28 @@ module ven_soc_axil #(
             if (s_axil_wdata[0]) irq_clr_pulse <= 1'b1;        // W1C io irq
             if (s_axil_wdata[1]) intr_seen_r   <= 1'b0;        // W1C inta-seen
           end
+`ifdef VEN_DBG_CORE
+          R_DBG_TRACE_IDX: if (s_axil_wstrb[0]) dbg_trace_idx_r <= s_axil_wdata[4:0];
+          R_DBG_CTRL:      if (s_axil_wstrb[0] && s_axil_wdata[0]) dbg_clear <= 1'b1; // W1P
+          R_DBG_FREEZE_TH: begin
+            if (s_axil_wstrb[0]) dbg_freeze_th_r[7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) dbg_freeze_th_r[15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) dbg_freeze_th_r[23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) dbg_freeze_th_r[31:24] <= s_axil_wdata[31:24];
+          end
+          R_DBG_BP_ADDR: begin
+            if (s_axil_wstrb[0]) dbg_bp_addr_r[7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) dbg_bp_addr_r[15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) dbg_bp_addr_r[23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) dbg_bp_addr_r[31:24] <= s_axil_wdata[31:24];
+          end
+          R_DBG_RUNCTL: if (s_axil_wstrb[0]) begin
+            dbg_halt_req_r <= s_axil_wdata[0];
+            if (s_axil_wdata[1]) dbg_step   <= 1'b1;   // W1P single-step
+            dbg_bp_en_r    <= s_axil_wdata[2];
+            if (s_axil_wdata[3]) dbg_bp_clr <= 1'b1;   // W1P clear breakpoint latch
+          end
+`endif
           default: ;
         endcase
       end

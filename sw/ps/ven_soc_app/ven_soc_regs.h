@@ -34,6 +34,37 @@
 #define VEN_R_IRQ_STAT   0x70   // R/W1C: [0]io [1]inta-seen
 #define VEN_R_IDENT      0x7C   // RO == 0x5654_4D43 "VTMC"
 
+// ---- VEN_DBG_CORE debug/trace window (0x80+) ------------------------------
+// Present only in a DBG_CORE=1 (debug) bitstream. R_DBG_CAP reads 0xDB01_0020
+// (magic 0xDB, ver 1, ring DEPTH 0x20=32) when present, else 0 — probe it first.
+#define VEN_R_DBG_CAP        0x80  // RO {magic 0xDB, ver, DEPTH}
+#define VEN_R_DBG_EIP        0x84  // RO last-retired EIP
+#define VEN_R_DBG_CS         0x88  // RO last-retired CS
+#define VEN_R_DBG_ESP        0x8C  // RO last-retired ESP
+#define VEN_R_DBG_EFLAGS     0x90  // RO last-retired EFLAGS
+#define VEN_R_DBG_STATE      0x94  // RO live: [5:0]fsm [6]cr0.PE [7]cr0.PG [15:8]vec
+                                   //          [16]io_pending [17]cpu_hung [18]frozen
+#define VEN_R_DBG_FAULT_PC   0x98  // RO live exception/IRQ source EIP
+#define VEN_R_DBG_CR0        0x9C  // RO live CR0
+#define VEN_R_DBG_FROZEN_EIP 0xA0  // RO EIP snapshot at the freeze
+#define VEN_R_DBG_FROZEN_ST  0xA4  // RO [5:0]fsm [15:8]vec [16]frozen — at the freeze
+#define VEN_R_DBG_TRACE_IDX  0xA8  // RW [4:0]=N-back ring idx; RO [13:8]=count
+#define VEN_R_DBG_TRACE_PC   0xAC  // RO ring[idx] EIP
+#define VEN_R_DBG_TRACE_AUX  0xB0  // RO ring[idx] {state[5:0]<<16, cs[15:0]}
+#define VEN_R_DBG_CTRL       0xB4  // W1P [0]=clear perf/freeze/ring
+#define VEN_R_DBG_FREEZE_TH  0xB8  // RW stall cycles -> freeze snapshot (0=off)
+#define VEN_R_DBG_PERF_CYCLO 0xBC  // RO cycles[31:0]
+#define VEN_R_DBG_PERF_CYCHI 0xC0  // RO cycles[63:32]
+#define VEN_R_DBG_PERF_RETLO 0xC4  // RO retired[31:0]
+#define VEN_R_DBG_PERF_RETHI 0xC8  // RO retired[63:32]
+#define VEN_R_DBG_PERF_STALL 0xCC  // RO no-retire cycles
+#define VEN_R_DBG_PERF_IO    0xD0  // RO S_IO cycles
+#define VEN_R_DBG_PERF_IRQ   0xD4  // RO external IRQs taken
+#define VEN_R_DBG_BP_ADDR    0xD8  // RW breakpoint EIP
+#define VEN_R_DBG_RUNCTL     0xDC  // RW [0]halt_req [1]W1P step [2]bp_en [3]W1P bp_clr
+                                   //    RO [8]=halted
+#define VEN_DBG_CAP_MAGIC    0xDB010020u  // R_DBG_CAP value when the unit is present
+
 // ---- CTRL bits ------------------------------------------------------------
 #define VEN_CTRL_CORE_RUN   (1u << 0)   // 1 = release the core's reset
 #define VEN_CTRL_FLUSH_REQ  (1u << 1)   // W1P: pulse flush_all (mode-2 L1 invalidate)

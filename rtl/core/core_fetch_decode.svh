@@ -139,6 +139,17 @@
             // back on inta_vector. Deliver through IDT[inta_vector], int_sw=0.
             start_fault(inta_vector, 1'b0, 32'd0, eip);
           end
+          // ---- VEN_DBG_CORE single-step / breakpoint PARK -------------------
+          // dbg_block_issue is tied 0 in non-debug builds, so this arm is dead and
+          // the dispatch is byte/cycle-identical. It sits BELOW SMI/NMI/INTR (no
+          // interrupt is ever lost) and ABOVE the normal instruction dispatch + its
+          // per-insn fault checks: a held instruction does not execute at all. state
+          // stays S_DECODE and eip is unchanged, so the held instruction re-decodes
+          // and issues only when the hold releases (dbg_step grants one; dbg_halt_req
+          // low + the breakpoint cleared frees the run).
+          else if (dbg_block_issue) begin
+            state <= S_DECODE;
+          end
           // ---- M2S.6 GD general-detect (#DB before a MOV-DR access; gated
           // sys_mode + DBG_GD_ENABLE). This is the ONE #DB that fires BEFORE its
           // instruction (no preceding instruction to fuse with): a MOV to/from a DR
