@@ -68,6 +68,16 @@ module ven_axi_master #(
     output logic        m_ack,
     output logic        bus_err,        // #34: sticky FATAL fault (timeout or SLVERR/DECERR)
 
+    // ---- clean-shutdown quiesce (so xmutil unloadapp can't wedge the PS interconnect) -
+    // shutdown=1: refuse to START any new AXI transaction (the FSMs stop accepting
+    // m_req) but COMPLETE any in-flight one (a master can't retract VALID); a backing
+    // request that arrives while idle is acked LOCALLY (rdata=0, no DDR access) so the
+    // core never deadlocks. Once the in-flight burst/beat finishes, both FSMs sit in
+    // IDLE with every AXI *VALID/*READY low — a protocol-clean state the PS can poll
+    // (m_idle) before removing the PL overlay. Inert when shutdown=0 (default).
+    input  logic        shutdown,
+    output logic        m_idle,         // 1 = R_IDLE && W_IDLE -> no outstanding AXI
+
     // ---- AXI4 master port (-> S_AXI_HPC0_FPD, 32-bit data) --------------------
     // write address channel
     output logic [3:0]        m_axi_awid,
@@ -198,12 +208,19 @@ module ven_axi_master #(
     // VALID — AXI has no cancel), bus_err is raised, and the core's bus_err->S_HALT
     // override abandons the stuck access + halts (the PS then resets). No protocol-
     // violating abort, no drain.
-    m_rdata = m_axi_rdata;
+    // clean-shutdown quiesce: both FSMs idle == no outstanding AXI (every *VALID is
+    // gated on a non-IDLE state above, so IDLE is the protocol-safe drained state).
+    m_idle  = (rst == R_IDLE) && (wst == W_IDLE);
+    // a backing request that arrives while shutting-down + idle is acked locally with
+    // rdata=0 (NO AXI transaction is started — the FSM start arms are gated on
+    // !shutdown), so the core/L1 never deadlocks waiting for an ack we won't issue.
+    m_rdata = (shutdown && m_idle) ? 32'd0 : m_axi_rdata;
     // ack the core write only after the FINAL beat (beat A of an aligned store, or
     // beat B of a straddling one) — a per-beat ack would complete the core's store
     // after only the first word landed.
     m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready) ||
-              ((wst == W_RESP) && m_axi_bvalid && (!xword_q || wbeat));
+              ((wst == W_RESP) && m_axi_bvalid && (!xword_q || wbeat)) ||
+              (shutdown && m_idle && m_req);          // shutdown: local ack, no DDR
     bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err;  // #34 sticky fatal-fault to core
   end
 
@@ -214,7 +231,7 @@ module ven_axi_master #(
       r_wd <= 16'd0; wd_err_r <= 1'b0;
     end else begin
       unique case (rst)
-        R_IDLE: if (m_req && !m_we) begin
+        R_IDLE: if (m_req && !m_we && !shutdown) begin
                   // a backing read == a full line fill: latch the 32B-aligned base.
                   araddr_q <= remap({m_addr[31:5], 5'd0});
                   r_beat <= 8'd0; rresp_err <= 1'b0; r_wd <= 16'd0;
@@ -250,7 +267,7 @@ module ven_axi_master #(
       aw_done <= 1'b0; w_done <= 1'b0; bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
       unique case (wst)
-        W_IDLE: if (m_req && m_we) begin
+        W_IDLE: if (m_req && m_we && !shutdown) begin
                   // BYTE-LANE ALIGN (P2 fix): the core's mem port is byte-addressed —
                   // the byte at m_addr sits in LANE 0 of m_wdata/m_wstrb (symmetric with
                   // the read window c_rdata = line[boff*8 +: 32]). A 32-bit AXI write

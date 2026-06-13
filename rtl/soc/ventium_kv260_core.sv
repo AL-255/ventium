@@ -91,6 +91,8 @@ module ventium_kv260_core #(
   logic [31:0] cfg_init_eip, cfg_init_esp;
   logic        cfg_boot_mode, cfg_cycle_mode, cfg_bus_mode, cfg_l1axi_en;
   logic        cfg_proxy_en, cfg_cosim_en, cfg_soc_en, cfg_flush_all;
+  logic        cfg_shutdown;     // R_CTRL.SHUTDOWN -> quiesce the AXI master
+  logic        st_axi_idle;      // ven_axi_master m_idle -> R_STATUS.AXI_IDLE
   logic [4:0]  cfg_errata_en;
   logic        st_cpu_hung, st_bus_err;
   logic [63:0] st_retire_n;
@@ -136,6 +138,7 @@ module ventium_kv260_core #(
       .proxy_en(cfg_proxy_en), .cosim_en(cfg_cosim_en), .soc_en(cfg_soc_en),
       .errata_en(cfg_errata_en),
       .flush_all(cfg_flush_all),
+      .shutdown(cfg_shutdown), .axi_idle(st_axi_idle),
       .cpu_hung(st_cpu_hung), .bus_err(st_bus_err), .retire_n(st_retire_n),
       .io_req(io_req), .io_we(io_we), .io_addr(io_addr), .io_size(io_size),
       .io_wdata(io_wdata), .io_rdata(io_rdata), .io_ack(io_ack),
@@ -182,6 +185,7 @@ module ventium_kv260_core #(
       .mem_rdata(32'd0), .mem_ack(1'b0),
       // L1+AXI mode 2 -> the AXI4 master to PS-DDR.
       .l1axi_en(cfg_l1axi_en), .flush_all(cfg_flush_all),
+      .shutdown(cfg_shutdown), .m_idle(st_axi_idle),
       .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
       .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst), .m_axi_awlock(m_axi_awlock),
       .m_axi_awcache(m_axi_awcache), .m_axi_awprot(m_axi_awprot), .m_axi_awqos(m_axi_awqos),

@@ -69,12 +69,15 @@
 #define VEN_CTRL_CORE_RUN   (1u << 0)   // 1 = release the core's reset
 #define VEN_CTRL_FLUSH_REQ  (1u << 1)   // W1P: pulse flush_all (mode-2 L1 invalidate)
 #define VEN_CTRL_RST_REQ    (1u << 2)   // W1P: drop CORE_RUN (re-assert reset)
+#define VEN_CTRL_SHUTDOWN   (1u << 3)   // level: quiesce the AXI master (drain in-flight +
+                                        // refuse new txns) before xmutil unloadapp
 #define VEN_CTRL_IRQ_EN     (1u << 8)   // 1 = irq_out drives pl_ps_irq0
 
 // ---- STATUS bits ----------------------------------------------------------
 #define VEN_ST_CPU_HUNG     (1u << 0)
 #define VEN_ST_BUS_ERR      (1u << 1)
 #define VEN_ST_IN_RESET     (1u << 2)
+#define VEN_ST_AXI_IDLE     (1u << 3)   // AXI master drained -> safe to remove the overlay
 #define VEN_ST_IO_REQ       (1u << 8)   // an IN/OUT is pending
 #define VEN_ST_SYS_PEND     (1u << 9)   // an int-0x80 is pending (F4 / +VEN_PS_PROXY)
 

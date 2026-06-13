@@ -38,9 +38,12 @@ module tb_l1_axi;
   logic [3:0]        rid;    logic [31:0] rdata; logic [1:0] rresp; logic rlast, rvalid, rready;
 
   logic bus_err; logic flush = 1'b0;
+  logic shutdown = 1'b0; logic m_idle; logic shutdown_viol = 1'b0;
+  // monitor: any AXI AR/AW asserted while shutting-down is a quiesce violation.
+  always @(posedge clk) if (shutdown && (arvalid || awvalid)) shutdown_viol <= 1'b1;
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK)) dut (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
-      .flush_all(flush),
+      .flush_all(flush), .shutdown(shutdown), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
@@ -144,6 +147,24 @@ module tb_l1_axi;
     do_read(32'h0000_1000, d); chk("STALE hit (no flush yet)", d, 32'h1000 ^ 32'hA5A5_0000);  // still the old cached value
     @(negedge clk); flush <= 1'b1; @(posedge clk); @(negedge clk); flush <= 1'b0;     // pulse the L1 flush
     do_read(32'h0000_1000, d); chk("post-flush refill (coherent)", d, 32'hC0FF_EE00); // miss -> refill -> new value
+
+    // [8] CLEAN-SHUTDOWN QUIESCE: with CTRL.SHUTDOWN asserted, ven_axi_master must
+    // start NO new AXI transaction (no AR/AW ever), report m_idle, and locally ack the
+    // core/L1 (a miss zero-fills) so nothing deadlocks. This is the protocol-clean
+    // state the PS leaves the PL in before `xmutil unloadapp` (an outstanding burst at
+    // overlay-teardown is what wedges the PS interconnect / hangs the host).
+    $display("[8] shutdown quiesce: m_idle clean + no AXI txns while shutting down");
+    @(negedge clk); shutdown <= 1'b1;
+    repeat (8) @(posedge clk);                          // let any in-flight txn drain
+    shutdown_viol = 1'b0;                                // ignore the drain; flag only NEW txns
+    #1; chk("m_idle after drain", {31'd0, m_idle}, 32'd1);
+    do_read (32'h0000_4000, d); chk("shutdown read -> local 0", d, 32'd0);     // uncached -> zero-fill, no AR
+    do_write(32'h0000_4040, 32'hBADC_0DE);                                      // dropped, no AW
+    repeat (4) @(posedge clk);
+    #1; chk("no AXI AR/AW during shutdown", {31'd0, shutdown_viol}, 32'd0);
+    chk("m_idle still high", {31'd0, m_idle}, 32'd1);
+    @(negedge clk); shutdown <= 1'b0;                   // resume -> normal AXI traffic returns
+    do_read(32'h0000_2000, d); chk("post-shutdown read OK", d, 32'h2000 ^ 32'hA5A5_0000);
 
     if (errors==0) $display("L1AXI-GATE-OK (all checks pass)");
     else           $display("L1AXI-GATE-FAIL (%0d errors)", errors);

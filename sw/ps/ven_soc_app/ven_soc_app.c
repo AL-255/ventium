@@ -144,7 +144,26 @@ static void vga_textdump(void) {
     fprintf(stderr, "=====================================\n");
     fflush(stderr);
 }
-static void on_term(int sig) { (void)sig; vga_textdump(); _exit(0); }
+
+// Clean AXI teardown: assert CTRL.SHUTDOWN so ven_axi_master refuses NEW transactions
+// and drains any in-flight one, then poll STATUS.AXI_IDLE. Leaving the PL here means a
+// subsequent `xmutil unloadapp` removes the overlay while the PL→PS AXI master is
+// protocol-clean (no outstanding AW/W/AR) — an outstanding burst at teardown is what
+// wedges the PS interconnect/DDR and can hang the host. core_run is preserved (NOT
+// dropped — dropping it would reset ven_axi_master mid-handshake and strand a beat).
+// No-op on a non-shutdown-capable bitstream (AXI_IDLE just never deviates).
+static void ven_shutdown_quiesce(void) {
+    if (!g_reg) return;
+    uint32_t keep = rd(VEN_R_CTRL) & (VEN_CTRL_CORE_RUN | VEN_CTRL_IRQ_EN);
+    wr(VEN_R_CTRL, keep | VEN_CTRL_SHUTDOWN);
+    for (int i = 0; i < 5000; i++) {            // up to ~5 ms for in-flight to drain
+        if (rd(VEN_R_STATUS) & VEN_ST_AXI_IDLE) break;
+        usleep(1);
+    }
+    fprintf(stderr, "ven_soc: AXI quiesced (STATUS=0x%x) — safe to unloadapp\n",
+            rd(VEN_R_STATUS));
+}
+static void on_term(int sig) { (void)sig; vga_textdump(); ven_shutdown_quiesce(); _exit(0); }
 
 // --- console / device emulation (the part that grows for F3/F4) --------------
 // F2: a tiny UART. OUT to 0x3F8 (COM1 THR) or 0xE9 (debug) -> stdout. IN from the
@@ -386,5 +405,6 @@ int main(int argc, char **argv) {
         // (no busy-spin throttle here; F3 sleeps on the GIC irq via UIO instead.)
     }
     if (g_dos) { if (g_dac_dirty) export_dac(); hid_kbd_close(); }
+    ven_shutdown_quiesce();        // leave the PL→PS AXI clean for xmutil unloadapp
     return 0;
 }

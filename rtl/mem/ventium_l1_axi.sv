@@ -63,6 +63,10 @@ module ventium_l1_axi #(
     output logic        core_ack,
     output logic        bus_err,        // #34 fatal AXI fault (watchdog timeout / SLVERR)
 
+    // ---- clean-shutdown quiesce (pass-through to ven_axi_master) ---------------
+    input  logic        shutdown,        // 1 = stop new AXI txns, drain in-flight
+    output logic        m_idle,          // 1 = AXI master drained -> safe to remove overlay
+
     // ---- AXI4 master port (-> S_AXI_HPC0_FPD), bundle `m_axi` ------------------
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi AWID" *)
     output logic [3:0]        m_axi_awid,
@@ -247,6 +251,8 @@ module ventium_l1_axi #(
       .m_rdata     (axm_rdata),
       .m_ack       (axm_ack),
       .bus_err     (axm_bus_err),
+      .shutdown    (shutdown),
+      .m_idle      (m_idle),
       .m_axi_awid    (m_axi_awid),
       .m_axi_awaddr  (m_axi_awaddr),
       .m_axi_awlen   (m_axi_awlen),

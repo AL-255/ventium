@@ -64,10 +64,13 @@ module ven_soc_axil #(
     output logic        soc_en,                 // F3: core soc_en (MODE.SOCEN, bit 6)
     output logic [4:0]  errata_en,
     output logic        flush_all,              // W1P pulse from CTRL.FLUSH_ALL_REQ
+    output logic        shutdown,               // CTRL.SHUTDOWN level: quiesce the AXI master
+                                                // (clean teardown before xmutil unloadapp)
 
     // ---- status in <- core --------------------------------------------------------
     input  logic        cpu_hung,
     input  logic        bus_err,
+    input  logic        axi_idle,               // ven_axi_master drained -> STATUS.AXI_IDLE
     input  logic [63:0] retire_n,
 
     // ---- port-I/O bridge <-> core io_* bus ----------------------------------------
@@ -289,8 +292,8 @@ module ven_soc_axil #(
       if (rd_fire) begin
         s_axil_rvalid <= 1'b1;
         unique case (raddr)
-          R_CTRL:      s_axil_rdata <= {23'd0, irq_en, 5'd0, 1'b0 /*rst_req W1P*/, 1'b0 /*flush W1P*/, core_run};
-          R_STATUS:    s_axil_rdata <= {22'd0, 1'b0 /*sys_pend*/, io_pending, 5'd0, ~aresetn, bus_err, cpu_hung};
+          R_CTRL:      s_axil_rdata <= {23'd0, irq_en, 4'd0, shutdown /*[3] level*/, 1'b0 /*rst_req W1P*/, 1'b0 /*flush W1P*/, core_run};
+          R_STATUS:    s_axil_rdata <= {22'd0, 1'b0 /*sys_pend*/, io_pending, 4'd0, axi_idle /*[3]*/, ~aresetn, bus_err, cpu_hung};
           R_INIT_EIP:  s_axil_rdata <= init_eip_r;
           R_INIT_ESP:  s_axil_rdata <= init_esp_r;
           R_MODE:      s_axil_rdata <= {19'd0, errata_en_r, 1'b0, soc_en_r, cosim_en_r, proxy_en_r, l1axi_en_r, bus_mode_r, cycle_mode_r, boot_mode_r};
@@ -355,6 +358,7 @@ module ven_soc_axil #(
       intr_vec_r <= 8'd0; intr_pend_r <= 1'b0; intr_seen_r <= 1'b0; intr_irq_en_r <= 1'b0;
       io_rdata_r <= 32'd0;
       flush_all <= 1'b0; ps_ack_pulse <= 1'b0; irq_clr_pulse <= 1'b0;
+      shutdown  <= 1'b0;
 `ifdef VEN_DBG_CORE
       dbg_trace_idx_r <= 5'd0; dbg_freeze_th_r <= 32'd0; dbg_clear <= 1'b0;
       dbg_bp_addr_r <= 32'd0; dbg_bp_en_r <= 1'b0; dbg_halt_req_r <= 1'b0;
@@ -376,6 +380,7 @@ module ven_soc_axil #(
               core_run <= s_axil_wdata[0];
               if (s_axil_wdata[1]) flush_all <= 1'b1;          // W1P FLUSH_ALL_REQ
               if (s_axil_wdata[2]) core_run  <= 1'b0;          // W1P CORE_RST_REQ -> drop run
+              shutdown <= s_axil_wdata[3];                     // [3] SHUTDOWN level (held)
             end
             if (s_axil_wstrb[1]) irq_en <= s_axil_wdata[8];
           end
