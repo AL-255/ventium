@@ -186,6 +186,28 @@ module ventium_top
     output logic        inta
 `endif
 `endif
+`ifdef VEN_DBG_CORE
+    ,
+    // ---- Debug bundle (VEN_DBG_CORE): committed state + FSM/fault/mode taps.
+    // Consumed by tb_main directly (sim post-mortem) and by ven_soc_dbg in the
+    // KV260 wrapper (PC ring / freeze latch / perf counters). Pure observers.
+    output logic        dbg_retire_valid,  // 1-clock per retired instruction
+    output logic [31:0] dbg_eip,           // committed EIP of last retired insn
+    output logic [15:0] dbg_cs,            // committed CS selector
+    output logic [31:0] dbg_esp,           // committed ESP
+    output logic [31:0] dbg_eflags,        // committed EFLAGS
+    output logic [5:0]  dbg_state,         // core FSM micro-state (state_e)
+    output logic [7:0]  dbg_int_vec,       // last delivered exception/IRQ vector
+    output logic [31:0] dbg_fault_pc,      // source EIP of that exception/IRQ
+    output logic [31:0] dbg_cr0,           // live CR0 (PE/PG = mode)
+    // single-step / breakpoint control (pass-through to the core)
+    input  logic        dbg_halt_req,
+    input  logic        dbg_step,
+    input  logic        dbg_bp_en,
+    input  logic [31:0] dbg_bp_addr,
+    input  logic        dbg_bp_clr,
+    output logic        dbg_halted
+`endif
 );
 
   // ---------------------------------------------------------------------------
@@ -326,7 +348,31 @@ module ventium_top
       .retire_cr2        (core_cr2),
       .retire_cr3        (core_cr3),
       .retire_cr4        (core_cr4)
+`ifdef VEN_DBG_CORE
+      ,
+      .dbg_state    (dbg_state),
+      .dbg_int_vec  (dbg_int_vec),
+      .dbg_fault_pc (dbg_fault_pc),
+      .dbg_cr0      (dbg_cr0),
+      .dbg_halt_req (dbg_halt_req),
+      .dbg_step     (dbg_step),
+      .dbg_bp_en    (dbg_bp_en),
+      .dbg_bp_addr  (dbg_bp_addr),
+      .dbg_bp_clr   (dbg_bp_clr),
+      .dbg_halted   (dbg_halted)
+`endif
   );
+
+`ifdef VEN_DBG_CORE
+  // Committed-state half of the debug bundle (tapped from the retire wires the
+  // DPI point already uses). Pure observers; valid in the same clock as the
+  // retire pulse, then held until the next retire.
+  assign dbg_retire_valid = core_retire_valid;
+  assign dbg_eip          = core_retire_pc;
+  assign dbg_cs           = core_retire_state.cs;
+  assign dbg_esp          = core_retire_state.esp;
+  assign dbg_eflags       = core_retire_state.eflags;
+`endif
 
   // ---------------------------------------------------------------------------
   // Single DPI retire point (docs/rtl-interface.md §2).  retire_n is the core's
