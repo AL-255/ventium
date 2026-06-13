@@ -466,10 +466,18 @@ int main(int argc, char** argv) {
                       else if (axhs.r)  { if (axr_cnt==0) axr=0; else { axr_cnt--; axr_addr+=4; axr_lat=AXI_RLAT; } } }
         if (axw==0) { if (axhs.aw) { axw_addr=axhs.awaddr; axw=1; } }
         else if (axw==1) { if (axhs.w) {
-            uint32_t old=mem.read32(axw_addr), nw=0;
+            // FAITHFUL DDR/AXI write: a 32-bit-bus write places byte lane b at the
+            // WORD-ALIGNED address + b, selected by WSTRB. (A real DDR controller
+            // ignores awaddr[1:0] for lane placement — the address's low bits must be
+            // reflected in WSTRB by the master.) Aligning here models real hardware;
+            // the earlier byte-addressed write() was too lenient and HID the L1/AXI
+            // unaligned-write lane bug (a sub-word write to a non-word-aligned byte
+            // address wrote the wrong bytes on silicon but "passed" in sim).
+            uint32_t aligned = axw_addr & ~3u;
+            uint32_t old=mem.read32(aligned), nw=0;
             for (int b=0;b<4;b++){ uint32_t by=((axhs.wstrb>>b)&1)?((axhs.wdata>>(b*8))&0xff)
                                                                   :((old>>(b*8))&0xff); nw|=by<<(b*8); }
-            mem.write32(axw_addr,nw); axw=2; axw_lat=AXI_WLAT; } }
+            mem.write32(aligned,nw); axw=2; axw_lat=AXI_WLAT; } }
         else { if (axw_lat>0) axw_lat--; else if (axhs.b) axw=0; }
     };
 #endif

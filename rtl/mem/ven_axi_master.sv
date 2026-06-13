@@ -235,8 +235,20 @@ module ven_axi_master #(
     end else begin
       unique case (wst)
         W_IDLE: if (m_req && m_we) begin
-                  awaddr_q <= remap(m_addr);
-                  wdata_q  <= m_wdata; wstrb_q <= m_wstrb;
+                  // BYTE-LANE ALIGN (P2 fix): the core's mem port is byte-addressed —
+                  // the byte at m_addr sits in LANE 0 of m_wdata/m_wstrb (symmetric with
+                  // the read window c_rdata = line[boff*8 +: 32]). But a 32-bit AXI write
+                  // places byte lane b at the WORD-ALIGNED address + b, so the master MUST
+                  // word-align awaddr and shift the data/strobes left by m_addr[1:0] bytes
+                  // onto the correct lanes. Forwarding the raw byte address + lane-0 data
+                  // wrote the WRONG DDR bytes on silicon (a sub-word write to a non-word-
+                  // aligned byte address) — the stack / CALL-RET / IVT coherence failure;
+                  // the byte-addressed sim BFM masked it. (Within-32b-word writes; the core
+                  // does not emit a write whose bytes cross a 32-bit word for this path —
+                  // SP is even-aligned, and the no_xword assertion below guards it.)
+                  awaddr_q <= remap({m_addr[31:2], 2'b00});
+                  wdata_q  <= m_wdata << {m_addr[1:0], 3'b000};   // << boff*8 bits
+                  wstrb_q  <= 4'(m_wstrb << m_addr[1:0]);         // << boff bytes
                   aw_done  <= 1'b0;    w_done  <= 1'b0;  bresp_err <= 1'b0; w_wd <= 16'd0;
                   wst <= W_RUN;
                 end
@@ -281,6 +293,12 @@ module ven_axi_master #(
   // no AR while a write is outstanding (single-outstanding in-order guarantee).
   no_rw_overlap: assert property (@(posedge core_clk) disable iff (!core_rst_n)
       !(m_axi_arvalid && (wst != W_IDLE)));
+  // P2 byte-lane fix is within-32b-word only: a write whose strobed bytes, shifted by
+  // the byte offset m_addr[1:0], spill past lane 3 would need a 2-beat split (NOT done).
+  // The core never emits such a write on the L1/AXI path (SP even-aligned; sub-word
+  // accesses stay within a word). Fire if that invariant is ever violated.
+  no_xword_wr: assert property (@(posedge core_clk) disable iff (!core_rst_n)
+      (wst==W_IDLE && m_req && m_we) |-> ((({4'd0, m_wstrb} << m_addr[1:0]) >> 4) == 4'd0));
   // RLAST must land exactly on the last beat (catches a slave's early/late RLAST —
   // the beat counter now ignores RLAST for the FSM exit, this SVA flags the abuse).
   rlast_align: assert property (@(posedge core_clk) disable iff (!core_rst_n)
