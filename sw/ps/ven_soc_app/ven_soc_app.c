@@ -38,6 +38,11 @@ void          ven_pic_set_irq(ven_periph_t*, int irq, int level);
 uint8_t       ven_pic_peek_vector(ven_periph_t*);
 uint8_t       ven_pic_intack(ven_periph_t*);
 const uint8_t* ven_vgaregs_dac(ven_periph_t*);
+// F-track FreeDOS stack: PIT (timer/IRQ0), RTC/CMOS, IDE/ATA disk.
+ven_periph_t* ven_pit_new(void);
+int           ven_pit_irq0_ticks(ven_periph_t*);
+ven_periph_t* ven_rtc_new(void);
+ven_periph_t* ven_ide_new(const char* disk_path);
 
 static volatile uint32_t *g_reg;     // mmap'd AXI-Lite slave
 static volatile uint8_t  *g_ddr;     // mmap'd DDR carveout
@@ -47,7 +52,7 @@ static inline void     wr(uint32_t off, uint32_t v) { g_reg[off >> 2] = v; }
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
-static ven_periph_t *g_i8042, *g_pic, *g_vga;
+static ven_periph_t *g_i8042, *g_pic, *g_vga, *g_pit, *g_rtc, *g_ide;
 static int           g_dac_dirty = 0;    // guest wrote the DAC -> re-export
 static const char   *VGA_DAC_EXPORT = "/dev/shm/ven_vga_dac";
 
@@ -74,6 +79,9 @@ static ven_periph_t* dos_model_of(uint16_t port) {
         port == 0xA0 || port == 0xA1 ||
         port == 0x4D0 || port == 0x4D1)                return g_pic;
     if (port >= 0x3B0 && port <= 0x3DF)                return g_vga;
+    if (port >= 0x40 && port <= 0x43)                  return g_pit;   // 8254 PIT
+    if (port == 0x70 || port == 0x71)                  return g_rtc;   // RTC/CMOS
+    if ((port >= 0x1F0 && port <= 0x1F7) || port == 0x3F6) return g_ide;  // IDE/ATA
     return 0;
 }
 
@@ -93,8 +101,10 @@ static int service_out(uint16_t port, uint32_t val) {
 }
 static uint32_t service_in(uint16_t port, uint8_t size) {
     ven_periph_t* m = dos_model_of(port);
-    (void)size;
-    if (m) return m->io_read(m, port);     // byte-wide devices (DOS uses byte IN)
+    if (m) {
+        if (size >= 2 && m->io_read16) return m->io_read16(m, port);  // IDE data port (0x1F0)
+        return m->io_read(m, port);        // byte-wide devices
+    }
     switch (port) {
         case 0x03FD: return 0x60;          // COM1 LSR: THR-empty | TSR-empty
         case 0x03F8: return 0x00;          // COM1 RBR: no input byte
@@ -105,21 +115,24 @@ static uint32_t service_in(uint16_t port, uint8_t size) {
 int main(int argc, char **argv) {
     // positional args exactly as F2 (<program.bin> [load_off] [entry] [esp]);
     // flags may appear anywhere: --sys, --dos, --kbd <evdev-path>.
-    const char *img = 0, *kbd_path = 0;
+    const char *img = 0, *kbd_path = 0, *bios = 0, *disk = 0;
     uint32_t pos[3] = {0x0, 0x0, 0x000FFFF0};    // load_off, entry, esp
     int      npos = 0, sysmode = 0, i;
     for (i = 1; i < argc; i++) {
         if      (!strcmp(argv[i], "--sys")) sysmode = 1;
         else if (!strcmp(argv[i], "--dos")) g_dos   = 1;
-        else if (!strcmp(argv[i], "--kbd") && i + 1 < argc) kbd_path = argv[++i];
+        else if (!strcmp(argv[i], "--kbd")  && i + 1 < argc) kbd_path = argv[++i];
+        else if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];  // SeaBIOS image
+        else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk = argv[++i];  // IDE disk image
         else if (!img)      img = argv[i];
         else if (npos < 3)  pos[npos++] = strtoul(argv[i], 0, 0);
     }
-    if (!img) {
-        fprintf(stderr, "usage: %s <program.bin> [load_off] [entry] [esp] [--sys]"
-                        " [--dos] [--kbd /dev/input/eventN]\n", argv[0]);
+    if (!img && !bios) {
+        fprintf(stderr, "usage: %s <program.bin> [load_off] [entry] [esp] [--sys] [--dos]\n"
+                        "       [--kbd /dev/input/eventN] [--bios seabios.bin --disk hd.img]\n", argv[0]);
         return 2;
     }
+    if (bios) sysmode = 1;   // a BIOS boots from the reset vector F000:FFF0
     uint32_t load_off = pos[0], entry = pos[1], esp = pos[2];
 
     int fd = open("/dev/mem", O_RDWR | O_SYNC);
@@ -133,19 +146,40 @@ int main(int argc, char **argv) {
 
     // hold the core in reset (CORE_RUN=0 by default at slave reset), stage the image.
     wr(VEN_R_CTRL, 0);                                   // ensure CORE_RUN=0
-    FILE *f = fopen(img, "rb");
-    if (!f) { perror(img); return 1; }
-    size_t n = fread((void *)(g_ddr + load_off), 1, VEN_CARVEOUT_SIZE - load_off, f);
-    fclose(f);
-    __sync_synchronize();                                // flush the image to DRAM before run
-    fprintf(stderr, "ven_soc: loaded %zu bytes at carveout+0x%x; entry=0x%x esp=0x%x %s\n",
-            n, load_off, entry, esp, sysmode ? "[system]" : "[user]");
+    if (bios) {
+        // FreeDOS: stage the SeaBIOS image at the low shadow (0xE0000) AND the
+        // top-of-4G shadow, which the L1/AXI ADDR_MASK wrap folds to carveout offset
+        // 0x0FFE0000 (phys 0xFFFE0000 & 0x0FFF_FFFF). SeaBIOS runs its 32-bit POST from
+        // the high shadow; both copies must be present. The disk is served by the IDE
+        // model from --disk (NOT staged into RAM). Boot from the reset vector.
+        FILE *f = fopen(bios, "rb");
+        if (!f) { perror(bios); return 1; }
+        static uint8_t biosbuf[131072];                  // 128 KiB BIOS region
+        size_t bn = fread(biosbuf, 1, sizeof(biosbuf), f);
+        fclose(f);
+        memcpy((void *)(g_ddr + 0x000E0000), biosbuf, bn);   // low shadow 0xE0000-0xFFFFF
+        memcpy((void *)(g_ddr + 0x0FFE0000), biosbuf, bn);   // wrapped 4G-top shadow
+        __sync_synchronize();
+        fprintf(stderr, "ven_soc: staged %zu-byte BIOS at 0xE0000 + 0x0FFE0000 (4G alias); disk=%s\n",
+                bn, disk ? disk : "(none)");
+    } else {
+        FILE *f = fopen(img, "rb");
+        if (!f) { perror(img); return 1; }
+        size_t n = fread((void *)(g_ddr + load_off), 1, VEN_CARVEOUT_SIZE - load_off, f);
+        fclose(f);
+        __sync_synchronize();                            // flush the image to DRAM before run
+        fprintf(stderr, "ven_soc: loaded %zu bytes at carveout+0x%x; entry=0x%x esp=0x%x %s\n",
+                n, load_off, entry, esp, sysmode ? "[system]" : "[user]");
+    }
 
     // F3 (--dos): instantiate the PS-placed peripheral C models + the keyboard.
     if (g_dos) {
         g_i8042 = ven_i8042_new();
         g_pic   = ven_pic_new();
         g_vga   = ven_vgaregs_new();
+        g_pit   = ven_pit_new();                         // 8254 timer (IRQ0)
+        g_rtc   = ven_rtc_new();                          // RTC/CMOS (RAM-size, time)
+        g_ide   = ven_ide_new(disk);                      // IDE/ATA disk (INT13 source)
         if (hid_kbd_open(kbd_path) < 0)
             fprintf(stderr, "ven_soc: --dos without a keyboard (display only)\n");
         export_dac();                                    // publish the reset palette
@@ -189,25 +223,32 @@ int main(int argc, char **argv) {
         // ---- F3 interrupt pump (the PS *is* the PIC + keyboard) ---------------
         if (g_dos) {
             uint32_t seam, desired;
+            static int pit_pending = 0;
             // 1. USB keyboard -> scancode FIFO -> i8042 OBF (one byte at a time)
             hid_kbd_poll();
             hid_kbd_pump(g_i8042);
-            // 2. i8042 IRQ1 level -> the 8259 C model
-            ven_pic_set_irq(g_pic, 1, g_i8042->irq(g_i8042));
-            // 3. INTA boundary: the core took our injection -> intack the PIC
-            //    model (ISR set/IRR clear, exactly the RTL ven_pic inta path),
-            //    clear the seen latch, then fall through to re-stage.
+            // 2. PIT: each elapsed timer period is one IRQ0 edge, latched until serviced
+            //    (period-count, not OUT-edge, so a slow poll never drops a tick).
+            if (ven_pit_irq0_ticks(g_pit) > 0) pit_pending = 1;
+            // 3. drive the 8259 IR lines: IRQ0 (timer), IRQ1 (kbd), IRQ14 (IDE)
+            ven_pic_set_irq(g_pic, 0,  pit_pending);
+            ven_pic_set_irq(g_pic, 1,  g_i8042->irq(g_i8042));
+            ven_pic_set_irq(g_pic, 14, g_ide->irq(g_ide));
+            // 4. INTA boundary: the core took our injection -> intack the PIC model
+            //    (ISR set/IRR clear, the RTL ven_pic inta path); clear the serviced
+            //    source's latch (IRQ0 re-arms on the next tick).
             seam = rd(VEN_R_INTR);
             if (seam & VEN_INTR_INTA_SEEN) {
-                (void)ven_pic_intack(g_pic);
+                uint8_t vec = ven_pic_intack(g_pic);
+                if (vec == 0x08) pit_pending = 0;        // IRQ0 (PIC base 0x08) serviced
                 wr(VEN_R_INTR, VEN_INTR_INTA_SEEN);      // W1C (and deassert)
                 intr_shadow = 0;
             }
-            // 4. mirror the PIC INT level + would-be vector into the seam
+            // 5. mirror the PIC INT level + would-be vector into the seam
             desired = g_pic->irq(g_pic)
                     ? (VEN_INTR_ASSERT | ven_pic_peek_vector(g_pic)) : 0;
             if (desired != intr_shadow) { wr(VEN_R_INTR, desired); intr_shadow = desired; }
-            // 5. periodic: publish the DAC for the fb_vnc daemon
+            // 6. periodic: publish the DAC for the fb_vnc daemon
             if ((++housekeep & 0xFFFF) == 0 && g_dac_dirty) { export_dac(); g_dac_dirty = 0; }
         }
         // (no busy-spin throttle here; F3 sleeps on the GIC irq via UIO instead.)

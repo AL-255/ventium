@@ -14,7 +14,8 @@ endif
 
 PERIPH  := ../../ps_periph
 APP_SRC := ven_soc_app.c hid_kbd.c \
-           $(PERIPH)/ven_i8042.c $(PERIPH)/ven_pic.c $(PERIPH)/ven_vgaregs.c
+           $(PERIPH)/ven_i8042.c $(PERIPH)/ven_pic.c $(PERIPH)/ven_vgaregs.c \
+           $(PERIPH)/ven_pit.c $(PERIPH)/ven_rtc.c $(PERIPH)/ven_ide.c
 
 all: ven_soc_app ven_fb_vnc
 

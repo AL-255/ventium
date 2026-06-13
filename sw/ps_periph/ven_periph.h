@@ -20,6 +20,10 @@ typedef struct ven_periph {
     uint8_t (*io_read) (struct ven_periph*, uint16_t port);
     void   (*io_write)(struct ven_periph*, uint16_t port, uint8_t val);
     int    (*irq)     (struct ven_periph*);  // IRQ level (0/1), or -1 if no IRQ line
+    // Optional 16-bit accessors (default NULL). Only the IDE/ATA data port (0x1F0)
+    // is word-wide; ven_soc_app calls these when the io-bridge reports io_size==2.
+    uint16_t (*io_read16) (struct ven_periph*, uint16_t port);
+    void     (*io_write16)(struct ven_periph*, uint16_t port, uint16_t val);
 } ven_periph_t;
 
 // A model's constructor allocates + resets its state and returns the vtable.
