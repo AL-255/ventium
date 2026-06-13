@@ -21,7 +21,11 @@ from matplotlib.lines import Line2D
 
 csv_path = sys.argv[1] if len(sys.argv) > 1 else "fpga/build/kv260_soc_impl_linux_40/cells_loc_soc.csv"
 out_png  = sys.argv[2] if len(sys.argv) > 2 else "docs/fpga-device-view-soc-split.png"
-suptitle = sys.argv[3] if len(sys.argv) > 3 else "Ventium Full SoC on K26 @ 40MHz"
+suptitle = sys.argv[3] if len(sys.argv) > 3 else "Ventium Full SoC on K26 @ 40MHz (Congestion limited)"
+# second title line: the verilog_define option set of the deployed build
+# (fpga/build/kv260_soc_impl_linux_40, WNS +0.104 ns @ 40 MHz)
+OPTIONS = ("+SRT_ITER +IDIV_ITER +BCD_ITER +FP_PIPE +FP_PIPE2 +BTB_PIPE "
+           "+IC_BRAM +UOPCACHE +CACHE_HALF +FE_PIPE +L1_AXI +KV260_SOC")
 
 GRAY = "#d4d4d4"
 CORE_FOCUS = set("core_spine btb icache fpu uopcache sqrt_iter bcd srt_div "
@@ -33,10 +37,10 @@ PANELS = [
 ]
 
 MODULE_COLOR = {
-    "icache": "#1f77b4", "fpu": "#ff7f0e", "btb": "#2ca02c", "uopcache": "#8c564b",
+    "icache": "#1f77b4", "fpu": "#ff7f0e", "btb": "#2ca02c", "uopcache": "#0aa386",
     "core_spine": "#9467bd", "dcache_tm": "#17becf", "bcd": "#e377c2",
-    "sqrt_iter": "#d62728", "srt_div": "#c5b0d5", "idiv": "#bcbd22",
-    "dtlb": "#393b79", "itlb": "#843c39", "bcd2fp": "#e7ba52",
+    "sqrt_iter": "#d62728", "srt_div": "#1c1c1c", "idiv": "#bcbd22",
+    "dtlb": "#393b79", "itlb": "#bb29bb", "bcd2fp": "#84cc16",
     "l1d": "#1f77b4", "l1axi": "#2ca02c", "axi_master": "#ff7f0e",
     "soc_axil": "#d62728", "smartconnect": "#9467bd",
 }
@@ -52,6 +56,10 @@ LABEL = {
 }
 BREAKOUT_MIN = 4000
 SAT_BOOST, SAT_FLOOR = 1.6, 0.85
+# srt_div's cells interleave with btb/uopcache/bcd2fp in the NE corner — every
+# saturated hue is taken by an on-die neighbor there, so it stays neutral-dark
+# (exempt from vivid(), the only dark-neutral element in the figure).
+RAW_COLOR = {"srt_div"}
 
 def vivid(hex_base):
     h, l, s = colorsys.rgb_to_hls(*mcolors.to_rgb(hex_base))
@@ -120,7 +128,8 @@ def build_panel(focus):
         base = MODULE_COLOR.get(m)
         if base is None:
             base = _FALLBACK[fb % len(_FALLBACK)]; fb += 1
-        base = vivid(base)
+        if m not in RAW_COLOR:
+            base = vivid(base)
         subs = data[m]; leg = []
         if mod_total[m] >= BREAKOUT_MIN and len(subs) > 1:
             weight = {nm: len(xy[0]) for nm, xy in subs.items()}
@@ -154,9 +163,9 @@ def build_panel(focus):
 # CONTENT (two ~1.6in dies + two slim single-column legends) — compact without
 # overlap: an inset legend over the right die clipped its BD/interconnect cells,
 # so both legends keep their own (slim) columns.
-fig = plt.figure(figsize=(6.9, 6.4))
-gs = fig.add_gridspec(1, 4, width_ratios=[1.0, 1.14, 1.0, 1.02], wspace=0.03,
-                      left=0.066, right=0.998, top=0.875, bottom=0.08)
+fig = plt.figure(figsize=(7.55, 6.4))
+gs = fig.add_gridspec(1, 4, width_ratios=[1.0, 1.18, 1.0, 1.10], wspace=0.10,
+                      left=0.060, right=0.998, top=0.862, bottom=0.08)
 
 def legend_items(legend_blocks):
     handles, labels = [], []
@@ -190,12 +199,13 @@ for p, (focus, subtitle) in enumerate(PANELS):
     ax.tick_params(labelsize=6.5)
     handles, labels = legend_items(legend_blocks)
     lax = fig.add_subplot(gs[0, 2 * p + 1]); lax.axis("off")
-    lg = lax.legend(handles, labels, loc="center left", bbox_to_anchor=(-0.16, 0.5),
+    lg = lax.legend(handles, labels, loc="center left", bbox_to_anchor=(0.0, 0.5),
                     fontsize=6.0, framealpha=0.0, handlelength=1.0,
                     labelspacing=0.22, borderpad=0.1, handletextpad=0.5,
                     title="module ▸ sub-block (cells)")
     style_legend(lg, handles)
 
-fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=0.965)
+fig.suptitle(suptitle, fontsize=13.5, fontweight="bold", y=0.978)
+fig.text(0.5, 0.934, OPTIONS, ha="center", va="center", fontsize=6.8, color="#444444")
 fig.savefig(out_png, dpi=150, bbox_inches="tight", pad_inches=0.08)
 print(f"wrote {out_png}")
