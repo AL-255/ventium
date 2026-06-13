@@ -66,4 +66,5 @@ issue to and why*, and an honest implementation status.
    :maxdepth: 1
    :caption: Project resources
 
+   build-flags
    reference-library
