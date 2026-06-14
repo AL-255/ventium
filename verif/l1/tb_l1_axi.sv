@@ -121,6 +121,16 @@ module tb_l1_axi;
     do_read (32'h0000_1008, d); chk("read-after-write", d, 32'hDEAD_BEEF);
     chk("DDR slave got the write", slv.peek(32'h0000_1008), 32'hDEAD_BEEF);
 
+    $display("[3b] XLINE READ: 4-byte read crossing the 32B line end, NEXT line COLD");
+    $display("     (== the argv[0] strrchr byte-scan pattern that derails free-run on silicon)");
+    do_read(32'h0000_1840, d); chk("xline setup: line@1840 resident", d, 32'h1840 ^ 32'hA5A5_0000);
+    // 0x1860 (the next line) is NOT resident. A 4-byte read at 0x185E (boff=30) spills its
+    // high 2 bytes into 0x1860 -> the L1 must fill the next line, then assemble {L+1, L}.
+    // bytes: [185E]=A5 [185F]=A5 (word 185C=A5A5_185C) ; [1860]=60 [1861]=18 (word 1860=A5A5_1860).
+    do_read(32'h0000_185E, d); chk("xline read @185E (cold next-line fill)", d, 32'h1860_A5A5);
+    // and the reverse: read the SAME xline address again now BOTH lines are resident (hit path).
+    do_read(32'h0000_185E, d); chk("xline read @185E (both resident, hit)", d, 32'h1860_A5A5);
+
     $display("[4] 2-way set: a 3rd distinct line into the same set evicts LRU");
     do_read(32'h0000_2000, d); chk("line@2000", d, 32'h2000 ^ 32'hA5A5_0000);
     do_read(32'h0000_3000, d); chk("line@3000", d, 32'h3000 ^ 32'hA5A5_0000);
