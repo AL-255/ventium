@@ -255,8 +255,26 @@ BOARD BUG NOW PRECISELY LOCALIZED (breakpoint bisection on silicon):
   uncovered-path issue in the L1 line-fill (ven_axi_master R-channel or ven_l1d async read) that the
   real PS-DDR/smartconnect timing exposes but the lenient behavioral sim slave tolerates.
 
-NEXT (constraint = exhaust PS testing before respin): faithful repro via the FULL-CORE Xilinx AXI VIP
-(PS8 VIP returning realistic, variable-latency, wait-stated R-beats) — the L1AXI-only VIP harness
-(fpga/scripts/sim_l1axi_vip.tcl) tests ven_l1d+ven_axi_master but the bug is exercised by the core's
-fill pattern; need the core-vs-VIP. If VIP impractical, add on-die L1-fill taps (capture ar_addr /
-r_data / the assembled line at a retire-count or PC trigger in the n~105..1454 window) + ONE respin.
+DIVERGENCE FURTHER NARROWED (more bp bisection): free-run REACHES the argv[0]-basename scan loop
+@0x08098630-b (the "strrchr" — `cmp $0x2f,%al; jne; mov %ebx,(%edx); mov (%ebx),%al; inc %ebx; test;
+jne`) and executes the slash-store 0x08098634 on the first iteration (ESP=0x40c34700 == sim). So it
+diverges WHILE scanning argv[0] (a later byte/line) or in the immediately-following __init_tls
+(0x08098641) -> __set_thread_area path. This IS the summary's "strrchr @0x08098630 livelock /
+ven_l1d data-staleness": single-step + --flush-each-step reads argv[0] correctly; free-run reads it
+STALE. argv[0] string is at ~0x40c34a8b (a stack/data line first touched cold at the scan).
+
+PERIODIC-FLUSH PS WORKAROUND FAILED (VEN_QUAKE_FLUSH_N): pulsing CTRL.FLUSH_REQ every N service-loop
+iterations gives **retire=0 for ALL N (1,8,64,512,4096)** — the `wr(CTRL, CORE_RUN|FLUSH_REQ)` write
+BREAKS the running core on silicon (resets/stalls it). SECONDARY FINDING: the board's CTRL-write flush
+path is itself untested+broken (0 syscalls on the board means the syscall-path flush at ven_soc_app.c
+:577 never ran either; the sim pulses flush_all directly, not via the CTRL reg, so it was never caught).
+So a flush-based workaround is out. Knob reverted.
+
+NEXT (the cheap PS tests are now exhausted — sim clean, L1-VIP clean, latency/WPOST/flush all tried):
+ON-DIE TAP RESPIN is justified. Add to the VEN_DBG_CORE unit (a) committed-GPR exposure (R_DBG_EAX..
+EDI) so a bp dump shows the loaded values, and (b) a RETIRE-COUNT breakpoint (halt when retired==N) so
+free-run can be stopped EXACTLY at the divergence (n~1000+) — the PC bp can't, because the scan is a
+loop (first-reach fires on the correct early iteration). Then halt at the divergent n, compare GPRs +
+(ideally) an L1-read ring to the sim, pin the wrong read. Implement carefully, validate via the sim
+build + make verify (default byte-identical), THEN respin. ALT: full-core PS8 AXI VIP (no respin, but a
+large xsim build). The write-allocate fix + VEN_QUAKE_DATA redirect STAY (both correct, sim-validated).
