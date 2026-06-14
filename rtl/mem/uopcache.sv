@@ -189,7 +189,18 @@ module uopcache
           // record this instruction's slot + its start-byte boundary, then consume.
           wbuf_slots[wslot*FPDW +: FPDW] <= pd_uop;
           // boundary map: byte woff starts slot wslot (valid bit + slot index).
-          if (woff < IC_LINE)
+          // ONLY record a VALID boundary when the instruction FITS ENTIRELY within
+          // this 32-byte line (woff+len <= IC_LINE). An instruction that STRADDLES the
+          // line end was decoded from `residual` whose bytes past offset 32 are ZEROS
+          // (the walker only sees one line — uopcache.sv header: straddle re-walk is
+          // follow-on), so its slot's operands/length are UNRELIABLE. Leaving its
+          // boundary INVALID makes uop_hit=0 at that offset, so the spine's !uop_hit
+          // gate (core_fastpath.svh) routes it to the slow S_FETCH path, which decodes
+          // it correctly from the real (resident) next-line bytes. Without this, a
+          // straddling insn read a zero-filled slot and issued garbage (the remaining
+          // class of the F4 board Quake cold-line fetch corruption; baseline 60 ->
+          // spine-gate 28 -> this 0 functional fails in the UOPCACHE+IC_BRAM config).
+          if (woff < IC_LINE && (woff + {2'd0, pd_len} <= 6'(IC_LINE)))
             wbuf_bmap[woff*4 +: 4] <= {1'b1, wslot[2:0]};
           residual <= residual >> {pd_len, 3'b000};   // drop pd_len bytes
           woff     <= woff + {2'd0, pd_len};

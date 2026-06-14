@@ -101,6 +101,12 @@ SyscallEmuResult SyscallEmulator::service(uint32_t nr, uint32_t ebx, uint32_t ec
         // so musl's `call *%gs:0x10` (the __kernel_vsyscall gate) reads 0 -> NULL.
         if (entry == 0xffffffffu) { static uint32_t next = 6; entry = next++; wr32(ebx, entry); }
         r.apply_gs = true; r.gs_base = base; r.eax = 0;
+        if (std::getenv("VEN_STA_DBG"))
+            std::fprintf(stderr, "[STA] set_thread_area ebx=0x%08x entry_in->%u base=0x%08x "
+                         "MM[ebx]=%u  MM[ebx&0x0FFFFFFF=0x%08x]=0x%08x MM[+4]=0x%08x\n",
+                         ebx, entry, base, mem_.read32(ebx),
+                         ebx & 0x0FFFFFFFu, mem_.read32(ebx & 0x0FFFFFFFu),
+                         mem_.read32((ebx & 0x0FFFFFFFu) + 4));
         break;
     }
     case NR_set_tid_address: r.eax = 1000; break;          // a fixed tid

@@ -114,6 +114,7 @@ static void dbg_dump_core(void) {
 static int          g_quake     = 0;     // --quake <image.json>
 static const char  *g_qimage    = 0;     // the gen_trace.py --image-out JSON
 static const char  *g_video_out = 0;     // --video <out.p5q>: capture the P5Q1 stream
+static const char  *g_vga_dump  = 0;     // --vga-dump <out.ppm>: mode-13h framebuffer snapshot
 static const char  *g_vidpath   = "/p5q_video_capture";  // $P5Q_VIDEO sentinel (match the image)
 static uint32_t      g_brk      = 0x0a000000u;  // --brk: initial break (run-quake-fb computes it)
 static int           g_video_fd = -1;
@@ -127,6 +128,18 @@ static uint32_t      g_steps     = 80;
 // folded guest address — to tell a staging error from a fetch-read bug. Does not run.
 static uint32_t      g_peek      = 0;
 static int           g_peek_set  = 0;
+// --poke <gaddr> <hexbytes>: after staging, OVERWRITE the carveout at the folded guest
+// address with the given bytes (a controlled instruction stream), then run/single-step.
+// Software-only (g_ddr mmap, like --peek) — used to probe the L1AXI fetch/decode on
+// silicon with a known pattern (e.g. NOP runs / repeated `8b 42 04` across a line edge).
+static uint32_t      g_poke      = 0;
+static int           g_poke_set  = 0;
+static uint8_t       g_poke_buf[512];
+static int           g_poke_len  = 0;
+// --flush-each-step: pulse FLUSH_REQ (L1 invalidate) before every single-step, so each
+// fetch MISSES and refills from DDR — removes the --poke staleness confound (the PS write
+// is not snooped) and isolates a unified-L1 set-eviction / cross-line refill bug.
+static int           g_flush_step = 0;
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
@@ -166,6 +179,35 @@ static void vga_textdump(void) {
     }
     if (!any) fprintf(stderr, "(text buffer all-blank)\n");
     fprintf(stderr, "=====================================\n");
+    fflush(stderr);
+}
+
+// VGA GRAPHICS (mode-13h 320x200x8) snapshot: the DOS framebuffer at core-physical
+// 0xA0000 (carveout+0xA0000; ven_l1d write-through => DDR current) + the 6-bit DAC
+// palette -> a P6 PPM. This is how we SEE/retrieve a DOS Quake frame on a headless
+// board (the only graphics path besides the fb_vnc daemon). Reports the non-zero
+// pixel count so a blank vs rendered screen is obvious. --vga-dump <file>.
+static void vga_gfxdump(void) {
+    if (!g_ddr || !g_vga || !g_vga_dump) return;
+    const volatile uint8_t *fb = g_ddr + 0x000A0000;     // mode-13h linear framebuffer
+    const uint8_t *dac = ven_vgaregs_dac(g_vga);          // 768 bytes = 256 * {R,G,B} 6-bit
+    FILE *f = fopen(g_vga_dump, "wb");
+    if (!f) { perror(g_vga_dump); return; }
+    fprintf(f, "P6\n320 200\n255\n");
+    long nz = 0; int histtop = 0; long histmax = 0; long hist[256]; for (int i=0;i<256;i++) hist[i]=0;
+    for (int i = 0; i < 320*200; i++) {
+        uint8_t idx = fb[i];
+        hist[idx]++;
+        if (idx) nz++;
+        unsigned char r = (unsigned char)(dac[idx*3+0] << 2);
+        unsigned char g = (unsigned char)(dac[idx*3+1] << 2);
+        unsigned char b = (unsigned char)(dac[idx*3+2] << 2);
+        fputc(r, f); fputc(g, f); fputc(b, f);
+    }
+    fclose(f);
+    for (int i=0;i<256;i++) if (hist[i]>histmax) { histmax=hist[i]; histtop=i; }
+    fprintf(stderr, "ven_soc: VGA gfx mode13 @0xA0000 -> %s  (%ld/64000 non-zero px; "
+            "dominant idx=%d count=%ld)\n", g_vga_dump, nz, histtop, histmax);
     fflush(stderr);
 }
 
@@ -259,11 +301,22 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk = argv[++i];  // IDE disk image
         else if (!strcmp(argv[i], "--quake")   && i + 1 < argc) { g_quake = 1; g_qimage = argv[++i]; }
         else if (!strcmp(argv[i], "--video")   && i + 1 < argc) g_video_out = argv[++i];
+        else if (!strcmp(argv[i], "--vga-dump")&& i + 1 < argc) g_vga_dump  = argv[++i];
         else if (!strcmp(argv[i], "--vidpath") && i + 1 < argc) g_vidpath   = argv[++i];
         else if (!strcmp(argv[i], "--brk")     && i + 1 < argc) g_brk = strtoul(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--bp")      && i + 1 < argc) { g_bp = strtoul(argv[++i], 0, 0); g_bp_set = 1; }
         else if (!strcmp(argv[i], "--steps")   && i + 1 < argc) g_steps = strtoul(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--flush-each-step")) g_flush_step = 1;
         else if (!strcmp(argv[i], "--peek")    && i + 1 < argc) { g_peek = strtoul(argv[++i], 0, 0); g_peek_set = 1; }
+        else if (!strcmp(argv[i], "--poke")    && i + 2 < argc) {
+            g_poke = strtoul(argv[++i], 0, 0); g_poke_set = 1;
+            const char *hx = argv[++i]; g_poke_len = 0;     // pairs of hex digits, no spaces
+            while (hx[0] && hx[1] && g_poke_len < (int)sizeof(g_poke_buf)) {
+                char b[3] = { hx[0], hx[1], 0 };
+                g_poke_buf[g_poke_len++] = (uint8_t)strtoul(b, 0, 16);
+                hx += 2;
+            }
+        }
         else if (!img)      img = argv[i];
         else if (npos < 3)  pos[npos++] = strtoul(argv[i], 0, 0);
     }
@@ -310,6 +363,14 @@ int main(int argc, char **argv) {
         }
         fprintf(stderr, "ven_soc: quake staged; entry=0x%x esp=0x%x brk=0x%x [user+proxy]\n",
                 entry, esp, g_brk);
+        if (g_poke_set) {     // OVERWRITE the staged carveout with a controlled pattern
+            volatile uint8_t *pk = g_ddr + (g_poke & (VEN_CARVEOUT_SIZE - 1));
+            for (int b = 0; b < g_poke_len; b++) pk[b] = g_poke_buf[b];
+            __sync_synchronize();
+            fprintf(stderr, "ven_soc: --poke guest 0x%08x  %d bytes:", g_poke, g_poke_len);
+            for (int b = 0; b < g_poke_len; b++) fprintf(stderr, " %02x", g_poke_buf[b]);
+            fprintf(stderr, "\n");
+        }
         if (g_peek_set) {     // dump the staged carveout (what the core fetches) + exit
             const volatile uint8_t *pk = g_ddr + (g_peek & (VEN_CARVEOUT_SIZE - 1));
             fprintf(stderr, "ven_soc: --peek guest 0x%08x (carveout offset 0x%08x):\n",
@@ -415,8 +476,8 @@ int main(int argc, char **argv) {
     for (;;) {
         // service deferred signal requests in NORMAL context (stdio-safe): SIGTERM
         // dumps + quiesces + exits; SIGUSR1 prints a non-destructive live snapshot.
-        if (g_term_req) { systrace_dump("term"); vga_textdump(); ven_shutdown_quiesce(); _exit(0); }
-        if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); dbg_dump_core(); }
+        if (g_term_req) { systrace_dump("term"); vga_textdump(); vga_gfxdump(); ven_shutdown_quiesce(); _exit(0); }
+        if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); dbg_dump_core(); vga_gfxdump(); }
         // --bp single-step trace: when the core halts at the HW breakpoint, walk the
         // trajectory instruction-by-instruction (the on-silicon fetch/control-flow trace
         // for a bug the sim can't reproduce). Each step: RUNCTL halt_req+step (0x3) ->
@@ -424,6 +485,7 @@ int main(int argc, char **argv) {
         if (g_bp_set && (rd(VEN_R_DBG_RUNCTL) & (1u << 8))) {
             fprintf(stderr, "\n=== BP HIT @ 0x%08x — single-stepping %u instructions ===\n", g_bp, g_steps);
             for (uint32_t s = 0; s < g_steps; s++) {
+                if (g_flush_step) wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN | VEN_CTRL_FLUSH_REQ); // L1 invalidate
                 wr(VEN_R_DBG_RUNCTL, (1u << 0) | (1u << 1));     // halt_req + W1P step (exec 1)
                 int rehalt = 0;
                 for (int g = 0; g < 4000000; g++) { if (rd(VEN_R_DBG_RUNCTL) & (1u << 8)) { rehalt = 1; break; } }

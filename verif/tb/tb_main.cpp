@@ -498,6 +498,17 @@ int main(int argc, char** argv) {
     const uint32_t AXI_RLAT = std::getenv("AXI_RLAT") ? (uint32_t)atoi(std::getenv("AXI_RLAT")) : 0;
     const uint32_t AXI_WLAT = std::getenv("AXI_WLAT") ? (uint32_t)atoi(std::getenv("AXI_WLAT")) : 0;
     uint32_t axr_lat = 0, axw_lat = 0;   // remaining wait cycles before R / B
+    // AXI_WPOST: model a POSTED write — BVALID returns (write "accepted") but the
+    // datum becomes globally visible only AXI_WPOST clocks later. A read-miss fill
+    // that races into that window reads STALE backing (pre-write) data, exactly like
+    // the real PL->smartconnect->DDR path where BVALID precedes DRAM commit. This
+    // exposes ven_l1d's no-write-allocate hole: a write-miss (e.g. __init_libc's
+    // `rep stos` zeroing an uncached buffer) goes write-through only, and a later
+    // read-miss of the same line fills from not-yet-committed DRAM -> garbage ->
+    // free-run derail (single-step drains the post between insns, hiding it). 0=off.
+    const uint32_t AXI_WPOST = std::getenv("AXI_WPOST") ? (uint32_t)atoi(std::getenv("AXI_WPOST")) : 0;
+    struct PostW { uint32_t addr, val; int cd; };
+    std::vector<PostW> wpost_q;
     // P2 repro: under VEN_KV260_SOC the L1/AXI master remaps x86 phys into the DDR
     // carveout (m_axi addr = 0x4000_0000 + phys, ventium_top L1AXI_REMAP_BASE). The
     // MemModel is x86-phys-indexed, so subtract the carveout base off every AXI addr.
@@ -536,7 +547,16 @@ int main(int argc, char** argv) {
         axhs.wdata  = (uint32_t)top->m_axi_wdata;  axhs.wstrb = (uint32_t)top->m_axi_wstrb;
     };
     auto axi_advance = [&]() {
-        if (!top->rst_n) { axr=0; axw=0; axr_lat=0; axw_lat=0; return; }
+        if (!top->rst_n) { axr=0; axw=0; axr_lat=0; axw_lat=0; wpost_q.clear(); return; }
+        // drain posted writes whose visibility delay has elapsed (apply to backing).
+        if (!wpost_q.empty()) {
+            size_t k = 0;
+            for (size_t i = 0; i < wpost_q.size(); ++i) {
+                if (--wpost_q[i].cd <= 0) mem.write32(wpost_q[i].addr, wpost_q[i].val);
+                else wpost_q[k++] = wpost_q[i];
+            }
+            wpost_q.resize(k);
+        }
         if (axr==0) { if (axhs.ar) { axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr=1; axr_lat=AXI_RLAT; } }
         else        { if (axr_lat>0) axr_lat--;
                       else if (axhs.r)  { if (axr_cnt==0) axr=0; else { axr_cnt--; axr_addr+=4; axr_lat=AXI_RLAT; } } }
@@ -553,7 +573,8 @@ int main(int argc, char** argv) {
             uint32_t old=mem.read32(aligned), nw=0;
             for (int b=0;b<4;b++){ uint32_t by=((axhs.wstrb>>b)&1)?((axhs.wdata>>(b*8))&0xff)
                                                                   :((old>>(b*8))&0xff); nw|=by<<(b*8); }
-            mem.write32(aligned,nw);
+            if (AXI_WPOST > 0) wpost_q.push_back({aligned, nw, (int)AXI_WPOST}); // posted: defer visibility
+            else               mem.write32(aligned,nw);                          // immediate (coherent)
 #ifdef VEN_DBG_CORE
             { static uint32_t wbase = std::getenv("VEN_WATCH")
                   ? (uint32_t)strtoul(std::getenv("VEN_WATCH"), 0, 0) : 0xFFFFFFFFu;
@@ -702,6 +723,14 @@ int main(int argc, char** argv) {
         // applied exactly once. Then drive eax/gs back for the core to latch.
         if (emu) {
             if (last_emu_n != top->syscall_n) {
+#ifdef VEN_L1_AXI
+                // a real PS syscall service takes microseconds (thousands of core
+                // clocks); any posted write in flight has long since become globally
+                // visible. Drain the AXI_WPOST queue BEFORE the emulator touches guest
+                // memory so its direct writes are not later clobbered by a stale post.
+                for (auto& w : wpost_q) mem.write32(w.addr, w.val);
+                wpost_q.clear();
+#endif
                 emu->set_cycles(cycles);   // drive the synthetic wall clock
                 ventium::SyscallEmuResult r = emu->service(
                     top->syscall_arg_eax, top->syscall_arg_ebx, top->syscall_arg_ecx,
