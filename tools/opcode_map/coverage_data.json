@@ -1299,8 +1299,8 @@
   "D9": {
    "mnem": "FLD/FST/FLDCW/FNSTCW + D9 reg group",
    "status": "partial",
-   "detail": "Many forms HALT: FSCALE/FPREM/FPREM1/FRNDINT/FXTRACT (F4/F5/F8/FC/FD) -> d_unknown (isa-coverage.md:153); transcendentals default-build HALT (2412-2421 ifdef); D9 mem /1 (reg1) -> default d_unknown.",
-   "evidence": "core.sv:2381-2425. Mem: /0 FLD_M32,/2 FST,/3 FSTP,/4 FLDENV,/5 FLDCW,/6 FNSTENV,/7 FNSTCW; default d_unknown. Reg: FLD st(i),FXCH,FNOP,FCHS,FABS,FTST,FXAM,7 FLDCONSTs,FDECSTP,FINCSTP,FSQRT; transcendentals (F0-FF) only under +VEN_TRANSCENDENTAL else default d_unknown."
+   "detail": "Reg-form FRNDINT (FC) and FSCALE (FD) now implemented (libm floor/ceil/rint, ldexp). Still HALT: FPREM/FPREM1 (F8/F5 \u2014 need an exact-remainder engine), FXTRACT (F4); transcendentals (F0-F3/F9-FF) only under +VEN_TRANSCENDENTAL else d_unknown.",
+   "evidence": "core.sv:2381-2429. Reg adds 8h FC FRNDINT / FD FSCALE (exec FX_FRNDINT/FX_FSCALE); F8 FPREM deferred -> d_unknown."
   },
   "DA": {
    "mnem": "FIADD/FICOM m32; FUCOMPP",
@@ -3063,5 +3063,5 @@
    "evidence": "No 0F FF arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
   }
  },
- "_decode_fingerprint": "9f7d6bea3590e61f1263b48aa3fbfbfd660a19d3567f036e95e0af04ba3b8a8f"
+ "_decode_fingerprint": "d1d3fd5957942067acfc7489d6581e15136b1770019029633179eb43e18abfca"
 }

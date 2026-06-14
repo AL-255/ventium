@@ -68,7 +68,12 @@ package ventium_decode_pkg;
     // build keeps treating D9 F0/F1/F2/F3/F9/FB/FE/FF as d_unknown -> HALT, so the
     // 77/77 corpus stays byte-identical). Appended at the END so every existing
     // fxop's enum encoding is unchanged.
-    FX_F2XM1, FX_FPATAN, FX_FYL2X, FX_FYL2XP1, FX_FSIN, FX_FCOS, FX_FSINCOS, FX_FPTAN
+    FX_F2XM1, FX_FPATAN, FX_FYL2X, FX_FYL2XP1, FX_FSIN, FX_FCOS, FX_FSINCOS, FX_FPTAN,
+    // D9 reg-form extended ops (NOT transcendental, NOT ifdef-gated): used by libm
+    // floor/ceil/rint (FRNDINT), ldexp/scalbn (FSCALE), fmod (FPREM). Quake's
+    // FloorDivMod + float math hit these on the render path. Appended at the END so
+    // every existing fxop's enum encoding is unchanged.
+    FX_FRNDINT, FX_FSCALE, FX_FPREM
   } fxop_e;
 
   // ===========================================================================
