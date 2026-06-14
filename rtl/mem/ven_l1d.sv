@@ -120,6 +120,29 @@ module ven_l1d #(
   assign rd_window    = {rd_line_next, rd_line};       // named temp: xsim can't index a concat
   assign boff         = c_addr[4:0];
 
+  // ---- PIPELINED READ (timing-closure): register the high-fanout async line read.
+  // The async read of dc_line (256-bit-wide distributed RAM, 256 entries) has huge
+  // fanout (>1100) and ~49 logic levels through the {set,way} mux — it does not close
+  // 40 MHz timing and GLITCHES on silicon (the free-run Quake derail). Registering
+  // rd_window into rd_window_q breaks that path (now: eip_reg -> async read -> a FF,
+  // then FF -> output mux as two short paths). The core polls mem_ack, so a 1-cycle
+  // read latency is fine.
+  //
+  // CRITICAL: the ack must be GUARDED by an address match. The core does not cleanly
+  // "hold addr, wait for ack, then advance" — it can present a NEW c_addr while a prior
+  // read's ack (rd_armed) is still asserted (different cache SET, even). A bare
+  // `c_ack = rd_armed` then serves rd_window_q (captured for the OLD addr) to the NEW
+  // addr -> stale data -> derail. rd_addr_q records which address the window was
+  // captured for; we only ack (and suppress re-capture) when it matches the live
+  // request, so stale data can NEVER be acked for a mismatched address.
+  logic            rd_armed;
+  logic [2*LW-1:0] rd_window_q;
+  logic [31:0]     rd_addr_q;       // address rd_window_q was captured for
+  logic            rd_match;        // captured window is valid for the CURRENT request
+  logic            do_rd_cap;
+  assign rd_match  = rd_armed && (rd_addr_q == c_addr);
+  assign do_rd_cap = c_req && !c_we && rd_hit && (st==L1_IDLE) && !rd_match;
+
   // ---- fill FSM --------------------------------------------------------------
   typedef enum logic [1:0] { L1_IDLE, L1_FILL, L1_DONE } l1_state_e;
   l1_state_e   st;
@@ -148,28 +171,29 @@ module ven_l1d #(
   always_comb begin
     // 4 bytes at the addressed byte offset, from the {L+1, L} window so a read that
     // crosses the line end (boff > 28) takes its high bytes from the next line.
-    c_rdata = rd_window[{1'b0,boff,3'b000} +: 32];
+    c_rdata = rd_window_q[{1'b0,boff,3'b000} +: 32];   // mux off the REGISTERED window
     c_ack   = 1'b0;
     if (c_req) begin
-      // write ack = backing ack, but ONLY once the write is actually being forwarded
-      // (a hit or a cross-line write). A within-line write MISS first write-allocates
-      // (fills) — hold c_ack=0 across the fill so the core stays stalled until the
-      // post-fill retry forwards the store.
       if (c_we)            c_ack = (st==L1_IDLE && (hit || xline)) ? m_ack : 1'b0;
-      else if (rd_hit && st==L1_IDLE) c_ack = 1'b1; // read hit (both needed lines): same-cycle
-      // read miss: c_ack stays 0 (core stalls) until the fill completes + retries.
+      else                 c_ack = rd_match && !flush_all; // ack only when the captured
+                                                           // window matches THIS addr
     end
   end
 
   // ---- sequential: fill sequencing + array writes ---------------------------
   always_ff @(posedge clk) begin
     if (!rst_n) begin
-      st<=L1_IDLE; fw<=3'd0;
+      st<=L1_IDLE; fw<=3'd0; rd_armed<=1'b0; rd_window_q<='0; rd_addr_q<=32'd0;
       for (int s=0;s<L1_SETS;s++) begin
         dc_lru[s]<=1'b0; dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0;
         dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
       end
     end else begin
+      rd_armed <= do_rd_cap && !flush_all;
+      if (do_rd_cap && !flush_all) begin
+        rd_window_q <= rd_window;
+        rd_addr_q   <= c_addr;        // remember which address this window serves
+      end
       unique case (st)
         L1_IDLE: begin
           if (c_req && !c_we && !rd_hit) begin

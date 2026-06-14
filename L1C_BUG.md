@@ -338,3 +338,28 @@ S_FETCH (or the ven_l1d ack timing) accordingly. NOTE: the functional read path 
 (it's not the WNS — that's the unused fast path), so the silicon failure is likely an ASYNC-LUTRAM-READ
 GLITCH on back-to-back address changes (STA models settled delays, not glitches) — which registering
 the read fixes; that is why the read-pipeline is still the right direction.
+
+## 14. PIPELINED-READ FIXED + SIM-VALIDATED (2026-06-14): address-matched 1-cycle ack
+
+ROOT CAUSE of the §13 core-interaction bug, found via a per-cycle `[L1]` trace of the read FSM around
+the __set_thread_area fetch: the bare `c_ack = rd_armed` decoupled the 1-cycle ack from the address
+the window was captured for. The core does NOT cleanly "hold addr, wait for ack, advance" — it presents
+a NEW c_addr while a prior read's `rd_armed` is still asserted, and the two addresses can land in
+DIFFERENT cache SETS. The trace caught it exactly:
+    addr=080aebc1 armed=1 ack=1 reg=102474ff comb=102474ff   <- ack for c1 (set 0x5E), correct
+    addr=080aebba armed=1 ack=1 reg=00000000 comb=ff68516a   <- addr->ba (set 0x5D), STALE reg served!
+i.e. ba (a different set) got an immediate bogus ack with c1's captured window (=0 at ba's byte offset)
+instead of ba's real data (comb=ff68516a). That stale fetch mis-decoded -> derail.
+
+FIX (rtl/mem/ven_l1d.sv): record the captured address `rd_addr_q` and gate the read ack with a match —
+`rd_match = rd_armed && (rd_addr_q == c_addr)`; `c_ack(read) = rd_match`; `do_rd_cap` suppressed while
+matched. Stale data can now NEVER be acked for a mismatched address (worst case: one extra stall cycle
++ a fresh capture for the new addr). The high-fanout async read still feeds only the register, so the
+49-level path is broken (the silicon-glitch fix).
+
+VALIDATION: l1d gate L1D-GATE-OK + l1axi gate L1AXI-GATE-OK (data-correct, incl. unaligned/xline/b2b).
+Full sim (l1axi_kv_proxy, 12M insns) reaches the SAME point as the same-cycle version — no regression:
+"Added packfile pak0.pak (339 files) / Playing shareware version / 875k surface cache / Initializing
+palettes...", 63 syscalls, halted=0, no derail. (Verilator is cycle-accurate and cannot model the
+silicon glitch, so the sim's role here is FUNCTIONAL-EQUIVALENCE — confirmed; the glitch fix is proven
+on the board after respin.) NEXT: respin (OUTTAG=proxyl1fix) -> deploy -> board Quake retest.
