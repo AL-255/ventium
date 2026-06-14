@@ -2409,6 +2409,13 @@ module core
                   8'hF6:        d_fxop=FX_FDECSTP;            // D9 F6
                   8'hF7:        d_fxop=FX_FINCSTP;            // D9 F7
                   8'hFA:        d_fxop=FX_FSQRT;              // D9 FA FSQRT
+                  // NOT transcendental, NOT gated — libm floor/ceil/rint, ldexp:
+                  8'hFC:        d_fxop=FX_FRNDINT;            // D9 FC FRNDINT
+                  8'hFD:        d_fxop=FX_FSCALE;             // D9 FD FSCALE (ST0 *= 2^trunc(ST1))
+                  // D9 F8 FPREM is DEFERRED: a true remainder must be EXACT
+                  // (ST0-Q*ST1), but fx_mul rounds, so it needs a dedicated
+                  // exact-remainder engine, not div+mul+sub. Left as d_unknown
+                  // (loud HALT) until that engine lands — never mis-executed.
 `ifdef VEN_TRANSCENDENTAL
                   8'hF0:        d_fxop=FX_F2XM1;              // D9 F0 F2XM1 (#11)
                   8'hF1:        d_fxop=FX_FYL2X;              // D9 F1 FYL2X (#11)
@@ -5251,6 +5258,12 @@ module core
     logic [15:0] s_cmp_fstat;        // shared apply_cmp result
     logic [1:0]  s_rc;
     logic        fstore_last_beat;
+    // D9 extended-op temps (FRNDINT / FSCALE / FPREM)
+    logic [65:0] s_ri;                       // fx_to_int_ex result {ovf,inexact,sval}
+    logic signed [63:0] s_qn;                // FSCALE: trunc(ST1); FPREM: quotient
+    logic signed [17:0] s_se;                // FSCALE: ST0 biased-exp + n
+    logic [79:0] s_st1v;                     // ST1
+    logic [80:0] s_pr;                       // FPREM: ST0 - Q*ST1
 
     // default: no writes this clock
     fp_we_push=1'b0; fp_push_data=80'd0;
@@ -5483,7 +5496,9 @@ module core
     s_opnd_f = q_f_mem_read ? f_mem_as_float(f_mem80, q_f_mbytes) : 80'd0;
     s_st0v   = fst(3'd0);
     s_stiv   = fst(q_f_sti);
+    s_st1v   = fst(3'd1);
     s_rc     = fctrl[11:10];
+    s_ri = 66'd0; s_qn = 64'sd0; s_se = 18'sd0; s_pr = 81'd0;
     s_argb   = 80'd0; s_codes = 3'd0; s_xc = 4'd0; s_cmp_ie = 1'b0;
     s_ar = 81'd0;
     // R-area: ONE shared arithmetic eval. The four S_FEXEC arith commit arms used
@@ -5699,6 +5714,53 @@ module core
             s_ar = fx_sqrt(s_st0v, s_rc);
             fp_we_top=1'b1; fp_top_data=s_ar[79:0];
             if (s_ar[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end    // PE
+          end
+        end
+        // ---- D9 FC FRNDINT: round ST0 to an integer-valued floatx80 per RC.
+        // Inf/NaN/zero and already-integral magnitudes (uexp>=63: no fraction
+        // bits) pass through unchanged; the finite fractional case round-trips
+        // through the shared int converter (its exact inverse) and sets PE on a
+        // changed value, preserving the sign of a result that rounds to zero.
+        // (QEMU helper_frndint / floatx80_round_to_int.)
+        FX_FRNDINT: begin
+          if (fx_is_inf_nan(s_st0v) || fx_is_zero(s_st0v) || (fx_uexp(s_st0v) >= 32'sd63)) begin
+            fp_we_top=1'b1; fp_top_data=s_st0v;
+          end else begin
+            s_ri = fx_to_int_ex(s_st0v, 64, s_rc);
+            fp_we_top=1'b1;
+            fp_top_data = (s_ri[63:0]==64'd0) ? fx_make(fx_sign(s_st0v), 15'd0, 64'd0)
+                                              : fx_from_int($signed(s_ri[63:0]));
+            if (s_ri[64]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end  // PE
+          end
+        end
+        // ---- D9 FD FSCALE: ST0 = ST0 * 2^trunc(ST1) — add trunc(ST1) to ST0's
+        // biased exponent. Inf/NaN/zero ST0 pass through; over/underflow saturate
+        // to signed Inf/0 with OE/UE. (QEMU helper_fscale / floatx80_scalbn; the
+        // power-of-two scale is exact, so the mantissa is preserved verbatim.)
+        FX_FSCALE: begin
+          if (fx_is_inf_nan(s_st0v) || fx_is_zero(s_st0v)) begin
+            fp_we_top=1'b1; fp_top_data=s_st0v;
+          end else begin
+            s_ri = fx_to_int_ex(s_st1v, 64, 2'd3);            // trunc ST1 toward zero
+            s_qn = $signed(s_ri[63:0]);
+            if (s_qn >= 64'sd32768) begin                     // huge up-scale -> Inf (OE)
+              fp_we_top=1'b1; fp_top_data=fx_make(fx_sign(s_st0v), 15'h7FFF, 64'h8000000000000000);
+              fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0008;
+            end else if (s_qn <= -64'sd32768) begin           // huge down-scale -> 0 (UE)
+              fp_we_top=1'b1; fp_top_data=fx_make(fx_sign(s_st0v), 15'd0, 64'd0);
+              fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0010;
+            end else begin
+              s_se = $signed({3'd0, fx_exp(s_st0v)}) + $signed(s_qn[17:0]);
+              if (s_se >= 18'sd32767) begin                   // exponent overflow -> Inf (OE)
+                fp_we_top=1'b1; fp_top_data=fx_make(fx_sign(s_st0v), 15'h7FFF, 64'h8000000000000000);
+                fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0008;
+              end else if (s_se <= 18'sd0) begin              // exponent underflow -> signed 0 (UE)
+                fp_we_top=1'b1; fp_top_data=fx_make(fx_sign(s_st0v), 15'd0, 64'd0);
+                fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0010;
+              end else begin
+                fp_we_top=1'b1; fp_top_data=fx_make(fx_sign(s_st0v), s_se[14:0], fx_man(s_st0v));
+              end
+            end
           end
         end
         // ---- memory stores: sticky PE/IE latch at dispatch (the store value +
