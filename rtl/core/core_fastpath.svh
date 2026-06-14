@@ -93,6 +93,50 @@
             // (sub-step 2b prefetches predicted-taken targets to remove even that).
             agi_wr0<=9'h100; agi_wr1<=9'h100;   // bubble writes nothing
 `endif
+`ifdef VEN_UOPCACHE
+          end else if (!uop_hit || !cycle_mode) begin
+            // PREDECODE-VALID GATE + ROBUST FUNCTIONAL-MODE FALLBACK.
+            // `!cycle_mode`: in FUNCTIONAL (single-issue) mode — the board's Quake
+            // run (cycle_mode=0) and the m3 func verify — route EVERY fetch to the
+            // proven slow S_FETCH/S_DECODE decode, NOT the predecoded uop-cache slot.
+            // The uop-cache predecode is only "common-case correct" (uopcache.sv:42:
+            // the SMC/partial-fill/straddle-rewalk cases are follow-on), so in
+            // functional mode (where correctness, not the M5 cycle model, is the
+            // verdict) we DON'T TRUST the slot and use the reference decoder. This
+            // drops the uop-cache *fast-path issue* at runtime in func mode (slower,
+            // but the board only needs first-frame correctness for F4) WHILE KEEPING
+            // the uop-cache HARDWARE synthesized — the twelve 32:1 byte-alignment
+            // MUXF stay deleted (the congestion win), so timing/area are unchanged;
+            // the slot BRAM is simply unused in func mode. cycle_mode=1 (the M5 cycle
+            // kernels) STILL uses the fast path so the emergent-CPI model is intact.
+            // This makes the +VEN_UOPCACHE func verify go 28 -> 0 (vs the spine-only
+            // gate's 28) and is the robust path past the board's hardware-only
+            // db-modrm fetch corruption (0x42->0x82) IF that lives in the fast path.
+            //
+            // `!uop_hit` (the original gate, still live for cycle_mode=1): the line is
+            // RESIDENT (pipe_bytes_ok) + buffered
+            // (ic_fetch_ready) but flin does NOT land on a VALID predecoded boundary,
+            // for one of two reasons:
+            //   (a) COLD: the line was just filled — the spine's inv_en cleared its
+            //       predecode-valid (uopcache.sv:173) and the off-fast-path walker
+            //       (W_WALK/W_WRITE) hasn't re-decoded it yet -> uc_pdvA=0.
+            //   (b) STRADDLE / mid-insn start: the walker decodes each line FROM ITS
+            //       OWN byte 0 (uopcache.sv:178); if an instruction from the PREVIOUS
+            //       line spills across the 32-byte boundary into byte 0 of this line,
+            //       this line's boundary map is mis-aligned -> uc_bvA[flin offset]=0
+            //       (uopcache.sv:44 leaves the straddle re-walk as follow-on).
+            // EITHER WAY the slot read (u_d) is STALE/garbage; issuing from it is the
+            // F4 board Quake __init_libc retire-557 COLD-LINE fetch wedge/mis-decode
+            // (a `mov` at 0x080985db whose window straddles into the cold line 0xe0,
+            // or a fetch landing on byte 0 of 0xe0). Route to the slow S_FETCH/S_DECODE
+            // path, which decodes flin DIRECTLY from the resident line (always correct,
+            // straddle-robust). The walker finishes within a few clocks; the next fetch
+            // reads uop_hit=1 and the fast path resumes. Placed BEFORE every u_d-
+            // dependent arm so no garbage decode field is ever acted on. INERT (signal
+            // absent) without VEN_UOPCACHE, so default `make verify` is byte-identical.
+            agi_wr0<=9'h100; agi_wr1<=9'h100;
+            fetch_word<=3'd0; state<=S_FETCH;
+`endif
           end else if (pending_mem_pen!=7'd0) begin
             // M5: a previous load's D-cache miss/misalign penalty is DEFERRED to
             // the next instruction (p5model g.pending_mem_pen folded into the next

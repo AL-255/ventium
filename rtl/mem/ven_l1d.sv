@@ -112,10 +112,12 @@ module ven_l1d #(
   // c_addr[1:0]=0, so {boff,3'b0} == {word_c,5'b0} and they are unchanged.) A read
   // whose 4 bytes cross the 32-byte line end (c_addr[4:0] > 28) is NOT handled here
   // (it would need the next line too) — see the cross-line note in P1-1.
-  logic [LW-1:0] rd_line, rd_line_next;
-  logic [4:0]    boff;
+  logic [LW-1:0]   rd_line, rd_line_next;
+  logic [2*LW-1:0] rd_window;                          // {L+1, L} cross-line read window
+  logic [4:0]      boff;
   assign rd_line      = dc_line[{set_c, hit_way}];
   assign rd_line_next = dc_line[{set_n, hit_way_n}];   // the L+1 line (for a cross-line read)
+  assign rd_window    = {rd_line_next, rd_line};       // named temp: xsim can't index a concat
   assign boff         = c_addr[4:0];
 
   // ---- fill FSM --------------------------------------------------------------
@@ -132,8 +134,11 @@ module ven_l1d #(
     if (st==L1_FILL) begin
       m_req  = 1'b1; m_we = 1'b0;
       m_addr = {fbase[31:5], 5'd0} + {27'd0, fw, 2'b00};
-    end else if (st==L1_IDLE && c_req && c_we) begin
-      // write-through: forward the core write to the backing verbatim.
+    end else if (st==L1_IDLE && c_req && c_we && (hit || xline)) begin
+      // write-through: forward the core write to the backing verbatim. A within-line
+      // write MISS (!hit && !xline) is NOT forwarded here — it first WRITE-ALLOCATES
+      // (fills the line in the FF below), then retries as a hit and forwards on that
+      // second pass. (Cross-line writes keep the invalidate path and forward now.)
       m_req=1'b1; m_we=1'b1; m_addr=c_addr; m_wdata=c_wdata; m_wstrb=c_wstrb;
     end
   end
@@ -143,10 +148,14 @@ module ven_l1d #(
   always_comb begin
     // 4 bytes at the addressed byte offset, from the {L+1, L} window so a read that
     // crosses the line end (boff > 28) takes its high bytes from the next line.
-    c_rdata = {rd_line_next, rd_line}[{1'b0,boff,3'b000} +: 32];
+    c_rdata = rd_window[{1'b0,boff,3'b000} +: 32];
     c_ack   = 1'b0;
     if (c_req) begin
-      if (c_we)            c_ack = m_ack;          // write-through ack = backing ack
+      // write ack = backing ack, but ONLY once the write is actually being forwarded
+      // (a hit or a cross-line write). A within-line write MISS first write-allocates
+      // (fills) — hold c_ack=0 across the fill so the core stays stalled until the
+      // post-fill retry forwards the store.
+      if (c_we)            c_ack = (st==L1_IDLE && (hit || xline)) ? m_ack : 1'b0;
       else if (rd_hit && st==L1_IDLE) c_ack = 1'b1; // read hit (both needed lines): same-cycle
       // read miss: c_ack stays 0 (core stalls) until the fill completes + retries.
     end
@@ -172,6 +181,17 @@ module ven_l1d #(
             end else begin            // hit_L but xline && !hit_n -> fill the next line
               fset <= set_n; fway <= ~dc_lru[set_n]; ftag <= tag_n; fbase <= addr_n;
             end
+            fw <= 3'd0;  st <= L1_FILL;
+          end else if (c_req && c_we && !xline && !hit) begin
+            // WRITE-ALLOCATE: a within-line write MISS fills the addressed line into
+            // the not-MRU victim FIRST; the core holds the store (c_ack=0) and the
+            // post-fill retry hits -> RMW the cached copy + write-through. Without the
+            // allocate the store is write-through ONLY, and a later read MISS of the
+            // same line fills from not-yet-globally-visible (posted) backing -> STALE
+            // data. That is the free-run __init_libc derail: `rep stos` zeroes an
+            // uncached buffer then reads it back; single-step drained the posted write
+            // between instructions so it only bit on silicon (AXI_WPOST sim repro).
+            fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             fw <= 3'd0;  st <= L1_FILL;
           end else if (c_req && !c_we && rd_hit) begin
             // read HIT → 2-way LRU touch (both lines on a xline-line hit).

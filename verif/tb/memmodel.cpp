@@ -11,6 +11,29 @@
 
 namespace ventium {
 
+// KV260 carveout fold: under VEN_KV260_SOC the L1AXI master remaps every guest
+// access into the 256 MiB DDR carveout (m_axi = REMAP_BASE + (phys & ADDR_MASK)),
+// and the TB's AXI slave subtracts REMAP_BASE so the MemModel index it presents is
+// (phys & 0x0FFFFFFF). The image loader and the int-0x80 syscall EMULATOR, however,
+// dereference RAW guest addresses. For guest addresses >= 0x1000_0000 (the user
+// stack lives at 0x40c3_xxxx) the two disagree: the core writes/reads MM[masked]
+// while the emulator touched MM[raw], so set_thread_area read a zero user_desc,
+// never allocated entry 6, and glibc loaded %gs=0xfffb (flat) -> `call *%gs:0x10`
+// (the AT_SYSINFO __kernel_vsyscall gate) -> NULL -> derail. Folding here makes the
+// loader + emulator + core agree on ONE index, EXACTLY like the board's
+// mem_carveout.cpp (s_mask=0x0FFFFFFF). No-op for the core path (already masked) and
+// for addresses < 0x1000_0000 (code/data), and inert when !VEN_KV260_SOC.
+// Scoped to the KV260 PS-proxy (userspace Quake) build: that path stages the guest
+// user stack at 0x40c3_xxxx (>= 0x1000_0000), where the loader/emulator's raw index
+// and the core's masked index diverge. The DOS path (VEN_KV260_SOC without
+// VEN_PS_PROXY) is left byte-for-byte unchanged.
+#if defined(VEN_KV260_SOC) && defined(VEN_PS_PROXY)
+static constexpr uint32_t CARVEOUT_MASK = 0x0FFFFFFFu;   // == ventium_l1_axi ADDR_MASK
+static inline uint32_t fold(uint32_t a) { return a & CARVEOUT_MASK; }
+#else
+static inline uint32_t fold(uint32_t a) { return a; }
+#endif
+
 MemModel::Page& MemModel::page_for(uint32_t addr) {
     return pages_[addr >> PAGE_SHIFT];   // default-constructs (zeroed) if absent
 }
@@ -21,11 +44,13 @@ const MemModel::Page* MemModel::page_lookup(uint32_t addr) const {
 }
 
 uint8_t MemModel::read8(uint32_t addr) const {
+    addr = fold(addr);
     const Page* p = page_lookup(addr);
     return p ? p->b[addr & PAGE_MASK] : 0u;   // unmapped reads as 0 (M0)
 }
 
 void MemModel::write8(uint32_t addr, uint8_t val) {
+    addr = fold(addr);
     page_for(addr).b[addr & PAGE_MASK] = val;
 }
 
