@@ -226,5 +226,37 @@ that wedges at a `memcpy` `ret` (S_HALT). Single-step from entry runs CORRECTLY 
     (FE_PIPE=1 PS_PROXY=1 DBG_CORE=1) in flight; board retest pending.
 
 Remaining (post-respin, PS-software): "Couldn't load gfx/palette.lmp" — the int-0x80 emulator opens
-pak0.pak + reads the header (Quake prints "Playing shareware version") but fails to load that lump
-(lseek/read of a pak entry). Independent of the L1 fix; needed for the first rendered frame.
+pak0.pak + reads the header (Quake prints "Playing shareware version") but fails to load that lump.
+FIXED PS-side: added a VEN_QUAKE_DATA env redirect in syscall_emu.cpp open() ("/opt/quake/id1/.." ->
+$VEN_QUAKE_DATA/id1/..), since the image was produced with -basedir /opt/quake which does not exist on
+host/board. With it the SIM now loads pak0.pak (339 files), passes palette.lmp, reaches "875k surface
+cache / Initializing palettes..." cleanly (63 syscalls) — the userspace path is FULLY CORRECT IN SIM.
+
+## 10. BOARD RETEST of the write-allocate respin (proxywa) — DID NOT FIX THE BOARD (2026-06-14)
+
+Built+deployed the write-allocate bitstream (OUTTAG=proxywa; md5 765da913 confirmed loaded, != the
+robust .prewa.bak; WHS=+0.011 hold MET, WNS=-2.242@50MHz => +2.76@40MHz so timing MET at the 40MHz
+operating point). Ran userspace `--quake` (VEN_QUAKE_DATA=/tmp/quake, new aarch64 ven_soc_app with the
+redirect): **IDENTICAL derail — 0 syscalls, retire=37.9M, wedge @0x080a67e4 (memcpy).** So the
+AXI_WPOST sim repro was a SAME-SYMPTOM-DIFFERENT-MECHANISM false lead: write-allocate fixes the
+posted-write hole (real, kept — sim-validated, gates green) but is NOT the board bug.
+
+BOARD BUG NOW PRECISELY LOCALIZED (breakpoint bisection on silicon):
+- Free-run is CORRECT through the `rep stos` (write-allocate region — so NOT a write bug) and REACHES
+  the envp loop @0x080985a8 (HW bp FIRES; PC-ring trail clean; ESP=0x40c34700 == sim n=105). So the
+  write path + the early reads are fine.
+- Free-run does NOT reach set_thread_area's int-0x80 @0x080aebdb (0 syscalls). So it diverges in the
+  AUXV-region READS, n~105..1454 (between the envp loop and __set_thread_area).
+- Single-step from entry runs CORRECTLY through this same region (reaches 0x080985a8 at step 219). So
+  it is a FREE-RUN-ONLY READ-PATH bug.
+- NOT timing (met at 40MHz; memory note: clock-independent 40==30MHz), NOT write-allocate, NOT
+  reproducible in the cycle-accurate Verilator sim (clean — runs Quake to video init), NOT reproduced
+  by uniform AXI_RLAT/AXI_WLAT/AXI_WPOST. Strongly suggests a STRICT-AXI R-beat / BRAM-read /
+  uncovered-path issue in the L1 line-fill (ven_axi_master R-channel or ven_l1d async read) that the
+  real PS-DDR/smartconnect timing exposes but the lenient behavioral sim slave tolerates.
+
+NEXT (constraint = exhaust PS testing before respin): faithful repro via the FULL-CORE Xilinx AXI VIP
+(PS8 VIP returning realistic, variable-latency, wait-stated R-beats) — the L1AXI-only VIP harness
+(fpga/scripts/sim_l1axi_vip.tcl) tests ven_l1d+ven_axi_master but the bug is exercised by the core's
+fill pattern; need the core-vs-VIP. If VIP impractical, add on-die L1-fill taps (capture ar_addr /
+r_data / the assembled line at a retire-count or PC trigger in the n~105..1454 window) + ONE respin.
