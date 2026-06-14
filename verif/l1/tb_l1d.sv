@@ -70,6 +70,31 @@ module tb_l1d;
     @(negedge clk); c_req<=1'b0; c_we<=1'b0;
   endtask
 
+  // back-to-back reads with c_req HELD (mimics the core's S_FETCH 4-word burst): advance
+  // c_addr on each c_ack, NEVER dropping c_req. do_read drops c_req between reads, so it
+  // misses the read-after-read protocol — exactly where a pipelined/1-cycle read FSM can
+  // mis-handle the addr advance vs the ack. Also covers the first word missing (fill) then
+  // the rest hitting, all in one held burst.
+  task automatic do_read_b2b(input logic [31:0] base, input int n);
+    int guard; int i;
+    @(negedge clk); c_req<=1'b1; c_we<=1'b0; c_wstrb<=4'd0; c_addr<=base;
+    i=0; guard=0;
+    forever begin
+      @(posedge clk); #1;
+      if (c_ack) begin
+        // expected = the 4 backing bytes at the (possibly UNALIGNED) byte address — covers
+        // unaligned + cross-line (xline) reads the aligned (addr^A5A5) formula can't express.
+        automatic logic [31:0] a = base + 32'(i)*4;
+        automatic logic [31:0] exp = {mem[a+3], mem[a+2], mem[a+1], mem[a+0]};
+        chk($sformatf("b2b w%0d @%08x", i, a), c_rdata, exp);
+        i++; if (i==n) break;
+        c_addr <= base + 32'(i)*4;            // advance; c_req STAYS high
+      end
+      if (++guard > 300) begin $display("  FAIL b2b: no ack at w%0d", i); errors++; break; end
+    end
+    @(negedge clk); c_req<=1'b0;
+  endtask
+
   logic [31:0] d;
   initial begin
     c_req=0; c_we=0; c_addr=0; c_wdata=0; c_wstrb=0;
@@ -98,6 +123,17 @@ module tb_l1d;
     do_read(32'h0000_2000, d); chk("line@2000", d, 32'h2000 ^ 32'hA5A5_0000); // way A
     do_read(32'h0000_3000, d); chk("line@3000", d, 32'h3000 ^ 32'hA5A5_0000); // way B (set 0 too? 0x2000/0x3000 share set 0)
     do_read(32'h0000_2000, d); chk("rehit@2000", d, 32'h2000 ^ 32'hA5A5_0000);
+
+    $display("[5] BACK-TO-BACK reads, c_req held (S_FETCH-style burst): word0 miss+fill, rest hit");
+    do_read_b2b(32'h0000_1840, 8);   // fresh line 0x1840: first word fills, then 7 held hits
+    $display("[6] BACK-TO-BACK reads on an ALREADY-resident line (all hits, held c_req)");
+    do_read_b2b(32'h0000_1840, 8);   // now fully resident -> 8 held hits in a row
+
+    $display("[7] BACK-TO-BACK UNALIGNED reads, held c_req (S_FETCH at an unaligned eip):");
+    $display("    boff=26,30,... -> includes a CROSS-LINE (xline) word @boff=30 mid-burst");
+    do_read_b2b(32'h0000_1c1a, 6);   // 0x1c1a unaligned: words at boff 26,30(xline),2,6,10,14
+    $display("[8] same burst over a COLD next line (xline fills L+1 mid-burst)");
+    do_read_b2b(32'h0000_201a, 6);   // 0x201a: line 0x2000 + crosses into cold 0x2020 @boff=30
 
     if (errors==0) $display("L1D-GATE-OK (all checks pass)");
     else           $display("L1D-GATE-FAIL (%0d errors)", errors);

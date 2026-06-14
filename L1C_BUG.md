@@ -320,3 +320,21 @@ without a read-contract change. Either way this is now a TIMING-CLOSURE fix, not
     (ram_style="block"/registered-addr) instead of the hand-rolled capture. Then validate (incl. the
     new directed test) + respin. The read-pipeline DIRECTION is correct (it breaks the 49-level
     high-fanout path); only the FSM micro-implementation needs to be gotten right (waveform-debug).
+
+## 13. PIPELINED-READ DEBUG NARROWED (2026-06-14): correct in isolation, core-interaction bug
+
+Re-implemented the 1-cycle ven_l1d read + a flush-cancel; hardened the L1 unit gate with
+BACK-TO-BACK (held-c_req) reads covering aligned, UNALIGNED, and CROSS-LINE words + cold-next-line
+fill mid-burst (verif/l1/tb_l1d.sv [5]-[8]). With the pipelined read ALL of these PASS — so ven_l1d's
+1-cycle read is correct for every access protocol in isolation. BUT the full sim Quake still regressed:
+sim-trajectory diff (pipelined vs same-cycle) pins the first divergence to n=1439-1440 IN
+__set_thread_area — the FETCH of the insn @0x080aebbc mis-decodes (2 bytes not 5), i.e. a corrupted
+instruction fetch. The previous fetch (eip=0x080aebba, unaligned) reads boff=26,30(xline),... So the
+bug is the CORE's S_FETCH driving the 1-cycle read (subtly different from the gate's clean held-c_req
+protocol) — NOT ven_l1d alone. Reverted the pipelined read (kept the new gate tests, which pass with
+the same-cycle read). NEXT: full-sim VCD of the core<->ven_l1d signals (mem_req/mem_addr/c_ack/c_rdata/
+fetch_word) across n~1435-1442 to see how the core's S_FETCH mishandles the 1-cycle read; fix the core
+S_FETCH (or the ven_l1d ack timing) accordingly. NOTE: the functional read path MEETS STA timing
+(it's not the WNS — that's the unused fast path), so the silicon failure is likely an ASYNC-LUTRAM-READ
+GLITCH on back-to-back address changes (STA models settled delays, not glitches) — which registering
+the read fixes; that is why the read-pipeline is still the right direction.
