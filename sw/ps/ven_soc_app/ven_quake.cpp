@@ -10,6 +10,7 @@
 #include "ven_quake.h"
 
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "syscall_emu.h"    // verif/tb/syscall_emu.h (via -I)
@@ -29,9 +30,18 @@ extern "C" int ven_quake_init(volatile uint8_t* ddr, uint32_t mask,
                               uint32_t* out_esp) {
     ventium::mem_carveout_bind(ddr, mask);
     g_mem = new ventium::MemModel();
-    // Stage every materialised region of the process image into the carveout
-    // (the loader writes via MemModel::write8 -> g_ddr). Zero regions stay sparse
-    // (the carveout is zeroed). Returns the reset regs.
+    // ZERO THE CARVEOUT FIRST. The board's DDR carveout holds STALE data from prior
+    // runs; the sim's MemModel returns 0 for any unwritten address, so the guest's
+    // BSS / brk-heap / anonymous (zero) memory is implicitly zero in sim. Kernel
+    // anonymous memory IS zero-filled, so Quake relies on it. Without this, the guest
+    // reads GARBAGE from its BSS -> a corrupted global -> a corrupted pointer/count
+    // -> a DETERMINISTIC memcpy (rep movsl) fault deep in init (insn ~33.66M, EIP
+    // 0x080A67E4) that ONLY bites on the board (the cycle-accurate sim passes the same
+    // point). Match the sim: zero the whole carveout before staging the image regions.
+    std::memset(const_cast<uint8_t*>(ddr), 0, (size_t)mask + 1u);
+    // Stage every materialised region of the process image into the now-zeroed
+    // carveout (the loader writes via MemModel::write8 -> g_ddr). Zero regions stay
+    // sparse (already zero). Returns the reset regs.
     ventium::QuakeImage img = ventium::load_quake_image(image_json, *g_mem);
     if (!img.ok) {
         std::fprintf(stderr, "ven_quake: failed to load image '%s'\n", image_json);

@@ -43,9 +43,17 @@ SyscallEmulator::SyscallEmulator(MemModel& mem, std::vector<uint8_t> stdin_bytes
                                  uint32_t brk_base)
     : mem_(mem), stdin_(std::move(stdin_bytes)),
       brk_(page_up(brk_base)),
-      // A high private arena for anon mmap, clear of the program (low), the brk
-      // heap (just above the image), and the initial stack (~0x40c34000).
-      mmap_next_(0x50000000u),
+      // Anon-mmap arena. MUST fold cleanly through the KV260 L1AXI REMAP, which
+      // maps a guest address into a 256 MB DDR carveout by `addr & 0x0FFFFFFF`.
+      // The old 0x50000000 base folded to 0x00000000 and ALIASED the folded stack
+      // (0x40c34840 -> 0x00c34840) — so Quake's 32 MB Hunk (a malloc -> mmap) and
+      // the stack overwrote each other on the board (a deterministic memcpy fault
+      // ~insn 33.66M; the sim's full-4 GB MemModel never aliases, so it passed).
+      // 0x01000000 folds to itself, landing in the large free carveout gap between
+      // the folded stack-top (~0x00c35000) and the ELF image (0x08048000) — ~116 MB,
+      // ample for the Hunk + musl's internal mmaps. Low in guest space too (unused,
+      // below the 0x08048000 ELF), so it is clear in BOTH the carveout AND full 4 GB.
+      mmap_next_(0x01000000u),
       vns_(1000000000ull) {}   // start at t=1.000000000s
 
 std::vector<uint8_t> SyscallEmulator::rd(uint32_t addr, uint32_t len) const {
