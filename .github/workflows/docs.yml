@@ -15,6 +15,11 @@ on:
     paths:
       - 'docs/sphinx/**'
       - '.github/workflows/docs.yml'
+      # the opcode-map is generated from the RTL decoder + its data file, so a
+      # decoder change must re-trigger the docs build (and the drift check).
+      - 'tools/opcode_map/**'
+      - 'rtl/core/core.sv'
+      - 'rtl/core/ventium_decode_pkg.sv'
   workflow_dispatch:
 
 # Least-privilege token + the Pages/OIDC perms the deploy action needs.
@@ -47,6 +52,14 @@ jobs:
 
       - name: Install Sphinx
         run: pip install -r docs/sphinx/requirements.txt
+
+      - name: Regenerate the opcode-map table + verify it matches the RTL decoder
+        run: |
+          # Fail loudly if the core.sv decoder changed without the coverage data
+          # being updated (the staleness tripwire), then regenerate the RST fresh
+          # so the published map always reflects the current decoder.
+          python3 tools/opcode_map/gen_opcode_map.py --verify-rtl
+          python3 tools/opcode_map/gen_opcode_map.py
 
       - name: Build HTML (warnings are errors)
         run: |

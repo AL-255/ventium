@@ -45,6 +45,7 @@ issue to and why*, and an honest implementation status.
    :caption: Reference
 
    isa/index
+   isa/opcode-map
 
 .. toctree::
    :maxdepth: 2

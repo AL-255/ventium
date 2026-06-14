@@ -363,3 +363,23 @@ Full sim (l1axi_kv_proxy, 12M insns) reaches the SAME point as the same-cycle ve
 palettes...", 63 syscalls, halted=0, no derail. (Verilator is cycle-accurate and cannot model the
 silicon glitch, so the sim's role here is FUNCTIONAL-EQUIVALENCE — confirmed; the glitch fix is proven
 on the board after respin.) NEXT: respin (OUTTAG=proxyl1fix) -> deploy -> board Quake retest.
+
+## 15. BUILD CONSTRAINT MISMATCH (2026-06-14): build at 40 MHz, not 50 MHz
+
+The first proxyl1fix respin (PL0_MHZ default = 50) FAILED timing at WNS=-10.945 (uopcache->icache,
+31 ns, 76% route) — but this was an unlucky 50 MHz router roll on a congestion-limited XCK26 (78% LUT),
+NOT my fix: the L1-read path (eip->RAMD64E->gpr) DROPPED OUT of the worst-path list (the pipeline
+worked), and utilization vs proxywa is ~identical (+17 LUTs, +357 FFs). Key realization from the
+post-route reports: **the DEPLOYED proxywa ALSO fails 50 MHz timing (WNS=-2.242; worst path = the
+22 ns L1 async read).** The design only ever closed at the REAL operating point — 40 MHz (25 ns) — per
+venclk.sh / psu_init (IOPLL 1000 / DIVISOR0=25 = 40 MHz, "the timing-closure target; sign-off margin
+ends ~40.4 MHz"). The impl tcl over-constrained pl_clk0 at 50 MHz (PL0_MHZ default 50), so signoff was
+pessimistic and high-variance. proxywa's 22 ns L1 path passes at 40 MHz with only ~3 ns margin -> that
+thin margin + the un-modeled high-fanout async-LUTRAM-read GLITCH = the board derail.
+
+FIX: rebuild constrained at 40 MHz (`PL0_MHZ=40` -> 25 ns), OUTTAG=proxyl1fix40. The design closes with
+positive margin at the real operating frequency, my L1 pipeline removes the glitchy async-read path
+entirely, and runtime `venclk set 25` (40 MHz) matches the constraint -> glitch-free. (Leaving the impl
+default at 50 for overclock-headroom analysis; the DEPLOY build uses PL0_MHZ=40.) NEXT: confirm
+positive-WNS close -> bootgen -> deploy -> board Quake retest (expect ~4-6 min Alpha_Init precompute
+before the first frame, see the translucency-precompute note).

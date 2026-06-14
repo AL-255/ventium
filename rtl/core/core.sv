@@ -1945,6 +1945,11 @@ module core
         end
         8'h98: begin d_kind=K_CONV; d_conv_cdq=1'b0; d_len=pfx_len+4'd1; end
         8'h99: begin d_kind=K_CONV; d_conv_cdq=1'b1; d_len=pfx_len+4'd1; end
+        // FWAIT/WAIT (9B): wait for pending unmasked x87 exceptions. With the FPU
+        // exception masks at their (default) masked state — as glibc/musl libm
+        // (floor/ceil via FSTCW) and Quake leave them — there is nothing to
+        // service, so it retires as a 1-byte NOP. (Was undecoded -> S_HALT hang.)
+        8'h9B: begin d_is_nop=1'b1; d_len=pfx_len+4'd1; end
         8'h9C: begin d_kind=K_STKMISC; d_sm=SM_PUSHF; d_mem_write=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'h9D: begin d_kind=K_STKMISC; d_sm=SM_POPF;  d_mem_read=1'b1;  d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'h9E: begin d_kind=K_STKMISC; d_sm=SM_SAHF; d_len=pfx_len+4'd1; end
