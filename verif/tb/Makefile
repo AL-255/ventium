@@ -142,6 +142,21 @@ l1axi_kv_full:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (deployed linux_40 config): $(CURDIR)/obj_dir_l1axi_kvf/$(EXE)"
 
+# ---- l1axi_kv_proxy: the EXACT deployed PROXY bitstream config ---------------
+# l1axi_kv_full + VEN_PS_PROXY + VEN_DBG_CORE = the kv260_soc_impl_proxy build.
+# Reproduces the on-silicon userspace-Quake memory+fetch path so a board-only freeze
+# (e.g. the __init_libc jcc fetch wedge) reproduces in sim where the PC + every
+# internal signal is visible. Run:
+#   ./obj_dir_l1axi_kvproxy/tb_ventium --l1-axi --quake-image image_board.json \
+#       --emulate-syscalls --brk-base 0x87c3000 --x87 --max-insn 5000 ...
+.PHONY: l1axi_kv_proxy
+l1axi_kv_proxy:
+	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) +define+VEN_PS_PROXY +define+VEN_DBG_CORE $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_PS_PROXY -DVEN_DBG_CORE" \
+	  -Mdir obj_dir_l1axi_kvproxy \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (deployed PROXY config): $(CURDIR)/obj_dir_l1axi_kvproxy/$(EXE)"
+
 # ---- l1axi_kv_dos: l1axi_kv_full + the PS peripheral C models wired into the io
 # bridge (--dos). A FAITHFUL FreeDOS repro — SeaBIOS POST gets the SAME device
 # responses ven_soc_app gives on the KV260, so it follows the board's exact path

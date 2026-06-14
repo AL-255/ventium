@@ -713,6 +713,15 @@ int main(int argc, char** argv) {
                 emu_gs       = r.gs_base;
                 if (r.unsupported) { emu_unsupported = true; emu_bad_nr = top->syscall_arg_eax; }
                 if (r.should_exit) { emu_exit = true; emu_code = r.exit_code; }
+#ifdef VEN_L1_AXI
+                // The emulator wrote kernel effects into MemModel behind the L1's
+                // back (set_thread_area's user_desc, read/mmap buffers, brk zero
+                // pages). In mode 2 invalidate the L1 so the core's next read
+                // refills coherently — mirrors ven_soc_app's per-syscall FLUSH_REQ
+                // on the board. Without it a stale L1 returns the OLD user_desc
+                // entry -> wrong %gs selector (0xfffb) -> NULL vsyscall call -> derail.
+                flush_l1_pending = true;
+#endif
             }
             top->syscall_resume_eip = 0;
             top->syscall_eax        = emu_eax;
