@@ -31,6 +31,7 @@
 #include "ven_soc_regs.h"
 #include "hid_kbd.h"
 #include "ven_quake.h"
+#include "ven_systrace.h"
 #include "../../ps_periph/ven_periph.h"
 
 // F3 PS-placed peripheral C models (sw/ps_periph/, same files the cosim gates
@@ -176,7 +177,10 @@ static void ven_shutdown_quiesce(void) {
     fprintf(stderr, "ven_soc: AXI quiesced (STATUS=0x%x) — safe to unloadapp\n",
             rd(VEN_R_STATUS));
 }
-static void on_term(int sig) { (void)sig; vga_textdump(); ven_shutdown_quiesce(); _exit(0); }
+static void on_term(int sig) { (void)sig; systrace_dump("term"); vga_textdump(); ven_shutdown_quiesce(); _exit(0); }
+// SIGUSR1: non-destructive live snapshot of the Quake proxy (does NOT exit) —
+// `kill -USR1 <pid>` from an SSH session to probe a still-running board.
+static void on_snap(int sig) { (void)sig; systrace_snapshot(); dbg_dump_core(); }
 
 // --- console / device emulation (the part that grows for F3/F4) --------------
 // F2: a tiny UART. OUT to 0x3F8 (COM1 THR) or 0xE9 (debug) -> stdout. IN from the
@@ -262,6 +266,8 @@ int main(int argc, char **argv) {
     g_ddr = mmap(0, VEN_CARVEOUT_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fd, VEN_CARVEOUT_BASE);
     if (g_reg == MAP_FAILED || g_ddr == MAP_FAILED) { perror("mmap"); return 1; }
     signal(SIGTERM, on_term); signal(SIGINT, on_term);   // dump the VGA screen on stop
+    signal(SIGUSR1, on_snap);                            // live (non-exiting) proxy snapshot
+    systrace_init();                                     // F4 syscall observability (env-gated)
 
     uint32_t ident = rd(VEN_R_IDENT);
     if (ident != VEN_IDENT_MAGIC) { fprintf(stderr, "bad IDENT 0x%08x (slave not present?)\n", ident); return 1; }
@@ -370,6 +376,18 @@ int main(int argc, char **argv) {
     if (dbg < 0) dbg = getenv("VEN_DBG") ? 1 : 0;
     for (;;) {
         uint32_t st = rd(VEN_R_STATUS);
+        // F4 no-progress watchdog: fire if neither syscalls nor retire advance for
+        // SYS_TIMEOUT_MS (a wedged proxy handshake / stuck core). Only when enabled,
+        // so the per-iteration retire reads stay off the production hot path.
+        if (g_quake && systrace_watchdog_enabled()) {
+            uint32_t wlo = rd(VEN_R_RETIRE_LO);                       // read LO first (snapshots HI)
+            uint64_t wret = ((uint64_t)rd(VEN_R_RETIRE_HI) << 32) | wlo;
+            if (systrace_watchdog(ven_quake_syscalls(), wret, !!(st & VEN_ST_SYS_PEND))) {
+                systrace_dump("watchdog"); dbg_dump_core();
+                fprintf(stderr, "ven_soc: watchdog fired — stopping\n");
+                break;
+            }
+        }
         if (dbg) {
             long now = dbg_now_ms();
             if (now - dbg_last >= 250) {
@@ -378,6 +396,9 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "[dbg t=%ldms] retire=0x%x%08x st=0x%x ioaddr=0x%x iostat=0x%x intr=0x%x io=%llu\n",
                         now, hi, lo, st, rd(VEN_R_IO_ADDR), rd(VEN_R_IO_STATUS), rd(VEN_R_INTR),
                         (unsigned long long)serviced);
+                if (g_quake)
+                    fprintf(stderr, "[dbg t=%ldms] quake:%s\n", now,
+                            systrace_heartbeat(ven_quake_video_total(), ven_quake_syscalls()));
                 // silent-stall auto-dump: if retire is frozen for ~2.5s, dump the
                 // on-die debug unit ONCE (the PC ring shows the trail into the stall).
                 static uint64_t last_ret = 0; static int stall_n = 0, dumped = 0;
@@ -388,7 +409,7 @@ int main(int argc, char **argv) {
         }
         if (st & VEN_ST_CPU_HUNG) { fprintf(stderr, "\nven_soc: CPU HUNG (bus_err=%d) after %llu io\n",
                                             !!(st & VEN_ST_BUS_ERR), (unsigned long long)serviced);
-                                    dbg_dump_core(); break; }
+                                    systrace_dump("cpu-hung"); dbg_dump_core(); break; }
         if (st & VEN_ST_IO_REQ) {
             uint32_t ios  = rd(VEN_R_IO_STATUS);
             uint16_t port = (uint16_t)rd(VEN_R_IO_ADDR);
@@ -435,19 +456,45 @@ int main(int argc, char **argv) {
             uint32_t sysctrl = VEN_SYS_RESP_VALID;
             if (r.apply_gs) { wr(VEN_R_SYS_GS, r.gs_base); sysctrl |= VEN_SYS_APPLY_GS; }
             wr(VEN_R_SYS_CTRL, sysctrl);                     // commit -> release S_SYSCALL_WAIT
+            // commit-verify (SYS_COMMIT_VERIFY=1): SYS_PEND must clear after RESP_VALID;
+            // if it doesn't, the W1P pulse was dropped or the core is stuck in
+            // S_SYSCALL_WAIT — pinpoints a handshake fault on brand-new proxy RTL.
+            if (systrace_commit_verify_enabled()) {
+                int cleared = 0;
+                for (int v = 0; v < 256; v++)
+                    if (!(rd(VEN_R_STATUS) & VEN_ST_SYS_PEND)) { cleared = 1; break; }
+                if (!cleared) {
+                    fprintf(stderr, "\nven_soc: COMMIT NOT ACKED — SYS_PEND stuck after RESP_VALID "
+                            "(%s eax=0x%x sys_status=0x%x)\n",
+                            ven_quake_nr_name(nr), r.eax, rd(VEN_R_SYS_STATUS));
+                    systrace_dump("commit-not-acked"); dbg_dump_core(); break;
+                }
+            }
             if (g_video_fd >= 0) {                           // stream captured frames to file
                 static uint8_t vbuf[65536]; uint32_t got;
                 while ((got = ven_quake_video_drain(vbuf, sizeof(vbuf))) > 0)
                     if (write(g_video_fd, vbuf, got) != (ssize_t)got) { /* best effort */ }
             }
+            // observability: record the syscall into the ring/histogram + tee guest stdout.
+            uint32_t sysargs[6] = { ebx, ecx, edx, esi, edi, ebp };
+            int stflags = systrace_record(nr, sysargs, r.eax, r.unsupported,
+                                          ven_quake_syscalls(), cyc);
+            systrace_tee_stdout();
             if (dbg && (serviced % 2000 == 0))
-                fprintf(stderr, "[sys %llu] nr=%u eax=0x%x%s\n",
-                        (unsigned long long)serviced, nr, r.eax, r.apply_gs ? " +gs" : "");
+                fprintf(stderr, "[sys %llu] %s eax=0x%x%s\n", (unsigned long long)serviced,
+                        ven_quake_nr_name(nr), r.eax, r.apply_gs ? " +gs" : "");
             serviced++;
-            if (r.unsupported) { fprintf(stderr, "\nven_soc: UNSUPPORTED syscall nr=%u (#%llu)\n",
-                                         nr, (unsigned long long)serviced); dbg_dump_core(); break; }
+            if (stflags & SYSTRACE_LIVELOCK) {
+                fprintf(stderr, "\nven_soc: LIVELOCK — %s repeating with no progress (#%llu)\n",
+                        ven_quake_nr_name(nr), (unsigned long long)serviced);
+                systrace_dump("livelock"); dbg_dump_core(); break;
+            }
+            if (r.unsupported) { fprintf(stderr, "\nven_soc: UNSUPPORTED syscall %s (nr=%u, #%llu)\n",
+                                         ven_quake_nr_name(nr), nr, (unsigned long long)serviced);
+                                 systrace_dump("unsupported"); dbg_dump_core(); break; }
             if (r.should_exit) { fprintf(stderr, "\nven_soc: guest exit(%d) after %llu syscalls\n",
-                                         r.exit_code, (unsigned long long)serviced); break; }
+                                         r.exit_code, (unsigned long long)serviced);
+                                 systrace_dump("exit"); break; }
         }
 
         // ---- F3 interrupt pump (the PS *is* the PIC + keyboard) ---------------
@@ -500,6 +547,7 @@ int main(int argc, char **argv) {
                 (unsigned long long)ven_quake_syscalls(),
                 (unsigned long long)ven_quake_video_total(),
                 g_video_out ? "" : " (no --video; not written)");
+        systrace_dump("done");          // final syscall histogram + ring (if VEN_SYS_RING)
     }
     ven_shutdown_quiesce();        // leave the PL→PS AXI clean for xmutil unloadapp
     return 0;

@@ -58,6 +58,19 @@ uint32_t ven_quake_video_drain(uint8_t* buf, uint32_t max);
 uint64_t ven_quake_video_total(void);
 uint64_t ven_quake_syscalls(void);
 
+// ---- debug/observability exports (used by ven_systrace.c) --------------------
+// i386 syscall NR -> short name ("open","mmap2",...) or "nr_<n>" for unknown.
+const char* ven_quake_nr_name(uint32_t nr);
+// Read a NUL-terminated guest C string from the carveout at guest vaddr `gaddr`
+// (fold-correct via the MemModel). Copies up to max-1 bytes + a NUL; returns the
+// length (excluding NUL). For decoding open()/openat() path args in a trace.
+int ven_quake_read_cstr(uint32_t gaddr, char* out, int max);
+// The guest's accumulated fd 1/2 output (captured_stdout): total length, and a
+// copy of `max` bytes starting at byte offset `from` (returns count copied). Lets
+// the PS tee Quake's banner / panic text live without reaching into C++ state.
+uint64_t ven_quake_stdout_len(void);
+int      ven_quake_stdout_copy(uint64_t from, char* out, int max);
+
 #ifdef __cplusplus
 }
 #endif

@@ -9,11 +9,13 @@
 // round-trips, set_thread_area returns apply_gs + a TLS base, brk grows, and the
 // time syscall writes the carveout. This is the off-board half of the proxy path
 // (the on-board half adds the RTL window + the real core). Prints GLUE-OK/-FAIL.
+#define _GNU_SOURCE 1
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "ven_quake.h"
+#include "ven_systrace.h"
 
 // i386 NRs the harness drives.
 enum { NR_set_thread_area = 243, NR_brk = 45, NR_gettimeofday = 78 };
@@ -70,6 +72,26 @@ int main(int argc, char** argv) {
     chk("gettimeofday eax", r.eax, 0);
     uint32_t tsec = ddr[tv & MASK] | (ddr[(tv+1)&MASK]<<8) | (ddr[(tv+2)&MASK]<<16) | ((uint32_t)ddr[(tv+3)&MASK]<<24);
     chk("tv_sec advanced (>=1)", tsec >= 1, 1);
+
+    printf("[5] ven_systrace ring + histogram + nr decode + livelock\n");
+    chk("nr_name(open)",    strcmp(ven_quake_nr_name(5),   "open")  == 0, 1);
+    chk("nr_name(mmap2)",   strcmp(ven_quake_nr_name(192), "mmap2") == 0, 1);
+    chk("nr_name(set_thread_area)", strcmp(ven_quake_nr_name(243), "set_thread_area") == 0, 1);
+    chk("nr_name(unknown)", strcmp(ven_quake_nr_name(9999),"nr_?")  == 0, 1);
+    setenv("VEN_SYS_RING", "1", 1);
+    systrace_init();
+    uint32_t a0[6] = { 0x1234, 0, 0, 0, 0, 0 };
+    int fl = systrace_record(5,  a0, 0x10, 0, 1, 1000);   // open -> fd 0x10
+    chk("record open: no livelock", (fl & SYSTRACE_LIVELOCK) ? 1 : 0, 0);
+    systrace_record(45, a0, 0x0a000000, 0, 2, 2000);      // brk
+    // livelock: the same read() repeating (returns 0) past the 2000 default threshold.
+    uint32_t a1[6] = { 3, 0, 0, 0, 0, 0 };
+    int last = 0;
+    for (int i = 0; i < 2100; i++) last = systrace_record(3, a1, 0, 0, 100 + i, 0);
+    chk("livelock detected after >2000 repeats", (last & SYSTRACE_LIVELOCK) ? 1 : 0, 1);
+    (void)systrace_heartbeat(0, 5);
+    (void)systrace_heartbeat(120, 2110);                  // first-frame latch (prints ***)
+    systrace_dump("test");                                // visual: ring + histogram (read dominant)
 
     free(ddr);
     if (errors == 0) printf("GLUE-OK (%llu syscalls serviced)\n", (unsigned long long)ven_quake_syscalls());

@@ -22,6 +22,7 @@ $CXX -O2 -std=c++17 $INC -c "$APP/ven_quake.cpp"     -o "$OBJ/ven_quake.o"
 $CXX -O2 -std=c++17 $INC -c "$APP/mem_carveout.cpp"  -o "$OBJ/mem_carveout.o"
 $CXX -O2 -std=c++17 $INC -c "$TB/syscall_emu.cpp"    -o "$OBJ/syscall_emu.o"
 $CXX -O2 -std=c++17 $INC -c "$TB/quake_image.cpp"    -o "$OBJ/quake_image.o"
+$CC  -O2 -std=c11   -I"$APP" -c "$APP/ven_systrace.c"    -o "$OBJ/ven_systrace.o"
 $CC  -O2 -std=c11   -I"$APP" -c "$APP/test_quake_glue.c" -o "$OBJ/test.o"
 $CXX -o "$OBJ/test_quake_glue" "$OBJ"/*.o
 

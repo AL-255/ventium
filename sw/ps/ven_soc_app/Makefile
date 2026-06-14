@@ -24,8 +24,8 @@ PERIPH  := ../../ps_periph
 TBDIR   := ../../../verif/tb
 OBJDIR  := build
 
-# C sources (control app + the F3 peripheral C models).
-C_SRC   := ven_soc_app.c hid_kbd.c \
+# C sources (control app + the F4 syscall-trace module + the F3 peripheral C models).
+C_SRC   := ven_soc_app.c ven_systrace.c hid_kbd.c \
            $(PERIPH)/ven_i8042.c $(PERIPH)/ven_pic.c $(PERIPH)/ven_vgaregs.c \
            $(PERIPH)/ven_pit.c $(PERIPH)/ven_rtc.c $(PERIPH)/ven_ide.c
 # C++ sources (F4 Quake proxy: board glue + g_ddr-backed MemModel + the ported

@@ -75,3 +75,95 @@ extern "C" uint64_t ven_quake_video_total(void) {
 extern "C" uint64_t ven_quake_syscalls(void) {
     return g_emu ? g_emu->syscalls_serviced() : 0;
 }
+
+// ---- debug/observability exports --------------------------------------------
+// NR -> name, mirroring the enum in verif/tb/syscall_emu.cpp (kept here so the
+// shared emulator source stays byte-identical — no fork).
+extern "C" const char* ven_quake_nr_name(uint32_t nr) {
+    switch (nr) {
+    case 1:   return "exit";
+    case 3:   return "read";
+    case 4:   return "write";
+    case 5:   return "open";
+    case 6:   return "close";
+    case 13:  return "time";
+    case 19:  return "lseek";
+    case 20:  return "getpid";
+    case 33:  return "access";
+    case 45:  return "brk";
+    case 54:  return "ioctl";
+    case 78:  return "gettimeofday";
+    case 91:  return "munmap";
+    case 94:  return "fchmod";
+    case 102: return "socketcall";
+    case 122: return "uname";
+    case 125: return "mprotect";
+    case 140: return "_llseek";
+    case 142: return "select";
+    case 145: return "readv";
+    case 146: return "writev";
+    case 158: return "sched_yield";
+    case 162: return "nanosleep";
+    case 168: return "poll";
+    case 174: return "rt_sigaction";
+    case 175: return "rt_sigprocmask";
+    case 192: return "mmap2";
+    case 195: return "stat64";
+    case 197: return "fstat64";
+    case 199: return "getuid32";
+    case 200: return "getgid32";
+    case 201: return "geteuid32";
+    case 202: return "getegid32";
+    case 219: return "madvise";
+    case 221: return "fcntl64";
+    case 224: return "gettid";
+    case 243: return "set_thread_area";
+    case 252: return "exit_group";
+    case 258: return "set_tid_address";
+    case 265: return "clock_gettime";
+    case 266: return "clock_getres";
+    case 295: return "openat";
+    case 355: return "getrandom";
+    case 359: return "socket";
+    case 361: return "bind";
+    case 362: return "connect";
+    case 363: return "listen";
+    case 365: return "getsockopt";
+    case 366: return "setsockopt";
+    case 367: return "getsockname";
+    case 368: return "getpeername";
+    case 369: return "sendto";
+    case 370: return "sendmsg";
+    case 372: return "recvmsg";
+    case 373: return "shutdown";
+    case 383: return "statx";
+    case 403: return "clock_gettime64";
+    case 406: return "clock_getres_time64";
+    default:  return "nr_?";
+    }
+}
+
+extern "C" int ven_quake_read_cstr(uint32_t gaddr, char* out, int max) {
+    if (!g_mem || !out || max <= 0) return 0;
+    int i = 0;
+    for (; i < max - 1; ++i) {
+        uint8_t c = g_mem->read8(gaddr + (uint32_t)i);
+        if (c == 0) break;
+        out[i] = (c >= 32 && c < 127) ? (char)c : '?';   // printable-safe
+    }
+    out[i] = '\0';
+    return i;
+}
+
+extern "C" uint64_t ven_quake_stdout_len(void) {
+    return g_emu ? (uint64_t)g_emu->captured_stdout().size() : 0;
+}
+extern "C" int ven_quake_stdout_copy(uint64_t from, char* out, int max) {
+    if (!g_emu || !out || max <= 0) return 0;
+    const std::string& s = g_emu->captured_stdout();
+    if (from >= s.size()) return 0;
+    int n = (int)(s.size() - from);
+    if (n > max) n = max;
+    for (int i = 0; i < n; ++i) out[i] = s[(size_t)from + (size_t)i];
+    return n;
+}
