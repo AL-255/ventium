@@ -117,6 +117,12 @@ static const char  *g_video_out = 0;     // --video <out.p5q>: capture the P5Q1 
 static const char  *g_vidpath   = "/p5q_video_capture";  // $P5Q_VIDEO sentinel (match the image)
 static uint32_t      g_brk      = 0x0a000000u;  // --brk: initial break (run-quake-fb computes it)
 static int           g_video_fd = -1;
+// On-die single-step debug (VEN_DBG_CORE): --bp <eip> sets a HW breakpoint; on the
+// halt, --steps <n> single-steps n instructions dumping EIP/CS/FSM each — to walk a
+// fetch/control-flow bug instruction-by-instruction on real silicon.
+static uint32_t      g_bp        = 0;
+static int           g_bp_set    = 0;
+static uint32_t      g_steps     = 80;
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
@@ -251,6 +257,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--video")   && i + 1 < argc) g_video_out = argv[++i];
         else if (!strcmp(argv[i], "--vidpath") && i + 1 < argc) g_vidpath   = argv[++i];
         else if (!strcmp(argv[i], "--brk")     && i + 1 < argc) g_brk = strtoul(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--bp")      && i + 1 < argc) { g_bp = strtoul(argv[++i], 0, 0); g_bp_set = 1; }
+        else if (!strcmp(argv[i], "--steps")   && i + 1 < argc) g_steps = strtoul(argv[++i], 0, 0);
         else if (!img)      img = argv[i];
         else if (npos < 3)  pos[npos++] = strtoul(argv[i], 0, 0);
     }
@@ -369,6 +377,15 @@ int main(int argc, char **argv) {
                      | (sysmode ? VEN_MODE_BOOT_SYS : 0)
                      | (g_dos   ? VEN_MODE_SOCEN    : 0));
     }
+    // --bp: arm the on-die HW breakpoint BEFORE releasing the core, so it halts the
+    // first time the PC reaches g_bp (needs a VEN_DBG_CORE bitstream).
+    if (g_bp_set) {
+        if (rd(VEN_R_DBG_CAP) != VEN_DBG_CAP_MAGIC)
+            fprintf(stderr, "ven_soc: --bp needs a DBG_CORE bitstream (cap=0x%x)\n", rd(VEN_R_DBG_CAP));
+        wr(VEN_R_DBG_BP_ADDR, g_bp);
+        wr(VEN_R_DBG_RUNCTL, 1u << 2);                   // bp_en
+        fprintf(stderr, "ven_soc: HW breakpoint armed @ 0x%08x; will single-step %u\n", g_bp, g_steps);
+    }
     wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN);                   // release reset -> run
 
     // service loop (F2: poll; F3+ can switch to the GIC interrupt on irq_out).
@@ -383,11 +400,31 @@ int main(int argc, char **argv) {
         // dumps + quiesces + exits; SIGUSR1 prints a non-destructive live snapshot.
         if (g_term_req) { systrace_dump("term"); vga_textdump(); ven_shutdown_quiesce(); _exit(0); }
         if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); dbg_dump_core(); }
+        // --bp single-step trace: when the core halts at the HW breakpoint, walk the
+        // trajectory instruction-by-instruction (the on-silicon fetch/control-flow trace
+        // for a bug the sim can't reproduce). Each step: RUNCTL halt_req+step (0x3) ->
+        // execute exactly one instruction -> re-park; then read the committed EIP/FSM.
+        if (g_bp_set && (rd(VEN_R_DBG_RUNCTL) & (1u << 8))) {
+            fprintf(stderr, "\n=== BP HIT @ 0x%08x — single-stepping %u instructions ===\n", g_bp, g_steps);
+            for (uint32_t s = 0; s < g_steps; s++) {
+                wr(VEN_R_DBG_RUNCTL, (1u << 0) | (1u << 1));     // halt_req + W1P step (exec 1)
+                int rehalt = 0;
+                for (int g = 0; g < 4000000; g++) { if (rd(VEN_R_DBG_RUNCTL) & (1u << 8)) { rehalt = 1; break; } }
+                uint32_t eip = rd(VEN_R_DBG_EIP), cs = rd(VEN_R_DBG_CS) & 0xffff;
+                uint32_t dst = rd(VEN_R_DBG_STATE), esp = rd(VEN_R_DBG_ESP);
+                fprintf(stderr, "[step %3u] %04x:%08x ESP=%08x FSM=0x%02x%s\n",
+                        s, cs, eip, esp, dst & 0x3f, rehalt ? "" : "  <NO-REHALT: S_HALT/wedge>");
+                if (!rehalt) { fprintf(stderr, "  core stopped re-parking (likely S_HALT) — done\n"); break; }
+            }
+            fprintf(stderr, "=== single-step trace done ===\n");
+            dbg_dump_core();
+            break;
+        }
         uint32_t st = rd(VEN_R_STATUS);
         // F4 no-progress watchdog: fire if neither syscalls nor retire advance for
         // SYS_TIMEOUT_MS (a wedged proxy handshake / stuck core). Only when enabled,
         // so the per-iteration retire reads stay off the production hot path.
-        if (g_quake && systrace_watchdog_enabled()) {
+        if (g_quake && !g_bp_set && systrace_watchdog_enabled()) {
             uint32_t wlo = rd(VEN_R_RETIRE_LO);                       // read LO first (snapshots HI)
             uint64_t wret = ((uint64_t)rd(VEN_R_RETIRE_HI) << 32) | wlo;
             if (systrace_watchdog(ven_quake_syscalls(), wret, !!(st & VEN_ST_SYS_PEND))) {
