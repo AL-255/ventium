@@ -278,3 +278,27 @@ loop (first-reach fires on the correct early iteration). Then halt at the diverg
 (ideally) an L1-read ring to the sim, pin the wrong read. Implement carefully, validate via the sim
 build + make verify (default byte-identical), THEN respin. ALT: full-core PS8 AXI VIP (no respin, but a
 large xsim build). The write-allocate fix + VEN_QUAKE_DATA redirect STAY (both correct, sim-validated).
+
+## 11. ROOT CAUSE CONFIRMED (2026-06-14): silicon-timing on the high-fanout L1 async-read path
+
+Two converging no-respin proofs:
+1. Directed xline-READ gate test (verif/l1/tb_l1_axi.sv [3b], commit 5fffb45): the cross-line 4-byte
+   read (cold next-line fill + both-resident hit) — the argv[0] byte-scan pattern — is FUNCTIONALLY
+   CORRECT. So the board derail is NOT a logic bug; it is a timing/silicon effect invisible to the
+   cycle-accurate Verilator.
+2. proxywa impl reports: the WNS setup path (-2.242ns @50MHz = +2.76 @40MHz, "met" but marginal,
+   **49 logic levels**) is `u_core/eip_reg -> ... u_l1axi/u_l1d/dc_line_reg async read ... -> gpr_reg`.
+   physopt could NOT optimize the `u_l1d/dc_line` read-data nets — **fanout 1152..1460**, unreplicable
+   (RAMD64E LUTRAM outputs). So ven_l1d's wide ASYNC distributed-RAM read (256b line read + the
+   512->32 byte/way mux) is the dominant, high-fanout, deep combinational path. At 40MHz it "meets" in
+   STA but is silicon-marginal; the deep argv[0] byte-scan (cold fills + xline reads) trips it free-run
+   (back-to-back), while single-step (drains between insns) and Verilator (no gate delay) do not.
+
+THE FIX (next iteration, careful): break this path — REGISTER/PIPELINE the ven_l1d read (async
+distributed-RAM read -> 1-cycle synchronous read), so the LUTRAM read + the wide mux are in separate
+cycles and the registered output has manageable fanout. Cost: L1 read becomes 1-cycle latency; the
+core already polls c_ack (handles multi-cycle), so functional correctness holds, but the cycle-mode
+(M5) bands shift -> re-tune or gate the sync read behind a define used only for the board (functional)
+bitstream. Validate: l1d/l1axi gates + make verify, then respin + board retest. Lower-risk alt to
+investigate first: cut the read fanout via smaller/direct-mapped L1 (define knob) — may relax timing
+without a read-contract change. Either way this is now a TIMING-CLOSURE fix, not a logic fix.
