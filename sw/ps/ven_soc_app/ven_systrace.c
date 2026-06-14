@@ -82,7 +82,9 @@ void systrace_init(void) {
     const char* t = getenv("SYS_TIMEOUT_MS");
     g_timeout_ms = t ? atol(t) : ((g_ring_en || dbg) ? 2000 : 0);   // conservative default
     const char* l = getenv("SYS_LIVELOCK_N");
-    g_livelock_n = l ? strtoull(l, 0, 0) : 2000;
+    g_livelock_n = l ? strtoull(l, 0, 0) : 0;   // OFF by default — a healthy guest can
+                                                // legitimately repeat a syscall many times
+                                                // (buffered reads, polls); never auto-fire.
     const char* k = getenv("SYS_VIDEO_STALL_K");
     if (k) g_video_stall_k = strtoull(k, 0, 0);
 
@@ -131,11 +133,15 @@ int systrace_record(uint32_t nr, const uint32_t args[6], uint32_t eax, int unsup
     int flags = 0;
     (void)unsupported;
 
-    // livelock detection is cheap and useful even without the full ring.
+    // livelock detection (ADVISORY, opt-in via SYS_LIVELOCK_N): a guest spinning on
+    // one syscall while retire keeps advancing — the retire-stall watchdog misses it.
+    // Fires EXACTLY ONCE per episode (== threshold) so the caller warns without
+    // re-dumping every subsequent call; the caller must NOT abort on it (a healthy
+    // guest can legitimately repeat a syscall thousands of times).
     if (g_livelock_n) {
         int same = (nr == g_prev_nr) && (eax == g_prev_eax) &&
                    (memcmp(args, g_prev_args, sizeof(g_prev_args)) == 0);
-        if (same) { if (++g_repeat >= g_livelock_n) flags |= SYSTRACE_LIVELOCK; }
+        if (same) { if (++g_repeat == g_livelock_n) flags |= SYSTRACE_LIVELOCK; }
         else {
             g_repeat = 0; g_prev_nr = nr; g_prev_eax = eax;
             memcpy(g_prev_args, args, sizeof(g_prev_args));

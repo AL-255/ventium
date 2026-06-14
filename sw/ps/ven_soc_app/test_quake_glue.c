@@ -79,16 +79,17 @@ int main(int argc, char** argv) {
     chk("nr_name(set_thread_area)", strcmp(ven_quake_nr_name(243), "set_thread_area") == 0, 1);
     chk("nr_name(unknown)", strcmp(ven_quake_nr_name(9999),"nr_?")  == 0, 1);
     setenv("VEN_SYS_RING", "1", 1);
+    setenv("SYS_LIVELOCK_N", "2000", 1);   // opt-in: livelock is OFF by default (advisory)
     systrace_init();
     uint32_t a0[6] = { 0x1234, 0, 0, 0, 0, 0 };
     int fl = systrace_record(5,  a0, 0x10, 0, 1, 1000);   // open -> fd 0x10
     chk("record open: no livelock", (fl & SYSTRACE_LIVELOCK) ? 1 : 0, 0);
     systrace_record(45, a0, 0x0a000000, 0, 2, 2000);      // brk
-    // livelock: the same read() repeating (returns 0) past the 2000 default threshold.
+    // livelock fires EXACTLY ONCE when an identical read() crosses the threshold.
     uint32_t a1[6] = { 3, 0, 0, 0, 0, 0 };
-    int last = 0;
-    for (int i = 0; i < 2100; i++) last = systrace_record(3, a1, 0, 0, 100 + i, 0);
-    chk("livelock detected after >2000 repeats", (last & SYSTRACE_LIVELOCK) ? 1 : 0, 1);
+    int fired = 0;
+    for (int i = 0; i < 2100; i++) fired |= systrace_record(3, a1, 0, 0, 100 + i, 0);
+    chk("livelock fires once past SYS_LIVELOCK_N", (fired & SYSTRACE_LIVELOCK) ? 1 : 0, 1);
     (void)systrace_heartbeat(0, 5);
     (void)systrace_heartbeat(120, 2110);                  // first-frame latch (prints ***)
     systrace_dump("test");                                // visual: ring + histogram (read dominant)

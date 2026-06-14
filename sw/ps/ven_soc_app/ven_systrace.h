@@ -14,7 +14,9 @@
 // Env vars (read once at systrace_init):
 //   VEN_SYS_RING=1        enable the syscall ring + histogram (dumped on abnormal exit)
 //   SYS_TIMEOUT_MS=<ms>   no-progress watchdog (default 2000 when ring/VEN_DBG set; 0=off)
-//   SYS_LIVELOCK_N=<n>    same-syscall-repeat alert threshold (default 2000; 0=off)
+//   SYS_LIVELOCK_N=<n>    same-syscall-repeat ADVISORY threshold (default 0=off; opt-in only).
+//                         When set, it WARNS once (never aborts) — a healthy guest can
+//                         legitimately repeat a syscall many times.
 //   SYS_COMMIT_VERIFY=1   re-read SYS_PEND after each commit (catches a lost handshake)
 //   VEN_QUAKE_LIVE_TTY=1  tee the guest's fd 1/2 output to stderr live
 //   SYS_VIDEO_STALL_K=<n> warn if video bytes flat for N syscalls while syscalls advance

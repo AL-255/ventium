@@ -177,10 +177,14 @@ static void ven_shutdown_quiesce(void) {
     fprintf(stderr, "ven_soc: AXI quiesced (STATUS=0x%x) — safe to unloadapp\n",
             rd(VEN_R_STATUS));
 }
-static void on_term(int sig) { (void)sig; systrace_dump("term"); vga_textdump(); ven_shutdown_quiesce(); _exit(0); }
-// SIGUSR1: non-destructive live snapshot of the Quake proxy (does NOT exit) —
-// `kill -USR1 <pid>` from an SSH session to probe a still-running board.
-static void on_snap(int sig) { (void)sig; systrace_snapshot(); dbg_dump_core(); }
+// Async-signal-safe request flags: the handlers ONLY set these; the main loop does
+// the actual stdio work (systrace_dump/vga_textdump/snapshot), so a signal arriving
+// while the main thread holds the stdio lock can never deadlock — critical for
+// SIGUSR1, which is meant to be sent repeatedly to probe a LIVE, still-running board.
+static volatile sig_atomic_t g_term_req = 0;
+static volatile sig_atomic_t g_snap_req = 0;
+static void on_term(int sig) { (void)sig; g_term_req = 1; }   // SIGTERM/SIGINT: dump + exit
+static void on_snap(int sig) { (void)sig; g_snap_req = 1; }   // SIGUSR1: live snapshot (no exit)
 
 // --- console / device emulation (the part that grows for F3/F4) --------------
 // F2: a tiny UART. OUT to 0x3F8 (COM1 THR) or 0xE9 (debug) -> stdout. IN from the
@@ -375,6 +379,10 @@ int main(int argc, char **argv) {
     static long dbg_last = 0;
     if (dbg < 0) dbg = getenv("VEN_DBG") ? 1 : 0;
     for (;;) {
+        // service deferred signal requests in NORMAL context (stdio-safe): SIGTERM
+        // dumps + quiesces + exits; SIGUSR1 prints a non-destructive live snapshot.
+        if (g_term_req) { systrace_dump("term"); vga_textdump(); ven_shutdown_quiesce(); _exit(0); }
+        if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); dbg_dump_core(); }
         uint32_t st = rd(VEN_R_STATUS);
         // F4 no-progress watchdog: fire if neither syscalls nor retire advance for
         // SYS_TIMEOUT_MS (a wedged proxy handshake / stuck core). Only when enabled,
@@ -484,10 +492,11 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "[sys %llu] %s eax=0x%x%s\n", (unsigned long long)serviced,
                         ven_quake_nr_name(nr), r.eax, r.apply_gs ? " +gs" : "");
             serviced++;
-            if (stflags & SYSTRACE_LIVELOCK) {
-                fprintf(stderr, "\nven_soc: LIVELOCK — %s repeating with no progress (#%llu)\n",
+            if (stflags & SYSTRACE_LIVELOCK) {     // ADVISORY (opt-in SYS_LIVELOCK_N) — never abort
+                fprintf(stderr, "\nven_soc: LIVELOCK SUSPECTED — %s repeated identically past the "
+                        "SYS_LIVELOCK_N threshold (#%llu); advisory, run continues\n",
                         ven_quake_nr_name(nr), (unsigned long long)serviced);
-                systrace_dump("livelock"); dbg_dump_core(); break;
+                systrace_dump("livelock-suspected");
             }
             if (r.unsupported) { fprintf(stderr, "\nven_soc: UNSUPPORTED syscall %s (nr=%u, #%llu)\n",
                                          ven_quake_nr_name(nr), nr, (unsigned long long)serviced);
