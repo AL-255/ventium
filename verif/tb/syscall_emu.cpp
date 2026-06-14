@@ -132,6 +132,20 @@ SyscallEmuResult SyscallEmulator::service(uint32_t nr, uint32_t ebx, uint32_t ec
         if (!video_path_.empty() && path == video_path_) {
             video_fd_ = next_fd_++; r.eax = (uint32_t)video_fd_; break;  // capture frames
         }
+        // VEN_QUAKE_DATA redirect: the image was produced with -basedir /opt/quake, so
+        // the guest opens /opt/quake/id1/pak0.pak (and ~/.tyrquake/id1/...) — paths that
+        // do not exist on the sim host or the board. If VEN_QUAKE_DATA is set, rewrite
+        // any ".../id1/<rest>" to <VEN_QUAKE_DATA>/id1/<rest> so the real shareware data
+        // is found without regenerating the image. Opt-in -> inert for every other test.
+        {
+            const char* dd = std::getenv("VEN_QUAKE_DATA");
+            size_t ip = path.find("id1/");
+            if (dd && ip != std::string::npos) {
+                std::string nd = std::string(dd);
+                if (!nd.empty() && nd.back() == '/') nd.pop_back();
+                path = nd + "/" + path.substr(ip);
+            }
+        }
         FILE* f = std::fopen(path.c_str(), "rb");   // guest paths ARE real host paths
         if (kEmuDbg) std::fprintf(stderr, "[emu] open(\"%s\") -> %s\n",
                                   path.c_str(), f ? "ok" : "ENOENT");
