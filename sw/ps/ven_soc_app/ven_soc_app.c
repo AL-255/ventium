@@ -123,6 +123,10 @@ static int           g_video_fd = -1;
 static uint32_t      g_bp        = 0;
 static int           g_bp_set    = 0;
 static uint32_t      g_steps     = 80;
+// --peek <gaddr>: after staging, hexdump the carveout (what the core fetches) at the
+// folded guest address — to tell a staging error from a fetch-read bug. Does not run.
+static uint32_t      g_peek      = 0;
+static int           g_peek_set  = 0;
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
@@ -259,6 +263,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--brk")     && i + 1 < argc) g_brk = strtoul(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--bp")      && i + 1 < argc) { g_bp = strtoul(argv[++i], 0, 0); g_bp_set = 1; }
         else if (!strcmp(argv[i], "--steps")   && i + 1 < argc) g_steps = strtoul(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--peek")    && i + 1 < argc) { g_peek = strtoul(argv[++i], 0, 0); g_peek_set = 1; }
         else if (!img)      img = argv[i];
         else if (npos < 3)  pos[npos++] = strtoul(argv[i], 0, 0);
     }
@@ -305,6 +310,18 @@ int main(int argc, char **argv) {
         }
         fprintf(stderr, "ven_soc: quake staged; entry=0x%x esp=0x%x brk=0x%x [user+proxy]\n",
                 entry, esp, g_brk);
+        if (g_peek_set) {     // dump the staged carveout (what the core fetches) + exit
+            const volatile uint8_t *pk = g_ddr + (g_peek & (VEN_CARVEOUT_SIZE - 1));
+            fprintf(stderr, "ven_soc: --peek guest 0x%08x (carveout offset 0x%08x):\n",
+                    g_peek, g_peek & (uint32_t)(VEN_CARVEOUT_SIZE - 1));
+            for (int rr = 0; rr < 4; rr++) {
+                fprintf(stderr, "  %08x:", g_peek + rr * 16);
+                for (int cc = 0; cc < 16; cc++) fprintf(stderr, " %02x", pk[rr * 16 + cc]);
+                fprintf(stderr, "\n");
+            }
+            ven_shutdown_quiesce();
+            return 0;
+        }
     } else if (bios) {
         // FreeDOS: stage the SeaBIOS image at the low shadow (0xE0000) AND the
         // top-of-4G shadow, which the L1/AXI ADDR_MASK wrap folds to carveout offset
