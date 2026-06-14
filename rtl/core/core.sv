@@ -3261,11 +3261,23 @@ module core
     // baked into each line (ic_rd_wayA/B), so there is no per-byte way mux.
     logic [IC_LINE*8-1:0] ln;
 `ifdef VEN_IC_BRAM
-    // content-addressed: pick whichever REGISTERED buffer holds addr's set (the two
-    // buffers always hold different sets, so a set match is unambiguous). If neither
-    // matches (line not buffered) the result is stale — that case is gated by
-    // ic_fetch_ready (no issue) / the existing V-candidate stale-by-design.
-    ln = (addr[5 +: IC_IDXW] == rdA_set_q) ? ic_rd_lineA : ic_rd_lineB;
+    // content-addressed by (set, WAY): pick whichever REGISTERED buffer holds addr's
+    // (set,way). ic_fetch_ready (below) gates issue on the SAME (set,way) predicate,
+    // so the two MUST agree. A set-ONLY match was STALE-BY-WAY: after a fill
+    // re-allocated addr's line into the other 2-way victim, rdA_set_q still matches
+    // addr's set for ~1 window while rdA_way_q / ic_rd_lineA still hold the OLD way's
+    // bytes — returning a wrong opcode byte -> a len-1 misdecode -> next-EIP off by 1
+    // -> derail (the F4 board Quake __init_libc retire-557 freeze; only over L1AXI +
+    // IC_BRAM, where the multi-cycle AXI fill opens the way-stale window). Neither
+    // buffer holds (set,way) => not buffered, stale-by-design (gated by ic_fetch_ready
+    // / the V-candidate path), so fall back to A.
+    logic [IC_IDXW-1:0] icb_s;
+    logic [IC_WAYW-1:0] icb_w;
+    icb_s = addr[5 +: IC_IDXW];
+    icb_w = ic_hit_way(addr);
+    ln = (rdA_set_q == icb_s && rdA_way_q == icb_w) ? ic_rd_lineA
+       : (rdB_set_q == icb_s && rdB_way_q == icb_w) ? ic_rd_lineB
+       : ic_rd_lineA;
 `else
     ln = (addr[5 +: IC_IDXW] == ic_rd_setA) ? ic_rd_lineA : ic_rd_lineB;
 `endif
