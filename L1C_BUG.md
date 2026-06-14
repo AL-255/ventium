@@ -302,3 +302,21 @@ core already polls c_ack (handles multi-cycle), so functional correctness holds,
 bitstream. Validate: l1d/l1axi gates + make verify, then respin + board retest. Lower-risk alt to
 investigate first: cut the read fanout via smaller/direct-mapped L1 (define knob) — may relax timing
 without a read-contract change. Either way this is now a TIMING-CLOSURE fix, not a logic fix.
+
+## 12. FIX ATTEMPTS (2026-06-14) — pipelined read had a data bug; lower-clock not viable
+
+(a) LOWER CLOCK (no-respin test, deployed proxywa): board at 30/25/20 MHz -> retire=0 (core doesn't
+    run). The PL clock div change breaks the PL<->PS-DDR AXI crossing (CDC tuned for 40 MHz). So a
+    slower clock is NOT a usable workaround; the bug must be fixed at 40 MHz.
+
+(b) PIPELINED READ (registered ven_l1d line-read, 1-cycle): implemented + ALL l1d/l1axi gates PASS +
+    make verify 77/77 — BUT the sim Quake path regressed: gs=0x0003 (entry 0) instead of 0x0033
+    (entry 6), i.e. a STALE read of the user_desc.entry_number. A subtle read-data bug in the
+    hand-rolled rd_armed/capture FSM (corner case the gates miss; suspected flush-vs-in-flight-read
+    race AND/OR a back-to-back/fill-retry timing case — a `&& !flush_all` cancel did NOT clear it).
+    REVERTED (kept write-allocate). NEXT: re-implement the 1-cycle read with a DIRECTED gate that
+    reproduces the gs=0x0003 sequence (read after a syscall flush + the set_thread_area pattern) so
+    the corner case is caught in the unit test, OR use a clean synchronous-RAM inference
+    (ram_style="block"/registered-addr) instead of the hand-rolled capture. Then validate (incl. the
+    new directed test) + respin. The read-pipeline DIRECTION is correct (it breaks the 49-level
+    high-fanout path); only the FSM micro-implementation needs to be gotten right (waveform-debug).
