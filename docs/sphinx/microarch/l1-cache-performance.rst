@@ -1,5 +1,5 @@
 ==================================================
-L1 cache size vs performance — the miss-rate knee
+L1 cache size vs performance
 ==================================================
 
 How much does L1 cache size matter for Ventium's performance, and *where* does

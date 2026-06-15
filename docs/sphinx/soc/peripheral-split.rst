@@ -1,5 +1,5 @@
 ==============================================================
-SoC peripherals — configurable RTL (PL) / software (PS) split
+SoC Peripherals PL/PS Split
 ==============================================================
 
 Ventium boots as a PC: around the core sits a chipset of standard peripherals,
