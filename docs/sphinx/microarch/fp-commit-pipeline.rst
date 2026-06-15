@@ -1,5 +1,5 @@
 ==================================================================
-The FP execute/commit pipeline and the K26 60 MHz close
+The FP execute/commit pipeline
 ==================================================================
 
 The Pentium retires a pipelined ``FADD``/``FSUB``/``FMUL`` at **throughput 1,

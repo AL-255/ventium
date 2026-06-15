@@ -64,6 +64,12 @@ issue to and why*, and an honest implementation status.
    soc/peripheral-split
 
 .. toctree::
+   :maxdepth: 2
+   :caption: Debug & bring-up
+
+   debug-instrumentation
+
+.. toctree::
    :maxdepth: 1
    :caption: Project resources
 

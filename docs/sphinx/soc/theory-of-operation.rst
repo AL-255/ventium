@@ -1,5 +1,5 @@
 =========================================================
-Bus & peripheral system — theory of operation
+Bus & Peripheral Theory of Operation
 =========================================================
 
 This page explains *how the chipset actually works*: how the core reaches a

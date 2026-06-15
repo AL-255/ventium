@@ -1,5 +1,5 @@
 ==========================================
-Reference library — sources behind Ventium
+References
 ==========================================
 
 Ventium is reconstructed entirely from **public sources**: Intel's period

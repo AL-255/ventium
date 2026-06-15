@@ -1,5 +1,5 @@
 =================================================
-Parametric L1 caches — size and associativity
+Parametric L1 Caches
 =================================================
 
 Ventium's L1 instruction and data caches are **8 KB, 2-way set-associative,

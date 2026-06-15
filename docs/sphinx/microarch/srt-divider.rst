@@ -1,5 +1,5 @@
 ============================================
-The radix-4 SRT divider and the FDIV bug
+The r4 SRT divider and the FDIV bug
 ============================================
 
 The Pentium does not divide floating-point numbers with a one-shot wide divide;
