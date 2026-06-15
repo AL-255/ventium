@@ -28,10 +28,19 @@ Status legend
    .opc-legend{display:flex;flex-wrap:wrap;gap:.4em .9em;margin:.6em 0 1.2em;font-size:.85em}
    .opc-legend .lg{display:inline-flex;align-items:center;gap:.4em}
    .opc-legend .sw{width:1.05em;height:1.05em;border-radius:3px;border:1px solid rgba(0,0,0,.25);display:inline-block}
-   .opc-scroll{overflow-x:auto;margin:.4em 0 1.4em;padding-bottom:.4em}
-   .opc-grid{display:grid;grid-template-columns:2.4em repeat(16,minmax(4.6em,1fr));gap:2px;min-width:60em;font-family:var(--mono,SFMono-Regular,Menlo,Consolas,monospace)}
-   .opc-h{display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8em;color:#444;background:#f0f0f0;border-radius:3px;padding:.2em 0}
-   .opc-corner{background:transparent}
+   /* overflow:auto + a max-height makes the matrix its own scroll viewport so the
+      sticky index row/column (below) stay frozen. The 1fr columns fill the full
+      content width, so a wide display shows the whole map with no horizontal
+      scrolling; only a narrow window (content < ~16x3.2em) falls back to scroll. */
+   .opc-scroll{overflow:auto;max-height:85vh;margin:.4em 0 1.4em;padding-bottom:.4em}
+   .opc-grid{display:grid;grid-template-columns:2.4em repeat(16,minmax(3.2em,1fr));gap:2px;font-family:var(--mono,SFMono-Regular,Menlo,Consolas,monospace)}
+   .opc-h{display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8em;color:#444;background:#eef0f2;border-radius:3px;padding:.2em 0}
+   /* Freeze the index headers: the low-nibble row stays put on vertical scroll,
+      the high-nibble column on horizontal scroll, the corner on both. Opaque
+      backgrounds + z-index keep the scrolling cells from showing through. */
+   .opc-colh{position:sticky;top:0;z-index:4}
+   .opc-rowh{position:sticky;left:0;z-index:4}
+   .opc-corner{position:sticky;top:0;left:0;z-index:6;background:#e3e6e9;border-radius:3px}
    .opc-cell{position:relative;cursor:default;border-radius:3px;padding:.25em .35em;min-height:2.7em;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-start;gap:.02em;border:1px solid rgba(0,0,0,.12);transition:transform .05s ease,box-shadow .05s ease;outline:none}
    .opc-cell:hover,.opc-cell:focus,.opc-cell.opc-pin{transform:scale(1.04);box-shadow:0 2px 8px rgba(0,0,0,.28);z-index:3}
    .opc-cell .opc-op{font-size:.6em;font-weight:700;opacity:.5;line-height:1.1;margin-bottom:.12em}
@@ -66,7 +75,7 @@ Status legend
 
    <div class="opc-legend">
    <span class="lg"><span class="sw sw-implemented"></span><strong>implemented</strong> — Fully decoded and retired; behaviour QEMU-matched for the P54C model.</span>
-   <span class="lg"><span class="sw sw-over-implemented"></span><strong>over-implemented</strong> — Decoded and retired even though the opcode post-dates P54C (P6/MMX/SSE/CET-era) -&gt; beyond the P54C ISA, but the Ventium core handles it rather than HALTing.</span>
+   <span class="lg"><span class="sw sw-over-implemented"></span><strong>over-impl.</strong> — Decoded and retired even though the opcode post-dates P54C (P6/MMX/SSE/CET-era) -&gt; beyond the P54C ISA, but the Ventium core handles it rather than HALTing.</span>
    <span class="lg"><span class="sw sw-partial"></span><strong>partial</strong> — Decoded, but some ModRM/x87 sub-forms, modes, or value-ranges are gated off and HALT.</span>
    <span class="lg"><span class="sw sw-system-only"></span><strong>system-only</strong> — Decodes only in ``sys_mode``; user mode HALTs.</span>
    <span class="lg"><span class="sw sw-gap"></span><strong>gap</strong> — Architecturally-valid P54C opcode with no decode arm -&gt; HALTs. (Implementation target.)</span>
