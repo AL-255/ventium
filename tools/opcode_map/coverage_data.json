@@ -1708,13 +1708,13 @@
   },
   "1E": {
    "mnem": "(P6+/CET multi-byte NOP / endbr marker; not P54C)",
-   "status": "implemented",
+   "status": "over-implemented",
    "detail": "Not a P54C instruction (HINT_NOP / F3 0F 1E endbr is P6/CET era), but Ventium decodes the whole 0F 1E/1F space as a NOP unconditionally (no mode gate), consuming ModRM(+SIB/disp) for exact length. Retires as NOP. Needed because CET-compiled musl (Quake) starts with endbr32.",
    "evidence": "core.sv:1434-1437 (8'h1E,8'h1F: d_is_nop, len via mfl_e)"
   },
   "1F": {
    "mnem": "NOP r/m (multi-byte NOP)",
-   "status": "implemented",
+   "status": "over-implemented",
    "detail": "Canonical multi-byte NOP (P6+ encoding). Ventium decodes 0F 1F as NOP unconditionally, consuming ModRM(+SIB/disp) via mfl_e for exact length. Retires as NOP.",
    "evidence": "core.sv:1434-1437 (8'h1E,8'h1F: d_is_nop)"
   },
@@ -1912,385 +1912,385 @@
   },
   "40": {
    "mnem": "CMOVO r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "CMOVcc post-dates P54C (Pentium Pro). Decoder HALTs loudly.",
    "evidence": "No 0F op1 case for 0x40; hits two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc is P6, not in the P54C ISA; no K_ enum exists."
   },
   "41": {
    "mnem": "CMOVNO r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x41; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "42": {
    "mnem": "CMOVB/CMOVC/CMOVNAE r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x42; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "43": {
    "mnem": "CMOVAE/CMOVNB/CMOVNC r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x43; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "44": {
    "mnem": "CMOVE/CMOVZ r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x44; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "45": {
    "mnem": "CMOVNE/CMOVNZ r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x45; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "46": {
    "mnem": "CMOVBE/CMOVNA r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x46; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "47": {
    "mnem": "CMOVA/CMOVNBE r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x47; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "48": {
    "mnem": "CMOVS r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x48; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "49": {
    "mnem": "CMOVNS r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x49; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "4A": {
    "mnem": "CMOVP/CMOVPE r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x4A; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "4B": {
    "mnem": "CMOVNP/CMOVPO r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x4B; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "4C": {
    "mnem": "CMOVL/CMOVNGE r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x4C; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "4D": {
    "mnem": "CMOVGE/CMOVNL r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x4D; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "4E": {
    "mnem": "CMOVLE/CMOVNG r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x4E; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "4F": {
    "mnem": "CMOVG/CMOVNLE r,r/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
    "evidence": "No 0F op1 case for 0x4F; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
   },
   "50": {
    "mnem": "MOVMSKPS r32,xmm",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs. No XMM datapath in Ventium.",
    "evidence": "No 0F op1 case for 0x50; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE (PIII), no K_/FX_ enum."
   },
   "51": {
    "mnem": "SQRTPS/SQRTSS xmm,xmm/m (66/F3/F2 variants)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE family, post-P54C; HALTs (all prefix variants since 66/F2/F3 are consumed into pfx then still no case).",
    "evidence": "No 0F op1 case for 0x51; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "52": {
    "mnem": "RSQRTPS/RSQRTSS xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x52; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "53": {
    "mnem": "RCPPS/RCPSS xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x53; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "54": {
    "mnem": "ANDPS/ANDPD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x54; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
   },
   "55": {
    "mnem": "ANDNPS/ANDNPD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x55; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
   },
   "56": {
    "mnem": "ORPS/ORPD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x56; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
   },
   "57": {
    "mnem": "XORPS/XORPD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x57; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
   },
   "58": {
    "mnem": "ADDPS/ADDSS/ADDPD/ADDSD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x58; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "59": {
    "mnem": "MULPS/MULSS/MULPD/MULSD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x59; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "5A": {
    "mnem": "CVTPS2PD/CVTSS2SD/CVTPD2PS/CVTSD2SS",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x5A; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2."
   },
   "5B": {
    "mnem": "CVTDQ2PS/CVTPS2DQ/CVTTPS2DQ",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x5B; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2."
   },
   "5C": {
    "mnem": "SUBPS/SUBSS/SUBPD/SUBSD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x5C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "5D": {
    "mnem": "MINPS/MINSS/MINPD/MINSD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x5D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "5E": {
    "mnem": "DIVPS/DIVSS/DIVPD/DIVSD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x5E; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "5F": {
    "mnem": "MAXPS/MAXSS/MAXPD/MAXSD xmm,xmm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x5F; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
   },
   "60": {
    "mnem": "PUNPCKLBW mm,mm/m (xmm w/66)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs. No MMX/XMM datapath.",
    "evidence": "No 0F op1 case for 0x60; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX (P55C)."
   },
   "61": {
    "mnem": "PUNPCKLWD mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x61; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "62": {
    "mnem": "PUNPCKLDQ mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x62; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "63": {
    "mnem": "PACKSSWB mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x63; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "64": {
    "mnem": "PCMPGTB mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x64; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "65": {
    "mnem": "PCMPGTW mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x65; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "66": {
    "mnem": "PCMPGTD mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x66; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX. (Note: 0x66 as the leading byte is the opsize prefix, handled in pfx loop; here 0x66 is op1 after 0F.)"
   },
   "67": {
    "mnem": "PACKUSWB mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x67; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "68": {
    "mnem": "PUNPCKHBW mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x68; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "69": {
    "mnem": "PUNPCKHWD mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x69; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "6A": {
    "mnem": "PUNPCKHDQ mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x6A; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "6B": {
    "mnem": "PACKSSDW mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x6B; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "6C": {
    "mnem": "PUNPCKLQDQ xmm,xmm/m (66 only)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs (no-prefix encoding is also invalid).",
    "evidence": "No 0F op1 case for 0x6C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2. No-prefix form is undefined."
   },
   "6D": {
    "mnem": "PUNPCKHQDQ xmm,xmm/m (66 only)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x6D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2. No-prefix form is undefined."
   },
   "6E": {
    "mnem": "MOVD mm/xmm,r/m32",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x6E; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
   },
   "6F": {
    "mnem": "MOVQ mm,mm/m (MOVDQA/MOVDQU xmm w/66/F3)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x6F; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
   },
   "70": {
    "mnem": "PSHUFW/PSHUFD/PSHUFHW/PSHUFLW mm/xmm,mm/m,imm8",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Post-P54C (PSHUFW is SSE/MMX-ext); HALTs.",
    "evidence": "No 0F op1 case for 0x70; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX-ext/SSE2."
   },
   "71": {
    "mnem": "Group12: PSRLW/PSRAW/PSLLW mm/xmm,imm8 (ModRM.reg /2,/4,/6)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX shift-by-imm group, post-P54C; all sub-forms HALT.",
    "evidence": "No 0F op1 case for 0x71; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX shift group, ModRM-extended."
   },
   "72": {
    "mnem": "Group13: PSRLD/PSRAD/PSLLD mm/xmm,imm8 (ModRM.reg /2,/4,/6)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX shift-by-imm group, post-P54C; all sub-forms HALT.",
    "evidence": "No 0F op1 case for 0x72; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX shift group, ModRM-extended."
   },
   "73": {
    "mnem": "Group14: PSRLQ/PSRLDQ/PSLLQ/PSLLDQ mm/xmm,imm8 (ModRM.reg /2,/3,/6,/7)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX/SSE2 shift-by-imm group, post-P54C; all sub-forms HALT.",
    "evidence": "No 0F op1 case for 0x73; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2 shift group, ModRM-extended."
   },
   "74": {
    "mnem": "PCMPEQB mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x74; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "75": {
    "mnem": "PCMPEQW mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x75; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "76": {
    "mnem": "PCMPEQD mm,mm/m",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x76; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
   },
   "77": {
    "mnem": "EMMS (VZEROUPPER/VZEROALL w/VEX)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX EMMS, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x77; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX (EMMS)."
   },
   "78": {
    "mnem": "VMREAD r/m,r (also Group17 EXTRQ/INSERTQ w/66/F2)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "VMX/SSE4a, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x78; two-byte default d_unknown -> S_HALT (core.sv:1668). VMX (P4+)."
   },
   "79": {
    "mnem": "VMWRITE r,r/m (also EXTRQ/INSERTQ w/66/F2)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "VMX/SSE4a, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x79; two-byte default d_unknown -> S_HALT (core.sv:1668). VMX (P4+)."
   },
   "7A": {
    "mnem": "(undefined; later AMD XOP/SSE-context only)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Reserved/undefined in legacy IA-32 (no architectural Pentium-era mapping); the Ventium decoder HALTs loudly regardless.",
    "evidence": "No 0F op1 case for 0x7A; two-byte default d_unknown -> S_HALT (core.sv:1668). No canonical legacy IA-32 instruction."
   },
   "7B": {
    "mnem": "(undefined; reserved in legacy IA-32)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "Reserved/undefined in legacy IA-32; HALTs loudly.",
    "evidence": "No 0F op1 case for 0x7B; two-byte default d_unknown -> S_HALT (core.sv:1668). No canonical legacy IA-32 instruction."
   },
   "7C": {
    "mnem": "HADDPS/HADDPD xmm,xmm/m (66/F2)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE3, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x7C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE3. No-prefix form undefined."
   },
   "7D": {
    "mnem": "HSUBPS/HSUBPD xmm,xmm/m (66/F2)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "SSE3, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x7D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE3. No-prefix form undefined."
   },
   "7E": {
    "mnem": "MOVD r/m32,mm (MOVQ xmm,xmm/m w/F3)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x7E; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
   },
   "7F": {
    "mnem": "MOVQ mm/m,mm (MOVDQA/MOVDQU mem w/66/F3)",
-   "status": "gap",
+   "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
    "evidence": "No 0F op1 case for 0x7F; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
   },
