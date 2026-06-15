@@ -4,1531 +4,1786 @@
    "mnem": "ADD r/m8, r8",
    "status": "implemented",
    "detail": "ALU group form Eb,Gb; op[5:3]=000=ADD. Reg+mem dst both handled, flags QEMU-matched.",
-   "evidence": "casez 8'b00??_?000 ALU r/m8,r8: d_alu_op={2'b00,op0[5:3]}=ALU_ADD, d_writes_flags (core.sv:1757-1764)"
+   "evidence": "casez 8'b00??_?000 ALU r/m8,r8: d_alu_op={2'b00,op0[5:3]}=ALU_ADD, d_writes_flags (core.sv:1757-1764)",
+   "desc": "Add"
   },
   "01": {
    "mnem": "ADD r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form. eff_opsize selects 16/32.",
-   "evidence": "casez 8'b00??_?001 ALU r/m16/32,r16/32 (core.sv:1765-1771); op[5:3]=000=ADD"
+   "evidence": "casez 8'b00??_?001 ALU r/m16/32,r16/32 (core.sv:1765-1771); op[5:3]=000=ADD",
+   "desc": "Add"
   },
   "02": {
    "mnem": "ADD r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form.",
-   "evidence": "casez 8'b00??_?010 ALU r8,r/m8 (core.sv:1772-1777); op[5:3]=000=ADD"
+   "evidence": "casez 8'b00??_?010 ALU r8,r/m8 (core.sv:1772-1777); op[5:3]=000=ADD",
+   "desc": "Add"
   },
   "03": {
    "mnem": "ADD r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form.",
-   "evidence": "casez 8'b00??_?011 ALU r16/32,r/m16/32 (core.sv:1778-1783); op[5:3]=000=ADD"
+   "evidence": "casez 8'b00??_?011 ALU r16/32,r/m16/32 (core.sv:1778-1783); op[5:3]=000=ADD",
+   "desc": "Add"
   },
   "04": {
    "mnem": "ADD AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form.",
-   "evidence": "casez 8'b00??_?100 ALU AL,imm8 (core.sv:1784-1788); op[5:3]=000=ADD"
+   "evidence": "casez 8'b00??_?100 ALU AL,imm8 (core.sv:1784-1788); op[5:3]=000=ADD",
+   "desc": "Add"
   },
   "05": {
    "mnem": "ADD eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form.",
-   "evidence": "casez 8'b00??_?101 ALU eAX,imm (core.sv:1789-1794); op[5:3]=000=ADD"
+   "evidence": "casez 8'b00??_?101 ALU eAX,imm (core.sv:1789-1794); op[5:3]=000=ADD",
+   "desc": "Add"
   },
   "06": {
    "mnem": "PUSH ES",
    "status": "implemented",
    "detail": "One-byte PUSH segment reg ES; was d_unknown before, now real arm. Pushes 16-bit selector (zero-ext under 0x66).",
-   "evidence": "explicit 8'h06: d_is_push, d_push_sreg, d_sys_sreg=SG_ES (core.sv:1707-1708)"
+   "evidence": "explicit 8'h06: d_is_push, d_push_sreg, d_sys_sreg=SG_ES (core.sv:1707-1708)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "07": {
    "mnem": "POP ES",
    "status": "implemented",
    "detail": "POP segment reg ES; real/v86 base=sel<<4. Real arm.",
-   "evidence": "explicit 8'h07: d_is_pop, d_pop_sreg, d_sys_sreg=SG_ES (core.sv:1715-1716)"
+   "evidence": "explicit 8'h07: d_is_pop, d_pop_sreg, d_sys_sreg=SG_ES (core.sv:1715-1716)",
+   "desc": "Pop a Value from the Stack"
   },
   "08": {
    "mnem": "OR r/m8, r8",
    "status": "implemented",
    "detail": "Eb,Gb form, OR.",
-   "evidence": "casez 8'b00??_?000 ALU r/m8,r8 (core.sv:1757-1764); op[5:3]=001=OR"
+   "evidence": "casez 8'b00??_?000 ALU r/m8,r8 (core.sv:1757-1764); op[5:3]=001=OR",
+   "desc": "Logical Inclusive OR"
   },
   "09": {
    "mnem": "OR r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form, OR.",
-   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=001=OR"
+   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=001=OR",
+   "desc": "Logical Inclusive OR"
   },
   "0A": {
    "mnem": "OR r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form, OR.",
-   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=001=OR"
+   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=001=OR",
+   "desc": "Logical Inclusive OR"
   },
   "0B": {
    "mnem": "OR r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form, OR.",
-   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=001=OR"
+   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=001=OR",
+   "desc": "Logical Inclusive OR"
   },
   "0C": {
    "mnem": "OR AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form, OR.",
-   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=001=OR"
+   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=001=OR",
+   "desc": "Logical Inclusive OR"
   },
   "0D": {
    "mnem": "OR eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form, OR.",
-   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=001=OR"
+   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=001=OR",
+   "desc": "Logical Inclusive OR"
   },
   "0E": {
    "mnem": "PUSH CS",
    "status": "implemented",
    "detail": "One-byte PUSH segment reg CS (SeaBIOS call32 trampoline builds iret frame). Real arm.",
-   "evidence": "explicit 8'h0E: d_is_push, d_push_sreg, d_sys_sreg=SG_CS (core.sv:1709-1710)"
+   "evidence": "explicit 8'h0E: d_is_push, d_push_sreg, d_sys_sreg=SG_CS (core.sv:1709-1710)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "10": {
    "mnem": "ADC r/m8, r8",
    "status": "implemented",
    "detail": "Eb,Gb form, ADC.",
-   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=010=ADC"
+   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=010=ADC",
+   "desc": "Add with Carry"
   },
   "11": {
    "mnem": "ADC r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form, ADC.",
-   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=010=ADC"
+   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=010=ADC",
+   "desc": "Add with Carry"
   },
   "12": {
    "mnem": "ADC r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form, ADC.",
-   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=010=ADC"
+   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=010=ADC",
+   "desc": "Add with Carry"
   },
   "13": {
    "mnem": "ADC r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form, ADC.",
-   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=010=ADC"
+   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=010=ADC",
+   "desc": "Add with Carry"
   },
   "14": {
    "mnem": "ADC AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form, ADC.",
-   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=010=ADC"
+   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=010=ADC",
+   "desc": "Add with Carry"
   },
   "15": {
    "mnem": "ADC eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form, ADC.",
-   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=010=ADC"
+   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=010=ADC",
+   "desc": "Add with Carry"
   },
   "16": {
    "mnem": "PUSH SS",
    "status": "implemented",
    "detail": "One-byte PUSH segment reg SS. Real arm.",
-   "evidence": "explicit 8'h16: d_is_push, d_push_sreg, d_sys_sreg=SG_SS (core.sv:1711-1712)"
+   "evidence": "explicit 8'h16: d_is_push, d_push_sreg, d_sys_sreg=SG_SS (core.sv:1711-1712)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "17": {
    "mnem": "POP SS",
    "status": "implemented",
    "detail": "POP segment reg SS. Real arm (no blocking-by-MOV-SS modeled, but functionally retires).",
-   "evidence": "explicit 8'h17: d_is_pop, d_pop_sreg, d_sys_sreg=SG_SS (core.sv:1717-1718)"
+   "evidence": "explicit 8'h17: d_is_pop, d_pop_sreg, d_sys_sreg=SG_SS (core.sv:1717-1718)",
+   "desc": "Pop a Value from the Stack"
   },
   "18": {
    "mnem": "SBB r/m8, r8",
    "status": "implemented",
    "detail": "Eb,Gb form, SBB.",
-   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=011=SBB"
+   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=011=SBB",
+   "desc": "Integer Subtraction with Borrow"
   },
   "19": {
    "mnem": "SBB r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form, SBB.",
-   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=011=SBB"
+   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=011=SBB",
+   "desc": "Integer Subtraction with Borrow"
   },
   "1A": {
    "mnem": "SBB r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form, SBB.",
-   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=011=SBB"
+   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=011=SBB",
+   "desc": "Integer Subtraction with Borrow"
   },
   "1B": {
    "mnem": "SBB r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form, SBB.",
-   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=011=SBB"
+   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=011=SBB",
+   "desc": "Integer Subtraction with Borrow"
   },
   "1C": {
    "mnem": "SBB AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form, SBB.",
-   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=011=SBB"
+   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=011=SBB",
+   "desc": "Integer Subtraction with Borrow"
   },
   "1D": {
    "mnem": "SBB eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form, SBB.",
-   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=011=SBB"
+   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=011=SBB",
+   "desc": "Integer Subtraction with Borrow"
   },
   "1E": {
    "mnem": "PUSH DS",
    "status": "implemented",
    "detail": "One-byte PUSH segment reg DS. Real arm.",
-   "evidence": "explicit 8'h1E: d_is_push, d_push_sreg, d_sys_sreg=SG_DS (core.sv:1713-1714)"
+   "evidence": "explicit 8'h1E: d_is_push, d_push_sreg, d_sys_sreg=SG_DS (core.sv:1713-1714)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "1F": {
    "mnem": "POP DS",
    "status": "implemented",
    "detail": "POP segment reg DS. Real arm.",
-   "evidence": "explicit 8'h1F: d_is_pop, d_pop_sreg, d_sys_sreg=SG_DS (core.sv:1719-1720)"
+   "evidence": "explicit 8'h1F: d_is_pop, d_pop_sreg, d_sys_sreg=SG_DS (core.sv:1719-1720)",
+   "desc": "Pop a Value from the Stack"
   },
   "20": {
    "mnem": "AND r/m8, r8",
    "status": "implemented",
    "detail": "Eb,Gb form, AND.",
-   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=100=AND"
+   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=100=AND",
+   "desc": "Logical AND"
   },
   "21": {
    "mnem": "AND r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form, AND.",
-   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=100=AND"
+   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=100=AND",
+   "desc": "Logical AND"
   },
   "22": {
    "mnem": "AND r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form, AND.",
-   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=100=AND"
+   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=100=AND",
+   "desc": "Logical AND"
   },
   "23": {
    "mnem": "AND r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form, AND.",
-   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=100=AND"
+   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=100=AND",
+   "desc": "Logical AND"
   },
   "24": {
    "mnem": "AND AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form, AND.",
-   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=100=AND"
+   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=100=AND",
+   "desc": "Logical AND"
   },
   "25": {
    "mnem": "AND eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form, AND.",
-   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=100=AND"
+   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=100=AND",
+   "desc": "Logical AND"
   },
   "26": {
    "mnem": "ES segment-override prefix",
    "status": "prefix",
    "detail": "Consumed in the prefix loop into pfx_len; never reaches the opcode switch as a standalone instr.",
-   "evidence": "is_prefix() true for 0x26 (ventium_decode_pkg.sv:94-95); prefix loop sets d_pfx_seg_en, d_pfx_seg_idx=SG_ES (core.sv:1237)"
+   "evidence": "is_prefix() true for 0x26 (ventium_decode_pkg.sv:94-95); prefix loop sets d_pfx_seg_en, d_pfx_seg_idx=SG_ES (core.sv:1237)",
+   "desc": "ES segment override prefix"
   },
   "27": {
    "mnem": "DAA",
    "status": "implemented",
    "detail": "Decimal Adjust AL after Add. QEMU helper_daa-exact; undefined flags masked.",
-   "evidence": "explicit 8'h27: d_kind=K_ALU, d_alu_op=ALU_DAA, writes AX+flags (core.sv:1966-1967); exec bcd_ax/bcd_flags QEMU-exact (core.sv:2900-2985, ALU_DAA at 2953)"
+   "evidence": "explicit 8'h27: d_kind=K_ALU, d_alu_op=ALU_DAA, writes AX+flags (core.sv:1966-1967); exec bcd_ax/bcd_flags QEMU-exact (core.sv:2900-2985, ALU_DAA at 2953)",
+   "desc": "Decimal Adjust AL after Addition"
   },
   "28": {
    "mnem": "SUB r/m8, r8",
    "status": "implemented",
    "detail": "Eb,Gb form, SUB.",
-   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=101=SUB"
+   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=101=SUB",
+   "desc": "Subtract"
   },
   "29": {
    "mnem": "SUB r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form, SUB.",
-   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=101=SUB"
+   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=101=SUB",
+   "desc": "Subtract"
   },
   "2A": {
    "mnem": "SUB r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form, SUB.",
-   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=101=SUB"
+   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=101=SUB",
+   "desc": "Subtract"
   },
   "2B": {
    "mnem": "SUB r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form, SUB.",
-   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=101=SUB"
+   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=101=SUB",
+   "desc": "Subtract"
   },
   "2C": {
    "mnem": "SUB AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form, SUB.",
-   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=101=SUB"
+   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=101=SUB",
+   "desc": "Subtract"
   },
   "2D": {
    "mnem": "SUB eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form, SUB.",
-   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=101=SUB"
+   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=101=SUB",
+   "desc": "Subtract"
   },
   "2E": {
    "mnem": "CS segment-override prefix",
    "status": "prefix",
    "detail": "Consumed in prefix loop. (Also branch-hint on P4+, but a pure prefix in P54C scope.)",
-   "evidence": "is_prefix() true for 0x2E (ventium_decode_pkg.sv:94); prefix loop sets d_pfx_seg_idx=SG_CS (core.sv:1234)"
+   "evidence": "is_prefix() true for 0x2E (ventium_decode_pkg.sv:94); prefix loop sets d_pfx_seg_idx=SG_CS (core.sv:1234)",
+   "desc": "CS segment override prefix"
   },
   "2F": {
    "mnem": "DAS",
    "status": "implemented",
    "detail": "Decimal Adjust AL after Subtract. QEMU helper_das-exact.",
-   "evidence": "explicit 8'h2F: d_kind=K_ALU, d_alu_op=ALU_DAS, writes AX+flags (core.sv:1968-1969); exec ALU_DAS (core.sv:2958), QEMU-exact"
+   "evidence": "explicit 8'h2F: d_kind=K_ALU, d_alu_op=ALU_DAS, writes AX+flags (core.sv:1968-1969); exec ALU_DAS (core.sv:2958), QEMU-exact",
+   "desc": "Decimal Adjust AL after Subtraction"
   },
   "30": {
    "mnem": "XOR r/m8, r8",
    "status": "implemented",
    "detail": "Eb,Gb form, XOR.",
-   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=110=XOR"
+   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=110=XOR",
+   "desc": "Logical Exclusive OR"
   },
   "31": {
    "mnem": "XOR r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form, XOR.",
-   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=110=XOR"
+   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=110=XOR",
+   "desc": "Logical Exclusive OR"
   },
   "32": {
    "mnem": "XOR r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form, XOR.",
-   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=110=XOR"
+   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=110=XOR",
+   "desc": "Logical Exclusive OR"
   },
   "33": {
    "mnem": "XOR r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form, XOR.",
-   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=110=XOR"
+   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=110=XOR",
+   "desc": "Logical Exclusive OR"
   },
   "34": {
    "mnem": "XOR AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form, XOR.",
-   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=110=XOR"
+   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=110=XOR",
+   "desc": "Logical Exclusive OR"
   },
   "35": {
    "mnem": "XOR eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form, XOR.",
-   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=110=XOR"
+   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=110=XOR",
+   "desc": "Logical Exclusive OR"
   },
   "36": {
    "mnem": "SS segment-override prefix",
    "status": "prefix",
    "detail": "Consumed in prefix loop.",
-   "evidence": "is_prefix() true for 0x36 (ventium_decode_pkg.sv:94); prefix loop sets d_pfx_seg_idx=SG_SS (core.sv:1235)"
+   "evidence": "is_prefix() true for 0x36 (ventium_decode_pkg.sv:94); prefix loop sets d_pfx_seg_idx=SG_SS (core.sv:1235)",
+   "desc": "SS segment override prefix"
   },
   "37": {
    "mnem": "AAA",
    "status": "implemented",
    "detail": "ASCII Adjust AL after Addition. QEMU-exact; undefined flags masked.",
-   "evidence": "explicit 8'h37: d_kind=K_ALU, d_alu_op=ALU_AAA, writes AX+flags (core.sv:1962-1963); exec ALU_AAA path (core.sv:2900-2985), QEMU helper_aaa-exact"
+   "evidence": "explicit 8'h37: d_kind=K_ALU, d_alu_op=ALU_AAA, writes AX+flags (core.sv:1962-1963); exec ALU_AAA path (core.sv:2900-2985), QEMU helper_aaa-exact",
+   "desc": "ASCII Adjust After Addition"
   },
   "38": {
    "mnem": "CMP r/m8, r8",
    "status": "implemented",
    "detail": "Eb,Gb form, CMP. No register/memory writeback (compare only).",
-   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=111=CMP. d_writes_reg=(op[5:3]!=111) so CMP writes flags only (core.sv:1761)"
+   "evidence": "casez 8'b00??_?000 (core.sv:1757-1764); op[5:3]=111=CMP. d_writes_reg=(op[5:3]!=111) so CMP writes flags only (core.sv:1761)",
+   "desc": "Compare Two Operands"
   },
   "39": {
    "mnem": "CMP r/m16/32, r16/32",
    "status": "implemented",
    "detail": "Ev,Gv form, CMP (flags only).",
-   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=111=CMP; d_writes_reg/d_mem_write gated off (core.sv:1768-1769)"
+   "evidence": "casez 8'b00??_?001 (core.sv:1765-1771); op[5:3]=111=CMP; d_writes_reg/d_mem_write gated off (core.sv:1768-1769)",
+   "desc": "Compare Two Operands"
   },
   "3A": {
    "mnem": "CMP r8, r/m8",
    "status": "implemented",
    "detail": "Gb,Eb form, CMP (flags only).",
-   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=111=CMP; d_writes_reg gated off (core.sv:1774)"
+   "evidence": "casez 8'b00??_?010 (core.sv:1772-1777); op[5:3]=111=CMP; d_writes_reg gated off (core.sv:1774)",
+   "desc": "Compare Two Operands"
   },
   "3B": {
    "mnem": "CMP r16/32, r/m16/32",
    "status": "implemented",
    "detail": "Gv,Ev form, CMP (flags only).",
-   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=111=CMP (core.sv:1780)"
+   "evidence": "casez 8'b00??_?011 (core.sv:1778-1783); op[5:3]=111=CMP (core.sv:1780)",
+   "desc": "Compare Two Operands"
   },
   "3C": {
    "mnem": "CMP AL, imm8",
    "status": "implemented",
    "detail": "AL,Ib form, CMP (flags only).",
-   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=111=CMP (core.sv:1786)"
+   "evidence": "casez 8'b00??_?100 (core.sv:1784-1788); op[5:3]=111=CMP (core.sv:1786)",
+   "desc": "Compare Two Operands"
   },
   "3D": {
    "mnem": "CMP eAX, imm16/32",
    "status": "implemented",
    "detail": "eAX,Iz form, CMP (flags only).",
-   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=111=CMP (core.sv:1791)"
+   "evidence": "casez 8'b00??_?101 (core.sv:1789-1794); op[5:3]=111=CMP (core.sv:1791)",
+   "desc": "Compare Two Operands"
   },
   "3E": {
    "mnem": "DS segment-override prefix",
    "status": "prefix",
    "detail": "Consumed in prefix loop.",
-   "evidence": "is_prefix() true for 0x3E (ventium_decode_pkg.sv:94); prefix loop sets d_pfx_seg_idx=SG_DS (core.sv:1236)"
+   "evidence": "is_prefix() true for 0x3E (ventium_decode_pkg.sv:94); prefix loop sets d_pfx_seg_idx=SG_DS (core.sv:1236)",
+   "desc": "DS segment override prefix"
   },
   "3F": {
    "mnem": "AAS",
    "status": "implemented",
    "detail": "ASCII Adjust AL after Subtraction. QEMU-exact; undefined flags masked.",
-   "evidence": "explicit 8'h3F: d_kind=K_ALU, d_alu_op=ALU_AAS, writes AX+flags (core.sv:1964-1965); exec ALU_AAS (core.sv:2943), QEMU helper_aas-exact"
+   "evidence": "explicit 8'h3F: d_kind=K_ALU, d_alu_op=ALU_AAS, writes AX+flags (core.sv:1964-1965); exec ALU_AAS (core.sv:2943), QEMU helper_aas-exact",
+   "desc": "ASCII Adjust AL After Subtraction"
   },
   "40": {
    "mnem": "INC eAX",
    "status": "implemented",
    "detail": "casez pattern 8'b0100_0??? sets ALU_INC, d_writes_reg/d_writes_flags, dst=op0[2:0].",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "41": {
    "mnem": "INC eCX",
    "status": "implemented",
    "detail": "Same INC r16/32 arm, reg=op0[2:0]=1.",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "42": {
    "mnem": "INC eDX",
    "status": "implemented",
    "detail": "Same INC r16/32 arm, reg=2.",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "43": {
    "mnem": "INC eBX",
    "status": "implemented",
    "detail": "Same INC r16/32 arm, reg=3.",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "44": {
    "mnem": "INC eSP",
    "status": "implemented",
    "detail": "Same INC r16/32 arm, reg=4.",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "45": {
    "mnem": "INC eBP",
    "status": "implemented",
    "detail": "Same INC r16/32 arm, reg=5.",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "46": {
    "mnem": "INC eSI",
    "status": "implemented",
    "detail": "Same INC r16/32 arm, reg=6.",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "47": {
    "mnem": "INC eDI",
    "status": "implemented",
    "detail": "Same INC r16/32 arm, reg=7.",
-   "evidence": "core.sv:1682-1685 (8'b0100_0???)"
+   "evidence": "core.sv:1682-1685 (8'b0100_0???)",
+   "desc": "Increment by 1"
   },
   "48": {
    "mnem": "DEC eAX",
    "status": "implemented",
    "detail": "casez pattern 8'b0100_1??? sets ALU_DEC, d_writes_reg/d_writes_flags.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "49": {
    "mnem": "DEC eCX",
    "status": "implemented",
    "detail": "Same DEC r16/32 arm, reg=1.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "4A": {
    "mnem": "DEC eDX",
    "status": "implemented",
    "detail": "Same DEC r16/32 arm, reg=2.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "4B": {
    "mnem": "DEC eBX",
    "status": "implemented",
    "detail": "Same DEC r16/32 arm, reg=3.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "4C": {
    "mnem": "DEC eSP",
    "status": "implemented",
    "detail": "Same DEC r16/32 arm, reg=4.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "4D": {
    "mnem": "DEC eBP",
    "status": "implemented",
    "detail": "Same DEC r16/32 arm, reg=5.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "4E": {
    "mnem": "DEC eSI",
    "status": "implemented",
    "detail": "Same DEC r16/32 arm, reg=6.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "4F": {
    "mnem": "DEC eDI",
    "status": "implemented",
    "detail": "Same DEC r16/32 arm, reg=7.",
-   "evidence": "core.sv:1686-1689 (8'b0100_1???)"
+   "evidence": "core.sv:1686-1689 (8'b0100_1???)",
+   "desc": "Decrement by 1"
   },
   "50": {
    "mnem": "PUSH eAX",
    "status": "implemented",
    "detail": "casez pattern 8'b0101_0??? sets d_is_push/d_mem_write, src=op0[2:0]; width eff_opsize.",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "51": {
    "mnem": "PUSH eCX",
    "status": "implemented",
    "detail": "Same PUSH r16/32 arm, reg=1.",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "52": {
    "mnem": "PUSH eDX",
    "status": "implemented",
    "detail": "Same PUSH r16/32 arm, reg=2.",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "53": {
    "mnem": "PUSH eBX",
    "status": "implemented",
    "detail": "Same PUSH r16/32 arm, reg=3.",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "54": {
    "mnem": "PUSH eSP",
    "status": "implemented",
    "detail": "Same PUSH r16/32 arm, reg=4 (pushes pre-decrement ESP per x86).",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "55": {
    "mnem": "PUSH eBP",
    "status": "implemented",
    "detail": "Same PUSH r16/32 arm, reg=5.",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "56": {
    "mnem": "PUSH eSI",
    "status": "implemented",
    "detail": "Same PUSH r16/32 arm, reg=6.",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "57": {
    "mnem": "PUSH eDI",
    "status": "implemented",
    "detail": "Same PUSH r16/32 arm, reg=7.",
-   "evidence": "core.sv:1690-1693 (8'b0101_0???)"
+   "evidence": "core.sv:1690-1693 (8'b0101_0???)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "58": {
    "mnem": "POP eAX",
    "status": "implemented",
    "detail": "casez pattern 8'b0101_1??? sets d_is_pop/d_mem_read/d_writes_reg, dst=op0[2:0].",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "59": {
    "mnem": "POP eCX",
    "status": "implemented",
    "detail": "Same POP r16/32 arm, reg=1.",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "5A": {
    "mnem": "POP eDX",
    "status": "implemented",
    "detail": "Same POP r16/32 arm, reg=2.",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "5B": {
    "mnem": "POP eBX",
    "status": "implemented",
    "detail": "Same POP r16/32 arm, reg=3.",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "5C": {
    "mnem": "POP eSP",
    "status": "implemented",
    "detail": "Same POP r16/32 arm, reg=4.",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "5D": {
    "mnem": "POP eBP",
    "status": "implemented",
    "detail": "Same POP r16/32 arm, reg=5.",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "5E": {
    "mnem": "POP eSI",
    "status": "implemented",
    "detail": "Same POP r16/32 arm, reg=6.",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "5F": {
    "mnem": "POP eDI",
    "status": "implemented",
    "detail": "Same POP r16/32 arm, reg=7.",
-   "evidence": "core.sv:1694-1697 (8'b0101_1???)"
+   "evidence": "core.sv:1694-1697 (8'b0101_1???)",
+   "desc": "Pop a Value from the Stack"
   },
   "60": {
    "mnem": "PUSHA/PUSHAD",
    "status": "implemented",
    "detail": "K_STKMISC SM_PUSHA, micro-sequenced in S_USEQ (modeled by effect); width eff_opsize. No ModRM sub-forms.",
-   "evidence": "core.sv:1721 (8'h60 -> K_STKMISC SM_PUSHA)"
+   "evidence": "core.sv:1721 (8'h60 -> K_STKMISC SM_PUSHA)",
+   "desc": "Push All General-Purpose Registers"
   },
   "61": {
    "mnem": "POPA/POPAD",
    "status": "implemented",
    "detail": "K_STKMISC SM_POPA, micro-sequenced in S_USEQ; width eff_opsize.",
-   "evidence": "core.sv:1722 (8'h61 -> K_STKMISC SM_POPA)"
+   "evidence": "core.sv:1722 (8'h61 -> K_STKMISC SM_POPA)",
+   "desc": "Pop All General-Purpose Registers"
   },
   "62": {
    "mnem": "BOUND r,m16&16/m32&32",
    "status": "gap",
    "detail": "No decode arm exists; is_prefix() excludes 0x62 so it is a real opcode byte that falls to the one-byte default -> d_unknown -> S_HALT.",
-   "evidence": "core.sv:2547 (one-byte default d_unknown); pkg is_prefix() ventium_decode_pkg.sv:93-95 excludes 62"
+   "evidence": "core.sv:2547 (one-byte default d_unknown); pkg is_prefix() ventium_decode_pkg.sv:93-95 excludes 62",
+   "desc": "Check Array Index Against Bounds"
   },
   "63": {
    "mnem": "ARPL r/m16,r16",
    "status": "gap",
    "detail": "No decode arm; not in is_prefix(). Falls to the one-byte default -> d_unknown -> S_HALT.",
-   "evidence": "core.sv:2547 (one-byte default d_unknown)"
+   "evidence": "core.sv:2547 (one-byte default d_unknown)",
+   "desc": "Adjust RPL Field of Segment Selector"
   },
   "64": {
    "mnem": "FS segment-override prefix",
    "status": "prefix",
    "detail": "Consumed in the prefix loop: is_prefix()=1, sets pfx_seg + d_pfx_seg_idx=SG_FS. Not a standalone instruction.",
-   "evidence": "core.sv:1238 (8'h64 -> SG_FS); ventium_decode_pkg.sv:93-95 is_prefix"
+   "evidence": "core.sv:1238 (8'h64 -> SG_FS); ventium_decode_pkg.sv:93-95 is_prefix",
+   "desc": "FS segment override prefix"
   },
   "65": {
    "mnem": "GS segment-override prefix",
    "status": "prefix",
    "detail": "Consumed in the prefix loop: pfx_seg + d_pfx_seg_idx=SG_GS.",
-   "evidence": "core.sv:1239 (8'h65 -> SG_GS)"
+   "evidence": "core.sv:1239 (8'h65 -> SG_GS)",
+   "desc": "GS segment override prefix"
   },
   "66": {
    "mnem": "Operand-size override prefix",
    "status": "prefix",
    "detail": "Consumed in the prefix loop: sets pfx_opsize (eff_opsize=pfx_opsize^def16). Not a standalone instruction.",
-   "evidence": "core.sv:1228 (8'h66 -> pfx_opsize)"
+   "evidence": "core.sv:1228 (8'h66 -> pfx_opsize)",
+   "desc": "Operand-size override prefix"
   },
   "67": {
    "mnem": "Address-size override prefix",
    "status": "prefix",
    "detail": "Consumed in the prefix loop: sets pfx_addr (eff_addr=pfx_addr^def16).",
-   "evidence": "core.sv:1229 (8'h67 -> pfx_addr)"
+   "evidence": "core.sv:1229 (8'h67 -> pfx_addr)",
+   "desc": "Address-size override prefix"
   },
   "68": {
    "mnem": "PUSH imm16/32",
    "status": "implemented",
    "detail": "d_is_push/d_mem_write/d_use_imm; imm width follows eff_opsize (imm16 len 3 / imm32 len 5).",
-   "evidence": "core.sv:1723-1727 (8'h68)"
+   "evidence": "core.sv:1723-1727 (8'h68)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "69": {
    "mnem": "IMUL r16/32,r/m,imm16/32",
    "status": "implemented",
    "detail": "K_IMUL2 3-op (d_imul_3op), both mod==11 (reg) and mem forms handled; native multiply, no #DE concern.",
-   "evidence": "core.sv:1732-1745 (8'h69)"
+   "evidence": "core.sv:1732-1745 (8'h69)",
+   "desc": "Signed Multiply"
   },
   "6A": {
    "mnem": "PUSH imm8 (sign-ext)",
    "status": "implemented",
    "detail": "d_is_push, imm8 sign-extended to eff_opsize width.",
-   "evidence": "core.sv:1728-1731 (8'h6A)"
+   "evidence": "core.sv:1728-1731 (8'h6A)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "6B": {
    "mnem": "IMUL r16/32,r/m,imm8",
    "status": "implemented",
    "detail": "K_IMUL2 3-op, imm8 sign-extended; both reg (mod==11) and mem forms handled.",
-   "evidence": "core.sv:1746-1756 (8'h6B)"
+   "evidence": "core.sv:1746-1756 (8'h6B)",
+   "desc": "Signed Multiply"
   },
   "6C": {
    "mnem": "INSB m8,DX",
    "status": "partial",
    "detail": "K_STR ST_INS implemented ONLY under cosim_en||soc_en (per-element S_INS port handshake, REP via S_USEQ). In user mode (both off) it sets d_unknown -> S_HALT. Mode/feature-gated, so partial.",
-   "evidence": "core.sv:2037-2047 (8'h6C/6D; else d_unknown)"
+   "evidence": "core.sv:2037-2047 (8'h6C/6D; else d_unknown)",
+   "desc": "Input from Port to String"
   },
   "6D": {
    "mnem": "INSW/INSD m16/32,DX",
    "status": "partial",
    "detail": "Same 6C/6D arm: K_STR ST_INS, width eff_opsize; only under cosim_en||soc_en, else d_unknown -> S_HALT.",
-   "evidence": "core.sv:2037-2047 (8'h6C/6D; else d_unknown)"
+   "evidence": "core.sv:2037-2047 (8'h6C/6D; else d_unknown)",
+   "desc": "Input from Port to String"
   },
   "6E": {
    "mnem": "OUTSB DX,m8",
    "status": "gap",
    "detail": "No decode arm \u2014 only INS (6C/6D) is implemented (the comment at core.sv:2024 calls INS 'the co-sim's only string-I/O op'). 6E falls to the one-byte default -> d_unknown -> S_HALT.",
-   "evidence": "core.sv:2547 (one-byte default d_unknown); no 8'h6E arm"
+   "evidence": "core.sv:2547 (one-byte default d_unknown); no 8'h6E arm",
+   "desc": "Output String to Port"
   },
   "6F": {
    "mnem": "OUTSW/OUTSD DX,m16/32",
    "status": "gap",
    "detail": "No decode arm for OUTS word/dword; falls to the one-byte default -> d_unknown -> S_HALT.",
-   "evidence": "core.sv:2547 (one-byte default d_unknown); no 8'h6F arm"
+   "evidence": "core.sv:2547 (one-byte default d_unknown); no 8'h6F arm",
+   "desc": "Output String to Port"
   },
   "70": {
    "mnem": "JO rel8",
    "status": "implemented",
    "detail": "casez 8'b0111_???? Jcc rel8: d_is_branch, d_branch_taken=cond_true(op0[3:0]); tttn=0 (OF). 16-bit EIP trunc via d_br16=eff_opsize.",
-   "evidence": "core.sv:2215-2217 (8'b0111_????); cond_true ventium_decode_pkg.sv:101-112"
+   "evidence": "core.sv:2215-2217 (8'b0111_????); cond_true ventium_decode_pkg.sv:101-112",
+   "desc": "Jump short if overflow (OF=1)"
   },
   "71": {
    "mnem": "JNO rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=1 (~OF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not overflow (OF=0)"
   },
   "72": {
    "mnem": "JB/JC/JNAE rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=2 (CF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if below/not above or equal/carry (CF=1)"
   },
   "73": {
    "mnem": "JAE/JNB/JNC rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=3 (~CF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not below/above or equal/not carry (CF=0)"
   },
   "74": {
    "mnem": "JE/JZ rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=4 (ZF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if zero/equal (ZF=1)"
   },
   "75": {
    "mnem": "JNE/JNZ rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=5 (~ZF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not zero/not equal (ZF=0)"
   },
   "76": {
    "mnem": "JBE/JNA rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=6 (CF|ZF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if below or equal/not above (CF=1 OR ZF=1)"
   },
   "77": {
    "mnem": "JA/JNBE rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=7 (~(CF|ZF)).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not below or equal/above (CF=0 AND ZF=0)"
   },
   "78": {
    "mnem": "JS rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=8 (SF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if sign (SF=1)"
   },
   "79": {
    "mnem": "JNS rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=9 (~SF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not sign (SF=0)"
   },
   "7A": {
    "mnem": "JP/JPE rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=10 (PF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if parity/parity even (PF=1)"
   },
   "7B": {
    "mnem": "JNP/JPO rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=11 (~PF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not parity/parity odd (PF=0)"
   },
   "7C": {
    "mnem": "JL/JNGE rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=12 (SF^OF).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if less/not greater (SF!=OF)"
   },
   "7D": {
    "mnem": "JGE/JNL rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=13 (~(SF^OF)).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not less/greater or equal (SF=OF)"
   },
   "7E": {
    "mnem": "JLE/JNG rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=14 (ZF|(SF^OF)).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if less or equal/not greater ((ZF=1) OR (SF!=OF))"
   },
   "7F": {
    "mnem": "JG/JNLE rel8",
    "status": "implemented",
    "detail": "Same Jcc rel8 arm; tttn=15 (~(ZF|(SF^OF))).",
-   "evidence": "core.sv:2215-2217 (8'b0111_????)"
+   "evidence": "core.sv:2215-2217 (8'b0111_????)",
+   "desc": "Jump short if not less nor equal/greater ((ZF=0) AND (SF=OF))"
   },
   "80": {
    "mnem": "group-1 r/m8, imm8 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP)",
    "status": "implemented",
    "detail": "ModRM.reg selects ALU op via d_alu_op={2'b00,modrm_reg}; all 8 sub-forms covered (ALU enum ADD=0..CMP=7 matches x86 group-1 order); reg and mem dest both handled; CMP(/7) suppresses the write.",
-   "evidence": "core.sv:1795-1805; ALU enum order ventium_alu_pkg.sv:17-24"
+   "evidence": "core.sv:1795-1805; ALU enum order ventium_alu_pkg.sv:17-24",
+   "desc": "Immediate Group 1 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP)"
   },
   "81": {
    "mnem": "group-1 r/m16/32, imm16/32",
    "status": "implemented",
    "detail": "Same 8-way ModRM.reg dispatch as 0x80, word/dword operand (eff_opsize), reg+mem dest forms; imm width follows opsize.",
-   "evidence": "core.sv:1806-1826"
+   "evidence": "core.sv:1806-1826",
+   "desc": "Immediate Group 1 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP)"
   },
   "82": {
    "mnem": "group-1 r/m8, imm8 (undocumented alias of 0x80)",
    "status": "gap",
    "detail": "No decode arm; the undocumented P54C alias of 0x80 falls through unique-casez to the one-byte default -> d_unknown -> S_HALT. Real silicon executes it like 0x80 but Ventium HALTs loudly on it.",
-   "evidence": "no arm; one-byte default core.sv:2547"
+   "evidence": "no arm; one-byte default core.sv:2547",
+   "desc": "Immediate Group 1 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP)"
   },
   "83": {
    "mnem": "group-1 r/m16/32, imm8 (sign-extended)",
    "status": "implemented",
    "detail": "8-way ModRM.reg dispatch, imm8 sign-extended to 16/32; reg+mem dest, CMP(/7) suppresses write.",
-   "evidence": "core.sv:1827-1838"
+   "evidence": "core.sv:1827-1838",
+   "desc": "Immediate Group 1 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP)"
   },
   "84": {
    "mnem": "TEST r/m8, r8",
    "status": "implemented",
    "detail": "ALU_TEST, byte, src=modrm_reg (with high8), reg and mem dest forms.",
-   "evidence": "core.sv:1839-1843"
+   "evidence": "core.sv:1839-1843",
+   "desc": "Logical Compare"
   },
   "85": {
    "mnem": "TEST r/m16/32, r16/32",
    "status": "implemented",
    "detail": "ALU_TEST, eff_opsize width, reg and mem forms.",
-   "evidence": "core.sv:1844-1848"
+   "evidence": "core.sv:1844-1848",
+   "desc": "Logical Compare"
   },
   "86": {
    "mnem": "XCHG r/m8, r8",
    "status": "implemented",
    "detail": "K_XCHG byte; reg form writes both regs, mem form does read+write (d_mem_dst).",
-   "evidence": "core.sv:1849-1854"
+   "evidence": "core.sv:1849-1854",
+   "desc": "Exchange Register/Memory with Register"
   },
   "87": {
    "mnem": "XCHG r/m16/32, r16/32",
    "status": "implemented",
    "detail": "K_XCHG eff_opsize; reg and mem (read+write) forms.",
-   "evidence": "core.sv:1855-1860"
+   "evidence": "core.sv:1855-1860",
+   "desc": "Exchange Register/Memory with Register"
   },
   "88": {
    "mnem": "MOV r/m8, r8",
    "status": "implemented",
    "detail": "d_is_mov/ALU_MOV byte store; reg-dst and mem-dst forms.",
-   "evidence": "core.sv:1861-1865"
+   "evidence": "core.sv:1861-1865",
+   "desc": "Move"
   },
   "89": {
    "mnem": "MOV r/m16/32, r16/32",
    "status": "implemented",
    "detail": "d_is_mov eff_opsize; reg-dst and mem-dst forms.",
-   "evidence": "core.sv:1866-1870"
+   "evidence": "core.sv:1866-1870",
+   "desc": "Move"
   },
   "8A": {
    "mnem": "MOV r8, r/m8",
    "status": "implemented",
    "detail": "d_is_mov byte load to modrm_reg (high8 aware); reg-src and mem-src forms.",
-   "evidence": "core.sv:1871-1875"
+   "evidence": "core.sv:1871-1875",
+   "desc": "Move"
   },
   "8B": {
    "mnem": "MOV r16/32, r/m16/32",
    "status": "implemented",
    "detail": "d_is_mov eff_opsize load to modrm_reg; reg-src and mem-src forms.",
-   "evidence": "core.sv:1876-1880"
+   "evidence": "core.sv:1876-1880",
+   "desc": "Move"
   },
   "8C": {
    "mnem": "MOV r/m16, Sreg",
    "status": "partial",
    "detail": "Register-dest form IMPLEMENTED (SYS_MOVSREG_FROM, writes a GPR, all modes). Memory-dest form (mod!=11) is gated on sys_mode (stores the selector via d_store_sreg); in user mode the mem-dest form -> d_unknown -> S_HALT.",
-   "evidence": "core.sv:1894-1912 (user-mode mem path d_unknown at :1910)"
+   "evidence": "core.sv:1894-1912 (user-mode mem path d_unknown at :1910)",
+   "desc": "Move"
   },
   "8D": {
    "mnem": "LEA r16/32, m",
    "status": "implemented",
    "detail": "d_is_lea; computes EA into modrm_reg. (Reg-source form is #UD on real x86 but the corpus never emits it; not separately gated.)",
-   "evidence": "core.sv:1913-1916"
+   "evidence": "core.sv:1913-1916",
+   "desc": "Load Effective Address"
   },
   "8E": {
    "mnem": "MOV Sreg, r/m16",
    "status": "partial",
    "detail": "Register-source form IMPLEMENTED in all modes (SYS_MOVSREG_TO: real -> base=sel<<4, PM -> GDT walk in S_SEGLD). Memory-source form (mod!=11) implemented ONLY in real mode (seg_real, low-half seg-load); a PM mem-source MOV Sreg would need the GDT walk and falls to d_unknown -> S_HALT.",
-   "evidence": "core.sv:1917-1936 (PM mem path d_unknown at :1934)"
+   "evidence": "core.sv:1917-1936 (PM mem path d_unknown at :1934)",
+   "desc": "Move"
   },
   "8F": {
    "mnem": "POP r/m16/32 (group-1A /0)",
    "status": "implemented",
    "detail": "d_is_pop, reg-dst and mem-dst forms. Only /0 is a valid x86 form; /1-/7 are illegal but the decoder ignores ModRM.reg and treats all as POP (does not separately #UD reg!=0 \u2014 a minor over-acceptance, not a wrong retire for /0).",
-   "evidence": "core.sv:1937-1941"
+   "evidence": "core.sv:1937-1941",
+   "desc": "POP Group 1A"
   },
   "90": {
    "mnem": "NOP / XCHG eAX,eAX (PAUSE under F3)",
    "status": "implemented",
    "detail": "op0==0x90 w/o opsize -> d_is_nop; with 0x66 prefix decodes as XCHG eAX,r form (still functional NOP). Matched by wildcard 8'b1001_0???.",
-   "evidence": "core.sv:1942-1945"
+   "evidence": "core.sv:1942-1945",
+   "desc": "Exchange Register/Memory with Register"
   },
   "91": {
    "mnem": "XCHG eAX, eCX",
    "status": "implemented",
    "detail": "K_XCHG with dst=EAX, src=op0[2:0]=ECX (wildcard 8'b1001_0???).",
-   "evidence": "core.sv:1942-1944"
+   "evidence": "core.sv:1942-1944",
+   "desc": "Exchange Register/Memory with Register"
   },
   "92": {
    "mnem": "XCHG eAX, eDX",
    "status": "implemented",
    "detail": "K_XCHG dst=EAX src=EDX.",
-   "evidence": "core.sv:1942-1944"
+   "evidence": "core.sv:1942-1944",
+   "desc": "Exchange Register/Memory with Register"
   },
   "93": {
    "mnem": "XCHG eAX, eBX",
    "status": "implemented",
    "detail": "K_XCHG dst=EAX src=EBX.",
-   "evidence": "core.sv:1942-1944"
+   "evidence": "core.sv:1942-1944",
+   "desc": "Exchange Register/Memory with Register"
   },
   "94": {
    "mnem": "XCHG eAX, eSP",
    "status": "implemented",
    "detail": "K_XCHG dst=EAX src=ESP.",
-   "evidence": "core.sv:1942-1944"
+   "evidence": "core.sv:1942-1944",
+   "desc": "Exchange Register/Memory with Register"
   },
   "95": {
    "mnem": "XCHG eAX, eBP",
    "status": "implemented",
    "detail": "K_XCHG dst=EAX src=EBP.",
-   "evidence": "core.sv:1942-1944"
+   "evidence": "core.sv:1942-1944",
+   "desc": "Exchange Register/Memory with Register"
   },
   "96": {
    "mnem": "XCHG eAX, eSI",
    "status": "implemented",
    "detail": "K_XCHG dst=EAX src=ESI.",
-   "evidence": "core.sv:1942-1944"
+   "evidence": "core.sv:1942-1944",
+   "desc": "Exchange Register/Memory with Register"
   },
   "97": {
    "mnem": "XCHG eAX, eDI",
    "status": "implemented",
    "detail": "K_XCHG dst=EAX src=EDI.",
-   "evidence": "core.sv:1942-1944"
+   "evidence": "core.sv:1942-1944",
+   "desc": "Exchange Register/Memory with Register"
   },
   "98": {
    "mnem": "CWDE / CBW",
    "status": "implemented",
    "detail": "K_CONV with d_conv_cdq=0 (sign-extend AL->AX / AX->EAX per opsize).",
-   "evidence": "core.sv:1946"
+   "evidence": "core.sv:1946",
+   "desc": "Convert Byte to Word"
   },
   "99": {
    "mnem": "CDQ / CWD",
    "status": "implemented",
    "detail": "K_CONV with d_conv_cdq=1 (sign-extend AX->DX:AX / EAX->EDX:EAX).",
-   "evidence": "core.sv:1947"
+   "evidence": "core.sv:1947",
+   "desc": "Convert Word to Doubleword"
   },
   "9A": {
    "mnem": "CALL far ptr16:16 / ptr16:32",
    "status": "implemented",
    "detail": "SYS_LCALL: pushes CS + return IP (S_LCALL) then loads CS=sel<<4, EIP=off. This is the real-mode far-call model (base=sel<<4); operand size selects offset/push width. Decode is unconditional (not sys_mode-gated), retires via S_LCALL; a protected-mode call-gate/TSS far call is NOT modeled.",
-   "evidence": "core.sv:2298-2311"
+   "evidence": "core.sv:2298-2311",
+   "desc": "Call Procedure"
   },
   "9B": {
    "mnem": "FWAIT / WAIT",
    "status": "implemented",
    "detail": "Modeled as a 1-byte NOP (d_is_nop). With x87 exception masks at their default masked state there is nothing to service; the architectural pending-unmasked-exception check is NOT performed (modeled-by-effect).",
-   "evidence": "core.sv:1952"
+   "evidence": "core.sv:1952",
+   "desc": "Check pending unmasked floating-point exceptions"
   },
   "9C": {
    "mnem": "PUSHF / PUSHFD",
    "status": "implemented",
    "detail": "K_STKMISC SM_PUSHF, mem write, eff_opsize width; micro-sequenced in S_USEQ (modeled by effect).",
-   "evidence": "core.sv:1953"
+   "evidence": "core.sv:1953",
+   "desc": "Push FLAGS Register onto the Stack"
   },
   "9D": {
    "mnem": "POPF / POPFD",
    "status": "implemented",
    "detail": "K_STKMISC SM_POPF, mem read, eff_opsize; S_USEQ modeled by effect.",
-   "evidence": "core.sv:1954"
+   "evidence": "core.sv:1954",
+   "desc": "Pop Stack into FLAGS Register"
   },
   "9E": {
    "mnem": "SAHF",
    "status": "implemented",
    "detail": "K_STKMISC SM_SAHF (AH -> low byte of EFLAGS).",
-   "evidence": "core.sv:1955"
+   "evidence": "core.sv:1955",
+   "desc": "Store AH into Flags"
   },
   "9F": {
    "mnem": "LAHF",
    "status": "implemented",
    "detail": "K_STKMISC SM_LAHF (low byte of EFLAGS -> AH).",
-   "evidence": "core.sv:1956"
+   "evidence": "core.sv:1956",
+   "desc": "Load Status Flags into AH Register"
   },
   "A0": {
    "mnem": "MOV AL, moffs8",
    "status": "implemented",
    "detail": "d_is_mov byte load from absolute moffs; moffs width follows address size (2B if eff_addr 16-bit, else 4B); preserves [31:8] of EAX.",
-   "evidence": "core.sv:1983-1988"
+   "evidence": "core.sv:1983-1988",
+   "desc": "Move"
   },
   "A1": {
    "mnem": "MOV eAX, moffs16/32",
    "status": "implemented",
    "detail": "d_is_mov load from absolute moffs, eff_opsize width, address-size-dependent moffs width.",
-   "evidence": "core.sv:1989-1994"
+   "evidence": "core.sv:1989-1994",
+   "desc": "Move"
   },
   "A2": {
    "mnem": "MOV moffs8, AL",
    "status": "implemented",
    "detail": "d_is_mov byte store to absolute moffs (src=EAX), address-size-dependent moffs width.",
-   "evidence": "core.sv:1995-2000"
+   "evidence": "core.sv:1995-2000",
+   "desc": "Move"
   },
   "A3": {
    "mnem": "MOV moffs16/32, eAX",
    "status": "implemented",
    "detail": "d_is_mov store to absolute moffs, eff_opsize width.",
-   "evidence": "core.sv:2001-2006"
+   "evidence": "core.sv:2001-2006",
+   "desc": "Move"
   },
   "A4": {
    "mnem": "MOVSB",
    "status": "implemented",
    "detail": "K_STR ST_MOVS byte, loadsi+storedi; REP handled via S_USEQ (modeled by effect).",
-   "evidence": "core.sv:2014"
+   "evidence": "core.sv:2014",
+   "desc": "Move Data from String to String"
   },
   "A5": {
    "mnem": "MOVSW / MOVSD",
    "status": "implemented",
    "detail": "K_STR ST_MOVS eff_opsize, loadsi+storedi; REP via S_USEQ.",
-   "evidence": "core.sv:2015"
+   "evidence": "core.sv:2015",
+   "desc": "Move Data from String to String"
   },
   "A6": {
    "mnem": "CMPSB",
    "status": "implemented",
    "detail": "K_STR ST_CMPS byte, loadsi+scandi, writes flags; REPE/REPNE via S_USEQ.",
-   "evidence": "core.sv:2022"
+   "evidence": "core.sv:2022",
+   "desc": "Compare String Operands"
   },
   "A7": {
    "mnem": "CMPSW / CMPSD",
    "status": "implemented",
    "detail": "K_STR ST_CMPS eff_opsize, loadsi+scandi, writes flags; REP via S_USEQ.",
-   "evidence": "core.sv:2023"
+   "evidence": "core.sv:2023",
+   "desc": "Compare String Operands"
   },
   "A8": {
    "mnem": "TEST AL, imm8",
    "status": "implemented",
    "detail": "ALU_TEST byte, dst=EAX, imm8.",
-   "evidence": "core.sv:2007-2008"
+   "evidence": "core.sv:2007-2008",
+   "desc": "Logical Compare"
   },
   "A9": {
    "mnem": "TEST eAX, imm16/32",
    "status": "implemented",
    "detail": "ALU_TEST, dst=EAX, eff_opsize imm.",
-   "evidence": "core.sv:2009-2011"
+   "evidence": "core.sv:2009-2011",
+   "desc": "Logical Compare"
   },
   "AA": {
    "mnem": "STOSB",
    "status": "implemented",
    "detail": "K_STR ST_STOS byte, storedi; REP via S_USEQ.",
-   "evidence": "core.sv:2016"
+   "evidence": "core.sv:2016",
+   "desc": "Store String"
   },
   "AB": {
    "mnem": "STOSW / STOSD",
    "status": "implemented",
    "detail": "K_STR ST_STOS eff_opsize, storedi; REP via S_USEQ.",
-   "evidence": "core.sv:2017"
+   "evidence": "core.sv:2017",
+   "desc": "Store String"
   },
   "AC": {
    "mnem": "LODSB",
    "status": "implemented",
    "detail": "K_STR ST_LODS byte, loadsi; REP via S_USEQ.",
-   "evidence": "core.sv:2018"
+   "evidence": "core.sv:2018",
+   "desc": "Load String"
   },
   "AD": {
    "mnem": "LODSW / LODSD",
    "status": "implemented",
    "detail": "K_STR ST_LODS eff_opsize, loadsi; REP via S_USEQ.",
-   "evidence": "core.sv:2019"
+   "evidence": "core.sv:2019",
+   "desc": "Load String"
   },
   "AE": {
    "mnem": "SCASB",
    "status": "implemented",
    "detail": "K_STR ST_SCAS byte, scandi, writes flags; REPE/REPNE via S_USEQ.",
-   "evidence": "core.sv:2020"
+   "evidence": "core.sv:2020",
+   "desc": "Scan String"
   },
   "AF": {
    "mnem": "SCASW / SCASD",
    "status": "implemented",
    "detail": "K_STR ST_SCAS eff_opsize, scandi, writes flags; REP via S_USEQ.",
-   "evidence": "core.sv:2021"
+   "evidence": "core.sv:2021",
+   "desc": "Scan String"
   },
   "B0": {
    "mnem": "MOV AL, imm8",
    "status": "implemented",
    "detail": "Wildcard 8'b1011_0???: d_is_mov byte, dst=op0[2:0], high8=op0[2], imm8.",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B1": {
    "mnem": "MOV CL, imm8",
    "status": "implemented",
    "detail": "8'b1011_0??? MOV r8,imm8 (dst=CL).",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B2": {
    "mnem": "MOV DL, imm8",
    "status": "implemented",
    "detail": "8'b1011_0??? MOV r8,imm8 (dst=DL).",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B3": {
    "mnem": "MOV BL, imm8",
    "status": "implemented",
    "detail": "8'b1011_0??? MOV r8,imm8 (dst=BL).",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B4": {
    "mnem": "MOV AH, imm8",
    "status": "implemented",
    "detail": "8'b1011_0??? MOV r8,imm8; d_dst_high8=op0[2] selects the AH high-byte register.",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B5": {
    "mnem": "MOV CH, imm8",
    "status": "implemented",
    "detail": "8'b1011_0??? MOV r8,imm8 (high8, dst=CH).",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B6": {
    "mnem": "MOV DH, imm8",
    "status": "implemented",
    "detail": "8'b1011_0??? MOV r8,imm8 (high8, dst=DH).",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B7": {
    "mnem": "MOV BH, imm8",
    "status": "implemented",
    "detail": "8'b1011_0??? MOV r8,imm8 (high8, dst=BH).",
-   "evidence": "core.sv:1672-1676"
+   "evidence": "core.sv:1672-1676",
+   "desc": "Move"
   },
   "B8": {
    "mnem": "MOV eAX, imm16/32",
    "status": "implemented",
    "detail": "Wildcard 8'b1011_1???: d_is_mov eff_opsize, dst=op0[2:0]=EAX, imm16/32.",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "B9": {
    "mnem": "MOV eCX, imm16/32",
    "status": "implemented",
    "detail": "8'b1011_1??? MOV r16/32,imm (dst=ECX).",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "BA": {
    "mnem": "MOV eDX, imm16/32",
    "status": "implemented",
    "detail": "8'b1011_1??? MOV r16/32,imm (dst=EDX).",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "BB": {
    "mnem": "MOV eBX, imm16/32",
    "status": "implemented",
    "detail": "8'b1011_1??? MOV r16/32,imm (dst=EBX).",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "BC": {
    "mnem": "MOV eSP, imm16/32",
    "status": "implemented",
    "detail": "8'b1011_1??? MOV r16/32,imm (dst=ESP).",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "BD": {
    "mnem": "MOV eBP, imm16/32",
    "status": "implemented",
    "detail": "8'b1011_1??? MOV r16/32,imm (dst=EBP).",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "BE": {
    "mnem": "MOV eSI, imm16/32",
    "status": "implemented",
    "detail": "8'b1011_1??? MOV r16/32,imm (dst=ESI).",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "BF": {
    "mnem": "MOV eDI, imm16/32",
    "status": "implemented",
    "detail": "8'b1011_1??? MOV r16/32,imm (dst=EDI).",
-   "evidence": "core.sv:1677-1681"
+   "evidence": "core.sv:1677-1681",
+   "desc": "Move"
   },
   "C0": {
    "mnem": "ROL/ROR/RCL/RCR/SHL/SHR/SAR r/m8,imm8 (grp2)",
    "status": "implemented",
    "detail": "Width byte (op0==C0). imm8 shift count. RCL/RCR through-carry rotates also covered by d_shrot.",
-   "evidence": "core.sv:2086-2095 8'hC0,8'hC1 -> K_SHIFT, d_shrot=modrm_reg; both reg (mod==11) and mem forms handled, all 8 reg sub-ops dispatched in the K_SHIFT exec via d_shrot."
+   "evidence": "core.sv:2086-2095 8'hC0,8'hC1 -> K_SHIFT, d_shrot=modrm_reg; both reg (mod==11) and mem forms handled, all 8 reg sub-ops dispatched in the K_SHIFT exec via d_shrot.",
+   "desc": "Shift Group 2 (ROL/ROR/RCL/RCR/SHL/SHR/SAR)"
   },
   "C1": {
    "mnem": "ROL/ROR/RCL/RCR/SHL/SHR/SAR r/m,imm8 (grp2)",
    "status": "implemented",
    "detail": "imm8 count masked to 5 bits (d_shift_imm=ibuf[..][4:0]).",
-   "evidence": "core.sv:2086-2095 8'hC0,8'hC1 -> K_SHIFT, d_w=eff_opsize?2:4; reg+mem forms, all 8 reg sub-ops via d_shrot=modrm_reg."
+   "evidence": "core.sv:2086-2095 8'hC0,8'hC1 -> K_SHIFT, d_w=eff_opsize?2:4; reg+mem forms, all 8 reg sub-ops via d_shrot=modrm_reg.",
+   "desc": "Shift Group 2 (ROL/ROR/RCL/RCR/SHL/SHR/SAR)"
   },
   "C2": {
    "mnem": "RET imm16 (near)",
    "status": "implemented",
    "detail": "isa-coverage.md:52 RET near (+imm16) IMPLEMENTED.",
-   "evidence": "core.sv:2225-2226 8'hC2 -> K_CTRL CT_RETN_IMM, d_mem_read, d_ret_imm={ibuf[pfx+2],ibuf[pfx+1]}; modeled by effect via K_CTRL exec."
+   "evidence": "core.sv:2225-2226 8'hC2 -> K_CTRL CT_RETN_IMM, d_mem_read, d_ret_imm={ibuf[pfx+2],ibuf[pfx+1]}; modeled by effect via K_CTRL exec.",
+   "desc": "Return from procedure"
   },
   "C3": {
    "mnem": "RET (near)",
    "status": "implemented",
    "detail": "isa-coverage.md:52.",
-   "evidence": "core.sv:2224 8'hC3 -> K_CTRL CT_RETN, d_mem_read, d_w=eff_opsize?2:4."
+   "evidence": "core.sv:2224 8'hC3 -> K_CTRL CT_RETN, d_mem_read, d_w=eff_opsize?2:4.",
+   "desc": "Return from procedure"
   },
   "C4": {
    "mnem": "LES r,m16:16",
    "status": "partial",
    "detail": "Real-mode 16-bit LES only; PM/32-bit/reg forms HALT. (On modern CPUs C4 is also the 3-byte VEX prefix, out of P54C scope.)",
-   "evidence": "core.sv:1886-1892 8'hC4,8'hC5: implemented ONLY for mod!=11 && seg_real && eff_opsize (real-mode 16-bit). Reg form (mod==11), 32-bit (0x66/no eff_opsize) and protected mode -> else d_unknown (HALT)."
+   "evidence": "core.sv:1886-1892 8'hC4,8'hC5: implemented ONLY for mod!=11 && seg_real && eff_opsize (real-mode 16-bit). Reg form (mod==11), 32-bit (0x66/no eff_opsize) and protected mode -> else d_unknown (HALT).",
+   "desc": "Load Far Pointer"
   },
   "C5": {
    "mnem": "LDS r,m16:16",
    "status": "partial",
    "detail": "Real-mode 16-bit only; PM/32-bit/reg HALT. (Also 2-byte VEX prefix on modern CPUs, out of scope.)",
-   "evidence": "core.sv:1886-1892 8'hC4,8'hC5: same gate as LES \u2014 only mod!=11 && seg_real && eff_opsize; otherwise d_unknown (HALT). d_lseg=SG_DS for C5."
+   "evidence": "core.sv:1886-1892 8'hC4,8'hC5: same gate as LES \u2014 only mod!=11 && seg_real && eff_opsize; otherwise d_unknown (HALT). d_lseg=SG_DS for C5.",
+   "desc": "Load Far Pointer"
   },
   "C6": {
    "mnem": "MOV r/m8,imm8 (grp11 /0)",
    "status": "partial",
    "detail": "Only the /0 MOV form is architecturally valid; /1-/7 (incl C6 /7=XABORT on modern CPUs) are reserved #UD but here decode as MOV (reg field ignored). Functionally fine for the corpus (only /0 emitted), but reg sub-form not validated.",
-   "evidence": "core.sv:2049-2056 8'hC6: decodes as MOV r/m8,imm8 unconditionally (d_is_mov, ALU_MOV) for any modrm_reg \u2014 does NOT check reg==0. Reg and mem forms handled."
+   "evidence": "core.sv:2049-2056 8'hC6: decodes as MOV r/m8,imm8 unconditionally (d_is_mov, ALU_MOV) for any modrm_reg \u2014 does NOT check reg==0. Reg and mem forms handled.",
+   "desc": "MOV Group 11"
   },
   "C7": {
    "mnem": "MOV r/m,imm (grp11 /0)",
    "status": "partial",
    "detail": "Only /0 valid; /1-/7 (C7 /7=XBEGIN modern) reserved but decode as MOV. Note: the 8'hC7 at core.sv:1612 is the TWO-BYTE 0F C7 (CMPXCHG8B), a different opcode.",
-   "evidence": "core.sv:2057-2075 8'hC7 (one-byte): MOV r/m,imm decoded unconditionally for any modrm_reg (no reg==0 check); reg+mem, 16/32-bit forms handled."
+   "evidence": "core.sv:2057-2075 8'hC7 (one-byte): MOV r/m,imm decoded unconditionally for any modrm_reg (no reg==0 check); reg+mem, 16/32-bit forms handled.",
+   "desc": "MOV Group 11"
   },
   "C8": {
    "mnem": "ENTER imm16,imm8",
    "status": "gap",
    "detail": "isa-coverage.md:53 mislabels 'LEAVE/ENTER' as IMPLEMENTED, but only LEAVE (C9/SM_LEAVE) exists; ENTER (C8) HALTs. Whole-opcode gap.",
-   "evidence": "No 8'hC8 case anywhere in the one-byte casez (grep confirms none); falls to one-byte default core.sv:2547 -> d_unknown=1'b1 -> S_HALT."
+   "evidence": "No 8'hC8 case anywhere in the one-byte casez (grep confirms none); falls to one-byte default core.sv:2547 -> d_unknown=1'b1 -> S_HALT.",
+   "desc": "Make Stack Frame for Procedure Parameters"
   },
   "C9": {
    "mnem": "LEAVE",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2234 8'hC9 -> K_STKMISC SM_LEAVE, d_mem_read, d_w=eff_opsize?2:4; modeled by effect (t_leave16). isa-coverage.md:53."
+   "evidence": "core.sv:2234 8'hC9 -> K_STKMISC SM_LEAVE, d_mem_read, d_w=eff_opsize?2:4; modeled by effect (t_leave16). isa-coverage.md:53.",
+   "desc": "High Level Procedure Exit"
   },
   "CA": {
    "mnem": "RETF imm16",
    "status": "partial",
    "detail": "Real-mode far return implemented; protected-mode far return (descriptor/privilege checks) deferred -> HALT.",
-   "evidence": "core.sv:2232-2233 8'hCA -> SYS_RETF, d_ret_imm from imm16. isa-coverage.md:227-229: routed REAL-MODE only (S_RETF, CS base=sel<<4); PM RETF HALTs (routing in core_fetch_decode.svh)."
+   "evidence": "core.sv:2232-2233 8'hCA -> SYS_RETF, d_ret_imm from imm16. isa-coverage.md:227-229: routed REAL-MODE only (S_RETF, CS base=sel<<4); PM RETF HALTs (routing in core_fetch_decode.svh).",
+   "desc": "Return from procedure"
   },
   "CB": {
    "mnem": "RETF",
    "status": "partial",
    "detail": "Real-mode far return implemented; PM RETF deferred.",
-   "evidence": "core.sv:2230-2231 8'hCB -> SYS_RETF, d_ret_imm=0. Real-mode only per isa-coverage.md:227-229 (S_RETF pops IP then CS, base=sel<<4); PM form HALTs."
+   "evidence": "core.sv:2230-2231 8'hCB -> SYS_RETF, d_ret_imm=0. Real-mode only per isa-coverage.md:227-229 (S_RETF pops IP then CS, base=sel<<4); PM form HALTs.",
+   "desc": "Return from procedure"
   },
   "CC": {
    "mnem": "INT3",
    "status": "partial",
    "detail": "system-mode only (IDT); user mode HALTs (no IDT). Partial = mode-gated.",
-   "evidence": "core.sv:2251-2256 8'hCC: sys_mode -> d_int=1,d_int_vec=3 (IDT delivery). USER mode -> d_unknown (HALT). isa-coverage.md:54,78."
+   "evidence": "core.sv:2251-2256 8'hCC: sys_mode -> d_int=1,d_int_vec=3 (IDT delivery). USER mode -> d_unknown (HALT). isa-coverage.md:54,78.",
+   "desc": "Call to Interrupt Procedure"
   },
   "CD": {
    "mnem": "INT imm8",
    "status": "partial",
    "detail": "System mode: full IDT delivery. User mode: only 0x80 (syscall proxy) handled, all other vectors HALT.",
-   "evidence": "core.sv:2257-2267 8'hCD: sys_mode -> d_int,d_int_imm,d_int_vec=imm8 (IDT). USER mode -> only INT 0x80 routes (d_int80/proxy or d_halt); any other INT n HALTs. isa-coverage.md:54,78."
+   "evidence": "core.sv:2257-2267 8'hCD: sys_mode -> d_int,d_int_imm,d_int_vec=imm8 (IDT). USER mode -> only INT 0x80 routes (d_int80/proxy or d_halt); any other INT n HALTs. isa-coverage.md:54,78.",
+   "desc": "Call to Interrupt Procedure"
   },
   "CE": {
    "mnem": "INTO",
    "status": "partial",
    "detail": "system-mode only; user HALTs.",
-   "evidence": "core.sv:2268-2273 8'hCE: sys_mode -> d_int,d_int_vec=4,d_int_cond_of (IDT, conditional). USER mode -> d_unknown (HALT). isa-coverage.md:54,78."
+   "evidence": "core.sv:2268-2273 8'hCE: sys_mode -> d_int,d_int_vec=4,d_int_cond_of (IDT, conditional). USER mode -> d_unknown (HALT). isa-coverage.md:54,78.",
+   "desc": "Call to Interrupt Procedure"
   },
   "CF": {
    "mnem": "IRET",
    "status": "partial",
    "detail": "system-mode near/same-privilege IRET; user HALTs. PM cross-privilege/task-switch IRET not modeled.",
-   "evidence": "core.sv:2274-2277 8'hCF: sys_mode -> d_iret=1 (pop EIP/CS/EFLAGS, near same-privilege). USER mode -> d_unknown (HALT). isa-coverage.md:54,78."
+   "evidence": "core.sv:2274-2277 8'hCF: sys_mode -> d_iret=1 (pop EIP/CS/EFLAGS, near same-privilege). USER mode -> d_unknown (HALT). isa-coverage.md:54,78.",
+   "desc": "Interrupt Return"
   },
   "D0": {
    "mnem": "ROL/ROR/RCL/RCR/SHL/SHR/SAR r/m8,1",
    "status": "implemented",
    "detail": "shift-by-1 form.",
-   "evidence": "core.sv:2076-2085 8'hD0..8'hD3 -> K_SHIFT, d_shift_one=(D0||D1), d_w byte for D0; all 8 reg sub-ops via d_shrot=modrm_reg; reg+mem forms. isa-coverage.md:55."
+   "evidence": "core.sv:2076-2085 8'hD0..8'hD3 -> K_SHIFT, d_shift_one=(D0||D1), d_w byte for D0; all 8 reg sub-ops via d_shrot=modrm_reg; reg+mem forms. isa-coverage.md:55.",
+   "desc": "Shift Group 2 (ROL/ROR/RCL/RCR/SHL/SHR/SAR)"
   },
   "D1": {
    "mnem": "ROL/ROR/RCL/RCR/SHL/SHR/SAR r/m,1",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2076-2085 8'hD0..8'hD3, d_shift_one set, d_w=eff_opsize?2:4; all reg sub-ops via d_shrot."
+   "evidence": "core.sv:2076-2085 8'hD0..8'hD3, d_shift_one set, d_w=eff_opsize?2:4; all reg sub-ops via d_shrot.",
+   "desc": "Shift Group 2 (ROL/ROR/RCL/RCR/SHL/SHR/SAR)"
   },
   "D2": {
    "mnem": "ROL/ROR/RCL/RCR/SHL/SHR/SAR r/m8,CL",
    "status": "implemented",
    "detail": "shift count from CL (d_shift_cl).",
-   "evidence": "core.sv:2076-2085 8'hD0..8'hD3, d_shift_cl=(D2||D3), d_w byte; all reg sub-ops via d_shrot."
+   "evidence": "core.sv:2076-2085 8'hD0..8'hD3, d_shift_cl=(D2||D3), d_w byte; all reg sub-ops via d_shrot.",
+   "desc": "Shift Group 2 (ROL/ROR/RCL/RCR/SHL/SHR/SAR)"
   },
   "D3": {
    "mnem": "ROL/ROR/RCL/RCR/SHL/SHR/SAR r/m,CL",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2076-2085 8'hD0..8'hD3, d_shift_cl set, d_w=eff_opsize?2:4; all reg sub-ops via d_shrot."
+   "evidence": "core.sv:2076-2085 8'hD0..8'hD3, d_shift_cl set, d_w=eff_opsize?2:4; all reg sub-ops via d_shrot.",
+   "desc": "Shift Group 2 (ROL/ROR/RCL/RCR/SHL/SHR/SAR)"
   },
   "D4": {
    "mnem": "AAM imm8",
    "status": "partial",
    "detail": "Result/flags QEMU-exact; architectural #DE on base==0 not raised. Partial per isa-coverage.md:56,80.",
-   "evidence": "core.sv:1970-1972 8'hD4 -> K_ALU ALU_AAM, d_use_imm imm8 base. Exec QEMU-exact (core.sv:2356-2439 BCD block per isa-coverage.md:56). BUT AAM base-0 #DE is deferred (quotient/remainder guarded to 0, core.sv:2422-2423 region per isa-coverage.md:80)."
+   "evidence": "core.sv:1970-1972 8'hD4 -> K_ALU ALU_AAM, d_use_imm imm8 base. Exec QEMU-exact (core.sv:2356-2439 BCD block per isa-coverage.md:56). BUT AAM base-0 #DE is deferred (quotient/remainder guarded to 0, core.sv:2422-2423 region per isa-coverage.md:80).",
+   "desc": "ASCII Adjust AX After Multiply"
   },
   "D5": {
    "mnem": "AAD imm8",
    "status": "implemented",
    "detail": "QEMU-exact; undefined flags masked via eflags_undefined_mask.",
-   "evidence": "core.sv:1973-1975 8'hD5 -> K_ALU ALU_AAD, d_use_imm imm8 base; exec QEMU-exact BCD block (isa-coverage.md:56). No divide-by-zero hazard (AAD multiplies)."
+   "evidence": "core.sv:1973-1975 8'hD5 -> K_ALU ALU_AAD, d_use_imm imm8 base; exec QEMU-exact BCD block (isa-coverage.md:56). No divide-by-zero hazard (AAD multiplies).",
+   "desc": "ASCII Adjust AX Before Division"
   },
   "D6": {
-   "mnem": "(undefined / SALC)",
+   "mnem": "SALC",
    "status": "undefined",
    "detail": "0xD6 is an undocumented opcode (SALC) \u2014 no architectural IA-32 instruction in P54C scope; HALTs loudly.",
-   "evidence": "No 8'hD6 case; not matched by the x87 pattern 8'b1101_1??? (that is D8-DF only). Falls to one-byte default core.sv:2547 -> d_unknown -> S_HALT."
+   "evidence": "No 8'hD6 case; not matched by the x87 pattern 8'b1101_1??? (that is D8-DF only). Falls to one-byte default core.sv:2547 -> d_unknown -> S_HALT.",
+   "desc": "Undefined and Reserved; Does not Generate #UD"
   },
   "D7": {
    "mnem": "XLATB",
    "status": "gap",
    "detail": "Architecturally valid IA-32 instruction with no decode arm -> whole-opcode gap.",
-   "evidence": "No 8'hD7 case (grep confirms); not in the 1101_1??? x87 pattern. Falls to one-byte default core.sv:2547 -> d_unknown -> S_HALT."
+   "evidence": "No 8'hD7 case (grep confirms); not in the 1101_1??? x87 pattern. Falls to one-byte default core.sv:2547 -> d_unknown -> S_HALT.",
+   "desc": "Table Look-up Translation"
   },
   "D8": {
    "mnem": "FADD/FMUL/FCOM/FSUB/FDIV m32/st(i)",
    "status": "partial",
    "detail": "All D8 sub-forms decode; PARTIAL only because x87 is bit-exact ONLY for normal finite values/+-0 at default 64-bit PC/RNE; Inf/NaN/denormal/non-default RC/PC paths HALT (isa-coverage.md:121-127,157). d_is_x87 cleared if d_unknown.",
-   "evidence": "core.sv:2363-2379 (under 8'b1101_1??? at 2355). Mem form: reg 0,1,4,5,6,7 -> FX_AR_M32; reg2 FCOM_M32; default FCOMP. Reg form: 0,1,4,5,6,7 FX_AR_ST0_STI; 2 FCOM_STI; default FCOMP. No d_unknown arm \u2014 every ModRM handled."
+   "evidence": "core.sv:2363-2379 (under 8'b1101_1??? at 2355). Mem form: reg 0,1,4,5,6,7 -> FX_AR_M32; reg2 FCOM_M32; default FCOMP. Reg form: 0,1,4,5,6,7 FX_AR_ST0_STI; 2 FCOM_STI; default FCOMP. No d_unknown arm \u2014 every ModRM handled.",
+   "desc": "x87 floating-point arithmetic/compare (m32real or st(i))"
   },
   "D9": {
    "mnem": "FLD/FST/FLDCW/FNSTCW + D9 reg group",
    "status": "partial",
    "detail": "Reg-form FRNDINT (FC) and FSCALE (FD) now implemented (libm floor/ceil/rint, ldexp). Still HALT: FPREM/FPREM1 (F8/F5 \u2014 need an exact-remainder engine), FXTRACT (F4); transcendentals (F0-F3/F9-FF) only under +VEN_TRANSCENDENTAL else d_unknown.",
-   "evidence": "core.sv:2381-2429. Reg adds 8h FC FRNDINT / FD FSCALE (exec FX_FRNDINT/FX_FSCALE); F8 FPREM deferred -> d_unknown."
+   "evidence": "core.sv:2381-2429. Reg adds 8h FC FRNDINT / FD FSCALE (exec FX_FRNDINT/FX_FSCALE); F8 FPREM deferred -> d_unknown.",
+   "desc": "x87 load/store real, control word, and constants"
   },
   "DA": {
    "mnem": "FIADD/FICOM m32; FUCOMPP",
    "status": "partial",
    "detail": "Integer-arith + FICOM + FUCOMPP implemented; FCMOVB/E/BE/U (DA reg forms) deferred -> HALT (isa-coverage.md:154). Plus finite-value caveat.",
-   "evidence": "core.sv:2427-2438. Mem: reg 0,1,4,5,6,7 -> FX_AR_I32; reg2 FICOM_M32; default FICOMP. Reg form: only mrm==E9 -> FUCOMPP; everything else (FCMOVcc) -> d_unknown (HALT)."
+   "evidence": "core.sv:2427-2438. Mem: reg 0,1,4,5,6,7 -> FX_AR_I32; reg2 FICOM_M32; default FICOMP. Reg form: only mrm==E9 -> FUCOMPP; everything else (FCMOVcc) -> d_unknown (HALT).",
+   "desc": "x87 integer arithmetic; FUCOMPP"
   },
   "DB": {
    "mnem": "FILD/FISTP/FLD m80/FNINIT; DB reg",
    "status": "partial",
    "detail": "FILD/FIST/FLD-m80/FNCLEX/FNINIT implemented; FCMOVNB/NE/NBE/NU + FCOMI/FUCOMI HALT (isa-coverage.md:154); mem /1,/4,/6 -> d_unknown. Plus finite-value caveat.",
-   "evidence": "core.sv:2440-2457. Mem: /0 FILD_M32,/2 FIST,/3 FISTP,/5 FLD_M80,/7 FSTP_M80; default d_unknown. Reg: mrm E2 FNCLEX, E3 FNINIT; default d_unknown (FCMOVcc/FCOMI/FUCOMI deferred)."
+   "evidence": "core.sv:2440-2457. Mem: /0 FILD_M32,/2 FIST,/3 FISTP,/5 FLD_M80,/7 FSTP_M80; default d_unknown. Reg: mrm E2 FNCLEX, E3 FNINIT; default d_unknown (FCMOVcc/FCOMI/FUCOMI deferred).",
+   "desc": "x87 integer load/store; FNINIT/FNCLEX; FUCOMI"
   },
   "DC": {
    "mnem": "FADD/FMUL/FSUB/FDIV m64/st(i)-dest",
    "status": "partial",
    "detail": "Arith m64 + ST(i)-dest arith implemented; reg form reg=2/3 (FCOM/FCOMP st(i) via DC, non-canonical) -> d_unknown. Plus finite-value caveat.",
-   "evidence": "core.sv:2459-2479. Mem: reg 0,1,4,5,6,7 FX_AR_M64; reg2 FCOM_M64; default FCOMP. Reg form: 0,1 + 4,5,6,7 (with SUBR/SUB DIVR/DIV bit0 flipped) -> FX_AR_STI_ST0; reg2/3 -> d_unknown."
+   "evidence": "core.sv:2459-2479. Mem: reg 0,1,4,5,6,7 FX_AR_M64; reg2 FCOM_M64; default FCOMP. Reg form: 0,1 + 4,5,6,7 (with SUBR/SUB DIVR/DIV bit0 flipped) -> FX_AR_STI_ST0; reg2/3 -> d_unknown.",
+   "desc": "x87 floating-point arithmetic (m64real or st(i))"
   },
   "DD": {
    "mnem": "FLD/FST m64; FFREE/FUCOM; FRSTOR/FNSAVE",
    "status": "partial",
    "detail": "FRSTOR/FNSAVE present in enum (M11b) but isa-coverage.md:155 lists them deferred in default build; mem /1,/5 -> d_unknown; reg F0+/F8+ -> d_unknown. Plus finite-value caveat.",
-   "evidence": "core.sv:2481-2502. Mem: /0 FLD_M64,/2 FST,/3 FSTP,/4 FRSTOR,/6 FNSAVE,/7 FNSTSW_M; default d_unknown. Reg: FFREE(C0+),FST st(i)(D0+),FSTP st(i)(D8+),FUCOM(E0+),FUCOMP(E8+); default d_unknown."
+   "evidence": "core.sv:2481-2502. Mem: /0 FLD_M64,/2 FST,/3 FSTP,/4 FRSTOR,/6 FNSAVE,/7 FNSTSW_M; default d_unknown. Reg: FFREE(C0+),FST st(i)(D0+),FSTP st(i)(D8+),FUCOM(E0+),FUCOMP(E8+); default d_unknown.",
+   "desc": "x87 load/store real; FFREE/FUCOM; FRSTOR/FNSAVE"
   },
   "DE": {
    "mnem": "FIADD m16; FADDP/FCOMPP",
    "status": "partial",
    "detail": "FADDP/FMULP/FSUBRP/FSUBP/FDIVRP/FDIVP + FCOMPP + FIxxx m16 implemented; reg=2/3 non-D9 -> d_unknown. Plus finite-value caveat.",
-   "evidence": "core.sv:2504-2523. Mem: reg 0,1,4,5,6,7 FX_AR_I16; reg2 FICOM_M16; default FICOMP. Reg: mrm D9 FCOMPP; else 0,1 + 4,5,6,7 (SUBR/SUB DIVR/DIV swap) FX_AR_STI_ST0 with pop; reg2/3 -> d_unknown."
+   "evidence": "core.sv:2504-2523. Mem: reg 0,1,4,5,6,7 FX_AR_I16; reg2 FICOM_M16; default FICOMP. Reg: mrm D9 FCOMPP; else 0,1 + 4,5,6,7 (SUBR/SUB DIVR/DIV swap) FX_AR_STI_ST0 with pop; reg2/3 -> d_unknown.",
+   "desc": "x87 integer arithmetic and arithmetic-and-pop; FCOMPP"
   },
   "DF": {
    "mnem": "FILD/FISTP m16/m64; FBLD/FBSTP; FNSTSW AX",
    "status": "partial",
    "detail": "FILD/FIST m16/m64, FBLD/FBSTP (M10), FNSTSW AX implemented; mem /1 -> d_unknown; reg forms other than E0 (incl FCOMIP/FUCOMIP) -> d_unknown. Plus finite-value caveat.",
-   "evidence": "core.sv:2525-2541. Mem: /0 FILD_M16,/2 FIST_M16,/3 FISTP_M16,/4 FBLD,/5 FILD_M64,/6 FBSTP,/7 FISTP_M64; default(/1) d_unknown. Reg: mrm E0 FNSTSW_AX; else d_unknown (FCOMIP/FUCOMIP deferred)."
+   "evidence": "core.sv:2525-2541. Mem: /0 FILD_M16,/2 FIST_M16,/3 FISTP_M16,/4 FBLD,/5 FILD_M64,/6 FBSTP,/7 FISTP_M64; default(/1) d_unknown. Reg: mrm E0 FNSTSW_AX; else d_unknown (FCOMIP/FUCOMIP deferred).",
+   "desc": "x87 integer load/store; FBLD/FBSTP; FNSTSW AX"
   },
   "E0": {
    "mnem": "LOOPNE rel8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2237 8'hE0 -> K_CTRL CT_LOOPNE, d_rel sext imm8. isa-coverage.md:58."
+   "evidence": "core.sv:2237 8'hE0 -> K_CTRL CT_LOOPNE, d_rel sext imm8. isa-coverage.md:58.",
+   "desc": "Decrement count; Jump short if count!=0 and ZF=0"
   },
   "E1": {
    "mnem": "LOOPE rel8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2236 8'hE1 -> K_CTRL CT_LOOPE, d_rel sext imm8. isa-coverage.md:58."
+   "evidence": "core.sv:2236 8'hE1 -> K_CTRL CT_LOOPE, d_rel sext imm8. isa-coverage.md:58.",
+   "desc": "Decrement count; Jump short if count!=0 and ZF=1"
   },
   "E2": {
    "mnem": "LOOP rel8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2235 8'hE2 -> K_CTRL CT_LOOP, d_rel sext imm8. isa-coverage.md:58."
+   "evidence": "core.sv:2235 8'hE2 -> K_CTRL CT_LOOP, d_rel sext imm8. isa-coverage.md:58.",
+   "desc": "Decrement count; Jump short if count!=0"
   },
   "E3": {
    "mnem": "JECXZ rel8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2238 8'hE3 -> K_CTRL CT_JECXZ, d_rel sext imm8. isa-coverage.md:58."
+   "evidence": "core.sv:2238 8'hE3 -> K_CTRL CT_JECXZ, d_rel sext imm8. isa-coverage.md:58.",
+   "desc": "Jump short if eCX register is 0"
   },
   "E4": {
    "mnem": "IN AL,imm8",
    "status": "partial",
    "detail": "Implemented under co-sim/SoC io-bridge; outside it HALTs (no real port).",
-   "evidence": "core.sv:2326-2330 8'hE4,E5: d_io,d_io_imm,port=imm8,width byte. Decode unconditional but EXEC gated: in co-sim takes io-bus value; outside co-sim only 'out 0xf4' is legal, any other IN/OUT HALTs (isa-coverage.md:59,79)."
+   "evidence": "core.sv:2326-2330 8'hE4,E5: d_io,d_io_imm,port=imm8,width byte. Decode unconditional but EXEC gated: in co-sim takes io-bus value; outside co-sim only 'out 0xf4' is legal, any other IN/OUT HALTs (isa-coverage.md:59,79).",
+   "desc": "Input from Port"
   },
   "E5": {
    "mnem": "IN eAX,imm8",
    "status": "partial",
    "detail": "co-sim/SoC only; otherwise HALT.",
-   "evidence": "core.sv:2326-2330 8'hE4,E5 -> d_io, port imm8, width eff_opsize. Same co-sim gating as E4 (isa-coverage.md:59,79)."
+   "evidence": "core.sv:2326-2330 8'hE4,E5 -> d_io, port imm8, width eff_opsize. Same co-sim gating as E4 (isa-coverage.md:59,79).",
+   "desc": "Input from Port"
   },
   "E6": {
    "mnem": "OUT imm8,AL",
    "status": "partial",
    "detail": "co-sim/SoC or the 0xf4 terminator; otherwise HALT.",
-   "evidence": "core.sv:2331-2335 8'hE6,E7 -> d_io,d_io_write,port imm8,width byte. EXEC: only 'out 0xf4' (isa-debug-exit) legal outside co-sim; others HALT (isa-coverage.md:59,79)."
+   "evidence": "core.sv:2331-2335 8'hE6,E7 -> d_io,d_io_write,port imm8,width byte. EXEC: only 'out 0xf4' (isa-debug-exit) legal outside co-sim; others HALT (isa-coverage.md:59,79).",
+   "desc": "Output to Port"
   },
   "E7": {
    "mnem": "OUT imm8,eAX",
    "status": "partial",
    "detail": "co-sim/SoC only (or 0xf4); otherwise HALT.",
-   "evidence": "core.sv:2331-2335 8'hE6,E7 -> d_io,d_io_write, port imm8, width eff_opsize. Same gating as E6."
+   "evidence": "core.sv:2331-2335 8'hE6,E7 -> d_io,d_io_write, port imm8, width eff_opsize. Same gating as E6.",
+   "desc": "Output to Port"
   },
   "E8": {
    "mnem": "CALL rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2218-2223 8'hE8 -> K_CTRL CT_CALLREL, d_mem_write (push), operand-size-aware rel16/rel32; modeled by effect. isa-coverage.md:60."
+   "evidence": "core.sv:2218-2223 8'hE8 -> K_CTRL CT_CALLREL, d_mem_write (push), operand-size-aware rel16/rel32; modeled by effect. isa-coverage.md:60.",
+   "desc": "Call Procedure"
   },
   "E9": {
    "mnem": "JMP rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2203-2214 8'hE9 -> d_is_branch, taken=1, operand-size-aware rel16(d_br16)/rel32. isa-coverage.md:60."
+   "evidence": "core.sv:2203-2214 8'hE9 -> d_is_branch, taken=1, operand-size-aware rel16(d_br16)/rel32. isa-coverage.md:60.",
+   "desc": "Jump"
   },
   "EA": {
    "mnem": "JMP far ptr16:off",
    "status": "partial",
    "detail": "Real-mode + real->PM transition far JMP implemented; general PM far-jump (gate/TSS) not modeled. Marked partial vs the broad ISA.",
-   "evidence": "core.sv:2282-2297 8'hEA -> SYS_LJMP, off/sel by operand size. isa-coverage.md:60 far JMP via SYS_LJMP. Real-mode/PM-entry transition path (S_LJMP); full PM descriptor far-jump beyond the boot transition is out of scope."
+   "evidence": "core.sv:2282-2297 8'hEA -> SYS_LJMP, off/sel by operand size. isa-coverage.md:60 far JMP via SYS_LJMP. Real-mode/PM-entry transition path (S_LJMP); full PM descriptor far-jump beyond the boot transition is out of scope.",
+   "desc": "Jump"
   },
   "EB": {
    "mnem": "JMP rel8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2201-2202 8'hEB -> d_is_branch, taken=1, d_rel sext imm8, d_br16=eff_opsize."
+   "evidence": "core.sv:2201-2202 8'hEB -> d_is_branch, taken=1, d_rel sext imm8, d_br16=eff_opsize.",
+   "desc": "Jump"
   },
   "EC": {
    "mnem": "IN AL,DX",
    "status": "partial",
    "detail": "co-sim/SoC only; otherwise HALT.",
-   "evidence": "core.sv:2336-2340 8'hEC,ED -> d_io, port=DX, width byte. Co-sim/SoC gated in EXEC; outside HALTs (isa-coverage.md:59,79)."
+   "evidence": "core.sv:2336-2340 8'hEC,ED -> d_io, port=DX, width byte. Co-sim/SoC gated in EXEC; outside HALTs (isa-coverage.md:59,79).",
+   "desc": "Input from Port"
   },
   "ED": {
    "mnem": "IN eAX,DX",
    "status": "partial",
    "detail": "co-sim/SoC only; otherwise HALT.",
-   "evidence": "core.sv:2336-2340 8'hEC,ED -> d_io, port=DX, width eff_opsize. Same gating."
+   "evidence": "core.sv:2336-2340 8'hEC,ED -> d_io, port=DX, width eff_opsize. Same gating.",
+   "desc": "Input from Port"
   },
   "EE": {
    "mnem": "OUT DX,AL",
    "status": "partial",
    "detail": "co-sim/SoC only; otherwise HALT.",
-   "evidence": "core.sv:2341-2345 8'hEE,EF -> d_io,d_io_write, port=DX, width byte. Co-sim/SoC gated; outside (except 0xf4 which is imm8) HALTs."
+   "evidence": "core.sv:2341-2345 8'hEE,EF -> d_io,d_io_write, port=DX, width byte. Co-sim/SoC gated; outside (except 0xf4 which is imm8) HALTs.",
+   "desc": "Output to Port"
   },
   "EF": {
    "mnem": "OUT DX,eAX",
    "status": "partial",
    "detail": "co-sim/SoC only; otherwise HALT.",
-   "evidence": "core.sv:2341-2345 8'hEE,EF -> d_io,d_io_write, port=DX, width eff_opsize."
+   "evidence": "core.sv:2341-2345 8'hEE,EF -> d_io,d_io_write, port=DX, width eff_opsize.",
+   "desc": "Output to Port"
   },
   "F0": {
    "mnem": "LOCK",
    "status": "prefix",
    "detail": "Legacy prefix, consumed into pfx_lock; not a standalone instruction.",
-   "evidence": "core.sv:1232 8'hF0 -> pfx_lock=1'b1 in the prefix loop; functional no-op on this in-order single core. is_prefix() lists F0 (ventium_decode_pkg.sv:95)."
+   "evidence": "core.sv:1232 8'hF0 -> pfx_lock=1'b1 in the prefix loop; functional no-op on this in-order single core. is_prefix() lists F0 (ventium_decode_pkg.sv:95).",
+   "desc": "Assert LOCK# Signal Prefix"
   },
   "F1": {
    "mnem": "INT1/ICEBP",
    "status": "gap",
    "detail": "Undocumented single-step/ICEBP opcode; no decode arm. HALTs loudly.",
-   "evidence": "No 8'hF1 case; not a prefix; falls to one-byte default core.sv:2547 -> d_unknown -> S_HALT."
+   "evidence": "No 8'hF1 case; not a prefix; falls to one-byte default core.sv:2547 -> d_unknown -> S_HALT.",
+   "desc": "Undefined and Reserved; Does not Generate #UD"
   },
   "F2": {
    "mnem": "REPNE",
    "status": "prefix",
    "detail": "Legacy REP-class prefix; not standalone.",
-   "evidence": "core.sv:1231 8'hF2 -> pfx_rep=2'd2. is_prefix() lists F2 (ventium_decode_pkg.sv:95). Consumed in the prefix loop and applied to string ops."
+   "evidence": "core.sv:1231 8'hF2 -> pfx_rep=2'd2. is_prefix() lists F2 (ventium_decode_pkg.sv:95). Consumed in the prefix loop and applied to string ops.",
+   "desc": "Repeat String Operation Prefix"
   },
   "F3": {
    "mnem": "REP/REPE",
    "status": "prefix",
    "detail": "Legacy REP-class prefix; not standalone.",
-   "evidence": "core.sv:1230 8'hF3 -> pfx_rep=2'd3. is_prefix() lists F3 (ventium_decode_pkg.sv:95). Used by string-op REP loop (S_USEQ)."
+   "evidence": "core.sv:1230 8'hF3 -> pfx_rep=2'd3. is_prefix() lists F3 (ventium_decode_pkg.sv:95). Used by string-op REP loop (S_USEQ).",
+   "desc": "Repeat String Operation Prefix"
   },
   "F4": {
    "mnem": "HLT",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2312-2314 8'hF4 -> d_halt=1'b1 (stops retiring). isa-coverage.md:61."
+   "evidence": "core.sv:2312-2314 8'hF4 -> d_halt=1'b1 (stops retiring). isa-coverage.md:61.",
+   "desc": "Halt"
   },
   "F5": {
    "mnem": "CMC",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2243 8'hF5 -> d_cmc=1'b1 (CF<-~CF). isa-coverage.md:62 (F5-FF flag ops)."
+   "evidence": "core.sv:2243 8'hF5 -> d_cmc=1'b1 (CF<-~CF). isa-coverage.md:62 (F5-FF flag ops).",
+   "desc": "Complement Carry Flag"
   },
   "F6": {
    "mnem": "TEST/NOT/NEG/MUL/DIV r/m8 (grp3)",
    "status": "partial",
    "detail": "All 8 reg sub-ops implemented; architectural #DE (divide error) is not raised -> partial.",
-   "evidence": "core.sv:2097-2145 8'hF6,F7: reg /0,/1 TEST imm (reg+mem); /2 NOT; /3 NEG; /4-/7 K_MULDIV (MUL/IMUL/DIV/IDIV) \u2014 all sub-forms decoded. BUT DIV/IDIV do NOT raise #DE on divide-by-zero/overflow (native */% no srcv==0 guard, isa-coverage.md:63, core_exec.svh:214-284)."
+   "evidence": "core.sv:2097-2145 8'hF6,F7: reg /0,/1 TEST imm (reg+mem); /2 NOT; /3 NEG; /4-/7 K_MULDIV (MUL/IMUL/DIV/IDIV) \u2014 all sub-forms decoded. BUT DIV/IDIV do NOT raise #DE on divide-by-zero/overflow (native */% no srcv==0 guard, isa-coverage.md:63, core_exec.svh:214-284).",
+   "desc": "Unary Group 3 (TEST/NOT/NEG/MUL/IMUL/DIV/IDIV)"
   },
   "F7": {
    "mnem": "TEST/NOT/NEG/MUL/DIV r/m (grp3)",
    "status": "partial",
    "detail": "All sub-ops implemented; #DE deferred -> partial.",
-   "evidence": "core.sv:2097-2145 8'hF6,F7 (op0==F7 -> d_w=eff_opsize?2:4): same dispatch \u2014 /0,/1 TEST imm (reg+mem incl 'test mem,imm'), /2 NOT, /3 NEG, /4-/7 K_MULDIV. #DE not raised on div-by-zero/overflow (isa-coverage.md:63)."
+   "evidence": "core.sv:2097-2145 8'hF6,F7 (op0==F7 -> d_w=eff_opsize?2:4): same dispatch \u2014 /0,/1 TEST imm (reg+mem incl 'test mem,imm'), /2 NOT, /3 NEG, /4-/7 K_MULDIV. #DE not raised on div-by-zero/overflow (isa-coverage.md:63).",
+   "desc": "Unary Group 3 (TEST/NOT/NEG/MUL/IMUL/DIV/IDIV)"
   },
   "F8": {
    "mnem": "CLC",
    "status": "implemented",
    "detail": "isa-coverage.md:62.",
-   "evidence": "core.sv:2241 8'hF8 -> d_clc=1'b1 (CF<-0)."
+   "evidence": "core.sv:2241 8'hF8 -> d_clc=1'b1 (CF<-0).",
+   "desc": "Clear Carry Flag"
   },
   "F9": {
    "mnem": "STC",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2242 8'hF9 -> d_stc=1'b1 (CF<-1)."
+   "evidence": "core.sv:2242 8'hF9 -> d_stc=1'b1 (CF<-1).",
+   "desc": "Set Carry Flag"
   },
   "FA": {
    "mnem": "CLI",
    "status": "implemented",
    "detail": "IF state is maintained; effective in system mode. Decode/retire is unconditional.",
-   "evidence": "core.sv:2244 8'hFA -> d_cli=1'b1 (IF<-0, M2S.1). isa-coverage.md:62."
+   "evidence": "core.sv:2244 8'hFA -> d_cli=1'b1 (IF<-0, M2S.1). isa-coverage.md:62.",
+   "desc": "Clear Interrupt Flag"
   },
   "FB": {
    "mnem": "STI",
    "status": "implemented",
    "detail": "One-instruction STI shadow (irq_shadow) handled in the interrupt-accept logic.",
-   "evidence": "core.sv:2245 8'hFB -> d_sti=1'b1 (IF<-1, M2S.1)."
+   "evidence": "core.sv:2245 8'hFB -> d_sti=1'b1 (IF<-1, M2S.1).",
+   "desc": "Set Interrupt Flag"
   },
   "FC": {
    "mnem": "CLD",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2239 8'hFC -> d_cld=1'b1. isa-coverage.md:62."
+   "evidence": "core.sv:2239 8'hFC -> d_cld=1'b1. isa-coverage.md:62.",
+   "desc": "Clear Direction Flag"
   },
   "FD": {
    "mnem": "STD",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:2240 8'hFD -> d_std=1'b1."
+   "evidence": "core.sv:2240 8'hFD -> d_std=1'b1.",
+   "desc": "Set Direction Flag"
   },
   "FE": {
    "mnem": "INC/DEC r/m8 (grp4)",
    "status": "partial",
    "detail": "/0 INC, /1 DEC implemented; reserved /2-/7 mis-decode as DEC rather than #UD (only /0,/1 ever emitted, so functionally fine for the corpus).",
-   "evidence": "core.sv:2146-2150 8'hFE -> ALU_INC if modrm_reg==0 else ALU_DEC; reg+mem forms. Does NOT validate reg<2 \u2014 reg /2-/7 (reserved #UD) decode as DEC."
+   "evidence": "core.sv:2146-2150 8'hFE -> ALU_INC if modrm_reg==0 else ALU_DEC; reg+mem forms. Does NOT validate reg<2 \u2014 reg /2-/7 (reserved #UD) decode as DEC.",
+   "desc": "INC/DEC Group 4"
   },
   "FF": {
    "mnem": "INC/DEC/CALL/JMP/PUSH r/m (grp5)",
    "status": "partial",
    "detail": "INC/DEC/CALL-near/JMP-near/PUSH fully implemented; far CALL/JMP-indirect-through-memory real-mode only; /7 reserved and PM/reg far forms HALT.",
-   "evidence": "core.sv:2151-2200 8'hFF: /0 INC,/1 DEC,/2 CALL near,/4 JMP near,/6 PUSH all implemented (reg+mem). /3 CALLF m16:16 and /5 JMPF m16:16 only mod!=11 && seg_real && !paging_on else d_unknown; /7 (and CALLF/JMPF reg/PM forms) -> default d_unknown (HALT)."
+   "evidence": "core.sv:2151-2200 8'hFF: /0 INC,/1 DEC,/2 CALL near,/4 JMP near,/6 PUSH all implemented (reg+mem). /3 CALLF m16:16 and /5 JMPF m16:16 only mod!=11 && seg_real && !paging_on else d_unknown; /7 (and CALLF/JMPF reg/PM forms) -> default d_unknown (HALT).",
+   "desc": "INC/DEC/CALL/JMP/PUSH Group 5"
   }
  },
  "secondary": {
@@ -1536,25 +1791,29 @@
    "mnem": "GRP6 (SLDT/STR/LLDT/LTR/VERR/VERW r/m)",
    "status": "partial",
    "detail": "ModRM.reg group. Ventium decodes only the register-form /1 STR and /3 LTR, and ONLY when sys_mode=1; SLDT(/0), LLDT(/2), VERR(/4), VERW(/5), and ALL memory forms set d_unknown->S_HALT, and the whole opcode HALTs in user mode.",
-   "evidence": "core.sv:1412-1424 (STR /1 reg, LTR /3 reg gated on sys_mode; else d_unknown); exec core_exec.svh:103 (SYS_STR), core_fetch_decode.svh:430 (SYS_LTR)"
+   "evidence": "core.sv:1412-1424 (STR /1 reg, LTR /3 reg gated on sys_mode; else d_unknown); exec core_exec.svh:103 (SYS_STR), core_fetch_decode.svh:430 (SYS_LTR)",
+   "desc": "Group 6 (SLDT/STR/LLDT/LTR/VERR/VERW)"
   },
   "01": {
    "mnem": "GRP7 (SGDT/SIDT/LGDT/LIDT/SMSW/LMSW/INVLPG)",
    "status": "partial",
    "detail": "ModRM.reg group. Implemented: /2 LGDT and /3 LIDT (mem, read 6-byte pseudo-desc); /0 SGDT and /1 SIDT (mem store) only when modrm_mod!=11 AND !paging_on. /4 SMSW, /6 LMSW, /7 INVLPG, and all reg forms set d_unknown->S_HALT. System-context (boot path).",
-   "evidence": "core.sv:1451-1463 (LGDT/LIDT/SGDT/SIDT arms; else d_unknown); exec core_fetch_decode.svh:406 (S_LGDT), :450 (S_SGDT)"
+   "evidence": "core.sv:1451-1463 (LGDT/LIDT/SGDT/SIDT arms; else d_unknown); exec core_fetch_decode.svh:406 (S_LGDT), :450 (S_SGDT)",
+   "desc": "Group 7 (SGDT/SIDT/LGDT/LIDT/SMSW/LMSW/INVLPG)"
   },
   "02": {
    "mnem": "LAR r,r/m",
    "status": "gap",
    "detail": "No decode arm; falls to the two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (two-byte default d_unknown); FSM core_fetch_decode.svh:351 (->S_HALT)"
+   "evidence": "core.sv:1668 (two-byte default d_unknown); FSM core_fetch_decode.svh:351 (->S_HALT)",
+   "desc": "Load Access Rights Byte"
   },
   "03": {
    "mnem": "LSL r,r/m",
    "status": "gap",
    "detail": "No decode arm; two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown); core_fetch_decode.svh:351"
+   "evidence": "core.sv:1668 (default d_unknown); core_fetch_decode.svh:351",
+   "desc": "Load Segment Limit"
   },
   "04": {
    "mnem": "(undefined)",
@@ -1563,34 +1822,39 @@
    "evidence": "core.sv:1668 (default d_unknown)"
   },
   "05": {
-   "mnem": "(undefined on P54C; LOADALL was 286/386, SYSCALL is AMD)",
+   "mnem": "SYSCALL",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Fast System Call"
   },
   "06": {
    "mnem": "CLTS",
    "status": "gap",
    "detail": "Valid P54C system instr (clear CR0.TS); no Ventium decode arm. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown); core_fetch_decode.svh:351"
+   "evidence": "core.sv:1668 (default d_unknown); core_fetch_decode.svh:351",
+   "desc": "Clear Task-Switched Flag in CR0"
   },
   "07": {
-   "mnem": "(undefined on P54C; SYSRET is AMD)",
+   "mnem": "SYSRET",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Return From Fast System Call"
   },
   "08": {
    "mnem": "INVD",
    "status": "implemented",
    "detail": "Privileged cache-invalidate; modeled by effect as a NOP (no architectural reg/flag change). Decoded ONLY when cosim_en||soc_en (the board/SoC path); plain user mode (both off) keeps d_unknown->S_HALT. Retires as NOP.",
-   "evidence": "core.sv:1656-1658 (if(cosim_en||soc_en) d_is_nop else d_unknown)"
+   "evidence": "core.sv:1656-1658 (if(cosim_en||soc_en) d_is_nop else d_unknown)",
+   "desc": "Invalidate Internal Caches"
   },
   "09": {
    "mnem": "WBINVD",
    "status": "implemented",
    "detail": "Privileged write-back+invalidate; modeled by effect as a NOP. Decoded only when cosim_en||soc_en (board/SoC); user-mode default HALTs. SeaBIOS boot uses it.",
-   "evidence": "core.sv:1656-1658 (if(cosim_en||soc_en) d_is_nop else d_unknown)"
+   "evidence": "core.sv:1656-1658 (if(cosim_en||soc_en) d_is_nop else d_unknown)",
+   "desc": "Write Back and Invalidate Cache"
   },
   "0A": {
    "mnem": "(undefined)",
@@ -1602,7 +1866,8 @@
    "mnem": "UD2 (#UD)",
    "status": "system-only",
    "detail": "Architecturally-reserved opcode that raises #UD. Ventium DELIVERS #UD (vector 6) through the IDT only when sys_mode=1 (d_ud2); in user mode it stays d_unknown->S_HALT (no IDT).",
-   "evidence": "core.sv:1664-1666 (if(sys_mode) d_ud2 else d_unknown)"
+   "evidence": "core.sv:1664-1666 (if(sys_mode) d_ud2 else d_unknown)",
+   "desc": "Undefined Instruction"
   },
   "0C": {
    "mnem": "(undefined)",
@@ -1611,142 +1876,165 @@
    "evidence": "core.sv:1668 (default d_unknown)"
   },
   "0D": {
-   "mnem": "(undefined on P54C; NOP/prefetchw is later)",
+   "mnem": "PREFETCHW m8",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "No Operation"
   },
   "0E": {
-   "mnem": "(undefined on P54C; FEMMS is AMD)",
+   "mnem": "FEMMS",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Fast Clear MMX/3DNow! State"
   },
   "10": {
-   "mnem": "(undefined on P54C; SSE MOVUPS is later)",
+   "mnem": "MOVUPS xmm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction (SSE is PIII+). Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move Unaligned Packed Single-FP Values"
   },
   "11": {
-   "mnem": "(undefined on P54C; SSE MOVUPS)",
+   "mnem": "MOVUPS xmm/m,xmm",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move Unaligned Packed Single-FP Values"
   },
   "12": {
-   "mnem": "(undefined on P54C; SSE MOVLPS/MOVHLPS)",
+   "mnem": "MOVLPS/MOVHLPS xmm,m64",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move Packed Single-FP Values High to Low"
   },
   "13": {
-   "mnem": "(undefined on P54C; SSE MOVLPS)",
+   "mnem": "MOVLPS m64,xmm",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move Low Packed Single-FP Values"
   },
   "14": {
-   "mnem": "(undefined on P54C; SSE UNPCKLPS)",
+   "mnem": "UNPCKLPS xmm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Unpack and Interleave Low Packed Single-FP Values"
   },
   "15": {
-   "mnem": "(undefined on P54C; SSE UNPCKHPS)",
+   "mnem": "UNPCKHPS xmm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Unpack and Interleave High Packed Single-FP Values"
   },
   "16": {
-   "mnem": "(undefined on P54C; SSE MOVHPS/MOVLHPS)",
+   "mnem": "MOVHPS/MOVLHPS xmm,m64",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move Packed Single-FP Values Low to High"
   },
   "17": {
-   "mnem": "(undefined on P54C; SSE MOVHPS)",
+   "mnem": "MOVHPS m64,xmm",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move High Packed Single-FP Values"
   },
   "18": {
-   "mnem": "(undefined on P54C; GRP16 prefetch hints are P6+)",
+   "mnem": "PREFETCHNTA/T0/T1/T2 m8 (grp16)",
    "status": "undefined",
    "detail": "Not a P54C instruction (prefetch/HINT_NOP group is P6+). No Ventium arm; two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Prefetch Group 16 (PREFETCHNTA/T0/T1/T2)"
   },
   "19": {
    "mnem": "(undefined on P54C; reserved-NOP P6+)",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Hintable NOP"
   },
   "1A": {
    "mnem": "(undefined on P54C; reserved-NOP P6+)",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Hintable NOP"
   },
   "1B": {
    "mnem": "(undefined on P54C; reserved-NOP P6+)",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Hintable NOP"
   },
   "1C": {
    "mnem": "(undefined on P54C; reserved-NOP P6+)",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Hintable NOP"
   },
   "1D": {
    "mnem": "(undefined on P54C; reserved-NOP P6+)",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Hintable NOP"
   },
   "1E": {
-   "mnem": "(P6+/CET multi-byte NOP / endbr marker; not P54C)",
+   "mnem": "NOP r/m (endbr w/ F3)",
    "status": "over-implemented",
    "detail": "Not a P54C instruction (HINT_NOP / F3 0F 1E endbr is P6/CET era), but Ventium decodes the whole 0F 1E/1F space as a NOP unconditionally (no mode gate), consuming ModRM(+SIB/disp) for exact length. Retires as NOP. Needed because CET-compiled musl (Quake) starts with endbr32.",
-   "evidence": "core.sv:1434-1437 (8'h1E,8'h1F: d_is_nop, len via mfl_e)"
+   "evidence": "core.sv:1434-1437 (8'h1E,8'h1F: d_is_nop, len via mfl_e)",
+   "desc": "Hintable NOP"
   },
   "1F": {
    "mnem": "NOP r/m (multi-byte NOP)",
    "status": "over-implemented",
    "detail": "Canonical multi-byte NOP (P6+ encoding). Ventium decodes 0F 1F as NOP unconditionally, consuming ModRM(+SIB/disp) via mfl_e for exact length. Retires as NOP.",
-   "evidence": "core.sv:1434-1437 (8'h1E,8'h1F: d_is_nop)"
+   "evidence": "core.sv:1434-1437 (8'h1E,8'h1F: d_is_nop)",
+   "desc": "No Operation"
   },
   "20": {
    "mnem": "MOV r32, CRn",
    "status": "implemented",
    "detail": "Privileged move FROM control reg. Decode arm fires UNCONDITIONALLY (no sys_mode gate, unlike DRn); sets d_sysop=SYS_MOVCR_FROM, writes the GPR. Executes/commits in S_EXEC. (Architecturally CPL0-only; the board runs it in sys_mode.)",
-   "evidence": "core.sv:1465-1467 (SYS_MOVCR_FROM, no gate); exec core_exec.svh:56"
+   "evidence": "core.sv:1465-1467 (SYS_MOVCR_FROM, no gate); exec core_exec.svh:56",
+   "desc": "Move to/from Control Registers"
   },
   "21": {
    "mnem": "MOV r32, DRn",
    "status": "system-only",
    "detail": "Move FROM debug reg. Gated on sys_mode (M2S.6): sets SYS_MOVDR_FROM only when sys_mode=1; user mode keeps d_unknown->S_HALT. Also DR7.GD general-detect fault checked.",
-   "evidence": "core.sv:1473-1479 (if(sys_mode) SYS_MOVDR_FROM else d_unknown); exec core_exec.svh:87"
+   "evidence": "core.sv:1473-1479 (if(sys_mode) SYS_MOVDR_FROM else d_unknown); exec core_exec.svh:87",
+   "desc": "Move to/from Debug Registers"
   },
   "22": {
    "mnem": "MOV CRn, r32",
    "status": "implemented",
    "detail": "Privileged move TO control reg. Decode arm fires unconditionally (no sys_mode gate); sets d_sysop=SYS_MOVCR_TO. Commits in S_EXEC; MOV CR3 also triggers tlb_flush. (CPL0-only architecturally; board runs in sys_mode.)",
-   "evidence": "core.sv:1469-1472 (SYS_MOVCR_TO, no gate); exec core_exec.svh:35; tlb_flush core.sv:4494"
+   "evidence": "core.sv:1469-1472 (SYS_MOVCR_TO, no gate); exec core_exec.svh:35; tlb_flush core.sv:4494",
+   "desc": "Move to/from Control Registers"
   },
   "23": {
    "mnem": "MOV DRn, r32",
    "status": "system-only",
    "detail": "Move TO debug reg. Gated on sys_mode (M2S.6): SYS_MOVDR_TO only when sys_mode=1; user mode keeps d_unknown->S_HALT.",
-   "evidence": "core.sv:1481-1485 (if(sys_mode) SYS_MOVDR_TO else d_unknown); exec core_exec.svh:75"
+   "evidence": "core.sv:1481-1485 (if(sys_mode) SYS_MOVDR_TO else d_unknown); exec core_exec.svh:75",
+   "desc": "Move to/from Debug Registers"
   },
   "24": {
-   "mnem": "(undefined on P54C; MOV r,TRn removed after 486)",
+   "mnem": "MOV r32,TRn",
    "status": "undefined",
    "detail": "Test-register move was deleted on the Pentium (P54C); not a valid P54C opcode. No Ventium arm; two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move to/from Test Register (386/486; removed)"
   },
   "25": {
    "mnem": "(undefined)",
@@ -1755,10 +2043,11 @@
    "evidence": "core.sv:1668 (default d_unknown)"
   },
   "26": {
-   "mnem": "(undefined on P54C; MOV TRn,r removed after 486)",
+   "mnem": "MOV TRn,r32",
    "status": "undefined",
    "detail": "Test-register move deleted on Pentium; not a valid P54C opcode. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move to/from Test Register (386/486; removed)"
   },
   "27": {
    "mnem": "(undefined)",
@@ -1767,88 +2056,102 @@
    "evidence": "core.sv:1668 (default d_unknown)"
   },
   "28": {
-   "mnem": "(undefined on P54C; SSE MOVAPS)",
+   "mnem": "MOVAPS xmm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction (SSE is PIII+). Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move Aligned Packed Single-FP Values"
   },
   "29": {
-   "mnem": "(undefined on P54C; SSE MOVAPS)",
+   "mnem": "MOVAPS xmm/m,xmm",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Move Aligned Packed Single-FP Values"
   },
   "2A": {
-   "mnem": "(undefined on P54C; SSE CVTPI2PS)",
+   "mnem": "CVTPI2PS xmm,mm/m",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Convert Packed DW Integers to Single-FP Values"
   },
   "2B": {
-   "mnem": "(undefined on P54C; SSE MOVNTPS)",
+   "mnem": "MOVNTPS m128,xmm",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Store Packed Single-FP Values Using Non-Temporal Hint"
   },
   "2C": {
-   "mnem": "(undefined on P54C; SSE CVTTPS2PI)",
+   "mnem": "CVTTPS2PI mm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Convert with Trunc. Packed Single-FP Values to DW Integers"
   },
   "2D": {
-   "mnem": "(undefined on P54C; SSE CVTPS2PI)",
+   "mnem": "CVTPS2PI mm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Convert Packed Single-FP Values to DW Integers"
   },
   "2E": {
-   "mnem": "(undefined on P54C; SSE UCOMISS)",
+   "mnem": "UCOMISS xmm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Unordered Compare Scalar Single-FP Values and Set EFLAGS"
   },
   "2F": {
-   "mnem": "(undefined on P54C; SSE COMISS)",
+   "mnem": "COMISS xmm,xmm/m",
    "status": "undefined",
    "detail": "No P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Compare Scalar Ordered Single-FP Values and Set EFLAGS"
   },
   "30": {
    "mnem": "WRMSR",
    "status": "gap",
    "detail": "Valid P54C system instruction (write model-specific reg from EDX:EAX). No Ventium decode arm; two-byte default d_unknown->S_HALT. (MSR access listed as a deferred gap in isa-coverage.md.)",
-   "evidence": "core.sv:1668 (default d_unknown); isa-coverage.md:113"
+   "evidence": "core.sv:1668 (default d_unknown); isa-coverage.md:113",
+   "desc": "Write to Model Specific Register"
   },
   "31": {
    "mnem": "RDTSC",
    "status": "implemented",
    "detail": "Read 64-bit TSC into EDX:EAX. Decoded as K_RDTSC ONLY when cosim_en||soc_en (board/SoC path; SeaBIOS calibrates TSC); plain user mode keeps d_unknown->S_HALT. EXEC writes EDX:EAX from the free-running cycle counter (free-run graded, not per-record diffable). CR4.TSD not modeled.",
-   "evidence": "core.sv:1644-1648 (if(cosim_en||soc_en) K_RDTSC else d_unknown); enum ventium_decode_pkg.sv:22"
+   "evidence": "core.sv:1644-1648 (if(cosim_en||soc_en) K_RDTSC else d_unknown); enum ventium_decode_pkg.sv:22",
+   "desc": "Read Time-Stamp Counter"
   },
   "32": {
    "mnem": "RDMSR",
    "status": "gap",
    "detail": "Valid P54C system instruction (read MSR to EDX:EAX). No Ventium decode arm; two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown); isa-coverage.md:113"
+   "evidence": "core.sv:1668 (default d_unknown); isa-coverage.md:113",
+   "desc": "Read from Model Specific Register"
   },
   "33": {
-   "mnem": "(undefined on P54C; RDPMC is P6+)",
+   "mnem": "RDPMC",
    "status": "undefined",
    "detail": "Performance-counter read is P6+; not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Read Performance-Monitoring Counters"
   },
   "34": {
-   "mnem": "(undefined on P54C; SYSENTER is P6+)",
+   "mnem": "SYSENTER",
    "status": "undefined",
    "detail": "SYSENTER is P6/PII+; not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Fast System Call"
   },
   "35": {
-   "mnem": "(undefined on P54C; SYSEXIT is P6+)",
+   "mnem": "SYSEXIT",
    "status": "undefined",
    "detail": "SYSEXIT is P6/PII+; not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Fast Return from Fast System Call"
   },
   "36": {
    "mnem": "(undefined)",
@@ -1857,16 +2160,18 @@
    "evidence": "core.sv:1668 (default d_unknown)"
   },
   "37": {
-   "mnem": "(undefined on P54C; GETSEC is later)",
+   "mnem": "GETSEC",
    "status": "undefined",
    "detail": "Not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "GETSEC Leaf Functions"
   },
   "38": {
    "mnem": "(undefined on P54C; 3-byte 0F 38 escape is SSSE3+)",
    "status": "undefined",
    "detail": "Three-byte opcode escape is SSSE3+; not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Packed Shuffle Bytes"
   },
   "39": {
    "mnem": "(undefined)",
@@ -1878,7 +2183,8 @@
    "mnem": "(undefined on P54C; 3-byte 0F 3A escape is SSE4.1+)",
    "status": "undefined",
    "detail": "Three-byte opcode escape is SSE4.1+; not a P54C instruction. Two-byte default d_unknown->S_HALT.",
-   "evidence": "core.sv:1668 (default d_unknown)"
+   "evidence": "core.sv:1668 (default d_unknown)",
+   "desc": "Round Packed Single-FP Values"
   },
   "3B": {
    "mnem": "(undefined)",
@@ -1914,349 +2220,407 @@
    "mnem": "CMOVO r,r/m",
    "status": "undefined",
    "detail": "CMOVcc post-dates P54C (Pentium Pro). Decoder HALTs loudly.",
-   "evidence": "No 0F op1 case for 0x40; hits two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc is P6, not in the P54C ISA; no K_ enum exists."
+   "evidence": "No 0F op1 case for 0x40; hits two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc is P6, not in the P54C ISA; no K_ enum exists.",
+   "desc": "Conditional Move - overflow (OF=1)"
   },
   "41": {
    "mnem": "CMOVNO r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x41; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x41; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not overflow (OF=0)"
   },
   "42": {
    "mnem": "CMOVB/CMOVC/CMOVNAE r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x42; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x42; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - below/not above or equal/carry (CF=1)"
   },
   "43": {
    "mnem": "CMOVAE/CMOVNB/CMOVNC r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x43; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x43; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not below/above or equal/not carry (CF=0)"
   },
   "44": {
    "mnem": "CMOVE/CMOVZ r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x44; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x44; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - zero/equal (ZF=1)"
   },
   "45": {
    "mnem": "CMOVNE/CMOVNZ r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x45; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x45; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not zero/not equal (ZF=0)"
   },
   "46": {
    "mnem": "CMOVBE/CMOVNA r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x46; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x46; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - below or equal/not above (CF=1 OR ZF=1)"
   },
   "47": {
    "mnem": "CMOVA/CMOVNBE r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x47; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x47; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not below or equal/above (CF=0 AND ZF=0)"
   },
   "48": {
    "mnem": "CMOVS r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x48; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x48; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - sign (SF=1)"
   },
   "49": {
    "mnem": "CMOVNS r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x49; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x49; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not sign (SF=0)"
   },
   "4A": {
    "mnem": "CMOVP/CMOVPE r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x4A; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x4A; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - parity/parity even (PF=1)"
   },
   "4B": {
    "mnem": "CMOVNP/CMOVPO r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x4B; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x4B; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not parity/parity odd (PF=0)"
   },
   "4C": {
    "mnem": "CMOVL/CMOVNGE r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x4C; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x4C; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - less/not greater (SF!=OF)"
   },
   "4D": {
    "mnem": "CMOVGE/CMOVNL r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x4D; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x4D; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not less/greater or equal (SF=OF)"
   },
   "4E": {
    "mnem": "CMOVLE/CMOVNG r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x4E; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x4E; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - less or equal/not greater ((ZF=1) OR (SF!=OF))"
   },
   "4F": {
    "mnem": "CMOVG/CMOVNLE r,r/m",
    "status": "undefined",
    "detail": "Not in P54C ISA; HALTs.",
-   "evidence": "No 0F op1 case for 0x4F; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6)."
+   "evidence": "No 0F op1 case for 0x4F; two-byte default d_unknown -> S_HALT (core.sv:1668). CMOVcc (P6).",
+   "desc": "Conditional Move - not less nor equal/greater ((ZF=0) AND (SF=OF))"
   },
   "50": {
    "mnem": "MOVMSKPS r32,xmm",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs. No XMM datapath in Ventium.",
-   "evidence": "No 0F op1 case for 0x50; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE (PIII), no K_/FX_ enum."
+   "evidence": "No 0F op1 case for 0x50; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE (PIII), no K_/FX_ enum.",
+   "desc": "Extract Packed Single-FP Sign Mask"
   },
   "51": {
    "mnem": "SQRTPS/SQRTSS xmm,xmm/m (66/F3/F2 variants)",
    "status": "undefined",
    "detail": "SSE family, post-P54C; HALTs (all prefix variants since 66/F2/F3 are consumed into pfx then still no case).",
-   "evidence": "No 0F op1 case for 0x51; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x51; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Compute Square Roots of Packed Single-FP Values"
   },
   "52": {
    "mnem": "RSQRTPS/RSQRTSS xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x52; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x52; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Compute Recipr. of Square Roots of Packed Single-FP Values"
   },
   "53": {
    "mnem": "RCPPS/RCPSS xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x53; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x53; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Compute Reciprocals of Packed Single-FP Values"
   },
   "54": {
    "mnem": "ANDPS/ANDPD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x54; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
+   "evidence": "No 0F op1 case for 0x54; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2.",
+   "desc": "Bitwise Logical AND of Packed Single-FP Values"
   },
   "55": {
    "mnem": "ANDNPS/ANDNPD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x55; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
+   "evidence": "No 0F op1 case for 0x55; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2.",
+   "desc": "Bitwise Logical AND NOT of Packed Single-FP Values"
   },
   "56": {
    "mnem": "ORPS/ORPD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x56; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
+   "evidence": "No 0F op1 case for 0x56; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2.",
+   "desc": "Bitwise Logical OR of Single-FP Values"
   },
   "57": {
    "mnem": "XORPS/XORPD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x57; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2."
+   "evidence": "No 0F op1 case for 0x57; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE/SSE2.",
+   "desc": "Bitwise Logical XOR for Single-FP Values"
   },
   "58": {
    "mnem": "ADDPS/ADDSS/ADDPD/ADDSD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x58; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x58; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Add Packed Single-FP Values"
   },
   "59": {
    "mnem": "MULPS/MULSS/MULPD/MULSD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x59; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x59; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Multiply Packed Single-FP Values"
   },
   "5A": {
    "mnem": "CVTPS2PD/CVTSS2SD/CVTPD2PS/CVTSD2SS",
    "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x5A; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2."
+   "evidence": "No 0F op1 case for 0x5A; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2.",
+   "desc": "Convert Packed Single-FP Values to Double-FP Values"
   },
   "5B": {
    "mnem": "CVTDQ2PS/CVTPS2DQ/CVTTPS2DQ",
    "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x5B; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2."
+   "evidence": "No 0F op1 case for 0x5B; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2.",
+   "desc": "Convert Packed DW Integers to Single-FP Values"
   },
   "5C": {
    "mnem": "SUBPS/SUBSS/SUBPD/SUBSD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x5C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x5C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Subtract Packed Single-FP Values"
   },
   "5D": {
    "mnem": "MINPS/MINSS/MINPD/MINSD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x5D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x5D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Return Minimum Packed Single-FP Values"
   },
   "5E": {
    "mnem": "DIVPS/DIVSS/DIVPD/DIVSD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x5E; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x5E; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Divide Packed Single-FP Values"
   },
   "5F": {
    "mnem": "MAXPS/MAXSS/MAXPD/MAXSD xmm,xmm/m",
    "status": "undefined",
    "detail": "SSE, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x5F; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE."
+   "evidence": "No 0F op1 case for 0x5F; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE.",
+   "desc": "Return Maximum Packed Single-FP Values"
   },
   "60": {
    "mnem": "PUNPCKLBW mm,mm/m (xmm w/66)",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs. No MMX/XMM datapath.",
-   "evidence": "No 0F op1 case for 0x60; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX (P55C)."
+   "evidence": "No 0F op1 case for 0x60; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX (P55C).",
+   "desc": "Unpack Low Data"
   },
   "61": {
    "mnem": "PUNPCKLWD mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x61; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x61; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Unpack Low Data"
   },
   "62": {
    "mnem": "PUNPCKLDQ mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x62; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x62; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Unpack Low Data"
   },
   "63": {
    "mnem": "PACKSSWB mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x63; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x63; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Pack with Signed Saturation"
   },
   "64": {
    "mnem": "PCMPGTB mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x64; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x64; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Compare Packed Signed Integers for Greater Than"
   },
   "65": {
    "mnem": "PCMPGTW mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x65; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x65; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Compare Packed Signed Integers for Greater Than"
   },
   "66": {
    "mnem": "PCMPGTD mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x66; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX. (Note: 0x66 as the leading byte is the opsize prefix, handled in pfx loop; here 0x66 is op1 after 0F.)"
+   "evidence": "No 0F op1 case for 0x66; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX. (Note: 0x66 as the leading byte is the opsize prefix, handled in pfx loop; here 0x66 is op1 after 0F.)",
+   "desc": "Compare Packed Signed Integers for Greater Than"
   },
   "67": {
    "mnem": "PACKUSWB mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x67; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x67; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Pack with Unsigned Saturation"
   },
   "68": {
    "mnem": "PUNPCKHBW mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x68; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x68; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Unpack High Data"
   },
   "69": {
    "mnem": "PUNPCKHWD mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x69; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x69; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Unpack High Data"
   },
   "6A": {
    "mnem": "PUNPCKHDQ mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x6A; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x6A; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Unpack High Data"
   },
   "6B": {
    "mnem": "PACKSSDW mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x6B; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x6B; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Pack with Signed Saturation"
   },
   "6C": {
    "mnem": "PUNPCKLQDQ xmm,xmm/m (66 only)",
    "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs (no-prefix encoding is also invalid).",
-   "evidence": "No 0F op1 case for 0x6C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2. No-prefix form is undefined."
+   "evidence": "No 0F op1 case for 0x6C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2. No-prefix form is undefined.",
+   "desc": "Unpack Low Data"
   },
   "6D": {
    "mnem": "PUNPCKHQDQ xmm,xmm/m (66 only)",
    "status": "undefined",
    "detail": "SSE2, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x6D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2. No-prefix form is undefined."
+   "evidence": "No 0F op1 case for 0x6D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE2. No-prefix form is undefined.",
+   "desc": "Unpack High Data"
   },
   "6E": {
    "mnem": "MOVD mm/xmm,r/m32",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x6E; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
+   "evidence": "No 0F op1 case for 0x6E; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2.",
+   "desc": "Move Doubleword"
   },
   "6F": {
    "mnem": "MOVQ mm,mm/m (MOVDQA/MOVDQU xmm w/66/F3)",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x6F; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
+   "evidence": "No 0F op1 case for 0x6F; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2.",
+   "desc": "Move Quadword"
   },
   "70": {
    "mnem": "PSHUFW/PSHUFD/PSHUFHW/PSHUFLW mm/xmm,mm/m,imm8",
    "status": "undefined",
    "detail": "Post-P54C (PSHUFW is SSE/MMX-ext); HALTs.",
-   "evidence": "No 0F op1 case for 0x70; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX-ext/SSE2."
+   "evidence": "No 0F op1 case for 0x70; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX-ext/SSE2.",
+   "desc": "Shuffle Packed Words"
   },
   "71": {
    "mnem": "Group12: PSRLW/PSRAW/PSLLW mm/xmm,imm8 (ModRM.reg /2,/4,/6)",
    "status": "undefined",
    "detail": "MMX shift-by-imm group, post-P54C; all sub-forms HALT.",
-   "evidence": "No 0F op1 case for 0x71; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX shift group, ModRM-extended."
+   "evidence": "No 0F op1 case for 0x71; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX shift group, ModRM-extended.",
+   "desc": "MMX/SSE Shift Group (PSRLW/PSRAW/PSLLW)"
   },
   "72": {
    "mnem": "Group13: PSRLD/PSRAD/PSLLD mm/xmm,imm8 (ModRM.reg /2,/4,/6)",
    "status": "undefined",
    "detail": "MMX shift-by-imm group, post-P54C; all sub-forms HALT.",
-   "evidence": "No 0F op1 case for 0x72; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX shift group, ModRM-extended."
+   "evidence": "No 0F op1 case for 0x72; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX shift group, ModRM-extended.",
+   "desc": "MMX/SSE Shift Group (PSRLD/PSRAD/PSLLD)"
   },
   "73": {
    "mnem": "Group14: PSRLQ/PSRLDQ/PSLLQ/PSLLDQ mm/xmm,imm8 (ModRM.reg /2,/3,/6,/7)",
    "status": "undefined",
    "detail": "MMX/SSE2 shift-by-imm group, post-P54C; all sub-forms HALT.",
-   "evidence": "No 0F op1 case for 0x73; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2 shift group, ModRM-extended."
+   "evidence": "No 0F op1 case for 0x73; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2 shift group, ModRM-extended.",
+   "desc": "MMX/SSE Shift Group (PSRLQ/PSRLDQ/PSLLQ/PSLLDQ)"
   },
   "74": {
    "mnem": "PCMPEQB mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x74; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x74; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Compare Packed Data for Equal"
   },
   "75": {
    "mnem": "PCMPEQW mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x75; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x75; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Compare Packed Data for Equal"
   },
   "76": {
    "mnem": "PCMPEQD mm,mm/m",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x76; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX."
+   "evidence": "No 0F op1 case for 0x76; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX.",
+   "desc": "Compare Packed Data for Equal"
   },
   "77": {
    "mnem": "EMMS (VZEROUPPER/VZEROALL w/VEX)",
    "status": "undefined",
    "detail": "MMX EMMS, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x77; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX (EMMS)."
+   "evidence": "No 0F op1 case for 0x77; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX (EMMS).",
+   "desc": "Empty MMX Technology State"
   },
   "78": {
    "mnem": "VMREAD r/m,r (also Group17 EXTRQ/INSERTQ w/66/F2)",
    "status": "undefined",
    "detail": "VMX/SSE4a, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x78; two-byte default d_unknown -> S_HALT (core.sv:1668). VMX (P4+)."
+   "evidence": "No 0F op1 case for 0x78; two-byte default d_unknown -> S_HALT (core.sv:1668). VMX (P4+).",
+   "desc": "Read Field from Virtual-Machine Control Structure"
   },
   "79": {
    "mnem": "VMWRITE r,r/m (also EXTRQ/INSERTQ w/66/F2)",
    "status": "undefined",
    "detail": "VMX/SSE4a, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x79; two-byte default d_unknown -> S_HALT (core.sv:1668). VMX (P4+)."
+   "evidence": "No 0F op1 case for 0x79; two-byte default d_unknown -> S_HALT (core.sv:1668). VMX (P4+).",
+   "desc": "Write Field to Virtual-Machine Control Structure"
   },
   "7A": {
    "mnem": "(undefined; later AMD XOP/SSE-context only)",
@@ -2274,793 +2638,925 @@
    "mnem": "HADDPS/HADDPD xmm,xmm/m (66/F2)",
    "status": "undefined",
    "detail": "SSE3, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x7C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE3. No-prefix form undefined."
+   "evidence": "No 0F op1 case for 0x7C; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE3. No-prefix form undefined.",
+   "desc": "Packed Double-FP Horizontal Add"
   },
   "7D": {
    "mnem": "HSUBPS/HSUBPD xmm,xmm/m (66/F2)",
    "status": "undefined",
    "detail": "SSE3, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x7D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE3. No-prefix form undefined."
+   "evidence": "No 0F op1 case for 0x7D; two-byte default d_unknown -> S_HALT (core.sv:1668). SSE3. No-prefix form undefined.",
+   "desc": "Packed Double-FP Horizontal Subtract"
   },
   "7E": {
    "mnem": "MOVD r/m32,mm (MOVQ xmm,xmm/m w/F3)",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x7E; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
+   "evidence": "No 0F op1 case for 0x7E; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2.",
+   "desc": "Move Doubleword"
   },
   "7F": {
    "mnem": "MOVQ mm/m,mm (MOVDQA/MOVDQU mem w/66/F3)",
    "status": "undefined",
    "detail": "MMX, post-P54C; HALTs.",
-   "evidence": "No 0F op1 case for 0x7F; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2."
+   "evidence": "No 0F op1 case for 0x7F; two-byte default d_unknown -> S_HALT (core.sv:1668). MMX/SSE2.",
+   "desc": "Move Quadword"
   },
   "80": {
    "mnem": "JO rel16/32",
    "status": "implemented",
    "detail": "Jcc near, 0F 8x family; all 16 ccs covered by cond_true.",
-   "evidence": "core.sv:1487-1502 casez 8'b1000_???? sets d_is_branch + d_branch_taken=cond_true(op1[3:0],eflags); cond_true covers tttn 0x0 (ventium_decode_pkg.sv:105-110); operand-size aware rel16/rel32"
+   "evidence": "core.sv:1487-1502 casez 8'b1000_???? sets d_is_branch + d_branch_taken=cond_true(op1[3:0],eflags); cond_true covers tttn 0x0 (ventium_decode_pkg.sv:105-110); operand-size aware rel16/rel32",
+   "desc": "Jump near if overflow (OF=1)"
   },
   "81": {
    "mnem": "JNO rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x1 (ventium_decode_pkg.sv:110)"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x1 (ventium_decode_pkg.sv:110)",
+   "desc": "Jump near if not overflow (OF=0)"
   },
   "82": {
    "mnem": "JB/JC/JNAE rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x2 -> cf (ventium_decode_pkg.sv:106)"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x2 -> cf (ventium_decode_pkg.sv:106)",
+   "desc": "Jump near if below/not above or equal/carry (CF=1)"
   },
   "83": {
    "mnem": "JAE/JNB/JNC rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x3"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x3",
+   "desc": "Jump near if not below/above or equal/not carry (CF=0)"
   },
   "84": {
    "mnem": "JE/JZ rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x4 -> zf"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x4 -> zf",
+   "desc": "Jump near if zero/equal (ZF=1)"
   },
   "85": {
    "mnem": "JNE/JNZ rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x5"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x5",
+   "desc": "Jump near if not zero/not equal (ZF=0)"
   },
   "86": {
    "mnem": "JBE/JNA rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x6 -> cf|zf"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x6 -> cf|zf",
+   "desc": "Jump near if below or equal/not above (CF=1 OR ZF=1)"
   },
   "87": {
    "mnem": "JA/JNBE rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x7"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x7",
+   "desc": "Jump near if not below or equal/above (CF=0 AND ZF=0)"
   },
   "88": {
    "mnem": "JS rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x8 -> sf"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x8 -> sf",
+   "desc": "Jump near if sign (SF=1)"
   },
   "89": {
    "mnem": "JNS rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x9"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0x9",
+   "desc": "Jump near if not sign (SF=0)"
   },
   "8A": {
    "mnem": "JP/JPE rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xA -> pf"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xA -> pf",
+   "desc": "Jump near if parity/parity even (PF=1)"
   },
   "8B": {
    "mnem": "JNP/JPO rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xB"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xB",
+   "desc": "Jump near if not parity/parity odd (PF=0)"
   },
   "8C": {
    "mnem": "JL/JNGE rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xC -> sf^of"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xC -> sf^of",
+   "desc": "Jump near if less/not greater (SF!=OF)"
   },
   "8D": {
    "mnem": "JGE/JNL rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xD"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xD",
+   "desc": "Jump near if not less/greater or equal (SF=OF)"
   },
   "8E": {
    "mnem": "JLE/JNG rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xE -> zf|(sf^of)"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xE -> zf|(sf^of)",
+   "desc": "Jump near if less or equal/not greater ((ZF=1) OR (SF!=OF))"
   },
   "8F": {
    "mnem": "JG/JNLE rel16/32",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xF"
+   "evidence": "core.sv:1487-1502 (8'b1000_????); cond_true tttn=0xF",
+   "desc": "Jump near if not less nor equal/greater ((ZF=0) AND (SF=OF))"
   },
   "90": {
    "mnem": "SETO r/m8",
    "status": "implemented",
    "detail": "SETcc family; all 16 ccs + reg+mem forms covered.",
-   "evidence": "core.sv:1503-1512 casez 8'b1001_???? sets K_SETCC,d_cc=op1[3:0]; both reg (mod==11) and mem-write forms handled; cond_true(0x0) via S_EXEC core.sv:3119"
+   "evidence": "core.sv:1503-1512 casez 8'b1001_???? sets K_SETCC,d_cc=op1[3:0]; both reg (mod==11) and mem-write forms handled; cond_true(0x0) via S_EXEC core.sv:3119",
+   "desc": "Set Byte on Condition - overflow (OF=1)"
   },
   "91": {
    "mnem": "SETNO r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x1"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x1",
+   "desc": "Set Byte on Condition - not overflow (OF=0)"
   },
   "92": {
    "mnem": "SETB/SETC/SETNAE r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x2"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x2",
+   "desc": "Set Byte on Condition - below/not above or equal/carry (CF=1)"
   },
   "93": {
    "mnem": "SETAE/SETNB/SETNC r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x3"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x3",
+   "desc": "Set Byte on Condition - not below/above or equal/not carry (CF=0)"
   },
   "94": {
    "mnem": "SETE/SETZ r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x4"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x4",
+   "desc": "Set Byte on Condition - zero/equal (ZF=1)"
   },
   "95": {
    "mnem": "SETNE/SETNZ r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x5"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x5",
+   "desc": "Set Byte on Condition - not zero/not equal (ZF=0)"
   },
   "96": {
    "mnem": "SETBE/SETNA r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x6"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x6",
+   "desc": "Set Byte on Condition - below or equal/not above (CF=1 OR ZF=1)"
   },
   "97": {
    "mnem": "SETA/SETNBE r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x7"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x7",
+   "desc": "Set Byte on Condition - not below or equal/above (CF=0 AND ZF=0)"
   },
   "98": {
    "mnem": "SETS r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x8"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x8",
+   "desc": "Set Byte on Condition - sign (SF=1)"
   },
   "99": {
    "mnem": "SETNS r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x9"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0x9",
+   "desc": "Set Byte on Condition - not sign (SF=0)"
   },
   "9A": {
    "mnem": "SETP/SETPE r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xA"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xA",
+   "desc": "Set Byte on Condition - parity/parity even (PF=1)"
   },
   "9B": {
    "mnem": "SETNP/SETPO r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xB"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xB",
+   "desc": "Set Byte on Condition - not parity/parity odd (PF=0)"
   },
   "9C": {
    "mnem": "SETL/SETNGE r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xC"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xC",
+   "desc": "Set Byte on Condition - less/not greater (SF!=OF)"
   },
   "9D": {
    "mnem": "SETGE/SETNL r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xD"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xD",
+   "desc": "Set Byte on Condition - not less/greater or equal (SF=OF)"
   },
   "9E": {
    "mnem": "SETLE/SETNG r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xE"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xE",
+   "desc": "Set Byte on Condition - less or equal/not greater ((ZF=1) OR (SF!=OF))"
   },
   "9F": {
    "mnem": "SETG/SETNLE r/m8",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xF"
+   "evidence": "core.sv:1503-1512 (8'b1001_????); d_cc=0xF",
+   "desc": "Set Byte on Condition - not less nor equal/greater ((ZF=0) AND (SF=OF))"
   },
   "A0": {
    "mnem": "PUSH FS",
    "status": "gap",
    "detail": "Push FS segment register; unimplemented, HALTs loudly.",
-   "evidence": "No arm in two-byte casez (core.sv:1406-1668); 8'hA0 falls to two-byte default core.sv:1668 -> d_unknown=1 -> S_HALT. (The 8'hA0 case at core.sv:1983 is in the ONE-byte else-block, MOV AL,moffs8 \u2014 not this 0F path.)"
+   "evidence": "No arm in two-byte casez (core.sv:1406-1668); 8'hA0 falls to two-byte default core.sv:1668 -> d_unknown=1 -> S_HALT. (The 8'hA0 case at core.sv:1983 is in the ONE-byte else-block, MOV AL,moffs8 \u2014 not this 0F path.)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "A1": {
    "mnem": "POP FS",
    "status": "gap",
    "detail": "Pop into FS; unimplemented.",
-   "evidence": "No arm; 8'hA1 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA1 at core.sv:1989 is the one-byte MOV eAX,moffs path.)"
+   "evidence": "No arm; 8'hA1 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA1 at core.sv:1989 is the one-byte MOV eAX,moffs path.)",
+   "desc": "Pop a Value from the Stack"
   },
   "A2": {
    "mnem": "CPUID",
    "status": "partial",
    "detail": "No-operand; IMPLEMENTED under co-sim/SoC, HALTs in plain user mode. isa-coverage.md:102.",
-   "evidence": "core.sv:1630-1635: d_kind=K_CPUID only if (cosim_en || soc_en); else d_unknown -> S_HALT. Leaf table in S_EXEC (qemu -cpu pentium model)."
+   "evidence": "core.sv:1630-1635: d_kind=K_CPUID only if (cosim_en || soc_en); else d_unknown -> S_HALT. Leaf table in S_EXEC (qemu -cpu pentium model).",
+   "desc": "CPU Identification"
   },
   "A3": {
    "mnem": "BT r/m,r",
    "status": "partial",
    "detail": "Memory destination HALTs. isa-coverage.md:100,111.",
-   "evidence": "core.sv:1540-1548 (8'hA3): K_BITTEST reg-dst form (mod==11) implemented; mem-dst (mod!=11) sets d_unknown -> S_HALT (core.sv:1548)."
+   "evidence": "core.sv:1540-1548 (8'hA3): K_BITTEST reg-dst form (mod==11) implemented; mem-dst (mod!=11) sets d_unknown -> S_HALT (core.sv:1548).",
+   "desc": "Bit Test"
   },
   "A4": {
    "mnem": "SHLD r/m,r,imm8",
    "status": "partial",
    "detail": "Memory destination HALTs. isa-coverage.md:101,112.",
-   "evidence": "core.sv:1563-1576 (8'hA4): K_SHLDRD reg-dst (mod==11) implemented with d_shift_imm; mem-dst sets d_unknown -> S_HALT (core.sv:1573)."
+   "evidence": "core.sv:1563-1576 (8'hA4): K_SHLDRD reg-dst (mod==11) implemented with d_shift_imm; mem-dst sets d_unknown -> S_HALT (core.sv:1573).",
+   "desc": "Double Precision Shift Left"
   },
   "A5": {
    "mnem": "SHLD r/m,r,CL",
    "status": "partial",
    "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1563-1576 (8'hA5): reg-dst (mod==11) implemented, d_shift_cl=1; mem-dst sets d_unknown -> S_HALT (core.sv:1573)."
+   "evidence": "core.sv:1563-1576 (8'hA5): reg-dst (mod==11) implemented, d_shift_cl=1; mem-dst sets d_unknown -> S_HALT (core.sv:1573).",
+   "desc": "Double Precision Shift Left"
   },
   "A6": {
-   "mnem": "(reserved / former XBTS)",
+   "mnem": "XBTS r,r/m",
    "status": "undefined",
    "detail": "XBTS existed only on early 386/486 steppings; #UD on P54C Pentium. Undefined in scope; HALTs.",
-   "evidence": "No arm; 8'hA6 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA6 at core.sv:2022 is one-byte CMPSB string, not this path.)"
+   "evidence": "No arm; 8'hA6 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA6 at core.sv:2022 is one-byte CMPSB string, not this path.)",
+   "desc": "Extract Bit String (obsolete 386 step)"
   },
   "A7": {
-   "mnem": "(reserved / former IBTS)",
+   "mnem": "IBTS r/m,r",
    "status": "undefined",
    "detail": "IBTS existed only on early steppings; #UD on P54C. Undefined; HALTs.",
-   "evidence": "No arm; 8'hA7 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA7 at core.sv:2023 is one-byte CMPSW/D.)"
+   "evidence": "No arm; 8'hA7 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA7 at core.sv:2023 is one-byte CMPSW/D.)",
+   "desc": "Insert Bit String (obsolete 386 step)"
   },
   "A8": {
    "mnem": "PUSH GS",
    "status": "gap",
    "detail": "Push GS segment register; unimplemented.",
-   "evidence": "No arm; 8'hA8 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA8 at core.sv:2007 is one-byte TEST AL,imm8.)"
+   "evidence": "No arm; 8'hA8 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA8 at core.sv:2007 is one-byte TEST AL,imm8.)",
+   "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "A9": {
    "mnem": "POP GS",
    "status": "gap",
    "detail": "Pop into GS; unimplemented.",
-   "evidence": "No arm; 8'hA9 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA9 at core.sv:2009 is one-byte TEST eAX,imm.)"
+   "evidence": "No arm; 8'hA9 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA9 at core.sv:2009 is one-byte TEST eAX,imm.)",
+   "desc": "Pop a Value from the Stack"
   },
   "AA": {
    "mnem": "RSM",
    "status": "system-only",
    "detail": "Resume from SMM; valid only inside SMM, HALTs elsewhere (incl. user mode). isa-coverage.md:91.",
-   "evidence": "core.sv:1446-1449 (8'hAA): d_rsm=1 only if (sys_mode && smm_active); otherwise d_unknown -> S_HALT."
+   "evidence": "core.sv:1446-1449 (8'hAA): d_rsm=1 only if (sys_mode && smm_active); otherwise d_unknown -> S_HALT.",
+   "desc": "Resume from System Management Mode"
   },
   "AB": {
    "mnem": "BTS r/m,r",
    "status": "partial",
    "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1540-1548 (8'hAB): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548)."
+   "evidence": "core.sv:1540-1548 (8'hAB): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548).",
+   "desc": "Bit Test and Set"
   },
   "AC": {
    "mnem": "SHRD r/m,r,imm8",
    "status": "partial",
    "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1563-1576 (8'hAC): K_SHLDRD d_shrd=1 reg-dst implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1573)."
+   "evidence": "core.sv:1563-1576 (8'hAC): K_SHLDRD d_shrd=1 reg-dst implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1573).",
+   "desc": "Double Precision Shift Right"
   },
   "AD": {
    "mnem": "SHRD r/m,r,CL",
    "status": "partial",
    "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1563-1576 (8'hAD): reg-dst implemented, d_shrd & d_shift_cl; mem-dst sets d_unknown -> S_HALT (core.sv:1573)."
+   "evidence": "core.sv:1563-1576 (8'hAD): reg-dst implemented, d_shrd & d_shift_cl; mem-dst sets d_unknown -> S_HALT (core.sv:1573).",
+   "desc": "Double Precision Shift Right"
   },
   "AE": {
-   "mnem": "(group 15: FXSAVE/.../SFENCE)",
+   "mnem": "FXSAVE/FXRSTOR/LDMXCSR/STMXCSR/LFENCE/MFENCE/SFENCE (grp15)",
    "status": "undefined",
    "detail": "0F AE group (FXSAVE/FXRSTOR/LFENCE/MFENCE/SFENCE) is Pentium II/SSE-era; out of P54C scope -> undefined; HALTs.",
-   "evidence": "No arm; 8'hAE -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hAE at core.sv:2020 is one-byte SCASB.)"
+   "evidence": "No arm; 8'hAE -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hAE at core.sv:2020 is one-byte SCASB.)",
+   "desc": "Group 15 (FXSAVE/FXRSTOR/LDMXCSR/STMXCSR/LFENCE/MFENCE/SFENCE)"
   },
   "AF": {
    "mnem": "IMUL r,r/m",
    "status": "implemented",
    "detail": "Two-operand IMUL. isa-coverage.md:95.",
-   "evidence": "core.sv:1535-1539 (8'hAF): K_IMUL2, reg form (mod==11) and mem form both handled (d_mem_read for mod!=11). Native '*' in EXEC."
+   "evidence": "core.sv:1535-1539 (8'hAF): K_IMUL2, reg form (mod==11) and mem form both handled (d_mem_read for mod!=11). Native '*' in EXEC.",
+   "desc": "Signed Multiply"
   },
   "B0": {
    "mnem": "CMPXCHG r/m8,r8",
    "status": "implemented",
    "detail": "isa-coverage.md:98.",
-   "evidence": "core.sv:1593-1604 (8'hB0): K_CMPXCHG, w=1; reg (mod==11) and mem (d_mem_read+d_mem_write RMW) forms both handled."
+   "evidence": "core.sv:1593-1604 (8'hB0): K_CMPXCHG, w=1; reg (mod==11) and mem (d_mem_read+d_mem_write RMW) forms both handled.",
+   "desc": "Compare and Exchange"
   },
   "B1": {
    "mnem": "CMPXCHG r/m,r",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1593-1604 (8'hB1): K_CMPXCHG, w=2/4 (opsize); reg and mem RMW forms both handled."
+   "evidence": "core.sv:1593-1604 (8'hB1): K_CMPXCHG, w=2/4 (opsize); reg and mem RMW forms both handled.",
+   "desc": "Compare and Exchange"
   },
   "B2": {
    "mnem": "LSS r,m16:16/32",
    "status": "partial",
    "detail": "Implemented only as real-mode 16-bit m16:16 far load; PM/32-bit form HALTs.",
-   "evidence": "core.sv:1516-1523 (8'hB2): decodes (d_lseg=SG_SS) ONLY if (mod!=11 && seg_real && eff_opsize); every other case (incl. all 32-bit/protected-mode forms) sets d_unknown -> S_HALT (core.sv:1522)."
+   "evidence": "core.sv:1516-1523 (8'hB2): decodes (d_lseg=SG_SS) ONLY if (mod!=11 && seg_real && eff_opsize); every other case (incl. all 32-bit/protected-mode forms) sets d_unknown -> S_HALT (core.sv:1522).",
+   "desc": "Load Far Pointer"
   },
   "B3": {
    "mnem": "BTR r/m,r",
    "status": "partial",
    "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1540-1548 (8'hB3): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548)."
+   "evidence": "core.sv:1540-1548 (8'hB3): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548).",
+   "desc": "Bit Test and Reset"
   },
   "B4": {
    "mnem": "LFS r,m16:16/32",
    "status": "partial",
    "detail": "Real-mode 16-bit far-pointer load only; PM/32-bit HALTs.",
-   "evidence": "core.sv:1516-1523 (8'hB4): d_lseg=SG_FS only if (mod!=11 && seg_real && eff_opsize); else d_unknown -> S_HALT (core.sv:1522)."
+   "evidence": "core.sv:1516-1523 (8'hB4): d_lseg=SG_FS only if (mod!=11 && seg_real && eff_opsize); else d_unknown -> S_HALT (core.sv:1522).",
+   "desc": "Load Far Pointer"
   },
   "B5": {
    "mnem": "LGS r,m16:16/32",
    "status": "partial",
    "detail": "Real-mode 16-bit far-pointer load only; PM/32-bit HALTs.",
-   "evidence": "core.sv:1516-1523 (8'hB5): d_lseg=SG_GS only if (mod!=11 && seg_real && eff_opsize); else d_unknown -> S_HALT (core.sv:1522)."
+   "evidence": "core.sv:1516-1523 (8'hB5): d_lseg=SG_GS only if (mod!=11 && seg_real && eff_opsize); else d_unknown -> S_HALT (core.sv:1522).",
+   "desc": "Load Far Pointer"
   },
   "B6": {
    "mnem": "MOVZX r,r/m8",
    "status": "implemented",
    "detail": "isa-coverage.md:94.",
-   "evidence": "core.sv:1524-1534 (8'hB6): K_EXT, unsigned, srcw=1; reg and mem (d_mem_read) forms both handled."
+   "evidence": "core.sv:1524-1534 (8'hB6): K_EXT, unsigned, srcw=1; reg and mem (d_mem_read) forms both handled.",
+   "desc": "Move with Zero-Extend"
   },
   "B7": {
    "mnem": "MOVZX r,r/m16",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1524-1534 (8'hB7): K_EXT, unsigned, srcw=2; reg and mem forms both handled."
+   "evidence": "core.sv:1524-1534 (8'hB7): K_EXT, unsigned, srcw=2; reg and mem forms both handled.",
+   "desc": "Move with Zero-Extend"
   },
   "B8": {
-   "mnem": "(reserved; later POPCNT w/ F3)",
+   "mnem": "POPCNT r,r/m (F3)",
    "status": "undefined",
    "detail": "0F B8 is reserved/#UD on P54C (POPCNT is much later, F3-prefixed). Undefined; HALTs.",
-   "evidence": "No arm; 8'hB8 (1011_1000, not matched by 1000/1001/1100_1 wildcards) -> two-byte default core.sv:1668 -> d_unknown -> S_HALT."
+   "evidence": "No arm; 8'hB8 (1011_1000, not matched by 1000/1001/1100_1 wildcards) -> two-byte default core.sv:1668 -> d_unknown -> S_HALT.",
+   "desc": "Bit Population Count"
   },
   "B9": {
    "mnem": "UD1 (reserved #UD)",
    "status": "undefined",
    "detail": "0F B9 is the architecturally-reserved 'UD1' undefined opcode (intentional #UD). In Ventium it is an unknown opcode that HALTs loudly rather than delivering #UD.",
-   "evidence": "No arm; 8'hB9 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT."
+   "evidence": "No arm; 8'hB9 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT.",
+   "desc": "Undefined Instruction"
   },
   "BA": {
    "mnem": "BT/BTS/BTR/BTC r/m,imm8 (grp 8)",
    "status": "partial",
    "detail": "ModRM.reg group: /4 BT /5 BTS /6 BTR /7 BTC handled reg-only; memory dst HALTs. Invalid sub-forms /0-/3 are NOT rejected as #UD (decoded as a bit-test). isa-coverage.md:100,111.",
-   "evidence": "core.sv:1550-1556 (8'hBA): K_BITTEST d_bit_imm, d_bit_op=modrm_reg, reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1555)."
+   "evidence": "core.sv:1550-1556 (8'hBA): K_BITTEST d_bit_imm, d_bit_op=modrm_reg, reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1555).",
+   "desc": "Bit Test Group 8 (BT/BTS/BTR/BTC)"
   },
   "BB": {
    "mnem": "BTC r/m,r",
    "status": "partial",
    "detail": "Memory destination HALTs.",
-   "evidence": "core.sv:1540-1548 (8'hBB): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548)."
+   "evidence": "core.sv:1540-1548 (8'hBB): K_BITTEST reg-dst (mod==11) implemented; mem-dst sets d_unknown -> S_HALT (core.sv:1548).",
+   "desc": "Bit Test and Complement"
   },
   "BC": {
    "mnem": "BSF r,r/m",
    "status": "implemented",
    "detail": "isa-coverage.md:96.",
-   "evidence": "core.sv:1557-1562 (8'hBC): K_BITSCAN, d_shrd=0; reg and mem (d_mem_read) forms both handled."
+   "evidence": "core.sv:1557-1562 (8'hBC): K_BITSCAN, d_shrd=0; reg and mem (d_mem_read) forms both handled.",
+   "desc": "Bit Scan Forward"
   },
   "BD": {
    "mnem": "BSR r,r/m",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1557-1562 (8'hBD): K_BITSCAN, d_shrd=1 (BSR); reg and mem forms both handled."
+   "evidence": "core.sv:1557-1562 (8'hBD): K_BITSCAN, d_shrd=1 (BSR); reg and mem forms both handled.",
+   "desc": "Bit Scan Reverse"
   },
   "BE": {
    "mnem": "MOVSX r,r/m8",
    "status": "implemented",
    "detail": "isa-coverage.md:94.",
-   "evidence": "core.sv:1524-1534 (8'hBE): K_EXT, signed (d_ext_signed), srcw=1; reg and mem forms both handled."
+   "evidence": "core.sv:1524-1534 (8'hBE): K_EXT, signed (d_ext_signed), srcw=1; reg and mem forms both handled.",
+   "desc": "Move with Sign-Extension"
   },
   "BF": {
    "mnem": "MOVSX r,r/m16",
    "status": "implemented",
    "detail": "",
-   "evidence": "core.sv:1524-1534 (8'hBF): K_EXT, signed, srcw=2; reg and mem forms both handled."
+   "evidence": "core.sv:1524-1534 (8'hBF): K_EXT, signed, srcw=2; reg and mem forms both handled.",
+   "desc": "Move with Sign-Extension"
   },
   "C0": {
    "mnem": "XADD r/m8, r8",
    "status": "gap",
    "detail": "XADD is a real P54C instruction but unimplemented; loud HALT, never misexecuted.",
-   "evidence": "Two-byte casez over op1 (core.sv:1406) has no 0F C0 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). isa-coverage.md:113 lists all other 0F xx as two-byte default gaps."
+   "evidence": "Two-byte casez over op1 (core.sv:1406) has no 0F C0 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). isa-coverage.md:113 lists all other 0F xx as two-byte default gaps.",
+   "desc": "Exchange and Add"
   },
   "C1": {
    "mnem": "XADD r/m16/32, r16/32",
    "status": "gap",
    "detail": "Real P54C instruction, unimplemented -> HALT.",
-   "evidence": "No 0F C1 arm in the two-byte casez (core.sv:1406-1669); falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F C1 arm in the two-byte casez (core.sv:1406-1669); falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Exchange and Add"
   },
   "C2": {
-   "mnem": "(none in P54C; CMPPS xmm,xmm/m,imm8 is SSE/P-III)",
+   "mnem": "CMPPS xmm,xmm/m,imm8",
    "status": "undefined",
    "detail": "SSE opcode, not in P54C scope. Decode behavior: loud HALT.",
-   "evidence": "No 0F C2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). Ventium models qemu -cpu pentium (P54C, no SSE)."
+   "evidence": "No 0F C2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). Ventium models qemu -cpu pentium (P54C, no SSE).",
+   "desc": "Compare Packed Single-FP Values"
   },
   "C3": {
-   "mnem": "(none in P54C; MOVNTI m32,r32 is SSE2)",
+   "mnem": "MOVNTI m32,r32",
    "status": "undefined",
    "detail": "SSE2 opcode, not in P54C scope. Decode behavior: loud HALT.",
-   "evidence": "No 0F C3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F C3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Store Doubleword Using Non-Temporal Hint"
   },
   "C4": {
-   "mnem": "(none in P54C; PINSRW mm,r32/m16,imm8 is MMX2/SSE)",
+   "mnem": "PINSRW mm,r32/m16,imm8",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F C4 arm in two-byte casez (core.sv:1406-1669); falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F C4 arm in two-byte casez (core.sv:1406-1669); falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Insert Word"
   },
   "C5": {
-   "mnem": "(none in P54C; PEXTRW r32,mm,imm8 is MMX2/SSE)",
+   "mnem": "PEXTRW r32,mm,imm8",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F C5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F C5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Extract Word"
   },
   "C6": {
-   "mnem": "(none in P54C; SHUFPS xmm,xmm/m,imm8 is SSE)",
+   "mnem": "SHUFPS xmm,xmm/m,imm8",
    "status": "undefined",
    "detail": "SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F C6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F C6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Shuffle Packed Single-FP Values"
   },
   "C7": {
    "mnem": "Group 9: CMPXCHG8B m64 (/1)",
    "status": "gap",
    "detail": "Group opcode (only /1 CMPXCHG8B defined in P54C). The single valid form (m64) and the invalid reg form both HALT loudly; reg-dst flagged d_f00f so the FSM can reproduce the F00F hang when errata_en[ERR_F00F].",
-   "evidence": "Explicit arm sets d_unknown=1 for ALL forms (core.sv:1612-1613); /1 reg-dst (mod==11) additionally tagged d_f00f for Erratum 81 (core.sv:1614). isa-coverage.md:110 confirms both reg and mem forms HALT."
+   "evidence": "Explicit arm sets d_unknown=1 for ALL forms (core.sv:1612-1613); /1 reg-dst (mod==11) additionally tagged d_f00f for Erratum 81 (core.sv:1614). isa-coverage.md:110 confirms both reg and mem forms HALT.",
+   "desc": "Group 9 (CMPXCHG8B)"
   },
   "C8": {
    "mnem": "BSWAP EAX",
    "status": "implemented",
    "detail": "BSWAP r32 (reg from op1[2:0]). 16-bit (66 prefix) form is arch-undefined and treated as r32.",
-   "evidence": "casez arm 8'b1100_1??? (core.sv:1577-1578) sets d_kind=K_BSWAP, d_writes_reg, d_dst_reg=op1[2:0]; exec arm at core_exec.svh:518 byte-reverses gpr[q_dst_reg]. isa-coverage.md:97."
+   "evidence": "casez arm 8'b1100_1??? (core.sv:1577-1578) sets d_kind=K_BSWAP, d_writes_reg, d_dst_reg=op1[2:0]; exec arm at core_exec.svh:518 byte-reverses gpr[q_dst_reg]. isa-coverage.md:97.",
+   "desc": "Byte Swap"
   },
   "C9": {
    "mnem": "BSWAP ECX",
    "status": "implemented",
    "detail": "BSWAP r32.",
-   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=op1[2:0]=1; exec core_exec.svh:518."
+   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=op1[2:0]=1; exec core_exec.svh:518.",
+   "desc": "Byte Swap"
   },
   "CA": {
    "mnem": "BSWAP EDX",
    "status": "implemented",
    "detail": "BSWAP r32.",
-   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=2; exec core_exec.svh:518."
+   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=2; exec core_exec.svh:518.",
+   "desc": "Byte Swap"
   },
   "CB": {
    "mnem": "BSWAP EBX",
    "status": "implemented",
    "detail": "BSWAP r32.",
-   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=3; exec core_exec.svh:518."
+   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=3; exec core_exec.svh:518.",
+   "desc": "Byte Swap"
   },
   "CC": {
    "mnem": "BSWAP ESP",
    "status": "implemented",
    "detail": "BSWAP r32.",
-   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=4; exec core_exec.svh:518."
+   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=4; exec core_exec.svh:518.",
+   "desc": "Byte Swap"
   },
   "CD": {
    "mnem": "BSWAP EBP",
    "status": "implemented",
    "detail": "BSWAP r32.",
-   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=5; exec core_exec.svh:518."
+   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=5; exec core_exec.svh:518.",
+   "desc": "Byte Swap"
   },
   "CE": {
    "mnem": "BSWAP ESI",
    "status": "implemented",
    "detail": "BSWAP r32.",
-   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=6; exec core_exec.svh:518."
+   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=6; exec core_exec.svh:518.",
+   "desc": "Byte Swap"
   },
   "CF": {
    "mnem": "BSWAP EDI",
    "status": "implemented",
    "detail": "BSWAP r32.",
-   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=7; exec core_exec.svh:518."
+   "evidence": "casez 8'b1100_1??? (core.sv:1577-1578) -> K_BSWAP, d_dst_reg=7; exec core_exec.svh:518.",
+   "desc": "Byte Swap"
   },
   "D0": {
-   "mnem": "(none in P54C; ADDSUBPS xmm is SSE3)",
+   "mnem": "ADDSUBPS xmm",
    "status": "undefined",
    "detail": "SSE3 opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D0 arm in two-byte casez (core.sv:1406-1669); falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F D0 arm in two-byte casez (core.sv:1406-1669); falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Packed Double-FP Add/Subtract"
   },
   "D1": {
-   "mnem": "(none in P54C; PSRLW mm,mm/m64 is MMX)",
+   "mnem": "PSRLW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode (P55C+), not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D1 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). Ventium models qemu -cpu pentium (P54C, no MMX)."
+   "evidence": "No 0F D1 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). Ventium models qemu -cpu pentium (P54C, no MMX).",
+   "desc": "Shift Packed Data Right Logical"
   },
   "D2": {
-   "mnem": "(none in P54C; PSRLD mm,mm/m64 is MMX)",
+   "mnem": "PSRLD mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F D2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Shift Packed Data Right Logical"
   },
   "D3": {
-   "mnem": "(none in P54C; PSRLQ mm,mm/m64 is MMX)",
+   "mnem": "PSRLQ mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F D3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Shift Packed Data Right Logical"
   },
   "D4": {
-   "mnem": "(none in P54C; PADDQ mm,mm/m64 is MMX2/SSE2)",
+   "mnem": "PADDQ mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE2 opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D4 arm in two-byte casez; falls to default d_unknown=1 -> HALT (core.sv:1668). NOTE: 8'hD4 at core.sv:1970 is the ONE-BYTE AAM arm, not 0F D4."
+   "evidence": "No 0F D4 arm in two-byte casez; falls to default d_unknown=1 -> HALT (core.sv:1668). NOTE: 8'hD4 at core.sv:1970 is the ONE-BYTE AAM arm, not 0F D4.",
+   "desc": "Add Packed Quadword Integers"
   },
   "D5": {
-   "mnem": "(none in P54C; PMULLW mm,mm/m64 is MMX)",
+   "mnem": "PMULLW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). NOTE: 8'hD5 at core.sv:1973 is one-byte AAD, not 0F D5."
+   "evidence": "No 0F D5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). NOTE: 8'hD5 at core.sv:1973 is one-byte AAD, not 0F D5.",
+   "desc": "Multiply Packed Signed Integers and Store Low Result"
   },
   "D6": {
-   "mnem": "(none in P54C; MOVQ xmm/m64,xmm is SSE2)",
+   "mnem": "MOVQ xmm/m64,xmm",
    "status": "undefined",
    "detail": "SSE2 opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F D6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Move Quadword"
   },
   "D7": {
-   "mnem": "(none in P54C; PMOVMSKB r32,mm is MMX2/SSE)",
+   "mnem": "PMOVMSKB r32,mm",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D7 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F D7 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Move Byte Mask"
   },
   "D8": {
-   "mnem": "(none in P54C; PSUBUSB mm,mm/m64 is MMX)",
+   "mnem": "PSUBUSB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D8 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F D8 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Unsigned Integers with Unsigned Saturation"
   },
   "D9": {
-   "mnem": "(none in P54C; PSUBUSW mm,mm/m64 is MMX)",
+   "mnem": "PSUBUSW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F D9 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F D9 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Unsigned Integers with Unsigned Saturation"
   },
   "DA": {
-   "mnem": "(none in P54C; PMINUB mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PMINUB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F DA arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F DA arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Minimum of Packed Unsigned Byte Integers"
   },
   "DB": {
-   "mnem": "(none in P54C; PAND mm,mm/m64 is MMX)",
+   "mnem": "PAND mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F DB arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F DB arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Logical AND"
   },
   "DC": {
-   "mnem": "(none in P54C; PADDUSB mm,mm/m64 is MMX)",
+   "mnem": "PADDUSB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F DC arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F DC arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Add Packed Unsigned Integers with Unsigned Saturation"
   },
   "DD": {
-   "mnem": "(none in P54C; PADDUSW mm,mm/m64 is MMX)",
+   "mnem": "PADDUSW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F DD arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F DD arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Add Packed Unsigned Integers with Unsigned Saturation"
   },
   "DE": {
-   "mnem": "(none in P54C; PMAXUB mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PMAXUB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F DE arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F DE arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Maximum of Packed Unsigned Byte Integers"
   },
   "DF": {
-   "mnem": "(none in P54C; PANDN mm,mm/m64 is MMX)",
+   "mnem": "PANDN mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F DF arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F DF arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Logical AND NOT"
   },
   "E0": {
-   "mnem": "(none in P54C; PAVGB mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PAVGB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E0 arm in two-byte casez; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E0 arm in two-byte casez; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Average Packed Integers"
   },
   "E1": {
-   "mnem": "(none in P54C; PSRAW mm,mm/m64 is MMX)",
+   "mnem": "PSRAW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E1 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E1 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Shift Packed Data Right Arithmetic"
   },
   "E2": {
-   "mnem": "(none in P54C; PSRAD mm,mm/m64 is MMX)",
+   "mnem": "PSRAD mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Shift Packed Data Right Arithmetic"
   },
   "E3": {
-   "mnem": "(none in P54C; PAVGW mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PAVGW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Average Packed Integers"
   },
   "E4": {
-   "mnem": "(none in P54C; PMULHUW mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PMULHUW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E4 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E4 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Multiply Packed Unsigned Integers and Store High Result"
   },
   "E5": {
-   "mnem": "(none in P54C; PMULHW mm,mm/m64 is MMX)",
+   "mnem": "PMULHW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Multiply Packed Signed Integers and Store High Result"
   },
   "E6": {
-   "mnem": "(none in P54C; CVTPD2DQ/CVTTPD2DQ is SSE2)",
+   "mnem": "CVTPD2DQ/CVTTPD2DQ",
    "status": "undefined",
    "detail": "SSE2 opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Convert Packed Double-FP Values to DW Integers"
   },
   "E7": {
-   "mnem": "(none in P54C; MOVNTQ m64,mm is MMX2/SSE)",
+   "mnem": "MOVNTQ m64,mm",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E7 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E7 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Store of Quadword Using Non-Temporal Hint"
   },
   "E8": {
-   "mnem": "(none in P54C; PSUBSB mm,mm/m64 is MMX)",
+   "mnem": "PSUBSB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E8 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E8 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Signed Integers with Signed Saturation"
   },
   "E9": {
-   "mnem": "(none in P54C; PSUBSW mm,mm/m64 is MMX)",
+   "mnem": "PSUBSW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F E9 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F E9 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Signed Integers with Signed Saturation"
   },
   "EA": {
-   "mnem": "(none in P54C; PMINSW mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PMINSW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F EA arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F EA arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Minimum of Packed Signed Word Integers"
   },
   "EB": {
-   "mnem": "(none in P54C; POR mm,mm/m64 is MMX)",
+   "mnem": "POR mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F EB arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F EB arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Bitwise Logical OR"
   },
   "EC": {
-   "mnem": "(none in P54C; PADDSB mm,mm/m64 is MMX)",
+   "mnem": "PADDSB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F EC arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F EC arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Add Packed Signed Integers with Signed Saturation"
   },
   "ED": {
-   "mnem": "(none in P54C; PADDSW mm,mm/m64 is MMX)",
+   "mnem": "PADDSW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F ED arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F ED arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Add Packed Signed Integers with Signed Saturation"
   },
   "EE": {
-   "mnem": "(none in P54C; PMAXSW mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PMAXSW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F EE arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F EE arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Maximum of Packed Signed Word Integers"
   },
   "EF": {
-   "mnem": "(none in P54C; PXOR mm,mm/m64 is MMX)",
+   "mnem": "PXOR mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F EF arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F EF arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Logical Exclusive OR"
   },
   "F0": {
-   "mnem": "(none in P54C; LDDQU xmm,m128 is SSE3)",
+   "mnem": "LDDQU xmm,m128",
    "status": "undefined",
    "detail": "SSE3 opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F0 arm in two-byte casez; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F0 arm in two-byte casez; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Load Unaligned Integer 128 Bits"
   },
   "F1": {
-   "mnem": "(none in P54C; PSLLW mm,mm/m64 is MMX)",
+   "mnem": "PSLLW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F1 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F1 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Shift Packed Data Left Logical"
   },
   "F2": {
-   "mnem": "(none in P54C; PSLLD mm,mm/m64 is MMX)",
+   "mnem": "PSLLD mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). (F2 as a one-byte byte is a REP prefix, but here it is op1 after 0F.)"
+   "evidence": "No 0F F2 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). (F2 as a one-byte byte is a REP prefix, but here it is op1 after 0F.)",
+   "desc": "Shift Packed Data Left Logical"
   },
   "F3": {
-   "mnem": "(none in P54C; PSLLQ mm,mm/m64 is MMX)",
+   "mnem": "PSLLQ mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F3 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Shift Packed Data Left Logical"
   },
   "F4": {
-   "mnem": "(none in P54C; PMULUDQ mm,mm/m64 is SSE2)",
+   "mnem": "PMULUDQ mm,mm/m64",
    "status": "undefined",
    "detail": "SSE2 opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F4 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F4 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Multiply Packed Unsigned DW Integers"
   },
   "F5": {
-   "mnem": "(none in P54C; PMADDWD mm,mm/m64 is MMX)",
+   "mnem": "PMADDWD mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F5 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Multiply and Add Packed Integers"
   },
   "F6": {
-   "mnem": "(none in P54C; PSADBW mm,mm/m64 is MMX2/SSE)",
+   "mnem": "PSADBW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F6 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Compute Sum of Absolute Differences"
   },
   "F7": {
-   "mnem": "(none in P54C; MASKMOVQ mm,mm is MMX2/SSE)",
+   "mnem": "MASKMOVQ mm,mm",
    "status": "undefined",
    "detail": "MMX2/SSE opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F7 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F7 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Store Selected Bytes of Quadword"
   },
   "F8": {
-   "mnem": "(none in P54C; PSUBB mm,mm/m64 is MMX)",
+   "mnem": "PSUBB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F8 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F8 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Integers"
   },
   "F9": {
-   "mnem": "(none in P54C; PSUBW mm,mm/m64 is MMX)",
+   "mnem": "PSUBW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F F9 arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F F9 arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Integers"
   },
   "FA": {
-   "mnem": "(none in P54C; PSUBD mm,mm/m64 is MMX)",
+   "mnem": "PSUBD mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F FA arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F FA arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Integers"
   },
   "FB": {
-   "mnem": "(none in P54C; PSUBQ mm,mm/m64 is SSE2)",
+   "mnem": "PSUBQ mm,mm/m64",
    "status": "undefined",
    "detail": "SSE2 opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F FB arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F FB arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Subtract Packed Quadword Integers"
   },
   "FC": {
-   "mnem": "(none in P54C; PADDB mm,mm/m64 is MMX)",
+   "mnem": "PADDB mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F FC arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F FC arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Add Packed Integers"
   },
   "FD": {
-   "mnem": "(none in P54C; PADDW mm,mm/m64 is MMX)",
+   "mnem": "PADDW mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F FD arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F FD arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Add Packed Integers"
   },
   "FE": {
-   "mnem": "(none in P54C; PADDD mm,mm/m64 is MMX)",
+   "mnem": "PADDD mm,mm/m64",
    "status": "undefined",
    "detail": "MMX opcode, not in P54C scope. Loud HALT.",
-   "evidence": "No 0F FE arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F FE arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Add Packed Integers"
   },
   "FF": {
-   "mnem": "(none in P54C; UD0 r,r/m on later CPUs)",
+   "mnem": "UD0 r,r/m",
    "status": "undefined",
    "detail": "No P54C instruction (later assigned UD0). Loud HALT.",
-   "evidence": "No 0F FF arm; falls to default d_unknown=1 -> HALT (core.sv:1668)."
+   "evidence": "No 0F FF arm; falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "desc": "Undefined Instruction (#UD)"
   }
  },
  "_decode_fingerprint": "d1d3fd5957942067acfc7489d6581e15136b1770019029633179eb43e18abfca"

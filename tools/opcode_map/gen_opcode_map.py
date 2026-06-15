@@ -118,6 +118,7 @@ def html_grid(m, prefix):
                     f'data-op="{esc_html(op)}" '
                     f'data-mnem="{esc_html(mnem)}" '
                     f'data-status="{esc_html(STATUS_LABEL[rec["status"]])}" '
+                    f'data-desc="{esc_html(rec.get("desc", ""))}" '
                     f'data-detail="{esc_html(rec.get("detail", ""))}" '
                     f'data-evidence="{esc_html(rec.get("evidence", ""))}">'
                     f'{body}</div>')
@@ -158,8 +159,10 @@ OPC_STYLE = r"""
    #opc-tip{position:absolute;z-index:50;max-width:30em;background:#1e1e2a;color:#f4f4f6;border-radius:6px;padding:.6em .75em;font-size:.8rem;line-height:1.35;box-shadow:0 6px 24px rgba(0,0,0,.4);pointer-events:none;display:none}
    #opc-tip .t-op{font-family:var(--mono,Menlo,Consolas,monospace);font-weight:700;color:#ffd479}
    #opc-tip .t-badge{display:inline-block;margin-left:.5em;padding:.05em .5em;border-radius:10px;font-size:.78em;font-weight:700;color:#1e1e2a}
-   #opc-tip .t-detail{margin:.45em 0 0}
-   #opc-tip .t-ev{margin:.45em 0 0;font-family:var(--mono,Menlo,Consolas,monospace);font-size:.84em;opacity:.72;white-space:pre-wrap}
+   #opc-tip .t-desc{margin:.4em 0 0;font-size:.95em}
+   #opc-tip .t-detail{margin:.5em 0 0;font-size:.9em;opacity:.92}
+   #opc-tip .t-lbl{display:inline-block;font-size:.82em;font-weight:700;color:#ffd479;text-transform:uppercase;letter-spacing:.03em;margin-right:.3em}
+   #opc-tip .t-ev{margin:.4em 0 0;font-family:var(--mono,Menlo,Consolas,monospace);font-size:.84em;opacity:.62;white-space:pre-wrap}
    #opc-tip .b-implemented{background:#7fd49a}#opc-tip .b-over-implemented{background:#79ccc4}
    #opc-tip .b-partial{background:#f0cf6a}#opc-tip .b-system-only{background:#8fb6ec}
    #opc-tip .b-gap{background:#ef9a9a}#opc-tip .b-prefix{background:#cdaee6}#opc-tip .b-undefined{background:#cfcfcf}
@@ -180,7 +183,8 @@ OPC_SCRIPT = r"""
        var h='<span class="t-op">'+c.getAttribute('data-op')+'</span>'
             +'<span class="t-badge b-'+st+'">'+st+'</span>'
             +'<div class="t-mnem"><strong>'+c.getAttribute('data-mnem')+'</strong></div>';
-       var d=c.getAttribute('data-detail'); if(d) h+='<div class="t-detail">'+d+'</div>';
+       var desc=c.getAttribute('data-desc'); if(desc) h+='<div class="t-desc">'+desc+'</div>';
+       var d=c.getAttribute('data-detail'); if(d) h+='<div class="t-detail"><span class="t-lbl">Ventium</span> '+d+'</div>';
        var e=c.getAttribute('data-evidence'); if(e) h+='<div class="t-ev">'+e+'</div>';
        tip.innerHTML=h;
      }
@@ -243,6 +247,10 @@ def render(d):
     L.append('Out-of-scope opcodes HALT loudly (``d_unknown`` -> ``S_HALT``); they are never')
     L.append('silently mis-executed.')
     L.append('')
+    L.append('Each cell\'s hover/click callout shows the instruction\'s concise description,')
+    L.append('courtesy of the `x86 Opcode and Instruction Reference <http://ref.x86asm.net/coder32.html>`_')
+    L.append('(ref.x86asm.net, coder32 edition), followed by the Ventium decode status and RTL evidence.')
+    L.append('')
     MEANING = {
         'implemented': 'Fully decoded and retired; behaviour QEMU-matched for the P54C model.',
         'over-implemented': 'Decoded and retired even though the opcode post-dates P54C (P6/MMX/SSE/CET-era) -> beyond the P54C ISA, but the Ventium core handles it rather than HALTing.',
@@ -267,8 +275,10 @@ def render(d):
         L.append(f'   <span class="lg"><span class="sw sw-{st}"></span>'
                  f'<strong>{st}</strong> — {esc_html(MEANING[st])}</span>')
     L.append('   </div>')
-    L.append('   <p class="opc-hint">Hover (or tab to, or click to pin) any cell for the full '
-             'mnemonic, decode status, sub-form notes, and the RTL evidence. The same status '
+    L.append('   <p class="opc-hint">Hover (or tab to, or click to pin) any cell for what the '
+             'instruction does, its Ventium decode status and sub-form notes, and the RTL '
+             'evidence. Instruction descriptions are from '
+             '<a href="http://ref.x86asm.net/coder32.html">ref.x86asm.net</a>. The same status '
              'glyphs (<code>I + ~ S X P .</code>) appear in the coverage table below.</p>')
     L.append('')
     for name, m, c, pfx in (('Primary one-byte opcode map', P, cp, ''),
