@@ -28,9 +28,9 @@ CORE = os.path.join(REPO, 'rtl', 'core', 'core.sv')
 PKG  = os.path.join(REPO, 'rtl', 'core', 'ventium_decode_pkg.sv')
 RST  = os.path.join(REPO, 'docs', 'sphinx', 'isa', 'opcode-map.rst')
 
-GLYPH = {'implemented': 'I', 'partial': '~', 'system-only': 'S',
+GLYPH = {'implemented': 'I', 'over-implemented': '+', 'partial': '~', 'system-only': 'S',
          'gap': 'X', 'prefix': 'P', 'undefined': '.'}
-ORDER = ['implemented', 'partial', 'system-only', 'gap', 'prefix', 'undefined']
+ORDER = ['implemented', 'over-implemented', 'partial', 'system-only', 'gap', 'prefix', 'undefined']
 
 def load():
     d = json.load(open(DATA))
@@ -46,15 +46,6 @@ def load():
                     m[k] = {'mnem': '(reserved)', 'status': 'undefined', 'detail': '', 'evidence': ''}
     return d
 
-def esc(s):
-    """Escape RST inline-markup metacharacters in free text (signal names full of
-    underscores, stray ``*``/backticks/pipes from the analysis) so the generated
-    appendix never trips docutils (-W in CI)."""
-    s = (s or '').replace('\\', '')
-    s = s.replace('*', r'\*').replace('`', r'\`').replace('|', r'\|')
-    s = re.sub(r'_(?=[^A-Za-z0-9_]|$)', r'\_', s)   # kill trailing-underscore "references" (RST links)
-    return s
-
 def esc_html(s):
     """Escape text destined for an HTML element body OR a double-quoted attribute
     value (we use it for both), so signal names, ``*``/backticks, and the stray
@@ -65,9 +56,37 @@ def esc_html(s):
 
 # Status -> human label shown in the tooltip and legend (mirrors the RST legend).
 STATUS_LABEL = {
-    'implemented': 'implemented', 'partial': 'partial', 'system-only': 'system-only',
+    'implemented': 'implemented', 'over-implemented': 'over-implemented',
+    'partial': 'partial', 'system-only': 'system-only',
     'gap': 'gap', 'prefix': 'prefix', 'undefined': 'undefined',
 }
+
+def cell_parse(mnem):
+    """Split a cell mnemonic into bold mnemonic line(s), argument line(s), and an
+    optional trailing parenthetical note, so each cell stacks vertically:
+
+        **MNEM1**          (group members ROL/ROR/RCL -> one bold line each)
+        **MNEM2**
+        arg1               (comma-separated operands -> one line each)
+        arg2
+        (note)             (trailing parenthetical, de-emphasised)
+
+    The '/' that separates *group mnemonics* (head, e.g. ROL/ROR) becomes a line
+    break; the '/' *inside an argument* (r/m8, m16:16/32) is preserved inline. A
+    string that is wholly a parenthetical (``(reserved)``, ``(none in P54C; ...)``)
+    is treated as a single note with no mnemonic."""
+    s = re.sub(r'\s*/\s*', '/', mnem.strip())      # normalise spaced group slashes (NOP / XCHG)
+    if s.startswith('('):
+        return [], [], s
+    note = ''
+    mt = re.search(r'\s*(\([^()]*\))\s*$', s)       # peel a trailing "(...)" note
+    if mt:
+        note = mt.group(1)
+        s = s[:mt.start()].rstrip()
+    head, _, args = s.partition(' ')                # mnemonic head vs operand list
+    mnems = [p for p in head.split('/') if p]
+    arglist = [a.strip() for a in args.split(',') if a.strip()]
+    return mnems, arglist, note
 
 def html_grid(m, prefix):
     """One interactive 16x16 opcode matrix as a CSS-grid of colour-coded cells.
@@ -88,6 +107,12 @@ def html_grid(m, prefix):
             rec = m[f'{i:02X}']
             op = f'{prefix}{i:02X}'
             mnem = rec['mnem']
+            mnems, arglist, note = cell_parse(mnem)
+            body = f'<span class="opc-op">{i:02X}</span>'
+            body += ''.join(f'<span class="opc-m">{esc_html(x)}</span>' for x in mnems)
+            body += ''.join(f'<span class="opc-a">{esc_html(x)}</span>' for x in arglist)
+            if note:
+                body += f'<span class="opc-n">{esc_html(note)}</span>'
             cell = (f'<div class="opc-cell opc-{rec["status"]}" role="gridcell" '
                     f'tabindex="0" '
                     f'data-op="{esc_html(op)}" '
@@ -95,9 +120,7 @@ def html_grid(m, prefix):
                     f'data-status="{esc_html(STATUS_LABEL[rec["status"]])}" '
                     f'data-detail="{esc_html(rec.get("detail", ""))}" '
                     f'data-evidence="{esc_html(rec.get("evidence", ""))}">'
-                    f'<span class="opc-op">{i:02X}</span>'
-                    f'<span class="opc-mnem">{esc_html(mnem)}</span>'
-                    f'</div>')
+                    f'{body}</div>')
             out.append(cell)
     out.append('</div></div>')
     return '\n'.join('   ' + ln for ln in out)   # 3-space indent for the raw:: html block
@@ -116,26 +139,30 @@ OPC_STYLE = r"""
    .opc-grid{display:grid;grid-template-columns:2.4em repeat(16,minmax(4.6em,1fr));gap:2px;min-width:60em;font-family:var(--mono,SFMono-Regular,Menlo,Consolas,monospace)}
    .opc-h{display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8em;color:#444;background:#f0f0f0;border-radius:3px;padding:.2em 0}
    .opc-corner{background:transparent}
-   .opc-cell{position:relative;cursor:default;border-radius:3px;padding:.22em .3em;min-height:2.7em;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-start;border:1px solid rgba(0,0,0,.12);transition:transform .05s ease,box-shadow .05s ease;outline:none}
+   .opc-cell{position:relative;cursor:default;border-radius:3px;padding:.25em .35em;min-height:2.7em;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-start;gap:.02em;border:1px solid rgba(0,0,0,.12);transition:transform .05s ease,box-shadow .05s ease;outline:none}
    .opc-cell:hover,.opc-cell:focus,.opc-cell.opc-pin{transform:scale(1.04);box-shadow:0 2px 8px rgba(0,0,0,.28);z-index:3}
-   .opc-cell .opc-op{font-size:.62em;font-weight:700;opacity:.6;line-height:1}
-   .opc-cell .opc-mnem{font-size:.72em;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-   .opc-implemented{background:#e6f4ea;border-color:#9ccaa8}
-   .opc-partial    {background:#fff5da;border-color:#e6c463}
-   .opc-system-only{background:#e4eefb;border-color:#9bbde8}
-   .opc-gap        {background:#fde7e7;border-color:#e6a3a3}
-   .opc-prefix     {background:#f1e8f8;border-color:#c8a8e0}
-   .opc-undefined  {background:#f4f4f4;border-color:#dadada;color:#888}
-   .sw-implemented{background:#e6f4ea}.sw-partial{background:#fff5da}.sw-system-only{background:#e4eefb}
-   .sw-gap{background:#fde7e7}.sw-prefix{background:#f1e8f8}.sw-undefined{background:#f4f4f4}
+   .opc-cell .opc-op{font-size:.6em;font-weight:700;opacity:.5;line-height:1.1;margin-bottom:.12em}
+   .opc-cell .opc-m{font-size:.75em;font-weight:700;line-height:1.16;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+   .opc-cell .opc-a{font-size:.7em;line-height:1.14;color:#4a4a4a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+   .opc-cell .opc-n{font-size:.62em;font-style:italic;color:#8a8a8a;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+   .opc-undefined .opc-m,.opc-undefined .opc-a{color:#888}
+   .opc-implemented     {background:#e6f4ea;border-color:#9ccaa8}
+   .opc-over-implemented{background:#e0f4f3;border-color:#88ccc6}
+   .opc-partial         {background:#fff5da;border-color:#e6c463}
+   .opc-system-only     {background:#e4eefb;border-color:#9bbde8}
+   .opc-gap             {background:#fde7e7;border-color:#e6a3a3}
+   .opc-prefix          {background:#f1e8f8;border-color:#c8a8e0}
+   .opc-undefined       {background:#f4f4f4;border-color:#dadada;color:#888}
+   .sw-implemented{background:#e6f4ea}.sw-over-implemented{background:#e0f4f3}.sw-partial{background:#fff5da}
+   .sw-system-only{background:#e4eefb}.sw-gap{background:#fde7e7}.sw-prefix{background:#f1e8f8}.sw-undefined{background:#f4f4f4}
    #opc-tip{position:absolute;z-index:50;max-width:30em;background:#1e1e2a;color:#f4f4f6;border-radius:6px;padding:.6em .75em;font-size:.8rem;line-height:1.35;box-shadow:0 6px 24px rgba(0,0,0,.4);pointer-events:none;display:none}
    #opc-tip .t-op{font-family:var(--mono,Menlo,Consolas,monospace);font-weight:700;color:#ffd479}
    #opc-tip .t-badge{display:inline-block;margin-left:.5em;padding:.05em .5em;border-radius:10px;font-size:.78em;font-weight:700;color:#1e1e2a}
    #opc-tip .t-detail{margin:.45em 0 0}
    #opc-tip .t-ev{margin:.45em 0 0;font-family:var(--mono,Menlo,Consolas,monospace);font-size:.84em;opacity:.72;white-space:pre-wrap}
-   #opc-tip .b-implemented{background:#7fd49a}#opc-tip .b-partial{background:#f0cf6a}
-   #opc-tip .b-system-only{background:#8fb6ec}#opc-tip .b-gap{background:#ef9a9a}
-   #opc-tip .b-prefix{background:#cdaee6}#opc-tip .b-undefined{background:#cfcfcf}
+   #opc-tip .b-implemented{background:#7fd49a}#opc-tip .b-over-implemented{background:#79ccc4}
+   #opc-tip .b-partial{background:#f0cf6a}#opc-tip .b-system-only{background:#8fb6ec}
+   #opc-tip .b-gap{background:#ef9a9a}#opc-tip .b-prefix{background:#cdaee6}#opc-tip .b-undefined{background:#cfcfcf}
    .opc-hint{font-size:.82em;color:#666;margin:.2em 0 .8em}
    </style>
    <div id="opc-tip" role="tooltip"></div>
@@ -195,17 +222,6 @@ def counts(m):
         c[m[f'{i:02X}']['status']] += 1
     return c
 
-def appendix(m, mapname):
-    lines = []
-    for i in range(256):
-        rec = m[f'{i:02X}']
-        if rec['status'] in ('partial', 'gap', 'system-only'):
-            pfx = '0F ' if mapname == 'secondary' else ''
-            det = esc(rec.get('detail', ''))
-            ev = esc(rec.get('evidence', ''))
-            lines.append(f"* ``{pfx}{i:02X}`` **{esc(rec['mnem'])}** — *{rec['status']}*. {det} {('[' + ev + ']') if ev else ''}".rstrip())
-    return lines
-
 def render(d):
     P, S = d['primary'], d['secondary']
     cp, cs = counts(P), counts(S)
@@ -229,11 +245,12 @@ def render(d):
     L.append('')
     MEANING = {
         'implemented': 'Fully decoded and retired; behaviour QEMU-matched for the P54C model.',
+        'over-implemented': 'Decoded and retired even though the opcode post-dates P54C (P6/MMX/SSE/CET-era) -> beyond the P54C ISA, but the Ventium core handles it rather than HALTing.',
         'partial': 'Decoded, but some ModRM/x87 sub-forms, modes, or value-ranges are gated off and HALT.',
         'system-only': 'Decodes only in ``sys_mode``; user mode HALTs.',
         'gap': 'Architecturally-valid P54C opcode with no decode arm -> HALTs. (Implementation target.)',
         'prefix': 'Legacy/segment/operand prefix; consumed in the prefix loop.',
-        'undefined': 'Not a P54C instruction (MMX/SSE/post-Pentium/reserved); HALTs.',
+        'undefined': 'Not a P54C instruction (P6/MMX/SSE/post-Pentium/reserved); HALTs.',
     }
     L.append('Status legend')
     L.append('-------------')
@@ -251,8 +268,8 @@ def render(d):
                  f'<strong>{st}</strong> — {esc_html(MEANING[st])}</span>')
     L.append('   </div>')
     L.append('   <p class="opc-hint">Hover (or tab to, or click to pin) any cell for the full '
-             'mnemonic, decode status, sub-form notes, and the RTL evidence. The same legend '
-             'glyphs (``I ~ S X P .``) appear in the appendix and coverage table below.</p>')
+             'mnemonic, decode status, sub-form notes, and the RTL evidence. The same status '
+             'glyphs (<code>I + ~ S X P .</code>) appear in the coverage table below.</p>')
     L.append('')
     for name, m, c, pfx in (('Primary one-byte opcode map', P, cp, ''),
                             ('Secondary ``0F`` opcode map', S, cs, '0F ')):
@@ -283,19 +300,6 @@ def render(d):
         L.append(f'   * - ``{GLYPH[st]}`` {st}')
         L.append(f'     - {cp[st]}')
         L.append(f'     - {cs[st]}')
-    L.append('')
-    L.append('Detail: partial / gap / system-only cells')
-    L.append('-----------------------------------------')
-    L.append('')
-    L.append('Primary map')
-    L.append('~~~~~~~~~~~')
-    L.append('')
-    L.extend(appendix(P, 'primary') or ['* (none)'])
-    L.append('')
-    L.append('Secondary ``0F`` map')
-    L.append('~~~~~~~~~~~~~~~~~~~~~')
-    L.append('')
-    L.extend(appendix(S, 'secondary') or ['* (none)'])
     L.append('')
     return '\n'.join(L) + '\n'
 
