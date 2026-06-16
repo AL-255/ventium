@@ -12,6 +12,10 @@ verif/tb/obj_dir/
 verif/tb/obj_dir_sva/
 verif/tb/obj_dir_selftest/
 verif/soc/obj/
+# standalone unit-gate Verilator build dirs (the run-*-gate.sh scripts normally build
+# in $TMPDIR via mktemp, but guard against a local -Mdir; covers the L1 obj_l1*_chk and
+# the L2 ven_l2 gate dirs alike).
+verif/l1/obj_*/
 *.vcd
 *.fst
 
