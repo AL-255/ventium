@@ -3,7 +3,7 @@
 # Settles the load-bearing claim: does the default 2 MiB / 32 B-line / 8-way ven_l2
 # DATA array infer the FULL UltraRAM column complement on the KV260 part — i.e. all
 # 64 URAM288 blocks (4 wide × 16 deep, 256 data bits + 32 spare parity/word) — with the tags
-# + {valid,dirty} + PLRU in BRAM? Synthesizes rtl/mem/ven_l2.sv OOC and reports
+# + {valid,dirty} + PLRU in BRAM? Synthesizes rtl/northbridge/ven_l2.sv OOC and reports
 # URAM + RAMB utilization + timing.
 #
 # Expected (xck26-sfvc784): URAM288 = 64 (100% of the device), RAMB36 ≈ 30 (the
@@ -13,7 +13,7 @@
 # Run:  vivado -mode batch -source fpga/scripts/probe_l2_uram.tcl -notrace
 # =====================================================================
 set ROOT [pwd]
-if {![file exists $ROOT/rtl/mem/ven_l2.sv] && [file exists [file join [file dirname [info script]] .. .. rtl/mem/ven_l2.sv]]} {
+if {![file exists $ROOT/rtl/northbridge/ven_l2.sv] && [file exists [file join [file dirname [info script]] .. .. rtl/northbridge/ven_l2.sv]]} {
     set ROOT [file normalize [file join [file dirname [info script]] .. ..]]
 }
 set RTL  $ROOT/rtl
@@ -23,7 +23,7 @@ set PART xck26-sfvc784-2LV-c
 
 puts "PROBE(l2-uram): ROOT=$ROOT PART=$PART"
 create_project -in_memory -part $PART probe_l2_uram
-read_verilog -sv $RTL/mem/ven_l2.sv
+read_verilog -sv $RTL/northbridge/ven_l2.sv
 
 set xdc $OUT/clk.xdc
 set fh [open $xdc w]

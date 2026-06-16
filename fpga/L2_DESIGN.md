@@ -6,7 +6,7 @@ between the L1's word-granular backing port and the PS-DDR AXI master. **Standal
 as of this drop** — synthesizable + unit-checkable, but nothing in the core/SoC
 instantiates it yet (per the task: "leave it standalone and don't wire it up").
 Cross-ref `fpga/L1_AXI_DESIGN.md` (the port it splices into) and the RTL header in
-`rtl/mem/ven_l2.sv` (the authoritative spec).
+`rtl/northbridge/ven_l2.sv` (the authoritative spec).
 
 ## 0. Why an L2, and why now
 The L1 (`ven_l1d`, 8 KB) acks a hit in the same clock but a miss is a full DDR

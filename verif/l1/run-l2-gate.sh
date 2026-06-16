@@ -12,7 +12,7 @@ trap 'rm -rf "$OBJ"' EXIT
 
 verilator --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC --top-module tb_l2 -Mdir "$OBJ" -o tb_l2 \
-    "$ROOT/rtl/mem/ven_l2.sv" "$ROOT/verif/l1/tb_l2.sv" > "$OBJ/build.log" 2>&1 \
+    "$ROOT/rtl/northbridge/ven_l2.sv" "$ROOT/verif/l1/tb_l2.sv" > "$OBJ/build.log" 2>&1 \
     || { echo "L2-GATE-FAIL (build)"; tail -30 "$OBJ/build.log"; exit 1; }
 
 OUT="$("$OBJ/tb_l2" 2>&1)"

@@ -1,7 +1,7 @@
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
-// mem/ven_l2.sv — UltraRAM-backed L2 cache controller (STANDALONE, not yet wired).
+// northbridge/ven_l2.sv — UltraRAM-backed L2 cache controller (STANDALONE, not yet wired).
 //
 // PURPOSE.  The KV260 part (xck26-sfvc784) carries 64 UltraRAM blocks (URAM288:
 // 4096 deep x 72 bits = 288 Kb each → 18 Mb total) that the core/L1 leave idle.

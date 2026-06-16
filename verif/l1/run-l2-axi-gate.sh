@@ -12,7 +12,7 @@ trap 'rm -rf "$OBJ"' EXIT
 verilator --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC -Wno-CASEINCOMPLETE --top-module tb_l2_axi \
     -Mdir "$OBJ" -o tb_l2_axi \
-    "$ROOT/rtl/mem/ven_l2.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \
+    "$ROOT/rtl/northbridge/ven_l2.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \
     "$ROOT/verif/l1/axi_slave_bfm.sv" "$ROOT/verif/l1/tb_l2_axi.sv" > "$OBJ/build.log" 2>&1 \
     || { echo "L2AXI-GATE-FAIL (build)"; tail -30 "$OBJ/build.log"; exit 1; }
 
