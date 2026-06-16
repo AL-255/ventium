@@ -1,0 +1,9 @@
+{
+  "name": "t_grp1alias",
+  "src": "t_grp1alias/t_grp1alias.s",
+  "elf": "t_grp1alias/t_grp1alias.elf",
+  "image": "t_grp1alias/t_grp1alias.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 100
+}

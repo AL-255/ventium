@@ -44,6 +44,16 @@ module ven_l1d #(
     // real HW the HPC0 CCI snoop covers AXI writes; tied 0 in modes 0/1.
     input  logic        flush_all,
 
+    // ---- golden / "L1-useless" mode (diagnostic): after EVERY completed core
+    // transaction, drop all cached state (valid bits + the registered read window)
+    // so the NEXT access fully re-fills from the backing and re-captures fresh — no
+    // L1 state survives a transaction. Tanks performance (every access misses), but
+    // produces a result uncontaminated by L1 line-staleness / read-window bugs: if a
+    // fetch corruption PERSISTS with golden=1, the bug is NOT in L1's carried state
+    // (it is downstream — the core fetch buffer); if it VANISHES, L1 state was the
+    // cause. Runtime bit (MODE.GOLDEN_L1); tied 0 = normal cached operation.
+    input  logic        golden,
+
     // ---- core side (the same-cycle-ack contract; mirrors core mem_*) ----------
     input  logic        c_req,
     input  logic        c_we,
@@ -171,7 +181,7 @@ module ven_l1d #(
   always_comb begin
     // 4 bytes at the addressed byte offset, from the {L+1, L} window so a read that
     // crosses the line end (boff > 28) takes its high bytes from the next line.
-    c_rdata = rd_window_q[{1'b0,boff,3'b000} +: 32];   // mux off the REGISTERED window
+    c_rdata = rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];   // mux off the REGISTERED window with the REGISTERED offset (synth-safe: data & select from the same capture)
     c_ack   = 1'b0;
     if (c_req) begin
       if (c_we)            c_ack = (st==L1_IDLE && (hit || xline)) ? m_ack : 1'b0;
@@ -179,6 +189,12 @@ module ven_l1d #(
                                                            // window matches THIS addr
     end
   end
+
+  // golden / "L1-useless" mode: a core transaction completes (acks) this clock. We
+  // drop all cached state on the NEXT edge so nothing carries into the following
+  // access. c_ack is the completion edge for both reads (rd_match) and writes (m_ack).
+  logic txn_done;
+  assign txn_done = golden && c_req && c_ack;
 
   // ---- sequential: fill sequencing + array writes ---------------------------
   always_ff @(posedge clk) begin
@@ -277,6 +293,15 @@ module ven_l1d #(
       // miss + refill the now-current backing. Tags/data are left (val gates them).
       if (flush_all)
         for (int s=0;s<L1_SETS;s++) begin dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0; end
+      // golden mode: after each completed transaction, invalidate every line AND
+      // clear the registered read window (rd_armed/rd_window_q/rd_addr_q) so the next
+      // access fully re-fills + re-captures. Last-write-wins over the fill's val=1 and
+      // the do_rd_cap capture above (this clock the txn already acked, so dropping the
+      // state cannot un-do the ack — c_ack/rd_match are registered values sampled now).
+      if (txn_done) begin
+        rd_armed <= 1'b0; rd_window_q <= '0; rd_addr_q <= 32'd0;
+        for (int s=0;s<L1_SETS;s++) begin dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0; end
+      end
     end
   end
 

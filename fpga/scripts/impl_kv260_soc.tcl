@@ -55,17 +55,23 @@ set svfiles {
     bus/biu_p5.sv bus/biu.sv
     mem/ven_l1d.sv mem/ven_axi_master.sv mem/ventium_l1_axi.sv
     soc/ven_soc_axil.sv soc/ven_soc_dbg.sv soc/ventium_kv260_core.sv
+    soc/ven_fan_ctrl.sv
 }
 foreach f $svfiles { add_files -norecurse $ROOT/rtl/$f }
 add_files -norecurse $ROOT/rtl/soc/ventium_kv260_top.v
+add_files -norecurse $ROOT/rtl/soc/ven_fan_ctrl_top.v
 set_property file_type SystemVerilog [get_files *.sv]
 add_files -norecurse [glob $ROOT/rtl/core/*.svh]
 set_property file_type {Verilog Header} [get_files *.svh]
 set_property include_dirs [list $ROOT/rtl/core] [current_fileset]
 # uop-cache + half-cache + 2-stage FP commit (routable, 65.3 MHz OOC) + SoC seams.
 set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
-    VEN_FP_PIPE VEN_FP_PIPE2 VEN_IC_BRAM VEN_CACHE_HALF \
+    VEN_FP_PIPE VEN_FP_PIPE2 VEN_CACHE_HALF \
     VEN_L1_AXI VEN_KV260_SOC}
+# IC_BRAM=0 drops the RAMB36 icache line buffer for the LUTRAM (distributed)
+# path — used to test whether the board-only upper-fetch-word corruption is the
+# BRAM cross-port read path (the RAMB36 collision is not modeled by Verilator).
+if {[envor IC_BRAM 1]} { lappend DEFS VEN_IC_BRAM }
 # Fetch-path feature defines are env-controllable (default ON, matching linux_40)
 # so a CALL/RET / fetch-redirect synth bug can be bisected by dropping one at a time:
 #   BTB_PIPE=0 (pipelined BTB), UOPCACHE=0 (micro-op cache), FE_PIPE=1 (fetch pipe).
@@ -85,7 +91,29 @@ if {[envor DBG_CORE 0]} { lappend DEFS VEN_DBG_CORE }
 # port list is unchanged (the seam is internal to ventium_kv260_core), so the BD/
 # address map need no change. OFF by default.
 if {[envor PS_PROXY 0]} { lappend DEFS VEN_PS_PROXY }
+# AXI_RREG=1 (default ON): register ven_axi_master's AXI read-data channel before the
+# L1/icache fill capture — the F4 fix for the board-only fetch corruption (a corrupted
+# line-fill word under Alpha_Init's saturated fill traffic on real HPC0). Removes the
+# combinational AXI-R-bus -> cache-array path; verified make-verify GREEN + Quake-to-
+# palettes clean. Drop to 0 to A/B against the un-registered path.
+if {[envor AXI_RREG 1]} { lappend DEFS VEN_AXI_RREG }
+# FP_PC_RELAX=1 (default ON): relax the x87 precision-control loud-HALT (f_pc_bad)
+# so FP arithmetic under PC!=11 (24-bit single / 53-bit double) proceeds instead of
+# halting. Quake's rasterizer (R_RecursiveWorldNode) runs FSUBR/FMUL under single
+# precision via fldcw; the gate HALTed the render. Result is full-80-bit-then-RC
+# (more precise than P5, benign — Quake stores back to f32). make verify never runs
+# arith under PC!=11 so the base build (no define) stays byte-identical.
+if {[envor FP_PC_RELAX 1]} { lappend DEFS VEN_FP_PC_RELAX }
 set_property verilog_define $DEFS [current_fileset]
+
+# FAN_CTRL=1 (default ON): add the temperature-controlled cooling fan — a PL
+# SYSMONE4 (System Management Wizard) feeding ven_fan_ctrl, which PWM-drives the
+# fan transistor on package pin A12. Fully hardware (no PS); the fan_pin external
+# port + its A12 constraint exist ONLY in this build. Set FAN_CTRL=0 to omit.
+set FANCTRL [envor FAN_CTRL 1]
+if {$FANCTRL} {
+    add_files -fileset constrs_1 -norecurse $ROOT/fpga/constraints/fan.xdc
+}
 update_compile_order -fileset sources_1
 
 # ---- block design (identical topology to bd_kv260_soc.tcl) ----------------------
@@ -133,6 +161,39 @@ connect_bd_net [get_bd_pins ps8/pl_resetn0] [get_bd_pins rst0/ext_reset_in]
 connect_bd_net [get_bd_pins rst0/peripheral_aresetn] \
     [get_bd_pins u_kv260/aresetn] \
     [get_bd_pins sc_mem/aresetn] [get_bd_pins sc_ctrl/aresetn]
+
+# ---- temperature-controlled cooling fan (FAN_CTRL) -----------------------------
+# A PL SYSMONE4 (System Management Wizard, INTERFACE=Enable_AXI + ENABLE_TEMP_BUS:
+# continuous on-die temperature -> temp_out[9:0] + eos_out; clocked by s_axi_aclk)
+# feeds ven_fan_ctrl_top (the .v BD shell over ven_fan_ctrl.sv), which maps the
+# temperature to an 8-bit PWM driving fan_pin (A12). The fan PWM loop is pure
+# hardware (continuous sequencer auto-runs after reset); the wizard's S_AXI_LITE
+# is wired to the control SmartConnect (sc_ctrl M01) for optional PS readback/
+# reconfig. Port/CONFIG names verified against the IP (system_management_wiz 1.3).
+if {$FANCTRL} {
+    set smvlnv [lindex [lsort [get_ipdefs xilinx.com:ip:system_management_wiz:*]] end]
+    create_bd_cell -type ip -vlnv $smvlnv sysmon
+    set_property -dict [list \
+        CONFIG.INTERFACE_SELECTION {Enable_AXI} \
+        CONFIG.ENABLE_TEMP_BUS {true} \
+        CONFIG.SEQUENCER_MODE {Continuous} \
+        CONFIG.DCLK_FREQUENCY $PL0_MHZ ] [get_bd_cells sysmon]
+    # S_AXI_LITE of the wizard -> a second master on sc_ctrl (M00 already -> u_kv260)
+    set_property CONFIG.NUM_MI {2} [get_bd_cells sc_ctrl]
+    connect_bd_intf_net [get_bd_intf_pins sc_ctrl/M01_AXI] [get_bd_intf_pins sysmon/S_AXI_LITE]
+    connect_bd_net [get_bd_pins ps8/pl_clk0]              [get_bd_pins sysmon/s_axi_aclk]
+    connect_bd_net [get_bd_pins rst0/peripheral_aresetn] [get_bd_pins sysmon/s_axi_aresetn]
+    # the fan controller (Verilog BD shell over the SV implementation)
+    create_bd_cell -type module -reference ven_fan_ctrl_top u_fan
+    set_property -dict [list CONFIG.CLK_HZ [expr {$PL0_MHZ * 1000000}]] [get_bd_cells u_fan]
+    connect_bd_net [get_bd_pins ps8/pl_clk0]              [get_bd_pins u_fan/clk]
+    connect_bd_net [get_bd_pins rst0/peripheral_aresetn] [get_bd_pins u_fan/rst_n]
+    connect_bd_net [get_bd_pins sysmon/temp_out] [get_bd_pins u_fan/temp]
+    connect_bd_net [get_bd_pins sysmon/eos_out]  [get_bd_pins u_fan/eos]
+    create_bd_port -dir O fan_pin
+    connect_bd_net [get_bd_ports fan_pin] [get_bd_pins u_fan/fan_pwm]
+    # Vp_Vn (external-analog interface) left unconnected — internal temperature only.
+}
 assign_bd_address
 catch {
     set seg [get_bd_addr_segs -of_objects [get_bd_addr_spaces u_kv260/m_axi]]
@@ -170,8 +231,11 @@ if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
 puts "IMPL_SYNTH_DONE"
 
 # ---- IMPL: place + route + bitstream -------------------------------------------
-set_property strategy Performance_NetDelay_high [get_runs impl_1]
-puts "=== IMPL place+route+bitstream (strategy Performance_NetDelay_high) ==="
+# IMPL_STRATEGY env override: e.g. Congestion_SpreadLogic_high relieves routing
+# congestion (AltSpreadLogic_high placement + phys_opt + Explore routing).
+set IMPLSTRAT [envor IMPL_STRATEGY Performance_NetDelay_high]
+set_property strategy $IMPLSTRAT [get_runs impl_1]
+puts "=== IMPL place+route+bitstream (strategy $IMPLSTRAT) ==="
 launch_runs impl_1 -to_step write_bitstream -jobs $THREADS
 wait_on_run impl_1
 set ist [get_property STATUS   [get_runs impl_1]]

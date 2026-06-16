@@ -104,6 +104,7 @@
 #define VEN_MODE_PROXY      (1u << 4)   // proxy_en: 1 = int-0x80 proxy (F4 only)
 #define VEN_MODE_COSIM      (1u << 5)   // cosim_en: 1 = route IN/OUT to the io bridge
 #define VEN_MODE_SOCEN      (1u << 6)   // soc_en: 1 = ungate the core's external-INTR
+#define VEN_MODE_GOLDEN_L1  (1u << 7)   // golden_l1: L1 flush-after-each-access (diagnostic; tanks perf)
                                         //   divert (F3; also selects the SoC CPUID arm)
 #define VEN_MODE_ERRATA_SH  8           // errata_en[4:0] at bits [12:8]
 

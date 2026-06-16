@@ -42,6 +42,8 @@
               seg_step   <= 1'b0; state <= S_LCALL;
             end
             else if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
+            // BOUND / CMPXCHG8B read a SECOND word ([mem+w]) before executing.
+            else if (q_kind==K_BOUND || q_kind==K_CX8B) state<=S_LOAD2;
             else state<=S_EXEC;
           end
         end

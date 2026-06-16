@@ -148,7 +148,12 @@
           else begin
             unique case (q_kind)
               K_ALU: begin
-                if (q_is_lea) gpr[q_dst_reg]<=q_ea;
+                if (q_xlat) begin
+                  // XLATB: AL <- the byte loaded from [DS:(E)BX + AL]. No flags.
+                  gpr[R_EAX]<=reg_merge(gpr[R_EAX], {24'd0, mem_load_data[7:0]}, 3'd1, 1'b0);
+                  flags_we=1'b0;
+                end
+                else if (q_is_lea) gpr[q_dst_reg]<=q_ea;
                 else if (q_is_pop && q_mem_write) begin
                   // POP m: stack value (mem_load_data) -> memory dest; ESP += w.
                   do_store=1'b1; do_retire=1'b0;
@@ -515,6 +520,70 @@
                 end
               end
 
+              K_XADD: begin
+                // XADD r/m,r:  TEMP = SRC + DEST;  SRC = DEST;  DEST = TEMP.
+                // a_op is the OLD destination (mem_load_data for the RMW form, the
+                // dst register otherwise) — the value the source register receives.
+                // alu_out = dst+src (the SUM) with ADD flags in flags_out.
+                if (q_mem_write) begin
+                  // MEMORY form: the sum is stored in S_STORE (st_data=alu_out),
+                  // which RE-READS the src register combinationally — so the SRC<-
+                  // old-dst writeback is DEFERRED to S_STORE (K_XADD arm), otherwise
+                  // clobbering src here would make alu_out read mem+mem next clock.
+                  // The ADD flags are committed HERE (the do_store path skips the
+                  // generic flag commit), exactly like K_CMPXCHG's mem form.
+                  eflags <= flags_out; flags_we=1'b0;
+                  do_store=1'b1; do_retire=1'b0;
+                end else begin
+                  // REGISTER form: SRC<-old dst FIRST, then DEST<-sum, so that when
+                  // src==dst (`xadd %eax,%eax`) the destination write (the SUM) wins
+                  // last — the SDM result DEST=TEMP=sum. Flags via the do_retire path.
+                  gpr[q_src_reg] <= reg_merge(gpr[q_src_reg], a_op, q_w, q_src_high8);
+                  gpr[q_dst_reg] <= reg_merge(dst_cur, alu_out, q_w, q_dst_high8);
+                end
+              end
+
+              K_BOUND: begin
+                // index (modrm_reg) must satisfy lower <= index <= upper, all SIGNED
+                // at the operand width. lower=[mem]=mem_load_data, upper=[mem+w]=
+                // mem_load_data2. BOUND writes no register and no flags.
+                logic [31:0] idxv, lov, hiv;
+                idxv = reg_read(q_src_reg,q_w,1'b0);
+                lov  = wmask(mem_load_data ,q_w);
+                hiv  = wmask(mem_load_data2,q_w);
+                if (q_w==3'd2) begin              // sign-extend the 16-bit operands
+                  idxv={{16{idxv[15]}},idxv[15:0]};
+                  lov ={{16{lov [15]}},lov [15:0]};
+                  hiv ={{16{hiv [15]}},hiv [15:0]};
+                end
+                flags_we=1'b0;
+                if ($signed(idxv) < $signed(lov) || $signed(idxv) > $signed(hiv)) begin
+                  // #BR (vector 5): BOUND range exceeded. FAULT semantics (push the
+                  // faulting EIP). sys_mode delivers via the IDT; user mode loud-HALTs
+                  // (no IDT) — exactly the #DE policy. Carries no error code.
+                  do_retire=1'b0;
+                  if (sys_mode) start_fault(8'd5, 1'b0, 32'd0, q_pc);
+                  else          state<=S_HALT;
+                end
+                // in-bounds: do_retire stays 1 -> advance EIP, no state change.
+              end
+
+              K_CX8B: begin
+                // CMPXCHG8B m64: low=[mem]=mem_load_data, high=[mem+4]=mem_load_data2.
+                // Equal iff EDX:EAX == high:low. ONLY ZF is affected (CF/PF/AF/SF/OF
+                // unchanged). Equal -> store ECX:EBX to [mem]:[mem+4] (2 beats via
+                // S_USEQ) and ZF=1. Not equal -> EDX:EAX <- [mem64], ZF=0, no store.
+                logic eq;
+                eq = (mem_load_data == gpr[R_EAX]) && (mem_load_data2 == gpr[R_EDX]);
+                eflags <= (eflags & ~(32'd1 << 6)) | (eq ? (32'd1 << 6) : 32'd0);
+                flags_we=1'b0;
+                if (eq) begin
+                  do_retire=1'b0; state<=S_USEQ; step<=4'd0;   // conditional 2-word store
+                end else begin
+                  gpr[R_EAX]<=mem_load_data; gpr[R_EDX]<=mem_load_data2;
+                end
+              end
+
               K_BSWAP: begin logic [31:0] v; v=gpr[q_dst_reg];
                 gpr[q_dst_reg]<={v[7:0],v[15:8],v[23:16],v[31:24]}; end
 
@@ -641,6 +710,10 @@
                     gpr[R_ESP]<=gpr[R_EBP]+{28'd0,q_w};
                   end
                   SM_PUSHA, SM_POPA: begin do_retire=1'b0; state<=S_USEQ; step<=4'd0; end
+                  // ENTER (level 0): push EBP now (store driven by the st_data mux:
+                  // st_addr=ESP-w, st_data=EBP); S_STORE then sets EBP=ESP-w and
+                  // ESP=ESP-w-alloc and retires.
+                  SM_ENTER: begin do_store=1'b1; do_retire=1'b0; end
                   default: ;
                 endcase
                 flags_we=1'b0;

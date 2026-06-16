@@ -21,7 +21,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 H="$REPO/ventium-refs/07-p5-emulation-harness"
 QEMU="$H/build/qemu/build/qemu-i386"; ELF="$H/quake/bin/tyr-quake-p5"
 GEN="$REPO/verif/qemu-trace/gen_trace.py"
-TB="$REPO/verif/tb/obj_dir_emu/tb_ventium"; [[ -x "$TB" ]] || TB="$REPO/verif/tb/obj_dir/tb_ventium"
+# Prefer the canonical obj_dir build (rebuilt by `make rtl`, has the emulator
+# linked in + the --no-trace fast path); fall back to obj_dir_emu.
+TB="$REPO/verif/tb/obj_dir/tb_ventium"; [[ -x "$TB" ]] || TB="$REPO/verif/tb/obj_dir_emu/tb_ventium"
 PY=/usr/bin/python3; command -v "$PY" >/dev/null || PY="$(command -v python3)"
 N="${1:-120000000}"; EVERY="${2:-1}"
 VIDP="/p5q_video_capture"          # sentinel $P5Q_VIDEO path (matched, never opened)
@@ -56,10 +58,16 @@ echo "== 2. RTL free-run Quake (emulate syscalls + capture frame stream), N=$N =
 # --quiesce high: free-run ends at exit_group, not quiescence; a multi-cycle SRT
 # divide legitimately exceeds the default 64-clock no-retire window. (If the core
 # stalls >100k clocks here, THAT is a genuine hang bug, not a false trip.)
-"$TB" --out /dev/null --quake-image "$IMG" --emulate-syscalls --user-stdin /dev/null \
+# Optional periodic complete-state checkpoints: CKPT_EVERY=<N retired insns>
+# drops {g_last_arch + full MemModel} to CKPT_DIR (2-deep ring) — a replay /
+# restart artifact for the long startup (palette init).
+CKPT_EVERY="${CKPT_EVERY:-0}"; CKPT_DIR="${CKPT_DIR:-$OUT/ckpt}"
+CK=(); [[ "$CKPT_EVERY" != 0 ]] && { mkdir -p "$CKPT_DIR"; CK=(--checkpoint-every "$CKPT_EVERY" --checkpoint-dir "$CKPT_DIR"); }
+"$TB" --no-trace --quake-image "$IMG" --emulate-syscalls --user-stdin /dev/null \
       --brk-base "$BRK" --max-insn "$N" --max-cycles $(( N * 16 )) --quiesce 100000 --x87 \
+      "${CK[@]}" \
       --video-path "$VIDP" --video-out "$OUT/frames.p5q" \
-      --user-stdout "$OUT/quake.out" 2>&1 | grep -iE 'FREE-RUN|stop:|video stream|UNIMPL' | head
+      --user-stdout "$OUT/quake.out" 2>&1 | grep -iE 'FREE-RUN|stop:|video stream|UNIMPL|checkpoint @' | head -40
 
 echo "== 3. convert captured frames -> PNG =="
 if [[ -s "$OUT/frames.p5q" ]]; then

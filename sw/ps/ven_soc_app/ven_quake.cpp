@@ -35,10 +35,21 @@ extern "C" int ven_quake_init(volatile uint8_t* ddr, uint32_t mask,
     // BSS / brk-heap / anonymous (zero) memory is implicitly zero in sim. Kernel
     // anonymous memory IS zero-filled, so Quake relies on it. Without this, the guest
     // reads GARBAGE from its BSS -> a corrupted global -> a corrupted pointer/count
-    // -> a DETERMINISTIC memcpy (rep movsl) fault deep in init (insn ~33.66M, EIP
-    // 0x080A67E4) that ONLY bites on the board (the cycle-accurate sim passes the same
-    // point). Match the sim: zero the whole carveout before staging the image regions.
-    std::memset(const_cast<uint8_t*>(ddr), 0, (size_t)mask + 1u);
+    // -> a DETERMINISTIC memcpy (rep movsl) fault deep in init. Match the sim: zero the
+    // whole carveout before staging the image regions.
+    //
+    // DO NOT use std::memset here. The carveout is a no-map reserved-memory region
+    // (/proc/iomem: "40000000-4fffffff : reserved"), mmap'd from /dev/mem with O_SYNC,
+    // so the kernel maps it as DEVICE (non-cacheable, MT_DEVICE_nGnRnE) memory. glibc's
+    // aarch64 memset uses the `DC ZVA` (data-cache zero-by-VA) instruction for large
+    // blocks, which FAULTS on Device memory (SIGBUS / BUS_ADRALN). Zero with explicit
+    // aligned 64-bit volatile stores instead — ddr is page-aligned (mmap result) and
+    // the size is a power-of-two multiple of 8, so every access is naturally aligned.
+    {
+        volatile uint64_t* p = reinterpret_cast<volatile uint64_t*>(const_cast<uint8_t*>(ddr));
+        size_t nwords = ((size_t)mask + 1u) / sizeof(uint64_t);
+        for (size_t i = 0; i < nwords; ++i) p[i] = 0;
+    }
     // Stage every materialised region of the process image into the now-zeroed
     // carveout (the loader writes via MemModel::write8 -> g_ddr). Zero regions stay
     // sparse (already zero). Returns the reset regs.

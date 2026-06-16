@@ -102,11 +102,43 @@ module icache #(
   // +VEN_IC_BRAM: force the line store into Block RAM (RAMB36) to DISSOLVE the
   // distributed-RAM read-mux MUXF congestion. BRAM mandates a SYNCHRONOUS read,
   // so rd_lineA/B are REGISTERED here. The line store is REPLICATED (ic_line_a
-  // serves port A, ic_line_b serves port B) so each is a single-read SDP BRAM.
+  // serves port A, ic_line_b serves port B) so each is a single-write/single-read
+  // SDP BRAM. This two-array structure is the form PROVEN to run the core: each
+  // 256-bit port maps to its own four physical RAMB36 slices (one per 64-bit lane).
+  //
+  // SYNTH-ONLY HAZARD (KV260 silicon bug, GLS-reproduced): if the two stores are
+  // written with byte-IDENTICAL data+address, Vivado's RAM-equivalence pass PROVES
+  // ic_line_a == ic_line_b and eliminates one array — tying ic_line_a's write
+  // enables to 0 and deriving rd_lineA from ic_line_b. The leftover degenerate
+  // ic_line_a then DECLONES ("[Synth 8-223] decloning ... RAMB36E2") down to a
+  // single 64-bit RAMB36 fanned across all four lanes of rd_lineA
+  // (`assign rd_lineA[255:192] = rd_lineA[191:128]` in funcsim), so every lane
+  // returns the SAME 64-bit slice and the upper word of an 8-byte granule
+  // (addr bit[2]=1) reads back the lower word's bytes => board-only fetch
+  // corruption. Functional Verilator never models this (the arrays are genuinely
+  // separate in RTL).
+  //
+  // ANTI-DECLONE (METHOD B — word-order skew): attributes alone (dont_touch / keep
+  // / ram_style=block) do NOT stop the equivalence merge, and per-lane address /
+  // data skews either dump the array to LUTRAM or mis-synthesise the A port. So we
+  // make ic_line_b GENUINELY non-equivalent in STORED CONTENT: it holds each line
+  // with its eight 32-bit WORDS in REVERSED order (word w stored at word slot 7-w).
+  // The write stays a single direct-offset byte-write to the reversed word slot —
+  // reversed offset = fill_off XOR 5'b11100 (== 28-fill_off for the word-aligned
+  // fill_off), which is direct line-offset indexing, so the byte-write BRAM template
+  // is preserved (a byte-SCATTER reversal instead breaks it -> LUTRAM). ic_line_a
+  // and ic_line_b now store DIFFERENT bit patterns for every non-palindromic line,
+  // so Vivado cannot prove them equal, keeps BOTH writes, declones NOTHING, and
+  // infers 8 RAMB36E2 (4 per array). The rd_lineB read un-reverses the words, so
+  // behaviour is bit-identical to the original. Pure wiring (a static word swizzle).
+  localparam logic [4:0] WREV = 5'b11100; // reversed word offset = fill_off ^ WREV
   (* ram_style = "block" *) logic [IC_LINE*8-1:0] ic_line_a [IC_SETS*IC_WAYS];
   (* ram_style = "block" *) logic [IC_LINE*8-1:0] ic_line_b [IC_SETS*IC_WAYS];
-  logic [IC_LINE-1:0] fill_be;
-  assign fill_be = {{(IC_LINE-4){1'b0}}, 4'b1111} << fill_off;
+  logic [IC_LINE*8-1:0] rdq_b_rev;  // registered RAW (word-reversed) read of ic_line_b
+  logic [IC_LINE-1:0] fill_be;    // byte-enable for ic_line_a (natural word offset)
+  logic [IC_LINE-1:0] fill_be_b;  // byte-enable for ic_line_b (reversed word offset)
+  assign fill_be   = {{(IC_LINE-4){1'b0}}, 4'b1111} <<  fill_off;
+  assign fill_be_b = {{(IC_LINE-4){1'b0}}, 4'b1111} << (fill_off ^ WREV);
 `else
   // Default: distributed RAM — the ram_style hint pushes Vivado to LUTRAM (async
   // read + partial word write) instead of flip-flops + read muxes.
@@ -119,9 +151,25 @@ module icache #(
 
 `ifdef VEN_IC_BRAM
   always_ff @(posedge clk) begin
-    rd_lineA <= ic_line_a[{rd_setA, rd_wayA}];
-    rd_lineB <= ic_line_b[{rd_setB, rd_wayB}];
+    if (!rst_n) begin
+      // Pin the BRAM output registers out of reset. On silicon these power up to
+      // arbitrary values; with no reset a fetch that samples them before the read
+      // settles (the registered-read latency window) consumes garbage -> opcode
+      // misdecode. Zero is the safe value (decodes the same as the zero-init sim
+      // that make verify uses), so this removes the synth/sim divergence.
+      rd_lineA  <= '0;
+      rdq_b_rev <= '0;
+    end else begin
+      rd_lineA  <= ic_line_a[{rd_setA, rd_wayA}];
+      // CLEAN whole-line registered read of ic_line_b (keeps the BRAM read port);
+      // ic_line_b holds the words reversed, so rdq_b_rev is the reversed line.
+      rdq_b_rev <= ic_line_b[{rd_setB, rd_wayB}];
+    end
   end
+  // un-reverse the eight words COMBINATIONALLY (after the registered BRAM read) so
+  // rd_lineB is bit-identical to the unreversed line. Pure wiring, no logic depth.
+  always_comb
+    for (int wd=0; wd<8; wd++) rd_lineB[wd*32 +: 32] = rdq_b_rev[(7-wd)*32 +: 32];
 `else
   assign rd_lineA = ic_line[{rd_setA, rd_wayA}];
 `ifdef VEN_IC_NARROWB
@@ -175,12 +223,14 @@ module icache #(
       // ---- per-word line fill (S_PF + S_PIPE word-0 path; one/clock) ----
       if (fill_en) begin
 `ifdef VEN_IC_BRAM
-        // canonical UltraScale byte-write-enable template (both replicated copies).
+        // canonical UltraScale byte-write-enable template. ic_line_a uses the
+        // natural byte-enable (fill_be); ic_line_b uses the reversed-word byte-enable
+        // (fill_be_b) so the same fill_data word lands at word slot 7-w => ic_line_b
+        // stores the line word-reversed. Both are direct line-offset byte-writes, so
+        // both stay byte-write BRAMs; the differing content prevents the declone.
         for (int bl=0; bl<32; bl++) begin
-          if (fill_be[bl]) begin
-            ic_line_a[{fill_set,fill_way}][bl*8 +: 8] <= fill_data[(bl%4)*8 +: 8];
-            ic_line_b[{fill_set,fill_way}][bl*8 +: 8] <= fill_data[(bl%4)*8 +: 8];
-          end
+          if (fill_be[bl])   ic_line_a[{fill_set,fill_way}][bl*8 +: 8] <= fill_data[(bl%4)*8 +: 8];
+          if (fill_be_b[bl]) ic_line_b[{fill_set,fill_way}][bl*8 +: 8] <= fill_data[(bl%4)*8 +: 8];
         end
 `else
         ic_line[{fill_set,fill_way}][{fill_off,3'b000} +: 32] <= fill_data;

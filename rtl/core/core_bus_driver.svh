@@ -39,10 +39,17 @@
           // F3: a16 string EA uses SI/DI low-16 (str_esi/str_edi mask).
           if (q_st==ST_SCAS) mem_addr=dbase+str_edi;
           else               mem_addr=dbase+str_esi;
-        end else mem_addr=opbase+q_ea;   // M7.1: opbase==dbase except a proxy
+        end else if (q_xlat) mem_addr=dbase+gpr[R_EBX]+{24'd0,gpr[R_EAX][7:0]};
+                                          // XLATB: byte at [DS:(E)BX + AL]
+        else mem_addr=opbase+q_ea;        // M7.1: opbase==dbase except a proxy
                                           // gs-override indirect-call operand read
       end
-      S_LOAD2: begin mem_req=1'b1; mem_addr=dbase_edi+str_edi; end
+      S_LOAD2: begin mem_req=1'b1;
+        // BOUND / CMPXCHG8B: the SECOND word is the upper bound / high dword at
+        // [mem + w] (w=4 for 32-bit BOUND & CMPXCHG8B, 2 for a 16-bit BOUND).
+        if (q_kind==K_BOUND || q_kind==K_CX8B) mem_addr=dbase+q_ea+{28'd0,q_w};
+        else mem_addr=dbase_edi+str_edi;   // CMPS second operand ([EDI])
+      end
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
       S_LGDT: begin mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
       S_SEGLD: begin mem_req=1'b1;
@@ -148,7 +155,12 @@
       end
       S_USEQ: begin
         mem_req=1'b1;
-        if (q_sm==SM_PUSHA) begin
+        if (q_kind==K_CX8B) begin
+          // CMPXCHG8B equal-case store: EBX -> [mem] (beat 0), ECX -> [mem+4] (beat 1).
+          mem_we=1'b1; mem_wstrb=4'b1111;
+          mem_addr=dbase+q_ea+(step==4'd0 ? 32'd0 : {28'd0,q_w});
+          mem_wdata=(step==4'd0) ? gpr[R_EBX] : gpr[R_ECX];
+        end else if (q_sm==SM_PUSHA) begin
           mem_we=1'b1; mem_wstrb=4'b1111;
           mem_addr=dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
           unique case (step)

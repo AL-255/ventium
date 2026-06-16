@@ -91,6 +91,7 @@ module ventium_kv260_core #(
   logic [31:0] cfg_init_eip, cfg_init_esp;
   logic        cfg_boot_mode, cfg_cycle_mode, cfg_bus_mode, cfg_l1axi_en;
   logic        cfg_proxy_en, cfg_cosim_en, cfg_soc_en, cfg_flush_all;
+  logic        cfg_golden_l1;    // MODE.GOLDEN_L1 -> ven_l1d flush-after-each-access
   logic        cfg_shutdown;     // R_CTRL.SHUTDOWN -> quiesce the AXI master
   logic        st_axi_idle;      // ven_axi_master m_idle -> R_STATUS.AXI_IDLE
   logic [4:0]  cfg_errata_en;
@@ -115,6 +116,12 @@ module ventium_kv260_core #(
   logic [31:0] dbg_eip, dbg_esp, dbg_eflags, dbg_fault_pc, dbg_cr0;
   logic [15:0] dbg_cs;
   logic [5:0]  dbg_state;  logic [7:0] dbg_int_vec;
+  // F4 read-beat trace nets (ventium_top -> ven_soc_dbg ring).
+  logic        dbg_rd_valid;
+  logic [31:0] dbg_rd_addr, dbg_rd_data;
+  // ven_soc_dbg read-beat-ring readback (d_rd_*):
+  logic [31:0] d_rd_addr, d_rd_data;
+  logic [5:0]  d_rd_count;
   // ven_soc_dbg readback + control nets (d_*):
   logic        d_clear, d_frozen;
   logic [31:0] d_freeze_th, d_last_eip, d_last_esp, d_last_eflags, d_frozen_eip;
@@ -146,6 +153,7 @@ module ventium_kv260_core #(
       .proxy_en(cfg_proxy_en), .cosim_en(cfg_cosim_en), .soc_en(cfg_soc_en),
       .errata_en(cfg_errata_en),
       .flush_all(cfg_flush_all),
+      .golden_l1(cfg_golden_l1),
       .shutdown(cfg_shutdown), .axi_idle(st_axi_idle),
       .cpu_hung(st_cpu_hung), .bus_err(st_bus_err), .retire_n(st_retire_n),
       .io_req(io_req), .io_we(io_we), .io_addr(io_addr), .io_size(io_size),
@@ -171,6 +179,7 @@ module ventium_kv260_core #(
       .dbg_last_eflags(d_last_eflags), .dbg_frozen(d_frozen), .dbg_frozen_eip(d_frozen_eip),
       .dbg_frozen_state(d_frozen_state), .dbg_frozen_vec(d_frozen_vec),
       .dbg_trace_pc(d_trace_pc), .dbg_trace_aux(d_trace_aux), .dbg_trace_count(d_trace_count),
+      .dbg_rd_ring_addr(d_rd_addr), .dbg_rd_ring_data(d_rd_data), .dbg_rd_ring_count(d_rd_count),
       .dbg_live_state(dbg_state), .dbg_live_vec(dbg_int_vec), .dbg_live_fault_pc(dbg_fault_pc),
       .dbg_live_cr0(dbg_cr0), .dbg_cpu_hung(st_cpu_hung),
       .dbg_perf_cyc(d_perf_cyc), .dbg_perf_retired(d_perf_ret), .dbg_perf_stall(d_perf_stall),
@@ -218,6 +227,7 @@ module ventium_kv260_core #(
       .mem_rdata(32'd0), .mem_ack(1'b0),
       // L1+AXI mode 2 -> the AXI4 master to PS-DDR.
       .l1axi_en(cfg_l1axi_en), .flush_all(cfg_flush_all),
+      .golden_l1(cfg_golden_l1),
       .shutdown(cfg_shutdown), .m_idle(st_axi_idle),
       .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
       .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst), .m_axi_awlock(m_axi_awlock),
@@ -244,6 +254,7 @@ module ventium_kv260_core #(
       .dbg_retire_valid(dbg_retire_valid), .dbg_eip(dbg_eip), .dbg_cs(dbg_cs),
       .dbg_esp(dbg_esp), .dbg_eflags(dbg_eflags), .dbg_state(dbg_state),
       .dbg_int_vec(dbg_int_vec), .dbg_fault_pc(dbg_fault_pc), .dbg_cr0(dbg_cr0),
+      .dbg_rd_valid(dbg_rd_valid), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
       .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
       .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted)
 `endif
@@ -266,7 +277,10 @@ module ventium_kv260_core #(
       .frozen_state(d_frozen_state), .frozen_vec(d_frozen_vec),
       .trace_pc(d_trace_pc), .trace_aux(d_trace_aux), .trace_count(d_trace_count),
       .perf_cyc(d_perf_cyc), .perf_retired(d_perf_ret), .perf_stall(d_perf_stall),
-      .perf_io(d_perf_io), .perf_irq(d_perf_irq)
+      .perf_io(d_perf_io), .perf_irq(d_perf_irq),
+      // F4 read-beat trace ring (taps from ventium_top -> ring -> ven_soc_axil regs).
+      .dbg_rd_valid(dbg_rd_valid), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
+      .dbg_rd_ring_addr(d_rd_addr), .dbg_rd_ring_data(d_rd_data), .dbg_rd_ring_count(d_rd_count)
   );
 `endif
 

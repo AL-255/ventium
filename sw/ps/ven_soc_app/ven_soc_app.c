@@ -112,6 +112,7 @@ static void dbg_dump_core(void) {
 // 0x40-0x6C syscall window, emulates the i386 Linux call (ven_quake.*), writes
 // the kernel memory effects into the carveout, then commits the response.
 static int          g_quake     = 0;     // --quake <image.json>
+static int          g_cycle     = 0;     // --cycle: set MODE.CYCLE (dual-issue / fast uopcache fetch path)
 static const char  *g_qimage    = 0;     // the gen_trace.py --image-out JSON
 static const char  *g_video_out = 0;     // --video <out.p5q>: capture the P5Q1 stream
 static const char  *g_vga_dump  = 0;     // --vga-dump <out.ppm>: mode-13h framebuffer snapshot
@@ -317,6 +318,7 @@ int main(int argc, char **argv) {
                 hx += 2;
             }
         }
+        else if (!strcmp(argv[i], "--cycle")) g_cycle = 1;   // MODE.CYCLE = dual-issue/fast-fetch path
         else if (!img)      img = argv[i];
         else if (npos < 3)  pos[npos++] = strtoul(argv[i], 0, 0);
     }
@@ -449,7 +451,7 @@ int main(int argc, char **argv) {
     // (userspace issues no IN/OUT), no SOCEN, no BOOT_SYS. Otherwise the F2/F3
     // boot mode (L1AXI + IO bridge + optional system/SOCEN).
     if (g_quake) {
-        wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_PROXY);
+        wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_PROXY | (g_cycle ? VEN_MODE_CYCLE : 0));
     } else {
         wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_COSIM
                      | (sysmode ? VEN_MODE_BOOT_SYS : 0)

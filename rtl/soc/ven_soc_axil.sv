@@ -62,6 +62,7 @@ module ven_soc_axil #(
     output logic        proxy_en,
     output logic        cosim_en,
     output logic        soc_en,                 // F3: core soc_en (MODE.SOCEN, bit 6)
+    output logic        golden_l1,              // MODE.GOLDEN_L1 (bit 7): L1 flush-after-each-access
     output logic [4:0]  errata_en,
     output logic        flush_all,              // W1P pulse from CTRL.FLUSH_ALL_REQ
     output logic        shutdown,               // CTRL.SHUTDOWN level: quiesce the AXI master
@@ -136,6 +137,10 @@ module ven_soc_axil #(
     input  logic [31:0] dbg_trace_pc,
     input  logic [31:0] dbg_trace_aux,
     input  logic [5:0]  dbg_trace_count,
+    // F4 read-beat trace ring readback (indexed by the same R_DBG_TRACE_IDX):
+    input  logic [31:0] dbg_rd_ring_addr,
+    input  logic [31:0] dbg_rd_ring_data,
+    input  logic [5:0]  dbg_rd_ring_count,
     // live core taps (combinational, stable when the core is frozen):
     input  logic [5:0]  dbg_live_state,
     input  logic [7:0]  dbg_live_vec,
@@ -217,6 +222,10 @@ module ven_soc_axil #(
   localparam logic [7:0] R_DBG_BP_ADDR    = 8'hD8;  // RW breakpoint EIP
   localparam logic [7:0] R_DBG_RUNCTL     = 8'hDC;  // RW [0]halt_req [1]W1P step
                                                     //    [2]bp_en [3]W1P bp_clr; RO [8]halted
+  // F4 read-beat trace ring readback (indexed by R_DBG_TRACE_IDX, same as PC ring):
+  localparam logic [7:0] R_DBG_RD_ADDR    = 8'hE0;  // RO read-beat ring[idx] DDR addr
+  localparam logic [7:0] R_DBG_RD_DATA    = 8'hE4;  // RO read-beat ring[idx] data word
+  localparam logic [7:0] R_DBG_RD_COUNT   = 8'hE8;  // RO read-beat ring entry count
 `endif
 
   // ---- control / config registers ----------------------------------------------
@@ -225,6 +234,7 @@ module ven_soc_axil #(
   logic [31:0] init_eip_r, init_esp_r;
   logic        boot_mode_r, cycle_mode_r, bus_mode_r, l1axi_en_r, proxy_en_r, cosim_en_r;
   logic        soc_en_r;
+  logic        golden_l1_r;
   logic [4:0]  errata_en_r;
   logic [31:0] io_rdata_r;       // PS-written IN return value (staged for the ack)
   logic [31:0] hi_snap;          // retire_n[63:32] snapshot, latched on RETIRE_LO read
@@ -274,6 +284,7 @@ module ven_soc_axil #(
   assign proxy_en   = proxy_en_r;
   assign cosim_en   = cosim_en_r;
   assign soc_en     = soc_en_r;
+  assign golden_l1  = golden_l1_r;
   assign errata_en  = errata_en_r;
   assign intr_out   = intr_pend_r;
   assign intr_vec   = intr_vec_r;
@@ -361,7 +372,7 @@ module ven_soc_axil #(
           R_STATUS:    s_axil_rdata <= {22'd0, sys_pend_status /*[9]*/, io_pending, 4'd0, axi_idle /*[3]*/, ~aresetn, bus_err, cpu_hung};
           R_INIT_EIP:  s_axil_rdata <= init_eip_r;
           R_INIT_ESP:  s_axil_rdata <= init_esp_r;
-          R_MODE:      s_axil_rdata <= {19'd0, errata_en_r, 1'b0, soc_en_r, cosim_en_r, proxy_en_r, l1axi_en_r, bus_mode_r, cycle_mode_r, boot_mode_r};
+          R_MODE:      s_axil_rdata <= {19'd0, errata_en_r, golden_l1_r, soc_en_r, cosim_en_r, proxy_en_r, l1axi_en_r, bus_mode_r, cycle_mode_r, boot_mode_r};
           R_RETIRE_LO: s_axil_rdata <= retire_n[31:0];   // (HI snapshot handled below)
           R_RETIRE_HI: s_axil_rdata <= hi_snap;
           R_IO_STATUS: s_axil_rdata <= {28'd0, 1'b0 /*is_ins*/, io_pending /*busy*/, io_we_q, io_pending};
@@ -412,6 +423,9 @@ module ven_soc_axil #(
           R_DBG_PERF_IRQ:   s_axil_rdata <= dbg_perf_irq;
           R_DBG_BP_ADDR:    s_axil_rdata <= dbg_bp_addr_r;
           R_DBG_RUNCTL:     s_axil_rdata <= {23'd0, dbg_halted, 5'd0, dbg_bp_en_r, 1'b0, dbg_halt_req_r};
+          R_DBG_RD_ADDR:    s_axil_rdata <= dbg_rd_ring_addr;
+          R_DBG_RD_DATA:    s_axil_rdata <= dbg_rd_ring_data;
+          R_DBG_RD_COUNT:   s_axil_rdata <= {26'd0, dbg_rd_ring_count};
 `endif
           default:     s_axil_rdata <= 32'h0;
         endcase
@@ -433,7 +447,7 @@ module ven_soc_axil #(
       init_eip_r <= 32'd0; init_esp_r <= 32'd0;
       boot_mode_r <= 1'b0; cycle_mode_r <= 1'b0; bus_mode_r <= 1'b0;
       l1axi_en_r <= 1'b0; proxy_en_r <= 1'b0; cosim_en_r <= 1'b0; errata_en_r <= 5'd0;
-      soc_en_r <= 1'b0;
+      soc_en_r <= 1'b0; golden_l1_r <= 1'b0;
       intr_vec_r <= 8'd0; intr_pend_r <= 1'b0; intr_seen_r <= 1'b0; intr_irq_en_r <= 1'b0;
       io_rdata_r <= 32'd0;
       flush_all <= 1'b0; ps_ack_pulse <= 1'b0; irq_clr_pulse <= 1'b0;
@@ -487,6 +501,7 @@ module ven_soc_axil #(
             bus_mode_r  <= s_axil_wdata[2]; l1axi_en_r   <= s_axil_wdata[3];
             proxy_en_r  <= s_axil_wdata[4]; cosim_en_r   <= s_axil_wdata[5];
             soc_en_r    <= s_axil_wdata[6];  // F3: SOCEN (ungates the core's intr divert)
+            golden_l1_r <= s_axil_wdata[7];  // GOLDEN_L1: L1 flush-after-each-access (diagnostic)
             if (s_axil_wstrb[1]) errata_en_r <= s_axil_wdata[12:8];
           end
           R_IO_RDATA: begin

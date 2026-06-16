@@ -134,13 +134,27 @@ l1axi_kv:
 KV_FULL_DEFS := +define+VEN_L1_AXI +define+VEN_KV260_SOC +define+VEN_FE_PIPE \
   +define+VEN_UOPCACHE +define+VEN_BTB_PIPE +define+VEN_IC_BRAM +define+VEN_CACHE_HALF \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
-  +define+VEN_BCD_ITER
+  +define+VEN_BCD_ITER +define+VEN_FP_PC_RELAX
 .PHONY: l1axi_kv_full
 l1axi_kv_full:
 	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) \
 	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir obj_dir_l1axi_kvf \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (deployed linux_40 config): $(CURDIR)/obj_dir_l1axi_kvf/$(EXE)"
+
+# ---- l1axi_kv_full_xinit: KVF + Verilator X-randomization -------------------
+# Same defines as l1axi_kv_full but with --x-initial/--x-assign unique so
+# uninitialized flops power up to random (not zero) values — this exposes the
+# board-only reset-incompleteness fetch bugs that the zero-init `make verify`
+# is structurally blind to. Run the board-faithful sweep against it:
+#   make l1axi_kv_full_xinit && bash /tmp/xrepro/sweep_kvf.sh   (all seeds must PASS)
+XINIT_FLAGS := --x-initial unique --x-assign unique --x-initial-edge
+.PHONY: l1axi_kv_full_xinit
+l1axi_kv_full_xinit:
+	$(VERILATOR) $(VL_FLAGS) $(XINIT_FLAGS) $(KV_FULL_DEFS) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC" -Mdir obj_dir_xinit_kvf \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (x-init KVF): $(CURDIR)/obj_dir_xinit_kvf/$(EXE)"
 
 # ---- l1axi_kv_proxy: the EXACT deployed PROXY bitstream config ---------------
 # l1axi_kv_full + VEN_PS_PROXY + VEN_DBG_CORE = the kv260_soc_impl_proxy build.

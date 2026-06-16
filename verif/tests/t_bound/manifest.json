@@ -1,0 +1,9 @@
+{
+  "name": "t_bound",
+  "src": "t_bound/t_bound.s",
+  "elf": "t_bound/t_bound.elf",
+  "image": "t_bound/t_bound.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 100
+}

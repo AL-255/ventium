@@ -78,6 +78,14 @@ module ven_axi_master #(
     input  logic        shutdown,
     output logic        m_idle,         // 1 = R_IDLE && W_IDLE -> no outstanding AXI
 
+`ifdef VEN_DBG_CORE
+    // ---- read-beat trace (VEN_DBG_CORE): observe each accepted AXI read beat so the
+    // on-die ring can post-mortem a corrupted LINE FILL (the F4 board-only fetch bug).
+    output logic        dbg_rd_valid,   // 1 = a read beat was accepted this clock
+    output logic [31:0] dbg_rd_addr,    // that beat's DDR address (line base + beat*4)
+    output logic [31:0] dbg_rd_data,    // that beat's RDATA (raw, off the AXI R bus)
+`endif
+
     // ---- AXI4 master port (-> S_AXI_HPC0_FPD, 32-bit data) --------------------
     // write address channel
     output logic [3:0]        m_axi_awid,
@@ -223,6 +231,13 @@ module ven_axi_master #(
               (shutdown && m_idle && m_req);          // shutdown: local ack, no DDR
     bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err;  // #34 sticky fatal-fault to core
   end
+
+`ifdef VEN_DBG_CORE
+  // read-beat trace taps: capture the address + data of every ACCEPTED read beat.
+  assign dbg_rd_valid = (rst == R_DATA) && m_axi_rvalid && m_axi_rready;
+  assign dbg_rd_addr  = araddr_q[31:0] + {22'd0, r_beat, 2'b00};
+  assign dbg_rd_data  = m_axi_rdata;
+`endif
 
   // ---- READ sequencing -------------------------------------------------------
   always_ff @(posedge core_clk) begin

@@ -64,7 +64,19 @@ module ven_soc_dbg #(
     output logic [63:0] perf_retired,    // retired instructions since clear
     output logic [31:0] perf_stall,      // cycles with NO retire
     output logic [31:0] perf_io,         // cycles parked in S_IO (io_pending)
-    output logic [31:0] perf_irq         // external interrupts acknowledged (inta)
+    output logic [31:0] perf_irq,        // external interrupts acknowledged (inta)
+
+    // ---- F4 read-beat trace ring (AXI line-fill forensics) --------------------
+    // Captures {DDR addr, data} of each accepted AXI read beat. Read back through
+    // the SAME trace_rd_idx as the PC ring (0 = most-recent beat). On a corrupted
+    // line fill the board derails; dumping this ring shows the exact fill word the
+    // core latched vs the expected code bytes.
+    input  logic        dbg_rd_valid,    // 1 = an AXI read beat was accepted
+    input  logic [31:0] dbg_rd_addr,     // that beat's DDR address
+    input  logic [31:0] dbg_rd_data,     // that beat's data word
+    output logic [31:0] dbg_rd_ring_addr,// ring[idx].addr (1-clock read latency)
+    output logic [31:0] dbg_rd_ring_data,// ring[idx].data (same entry)
+    output logic [IDXW:0] dbg_rd_ring_count
 );
 
   // ---- last-retire latch ----------------------------------------------------
@@ -105,6 +117,32 @@ module ven_soc_dbg #(
   assign trace_pc    = rd_q[31:0];
   assign trace_aux   = {10'd0, rd_q[53:48], rd_q[47:32]};  // {state[5:0], cs[15:0]}
   assign trace_count = count;
+
+  // ---- F4 read-beat ring (BRAM SDP: 1 write per accepted AXI read beat) ------
+  // Entry = {addr[31:0], data[31:0]} = 64 bits. Indexed by the SAME trace_rd_idx
+  // as the PC ring (0 = most-recent beat), so one PS index write reads both rings.
+  (* ram_style = "block" *) logic [63:0] rdr_ring [DEPTH];
+  logic [IDXW-1:0] rdr_head;
+  logic [IDXW:0]   rdr_count;
+  logic [63:0]     rdr_rd_q;
+  logic [IDXW-1:0] rdr_rd_addr;
+  assign rdr_rd_addr = rdr_head - 1'b1 - trace_rd_idx;
+
+  always_ff @(posedge clk) begin
+    if (!rst_n || ctrl_clear) begin
+      rdr_head  <= '0;
+      rdr_count <= '0;
+    end else if (dbg_rd_valid) begin
+      rdr_ring[rdr_head] <= {dbg_rd_addr, dbg_rd_data};
+      rdr_head <= rdr_head + 1'b1;
+      if (rdr_count < (IDXW+1)'(DEPTH)) rdr_count <= rdr_count + 1'b1;
+    end
+    rdr_rd_q <= rdr_ring[rdr_rd_addr];
+  end
+
+  assign dbg_rd_ring_addr  = rdr_rd_q[63:32];
+  assign dbg_rd_ring_data  = rdr_rd_q[31:0];
+  assign dbg_rd_ring_count = rdr_count;
 
   // ---- freeze detector ------------------------------------------------------
   logic [31:0] stall;

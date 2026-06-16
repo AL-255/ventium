@@ -88,6 +88,7 @@
           q_push_sreg<=d_push_sreg; q_pop_sreg<=d_pop_sreg;   // F3 PUSH/POP sreg
           q_seg_load_lo<=d_seg_load_lo;                       // F3 MOV Sreg,[mem]
           q_store_sreg<=d_store_sreg;                         // F3 MOV [mem],Sreg
+          q_xlat<=d_xlat;                                     // XLATB (D7)
           q_callf_mem<=d_callf_mem; q_jmpf_mem<=d_jmpf_mem;   // F3 FF /3 CALLF / FF /5 JMPF
           seg_step<=1'b0;
           // M2S.3 INT/IRET/UD2 are dispatched directly from the d_* decode below

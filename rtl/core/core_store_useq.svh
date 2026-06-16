@@ -79,8 +79,30 @@
                 end
                 else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
-              K_STKMISC: begin // PUSHF
-                gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}; eip<=next_eip;
+              K_STKMISC: begin // PUSHF (ESP-=w) or ENTER (push EBP then build frame)
+                if (q_sm==SM_ENTER) begin
+                  // ENTER level 0: EBP <- (ESP-w) = FrameTemp; ESP <- ESP-w-alloc.
+                  // q_imm carries `alloc` (the imm16 byte count to reserve).
+                  gpr[R_EBP]<=gpr[R_ESP]-{28'd0,q_w};
+                  gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}-{16'd0,q_imm[15:0]};
+                end else
+                  gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w};  // PUSHF
+                eip<=next_eip;
+                if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
+                  arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
+                       | (tf_at_issue   ? (32'd1 << DR6_BS) : 32'd0),
+                         q_pc, next_eip);
+                  if (wr_hit != 4'd0) db_wp_extra <= 1'b1;
+                end
+                else begin retire_valid<=1'b1; state<=S_PIPE; end
+              end
+              K_XADD: begin // XADD memory form: sum already stored; now SRC <- old [mem]
+                // The store wrote alu_out (mem+src); the source register receives the
+                // OLD memory value (a_op = wmask(mem_load_data)). Doing the writeback
+                // HERE (not in S_EXEC) keeps the store's combinational alu_out reading
+                // the original src this clock. Flags were committed in S_EXEC.
+                gpr[q_src_reg]<=reg_merge(gpr[q_src_reg], wmask(mem_load_data,q_w), q_w, q_src_high8);
+                eip<=next_eip;
                 if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
                   arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
                        | (tf_at_issue   ? (32'd1 << DR6_BS) : 32'd0),
@@ -132,7 +154,12 @@
         // S_USEQ: PUSHA / POPA micro-sequence (8 word transfers).
         S_USEQ: begin
           if (mem_ack) begin
-            if (q_sm==SM_PUSHA) begin
+            if (q_kind==K_CX8B) begin
+              // CMPXCHG8B equal-case store: beat 0 = EBX@[mem], beat 1 = ECX@[mem+4].
+              // ZF was already committed in S_EXEC; retire after the second beat.
+              if (step==4'd1) begin eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; end
+              else step<=step+4'd1;
+            end else if (q_sm==SM_PUSHA) begin
               // push order: EAX,ECX,EDX,EBX,ESP(orig),EBP,ESI,EDI
               if (step==4'd7) begin
                 gpr[R_ESP]<=pusha_esp - (32'd4*8);

@@ -54,6 +54,7 @@ module ventium_l1_axi #(
 
     // ---- core side (the same-cycle-ack contract; mirrors core mem_*) ----------
     input  logic        flush_all,       // #35 external L1 invalidation (clear all val)
+    input  logic        golden_l1,       // golden/L1-useless diagnostic mode (flush after each access)
     input  logic        core_req,
     input  logic        core_we,
     input  logic [31:0] core_addr,
@@ -66,6 +67,13 @@ module ventium_l1_axi #(
     // ---- clean-shutdown quiesce (pass-through to ven_axi_master) ---------------
     input  logic        shutdown,        // 1 = stop new AXI txns, drain in-flight
     output logic        m_idle,          // 1 = AXI master drained -> safe to remove overlay
+
+`ifdef VEN_DBG_CORE
+    // ---- read-beat trace (VEN_DBG_CORE): pass-through from ven_axi_master ------
+    output logic        dbg_rd_valid,
+    output logic [31:0] dbg_rd_addr,
+    output logic [31:0] dbg_rd_data,
+`endif
 
     // ---- AXI4 master port (-> S_AXI_HPC0_FPD), bundle `m_axi` ------------------
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi AWID" *)
@@ -215,6 +223,7 @@ module ventium_l1_axi #(
       .clk      (core_clk),
       .rst_n    (l1d_rst_n),
       .flush_all(flush_all),
+      .golden   (golden_l1),
       .c_req   (core_req),
       .c_we    (core_we),
       .c_addr  (core_addr),
@@ -253,6 +262,11 @@ module ventium_l1_axi #(
       .bus_err     (axm_bus_err),
       .shutdown    (shutdown),
       .m_idle      (m_idle),
+`ifdef VEN_DBG_CORE
+      .dbg_rd_valid (dbg_rd_valid),
+      .dbg_rd_addr  (dbg_rd_addr),
+      .dbg_rd_data  (dbg_rd_data),
+`endif
       .m_axi_awid    (m_axi_awid),
       .m_axi_awaddr  (m_axi_awaddr),
       .m_axi_awlen   (m_axi_awlen),
