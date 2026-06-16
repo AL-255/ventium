@@ -106,6 +106,15 @@ module uopcache
   logic [NSLOT*FPDW-1:0] rdslots_a_q, rdslots_b_q;
   logic [IC_LINE*4-1:0]  rdbmap_a_q,  rdbmap_b_q;
   logic                  rdpdv_a_q,   rdpdv_b_q;
+  // KV260 BRAM cross-port read-during-write collide flags (same hazard fixed in the
+  // icache, commit 65c1929): the store_slots and store_bmap arrays are block RAM; if a
+  // slot read launches off rd_setA/rd_wayA the SAME cycle the walker W_WRITE writes that
+  // set,way, the registered read is garbage on real RAMB36 (clean READ_FIRST under a
+  // 2-state functional model). store_pdv is FF and invalidated on refill so it MOSTLY
+  // gates this, but belt-and-suspenders: a collided read is forced not-predecoded-valid,
+  // so the spine
+  // re-walks (a perf event, never a wrong opcode). Behavior-neutral in 2-state sim.
+  logic                  rd_collA_q,  rd_collB_q;
   always_ff @(posedge clk) begin
     rdslots_a_q <= store_slots_a[{rd_setA, rd_wayA}];
     rdslots_b_q <= store_slots_b[{rd_setB, rd_wayB}];
@@ -113,6 +122,8 @@ module uopcache
     rdbmap_b_q  <= store_bmap_b [{rd_setB, rd_wayB}];
     rdpdv_a_q   <= store_pdv[{rd_setA, rd_wayA}];
     rdpdv_b_q   <= store_pdv[{rd_setB, rd_wayB}];
+    rd_collA_q  <= (wst == W_WRITE) && ({rd_setA, rd_wayA} == {wset, wway});
+    rd_collB_q  <= (wst == W_WRITE) && ({rd_setB, rd_wayB} == {wset, wway});
   end
 
   // unpack the registered line into the slot/byte-map outputs.  The fast-path 8:1
@@ -128,8 +139,10 @@ module uopcache
       rd_bvalidB[b] = rdbmap_b_q[b*4+3];
       rd_bslotB[b]  = rdbmap_b_q[b*4 +: 3];
     end
-    rd_pdvalidA = rdpdv_a_q;
-    rd_pdvalidB = rdpdv_b_q;
+    // a collided registered read holds BRAM-garbage on silicon — present it as
+    // not-predecoded so the spine re-walks instead of issuing a garbage uop.
+    rd_pdvalidA = rdpdv_a_q && !rd_collA_q;
+    rd_pdvalidB = rdpdv_b_q && !rd_collB_q;
   end
 
   // ---- predecode walker (sequential; ~1 instruction/cycle) -------------------

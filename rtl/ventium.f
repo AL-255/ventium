@@ -52,6 +52,7 @@ fpu/ven_bcd_to_fp.sv
 // under +define+VEN_TRANSCENDENTAL; harmless (uninstantiated) in the default build.
 fpu/fpu_f2xm1.sv
 fpu/fpu_fpatan.sv
+fpu/fpu_fprem.sv
 fpu/fpu_fyl2x.sv
 fpu/fpu_fsincos.sv
 
