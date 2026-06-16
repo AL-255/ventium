@@ -888,6 +888,12 @@ module core
   logic [IC_IDXW-1:0]  ic_rd_setA, ic_rd_setB;
   logic [IC_WAYW-1:0] ic_rd_wayA, ic_rd_wayB;
   logic [IC_LINE*8-1:0] ic_rd_lineA, ic_rd_lineB;
+  // KV260 BRAM cross-port read-during-write collide flags (icache module): set when
+  // the registered read of A/B launched in the SAME cycle a fill wrote that {set,way}.
+  // The spine must NOT consume a collided buffer (silicon RAMB36 returns garbage there,
+  // invisible to Verilator) — it gates fetch-ready / the ic_byte select to force a
+  // clean re-read. Tied 0 on the async (distributed) path.
+  logic        ic_rd_collA, ic_rd_collB;
 `ifdef VEN_IC_BRAM
   // +VEN_IC_BRAM: the icache read ports are REGISTERED (BRAM mandates a synchronous
   // read), so ic_rd_lineA/B in cycle T hold the line for the read ADDRESS presented
@@ -3398,8 +3404,11 @@ module core
     logic [IC_WAYW-1:0] icb_w;
     icb_s = addr[5 +: IC_IDXW];
     icb_w = ic_hit_way(addr);
-    ln = (rdA_set_q == icb_s && rdA_way_q == icb_w) ? ic_rd_lineA
-       : (rdB_set_q == icb_s && rdB_way_q == icb_w) ? ic_rd_lineB
+    // A collided buffer (rd_coll*) holds BRAM-garbage on silicon — skip it so the
+    // select matches ic_fetch_ready (which also rejects collided buffers); the spine
+    // stalls one cycle and re-reads cleanly.
+    ln = (rdA_set_q == icb_s && rdA_way_q == icb_w && !ic_rd_collA) ? ic_rd_lineA
+       : (rdB_set_q == icb_s && rdB_way_q == icb_w && !ic_rd_collB) ? ic_rd_lineB
        : ic_rd_lineA;
 `else
     ln = (addr[5 +: IC_IDXW] == ic_rd_setA) ? ic_rd_lineA : ic_rd_lineB;
@@ -3523,10 +3532,12 @@ module core
     logic [IC_IDXW-1:0] fa_set, fb_set; logic [IC_WAYW-1:0] fa_way, fb_way;
     fa_set = flin[5 +: IC_IDXW];        fa_way = ic_hit_way(flin);
     fb_set = flin_nl[5 +: IC_IDXW];     fb_way = ic_hit_way(flin_nl);
-    ic_fa_avail = (rdA_set_q==fa_set && rdA_way_q==fa_way)
-                || (rdB_set_q==fa_set && rdB_way_q==fa_way);
-    ic_fb_avail = (rdA_set_q==fb_set && rdA_way_q==fb_way)
-                || (rdB_set_q==fb_set && rdB_way_q==fb_way);
+    // A buffer whose registered read COLLIDED with a fill (rd_coll*) holds BRAM-garbage
+    // on silicon — exclude it so the fetch stalls and re-reads cleanly next cycle.
+    ic_fa_avail = (rdA_set_q==fa_set && rdA_way_q==fa_way && !ic_rd_collA)
+                || (rdB_set_q==fa_set && rdB_way_q==fa_way && !ic_rd_collB);
+    ic_fb_avail = (rdA_set_q==fb_set && rdA_way_q==fb_way && !ic_rd_collA)
+                || (rdB_set_q==fb_set && rdB_way_q==fb_way && !ic_rd_collB);
     // the fast-path decode window is at most 12 bytes (ub 6 + vb up to len 6 + 6);
     // it straddles into the next line iff flin's byte offset + 12 > 32.
     ic_win_straddle = ({1'b0,flin[4:0]} + 6'd12) > 6'd32;
@@ -5181,6 +5192,8 @@ module core
     .rd_setB   (ic_rd_setB),
     .rd_wayB   (ic_rd_wayB),
     .rd_lineB  (ic_rd_lineB),
+    .rd_collA  (ic_rd_collA),
+    .rd_collB  (ic_rd_collB),
     .ic_tag_o  (ic_tag_o),
     .ic_val_o  (ic_val_o),
     .ic_victim_o (ic_victim_o),
