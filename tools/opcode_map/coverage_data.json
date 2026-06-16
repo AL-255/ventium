@@ -681,9 +681,9 @@
   },
   "62": {
    "mnem": "BOUND r,m16&16/m32&32",
-   "status": "gap",
-   "detail": "No decode arm exists; is_prefix() excludes 0x62 so it is a real opcode byte that falls to the one-byte default -> d_unknown -> S_HALT.",
-   "evidence": "core.sv:2547 (one-byte default d_unknown); pkg is_prefix() ventium_decode_pkg.sv:93-95 excludes 62",
+   "status": "implemented",
+   "detail": "BOUND r16/32, m16&16/m32&32: SIGNED check lower=[mem] <= index(reg) <= upper=[mem+w]; out of range -> #BR (vector 5, delivered via IDT in sys-mode, loud HALT in user like #DE). Memory-only; reg form is #UD. No writeback/flags otherwise.",
+   "evidence": "0x62 -> K_BOUND d_mem_read (core.sv); two-word read S_LOAD([mem]) + S_LOAD2([mem+w]); signed compare + start_fault(5)/retire in S_EXEC. t_bound (in-bounds 32/16-bit + edges + negative range) PASS vs QEMU.",
    "desc": "Check Array Index Against Bounds"
   },
   "63": {
@@ -905,9 +905,9 @@
   },
   "82": {
    "mnem": "group-1 r/m8, imm8 (undocumented alias of 0x80)",
-   "status": "gap",
-   "detail": "No decode arm; the undocumented P54C alias of 0x80 falls through unique-casez to the one-byte default -> d_unknown -> S_HALT. Real silicon executes it like 0x80 but Ventium HALTs loudly on it.",
-   "evidence": "no arm; one-byte default core.sv:2547",
+   "status": "implemented",
+   "detail": "Undocumented one-byte alias of 0x80 (group-1 r/m8, imm8): identical ModRM /digit ALU op, imm8, and flags. Folded into the 0x80 decode arm; QEMU + binutils decode it the same.",
+   "evidence": "core.sv: case label 8'h80, 8'h82 share the group-1 r/m8,imm8 arm. t_grp1alias (.byte 0x82 for ADD/SUB/CMP/AND/XOR /digits) PASS vs QEMU.",
    "desc": "Immediate Group 1 (ADD/OR/ADC/SBB/AND/SUB/XOR/CMP)"
   },
   "83": {
@@ -1395,9 +1395,9 @@
   },
   "C8": {
    "mnem": "ENTER imm16,imm8",
-   "status": "gap",
-   "detail": "isa-coverage.md:53 mislabels 'LEAVE/ENTER' as IMPLEMENTED, but only LEAVE (C9/SM_LEAVE) exists; ENTER (C8) HALTs. Whole-opcode gap.",
-   "evidence": "No 8'hC8 case anywhere in the one-byte casez (grep confirms none); falls to one-byte default core.sv:2547 -> d_unknown=1'b1 -> S_HALT.",
+   "status": "partial",
+   "detail": "ENTER imm16, 0 (the nesting-level-0 form compilers emit): push EBP; EBP=ESP; ESP=ESP-alloc. Implemented for 32-bit operand + level 0; the nested form (level>0) and the 0x66 16-bit form raise the loud HALT.",
+   "evidence": "8'hC8 -> K_STKMISC/SM_ENTER when (!eff_opsize && level==0) else d_unknown (core.sv); store-data mux pushes EBP at [ESP-w]; S_STORE SM_ENTER sets EBP=ESP-w, ESP=ESP-w-alloc (core_store_useq.svh). t_enter PASS vs QEMU.",
    "desc": "Make Stack Frame for Procedure Parameters"
   },
   "C9": {
@@ -1500,9 +1500,9 @@
   },
   "D7": {
    "mnem": "XLATB",
-   "status": "gap",
-   "detail": "Architecturally valid IA-32 instruction with no decode arm -> whole-opcode gap.",
-   "evidence": "No 8'hD7 case (grep confirms); not in the 1101_1??? x87 pattern. Falls to one-byte default core.sv:2547 -> d_unknown -> S_HALT.",
+   "status": "implemented",
+   "detail": "XLATB: AL <- [DS:(E)BX + zero-extend(AL)] byte load. No flags. 32-bit address form (0x67 16-bit form not modelled).",
+   "evidence": "8'hD7 d_xlat=1 d_mem_read=1 d_w=1 (core.sv); load addr dbase+EBX+AL in S_LOAD bus arm; K_ALU q_xlat writes AL (core_exec.svh). Differential gate t_xadd? no -> t_xlat (verif/tests/t_xlat) PASS vs QEMU.",
    "desc": "Table Look-up Translation"
   },
   "D8": {
@@ -2888,9 +2888,9 @@
   },
   "A0": {
    "mnem": "PUSH FS",
-   "status": "gap",
-   "detail": "Push FS segment register; unimplemented, HALTs loudly.",
-   "evidence": "No arm in two-byte casez (core.sv:1406-1668); 8'hA0 falls to two-byte default core.sv:1668 -> d_unknown=1 -> S_HALT. (The 8'hA0 case at core.sv:1983 is in the ONE-byte else-block, MOV AL,moffs8 \u2014 not this 0F path.)",
+   "status": "implemented",
+   "detail": "PUSH FS: push the 16-bit FS selector, zero-extended to the operand size (32 / 16 under 0x66), ESP-=w. No flags.",
+   "evidence": "0F A0 d_is_push d_push_sreg d_sys_sreg=SG_FS (core.sv); st_data uses arch_seg_sel() = the trace-reported selector (live seg_sel[] in sys/proxy, SEG_* consts in flat user). t_pushfsgs PASS vs QEMU.",
    "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "A1": {
@@ -2944,9 +2944,9 @@
   },
   "A8": {
    "mnem": "PUSH GS",
-   "status": "gap",
-   "detail": "Push GS segment register; unimplemented.",
-   "evidence": "No arm; 8'hA8 -> two-byte default core.sv:1668 -> d_unknown -> S_HALT. (8'hA8 at core.sv:2007 is one-byte TEST AL,imm8.)",
+   "status": "implemented",
+   "detail": "PUSH GS: push the 16-bit GS selector, zero-extended to the operand size, ESP-=w. No flags.",
+   "evidence": "0F A8 d_is_push d_push_sreg d_sys_sreg=SG_GS (core.sv); st_data uses arch_seg_sel(). POP FS/GS (0F A1/A9) still HALT (need the PM descriptor reload). t_pushfsgs PASS vs QEMU.",
    "desc": "Push Word, Doubleword or Quadword Onto the Stack"
   },
   "A9": {
@@ -3112,16 +3112,16 @@
   },
   "C0": {
    "mnem": "XADD r/m8, r8",
-   "status": "gap",
-   "detail": "XADD is a real P54C instruction but unimplemented; loud HALT, never misexecuted.",
-   "evidence": "Two-byte casez over op1 (core.sv:1406) has no 0F C0 arm; falls to default d_unknown=1 -> HALT (core.sv:1668). isa-coverage.md:113 lists all other 0F xx as two-byte default gaps.",
+   "status": "implemented",
+   "detail": "XADD r/m8, r8: TEMP=SRC+DEST; SRC=DEST; DEST=TEMP. All six ADD flags defined. Reg + memory-RMW forms, high-8 regs; same-register corner leaves the sum.",
+   "evidence": "0F C0 -> K_XADD d_alu_op=ALU_ADD d_w=1 (core.sv); K_XADD exec writes both operands (mem form defers SRC<-old-mem to S_STORE so the store reads the original src). t_xadd PASS vs QEMU.",
    "desc": "Exchange and Add"
   },
   "C1": {
    "mnem": "XADD r/m16/32, r16/32",
-   "status": "gap",
-   "detail": "Real P54C instruction, unimplemented -> HALT.",
-   "evidence": "No 0F C1 arm in the two-byte casez (core.sv:1406-1669); falls to default d_unknown=1 -> HALT (core.sv:1668).",
+   "status": "implemented",
+   "detail": "XADD r/m16/32, r16/32: 16/32-bit per 0x66. Reg + memory-RMW, ADD flags, same-register corner. LOCK is a functional no-op.",
+   "evidence": "0F C1 -> K_XADD d_alu_op=ALU_ADD d_w=eff_opsize?2:4 (core.sv:8'hC0,8'hC1); K_XADD exec/store arms. t_xadd PASS vs QEMU.",
    "desc": "Exchange and Add"
   },
   "C2": {
@@ -3161,9 +3161,9 @@
   },
   "C7": {
    "mnem": "Group 9: CMPXCHG8B m64 (/1)",
-   "status": "gap",
-   "detail": "Group opcode (only /1 CMPXCHG8B defined in P54C). The single valid form (m64) and the invalid reg form both HALT loudly; reg-dst flagged d_f00f so the FSM can reproduce the F00F hang when errata_en[ERR_F00F].",
-   "evidence": "Explicit arm sets d_unknown=1 for ALL forms (core.sv:1612-1613); /1 reg-dst (mod==11) additionally tagged d_f00f for Erratum 81 (core.sv:1614). isa-coverage.md:110 confirms both reg and mem forms HALT.",
+   "status": "implemented",
+   "detail": "CMPXCHG8B m64 (/1, memory only): if EDX:EAX==[m64] then [m64]<-ECX:EBX, ZF=1; else EDX:EAX<-[m64], ZF=0. ONLY ZF affected. 64-bit RMW (2-word load + compare + conditional 2-word store). Reg form (mod==11) stays #UD and tags d_f00f for Erratum 81.",
+   "evidence": "0F C7 /1 mem -> K_CX8B (core.sv); S_LOAD/S_LOAD2 read low/high, S_EXEC compares + commits ZF, equal-case stores EBX:ECX via the S_USEQ 2-beat path. LOCK is a no-op. t_cmpxchg8b (equal/not-equal/lock) PASS vs QEMU.",
    "desc": "Group 9 (CMPXCHG8B)"
   },
   "C8": {
@@ -3559,5 +3559,5 @@
    "desc": "Undefined Instruction (#UD)"
   }
  },
- "_decode_fingerprint": "d1d3fd5957942067acfc7489d6581e15136b1770019029633179eb43e18abfca"
+ "_decode_fingerprint": "ab08bbb22da93131c8ad8c5477e2c54f8a6660082452d58b6073f463e11d82a9"
 }

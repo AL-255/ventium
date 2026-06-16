@@ -1,0 +1,9 @@
+{
+  "name": "t_pushfsgs",
+  "src": "t_pushfsgs/t_pushfsgs.s",
+  "elf": "t_pushfsgs/t_pushfsgs.elf",
+  "image": "t_pushfsgs/t_pushfsgs.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60
+}

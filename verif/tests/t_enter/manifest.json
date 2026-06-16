@@ -1,0 +1,9 @@
+{
+  "name": "t_enter",
+  "src": "t_enter/t_enter.s",
+  "elf": "t_enter/t_enter.elf",
+  "image": "t_enter/t_enter.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60
+}

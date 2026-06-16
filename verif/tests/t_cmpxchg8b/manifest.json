@@ -1,0 +1,9 @@
+{
+  "name": "t_cmpxchg8b",
+  "src": "t_cmpxchg8b/t_cmpxchg8b.s",
+  "elf": "t_cmpxchg8b/t_cmpxchg8b.elf",
+  "image": "t_cmpxchg8b/t_cmpxchg8b.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 100
+}

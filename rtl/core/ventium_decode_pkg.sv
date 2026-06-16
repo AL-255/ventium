@@ -19,10 +19,18 @@ package ventium_decode_pkg;
     K_BITTEST, K_BITSCAN, K_XCHG, K_BSWAP, K_CONV, K_STKMISC, K_STR, K_CTRL,
     K_CMPXCHG,
     K_CPUID,  // M7.3c: CPUID (0F A2) — writes eax/ebx/ecx/edx from a fixed leaf table
-    K_RDTSC   // F3: RDTSC (0F 31) — writes edx:eax from the 64-bit time-stamp counter
+    K_RDTSC,  // F3: RDTSC (0F 31) — writes edx:eax from the 64-bit time-stamp counter
+    K_XADD,   // XADD r/m,r (0F C0/C1): temp=dst; dst=dst+src (ADD flags); src=temp.
+    K_BOUND,  // BOUND r,m (0x62): #BR if index < [mem] (lower) or > [mem+w] (upper)
+    K_CX8B    // CMPXCHG8B m64 (0F C7 /1): EDX:EAX vs [m64]; eq -> [m64]=ECX:EBX, ZF=1
+              // Appended at the END so every existing kind_e encoding is unchanged.
   } kind_e;
 
-  typedef enum logic [2:0] { SM_PUSHA, SM_POPA, SM_PUSHF, SM_POPF, SM_LAHF, SM_SAHF, SM_LEAVE } smk_e;
+  // SM_ENTER appended at the END (encoding 7, still fits [2:0]) so SM_PUSHA..
+  // SM_LEAVE keep their values. ENTER imm16,0 (level-0) pushes EBP then sets the
+  // new frame — a single store + register update, modelled like SM_PUSHF.
+  typedef enum logic [2:0] { SM_PUSHA, SM_POPA, SM_PUSHF, SM_POPF, SM_LAHF, SM_SAHF,
+                             SM_LEAVE, SM_ENTER } smk_e;
   typedef enum logic [2:0] { ST_MOVS, ST_STOS, ST_LODS, ST_SCAS, ST_CMPS,
                              ST_INS  // M7.3c: INS (6C/6D) — IN per element -> [EDI]
                            } st_e;  // 6 values -> still fits [2:0]

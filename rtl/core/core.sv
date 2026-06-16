@@ -284,6 +284,8 @@ module core
     output logic [7:0]  dbg_int_vec,
     output logic [31:0] dbg_fault_pc,
     output logic [31:0] dbg_cr0,
+    output logic [15:0] dbg_fctrl,      // live x87 control word (PC=[9:8],RC=[11:10])
+    output logic [5:0]  dbg_fxop,       // q_fxop currently in flight (halt-cause probe)
     // Single-step / instruction-breakpoint control (the ONLY debug signals that
     // affect execution, and ONLY when the PS arms them — see the dbg_hold block).
     // Park is at the S_DECODE instruction boundary, LOWER priority than SMI/NMI/
@@ -739,6 +741,8 @@ module core
   assign dbg_int_vec  = int_vec;
   assign dbg_fault_pc = int_src_pc;
   assign dbg_cr0      = creg0;
+  assign dbg_fctrl    = fctrl;             // live x87 control word (PC = [9:8])
+  assign dbg_fxop     = 6'(q_fxop);        // x87 sub-op currently in flight
 
   // ---- single-step / instruction-breakpoint hold ---------------------------
   // dbg_block_issue, when 1, makes the S_DECODE boundary PARK (stay in S_DECODE,
@@ -1172,6 +1176,7 @@ module core
   logic        d_pop_sreg;     // F3 POP sreg (07/17/1F): pop writes seg_sel/base[d_sys_sreg]
   logic        d_seg_load_lo;  // F3 MOV Sreg,[mem]: selector = LOW 16b of the 2-byte read
   logic        d_store_sreg;   // F3 MOV [mem],Sreg: store data = seg_sel[d_sys_sreg]
+  logic        d_xlat;         // XLATB (D7): AL <- [DS:(E)BX + zero-extend(AL)] (byte load)
   logic        d_callf_mem;    // F3 FF /3 CALLF m16:16 (far indirect call through memory)
   logic        d_jmpf_mem;     // F3 FF /5 JMPF  m16:16 (far indirect jump through memory)
   logic        d_pfx_seg_en;   // a segment-override prefix is present
@@ -1305,6 +1310,7 @@ module core
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
     d_seg_load=1'b0; d_lseg=3'd0;
     d_push_sreg=1'b0; d_pop_sreg=1'b0; d_seg_load_lo=1'b0; d_store_sreg=1'b0;
+    d_xlat=1'b0;
     d_callf_mem=1'b0; d_jmpf_mem=1'b0;
     d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
     // M2S.3 interrupt/return decode defaults.
@@ -1602,6 +1608,39 @@ module core
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end
         end
+        // ---- 0F C0/C1: XADD r/m, r (exchange-and-add) ------------------------
+        // XADD has the SAME operand shape as ADD r/m,r / CMPXCHG (r/m = dst, reg =
+        // src). Semantics (Intel): TEMP = SRC + DEST; SRC = DEST; DEST = TEMP — i.e.
+        // the destination gets the SUM, the source register gets the OLD destination,
+        // and all six ADD flags (CF/PF/AF/ZF/SF/OF) are defined. q_alu_op=ALU_ADD
+        // reuses the ALU add (alu_out = dst+src, flags_out = ADD flags); the K_XADD
+        // exec arm performs both writebacks. 0F C0 is byte (high-8 regs honoured);
+        // 0F C1 is 16/32 per 0x66. Reg-form (mod==11) and memory-RMW both handled.
+        // LOCK (F0) is a functional no-op (the in-order single core RMW is atomic).
+        // Was d_unknown->HALT before; the user corpus never executes it -> byte-id.
+        8'hC0,8'hC1: begin
+          d_kind=K_XADD; d_alu_op=ALU_ADD; d_writes_flags=1'b1;
+          d_w=(op1==8'hC0)?3'd1:(eff_opsize?3'd2:3'd4);
+          d_src_reg=modrm_reg; d_src_high8=(op1==8'hC0)&&modrm_reg[2];
+          if (modrm_mod==2'b11) begin
+            d_dst_reg=modrm_rm; d_dst_high8=(op1==8'hC0)&&modrm_rm[2];
+            d_len=pfx_len+4'd3;
+          end else begin
+            d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1;
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end
+        end
+        // ---- 0F A0/A8 PUSH FS / PUSH GS --------------------------------------
+        // Two-byte one-operand PUSH of the 16-bit segment selector (zero-extended to
+        // 32 unless a 0x66 operand-size prefix keeps it 16). Reuses the one-byte
+        // PUSH-sreg datapath (d_push_sreg: store data = seg_sel[d_sys_sreg]; K_ALU
+        // default kind drives the push). The POP counterparts (0F A1/A9) reload the
+        // selector and a hidden base, which needs the protected-mode descriptor path
+        // — deferred to the segment batch, so they stay the loud HALT for now.
+        8'hA0: begin d_len=pfx_len+4'd2; d_is_push=1'b1; d_mem_write=1'b1;
+                     d_push_sreg=1'b1; d_sys_sreg=3'(SG_FS); d_w=eff_opsize?3'd2:3'd4; end
+        8'hA8: begin d_len=pfx_len+4'd2; d_is_push=1'b1; d_mem_write=1'b1;
+                     d_push_sreg=1'b1; d_sys_sreg=3'(SG_GS); d_w=eff_opsize?3'd2:3'd4; end
         // ---- 0F C7: CMPXCHG8B (/1, memory only) ------------------------------
         // The ONLY valid form is a MEMORY destination (mod != 11). A REGISTER
         // destination (mod == 11) is an invalid opcode (#UD). The clean core does
@@ -1610,8 +1649,19 @@ module core
         // register-destination form (mod==11) as d_f00f so the FSM can reproduce
         // Erratum 81 (the LOCK + reg-dst HANG) when errata_en[ERR_F00F] is set.
         8'hC7: begin
-          d_unknown=1'b1; d_len=pfx_len+4'd3;
-          if (modrm_mod==2'b11 && modrm_reg==3'd1) d_f00f=1'b1;  // /1 reg-dst
+          d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          if (modrm_mod!=2'b11 && modrm_reg==3'd1) begin
+            // CMPXCHG8B m64 (the ONLY valid form). EDX:EAX vs [m64]; if equal then
+            // [m64] <- ECX:EBX and ZF=1, else EDX:EAX <- [m64] and ZF=0. ONLY ZF is
+            // affected (CF/PF/AF/SF/OF unchanged). 64-bit RMW: two word loads
+            // (S_LOAD [m]=low vs EAX, S_LOAD2 [m+4]=high vs EDX), then a conditional
+            // two-word store (EBX->[m], ECX->[m+4]) in S_STORE. LOCK (F0) is a
+            // functional no-op on this in-order single core.
+            d_kind=K_CX8B; d_mem_read=1'b1; d_w=3'd4;
+          end else begin
+            d_unknown=1'b1; d_len=pfx_len+4'd3;
+            if (modrm_mod==2'b11 && modrm_reg==3'd1) d_f00f=1'b1;  // /1 reg-dst (Erratum 81)
+          end
         end
         // ---- 0F A2: CPUID -----------------------------------------------------
         // CPUID is a no-operand instruction (no ModRM): leaf = eAX (subleaf = eCX,
@@ -1720,6 +1770,19 @@ module core
                      d_pop_sreg=1'b1; d_sys_sreg=3'(SG_DS); d_w=eff_opsize?3'd2:3'd4; end
         8'h60: begin d_kind=K_STKMISC; d_sm=SM_PUSHA; d_len=pfx_len+4'd1; d_w=eff_opsize?3'd2:3'd4; end
         8'h61: begin d_kind=K_STKMISC; d_sm=SM_POPA;  d_len=pfx_len+4'd1; d_w=eff_opsize?3'd2:3'd4; end
+        // ---- 0x62: BOUND r16/32, m16&16/m32&32 (array index bounds check) -----
+        // index = modrm_reg; [mem] = lower bound, [mem+w] = upper bound (SIGNED).
+        // If index < lower OR index > upper -> #BR (vector 5). No writeback, no
+        // flags otherwise. MEMORY operand only — the register form (mod==11) is an
+        // invalid opcode (#UD) -> loud HALT. The two bounds are read via S_LOAD
+        // ([mem]) then S_LOAD2 ([mem+w]); the compare + #BR/retire is in S_EXEC.
+        8'h62: begin
+          if (modrm_mod!=2'b11) begin
+            d_kind=K_BOUND; d_mem_read=1'b1; d_src_reg=modrm_reg;
+            d_w=eff_opsize?3'd2:3'd4;
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end   // reg form -> #UD
+        end
         8'h68: begin // PUSH imm
           d_is_push=1'b1; d_mem_write=1'b1; d_use_imm=1'b1;
           if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
@@ -1792,7 +1855,11 @@ module core
           if (eff_opsize) begin d_w=3'd2; d_imm={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_w=3'd4; d_imm={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
-        8'h80: begin // group1 r/m8, imm8
+        // 0x82 is an undocumented alias of 0x80 (group-1 r/m8, imm8) — same ModRM,
+        // same imm8, same /digit ALU op. Real P5 silicon (and QEMU) decode it
+        // identically; folding it here closes the alias gap. (Compilers never emit
+        // it, so the corpus is byte-identical; t_grp1alias uses a .byte 0x82.)
+        8'h80, 8'h82: begin // group1 r/m8, imm8
           d_w=3'd1; d_alu_op={2'b00,modrm_reg}; d_writes_flags=1'b1; d_use_imm=1'b1;
           if (modrm_mod==2'b11) begin
             d_writes_reg=(modrm_reg!=3'b111); d_dst_reg=modrm_rm; d_dst_high8=modrm_rm[2];
@@ -2232,6 +2299,30 @@ module core
         8'hCA: begin d_sysop=SYS_RETF; d_ret_imm={ibuf[pfx_len+2],ibuf[pfx_len+1]};
           d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd3; end
         8'hC9: begin d_kind=K_STKMISC; d_sm=SM_LEAVE; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
+        // ---- C8: ENTER imm16, imm8 (make a stack frame) ----------------------
+        // ENTER alloc,level:  push EBP; FrameTemp=ESP; (level-1 nested-display
+        // copies + push FrameTemp); EBP=FrameTemp; ESP=ESP-alloc. We implement the
+        // form compilers actually emit: 32-bit operand size, nesting LEVEL 0, which
+        // reduces to  push EBP; EBP=ESP; ESP=ESP-alloc  — a single push + register
+        // update (modelled as SM_ENTER, finalized in S_STORE). The nested form
+        // (level>0, a read+push micro-loop) and the 0x66 16-bit form stay the loud
+        // HALT (d_unknown) — they never appear in the user corpus. encoding: C8 iw ib
+        // (alloc16 = ib1:ib0, level = ib2). Was d_unknown->HALT before.
+        8'hC8: begin
+          d_len=pfx_len+4'd4;
+          if (!eff_opsize && ibuf[pfx_len+3]==8'd0) begin
+            d_kind=K_STKMISC; d_sm=SM_ENTER; d_mem_write=1'b1; d_w=3'd4;
+            d_imm={16'd0, ibuf[pfx_len+2], ibuf[pfx_len+1]};   // alloc (bytes to subtract)
+          end else d_unknown=1'b1;                              // nested / 16-bit -> HALT
+        end
+        // ---- D7: XLATB — AL <- [DS:(E)BX + zero-extend(AL)] (table lookup) ----
+        // One-byte, no ModR/M. The default (no 0x67) 32-bit address form: linear
+        // EA = DS.base + EBX + AL; a segment-override prefix redirects DS (handled
+        // by dbase/q_seg). Touches no flags. The byte-load address is driven in the
+        // S_LOAD bus arm (q_xlat); S_EXEC writes AL from the loaded byte. The 0x67
+        // 16-bit-address form (BX, not EBX) is rare and not modelled here — it is
+        // only reachable under an address-size prefix the user corpus never uses.
+        8'hD7: begin d_xlat=1'b1; d_mem_read=1'b1; d_w=3'd1; d_len=pfx_len+4'd1; end
         8'hE2: begin d_kind=K_CTRL; d_ct=CT_LOOP;   d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
         8'hE1: begin d_kind=K_CTRL; d_ct=CT_LOOPE;  d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
         8'hE0: begin d_kind=K_CTRL; d_ct=CT_LOOPNE; d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
@@ -2677,6 +2768,7 @@ module core
   logic        q_pop_sreg;        // F3 POP sreg latch
   logic        q_seg_load_lo;     // F3 MOV Sreg,[mem] low-half seg-load latch
   logic        q_store_sreg;      // F3 MOV [mem],Sreg store-selector latch
+  logic        q_xlat;            // XLATB latch (AL <- [DS:(E)BX + AL])
   logic        q_callf_mem;       // F3 FF /3 CALLF m16:16 latch
   logic        q_jmpf_mem;        // F3 FF /5 JMPF  m16:16 latch
   logic        seg_step;          // SEGLD descriptor-fetch beat counter (0/1)
@@ -2878,6 +2970,20 @@ module core
       end else if (w==3'd2) reg_merge = {cur[31:16], res[15:0]};
       else reg_merge = res;
     end
+  endfunction
+
+  // ARCHITECTURAL segment selector for a seg index — the value the RETIRE trace
+  // reports (see the `snap` mux): the LIVE seg_sel[] in system/proxy mode, else
+  // the flat-user SEG_* reset constants (plain user mode does not maintain the
+  // live seg_sel[] array). PUSH FS/PUSH GS / PUSH sreg must push THIS so the
+  // pushed selector equals the traced one in every mode.
+  function automatic logic [15:0] arch_seg_sel(input logic [2:0] idx);
+    if (sys_mode || proxy_en) arch_seg_sel = seg_sel[idx];
+    else unique case (idx)
+      3'(SG_CS): arch_seg_sel = SEG_CS;  3'(SG_SS): arch_seg_sel = SEG_SS;
+      3'(SG_DS): arch_seg_sel = SEG_DS;  3'(SG_ES): arch_seg_sel = SEG_ES;
+      3'(SG_FS): arch_seg_sel = SEG_FS;  default:   arch_seg_sel = SEG_GS;
+    endcase
   endfunction
 
   // ALU result + EFLAGS (alu_result/flags_next) and the shift/rotate datapath
@@ -3090,6 +3196,7 @@ module core
     if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
         (q_kind==K_STKMISC && q_sm==SM_POPF))      slow_dmem_addr = gpr[R_ESP];
     else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  slow_dmem_addr = gpr[R_EBP];
+    else if (q_xlat)                               slow_dmem_addr = gpr[R_EBX]+{24'd0,gpr[R_EAX][7:0]};
     else if (q_kind==K_STR) begin
       if (q_st==ST_SCAS)                           slow_dmem_addr = str_edi;
       else                                         slow_dmem_addr = str_esi;
@@ -3110,7 +3217,7 @@ module core
       st_addr = gpr[R_ESP] - {28'd0,q_w};
       // F3 PUSH sreg: data = the 16-bit selector (zero-extended; strb_of(q_w) keeps
       // 2 bytes for a 16-bit push, 4 for a 0x66-prefixed 32-bit push).
-      st_data = q_push_sreg ? {16'd0, seg_sel[q_sys_sreg]}
+      st_data = q_push_sreg ? {16'd0, arch_seg_sel(q_sys_sreg)}
               : q_use_imm   ? q_imm
               : (q_mem_read ? mem_load_data : reg_read(q_src_reg,q_w,1'b0));
     end else if (q_kind==K_CTRL && (q_ct==CT_CALLREL || q_ct==CT_CALLIND)) begin
@@ -3122,6 +3229,10 @@ module core
     end else if (q_kind==K_STKMISC && q_sm==SM_PUSHF) begin
       st_addr = gpr[R_ESP] - {28'd0,q_w};
       st_data = eflags;
+    end else if (q_kind==K_STKMISC && q_sm==SM_ENTER) begin
+      // ENTER level 0: the single push writes EBP at [ESP-w].
+      st_addr = gpr[R_ESP] - {28'd0,q_w};
+      st_data = gpr[R_EBP];
     end else if (q_kind==K_SETCC) begin
       st_data = {31'd0, cond_true(q_cc, eflags)};
       st_strb = 4'b0001;
@@ -5439,7 +5550,13 @@ module core
                     (q_fxop==FX_AR_M32)     || (q_fxop==FX_AR_M64)     ||
                     (q_fxop==FX_AR_I16)     || (q_fxop==FX_AR_I32)     ||
                     (q_fxop==FX_FSQRT);
+`ifdef VEN_FP_PC_RELAX
+    // Must track the core_fp_exec.svh gate exactly so the fp_we_* commit driver
+    // and the FSM spine re-derive the SAME (state==S_FEXEC && !pc_bad) predicate.
+    slow_pc_bad = 1'b0;
+`else
     slow_pc_bad = slow_is_arith && (fctrl[9:8] != 2'b11);
+`endif
     slow_arm    = (state==S_FEXEC) && !slow_pc_bad;
 
     // ===== M11 env-pointer latch (func path = the slow arm; one S_FEXEC commit

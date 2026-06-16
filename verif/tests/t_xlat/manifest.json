@@ -1,0 +1,9 @@
+{
+  "name": "t_xlat",
+  "src": "t_xlat/t_xlat.s",
+  "elf": "t_xlat/t_xlat.elf",
+  "image": "t_xlat/t_xlat.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 60
+}

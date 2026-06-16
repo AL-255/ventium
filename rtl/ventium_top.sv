@@ -133,6 +133,7 @@ module ventium_top
     ,
     input  logic        l1axi_en,           // 1 = mode 2 (L1+AXI); 0 = modes 0/1
     input  logic        flush_all,           // #35 pulse to invalidate the L1 (cosim coherency)
+    input  logic        golden_l1,           // golden/L1-useless diagnostic mode (flush after each access)
     output logic [3:0]  m_axi_awid,
     output logic [39:0] m_axi_awaddr,
     output logic [7:0]  m_axi_awlen,
@@ -205,6 +206,13 @@ module ventium_top
     output logic [7:0]  dbg_int_vec,       // last delivered exception/IRQ vector
     output logic [31:0] dbg_fault_pc,      // source EIP of that exception/IRQ
     output logic [31:0] dbg_cr0,           // live CR0 (PE/PG = mode)
+    output logic [15:0] dbg_fctrl,         // live x87 control word (PC=[9:8])
+    output logic [5:0]  dbg_fxop,          // x87 sub-op currently in flight
+    // F4 read-beat trace: each accepted AXI read beat {DDR addr, data} from the
+    // L1/AXI master (l1axi_en builds) -> ven_soc_dbg ring (corrupted-fill forensics).
+    output logic        dbg_rd_valid,
+    output logic [31:0] dbg_rd_addr,
+    output logic [31:0] dbg_rd_data,
     // single-step / breakpoint control (pass-through to the core)
     input  logic        dbg_halt_req,
     input  logic        dbg_step,
@@ -359,6 +367,8 @@ module ventium_top
       .dbg_int_vec  (dbg_int_vec),
       .dbg_fault_pc (dbg_fault_pc),
       .dbg_cr0      (dbg_cr0),
+      .dbg_fctrl    (dbg_fctrl),
+      .dbg_fxop     (dbg_fxop),
       .dbg_halt_req (dbg_halt_req),
       .dbg_step     (dbg_step),
       .dbg_bp_en    (dbg_bp_en),
@@ -576,7 +586,11 @@ module ventium_top
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all),
+      .golden_l1 (golden_l1),
       .shutdown  (shutdown), .m_idle (m_idle),
+`ifdef VEN_DBG_CORE
+      .dbg_rd_valid (dbg_rd_valid), .dbg_rd_addr (dbg_rd_addr), .dbg_rd_data (dbg_rd_data),
+`endif
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
       .core_we   (core_mem_we),
       .core_addr (core_mem_addr),

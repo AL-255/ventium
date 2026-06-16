@@ -180,6 +180,53 @@ extern "C" void vtm_retire(
     g_last_arch.seg[0]=cs; g_last_arch.seg[1]=ss; g_last_arch.seg[2]=ds;
     g_last_arch.seg[3]=es; g_last_arch.seg[4]=fs; g_last_arch.seg[5]=gs;
 
+    // --- F4 DERAIL TRIPWIRE -------------------------------------------------
+    // A committed EIP in [0x1000_0000, 0x4000_0000) is NEVER legitimate for the
+    // Quake user image (code = 0x0804_xxxx..0x080B_xxxx, brk-heap = 0x0a00_0000+,
+    // stack/Hunk >= 0x4000_0000). On the board the userspace Quake derails into
+    // the 0x1804_xxxx alias of the ELF header (a code pointer / branch target that
+    // acquired bit 28). Capture the instruction trail INTO the bad branch + the
+    // committed register state at the transition, so the BRANCH SOURCE (the last
+    // 0x08xx_xxxx EIP) and the kind of branch are unambiguous in ONE free-run.
+    // Enabled by VEN_DERAIL_TRIP in the environment (off => zero overhead path).
+    {
+        static const bool en = (std::getenv("VEN_DERAIL_TRIP") != nullptr);
+        // VEN_TRIP_N: dump a window of committed {n,eip,esp,regs} bracketing this
+        // retire count — the board's EXACT derail count (default 43,695,985). The
+        // sim runs CLEAN through here, so its committed insns ARE the correct stream
+        // the board mis-executed: the branch source + the CORRECT target it should
+        // have taken (vs the board's corrupt 0x1804_xxxx). Pins read-vs-fetch.
+        static const char* tn = std::getenv("VEN_TRIP_N");
+        static const unsigned long long N0 = tn ? std::strtoull(tn, 0, 0) : 43695985ull;
+        if (en && n + 700 >= N0 && n <= N0 + 50) {
+            std::fprintf(stderr,
+                "WIN n=%-10llu eip=%08x esp=%08x  eax=%08x ecx=%08x edx=%08x ebx=%08x ebp=%08x esi=%08x edi=%08x\n",
+                (unsigned long long)n, pc, esp, eax, ecx, edx, ebx, ebp, esi, edi);
+        }
+        if (en) {
+            static uint32_t r_pc[64]; static uint32_t r_n[64]; static uint32_t r_sp[64];
+            static int      r_h = 0;  static bool tripped = false;
+            r_pc[r_h & 63] = pc; r_n[r_h & 63] = (uint32_t)n; r_sp[r_h & 63] = esp; r_h++;
+            if (!tripped && ((pc >= 0x10000000u && pc < 0x40000000u) || pc < 0x08047000u)) {
+                tripped = true;
+                std::fprintf(stderr,
+                    "\n==== F4 DERAIL TRIP: EIP entered alias 0x%08x at retire n=%llu ====\n"
+                    "  regs(post): eax=%08x ecx=%08x edx=%08x ebx=%08x\n"
+                    "              esp=%08x ebp=%08x esi=%08x edi=%08x eflags=%08x\n"
+                    "  segs: cs=%04x ss=%04x ds=%04x es=%04x fs=%04x gs=%04x\n"
+                    "  --- last 48 committed {retire, eip, esp} (oldest first) ---\n",
+                    pc, (unsigned long long)n, eax, ecx, edx, ebx,
+                    esp, ebp, esi, edi, eflags, cs, ss, ds, es, fs, gs);
+                for (int i = 0; i < 48; i++) {
+                    int idx = (r_h - 48 + i) & 63;
+                    std::fprintf(stderr, "    n=%-10u eip=%08x esp=%08x\n",
+                                 r_n[idx], r_pc[idx], r_sp[idx]);
+                }
+                std::fflush(stderr);
+            }
+        }
+    }
+
     // --exec-written-check: the first retire whose fetch lin addr was written as
     // DATA (>= floor) is where the core began executing recently-written data as
     // code — the F3 control-flow divergence. Report the onset (first ~20 hits).

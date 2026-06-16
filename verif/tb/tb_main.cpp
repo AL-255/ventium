@@ -91,6 +91,7 @@ struct Args {
     // this TB's behavioral DDR slave services off the SAME MemModel. Only meaningful
     // in the +VEN_L1_AXI build; FUNCTIONAL equivalence vs mode 0 (timing emergent).
     bool     l1_axi     = false;
+    bool     golden     = false;  // --golden: ven_l1d flush-after-each-access (L1-useless diagnostic)
     uint32_t errata     = 0;      // M6 errata-enable bus (default 0 = clean core)
     // M2S.1: --system selects boot_mode=system (cold reset at F000:FFF0, real
     // mode) and emits the sys fields + header sys:true. A -bios image is loaded
@@ -162,6 +163,7 @@ struct Args {
     // --video-out for offline PNG conversion.
     std::string video_path;            // --video-path <guest $P5Q_VIDEO value>
     std::string video_out;             // --video-out <file> (raw P5Q1 stream)
+    std::string dump_fb;               // --dump-fb <file> (vid.buffer @0x087a29e0 at exit)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -187,6 +189,10 @@ Args parse_args(int argc, char** argv) {
     Args a;
     for (int i = 1; i < argc; ++i) {
         const std::string k = argv[i];
+        // Verilator plusargs (+verilator+rand+reset+N, +verilator+seed+N, ...) are
+        // consumed by Verilated::commandArgs() in main(); skip them here so the
+        // x-init fetch sweep can pass them through without tripping "unknown argument".
+        if (!k.empty() && k[0] == '+') continue;
         auto need = [&](const char* opt) -> const char* {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "%s: %s requires an argument\n", argv[0], opt);
@@ -207,6 +213,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--cycle")      a.cycle      = true;
         else if (k == "--bus-mode")   a.bus_mode   = true;   // M5B-int
         else if (k == "--l1-axi")     a.l1_axi     = true;   // P1-1 bus_mode=2
+        else if (k == "--golden")     a.golden     = true;   // ven_l1d flush-after-each-access
         else if (k == "--system")     a.system     = true;
         else if (k == "--cosim")    { a.cosim = true; a.system = true; }   // P2 repro
         else if (k == "--dos")      { a.dos = true; a.cosim = true; a.system = true; }
@@ -227,6 +234,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--checkpoint-dir")   a.checkpoint_dir   = need("--checkpoint-dir");
         else if (k == "--video-path") a.video_path = need("--video-path");
         else if (k == "--video-out")  a.video_out  = need("--video-out");
+        else if (k == "--dump-fb")    a.dump_fb    = need("--dump-fb");
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -498,6 +506,28 @@ int main(int argc, char** argv) {
     const uint32_t AXI_RLAT = std::getenv("AXI_RLAT") ? (uint32_t)atoi(std::getenv("AXI_RLAT")) : 0;
     const uint32_t AXI_WLAT = std::getenv("AXI_WLAT") ? (uint32_t)atoi(std::getenv("AXI_WLAT")) : 0;
     uint32_t axr_lat = 0, axw_lat = 0;   // remaining wait cycles before R / B
+    // F4 INVESTIGATOR-A: FAITHFUL R-channel timing. The idealized slave above returns
+    // every line-fill R beat zero-gap, in-order, no backpressure — a real PS DDR +
+    // SmartConnect returns R beats with variable first-beat latency, mid-burst RVALID
+    // deassertions (gaps), and respects RREADY backpressure. AXI_RGAP=1 turns on a
+    // deterministic-PRNG faithful model so the L1/AXI fill FSM is exercised against the
+    // exact beat patterns silicon produces. Default off => the 77-corpus stays clean.
+    //   AXI_RGAP=1            : enable faithful R timing (PRNG seed = AXI_RSEED or 1)
+    //   AXI_RSEED=<n>         : PRNG seed (sweep many beat patterns)
+    //   AXI_RFIRST=<n>        : max extra first-beat (AR->first R) latency, 0..n random
+    //   AXI_RGAPMAX=<n>       : max inter-beat gap (RVALID deasserts), 0..n random (def 3)
+    //   AXI_RGAPPROB=<0..100> : % chance of a gap before each non-first beat (def 60)
+    // The model still honors RREADY (only counts a beat on rvalid&&rready) and presents
+    // a STABLE rdata/rlast while rvalid is held but unaccepted (AXI VALID-stability).
+    const bool     AXI_RGAP    = (std::getenv("AXI_RGAP") != nullptr);
+    const uint32_t AXI_RSEED   = std::getenv("AXI_RSEED")   ? (uint32_t)strtoul(std::getenv("AXI_RSEED"),0,0) : 1u;
+    const uint32_t AXI_RFIRST  = std::getenv("AXI_RFIRST")  ? (uint32_t)atoi(std::getenv("AXI_RFIRST"))  : 4u;
+    const uint32_t AXI_RGAPMAX = std::getenv("AXI_RGAPMAX") ? (uint32_t)atoi(std::getenv("AXI_RGAPMAX")) : 3u;
+    const uint32_t AXI_RGAPPRB = std::getenv("AXI_RGAPPROB")? (uint32_t)atoi(std::getenv("AXI_RGAPPROB")): 60u;
+    uint32_t rgap_state = AXI_RSEED ? AXI_RSEED : 1u;       // xorshift32 PRNG state
+    auto rgap_rng = [&]() -> uint32_t {                     // deterministic per-seed
+        uint32_t x = rgap_state; x ^= x<<13; x ^= x>>17; x ^= x<<5; rgap_state = x; return x;
+    };
     // AXI_WPOST: model a POSTED write — BVALID returns (write "accepted") but the
     // datum becomes globally visible only AXI_WPOST clocks later. A read-miss fill
     // that races into that window reads STALE backing (pre-write) data, exactly like
@@ -557,9 +587,27 @@ int main(int argc, char** argv) {
             }
             wpost_q.resize(k);
         }
-        if (axr==0) { if (axhs.ar) { axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr=1; axr_lat=AXI_RLAT; } }
-        else        { if (axr_lat>0) axr_lat--;
-                      else if (axhs.r)  { if (axr_cnt==0) axr=0; else { axr_cnt--; axr_addr+=4; axr_lat=AXI_RLAT; } } }
+        if (axr==0) { if (axhs.ar) {
+                          axr_addr=axhs.araddr; axr_cnt=axhs.arlen; axr=1;
+                          // first-beat (AR->first R) latency: fixed AXI_RLAT, plus a
+                          // random 0..AXI_RFIRST under the faithful model (real DDR
+                          // open-row vs precharge variance).
+                          axr_lat = AXI_RLAT + (AXI_RGAP ? (rgap_rng() % (AXI_RFIRST+1)) : 0);
+                      } }
+        else        { if (axr_lat>0) axr_lat--;                  // gap cycle: rvalid==0
+                      else if (axhs.r)  {                        // beat accepted (rvalid&&rready)
+                          if (axr_cnt==0) axr=0;
+                          else {
+                              axr_cnt--; axr_addr+=4;
+                              // inter-beat latency: fixed AXI_RLAT, plus under the
+                              // faithful model a random gap (RVALID deasserts mid-burst)
+                              // with probability AXI_RGAPPROB, size 1..AXI_RGAPMAX.
+                              uint32_t g = 0;
+                              if (AXI_RGAP && AXI_RGAPMAX>0 && (rgap_rng()%100) < AXI_RGAPPRB)
+                                  g = 1 + (rgap_rng() % AXI_RGAPMAX);
+                              axr_lat = AXI_RLAT + g;
+                          }
+                      } }
         if (axw==0) { if (axhs.aw) { axw_addr=axhs.awaddr; axw=1; } }
         else if (axw==1) { if (axhs.w) {
             // FAITHFUL DDR/AXI write: a 32-bit-bus write places byte lane b at the
@@ -838,6 +886,14 @@ int main(int argc, char** argv) {
     top->l1axi_en   = args.l1_axi ? 1 : 0;   // P1-1: route mem via ventium_l1_axi (mode 2)
     if (args.l1_axi) top->bus_mode = 0;      // mode 2 supersedes the biu (kept inert)
     top->flush_all  = 0;                     // #35: external L1 invalidation (idle until armed)
+    top->golden_l1  = args.golden ? 1 : 0;   // golden/L1-useless: flush ven_l1d after each access
+    // clean-shutdown quiesce must be driven INERT. On the board this comes from the
+    // ven_soc_axil R_CTRL.SHUTDOWN bit, which resets to 0; the TB never instantiates
+    // that block, so an undriven port is X under --x-assign unique. A stray 1 puts
+    // ven_axi_master into local-shutdown-ack (m_ack with rdata=0, NO AXI read) so a
+    // line fill silently returns all-zeros -> opcode misdecode. Pin it to the board
+    // reset value so the x-init fetch sweep matches silicon.
+    top->shutdown   = 0;
 #endif
     top->errata_en  = args.errata & 0x1F;    // M6/M6B: errata-enable bus (default 0)
     top->proxy_en   = proxy_mode ? 1 : 0;    // M7.1: int-0x80 proxy + %gs base
@@ -891,6 +947,13 @@ int main(int argc, char** argv) {
 
     uint64_t syscalls_replayed = 0;   // M7.1 diagnostics
 #ifdef VEN_DBG_CORE
+    // read-beat trace selftest: count dbg_rd_valid pulses + remember the first/last
+    // few {addr,data} beats. This is the SAME signal ven_soc_dbg's ring captures, so
+    // if it fires here (tb compiles ventium_top) the upstream master->top plumbing is
+    // sound and a board count=0 means the bug is downstream (ring / wrapper / readback).
+    uint64_t g_rd_beats = 0;
+    uint32_t g_rd_first_addr = 0, g_rd_first_data = 0;
+    uint32_t g_rd_last_addr  = 0, g_rd_last_data  = 0;
     // VEN_DBG_CORE single-step / breakpoint selftest: --dbg-step N parks from reset
     // and grants one instruction per re-park (logging the committed EIP each time, so
     // the printed sequence IS the executed instruction stream); --dbg-bp <eip> arms a
@@ -993,6 +1056,16 @@ int main(int argc, char** argv) {
         service_io();
         top->eval();          // <- DPI vtm_retire calls happen here; the core
                               //    latches the proxied syscall effects here too
+#ifdef VEN_DBG_CORE
+        // read-beat trace selftest: sample dbg_rd_valid at the SAME instant ven_soc_dbg's
+        // ring does (post-edge eval, after axi_capture snapped the pre-edge R handshake,
+        // before axi_advance mutates the slave). Nonzero here => upstream plumbing fires.
+        if (top->dbg_rd_valid) {
+            if (g_rd_beats == 0) { g_rd_first_addr = top->dbg_rd_addr; g_rd_first_data = top->dbg_rd_data; }
+            g_rd_last_addr = top->dbg_rd_addr; g_rd_last_data = top->dbg_rd_data;
+            g_rd_beats++;
+        }
+#endif
 #ifdef VEN_L1_AXI
         axi_advance();        // advance the AXI slave on the rising edge (pre-edge snap)
 #endif
@@ -1161,16 +1234,39 @@ int main(int argc, char** argv) {
             "TSW_SEG","TSW_BUSY","SMI_SAVE","RSM","DB_EXTRA" };
         unsigned s = (unsigned)top->dbg_state;
         const char* sn = (s < sizeof(SN)/sizeof(SN[0])) ? SN[s] : "?";
+        unsigned fcw = (unsigned)top->dbg_fctrl;
+        unsigned pc  = (fcw >> 8) & 3;
+        const char* pcs = (pc==3)?"64/ext":(pc==2)?"53/dbl":(pc==0)?"24/sgl":"rsvd";
         std::fprintf(stderr,
             "tb: [VEN_DBG] EIP=%08x CS=%04x ESP=%08x EFLAGS=%08x\n"
-            "tb: [VEN_DBG] FSM=S_%s(0x%02x) mode=%s%s vec=0x%02x fault_pc=%08x CR0=%08x halted=%d\n",
+            "tb: [VEN_DBG] FSM=S_%s(0x%02x) mode=%s%s vec=0x%02x fault_pc=%08x CR0=%08x halted=%d\n"
+            "tb: [VEN_DBG] FCTRL=%04x PC=%u(%s) RC=%u  q_fxop=%u\n",
             (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs, (uint32_t)top->dbg_esp,
             (uint32_t)top->dbg_eflags, sn, s,
             (top->dbg_cr0 & 1u) ? "PE" : "real", (top->dbg_cr0 & 0x80000000u) ? "+PG" : "",
             (unsigned)top->dbg_int_vec, (uint32_t)top->dbg_fault_pc, (uint32_t)top->dbg_cr0,
-            (int)top->dbg_halted);
+            (int)top->dbg_halted,
+            fcw, pc, pcs, (fcw>>10)&3, (unsigned)top->dbg_fxop);
+        std::fprintf(stderr,
+            "tb: [VEN_DBG] rd_beats=%llu  first={addr=%08x data=%08x} last={addr=%08x data=%08x}\n",
+            (unsigned long long)g_rd_beats, g_rd_first_addr, g_rd_first_data,
+            g_rd_last_addr, g_rd_last_data);
     }
 #endif
+
+    // ---- F4: dump the Quake framebuffer (vid.buffer @0x087a29e0, 320x200 8-bit
+    // indexed) so a sim render can be checked offline (combine with gfx/palette.lmp
+    // -> PNG). The MemModel is x86-phys-indexed, so read the guest vaddr directly.
+    if (!args.dump_fb.empty()) {
+        FILE* ff = std::fopen(args.dump_fb.c_str(), "wb");
+        if (ff) {
+            for (uint32_t i = 0; i < 64000u; i++)
+                std::fputc(mem.read8(0x087a29e0u + i), ff);
+            std::fclose(ff);
+            std::fprintf(stderr, "tb: dumped framebuffer (64000B @0x087a29e0) -> %s\n",
+                         args.dump_fb.c_str());
+        }
+    }
 
     // ---- M2S.5: dump SMM-relevant physical memory for the structural check --
     // The RTL analogue of psmm-selfcheck.py's QMP readback: the handler sentinels
