@@ -644,6 +644,9 @@ module core
 `ifdef VEN_TRANSCENDENTAL
     S_TRSC_BUSY, // wait for the iterative x87 transcendental engine (F2XM1, #11)
 `endif
+`ifdef VEN_FPREM
+    S_FPREM_BUSY, // wait for the iterative exact partial-remainder engine (FPREM)
+`endif
 `ifdef VEN_FP_PIPE
     S_FEXEC_EX,  // slow-arm FP-execute 2nd stage: f_eval from the registered
                  // operands (captured in S_FEXEC) -> commit (we_wabs) + retire IN
@@ -2509,10 +2512,13 @@ module core
                   // NOT transcendental, NOT gated — libm floor/ceil/rint, ldexp:
                   8'hFC:        d_fxop=FX_FRNDINT;            // D9 FC FRNDINT
                   8'hFD:        d_fxop=FX_FSCALE;             // D9 FD FSCALE (ST0 *= 2^trunc(ST1))
-                  // D9 F8 FPREM is DEFERRED: a true remainder must be EXACT
-                  // (ST0-Q*ST1), but fx_mul rounds, so it needs a dedicated
-                  // exact-remainder engine, not div+mul+sub. Left as d_unknown
-                  // (loud HALT) until that engine lands — never mis-executed.
+`ifdef VEN_FPREM
+                  8'hF8:        d_fxop=FX_FPREM;              // D9 F8 FPREM (exact partial remainder, fpu_fprem)
+`endif
+                  // D9 F8 FPREM (without VEN_FPREM) stays DEFERRED: a true remainder
+                  // must be EXACT (ST0-Q*ST1), but fx_mul rounds — it needs the
+                  // dedicated exact-remainder engine (fpu_fprem). Left as d_unknown
+                  // (loud HALT) when the engine is not built — never mis-executed.
 `ifdef VEN_TRANSCENDENTAL
                   8'hF0:        d_fxop=FX_F2XM1;              // D9 F0 F2XM1 (#11)
                   8'hF1:        d_fxop=FX_FYL2X;              // D9 F1 FYL2X (#11)
@@ -5997,6 +6003,25 @@ module core
     end
 `endif
 
+`ifdef VEN_FPREM
+    // FPREM: write the remainder to ST0 in place + the condition codes on the engine
+    // `done` clock (helper_fprem_common: clear C3/C2/C1/C0, then C0<-q2 C3<-q1 C1<-q0
+    // on a completed reduction, or C2<-1 on a partial; IE on invalid operands).
+    if (state==S_FPREM_BUSY && eng_fprem_done) begin
+      logic [15:0] cc;
+      fp_we_top=1'b1; fp_top_data=eng_fprem_result;          // remainder -> ST0
+      cc = fstat & ~16'h4700;                                 // clear C3,C2,C1,C0
+      if (eng_fprem_ie) cc = cc | 16'h0001;                   // IE
+      else if (eng_fprem_c2) cc = cc | 16'h0400;              // C2 <- 1 (partial)
+      else begin
+        if (eng_fprem_q012[2]) cc = cc | 16'h0100;            // C0 <- q2
+        if (eng_fprem_q012[1]) cc = cc | 16'h4000;            // C3 <- q1
+        if (eng_fprem_q012[0]) cc = cc | 16'h0200;            // C1 <- q0
+      end
+      fp_we_fstat=1'b1; fp_fstat_wval=cc;
+    end
+`endif
+
     // ===== SLOW ARM (S_FSTORE last beat) — the FSTP/FISTP pop.
     fstore_last_beat = (state==S_FSTORE) && mem_ack &&
                        ((q_f_mbytes<=4'd4) ||
@@ -6234,6 +6259,26 @@ module core
 `else
   assign eng_trsc_done=1'b0; assign eng_trsc_result=80'd0;
   assign eng_trsc_pe=1'b0; assign eng_trsc_ie=1'b0; assign eng_trsc_c2=1'b0;
+`endif
+
+  // --- iterative exact partial-remainder engine (FPREM, D9 F8; VEN_FPREM) ------
+  // Started in S_FEXEC on FX_FPREM, busy-wait in S_FPREM_BUSY, commit remainder->ST0
+  // + C0/C3/C1/C2 on `done`. Bit-exact vs qemu helper_fprem (a=ST0/dividend, b=ST1).
+  logic        eng_fprem_done, eng_fprem_c2, eng_fprem_ie;
+  logic [79:0] eng_fprem_result;
+  logic [2:0]  eng_fprem_q012;
+`ifdef VEN_FPREM
+  logic        eng_fprem_start, eng_fprem_busy;
+  assign eng_fprem_start = (state==S_FEXEC) && (q_fxop==FX_FPREM);
+  fpu_fprem u_fprem (
+    .clk(clk), .rst_n(rst_n), .start(eng_fprem_start),
+    .a(fst(3'd0)), .b(fst(3'd1)),
+    .busy(eng_fprem_busy), .done(eng_fprem_done), .result(eng_fprem_result),
+    .q012(eng_fprem_q012), .c2(eng_fprem_c2), .ie(eng_fprem_ie)
+  );
+`else
+  assign eng_fprem_done=1'b0; assign eng_fprem_result=80'd0;
+  assign eng_fprem_q012=3'd0; assign eng_fprem_c2=1'b0; assign eng_fprem_ie=1'b0;
 `endif
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a

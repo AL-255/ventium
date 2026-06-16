@@ -1,0 +1,10 @@
+{
+  "name": "tx_fprem",
+  "src": "tx_fprem/tx_fprem.s",
+  "elf": "tx_fprem/tx_fprem.elf",
+  "image": "tx_fprem/tx_fprem.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 130,
+  "x87": true
+}

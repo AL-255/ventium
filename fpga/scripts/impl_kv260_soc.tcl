@@ -104,6 +104,16 @@ if {[envor AXI_RREG 1]} { lappend DEFS VEN_AXI_RREG }
 # (more precise than P5, benign — Quake stores back to f32). make verify never runs
 # arith under PC!=11 so the base build (no define) stays byte-identical.
 if {[envor FP_PC_RELAX 1]} { lappend DEFS VEN_FP_PC_RELAX }
+# TRANSCENDENTAL=1 (default ON): the iterative x87 transcendental unit (fpu_fpatan/
+# fpu_fyl2x/fpu_fsincos/fpu_f2xm1 + S_TRSC_BUSY). Quake's glibc atan() issues D9 F3
+# FPATAN (the ONLY transcendental Quake uses) — without this the core loud-HALTs on
+# the first FPATAN (board-confirmed: retire ~2.4B @0x809aaf5). Adds area; pairs with
+# UOPCACHE=1 (which frees LUTs by deleting the byte-gather MUXF wall). Set 0 to omit.
+if {[envor TRANSCENDENTAL 1]} { lappend DEFS VEN_TRANSCENDENTAL }
+# FPREM=1 (default ON): the exact partial-remainder engine (fpu_fprem) for D9 F8 FPREM.
+# Quake's glibc fmodl issues one FPREM; without this the core loud-HALTs on it. Without
+# the define D9 F8 stays DEFERRED (loud HALT) — base build unchanged.
+if {[envor FPREM 1]} { lappend DEFS VEN_FPREM }
 set_property verilog_define $DEFS [current_fileset]
 
 # FAN_CTRL=1 (default ON): add the temperature-controlled cooling fan — a PL

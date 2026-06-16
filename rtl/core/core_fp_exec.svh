@@ -85,6 +85,13 @@
             end else
 `endif
             if (f_do_retire) begin
+`ifdef VEN_FPREM
+              // FPREM: run the iterative exact-remainder engine (S_FPREM_BUSY), then
+              // commit ST0 (remainder) + the C0/C3/C1/C2 condition codes + retire there.
+              if (q_fxop==FX_FPREM) begin
+                state<=S_FPREM_BUSY;
+              end else begin
+`endif
 `ifdef VEN_TRANSCENDENTAL
               // Transcendentals (#11): run the iterative engine first
               // (S_TRSC_BUSY), then commit + retire there. F2XM1 overwrites ST0
@@ -122,6 +129,9 @@
               end
 `endif
 `ifdef VEN_TRANSCENDENTAL
+              end
+`endif
+`ifdef VEN_FPREM
               end
 `endif
             end else begin
@@ -178,6 +188,16 @@
         // we retire + advance EIP the same clock (per-retire arch state exact).
         S_TRSC_BUSY: begin
           if (eng_trsc_done) begin
+            eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+          end
+        end
+`endif
+`ifdef VEN_FPREM
+        // S_FPREM_BUSY: wait for the exact partial-remainder engine. The remainder ->
+        // ST0 + the C0/C3/C1/C2 fstat codes are driven by the fp_we_* commit block on
+        // the engine `done` clock; here we retire + advance EIP the same clock.
+        S_FPREM_BUSY: begin
+          if (eng_fprem_done) begin
             eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end
