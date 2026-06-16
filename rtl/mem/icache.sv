@@ -66,6 +66,14 @@ module icache #(
     input  logic [IC_IDXW-1:0]  rd_setB, // line B = the next line (for straddles)
     input  logic [IC_WAYW-1:0]  rd_wayB,
     output logic [IC_LINE*8-1:0] rd_lineB,
+    // KV260 silicon fix: each registered BRAM read asserts its collide flag when the
+    // read launched in the SAME cycle a fill WROTE the SAME {set,way}. On real SDP
+    // RAMB36 a cross-port read-during-write returns INVALID data (Verilator models a
+    // clean READ_FIRST, so it never sees this) — the spine must NOT consume a buffer
+    // whose read collided; it forces a clean re-read instead. Tied 0 on the async
+    // (distributed-RAM) path, which has no registered read and no collision.
+    output logic        rd_collA,
+    output logic        rd_collB,
     output logic [IC_TAGW-1:0] ic_tag_o   [IC_SETS][IC_WAYS],
     output logic        ic_val_o   [IC_SETS][IC_WAYS],
     output logic [IC_WAYW-1:0] ic_victim_o [IC_SETS],   // replacement (LRU) way per set
@@ -159,18 +167,55 @@ module icache #(
       // that make verify uses), so this removes the synth/sim divergence.
       rd_lineA  <= '0;
       rdq_b_rev <= '0;
+      rd_collA  <= 1'b0;
+      rd_collB  <= 1'b0;
     end else begin
       rd_lineA  <= ic_line_a[{rd_setA, rd_wayA}];
       // CLEAN whole-line registered read of ic_line_b (keeps the BRAM read port);
       // ic_line_b holds the words reversed, so rdq_b_rev is the reversed line.
       rdq_b_rev <= ic_line_b[{rd_setB, rd_wayB}];
+      // collide flags: this read launches off {rd_set*,rd_way*}; if the fill writes
+      // that exact {set,way} THIS cycle, the registered data will be BRAM-garbage on
+      // silicon. Register the flag in lock-step so the spine can reject the buffer.
+      rd_collA  <= fill_en && ({rd_setA, rd_wayA} == {fill_set, fill_way});
+      rd_collB  <= fill_en && ({rd_setB, rd_wayB} == {fill_set, fill_way});
     end
   end
   // un-reverse the eight words COMBINATIONALLY (after the registered BRAM read) so
   // rd_lineB is bit-identical to the unreversed line. Pure wiring, no logic depth.
   always_comb
     for (int wd=0; wd<8; wd++) rd_lineB[wd*32 +: 32] = rdq_b_rev[(7-wd)*32 +: 32];
+`ifdef VEN_IC_COLLIDE_DBG
+  // DIAGNOSTIC (sim-only, default OFF): detect the cross-port read-during-write
+  // collision the board RAMB36 cannot model — fill writes {fill_set,fill_way} in the
+  // SAME cycle the registered read launches off the SAME {set,way}. Verilator captures
+  // the OLD line (clean READ_FIRST); real SDP BRAM returns INVALID data. Classify by
+  // whether the colliding way is RESIDENT (val=1 => the read is CONSUMED => dangerous).
+  int unsigned colA_tot, colA_live, colB_tot, colB_live;
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin colA_tot<=0; colA_live<=0; colB_tot<=0; colB_live<=0; end
+    else if (fill_en) begin
+      if ({rd_setA,rd_wayA} == {fill_set,fill_way}) begin
+        colA_tot <= colA_tot + 1;
+        if (ic_val[fill_set][fill_way]) colA_live <= colA_live + 1;
+        if (colA_tot < 12) $display("[ICCOL-A] set=%0d way=%0d off=%0d val=%b done=%b @%0t",
+                                    fill_set, fill_way, fill_off, ic_val[fill_set][fill_way], fill_done, $time);
+      end
+      if ({rd_setB,rd_wayB} == {fill_set,fill_way}) begin
+        colB_tot <= colB_tot + 1;
+        if (ic_val[fill_set][fill_way]) colB_live <= colB_live + 1;
+        if (colB_tot < 12) $display("[ICCOL-B] set=%0d way=%0d off=%0d val=%b done=%b @%0t",
+                                    fill_set, fill_way, fill_off, ic_val[fill_set][fill_way], fill_done, $time);
+      end
+    end
+  end
+  final $display("[ICCOL-SUMMARY] portA: total=%0d live(resident)=%0d  portB: total=%0d live=%0d",
+                 colA_tot, colA_live, colB_tot, colB_live);
+`endif
 `else
+  // Async distributed-RAM path: combinational read, no registered-read collision.
+  assign rd_collA = 1'b0;
+  assign rd_collB = 1'b0;
   assign rd_lineA = ic_line[{rd_setA, rd_wayA}];
 `ifdef VEN_IC_NARROWB
   // +VEN_IC_NARROWB: rd_lineB is the NEXT (straddle) line, sliced only at LOW byte
