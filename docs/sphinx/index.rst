@@ -55,6 +55,7 @@ issue to and why*, and an honest implementation status.
    microarch/fp-commit-pipeline
    microarch/l1-cache-performance
    microarch/l1-parametric
+   microarch/l2-cache
 
 .. toctree::
    :maxdepth: 2
