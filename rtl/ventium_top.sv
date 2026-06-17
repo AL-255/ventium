@@ -101,6 +101,15 @@ module ventium_top
     output logic [31:0] syscall_arg_esi,
     output logic [31:0] syscall_arg_edi,
     output logic [31:0] syscall_arg_ebp,
+`ifdef VEN_FPTRAP
+    // F4 FP-op PS-trap: FPATAN exposes ST0/ST1; the TB/PS computes atan2 and answers.
+    output logic        fptrap_active,
+    output logic [3:0]  fptrap_op,
+    output logic [79:0] fptrap_st0,
+    output logic [79:0] fptrap_st1,
+    input  logic        fptrap_resp_valid,
+    input  logic [79:0] fptrap_result,
+`endif
 
     // M7.3b: Win95 system co-sim port-I/O bus (docs/m7-lockstep-spec.md M7.3).
     // DEFAULT 0 = INERT (the IN/OUT decode HALTs / the `out 0xf4` terminator is
@@ -290,6 +299,14 @@ module ventium_top
       .syscall_gs_base    (syscall_gs_base),
 `ifdef VEN_PS_PROXY
       .syscall_resp_valid (syscall_resp_valid),
+`endif
+`ifdef VEN_FPTRAP
+      .fptrap_active      (fptrap_active),
+      .fptrap_op          (fptrap_op),
+      .fptrap_st0         (fptrap_st0),
+      .fptrap_st1         (fptrap_st1),
+      .fptrap_resp_valid  (fptrap_resp_valid),
+      .fptrap_result      (fptrap_result),
 `endif
       .syscall_arg_eax    (syscall_arg_eax),
       .syscall_arg_ebx    (syscall_arg_ebx),

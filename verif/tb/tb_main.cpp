@@ -857,6 +857,31 @@ int main(int argc, char** argv) {
         }
     };
 
+#ifdef VEN_FPTRAP
+    // F4 FP-op PS-trap service (mirrors the A53 PS handler): when the core stalls in
+    // S_FPTRAP_WAIT on FPATAN, read ST0/ST1 (floatx80), compute atan2(ST1,ST0), and
+    // drive fptrap_result + fptrap_resp_valid. x86_64 `long double` IS 80-bit floatx80,
+    // so the operand/result are a direct 10-byte reinterpret. FPATAN: ST0=x, ST1=y.
+    auto service_fptrap = [&]() {
+        if (!top->fptrap_active) { top->fptrap_resp_valid = 0; return; }
+        auto rd80 = [](const auto& sig) -> long double {
+            uint8_t b[16] = {0};
+            uint32_t w0 = sig[0], w1 = sig[1], w2 = sig[2];
+            memcpy(b+0,&w0,4); memcpy(b+4,&w1,4); b[8]=w2&0xff; b[9]=(w2>>8)&0xff;
+            long double ld; memcpy(&ld,b,10); return ld;
+        };
+        long double x = rd80(top->fptrap_st0), y = rd80(top->fptrap_st1);
+        long double r = atan2l(y, x);                       // FPATAN = atan2(ST1, ST0)
+        uint8_t b[16]; memcpy(b,&r,16);
+        top->fptrap_result[0] = (uint32_t)b[0]|((uint32_t)b[1]<<8)|((uint32_t)b[2]<<16)|((uint32_t)b[3]<<24);
+        top->fptrap_result[1] = (uint32_t)b[4]|((uint32_t)b[5]<<8)|((uint32_t)b[6]<<16)|((uint32_t)b[7]<<24);
+        top->fptrap_result[2] = (uint32_t)b[8]|((uint32_t)b[9]<<8);
+        top->fptrap_resp_valid = 1;
+    };
+#else
+    auto service_fptrap = [&]() {};
+#endif
+
     // ---- reset: hold rst_n low for a few clocks, then release -------------
     // The TB plays the loader: it establishes the architectural init state the
     // core latches at reset (docs/m1-core-spec.md "Initial architectural
@@ -1021,14 +1046,14 @@ int main(int argc, char** argv) {
         }
 #endif
         service_bus();
-        service_proxy();      // M7.1: drive int-0x80 effects if syscall_active
+        service_proxy(); service_fptrap();      // M7.1: drive int-0x80 effects if syscall_active
                               //       (may re-arm flush_l1_pending for next clock)
         service_io();         // M7.3b: serve the port-I/O bus if io_req
         top->eval();
         // syscall_active settles combinationally this phase (state==S_DECODE);
         // re-serve so the inputs propagate, then sample whether we proxied.
         service_bus();
-        service_proxy();
+        service_proxy(); service_fptrap();
         service_io();
         top->eval();
         bool saw_active = proxy_mode && (bool)top->syscall_active;
@@ -1052,7 +1077,7 @@ int main(int argc, char** argv) {
         axi_capture();        // snapshot the PRE-edge AXI handshakes (DUT + slave state)
 #endif
         service_bus();
-        service_proxy();
+        service_proxy(); service_fptrap();
         service_io();
         top->eval();          // <- DPI vtm_retire calls happen here; the core
                               //    latches the proxied syscall effects here too

@@ -85,6 +85,13 @@
             end else
 `endif
             if (f_do_retire) begin
+`ifdef VEN_FPTRAP
+              // FPATAN (no HW engine): trap to the PS — stall in S_FPTRAP_WAIT exposing
+              // ST0/ST1; commit ST1<-atan2 result + pop when the PS answers.
+              if (q_fxop==FX_FPATAN) begin
+                state<=S_FPTRAP_WAIT;
+              end else begin
+`endif
 `ifdef VEN_FPREM
               // FPREM: run the iterative exact-remainder engine (S_FPREM_BUSY), then
               // commit ST0 (remainder) + the C0/C3/C1/C2 condition codes + retire there.
@@ -132,6 +139,9 @@
               end
 `endif
 `ifdef VEN_FPREM
+              end
+`endif
+`ifdef VEN_FPTRAP
               end
 `endif
             end else begin
