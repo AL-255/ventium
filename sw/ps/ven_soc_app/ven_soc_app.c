@@ -205,6 +205,7 @@ static int           g_poke_len  = 0;
 // fetch MISSES and refills from DDR — removes the --poke staleness confound (the PS write
 // is not snooped) and isolates a unified-L1 set-eviction / cross-line refill bug.
 static int           g_flush_step = 0;
+static int           g_golden_l1  = 0;     // --golden-l1: MODE.GOLDEN_L1 (flush L1 each access; diag)
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
@@ -372,6 +373,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--bp")      && i + 1 < argc) { g_bp = strtoul(argv[++i], 0, 0); g_bp_set = 1; }
         else if (!strcmp(argv[i], "--steps")   && i + 1 < argc) g_steps = strtoul(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--flush-each-step")) g_flush_step = 1;
+        else if (!strcmp(argv[i], "--golden-l1")) g_golden_l1 = 1;   // diag: flush L1 each access
         else if (!strcmp(argv[i], "--peek")    && i + 1 < argc) { g_peek = strtoul(argv[++i], 0, 0); g_peek_set = 1; }
         else if (!strcmp(argv[i], "--poke")    && i + 2 < argc) {
             g_poke = strtoul(argv[++i], 0, 0); g_poke_set = 1;
@@ -518,8 +520,9 @@ int main(int argc, char **argv) {
         wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_PROXY | (g_cycle ? VEN_MODE_CYCLE : 0));
     } else {
         wr(VEN_R_MODE, VEN_MODE_L1AXI | VEN_MODE_COSIM
-                     | (sysmode ? VEN_MODE_BOOT_SYS : 0)
-                     | (g_dos   ? VEN_MODE_SOCEN    : 0));
+                     | (sysmode    ? VEN_MODE_BOOT_SYS  : 0)
+                     | (g_dos      ? VEN_MODE_SOCEN     : 0)
+                     | (g_golden_l1? VEN_MODE_GOLDEN_L1 : 0));
     }
     // --bp: arm the on-die HW breakpoint BEFORE releasing the core, so it halts the
     // first time the PC reaches g_bp (needs a VEN_DBG_CORE bitstream).
