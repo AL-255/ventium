@@ -539,6 +539,13 @@ int main(int argc, char **argv) {
     // divert (and selects the qemu-system CPUID arm the FreeDOS golden used).
     wr(VEN_R_INTR, VEN_INTR_INTA_SEEN);  // clear any leftover injection from a prior run
     wr(VEN_R_INTR, 0);                    // (else a stale ASSERT|vec derails the fresh core)
+    // clear any leftover DBG run-control from a prior --bp/single-step run, else a
+    // stale halt_req/bp_en parks the freshly-booted core (retired stays 0).
+    if (rd(VEN_R_DBG_CAP) == VEN_DBG_CAP_MAGIC) {
+        wr(VEN_R_DBG_RUNCTL, 1u << 3);   // W1P bp_clr (release a latched breakpoint)
+        wr(VEN_R_DBG_RUNCTL, 0);         // clear halt_req + bp_en
+        wr(VEN_R_DBG_BP_ADDR, 0);
+    }
     wr(VEN_R_INIT_EIP, entry);
     wr(VEN_R_INIT_ESP, esp);
     // F4 (--quake): user mode + int-0x80 proxy, memory via L1/AXI. No IO bridge
