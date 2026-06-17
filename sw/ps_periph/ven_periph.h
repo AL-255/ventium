@@ -13,6 +13,9 @@
 #ifndef VEN_PERIPH_H
 #define VEN_PERIPH_H
 #include <stdint.h>
+#ifdef VEN_SAVABLE
+#include <stdio.h>     // FILE/fwrite/fread for the checkpoint hooks (tb build only)
+#endif
 
 typedef struct ven_periph {
     void*    state;
@@ -24,6 +27,15 @@ typedef struct ven_periph {
     // is word-wide; ven_soc_app calls these when the io-bridge reports io_size==2.
     uint16_t (*io_read16) (struct ven_periph*, uint16_t port);
     void     (*io_write16)(struct ven_periph*, uint16_t port, uint16_t val);
+    // Optional sim-checkpoint hooks (default NULL => the model is skipped on
+    // save/restore). `f` is a host `FILE*` (typed void* so this header stays free
+    // of <stdio.h> for baremetal includes). save() writes the model's resumable
+    // state; load() reads it back. The IDE model preserves its live backing fd
+    // across load (the disk is re-attached by the constructor before restore).
+    // tb-only (the A53 firmware never checkpoints); kept here so models stay
+    // self-contained. Appended at struct end => calloc'd vtables default to NULL.
+    void   (*save)    (struct ven_periph*, void* f);
+    void   (*load)    (struct ven_periph*, void* f);
 } ven_periph_t;
 
 // A model's constructor allocates + resets its state and returns the vtable.

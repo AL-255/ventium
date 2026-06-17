@@ -318,6 +318,11 @@ uint8_t ven_pic_intack(ven_periph_t* p) {
     return vec;
 }
 
+#ifdef VEN_SAVABLE
+static void pic_save(ven_periph_t* p, void* f){ fwrite(p->state, sizeof(pic_state_t), 1, (FILE*)f); }
+static void pic_load(ven_periph_t* p, void* f){ if (fread(p->state, sizeof(pic_state_t), 1, (FILE*)f)!=1){} }
+#endif
+
 ven_periph_t* ven_pic_new(void) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(ven_periph_t));
     p->state    = calloc(1, sizeof(pic_state_t));
@@ -325,6 +330,9 @@ ven_periph_t* ven_pic_new(void) {
     p->io_read  = pic_io_read;
     p->io_write = pic_io_write;
     p->irq      = pic_irq;
+#ifdef VEN_SAVABLE
+    p->save = pic_save; p->load = pic_load;
+#endif
     pic_reset(p);
     return p;
 }

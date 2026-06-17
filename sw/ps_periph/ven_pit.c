@@ -192,6 +192,11 @@ int ven_pit_irq0_ticks(ven_periph_t* p) {
     return n;
 }
 
+#ifdef VEN_SAVABLE
+static void pit_save(ven_periph_t* p, void* f){ fwrite(p->state, sizeof(pit_state_t), 1, (FILE*)f); }
+static void pit_load(ven_periph_t* p, void* f){ if (fread(p->state, sizeof(pit_state_t), 1, (FILE*)f)!=1){} }
+#endif
+
 ven_periph_t* ven_pit_new(void) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(*p));
     p->state    = calloc(1, sizeof(pit_state_t));
@@ -199,6 +204,9 @@ ven_periph_t* ven_pit_new(void) {
     p->io_read  = pit_read;
     p->io_write = pit_write;
     p->irq      = pit_irq;
+#ifdef VEN_SAVABLE
+    p->save = pit_save; p->load = pit_load;
+#endif
     pit_reset(p);
     return p;
 }

@@ -35,6 +35,9 @@
 #if VM_TRACE
 #  include "verilated_vcd_c.h"
 #endif
+#ifdef VEN_SAVABLE
+#  include "verilated_save.h"   // VerilatedSave/Restore — full-model sim checkpointing
+#endif
 
 #include "memmodel.h"
 #include "trace_writer.h"
@@ -158,6 +161,16 @@ struct Args {
     uint64_t    checkpoint_every = 0;  // --checkpoint-every N (0 = off)
     std::string checkpoint_dir;        // --checkpoint-dir D
 
+    // ---- full-model sim state checkpoint (requires the --savable build) --------
+    // Save the entire RTL model (top), MemModel, PS peripheral models + tb scalars
+    // at --save-at-cycle, and/or restore them at startup, so a long deterministic
+    // boot is run ONCE and later iterations resume from near the point of interest.
+    // Two files: <prefix>.vlt (RTL via VerilatedSave) + <prefix>.aux (everything else).
+    std::string save_state;            // --save-state <prefix>     (write checkpoint)
+    std::string restore_state;         // --restore-state <prefix>  (load at startup)
+    uint64_t    save_at_cycle = 0;     // --save-at-cycle N         (clock to write at)
+    bool        save_exit     = false; // --save-exit               (stop right after saving)
+
     // M14 video capture (Quake): the guest's $P5Q_VIDEO path; the emulator
     // captures writes to it (the P5Q1 frame stream) and we dump them to
     // --video-out for offline PNG conversion.
@@ -232,6 +245,10 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--brk-base")    a.brk_base    = parse_u32(need("--brk-base"));
         else if (k == "--checkpoint-every") a.checkpoint_every = parse_u64(need("--checkpoint-every"));
         else if (k == "--checkpoint-dir")   a.checkpoint_dir   = need("--checkpoint-dir");
+        else if (k == "--save-state")       a.save_state       = need("--save-state");
+        else if (k == "--restore-state")    a.restore_state    = need("--restore-state");
+        else if (k == "--save-at-cycle")    a.save_at_cycle    = parse_u64(need("--save-at-cycle"));
+        else if (k == "--save-exit")        a.save_exit        = true;
         else if (k == "--video-path") a.video_path = need("--video-path");
         else if (k == "--video-out")  a.video_out  = need("--video-out");
         else if (k == "--dump-fb")    a.dump_fb    = need("--dump-fb");
@@ -621,6 +638,14 @@ int main(int argc, char** argv) {
             uint32_t old=mem.read32(aligned), nw=0;
             for (int b=0;b<4;b++){ uint32_t by=((axhs.wstrb>>b)&1)?((axhs.wdata>>(b*8))&0xff)
                                                                   :((old>>(b*8))&0xff); nw|=by<<(b*8); }
+#ifdef VEN_DBG_CORE
+            // DEBUG: force DF_FIXED into the C: ddt descflags to PROVE the wedge is the
+            // dropped-DF_FIXED detection bug. VEN_FORCE_DFFIXED=<word addr of descflags>
+            // (e.g. 0x27ec); DF_FIXED=bit0 of descflags low byte @+1 == bit8 of the word.
+            { static uint32_t dff = std::getenv("VEN_FORCE_DFFIXED")
+                  ? (uint32_t)strtoul(std::getenv("VEN_FORCE_DFFIXED"),0,0) : 0;
+              if (dff && aligned == (dff & ~3u)) nw |= 0x0100u; }
+#endif
             if (AXI_WPOST > 0) wpost_q.push_back({aligned, nw, (int)AXI_WPOST}); // posted: defer visibility
             else               mem.write32(aligned,nw);                          // immediate (coherent)
 #ifdef VEN_DBG_CORE
@@ -668,9 +693,31 @@ int main(int argc, char** argv) {
     uint64_t io_in_count   = 0;       // diagnostics: IN reads serviced
     uint64_t io_out_count  = 0;       // diagnostics: OUT writes consumed
     int      io_desync     = 0;       // diagnostics: port/size mismatches (a bug)
+    bool     io_serviced   = false;   // FIX: current io_req assertion already had its 1 side-effect
+    uint32_t io_held_rdata = 0;       //      held IN value while io_req stays asserted (S_IO multi-clock)
+    // wedge diag: per-port IO histogram + recent-op ring (env-gated dump at exit).
+    // Classifies a busy loop: a dominant polled port => peripheral-model gap;
+    // zero IO in the wedge window => a CPU/logic loop (rep-string class).
+    std::vector<uint64_t> io_rd_hist(65536, 0), io_wr_hist(65536, 0);
+    uint64_t io_op_seq = 0;
+    static const int IO_RING = 64;
+    uint32_t io_ring_port[IO_RING] = {0}; uint8_t  io_ring_we[IO_RING] = {0};
+    uint32_t io_ring_val[IO_RING]  = {0}; uint64_t io_ring_seq[IO_RING] = {0};
+    int io_ring_pos = 0;
     auto service_io = [&]() {
         if (!cosim_mode) { top->io_rdata = 0; top->io_ack = 0; return; }
-        if (!top->io_req) { top->io_rdata = 0; top->io_ack = 0; io_pending_in = false; return; }
+        if (!top->io_req) {            // bus idle: ready for the next op
+            top->io_rdata = 0; top->io_ack = 0;
+            io_pending_in = false; io_serviced = false;
+            return;
+        }
+        // The core HOLDS io_req asserted for the S_IO clock(s). Do the side-effecting
+        // device access EXACTLY ONCE per assertion (matching ven_soc_app's poll->ack on
+        // silicon), then just HOLD io_ack/io_rdata until io_req deasserts. Re-doing it
+        // every clock quad-counted OUTs and (worse) advanced FIFO/data-port reads
+        // multiple times per IN -> SeaBIOS POST desync (the old --dos sim divergence).
+        if (io_serviced) { top->io_rdata = io_held_rdata; top->io_ack = 1; return; }
+        io_serviced = true;
         const uint32_t port = (uint32_t)top->io_addr;
         const uint32_t size = (uint32_t)top->io_size;
         if (top->io_we) {
@@ -682,11 +729,10 @@ int main(int argc, char** argv) {
                 m->io_write(m, (uint16_t)port, (uint8_t)(top->io_wdata & 0xff));
             }
 #endif
-            else if (args.cosim && (port == 0x3f8 || port == 0xe9)) {
-                std::putchar((int)(top->io_wdata & 0xff)); std::fflush(stdout);
+            else if (args.cosim && (port == 0x3f8 || port == 0xe9 || port == 0x402)) {
+                std::putchar((int)(top->io_wdata & 0xff)); std::fflush(stdout);  // COM1 / qemu-dbg / SeaBIOS DEBUG_IO_PORT
             }
-            top->io_rdata = 0;
-            top->io_ack   = 1;
+            io_held_rdata = 0;
             io_pending_in = false;
         } else {
             // IN: return the next recorded dev_in value (in order). Cross-check the
@@ -720,10 +766,18 @@ int main(int argc, char** argv) {
                 else mv &= 0xffffffffull;
                 v = (uint32_t)mv;
             }
-            top->io_rdata = v;
-            top->io_ack   = 1;
+            io_held_rdata = v;
             io_pending_in = true;   // commit (advance) on the rising edge
         }
+        // wedge diag: record this op exactly once per io_req assertion
+        if (top->io_we) io_wr_hist[port & 0xffff]++; else io_rd_hist[port & 0xffff]++;
+        io_ring_port[io_ring_pos] = port;
+        io_ring_we[io_ring_pos]   = top->io_we ? 1 : 0;
+        io_ring_val[io_ring_pos]  = top->io_we ? (uint32_t)(top->io_wdata) : io_held_rdata;
+        io_ring_seq[io_ring_pos]  = io_op_seq++;
+        io_ring_pos = (io_ring_pos + 1) % IO_RING;
+        top->io_rdata = io_held_rdata;
+        top->io_ack   = 1;
     };
 
     // ---- M7.1 int-0x80 proxy service (combinational, like the bus) ----------
@@ -988,8 +1042,89 @@ int main(int argc, char** argv) {
     if (args.dbg_step_n) top->dbg_halt_req = 1;                  // park at the first boundary
     if (args.dbg_bp)   { top->dbg_bp_en = 1; top->dbg_bp_addr = args.dbg_bp; }
 #endif
+
+    // ---- full-model sim state checkpoint: helpers + restore -------------------
+#ifdef VEN_SAVABLE
+    const uint64_t kSaveMagic = 0x56454e5341564531ull;   // "VENSAVE1"
+    // Peripheral models are saved/restored in a FIXED order; both directions must
+    // iterate the same list. A per-model present-byte tolerates a NULL/hookless model.
+    auto ckpt_save_devs = [&](FILE* f){
+        ven_periph_t* devs[6] = { g_pic, g_rtc, g_pit, g_i8042, g_vga, g_ide };
+        for (int i = 0; i < 6; i++) {
+            uint8_t present = (devs[i] && devs[i]->save) ? 1u : 0u;
+            std::fwrite(&present, 1, 1, f);
+            if (present) devs[i]->save(devs[i], f);
+        }
+    };
+    auto ckpt_load_devs = [&](FILE* f){
+        ven_periph_t* devs[6] = { g_pic, g_rtc, g_pit, g_i8042, g_vga, g_ide };
+        for (int i = 0; i < 6; i++) {
+            uint8_t present = 0; if (std::fread(&present, 1, 1, f) != 1) return;
+            if (present && devs[i] && devs[i]->load) devs[i]->load(devs[i], f);
+        }
+    };
+    auto ckpt_write = [&](const std::string& prefix){
+        VerilatedSave os; os.open((prefix + ".vlt").c_str());
+        os << *top; os.close();                          // entire RTL model (flops + caches)
+        FILE* af = std::fopen((prefix + ".aux").c_str(), "wb");
+        if (!af) { std::fprintf(stderr, "tb: SAVE: cannot open %s.aux\n", prefix.c_str()); return; }
+        uint64_t u; int32_t i32;
+        u = kSaveMagic;          std::fwrite(&u, 8, 1, af);
+        u = cycles;              std::fwrite(&u, 8, 1, af);
+        u = dos_irq0_next;       std::fwrite(&u, 8, 1, af);
+        i32 = dos_pit_pending;   std::fwrite(&i32, 4, 1, af);
+        std::fwrite(&idle, 4, 1, af);
+        u = (uint64_t)devin_idx; std::fwrite(&u, 8, 1, af);
+        u = (uint64_t)sc_idx;    std::fwrite(&u, 8, 1, af);
+        u = io_in_count;         std::fwrite(&u, 8, 1, af);
+        u = io_out_count;        std::fwrite(&u, 8, 1, af);
+        u = syscalls_replayed;   std::fwrite(&u, 8, 1, af);
+        mem.snapshot(af);                                // full sparse DDR (BIOS + DOS + heap)
+        ckpt_save_devs(af);                              // PS peripheral models
+        std::fclose(af);
+        std::fprintf(stderr, "tb: SAVED state @ cyc=%llu retired=%llu -> %s.{vlt,aux}\n",
+                     (unsigned long long)cycles, (unsigned long long)trace.retired(), prefix.c_str());
+    };
+    if (!args.restore_state.empty()) {
+        const std::string& prefix = args.restore_state;
+        FILE* af = std::fopen((prefix + ".aux").c_str(), "rb");
+        if (!af) { std::fprintf(stderr, "tb: RESTORE: cannot open %s.aux\n", prefix.c_str()); return 2; }
+        uint64_t u, magic = 0; int32_t i32 = 0;
+        if (std::fread(&magic, 8, 1, af) != 1 || magic != kSaveMagic) {
+            std::fprintf(stderr, "tb: RESTORE: bad/again magic in %s.aux\n", prefix.c_str());
+            std::fclose(af); return 2;
+        }
+        std::fread(&u, 8, 1, af);   cycles          = u;
+        std::fread(&u, 8, 1, af);   dos_irq0_next   = u;
+        std::fread(&i32, 4, 1, af); dos_pit_pending = i32;
+        std::fread(&idle, 4, 1, af);
+        std::fread(&u, 8, 1, af);   devin_idx       = (size_t)u;
+        std::fread(&u, 8, 1, af);   sc_idx          = (size_t)u;
+        std::fread(&u, 8, 1, af);   io_in_count     = u;
+        std::fread(&u, 8, 1, af);   io_out_count    = u;
+        std::fread(&u, 8, 1, af);   syscalls_replayed = u;
+        mem.restore(af);
+        ckpt_load_devs(af);
+        std::fclose(af);
+        VerilatedRestore is; is.open((prefix + ".vlt").c_str());
+        is >> *top; is.close();
+        top->eval();                                     // settle combinational off restored flops
+        std::fprintf(stderr, "tb: RESTORED state @ cyc=%llu -> resuming\n",
+                     (unsigned long long)cycles);
+    }
+#endif
+
     while (true) {
         uint64_t before = trace.retired();
+#ifdef VEN_SAVABLE
+        // checkpoint write point: the loop top is a clean per-cycle boundary (flops
+        // settled from the prior rising edge). On restore we re-enter here with the
+        // same `cycles`, so the resumed run is bit-identical to the original.
+        if (!args.save_state.empty() && args.save_at_cycle && cycles == args.save_at_cycle) {
+            ckpt_write(args.save_state);
+            if (args.save_exit) { std::fprintf(stderr, "tb: --save-exit: stopping after checkpoint\n"); break; }
+        }
+#endif
 #ifdef VEN_DBG_CORE
         top->dbg_step = 0;
         if (args.dbg_step_n) {
@@ -1143,6 +1278,20 @@ int main(int argc, char** argv) {
 
         ++cycles;
 
+        // wedge diag: optionally zero the IO histogram at a cycle threshold so the
+        // dump at exit reflects ONLY the post-threshold (wedge) window. VEN_IOHIST_RESET=N
+        {
+            static uint64_t io_hist_reset_at =
+                std::getenv("VEN_IOHIST_RESET") ? strtoull(std::getenv("VEN_IOHIST_RESET"), nullptr, 0) : 0;
+            if (io_hist_reset_at && cycles == io_hist_reset_at) {
+                for (auto& x : io_rd_hist) x = 0;
+                for (auto& x : io_wr_hist) x = 0;
+                io_op_seq = 0;
+                std::fprintf(stderr, "tb: [IOHIST] reset at cyc=%llu\n",
+                             (unsigned long long)cycles);
+            }
+        }
+
         // M7.3b: the co-sim hit the isa-debug-exit `out 0xf4` — qemu-system would
         // exit here; stop the run cleanly (matches the producer's termination).
         if (io_exit) {
@@ -1203,6 +1352,37 @@ int main(int argc, char** argv) {
             }
         }
 
+#ifdef VEN_DBG_CORE
+        // --dos long-run progress: periodically name where the boot is (BIOS POST
+        // lives at CS=0x08/EIP~0xFxxxx; the FreeDOS kernel at phys 0x600+ -> CS=0/EIP
+        // small). Lets a multi-100M-cycle run be watched without a per-insn trace.
+        if (cycles && (cycles % 50000000ull) == 0) {
+            static uint64_t last_prog = 0;
+            if (cycles != last_prog) {
+                last_prog = cycles;
+                std::fprintf(stderr, "tb: progress cyc=%llu ret=%llu EIP=%08x CS=%04x st=%u\n",
+                    (unsigned long long)cycles, (unsigned long long)trace.retired(),
+                    (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs, (unsigned)top->dbg_state);
+                std::fflush(stderr);
+            }
+        }
+        // Log every real-mode INT (vector + AX at entry). init_call_intr patches
+        // `int 0`->`int N` via SMC; if Ventium's icache serves a stale opcode in the
+        // kernel (INIT_TEXT) context, the WRONG vector fires -> init_readdasd's AH=15h
+        // DASD probe never runs as int 0x13 -> DF_FIXED dropped. S_RMINT_RD=state 32.
+        {
+            static unsigned prev_rmst = 0;
+            unsigned dsn = (unsigned)top->dbg_state;
+            if (dsn == 32 && prev_rmst != 32) {
+                uint32_t ax = ventium::g_last_arch.gpr[0];
+                std::fprintf(stderr, "tb: [INT] vec=0x%02x CS:EIP=%04x:%08x AX=%04x (cyc=%llu)\n",
+                    (unsigned)top->dbg_int_vec, (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip,
+                    (unsigned)(ax & 0xffff), (unsigned long long)cycles);
+                std::fflush(stderr);
+            }
+            prev_rmst = dsn;
+        }
+#endif
         // quiescence / limit detection
         if (trace.retired() > before) {
             idle = 0;
@@ -1276,6 +1456,41 @@ int main(int argc, char** argv) {
             "tb: [VEN_DBG] rd_beats=%llu  first={addr=%08x data=%08x} last={addr=%08x data=%08x}\n",
             (unsigned long long)g_rd_beats, g_rd_first_addr, g_rd_first_data,
             g_rd_last_addr, g_rd_last_data);
+    }
+#endif
+
+#ifdef VEN_DOS_MODELS
+    // --dos: dump low physical memory (IVT/BDA/loaded FreeDOS kernel @0x600+/_Dyn
+    // ~0x26A4/the C: ddt) so the runtime ddt_descflags (DF_FIXED bit) can be checked
+    // offline — the board can't read this region safely (uninit-ECC SIGBUS risk).
+    if (args.dos) {
+        if (FILE* lf = std::fopen("/tmp/sim_lowmem.bin", "wb")) {
+            for (uint32_t i = 0; i < 0x20000u; i++) std::fputc(mem.read8(i), lf);
+            std::fclose(lf);
+            std::fprintf(stderr, "tb: dumped lowmem 0..0x20000 -> /tmp/sim_lowmem.bin\n");
+        }
+        // wedge diag: top IO ports (a dominant port => poll loop / peripheral gap;
+        // all-zero after VEN_IOHIST_RESET => the wedge does NO IO == CPU/logic loop)
+        std::fprintf(stderr, "tb: === IO histogram (top ports, window since reset) ===\n");
+        for (int dir = 0; dir < 2; dir++) {
+            std::vector<uint64_t>& h = dir ? io_wr_hist : io_rd_hist;
+            for (int k = 0; k < 12; k++) {
+                uint64_t best = 0; int bp = -1;
+                for (int p = 0; p < 65536; p++) if (h[p] > best) { best = h[p]; bp = p; }
+                if (bp < 0 || best == 0) break;
+                std::fprintf(stderr, "tb: IO %s port=0x%04x count=%llu\n",
+                             dir ? "OUT" : "IN ", bp, (unsigned long long)best);
+                h[bp] = 0;
+            }
+        }
+        std::fprintf(stderr, "tb: === last IO ops (seq port dir val) ===\n");
+        for (int i = 0; i < IO_RING; i++) {
+            int idx = (io_ring_pos + i) % IO_RING;
+            if (io_ring_seq[idx] == 0 && io_ring_val[idx] == 0 && io_ring_port[idx] == 0) continue;
+            std::fprintf(stderr, "tb: io seq=%llu port=0x%04x %s val=0x%x\n",
+                (unsigned long long)io_ring_seq[idx], io_ring_port[idx],
+                io_ring_we[idx] ? "OUT" : "IN ", io_ring_val[idx]);
+        }
     }
 #endif
 

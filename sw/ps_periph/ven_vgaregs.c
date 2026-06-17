@@ -330,6 +330,11 @@ const uint8_t* ven_vgaregs_dac(ven_periph_t* p) {
     return ((vga_state_t*)p->state)->palette;
 }
 
+#ifdef VEN_SAVABLE
+static void vga_save(ven_periph_t* p, void* f){ fwrite(p->state, sizeof(vga_state_t), 1, (FILE*)f); }
+static void vga_load(ven_periph_t* p, void* f){ if (fread(p->state, sizeof(vga_state_t), 1, (FILE*)f)!=1){} }
+#endif
+
 ven_periph_t* ven_vgaregs_new(void) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(ven_periph_t));
     p->state    = calloc(1, sizeof(vga_state_t));
@@ -337,6 +342,9 @@ ven_periph_t* ven_vgaregs_new(void) {
     p->io_read  = vga_read;
     p->io_write = vga_write;
     p->irq      = 0;            // no IRQ line (VGA register file)
+#ifdef VEN_SAVABLE
+    p->save = vga_save; p->load = vga_load;
+#endif
     vga_reset(p);
     return p;
 }

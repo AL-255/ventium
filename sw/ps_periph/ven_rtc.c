@@ -223,6 +223,11 @@ void ven_rtc_set_extmem_kb(ven_periph_t* p, uint32_t kb) {
     }
 }
 
+#ifdef VEN_SAVABLE
+static void rtc_save(ven_periph_t* p, void* f){ fwrite(p->state, sizeof(rtc_state_t), 1, (FILE*)f); }
+static void rtc_load(ven_periph_t* p, void* f){ if (fread(p->state, sizeof(rtc_state_t), 1, (FILE*)f)!=1){} }
+#endif
+
 ven_periph_t* ven_rtc_new(void) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(ven_periph_t));
     p->state    = calloc(1, sizeof(rtc_state_t));
@@ -230,6 +235,9 @@ ven_periph_t* ven_rtc_new(void) {
     p->io_read  = rtc_read;
     p->io_write = rtc_write;
     p->irq      = rtc_irq;
+#ifdef VEN_SAVABLE
+    p->save = rtc_save; p->load = rtc_load;
+#endif
     ((rtc_state_t*)p->state)->extmem_kb = VEN_RTC_EXTMEM_KB;  // compile-time default
     rtc_reset(p);
     return p;

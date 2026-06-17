@@ -1,4 +1,6 @@
 #define _GNU_SOURCE 1
+#include <stdio.h>
+#include <stdlib.h>
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 //
@@ -95,6 +97,11 @@ static void load_sector(ide_t* s) {
     memset(s->sbuf, 0, 512);
     if (s->fd >= 0 && s->xfer_lba < s->total_sectors)
         if (pread(s->fd, s->sbuf, 512, (off_t)s->xfer_lba * 512) < 0) { /* leave zeros */ }
+    if (getenv("VEN_IDE_LOG")) {
+        unsigned sm = 0; for (int i = 0; i < 512; i++) sm = (sm + s->sbuf[i]) & 0xffff;
+        fprintf(stderr, "ven_ide: RD lba=%u sum=%04x b=%02x%02x%02x%02x\n",
+                s->xfer_lba, sm, s->sbuf[0], s->sbuf[1], s->sbuf[2], s->sbuf[3]);
+    }
 }
 
 static void start_read(ide_t* s) {
@@ -204,6 +211,16 @@ static int ide_irq(ven_periph_t* p) {
     return s->irq;
 }
 
+#ifdef VEN_SAVABLE
+static void ide_save(ven_periph_t* p, void* f){ fwrite(p->state, sizeof(ide_t), 1, (FILE*)f); }
+static void ide_load(ven_periph_t* p, void* f){
+    ide_t* s = (ide_t*)p->state;
+    int live_fd = s->fd;                                  // keep the re-opened backing fd
+    if (fread(s, sizeof(ide_t), 1, (FILE*)f)!=1){}        // overwrite registers + sector buf
+    s->fd = live_fd;                                      // (the saved fd is meaningless cross-process)
+}
+#endif
+
 ven_periph_t* ven_ide_new(const char* path) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(*p));
     ide_t* s = (ide_t*)calloc(1, sizeof(ide_t));
@@ -220,6 +237,9 @@ ven_periph_t* ven_ide_new(const char* path) {
     build_identify(s);
     p->reset = ide_reset; p->io_read = ide_read8; p->io_write = ide_write8;
     p->irq = ide_irq; p->io_read16 = ide_read16; p->io_write16 = 0;
+#ifdef VEN_SAVABLE
+    p->save = ide_save; p->load = ide_load;
+#endif
     ide_reset(p);
     fprintf(stderr, "ven_ide: %s  %llu sectors  CHS=%u/%u/%u\n",
             path ? path : "(none)", (unsigned long long)s->total_sectors, s->cyls, s->heads, s->secs);

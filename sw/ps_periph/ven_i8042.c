@@ -279,6 +279,11 @@ int ven_i8042_kbd_inject(ven_periph_t* p, uint8_t sc) {
     return 1;
 }
 
+#ifdef VEN_SAVABLE
+static void i8042_save(ven_periph_t* p, void* f){ fwrite(p->state, sizeof(i8042_state_t), 1, (FILE*)f); }
+static void i8042_load(ven_periph_t* p, void* f){ if (fread(p->state, sizeof(i8042_state_t), 1, (FILE*)f)!=1){} }
+#endif
+
 ven_periph_t* ven_i8042_new(void) {
     ven_periph_t* p = (ven_periph_t*)calloc(1, sizeof(ven_periph_t));
     p->state    = calloc(1, sizeof(i8042_state_t));
@@ -286,6 +291,9 @@ ven_periph_t* ven_i8042_new(void) {
     p->io_read  = i8042_read;
     p->io_write = i8042_write;
     p->irq      = i8042_irq;
+#ifdef VEN_SAVABLE
+    p->save = i8042_save; p->load = i8042_load;
+#endif
     i8042_reset(p);
     return p;
 }
