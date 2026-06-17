@@ -5983,8 +5983,10 @@ module core
         if (eng_trsc_c2) begin
           fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0400;
         end else begin
+          // (part-select on a function call is illegal in synth/IEEE-1800 — temp it)
+          logic [80:0] tan_q; tan_q = fx_div(eng_fs_sin, eng_fs_cos, 2'd0);
           fp_we_top=1'b1;
-          fp_top_data=(q_fxop==FX_FPTAN) ? fx_div(eng_fs_sin, eng_fs_cos, 2'd0)[79:0] : eng_fs_sin;
+          fp_top_data=(q_fxop==FX_FPTAN) ? tan_q[79:0] : eng_fs_sin;
           fp_we_push=1'b1;
           fp_push_data=(q_fxop==FX_FPTAN) ? 80'h3fff8000000000000000 : eng_fs_cos;  // FPTAN pushes +1.0
           fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h0400) | 16'h0020;
