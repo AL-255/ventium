@@ -167,7 +167,32 @@ static void dbg_dump_core(void) {
         uint32_t pc = rd(VEN_R_DBG_TRACE_PC), aux = rd(VEN_R_DBG_TRACE_AUX);
         fprintf(stderr, "  [-%2d] %04x:%08x  fsm=0x%02x\n", i, aux & 0xFFFF, pc, (aux >> 16) & 0x3F);
     }
+    // F4 AXI read-beat ring (DDR addr+data of recent accepted read beats; under
+    // --golden-l1 every load misses L1 -> AXI, so this captures the loop's reads).
+    int rn = (int)(rd(VEN_R_DBG_RD_COUNT) & 0x3F);
+    if (rn > depth) rn = depth;
+    fprintf(stderr, " AXI read-beat ring (newest first, %d of %d):\n", rn, depth);
+    for (int i = 0; i < rn; i++) {
+        wr(VEN_R_DBG_TRACE_IDX, (uint32_t)i);
+        (void)rd(VEN_R_DBG_RD_ADDR);   // flush the 1-clock BRAM read latency
+        uint32_t a = rd(VEN_R_DBG_RD_ADDR), d = rd(VEN_R_DBG_RD_DATA);
+        fprintf(stderr, "  rd[-%2d] addr=%08x data=%08x\n", i, a, d);
+    }
     fflush(stderr);
+}
+
+// Halt the core at the next instruction boundary, dump full forensic state
+// (PC ring + AXI read-beat ring are stable only when frozen), then resume.
+// Triggered by SIGUSR2 — used to snapshot the FreeDOS SYSINIT loop's reads.
+static void dbg_halt_dump_resume(void) {
+    if (rd(VEN_R_DBG_CAP) != VEN_DBG_CAP_MAGIC) { dbg_dump_core(); return; }
+    wr(VEN_R_DBG_RUNCTL, 0x1);                       // halt_req
+    int parked = 0;
+    for (int i = 0; i < 100000; i++)
+        if ((rd(VEN_R_DBG_RUNCTL) >> 8) & 1) { parked = 1; break; }
+    fprintf(stderr, "\n[FORENSIC] core %s\n", parked ? "halted" : "NOT halted (timeout)");
+    dbg_dump_core();
+    wr(VEN_R_DBG_RUNCTL, 0x0);                        // resume
 }
 
 // ---- F4 (--quake) state ------------------------------------------------------
@@ -301,8 +326,10 @@ static void ven_shutdown_quiesce(void) {
 // SIGUSR1, which is meant to be sent repeatedly to probe a LIVE, still-running board.
 static volatile sig_atomic_t g_term_req = 0;
 static volatile sig_atomic_t g_snap_req = 0;
+static volatile sig_atomic_t g_fdump_req = 0;
 static void on_term(int sig) { (void)sig; g_term_req = 1; }   // SIGTERM/SIGINT: dump + exit
 static void on_snap(int sig) { (void)sig; g_snap_req = 1; }   // SIGUSR1: live snapshot (no exit)
+static void on_fdump(int sig){ (void)sig; g_fdump_req = 1; }  // SIGUSR2: halt + forensic dump + resume
 
 // --- console / device emulation (the part that grows for F3/F4) --------------
 // F2: a tiny UART. OUT to 0x3F8 (COM1 THR) or 0xE9 (debug) -> stdout. IN from the
@@ -405,6 +432,7 @@ int main(int argc, char **argv) {
     if (g_reg == MAP_FAILED || g_ddr == MAP_FAILED) { perror("mmap"); return 1; }
     signal(SIGTERM, on_term); signal(SIGINT, on_term);   // dump the VGA screen on stop
     signal(SIGUSR1, on_snap);                            // live (non-exiting) proxy snapshot
+    signal(SIGUSR2, on_fdump);                           // halt + forensic dump (read-beat ring) + resume
     systrace_init();                                     // F4 syscall observability (env-gated)
 
     uint32_t ident = rd(VEN_R_IDENT);
@@ -548,6 +576,7 @@ int main(int argc, char **argv) {
         // dumps + quiesces + exits; SIGUSR1 prints a non-destructive live snapshot.
         if (g_term_req) { systrace_dump("term"); vga_textdump(); vga_gfxdump(); ven_shutdown_quiesce(); _exit(0); }
         if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); dbg_dump_core(); vga_gfxdump(); }
+        if (g_fdump_req) { g_fdump_req = 0; dbg_halt_dump_resume(); }
         // --bp single-step trace: when the core halts at the HW breakpoint, walk the
         // trajectory instruction-by-instruction (the on-silicon fetch/control-flow trace
         // for a bug the sim can't reproduce). Each step: RUNCTL halt_req+step (0x3) ->

@@ -78,6 +78,9 @@
 #define VEN_R_DBG_BP_ADDR    0xD8  // RW breakpoint EIP
 #define VEN_R_DBG_RUNCTL     0xDC  // RW [0]halt_req [1]W1P step [2]bp_en [3]W1P bp_clr
                                    //    RO [8]=halted
+#define VEN_R_DBG_RD_ADDR    0xE0  // RO  AXI read-beat ring[TRACE_IDX] DDR addr
+#define VEN_R_DBG_RD_DATA    0xE4  // RO  AXI read-beat ring[TRACE_IDX] data word
+#define VEN_R_DBG_RD_COUNT   0xE8  // RO  AXI read-beat ring entry count
 #define VEN_DBG_CAP_MAGIC    0xDB010020u  // R_DBG_CAP value when the unit is present
 
 // ---- FP-op trap window (0xEC-0xFC; present only in a +VEN_FPTRAP bitstream) ----
