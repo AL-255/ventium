@@ -122,6 +122,19 @@ module core
     // syscall_eax/gs/resume AND written the kernel memory effects to the DDR carveout.
     input  logic        syscall_resp_valid,
 `endif
+`ifdef VEN_FPTRAP
+    // FP-op PS-trap (F4): FPATAN (D9 F3) has no HW engine (the iterative transcendental
+    // unit is ~2x over LUTs on the xck26). The core STALLS in S_FPTRAP_WAIT exposing the
+    // floatx80 operands ST0/ST1; the PS computes atan2 and writes fptrap_result + asserts
+    // fptrap_resp_valid; the core then commits ST1<-result, pops, retires. Inert unless
+    // proxy_en + the op is decoded (VEN_FPTRAP). fptrap_op selects which op (0=FPATAN).
+    output logic        fptrap_active,       // 1-clock: core entered S_FPTRAP_WAIT
+    output logic [3:0]  fptrap_op,           // 0 = FPATAN
+    output logic [79:0] fptrap_st0,          // ST0 (x)  floatx80
+    output logic [79:0] fptrap_st1,          // ST1 (y)  floatx80
+    input  logic        fptrap_resp_valid,   // PS wrote the result
+    input  logic [79:0] fptrap_result,       // atan2(ST1,ST0) as floatx80
+`endif
 
     // M14: syscall ARGS exposed at the syscall_active pulse (read-only). For the
     // TB's free-run syscall EMULATOR (--emulate-syscalls): the TB samples these
@@ -655,6 +668,9 @@ module core
 
 `ifdef VEN_PS_PROXY
     S_SYSCALL_WAIT,   // PS-bridge (F4): hold the int-0x80 proxy until syscall_resp_valid
+`endif
+`ifdef VEN_FPTRAP
+    S_FPTRAP_WAIT,    // PS-trap (F4): hold FPATAN until the PS writes fptrap_result
 `endif
     S_FENV_ST, S_FENV_LD,   // M11b: env/state store (FNSTENV/FNSAVE) & load (FLDENV/FRSTOR)
     // M7.3b Win95 co-sim port I/O: the IN/OUT bus handshake state (cosim only).
@@ -2528,6 +2544,10 @@ module core
                   8'hFF:        d_fxop=FX_FCOS;               // D9 FF FCOS (#11)
                   8'hFB:        d_fxop=FX_FSINCOS;            // D9 FB FSINCOS (#11)
                   8'hF2:        d_fxop=FX_FPTAN;              // D9 F2 FPTAN (#11)
+`elsif VEN_FPTRAP
+                  // No HW transcendental engine (too big for xck26) — PS-trap FPATAN,
+                  // Quake's ONLY transcendental. D9 F3 -> FX_FPATAN -> S_FPTRAP_WAIT.
+                  8'hF3:        d_fxop=FX_FPATAN;             // D9 F3 FPATAN (PS-trap)
 `endif
                   default:      d_unknown=1'b1;  // transcendentals/F2XM1/etc deferred
                 endcase
@@ -2674,6 +2694,14 @@ module core
   // non-proxy runs (proxy_en==0).
   assign syscall_active_c = (state==S_DECODE) && d_int80 && proxy_en;
   assign syscall_active   = syscall_active_c;
+
+`ifdef VEN_FPTRAP
+  // FP PS-trap outputs: high while stalled in S_FPTRAP_WAIT exposing ST0/ST1 to the PS.
+  assign fptrap_active = (state==S_FPTRAP_WAIT);
+  assign fptrap_op     = 4'd0;          // 0 = FPATAN (the only PS-trapped FP op)
+  assign fptrap_st0    = fp_st[0];      // ST0 = x
+  assign fptrap_st1    = fp_st[1];      // ST1 = y
+`endif
 
   // M14: expose the syscall args (regfile values at the cd80 decode) so the TB
   // free-run emulator can read nr+args off the same edge as syscall_active. Pure
@@ -4223,6 +4251,16 @@ module core
             fold_pc_r      <= eip;
             fetch_word     <= 3'd0;
             state          <= S_FETCH;
+          end
+        end
+`endif
+`ifdef VEN_FPTRAP
+        // FPATAN PS-trap: stall until the PS writes fptrap_result. The ST1<-result+pop
+        // commit is driven by the fp_we_* block above on the same clock; here we retire
+        // + advance EIP (mirrors the S_TRSC_BUSY HW-engine path).
+        S_FPTRAP_WAIT: begin
+          if (fptrap_resp_valid) begin
+            eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
           end
         end
 `endif
@@ -6021,6 +6059,15 @@ module core
         if (eng_fprem_q012[0]) cc = cc | 16'h0200;            // C1 <- q0
       end
       fp_we_fstat=1'b1; fp_fstat_wval=cc;
+    end
+`endif
+
+`ifdef VEN_FPTRAP
+    // FPATAN PS-trap: the PS computed atan2(ST1,ST0); commit it like FDIVP ST1,ST0 —
+    // write ST1 then pop (result ends in the new ST0), same as the HW FPATAN commit.
+    if (state==S_FPTRAP_WAIT && fptrap_resp_valid) begin
+      fp_we_sti=1'b1; fp_wsti_idx=3'd1; fp_wsti_data=fptrap_result; fp_wsti_clr_tag=1'b0;
+      fp_we_pop=1'b1;
     end
 `endif
 

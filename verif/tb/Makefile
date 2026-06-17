@@ -165,8 +165,8 @@ l1axi_kv_full_xinit:
 #       --emulate-syscalls --brk-base 0x87c3000 --x87 --max-insn 5000 ...
 .PHONY: l1axi_kv_proxy
 l1axi_kv_proxy:
-	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) +define+VEN_PS_PROXY +define+VEN_DBG_CORE $(VL_EXTRA_DEFINES) \
-	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_PS_PROXY -DVEN_DBG_CORE" \
+	$(VERILATOR) $(VL_FLAGS) $(KV_FULL_DEFS) +define+VEN_PS_PROXY +define+VEN_DBG_CORE +define+VEN_FPTRAP +define+VEN_FPREM $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_PS_PROXY -DVEN_DBG_CORE -DVEN_FPTRAP" \
 	  -Mdir obj_dir_l1axi_kvproxy \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (deployed PROXY config): $(CURDIR)/obj_dir_l1axi_kvproxy/$(EXE)"
