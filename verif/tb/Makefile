@@ -185,6 +185,17 @@ l1axi_kv_dos:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)
 	@echo "built (deployed config + PS DOS models + VEN_DBG_CORE): $(CURDIR)/obj_dir_l1axi_kvdos/$(EXE)"
 
+# ---- l1axi_kv_dos_q: l1axi_kv_dos + 64 MiB CMOS extended memory (F4A: DOS Quake
+# needs the RAM for CWSDPMI's heap). Separate obj dir so the FreeDOS build stays
+# byte-identical. Run with --disk quake_ven.img (patched kernel + VGABIOS+vgainit).
+.PHONY: l1axi_kv_dos_q
+l1axi_kv_dos_q:
+	$(VERILATOR) $(VL_FLAGS) --savable $(KV_FULL_DEFS) +define+VEN_DBG_CORE $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir obj_dir_l1axi_kvdosq \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)
+	@echo "built (DOS + 64MiB extmem for Quake): $(CURDIR)/obj_dir_l1axi_kvdosq/$(EXE)"
+
 # ---- l1axi_cdc: P1-3 dual-clock build (+VEN_L1_AXI +VEN_AXI_CDC) -------------
 # Same bus_mode=2 path, but the L1<->AXI backing port crosses through ven_axi_cdc
 # (the async-FIFO CDC bridge). In the cosim core_clk==axi_clk==top->clk, so this

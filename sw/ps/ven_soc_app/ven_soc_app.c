@@ -48,6 +48,7 @@ const uint8_t* ven_vgaregs_dac(ven_periph_t*);
 ven_periph_t* ven_pit_new(void);
 int           ven_pit_irq0_ticks(ven_periph_t*);
 ven_periph_t* ven_rtc_new(void);
+void          ven_rtc_set_extmem_kb(ven_periph_t*, uint32_t);  // F4A: seed >1MiB RAM
 ven_periph_t* ven_ide_new(const char* disk_path);
 
 static volatile uint32_t *g_reg;     // mmap'd AXI-Lite slave
@@ -234,6 +235,7 @@ static int           g_golden_l1  = 0;     // --golden-l1: MODE.GOLDEN_L1 (flush
 
 // ---- F3 (--dos) state --------------------------------------------------------
 static int           g_dos = 0;          // --dos: i8042/PIC/VGA models + IRQ inject
+static uint32_t      g_extmem_kb = 0;    // --extmem-kb N: seed CMOS RAM-size >1MiB (F4A DOS Quake)
 static ven_periph_t *g_i8042, *g_pic, *g_vga, *g_pit, *g_rtc, *g_ide;
 static int           g_dac_dirty = 0;    // guest wrote the DAC -> re-export
 static const char   *VGA_DAC_EXPORT = "/dev/shm/ven_vga_dac";
@@ -388,6 +390,7 @@ int main(int argc, char **argv) {
     for (i = 1; i < argc; i++) {
         if      (!strcmp(argv[i], "--sys")) sysmode = 1;
         else if (!strcmp(argv[i], "--dos")) g_dos   = 1;
+        else if (!strcmp(argv[i], "--extmem-kb") && i + 1 < argc) g_extmem_kb = strtoul(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--kbd")  && i + 1 < argc) kbd_path = argv[++i];
         else if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];  // SeaBIOS image
         else if (!strcmp(argv[i], "--vgabios") && i + 1 < argc) vgabios = argv[++i]; // VGA option ROM @0xC0000
@@ -528,6 +531,11 @@ int main(int argc, char **argv) {
         g_vga   = ven_vgaregs_new();
         g_pit   = ven_pit_new();                         // 8254 timer (IRQ0)
         g_rtc   = ven_rtc_new();                          // RTC/CMOS (RAM-size, time)
+        if (g_extmem_kb) {                                 // F4A: DOS Quake needs >1MiB RAM
+            ven_rtc_set_extmem_kb(g_rtc, g_extmem_kb);
+            fprintf(stderr, "ven_soc: CMOS extmem seeded = %u KB (%u MiB total)\n",
+                    g_extmem_kb, 1 + g_extmem_kb / 1024);
+        }
         g_ide   = ven_ide_new(disk);                      // IDE/ATA disk (INT13 source)
         if (hid_kbd_open(kbd_path) < 0)
             fprintf(stderr, "ven_soc: --dos without a keyboard (display only)\n");

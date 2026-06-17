@@ -76,6 +76,14 @@ static uint32_t g_stride_px = 0;
 static const char   *g_src_path = "/tmp/quake.p5q";
 static int           g_src_fd   = -1;
 static int           g_src_is_reg = 0;          /* regular file -> paced + looped */
+/* --vga13: show the live mode-13h fb (core-physical 0xA0000 in the carveout) +
+ * the exported VGA DAC directly, instead of a P5Q1 stream. For DOS Quake / any
+ * native mode-13h app on the board (F4A). */
+#define VEN_CARVEOUT_BASE 0x40000000UL
+#define VGA13_FB_OFF      0xA0000UL
+static int           g_vga13   = 0;
+static const uint8_t *g_vga13_fb = 0;           /* mmap'd /dev/mem carveout + 0xA0000 */
+static const char   *g_dac_path = "/dev/shm/ven_vga_dac";
 static int           g_qw = QK_W, g_qh = QK_H;
 static size_t        g_framesz   = 768 + (size_t)QK_W * QK_H;
 static uint8_t       g_qpix[QK_W * QK_H];       /* latest frame, 8-bit indices */
@@ -535,11 +543,44 @@ static void wait_for_flip(void)
     }
 }
 
+/* --vga13: rebuild the latest frame straight from the core's live VGA RAM +
+ * exported DAC (no P5Q1 stream). Used for DOS Quake / native mode-13h apps. */
+static void poll_vga13(void)
+{
+    uint8_t dac[768];
+    int fd = open(g_dac_path, O_RDONLY);
+    if (fd >= 0) {
+        ssize_t n = read(fd, dac, 768);
+        close(fd);
+        if (n == 768)
+            for (int i = 0; i < 256; i++)        /* DAC is 6-bit/channel -> <<2 */
+                g_qlut[i] = rgb565(dac[i*3] << 2, dac[i*3+1] << 2, dac[i*3+2] << 2);
+    }
+    if (g_vga13_fb) {
+        memcpy(g_qpix, g_vga13_fb, (size_t)QK_W * QK_H);
+        g_have_frame = 1;
+        g_qframe++;
+    }
+}
+
 #ifndef KMSDRAW_NO_MAIN
 int main(int argc, char **argv)
 {
-    if (argc > 1)
-        g_src_path = argv[1];   /* P5Q1 source: .p5q file (replay) or FIFO (live) */
+    for (int i = 1; i < argc; i++) {
+        if      (!strcmp(argv[i], "--vga13")) g_vga13 = 1;       /* live mode-13h fb */
+        else if (!strcmp(argv[i], "--dac") && i + 1 < argc) g_dac_path = argv[++i];
+        else    g_src_path = argv[i];   /* P5Q1 source: .p5q file (replay) or FIFO */
+    }
+    if (g_vga13) {
+        int mfd = open("/dev/mem", O_RDONLY | O_SYNC);
+        if (mfd < 0) die("open /dev/mem (--vga13 needs root)");
+        void *m = mmap(0, 0x100000, PROT_READ, MAP_SHARED, mfd, VEN_CARVEOUT_BASE);
+        if (m == MAP_FAILED) die("mmap carveout");
+        g_vga13_fb = (const uint8_t *)m + VGA13_FB_OFF;
+        g_qw = QK_W; g_qh = QK_H; build_maps();
+        fprintf(stderr, "kms-draw: --vga13 live mode-13h fb @ carveout+0x%lx, dac=%s\n",
+                VGA13_FB_OFF, g_dac_path);
+    }
 
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
@@ -577,7 +618,7 @@ int main(int argc, char **argv)
     int frame = 0;
 
     /* Initial front buffer. */
-    poll_quake_frames();
+    if (g_vga13) poll_vga13(); else poll_quake_frames();
     g_fb = bufs[front].pix;
     g_stride_px = bufs[front].pitch / 2;
     draw_layout(frame++);
@@ -589,7 +630,7 @@ int main(int argc, char **argv)
     printf("Running vsync-locked page-flip loop. Ctrl-C to exit.\n");
 
     while (running) {
-        poll_quake_frames();
+        if (g_vga13) poll_vga13(); else poll_quake_frames();
 
         g_fb = bufs[back].pix;
         g_stride_px = bufs[back].pitch / 2;
