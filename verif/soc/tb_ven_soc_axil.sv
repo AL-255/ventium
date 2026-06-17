@@ -24,6 +24,7 @@ module tb_ven_soc_axil;
   // control/config out
   logic core_rst_n; logic [31:0] init_eip, init_esp; logic boot_mode, cycle_mode, bus_mode;
   logic l1axi_en, proxy_en, cosim_en, soc_en; logic [4:0] errata_en; logic flush_all;
+  logic golden_l1;   // GOLDEN_L1 diagnostic (MODE[7]); round-tripped, not exercised here
   // status in
   logic cpu_hung=0, bus_err=0; logic [63:0] retire_n=64'd0;
   // io bus
@@ -55,6 +56,18 @@ module tb_ven_soc_axil;
   end
 `endif
 
+`ifdef VEN_FPTRAP
+  // F4 FP-op trap window seam. Driven side (core -> slave, level while S_FPTRAP_WAIT):
+  logic        t_ft_active=1'b0; logic [3:0] t_ft_op=4'd0;
+  logic [79:0] t_ft_st0=80'd0, t_ft_st1=80'd0;
+  // Observed side (slave -> core response):
+  logic        o_ft_resp_valid; logic [79:0] o_ft_result;
+  int          ft_resp_pulses=0; logic [79:0] ft_cap_result=80'd0;
+  always @(posedge clk) if (o_ft_resp_valid) begin
+    ft_resp_pulses <= ft_resp_pulses + 1; ft_cap_result <= o_ft_result;
+  end
+`endif
+
   ven_soc_axil dut (
     .clk(clk), .aresetn(aresetn),
     .s_axil_awaddr(awaddr), .s_axil_awprot(3'd0), .s_axil_awvalid(awvalid), .s_axil_awready(awready),
@@ -65,6 +78,7 @@ module tb_ven_soc_axil;
     .core_rst_n(core_rst_n), .init_eip(init_eip), .init_esp(init_esp), .boot_mode(boot_mode),
     .cycle_mode(cycle_mode), .bus_mode(bus_mode), .l1axi_en(l1axi_en), .proxy_en(proxy_en),
     .cosim_en(cosim_en), .soc_en(soc_en), .errata_en(errata_en), .flush_all(flush_all),
+    .golden_l1(golden_l1),
     .cpu_hung(cpu_hung), .bus_err(bus_err), .retire_n(retire_n),
     .io_req(io_req), .io_we(io_we), .io_addr(io_addr), .io_size(io_size), .io_wdata(io_wdata),
     .io_rdata(io_rdata), .io_ack(io_ack),
@@ -76,6 +90,11 @@ module tb_ven_soc_axil;
     .syscall_arg_ebp(t_sc_ebp),
     .syscall_resp_valid(o_sc_resp_valid), .syscall_eax(o_sc_eax),
     .syscall_apply_gs(o_sc_apply_gs), .syscall_gs_base(o_sc_gs), .syscall_resume_eip(o_sc_resume),
+`endif
+`ifdef VEN_FPTRAP
+    .fptrap_active(t_ft_active), .fptrap_op(t_ft_op),
+    .fptrap_st0(t_ft_st0), .fptrap_st1(t_ft_st1),
+    .fptrap_resp_valid(o_ft_resp_valid), .fptrap_result(o_ft_result),
 `endif
     .intr_out(intr_out), .intr_vec(intr_vec), .inta(inta),
     .irq_out(irq_out)
@@ -262,6 +281,42 @@ module tb_ven_soc_axil;
     axil_read(16'h40, d); chk("R_SYS_STATUS cleared", d[0], 1'b0);
     axil_read(16'h04, d); chk("STATUS.SYS_PEND cleared", d[9], 1'b0);
     @(posedge clk); chk("irq_out dropped after commit", irq_out, 1'b0);
+`endif
+
+`ifdef VEN_FPTRAP
+    $display("[12] FP-op trap window (FPATAN: ST0/ST1 expose -> indexed read -> result commit)");
+    chk("no ft resp_valid at idle", o_ft_resp_valid, 1'b0);
+    axil_read(16'hEC, d); chk("FPT_STAT idle (no pending)", d[0], 1'b0);
+    // core stalls in S_FPTRAP_WAIT (level): op=0 (FPATAN), ST0=ST1=1.0 floatx80.
+    @(negedge clk);
+      t_ft_active<=1'b1; t_ft_op<=4'd0;
+      t_ft_st0<=80'h3FFF_8000_0000_0000_0000;   // +1.0
+      t_ft_st1<=80'h3FFF_8000_0000_0000_0000;   // +1.0
+    @(posedge clk); #1;
+    axil_read(16'hEC, d); chk("FPT_STAT active",  d[0],   1'b1);
+    chk("FPT_STAT op=FPATAN", d[4:1], 4'd0);
+    // indexed operand read: idx 0-2 = ST0 words, 3-5 = ST1 words.
+    axil_write(16'hF0, 32'd0, 4'hF); axil_read(16'hF4, d); chk("ST0 w0", d, 32'h0000_0000);
+    axil_write(16'hF0, 32'd1, 4'hF); axil_read(16'hF4, d); chk("ST0 w1", d, 32'h8000_0000);
+    axil_write(16'hF0, 32'd2, 4'hF); axil_read(16'hF4, d); chk("ST0 w2", d, 32'h0000_3FFF);
+    axil_write(16'hF0, 32'd3, 4'hF); axil_read(16'hF4, d); chk("ST1 w0", d, 32'h0000_0000);
+    axil_write(16'hF0, 32'd4, 4'hF); axil_read(16'hF4, d); chk("ST1 w1", d, 32'h8000_0000);
+    axil_write(16'hF0, 32'd5, 4'hF); axil_read(16'hF4, d); chk("ST1 w2", d, 32'h0000_3FFF);
+    axil_read(16'hF0, d); chk("FPT_IDX readback", d, 32'd5);
+    // PS posts atan2(1,1)=pi/4 floatx80 (0x3FFE_C90FDAA22168C235), then W1P commit.
+    ft_resp_pulses = 0;
+    axil_write(16'hF0, 32'd0, 4'hF); axil_write(16'hF8, 32'h2168_C235, 4'hF);  // result w0
+    axil_write(16'hF0, 32'd1, 4'hF); axil_write(16'hF8, 32'hC90F_DAA2, 4'hF);  // result w1
+    axil_write(16'hF0, 32'd2, 4'hF); axil_write(16'hF8, 32'h0000_3FFE, 4'hF);  // result w2
+    axil_write(16'hFC, 32'h0000_0001, 4'hF);                                   // FPT_CTRL commit
+    repeat(4) @(posedge clk); #1;
+    chk("ft resp_valid pulsed once", ft_resp_pulses, 32'd1);
+    if (ft_cap_result !== 80'h3FFE_C90F_DAA2_2168_C235) begin
+      $display("  FAIL fptrap_result: got %020x exp 3FFEC90FDAA22168C235", ft_cap_result); errors++;
+    end else $display("  ok   fptrap_result = %020x", ft_cap_result);
+    // the core resumes (drops fptrap_active when it leaves S_FPTRAP_WAIT).
+    @(negedge clk); t_ft_active<=1'b0; @(posedge clk); #1;
+    axil_read(16'hEC, d); chk("FPT_STAT cleared after resume", d[0], 1'b0);
 `endif
 
     if (errors==0) $display("SOCAXIL-GATE-OK (control + status + retire + IO-bridge handshake all pass)");

@@ -29,4 +29,5 @@ run_one() {  # $1 = label, $2... = extra verilator defines
 
 run_one default
 run_one proxy +define+VEN_PS_PROXY
-echo "== ven_soc_axil unit gate PASS (default + VEN_PS_PROXY) =="
+run_one fptrap +define+VEN_PS_PROXY +define+VEN_FPTRAP
+echo "== ven_soc_axil unit gate PASS (default + VEN_PS_PROXY + VEN_FPTRAP) =="

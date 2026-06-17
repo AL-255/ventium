@@ -243,7 +243,7 @@ module ven_soc_axil #(
   // Indexed operand/result transfer: the 80-bit floatx80 ST0/ST1 don't fit one word,
   // so the PS sets R_FPT_IDX (0..2 = ST0 words, 3..5 = ST1 words) and reads R_FPT_DATA,
   // then writes the 3 result words back through R_FPT_IDX (0..2) + R_FPT_RES and commits.
-  localparam logic [7:0] R_FPT_STAT  = 8'hEC;  // RO  [0]=active(pending) [3:1]=op
+  localparam logic [7:0] R_FPT_STAT  = 8'hEC;  // RO  [0]=active(pending) [4:1]=op
   localparam logic [7:0] R_FPT_IDX   = 8'hF0;  // RW  [2:0] operand/result word index
   localparam logic [7:0] R_FPT_DATA  = 8'hF4;  // RO  operand word selected by IDX (0-5)
   localparam logic [7:0] R_FPT_RES   = 8'hF8;  // W   result word -> res_q[IDX] (IDX 0-2)
@@ -460,7 +460,7 @@ module ven_soc_axil #(
           R_DBG_RD_COUNT:   s_axil_rdata <= {26'd0, dbg_rd_ring_count};
 `endif
 `ifdef VEN_FPTRAP
-          R_FPT_STAT:  s_axil_rdata <= {28'd0, fptrap_op, fptrap_active};
+          R_FPT_STAT:  s_axil_rdata <= {27'd0, fptrap_op, fptrap_active};
           R_FPT_IDX:   s_axil_rdata <= {29'd0, fptrap_idx_r};
           R_FPT_DATA:  begin
             unique case (fptrap_idx_r)
@@ -638,10 +638,11 @@ module ven_soc_axil #(
           // on the resp_valid clock, so all 3 RES words must precede the CTRL commit.
           R_FPT_IDX: if (s_axil_wstrb[0]) fptrap_idx_r <= s_axil_wdata[2:0];
           R_FPT_RES: if (fptrap_idx_r < 3'd3) begin
-            if (s_axil_wstrb[0]) fptrap_res_q[fptrap_idx_r][7:0]   <= s_axil_wdata[7:0];
-            if (s_axil_wstrb[1]) fptrap_res_q[fptrap_idx_r][15:8]  <= s_axil_wdata[15:8];
-            if (s_axil_wstrb[2]) fptrap_res_q[fptrap_idx_r][23:16] <= s_axil_wdata[23:16];
-            if (s_axil_wstrb[3]) fptrap_res_q[fptrap_idx_r][31:24] <= s_axil_wdata[31:24];
+            // idx is guarded to 0..2, so [1:0] is the exact array index (3 elements).
+            if (s_axil_wstrb[0]) fptrap_res_q[fptrap_idx_r[1:0]][7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) fptrap_res_q[fptrap_idx_r[1:0]][15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) fptrap_res_q[fptrap_idx_r[1:0]][23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) fptrap_res_q[fptrap_idx_r[1:0]][31:24] <= s_axil_wdata[31:24];
           end
           R_FPT_CTRL: if (s_axil_wstrb[0] && s_axil_wdata[0]) fptrap_resp_pulse <= 1'b1; // W1P
 `endif

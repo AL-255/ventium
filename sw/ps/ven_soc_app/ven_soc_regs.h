@@ -85,7 +85,7 @@
 // ST0/ST1. The PS polls FPT_STAT[0], reads the 6 operand words (IDX 0-2=ST0,
 // 3-5=ST1) through IDX/DATA, computes atan2(ST1,ST0), writes the 3 result words
 // (IDX 0-2) via RES, then W1P FPT_CTRL[0] to commit (core does ST1<-result, pop).
-#define VEN_R_FPT_STAT   0xEC  // RO  [0]=active(pending) [3:1]=op (0=FPATAN)
+#define VEN_R_FPT_STAT   0xEC  // RO  [0]=active(pending) [4:1]=op (0=FPATAN)
 #define VEN_R_FPT_IDX    0xF0  // RW  [2:0] operand/result word index
 #define VEN_R_FPT_DATA   0xF4  // RO  operand word selected by IDX (0-5)
 #define VEN_R_FPT_RES    0xF8  // W   result word -> res[IDX] (IDX 0-2)
