@@ -41,6 +41,11 @@ package fpu_x87_pkg;
   function automatic logic [79:0] fx_make(input logic s, input logic [14:0] e, input logic [63:0] m);
     return {s, e, m};
   endfunction
+  // Extract the floatx80 from an {inexact,floatx80} = [80:0] fx_add/fx_mul/fx_div
+  // result. A direct bit-select on a function call result is legal in 2-state sim but
+  // ILLEGAL in Vivado/IEEE-1800 (Synth 8-12513) — wrap as a nested call fx80(fx_mul(..))
+  // instead of fx_mul(..) followed by an [79:0] select. Pure wiring.
+  function automatic logic [79:0] fx80(input logic [80:0] v); return v[79:0]; endfunction
 
   function automatic logic fx_is_zero(input logic [79:0] v);
     return (fx_exp(v)==15'd0) && (fx_man(v)==64'd0);

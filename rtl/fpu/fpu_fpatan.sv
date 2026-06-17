@@ -343,8 +343,8 @@ module fpu_fpatan
 
         // ---- Horner: accum, 11 steps -----------------------------------
         S_HORN: begin
-          if (step_q[0]==1'b0) accum_q <= fx_mul(accum_q, z2_q, 2'd0)[79:0];
-          else                 accum_q <= fx_add(hcoeff(step_q), accum_q, 2'd0)[79:0];
+          if (step_q[0]==1'b0) accum_q <= fx80(fx_mul(accum_q, z2_q, 2'd0));
+          else                 accum_q <= fx80(fx_add(hcoeff(step_q), accum_q, 2'd0));
           if (step_q==4'd10) st<=S_ATANZ;
           step_q<=step_q+4'd1;
         end

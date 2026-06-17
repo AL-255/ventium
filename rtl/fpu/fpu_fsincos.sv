@@ -85,7 +85,7 @@ module fpu_fsincos
             if (x_oor) begin
               c2_q<=1'b1; sin_q<=x_q; cos_q<=x_q; st<=S_DONE;
             end else begin
-              m = fx_mul(x_q, T_2OPI, 2'd0)[79:0];
+              m = fx80(fx_mul(x_q, T_2OPI, 2'd0));
               ni = (m[78:64] < 15'h3ffe) ? 64'sd0 : fx_to_int(m);   // |m|<0.5 -> 0
               quad_q <= ni[1:0];
               nf_q   <= fx_from_int(ni);
@@ -95,8 +95,8 @@ module fpu_fsincos
           end else begin
             automatic logic [79:0] pio2, prod;
             pio2 = (redk_q==4'd1) ? T_PIO2_1 : (redk_q==4'd2) ? T_PIO2_2 : T_PIO2_3;
-            prod = fx_mul(nf_q, pio2, 2'd0)[79:0];
-            r_q  <= fx_add(r_q, negf(prod), 2'd0)[79:0];           // r = r - nf*pio2
+            prod = fx80(fx_mul(nf_q, pio2, 2'd0));
+            r_q  <= fx80(fx_add(r_q, negf(prod), 2'd0));           // r = r - nf*pio2
             if (redk_q==4'd3) begin st<=S_POLY; polyk_q<=4'd0; end
             else redk_q<=redk_q+4'd1;
           end
@@ -105,15 +105,15 @@ module fpu_fsincos
         // ---- Horner: sp,cp over r2 (10 steps), then sp *= r --------------
         S_POLY: begin
           if (polyk_q==4'd0) begin
-            r2_q <= fx_mul(r_q, r_q, 2'd0)[79:0];
+            r2_q <= fx80(fx_mul(r_q, r_q, 2'd0));
             sp_q <= sinc(4'(NT-1));         // SINC[10]
             cp_q <= cosc(4'(NT-1));         // COSC[10]
             polyk_q <= 4'd1;
           end else begin
             // k counts 1..10 -> coefficient index (NT-1-k) = 9..0
             automatic logic [3:0] idx; idx = 4'(NT-1) - polyk_q;
-            sp_q <= fx_add(fx_mul(sp_q, r2_q, 2'd0)[79:0], sinc(idx), 2'd0)[79:0];
-            cp_q <= fx_add(fx_mul(cp_q, r2_q, 2'd0)[79:0], cosc(idx), 2'd0)[79:0];
+            sp_q <= fx80(fx_add(fx80(fx_mul(sp_q, r2_q, 2'd0)), sinc(idx), 2'd0));
+            cp_q <= fx80(fx_add(fx80(fx_mul(cp_q, r2_q, 2'd0)), cosc(idx), 2'd0));
             if (polyk_q==4'(NT-1)) st<=S_FIN;
             polyk_q<=polyk_q+4'd1;
           end
@@ -121,7 +121,7 @@ module fpu_fsincos
 
         // ---- sin(r) = sp * r --------------------------------------------
         S_FIN: begin
-          sp_q <= fx_mul(sp_q, r_q, 2'd0)[79:0];
+          sp_q <= fx80(fx_mul(sp_q, r_q, 2'd0));
           st<=S_QUAD;
         end
 

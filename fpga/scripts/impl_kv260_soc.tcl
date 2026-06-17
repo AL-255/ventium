@@ -51,6 +51,7 @@ set svfiles {
     ventium_top.sv
     core/core.sv core/bpred_btb.sv core/decode.sv core/issue_uv.sv core/ven_idiv.sv
     fpu/fpu_top.sv fpu/fpu_srt_div.sv fpu/fpu_sqrt_iter.sv fpu/ven_bcd.sv fpu/ven_bcd_to_fp.sv
+    fpu/fpu_fpatan.sv fpu/fpu_fyl2x.sv fpu/fpu_fsincos.sv fpu/fpu_f2xm1.sv fpu/fpu_fprem.sv
     mem/dcache_timing.sv mem/icache.sv mem/uopcache.sv mem/tlb.sv
     bus/biu_p5.sv bus/biu.sv
     mem/ven_l1d.sv mem/ven_axi_master.sv mem/ventium_l1_axi.sv
@@ -62,8 +63,9 @@ add_files -norecurse $ROOT/rtl/soc/ventium_kv260_top.v
 add_files -norecurse $ROOT/rtl/soc/ven_fan_ctrl_top.v
 set_property file_type SystemVerilog [get_files *.sv]
 add_files -norecurse [glob $ROOT/rtl/core/*.svh]
+add_files -norecurse [glob $ROOT/rtl/fpu/*.svh]
 set_property file_type {Verilog Header} [get_files *.svh]
-set_property include_dirs [list $ROOT/rtl/core] [current_fileset]
+set_property include_dirs [list $ROOT/rtl/core $ROOT/rtl/fpu] [current_fileset]
 # uop-cache + half-cache + 2-stage FP commit (routable, 65.3 MHz OOC) + SoC seams.
 set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
     VEN_FP_PIPE VEN_FP_PIPE2 VEN_CACHE_HALF \

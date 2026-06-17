@@ -103,7 +103,7 @@ module fpu_fyl2x
             ie2 = a0e - 32'sd16383;
             if (a0s > FY_SQRT2THR) ie2 = ie2 + 32'sd1;
             scaled = {x_sign, 15'(a0e - ie2), a0s};           // scalbn(x,-int_exp)
-            m1 = fx_add(scaled, 80'hbfff8000000000000000, 2'd0)[79:0];  // scaled - 1.0
+            m1 = fx80(fx_add(scaled, 80'hbfff8000000000000000, 2'd0));  // scaled - 1.0
             int_exp_q <= ie2;
             ie64 = ie2;
             if (m1[78:64]==15'd0 && m1[63:0]==64'd0) begin   // exact power of 2
@@ -176,8 +176,8 @@ module fpu_fyl2x
 
         // ---- deg-9 Horner: 18 steps -------------------------------------
         S_CHORN: begin
-          if (step_q[0]==1'b0) accum_q <= fx_mul(accum_q, t2_q, 2'd0)[79:0];
-          else                 accum_q <= fx_add(hcoeff(step_q), accum_q, 2'd0)[79:0];
+          if (step_q[0]==1'b0) accum_q <= fx80(fx_mul(accum_q, t2_q, 2'd0));
+          else                 accum_q <= fx80(fx_add(hcoeff(step_q), accum_q, 2'd0));
           if (step_q==5'd17) st<=S_CRECON;
           step_q<=step_q+5'd1;
         end
