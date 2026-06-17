@@ -1360,10 +1360,28 @@ int main(int argc, char** argv) {
             static uint64_t last_prog = 0;
             if (cycles != last_prog) {
                 last_prog = cycles;
-                std::fprintf(stderr, "tb: progress cyc=%llu ret=%llu EIP=%08x CS=%04x st=%u\n",
+                std::fprintf(stderr, "tb: progress cyc=%llu ret=%llu EIP=%08x CS=%04x st=%u "
+                    "EAX=%08x ECX=%08x EDX=%08x ESI=%08x EDI=%08x\n",
                     (unsigned long long)cycles, (unsigned long long)trace.retired(),
-                    (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs, (unsigned)top->dbg_state);
+                    (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs, (unsigned)top->dbg_state,
+                    ventium::g_last_arch.gpr[0], ventium::g_last_arch.gpr[1],
+                    ventium::g_last_arch.gpr[2], ventium::g_last_arch.gpr[6],
+                    ventium::g_last_arch.gpr[7]);
                 std::fflush(stderr);
+            }
+        }
+        // F4A: windowed per-commit trace of the VBR KERNEL.SYS load loop (cs=0x1FE0,
+        // ~0x7dxx) to root-cause the non-terminating rep-movsb/dec-di spin. Logs each
+        // unique committed EIP in the loop region over a 200k-cycle window at the hang.
+        {
+            static uint32_t f4a_last = 0xffffffffu; static int f4a_n = 0;
+            uint32_t e = (uint32_t)top->dbg_eip;
+            if (cycles >= 155000000ull && cycles <= 155200000ull && f4a_n < 4000
+                && e != f4a_last && e >= 0x7d00u && e <= 0x7e60u) {
+                f4a_last = e; f4a_n++;
+                std::fprintf(stderr, "f4a eip=%04x cx=%08x si=%08x di=%08x ax=%08x\n",
+                    e, ventium::g_last_arch.gpr[1], ventium::g_last_arch.gpr[6],
+                    ventium::g_last_arch.gpr[7], ventium::g_last_arch.gpr[0]);
             }
         }
         // Log every real-mode INT (vector + AX at entry). init_call_intr patches
@@ -1468,6 +1486,19 @@ int main(int argc, char** argv) {
             for (uint32_t i = 0; i < 0x20000u; i++) std::fputc(mem.read8(i), lf);
             std::fclose(lf);
             std::fprintf(stderr, "tb: dumped lowmem 0..0x20000 -> /tmp/sim_lowmem.bin\n");
+        }
+        // F4A: VGA mode-13h framebuffer @0xA0000 (320x200x8 = 64000 B). DOS Quake
+        // blits its frame here; dump it so a render can be checked offline + a
+        // nonzero-pixel count printed (blank vs rendered is obvious).
+        if (FILE* vf = std::fopen("/tmp/sim_vga13.bin", "wb")) {
+            long nz = 0;
+            for (uint32_t i = 0; i < 64000u; i++) {
+                uint8_t p = mem.read8(0xA0000u + i);
+                if (p) nz++;
+                std::fputc(p, vf);
+            }
+            std::fclose(vf);
+            std::fprintf(stderr, "tb: dumped VGA13 @0xA0000 (64000 B, %ld nonzero px) -> /tmp/sim_vga13.bin\n", nz);
         }
         // wedge diag: top IO ports (a dominant port => poll loop / peripheral gap;
         // all-zero after VEN_IOHIST_RESET => the wedge does NO IO == CPU/logic loop)
