@@ -104,6 +104,17 @@ module ven_soc_axil #(
     output logic [31:0] syscall_gs_base,    // the %gs base (set_thread_area)
     output logic [31:0] syscall_resume_eip, // informational on HW (core derives it)
 `endif
+`ifdef VEN_FPTRAP
+    // F4 FP-op trap window: the core stalls in S_FPTRAP_WAIT on FPATAN, exposing the two
+    // floatx80 operands; the PS reads them (indexed), computes atan2, writes the floatx80
+    // result, and W1P-commits. Indexed because the 8-bit reg map only has 0xEC-0xFC free.
+    input  logic        fptrap_active,      // core -> slave: stalled, operands valid (level)
+    input  logic [3:0]  fptrap_op,          // 0 = FPATAN
+    input  logic [79:0] fptrap_st0,         // ST0 (x)
+    input  logic [79:0] fptrap_st1,         // ST1 (y)
+    output logic        fptrap_resp_valid,  // slave -> core: 1-cycle commit strobe
+    output logic [79:0] fptrap_result,      // atan2(ST1,ST0) -> ST1, pop
+`endif
 
     // ---- PS -> core interrupt-injection seam (F3, R_INTR) --------------------------
     // The PS-side 8259 C model (sw/ps_periph/ven_pic.c) is the PIC; this seam is its
@@ -227,6 +238,17 @@ module ven_soc_axil #(
   localparam logic [7:0] R_DBG_RD_DATA    = 8'hE4;  // RO read-beat ring[idx] data word
   localparam logic [7:0] R_DBG_RD_COUNT   = 8'hE8;  // RO read-beat ring entry count
 `endif
+`ifdef VEN_FPTRAP
+  // ---- FP-op trap window (0xEC-0xFC; the only 5 words free with the DBG window) ---
+  // Indexed operand/result transfer: the 80-bit floatx80 ST0/ST1 don't fit one word,
+  // so the PS sets R_FPT_IDX (0..2 = ST0 words, 3..5 = ST1 words) and reads R_FPT_DATA,
+  // then writes the 3 result words back through R_FPT_IDX (0..2) + R_FPT_RES and commits.
+  localparam logic [7:0] R_FPT_STAT  = 8'hEC;  // RO  [0]=active(pending) [3:1]=op
+  localparam logic [7:0] R_FPT_IDX   = 8'hF0;  // RW  [2:0] operand/result word index
+  localparam logic [7:0] R_FPT_DATA  = 8'hF4;  // RO  operand word selected by IDX (0-5)
+  localparam logic [7:0] R_FPT_RES   = 8'hF8;  // W   result word -> res_q[IDX] (IDX 0-2)
+  localparam logic [7:0] R_FPT_CTRL  = 8'hFC;  // W1P [0]=commit -> fptrap_resp_valid
+`endif
 
   // ---- control / config registers ----------------------------------------------
   logic        core_run;
@@ -272,6 +294,16 @@ module ven_soc_axil #(
   assign dbg_bp_en         = dbg_bp_en_r;
   assign dbg_halt_req      = dbg_halt_req_r;
   // dbg_step / dbg_bp_clr are W1P pulses, driven in the write-decode block.
+`endif
+
+`ifdef VEN_FPTRAP
+  // ---- FP-op trap state ----------------------------------------------------------
+  logic [2:0]  fptrap_idx_r;       // PS-written operand/result word index
+  logic [31:0] fptrap_res_q [3];   // PS-written floatx80 result, low->high word (0:2)
+  logic        fptrap_resp_pulse;  // 1-cycle W1P -> fptrap_resp_valid
+  assign fptrap_resp_valid = fptrap_resp_pulse;
+  // recompose the 80-bit result: words [0]=[31:0] [1]=[63:32] [2]=[79:64] (low 16 used)
+  assign fptrap_result     = {fptrap_res_q[2][15:0], fptrap_res_q[1], fptrap_res_q[0]};
 `endif
 
   assign core_rst_n = aresetn & core_run;
@@ -427,6 +459,21 @@ module ven_soc_axil #(
           R_DBG_RD_DATA:    s_axil_rdata <= dbg_rd_ring_data;
           R_DBG_RD_COUNT:   s_axil_rdata <= {26'd0, dbg_rd_ring_count};
 `endif
+`ifdef VEN_FPTRAP
+          R_FPT_STAT:  s_axil_rdata <= {28'd0, fptrap_op, fptrap_active};
+          R_FPT_IDX:   s_axil_rdata <= {29'd0, fptrap_idx_r};
+          R_FPT_DATA:  begin
+            unique case (fptrap_idx_r)
+              3'd0:    s_axil_rdata <= fptrap_st0[31:0];
+              3'd1:    s_axil_rdata <= fptrap_st0[63:32];
+              3'd2:    s_axil_rdata <= {16'd0, fptrap_st0[79:64]};
+              3'd3:    s_axil_rdata <= fptrap_st1[31:0];
+              3'd4:    s_axil_rdata <= fptrap_st1[63:32];
+              3'd5:    s_axil_rdata <= {16'd0, fptrap_st1[79:64]};
+              default: s_axil_rdata <= 32'h0;
+            endcase
+          end
+`endif
           default:     s_axil_rdata <= 32'h0;
         endcase
       end else if (s_axil_rvalid && s_axil_rready) begin
@@ -461,6 +508,10 @@ module ven_soc_axil #(
       dbg_bp_addr_r <= 32'd0; dbg_bp_en_r <= 1'b0; dbg_halt_req_r <= 1'b0;
       dbg_step <= 1'b0; dbg_bp_clr <= 1'b0;
 `endif
+`ifdef VEN_FPTRAP
+      fptrap_idx_r <= 3'd0; fptrap_resp_pulse <= 1'b0;
+      fptrap_res_q[0] <= 32'd0; fptrap_res_q[1] <= 32'd0; fptrap_res_q[2] <= 32'd0;
+`endif
     end else begin
       flush_all     <= 1'b0;     // W1P: default low, pulse one cycle on the write
       ps_ack_pulse  <= 1'b0;
@@ -472,6 +523,9 @@ module ven_soc_axil #(
       dbg_clear     <= 1'b0;     // W1P
       dbg_step      <= 1'b0;     // W1P
       dbg_bp_clr    <= 1'b0;     // W1P
+`endif
+`ifdef VEN_FPTRAP
+      fptrap_resp_pulse <= 1'b0; // W1P
 `endif
       if (wr_fire) begin
         unique case (waddr)
@@ -577,6 +631,19 @@ module ven_soc_axil #(
             dbg_bp_en_r    <= s_axil_wdata[2];
             if (s_axil_wdata[3]) dbg_bp_clr <= 1'b1;   // W1P clear breakpoint latch
           end
+`endif
+`ifdef VEN_FPTRAP
+          // FP-op trap response: the PS sets IDX (0..2), writes the result word via RES
+          // (×3), then W1P CTRL.COMMIT. The core latches fptrap_result combinationally
+          // on the resp_valid clock, so all 3 RES words must precede the CTRL commit.
+          R_FPT_IDX: if (s_axil_wstrb[0]) fptrap_idx_r <= s_axil_wdata[2:0];
+          R_FPT_RES: if (fptrap_idx_r < 3'd3) begin
+            if (s_axil_wstrb[0]) fptrap_res_q[fptrap_idx_r][7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) fptrap_res_q[fptrap_idx_r][15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) fptrap_res_q[fptrap_idx_r][23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) fptrap_res_q[fptrap_idx_r][31:24] <= s_axil_wdata[31:24];
+          end
+          R_FPT_CTRL: if (s_axil_wstrb[0] && s_axil_wdata[0]) fptrap_resp_pulse <= 1'b1; // W1P
 `endif
           default: ;
         endcase

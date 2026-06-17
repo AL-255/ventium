@@ -110,6 +110,14 @@ module ventium_kv260_core #(
   logic [31:0] sc_eax, sc_gs_base, sc_resume_eip;
 `endif
 
+`ifdef VEN_FPTRAP
+  // F4 FP-op trap seam (ven_soc_axil 0xEC-0xFC <-> ventium_top/core): the core stalls
+  // in S_FPTRAP_WAIT on FPATAN, exposing ST0/ST1; the PS computes atan2 and commits.
+  logic        ft_active, ft_resp_valid;
+  logic [3:0]  ft_op;
+  logic [79:0] ft_st0, ft_st1, ft_result;
+`endif
+
 `ifdef VEN_DBG_CORE
   // VEN_DBG_CORE bundle: ventium_top debug taps -> ven_soc_dbg -> ven_soc_axil regs.
   logic        dbg_retire_valid;
@@ -172,6 +180,13 @@ module ventium_kv260_core #(
       .syscall_apply_gs(sc_apply_gs), .syscall_gs_base(sc_gs_base),
       .syscall_resume_eip(sc_resume_eip)
 `endif
+`ifdef VEN_FPTRAP
+      ,
+      // FP-op trap window <-> core seam (0xEC-0xFC).
+      .fptrap_active(ft_active), .fptrap_op(ft_op),
+      .fptrap_st0(ft_st0), .fptrap_st1(ft_st1),
+      .fptrap_resp_valid(ft_resp_valid), .fptrap_result(ft_result)
+`endif
 `ifdef VEN_DBG_CORE
       ,
       .dbg_clear(d_clear), .dbg_freeze_thresh(d_freeze_th), .dbg_trace_idx(d_trace_idx),
@@ -217,6 +232,12 @@ module ventium_kv260_core #(
       .syscall_apply_gs(1'b0), .syscall_gs_base(32'd0),
       .syscall_arg_eax(), .syscall_arg_ebx(), .syscall_arg_ecx(), .syscall_arg_edx(),
       .syscall_arg_esi(), .syscall_arg_edi(), .syscall_arg_ebp(),
+`endif
+`ifdef VEN_FPTRAP
+      // FP-op trap seam: the core exposes ST0/ST1 in S_FPTRAP_WAIT, the PS commits.
+      .fptrap_active(ft_active), .fptrap_op(ft_op),
+      .fptrap_st0(ft_st0), .fptrap_st1(ft_st1),
+      .fptrap_resp_valid(ft_resp_valid), .fptrap_result(ft_result),
 `endif
       // port-I/O bridge (cosim_en routes IN/OUT to this bus; the slave services it).
       .cosim_en(cfg_cosim_en),

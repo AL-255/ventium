@@ -144,6 +144,17 @@ module uopcache
     rd_pdvalidA = rdpdv_a_q && !rd_collA_q;
     rd_pdvalidB = rdpdv_b_q && !rd_collB_q;
   end
+`ifdef VEN_UOP_PERF
+  // DIAGNOSTIC (sim-only, default OFF): confirm the uop cache POPULATES (pdv hits)
+  // and the collide-guard is BENIGN (re-walks rare). hits = pdvalid presented;
+  // rewalk = guard suppressed a valid-but-collided read (the only perf cost added).
+  longint unsigned uop_hitA, uop_rewalkA;
+  always_ff @(posedge clk) if (rst_n) begin
+    if (rd_pdvalidA)             uop_hitA    <= uop_hitA + 1;
+    if (rdpdv_a_q && rd_collA_q) uop_rewalkA <= uop_rewalkA + 1;
+  end
+  final $display("[UOPPERF] portA pdv-hits=%0d  guard-rewalks=%0d", uop_hitA, uop_rewalkA);
+`endif
 
   // ---- predecode walker (sequential; ~1 instruction/cycle) -------------------
   // Decodes the FIXED bottom 6 bytes of `residual`, records the slot + boundary,

@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <math.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include "ven_soc_regs.h"
@@ -54,6 +55,69 @@ static volatile uint8_t  *g_ddr;     // mmap'd DDR carveout
 
 static inline uint32_t rd(uint32_t off)          { return g_reg[off >> 2]; }
 static inline void     wr(uint32_t off, uint32_t v) { g_reg[off >> 2] = v; }
+
+// ---- F4 FP-op trap (PS-trap FPATAN; +VEN_FPTRAP bitstream) -------------------
+// The core has no HW transcendental engine (too big for the xck26), so on D9 F3
+// FPATAN it stalls in S_FPTRAP_WAIT and exposes ST0/ST1 as 80-bit floatx80. The
+// A53 reads them, computes atan2, and commits the floatx80 result. aarch64 long
+// double is 128-bit quad (NOT floatx80), so convert the operands/result by hand.
+// Quake's render path needs only ~double precision, which double carries exactly.
+static double fx80_to_double(uint32_t w0, uint32_t w1, uint32_t w2) {
+    int      sign = (w2 >> 15) & 1;
+    int      exp  = w2 & 0x7FFF;
+    uint64_t mant = ((uint64_t)w1 << 32) | w0;     // 64-bit significand, int bit @63
+    double   val;
+    if (exp == 0x7FFF) {                            // Inf / NaN
+        val = (mant << 1) == 0 ? INFINITY : NAN;
+    } else if (exp == 0 && mant == 0) {
+        val = 0.0;
+    } else {
+        // value = mant * 2^(exp - 16383 - 63)  (mant carries the explicit integer bit)
+        val = ldexp((double)mant, exp - 16383 - 63);
+    }
+    return sign ? -val : val;
+}
+
+static void double_to_fx80(double v, uint32_t *w0, uint32_t *w1, uint32_t *w2) {
+    int sign = signbit(v) ? 1 : 0;
+    if (sign) v = -v;
+    uint32_t hi;            // word2: [15]=sign [14:0]=exp
+    uint64_t mant;         // {w1,w0}
+    if (v == 0.0)        { mant = 0;                       hi = 0; }
+    else if (isinf(v))   { mant = 0x8000000000000000ull;   hi = 0x7FFF; }
+    else if (isnan(v))   { mant = 0xC000000000000000ull;   hi = 0x7FFF; }
+    else {
+        int    e;
+        double m = frexp(v, &e);          // v = m * 2^e, m in [0.5, 1)
+        double scaled = ldexp(m, 64);     // m * 2^64 in [2^63, 2^64)
+        mant = scaled >= 18446744073709551616.0 ? 0xFFFFFFFFFFFFFFFFull
+                                                 : (uint64_t)scaled;
+        int exp = e + 16382;              // expfield = e - 64 + 16383 + 63
+        if      (exp <= 0)     { mant = 0; hi = 0; }            // underflow -> 0
+        else if (exp >= 0x7FFF){ mant = 0x8000000000000000ull; hi = 0x7FFF; } // -> Inf
+        else                     hi = (uint32_t)exp;
+    }
+    *w0 = (uint32_t)(mant & 0xFFFFFFFFu);
+    *w1 = (uint32_t)(mant >> 32);
+    *w2 = ((uint32_t)sign << 15) | hi;
+}
+
+// Service one pending FP trap: read ST0/ST1, compute, commit. Mirrors the syscall
+// proxy ordering — write the 3 result words BEFORE the W1P commit (the core latches
+// fptrap_result combinationally on the resp_valid clock).
+static void service_fptrap(void) {
+    uint32_t st[6];
+    for (int i = 0; i < 6; i++) { wr(VEN_R_FPT_IDX, i); st[i] = rd(VEN_R_FPT_DATA); }
+    double x = fx80_to_double(st[0], st[1], st[2]);   // ST0
+    double y = fx80_to_double(st[3], st[4], st[5]);   // ST1
+    double r = atan2(y, x);                            // FPATAN: ST1 <- atan2(ST1,ST0)
+    uint32_t r0, r1, r2;
+    double_to_fx80(r, &r0, &r1, &r2);
+    wr(VEN_R_FPT_IDX, 0); wr(VEN_R_FPT_RES, r0);
+    wr(VEN_R_FPT_IDX, 1); wr(VEN_R_FPT_RES, r1);
+    wr(VEN_R_FPT_IDX, 2); wr(VEN_R_FPT_RES, r2);
+    wr(VEN_R_FPT_CTRL, 1);                             // W1P commit -> core resumes
+}
 
 // VEN_DBG=1: print the retire trajectory + status/last-io every ~250 ms so a
 // silent stall (status=0, retire frozen) is visible (no CPU_HUNG is raised).
@@ -470,6 +534,7 @@ int main(int argc, char **argv) {
 
     // service loop (F2: poll; F3+ can switch to the GIC interrupt on irq_out).
     uint64_t serviced = 0;
+    uint64_t fptraps  = 0;           // F4 FP-op traps (FPATAN) serviced
     uint32_t intr_shadow = 0;        // last R_INTR value we wrote (vector|assert)
     uint32_t housekeep   = 0;
     static int  dbg = -1;
@@ -624,6 +689,15 @@ int main(int argc, char **argv) {
                                  systrace_dump("exit"); break; }
         }
 
+        // ---- F4 FP-op trap (PS-trap FPATAN; +VEN_FPTRAP bitstream) ------------
+        // On D9 F3 the core stalls exposing ST0/ST1; the A53 computes atan2 and
+        // commits. The window reads 0 on a non-FPTRAP bitstream (default case), so
+        // the poll is inert there. Gated on g_quake (only Quake issues FPATAN).
+        if (g_quake && (rd(VEN_R_FPT_STAT) & VEN_FPT_STAT_ACTIVE)) {
+            service_fptrap();
+            fptraps++;
+        }
+
         // ---- F3 interrupt pump (the PS *is* the PIC + keyboard) ---------------
         if (g_dos) {
             uint32_t seam, desired;
@@ -670,8 +744,9 @@ int main(int argc, char **argv) {
                 if (write(g_video_fd, vbuf, got) != (ssize_t)got) { /* best effort */ }
             close(g_video_fd);
         }
-        fprintf(stderr, "ven_soc: quake done — %llu syscalls, %llu P5Q1 bytes captured%s\n",
+        fprintf(stderr, "ven_soc: quake done — %llu syscalls, %llu fpatans, %llu P5Q1 bytes captured%s\n",
                 (unsigned long long)ven_quake_syscalls(),
+                (unsigned long long)fptraps,
                 (unsigned long long)ven_quake_video_total(),
                 g_video_out ? "" : " (no --video; not written)");
         systrace_dump("done");          // final syscall histogram + ring (if VEN_SYS_RING)

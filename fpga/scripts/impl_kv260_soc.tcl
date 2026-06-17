@@ -116,6 +116,12 @@ if {[envor TRANSCENDENTAL 1]} { lappend DEFS VEN_TRANSCENDENTAL }
 # Quake's glibc fmodl issues one FPREM; without this the core loud-HALTs on it. Without
 # the define D9 F8 stays DEFERRED (loud HALT) — base build unchanged.
 if {[envor FPREM 1]} { lappend DEFS VEN_FPREM }
+# FPTRAP=0 (default OFF): PS-trap FPATAN instead of the HW transcendental engine. On
+# D9 F3 the core stalls in S_FPTRAP_WAIT exposing ST0/ST1; the A53 (ven_soc_app)
+# computes atan2 and commits ST1<-result+pop via the 0xEC-0xFC reg window. Use this
+# WITH TRANSCENDENTAL=0 to fit the xck26 (the 4 iterative engines are ~2x over). The
+# two are mutually exclusive for D9 F3 decode — never set both to 1.
+if {[envor FPTRAP 0]} { lappend DEFS VEN_FPTRAP }
 set_property verilog_define $DEFS [current_fileset]
 
 # FAN_CTRL=1 (default ON): add the temperature-controlled cooling fan — a PL

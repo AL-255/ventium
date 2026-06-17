@@ -80,6 +80,18 @@
                                    //    RO [8]=halted
 #define VEN_DBG_CAP_MAGIC    0xDB010020u  // R_DBG_CAP value when the unit is present
 
+// ---- FP-op trap window (0xEC-0xFC; present only in a +VEN_FPTRAP bitstream) ----
+// On D9 F3 FPATAN the core stalls in S_FPTRAP_WAIT exposing the 80-bit floatx80
+// ST0/ST1. The PS polls FPT_STAT[0], reads the 6 operand words (IDX 0-2=ST0,
+// 3-5=ST1) through IDX/DATA, computes atan2(ST1,ST0), writes the 3 result words
+// (IDX 0-2) via RES, then W1P FPT_CTRL[0] to commit (core does ST1<-result, pop).
+#define VEN_R_FPT_STAT   0xEC  // RO  [0]=active(pending) [3:1]=op (0=FPATAN)
+#define VEN_R_FPT_IDX    0xF0  // RW  [2:0] operand/result word index
+#define VEN_R_FPT_DATA   0xF4  // RO  operand word selected by IDX (0-5)
+#define VEN_R_FPT_RES    0xF8  // W   result word -> res[IDX] (IDX 0-2)
+#define VEN_R_FPT_CTRL   0xFC  // W1P [0]=commit -> the core resumes
+#define VEN_FPT_STAT_ACTIVE  (1u << 0)   // a FP trap is pending + operands valid
+
 // ---- CTRL bits ------------------------------------------------------------
 #define VEN_CTRL_CORE_RUN   (1u << 0)   // 1 = release the core's reset
 #define VEN_CTRL_FLUSH_REQ  (1u << 1)   // W1P: pulse flush_all (mode-2 L1 invalidate)

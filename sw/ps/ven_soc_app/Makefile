@@ -50,9 +50,11 @@ $(OBJDIR)/%.o: %.c ven_soc_regs.h | $(OBJDIR)
 $(OBJDIR)/%.o: %.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -I. -I$(TBDIR) -c $< -o $@
 
-# link with the C++ driver so libstdc++ is pulled in.
+# link with the C++ driver so libstdc++ is pulled in; -lm for the FPATAN trap's
+# atan2/ldexp/frexp (floatx80<->double conversion in ven_soc_app.c). -lm trails the
+# objects so the static archive resolves the references.
 ven_soc_app: $(C_OBJ) $(CXX_OBJ)
-	$(CXX) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^ -lm
 
 ven_fb_vnc: fb_vnc.c ven_soc_regs.h
 	$(CC) $(CFLAGS) -o $@ fb_vnc.c
