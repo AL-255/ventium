@@ -1,6 +1,6 @@
 # Ventium — Status & TODO
 
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-18_
 
 ## Current focus: F4A — first DOS Quake frame on the KV260 (under FreeDOS)
 
@@ -9,108 +9,81 @@ PS-assisted Ventium SoC (real PL core + A53 peripheral models / soft devices).
 
 ---
 
-## ★★★ MAJOR RESULT (this milestone): F4A blocker ROOT-CAUSED + RTL-confirmed
+## DONE this session: real-mode stack-pointer 16-bit wrap fix (committed `1a64426`)
 
-**Symptom:** EXEC of a **high-cluster** file (VGATEST.COM ~cluster 4500, QUAKE.EXE)
-fails with `Error reading from drive C: ... unknown command given to driver
-(A)bort,(I)gnore,(R)etry,(F)ail?`, then idles at the prompt. Low-cluster `.COM`s
-(M1/M2/M3) EXEC fine. FreeDOS boots to `C:\>`; the soft-VGA teletype renders the
-full boot banner correctly.
+A genuine RTL bug, found + fixed + verified — **but it turned out NOT to be the
+F4A blocker** (see below).
 
-**Root cause — real-mode stack pointer is NOT masked to 16 bits in the core.**
-- The error is kernel `E_CMD` (code 3, `hdr/device.h:62`) from `Genblkdev`
-  (`dsk.c:517`) — a kernel block-device request whose command/category field is
-  **corrupted**. It is NOT an IDE/ATA abort and NOT a go32/CWSDPMI problem:
-  instrumented `VEN_IDE_LOG` shows the **board IDE trace == Verilator sim IDE
-  trace EXACTLY** (226 clean `CMD 20` reads to LBA 496 = AUTOEXEC.BAT, highest
-  LBA 496, **zero real aborts**, no high-cluster read ever issued). ⇒ **not
-  silicon-specific** ⇒ a deterministic, sim-debuggable CPU bug.
-- Traced (LBA-armed per-commit trace) to the **DOS reentrant interrupt-stack
-  trampoline** (LGROUP `cs=0070`: `mov ss,[6]; mov sp,[2]=0; push…; call far[bx]`),
-  which switches to **SP=0** (= top of a 64 KB internal stack) on every reentrant
-  DOS/disk call.
-- **RTL confirmed:** `core_bus_driver.svh` computes every stack address as
-  `seg_base[SG_SS] + (gpr[R_ESP] - q_w)` and `core_store_useq.svh`/`core_exec.svh`
-  write back `gpr[R_ESP] <= gpr[R_ESP] ± q_w` — **full 32-bit ESP, no 16-bit
-  wrap**. At SP=0 a push computes `ss_base + 0xFFFFFFFE` = **`ss_base − 2`**
-  (should be `ss_base + 0xFFFE`, top of the segment) → it scribbles *below* the
-  stack segment, corrupting adjacent kernel data → bad block request → `E_CMD`.
-- **Why only high-cluster EXEC:** boot / SeaBIOS / low-cluster `.COM`s keep SP
-  well above 0 and never wrap; the high-cluster EXEC path drives the reentrant
-  DOS stack down to SP=0.
-- The core HAS `real_mode` (=`sys_mode && !creg0[0]`) and masks 16-bit EA, but
-  never applies it to the **stack** pointer.
+- **Bug:** in real mode the stack pointer is 16-bit, but the core computed every
+  stack address and ESP writeback from the full 32-bit ESP with no wrap. At SP=0 a
+  push computed `ss_base+0xFFFFFFFE` = `ss_base-2` instead of `ss_base+0xFFFE`
+  (top of the 64K SS segment). RTL-confirmed in `core_bus_driver.svh` + the
+  centralized `core_gpr_wb.svh`.
+- **Fix:** `stk16()` helper masks a stack-address offset to 16 bits when
+  `real_mode`; one post-mask wraps the ESP writeback. Gated on `real_mode`
+  (=`sys_mode && !CR0.PE`) ⇒ pure identity in user/PM ⇒ `make verify` byte-identical.
+- **Verified working:** a sim trace shows the DOS reentrant trampoline now wraps
+  SP `0xfffe → 0xfffc → …` (zero `0xffffffff` underflows). SeaBIOS POSTs; a
+  low-cluster `.COM` EXECs fine from AUTOEXEC.
 
----
+## STILL OPEN: the actual F4A blocker — high-cluster file EXEC fails
 
-## TODO
+The SP wrap was a **red herring** for F4A. The real bug is separate and present
+even with the fix:
 
-### 1. [NEXT] Implement the real-mode stack-wrap fix (~35 sites / 7 files)
-Gate everything on `real_mode` (identity when 0 ⇒ user-mode `make verify` stays
-byte-identical by construction; only real-mode stack wraps change).
+- **Symptom:** a `.COM` at a **low cluster** EXECs fine from AUTOEXEC
+  (`[KLO-RAN]` prints); a `.COM` at a **high cluster** (~4500, after an 18 MB
+  filler — mirrors VGATEST/QUAKE.EXE) does NOT (`[KHI-RAN]` never prints).
+  Deterministic, cluster-number-dependent ⇒ a real CPU bug.
+- **Where it fails (trace, sentinel-armed at the KHI EXEC):** the kernel's
+  high-cluster file read fails in the **read-SETUP, before INT 13h AH=02** — it
+  **never issues the high-LBA read** (highest LBA stays ~432, the low region).
+  Instead the kernel spins in a disk-retry loop at `cs=10ef:0x108c–0x1098`
+  issuing INT 13h **resets (AH=00) but no reads (AH=02)**. The original 70142-byte
+  kernel surfaced this as `E_CMD`/"unknown command"; this 48856-byte kernel spins
+  in reset/retry.
+- **Localized (kwc8616.map + sentinel-armed trace):** the spin is in the kernel's
+  **`LBA_Transfer_` / `LBA_to_CHS_`** region (TGROUP link `020b:0e3a`/`0ee2`; the
+  failing loop is TGROUP offset `~0x108c`, runtime `cs=10ef:0x108c`). The loop
+  scans `bx` upward by 2 (~1871 iterations for the high sector ~36000) with
+  `cx=0`, `ax=0x2030`, never issuing INT 13h AH=02 → then reset/retry forever.
+  So the bug is in the **LBA→CHS conversion / transfer-split loop** for a high
+  sector. NOT the SP wrap (ruled out), NOT the disk (low-cluster works), NOT
+  silicon (sim-reproducible). The exact faulting instruction still needs the
+  correct kernel disassembly (kernel.sys file layout ≠ link paragraphs — find the
+  TGROUP/HMA_TEXT file offset, then `ndisasm -b16` the `0x108c` loop).
 
-- Add 2 module-scope fns in `core.sv` near `seg_real`:
-  - `stk16(off)   = real_mode ? {16'd0, off[15:0]} : off`        (address offsets)
-  - `stk16wb(new) = real_mode ? {gpr[R_ESP][31:16], new[15:0]} : new`  (ESP writeback; preserves ESP high word)
-- **Address** sites (wrap the esp-offset arg with `stk16`):
-  `core_bus_driver.svh` L34, 36, 68, 71, 79, 80, 109, 120, 165, 177, 247, 258;
-  `core.sv` `st_addr` L3257, 3266, 3270, 3274 (+ any other `st_addr=gpr[R_ESP]-…`
-  in the push if/else ~3250–3300).
-- **ESP/EBP writeback** sites (wrap the new value with `stk16wb`):
-  `core_store_useq.svh` L57, 86, 87, 89, 130, 131, 165, 180;
-  `core_exec.svh` L165, 168, 703, 710, 798, 802;
-  `core_seg_ljmp.svh` L155, 181; `core_rmint.svh` L34, 66;
-  `core_iret.svh` L41, 60, 80; `core_int_deliver.svh` L172, 178, 183.
-- **CRITICAL:** mask an address AND its matching writeback together — a
-  half-masked op = inconsistent push/pop = worse than the bug.
-- Cross-priv / `int_deliver` sites (214/234/172/178) are PM (real_mode=0) ⇒
-  `stk16` is identity there; safe.
+## NEXT STEPS
 
-### 2. [VERIFY] Regression the fix
-- `make verify` → 77/77 byte-identical (guaranteed by the `real_mode=0` guard).
-- SeaBIOS / FreeDOS SoC gates pass.
-- `VEN_F4A_ARM_LBA=496 obj_dir_l1axi_kvdosq/tb_ventium --dos --disk
-  /tmp/quake_safe.img …` must now show a **high-LBA read of VGATEST's cluster
-  (~36000)** replacing the `E_CMD` retry loop (= the fix works).
+1. **Pin the high-cluster read-setup bug.** Disassemble the kernel loop at
+   `cs=10ef:0x108c–0x1098` (map via the kwc8616.map link addrs + the runtime load
+   base) to identify the function; trace the cluster→sector/CHS computation for a
+   high cluster vs a low one and find the diverging value. Capture needs a bigger
+   trace budget OR `VEN_F4A_CYC_LO` set to the KHI-EXEC cycle (~70M) — the 400k
+   per-commit budget runs out in the ~6M-cycle COMMAND.COM reload gap after KLO.
+   Alternative: cluster-threshold bisection (vary the filler size) to find the
+   failing bit-width.
+2. Fix that bug; re-run the `fdhi.img` KLO/KHI test until `[KHI-RAN]` prints.
+3. Keep the SP-wrap fix (it's correct + safe); `make verify` stays byte-identical.
+4. **Pre-existing regression to address:** `tx_fprem` (FPREM) — broken by the R3
+   `fpu_writeback.sv` extraction (`de67eca`), the only `make verify` failure,
+   independent of the above. FPREM is on the Quake render path.
+5. After F4A EXEC works: QUAKE.EXE load → CWSDPMI → PAK0.PAK → first mode-13h frame.
+6. [#41 F5] tyrquake interactive — PARKED (board-only synth fetch-bit[2] bug).
 
-### 3. [BOARD] Respin + deploy + retest on the KV260
-- Rebuild the bitstream with the fix (respins are expensive — exhaust sim first).
-- Deploy + re-run the F4A flow with `--soft-vga` + `kms-draw --vga13`.
-- VGATEST should render its mode-13h grayscale gradient on the monitor.
+## Harness notes (rebuilt this session after `/tmp` was cleared)
 
-### 4. [F4A] Continue DOS-Quake bring-up to the first frame
-After EXEC works: QUAKE.EXE load → CWSDPMI real→PM/paging → PAK0.PAK load
-(18 MB PIO) → Quake init (`Alpha_Init` ~1 B insns) → first mode-13h frame at
-0xA0000. Watch for the userspace-path silicon fetch bug ([[f4-board-memcpy-halt]]).
-
-### 5. [#99 Soft VGA] Finish validation
-PS-side INT 10h handler in `ven_soc_app` (`--soft-vga`): teletype banner renders
-(validated). Mode-13h set + DAC + framebuffer-capture path is implemented but the
-gradient render is blocked by the high-cluster EXEC bug above — re-validate once
-VGATEST can run.
-
-### 6. [#41 F5] tyrquake interactive Quake — PARKED
-Board-only synthesis fetch hazard (RTL sim clean; "instruction-fetch address
-bit[2] dropped" — see [[fetch-addr-bit2-drop]] / [[quake-freeze-fetch-path]]).
-Distinct from the F4A bug above (that one IS sim-reproducible).
-
----
-
-## Debug tooling added this milestone (in this commit)
-- **`ven_soc_app --soft-vga`** (`sw/ps/ven_soc_app/ven_soc_app.c`): PS-side INT 10h
-  VGABIOS — trapped via a C000:0 stub + port 0x2E0; teletype → 0xB8000, set-mode-13h
-  → 0xA0000, DAC via 0x3C8/0x3C9. Plus `--extmem-kb N` (CMOS extended memory for
-  CWSDPMI's heap; DOS Quake needs `--extmem-kb 64512`).
-- **`ven_ide` diagnostics** (`sw/ps_periph/ven_ide.c`): `VEN_IDE_LOG` now logs every
-  ATA command + flags aborts; `g_ven_f4a_arm` global armed by `VEN_F4A_ARM_LBA`.
-- **f4a instruction trace** (`verif/tb/tb_main.cpp`): per-commit `cs/eip/GPR` trace
-  armed by `VEN_F4A_ARM_LBA` (the disk LBA that starts the trace), optionally
-  windowed by `VEN_F4A_CYC_LO`/`VEN_F4A_CYC_HI`. Default-off ⇒ byte-identical.
-
-## Repro recipes
-- **Board (fast, ~secs):** `ven_soc_app_q --sys --dos --soft-vga --bios seabios.bin
-  --disk quake_safe.img --extmem-kb 64512` + `kms-draw --vga13` (board @ 40 MHz).
-- **Sim (faithful, ~20 min boot):** `obj_dir_l1axi_kvdosq/tb_ventium --image
-  bios.bin --dos --disk /tmp/quake_safe.img --no-trace --quiesce 8000000
-  --max-cycles 4000000000 --max-insn 250000000`.
-- Disk built by `/tmp/build_safe.sh` (28 MB, CHS 56/16/63, FAT16 spc=8, `-r 32`).
+- Original patched kernel `kwc8616.sys` (70142 B) + disk-build inputs were LOST
+  with `/tmp`. Recovered `ventium-refs/freedos/kernel.sys` (48856 B, kwc8616
+  build) + `COMMAND.COM` + the boot.asm VBR recipe (`build-freedos-hdd.sh`).
+- `tb_main` additions (uncommitted debug): 0xB8000 **VGA text-screen dump** at
+  `--dos` exit; `VEN_F4A_ARM_LBA` / `VEN_F4A_CYC_LO/HI` per-commit `cs/eip/GPR`
+  trace; **0x07-on-port-0xE9 sentinel** arms the trace (a marker `.COM` emits it
+  right before the instruction under study). FreeDOS console output goes via INT
+  10h (no sim handler) ⇒ the screen is blank unless soft-VGA is present; use a
+  port-0xE9 marker `.COM` for visible output in the sim.
+- Repro disks: `/tmp/fdmin.img` (3 MB, boots + runs a low-cluster `.COM`),
+  `/tmp/fdhi.img` (28 MB, spc=8, KLO low + 18 MB filler + KHI high — the repro).
+- Sim run: `obj_dir_l1axi_kvdosq/tb_ventium --image bios.bin --dos --disk <img>
+  --no-trace --quiesce 8000000 --max-cycles 150000000 --max-insn 250000000`,
+  `VEN_IDE_LOG=1`. Boot reaches AUTOEXEC ~cyc 60M; ~10 min wall.

@@ -732,6 +732,13 @@ int main(int argc, char** argv) {
 #endif
             else if (args.cosim && (port == 0x3f8 || port == 0xe9 || port == 0x402)) {
                 std::putchar((int)(top->io_wdata & 0xff)); std::fflush(stdout);  // COM1 / qemu-dbg / SeaBIOS DEBUG_IO_PORT
+                // F4A: a sentinel byte 0x07 on 0xe9 arms the f4a per-commit trace
+                // (a marker .COM emits it right before the instruction under study,
+                // so the trace captures that exact region instead of the boot idle).
+                // Guarded: g_ven_f4a_arm only exists in the VEN_DOS_MODELS build.
+#ifdef VEN_DOS_MODELS
+                if (port == 0xe9 && (top->io_wdata & 0xff) == 0x07) g_ven_f4a_arm = 1;
+#endif
             }
             io_held_rdata = 0;
             io_pending_in = false;
@@ -1505,6 +1512,22 @@ int main(int argc, char** argv) {
             }
             std::fclose(vf);
             std::fprintf(stderr, "tb: dumped VGA13 @0xA0000 (64000 B, %ld nonzero px) -> /tmp/sim_vga13.bin\n", nz);
+        }
+        // F4A: VGA TEXT @0xB8000 (80x25, char+attr). FreeDOS CON writes its banner /
+        // prompt / errors directly here; the sim has no soft-VGA INT10h so this is
+        // the only way to SEE the boot screen. Dump non-blank rows as readable text.
+        {
+            std::fprintf(stderr, "tb: === VGA text @0xB8000 (80x25) ===\n");
+            for (int row = 0; row < 25; row++) {
+                char line[81]; int any = 0;
+                for (int col = 0; col < 80; col++) {
+                    uint8_t ch = mem.read8(0xB8000u + (uint32_t)(row*80 + col)*2u);
+                    line[col] = (ch >= 0x20 && ch < 0x7f) ? (char)ch : ' ';
+                    if (line[col] != ' ') any = 1;
+                }
+                int e = 80; line[80] = 0; while (e > 0 && line[e-1] == ' ') line[--e] = 0;
+                if (any) std::fprintf(stderr, "tb: %2d|%s\n", row, line);
+            }
         }
         // wedge diag: top IO ports (a dominant port => poll loop / peripheral gap;
         // all-zero after VEN_IOHIST_RESET => the wedge does NO IO == CPU/logic loop)
