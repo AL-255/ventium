@@ -3697,19 +3697,9 @@ module core
                      u_d.is_load && !pipe_agi && (mispred_bubbles==3'd0);
     pipe_load_base = u_d.base;
 
-    // U datapath (reuse the shared helpers; results are bit-identical to slow).
-    // INC/DEC use a fixed second operand of 1 (matching the slow path's b_op).
-    u_alu   = alu_result(u_d.alu_op, reg_read(u_d.dst,3'd4,1'b0),
-                         fp_bop(u_d), eflags[0]);
-    u_flags = flags_next(u_d.alu_op, reg_read(u_d.dst,3'd4,1'b0),
-                         fp_bop(u_d), u_alu, eflags, 3'd4);
-    u_sh    = shrot_result(u_d.shrot, reg_read(u_d.dst,3'd4,1'b0),
-                           {1'b0,u_d.shimm}, eflags[0], 3'd4);
-    u_shm1  = (u_d.shimm==5'd0) ? reg_read(u_d.dst,3'd4,1'b0)
-              : shrot_result(u_d.shrot, reg_read(u_d.dst,3'd4,1'b0),
-                             {1'b0,u_d.shimm}-6'd1, eflags[0], 3'd4);
-    u_shcf  = shrot_cf(u_d.shrot, reg_read(u_d.dst,3'd4,1'b0),
-                       {1'b0,u_d.shimm}, eflags[0], 3'd4);
+    // U datapath extracted to core/u_pipe.sv (R3, behaviour-preserving):
+    // u_alu/u_flags/u_sh/u_shm1/u_shcf are driven by the u_pipe instance below
+    // from the pre-read U operands. The eip-relative branch target stays here.
     u_target = (eip + {28'd0,u_d.len}) + u_d.rel;
     // BTB U predict: drive the module's comb predict port at this clock's U pc
     // (= eip) and read back its PRE-update predicted-taken (bpred_btb).
@@ -3763,6 +3753,25 @@ module core
     end
     v_br_taken_eff = v_d.br_cond ? cond_true(v_br_cc(v_d), u_flags_eff) : 1'b1;
   end
+
+  // ---- U-pipe datapath (core/u_pipe.sv, R3) --------------------------------
+  // Pre-read U operands; the fast path always reads full dwords, so these are
+  // exactly reg_read(idx,3'd4,1'b0) == gpr[idx]. The u_pipe instance drives
+  // u_alu/u_flags/u_sh/u_shm1/u_shcf consumed by the eval above + S_PIPE commit.
+  logic [31:0] u_dst_val, u_src_val;
+  assign u_dst_val = reg_read(u_d.dst, 3'd4, 1'b0);
+  assign u_src_val = reg_read(u_d.src, 3'd4, 1'b0);
+  u_pipe u_upipe (
+    .u_d       (u_d),
+    .u_dst_val (u_dst_val),
+    .u_src_val (u_src_val),
+    .eflags    (eflags),
+    .u_alu     (u_alu),
+    .u_flags   (u_flags),
+    .u_sh      (u_sh),
+    .u_shm1    (u_shm1),
+    .u_shcf    (u_shcf)
+  );
 
   // ===========================================================================
   // BTB resolve port (R2 extract, bpred_btb). The single per-clock BTB update
