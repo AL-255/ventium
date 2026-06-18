@@ -57,6 +57,7 @@ ven_periph_t* ven_vgaregs_new(void);
 ven_periph_t* ven_pit_new(void);
 ven_periph_t* ven_rtc_new(void);
 ven_periph_t* ven_ide_new(const char* disk_path);
+extern int    g_ven_f4a_arm;   // ven_ide sets this when VEN_F4A_ARM_LBA is read (F4A trace arm)
 void          ven_pic_set_irq(ven_periph_t*, int irq, int level);
 uint8_t       ven_pic_peek_vector(ven_periph_t*);
 uint8_t       ven_pic_intack(ven_periph_t*);
@@ -1375,13 +1376,18 @@ int main(int argc, char** argv) {
         // unique committed EIP in the loop region over a 200k-cycle window at the hang.
         {
             static uint32_t f4a_last = 0xffffffffu; static int f4a_n = 0;
+            static uint64_t f4a_lo = std::getenv("VEN_F4A_CYC_LO") ? strtoull(std::getenv("VEN_F4A_CYC_LO"),0,0) : 0ull;
+            static uint64_t f4a_hi = std::getenv("VEN_F4A_CYC_HI") ? strtoull(std::getenv("VEN_F4A_CYC_HI"),0,0) : ~0ull;
             uint32_t e = (uint32_t)top->dbg_eip;
-            if (cycles >= 155000000ull && cycles <= 155200000ull && f4a_n < 4000
-                && e != f4a_last && e >= 0x7d00u && e <= 0x7e60u) {
-                f4a_last = e; f4a_n++;
-                std::fprintf(stderr, "f4a eip=%04x cx=%08x si=%08x di=%08x ax=%08x\n",
-                    e, ventium::g_last_arch.gpr[1], ventium::g_last_arch.gpr[6],
-                    ventium::g_last_arch.gpr[7], ventium::g_last_arch.gpr[0]);
+            uint32_t key = ((uint32_t)top->dbg_cs << 16) ^ e;
+            if (g_ven_f4a_arm && cycles >= f4a_lo && cycles <= f4a_hi && f4a_n < 400000 && key != f4a_last) {
+                f4a_last = key; f4a_n++;
+                std::fprintf(stderr, "f4a cs=%04x eip=%04x ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x\n",
+                    (unsigned)top->dbg_cs, e,
+                    ventium::g_last_arch.gpr[0], ventium::g_last_arch.gpr[3],
+                    ventium::g_last_arch.gpr[1], ventium::g_last_arch.gpr[2],
+                    ventium::g_last_arch.gpr[6], ventium::g_last_arch.gpr[7],
+                    ventium::g_last_arch.gpr[5], ventium::g_last_arch.gpr[4]);
             }
         }
         // Log every real-mode INT (vector + AX at entry). init_call_intr patches
