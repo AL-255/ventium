@@ -31,7 +31,7 @@
           if (mem_ack) begin
             if (int_step != 4'd2) int_step <= int_step + 4'd1;
             else begin
-              gpr[R_ESP]      <= gpr[R_ESP] - 32'd6;
+              // R3: SP -= 6 moved to the gpr writeback driver (S_RMINT_PUSH arm).
               seg_sel [SG_CS] <= int_gate_sel;
               seg_base[SG_CS] <= {12'd0, int_gate_sel, 4'd0};
               seg_attr[SG_CS] <= 8'h9B;
@@ -63,7 +63,7 @@
                 // 16-bit IRET restores the low-16 settable flags (CF..NT incl IF/IOPL);
                 // bit1 reads 1; EFLAGS[31:16] (VM/AC/ID/...) are untouched by a 16-bit pop.
                 eflags          <= {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)};
-                gpr[R_ESP]      <= gpr[R_ESP] + 32'd6;
+                // R3: SP += 6 moved to the gpr writeback driver (S_RMIRET arm).
                 q_pc            <= int_src_pc;
                 retire_valid    <= 1'b1;
                 int_step        <= 4'd0;

@@ -38,7 +38,7 @@
                 end else if (iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
                 else begin
                   // SAME-PRIV: commit now (ESP += 12), reload CS, retire via _RET.
-                  gpr[R_ESP]   <= gpr[R_ESP] + 32'd12;
+                  // R3: ESP+=12 moved to the gpr writeback driver (S_IRET/int_step 2).
                   eip          <= iret_eip;
                   eflags       <= mem_rdata;
                   int_gate_sel <= iret_cs;
@@ -55,9 +55,10 @@
                   // return: EIP, EFLAGS, and the OUTER ESP/SS. seg_base[SG_SS] is
                   // still the inner base while we reload the CS (S_INT_CS_RET), then
                   // S_IRET_SS loads the outer SS descriptor. ESP <- popped outer ESP.
+                  // R3: ESP<-outer popped ESP moved to the gpr writeback driver
+                  // (core_gpr_wb.svh, S_IRET/int_step 4 arm).
                   eip          <= iret_eip;
                   eflags       <= iret_eflags;
-                  gpr[R_ESP]   <= iret_esp;
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
                   state        <= S_INT_CS_RET;
@@ -77,7 +78,7 @@
                 iret_v86_gs <= mem_rdata[15:0];
                 eip         <= iret_eip;
                 eflags      <= iret_eflags;            // VM is set in the popped image
-                gpr[R_ESP]  <= iret_esp;
+                // R3: ESP<-popped ESP moved to the gpr writeback driver (S_IRET beat 8).
                 cpl_r       <= 2'd3;                   // V86 runs at CPL3
                 cs_d        <= 1'b0;                   // V86 is 16-bit default
                 // CS = popped selector, base = sel<<4.

@@ -24,8 +24,8 @@
             logic [31:0] io_eip;
             logic [3:0]  io_xbp;
             io_eip = next_eip;
-            if (!q_io_write)
-              gpr[R_EAX] <= reg_merge(gpr[R_EAX], wmask(io_rdata, q_io_w), q_io_w, 1'b0);
+            // R3: the IN value -> AL/AX/eAX write moved to the gpr writeback driver
+            // (core_gpr_wb.svh, S_IO arm).
             eip <= io_eip;
             io_xbp = (sys_mode && !rf_at_issue) ? dr_match(seg_base[SG_CS]+io_eip, 1'b1)
                                                 : 4'd0;
@@ -52,7 +52,7 @@
         S_INS: begin
           logic [31:0] cx;
           logic        rep_active, last_iter;
-          cx = gpr[R_ECX];
+          cx = gpr_o[R_ECX];
           rep_active = (q_rep || q_repne);
           // F3: a16 REP INS counts in CX (low 16) — see the K_STR arm.
           if (rep_active && (q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0))) begin
@@ -65,12 +65,11 @@
             // Capture the IN value, set up THIS element's store + pointer/count
             // update, then go to S_STORE (str_store_addr/data latched below).
             ins_data <= wmask(io_rdata, q_io_w);   // width-masked device value
-            gpr[R_EDI] <= q_cnt16                  // F3: a16 wraps DI mod 64K
-                ? {gpr[R_EDI][31:16], gpr[R_EDI][15:0]+str_step[15:0]}
-                : gpr[R_EDI] + str_step;               // EDI += width (DF direction)
+            // R3: the EDI += width and ECX -= 1 (REP) writes moved to the gpr
+            // writeback driver (core_gpr_wb.svh, S_INS arm); cx is still recomputed
+            // below since last_iter / str_next_eip need it.
             if (rep_active) begin
               cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
-              gpr[R_ECX] <= cx;
               last_iter = q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0);
               str_next_eip <= last_iter ? next_eip : q_pc;  // loop at q_pc if more
             end else begin

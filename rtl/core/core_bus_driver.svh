@@ -20,7 +20,7 @@
       S_PIPE:  begin
         // a register-base load issued this clock reads [base] combinationally.
         // M2S.1: add the DS base (0 in user mode / flat PM).
-        if (pipe_load_req) begin mem_req=1'b1; mem_addr=seg_base[SG_DS]+gpr[pipe_load_base]; end
+        if (pipe_load_req) begin mem_req=1'b1; mem_addr=seg_base[SG_DS]+gpr_o[pipe_load_base]; end
         // I-cache miss detected this clock: fetch the fill line's WORD 0 NOW so the
         // detection clock is productive (finding [med] I-miss off-by-one). S_PF then
         // fetches words 1..7. mem_req for the load and the fill are mutually
@@ -31,15 +31,15 @@
         mem_req=1'b1;
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
             (q_kind==K_STKMISC && q_sm==SM_POPF))
-          mem_addr=dbase+gpr[R_ESP];
+          mem_addr=dbase+gpr_o[R_ESP];
         else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)
-          mem_addr=dbase+gpr[R_EBP];     // LEAVE reads [EBP] (the saved frame ptr)
+          mem_addr=dbase+gpr_o[R_EBP];     // LEAVE reads [EBP] (the saved frame ptr)
         else if (q_kind==K_STR) begin
           // load order: movs/lods/cmps -> [ESI]; scas -> [EDI]
           // F3: a16 string EA uses SI/DI low-16 (str_esi/str_edi mask).
           if (q_st==ST_SCAS) mem_addr=dbase+str_edi;
           else               mem_addr=dbase+str_esi;
-        end else if (q_xlat) mem_addr=dbase+gpr[R_EBX]+{24'd0,gpr[R_EAX][7:0]};
+        end else if (q_xlat) mem_addr=dbase+gpr_o[R_EBX]+{24'd0,gpr_o[R_EAX][7:0]};
                                           // XLATB: byte at [DS:(E)BX + AL]
         else mem_addr=opbase+q_ea;        // M7.1: opbase==dbase except a proxy
                                           // gs-override indirect-call operand read
@@ -53,7 +53,7 @@
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
       S_LGDT: begin mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
       S_SEGLD: begin mem_req=1'b1;
-        mem_addr=gdt_base+{16'd0,gpr[q_src_reg][15:3],3'd0}+{29'd0,seg_step,2'b00};
+        mem_addr=gdt_base+{16'd0,gpr_o[q_src_reg][15:3],3'd0}+{29'd0,seg_step,2'b00};
       end
       S_LJMP: begin mem_req=1'b1;
         mem_addr=gdt_base+{16'd0,q_ljmp_sel[15:3],3'd0}+{29'd0,seg_step,2'b00};
@@ -65,10 +65,10 @@
       S_LCALL: begin
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=(q_w==3'd2)?4'b0011:4'b1111;
         if (!seg_step) begin
-          mem_addr  = seg_base[SG_SS] + (gpr[R_ESP] - {28'd0,q_w});         // SP - w
+          mem_addr  = seg_base[SG_SS] + (gpr_o[R_ESP] - {28'd0,q_w});         // SP - w
           mem_wdata = {16'd0, seg_sel[SG_CS]};                             // push CS
         end else begin
-          mem_addr  = seg_base[SG_SS] + (gpr[R_ESP] - {27'd0,q_w,1'b0});   // SP - 2w
+          mem_addr  = seg_base[SG_SS] + (gpr_o[R_ESP] - {27'd0,q_w,1'b0});   // SP - 2w
           mem_wdata = next_eip;                                           // push ret IP
         end
       end
@@ -76,8 +76,8 @@
       // pops CS at [SS:SP+w]. ESP is unchanged until the S_RETF commit.
       S_RETF: begin
         mem_req=1'b1;
-        if (!seg_step) mem_addr = seg_base[SG_SS] + gpr[R_ESP];            // pop IP
-        else           mem_addr = seg_base[SG_SS] + (gpr[R_ESP]+{28'd0,q_w}); // pop CS
+        if (!seg_step) mem_addr = seg_base[SG_SS] + gpr_o[R_ESP];            // pop IP
+        else           mem_addr = seg_base[SG_SS] + (gpr_o[R_ESP]+{28'd0,q_w}); // pop CS
       end
       // M9.5 — SGDT/SIDT: 2-beat store of the 6-byte pseudo-descriptor (the exact
       // reverse of S_LGDT's read layout). beat 0 @[mem] = {base[15:0], limit[15:0]}
@@ -106,7 +106,7 @@
       // the S_RMINT_PUSH commit.
       S_RMINT_PUSH: begin
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b0011;
-        mem_addr = seg_base[SG_SS] + (gpr[R_ESP] - {27'd0, (int_step+4'd1), 1'b0});
+        mem_addr = seg_base[SG_SS] + (gpr_o[R_ESP] - {27'd0, (int_step+4'd1), 1'b0});
         unique case (int_step)
           4'd0:    mem_wdata = {16'd0, eflags[15:0]};
           4'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
@@ -117,7 +117,7 @@
       // FLAGS (beat2 @SS:SP+4).
       S_RMIRET: begin
         mem_req=1'b1;
-        mem_addr = seg_base[SG_SS] + (gpr[R_ESP] + {27'd0, int_step, 1'b0});
+        mem_addr = seg_base[SG_SS] + (gpr_o[R_ESP] + {27'd0, int_step, 1'b0});
       end
       S_FLOAD: begin
         mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
@@ -159,22 +159,22 @@
           // CMPXCHG8B equal-case store: EBX -> [mem] (beat 0), ECX -> [mem+4] (beat 1).
           mem_we=1'b1; mem_wstrb=4'b1111;
           mem_addr=dbase+q_ea+(step==4'd0 ? 32'd0 : {28'd0,q_w});
-          mem_wdata=(step==4'd0) ? gpr[R_EBX] : gpr[R_ECX];
+          mem_wdata=(step==4'd0) ? gpr_o[R_EBX] : gpr_o[R_ECX];
         end else if (q_sm==SM_PUSHA) begin
           mem_we=1'b1; mem_wstrb=4'b1111;
           mem_addr=dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
           unique case (step)
-            4'd0: mem_wdata=gpr[R_EAX];
-            4'd1: mem_wdata=gpr[R_ECX];
-            4'd2: mem_wdata=gpr[R_EDX];
-            4'd3: mem_wdata=gpr[R_EBX];
+            4'd0: mem_wdata=gpr_o[R_EAX];
+            4'd1: mem_wdata=gpr_o[R_ECX];
+            4'd2: mem_wdata=gpr_o[R_EDX];
+            4'd3: mem_wdata=gpr_o[R_EBX];
             4'd4: mem_wdata=pusha_esp;     // original ESP
-            4'd5: mem_wdata=gpr[R_EBP];
-            4'd6: mem_wdata=gpr[R_ESI];
-            default: mem_wdata=gpr[R_EDI];
+            4'd5: mem_wdata=gpr_o[R_EBP];
+            4'd6: mem_wdata=gpr_o[R_ESI];
+            default: mem_wdata=gpr_o[R_EDI];
           endcase
         end else begin // POPA: read ascending from ESP
-          mem_we=1'b0; mem_addr=dbase+gpr[R_ESP] + (32'd4*{28'd0,step});
+          mem_we=1'b0; mem_addr=dbase+gpr_o[R_ESP] + (32'd4*{28'd0,step});
         end
       end
       // M2S.2 — the page-walk reads/writes the page tables in PHYSICAL memory.
@@ -244,7 +244,7 @@
         end else begin
           // SAME-PRIV: beat 0 EFLAGS @ ESP-4, 1 CS @ ESP-8, 2 EIP @ ESP-12,
           // 3 errcode @ ESP-16. The push uses the SS base (flat 0 here).
-          mem_addr = seg_base[SG_SS] + gpr[R_ESP]
+          mem_addr = seg_base[SG_SS] + gpr_o[R_ESP]
                      - ({28'd0, int_step} * 32'd4) - 32'd4;
           unique case (int_step)
             4'd0:    mem_wdata = eflags;
@@ -255,7 +255,7 @@
         end
       end
       S_IRET, S_IRET_SS: begin mem_req=1'b1;     // pop EIP/CS/EFLAGS[+ESP/SS] asc
-        mem_addr = seg_base[SG_SS] + gpr[R_ESP] + ({28'd0, int_step} * 32'd4);
+        mem_addr = seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4);
       end
       S_INT_CS_RET: begin mem_req=1'b1;          // reload returned-to CS descriptor
         mem_addr = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
@@ -264,7 +264,7 @@
       // M2S.4 — TR/TSS reads (run with paging OFF, like the other descriptor
       // reads; NOT re-translated by the post-stage below).
       S_LTR: begin mem_req=1'b1;                 // GDT TSS descriptor @ gdt_base
-        mem_addr = gdt_base + {16'd0, gpr[q_src_reg][15:3], 3'd0}
+        mem_addr = gdt_base + {16'd0, gpr_o[q_src_reg][15:3], 3'd0}
                    + {29'd0, seg_step, 2'b00};
       end
       S_INT_TSS: begin mem_req=1'b1;             // TSS.ssN:espN (ESPn then SSn)
@@ -287,7 +287,7 @@
           5'd0:    mem_wdata = tsw_save_eip;
           5'd1:    mem_wdata = eflags;
           5'd2,5'd3,5'd4,5'd5,5'd6,5'd7,5'd8,5'd9:
-                   mem_wdata = gpr[3'(tsw_step - 5'd2)];
+                   mem_wdata = gpr_o[3'(tsw_step - 5'd2)];
           5'd10:   mem_wdata = {16'd0, seg_sel[SG_ES]};
           5'd11:   mem_wdata = {16'd0, seg_sel[SG_CS]};
           5'd12:   mem_wdata = {16'd0, seg_sel[SG_SS]};

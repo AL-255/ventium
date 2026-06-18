@@ -26,12 +26,12 @@
       io_addr  = q_io_port;
       io_size  = q_io_w;
       // OUT drives the source eAX masked to the access width (the CPU's own datum).
-      io_wdata = (q_io_w==3'd1) ? {24'd0, gpr[R_EAX][7:0]}  :
-                 (q_io_w==3'd2) ? {16'd0, gpr[R_EAX][15:0]} : gpr[R_EAX];
+      io_wdata = (q_io_w==3'd1) ? {24'd0, gpr_o[R_EAX][7:0]}  :
+                 (q_io_w==3'd2) ? {16'd0, gpr_o[R_EAX][15:0]} : gpr_o[R_EAX];
     end
     // M7.3c INS: each element issues an IN (read) from port DX (q_io_port). Suppress
     // the request on a degenerate REP INS with ECX==0 (no element -> no port read).
-    else if (state==S_INS && !((q_rep||q_repne) && gpr[R_ECX]==32'd0)) begin
+    else if (state==S_INS && !((q_rep||q_repne) && gpr_o[R_ECX]==32'd0)) begin
       io_req   = 1'b1;
       io_we    = 1'b0;            // INS is always a port READ
       io_addr  = q_io_port;

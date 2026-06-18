@@ -274,7 +274,7 @@ module core
     // of replaying a golden. Pure combinational regfile reads — completely INERT
     // to core behaviour (no feedback path), so every existing gate is unchanged.
     // i386 Linux syscall ABI: nr=eax, args=(ebx,ecx,edx,esi,edi,ebp).
-    output logic [31:0] syscall_arg_eax,  // gpr[EAX] = syscall number
+    output logic [31:0] syscall_arg_eax,  // gpr_o[EAX] = syscall number
     output logic [31:0] syscall_arg_ebx,  // arg0
     output logic [31:0] syscall_arg_ecx,  // arg1
     output logic [31:0] syscall_arg_edx,  // arg2
@@ -449,7 +449,24 @@ module core
   // ===========================================================================
   logic [31:0] eip;
   logic [31:0] eflags;
-  logic [31:0] gpr [NUM_GPR];   // eax ecx edx ebx esp ebp esi edi
+  // R3: the architectural GPR file now lives in the `regfile` submodule (its own
+  // synchronous dual-boot-mode reset + per-register write bus). The spine drives
+  // gpr_we/gpr_wd from the writeback driver below; gpr_o is the registered read-
+  // out (combinationally visible), used everywhere the old `gpr` array was read.
+  logic [NUM_GPR-1:0] gpr_we;          // per-register write enable
+  logic [31:0]        gpr_wd [NUM_GPR]; // per-register write data
+  logic [31:0]        gpr_o  [NUM_GPR]; // registered read-out (eax..edi)
+
+  regfile u_regfile (
+    .clk       (clk),
+    .rst_n     (rst_n),
+    .boot_mode (boot_mode),
+    .cosim_en  (cosim_en),
+    .init_esp  (init_esp),
+    .gpr_we    (gpr_we),
+    .gpr_wd    (gpr_wd),
+    .gpr_o     (gpr_o)
+  );
 
   // ===========================================================================
   // M2S.1 system-mode architectural state (docs/m2s1-segmentation-spec.md).
@@ -731,7 +748,7 @@ module core
   // st(i) read addressing) is now OWNED by the fpu_top module (rtl/fpu/fpu_top.sv),
   // instantiated as u_fpu_state below. The spine keeps the DATAPATH (the
   // fpu_x87_pkg value computations), the M5 FP scoreboard, the S_FEXEC/S_FSTORE
-  // FSM, and FNSTSW->gpr[EAX]; it computes each value and drives it onto the
+  // FSM, and FNSTSW->gpr_o[EAX]; it computes each value and drives it onto the
   // module's write ports (the fp_we_* combinational driver near the u_fpu_state
   // instance), and reads the registered state back through these combinational
   // wires (st(i) = fp_st[i], ftop/fctrl/fstat/fptag = the module's *_o outputs).
@@ -1280,7 +1297,7 @@ module core
   decode_stages u_decode_stages (
     // inputs (architectural + fetch state the decoder reads)
     .ibuf          (ibuf),
-    .gpr           (gpr),
+    .gpr           (gpr_o),
     .eflags        (eflags),
     .sys_mode      (sys_mode),
     .def16         (def16),
@@ -1419,13 +1436,13 @@ module core
   // free-run emulator can read nr+args off the same edge as syscall_active. Pure
   // combinational reads of gpr (layout: eax ecx edx ebx esp ebp esi edi) — no
   // feedback into the core, inert in every replay/non-proxy run.
-  assign syscall_arg_eax = gpr[0];
-  assign syscall_arg_ecx = gpr[1];
-  assign syscall_arg_edx = gpr[2];
-  assign syscall_arg_ebx = gpr[3];
-  assign syscall_arg_ebp = gpr[5];
-  assign syscall_arg_esi = gpr[6];
-  assign syscall_arg_edi = gpr[7];
+  assign syscall_arg_eax = gpr_o[0];
+  assign syscall_arg_ecx = gpr_o[1];
+  assign syscall_arg_edx = gpr_o[2];
+  assign syscall_arg_ebx = gpr_o[3];
+  assign syscall_arg_ebp = gpr_o[5];
+  assign syscall_arg_esi = gpr_o[6];
+  assign syscall_arg_edi = gpr_o[7];
 
   // ===========================================================================
   // M8.1 — external-interrupt ACCEPT predicates (combinational). These mirror the
@@ -1472,7 +1489,7 @@ module core
   // CMPXCHG (0F B0/B1) mem-form: latched equality decision. Computed in S_EXEC
   // (before the conditional accumulator update mutates EAX) and consumed in
   // S_STORE's store-operand resolution, so the write data stays stable across
-  // the S_EXEC->S_STORE clock even though gpr[R_EAX] changes on the not-equal
+  // the S_EXEC->S_STORE clock even though gpr_o[R_EAX] changes on the not-equal
   // path. 1 => store src (equal); 0 => write the original temp back unchanged.
   logic        cmpxchg_wrsrc_r;
   kind_e       q_kind;
@@ -1706,10 +1723,10 @@ module core
   function automatic logic [31:0] reg_read(input logic [2:0] r, input logic [2:0] w, input logic high8);
     begin
       if (w==3'd1) begin
-        if (high8) reg_read = {24'd0, gpr[r][15:8]};
-        else       reg_read = {24'd0, gpr[r][7:0]};
-      end else if (w==3'd2) reg_read = {16'd0, gpr[r][15:0]};
-      else reg_read = gpr[r];
+        if (high8) reg_read = {24'd0, gpr_o[r][15:8]};
+        else       reg_read = {24'd0, gpr_o[r][7:0]};
+      end else if (w==3'd2) reg_read = {16'd0, gpr_o[r][15:0]};
+      else reg_read = gpr_o[r];
     end
   endfunction
 
@@ -1750,7 +1767,7 @@ module core
   logic        sh_cfout;
 
   always_comb begin
-    dst_cur = gpr[q_dst_reg];
+    dst_cur = gpr_o[q_dst_reg];
     a_op = (q_mem_read && q_mem_dst) ? wmask(mem_load_data,q_w) : reg_read(q_dst_reg,q_w,q_dst_high8);
     if (q_use_imm) b_op = wmask(q_imm,q_w);
     else if (q_mem_read && !q_mem_dst) b_op = wmask(mem_load_data,q_w);
@@ -1769,7 +1786,7 @@ module core
 
     sh_val = (q_mem_read && q_mem_dst) ? wmask(mem_load_data,q_w) : reg_read(q_dst_reg,q_w,q_dst_high8);
     if (q_shift_one) sh_cnt = 6'd1;
-    else if (q_shift_cl) sh_cnt = {1'b0, gpr[R_ECX][4:0]};
+    else if (q_shift_cl) sh_cnt = {1'b0, gpr_o[R_ECX][4:0]};
     else sh_cnt = {1'b0, q_shift_imm};
     sh_out   = shrot_result(q_shrot, sh_val, sh_cnt, eflags[0], q_w);
     sh_cfout = shrot_cf(q_shrot, sh_val, sh_cnt, eflags[0], q_w);
@@ -1792,12 +1809,12 @@ module core
   logic [15:0] bcd_ax;
   logic [31:0] bcd_flags;
   // BCD / ASCII-adjust datapath extracted to core/uv_common.sv (R3,
-  // behaviour-preserving). The spine forwards gpr[R_EAX] low 16, the imm8,
+  // behaviour-preserving). The spine forwards gpr_o[R_EAX] low 16, the imm8,
   // q_alu_op, and EFLAGS; the EXEC block above routes bcd_ax/bcd_flags onto
   // alu_out/flags_out for AAA/AAS/DAA/DAS/AAM/AAD.
   uv_common u_uv_common (
     .eflags        (eflags),
-    .bcd_eax16     (gpr[R_EAX][15:0]),
+    .bcd_eax16     (gpr_o[R_EAX][15:0]),
     .bcd_imm8      (q_imm[7:0]),
     .bcd_alu_op    (q_alu_op),
     .bcd_ax        (bcd_ax),
@@ -1835,8 +1852,8 @@ module core
   arch_state_t snap;
   always_comb begin
     snap.eflags=eflags;
-    snap.eax=gpr[0]; snap.ecx=gpr[1]; snap.edx=gpr[2]; snap.ebx=gpr[3];
-    snap.esp=gpr[4]; snap.ebp=gpr[5]; snap.esi=gpr[6]; snap.edi=gpr[7];
+    snap.eax=gpr_o[0]; snap.ecx=gpr_o[1]; snap.edx=gpr_o[2]; snap.ebx=gpr_o[3];
+    snap.esp=gpr_o[4]; snap.ebp=gpr_o[5]; snap.esi=gpr_o[6]; snap.edi=gpr_o[7];
     if (sys_mode) begin
       // System-mode core: the selectors are the LIVE seg_sel[] (real-mode
       // segment values, or protected-mode descriptor selectors). User mode is
@@ -1887,8 +1904,8 @@ module core
   // (DF=1) copy whose SI/DI crossed 0 went 32-bit negative and every later
   // string EA landed 64 KiB low (FreeDOS SYSINIT's relocate-high copy left
   // holes the flow later fell into). q_cnt16=0 in every 32-bit flat gate.
-  wire [31:0] str_esi = q_cnt16 ? {16'd0, gpr[R_ESI][15:0]} : gpr[R_ESI];
-  wire [31:0] str_edi = q_cnt16 ? {16'd0, gpr[R_EDI][15:0]} : gpr[R_EDI];
+  wire [31:0] str_esi = q_cnt16 ? {16'd0, gpr_o[R_ESI][15:0]} : gpr_o[R_ESI];
+  wire [31:0] str_edi = q_cnt16 ? {16'd0, gpr_o[R_EDI][15:0]} : gpr_o[R_EDI];
 
   // ===========================================================================
   // Store-operand resolution (combinational) used in S_STORE.
@@ -1907,9 +1924,9 @@ module core
   logic [31:0] slow_dmem_addr;
   always_comb begin
     if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
-        (q_kind==K_STKMISC && q_sm==SM_POPF))      slow_dmem_addr = gpr[R_ESP];
-    else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  slow_dmem_addr = gpr[R_EBP];
-    else if (q_xlat)                               slow_dmem_addr = gpr[R_EBX]+{24'd0,gpr[R_EAX][7:0]};
+        (q_kind==K_STKMISC && q_sm==SM_POPF))      slow_dmem_addr = gpr_o[R_ESP];
+    else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  slow_dmem_addr = gpr_o[R_EBP];
+    else if (q_xlat)                               slow_dmem_addr = gpr_o[R_EBX]+{24'd0,gpr_o[R_EAX][7:0]};
     else if (q_kind==K_STR) begin
       if (q_st==ST_SCAS)                           slow_dmem_addr = str_edi;
       else                                         slow_dmem_addr = str_esi;
@@ -1927,7 +1944,7 @@ module core
 
     // resolve store data by op kind
     if (q_is_push) begin
-      st_addr = gpr[R_ESP] - {28'd0,q_w};
+      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
       // F3 PUSH sreg: data = the 16-bit selector (zero-extended; strb_of(q_w) keeps
       // 2 bytes for a 16-bit push, 4 for a 0x66-prefixed 32-bit push).
       st_data = q_push_sreg ? {16'd0, arch_seg_sel(q_sys_sreg)}
@@ -1936,16 +1953,16 @@ module core
     end else if (q_kind==K_CTRL && (q_ct==CT_CALLREL || q_ct==CT_CALLIND)) begin
       // Near CALL pushes the next-IP at the operand width: 4 bytes (32-bit) or
       // 2 bytes for a 0x66-prefixed 16-bit near CALL.
-      st_addr = gpr[R_ESP] - {28'd0,q_w};
+      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
       st_data = next_eip;
       st_strb = strb_of(q_w);
     end else if (q_kind==K_STKMISC && q_sm==SM_PUSHF) begin
-      st_addr = gpr[R_ESP] - {28'd0,q_w};
+      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
       st_data = eflags;
     end else if (q_kind==K_STKMISC && q_sm==SM_ENTER) begin
       // ENTER level 0: the single push writes EBP at [ESP-w].
-      st_addr = gpr[R_ESP] - {28'd0,q_w};
-      st_data = gpr[R_EBP];
+      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
+      st_data = gpr_o[R_EBP];
     end else if (q_kind==K_SETCC) begin
       st_data = {31'd0, cond_true(q_cc, eflags)};
       st_strb = 4'b0001;
@@ -1956,7 +1973,7 @@ module core
     end else if (q_kind==K_CMPXCHG) begin
       // CMPXCHG mem-dst: store src (reg operand) if equal, else write the
       // original temp back UNCHANGED (keeps the locked RMW atomic, per QEMU).
-      // Uses the LATCHED equality (cmpxchg_wrsrc_r) — by S_STORE gpr[R_EAX] may
+      // Uses the LATCHED equality (cmpxchg_wrsrc_r) — by S_STORE gpr_o[R_EAX] may
       // have been updated on the not-equal path, so the live cmpxchg_eq is stale.
       st_data = cmpxchg_wrsrc_r ? reg_read(q_src_reg,q_w,q_src_high8)
                                 : wmask(mem_load_data,q_w);
@@ -1974,7 +1991,7 @@ module core
 
     // CALL/JMP indirect target
     if (q_ct==CT_CALLIND || q_ct==CT_JMPIND) begin
-      call_target = q_mem_read ? mem_load_data : gpr[q_src_reg];
+      call_target = q_mem_read ? mem_load_data : gpr_o[q_src_reg];
       // F3: a 16-bit-operand indirect CALL/JMP loads IP from r/m16 and zeroes
       // EIP[31:16] (same convention as CT_RETN below). Without the mask, EIP's
       // high half took table-adjacent memory bytes / stale upper register bits.
@@ -2024,7 +2041,7 @@ module core
   // f_arith/f_div_by_zero/f_zero_over_zero/f_eval/f_arith_fstat) were extracted
   // VERBATIM to ventium_x87_pkg (R2 modularization). They wrap the fpu_x87_pkg
   // floatx80 ops and use no module state, so the move is a netlist no-op.
-  // fri()/fst()/fp_bop() stay here (they read module state ftop/fp_st[]/gpr[]).
+  // fri()/fst()/fp_bop() stay here (they read module state ftop/fp_st[]/gpr_o[]).
 
   // ===========================================================================
   // x87 retire snapshot (TOP-relative st0..st7, fstat with TOP overlaid)
@@ -2459,7 +2476,7 @@ module core
 
   // ---- U-pipe datapath (core/u_pipe.sv, R3) --------------------------------
   // Pre-read U operands; the fast path always reads full dwords, so these are
-  // exactly reg_read(idx,3'd4,1'b0) == gpr[idx]. The u_pipe instance drives
+  // exactly reg_read(idx,3'd4,1'b0) == gpr_o[idx]. The u_pipe instance drives
   // u_alu/u_flags/u_sh/u_shm1/u_shcf consumed by the eval above + S_PIPE commit.
   logic [31:0] u_dst_val, u_src_val;
   assign u_dst_val = reg_read(u_d.dst, 3'd4, 1'b0);
@@ -2580,16 +2597,8 @@ module core
         // 0x000F0000 here (fetch linear = 0x000F0000 + 0xFFF0 = 0x000FFFF0,
         // exactly where the TB loads the image's last 16 bytes).
         eip<=32'h0000_FFF0; eflags<=32'h0000_0002;
-        gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[3]<=32'd0;
-        // EDX reset = the CPUID family/model/stepping signature. The existing M2S
-        // sys gates oracle against qemu's default (qemu32) cold reset EDX=0x663 and
-        // MUST stay byte-identical; the M7.3b Win95 co-sim oracles against qemu
-        // `-cpu pentium` whose cold reset EDX=0x543 (golden record 0). cosim_en
-        // (set only in --win95-image mode) selects 0x543; every other system run
-        // keeps 0x663 unchanged. (EDX is the only reset-state delta between the two
-        // CPU models that the golden prefix observes.)
-        gpr[2]<= cosim_en ? 32'h0000_0543 : 32'h0000_0663;
-        gpr[4]<=32'd0; gpr[5]<=32'd0; gpr[6]<=32'd0; gpr[7]<=32'd0;
+        // GPR reset (system: EDX = CPUID sig 0x543/0x663, others 0) lives in
+        // u_regfile's own synchronous rst_n arm now (R3) — driven by boot_mode/cosim_en.
         creg0<=32'h6000_0010; creg2<=32'd0; creg3<=32'd0; creg4<=32'd0;
         for (int s=0;s<NUM_SEG;s++) begin
           seg_sel[s]<=16'h0000; seg_base[s]<=32'd0; seg_limit[s]<=32'h0000_FFFF;
@@ -2604,8 +2613,8 @@ module core
         cs_d<=1'b0;   // real-mode CS: 16-bit default operand/address size
       end else begin
         eip<=init_eip; eflags<=EFLAGS_RESET;
-        gpr[0]<=32'd0; gpr[1]<=32'd0; gpr[2]<=32'd0; gpr[3]<=32'd0;
-        gpr[4]<=init_esp; gpr[5]<=32'd0; gpr[6]<=32'd0; gpr[7]<=32'd0;
+        // GPR reset (user: ESP = init_esp, others 0) lives in u_regfile's own
+        // synchronous rst_n arm now (R3) — driven by boot_mode/init_esp.
         creg0<=32'd0; creg2<=32'd0; creg3<=32'd0; creg4<=32'd0;
         for (int s=0;s<NUM_SEG;s++) begin
           seg_sel[s]<=16'h0000; seg_base[s]<=32'd0; seg_limit[s]<=32'hFFFF_FFFF;
@@ -2759,7 +2768,7 @@ module core
       if (seg_sel[SG_CS] != dbg_cs_q || seg_base[SG_CS] != dbg_csb_q) begin
         $display("[CS-CHG]  t=%0t state=%s cs_sel %04x->%04x cs_base %08x->%08x eip=%08x eax=%08x edx=%08x dsb=%08x",
                  $time, state.name(), dbg_cs_q, seg_sel[SG_CS], dbg_csb_q, seg_base[SG_CS], eip,
-                 gpr[R_EAX], gpr[R_EDX], seg_base[SG_DS]);
+                 gpr_o[R_EAX], gpr_o[R_EDX], seg_base[SG_DS]);
         dbg_cs_q  <= seg_sel[SG_CS];
         dbg_csb_q <= seg_base[SG_CS];
       end
@@ -2767,7 +2776,7 @@ module core
       if (state==S_RMIRET && mem_ack && int_step==4'd2) begin
         $display("[RMIRET]  t=%0t pop cs=%04x ip=%04x flags=%04x  (SS:SP read @ %08x)",
                  $time, iret_cs, iret_eip[15:0], mem_rdata[15:0],
-                 seg_base[SG_SS] + (gpr[R_ESP] + {27'd0, int_step, 1'b0}));
+                 seg_base[SG_SS] + (gpr_o[R_ESP] + {27'd0, int_step, 1'b0}));
       end
       // real-mode INT push: show the CS/IP it pushed onto the stack.
       if (state==S_RMINT_PUSH && mem_ack && int_step==4'd2) begin
@@ -2895,15 +2904,8 @@ module core
               if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
               else          state<=S_HALT;
             end else begin
-              if (q_w==3'd1)
-                gpr[R_EAX] <= {gpr[R_EAX][31:16], eng_int_rem[7:0], eng_int_quot[7:0]};
-              else if (q_w==3'd2) begin
-                gpr[R_EAX] <= {gpr[R_EAX][31:16], eng_int_quot[15:0]};
-                gpr[R_EDX] <= {gpr[R_EDX][31:16], eng_int_rem[15:0]};
-              end else begin
-                gpr[R_EAX] <= eng_int_quot[31:0];
-                gpr[R_EDX] <= eng_int_rem[31:0];
-              end
+              // R3: EAX/EDX quotient/remainder commit moved to the gpr writeback
+              // driver (core_gpr_wb.svh, S_DIV_BUSY arm).
               // P5 occupancy residual so issue->next-issue == occ (DIV 17/25/41,
               // IDIV 22/30/46). The engine's real clocks cover most of it; top up
               // (tuned vs make m5). q_md 3'd7 = IDIV.
@@ -2925,7 +2927,7 @@ module core
         // -> cn frozen -> syscall_n/args stable for the PS the whole wait).
         S_SYSCALL_WAIT: begin
           if (syscall_resp_valid) begin
-            gpr[0] <= syscall_eax;
+            // R3: EAX<=syscall_eax moved to the gpr writeback driver (S_SYSCALL_WAIT).
             if (syscall_apply_gs) gs_base_r <= syscall_gs_base;
             eip            <= eip + {28'd0, q_proxy_len};
             fold_pending_r <= 1'b1;
@@ -3022,6 +3024,43 @@ module core
       // 77/77+10/10 path), so it is byte-identical; absent in the default build.
       if (real_bus && bus_err) begin hung_r <= 1'b1; state <= S_HALT; end
 `endif
+    end
+  end
+
+  // ===========================================================================
+  // GPR WRITEBACK DRIVER (R3) — the per-register write bus (gpr_we/gpr_wd) that
+  // feeds u_regfile. This combinational block re-derives EVERY architectural GPR
+  // write the FSM used to commit (the `gpr[idx] <= expr` NBA writes that lived in
+  // the main always_ff above + its `included case-arms). It mirrors the FSM's
+  // EXACT gating: the same outer xlate_miss / fe_xlate_pend skip, the same
+  // `case (state)` arms, and per-arm the same conditions — but keeps ONLY the
+  // gpr writes (every eflags/eip/seg/cr/retire/store statement is stripped).
+  //
+  // Per-register bus semantics: two writes to DIFFERENT registers the same clock
+  // (e.g. dst + ESP on a pop; EAX + EDX on MUL/DIV) assert both gpr_we lines; two
+  // writes to the SAME register in one arm resolve last-blocking-assignment-wins
+  // (same as the FSM's last-NBA-wins). DEFAULT is no write (gpr_we=0), so a clock
+  // that the FSM left a register unchanged leaves gpr_we[idx]=0 -> regfile holds.
+  //
+  // Reads use gpr_o[] (the registered, pre-edge value) exactly as the FSM did, so
+  // read-modify-write values (reg_merge(gpr_o[i],...), gpr_o[R_ESP]+w, ...) are
+  // byte-identical. Block-local temporaries that an arm computed to produce a gpr
+  // write VALUE are recomputed here from module-level signals (pure functions).
+  // ===========================================================================
+  always_comb begin
+    gpr_we = '0;
+    gpr_wd = '{default:'0};
+    if (!rst_n) begin
+      // reset GPR seed is u_regfile's own synchronous arm; nothing to drive here.
+    end else if (xlate_miss) begin
+      // page-walk diversion clock: the FSM skips the whole case body -> no gpr write.
+    end else if (fe_xlate_pend) begin
+      // +VEN_FE_PIPE page-cross stall clock: FSM holds -> no gpr write.
+    end else begin
+      case (state)
+        `include "core_gpr_wb.svh"
+        default: ;
+      endcase
     end
   end
 
@@ -3582,7 +3621,7 @@ module core
       6'd4:  smm_save_data = eflags;
       6'd5:  smm_save_data = smm_resume_eip;        // resume EIP (writeable slot)
       6'd6,6'd7,6'd8,6'd9,6'd10,6'd11,6'd12,6'd13:
-             smm_save_data = gpr[3'(s - 6'd6)];
+             smm_save_data = gpr_o[3'(s - 6'd6)];
       6'd14,6'd15,6'd16,6'd17,6'd18,6'd19:
              smm_save_data = {16'd0, seg_sel[3'(s - 6'd14)]};
       6'd20,6'd21,6'd22,6'd23,6'd24,6'd25:
@@ -3614,11 +3653,11 @@ module core
       S_FETCH: cur_lin = flin + {27'd0,fetch_word,2'b00};
       S_PF:    cur_lin = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
       S_PIPE:  cur_lin = pf_miss ? {pf_miss_fa[31:5],5'd0}
-                                 : (seg_base[SG_DS]+gpr[pipe_load_base]);
+                                 : (seg_base[SG_DS]+gpr_o[pipe_load_base]);
       S_LOAD: begin
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
-            (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+gpr[R_ESP];
-        else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+gpr[R_EBP];
+            (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+gpr_o[R_ESP];
+        else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+gpr_o[R_EBP];
         else if (q_kind==K_STR)
           cur_lin = (q_st==ST_SCAS) ? dbase+str_edi : dbase+str_esi;
         else                                           cur_lin = opbase+q_ea;  // M7.1 opbase
@@ -3636,7 +3675,7 @@ module core
         if (q_sm==SM_PUSHA) begin
           cur_is_w = 1'b1;
           cur_lin = dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
-        end else cur_lin = dbase+gpr[R_ESP] + (32'd4*{28'd0,step});
+        end else cur_lin = dbase+gpr_o[R_ESP] + (32'd4*{28'd0,step});
       end
       // M2S.3 IDT delivery linear addresses (mirror the bus driver arms).
       S_INT_GATE:   cur_lin = idt_base + {21'd0, int_vec, 3'd0}
@@ -3650,16 +3689,16 @@ module core
         // descending from the current SS:ESP. (mirror the bus driver arm.)
         cur_lin = xpl_active
                   ? (seg_base[SG_SS] + int_new_esp - ({28'd0, int_step} * 32'd4) - 32'd4)
-                  : (seg_base[SG_SS] + gpr[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
+                  : (seg_base[SG_SS] + gpr_o[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
       end
       S_IRET, S_IRET_SS:
-                    cur_lin = seg_base[SG_SS] + gpr[R_ESP] + ({28'd0, int_step} * 32'd4);
+                    cur_lin = seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4);
       // M2S.4 — TR/TSS reads. S_LTR reads the GDT TSS descriptor; S_INT_TSS reads
       // TSS.ssN:espN. Like the other descriptor-table reads, both address their
       // (linear) structure PHYSICALLY under the M2S.1/.2 identity-map convention —
       // excluded from both xlate_miss and the post-translate, so cur_lin here is
       // informational only (they pass through untranslated). See those two sites.
-      S_LTR:     cur_lin = gdt_base + {16'd0, gpr[q_src_reg][15:3], 3'd0}
+      S_LTR:     cur_lin = gdt_base + {16'd0, gpr_o[q_src_reg][15:3], 3'd0}
                            + {29'd0, seg_step, 2'b00};
       S_INT_TSS: cur_lin = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
       S_INT_SS:  cur_lin = gdt_base + {16'd0, int_new_ss[15:3], 3'd0}
@@ -3732,7 +3771,7 @@ module core
   always_comb begin
     // U-pipe fast-path load commit (S_PIPE issue arm, is_load). UNGATED by
     // cycle_mode — the SM runs in func and cycle mode alike, exactly as the
-    // original inline dc_access(gpr[u_d.base]). pipe_load_req already folds in
+    // original inline dc_access(gpr_o[u_d.base]). pipe_load_req already folds in
     // (state==S_PIPE && pipe_bytes_ok && u_d.simple && u_d.is_load && !pipe_agi &&
     // mispred_bubbles==0); reaching the issue+commit branch additionally requires
     // stall_cnt==0, pending_mem_pen==0, not-FP, and !sys_mode.
@@ -3745,7 +3784,7 @@ module core
     unique case (state)
       S_PIPE: begin
         dc_acc_valid = u_load_acc;
-        dc_acc_addr  = gpr[u_d.base];
+        dc_acc_addr  = gpr_o[u_d.base];
       end
       // Slow-path data accesses: all gated on mem_ack && cycle_mode, mirroring the
       // original inline `if (cycle_mode) ... dc_access(...)` under `if (mem_ack)`.
@@ -4355,9 +4394,9 @@ module core
       eng_int_start  = 1'b1;
       eng_int_signed = (q_md==3'd7);
       eng_int_w      = q_w;
-      eng_int_num    = (q_w==3'd1) ? {48'd0, gpr[R_EAX][15:0]} :
-                       (q_w==3'd2) ? {32'd0, gpr[R_EDX][15:0], gpr[R_EAX][15:0]} :
-                                     {gpr[R_EDX], gpr[R_EAX]};
+      eng_int_num    = (q_w==3'd1) ? {48'd0, gpr_o[R_EAX][15:0]} :
+                       (q_w==3'd2) ? {32'd0, gpr_o[R_EDX][15:0], gpr_o[R_EAX][15:0]} :
+                                     {gpr_o[R_EDX], gpr_o[R_EAX]};
       eng_int_den    = srcv_drv;
     end
   end
@@ -4541,7 +4580,7 @@ module core
 
   // capture original ESP at the cycle we enter PUSHA's S_USEQ.
   always_ff @(posedge clk) begin
-    if (state==S_EXEC && q_kind==K_STKMISC && q_sm==SM_PUSHA) pusha_esp<=gpr[R_ESP];
+    if (state==S_EXEC && q_kind==K_STKMISC && q_sm==SM_PUSHA) pusha_esp<=gpr_o[R_ESP];
   end
 
   // ===========================================================================

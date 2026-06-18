@@ -122,7 +122,7 @@
                   xpl_active   <= 1'b1;
                   int_old_cs   <= seg_sel[SG_CS];
                   int_old_ss   <= seg_sel[SG_SS];
-                  int_old_esp  <= gpr[R_ESP];
+                  int_old_esp  <= gpr_o[R_ESP];
                   int_new_cpl  <= tgt_dpl;
                   // M7.2 V86: freeze the four data selectors + the V86 EFLAGS image
                   // (VM still set) so the 9-word frame pushes GS,FS,DS,ES + the V86
@@ -163,25 +163,9 @@
             else
               last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
             if (last) begin
-              logic [31:0] fsz;
-              if (from_v86) begin
-                // V86: 9-word frame (40 bytes w/ errcode, 36 without) on the TSS
-                // stack. The new (CPL0) SS:base were loaded in S_INT_SS; ESP drops to
-                // the top of the pushed frame.
-                fsz = int_has_err ? 32'd40 : 32'd36;
-                gpr[R_ESP] <= int_new_esp - fsz;
-              end else if (xpl_active) begin
-                // CROSS-PRIV: the new (CPL0) SS:base were already loaded in
-                // S_INT_SS; ESP now drops to the top of the pushed frame on the
-                // TSS stack. fsz = 20 (5 words) or 24 (6 words w/ errcode).
-                fsz = int_has_err ? 32'd24 : 32'd20;
-                gpr[R_ESP] <= int_new_esp - fsz;
-                // CPL already lowered when S_INT_CS loaded the target CS (RPL = the
-                // gate selector's RPL = 0); xpl_active is cleared below.
-              end else begin
-                fsz = int_has_err ? 32'd16 : 32'd12;
-                gpr[R_ESP] <= gpr[R_ESP] - fsz;
-              end
+              // R3: the ESP drop to the top of the pushed frame (V86 9-word / cross-
+              // priv 5-6-word / same-priv 3-4-word, all gated on int_has_err) moved to
+              // the gpr writeback driver (core_gpr_wb.svh, S_INT_PUSH arm).
               xpl_active <= 1'b0;
               eip        <= int_gate_off;
               // IA-32 6.12.1: on ANY interrupt/trap-gate entry the CPU clears TF

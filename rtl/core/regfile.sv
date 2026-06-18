@@ -1,0 +1,64 @@
+// Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
+// core/regfile.sv — architectural General-Purpose Register file
+//                   (extracted from core.sv, R3; behaviour-preserving).
+//
+// A plain REGISTERED register file: storage + a synchronous reset + one
+// write-enable/write-data line PER register, plus combinational read-out. It
+// holds NO instruction logic — the write enables/data are driven from the
+// spine's various commit sites (the writeback driver), so each register is
+// written from one place and the file itself stays trivially readable.
+//
+// Per-register write ports (gpr_we[i] / gpr_wd[i]) rather than a muxed
+// addr/data port: several P5 arms commit two registers in the same clock
+// (e.g. a stack op writes the destination AND ESP; MUL/DIV writes EAX AND EDX),
+// so a per-register enable needs no priority mux and the spine simply asserts
+// the lines it needs.
+//
+// RESET is SYNCHRONOUS (posedge-clk, gated by rst_n) to match the original
+// core.sv FSM reset arm VERBATIM — the two boot modes seed different values:
+//   system (boot_mode=1): EDX = P5/P54C CPUID signature (cosim_en ? 0x543 :
+//                         0x663), all other GPRs 0.
+//   user   (boot_mode=0): ESP = init_esp, all other GPRs 0.
+// gpr_o exposes the registered array (PRE-edge state) so the spine's
+// combinational reads (reg_read / decode EA / retire snapshot) are unchanged.
+
+module regfile
+  import ventium_pkg::*;
+(
+    input  logic                clk,
+    input  logic                rst_n,
+    // reset seed
+    input  logic                boot_mode,   // 1 = system cold reset, 0 = user
+    input  logic                cosim_en,    // selects EDX 0x543 vs 0x663 (sys)
+    input  logic [31:0]         init_esp,    // user-mode ESP seed
+    // per-register write bus (driven by the spine writeback driver)
+    input  logic [NUM_GPR-1:0]  gpr_we,
+    input  logic [31:0]         gpr_wd [NUM_GPR],
+    // read-out (registered state, combinationally visible)
+    output logic [31:0]         gpr_o [NUM_GPR]
+);
+
+  logic [31:0] gpr [NUM_GPR];   // eax ecx edx ebx esp ebp esi edi
+
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      // dual boot-mode reset — VERBATIM from the original core.sv FSM arm.
+      gpr[0] <= 32'd0;
+      gpr[1] <= 32'd0;
+      gpr[2] <= boot_mode ? (cosim_en ? 32'h0000_0543 : 32'h0000_0663) : 32'd0;
+      gpr[3] <= 32'd0;
+      gpr[4] <= boot_mode ? 32'd0 : init_esp;
+      gpr[5] <= 32'd0;
+      gpr[6] <= 32'd0;
+      gpr[7] <= 32'd0;
+    end else begin
+      for (int i = 0; i < NUM_GPR; i++)
+        if (gpr_we[i]) gpr[i] <= gpr_wd[i];
+    end
+  end
+
+  assign gpr_o = gpr;
+
+endmodule : regfile

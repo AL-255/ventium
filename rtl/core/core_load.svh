@@ -51,11 +51,11 @@
           if (mem_ack) begin
             mem_load_data2<=mem_rdata; state<=S_EXEC;
             // CMPS second operand [EDI] is also a data load -> D-cache access.
-            // dc_lu_hit/dc_acc_* are driven to gpr[R_EDI] this clock (S_LOAD2).
+            // dc_lu_hit/dc_acc_* are driven to gpr_o[R_EDI] this clock (S_LOAD2).
             if (cycle_mode) begin
               logic [6:0] pen; pen=7'd0;
               if (!dc_lu_hit)               pen = pen + P5_DMISS;
-              if (gpr[R_EDI][1:0]!=2'b00)   pen = pen + P5_MISALIGN;
+              if (gpr_o[R_EDI][1:0]!=2'b00)   pen = pen + P5_MISALIGN;
               pending_mem_pen <= pen;
             end
           end

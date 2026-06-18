@@ -45,7 +45,7 @@
           if (mem_ack) begin
             logic [15:0] msel;
             logic        mnull;
-            msel  = gpr[q_src_reg][15:0];
+            msel  = gpr_o[q_src_reg][15:0];
             mnull = (msel[15:3] == 13'd0);
             // M2S.3 — selector index past the GDT limit -> #GP(13) carrying the
             // selector as the error code (the descriptor read was out of bounds;
@@ -152,7 +152,7 @@
           if (mem_ack) begin
             if (!seg_step) seg_step <= 1'b1;          // CS pushed (beat 0)
             else begin
-              gpr[R_ESP]      <= gpr[R_ESP] - {27'd0, q_w, 1'b0};  // SP -= 2w
+              // R3: SP -= 2w bump moved to the gpr writeback driver (S_LCALL arm).
               seg_sel [SG_CS] <= q_ljmp_sel;
               seg_base[SG_CS] <= {12'd0, q_ljmp_sel, 4'd0};        // base = sel<<4
               seg_attr[SG_CS] <= 8'h9B;
@@ -178,7 +178,7 @@
               seg_sel [SG_CS] <= new_cs;
               seg_base[SG_CS] <= {12'd0, new_cs, 4'd0};
               seg_attr[SG_CS] <= 8'h9B;
-              gpr[R_ESP] <= gpr[R_ESP] + {27'd0, q_w, 1'b0} + {16'd0, q_ret_imm};
+              // R3: ESP += 2w + imm bump moved to the gpr writeback driver (S_RETF arm).
               eip <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
               retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
             end
