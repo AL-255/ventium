@@ -3084,12 +3084,19 @@ module core
   // q_alu_op, and EFLAGS; the EXEC block above routes bcd_ax/bcd_flags onto
   // alu_out/flags_out for AAA/AAS/DAA/DAS/AAM/AAD.
   uv_common u_uv_common (
-    .bcd_eax16 (gpr[R_EAX][15:0]),
-    .bcd_imm8  (q_imm[7:0]),
-    .bcd_alu_op(q_alu_op),
-    .bcd_eflags(eflags),
-    .bcd_ax    (bcd_ax),
-    .bcd_flags (bcd_flags)
+    .eflags        (eflags),
+    .bcd_eax16     (gpr[R_EAX][15:0]),
+    .bcd_imm8      (q_imm[7:0]),
+    .bcd_alu_op    (q_alu_op),
+    .bcd_ax        (bcd_ax),
+    .bcd_flags     (bcd_flags),
+    .u_d           (u_d),
+    .v_d           (v_d),
+    .u_flags       (u_flags),
+    .u_sh          (u_sh),
+    .u_shm1        (u_shm1),
+    .u_shcf        (u_shcf),
+    .v_br_taken_eff(v_br_taken_eff)
   );
 
   // ---- CMPXCHG (0F B0/B1) combinational compute -----------------------------
@@ -3443,8 +3450,7 @@ module core
   logic [31:0] v_alu, v_flags;
   logic [31:0] u_target, v_target;   // branch targets
   logic        u_pred_taken, v_pred_taken;
-  logic        v_br_taken_eff;       // V branch taken using U's flags if forwarded
-  logic [31:0] u_flags_eff;          // U's resulting flags (post-commit) for fwd
+  logic        v_br_taken_eff;       // V branch taken using U's flags (uv_common)
   logic [7:0]  ub [6];               // U decode bytes (icache, possibly 0 if cold)
   logic [7:0]  vb [6];               // V candidate decode bytes (at eip+lenU)
 `ifdef VEN_UOPCACHE
@@ -3735,21 +3741,8 @@ module core
     end
 `endif
 
-    // Flags forwarding U->V (the P5 cmp/dec/test + jcc pairing case): when the
-    // U member writes EFLAGS, the paired V branch must see U's RESULT flags, not
-    // the stale architectural eflags. Compute U's post-commit flags and use them
-    // to evaluate a paired conditional V branch.
-    u_flags_eff = u_d.wflags ? u_flags : eflags;
-    if (u_d.is_shift) begin
-      if (u_d.shimm!=5'd0) begin
-        // shift (SHL/SHR/SAL/SAR group) result flags, for a paired following jcc.
-        u_flags_eff = eflags & 32'hFFFF_F72A;
-        u_flags_eff[0]=u_shcf; u_flags_eff[2]=parity8(u_sh[7:0]); u_flags_eff[4]=1'b0;
-        u_flags_eff[6]=(u_sh==32'd0); u_flags_eff[7]=u_sh[31];
-        u_flags_eff[11]=u_shm1[31]^u_sh[31]; u_flags_eff[1]=1'b1;
-      end else u_flags_eff = eflags;   // count 0 => no flag change
-    end
-    v_br_taken_eff = v_d.br_cond ? cond_true(v_br_cc(v_d), u_flags_eff) : 1'b1;
+    // U->V EFLAGS forwarding + paired-V branch resolution (v_br_taken_eff)
+    // extracted to core/uv_common.sv (R3): driven by the u_uv_common instance.
   end
 
   // ---- U-pipe datapath (core/u_pipe.sv, R3) --------------------------------
