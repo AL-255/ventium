@@ -651,6 +651,16 @@ module core
   // MOV-sreg / far-jump base computation + the decode routing both key on this.
   logic        seg_real;
   assign seg_real = real_mode || v86;
+  // Real-mode (16-bit SS) stack-pointer wrap. In real mode the stack pointer is
+  // 16 bits, so a push/pop crossing the 0/64k boundary must stay inside the SS
+  // segment (a push at SP=0 -> ss_base+0xFFFE, NOT ss_base-2). stk16 masks a stack
+  // ADDRESS offset to 16 bits when real_mode; identity in user/PM (real_mode=0) so
+  // every user-mode gate stays byte-identical. The matching ESP-register wrap is a
+  // post-mask in the gpr-writeback always_comb. (V86 stacks unhandled here — the
+  // DOS-Quake path is real mode; CWSDPMI runs the client in 32-bit PM.)
+  function automatic logic [31:0] stk16(input logic [31:0] off);
+    stk16 = real_mode ? {16'd0, off[15:0]} : off;
+  endfunction
   // eff_cpl = the EFFECTIVE current privilege. In V86 it is architecturally 3
   // (USER) regardless of the CS selector's RPL (the CS selector is a real-mode
   // segment value, e.g. 0x1000, so cs&3 is NOT the CPL). Outside V86 it is cpl_r.
@@ -2066,7 +2076,7 @@ module core
 
     // resolve store data by op kind
     if (q_is_push) begin
-      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
+      st_addr = stk16(gpr_o[R_ESP] - {28'd0,q_w});
       // F3 PUSH sreg: data = the 16-bit selector (zero-extended; strb_of(q_w) keeps
       // 2 bytes for a 16-bit push, 4 for a 0x66-prefixed 32-bit push).
       st_data = q_push_sreg ? {16'd0, arch_seg_sel(q_sys_sreg)}
@@ -2075,15 +2085,15 @@ module core
     end else if (q_kind==K_CTRL && (q_ct==CT_CALLREL || q_ct==CT_CALLIND)) begin
       // Near CALL pushes the next-IP at the operand width: 4 bytes (32-bit) or
       // 2 bytes for a 0x66-prefixed 16-bit near CALL.
-      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
+      st_addr = stk16(gpr_o[R_ESP] - {28'd0,q_w});
       st_data = next_eip;
       st_strb = strb_of(q_w);
     end else if (q_kind==K_STKMISC && q_sm==SM_PUSHF) begin
-      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
+      st_addr = stk16(gpr_o[R_ESP] - {28'd0,q_w});
       st_data = eflags;
     end else if (q_kind==K_STKMISC && q_sm==SM_ENTER) begin
       // ENTER level 0: the single push writes EBP at [ESP-w].
-      st_addr = gpr_o[R_ESP] - {28'd0,q_w};
+      st_addr = stk16(gpr_o[R_ESP] - {28'd0,q_w});
       st_data = gpr_o[R_EBP];
     end else if (q_kind==K_SETCC) begin
       st_data = {31'd0, cond_true(q_cc, eflags)};
@@ -3184,6 +3194,12 @@ module core
         default: ;
       endcase
     end
+    // Real-mode 16-bit SS: wrap the ESP writeback within 64k (SP-only changes; the
+    // high half of ESP is preserved). Pairs with stk16() on the stack ADDRESS so a
+    // wrapping push/pop writes and reads the SAME ss_base+0xFFFx slot. Identity in
+    // user/PM (real_mode=0) -> make verify byte-identical.
+    if (real_mode && gpr_we[R_ESP])
+      gpr_wd[R_ESP] = {gpr_o[R_ESP][31:16], gpr_wd[R_ESP][15:0]};
   end
 
   // ===========================================================================

@@ -31,9 +31,9 @@
         mem_req=1'b1;
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
             (q_kind==K_STKMISC && q_sm==SM_POPF))
-          mem_addr=dbase+gpr_o[R_ESP];
+          mem_addr=dbase+stk16(gpr_o[R_ESP]);
         else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)
-          mem_addr=dbase+gpr_o[R_EBP];     // LEAVE reads [EBP] (the saved frame ptr)
+          mem_addr=dbase+stk16(gpr_o[R_EBP]); // LEAVE reads [EBP] (the saved frame ptr)
         else if (q_kind==K_STR) begin
           // load order: movs/lods/cmps -> [ESI]; scas -> [EDI]
           // F3: a16 string EA uses SI/DI low-16 (str_esi/str_edi mask).
@@ -65,10 +65,10 @@
       S_LCALL: begin
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=(q_w==3'd2)?4'b0011:4'b1111;
         if (!seg_step) begin
-          mem_addr  = seg_base[SG_SS] + (gpr_o[R_ESP] - {28'd0,q_w});         // SP - w
+          mem_addr  = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {28'd0,q_w});    // SP - w
           mem_wdata = {16'd0, seg_sel[SG_CS]};                             // push CS
         end else begin
-          mem_addr  = seg_base[SG_SS] + (gpr_o[R_ESP] - {27'd0,q_w,1'b0});   // SP - 2w
+          mem_addr  = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {27'd0,q_w,1'b0}); // SP - 2w
           mem_wdata = next_eip;                                           // push ret IP
         end
       end
@@ -76,8 +76,8 @@
       // pops CS at [SS:SP+w]. ESP is unchanged until the S_RETF commit.
       S_RETF: begin
         mem_req=1'b1;
-        if (!seg_step) mem_addr = seg_base[SG_SS] + gpr_o[R_ESP];            // pop IP
-        else           mem_addr = seg_base[SG_SS] + (gpr_o[R_ESP]+{28'd0,q_w}); // pop CS
+        if (!seg_step) mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]);       // pop IP
+        else           mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]+{28'd0,q_w}); // pop CS
       end
       // M9.5 — SGDT/SIDT: 2-beat store of the 6-byte pseudo-descriptor (the exact
       // reverse of S_LGDT's read layout). beat 0 @[mem] = {base[15:0], limit[15:0]}
@@ -106,7 +106,7 @@
       // the S_RMINT_PUSH commit.
       S_RMINT_PUSH: begin
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b0011;
-        mem_addr = seg_base[SG_SS] + (gpr_o[R_ESP] - {27'd0, (int_step+4'd1), 1'b0});
+        mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {27'd0, (int_step+4'd1), 1'b0});
         unique case (int_step)
           4'd0:    mem_wdata = {16'd0, eflags[15:0]};
           4'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
@@ -117,7 +117,7 @@
       // FLAGS (beat2 @SS:SP+4).
       S_RMIRET: begin
         mem_req=1'b1;
-        mem_addr = seg_base[SG_SS] + (gpr_o[R_ESP] + {27'd0, int_step, 1'b0});
+        mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] + {27'd0, int_step, 1'b0});
       end
       S_FLOAD: begin
         mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
@@ -162,7 +162,7 @@
           mem_wdata=(step==4'd0) ? gpr_o[R_EBX] : gpr_o[R_ECX];
         end else if (q_sm==SM_PUSHA) begin
           mem_we=1'b1; mem_wstrb=4'b1111;
-          mem_addr=dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
+          mem_addr=dbase+stk16(pusha_esp - (32'd4*({28'd0,step}+32'd1)));
           unique case (step)
             4'd0: mem_wdata=gpr_o[R_EAX];
             4'd1: mem_wdata=gpr_o[R_ECX];
@@ -174,7 +174,7 @@
             default: mem_wdata=gpr_o[R_EDI];
           endcase
         end else begin // POPA: read ascending from ESP
-          mem_we=1'b0; mem_addr=dbase+gpr_o[R_ESP] + (32'd4*{28'd0,step});
+          mem_we=1'b0; mem_addr=dbase+stk16(gpr_o[R_ESP] + (32'd4*{28'd0,step}));
         end
       end
       // M2S.2 — the page-walk reads/writes the page tables in PHYSICAL memory.
