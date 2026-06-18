@@ -7,35 +7,46 @@
 // docs/rtl-refactor-plan.md: the common combinational datapath shared by the
 // U-pipe and V-pipe execution units. The ALU result/flags, the shift/rotate
 // datapath, and the width/parity helpers are pure functions in
-// ventium_alu_pkg (alu_result/flags_next/shrot_result/shrot_cf/wmask); this
-// module collects the larger combinational building blocks that are NOT a
-// single package call.
+// ventium_alu_pkg (alu_result/flags_next/shrot_result/shrot_cf/wmask/parity8);
+// this module collects the larger combinational building blocks that are NOT a
+// single package call. Both blocks below were moved VERBATIM from core.sv and
+// share the live EFLAGS input, so the netlist is identical.
 //
-// Block #1 — BCD / ASCII-adjust datapath (AAA/AAS/DAA/DAS/AAM/AAD). Moved
-// VERBATIM from the inline `always_comb` at core.sv (the EXEC datapath routes
-// bcd_ax/bcd_flags onto alu_out/flags_out when the op is a BCD adjust). It
-// matches QEMU int_helper.c helper_aaa/aas/daa/das/aam/aad EXACTLY. Computes
-// the AX result (bcd_ax) + the DEFINED EFLAGS (bcd_flags). Architecturally
-// undefined flags (OF always; SF/ZF/PF for AAA/AAS; CF/AF for AAM/AAD) are
-// left cleared and are removed from the differential by
-// tracefmt.eflags_undefined_mask. AAM base 0 is a #DE this core defers (like
-// native DIV-by-zero); the divide is guarded to avoid an X (the corpus never
-// executes AAM 0). Outputs default unconditionally (no latch); the `default`
-// arm computes AAA and also covers every non-BCD alu_op (harmless dead
-// compute — bcd_* are consumed only for BCD ops). Inputs are read-only state
-// the spine forwards (gpr[R_EAX] low 16, the imm8, the 5-bit ALU op selector,
-// and the live EFLAGS); the netlist is identical to the inline form.
+// Block #1 — BCD / ASCII-adjust datapath (AAA/AAS/DAA/DAS/AAM/AAD). The EXEC
+// datapath routes bcd_ax/bcd_flags onto alu_out/flags_out when the op is a BCD
+// adjust. Matches QEMU int_helper.c helper_aaa/aas/daa/das/aam/aad EXACTLY.
+// Architecturally-undefined flags (OF always; SF/ZF/PF for AAA/AAS; CF/AF for
+// AAM/AAD) are left cleared and are removed from the differential by
+// tracefmt.eflags_undefined_mask. The `default` arm computes AAA and also
+// covers every non-BCD alu_op (harmless dead compute — bcd_* consumed only for
+// BCD ops).
+//
+// Block #2 — U->V EFLAGS forwarding (the P5 cmp/dec/test + jcc pairing case):
+// when the U member writes EFLAGS, the paired V conditional branch must see
+// U's RESULT flags, not the stale architectural eflags. Computes U's
+// post-commit flags (u_flags_eff, internal) from the u_pipe ALU/shift outputs
+// and uses them to resolve a paired conditional V branch (v_br_taken_eff).
 
 module uv_common
+  import ventium_decode_pkg::*;
   import ventium_alu_pkg::*;
 (
+    // ---- shared --------------------------------------------------------------
+    input  logic [31:0] eflags,       // live EFLAGS (carries undefined bits through)
     // ---- BCD / ASCII-adjust datapath -----------------------------------------
-    input  logic [15:0] bcd_eax16,   // gpr[R_EAX][15:0] (AL = [7:0], AH = [15:8])
+    input  logic [15:0] bcd_eax16,    // gpr[R_EAX][15:0] (AL = [7:0], AH = [15:8])
     input  logic [7:0]  bcd_imm8,     // q_imm[7:0] (AAM/AAD base)
     input  logic [4:0]  bcd_alu_op,   // q_alu_op (ALU_AAA..ALU_AAD select)
-    input  logic [31:0] bcd_eflags,   // live EFLAGS (carries undefined bits through)
     output logic [15:0] bcd_ax,       // AX result for the adjust
-    output logic [31:0] bcd_flags     // defined EFLAGS after the adjust
+    output logic [31:0] bcd_flags,    // defined EFLAGS after the adjust
+    // ---- U->V flag forwarding ------------------------------------------------
+    input  fpd_t        u_d,          // U-member decode (wflags/is_shift/shimm)
+    input  fpd_t        v_d,          // V-candidate decode (br_cond/cc)
+    input  logic [31:0] u_flags,      // u_pipe: U's ALU-result EFLAGS
+    input  logic [31:0] u_sh,         // u_pipe: U's shift/rotate result
+    input  logic [31:0] u_shm1,       // u_pipe: U operand shifted by (count-1)
+    input  logic        u_shcf,       // u_pipe: U's shift/rotate carry-out
+    output logic        v_br_taken_eff // V branch taken using U's forwarded flags
 );
 
   // ===========================================================================
@@ -48,17 +59,17 @@ module uv_common
     al0  = bcd_eax16[7:0];
     ah0  = bcd_eax16[15:8];
     imm8 = bcd_imm8;
-    af0  = bcd_eflags[4];
-    cf0  = bcd_eflags[0];
+    af0  = eflags[4];
+    cf0  = eflags[0];
     icar = 1'b0;
-    fl   = bcd_eflags & 32'hFFFF_F72A;   // clear CF/PF/AF/ZF/SF/OF
-    fl[1]= 1'b1;                         // reserved bit 1 always 1
+    fl   = eflags & 32'hFFFF_F72A;   // clear CF/PF/AF/ZF/SF/OF
+    fl[1]= 1'b1;                     // reserved bit 1 always 1
     nal  = al0; nah = ah0;
     case (bcd_alu_op)
       ALU_AAS: begin
         // QEMU carries SF/ZF/PF/OF THROUGH (only CF/AF change). Must match
         // exactly: the undefined bits persist into later (unmasked) instructions.
-        fl = bcd_eflags; fl[1]=1'b1;
+        fl = eflags; fl[1]=1'b1;
         icar = (al0 < 8'd6);
         if ((al0[3:0] > 4'd9) || af0) begin
           nal = (al0 - 8'd6) & 8'h0F; nah = ah0 - 8'd1 - {7'd0,icar};
@@ -88,7 +99,7 @@ module uv_common
       end
       default: begin // ALU_AAA (and every non-BCD op: harmless dead compute)
         // QEMU carries SF/ZF/PF/OF THROUGH (only CF/AF change) — match exactly.
-        fl = bcd_eflags; fl[1]=1'b1;
+        fl = eflags; fl[1]=1'b1;
         icar = (al0 > 8'hF9);
         if ((al0[3:0] > 4'd9) || af0) begin
           nal = (al0 + 8'd6) & 8'h0F; nah = ah0 + 8'd1 + {7'd0,icar};
@@ -98,6 +109,25 @@ module uv_common
     endcase
     bcd_ax    = {nah, nal};
     bcd_flags = fl;
+  end
+
+  // ===========================================================================
+  // U->V EFLAGS forwarding (verbatim from core.sv)
+  // ===========================================================================
+  always_comb begin
+    logic [31:0] u_flags_eff;
+    u_flags_eff = u_d.wflags ? u_flags : eflags;
+    if (u_d.is_shift) begin
+      if (u_d.shimm!=5'd0) begin
+        // shift (SHL/SHR/SAL/SAR group) result flags, for a paired following jcc.
+        u_flags_eff = eflags & 32'hFFFF_F72A;
+        u_flags_eff[0]=u_shcf; u_flags_eff[2]=parity8(u_sh[7:0]); u_flags_eff[4]=1'b0;
+        u_flags_eff[6]=(u_sh==32'd0); u_flags_eff[7]=u_sh[31];
+        u_flags_eff[11]=u_shm1[31]^u_sh[31]; u_flags_eff[1]=1'b1;
+      end else u_flags_eff = eflags;   // count 0 => no flag change
+    end
+    // v_br_cc(v_d) == v_d.cc (the raw Jcc condition carried in the decode).
+    v_br_taken_eff = v_d.br_cond ? cond_true(v_d.cc, u_flags_eff) : 1'b1;
   end
 
 endmodule : uv_common
