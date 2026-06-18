@@ -97,7 +97,8 @@
               // ---- COMMIT the incoming task ----
               eip     <= tsw_eip;
               eflags  <= tsw_eflags;
-              for (int g = 0; g < NUM_GPR; g++) gpr[g] <= tsw_gpr[g];
+              // R3: the incoming-task GPR-file load moved to the gpr writeback driver
+              // (core_gpr_wb.svh, S_TSW_BUSY arm).
               creg3   <= tsw_cr3;                 // new task CR3 (0 here; paging off)
               creg0   <= creg0 | 32'h0000_0008;   // CR0.TS = 1 on every task switch
               // new TR <- the incoming TSS descriptor (now busy).

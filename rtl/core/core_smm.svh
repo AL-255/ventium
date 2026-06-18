@@ -25,7 +25,7 @@
         //   clock (honoring a handler-modified SMBASE/resume-EIP) and resume.
         //
         // SMM_LAST = the final beat index (0-based). Beats:
-        //   0..5  CR0,CR3,CR4,CR2,EFLAGS,EIP        6..13 EAX..EDI (gpr[0..7])
+        //   0..5  CR0,CR3,CR4,CR2,EFLAGS,EIP        6..13 EAX..EDI (gpr_o[0..7])
         //   14..19 CS,SS,DS,ES,FS,GS selectors      20..25 seg base[0..5]
         //   26..31 seg limit[0..5]                  32..37 seg attr[0..5]
         //   38 GDT base  39 IDT base  40 {gdtl,idtl}
@@ -101,7 +101,8 @@
               creg0   <= rsm_cr0;  creg3 <= rsm_cr3;  creg4 <= rsm_cr4;  creg2 <= rsm_cr2;
               eflags  <= rsm_eflags;
               eip     <= rsm_eip;
-              for (int g = 0; g < NUM_GPR; g++) gpr[g] <= rsm_gpr[g];
+              // R3: the GPR-file restore moved to the gpr writeback driver
+              // (core_gpr_wb.svh, S_RSM arm).
               for (int s = 0; s < NUM_SEG; s++) begin
                 seg_sel  [s] <= rsm_sel  [s];
                 seg_base [s] <= rsm_base [s];

@@ -30,6 +30,10 @@ ventium_top.sv
 
 // ---- core -----------------------------------------------------------------
 core/core.sv
+// architectural GPR file extracted VERBATIM from core.sv (R3): registered storage
+// + synchronous dual-boot-mode reset + per-register write bus. Driven by core.sv's
+// gpr writeback driver (core_gpr_wb.svh).
+core/regfile.sv
 core/bpred_btb.sv
 core/decode.sv
 core/issue_uv.sv

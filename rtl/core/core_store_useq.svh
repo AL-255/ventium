@@ -54,7 +54,8 @@
             end
             unique case (q_kind)
               K_CTRL: begin // CALL: push done, set EIP (width-aware ESP adjust)
-                gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}; eip<=call_target;
+                // R3: ESP-=w bump moved to the gpr writeback driver (S_STORE/K_CTRL).
+                eip<=call_target;
                 // M2S.6: a TF single-step trap (and/or a data-write breakpoint on
                 // the pushed return address) fuses with this CALL's record — qemu
                 // delivers a #DB on EVERY single-stepped instruction. Resume EIP is
@@ -69,7 +70,8 @@
                 else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
               K_XCHG: begin // XCHG r/m,r mem: reg <- old mem
-                gpr[q_src_reg]<=reg_merge(gpr[q_src_reg], wmask(mem_load_data,q_w), q_w, q_src_high8);
+                // R3: the src-reg<-old-mem write moved to the gpr writeback driver
+                // (core_gpr_wb.svh, S_STORE/K_XCHG arm).
                 eip<=next_eip;
                 if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
                   arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
@@ -80,13 +82,8 @@
                 else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
               K_STKMISC: begin // PUSHF (ESP-=w) or ENTER (push EBP then build frame)
-                if (q_sm==SM_ENTER) begin
-                  // ENTER level 0: EBP <- (ESP-w) = FrameTemp; ESP <- ESP-w-alloc.
-                  // q_imm carries `alloc` (the imm16 byte count to reserve).
-                  gpr[R_EBP]<=gpr[R_ESP]-{28'd0,q_w};
-                  gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w}-{16'd0,q_imm[15:0]};
-                end else
-                  gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w};  // PUSHF
+                // R3: ENTER's EBP/ESP frame writes and PUSHF's ESP-=w moved to the
+                // gpr writeback driver (core_gpr_wb.svh, S_STORE/K_STKMISC arm).
                 eip<=next_eip;
                 if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
                   arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
@@ -101,7 +98,8 @@
                 // OLD memory value (a_op = wmask(mem_load_data)). Doing the writeback
                 // HERE (not in S_EXEC) keeps the store's combinational alu_out reading
                 // the original src this clock. Flags were committed in S_EXEC.
-                gpr[q_src_reg]<=reg_merge(gpr[q_src_reg], wmask(mem_load_data,q_w), q_w, q_src_high8);
+                // R3: the src-reg<-old-mem write moved to the gpr writeback driver
+                // (core_gpr_wb.svh, S_STORE/K_XADD arm).
                 eip<=next_eip;
                 if (sys_mode && (wr_hit != 4'd0 || tf_at_issue)) begin
                   arm_db((wr_hit != 4'd0 ? {28'd0, wr_hit} : 32'd0)
@@ -127,8 +125,8 @@
                 else begin retire_valid<=1'b1; state<=S_PIPE; end
               end
               default: begin
-                if (q_is_push) gpr[R_ESP]<=gpr[R_ESP]-{28'd0,q_w};
-                if (q_is_pop)  gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};  // POP m
+                // R3: the push/pop ESP adjust moved to the gpr writeback driver
+                // (core_gpr_wb.svh, S_STORE/default arm).
                 if (q_writes_flags && q_kind==K_ALU) eflags<=flags_out;
                 eip<=next_eip;
                 // M2S.6: a data-write breakpoint (TRAP, fires AFTER the store) or a
@@ -161,23 +159,14 @@
               else step<=step+4'd1;
             end else if (q_sm==SM_PUSHA) begin
               // push order: EAX,ECX,EDX,EBX,ESP(orig),EBP,ESI,EDI
+              // R3: the final ESP commit moved to the gpr writeback driver (S_USEQ).
               if (step==4'd7) begin
-                gpr[R_ESP]<=pusha_esp - (32'd4*8);
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end else begin // POPA: pop EDI,ESI,EBP,(skip ESP),EBX,EDX,ECX,EAX
-              unique case (step)
-                4'd0: gpr[R_EDI]<=mem_rdata;
-                4'd1: gpr[R_ESI]<=mem_rdata;
-                4'd2: gpr[R_EBP]<=mem_rdata;
-                4'd3: ; // skip ESP slot
-                4'd4: gpr[R_EBX]<=mem_rdata;
-                4'd5: gpr[R_EDX]<=mem_rdata;
-                4'd6: gpr[R_ECX]<=mem_rdata;
-                default: gpr[R_EAX]<=mem_rdata;
-              endcase
+              // R3: the per-beat GPR pops + the final ESP commit moved to the gpr
+              // writeback driver (core_gpr_wb.svh, S_USEQ arm).
               if (step==4'd7) begin
-                gpr[R_ESP]<=gpr[R_ESP]+(32'd4*8);
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
               end else step<=step+4'd1;
             end

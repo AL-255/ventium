@@ -42,26 +42,21 @@
             // 0 so the TLBs are already empty, but the flush keeps it correct.
             flags_we=1'b0;
             unique case (q_sys_creg)
-              3'd0: creg0<=gpr[q_src_reg];
-              3'd2: creg2<=gpr[q_src_reg];
+              3'd0: creg0<=gpr_o[q_src_reg];
+              3'd2: creg2<=gpr_o[q_src_reg];
               3'd3: begin
-                creg3<=gpr[q_src_reg];
+                creg3<=gpr_o[q_src_reg];
                 // TLB flush (clear val bits only) now lands in u_itlb/u_dtlb via
                 // tlb_flush (driven combinationally from this exact MOV CR3
                 // condition; see the flush driver at the TLB instantiation).
               end
-              default: creg4<=gpr[q_src_reg];
+              default: creg4<=gpr_o[q_src_reg];
             endcase
           end
           else if (q_sysop==SYS_MOVCR_FROM) begin
-            // MOV r32, CRn.
+            // MOV r32, CRn. R3: the dst-reg<-CRn write moved to the gpr writeback
+            // driver (core_gpr_wb.svh, SYS_MOVCR_FROM arm).
             flags_we=1'b0;
-            unique case (q_sys_creg)
-              3'd0: gpr[q_dst_reg]<=creg0;
-              3'd2: gpr[q_dst_reg]<=creg2;
-              3'd3: gpr[q_dst_reg]<=creg3;
-              default: gpr[q_dst_reg]<=creg4;
-            endcase
           end
           // ---- M2S.6 MOV DRn <-> GPR (gated sys_mode via the sysop decode) ----
           // DR4/DR5 alias DR6/DR7 ONLY when CR4.DE=0 (P5 debug-extensions). When
@@ -75,35 +70,29 @@
           else if (q_sysop==SYS_MOVDR_TO) begin
             flags_we=1'b0;
             unique case (q_sys_creg)
-              3'd0: dr0 <= gpr[q_src_reg];
-              3'd1: dr1 <= gpr[q_src_reg];
-              3'd2: dr2 <= gpr[q_src_reg];
-              3'd3: dr3 <= gpr[q_src_reg];
+              3'd0: dr0 <= gpr_o[q_src_reg];
+              3'd1: dr1 <= gpr_o[q_src_reg];
+              3'd2: dr2 <= gpr_o[q_src_reg];
+              3'd3: dr3 <= gpr_o[q_src_reg];
               // DR4 aliases DR6, DR5 aliases DR7 (CR4.DE=0; the corpus keeps DE=0).
-              3'd4, 3'd6: dr6 <= gpr[q_src_reg] | DR6_FIXED_1;
-              default:    dr7 <= gpr[q_src_reg] | DR7_FIXED_1;  // DR5/DR7
+              3'd4, 3'd6: dr6 <= gpr_o[q_src_reg] | DR6_FIXED_1;
+              default:    dr7 <= gpr_o[q_src_reg] | DR7_FIXED_1;  // DR5/DR7
             endcase
           end
           else if (q_sysop==SYS_MOVDR_FROM) begin
+            // R3: the dst-reg<-DRn write moved to the gpr writeback driver
+            // (core_gpr_wb.svh, SYS_MOVDR_FROM arm).
             flags_we=1'b0;
-            unique case (q_sys_creg)
-              3'd0: gpr[q_dst_reg] <= dr0;
-              3'd1: gpr[q_dst_reg] <= dr1;
-              3'd2: gpr[q_dst_reg] <= dr2;
-              3'd3: gpr[q_dst_reg] <= dr3;
-              3'd4, 3'd6: gpr[q_dst_reg] <= dr6;   // DR4 aliases DR6
-              default:    gpr[q_dst_reg] <= dr7;   // DR5/DR7
-            endcase
           end
           else if (q_sysop==SYS_MOVSREG_FROM) begin
-            // MOV r/m16, Sreg -> write the selector value (zero-extended) to reg.
+            // MOV r/m16, Sreg. R3: the dst-reg<-selector write moved to the gpr
+            // writeback driver (core_gpr_wb.svh, SYS_MOVSREG_FROM arm).
             flags_we=1'b0;
-            gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], {16'd0, seg_sel[q_sys_sreg]}, 3'd2, 1'b0);
           end
           else if (q_sysop==SYS_STR) begin
-            // STR r/m16 -> write the current TR selector (zero-extended) to reg.
+            // STR r/m16. R3: the dst-reg<-TR-selector write moved to the gpr
+            // writeback driver (core_gpr_wb.svh, SYS_STR arm).
             flags_we=1'b0;
-            gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], {16'd0, tr_sel}, 3'd2, 1'b0);
           end
           else if (q_sysop==SYS_MOVSREG_TO && !sys_mode && proxy_en) begin
             // M7.1 USER+proxy MOV Sreg, r16 (linux-user, no GDT): selector :=
@@ -114,8 +103,8 @@
             // base; every other flat user selector keeps base 0. The limit/attr
             // are the flat 4 GB data defaults (unused by the func compare).
             flags_we=1'b0;
-            seg_sel [q_sys_sreg] <= gpr[q_src_reg][15:0];
-            if (q_sys_sreg == 3'(SG_GS) && gpr[q_src_reg][15:0]==16'h0033)
+            seg_sel [q_sys_sreg] <= gpr_o[q_src_reg][15:0];
+            if (q_sys_sreg == 3'(SG_GS) && gpr_o[q_src_reg][15:0]==16'h0033)
               seg_base[q_sys_sreg] <= gs_base_r;        // TLS base for %gs:off
             else
               seg_base[q_sys_sreg] <= 32'd0;            // flat
@@ -123,8 +112,8 @@
             seg_attr [q_sys_sreg]<= 8'h93;
 `ifdef M7_PROXY_DEBUG
             $display("[M7DBG] mov sreg=%0d sel=0x%04x gs_base_r=0x%08x -> base=0x%08x",
-                     q_sys_sreg, gpr[q_src_reg][15:0], gs_base_r,
-                     (q_sys_sreg==3'(SG_GS) && gpr[q_src_reg][15:0]==16'h0033) ? gs_base_r : 32'd0);
+                     q_sys_sreg, gpr_o[q_src_reg][15:0], gs_base_r,
+                     (q_sys_sreg==3'(SG_GS) && gpr_o[q_src_reg][15:0]==16'h0033) ? gs_base_r : 32'd0);
 `endif
           end
           else if (q_sysop==SYS_MOVSREG_TO) begin
@@ -132,8 +121,8 @@
             // Real mode does no descriptor / protection checks (no GDT consulted);
             // the hidden attr stays the present R/W data default.
             flags_we=1'b0;
-            seg_sel [q_sys_sreg] <= gpr[q_src_reg][15:0];
-            seg_base[q_sys_sreg] <= {12'd0, gpr[q_src_reg][15:0], 4'd0};
+            seg_sel [q_sys_sreg] <= gpr_o[q_src_reg][15:0];
+            seg_base[q_sys_sreg] <= {12'd0, gpr_o[q_src_reg][15:0], 4'd0};
             seg_limit[q_sys_sreg]<= 32'h0000_FFFF;
             seg_attr [q_sys_sreg]<= 8'h93;
           end
@@ -148,12 +137,14 @@
           else begin
             unique case (q_kind)
               K_ALU: begin
+                // R3: all GPR writes in this arm (XLATB AL, LEA dst, POP dst/ESP,
+                // ALU dst) moved to the gpr writeback driver (core_gpr_wb.svh,
+                // K_ALU arm). Only the flags/store/state/seg-load logic stays here.
                 if (q_xlat) begin
                   // XLATB: AL <- the byte loaded from [DS:(E)BX + AL]. No flags.
-                  gpr[R_EAX]<=reg_merge(gpr[R_EAX], {24'd0, mem_load_data[7:0]}, 3'd1, 1'b0);
                   flags_we=1'b0;
                 end
-                else if (q_is_lea) gpr[q_dst_reg]<=q_ea;
+                else if (q_is_lea) begin end
                 else if (q_is_pop && q_mem_write) begin
                   // POP m: stack value (mem_load_data) -> memory dest; ESP += w.
                   do_store=1'b1; do_retire=1'b0;
@@ -162,12 +153,9 @@
                   // real/v86, recompute base = sel<<4 (the firmware path). ESP += w.
                   seg_sel [q_sys_sreg] <= mem_load_data[15:0];
                   seg_base[q_sys_sreg] <= {12'd0, mem_load_data[15:0], 4'd0};
-                  gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};
                 end else if (q_is_pop) begin
-                  gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], wmask(mem_load_data,q_w), q_w, 1'b0);
-                  if (q_dst_reg!=R_ESP) gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};
                 end else if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
-                else if (q_writes_reg) gpr[q_dst_reg]<=reg_merge(dst_cur, alu_out, q_w, q_dst_high8);
+                else if (q_writes_reg) begin end
                 // M9.5 LES/LDS/LSS/LFS/LGS: on top of the GPR (offset) write above,
                 // load the target segment register from the HIGH half of the SAME
                 // 4-byte far-pointer read (raw mem_load_data, not the width-masked
@@ -192,8 +180,9 @@
                   flags_we=1'b0;
                   if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
                 end else begin
+                  // R3: the dst-reg shift result write moved to the gpr writeback
+                  // driver (core_gpr_wb.svh, K_SHIFT arm); only flags/store stay.
                   if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
-                  else gpr[q_dst_reg]<=reg_merge(dst_cur, sh_out, q_w, q_dst_high8);
                   begin
                     logic [31:0] fl; logic ofb;
                     fl=eflags;
@@ -222,14 +211,15 @@
 
               K_SHLDRD: begin
                 logic [5:0] cnt; logic [31:0] r, shm1;
-                cnt = q_shift_cl ? {1'b0,gpr[R_ECX][4:0]} : {1'b0,q_shift_imm};
+                cnt = q_shift_cl ? {1'b0,gpr_o[R_ECX][4:0]} : {1'b0,q_shift_imm};
                 if (cnt==6'd0) flags_we=1'b0;
                 else begin
                   r = shld_result(q_shrd, dst_cur, reg_read(q_src_reg,q_w,1'b0), cnt, q_w);
                   // shm1 = dst shifted by (count-1) (same direction) = QEMU CC_SRC.
                   shm1 = q_shrd ? (wmask(dst_cur,q_w) >> (cnt-6'd1))
                                 : wmask(wmask(dst_cur,q_w) << (cnt-6'd1), q_w);
-                  gpr[q_dst_reg]<=reg_merge(dst_cur, r, q_w, 1'b0);
+                  // R3: the dst-reg SHLD/SHRD result write moved to the gpr
+                  // writeback driver (core_gpr_wb.svh, K_SHLDRD arm).
                   begin logic [31:0] fl;
                     fl=eflags & 32'hFFFF_F72A;
                     fl[0]=shld_cf(q_shrd, dst_cur, cnt, q_w); fl[2]=parity8(r[7:0]); fl[4]=1'b0;
@@ -247,13 +237,14 @@
                 unique case (q_md)
                   3'd4: begin // MUL (unsigned)
                     logic [63:0] p; logic [31:0] lo; logic ovf; logic [31:0] fl;
-                    if (q_w==3'd1)      p={48'd0, ({8'd0,gpr[R_EAX][7:0]}*{8'd0,srcv[7:0]})};
-                    else if (q_w==3'd2) p={32'd0, ({16'd0,gpr[R_EAX][15:0]}*{16'd0,srcv[15:0]})};
-                    else                p={32'd0,gpr[R_EAX]}*{32'd0,srcv};
-                    if (q_w==3'd1) begin lo={24'd0,p[7:0]};  ovf=(p[15:8]!=8'd0);  gpr[R_EAX]<={gpr[R_EAX][31:16],p[15:0]}; end
-                    else if (q_w==3'd2) begin lo={16'd0,p[15:0]}; ovf=(p[31:16]!=16'd0);
-                      gpr[R_EAX]<={gpr[R_EAX][31:16],p[15:0]}; gpr[R_EDX]<={gpr[R_EDX][31:16],p[31:16]}; end
-                    else begin lo=p[31:0]; ovf=(p[63:32]!=32'd0); gpr[R_EAX]<=p[31:0]; gpr[R_EDX]<=p[63:32]; end
+                    if (q_w==3'd1)      p={48'd0, ({8'd0,gpr_o[R_EAX][7:0]}*{8'd0,srcv[7:0]})};
+                    else if (q_w==3'd2) p={32'd0, ({16'd0,gpr_o[R_EAX][15:0]}*{16'd0,srcv[15:0]})};
+                    else                p={32'd0,gpr_o[R_EAX]}*{32'd0,srcv};
+                    // R3: EAX/EDX product commit moved to the gpr writeback driver
+                    // (core_gpr_wb.svh, K_MULDIV/3'd4); lo/ovf stay (feed flags).
+                    if (q_w==3'd1) begin lo={24'd0,p[7:0]};  ovf=(p[15:8]!=8'd0);  end
+                    else if (q_w==3'd2) begin lo={16'd0,p[15:0]}; ovf=(p[31:16]!=16'd0); end
+                    else begin lo=p[31:0]; ovf=(p[63:32]!=32'd0); end
                     // QEMU compute_all_mul: ZF/SF/PF from low result, AF=0, CF=OF=ovf
                     fl=eflags&32'hFFFF_F72A; fl[1]=1'b1;
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
@@ -267,13 +258,14 @@
                   end
                   3'd5: begin // IMUL one-operand (signed)
                     logic signed [63:0] p; logic [31:0] lo; logic ovf; logic [31:0] fl;
-                    if (q_w==3'd1)      p=$signed({{8{srcv[7]}},srcv[7:0]}) * $signed({{8{gpr[R_EAX][7]}},gpr[R_EAX][7:0]});
-                    else if (q_w==3'd2) p=$signed({{16{srcv[15]}},srcv[15:0]}) * $signed({{16{gpr[R_EAX][15]}},gpr[R_EAX][15:0]});
-                    else                p=$signed(srcv) * $signed(gpr[R_EAX]);
-                    if (q_w==3'd1) begin lo={24'd0,p[7:0]};  ovf=($signed(p)!=$signed({{56{p[7]}},p[7:0]}));   gpr[R_EAX]<={gpr[R_EAX][31:16],p[15:0]}; end
-                    else if (q_w==3'd2) begin lo={16'd0,p[15:0]}; ovf=($signed(p)!=$signed({{48{p[15]}},p[15:0]}));
-                      gpr[R_EAX]<={gpr[R_EAX][31:16],p[15:0]}; gpr[R_EDX]<={gpr[R_EDX][31:16],p[31:16]}; end
-                    else begin lo=p[31:0]; ovf=($signed(p)!=$signed({{32{p[31]}},p[31:0]})); gpr[R_EAX]<=p[31:0]; gpr[R_EDX]<=p[63:32]; end
+                    if (q_w==3'd1)      p=$signed({{8{srcv[7]}},srcv[7:0]}) * $signed({{8{gpr_o[R_EAX][7]}},gpr_o[R_EAX][7:0]});
+                    else if (q_w==3'd2) p=$signed({{16{srcv[15]}},srcv[15:0]}) * $signed({{16{gpr_o[R_EAX][15]}},gpr_o[R_EAX][15:0]});
+                    else                p=$signed(srcv) * $signed(gpr_o[R_EAX]);
+                    // R3: EAX/EDX product commit moved to the gpr writeback driver
+                    // (core_gpr_wb.svh, K_MULDIV/3'd5); lo/ovf stay (feed flags).
+                    if (q_w==3'd1) begin lo={24'd0,p[7:0]};  ovf=($signed(p)!=$signed({{56{p[7]}},p[7:0]}));   end
+                    else if (q_w==3'd2) begin lo={16'd0,p[15:0]}; ovf=($signed(p)!=$signed({{48{p[15]}},p[15:0]})); end
+                    else begin lo=p[31:0]; ovf=($signed(p)!=$signed({{32{p[31]}},p[31:0]})); end
                     fl=eflags&32'hFFFF_F72A; fl[1]=1'b1;
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
@@ -290,31 +282,30 @@
                     dfault = 1'b0;
                     if (q_w==3'd1) begin
                       logic [15:0] num, qq, rr;
-                      num=gpr[R_EAX][15:0];
+                      num=gpr_o[R_EAX][15:0];
                       if (srcv[7:0]==8'd0) dfault=1'b1;            // divide-by-zero
                       else begin
                         qq=num/{8'd0,srcv[7:0]}; rr=num%{8'd0,srcv[7:0]};
                         if (qq[15:8]!=8'd0) dfault=1'b1;           // quotient > 0xFF
-                        else gpr[R_EAX]<={gpr[R_EAX][31:16], rr[7:0], qq[7:0]};
+                        // R3: EAX commit moved to the gpr writeback driver (K_MULDIV/3'd6).
                       end
                     end else if (q_w==3'd2) begin
                       logic [31:0] num,qq,rr;
-                      num={gpr[R_EDX][15:0],gpr[R_EAX][15:0]};
+                      num={gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]};
                       if (srcv[15:0]==16'd0) dfault=1'b1;
                       else begin
                         qq=num/{16'd0,srcv[15:0]}; rr=num%{16'd0,srcv[15:0]};
                         if (qq[31:16]!=16'd0) dfault=1'b1;         // quotient > 0xFFFF
-                        else begin gpr[R_EAX]<={gpr[R_EAX][31:16], qq[15:0]};
-                                   gpr[R_EDX]<={gpr[R_EDX][31:16], rr[15:0]}; end
+                        // R3: EAX/EDX commit moved to the gpr writeback driver.
                       end
                     end else begin
                       logic [63:0] num,qq,rr;
-                      num={gpr[R_EDX],gpr[R_EAX]};
+                      num={gpr_o[R_EDX],gpr_o[R_EAX]};
                       if (srcv==32'd0) dfault=1'b1;
                       else begin
                         qq=num/{32'd0,srcv}; rr=num%{32'd0,srcv};
                         if (qq[63:32]!=32'd0) dfault=1'b1;         // quotient > 0xFFFFFFFF
-                        else begin gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0]; end
+                        // R3: EAX/EDX commit moved to the gpr writeback driver.
                       end
                     end
                     flags_we=1'b0;
@@ -349,32 +340,31 @@
                     dfault = 1'b0;
                     if (q_w==3'd1) begin
                       logic signed [15:0] num,den,qq,rr;
-                      num=$signed(gpr[R_EAX][15:0]); den=$signed({{8{srcv[7]}},srcv[7:0]});
+                      num=$signed(gpr_o[R_EAX][15:0]); den=$signed({{8{srcv[7]}},srcv[7:0]});
                       if (srcv[7:0]==8'd0) dfault=1'b1;
                       else begin
                         qq=num/den; rr=num%den;
                         // overflow: quotient outside signed 8-bit [-128,127]
                         if (qq != $signed({{8{qq[7]}}, qq[7:0]})) dfault=1'b1;
-                        else gpr[R_EAX]<={gpr[R_EAX][31:16], rr[7:0], qq[7:0]};
+                        // R3: EAX commit moved to the gpr writeback driver (K_MULDIV/default).
                       end
                     end else if (q_w==3'd2) begin
                       logic signed [31:0] num,den,qq,rr;
-                      num=$signed({gpr[R_EDX][15:0],gpr[R_EAX][15:0]}); den=$signed({{16{srcv[15]}},srcv[15:0]});
+                      num=$signed({gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]}); den=$signed({{16{srcv[15]}},srcv[15:0]});
                       if (srcv[15:0]==16'd0) dfault=1'b1;
                       else begin
                         qq=num/den; rr=num%den;
                         if (qq != $signed({{16{qq[15]}}, qq[15:0]})) dfault=1'b1;
-                        else begin gpr[R_EAX]<={gpr[R_EAX][31:16], qq[15:0]};
-                                   gpr[R_EDX]<={gpr[R_EDX][31:16], rr[15:0]}; end
+                        // R3: EAX/EDX commit moved to the gpr writeback driver.
                       end
                     end else begin
                       logic signed [63:0] num,den,qq,rr;
-                      num=$signed({gpr[R_EDX],gpr[R_EAX]}); den=$signed({{32{srcv[31]}},srcv});
+                      num=$signed({gpr_o[R_EDX],gpr_o[R_EAX]}); den=$signed({{32{srcv[31]}},srcv});
                       if (srcv==32'd0) dfault=1'b1;
                       else begin
                         qq=num/den; rr=num%den;
                         if (qq != $signed({{32{qq[31]}}, qq[31:0]})) dfault=1'b1;
-                        else begin gpr[R_EAX]<=qq[31:0]; gpr[R_EDX]<=rr[31:0]; end
+                        // R3: EAX/EDX commit moved to the gpr writeback driver.
                       end
                     end
                     flags_we=1'b0;
@@ -397,14 +387,14 @@
                 logic [31:0] s1,s2,lo; logic ov; logic [31:0] fl;
                 s1 = q_mem_read ? wmask(mem_load_data,q_w) : reg_read(q_src_reg,q_w,1'b0);
                 s2 = q_imul_3op ? q_imul_imm : reg_read(q_dst_reg,q_w,1'b0);
+                // R3: the dst-reg IMUL2 result write moved to the gpr writeback
+                // driver (core_gpr_wb.svh, K_IMUL2 arm); lo/ov stay (feed flags).
                 if (q_w==3'd2) begin logic signed [31:0] pp;
                   pp=$signed({{16{s1[15]}},s1[15:0]})*$signed({{16{s2[15]}},s2[15:0]});
                   lo={16'd0,pp[15:0]};
-                  gpr[q_dst_reg]<=reg_merge(dst_cur, {16'd0,pp[15:0]}, q_w, 1'b0);
                   ov=(pp!=$signed({{16{pp[15]}},pp[15:0]}));
                 end else begin logic signed [63:0] pp; pp=$signed(s1)*$signed(s2);
                   lo=pp[31:0];
-                  gpr[q_dst_reg]<=reg_merge(dst_cur, pp[31:0], q_w, 1'b0);
                   ov=(pp!=$signed({{32{pp[31]}},pp[31:0]}));
                 end
                 // QEMU CC_OP_MUL: ZF/SF/PF from low result, AF=0, CF=OF=ov.
@@ -417,19 +407,13 @@
               end
 
               K_EXT: begin
-                logic [31:0] s,r;
-                s = q_mem_read ? mem_load_data : reg_read(q_src_reg, q_ext_srcw, q_src_high8);
-                if (q_ext_srcw==3'd1) r = q_ext_signed ? {{24{s[7]}},s[7:0]} : {24'd0,s[7:0]};
-                else                  r = q_ext_signed ? {{16{s[15]}},s[15:0]} : {16'd0,s[15:0]};
-                // Destination width follows the operand-size: a 0x66-prefixed
-                // MOVZX/MOVSX (66 0F B6/B7/BE/BF) writes a 16-bit register and
-                // must PRESERVE [31:16]; the unprefixed form writes the full 32.
-                gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], r, q_w, 1'b0);
+                // R3: the MOVZX/MOVSX dst-reg write moved to the gpr writeback
+                // driver (core_gpr_wb.svh, K_EXT arm). No flags/store here.
               end
 
               K_SETCC: begin
                 if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
-                else gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], {31'd0,cond_true(q_cc,eflags)}, 3'd1, q_dst_high8);
+                // R3: else dst-reg<-cond write moved to the gpr writeback driver.
                 flags_we=1'b0;
               end
 
@@ -454,9 +438,8 @@
                   3'd7: res=cur ^ (32'd1<<idx);
                   default: res=cur;
                 endcase
-                // Modify forms (BTS/BTR/BTC) write the destination at operand
-                // width, preserving [31:16] for the 16-bit form.
-                if (q_writes_reg) gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], res, q_w, 1'b0);
+                // Modify forms (BTS/BTR/BTC) write the destination — R3: that
+                // dst-reg write moved to the gpr writeback driver (K_BITTEST arm).
                 begin logic [31:0] fl; fl=eflags; fl[0]=bv; fl[1]=1'b1; eflags<=fl; end
                 flags_we=1'b0;
               end
@@ -475,7 +458,8 @@
                 // it. Semantics are identical (only bits <=hi are considered).
                 if (!q_shrd) begin for (int i=31;i>=0;i--) if (i<=hi && s[i]) idx=i[31:0]; end // BSF lowest
                 else         begin for (int i=0;i<=31;i++) if (i<=hi && s[i]) idx=i[31:0]; end // BSR highest
-                if (!zero) gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], idx, q_w, 1'b0);  // dest unchanged on src==0 (QEMU)
+                // R3: the BSF/BSR dst-reg index write (dest unchanged on src==0)
+                // moved to the gpr writeback driver (core_gpr_wb.svh, K_BITSCAN arm).
                 // QEMU sets CC_OP_LOGIC with CC_DST = the SOURCE operand:
                 //   ZF=(src==0) [defined]; SF=MSB(src); PF=parity(src); CF=OF=AF=0.
                 begin logic [31:0] fl; fl=eflags & 32'hFFFF_F72A;
@@ -486,37 +470,24 @@
 
               K_XCHG: begin
                 if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
-                else begin
-                  logic [31:0] a,b;
-                  a=reg_read(q_dst_reg,q_w,q_dst_high8); b=reg_read(q_src_reg,q_w,q_src_high8);
-                  gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg], b, q_w, q_dst_high8);
-                  gpr[q_src_reg]<=reg_merge(gpr[q_src_reg], a, q_w, q_src_high8);
-                end
+                // R3: the register-form dst/src swap writes moved to the gpr
+                // writeback driver (core_gpr_wb.svh, K_XCHG arm).
                 flags_we=1'b0;
               end
 
               K_CMPXCHG: begin
-                // Flags = CMP accumulator,temp (always written, both forms). The
-                // conditional accumulator update (acc <- temp when NOT equal) is
-                // committed here for both forms. Source store / dst-reg write is
-                // conditional on equality.
+                // Flags = CMP accumulator,temp (always written, both forms).
+                // R3: the conditional accumulator (EAX) update and the register-form
+                // dst-reg write moved to the gpr writeback driver (K_CMPXCHG arm).
+                // Only flags + the store-decision latch stay here.
                 eflags<=cmpxchg_flags; flags_we=1'b0;
-                if (!cmpxchg_eq)
-                  gpr[R_EAX]<=reg_merge(gpr[R_EAX], cmpxchg_temp, q_w, 1'b0);
                 if (q_mem_write) begin
                   // memory form: write src (equal) or temp-unchanged (not equal)
                   // in S_STORE. Latch the decision NOW — the accumulator update
-                  // above changes EAX, so the live cmpxchg_eq is no longer valid
-                  // by the S_STORE clock.
+                  // (in the driver) changes EAX, so the live cmpxchg_eq is no longer
+                  // valid by the S_STORE clock.
                   cmpxchg_wrsrc_r<=cmpxchg_eq;
                   do_store=1'b1; do_retire=1'b0;
-                end else begin
-                  // register form: on equality the dst GPR gets src; otherwise it
-                  // is left unchanged (the accumulator already took temp above).
-                  if (cmpxchg_eq)
-                    gpr[q_dst_reg]<=reg_merge(gpr[q_dst_reg],
-                                              reg_read(q_src_reg,q_w,q_src_high8),
-                                              q_w, q_dst_high8);
                 end
               end
 
@@ -535,11 +506,9 @@
                   eflags <= flags_out; flags_we=1'b0;
                   do_store=1'b1; do_retire=1'b0;
                 end else begin
-                  // REGISTER form: SRC<-old dst FIRST, then DEST<-sum, so that when
-                  // src==dst (`xadd %eax,%eax`) the destination write (the SUM) wins
-                  // last — the SDM result DEST=TEMP=sum. Flags via the do_retire path.
-                  gpr[q_src_reg] <= reg_merge(gpr[q_src_reg], a_op, q_w, q_src_high8);
-                  gpr[q_dst_reg] <= reg_merge(dst_cur, alu_out, q_w, q_dst_high8);
+                  // REGISTER form: SRC<-old dst, then DEST<-sum (src==dst -> SUM
+                  // wins last). R3: both writes moved to the gpr writeback driver
+                  // (core_gpr_wb.svh, K_XADD arm). Flags via the do_retire path.
                 end
               end
 
@@ -574,18 +543,20 @@
                 // unchanged). Equal -> store ECX:EBX to [mem]:[mem+4] (2 beats via
                 // S_USEQ) and ZF=1. Not equal -> EDX:EAX <- [mem64], ZF=0, no store.
                 logic eq;
-                eq = (mem_load_data == gpr[R_EAX]) && (mem_load_data2 == gpr[R_EDX]);
+                eq = (mem_load_data == gpr_o[R_EAX]) && (mem_load_data2 == gpr_o[R_EDX]);
                 eflags <= (eflags & ~(32'd1 << 6)) | (eq ? (32'd1 << 6) : 32'd0);
                 flags_we=1'b0;
                 if (eq) begin
                   do_retire=1'b0; state<=S_USEQ; step<=4'd0;   // conditional 2-word store
-                end else begin
-                  gpr[R_EAX]<=mem_load_data; gpr[R_EDX]<=mem_load_data2;
                 end
+                // R3: not-equal EDX:EAX <- [mem64] load moved to the gpr writeback
+                // driver (core_gpr_wb.svh, K_CX8B arm).
               end
 
-              K_BSWAP: begin logic [31:0] v; v=gpr[q_dst_reg];
-                gpr[q_dst_reg]<={v[7:0],v[15:8],v[23:16],v[31:24]}; end
+              K_BSWAP: begin
+                // R3: the dst-reg byte-swap write moved to the gpr writeback driver
+                // (core_gpr_wb.svh, K_BSWAP arm).
+              end
 
               // ---- CPUID (0F A2) — deterministic leaf table for `-cpu pentium` ----
               // CPUID writes eax/ebx/ecx/edx as a pure function of the leaf (eAX).
@@ -619,52 +590,10 @@
               // (so the M7 lockstep stays byte-identical). soc_en and cosim_en are
               // mutually exclusive (tb_soc vs the Win95 co-sim TB).
               K_CPUID: begin
-                if (soc_en) begin
-                  // qemu-system-i386 8.2.2 `-cpu pentium`, verified per-record vs the
-                  // psoccpuid golden over leaves {0..4, 0x4000_0000..1, 0x8000_0000..4}
-                  // (the brand string is "QEMU Virtual CPU version 2.5+"). Reserved /
-                  // unprobed leaves return 0 (unverified beyond this set, documented).
-                  unique case (gpr[R_EAX])
-                    32'h0000_0000: begin gpr[R_EAX]<=32'h0000_0004; gpr[R_EBX]<=32'h756e_6547;
-                                         gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69; end
-                    32'h0000_0001: begin gpr[R_EAX]<=32'h0000_0663; gpr[R_EBX]<=32'h0000_0800;
-                                         gpr[R_ECX]<=32'h8000_0001; gpr[R_EDX]<=32'h0781_abfd; end
-                    32'h0000_0002: begin gpr[R_EAX]<=32'h0000_0001; gpr[R_EBX]<=32'h0000_0000;
-                                         gpr[R_ECX]<=32'h0000_004d; gpr[R_EDX]<=32'h002c_307d; end
-                    32'h0000_0004: begin gpr[R_EAX]<=32'h0000_0121; gpr[R_EBX]<=32'h01c0_003f;
-                                         gpr[R_ECX]<=32'h0000_003f; gpr[R_EDX]<=32'h0000_0001; end
-                    32'h4000_0000: begin gpr[R_EAX]<=32'h4000_0001; gpr[R_EBX]<=32'h5447_4354;
-                                         gpr[R_ECX]<=32'h4354_4743; gpr[R_EDX]<=32'h4743_5447; end
-                    32'h8000_0000: begin gpr[R_EAX]<=32'h8000_0004; gpr[R_EBX]<=32'h756e_6547;
-                                         gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69; end
-                    32'h8000_0001: begin gpr[R_EAX]<=32'h0000_0663; gpr[R_EBX]<=32'h0000_0000;
-                                         gpr[R_ECX]<=32'h0000_0000; gpr[R_EDX]<=32'h0000_0000; end
-                    32'h8000_0002: begin gpr[R_EAX]<=32'h554d_4551; gpr[R_EBX]<=32'h7269_5620;
-                                         gpr[R_ECX]<=32'h6c61_7574; gpr[R_EDX]<=32'h5550_4320; end
-                    32'h8000_0003: begin gpr[R_EAX]<=32'h7265_7620; gpr[R_EBX]<=32'h6e6f_6973;
-                                         gpr[R_ECX]<=32'h352e_3220; gpr[R_EDX]<=32'h0000_002b; end
-                    // leaf 3, 0x4000_0001, 0x8000_0004, and all reserved leaves -> 0.
-                    default:       begin gpr[R_EAX]<=32'h0000_0000; gpr[R_EBX]<=32'h0000_0000;
-                                         gpr[R_ECX]<=32'h0000_0000; gpr[R_EDX]<=32'h0000_0000; end
-                  endcase
-                end else begin
-                  // Win95 co-sim model (cosim_en) — UNCHANGED.
-                  unique case (gpr[R_EAX])
-                    32'h0000_0000: begin
-                      gpr[R_EAX]<=32'h0000_0001; gpr[R_EBX]<=32'h756e_6547;
-                      gpr[R_ECX]<=32'h6c65_746e; gpr[R_EDX]<=32'h4965_6e69;
-                    end
-                    32'h4000_0000: begin
-                      gpr[R_EAX]<=32'h4000_0001; gpr[R_EBX]<=32'h5447_4354;
-                      gpr[R_ECX]<=32'h4354_4743; gpr[R_EDX]<=32'h4743_5447;
-                    end
-                    default: begin
-                      gpr[R_EAX]<=32'h0000_0543; gpr[R_EBX]<=32'h0000_0800;
-                      gpr[R_ECX]<=32'h8000_0000; gpr[R_EDX]<=32'h0080_03bd;
-                    end
-                  endcase
-                end
-                flags_we=1'b0;   // CPUID modifies no flags
+                // R3: the CPUID leaf->EAX/EBX/ECX/EDX result table moved to the gpr
+                // writeback driver (core_gpr_wb.svh, K_CPUID arm — same soc_en/cosim
+                // branch + per-leaf constants). CPUID modifies no flags.
+                flags_we=1'b0;
               end
 
               // F3: RDTSC (0F 31) — EDX:EAX <= the 64-bit time-stamp counter. EAX is
@@ -672,43 +601,33 @@
               // executes (the same `tsc` the always_ff free-runs). No flags. Reached
               // only under cosim_en||soc_en (the decode gate); inert for user mode.
               K_RDTSC: begin
-                gpr[R_EAX]<=tsc[31:0];
-                gpr[R_EDX]<=tsc[63:32];
+                // R3: EDX:EAX <= tsc moved to the gpr writeback driver (K_RDTSC arm).
                 flags_we=1'b0;
               end
 
               K_CONV: begin
-                if (!q_conv_cdq) begin
-                  if (q_w==3'd2) gpr[R_EAX]<={gpr[R_EAX][31:16], {8{gpr[R_EAX][7]}}, gpr[R_EAX][7:0]};
-                  else           gpr[R_EAX]<={{16{gpr[R_EAX][15]}}, gpr[R_EAX][15:0]};
-                end else begin
-                  if (q_w==3'd2) gpr[R_EDX]<={gpr[R_EDX][31:16], {16{gpr[R_EAX][15]}}};
-                  else           gpr[R_EDX]<={32{gpr[R_EAX][31]}};
-                end
+                // R3: CBW/CWDE (EAX) / CWD/CDQ (EDX) sign-extend writes moved to the
+                // gpr writeback driver (core_gpr_wb.svh, K_CONV arm). No flags here.
               end
 
               K_STKMISC: begin
                 unique case (q_sm)
-                  SM_LAHF: gpr[R_EAX]<={gpr[R_EAX][31:16], eflags[7:0], gpr[R_EAX][7:0]};
+                  SM_LAHF: begin end  // R3: AH<-flags write moved to the gpr writeback driver
                   SM_SAHF: begin logic [31:0] fl; fl=eflags;
-                    fl[7]=gpr[R_EAX][15]; fl[6]=gpr[R_EAX][14]; fl[4]=gpr[R_EAX][12];
-                    fl[2]=gpr[R_EAX][10]; fl[0]=gpr[R_EAX][8]; fl[1]=1'b1; eflags<=fl; end
+                    fl[7]=gpr_o[R_EAX][15]; fl[6]=gpr_o[R_EAX][14]; fl[4]=gpr_o[R_EAX][12];
+                    fl[2]=gpr_o[R_EAX][10]; fl[0]=gpr_o[R_EAX][8]; fl[1]=1'b1; eflags<=fl; end
                   SM_PUSHF: begin do_store=1'b1; do_retire=1'b0; end
                   SM_POPF: begin
                     // EFLAGS <- [ESP], USER-MODE mask: status flags + DF/TF/AC/
                     // ID/NT writable; IF/IOPL/VM/RF preserved (QEMU CPL=3 popf).
                     // writable = CF|PF|AF|ZF|SF|TF|DF|OF|NT|AC|ID = 0x244DD5.
+                    // R3: the ESP+=w bump moved to the gpr writeback driver.
                     eflags<=((mem_load_data & 32'h0024_4DD5) |
                              (eflags & ~32'h0024_4DD5)) | 32'h0000_0002;
-                    gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};
                   end
-                  // LEAVE: ESP<-EBP (full, stack-addr width), then pop (E)BP.
-                  // A 0x66 LEAVE pops a 16-bit BP (preserve EBP[31:16]) and the
-                  // stack slot is 2 bytes wide, so ESP = old EBP + 2.
-                  SM_LEAVE: begin
-                    gpr[R_EBP]<=reg_merge(gpr[R_EBP], wmask(mem_load_data,q_w), q_w, 1'b0);
-                    gpr[R_ESP]<=gpr[R_EBP]+{28'd0,q_w};
-                  end
+                  // LEAVE: ESP<-EBP, then pop (E)BP. R3: both EBP/ESP writes moved to
+                  // the gpr writeback driver (core_gpr_wb.svh, K_STKMISC/SM_LEAVE).
+                  SM_LEAVE: begin end
                   SM_PUSHA, SM_POPA: begin do_retire=1'b0; state<=S_USEQ; step<=4'd0; end
                   // ENTER (level 0): push EBP now (store driven by the st_data mux:
                   // st_addr=ESP-w, st_data=EBP); S_STORE then sets EBP=ESP-w and
@@ -723,7 +642,7 @@
                 // one element; with REP iterate via S_USEQ keeping pc fixed.
                 logic [31:0] cx;
                 logic        rep_active, last_iter, cmp_term, store_needed;
-                cx = gpr[R_ECX];
+                cx = gpr_o[R_ECX];
                 rep_active = (q_rep || q_repne);
                 // ECX==0 degenerate REP: no element, just advance EIP, one record.
                 // F3: a16 (q_cnt16) REP counts in CX (low 16) — test/decrement
@@ -738,22 +657,14 @@
                   // F3: a16 (q_cnt16) string updates touch ONLY SI/DI — the
                   // low 16 bits wrap mod 64K and ESI/EDI[31:16] are preserved
                   // (a DF=1 copy crossing 0 must wrap to 0xFFFF, not 32-bit -1).
-                  if (q_str_loadsi)  gpr[R_ESI]<=q_cnt16
-                      ? {gpr[R_ESI][31:16], gpr[R_ESI][15:0]+str_step[15:0]}
-                      : gpr[R_ESI]+str_step;
-                  if (q_str_storedi) gpr[R_EDI]<=q_cnt16
-                      ? {gpr[R_EDI][31:16], gpr[R_EDI][15:0]+str_step[15:0]}
-                      : gpr[R_EDI]+str_step;
-                  if (q_str_scandi)  gpr[R_EDI]<=q_cnt16
-                      ? {gpr[R_EDI][31:16], gpr[R_EDI][15:0]+str_step[15:0]}
-                      : gpr[R_EDI]+str_step;
-                  if (q_st==ST_LODS) gpr[R_EAX]<=reg_merge(gpr[R_EAX], wmask(mem_load_data,q_w), q_w, 1'b0);
+                  // R3: the ESI/EDI/EAX(LODS)/ECX(REP) writes moved to the gpr
+                  // writeback driver (core_gpr_wb.svh, K_STR arm); cx is still
+                  // recomputed below since last_iter/new_eip (do_retire/state) need it.
                   if (q_str_scandi) begin eflags<=str_flags; end
                   flags_we=1'b0;
 
                   if (rep_active) begin
                     cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
-                    gpr[R_ECX]<=cx;
                     // termination: ECX reaches 0, or (REPE/REPNE) ZF condition.
                     cmp_term = 1'b0;
                     if (q_str_scandi) begin
@@ -774,7 +685,7 @@
 
                   // latch pre-increment [EDI] + data for the store stage (EDI is
                   // being incremented this cycle via NBA, so S_STORE must not
-                  // re-read gpr[EDI]).
+                  // re-read gpr_o[EDI]).
                   str_store_addr <= str_edi;   // F3: a16-masked DI
                   str_store_data <= str_wdata;
                   // remember the eip we want after this element commit
@@ -794,25 +705,26 @@
                   // Near RET: pop the return IP at operand width. A 0x66 RET
                   // pops a 16-bit IP (EIP truncated to 16 bits) and ESP+=2.
                   CT_RETN: begin
+                    // R3: ESP+=w bump moved to the gpr writeback driver (K_CTRL/CT_RETN).
                     new_eip = (q_w==3'd2) ? {16'd0,mem_load_data[15:0]} : mem_load_data;
-                    gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w};
                   end
                   CT_RETN_IMM: begin
+                    // R3: ESP+=w+imm bump moved to the gpr writeback driver (CT_RETN_IMM).
                     new_eip = (q_w==3'd2) ? {16'd0,mem_load_data[15:0]} : mem_load_data;
-                    gpr[R_ESP]<=gpr[R_ESP]+{28'd0,q_w}+{16'd0,q_ret_imm};
                   end
                   CT_LOOP, CT_LOOPE, CT_LOOPNE: begin
                     // 0x67 address-size: the count register is CX (low 16):
                     // decrement preserves ECX[31:16] and the taken test is CX!=0.
                     logic [31:0] cx; logic take; logic zero_after;
                     if (q_cnt16) begin
-                      cx = {gpr[R_ECX][31:16], (gpr[R_ECX][15:0]-16'd1)};
+                      cx = {gpr_o[R_ECX][31:16], (gpr_o[R_ECX][15:0]-16'd1)};
                       zero_after = (cx[15:0]==16'd0);
                     end else begin
-                      cx = gpr[R_ECX]-32'd1;
+                      cx = gpr_o[R_ECX]-32'd1;
                       zero_after = (cx==32'd0);
                     end
-                    gpr[R_ECX]<=cx;
+                    // R3: ECX<-cx write moved to the gpr writeback driver (K_CTRL/CT_LOOP);
+                    // cx/zero_after stay since new_eip (the taken target) needs them.
                     take=~zero_after;
                     if (q_ct==CT_LOOPE)  take=take & eflags[6];
                     if (q_ct==CT_LOOPNE) take=take & ~eflags[6];
@@ -821,7 +733,7 @@
                   end
                   CT_JECXZ: begin
                     logic cx_zero;
-                    cx_zero = q_cnt16 ? (gpr[R_ECX][15:0]==16'd0) : (gpr[R_ECX]==32'd0);
+                    cx_zero = q_cnt16 ? (gpr_o[R_ECX][15:0]==16'd0) : (gpr_o[R_ECX]==32'd0);
                     new_eip=cx_zero?(next_eip+q_rel):next_eip; flags_we=1'b0;
                   end
                   default: ;

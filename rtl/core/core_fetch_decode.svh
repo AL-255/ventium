@@ -32,8 +32,8 @@
           // F3 probe 2: 16-bit code never legitimately carries ESP[31:16]!=0.
           // High bits here mean a 32-bit-ESP stack op leaked past 64K (the
           // missing real-mode SP wrap) — the audit's remaining finding.
-          if (seg_real && gpr[R_ESP][31:16] != 16'd0)
-            $display("ESP-HIGH eip=%08x esp=%08x ss=%04x", eip, gpr[R_ESP], seg_sel[SG_SS]);
+          if (seg_real && gpr_o[R_ESP][31:16] != 16'd0)
+            $display("ESP-HIGH eip=%08x esp=%08x ss=%04x", eip, gpr_o[R_ESP], seg_sel[SG_SS]);
 `endif
           // M2S.6 (gated sys_mode): snapshot the TF/RF the about-to-execute
           // instruction RUNS UNDER (so the #DB checks at its RETIRE boundary use
@@ -75,7 +75,7 @@
           irq_shadow <= 1'b0;
           // M7.3b IN/OUT latch: resolve the port (imm8 zero-extended, or DX[15:0]).
           q_io<=d_io; q_io_write<=d_io_write; q_io_w<=d_io_w;
-          q_io_port<= d_io_imm ? {8'd0, d_io_port_imm} : gpr[R_EDX][15:0];
+          q_io_port<= d_io_imm ? {8'd0, d_io_port_imm} : gpr_o[R_EDX][15:0];
           // latch x87 decode
           q_fxop<=d_fxop; q_is_x87<=d_is_x87; q_f_mem_read<=d_f_mem_read;
           q_f_mem_write<=d_f_mem_write; q_f_mbytes<=d_f_mbytes; q_f_pop<=d_f_pop;
@@ -222,7 +222,7 @@
             if (errata_en[ERR_DBGP] &&
                 ((d_kind==K_STKMISC && d_sm==SM_POPF) || d_iret)) begin
               logic [3:0] ssp_hit;
-              ssp_hit = dr_match(seg_base[SG_SS] + gpr[R_ESP], 1'b0);
+              ssp_hit = dr_match(seg_base[SG_SS] + gpr_o[R_ESP], 1'b0);
               if (ssp_hit != 4'd0) begin
                 err79_pending  <= 1'b1;
                 err79_dr6_bits <= ssp_hit;
@@ -262,7 +262,7 @@
             else if (soc_en) begin
               if (d_io_write &&
                   (d_io_imm ? ({8'd0, d_io_port_imm}==16'h00F4)
-                            : (gpr[R_EDX][15:0]==16'h00F4)))
+                            : (gpr_o[R_EDX][15:0]==16'h00F4)))
                 state <= S_HALT;          // isa-debug-exit terminator (no retire)
               else if (d_kind==K_STR && d_st==ST_INS) state <= S_INS;
               else                                    state <= S_IO;
@@ -310,7 +310,8 @@
             q_proxy_len <= d_len;
             state       <= S_SYSCALL_WAIT;
 `else
-            gpr[0] <= syscall_eax;               // eax = kernel ret (pre-folded-insn)
+            // R3: EAX<=syscall_eax (kernel ret) moved to the gpr writeback driver
+            // (core_gpr_wb.svh, S_DECODE proxy-int80 arm).
             if (syscall_apply_gs)
               gs_base_r <= syscall_gs_base;      // latch the TLS base for `mov gs`
             eip <= eip + {28'd0, d_len};         // step past cd80 to the folded insn
@@ -454,7 +455,7 @@
           end
           else if (d_kind==K_STR) begin
             // REP with ECX==0: degenerate single no-op record (advance EIP).
-            if ((pfx_rep!=2'd0) && (gpr[R_ECX]==32'd0)) state<=S_EXEC; // handled as no-op
+            if ((pfx_rep!=2'd0) && (gpr_o[R_ECX]==32'd0)) state<=S_EXEC; // handled as no-op
             else if (d_mem_read) state<=S_LOAD;   // movs/lods/scas/cmps load first
             else state<=S_EXEC;                    // stos stores directly
           end

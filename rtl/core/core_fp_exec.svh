@@ -22,7 +22,7 @@
           // fxam_codes/fx_sqrt/f_mem_as_*/f_arith_fstat + the fstore sticky flags),
           // so the state mutation is byte-identical. This block keeps ONLY the
           // SPINE control: the f_pc_bad->S_HALT gate, the f_do_store/f_do_retire
-          // FSM transition, and the FNSTSW_AX cross-leaf gpr[EAX] write.
+          // FSM transition, and the FNSTSW_AX cross-leaf gpr_o[EAX] write.
           logic f_do_store, f_do_retire;
           logic f_pc_bad;        // arithmetic requested under non-64-bit PC
           logic f_is_arith;
@@ -65,12 +65,10 @@
             FX_FNSTCW, FX_FNSTSW_M: begin
               f_do_store=1'b1; f_do_retire=1'b0;
             end
-            // ---- FNSTSW AX (writes AX, no memory) — cross-leaf: reads fstat/ftop
-            // from u_fpu_state and writes the integer file (stays in the spine).
-            FX_FNSTSW_AX: begin
-              gpr[R_EAX] <= {gpr[R_EAX][31:16],
-                             (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
-            end
+            // ---- FNSTSW AX (writes AX, no memory) — cross-leaf: reads fstat/ftop.
+            // R3: the AX<-fstat write moved to the gpr writeback driver
+            // (core_gpr_wb.svh, S_FEXEC/FX_FNSTSW_AX arm).
+            FX_FNSTSW_AX: begin end
             default: ;   // all other fxops mutate only FP state (driven by fp_we_*)
           endcase
 

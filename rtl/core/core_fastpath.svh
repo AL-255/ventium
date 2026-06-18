@@ -310,12 +310,13 @@
             // tch0/tch1/tch2 ports (ic_tch*_* driver above), gated on this exact
             // integer-ISSUE arm, with the SAME U->straddle->V last-write-wins order.
 
-            // ---- U commit ----
+            // ---- U commit ----  R3: the dst-reg writes (LEA/load/shift/ALU) moved
+            // to the gpr writeback driver (core_gpr_wb.svh, S_PIPE ISSUE arm). The
+            // AGI write-tracking (w0/w1), the D-cache penalty, and the flag commits
+            // stay here.
             if (u_d.is_lea) begin
-              gpr[u_d.dst]<=gpr[u_d.base];
               if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
             end else if (u_d.is_load) begin
-              gpr[u_d.dst]<=mem_rdata;
               if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
               // M5: L1 D-cache TIMING. The load data still comes from the BFM
               // (mem_rdata, above); here we run the real 2-way LRU hit/miss SM and
@@ -323,14 +324,14 @@
               // the next instruction, exactly as p5_mem()/p5model does. A line
               // that misses is allocated now (dc_acc_valid below) so re-references
               // hit. dc_lu_hit reads the PRE-access state (dc_lu_addr ==
-              // gpr[u_d.base] this clock); the allocate is the dcache_timing
+              // gpr_o[u_d.base] this clock); the allocate is the dcache_timing
               // posedge driven by dc_acc_valid/dc_acc_addr (UNGATED — this U-pipe
               // load runs the SM in func and cycle mode alike).
               begin
                 logic [6:0] pen;
                 pen = 7'd0;
                 if (!dc_lu_hit)                     pen = pen + P5_DMISS;
-                if (gpr[u_d.base][1:0] != 2'b00)    pen = pen + P5_MISALIGN;
+                if (gpr_o[u_d.base][1:0] != 2'b00)    pen = pen + P5_MISALIGN;
 `ifdef VEN_L1_AXI
                 // bus_mode=2: the REAL DDR latency is the only timing source — the
                 // miss-stall gate already held the load for the actual fill. Suppress
@@ -342,7 +343,6 @@
 `endif
               end
             end else if (u_d.is_shift) begin
-              gpr[u_d.dst]<=u_sh;
               if (u_d.shimm!=5'd0) begin
                 logic [31:0] fl;
                 // SHL/SHR/SAL/SAR (shrot 4..7): SF/ZF/PF from result, AF=0,
@@ -360,7 +360,6 @@
               // no register/flag write
             end else begin
               if (u_d.wreg) begin
-                gpr[u_d.dst]<=u_alu;
                 if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
               end
               if (u_d.wflags) eflags<=u_flags;
@@ -369,13 +368,11 @@
             // ---- V commit (paired) ----
             if (do_v) begin
               if (v_d.is_lea) begin
-                gpr[v_d.dst]<=gpr[v_d.base];
                 if (v_d.dst!=R_ESP) w1={6'd0,v_d.dst};
               end else if (v_d.is_branch || v_d.is_nop) begin
                 // V branch: handled via branch logic below
               end else begin
                 if (v_d.wreg) begin
-                  gpr[v_d.dst]<=v_alu;
                   if (v_d.dst!=R_ESP) w1={6'd0,v_d.dst};
                 end
                 // a paired V that writes flags overrides U's flags (program

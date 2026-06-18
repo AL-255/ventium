@@ -7,7 +7,7 @@
 // identical. Covers the LTR + cross-privilege stack/SS-load arms:
 //   S_LTR (M2S.4 load TR), S_INT_TSS (TSS.ssN:espN), S_INT_SS (new SS desc).
         // S_LTR (M2S.4): LTR r16 — read the GDT TSS descriptor named by the
-        // selector in gpr[q_src_reg], load the TR hidden cache (base/limit/sel),
+        // selector in gpr_o[q_src_reg], load the TR hidden cache (base/limit/sel),
         // and retire. IA-32 also sets the descriptor's busy bit (type 9 -> B) in
         // the GDT; that writeback is a memory-only side effect the corpus never
         // reads back (STR returns the SELECTOR, captured below), so it is omitted
@@ -18,7 +18,7 @@
             else begin
               logic [63:0] desc;
               desc      = {mem_rdata, gdt_lo};
-              tr_sel   <= gpr[q_src_reg][15:0];
+              tr_sel   <= gpr_o[q_src_reg][15:0];
               tr_base  <= desc_base(desc);
               tr_limit <= desc_limit(desc);
               tr_attr  <= desc_attr(desc);   // M2S.4b: held for the busy-clear on a switch
