@@ -228,8 +228,19 @@
                 else begin
                   logic [31:0] a,b;
                   a=reg_read(q_dst_reg,q_w,q_dst_high8); b=reg_read(q_src_reg,q_w,q_src_high8);
-                  gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], b, q_w, q_dst_high8);
-                  gpr_we[q_src_reg]=1'b1; gpr_wd[q_src_reg]=reg_merge(gpr_o[q_src_reg], a, q_w, q_src_high8);
+                  if (q_dst_reg == q_src_reg) begin
+                    // Same GPR, different byte halves (e.g. `xchg ch,cl`, `xchg ah,al`):
+                    // both writes target one register, so CHAIN the second merge off the
+                    // first's result. Two independent reg_merge(gpr_o,...) would each start
+                    // from the ORIGINAL value, so the later write discards the earlier byte
+                    // (only one half swaps). q_dst_high8 != q_src_high8 here.
+                    gpr_we[q_dst_reg]=1'b1;
+                    gpr_wd[q_dst_reg]=reg_merge(reg_merge(gpr_o[q_dst_reg], b, q_w, q_dst_high8),
+                                                a, q_w, q_src_high8);
+                  end else begin
+                    gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], b, q_w, q_dst_high8);
+                    gpr_we[q_src_reg]=1'b1; gpr_wd[q_src_reg]=reg_merge(gpr_o[q_src_reg], a, q_w, q_src_high8);
+                  end
                 end
               end
 

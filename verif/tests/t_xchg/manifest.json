@@ -1,0 +1,9 @@
+{
+  "name": "t_xchg",
+  "src": "t_xchg/t_xchg.s",
+  "elf": "t_xchg/t_xchg.elf",
+  "image": "t_xchg/t_xchg.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 80
+}
