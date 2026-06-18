@@ -50,6 +50,7 @@ set svfiles {
     fpu/fpu_x87_pkg.sv core/ventium_sys_pkg.sv core/ventium_x87_pkg.sv
     ventium_top.sv
     core/core.sv core/bpred_btb.sv core/decode.sv core/issue_uv.sv core/ven_idiv.sv
+    core/regfile.sv core/decode_stages.sv core/uv_common.sv core/u_pipe.sv core/v_pipe.sv core/fpu_writeback.sv
     fpu/fpu_top.sv fpu/fpu_srt_div.sv fpu/fpu_sqrt_iter.sv fpu/ven_bcd.sv fpu/ven_bcd_to_fp.sv
     fpu/fpu_fpatan.sv fpu/fpu_fyl2x.sv fpu/fpu_fsincos.sv fpu/fpu_f2xm1.sv fpu/fpu_fprem.sv
     mem/dcache_timing.sv mem/icache.sv mem/uopcache.sv mem/tlb.sv
