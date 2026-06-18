@@ -1795,6 +1795,119 @@ module core
   end
 
   // ===========================================================================
+  // R3 HOIST: MUL/IMUL/DIV/IDIV + SHLD/SHRD shared datapath.
+  // These values were formerly computed TWICE — once in the EXEC FSM arm
+  // (core_exec.svh K_MULDIV/K_SHLDRD, for flags/#DE/eip) and once in the gpr
+  // writeback driver (core_gpr_wb.svh, for the register write VALUE). That
+  // duplicated the multiplier (`*`) and divider (`/`/`%`) in the FPGA build.
+  // Hoisting them here computes each ONCE; both sides read these signals. They
+  // are pure functions of pre-edge state (gpr_o/mem_load_data/q_*), so they may
+  // compute every cycle (dead when not in S_EXEC/K_MULDIV/K_SHLDRD — that's the
+  // point: ONE shared unit). The divides stay guarded against /0 (no new X).
+  // ---------------------------------------------------------------------------
+  logic [31:0]        ex_srcv;          // MUL/DIV source operand (`/7 sign-ext base)
+  logic [63:0]        ex_mul_p;         // MUL (unsigned) 64-bit product
+  logic signed [63:0] ex_imul_p;        // IMUL (one-operand, signed) product
+  logic [31:0]        ex_shld_r;        // SHLD/SHRD result word
+  // SHLD/SHRD shift count (q_shift_cl ? CL : imm8); used by both the FSM arm
+  // (cnt==0 guard + flags) and the driver (cnt==0 guard + ex_shld_r select).
+  logic [5:0]         ex_shld_cnt;
+  assign ex_shld_cnt = q_shift_cl ? {1'b0,gpr_o[R_ECX][4:0]} : {1'b0,q_shift_imm};
+  always_comb begin
+    ex_srcv = q_mem_read ? wmask(mem_load_data,q_w) : reg_read(q_src_reg,q_w,q_src_high8);
+
+    // ---- MUL (unsigned, /4) : ONE multiplier shared by flags(core_exec) + EAX/EDX(driver)
+    if (q_w==3'd1)      ex_mul_p = {48'd0, ({8'd0,gpr_o[R_EAX][7:0]}*{8'd0,ex_srcv[7:0]})};
+    else if (q_w==3'd2) ex_mul_p = {32'd0, ({16'd0,gpr_o[R_EAX][15:0]}*{16'd0,ex_srcv[15:0]})};
+    else                ex_mul_p = {32'd0,gpr_o[R_EAX]}*{32'd0,ex_srcv};
+
+    // ---- IMUL one-operand (signed, /5) : ONE multiplier shared
+    if (q_w==3'd1)      ex_imul_p = $signed({{8{ex_srcv[7]}},ex_srcv[7:0]}) * $signed({{8{gpr_o[R_EAX][7]}},gpr_o[R_EAX][7:0]});
+    else if (q_w==3'd2) ex_imul_p = $signed({{16{ex_srcv[15]}},ex_srcv[15:0]}) * $signed({{16{gpr_o[R_EAX][15]}},gpr_o[R_EAX][15:0]});
+    else                ex_imul_p = $signed(ex_srcv) * $signed(gpr_o[R_EAX]);
+
+    // ---- SHLD/SHRD result : ONE shifter shared by flags(core_exec) + dst(driver)
+    ex_shld_r = shld_result(q_shrd, dst_cur, reg_read(q_src_reg,q_w,1'b0), ex_shld_cnt, q_w);
+  end
+
+`ifndef VEN_IDIV_ITER
+  // ---- Native DIV/IDIV (/6, /7) : ONE divider (`/`/`%`) shared by the FSM #DE
+  // check (core_exec.svh) and the EAX/EDX write (core_gpr_wb.svh). The FPGA
+  // VEN_IDIV_ITER path uses the iterative ven_idiv engine instead (eng_int_*),
+  // so this whole block is compiled out there. Results are widened to 64 bits;
+  // each side slices the bits it formerly computed. Divides are guarded against
+  // a zero divisor (qq/rr forced 0 -> no X), mirroring the original structure
+  // where the body under `if(srcv!=0)` is the only place `/`/`%` appears.
+  logic [63:0] ex_div_qq,  ex_div_rr;    // DIV  (unsigned) quotient / remainder
+  logic        ex_div_dfault;            // DIV  #DE (div-by-zero OR quotient overflow)
+  logic [63:0] ex_idiv_qq, ex_idiv_rr;   // IDIV (signed)   quotient / remainder
+  logic        ex_idiv_dfault;           // IDIV #DE
+  always_comb begin
+    // --- DIV (unsigned) ---
+    ex_div_qq=64'd0; ex_div_rr=64'd0; ex_div_dfault=1'b0;
+    if (q_w==3'd1) begin
+      logic [15:0] num, qq, rr;
+      num=gpr_o[R_EAX][15:0];
+      if (ex_srcv[7:0]==8'd0) ex_div_dfault=1'b1;
+      else begin
+        qq=num/{8'd0,ex_srcv[7:0]}; rr=num%{8'd0,ex_srcv[7:0]};
+        if (qq[15:8]!=8'd0) ex_div_dfault=1'b1;
+        ex_div_qq={48'd0,qq}; ex_div_rr={48'd0,rr};
+      end
+    end else if (q_w==3'd2) begin
+      logic [31:0] num,qq,rr;
+      num={gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]};
+      if (ex_srcv[15:0]==16'd0) ex_div_dfault=1'b1;
+      else begin
+        qq=num/{16'd0,ex_srcv[15:0]}; rr=num%{16'd0,ex_srcv[15:0]};
+        if (qq[31:16]!=16'd0) ex_div_dfault=1'b1;
+        ex_div_qq={32'd0,qq}; ex_div_rr={32'd0,rr};
+      end
+    end else begin
+      logic [63:0] num,qq,rr;
+      num={gpr_o[R_EDX],gpr_o[R_EAX]};
+      if (ex_srcv==32'd0) ex_div_dfault=1'b1;
+      else begin
+        qq=num/{32'd0,ex_srcv}; rr=num%{32'd0,ex_srcv};
+        if (qq[63:32]!=32'd0) ex_div_dfault=1'b1;
+        ex_div_qq=qq; ex_div_rr=rr;
+      end
+    end
+
+    // --- IDIV (signed) ---
+    ex_idiv_qq=64'd0; ex_idiv_rr=64'd0; ex_idiv_dfault=1'b0;
+    if (q_w==3'd1) begin
+      logic signed [15:0] num,den,qq,rr;
+      num=$signed(gpr_o[R_EAX][15:0]); den=$signed({{8{ex_srcv[7]}},ex_srcv[7:0]});
+      if (ex_srcv[7:0]==8'd0) ex_idiv_dfault=1'b1;
+      else begin
+        qq=num/den; rr=num%den;
+        if (qq != $signed({{8{qq[7]}}, qq[7:0]})) ex_idiv_dfault=1'b1;
+        ex_idiv_qq={{48{qq[15]}},qq}; ex_idiv_rr={{48{rr[15]}},rr};
+      end
+    end else if (q_w==3'd2) begin
+      logic signed [31:0] num,den,qq,rr;
+      num=$signed({gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]}); den=$signed({{16{ex_srcv[15]}},ex_srcv[15:0]});
+      if (ex_srcv[15:0]==16'd0) ex_idiv_dfault=1'b1;
+      else begin
+        qq=num/den; rr=num%den;
+        if (qq != $signed({{16{qq[15]}}, qq[15:0]})) ex_idiv_dfault=1'b1;
+        ex_idiv_qq={{32{qq[31]}},qq}; ex_idiv_rr={{32{rr[31]}},rr};
+      end
+    end else begin
+      logic signed [63:0] num,den,qq,rr;
+      num=$signed({gpr_o[R_EDX],gpr_o[R_EAX]}); den=$signed({{32{ex_srcv[31]}},ex_srcv});
+      if (ex_srcv==32'd0) ex_idiv_dfault=1'b1;
+      else begin
+        qq=num/den; rr=num%den;
+        if (qq != $signed({{32{qq[31]}}, qq[31:0]})) ex_idiv_dfault=1'b1;
+        ex_idiv_qq=qq; ex_idiv_rr=rr;
+      end
+    end
+  end
+`endif
+
+  // ===========================================================================
   // BCD / ASCII-adjust datapath (AAA/AAS/DAA/DAS/AAM/AAD) — matches QEMU
   // int_helper.c helper_aaa/aas/daa/das/aam/aad EXACTLY. Computes the AX result
   // (bcd_ax) + the DEFINED EFLAGS (bcd_flags); the EXEC block above routes these
@@ -1906,6 +2019,15 @@ module core
   // holes the flow later fell into). q_cnt16=0 in every 32-bit flat gate.
   wire [31:0] str_esi = q_cnt16 ? {16'd0, gpr_o[R_ESI][15:0]} : gpr_o[R_ESI];
   wire [31:0] str_edi = q_cnt16 ? {16'd0, gpr_o[R_EDI][15:0]} : gpr_o[R_EDI];
+  // R3 HOIST: post-decrement ECX (ECX-1, a16-wrapped). This single decrementer
+  // is SHARED by every arm that decrements the count register and also writes it
+  // back — the REP string arms (K_STR core_exec.svh, S_INS core_io.svh) and the
+  // LOOP/LOOPE/LOOPNE arm (K_CTRL/CT_LOOP). The FSM side uses it for the
+  // taken/last_iter test + new_eip; the gpr writeback driver (core_gpr_wb.svh)
+  // writes it to ECX — instead of each side recomputing `gpr_o[R_ECX]-1`. These
+  // states are mutually exclusive, so one decrementer suffices.
+  wire [31:0] dec_cx = q_cnt16 ? {gpr_o[R_ECX][31:16], gpr_o[R_ECX][15:0]-16'd1}
+                               : (gpr_o[R_ECX] - 32'd1);
 
   // ===========================================================================
   // Store-operand resolution (combinational) used in S_STORE.

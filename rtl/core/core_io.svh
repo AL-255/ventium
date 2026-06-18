@@ -66,10 +66,11 @@
             // update, then go to S_STORE (str_store_addr/data latched below).
             ins_data <= wmask(io_rdata, q_io_w);   // width-masked device value
             // R3: the EDI += width and ECX -= 1 (REP) writes moved to the gpr
-            // writeback driver (core_gpr_wb.svh, S_INS arm); cx is still recomputed
-            // below since last_iter / str_next_eip need it.
+            // writeback driver (core_gpr_wb.svh, S_INS arm). dec_cx is the
+            // SHARED post-decrement ECX (core.sv); the FSM uses it for last_iter /
+            // str_next_eip, the driver writes it to ECX.
             if (rep_active) begin
-              cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
+              cx = dec_cx;
               last_iter = q_cnt16 ? (cx[15:0]==16'd0) : (cx==32'd0);
               str_next_eip <= last_iter ? next_eip : q_pc;  // loop at q_pc if more
             end else begin

@@ -112,116 +112,60 @@
               end
 
               K_SHLDRD: begin
-                logic [5:0] cnt; logic [31:0] r;
-                cnt = q_shift_cl ? {1'b0,gpr_o[R_ECX][4:0]} : {1'b0,q_shift_imm};
-                if (cnt==6'd0) begin end
+                // R3 HOIST: ex_shld_cnt (count) + ex_shld_r (result) are the SHARED
+                // module-scope values (core.sv); the FSM arm uses the same ones for
+                // the cnt==0 guard + flags. No local recompute / second shifter.
+                if (ex_shld_cnt==6'd0) begin end
                 else begin
-                  r = shld_result(q_shrd, dst_cur, reg_read(q_src_reg,q_w,1'b0), cnt, q_w);
-                  gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(dst_cur, r, q_w, 1'b0);
+                  gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(dst_cur, ex_shld_r, q_w, 1'b0);
                 end
               end
 
               K_MULDIV: begin
-                logic [31:0] srcv;
-                srcv = q_mem_read ? wmask(mem_load_data,q_w) : reg_read(q_src_reg,q_w,q_src_high8);
+                // R3 HOIST: ex_mul_p / ex_imul_p (the ONE multiplier) and
+                // ex_div_*/ex_idiv_* (the ONE native divider, /0-guarded) are the
+                // SHARED module-scope values (core.sv); the FSM arm reads the same
+                // ones for flags / #DE. No local recompute = no second `*` / `/`.
                 unique case (q_md)
                   3'd4: begin // MUL (unsigned)
-                    logic [63:0] p;
-                    if (q_w==3'd1)      p={48'd0, ({8'd0,gpr_o[R_EAX][7:0]}*{8'd0,srcv[7:0]})};
-                    else if (q_w==3'd2) p={32'd0, ({16'd0,gpr_o[R_EAX][15:0]}*{16'd0,srcv[15:0]})};
-                    else                p={32'd0,gpr_o[R_EAX]}*{32'd0,srcv};
-                    if (q_w==3'd1) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],p[15:0]}; end
+                    if (q_w==3'd1) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],ex_mul_p[15:0]}; end
                     else if (q_w==3'd2) begin
-                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],p[15:0]};
-                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16],p[31:16]};
+                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],ex_mul_p[15:0]};
+                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16],ex_mul_p[31:16]};
                     end else begin
-                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=p[31:0];
-                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=p[63:32];
+                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=ex_mul_p[31:0];
+                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=ex_mul_p[63:32];
                     end
                   end
                   3'd5: begin // IMUL one-operand (signed)
-                    logic signed [63:0] p;
-                    if (q_w==3'd1)      p=$signed({{8{srcv[7]}},srcv[7:0]}) * $signed({{8{gpr_o[R_EAX][7]}},gpr_o[R_EAX][7:0]});
-                    else if (q_w==3'd2) p=$signed({{16{srcv[15]}},srcv[15:0]}) * $signed({{16{gpr_o[R_EAX][15]}},gpr_o[R_EAX][15:0]});
-                    else                p=$signed(srcv) * $signed(gpr_o[R_EAX]);
-                    if (q_w==3'd1) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],p[15:0]}; end
+                    if (q_w==3'd1) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],ex_imul_p[15:0]}; end
                     else if (q_w==3'd2) begin
-                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],p[15:0]};
-                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16],p[31:16]};
+                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16],ex_imul_p[15:0]};
+                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16],ex_imul_p[31:16]};
                     end else begin
-                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=p[31:0];
-                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=p[63:32];
+                      gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=ex_imul_p[31:0];
+                      gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=ex_imul_p[63:32];
                     end
                   end
                   3'd6: begin // DIV (unsigned)
 `ifndef VEN_IDIV_ITER
-                    logic dfault;
-                    dfault = 1'b0;
-                    if (q_w==3'd1) begin
-                      logic [15:0] num, qq, rr;
-                      num=gpr_o[R_EAX][15:0];
-                      if (srcv[7:0]==8'd0) dfault=1'b1;
-                      else begin
-                        qq=num/{8'd0,srcv[7:0]}; rr=num%{8'd0,srcv[7:0]};
-                        if (qq[15:8]!=8'd0) dfault=1'b1;
-                        else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], rr[7:0], qq[7:0]}; end
-                      end
-                    end else if (q_w==3'd2) begin
-                      logic [31:0] num,qq,rr;
-                      num={gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]};
-                      if (srcv[15:0]==16'd0) dfault=1'b1;
-                      else begin
-                        qq=num/{16'd0,srcv[15:0]}; rr=num%{16'd0,srcv[15:0]};
-                        if (qq[31:16]!=16'd0) dfault=1'b1;
-                        else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], qq[15:0]};
-                                   gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16], rr[15:0]}; end
-                      end
-                    end else begin
-                      logic [63:0] num,qq,rr;
-                      num={gpr_o[R_EDX],gpr_o[R_EAX]};
-                      if (srcv==32'd0) dfault=1'b1;
-                      else begin
-                        qq=num/{32'd0,srcv}; rr=num%{32'd0,srcv};
-                        if (qq[63:32]!=32'd0) dfault=1'b1;
-                        else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=qq[31:0];
-                                   gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=rr[31:0]; end
-                      end
+                    if (!ex_div_dfault) begin
+                      if (q_w==3'd1) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], ex_div_rr[7:0], ex_div_qq[7:0]}; end
+                      else if (q_w==3'd2) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], ex_div_qq[15:0]};
+                                                gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16], ex_div_rr[15:0]}; end
+                      else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=ex_div_qq[31:0];
+                                 gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=ex_div_rr[31:0]; end
                     end
 `endif
                   end
                   default: begin // IDIV /7 (signed)
 `ifndef VEN_IDIV_ITER
-                    logic dfault;
-                    dfault = 1'b0;
-                    if (q_w==3'd1) begin
-                      logic signed [15:0] num,den,qq,rr;
-                      num=$signed(gpr_o[R_EAX][15:0]); den=$signed({{8{srcv[7]}},srcv[7:0]});
-                      if (srcv[7:0]==8'd0) dfault=1'b1;
-                      else begin
-                        qq=num/den; rr=num%den;
-                        if (qq != $signed({{8{qq[7]}}, qq[7:0]})) dfault=1'b1;
-                        else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], rr[7:0], qq[7:0]}; end
-                      end
-                    end else if (q_w==3'd2) begin
-                      logic signed [31:0] num,den,qq,rr;
-                      num=$signed({gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]}); den=$signed({{16{srcv[15]}},srcv[15:0]});
-                      if (srcv[15:0]==16'd0) dfault=1'b1;
-                      else begin
-                        qq=num/den; rr=num%den;
-                        if (qq != $signed({{16{qq[15]}}, qq[15:0]})) dfault=1'b1;
-                        else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], qq[15:0]};
-                                   gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16], rr[15:0]}; end
-                      end
-                    end else begin
-                      logic signed [63:0] num,den,qq,rr;
-                      num=$signed({gpr_o[R_EDX],gpr_o[R_EAX]}); den=$signed({{32{srcv[31]}},srcv});
-                      if (srcv==32'd0) dfault=1'b1;
-                      else begin
-                        qq=num/den; rr=num%den;
-                        if (qq != $signed({{32{qq[31]}}, qq[31:0]})) dfault=1'b1;
-                        else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=qq[31:0];
-                                   gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=rr[31:0]; end
-                      end
+                    if (!ex_idiv_dfault) begin
+                      if (q_w==3'd1) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], ex_idiv_rr[7:0], ex_idiv_qq[7:0]}; end
+                      else if (q_w==3'd2) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]={gpr_o[R_EAX][31:16], ex_idiv_qq[15:0]};
+                                                gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]={gpr_o[R_EDX][31:16], ex_idiv_rr[15:0]}; end
+                      else begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=ex_idiv_qq[31:0];
+                                 gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=ex_idiv_rr[31:0]; end
                     end
 `endif
                   end
@@ -418,8 +362,8 @@
                       : gpr_o[R_EDI]+str_step; end
                   if (q_st==ST_LODS) begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=reg_merge(gpr_o[R_EAX], wmask(mem_load_data,q_w), q_w, 1'b0); end
                   if (rep_active) begin
-                    cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
-                    gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=cx;
+                    // R3 HOIST: dec_cx is the SHARED post-decrement ECX (core.sv).
+                    gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=dec_cx;
                   end
                 end
               end
@@ -435,10 +379,8 @@
                     gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+{28'd0,q_w}+{16'd0,q_ret_imm};
                   end
                   CT_LOOP, CT_LOOPE, CT_LOOPNE: begin
-                    logic [31:0] cx;
-                    if (q_cnt16) cx = {gpr_o[R_ECX][31:16], (gpr_o[R_ECX][15:0]-16'd1)};
-                    else         cx = gpr_o[R_ECX]-32'd1;
-                    gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=cx;
+                    // R3 HOIST: dec_cx is the SHARED post-decrement ECX (core.sv).
+                    gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=dec_cx;
                   end
                   CT_JECXZ: begin end
                   default: ;
@@ -470,8 +412,8 @@
                 ? {gpr_o[R_EDI][31:16], gpr_o[R_EDI][15:0]+str_step[15:0]}
                 : gpr_o[R_EDI] + str_step;
             if (rep_active) begin
-              cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
-              gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=cx;
+              // R3 HOIST: dec_cx is the SHARED post-decrement ECX (core.sv).
+              gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=dec_cx;
             end
           end
         end

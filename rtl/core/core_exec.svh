@@ -210,21 +210,21 @@
               end
 
               K_SHLDRD: begin
-                logic [5:0] cnt; logic [31:0] r, shm1;
-                cnt = q_shift_cl ? {1'b0,gpr_o[R_ECX][4:0]} : {1'b0,q_shift_imm};
-                if (cnt==6'd0) flags_we=1'b0;
+                logic [31:0] shm1;
+                // R3 HOIST: cnt (ex_shld_cnt) and the SHLD/SHRD result r (ex_shld_r)
+                // are computed ONCE at module scope (core.sv) and shared with the gpr
+                // writeback driver (core_gpr_wb.svh, K_SHLDRD arm). shm1 is FSM-only
+                // (feeds the OF flag; the driver never needs it) so it stays here.
+                if (ex_shld_cnt==6'd0) flags_we=1'b0;
                 else begin
-                  r = shld_result(q_shrd, dst_cur, reg_read(q_src_reg,q_w,1'b0), cnt, q_w);
                   // shm1 = dst shifted by (count-1) (same direction) = QEMU CC_SRC.
-                  shm1 = q_shrd ? (wmask(dst_cur,q_w) >> (cnt-6'd1))
-                                : wmask(wmask(dst_cur,q_w) << (cnt-6'd1), q_w);
-                  // R3: the dst-reg SHLD/SHRD result write moved to the gpr
-                  // writeback driver (core_gpr_wb.svh, K_SHLDRD arm).
+                  shm1 = q_shrd ? (wmask(dst_cur,q_w) >> (ex_shld_cnt-6'd1))
+                                : wmask(wmask(dst_cur,q_w) << (ex_shld_cnt-6'd1), q_w);
                   begin logic [31:0] fl;
                     fl=eflags & 32'hFFFF_F72A;
-                    fl[0]=shld_cf(q_shrd, dst_cur, cnt, q_w); fl[2]=parity8(r[7:0]); fl[4]=1'b0;
-                    fl[6]=(wmask(r,q_w)==32'd0); fl[7]=sbit(r,q_w);
-                    fl[11]=sbit(shm1,q_w)^sbit(r,q_w); fl[1]=1'b1;
+                    fl[0]=shld_cf(q_shrd, dst_cur, ex_shld_cnt, q_w); fl[2]=parity8(ex_shld_r[7:0]); fl[4]=1'b0;
+                    fl[6]=(wmask(ex_shld_r,q_w)==32'd0); fl[7]=sbit(ex_shld_r,q_w);
+                    fl[11]=sbit(shm1,q_w)^sbit(ex_shld_r,q_w); fl[1]=1'b1;
                     eflags<=fl;
                   end
                   flags_we=1'b0;
@@ -232,40 +232,37 @@
               end
 
               K_MULDIV: begin
-                logic [31:0] srcv;
-                srcv = q_mem_read ? wmask(mem_load_data,q_w) : reg_read(q_src_reg,q_w,q_src_high8);
+                // R3 HOIST: ex_srcv (the source operand), ex_mul_p / ex_imul_p
+                // (the ONE multiplier) and ex_div_*/ex_idiv_* (the ONE native
+                // divider) are computed at module scope (core.sv) and shared with
+                // the gpr writeback driver (core_gpr_wb.svh, K_MULDIV arm). Here we
+                // derive only the flag inputs (lo/ovf) + the #DE / occupancy effects.
                 unique case (q_md)
                   3'd4: begin // MUL (unsigned)
-                    logic [63:0] p; logic [31:0] lo; logic ovf; logic [31:0] fl;
-                    if (q_w==3'd1)      p={48'd0, ({8'd0,gpr_o[R_EAX][7:0]}*{8'd0,srcv[7:0]})};
-                    else if (q_w==3'd2) p={32'd0, ({16'd0,gpr_o[R_EAX][15:0]}*{16'd0,srcv[15:0]})};
-                    else                p={32'd0,gpr_o[R_EAX]}*{32'd0,srcv};
+                    logic [31:0] lo; logic ovf; logic [31:0] fl;
                     // R3: EAX/EDX product commit moved to the gpr writeback driver
                     // (core_gpr_wb.svh, K_MULDIV/3'd4); lo/ovf stay (feed flags).
-                    if (q_w==3'd1) begin lo={24'd0,p[7:0]};  ovf=(p[15:8]!=8'd0);  end
-                    else if (q_w==3'd2) begin lo={16'd0,p[15:0]}; ovf=(p[31:16]!=16'd0); end
-                    else begin lo=p[31:0]; ovf=(p[63:32]!=32'd0); end
+                    if (q_w==3'd1) begin lo={24'd0,ex_mul_p[7:0]};  ovf=(ex_mul_p[15:8]!=8'd0);  end
+                    else if (q_w==3'd2) begin lo={16'd0,ex_mul_p[15:0]}; ovf=(ex_mul_p[31:16]!=16'd0); end
+                    else begin lo=ex_mul_p[31:0]; ovf=(ex_mul_p[63:32]!=32'd0); end
                     // QEMU compute_all_mul: ZF/SF/PF from low result, AF=0, CF=OF=ovf
                     fl=eflags&32'hFFFF_F72A; fl[1]=1'b1;
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
                     eflags<=fl; flags_we=1'b0;
                     // P5 MULTIPLY OCCUPANCY (cycle-modeled, p5model occ MUL=10, NP,
-                    // U-pipe). The native `*` above is the bit-exact result; the
-                    // modeled occupancy is the deferred penalty occ-7 = 3 (same
+                    // U-pipe). The native `*` (now ex_mul_p) is the bit-exact result;
+                    // the modeled occupancy is the deferred penalty occ-7 = 3 (same
                     // mechanism + measured slow-FSM base as the DIV occupancy below).
                     pending_mem_pen <= 7'd3;
                   end
                   3'd5: begin // IMUL one-operand (signed)
-                    logic signed [63:0] p; logic [31:0] lo; logic ovf; logic [31:0] fl;
-                    if (q_w==3'd1)      p=$signed({{8{srcv[7]}},srcv[7:0]}) * $signed({{8{gpr_o[R_EAX][7]}},gpr_o[R_EAX][7:0]});
-                    else if (q_w==3'd2) p=$signed({{16{srcv[15]}},srcv[15:0]}) * $signed({{16{gpr_o[R_EAX][15]}},gpr_o[R_EAX][15:0]});
-                    else                p=$signed(srcv) * $signed(gpr_o[R_EAX]);
+                    logic [31:0] lo; logic ovf; logic [31:0] fl;
                     // R3: EAX/EDX product commit moved to the gpr writeback driver
                     // (core_gpr_wb.svh, K_MULDIV/3'd5); lo/ovf stay (feed flags).
-                    if (q_w==3'd1) begin lo={24'd0,p[7:0]};  ovf=($signed(p)!=$signed({{56{p[7]}},p[7:0]}));   end
-                    else if (q_w==3'd2) begin lo={16'd0,p[15:0]}; ovf=($signed(p)!=$signed({{48{p[15]}},p[15:0]})); end
-                    else begin lo=p[31:0]; ovf=($signed(p)!=$signed({{32{p[31]}},p[31:0]})); end
+                    if (q_w==3'd1) begin lo={24'd0,ex_imul_p[7:0]};  ovf=($signed(ex_imul_p)!=$signed({{56{ex_imul_p[7]}},ex_imul_p[7:0]}));   end
+                    else if (q_w==3'd2) begin lo={16'd0,ex_imul_p[15:0]}; ovf=($signed(ex_imul_p)!=$signed({{48{ex_imul_p[15]}},ex_imul_p[15:0]})); end
+                    else begin lo=ex_imul_p[31:0]; ovf=($signed(ex_imul_p)!=$signed({{32{ex_imul_p[31]}},ex_imul_p[31:0]})); end
                     fl=eflags&32'hFFFF_F72A; fl[1]=1'b1;
                     fl[0]=ovf; fl[11]=ovf; fl[2]=parity8(lo[7:0]); fl[4]=1'b0;
                     fl[6]=(wmask(lo,q_w)==32'd0); fl[7]=sbit(lo,q_w);
@@ -278,38 +275,11 @@
                     // #DE commit on `done` in S_DIV_BUSY (engine started in core.sv).
                     flags_we=1'b0; do_retire=1'b0; state<=S_DIV_BUSY;
 `else
-                    logic dfault;
-                    dfault = 1'b0;
-                    if (q_w==3'd1) begin
-                      logic [15:0] num, qq, rr;
-                      num=gpr_o[R_EAX][15:0];
-                      if (srcv[7:0]==8'd0) dfault=1'b1;            // divide-by-zero
-                      else begin
-                        qq=num/{8'd0,srcv[7:0]}; rr=num%{8'd0,srcv[7:0]};
-                        if (qq[15:8]!=8'd0) dfault=1'b1;           // quotient > 0xFF
-                        // R3: EAX commit moved to the gpr writeback driver (K_MULDIV/3'd6).
-                      end
-                    end else if (q_w==3'd2) begin
-                      logic [31:0] num,qq,rr;
-                      num={gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]};
-                      if (srcv[15:0]==16'd0) dfault=1'b1;
-                      else begin
-                        qq=num/{16'd0,srcv[15:0]}; rr=num%{16'd0,srcv[15:0]};
-                        if (qq[31:16]!=16'd0) dfault=1'b1;         // quotient > 0xFFFF
-                        // R3: EAX/EDX commit moved to the gpr writeback driver.
-                      end
-                    end else begin
-                      logic [63:0] num,qq,rr;
-                      num={gpr_o[R_EDX],gpr_o[R_EAX]};
-                      if (srcv==32'd0) dfault=1'b1;
-                      else begin
-                        qq=num/{32'd0,srcv}; rr=num%{32'd0,srcv};
-                        if (qq[63:32]!=32'd0) dfault=1'b1;         // quotient > 0xFFFFFFFF
-                        // R3: EAX/EDX commit moved to the gpr writeback driver.
-                      end
-                    end
+                    // R3 HOIST: quotient/remainder + #DE come from the ONE native
+                    // divider at module scope (ex_div_*); the EAX/EDX write lives in
+                    // the gpr writeback driver (core_gpr_wb.svh, K_MULDIV/3'd6).
                     flags_we=1'b0;
-                    if (dfault) begin
+                    if (ex_div_dfault) begin
                       // #DE (vector 0): divide error. NO result write, EFLAGS
                       // unchanged. sys_mode DELIVERS through the IDT (the verified
                       // S_INT_GATE FSM, FAULT semantics = push the faulting EIP);
@@ -336,39 +306,11 @@
 `ifdef VEN_IDIV_ITER
                     flags_we=1'b0; do_retire=1'b0; state<=S_DIV_BUSY;   // -> ven_idiv
 `else
-                    logic dfault;
-                    dfault = 1'b0;
-                    if (q_w==3'd1) begin
-                      logic signed [15:0] num,den,qq,rr;
-                      num=$signed(gpr_o[R_EAX][15:0]); den=$signed({{8{srcv[7]}},srcv[7:0]});
-                      if (srcv[7:0]==8'd0) dfault=1'b1;
-                      else begin
-                        qq=num/den; rr=num%den;
-                        // overflow: quotient outside signed 8-bit [-128,127]
-                        if (qq != $signed({{8{qq[7]}}, qq[7:0]})) dfault=1'b1;
-                        // R3: EAX commit moved to the gpr writeback driver (K_MULDIV/default).
-                      end
-                    end else if (q_w==3'd2) begin
-                      logic signed [31:0] num,den,qq,rr;
-                      num=$signed({gpr_o[R_EDX][15:0],gpr_o[R_EAX][15:0]}); den=$signed({{16{srcv[15]}},srcv[15:0]});
-                      if (srcv[15:0]==16'd0) dfault=1'b1;
-                      else begin
-                        qq=num/den; rr=num%den;
-                        if (qq != $signed({{16{qq[15]}}, qq[15:0]})) dfault=1'b1;
-                        // R3: EAX/EDX commit moved to the gpr writeback driver.
-                      end
-                    end else begin
-                      logic signed [63:0] num,den,qq,rr;
-                      num=$signed({gpr_o[R_EDX],gpr_o[R_EAX]}); den=$signed({{32{srcv[31]}},srcv});
-                      if (srcv==32'd0) dfault=1'b1;
-                      else begin
-                        qq=num/den; rr=num%den;
-                        if (qq != $signed({{32{qq[31]}}, qq[31:0]})) dfault=1'b1;
-                        // R3: EAX/EDX commit moved to the gpr writeback driver.
-                      end
-                    end
+                    // R3 HOIST: signed quotient/remainder + #DE come from the ONE
+                    // native divider at module scope (ex_idiv_*); the EAX/EDX write
+                    // lives in the gpr writeback driver (K_MULDIV/default).
                     flags_we=1'b0;
-                    if (dfault) begin
+                    if (ex_idiv_dfault) begin
                       // #DE (vector 0). Same delivery/HALT policy as DIV above.
                       do_retire=1'b0;
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
@@ -658,13 +600,14 @@
                   // low 16 bits wrap mod 64K and ESI/EDI[31:16] are preserved
                   // (a DF=1 copy crossing 0 must wrap to 0xFFFF, not 32-bit -1).
                   // R3: the ESI/EDI/EAX(LODS)/ECX(REP) writes moved to the gpr
-                  // writeback driver (core_gpr_wb.svh, K_STR arm); cx is still
-                  // recomputed below since last_iter/new_eip (do_retire/state) need it.
+                  // writeback driver (core_gpr_wb.svh, K_STR arm). The post-decrement
+                  // ECX (dec_cx) is the SHARED module-scope decrementer; the FSM
+                  // uses it here for last_iter/new_eip, the driver writes it to ECX.
                   if (q_str_scandi) begin eflags<=str_flags; end
                   flags_we=1'b0;
 
                   if (rep_active) begin
-                    cx = q_cnt16 ? {cx[31:16], cx[15:0]-16'd1} : (cx - 32'd1);
+                    cx = dec_cx;
                     // termination: ECX reaches 0, or (REPE/REPNE) ZF condition.
                     cmp_term = 1'b0;
                     if (q_str_scandi) begin
@@ -715,16 +658,10 @@
                   CT_LOOP, CT_LOOPE, CT_LOOPNE: begin
                     // 0x67 address-size: the count register is CX (low 16):
                     // decrement preserves ECX[31:16] and the taken test is CX!=0.
-                    logic [31:0] cx; logic take; logic zero_after;
-                    if (q_cnt16) begin
-                      cx = {gpr_o[R_ECX][31:16], (gpr_o[R_ECX][15:0]-16'd1)};
-                      zero_after = (cx[15:0]==16'd0);
-                    end else begin
-                      cx = gpr_o[R_ECX]-32'd1;
-                      zero_after = (cx==32'd0);
-                    end
-                    // R3: ECX<-cx write moved to the gpr writeback driver (K_CTRL/CT_LOOP);
-                    // cx/zero_after stay since new_eip (the taken target) needs them.
+                    logic take; logic zero_after;
+                    // R3 HOIST: dec_cx is the SHARED post-decrement ECX (core.sv);
+                    // the FSM uses it for the taken test, the driver writes it to ECX.
+                    zero_after = q_cnt16 ? (dec_cx[15:0]==16'd0) : (dec_cx==32'd0);
                     take=~zero_after;
                     if (q_ct==CT_LOOPE)  take=take & eflags[6];
                     if (q_ct==CT_LOOPNE) take=take & ~eflags[6];
