@@ -42,6 +42,10 @@ core/u_pipe.sv
 core/v_pipe.sv
 // SLOW-PATH instruction decoder extracted VERBATIM from core.sv (R3).
 core/decode_stages.sv
+// x87 FP WRITE-DRIVER (the combinational fpu_top state-mutation driver) extracted
+// VERBATIM from core.sv (R3). MUST come after core/core.sv (uses the $unit-scope
+// state_e enum promoted at the top of core.sv).
+core/fpu_writeback.sv
 // iterative integer DIV/IDIV engine (the FPGA-synthesizable form of the native
 // '/'/'%'). Instantiated by core.sv only under +define+VEN_IDIV_ITER; harmless
 // (uninstantiated) in the default build.

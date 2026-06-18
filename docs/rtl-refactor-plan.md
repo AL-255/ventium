@@ -105,3 +105,62 @@ Use SystemVerilog `interface`s only if a port group is shared by many modules
 Add a maintenance milestone **"R1 — RTL modularization"** to PROGRESS once M5 has
 landed (don't edit PROGRESS now — M5's close-out owns it). R1 is non-functional;
 its gate is "all of m1–m5 stay green across every extraction commit, lint clean."
+
+## R3 — front-end / execution true-module split (post-R2)
+
+R1/R2 extracted the clean leaf modules (decode fast-path, issue_uv, bpred_btb,
+icache, dcache_timing, tlb, fpu_top, ven_idiv, …). R3 continues the split of the
+remaining flat spine into the natural P5 functional blocks, **gate-protected**:
+the refactor-time gate is `make verify`, but because `tx_fprem` is a known WIP
+divergence at the time of R3, the per-step bar is a **byte-identical behaviour
+fingerprint** (84 func PASS / 1 WIP FAIL tx_fprem / identical RTL cycle counts),
+which is *stricter* than pass/fail (it catches in-tolerance cycle drift too).
+Every step is `verilator --lint-only` clean and fingerprint-identical or it is
+reverted.
+
+### Extracted (true modules instantiated by core.sv)
+| New file | Contents (moved VERBATIM from core.sv) | IF |
+|---|---|---|
+| `core/uv_common.sv` | shared U/V exec building blocks: the BCD/ASCII-adjust datapath (AAA/AAS/DAA/DAS/AAM/AAD) and the U→V EFLAGS forwarding that resolves a paired V branch | gpr[EAX]/imm/op/EFLAGS + u_pipe outputs → bcd_ax/bcd_flags, v_br_taken_eff |
+| `core/u_pipe.sv` | the P5 **U-pipe** full ALU/shift datapath (M4 fast path) | u_d + pre-read operands + EFLAGS → u_alu/u_flags/u_sh/u_shm1/u_shcf |
+| `core/v_pipe.sv` | the P5 **V-pipe** restricted ALU datapath | v_d + pre-read operands + EFLAGS → v_alu/v_flags |
+| `core/decode_stages.sv` | the **slow-path instruction decoder** (~1400 lines): prefix machine, eff_opsize/eff_addr, sreg_idx, the variable-length combinational decoder | ibuf/gpr/EFLAGS/mode-state → the d_* decoded fields (115 ports) |
+| `core/fpu_writeback.sv` | the **x87 FP write-driver** (~674-line combinational block): re-derives every x87 state mutation from the FSM/decode and drives the `fpu_top` write ports | state/decode-FP/fp-readback/engine-results → fp_we_*/fp_*_data (130 ports) |
+
+`decode_stages` and `fpu_writeback` are the size wins (core.sv 6440 → ~4606,
+-29%). Two in-module typedefs were promoted to `$unit` scope (top of core.sv,
+before the module, next to each other) so the new modules' port/case types are
+visible (compile order: core.sv precedes the new modules in rtl/ventium.f):
+`sysop_e` (for decode_stages' `d_sysop` port) and `state_e` (the FSM enum, for
+fpu_writeback's `state` input + `case(state)`). `fpu_writeback` is a clean
+RELOCATION of an existing combinational driver (the fpu_top R2 pattern) — no new
+logic and no duplication, unlike a would-be regfile driver.
+
+### NOT extractable as a true module (structural, documented here so it is not re-attempted)
+- **"microcoded / multi-cycle instructions"** — these are sequenced by the main
+  `always_ff @(posedge clk)` FSM, which is the **single writer** of *all*
+  architectural state (gpr, eip, eflags, segment regs/bases, CR0–4, dr*, the FSM
+  state register, the x87 touch/seq state, the bus/memory request handshake). A
+  standalone module would have to own that state — i.e. it would *be* the core, not
+  a sub-block. The multi-cycle handlers are **already factored** into the raw-text
+  includes `core_store_useq.svh` (PUSHA/POPA/strings/stack µops), `core_seg_ljmp.svh`
+  (far CALL/JMP/RETF), `core_iret.svh`, `core_rmint.svh` (real-mode INT/IRET),
+  `core_tss_priv.svh`/`core_tsw.svh` (TSS / hardware task switch), `core_smm.svh`
+  (SMM), `core_int_deliver.svh` (PM interrupt gates), `core_walk.svh` (page-table
+  walk) — these `\`included` chunks ARE the microcode, kept as netlist-identical
+  text-includes because they are inseparable from the FSM that drives them.
+- **regfile / prefetch buffer (ibuf)** — `gpr[]` is written from 145 NBA sites
+  scattered across the FSM (12 core_*.svh + core.sv). A true module (gpr storage +
+  reset + read outputs, written through combinational write ports) requires a
+  spine-side combinational **write-driver that re-derives every write condition**
+  (the same pattern as the existing ~1000-line x87 `fp_we_*` driver around the
+  `fpu_top` instance). **Attempted and verified byte-identical**, but the only way
+  to reproduce the 145 scattered NBA writes combinationally was to **duplicate the
+  FSM control flow**: every `core_*.svh` case-arm split into a gpr-stripped half +
+  a parallel `*_gw.svh` half (16 new files, ~3575 lines), with `core.sv` *growing*.
+  That doubles the per-instruction edit surface and is a net maintainability loss
+  for a 70-line module, so the attempt was **reverted**. Conclusion: `gpr` stays
+  spine-resident, exactly like the architectural eflags/eip/segment/CR state and
+  for the same single-writer-FSM reason. A true `regfile` module is only worth it
+  if/when the core is re-architected so register writes flow through a small fixed
+  set of commit ports (a pipeline rewrite, not a refactor).
