@@ -33,6 +33,9 @@ core/core.sv
 core/bpred_btb.sv
 core/decode.sv
 core/issue_uv.sv
+// shared U/V integer-execution building blocks (BCD/ASCII-adjust datapath, ...)
+// extracted from core.sv (R3). One module per file; behaviour-preserving.
+core/uv_common.sv
 // iterative integer DIV/IDIV engine (the FPGA-synthesizable form of the native
 // '/'/'%'). Instantiated by core.sv only under +define+VEN_IDIV_ITER; harmless
 // (uninstantiated) in the default build.
