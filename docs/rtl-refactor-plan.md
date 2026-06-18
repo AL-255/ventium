@@ -126,6 +126,7 @@ reverted.
 | `core/v_pipe.sv` | the P5 **V-pipe** restricted ALU datapath | v_d + pre-read operands + EFLAGS → v_alu/v_flags |
 | `core/decode_stages.sv` | the **slow-path instruction decoder** (~1400 lines): prefix machine, eff_opsize/eff_addr, sreg_idx, the variable-length combinational decoder | ibuf/gpr/EFLAGS/mode-state → the d_* decoded fields (115 ports) |
 | `core/fpu_writeback.sv` | the **x87 FP write-driver** (~674-line combinational block): re-derives every x87 state mutation from the FSM/decode and drives the `fpu_top` write ports | state/decode-FP/fp-readback/engine-results → fp_we_*/fp_*_data (130 ports) |
+| `core/regfile.sv` (+ `core_gpr_wb.svh`) | the architectural **GPR file** as a plain REGISTERED module: storage + synchronous dual-boot reset + per-register `gpr_we[i]`/`gpr_wd[i]` write lines + `gpr_o[]` read-out, **no instruction logic** | per-register write bus ← a single gpr-only writeback driver (`core_gpr_wb.svh`, `included once); `gpr_o[]` → all reads |
 
 `decode_stages` and `fpu_writeback` are the size wins (core.sv 6440 → ~4606,
 -29%). Two in-module typedefs were promoted to `$unit` scope (top of core.sv,
@@ -149,18 +150,22 @@ logic and no duplication, unlike a would-be regfile driver.
   (SMM), `core_int_deliver.svh` (PM interrupt gates), `core_walk.svh` (page-table
   walk) — these `\`included` chunks ARE the microcode, kept as netlist-identical
   text-includes because they are inseparable from the FSM that drives them.
-- **regfile / prefetch buffer (ibuf)** — `gpr[]` is written from 145 NBA sites
-  scattered across the FSM (12 core_*.svh + core.sv). A true module (gpr storage +
-  reset + read outputs, written through combinational write ports) requires a
-  spine-side combinational **write-driver that re-derives every write condition**
-  (the same pattern as the existing ~1000-line x87 `fp_we_*` driver around the
-  `fpu_top` instance). **Attempted and verified byte-identical**, but the only way
-  to reproduce the 145 scattered NBA writes combinationally was to **duplicate the
-  FSM control flow**: every `core_*.svh` case-arm split into a gpr-stripped half +
-  a parallel `*_gw.svh` half (16 new files, ~3575 lines), with `core.sv` *growing*.
-  That doubles the per-instruction edit surface and is a net maintainability loss
-  for a 70-line module, so the attempt was **reverted**. Conclusion: `gpr` stays
-  spine-resident, exactly like the architectural eflags/eip/segment/CR state and
-  for the same single-writer-FSM reason. A true `regfile` module is only worth it
-  if/when the core is re-architected so register writes flow through a small fixed
-  set of commit ports (a pipeline rewrite, not a refactor).
+- **prefetch buffer (`ibuf`)** — the 16-byte slow-path prefetch buffer (4 fill
+  writes in S_FETCH) is small and tangled with the icache/uopcache `\`ifdef` paths;
+  left spine-resident (low value). The substantive "decode stages" half of that
+  block IS extracted (`decode_stages.sv`).
+
+### regfile — extracted, but note the lesson (the FIRST attempt was wrong)
+`gpr[]` is written from ~145 NBA sites scattered across the FSM (12 core_*.svh +
+core.sv). The CORRECT extraction (above) is a registered `regfile` module whose
+per-register write lines are driven by ONE gpr-only writeback `always_comb`
+(`core_gpr_wb.svh`): the gpr writes are **moved** out of the FSM (non-gpr logic
+stripped), and shared arithmetic (the MUL product, native DIV quotient/remainder,
+etc.) is **hoisted to module scope** so it is computed once and read by both the
+FSM (flags/fault) and the driver (the gpr value) — no duplicate multiplier/divider.
+The FIRST attempt did this WRONG: it split every `core_*.svh` arm into a
+gpr-stripped half + a parallel `*_gw.svh` clone (16 files, ~3575 lines of
+duplicated control flow). That was a maintainability/area regression and was
+**reverted** before the clean version was built. Lesson: a writeback driver must
+hold ONLY the gpr-write decisions + hoisted-once shared values — never a clone of
+the FSM arms.
