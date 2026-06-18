@@ -3708,10 +3708,8 @@ module core
 
     // V datapath (independent of U by the pairing rule, so reading the OLD gpr
     // state is correct for both).
-    v_alu   = alu_result(v_d.alu_op, reg_read(v_d.dst,3'd4,1'b0),
-                         fp_bop(v_d), eflags[0]);
-    v_flags = flags_next(v_d.alu_op, reg_read(v_d.dst,3'd4,1'b0),
-                         fp_bop(v_d), v_alu, eflags, 3'd4);
+    // V datapath extracted to core/v_pipe.sv (R3): v_alu/v_flags are driven by
+    // the v_pipe instance below. The eip-relative V target stays here.
     v_target = ((eip + {28'd0,u_d.len}) + {28'd0,v_d.len}) + v_d.rel;
     // BTB V predict: drive the module's comb predict port at the V pc
     // (= eip + u_d.len) and read back its PRE-update predicted-taken (bpred_btb).
@@ -3771,6 +3769,21 @@ module core
     .u_sh      (u_sh),
     .u_shm1    (u_shm1),
     .u_shcf    (u_shcf)
+  );
+
+  // ---- V-pipe datapath (core/v_pipe.sv, R3) --------------------------------
+  // Pre-read V operands (full dwords == reg_read(idx,3'd4,1'b0)). The v_pipe
+  // instance drives v_alu/v_flags consumed by the eval above + S_PIPE commit.
+  logic [31:0] v_dst_val, v_src_val;
+  assign v_dst_val = reg_read(v_d.dst, 3'd4, 1'b0);
+  assign v_src_val = reg_read(v_d.src, 3'd4, 1'b0);
+  v_pipe u_vpipe (
+    .v_d       (v_d),
+    .v_dst_val (v_dst_val),
+    .v_src_val (v_src_val),
+    .eflags    (eflags),
+    .v_alu     (v_alu),
+    .v_flags   (v_flags)
   );
 
   // ===========================================================================
