@@ -40,6 +40,8 @@ core/uv_common.sv
 // V-pipe = restricted ALU/branch member. Combinational; netlist-identical.
 core/u_pipe.sv
 core/v_pipe.sv
+// SLOW-PATH instruction decoder extracted VERBATIM from core.sv (R3).
+core/decode_stages.sv
 // iterative integer DIV/IDIV engine (the FPGA-synthesizable form of the native
 // '/'/'%'). Instantiated by core.sv only under +define+VEN_IDIV_ITER; harmless
 // (uninstantiated) in the default build.
