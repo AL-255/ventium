@@ -93,10 +93,21 @@ static uint32_t cur_lba(ide_t* s) {
     return (cyl * s->heads + head) * s->secs + (s->sector ? s->sector - 1 : 0);
 }
 
+// F4A debug: armed by the sim (tb_main) to start a per-commit trace when the
+// disk read of a chosen LBA happens (e.g. AUTOEXEC.BAT @496, right before the
+// "unknown command" critical error on a high-cluster EXEC). VEN_F4A_ARM_LBA=<lba>.
+// Default (env unset) leaves it 0 forever => byte-identical normal runs.
+int g_ven_f4a_arm = 0;
+
 static void load_sector(ide_t* s) {
     memset(s->sbuf, 0, 512);
     if (s->fd >= 0 && s->xfer_lba < s->total_sectors)
         if (pread(s->fd, s->sbuf, 512, (off_t)s->xfer_lba * 512) < 0) { /* leave zeros */ }
+    {
+        static long arm_lba = -2;
+        if (arm_lba == -2) { const char* e = getenv("VEN_F4A_ARM_LBA"); arm_lba = e ? strtol(e, 0, 0) : -1; }
+        if (arm_lba >= 0 && s->xfer_lba == (uint32_t)arm_lba) g_ven_f4a_arm = 1;
+    }
     if (getenv("VEN_IDE_LOG")) {
         unsigned sm = 0; for (int i = 0; i < 512; i++) sm = (sm + s->sbuf[i]) & 0xffff;
         fprintf(stderr, "ven_ide: RD lba=%u sum=%04x b=%02x%02x%02x%02x\n",
@@ -146,6 +157,9 @@ static uint8_t ide_read8(ven_periph_t* p, uint16_t port) {
 
 static void ide_exec(ide_t* s, uint8_t cmd) {
     s->command = cmd;
+    if (getenv("VEN_IDE_LOG"))
+        fprintf(stderr, "ven_ide: CMD %02x sel=%02x nsec=%u lba=%u\n",
+                cmd, s->select, s->nsector, cur_lba(s));
     switch (cmd) {
         case 0xEC: start_identify(s); break;                 // IDENTIFY DEVICE
         case 0x20: case 0x21: start_read(s); break;          // READ SECTORS (w/ + w/o retry)
@@ -153,7 +167,11 @@ static void ide_exec(ide_t* s, uint8_t cmd) {
         case 0x91: s->status = ST_IDLE; s->irq = 1; break;   // INITIALIZE DEVICE PARAMETERS (accept)
         case 0xC6: s->status = ST_IDLE; s->irq = 1; break;   // SET MULTIPLE (status-only)
         case 0xEF: s->status = ST_IDLE; s->irq = 1; break;   // SET FEATURES (accept)
-        default:   s->status = ST_ABRT; s->error = ERR_ABRT; s->irq = 1; break;  // incl WRITE
+        default:   s->status = ST_ABRT; s->error = ERR_ABRT; s->irq = 1;      // incl WRITE
+                   fprintf(stderr, "ven_ide: *** ABORT unsupported cmd=%02x "
+                           "sel=%02x nsec=%u lba=%u ***\n",
+                           cmd, s->select, s->nsector, cur_lba(s));
+                   break;
     }
 }
 

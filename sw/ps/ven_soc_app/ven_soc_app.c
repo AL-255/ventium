@@ -353,7 +353,117 @@ static ven_periph_t* dos_model_of(uint16_t port) {
     return 0;
 }
 
+// ---- Soft VGA: A53-side INT 10h (VGABIOS) for DOS Quake ---------------------
+// The vgabios-stdvga option ROM is unusable on Ventium (no PCI std-vga device: its
+// init far-call hangs SeaBIOS / reboot-loops). Instead the PS *is* the VGABIOS: a
+// 93-byte in-guest stub installed at C000:0 (IVT[0x10] -> it, after POST) saves
+// regs to C000:0x100 and OUTs the VGA-trap port; we service the call here. Mode-13h
+// pixels land at 0xA0000 (captured by --vga-dump / kms-draw --vga13); the palette
+// comes via the DAC ports (g_vga) or AH=10/AL=12. --soft-vga enables it.
+#define VGA_STUB_SEG   0xC000u
+#define VGA_STUB_PHYS  0xC0000u
+#define VGA_REGBUF     (VGA_STUB_PHYS + 0x100u)   // AX@+0 BX@+2 CX@+4 DX@+6 SI@+8 DI@+a BP@+c ES@+e DS@+10
+#define VGA_TRAP_PORT  0x02E0u
+static const uint8_t g_vga_stub[] = {
+    0x2e,0xa3,0x00,0x01, 0x2e,0x89,0x1e,0x02,0x01, 0x2e,0x89,0x0e,0x04,0x01,
+    0x2e,0x89,0x16,0x06,0x01, 0x2e,0x89,0x36,0x08,0x01, 0x2e,0x89,0x3e,0x0a,0x01,
+    0x2e,0x89,0x2e,0x0c,0x01, 0x2e,0x8c,0x06,0x0e,0x01, 0x2e,0x8c,0x1e,0x10,0x01,
+    0xba,0xe0,0x02, 0xee,
+    0x2e,0xa1,0x00,0x01, 0x2e,0x8b,0x1e,0x02,0x01, 0x2e,0x8b,0x0e,0x04,0x01,
+    0x2e,0x8b,0x16,0x06,0x01, 0x2e,0x8b,0x36,0x08,0x01, 0x2e,0x8b,0x3e,0x0a,0x01,
+    0x2e,0x8b,0x2e,0x0c,0x01, 0x2e,0x8e,0x06,0x0e,0x01, 0x2e,0x8e,0x1e,0x10,0x01,
+    0xcf
+};
+static int g_soft_vga = 0, g_vga_installed = 0, g_post_done = 0;
+
+static inline uint16_t gr16(uint32_t p){ return (uint16_t)(g_ddr[p] | (g_ddr[p+1] << 8)); }
+static inline void     gw16(uint32_t p, uint16_t v){ g_ddr[p]=(uint8_t)v; g_ddr[p+1]=(uint8_t)(v>>8); }
+
+static void install_soft_vga(void) {
+    for (size_t i = 0; i < sizeof(g_vga_stub); i++) g_ddr[VGA_STUB_PHYS + i] = g_vga_stub[i];
+    gw16(0x40, 0x0000);            // IVT[0x10].offset
+    gw16(0x42, VGA_STUB_SEG);      // IVT[0x10].segment
+    __sync_synchronize();
+    wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN | VEN_CTRL_FLUSH_REQ);   // invalidate the core's L1/I$
+    fprintf(stderr, "ven_soc: soft-VGA INT10h installed (stub@C000:0, trap port 0x%x)\n", VGA_TRAP_PORT);
+}
+
+static void vga_set_mode13(void) {
+    g_ddr[0x449] = 0x13;           // BDA video mode = 13h
+    gw16(0x44a, 40); gw16(0x44c, 0);   // BDA columns / page size
+    g_ddr[0x462] = 0; g_ddr[0x487] = 0x60;   // active page / VGA mode flags (graphics)
+}
+
+// Service one trapped INT 10h call (regs in the C000:0x100 buffer; result written back).
+static unsigned long g_vga_calls = 0;
+static void vga_int10_service(void) {
+    uint16_t ax = gr16(VGA_REGBUF+0), bx = gr16(VGA_REGBUF+2),
+             cx = gr16(VGA_REGBUF+4), dx = gr16(VGA_REGBUF+6),
+             es = gr16(VGA_REGBUF+0x0e);
+    uint8_t  ah = (uint8_t)(ax >> 8), al = (uint8_t)ax;
+    if (g_vga_calls++ < 64 || (ah != 0x0E))
+        fprintf(stderr, "soft-vga: int10 #%lu ax=%04x bx=%04x cx=%04x dx=%04x\n",
+                g_vga_calls, ax, bx, cx, dx);
+    switch (ah) {
+        case 0x00:                                  // set video mode
+            if (al == 0x13) vga_set_mode13(); else g_ddr[0x449] = al;
+            break;
+        case 0x02:                                  // set cursor position (DH=row DL=col)
+            gw16(0x450, dx);
+            break;
+        case 0x03:                                  // get cursor -> DX=pos, CX=shape
+            dx = gr16(0x450); cx = gr16(0x460);
+            break;
+        case 0x0E: {                                // teletype: write AL, advance cursor (page 0)
+            uint8_t ch = al;
+            uint16_t cur = gr16(0x450);
+            uint8_t col = (uint8_t)cur, row = (uint8_t)(cur >> 8);
+            uint8_t cols = (uint8_t)gr16(0x44a); if (!cols) cols = 80;
+            if      (ch == 0x0D) col = 0;
+            else if (ch == 0x0A) row++;
+            else if (ch == 0x08) { if (col) col--; }
+            else {
+                uint32_t v = 0xB8000u + ((uint32_t)row*cols + col)*2u;
+                g_ddr[v] = ch; g_ddr[v+1] = 0x07;
+                if (++col >= cols) { col = 0; row++; }
+            }
+            if (row >= 25) {                        // scroll up one line
+                uint32_t w = (uint32_t)cols*2u, b = 0xB8000u;
+                for (uint32_t i = 0; i < w*24u; i++) g_ddr[b+i] = g_ddr[b+w+i];
+                for (uint32_t i = 0; i < cols;  i++) { g_ddr[b+w*24u+i*2]=' '; g_ddr[b+w*24u+i*2+1]=0x07; }
+                row = 24;
+            }
+            gw16(0x450, (uint16_t)(((uint16_t)row << 8) | col));
+            break; }
+        case 0x0F:                                  // get mode -> AL=mode AH=cols BH=page
+            ax = (uint16_t)(((uint16_t)(uint8_t)gr16(0x44a) << 8) | g_ddr[0x449]);
+            bx = (uint16_t)(bx & 0x00ff);
+            break;
+        case 0x10:                                  // palette / DAC
+            if (al == 0x12) {                       // set block: ES:DX -> (R,G,B) table, BX start, CX count
+                uint32_t tbl = ((uint32_t)es << 4) + dx;
+                g_vga->io_write(g_vga, 0x3C8, (uint8_t)bx);
+                for (uint16_t i = 0; i < cx; i++) {
+                    g_vga->io_write(g_vga, 0x3C9, g_ddr[tbl + i*3 + 0]);
+                    g_vga->io_write(g_vga, 0x3C9, g_ddr[tbl + i*3 + 1]);
+                    g_vga->io_write(g_vga, 0x3C9, g_ddr[tbl + i*3 + 2]);
+                }
+                g_dac_dirty = 1;
+            }
+            break;
+        case 0x1A:                                  // get display combination code -> VGA color
+            if (al == 0x00) { ax = 0x001A; bx = (uint16_t)((bx & 0xff00) | 0x08); }
+            break;
+        case 0x4F:                                  // VBE: leave AX=0x4Fxx (!=0x004F) -> unsupported
+        default:                                    // -> Quake falls back to mode 13h
+            break;
+    }
+    gw16(VGA_REGBUF+0, ax); gw16(VGA_REGBUF+2, bx);
+    gw16(VGA_REGBUF+4, cx); gw16(VGA_REGBUF+6, dx);
+}
+
 static int service_out(uint16_t port, uint32_t val) {
+    if (g_soft_vga && port == VGA_TRAP_PORT) { vga_int10_service(); return 0; }
     ven_periph_t* m = dos_model_of(port);
     if (m) {
         m->io_write(m, port, (uint8_t)(val & 0xFF));
@@ -390,6 +500,7 @@ int main(int argc, char **argv) {
     for (i = 1; i < argc; i++) {
         if      (!strcmp(argv[i], "--sys")) sysmode = 1;
         else if (!strcmp(argv[i], "--dos")) g_dos   = 1;
+        else if (!strcmp(argv[i], "--soft-vga")) g_soft_vga = 1;   // PS-side INT10h VGABIOS (DOS Quake)
         else if (!strcmp(argv[i], "--extmem-kb") && i + 1 < argc) g_extmem_kb = strtoul(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--kbd")  && i + 1 < argc) kbd_path = argv[++i];
         else if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];  // SeaBIOS image
@@ -653,6 +764,9 @@ int main(int argc, char **argv) {
             uint16_t port = (uint16_t)rd(VEN_R_IO_ADDR);
             if (ios & VEN_IO_IS_WRITE) {
                 uint32_t v = rd(VEN_R_IO_WDATA);
+                // soft-VGA install trigger: the first ATA READ-SECTORS (0x20) command to
+                // the IDE cmd port = the boot sector load = POST is done + 0xC0000 is free.
+                if (g_soft_vga && port == 0x1F7 && (v & 0xFF) == 0x20) g_post_done = 1;
                 if (dbg) fprintf(stderr, "[io %llu] OUT 0x%03x = 0x%x\n",
                                  (unsigned long long)serviced, port, v);
                 if (service_out(port, v)) {              // out 0xf4 -> done
@@ -669,6 +783,8 @@ int main(int argc, char **argv) {
             wr(VEN_R_IO_CTRL, VEN_IO_ACK | VEN_IO_IRQ_CLR);   // release the stalled core
             serviced++;
         }
+        // soft-VGA: install the INT 10h stub + IVT[0x10] once POST is done (first ATA read).
+        if (g_soft_vga && g_post_done && !g_vga_installed) { install_soft_vga(); g_vga_installed = 1; }
 
         // ---- F4 int-0x80 syscall proxy (the PS *is* the Linux kernel) ----------
         // The core stalls in S_SYSCALL_WAIT on a cd80; read {nr,args}, emulate the
