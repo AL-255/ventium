@@ -68,11 +68,6 @@ Quick reference
      - boolean define
      - off — combinational FDIV/FSQRT
      - Multi-cycle iterative SRT divide and square-root engines, bit-exact.
-   * - ``VEN_SRT_DIV``
-     - boolean define
-     - no-op (legacy)
-     - Historical name; the genuine SRT divider is now the unconditional
-       default.
    * - ``VEN_SRT_FDIV_BUG``
      - boolean define
      - off — correct PLA
@@ -94,11 +89,20 @@ Quick reference
      - boolean define
      - off — opcodes HALT
      - Adds the 8 x87 transcendental instructions via iterative engines.
-   * - ``VEN_TRSC_SILICON``
+   * - ``VEN_FPREM``
      - boolean define
-     - inert (reserved)
-     - Planned silicon-accuracy mode select for the transcendental engines;
-       not implemented.
+     - off — opcode HALTs
+     - Adds FPREM (``D9 F8``) via an exact iterative partial-remainder engine.
+   * - ``VEN_FPTRAP``
+     - boolean define
+     - off — opcode HALTs
+     - Traps FPATAN (``D9 F3``) to the PS for ``atan2`` (the small-FPGA
+       alternative to the ``VEN_TRANSCENDENTAL`` engine).
+   * - ``VEN_FP_PC_RELAX``
+     - boolean define
+     - off — arith under PC≠11 HALTs
+     - Relaxes the precision-control loud-HALT so PC≠11 FP arithmetic executes
+       (deployed-build faithfulness option).
    * - **Front-end and L1 caches**
      -
      -
@@ -151,6 +155,14 @@ Quick reference
      - valued define (int)
      - 2
      - D-cache timing-model associativity override.
+   * - ``VEN_IC_COLLIDE_DBG``
+     - boolean define
+     - off (needs ``VEN_IC_BRAM``)
+     - Counts/logs BRAM-icache read-vs-fill cross-port collisions (diagnostic).
+   * - ``VEN_UOP_PERF``
+     - boolean define
+     - off (needs ``VEN_UOPCACHE``)
+     - µop-cache hit / collide-guard-rewalk counters (diagnostic).
    * - **Integer core and build plumbing**
      -
      -
@@ -181,6 +193,16 @@ Quick reference
      - boolean define
      - off
      - ``$display`` tap in the F2XM1 engine's pack stage.
+   * - ``VEN_DBG_CORE``
+     - boolean define
+     - off
+     - On-die debug seam: committed-state taps, PC ring, freeze detector, perf
+       counters, single-step/breakpoint (``ven_soc_axil`` 0x80+ window).
+   * - ``VEN_TRACE_IRQ``
+     - boolean define
+     - off
+     - Sim-only ``$display`` forensic trace of IRQ entry / IF / CS / IRET
+       deltas.
    * - **Memory system and SoC platform**
      -
      -
@@ -306,8 +328,10 @@ x87 FPU implementation
 
 This family covers the flags around the x87 FPU: the radix-4 SRT FDIV/FSQRT
 datapath, the FBSTP/FBLD packed-BCD converters, the FP-execute commit
-pipeline, the in-core transcendental engines, and two P5 cycle-model "gap"
-features (FDIV/integer overlap, free FXCH). The default build uses
+pipeline, the in-core transcendental engines, two P5 cycle-model "gap"
+features (FDIV/integer overlap, free FXCH), the exact FPREM engine, the
+PS-trapped FPATAN path, and the precision-control HALT relaxation. The default
+build uses
 single-cycle combinational x87 functions (``rtl/fpu/fpu_x87_pkg.sv``,
 ``rtl/core/ventium_x87_pkg.sv``) that are bit-exact against QEMU softfloat at
 every retire — and note that the genuine SRT divider with the *correct* PLA is
@@ -321,11 +345,26 @@ first four are what the KV260 FPGA builds set, while ``VEN_BCD_DIV100`` and
 ``VEN_DIV_EXACT`` are manual/sim-side options in the same class. The architectural opt-ins change visible
 behaviour and carry their own oracles and gates: ``VEN_SRT_FDIV_BUG`` (the
 authentic Pentium FDIV flaw), ``VEN_TRANSCENDENTAL`` (eight new instructions),
-and ``VEN_FP_OVERLAP``/``VEN_FXCH_FREE`` (cycle-trace changes graded against
-``fpovl=1``/``fxchfree=1`` variants of the ``p5trace`` oracle). Two names in
-this family are *not* live ``ifdef``\ s at all: ``VEN_SRT_DIV`` is a legacy flag
-whose semantics became the default in commit ``3791e46``, and
-``VEN_TRSC_SILICON`` is a reserved, intentionally inert name.
+``VEN_FPREM`` and ``VEN_FPTRAP`` (two more opcodes that otherwise HALT —
+``D9 F8`` via an exact engine, ``D9 F3`` trapped to the PS), and
+``VEN_FP_OVERLAP``/``VEN_FXCH_FREE`` (cycle-trace changes graded against
+``fpovl=1``/``fxchfree=1`` variants of the ``p5trace`` oracle). Sitting between
+the two groups is ``VEN_FP_PC_RELAX``, a deployed-build faithfulness option that
+removes the precision-control HALT and is bit-exact vs QEMU. The three deployed
+FPGA-only flags (``VEN_FPREM``, ``VEN_FPTRAP``, ``VEN_FP_PC_RELAX``) are
+documented after ``VEN_TRANSCENDENTAL`` below.
+
+.. note::
+
+   **Retired names.** Two former flag names in this family have been purged from
+   the source tree — no ``ifdef``, source comment, or build script references
+   them any longer (this page keeps the names only as a historical pointer).
+   ``VEN_SRT_DIV`` opted *in* to the genuine SRT divider; commit ``3791e46``
+   made that the unconditional default, so the opt-*out* ``VEN_DIV_EXACT`` is
+   the live flag now. ``VEN_TRSC_SILICON`` was a never-implemented
+   silicon-accuracy mode select; its only real seam is the inert
+   ``parameter bit SILICON = 1'b0`` on each transcendental engine, never
+   overridden (see ``docs/m11-transcendental-spec.md``).
 
 ``VEN_FP_PIPE``
 ---------------
@@ -544,27 +583,6 @@ published vector takes sign/exponent from the stubbed "clean" value). The M6
 errata gates run on the default build; that combination is unverified
 territory.
 
-``VEN_SRT_DIV``
----------------
-
-**Legacy, vestigial — defining it today changes nothing**; there is no live
-``ifdef VEN_SRT_DIV`` anywhere in the RTL. At M8.5 (commit ``9e6e329``) the
-``fx_div`` dispatcher read ``ifdef VEN_SRT_DIV → fx_srt_div`` (with nested
-``VEN_SRT_FDIV_BUG`` selecting the buggy PLA), ``else → fx_div_exact``.
-Commit ``3791e46`` inverted the polarity: the genuine SRT datapath with the
-correct PLA became the unconditional hardware default ("bit-exact vs
-``fx_div_exact``/QEMU"), and the opt-*out* became ``VEN_DIV_EXACT``.
-
-The name now survives only in comments and documentation — the feature header
-in ``rtl/fpu/fpu_x87_pkg.sv``, a ``Makefile`` note, and *stale* docs that
-still describe the old default: ``verif/srt/README.md`` ("with no defines the
-divider is ``fx_div_exact``") and ``docs/sphinx/microarch/srt-divider.rst``
-both contradict the current code, while ``fpga/TARGETS.md`` has the current
-truth. Nothing in the build system sets it; both PLAs are graded by
-``verify-srt`` against ``tools/srt/srt_model.py`` with the testbench driving
-the ``buggy`` input directly, no define needed. Anyone auditing "which divider
-is default" from the README will get the wrong answer.
-
 ``VEN_SRT_FDIV_BUG``
 --------------------
 
@@ -730,33 +748,100 @@ i.e. on the combinational ``fx_div`` whose finite-nonzero SRT body is stubbed
 run without ``VEN_SRT_ITER``. Gotchas: a naive QEMU diff on FSIN/FCOS fails
 by design (the checker compares against the model instead), and the
 default-build behaviour for these opcodes is HALT, not a #UD trap — real-world
-code using transcendentals requires the flag.
+code using transcendentals requires the flag. (The never-implemented
+silicon-accuracy mode select once sketched as ``VEN_TRSC_SILICON`` is covered
+under *Retired names* above: its only real seam is the inert
+``parameter bit SILICON`` on each engine, and
+``docs/m11-transcendental-spec.md`` records why a separate macro was never
+warranted.)
 
-``VEN_TRSC_SILICON``
---------------------
+``VEN_FPREM``
+-------------
 
-Reserved and currently **unimplemented**: there is no
-``ifdef VEN_TRSC_SILICON`` anywhere in the RTL or build system — the name
-exists only in comments (``rtl/fpu/fpu_f2xm1.sv``, ``tools/p5xtrans/qref.c``);
-the M11 spec documents the ``SILICON`` parameter seam and the design
-conclusion without ever naming the macro. The seam it would drive does exist: every transcendental
-engine declares ``parameter bit SILICON = 1'b0`` (``fpu_f2xm1``,
-``fpu_fpatan``, ``fpu_fyl2x``, ``fpu_fsincos``), and the instances in
-``rtl/core/core.sv`` never override it.
+Adds the **FPREM** instruction (``D9 F8``) through a dedicated exact iterative
+partial-remainder engine. Without it, ``D9 F8`` stays ``d_unknown`` in decode
+and the core **HALTs** (``rtl/core/decode_stages.sv`` — the in-source comment
+explains why it must: a true remainder ``ST0 − Q·ST1`` has to be *exact*, but
+``fx_mul`` rounds, so it needs the dedicated engine rather than the generic
+arithmetic path), keeping the baseline byte-identical.
 
-The inertness is a design conclusion, not an omission.
-``docs/m11-transcendental-spec.md`` records that (a) bit-exact-to-silicon is
-unachievable from public data (undumped transcendental microcode, unpublished
-Remez coefficients), and (b) for Group B, QEMU's softfloat algorithm *is
-itself* the accuracy-faithful silicon one (80-bit table + Horner +
-reconstruct, ~0.5 ulp) — a single datapath serves both the bit-exact-vs-qemu
-gate and silicon fidelity, so the parameter is reserved/inert. For Group A the
-shipped shared-polynomial model already is the silicon-accuracy target.
-``tools/p5xtrans/p5xtrans.c`` remains the independent silicon-accuracy oracle
-(agrees with ``qref`` to <1 ulp). If the flag were ever implemented it would
-be an architectural-mode change requiring its own silicon-model oracle, since
-the QEMU differential gates for Group B would no longer apply. Do not assume
-it does anything because comments reference it.
+With the flag, decode emits ``FX_FPREM``, ``S_FEXEC`` routes it to a new
+busy-wait state ``S_FPREM_BUSY`` (``rtl/core/core.sv``,
+``rtl/core/core_fp_exec.svh``), and ``rtl/fpu/fpu_fprem.sv`` is instantiated;
+on the engine-done clock the writeback driver overwrites ST0 with the remainder
+and sets the C0/C1/C2/C3 condition codes from the low quotient bits and the
+partial-reduction flag (``rtl/core/fpu_writeback.sv``). This is an
+**architectural (behaviour-adding)** flag — it changes ST0 and the status word,
+bit-exact against QEMU's softfloat ``frac64_modrem``.
+
+Its oracle is QEMU and its differential program is ``verif/tests/tx_fprem``,
+auto-discovered into the x87 corpus by ``verif/run-m3.sh``. Because the default
+build HALTs on ``D9 F8``, ``tx_fprem`` is the *one* known ``make verify``
+mismatch on the baseline; a build that defines ``VEN_FPREM`` is what makes it
+pass. Set by the deployed KV260 configs (``fpga/scripts/impl_kv260_soc.tcl``
+via ``envor FPREM 1`` — **default on** there; ``fpga/scripts/synth_check.tcl``)
+and the ``l1axi_kv_proxy`` Verilator target (``verif/tb/Makefile``). It is
+independent of ``VEN_FPTRAP`` and ``VEN_TRANSCENDENTAL`` (different opcodes) and
+of ``VEN_FP_PC_RELAX``.
+
+``VEN_FPTRAP``
+--------------
+
+Executes **FPATAN** (``D9 F3``) by trapping it to the PS instead of an in-PL
+transcendental engine — the small-FPGA alternative to ``VEN_TRANSCENDENTAL``
+(whose four iterative engines are ~2× over the XCK26, per
+``fpga/scripts/synth_check.tcl``), and the only transcendental Quake needs.
+Without it (and without ``VEN_TRANSCENDENTAL``), ``D9 F3`` is ``d_unknown`` and
+the core HALTs. The decode site is an ``elsif`` after ``VEN_TRANSCENDENTAL``
+(``rtl/core/decode_stages.sv``), so the two are **mutually exclusive for
+``D9 F3``**: ``VEN_TRANSCENDENTAL`` wins (in-PL engine), else ``VEN_FPTRAP``
+(PS trap), else HALT.
+
+With the flag, ``S_FEXEC`` parks FPATAN in a new ``S_FPTRAP_WAIT`` state and
+exposes the ST0/ST1 ``floatx80`` operands plus an ``fptrap_active`` strobe on a
+port group that threads ``core`` → ``ventium_top`` → ``ven_soc_axil`` (a
+register window at 0xEC–0xFC, the 80-bit operands word-indexed) → the PS. The
+PS computes ``atan2(ST1, ST0)``, writes the ``floatx80`` result back, and pulses
+the response; the wait arm then commits exactly as the in-PL FPATAN would
+(result to ST1, then pop) and resumes — architecturally equivalent, just later.
+It is **behaviour-adding** and, like ``VEN_PS_PROXY``, depends on a PS bridge to
+be useful (the two are built together in the SoC AXI-Lite gate). Its in-core
+register/handshake protocol is exercised by ``verif/soc/run-soc-axil-gate.sh``
+(a ``+define+VEN_FPTRAP`` variant); the PS-side ``atan2`` is verified
+separately. Set by ``fpga/scripts/impl_kv260_soc.tcl`` (``envor FPTRAP 0`` —
+**default off**, opt-in for the no-transcendental board build),
+``synth_check.tcl``, and the ``l1axi_kv_proxy`` target. There is no direct QEMU
+differential gate (the baseline lacks FPATAN), so it is certified by the SoC
+gate plus on-board Quake.
+
+``VEN_FP_PC_RELAX``
+-------------------
+
+Relaxes the x87 **precision-control loud-HALT**. By default any FP *arithmetic*
+issued while the FPU control word's PC field (``fctrl[9:8]``) is not ``11``
+(64-bit extended) sets ``f_pc_bad`` and the core HALTs, because Ventium's
+datapath only implements 64-bit-extended precision and refuses to silently
+ignore a 24-bit-single / 53-bit-double request. The gate has two mirrored
+sites — the FSM spine (``rtl/core/core_fp_exec.svh``) and the commit driver
+(``rtl/core/fpu_writeback.sv``), which re-derives the same predicate — both of
+which the flag forces to ``0``.
+
+With the flag, PC≠11 arithmetic simply executes to full 80-bit extended and
+rounds per RC, so the result is *more* precise than a real P5's
+mantissa-truncated value — benign in practice (Quake's rasterizer
+``R_RecursiveWorldNode`` runs FSUBR/FMUL under single-precision ``fldcw`` and
+then stores back to a 32-bit float, discarding the extra bits). Relative to the
+QEMU golden it is **bit-exact**: QEMU's softfloat also computes at full
+precision and does not model PC truncation, so a relaxed build matches QEMU
+while the default build's HALT is the deliberately conservative deviation. It is
+therefore a deployed-build *faithfulness* option, not an Fmax one. ``make
+verify`` never issues arithmetic under PC≠11, so default and relaxed builds are
+byte-identical on the corpus and there is no dedicated gate; the validation is
+on-board Quake rendering. Set **default-on** by
+``fpga/scripts/impl_kv260_soc.tcl`` (``envor FP_PC_RELAX 1``), and in every
+deployed Verilator config (``KV_FULL_DEFS`` in ``verif/tb/Makefile``,
+``synth_check.tcl``). Independent of every other FP flag — it only touches the
+``f_is_arith`` precision predicate.
 
 Front-end and L1 caches
 =======================
@@ -773,7 +858,10 @@ explicitly non-cycle-faithful demonstrator (``VEN_FE_PIPE``,
 ``VEN_UOPCACHE``; or
 (c) a numeric geometry parameter for cache sweeps (``VEN_IC_SETS``,
 ``VEN_IC_WAYS``, ``VEN_DC_SETS``, ``VEN_DC_WAYS``, plus the umbrella
-``VEN_L1_SETS``/``VEN_L1_WAYS`` pair described with the SoC platform family).
+``VEN_L1_SETS``/``VEN_L1_WAYS`` pair described with the SoC platform family); or
+(d) a purely observational diagnostic counter layer (``VEN_IC_COLLIDE_DBG`` on
+the BRAM icache, ``VEN_UOP_PERF`` on the µop cache), documented at the end of
+this section.
 
 The deployable KV260 SoC bitstream sets ``VEN_BTB_PIPE`` + ``VEN_IC_BRAM`` +
 ``VEN_UOPCACHE`` + ``VEN_CACHE_HALF`` + ``VEN_FE_PIPE`` (plus the FP and
@@ -1131,6 +1219,35 @@ I-side so the two L1s stay symmetric, mirroring the oracle's single L1
 geometry parameterization. Its "differential gate" is a functional/CRC
 equivalence run plus a CPI plausibility check — never the cycle bands.
 
+``VEN_IC_COLLIDE_DBG``
+----------------------
+
+A diagnostic counter layer for the Block-RAM icache, **nested inside the
+``VEN_IC_BRAM`` block** in ``rtl/mem/icache.sv`` and therefore inert without it.
+The functional read-during-fill collision flags (``rd_collA``/``rd_collB``,
+which gate fetch readiness) exist unconditionally; this flag adds only the
+forensic bookkeeping — per-port total/live collision counters, a ``[ICCOL-A]``/
+``[ICCOL-B]`` ``$display`` on the first several events, and an
+``[ICCOL-SUMMARY]`` total at end of simulation — to confirm whether the
+cross-port collisions a BRAM build detects are benign (``live = 0``) or actually
+consumed a stale read (``live = 1``). Purely observational, no logic or state
+effect on the datapath, no gate needed. No build script sets it (manual
+``+define`` only); meaningful only on a ``+VEN_IC_BRAM`` build.
+
+``VEN_UOP_PERF``
+----------------
+
+The µop-cache twin of the above: per-port counters added inside
+``rtl/mem/uopcache.sv`` reporting predecode-valid **hits** (the slot read found
+a valid predecoded entry) and collide-guard **rewalks** (a cross-port collision
+suppressed the slot read, forcing a safe re-walk), dumped as ``[UOPPERF]`` at
+end of simulation. The predecode-valid latch and the collide-guard that drive
+them are functional and always present; this flag adds only the bookkeeping, to
+confirm the µop cache is populating (hits ≫ 0) and the guard is not thrashing
+(rewalks rare). Purely observational, no gate needed. No build script sets it
+(manual ``+define`` only); vacuous without ``VEN_UOPCACHE`` (which is what
+instantiates ``uopcache.sv`` at all).
+
 Integer core and build plumbing
 ===============================
 
@@ -1319,6 +1436,49 @@ before ``norm_round_pack_x`` produces the result. Pure observation, no
 behavioural or timing effect, no gate needed; nothing sets it. It is only
 meaningful when the engine is actually instantiated, i.e. under
 ``VEN_TRANSCENDENTAL``.
+
+``VEN_DBG_CORE``
+----------------
+
+The opt-in on-die debug/observability seam (commit ``46c57f7``). Without it the
+debug port group constant-folds away and the core is **byte/cycle-identical** to
+the baseline — ``make verify`` passes identically with and without it. With it,
+``rtl/core/core.sv`` and ``rtl/ventium_top.sv`` expose a bundle of *combinational
+mirrors* of existing state (FSM ``state``, pending interrupt vector, fault PC,
+cr0, fctrl, current fxop, the instruction buffer, the active segment, a #DE
+counter) plus committed-retire taps (``dbg_eip``/``cs``/``esp``/``eflags``), and
+``rtl/mem/ven_axi_master.sv`` taps each accepted AXI read beat (DDR addr+data).
+``rtl/soc/ven_soc_dbg.sv`` adds a 32-entry ``{state,CS,EIP}`` PC ring, a
+no-retire freeze detector and CPI/perf counters; ``rtl/soc/ven_soc_axil.sv``
+maps all of it (plus single-step and breakpoint controls) into the PS-readable
+register window at 0x80–0xE8.
+
+It is **purely observational**: the only thing that touches control flow is the
+single-step / breakpoint *hold*, which parks at an ``S_DECODE`` boundary
+(priority below SMI/NMI/INTR, modelled on ``S_HLTWAIT`` so in-flight L1/AXI
+fills continue) and is inert until the PS arms it — so it cannot change which
+instructions retire. The C++ testbench has a matching ``-DVEN_DBG_CORE`` side
+(``verif/tb/tb_main.cpp``): the ``[VEN_DBG]`` post-mortem dump, a ``VEN_WATCH``
+memory-write watch window, and ``--dbg-step N`` / ``--dbg-bp <eip>`` drivers.
+Set by the deployed Verilator targets (``l1axi_kv_proxy``/``_dos``/``_dos_q`` in
+``verif/tb/Makefile``), by ``fpga/scripts/synth_check.tcl``, and opt-in on the
+FPGA via ``fpga/scripts/impl_kv260_soc.tcl`` (``envor DBG_CORE 0`` — default
+off). Standalone and orthogonal to every other flag.
+
+``VEN_TRACE_IRQ``
+-----------------
+
+A leave-undefined, sim-only forensic trace for interrupt-delivery debugging
+(the FreeDOS-derail diagnosis). It adds three latch registers in
+``rtl/core/core.sv`` (last-seen EFLAGS.IF, CS selector, CS base) and a set of
+combinational ``$display`` taps that fire on deltas: ``[IRQ-TAKE]`` when an IRQ
+is taken at ``S_DECODE``, ``[IF-CHG]`` on an interrupt-flag toggle, ``[CS-CHG]``
+on a CS selector/base change, and ``[RMIRET]``/``[RMPUSH]`` on real-mode IRET
+pops and INT pushes. The latch registers are write-only observers — nothing in
+the datapath or FSM reads them — so it is purely observational with no
+architectural or cycle effect, no gate needed. No build script sets it (manual
+``+define+VEN_TRACE_IRQ`` only); it floods logs and is meant for short directed
+reproductions, like ``M7_PROXY_DEBUG``.
 
 Testbench value macros and sweep hygiene
 ----------------------------------------

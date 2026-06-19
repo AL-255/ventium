@@ -260,7 +260,7 @@ coverage-all:
 
 # --- SRT divider gate (verif/srt/run-srt-gate.sh) ---------------------------
 # Standalone Verilator unit gate for the genuine radix-4 SRT divider
-# (fpu_x87_pkg::fx_srt_div, the optional +define+VEN_SRT_DIV feature). Drives
+# (fpu_x87_pkg::fx_srt_div, the unconditional default divider). Drives
 # golden vectors from the single-source model tools/srt/srt_model.py and asserts
 # the RTL is bit-exact for BOTH the correct PLA (== correctly-rounded floatx80 ==
 # QEMU) and the buggy PLA (the documented Pentium FDIV flaw, reproduced from

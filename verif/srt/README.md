@@ -2,14 +2,16 @@
 
 `make verify-srt` (or `bash verif/srt/run-srt-gate.sh`) is a standalone Verilator
 unit gate for **`fpu_x87_pkg::fx_srt_div`** — the real base-4 SRT divider the
-Pentium implements in silicon, added as an **optional compile-time feature**. It
-is independent of the core/SoC build (it touches only `rtl/fpu/fpu_x87_pkg.sv`),
-so the default `make verify` / `verify-soc` tracks are unaffected.
+Pentium implements in silicon, and Ventium's **default** division datapath
+(since commit `3791e46`). The gate drives `fx_srt_div` directly, so it is
+independent of the core/SoC build (it touches only `rtl/fpu/fpu_x87_pkg.sv`)
+and validates **both** PLAs regardless of which build defines are set.
 
 ## What it is
 
-Plain behavioral division (`fx_div_exact`, the default) just computes a wide
-integer quotient. `fx_srt_div` instead runs the **actual algorithm**, reverse-
+Plain behavioral division (`fx_div_exact`, the `+define+VEN_DIV_EXACT` opt-out)
+just computes a wide integer quotient. `fx_srt_div` — the **default** divider —
+runs the **actual algorithm**, reverse-
 engineered from the Pentium die photo (Ken Shirriff, *"Intel's $475 million
 error: the silicon behind the Pentium division bug"*, righto.com, Dec 2024) and
 formalised by Tim Coe & Ping Tak Peter Tang and Alan Edelman (*"The Mathematics
@@ -42,17 +44,20 @@ the algorithm** — no operand is special-cased:
 
 The bug is hit at iteration 8 (Edelman §7, *"at least nine steps to failure"*).
 
-## How it is enabled (compile-time, default OFF)
+## How it is selected (compile-time)
 
 ```
-+define+VEN_SRT_DIV        # route every FDIV/FDIVR through the SRT engine
-+define+VEN_SRT_FDIV_BUG   # (implies VEN_SRT_DIV) use the buggy PLA -> the flaw
+(no define)               # DEFAULT: genuine SRT engine, CORRECT PLA (bit-exact)
++define+VEN_SRT_FDIV_BUG  # SRT engine, buggy PLA -> the FDIV flaw, all operands
++define+VEN_DIV_EXACT     # opt OUT to the fast behavioral fx_div_exact divider
 ```
 
-With no defines the divider is `fx_div_exact` and the whole project stays
-bit-exact vs QEMU (`make verify` 69/69, `make verify-soc` 5/5). `VEN_SRT_DIV`
-alone gives the genuine SRT engine with the **correct** PLA (still bit-exact);
-adding `VEN_SRT_FDIV_BUG` reproduces the FDIV flaw for all operands.
+With no defines the divider is the genuine `fx_srt_div` with the **correct**
+PLA — the unconditional hardware default since commit `3791e46` — and the whole
+project stays bit-exact vs QEMU (`make verify`, `make verify-soc`). Adding
+`VEN_SRT_FDIV_BUG` reproduces the FDIV flaw for all operands; `VEN_DIV_EXACT`
+opts back to the fast behavioral `fx_div_exact` (a sim-only escape hatch, also
+bit-exact vs QEMU) and takes precedence over `VEN_SRT_FDIV_BUG`.
 
 ## How the gate validates it
 
