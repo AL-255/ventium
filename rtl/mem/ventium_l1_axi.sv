@@ -49,7 +49,18 @@ module ventium_l1_axi #(
     // until eviction) — which is why AXI-pattern gates keep the default 0.
     parameter bit          EN_L2        = 1'b0,
     parameter int          L2_CAP_BYTES = 2*1024*1024,     // 2 MiB (= all 64 URAM288)
-    parameter int          L2_WAYS      = 8
+    parameter int          L2_WAYS      = 8,
+    // ---- Phase C: ven_northbridge cacheability config (the 430FX TSC registers).
+    // These are the BOOT defaults until the PCI-config shim drives them (Phase D):
+    // FLCE=1 + SCS=01 (L1 + a populated L2), no memory hole, all DRAM below TOM
+    // cacheable, BIOS/ROM windows (PAM) default-uncacheable (→ bypass to DDR).
+    // Effective only when EN_L2=1 (the northbridge is present); EN_L2=0 keeps the L1
+    // unconditionally caching (byte-identical).
+    parameter logic [7:0]  NB_CC      = 8'h41,             // FLCE=1, SCS=01, SCFMI=0
+    parameter logic [7:0]  NB_DRAMC   = 8'h01,             // HEN=00 (no hole)
+    parameter logic [7:0]  NB_TOM_MB4 = 8'd255,            // ~1020 MiB cacheable DRAM
+    parameter logic [55:0] NB_PAM     = 56'h0,             // ROM windows uncacheable by default
+    parameter logic [7:0]  NB_SMRAM   = 8'h00
 ) (
     (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 core_clk CLK" *)
     (* X_INTERFACE_PARAMETER = "ASSOCIATED_RESET core_rst_n" *)
@@ -171,7 +182,8 @@ module ventium_l1_axi #(
     output logic        dbg_l2_ready,
     output logic [31:0] dbg_l2_hits,
     output logic [31:0] dbg_l2_misses,
-    output logic [31:0] dbg_l2_wbacks
+    output logic [31:0] dbg_l2_wbacks,
+    output logic [31:0] dbg_l2_bypass
 `endif
 );
 
@@ -194,8 +206,12 @@ module ventium_l1_axi #(
   logic [31:0] b_rdata;
   logic        b_ack;
   logic        l2_ready;          // 1 once the L2 finishes its post-reset valid-clear walk
-  // observability wires (driven by ven_l2 under VEN_DBG_CORE; 0 otherwise).
-  logic [31:0] l2_hits_w, l2_misses_w, l2_wbacks_w;
+  // observability wires (driven by ven_l2/ven_northbridge under VEN_DBG_CORE; 0 otherwise).
+  logic [31:0] l2_hits_w, l2_misses_w, l2_wbacks_w, l2_bypass_w;
+  // KEN# for the L1 D-cache: with the northbridge present (EN_L2), a cachemap on the
+  // CORE address decides cacheability so MMIO is never L1-cached; else cache everything.
+  // Driven inside the EN_L2 generate (below) so EN_L2=0 builds don't pull in ven_cachemap.
+  logic l1d_cacheable;
 
   // ven_axi_master's backing slave + its clock/reset — a COMPILE-TIME (ifdef) alias
   // of either the core domain (default) or the axi domain (+VEN_AXI_CDC). Static
@@ -260,10 +276,21 @@ module ventium_l1_axi #(
   // (verif/l1/run-l2-axi-gate.sh ran it end-to-end through the real ven_axi_master).
   generate
     if (EN_L2) begin : g_l2
-      ven_l2 #(.L2_CAP_BYTES(L2_CAP_BYTES), .L2_LINE(L1_LINE), .L2_WAYS(L2_WAYS)) u_l2 (
+      // KEN# for the L1 D-cache (data path; is_code=0) — MMIO is never L1-cached.
+      logic core_l1c, core_to_dram_u, core_l2c_u; logic [3:0] core_cm_region;
+      ven_cachemap u_cmap_l1 (
+          .addr(core_addr), .is_write(core_we), .is_code(1'b0), .smm_active(1'b0),
+          .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
+          .to_dram(core_to_dram_u), .l1_cacheable(core_l1c), .l2_cacheable(core_l2c_u),
+          .region(core_cm_region));
+      assign l1d_cacheable = core_l1c;
+      // Phase C: the northbridge (cachemap + L2 + uncacheable bypass) sits in the seam.
+      ven_northbridge #(.L2_CAP_BYTES(L2_CAP_BYTES), .L2_LINE(L1_LINE), .L2_WAYS(L2_WAYS)) u_nb (
           .clk   (core_clk),
           .rst_n (l1d_rst_n),       // L2's own reset (NOT gated on its own ready)
           .ready (l2_ready),
+          .cfg_pam(NB_PAM), .cfg_dramc(NB_DRAMC), .cfg_cc(NB_CC),
+          .cfg_tom_mb4(NB_TOM_MB4), .cfg_smram(NB_SMRAM), .smm_active(1'b0),
           // upstream slave ⇐ the L1's backing master
           .u_req (m_req),  .u_we (m_we),  .u_addr (m_addr), .u_wdata (m_wdata),
           .u_wstrb(m_wstrb), .u_rdata(m_rdata), .u_ack (m_ack),
@@ -271,7 +298,8 @@ module ventium_l1_axi #(
           .d_req (b_req),  .d_we (b_we),  .d_addr (b_addr), .d_wdata (b_wdata),
           .d_wstrb(b_wstrb), .d_rdata(b_rdata), .d_ack (b_ack)
 `ifdef VEN_DBG_CORE
-          , .dbg_hits(l2_hits_w), .dbg_misses(l2_misses_w), .dbg_wbacks(l2_wbacks_w)
+          , .dbg_hits(l2_hits_w), .dbg_misses(l2_misses_w), .dbg_wbacks(l2_wbacks_w),
+            .dbg_bypass(l2_bypass_w)
 `endif
       );
     end else begin : g_nol2
@@ -280,16 +308,26 @@ module ventium_l1_axi #(
       assign b_wdata = m_wdata; assign b_wstrb = m_wstrb;
       assign m_rdata = b_rdata; assign m_ack = b_ack;
       assign l2_ready = 1'b1;
+      assign l1d_cacheable = 1'b1;       // cache everything (byte-identical to pre-L2)
     end
   endgenerate
-`ifndef VEN_DBG_CORE
-  assign l2_hits_w = 32'd0; assign l2_misses_w = 32'd0; assign l2_wbacks_w = 32'd0;
+  // Pin the observability wires to 0 wherever the generate does NOT drive them (the
+  // g_l2 branch drives them only when EN_L2=1 AND VEN_DBG_CORE) — exactly one driver.
+`ifdef VEN_DBG_CORE
+  if (!EN_L2) begin : g_dbg0
+    assign l2_hits_w = 32'd0; assign l2_misses_w = 32'd0;
+    assign l2_wbacks_w = 32'd0; assign l2_bypass_w = 32'd0;
+  end
+`else
+  assign l2_hits_w = 32'd0; assign l2_misses_w = 32'd0;
+  assign l2_wbacks_w = 32'd0; assign l2_bypass_w = 32'd0;
 `endif
 `ifdef VEN_DBG_L2
   assign dbg_l2_ready  = l2_ready;
   assign dbg_l2_hits   = l2_hits_w;
   assign dbg_l2_misses = l2_misses_w;
   assign dbg_l2_wbacks = l2_wbacks_w;
+  assign dbg_l2_bypass = l2_bypass_w;
 `endif
 
   ven_l1d #(.L1_SETS(L1_SETS), .L1_LINE(L1_LINE)) u_l1d (
@@ -300,9 +338,9 @@ module ventium_l1_axi #(
       .rst_n    (l1d_rst_n & l2_ready),
       .flush_all(flush_all),
       .golden   (golden_l1),
-      // Phase A: cacheability/snoop ports tied inert (cacheable=1, no snoop) until the
-      // northbridge ven_cachemap + DMA coherence are wired (Phase C/D). Byte-identical.
-      .cacheable      (1'b1),
+      // Phase C: KEN# from the cachemap (EN_L2) so MMIO is never L1-cached; EN_L2=0 →
+      // 1'b1 (byte-identical). Snoop still inert until DMA coherence (Phase D).
+      .cacheable      (l1d_cacheable),
       .snoop_inv_valid(1'b0),
       .snoop_inv_addr (32'd0),
       .c_req   (core_req),

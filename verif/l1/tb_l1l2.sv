@@ -45,7 +45,7 @@ module tb_l1l2;
 
   logic bus_err; logic flush = 1'b0; logic shutdown = 1'b0; logic m_idle;
   logic        dbg_rd_valid; logic [31:0] dbg_rd_addr, dbg_rd_data;       // VEN_DBG_CORE
-  logic        dbg_l2_ready; logic [31:0] dbg_l2_hits, dbg_l2_misses, dbg_l2_wbacks; // VEN_DBG_L2
+  logic        dbg_l2_ready; logic [31:0] dbg_l2_hits, dbg_l2_misses, dbg_l2_wbacks, dbg_l2_bypass; // VEN_DBG_L2
 
   // ---- AXI transaction counters (the structural proof of L2 caching) ---------
   int ar_count = 0, aw_count = 0;
@@ -60,7 +60,7 @@ module tb_l1l2;
       .flush_all(flush), .golden_l1(1'b0), .shutdown(shutdown), .m_idle(m_idle),
       .dbg_rd_valid(dbg_rd_valid), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
       .dbg_l2_ready(dbg_l2_ready), .dbg_l2_hits(dbg_l2_hits),
-      .dbg_l2_misses(dbg_l2_misses), .dbg_l2_wbacks(dbg_l2_wbacks),
+      .dbg_l2_misses(dbg_l2_misses), .dbg_l2_wbacks(dbg_l2_wbacks), .dbg_l2_bypass(dbg_l2_bypass),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),

@@ -15,7 +15,8 @@ verilator --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     +define+VEN_DBG_CORE +define+VEN_DBG_L2 \
     --top-module tb_l1l2 -Mdir "$OBJ" -o tb_l1l2 \
     "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \
-    "$ROOT/rtl/northbridge/ven_l2.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" \
+    "$ROOT/rtl/northbridge/ven_cachemap.sv" "$ROOT/rtl/northbridge/ven_l2.sv" \
+    "$ROOT/rtl/northbridge/ven_northbridge.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" \
     "$ROOT/verif/l1/axi_slave_bfm.sv" "$ROOT/verif/l1/tb_l1l2.sv" > "$OBJ/build.log" 2>&1 \
     || { echo "L1L2-GATE-FAIL (build)"; tail -40 "$OBJ/build.log"; exit 1; }
 
