@@ -238,7 +238,7 @@ package ventium_x87_pkg;
   // `fdiv_err` (M6 Erratum 23): when 1, the div/divr group routes through the
   // SRT-flaw-aware divide (fx_div_errata); when 0 (default) it uses the exact
   // fx_div, so the clean core is bit-identical. add/sub/mul are never affected.
-  function automatic logic [80:0] f_arith(input logic [2:0] sub,
+  function automatic logic [82:0] f_arith(input logic [2:0] sub,   // {oe, ue, pe, result}
                                           input logic [79:0] a, input logic [79:0] b,
                                           input logic [1:0] rc,
                                           input logic fdiv_err);
@@ -279,29 +279,34 @@ package ventium_x87_pkg;
   endfunction
 
   // Full arithmetic evaluation with the exception cases QEMU handles explicitly
-  // for masked, default-control operands. Returns {ie, ze, inexact, result}:
+  // for masked, default-control operands. Returns {ie, ze, oe, ue, pe, result}:
   //   0/0          -> real-indefinite QNaN, IE                 (helper_fdiv)
   //   x/0 (x!=0)   -> signed Inf, ZE                           (helper_fdiv)
-  //   otherwise    -> normal-operand datapath via f_arith, PE = inexact.
+  //   otherwise    -> finite-operand datapath via f_arith; OE/UE/PE propagate
+  //                   from fx_round_pack_f (overflow->Inf, underflow->denormal).
   // (a,b) are in f_arith canonical order: div = a/b, divr = b/a, etc.
-  function automatic logic [82:0] f_eval(input logic [2:0] sub,
+  // NB: DE (denormal-operand, fstat bit1) is intentionally NOT raised here — QEMU's
+  // x87 model only sets it for FXTRACT / flush-to-zero, never for the masked
+  // FADD/FSUB/FMUL/FDIV/FSQRT datapath (target/i386 fpu_helper.c), so to stay
+  // bit-exact the arithmetic path leaves DE clear.
+  function automatic logic [84:0] f_eval(input logic [2:0] sub,
                                          input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc,
                                          input logic fdiv_err);
-    logic [80:0] r;
+    logic [82:0] r;   // {oe, ue, pe, result} from f_arith
     logic [81:0] sp;
     begin
       sp = f_special(sub, a, b);
       if (sp[81])                                                // Inf/NaN special operand
-        f_eval = {sp[80], 1'b0, 1'b0, sp[79:0]};                // {ie, ze=0, inexact=0, result}
+        f_eval = {sp[80], 4'b0, sp[79:0]};                      // {ie, ze=oe=ue=pe=0, result}
       else if (f_zero_over_zero(sub, a, b))
-        f_eval = {1'b1, 1'b0, 1'b0, 80'hFFFFC000000000000000};   // IE, indefinite
+        f_eval = {1'b1, 4'b0, 80'hFFFFC000000000000000};         // IE, indefinite
       else if (f_div_by_zero(sub, a, b)) begin
         r = f_arith(sub, a, b, rc, fdiv_err);                   // fx_div -> signed Inf
-        f_eval = {1'b0, 1'b1, 1'b0, r[79:0]};                   // ZE
+        f_eval = {1'b0, 1'b1, 3'b0, r[79:0]};                   // ZE
       end else begin
         r = f_arith(sub, a, b, rc, fdiv_err);
-        f_eval = {1'b0, 1'b0, r[80], r[79:0]};                  // PE = inexact
+        f_eval = {2'b0, r[82], r[81], r[80], r[79:0]};          // {oe, ue, pe} from datapath
       end
     end
   endfunction
@@ -319,19 +324,19 @@ package ventium_x87_pkg;
                                          input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc,
                                          input logic fdiv_err);
-    logic [80:0] r;
+    logic [82:0] r;   // {oe, ue, pe, result} from f_arith
     logic [81:0] sp;
     fx_pipe_t    p;
     begin
       p = '0;
       sp = f_special(sub, a, b);
       if (sp[81]) begin                                          // Inf/NaN special operand
-        p.early = 1'b1; p.result = {sp[80], 1'b0, 1'b0, sp[79:0]};
+        p.early = 1'b1; p.result = {sp[80], 4'b0, sp[79:0]};
       end else if (f_zero_over_zero(sub, a, b)) begin
-        p.early = 1'b1; p.result = {1'b1, 1'b0, 1'b0, 80'hFFFFC000000000000000};
+        p.early = 1'b1; p.result = {1'b1, 4'b0, 80'hFFFFC000000000000000};
       end else if (f_div_by_zero(sub, a, b)) begin
         r = f_arith(sub, a, b, rc, fdiv_err);                    // signed Inf
-        p.early = 1'b1; p.result = {1'b0, 1'b1, 1'b0, r[79:0]};
+        p.early = 1'b1; p.result = {1'b0, 1'b1, 3'b0, r[79:0]};
       end else begin
         unique case (sub)
           3'd0: p = fx_add_s1(a, b, rc);                          // add
@@ -340,32 +345,37 @@ package ventium_x87_pkg;
           3'd5: p = fx_add_s1(b, {~a[79], a[78:0]}, rc);          // subr: b - a
           // div/divr (6/7) never reach here in the pipelined fast arm (normal
           // divides are SRT-engine-routed; non-normal hit the early cases above).
-          default: begin p.early = 1'b1; p.result = 83'd0; end
+          default: begin p.early = 1'b1; p.result = 85'd0; end
         endcase
       end
       f_eval_s1 = p;
     end
   endfunction
 
-  function automatic logic [82:0] f_eval_s2(input fx_pipe_t p, input logic [1:0] rc);
-    logic [80:0] rp;
+  function automatic logic [84:0] f_eval_s2(input fx_pipe_t p, input logic [1:0] rc);
+    logic [82:0] rp;   // {oe, ue, pe, result} from fx_round_pack_f
     begin
       if (p.early) f_eval_s2 = p.result;
       else begin
-        rp = fx_round_pack(p.sign, p.unbiased, p.sig, p.pre_inexact, rc);
-        f_eval_s2 = {1'b0, 1'b0, rp[80], rp[79:0]};               // PE = inexact
+        rp = fx_round_pack_f(p.sign, p.unbiased, p.sig, p.pre_inexact, rc);
+        f_eval_s2 = {2'b0, rp[82], rp[81], rp[80], rp[79:0]};     // {oe, ue, pe} from datapath
       end
     end
   endfunction
 
   // Latch arithmetic status flags (sticky) into fstat from f_eval's flag bits.
+  // f_eval format: {ie[84], ze[83], oe[82], ue[81], pe[80], result[79:0]}.
+  // fstat exception bits: IE=0, DE=1, ZE=2, OE=3, UE=4, PE=5 (DE is never set by
+  // the arithmetic path — see f_eval).
   function automatic logic [15:0] f_arith_fstat(input logic [15:0] cur,
-                                                input logic [82:0] arf);
+                                                input logic [84:0] arf);
     logic [15:0] r;
     begin
       r = cur;
-      if (arf[82]) r[0] = 1'b1;   // IE
-      if (arf[81]) r[2] = 1'b1;   // ZE
+      if (arf[84]) r[0] = 1'b1;   // IE
+      if (arf[83]) r[2] = 1'b1;   // ZE
+      if (arf[82]) r[3] = 1'b1;   // OE
+      if (arf[81]) r[4] = 1'b1;   // UE
       if (arf[80]) r[5] = 1'b1;   // PE
       return r;
     end

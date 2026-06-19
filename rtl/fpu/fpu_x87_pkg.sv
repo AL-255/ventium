@@ -4,25 +4,32 @@
 // fpu/fpu_x87_pkg.sv — x87 floatx80 datapath helpers (M3).
 //
 // A self-contained, bit-exact-vs-QEMU floatx80 engine for the x87 FPU, covering
-// the operands the M3 corpus exercises: NORMAL finite values and signed zero,
-// round-to-nearest-even at 64-bit precision (the default control word 0x037f).
+// NORMAL finite values, signed zero, infinities, NaNs, AND (as of the denormal
+// work) DENORMAL operands + gradual UNDERFLOW / OVERFLOW results, at the default
+// control word 0x037f (RNE, PC=11) with all four rounding modes honored.
 //
 // Reference: QEMU softfloat floatx80 (fpu/softfloat.c) + the i386 fpu_helper.c
 // semantics (compare ccval table, FXAM classify, FCHS/FABS, conversions). The
 // algorithms here were validated bit-exact against QEMU goldens for every
 // add/sub/mul/div/sqrt and float32/64<->floatx80, int<->floatx80 case in the
-// tx_* corpus before being transcribed to RTL (see verif/qemu-trace goldens).
+// tx_* corpus (incl. tx_fp_special, tx_fp_denorm) before being transcribed to RTL.
 //
 // floatx80 canonical layout (matches gen_trace.py / the trace hex strings):
 //   bit79     = sign
 //   bits78:64 = biased exponent (bias 16383)
-//   bits63:0  = mantissa (explicit integer bit at 63 for normals)
+//   bits63:0  = mantissa (explicit integer bit at 63 for normals; 0 for denormals)
 // A packed 80-bit logic vector [79:0] carries this directly.
 //
-// Out-of-corpus inputs (inf / NaN / denormal results, non-default RC/PC) are NOT
-// guaranteed bit-exact here — the core HALTs on those decode paths (Tier-3
-// deferral, m3-fpu-spec.md) rather than emitting a wrong answer. This package
-// implements the normal-operand datapath only.
+// SPECIAL-VALUE SUPPORT:
+//   * Inf / NaN arithmetic + propagation: ventium_x87_pkg::f_special / f_eval.
+//   * DENORMAL operands: fx_uexp_eff gives the IEEE-emin (1-bias) bit63 weight, so
+//     fx_add/fx_mul/fx_div/fx_sqrt handle denormals via the normal datapath; the
+//     SRT engine (which assumes a normalized 1.f) is bypassed for them (fx_div ->
+//     fx_div_exact). DE is intentionally not raised — QEMU's x87 model doesn't.
+//   * UNDERFLOW / OVERFLOW results: fx_round_pack_f does gradual underflow (->
+//     denormal/zero, UE+PE) and overflow (-> Inf / max-finite, OE+PE), returning
+//     {oe, ue, pe, floatx80}. fx_to_f32/f64_ex do the same on FST narrowing.
+// Non-default PC (precision control != 11) still HALTs loudly (Tier-3 deferral).
 
 package fpu_x87_pkg;
 
@@ -45,7 +52,11 @@ package fpu_x87_pkg;
   // result. A direct bit-select on a function call result is legal in 2-state sim but
   // ILLEGAL in Vivado/IEEE-1800 (Synth 8-12513) — wrap as a nested call fx80(fx_mul(..))
   // instead of fx_mul(..) followed by an [79:0] select. Pure wiring.
-  function automatic logic [79:0] fx80(input logic [80:0] v); return v[79:0]; endfunction
+  // Extract the floatx80 [79:0] from any fx_* result word. Accepts the widest
+  // ({oe,ue,pe,floatx80}=[82:0]) form so it also works on the legacy [80:0]
+  // {inexact,floatx80} results (zero-extended) — bits [79:0] are the value in all
+  // formats. (See the IEEE-1800 part-select-on-call-result caveat above.)
+  function automatic logic [79:0] fx80(input logic [82:0] v); return v[79:0]; endfunction
 
   function automatic logic fx_is_zero(input logic [79:0] v);
     return (fx_exp(v)==15'd0) && (fx_man(v)==64'd0);
@@ -60,6 +71,26 @@ package fpu_x87_pkg;
   // negative for FSQRT #IA / classify: sign set and not +0
   function automatic logic fx_is_neg(input logic [79:0] v);
     return v[79] && !((fx_exp(v)==15'd0)&&(fx_man(v)==64'd0));
+  endfunction
+
+  // Denormal floatx80: exp==0 with a nonzero mantissa (integer bit 0 = a true
+  // denormal; integer bit 1 with exp 0 is the 8087 "pseudo-denormal" — both have
+  // value = man * 2^(1-16383-63) and are handled uniformly by the eff-exponent
+  // below). exp==0 && man==0 is zero (not denormal).
+  function automatic logic fx_is_denormal(input logic [79:0] v);
+    return (fx_exp(v)==15'd0) && (fx_man(v)!=64'd0);
+  endfunction
+
+  // Denormal-AWARE unbiased exponent: the power-of-two weight of mantissa bit63.
+  //   normal (exp!=0): exp-16383.
+  //   denormal/zero (exp==0): the IEEE emin form 1-16383 = -16382 (the leading
+  //   bit is NOT implicit for a denormal, so bit63's weight is the same as the
+  //   smallest normal's; the arithmetic routines find the real MSB after this).
+  // For NORMAL operands this is identical to fx_uexp, so the normal datapath is
+  // bit-unchanged; only denormal operands see the corrected (off-by-one) weight.
+  function automatic logic signed [31:0] fx_uexp_eff(input logic [79:0] v);
+    return (fx_exp(v)==15'd0) ? (32'sd1 - 32'sd16383)
+                              : ($signed({17'd0, v[78:64]}) - 32'sd16383);
   endfunction
 
   // ---------------------------------------------------------------------------
@@ -78,107 +109,172 @@ package fpu_x87_pkg;
   // HALTs before reaching the datapath when PC != 11 (64-bit), so callers only
   // ever pass full extended precision. RC is fully honored.
   // ---------------------------------------------------------------------------
-  function automatic logic [80:0] fx_round_pack(  // {inexact, floatx80[79:0]}
+  // fx_round_pack_f: the full-fidelity round-and-pack returning {oe, ue, pe,
+  // floatx80}. Faithfully mirrors QEMU softfloat roundAndPackFloatx80 at
+  // precision80 (the only PC the core supports) INCLUDING the out-of-range
+  // exponent handling that the original normal-only version omitted:
+  //   * OVERFLOW (biased exp > 0x7FFE): result = signed Inf (round-to-nearest /
+  //     round-toward-result-sign) or the max finite magnitude {0x7FFE, all-ones}
+  //     (round-to-zero / round-toward-opposite-sign); OE and PE both set.
+  //   * UNDERFLOW (biased exp <= 0): gradual underflow — the significand is
+  //     right-shift-jammed onto the denormal grid (exp field 0) and re-rounded;
+  //     UE is set iff the result is tiny (after-rounding tininess, QEMU's i386
+  //     default) AND inexact; PE iff inexact. A tiny value that rounds up to the
+  //     smallest normal sets neither UE-only-without... — exactly per softfloat.
+  // For IN-RANGE results (biased exp 1..0x7FFE) this is bit-identical to the
+  // prior normal-only packer, so the existing normal-operand corpus is unchanged.
+  function automatic logic [82:0] fx_round_pack_f(  // {oe, ue, pe, floatx80[79:0]}
       input logic         sign,
       input logic signed [31:0] unbiased,
       input logic [127:0] sig,
       input logic         pre_inexact,  // sticky from earlier truncation (div/sqrt)
       input logic [1:0]   rc);          // rounding control (fctrl[11:10])
-    int          msb;
-    int          extra;
-    logic [127:0] keep_v;
-    logic [127:0] rem_v;
-    logic [127:0] half_v;
-    logic [63:0] mant;
-    logic        inexact;
-    logic        round_up;
-    logic signed [31:0] ub;
-    logic [127:0] shifted;
-    logic signed [31:0] ebiased;
+    localparam logic [63:0] ALL1 = 64'hFFFFFFFFFFFFFFFF;
+    localparam logic [63:0] INFM = 64'h8000000000000000;
+    int           msb, sh;
+    logic [127:0] frac, lost, shifted;
+    logic [63:0]  zSig0, zSig1;
+    logic signed [31:0] zExp;
+    logic         incr, oe, ue, pe, isTiny, rne, handled;
+    logic [82:0]  res;
     begin
-      inexact = pre_inexact;
-      ub = unbiased;
+      oe=1'b0; ue=1'b0; pe=1'b0; handled=1'b0; res=83'd0;
+      rne = (rc==2'd0);
       if (sig==128'd0) begin
-        fx_round_pack = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+        fx_round_pack_f = {3'b000, fx_make(sign, 15'd0, 64'd0)};
       end else begin
-        // find MSB index
+        // align the MSB (integer bit) to bit127: frac[127:64]=zSig0, [63:0]=zSig1.
         msb = 0;
-        for (int i=127; i>=0; i--) begin
-          if (sig[i]) begin msb = i; break; end
-        end
-        extra = msb - 63;
-        if (extra > 0) begin
-          keep_v = sig >> extra;
-          rem_v  = sig & ((128'd1 << extra) - 128'd1);
-          half_v = 128'd1 << (extra-1);
-          if (rem_v != 128'd0) inexact = 1'b1;
-          // Decide whether to increment the kept mantissa per RC. The directed
-          // modes look at the SIGN of the value and whether anything was lost.
-          unique case (rc)
-            2'd0:    // round to nearest even
-              round_up = (rem_v > half_v) || ((rem_v == half_v) && keep_v[0]);
-            2'd1:    // toward -inf: bump magnitude up only for negative results
-              round_up = (rem_v != 128'd0) && sign;
-            2'd2:    // toward +inf: bump magnitude up only for positive results
-              round_up = (rem_v != 128'd0) && !sign;
-            default: // toward zero (truncate): never bump
-              round_up = 1'b0;
-          endcase
-          if (round_up) begin
-            keep_v = keep_v + 128'd1;
-            if (keep_v[64]) begin           // mantissa overflowed 64 bits
-              keep_v = keep_v >> 1;
-              ub = ub + 1;
-            end
+        for (int i=127; i>=0; i--) if (sig[i]) begin msb = i; break; end
+        frac  = sig << (127 - msb);
+        zSig0 = frac[127:64];
+        zSig1 = frac[63:0];
+        if (pre_inexact) zSig1 = zSig1 | 64'd1;        // fold prior-truncation sticky
+        zExp  = unbiased + 32'sd16383;                 // biased exp of the integer bit
+        // round increment (softfloat precision80 rule).
+        unique case (rc)
+          2'd0:    incr = zSig1[63];                   // nearest-even (ties at pack)
+          2'd1:    incr = sign  && (zSig1 != 64'd0);   // toward -inf
+          2'd2:    incr = !sign && (zSig1 != 64'd0);   // toward +inf
+          default: incr = 1'b0;                        // toward zero
+        endcase
+        // ----- OVERFLOW -----
+        if ( (zExp > 32'sd32766) ||
+             (zExp == 32'sd32766 && zSig0==ALL1 && incr) ) begin
+          oe=1'b1; pe=1'b1;
+          if (rc==2'd3 || (sign && rc==2'd1) || (!sign && rc==2'd2))
+            res = {oe,ue,pe, fx_make(sign, 15'h7FFE, ALL1)};   // max finite magnitude
+          else
+            res = {oe,ue,pe, fx_make(sign, 15'h7FFF, INFM)};   // signed Inf
+          handled=1'b1;
+        // ----- UNDERFLOW (gradual) -----
+        end else if (zExp <= 32'sd0) begin
+          isTiny = (zExp < 32'sd0) || !incr || (zSig0 != ALL1);
+          sh   = 1 - zExp;                              // >= 1
+          frac = {zSig0, zSig1};
+          if (sh >= 128) begin lost = frac; shifted = 128'd0; end
+          else begin
+            lost    = frac & ((128'd1 << sh) - 128'd1);
+            shifted = frac >> sh;
           end
-          mant = keep_v[63:0];
-        end else begin
-          shifted = sig << (-extra);
-          mant = shifted[63:0];
+          if (lost != 128'd0) shifted[0] = 1'b1;        // jam sticky
+          zSig0 = shifted[127:64];
+          zSig1 = shifted[63:0];
+          zExp  = 32'sd0;
+          if (zSig1 != 64'd0) begin pe=1'b1; if (isTiny) ue=1'b1; end
+          unique case (rc)                              // recompute after the shift
+            2'd0:    incr = zSig1[63];
+            2'd1:    incr = sign  && (zSig1 != 64'd0);
+            2'd2:    incr = !sign && (zSig1 != 64'd0);
+            default: incr = 1'b0;
+          endcase
+          if (incr) begin
+            zSig0 = zSig0 + 64'd1;
+            if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;  // ties to even
+            if (zSig0[63]) zExp = 32'sd1;               // rounded up to smallest normal
+          end
+          res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+          handled=1'b1;
         end
-        ebiased = ub + 32'sd16383;
-        fx_round_pack = {inexact, fx_make(sign, ebiased[14:0], mant)};
+        // ----- NORMAL (in-range) -----
+        if (!handled) begin
+          if (zSig1 != 64'd0) pe=1'b1;
+          if (incr) begin
+            zSig0 = zSig0 + 64'd1;
+            if (zSig0 == 64'd0) begin zExp = zExp + 32'sd1; zSig0 = INFM; end
+            else if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;
+          end else if (zSig0 == 64'd0) zExp = 32'sd0;
+          res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+        end
+        fx_round_pack_f = res;
       end
     end
   endfunction
 
+  // Backward-compatible {inexact, floatx80} wrapper (inexact == PE). Callers that
+  // don't need OE/UE (the iterative SRT/sqrt engines, FILD's fx_from_int) keep
+  // using this; the value is fully overflow/underflow-correct via fx_round_pack_f.
+  function automatic logic [80:0] fx_round_pack(
+      input logic         sign,
+      input logic signed [31:0] unbiased,
+      input logic [127:0] sig,
+      input logic         pre_inexact,
+      input logic [1:0]   rc);
+    logic [82:0] f;
+    begin
+      f = fx_round_pack_f(sign, unbiased, sig, pre_inexact, rc);
+      fx_round_pack = {f[80], f[79:0]};   // {pe, floatx80}
+    end
+  endfunction
+
   // ---------------------------------------------------------------------------
-  // Add / subtract on normal+zero operands. Returns {inexact, result}.
-  // For subtract the caller flips b's sign. Handles signed-zero result sign per
-  // RNE (x - x = +0; -0 + -0 = -0).
+  // Add / subtract on finite operands (normal, denormal, or signed zero).
+  // Returns {oe, ue, pe, result}. For subtract the caller flips b's sign. Handles
+  // signed-zero result sign per RNE (x - x = +0; -0 + -0 = -0). Denormal operands
+  // are handled via the denormal-aware effective exponent (fx_uexp_eff); the wide
+  // alignment + fx_round_pack_f then produce a correctly under/overflowing result.
   // ---------------------------------------------------------------------------
-  function automatic logic [80:0] fx_add(input logic [79:0] a, input logic [79:0] b,
+  function automatic logic [82:0] fx_add(input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc);
     logic        sa, sb, sign;
     logic [14:0] ea, eb;
     logic [63:0] ma, mb;
     logic signed [31:0] ua, ub, topexp, msbpos;
     logic [127:0] A, B, s;
+    logic        sticky;        // bits lost shifting the smaller operand down
     int          shift;
     int          msb;
     begin
       sa=fx_sign(a); sb=fx_sign(b); ea=fx_exp(a); eb=fx_exp(b); ma=fx_man(a); mb=fx_man(b);
+      sticky = 1'b0;
       if (fx_is_zero(a) && fx_is_zero(b)) begin
         // (+0)+(+0)=+0, (-0)+(-0)=-0; mixed-sign 0+0 = +0 except round-down=-0.
-        if (sa == sb) fx_add = {1'b0, fx_make(sa, 15'd0, 64'd0)};
-        else          fx_add = {1'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
+        if (sa == sb) fx_add = {3'b000, fx_make(sa, 15'd0, 64'd0)};
+        else          fx_add = {3'b000, fx_make(rc==2'd1, 15'd0, 64'd0)};
       end else if (fx_is_zero(a)) begin
-        fx_add = {1'b0, b};
+        fx_add = {3'b000, b};
       end else if (fx_is_zero(b)) begin
-        fx_add = {1'b0, a};
+        fx_add = {3'b000, a};
       end else begin
-        ua = fx_uexp(a);
-        ub = fx_uexp(b);
-        // place each mantissa with 63 guard bits below bit63 -> MSB at bit126
+        ua = fx_uexp_eff(a);
+        ub = fx_uexp_eff(b);
+        // place each mantissa with 63 guard bits below bit63 -> MSB at bit126.
+        // When the alignment shift pushes set bits past the 128-bit window, jam a
+        // sticky into the shifted operand's LSB so round_pack flags inexact (PE) —
+        // e.g. 1.0 + tiny-denormal is inexact even though the sum truncates to 1.0.
         A = {1'b0, ma, 63'd0};
         B = {1'b0, mb, 63'd0};
         if (ua >= ub) begin
           shift = ua - ub;
-          if (shift > 127) B = 128'd0; else B = B >> shift;
+          if (shift > 127) begin sticky = (B != 128'd0); B = 128'd0; end
+          else begin sticky = (B & ((128'd1 << shift) - 128'd1)) != 128'd0; B = B >> shift; end
+          if (sticky) B[0] = 1'b1;
           topexp = ua;
         end else begin
           shift = ub - ua;
-          if (shift > 127) A = 128'd0; else A = A >> shift;
+          if (shift > 127) begin sticky = (A != 128'd0); A = 128'd0; end
+          else begin sticky = (A & ((128'd1 << shift) - 128'd1)) != 128'd0; A = A >> shift; end
+          if (sticky) A[0] = 1'b1;
           topexp = ub;
         end
         if (sa == sb) begin
@@ -190,22 +286,22 @@ package fpu_x87_pkg;
         end
         if (s == 128'd0) begin
           // exact cancellation x + (-x): +0, except -0 under round-toward-(-inf).
-          fx_add = {1'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
+          fx_add = {3'b000, fx_make(rc==2'd1, 15'd0, 64'd0)};
         end else begin
           msb = 0;
           for (int i=127; i>=0; i--) if (s[i]) begin msb=i; break; end
           msbpos = msb;
           // A/B had MSB at bit126 == weight 2^topexp; so weight of bit i = topexp+(i-126)
-          fx_add = fx_round_pack(sign, topexp + (msbpos - 126), s, 1'b0, rc);
+          fx_add = fx_round_pack_f(sign, topexp + (msbpos - 126), s, 1'b0, rc);
         end
       end
     end
   endfunction
 
   // ---------------------------------------------------------------------------
-  // Multiply. Returns {inexact, result}.
+  // Multiply. Returns {oe, ue, pe, result}. Denormal-aware (fx_uexp_eff).
   // ---------------------------------------------------------------------------
-  function automatic logic [80:0] fx_mul(input logic [79:0] a, input logic [79:0] b,
+  function automatic logic [82:0] fx_mul(input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc);
     logic        sa, sb, sign;
     logic [63:0] ma, mb;
@@ -215,16 +311,16 @@ package fpu_x87_pkg;
     begin
       sa=fx_sign(a); sb=fx_sign(b); sign=sa^sb;
       if (fx_is_zero(a) || fx_is_zero(b)) begin
-        fx_mul = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+        fx_mul = {3'b000, fx_make(sign, 15'd0, 64'd0)};
       end else begin
         ma=fx_man(a); mb=fx_man(b);
-        ua=fx_uexp(a); ub=fx_uexp(b);
+        ua=fx_uexp_eff(a); ub=fx_uexp_eff(b);
         prod = {64'd0, ma} * {64'd0, mb};
         msb = 0;
         for (int i=127; i>=0; i--) if (prod[i]) begin msb=i; break; end
         msbpos = msb;
         // ma MSB at bit63 weight 2^ua ; product bit i weight = (ua-63)+(ub-63)+i
-        fx_mul = fx_round_pack(sign, (ua-63) + (ub-63) + msbpos, prod, 1'b0, rc);
+        fx_mul = fx_round_pack_f(sign, (ua-63) + (ub-63) + msbpos, prod, 1'b0, rc);
       end
     end
   endfunction
@@ -238,12 +334,12 @@ package fpu_x87_pkg;
   // single-cycle fx_add/fx_mul (verified by verif/fppipe). early=1 means the
   // result is already final (signed-zero / exact-cancellation specials), so the
   // back stage just forwards it. The f_eval-level flag wrapping ({ie,ze,pe}) is
-  // applied in f_eval_s1/f_eval_s2 (ventium_x87_pkg). `result` is the 83-bit
-  // f_eval value {ie,ze,pe,floatx80}; for an arith special ie=ze=pe=0.
+  // applied in f_eval_s1/f_eval_s2 (ventium_x87_pkg). `result` is the 85-bit
+  // f_eval value {ie,ze,oe,ue,pe,floatx80}; for an arith special all flags = 0.
   // ===========================================================================
   typedef struct packed {
     logic        early;            // result already final (special / cancellation)
-    logic [82:0] result;           // {ie,ze,pe,floatx80} when early
+    logic [84:0] result;           // {ie,ze,oe,ue,pe,floatx80} when early
     logic        sign;             // round_pack args when !early
     logic signed [31:0] unbiased;
     logic [127:0] sig;
@@ -258,38 +354,43 @@ package fpu_x87_pkg;
     logic [63:0] ma, mb;
     logic signed [31:0] ua, ub, topexp, msbpos;
     logic [127:0] A, B, s;
+    logic        sticky;
     int          shift;
     int          msb;
     fx_pipe_t    p;
     begin
-      p = '0;
+      p = '0; sticky = 1'b0;
       sa=fx_sign(a); sb=fx_sign(b); ma=fx_man(a); mb=fx_man(b);
       if (fx_is_zero(a) && fx_is_zero(b)) begin
         p.early=1'b1;
-        if (sa == sb) p.result = {3'b0, fx_make(sa, 15'd0, 64'd0)};
-        else          p.result = {3'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
+        if (sa == sb) p.result = {5'b0, fx_make(sa, 15'd0, 64'd0)};
+        else          p.result = {5'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
       end else if (fx_is_zero(a)) begin
-        p.early=1'b1; p.result = {3'b0, b};
+        p.early=1'b1; p.result = {5'b0, b};
       end else if (fx_is_zero(b)) begin
-        p.early=1'b1; p.result = {3'b0, a};
+        p.early=1'b1; p.result = {5'b0, a};
       end else begin
-        ua = fx_uexp(a); ub = fx_uexp(b);
+        ua = fx_uexp_eff(a); ub = fx_uexp_eff(b);
         A = {1'b0, ma, 63'd0};
         B = {1'b0, mb, 63'd0};
         if (ua >= ub) begin
           shift = ua - ub;
-          if (shift > 127) B = 128'd0; else B = B >> shift;
+          if (shift > 127) begin sticky = (B != 128'd0); B = 128'd0; end
+          else begin sticky = (B & ((128'd1 << shift) - 128'd1)) != 128'd0; B = B >> shift; end
+          if (sticky) B[0] = 1'b1;
           topexp = ua;
         end else begin
           shift = ub - ua;
-          if (shift > 127) A = 128'd0; else A = A >> shift;
+          if (shift > 127) begin sticky = (A != 128'd0); A = 128'd0; end
+          else begin sticky = (A & ((128'd1 << shift) - 128'd1)) != 128'd0; A = A >> shift; end
+          if (sticky) A[0] = 1'b1;
           topexp = ub;
         end
         if (sa == sb)        begin s = A + B; sign = sa; end
         else if (A >= B)     begin s = A - B; sign = sa; end
         else                 begin s = B - A; sign = sb; end
         if (s == 128'd0) begin
-          p.early=1'b1; p.result = {3'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
+          p.early=1'b1; p.result = {5'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
         end else begin
           msb = 0;
           for (int i=127; i>=0; i--) if (s[i]) begin msb=i; break; end
@@ -317,10 +418,10 @@ package fpu_x87_pkg;
       p = '0;
       sa=fx_sign(a); sb=fx_sign(b); sign=sa^sb;
       if (fx_is_zero(a) || fx_is_zero(b)) begin
-        p.early=1'b1; p.result = {3'b0, fx_make(sign, 15'd0, 64'd0)};
+        p.early=1'b1; p.result = {5'b0, fx_make(sign, 15'd0, 64'd0)};
       end else begin
         ma=fx_man(a); mb=fx_man(b);
-        ua=fx_uexp(a); ub=fx_uexp(b);
+        ua=fx_uexp_eff(a); ub=fx_uexp_eff(b);
         prod = {64'd0, ma} * {64'd0, mb};
         msb = 0;
         for (int i=127; i>=0; i--) if (prod[i]) begin msb=i; break; end
@@ -343,7 +444,7 @@ package fpu_x87_pkg;
   // datapath (M0–M5 stay bit-exact vs QEMU). The genuine radix-4 SRT engine
   // (fx_srt_div, below) is an OPTIONAL compile-time feature; fx_div dispatches to
   // one or the other (see fx_div at the end of this group).
-  function automatic logic [80:0] fx_div_exact(input logic [79:0] a, input logic [79:0] b,
+  function automatic logic [82:0] fx_div_exact(input logic [79:0] a, input logic [79:0] b,
                                                input logic [1:0] rc);
     logic        sa, sb, sign;
     logic [63:0] ma, mb;
@@ -362,12 +463,12 @@ package fpu_x87_pkg;
         // Divide by zero: x/0 -> signed Inf (caller latches ZE). Guarded so the
         // datapath never performs an undefined /0. 0/0 is handled by the caller
         // (special-cased to real-indefinite QNaN before reaching here).
-        fx_div_exact = {1'b0, fx_make(sign, 15'h7fff, 64'h8000000000000000)};
+        fx_div_exact = {3'b000, fx_make(sign, 15'h7fff, 64'h8000000000000000)};
       end else if (fx_is_zero(a)) begin
-        fx_div_exact = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+        fx_div_exact = {3'b000, fx_make(sign, 15'd0, 64'd0)};
       end else begin
         ma=fx_man(a); mb=fx_man(b);
-        ua=fx_uexp(a); ub=fx_uexp(b);
+        ua=fx_uexp_eff(a); ub=fx_uexp_eff(b);
         num = {128'd0, ma} << P;            // ma << P
         q   = num / {128'd0, mb};
         rem = num - q * {128'd0, mb};
@@ -378,7 +479,7 @@ package fpu_x87_pkg;
         qlo = q[127:0];
         // value(ma/mb) ~ q * 2^-P ; weight of q's MSB = msbpos - P.
         // total value = (ma/mb)*2^(ua-ub) -> unbiased of MSB:
-        fx_div_exact = fx_round_pack(sign, (msbpos - P) + (ua - ub), qlo, 1'b0, rc);
+        fx_div_exact = fx_round_pack_f(sign, (msbpos - P) + (ua - ub), qlo, 1'b0, rc);
       end
     end
   endfunction
@@ -466,7 +567,11 @@ package fpu_x87_pkg;
   // (Edelman "xxxx.yyy"). NSTEP=36 radix-4 steps -> 72 quotient bits, rounded to
   // the 64-bit floatx80 significand using the final partial-remainder sign as the
   // round-to-nearest tiebreaker (the hardware-realistic final rounding).
-  function automatic logic [80:0] fx_srt_div(input logic [79:0] a, input logic [79:0] b,
+  // NOTE: fx_srt_div assumes NORMAL/NORMAL operands whose quotient stays in the
+  // normal floatx80 exponent range — fx_div routes denormal operands and extreme-
+  // exponent pairs to fx_div_exact, so this engine never over/underflows and
+  // always returns oe=ue=0 (only PE/inexact). Returns {oe, ue, pe, result}.
+  function automatic logic [82:0] fx_srt_div(input logic [79:0] a, input logic [79:0] b,
                                              input logic [1:0] rc, input logic buggy);
     localparam int NSTEP = 36;
     logic        sa, sb, sign;
@@ -486,9 +591,9 @@ package fpu_x87_pkg;
     begin
       sa=fx_sign(a); sb=fx_sign(b); sign=sa^sb;
       if (fx_is_zero(b))
-        fx_srt_div = {1'b0, fx_make(sign, 15'h7fff, 64'h8000000000000000)};
+        fx_srt_div = {3'b000, fx_make(sign, 15'h7fff, 64'h8000000000000000)};
       else if (fx_is_zero(a))
-        fx_srt_div = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+        fx_srt_div = {3'b000, fx_make(sign, 15'd0, 64'd0)};
       else begin
 `ifdef VEN_SRT_ITER
         // D8b: the 36-step radix-4 loop is performed by the iterative engine
@@ -496,9 +601,9 @@ package fpu_x87_pkg;
         // (core.sv fp_div_elig), so this combinational path is never committed
         // under +VEN_SRT_ITER — stub it so the 126x256-bit-adder cone is not
         // synthesized. (The zero/Inf guards above remain for the x/0 path.)
-        fx_srt_div = {1'b0, fx_make(sign, 15'd0, 64'd0)};
+        fx_srt_div = {3'b000, fx_make(sign, 15'd0, 64'd0)};
 `else
-        ma=fx_man(a); mb=fx_man(b); ua=fx_uexp(a); ub=fx_uexp(b);
+        ma=fx_man(a); mb=fx_man(b); ua=fx_uexp_eff(a); ub=fx_uexp_eff(b);
         d4  = mb[62:59];                 // column D = 16 + d4
         dfx = {7'b0, mb, 9'b0};          // d_significand * 2^72  (mb << 9)
         S   = {7'b0, ma, 9'b0};          // p_significand * 2^72  -> sum word
@@ -561,7 +666,8 @@ package fpu_x87_pkg;
         end
         e       = (msb - 70) + (ua - ub);
         ebiased = e + 32'sd16383;
-        fx_srt_div = {inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
+        // oe=ue=0: fx_div guarantees normal/normal operands with in-range quotient.
+        fx_srt_div = {2'b00, inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
 `endif
       end
     end
@@ -570,22 +676,38 @@ package fpu_x87_pkg;
   // fx_div: the division entry point used everywhere (f_arith, helper_fdiv).
   // Dispatches to the fast exact divider by default, or to the genuine radix-4
   // SRT engine when the optional compile-time feature is enabled.
-  function automatic logic [80:0] fx_div(input logic [79:0] a, input logic [79:0] b,
+  function automatic logic [82:0] fx_div(input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc);
+    // The SRT engine assumes NORMAL operands and an in-range quotient (its PLA
+    // indexes the normalized 1.f divisor and it has no gradual-underflow path).
+    // Route denormal operands AND extreme-exponent pairs (whose quotient would
+    // over/underflow the floatx80 range) to the exact divider, which threads the
+    // full fx_round_pack_f under/overflow + denormal handling. The threshold
+    // (±16000) is well inside the ±16383 range, so the SRT path is provably
+    // in-range and never needs OE/UE. The canonical FDIV-flaw vectors are normal
+    // and in-range, so they still exercise the (buggy) SRT engine.
+    logic               use_exact;
+    logic signed [31:0] eq;
+    begin
+      eq = fx_uexp_eff(a) - fx_uexp_eff(b);
+      use_exact = fx_is_denormal(a) || fx_is_denormal(b) ||
+                  (eq > 32'sd16000) || (eq < -32'sd16000);
 `ifdef VEN_DIV_EXACT
-    // opt-OUT: the fast behavioral divider (a plain wide integer divide). Kept as
-    // a fast-sim escape hatch; NOT the hardware path.
-    fx_div = fx_div_exact(a, b, rc);
+      // opt-OUT: the fast behavioral divider (a plain wide integer divide). Kept
+      // as a fast-sim escape hatch; NOT the hardware path.
+      fx_div = fx_div_exact(a, b, rc);
 `else
   `ifdef VEN_SRT_FDIV_BUG
-    fx_div = fx_srt_div(a, b, rc, 1'b1);   // genuine SRT, buggy PLA (FDIV flaw)
+      fx_div = use_exact ? fx_div_exact(a, b, rc)
+                         : fx_srt_div(a, b, rc, 1'b1);   // genuine SRT, buggy PLA
   `else
-    // DEFAULT: the genuine radix-4 Pentium SRT engine (correct PLA). This is the
-    // canonical hardware algorithm; the iterative/microcoded engine (fpga/ rework
-    // targets T1..T7) is built from this. Bit-exact vs fx_div_exact/QEMU.
-    fx_div = fx_srt_div(a, b, rc, 1'b0);
+      // DEFAULT: the genuine radix-4 Pentium SRT engine (correct PLA) for the
+      // normal in-range case; exact divider for denormal/extreme operands.
+      fx_div = use_exact ? fx_div_exact(a, b, rc)
+                         : fx_srt_div(a, b, rc, 1'b0);
   `endif
 `endif
+    end
   endfunction
 
   // ===========================================================================
@@ -683,10 +805,10 @@ package fpu_x87_pkg;
   //
   // The canonical operands in floatx80 (after FLD-from-double): 4195835.0 and
   // 3145727.0 = +1.0111...1*2^21; matched by their exact normal floatx80 codes.
-  function automatic logic [80:0] fx_div_errata(input logic [79:0] a,
+  function automatic logic [82:0] fx_div_errata(input logic [79:0] a,
                                                 input logic [79:0] b,
                                                 input logic [1:0] rc);
-    logic [80:0] clean;
+    logic [82:0] clean;
     logic        sign;
     logic [14:0] e;
     // published-vector table (exact floatx80 encodings):
@@ -705,8 +827,9 @@ package fpu_x87_pkg;
           a == CANON_A && b == CANON_B) begin
         sign = clean[79];
         e    = clean[78:64];
-        // exact documented flawed quotient for the canonical published vector.
-        fx_div_errata = {1'b1, sign, e, CANON_FLAWED_MANT};
+        // exact documented flawed quotient for the canonical published vector
+        // (oe=ue=0, pe=1: the flaw forces inexact). {oe, ue, pe, floatx80}.
+        fx_div_errata = {2'b00, 1'b1, sign, e, CANON_FLAWED_MANT};
       end else begin
         fx_div_errata = clean;
       end
@@ -808,7 +931,7 @@ package fpu_x87_pkg;
         fx_sqrt = {1'b0, a};
 `else
         ma=fx_man(a);
-        ua=fx_uexp(a);
+        ua=fx_uexp_eff(a);    // denormal-aware: sqrt of a denormal is a normal result
         // value = ma * 2^(ua-63). exponent of the integer ma:
         e = ua - 63;
         if (e[0]) begin ma2 = {191'd0, ma, 1'b0}; e = e - 1; end  // make e even, ma2=ma<<1
@@ -862,15 +985,26 @@ package fpu_x87_pkg;
     logic [22:0] f;
     logic [63:0] mant;
     logic signed [31:0] ebiased;
+    int          k;
     begin
       s=u[31]; e=u[30:23]; f=u[22:0];
       if (e==8'd0 && f==23'd0) begin
         fx_from_f32 = fx_make(s, 15'd0, 64'd0);
+      end else if (e==8'd0) begin
+        // DENORMAL (f != 0): value = f * 2^-149. floatx80 has room to represent
+        // every f32 denormal as a NORMAL — left-normalize f's MSB to bit63. This
+        // is EXACT (no rounding, no DE flag — softfloat float32_to_floatx80 just
+        // normalizes the subnormal in non-flush mode).
+        k = 0;
+        for (int i=22; i>=0; i--) if (f[i]) begin k=i; break; end
+        mant    = {41'd0, f} << (63 - k);
+        ebiased = k + 32'sd16234;               // (k - 149) + 16383
+        fx_from_f32 = fx_make(s, ebiased[14:0], mant);
       end else if (e==8'hFF) begin
-        // inf/nan: build a floatx80 inf/nan (Tier-3; corpus avoids, but be sane)
+        // inf/nan: build a floatx80 inf/nan (integer bit + payload at the top).
         fx_from_f32 = fx_make(s, 15'h7fff, {1'b1, f, 40'd0});
       end else begin
-        // normal (corpus uses only normals); integer bit + fraction at top
+        // normal: integer bit + fraction at top
         mant = {1'b1, f, 40'd0};
         ebiased = $signed({{24{1'b0}}, e}) - 32'sd127 + 32'sd16383;
         fx_from_f32 = fx_make(s, ebiased[14:0], mant);
@@ -884,10 +1018,19 @@ package fpu_x87_pkg;
     logic [51:0] f;
     logic [63:0] mant;
     logic signed [31:0] ebiased;
+    int          k;
     begin
       s=u[63]; e=u[62:52]; f=u[51:0];
       if (e==11'd0 && f==52'd0) begin
         fx_from_f64 = fx_make(s, 15'd0, 64'd0);
+      end else if (e==11'd0) begin
+        // DENORMAL (f != 0): value = f * 2^-1074. Left-normalize to a floatx80
+        // normal (exact, no DE — matches softfloat float64_to_floatx80).
+        k = 0;
+        for (int i=51; i>=0; i--) if (f[i]) begin k=i; break; end
+        mant    = {12'd0, f} << (63 - k);
+        ebiased = k + 32'sd15309;               // (k - 1074) + 16383
+        fx_from_f64 = fx_make(s, ebiased[14:0], mant);
       end else if (e==11'h7FF) begin
         fx_from_f64 = fx_make(s, 15'h7fff, {1'b1, f, 11'd0});
       end else begin
@@ -946,61 +1089,145 @@ package fpu_x87_pkg;
     endcase
   endfunction
 
-  function automatic logic [32:0] fx_to_f32_ex(input logic [79:0] v, input logic [1:0] rc);
-    logic        s;
-    logic signed [31:0] ue;
-    logic [63:0] m;
-    logic [23:0] frac;          // 1 + 23
-    logic [39:0] rem;
-    logic        inex;
-    logic signed [31:0] eb;
+  // FST m32: floatx80 -> float32, returning {oe, ue, pe, float32[31:0]}. Mirrors
+  // QEMU floatx80_to_float32 + roundAndPackFloat32 INCLUDING the narrowing range
+  // edges: Inf/NaN pass through, results above the float32 normal range overflow
+  // to Inf (OE+PE) / max normal, and results below it underflow to a float32
+  // denormal or zero (UE+PE on tiny+inexact, after-rounding tininess). Denormal
+  // floatx80 inputs are first left-normalized so the common case (a normal
+  // floatx80 whose value lands in the float32 denormal range) is handled exactly.
+  function automatic logic [34:0] fx_to_f32_ex(input logic [79:0] v, input logic [1:0] rc);
+    logic        s, oe, ue, pe;
+    logic signed [31:0] uebit, eb;
+    logic [63:0] m, sig, lost, shifted;
+    logic [23:0] frac;          // 1 + 23 (integer bit at 23)
+    logic [39:0] rem;           // round/sticky
+    int          k, sh;
     begin
+      oe=1'b0; ue=1'b0; pe=1'b0;
       s=fx_sign(v);
-      if (fx_is_zero(v)) return {1'b0, s, 31'd0};
-      ue = fx_uexp(v);
-      m  = fx_man(v);
-      // top 24 bits = m[63:40]; rem = m[39:0]; half = 0x80_0000_0000
-      frac = m[63:40];
-      rem  = m[39:0];
-      inex = (rem != 40'd0);
-      if (fx_dir_up({24'd0, rem}, 64'h8000000000, frac[0], s, rc)) begin
-        frac = frac + 24'd1;
-        if (frac[23:0]==24'd0) ue = ue + 1;   // mantissa carried (1.111->10.0)
+      if (fx_is_zero(v)) return {3'b000, s, 31'd0};
+      m = fx_man(v);
+      if (fx_exp(v)==15'h7fff) begin
+        if (m==64'h8000000000000000) fx_to_f32_ex = {3'b000, s, 8'hFF, 23'd0};      // Inf
+        else                         fx_to_f32_ex = {3'b000, s, 8'hFF, {1'b1, m[61:40]}}; // NaN
+      end else begin
+        // left-normalize (handles a denormal floatx80 input) so bit63 = integer bit.
+        k=0; for (int i=63;i>=0;i--) if (m[i]) begin k=i; break; end
+        sig   = m << (63 - k);
+        uebit = fx_uexp_eff(v) - (63 - k);     // power-of-two weight of sig bit63
+        eb    = uebit + 32'sd127;
+        frac  = sig[63:40];
+        rem   = sig[39:0];
+        if (eb >= 32'sd255) begin              // OVERFLOW
+          oe=1'b1; pe=1'b1;
+          if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+            fx_to_f32_ex = {oe,ue,pe, s, 8'hFE, 23'h7FFFFF};   // max normal magnitude
+          else
+            fx_to_f32_ex = {oe,ue,pe, s, 8'hFF, 23'd0};        // Inf
+        end else if (eb <= 32'sd0) begin       // UNDERFLOW (gradual)
+          sh = 1 - eb;
+          if (sh >= 64) begin lost = sig; shifted = 64'd0; end
+          else begin lost = sig & ((64'd1<<sh)-64'd1); shifted = sig >> sh; end
+          if (lost != 64'd0) shifted[0] = 1'b1;          // jam sticky
+          frac = shifted[63:40];
+          rem  = shifted[39:0];
+          pe   = (rem != 40'd0);
+          if (fx_dir_up({24'd0, rem}, 64'h8000000000, frac[0], s, rc)) frac = frac + 24'd1;
+          if (frac[23]) begin                            // rounded up to smallest NORMAL
+            fx_to_f32_ex = {oe, 1'b0, pe, s, 8'd1, 23'd0};         // tiny->normal: no UE
+          end else begin
+            ue = pe;                                     // tiny & inexact -> UE (after-round)
+            fx_to_f32_ex = {oe, ue, pe, s, 8'd0, frac[22:0]};      // denormal / zero
+          end
+        end else begin                         // NORMAL range
+          pe = (rem != 40'd0);
+          if (fx_dir_up({24'd0, rem}, 64'h8000000000, frac[0], s, rc)) begin
+            frac = frac + 24'd1;
+            if (frac[23:0]==24'd0) eb = eb + 32'sd1;      // mantissa carried (1.111->10.0)
+          end
+          if (eb >= 32'sd255) begin                       // carry pushed into overflow
+            oe=1'b1; pe=1'b1;
+            if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+              fx_to_f32_ex = {oe,ue,pe, s, 8'hFE, 23'h7FFFFF};
+            else
+              fx_to_f32_ex = {oe,ue,pe, s, 8'hFF, 23'd0};
+          end else
+            fx_to_f32_ex = {oe, ue, pe, s, eb[7:0], frac[22:0]};
+        end
       end
-      eb = ue + 127;
-      fx_to_f32_ex = {inex, s, eb[7:0], frac[22:0]};
     end
   endfunction
   function automatic logic [31:0] fx_to_f32(input logic [79:0] v);
-    logic [32:0] r; begin r = fx_to_f32_ex(v, 2'd0); return r[31:0]; end
+    logic [34:0] r; begin r = fx_to_f32_ex(v, 2'd0); return r[31:0]; end
   endfunction
 
-  function automatic logic [64:0] fx_to_f64_ex(input logic [79:0] v, input logic [1:0] rc);
-    logic        s;
-    logic signed [31:0] ue;
-    logic [63:0] m;
-    logic [52:0] frac;
-    logic [10:0] rem;
-    logic        inex;
-    logic signed [31:0] eb;
+  // FST m64: floatx80 -> float64, {oe, ue, pe, float64[63:0]}. Same structure as
+  // fx_to_f32_ex (Inf/NaN passthrough, overflow->Inf+OE/max, gradual underflow->
+  // denormal+UE+PE), at float64 width (52-bit fraction, bias 1023).
+  function automatic logic [66:0] fx_to_f64_ex(input logic [79:0] v, input logic [1:0] rc);
+    logic        s, oe, ue, pe;
+    logic signed [31:0] uebit, eb;
+    logic [63:0] m, sig, lost, shifted;
+    logic [52:0] frac;          // 1 + 52 (integer bit at 52)
+    logic [10:0] rem;           // round/sticky
+    int          k, sh;
     begin
+      oe=1'b0; ue=1'b0; pe=1'b0;
       s=fx_sign(v);
-      if (fx_is_zero(v)) return {1'b0, s, 63'd0};
-      ue = fx_uexp(v);
-      m  = fx_man(v);
-      frac = m[63:11];
-      rem  = m[10:0];
-      inex = (rem != 11'd0);
-      if (fx_dir_up({53'd0, rem}, 64'h400, frac[0], s, rc)) begin
-        frac = frac + 53'd1;
-        if (frac[52:0]==53'd0) ue = ue + 1;
+      if (fx_is_zero(v)) return {3'b000, s, 63'd0};
+      m = fx_man(v);
+      if (fx_exp(v)==15'h7fff) begin
+        if (m==64'h8000000000000000) fx_to_f64_ex = {3'b000, s, 11'h7FF, 52'd0};        // Inf
+        else                         fx_to_f64_ex = {3'b000, s, 11'h7FF, {1'b1, m[61:11]}}; // NaN
+      end else begin
+        k=0; for (int i=63;i>=0;i--) if (m[i]) begin k=i; break; end
+        sig   = m << (63 - k);
+        uebit = fx_uexp_eff(v) - (63 - k);
+        eb    = uebit + 32'sd1023;
+        frac  = sig[63:11];
+        rem   = sig[10:0];
+        if (eb >= 32'sd2047) begin             // OVERFLOW
+          oe=1'b1; pe=1'b1;
+          if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+            fx_to_f64_ex = {oe,ue,pe, s, 11'h7FE, 52'hFFFFFFFFFFFFF};   // max normal
+          else
+            fx_to_f64_ex = {oe,ue,pe, s, 11'h7FF, 52'd0};              // Inf
+        end else if (eb <= 32'sd0) begin       // UNDERFLOW (gradual)
+          sh = 1 - eb;
+          if (sh >= 64) begin lost = sig; shifted = 64'd0; end
+          else begin lost = sig & ((64'd1<<sh)-64'd1); shifted = sig >> sh; end
+          if (lost != 64'd0) shifted[0] = 1'b1;
+          frac = shifted[63:11];
+          rem  = shifted[10:0];
+          pe   = (rem != 11'd0);
+          if (fx_dir_up({53'd0, rem}, 64'h400, frac[0], s, rc)) frac = frac + 53'd1;
+          if (frac[52]) begin                            // rounded up to smallest NORMAL
+            fx_to_f64_ex = {oe, 1'b0, pe, s, 11'd1, 52'd0};
+          end else begin
+            ue = pe;
+            fx_to_f64_ex = {oe, ue, pe, s, 11'd0, frac[51:0]};
+          end
+        end else begin                         // NORMAL range
+          pe = (rem != 11'd0);
+          if (fx_dir_up({53'd0, rem}, 64'h400, frac[0], s, rc)) begin
+            frac = frac + 53'd1;
+            if (frac[52:0]==53'd0) eb = eb + 32'sd1;
+          end
+          if (eb >= 32'sd2047) begin
+            oe=1'b1; pe=1'b1;
+            if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+              fx_to_f64_ex = {oe,ue,pe, s, 11'h7FE, 52'hFFFFFFFFFFFFF};
+            else
+              fx_to_f64_ex = {oe,ue,pe, s, 11'h7FF, 52'd0};
+          end else
+            fx_to_f64_ex = {oe, ue, pe, s, eb[10:0], frac[51:0]};
+        end
       end
-      eb = ue + 1023;
-      fx_to_f64_ex = {inex, s, eb[10:0], frac[51:0]};
     end
   endfunction
   function automatic logic [63:0] fx_to_f64(input logic [79:0] v);
-    logic [64:0] r; begin r = fx_to_f64_ex(v, 2'd0); return r[63:0]; end
+    logic [66:0] r; begin r = fx_to_f64_ex(v, 2'd0); return r[63:0]; end
   endfunction
 
   // floatx80 -> signed int (round-to-nearest-even), width via mask outside.

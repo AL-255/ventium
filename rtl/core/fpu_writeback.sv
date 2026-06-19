@@ -91,6 +91,8 @@ module fpu_writeback
     // FP-store sticky-exception inputs
     input  logic        fstore_ie,
     input  logic        fstore_pe,
+    input  logic        fstore_oe,    // FST m32/m64 narrowing overflow (OE)
+    input  logic        fstore_ue,    // FST m32/m64 narrowing underflow (UE)
 `ifdef VEN_FP_OVERLAP
     input  logic [31:0] fp_busy_cyc,
 `endif
@@ -235,12 +237,12 @@ module fpu_writeback
     logic [639:0] frstor_streg;   // M11b FRSTOR: loaded ST region (logical ST0..7)
     int          frli;            // M11b FRSTOR: logical index for a physical reg
     logic [31:0] fp_dep_ready;
-    logic [82:0] fp_arf;          // {ie, ze, inexact, result} from f_eval (fast)
+    logic [84:0] fp_arf;          // {ie, ze, oe, ue, pe, result} from f_eval (fast)
     logic        slow_arm;        // S_FEXEC, op actually executes (not f_pc_bad)
     logic        slow_pc_bad, slow_is_arith;
     logic [79:0] s_opnd_f, s_argb, s_st0v, s_stiv;
     logic [79:0] s_fa, s_fb;      // shared arith operands (mux-then-eval, R-area)
-    logic [82:0] s_arf;
+    logic [84:0] s_arf;
     logic [80:0] s_ar;
     logic [2:0]  s_codes;
     logic [3:0]  s_xc;
@@ -309,7 +311,7 @@ module fpu_writeback
     // commit to the absolute target. This is the SHORT back-half cone (round_pack
     // only); the front half was spent the previous clock — that is the whole split.
     if (fpp2_valid) begin
-      automatic logic [82:0] pp_arf = f_eval_s2(fpp2_s1, fpp2_rc);
+      automatic logic [84:0] pp_arf = f_eval_s2(fpp2_s1, fpp2_rc);
       fp_we_wabs       = 1'b1;
       fp_wabs_idx      = fpp2_dst;
       fp_wabs_data     = pp_arf[79:0];
@@ -335,9 +337,9 @@ module fpu_writeback
       // never deferred to this commit port), so f_eval_s1's div-returns-0 default
       // is unreachable. Without VEN_SRT_ITER, divide DOES defer here -> keep the
       // full f_eval (below). Combinational s1->s2, same 1-clock defer as before.
-      automatic logic [82:0] pp_arf = f_eval_s2(f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err), fpp_rc);
+      automatic logic [84:0] pp_arf = f_eval_s2(f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err), fpp_rc);
 `else
-      automatic logic [82:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err);
+      automatic logic [84:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err);
 `endif
       fp_we_wabs       = 1'b1;
       fp_wabs_idx      = fpp_dst;
@@ -551,15 +553,19 @@ module fpu_writeback
       // fx_isqrt's loop in f_eval's else (zero/Inf/NaN hit cheap guards). Routing
       // ALL of these to the engine lets the combinational loops be stubbed out of
       // synthesis (D8b); the engine == fx_srt_div / fx_sqrt for every operand.
-      na = !fx_is_zero(s_fa) && (fx_exp(s_fa)!=15'h7fff);
-      nb = !fx_is_zero(s_fb) && (fx_exp(s_fb)!=15'h7fff);
+      // NORMAL-only: the SRT/sqrt engines assume a normalized 1.f operand, so
+      // denormal operands are EXCLUDED here and fall to the combinational path
+      // (fx_div routes them to the denormal-aware fx_div_exact; fx_sqrt's eff-exp
+      // path handles a denormal radicand). fx_is_normal == exp in (0,0x7fff) & v[63].
+      na = fx_is_normal(s_fa);
+      nb = fx_is_normal(s_fb);
       fp_div_elig = slow_arm && !errata_en[ERR_FDIV] &&
                     ((q_fxop==FX_AR_ST0_STI)||(q_fxop==FX_AR_STI_ST0)||
                      (q_fxop==FX_AR_M32)||(q_fxop==FX_AR_M64)||
                      (q_fxop==FX_AR_I16)||(q_fxop==FX_AR_I32)) &&
                     ((q_f_aluop==3'd6)||(q_f_aluop==3'd7)) && na && nb;
       fp_sqrt_elig = slow_arm && (q_fxop==FX_FSQRT) &&
-                     !fx_is_zero(s_st0v) && (fx_exp(s_st0v)!=15'h7fff) && !s_st0v[79];
+                     fx_is_normal(s_st0v) && !s_st0v[79];
       fp_iter_go   = fp_div_elig || fp_sqrt_elig;
       // div: a/b as passed to fx_div (divr, aluop 7, swaps operands)
       eng_div_a    = (q_f_aluop==3'd7) ? s_fb : s_fa;
@@ -772,8 +778,16 @@ module fpu_writeback
           // (fstore_ie/pe come from the engine, not valid yet here at S_FEXEC).
           if (q_fxop != FX_FBSTP) begin
 `endif
-          if (fstore_ie)      begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end  // IE
-          else if (fstore_pe) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end  // PE
+          // IE is mutually exclusive with the numeric flags (QEMU signals invalid
+          // OR the rounding flags). FST m32/m64 narrowing overflow/underflow set
+          // OE/UE alongside PE (the narrow round is always inexact in those cases).
+          if (fstore_ie) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0001; end       // IE
+          else if (fstore_oe || fstore_ue || fstore_pe) begin
+            fp_we_fstat=1'b1;
+            fp_fstat_wval = fstat | (fstore_oe ? 16'h0008 : 16'h0000)   // OE
+                                  | (fstore_ue ? 16'h0010 : 16'h0000)   // UE
+                                  | (fstore_pe ? 16'h0020 : 16'h0000);  // PE
+          end
 `ifdef VEN_BCD_ITER
           end
 `endif
@@ -807,8 +821,8 @@ module fpu_writeback
         fp_we_top=1'b1; fp_top_data=eng_sqrt_result[79:0];
         if (eng_sqrt_result[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
       end else begin
-        logic [82:0] earf;
-        earf = {2'b00, eng_div_result[80], eng_div_result[79:0]};
+        logic [84:0] earf;
+        earf = {4'b0000, eng_div_result[80], eng_div_result[79:0]};   // {ie,ze,oe,ue=0, pe, result}
         if (q_fxop==FX_AR_STI_ST0) begin
           fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=eng_div_result[79:0]; fp_wsti_clr_tag=1'b0;
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, earf);
@@ -846,7 +860,7 @@ module fpu_writeback
           fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0400;
         end else begin
           // (part-select on a function call is illegal in synth/IEEE-1800 — temp it)
-          logic [80:0] tan_q; tan_q = fx_div(eng_fs_sin, eng_fs_cos, 2'd0);
+          logic [82:0] tan_q; tan_q = fx_div(eng_fs_sin, eng_fs_cos, 2'd0);
           fp_we_top=1'b1;
           fp_top_data=(q_fxop==FX_FPTAN) ? tan_q[79:0] : eng_fs_sin;
           fp_we_push=1'b1;
