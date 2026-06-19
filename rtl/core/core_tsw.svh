@@ -43,10 +43,32 @@
               5'd14: tsw_sel[SG_DS] <= mem_rdata[15:0];
               5'd15: tsw_sel[SG_FS] <= mem_rdata[15:0];
               5'd16: tsw_sel[SG_GS] <= mem_rdata[15:0];
-              default: ;   // beat 17 = LDTR (no LDT machinery; discarded)
+              5'd17: tsw_new_ldt <= mem_rdata[15:0];  // capture the new task's LDTR selector
+              default: ;
             endcase
-            if (tsw_step == 5'd17) begin tsw_step <= 5'd0; state <= S_TSW_SEG; end
+            // After the last TSS field, load the LDTR's hidden base/limit (S_TSW_LDT)
+            // BEFORE reloading the segments, so LDT-selector CS/SS/etc. resolve right.
+            if (tsw_step == 5'd17) begin tsw_step <= 5'd0; state <= S_TSW_LDT; end
             else tsw_step <= tsw_step + 5'd1;
+          end
+        end
+
+        // S_TSW_LDT: load the new task's LDTR hidden base/limit from the GDT LDT
+        // descriptor named by tsw_new_ldt (2 word reads), so the subsequent S_TSW_SEG
+        // can resolve LDT-selector segments (e.g. CWSDPMI's PM client CS). A null
+        // LDTR (index 0) leaves ldt_base unchanged. Then proceed to the seg reload.
+        S_TSW_LDT: begin
+          if (mem_ack) begin
+            if (!tsw_step[0]) begin tsw_seg_lo <= mem_rdata; tsw_step <= 5'd1; end
+            else begin
+              logic [63:0] desc;
+              desc = {mem_rdata, tsw_seg_lo};
+              if (|tsw_new_ldt[15:3]) begin
+                ldt_base  <= desc_base(desc);
+                ldt_limit <= desc_limit(desc)[15:0];
+              end
+              tsw_step <= 5'd0; state <= S_TSW_SEG;
+            end
           end
         end
 

@@ -324,8 +324,15 @@ static void classify(cs_insn *in, insn_t *ii)
         ii->pclass=NP; ii->occ=2; ii->lat=2; ii->fp_role=1; break;
     case X86_INS_FSIN: case X86_INS_FCOS: case X86_INS_FSINCOS: case X86_INS_FPTAN:
     case X86_INS_FPATAN: case X86_INS_FYL2X: case X86_INS_FYL2XP1:
-    case X86_INS_F2XM1: case X86_INS_FSCALE: case X86_INS_FPREM: case X86_INS_FPREM1:
+    case X86_INS_F2XM1: case X86_INS_FSCALE:
         ii->pclass=NP; ii->occ=120; ii->lat=120; ii->fp_role=3; break;
+    case X86_INS_FPREM: case X86_INS_FPREM1:
+        // Microcoded multi-cycle: P5 FPREM/FPREM1 = 16-64 clocks (data-dependent
+        // on the operand exponent difference), non-pairable, integer/FP overlap 2
+        // (the global P5_FP_ISSUE_OCC GAP1 model). The true 16-64 is modeled
+        // EXACTLY by the RTL slow-arm engine (fpu_fprem, ~expdiff steps); this
+        // plugin can't read operands, so it uses a fixed structural estimate.
+        ii->pclass=NP; ii->occ=40; ii->lat=40; ii->fp_role=3; break;
     /* ---- string ---- */
     case X86_INS_MOVSB: case X86_INS_MOVSW: case X86_INS_MOVSD:
     case X86_INS_STOSB: case X86_INS_STOSW: case X86_INS_STOSD:

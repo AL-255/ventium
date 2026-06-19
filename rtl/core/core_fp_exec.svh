@@ -91,9 +91,9 @@
               end else begin
 `endif
 `ifdef VEN_FPREM
-              // FPREM: run the iterative exact-remainder engine (S_FPREM_BUSY), then
-              // commit ST0 (remainder) + the C0/C3/C1/C2 condition codes + retire there.
-              if (q_fxop==FX_FPREM) begin
+              // FPREM/FPREM1: run the iterative exact-remainder engine (S_FPREM_BUSY),
+              // then commit ST0 (remainder) + the C0/C3/C1/C2 condition codes + retire.
+              if (q_fxop==FX_FPREM || q_fxop==FX_FPREM1) begin
                 state<=S_FPREM_BUSY;
               end else begin
 `endif

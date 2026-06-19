@@ -43,7 +43,7 @@ module tb_l1_axi;
   always @(posedge clk) if (shutdown && (arvalid || awvalid)) shutdown_viol <= 1'b1;
   ventium_l1_axi #(.ADDR_W(ADDR_W), .REMAP_BASE(REMAP_BASE), .ADDR_MASK(ADDR_MASK)) dut (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
-      .flush_all(flush), .shutdown(shutdown), .m_idle(m_idle),
+      .flush_all(flush), .golden_l1(1'b0), .shutdown(shutdown), .m_idle(m_idle),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),

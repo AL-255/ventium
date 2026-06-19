@@ -367,6 +367,9 @@ module decode_stages
           // keeps `make verify` byte-identical).
           if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd3) begin // LTR r16
             d_sysop=SYS_LTR; d_src_reg=modrm_rm; d_w=3'd2; d_len=pfx_len+4'd3;
+          end else if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd2) begin // LLDT r16
+            // load the LDTR from a GDT LDT descriptor (reuses the S_LTR read FSM).
+            d_sysop=SYS_LLDT; d_src_reg=modrm_rm; d_w=3'd2; d_len=pfx_len+4'd3;
           end else if (sys_mode && modrm_mod==2'b11 && modrm_reg==3'd1) begin // STR r16
             d_sysop=SYS_STR; d_dst_reg=modrm_rm; d_writes_reg=1'b1;
             d_w=3'd2; d_len=pfx_len+4'd3;
@@ -411,7 +414,13 @@ module decode_stages
             d_sysop=(modrm_reg==3'd0)?SYS_SGDT:SYS_SIDT;
             d_mem_write=1'b1;
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
-          end else d_unknown=1'b1;  // /4 SMSW /6 LMSW etc deferred
+          end else if (modrm_reg==3'd4 && modrm_mod==2'b11) begin
+            // SMSW r16 (0F 01 /4, register form): r16 <- CR0[15:0]. Real boot/DOS code
+            // (CWSDPMI's PE probe) reads CR0 this way. Reuse the MOVCR_FROM datapath
+            // (creg0) at 16-bit width so the reg_merge keeps the dst reg's high 16.
+            d_sysop=SYS_MOVCR_FROM; d_sys_creg=3'd0; d_dst_reg=modrm_rm;
+            d_writes_reg=1'b1; d_w=3'd2; d_len=pfx_len+4'd3;
+          end else d_unknown=1'b1;  // /4 SMSW mem form, /6 LMSW etc deferred
         end
         8'h20: begin // 0F 20 /r MOV r32, CRn  (mod field ignored, always reg)
           d_sysop=SYS_MOVCR_FROM; d_sys_creg=modrm_reg; d_dst_reg=modrm_rm;
@@ -931,19 +940,18 @@ module decode_stages
           // SYS_MOVSREG_TO path (real -> base=sel<<4 in S_EXEC; PM -> S_SEGLD GDT walk).
           // F3 MEMORY-source form (mod!=11): real/v86 boot firmware (SeaBIOS's call32
           // return loads ds/es from a saved struct). Read the 2-byte selector and load
-          // it via the LES/LDS seg-load hook's LOW-half variant (base=sel<<4). Gated
-          // seg_real: a PM mov-sreg-from-mem would need the GDT walk and still defers
-          // to HALT (out of scope, never hit by the firmware path). The user corpus
-          // never uses the mem form, so `make verify` stays byte-identical.
+          // it via the LES/LDS seg-load hook's LOW-half variant (base=sel<<4). In
+          // PROTECTED mode the loaded selector is walked through the GDT/LDT instead
+          // (S_EXEC latches the loaded sel + routes to S_SEGLD) — CWSDPMI's fault
+          // handlers restore the client's segs via `mov fs,[mem]` in PM. The user
+          // corpus never uses the mem form, so `make verify` stays byte-identical.
           if (modrm_mod==2'b11) begin
             d_sysop=SYS_MOVSREG_TO; d_sys_sreg=sreg_idx(modrm_reg); d_w=3'd2;
             d_src_reg=modrm_rm; d_len=pfx_len+4'd2;
-          end else if (seg_real) begin
+          end else begin
             d_mem_read=1'b1; d_w=3'd2;
             d_seg_load=1'b1; d_seg_load_lo=1'b1; d_lseg=sreg_idx(modrm_reg);
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
-          end else begin
-            d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end
         end
         8'h8F: begin // POP r/m
@@ -1255,10 +1263,16 @@ module decode_stages
         // (alloc16 = ib1:ib0, level = ib2). Was d_unknown->HALT before.
         8'hC8: begin
           d_len=pfx_len+4'd4;
-          if (!eff_opsize && ibuf[pfx_len+3]==8'd0) begin
-            d_kind=K_STKMISC; d_sm=SM_ENTER; d_mem_write=1'b1; d_w=3'd4;
+          // ENTER alloc,0 (level 0). The frame width follows the operand size:
+          // 32-bit (eff_opsize=0) pushes EBP+4-byte frame; 16-bit (eff_opsize=1, the
+          // real-mode form DOS Quake's CWSDPMI uses) pushes BP+2-byte frame. Both
+          // share the C8 iw ib encoding (alloc16=ib1:ib0, level=ib2). The nested form
+          // (level>0, a read+push micro-loop) stays the loud HALT (d_unknown).
+          if (ibuf[pfx_len+3]==8'd0) begin
+            d_kind=K_STKMISC; d_sm=SM_ENTER; d_mem_write=1'b1;
+            d_w = eff_opsize ? 3'd2 : 3'd4;                     // 16-bit (real) vs 32-bit frame
             d_imm={16'd0, ibuf[pfx_len+2], ibuf[pfx_len+1]};   // alloc (bytes to subtract)
-          end else d_unknown=1'b1;                              // nested / 16-bit -> HALT
+          end else d_unknown=1'b1;                              // nested (level>0) -> HALT
         end
         // ---- D7: XLATB — AL <- [DS:(E)BX + zero-extend(AL)] (table lookup) ----
         // One-byte, no ModR/M. The default (no 0x67) 32-bit address form: linear
@@ -1449,7 +1463,8 @@ module decode_stages
                   8'hFC:        d_fxop=FX_FRNDINT;            // D9 FC FRNDINT
                   8'hFD:        d_fxop=FX_FSCALE;             // D9 FD FSCALE (ST0 *= 2^trunc(ST1))
 `ifdef VEN_FPREM
-                  8'hF8:        d_fxop=FX_FPREM;              // D9 F8 FPREM (exact partial remainder, fpu_fprem)
+                  8'hF8:        d_fxop=FX_FPREM;              // D9 F8 FPREM  (trunc-Q partial remainder, fpu_fprem)
+                  8'hF5:        d_fxop=FX_FPREM1;             // D9 F5 FPREM1 (round-nearest-Q IEEE remainder)
 `endif
                   // D9 F8 FPREM (without VEN_FPREM) stays DEFERRED: a true remainder
                   // must be EXACT (ST0-Q*ST1), but fx_mul rounds — it needs the

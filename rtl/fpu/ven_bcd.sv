@@ -11,8 +11,14 @@
 // "Critical-path investigation"), even though FBSTP is a rare instruction.
 //
 // This engine does the FP->int64 conversion once (fx_to_int_ex, in IDLE) then
-// extracts the 18 BCD digits two /10 steps per clock (~9 clocks), so the per-clock
-// path is one or two /10 stages instead of 18 chained. Bit-exact to fx_fx_to_bcd.
+// converts the magnitude to BCD by DOUBLE-DABBLE (shift-and-add-3): one binary bit
+// per clock, MSB-first, 60 clocks. Each clock every BCD nibble >= 5 gets +3, then
+// the BCD register shifts left bringing in the next binary bit. This is pure
+// shift+compare+add-3 — NO divide and NO multiply — so it drops the two 64-bit /10
+// reciprocal-multiplies the prior digit-extraction synthesized (the bulk of this
+// module's LUTs). Slower (~60 vs ~9 clocks) but far more compact; FBSTP is rare.
+// Bit-exact to fx_fx_to_bcd (same LSB-first digit layout; correct because the
+// |val| >= 1e18 overflow check guarantees 18 digits, so digit 17 never carries out).
 // Handshake mirrors ven_idiv / fpu_srt_div; gated into the core behind +VEN_BCD_ITER.
 // ===========================================================================
 `default_nettype none
@@ -32,10 +38,10 @@ module ven_bcd
   typedef enum logic [1:0] { ST_IDLE, ST_RUN, ST_FIN, ST_DONE0 } state_t;
   state_t st;
 
-  logic [63:0] q;
-  logic [79:0] bcd_acc;
+  logic [63:0] q;            // binary magnitude, shifted left MSB-first
+  logic [79:0] bcd_acc;      // double-dabble BCD accumulator (18 nibbles in [71:0])
   logic        sign_q, pe_q;
-  logic [4:0]  i;
+  logic [6:0]  i;            // remaining shift count (60 down to 0)
   logic [81:0] result_q;
   logic        done_q;
 
@@ -63,42 +69,25 @@ module ven_bcd
             end else begin
               sign_q  <= sval[63];
               pe_q    <= ri[64];
-              q       <= mag;
+              q       <= mag;          // |val| < 1e18 < 2^60
               bcd_acc <= 80'd0;
-              i       <= 5'd0;
+              i       <= 7'd60;        // 60 double-dabble shifts (bits 59..0)
               st      <= ST_RUN;
             end
           end
         end
         ST_RUN: begin
-          // Two BCD digits per clock (digit i at bit i*4, LSB-first).
-`ifdef VEN_BCD_DIV100
-          // +VEN_BCD_DIV100 (OPTIONAL, default OFF): extract with ONE divide-by-100
-          // instead of two CHAINED divide-by-10 — q2 = q/100 is the only wide
-          // (reciprocal-multiply) op on the q feedback; the two low digits come from
-          // q%100 (a 0..99 value -> a tiny 7-bit extract). Halves the per-clock cone.
-          // Bit-exact + cycle-neutral (d0=q%10, d1=(q/10)%10, q2=q/100). It only helps
-          // when u_bcd is the worst path (the OOC half-cache+FP_PIPE2 65.3 MHz config);
-          // in the full SoC the eip/TLB cone binds, so it is OFF by default there.
-          automatic logic [63:0] q2  = q / 64'd100;
-          automatic logic [63:0] rem = q - (q2 * 64'd100);   // q mod 100, 0..99
-          automatic logic [6:0]  r   = rem[6:0];
-          automatic logic [3:0]  d0  = r % 7'd10;            // q % 10
-          automatic logic [3:0]  d1  = r / 7'd10;            // (q / 10) % 10
-`else
-          // DEFAULT: two CHAINED divide-by-10 (the original form).
-          automatic logic [3:0]  d0 = q[3:0]  ; // placeholder, recomputed below
-          automatic logic [63:0] q1;
-          automatic logic [3:0]  d1;
-          automatic logic [63:0] q2;
-          d0 = q  % 64'd10;  q1 = q  / 64'd10;
-          d1 = q1 % 64'd10;  q2 = q1 / 64'd10;
-`endif
-          bcd_acc[{i,        2'b00} +: 4] <= d0;   // digit i
-          bcd_acc[{(i+5'd1), 2'b00} +: 4] <= d1;   // digit i+1
-          q <= q2;
-          i <= i + 5'd2;
-          if (i >= 5'd16) st <= ST_FIN;            // just did digits 16,17
+          // Double-dabble: add-3 every BCD nibble >= 5, then shift the BCD register
+          // left by one bringing in the next binary MSB (q[59]). 60 clocks total.
+          automatic logic [71:0] corr;
+          for (int n = 0; n < 18; n++) begin
+            automatic logic [3:0] nib = bcd_acc[n*4 +: 4];
+            corr[n*4 +: 4] = (nib >= 4'd5) ? (nib + 4'd3) : nib;
+          end
+          bcd_acc[71:0] <= {corr[70:0], q[59]};    // shift BCD left, bring in bit 59
+          q             <= q << 1;                 // shift binary left (MSB-first)
+          i             <= i - 7'd1;
+          if (i == 7'd1) st <= ST_FIN;             // 60th (last) shift this clock
         end
         ST_FIN: begin
           // sign byte (0x80 negative / 0x00 positive) in the top byte; flags.

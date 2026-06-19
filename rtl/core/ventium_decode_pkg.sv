@@ -43,7 +43,7 @@ package ventium_decode_pkg;
   // x87 sub-op encoding for the FPU execution path. The decoder classifies each
   // escape (D8..DF + ModR/M) into one of these and supplies the addressing
   // (d_f_mem_read/write + d_f_msize) and operand index (d_f_sti) it needs.
-  typedef enum logic [5:0] {
+  typedef enum logic [6:0] {   // 7-bit: >64 fxops (FX_FPREM1 was the 65th, wrapped [5:0])
     FX_NONE,
     // loads / pushes
     FX_FLD_M32, FX_FLD_M64, FX_FLD_M80, FX_FLD_STI,
@@ -81,7 +81,7 @@ package ventium_decode_pkg;
     // floor/ceil/rint (FRNDINT), ldexp/scalbn (FSCALE), fmod (FPREM). Quake's
     // FloorDivMod + float math hit these on the render path. Appended at the END so
     // every existing fxop's enum encoding is unchanged.
-    FX_FRNDINT, FX_FSCALE, FX_FPREM
+    FX_FRNDINT, FX_FSCALE, FX_FPREM, FX_FPREM1
   } fxop_e;
 
   // ===========================================================================

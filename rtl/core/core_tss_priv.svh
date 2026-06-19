@@ -18,11 +18,17 @@
             else begin
               logic [63:0] desc;
               desc      = {mem_rdata, gdt_lo};
-              tr_sel   <= gpr_o[q_src_reg][15:0];
-              tr_base  <= desc_base(desc);
-              tr_limit <= desc_limit(desc);
-              tr_attr  <= desc_attr(desc);   // M2S.4b: held for the busy-clear on a switch
-              tr_valid <= 1'b1;
+              if (q_sysop==SYS_LLDT) begin
+                // LLDT: load the LDTR hidden base/limit from the GDT LDT descriptor.
+                ldt_base  <= desc_base(desc);
+                ldt_limit <= desc_limit(desc)[15:0];
+              end else begin
+                tr_sel   <= gpr_o[q_src_reg][15:0];
+                tr_base  <= desc_base(desc);
+                tr_limit <= desc_limit(desc);
+                tr_attr  <= desc_attr(desc);   // M2S.4b: held for the busy-clear on a switch
+                tr_valid <= 1'b1;
+              end
               seg_step <= 1'b0;
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
             end

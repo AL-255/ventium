@@ -37,7 +37,19 @@ module ventium_l1_axi #(
     parameter logic [39:0] REMAP_BASE = 40'h00_0000_0000,
     parameter logic [31:0] ADDR_MASK  = 32'hFFFF_FFFF,
     parameter logic [3:0]  AXI_ID     = 4'd0,
-    parameter int unsigned WATCHDOG   = 1024            // #34 AXI stall watchdog cycles
+    parameter int unsigned WATCHDOG   = 1024,           // #34 AXI stall watchdog cycles
+    // ---- Phase B (docs/northbridge-system-spec.md §5): splice the UltraRAM L2
+    // (ven_l2) into the L1 backing seam — ven_l1d.m_* → ven_l2.u_*, ven_l2.d_* →
+    // ven_axi_master.m_*. DEFAULT 0 = the L2 is BYPASSED (the backing port wires
+    // straight through, byte-identical to the pre-L2 subsystem AND its AXI-traffic
+    // pattern — so every existing L1AXI gate stays green and the board build is
+    // unchanged). 1 = the L2 is IN the datapath (the integration gate run-l1l2-gate.sh
+    // drives this; the board flips it in Phase E behind the northbridge). The L2 is
+    // WRITE-BACK, so with EN_L2=1 the AXI traffic shape CHANGES (stores are absorbed
+    // until eviction) — which is why AXI-pattern gates keep the default 0.
+    parameter bit          EN_L2        = 1'b0,
+    parameter int          L2_CAP_BYTES = 2*1024*1024,     // 2 MiB (= all 64 URAM288)
+    parameter int          L2_WAYS      = 8
 ) (
     (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 core_clk CLK" *)
     (* X_INTERFACE_PARAMETER = "ASSOCIATED_RESET core_rst_n" *)
@@ -150,6 +162,17 @@ module ventium_l1_axi #(
     input  logic              m_axi_rvalid,
     (* X_INTERFACE_INFO = "xilinx.com:interface:aximm:1.0 m_axi RREADY" *)
     output logic              m_axi_rready
+`ifdef VEN_DBG_L2
+    // ---- L2 observability (opt-in, gate-only define — NOT seen by ventium_top, so
+    // no plumbing churn there). Surfaces ven_l2's perf counters + init-ready so the
+    // integration gate (and future validation) can read L2 hit/miss/writeback rate.
+    // The counters themselves need VEN_DBG_CORE in ven_l2; without it they read 0.
+    ,
+    output logic        dbg_l2_ready,
+    output logic [31:0] dbg_l2_hits,
+    output logic [31:0] dbg_l2_misses,
+    output logic [31:0] dbg_l2_wbacks
+`endif
 );
 
   // ---- internal word-granular backing port (L1 <-> AXI master) --------------
@@ -161,6 +184,18 @@ module ventium_l1_axi #(
   logic [3:0]  m_wstrb;
   logic [31:0] m_rdata;
   logic        m_ack;
+
+  // ---- post-L2 backing port (b_*): the seam between the L2 (or the bypass) and the
+  // AXI master / CDC. With EN_L2=0 these are wired straight to m_* (transparent);
+  // with EN_L2=1 ven_l2 sits between m_* (its upstream u_*) and b_* (its downstream d_*).
+  logic        b_req, b_we;
+  logic [31:0] b_addr, b_wdata;
+  logic [3:0]  b_wstrb;
+  logic [31:0] b_rdata;
+  logic        b_ack;
+  logic        l2_ready;          // 1 once the L2 finishes its post-reset valid-clear walk
+  // observability wires (driven by ven_l2 under VEN_DBG_CORE; 0 otherwise).
+  logic [31:0] l2_hits_w, l2_misses_w, l2_wbacks_w;
 
   // ven_axi_master's backing slave + its clock/reset — a COMPILE-TIME (ifdef) alias
   // of either the core domain (default) or the axi domain (+VEN_AXI_CDC). Static
@@ -200,30 +235,76 @@ module ventium_l1_axi #(
   ven_axi_cdc #(.LINE_BEATS(L1_LINE/4)) u_cdc (
       .core_clk   (core_clk),        .core_rst_n (core_rst_sync_n),
       .axi_clk    (axi_clk),         .axi_rst_n  (axi_rst_sync_n),
-      // core side: ven_l1d's backing master
-      .c_req      (m_req),  .c_we    (m_we),    .c_addr  (m_addr),
-      .c_wdata    (m_wdata),.c_wstrb (m_wstrb), .c_rdata (m_rdata),
-      .c_ack      (m_ack),  .bus_err (bus_err),
+      // core side: the post-L2 backing master (b_*; == m_* when EN_L2=0)
+      .c_req      (b_req),  .c_we    (b_we),    .c_addr  (b_addr),
+      .c_wdata    (b_wdata),.c_wstrb (b_wstrb), .c_rdata (b_rdata),
+      .c_ack      (b_ack),  .bus_err (bus_err),
       // axi side: drives ven_axi_master's backing slave
       .a_req      (axm_req),  .a_we    (axm_we),    .a_addr  (axm_addr),
       .a_wdata    (axm_wdata),.a_wstrb (axm_wstrb), .a_rdata (axm_rdata),
       .a_ack      (axm_ack),  .a_bus_err(axm_bus_err)
   );
 `else
-  // ---- default single-clock (CDC_BYPASS): wire the backing port straight through.
+  // ---- default single-clock (CDC_BYPASS): wire the post-L2 backing straight through.
   assign l1d_rst_n = core_rst_n;
   assign axm_clk   = core_clk;
   assign axm_rst_n = core_rst_n;
-  assign axm_req   = m_req;   assign axm_we    = m_we;
-  assign axm_addr  = m_addr;  assign axm_wdata = m_wdata;  assign axm_wstrb = m_wstrb;
-  assign m_rdata   = axm_rdata; assign m_ack   = axm_ack;  assign bus_err   = axm_bus_err;
+  assign axm_req   = b_req;   assign axm_we    = b_we;
+  assign axm_addr  = b_addr;  assign axm_wdata = b_wdata;  assign axm_wstrb = b_wstrb;
+  assign b_rdata   = axm_rdata; assign b_ack   = axm_ack;  assign bus_err   = axm_bus_err;
+`endif
+
+  // ---- L2 splice (Phase B): EN_L2=0 → transparent (b_* = m_*); EN_L2=1 → ven_l2
+  // sits between the L1's backing master (m_*) and the AXI/CDC path (b_*). ven_l2 is
+  // a proven drop-in for this exact word-granular backing protocol on both ports
+  // (verif/l1/run-l2-axi-gate.sh ran it end-to-end through the real ven_axi_master).
+  generate
+    if (EN_L2) begin : g_l2
+      ven_l2 #(.L2_CAP_BYTES(L2_CAP_BYTES), .L2_LINE(L1_LINE), .L2_WAYS(L2_WAYS)) u_l2 (
+          .clk   (core_clk),
+          .rst_n (l1d_rst_n),       // L2's own reset (NOT gated on its own ready)
+          .ready (l2_ready),
+          // upstream slave ⇐ the L1's backing master
+          .u_req (m_req),  .u_we (m_we),  .u_addr (m_addr), .u_wdata (m_wdata),
+          .u_wstrb(m_wstrb), .u_rdata(m_rdata), .u_ack (m_ack),
+          // downstream master ⇒ the AXI master / CDC backing slave
+          .d_req (b_req),  .d_we (b_we),  .d_addr (b_addr), .d_wdata (b_wdata),
+          .d_wstrb(b_wstrb), .d_rdata(b_rdata), .d_ack (b_ack)
+`ifdef VEN_DBG_CORE
+          , .dbg_hits(l2_hits_w), .dbg_misses(l2_misses_w), .dbg_wbacks(l2_wbacks_w)
+`endif
+      );
+    end else begin : g_nol2
+      // L2 bypassed: the backing port is transparent (byte-identical to pre-L2).
+      assign b_req = m_req;   assign b_we = m_we;   assign b_addr = m_addr;
+      assign b_wdata = m_wdata; assign b_wstrb = m_wstrb;
+      assign m_rdata = b_rdata; assign m_ack = b_ack;
+      assign l2_ready = 1'b1;
+    end
+  endgenerate
+`ifndef VEN_DBG_CORE
+  assign l2_hits_w = 32'd0; assign l2_misses_w = 32'd0; assign l2_wbacks_w = 32'd0;
+`endif
+`ifdef VEN_DBG_L2
+  assign dbg_l2_ready  = l2_ready;
+  assign dbg_l2_hits   = l2_hits_w;
+  assign dbg_l2_misses = l2_misses_w;
+  assign dbg_l2_wbacks = l2_wbacks_w;
 `endif
 
   ven_l1d #(.L1_SETS(L1_SETS), .L1_LINE(L1_LINE)) u_l1d (
       .clk      (core_clk),
-      .rst_n    (l1d_rst_n),
+      // hold the L1 (and thus the core, which stalls on c_ack) in reset until the L2
+      // has finished its post-reset valid-clear walk (l2_ready). EN_L2=0 → l2_ready=1
+      // → this is exactly l1d_rst_n (byte-identical).
+      .rst_n    (l1d_rst_n & l2_ready),
       .flush_all(flush_all),
       .golden   (golden_l1),
+      // Phase A: cacheability/snoop ports tied inert (cacheable=1, no snoop) until the
+      // northbridge ven_cachemap + DMA coherence are wired (Phase C/D). Byte-identical.
+      .cacheable      (1'b1),
+      .snoop_inv_valid(1'b0),
+      .snoop_inv_addr (32'd0),
       .c_req   (core_req),
       .c_we    (core_we),
       .c_addr  (core_addr),

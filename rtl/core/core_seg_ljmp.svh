@@ -45,36 +45,39 @@
           if (mem_ack) begin
             logic [15:0] msel;
             logic        mnull;
-            msel  = gpr_o[q_src_reg][15:0];
+            msel  = q_seg_from_mem ? seg_mem_sel : gpr_o[q_src_reg][15:0];
             mnull = (msel[15:3] == 13'd0);
             // M2S.3 — selector index past the GDT limit -> #GP(13) carrying the
             // selector as the error code (the descriptor read was out of bounds;
             // we discard it). A NULL selector (idx 0) skips the limit check (a
             // null load into DS/ES/FS/GS is legal). Checked on beat 0 so we
             // deliver before consuming the (garbage) descriptor.
-            if (!seg_step && !mnull &&
-                ({16'd0, msel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit})) begin
+            if (!seg_step && !mnull &&   // TI bit (msel[2]) picks the GDT vs LDT limit
+                ({16'd0, msel[15:3], 3'd0} + 32'd7 > {16'd0, (msel[2]?ldt_limit:gdt_limit)})) begin
               start_fault(8'd13, 1'b1, {16'd0, msel}, q_pc);
-              seg_step<=1'b0;
+              seg_step<=1'b0; q_seg_from_mem<=1'b0;
             end else if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
             else begin
               logic [63:0] desc;
               logic [7:0]  attr;
               logic        is_ss;
+              logic [2:0]  tgt;
               desc  = {mem_rdata, gdt_lo};
               attr  = desc_attr(desc);
-              is_ss = (q_sys_sreg == 3'(SG_SS));
+              tgt   = q_seg_from_mem ? q_lseg : q_sys_sreg;  // PM mov-sreg-from-mem -> q_lseg
+              is_ss = (tgt == 3'(SG_SS));
               // PROTECTION DECISION (M2S.1) -> now DELIVERED through the IDT (M2S.3).
               if (seg_load_fault(1'b0, is_ss, msel, attr, cpl_r)) begin
                 // #NP/#SS/#GP — error code = selector (idx<<3 | TI | EXT=0).
                 start_fault(seg_fault_vec(1'b0, is_ss, msel, attr), 1'b1,
                             {16'd0, msel[15:3], 3'd0}, q_pc);
-                seg_step<=1'b0;
+                seg_step<=1'b0; q_seg_from_mem<=1'b0;
               end else begin
-                seg_sel  [q_sys_sreg] <= msel;
-                seg_base [q_sys_sreg] <= desc_base(desc);
-                seg_limit[q_sys_sreg] <= desc_limit(desc);
-                seg_attr [q_sys_sreg] <= attr;
+                seg_sel  [tgt] <= msel;
+                seg_base [tgt] <= desc_base(desc);
+                seg_limit[tgt] <= desc_limit(desc);
+                seg_attr [tgt] <= attr;
+                q_seg_from_mem <= 1'b0;
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
               end
             end
@@ -151,6 +154,14 @@
         S_LCALL: begin
           if (mem_ack) begin
             if (!seg_step) seg_step <= 1'b1;          // CS pushed (beat 0)
+            else if (!seg_real) begin
+              // PM far CALL: both return-frame pushes are done (the ESP-=2w fires in
+              // the gpr-wb S_LCALL arm at this same beat-1 ack). Hand off to S_LJMP,
+              // which reads the target CS descriptor from the GDT, loads CS:base/
+              // limit/attr/CPL/D, sets EIP=q_ljmp_off and retires — identical CS-load
+              // path the PM far JMP already uses (incl. seg_load_fault delivery).
+              seg_step <= 1'b0; state <= S_LJMP;
+            end
             else begin
               // R3: SP -= 2w bump moved to the gpr writeback driver (S_LCALL arm).
               seg_sel [SG_CS] <= q_ljmp_sel;

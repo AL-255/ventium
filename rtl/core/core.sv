@@ -26,7 +26,7 @@
 // its `output sysop_e d_sysop` port with the SAME type these wires (q_sysop /
 // d_sysop) + the svh `q_sysop==SYS_*` compares use. Enumerators are unchanged
 // (verbatim relocation; the inline copy in `core` was removed).
-typedef enum logic [3:0] {
+typedef enum logic [4:0] {
   SYS_NONE, SYS_LGDT, SYS_LIDT, SYS_MOVCR_TO, SYS_MOVCR_FROM,
   SYS_MOVSREG_TO, SYS_MOVSREG_FROM, SYS_LJMP,
   // M2S.4 — LTR (load TR from a GDT TSS selector) and STR (store TR selector).
@@ -39,7 +39,12 @@ typedef enum logic [3:0] {
   SYS_LCALL, SYS_RETF,
   // M9.5 — SGDT (0F 01 /0) / SIDT (0F 01 /1): store the 6-byte GDTR/IDTR
   // pseudo-descriptor to memory (the reverse of LGDT/LIDT's S_LGDT read).
-  SYS_SGDT, SYS_SIDT
+  SYS_SGDT, SYS_SIDT,
+  // PM segmentation — LLDT (0F 00 /2): load the LDTR base/limit from a GDT LDT
+  // descriptor (reuses the S_LTR descriptor-read FSM, branched in core_tss_priv.svh).
+  // CWSDPMI runs its code/handlers from LDT selectors, so every CS/SS/seg descriptor
+  // read must pick (sel[2] ? ldt_base : gdt_base).
+  SYS_LLDT
 } sysop_e;
 
 // The pipeline FSM state enum. Promoted from an in-`core` typedef to compilation-
@@ -137,7 +142,7 @@ typedef enum logic [5:0] {
     //   S_TSW_BUSY : toggle the descriptor busy bits — a JMP CLEARS the outgoing
     //                TSS busy bit (type B->9) and SETS the incoming one (9->B) —
     //                then COMMIT (new TR, CR0.TS=1, incoming EIP) and retire ONCE.
-    S_TSW_SAVE, S_TSW_READ, S_TSW_SEG, S_TSW_BUSY,
+    S_TSW_SAVE, S_TSW_READ, S_TSW_LDT, S_TSW_SEG, S_TSW_BUSY,
     // M2S.5 — SMM / RSM (gated sys_mode; docs/m2s5-smm-spec.md):
     //   S_SMI_SAVE : SMI# entry — save the CPU state to the SMRAM save-state map
     //                (P5 Table 20-1 offsets @ SMBASE+0x8000+offset), then enter
@@ -431,6 +436,10 @@ module core
     output logic [31:0] dbg_cr0,
     output logic [15:0] dbg_fctrl,      // live x87 control word (PC=[9:8],RC=[11:10])
     output logic [5:0]  dbg_fxop,       // q_fxop currently in flight (halt-cause probe)
+    output logic [63:0] dbg_ibuf,       // 8 fetch-window bytes at the committed EIP (PM-wedge disasm)
+    output logic [63:0] dbg_seg,        // [31:0]=GDTR base, [32]=CS.D (PM-wedge descriptor probe)
+    output logic [63:0] dbg_de_num,     // divide-#DE tap: faulting dividend (EDX:EAX), snapshot at #DE
+    output logic [63:0] dbg_de_info,    //   {divisor[31:0], eip[15:0], w[2:0], decnt[12:0]}
     // Single-step / instruction-breakpoint control (the ONLY debug signals that
     // affect execution, and ONLY when the PS arms them — see the dbg_hold block).
     // Park is at the S_DECODE instruction boundary, LOWER priority than SMI/NMI/
@@ -495,6 +504,9 @@ module core
   // GDTR / IDTR (loaded by LGDT/LIDT).
   logic [31:0] gdt_base;
   logic [15:0] gdt_limit;
+  // LDTR (loaded by LLDT from a GDT LDT descriptor). TI=1 selectors index this table.
+  logic [31:0] ldt_base;
+  logic [15:0] ldt_limit;
   logic [31:0] idt_base;
   logic [15:0] idt_limit;
   // M2S.4 — TR / TSS. LTR loads the task register from a GDT TSS descriptor; the
@@ -821,6 +833,8 @@ module core
   assign dbg_cr0      = creg0;
   assign dbg_fctrl    = fctrl;             // live x87 control word (PC = [9:8])
   assign dbg_fxop     = 6'(q_fxop);        // x87 sub-op currently in flight
+  assign dbg_ibuf     = {ibuf[7],ibuf[6],ibuf[5],ibuf[4],ibuf[3],ibuf[2],ibuf[1],ibuf[0]};
+  assign dbg_seg      = {31'd0, cs_d, gdt_base};   // [31:0]=GDTR base, [32]=CS.D (PM-wedge descriptor probe)
 
   // ---- single-step / instruction-breakpoint hold ---------------------------
   // dbg_block_issue, when 1, makes the S_DECODE boundary PARK (stay in S_DECODE,
@@ -1547,6 +1561,10 @@ module core
   logic        q_pop_sreg;        // F3 POP sreg latch
   logic        q_seg_load_lo;     // F3 MOV Sreg,[mem] low-half seg-load latch
   logic        q_store_sreg;      // F3 MOV [mem],Sreg store-selector latch
+  // PM memory-source MOV Sreg: S_EXEC latches the loaded selector here + sets
+  // q_seg_from_mem so S_SEGLD walks the descriptor for it (target = q_lseg).
+  logic        q_seg_from_mem;    // S_SEGLD selector source = seg_mem_sel (not a GPR)
+  logic [15:0] seg_mem_sel;       //   the selector loaded from memory
   logic        q_xlat;            // XLATB latch (AL <- [DS:(E)BX + AL])
   logic        q_callf_mem;       // F3 FF /3 CALLF m16:16 latch
   logic        q_jmpf_mem;        // F3 FF /5 JMPF  m16:16 latch
@@ -1703,6 +1721,7 @@ module core
   logic [31:0] tsw_eflags;        // incoming EFLAGS(from new TSS @0x24)
   logic [31:0] tsw_cr3;           // incoming CR3   (from new TSS @0x1C)
   logic [31:0] tsw_gpr [NUM_GPR]; // incoming GPRs  (@0x28..0x44)
+  logic [15:0] tsw_new_ldt;       // incoming LDTR selector (from new TSS @0x60)
   logic [15:0] tsw_sel [NUM_SEG]; // incoming selectors CS/SS/DS/ES/FS/GS (loaded)
   logic [31:0] tsw_seg_lo;        // low dword latch for the SEG descriptor read
 
@@ -2742,6 +2761,11 @@ module core
         seg_attr[SG_CS]<=8'h9B;   // CS: present readable code (P=1 S=1 type=0xB)
         cpl_r<=2'd0;              // reset CPL = 0
         gdt_base<=32'd0; gdt_limit<=16'd0; idt_base<=32'd0; idt_limit<=16'h03FF;
+        ldt_base<=32'd0; ldt_limit<=16'd0; q_seg_from_mem<=1'b0;
+        dbg_de_cnt_r<=13'd0;
+`ifdef VEN_DBG_CORE
+        dbg_de_num<=64'd0; dbg_de_info<=64'd0;   // ports exist only under VEN_DBG_CORE
+`endif
         cs_d<=1'b0;   // real-mode CS: 16-bit default operand/address size
       end else begin
         eip<=init_eip; eflags<=EFLAGS_RESET;
@@ -2764,6 +2788,11 @@ module core
         seg_attr[SG_CS]<=8'h9B;
         cpl_r<=2'd0;
         gdt_base<=32'd0; gdt_limit<=16'd0; idt_base<=32'd0; idt_limit<=16'd0;
+        ldt_base<=32'd0; ldt_limit<=16'd0; q_seg_from_mem<=1'b0;
+        dbg_de_cnt_r<=13'd0;
+`ifdef VEN_DBG_CORE
+        dbg_de_num<=64'd0; dbg_de_info<=64'd0;   // ports exist only under VEN_DBG_CORE
+`endif
         cs_d<=1'b1;   // user mode: flat 32-bit (def16 is gated off by !sys_mode)
       end
       fetch_word<=3'd0; retire_valid<=1'b0; step<=4'd0;
@@ -3033,6 +3062,14 @@ module core
             if (eng_int_derr) begin
               // #DE (vector 0): no result, EFLAGS unchanged. sys_mode delivers
               // through the IDT; user mode loud-HALTs (matches the inline path).
+`ifdef VEN_DBG_CORE
+              // divide-#DE tap: snapshot the (start-latched) faulting operands.
+              dbg_de_cnt_r <= dbg_de_cnt_r + 13'd1;
+              dbg_de_num   <= dbg_de_num_r;
+              dbg_de_info  <= {dbg_de_den_r, dbg_de_eip_r[15:0], dbg_de_w_r, (dbg_de_cnt_r + 13'd1)};
+              $display("tb: DIVDE w=%0d eip=%08x num=%016x den=%08x",
+                       dbg_de_w_r, dbg_de_eip_r, dbg_de_num_r, dbg_de_den_r);
+`endif
               if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
               else          state<=S_HALT;
             end else begin
@@ -3643,6 +3680,12 @@ module core
                              input logic [31:0] err, input logic [31:0] fault_pc);
     begin
       int_vec     <= vec;
+`ifdef VEN_DBG_CORE
+      // F4A: capture EVERY hardware fault (vec/eip/cs/err) — the abort's true vector
+      // (CWSDPMI may mislabel it "Division by Zero"). The LAST one before the abort.
+      $display("tb: FLT vec=%0d fault_pc=%08x cs=%04x err=%08x ibuf=%016x",
+               vec, fault_pc, seg_sel[SG_CS], err, dbg_ibuf);
+`endif
       int_ret_eip <= fault_pc;     // FAULT: push the faulting EIP (restart)
       int_src_pc  <= fault_pc;
       int_has_err <= has_err;
@@ -4119,7 +4162,10 @@ module core
     .tch1_tag  (ic_tch1_tag),
     .tch2_en   (ic_tch2_en),
     .tch2_set  (ic_tch2_set),
-    .tch2_tag  (ic_tch2_tag)
+    .tch2_tag  (ic_tch2_tag),
+    // Phase A: snoop-invalidate tied inert until DMA coherence is wired (Phase D).
+    .snoop_inv_valid (1'b0),
+    .snoop_inv_addr  (32'd0)
   );
 
 `ifdef VEN_UOPCACHE
@@ -4529,6 +4575,13 @@ module core
   logic [31:0] eng_int_den;
   logic        eng_int_busy, eng_int_done, eng_int_derr;
   logic [31:0] eng_int_quot, eng_int_rem;
+  // Divide-#DE tap: latch the engine's operands at issue (they are combinational +
+  // stale by S_DIV_BUSY), snapshot them to the dbg_de_* outputs when the #DE fires.
+  logic [63:0] dbg_de_num_r;   // dividend latched at the divide START
+  logic [31:0] dbg_de_den_r;   // divisor
+  logic [2:0]  dbg_de_w_r;     // width (1/2/4)
+  logic [31:0] dbg_de_eip_r;   // the divide's EIP
+  logic [12:0] dbg_de_cnt_r;   // running count of divide #DEs
 `ifdef VEN_IDIV_ITER
   always_comb begin
     logic [31:0] srcv_drv;
@@ -4668,9 +4721,12 @@ module core
   logic [2:0]  eng_fprem_q012;
 `ifdef VEN_FPREM
   logic        eng_fprem_start, eng_fprem_busy;
-  assign eng_fprem_start = (state==S_FEXEC) && (q_fxop==FX_FPREM);
+  // FPREM (FX_FPREM) and FPREM1 (FX_FPREM1) share the engine; prem1 selects the
+  // round-nearest quotient (IEEE remainder) vs the truncating quotient.
+  assign eng_fprem_start = (state==S_FEXEC) && (q_fxop==FX_FPREM || q_fxop==FX_FPREM1);
   fpu_fprem u_fprem (
     .clk(clk), .rst_n(rst_n), .start(eng_fprem_start),
+    .prem1(q_fxop==FX_FPREM1),
     .a(fst(3'd0)), .b(fst(3'd1)),
     .busy(eng_fprem_busy), .done(eng_fprem_done), .result(eng_fprem_result),
     .q012(eng_fprem_q012), .c2(eng_fprem_c2), .ie(eng_fprem_ie)

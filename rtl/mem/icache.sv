@@ -101,7 +101,16 @@ module icache #(
     input  logic [IC_TAGW-1:0] tch1_tag,
     input  logic        tch2_en,
     input  logic [IC_IDXW-1:0]  tch2_set,
-    input  logic [IC_TAGW-1:0] tch2_tag
+    input  logic [IC_TAGW-1:0] tch2_tag,
+
+    // ---- per-line snoop INVALIDATE (DMA / PCI coherence, the EADS#/inquire
+    // analogue): the northbridge pulses this for one clock when a non-CPU master
+    // writes a line that may hold code (e.g. a program DMA'd in then executed), so
+    // the next fetch of it misses and refills. Clears the matching {set,way} valid
+    // bit if resident; harmless if absent. Tied 0 until DMA is a coherent requester
+    // (Phase D) → the default build is byte-identical.
+    input  logic        snoop_inv_valid,
+    input  logic [31:0] snoop_inv_addr
 );
 
   // Data array as packed 256-bit lines, FLAT-indexed {set,way} for clean RAM
@@ -291,6 +300,16 @@ module icache #(
       if (tch0_en) do_touch(tch0_set, tch0_tag);
       if (tch1_en) do_touch(tch1_set, tch1_tag);
       if (tch2_en) do_touch(tch2_set, tch2_tag);
+      // per-line snoop INVALIDATE — LAST in the FF so it wins over a same-cycle
+      // fill_done allocate of that line (a DMA write must not leave stale code cached).
+      // Gated by snoop_inv_valid (tied 0 in the default build → byte-identical).
+      if (snoop_inv_valid) begin
+        logic [IC_IDXW-1:0] snp_set; logic [IC_TAGW-1:0] snp_tag;
+        snp_set = snoop_inv_addr[5 +: IC_IDXW];
+        snp_tag = snoop_inv_addr[5+IC_IDXW +: IC_TAGW];
+        for (int w=0; w<IC_WAYS; w++)
+          if (ic_val[snp_set][w] && ic_tag[snp_set][w]==snp_tag) ic_val[snp_set][w] <= 1'b0;
+      end
     end
   end
 

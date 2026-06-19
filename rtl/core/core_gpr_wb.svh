@@ -54,7 +54,7 @@
           else if (q_sysop==SYS_MOVCR_TO) begin end
           else if (q_sysop==SYS_MOVCR_FROM) begin
             unique case (q_sys_creg)
-              3'd0: begin gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=creg0; end
+              3'd0: begin gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], creg0, q_w, 1'b0); end  // q_w=4 MOV r32,CR0 (full) / q_w=2 SMSW r16
               3'd2: begin gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=creg2; end
               3'd3: begin gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=creg3; end
               default: begin gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=creg4; end
@@ -443,8 +443,11 @@
               end
               K_STKMISC: begin // PUSHF (ESP-=w) or ENTER (EBP<-ESP-w, ESP<-ESP-w-alloc)
                 if (q_sm==SM_ENTER) begin
-                  gpr_we[R_EBP]=1'b1; gpr_wd[R_EBP]=gpr_o[R_ESP]-{28'd0,q_w};
-                  gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-{28'd0,q_w}-{16'd0,q_imm[15:0]};
+                  // EBP<-ESP-w (new frame ptr), ESP<-ESP-w-alloc. reg_merge preserves
+                  // EBP/ESP[31:16] for the 16-bit real-mode form (q_w=2); the 32-bit
+                  // form (q_w=4) is a full write -> byte-identical to the prior code.
+                  gpr_we[R_EBP]=1'b1; gpr_wd[R_EBP]=reg_merge(gpr_o[R_EBP], gpr_o[R_ESP]-{28'd0,q_w}, q_w, 1'b0);
+                  gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=reg_merge(gpr_o[R_ESP], gpr_o[R_ESP]-{28'd0,q_w}-{16'd0,q_imm[15:0]}, q_w, 1'b0);
                 end else begin
                   gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]-{28'd0,q_w};  // PUSHF
                 end

@@ -132,6 +132,10 @@ static void vga_reset(ven_periph_t* p) {
     s->msr = 0x00; s->fcr = 0x00; s->st00 = 0x00; s->st01 = 0x00;
     s->sr_index = 0;
     for (i = 0; i <= 7;  i++) s->sr[i] = 0x00;
+    // F4A env-match: qemu's stdvga reports 0x12 at Sequencer index 6 (a chipset-ID
+    // register the VGABIOS probes for video-adapter detection); the bare VGA model
+    // left it 0, so SeaVGABIOS branched to a different adapter path vs qemu.
+    s->sr[6] = 0x12;
     s->gr_index = 0;
     for (i = 0; i <= 15; i++) s->gr[i] = 0x00;
     s->cr_index = 0x00;

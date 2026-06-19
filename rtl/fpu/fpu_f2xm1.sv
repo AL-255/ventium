@@ -138,8 +138,8 @@ module fpu_f2xm1
   endfunction
 
   // ---- state ---------------------------------------------------------------
-  typedef enum logic [2:0] {
-    S_IDLE, S_SETUP, S_HORNER, S_RECON, S_RECONB, S_PACK, S_DONE
+  typedef enum logic [3:0] {
+    S_IDLE, S_SETUP, S_TWAIT, S_TLOOK, S_HORNER, S_RECON, S_RECONB, S_PACK, S_DONE
   } state_t;
   state_t st;
 
@@ -151,6 +151,29 @@ module fpu_f2xm1
   logic        asign_q;
   logic [63:0] asig0_q, asig1_q;
   logic        done_q, pe_q, ie_q;
+
+  // ---- table ROMs as BLOCK RAM (was 3x combinational 65:1 80-bit muxes ~K LUTs).
+  // The reduction tables t[n] / 2^t[n] / (2^t[n]-1) are read SYNCHRONOUSLY (block
+  // RAM is synchronous) off the registered index n_q; rom_style=block forces BRAM
+  // rather than distributed LUTRAM. The 1-clock read latency is hidden: F2_E2/F2_EM
+  // are consumed in S_RECONB (n_q stable for ~17 clocks by then), and F2_T gets a
+  // dedicated S_TLOOK cycle. Init from the localparam ROM (constants -> ROM image).
+  (* rom_style = "block" *) logic [79:0] f2t_mem  [0:64];
+  (* rom_style = "block" *) logic [79:0] f2e2_mem [0:64];
+  (* rom_style = "block" *) logic [79:0] f2em_mem [0:64];
+  initial begin
+    for (int i = 0; i <= 64; i++) begin
+      f2t_mem[i]  = F2_T[i];
+      f2e2_mem[i] = F2_E2[i];
+      f2em_mem[i] = F2_EM[i];
+    end
+  end
+  logic [79:0] f2t_rd, f2e2_rd, f2em_rd;          // registered (BRAM) read data
+  always_ff @(posedge clk) begin                  // no reset -> clean BRAM inference
+    f2t_rd  <= f2t_mem [n_q];
+    f2e2_rd <= f2e2_mem[n_q];
+    f2em_rd <= f2em_mem[n_q];
+  end
 
   assign busy    = (st != S_IDLE);
   assign done    = done_q;
@@ -204,8 +227,9 @@ module fpu_f2xm1
               st <= S_PACK;
             end
           end else begin
-            // polynomial path: n = 32 + round_RNE(x*32); y = x - t[n].
-            automatic logic [79:0] scaled, tval, ydiff;
+            // polynomial path: n = 32 + round_RNE(x*32). The table lookup t[n] is a
+            // registered block-ROM read (f2t_rd), resolved next cycle in S_TLOOK.
+            automatic logic [79:0] scaled;
             automatic logic signed [63:0] ni;
             automatic logic [6:0] nn;
             scaled = {x_sign, x_exp + 15'd5, x_man};        // floatx80_scalbn(x,5)
@@ -214,18 +238,26 @@ module fpu_f2xm1
             // always rounds to 0, so short-circuit that range explicitly.
             ni     = ((x_exp + 15'd5) < 15'h3ffe) ? 64'sd0 : fx_to_int(scaled);
             nn     = 7'(32 + ni);
-            tval   = F2_T[nn];
-            ydiff  = fx80(fx_add(x_q, {~tval[79], tval[78:0]}, 2'd0));  // x - t[n]
-            n_q    <= nn;
-            y_q    <= ydiff;
-            if (fx_is_zero(ydiff)) begin
-              result_q <= tval;                             // qemu: ST0 = table[n].t
-              st <= S_DONE;
-            end else begin
-              accum_q <= F2_C7;                             // step0 = C7*y
-              step_q  <= 4'd0;
-              st <= S_HORNER;
-            end
+            n_q    <= nn;                                   // BRAM read address
+            st     <= S_TWAIT;
+          end
+        end
+        // ---- 1 clock for the block-ROM read (f2t_rd <= f2t_mem[n_q]) to settle:
+        //      n_q is registered THIS cycle, so f2t_rd is valid the cycle after. ----
+        S_TWAIT: st <= S_TLOOK;
+        // ---- table lookup: t[n] now valid from the block ROM; y = x - t[n] ------
+        S_TLOOK: begin
+          automatic logic [79:0] tval, ydiff;
+          tval  = f2t_rd;                                   // F2_T[n_q] (registered)
+          ydiff = fx80(fx_add(x_q, {~tval[79], tval[78:0]}, 2'd0));  // x - t[n]
+          y_q   <= ydiff;
+          if (fx_is_zero(ydiff)) begin
+            result_q <= tval;                               // qemu: ST0 = table[n].t
+            st <= S_DONE;
+          end else begin
+            accum_q <= F2_C7;                               // step0 = C7*y
+            step_q  <= 4'd0;
+            st <= S_HORNER;
           end
         end
         // ---- Horner: 14 steps, one fx_mul / fx_add per clock ------------
@@ -257,7 +289,7 @@ module fpu_f2xm1
           automatic logic signed [31:0] e2exp, bexp, ae;
           automatic logic [127:0] amul, asig, bsig;
           automatic logic        bsign;
-          e2 = F2_E2[n_q]; em = F2_EM[n_q];
+          e2 = f2e2_rd; em = f2em_rd;          // registered block-ROM reads (n_q stable)
           // asig *= frac(2^t); aexp += exp(2^t) - 0x3ffe
           amul = mul128_hi(asig0_q, asig1_q, e2[63:0]);
           e2exp = $signed({17'd0, e2[78:64]});

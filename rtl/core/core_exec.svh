@@ -163,14 +163,24 @@
                 // Only decoded under seg_real + 16-bit operand (else HALT), so this
                 // real-mode load is the only path reached.
                 if (q_seg_load) begin
-                  // F3 MOV Sreg,[mem]: the 2-byte read IS the selector (LOW half);
-                  // LES/LDS read a 4-byte far pointer and take the selector from the
-                  // HIGH half. Both load base=sel<<4 (real/v86), limit 0xFFFF, attr 0x93.
-                  seg_sel  [q_lseg] <= q_seg_load_lo ? mem_load_data[15:0]  : mem_load_data[31:16];
-                  seg_base [q_lseg] <= q_seg_load_lo ? {12'd0, mem_load_data[15:0],  4'd0}
-                                                     : {12'd0, mem_load_data[31:16], 4'd0};
-                  seg_limit[q_lseg] <= 32'h0000_FFFF;
-                  seg_attr [q_lseg] <= 8'h93;
+                  if (!seg_real && q_seg_load_lo) begin
+                    // PM MOV Sreg,[mem]: the loaded 2-byte value is a PROTECTED-mode
+                    // selector — latch it and walk the GDT/LDT descriptor in S_SEGLD
+                    // (target seg = q_lseg). Suppress this S_EXEC retire.
+                    seg_mem_sel    <= mem_load_data[15:0];
+                    q_seg_from_mem <= 1'b1;
+                    do_retire       = 1'b0;
+                    state          <= S_SEGLD;
+                  end else begin
+                    // F3 MOV Sreg,[mem]: the 2-byte read IS the selector (LOW half);
+                    // LES/LDS read a 4-byte far pointer and take the selector from the
+                    // HIGH half. Both load base=sel<<4 (real/v86), limit 0xFFFF, attr 0x93.
+                    seg_sel  [q_lseg] <= q_seg_load_lo ? mem_load_data[15:0]  : mem_load_data[31:16];
+                    seg_base [q_lseg] <= q_seg_load_lo ? {12'd0, mem_load_data[15:0],  4'd0}
+                                                       : {12'd0, mem_load_data[31:16], 4'd0};
+                    seg_limit[q_lseg] <= 32'h0000_FFFF;
+                    seg_attr [q_lseg] <= 8'h93;
+                  end
                 end
               end
 
@@ -274,6 +284,10 @@
                     // route to the iterative integer divider (ven_idiv); EAX/EDX +
                     // #DE commit on `done` in S_DIV_BUSY (engine started in core.sv).
                     flags_we=1'b0; do_retire=1'b0; state<=S_DIV_BUSY;
+`ifdef VEN_DBG_CORE
+                    dbg_de_num_r<=eng_int_num; dbg_de_den_r<=eng_int_den;
+                    dbg_de_w_r<=q_w; dbg_de_eip_r<=q_pc;   // divide-#DE tap: latch operands
+`endif
 `else
                     // R3 HOIST: quotient/remainder + #DE come from the ONE native
                     // divider at module scope (ex_div_*); the EAX/EDX write lives in
@@ -287,6 +301,10 @@
                       // #DE on div-by-zero AND on a quotient that overflows the
                       // destination width.
                       do_retire=1'b0;
+`ifdef VEN_DBG_CORE
+                      $display("tb: DIVDE w=%0d eip=%08x EDX=%08x EAX=%08x den=%08x",
+                               q_w, q_pc, gpr_o[R_EDX], gpr_o[R_EAX], ex_srcv);
+`endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else          state<=S_HALT;
                     end else
@@ -305,6 +323,10 @@
                   default: begin // IDIV /7 (signed) — with #DE (div-by-zero / overflow)
 `ifdef VEN_IDIV_ITER
                     flags_we=1'b0; do_retire=1'b0; state<=S_DIV_BUSY;   // -> ven_idiv
+`ifdef VEN_DBG_CORE
+                    dbg_de_num_r<=eng_int_num; dbg_de_den_r<=eng_int_den;
+                    dbg_de_w_r<=q_w; dbg_de_eip_r<=q_pc;   // divide-#DE tap: latch operands
+`endif
 `else
                     // R3 HOIST: signed quotient/remainder + #DE come from the ONE
                     // native divider at module scope (ex_idiv_*); the EAX/EDX write
@@ -313,6 +335,10 @@
                     if (ex_idiv_dfault) begin
                       // #DE (vector 0). Same delivery/HALT policy as DIV above.
                       do_retire=1'b0;
+`ifdef VEN_DBG_CORE
+                      $display("tb: IDIVDE w=%0d eip=%08x EDX=%08x EAX=%08x den=%08x",
+                               q_w, q_pc, gpr_o[R_EDX], gpr_o[R_EAX], ex_srcv);
+`endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else          state<=S_HALT;
                     end else
