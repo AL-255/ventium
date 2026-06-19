@@ -612,8 +612,8 @@ package fpu_x87_pkg;
     logic        cf;
     logic signed [127:0] qacc, qext;
     logic [127:0] uq, keep, remv, half;
-    logic [80:0] rsum;
-    logic        rem_neg, rem_nz, rs_pos, rs_neg, up, inexact;
+    logic [159:0] ra, rq;
+    logic        rs_pos, rs_neg, up, down, inexact, resid_pos, resid_neg;
     int          msb, extra;
     begin
       sa=fx_sign(a); sb=fx_sign(b); sign=sa^sb;
@@ -662,13 +662,19 @@ package fpu_x87_pkg;
           S = sxor << 2;
           C = cmaj << 2;
         end
-        // final partial remainder sign (the round tiebreaker). value of C+S
-        // mod 2^80; the integer field's top bit (bit79) is the centered sign.
-        rsum    = {1'b0, C} + {1'b0, S};
-        rem_neg = rsum[79];
-        rem_nz  = (rsum[79:0] != 80'd0);
-        rs_neg  = rem_neg;
-        rs_pos  = !rem_neg && rem_nz;
+        // Exact residual sign of the COMPUTED quotient: sign(ma/mb - qacc/2^70)
+        // = sign(ma*2^70 - qacc*mb). The carry-save (S,C) is SUPPOSED to hold this
+        // partial remainder, but its ones-complement / delayed-+1 representation can
+        // leave a non-canonical NONZERO image of a TRUE-ZERO remainder, spuriously
+        // flagging an exact quotient as inexact -> a 1-ULP over-round under directed
+        // rounding (fpu87/SoftFloat-3e finding). Recompute the sign/zero directly:
+        // it is scale-invariant w.r.t. the carry-save 4^NSTEP scaling, so it is
+        // faithful to the hardware partial remainder AND preserves the (buggy-PLA)
+        // qacc digits, since it is derived FROM qacc.
+        ra = {96'd0, ma} << 70;            // ma * 2^70           (<= 2^134)
+        rq = qacc[127:0] * mb;             // computed quotient * divisor (160b ctx)
+        rs_pos = (ra > rq);                // true value above the computed quotient
+        rs_neg = (ra < rq);                // true value below it
         // round the (positive) quotient accumulator to 64-bit significand.
         uq  = qacc;                      // qacc is positive for normal operands
         msb = 0;
@@ -677,19 +683,36 @@ package fpu_x87_pkg;
         keep  = uq >> extra;
         remv  = uq & ((128'd1 << extra) - 128'd1);
         half  = 128'd1 << (extra-1);
-        inexact = (remv != 128'd0) || rs_pos || rs_neg;
+        // Round the magnitude `keep` to the true quotient. With remv = the guard
+        // bits below keep and the EXACT sub-qacc residual sign (rs_pos/rs_neg), the
+        // true magnitude sits strictly above keep iff resid_pos, strictly below it
+        // (by < 1 ULP, the SRT can over-estimate) iff resid_neg.
+        inexact   = (remv != 128'd0) || rs_pos || rs_neg;
+        resid_pos = (remv != 128'd0) || rs_pos;
+        resid_neg = (remv == 128'd0) && rs_neg;
+        up = 1'b0; down = 1'b0;
         unique case (rc)
           2'd0:    // round to nearest even (remainder sign breaks exact ties)
             if      (remv > half) up = 1'b1;
             else if (remv < half) up = 1'b0;
             else                  up = rs_pos ? 1'b1 : (rs_neg ? 1'b0 : keep[0]);
-          2'd1:    up = inexact &&  sign;   // toward -inf
-          2'd2:    up = inexact && !sign;   // toward +inf
-          default: up = 1'b0;               // toward zero
+          // directed rounding keys off the residual DIRECTION, not just inexactness
+          // (using inexact would over-round keep+1 when the true value is BELOW keep):
+          2'd1: begin up =  sign && resid_pos; down = !sign && resid_neg; end  // toward -inf
+          2'd2: begin up = !sign && resid_pos; down =  sign && resid_neg; end  // toward +inf
+          default: down = resid_neg;                                          // toward zero
         endcase
         if (up) begin
           keep = keep + 128'd1;
           if (keep[64]) begin keep = keep >> 1; msb = msb + 1; end
+        end else if (down) begin
+          // keep over-estimates the true magnitude by < 1 ULP -> floor to keep-1.
+          keep = keep - 128'd1;
+          if (!keep[63]) begin               // crossed a power of two: renormalize.
+            // deficit is sub-ULP-tiny, so the floored significand is all-ones, exp-1.
+            keep = {64'd0, 64'hFFFFFFFFFFFFFFFF};
+            msb  = msb - 1;
+          end
         end
         e       = (msb - 70) + (ua - ub);
         ebiased = e + 32'sd16383;
