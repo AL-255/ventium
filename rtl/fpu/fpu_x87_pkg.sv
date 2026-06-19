@@ -162,7 +162,12 @@ package fpu_x87_pkg;
         if ( (zExp > 32'sd32766) ||
              (zExp == 32'sd32766 && zSig0==ALL1 && incr) ) begin
           oe=1'b1; pe=1'b1;
-          if (rc==2'd3 || (sign && rc==2'd1) || (!sign && rc==2'd2))
+          // softfloat saturation: overflow rounds to the MAX FINITE magnitude
+          // when the active rounding is toward zero in magnitude — i.e. truncate,
+          // or toward -inf for a POSITIVE result, or toward +inf for a NEGATIVE
+          // result; otherwise the result is signed Inf. (Was sign-swapped: that
+          // returned Inf<->max-finite backwards under directed RC. fpu87/SoftFloat.)
+          if (rc==2'd3 || (!sign && rc==2'd1) || (sign && rc==2'd2))
             res = {oe,ue,pe, fx_make(sign, 15'h7FFE, ALL1)};   // max finite magnitude
           else
             res = {oe,ue,pe, fx_make(sign, 15'h7FFF, INFM)};   // signed Inf
@@ -451,7 +456,7 @@ package fpu_x87_pkg;
     logic signed [31:0] ua, ub, msbpos;
     logic [191:0] num, q, rem;
     logic [127:0] qlo;
-    int          msb;
+    int          msb, sh, ka, kb;
     // P fractional bits for the quotient: ma,mb are 64-bit (MSB bit63) so q has
     // ~P+1 bits. We keep enough guard bits below the rounding boundary that the
     // exact-division remainder, folded in as a sticky on q's LSB, resolves any
@@ -469,14 +474,36 @@ package fpu_x87_pkg;
       end else begin
         ma=fx_man(a); mb=fx_man(b);
         ua=fx_uexp_eff(a); ub=fx_uexp_eff(b);
+        // Normalize each significand so its leading 1 sits at bit63. Denormal
+        // operands arrive UNNORMALIZED (leading 1 below bit63); dividing a tiny
+        // dividend (e.g. ma=1) would otherwise yield only a few quotient bits and
+        // truncate the mantissa. The value model (mant * 2^(uexp-63)) is preserved
+        // by decrementing uexp by the left-shift. (fpu87/SoftFloat-3e finding.)
+        ka=0; for (int i=63;i>=0;i--) if (ma[i]) begin ka=i; break; end
+        kb=0; for (int i=63;i>=0;i--) if (mb[i]) begin kb=i; break; end
+        ma = ma << (63-ka); ua = ua - (63-ka);
+        mb = mb << (63-kb); ub = ub - (63-kb);
         num = {128'd0, ma} << P;            // ma << P
         q   = num / {128'd0, mb};
         rem = num - q * {128'd0, mb};
         if (rem != 192'd0) q[0] = q[0] | 1'b1;   // exact-division sticky bit
         msb = 0;
-        for (int i=135; i>=0; i--) if (q[i]) begin msb=i; break; end
+        for (int i=191; i>=0; i--) if (q[i]) begin msb=i; break; end
         msbpos = msb;
-        qlo = q[127:0];
+        // q's significant bits sit ABOVE bit 127 when the divisor is an
+        // unnormalized denormal (q = (ma<<P)/mb blows up as mb's MSB drops below
+        // bit63). A plain q[127:0] would then DROP the MSB (-> sig==0 -> a wrong
+        // 0 result instead of the correct overflow-to-Inf). Anchor a 128-bit
+        // window at q's MSB, jamming anything shifted out into the sticky LSB;
+        // fx_round_pack_f re-aligns the window MSB and uses the passed weight as
+        // that MSB's exponent, so the magnitude is preserved. (fpu87/SoftFloat.)
+        if (msb > 127) begin
+          sh  = msb - 127;
+          qlo = q >> sh;                         // window MSB now at bit 127
+          if ((q & ((192'd1 << sh) - 192'd1)) != 192'd0) qlo[0] = 1'b1;
+        end else begin
+          qlo = q[127:0];
+        end
         // value(ma/mb) ~ q * 2^-P ; weight of q's MSB = msbpos - P.
         // total value = (ma/mb)*2^(ua-ub) -> unbiased of MSB:
         fx_div_exact = fx_round_pack_f(sign, (msbpos - P) + (ua - ub), qlo, 1'b0, rc);
@@ -1121,7 +1148,7 @@ package fpu_x87_pkg;
         rem   = sig[39:0];
         if (eb >= 32'sd255) begin              // OVERFLOW
           oe=1'b1; pe=1'b1;
-          if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+          if (rc==2'd3 || (!s && rc==2'd1) || (s && rc==2'd2))
             fx_to_f32_ex = {oe,ue,pe, s, 8'hFE, 23'h7FFFFF};   // max normal magnitude
           else
             fx_to_f32_ex = {oe,ue,pe, s, 8'hFF, 23'd0};        // Inf
@@ -1148,7 +1175,7 @@ package fpu_x87_pkg;
           end
           if (eb >= 32'sd255) begin                       // carry pushed into overflow
             oe=1'b1; pe=1'b1;
-            if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+            if (rc==2'd3 || (!s && rc==2'd1) || (s && rc==2'd2))
               fx_to_f32_ex = {oe,ue,pe, s, 8'hFE, 23'h7FFFFF};
             else
               fx_to_f32_ex = {oe,ue,pe, s, 8'hFF, 23'd0};
@@ -1189,7 +1216,7 @@ package fpu_x87_pkg;
         rem   = sig[10:0];
         if (eb >= 32'sd2047) begin             // OVERFLOW
           oe=1'b1; pe=1'b1;
-          if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+          if (rc==2'd3 || (!s && rc==2'd1) || (s && rc==2'd2))
             fx_to_f64_ex = {oe,ue,pe, s, 11'h7FE, 52'hFFFFFFFFFFFFF};   // max normal
           else
             fx_to_f64_ex = {oe,ue,pe, s, 11'h7FF, 52'd0};              // Inf
@@ -1216,7 +1243,7 @@ package fpu_x87_pkg;
           end
           if (eb >= 32'sd2047) begin
             oe=1'b1; pe=1'b1;
-            if (rc==2'd3 || (s && rc==2'd1) || (!s && rc==2'd2))
+            if (rc==2'd3 || (!s && rc==2'd1) || (s && rc==2'd2))
               fx_to_f64_ex = {oe,ue,pe, s, 11'h7FE, 52'hFFFFFFFFFFFFF};
             else
               fx_to_f64_ex = {oe,ue,pe, s, 11'h7FF, 52'd0};
