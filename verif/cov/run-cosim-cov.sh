@@ -34,6 +34,7 @@ mkdir -p "$DAT"; rm -f "$DAT"/*.dat 2>/dev/null || true
 IMAGES=(
   "psoccpuid|$ROOT/verif/sys/tests/psoccpuid|psoccpuid.bin"
   "covtsc|$ROOT/verif/cov/cosim/covtsc|covtsc.bin"
+  "covio|$ROOT/verif/cov/cosim/covio|covio.bin"
 )
 
 RAN=0

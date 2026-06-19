@@ -93,8 +93,31 @@ Two views of the CORE (both authoritative — they measure different point sets)
 
 | view | points | line | toggle |
 |------|-------:|-----:|-------:|
-| **default core** (the `make verify` feature set) | 1327 | **90.0 %** | 61.7 % |
+| **default core** (the `make verify` feature set) | 1341 | **92.0 %** | 59.7 % |
 | **full-featured core** (all `VEN_*` flags via the FLAGS lane) | 2028 | **85.1 %** | 63.3 % |
+
+> Merge note: `verilator_coverage` fails past ~a few hundred input `.dat`s
+> (~GBs), so merge in batches (feed the running aggregate back in). Coverage from
+> two BUILD configs (default vs feature) has different point sets — keep them in
+> separate aggregates rather than one cross-config merge.
+
+### Chasing the `rtl/core` ceiling (default config)
+
+`rtl/core` default-config line coverage reached **~92 %**; the ~81 still-
+uncovered lines break down as (these are *not* reachable by more ISA tests
+against the default `ventium_top`):
+
+| ~count | category | what would cover it |
+|------:|----------|---------------------|
+| 12 | CPUID **soc-arm** leaf table | the real `soc_en` → the SoC lane (`run-soc-cov.sh`, separate pool) covers it |
+| 20 | special-mode (`proxy_en`, `cosim`, `VEN_DBG_CORE`, `fe_xlate`, `nmi`/`intr`, `soc_en`, `S_HLTWAIT`, `S_F00F`) | the corresponding build/run modes (proxy/dbg builds, HW-interrupt injection, HLT in system mode, errata flag) |
+| 9 | system faults (#NP/#GP gate, DPL violation, `!pde[0]` #PF-on-PDE, far-jmp `seg_load_fault`, error-code push, `RETF imm`) | new bare-metal fault images under `verif/sys/tests` |
+| 9 | defensive `default: d_unknown`/`;` dead arms | unreachable by valid stimulus (only invalid opcodes already in the HALT lane) |
+| ~31 | feature-config / FP-corner / niche decode (`fri/fst/fp_bop/v_br_cc`, FSCALE exp over/underflow, SNaN, `callw`, rel16 Jcc) | the FLAGS lane (feature build) + crafted FP-exception operands |
+
+User/cosim-reachable gaps closed this round: REP-with-CX=0 (`t_repzero`, also
+in `make verify`), IN/OUT/INS + REP-INS-CX=0 (`covio`), CPUID/RDTSC/INVD
+(`--cosim`).
 
 The FLAGS lane builds a feature-rich `ventium_top` (FE_PIPE, UOPCACHE, BTB_PIPE,
 FP_PIPE/2, FP_OVERLAP, FXCH_FREE, **TRANSCENDENTAL**, FPREM, SRT/IDIV/BCD_ITER,

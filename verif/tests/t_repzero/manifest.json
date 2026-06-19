@@ -1,0 +1,2 @@
+{ "name":"t_repzero","src":"t_repzero/t_repzero.s","elf":"t_repzero/t_repzero.elf",
+  "image":"t_repzero/t_repzero.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":60 }
