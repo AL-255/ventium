@@ -21,7 +21,7 @@
               if (q_sysop==SYS_LLDT) begin
                 // LLDT: load the LDTR hidden base/limit from the GDT LDT descriptor.
                 ldt_base  <= desc_base(desc);
-                ldt_limit <= desc_limit(desc)[15:0];
+                ldt_limit <= desc_limit16(desc);
               end else begin
                 tr_sel   <= gpr_o[q_src_reg][15:0];
                 tr_base  <= desc_base(desc);

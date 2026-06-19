@@ -51,6 +51,16 @@ package ventium_sys_pkg;
       desc_limit = d[55] ? {lim20, 12'hFFF} : {12'd0, lim20};
     end
   endfunction
+  // Low 16 bits of the (granularity-scaled) limit, for the 16-bit LDTR limit.
+  // A standalone function avoids a bit-select on a function call (`desc_limit(d)[15:0]`),
+  // which Verilator accepts but Vivado synthesis rejects (IEEE 1800 syntax).
+  function automatic logic [15:0] desc_limit16(input logic [63:0] d);
+    logic [31:0] full;
+    begin
+      full = desc_limit(d);
+      desc_limit16 = full[15:0];
+    end
+  endfunction
   // The descriptor access byte = d[47:40] = P|DPL[1:0]|S|type[3:0].
   function automatic logic [7:0] desc_attr (input logic [63:0] d); desc_attr = d[47:40]; endfunction
   function automatic logic       desc_present(input logic [7:0] a); desc_present = a[7];      endfunction
