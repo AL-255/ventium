@@ -94,12 +94,6 @@ if {[envor DBG_CORE 0]} { lappend DEFS VEN_DBG_CORE }
 # port list is unchanged (the seam is internal to ventium_kv260_core), so the BD/
 # address map need no change. OFF by default.
 if {[envor PS_PROXY 0]} { lappend DEFS VEN_PS_PROXY }
-# AXI_RREG=1 (default ON): register ven_axi_master's AXI read-data channel before the
-# L1/icache fill capture — the F4 fix for the board-only fetch corruption (a corrupted
-# line-fill word under Alpha_Init's saturated fill traffic on real HPC0). Removes the
-# combinational AXI-R-bus -> cache-array path; verified make-verify GREEN + Quake-to-
-# palettes clean. Drop to 0 to A/B against the un-registered path.
-if {[envor AXI_RREG 1]} { lappend DEFS VEN_AXI_RREG }
 # FP_PC_RELAX=1 (default ON): relax the x87 precision-control loud-HALT (f_pc_bad)
 # so FP arithmetic under PC!=11 (24-bit single / 53-bit double) proceeds instead of
 # halting. Quake's rasterizer (R_RecursiveWorldNode) runs FSUBR/FMUL under single

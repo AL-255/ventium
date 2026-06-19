@@ -1917,9 +1917,10 @@ FADD / FSUB / FSUBR / FMUL / FDIV / FDIVR (``D8/DC``, ``D8 /r``, ``DC /r``, ``DA
     **Pentium FDIV SRT erratum** is reproduced two ways: the runtime
     ``fx_div_errata`` anchor for the one published bit-exact operand pair (gated
     by ``errata_en[ERR_FDIV]``), and — optionally, at compile time
-    (``+define+VEN_SRT_DIV+VEN_SRT_FDIV_BUG``) — the genuine radix-4 SRT divider
-    ``fx_srt_div``, which reproduces the flaw from first principles for *all*
-    operands. See :doc:`../microarch/srt-divider`. All
+    (``+define+VEN_SRT_FDIV_BUG``) — the buggy PLA of the genuine radix-4 SRT
+    divider ``fx_srt_div`` (the default datapath), which reproduces the flaw
+    from first principles for *all* operands. See
+    :doc:`../microarch/srt-divider`. All
     **NP** functionally (AP-500 FX, not modeled); in cycle-mode the ``D8``
     reg-form models result latency (3 add/sub, 3 mul, 39 div) and occupancy so a
     dependent ``fadd`` chain emerges at CPI ~3. **Precision control:** any arith

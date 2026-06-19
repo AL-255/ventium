@@ -10,7 +10,7 @@ create_project -in_memory -part $PART
 set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
     VEN_FP_PIPE VEN_FP_PIPE2 VEN_CACHE_HALF VEN_L1_AXI VEN_KV260_SOC \
     VEN_IC_BRAM VEN_BTB_PIPE VEN_UOPCACHE VEN_FE_PIPE VEN_DBG_CORE VEN_PS_PROXY \
-    VEN_AXI_RREG VEN_FP_PC_RELAX VEN_FPTRAP VEN_FPREM}
+    VEN_FP_PC_RELAX VEN_FPTRAP VEN_FPREM}
 set svfiles {
     ventium_pkg.sv core/ventium_alu_pkg.sv core/ventium_decode_pkg.sv
     fpu/fpu_x87_pkg.sv core/ventium_sys_pkg.sv core/ventium_x87_pkg.sv

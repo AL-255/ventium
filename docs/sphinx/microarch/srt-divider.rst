@@ -9,12 +9,13 @@ hard-wired quotient-selection table. That table is the famous **PLA** Ken
 Shirriff photographed and reverse-engineered from the die, and five missing
 entries in it are the **FDIV bug** of 1994.
 
-Ventium ships the *real* algorithm as an **optional, compile-time** division
-engine (``fpu_x87_pkg::fx_srt_div``). With its **correct** PLA it produces the
+Ventium ships the *real* algorithm as its **default** division engine
+(``fpu_x87_pkg::fx_srt_div``). With its **correct** PLA it produces the
 correctly-rounded ``floatx80`` quotient — bit-identical to QEMU and to the
-default fast divider. With its **buggy** PLA it reproduces the FDIV flaw **from
-first principles**: no operand is special-cased, the famous wrong answer simply
-*emerges* from the missing table cells.
+behavioural ``fx_div_exact`` fast divider (the ``+define+VEN_DIV_EXACT``
+opt-out). With its **buggy** PLA (``+define+VEN_SRT_FDIV_BUG``) it reproduces
+the FDIV flaw **from first principles**: no operand is special-cased, the famous
+wrong answer simply *emerges* from the missing table cells.
 
 This page documents the algorithm, the datapath, the bug, and how Ventium models
 and verifies all of it. The primary references are Ken Shirriff, *"Intel's $475
@@ -152,23 +153,25 @@ correct.
 How Ventium models it
 =====================
 
-``fx_div`` is a compile-time dispatcher. The defaults leave the project
-bit-exact vs QEMU; the SRT engine is opt-in:
+``fx_div`` is a compile-time dispatcher. The genuine SRT engine is the
+**default** (commit ``3791e46`` made it unconditional); the project stays
+bit-exact vs QEMU unless the FDIV-flaw flag is set:
 
 .. list-table::
    :header-rows: 1
-   :widths: 34 66
+   :widths: 40 60
 
    * - Build
      - Division datapath
    * - *(no define)* — **default**
-     - ``fx_div_exact`` — fast behavioural wide divide (correctly rounded).
-   * - ``+define+VEN_SRT_DIV``
-     - ``fx_srt_div`` with the **correct** PLA — the genuine SRT engine; still
+     - ``fx_srt_div`` with the **correct** PLA — the genuine SRT engine;
        correctly-rounded / bit-exact vs QEMU.
-   * - ``+define+VEN_SRT_DIV`` ``+define+VEN_SRT_FDIV_BUG``
+   * - ``+define+VEN_SRT_FDIV_BUG``
      - ``fx_srt_div`` with the **buggy** PLA — the FDIV flaw, reproduced for
        *all* operands from first principles.
+   * - ``+define+VEN_DIV_EXACT``
+     - ``fx_div_exact`` — fast behavioural wide divide (correctly rounded);
+       a sim-only opt-out that takes precedence over ``VEN_SRT_FDIV_BUG``.
 
 With the buggy PLA the canonical pairs flaw exactly as documented, while a
 triggering divisor alone does not:
@@ -220,5 +223,6 @@ a model that has **no oracle** for the general flaw. The SRT engine *is* that
 oracle: it bit-reproduces the documented flaw (and a second published pair) with
 no operand special-cased — the very thing the erratum model's own comments noted
 "would require bit-reproducing Intel's exact buggy SRT iteration." The two
-coexist: ``fx_div_errata`` remains the default-build, self-checking anchor;
-``fx_srt_div`` is the opt-in, first-principles reproduction.
+coexist: ``fx_div_errata`` remains the default-build, self-checking anchor for
+the runtime erratum; ``fx_srt_div`` is always the divider, and its buggy-PLA
+flaw reproduction is the compile-time opt-in (``+define+VEN_SRT_FDIV_BUG``).

@@ -20,10 +20,10 @@
 // DUAL-MODE (docs/m11 §3.4): F2XM1's QEMU softfloat algorithm is ITSELF the P5
 // accuracy-faithful one (80-bit table+Horner+reconstruct, ~0.5 ulp == silicon),
 // with no catastrophic-reduction divergence (that is FSIN-near-pi's story, not
-// F2XM1's). So this single datapath serves both QEMU and silicon (+VEN_TRSC_SILICON)
-// modes; tools/p5xtrans/p5xtrans.c remains the silicon-accuracy oracle and was
-// shown to agree to <1 ulp. The `silicon` parameter is reserved for symmetry with
-// the FSIN/FCOS engines (where the modes genuinely diverge) — inert here.
+// F2XM1's). So this single datapath serves both QEMU and silicon-accuracy modes;
+// tools/p5xtrans/p5xtrans.c remains the silicon-accuracy oracle and was shown to
+// agree to <1 ulp. The `silicon` parameter is reserved for symmetry with the
+// FSIN/FCOS engines (where the modes genuinely diverge) — inert here.
 //
 // The floatx80 Horner runs in round-nearest (QEMU forces RNE there); only the
 // final normalizeRoundAndPackFloatx80 honours the user RC (`rc` port).

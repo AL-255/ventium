@@ -5,7 +5,7 @@
 // transcendentals (#11). Companion to p5xtrans.c (the SILICON-mode oracle).
 //
 // The dual-mode RTL engine (docs/m11-transcendental-spec.md §3.4) ships SILICON
-// behaviour but, by DEFAULT (+VEN_TRANSCENDENTAL without +VEN_TRSC_SILICON),
+// behaviour but, by DEFAULT (+VEN_TRANSCENDENTAL, the `silicon` parameter left 0),
 // reproduces QEMU 8.2's softfloat helper bit-for-bit so the existing `make verify`
 // x87 path stays a real exact gate. This file is the executable definition of that
 // QEMU-mode target: a faithful, line-by-line port of qemu-8.2.2

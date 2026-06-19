@@ -405,10 +405,12 @@ package fpu_x87_pkg;
   // 1.0001/1.0100/1.0111/1.1010/1.1101). With `buggy`=1 those cells return 0 and
   // the flaw EMERGES FROM FIRST PRINCIPLES — no operand is special-cased.
   //
-  // COMPILE-TIME FEATURE (user-selectable, default OFF — see fx_div dispatcher):
-  //   +define+VEN_SRT_DIV       route every FDIV/FDIVR through this SRT engine
-  //   +define+VEN_SRT_FDIV_BUG  (implies VEN_SRT_DIV) use the buggy PLA so the
-  //                             FDIV flaw is reproduced for all operands.
+  // DEFAULT DATAPATH (see fx_div dispatcher): this genuine SRT engine with the
+  // CORRECT PLA is the unconditional hardware default — no define needed.
+  //   +define+VEN_SRT_FDIV_BUG  use the buggy PLA so the FDIV flaw is reproduced
+  //                             for all operands.
+  //   +define+VEN_DIV_EXACT     opt OUT to the fast behavioral fx_div_exact (a
+  //                             sim-only escape hatch; takes precedence).
   //
   // Validated bit-exact against the Python golden model tools/srt/srt_ref.py:
   //   correct PLA -> correctly-rounded floatx80 (8000/8000 random corpus == the
@@ -649,13 +651,15 @@ package fpu_x87_pkg;
   // iteration -- not faithfully verifiable without that oracle. We therefore take
   // the spec's explicit fallback: "reproduce the PUBLISHED failing operands."
   //
-  // UPDATE (M8.5): that "gold-standard path" now EXISTS as the optional radix-4
-  // SRT engine fx_srt_div (above, +define+VEN_SRT_DIV+VEN_SRT_FDIV_BUG). It bit-
+  // UPDATE (M8.5): that "gold-standard path" now EXISTS as the genuine radix-4
+  // SRT engine fx_srt_div (above, the default datapath; +define+VEN_SRT_FDIV_BUG
+  // selects the buggy PLA). It bit-
   // reproduces Intel's buggy SRT iteration from first principles -- the canonical
   // 4195835/3145727 flaw (and a second published pair) emerge from the missing
   // PLA entries, validated by verif/srt. This runtime errata model is kept as the
-  // documented, default-build anchor (M6 tests stay green); fx_srt_div is the
-  // opt-in, no-special-case reproduction. See verif/srt/README.md.
+  // documented, default-build anchor (M6 tests stay green); fx_srt_div's buggy
+  // PLA (+define+VEN_SRT_FDIV_BUG) is the opt-in, no-special-case reproduction.
+  // See verif/srt/README.md.
   //
   // This function reproduces flawed quotients ONLY for operand pairs that have an
   // EXACT, bit-precise published flawed result, via the DOC_VEC table below. The
