@@ -292,10 +292,23 @@ static uint32_t le32(const uint8_t *p)
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/* Integer (square-pixel) scale: the largest N such that N*src fits the CB_W x
+ * CB_H window, then centre it with a black letterbox/pillarbox. Never distort.
+ *   320x200 -> 4x = 1280x800 (80px top/bottom bars)
+ *   320x240 -> 4x = 1280x960 (fills the window)
+ * The maps carry -1 for the border pixels so draw_quake() blacks them out. */
 static void build_maps(void)
 {
-    for (int dx = 0; dx < CB_W; dx++) g_colmap[dx] = (dx * g_qw) / CB_W;
-    for (int dy = 0; dy < CB_H; dy++) g_rowmap[dy] = (dy * g_qh) / CB_H;
+    int sx = CB_W / (g_qw > 0 ? g_qw : 1);
+    int sy = CB_H / (g_qh > 0 ? g_qh : 1);
+    int n  = sx < sy ? sx : sy;
+    if (n < 1) n = 1;
+    int xoff = (CB_W - n * g_qw) / 2;
+    int yoff = (CB_H - n * g_qh) / 2;
+    for (int dx = 0; dx < CB_W; dx++)
+        g_colmap[dx] = (dx >= xoff && dx < xoff + n * g_qw) ? (dx - xoff) / n : -1;
+    for (int dy = 0; dy < CB_H; dy++)
+        g_rowmap[dy] = (dy >= yoff && dy < yoff + n * g_qh) ? (dy - yoff) / n : -1;
 }
 
 static void open_source(void)
@@ -388,10 +401,17 @@ static void draw_quake(int ox, int oy)
     }
 
     for (int dy = 0; dy < CB_H; dy++) {
-        const uint8_t *srow = g_qpix + (size_t)g_rowmap[dy] * g_qw;
         uint16_t *drow = g_fb + (size_t)(oy + dy) * g_stride_px + ox;
-        for (int dx = 0; dx < CB_W; dx++)
-            drow[dx] = g_qlut[srow[g_colmap[dx]]];
+        int sry = g_rowmap[dy];
+        if (sry < 0) {                          /* letterbox row -> black */
+            for (int dx = 0; dx < CB_W; dx++) drow[dx] = 0;
+            continue;
+        }
+        const uint8_t *srow = g_qpix + (size_t)sry * g_qw;
+        for (int dx = 0; dx < CB_W; dx++) {
+            int srx = g_colmap[dx];             /* pillarbox column -> black */
+            drow[dx] = (srx < 0) ? 0 : g_qlut[srow[srx]];
+        }
     }
 }
 

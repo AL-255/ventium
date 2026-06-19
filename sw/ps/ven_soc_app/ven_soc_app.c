@@ -240,6 +240,33 @@ static ven_periph_t *g_i8042, *g_pic, *g_vga, *g_pit, *g_rtc, *g_ide;
 static int           g_dac_dirty = 0;    // guest wrote the DAC -> re-export
 static const char   *VGA_DAC_EXPORT = "/dev/shm/ven_vga_dac";
 
+// --- live VGA display: kms-draw runs alongside the app by default (--dos) ------
+// User directive: kms-draw is a default companion of ven_soc_app so the board's
+// monitor shows the guest VGA the moment it renders. ./kms-draw --vga13 reads the
+// live mode-13h framebuffer (carveout+0xA0000) + exported DAC and blits it
+// integer-scaled to the panel. Suppress with --no-kms.
+static pid_t         g_kms_pid = -1;
+static int           g_no_kms  = 0;
+static void spawn_kms(void) {
+    if (g_no_kms || g_kms_pid > 0) return;
+    if (access("./kms-draw", X_OK) != 0) {
+        fprintf(stderr, "ven_soc: ./kms-draw not executable — no live display "
+                        "(build it, or pass --no-kms to silence)\n");
+        return;
+    }
+    pid_t pid = fork();
+    if (pid == 0) {                         // child becomes the display
+        execl("./kms-draw", "kms-draw", "--vga13", (char *)NULL);
+        perror("execl kms-draw"); _exit(127);
+    }
+    if (pid > 0) { g_kms_pid = pid;
+        fprintf(stderr, "ven_soc: live display: kms-draw --vga13 (pid %d)\n", pid); }
+    else perror("fork kms-draw");
+}
+static void stop_kms(void) {
+    if (g_kms_pid > 0) { kill(g_kms_pid, SIGTERM); g_kms_pid = -1; }
+}
+
 // export the live 6-bit DAC for the fb_vnc daemon (768 bytes, atomic-enough:
 // readers tolerate a torn palette for one frame).
 static void export_dac(void) {
@@ -312,6 +339,7 @@ static void vga_gfxdump(void) {
 // dropped — dropping it would reset ven_axi_master mid-handshake and strand a beat).
 // No-op on a non-shutdown-capable bitstream (AXI_IDLE just never deviates).
 static void ven_shutdown_quiesce(void) {
+    stop_kms();                                 // tear down the live display child
     if (!g_reg) return;
     uint32_t keep = rd(VEN_R_CTRL) & (VEN_CTRL_CORE_RUN | VEN_CTRL_IRQ_EN);
     wr(VEN_R_CTRL, keep | VEN_CTRL_SHUTDOWN);
@@ -501,6 +529,7 @@ int main(int argc, char **argv) {
         if      (!strcmp(argv[i], "--sys")) sysmode = 1;
         else if (!strcmp(argv[i], "--dos")) g_dos   = 1;
         else if (!strcmp(argv[i], "--soft-vga")) g_soft_vga = 1;   // PS-side INT10h VGABIOS (DOS Quake)
+        else if (!strcmp(argv[i], "--no-kms")) g_no_kms = 1;        // suppress the default live kms-draw display
         else if (!strcmp(argv[i], "--extmem-kb") && i + 1 < argc) g_extmem_kb = strtoul(argv[++i], 0, 0);
         else if (!strcmp(argv[i], "--kbd")  && i + 1 < argc) kbd_path = argv[++i];
         else if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];  // SeaBIOS image
@@ -688,6 +717,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ven_soc: HW breakpoint armed @ 0x%08x; will single-step %u\n", g_bp, g_steps);
     }
     wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN);                   // release reset -> run
+    if (g_dos) spawn_kms();                              // default live VGA display (--no-kms to suppress)
 
     // service loop (F2: poll; F3+ can switch to the GIC interrupt on irq_out).
     uint64_t serviced = 0;
