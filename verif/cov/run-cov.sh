@@ -82,7 +82,11 @@ GOLDEN_RETRIES="${GOLDEN_RETRIES:-3}"
 #   tx_fpspecial2 — FSCALE overflow->Inf sets the x87 PE flag in QEMU but not in
 #              the core (fstat 0x3028 vs 0x3008); a minor x87 status-flag gap. The
 #              test exists to cover the FSCALE OE/UE + SNaN arms (coverage).
-KNOWN_FAIL="${KNOWN_FAIL:-tx_fprem tx_fpspecial2}"
+#   tx_transc — x87 transcendentals (F2XM1/FYL2X/FSIN/.../FPATAN) are DEFERRED
+#              (d_unknown -> HALT) unless built +VEN_TRANSCENDENTAL, so the
+#              default-build ISA lane halts on them; it is a FLAGS-lane coverage
+#              test (run there against the feature-rich build).
+KNOWN_FAIL="${KNOWN_FAIL:-tx_fprem tx_fpspecial2 tx_transc}"
 is_known_fail() { case " $KNOWN_FAIL " in *" $1 "*) return 0;; esac; return 1; }
 VERILATOR_COVERAGE="${VERILATOR_COVERAGE:-verilator_coverage}"
 CFLAGS_BASE="-m32 -march=pentium -nostdlib -static -Wl,--build-id=none"

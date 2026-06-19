@@ -88,12 +88,25 @@ coverage in three rounds:
 | + round-1/2 gap tests        | 83.9 % |
 | + cycle-mode                 | 85.3 % |
 | + HALT arms + real-mode `psoc*` + CPUID/RDTSC (`--cosim`) | **90.0 %** |
-| + build-flags lane (FE_PIPE/UOPCACHE/FP_PIPE/TRANSCENDENTAL/...) | pending* |
 
-\* the FLAGS lane builds a feature-rich `ventium_top` and lights up the `ifdef
-VEN_*` code + whole modules (`uopcache.sv`, `fpu_f2xm1/fpatan/fyl2x/fsincos.sv`,
-the FP-commit pipeline) that no other lane reaches; it is wired into
-`make coverage-all` and ready to run once the core compiles cleanly.
+Two views of the CORE (both authoritative — they measure different point sets):
+
+| view | points | line | toggle |
+|------|-------:|-----:|-------:|
+| **default core** (the `make verify` feature set) | 1327 | **90.0 %** | 61.7 % |
+| **full-featured core** (all `VEN_*` flags via the FLAGS lane) | 2028 | **85.1 %** | 63.3 % |
+
+The FLAGS lane builds a feature-rich `ventium_top` (FE_PIPE, UOPCACHE, BTB_PIPE,
+FP_PIPE/2, FP_OVERLAP, FXCH_FREE, **TRANSCENDENTAL**, FPREM, SRT/IDIV/BCD_ITER,
+FPTRAP, FP_PC_RELAX) and runs the whole corpus + `tx_transc` (the transcendental
+exerciser) through it. It lit up modules that are 0%/absent in every other lane:
+`uopcache.sv` 90 %, `fpu_top.sv` 100 %, `fpu_fprem.sv` 73 %, `fpu_fsincos.sv`
+95 %, `fpu_f2xm1.sv` 66 %, `fpu_fyl2x.sv` 81 %, `fpu_fpatan.sv` 68 %.
+
+The SoC lane (`run-soc-cov.sh`, a separate pool) covers the SoC peripherals the
+core lanes never touch: `ven_i8237` 90 %, `ven_uart16550` 85 %, `ven_rtc` 75 %,
+`ven_i8272` 57 %, `ven_pit`/`ven_pic`/`ven_i8042`/`ven_vga*`, plus CPUID/RDTSC
+under the real `soc_en`.
 
 MEM lane: ven_l1d 75 / axi 74 / l2 95 % line. UNIT lane: ven_idiv 92 / bcd 83 /
 sqrt 78 / srt 68 / biu_p5 90 % line.
