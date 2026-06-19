@@ -107,7 +107,7 @@ module fpu_fyl2x
             int_exp_q <= ie2;
             ie64 = ie2;
             if (m1[78:64]==15'd0 && m1[63:0]==64'd0) begin   // exact power of 2
-              automatic logic [80:0] mr;
+              automatic logic [82:0] mr;
               mr = fx_mul(fx_from_int(ie64), y_q, rc_q);
               result_q <= mr[79:0]; pe_q <= mr[80]; st<=S_DONE;
             end else begin
@@ -122,7 +122,7 @@ module fpu_fyl2x
                 (x_exp == 15'h3ffd && x_man > (x_sign ? 64'h95f619980c4336f7 : 64'hd413cccfe7799211))) begin
               result_q <= {16'hffff, 64'hc000000000000000}; pe_q<=1'b0; ie_q<=1'b1; st<=S_DONE;
             end else if (x_is_zero || y_is_zero || a1e==32'sd32767) begin
-              automatic logic [80:0] mr; mr=fx_mul(x_q,y_q,rc_q);
+              automatic logic [82:0] mr; mr=fx_mul(x_q,y_q,rc_q);
               result_q<=mr[79:0]; pe_q<=mr[80]; st<=S_DONE;
             end else if (a0e < 32'sd16304) begin              // exp < 0x3fb0: log2e tiny path
               automatic logic [191:0] p; automatic logic [63:0] s0,s1; automatic logic signed [31:0] e;

@@ -3216,22 +3216,27 @@ module core
   logic [79:0] fstore_val;
   logic        fstore_pe;
   logic        fstore_ie;
+  logic        fstore_oe;        // FST m32/m64 narrowing overflow -> Inf (OE)
+  logic        fstore_ue;        // FST m32/m64 narrowing underflow -> denormal (UE)
   always_comb begin
     logic [79:0] s0;
-    logic [32:0] r32;
-    logic [64:0] r64;
+    logic [34:0] r32;            // {oe, ue, pe, float32}
+    logic [66:0] r64;            // {oe, ue, pe, float64}
     logic [65:0] ri;             // {invalid, inexact, value}
     s0 = fp_st0_phys;             // ST0 (= fpr[ftop], u_fpu_state read port)
-    r32 = 33'd0; r64 = 65'd0; ri = 66'd0;
+    r32 = 35'd0; r64 = 67'd0; ri = 66'd0;
     fstore_val = 80'd0; fstore_pe = 1'b0; fstore_ie = 1'b0;
+    fstore_oe = 1'b0; fstore_ue = 1'b0;
     unique case (q_fxop)
       FX_FST_M32: begin
         r32 = fx_to_f32_ex(s0, fctrl[11:10]);
-        fstore_val = {48'd0, r32[31:0]}; fstore_pe = r32[32];
+        fstore_val = {48'd0, r32[31:0]};
+        fstore_pe = r32[32]; fstore_ue = r32[33]; fstore_oe = r32[34];
       end
       FX_FST_M64: begin
         r64 = fx_to_f64_ex(s0, fctrl[11:10]);
-        fstore_val = {16'd0, r64[63:0]}; fstore_pe = r64[64];
+        fstore_val = {16'd0, r64[63:0]};
+        fstore_pe = r64[64]; fstore_ue = r64[65]; fstore_oe = r64[66];
       end
       FX_FST_M80:  fstore_val = s0;
       // M10 FBSTP: round ST0 to int (per RC), pack 18-digit BCD + sign byte.
@@ -4309,6 +4314,8 @@ module core
     .fp_occ_pending   (fp_occ_pending),
     .fstore_ie        (fstore_ie),
     .fstore_pe        (fstore_pe),
+    .fstore_oe        (fstore_oe),
+    .fstore_ue        (fstore_ue),
 `ifdef VEN_FP_OVERLAP
     .fp_busy_cyc      (fp_busy_cyc),
 `endif
