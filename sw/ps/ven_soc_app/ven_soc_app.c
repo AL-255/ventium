@@ -506,7 +506,21 @@ static int service_out(uint16_t port, uint32_t val) {
         default:     return 0;             // ignore unmodeled OUTs (F3 fills these in)
     }
 }
+// I/O-read histogram — find which device a hang spins on (e.g. the go32 stub
+// polling the IDE). Dumped on SIGTERM/exit via io_hist_dump(). Diagnostic-only.
+static uint64_t g_io_in_hist[0x10000];
+static void io_hist_dump(void) {
+    fprintf(stderr, "=== I/O read histogram (top ports) ===\n");
+    for (int top = 0; top < 16; top++) {
+        uint32_t bp = 0; uint64_t bc = 0;
+        for (int p = 0; p < 0x10000; p++) if (g_io_in_hist[p] > bc) { bc = g_io_in_hist[p]; bp = (uint32_t)p; }
+        if (!bc) break;
+        fprintf(stderr, "  port 0x%04x : %llu reads\n", bp, (unsigned long long)bc);
+        g_io_in_hist[bp] = 0;
+    }
+}
 static uint32_t service_in(uint16_t port, uint8_t size) {
+    g_io_in_hist[port]++;
     ven_periph_t* m = dos_model_of(port);
     if (m) {
         if (size >= 2 && m->io_read16) return m->io_read16(m, port);  // IDE data port (0x1F0)
@@ -730,8 +744,10 @@ int main(int argc, char **argv) {
     for (;;) {
         // service deferred signal requests in NORMAL context (stdio-safe): SIGTERM
         // dumps + quiesces + exits; SIGUSR1 prints a non-destructive live snapshot.
-        if (g_term_req) { systrace_dump("term"); vga_textdump(); vga_gfxdump(); ven_shutdown_quiesce(); _exit(0); }
-        if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); dbg_dump_core(); vga_gfxdump(); }
+        if (g_term_req) { systrace_dump("term"); io_hist_dump(); vga_textdump(); vga_gfxdump(); ven_shutdown_quiesce(); _exit(0); }
+        if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); io_hist_dump();
+                          memset(g_io_in_hist, 0, sizeof(g_io_in_hist));   // window the histogram
+                          dbg_dump_core(); vga_gfxdump(); }
         if (g_fdump_req) { g_fdump_req = 0; dbg_halt_dump_resume(); }
         // --bp single-step trace: when the core halts at the HW breakpoint, walk the
         // trajectory instruction-by-instruction (the on-silicon fetch/control-flow trace
