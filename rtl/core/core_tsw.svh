@@ -65,7 +65,7 @@
               desc = {mem_rdata, tsw_seg_lo};
               if (|tsw_new_ldt[15:3]) begin
                 ldt_base  <= desc_base(desc);
-                ldt_limit <= desc_limit(desc)[15:0];
+                ldt_limit <= desc_limit16(desc);
               end
               tsw_step <= 5'd0; state <= S_TSW_SEG;
             end
