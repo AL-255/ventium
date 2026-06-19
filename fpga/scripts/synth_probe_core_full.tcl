@@ -31,11 +31,25 @@ set svfiles {
     core/decode.sv
     core/issue_uv.sv
     core/ven_idiv.sv
+    core/regfile.sv
+    core/decode_stages.sv
+    core/uv_common.sv
+    core/u_pipe.sv
+    core/v_pipe.sv
+    core/fpu_writeback.sv
     fpu/fpu_top.sv
     fpu/fpu_srt_div.sv
     fpu/fpu_sqrt_iter.sv
+    fpu/ven_bcd.sv
+    fpu/ven_bcd_to_fp.sv
+    fpu/fpu_fpatan.sv
+    fpu/fpu_fyl2x.sv
+    fpu/fpu_fsincos.sv
+    fpu/fpu_f2xm1.sv
+    fpu/fpu_fprem.sv
     mem/dcache_timing.sv
     mem/icache.sv
+    mem/uopcache.sv
     mem/tlb.sv
 }
 foreach f $svfiles { read_verilog -sv $RTL/$f }
@@ -50,7 +64,7 @@ puts "PROBE(core-full): synth_design starting (+VEN_SRT_ITER +VEN_IDIV_ITER) ...
 synth_design -top core -part $PART \
     -mode out_of_context \
     -include_dirs $RTL/core \
-    -verilog_define {VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER} \
+    -verilog_define {VTM_NO_DPI SYNTHESIS VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER VEN_FPREM} \
     -flatten_hierarchy rebuilt
 
 report_utilization               -file $OUT/util.rpt
