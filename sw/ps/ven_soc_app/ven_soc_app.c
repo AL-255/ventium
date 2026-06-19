@@ -168,6 +168,19 @@ static void dbg_dump_core(void) {
         uint32_t pc = rd(VEN_R_DBG_TRACE_PC), aux = rd(VEN_R_DBG_TRACE_AUX);
         fprintf(stderr, "  [-%2d] %04x:%08x  fsm=0x%02x\n", i, aux & 0xFFFF, pc, (aux >> 16) & 0x3F);
     }
+    // Instruction bytes at the halt sites (g_ddr=carveout, real-mode phys=cs*16+eip).
+    // devmem of the reserved carveout fails under strict-devmem, but g_ddr is mapped.
+    if (g_ddr) {
+        uint32_t dcs = rd(VEN_R_DBG_CS) & 0xFFFF;
+        uint32_t sites[3] = { rd(VEN_R_DBG_EIP), rd(VEN_R_DBG_FAULT_PC), rd(VEN_R_DBG_FROZEN_EIP) };
+        const char* nm[3] = { "eip", "fault_pc", "frozen_eip" };
+        for (int s = 0; s < 3; s++) {
+            uint32_t ph = ((uint32_t)(dcs*16 + sites[s])) & (uint32_t)(VEN_CARVEOUT_SIZE - 1);
+            fprintf(stderr, " bytes @%-10s %04x:%08x:", nm[s], dcs, sites[s]);
+            for (int b = 0; b < 16; b++) fprintf(stderr, " %02x", g_ddr[(ph + b) & (VEN_CARVEOUT_SIZE-1)]);
+            fprintf(stderr, "\n");
+        }
+    }
     // F4 AXI read-beat ring (DDR addr+data of recent accepted read beats; under
     // --golden-l1 every load misses L1 -> AXI, so this captures the loop's reads).
     int rn = (int)(rd(VEN_R_DBG_RD_COUNT) & 0x3F);
