@@ -1,0 +1,2 @@
+{ "name":"tx_regform","src":"tx_regform/tx_regform.s","elf":"tx_regform/tx_regform.elf",
+  "image":"tx_regform/tx_regform.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":60,"x87":true }

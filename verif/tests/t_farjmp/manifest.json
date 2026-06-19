@@ -1,0 +1,2 @@
+{ "name":"t_farjmp","src":"t_farjmp/t_farjmp.s","elf":"t_farjmp/t_farjmp.elf",
+  "image":"t_farjmp/t_farjmp.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":40 }

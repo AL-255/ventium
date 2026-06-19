@@ -1,0 +1,2 @@
+{ "name":"t_alu8","src":"t_alu8/t_alu8.s","elf":"t_alu8/t_alu8.elf",
+  "image":"t_alu8/t_alu8.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":60 }

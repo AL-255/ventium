@@ -56,18 +56,57 @@ authoritative CORE coverage number (`run-all-cov.sh` does this:
 `build/cov/combined/cov_summary.txt`). MEM/UNIT cover leaf modules under their
 own tops and are reported separately.
 
-### Measured baseline (this checkout)
+### Five lanes
 
-| pool | line | toggle |
-|------|------|--------|
-| CORE, user-mode ISA only | 55.2 % | 54.7 % |
-| **CORE, ISA + system-mode** | **80.6 %** | **59.5 %** |
-| ven_l1d / ven_axi_master / ven_l2 | 75 / 74 / 95 % | 43 / 37 / 64 % |
-| ven_idiv / bcd / sqrt / srt / biu_p5 | 92 / 83 / 78 / 68 / 90 % | 99 / 98 / 83 / 73 / 63 % |
+| lane | runner | covers | top |
+|------|--------|--------|-----|
+| ISA   | `run-cov.sh`     | core under the user-mode ISA corpus | `ventium_top` |
+| SYS   | `run-sys-cov.sh` | core under bare-metal `--system` images | `ventium_top` |
+| CYC   | `run-cyc-cov.sh` | the dual-issue **fast path** (corpus re-run in `--cycle`) | `ventium_top` |
+| MEM   | `run-mem-cov.sh` | `ven_l1d` / `ven_axi_master` / `ventium_l1_axi` / `ven_l2` | standalone |
+| UNIT  | `run-unit-cov.sh`| `ven_idiv` / `fpu_srt_div` / `fpu_sqrt_iter` / `ven_bcd*` / `biu_p5` | standalone |
 
-Adding the system-mode lane lifted core line coverage 55 % → 81 %; the next gap
-the report points at is `biu_p5` (pin-level bus, exercised only via the UNIT
-lane / `make bus`).
+ISA + SYS + CYC share `ventium_top` and **merge** into the authoritative CORE
+number (`build/cov/combined/cov_summary.txt`).
+
+### Measured CORE line coverage (this checkout)
+
+The assembly-test loop (`verif/tests` + `verif/cov/tests`) raised CORE line
+coverage in three rounds:
+
+| stage | core line % |
+|-------|-------------|
+| user-mode ISA only           | 55.2 % |
+| + system-mode                | 80.6 % |
+| + round-1/2 gap tests        | 83.9 % |
+| **+ cycle-mode (final)**     | **85.3 %** |
+
+MEM lane: ven_l1d 75 / axi 74 / l2 95 % line. UNIT lane: ven_idiv 92 / bcd 83 /
+sqrt 78 / srt 68 / biu_p5 90 % line.
+
+### The remaining ~15 % (the ceiling)
+
+The 167 still-uncovered CORE lines are dominated by code that **assembly tests
+against `ventium_top` cannot reach**, not by missing tests:
+
+| count | category | why unreachable by ASM |
+|------:|----------|------------------------|
+| ~19 | defensive `default: d_unknown`/HALT arms | only fire on *invalid* opcodes (would HALT) |
+| ~15 | CPUID / RDTSC leaf tables | gated off in `ventium_top`; live only in the SoC (`make verify-soc` / `psoccpuid`) |
+| ~20 | special build-modes (`VEN_PS_PROXY`, cosim, `VEN_DBG_CORE`, `fe_xlate`, `soc_en`, F00F) | compiled out / require non-default defines |
+| ~44 | deeper system paths (far CALL/RETF, IN/OUT, HLT, LLDT/LGDT, more IDT/SMM/paging) | need new bare-metal images beyond the current `verif/sys/tests` |
+| ~14 | x87 exception/flag corners (unmasked exceptions, FSCALE PE flag) | some diverge from QEMU (fidelity gaps, see findings) |
+| ~55 | gated/selector/16-bit-addr/system-push misc | MOV-moffs, LES/LDS/POP-seg (selector model), `addr16`, INVD/LSS |
+
+**Findings surfaced by the loop** (real, not test bugs):
+* `POP FS`/`POP GS` (0F A1/A9) are **unimplemented** — the core HALTs.
+* `POP DS`/`POP ES` are selector **no-ops** in user mode (flat-model simplification).
+* `FSCALE` overflow→Inf does **not set the x87 PE flag** that QEMU sets (`fstat 0x3008` vs `0x3028`).
+* `MOV moffs` (A0–A3) and CPUID/RDTSC are not decoded by the plain user-mode core.
+
+Going beyond ~85 % needs work that is *not* "writing assembly tests": core RTL
+changes (POP FS/GS, MOV-moffs), a `ventium_soc` coverage build (CPUID/RDTSC), and
+additional bare-metal system images — all tracked as follow-ups.
 
 or directly:
 
@@ -112,8 +151,13 @@ sources, and prints the coverage + ISA reports.
 | file | role |
 |------|------|
 | `run-cov.sh`            | top orchestrator (build → per-test → merge → report) |
+| `run-sys-cov.sh`        | system-mode coverage (bare-metal images via `--system`) |
+| `run-cyc-cov.sh`        | cycle-mode coverage (corpus re-run in `--cycle` for the fast path) |
 | `run-mem-cov.sh`        | dedicated cache/bus coverage (instruments `verif/l1/tb_*`) |
 | `run-unit-cov.sh`       | optional arithmetic-engine coverage (idiv/srt/sqrt/bcd gates, --coverage) |
+| `run-all-cov.sh`        | runs all five lanes + the combined CORE headline |
+| `uncovered.py`          | lists the exact uncovered source lines/toggles (drives the loop) |
+| `tests/`                | coverage-only tests that intentionally diverge (not in `make verify`) |
 | `isa_coverage.py`       | retired-instruction decoder: opcode histogram + unimplemented/diverge detection (capstone) |
 | `cov_summary.py`        | parses a Verilator `.dat` → per-file/overall line+toggle % |
 | `tb_cov_l1d_sweep.sv`   | breadth sweep of `ven_l1d` (all 128 sets × 2 ways + evict + write-through + flush) |

@@ -35,12 +35,14 @@ say "LANE 2/4 — system-mode images"
 bash "$SCRIPT_DIR/run-sys-cov.sh" || true
 say "LANE 3/4 — memory subsystem"
 bash "$SCRIPT_DIR/run-mem-cov.sh" || true
-say "LANE 4/4 — optional arithmetic engines + biu_p5"
+say "LANE 4/5 — optional arithmetic engines + biu_p5"
 bash "$SCRIPT_DIR/run-unit-cov.sh" || true
+say "LANE 5/5 — cycle-mode (dual-issue fast path)"
+bash "$SCRIPT_DIR/run-cyc-cov.sh" || true
 
-# ---- combined CORE coverage (ISA + SYS, same top) --------------------------
-say "COMBINED CORE COVERAGE (ISA + system-mode)"
-CORE_DATS=$(ls "$COV"/dat/*.dat "$COV"/sys/dat/*.dat 2>/dev/null || true)
+# ---- combined CORE coverage (ISA + SYS + CYC, same top) --------------------
+say "COMBINED CORE COVERAGE (ISA + system-mode + cycle-mode)"
+CORE_DATS=$(ls "$COV"/dat/*.dat "$COV"/sys/dat/*.dat "$COV"/cyc/dat/*.dat 2>/dev/null || true)
 if [ -n "$CORE_DATS" ]; then
     # shellcheck disable=SC2086
     "$VERILATOR_COVERAGE" --write "$COMB/core.dat" $CORE_DATS > "$COMB/merge.log" 2>&1 \

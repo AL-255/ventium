@@ -1,0 +1,2 @@
+{ "name":"t_sgdt","src":"t_sgdt/t_sgdt.s","elf":"t_sgdt/t_sgdt.elf",
+  "image":"t_sgdt/t_sgdt.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":30 }

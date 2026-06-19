@@ -1,0 +1,10 @@
+{
+  "name": "tx_fpspecial2",
+  "src": "tx_fpspecial2/tx_fpspecial2.s",
+  "elf": "tx_fpspecial2/tx_fpspecial2.elf",
+  "image": "tx_fpspecial2/tx_fpspecial2.flat",
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 40,
+  "x87": true
+}
