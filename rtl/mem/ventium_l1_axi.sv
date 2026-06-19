@@ -91,6 +91,19 @@ module ventium_l1_axi #(
     input  logic        shutdown,        // 1 = stop new AXI txns, drain in-flight
     output logic        m_idle,          // 1 = AXI master drained -> safe to remove overlay
 
+`ifdef VEN_NB_DMA
+    // ---- Phase D: coherent DMA requester (a non-CPU bus master via the southbridge).
+    // Gated by VEN_NB_DMA so ventium_top / the board build are untouched. Only meaningful
+    // with EN_L2=1 (the northbridge arbitrates it into the L2 + snoops the L1 on writes).
+    input  logic        dma_req,
+    input  logic        dma_we,
+    input  logic [31:0] dma_addr,
+    input  logic [31:0] dma_wdata,
+    input  logic [3:0]  dma_wstrb,
+    output logic [31:0] dma_rdata,
+    output logic        dma_ack,
+`endif
+
 `ifdef VEN_DBG_CORE
     // ---- read-beat trace (VEN_DBG_CORE): pass-through from ven_axi_master ------
     output logic        dbg_rd_valid,
@@ -212,6 +225,22 @@ module ventium_l1_axi #(
   // CORE address decides cacheability so MMIO is never L1-cached; else cache everything.
   // Driven inside the EN_L2 generate (below) so EN_L2=0 builds don't pull in ven_cachemap.
   logic l1d_cacheable;
+  // Phase D: northbridge → L1D snoop-invalidate (DMA coherence). Driven in the generate
+  // branches (g_l2 → NB snoop; g_nol2 → 0, byte-identical).
+  logic        l1d_snoop_valid;
+  logic [31:0] l1d_snoop_addr;
+  // DMA requester into the northbridge: from the external port (VEN_NB_DMA) or tied off
+  // (CPU-only). Responses (rdata/ack) are driven by the generate (NB present or 0).
+  logic        nb_dma_req, nb_dma_we; logic [31:0] nb_dma_addr, nb_dma_wdata; logic [3:0] nb_dma_wstrb;
+  logic [31:0] nb_dma_rdata; logic nb_dma_ack;
+`ifdef VEN_NB_DMA
+  assign nb_dma_req = dma_req; assign nb_dma_we = dma_we; assign nb_dma_addr = dma_addr;
+  assign nb_dma_wdata = dma_wdata; assign nb_dma_wstrb = dma_wstrb;
+  assign dma_rdata = nb_dma_rdata; assign dma_ack = nb_dma_ack;
+`else
+  assign nb_dma_req = 1'b0; assign nb_dma_we = 1'b0; assign nb_dma_addr = 32'd0;
+  assign nb_dma_wdata = 32'd0; assign nb_dma_wstrb = 4'd0;
+`endif
 
   // ven_axi_master's backing slave + its clock/reset — a COMPILE-TIME (ifdef) alias
   // of either the core domain (default) or the axi domain (+VEN_AXI_CDC). Static
@@ -296,7 +325,12 @@ module ventium_l1_axi #(
           .u_wstrb(m_wstrb), .u_rdata(m_rdata), .u_ack (m_ack),
           // downstream master ⇒ the AXI master / CDC backing slave
           .d_req (b_req),  .d_we (b_we),  .d_addr (b_addr), .d_wdata (b_wdata),
-          .d_wstrb(b_wstrb), .d_rdata(b_rdata), .d_ack (b_ack)
+          .d_wstrb(b_wstrb), .d_rdata(b_rdata), .d_ack (b_ack),
+          // coherent DMA requester + snoop broadcast (Phase D)
+          .dma_req(nb_dma_req), .dma_we(nb_dma_we), .dma_addr(nb_dma_addr),
+          .dma_wdata(nb_dma_wdata), .dma_wstrb(nb_dma_wstrb),
+          .dma_rdata(nb_dma_rdata), .dma_ack(nb_dma_ack),
+          .snoop_inv_valid(l1d_snoop_valid), .snoop_inv_addr(l1d_snoop_addr)
 `ifdef VEN_DBG_CORE
           , .dbg_hits(l2_hits_w), .dbg_misses(l2_misses_w), .dbg_wbacks(l2_wbacks_w),
             .dbg_bypass(l2_bypass_w)
@@ -309,6 +343,8 @@ module ventium_l1_axi #(
       assign m_rdata = b_rdata; assign m_ack = b_ack;
       assign l2_ready = 1'b1;
       assign l1d_cacheable = 1'b1;       // cache everything (byte-identical to pre-L2)
+      assign l1d_snoop_valid = 1'b0; assign l1d_snoop_addr = 32'd0;   // no snoop (no DMA path)
+      assign nb_dma_rdata = 32'd0; assign nb_dma_ack = 1'b0;          // no DMA path
     end
   endgenerate
   // Pin the observability wires to 0 wherever the generate does NOT drive them (the
@@ -339,10 +375,11 @@ module ventium_l1_axi #(
       .flush_all(flush_all),
       .golden   (golden_l1),
       // Phase C: KEN# from the cachemap (EN_L2) so MMIO is never L1-cached; EN_L2=0 →
-      // 1'b1 (byte-identical). Snoop still inert until DMA coherence (Phase D).
+      // 1'b1 (byte-identical). Phase D: snoop-invalidate driven by the northbridge on
+      // DMA writes (EN_L2=0 → 0, byte-identical).
       .cacheable      (l1d_cacheable),
-      .snoop_inv_valid(1'b0),
-      .snoop_inv_addr (32'd0),
+      .snoop_inv_valid(l1d_snoop_valid),
+      .snoop_inv_addr (l1d_snoop_addr),
       .c_req   (core_req),
       .c_we    (core_we),
       .c_addr  (core_addr),
