@@ -283,6 +283,26 @@ emu:
 	  -F $(RTL_FILELIST) $(CPP_SRCS)
 	@echo "built: $(CURDIR)/obj_dir_emu/$(EXE)"
 
+# ---- cov: Verilator code-coverage build (verif/cov/ coverage suite) ---------
+# Builds the SAME core sources + tb_main into a SEPARATE obj dir with Verilator
+# line + toggle (+ user/SVA) coverage instrumentation. The instrumented model is
+# functionally identical but slower and emits per-run coverage counters; tb_main
+# dumps them to $VEN_COV_DAT at exit (VM_COVERAGE-guarded, inert in every other
+# build). NEVER clobbers obj_dir/tb_ventium, so `make verify` / every gate keeps
+# using the byte-identical default. COV_DEFS lets the runner widen the feature
+# set (e.g. +define+VEN_IDIV_ITER) so optionally-instantiated modules light up.
+#   make cov && VEN_COV_DAT=run.dat ./obj_dir_cov/tb_ventium --out t.vtrace <image>
+COV_DEFS ?=
+.PHONY: cov
+cov:
+	@if [ ! -f "$(RTL_FILELIST)" ]; then \
+	  echo "ERROR: RTL filelist not found: $(RTL_FILELIST)."; exit 1; \
+	fi
+	$(VERILATOR) $(VL_FLAGS) --coverage --coverage-line --coverage-toggle \
+	  -Wno-DECLFILENAME $(COV_DEFS) -Mdir obj_dir_cov \
+	  -F $(RTL_FILELIST) $(CPP_SRCS)
+	@echo "built (coverage): $(CURDIR)/obj_dir_cov/$(EXE)"
+
 # ---- selftest target: build against the throwaway stub ----------------------
 # Built into a separate obj dir so it never clobbers a real-core build. ENTRY
 # is set via -GENTRY so the stub's deterministic pc values track --entry; the
@@ -321,5 +341,5 @@ selftest: selftest-build
 # ---- housekeeping -----------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -rf obj_dir obj_dir_selftest obj_dir_sva obj_dir_soc
+	rm -rf obj_dir obj_dir_selftest obj_dir_sva obj_dir_soc obj_dir_cov
 	rm -f selftest.vtrace
