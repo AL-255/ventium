@@ -1,0 +1,2 @@
+{ "name":"t_testnn","src":"t_testnn/t_testnn.s","elf":"t_testnn/t_testnn.elf",
+  "image":"t_testnn/t_testnn.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":60 }

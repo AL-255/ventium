@@ -1,0 +1,2 @@
+{ "name":"t_mulw","src":"t_mulw/t_mulw.s","elf":"t_mulw/t_mulw.elf",
+  "image":"t_mulw/t_mulw.flat","load_addr":"0x08048000","entry":"0x08048000","max_insn":80 }
