@@ -255,6 +255,29 @@ soc:
 	  -F $(SOC_FILELIST) $(SOC_CPP_SRCS)
 	@echo "built: $(CURDIR)/$(SOC_OBJDIR)/$(SOC_EXE)"
 
+# ---- soc-cov: the ventium_soc build with Verilator coverage ----------------
+# Same as `soc` but with --coverage so the SoC track (CPUID/RDTSC/INVD + the
+# system device paths IN/OUT + the SoC peripherals ven_pic/pit/uart/...) can be
+# coverage-measured. tb_soc dumps to $VEN_COV_DAT (VM_COVERAGE-guarded). Built
+# into obj_dir_soc_cov so the default obj_dir_soc/tb_soc stays byte-identical.
+SOC_COV_OBJ ?= obj_dir_soc_cov
+.PHONY: soc-cov
+soc-cov:
+	@if [ ! -f "$(SOC_FILELIST)" ]; then \
+	  echo "ERROR: SoC filelist not found: $(SOC_FILELIST)."; exit 1; \
+	fi
+	$(VERILATOR) --cc --exe --build -j 0 \
+	  -sv --top-module $(SOC_TOP) \
+	  -Wall -Wno-UNUSED -Wno-fatal -Wno-DECLFILENAME \
+	  --coverage --coverage-line --coverage-toggle \
+	  -DVEN_IDE_DISK_HEX='"$(VEN_IDE_DISK_HEX)"' \
+	  $(VL_TRACE) $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "$(VL_CFLAGS)" \
+	  -o $(SOC_EXE) \
+	  -Mdir $(SOC_COV_OBJ) \
+	  -F $(SOC_FILELIST) $(SOC_CPP_SRCS)
+	@echo "built (coverage): $(CURDIR)/$(SOC_COV_OBJ)/$(SOC_EXE)"
+
 # ---- rtl-sva: integrated build with the biu_p5 SVA bound + --assert ---------
 # M5B-int: build the SAME integrated model into a SEPARATE obj dir, but with
 # Verilator SVA enabled (--assert) and the 19 biu_p5 protocol-invariant SVA
@@ -293,15 +316,17 @@ emu:
 # set (e.g. +define+VEN_IDIV_ITER) so optionally-instantiated modules light up.
 #   make cov && VEN_COV_DAT=run.dat ./obj_dir_cov/tb_ventium --out t.vtrace <image>
 COV_DEFS ?=
+COV_OBJ ?= obj_dir_cov
+COV_CFLAGS ?=
 .PHONY: cov
 cov:
 	@if [ ! -f "$(RTL_FILELIST)" ]; then \
 	  echo "ERROR: RTL filelist not found: $(RTL_FILELIST)."; exit 1; \
 	fi
 	$(VERILATOR) $(VL_FLAGS) --coverage --coverage-line --coverage-toggle \
-	  -Wno-DECLFILENAME $(COV_DEFS) -Mdir obj_dir_cov \
+	  -Wno-DECLFILENAME $(COV_DEFS) $(if $(strip $(COV_CFLAGS)),-CFLAGS "$(COV_CFLAGS)",) -Mdir $(COV_OBJ) \
 	  -F $(RTL_FILELIST) $(CPP_SRCS)
-	@echo "built (coverage): $(CURDIR)/obj_dir_cov/$(EXE)"
+	@echo "built (coverage): $(CURDIR)/$(COV_OBJ)/$(EXE)"
 
 # ---- selftest target: build against the throwaway stub ----------------------
 # Built into a separate obj dir so it never clobbers a real-core build. ENTRY
