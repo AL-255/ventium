@@ -1611,6 +1611,18 @@ int main(int argc, char** argv) {
     if (vcd) { vcd->close(); delete vcd; }
 #endif
 
+#if VM_COVERAGE
+    // Coverage builds (verif/tb `make cov`, --coverage) accumulate line/toggle
+    // counters per run. Dump them to the path in $VEN_COV_DAT so the coverage
+    // runner can merge one .dat per program with verilator_coverage. Inert in
+    // every non-coverage build (VM_COVERAGE is 0), so the default obj_dir TB is
+    // byte-identical and unaffected.
+    if (const char* covdat = std::getenv("VEN_COV_DAT")) {
+        Verilated::threadContextp()->coveragep()->write(covdat);
+        std::fprintf(stderr, "tb: wrote coverage to %s\n", covdat);
+    }
+#endif
+
     std::fprintf(stderr,
         "tb: retired %llu instructions in %llu clocks "
         "(bus: %llu reads, %llu writes)\n",

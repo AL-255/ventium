@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all
 .DEFAULT_GOAL := help
 
 help:
@@ -35,6 +35,15 @@ help:
 	@echo "                  (pirqsoc + psocdev + pvga + pide + pboot + pbootdma + test386)"
 	@echo "  make verify-all UMBRELLA: every routinely-runnable gate (verify + verify-sys +"
 	@echo "                  verify-soc + verify-srt + m6 + bus + bus-sva); one pass/fail summary"
+	@echo "  make coverage   Verilator code-coverage + ISA-execution gate: run the full"
+	@echo "                  user-mode ISA suite through a --coverage core build, report"
+	@echo "                  line/toggle % per file + the executed-opcode histogram +"
+	@echo "                  the first UNIMPLEMENTED/diverging instruction per test"
+	@echo "  make coverage-sys  system-mode coverage: bare-metal images (--system) light"
+	@echo "                  up the privileged paths (int/IRET/seg/TSS/SMM/paging/TLB)"
+	@echo "  make coverage-mem  dedicated MEMORY-subsystem coverage (ven_l1d/axi/l2 TBs)"
+	@echo "  make coverage-unit optional engine coverage (idiv/srt/sqrt/bcd + biu_p5)"
+	@echo "  make coverage-all  every lane + the combined CORE (ISA+SYS) headline"
 	@echo "  make rtl        verilate + build the RTL testbench"
 	@echo "  make plugin     build the QEMU cycle-trace plugin"
 	@echo "  make tests      build the test corpus binaries"
@@ -222,6 +231,32 @@ verify-soc:
 # producer artifacts that cannot be regenerated from a clean checkout.
 verify-all:
 	bash verif/run-verify-all.sh
+
+# --- coverage gates (verif/cov/, see verif/cov/README.md) --------------------
+# Verilator only instruments INSTANTIATED modules, so coverage is gathered in
+# four complementary lanes; the coverage build lives in its own obj_dir_cov, so
+# `make verify`/every gate keeps using the byte-identical obj_dir/tb_ventium.
+# `coverage`      = full user-mode ISA suite through the --coverage core build
+#   (run-cov.sh): per-file line/toggle %, the executed-opcode histogram built
+#   from RETIRED instructions, and the first unimplemented/diverging instruction
+#   per test vs the QEMU golden (e.g. it pinpoints the known FPREM gap).
+# `coverage-sys`  = the same core in --system mode on the bare-metal images
+#   (run-sys-cov.sh) — lights up int/IRET/seg/TSS/SMM/paging/TLB.
+# `coverage-mem`  = faithful standalone ven_l1d/ven_axi_master/ventium_l1_axi/
+#   ven_l2 testbenches + an all-sets ven_l1d sweep (run-mem-cov.sh).
+# `coverage-unit` = the optional iterative engines (idiv/srt/sqrt/bcd/fbld) +
+#   biu_p5 via their proven standalone gates (run-unit-cov.sh).
+# `coverage-all`  = every lane + the COMBINED CORE (ISA+SYS) headline.
+coverage:
+	bash verif/cov/run-cov.sh
+coverage-sys:
+	bash verif/cov/run-sys-cov.sh
+coverage-mem:
+	bash verif/cov/run-mem-cov.sh
+coverage-unit:
+	bash verif/cov/run-unit-cov.sh
+coverage-all:
+	bash verif/cov/run-all-cov.sh
 
 # --- SRT divider gate (verif/srt/run-srt-gate.sh) ---------------------------
 # Standalone Verilator unit gate for the genuine radix-4 SRT divider
