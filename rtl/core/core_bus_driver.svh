@@ -52,11 +52,14 @@
       end
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
       S_LGDT: begin mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
-      S_SEGLD: begin mem_req=1'b1;
-        mem_addr=gdt_base+{16'd0,gpr_o[q_src_reg][15:3],3'd0}+{29'd0,seg_step,2'b00};
+      S_SEGLD: begin
+        // selector source: a GPR (reg-form MOV Sreg) or the latched mem value (PM mov-sreg-from-mem)
+        logic [15:0] ssel; ssel = q_seg_from_mem ? seg_mem_sel : gpr_o[q_src_reg][15:0];
+        mem_req=1'b1;  // TI bit (sel[2]) picks GDT vs LDT
+        mem_addr=(ssel[2]?ldt_base:gdt_base)+{16'd0,ssel[15:3],3'd0}+{29'd0,seg_step,2'b00};
       end
-      S_LJMP: begin mem_req=1'b1;
-        mem_addr=gdt_base+{16'd0,q_ljmp_sel[15:3],3'd0}+{29'd0,seg_step,2'b00};
+      S_LJMP: begin mem_req=1'b1;   // far jmp/call target CS: TI bit picks GDT vs LDT
+        mem_addr=(q_ljmp_sel[2]?ldt_base:gdt_base)+{16'd0,q_ljmp_sel[15:3],3'd0}+{29'd0,seg_step,2'b00};
       end
       // M9.5 — real-mode far CALL: 2-beat descending push on SS:SP. beat 0 pushes CS
       // at [SS:SP-w], beat 1 pushes the return IP at [SS:SP-2w]. ESP is unchanged
@@ -199,8 +202,8 @@
       S_INT_GATE: begin mem_req=1'b1;            // IDT[vec] @ idt_base + vec*8
         mem_addr = idt_base + {21'd0, int_vec, 3'd0} + {29'd0, int_step[0], 2'b00};
       end
-      S_INT_CS: begin mem_req=1'b1;              // GDT[gate_sel] descriptor
-        mem_addr = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
+      S_INT_CS: begin mem_req=1'b1;              // handler CS descriptor (TI picks GDT/LDT)
+        mem_addr = (int_gate_sel[2]?ldt_base:gdt_base) + {16'd0, int_gate_sel[15:3], 3'd0}
                    + {29'd0, int_step[0], 2'b00};
       end
       S_INT_PUSH: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
@@ -257,8 +260,8 @@
       S_IRET, S_IRET_SS: begin mem_req=1'b1;     // pop EIP/CS/EFLAGS[+ESP/SS] asc
         mem_addr = seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4);
       end
-      S_INT_CS_RET: begin mem_req=1'b1;          // reload returned-to CS descriptor
-        mem_addr = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
+      S_INT_CS_RET: begin mem_req=1'b1;          // reload returned-to CS descriptor (TI: GDT/LDT)
+        mem_addr = (int_gate_sel[2]?ldt_base:gdt_base) + {16'd0, int_gate_sel[15:3], 3'd0}
                    + {29'd0, int_step[0], 2'b00};
       end
       // M2S.4 — TR/TSS reads (run with paging OFF, like the other descriptor
@@ -270,8 +273,8 @@
       S_INT_TSS: begin mem_req=1'b1;             // TSS.ssN:espN (ESPn then SSn)
         mem_addr = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
       end
-      S_INT_SS: begin mem_req=1'b1;              // new SS descriptor @ gdt_base
-        mem_addr = gdt_base + {16'd0, int_new_ss[15:3], 3'd0}
+      S_INT_SS: begin mem_req=1'b1;              // new SS descriptor (TI picks GDT/LDT)
+        mem_addr = (int_new_ss[2]?ldt_base:gdt_base) + {16'd0, int_new_ss[15:3], 3'd0}
                    + {29'd0, int_step[0], 2'b00};
       end
       // M2S.4b — HARDWARE TASK SWITCH accesses. The TSS + GDT are addressed
@@ -300,10 +303,15 @@
       S_TSW_READ: begin mem_req=1'b1;            // read the incoming TSS state
         mem_addr = tsw_new_base + {24'd0, tsw_read_off(tsw_step)};
       end
+      S_TSW_LDT: begin mem_req=1'b1;             // new task's LDT descriptor @ GDT
+        mem_addr = gdt_base + {16'd0, tsw_new_ldt[15:3], 3'd0}
+                   + {29'd0, tsw_step[0], 2'b00};
+      end
       S_TSW_SEG: begin mem_req=1'b1;             // reload incoming seg descriptors
         // beat = seg_idx*2 + half; the selector for seg_idx is tsw_sel[seg_idx]
-        // (CS,SS,DS,ES,FS,GS order). Read GDT[sel] (two dword beats).
-        mem_addr = gdt_base + {16'd0, tsw_sel[3'(tsw_step[4:1])][15:3], 3'd0}
+        // (CS,SS,DS,ES,FS,GS order). TI bit (sel[2]) picks GDT vs the just-loaded LDT.
+        mem_addr = (tsw_sel[3'(tsw_step[4:1])][2]?ldt_base:gdt_base)
+                   + {16'd0, tsw_sel[3'(tsw_step[4:1])][15:3], 3'd0}
                    + {29'd0, tsw_step[0], 2'b00};
       end
       S_TSW_BUSY: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b0010;
@@ -343,7 +351,7 @@
         state != S_LTR && state != S_INT_SS && state != S_INT_TSS &&
         state != S_SMI_SAVE && state != S_RSM &&
         // M2S.4b task-switch TSS/GDT reads+writes address physical memory directly.
-        state != S_TSW_SAVE && state != S_TSW_READ &&
+        state != S_TSW_SAVE && state != S_TSW_READ && state != S_TSW_LDT &&
         state != S_TSW_SEG && state != S_TSW_BUSY) begin
       // CRITICAL (Phase-3 [high] fix): on a TLB MISS this clock the FSM diverts to
       // S_WALK (the clocked block, gated on the same `xlate_miss`), so the bus this

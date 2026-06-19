@@ -70,8 +70,11 @@ except Exception:
     print("0x40c34910")
 PY
 )"
+# --quiesce: a long microcoded FPREM/FPREM1 partial reduction can run ~16-64
+# clocks without retiring; raise the idle threshold so the tb doesn't mistake a
+# legitimately-busy core for done (--max-cycles still backstops a true hang).
 if ! "$TB_BIN" --image "$FLAT" --load "$LOAD" --entry "$LOAD" \
-        --init-esp "$INIT_ESP" --out "$RTL" --max-insn "$MAX" --x87 \
+        --init-esp "$INIT_ESP" --out "$RTL" --max-insn "$MAX" --x87 --quiesce 100000 \
         > "$W/${NAME}_rtl.log" 2>&1; then
     emit TBFAIL "$XJSON" "tb_ventium run failed"; exit 0
 fi

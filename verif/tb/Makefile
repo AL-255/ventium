@@ -83,6 +83,7 @@ VL_FLAGS := --cc --exe --build -j 0 \
             $(VL_MAKEFLAGS) \
             -sv --top-module $(TOP) \
             -Wall -Wno-UNUSED -Wno-fatal \
+            +define+VEN_FPREM \
             $(VL_TRACE) $(VL_EXTRA_DEFINES) \
             -CFLAGS "$(VL_CFLAGS)" \
             -o $(EXE)

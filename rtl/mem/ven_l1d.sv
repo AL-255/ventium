@@ -54,6 +54,26 @@ module ven_l1d #(
     // cause. Runtime bit (MODE.GOLDEN_L1); tied 0 = normal cached operation.
     input  logic        golden,
 
+    // ---- KEN# (cacheability) — the northbridge ven_cachemap decision for THIS
+    // access (docs/northbridge-system-spec.md §3). 1 = normal cached operation
+    // (the Phase A default at every instantiation). 0 = NON-ALLOCATING BYPASS: the
+    // line is never allocated/touched in the array; a read fetches the addressed
+    // line into a private buffer and serves the word from there (no pollution), a
+    // write goes straight write-through. An uncacheable address has a STABLE PAM
+    // attribute, so it is never resident — hence no force-miss of a stale hit is
+    // needed (the bypass path simply never consults/installs the array). Tied 1
+    // until the cachemap is wired (Phase C), so the default build is byte-identical.
+    input  logic        cacheable,
+
+    // ---- per-line snoop INVALIDATE (the EADS#/inquire analogue) — the northbridge
+    // pulses this for one clock when a NON-CPU master (DMA / PCI) writes a line that
+    // may be cached here, so the next CPU read of it misses and refills the new data
+    // (the L1 is write-through, so it is never dirtier than L2 — invalidate suffices,
+    // no write-back). Clears the matching {set,way} valid bit if resident; harmless
+    // if absent. Tied 0 until DMA is a coherent requester (Phase D) → byte-identical.
+    input  logic        snoop_inv_valid,
+    input  logic [31:0] snoop_inv_addr,
+
     // ---- core side (the same-cycle-ack contract; mirrors core mem_*) ----------
     input  logic        c_req,
     input  logic        c_we,
@@ -154,11 +174,17 @@ module ven_l1d #(
   assign do_rd_cap = c_req && !c_we && rd_hit && (st==L1_IDLE) && !rd_match;
 
   // ---- fill FSM --------------------------------------------------------------
-  typedef enum logic [1:0] { L1_IDLE, L1_FILL, L1_DONE } l1_state_e;
+  // L1_BYP: a non-cacheable read has finished its line fetch into bp_line; serve the
+  // addressed word for one clock (c_ack below), allocating NOTHING, then back to IDLE.
+  typedef enum logic [1:0] { L1_IDLE, L1_FILL, L1_DONE, L1_BYP } l1_state_e;
   l1_state_e   st;
   logic [2:0]  fw;                       // fill word counter 0..7
   logic [6:0]  fset; logic fway; logic [19:0] ftag;
   logic [31:0] fbase;                    // line base address of the miss
+  // non-cacheable bypass: capture the fetched line into a PRIVATE buffer (not the
+  // array) and remember we are bypassing, so the fill commits nothing.
+  logic [LW-1:0] bp_line;
+  logic          bypass_q;
 
   // backing-side drive: during a FILL, burst-read the 8 line words; on a
   // write-through (IDLE), pass the core write straight to the backing.
@@ -167,11 +193,14 @@ module ven_l1d #(
     if (st==L1_FILL) begin
       m_req  = 1'b1; m_we = 1'b0;
       m_addr = {fbase[31:5], 5'd0} + {27'd0, fw, 2'b00};
-    end else if (st==L1_IDLE && c_req && c_we && (hit || xline)) begin
+    end else if (st==L1_IDLE && c_req && c_we && (hit || xline || !cacheable)) begin
       // write-through: forward the core write to the backing verbatim. A within-line
       // write MISS (!hit && !xline) is NOT forwarded here — it first WRITE-ALLOCATES
       // (fills the line in the FF below), then retries as a hit and forwards on that
       // second pass. (Cross-line writes keep the invalidate path and forward now.)
+      // A NON-CACHEABLE write (!cacheable) is forwarded straight through here with NO
+      // write-allocate, regardless of residency. (At cacheable=1 this is (hit||xline),
+      // byte-identical to the original.)
       m_req=1'b1; m_we=1'b1; m_addr=c_addr; m_wdata=c_wdata; m_wstrb=c_wstrb;
     end
   end
@@ -181,12 +210,16 @@ module ven_l1d #(
   always_comb begin
     // 4 bytes at the addressed byte offset, from the {L+1, L} window so a read that
     // crosses the line end (boff > 28) takes its high bytes from the next line.
-    c_rdata = rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];   // mux off the REGISTERED window with the REGISTERED offset (synth-safe: data & select from the same capture)
+    // In L1_BYP (non-cacheable read) the data comes from the private bp_line buffer
+    // instead — the addressed word at c_addr[4:0] (aligned; cross-line uncacheable
+    // reads are not generated for MMIO and are out of scope here).
+    c_rdata = (st==L1_BYP) ? bp_line[{c_addr[4:0],3'b000} +: 32]
+                           : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];   // mux off the REGISTERED window with the REGISTERED offset (synth-safe: data & select from the same capture)
     c_ack   = 1'b0;
     if (c_req) begin
-      if (c_we)            c_ack = (st==L1_IDLE && (hit || xline)) ? m_ack : 1'b0;
-      else                 c_ack = rd_match && !flush_all; // ack only when the captured
-                                                           // window matches THIS addr
+      if (c_we)            c_ack = (st==L1_IDLE && (hit || xline || !cacheable)) ? m_ack : 1'b0;
+      else                 c_ack = (rd_match && !flush_all)   // cacheable hit serve
+                                 || (st==L1_BYP);             // non-cacheable bypass serve
     end
   end
 
@@ -200,6 +233,7 @@ module ven_l1d #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st<=L1_IDLE; fw<=3'd0; rd_armed<=1'b0; rd_window_q<='0; rd_addr_q<=32'd0;
+      bypass_q<=1'b0; bp_line<='0;
       for (int s=0;s<L1_SETS;s++) begin
         dc_lru[s]<=1'b0; dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0;
         dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
@@ -212,17 +246,25 @@ module ven_l1d #(
       end
       unique case (st)
         L1_IDLE: begin
-          if (c_req && !c_we && !rd_hit) begin
+          if (c_req && !c_we && !cacheable) begin
+            // NON-CACHEABLE READ (KEN# negated): fetch the addressed line into the
+            // private bp_line buffer (no array touch, no LRU), then serve the word in
+            // L1_BYP. Reuses the FILL burst; allocates NOTHING. (cacheable=1 never
+            // takes this branch, so the path below is unchanged.)
+            fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
+            fw <= 3'd0;  bypass_q <= 1'b1;  st <= L1_FILL;
+          end else if (c_req && !c_we && !rd_hit) begin
             // read MISS → fill the MISSING line into its not-MRU victim way. On a
             // xline-line read where L is resident but L+1 is not, fill L+1; the core
             // holds the request so the retry then fills L (if needed) -> L+1 -> hits.
+            bypass_q <= 1'b0;
             if (!hit) begin
               fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             end else begin            // hit_L but xline && !hit_n -> fill the next line
               fset <= set_n; fway <= ~dc_lru[set_n]; ftag <= tag_n; fbase <= addr_n;
             end
             fw <= 3'd0;  st <= L1_FILL;
-          end else if (c_req && c_we && !xline && !hit) begin
+          end else if (c_req && c_we && !xline && !hit && cacheable) begin
             // WRITE-ALLOCATE: a within-line write MISS fills the addressed line into
             // the not-MRU victim FIRST; the core holds the store (c_ack=0) and the
             // post-fill retry hits -> RMW the cached copy + write-through. Without the
@@ -231,6 +273,7 @@ module ven_l1d #(
             // data. That is the free-run __init_libc derail: `rep stos` zeroes an
             // uncached buffer then reads it back; single-step drained the posted write
             // between instructions so it only bit on silicon (AXI_WPOST sim repro).
+            bypass_q <= 1'b0;
             fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             fw <= 3'd0;  st <= L1_FILL;
           end else if (c_req && !c_we && rd_hit) begin
@@ -272,18 +315,30 @@ module ven_l1d #(
         end
         L1_FILL: begin
           if (m_ack) begin
-            // capture the returned word into the victim line.
-            dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
+            // capture the returned word: into the PRIVATE buffer for a non-cacheable
+            // bypass (no array write), else into the victim line being allocated.
+            if (bypass_q) bp_line[{fw,5'b00000} +: 32] <= m_rdata;
+            else          dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
             if (fw==3'(WORDS-1)) begin
-              // last word → allocate the victim (tag/val) + MRU, then retry hits.
-              dc_tag[fset][fway]<=ftag; dc_val[fset][fway]<=1'b1; dc_lru[fset]<=fway;
-              st<=L1_DONE;
+              if (bypass_q) begin
+                // non-cacheable: serve the word from bp_line next clock; allocate NOTHING.
+                st<=L1_BYP;
+              end else begin
+                // last word → allocate the victim (tag/val) + MRU, then retry hits.
+                dc_tag[fset][fway]<=ftag; dc_val[fset][fway]<=1'b1; dc_lru[fset]<=fway;
+                st<=L1_DONE;
+              end
             end else fw<=fw+3'd1;
           end
         end
         L1_DONE: begin
           // one settle clock so the just-written line is visible to the comb read
           // before the core's retry samples the hit. Then back to serving.
+          st<=L1_IDLE;
+        end
+        L1_BYP: begin
+          // non-cacheable read: c_ack + c_rdata (from bp_line) are asserted
+          // combinationally THIS clock; just return to serving. Nothing allocated.
           st<=L1_IDLE;
         end
         default: st<=L1_IDLE;
@@ -301,6 +356,17 @@ module ven_l1d #(
       if (txn_done) begin
         rd_armed <= 1'b0; rd_window_q <= '0; rd_addr_q <= 32'd0;
         for (int s=0;s<L1_SETS;s++) begin dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0; end
+      end
+      // per-line snoop INVALIDATE (DMA / PCI coherence): clear the matching {set,way}
+      // valid bit if resident. LAST in the FF so an invalidation wins over a same-cycle
+      // allocate of that line (a DMA write must never leave a stale cached copy). Gated
+      // by snoop_inv_valid — tied 0 in modes 0/1, so the default path is byte-identical.
+      if (snoop_inv_valid) begin
+        logic [6:0] snp_set; logic [19:0] snp_tag;
+        snp_set = snoop_inv_addr[11:5];
+        snp_tag = snoop_inv_addr[31:12];
+        if (dc_val[snp_set][0] && dc_tag[snp_set][0]==snp_tag) dc_val[snp_set][0]<=1'b0;
+        if (dc_val[snp_set][1] && dc_tag[snp_set][1]==snp_tag) dc_val[snp_set][1]<=1'b0;
       end
     end
   end

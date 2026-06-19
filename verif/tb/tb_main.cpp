@@ -82,6 +82,7 @@ struct Args {
     uint32_t quiesce    = 64;     // K consecutive no-retire cycles => done
     bool     x87        = false;  // emit x87 fields + header x87:true (M3)
     bool     cycle      = false;  // emit cycle-mode trace + header mode:cycle (M4)
+    bool     soc_en     = false;  // force core soc_en=1 for a -bios firmware (CPUID/etc. ungate)
     // M5B-int: --bus-mode drives the top bus_mode=1, routing the core memory
     // through the gated pin-level 64-bit P5 bus subsystem (rtl/bus/biu.sv ->
     // biu_p5). DEFAULT 0 = the direct mem_* path (byte-identical, the M4/M5-gated
@@ -229,6 +230,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--l1-axi")     a.l1_axi     = true;   // P1-1 bus_mode=2
         else if (k == "--golden")     a.golden     = true;   // ven_l1d flush-after-each-access
         else if (k == "--system")     a.system     = true;
+        else if (k == "--soc-en")     a.soc_en     = true;
         else if (k == "--cosim")    { a.cosim = true; a.system = true; }   // P2 repro
         else if (k == "--dos")      { a.dos = true; a.cosim = true; a.system = true; }
         else if (k == "--disk")       a.disk       = need("--disk");
@@ -408,6 +410,21 @@ int main(int argc, char** argv) {
 
     // P2 repro: plain -bios co-sim (no win95 golden) — execute IN/OUT via the io bus.
     if (args.cosim) cosim_mode = true;
+
+    // F4A environment-replay: --dos --lockstep <golden> makes the core's IN reads
+    // (fw_cfg, PIC, PIT, RTC, IDE — EVERY port) return qemu's recorded dev_in values
+    // instead of the PS C-models, so the core sees qemu's EXACT environment and the
+    // full-boot differential stays aligned through POST (where qemu's fw_cfg diverges
+    // from the board's CMOS-only path). Routed in the IN path below via dos_env_replay.
+    bool dos_env_replay = false;
+    if (args.dos && !args.lockstep.empty()) {
+        devins = ventium::load_devin_replay(args.lockstep, &devin_had_intr);
+        dos_env_replay = !devins.empty();
+        std::fprintf(stderr,
+            "tb: --dos ENV-REPLAY ON: %zu dev_in values from %s%s\n",
+            devins.size(), args.lockstep.c_str(),
+            devin_had_intr ? " [golden carries intr — timing replay needed]" : "");
+    }
 
 #ifdef VEN_DOS_MODELS
     // --dos: instantiate the PS peripheral C models (same code ven_soc_app runs on
@@ -690,6 +707,7 @@ int main(int argc, char** argv) {
     //     isa-debug-exit `out 0xf4` terminates the run (flagged via io_exit).
     // INERT when cosim_mode==0 (io_req never asserts; io_rdata/io_ack stay 0).
     bool     io_pending_in = false;   // an IN is being serviced this clock
+    bool     io_used_golden = false;  // this IN consumed a golden dev_in (scoped replay)
     bool     io_exit       = false;   // saw an `out 0xf4` (isa-debug-exit)
     uint64_t io_in_count   = 0;       // diagnostics: IN reads serviced
     uint64_t io_out_count  = 0;       // diagnostics: OUT writes consumed
@@ -750,14 +768,26 @@ int main(int argc, char** argv) {
             // high, and SeaBIOS branches on 0xFF; returning 0 derails POST.
             uint32_t v = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
 #ifdef VEN_DOS_MODELS
+            bool used_model = false;
+            io_used_golden = false;
+            // SCOPED ENV-REPLAY: the PS C-models serve the modeled ports (PIC/PIT/RTC/IDE,
+            // which already match qemu); the golden serves ONLY the UNMODELED ports —
+            // i.e. qemu's fw_cfg (0x510/0x511), the sole environment divergence.
             if (ven_periph_t* m = dos_model_of((uint16_t)port)) {
                 v = (size >= 2 && m->io_read16) ? m->io_read16(m, (uint16_t)port)
                                                 : m->io_read(m, (uint16_t)port);
-            } else if (args.dos && port == 0x3fd) { v = 0x60;   // COM1 LSR: THR+TSR empty
-            } else if (args.dos && port == 0x3f8) { v = 0x00;   // COM1 RBR: no input byte
-            } else
+                used_model = true;
+            } else if (args.dos && port == 0x3fd) { v = 0x60; used_model = true;  // COM1 LSR
+            } else if (args.dos && port == 0x3f8) { v = 0x00; used_model = true;  // COM1 RBR
+            }
+            (void)dos_env_replay;
+            // the golden serves ONLY qemu's fw_cfg (0x510/0x511) — the one device the
+            // core lacks; all other unmodeled ports stay open-bus (0xff), matching a
+            // real PC, so they don't consume fw_cfg golden entries.
+            if (!used_model && (port == 0x510 || port == 0x511))
 #endif
             if (devin_idx < devins.size()) {
+                io_used_golden = true;
                 const ventium::DevIn& d = devins[devin_idx];
                 if (d.port != port || d.size != size) {
                     if (io_desync < 8)
@@ -958,7 +988,7 @@ int main(int argc, char** argv) {
 #ifdef VEN_KV260_SOC
     // P2 repro: KV260 build adds the PS->core interrupt-injection ports. calltest
     // takes no interrupts, so drive them inert (soc_en=0 keeps the divert dead).
-    top->soc_en      = 0;
+    top->soc_en      = args.soc_en ? 1 : 0;
     top->intr        = 0;
     top->inta_vector = 0;
 #endif
@@ -1278,7 +1308,10 @@ int main(int argc, char** argv) {
         // M7.3b: the core latched the IN value this clock — advance the dev_in
         // cursor (strict retire order) so the next IN reads the next value.
         if (saw_io_in) {
-            if (devin_idx < devins.size()) ++devin_idx;
+            // SCOPED replay: advance the golden cursor ONLY when this IN actually
+            // consumed a golden value (an unmodeled/fw_cfg port) — modeled-port reads
+            // are served by the PS C-models and must not eat a golden entry.
+            if (io_used_golden && devin_idx < devins.size()) ++devin_idx;
             ++io_in_count;
         }
         if (cosim_mode && (bool)top->io_req && (bool)top->io_we && (bool)top->io_ack)
@@ -1385,9 +1418,10 @@ int main(int argc, char** argv) {
             static uint32_t f4a_last = 0xffffffffu; static int f4a_n = 0;
             static uint64_t f4a_lo = std::getenv("VEN_F4A_CYC_LO") ? strtoull(std::getenv("VEN_F4A_CYC_LO"),0,0) : 0ull;
             static uint64_t f4a_hi = std::getenv("VEN_F4A_CYC_HI") ? strtoull(std::getenv("VEN_F4A_CYC_HI"),0,0) : ~0ull;
+            static int f4a_force = std::getenv("VEN_F4A_FORCE") ? 1 : 0;  // arm by cycle-window alone
             uint32_t e = (uint32_t)top->dbg_eip;
             uint32_t key = ((uint32_t)top->dbg_cs << 16) ^ e;
-            if (g_ven_f4a_arm && cycles >= f4a_lo && cycles <= f4a_hi && f4a_n < 400000 && key != f4a_last) {
+            if ((g_ven_f4a_arm || f4a_force) && cycles >= f4a_lo && cycles <= f4a_hi && f4a_n < 400000 && key != f4a_last) {
                 f4a_last = key; f4a_n++;
                 std::fprintf(stderr, "f4a cs=%04x eip=%04x ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x\n",
                     (unsigned)top->dbg_cs, e,
@@ -1403,15 +1437,47 @@ int main(int argc, char** argv) {
         // DASD probe never runs as int 0x13 -> DF_FIXED dropped. S_RMINT_RD=state 32.
         {
             static unsigned prev_rmst = 0;
+            static long int_log_count = 0;
+            static long idle28_count = 0;
             unsigned dsn = (unsigned)top->dbg_state;
             if (dsn == 32 && prev_rmst != 32) {
                 uint32_t ax = ventium::g_last_arch.gpr[0];
-                std::fprintf(stderr, "tb: [INT] vec=0x%02x CS:EIP=%04x:%08x AX=%04x (cyc=%llu)\n",
-                    (unsigned)top->dbg_int_vec, (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip,
-                    (unsigned)(ax & 0xffff), (unsigned long long)cycles);
-                std::fflush(stderr);
+                unsigned vec = (unsigned)top->dbg_int_vec;
+                if (int_log_count++ < 4000) {   // cap the [INT] spam (idle loop floods it)
+                    std::fprintf(stderr, "tb: [INT] vec=0x%02x CS:EIP=%04x:%08x AX=%04x (cyc=%llu)\n",
+                        vec, (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip,
+                        (unsigned)(ax & 0xffff), (unsigned long long)cycles);
+                    std::fflush(stderr);
+                }
+                // F4A: INT 10h teletype (AH=0Eh) — capture AL UNCAPPED. The VGA BIOS's
+                // writes to video RAM don't land in the sim, but the console output IS
+                // visible via this teletype stream (FreeDOS/Quake printf -> INT10h/0Eh).
+                if (vec == 0x10 && ((ax >> 8) & 0xff) == 0x0e)
+                    std::fprintf(stderr, "tbCON %02x\n", (unsigned)(ax & 0xff));
+                // F4A: INT 0x28 = COMMAND.COM DOS-idle => Quake has exited to the C:\
+                // prompt. After enough idle ticks, dump the screen+memory (clean-exit
+                // path below) so the failure/error banner is captured, then stop.
+                if (vec == 0x28 && ++idle28_count >= 300) {
+                    std::fprintf(stderr, "tb: DOS-IDLE (300x INT 0x28) @cycle %llu retired %llu -- Quake exited to DOS; dumping+stopping\n",
+                        (unsigned long long)cycles, (unsigned long long)trace.retired());
+                    break;
+                }
             }
             prev_rmst = dsn;
+        }
+        // F4A: capture fault deliveries (esp. the #DE vec 0 that aborts Quake). When
+        // dbg_fault_pc changes the core just raised a fault; dbg_eip/ibuf still point
+        // at the faulting instruction, dbg_int_vec = the vector. Logs cs:eip:ibuf:vec.
+        {
+            static uint32_t prev_fpc = 0xFFFFFFFFu;
+            uint32_t fpc = (uint32_t)top->dbg_fault_pc;
+            if (fpc != prev_fpc) {
+                std::fprintf(stderr, "tb: [FAULT] vec=0x%02x cs=%04x eip=%08x fault_pc=%08x ibuf=%016llx (cyc=%llu)\n",
+                    (unsigned)top->dbg_int_vec, (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip,
+                    fpc, (unsigned long long)top->dbg_ibuf, (unsigned long long)cycles);
+                std::fflush(stderr);
+                prev_fpc = fpc;
+            }
         }
 #endif
         // quiescence / limit detection
@@ -1421,6 +1487,37 @@ int main(int argc, char** argv) {
             ++idle;
         }
 
+        // F4A: early-exit the moment DOS Quake renders a frame (substantial nonzero
+        // VGA mode-13h px @0xA0000). Checked ~every 2M cycles (cheap vs the run).
+        if ((cycles & 0x1FFFFFull) == 0) {
+            long nz = 0;
+            for (int i = 0; i < 64000; ++i) if (mem.read8(0xA0000u + i)) ++nz;
+            if (nz > 1000) {
+                std::fprintf(stderr, "tb: FRAME! %ld nonzero VGA px @cycle %llu retired %llu\n",
+                             nz, (unsigned long long)cycles,
+                             (unsigned long long)trace.retired());
+                break;
+            }
+            if ((cycles & 0x3FFFFFFull) == 0) { // ~every 64M cycles: progress heartbeat
+                std::fprintf(stderr, "tb: progress @cycle %llu retired %llu vga_nz %ld\n",
+                             (unsigned long long)cycles,
+                             (unsigned long long)trace.retired(), nz);
+                // F4A: also snapshot the non-blank VGA TEXT lines (0xB8000) so Quake's
+                // DOS console messages (init steps + any error banner) are visible live.
+                for (int row = 0; row < 25; ++row) {
+                    char line[81]; int any = 0;
+                    for (int col = 0; col < 80; ++col) {
+                        uint8_t ch = mem.read8(0xB8000u + (uint32_t)(row*80+col)*2u);
+                        line[col] = (ch >= 32 && ch < 127) ? (char)ch : ' ';
+                        if (ch >= 33 && ch < 127) any = 1;
+                    }
+                    line[80] = 0;
+                    int e = 80; while (e > 0 && line[e-1] == ' ') line[--e] = 0;
+                    if (any) std::fprintf(stderr, "tb: TXT| %s\n", line);
+                }
+                std::fflush(stderr);
+            }
+        }
         if (trace.retired() >= args.max_insn) {
             std::fprintf(stderr, "tb: stop: reached --max-insn (%llu)\n",
                          (unsigned long long)args.max_insn);
@@ -1476,13 +1573,25 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
             "tb: [VEN_DBG] EIP=%08x CS=%04x ESP=%08x EFLAGS=%08x\n"
             "tb: [VEN_DBG] FSM=S_%s(0x%02x) mode=%s%s vec=0x%02x fault_pc=%08x CR0=%08x halted=%d\n"
-            "tb: [VEN_DBG] FCTRL=%04x PC=%u(%s) RC=%u  q_fxop=%u\n",
+            "tb: [VEN_DBG] FCTRL=%04x PC=%u(%s) RC=%u  q_fxop=%u\n"
+            "tb: [VEN_DBG] IBUF=%016llx (8 bytes at committed EIP, little-endian)\n"
+            "tb: [VEN_DBG] GDTR=%08x CS.D=%d\n",
             (uint32_t)top->dbg_eip, (unsigned)top->dbg_cs, (uint32_t)top->dbg_esp,
             (uint32_t)top->dbg_eflags, sn, s,
             (top->dbg_cr0 & 1u) ? "PE" : "real", (top->dbg_cr0 & 0x80000000u) ? "+PG" : "",
             (unsigned)top->dbg_int_vec, (uint32_t)top->dbg_fault_pc, (uint32_t)top->dbg_cr0,
             (int)top->dbg_halted,
-            fcw, pc, pcs, (fcw>>10)&3, (unsigned)top->dbg_fxop);
+            fcw, pc, pcs, (fcw>>10)&3, (unsigned)top->dbg_fxop,
+            (unsigned long long)top->dbg_ibuf,
+            (uint32_t)(top->dbg_seg & 0xffffffffu), (int)((top->dbg_seg >> 32) & 1u));
+        {   // divide-#DE tap: faulting dividend/divisor/eip/width + count
+            uint64_t num = (uint64_t)top->dbg_de_num, info = (uint64_t)top->dbg_de_info;
+            unsigned decnt = (unsigned)(info & 0x1fffu);
+            std::fprintf(stderr,
+                "tb: [VEN_DBG] DIVDE cnt=%u  last: w=%u eip=%04x den=%08x num=%08x:%08x (EDX:EAX)\n",
+                decnt, (unsigned)((info >> 13) & 7u), (unsigned)((info >> 16) & 0xffffu),
+                (uint32_t)(info >> 32), (uint32_t)(num >> 32), (uint32_t)(num & 0xffffffffu));
+        }
         std::fprintf(stderr,
             "tb: [VEN_DBG] rd_beats=%llu  first={addr=%08x data=%08x} last={addr=%08x data=%08x}\n",
             (unsigned long long)g_rd_beats, g_rd_first_addr, g_rd_first_data,
@@ -1496,9 +1605,9 @@ int main(int argc, char** argv) {
     // offline — the board can't read this region safely (uninit-ECC SIGBUS risk).
     if (args.dos) {
         if (FILE* lf = std::fopen("/tmp/sim_lowmem.bin", "wb")) {
-            for (uint32_t i = 0; i < 0x20000u; i++) std::fputc(mem.read8(i), lf);
+            for (uint32_t i = 0; i < 0x100000u; i++) std::fputc(mem.read8(i), lf);  // full low 1MB (incl VGA BIOS @0xC0000)
             std::fclose(lf);
-            std::fprintf(stderr, "tb: dumped lowmem 0..0x20000 -> /tmp/sim_lowmem.bin\n");
+            std::fprintf(stderr, "tb: dumped lowmem 0..0x40000 -> /tmp/sim_lowmem.bin\n");
         }
         // F4A: VGA mode-13h framebuffer @0xA0000 (320x200x8 = 64000 B). DOS Quake
         // blits its frame here; dump it so a render can be checked offline + a
@@ -1517,6 +1626,23 @@ int main(int argc, char** argv) {
         // prompt / errors directly here; the sim has no soft-VGA INT10h so this is
         // the only way to SEE the boot screen. Dump non-blank rows as readable text.
         {
+            // F4A diag: BDA video state — mode (0x449), active page (0x462), CRTC
+            // start (0x44E), cursor (0x450). Distinguishes color (mode 3 @0xB8000)
+            // vs mono (mode 7 @0xB0000) and shows where the active page maps.
+            std::fprintf(stderr, "tb: BDA mode=0x%02x page=0x%02x crtc_start=0x%04x cur=0x%04x\n",
+                (unsigned)mem.read8(0x449), (unsigned)mem.read8(0x462),
+                (unsigned)(mem.read8(0x44E) | (mem.read8(0x44F)<<8)),
+                (unsigned)(mem.read8(0x450) | (mem.read8(0x451)<<8)));
+            for (int row = 0; row < 25; row++) {   // also the MONO buffer @0xB0000 (mode 7)
+                char ml[81]; int many = 0;
+                for (int col = 0; col < 80; col++) {
+                    uint8_t ch = mem.read8(0xB0000u + (uint32_t)(row*80+col)*2u);
+                    ml[col] = (ch >= 0x21 && ch < 0x7f) ? (char)ch : ' ';
+                    if (ch >= 0x21 && ch < 0x7f) many = 1;
+                }
+                ml[80]=0; int me=80; while(me>0 && ml[me-1]==' ') ml[--me]=0;
+                if (many) std::fprintf(stderr, "tb: B0000| %s\n", ml);
+            }
             std::fprintf(stderr, "tb: === VGA text @0xB8000 (80x25) ===\n");
             for (int row = 0; row < 25; row++) {
                 char line[81]; int any = 0;

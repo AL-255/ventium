@@ -217,6 +217,10 @@ module ventium_top
     output logic [31:0] dbg_cr0,           // live CR0 (PE/PG = mode)
     output logic [15:0] dbg_fctrl,         // live x87 control word (PC=[9:8])
     output logic [5:0]  dbg_fxop,          // x87 sub-op currently in flight
+    output logic [63:0] dbg_ibuf,          // fetch-window bytes at committed EIP (PM-wedge disasm)
+    output logic [63:0] dbg_seg,           // [31:0]=GDTR base, [32]=CS.D (PM-wedge descriptor probe)
+    output logic [63:0] dbg_de_num,        // divide-#DE tap: faulting dividend (EDX:EAX)
+    output logic [63:0] dbg_de_info,       //   {divisor[31:0], eip[15:0], w[2:0], decnt[12:0]}
     // F4 read-beat trace: each accepted AXI read beat {DDR addr, data} from the
     // L1/AXI master (l1axi_en builds) -> ven_soc_dbg ring (corrupted-fill forensics).
     output logic        dbg_rd_valid,
@@ -386,6 +390,10 @@ module ventium_top
       .dbg_cr0      (dbg_cr0),
       .dbg_fctrl    (dbg_fctrl),
       .dbg_fxop     (dbg_fxop),
+      .dbg_ibuf     (dbg_ibuf),
+      .dbg_de_num   (dbg_de_num),
+      .dbg_de_info  (dbg_de_info),
+      .dbg_seg      (dbg_seg),
       .dbg_halt_req (dbg_halt_req),
       .dbg_step     (dbg_step),
       .dbg_bp_en    (dbg_bp_en),

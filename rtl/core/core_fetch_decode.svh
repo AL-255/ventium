@@ -371,6 +371,14 @@
               state<=S_EXEC;            // INTO with OF=0: no-op, advance EIP
             end else begin
               int_vec     <= d_ud2 ? 8'd6 : d_int_vec;
+`ifdef VEN_DBG_CORE
+              // F4A: capture a SOFTWARE int 0 (the "Division by Zero" abort is a PM
+              // int-0, NOT a divide — divide tap showed cnt=0). ibuf confirms cd 00
+              // vs garbage (a control-flow derail landing on it).
+              if (d_int && !d_ud2 && d_int_vec == 8'd0)
+                $display("tb: INT0 software-int-0 @cs=%04x eip=%08x ibuf=%016x",
+                         seg_sel[SG_CS], eip, dbg_ibuf);
+`endif
               // FAULT (#UD) pushes the faulting EIP; a TRAP (INT/INT3/INTO)
               // pushes the NEXT EIP. In S_DECODE q_pc/q_len are not yet latched,
               // so derive next-EIP from the live eip + decoded length.
@@ -429,9 +437,10 @@
                 if (seg_real) state<=S_EXEC;
                 else state<=S_LJMP;
               end
-              SYS_LTR: begin
+              SYS_LTR, SYS_LLDT: begin
                 // LTR — read the GDT TSS descriptor (S_LTR fetches it, loads the
-                // TR hidden base/limit + sets the descriptor busy bit).
+                // TR hidden base/limit + sets the descriptor busy bit). LLDT reuses
+                // the same read FSM but loads ldt_base/ldt_limit (branched in S_LTR).
                 seg_step<=1'b0; state<=S_LTR;
               end
               // M9.5 — real-mode far CALL / RETF. The S_LCALL/S_RETF micro-sequences
@@ -440,7 +449,10 @@
               // (call gates / privilege change) is out of scope -> HALT loudly (never
               // mis-executes) exactly like the other unimplemented system forms.
               SYS_LCALL: begin
-                if (seg_real && !paging_on) begin seg_step<=1'b0; state<=S_LCALL; end
+                // real/V86: push CS:IP + real-mode CS load (base=sel<<4). PM: push
+                // CS:EIP then S_LCALL hands off to S_LJMP's GDT descriptor CS load
+                // (DOS Quake's CWSDPMI far-calls in PM). seg_real && paging_on stays HALT.
+                if ((seg_real && !paging_on) || !seg_real) begin seg_step<=1'b0; state<=S_LCALL; end
                 else state<=S_HALT;
               end
               SYS_RETF: begin

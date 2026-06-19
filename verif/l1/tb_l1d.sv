@@ -19,8 +19,14 @@ module tb_l1d;
   // backing side
   logic        m_req, m_we; logic [31:0] m_addr, m_wdata; logic [3:0] m_wstrb;
   logic [31:0] m_rdata; logic m_ack;
+  // KEN# / snoop (Phase A): default cacheable, no snoop — groups [9]/[10] drive them.
+  logic        cacheable = 1'b1;
+  logic        snoop_inv_valid = 1'b0;
+  logic [31:0] snoop_inv_addr  = 32'd0;
 
-  ven_l1d dut (.clk, .rst_n, .flush_all(1'b0), .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
+  ven_l1d dut (.clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
+               .cacheable, .snoop_inv_valid, .snoop_inv_addr,
+               .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
                .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack);
 
   // ---- behavioral backing: byte-addressable, same-cycle ack -----------------
@@ -95,12 +101,22 @@ module tb_l1d;
     @(negedge clk); c_req<=1'b0;
   endtask
 
+  // pulse a one-clock snoop invalidate for the line containing `a`.
+  task automatic do_snoop(input logic [31:0] a);
+    @(negedge clk); snoop_inv_valid<=1'b1; snoop_inv_addr<=a;
+    @(negedge clk); snoop_inv_valid<=1'b0;
+  endtask
+  // direct backing write (simulates a DMA master writing DRAM behind the L1's back).
+  task automatic dma_poke(input logic [31:0] a, input logic [31:0] v);
+    for (int b=0;b<4;b++) mem[a+b] = v[b*8 +: 8];
+  endtask
+
   logic [31:0] d;
   initial begin
     c_req=0; c_we=0; c_addr=0; c_wdata=0; c_wstrb=0;
     // seed the backing with a recognizable pattern: word at addr A = A ^ 0xA5A5_0000
     for (int i=0;i<(1<<20);i++) mem[i] = 8'h00;
-    for (logic [31:0] a=0; a<32'h4000; a+=4)
+    for (logic [31:0] a=0; a<32'h4400; a+=4)
       {mem[a+3],mem[a+2],mem[a+1],mem[a+0]} = a ^ 32'hA5A5_0000;
     repeat(4) @(posedge clk); rst_n<=1'b1; @(posedge clk);
 
@@ -134,6 +150,27 @@ module tb_l1d;
     do_read_b2b(32'h0000_1c1a, 6);   // 0x1c1a unaligned: words at boff 26,30(xline),2,6,10,14
     $display("[8] same burst over a COLD next line (xline fills L+1 mid-burst)");
     do_read_b2b(32'h0000_201a, 6);   // 0x201a: line 0x2000 + crosses into cold 0x2020 @boff=30
+
+    // ----- NEW Phase A behavior: KEN# bypass + snoop invalidate ---------------
+    $display("[9] NON-CACHEABLE read (cacheable=0): no allocate, fresh data each time");
+    cacheable = 1'b0;
+    do_read(32'h0000_0500, d); chk("nc read 0x500", d, 32'h0500 ^ 32'hA5A5_0000);
+    dma_poke(32'h0000_0500, 32'hCAFE_F00D);             // backing changes underneath
+    do_read(32'h0000_0500, d); chk("nc re-read sees new", d, 32'hCAFE_F00D); // proves not cached
+    $display("[9b] NON-CACHEABLE write (cacheable=0): straight write-through, no allocate");
+    do_write(32'h0000_0600, 32'h1234_5678);
+    chk("nc write hit backing", rd32(32'h0000_0600), 32'h1234_5678);
+    cacheable = 1'b1;
+    do_read(32'h0000_0600, d); chk("cacheable read-back", d, 32'h1234_5678);
+    // the non-cacheable accesses must NOT have polluted/evicted resident lines:
+    do_read(32'h0000_1004, d); chk("resident line intact", d, 32'h1004 ^ 32'hA5A5_0000);
+
+    $display("[10] SNOOP invalidate: DMA write + snoop -> next read refills new data");
+    do_read(32'h0000_4000, d); chk("cache line@4000", d, 32'h4000 ^ 32'hA5A5_0000); // now resident
+    dma_poke(32'h0000_4000, 32'h0BAD_C0DE);             // DMA overwrites it in DRAM
+    do_read(32'h0000_4000, d); chk("stale hit pre-snoop", d, 32'h4000 ^ 32'hA5A5_0000); // still cached (stale)
+    do_snoop(32'h0000_4000);                            // northbridge invalidates the line
+    do_read(32'h0000_4000, d); chk("post-snoop refill",  d, 32'h0BAD_C0DE);            // miss -> fresh data
 
     if (errors==0) $display("L1D-GATE-OK (all checks pass)");
     else           $display("L1D-GATE-FAIL (%0d errors)", errors);
