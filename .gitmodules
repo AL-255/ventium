@@ -4,3 +4,9 @@
 [submodule "3rd-party/opl3_fpga"]
 	path = 3rd-party/opl3_fpga
 	url = git@github.com:gtaylormb/opl3_fpga.git
+[submodule "verif/fpu87/extern/berkeley-softfloat-3"]
+	path = verif/fpu87/extern/berkeley-softfloat-3
+	url = https://github.com/ucb-bar/berkeley-softfloat-3
+[submodule "verif/fpu87/extern/berkeley-testfloat-3"]
+	path = verif/fpu87/extern/berkeley-testfloat-3
+	url = https://github.com/ucb-bar/berkeley-testfloat-3

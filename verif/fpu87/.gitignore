@@ -1,0 +1,3 @@
+# All build artifacts (SoftFloat objects/lib, the oracle binary, generated test
+# corpora, per-run work dirs) live under build/ and are never committed.
+build/
