@@ -35,14 +35,21 @@ say "LANE 2/4 — system-mode images"
 bash "$SCRIPT_DIR/run-sys-cov.sh" || true
 say "LANE 3/4 — memory subsystem"
 bash "$SCRIPT_DIR/run-mem-cov.sh" || true
-say "LANE 4/5 — optional arithmetic engines + biu_p5"
+say "LANE 4/8 — optional arithmetic engines + biu_p5"
 bash "$SCRIPT_DIR/run-unit-cov.sh" || true
-say "LANE 5/5 — cycle-mode (dual-issue fast path)"
+say "LANE 5/8 — cycle-mode (dual-issue fast path)"
 bash "$SCRIPT_DIR/run-cyc-cov.sh" || true
+say "LANE 6/8 — HALT arms (invalid-opcode d_unknown defaults)"
+bash "$SCRIPT_DIR/run-halt-cov.sh" || true
+say "LANE 7/8 — CPUID/RDTSC/INVD via --cosim"
+bash "$SCRIPT_DIR/run-cosim-cov.sh" || true
+say "LANE 8/8 — build-flags (feature-rich variant: FE_PIPE/UOPCACHE/FP_PIPE/TRANSCENDENTAL/...)"
+bash "$SCRIPT_DIR/run-flags-cov.sh" || true
 
-# ---- combined CORE coverage (ISA + SYS + CYC, same top) --------------------
-say "COMBINED CORE COVERAGE (ISA + system-mode + cycle-mode)"
-CORE_DATS=$(ls "$COV"/dat/*.dat "$COV"/sys/dat/*.dat "$COV"/cyc/dat/*.dat 2>/dev/null || true)
+# ---- combined CORE coverage (every ventium_top lane, same top) -------------
+say "COMBINED CORE COVERAGE (ISA + system + cycle + halt + cosim + build-flags)"
+CORE_DATS=$(ls "$COV"/dat/*.dat "$COV"/sys/dat/*.dat "$COV"/cyc/dat/*.dat \
+    "$COV"/halt/dat/*.dat "$COV"/cosim/dat/*.dat "$COV"/flags/dat/*.dat 2>/dev/null || true)
 if [ -n "$CORE_DATS" ]; then
     # shellcheck disable=SC2086
     "$VERILATOR_COVERAGE" --write "$COMB/core.dat" $CORE_DATS > "$COMB/merge.log" 2>&1 \

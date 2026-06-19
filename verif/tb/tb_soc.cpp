@@ -626,6 +626,16 @@ int main(int argc, char** argv) {
     if (vcd) { vcd->close(); delete vcd; }
 #endif
 
+#if VM_COVERAGE
+    // SoC coverage build (`make -C verif/tb soc-cov`): dump line/toggle counters
+    // to $VEN_COV_DAT at exit. Inert in every non-coverage build (VM_COVERAGE=0),
+    // so the default obj_dir_soc/tb_soc is byte-identical.
+    if (const char* covdat = std::getenv("VEN_COV_DAT")) {
+        Verilated::threadContextp()->coveragep()->write(covdat);
+        std::fprintf(stderr, "tb_soc: wrote coverage to %s\n", covdat);
+    }
+#endif
+
     std::fprintf(stderr,
         "tb_soc: retired %llu instructions in %llu clocks (bus: %llu reads, %llu writes)\n",
         (unsigned long long)trace.retired(), (unsigned long long)cycles,

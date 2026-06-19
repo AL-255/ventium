@@ -37,7 +37,8 @@ info() { printf '    %s\n' "$*"; }
 # RTL_SYS_TESTS family from run-sys-golden.sh) — each exercises a distinct
 # privileged path: segmentation, paging, interrupts, faults, CPL/TSS, task
 # switch, V86, debug, SMM, descriptor errors.
-DEFAULT_TESTS="pseg pmode ppage pintr pfault pde pcpl ptask pv86 pdebug psmm"
+DEFAULT_TESTS="pseg pmode ppage pintr pfault pde pcpl ptask pv86 pdebug psmm \
+  psocfarcall psoclseg psocrmint psocrmexc psocsgdt psoccallfmem psocsregmem"
 TESTS=("$@"); [ "${#TESTS[@]}" -eq 0 ] && read -r -a TESTS <<<"$DEFAULT_TESTS"
 
 mkdir -p "$DAT"; rm -f "$DAT"/*.dat 2>/dev/null || true

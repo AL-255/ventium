@@ -56,18 +56,25 @@ authoritative CORE coverage number (`run-all-cov.sh` does this:
 `build/cov/combined/cov_summary.txt`). MEM/UNIT cover leaf modules under their
 own tops and are reported separately.
 
-### Five lanes
+### Eight lanes
 
 | lane | runner | covers | top |
 |------|--------|--------|-----|
-| ISA   | `run-cov.sh`     | core under the user-mode ISA corpus | `ventium_top` |
-| SYS   | `run-sys-cov.sh` | core under bare-metal `--system` images | `ventium_top` |
-| CYC   | `run-cyc-cov.sh` | the dual-issue **fast path** (corpus re-run in `--cycle`) | `ventium_top` |
-| MEM   | `run-mem-cov.sh` | `ven_l1d` / `ven_axi_master` / `ventium_l1_axi` / `ven_l2` | standalone |
-| UNIT  | `run-unit-cov.sh`| `ven_idiv` / `fpu_srt_div` / `fpu_sqrt_iter` / `ven_bcd*` / `biu_p5` | standalone |
+| ISA   | `run-cov.sh`      | core under the user-mode ISA corpus | `ventium_top` |
+| SYS   | `run-sys-cov.sh`  | core under bare-metal `--system` images (incl. real-mode `psoc*`: far CALL/RETF, LSS/LFS/LGS, INT/exc, SGDT) | `ventium_top` |
+| CYC   | `run-cyc-cov.sh`  | the dual-issue **fast path** (corpus re-run in `--cycle`) | `ventium_top` |
+| HALT  | `run-halt-cov.sh` | the defensive `d_unknown`/HALT default arms (invalid-opcode images) | `ventium_top` |
+| COSIM | `run-cosim-cov.sh`| **CPUID / RDTSC / INVD / WBINVD** (gated on `cosim_en\|\|soc_en`, run via `--cosim`) | `ventium_top` |
+| FLAGS | `run-flags-cov.sh`| the `ifdef VEN_*` feature gates + their modules (FE_PIPE, UOPCACHE, FP_PIPE, **TRANSCENDENTAL** f2xm1/fpatan/..., FPREM, iter engines) | `ventium_top` |
+| MEM   | `run-mem-cov.sh`  | `ven_l1d` / `ven_axi_master` / `ventium_l1_axi` / `ven_l2` | standalone |
+| UNIT  | `run-unit-cov.sh` | `ven_idiv` / `fpu_srt_div` / `fpu_sqrt_iter` / `ven_bcd*` / `biu_p5` | standalone |
 
-ISA + SYS + CYC share `ventium_top` and **merge** into the authoritative CORE
-number (`build/cov/combined/cov_summary.txt`).
+ISA+SYS+CYC+HALT+COSIM+FLAGS all share the `ventium_top` hierarchy and **merge**
+into the authoritative CORE number (`build/cov/combined/cov_summary.txt`).
+`run-soc-cov.sh` is the proper `ventium_soc` lane for CPUID/RDTSC + the SoC
+peripherals/device IN-OUT paths; it is a SEPARATE pool (the SoC core hierarchy
+differs, so it doesn't merge) and currently needs `ventium_soc.sv` to be updated
+to connect the new `dbg_de_*` core ports before it compiles.
 
 ### Measured CORE line coverage (this checkout)
 
@@ -79,7 +86,14 @@ coverage in three rounds:
 | user-mode ISA only           | 55.2 % |
 | + system-mode                | 80.6 % |
 | + round-1/2 gap tests        | 83.9 % |
-| **+ cycle-mode (final)**     | **85.3 %** |
+| + cycle-mode                 | 85.3 % |
+| + HALT arms + real-mode `psoc*` + CPUID/RDTSC (`--cosim`) | **90.0 %** |
+| + build-flags lane (FE_PIPE/UOPCACHE/FP_PIPE/TRANSCENDENTAL/...) | pending* |
+
+\* the FLAGS lane builds a feature-rich `ventium_top` and lights up the `ifdef
+VEN_*` code + whole modules (`uopcache.sv`, `fpu_f2xm1/fpatan/fyl2x/fsincos.sv`,
+the FP-commit pipeline) that no other lane reaches; it is wired into
+`make coverage-all` and ready to run once the core compiles cleanly.
 
 MEM lane: ven_l1d 75 / axi 74 / l2 95 % line. UNIT lane: ven_idiv 92 / bcd 83 /
 sqrt 78 / srt 68 / biu_p5 90 % line.

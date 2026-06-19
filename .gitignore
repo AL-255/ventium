@@ -71,3 +71,9 @@ __pycache__/
 *.swp
 .DS_Store
 verif/tb/ps_periph_table.inc
+
+# coverage-suite build artifacts
+verif/cov/cosim/*/*.bin
+verif/cov/cosim/*/*.elf
+verif/cov/cosim/*/*.o
+verif/cov/build_cov.log
