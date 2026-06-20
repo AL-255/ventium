@@ -21,6 +21,10 @@
 // ===========================================================================
 `default_nettype none
 
+// Force the polynomial/Newton 64x64 multiplies (mul128_*, fx_mul) onto DSP48s
+// instead of LUTs — these qref-bit-exact transcendentals are multiplier-heavy
+// (not CORDIC), so default LUT mapping over-utilizes; the device has ~1216 free DSPs.
+(* use_dsp = "yes" *)
 module fpu_fpatan
   import fpu_x87_pkg::*;
 #(
@@ -194,6 +198,26 @@ module fpu_fpatan
   wire x_is_zero = (x_exp==15'd0) && (x_man==64'd0);
   wire y_is_zero = (y_exp==15'd0) && (y_man==64'd0);
 
+  // ---- SHARED wide multiplier (Pentium FIRC: one mul128_256 time-muxed across the
+  // mutually-exclusive S_Z2 (z^2) and S_ATANZ (poly*z) states). Module-level use_dsp
+  // maps it to DSP48. (S_ZDIV's rational-division mul128_192s stay inline.)
+  logic [63:0]  sm_a0, sm_a1, sm_b0, sm_b1;
+  logic [255:0] sm256;
+  logic [127:0] fa_asig;                    // S_ATANZ reconstruction operand
+  assign sm256 = mul128_256(sm_a0, sm_a1, sm_b0, sm_b1);
+  always_comb begin
+    automatic logic signed [31:0] fax; automatic logic [127:0] fash;
+    fax     = $signed({17'd0, FA_C0[78:64]});
+    fash    = shift128rj(accum_q[63:0], 64'd0, fax - $signed({17'd0, accum_q[78:64]}));
+    fa_asig = {FA_C0[63:0],64'd0} - fash;
+    sm_a0='0; sm_a1='0; sm_b0='0; sm_b1='0;
+    unique case (st)
+      S_Z2:    begin sm_a0=zsig0_q;          sm_a1=zsig1_q;       sm_b0=zsig0_q; sm_b1=zsig1_q; end
+      S_ATANZ: begin sm_a0=fa_asig[127:64];  sm_a1=fa_asig[63:0]; sm_b0=zsig0_q; sm_b1=zsig1_q; end
+      default: ;
+    endcase
+  end
+
   always_ff @(posedge clk) begin
     if (!rst_n) begin st<=S_IDLE; done_q<=1'b0; end
     else begin
@@ -334,7 +358,7 @@ module fpu_fpatan
             st<=S_ATANX;                                      // skip Horner (z==0)
           end else begin
             automatic logic [255:0] z2p;
-            z2p = mul128_256(zsig0_q,zsig1_q, zsig0_q,zsig1_q);
+            z2p = sm256;                             // shared mul: z^2 (== mul128_256(z,z))
             z2_q <= norm_pack(1'b0, zexp_q+zexp_q-32'sd16382, z2p[255:192], z2p[191:128], 2'd0);
             accum_q <= FA_C6; step_q<=4'd0;
             st<=S_HORN;
@@ -351,13 +375,10 @@ module fpu_fpatan
 
         // ---- arctan(z) = z*(C0 + accum) --------------------------------
         S_ATANZ: begin
-          automatic logic signed [31:0] aexp;
-          automatic logic [127:0] sh, asig; automatic logic [255:0] azp;
+          automatic logic signed [31:0] aexp; automatic logic [255:0] azp;
           aexp = $signed({17'd0,FA_C0[78:64]});
-          sh = shift128rj(accum_q[63:0], 64'd0, aexp - $signed({17'd0,accum_q[78:64]}));
-          asig = {FA_C0[63:0],64'd0} - sh;                    // sub128(C0frac, accum_shifted)
+          azp = sm256;                              // shared mul: fa_asig * z (== mul128_256)
           azexp_q <= aexp + zexp_q - 32'sd16382;
-          azp = mul128_256(asig[127:64],asig[63:0], zsig0_q,zsig1_q);
           azsig0_q <= azp[255:192]; azsig1_q <= azp[191:128];
           st<=S_ATANX;
         end

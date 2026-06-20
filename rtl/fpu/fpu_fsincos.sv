@@ -17,6 +17,7 @@
 // ===========================================================================
 `default_nettype none
 
+(* use_dsp = "yes" *)   // 64x64 fx_mul/poly -> DSP48 (multiplier-heavy, not CORDIC)
 module fpu_fsincos
   import fpu_x87_pkg::*;
 #(
