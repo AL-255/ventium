@@ -19,6 +19,7 @@
 // ===========================================================================
 `default_nettype none
 
+(* use_dsp = "yes" *)   // 64x64 mul128_*/fx_mul -> DSP48 (multiplier-heavy, not CORDIC)
 module fpu_fyl2x
   import fpu_x87_pkg::*;
 #(
@@ -76,6 +77,44 @@ module fpu_fyl2x
   wire [14:0] y_exp=y_q[78:64]; wire y_sign=y_q[79]; wire [63:0] y_man=y_q[63:0];
   wire x_is_zero=(x_exp==15'd0)&&(x_man==64'd0);
   wire y_is_zero=(y_exp==15'd0)&&(y_man==64'd0);
+
+  // ---- SHARED wide multiplier (Pentium FIRC: one mul128 datapath, time-muxed
+  // across the mutually-exclusive multiply states). One mul128_256 covers both the
+  // 256-bit (S_CT2/S_CRECON) and 128x64 (b1=0, take [255:64]) products. Operands are
+  // derived combinationally per state; the module-level use_dsp maps it to DSP48.
+  logic [63:0]  sm_a0, sm_a1, sm_b0, sm_b1;
+  logic [255:0] sm256;
+  logic [127:0] cr_asig;                    // S_CRECON poly-reconstruction operand
+  logic [63:0]  po_as0, po_as1;             // S_POST operands (post int_exp combine)
+  logic signed [31:0] po_aexp; logic po_asign;
+  assign sm256 = mul128_256(sm_a0, sm_a1, sm_b0, sm_b1);
+  always_comb begin
+    automatic logic signed [31:0] crx; automatic logic [127:0] crsh;
+    crx     = $signed({17'd0, FY_C0[78:64]});
+    crsh    = shift128rj(accum_q[63:0], 64'd0, crx - $signed({17'd0, accum_q[78:64]}));
+    cr_asig = (FY_C0[79]==accum_q[79]) ? ({FY_C0[63:0],64'd0} + crsh)
+                                       : ({FY_C0[63:0],64'd0} - crsh);
+    // S_POST: FYL2X int_exp (2^k) combine, then the *ST1 multiplicand.
+    po_as0=asig0_q; po_as1=asig1_q; po_aexp=aexp_q; po_asign=asign_q;
+    if (mode_q==1'b0 && int_exp_q!=32'sd0) begin
+      automatic logic isign2; automatic logic signed [31:0] ie2,iexp2; automatic logic [63:0] isig2;
+      automatic int shift2; automatic logic [127:0] sh2, comb2;
+      isign2 = int_exp_q[31];
+      ie2    = isign2 ? -int_exp_q : int_exp_q;
+      shift2 = clz32(ie2)+32; isig2 = ie2 << shift2; iexp2 = 32'sd16446 - shift2;
+      sh2    = shift128rj(po_as0, po_as1, iexp2 - po_aexp); po_as0=sh2[127:64]; po_as1=sh2[63:0];
+      comb2  = (po_asign==isign2) ? ({isig2,64'd0} + {po_as0,po_as1})
+                                  : ({isig2,64'd0} - {po_as0,po_as1});
+      po_as0=comb2[127:64]; po_as1=comb2[63:0]; po_aexp=iexp2; po_asign=isign2;
+    end
+    sm_a0='0; sm_a1='0; sm_b0='0; sm_b1='0;
+    unique case (st)
+      S_CT2:    begin sm_a0=tsig0_q;         sm_a1=tsig1_q;        sm_b0=tsig0_q; sm_b1=tsig1_q; end
+      S_CRECON: begin sm_a0=cr_asig[127:64]; sm_a1=cr_asig[63:0];  sm_b0=tsig0_q; sm_b1=tsig1_q; end
+      S_POST:   begin sm_a0=po_as0;          sm_a1=po_as1;         sm_b0=a1sig_q; sm_b1=64'd0;  end
+      default: ;
+    endcase
+  end
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin st<=S_IDLE; done_q<=1'b0; end
@@ -168,7 +207,7 @@ module fpu_fyl2x
         // ---- t2 = t^2 ; preload Horner ----------------------------------
         S_CT2: begin
           automatic logic [255:0] t2p;
-          t2p = mul128_256(tsig0_q,tsig1_q, tsig0_q,tsig1_q);
+          t2p = sm256;                             // shared mul: t^2 (== mul128_256(t,t))
           t2_q <= norm_pack(1'b0, texp_q+texp_q-32'sd16382, t2p[255:192], t2p[191:128], 2'd0);
           accum_q <= FY_C9; step_q<=5'd0;
           st<=S_CHORN;
@@ -184,37 +223,25 @@ module fpu_fyl2x
 
         // ---- poly = (C0 + accum) * t ------------------------------------
         S_CRECON: begin
-          automatic logic signed [31:0] aexp; automatic logic [127:0] sh, asig; automatic logic [255:0] ap;
+          automatic logic signed [31:0] aexp; automatic logic [255:0] ap;
           aexp = $signed({17'd0,FY_C0[78:64]});
-          sh = shift128rj(accum_q[63:0], 64'd0, aexp - $signed({17'd0,accum_q[78:64]}));
-          if (FY_C0[79]==accum_q[79]) asig = {FY_C0[63:0],64'd0} + sh;
-          else                        asig = {FY_C0[63:0],64'd0} - sh;
-          ap = mul128_256(asig[127:64],asig[63:0], tsig0_q,tsig1_q);
+          ap = sm256;                              // shared mul: cr_asig * t (== mul128_256)
           aexp_q  <= aexp + texp_q - 32'sd16382;
           asig0_q <= ap[255:192]; asig1_q <= ap[191:128];
           st<=S_POST;
         end
 
-        // ---- wrapper post: int_exp add (fyl2x) + mul by ST1 -------------
+        // ---- wrapper post: int_exp combine (always_comb po_*) + mul by ST1 ----
+        // The int_exp (2^k) combine that forms the multiplicand is done in the shared
+        // always_comb (po_as0/po_as1/po_aexp/po_asign); here we only consume the
+        // shared mul product (po_as * a1sig) and finish.
         S_POST: begin
-          automatic logic signed [31:0] aexp; automatic logic [63:0] as0, as1; automatic logic asign;
+          automatic logic signed [31:0] aexp; automatic logic [63:0] as0, as1;
           automatic logic [191:0] mp;
-          aexp=aexp_q; as0=asig0_q; as1=asig1_q; asign=asign_q;
-          if (mode_q==1'b0 && int_exp_q!=32'sd0) begin
-            automatic logic isign; automatic logic signed [31:0] ie, iexp; automatic logic [63:0] isig; automatic int shift;
-            automatic logic [127:0] sh, comb;
-            isign = int_exp_q[31];
-            ie = isign ? -int_exp_q : int_exp_q;
-            shift = clz32(ie) + 32; isig = ie << shift; iexp = 32'sd16446 - shift;  // 0x403e - shift
-            sh = shift128rj(as0,as1, iexp - aexp); as0=sh[127:64]; as1=sh[63:0];
-            if (asign==isign) comb = {isig,64'd0} + {as0,as1};
-            else              comb = {isig,64'd0} - {as0,as1};
-            as0=comb[127:64]; as1=comb[63:0]; aexp=iexp; asign=isign;
-          end
-          // multiply by ST1 (arg1)
-          mp = mul128_192(as0, as1, a1sig_q); as0=mp[191:128]; as1=mp[127:64];
-          aexp = aexp + (a1exp_q - 32'sd16382);
-          asign_q<=asign; aexp_q<=aexp; asig0_q<=as0; asig1_q<=as1|64'd1;
+          mp = sm256[255:64];                      // shared mul: po_as * a1sig (== mul128_192)
+          as0=mp[191:128]; as1=mp[127:64];
+          aexp = po_aexp + (a1exp_q - 32'sd16382);
+          asign_q<=po_asign; aexp_q<=aexp; asig0_q<=as0; asig1_q<=as1|64'd1;
           st<=S_PACK;
         end
 
