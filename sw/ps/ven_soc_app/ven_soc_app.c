@@ -150,6 +150,13 @@ static void dbg_dump_core(void) {
         st & 0x3F, (st & 0x40) ? "PE" : "real", (st & 0x80) ? "+PG" : "", (st >> 8) & 0xFF,
         (st >> 16) & 1, (st >> 17) & 1, (st >> 18) & 1,
         rd(VEN_R_DBG_FAULT_PC), rd(VEN_R_DBG_CR0), rd(VEN_R_DBG_RUNCTL) >> 8 & 1);
+    {   // patchable opcode-hook: most-recent captured instruction (e.g. the faulting divide)
+        uint32_t hm = rd(VEN_R_DBG_HOOK_META);
+        fprintf(stderr, " hook: seq=%u eip=%08x EDX:EAX=%08x:%08x opB=%08x (op=%u w=%u cs=%04x)\n",
+            rd(VEN_R_DBG_HOOK_SEQ) & 0xFF, rd(VEN_R_DBG_HOOK_EIP),
+            rd(VEN_R_DBG_HOOK_OPAHI), rd(VEN_R_DBG_HOOK_OPALO), rd(VEN_R_DBG_HOOK_OPB),
+            (hm >> 24) & 0xFF, hm & 0x7, (hm >> 8) & 0xFFFF);
+    }
     if (st & (1u << 18)) {
         uint32_t fs = rd(VEN_R_DBG_FROZEN_ST);
         fprintf(stderr, " FROZEN snapshot: EIP=%08x FSM=0x%02x vec=0x%02x\n",
@@ -744,6 +751,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ven_soc: HW breakpoint armed @ 0x%08x; will single-step %u\n", g_bp, g_steps);
     }
     wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN);                   // release reset -> run
+    {   // arm the patchable opcode-capture hook (default 0x3 = enable + DIV/IDIV class;
+        // override via VEN_HOOK). DBG-only; harmless no-op on a non-DBG bitstream.
+        const char* h = getenv("VEN_HOOK");
+        wr(VEN_R_DBG_HOOK_CFG, h ? (uint32_t)strtoul(h, 0, 0) : 0x3u);
+    }
     if (g_dos) spawn_kms();                              // default live VGA display (--no-kms to suppress)
 
     // service loop (F2: poll; F3+ can switch to the GIC interrupt on irq_out).

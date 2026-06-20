@@ -142,6 +142,11 @@ module ventium_kv260_core #(
   // single-step / breakpoint control (ven_soc_axil <-> ventium_top/core)
   logic        d_halt_req, d_step, d_bp_en, d_bp_clr, d_halted;
   logic [31:0] d_bp_addr;
+  // patchable opcode-capture hook nets (ven_soc_axil <-> ventium_top/core)
+  logic [15:0] d_hook_cfg;
+  logic [7:0]  d_hook_seq;
+  logic [31:0] d_hook_eip, d_hook_opb, d_hook_meta;
+  logic [63:0] d_hook_opa;
 `endif
 
   ven_soc_axil #(.AXIL_AW(AXIL_AW)) u_axil (
@@ -200,7 +205,9 @@ module ventium_kv260_core #(
       .dbg_perf_cyc(d_perf_cyc), .dbg_perf_retired(d_perf_ret), .dbg_perf_stall(d_perf_stall),
       .dbg_perf_io(d_perf_io), .dbg_perf_irq(d_perf_irq),
       .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
-      .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted)
+      .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted),
+      .dbg_hook_cfg(d_hook_cfg), .dbg_hook_seq(d_hook_seq), .dbg_hook_eip(d_hook_eip),
+      .dbg_hook_opa(d_hook_opa), .dbg_hook_opb(d_hook_opb), .dbg_hook_meta(d_hook_meta)
 `endif
   );
 
@@ -278,11 +285,10 @@ module ventium_kv260_core #(
       .dbg_rd_valid(dbg_rd_valid), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
       .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
       .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted),
-      // Patchable opcode-capture hook: board-AXIL exposure is the next step; tie the
-      // config off (disabled) for now so the SoC wrapper builds. The SIM tb drives
-      // ventium_top's dbg_hook_cfg directly (the hook is fully usable in sim).
-      .dbg_hook_cfg(16'd0), .dbg_hook_seq(), .dbg_hook_eip(),
-      .dbg_hook_opa(), .dbg_hook_opb(), .dbg_hook_meta()
+      // Patchable opcode-capture hook: cfg from ven_soc_axil (PS-armed), capture
+      // snapshot back to ven_soc_axil's RO window (0xB0-0xC8).
+      .dbg_hook_cfg(d_hook_cfg), .dbg_hook_seq(d_hook_seq), .dbg_hook_eip(d_hook_eip),
+      .dbg_hook_opa(d_hook_opa), .dbg_hook_opb(d_hook_opb), .dbg_hook_meta(d_hook_meta)
 `endif
   );
   // verilator lint_on PINCONNECTEMPTY

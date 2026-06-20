@@ -170,7 +170,14 @@ module ven_soc_axil #(
     output logic        dbg_bp_en,         // enable the PC breakpoint
     output logic [31:0] dbg_bp_addr,       // breakpoint EIP
     output logic        dbg_bp_clr,        // W1P: clear a latched breakpoint (resume)
-    input  logic        dbg_halted         // status: core parked at a boundary
+    input  logic        dbg_halted,        // status: core parked at a boundary
+    // patchable opcode-capture hook: cfg out -> core; capture snapshot in <- core
+    output logic [15:0] dbg_hook_cfg,      // RW config (PS arms which class to record)
+    input  logic [7:0]  dbg_hook_seq,      // capture counter (poll for a new match)
+    input  logic [31:0] dbg_hook_eip,
+    input  logic [63:0] dbg_hook_opa,
+    input  logic [31:0] dbg_hook_opb,
+    input  logic [31:0] dbg_hook_meta
 `endif
 );
 
@@ -220,6 +227,13 @@ module ven_soc_axil #(
   localparam logic [7:0] R_DBG_FROZEN_ST  = 8'hA4;  // RO {frozen,vec,state} at the freeze
   localparam logic [7:0] R_DBG_TRACE_IDX  = 8'hA8;  // RW [4:0]=N-back idx; RO [13:8]=count
   localparam logic [7:0] R_DBG_TRACE_PC   = 8'hAC;  // RO ring[idx] EIP
+  localparam logic [7:0] R_DBG_HOOK_CFG   = 8'hB0;  // RW [15:0] opcode-hook config (PS-armed)
+  localparam logic [7:0] R_DBG_HOOK_SEQ   = 8'hB4;  // RO [7:0] capture seq (poll for a match)
+  localparam logic [7:0] R_DBG_HOOK_EIP   = 8'hB8;  // RO matched-insn EIP
+  localparam logic [7:0] R_DBG_HOOK_OPALO = 8'hBC;  // RO opA[31:0]  (DIV: EAX)
+  localparam logic [7:0] R_DBG_HOOK_OPAHI = 8'hC0;  // RO opA[63:32] (DIV: EDX)
+  localparam logic [7:0] R_DBG_HOOK_OPB   = 8'hC4;  // RO opB        (DIV: divisor)
+  localparam logic [7:0] R_DBG_HOOK_META  = 8'hC8;  // RO {opcode/subop[7:0], cs[15:0], 5'b0, w[2:0]}
   localparam logic [7:0] R_DBG_TRACE_AUX  = 8'hB0;  // RO ring[idx] {state,cs}
   localparam logic [7:0] R_DBG_CTRL       = 8'hB4;  // W1P [0]=clear perf/freeze/ring
   localparam logic [7:0] R_DBG_FREEZE_TH  = 8'hB8;  // RW stall-cycles -> freeze (0=off)
@@ -293,6 +307,8 @@ module ven_soc_axil #(
   assign dbg_bp_addr       = dbg_bp_addr_r;
   assign dbg_bp_en         = dbg_bp_en_r;
   assign dbg_halt_req      = dbg_halt_req_r;
+  logic [15:0] dbg_hook_cfg_r;   // opcode-hook config, PS-written (RW at R_DBG_HOOK_CFG)
+  assign dbg_hook_cfg      = dbg_hook_cfg_r;
   // dbg_step / dbg_bp_clr are W1P pulses, driven in the write-decode block.
 `endif
 
@@ -444,6 +460,13 @@ module ven_soc_axil #(
           R_DBG_FROZEN_ST:  s_axil_rdata <= {15'd0, dbg_frozen, dbg_frozen_vec, 2'd0, dbg_frozen_state};
           R_DBG_TRACE_IDX:  s_axil_rdata <= {18'd0, dbg_trace_count, 3'd0, dbg_trace_idx_r};
           R_DBG_TRACE_PC:   s_axil_rdata <= dbg_trace_pc;
+          R_DBG_HOOK_CFG:   s_axil_rdata <= {16'd0, dbg_hook_cfg_r};
+          R_DBG_HOOK_SEQ:   s_axil_rdata <= {24'd0, dbg_hook_seq};
+          R_DBG_HOOK_EIP:   s_axil_rdata <= dbg_hook_eip;
+          R_DBG_HOOK_OPALO: s_axil_rdata <= dbg_hook_opa[31:0];
+          R_DBG_HOOK_OPAHI: s_axil_rdata <= dbg_hook_opa[63:32];
+          R_DBG_HOOK_OPB:   s_axil_rdata <= dbg_hook_opb;
+          R_DBG_HOOK_META:  s_axil_rdata <= dbg_hook_meta;
           R_DBG_TRACE_AUX:  s_axil_rdata <= dbg_trace_aux;
           R_DBG_FREEZE_TH:  s_axil_rdata <= dbg_freeze_th_r;
           R_DBG_PERF_CYCLO: s_axil_rdata <= dbg_perf_cyc[31:0];
@@ -506,6 +529,7 @@ module ven_soc_axil #(
 `ifdef VEN_DBG_CORE
       dbg_trace_idx_r <= 5'd0; dbg_freeze_th_r <= 32'd0; dbg_clear <= 1'b0;
       dbg_bp_addr_r <= 32'd0; dbg_bp_en_r <= 1'b0; dbg_halt_req_r <= 1'b0;
+      dbg_hook_cfg_r <= 16'd0;
       dbg_step <= 1'b0; dbg_bp_clr <= 1'b0;
 `endif
 `ifdef VEN_FPTRAP
@@ -612,6 +636,7 @@ module ven_soc_axil #(
 `endif
 `ifdef VEN_DBG_CORE
           R_DBG_TRACE_IDX: if (s_axil_wstrb[0]) dbg_trace_idx_r <= s_axil_wdata[4:0];
+          R_DBG_HOOK_CFG:  if (s_axil_wstrb[0]) dbg_hook_cfg_r <= s_axil_wdata[15:0];
           R_DBG_CTRL:      if (s_axil_wstrb[0] && s_axil_wdata[0]) dbg_clear <= 1'b1; // W1P
           R_DBG_FREEZE_TH: begin
             if (s_axil_wstrb[0]) dbg_freeze_th_r[7:0]   <= s_axil_wdata[7:0];

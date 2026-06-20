@@ -64,6 +64,14 @@
 #define VEN_R_DBG_FROZEN_EIP 0xA0  // RO EIP snapshot at the freeze
 #define VEN_R_DBG_FROZEN_ST  0xA4  // RO [5:0]fsm [15:8]vec [16]frozen — at the freeze
 #define VEN_R_DBG_TRACE_IDX  0xA8  // RW [4:0]=N-back ring idx; RO [13:8]=count
+// patchable opcode-capture hook (generalises the divide tap): arm CFG, poll SEQ.
+#define VEN_R_DBG_HOOK_CFG   0xB0  // RW [0]en [1]DIV/IDIV-class [9:2]opcode [13:11]modrm.reg [14]modrm-care
+#define VEN_R_DBG_HOOK_SEQ   0xB4  // RO [7:0] capture counter (changes on each match)
+#define VEN_R_DBG_HOOK_EIP   0xB8  // RO matched-instruction EIP
+#define VEN_R_DBG_HOOK_OPALO 0xBC  // RO opA[31:0]  (DIV: EAX)
+#define VEN_R_DBG_HOOK_OPAHI 0xC0  // RO opA[63:32] (DIV: EDX)
+#define VEN_R_DBG_HOOK_OPB   0xC4  // RO opB        (DIV: divisor)
+#define VEN_R_DBG_HOOK_META  0xC8  // RO {opcode/subop[7:0], cs[15:0], 5'b0, w[2:0]}
 #define VEN_R_DBG_TRACE_PC   0xAC  // RO ring[idx] EIP
 #define VEN_R_DBG_TRACE_AUX  0xB0  // RO ring[idx] {state[5:0]<<16, cs[15:0]}
 #define VEN_R_DBG_CTRL       0xB4  // W1P [0]=clear perf/freeze/ring
