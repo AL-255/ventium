@@ -15,7 +15,9 @@
 #
 # Flags exercised (the safe, combinable, non-L1AXI set the deployed build uses):
 #   VEN_FE_PIPE VEN_UOPCACHE VEN_BTB_PIPE VEN_FP_PIPE VEN_FP_PIPE2 VEN_FP_OVERLAP
-#   VEN_FXCH_FREE VEN_TRANSCENDENTAL VEN_FPREM VEN_SRT_ITER VEN_IDIV_ITER
+# (VEN_FPREM is omitted here — the FPU overhaul made it default-on in the base
+#  build's VL_FLAGS, so the unified FDIV/FSQRT/FPREM datapath is always present.)
+#   VEN_FXCH_FREE VEN_TRANSCENDENTAL VEN_SRT_ITER VEN_IDIV_ITER
 #   VEN_BCD_ITER VEN_FPTRAP VEN_FP_PC_RELAX VEN_DIV_EXACT
 # (VEN_IC_BRAM/VEN_CACHE_HALF/VEN_KV260_SOC need L1AXI; VEN_PS_PROXY/VEN_DBG_CORE
 #  need their own run modes — out of this lane's scope, noted in the README.)
@@ -33,7 +35,7 @@ PYTHON="${PYTHON:-python3}"; CC="${CC:-gcc}"
 CFLAGS_BASE="-m32 -march=pentium -nostdlib -static -Wl,--build-id=none"
 FEAT_DEFS="${FEAT_DEFS:-+define+VEN_FE_PIPE +define+VEN_UOPCACHE +define+VEN_BTB_PIPE \
   +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_FP_OVERLAP +define+VEN_FXCH_FREE \
-  +define+VEN_TRANSCENDENTAL +define+VEN_FPREM +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
+  +define+VEN_TRANSCENDENTAL +define+VEN_SRT_ITER +define+VEN_IDIV_ITER \
   +define+VEN_BCD_ITER +define+VEN_FPTRAP +define+VEN_FP_PC_RELAX}"
 say()  { printf '\n=== %s ===\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
