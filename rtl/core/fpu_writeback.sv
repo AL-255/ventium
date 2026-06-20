@@ -548,6 +548,7 @@ module fpu_writeback
     // on the combinational path (its flag/special logic below is preserved).
     begin
       logic na, nb;
+      logic signed [31:0] eqd;
       // operands are the shared s_fa/s_fb (the per-q_fxop mux computed above).
       // FINITE-NONZERO operands: exactly the set that reaches fx_srt_div's /
       // fx_isqrt's loop in f_eval's else (zero/Inf/NaN hit cheap guards). Routing
@@ -559,13 +560,26 @@ module fpu_writeback
       // path handles a denormal radicand). fx_is_normal == exp in (0,0x7fff) & v[63].
       na = fx_is_normal(s_fa);
       nb = fx_is_normal(s_fb);
+      // EXP-DIFF guard (mirror fx_div's use_exact): the iterative engine has no
+      // gradual-underflow/overflow path, so a normal/normal divide whose QUOTIENT
+      // over/underflows the floatx80 range (|exp(a)-exp(b)| > 16000) must fall to
+      // the shared denormal/overflow-correct fx_div_exact, not the engine. Without
+      // this it produced garbage on tiny/huge quotients (fpu87 VEN_SRT_ITER suite).
+      eqd = $signed(fx_uexp_eff(s_fa)) - $signed(fx_uexp_eff(s_fb));
       fp_div_elig = slow_arm && !errata_en[ERR_FDIV] &&
                     ((q_fxop==FX_AR_ST0_STI)||(q_fxop==FX_AR_STI_ST0)||
                      (q_fxop==FX_AR_M32)||(q_fxop==FX_AR_M64)||
                      (q_fxop==FX_AR_I16)||(q_fxop==FX_AR_I32)) &&
-                    ((q_f_aluop==3'd6)||(q_f_aluop==3'd7)) && na && nb;
-      fp_sqrt_elig = slow_arm && (q_fxop==FX_FSQRT) &&
-                     fx_is_normal(s_st0v) && !s_st0v[79];
+                    ((q_f_aluop==3'd6)||(q_f_aluop==3'd7)) && na && nb &&
+                    (eqd <= 32'sd16000) && (eqd >= -32'sd16000);
+      // Accept NORMAL *and* DENORMAL positive radicands: the unified engine's
+      // sqrt setup uses the denormal-aware fx_uexp_eff (== fx_sqrt), so it handles
+      // both. Denormals were excluded before and fell to the combinational fx_sqrt
+      // — which is STUBBED under VEN_SRT_ITER, so sqrt(denormal) returned garbage
+      // (fpu87 finding). Zero/Inf/NaN stay on the combinational path (handled
+      // before fx_sqrt's stub); negative radicands (NaN) handled by the caller.
+      fp_sqrt_elig = slow_arm && (q_fxop==FX_FSQRT) && !s_st0v[79] &&
+                     !fx_is_zero(s_st0v) && (fx_exp(s_st0v) != 15'h7fff);
       fp_iter_go   = fp_div_elig || fp_sqrt_elig;
       // div: a/b as passed to fx_div (divr, aluop 7, swaps operands)
       eng_div_a    = (q_f_aluop==3'd7) ? s_fb : s_fa;
