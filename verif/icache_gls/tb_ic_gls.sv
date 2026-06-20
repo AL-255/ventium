@@ -48,7 +48,7 @@ module tb_ic_gls;
   int errs=0;
   task check_read(input [IDXW-1:0] s, input [WAYW-1:0] w);
     @(negedge clk); rd_setA=s; rd_wayA=w;
-    @(posedge clk); #1;                       // registered read settles
+    @(posedge clk); @(posedge clk); #1;       // hold addr, let the registered RAMB read settle (2 clk)
     for (int wd=0; wd<8; wd++)
       if (rd_lineA[wd*32 +: 32] !== gv(s,w,wd[2:0]) && !rd_collA) begin
         errs++;
