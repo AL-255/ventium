@@ -61,7 +61,6 @@ fpu/fpu_top.sv
 // one-step-per-clock form of fx_srt_div/fx_sqrt). Instantiated by core.sv only
 // under +define+VEN_SRT_ITER; harmless (uninstantiated) in the default build.
 fpu/fpu_srt_div.sv
-fpu/fpu_sqrt_iter.sv
 // iterative FP->packed-BCD (FBSTP) engine — instantiated under +VEN_BCD_ITER.
 fpu/ven_bcd.sv
 fpu/ven_bcd_to_fp.sv

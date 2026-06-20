@@ -4540,6 +4540,20 @@ module core
     .wabs_fstat   (fp_wabs_fstat)
   );
 
+  // FPREM/FPREM1 (D9 F8 / F5) engine handshake. Under VEN_SRT_ITER the UNIFIED
+  // fpu_srt_div handles remainder (folded in); otherwise the dedicated fpu_fprem
+  // serves the combinational config. Declared once here; one driver per config.
+  logic        eng_fprem_start, eng_fprem_busy, eng_fprem_done, eng_fprem_c2, eng_fprem_ie;
+  logic [79:0] eng_fprem_result;
+  logic [2:0]  eng_fprem_q012;
+`ifdef VEN_FPREM
+  assign eng_fprem_start = (state==S_FEXEC) && (q_fxop==FX_FPREM || q_fxop==FX_FPREM1);
+`else
+  assign eng_fprem_start = 1'b0; assign eng_fprem_busy = 1'b0;
+  assign eng_fprem_done  = 1'b0; assign eng_fprem_result = 80'd0;
+  assign eng_fprem_q012  = 3'd0; assign eng_fprem_c2 = 1'b0; assign eng_fprem_ie = 1'b0;
+`endif
+
 `ifdef VEN_SRT_ITER
   // iterative SRT FDIV / FSQRT engines — the FPGA-synthesizable multi-cycle form
   // of fx_srt_div / fx_sqrt. Started from S_FEXEC for normal-operand divides /
@@ -4550,16 +4564,42 @@ module core
   `else
   localparam logic ENG_DIV_BUGGY = 1'b0;
   `endif
+  // UNIFIED FDIV: one engine does divide AND square-root (Pentium FDIV section).
+  // div and sqrt are mutually exclusive (blocking FP), so the single busy/done/
+  // result fan out to both handshakes; fp_iter_done picks by q_fxop. mode/a are
+  // muxed at the (one-cycle) start pulse, which the engine latches.
+  // div/sqrt/rem are mutually exclusive blocking FP ops -> the single engine's
+  // busy/done/result fan out to every handshake; the consuming FSM state picks the
+  // matching one. mode/a/b/prem1 are muxed at the one-cycle start pulse.
+  logic [1:0]  eng_u_mode;
+  logic        eng_u_start, eng_u_busy, eng_u_done, eng_u_prem1, eng_u_rem_go;
+  logic [79:0] eng_u_a, eng_u_b;
+  logic [80:0] eng_u_result;
+`ifdef VEN_FPREM
+  assign eng_u_rem_go = eng_fprem_start;
+  assign eng_u_prem1  = (q_fxop==FX_FPREM1);
+`else
+  assign eng_u_rem_go = 1'b0;
+  assign eng_u_prem1  = 1'b0;
+`endif
+  assign eng_u_start = eng_div_start || eng_sqrt_start || eng_u_rem_go;
+  assign eng_u_mode  = eng_u_rem_go ? 2'd2 : (eng_sqrt_start ? 2'd1 : 2'd0);
+  assign eng_u_a     = eng_u_rem_go ? fst(3'd0) : (eng_sqrt_start ? eng_sqrt_in : eng_div_a);
+  assign eng_u_b     = eng_u_rem_go ? fst(3'd1) : eng_div_b;
   fpu_srt_div u_srt_div (
-    .clk(clk), .rst_n(rst_n), .start(eng_div_start),
-    .a(eng_div_a), .b(eng_div_b), .rc(eng_rc), .buggy(ENG_DIV_BUGGY),
-    .busy(eng_div_busy), .done(eng_div_done), .result(eng_div_result)
+    .clk(clk), .rst_n(rst_n), .start(eng_u_start), .mode(eng_u_mode),
+    .prem1(eng_u_prem1), .a(eng_u_a), .b(eng_u_b), .rc(eng_rc), .buggy(ENG_DIV_BUGGY),
+    .busy(eng_u_busy), .done(eng_u_done), .result(eng_u_result),
+    .rem_q012(eng_fprem_q012), .rem_c2(eng_fprem_c2), .rem_ie(eng_fprem_ie)
   );
-  fpu_sqrt_iter u_sqrt_iter (
-    .clk(clk), .rst_n(rst_n), .start(eng_sqrt_start),
-    .a(eng_sqrt_in), .rc(eng_rc),
-    .busy(eng_sqrt_busy), .done(eng_sqrt_done), .result(eng_sqrt_result)
-  );
+  assign eng_div_busy   = eng_u_busy;   assign eng_sqrt_busy   = eng_u_busy;
+  assign eng_div_done   = eng_u_done;   assign eng_sqrt_done   = eng_u_done;
+  assign eng_div_result = eng_u_result; assign eng_sqrt_result = eng_u_result;
+`ifdef VEN_FPREM
+  assign eng_fprem_busy   = eng_u_busy;
+  assign eng_fprem_done   = eng_u_done;
+  assign eng_fprem_result = eng_u_result[79:0];
+`endif
 `else
   assign eng_div_busy=1'b0;  assign eng_div_done=1'b0;  assign eng_div_result='0;
   assign eng_sqrt_busy=1'b0; assign eng_sqrt_done=1'b0; assign eng_sqrt_result='0;
@@ -4713,17 +4753,12 @@ module core
   assign eng_trsc_pe=1'b0; assign eng_trsc_ie=1'b0; assign eng_trsc_c2=1'b0;
 `endif
 
-  // --- iterative exact partial-remainder engine (FPREM, D9 F8; VEN_FPREM) ------
-  // Started in S_FEXEC on FX_FPREM, busy-wait in S_FPREM_BUSY, commit remainder->ST0
-  // + C0/C3/C1/C2 on `done`. Bit-exact vs qemu helper_fprem (a=ST0/dividend, b=ST1).
-  logic        eng_fprem_done, eng_fprem_c2, eng_fprem_ie;
-  logic [79:0] eng_fprem_result;
-  logic [2:0]  eng_fprem_q012;
+  // --- FPREM dedicated engine — COMBINATIONAL config only (no VEN_SRT_ITER) ----
+  // Under VEN_SRT_ITER the unified fpu_srt_div handles remainder (folded above);
+  // the eng_fprem_* handshake + start are declared/driven there. Here the dedicated
+  // fpu_fprem serves builds without the iterative engine (e.g. the make-verify tb).
 `ifdef VEN_FPREM
-  logic        eng_fprem_start, eng_fprem_busy;
-  // FPREM (FX_FPREM) and FPREM1 (FX_FPREM1) share the engine; prem1 selects the
-  // round-nearest quotient (IEEE remainder) vs the truncating quotient.
-  assign eng_fprem_start = (state==S_FEXEC) && (q_fxop==FX_FPREM || q_fxop==FX_FPREM1);
+ `ifndef VEN_SRT_ITER
   fpu_fprem u_fprem (
     .clk(clk), .rst_n(rst_n), .start(eng_fprem_start),
     .prem1(q_fxop==FX_FPREM1),
@@ -4731,9 +4766,7 @@ module core
     .busy(eng_fprem_busy), .done(eng_fprem_done), .result(eng_fprem_result),
     .q012(eng_fprem_q012), .c2(eng_fprem_c2), .ie(eng_fprem_ie)
   );
-`else
-  assign eng_fprem_done=1'b0; assign eng_fprem_result=80'd0;
-  assign eng_fprem_q012=3'd0; assign eng_fprem_c2=1'b0; assign eng_fprem_ie=1'b0;
+ `endif
 `endif
 
   // ---- M2S.2 permission-fault DECISION (P/RW/US), computed not delivered. On a
