@@ -724,14 +724,26 @@ module fpu_writeback
               fp_we_top=1'b1;   fp_top_data=80'hFFFFC000000000000000;
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400 | 16'h0001; // C2+IE
             end else begin                                    // -0
+`ifdef VEN_SRT_ITER
+              // The engine handles every real sqrt, so only +0/-0/+Inf reach here and
+              // sqrt(x)==x (exact) for those. Drop the fx_sqrt call so the 256-bit
+              // combinational fx_sqrt (+ its bloated fx_round_pack_f cone) is dead-code
+              // eliminated. !VEN_SRT_ITER still needs the real fx_sqrt below.
+              fp_we_top=1'b1;   fp_top_data=s_st0v;
+`else
               s_ar = fx_sqrt(s_st0v, s_rc);
               fp_we_top=1'b1;   fp_top_data=s_ar[79:0];
+`endif
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400;            // C2 only
             end
           end else if (!fp_sqrt_elig) begin                   // +0, +Inf (+normal -> engine)
+`ifdef VEN_SRT_ITER
+            fp_we_top=1'b1; fp_top_data=s_st0v;               // sqrt(+0)=+0, sqrt(+Inf)=+Inf (exact)
+`else
             s_ar = fx_sqrt(s_st0v, s_rc);
             fp_we_top=1'b1; fp_top_data=s_ar[79:0];
             if (s_ar[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end    // PE
+`endif
           end
         end
         // ---- D9 FC FRNDINT: round ST0 to an integer-valued floatx80 per RC.
