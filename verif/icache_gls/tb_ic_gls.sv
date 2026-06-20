@@ -45,7 +45,7 @@ module tb_ic_gls;
     end
     @(negedge clk); fill_en=0; fill_done=0;
   endtask
-  int errs=0;
+  int errs=0, gmiss=0;
   task check_read(input [IDXW-1:0] s, input [WAYW-1:0] w);
     @(negedge clk); rd_setA=s; rd_wayA=w;
     @(posedge clk); @(posedge clk); #1;       // hold addr, let the registered RAMB read settle (2 clk)
@@ -75,6 +75,17 @@ module tb_ic_gls;
       @(negedge clk); fill_en=0;
     end
     $display("PHASE B (concurrent cross-port): total errs=%0d", errs);
+    // PHASE C: same-{set,way} read+fill SAME cycle -> the collide-guard MUST flag it (rd_collA=1).
+    // This is the ONE collision edge the icache module owns; if it holds, the residual is in the SPINE.
+
+    for (int s=8;s<40;s++) begin
+      @(negedge clk); rd_setA=s[IDXW-1:0]; rd_wayA=0;
+      fill_en=1; fill_set=s[IDXW-1:0]; fill_way=0; fill_off=4*(s%8); fill_data=32'hDEAD0000+s; fill_done=0;
+      @(posedge clk); #1;
+      if (!rd_collA) begin gmiss++; if(gmiss<=10) $display("GUARD-MISS set=%0d collA=%b (must be 1)",s,rd_collA); end
+      @(negedge clk); fill_en=0;
+    end
+    $display("PHASE C (collide-guard edge): guard-misses=%0d", gmiss); errs+=gmiss;
     $display(errs==0 ? "IC_GLS_PASS" : "IC_GLS_FAIL");
     $finish;
   end
