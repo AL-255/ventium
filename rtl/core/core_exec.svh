@@ -287,6 +287,11 @@
 `ifdef VEN_DBG_CORE
                     dbg_de_num_r<=eng_int_num; dbg_de_den_r<=eng_int_den;
                     dbg_de_w_r<=q_w; dbg_de_eip_r<=q_pc;   // divide-#DE tap: latch operands
+                    if (dbg_hook_cfg[0] && dbg_hook_cfg[1]) begin  // opcode-hook: DIV class
+                      dbg_hook_seq<=dbg_hook_seq+8'd1; dbg_hook_eip<=q_pc;
+                      dbg_hook_opa<=eng_int_num; dbg_hook_opb<=eng_int_den;
+                      dbg_hook_meta<={8'd6, seg_sel[SG_CS], 5'd0, q_w};
+                    end
 `endif
 `else
                     // R3 HOIST: quotient/remainder + #DE come from the ONE native
@@ -326,6 +331,11 @@
 `ifdef VEN_DBG_CORE
                     dbg_de_num_r<=eng_int_num; dbg_de_den_r<=eng_int_den;
                     dbg_de_w_r<=q_w; dbg_de_eip_r<=q_pc;   // divide-#DE tap: latch operands
+                    if (dbg_hook_cfg[0] && dbg_hook_cfg[1]) begin  // opcode-hook: IDIV class
+                      dbg_hook_seq<=dbg_hook_seq+8'd1; dbg_hook_eip<=q_pc;
+                      dbg_hook_opa<=eng_int_num; dbg_hook_opb<=eng_int_den;
+                      dbg_hook_meta<={8'd7, seg_sel[SG_CS], 5'd0, q_w};
+                    end
 `endif
 `else
                     // R3 HOIST: signed quotient/remainder + #DE come from the ONE

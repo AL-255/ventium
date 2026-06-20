@@ -221,6 +221,12 @@ module ventium_top
     output logic [63:0] dbg_seg,           // [31:0]=GDTR base, [32]=CS.D (PM-wedge descriptor probe)
     output logic [63:0] dbg_de_num,        // divide-#DE tap: faulting dividend (EDX:EAX)
     output logic [63:0] dbg_de_info,       //   {divisor[31:0], eip[15:0], w[2:0], decnt[12:0]}
+    input  logic [15:0] dbg_hook_cfg,      // patchable opcode-capture hook config (PS-armed)
+    output logic [7:0]  dbg_hook_seq,      // capture counter (PS rings on change)
+    output logic [31:0] dbg_hook_eip,
+    output logic [63:0] dbg_hook_opa,
+    output logic [31:0] dbg_hook_opb,
+    output logic [31:0] dbg_hook_meta,
     // F4 read-beat trace: each accepted AXI read beat {DDR addr, data} from the
     // L1/AXI master (l1axi_en builds) -> ven_soc_dbg ring (corrupted-fill forensics).
     output logic        dbg_rd_valid,
@@ -393,6 +399,8 @@ module ventium_top
       .dbg_ibuf     (dbg_ibuf),
       .dbg_de_num   (dbg_de_num),
       .dbg_de_info  (dbg_de_info),
+      .dbg_hook_cfg (dbg_hook_cfg), .dbg_hook_seq(dbg_hook_seq), .dbg_hook_eip(dbg_hook_eip),
+      .dbg_hook_opa (dbg_hook_opa), .dbg_hook_opb(dbg_hook_opb), .dbg_hook_meta(dbg_hook_meta),
       .dbg_seg      (dbg_seg),
       .dbg_halt_req (dbg_halt_req),
       .dbg_step     (dbg_step),

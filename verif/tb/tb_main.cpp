@@ -1479,6 +1479,24 @@ int main(int argc, char** argv) {
                 prev_fpc = fpc;
             }
         }
+        // Patchable opcode-capture hook: arm via VEN_HOOK (e.g. 0x3 = enable + DIV/IDIV
+        // class); print {eip, EDX:EAX, divisor} on each capture (seq counter changes).
+        {
+            static int hk_init = 0; static uint16_t hk_cfg = 0;
+            if (!hk_init) { const char* e = std::getenv("VEN_HOOK");
+                hk_cfg = e ? (uint16_t)strtoul(e, 0, 0) : 0; hk_init = 1; }
+            top->dbg_hook_cfg = hk_cfg;
+            static int seq_init = 0; static uint8_t prev_seq = 0;
+            uint8_t s = (uint8_t)top->dbg_hook_seq;
+            if (!seq_init) { prev_seq = s; seq_init = 1; }
+            else if (s != prev_seq) { prev_seq = s;
+                uint32_t m = (uint32_t)top->dbg_hook_meta;
+                std::fprintf(stderr, "tb: [HOOK] eip=%08x EDX:EAX=%016llx divisor=%08x (op=%u w=%u cs=%04x)\n",
+                    (uint32_t)top->dbg_hook_eip, (unsigned long long)top->dbg_hook_opa,
+                    (uint32_t)top->dbg_hook_opb, (m>>24)&0xff, m&0x7, (m>>8)&0xffff);
+                std::fflush(stderr);
+            }
+        }
 #endif
         // quiescence / limit detection
         if (trace.retired() > before) {

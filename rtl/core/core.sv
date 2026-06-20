@@ -449,7 +449,19 @@ module core
     input  logic        dbg_bp_en,      // enable the PC breakpoint
     input  logic [31:0] dbg_bp_addr,    // park when the about-to-issue EIP == this
     input  logic        dbg_bp_clr,     // pulse: clear a latched breakpoint (resume)
-    output logic        dbg_halted      // 1 = parked at an instruction boundary
+    output logic        dbg_halted,     // 1 = parked at an instruction boundary
+    // ---- Patchable opcode-capture hook (generalises the divide-#DE tap): the PS
+    // arms dbg_hook_cfg to select WHICH instruction class to record; on each match
+    // the core bumps dbg_hook_seq and latches a snapshot {eip, opA, opB, meta} the PS
+    // reads back (poll the seq counter for a new capture). Purely observational — never
+    // affects execution. cfg[0]=enable, cfg[1]=class:DIV/IDIV, cfg[9:2]=opcode (future
+    // raw-opcode match), cfg[10]=match-opcode, cfg[13:11]=modrm.reg, cfg[14]=modrm-care.
+    input  logic [15:0] dbg_hook_cfg,
+    output logic [7:0]  dbg_hook_seq,   // capture counter: increments on each match (ven_soc_dbg rings on change)
+    output logic [31:0] dbg_hook_eip,   // the matched instruction's EIP
+    output logic [63:0] dbg_hook_opa,   // operand A (DIV/IDIV: dividend EDX:EAX)
+    output logic [31:0] dbg_hook_opb,   // operand B (DIV/IDIV: divisor)
+    output logic [31:0] dbg_hook_meta   // {opcode/subop[7:0], cs[15:0], 5'b0, width[2:0]}
 `endif
 );
 
@@ -2765,6 +2777,7 @@ module core
         dbg_de_cnt_r<=13'd0;
 `ifdef VEN_DBG_CORE
         dbg_de_num<=64'd0; dbg_de_info<=64'd0;   // ports exist only under VEN_DBG_CORE
+        dbg_hook_seq<=8'd0; dbg_hook_eip<=32'd0; dbg_hook_opa<=64'd0; dbg_hook_opb<=32'd0; dbg_hook_meta<=32'd0;
 `endif
         cs_d<=1'b0;   // real-mode CS: 16-bit default operand/address size
       end else begin
@@ -2792,6 +2805,7 @@ module core
         dbg_de_cnt_r<=13'd0;
 `ifdef VEN_DBG_CORE
         dbg_de_num<=64'd0; dbg_de_info<=64'd0;   // ports exist only under VEN_DBG_CORE
+        dbg_hook_seq<=8'd0; dbg_hook_eip<=32'd0; dbg_hook_opa<=64'd0; dbg_hook_opb<=32'd0; dbg_hook_meta<=32'd0;
 `endif
         cs_d<=1'b1;   // user mode: flat 32-bit (def16 is gated off by !sys_mode)
       end
