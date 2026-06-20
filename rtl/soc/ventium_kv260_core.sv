@@ -277,7 +277,12 @@ module ventium_kv260_core #(
       .dbg_int_vec(dbg_int_vec), .dbg_fault_pc(dbg_fault_pc), .dbg_cr0(dbg_cr0),
       .dbg_rd_valid(dbg_rd_valid), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
       .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
-      .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted)
+      .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted),
+      // Patchable opcode-capture hook: board-AXIL exposure is the next step; tie the
+      // config off (disabled) for now so the SoC wrapper builds. The SIM tb drives
+      // ventium_top's dbg_hook_cfg directly (the hook is fully usable in sim).
+      .dbg_hook_cfg(16'd0), .dbg_hook_seq(), .dbg_hook_eip(),
+      .dbg_hook_opa(), .dbg_hook_opb(), .dbg_hook_meta()
 `endif
   );
   // verilator lint_on PINCONNECTEMPTY
