@@ -120,11 +120,25 @@ in `make verify`), IN/OUT/INS + REP-INS-CX=0 (`covio`), CPUID/RDTSC/INVD
 (`--cosim`).
 
 The FLAGS lane builds a feature-rich `ventium_top` (FE_PIPE, UOPCACHE, BTB_PIPE,
-FP_PIPE/2, FP_OVERLAP, FXCH_FREE, **TRANSCENDENTAL**, FPREM, SRT/IDIV/BCD_ITER,
-FPTRAP, FP_PC_RELAX) and runs the whole corpus + `tx_transc` (the transcendental
-exerciser) through it. It lit up modules that are 0%/absent in every other lane:
-`uopcache.sv` 90 %, `fpu_top.sv` 100 %, `fpu_fprem.sv` 73 %, `fpu_fsincos.sv`
-95 %, `fpu_f2xm1.sv` 66 %, `fpu_fyl2x.sv` 81 %, `fpu_fpatan.sv` 68 %.
+FP_PIPE/2, FP_OVERLAP, FXCH_FREE, **TRANSCENDENTAL**, SRT/IDIV/BCD_ITER, FPTRAP,
+FP_PC_RELAX) and runs the whole corpus + the FP exercisers (`tx_transc`,
+`tx_unifdiv`) through it. It lights up modules that are 0%/absent in every other
+lane: `uopcache.sv` 90 %, `fpu_top.sv` 100 %, `fpu_fsincos.sv` 95 %,
+`fpu_fyl2x.sv` 84 %, `fpu_fpatan.sv` 72 %, `fpu_f2xm1.sv` 70 %.
+
+**FPU overhaul (2026-06).** The FPU was reworked: FDIV/FSQRT/FPREM were unified
+onto **one carry-save datapath** (`fpu_srt_div.sv`), the transcendentals moved to
+DSP48 + a shared 128-bit multiply (`fpu_trsc_wideint.svh`), and `VEN_FPREM` is now
+**default-on** (in the build's base `VL_FLAGS`). Coverage-flow consequences:
+* `tx_fprem` now **passes** (FPREM is no longer deferred) — it left `KNOWN_FAIL`
+  and is a plain `make verify` test, so `make verify` is now fully green.
+* `tx_unifdiv` (new, passes) exercises the unified datapath — exact/inexact FDIV,
+  perfect/non-perfect FSQRT, FPREM/FPREM1 — driving `fpu_srt_div.sv` to **84 %**
+  line / 88 % toggle (vs 65 % from the divide-only standalone gate; its sqrt+rem
+  paths are only reached **in-core**, via the FLAGS lane).
+* `fpu_trsc_wideint.svh` (the shared wide-int kit) now appears in coverage (52 %).
+* The standalone `sqrt_iter` UNIT gate still validates the legacy `fpu_sqrt_iter.sv`,
+  which the core no longer instantiates (sqrt is now the unified `fpu_srt_div`).
 
 The SoC lane (`run-soc-cov.sh`, a separate pool) covers the SoC peripherals the
 core lanes never touch: `ven_i8237` 90 %, `ven_uart16550` 85 %, `ven_rtc` 75 %,
