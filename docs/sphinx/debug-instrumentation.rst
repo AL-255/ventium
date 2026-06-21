@@ -136,8 +136,20 @@ from ``sw/ps/ven_soc_app/ven_soc_regs.h`` (which **must stay in lock-step** with
      - ``R_DBG_RUNCTL``
      - RW
      - ``[0]`` ``halt_req`` (hold the core parked), ``[1]`` W1P ``step`` (execute
-       exactly one instruction), ``[2]`` ``bp_en``, ``[3]`` W1P ``bp_clr``; RO
-       ``[8]`` = ``halted``.
+       exactly one instruction), ``[2]`` ``bp_en``, ``[3]`` W1P ``bp_clr``,
+       ``[4]`` ``clkstep_mode`` (gate the core clock off), ``[5]`` W1P
+       ``clkstep_pulse`` (advance exactly one **core clock**); RO ``[8]`` =
+       ``halted``.
+   * - ``0xB0``–``0xC8``
+     - ``R_DBG_HOOK_*``
+     - RW/RO
+     - Patchable **opcode-capture hook** — arm an opcode class, latch its
+       operands at retire (see below).
+   * - ``0xCC`` / ``0xD0`` / ``0xD4``
+     - ``R_CMP_*``
+     - RW/RO
+     - Programmable **retire comparator** + freeze triggers (see below). Write =
+       ``cfg`` / ``range``; read = last-match EIP / prev-match EIP / ``{seq,cs}``.
    * - ``0xE0`` / ``0xE4`` / ``0xE8``
      - ``RD_ADDR`` / ``RD_DATA`` / ``RD_COUNT``
      - RO
@@ -210,6 +222,72 @@ address and raw RDATA of every accepted ``ven_axi_master`` read beat into a ring
 indexed by ``R_DBG_TRACE_IDX``. It is the instrument for post-morteming a
 **corrupted cache line fill**: read back the exact ``{addr, data}`` the fabric
 delivered for each beat and compare against the staged DDR image.
+
+Opcode-capture hook
+-------------------
+
+``R_DBG_HOOK_CFG`` (``0xB0``) arms a *patchable* capture that latches the
+**operands** of a chosen instruction class as it retires: write ``[0]`` enable,
+``[1]`` DIV/IDIV-class, ``[9:2]`` opcode, ``[13:11]`` ModRM.reg, ``[14]``
+ModRM-care. Poll ``R_DBG_HOOK_SEQ`` (``0xB4``, a counter that ticks on each
+match), then read the matched EIP (``0xB8``), the operands (``0xBC`` / ``0xC0`` =
+opA lo/hi, ``0xC4`` = opB — for a ``DIV`` these are EDX:EAX and the divisor), and
+``0xC8`` = ``{opcode/subop, cs, w}``. It answers *"what were the actual operands
+the instant this opcode executed"* on silicon — e.g. confirming whether a
+``#DE``'s divisor was genuinely zero, or the fetch that fed the decode was the
+thing that was corrupt.
+
+Programmable retire comparator and hardware freeze triggers
+-----------------------------------------------------------
+
+``R_CMP_CFG`` / ``R_CMP_RANGE`` (``0xCC`` / ``0xD0``, write side) arm a **retire
+comparator** that the PS re-targets **without a respin**: match on CS (``cfg[16]``
+enable, ``cfg[17]`` cs-care, ``cfg[15:0]`` match-CS) and/or an EIP range
+(``cfg[18]`` eip-care, ``range`` = ``{eip_hi, eip_lo}``). On a match it captures
+the matched EIP (read ``0xCC``), the previous match (read ``0xD0``) and
+``{seq, cs}`` (read ``0xD4``) — a programmable on-silicon retire tracepoint.
+
+Three escalating **freeze triggers** ride on the comparator; each latches the PC
+ring (and, coupled to the gated clock below, the *whole core*) so the trajectory
+*into* a fault survives the fault:
+
+* **Freeze-on-Nth-match** (``cfg[19]`` ``VEN_CMP_FREEZE`` + ``cfg[31:24]`` skip) —
+  freeze on the (skip+1)-th match of the CS/EIP predicate.
+* **Freeze-on-#DE** (``cfg[20]`` ``VEN_CMP_FREEZE_DE``) — freeze the instant a
+  divide ``#DE`` is delivered in-core (``core_div_fault``), independent of the
+  CS/EIP terms.
+* **Fault-freeze** (``cfg[22]`` + ``cfg[31:24]`` skip) — freeze on the **Nth
+  exception delivery of any vector**. ``start_fault()`` (the core's universal
+  exception entry) increments ``dbg_fault_cnt``; ``ventium_top`` asserts the
+  freeze when the count reaches the skip. Sweeping the skip (``/tmp/ven_skip`` in
+  ``run.sh``) walks past the handled boot faults to land on a specific fault — the
+  one trigger that stops the core **before** a triple-fault ``rst_n`` wipes the
+  ring.
+
+Strict clock-step (gated core clock)
+------------------------------------
+
+The instruction single-step above forces the **slow decode path**, so it cannot
+observe a fault that only manifests on the **fast (uop-cache) fetch path**. The
+strict clock-step gates the *core clock itself* with a ``BUFGCE`` in
+``ventium_kv260_core`` (the AXI-Lite control stays on the ungated clock so the PS
+can always drive it):
+
+* ``R_DBG_RUNCTL[4]`` = clkstep-mode (gate the core clock **off**),
+* ``R_DBG_RUNCTL[5]`` = W1P clkstep-pulse (advance **exactly one core clock**).
+
+Drive it purely over ``devmem`` on ``0xDC``: enter clkstep-mode, then pulse and
+read ``EIP`` / ``CS`` / ``FSM`` (``0x84`` / ``0x88`` / ``0x94``) between pulses to
+watch the fast-path fetch+decode **cycle by cycle** — the micro-states the
+instruction-granular single-step skips over.
+
+The freeze triggers and the clock-step **share one gate**: a hardware freeze
+(``d_frozen``) also stops the core clock —
+``core_clk_en = (!clkstep_mode && !d_frozen) || clkstep_pulse``. So a
+comparator/fault match freezes the core with **zero PS latency** at the fault,
+and the PS then clock-steps forward from the frozen point. This coupling is the
+mechanism that finally defeats the ``#DE`` triple-fault reset that erased every
+post-hoc capture.
 
 Diagnostic operating modes
 ==========================
@@ -421,13 +499,65 @@ corruption. In order of cheapest-first:
 #. **Physical vs. structural** — re-flash a **different-placement** bitstream of
    the same RTL and re-run the repro. Byte-identical across placements ⇒
    **structural** synth-sim mismatch (not placement/hold timing).
+#. **Slow path vs. fast path** — if a fault survives single-step (which forces
+   the slow decode path) it is in a *shared* path; if it only appears at speed,
+   it is on the **fast uop-cache fetch path**. Use the **strict clock-step**
+   (gated core clock) to walk the fast path cycle-by-cycle where instruction
+   single-step cannot reach.
+#. **Capture before the reset** — for a fault that escalates to a triple-fault
+   ``rst_n`` (which wipes the PC ring before software can poll it), arm the
+   **fault-freeze** (``cfg[22]`` + a swept skip) so the core clock stops *at the
+   faulting exception*, before the reset. Then read the frozen committed state +
+   PC ring.
 #. **Reproduce in sim** — once classified, reproduce in the testbench:
    ``AXI_RGAP`` for beat-timing, ``+verilator+rand+reset`` for uninitialized
-   state, or a gate-level sim of the synthesized netlist for a structural
+   state, or a **gate-level sim of the synthesized netlist** for a structural
    divergence — then fix and re-verify against the differential corpus.
 
-This procedure was used to localize the F4 board-only instruction-fetch
-corruption to a placement-independent structural synth-sim mismatch in the
-``ven_l1d`` read mux (a live-vs-registered byte-select split), reproduced as a
-12-byte ``--poke`` program and fixed by selecting the read window with the
-**registered** capture address.
+This procedure localized the F4 board-only instruction-fetch corruption to a
+placement-independent structural synth-sim mismatch in the ``ven_l1d`` read mux
+(a live-vs-registered byte-select split), reproduced as a 12-byte ``--poke``
+program and fixed by selecting the read window with the **registered** capture
+address.
+
+Gate-level simulation: when Verilator structurally cannot see the bug
+=====================================================================
+
+The hardest faults are **created by synthesis or silicon**, one layer *below*
+where the functional (Verilator) model looks. Verilator runs RTL *semantics* —
+it cannot model: (1) **synthesis transforms** such as RAM-equivalence
+``[Synth 8-223]`` decloning (two RTL arrays written byte-identically get merged
+and the survivor fans one BRAM lane across all four, so the upper word of an
+8-byte granule reads back the lower word — an ``A[2]``-drop fetch corruption);
+(2) **zero-delay timing** (no setup/hold — a path that captures stale data on
+silicon always settles in sim); (3) **2-state init** (an uninitialised reg/BRAM
+reads as ``0`` in sim, power-up garbage / ``X`` on silicon).
+
+For these, drive the **Xilinx gate-level simulator** (``xsim``) on the
+*synthesized netlist* with the real ``unisims_ver`` / ``secureip`` primitive
+models — it sees the declone, the BRAM read-during-write collision, and (with
+``write_sdf`` + a timing sim) the setup/hold the RTL model erases. The flow:
+
+* **Confirm declone in the synthesizer** — synthesize **in-context**
+  (``-top core``, ``-flatten_hierarchy rebuilt``, the deployed
+  ``-verilog_define`` set) and grep the synth log for ``[Synth 8-223]`` + check
+  RAMB ``_a``/``_b`` cell survival. Bare-module OOC often does **not** reproduce
+  the merge (its read outputs become primary ports, inhibiting it). Anti-declone
+  fix = a word/slot-order skew on the ``_b`` copy so Vivado cannot prove
+  equivalence (``icache.sv`` Method-B; attributes / ``dont_touch`` do *not* stop
+  it). Harnesses: ``verif/icache_gls/``, ``fpga/scripts/synth_*_ooc.tcl``,
+  ``synth_core_declone_check.tcl``.
+* **Differential funcsim** — drive the funcsim netlist and the RTL with identical
+  stimulus and diff the outputs cycle-by-cycle (``verif/icache_gls/tb_ic_gls*.sv``
+  test both icache read ports against a golden line image).
+* **Reach a real workload** — a full-system netlist sim (synthesized
+  ``ventium_top`` + an ``xsim`` SoC testbench that reuses the Verilator harness's
+  C memory + peripheral models via DPI-C) can **boot firmware** for an integrated
+  repro. Gate-level sim is ~1000× slower than Verilator, so target small stimuli
+  or an **early** manifestation rather than a deep workload.
+
+The decisive lesson: the synthesizer (and ``xsim`` on its output) **verifies**,
+where reasoning only *hypothesises* — it has caught both Verilator's
+false-negatives (a real declone the functional model missed) and a plausible
+but wrong root-cause **false-positive** (a structure that does *not* declone
+in-context), each in minutes, before any respin.
