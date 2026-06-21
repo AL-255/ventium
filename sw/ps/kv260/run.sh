@@ -17,27 +17,21 @@ echo "ven_soc_app pid=$(cat /tmp/vsa.pid)"
 # ---- STRICT CLOCK-STEP validation: freeze the core clock, pulse 1 clk at a time,
 # watch the FSM micro-state (0x94) advance per pulse. RUNCTL(0xDC)[4]=mode [5]=pulse.
 if [ "${CLKSTEP:-1}" = "1" ]; then
-  # Arm the retire-comparator to HARDWARE-freeze the core clock at the instruction
-  # just BEFORE the fast-path drift: cs=0x0070, eip==0x245 (the MOV SI before the
-  # 0x248 MOV that mis-decodes). cfg = en|cs_care|eip_care|freeze (bits 16-19).
-  CMP_CFG=${CMP_CFG:-0x000Dfff0}
-  CMP_RANGE=${CMP_RANGE:-0xfff0fff0}
+  # FAULT-FREEZE: freeze the core clock on the Nth exception delivery (= the drift's
+  # fault, past the handled boot faults) BEFORE the triple-fault rst_n wipes the ring.
+  # cfg[22]=fault-freeze mode, cfg[31:24]=skip. Tune SKIP via env (no rebuild).
+  SKIP=${SKIP:-12}
+  CMP_CFG=$(printf '0x%08x' $(( 0x00400000 | (SKIP<<24) )))
   sudo busybox devmem 0xA00000CC 32 "$CMP_CFG"
-  sudo busybox devmem 0xA00000D0 32 "$CMP_RANGE"
-  echo "clkstep: armed comparator-freeze cfg=$CMP_CFG range=$CMP_RANGE; waiting for the clock to freeze..."
-  for i in $(seq 1 2000); do
-    CC=$(sudo busybox devmem 0xA00000CC)
-    if [ "$CC" != "0x00000000" ]; then echo "clkstep: FROZEN, cmp captured eip=$CC info=$(sudo busybox devmem 0xA00000D4)"; break; fi
-    # also bail on a guest fault (the drift may #DE before we freeze on a bad target)
-    if grep -aiqE 'division by zero|divide error' /tmp/vsa.log 2>/dev/null; then echo "clkstep: guest faulted before freeze (target may be wrong) cc=$CC"; break; fi
+  sudo busybox devmem 0xA00000D0 32 0x00000000
+  echo "clkstep: fault-freeze armed cfg=$CMP_CFG skip=$SKIP; waiting for the clock to freeze at fault #$SKIP..."
+  PEIP=""; FRZ=0
+  for i in $(seq 1 4000); do
+    EIP=$(sudo busybox devmem 0xA0000084)
+    if [ "$EIP" = "$PEIP" ]; then FRZ=$((FRZ+1)); else FRZ=0; PEIP=$EIP; fi
+    if [ "$FRZ" -ge 150 ]; then echo "clkstep: CLOCK FROZEN (PC stopped)"; break; fi
   done
   echo "FROZEN: eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088) fsm=$(sudo busybox devmem 0xA0000094)"
-  # Clock-step FORWARD one core clk at a time through 0x248's fast-path fetch+decode.
-  # Watch the committed eip: a CORRECT decode advances 0x248->0x24d; the DRIFT 0x248->0x24e.
-  for p in $(seq 1 1); do
-    sudo busybox devmem 0xA00000DC 32 0x20   # pulse: 1 core clk (frozen -> pulse overrides)
-    echo "CK$p: eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088) fsm=$(sudo busybox devmem 0xA0000094)"
-  done
   echo "CKDONE"; sudo kill "$(cat /tmp/vsa.pid)" 2>/dev/null; sleep 1; sudo pkill -f kms-draw 2>/dev/null
   exit 0
 fi
