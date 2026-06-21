@@ -334,6 +334,19 @@ const uint8_t* ven_vgaregs_dac(ven_periph_t* p) {
     return ((vga_state_t*)p->state)->palette;
 }
 
+// Hardware text cursor (CRTC). loc = char offset = cr[0x0E]<<8 | cr[0x0F].
+// shape = {end scanline cr[0x0B] in [15:8], start cr[0x0A] in [7:0]}; cr[0x0A]
+// bit5 set => cursor disabled. The PS keeps the BDA cursor cell synced from this
+// so the display (kms-draw) tracks the guest cursor even when DOS pokes the CRTC.
+uint16_t ven_vgaregs_cursor(ven_periph_t* p) {
+    vga_state_t* s = (vga_state_t*)p->state;
+    return (uint16_t)(((uint16_t)s->cr[0x0E] << 8) | s->cr[0x0F]);
+}
+uint16_t ven_vgaregs_cursor_shape(ven_periph_t* p) {
+    vga_state_t* s = (vga_state_t*)p->state;
+    return (uint16_t)(((uint16_t)s->cr[0x0B] << 8) | s->cr[0x0A]);
+}
+
 #ifdef VEN_SAVABLE
 static void vga_save(ven_periph_t* p, void* f){ fwrite(p->state, sizeof(vga_state_t), 1, (FILE*)f); }
 static void vga_load(ven_periph_t* p, void* f){ if (fread(p->state, sizeof(vga_state_t), 1, (FILE*)f)!=1){} }

@@ -434,6 +434,14 @@ static void render_vga_text(int ox, int oy) {
     uint8_t cstart = m_carveout[0x461], cend = m_carveout[0x460];
     int cur_hidden = (cstart & 0x20) != 0;
     if (cend == 0 && cstart == 0) { cstart = 14; cend = 15; cur_hidden = 0; }  /* default underline */
+    /* CRTC cursor scanlines (cstart..cend) are relative to the cursor cell as the
+     * BIOS programmed it — often an 8px CGA-style cell, so e.g. 6..7 would land
+     * MID-cell on our fixed 16px font. Anchor the cursor at the BOTTOM of the 16px
+     * cell, keeping only its thickness: an underline sits on the baseline, a full
+     * block still fills the cell. */
+    int cspan = (int)(cend & 0x1f) - (int)(cstart & 0x1f) + 1;
+    if (cspan < 1) cspan = 1; if (cspan > 16) cspan = 16;
+    int cur_lo = 16 - cspan;
     for (int dy=0; dy<CB_H; dy++) {                 /* clear window to black */
         uint16_t *r = g_fb + (size_t)(oy+dy)*g_stride_px + ox;
         for (int dx=0; dx<CB_W; dx++) r[dx] = 0;
@@ -450,7 +458,7 @@ static void render_vga_text(int ox, int oy) {
         for (int gy=0; gy<16; gy++) {
             uint8_t bits = gl[gy];
             if (blink && !blink_on) bits = 0;                         /* blink: glyph -> bg */
-            if (is_cur && gy >= cstart && gy <= cend) bits = 0xff;    /* cursor scanlines -> fg */
+            if (is_cur && gy >= cur_lo) bits = 0xff;                 /* bottom-anchored cursor -> fg */
             int py = y0 + (row*16+gy)*sc;
             for (int gx=0; gx<8; gx++) {
                 uint16_t c = (bits & (0x80>>gx)) ? fg : bg;

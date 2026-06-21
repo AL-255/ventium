@@ -44,6 +44,8 @@ void          ven_pic_set_irq(ven_periph_t*, int irq, int level);
 uint8_t       ven_pic_peek_vector(ven_periph_t*);
 uint8_t       ven_pic_intack(ven_periph_t*);
 const uint8_t* ven_vgaregs_dac(ven_periph_t*);
+uint16_t ven_vgaregs_cursor(ven_periph_t*);
+uint16_t ven_vgaregs_cursor_shape(ven_periph_t*);
 // F-track FreeDOS stack: PIT (timer/IRQ0), RTC/CMOS, IDE/ATA disk.
 ven_periph_t* ven_pit_new(void);
 int           ven_pit_irq0_ticks(ven_periph_t*);
@@ -516,6 +518,14 @@ static int service_out(uint16_t port, uint32_t val) {
     if (m) {
         m->io_write(m, port, (uint8_t)(val & 0xFF));
         if (port == 0x3C8 || port == 0x3C9) g_dac_dirty = 1;  // DAC write -> export
+        if (port == 0x3D5 || port == 0x3B5) {  // CRTC data: keep BDA text cursor synced
+            uint16_t loc  = ven_vgaregs_cursor(m);        // char offset cr[0x0E:0x0F]
+            uint16_t sh   = ven_vgaregs_cursor_shape(m);  // {end cr[0x0B], start cr[0x0A]}
+            uint16_t cols = gr16(0x44a); if (!cols) cols = 80;
+            gw16(0x450, (uint16_t)(((loc/cols) << 8) | (loc % cols))); // 0x450=col,0x451=row
+            g_ddr[0x461] = (uint8_t)(sh & 0xff);          // cursor start scanline + enable
+            g_ddr[0x460] = (uint8_t)((sh >> 8) & 0xff);   // cursor end scanline
+        }
         return 0;
     }
     switch (port) {
