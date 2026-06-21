@@ -224,7 +224,16 @@ module uopcache
           // straddling insn read a zero-filled slot and issued garbage (the remaining
           // class of the F4 board Quake cold-line fetch corruption; baseline 60 ->
           // spine-gate 28 -> this 0 functional fails in the UOPCACHE+IC_BRAM config).
-          if (woff < IC_LINE && (woff + {2'd0, pd_len} <= 6'(IC_LINE)))
+          // ...AND only when the instruction FITS ENTIRELY within the 6-byte
+          // decode window (pd_len <= 6). The decode leaf (u_pd_decode) is fed the
+          // FIXED bottom 6 bytes of `residual`; an instruction with len>6 has
+          // operand bytes (e.g. a far-jump ptr16:32 selector at bytes 6..7, or a
+          // disp32+imm tail) that were NEVER presented to the leaf, so its fpd_t
+          // (imm[31:0] et al) is UNRELIABLE — the same "bytes weren't seen" hazard
+          // as the line-straddle case above, one scale down. Leaving the boundary
+          // INVALID routes it to the slow S_FETCH path, which re-fetches all bytes.
+          if (woff < IC_LINE && (woff + {2'd0, pd_len} <= 6'(IC_LINE))
+              && (pd_len <= 4'd6))
             wbuf_bmap[woff*4 +: 4] <= {1'b1, wslot[2:0]};
           residual <= residual >> {pd_len, 3'b000};   // drop pd_len bytes
           woff     <= woff + {2'd0, pd_len};
