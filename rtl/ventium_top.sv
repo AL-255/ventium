@@ -405,6 +405,7 @@ module ventium_top
       ,
       .dbg_state    (dbg_state),
       .dbg_int_vec  (dbg_int_vec),
+      .dbg_div_fault(core_div_fault),
       .dbg_fault_pc (dbg_fault_pc),
       .dbg_cr0      (dbg_cr0),
       .dbg_fctrl    (dbg_fctrl),
@@ -455,13 +456,16 @@ module ventium_top
   // Re-arm by toggling enable (cfg[16]) low->high.
   logic [15:0] cmp_seq_q, cmp_cs_q;
   logic        cmp_frozen;
+  logic        core_div_fault;   // core's sticky divide-#DE flag (driven by the core instance)
   wire cmp_hit = core_retire_valid && dbg_cmp_cfg[16]
        && (!dbg_cmp_cfg[17] || dbg_cs == dbg_cmp_cfg[15:0])
        && (!dbg_cmp_cfg[18] || (dbg_eip[15:0] >= dbg_cmp_range[15:0]
                               && dbg_eip[15:0] <= dbg_cmp_range[31:16]));
   wire cmp_do_freeze = dbg_cmp_cfg[19] && cmp_hit && !cmp_frozen
                        && (cmp_seq_q >= dbg_cmp_cfg[31:24]);
-  assign dbg_cmp_freeze = cmp_do_freeze;
+  // cfg[20]=freeze-on-#DE: the moment a divide #DE fires (core_div_fault), freeze
+  // the PC ring -> capture the trajectory INTO the fault before the reboot/reset.
+  assign dbg_cmp_freeze = cmp_do_freeze || (dbg_cmp_cfg[20] && core_div_fault);
   assign dbg_div_info   = {cmp_seq_q, cmp_cs_q};
   always_ff @(posedge clk) begin
     if (!rst_n) begin
