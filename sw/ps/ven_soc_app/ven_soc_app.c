@@ -469,6 +469,9 @@ static void vga_int10_service(void) {
             uint16_t cur = gr16(0x450);
             uint8_t col = (uint8_t)cur, row = (uint8_t)(cur >> 8);
             uint8_t cols = (uint8_t)gr16(0x44a); if (!cols) cols = 80;
+            { static char cbuf[256]; static int cn = 0;   // mirror guest teletype -> stderr so run.sh can detect a guest fault (e.g. "Divide error") and kill the run before a runaway corrupts memory
+              if (ch == 0x0A || cn >= 255) { cbuf[cn] = 0; if (cn) fprintf(stderr, "GUESTCON: %s\n", cbuf); cn = 0; }
+              else if (ch >= 0x20) cbuf[cn++] = (char)ch; }
             if      (ch == 0x0D) col = 0;
             else if (ch == 0x0A) row++;
             else if (ch == 0x08) { if (col) col--; }
