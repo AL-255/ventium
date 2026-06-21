@@ -432,6 +432,7 @@ module core
     // ------------------------------------------------------------------------
     output logic [5:0]  dbg_state,
     output logic [7:0]  dbg_int_vec,
+    output logic        dbg_div_fault,  // sticky: a divide #DE (vector 0) was delivered -> freeze the PC ring
     output logic [31:0] dbg_fault_pc,
     output logic [31:0] dbg_cr0,
     output logic [15:0] dbg_fctrl,      // live x87 control word (PC=[9:8],RC=[11:10])
@@ -2742,12 +2743,21 @@ module core
     v_br_cc = d.cc;
   endfunction
 
+`ifdef VEN_DBG_CORE
+  // freeze-on-#DE: sticky flag set when a divide #DE (vector 0) is delivered
+  // (core_exec.svh DIV/IDIV start_fault) -> drives the PC-ring freeze in ventium_top.
+  logic dbg_div_fault_q;
+  assign dbg_div_fault = dbg_div_fault_q;
+`endif
   // ===========================================================================
   // Main sequential FSM
   // ===========================================================================
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       state<=S_RESET;
+`ifdef VEN_DBG_CORE
+      dbg_div_fault_q <= 1'b0;
+`endif
       // ----- M2S.1: dual boot-mode reset (docs/m2s1-segmentation-spec.md) -----
       sys_mode<=boot_mode;
       if (boot_mode) begin

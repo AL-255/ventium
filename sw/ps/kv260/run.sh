@@ -23,8 +23,8 @@ echo "ven_soc_app pid=$(cat /tmp/vsa.pid)"
 # reset vector eip=0xfff0 is reached (the #DE triple-fault reset) so it survives -
 # the frozen ring then holds the trajectory INTO the fault. skip=0 -> first 0xfff0
 # the cmp sees. Adjust skip / target via CMP_CFG/CMP_RANGE to triangulate.
-CMP_CFG=${CMP_CFG:-0x000d0000}   # freeze|eip_care|en, skip=0
-CMP_RANGE=${CMP_RANGE:-0xfff0fff0}  # eip == 0xfff0
+CMP_CFG=${CMP_CFG:-0x00110000}   # en + freeze-on-#DE (cfg[20]): freeze the PC ring when the divide #DE fires
+CMP_RANGE=${CMP_RANGE:-0x00000000}
 sudo busybox devmem 0xA00000CC 32 "$CMP_CFG"
 sudo busybox devmem 0xA00000D0 32 "$CMP_RANGE"
 echo "comparator armed: cfg=$CMP_CFG range=$CMP_RANGE"

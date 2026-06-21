@@ -85,6 +85,7 @@
 #define VEN_CMP_CS_CARE      (1u<<17)
 #define VEN_CMP_EIP_CARE     (1u<<18)
 #define VEN_CMP_FREEZE       (1u<<19)            // freeze-on-Nth-match: latch + freeze the PC ring
+#define VEN_CMP_FREEZE_DE    (1u<<20)            // freeze the PC ring the moment a divide #DE fires (in-core)
 #define VEN_CMP_SKIP(n)      (((n)&0xffu)<<24)   // skip N matches before freezing (cfg[31:24])
 #define VEN_R_DBG_TRACE_PC   0xAC  // RO ring[idx] EIP
 #define VEN_R_DBG_TRACE_AUX  0xB0  // RO ring[idx] {state[5:0]<<16, cs[15:0]}

@@ -814,6 +814,8 @@ int main(int argc, char **argv) {
         // execute exactly one instruction -> re-park; then read the committed EIP/FSM.
         if (g_bp_set && (rd(VEN_R_DBG_RUNCTL) & (1u << 8))) {
             fprintf(stderr, "\n=== BP HIT @ 0x%08x — single-stepping %u instructions ===\n", g_bp, g_steps);
+            dbg_dump_core();   // core is halted here -> the PC ring is stable: dump the trajectory INTO the breakpoint (pre-drift) before stepping forward
+
             for (uint32_t s = 0; s < g_steps; s++) {
                 if (g_flush_step) wr(VEN_R_CTRL, VEN_CTRL_CORE_RUN | VEN_CTRL_FLUSH_REQ); // L1 invalidate
                 wr(VEN_R_DBG_RUNCTL, (1u << 0) | (1u << 1));     // halt_req + W1P step (exec 1)

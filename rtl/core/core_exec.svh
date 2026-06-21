@@ -309,6 +309,7 @@
 `ifdef VEN_DBG_CORE
                       $display("tb: DIVDE w=%0d eip=%08x EDX=%08x EAX=%08x den=%08x",
                                q_w, q_pc, gpr_o[R_EDX], gpr_o[R_EAX], ex_srcv);
+                      dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else          state<=S_HALT;
@@ -348,6 +349,7 @@
 `ifdef VEN_DBG_CORE
                       $display("tb: IDIVDE w=%0d eip=%08x EDX=%08x EAX=%08x den=%08x",
                                q_w, q_pc, gpr_o[R_EDX], gpr_o[R_EAX], ex_srcv);
+                      dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else          state<=S_HALT;
