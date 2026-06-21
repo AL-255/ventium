@@ -163,7 +163,12 @@ module ventium_kv260_core #(
   logic        core_clk;
   logic        d_clkstep_mode;   // 1 = clock-step mode (core clock gated off unless pulsed)
   logic        d_clkstep_pulse;  // 1-clk pulse from a PS write: advance the core one core_clk
-  wire         core_clk_en = (!d_clkstep_mode) || d_clkstep_pulse;
+  // Free-run unless: clock-step mode OR the debug ring froze (d_frozen, set by a
+  // retire-comparator match via dbg_cmp_freeze). A HARDWARE comparator match thus
+  // freezes the clock with ZERO PS latency -> arm the comparator at the instruction
+  // just before the fast-path drift, then clock-step FORWARD through the mis-decode.
+  // The clkstep pulse always wins so the PS can advance one clk while frozen.
+  wire         core_clk_en = ((!d_clkstep_mode) && (!d_frozen)) || d_clkstep_pulse;
   BUFGCE u_coreclk (.I(clk), .CE(core_clk_en), .O(core_clk));
 `else
   wire         core_clk = clk;
