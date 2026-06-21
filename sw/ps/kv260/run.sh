@@ -20,8 +20,8 @@ if [ "${CLKSTEP:-1}" = "1" ]; then
   # Arm the retire-comparator to HARDWARE-freeze the core clock at the instruction
   # just BEFORE the fast-path drift: cs=0x0070, eip==0x245 (the MOV SI before the
   # 0x248 MOV that mis-decodes). cfg = en|cs_care|eip_care|freeze (bits 16-19).
-  CMP_CFG=${CMP_CFG:-0x000F0070}
-  CMP_RANGE=${CMP_RANGE:-0x02450245}
+  CMP_CFG=${CMP_CFG:-0x000Dfff0}
+  CMP_RANGE=${CMP_RANGE:-0xfff0fff0}
   sudo busybox devmem 0xA00000CC 32 "$CMP_CFG"
   sudo busybox devmem 0xA00000D0 32 "$CMP_RANGE"
   echo "clkstep: armed comparator-freeze cfg=$CMP_CFG range=$CMP_RANGE; waiting for the clock to freeze..."
@@ -34,7 +34,7 @@ if [ "${CLKSTEP:-1}" = "1" ]; then
   echo "FROZEN: eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088) fsm=$(sudo busybox devmem 0xA0000094)"
   # Clock-step FORWARD one core clk at a time through 0x248's fast-path fetch+decode.
   # Watch the committed eip: a CORRECT decode advances 0x248->0x24d; the DRIFT 0x248->0x24e.
-  for p in $(seq 1 80); do
+  for p in $(seq 1 1); do
     sudo busybox devmem 0xA00000DC 32 0x20   # pulse: 1 core clk (frozen -> pulse overrides)
     echo "CK$p: eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088) fsm=$(sudo busybox devmem 0xA0000094)"
   done
