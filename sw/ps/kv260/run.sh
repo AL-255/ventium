@@ -20,7 +20,9 @@ if [ "${CLKSTEP:-1}" = "1" ]; then
   # FAULT-FREEZE: freeze the core clock on the Nth exception delivery (= the drift's
   # fault, past the handled boot faults) BEFORE the triple-fault rst_n wipes the ring.
   # cfg[22]=fault-freeze mode, cfg[31:24]=skip. Tune SKIP via env (no rebuild).
-  SKIP=${SKIP:-12}
+  # skip = which exception delivery to freeze on. Sweep it WITHOUT re-editing run.sh:
+  # `ssh board 'echo N | sudo tee /tmp/ven_skip'` before each `deploy.sh --run`.
+  SKIP=$(cat /tmp/ven_skip 2>/dev/null || echo "${SKIP:-1}")
   CMP_CFG=$(printf '0x%08x' $(( 0x00400000 | (SKIP<<24) )))
   sudo busybox devmem 0xA00000CC 32 "$CMP_CFG"
   sudo busybox devmem 0xA00000D0 32 0x00000000
