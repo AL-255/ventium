@@ -782,7 +782,7 @@ int main(int argc, char **argv) {
     for (;;) {
         // service deferred signal requests in NORMAL context (stdio-safe): SIGTERM
         // dumps + quiesces + exits; SIGUSR1 prints a non-destructive live snapshot.
-        if (g_term_req) { systrace_dump("term"); io_hist_dump(); vga_textdump(); vga_gfxdump(); ven_shutdown_quiesce(); _exit(0); }
+        if (g_term_req) { systrace_dump("term"); io_hist_dump(); vga_textdump(); dbg_dump_core(); vga_gfxdump(); ven_shutdown_quiesce(); _exit(0); }
         if (g_snap_req) { g_snap_req = 0; systrace_snapshot(); io_hist_dump();
                           memset(g_io_in_hist, 0, sizeof(g_io_in_hist));   // window the histogram
                           dbg_dump_core(); vga_gfxdump(); }

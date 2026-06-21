@@ -19,7 +19,7 @@ echo "ven_soc_app pid=$(cat /tmp/vsa.pid)"
 #   0xD0 W = cmp_range {eip_hi<<16, eip_lo[15:0]}
 # Then READ: 0xCC=last-match eip, 0xD0=prev-match eip, 0xD4={seq[15:0],cs[15:0]}.
 # CMP_TERMS default: match cs=0x0070 (the cs=0x70 drift), any eip. Override via $CMP_*.
-CMP_CFG=${CMP_CFG:-0x00030070}   # en|cs_care|cs=0x0070  (set CMP_CFG/CMP_RANGE env to retarget)
+CMP_CFG=${CMP_CFG:-0x00010000}   # en only (match EVERY retire) -> last/prev+info{cs} = the pre-#DE context
 CMP_RANGE=${CMP_RANGE:-0x00000000}
 sudo busybox devmem 0xA00000CC 32 "$CMP_CFG"
 sudo busybox devmem 0xA00000D0 32 "$CMP_RANGE"
