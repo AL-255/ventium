@@ -787,6 +787,27 @@ int main(int argc, char **argv) {
                           memset(g_io_in_hist, 0, sizeof(g_io_in_hist));   // window the histogram
                           dbg_dump_core(); vga_gfxdump(); }
         if (g_fdump_req) { g_fdump_req = 0; dbg_halt_dump_resume(); }
+        // Guest-fault watchdog: the DOS-Quake #DE prints a banner ("Divide error"/
+        // "Exiting due to signal SIGFPE") to the VGA text page. Scan it periodically;
+        // on a hit, request a clean termination (dump + quiesce + exit). Never run on
+        // past a guest fault — a runaway can corrupt memory and lock up the PS.
+        { static unsigned fsc = 0;
+          if (g_ddr && (fsc++ & 0x3FFFF) == 0) {
+              static int seen = 0;
+              if (!seen) {
+                  const volatile uint8_t *t = g_ddr + 0x000B8000;
+                  char s[80*25+1]; int k = 0;
+                  for (int i = 0; i < 80*25; i++) { uint8_t c = t[i*2]; s[k++] = (c>=32 && c<127) ? (char)c : ' '; }
+                  s[k] = 0;
+                  if (strstr(s,"Divide error") || strstr(s,"Division by Zero") || strstr(s,"SIGFPE")
+                      || strstr(s,"Exiting due to") || strstr(s,"General Protection")) {
+                      seen = 1;
+                      fprintf(stderr, "GUESTFAULT: guest fault banner on VGA text page -> terminating run\n");
+                      fflush(stderr);
+                      g_term_req = 1;   // main loop -> dump + quiesce + _exit
+                  }
+              }
+          } }
         // --bp single-step trace: when the core halts at the HW breakpoint, walk the
         // trajectory instruction-by-instruction (the on-silicon fetch/control-flow trace
         // for a bug the sim can't reproduce). Each step: RUNCTL halt_req+step (0x3) ->

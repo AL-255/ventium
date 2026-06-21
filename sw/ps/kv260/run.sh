@@ -35,7 +35,7 @@ for i in $(seq 1 4000); do
     echo "CMP last=$EV prev=$(sudo busybox devmem 0xA00000D0) info=$(sudo busybox devmem 0xA00000D4)"
   fi
   # guest-fault watchdog (GUESTCON lines are the guest teletype mirrored by ven_soc_app)
-  if grep -aiqE 'division by zero|divide error|sigfpe|exiting due to signal|exception 0?6|unknown command given' /tmp/vsa.log 2>/dev/null; then
+  if grep -aiqE 'GUESTFAULT|division by zero|divide error|sigfpe|exiting due to signal|exception 0?6|unknown command given' /tmp/vsa.log 2>/dev/null; then
     echo "!!! GUEST FAULT DETECTED -> killing run immediately (no runaway)"
     echo "FAULT line: $(grep -aiE 'division by zero|divide error|sigfpe|exiting due to|exception|unknown command' /tmp/vsa.log | tail -1)"
     echo "=== fault-time cmp: last=$(sudo busybox devmem 0xA00000CC) prev=$(sudo busybox devmem 0xA00000D0) info=$(sudo busybox devmem 0xA00000D4) fsm=$(sudo busybox devmem 0xA0000094) eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088) ==="
