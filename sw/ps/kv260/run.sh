@@ -14,6 +14,22 @@ sudo pkill -f kms-draw 2>/dev/null; sudo pkill -f ven_soc_app_q 2>/dev/null; sle
 sudo sh -c 'nohup ./ven_soc_app_q --sys --dos --bios seabios.bin --disk quake_ven.img \
   --extmem-kb 64512 --vga-dump /tmp/qframe.ppm >/tmp/vsa.log 2>&1 & echo $! >/tmp/vsa.pid'
 echo "ven_soc_app pid=$(cat /tmp/vsa.pid)"
+# ---- STRICT CLOCK-STEP validation: freeze the core clock, pulse 1 clk at a time,
+# watch the FSM micro-state (0x94) advance per pulse. RUNCTL(0xDC)[4]=mode [5]=pulse.
+if [ "${CLKSTEP:-1}" = "1" ]; then
+  sleep 6
+  echo "CKRUN: fsm=$(sudo busybox devmem 0xA0000094) eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088)"
+  sudo busybox devmem 0xA00000DC 32 0x10    # enter clock-step mode -> core clock gated off
+  echo "CKFRZ1: fsm=$(sudo busybox devmem 0xA0000094) eip=$(sudo busybox devmem 0xA0000084)"
+  echo "CKFRZ2: fsm=$(sudo busybox devmem 0xA0000094) eip=$(sudo busybox devmem 0xA0000084)"
+  for p in 1 2 3 4 5 6 7 8; do
+    sudo busybox devmem 0xA00000DC 32 0x30  # pulse: advance exactly one core clk
+    echo "CKPLS$p: fsm=$(sudo busybox devmem 0xA0000094) eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088)"
+  done
+  sudo busybox devmem 0xA00000DC 32 0x00     # back to free-run
+  echo "CKDONE"; sudo kill "$(cat /tmp/vsa.pid)" 2>/dev/null; sleep 1; sudo pkill -f kms-draw 2>/dev/null
+  exit 0
+fi
 # PS-PROGRAMMABLE retire comparator (no respin to retarget). Arm via devmem:
 #   0xCC W = cmp_cfg {eip_care<<18, cs_care<<17, en<<16, match_cs[15:0]}
 #   0xD0 W = cmp_range {eip_hi<<16, eip_lo[15:0]}
@@ -37,6 +53,14 @@ for i in $(seq 1 4000); do
   if [ "$EV" != "$PREV" ]; then
     PREV=$EV
     echo "CMP last=$EV prev=$(sudo busybox devmem 0xA00000D0) info=$(sudo busybox devmem 0xA00000D4)"
+  fi
+  # core-halt detect: the VEN_DBG_CORE build HALTs at a divide #DE (no banner), so the
+  # committed PC stops advancing. A halted core can't run away -> safe to capture+stop.
+  EIP=$(sudo busybox devmem 0xA0000084)
+  if [ "$EIP" != "0x00000000" ] && [ "$EIP" = "$PEIP" ]; then HSTUCK=$((${HSTUCK:-0}+1)); else HSTUCK=0; PEIP=$EIP; fi
+  if [ "${HSTUCK:-0}" -ge 120 ]; then
+    echo "!!! CORE HALTED (PC frozen at eip=$EIP cs=$(sudo busybox devmem 0xA0000088) fsm=$(sudo busybox devmem 0xA0000094)) -> #DE halt-in-core; capturing frozen ring"
+    break
   fi
   # guest-fault watchdog (GUESTCON lines are the guest teletype mirrored by ven_soc_app)
   if grep -aiqE 'GUESTFAULT|division by zero|divide error|sigfpe|exiting due to signal|exception 0?6|unknown command given' /tmp/vsa.log 2>/dev/null; then
