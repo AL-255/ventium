@@ -406,9 +406,7 @@ module ventium_top
       .dbg_state    (dbg_state),
       .dbg_int_vec  (dbg_int_vec),
       .dbg_div_fault(core_div_fault),
-      .dbg_fault_cnt(core_fault_cnt), .dbg_fault_vec(core_fault_vec),
-      .dbg_fault_eip(core_fault_eip), .dbg_fault_cs(core_fault_cs),
-      .dbg_fault_ibuf(core_fault_ibuf),
+      .dbg_fault_cnt(core_fault_cnt),
       .dbg_fault_pc (dbg_fault_pc),
       .dbg_cr0      (dbg_cr0),
       .dbg_fctrl    (dbg_fctrl),
@@ -461,10 +459,6 @@ module ventium_top
   logic        cmp_frozen;
   logic        core_div_fault;   // core's sticky divide-#DE flag (driven by the core instance)
   logic [7:0]  core_fault_cnt;   // count of all exception deliveries (fault-freeze skip)
-  logic [7:0]  core_fault_vec;
-  logic [31:0] core_fault_eip;
-  logic [15:0] core_fault_cs;
-  logic [63:0] core_fault_ibuf;  // last fault's 8 fetched bytes (the fast-path fetch)
   wire cmp_hit = core_retire_valid && dbg_cmp_cfg[16]
        && (!dbg_cmp_cfg[17] || dbg_cs == dbg_cmp_cfg[15:0])
        && (!dbg_cmp_cfg[18] || (dbg_eip[15:0] >= dbg_cmp_range[15:0]
