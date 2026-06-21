@@ -391,8 +391,83 @@ static void poll_quake_frames(void)
     }
 }
 
+/* ---- VGA TEXT MODE (mode 3) renderer ------------------------------------
+ * FreeDOS/DOS write 80x25 char+attr cells to core-physical 0xB8000. kms-draw
+ * only rasterized the mode-13h gfx fb (0xA0000), so in text mode the monitor
+ * showed garbage. Render the text page with a real VGA 8x16 font + the 16-color
+ * attribute palette, integer-scaled (2x = 1280x800) and centered in the window. */
+#include "vga_font_8x16.h"
+static const uint8_t *m_carveout = 0;   /* mmap'd carveout base (low 1 MiB) */
+/* standard VGA 16-color palette as RGB565 */
+static uint16_t g_vga16[16];
+static void vga16_init(void) {
+    static const uint8_t p[16][3] = {
+        {0,0,0},{0,0,170},{0,170,0},{0,170,170},{170,0,0},{170,0,170},{170,85,0},{170,170,170},
+        {85,85,85},{85,85,255},{85,255,85},{85,255,255},{255,85,85},{255,85,255},{255,255,85},{255,255,255}};
+    for (int i=0;i<16;i++) g_vga16[i]=rgb565(p[i][0],p[i][1],p[i][2]);
+}
+/* true if the core is in a text mode (BDA video mode @0x449 != 0x13 gfx). */
+static int vga_is_text(void) { return m_carveout && m_carveout[0x449] != 0x13; }
+/* VGA text "special attributes": bit7=blink (default mode; the char's glyph
+ * is hidden on the off phase). When the attribute controller has blink DISABLED
+ * (mode-control bit set, exposed by ven_soc_app at BDA 0x465 bit5=0 -> 16 bg
+ * colors), bit7 becomes the bg-intensity bit instead. Plus the hardware cursor:
+ * a blinking block/underline at the BDA cursor cell, shaped by BDA 0x460/0x461. */
+static unsigned g_text_blink_ctr = 0;
+static void render_vga_text(int ox, int oy) {
+    const uint8_t *txt = m_carveout + 0xB8000;
+    int cols = m_carveout[0x44a]; if (cols < 1 || cols > 132) cols = 80;
+    int rows = 25;
+    int sc = CB_W/(cols*8); if (CB_H/(rows*16) < sc) sc = CB_H/(rows*16); if (sc < 1) sc = 1;
+    int tw = cols*8*sc, th = rows*16*sc;
+    int x0 = ox + (CB_W - tw)/2, y0 = oy + (CB_H - th)/2;
+    /* ~1.9 Hz blink at 60 fps (16 frames on / 16 off). Char-blink and the cursor
+     * share the phase, matching real VGA (cursor ~ same rate). */
+    int blink_on = ((g_text_blink_ctr++ >> 4) & 1) == 0;
+    /* blink-enable: BDA 0x465 (CRTC mode-control shadow) bit5 set => blink mode;
+     * default to blink-enabled if the byte is unset/zero. */
+    uint8_t modectl = m_carveout[0x465];
+    int blink_mode = (modectl == 0) ? 1 : ((modectl & 0x20) != 0);
+    /* cursor: BDA 0x450=col,0x451=row ; shape 0x460=end,0x461=start scanline.
+     * shape start bit5 (0x20) set => cursor hidden. */
+    int ccol = m_carveout[0x450], crow = m_carveout[0x451];
+    uint8_t cstart = m_carveout[0x461], cend = m_carveout[0x460];
+    int cur_hidden = (cstart & 0x20) != 0;
+    if (cend == 0 && cstart == 0) { cstart = 14; cend = 15; cur_hidden = 0; }  /* default underline */
+    for (int dy=0; dy<CB_H; dy++) {                 /* clear window to black */
+        uint16_t *r = g_fb + (size_t)(oy+dy)*g_stride_px + ox;
+        for (int dx=0; dx<CB_W; dx++) r[dx] = 0;
+    }
+    for (int row=0; row<rows; row++) for (int col=0; col<cols; col++) {
+        const uint8_t *cell = txt + ((size_t)row*cols + col)*2;
+        uint8_t ch = cell[0], attr = cell[1];
+        int fg_i = attr & 0x0f;
+        int bg_i = blink_mode ? ((attr>>4) & 0x07) : ((attr>>4) & 0x0f);  /* 8 vs 16 bg */
+        int blink = blink_mode && (attr & 0x80);
+        uint16_t fg = g_vga16[fg_i], bg = g_vga16[bg_i];
+        const uint8_t *gl = vga_font_8x16[ch];
+        int is_cur = !cur_hidden && blink_on && row==crow && col==ccol;
+        for (int gy=0; gy<16; gy++) {
+            uint8_t bits = gl[gy];
+            if (blink && !blink_on) bits = 0;                         /* blink: glyph -> bg */
+            if (is_cur && gy >= cstart && gy <= cend) bits = 0xff;    /* cursor scanlines -> fg */
+            int py = y0 + (row*16+gy)*sc;
+            for (int gx=0; gx<8; gx++) {
+                uint16_t c = (bits & (0x80>>gx)) ? fg : bg;
+                int px = x0 + (col*8+gx)*sc;
+                for (int sy=0; sy<sc; sy++) {
+                    int Y = py+sy; if (Y<0 || Y>=SCREEN_H) continue;
+                    uint16_t *r = g_fb + (size_t)Y*g_stride_px;
+                    for (int sx=0; sx<sc; sx++) { int X=px+sx; if (X>=0 && X<SCREEN_W) r[X]=c; }
+                }
+            }
+        }
+    }
+}
+
 static void draw_quake(int ox, int oy)
 {
+    if (vga_is_text()) { render_vga_text(ox, oy); return; }   /* DOS text mode */
     if (!g_have_frame) {
         fill_rect(ox, oy, CB_W, CB_H, rgb565(8, 10, 16));
         draw_text(ox + CB_W / 2 - 180, oy + CB_H / 2 - 14,
@@ -597,6 +672,8 @@ int main(int argc, char **argv)
         void *m = mmap(0, 0x100000, PROT_READ, MAP_SHARED, mfd, VEN_CARVEOUT_BASE);
         if (m == MAP_FAILED) die("mmap carveout");
         g_vga13_fb = (const uint8_t *)m + VGA13_FB_OFF;
+        m_carveout = (const uint8_t *)m;   /* for the VGA text-mode renderer (0xB8000, BDA) */
+        vga16_init();
         g_qw = QK_W; g_qh = QK_H; build_maps();
         fprintf(stderr, "kms-draw: --vga13 live mode-13h fb @ carveout+0x%lx, dac=%s\n",
                 VGA13_FB_OFF, g_dac_path);
