@@ -19,8 +19,12 @@ echo "ven_soc_app pid=$(cat /tmp/vsa.pid)"
 #   0xD0 W = cmp_range {eip_hi<<16, eip_lo[15:0]}
 # Then READ: 0xCC=last-match eip, 0xD0=prev-match eip, 0xD4={seq[15:0],cs[15:0]}.
 # CMP_TERMS default: match cs=0x0070 (the cs=0x70 drift), any eip. Override via $CMP_*.
-CMP_CFG=${CMP_CFG:-0x00010000}   # en only (match EVERY retire) -> last/prev+info{cs} = the pre-#DE context
-CMP_RANGE=${CMP_RANGE:-0x00000000}
+# FREEZE-ON-Nth-MATCH: cfg[19]=freeze, cfg[31:24]=skip. Freeze the PC ring when the
+# reset vector eip=0xfff0 is reached (the #DE triple-fault reset) so it survives -
+# the frozen ring then holds the trajectory INTO the fault. skip=0 -> first 0xfff0
+# the cmp sees. Adjust skip / target via CMP_CFG/CMP_RANGE to triangulate.
+CMP_CFG=${CMP_CFG:-0x000d0000}   # freeze|eip_care|en, skip=0
+CMP_RANGE=${CMP_RANGE:-0xfff0fff0}  # eip == 0xfff0
 sudo busybox devmem 0xA00000CC 32 "$CMP_CFG"
 sudo busybox devmem 0xA00000D0 32 "$CMP_RANGE"
 echo "comparator armed: cfg=$CMP_CFG range=$CMP_RANGE"

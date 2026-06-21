@@ -46,6 +46,7 @@ module ven_soc_dbg #(
     // ---- control (R_DBG_CTRL / R_DBG_TRACE_IDX in ven_soc_axil) ---------------
     input  logic        ctrl_clear,      // 1-clock: zero perf counters + clear freeze/ring
     input  logic [31:0] freeze_thresh,   // stall cycles -> freeze snapshot (0 = disabled)
+    input  logic        ext_freeze,      // 1-clock pulse (e.g. from the retire comparator) -> freeze the rings NOW
     input  logic [IDXW-1:0] trace_rd_idx,// 0 = most-recent retired PC, 1 = previous, ...
 
     // ---- readback (combinational; ven_soc_axil registers these on rd_fire) ----
@@ -106,7 +107,7 @@ module ven_soc_dbg #(
     if (!rst_n || ctrl_clear) begin
       head  <= '0;
       count <= '0;
-    end else if (dbg_retire_valid) begin
+    end else if (dbg_retire_valid && !frozen) begin   // stop on freeze so a reset can't wipe the trail
       ring[head] <= {dbg_state, dbg_cs, dbg_eip};
       head <= head + 1'b1;
       if (count < (IDXW+1)'(DEPTH)) count <= count + 1'b1;
@@ -132,7 +133,7 @@ module ven_soc_dbg #(
     if (!rst_n || ctrl_clear) begin
       rdr_head  <= '0;
       rdr_count <= '0;
-    end else if (dbg_rd_valid) begin
+    end else if (dbg_rd_valid && !frozen) begin   // freeze with the PC ring
       rdr_ring[rdr_head] <= {dbg_rd_addr, dbg_rd_data};
       rdr_head <= rdr_head + 1'b1;
       if (rdr_count < (IDXW+1)'(DEPTH)) rdr_count <= rdr_count + 1'b1;
@@ -156,11 +157,14 @@ module ven_soc_dbg #(
     end else begin
       if (dbg_retire_valid)            stall <= 32'd0;
       else if (stall != 32'hFFFF_FFFF) stall <= stall + 32'd1;
-      // latch the snapshot exactly once, when the stall first crosses threshold
-      if (!frozen && (freeze_thresh != 32'd0) && !dbg_retire_valid
-          && (stall + 32'd1 == freeze_thresh)) begin
+      // latch the snapshot once: stall crosses threshold, OR an external freeze
+      // pulse (the retire comparator's freeze-on-Nth-match -> catch a #DE before
+      // its triple-fault resets the core and re-runs BIOS over the ring).
+      if (!frozen && ((ext_freeze)
+          || ((freeze_thresh != 32'd0) && !dbg_retire_valid
+              && (stall + 32'd1 == freeze_thresh)))) begin
         frozen       <= 1'b1;
-        frozen_eip   <= last_eip;    // last committed EIP before the stall
+        frozen_eip   <= last_eip;    // last committed EIP before the freeze
         frozen_state <= dbg_state;   // FSM micro-state at the freeze
         frozen_vec   <= dbg_int_vec; // last exception/IRQ vector
       end

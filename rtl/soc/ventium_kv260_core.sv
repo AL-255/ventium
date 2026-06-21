@@ -146,6 +146,9 @@ module ventium_kv260_core #(
   logic [15:0] d_hook_cfg;
   logic [7:0]  d_hook_seq;
   logic [31:0] d_hook_eip, d_hook_opb, d_hook_meta;
+  logic [31:0] d_div_eip, d_div_eip70, d_div_info;   // retire-comparator captures
+  logic [31:0] d_cmp_cfg, d_cmp_range;               // retire-comparator terms (PS-written)
+  logic        d_cmp_freeze;                         // comparator freeze-on-Nth-match pulse -> u_dbg.ext_freeze
   logic [63:0] d_hook_opa;
 `endif
 
@@ -207,7 +210,9 @@ module ventium_kv260_core #(
       .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
       .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted),
       .dbg_hook_cfg(d_hook_cfg), .dbg_hook_seq(d_hook_seq), .dbg_hook_eip(d_hook_eip),
-      .dbg_hook_opa(d_hook_opa), .dbg_hook_opb(d_hook_opb), .dbg_hook_meta(d_hook_meta)
+      .dbg_hook_opa(d_hook_opa), .dbg_hook_opb(d_hook_opb), .dbg_hook_meta(d_hook_meta),
+      .dbg_div_eip(d_div_eip), .dbg_div_eip70(d_div_eip70), .dbg_div_info(d_div_info),
+      .dbg_cmp_cfg(d_cmp_cfg), .dbg_cmp_range(d_cmp_range)
 `endif
   );
 
@@ -288,7 +293,9 @@ module ventium_kv260_core #(
       // Patchable opcode-capture hook: cfg from ven_soc_axil (PS-armed), capture
       // snapshot back to ven_soc_axil's RO window (0xB0-0xC8).
       .dbg_hook_cfg(d_hook_cfg), .dbg_hook_seq(d_hook_seq), .dbg_hook_eip(d_hook_eip),
-      .dbg_hook_opa(d_hook_opa), .dbg_hook_opb(d_hook_opb), .dbg_hook_meta(d_hook_meta)
+      .dbg_hook_opa(d_hook_opa), .dbg_hook_opb(d_hook_opb), .dbg_hook_meta(d_hook_meta),
+      .dbg_div_eip(d_div_eip), .dbg_div_eip70(d_div_eip70), .dbg_div_info(d_div_info),
+      .dbg_cmp_cfg(d_cmp_cfg), .dbg_cmp_range(d_cmp_range), .dbg_cmp_freeze(d_cmp_freeze)
 `endif
   );
   // verilator lint_on PINCONNECTEMPTY
@@ -303,7 +310,7 @@ module ventium_kv260_core #(
       .dbg_esp(dbg_esp), .dbg_eflags(dbg_eflags), .dbg_state(dbg_state),
       .dbg_int_vec(dbg_int_vec), .dbg_fault_pc(dbg_fault_pc), .dbg_cr0(dbg_cr0),
       .io_pending(io_req), .inta(core_inta),
-      .ctrl_clear(d_clear), .freeze_thresh(d_freeze_th), .trace_rd_idx(d_trace_idx),
+      .ctrl_clear(d_clear), .freeze_thresh(d_freeze_th), .ext_freeze(d_cmp_freeze), .trace_rd_idx(d_trace_idx),
       .last_eip(d_last_eip), .last_cs(d_last_cs), .last_esp(d_last_esp),
       .last_eflags(d_last_eflags), .frozen(d_frozen), .frozen_eip(d_frozen_eip),
       .frozen_state(d_frozen_state), .frozen_vec(d_frozen_vec),

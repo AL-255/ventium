@@ -72,6 +72,20 @@
 #define VEN_R_DBG_HOOK_OPAHI 0xC0  // RO opA[63:32] (DIV: EDX)
 #define VEN_R_DBG_HOOK_OPB   0xC4  // RO opB        (DIV: divisor)
 #define VEN_R_DBG_HOOK_META  0xC8  // RO {opcode/subop[7:0], cs[15:0], 5'b0, w[2:0]}
+// PS-programmable retire comparator (no respin to retarget). RW split per offset:
+//   0xCC: W=cmp_cfg {eip_care<<18, cs_care<<17, en<<16, match_cs[15:0]} | R=last-match EIP
+//   0xD0: W=cmp_range {eip_hi<<16, eip_lo[15:0]}                        | R=prev-match EIP
+//   0xD4: R={seq[15:0], matched cs[15:0]}
+#define VEN_R_CMP_CFG        0xCC  // W: {eip_care,cs_care,en, match_cs[15:0]}
+#define VEN_R_CMP_EIP        0xCC  // R: last matching retired EIP
+#define VEN_R_CMP_RANGE      0xD0  // W: {eip_hi[15:0], eip_lo[15:0]}
+#define VEN_R_CMP_PREV       0xD0  // R: previous matching retired EIP
+#define VEN_R_CMP_INFO       0xD4  // R: {seq[15:0], matched cs[15:0]}
+#define VEN_CMP_EN           (1u<<16)
+#define VEN_CMP_CS_CARE      (1u<<17)
+#define VEN_CMP_EIP_CARE     (1u<<18)
+#define VEN_CMP_FREEZE       (1u<<19)            // freeze-on-Nth-match: latch + freeze the PC ring
+#define VEN_CMP_SKIP(n)      (((n)&0xffu)<<24)   // skip N matches before freezing (cfg[31:24])
 #define VEN_R_DBG_TRACE_PC   0xAC  // RO ring[idx] EIP
 #define VEN_R_DBG_TRACE_AUX  0xB0  // RO ring[idx] {state[5:0]<<16, cs[15:0]}
 #define VEN_R_DBG_CTRL       0xB4  // W1P [0]=clear perf/freeze/ring
