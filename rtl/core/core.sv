@@ -433,6 +433,11 @@ module core
     output logic [5:0]  dbg_state,
     output logic [7:0]  dbg_int_vec,
     output logic        dbg_div_fault,  // sticky: a divide #DE (vector 0) was delivered -> freeze the PC ring
+    output logic [7:0]  dbg_fault_cnt,  // count of all exception deliveries (for the fault-freeze skip)
+    output logic [7:0]  dbg_fault_vec,  // last fault's true vector
+    output logic [31:0] dbg_fault_eip,  // last fault's faulting EIP
+    output logic [15:0] dbg_fault_cs,   // last fault's CS selector
+    output logic [63:0] dbg_fault_ibuf, // last fault's 8 fetched bytes (the fast-path fetch)
     output logic [31:0] dbg_fault_pc,
     output logic [31:0] dbg_cr0,
     output logic [15:0] dbg_fctrl,      // live x87 control word (PC=[9:8],RC=[11:10])
@@ -2748,6 +2753,17 @@ module core
   // (core_exec.svh DIV/IDIV start_fault) -> drives the PC-ring freeze in ventium_top.
   logic dbg_div_fault_q;
   assign dbg_div_fault = dbg_div_fault_q;
+  // fault-capture: counter + last-fault {vec,eip,cs,ibuf}, latched in start_fault.
+  logic [7:0]  dbg_fault_cnt_q;
+  logic [7:0]  dbg_fault_vec_q;
+  logic [31:0] dbg_fault_eip_q;
+  logic [15:0] dbg_fault_cs_q;
+  logic [63:0] dbg_fault_ibuf_q;
+  assign dbg_fault_cnt  = dbg_fault_cnt_q;
+  assign dbg_fault_vec  = dbg_fault_vec_q;
+  assign dbg_fault_eip  = dbg_fault_eip_q;
+  assign dbg_fault_cs   = dbg_fault_cs_q;
+  assign dbg_fault_ibuf = dbg_fault_ibuf_q;
 `endif
   // ===========================================================================
   // Main sequential FSM
@@ -2757,6 +2773,8 @@ module core
       state<=S_RESET;
 `ifdef VEN_DBG_CORE
       dbg_div_fault_q <= 1'b0;
+      dbg_fault_cnt_q <= 8'd0; dbg_fault_vec_q <= 8'd0; dbg_fault_eip_q <= 32'd0;
+      dbg_fault_cs_q <= 16'd0; dbg_fault_ibuf_q <= 64'd0;
 `endif
       // ----- M2S.1: dual boot-mode reset (docs/m2s1-segmentation-spec.md) -----
       sys_mode<=boot_mode;
@@ -3709,6 +3727,14 @@ module core
       // (CWSDPMI may mislabel it "Division by Zero"). The LAST one before the abort.
       $display("tb: FLT vec=%0d fault_pc=%08x cs=%04x err=%08x ibuf=%016x",
                vec, fault_pc, seg_sel[SG_CS], err, dbg_ibuf);
+      // fault-freeze: count every exception delivery + latch its vec/eip/cs so the
+      // PS can freeze the clock on the Nth fault (= the drift's, skipping boot faults)
+      // BEFORE the triple-fault rst_n wipes the trail.
+      dbg_fault_cnt_q  <= dbg_fault_cnt_q + 8'd1;
+      dbg_fault_vec_q  <= vec;
+      dbg_fault_eip_q  <= fault_pc;
+      dbg_fault_cs_q   <= seg_sel[SG_CS];
+      dbg_fault_ibuf_q <= dbg_ibuf;
 `endif
       int_ret_eip <= fault_pc;     // FAULT: push the faulting EIP (restart)
       int_src_pc  <= fault_pc;
