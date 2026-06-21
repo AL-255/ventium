@@ -170,6 +170,8 @@ module ven_soc_axil #(
     output logic        dbg_bp_en,         // enable the PC breakpoint
     output logic [31:0] dbg_bp_addr,       // breakpoint EIP
     output logic        dbg_bp_clr,        // W1P: clear a latched breakpoint (resume)
+    output logic        dbg_clkstep_mode,  // RUNCTL[4] level: 1 = strict clock-step (core clock gated)
+    output logic        dbg_clkstep_pulse, // RUNCTL[5] W1P: advance the core exactly one clk cycle
     input  logic        dbg_halted,        // status: core parked at a boundary
     // patchable opcode-capture hook: cfg out -> core; capture snapshot in <- core
     output logic [15:0] dbg_hook_cfg,      // RW config (PS arms which class to record)
@@ -177,7 +179,13 @@ module ven_soc_axil #(
     input  logic [31:0] dbg_hook_eip,
     input  logic [63:0] dbg_hook_opa,
     input  logic [31:0] dbg_hook_opb,
-    input  logic [31:0] dbg_hook_meta
+    input  logic [31:0] dbg_hook_meta,
+    // PS-programmable retire comparator (no respin to retarget):
+    output logic [31:0] dbg_cmp_cfg,     // -> core: {eip_care,cs_care,en, match_cs[15:0]}
+    output logic [31:0] dbg_cmp_range,   // -> core: {eip_hi[15:0], eip_lo[15:0]}
+    input  logic [31:0] dbg_div_eip,     // <- core: last matching retired EIP
+    input  logic [31:0] dbg_div_eip70,   // <- core: previous matching retired EIP
+    input  logic [31:0] dbg_div_info     // <- core: {seq[15:0], matched cs[15:0]}
 `endif
 );
 
@@ -234,6 +242,11 @@ module ven_soc_axil #(
   localparam logic [7:0] R_DBG_HOOK_OPAHI = 8'hC0;  // RO opA[63:32] (DIV: EDX)
   localparam logic [7:0] R_DBG_HOOK_OPB   = 8'hC4;  // RO opB        (DIV: divisor)
   localparam logic [7:0] R_DBG_HOOK_META  = 8'hC8;  // RO {opcode/subop[7:0], cs[15:0], 5'b0, w[2:0]}
+  // PS-programmable retire comparator. RW split: WRITE 0xCC=cmp_cfg, 0xD0=cmp_range;
+  // READ 0xCC=last-match EIP, 0xD0=prev-match EIP, 0xD4={seq,cs}.
+  localparam logic [7:0] R_CMP_EIP        = 8'hCC;  // RO last matching retired EIP   (W: cmp_cfg)
+  localparam logic [7:0] R_CMP_PREV       = 8'hD0;  // RO prev matching retired EIP   (W: cmp_range)
+  localparam logic [7:0] R_CMP_INFO       = 8'hD4;  // RO {seq[15:0], matched cs[15:0]}
   localparam logic [7:0] R_DBG_TRACE_AUX  = 8'hB0;  // RO ring[idx] {state,cs}
   localparam logic [7:0] R_DBG_CTRL       = 8'hB4;  // W1P [0]=clear perf/freeze/ring
   localparam logic [7:0] R_DBG_FREEZE_TH  = 8'hB8;  // RW stall-cycles -> freeze (0=off)
@@ -302,6 +315,8 @@ module ven_soc_axil #(
   logic [31:0] dbg_bp_addr_r;    // breakpoint EIP, PS-written
   logic        dbg_bp_en_r;      // breakpoint enable
   logic        dbg_halt_req_r;   // single-step/park level
+  logic        dbg_clkstep_mode_r;  // strict clock-step mode level
+  assign dbg_clkstep_mode  = dbg_clkstep_mode_r;
   assign dbg_trace_idx     = dbg_trace_idx_r;
   assign dbg_freeze_thresh = dbg_freeze_th_r;
   assign dbg_bp_addr       = dbg_bp_addr_r;
@@ -309,6 +324,9 @@ module ven_soc_axil #(
   assign dbg_halt_req      = dbg_halt_req_r;
   logic [15:0] dbg_hook_cfg_r;   // opcode-hook config, PS-written (RW at R_DBG_HOOK_CFG)
   assign dbg_hook_cfg      = dbg_hook_cfg_r;
+  logic [31:0] dbg_cmp_cfg_r, dbg_cmp_range_r;   // retire-comparator terms, PS-written
+  assign dbg_cmp_cfg       = dbg_cmp_cfg_r;
+  assign dbg_cmp_range     = dbg_cmp_range_r;
   // dbg_step / dbg_bp_clr are W1P pulses, driven in the write-decode block.
 `endif
 
@@ -467,6 +485,9 @@ module ven_soc_axil #(
           R_DBG_HOOK_OPAHI: s_axil_rdata <= dbg_hook_opa[63:32];
           R_DBG_HOOK_OPB:   s_axil_rdata <= dbg_hook_opb;
           R_DBG_HOOK_META:  s_axil_rdata <= dbg_hook_meta;
+          R_CMP_EIP:        s_axil_rdata <= dbg_div_eip;
+          R_CMP_PREV:       s_axil_rdata <= dbg_div_eip70;
+          R_CMP_INFO:       s_axil_rdata <= dbg_div_info;
           R_DBG_TRACE_AUX:  s_axil_rdata <= dbg_trace_aux;
           R_DBG_FREEZE_TH:  s_axil_rdata <= dbg_freeze_th_r;
           R_DBG_PERF_CYCLO: s_axil_rdata <= dbg_perf_cyc[31:0];
@@ -530,7 +551,9 @@ module ven_soc_axil #(
       dbg_trace_idx_r <= 5'd0; dbg_freeze_th_r <= 32'd0; dbg_clear <= 1'b0;
       dbg_bp_addr_r <= 32'd0; dbg_bp_en_r <= 1'b0; dbg_halt_req_r <= 1'b0;
       dbg_hook_cfg_r <= 16'd0;
+      dbg_cmp_cfg_r <= 32'd0; dbg_cmp_range_r <= 32'd0;
       dbg_step <= 1'b0; dbg_bp_clr <= 1'b0;
+      dbg_clkstep_mode_r <= 1'b0; dbg_clkstep_pulse <= 1'b0;
 `endif
 `ifdef VEN_FPTRAP
       fptrap_idx_r <= 3'd0; fptrap_resp_pulse <= 1'b0;
@@ -547,6 +570,7 @@ module ven_soc_axil #(
       dbg_clear     <= 1'b0;     // W1P
       dbg_step      <= 1'b0;     // W1P
       dbg_bp_clr    <= 1'b0;     // W1P
+      dbg_clkstep_pulse <= 1'b0; // W1P
 `endif
 `ifdef VEN_FPTRAP
       fptrap_resp_pulse <= 1'b0; // W1P
@@ -637,6 +661,8 @@ module ven_soc_axil #(
 `ifdef VEN_DBG_CORE
           R_DBG_TRACE_IDX: if (s_axil_wstrb[0]) dbg_trace_idx_r <= s_axil_wdata[4:0];
           R_DBG_HOOK_CFG:  if (s_axil_wstrb[0]) dbg_hook_cfg_r <= s_axil_wdata[15:0];
+          R_CMP_EIP:       if (s_axil_wstrb[0]) dbg_cmp_cfg_r   <= s_axil_wdata;  // 0xCC W = cmp cfg
+          R_CMP_PREV:      if (s_axil_wstrb[0]) dbg_cmp_range_r <= s_axil_wdata;  // 0xD0 W = cmp range
           R_DBG_CTRL:      if (s_axil_wstrb[0] && s_axil_wdata[0]) dbg_clear <= 1'b1; // W1P
           R_DBG_FREEZE_TH: begin
             if (s_axil_wstrb[0]) dbg_freeze_th_r[7:0]   <= s_axil_wdata[7:0];
@@ -655,6 +681,8 @@ module ven_soc_axil #(
             if (s_axil_wdata[1]) dbg_step   <= 1'b1;   // W1P single-step
             dbg_bp_en_r    <= s_axil_wdata[2];
             if (s_axil_wdata[3]) dbg_bp_clr <= 1'b1;   // W1P clear breakpoint latch
+            dbg_clkstep_mode_r <= s_axil_wdata[4];     // [4] level: strict clock-step mode
+            if (s_axil_wdata[5]) dbg_clkstep_pulse <= 1'b1; // [5] W1P: advance one clk
           end
 `endif
 `ifdef VEN_FPTRAP

@@ -152,6 +152,23 @@ module ventium_kv260_core #(
   logic [63:0] d_hook_opa;
 `endif
 
+  // ---- strict clock-step debug -------------------------------------------------
+  // Gate the core + debug-ring clock (BUFGCE) so the PS can advance the core ONE
+  // clk at a time and read all state BETWEEN cycles. Unlike instruction-step (which
+  // forces the slow decode path), this observes the icache FAST PATH cycle-by-cycle.
+  // The AXIL control block stays on the ungated clk so it can drive the step. In a
+  // non-DBG build core_clk is just clk (no gate). BUFGCE is Vivado-only; this SoC
+  // wrapper is not in `make verify` (which drives ventium_top/core directly).
+`ifdef VEN_DBG_CORE
+  logic        core_clk;
+  logic        d_clkstep_mode;   // 1 = clock-step mode (core clock gated off unless pulsed)
+  logic        d_clkstep_pulse;  // 1-clk pulse from a PS write: advance the core one core_clk
+  wire         core_clk_en = (!d_clkstep_mode) || d_clkstep_pulse;
+  BUFGCE u_coreclk (.I(clk), .CE(core_clk_en), .O(core_clk));
+`else
+  wire         core_clk = clk;
+`endif
+
   ven_soc_axil #(.AXIL_AW(AXIL_AW)) u_axil (
       .clk(clk), .aresetn(aresetn),
       .s_axil_awaddr(s_axil_awaddr), .s_axil_awprot(s_axil_awprot),
@@ -209,6 +226,7 @@ module ventium_kv260_core #(
       .dbg_perf_io(d_perf_io), .dbg_perf_irq(d_perf_irq),
       .dbg_halt_req(d_halt_req), .dbg_step(d_step), .dbg_bp_en(d_bp_en),
       .dbg_bp_addr(d_bp_addr), .dbg_bp_clr(d_bp_clr), .dbg_halted(d_halted),
+      .dbg_clkstep_mode(d_clkstep_mode), .dbg_clkstep_pulse(d_clkstep_pulse),
       .dbg_hook_cfg(d_hook_cfg), .dbg_hook_seq(d_hook_seq), .dbg_hook_eip(d_hook_eip),
       .dbg_hook_opa(d_hook_opa), .dbg_hook_opb(d_hook_opb), .dbg_hook_meta(d_hook_meta),
       .dbg_div_eip(d_div_eip), .dbg_div_eip70(d_div_eip70), .dbg_div_info(d_div_info),
@@ -218,7 +236,7 @@ module ventium_kv260_core #(
 
   // verilator lint_off PINCONNECTEMPTY
   ventium_top u_core (
-      .clk(clk), .rst_n(core_rst_n),
+      .clk(core_clk), .rst_n(core_rst_n),
       // boot/config from the slave (PS-written; latched by the core at its reset edge,
       // mode bits read live — the PS sets MODE then releases CORE_RUN, AXI-Lite ordered).
       .init_eip(cfg_init_eip), .init_esp(cfg_init_esp), .boot_mode(cfg_boot_mode),
@@ -305,7 +323,7 @@ module ventium_kv260_core #(
   // ventium_top debug bundle. Reset with the core (core_rst_n) so a window aligns
   // with a run; survives a hang (core_run stays 1) so the PS can read the snapshot.
   ven_soc_dbg #(.DEPTH(32)) u_dbg (
-      .clk(clk), .rst_n(core_rst_n),
+      .clk(core_clk), .rst_n(core_rst_n),
       .dbg_retire_valid(dbg_retire_valid), .dbg_eip(dbg_eip), .dbg_cs(dbg_cs),
       .dbg_esp(dbg_esp), .dbg_eflags(dbg_eflags), .dbg_state(dbg_state),
       .dbg_int_vec(dbg_int_vec), .dbg_fault_pc(dbg_fault_pc), .dbg_cr0(dbg_cr0),
