@@ -19,6 +19,20 @@
         end
 
         S_DECODE: begin
+`ifdef VEN_DBG_CORE
+          // DOS-Quake #DE CONFIRM (hook cfg[2]): the JMP FAR `ea 00 00 70 00` (JMP FAR
+          // 0x0070:0x0000) at cs=0x2b:0x3E93 is the divergence — the board lands at
+          // cs=0x2b:0x24e = JMP FAR operands 4e 02 2b (corrupted from 00 00 70). The
+          // far jump is non-simple -> slow path -> S_DECODE -> dbg_ibuf = the fetched
+          // bytes. Golden: bytes0_3=0x700000EA (ea 00 00 70), byte4=0x00.
+          if (dbg_hook_cfg[0] && dbg_hook_cfg[2] && eip[15:0]==16'h3e93
+              && seg_sel[SG_CS]==16'h002b) begin
+            dbg_hook_seq  <= dbg_hook_seq + 8'd1;
+            dbg_hook_eip  <= eip;
+            dbg_hook_opa  <= dbg_ibuf;
+            dbg_hook_meta <= {8'hEA, seg_sel[SG_CS], 8'd0};
+          end
+`endif
 `ifdef VEN_DBG_SSBASE
           // F3 gap-walk probe: in real mode every sreg base must equal sel<<4.
           // (SeaBIOS unreal-mode transition stretches fire this legitimately —
