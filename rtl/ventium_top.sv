@@ -227,6 +227,19 @@ module ventium_top
     output logic [63:0] dbg_hook_opa,
     output logic [31:0] dbg_hook_opb,
     output logic [31:0] dbg_hook_meta,
+    // DOS-Quake divergence tap: the EIP of the LAST cs=0x2b (>=0x3000) instruction
+    // RETIRED — captures fast-path AND slow-path retires (the prior S_DECODE hook
+    // missed fast-path insns). At the #DE this holds the wild-jump origin.
+    // PS-PROGRAMMABLE retire comparator (no respin to retarget): the PS writes the
+    // match terms (cmp_cfg = {eip_care,cs_care,en, match_cs[15:0]}, cmp_range =
+    // {eip_hi[15:0], eip_lo[15:0]}) and reads back the last + previous matching
+    // retired EIP and a {seq,cs} info word. Captures fast-path AND slow-path retires.
+    input  logic [31:0] dbg_cmp_cfg,
+    input  logic [31:0] dbg_cmp_range,
+    output logic [31:0] dbg_div_eip,     // last matching retired EIP
+    output logic [31:0] dbg_div_eip70,   // previous matching retired EIP (1-deep history)
+    output logic [31:0] dbg_div_info,    // {seq[15:0], matched cs[15:0]}
+    output logic        dbg_cmp_freeze,  // 1-clk pulse on comparator freeze -> freezes the PC ring
     // F4 read-beat trace: each accepted AXI read beat {DDR addr, data} from the
     // L1/AXI master (l1axi_en builds) -> ven_soc_dbg ring (corrupted-fill forensics).
     output logic        dbg_rd_valid,
@@ -429,6 +442,42 @@ module ventium_top
   // post-commit architectural state; we emit one vtm_retire call here.
   // ---------------------------------------------------------------------------
   logic [63:0] retire_n;
+
+`ifdef VEN_DBG_CORE
+  // PS-programmable retire comparator: match terms in dbg_cmp_cfg/dbg_cmp_range.
+  //   cfg[15:0]=match_cs  cfg[16]=enable  cfg[17]=cs_care  cfg[18]=eip_care
+  //   range[15:0]=eip_lo  range[31:16]=eip_hi   (eip compared on [15:0])
+  // Latches the last + previous matching retired EIP (fast + slow path) + {seq,cs}.
+  //   cfg[19]=freeze mode  cfg[31:24]=skip count (freeze on the Nth match, N=skip)
+  // FREEZE-ON-Nth-MATCH: when the match count reaches the skip, latch + stop the
+  // comparator AND pulse dbg_cmp_freeze, which freezes the PC ring (ven_soc_dbg)
+  // so a subsequent #DE triple-fault -> CPU reset cannot overwrite the trail.
+  // Re-arm by toggling enable (cfg[16]) low->high.
+  logic [15:0] cmp_seq_q, cmp_cs_q;
+  logic        cmp_frozen;
+  wire cmp_hit = core_retire_valid && dbg_cmp_cfg[16]
+       && (!dbg_cmp_cfg[17] || dbg_cs == dbg_cmp_cfg[15:0])
+       && (!dbg_cmp_cfg[18] || (dbg_eip[15:0] >= dbg_cmp_range[15:0]
+                              && dbg_eip[15:0] <= dbg_cmp_range[31:16]));
+  wire cmp_do_freeze = dbg_cmp_cfg[19] && cmp_hit && !cmp_frozen
+                       && (cmp_seq_q >= dbg_cmp_cfg[31:24]);
+  assign dbg_cmp_freeze = cmp_do_freeze;
+  assign dbg_div_info   = {cmp_seq_q, cmp_cs_q};
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      dbg_div_eip <= 32'd0; dbg_div_eip70 <= 32'd0;
+      cmp_seq_q <= 16'd0; cmp_cs_q <= 16'd0; cmp_frozen <= 1'b0;
+    end else if (!dbg_cmp_cfg[16]) begin
+      cmp_frozen <= 1'b0; cmp_seq_q <= 16'd0;   // disarmed -> re-arm fresh
+    end else if (cmp_hit && !cmp_frozen) begin
+      dbg_div_eip70 <= dbg_div_eip;   // prev <- last
+      dbg_div_eip   <= dbg_eip;       // last <- this match
+      cmp_seq_q     <= cmp_seq_q + 16'd1;
+      cmp_cs_q      <= dbg_cs;
+      if (cmp_do_freeze) cmp_frozen <= 1'b1;
+    end
+  end
+`endif
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin
