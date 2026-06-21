@@ -311,16 +311,8 @@
                                q_w, q_pc, gpr_o[R_EDX], gpr_o[R_EAX], ex_srcv);
                       dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
-`ifdef VEN_DBG_CORE
-                      // #DE-debug build: HALT at the divide fault instead of
-                      // delivering it. The IDT delivery triple-faults -> CPU reset
-                      // -> wipes the PC ring; halting freezes the trajectory INTO
-                      // the #DE so it can be read out on silicon.
-                      state<=S_HALT;
-`else
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else          state<=S_HALT;
-`endif
                     end else
                       // P5 DIVIDE OCCUPANCY (cycle-modeled, p5model occ DIV
                       // 17/25/41 for r/m8/16/32). The native helper above produces
@@ -359,16 +351,8 @@
                                q_w, q_pc, gpr_o[R_EDX], gpr_o[R_EAX], ex_srcv);
                       dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
-`ifdef VEN_DBG_CORE
-                      // #DE-debug build: HALT at the divide fault instead of
-                      // delivering it. The IDT delivery triple-faults -> CPU reset
-                      // -> wipes the PC ring; halting freezes the trajectory INTO
-                      // the #DE so it can be read out on silicon.
-                      state<=S_HALT;
-`else
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
                       else          state<=S_HALT;
-`endif
                     end else
                       // P5 IDIV OCCUPANCY (cycle-modeled, p5model occ IDIV 22/30/46
                       // for r/m8/16/32 — a few clocks over DIV for the sign handling).
