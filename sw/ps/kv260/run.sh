@@ -11,12 +11,43 @@ IFS= read -r PW
 echo "$PW" | sudo -S -v 2>/dev/null      # cache sudo creds for this session
 PW=                                       # drop the secret from the environment
 sudo pkill -f kms-draw 2>/dev/null; sudo pkill -f ven_soc_app_q 2>/dev/null; sleep 1
+# ===== SETUP-RULE-OUT EXPERIMENT (VENSLOW=1): clock the PL core to ~496 kHz (<1 MHz) =====
+# PL0_REF_CTRL 0xFF5E00C0: DIVISOR0[13:8], DIVISOR1[21:16], IOPLL=1000MHz.
+# 63*32 -> ~0.496 MHz = ~80x the 40MHz clock period of setup margin. If the #DE STILL
+# fires this slow, setup timing is ruled out (the path has ~80x slack). Core is idle here
+# (ven_soc_app killed), so changing the clock is safe (no in-flight AXI). Restore with div0=25.
+if [ "${VENSLOW:-0}" = "1" ]; then
+  CRLV=$(sudo busybox devmem 0xFF5E00C0)
+  NEWV=$(printf '0x%08x' $(( (CRLV & 0xffc0c0ff) | 0x00203f00 )))   # DIV0=63 DIV1=32 -> ~496 kHz
+  sudo busybox devmem 0xFF5E00C0 32 "$NEWV"
+  echo "VENSLOW: PL0_REF_CTRL $CRLV -> $(sudo busybox devmem 0xFF5E00C0)  (~496 kHz, DIV0=63 DIV1=32)"
+  sudo sh -c 'nohup ./ven_soc_app_q --sys --dos --bios seabios.bin --disk quake_ven.img \
+    --extmem-kb 64512 --vga-dump /tmp/qframe.ppm >/tmp/vsa.log 2>&1 & echo $! >/tmp/vsa.pid'
+  echo "VENSLOW: ven_soc_app pid=$(cat /tmp/vsa.pid); watching for the #DE at <1MHz (up to ~40min)"
+  RES="CLEAN"
+  for i in $(seq 1 2400); do
+    sleep 1
+    if grep -aiqE 'division by zero|divide error|sigfpe|exiting due to|general protection|exception 0' /tmp/vsa.log 2>/dev/null; then
+      RES="FAULT"
+      echo "VENSLOW RESULT: #DE STILL FIRES at ~496 kHz => SETUP TIMING RULED OUT (~80x slack)"
+      echo "FAULT line: $(grep -aiE 'division by zero|divide error|exception|exiting due to' /tmp/vsa.log | tail -1)"
+      break
+    fi
+    if [ $((i % 60)) -eq 0 ]; then echo "VENSLOW t~${i}s eip=$(sudo busybox devmem 0xA0000084) cs=$(sudo busybox devmem 0xA0000088) loglines=$(wc -l </tmp/vsa.log 2>/dev/null)"; fi
+  done
+  [ "$RES" = "CLEAN" ] && echo "VENSLOW RESULT: NO #DE in ~40min at ~496 kHz => the bug did NOT occur slow (was setup-dependent) OR boot didn't reach Quake in time"
+  echo "VENSLOW: restoring 40 MHz (DIV0=25 DIV1=1)"
+  CRLV=$(sudo busybox devmem 0xFF5E00C0); NEWV=$(printf '0x%08x' $(( (CRLV & 0xffc0c0ff) | 0x00011900 )))
+  sudo busybox devmem 0xFF5E00C0 32 "$NEWV"; echo "VENSLOW: clock now $(sudo busybox devmem 0xFF5E00C0)"
+  sudo kill "$(cat /tmp/vsa.pid)" 2>/dev/null; sleep 1; sudo pkill -f kms-draw 2>/dev/null
+  echo "VENSLOW DONE"; exit 0
+fi
 sudo sh -c 'nohup ./ven_soc_app_q --sys --dos --bios seabios.bin --disk quake_ven.img \
   --extmem-kb 64512 --vga-dump /tmp/qframe.ppm >/tmp/vsa.log 2>&1 & echo $! >/tmp/vsa.pid'
 echo "ven_soc_app pid=$(cat /tmp/vsa.pid)"
 # ---- STRICT CLOCK-STEP validation: freeze the core clock, pulse 1 clk at a time,
 # watch the FSM micro-state (0x94) advance per pulse. RUNCTL(0xDC)[4]=mode [5]=pulse.
-if [ "${CLKSTEP:-1}" = "1" ]; then
+if [ "${CLKSTEP:-0}" = "1" ]; then
   # FAULT-FREEZE: freeze the core clock on the Nth exception delivery (= the drift's
   # fault, past the handled boot faults) BEFORE the triple-fault rst_n wipes the ring.
   # cfg[22]=fault-freeze mode, cfg[31:24]=skip. Tune SKIP via env (no rebuild).
