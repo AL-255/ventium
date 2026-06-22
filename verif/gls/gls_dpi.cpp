@@ -33,6 +33,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "svdpi.h"
 #include "memmodel.h"
@@ -137,6 +138,58 @@ int gls_init(const char* disk, const char* bios) {
         if (!g_irq0_period) g_irq0_period = 8000;
     }
     g_irq0_next = g_irq0_period;
+
+    // ---- STRETCH: fetch-stress repro (GLS_FETCHSTRESS=1) -------------------
+    // Opt-in only: leaves the default SeaBIOS boot byte-identical when unset.
+    // Stages a tiny self-contained 16-bit real-mode loop right at the reset
+    // vector's far-jump target (phys 0xFE05B, the entry SeaBIOS would reach) and
+    // overwrites the SeaBIOS entry there with a stream that exercises the fetch
+    // RAMs WITHOUT the multi-minute SeaBIOS POST: a marching set of taken/near
+    // jumps across several cache lines (the fetch path the board-only bug lives
+    // in), terminated by `out 0xf4` (isa-debug-exit) so the harness stops cleanly.
+    //
+    // The reset far-jump `jmp f000:e05b` (phys 0xFE05B) is untouched, so the core
+    // takes the exact same first control transfer as the real boot — only the
+    // landing code is replaced. If the board-only fetch corruption is RAM-fill/
+    // select related it can be hit in far fewer gate-level cycles here.
+    if (const char* e = std::getenv("GLS_FETCHSTRESS")) {
+      if (e[0] == '1') {
+        // phys 0xFE05B = the reset far-jump target (cs=F000, ip=E05B). Build a
+        // sequence of short forward jumps spanning cache-line boundaries, a tight
+        // backward loop counted in CX, then isa-debug-exit. All bytes 16-bit.
+        // Layout (offsets from 0xFE05B):
+        //   ip=E05B: mov cx, 0x0040      ; B9 40 00     (loop count)
+        //   ip=E05E: nop x N (pad to span lines)         ; 90 ...
+        //   loop:    dec cx              ; 49
+        //            jnz back            ; 75 FB        (taken backward branch)
+        //            mov dx, 0x00F4      ; BA F4 00
+        //            mov al, 0x00        ; B0 00
+        //            out dx, al          ; EE           (isa-debug-exit)
+        // Use a long NOP sled so the backward branch + several forward fetches
+        // cross multiple 16-byte/32-byte fetch granules.
+        const uint32_t base = 0x000FE05Bu;
+        std::vector<uint8_t> p;
+        p.push_back(0xB9); p.push_back(0x40); p.push_back(0x00);  // mov cx,0x40
+        // 80-byte NOP sled to span several cache lines before the loop body.
+        size_t sled = 80;
+        for (size_t i = 0; i < sled; i++) p.push_back(0x90);     // nop
+        // loop body starts here (offset 3+sled).
+        p.push_back(0x49);                                        // dec cx
+        p.push_back(0x75);                                        // jnz rel8
+        // rel8 back to the start of the sled (so each iteration re-fetches it):
+        // target = sledStart ; next_ip after this jnz = base+3+sled+2.
+        // disp = sledStart - next_ip = (base+3) - (base+3+sled+2) = -(sled+2)
+        p.push_back((uint8_t)(0 - (int)(sled + 2)));              // disp8
+        p.push_back(0xBA); p.push_back(0xF4); p.push_back(0x00);  // mov dx,0xF4
+        p.push_back(0xB0); p.push_back(0x00);                     // mov al,0
+        p.push_back(0xEE);                                        // out dx,al
+        for (size_t i = 0; i < p.size(); i++)
+            g_mem->write8(base + (uint32_t)i, p[i]);
+        std::fprintf(stderr,
+            "gls: GLS_FETCHSTRESS staged %zu-byte loop at phys 0x%08x "
+            "(cx=0x40, %zu-byte sled, isa-debug-exit)\n", p.size(), base, sled);
+      }
+    }
     return 0;
 }
 

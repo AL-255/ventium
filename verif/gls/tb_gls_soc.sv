@@ -144,6 +144,28 @@ module tb_gls_soc;
   logic [7:0]  inta_vector = 8'd0;
   logic        inta;
 
+  // ---- VEN_DBG_CORE observability taps (DBG netlist only) -------------------
+  // The DBG funcsim netlist (synth_ventop_funcsim_dbg.tcl, +VEN_DBG_CORE) exposes
+  // ventium_top's dbg_* outputs: committed EIP/CS/ESP/EFLAGS + FSM micro-state +
+  // last vector + fault PC + per-retire strobe + the AXI read-beat tap. The PC
+  // ring (ven_soc_dbg) lives BELOW ventium_top in the real SoC, so the tb rebuilds
+  // it here from dbg_eip + dbg_retire_valid (the GLS equivalent of dbg_dump_core).
+`ifdef VEN_DBG_CORE
+  logic        dbg_retire_valid;
+  logic [31:0] dbg_eip;
+  logic [15:0] dbg_cs;
+  logic [31:0] dbg_esp;
+  logic [31:0] dbg_eflags;
+  logic [5:0]  dbg_state;
+  logic [7:0]  dbg_int_vec;
+  logic [31:0] dbg_fault_pc;
+  logic [31:0] dbg_cr0;
+  logic [63:0] dbg_ibuf;
+  logic        dbg_rd_valid;
+  logic [31:0] dbg_rd_addr;
+  logic [31:0] dbg_rd_data;
+`endif
+
   // ---- DUT instance ---------------------------------------------------------
   ventium_top u_dut (
     .clk(clk), .rst_n(rst_n),
@@ -185,14 +207,16 @@ module tb_gls_soc;
     .soc_en(soc_en), .intr(intr), .inta_vector(inta_vector), .inta(inta)
 `ifdef VEN_DBG_CORE
     ,
-    .dbg_retire_valid(), .dbg_eip(), .dbg_cs(), .dbg_esp(), .dbg_eflags(),
-    .dbg_state(), .dbg_int_vec(), .dbg_fault_pc(), .dbg_cr0(), .dbg_fctrl(),
-    .dbg_fxop(), .dbg_ibuf(), .dbg_seg(), .dbg_de_num(), .dbg_de_info(),
+    .dbg_retire_valid(dbg_retire_valid), .dbg_eip(dbg_eip), .dbg_cs(dbg_cs),
+    .dbg_esp(dbg_esp), .dbg_eflags(dbg_eflags),
+    .dbg_state(dbg_state), .dbg_int_vec(dbg_int_vec), .dbg_fault_pc(dbg_fault_pc),
+    .dbg_cr0(dbg_cr0), .dbg_fctrl(), .dbg_fxop(),
+    .dbg_ibuf(dbg_ibuf), .dbg_seg(), .dbg_de_num(), .dbg_de_info(),
     .dbg_hook_cfg(16'd0), .dbg_hook_seq(), .dbg_hook_eip(), .dbg_hook_opa(),
     .dbg_hook_opb(), .dbg_hook_meta(),
     .dbg_cmp_cfg(32'd0), .dbg_cmp_range(32'd0),
     .dbg_div_eip(), .dbg_div_eip70(), .dbg_div_info(), .dbg_cmp_freeze(),
-    .dbg_rd_valid(), .dbg_rd_addr(), .dbg_rd_data(),
+    .dbg_rd_valid(dbg_rd_valid), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
     .dbg_halt_req(1'b0), .dbg_step(1'b0), .dbg_bp_en(1'b0), .dbg_bp_addr(32'd0),
     .dbg_bp_clr(1'b0), .dbg_halted()
 `endif
@@ -307,6 +331,70 @@ module tb_gls_soc;
     if (r[8]) g_term = 1'b1;  // bit8 = isa-debug-exit (out 0xf4)
   endtask
 
+  // ---- VEN_DBG_CORE: committed-PC ring + wedge/fault auto-detector ----------
+  // The GLS equivalent of dbg_dump_core(): a 32-deep ring of the most-recently-
+  // retired committed PCs ({eip,cs,state}), a no-retire wedge watchdog, and a
+  // non-IRQ exception detector. On a wedge or a fault the ring + AXI fetch addr
+  // are dumped automatically and the sim stops, so a divergence is caught without
+  // watching a slow log.
+`ifdef VEN_DBG_CORE
+  localparam int DBG_RING = 32;
+  logic [31:0] ring_eip   [DBG_RING];
+  logic [15:0] ring_cs    [DBG_RING];
+  logic [5:0]  ring_state [DBG_RING];
+  logic [63:0] ring_cyc   [DBG_RING];
+  int          ring_head  = 0;   // next write slot
+  int          ring_n     = 0;   // entries captured (saturates at DBG_RING)
+  longint unsigned dbg_retired = 0;
+
+  // wedge watchdog: cycles since the last retire.
+  longint unsigned last_retire_cyc = 0;
+  // fault detector: the previous-cycle vector, so we see a NEW delivery edge.
+  logic [7:0]  prev_int_vec = 8'd0;
+  bit          dbg_armed    = 1'b0;   // arm only after reset release
+  // wedge threshold (cycles with no retire) — set via +dbg_wedge_k; 0 disables.
+  longint unsigned dbg_wedge_k = 64'd200_000;
+  bit          dbg_stop_on_fault = 1'b1;  // +dbg_no_stop_fault clears it
+  bit          dbg_dumped = 1'b0;
+
+  // sample one committed retire into the ring (called on a dbg_retire_valid edge).
+  task automatic dbg_ring_push();
+    ring_eip[ring_head]   = dbg_eip;
+    ring_cs[ring_head]    = dbg_cs;
+    ring_state[ring_head] = dbg_state;
+    ring_cyc[ring_head]   = cycles;
+    ring_head = (ring_head + 1) % DBG_RING;
+    if (ring_n < DBG_RING) ring_n = ring_n + 1;
+    dbg_retired = dbg_retired + 1;
+    last_retire_cyc = cycles;
+  endtask
+
+  // dump the committed-PC ring newest->oldest + live state + the AXI fetch addr.
+  task automatic dbg_dump_ring(input string reason);
+    int idx;
+    $display("");
+    $display("gls-dbg: ======== CORE DUMP (%s) @ cyc %0d ========", reason, cycles);
+    $display("gls-dbg:   committed: eip=%08h cs=%04h esp=%08h eflags=%08h",
+             dbg_eip, dbg_cs, dbg_esp, dbg_eflags);
+    $display("gls-dbg:   state=%0d(0x%02h) intvec=0x%02h faultpc=%08h cr0=%08h",
+             dbg_state, dbg_state, dbg_int_vec, dbg_fault_pc, dbg_cr0);
+    $display("gls-dbg:   ibuf@eip = %016h", dbg_ibuf);
+    $display("gls-dbg:   retired=%0d (last @cyc %0d, %0d cyc ago) cpu_hung=%b",
+             dbg_retired, last_retire_cyc, cycles - last_retire_cyc, cpu_hung);
+    $display("gls-dbg:   AXI fetch: arvalid=%b araddr=%h (phys %h) | last AR phys=%h rbeat=%h@%h",
+             m_axi_arvalid, m_axi_araddr, m_axi_araddr[31:0] - REMAP_BASE,
+             last_rd_addr, dbg_rd_data, dbg_rd_addr);
+    $display("gls-dbg:   --- committed-PC ring (newest first, %0d entries) ---", ring_n);
+    for (int k = 0; k < ring_n; k++) begin
+      idx = (ring_head - 1 - k + DBG_RING*4) % DBG_RING;
+      $display("gls-dbg:     [-%0d] cs:eip=%04h:%08h state=%0d @cyc %0d",
+               k, ring_cs[idx], ring_eip[idx], ring_state[idx], ring_cyc[idx]);
+    end
+    $display("gls-dbg: ===============================================");
+    $display("");
+  endtask
+`endif
+
   // ---- run ------------------------------------------------------------------
   longint unsigned cycles = 0;
   longint unsigned max_cycles;
@@ -324,6 +412,12 @@ module tb_gls_soc;
     if (!$value$plusargs("report_every=%d", report_every)) report_every = 64'd200_000;
     if ($test$plusargs("gls_trace")) gls_trace = 1'b1;       // +gls_trace = AR/beat forensics
     void'($value$plusargs("gls_trace_n=%d", gls_trace_n));
+`ifdef VEN_DBG_CORE
+    void'($value$plusargs("dbg_wedge_k=%d", dbg_wedge_k));   // 0 = disable wedge watchdog
+    if ($test$plusargs("dbg_no_stop_fault")) dbg_stop_on_fault = 1'b0;
+    $display("gls-dbg: VEN_DBG_CORE taps ACTIVE (wedge_k=%0d stop_on_fault=%b)",
+             dbg_wedge_k, dbg_stop_on_fault);
+`endif
 
     rc = gls_init(disk_path, bios_path);
     if (rc != 0) begin $display("gls: init failed rc=%0d", rc); $finish; end
@@ -353,6 +447,9 @@ module tb_gls_soc;
     end
     rst_n = 1;
     $display("gls: reset released @ cycle 0 (t=%0t, past GSR)", $time);
+`ifdef VEN_DBG_CORE
+    dbg_armed = 1'b1; last_retire_cyc = 0; prev_int_vec = dbg_int_vec;
+`endif
 
     // ---- main run loop ----
     forever begin
@@ -383,6 +480,52 @@ module tb_gls_soc;
 
       cycles = cycles + 1;
 
+`ifdef VEN_DBG_CORE
+      if (dbg_armed) begin
+        // sample committed retires into the PC ring.
+        if (dbg_retire_valid) dbg_ring_push();
+
+        // fault detector: a NEW non-IRQ exception vector delivered. The DOS IRQ0
+        // pump delivers vector 0x08 (and the BIOS IRQs 0x08-0x0F / 0x70-0x77),
+        // which are expected; flag a non-IRQ vector (a real exception 0x00-0x1F
+        // that is NOT a hardware IRQ, or a far/wild jump that derails decode).
+        if (dbg_int_vec != prev_int_vec && dbg_int_vec != 8'd0) begin
+          bit is_hw_irq;
+          is_hw_irq = (dbg_int_vec >= 8'h08 && dbg_int_vec <= 8'h0F) ||
+                      (dbg_int_vec >= 8'h70 && dbg_int_vec <= 8'h77);
+          if (!is_hw_irq && dbg_int_vec <= 8'h1F && !dbg_dumped) begin
+            $display("gls-dbg: !! NON-IRQ EXCEPTION vector=0x%02h delivered (faultpc=%08h) @ cyc %0d",
+                     dbg_int_vec, dbg_fault_pc, cycles);
+            dbg_dump_ring($sformatf("exception vec 0x%02h", dbg_int_vec));
+            dbg_dumped = 1'b1;
+            if (dbg_stop_on_fault) begin
+              $display("gls-dbg: stop on fault (use +dbg_no_stop_fault to keep running)");
+              break;
+            end
+          end
+          prev_int_vec = dbg_int_vec;
+        end
+
+        // wedge watchdog: two cases, both gated by dbg_wedge_k (0 = disabled):
+        //  (a) made progress, then K cycles with NO retire (a derail/wedge), or
+        //  (b) NEVER retired even once after K cycles past reset (the documented
+        //      reset far-jump -> phys 0x3620 wedge at retire=0 — caught too).
+        if (dbg_wedge_k != 0 && !dbg_dumped &&
+            ((dbg_retired > 0 && (cycles - last_retire_cyc) >= dbg_wedge_k) ||
+             (dbg_retired == 0 && cycles >= dbg_wedge_k))) begin
+          if (dbg_retired == 0)
+            $display("gls-dbg: !! WEDGE: core NEVER retired an instruction in %0d cycles @ cyc %0d",
+                     cycles, cycles);
+          else
+            $display("gls-dbg: !! WEDGE: no retire for %0d cycles (last retire @cyc %0d) @ cyc %0d",
+                     cycles - last_retire_cyc, last_retire_cyc, cycles);
+          dbg_dump_ring("retire wedge");
+          dbg_dumped = 1'b1;
+          break;
+        end
+      end
+`endif
+
       // termination: isa-debug-exit.
       if (g_term) begin
         $display("gls: stop: isa-debug-exit (out 0xf4) @ cycle %0d", cycles);
@@ -405,12 +548,22 @@ module tb_gls_soc;
                  cycles, retire_count, nin, nout,
                  n_ar, n_rbeat, n_aw, n_wbeat, last_rd_addr, last_wr_addr,
                  m_axi_arvalid, m_axi_araddr, cpu_hung);
+`ifdef VEN_DBG_CORE
+        // committed-PC + FSM trajectory line (the dbg taps the netlist now exposes).
+        $display("gls-dbg: [cyc %0d] committed cs:eip=%04h:%08h esp=%08h efl=%08h | state=%0d intvec=0x%02h faultpc=%08h | dbg_retired=%0d ring=%0d",
+                 cycles, dbg_cs, dbg_eip, dbg_esp, dbg_eflags,
+                 dbg_state, dbg_int_vec, dbg_fault_pc, dbg_retired, ring_n);
+`endif
       end
     end
 
     gls_io_stats(nin, nout);
     $display("gls: DONE cycles=%0d io_in=%0d io_out=%0d retire_count=%0d",
              cycles, nin, nout, retire_count);
+`ifdef VEN_DBG_CORE
+    // final trajectory snapshot (skip if a wedge/fault already dumped the ring).
+    if (!dbg_dumped) dbg_dump_ring("final");
+`endif
     $finish;
   end
 

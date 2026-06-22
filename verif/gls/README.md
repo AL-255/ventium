@@ -64,9 +64,89 @@ handshake state; termination on isa-debug-exit (`out 0xf4`), `bus_err`, or
 # netlist mode (the real target): boots on fpga/build/ventop_funcsim/ventium_top_funcsim.v
 GLS_MODE=net bash verif/gls/run_gls_freedos.sh
 
+# netlist + on-die debug taps (the bug-hunt platform): boots on the +VEN_DBG_CORE
+# netlist and prints committed PC / FSM / retire trajectory + auto-dumps on a wedge
+# or fault. Needs the dbg netlist (synth_ventop_funcsim_dbg.tcl, built once).
+GLS_MODE=net GLS_DBG=1 bash verif/gls/run_gls_freedos.sh
+
 # RTL mode (harness debug): compiles against rtl/ ventium_top
 GLS_MODE=rtl bash verif/gls/run_gls_freedos.sh
 ```
+
+### GLS_DBG=1 — committed-state observability (the fetch-bug hunt mode)
+
+The default funcsim netlist has **no observability**: progress is inferred off the
+AXI bus only. `GLS_DBG=1` switches to a netlist synthesized **with
+`+VEN_DBG_CORE`** (`fpga/scripts/synth_ventop_funcsim_dbg.tcl` →
+`fpga/build/ventop_funcsim_dbg/ventium_top_funcsim_dbg.v`), which exposes
+`ventium_top`'s `dbg_*` outputs. The tb (`` `ifdef VEN_DBG_CORE``) wires them and
+adds a **GLS analogue of `dbg_dump_core()`**:
+
+- **Periodic `gls-dbg:` line** alongside each progress report: committed
+  `cs:eip`, `esp`, `eflags`, the live FSM micro-state, the last
+  interrupt/exception vector, the fault PC, the in-tb retire count, and the PC-ring
+  fill — i.e. *where the core actually is*, not just "the bus is busy".
+- **Committed-PC ring** (32-deep), rebuilt in the tb from `dbg_eip` +
+  `dbg_retire_valid` (the real `ven_soc_dbg` ring lives below `ventium_top`, so the
+  tb reconstructs it). Dumped newest→oldest on any stop.
+- **Wedge auto-detector**: if the core makes forward progress and then retires
+  **nothing for `GLS_WEDGE_K` cycles** (default 200000; `0` disables), the harness
+  dumps the committed-PC ring + live state + the current AXI fetch address and
+  stops — so a derail-into-dead-memory wedge is caught automatically.
+- **Fault auto-detector**: a **new non-IRQ exception vector** (`0x00`–`0x1F`,
+  excluding the HW-IRQ ranges `0x08`–`0x0F` / `0x70`–`0x77` driven by the DOS IRQ0
+  pump) triggers the same dump + stop. This is exactly the signal needed for the
+  DOS-Quake "Division by Zero at eip=24e" hunt: the dump shows the committed-PC
+  trajectory *into* the fault and the `ibuf@eip` fetch bytes, so a corrupted-fetch
+  derail (mislabeled by go32 as `#DE`) is distinguishable from a real `#DE`.
+
+DBG-mode env knobs:
+
+| env | default | effect |
+|-----|---------|--------|
+| `GLS_DBG=1`         | `0`      | select the dbg netlist + `+define+VEN_DBG_CORE` + wire the taps |
+| `GLS_WEDGE_K=<n>`   | `200000` | no-retire cycles before the wedge dump (`0` = disable) |
+| `GLS_NO_STOP_FAULT=1` | `0`    | keep running past a detected exception (just dump, don't stop) |
+| `GLS_NETLIST=<path>` | (auto)  | override the netlist path explicitly |
+
+The `dbg_*` taps available at the `ventium_top` level are: `dbg_eip`, `dbg_cs`,
+`dbg_esp`, `dbg_eflags`, `dbg_state`, `dbg_int_vec`, `dbg_fault_pc`,
+`dbg_retire_valid`, `dbg_cr0`, `dbg_ibuf`, and the AXI read-beat tap
+`dbg_rd_valid/_addr/_data`. The PC ring / freeze snapshot / comparator that the PS
+reads over AXI-Lite (`0xA000_0000+0x80..`) live in `ven_soc_dbg` **below**
+`ventium_top`, so they are not direct top-level ports — the tb rebuilds the ring
+from `dbg_eip`/`dbg_retire_valid`.
+
+To (re)build the dbg netlist (~15-20 min, one-time):
+
+```sh
+source /tools/Xilinx/2025.2/Vivado/settings64.sh
+vivado -mode batch -source fpga/scripts/synth_ventop_funcsim_dbg.tcl
+```
+
+### GLS_FETCHSTRESS=1 — fast fetch-RAM exercise (no SeaBIOS POST)
+
+A full SeaBIOS boot is multi-minute at gate-level. `GLS_FETCHSTRESS=1` (an env
+knob read by `gls_init` in `gls_dpi.cpp`) instead stages a tiny self-contained
+16-bit real-mode loop **at the reset far-jump target** (phys `0xFE05B`, where the
+reset `jmp f000:e05b` lands) and overwrites the SeaBIOS entry there. The stream is
+`mov cx,0x40` + an 80-byte NOP sled (spanning several fetch granules) + a tight
+backward-branch loop (`dec cx; jnz back`) + `out 0xf4` (isa-debug-exit). The reset
+vector itself is untouched, so the core takes the **exact same first control
+transfer** as a real boot — only the landing code changes. This exercises the
+fetch RAMs / line-select across cache-line boundaries in a few thousand gate-level
+cycles instead of the full POST, so a fill/select-triggered fetch bug (if that is
+its trigger) can be hit far faster. Combine with `GLS_DBG=1` to see the committed
+PC trajectory through the loop:
+
+```sh
+GLS_MODE=net GLS_DBG=1 GLS_FETCHSTRESS=1 GLS_MAX_CYCLES=200000 \
+  bash verif/gls/run_gls_freedos.sh
+```
+
+The default (knob unset) leaves the boot path byte-identical. This is a starting
+scaffold — widen the sled / vary the branch displacements to sweep the fetch
+address space if the simple loop does not trip the divergence.
 
 Env knobs: `GLS_DISK` (default `verif/freedos/f4a/fdhi.img`), `GLS_BIOS`
 (default `sw/ps/kv260/assets/seabios.bin`), `GLS_MAX_CYCLES`, `GLS_REPORT`,
