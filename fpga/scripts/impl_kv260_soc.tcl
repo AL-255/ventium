@@ -248,6 +248,14 @@ puts "IMPL_SYNTH_DONE"
 # congestion (AltSpreadLogic_high placement + phys_opt + Explore routing).
 set IMPLSTRAT [envor IMPL_STRATEGY Performance_NetDelay_high]
 set_property strategy $IMPLSTRAT [get_runs impl_1]
+# HOLD_FIX=1: run post-route `phys_opt_design -hold_fix` (after tightening the hold
+# requirement via HOLD_UNC clock uncertainty) to give the marginal uopcache BRAM-write
+# hold paths real silicon margin — the F4A board-only fetch #DE fix. Needs routing room,
+# so pair with congestion relief (UOPCACHE=0 / fewer features / bigger device).
+if {[envor HOLD_FIX 0]} {
+    set_property STEPS.ROUTE_DESIGN.TCL.POST $ROOT/fpga/scripts/post_route_holdfix.tcl [get_runs impl_1]
+    puts "=== HOLD_FIX=1: post-route phys_opt_design -hold_fix enabled (HOLD_UNC=[envor HOLD_UNC 0.150] ns) ==="
+}
 puts "=== IMPL place+route+bitstream (strategy $IMPLSTRAT) ==="
 launch_runs impl_1 -to_step write_bitstream -jobs $THREADS
 wait_on_run impl_1
