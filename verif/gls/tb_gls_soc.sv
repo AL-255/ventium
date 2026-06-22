@@ -45,6 +45,9 @@ module tb_gls_soc;
   import "DPI-C" function void gls_inta();
   import "DPI-C" function void gls_io_stats(output longint unsigned nin,
                                             output longint unsigned nout);
+  import "DPI-C" function void gls_probe_result(output int exit_al,
+                                                output int nmark,
+                                                output int unsigned trail0);
 
   // ---- clock / reset --------------------------------------------------------
   logic clk = 0;
@@ -247,6 +250,10 @@ module tb_gls_soc;
   // netlist-vs-RTL fetch-divergence forensic view). gls_trace_n = bursts to log.
   bit          gls_trace = 1'b0;
   int          gls_trace_n = 8;
+  // +gls_pctrace prints one parseable committed cs:eip line per retire (DBG mode
+  // only) so the GLS netlist retire stream can be diffed retire-by-retire against
+  // the Verilator golden .vtrace. Format: "PCTRACE n cs eip" (decimal n, hex cs/eip).
+  bit          gls_pctrace = 1'b0;
 
   // Captured pre-edge handshakes.
   logic        hs_ar, hs_r, hs_aw, hs_w, hs_b;
@@ -412,6 +419,7 @@ module tb_gls_soc;
     if (!$value$plusargs("report_every=%d", report_every)) report_every = 64'd200_000;
     if ($test$plusargs("gls_trace")) gls_trace = 1'b1;       // +gls_trace = AR/beat forensics
     void'($value$plusargs("gls_trace_n=%d", gls_trace_n));
+    if ($test$plusargs("gls_pctrace")) gls_pctrace = 1'b1;   // +gls_pctrace = per-retire cs:eip
 `ifdef VEN_DBG_CORE
     void'($value$plusargs("dbg_wedge_k=%d", dbg_wedge_k));   // 0 = disable wedge watchdog
     if ($test$plusargs("dbg_no_stop_fault")) dbg_stop_on_fault = 1'b0;
@@ -483,7 +491,12 @@ module tb_gls_soc;
 `ifdef VEN_DBG_CORE
       if (dbg_armed) begin
         // sample committed retires into the PC ring.
-        if (dbg_retire_valid) dbg_ring_push();
+        if (dbg_retire_valid) begin
+          dbg_ring_push();
+          // per-retire committed cs:eip emit for the retire-by-retire golden diff.
+          if (gls_pctrace)
+            $display("PCTRACE %0d %04h %08h", dbg_retired - 1, dbg_cs, dbg_eip);
+        end
 
         // fault detector: a NEW non-IRQ exception vector delivered. The DOS IRQ0
         // pump delivers vector 0x08 (and the BIOS IRQs 0x08-0x0F / 0x70-0x77),
@@ -560,6 +573,23 @@ module tb_gls_soc;
     gls_io_stats(nin, nout);
     $display("gls: DONE cycles=%0d io_in=%0d io_out=%0d retire_count=%0d",
              cycles, nin, nout, retire_count);
+
+    // ---- GLS_PROBE self-check verdict -----------------------------------------
+    // exit_al: the AL value the probe drove on `out 0xf4` (0x00 = PASS, nonzero =
+    // detected mismatch); 0xFFFFFFFF = never exited cleanly (derail/wedge = FAIL).
+    // nmark/trail0: the 0xE9 marker trail (PASS probes emit 0xAA as the last mark).
+    begin
+      int probe_al, probe_nmark; int unsigned probe_trail0;
+      gls_probe_result(probe_al, probe_nmark, probe_trail0);
+      if (probe_al != 32'hFFFFFFFF || probe_nmark != 0) begin
+        if (probe_al == 0 && probe_nmark >= 1 && (probe_trail0 & 32'hFF) == 32'hAA)
+          $display("gls-probe: ===== PASS ===== exit_al=0x%02h marks=%0d trail0=%08h",
+                   probe_al, probe_nmark, probe_trail0);
+        else
+          $display("gls-probe: ##### FAIL ##### exit_al=0x%08h marks=%0d trail0=%08h (expected al=0 + first-mark 0xAA)",
+                   probe_al, probe_nmark, probe_trail0);
+      end
+    end
 `ifdef VEN_DBG_CORE
     // final trajectory snapshot (skip if a wedge/fault already dumped the ring).
     if (!dbg_dumped) dbg_dump_ring("final");
