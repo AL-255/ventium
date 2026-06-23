@@ -40,6 +40,14 @@
               int_gate_off <= {mem_rdata[31:16], int_lo[15:0]};
               int_gate_sel <= int_lo[31:16];
               int_gate_trap<= gattr[0];   // 0xF trap -> leave IF; 0xE int -> clear IF
+              // Gate SIZE bit gattr[3]: 0 = 16-bit gate (type 0x6 int / 0x7 trap ->
+              // 6-byte IP:CS:FLAGS frame, 2-byte slots, ESP -= 6); 1 = 32-bit gate
+              // (type 0xE/0xF -> 12-byte EIP:CS:EFLAGS frame, the legacy path). Only
+              // the SAME-PRIV push arm honours this (cross-priv/V86 stay 32-bit; the
+              // corpus has no 16-bit cross-priv gate). A DPMI host running in 16-bit
+              // PM (cs_d=0) installs 16-bit gates, so a gated INT under it must push
+              // the 6-byte frame or the matching IRETW pops a 12-byte-shifted frame.
+              int_gate_op16<= !gattr[3];
               int_step     <= 4'd0;
               // M2S.4 GATE PROTECTION (deferred from M2S.3):
               //   (1) gate not Present -> #NP(vec*8 + IDT bit). The error code for

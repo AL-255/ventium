@@ -54,6 +54,16 @@
             // deliver before consuming the (garbage) descriptor.
             if (!seg_step && !mnull &&   // TI bit (msel[2]) picks the GDT vs LDT limit
                 ({16'd0, msel[15:3], 3'd0} + 32'd7 > {16'd0, (msel[2]?ldt_limit:gdt_limit)})) begin
+`ifdef VEN_DBG_CORE
+              // task #102 #GP triage (plusarg-gated, inert by default): a PM seg-load
+              // whose selector index overruns the GDT/LDT limit. Dumps the mode context
+              // so a spurious PM-walk of a REAL-mode segment value is identifiable.
+              if (segfaultdbg) $display(
+                "[SEGFLT] LIMIT #GP sel=%04x from_mem=%b tgt=%0d sysop=%0d ispop=%b popsreg=%b srcreg=%0d src=%08x seg_step=%b | seg_real=%b real=%b v86=%b cr0=%08x ef=%08x | gdt_lim=%08x ldt_lim=%08x cpl=%0d cs=%04x q_pc=%08x",
+                msel, q_seg_from_mem, (q_seg_from_mem?q_lseg:q_sys_sreg), q_sysop, q_is_pop, q_pop_sreg,
+                q_src_reg, gpr_o[q_src_reg], seg_step, seg_real, real_mode, v86,
+                creg0, eflags, gdt_limit, ldt_limit, cpl_r, seg_sel[SG_CS], q_pc);
+`endif
               start_fault(8'd13, 1'b1, {16'd0, msel}, q_pc);
               seg_step<=1'b0; q_seg_from_mem<=1'b0;
             end else if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
@@ -68,6 +78,11 @@
               is_ss = (tgt == 3'(SG_SS));
               // PROTECTION DECISION (M2S.1) -> now DELIVERED through the IDT (M2S.3).
               if (seg_load_fault(1'b0, is_ss, msel, attr, cpl_r)) begin
+`ifdef VEN_DBG_CORE
+                if (segfaultdbg) $display(
+                  "[SEGFLT] DESC fault sel=%04x attr=%02x from_mem=%b tgt=%0d | seg_real=%b v86=%b cr0=%08x ef=%08x cpl=%0d cs=%04x q_pc=%08x",
+                  msel, attr, q_seg_from_mem, tgt, seg_real, v86, creg0, eflags, cpl_r, seg_sel[SG_CS], q_pc);
+`endif
                 // #NP/#SS/#GP — error code = selector (idx<<3 | TI | EXT=0).
                 start_fault(seg_fault_vec(1'b0, is_ss, msel, attr), 1'b1,
                             {16'd0, msel[15:3], 3'd0}, q_pc);
@@ -183,6 +198,17 @@
             if (!seg_step) begin
               retf_off <= mem_rdata;                  // popped IP (beat 0)
               seg_step <= 1'b1;
+            end else if (!seg_real) begin
+              // PM far RETF: both pops are done (ESP+=2w+imm fires in the gpr-wb
+              // S_RETF arm at this same beat-1 ack). Latch the popped {CS, EIP} into
+              // the far-target regs and hand off to S_LJMP, which reads the target CS
+              // descriptor from the GDT/LDT, loads CS base/limit/attr/CPL/D, sets
+              // EIP=q_ljmp_off and retires — the identical CS-load path the PM far
+              // JMP/CALL already use (incl. seg_load_fault delivery). DOS Quake's
+              // CWSDPMI far-returns same-privilege (popped CS RPL == CPL).
+              q_ljmp_sel <= mem_rdata[15:0];
+              q_ljmp_off <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
+              seg_step <= 1'b0; state <= S_LJMP;
             end else begin
               logic [15:0] new_cs;
               new_cs = mem_rdata[15:0];               // popped CS (beat 1)

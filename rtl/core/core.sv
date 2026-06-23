@@ -266,11 +266,25 @@ module core
     // fptrap_resp_valid; the core then commits ST1<-result, pops, retires. Inert unless
     // proxy_en + the op is decoded (VEN_FPTRAP). fptrap_op selects which op (0=FPATAN).
     output logic        fptrap_active,       // 1-clock: core entered S_FPTRAP_WAIT
-    output logic [3:0]  fptrap_op,           // 0 = FPATAN
+    output logic [6:0]  fptrap_op,           // 0 = FPATAN; under VEN_FP_PS_ALL = full fxop_e
     output logic [79:0] fptrap_st0,          // ST0 (x)  floatx80
     output logic [79:0] fptrap_st1,          // ST1 (y)  floatx80
     input  logic        fptrap_resp_valid,   // PS wrote the result
     input  logic [79:0] fptrap_result,       // atan2(ST1,ST0) as floatx80
+`ifdef VEN_FP_PS_ALL
+    // FP_PS_ALL: the FULL x87 compute datapath is PS-trapped. Expose the extra
+    // operand context (memory operand, control word, st-index, pop flag) and accept
+    // the generalized result vector (res0/res1/fstat + a 4-bit stack action).
+    output logic [79:0] fptrap_mem,          // f_mem80 (memory operand for FADD m32, etc.)
+    output logic [15:0] fptrap_fctrl,        // control word (RC/PC) for the PS to honor
+    output logic [15:0] fptrap_fstat,        // live status word (PS ORs sticky flags + cc onto it)
+    output logic [2:0]  fptrap_sti,          // q_f_sti (ST(i) index for reg-form ops)
+    output logic        fptrap_pop,          // q_f_pop (the instruction has a pop suffix)
+    output logic [2:0]  fptrap_aluop,        // q_f_aluop (0=ADD 1=MUL 2=COM 3=COMP 4=SUB 5=SUBR 6=DIV 7=DIVR)
+    input  logic [79:0] fptrap_res1,         // secondary result (FSINCOS cos / FPTAN 1.0)
+    input  logic [15:0] fptrap_res_fstat,    // PS-computed status word (cond codes + flags)
+    input  logic [3:0]  fptrap_action,       // stack-commit action (see core_fp_exec.svh)
+`endif
 `endif
 
     // M14: syscall ARGS exposed at the syscall_active pulse (read-only). For the
@@ -704,6 +718,44 @@ module core
   logic        def16;
   assign def16 = sys_mode && !cs_d;
 
+`ifdef VEN_DBG_CORE
+  // task #102 IRET-trace plusarg gates (inert unless +ven_iretdbg is passed).
+  logic        ven_iretdbg_en;
+  logic [63:0] ven_iretdbg_lo, ven_iretdbg_hi;
+  initial begin
+    ven_iretdbg_en = $test$plusargs("ven_iretdbg");
+    ven_iretdbg_lo = 64'd0;
+    ven_iretdbg_hi = 64'hFFFF_FFFF_FFFF_FFFF;
+    void'($value$plusargs("ven_iretdbg_lo=%d", ven_iretdbg_lo));
+    void'($value$plusargs("ven_iretdbg_hi=%d", ven_iretdbg_hi));
+  end
+  // task #102 segment-load #GP/#NP triage (inert unless +ven_segfaultdbg). Used by
+  // the S_SEGLD limit/desc fault arms (core_seg_ljmp.svh) to dump the mode context
+  // (seg_real/v86/cr0/eflags/gdt-limit) when a PM seg-load faults — distinguishes a
+  // spurious PM-walk of a real-mode segment value from a genuine bad PM selector.
+  logic        segfaultdbg;
+  initial segfaultdbg = $test$plusargs("ven_segfaultdbg");
+  // task #102 data-store-under-paging micro-TLB forensic trace (inert unless
+  // +ven_tlbdbg is passed). Watches a single linear page (+ven_tlbdbg_lin=) and
+  // dumps the translate state of every D access to it: mem_addr/we/cur_lin/
+  // fe_dtlb_{v,page,phys,hit,dirty}/paging_on/cur_is_d plus whether xlate_miss
+  // (S_WALK divert) and fe_xlate_pend (pend stall) are asserted this clock.
+  logic        ven_tlbdbg_en;
+  logic [63:0] ven_tlbdbg_lin;
+  logic        ven_tlbdbg_cpl3w;            // also trace ALL CPL3 (cs RPL=3) writes
+  logic [63:0] ven_tlbdbg_lo, ven_tlbdbg_hi;
+  initial begin
+    ven_tlbdbg_en  = $test$plusargs("ven_tlbdbg");
+    ven_tlbdbg_lin = 64'hFFFF_FFFF;   // a page that never matches by default
+    ven_tlbdbg_cpl3w = $test$plusargs("ven_tlbdbg_cpl3w");
+    ven_tlbdbg_lo  = 64'd0;
+    ven_tlbdbg_hi  = 64'hFFFF_FFFF_FFFF_FFFF;
+    void'($value$plusargs("ven_tlbdbg_lin=%h", ven_tlbdbg_lin));
+    void'($value$plusargs("ven_tlbdbg_lo=%d", ven_tlbdbg_lo));
+    void'($value$plusargs("ven_tlbdbg_hi=%d", ven_tlbdbg_hi));
+  end
+`endif
+
   // SEG_KEYS index constants (cs ss ds es fs gs) for the seg_* arrays.
   localparam int SG_CS = 0, SG_SS = 1, SG_DS = 2, SG_ES = 3, SG_FS = 4, SG_GS = 5;
 
@@ -752,6 +804,13 @@ module core
   // every `... && !fe_xlate_pend` gate folds away -> default is byte/cycle-identical.
   // Fmax-only demonstrator contract (cycle bands not claimed); functionally arch-exact.
   logic fe_xlate_pend;
+  // Module-scope mirror of the `translatable` predicate computed in the xlate_miss
+  // always_comb: 1 iff THIS state issues a genuine paged memory access (the access
+  // whose linear == cur_lin). Hoisted to module scope so the FE_PIPE micro-TLB
+  // re-registration (a separate always_ff) can gate on it — a NON-translatable
+  // state (e.g. a task-switch TSS save S_TSW_SAVE, S_LTR, or an idle default) drives
+  // cur_lin=0 with cur_is_d=1, and must NOT pollute the page-keyed micro-TLB.
+  logic fe_translatable;
 `ifdef VEN_FE_PIPE
   logic [19:0] fe_itlb_page, fe_itlb_phys;  logic fe_itlb_hit,  fe_itlb_v;
   logic [19:0] fe_dtlb_page, fe_dtlb_phys;  logic fe_dtlb_hit,  fe_dtlb_dirty, fe_dtlb_v;
@@ -1465,9 +1524,29 @@ module core
 `ifdef VEN_FPTRAP
   // FP PS-trap outputs: high while stalled in S_FPTRAP_WAIT exposing ST0/ST1 to the PS.
   assign fptrap_active = (state==S_FPTRAP_WAIT);
-  assign fptrap_op     = 4'd0;          // 0 = FPATAN (the only PS-trapped FP op)
   assign fptrap_st0    = fp_st[0];      // ST0 = x
+`ifdef VEN_FP_PS_ALL
+  // Expose the SECOND operand as ST(q_f_sti) for reg-form ops (FADD ST0,ST(i) /
+  // FCOM ST(i) / FADDP ST(i),ST0). The implicit-ST1 ops (FCOMPP/FUCOMPP/FPATAN/
+  // FYL2X/FYL2XP1) decode with q_f_sti==0, so fall back to ST1 there. No legitimate
+  // op uses ST(0) as its second operand (that is ST0 itself), so this is unambiguous.
+  assign fptrap_st1    = (q_f_sti != 3'd0) ? fp_st[q_f_sti] : fp_st[1];
+`else
   assign fptrap_st1    = fp_st[1];      // ST1 = y
+`endif
+`ifdef VEN_FP_PS_ALL
+  // Carry the full fxop identity so the PS knows which op to compute (FPATAN==FX_FPATAN
+  // here, so the legacy 0-means-FPATAN handler still works once it switches on fxop).
+  assign fptrap_op     = 7'(q_fxop);
+  assign fptrap_mem    = f_mem80;
+  assign fptrap_fctrl  = fctrl;
+  assign fptrap_fstat  = fstat;
+  assign fptrap_sti    = q_f_sti;
+  assign fptrap_pop    = q_f_pop;
+  assign fptrap_aluop  = q_f_aluop;
+`else
+  assign fptrap_op     = 7'd0;          // 0 = FPATAN (the only PS-trapped FP op)
+`endif
 `endif
 
   // M14: expose the syscall args (regfile values at the cd80 decode) so the TB
@@ -1677,6 +1756,12 @@ module core
   logic [31:0] int_gate_off;      // assembled handler offset from the IDT gate
   logic [15:0] int_gate_sel;      // gate's code selector
   logic        int_gate_trap;     // 1 = trap gate (leave IF), 0 = interrupt gate
+  logic        int_gate_op16;     // 1 = 16-bit gate/IRET (6-byte IP:CS:FLAGS frame,
+                                  // 2-byte slots, ESP +/-6); 0 = 32-bit (the legacy
+                                  // path). Set from the IDT gate SIZE bit (gattr[3]:
+                                  // 0x6/0x7 = 16-bit) on a gated INT delivery, or from
+                                  // the IRET's effective operand size (eff_opsize) on
+                                  // an IRET. Only the SAME-PRIV push/pop arm honours it.
   logic        int_sw;            // delivery is a SOFTWARE INT n/INT3/INTO (the
                                   // gate DPL>=CPL privilege check applies; HW
                                   // faults / external INTs bypass it)
@@ -2876,7 +2961,7 @@ module core
       // M2S.3 IDT delivery state idle out of reset.
       int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
-      int_gate_trap<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
+      int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_sw<=1'b0;
       // M2S.4 TR/TSS + cross-priv + inter-priv IRET state idle out of reset.
       tr_sel<=16'd0; tr_base<=32'd0; tr_limit<=32'd0; tr_valid<=1'b0; tr_attr<=8'd0;
@@ -2973,6 +3058,78 @@ module core
         $display("[RMPUSH]  t=%0t push cs=%04x ip=%04x (int_ret_eip=%08x) -> resume gate cs=%04x:%04x",
                  $time, seg_sel[SG_CS], int_ret_eip[15:0], int_ret_eip, int_gate_sel, int_gate_off[15:0]);
       end
+`endif
+
+`ifdef VEN_DBG_CORE
+      // ------------------------------------------------------------------
+      // task #102 — IRET frame-sizing forensic trace (mirrors VEN_RETDUMP /
+      // VEN_WATCH: env/plusarg-gated, inert by default). Catches the ONE
+      // transition IRET where Ventium sizes the popped frame 6 bytes (16-bit
+      // IRETW) but qemu uses 12 (32-bit), reading cs_d / int_gate_op16 /
+      // eff_opsize at the deciding instruction. Enable with the +ven_iretdbg
+      // plusarg; bracket the retire window with +ven_iretdbg_lo / +ven_iretdbg_hi
+      // (defaults open). Also logs every mov-cr0 PE toggle (where cs_d is NOT
+      // reloaded) so a stale cs_d crossing a real<->PM transition is visible.
+      if (ven_iretdbg_en) begin
+        // mov cr0 with a PE transition (CWSDPMI real<->PM crossing): cs_d is NOT
+        // updated here today. ALWAYS log (these are rare) so a stale cs_d crossing
+        // is visible regardless of the retire window.
+        if (state==S_EXEC && q_sysop==SYS_MOVCR_TO && q_sys_creg==3'd0 &&
+            (gpr_o[q_src_reg][0] != creg0[0])) begin
+          $display("[IRETDBG] cn=%0d MOVCR0 pe %b->%b cs_d=%b(stale) cs=%04x eip=%08x esp=%08x",
+                   cn, creg0[0], gpr_o[q_src_reg][0], cs_d, seg_sel[SG_CS], eip, gpr_o[R_ESP]);
+        end
+        // S_IRET (PM / V86) same-priv commit: int_step 2, the frame-size choice.
+        // ALWAYS log (PM IRETs are comparatively rare vs the RMIRET timer storm).
+        if (state==S_IRET && mem_ack && int_step==4'd2) begin
+          $display("[IRETDBG] cn=%0d S_IRET cs=%04x eip=%08x cs_d=%b op16=%b eff_opsize=%b real=%b pe=%b esp_before=%08x delta=%0d csbase=%08x",
+                   cn, seg_sel[SG_CS], eip, cs_d, int_gate_op16, eff_opsize,
+                   real_mode, creg0[0], gpr_o[R_ESP],
+                   (int_gate_op16 ? 6 : 12), seg_base[SG_CS]);
+        end
+        // S_RMIRET (pure real-mode) commit: int_step 2, always +6. Windowed
+        // (the timer-IRQ storm floods this) by ven_iretdbg_lo/hi.
+        if (state==S_RMIRET && mem_ack && int_step==4'd2 &&
+            cn >= ven_iretdbg_lo && cn <= ven_iretdbg_hi) begin
+          $display("[IRETDBG] cn=%0d S_RMIRET cs=%04x ip=%04x cs_d=%b real=%b pe=%b esp_before=%08x delta=6 csbase=%08x",
+                   cn, iret_cs, iret_eip[15:0], cs_d, real_mode, creg0[0],
+                   gpr_o[R_ESP], seg_base[SG_CS]);
+        end
+      end
+      // task #102 micro-TLB data-store translate forensic (inert by default).
+      // Fires on every clock a translatable D access whose LINEAR page OR whose
+      // (registered/translated) PHYSICAL page matches the watch — so a store that
+      // drives the WRONG physical (linear==watch but mem_addr!=watch, or vice
+      // versa) is caught. Also logs mem_wdata so the actual stored value is seen.
+      if (ven_tlbdbg_en && paging_on && cur_is_d && mem_req &&
+          cn >= ven_tlbdbg_lo && cn <= ven_tlbdbg_hi &&
+          ((cur_lin[31:12]  == ven_tlbdbg_lin[31:12]) ||
+           (mem_addr[31:12] == ven_tlbdbg_lin[31:12]) ||
+           (ven_tlbdbg_cpl3w && cur_is_w && (seg_sel[SG_CS][1:0] == 2'b11)))) begin
+`ifdef VEN_FE_PIPE
+        $display("[TLBDBG] cn=%0d st=%0d cs=%04x eip=%08x cur_lin=%08x is_w=%b mem_req=%b mem_we=%b mem_addr=%08x wdata=%08x | fe_v=%b fe_page=%05x fe_phys=%05x fe_hit=%b fe_dirty=%b | xlate_miss=%b fe_pend=%b walk_step=%0d lk_hit=%b lk_phys=%08x lk_dirty=%b",
+                 cn, state, seg_sel[SG_CS], eip, cur_lin, cur_is_w,
+                 mem_req, mem_we, mem_addr, mem_wdata,
+                 fe_dtlb_v, fe_dtlb_page, fe_dtlb_phys, fe_dtlb_hit, fe_dtlb_dirty,
+                 xlate_miss, fe_xlate_pend, walk_step, dtlb_lk_hit, dtlb_lk_phys, dtlb_lk_dirty);
+`endif
+      end
+`ifdef VEN_FE_PIPE
+      // task #102 MISTRANSLATE assertion: a translatable D access PROCEEDS this
+      // clock (mem_req, not diverted/stalled) but the registered micro-TLB physical
+      // (driven onto mem_addr) DISAGREES with the fresh combinational lookup at the
+      // SAME cur_lin -> a wrong-physical event (the data-store-under-paging class).
+      // Inert unless +ven_tlbdbg; reusable to catch any future regression of this
+      // exact failure mode (the mem_xlate page-match guard makes it unreachable).
+      if (ven_tlbdbg_en && paging_on && fe_translatable && cur_is_d && mem_req &&
+          !xlate_miss && !fe_xlate_pend && dtlb_lk_hit &&
+          (mem_addr[31:12] != dtlb_lk_phys[31:12]) &&
+          cn >= ven_tlbdbg_lo && cn <= ven_tlbdbg_hi) begin
+        $display("[TLBMISXLAT] cn=%0d st=%0d cs=%04x eip=%08x cur_lin=%08x is_w=%b mem_addr=%08x(BAD) lk_phys=%08x(GOOD) | fe_v=%b fe_page=%05x fe_phys=%05x fe_hit=%b",
+                 cn, state, seg_sel[SG_CS], eip, cur_lin, cur_is_w,
+                 mem_addr, dtlb_lk_phys, fe_dtlb_v, fe_dtlb_page, fe_dtlb_phys, fe_dtlb_hit);
+      end
+`endif
 `endif
 
       retire_valid <= 1'b0;
@@ -3141,7 +3298,22 @@ module core
         // + advance EIP (mirrors the S_TRSC_BUSY HW-engine path).
         S_FPTRAP_WAIT: begin
           if (fptrap_resp_valid) begin
-            eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+`ifdef VEN_FP_PS_ALL
+            // FP_PS_ALL store-after-trap: a narrowing-store op (FST m32/m64, FIST,
+            // FBSTP) waited here for the A53 to convert ST0 to the destination width.
+            // The PS returns the packed bytes in fptrap_result (low 80b) + the status
+            // word in fptrap_res_fstat. Latch both and run the memory write (S_FSTORE);
+            // fstore_val draws f_trap_store_q so no conversion sits on the PL store path.
+            if (f_ps_store_trap) begin
+              f_trap_store_q <= fptrap_result;
+              // the PS-computed status word is committed to fstat this same clock by
+              // the generalized trap-commit in fpu_writeback (fp_we_fstat <= res_fstat).
+              state<=S_FSTORE; f_step<=4'd0;
+            end else
+`endif
+            begin
+              eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1; state<=S_PIPE;
+            end
           end
         end
 `endif
@@ -3293,7 +3465,20 @@ module core
     r32 = 35'd0; r64 = 67'd0; ri = 66'd0;
     fstore_val = 80'd0; fstore_pe = 1'b0; fstore_ie = 1'b0;
     fstore_oe = 1'b0; fstore_ue = 1'b0;
+`ifdef VEN_FP_PS_ALL
+    // FP_PS_ALL: the narrowing-store conversion runs on the A53 (store-after-trap).
+    // fstore_val draws the converted bytes straight from the registered PS result
+    // (f_trap_store_q), so the deep fx_to_f32/f64/int/bcd cones are NOT instantiated
+    // on the PL store path. The exact-image stores (m80 / CW / SW m16) plus FNSTSW_AX
+    // stay in PL (no conversion), handled in the case below. Sticky-flag bits are
+    // carried by the latched status word (fp_we_fstat driven at the trap-store commit),
+    // so fstore_pe/ie/oe/ue stay 0 here.
+    if (f_ps_store_trap) begin
+      fstore_val = f_trap_store_q;
+    end else
+`endif
     unique case (q_fxop)
+`ifndef VEN_FP_PS_ALL
       FX_FST_M32: begin
         r32 = fx_to_f32_ex(s0, fctrl[11:10]);
         fstore_val = {48'd0, r32[31:0]};
@@ -3304,10 +3489,12 @@ module core
         fstore_val = {16'd0, r64[63:0]};
         fstore_pe = r64[64]; fstore_ue = r64[65]; fstore_oe = r64[66];
       end
+`endif
       FX_FST_M80:  fstore_val = s0;
       // M10 FBSTP: round ST0 to int (per RC), pack 18-digit BCD + sign byte.
       // {ie,pe,bcd} -> IE on BCD-range overflow (indefinite image), PE on an
       // inexact round-to-int (oracle-confirmed: FBSTP of 2.5 sets PE).
+`ifndef VEN_FP_PS_ALL
       FX_FBSTP: begin
 `ifdef VEN_BCD_ITER
         // iterative engine result, latched in S_BCD_BUSY (see ven_bcd).
@@ -3318,6 +3505,7 @@ module core
         fstore_val = rb[79:0]; fstore_pe = rb[80]; fstore_ie = rb[81];
 `endif
       end
+`endif
       // M6 Erratum 20: FIST[P] m16int/m32int (NOT m64) miss the overflow on
       // the documented positive operands in nearest/up rounding -> store ZERO,
       // no IE. fx_to_int_errata reproduces that when errata_en[ERR_FIST] is set;
@@ -3325,6 +3513,7 @@ module core
       // three widths are kept as SEPARATE constant-width calls on purpose: the
       // constant `width` lets synth constant-fold each conversion's range-check
       // (a runtime-width merge measured +8.8K LUT, defeating that folding).
+`ifndef VEN_FP_PS_ALL
       FX_FIST_M16: begin
         ri = errata_en[ERR_FIST] ? fx_to_int_errata(s0, 16, fctrl[11:10])
                                  : fx_to_int_ex     (s0, 16, fctrl[11:10]);
@@ -3339,6 +3528,7 @@ module core
         ri = fx_to_int_ex(s0, 64, fctrl[11:10]);
         fstore_val = {16'd0, ri[63:0]}; fstore_pe = ri[64]; fstore_ie = ri[65];
       end
+`endif
       FX_FNSTCW:   fstore_val = {64'd0, fctrl};
       FX_FNSTSW_M: fstore_val = {64'd0, (fstat & ~16'h3800) | ({13'd0,ftop}<<11)};
       default:     fstore_val = 80'd0;
@@ -3493,12 +3683,19 @@ module core
   function automatic logic [31:0] mem_xlate(input logic [31:0] lin, input logic is_d);
     begin
 `ifdef VEN_FE_PIPE
-      // FE_PIPE: physical = {registered page-frame, this access's page offset}. Only
-      // reached when !fe_xlate_pend (the bus driver squashes during the stall), so the
-      // registered page matches lin[31:12] and fe_*_q is valid.
+      // FE_PIPE: physical = {registered page-frame, this access's page offset}. The
+      // bus driver squashes during fe_xlate_pend, so this is only reached when the
+      // registered page is valid + matches lin's page. Guard the registered-frame
+      // use EXPLICITLY on (fe_*_v && fe_*_page==lin[31:12]) so a stale/mismatched
+      // micro-TLB entry can NEVER drive a wrong physical (defense-in-depth pairing
+      // with the fe_translatable re-registration gate): the lk_lin lookup is at
+      // cur_lin==lin, so a guarded miss here passes the LINEAR through unchanged and
+      // the FSM (xlate_miss) diverts to S_WALK to fill the right entry.
       if (!paging_on)                  mem_xlate = lin;
-      else if (is_d  &&  fe_dtlb_hit)   mem_xlate = {fe_dtlb_phys, lin[11:0]};
-      else if (!is_d &&  fe_itlb_hit)   mem_xlate = {fe_itlb_phys, lin[11:0]};
+      else if (is_d  && fe_dtlb_hit && fe_dtlb_v &&
+               (fe_dtlb_page == lin[31:12]))  mem_xlate = {fe_dtlb_phys, lin[11:0]};
+      else if (!is_d && fe_itlb_hit && fe_itlb_v &&
+               (fe_itlb_page == lin[31:12]))  mem_xlate = {fe_itlb_phys, lin[11:0]};
       else                              mem_xlate = lin;   // miss: value unused
 `else
       if (!paging_on)                  mem_xlate = lin;
@@ -3633,16 +3830,26 @@ module core
     end else begin
       if (tlb_flush) begin fe_itlb_v <= 1'b0; fe_dtlb_v <= 1'b0; end
       else begin
+        // Re-register ONLY from a genuine translatable access this clock
+        // (fe_translatable): in a non-translatable state (a task-switch TSS save
+        // S_TSW_SAVE, S_LTR/S_INT_TSS, or an idle default) cur_lin is 0 / not the
+        // access linear while cur_is_d still defaults to 1, so the OLD code
+        // registered fe_*_page=0 with fe_*_phys = the lookup at cur_lin=0 — i.e.
+        // the D-TLB INDEX-0 entry's frame (page 0x30 maps to index 0 too). That
+        // produced an INCONSISTENT cached entry (page=0, phys=0x30) that then
+        // mis-translated a later page-0 (or the colliding-page) access, dropping
+        // the CWSDPMI dispatcher's vector store -> the bogus #DE. Gating on
+        // fe_translatable keeps the registered translate keyed to a real access.
         // I-side
         if (tlb_fill_en && !tlb_fill_is_d) fe_itlb_v <= 1'b0;
-        else if (paging_on && !cur_is_d &&
+        else if (paging_on && fe_translatable && !cur_is_d &&
                  (!fe_itlb_v || (fe_itlb_page != cur_lin[31:12]))) begin
           fe_itlb_page <= cur_lin[31:12]; fe_itlb_phys <= itlb_lk_phys[31:12];
           fe_itlb_hit  <= itlb_lk_hit;    fe_itlb_v    <= 1'b1;
         end
         // D-side
         if (tlb_fill_en && tlb_fill_is_d) fe_dtlb_v <= 1'b0;
-        else if (paging_on && cur_is_d &&
+        else if (paging_on && fe_translatable && cur_is_d &&
                  (!fe_dtlb_v || (fe_dtlb_page != cur_lin[31:12]))) begin
           fe_dtlb_page  <= cur_lin[31:12]; fe_dtlb_phys  <= dtlb_lk_phys[31:12];
           fe_dtlb_hit   <= dtlb_lk_hit;    fe_dtlb_dirty <= dtlb_lk_dirty;
@@ -3952,6 +4159,9 @@ module core
     endcase
     // S_PIPE only reads memory when a load or an icache fill is requested.
     if (state==S_PIPE && !(pipe_load_req || pf_miss)) translatable = 1'b0;
+    // Export the final predicate to module scope for the FE_PIPE micro-TLB
+    // re-registration gate (below). Identical value to the local `translatable`.
+    fe_translatable = translatable;
     // A data access misses if the D-TLB lacks the page OR (for a WRITE) the page
     // is TLB-resident but its Dirty bit has not yet been set in memory — that
     // first write must re-walk to set D (matching qemu's set-D-on-first-write).
@@ -4439,6 +4649,12 @@ module core
 `ifdef VEN_FPTRAP
     .fptrap_resp_valid(fptrap_resp_valid),
     .fptrap_result    (fptrap_result),
+`ifdef VEN_FP_PS_ALL
+    .fptrap_res1      (fptrap_res1),
+    .fptrap_res_fstat (fptrap_res_fstat),
+    .fptrap_action    (fptrap_action),
+    .fptrap_sti       (q_f_sti),
+`endif
 `endif
     // ---- outputs ----
     .fp_we_push       (fp_we_push),
@@ -4694,6 +4910,38 @@ module core
   logic        eng_bcd_start, eng_bcd_busy, eng_bcd_done;
   logic [81:0] eng_bcd_result;
   logic [81:0] fbcd_result_q;       // latched {ie,pe,bcd} store value
+`ifdef VEN_FP_PS_ALL
+  // FP_PS_ALL store-after-trap: the floatx80->m32/m64/int/BCD narrowing CONVERSION
+  // (fx_to_f32_ex / fx_to_f64_ex / fx_to_int_ex / fx_fx_to_bcd) is a deep combinational
+  // cone that, with the rest of the x87 compute logic gated out, became the lone long
+  // pole (fpr_reg -> dc_line_reg, ~356 logic levels of un-shared mantissa normalize/
+  // round). Under FP_PS_ALL we PS-TRAP these narrowing stores too: the A53 computes the
+  // converted bytes (SoftFloat extF80) and writes them back in fptrap_result (low bits)
+  // + the status word in fptrap_res_fstat. The core latches them here and drives the
+  // S_FSTORE bus from the REGISTER, so the conversion never sits on the PL store path.
+  logic [79:0] f_trap_store_q;      // latched PS-converted store bytes (m32/m64/int/BCD)
+  // is the in-flight x87 op a PS-trapped NARROWING STORE (vs a compute op that retires)?
+  // keyed off q_fxop (registered from decode, stable across S_FPTRAP_WAIT). FST m80 /
+  // FNSTCW / FNSTSW m16 are EXACT (no conversion) -> stay in PL, NOT trapped.
+  wire f_ps_store_trap = (q_fxop==FX_FST_M32)  || (q_fxop==FX_FST_M64)  ||
+                         (q_fxop==FX_FIST_M16) || (q_fxop==FX_FIST_M32) ||
+                         (q_fxop==FX_FIST_M64) || (q_fxop==FX_FBSTP);
+  // FP_PS_ALL load-after-trap: the m32/m64/int -> floatx80 WIDENING conversion
+  // (f_mem_as_float / f_mem_as_int -> fx_from_f32/f64/int) was the next worst SETUP
+  // cone once the stores were trapped (f_mem80_reg -> u_fpu_state/fpr_reg, ~74 logic
+  // levels). PS-TRAP these loads too: the A53 converts f_mem80 (exported as fptrap_mem)
+  // to extF80 and returns it in fptrap_result; the generalized trap-commit pushes it
+  // (action A_PUSH). FLD m80 is EXACT (no conversion) -> stays in PL, NOT trapped.
+  // FLDCONST (ROM const) and FLD ST(i) (reg copy) are likewise not memory-widening.
+  // FBLD (packed-BCD m80 -> floatx80) is ALSO a widening load. Under FP_PS_ALL the build
+  // STRIPS VEN_BCD_ITER (impl_kv260_soc.tcl), so FBLD would fall back to the COMBINATIONAL
+  // fx_bcd_to_fx (the 18-chained-*10 BCD->float cone — ~69 logic levels / 39 CARRY8,
+  // f_mem80_reg -> u_fpu_state/fpr_reg) which post-route is the WORST setup pole, starving
+  // hold-fix. Trap it too: the PS converts the packed BCD to extF80 (action A_PUSH).
+  wire f_ps_load_trap  = (q_fxop==FX_FLD_M32)  || (q_fxop==FX_FLD_M64)  ||
+                         (q_fxop==FX_FILD_M16) || (q_fxop==FX_FILD_M32) ||
+                         (q_fxop==FX_FILD_M64) || (q_fxop==FX_FBLD);
+`endif
   // FBLD (packed-BCD m80 -> floatx80): the 18-chained-*10 fx_bcd_to_fx was the
   // core's worst LOGIC path once the FP arith was pipelined. Run the iterative
   // engine (started in S_FEXEC), wait in S_FBLD_BUSY, then push the result + retire.

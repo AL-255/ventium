@@ -1,0 +1,33 @@
+{
+  "name": "psocpmretf",
+  "kind": "system",
+  "src": "psocpmretf.S",
+  "linker": "psocpmretf.ld",
+  "image": "psocpmretf.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 120,
+  "sys": true,
+  "paging": false,
+  "soc": true,
+  "cpu": "pentium",
+  "gate_shape": "per-record-differential",
+  "gate_script": "verif/soc/run-soc-pmretf-gate.sh",
+  "what_this_is": "PROTECTED-mode far CALL (0x9A) + far RETF (0xCB) boot-ISA gap -- the PM counterpart of psocfarcall (which covers the real-mode forms). This is the directed gate for the DOS-Quake DPMI-dispatch blocker: after the PM pop-sreg fix, CWSDPMI's INT 0x31 dispatch far-RETURNS in protected mode (cs=0x2b, a 16-bit ring-3 code segment, paging on) and the PM far RETF previously HALTed loudly (S_HALT) -- SYS_RETF only routed real mode (seg_real && !paging_on) to S_RETF, so every PM far RETF fell to S_HALT. Verified against the live qemu-system-i386 -cpu pentium oracle per-record.",
+  "transitions": [
+    "reset (CS:EIP=F000:FFF0) -> 16-bit real mode (CLI/CLD, segments=0, sp=0x7000)",
+    "real->protected: load a flat GDT (null/code32 @0x08/data32 @0x10), set CR0.PE, far-jump 0x08:pm32_entry (32-bit PM)",
+    "PM far CALL 0x08:far_routine (9A off32 sel16): push CS(=0x08):EIP(=ret_site=0xf008b), S_LCALL -> S_LJMP walks the 0x08 GDT descriptor to load CS, jump into far_routine (0xf009d)",
+    "far_routine writes ECX=0x22222222, PM far RETF (0xCB): pop EIP then CS, S_RETF -> S_LJMP re-walks the popped 0x08 GDT descriptor, loads CS, returns to ret_site",
+    "ret_site writes EBX=0x11111111, isa-debug-exit (out 0xf4, al=0x42 -> status 133)"
+  ],
+  "implementation": "decode 0xCB -> SYS_RETF (core.sv). The routing in core_fetch_decode.svh now mirrors SYS_LCALL: ((seg_real && !paging_on) || !seg_real) -> S_RETF, else (V86+paging) HALT. In S_RETF (core_seg_ljmp.svh) the PM path (!seg_real) latches the popped {CS, EIP} into the far-target regs (q_ljmp_sel/q_ljmp_off) on beat 1 and hands off to S_LJMP, which reads the target CS descriptor from the GDT/LDT, loads CS base/limit/attr/CPL/D, sets EIP=q_ljmp_off and retires (incl. seg_load_fault delivery) -- the identical CS-load path the PM far JMP/CALL already use. The ESP += 2w + imm bump still fires in the gpr-wb S_RETF arm at the same beat-1 ack.",
+  "why_per_record_differential": "PM far CALL and RETF are synchronous, deterministic control transfers (no IRQ, no async I/O), so the gen_trace.py --system single-step golden is a valid per-record oracle. compare.py --mode func checks CS/EIP/ESP + the pushed stack at each step, diffing the push (CS:EIP) and the pop directly vs qemu over all 34 retired instructions.",
+  "non_vacuous": "The gate asserts BOTH traces REACH the PM far-called routine (pc=0xf009d, the far CALL landed) AND RETURN to the call site (pc=0xf008b, the far RETF popped back). A silent HALT (the pre-fix behaviour) reaches neither.",
+  "zero_new_rtl_note": "The user-mode corpus never executes a protected-mode far RETF and is not seg_real-PM, so make verify stays byte-identical (98/98 GREEN). V86+paging far RETF remains out of scope -> HALT loudly (never mis-executes).",
+  "description": "Bare-metal protected-mode far CALL/RETF differential. A -bios firmware enters PM, far-CALLs a routine via the 0x08 selector and the routine far-RETFs back; proves the newly-routed PM far RETF (pop CS:EIP + GDT descriptor CS load) is byte-identical to qemu-system-i386 -cpu pentium over all 34 retired instructions, per-record, with non-vacuous call-landed + returned assertions on both traces. This is the DOS-Quake DPMI-dispatch S_HALT fix."
+}

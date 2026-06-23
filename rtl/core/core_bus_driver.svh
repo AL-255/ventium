@@ -206,7 +206,8 @@
         mem_addr = (int_gate_sel[2]?ldt_base:gdt_base) + {16'd0, int_gate_sel[15:3], 3'd0}
                    + {29'd0, int_step[0], 2'b00};
       end
-      S_INT_PUSH: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
+      S_INT_PUSH: begin mem_req=1'b1; mem_we=1'b1;
+        mem_wstrb = (!from_v86 && !xpl_active && int_gate_op16) ? 4'b0011 : 4'b1111;
         if (from_v86) begin
           // M7.2 V86: push the 9-WORD V86 frame (+errcode) descending from the NEW
           // (TSS.SS0) stack. seg_base[SG_SS] is the CPL0 SS base loaded in S_INT_SS.
@@ -244,9 +245,25 @@
             4'd4:    mem_wdata = int_ret_eip;
             default: mem_wdata = int_err;
           endcase
+        end else if (int_gate_op16) begin
+          // SAME-PRIV 16-BIT GATE (mirrors the real-mode S_RMINT_PUSH 6-byte frame):
+          // beat 0 FLAGS @ ESP-2, 1 CS @ ESP-4, 2 IP @ ESP-6 (2-byte slots). The
+          // memmodel applies wstrb byte i to byte addr+i (memmodel.cpp:96-99), so a
+          // wstrb=4'b0011 low-half write lands the 16-bit value at [addr..addr+1]
+          // regardless of dword alignment — no byte-lane shift needed, exactly like
+          // S_RMINT_PUSH. (errcode is impossible on a same-priv 16-bit software/HW
+          // delivery in this corpus, but mirror the low-half default anyway.)
+          mem_addr = seg_base[SG_SS]
+                     + (gpr_o[R_ESP] - {27'd0, (int_step + 4'd1), 1'b0});
+          unique case (int_step)
+            4'd0:    mem_wdata = {16'd0, eflags[15:0]};
+            4'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
+            4'd2:    mem_wdata = {16'd0, int_ret_eip[15:0]};
+            default: mem_wdata = {16'd0, int_err[15:0]};
+          endcase
         end else begin
-          // SAME-PRIV: beat 0 EFLAGS @ ESP-4, 1 CS @ ESP-8, 2 EIP @ ESP-12,
-          // 3 errcode @ ESP-16. The push uses the SS base (flat 0 here).
+          // SAME-PRIV 32-BIT GATE: beat 0 EFLAGS @ ESP-4, 1 CS @ ESP-8, 2 EIP @
+          // ESP-12, 3 errcode @ ESP-16. The push uses the SS base (flat 0 here).
           mem_addr = seg_base[SG_SS] + gpr_o[R_ESP]
                      - ({28'd0, int_step} * 32'd4) - 32'd4;
           unique case (int_step)
@@ -258,7 +275,15 @@
         end
       end
       S_IRET, S_IRET_SS: begin mem_req=1'b1;     // pop EIP/CS/EFLAGS[+ESP/SS] asc
-        mem_addr = seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4);
+        // 16-bit IRETW (same-priv only): ascending 2-byte pop IP @SP, CS @SP+2,
+        // FLAGS @SP+4 (mirrors S_RMIRET). The memmodel returns a 32-bit dword at the
+        // byte address (read32 @ addr), so the low 16 bits carry the popped word; the
+        // S_IRET arm masks to [15:0] for IP/CS and merges FLAGS' high half. Inter-priv
+        // / V86 IRET is never 16-bit in this corpus, so S_IRET_SS keeps the *4 stride.
+        if (int_gate_op16 && state == S_IRET)
+          mem_addr = seg_base[SG_SS] + gpr_o[R_ESP] + ({27'd0, int_step, 1'b0});
+        else
+          mem_addr = seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4);
       end
       S_INT_CS_RET: begin mem_req=1'b1;          // reload returned-to CS descriptor (TI: GDT/LDT)
         mem_addr = (int_gate_sel[2]?ldt_base:gdt_base) + {16'd0, int_gate_sel[15:3], 3'd0}

@@ -149,10 +149,30 @@
                   // POP m: stack value (mem_load_data) -> memory dest; ESP += w.
                   do_store=1'b1; do_retire=1'b0;
                 end else if (q_is_pop && q_pop_sreg) begin
-                  // F3 POP sreg (07/17/1F): load the selector from the stack and, in
-                  // real/v86, recompute base = sel<<4 (the firmware path). ESP += w.
-                  seg_sel [q_sys_sreg] <= mem_load_data[15:0];
-                  seg_base[q_sys_sreg] <= {12'd0, mem_load_data[15:0], 4'd0};
+                  // F3 POP sreg (07/17/1F = ES/SS/DS). The selector comes off the
+                  // stack (mem_load_data). ESP += w happens in the gpr writeback
+                  // driver regardless of the branch taken below.
+                  //   REAL/V86 (seg_real): hidden base = sel<<4, no GDT consulted.
+                  //   PROTECTED  (!seg_real): the popped value is a PM SELECTOR — it
+                  //     must be walked through the GDT/LDT exactly like MOV Sreg,r/m
+                  //     (the S_SEGLD path). Computing base=sel<<4 in PM was the
+                  //     DOS-Quake (task #102) bug: CWSDPMI's reflector does `pop ds`
+                  //     (ds=0x33, GDT[6] base 0x2b570) and the sel<<4 shortcut stored
+                  //     base 0x330 -> the dispatch vector landed at the wrong linear
+                  //     and the CPL0 read-back saw 0 ("Division by Zero" abort).
+                  if (seg_real) begin
+                    seg_sel [q_sys_sreg] <= mem_load_data[15:0];
+                    seg_base[q_sys_sreg] <= {12'd0, mem_load_data[15:0], 4'd0};
+                  end else begin
+                    // PM: latch the popped selector and walk the descriptor in
+                    // S_SEGLD (target = q_lseg). Suppress this S_EXEC retire; the
+                    // ESP increment still commits this cycle (gpr writeback driver).
+                    seg_mem_sel    <= mem_load_data[15:0];
+                    q_lseg         <= q_sys_sreg;
+                    q_seg_from_mem <= 1'b1;
+                    do_retire       = 1'b0;
+                    state          <= S_SEGLD;
+                  end
                 end else if (q_is_pop) begin
                 end else if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
                 else if (q_writes_reg) begin end
@@ -598,12 +618,45 @@
                     fl[2]=gpr_o[R_EAX][10]; fl[0]=gpr_o[R_EAX][8]; fl[1]=1'b1; eflags<=fl; end
                   SM_PUSHF: begin do_store=1'b1; do_retire=1'b0; end
                   SM_POPF: begin
-                    // EFLAGS <- [ESP], USER-MODE mask: status flags + DF/TF/AC/
-                    // ID/NT writable; IF/IOPL/VM/RF preserved (QEMU CPL=3 popf).
-                    // writable = CF|PF|AF|ZF|SF|TF|DF|OF|NT|AC|ID = 0x244DD5.
+                    // EFLAGS <- [ESP] with the architectural MODE/CPL-aware POPF
+                    // writable mask (IA-32 SDM Vol.1 "POPF"). VM and RF are NEVER
+                    // writable by POPF (kept in `eflags & ~mask`); bit1 is forced 1.
+                    //   base  = CF|PF|AF|ZF|SF|TF|DF|OF|NT|AC|ID = 0x00244DD5
+                    //           (status flags + TF/DF/NT/AC/ID — always writable).
+                    //   + IF (0x200)  : writable unless CPL>IOPL in PM.
+                    //   + IOPL(0x3000): writable only at the highest privilege —
+                    //                   REAL MODE or PM CPL==0. (V86 NEVER loads
+                    //                   IOPL/IF the privileged way here: at IOPL<3 it
+                    //                   already #GP-trapped upstream in
+                    //                   core_fetch_decode.svh and never reaches this
+                    //                   arm; at IOPL==3 eff_cpl==3 so it takes the
+                    //                   IF-only branch — POPF leaves IOPL/VM alone.)
+                    // This is the DOS-Quake fix: CWSDPMI/go32 runs `popfd` in REAL
+                    // MODE (cs=0x2593), where POPF must load IF AND IOPL. The old
+                    // hardcoded 0x00244DD5 kept IOPL=0, diverging from qemu's IOPL=3
+                    // and tripping CWSDPMI's exception reporter (the spurious #GP).
+                    logic [31:0] popf_mask;
+                    if (real_mode || (!seg_real && eff_cpl == 2'd0))
+                      popf_mask = 32'h0024_7FD5;          // base | IF | IOPL
+                    else if (!seg_real && eff_cpl <= iopl)
+                      popf_mask = 32'h0024_4FD5;          // base | IF
+                    else if (v86 && iopl == 2'd3)
+                      popf_mask = 32'h0024_4FD5;          // V86 IOPL==3: IF only
+                    else
+                      popf_mask = 32'h0024_4DD5;          // base (CPL>IOPL): neither
+                    // task #102 (EFLAGS.ID root): a 16-bit POPF (popfw, q_w==2 — the
+                    // real-mode default with no 0x66) loads ONLY the low 16 EFLAGS
+                    // bits; EFLAGS[31:16] (ID/VM/AC/...) are UNTOUCHED (IA-32 SDM
+                    // "POPF"). The 32-bit mem_load_data carries the next stack word in
+                    // [31:16]; without restricting the mask to 16 bits that high word
+                    // leaks into bit21 (ID) — DOS-Quake's CWSDPMI/go32 switcher does a
+                    // 16-bit `popf` (cs=0070:0x366) whose [esp+2] happens to have
+                    // bit21 set, so ID got stuck set vs qemu (which masks `&= 0xffff`
+                    // for MO_16). Mirror the 16-bit IRET (core_rmint.svh) here.
+                    if (q_w == 3'd2) popf_mask = popf_mask & 32'h0000_FFFF;
                     // R3: the ESP+=w bump moved to the gpr writeback driver.
-                    eflags<=((mem_load_data & 32'h0024_4DD5) |
-                             (eflags & ~32'h0024_4DD5)) | 32'h0000_0002;
+                    eflags<=((mem_load_data & popf_mask) |
+                             (eflags & ~popf_mask)) | 32'h0000_0002;
                   end
                   // LEAVE: ESP<-EBP, then pop (E)BP. R3: both EBP/ESP writes moved to
                   // the gpr writeback driver (core_gpr_wb.svh, K_STKMISC/SM_LEAVE).

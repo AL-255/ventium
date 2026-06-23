@@ -1,0 +1,27 @@
+{
+  "name": "ppopf",
+  "kind": "system",
+  "src": "ppopf.S",
+  "linker": "ppopf.ld",
+  "image": "ppopf.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 80,
+  "sys": true,
+  "paging": false,
+  "cpu": "pentium",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)"
+  ],
+  "delivery_records": {
+    "real_popf_iopl3": "real-mode popfd loads IOPL=3 + IF (EFLAGS 0x...3202); the OLD hardcoded 'user' mask 0x00244DD5 kept IOPL=0 here -> the DOS-Quake divergence",
+    "real_popf_iopl0": "a second real-mode popfd loads IOPL=0 + IF=0 -> proves IOPL is genuinely writable in real mode (not stuck at 3)",
+    "pm_cpl0_popf": "PM CPL=0 popfd loads IOPL=2 + IF + ID, with VM held 0 (POPF never loads VM/RF)",
+    "success_proof": "all three POPF results verified by PUSHF read-back + cmp; exits isa-debug-exit status 133. A core using the always-'user' mask (IOPL/IF held at the old value) DIVERGES per-record from the qemu -cpu pentium golden AND fails the self-check (exit status 67)"
+  },
+  "description": "Bare-metal directed test for the MODE/CPL-aware POPF writable-flag mask (IA-32 SDM Vol.1 POPF). PHASE A (real mode, PE=0): a 32-bit popfd loading IOPL=3 + IF must take BOTH (the architectural real-mode rule); a second popfd loads IOPL=0/IF=0 to prove IOPL is writable, not stuck. PHASE B (protected mode, CPL=0): a popfd loads IOPL=2 + IF + ID while VM stays 0 (POPF never loads VM/RF). Every retired instruction's EFLAGS is captured in the system golden and diffed per-record vs qemu-system-i386 -cpu pentium. This is the DOS-Quake fix's regression guard: the core previously hardcoded the CPL>IOPL 'user' mask 0x00244DD5 for EVERY POPF, so a real-mode popfd (CWSDPMI/go32 at cs=0x2593) kept IOPL=0 where qemu loads IOPL=3, derailing the DPMI register frame. A core with the wrong mask diverges on the very POPFs above and the diff FAILS; with the mode/CPL-aware mask it matches exactly (and the self-check exit code is also a guard: 133 pass / 67 fail). NO paging; the only mode transition is real->protected for PHASE B."
+}

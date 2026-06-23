@@ -47,7 +47,12 @@ module regfile
       // dual boot-mode reset — VERBATIM from the original core.sv FSM arm.
       gpr[0] <= 32'd0;
       gpr[1] <= 32'd0;
-      gpr[2] <= boot_mode ? (cosim_en ? 32'h0000_0543 : 32'h0000_0663) : 32'd0;
+      // task #102: reset EDX = P5/P54C CPUID signature 0x543 for BOTH the Win95
+      // co-sim AND the SoC. The SoC previously seeded 0x663 (qemu's DEFAULT cpu,
+      // family-6), but the boot oracle is qemu-system-i386 `-cpu pentium` whose
+      // reset EDX is 0x543 — matching the corrected SoC CPUID(1) table (a P6
+      // signature made go32/CWSDPMI derail; see core_gpr_wb.svh K_CPUID).
+      gpr[2] <= boot_mode ? 32'h0000_0543 : 32'd0;
       gpr[3] <= 32'd0;
       gpr[4] <= boot_mode ? 32'd0 : init_esp;
       gpr[5] <= 32'd0;

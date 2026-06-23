@@ -665,7 +665,8 @@ def generate(qemu, elf, out_path, max_insn, port, extra_args,
 
 
 def generate_system(qemu, image, image_mode, out_path, max_insn, port,
-                    extra_args, want_x87, stop_at, want_bytes, verbose):
+                    extra_args, want_x87, stop_at, want_bytes, verbose,
+                    cpu="pentium"):
     """SYSTEM-MODE oracle: launch qemu-system-i386 under gdbstub, single-step a
     bare-metal image from the real-mode reset vector, and write a sys .vtrace.
 
@@ -686,8 +687,13 @@ def generate_system(qemu, image, image_mode, out_path, max_insn, port,
     """
     # isa-debug-exit: `out 0xf4, code` exits qemu with status (code<<1)|1.
     mem = "32"
+    # task #102: honor --cpu (was silently dropped in system mode, so the golden
+    # always used qemu's DEFAULT cpu = qemu64/family-6 sig 0x663, NOT -cpu pentium
+    # = P54C sig 0x543). That mismatch is why the SoC CPUID/reset-EDX model was
+    # built to 0x663 and DOS-Quake's go32/CWSDPMI mis-detected the CPU. With this
+    # the system golden matches the -cpu pentium oracle the gate documents.
     base = [qemu, "-display", "none", "-S", "-gdb", "tcp::%d" % port,
-            "-machine", "pc", "-m", mem,
+            "-machine", "pc", "-cpu", cpu, "-m", mem,
             "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
     if image_mode == "bios":
         base += ["-bios", image]
@@ -1799,7 +1805,7 @@ def main(argv=None):
             qemu=args.qemu, image=args.image, image_mode=args.image_mode,
             out_path=args.out, max_insn=args.max_insn, port=args.port,
             extra_args=args.args, want_x87=args.x87, stop_at=stop_at,
-            want_bytes=(not args.no_bytes), verbose=args.verbose)
+            want_bytes=(not args.no_bytes), verbose=args.verbose, cpu=args.cpu)
     else:
         if not args.elf:
             p.error("user-mode requires --elf (or pass --system --image)")

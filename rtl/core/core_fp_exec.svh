@@ -83,7 +83,34 @@
             end else
 `endif
             if (f_do_retire) begin
-`ifdef VEN_FPTRAP
+`ifdef VEN_FP_PS_ALL
+              // FP_PS_ALL: the ENTIRE x87 compute datapath is gated out of the PL; every
+              // x87 COMPUTE op (arith / sqrt / compares / classify / rndint / scale /
+              // transcendental / fprem) traps to the PS, which computes with SoftFloat
+              // extF80 and writes back the generalized result vector. Data-movement ops
+              // (FXCH/FLDCONST/FFREE/FINCSTP/FNINIT/...) stay in PL and commit here as
+              // usual. The WIDENING LOADS (FLD m32/m64, FILD m16/m32/m64) ALSO trap so
+              // their f_mem80->floatx80 conversion cone (the 74-level FP-load setup pole)
+              // leaves the PL; the PS returns the assembled extF80 (action A_PUSH). FLD
+              // m80 / FLDCONST / FLD ST(i) need no conversion and stay in PL.
+              if (f_ps_load_trap) begin
+                state<=S_FPTRAP_WAIT;
+              end else
+              if (q_fxop==FX_AR_ST0_STI || q_fxop==FX_AR_STI_ST0 ||
+                  q_fxop==FX_AR_M32     || q_fxop==FX_AR_M64     ||
+                  q_fxop==FX_AR_I16     || q_fxop==FX_AR_I32     ||
+                  q_fxop==FX_FSQRT      || q_fxop==FX_FRNDINT    || q_fxop==FX_FSCALE ||
+                  q_fxop==FX_FCOM_STI   || q_fxop==FX_FCOM_M32   || q_fxop==FX_FCOM_M64 ||
+                  q_fxop==FX_FUCOM_STI  || q_fxop==FX_FCOMPP     || q_fxop==FX_FUCOMPP ||
+                  q_fxop==FX_FTST       || q_fxop==FX_FXAM       ||
+                  q_fxop==FX_FICOM_M16  || q_fxop==FX_FICOM_M32  ||
+                  q_fxop==FX_FPATAN     || q_fxop==FX_F2XM1      || q_fxop==FX_FYL2X ||
+                  q_fxop==FX_FYL2XP1    || q_fxop==FX_FSIN       || q_fxop==FX_FCOS ||
+                  q_fxop==FX_FSINCOS    || q_fxop==FX_FPTAN      ||
+                  q_fxop==FX_FPREM      || q_fxop==FX_FPREM1) begin
+                state<=S_FPTRAP_WAIT;
+              end else begin
+`elsif VEN_FPTRAP
               // FPATAN (no HW engine): trap to the PS — stall in S_FPTRAP_WAIT exposing
               // ST0/ST1; commit ST1<-atan2 result + pop when the PS answers.
               if (q_fxop==FX_FPATAN) begin
@@ -143,7 +170,14 @@
               end
 `endif
             end else begin
-`ifdef VEN_BCD_ITER
+`ifdef VEN_FP_PS_ALL
+              // FP_PS_ALL: the NARROWING stores (m32/m64/int/BCD) PS-trap so their
+              // deep conversion cone is computed on the A53 (store-after-trap). Exact-
+              // image stores (FST m80 / FNSTCW / FNSTSW m16) need no conversion and go
+              // straight to S_FSTORE in PL.
+              if (f_ps_store_trap) state<=S_FPTRAP_WAIT;
+              else begin state<=S_FSTORE; f_step<=4'd0; end
+`elsif VEN_BCD_ITER
               // FBSTP: run the iterative FP->BCD engine first (S_BCD_BUSY) so the
               // 18-chained-/10 conversion is multi-cycle, then store.
               if (q_fxop==FX_FBSTP) state<=S_BCD_BUSY;

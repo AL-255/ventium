@@ -207,12 +207,14 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pmode
 	bash verif/sys/run-sys-golden.sh ppage
 	bash verif/sys/run-sys-golden.sh pintr
+	bash verif/sys/run-sys-golden.sh pintr16
 	bash verif/sys/run-sys-golden.sh pfault
 	bash verif/sys/run-sys-golden.sh pde
 	bash verif/sys/run-sys-golden.sh pcpl
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh psmm
 	bash verif/sys/run-sys-golden.sh pdebug
+	bash verif/sys/run-sys-golden.sh ppopf
 	PORT=53220 bash verif/sys/run-sys-golden.sh pv86
 
 # M8 SoC regression aggregate — run every ventium_soc differential gate

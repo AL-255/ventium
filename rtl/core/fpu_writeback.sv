@@ -144,6 +144,12 @@ module fpu_writeback
 `ifdef VEN_FPTRAP
     input  logic        fptrap_resp_valid,
     input  logic [79:0] fptrap_result,
+`ifdef VEN_FP_PS_ALL
+    input  logic [79:0] fptrap_res1,         // secondary result (FSINCOS cos / FPTAN 1.0)
+    input  logic [15:0] fptrap_res_fstat,    // PS-computed status word
+    input  logic [3:0]  fptrap_action,       // generalized stack-commit action
+    input  logic [2:0]  fptrap_sti,          // q_f_sti for A_STI / A_STI_POP
+`endif
 `endif
 
     // ===== OUTPUTS (drive the fpu_top write ports + the iterative engines) ==
@@ -367,7 +373,12 @@ module fpu_writeback
     fp_fast_commit = fp_fp_arm &&
                      !(!fp_occ_pending && ($signed(fp_dep_ready - core_cyc) > 0)) &&
                      !(!fp_occ_pending && (u_d.fp_occ > 7'd1));
-`ifdef VEN_FP_PIPE
+`ifdef VEN_FP_PS_ALL
+    // FP_PS_ALL: ALL x87 compute is PS-trapped. The cycle-mode fast-arm arith never
+    // commits here (its op routes to S_FPTRAP_WAIT), so drop the live f_eval cone so
+    // synthesis prunes the fpu_x87_pkg add/mul/div datapath (the whole area win).
+    fp_arf = 83'd0;
+`elsif VEN_FP_PIPE
     // Fast-arm arith is DEFERRED: the live-operand f_eval is removed from the
     // issue cone (that is the whole point — the eip->icache->decode->f_eval->fpr
     // path is what we are splitting). The result is computed one clock later from
@@ -514,7 +525,11 @@ module fpu_writeback
       FX_AR_I16, FX_AR_I32: begin s_fa = s_st0v; s_fb = f_mem_as_int(f_mem80, q_f_mbytes); end
       default:              begin s_fa = s_st0v; s_fb = s_stiv; end  // FX_AR_ST0_STI + non-arith
     endcase
-`ifdef VEN_FP_PIPE
+`ifdef VEN_FP_PS_ALL
+    // FP_PS_ALL: the slow-arm arith fxops route to S_FPTRAP_WAIT (PS computes), so
+    // this f_eval never feeds a commit. Drop it so the add/mul/div cone is pruned.
+    s_arf = 83'd0;
+`elsif VEN_FP_PIPE
     // Slow-arm arith is SPLIT: S_FEXEC captures s_fa/s_fb into fpp_*, then
     // S_FEXEC_EX computes f_eval (from the registered operands) and commits via
     // we_wabs IN THE SAME CLOCK AS THE RETIRE (so the per-retire arch check is
@@ -538,9 +553,17 @@ module fpu_writeback
       FX_FICOM_M16, FX_FICOM_M32:begin s_cmp_b = f_mem_as_int(f_mem80, q_f_mbytes); s_cmp_sig = 1'b1; end
       default:                   begin s_cmp_b = s_stiv;    s_cmp_sig = 1'b1; end
     endcase
+`ifdef VEN_FP_PS_ALL
+    // FP_PS_ALL: compares (FCOM/FUCOM/FCOMPP/FTST/FICOM) PS-trap; the PS computes the
+    // condition-code status word. Drop the compare cone so it is pruned from synth.
+    s_codes     = 3'd0;
+    s_cmp_ie    = 1'b0;
+    s_cmp_fstat = fstat;
+`else
     s_codes     = fcom_codes(s_st0v, s_cmp_b);
     s_cmp_ie    = fcom_ie(s_st0v, s_cmp_b, s_cmp_sig);
     s_cmp_fstat = apply_cmp(fstat, s_codes, s_cmp_ie);
+`endif
 `ifdef VEN_SRT_ITER
     // ----- iterative SRT FDIV/FSQRT eligibility + engine inputs -------------
     // Route NORMAL-operand divides and +normal sqrt through the multi-cycle
@@ -594,18 +617,35 @@ module fpu_writeback
     if (slow_arm) begin
       unique case (q_fxop)
         // ---- loads (push) ----
+`ifdef VEN_FP_PS_ALL
+        // FP_PS_ALL: the WIDENING loads (FLD m32/m64, FILD m16/m32/m64) PS-trap — the
+        // f_mem80->floatx80 conversion runs on the A53 and the push happens at the
+        // generalized trap-commit (action A_PUSH), so DROP the combinational widening
+        // cone here (f_mem_as_float/_int -> fpr was the 74-level FP-load setup pole).
+        // FLD m80 is EXACT (verbatim f_mem80) and stays in PL.
+        FX_FLD_M32, FX_FLD_M64, FX_FLD_M80: begin
+          if (q_fxop==FX_FLD_M80) begin fp_we_push=1'b1; fp_push_data=f_mem80; end
+        end
+        FX_FILD_M16, FX_FILD_M32, FX_FILD_M64: begin /* PS-trapped (A_PUSH) */ end
+`else
         FX_FLD_M32, FX_FLD_M64, FX_FLD_M80: begin
           fp_we_push=1'b1; fp_push_data=(q_fxop==FX_FLD_M80) ? f_mem80 : s_opnd_f;
         end
         FX_FILD_M16, FX_FILD_M32, FX_FILD_M64: begin
           fp_we_push=1'b1; fp_push_data=f_mem_as_int(f_mem80, q_f_mbytes);
         end
+`endif
         FX_FBLD: begin   // M10: packed-BCD m80 -> floatx80 (exact, <=18 digits)
-`ifndef VEN_BCD_ITER
+`ifdef VEN_FP_PS_ALL
+          /* FP_PS_ALL: PS-trapped (A_PUSH); the combinational fx_bcd_to_fx cone (the
+             residual worst-setup pole once FLD/FILD are trapped + BCD_ITER stripped) is
+             DROPPED here — the PS converts the packed BCD to extF80. */
+`elsif VEN_BCD_ITER
+          // VEN_BCD_ITER: deferred to S_FBLD_BUSY (iterative ven_bcd_to_fp); the push
+          // lands there with the engine result, same clock as the retire.
+`else
           fp_we_push=1'b1; fp_push_data=fx_bcd_to_fx(f_mem80);
 `endif
-          // under VEN_BCD_ITER: deferred to S_FBLD_BUSY (iterative ven_bcd_to_fp);
-          // the push lands there with the engine result, same clock as the retire.
         end
         FX_FLDCONST: begin fp_we_push=1'b1; fp_push_data=fconst(q_f_const); end
         FX_FLD_STI:  begin fp_we_push=1'b1; fp_push_data=s_stiv;            end
@@ -653,7 +693,11 @@ module fpu_writeback
           fp_we_fstat=1'b1; fp_fstat_wval=s_cmp_fstat;
         end
         FX_FXAM: begin
+`ifdef VEN_FP_PS_ALL
+          s_xc = 4'd0;   // FXAM PS-traps; classify cone pruned
+`else
           s_xc = fxam_codes(s_st0v, fptag[ftop]);
+`endif
           fp_we_fstat=1'b1;
           fp_fstat_wval = (fstat & ~16'h4700) |
                           ({1'd0,s_xc[3]}<<14) | ({5'd0,s_xc[2]}<<10) |
@@ -724,7 +768,10 @@ module fpu_writeback
               fp_we_top=1'b1;   fp_top_data=80'hFFFFC000000000000000;
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400 | 16'h0001; // C2+IE
             end else begin                                    // -0
-`ifdef VEN_SRT_ITER
+`ifdef VEN_FP_PS_ALL
+              // FSQRT PS-traps; never commits here. Drop the combinational fx_sqrt.
+              fp_we_top=1'b1;   fp_top_data=s_st0v;
+`elsif VEN_SRT_ITER
               // The engine handles every real sqrt, so only +0/-0/+Inf reach here and
               // sqrt(x)==x (exact) for those. Drop the fx_sqrt call so the 256-bit
               // combinational fx_sqrt (+ its bloated fx_round_pack_f cone) is dead-code
@@ -737,7 +784,9 @@ module fpu_writeback
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400;            // C2 only
             end
           end else if (!fp_sqrt_elig) begin                   // +0, +Inf (+normal -> engine)
-`ifdef VEN_SRT_ITER
+`ifdef VEN_FP_PS_ALL
+            fp_we_top=1'b1; fp_top_data=s_st0v;               // FSQRT PS-traps; cone pruned
+`elsif VEN_SRT_ITER
             fp_we_top=1'b1; fp_top_data=s_st0v;               // sqrt(+0)=+0, sqrt(+Inf)=+Inf (exact)
 `else
             s_ar = fx_sqrt(s_st0v, s_rc);
@@ -753,6 +802,10 @@ module fpu_writeback
         // changed value, preserving the sign of a result that rounds to zero.
         // (QEMU helper_frndint / floatx80_round_to_int.)
         FX_FRNDINT: begin
+`ifdef VEN_FP_PS_ALL
+          // FRNDINT PS-traps; the round-to-int converter cone is pruned.
+          fp_we_top=1'b1; fp_top_data=s_st0v;
+`else
           if (fx_is_inf_nan(s_st0v) || fx_is_zero(s_st0v) || (fx_uexp(s_st0v) >= 32'sd63)) begin
             fp_we_top=1'b1; fp_top_data=s_st0v;
           end else begin
@@ -762,6 +815,7 @@ module fpu_writeback
                                               : fx_from_int($signed(s_ri[63:0]));
             if (s_ri[64]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end  // PE
           end
+`endif
         end
         // ---- D9 FD FSCALE: ST0 = ST0 * 2^trunc(ST1) — add trunc(ST1) to ST0's
         // biased exponent. Inf/NaN/zero ST0 pass through; over/underflow saturate
@@ -771,7 +825,12 @@ module fpu_writeback
           if (fx_is_inf_nan(s_st0v) || fx_is_zero(s_st0v)) begin
             fp_we_top=1'b1; fp_top_data=s_st0v;
           end else begin
+`ifdef VEN_FP_PS_ALL
+            // FSCALE PS-traps; the trunc(ST1) int-convert cone is pruned to a const.
+            s_ri = 66'd0;
+`else
             s_ri = fx_to_int_ex(s_st1v, 64, 2'd3);            // trunc ST1 toward zero
+`endif
             s_qn = $signed(s_ri[63:0]);
             if (s_qn >= 64'sd32768) begin                     // huge up-scale -> Inf (OE)
               fp_we_top=1'b1; fp_top_data=fx_make(fx_sign(s_st0v), 15'h7FFF, 64'h8000000000000000);
@@ -926,7 +985,54 @@ module fpu_writeback
     end
 `endif
 
-`ifdef VEN_FPTRAP
+`ifdef VEN_FP_PS_ALL
+    // FP_PS_ALL generalized PS-trap commit. The PS computed the full result with
+    // SoftFloat extF80 and wrote: fptrap_result (=res0, primary), fptrap_res1
+    // (secondary, for FSINCOS cos / FPTAN 1.0), fptrap_res_fstat (the new status
+    // word: condition codes + sticky exception flags, fully merged by the PS), and
+    // fptrap_action (where res0 lands + the stack motion). This single arm replaces
+    // EVERY trapped op's commit (the PL no longer computes any FP value).
+    //
+    //   action  effect
+    //   ------  -------------------------------------------------------------------
+    //    1 A_TOP        fpr[ftop]      <= res0                 (unary: FSQRT/FRNDINT/
+    //                                                           FSCALE/F2XM1/FSIN/FCOS,
+    //                                                           binary dst-ST0 no-pop)
+    //    2 A_STI        fpr[ftop+sti]  <= res0                 (FADD ST(i),ST0)
+    //    3 A_STI_POP    fpr[ftop+sti]  <= res0; pop            (FADDP ST(i),ST0)
+    //    4 A_ST1_POP    fpr[ftop+1]    <= res0; pop            (FPATAN/FYL2X/FYL2XP1/
+    //                                                           FPREM-pop variants)
+    //    5 A_FSTAT      (status only)                          (FCOM/FTST/FXAM no-pop)
+    //    6 A_FSTAT_POP  status; pop                            (FCOMP/FICOMP)
+    //    7 A_FSTAT_POP2 status; pop2                           (FCOMPP/FUCOMPP)
+    //    8 A_SINCOS     fpr[ftop] <= res0; push res1           (FSINCOS/FPTAN)
+    //    9 A_PUSH       push res0 (ftop--, ST0<=res0)          (FLD m32/m64, FILD m*)
+    //   fstat is always replaced with fptrap_res_fstat (the PS merges flags + cc;
+    //   for value-only ops it equals the input fstat, so it is a harmless rewrite).
+    if (state==S_FPTRAP_WAIT && fptrap_resp_valid) begin
+      fp_we_fstat = 1'b1; fp_fstat_wval = fptrap_res_fstat;
+      unique case (fptrap_action)
+        4'd1: begin fp_we_top=1'b1; fp_top_data=fptrap_result; end
+        4'd2: begin fp_we_sti=1'b1; fp_wsti_idx=fptrap_sti; fp_wsti_data=fptrap_result;
+                    fp_wsti_clr_tag=1'b0; end
+        4'd3: begin fp_we_sti=1'b1; fp_wsti_idx=fptrap_sti; fp_wsti_data=fptrap_result;
+                    fp_wsti_clr_tag=1'b0; fp_we_pop=1'b1; end
+        4'd4: begin fp_we_sti=1'b1; fp_wsti_idx=3'd1; fp_wsti_data=fptrap_result;
+                    fp_wsti_clr_tag=1'b0; fp_we_pop=1'b1; end
+        4'd5: begin /* status only */ end
+        4'd6: begin fp_we_pop=1'b1; end
+        4'd7: begin fp_we_pop2=1'b1; end
+        4'd8: begin fp_we_top=1'b1; fp_top_data=fptrap_result;
+                    fp_we_push=1'b1; fp_push_data=fptrap_res1; end
+        // A_PUSH: the WIDENING loads (FLD m32/m64, FILD m16/m32/m64). The PS converted
+        // f_mem80 -> floatx80 and returned it in fptrap_result; push it (ftop--, write
+        // new ST0, clear its tag) — the load-side twin of A_TOP. fstat is rewritten with
+        // fptrap_res_fstat (== input fstat for a plain load: harmless).
+        4'd9: begin fp_we_push=1'b1; fp_push_data=fptrap_result; end
+        default: ;
+      endcase
+    end
+`elsif VEN_FPTRAP
     // FPATAN PS-trap: the PS computed atan2(ST1,ST0); commit it like FDIVP ST1,ST0 —
     // write ST1 then pop (result ends in the new ST0), same as the HW FPATAN commit.
     if (state==S_FPTRAP_WAIT && fptrap_resp_valid) begin
