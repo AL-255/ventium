@@ -413,6 +413,12 @@
             // F3: real-mode IRET pops a 16-bit FLAGS:CS:IP frame (S_RMIRET); V86/PM
             // keep the 32-bit S_IRET pop (incl. the descriptor reload / priv return).
             int_step <= 4'd0; int_src_pc <= eip; state <= real_mode ? S_RMIRET : S_IRET;
+            // 16-bit IRET (IRETW): in PM the frame width follows the IRET's EFFECTIVE
+            // operand size (eff_opsize = pfx_opsize ^ def16). In 16-bit PM (cs_d=0, no
+            // 0x66) eff_opsize=1 -> pop a 6-byte IP:CS:FLAGS frame (2-byte slots, ESP
+            // += 6); 32-bit (cs_d=1 or 16-bit+0x66) keeps the 12-byte legacy pop. Only
+            // the SAME-PRIV S_IRET arm honours int_gate_op16 (inter-priv/V86 unchanged).
+            int_gate_op16 <= eff_opsize;
             // M8.1: IRET ends an interrupt/NMI handler -> re-arm NMI (clear the NMI
             // block, IA-32). nmi_in_progress is only ever SET in the soc_en NMI
             // divert, so this clear is a no-op (stays 0) when soc_en==0 — INERT.
@@ -470,7 +476,11 @@
                 else state<=S_HALT;
               end
               SYS_RETF: begin
-                if (seg_real && !paging_on) begin seg_step<=1'b0; state<=S_RETF; end
+                // real/V86: pop CS:IP + real-mode CS load (base=sel<<4). PM: pop
+                // CS:EIP then S_RETF hands off to S_LJMP's GDT/LDT descriptor CS load
+                // (DOS Quake's CWSDPMI far-returns in PM — same-privilege, the popped
+                // CS RPL == CPL). seg_real && paging_on stays HALT. Mirrors SYS_LCALL.
+                if ((seg_real && !paging_on) || !seg_real) begin seg_step<=1'b0; state<=S_RETF; end
                 else state<=S_HALT;
               end
               // M9.5 — SGDT/SIDT: 2-beat store of the GDTR/IDTR pseudo-descriptor.

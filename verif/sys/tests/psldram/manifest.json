@@ -1,0 +1,27 @@
+{
+  "name": "psldram",
+  "kind": "system",
+  "src": "psldram.S",
+  "linker": "psldram.ld",
+  "image": "psldram.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 200,
+  "sys": true,
+  "paging": true,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "build PD+PT0(identity code window)+PT1(fresh non-identity data page linear 0x400000 -> phys 0x900000)",
+    "CR3 load + CR0.PG 0->1 (paging ON, 4 KiB pages)",
+    "A) 32-bit store->same-addr RMW load: mov [0x400000],0x12345678; sub [0x400000],0x00010001; eax=[0x400000]=0x12335677",
+    "B) 16-bit store->same-addr RMW load: mov w[0x400010],0xC57C; sub w[0x400010],0x3A84; ebx=0x8AF8",
+    "C) byte store->same-addr RMW load: mov b[0x400020],0xAA; add b[0x400020],0x11; ecx=0xBB",
+    "D) POP word [m]->SUB word [m] (CWSDPMI shape): pop w[0x400030]=0x3B48; sub w[0x400030],0x3A84; edx=0x00C4",
+    "clean exit via isa-debug-exit (out 0xf4,al al=0x42 -> qemu status 133)"
+  ],
+  "description": "Paged store->load RAW (read-after-write) regression guard (task #102 DOS-Quake). A back-to-back store -> same-address RMW-load (32/16/8-bit + the exact CWSDPMI POP-word-[m]/SUB-word-[m] shape) into a FRESHLY-mapped non-identity paged page that was never read before, so a write-allocate stale-line or store->load forwarding bug would surface as a read-back GPR divergence. The earlier 'SUB reads stale 0' store->load-hazard hypothesis was DISPROVEN by a cycle-level BFM mem-port trace (the RMW load reads exactly the prior store's value); this test pins that correct behaviour. Per-record differential vs qemu-system-i386 (no interrupts -> the gdbstub single-step golden delivers the whole run)."
+}

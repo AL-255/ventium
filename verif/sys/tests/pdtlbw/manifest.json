@@ -1,0 +1,29 @@
+{
+  "name": "pdtlbw",
+  "kind": "system",
+  "src": "pdtlbw.S",
+  "linker": "pdtlbw.ld",
+  "image": "pdtlbw.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 20000,
+  "sys": true,
+  "paging": true,
+  "fe_pipe_only": true,
+  "self_checking": true,
+  "selfcheck_rtl": "pdtlbw-rtl-selfcheck.py",
+  "oracle_status": "BLOCKED — the refs qemu-system-i386 oracle is un-buildable in this environment (needs python3-venv + root). The differential verify-sys golden is therefore infeasible here; this test is SELF-CHECKING in the guest (the read-back comparison drives the isa-debug-exit AL: 0x42->status 133 PASS, 0x21->status 67 FAIL), so the RTL validates it stand-alone WITHOUT the oracle. Run on a FE_PIPE-enabled TB (the bug is FE_PIPE-specific).",
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code 0x08)",
+    "paging enable (CR3=0x11000, CR0.PG 0->1; FULL identity map of [0,4MiB), P|RW|US, D=0)",
+    "LTR 0x28 (TR = TSS_A @ 0x20000)",
+    "CPL0 16-bit-PM store of the sentinel to the clean (D=0), identity-mapped, US=1 target page 0x30",
+    "HARDWARE TASK SWITCH: far JMP $0x30,$0 -> TSS_B @ 0x10000 (S_TSW_SAVE saves TSS_A page 0x20, S_TSW_READ reads TSS_B page 0x10 -- both NON-translatable states; all three TSS/target pages collide at D-TLB index 0)",
+    "TSS_B task reads the target linear back and compares to the sentinel; isa-debug-exit AL=0x42 on PASS, 0x21 on FAIL"
+  ],
+  "description": "Ventium task #102 — DATA-STORE-UNDER-PAGING micro-TLB regression for the +VEN_FE_PIPE registered micro-TLB (fe_dtlb_*). The CWSDPMI INT 0x31 dispatcher class of bug: a paged store to a clean (PTE.D=0), identity-mapped, user-accessible page, with a HARDWARE TASK SWITCH (S_TSW_SAVE/S_TSW_READ -- NON-translatable states that drive cur_lin=0 with cur_is_d=1) between the store and the read-back, on pages that all collide at the direct-mapped D-TLB index 0 (lin[15:12]). Pre-fix, the FE_PIPE re-registration fired in those non-translatable states and cached an INCONSISTENT page-keyed entry (fe_dtlb_page vs fe_dtlb_phys for different pages), and mem_xlate used the registered frame without a page-match guard, so a colliding-page access could be mis-translated. The fix gates the micro-TLB re-registration on fe_translatable (a genuine paged access) and guards mem_xlate's registered-frame use on (fe_*_v && fe_*_page==lin[31:12]); see core.sv. This test exercises that exact path and self-checks the read-back equals the store under a FE_PIPE-enabled config. NOTE: the bug is FE_PIPE-specific (only the registered micro-TLB has the re-register window); a non-FE_PIPE build is immune, so a non-FE_PIPE run will not exercise it. The qemu-system differential golden is BLOCKED (oracle un-buildable here); the test is self-checking via the exit status so it validates on the RTL alone."
+}

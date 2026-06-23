@@ -16,7 +16,13 @@
         S_IRET: begin
           if (mem_ack) begin
             unique case (int_step)
-              4'd0: begin iret_eip   <= mem_rdata;        int_step <= 4'd1; end
+              // 16-bit IRETW (int_gate_op16, same-priv): the popped frame is 2-byte
+              // slots IP:CS:FLAGS. Capture only the low 16 bits and preserve the upper
+              // half of EIP/EFLAGS (a 16-bit pop leaves bits[31:16] untouched).
+              4'd0: begin
+                iret_eip   <= int_gate_op16 ? {eip[31:16], mem_rdata[15:0]} : mem_rdata;
+                int_step <= 4'd1;
+              end
               4'd1: begin
                 iret_cs    <= mem_rdata[15:0];
                 // inter-priv iff the returned-to CS is less privileged than now.
@@ -25,22 +31,31 @@
               end
               4'd2: begin
                 // EFLAGS popped. Hold it; the actual eflags/eip/ESP commit happens
-                // on the final beat so an inter-priv pop can still read ESP/SS.
-                iret_eflags <= mem_rdata;
+                // on the final beat so an inter-priv pop can still read ESP/SS. A
+                // 16-bit pop restores only the low-16 settable flags + keeps [31:16].
+                iret_eflags <= int_gate_op16
+                  ? {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)}
+                  : mem_rdata;
                 // M7.2: IRET from CPL0 with the popped EFLAGS.VM (bit17) set is a
                 // RETURN INTO V86. It always pops the full 9-word frame (ESP,SS +
                 // ES,DS,FS,GS follow) and switches stacks, regardless of the popped
                 // CS.RPL (the V86 CS is a real-mode selector, RPL=0). Only meaningful
                 // from CPL0 (the monitor); INERT for every non-V86 IRET (bit17=0).
-                if (mem_rdata[17] && cpl_r == 2'd0) begin
+                // A 16-bit IRETW (int_gate_op16) can carry neither VM (bit17) nor an
+                // inter-priv ESP/SS pair in its 6-byte frame: the dword read at SP+4
+                // has garbage in bits[31:16], so gate BOTH the V86 and the inter-priv
+                // branch off and force the same-priv commit.
+                if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin
                   iret_to_v86 <= 1'b1;
                   int_step    <= 4'd3;             // pop ESP, SS, ES, DS, FS, GS
-                end else if (iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
+                end else if (!int_gate_op16 && iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
                 else begin
-                  // SAME-PRIV: commit now (ESP += 12), reload CS, retire via _RET.
-                  // R3: ESP+=12 moved to the gpr writeback driver (S_IRET/int_step 2).
+                  // SAME-PRIV: commit now (ESP += 12 or 6), reload CS, retire via _RET.
+                  // R3: ESP adjust moved to the gpr writeback driver (S_IRET int_step 2).
                   eip          <= iret_eip;
-                  eflags       <= mem_rdata;
+                  eflags       <= int_gate_op16
+                    ? {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)}
+                    : mem_rdata;
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
                   state        <= S_INT_CS_RET;

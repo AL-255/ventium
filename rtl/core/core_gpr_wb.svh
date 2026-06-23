@@ -282,27 +282,28 @@
 
               K_CPUID: begin
                 if (soc_en) begin
+                  // task #102 DOS-Quake fix: the SoC CPUID table previously returned a
+                  // qemu-DEFAULT-cpu (qemu64, family-6, sig 0x663, EDX=0x0781abfd P6
+                  // feature set incl. CMOV/SEP/PGE/PAT) signature. But the DOS-Quake
+                  // boot oracle — and psoccpuid's own documented oracle — is
+                  // qemu-system-i386 `-cpu pentium` (P54C, family-5, sig 0x543,
+                  // EDX=0x008003bd, leaf-0 max-basic-leaf=1). go32/CWSDPMI reads
+                  // CPUID(1) on startup: the bogus 0x663/P6 signature made it
+                  // misidentify the CPU and take its real-mode exception-reporter path
+                  // (spurious #GP at `mov es,bx`, ending DOS-Quake early). The true
+                  // Pentium table below (identical to the non-soc `-cpu pentium` arm,
+                  // probed live from `-cpu pentium`) makes the boot match the oracle.
+                  // qemu `-cpu pentium` clamps every undefined leaf to the leaf-1
+                  // result, so only leaf 0 and 0x40000000 (TCG) are distinct.
                   unique case (gpr_o[R_EAX])
-                    32'h0000_0000: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0004; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h756e_6547;
+                    32'h0000_0000: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0001; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h756e_6547;
                                          gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h6c65_746e; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h4965_6e69; end
-                    32'h0000_0001: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0663; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h0000_0800;
-                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h8000_0001; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h0781_abfd; end
-                    32'h0000_0002: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0001; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h0000_0000;
-                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h0000_004d; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h002c_307d; end
-                    32'h0000_0004: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0121; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h01c0_003f;
-                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h0000_003f; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h0000_0001; end
                     32'h4000_0000: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h4000_0001; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h5447_4354;
                                          gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h4354_4743; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h4743_5447; end
-                    32'h8000_0000: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h8000_0004; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h756e_6547;
-                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h6c65_746e; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h4965_6e69; end
-                    32'h8000_0001: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0663; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h0000_0000;
+                    32'h4000_0001: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0000; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h0000_0000;
                                          gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h0000_0000; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h0000_0000; end
-                    32'h8000_0002: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h554d_4551; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h7269_5620;
-                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h6c61_7574; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h5550_4320; end
-                    32'h8000_0003: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h7265_7620; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h6e6f_6973;
-                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h352e_3220; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h0000_002b; end
-                    default:       begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0000; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h0000_0000;
-                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h0000_0000; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h0000_0000; end
+                    default:       begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=32'h0000_0543; gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=32'h0000_0800;
+                                         gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=32'h8000_0000; gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=32'h0080_03bd; end
                   endcase
                 end else begin
                   unique case (gpr_o[R_EAX])
@@ -552,6 +553,13 @@
               end else if (xpl_active) begin
                 fsz = int_has_err ? 32'd24 : 32'd20;
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=int_new_esp - fsz;
+              end else if (int_gate_op16) begin
+                // SAME-PRIV 16-BIT GATE: 6-byte IP:CS:FLAGS frame (no errcode on a
+                // 16-bit same-priv delivery in this corpus); SP -= 6 (mirrors
+                // S_RMINT_PUSH). The full 32-bit ESP is decremented (SS.B controls
+                // wrap; the corpus 16-bit-PM stacks are < 64 KiB so this matches).
+                fsz = 32'd6;
+                gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - fsz;
               end else begin
                 fsz = int_has_err ? 32'd16 : 32'd12;
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] - fsz;
@@ -566,9 +574,13 @@
           if (mem_ack) begin
             unique case (int_step)
               4'd2: begin
-                if (mem_rdata[17] && cpl_r == 2'd0) begin end
-                else if (iret_interpriv) begin end
-                else begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + 32'd12; end
+                // 16-bit IRETW (int_gate_op16) is always the same-priv 6-byte commit
+                // (SP += 6); guard the V86/inter-priv suppression off so a garbage
+                // high-half VM bit (from the dword read of a 2-byte slot) can't divert.
+                if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin end
+                else if (!int_gate_op16 && iret_interpriv) begin end
+                else begin gpr_we[R_ESP]=1'b1;
+                  gpr_wd[R_ESP]=gpr_o[R_ESP] + (int_gate_op16 ? 32'd6 : 32'd12); end
               end
               4'd4: begin
                 if (iret_to_v86) begin end

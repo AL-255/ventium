@@ -196,6 +196,26 @@ pm32_entry:
     movw    %ax, %ds            /* DS := read-only flat data segment */
     movl    0x00030000, %ebx    /* ebx = 0x0FF1CE00  (legal read of RO seg) */
 
+    /* ---------------- POP Sreg (07/17/1F) PROTECTED-MODE base walk ---------
+     * task #102 regression: `pop ds/es/ss` in protected mode must walk the GDT
+     * descriptor for the popped selector, NOT compute base = sel<<4 like real
+     * mode.  CWSDPMI's DPMI reflector does `pop ds` with a BASED selector; the
+     * sel<<4 shortcut stored the dispatch vector at the wrong linear (0x330 vs
+     * the GDT base 0x2b570) and the CPL0 read-back saw 0 -> "Division by Zero".
+     * Here: push the BASED selector 0x18 (GDT base 0x00020000), `pop %ds`, then
+     * store through DS:0x2000.  If the base was walked, the write lands at flat
+     * physical 0x00022000; if the buggy sel<<4 path runs, DS.base = 0x18<<4 =
+     * 0x180 and the write lands at 0x02180 instead -> the flat read-back below
+     * diverges from the golden.  esp is also restored by the pop (+2).          */
+    movw    $0x10, %ax
+    movw    %ax, %ds                /* DS := flat (so the pushw uses a known base) */
+    movw    $0x18, %ax
+    pushw   %ax                     /* selector 0x18 (based, GDT base 0x00020000) */
+    popw    %ds                     /* POP DS in PM -> must GDT-walk -> base 0x20000 */
+    movl    $0x9A9A9A9A, %eax
+    movl    %eax, 0x00002000        /* ds-relative: linear = 0x20000 + 0x2000 = 0x22000 */
+    movl    %es:0x00022000, %ecx    /* ecx = 0x9A9A9A9A iff POP-DS walked the descriptor */
+
     /* restore DS to the flat RW selector so the final state is well-defined */
     movw    $0x10, %ax
     movw    %ax, %ds

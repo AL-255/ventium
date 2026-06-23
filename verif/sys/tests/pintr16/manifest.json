@@ -1,0 +1,31 @@
+{
+  "name": "pintr16",
+  "kind": "system",
+  "src": "pintr16.S",
+  "linker": "pintr16.ld",
+  "image": "pintr16.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 300,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "IDT load (lidt base=0x1000 limit=0x7FF) + 1 gate (vec 0x40 = 16-bit INTERRUPT gate attr 0x86, selector 0x18)",
+    "far-jump 32->16-bit PM: CS 0x08 (cs_d=1) -> 0x18 (16-bit code seg, cs_d=0, base 0xF0000)",
+    "INT 0x40 delivery in 16-bit PM: 6-byte IP:CS:FLAGS frame (SP -= 6) -> int40_handler16 (IF cleared)",
+    "IRETW return: pops the 6-byte frame (SP += 6); SP restored EXACTLY to the pre-INT value",
+    "far-jump 16->32-bit PM back to 0x08 (cs_d=1) to verify + exit"
+  ],
+  "delivery_records": {
+    "pm16_entry": "CS=0x18 (16-bit code seg, cs_d=0), the 16-bit-PM phase begins",
+    "int40_enter": "INT 0x40 -> int40_handler16 (16-bit INTERRUPT gate; 6-byte frame; IF cleared)",
+    "int40_iretw_return": "IRETW returns to the instruction after INT 0x40 (SP restored exactly = the 6-byte frame proof)",
+    "success_proof": "esi=0x40404040 (handler sentinel), ecx=1 (handler counter), edx=1 (SP-restored-exactly flag); exits via isa-debug-exit (qemu status 133)"
+  },
+  "description": "Bare-metal real->protected 16-bit-PROTECTED-MODE INT/IRETW gate demonstrator. The 16-bit complement of pintr (which only covers the 32-bit gate). Boots from F000:FFF0, builds a flat GDT (null + code32 0x08 + data32 0x10 + CODE16 0x18 with descriptor type 0xA and D=0, base 0xF0000), enters PM, builds an IDT at 0x1000 with ONE 16-bit INTERRUPT gate (attr 0x86, type 0x6, selector 0x18) for vector 0x40 -> int40_handler16. It far-jumps into the 16-bit code segment 0x18 (cs_d=0), records SP, fires INT 0x40 (CD 40): the 16-bit gate delivers a 6-byte IP:CS:FLAGS frame (SP -= 6) to int40_handler16, which writes sentinel 0x40404040 + increments a counter, then IRETW (pops the 6-byte frame, SP += 6). After the IRETW the test PROVES SP equals its pre-INT value EXACTLY (the round-trip 6-byte frame), writes the proof flag, far-jumps back to the 32-bit code segment 0x08, verifies the sentinel/counter/SP-flag, and exits via isa-debug-exit (status 133). This exercises the 16-bit IDT gate push (S_INT_PUSH, int_gate_op16, 2-byte slots, ESP-=6) + the 16-bit IRETW pop (S_IRET, int_gate_op16, 2-byte slots, ESP+=6) that a core hardcoding the 32-bit (12-byte) frame mis-sizes -- the DPMI-host stack-frame bug that derailed DOS-Quake. A mis-sizing core returns from the IRETW to a 12-byte-shifted address and DIVERGES from the qemu-system golden (which sizes the frame correctly). NO paging; CR0.PG stays 0."
+}
