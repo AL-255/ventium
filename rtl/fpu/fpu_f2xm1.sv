@@ -250,7 +250,7 @@ module fpu_f2xm1
         S_TLOOK: begin
           automatic logic [79:0] tval, ydiff;
           tval  = f2t_rd;                                   // F2_T[n_q] (registered)
-          ydiff = fx80(fx_add(x_q, {~tval[79], tval[78:0]}, 2'd0));  // x - t[n]
+          ydiff = fx80(fx_add(x_q, {~tval[79], tval[78:0]}, 2'd0, 2'b11));  // x - t[n]
           y_q   <= ydiff;
           if (fx_is_zero(ydiff)) begin
             result_q <= tval;                               // qemu: ST0 = table[n].t
@@ -263,8 +263,8 @@ module fpu_f2xm1
         end
         // ---- Horner: 14 steps, one fx_mul / fx_add per clock ------------
         S_HORNER: begin
-          if (step_q[0] == 1'b0) accum_q <= fx80(fx_mul(accum_q, y_q, 2'd0));      // accum*y
-          else                   accum_q <= fx80(fx_add(horner_coeff(step_q), accum_q, 2'd0));
+          if (step_q[0] == 1'b0) accum_q <= fx80(fx_mul(accum_q, y_q, 2'd0, 2'b11));      // accum*y
+          else                   accum_q <= fx80(fx_add(horner_coeff(step_q), accum_q, 2'd0, 2'b11));
           if (step_q == 4'd13) st <= S_RECON;
           step_q <= step_q + 4'd1;
         end

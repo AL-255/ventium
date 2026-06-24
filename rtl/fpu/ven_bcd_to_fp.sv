@@ -71,7 +71,7 @@ module ven_bcd_to_fp
         end
         ST_FIN: begin
           automatic logic signed [63:0] sval = sign_q ? -$signed(mag) : $signed(mag);
-          result_q <= fx_from_int(sval);
+          result_q <= fx_from_int(sval, 2'b11);   // FBLD: extended (PC follow-up)
           done_q   <= 1'b1;
           st       <= ST_IDLE;
         end

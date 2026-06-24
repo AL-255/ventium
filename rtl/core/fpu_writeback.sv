@@ -101,9 +101,9 @@ module fpu_writeback
     // done-clock commits read; declared unconditionally, read under matching
     // `ifdef` arms inside the block).
     input  logic        eng_div_done,
-    input  logic [80:0] eng_div_result,
+    input  logic [82:0] eng_div_result,
     input  logic        eng_sqrt_done,
-    input  logic [80:0] eng_sqrt_result,
+    input  logic [82:0] eng_sqrt_result,
     input  logic        eng_bcd_done,
     input  logic [81:0] eng_bcd_result,
     input  logic        eng_fbld_done,
@@ -303,7 +303,7 @@ module fpu_writeback
     // assign is safe and latch-free. VEN_FP_PIPE2 REQUIRES VEN_SRT_ITER (the engine
     // owns divide, so the split eval's div default is unreachable — same guard the
     // 1-stage split relies on).
-    fp_s1_next = f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err);
+    fp_s1_next = f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fctrl[9:8], fpp_err);
     // The in-flight result is now 2 clocks deep, so the RAW hazard spans BOTH slots:
     // stall a role-0/1 reader of the stage-0 target (fpp_dst, commits in 2 clocks)
     // OR the stage-1 target (fpp2_dst, commits THIS edge — the same pre-edge stale
@@ -317,7 +317,7 @@ module fpu_writeback
     // commit to the absolute target. This is the SHORT back-half cone (round_pack
     // only); the front half was spent the previous clock — that is the whole split.
     if (fpp2_valid) begin
-      automatic logic [84:0] pp_arf = f_eval_s2(fpp2_s1, fpp2_rc);
+      automatic logic [84:0] pp_arf = f_eval_s2(fpp2_s1, fpp2_rc, fctrl[9:8]);
       fp_we_wabs       = 1'b1;
       fp_wabs_idx      = fpp2_dst;
       fp_wabs_data     = pp_arf[79:0];
@@ -343,9 +343,9 @@ module fpu_writeback
       // never deferred to this commit port), so f_eval_s1's div-returns-0 default
       // is unreachable. Without VEN_SRT_ITER, divide DOES defer here -> keep the
       // full f_eval (below). Combinational s1->s2, same 1-clock defer as before.
-      automatic logic [84:0] pp_arf = f_eval_s2(f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err), fpp_rc);
+      automatic logic [84:0] pp_arf = f_eval_s2(f_eval_s1(fpp_aluop, fpp_a, fpp_b, fpp_rc, fctrl[9:8], fpp_err), fpp_rc, fctrl[9:8]);
 `else
-      automatic logic [84:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fpp_err);
+      automatic logic [84:0] pp_arf = f_eval(fpp_aluop, fpp_a, fpp_b, fpp_rc, fctrl[9:8], fpp_err);
 `endif
       fp_we_wabs       = 1'b1;
       fp_wabs_idx      = fpp_dst;
@@ -385,7 +385,7 @@ module fpu_writeback
     // the REGISTERED fpp_* operands in the we_wabs deferred-commit block above.
     fp_arf = 83'd0;
 `else
-    fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10], errata_en[ERR_FDIV]);
+    fp_arf = f_eval(u_d.fp_aluop, fst(3'd0), fst(u_d.fp_sti), fctrl[11:10], fctrl[9:8], errata_en[ERR_FDIV]);
 `endif
     if (fp_fast_commit) begin
       unique case (u_d.fp_kind)
@@ -537,7 +537,7 @@ module fpu_writeback
     // (f_mem80->f_eval->fpr, the worst path) is dropped here.
     s_arf = 83'd0;
 `else
-    s_arf = f_eval(q_f_aluop, s_fa, s_fb, s_rc, errata_en[ERR_FDIV]);
+    s_arf = f_eval(q_f_aluop, s_fa, s_fb, s_rc, fctrl[9:8], errata_en[ERR_FDIV]);
 `endif
     // R-area: ONE shared FP compare. The six compare arms (FCOM/FUCOM/FCOMPP/
     // FUCOMPP/FTST/FICOM) each called fcom_codes+fcom_ie+apply_cmp with their own
@@ -571,30 +571,24 @@ module fpu_writeback
     // on the combinational path (its flag/special logic below is preserved).
     begin
       logic na, nb;
-      logic signed [31:0] eqd;
       // operands are the shared s_fa/s_fb (the per-q_fxop mux computed above).
-      // FINITE-NONZERO operands: exactly the set that reaches fx_srt_div's /
-      // fx_isqrt's loop in f_eval's else (zero/Inf/NaN hit cheap guards). Routing
-      // ALL of these to the engine lets the combinational loops be stubbed out of
-      // synthesis (D8b); the engine == fx_srt_div / fx_sqrt for every operand.
-      // NORMAL-only: the SRT/sqrt engines assume a normalized 1.f operand, so
-      // denormal operands are EXCLUDED here and fall to the combinational path
-      // (fx_div routes them to the denormal-aware fx_div_exact; fx_sqrt's eff-exp
-      // path handles a denormal radicand). fx_is_normal == exp in (0,0x7fff) & v[63].
-      na = fx_is_normal(s_fa);
-      nb = fx_is_normal(s_fb);
-      // EXP-DIFF guard (mirror fx_div's use_exact): the iterative engine has no
-      // gradual-underflow/overflow path, so a normal/normal divide whose QUOTIENT
-      // over/underflows the floatx80 range (|exp(a)-exp(b)| > 16000) must fall to
-      // the shared denormal/overflow-correct fx_div_exact, not the engine. Without
-      // this it produced garbage on tiny/huge quotients (fpu87 VEN_SRT_ITER suite).
-      eqd = $signed(fx_uexp_eff(s_fa)) - $signed(fx_uexp_eff(s_fb));
+      // FINITE-NONZERO operands: exactly the set that reaches fx_srt_div's loop in
+      // f_eval's else (zero/Inf/NaN hit cheap guards). The unified engine now
+      // CLZ-NORMALIZES denormal operands at setup and routes over/underflowing
+      // quotients through the shared fx_round_pack_f, so it == fx_div (engine OR
+      // exact) for EVERY finite-nonzero operand pair at ANY exponent. Denormals and
+      // extreme exp-diffs are therefore engine-routed too (previously excluded ->
+      // they fell to fx_div_exact, whose 192-bit divide is the board-fit STUB that
+      // produced garbage -> the fpu87 fp_div_core FAILs). Now the combinational
+      // fx_div_exact path is dead under +VEN_SRT_ITER. finite-nonzero = NORMAL or
+      // DENORMAL = exp != 0x7fff && !(exp==0 && man==0).
+      na = (fx_exp(s_fa)!=15'h7fff) && !fx_is_zero(s_fa);
+      nb = (fx_exp(s_fb)!=15'h7fff) && !fx_is_zero(s_fb);
       fp_div_elig = slow_arm && !errata_en[ERR_FDIV] &&
                     ((q_fxop==FX_AR_ST0_STI)||(q_fxop==FX_AR_STI_ST0)||
                      (q_fxop==FX_AR_M32)||(q_fxop==FX_AR_M64)||
                      (q_fxop==FX_AR_I16)||(q_fxop==FX_AR_I32)) &&
-                    ((q_f_aluop==3'd6)||(q_f_aluop==3'd7)) && na && nb &&
-                    (eqd <= 32'sd16000) && (eqd >= -32'sd16000);
+                    ((q_f_aluop==3'd6)||(q_f_aluop==3'd7)) && na && nb;
       // Accept NORMAL *and* DENORMAL positive radicands: the unified engine's
       // sqrt setup uses the denormal-aware fx_uexp_eff (== fx_sqrt), so it handles
       // both. Denormals were excluded before and fell to the combinational fx_sqrt
@@ -778,7 +772,7 @@ module fpu_writeback
               // eliminated. !VEN_SRT_ITER still needs the real fx_sqrt below.
               fp_we_top=1'b1;   fp_top_data=s_st0v;
 `else
-              s_ar = fx_sqrt(s_st0v, s_rc);
+              s_ar = fx_sqrt(s_st0v, s_rc, fctrl[9:8]);
               fp_we_top=1'b1;   fp_top_data=s_ar[79:0];
 `endif
               fp_we_fstat=1'b1; fp_fstat_wval=(fstat & ~16'h4700) | 16'h0400;            // C2 only
@@ -789,7 +783,7 @@ module fpu_writeback
 `elsif VEN_SRT_ITER
             fp_we_top=1'b1; fp_top_data=s_st0v;               // sqrt(+0)=+0, sqrt(+Inf)=+Inf (exact)
 `else
-            s_ar = fx_sqrt(s_st0v, s_rc);
+            s_ar = fx_sqrt(s_st0v, s_rc, fctrl[9:8]);
             fp_we_top=1'b1; fp_top_data=s_ar[79:0];
             if (s_ar[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end    // PE
 `endif
@@ -812,7 +806,7 @@ module fpu_writeback
             s_ri = fx_to_int_ex(s_st0v, 64, s_rc);
             fp_we_top=1'b1;
             fp_top_data = (s_ri[63:0]==64'd0) ? fx_make(fx_sign(s_st0v), 15'd0, 64'd0)
-                                              : fx_from_int($signed(s_ri[63:0]));
+                                              : fx_from_int($signed(s_ri[63:0]), fctrl[9:8]);
             if (s_ri[64]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end  // PE
           end
 `endif
@@ -904,10 +898,18 @@ module fpu_writeback
     if (state==S_FP_BUSY && fp_iter_done) begin
       if (q_fxop==FX_FSQRT) begin
         fp_we_top=1'b1; fp_top_data=eng_sqrt_result[79:0];
-        if (eng_sqrt_result[80]) begin fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0020; end
+        // PE (bit80) -> 0x20, UE (bit81) -> 0x10, OE (bit82) -> 0x08. sqrt cannot
+        // overflow a normalized radicand, but carry all three uniformly.
+        if (eng_sqrt_result[82:80]!=3'd0) begin
+          fp_we_fstat=1'b1;
+          fp_fstat_wval=fstat | (eng_sqrt_result[80] ? 16'h0020 : 16'h0)
+                              | (eng_sqrt_result[81] ? 16'h0010 : 16'h0)
+                              | (eng_sqrt_result[82] ? 16'h0008 : 16'h0);
+        end
       end else begin
         logic [84:0] earf;
-        earf = {4'b0000, eng_div_result[80], eng_div_result[79:0]};   // {ie,ze,oe,ue=0, pe, result}
+        // {ie,ze, oe=result[82], ue=result[81], pe=result[80], floatx80}
+        earf = {2'b00, eng_div_result[82], eng_div_result[81], eng_div_result[80], eng_div_result[79:0]};
         if (q_fxop==FX_AR_STI_ST0) begin
           fp_we_sti=1'b1; fp_wsti_idx=q_f_sti; fp_wsti_data=eng_div_result[79:0]; fp_wsti_clr_tag=1'b0;
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, earf);
@@ -945,7 +947,7 @@ module fpu_writeback
           fp_we_fstat=1'b1; fp_fstat_wval=fstat | 16'h0400;
         end else begin
           // (part-select on a function call is illegal in synth/IEEE-1800 — temp it)
-          logic [82:0] tan_q; tan_q = fx_div(eng_fs_sin, eng_fs_cos, 2'd0);
+          logic [82:0] tan_q; tan_q = fx_div(eng_fs_sin, eng_fs_cos, 2'd0, fctrl[9:8]);
           fp_we_top=1'b1;
           fp_top_data=(q_fxop==FX_FPTAN) ? tan_q[79:0] : eng_fs_sin;
           fp_we_push=1'b1;

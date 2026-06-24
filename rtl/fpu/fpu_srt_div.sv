@@ -38,10 +38,11 @@ module fpu_srt_div
     input  wire logic [79:0] a,          // dividend / radicand / ST0 (floatx80)
     input  wire logic [79:0] b,          // divisor / ST1 (floatx80; ignored for sqrt)
     input  wire logic [1:0]  rc,         // x87 rounding control (fctrl[11:10])
+    input  wire logic [1:0]  pc,         // x87 precision control (fctrl[9:8]): 00=24b 10=53b 11=64b
     input  wire logic        buggy,      // 1 = buggy PLA (reproduce the FDIV flaw)
     output logic             busy,       // 1 while an op is in flight
     output logic             done,       // 1-clk strobe: result valid this clock
-    output logic [80:0]      result,     // {inexact, floatx80}  (div/sqrt) | {1'b0, rem} (rem)
+    output logic [82:0]      result,     // {oe, ue, pe, floatx80}  (div/sqrt) | {2'b0, 1'b0, rem} (rem)
     output logic [2:0]       rem_q012,   // rem: {q2,q1,q0} -> {C0,C3,C1}
     output logic             rem_c2,     // rem: 1 = partial (incomplete) reduction
     output logic             rem_ie      // rem: invalid-operation
@@ -100,7 +101,7 @@ module fpu_srt_div
 `endif
 
   // ---- result --------------------------------------------------------------
-  logic [80:0]         result_q;
+  logic [82:0]         result_q;          // {oe, ue, pe, floatx80}
   logic                done_q;
 
   assign busy   = (st != ST_IDLE);
@@ -195,12 +196,26 @@ module fpu_srt_div
     if (cf) cmaj[0] = 1'b1;
   end
 
-  // DIVIDE rounding tail — IDENTICAL to the prior engine (final qacc/S/C).
+  // DIVIDE rounding tail — IDENTICAL to the prior engine (final qacc/S/C) for the
+  // IN-RANGE result; out-of-range (over/underflow) quotients are packed through the
+  // shared fx_round_pack_f below. Denormal OPERANDS are clz-normalized at setup so
+  // the SRT recurrence always sees a 1.f significand (ua/ub carry the eff exponent).
   logic [80:0]         rsum;
   logic                rem_nz, rs_pos, rs_neg, up, down, inexact, resid_pos, resid_neg;
   logic [127:0]        uq, keep, remv, half;
   int                  msb, extra;
   logic signed [31:0]  e, ebiased;
+  // out-of-range pack: feed the SHARED fx_round_pack_f one UNROUNDED 64-bit window
+  // (top-aligned) + a single residual sticky so it does ONE correct round across
+  // the gradual-underflow / overflow grid (no double-round). The SRT over-estimate
+  // (resid_neg: true value < keep_floor by < 1 ULP) is folded out by a floor
+  // decrement BEFORE packing, so the value handed to the packer is keep_floor with
+  // a non-negative residual = (remv!=0)||rs_pos.
+  logic                oor;
+  logic [127:0]        sigp, keepf;
+  logic signed [31:0]  ep;
+  logic                stickyp;
+  logic [82:0]         packed_oor;
   always_comb begin
     rsum    = {1'b0, C} + {1'b0, S};
     // The partial remainder is TRUE-ZERO when the ones-complement carry-save sum
@@ -242,6 +257,32 @@ module fpu_srt_div
     end
     e       = (msb - (mode_q == FD_SQRT ? 32'sd72 : 32'sd70)) + (ua - ub);
     ebiased = e + 32'sd16383;
+
+    // -------- out-of-range (over/underflow) pack via fx_round_pack_f ----------
+    // ep = unbiased exponent of the *floor* window MSB (bit63). The 64-bit floor
+    // significand keepf (top-aligned to bit127) + sticky go to the shared packer,
+    // which applies gradual-underflow / overflow + the active RC in ONE round.
+    keepf   = uq >> extra;                            // floor 64-bit window (unrounded)
+    if (resid_neg) begin                             // SRT over-shot by < 1 ULP
+      keepf = keepf - 128'd1;
+      if (!keepf[63]) keepf = {64'd0, 64'hFFFFFFFFFFFFFFFF};  // borrowed across pow2
+    end
+    stickyp = (remv != 128'd0) || rs_pos || resid_neg;        // any residual below floor
+    sigp    = keepf << 64;                            // window MSB (bit63) -> bit127
+    // weight of keepf's MSB (bit63) == weight of uq bit `msb` (the floor window top):
+    // (msb - SH) + (ua-ub), SH=70 (div) / 72 (sqrt). resid_neg's pow2-borrow drops
+    // the window MSB one position, but fx_round_pack_f re-finds the MSB of sigp and
+    // uses the passed weight as ITS top bit's exponent, so pass the floor MSB weight.
+    ep      = ($signed(msb) - (mode_q == FD_SQRT ? 32'sd72 : 32'sd70)) + (ua - ub);
+    if (resid_neg && !keepf[63]) ep = ep - 32'sd1;    // borrow crossed a power of two
+    // Pass pc: the floor-window packer rounds to 24/53/64 bits. For pc<64 this also
+    // serves the IN-RANGE result (single-round to PC; no double-round), so divide/
+    // sqrt honor x87 precision control. PC=64 keeps the fast inline path below.
+    packed_oor = fx_round_pack_f(sign, ep, sigp, stickyp, rc, pc);
+    // route the engine through the packer when the quotient is over/underflowing the
+    // floatx80 normal range (biased <= 0 -> underflow; >= 0x7FFF -> overflow). This
+    // is the set fx_div used to send to fx_div_exact; the engine now owns it too.
+    oor = (ebiased <= 32'sd0) || (ebiased >= 32'sd32767);
   end
 
   // ==========================================================================
@@ -265,18 +306,18 @@ module fpu_srt_div
               rea=a[78:64]; rebe=b[78:64]; rma=a[63:0]; rmbb=b[63:0];
               rsa<=a[79]; rem_q012<=3'd0; rem_c2<=1'b0; rem_ie<=1'b0; rprem1<=prem1;
               if (rem_is_nan(a) || rem_is_nan(b)) begin
-                result_q <= {1'b0, (rem_is_nan(a) ? rem_quiet(a) : rem_quiet(b))};
+                result_q <= {3'b000, (rem_is_nan(a) ? rem_quiet(a) : rem_quiet(b))};
                 st <= ST_SPECIAL;
               end else if (rem_is_zero(b) || rem_is_inf(a)) begin
-                result_q <= {1'b0, RQNAN_INDEF}; rem_ie<=1'b1; st <= ST_SPECIAL;
+                result_q <= {3'b000, RQNAN_INDEF}; rem_ie<=1'b1; st <= ST_SPECIAL;
               end else if (rem_is_zero(a) || rem_is_inf(b)) begin
-                result_q <= {1'b0, a}; st <= ST_SPECIAL;     // |a|<|b| or a==0
+                result_q <= {3'b000, a}; st <= ST_SPECIAL;     // |a|<|b| or a==0
               end else begin
                 rea_a = (rea ==15'd0) ? (17'sd1 - {10'd0, rem_clz64(rma)})  : $signed({2'b0, rea});
                 reb_a = (rebe==15'd0) ? (17'sd1 - {10'd0, rem_clz64(rmbb)}) : $signed({2'b0, rebe});
                 rexpd = rea_a - reb_a;
                 if (rexpd < 0 || (rexpd==0 && rma < rmbb)) begin
-                  result_q <= {1'b0, a}; st <= ST_SPECIAL;   // remainder = a, Q=0
+                  result_q <= {3'b000, a}; st <= ST_SPECIAL;   // remainder = a, Q=0
                 end else begin
                   // nb = alignment bits (D = ma<<nb): expdiff (complete) or the
                   // partial-reduction count (>=64 -> reduce 32..63 bits, C2=1).
@@ -302,7 +343,7 @@ module fpu_srt_div
             if (mode == FD_SQRT) begin
               // ---- sqrt setup (== fx_sqrt; caller guarantees a >= 0) --------
               if (fx_is_zero(a) || fx_exp(a)==15'h7fff) begin
-                result_q <= {1'b0, a};         // sqrt(+0)=+0, sqrt(-0)=-0, sqrt(+Inf)=+Inf
+                result_q <= {3'b000, a};         // sqrt(+0)=+0, sqrt(-0)=-0, sqrt(+Inf)=+Inf
                 st <= ST_SPECIAL;
               end else begin
                 // Normalize the radicand to sig*2^ee (sig in [1,2)); denormals
@@ -334,17 +375,33 @@ module fpu_srt_div
               // ---- divide setup (== prior engine) --------------------------
               sign <= fx_sign(a) ^ fx_sign(b);
               if (fx_is_zero(b)) begin
-                result_q <= {1'b0, fx_make(fx_sign(a) ^ fx_sign(b), 15'h7fff,
+                result_q <= {3'b000, fx_make(fx_sign(a) ^ fx_sign(b), 15'h7fff,
                                            64'h8000000000000000)};
                 st <= ST_SPECIAL;
               end else if (fx_is_zero(a)) begin
-                result_q <= {1'b0, fx_make(fx_sign(a) ^ fx_sign(b), 15'd0, 64'd0)};
+                result_q <= {3'b000, fx_make(fx_sign(a) ^ fx_sign(b), 15'd0, 64'd0)};
                 st <= ST_SPECIAL;
               end else begin
+                // Normalize each significand so its leading 1 sits at bit63. NORMAL
+                // operands already are (no shift, ua/ub == fx_uexp). DENORMAL operands
+                // (exp==0) arrive UNNORMALIZED — clz-shift to bit63 and carry the
+                // shift in the eff exponent so the SRT recurrence (which assumes a
+                // 1.f significand) and the final exponent stay exact. Value model
+                // mant*2^(uexp-63) is preserved by ua/ub -= (63-clz). The eligibility
+                // guard in fpu_writeback was widened to route denormal / extreme-exp
+                // divides here too, so the combinational fx_div_exact path is dead.
                 automatic logic [63:0] ma_ = fx_man(a);
                 automatic logic [63:0] mb_ = fx_man(b);
-                ua   <= fx_uexp(a);
-                ub   <= fx_uexp(b);
+                automatic int          ka  = 63;
+                automatic int          kb  = 63;
+                automatic logic signed [31:0] uae = fx_uexp_eff(a);
+                automatic logic signed [31:0] ube = fx_uexp_eff(b);
+                for (int i=63;i>=0;i--) if (ma_[i]) begin ka=i; break; end
+                for (int i=63;i>=0;i--) if (mb_[i]) begin kb=i; break; end
+                ma_  = ma_ << (63-ka);
+                mb_  = mb_ << (63-kb);
+                ua   <= uae - (63 - ka);
+                ub   <= ube - (63 - kb);
                 d4   <= mb_[62:59];
                 dfx  <= {7'b0, mb_, 9'b0};
                 S    <= {7'b0, ma_, 9'b0};
@@ -365,7 +422,8 @@ module fpu_srt_div
           k    <= k + 7'd1;
         end
         ST_DFIN: begin
-          result_q <= {inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
+          result_q <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[82:0]
+                          : {2'b00, inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
           done_q   <= 1'b1;
           st       <= ST_IDLE;
         end
@@ -380,7 +438,8 @@ module fpu_srt_div
           k       <= k + 7'd1;
         end
         ST_QFIN: begin                          // shared remainder-sign rounder
-          result_q <= {inexact, fx_make(1'b0, ebiased[14:0], keep[63:0])};
+          result_q <= (oor || pc==2'b00 || pc==2'b10) ? packed_oor[82:0]
+                          : {2'b00, inexact, fx_make(1'b0, ebiased[14:0], keep[63:0])};
           done_q   <= 1'b1;
           st       <= ST_IDLE;
         end
@@ -427,7 +486,7 @@ module fpu_srt_div
           if (rndup) begin r = rmb - rrem; s_eff = ~rsa; q_eff = qacc[63:0] + 64'd1; end
           else       begin r = rrem;       s_eff =  rsa; q_eff = qacc[63:0];          end
           if (r==64'd0) begin
-            result_q <= {1'b0, s_eff, 15'd0, 64'd0};       // signed zero
+            result_q <= {3'b000, s_eff, 15'd0, 64'd0};       // signed zero
           end else begin
             lz   = rem_clz64(r);
             mant = r << lz;
@@ -436,9 +495,9 @@ module fpu_srt_div
               logic signed [16:0] ome; logic [6:0] rsh;
               ome = 17'sd1 - e;
               rsh = (ome > 17'sd63) ? 7'd63 : ome[6:0];
-              result_q <= {1'b0, s_eff, 15'd0, (mant >> rsh)};
+              result_q <= {3'b000, s_eff, 15'd0, (mant >> rsh)};
             end else begin
-              result_q <= {1'b0, s_eff, e[14:0], mant};
+              result_q <= {3'b000, s_eff, e[14:0], mant};
             end
           end
           rem_q012 <= rc2 ? 3'd0 : q_eff[2:0];

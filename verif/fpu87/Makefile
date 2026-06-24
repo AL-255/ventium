@@ -26,6 +26,8 @@ SF_LIB      := $(SF_OBJDIR)/softfloat.a
 TF_OBJDIR   := $(BUILD)/testfloat
 TF_GEN      := $(TF_OBJDIR)/testfloat_gen
 ORACLE      := $(BUILD)/ven_fpu_oracle
+FIST_ORACLE := $(BUILD)/fist_oracle
+CONV_ORACLE := $(BUILD)/conv_oracle
 
 # extF80 results are identical across the 8086 / 8086-SSE specializations
 # (s_propagateNaNExtF80UI.c is byte-identical; conversions use the shared
@@ -40,8 +42,20 @@ SF_CFLAGS   := -DSOFTFLOAT_FAST_INT64 -DLITTLEENDIAN=1 -I$(SF_SRC)/include
 CC          ?= gcc
 CFLAGS      ?= -O2 -Wall -Wextra -std=c11
 
-.PHONY: all oracle qref testfloat clean
+.PHONY: all oracle fist conv qref testfloat clean
 all: $(ORACLE)
+
+# Standalone x87 FIST (floatx80 -> signed int) golden for the OOC fist gate.
+fist: $(FIST_ORACLE)
+$(FIST_ORACLE): oracle/fist_oracle.c $(SF_LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SF_CFLAGS) -o $@ $< $(SF_LIB)
+
+# Standalone x87 f32/f64 <-> floatx80 conversion golden for the OOC conv gate.
+conv: $(CONV_ORACLE)
+$(CONV_ORACLE): oracle/conv_oracle.c $(SF_LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SF_CFLAGS) -o $@ $< $(SF_LIB)
 
 $(SF_LIB):
 	@mkdir -p $(SF_OBJDIR)

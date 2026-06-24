@@ -367,8 +367,8 @@ module fpu_fpatan
 
         // ---- Horner: accum, 11 steps -----------------------------------
         S_HORN: begin
-          if (step_q[0]==1'b0) accum_q <= fx80(fx_mul(accum_q, z2_q, 2'd0));
-          else                 accum_q <= fx80(fx_add(hcoeff(step_q), accum_q, 2'd0));
+          if (step_q[0]==1'b0) accum_q <= fx80(fx_mul(accum_q, z2_q, 2'd0, 2'b11));
+          else                 accum_q <= fx80(fx_add(hcoeff(step_q), accum_q, 2'd0, 2'b11));
           if (step_q==4'd10) st<=S_ATANZ;
           step_q<=step_q+4'd1;
         end
@@ -442,7 +442,7 @@ module fpu_fpatan
         // ---- div-shortcut (far-apart exponents): ST1/ST0 ---------------
         S_DIV: begin
           automatic logic [80:0] qd; automatic logic [79:0] q;
-          qd = fx_div(y_q, x_q, rc_q);                        // floatx80_div, user rc
+          qd = fx_div(y_q, x_q, rc_q, 2'b11);                 // floatx80_div, user rc (extended internals)
           q  = qd[79:0];
           // exact-division nudge omitted: for the far-apart corner the division is
           // inexact in practice; qd[80] carries the inexact flag for PE.
