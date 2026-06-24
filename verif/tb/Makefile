@@ -197,6 +197,42 @@ l1axi_kv_dos_q:
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)
 	@echo "built (DOS + 64MiB extmem for Quake): $(CURDIR)/obj_dir_l1axi_kvdosq/$(EXE)"
 
+# ---- l1axi_kv_dos_q_xover: l1axi_kv_dos_q + --public-flat-rw (task #102) ------
+# IDENTICAL config to l1axi_kv_dos_q, plus Verilator --public-flat-rw so the C++ tb
+# can READ and WRITE the core's internal architectural signals directly through the
+# Verilated model hierarchy (top->rootp->ventium_top__DOT__u_core__DOT__...). This
+# is the state-crossover harness build (--xover-save / --xover-load in tb_main):
+# snapshot full arch+mem state at a clean instruction boundary, hand it to the qemu
+# oracle for the buggy window, and load the post-state back. NO RTL EDITS — the flag
+# alone exposes every signal; the committed RTL stays byte-identical. SEPARATE obj
+# dir so l1axi_kv_dos_q and the default build stay untouched. VEN_XOVER arms the
+# tb-side hierarchy walkers (compiled in via -DVEN_XOVER).
+.PHONY: l1axi_kv_dos_q_xover
+l1axi_kv_dos_q_xover:
+	$(VERILATOR) $(VL_FLAGS) --savable --public-flat-rw $(KV_FULL_DEFS) +define+VEN_DBG_CORE $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir obj_dir_l1axi_kvdosq_xover \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(TB_DIR)/xover.cpp $(DOS_PERIPH)
+	@echo "built (DOS Quake + public-flat-rw crossover): $(CURDIR)/obj_dir_l1axi_kvdosq_xover/$(EXE)"
+
+# ---- l1axi_kv_dos_q_xover_fp: the crossover build + the IN-RTL x87 transcendental
+# engine (+VEN_TRANSCENDENTAL) and the iterative FPREM engine (+VEN_FPREM). The plain
+# crossover build HALTs on FSIN (no transcendental engine + no FPTRAP), which Quake's
+# per-frame trig hits right after the first blit. VEN_TRANSCENDENTAL routes
+# FSIN/FCOS/FSINCOS/FPTAN/F2XM1/FPATAN/FYL2X/FYL2XP1 to the in-RTL iterative engines
+# (fpu_fsincos/fpu_f2xm1/fpu_fyl2x), so NO tb-side FP responder + NO RTL edit is needed
+# — purely a sim build knob. (TRANSCENDENTAL over-utilizes LUTs on the BOARD, but this
+# is a Verilator-only crossover-render harness, so area is irrelevant.) Separate obj dir
+# so every other build + `make verify` stays byte-identical.
+.PHONY: l1axi_kv_dos_q_xover_fp
+l1axi_kv_dos_q_xover_fp:
+	$(VERILATOR) $(VL_FLAGS) --savable --public-flat-rw $(KV_FULL_DEFS) \
+	  +define+VEN_DBG_CORE +define+VEN_TRANSCENDENTAL +define+VEN_FPREM $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir obj_dir_l1axi_kvdosq_xover_fp \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(TB_DIR)/xover.cpp $(DOS_PERIPH)
+	@echo "built (crossover + in-RTL x87 transcendentals): $(CURDIR)/obj_dir_l1axi_kvdosq_xover_fp/$(EXE)"
+
 # ---- l1axi_cdc: P1-3 dual-clock build (+VEN_L1_AXI +VEN_AXI_CDC) -------------
 # Same bus_mode=2 path, but the L1<->AXI backing port crosses through ven_axi_cdc
 # (the async-FIFO CDC bridge). In the cosim core_clk==axi_clk==top->clk, so this

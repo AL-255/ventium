@@ -38,6 +38,9 @@
 #ifdef VEN_SAVABLE
 #  include "verilated_save.h"   // VerilatedSave/Restore — full-model sim checkpointing
 #endif
+#ifdef VEN_XOVER
+#  include "xover.h"            // task #102 state-crossover (RTL<->qemu) extract/inject
+#endif
 
 #include "memmodel.h"
 #include "trace_writer.h"
@@ -57,10 +60,12 @@ ven_periph_t* ven_vgaregs_new(void);
 ven_periph_t* ven_pit_new(void);
 ven_periph_t* ven_rtc_new(void);
 ven_periph_t* ven_ide_new(const char* disk_path);
+const uint8_t* ven_vgaregs_dac(ven_periph_t* p);  // live 768B DAC palette (6-bit RGB)
 extern int    g_ven_f4a_arm;   // ven_ide sets this when VEN_F4A_ARM_LBA is read (F4A trace arm)
 void          ven_pic_set_irq(ven_periph_t*, int irq, int level);
 uint8_t       ven_pic_peek_vector(ven_periph_t*);
 uint8_t       ven_pic_intack(ven_periph_t*);
+int           ven_pit_irq0_ticks(ven_periph_t*);
 #endif
 
 #include <vector>
@@ -179,6 +184,19 @@ struct Args {
     std::string video_path;            // --video-path <guest $P5Q_VIDEO value>
     std::string video_out;             // --video-out <file> (raw P5Q1 stream)
     std::string dump_fb;               // --dump-fb <file> (vid.buffer @0x087a29e0 at exit)
+
+    // ---- task #102 state-crossover harness (VEN_XOVER build only) -------------
+    // --xover-save <prefix> @ --xover-at-retire N: when the FSM is at a clean
+    // instruction boundary (S_DECODE) at/after retire N, dump {arch regs + full
+    // MemModel} to <prefix>.arch/.mem and (optionally) stop. --xover-load <prefix>:
+    // re-inject a (qemu-produced) arch+mem state into the core at startup-or-boundary
+    // and continue. Off by default; only the new xover build links the implementation.
+    std::string xover_save_prefix;     // --xover-save <prefix>
+    std::string xover_load_prefix;     // --xover-load <prefix>
+    uint64_t    xover_at_retire = 0;   // --xover-at-retire N (save trigger; 0 = off)
+    bool        xover_save_exit = false; // --xover-save-exit (stop right after saving)
+    int         xover_at_cs    = -1;   // --xover-at-cs <hex> (also require dbg_cs==this; -1=any)
+    int64_t     xover_at_eip   = -1;   // --xover-at-eip <hex> (require architectural eip==this; -1=any)
 };
 
 [[noreturn]] void usage(const char* prog, int code) {
@@ -255,6 +273,12 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--video-path") a.video_path = need("--video-path");
         else if (k == "--video-out")  a.video_out  = need("--video-out");
         else if (k == "--dump-fb")    a.dump_fb    = need("--dump-fb");
+        else if (k == "--xover-save")      a.xover_save_prefix = need("--xover-save");
+        else if (k == "--xover-load")      a.xover_load_prefix = need("--xover-load");
+        else if (k == "--xover-at-retire") a.xover_at_retire   = parse_u64(need("--xover-at-retire"));
+        else if (k == "--xover-at-cs")      a.xover_at_cs       = (int)parse_u32(need("--xover-at-cs"));
+        else if (k == "--xover-at-eip")     a.xover_at_eip      = (int64_t)parse_u32(need("--xover-at-eip"));
+        else if (k == "--xover-save-exit") a.xover_save_exit   = true;
         else if (k == "--errata")     a.errata     = parse_u32(need("--errata"));
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
         else {
@@ -449,13 +473,171 @@ int main(int argc, char** argv) {
         if ((port>=0x1F0 && port<=0x1F7) || port==0x3F6) return g_ide;
         return nullptr;
     };
-    // IRQ0 (timer) pump — CYCLE-paced (deterministic; advances during HLT, unlike the
-    // board's wall-clock pacing, so a STI;HLT timer wait wakes). Mirrors ven_soc_app's
-    // PIC pump: raise IRQ0 every IRQ0_PERIOD cycles, present the PIC's vector on the
-    // core's intr seam ONLY once the PIC is programmed (vector>=0x08), intack on inta.
+
+    // ---- soft-VGA: PS-side INT 10h (VGABIOS) for DOS Quake (task #99) --------
+    // PORT of ven_soc_app.c's --soft-vga into the sim. The vgabios-stdvga option
+    // ROM is unusable on Ventium (no PCI std-vga device), so the PS *is* the
+    // VGABIOS: a tiny in-guest stub installed at C000:0 (IVT[0x10] -> it, after
+    // POST) saves the guest regs to C000:0x100 then OUTs the VGA trap port; the
+    // TB services the call here and writes mode-13h state into MemModel. Mode-13h
+    // pixels land at 0xA0000 (dumped to /tmp/sim_vga13.bin at exit); the palette
+    // comes via AH=10/AL=12 routed into the existing g_vga DAC. Env-gated by
+    // VEN_SOFTVGA so the default --dos run is byte-identical (stub never installs).
+    const bool soft_vga = args.dos && (std::getenv("VEN_SOFTVGA") != nullptr);
+    // VEN_SOFTVGA_FORCE installs the stub immediately (no POST/IDE-read trigger) —
+    // for a bare-metal INT 10h soft-VGA unit test that never boots a disk.
+    const bool soft_vga_force = soft_vga && (std::getenv("VEN_SOFTVGA_FORCE") != nullptr);
+    bool softvga_installed = false, softvga_post_done = false;
+    bool softvga_flush_req = false;     // ORed into flush_l1_pending each clock
+    unsigned long softvga_calls = 0;
+    static const uint32_t VGA_STUB_PHYS = 0xC0000u;
+    static const uint16_t VGA_STUB_SEG  = 0xC000u;
+    static const uint32_t VGA_REGBUF    = VGA_STUB_PHYS + 0x100u; // AX@+0 BX@+2 CX@+4 DX@+6 SI@+8 DI@+a BP@+c ES@+e DS@+10
+    static const uint16_t VGA_TRAP_PORT = 0x02E0u;
+    // 93-byte stub: save AX/BX/CX/DX/SI/DI/BP/ES/DS to cs:0x100..; out 0x2E0,al;
+    // restore them from the (possibly TB-modified) buffer; iret. (Identical bytes
+    // to ven_soc_app.c's g_vga_stub, so board and sim share one VGABIOS contract.)
+    static const uint8_t g_vga_stub[] = {
+        0x2e,0xa3,0x00,0x01, 0x2e,0x89,0x1e,0x02,0x01, 0x2e,0x89,0x0e,0x04,0x01,
+        0x2e,0x89,0x16,0x06,0x01, 0x2e,0x89,0x36,0x08,0x01, 0x2e,0x89,0x3e,0x0a,0x01,
+        0x2e,0x89,0x2e,0x0c,0x01, 0x2e,0x8c,0x06,0x0e,0x01, 0x2e,0x8c,0x1e,0x10,0x01,
+        0xba,0xe0,0x02, 0xee,
+        0x2e,0xa1,0x00,0x01, 0x2e,0x8b,0x1e,0x02,0x01, 0x2e,0x8b,0x0e,0x04,0x01,
+        0x2e,0x8b,0x16,0x06,0x01, 0x2e,0x8b,0x36,0x08,0x01, 0x2e,0x8b,0x3e,0x0a,0x01,
+        0x2e,0x8b,0x2e,0x0c,0x01, 0x2e,0x8e,0x06,0x0e,0x01, 0x2e,0x8e,0x1e,0x10,0x01,
+        0xcf
+    };
+    auto gr16 = [&](uint32_t p)->uint16_t { return (uint16_t)(mem.read8(p) | (mem.read8(p+1) << 8)); };
+    auto gw16 = [&](uint32_t p, uint16_t v){ mem.write8(p, (uint8_t)v); mem.write8(p+1, (uint8_t)(v>>8)); };
+    auto softvga_install = [&]() {
+        for (size_t i = 0; i < sizeof(g_vga_stub); i++) mem.write8(VGA_STUB_PHYS + (uint32_t)i, g_vga_stub[i]);
+        gw16(0x40, 0x0000);            // IVT[0x10].offset
+        gw16(0x42, VGA_STUB_SEG);      // IVT[0x10].segment
+        softvga_flush_req = true;      // refetch the new stub bytes + IVT coherently
+        std::fprintf(stderr, "tb: soft-VGA INT10h installed (stub@C000:0, trap port 0x%x)\n", VGA_TRAP_PORT);
+    };
+    auto softvga_set_mode13 = [&]() {
+        mem.write8(0x449, 0x13);                  // BDA video mode = 13h
+        gw16(0x44a, 40); gw16(0x44c, 0);          // BDA columns / regen size
+        mem.write8(0x462, 0); mem.write8(0x487, 0x60); // active page / VGA mode flags (graphics)
+    };
+    auto softvga_service = [&]() {
+        uint16_t ax = gr16(VGA_REGBUF+0), bx = gr16(VGA_REGBUF+2),
+                 cx = gr16(VGA_REGBUF+4), dx = gr16(VGA_REGBUF+6),
+                 es = gr16(VGA_REGBUF+0x0e);
+        uint8_t  ah = (uint8_t)(ax >> 8), al = (uint8_t)ax;
+        if (softvga_calls++ < 64 || ah != 0x0E)
+            std::fprintf(stderr, "tb: soft-vga int10 #%lu ax=%04x bx=%04x cx=%04x dx=%04x\n",
+                         softvga_calls, ax, bx, cx, dx);
+        switch (ah) {
+            case 0x00:                                  // set video mode
+                if (al == 0x13) softvga_set_mode13(); else mem.write8(0x449, al);
+                break;
+            case 0x02:                                  // set cursor position
+                gw16(0x450, dx);
+                break;
+            case 0x03:                                  // get cursor -> DX=pos CX=shape
+                dx = gr16(0x450); cx = gr16(0x460);
+                break;
+            case 0x0E: {                                // teletype: write AL, advance cursor (page 0)
+                uint8_t ch = al;
+                uint16_t cur = gr16(0x450);
+                uint8_t col = (uint8_t)cur, row = (uint8_t)(cur >> 8);
+                uint8_t cols = (uint8_t)gr16(0x44a); if (!cols) cols = 80;
+                { static char cbuf[256]; static int cn = 0;   // mirror teletype -> stderr (fault banner detection)
+                  if (ch == 0x0A || cn >= 255) { cbuf[cn] = 0; if (cn) std::fprintf(stderr, "GUESTCON: %s\n", cbuf); cn = 0; }
+                  else if (ch >= 0x20) cbuf[cn++] = (char)ch; }
+                if      (ch == 0x0D) col = 0;
+                else if (ch == 0x0A) row++;
+                else if (ch == 0x08) { if (col) col--; }
+                else {
+                    uint32_t v = 0xB8000u + ((uint32_t)row*cols + col)*2u;
+                    mem.write8(v, ch); mem.write8(v+1, 0x07);
+                    if (++col >= cols) { col = 0; row++; }
+                }
+                if (row >= 25) {                        // scroll up one line
+                    uint32_t w = (uint32_t)cols*2u, b = 0xB8000u;
+                    for (uint32_t i = 0; i < w*24u; i++) mem.write8(b+i, mem.read8(b+w+i));
+                    for (uint32_t i = 0; i < cols;  i++) { mem.write8(b+w*24u+i*2,(uint8_t)' '); mem.write8(b+w*24u+i*2+1,0x07); }
+                    row = 24;
+                }
+                gw16(0x450, (uint16_t)(((uint16_t)row << 8) | col));
+                break; }
+            case 0x0F:                                  // get mode -> AL=mode AH=cols BH=page
+                ax = (uint16_t)(((uint16_t)(uint8_t)gr16(0x44a) << 8) | mem.read8(0x449));
+                bx = (uint16_t)(bx & 0x00ff);
+                break;
+            case 0x10:                                  // palette / DAC
+                if (al == 0x12 && g_vga) {              // set block: ES:DX -> (R,G,B) table, BX start, CX count
+                    uint32_t tbl = ((uint32_t)es << 4) + dx;
+                    g_vga->io_write(g_vga, 0x3C8, (uint8_t)bx);
+                    for (uint16_t i = 0; i < cx; i++) {
+                        g_vga->io_write(g_vga, 0x3C9, mem.read8(tbl + i*3 + 0));
+                        g_vga->io_write(g_vga, 0x3C9, mem.read8(tbl + i*3 + 1));
+                        g_vga->io_write(g_vga, 0x3C9, mem.read8(tbl + i*3 + 2));
+                    }
+                } else if (al == 0x10 && g_vga) {       // set single DAC reg: BX=index, DH=r DL=g CH=b... actually CH=g CL=b DH=r
+                    g_vga->io_write(g_vga, 0x3C8, (uint8_t)bx);
+                    g_vga->io_write(g_vga, 0x3C9, (uint8_t)(dx >> 8));   // R
+                    g_vga->io_write(g_vga, 0x3C9, (uint8_t)(cx >> 8));   // G
+                    g_vga->io_write(g_vga, 0x3C9, (uint8_t)cx);          // B
+                }
+                break;
+            case 0x1A:                                  // get display combination code -> VGA color
+                if (al == 0x00) { ax = 0x001A; bx = (uint16_t)((bx & 0xff00) | 0x08); }
+                break;
+            case 0x4F:                                  // VBE: leave AX=0x4Fxx (!=0x004F) -> unsupported
+            default:                                    // -> Quake falls back to mode 13h
+                break;
+        }
+        gw16(VGA_REGBUF+0, ax); gw16(VGA_REGBUF+2, bx);
+        gw16(VGA_REGBUF+4, cx); gw16(VGA_REGBUF+6, dx);
+        softvga_flush_req = true;   // stub re-reads the regbuf through L1 after the OUT
+    };
+
+    // IRQ0 (timer) pump — PIT-DRIVEN, EMULATED-TIME-paced. The 8254 C model
+    // (g_pit, the same ven_pit.c the KV260 runs) decides the IRQ0 rate from the
+    // guest's port-0x40/0x43 counter0 reload + mode; we feed it an emulated
+    // nanosecond clock and ven_pit_irq0_ticks() reports how many ch0 periods
+    // elapsed -> latch IRQ0 pending.
+    //
+    // ROOT-CAUSE FIX (DOS-Quake go32 #DE): the OLD pump free-ran at a FIXED
+    // VEN_IRQ0_PERIOD=8000 core-cycles, IGNORING the guest's PIT programming, so a
+    // BIOS INT 1Ch timer tick landed inside a CWSDPMI real-mode reflection window
+    // and corrupted its bookkeeping -> eventual zero denominator -> "Division by
+    // Zero eip=0x24e". The cure is a tick-to-INSTRUCTION ratio that matches a real
+    // Pentium / qemu, where the guest executes MILLIONS of instructions between
+    // timer ticks. A cycle-rated clock at the 40 MHz core rate is NOT enough: the
+    // Verilated/RTL core spends ~10 cycles per retired instruction, so a 40 MHz
+    // cycle clock still ticks ~15-20x too often per instruction and the bad tick
+    // recurs (just at a different instruction). So the emulated clock is rated by
+    // RETIRED INSTRUCTIONS at a target MIPS (~real-Pentium throughput), which fixes
+    // the insn-per-tick density directly.
+    //
+    // The catch: a STI;HLT timer-wait (SeaBIOS boot menu, DOS idle) FREEZES the
+    // retire count, so an instruction-only clock would never advance during HLT and
+    // the wait would deadlock. Real hardware keeps ticking while halted, waking the
+    // CPU. So while the core is NOT retiring (idle/halt), the clock instead advances
+    // by core cycles at VEN_EMU_HZ (40 MHz) — fast enough to wake a HLT wait. Net:
+    //   emulated_ns = retired_insn * 1e9 / EMU_MIPS  (executing: correct density)
+    //               + halt_cycles  * 1e9 / EMU_HZ    (halted:    wakes the wait)
+    // Both bases are deterministic (no wall-clock), so the run is reproducible.
+    //
+    // VEN_IRQ0_PERIOD still honored as a legacy ESCAPE HATCH (fixed-cycle pump) for
+    // the old cadence-sweep diagnostics; default is the PIT-driven path.
     const uint64_t DOS_IRQ0_PERIOD =
-        std::getenv("VEN_IRQ0_PERIOD") ? (uint64_t)strtoull(std::getenv("VEN_IRQ0_PERIOD"),0,0) : 8000;
-    uint64_t dos_irq0_next = DOS_IRQ0_PERIOD;
+        std::getenv("VEN_IRQ0_PERIOD") ? (uint64_t)strtoull(std::getenv("VEN_IRQ0_PERIOD"),0,0) : 0;
+    // Target emulated instruction throughput (MIPS) — sets the insn-per-tick density
+    // during execution. ~100 MIPS gives ~5.5M instructions per default-18.2Hz tick,
+    // matching a fast Pentium; override with VEN_EMU_MIPS. Higher = sparser ticks.
+    const uint64_t DOS_EMU_MIPS =
+        std::getenv("VEN_EMU_MIPS") ? (uint64_t)strtoull(std::getenv("VEN_EMU_MIPS"),0,0) : 100ull;
+    uint64_t dos_halt_cycles = 0;   // core cycles accumulated while NOT retiring (HLT/idle)
+    // Emulated core clock (Hz) used to advance PIT time during HLT/idle. Default
+    // 40 MHz (the deployed KV260 PL0 rate); override with VEN_EMU_HZ.
+    const uint64_t DOS_EMU_HZ =
+        std::getenv("VEN_EMU_HZ") ? (uint64_t)strtoull(std::getenv("VEN_EMU_HZ"),0,0) : 40000000ull;
+    uint64_t dos_irq0_next = DOS_IRQ0_PERIOD;   // legacy fixed-pump next-edge cycle
     int      dos_pit_pending = 0;
 #endif
 
@@ -691,6 +873,22 @@ int main(int argc, char** argv) {
                     (uint8_t)top->mem_wstrb, &rdata, &ack);
         top->mem_rdata = rdata;
         top->mem_ack   = ack;
+        // VEN_BWATCH: BFM-side store/load tracer (env-gated, inert by default).
+        // Logs every mem-port access touching the 32-byte line around the addr.
+        if (top->mem_req && ack) {
+            static uint32_t bw = std::getenv("VEN_BWATCH")
+                ? (uint32_t)strtoul(std::getenv("VEN_BWATCH"), 0, 0) : 0xFFFFFFFFu;
+            if (bw != 0xFFFFFFFFu) {
+                uint32_t a = (uint32_t)top->mem_addr;
+                if ((a & ~0x1fu) == (bw & ~0x1fu)) {
+                    std::fprintf(stderr,
+                        "tb: [bwatch] %s addr=%05x strb=%x wdata=%08x rdata=%08x EIP=%08x\n",
+                        top->mem_we ? "WR" : "RD", a, (unsigned)top->mem_wstrb,
+                        (uint32_t)top->mem_wdata, rdata,
+                        (uint32_t)ventium::g_last_arch.pc);
+                }
+            }
+        }
 #ifdef VEN_L1_AXI
         axi_drive();   // keep the AXI slave outputs driven every bus-service phase
 #endif
@@ -709,6 +907,7 @@ int main(int argc, char** argv) {
     bool     io_pending_in = false;   // an IN is being serviced this clock
     bool     io_used_golden = false;  // this IN consumed a golden dev_in (scoped replay)
     bool     io_exit       = false;   // saw an `out 0xf4` (isa-debug-exit)
+    uint8_t  io_exit_al    = 0;       // the AL value of that `out 0xf4` (status source)
     uint64_t io_in_count   = 0;       // diagnostics: IN reads serviced
     uint64_t io_out_count  = 0;       // diagnostics: OUT writes consumed
     int      io_desync     = 0;       // diagnostics: port/size mismatches (a bug)
@@ -742,9 +941,27 @@ int main(int argc, char** argv) {
         if (top->io_we) {
             // OUT: the CPU drives the value out; we consume it. The isa-debug-exit
             // port 0xf4 stops the run (matches qemu-system -device isa-debug-exit).
-            if (port == 0xf4) io_exit = true;
+            // Capture the AL value so a bare-metal self-checking sys image (e.g.
+            // verif/sys/tests/pdtlbw) can report PASS/FAIL through the exit STATUS:
+            // qemu's isa-debug-exit maps AL -> process status ((AL<<1)|1), so we
+            // mirror that as the TB's exit code (qemu-faithful; inert otherwise).
+            if (port == 0xf4) { io_exit = true; io_exit_al = (uint8_t)(top->io_wdata & 0xff); }
 #ifdef VEN_DOS_MODELS
+            else if (soft_vga && port == VGA_TRAP_PORT) {
+                // soft-VGA INT 10h trap: the in-guest stub OUTs here after staging
+                // the guest regs to C000:0x100. Service the call; the stub then
+                // restores (TB-modified) regs from the buffer and IRETs.
+                softvga_service();
+            }
             else if (ven_periph_t* m = dos_model_of((uint16_t)port)) {
+                // soft-VGA install trigger: the first ATA READ-SECTORS (0x20) to the
+                // IDE cmd port = the boot sector load = POST done + 0xC0000 is free.
+                if (soft_vga && port == 0x1F7 && (top->io_wdata & 0xff) == 0x20)
+                    softvga_post_done = true;
+                if (std::getenv("VEN_PIC_LOG") && port == 0x21 && (top->io_wdata & 0xff) == 0x08)
+                    std::fprintf(stderr, "[PICOUT] OUT 0x21,0x08 retire=%llu cs=0x%04x eip=0x%08x\n",
+                                 (unsigned long long)trace.retired(), (unsigned)top->dbg_cs,
+                                 (uint32_t)top->dbg_eip);
                 m->io_write(m, (uint16_t)port, (uint8_t)(top->io_wdata & 0xff));
             }
 #endif
@@ -1152,6 +1369,31 @@ int main(int argc, char** argv) {
     }
 #endif
 
+#ifdef VEN_XOVER
+    // task #102 Stage 3 — RTL RESTORE. Inject a (qemu-produced) arch+mem state into
+    // the core's internal registers and continue. Done at startup (the model is at
+    // its reset boundary, or just after a --restore-state of a saved pre-state). We
+    // load arch+mem, write the architectural registers via the --public-flat-rw
+    // hierarchy, FLUSH the L1 (the injected MemModel differs from any cached lines),
+    // and force the FSM to S_FETCH so the very next step re-fetches from the new
+    // cs:eip. The post-eip arch state then drives the continued run past the bug.
+    if (!args.xover_load_prefix.empty()) {
+        ventium::XoverArch xa;
+        if (!ventium::xover_load(args.xover_load_prefix, xa, mem)) {
+            std::fprintf(stderr, "tb: --xover-load FAILED\n"); return 2;
+        }
+        ventium::xover_dump_summary("LOAD/pre-inject(RTL-current)", ([&]{
+            ventium::XoverArch cur; ventium::xover_extract(top, cur); return cur; }()));
+        ventium::xover_inject(top, xa);   // also forces FSM -> S_FETCH for a clean refetch
+        top->eval();
+        ventium::xover_dump_summary("LOAD/post-inject(RTL)", xa);
+        // Flush the L1 next clock so the injected memory image is the source of truth.
+        flush_l1_pending = true;
+        std::fprintf(stderr, "tb: XOVER-LOAD injected @ cyc=%llu -> continuing past the bug\n",
+                     (unsigned long long)cycles);
+    }
+#endif
+
     while (true) {
         uint64_t before = trace.retired();
 #ifdef VEN_SAVABLE
@@ -1182,7 +1424,40 @@ int main(int argc, char** argv) {
 #ifdef VEN_DOS_MODELS
         // F3 IRQ pump: present the PIC's timer vector on the core's intr seam.
         if (args.dos) {
-            if (cycles >= dos_irq0_next) { dos_pit_pending = 1; dos_irq0_next = cycles + DOS_IRQ0_PERIOD; }
+            static int irq0_off = std::getenv("VEN_IRQ0_OFF") ? 1 : 0;  // diag: suppress IRQ0 entirely
+            if (irq0_off) {
+                /* no timer ticks at all */
+            } else if (DOS_IRQ0_PERIOD != 0) {
+                // Legacy fixed-cycle pump (VEN_IRQ0_PERIOD set) — diagnostics only.
+                if (cycles >= dos_irq0_next) { dos_pit_pending = 1; dos_irq0_next = cycles + DOS_IRQ0_PERIOD; }
+            } else {
+                // PIT-driven pump: advance the 8254's emulated clock and latch IRQ0
+                // if any ch0 period elapsed. The clock is rated by RETIRED
+                // INSTRUCTIONS while the core is executing (correct insn-per-tick
+                // density), and by core CYCLES while the core is halted/idle (so a
+                // HLT timer-wait still wakes). The PIT model then ticks IRQ0 at
+                // whatever counter0 reload/mode the guest programmed.
+                static uint64_t dos_prev_ret2 = 0;
+                uint64_t ret_now = (uint64_t)trace.retired();
+                if (ret_now == dos_prev_ret2) dos_halt_cycles++;  // this clock retired nothing
+                dos_prev_ret2 = ret_now;
+                uint64_t emu_ns = (uint64_t)((__uint128_t)ret_now * 1000000000ull / DOS_EMU_MIPS / 1000000ull)
+                                + (uint64_t)((__uint128_t)dos_halt_cycles * 1000000000ull / DOS_EMU_HZ);
+                ven_pit_set_emu_ns(g_pit, emu_ns);
+                if (ven_pit_irq0_ticks(g_pit) > 0) {
+                    dos_pit_pending = 1;
+                    // DIAG: log the cycle interval between the first IRQ0 deliveries
+                    // so the cadence (vs the old fixed 8000) is visible in the log.
+                    if (std::getenv("VEN_IRQ0_DIAG")) {
+                        static uint64_t last_tick_cyc = 0; static int tick_n = 0;
+                        if (tick_n < 16)
+                            std::fprintf(stderr, "tb: [IRQ0] tick #%d at cyc=%llu (Δ=%llu)\n",
+                                tick_n, (unsigned long long)cycles,
+                                (unsigned long long)(cycles - last_tick_cyc));
+                        last_tick_cyc = cycles; ++tick_n;
+                    }
+                }
+            }
             ven_pic_set_irq(g_pic, 0, dos_pit_pending);
             uint8_t pv = ven_pic_peek_vector(g_pic);
             top->soc_en = 1;
@@ -1201,6 +1476,15 @@ int main(int argc, char** argv) {
         // The 1-clock latency is ample — the core is still resuming from the
         // int-0x80 and cannot issue the buffer load for several clocks. Tied 0 in
         // the RTL when !l1axi_en, so this is inert in modes 0/1 / the 77-corpus.
+#ifdef VEN_DOS_MODELS
+        // soft-VGA: install the INT 10h stub + IVT[0x10] once POST is done (first
+        // ATA read); its MemModel writes (stub bytes/IVT, and each serviced call's
+        // regbuf write-back) need the same flush_all coherency pulse as a proxy write.
+        if (soft_vga && (softvga_post_done || soft_vga_force) && !softvga_installed) {
+            softvga_install(); softvga_installed = true;
+        }
+        if (softvga_flush_req) { flush_l1_pending = true; softvga_flush_req = false; }
+#endif
         top->flush_all = flush_l1_pending ? 1 : 0;
         flush_l1_pending = false;
 #endif
@@ -1279,6 +1563,18 @@ int main(int argc, char** argv) {
         if (args.dos && top->inta) {
             uint8_t vec = ven_pic_intack(g_pic);
             if (vec == 0x08) dos_pit_pending = 0;
+            // Cadence-alignment harness, step 1: record the HW-IRQ acceptance schedule
+            // (retired-insn count + vector + cs:eip) so qemu can be driven to inject
+            // IRQ0 at the identical instruction points. Gated by VEN_IRQ_REC=<path>.
+            if (const char* rp = std::getenv("VEN_IRQ_REC")) {
+                static FILE* recf = std::fopen(rp, "w");
+                if (recf) {
+                    std::fprintf(recf, "%llu %u %04x %08x\n",
+                                 (unsigned long long)trace.retired(), (unsigned)vec,
+                                 (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip);
+                    std::fflush(recf);
+                }
+            }
         }
 #endif
 
@@ -1332,6 +1628,76 @@ int main(int argc, char** argv) {
                              (unsigned long long)cycles);
             }
         }
+
+#ifdef VEN_XOVER
+        // task #102 boundary PROBE (VEN_XOVER_PROBE=<cs hex>): log every clean
+        // S_DECODE boundary at that CS in the [VEN_PROBE_LO,VEN_PROBE_HI] retire
+        // window with its eip-delta (architectural eip - dbg_eip). A delta of 0 or
+        // a small insn length = a TRUE instruction boundary (safe snapshot point);
+        // a large delta = a mid-interrupt-vectoring micro-state (DO NOT snapshot).
+        // Used to pick the pre-int-0x31 snapshot target. OFF unless armed.
+        if (const char* pc = std::getenv("VEN_XOVER_PROBE")) {
+            static unsigned probe_cs = (unsigned)strtoul(pc, nullptr, 0);
+            static uint64_t plo = std::getenv("VEN_PROBE_LO") ? strtoull(std::getenv("VEN_PROBE_LO"),0,0) : 0;
+            static uint64_t phi = std::getenv("VEN_PROBE_HI") ? strtoull(std::getenv("VEN_PROBE_HI"),0,0) : ~0ull;
+            static long probe_n = 0;
+            if ((unsigned)top->dbg_state == 2 && (unsigned)top->dbg_cs == probe_cs &&
+                trace.retired() >= plo && trace.retired() <= phi && probe_n++ < 400) {
+                ventium::XoverArch px; ventium::xover_extract(top, px);
+                std::fprintf(stderr, "tb: [XPROBE] ret=%llu cyc=%llu cs=%04x dbg_eip=%08x arch_eip=%08x delta=%d cr0=%08x\n",
+                    (unsigned long long)trace.retired(), (unsigned long long)cycles,
+                    (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip, px.eip,
+                    (int)(px.eip - (uint32_t)top->dbg_eip), px.cr0);
+                std::fflush(stderr);
+            }
+        }
+        // task #102 Stage 1 — RTL EXTRACT. At/after --xover-at-retire, the FIRST
+        // time the FSM sits at a clean instruction boundary (S_DECODE=2, no in-flight
+        // uop), serialize the full arch state + MemModel to <prefix>.arch/.mem. The
+        // post-edge here is a settled boundary; gating on dbg_state==S_DECODE ensures
+        // the pipeline is empty (this in-order core retires before re-entering DECODE).
+        bool xsave_gate = !args.xover_save_prefix.empty() && args.xover_at_retire &&
+            trace.retired() >= args.xover_at_retire &&
+            (unsigned)top->dbg_state == 2 /*S_DECODE*/ &&
+            (args.xover_at_cs < 0 || (unsigned)top->dbg_cs == (unsigned)args.xover_at_cs);
+        // --xover-at-eip: also require the ARCHITECTURAL next-fetch eip == target.
+        // Lets us pin the snapshot to a specific instruction boundary (e.g. the
+        // int 0x31 at cs=0x87:0x24c) rather than the first boundary at/after a
+        // retire count. Requires a peek-extract to read the architectural eip.
+        if (xsave_gate && args.xover_at_eip >= 0) {
+            ventium::XoverArch peek; ventium::xover_extract(top, peek);
+            if (peek.eip != (uint32_t)args.xover_at_eip) xsave_gate = false;
+        }
+        if (xsave_gate) {
+            ventium::XoverArch xa;
+            ventium::xover_extract(top, xa);
+            // Cross-check the extracted arch state vs the independent dbg ports
+            // (the Stage-1 verification gate). NOTE: dbg_eip = core_retire_pc = the
+            // COMMITTED pc of the LAST RETIRED instruction, whereas the architectural
+            // `eip` register at the S_DECODE boundary already points at the NEXT
+            // instruction to fetch. So extract.eip == dbg_eip + (last insn length):
+            // they are SUPPOSED to differ by the instruction advance. cs/eflags/esp
+            // are post-commit state and MUST match exactly.
+            uint32_t d_eip = (uint32_t)top->dbg_eip, d_esp = (uint32_t)top->dbg_esp;
+            uint32_t d_efl = (uint32_t)top->dbg_eflags; unsigned d_cs = (unsigned)top->dbg_cs;
+            bool ok = (xa.seg_sel[0] == d_cs) && (xa.eflags == d_efl) &&
+                      (xa.gpr[4] == d_esp) && (xa.eip >= d_eip) && (xa.eip - d_eip <= 15);
+            std::fprintf(stderr,
+                "tb: XOVER-SAVE @ retire=%llu cyc=%llu  dbg{cs=%04x eip=%08x(committed) efl=%08x esp=%08x} "
+                "extract{cs=%04x eip=%08x(next) efl=%08x esp=%08x}  CROSSCHECK=%s (eip delta=+%d = last-insn len)\n",
+                (unsigned long long)trace.retired(), (unsigned long long)cycles,
+                d_cs, d_eip, d_efl, d_esp,
+                xa.seg_sel[0], xa.eip, xa.eflags, xa.gpr[4],
+                ok ? "MATCH" : "MISMATCH", (int)(xa.eip - d_eip));
+            ventium::xover_dump_summary("SAVE", xa);
+            ventium::xover_save(args.xover_save_prefix, xa, mem);
+            args.xover_at_retire = 0;  // one-shot
+            if (args.xover_save_exit) {
+                std::fprintf(stderr, "tb: --xover-save-exit: stopping after crossover save\n");
+                break;
+            }
+        }
+#endif
 
         // M7.3b: the co-sim hit the isa-debug-exit `out 0xf4` — qemu-system would
         // exit here; stop the run cleanly (matches the producer's termination).
@@ -1465,6 +1831,25 @@ int main(int argc, char** argv) {
             }
             prev_rmst = dsn;
         }
+        // task #102: PM gate-delivery trace. The [INT] logger above only catches
+        // REAL-mode S_RMINT_RD; PROTECTED-mode interrupt/exception delivery walks
+        // S_INT_GATE (state 36) instead, so a #DE/#GP/#UD/IRQ reaching go32's PM
+        // handler is otherwise invisible. Log the vector + faulting CS:EIP at the
+        // S_INT_GATE rising entry. Env-gated (VEN_PMGATE_LOG) so it is OFF by
+        // default and adds zero output to existing runs.
+        if (std::getenv("VEN_PMGATE_LOG")) {
+            static unsigned prev_igst = 0;
+            static long pmgate_count = 0;
+            unsigned igst = (unsigned)top->dbg_state;
+            if (igst == 36 && prev_igst != 36 && pmgate_count++ < 4000) {
+                std::fprintf(stderr, "tb: [PMGATE] vec=0x%02x cs=%04x eip=%08x cr0=%08x (cyc=%llu)\n",
+                    (unsigned)top->dbg_int_vec, (unsigned)top->dbg_cs,
+                    (uint32_t)top->dbg_eip, (uint32_t)top->dbg_cr0,
+                    (unsigned long long)cycles);
+                std::fflush(stderr);
+            }
+            prev_igst = igst;
+        }
         // F4A: capture fault deliveries (esp. the #DE vec 0 that aborts Quake). When
         // dbg_fault_pc changes the core just raised a fault; dbg_eip/ibuf still point
         // at the faulting instruction, dbg_int_vec = the vector. Logs cs:eip:ibuf:vec.
@@ -1510,7 +1895,7 @@ int main(int argc, char** argv) {
         if ((cycles & 0x1FFFFFull) == 0) {
             long nz = 0;
             for (int i = 0; i < 64000; ++i) if (mem.read8(0xA0000u + i)) ++nz;
-            if (nz > 1000) {
+            if (nz > 1000 && !std::getenv("VEN_NO_FRAME_EXIT")) {
                 std::fprintf(stderr, "tb: FRAME! %ld nonzero VGA px @cycle %llu retired %llu\n",
                              nz, (unsigned long long)cycles,
                              (unsigned long long)trace.retired());
@@ -1640,6 +2025,19 @@ int main(int argc, char** argv) {
             std::fclose(vf);
             std::fprintf(stderr, "tb: dumped VGA13 @0xA0000 (64000 B, %ld nonzero px) -> /tmp/sim_vga13.bin\n", nz);
         }
+#ifdef VEN_DOS_MODELS
+        // task #99: also dump the live 256-entry DAC palette (6-bit R/G/B, as the
+        // guest set it via the soft-VGA AH=10 calls or the 0x3C8/0x3C9 ports) so the
+        // mode-13h framebuffer can be colorized into a PPM offline. Inert if g_vga null.
+        if (g_vga) {
+            const uint8_t* pal = ven_vgaregs_dac(g_vga);
+            if (FILE* pf = std::fopen("/tmp/sim_vga13.pal", "wb")) {
+                std::fwrite(pal, 1, 768, pf);
+                std::fclose(pf);
+                std::fprintf(stderr, "tb: dumped VGA13 DAC palette (768 B) -> /tmp/sim_vga13.pal\n");
+            }
+        }
+#endif
         // F4A: VGA TEXT @0xB8000 (80x25, char+attr). FreeDOS CON writes its banner /
         // prompt / errors directly here; the sim has no soft-VGA INT10h so this is
         // the only way to SEE the boot screen. Dump non-blank rows as readable text.
@@ -1812,6 +2210,14 @@ int main(int argc, char** argv) {
             (unsigned long long)io_out_count, io_desync,
             io_exit ? ", isa-debug-exit reached" : "");
     }
+
+    // Bare-metal self-checking sys images report PASS/FAIL through the
+    // isa-debug-exit AL value; surface it as the process status the qemu way
+    // (((AL<<1)|1)) so a runner can assert it WITHOUT a qemu-system golden. Only
+    // taken when the run actually ended on `out 0xf4` and nothing else already
+    // claimed exit_code (free-run guest exit / a real error). Inert for the whole
+    // make-verify corpus (those tests never touch port 0xf4 / never set io_exit).
+    if (io_exit && exit_code == 0) exit_code = ((int)io_exit_al << 1) | 1;
 
     ventium::g_trace = nullptr;
     trace.close();

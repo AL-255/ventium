@@ -57,6 +57,9 @@ TraceWriter* g_trace = nullptr;
 // trace_writer.h), updated every vtm_retire so the periodic-checkpoint path
 // (free-run) can save complete state (these regs + the MemModel snapshot).
 LastArch g_last_arch;
+// task #102 RETDUMP: the latest post-commit CR0 (captured by vtm_retire_sys
+// UNCONDITIONALLY so the no-trace RD window can print PE/PG). Inert otherwise.
+unsigned int g_last_cr0 = 0;
 }  // namespace ventium
 
 // Match the SystemVerilog import signatures from docs/rtl-interface.md §2.
@@ -153,6 +156,7 @@ extern "C" void vtm_retire_sys(
     unsigned long long n, unsigned int cr0, unsigned int cr2,
     unsigned int cr3, unsigned int cr4) {
     using namespace ventium;
+    g_last_cr0 = cr0;  // task #102: always capture (RD window prints PE/PG)
     if (!g_trace || g_trace->discard()) return;   // --no-trace: skip the stash
     SysState s;
     s.cr0 = cr0; s.cr2 = cr2; s.cr3 = cr3; s.cr4 = cr4;
@@ -224,6 +228,60 @@ extern "C" void vtm_retire(
                 }
                 std::fflush(stderr);
             }
+        }
+    }
+
+    // --- RETIRE-WINDOW REGISTER DUMP (task #102 DOS-Quake forward diff) --------
+    // Emit one compact committed-state line per retire over the window
+    // [VEN_RETDUMP_LO, VEN_RETDUMP_HI] so an offline aligner can diff the Ventium
+    // committed PC+GPR+flag stream against the qemu -d in_asm,cpu trace and pin the
+    // FIRST divergent instruction (a register MISCOMPUTE, not a wild branch).
+    // Format (one per line, all hex): "RD n cs eip flags eax ecx edx ebx esp ebp
+    // esi edi ss ds". Env-gated => zero overhead when unset.
+    {
+        static int    rd_init = 0;
+        static unsigned long long rd_lo = 0, rd_hi = 0;
+        static int     rd_cs = -1;   // VEN_RETDUMP_CS: emit only this cs (else all)
+        if (!rd_init) {
+            const char* l = std::getenv("VEN_RETDUMP_LO");
+            const char* h = std::getenv("VEN_RETDUMP_HI");
+            const char* c = std::getenv("VEN_RETDUMP_CS");
+            rd_lo = l ? std::strtoull(l, 0, 0) : ~0ull;   // unset => never fire
+            rd_hi = h ? std::strtoull(h, 0, 0) : 0ull;
+            rd_cs = c ? (int)strtol(c, 0, 0) : -1;
+            rd_init = 1;
+        }
+        if (n >= rd_lo && n <= rd_hi && (rd_cs < 0 || (int)cs == rd_cs)) {
+            std::fprintf(stderr,
+                "RD %llu %04x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %04x %04x %04x cr0=%08x\n",
+                (unsigned long long)n, (unsigned)cs, pc, eflags,
+                eax, ecx, edx, ebx, esp, ebp, esi, edi, (unsigned)ss, (unsigned)ds,
+                (unsigned)es, g_last_cr0);  // es + cr0 (task #102: PE/PG visibility)
+        }
+    }
+
+    // task #102: EFLAGS.ID (bit21) transition tracer. VEN_IDSET=N emits the first N
+    // retires where bit21 goes 0->1 or 1->0, with full ctx, so the FIRST spurious
+    // ID set (vs qemu, which keeps it clear) can be pinned to one cs:eip + opcode.
+    // Env-gated => zero overhead when unset.
+    {
+        static int idset_init = 0, idset_max = 0, idset_cnt = 0, idset_prev = -1;
+        if (!idset_init) {
+            const char* e = std::getenv("VEN_IDSET");
+            idset_max = e ? (int)strtol(e, 0, 0) : 0;
+            idset_init = 1;
+        }
+        if (idset_max) {
+            int cur = (eflags >> 21) & 1;
+            if (idset_prev >= 0 && cur != idset_prev && idset_cnt < idset_max) {
+                std::fprintf(stderr,
+                    "IDSET %s n=%llu cs=%04x eip=%08x efl=%08x eax=%08x ecx=%08x esp=%08x cr0=%08x\n",
+                    cur ? "0->1" : "1->0",
+                    (unsigned long long)n, (unsigned)cs, pc, eflags,
+                    eax, ecx, esp, g_last_cr0);
+                ++idset_cnt;
+            }
+            idset_prev = cur;
         }
     }
 
