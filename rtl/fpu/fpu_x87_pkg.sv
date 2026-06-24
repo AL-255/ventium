@@ -550,10 +550,20 @@ package fpu_x87_pkg;
         ma = ma << (63-ka); ua = ua - (63-ka);
         mb = mb << (63-kb); ub = ub - (63-kb);
         num = {128'd0, ma} << P;            // ma << P
-        // BOARD-FIT STUB (temporary, NOT for commit) — denormal-divide fallback the
-        // Quake render path never hits; stubs the ~43.5K-LUT 192-bit divide to fit xck26.
+`ifdef VEN_FPDIV_BOARDFIT
+        // BOARD-FIT STUB — OPT-IN ONLY (+define+VEN_FPDIV_BOARDFIT), for a full-FP PL
+        // build that over-utilizes xck26. Stubs the ~43.5K-LUT 192-bit denormal divide.
+        // The FP_PS_ALL board (FP runs in the PS) NEVER uses this path, so the board
+        // does not need this; default is the real divide so committed code is correct.
         q   = num >> 7;
         rem = 192'd0;
+`else
+        // Real 192-bit denormal divide (DEFAULT — correct for sim/verification and any
+        // non-board build). num = ma<<P (P=70 guard bits), mb is leading-1-normalized
+        // (>=2^63, so no divide-by-zero); q,rem are 192-bit and hold the result.
+        q   = num / mb;
+        rem = num % mb;
+`endif
         if (rem != 192'd0) q[0] = q[0] | 1'b1;   // exact-division sticky bit
         msb = 0;
         for (int i=191; i>=0; i--) if (q[i]) begin msb=i; break; end
