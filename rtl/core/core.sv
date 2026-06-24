@@ -4499,8 +4499,8 @@ module core
   logic [79:0] eng_div_a, eng_div_b, eng_sqrt_in;
   logic [1:0]  eng_rc;
   logic        eng_div_start, eng_sqrt_start;
-  logic        eng_div_busy, eng_div_done;   logic [80:0] eng_div_result;
-  logic        eng_sqrt_busy, eng_sqrt_done;  logic [80:0] eng_sqrt_result;
+  logic        eng_div_busy, eng_div_done;   logic [82:0] eng_div_result;
+  logic        eng_sqrt_busy, eng_sqrt_done;  logic [82:0] eng_sqrt_result;
   // M11 env-pointer latch driver (write-only -> u_fpu_state; read back via the
   // fip/fcs/fdp/fds aliases below for FNSTENV/FNSAVE).
   logic        fp_we_eptr;   logic [31:0] fp_eptr_fip;  logic [15:0] fp_eptr_fcs;
@@ -4824,7 +4824,7 @@ module core
   logic [1:0]  eng_u_mode;
   logic        eng_u_start, eng_u_busy, eng_u_done, eng_u_prem1, eng_u_rem_go;
   logic [79:0] eng_u_a, eng_u_b;
-  logic [80:0] eng_u_result;
+  logic [82:0] eng_u_result;
 `ifdef VEN_FPREM
   assign eng_u_rem_go = eng_fprem_start;
   assign eng_u_prem1  = (q_fxop==FX_FPREM1);
@@ -4838,7 +4838,7 @@ module core
   assign eng_u_b     = eng_u_rem_go ? fst(3'd1) : eng_div_b;
   fpu_srt_div u_srt_div (
     .clk(clk), .rst_n(rst_n), .start(eng_u_start), .mode(eng_u_mode),
-    .prem1(eng_u_prem1), .a(eng_u_a), .b(eng_u_b), .rc(eng_rc), .buggy(ENG_DIV_BUGGY),
+    .prem1(eng_u_prem1), .a(eng_u_a), .b(eng_u_b), .rc(eng_rc), .pc(fctrl[9:8]), .buggy(ENG_DIV_BUGGY),
     .busy(eng_u_busy), .done(eng_u_done), .result(eng_u_result),
     .rem_q012(eng_fprem_q012), .rem_c2(eng_fprem_c2), .rem_ie(eng_fprem_ie)
   );

@@ -142,12 +142,12 @@ module fpu_fyl2x
             ie2 = a0e - 32'sd16383;
             if (a0s > FY_SQRT2THR) ie2 = ie2 + 32'sd1;
             scaled = {x_sign, 15'(a0e - ie2), a0s};           // scalbn(x,-int_exp)
-            m1 = fx80(fx_add(scaled, 80'hbfff8000000000000000, 2'd0));  // scaled - 1.0
+            m1 = fx80(fx_add(scaled, 80'hbfff8000000000000000, 2'd0, 2'b11));  // scaled - 1.0 (extended)
             int_exp_q <= ie2;
             ie64 = ie2;
             if (m1[78:64]==15'd0 && m1[63:0]==64'd0) begin   // exact power of 2
               automatic logic [82:0] mr;
-              mr = fx_mul(fx_from_int(ie64), y_q, rc_q);
+              mr = fx_mul(fx_from_int(ie64, 2'b11), y_q, rc_q, 2'b11);
               result_q <= mr[79:0]; pe_q <= mr[80]; st<=S_DONE;
             end else begin
               arg_sign<=m1[79]; arg_exp<=$signed({17'd0,m1[78:64]}); arg_sig<=m1[63:0];
@@ -161,7 +161,7 @@ module fpu_fyl2x
                 (x_exp == 15'h3ffd && x_man > (x_sign ? 64'h95f619980c4336f7 : 64'hd413cccfe7799211))) begin
               result_q <= {16'hffff, 64'hc000000000000000}; pe_q<=1'b0; ie_q<=1'b1; st<=S_DONE;
             end else if (x_is_zero || y_is_zero || a1e==32'sd32767) begin
-              automatic logic [82:0] mr; mr=fx_mul(x_q,y_q,rc_q);
+              automatic logic [82:0] mr; mr=fx_mul(x_q,y_q,rc_q,2'b11);
               result_q<=mr[79:0]; pe_q<=mr[80]; st<=S_DONE;
             end else if (a0e < 32'sd16304) begin              // exp < 0x3fb0: log2e tiny path
               automatic logic [191:0] p; automatic logic [63:0] s0,s1; automatic logic signed [31:0] e;
@@ -215,8 +215,8 @@ module fpu_fyl2x
 
         // ---- deg-9 Horner: 18 steps -------------------------------------
         S_CHORN: begin
-          if (step_q[0]==1'b0) accum_q <= fx80(fx_mul(accum_q, t2_q, 2'd0));
-          else                 accum_q <= fx80(fx_add(hcoeff(step_q), accum_q, 2'd0));
+          if (step_q[0]==1'b0) accum_q <= fx80(fx_mul(accum_q, t2_q, 2'd0, 2'b11));
+          else                 accum_q <= fx80(fx_add(hcoeff(step_q), accum_q, 2'd0, 2'b11));
           if (step_q==5'd17) st<=S_CRECON;
           step_q<=step_q+5'd1;
         end

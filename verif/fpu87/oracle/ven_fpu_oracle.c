@@ -86,9 +86,16 @@ static unsigned sf_to_x87sw(unsigned sf, int de) {
     return x;
 }
 
+// x87 precision control (PC, fctrl[9:8]) -> SoftFloat extF80_roundingPrecision.
+// Set once from the FPU_PREC env (24/53/64-bit significand == 32/64/80 softfloat),
+// default 80 (extended) so existing callers are byte-identical. This lets the
+// oracle produce the PC=24/53 golden Quake actually runs under (the board-F5 bug).
+static uint_fast8_t g_prec = 80;
+
 // ---- one vector -------------------------------------------------------------
 static int compute(const char *op, int rc, const char *a_s, const char *b_s) {
     softfloat_roundingMode  = (uint_fast8_t)rc_x87_to_sf(rc);
+    extF80_roundingPrecision = g_prec;
     softfloat_exceptionFlags = 0;
     extFloat80_t a = parse80(a_s);
     extFloat80_t b = {0, 0};
@@ -113,6 +120,11 @@ static int compute(const char *op, int rc, const char *a_s, const char *b_s) {
 }
 
 int main(int argc, char **argv) {
+    const char *pe = getenv("FPU_PREC");
+    if (pe) {
+        int p = atoi(pe);  // x87 significand bits: 24=single 53=double 64=extended
+        g_prec = (p==24) ? 32 : (p==53) ? 64 : 80;   // -> softfloat extF80 codes
+    }
     if (argc >= 4) {  // single-shot: op rc a [b]
         return compute(argv[1], atoi(argv[2]), argv[3], argc >= 5 ? argv[4] : NULL);
     }

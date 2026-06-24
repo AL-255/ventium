@@ -84,7 +84,7 @@ module fpu_sqrt_iter
     msb     = 0;
     for (int i=255; i>=0; i--) if (r_final[i]) begin msb=i; break; end
     msbpos  = msb;
-    fin_result = fx_round_pack(1'b0, (msbpos - Fb) + (e >>> 1), r_final[127:0], 1'b0, rc);
+    fin_result = fx_round_pack(1'b0, (msbpos - Fb) + (e >>> 1), r_final[127:0], 1'b0, rc, 2'b11);  // dead module; extended
   end
 
   always_ff @(posedge clk) begin

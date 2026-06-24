@@ -226,9 +226,9 @@ package ventium_x87_pkg;
   endfunction
   function automatic logic [79:0] f_mem_as_int(input logic [79:0] m80, input logic [3:0] bytes);
     unique case (bytes)
-      4'd2:  f_mem_as_int = fx_from_int({{48{m80[15]}}, m80[15:0]});
-      4'd4:  f_mem_as_int = fx_from_int({{32{m80[31]}}, m80[31:0]});
-      default: f_mem_as_int = fx_from_int($signed(m80[63:0]));
+      4'd2:  f_mem_as_int = fx_from_int({{48{m80[15]}}, m80[15:0]}, 2'b11);
+      4'd4:  f_mem_as_int = fx_from_int({{32{m80[31]}}, m80[31:0]}, 2'b11);
+      default: f_mem_as_int = fx_from_int($signed(m80[63:0]), 2'b11);   // FILD: PC follow-up
     endcase
   endfunction
 
@@ -241,16 +241,17 @@ package ventium_x87_pkg;
   function automatic logic [82:0] f_arith(input logic [2:0] sub,   // {oe, ue, pe, result}
                                           input logic [79:0] a, input logic [79:0] b,
                                           input logic [1:0] rc,
+                                          input logic [1:0] pc,    // precision control (fctrl[9:8])
                                           input logic fdiv_err);
     unique case (sub)
-      3'd0: f_arith = fx_add(a, b, rc);                       // add
-      3'd1: f_arith = fx_mul(a, b, rc);                       // mul
-      3'd4: f_arith = fx_add(a, {~b[79], b[78:0]}, rc);       // sub: a - b
-      3'd5: f_arith = fx_add(b, {~a[79], a[78:0]}, rc);       // subr: b - a
-      3'd6: f_arith = fdiv_err ? fx_div_errata(a, b, rc)
-                               : fx_div(a, b, rc);            // div: a / b
-      default: f_arith = fdiv_err ? fx_div_errata(b, a, rc)
-                                  : fx_div(b, a, rc);         // divr: b / a
+      3'd0: f_arith = fx_add(a, b, rc, pc);                   // add
+      3'd1: f_arith = fx_mul(a, b, rc, pc);                   // mul
+      3'd4: f_arith = fx_add(a, {~b[79], b[78:0]}, rc, pc);   // sub: a - b
+      3'd5: f_arith = fx_add(b, {~a[79], a[78:0]}, rc, pc);   // subr: b - a
+      3'd6: f_arith = fdiv_err ? fx_div_errata(a, b, rc, pc)
+                               : fx_div(a, b, rc, pc);        // div: a / b
+      default: f_arith = fdiv_err ? fx_div_errata(b, a, rc, pc)
+                                  : fx_div(b, a, rc, pc);     // divr: b / a
     endcase
   endfunction
 
@@ -292,6 +293,7 @@ package ventium_x87_pkg;
   function automatic logic [84:0] f_eval(input logic [2:0] sub,
                                          input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc,
+                                         input logic [1:0] pc,    // precision control (fctrl[9:8])
                                          input logic fdiv_err);
     logic [82:0] r;   // {oe, ue, pe, result} from f_arith
     logic [81:0] sp;
@@ -302,10 +304,10 @@ package ventium_x87_pkg;
       else if (f_zero_over_zero(sub, a, b))
         f_eval = {1'b1, 4'b0, 80'hFFFFC000000000000000};         // IE, indefinite
       else if (f_div_by_zero(sub, a, b)) begin
-        r = f_arith(sub, a, b, rc, fdiv_err);                   // fx_div -> signed Inf
+        r = f_arith(sub, a, b, rc, pc, fdiv_err);              // fx_div -> signed Inf
         f_eval = {1'b0, 1'b1, 3'b0, r[79:0]};                   // ZE
       end else begin
-        r = f_arith(sub, a, b, rc, fdiv_err);
+        r = f_arith(sub, a, b, rc, pc, fdiv_err);
         f_eval = {2'b0, r[82], r[81], r[80], r[79:0]};          // {oe, ue, pe} from datapath
       end
     end
@@ -323,6 +325,7 @@ package ventium_x87_pkg;
   function automatic fx_pipe_t f_eval_s1(input logic [2:0] sub,
                                          input logic [79:0] a, input logic [79:0] b,
                                          input logic [1:0] rc,
+                                         input logic [1:0] pc,    // precision control (fctrl[9:8])
                                          input logic fdiv_err);
     logic [82:0] r;   // {oe, ue, pe, result} from f_arith
     logic [81:0] sp;
@@ -335,7 +338,7 @@ package ventium_x87_pkg;
       end else if (f_zero_over_zero(sub, a, b)) begin
         p.early = 1'b1; p.result = {1'b1, 4'b0, 80'hFFFFC000000000000000};
       end else if (f_div_by_zero(sub, a, b)) begin
-        r = f_arith(sub, a, b, rc, fdiv_err);                    // signed Inf
+        r = f_arith(sub, a, b, rc, pc, fdiv_err);                // signed Inf
         p.early = 1'b1; p.result = {1'b0, 1'b1, 3'b0, r[79:0]};
       end else begin
         unique case (sub)
@@ -352,12 +355,13 @@ package ventium_x87_pkg;
     end
   endfunction
 
-  function automatic logic [84:0] f_eval_s2(input fx_pipe_t p, input logic [1:0] rc);
+  function automatic logic [84:0] f_eval_s2(input fx_pipe_t p, input logic [1:0] rc,
+                                            input logic [1:0] pc);
     logic [82:0] rp;   // {oe, ue, pe, result} from fx_round_pack_f
     begin
       if (p.early) f_eval_s2 = p.result;
       else begin
-        rp = fx_round_pack_f(p.sign, p.unbiased, p.sig, p.pre_inexact, rc);
+        rp = fx_round_pack_f(p.sign, p.unbiased, p.sig, p.pre_inexact, rc, pc);
         f_eval_s2 = {2'b0, rp[82], rp[81], rp[80], rp[79:0]};     // {oe, ue, pe} from datapath
       end
     end

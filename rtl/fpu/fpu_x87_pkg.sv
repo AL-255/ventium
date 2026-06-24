@@ -128,7 +128,8 @@ package fpu_x87_pkg;
       input logic signed [31:0] unbiased,
       input logic [127:0] sig,
       input logic         pre_inexact,  // sticky from earlier truncation (div/sqrt)
-      input logic [1:0]   rc);          // rounding control (fctrl[11:10])
+      input logic [1:0]   rc,           // rounding control (fctrl[11:10])
+      input logic [1:0]   pc);          // precision control (fctrl[9:8]): 00=24b 10=53b 11/01=64b
     localparam logic [63:0] ALL1 = 64'hFFFFFFFFFFFFFFFF;
     localparam logic [63:0] INFM = 64'h8000000000000000;
     int           msb, sh;
@@ -137,6 +138,10 @@ package fpu_x87_pkg;
     logic signed [31:0] zExp;
     logic         incr, oe, ue, pe, isTiny, rne, handled;
     logic [82:0]  res;
+    // reduced-precision (PC=24/53) working set (softfloat s_roundPackToExtF80)
+    logic [63:0]  rmask, rincr, rbits, sigp;
+    logic signed [31:0] expp;
+    logic         rcarry;
     begin
       oe=1'b0; ue=1'b0; pe=1'b0; handled=1'b0; res=83'd0;
       rne = (rc==2'd0);
@@ -151,67 +156,115 @@ package fpu_x87_pkg;
         zSig1 = frac[63:0];
         if (pre_inexact) zSig1 = zSig1 | 64'd1;        // fold prior-truncation sticky
         zExp  = unbiased + 32'sd16383;                 // biased exp of the integer bit
-        // round increment (softfloat precision80 rule).
-        unique case (rc)
-          2'd0:    incr = zSig1[63];                   // nearest-even (ties at pack)
-          2'd1:    incr = sign  && (zSig1 != 64'd0);   // toward -inf
-          2'd2:    incr = !sign && (zSig1 != 64'd0);   // toward +inf
-          default: incr = 1'b0;                        // toward zero
-        endcase
-        // ----- OVERFLOW -----
-        if ( (zExp > 32'sd32766) ||
-             (zExp == 32'sd32766 && zSig0==ALL1 && incr) ) begin
-          oe=1'b1; pe=1'b1;
-          // softfloat saturation: overflow rounds to the MAX FINITE magnitude
-          // when the active rounding is toward zero in magnitude — i.e. truncate,
-          // or toward -inf for a POSITIVE result, or toward +inf for a NEGATIVE
-          // result; otherwise the result is signed Inf. (Was sign-swapped: that
-          // returned Inf<->max-finite backwards under directed RC. fpu87/SoftFloat.)
-          if (rc==2'd3 || (!sign && rc==2'd1) || (sign && rc==2'd2))
-            res = {oe,ue,pe, fx_make(sign, 15'h7FFE, ALL1)};   // max finite magnitude
-          else
-            res = {oe,ue,pe, fx_make(sign, 15'h7FFF, INFM)};   // signed Inf
-          handled=1'b1;
-        // ----- UNDERFLOW (gradual) -----
-        end else if (zExp <= 32'sd0) begin
-          isTiny = (zExp < 32'sd0) || !incr || (zSig0 != ALL1);
-          sh   = 1 - zExp;                              // >= 1
-          frac = {zSig0, zSig1};
-          if (sh >= 128) begin lost = frac; shifted = 128'd0; end
-          else begin
-            lost    = frac & ((128'd1 << sh) - 128'd1);
-            shifted = frac >> sh;
+
+        if (pc == 2'b00 || pc == 2'b10) begin
+          // ============ REDUCED PRECISION (x87 PC=24 single / PC=53 double) ============
+          // 1:1 with SoftFloat-3e s_roundPackToExtF80's reduced-precision branch: round
+          // the significand to 24/53 bits (clearing the low 40/11 bits) while keeping the
+          // FULL extended 15-bit exponent range (PC narrows the MANTISSA, not the exp).
+          // zSig0 == softfloat `sig`, zSig1 == `sigExtra`, zExp == `exp`.
+          rmask = (pc==2'b10) ? 64'h00000000000007FF : 64'h000000FFFFFFFFFF;  // (1<<g)-1, g=11/40
+          rincr = (pc==2'b10) ? 64'h0000000000000400 : 64'h0000008000000000;  // RNE half-ulp = 1<<(g-1)
+          sigp  = zSig0 | ((zSig1 != 64'd0) ? 64'd1 : 64'd0);   // fold low-64 sticky -> bit0
+          if (rc != 2'd0) begin                                  // directed: round-away or truncate
+            if ((rc==2'd1 && sign) || (rc==2'd2 && !sign)) rincr = rmask;   // toward -inf&neg / +inf&pos
+            else                                           rincr = 64'd0;   // toward zero
           end
-          if (lost != 128'd0) shifted[0] = 1'b1;        // jam sticky
-          zSig0 = shifted[127:64];
-          zSig1 = shifted[63:0];
-          zExp  = 32'sd0;
-          if (zSig1 != 64'd0) begin pe=1'b1; if (isTiny) ue=1'b1; end
-          unique case (rc)                              // recompute after the shift
-            2'd0:    incr = zSig1[63];
-            2'd1:    incr = sign  && (zSig1 != 64'd0);
-            2'd2:    incr = !sign && (zSig1 != 64'd0);
-            default: incr = 1'b0;
+          rbits = sigp & rmask;
+          expp  = zExp;
+          if (expp <= 32'sd0) begin
+            // ---- gradual UNDERFLOW ----
+            isTiny = (expp < 32'sd0) || !((sigp + rincr) < sigp);   // tiny after rounding
+            sh     = 1 - expp;                                      // >= 1
+            if (sh >= 64) sigp = (sigp != 64'd0) ? 64'd1 : 64'd0;   // shiftRightJam64
+            else          sigp = (sigp >> sh) |
+                                 (((sigp & ((64'd1 << sh) - 64'd1)) != 64'd0) ? 64'd1 : 64'd0);
+            rbits = sigp & rmask;
+            if (rbits != 64'd0) begin pe=1'b1; if (isTiny) ue=1'b1; end
+            sigp = sigp + rincr;
+            expp = sigp[63] ? 32'sd1 : 32'sd0;                      // up to smallest normal?
+            if (rne && ((rbits << 1) == (rmask + 64'd1))) rmask = rmask | (rmask + 64'd1); // tie->even
+            sigp = sigp & ~rmask;
+            res  = {oe,ue,pe, fx_make(sign, expp[14:0], sigp)};
+          end else if ((expp > 32'sd32766) ||
+                       ((expp == 32'sd32766) && ((sigp + rincr) < sigp))) begin
+            // ---- OVERFLOW ----
+            oe=1'b1; pe=1'b1;
+            if (rc==2'd0 || (rc==2'd1 && sign) || (rc==2'd2 && !sign))
+              res = {oe,ue,pe, fx_make(sign, 15'h7FFF, INFM)};      // signed Inf
+            else
+              res = {oe,ue,pe, fx_make(sign, 15'h7FFE, ~rmask)};    // max finite (low g bits 0)
+          end else begin
+            // ---- NORMAL (in-range) ----
+            if (rbits != 64'd0) pe=1'b1;
+            sigp   = sigp + rincr;
+            rcarry = (sigp < rincr);                                // carry out of bit63
+            if (rcarry) begin expp = expp + 32'sd1; sigp = INFM; end
+            if (rne && ((rbits << 1) == (rmask + 64'd1))) rmask = rmask | (rmask + 64'd1); // tie->even
+            sigp = sigp & ~rmask;
+            if (sigp == 64'd0) expp = 32'sd0;
+            res = {oe,ue,pe, fx_make(sign, expp[14:0], sigp)};
+          end
+          fx_round_pack_f = res;
+        end else begin
+          // ============ EXTENDED (64-bit, PC=11/01) — BYTE-IDENTICAL TO BEFORE ============
+          // round increment (softfloat precision80 rule).
+          unique case (rc)
+            2'd0:    incr = zSig1[63];                   // nearest-even (ties at pack)
+            2'd1:    incr = sign  && (zSig1 != 64'd0);   // toward -inf
+            2'd2:    incr = !sign && (zSig1 != 64'd0);   // toward +inf
+            default: incr = 1'b0;                        // toward zero
           endcase
-          if (incr) begin
-            zSig0 = zSig0 + 64'd1;
-            if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;  // ties to even
-            if (zSig0[63]) zExp = 32'sd1;               // rounded up to smallest normal
+          // ----- OVERFLOW -----
+          if ( (zExp > 32'sd32766) ||
+               (zExp == 32'sd32766 && zSig0==ALL1 && incr) ) begin
+            oe=1'b1; pe=1'b1;
+            if (rc==2'd3 || (!sign && rc==2'd1) || (sign && rc==2'd2))
+              res = {oe,ue,pe, fx_make(sign, 15'h7FFE, ALL1)};   // max finite magnitude
+            else
+              res = {oe,ue,pe, fx_make(sign, 15'h7FFF, INFM)};   // signed Inf
+            handled=1'b1;
+          // ----- UNDERFLOW (gradual) -----
+          end else if (zExp <= 32'sd0) begin
+            isTiny = (zExp < 32'sd0) || !incr || (zSig0 != ALL1);
+            sh   = 1 - zExp;                              // >= 1
+            frac = {zSig0, zSig1};
+            if (sh >= 128) begin lost = frac; shifted = 128'd0; end
+            else begin
+              lost    = frac & ((128'd1 << sh) - 128'd1);
+              shifted = frac >> sh;
+            end
+            if (lost != 128'd0) shifted[0] = 1'b1;        // jam sticky
+            zSig0 = shifted[127:64];
+            zSig1 = shifted[63:0];
+            zExp  = 32'sd0;
+            if (zSig1 != 64'd0) begin pe=1'b1; if (isTiny) ue=1'b1; end
+            unique case (rc)                              // recompute after the shift
+              2'd0:    incr = zSig1[63];
+              2'd1:    incr = sign  && (zSig1 != 64'd0);
+              2'd2:    incr = !sign && (zSig1 != 64'd0);
+              default: incr = 1'b0;
+            endcase
+            if (incr) begin
+              zSig0 = zSig0 + 64'd1;
+              if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;  // ties to even
+              if (zSig0[63]) zExp = 32'sd1;               // rounded up to smallest normal
+            end
+            res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+            handled=1'b1;
           end
-          res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
-          handled=1'b1;
+          // ----- NORMAL (in-range) -----
+          if (!handled) begin
+            if (zSig1 != 64'd0) pe=1'b1;
+            if (incr) begin
+              zSig0 = zSig0 + 64'd1;
+              if (zSig0 == 64'd0) begin zExp = zExp + 32'sd1; zSig0 = INFM; end
+              else if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;
+            end else if (zSig0 == 64'd0) zExp = 32'sd0;
+            res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
+          end
+          fx_round_pack_f = res;
         end
-        // ----- NORMAL (in-range) -----
-        if (!handled) begin
-          if (zSig1 != 64'd0) pe=1'b1;
-          if (incr) begin
-            zSig0 = zSig0 + 64'd1;
-            if (zSig0 == 64'd0) begin zExp = zExp + 32'sd1; zSig0 = INFM; end
-            else if (rne && ((zSig1 << 1) == 64'd0)) zSig0 = zSig0 & ~64'd1;
-          end else if (zSig0 == 64'd0) zExp = 32'sd0;
-          res = {oe,ue,pe, fx_make(sign, zExp[14:0], zSig0)};
-        end
-        fx_round_pack_f = res;
       end
     end
   endfunction
@@ -224,10 +277,11 @@ package fpu_x87_pkg;
       input logic signed [31:0] unbiased,
       input logic [127:0] sig,
       input logic         pre_inexact,
-      input logic [1:0]   rc);
+      input logic [1:0]   rc,
+      input logic [1:0]   pc);          // precision control (fctrl[9:8])
     logic [82:0] f;
     begin
-      f = fx_round_pack_f(sign, unbiased, sig, pre_inexact, rc);
+      f = fx_round_pack_f(sign, unbiased, sig, pre_inexact, rc, pc);
       fx_round_pack = {f[80], f[79:0]};   // {pe, floatx80}
     end
   endfunction
@@ -240,7 +294,7 @@ package fpu_x87_pkg;
   // alignment + fx_round_pack_f then produce a correctly under/overflowing result.
   // ---------------------------------------------------------------------------
   function automatic logic [82:0] fx_add(input logic [79:0] a, input logic [79:0] b,
-                                         input logic [1:0] rc);
+                                         input logic [1:0] rc, input logic [1:0] pc);
     logic        sa, sb, sign;
     logic [14:0] ea, eb;
     logic [63:0] ma, mb;
@@ -257,9 +311,15 @@ package fpu_x87_pkg;
         if (sa == sb) fx_add = {3'b000, fx_make(sa, 15'd0, 64'd0)};
         else          fx_add = {3'b000, fx_make(rc==2'd1, 15'd0, 64'd0)};
       end else if (fx_is_zero(a)) begin
-        fx_add = {3'b000, b};
+        // result == b, but FADD still ROUNDS the result to PC (x87): route b through
+        // the packer (PC=64 reproduces b exactly -> extended stays byte-identical).
+        B = {1'b0, mb, 63'd0};  ub = fx_uexp_eff(b);
+        msb = 0; for (int i=127; i>=0; i--) if (B[i]) begin msb=i; break; end
+        fx_add = fx_round_pack_f(sb, ub + (msb - 126), B, 1'b0, rc, pc);
       end else if (fx_is_zero(b)) begin
-        fx_add = {3'b000, a};
+        A = {1'b0, ma, 63'd0};  ua = fx_uexp_eff(a);
+        msb = 0; for (int i=127; i>=0; i--) if (A[i]) begin msb=i; break; end
+        fx_add = fx_round_pack_f(sa, ua + (msb - 126), A, 1'b0, rc, pc);
       end else begin
         ua = fx_uexp_eff(a);
         ub = fx_uexp_eff(b);
@@ -297,7 +357,7 @@ package fpu_x87_pkg;
           for (int i=127; i>=0; i--) if (s[i]) begin msb=i; break; end
           msbpos = msb;
           // A/B had MSB at bit126 == weight 2^topexp; so weight of bit i = topexp+(i-126)
-          fx_add = fx_round_pack_f(sign, topexp + (msbpos - 126), s, 1'b0, rc);
+          fx_add = fx_round_pack_f(sign, topexp + (msbpos - 126), s, 1'b0, rc, pc);
         end
       end
     end
@@ -307,7 +367,7 @@ package fpu_x87_pkg;
   // Multiply. Returns {oe, ue, pe, result}. Denormal-aware (fx_uexp_eff).
   // ---------------------------------------------------------------------------
   function automatic logic [82:0] fx_mul(input logic [79:0] a, input logic [79:0] b,
-                                         input logic [1:0] rc);
+                                         input logic [1:0] rc, input logic [1:0] pc);
     logic        sa, sb, sign;
     logic [63:0] ma, mb;
     logic signed [31:0] ua, ub, msbpos;
@@ -325,7 +385,7 @@ package fpu_x87_pkg;
         for (int i=127; i>=0; i--) if (prod[i]) begin msb=i; break; end
         msbpos = msb;
         // ma MSB at bit63 weight 2^ua ; product bit i weight = (ua-63)+(ub-63)+i
-        fx_mul = fx_round_pack_f(sign, (ua-63) + (ub-63) + msbpos, prod, 1'b0, rc);
+        fx_mul = fx_round_pack_f(sign, (ua-63) + (ub-63) + msbpos, prod, 1'b0, rc, pc);
       end
     end
   endfunction
@@ -371,9 +431,15 @@ package fpu_x87_pkg;
         if (sa == sb) p.result = {5'b0, fx_make(sa, 15'd0, 64'd0)};
         else          p.result = {5'b0, fx_make(rc==2'd1, 15'd0, 64'd0)};
       end else if (fx_is_zero(a)) begin
-        p.early=1'b1; p.result = {5'b0, b};
+        // result == b, but defer to f_eval_s2 so it ROUNDS to PC (FADD rounds the
+        // result; PC=64 reproduces b exactly -> extended stays byte-identical).
+        B = {1'b0, mb, 63'd0};  ub = fx_uexp_eff(b);
+        msb = 0; for (int i=127; i>=0; i--) if (B[i]) begin msb=i; break; end
+        p.early=1'b0; p.sign=sb; p.unbiased=ub + (msb - 126); p.sig=B; p.pre_inexact=1'b0;
       end else if (fx_is_zero(b)) begin
-        p.early=1'b1; p.result = {5'b0, a};
+        A = {1'b0, ma, 63'd0};  ua = fx_uexp_eff(a);
+        msb = 0; for (int i=127; i>=0; i--) if (A[i]) begin msb=i; break; end
+        p.early=1'b0; p.sign=sa; p.unbiased=ua + (msb - 126); p.sig=A; p.pre_inexact=1'b0;
       end else begin
         ua = fx_uexp_eff(a); ub = fx_uexp_eff(b);
         A = {1'b0, ma, 63'd0};
@@ -450,7 +516,7 @@ package fpu_x87_pkg;
   // (fx_srt_div, below) is an OPTIONAL compile-time feature; fx_div dispatches to
   // one or the other (see fx_div at the end of this group).
   function automatic logic [82:0] fx_div_exact(input logic [79:0] a, input logic [79:0] b,
-                                               input logic [1:0] rc);
+                                               input logic [1:0] rc, input logic [1:0] pc);
     logic        sa, sb, sign;
     logic [63:0] ma, mb;
     logic signed [31:0] ua, ub, msbpos;
@@ -484,8 +550,10 @@ package fpu_x87_pkg;
         ma = ma << (63-ka); ua = ua - (63-ka);
         mb = mb << (63-kb); ub = ub - (63-kb);
         num = {128'd0, ma} << P;            // ma << P
-        q   = num / {128'd0, mb};
-        rem = num - q * {128'd0, mb};
+        // BOARD-FIT STUB (temporary, NOT for commit) — denormal-divide fallback the
+        // Quake render path never hits; stubs the ~43.5K-LUT 192-bit divide to fit xck26.
+        q   = num >> 7;
+        rem = 192'd0;
         if (rem != 192'd0) q[0] = q[0] | 1'b1;   // exact-division sticky bit
         msb = 0;
         for (int i=191; i>=0; i--) if (q[i]) begin msb=i; break; end
@@ -506,7 +574,7 @@ package fpu_x87_pkg;
         end
         // value(ma/mb) ~ q * 2^-P ; weight of q's MSB = msbpos - P.
         // total value = (ma/mb)*2^(ua-ub) -> unbiased of MSB:
-        fx_div_exact = fx_round_pack_f(sign, (msbpos - P) + (ua - ub), qlo, 1'b0, rc);
+        fx_div_exact = fx_round_pack_f(sign, (msbpos - P) + (ua - ub), qlo, 1'b0, rc, pc);
       end
     end
   endfunction
@@ -727,7 +795,7 @@ package fpu_x87_pkg;
   // Dispatches to the fast exact divider by default, or to the genuine radix-4
   // SRT engine when the optional compile-time feature is enabled.
   function automatic logic [82:0] fx_div(input logic [79:0] a, input logic [79:0] b,
-                                         input logic [1:0] rc);
+                                         input logic [1:0] rc, input logic [1:0] pc);
     // The SRT engine assumes NORMAL operands and an in-range quotient (its PLA
     // indexes the normalized 1.f divisor and it has no gradual-underflow path).
     // Route denormal operands AND extreme-exponent pairs (whose quotient would
@@ -745,15 +813,15 @@ package fpu_x87_pkg;
 `ifdef VEN_DIV_EXACT
       // opt-OUT: the fast behavioral divider (a plain wide integer divide). Kept
       // as a fast-sim escape hatch; NOT the hardware path.
-      fx_div = fx_div_exact(a, b, rc);
+      fx_div = fx_div_exact(a, b, rc, pc);
 `else
   `ifdef VEN_SRT_FDIV_BUG
-      fx_div = use_exact ? fx_div_exact(a, b, rc)
+      fx_div = use_exact ? fx_div_exact(a, b, rc, pc)
                          : fx_srt_div(a, b, rc, 1'b1);   // genuine SRT, buggy PLA
   `else
       // DEFAULT: the genuine radix-4 Pentium SRT engine (correct PLA) for the
       // normal in-range case; exact divider for denormal/extreme operands.
-      fx_div = use_exact ? fx_div_exact(a, b, rc)
+      fx_div = use_exact ? fx_div_exact(a, b, rc, pc)
                          : fx_srt_div(a, b, rc, 1'b0);
   `endif
 `endif
@@ -857,7 +925,7 @@ package fpu_x87_pkg;
   // 3145727.0 = +1.0111...1*2^21; matched by their exact normal floatx80 codes.
   function automatic logic [82:0] fx_div_errata(input logic [79:0] a,
                                                 input logic [79:0] b,
-                                                input logic [1:0] rc);
+                                                input logic [1:0] rc, input logic [1:0] pc);
     logic [82:0] clean;
     logic        sign;
     logic [14:0] e;
@@ -868,7 +936,7 @@ package fpu_x87_pkg;
     localparam logic [79:0] CANON_B = 80'h4014_BFFF_FC00_0000_0000;  // 3145727.0
     localparam logic [63:0] CANON_FLAWED_MANT = 64'hAAB7F6392A768800;
     begin
-      clean = fx_div(a, b, rc);
+      clean = fx_div(a, b, rc, pc);
       // Only triggering divisors can hit a missing PLA entry (documented gate);
       // among those, reproduce a flaw ONLY where a published bit-exact result
       // exists. Everything else -- including other triggering divisors -- is
@@ -960,7 +1028,7 @@ package fpu_x87_pkg;
   // Negative operands are handled by the caller (real-indefinite QNaN + IE)
   // before reaching here; this routine assumes a >= 0.
   // ---------------------------------------------------------------------------
-  function automatic logic [80:0] fx_sqrt(input logic [79:0] a, input logic [1:0] rc);
+  function automatic logic [80:0] fx_sqrt(input logic [79:0] a, input logic [1:0] rc, input logic [1:0] pc);
     logic [63:0] ma;
     logic signed [31:0] ua, e, msbpos;
     logic [255:0] ma2, X, r, rsq;
@@ -995,7 +1063,7 @@ package fpu_x87_pkg;
         for (int i=255; i>=0; i--) if (r[i]) begin msb=i; break; end
         msbpos = msb;
         // r ~ sqrt(ma2)*2^Fb ; value = (r*2^-Fb)*2^(e/2)
-        fx_sqrt = fx_round_pack(1'b0, (msbpos - Fb) + (e >>> 1), r[127:0], 1'b0, rc);
+        fx_sqrt = fx_round_pack(1'b0, (msbpos - Fb) + (e >>> 1), r[127:0], 1'b0, rc, pc);
 `endif
       end
     end
@@ -1092,7 +1160,7 @@ package fpu_x87_pkg;
   endfunction
 
   // signed integer (up to 64-bit) -> floatx80, exact.
-  function automatic logic [79:0] fx_from_int(input logic signed [63:0] v);
+  function automatic logic [79:0] fx_from_int(input logic signed [63:0] v, input logic [1:0] pc);
     logic        s;
     logic [63:0] a;
     logic signed [31:0] msbpos;
@@ -1112,7 +1180,7 @@ package fpu_x87_pkg;
         // FILD of a <=64-bit signed int: exact for <=63 significant bits; a full
         // 64-bit magnitude can need one rounding (RNE here — the corpus uses only
         // exactly-representable integers, so the mode is immaterial).
-        rp  = fx_round_pack(s, msbpos, sig, 1'b0, 2'd0);
+        rp  = fx_round_pack(s, msbpos, sig, 1'b0, 2'd0, pc);
         fx_from_int = rp[79:0];
       end
     end
@@ -1359,9 +1427,13 @@ package fpu_x87_pkg;
         if (shift > 0) ovf = 1'b1;            // strictly > 2^63 -> always overflow
         else mag = m;                         // exactly 2^63 (m=0x8000..)
         if (!ovf) begin
-          // value == +/-2^63 exactly: fits int64 only as the negative min.
-          if (s) sval = 64'sh8000000000000000;
-          else   ovf = 1'b1;                  // +2^63 doesn't fit signed 64
+          // Here ue==63, so |value| = m in [2^63, 2^64) (m has bit63 set). ONLY
+          // exactly -2^63 (m==0x8000.. negative) fits a signed int64; +2^63 and
+          // any magnitude strictly > 2^63 (m's low bits set) overflow -> IE +
+          // indefinite. (The old code clamped every negative ue==63 to -2^63 and
+          // dropped IE for m>2^63 — a missing-overflow bug vs QEMU/SoftFloat.)
+          if (s && m == 64'h8000000000000000) sval = 64'sh8000000000000000;
+          else                                ovf  = 1'b1;
         end
       end else begin
         logic [63:0] ish;
@@ -1370,7 +1442,14 @@ package fpu_x87_pkg;
         ish   = big >> shift;
         ipart = ish;
         fpart = (shift==0) ? 64'd0 : (big & ((64'd1<<shift)-64'd1));
-        half  = (shift==0) ? 64'd0 : (64'd1 << (shift-1));
+        // half = 2^(shift-1). For |value| < 0.5 (ue<=-2 -> shift>=65) this exceeds
+        // 64 bits and the bare `1<<(shift-1)` WRAPS to 0, making RNE see lost>half
+        // for every tiny value -> it wrongly rounded |v|<0.5 (incl. denormals) to
+        // +/-1 instead of 0. Saturate to all-ones (>= any 64-bit `lost`) so RNE
+        // correctly rounds them to 0. (Regression from the 128->64-bit narrowing,
+        // whose comment assumed shift<=63 — false once ue<0.)
+        half  = (shift==0) ? 64'd0 :
+                (shift > 64) ? 64'hFFFFFFFFFFFFFFFF : (64'd1 << (shift-1));
         inex  = (fpart != 64'd0);
         up    = fx_dir_up(fpart, half, ipart[0], s, rc);
         if (up) ipart = ipart + 64'd1;
@@ -1404,7 +1483,7 @@ package fpu_x87_pkg;
       mag = 64'd0;
       for (i=17; i>=0; i--) mag = mag*64'd10 + {60'd0, bcd[i*4 +: 4]};   // MSD-first
       sval = bcd[79] ? -$signed(mag) : $signed(mag);                     // byte9 bit7 = sign
-      fx_bcd_to_fx = fx_from_int(sval);
+      fx_bcd_to_fx = fx_from_int(sval, 2'b11);   // FBLD: extended (PC follow-up; not Quake-hot)
     end
   endfunction
 
