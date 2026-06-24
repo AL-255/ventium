@@ -267,6 +267,16 @@ static double ext_to_d(extFloat80_t v) {
 static extFloat80_t d_to_ext(double x) {
   union { double d; float64_t f; } u; u.d = x; return f64_to_extF80(u.f);
 }
+// Round an extF80 value to the active precision control (extF80_roundingPrecision,
+// set from fctrl[9:8] at the trap dispatch). x+(+0) rounds the mantissa to 24/53/64
+// bits keeping the exponent (a no-op at PC=64). The transcendental bridge computes
+// in libm double (~53-bit); at Quake's PC=24 this rounds the result to 24-bit, which
+// MATCHES a real PC=24 x87 (libm agrees to ~53 > 24 bits, so the 24-bit roundings
+// coincide) -- closing the last per-op PC gap on the FPATAN/FSIN/... path.
+static extFloat80_t round_to_pc(extFloat80_t v) {
+  extFloat80_t z; z.signExp = 0; z.signif = 0;
+  return extF80_add(v, z);
+}
 
 // Transcendental / FPREM bridge (libm doubles). FPATAN/FYL2X/FYL2XP1 write ST1+pop
 // (A_ST1_POP); F2XM1/FSIN/FCOS/FRNDINT-like write ST0 (A_TOP); FSINCOS/FPTAN push
@@ -300,7 +310,9 @@ static void ven_fp_ps_transc(ven_rd_fn rd, ven_wr_fn wr, unsigned op,
     }
     default: r = x; action = A_TOP; break;
   }
-  extFloat80_t res0 = d_to_ext(r), res1 = d_to_ext(r2);
+  // Honor x87 precision control on the transcendental result (extF80_roundingPrecision
+  // was set from fctrl[9:8] in ven_fp_ps_service before this dispatch).
+  extFloat80_t res0 = round_to_pc(d_to_ext(r)), res1 = round_to_pc(d_to_ext(r2));
   commit(rd, wr, res0, res1, fstat, action);
 }
 

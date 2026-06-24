@@ -235,6 +235,22 @@ int main(void) {
            ok?"ok":"FAIL", (unsigned long long)lo, hi);
     if (!ok) fails++; }
 
+  // ---- transcendental PC: FSIN result honors precision control --------------------
+  // sin(1.0) has >24 significant bits; at PC=24 the result is rounded to a 24-bit
+  // significand (low 40 mantissa bits == 0); at PC=64 it keeps the libm ~53-bit value.
+  // Proves round_to_pc() is applied on the transcendental (FPATAN/FSIN/...) path.
+  enum { FX_FSIN_OP = 57 };   // ven_fp_ps.c op enum: F2XM1=53..FPTAN=60
+  { setup(FX_FSIN_OP, 1.0, 0, 0, 0, 0, 0, 0);             // PC=00 single
+    ven_fp_ps_service(mock_rd, mock_wr);
+    int ok = (g_res0[0] == 0) && ((g_res0[1] & 0xFFu) == 0);   // low 40 bits zero
+    printf("%-5s FSIN PC24 24-bit (low40=0): %08x%08x\n", ok?"ok":"FAIL", g_res0[1], g_res0[0]);
+    if (!ok) fails++; }
+  { setup(FX_FSIN_OP, 1.0, 0, 0, 0, 0, 0, 0); g_fctrl |= (3u << 8);   // PC=11 extended
+    ven_fp_ps_service(mock_rd, mock_wr);
+    int kept = (g_res0[0] != 0) || ((g_res0[1] & 0xFFu) != 0);  // keeps sub-24-bit bits
+    printf("%-5s FSIN PC64 keeps bits:       %08x%08x\n", kept?"ok":"FAIL", g_res0[1], g_res0[0]);
+    if (!kept) fails++; }
+
   // ---- BULK DIFFERENTIAL: board FP path at PC=24/53/64 vs inline SoftFloat -------
   // Drives random arith (normals/denormals/zero/Inf/NaN) through ven_fp_ps_service at
   // all 3 precision-control modes and bit-exact-compares the 80-bit result to SoftFloat
