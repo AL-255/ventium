@@ -26,6 +26,7 @@
 
 #include "ven_periph.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 // per-chip state (mirrors ven_pic.sv / QEMU PICCommonState)
 typedef struct {
@@ -180,8 +181,14 @@ static void pic_wr_cmd(pic_chip_t* c, uint8_t val) {
 // data-port write (0x21/0xA1): OCW1 (IMR) or the ICW2..4 init sequence.
 static void pic_wr_data(pic_chip_t* c, uint8_t val) {
     switch (c->init_st) {
-        case 0: c->imr = val; break;                     // OCW1
+        case 0:                                          // OCW1
+            if (getenv("VEN_PIC_LOG") && ((c->imr ^ val) & 0x01))
+                fprintf(stderr, "[PIC] base=0x%02x IMR 0x%02x->0x%02x (IRQ0 %s)\n",
+                        c->irq_base, c->imr, val, (val & 1) ? "MASKED" : "unmasked");
+            c->imr = val; break;
         case 1:                                          // ICW2: vector base
+            if (getenv("VEN_PIC_LOG"))
+                fprintf(stderr, "[PIC] ICW2 base 0x%02x->0x%02x\n", c->irq_base, val & 0xF8u);
             c->irq_base = (uint8_t)(val & 0xF8u);
             c->init_st  = c->single_md ? (c->init4 ? 3 : 0) : 2;
             break;

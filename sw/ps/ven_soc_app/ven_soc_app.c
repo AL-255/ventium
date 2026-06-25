@@ -33,6 +33,7 @@
 #include "hid_kbd.h"
 #include "ven_quake.h"
 #include "ven_systrace.h"
+#include "ven_fp_ps.h"
 #include "../../ps_periph/ven_periph.h"
 
 // F3 PS-placed peripheral C models (sw/ps_periph/, same files the cosim gates
@@ -49,9 +50,24 @@ uint16_t ven_vgaregs_cursor_shape(ven_periph_t*);
 // F-track FreeDOS stack: PIT (timer/IRQ0), RTC/CMOS, IDE/ATA disk.
 ven_periph_t* ven_pit_new(void);
 int           ven_pit_irq0_ticks(ven_periph_t*);
+void          ven_pit_set_emu_ns(ven_periph_t*, uint64_t ns);
 ven_periph_t* ven_rtc_new(void);
 void          ven_rtc_set_extmem_kb(ven_periph_t*, uint32_t);  // F4A: seed >1MiB RAM
 ven_periph_t* ven_ide_new(const char* disk_path);
+
+// Emulated core clock (Hz) — the deployed KV260 PL0_REF rate. Advances the PIT's
+// emulated nanosecond time base while the core is HALTED/idle (so a STI;HLT timer
+// wait still wakes). See the F3 interrupt pump.
+#ifndef VEN_EMU_HZ
+#define VEN_EMU_HZ 40000000ull
+#endif
+// Target emulated instruction throughput (MIPS) — sets the tick-to-instruction
+// density while the core is EXECUTING. ~100 MIPS ~= a fast Pentium (millions of
+// instructions per default 18.2 Hz tick), keeping a timer tick out of the CWSDPMI
+// reentrancy window. MUST match the sim's VEN_EMU_MIPS default (tb_main.cpp).
+#ifndef VEN_EMU_MIPS
+#define VEN_EMU_MIPS 100ull
+#endif
 
 static volatile uint32_t *g_reg;     // mmap'd AXI-Lite slave
 static volatile uint8_t  *g_ddr;     // mmap'd DDR carveout
@@ -727,6 +743,13 @@ int main(int argc, char **argv) {
         if (hid_kbd_open(kbd_path) < 0)
             fprintf(stderr, "ven_soc: --dos without a keyboard (display only)\n");
         export_dac();                                    // publish the reset palette
+        // Wipe the VGA carveout (gfx 0xA0000 + text 0xB8000) so a STALE fault banner
+        // or frame from a PRIOR run can't false-trigger the run-kill fault scan — the
+        // carveout DDR persists across runs and is NOT cleared by reset. The guest
+        // (SeaBIOS sets mode-3 / Quake) overwrites it during boot; the write also
+        // initializes ECC (safe — unlike a READ of uninitialized carveout).
+        memset((void *)(g_ddr + 0x000A0000), 0, 0x00020000);   // 0xA0000..0xC0000
+        fprintf(stderr, "ven_soc: cleared VGA carveout (A0000..C0000) — no stale fault banner\n");
     }
 
     // boot config: route memory via L1/AXI (mode 2) + IN/OUT via the io bridge.
@@ -959,12 +982,17 @@ int main(int argc, char **argv) {
                                  systrace_dump("exit"); break; }
         }
 
-        // ---- F4 FP-op trap (PS-trap FPATAN; +VEN_FPTRAP bitstream) ------------
-        // On D9 F3 the core stalls exposing ST0/ST1; the A53 computes atan2 and
-        // commits. The window reads 0 on a non-FPTRAP bitstream (default case), so
-        // the poll is inert there. Gated on g_quake (only Quake issues FPATAN).
-        if (g_quake && (rd(VEN_R_FPT_STAT) & VEN_FPT_STAT_ACTIVE)) {
-            service_fptrap();
+        // ---- FP-op trap (+VEN_FPTRAP / +VEN_FP_PS_ALL bitstream) --------------
+        // On a trapped x87 op the core stalls in S_FPTRAP_WAIT exposing the operands;
+        // the A53 computes (SoftFloat extF80) and commits. The window reads 0 on a
+        // non-FPTRAP bitstream, so the poll is inert there. On a FP_PS_ALL bitstream
+        // the ENTIRE x87 compute datapath traps here (not just FPATAN), and any guest
+        // (DOS / Quake) can issue them — so it is serviced unconditionally when the
+        // STAT.ACTIVE bit is set, dispatching on the full fxop in STAT[7:1].
+        if (rd(VEN_R_FPT_STAT) & VEN_FPT_STAT_ACTIVE) {
+            unsigned ft_op = (rd(VEN_R_FPT_STAT) >> VEN_FPT_OP_SHIFT) & VEN_FPT_OP_MASK;
+            if (ft_op == 0) service_fptrap();          // legacy FPATAN-only bitstream (op tied 0)
+            else            ven_fp_ps_service(rd, wr);  // FP_PS_ALL: full x87 dispatcher
             fptraps++;
         }
 
@@ -975,11 +1003,46 @@ int main(int argc, char **argv) {
             // 1. USB keyboard -> scancode FIFO -> i8042 OBF (one byte at a time)
             hid_kbd_poll();
             hid_kbd_pump(g_i8042);
-            // 2. PIT IRQ0 on WALL-CLOCK (must fire even while the core is HLT-waiting for
-            //    the timer — a retire-paced tick deadlocks, since a HLT freezes the retire
-            //    count below the threshold). ~18.2 Hz; the ISR is ~us of a 55 ms period so
-            //    the mainline is never starved. The PIC-programmed gate (step 5) blocks the
-            //    pre-pic_setup vector-0 that would otherwise derail early POST.
+            // 2. PIT IRQ0 — paced by EMULATED CORE TIME, not host wall-clock.
+            //    ROOT-CAUSE FIX (DOS-Quake go32 #DE): wall-clock pacing makes the
+            //    IRQ0 rate float free of how fast the core actually executes
+            //    instructions, so a BIOS INT 1Ch timer tick can land inside a CWSDPMI
+            //    real-mode reflection window and corrupt its bookkeeping -> "Division
+            //    by Zero eip=0x24e". The cure is a tick-to-INSTRUCTION ratio that
+            //    matches a real Pentium/qemu (millions of instructions per tick).
+            //
+            //    Mirrors the sim fix in verif/tb/tb_main.cpp EXACTLY: the PIT's
+            //    emulated nanosecond clock is rated by RETIRED INSTRUCTIONS while the
+            //    core executes (correct insn-per-tick density at ~VEN_EMU_MIPS), and
+            //    by CORE CYCLES while the core is halted/idle (so a STI;HLT timer-wait
+            //    still wakes, like real hardware ticking while halted):
+            //        emulated_ns = retired * 1e9 / EMU_MIPS  (executing)
+            //                    + halt_cycles * 1e9 / EMU_HZ (halted)
+            //    Both counters come from the on-die DBG perf unit. On a non-DBG
+            //    bitstream (no perf counter) we fall back to wall-clock (the old
+            //    behavior, so timer waits still progress) — the cadence fix needs the
+            //    DBG perf counter, which the DOS-Quake bring-up bitstream carries.
+            static int      pit_emu_probed = 0, pit_emu_have = 0;
+            static uint64_t pit_prev_ret = 0, pit_prev_cyc = 0, pit_halt_cyc = 0;
+            if (!pit_emu_probed) {
+                pit_emu_probed = 1;
+                pit_emu_have   = (rd(VEN_R_DBG_CAP) == VEN_DBG_CAP_MAGIC);
+            }
+            if (pit_emu_have) {
+                uint64_t cyc = ((uint64_t)rd(VEN_R_DBG_PERF_CYCHI) << 32)
+                             | rd(VEN_R_DBG_PERF_CYCLO);
+                uint64_t ret = ((uint64_t)rd(VEN_R_DBG_PERF_RETHI) << 32)
+                             | rd(VEN_R_DBG_PERF_RETLO);
+                // accumulate the cycles elapsed since last poll during which the core
+                // retired nothing (HLT/idle) -> they advance time at the cycle rate.
+                if (ret == pit_prev_ret && cyc > pit_prev_cyc)
+                    pit_halt_cyc += (cyc - pit_prev_cyc);
+                pit_prev_ret = ret; pit_prev_cyc = cyc;
+                uint64_t emu_ns =
+                      (uint64_t)((__uint128_t)ret * 1000000000ull / VEN_EMU_MIPS / 1000000ull)
+                    + (uint64_t)((__uint128_t)pit_halt_cyc * 1000000000ull / VEN_EMU_HZ);
+                ven_pit_set_emu_ns(g_pit, emu_ns);
+            }
             if (ven_pit_irq0_ticks(g_pit) > 0) pit_pending = 1;
             // 3. drive the 8259 IR lines: IRQ0 (timer), IRQ1 (kbd), IRQ14 (IDE)
             ven_pic_set_irq(g_pic, 0,  pit_pending);

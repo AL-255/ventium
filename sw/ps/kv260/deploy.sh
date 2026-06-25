@@ -37,6 +37,19 @@ if [ "$DO_BIT" = 1 ] || [ "$DO_RUN" = 1 ]; then
   : "${KV260_PW:?set KV260_PW in the env for --run/--bitstream (board sudo; passed transiently, never stored)}"
 fi
 
+# SERIALIZE all board operations. Running a --bitstream reload (xmutil unloadapp/
+# loadapp) CONCURRENTLY with a live --run (which holds the PL→PS AXI master) makes the
+# overlay removal STRAND an in-flight AXI burst, which HANGS the PS host hard (ssh =
+# "No route to host"; recovery = physical power-cycle). One host-side deploy.sh may
+# touch the board at a time — a second invocation waits, then refuses rather than
+# overlapping. The lock auto-releases when this process exits (fd 9 closes).
+LOCK="${TMPDIR:-/tmp}/ven_deploy_$(printf '%s' "$BOARD" | tr -c 'A-Za-z0-9' '_').lock"
+exec 9>"$LOCK" || { echo "ERROR: cannot open board lock $LOCK"; exit 3; }
+if ! flock -n 9; then
+  echo "another deploy.sh is already touching $BOARD — waiting up to 600s (will NOT overlap board ops)..."
+  flock -w 600 9 || { echo "ERROR: timed out on the board lock; refusing to run concurrently (would risk an AXI-strand PS hang)"; exit 3; }
+fi
+
 mkdir -p "$HERE/build"
 
 echo "==> [1/6] cross-compile ven_soc_app (aarch64, static)"

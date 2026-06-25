@@ -79,7 +79,13 @@ OBJDIR ?= obj_dir
 VL_OPT_FAST  ?= -O3
 VL_OPT_MARCH ?= -march=native
 VL_MAKEFLAGS := -MAKEFLAGS OPT_FAST=$(VL_OPT_FAST) -MAKEFLAGS OPT=$(VL_OPT_MARCH)
-VL_FLAGS := --cc --exe --build -j 0 \
+# VL_J: C++ build parallelism (default 0 = all cores). Override (e.g. VL_J=6) to
+# cap peak g++ memory on RAM-tight boxes. VL_SPLIT: optional --output-split flags
+# to chunk Verilator's generated C++ so each g++ invocation uses far less memory
+# (set VL_SPLIT="--output-split 20000 --output-split-cfuncs 20000" for big builds).
+VL_J     ?= 0
+VL_SPLIT ?=
+VL_FLAGS := --cc --exe --build -j $(VL_J) $(VL_SPLIT) \
             $(VL_MAKEFLAGS) \
             -sv --top-module $(TOP) \
             -Wall -Wno-UNUSED -Wno-fatal \
@@ -232,6 +238,25 @@ l1axi_kv_dos_q_xover_fp:
 	  -Mdir obj_dir_l1axi_kvdosq_xover_fp \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(TB_DIR)/xover.cpp $(DOS_PERIPH)
 	@echo "built (crossover + in-RTL x87 transcendentals): $(CURDIR)/obj_dir_l1axi_kvdosq_xover_fp/$(EXE)"
+
+# ---- l1axi_kv_dos_q_xover_fpx: the transcendental crossover build with BIT-EXACT
+# FDIV/FSQRT. F5 root-cause was FP-divergence: the area-optimized iterative SRT
+# divider (+VEN_SRT_ITER) + integer iterative divide (+VEN_IDIV_ITER) are NOT
+# bit-exact vs QEMU (the fpu87 gate's fp_div_core fails every vector), so Quake's
+# per-frame fdivp diverges -> wrong branch -> null-pointer #PF at cs=00a7:0x30874.
+# This target SUBTRACTS those two tokens from KV_FULL_DEFS so the DEFAULT bit-exact
+# divider (the one `make verify` proves correct) is used, while keeping
+# VEN_TRANSCENDENTAL (still needed for FSIN; its fyl2x is a secondary divergence we
+# watch for). Separate obj dir; every other build + `make verify` stays identical.
+KV_FULL_DEFS_BITEXACT := $(filter-out +define+VEN_SRT_ITER +define+VEN_IDIV_ITER,$(KV_FULL_DEFS))
+.PHONY: l1axi_kv_dos_q_xover_fpx
+l1axi_kv_dos_q_xover_fpx:
+	$(VERILATOR) $(VL_FLAGS) --savable --public-flat-rw $(KV_FULL_DEFS_BITEXACT) \
+	  +define+VEN_DBG_CORE +define+VEN_TRANSCENDENTAL +define+VEN_FPREM $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_SAVABLE -DVEN_XOVER -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir obj_dir_l1axi_kvdosq_xover_fpx \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(TB_DIR)/xover.cpp $(DOS_PERIPH)
+	@echo "built (crossover + transcendentals + BIT-EXACT FDIV): $(CURDIR)/obj_dir_l1axi_kvdosq_xover_fpx/$(EXE)"
 
 # ---- l1axi_cdc: P1-3 dual-clock build (+VEN_L1_AXI +VEN_AXI_CDC) -------------
 # Same bus_mode=2 path, but the L1<->AXI backing port crosses through ven_axi_cdc
