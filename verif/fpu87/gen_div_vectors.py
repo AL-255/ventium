@@ -20,6 +20,10 @@ def denormal(r):
     sig = r.getrandbits(63); return r.getrandbits(1), 0, (sig if sig else 1)
 def zero(r):    return r.getrandbits(1), 0, 0
 def operand(r):
+    # DENORM_ONLY=1 forces denormal operands so EVERY divide routes through
+    # fx_div_exact (the use_exact path) — used to isolate-verify that path's divide.
+    if os.environ.get("DENORM_ONLY"):
+        s,e,g = denormal(r); return f80(s,e,g), (e==0 and g==0)
     k = r.random()
     if   k < 0.50: s,e,g = normal(r)
     elif k < 0.72: s,e,g = extreme(r)
