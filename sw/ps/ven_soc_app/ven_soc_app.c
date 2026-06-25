@@ -743,13 +743,11 @@ int main(int argc, char **argv) {
         if (hid_kbd_open(kbd_path) < 0)
             fprintf(stderr, "ven_soc: --dos without a keyboard (display only)\n");
         export_dac();                                    // publish the reset palette
-        // Wipe the VGA carveout (gfx 0xA0000 + text 0xB8000) so a STALE fault banner
-        // or frame from a PRIOR run can't false-trigger the run-kill fault scan — the
-        // carveout DDR persists across runs and is NOT cleared by reset. The guest
-        // (SeaBIOS sets mode-3 / Quake) overwrites it during boot; the write also
-        // initializes ECC (safe — unlike a READ of uninitialized carveout).
-        memset((void *)(g_ddr + 0x000A0000), 0, 0x00020000);   // 0xA0000..0xC0000
-        fprintf(stderr, "ven_soc: cleared VGA carveout (A0000..C0000) — no stale fault banner\n");
+        // NOTE: do NOT memset the VGA carveout here. On a FRESH boot the carveout DDR is
+        // uninitialized; a WRITE to it (memset) before the core/guest has scrubbed it
+        // crashes ven_soc_app on the ECC corner (the "stale-banner false-#DE" was a
+        // pre-session artifact that a power-cycle clears anyway). The guest writes the
+        // VGA region during boot, so the run-kill scan reads valid memory by then.
     }
 
     // boot config: route memory via L1/AXI (mode 2) + IN/OUT via the io bridge.
