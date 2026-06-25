@@ -677,7 +677,8 @@ package fpu_x87_pkg;
   // exponent pairs to fx_div_exact, so this engine never over/underflows and
   // always returns oe=ue=0 (only PE/inexact). Returns {oe, ue, pe, result}.
   function automatic logic [82:0] fx_srt_div(input logic [79:0] a, input logic [79:0] b,
-                                             input logic [1:0] rc, input logic buggy);
+                                             input logic [1:0] rc, input logic [1:0] pc,
+                                             input logic buggy);
     localparam int NSTEP = 36;
     logic        sa, sb, sign;
     logic [63:0] ma, mb;
@@ -692,7 +693,7 @@ package fpu_x87_pkg;
     logic [127:0] uq, keep, remv, half;
     logic [159:0] ra, rq;
     logic        rs_pos, rs_neg, up, down, inexact, resid_pos, resid_neg;
-    int          msb, extra;
+    int          msb, extra, pcbits;
     begin
       sa=fx_sign(a); sb=fx_sign(b); sign=sa^sb;
       if (fx_is_zero(b))
@@ -753,11 +754,15 @@ package fpu_x87_pkg;
         rq = qacc[127:0] * mb;             // computed quotient * divisor (160b ctx)
         rs_pos = (ra > rq);                // true value above the computed quotient
         rs_neg = (ra < rq);                // true value below it
-        // round the (positive) quotient accumulator to 64-bit significand.
+        // round the (positive) quotient accumulator to a PC-bit significand, placed at
+        // the top of the 64-bit floatx80 field (low 64-PCBITS bits zero). x87 precision
+        // control (PC=fctrl[9:8]: 00->24, 10->53, else 64) rounds the quotient to N bits
+        // in a SINGLE rounding (NOT round-to-64-then-N, which would double-round).
+        pcbits = (pc == 2'b00) ? 24 : (pc == 2'b10) ? 53 : 64;
         uq  = qacc;                      // qacc is positive for normal operands
         msb = 0;
         for (int i=127; i>=0; i--) if (uq[i]) begin msb=i; break; end
-        extra = msb - 63;
+        extra = msb - (pcbits-1);
         keep  = uq >> extra;
         remv  = uq & ((128'd1 << extra) - 128'd1);
         half  = 128'd1 << (extra-1);
@@ -782,19 +787,21 @@ package fpu_x87_pkg;
         endcase
         if (up) begin
           keep = keep + 128'd1;
-          if (keep[64]) begin keep = keep >> 1; msb = msb + 1; end
+          if (keep[pcbits]) begin keep = keep >> 1; msb = msb + 1; end
         end else if (down) begin
           // keep over-estimates the true magnitude by < 1 ULP -> floor to keep-1.
           keep = keep - 128'd1;
-          if (!keep[63]) begin               // crossed a power of two: renormalize.
+          if (!keep[pcbits-1]) begin         // crossed a power of two: renormalize.
             // deficit is sub-ULP-tiny, so the floored significand is all-ones, exp-1.
-            keep = {64'd0, 64'hFFFFFFFFFFFFFFFF};
+            keep = (128'd1 << pcbits) - 128'd1;
             msb  = msb - 1;
           end
         end
         e       = (msb - 70) + (ua - ub);
         ebiased = e + 32'sd16383;
         // oe=ue=0: fx_div guarantees normal/normal operands with in-range quotient.
+        // place the PCBITS significand at the top of the 64-bit field (low bits zero).
+        keep    = keep << (64 - pcbits);
         fx_srt_div = {2'b00, inexact, fx_make(sign, ebiased[14:0], keep[63:0])};
 `endif
       end
@@ -827,12 +834,12 @@ package fpu_x87_pkg;
 `else
   `ifdef VEN_SRT_FDIV_BUG
       fx_div = use_exact ? fx_div_exact(a, b, rc, pc)
-                         : fx_srt_div(a, b, rc, 1'b1);   // genuine SRT, buggy PLA
+                         : fx_srt_div(a, b, rc, pc, 1'b1);   // genuine SRT, buggy PLA
   `else
       // DEFAULT: the genuine radix-4 Pentium SRT engine (correct PLA) for the
       // normal in-range case; exact divider for denormal/extreme operands.
       fx_div = use_exact ? fx_div_exact(a, b, rc, pc)
-                         : fx_srt_div(a, b, rc, 1'b0);
+                         : fx_srt_div(a, b, rc, pc, 1'b0);
   `endif
 `endif
     end
