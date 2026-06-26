@@ -86,7 +86,20 @@ module ven_northbridge #(
     // line is dropped (the EADS#/inquire analogue; the L1 is write-through, so an
     // invalidate suffices — no write-back). Atomic with the write becoming visible.
     output logic        snoop_inv_valid,
-    output logic [31:0] snoop_inv_addr
+    output logic [31:0] snoop_inv_addr,
+
+    // ---- DOWNSTREAM MMIO MASTER (to the southbridge device fabric) -------------
+    // Phase D.5: uncacheable accesses whose cachemap `to_dram=0` (the VGA aperture,
+    // disabled/forwarded PAM windows, PCI memory space) are device MMIO — they route
+    // HERE instead of to DDR (d_*), so the L2 and DRAM never see device cycles. Same
+    // word-granular backing protocol. Tie mmio_ack appropriately when unused.
+    output logic        mmio_req,
+    output logic        mmio_we,
+    output logic [31:0] mmio_addr,
+    output logic [31:0] mmio_wdata,
+    output logic [3:0]  mmio_wstrb,
+    input  logic [31:0] mmio_rdata,
+    input  logic        mmio_ack
 `ifdef VEN_DBG_CORE
     ,
     output logic [31:0] dbg_hits,        // L2 hits
@@ -122,9 +135,14 @@ module ven_northbridge #(
       .to_dram(to_dram), .l1_cacheable(l1_cacheable), .l2_cacheable(l2_cacheable),
       .region(cm_region));
 
-  // route=1 → through the L2 (write-back cacheable); route=0 → bypass straight to DDR.
-  logic route;
-  assign route = l2_cacheable;
+  // Three-way routing for the active transaction (single-outstanding ⇒ exactly one):
+  //   route   = l2_cacheable           → through the L2 (write-back) to DDR
+  //   ddr_byp = ~l2_cacheable & to_dram → bypass straight to DDR (uncacheable DRAM)
+  //   mmio    = ~l2_cacheable & ~to_dram → device MMIO (mmio_*) — never touches L2/DDR
+  logic route, ddr_byp, mmio_sel;
+  assign route    = l2_cacheable;
+  assign mmio_sel = ~l2_cacheable & ~to_dram;
+  assign ddr_byp  = ~l2_cacheable &  to_dram;
 
   // ---- L2 instance (only sees CACHEABLE traffic from whichever requester is granted)
   logic        l2_u_ack;  logic [31:0] l2_u_rdata;
@@ -140,17 +158,25 @@ module ven_northbridge #(
 `endif
   );
 
-  // ---- downstream mux: L2's master when routing through it, else the active request
-  // (the bypass — a straight pass-through to DDR). ----------------------------
-  assign d_req   = route ? l2_d_req   : a_req;
+  // ---- DDR downstream (d_*): the L2's master on a cacheable txn, else the active
+  // request on a DRAM-bypass txn; idle (req=0) on an MMIO txn. -----------------
+  assign d_req   = route ? l2_d_req   : (ddr_byp & a_req);
   assign d_we    = route ? l2_d_we    : a_we;
   assign d_addr  = route ? l2_d_addr  : a_addr;
   assign d_wdata = route ? l2_d_wdata : a_wdata;
   assign d_wstrb = route ? l2_d_wstrb : a_wstrb;
 
-  // ---- active-transaction response, then demux to the granted requester -----
-  assign a_rdata = route ? l2_u_rdata : d_rdata;
-  assign a_ack   = route ? l2_u_ack   : d_ack;
+  // ---- MMIO downstream (mmio_*): the active request on an MMIO txn; else idle. -
+  assign mmio_req   = mmio_sel & a_req;
+  assign mmio_we    = a_we;
+  assign mmio_addr  = a_addr;
+  assign mmio_wdata = a_wdata;
+  assign mmio_wstrb = a_wstrb;
+
+  // ---- active-transaction response (one of L2 / DDR-bypass / MMIO), then demux to
+  // the granted requester. -----------------------------------------------------
+  assign a_rdata = route ? l2_u_rdata : (mmio_sel ? mmio_rdata : d_rdata);
+  assign a_ack   = route ? l2_u_ack   : (mmio_sel ? mmio_ack   : d_ack);
   assign u_rdata   = a_rdata;  assign u_ack   = ~gnt_dma & a_ack;
   assign dma_rdata = a_rdata;  assign dma_ack =  gnt_dma & a_ack;
 
