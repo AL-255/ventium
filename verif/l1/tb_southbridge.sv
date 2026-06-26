@@ -18,6 +18,8 @@ module tb_southbridge;
   logic        dma_req, dma_we; logic [31:0] dma_addr, dma_wdata; logic [3:0] dma_wstrb;
   logic [31:0] dma_rdata; logic dma_ack;
   logic        dev_rd, dev_wr; logic [31:0] dev_rdata, dev_wdata; logic dma_busy, dma_tc;
+  logic        ide_req, ide_we; logic [31:0] ide_addr, ide_wdata; logic [3:0] ide_wstrb;
+  logic [31:0] ide_rdata; logic ide_ack;
   logic [55:0] cfg_pam; logic [7:0] cfg_dramc, cfg_cc, cfg_tom_mb4, cfg_smram;
 
   ven_southbridge u_sb (
@@ -30,6 +32,8 @@ module tb_southbridge;
       .dma_wstrb(dma_wstrb), .dma_rdata(dma_rdata), .dma_ack(dma_ack),
       .dev_rd(dev_rd), .dev_rdata(dev_rdata), .dev_wr(dev_wr), .dev_wdata(dev_wdata),
       .dma_busy(dma_busy), .dma_tc(dma_tc),
+      .ide_req(ide_req), .ide_we(ide_we), .ide_addr(ide_addr), .ide_wdata(ide_wdata),
+      .ide_wstrb(ide_wstrb), .ide_rdata(ide_rdata), .ide_ack(ide_ack),
       .cfg_pam(cfg_pam), .cfg_dramc(cfg_dramc), .cfg_cc(cfg_cc),
       .cfg_tom_mb4(cfg_tom_mb4), .cfg_smram(cfg_smram));
 
@@ -66,10 +70,21 @@ module tb_southbridge;
   task automatic mmio_r(input [31:0] a, output [31:0] d);
     @(negedge clk); mmio_req<=1; mmio_we<=0; mmio_addr<=a; #1; d=mmio_rdata; @(negedge clk); mmio_req<=0;
   endtask
+  // an IDE bus master writing `n` words to memory via the ide_* port (disk-read DMA).
+  task automatic ide_write(input [31:0] base, input int n);
+    int g;
+    for (int i=0;i<n;i++) begin
+      @(negedge clk); ide_req<=1; ide_we<=1; ide_addr<=base+i*4; ide_wdata<=32'hBA5E_0000+i; ide_wstrb<=4'hF;
+      g=0; forever begin @(posedge clk); #1; if (ide_ack) break;
+        if (++g>200) begin $display("  FAIL ide write %0d: no ack", i); errors++; break; end end
+      @(negedge clk); ide_req<=0; ide_we<=0;
+    end
+  endtask
 
   logic [31:0] d;
   initial begin
     io_req=0; io_we=0; io_addr=0; io_wdata=0; mmio_req=0; mmio_we=0; mmio_addr=0; mmio_wdata=0; mmio_wstrb=0;
+    ide_req=0; ide_we=0; ide_addr=0; ide_wdata=0; ide_wstrb=0;
     devidx=0; for (int i=0;i<64;i++) devpat[i]=32'hDA7A_0000+i;
     for (int i=0;i<(1<<16);i++) mem[i]=8'h00;
     repeat(3) @(posedge clk); rst_n<=1'b1; @(posedge clk);
@@ -125,6 +140,11 @@ module tb_southbridge;
         {mem[16'h7000+w*4+3],mem[16'h7000+w*4+2],mem[16'h7000+w*4+1],mem[16'h7000+w*4+0]}, 32'hDA7A_0000+w);
     for (int w=0; w<8; w++) chk($sformatf("ch2→mem[0x8000+%0d]", w),
         {mem[16'h8000+w*4+3],mem[16'h8000+w*4+2],mem[16'h8000+w*4+1],mem[16'h8000+w*4+0]}, 32'hDA7A_0008+w);
+
+    $display("[5] IDE bus-master (second DMA master) arbitrated onto dma_* → memory");
+    ide_write(32'h0000_9000, 6);
+    for (int w=0; w<6; w++) chk($sformatf("IDE→mem[0x9000+%0d]", w),
+        {mem[16'h9000+w*4+3],mem[16'h9000+w*4+2],mem[16'h9000+w*4+1],mem[16'h9000+w*4+0]}, 32'hBA5E_0000+w);
 
     if (errors==0) $display("SOUTHBRIDGE-GATE-OK (all checks pass)");
     else           $display("SOUTHBRIDGE-GATE-FAIL (%0d errors)", errors);

@@ -61,6 +61,17 @@ module ven_southbridge (
     output logic             dma_busy,
     output logic             dma_tc,
 
+    // ---- IDE bus-master DMA requester (ven_ide.dma_mem_* in Phase E) ------------
+    // A second bus master; the southbridge arbitrates it with the 8237 engine onto the
+    // single dma_* to the northbridge. Tie ide_req=0 when no IDE bus-master is present.
+    input  wire logic        ide_req,
+    input  wire logic        ide_we,
+    input  wire logic [31:0] ide_addr,
+    input  wire logic [31:0] ide_wdata,
+    input  wire logic [3:0]  ide_wstrb,
+    output logic [31:0]      ide_rdata,
+    output logic             ide_ack,
+
     // ---- TSC host-bridge cacheability registers → northbridge.cachemap ----------
     output logic [55:0]      cfg_pam,
     output logic [7:0]       cfg_dramc,
@@ -126,13 +137,47 @@ module ven_southbridge (
   wire [15:0] eng_count = ch_count[eng_ch] + 16'd1;
   wire        eng_dir   = (ch_mode[eng_ch][3:2]==2'b10);
 
+  // the engine's backing master, arbitrated with the IDE bus-master below.
+  logic        eng_req, eng_we; logic [31:0] eng_addr, eng_wdata; logic [3:0] eng_wstrb;
+  logic [31:0] eng_rdata; logic eng_ack;
   ven_i8237_dma u_dma (
       .clk(clk), .rst_n(rst_n),
       .go(dma_go), .start_addr(eng_start), .count(eng_count), .dir(eng_dir),
       .busy(dma_busy), .tc(dma_tc),
       .dev_rd(dev_rd), .dev_rdata(dev_rdata), .dev_wr(dev_wr), .dev_wdata(dev_wdata),
-      .m_req(dma_req), .m_we(dma_we), .m_addr(dma_addr), .m_wdata(dma_wdata),
-      .m_wstrb(dma_wstrb), .m_rdata(dma_rdata), .m_ack(dma_ack));
+      .m_req(eng_req), .m_we(eng_we), .m_addr(eng_addr), .m_wdata(eng_wdata),
+      .m_wstrb(eng_wstrb), .m_rdata(eng_rdata), .m_ack(eng_ack));
+
+  // ===========================================================================
+  // DMA master arbiter: {8237 engine, IDE bus-master} → the single dma_* to the NB.
+  // Grant LOCKED per transaction (a read streams WORDS acks, a write is one); IDE has
+  // priority (bus-master is time-sensitive). Uses the latched we (dm_lwe) for last-ack,
+  // not the combinational requester we — robust to a master dropping req/we at the ack
+  // edge (the northbridge-arbiter footgun). Response demux is ungated (one master/txn).
+  // ===========================================================================
+  localparam int WORDS = 8;                  // 32-byte line / 4
+  logic dm_lock, dm_ide, dm_lwe; logic [3:0] dm_cnt;
+  wire        dm_gnt_ide = dm_lock ? dm_ide : ide_req;     // idle: IDE wins
+  wire        am_req   = dm_gnt_ide ? ide_req   : eng_req;
+  wire        am_we    = dm_gnt_ide ? ide_we    : eng_we;
+  wire [31:0] am_addr  = dm_gnt_ide ? ide_addr  : eng_addr;
+  wire [31:0] am_wdata = dm_gnt_ide ? ide_wdata : eng_wdata;
+  wire [3:0]  am_wstrb = dm_gnt_ide ? ide_wstrb : eng_wstrb;
+  assign dma_req=am_req; assign dma_we=am_we; assign dma_addr=am_addr;
+  assign dma_wdata=am_wdata; assign dma_wstrb=am_wstrb;
+  assign eng_rdata=dma_rdata; assign eng_ack = ~dm_gnt_ide & dma_ack;
+  assign ide_rdata=dma_rdata; assign ide_ack =  dm_gnt_ide & dma_ack;
+  wire dm_last = dma_ack && (dm_lwe || (dm_cnt==WORDS-1));
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin dm_lock<=1'b0; dm_ide<=1'b0; dm_lwe<=1'b0; dm_cnt<=4'd0; end
+    else if (!dm_lock) begin
+      dm_cnt <= 4'd0;
+      if (eng_req || ide_req) begin dm_lock<=1'b1; dm_ide<=dm_gnt_ide; dm_lwe<=am_we; end
+    end else begin
+      if (dma_ack && !dm_lwe) dm_cnt <= (dm_cnt==WORDS-1) ? 4'd0 : dm_cnt+4'd1;
+      if (dm_last) dm_lock <= 1'b0;
+    end
+  end
 
   // ---- port-I/O response: single-cycle ack; data from the selected block ------
   assign io_ack   = io_req;                  // all decoded ports ack in one cycle
