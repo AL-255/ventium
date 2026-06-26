@@ -5,14 +5,17 @@
 Pentium-style system. This is the live tracking doc; the design rationale lives in
 [`docs/northbridge-system-spec.md`](docs/northbridge-system-spec.md).
 
-> TL;DR — **Phases A, B, C, and Phase D step 1 (the coherence core) are DONE and
-> gated.** The cacheability map, the L2 splice behind L1, the cacheable-vs-MMIO
-> routing, the L1 `KEN#`, and a coherent DMA bus master (arbiter + snoop-invalidate)
-> all work and pass 13 unit gates. **What remains is integration/peripheral work:**
-> the `ven_southbridge` wrapper, a real `ven_i8237` transfer engine, PCI-config-driven
-> cacheability registers, a separate MMIO master, icache snoop, and the unified
-> `ventium_system` top (Phase E). Nothing here is wired into the board build yet
-> (`EN_L2` defaults off), so the running system is unchanged.
+> TL;DR (updated 2026-06-20) — **Phases A, B, C, and ALL of Phase D are DONE and gated**
+> (D.6 partial — see below). The cacheability map, the L2 splice behind L1, the
+> cacheable-vs-MMIO routing, the L1 `KEN#`, a coherent DMA bus master (arbiter +
+> snoop-invalidate), the **second MMIO master** (`to_dram` split), a **real 8237 DMA
+> transfer engine**, the **PCI-config-driven cacheability registers**, and the
+> **`ven_southbridge` wrapper** all work and pass **17 standalone unit gates**. The only
+> remaining items are: **D.6 top-level threading** of the icache snoop (the mechanism is
+> verified standalone; the wiring needs `ventium_top.sv`, which a parallel session is
+> editing) and **Phase E** (the unified `ventium_system` top wiring the real legacy
+> peripherals + flipping `EN_L2=1` on the board). Nothing is wired into the board build
+> yet (`EN_L2` defaults off), so the running system is unchanged.
 
 ---
 
@@ -97,13 +100,19 @@ write-back from the L1). The snoop is the EADS#/inquire-cycle analogue.
 | **B** | Splice `ven_l2` behind L1D (`EN_L2`), L2-ready reset gate, `VEN_DBG_L2` counters | ✅ done | `d9ba8d3` |
 | **C** | `ven_northbridge` (cachemap + L2 + bypass router); drive L1D `KEN#` | ✅ done | `d9ba8d3` |
 | **D.1** | Coherent DMA requester + CPU/DMA arbiter + snoop-invalidate generation | ✅ done | `938d110` |
-| **D.2** | `ven_southbridge` wrapper for `rtl/soc/*` | ⬜ pending | — |
-| **D.3** | Real `ven_i8237` transfer engine (today register-only) | ⬜ pending | — |
-| **D.4** | PCI-config shim drives the cachemap `cfg_*` registers | ⬜ pending | — |
-| **D.5** | Separate MMIO master for `to_dram=0` + single-beat granularity | ⬜ pending | — |
-| **D.6** | Wire NB snoop to the **icache** (DMA-loaded code) | ⬜ pending | — |
-| **E** | Unified `ventium_system` top; port differential suite + FreeDOS | ⬜ pending | — |
-| **F** | Hardening (BIOS-driven PAM, L2 §5 follow-ons, snoop-cycle timing) | ⬜ pending | — |
+| **D.5** | Second downstream MMIO master (`to_dram` split: device space ≠ DDR) | ✅ done | `34439cb` |
+| **D.3** | Real 8237 DMA transfer engine (`ven_i8237_dma`) — coherent bus master | ✅ done | `4aa3fc7` |
+| **D.4** | Host-bridge PCI-config registers (`ven_hostbridge_cfg`) drive the cachemap | ✅ done | `b223438` |
+| **D.2** | `ven_southbridge` wrapper shell (MMIO/io/DMA/cfg interfaces) | ✅ done | `43252b4` |
+| **D.6** | Icache snoop — **mechanism gated**; top-level threading deferred to E | ◑ partial | `00f287c` |
+| **E** | Unified `ventium_system` top; real peripherals; thread icache snoop; `EN_L2=1` board | ⬜ pending | — |
+| **F** | Hardening (single-beat MMIO granularity, L2 §5 follow-ons, snoop-cycle timing) | ⬜ pending | — |
+
+**D.6 status:** the icache per-line snoop port + logic exist (Phase A) and the MECHANISM
+is now gated (`run-icache-snoop-gate.sh`: matching snoop invalidates only that way,
+non-matching leaves lines). Threading `ven_northbridge.snoop_inv_*` →
+`ventium_l1_axi` → `ventium_top` → `core.u_icache` needs an edit to `ventium_top.sv`,
+which a parallel session has uncommitted edits in (shared working tree) — done in Phase E.
 
 † The A/B *RTL edits* (`ven_l1d`/`icache`/`core.sv`) were swept into the in-flight
 core commit `1fda887` by a parallel committer; only the new files landed in the
@@ -195,6 +204,35 @@ plumbing churn). `EN_L2=0` → snoop tied 0, byte-identical.
 `dbg_l2_wbacks`, `dbg_l2_bypass`. A gate-only define (separate from `VEN_DBG_CORE`) so
 `ventium_top` is untouched.
 
+D.5 added the **second downstream MMIO master** (`mmio_*`): the NB splits uncacheable
+traffic into `to_dram=1` → DDR bypass (`d_*`) and `to_dram=0` → device MMIO (`mmio_*`).
+`ventium_l1_axi` exposes `mmio_*` under `VEN_NB_MMIO` (else merges it back to the AXI
+backing, so non-`VEN_NB_MMIO` builds are byte-identical). The response demux uses the
+NB's stable `mmio_sel`, not the requester `req` — robust to the master dropping signals
+at the ack edge (same footgun as the snoop latch).
+
+### 5.7 `rtl/soc/ven_i8237_dma.sv` (Phase D.3)
+The 8237 DMA **transfer engine** (the register file's "oracle boundary"), kept separate so
+the differential-tested `ven_i8237.sv` register file is untouched. Given a programmed
+channel (`start_addr`/`count`/`dir`), it moves a block between a device data port
+(`dev_rd/rdata`, `dev_wr/wdata`) and memory via a word-granular backing master (`m_*`)
+that the NB arbitrates into the L2 — so a DMA write is coherent and a DMA read sees dirty
+L2. `dir=0` device→mem (disk read fill), `dir=1` mem→device (disk write drain).
+
+### 5.8 `rtl/northbridge/ven_hostbridge_cfg.sv` (Phase D.4)
+The 430FX TSC host-bridge PCI-config register file (bus0:dev0:func0): CC, DRAMC, PAM0-6,
+DRB4 (TOM), SMRAM, + read-only VID/DID. Written through a config port (the `0xCF8/0xCFC`
+shim decodes the dword offset + byte enables); outputs `cfg_*` to `ven_cachemap`,
+replacing the `NB_*` parameter constants with real BIOS-programmable cacheability. Reset =
+datasheet power-up (FLCE=0 → caches off until BIOS).
+
+### 5.9 `rtl/northbridge/ven_southbridge.sv` (Phase D.2)
+The PIIX-style south-bridge wrapper shell: an MMIO slave (→ a VGA-aperture framebuffer), a
+port-I/O slave (`0xCF8/0xCFC` PCI config → `ven_hostbridge_cfg`; a `0x00C0` DMA control
+block → `ven_i8237_dma`), a DMA master (→ NB `dma_*`), and the `cfg_*` outputs (→ NB). It
+ties together the bridge logic this work owns; wrapping the real legacy ISA peripherals +
+IRQ lines is Phase E.
+
 ---
 
 ## 6. The cachemap register model (430FX TSC — faithful)
@@ -269,17 +307,26 @@ Fixed (non-programmable) windows:
 ## 9. Verification
 
 All gates are standalone Verilator `--binary` unit gates; run from the repo root.
-**13/13 pass** as of this status.
+**17/17 pass** as of this status.
 
 | Gate | Proves |
 |---|---|
 | `verif/l1/run-cachemap-gate.sh` | 25 golden address→{to_dram,l1,l2} checks vs the TSC datasheet |
-| `verif/l1/run-l1d-gate.sh` | L1D incl. the new non-cacheable bypass [9] + snoop-invalidate [10] |
+| `verif/l1/run-l1d-gate.sh` | L1D incl. the non-cacheable bypass + snoop-invalidate |
 | `verif/l1/run-l1l2-gate.sh` | L1+L2 (through the NB): hit-after-flush = no new AR; dirty-eviction AW writeback |
 | `verif/l1/run-l1nb-gate.sh` | cacheable→L2 vs uncacheable(0xA0000)→bypass; MMIO not L1/L2-cached |
 | `verif/l1/run-l1dma-gate.sh` | **DMA coherence**: DMA-write snoop-invalidate; DMA-read sees dirty L2; arbiter interleave |
-| `run-l1axi-gate / -xline / -xword / -callret / -wd / -cdc` | the pre-L2 L1/AXI seam, **byte-identical** (`EN_L2=0`) |
+| `verif/l1/run-l1mmio-gate.sh` | **D.5** `to_dram=0` device space → MMIO master (distinct pattern), not DDR |
+| `verif/l1/run-dma8237-gate.sh` | **D.3** the 8237 DMA engine bus-masters device↔mem through the NB (both dirs) |
+| `verif/l1/run-hostcfg-gate.sh` | **D.4** PCI-config writes (CC/PAM/DRAMC/DRB4) change the cachemap; reads round-trip |
+| `verif/l1/run-southbridge-gate.sh` | **D.2** the southbridge: PCI config via io, MMIO framebuffer, DMA bus-master |
+| `verif/l1/run-icache-snoop-gate.sh` | **D.6** the icache per-line snoop invalidates only the matching way |
+| `run-l1axi-gate / -xline / -xword / -wd / -cdc` | the pre-L2 L1/AXI seam, **byte-identical** (`EN_L2=0`) |
 | `run-l2-gate / -l2-axi-gate` | bare `ven_l2` (unchanged) |
+
+(`run-l1axi-callret-gate.sh` builds the FULL deployed core tb via the parallel-modified
+`verif/tb/Makefile`/`ventium.f`/`ventium_top.sv` and is contaminated by the parallel
+session's uncommitted edits — not part of this work's clean surface.)
 
 `make verify` (the full differential CPU suite) is **unaffected** by all of this:
 `ventium_l1_axi` is a `+VEN_L1_AXI`-only module, not in the default `rtl/ventium.f`
@@ -295,14 +342,13 @@ Quick re-verify of all 13 gates:
 
 ```sh
 cd <repo root>
-for g in cachemap l1d l1l2 l1nb l1dma \
-         l1axi l1axi-xline l1axi-xword l1axi-callret l1axi-wd l1axi-cdc \
-         l2 l2-axi; do
+for g in cachemap l1d l1l2 l1nb l1dma l1mmio dma8237 hostcfg southbridge icache-snoop \
+         l1axi l1axi-xline l1axi-xword l1axi-wd l1axi-cdc l2 l2-axi; do
   ./verif/l1/run-$g-gate.sh >/dev/null 2>&1 && echo "PASS $g" || echo "FAIL $g"
 done
 ```
 
-Expect 13× PASS.
+Expect 17× PASS.
 
 ---
 
@@ -310,10 +356,19 @@ Expect 13× PASS.
 
 | Commit | Contents | Pushed? |
 |---|---|---|
-| `c8dbf3b` | Phase A new files: `ven_cachemap.sv`, `tb_cachemap`, `tb_l1l2`, gates, spec | no |
-| `d9ba8d3` | Phase B/C: `ven_northbridge.sv`, `ventium_l1_axi` L2/cachemap, `tb_l1nb` | no |
-| `938d110` | Phase D.1: NB DMA requester + arbiter + snoop, `tb_l1dma` | no |
-| (`1fda887`) | A/B **RTL** edits to `ven_l1d`/`icache`/`core.sv` — swept in by a parallel committer | — |
+| `c8dbf3b` | Phase A new files: `ven_cachemap.sv`, `tb_cachemap`, `tb_l1l2`, gates, spec | on `main` |
+| `d9ba8d3` | Phase B/C: `ven_northbridge.sv`, `ventium_l1_axi` L2/cachemap, `tb_l1nb` | on `main` |
+| `938d110` | Phase D.1: NB DMA requester + arbiter + snoop, `tb_l1dma` | on `main` |
+| `34439cb` | Phase D.5: NB second MMIO master (`to_dram` split), `tb_l1mmio` | on `main` |
+| `4aa3fc7` | Phase D.3: `ven_i8237_dma` transfer engine, `tb_dma8237` | on `main` |
+| `b223438` | Phase D.4: `ven_hostbridge_cfg` PCI-config regs, `tb_hostcfg` | on `main` |
+| `43252b4` | Phase D.2: `ven_southbridge` wrapper shell, `tb_southbridge` | on `main` |
+| `00f287c` | Phase D.6: icache snoop mechanism gate `tb_icache_snoop` | on `main` |
+| (`1fda887`) | A/B **RTL** edits to `ven_l1d`/`icache`/`core.sv` — swept in by a parallel committer | on `main` |
+
+Earlier these were local-only; the working tree is now on `main` and a parallel session's
+pushes have carried the northbridge history onto `origin/main`. `EN_L2` still defaults 0, so
+the board build is unchanged.
 
 **Important git hygiene:** a parallel agent/committer is independently committing the
 in-flight core/VGA/FPU work during these sessions, and has at times switched the
@@ -327,41 +382,27 @@ belong to the parallel in-flight core work. Track this doc so it survives branch
 
 ## 11. Remaining work (detailed)
 
-### D.2 — `ven_southbridge` wrapper
-Wrap the existing `rtl/soc/*` peripherals (PIC, PIT, RTC, i8042, i8237, i8272, IDE,
-UART, ACPI-PM, port92, VGA regs) + the PCI-config shim behind one decode front, with
-the port-I/O (`io_*`) bus in and the DMA bus-master ports (`ven_ide.dma_mem_*`, the new
-i8237 engine) out toward the northbridge. Mostly structural — the peripherals already
-exist and are instantiated in `rtl/soc/ventium_soc.sv` today.
+**D.2–D.5 are DONE** (see §4/§5/§9). D.6 is partial. What remains:
 
-### D.3 — real `ven_i8237` transfer engine
-`ven_i8237` is currently **register-only** (it stores channel addr/count/mode but never
-moves data; the actual DREQ/DACK/TC transfer is an oracle boundary). A real engine must
-walk a transfer and present a `dma_mem_*` master that the NB arbitrates through the L2.
-
-### D.4 — PCI-config drives the cachemap registers
-Extend the existing PCI-config shim (in `ventium_soc.sv`) with the host-bridge
-registers (PAM0-6, DRAMC, CC, DRB4, SMRAM) and route them to
-`ven_northbridge.cfg_*` / the L1 cachemap, replacing the `NB_*` parameter constants.
-Then BIOS shadow/cacheability programming works for real.
-
-### D.5 — separate MMIO master (honor `to_dram=0`)
-Today the bypass and the L2 share one DDR downstream. Add a second downstream master
-that routes `to_dram=0` (uncacheable device space) to the southbridge MMIO fabric
-instead of DDR, with single-beat (not 8-word-line) granularity for side-effect
-registers. This is what makes a memory-mapped VGA framebuffer / PCI BAR actually reach
-its device through the new system (vs. the current `ventium_soc.sv` ad-hoc intercept).
-
-### D.6 — icache snoop
-Route `ven_northbridge.snoop_inv_*` to the icache too (it already has the port from
-Phase A) so DMA-loaded **code** is coherent. Requires threading the snoop from
-`ventium_l1_axi` up to the `core.sv` icache instantiation (currently tied 0).
+### D.6 (remaining) — thread the icache snoop to the top
+The mechanism is gated (`run-icache-snoop-gate.sh`). What's left is pure wiring:
+`ven_northbridge.snoop_inv_*` is already routed to `ven_l1d` inside `ventium_l1_axi`;
+expose it from `ventium_l1_axi`, then in `ventium_top.sv` connect it to a new
+`core.sv` icache-snoop input that feeds `u_icache.snoop_inv_*` (currently tied 0). This
+edits `ventium_top.sv`, which the parallel session has uncommitted changes in (shared
+working tree) — do it in Phase E when those settle to avoid clobbering their work.
 
 ### E — unified `ventium_system` top
-A new top: `core → L1/icache → ven_northbridge → {L2/DDR, ven_southbridge}`. Keep
-`ventium_soc.sv` (the differential oracle) and `ventium_kv260_core` intact so the
-regression suite keeps running. Port the differential suite + FreeDOS boot onto it and
-prove byte-identical. Then flip `EN_L2=1` on the board path.
+A new top: `core → L1/icache → ven_northbridge → {L2/DDR, ven_southbridge}`. This is where
+the structural pieces connect for real: wire the existing legacy `rtl/soc/*` peripherals
+(PIC/PIT/RTC/i8042/i8272/IDE/UART) into `ven_southbridge`'s io-decode + their IRQ lines;
+route `ven_southbridge.cfg_*` → `ven_northbridge.cfg_*`, the NB's `mmio_*` → the
+southbridge, and the southbridge's `dma_*` (i8237 engine + `ven_ide.dma_mem_*`) → the NB;
+thread the icache snoop (D.6). Keep `ventium_soc.sv` (the differential oracle) and
+`ventium_kv260_core` intact so the regression suite keeps running. Port the differential
+suite + FreeDOS boot onto it and prove byte-identical. Then flip `EN_L2=1` on the board
+path. (Must be coordinated with the parallel session, which owns `ventium_top.sv` / the
+SoC tops right now.)
 
 ### F — hardening
 BIOS-driven PAM in anger; SMRAM cacheability; the `ven_l2` §5 follow-ons (writeback
