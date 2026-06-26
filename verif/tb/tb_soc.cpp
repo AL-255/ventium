@@ -323,6 +323,55 @@ int main(int argc, char** argv) {
     top->io_ps_ack   = 0;
     bool ps_busy = false;   // an io_ps access has been serviced, awaiting io_ps_req drop
 
+    // ---- soft-VGA INT10h (VEN_SOFTVGA): the RTL has no text-mode VGA BIOS, so guest
+    // console output (SeaBIOS, FreeDOS) is invisible. Port tb_main's mechanism: a tiny
+    // in-guest stub at C000:0 (IVT[0x10]->it) saves regs to C000:0x100 then OUTs the trap
+    // port 0x2E0; ventium_soc routes 0x2E0 to io_ps (cs_softvga), so we service it here and
+    // mirror INT10h teletype to stderr as "GUESTCON:". Off by default (stub never installs).
+    const bool soft_vga = (std::getenv("VEN_SOFTVGA") != nullptr);
+    bool       svga_installed = false;
+    static const uint32_t SVGA_STUB = 0xC0000u, SVGA_REGBUF = 0xC0100u;
+    // AX@+0 BX@+2 CX@+4 DX@+6 SI@+8 DI@+a BP@+c ES@+e DS@+10 (same layout as tb_main)
+    static const uint8_t svga_stub[] = {
+        0x2e,0xa3,0x00,0x01, 0x2e,0x89,0x1e,0x02,0x01, 0x2e,0x89,0x0e,0x04,0x01,
+        0x2e,0x89,0x16,0x06,0x01, 0x2e,0x89,0x36,0x08,0x01, 0x2e,0x89,0x3e,0x0a,0x01,
+        0x2e,0x89,0x2e,0x0c,0x01, 0x2e,0x8c,0x06,0x0e,0x01, 0x2e,0x8c,0x1e,0x10,0x01,
+        0xba,0xe0,0x02, 0xee,
+        0x2e,0xa1,0x00,0x01, 0x2e,0x8b,0x1e,0x02,0x01, 0x2e,0x8b,0x0e,0x04,0x01,
+        0x2e,0x8b,0x16,0x06,0x01, 0x2e,0x8b,0x36,0x08,0x01, 0x2e,0x8b,0x3e,0x0a,0x01,
+        0x2e,0x8b,0x2e,0x0c,0x01, 0x2e,0x8e,0x06,0x0e,0x01, 0x2e,0x8e,0x1e,0x10,0x01,
+        0xcf };
+    auto svga_gr16 = [&](uint32_t p)->uint16_t { return (uint16_t)(mem.read8(p) | (mem.read8(p+1)<<8)); };
+    auto svga_gw16 = [&](uint32_t p, uint16_t v){ mem.write8(p,(uint8_t)v); mem.write8(p+1,(uint8_t)(v>>8)); };
+    auto svga_install = [&](){
+        for (size_t i=0;i<sizeof(svga_stub);i++) mem.write8(SVGA_STUB+(uint32_t)i, svga_stub[i]);
+        svga_gw16(0x40, 0x0000); svga_gw16(0x42, 0xC000);   // IVT[0x10] -> C000:0
+    };
+    static char svga_cb[256]; static int svga_cn = 0;
+    auto svga_emit = [&](char ch){                           // accumulate a console line -> stderr
+        if (ch=='\n' || svga_cn>=255){ svga_cb[svga_cn]=0; if(svga_cn) std::fprintf(stderr,"GUESTCON: %s\n",svga_cb); svga_cn=0; }
+        else if ((uint8_t)ch>=0x20) svga_cb[svga_cn++]=ch;
+    };
+    unsigned long svga_calls = 0;
+    auto svga_service = [&](){
+        uint16_t ax=svga_gr16(SVGA_REGBUF+0), bx=svga_gr16(SVGA_REGBUF+2),
+                 cx=svga_gr16(SVGA_REGBUF+4), es=svga_gr16(SVGA_REGBUF+0x0e), bp=svga_gr16(SVGA_REGBUF+0x0c);
+        uint8_t  ah=(uint8_t)(ax>>8), al=(uint8_t)ax;
+        if (svga_calls++ < 8) std::fprintf(stderr,"tb_soc: soft-vga int10 #%lu ax=%04x bx=%04x cx=%04x\n", svga_calls, ax, bx, cx);
+        switch (ah) {
+            case 0x0E: svga_emit((char)al); break;           // teletype
+            case 0x09: case 0x0A:                            // write char (+attr) BL/CX times at cursor
+                for (uint16_t i=0;i<(cx?cx:1);i++) svga_emit((char)al); break;
+            case 0x13: {                                     // write string ES:BP, length CX
+                uint32_t p=((uint32_t)es<<4)+bp; uint8_t step=(al&0x02)?2:1;
+                for (uint16_t i=0;i<cx;i++) svga_emit((char)mem.read8(p+(uint32_t)i*step)); break; }
+            case 0x00: mem.write8(0x449, al); break;          // set mode (record only)
+            case 0x0F: svga_gw16(SVGA_REGBUF+0,(uint16_t)((80<<8)|mem.read8(0x449))); break; // get mode
+            case 0x03: svga_gw16(SVGA_REGBUF+4,0); svga_gw16(SVGA_REGBUF+6,svga_gr16(0x450)); break; // get cursor
+            default: break;                                  // ack everything else (no-op)
+        }
+    };
+
     // ---- mem_* bus service (single-beat, combinational-OK, like tb_main) ----
     // service_bus is called several times per clock (both phases, settle x2). The
     // mem bus is idempotent. The PS C models have READ side-effects (LSR clear,
@@ -381,6 +430,12 @@ int main(int argc, char** argv) {
                 // so the boot log is visible when chasing a POST hang.
                 if (top->io_ps_we && (port == 0xE9 || port == 0x402)) {
                     std::fputc((int)(top->io_ps_wdata & 0xFF), stderr);
+                }
+                // soft-VGA INT10h trap: the in-guest stub OUTs 0x2E0 after staging regs to
+                // C000:0x100. Service the call (teletype -> GUESTCON); the stub restores the
+                // (possibly TB-modified) regs and IRETs. rd stays 0xFF (write, value unused).
+                if (soft_vga && top->io_ps_we && port == 0x2E0) {
+                    svga_service();
                 }
                 // VEN_IOLOG: trace every forwarded port access (port/dir/data) to
                 // pinpoint what POST did right before a hang.
@@ -465,6 +520,20 @@ int main(int argc, char** argv) {
         dump(half++);
 
         ++cycles;
+
+        // soft-VGA: install the INT10h stub once POST has set up its IVT (~past 18M retired,
+        // safely after SeaBIOS's early init, before the boot sector / FreeDOS), then re-hook
+        // IVT[0x10]->stub each clock so it survives any later rewrite. VEN_SOFTVGA-gated.
+        if (soft_vga && trace.retired() >= 18000000ull) {
+            if (!svga_installed) {
+                svga_install();
+                svga_installed = true;
+                std::fprintf(stderr, "tb_soc: soft-VGA INT10h installed (stub@C000:0, trap 0x2E0) @retire=%llu\n",
+                             (unsigned long long)trace.retired());
+            } else {
+                svga_gw16(0x40, 0x0000); svga_gw16(0x42, 0xC000);  // keep IVT[0x10] hooked
+            }
+        }
 
         // --type-at typist: one scancode at a time through the i8042 inj port.
         if (type_idx < type_codes.size() && trace.retired() >= args.type_at_n) {

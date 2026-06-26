@@ -1123,9 +1123,14 @@ module ventium_soc
 
   // ---- PS-offload select: is the accessed port a PS-placed peripheral? -------
   // (Per +VEN_<DEV>_PS from fpga/periph_split.config. 0 in the all-RTL default.)
+  // soft-VGA INT10h trap port (VEN_SOFTVGA): the in-guest stub OUTs 0x2E0; forward it to
+  // io_ps so the TB services INT10h (mirrors guest console to stderr). Off by default.
+  logic cs_softvga;
+  assign cs_softvga = io_req && (io_addr == 16'h02E0);
   logic io_ps_sel;
   always_comb begin
     io_ps_sel = 1'b0;
+`ifdef VEN_SOFTVGA   io_ps_sel = io_ps_sel | cs_softvga; `endif
 `ifdef VEN_PIC_PS    io_ps_sel = io_ps_sel | cs_pic;    `endif
 `ifdef VEN_PIT_PS    io_ps_sel = io_ps_sel | cs_pit;    `endif
 `ifdef VEN_RTC_PS    io_ps_sel = io_ps_sel | cs_rtc;    `endif
