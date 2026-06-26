@@ -85,7 +85,7 @@ problem to two primitives, both now in place:
 | CPU | r/w cacheable DRAM | normal | L1D → L2 → DDR (`KEN#`=1) — **done** |
 | CPU | r/w MMIO (mem-space) | never cache | `KEN#`=0 → L1D non-allocating bypass; NB routes around L2 — **done** |
 | DMA | **read** DRAM | see latest (dirty L2) | DMA routed *through* the L2 (arbiter) — **done** |
-| DMA | **write** DRAM | invalidate stale CPU copies | NB pulses per-line `snoop_inv` → L1D — **done** (icache wire pending) |
+| DMA | **write** DRAM | invalidate stale CPU copies | NB pulses per-line `snoop_inv` → L1D **and icache** — **done** |
 
 The L1 being write-through means an **invalidate** is sufficient on a DMA write (no
 write-back from the L1). The snoop is the EADS#/inquire-cycle analogue.
@@ -103,16 +103,20 @@ write-back from the L1). The snoop is the EADS#/inquire-cycle analogue.
 | **D.5** | Second downstream MMIO master (`to_dram` split: device space ≠ DDR) | ✅ done | `34439cb` |
 | **D.3** | Real 8237 DMA transfer engine (`ven_i8237_dma`) — coherent bus master | ✅ done | `4aa3fc7` |
 | **D.4** | Host-bridge PCI-config registers (`ven_hostbridge_cfg`) drive the cachemap | ✅ done | `b223438` |
-| **D.2** | `ven_southbridge` wrapper shell (MMIO/io/DMA/cfg interfaces) | ✅ done | `43252b4` |
-| **D.6** | Icache snoop — **mechanism gated**; top-level threading deferred to E | ◑ partial | `00f287c` |
-| **E** | Unified `ventium_system` top; real peripherals; thread icache snoop; `EN_L2=1` board | ⬜ pending | — |
+| **D.2** | `ven_southbridge` wrapper shell (MMIO/io/DMA/cfg interfaces) + real 8237 (4-ch arbiter) + IDE bus-master DMA arbiter | ✅ done | `43252b4`/`e06260d`/`805a63b`/`26812ac` |
+| **D.6** | Icache snoop — mechanism gated **and threaded to the live core** | ✅ done | `00f287c`/`4b88171` |
+| **E.core** | L2/NB **LIVE behind the real core** (`+VEN_EN_L2` build knob, `make l1axi_l2`); real-mode code runs through L2+cachemap | ✅ done | `4b88171` |
+| **E.system** | Wire `ven_southbridge` to the live NB (`cfg_*`/`mmio_*`/`dma_*` incl. real peripherals + `ven_ide`); `EN_L2=1` on the KV260 board | ⬜ pending | — |
 | **F** | Hardening (single-beat MMIO granularity, L2 §5 follow-ons, snoop-cycle timing) | ⬜ pending | — |
 
-**D.6 status:** the icache per-line snoop port + logic exist (Phase A) and the MECHANISM
-is now gated (`run-icache-snoop-gate.sh`: matching snoop invalidates only that way,
-non-matching leaves lines). Threading `ven_northbridge.snoop_inv_*` →
-`ventium_l1_axi` → `ventium_top` → `core.u_icache` needs an edit to `ventium_top.sv`,
-which a parallel session has uncommitted edits in (shared working tree) — done in Phase E.
+**E.core (done):** `ventium_l1_axi`'s `EN_L2` default follows `+VEN_EN_L2`, so the L1AXI
+full-core build (`make l1axi_l2`) turns the northbridge on with no `ventium_top` param
+edit. The icache snoop is threaded `ven_l1d/NB → ventium_l1_axi → ventium_top → core →
+u_icache`. Verified: the REAL core runs real-mode `stacktest` (P=1234) + `calltest` (67
+retired, clean CALL/RET) through the L2 + cacheability routing; `make verify` 98/98 (the
+default build is unchanged — the core edit is `VEN_L1_AXI`-gated). Gotcha: the 2 MiB L2's
+~8192-cycle post-reset init walk holds the core (L1 reset gated on `l2_ready`) until ready
+— give the boot/quiesce window margin (negligible on silicon).
 
 † The A/B *RTL edits* (`ven_l1d`/`icache`/`core.sv`) were swept into the in-flight
 core commit `1fda887` by a parallel committer; only the new files landed in the
