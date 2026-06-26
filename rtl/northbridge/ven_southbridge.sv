@@ -100,16 +100,35 @@ module ven_southbridge (
       .ch_addr_o(ch_addr), .ch_count_o(ch_count), .ch_page_o(ch_page), .ch_mode_o(ch_mode),
       .ch_mask_o(ch_mask), .ch_xreq_o(ch_xreq));
 
-  // channel 0 → the transfer engine. start = {page,addr} (8237 24-bit), count = N+1
-  // (8257 stores N-1), dir from the mode transfer-type field (10=read mem→dev, 01=write).
-  wire        ch0_go    = ch_xreq[0] & ~ch_mask[0];
-  wire [31:0] ch0_start = {8'd0, ch_page[0], ch_addr[0]};
-  wire [15:0] ch0_count = ch_count[0] + 16'd1;
-  wire        ch0_dir   = (ch_mode[0][3:2]==2'b10);
+  // ---- 4-channel priority arbiter into the single transfer engine ------------
+  // The 8237 latches per-channel requests and serves them by fixed priority (ch0 >
+  // ch1 > ch2 > ch3); a channel holds the engine for its whole transfer, then the
+  // controller re-arbitrates. A 1-clock ch_xreq pulse sets a pending bit; the bit
+  // clears when that channel's transfer completes (dma_tc).
+  logic [3:0] req_pend; logic [1:0] sel_ch; logic sel_valid;
+  wire  [3:0] req_active = req_pend & ~ch_mask;            // requesting AND unmasked
+  wire        any_req    = |req_active;
+  wire  [1:0] next_ch    = req_active[0] ? 2'd0 : req_active[1] ? 2'd1
+                         : req_active[2] ? 2'd2 : 2'd3;     // fixed priority
+  wire  [1:0] eng_ch     = sel_valid ? sel_ch : next_ch;    // params source
+  wire        dma_go     = ~sel_valid & any_req;            // 1-clock start pulse
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin req_pend<=4'd0; sel_ch<=2'd0; sel_valid<=1'b0; end
+    else begin
+      for (int i=0;i<4;i++) if (ch_xreq[i]) req_pend[i] <= 1'b1;   // latch a request
+      if (!sel_valid && any_req) begin sel_ch <= next_ch; sel_valid <= 1'b1; end
+      if (sel_valid && dma_tc)   begin req_pend[sel_ch] <= 1'b0; sel_valid <= 1'b0; end
+    end
+  end
+  // engine programming from the selected channel: start = {page,addr} (8237 24-bit),
+  // count = N+1 (8257 stores N-1), dir from mode[3:2] (10=mem→dev read, 01=dev→mem write).
+  wire [31:0] eng_start = {8'd0, ch_page[eng_ch], ch_addr[eng_ch]};
+  wire [15:0] eng_count = ch_count[eng_ch] + 16'd1;
+  wire        eng_dir   = (ch_mode[eng_ch][3:2]==2'b10);
 
   ven_i8237_dma u_dma (
       .clk(clk), .rst_n(rst_n),
-      .go(ch0_go), .start_addr(ch0_start), .count(ch0_count), .dir(ch0_dir),
+      .go(dma_go), .start_addr(eng_start), .count(eng_count), .dir(eng_dir),
       .busy(dma_busy), .tc(dma_tc),
       .dev_rd(dev_rd), .dev_rdata(dev_rdata), .dev_wr(dev_wr), .dev_wdata(dev_wdata),
       .m_req(dma_req), .m_we(dma_we), .m_addr(dma_addr), .m_wdata(dma_wdata),

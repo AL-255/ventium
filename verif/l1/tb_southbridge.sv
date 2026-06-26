@@ -106,6 +106,26 @@ module tb_southbridge;
           {mem[16'h7000+w*4+3],mem[16'h7000+w*4+2],mem[16'h7000+w*4+1],mem[16'h7000+w*4+0]},
           32'hDA7A_0000 + w);
 
+    $display("[4] 4-channel arbiter: program ch0(→0x7000) + ch2(→0x8000), request both");
+    devidx = 0;
+    io_w(16'h000C, 32'h00);                               // clear FF
+    io_w(16'h0000, 32'h00); io_w(16'h0000, 32'h70);       // ch0 addr 0x7000
+    io_w(16'h0001, 32'h07); io_w(16'h0001, 32'h00);       // ch0 count 7
+    io_w(16'h0087, 32'h00); io_w(16'h000B, 32'h44); io_w(16'h000A, 32'h00); // page/mode/unmask ch0
+    io_w(16'h000C, 32'h00);                               // clear FF
+    io_w(16'h0004, 32'h00); io_w(16'h0004, 32'h80);       // ch2 addr 0x8000 (ports 0x04/0x05)
+    io_w(16'h0005, 32'h07); io_w(16'h0005, 32'h00);       // ch2 count 7
+    io_w(16'h0081, 32'h00); io_w(16'h000B, 32'h46); io_w(16'h000A, 32'h02); // page(0x81)/mode/unmask ch2
+    io_w(16'h0009, 32'h04);                               // request ch0 (higher priority → first)
+    io_w(16'h0009, 32'h06);                               // request ch2
+    begin int g; g=0; forever begin @(posedge clk); #1;
+      if (!dma_busy && devidx>=16) break;
+      if (++g>4000) begin $display("  FAIL 2-ch DMA stuck (devidx=%0d)", devidx); errors++; break; end end end
+    for (int w=0; w<8; w++) chk($sformatf("ch0→mem[0x7000+%0d]", w),
+        {mem[16'h7000+w*4+3],mem[16'h7000+w*4+2],mem[16'h7000+w*4+1],mem[16'h7000+w*4+0]}, 32'hDA7A_0000+w);
+    for (int w=0; w<8; w++) chk($sformatf("ch2→mem[0x8000+%0d]", w),
+        {mem[16'h8000+w*4+3],mem[16'h8000+w*4+2],mem[16'h8000+w*4+1],mem[16'h8000+w*4+0]}, 32'hDA7A_0008+w);
+
     if (errors==0) $display("SOUTHBRIDGE-GATE-OK (all checks pass)");
     else           $display("SOUTHBRIDGE-GATE-FAIL (%0d errors)", errors);
     $finish;
