@@ -521,17 +521,19 @@ int main(int argc, char** argv) {
 
         ++cycles;
 
-        // soft-VGA: install the INT10h stub once POST has set up its IVT (~past 18M retired,
-        // safely after SeaBIOS's early init, before the boot sector / FreeDOS), then re-hook
-        // IVT[0x10]->stub each clock so it survives any later rewrite. VEN_SOFTVGA-gated.
-        if (soft_vga && trace.retired() >= 18000000ull) {
+        // soft-VGA: install the INT10h stub bytes once (early — the stub IS the VGA BIOS,
+        // so DON'T also load a real vgabios at 0xC0000), then re-hook IVT[0x10]->stub EVERY
+        // clock. Installing from the start means the core's FIRST INT10h read of IVT[0x10]
+        // already sees our stub (so a cached IVT entry caches OUR value — no core flush
+        // needed, which ventium_soc's core has no port for). VEN_SOFTVGA-gated.
+        if (soft_vga) {
             if (!svga_installed) {
                 svga_install();
                 svga_installed = true;
                 std::fprintf(stderr, "tb_soc: soft-VGA INT10h installed (stub@C000:0, trap 0x2E0) @retire=%llu\n",
                              (unsigned long long)trace.retired());
             } else {
-                svga_gw16(0x40, 0x0000); svga_gw16(0x42, 0xC000);  // keep IVT[0x10] hooked
+                svga_gw16(0x40, 0x0000); svga_gw16(0x42, 0xC000);  // keep IVT[0x10] hooked each clock
             }
         }
 
