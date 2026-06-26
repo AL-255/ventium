@@ -1,0 +1,17 @@
+{
+  "name": "pfcpl3",
+  "kind": "system",
+  "src": "pfcpl3.S",
+  "linker": "pfcpl3.ld",
+  "image": "pfcpl3.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 600,
+  "sys": true,
+  "paging": true,
+  "description": "Paging #PF on a HIGH not-present page (linear 0x10001000, PD index 64) \u2014 the EXACT page-walk class + high CR2 the DOS-Quake go32 server demand-pages (qemu v=0e e=0006 CR2=0x10001000). Proves Ventium walks UPPER PD entries + raises #PF with the high CR2 bit-exactly vs qemu. Also keeps the low 0x401000 #PF."
+}

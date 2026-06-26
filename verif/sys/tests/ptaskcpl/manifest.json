@@ -1,0 +1,18 @@
+{
+  "name": "ptaskcpl",
+  "kind": "system",
+  "src": "ptaskcpl.S",
+  "linker": "ptaskcpl.ld",
+  "image": "ptaskcpl.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 2000,
+  "sys": true,
+  "paging": false,
+  "stretch": true,
+  "description": "HARDWARE TASK SWITCH where the OUTGOING task runs at CPL3 (the CWSDPMI 0x60<->0x70 co-routine pattern). TASK1 drops to CPL3 (cs=0x1B, a DPL3 alias of CPL0 0x08, RPL3), does ljmp $0x33 (task switch to TSS2, DPL3) -> the CPU SAVES cs=0x1B into TSS1+0x4C; TASK2 (CPL0) runs then ljmp $0x28 back -> TASK1 RESUMES from its saved TSS1 image at cs=0x1B, CPL=3. Proves the TSS save/restore of a CPL3 code selector is bit-exact to qemu (the exact mechanism the DOS-Quake #DE blames). Records: resumed CS selector (0x1B) + the saved TSS1 CS byte (0x1B). Exits via OUT 0xf4 from CPL3 (IOPL=3)."
+}

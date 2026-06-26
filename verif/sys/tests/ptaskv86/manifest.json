@@ -1,0 +1,18 @@
+{
+  "name": "ptaskv86",
+  "kind": "system",
+  "src": "ptaskv86.S",
+  "linker": "ptaskv86.ld",
+  "image": "ptaskv86.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 2000,
+  "sys": true,
+  "paging": false,
+  "v86": true,
+  "description": "HARDWARE TASK SWITCH whose INCOMING task is a VIRTUAL-8086 task (EFLAGS.VM=1) — the rigorous RTL-vs-qemu differential for the DOS-Quake #DE root cause. A CPL0 protected-mode task (TASK-A, TSS sel 0x60, LTR'd) builds TSS-B (sel 0x70) with EFLAGS.VM=1 and CS=DS=ES=SS = real-mode PARAGRAPHS 0x2000 (so the base must become 0x20000), EIP=0; then `ljmp $0x70` performs the hardware task switch into the V86 task. qemu switch_tss_ra does `if (new_eflags & VM_MASK) load_seg_vm(...)`: for a V86 incoming task it loads FLAT real-mode segments (base = sel<<4, limit 0xFFFF, CPL3, D/B=0), NOT a GDT descriptor walk. The fix in core_tsw.svh S_TSW_SEG adds the `if (tsw_eflags[17])` (VM) branch loading flat segs (base={12'd0,tsw_sel,4'd0}, limit 0xFFFF, attr 0x9B CS / 0x93 data, cpl_r=3, cs_d=0), mirroring the V86-return IRET tail (core_iret.svh) and qemu load_seg_vm. The V86 task runs the EXACT instruction class that faults in the bug: `mov bx,0x2593; mov es,bx; mov al,[es:0]` — with the fix ES.base becomes 0x25930 (sel<<4) and the read returns the planted sentinel 0x5A so AL=0x5A (a POSITIVE proof in the graded eax field); without the fix the switch loads a wrong CS base and the V86 task's first fetch comes from the wrong linear address, so the RTL --system trace DIVERGES from the qemu golden. The V86 task then `int $0x20` (IOPL=0 < 3 -> #GP(0) -> the CPL0 monitor) which performs the isa-debug-exit (out 0xf4, 0x42 -> qemu status 133). NO paging (linear == physical). Diffed RTL-vs-qemu by run-sys-golden.sh step 7 (ptaskv86 is in RTL_SYS_TESTS): EQUIVALENT across the task switch into V86 + the V86 segmentation + the V86 #GP delivery (cr0..cr4 + selectors + GPRs + eflags + eip)."
+}

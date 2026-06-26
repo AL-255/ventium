@@ -90,12 +90,29 @@
               sidx  = 3'(tsw_step[4:1]);     // 0..5 = CS,SS,DS,ES,FS,GS
               sattr = desc_attr(desc);
               seg_sel  [sidx] <= tsw_sel[sidx];
-              seg_base [sidx] <= desc_base(desc);
-              seg_limit[sidx] <= desc_limit(desc);
-              seg_attr [sidx] <= sattr;
-              if (sidx == 3'(SG_CS)) begin
-                cpl_r <= tsw_sel[SG_CS][1:0];  // CPL = new CS.RPL
-                cs_d  <= desc[54];              // D/B: 32-bit default op/addr size
+              // V86 incoming task (tsw_eflags[17]=VM): load FLAT real-mode segments
+              // (base = sel<<4, limit 0xFFFF, CPL3, 16-bit) instead of decoding the V86
+              // segment VALUES as GDT descriptors — they are real-mode paragraphs, not
+              // selector indices. Mirrors the V86-return IRET tail (core_iret.svh:86-121)
+              // and qemu switch_tss_ra's `if (new_eflags & VM_MASK) load_seg_vm(...)`.
+              // (The bus driver still issues the GDT reads; mem_rdata is just ignored here
+              //  — harmless: DOS low memory is mapped, so the overrun read can't fault.)
+              if (tsw_eflags[17]) begin
+                seg_base [sidx] <= {12'd0, tsw_sel[sidx], 4'd0};   // base = sel<<4
+                seg_limit[sidx] <= 32'h0000_FFFF;
+                seg_attr [sidx] <= (sidx == 3'(SG_CS)) ? 8'h9B : 8'h93;
+                if (sidx == 3'(SG_CS)) begin
+                  cpl_r <= 2'd3;                 // V86 runs at CPL3
+                  cs_d  <= 1'b0;                 // V86 is 16-bit default
+                end
+              end else begin
+                seg_base [sidx] <= desc_base(desc);
+                seg_limit[sidx] <= desc_limit(desc);
+                seg_attr [sidx] <= sattr;
+                if (sidx == 3'(SG_CS)) begin
+                  cpl_r <= tsw_sel[SG_CS][1:0];  // CPL = new CS.RPL
+                  cs_d  <= desc[54];              // D/B: 32-bit default op/addr size
+                end
               end
               if (tsw_step == 5'd11) begin tsw_step <= 5'd0; state <= S_TSW_BUSY; end
               else tsw_step <= tsw_step + 5'd1;
