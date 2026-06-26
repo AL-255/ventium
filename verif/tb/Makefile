@@ -361,12 +361,12 @@ soc:
 	  -sv --top-module $(SOC_TOP) \
 	  -Wall -Wno-UNUSED -Wno-fatal \
 	  -DVEN_IDE_DISK_HEX='"$(VEN_IDE_DISK_HEX)"' \
-	  $(VL_TRACE) $(VL_EXTRA_DEFINES) \
+	  $(VL_TRACE) $(VL_EXTRA_DEFINES) $(VL_MAKEFLAGS) \
 	  -CFLAGS "$(VL_CFLAGS)" \
 	  -o $(SOC_EXE) \
 	  -Mdir $(SOC_OBJDIR) \
 	  -F $(SOC_FILELIST) $(SOC_CPP_SRCS)
-	@echo "built: $(CURDIR)/$(SOC_OBJDIR)/$(SOC_EXE)"
+	@echo "built: $(CURDIR)/$(SOC_OBJDIR)/$(SOC_EXE)  (OPT_FAST=$(VL_OPT_FAST) $(VL_OPT_MARCH))"
 
 # ---- soc-cov: the ventium_soc build with Verilator coverage ----------------
 # Same as `soc` but with --coverage so the SoC track (CPUID/RDTSC/INVD + the

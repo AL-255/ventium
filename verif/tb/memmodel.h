@@ -80,6 +80,17 @@ private:
     const Page* page_lookup(uint32_t addr) const; // null if unmapped
 
     std::unordered_map<uint32_t, Page> pages_;     // keyed by page number
+
+    // 1-entry page cache: instruction fetch + data access are highly local, so
+    // caching the last looked-up page skips the hash-map find() on the hot path
+    // (read32 was doing 4 finds/word). unordered_map nodes are address-stable
+    // across insertions, so a cached Page* stays valid (we never erase except in
+    // restore(), which invalidates it); page_for refreshes it on absent->present.
+    // mutable: used from the const read path.
+    mutable uint32_t    cache_pidx_  = ~0u;
+    mutable const Page* cache_page_  = nullptr;
+    mutable bool        cache_valid_ = false;
+
     uint64_t reads_  = 0;
     uint64_t writes_ = 0;
 };
