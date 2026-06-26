@@ -199,6 +199,22 @@ module ventium_top
     input  logic        intr,
     input  logic [7:0]  inta_vector,
     output logic        inta
+`ifdef VEN_RTL_IRQ
+    ,
+    // VEN_RTL_IRQ: the 8254 PIT + 8259 PIC move from the PS C models into the PL
+    // (instantiated below), so IRQ0's cadence is cycle-deterministic. The PIT owns
+    // IR0; the other ISA device IRQ levels (IDE IR14, kbd IR1, RTC IR8, ...) still
+    // live in the PS, so the PS publishes them here (ven_soc_axil R_IRQ_IN). Bit 0 is
+    // ignored (overwritten by the RTL pit_out0). Only meaningful when VEN_RTL_IRQ is
+    // built AND soc_en=1; harmless (tie 0) otherwise.
+    input  logic [15:0] dev_irq_ps,
+    // VEN_RTL_IRQ_FIXED: the runtime half-period (cyc/2 - 1) for the dense fixed-cycle
+    // IR0 square wave below. Driven by ven_soc_axil R_FIXED_IRQ0_HALF; reset there is
+    // 1999 (== VEN_FIXED_IRQ0_CYC/2-1 for the default 4000), so an un-written register
+    // reproduces today's cadence. Swept on-board via devmem (no FPGA rebuild). Only the
+    // VEN_RTL_IRQ_FIXED block reads it; otherwise unused (harmless).
+    input  logic [31:0] fixed_irq0_half
+`endif
 `endif
 `endif
 `ifdef VEN_DBG_CORE
@@ -300,6 +316,172 @@ module ventium_top
   logic        soc_inta_unused;
 `endif
 
+`ifdef VEN_RTL_IRQ
+  // ===========================================================================
+  // VEN_RTL_IRQ: the 8254 PIT + 8259 PIC, moved from the PS C models into the PL
+  // so the IRQ0 cadence is cycle-deterministic. Mirrors rtl/soc/ventium_soc.sv
+  // (the all-RTL SoC) exactly. All of this is behind `ifdef VEN_RTL_IRQ; the
+  // default KV260 build (no +define) keeps the PS-PIC R_INTR path byte-identical.
+  // ---------------------------------------------------------------------------
+  // Intercepted core io seam: the core binds io_* to these cio_* nets; the PIT/PIC
+  // are decoded off them and the PS-facing io_* ports carry the non-PIT/PIC remainder.
+  logic        cio_req, cio_we;
+  logic [15:0] cio_addr;
+  logic [2:0]  cio_size;
+  logic [31:0] cio_wdata, cio_rdata;
+  logic        cio_ack;
+  // INTR/INTA handshake to the RTL PIC + its read data + device-IRQ assembly.
+  logic        pic_int_out;       // u_pic.int_out -> core.intr
+  logic        core_inta_w;       // core.inta     -> u_pic.inta (and the top inta port)
+  logic [7:0]  pic_inta_vector;   // u_pic.inta_vector -> core.inta_vector
+  logic [7:0]  pic_rdata, pit_rdata;
+  logic        pit_out0;          // PIT ch0 OUT -> PIC IR0
+  logic [15:0] pic_irq_in;
+  // cs decode off the core's io request (same ports as ventium_soc.sv).
+  logic        cs_pic, cs_pit;
+  always_comb begin
+    cs_pic = cio_req && (cio_addr == 16'h0020 || cio_addr == 16'h0021 ||
+                         cio_addr == 16'h00A0 || cio_addr == 16'h00A1 ||
+                         cio_addr == 16'h04D0 || cio_addr == 16'h04D1);
+    cs_pit = cio_req && (cio_addr == 16'h0040 || cio_addr == 16'h0041 ||
+                         cio_addr == 16'h0042 || cio_addr == 16'h0043);
+  end
+  // ---------------------------------------------------------------------------
+  // WNS FIX (routed bitstream): the in-PL PIT/PIC are placed FAR from the core,
+  // so the combinational path GPR -> core-IO-write-logic -> cio_wdata ->
+  // u_pit.wdata -> latched_count was the critical path (33.8ns @40MHz). Break it
+  // with a PIPELINE REGISTER: the PIT/PIC-bound request payload (we/addr/wdata
+  // and the per-device chip-select) is REGISTERED into pp_* flops before reaching
+  // ven_pit/ven_pic, the device rdata is captured back into a flop, and cio_ack
+  // for PIT/PIC is delayed by the added latency. The core holds io_req asserted
+  // until io_ack (S_IO waits), so the payload is stable across the added cycles —
+  // a textbook wait-for-ack stall. PIT/PIC I/O is rare (outb/inb), so the extra
+  // latency is functionally invisible; only the fmax improves. The device cs is
+  // pulsed for EXACTLY ONE cycle (pp_cs_* set in IDLE, cleared in RUN) so the
+  // PIT/PIC clocked write- and read-side-effects fire once per transaction, just
+  // as the un-pipelined same-cycle ack did. The INTR/INTA path (pic_int_out /
+  // core_inta_w / irq_in / inta_vector) is NOT part of the IO bus and stays direct.
+  // 3-state stall: IDLE -> RUN (1-cyc device cs, capture rdata) -> ACK (raise
+  // cio_ack) -> IDLE. Latency = 2 core clocks per PIT/PIC access.
+  localparam logic [1:0] PP_IDLE = 2'd0, PP_RUN = 2'd1, PP_ACK = 2'd2;
+  logic [1:0]  pp_state;
+  logic        pp_we;            // registered cio_we for the device
+  logic [15:0] pp_addr;          // registered cio_addr for the device
+  logic [31:0] pp_wdata;         // registered cio_wdata (the GPR-sourced datum) for the device
+  logic        pp_sel_pit, pp_sel_pic;   // which device this in-flight access targets
+  logic        pp_cs_pit, pp_cs_pic;     // 1-cycle registered chip-select -> u_pit/u_pic.cs
+  logic [7:0]  pp_rdata;         // captured device read data (presented at ack)
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      pp_state   <= PP_IDLE;
+      pp_we      <= 1'b0;
+      pp_addr    <= 16'd0;
+      pp_wdata   <= 32'd0;
+      pp_sel_pit <= 1'b0;
+      pp_sel_pic <= 1'b0;
+      pp_cs_pit  <= 1'b0;
+      pp_cs_pic  <= 1'b0;
+      pp_rdata   <= 8'd0;
+    end else begin
+      unique case (pp_state)
+        PP_IDLE: begin
+          pp_cs_pit <= 1'b0;
+          pp_cs_pic <= 1'b0;
+          // Latch a FRESH PIT/PIC request (held stable by the core until ack) and
+          // launch the registered chip-select for the next (RUN) cycle.
+          if (cs_pit || cs_pic) begin
+            pp_we      <= cio_we;
+            pp_addr    <= cio_addr;
+            pp_wdata   <= cio_wdata;
+            pp_sel_pit <= cs_pit;
+            pp_sel_pic <= cs_pic;
+            pp_cs_pit  <= cs_pit;   // one-cycle pulse: asserted in RUN, cleared below
+            pp_cs_pic  <= cs_pic;
+            pp_state   <= PP_RUN;
+          end
+        end
+        PP_RUN: begin
+          // The device sees pp_cs_* this cycle: a write commits on this edge; the
+          // combinational rdata (off the registered pp_addr) is valid now -> capture.
+          pp_rdata  <= pp_sel_pit ? pit_rdata : pic_rdata;
+          pp_cs_pit <= 1'b0;        // drop cs -> the write/read side-effect fires ONCE
+          pp_cs_pic <= 1'b0;
+          pp_state  <= PP_ACK;
+        end
+        PP_ACK: begin
+          // cio_ack asserts combinationally this cycle (see below); the core samples
+          // pp_rdata and advances out of S_IO. Return to IDLE.
+          pp_state <= PP_IDLE;
+        end
+        default: pp_state <= PP_IDLE;
+      endcase
+    end
+  end
+  // device-IRQ assembly: the PS publishes the non-timer ISA IRQ levels via
+  // dev_irq_ps (R_IRQ_IN); IR0 is the timer.
+`ifdef VEN_RTL_IRQ_FIXED
+  // VEN_RTL_IRQ_FIXED: drive IR0 from a DENSE fixed-cycle square wave (period
+  // VEN_FIXED_IRQ0_CYC core-clocks, default 4000 = the proven-clean dense cadence)
+  // instead of the guest-programmed RTL PIT. ROOT CAUSE: the sparse real-rate PIT
+  // never fires DURING CWSDPMI's int-0x31 reflector to preempt it, so int-0x31 wins
+  // the shared dispatch -> the 0x60 task resumes at cs=0x2b (CPL3) -> the DOS-Quake
+  // #DE. A dense IRQ0 preempts the reflector (-> the timer's cs=0x18 CPL0 dispatch
+  // -> clean). A count-honoring PIT can't reach this density (count=0x10000 => >=64k
+  // cyc/IRQ0 even at TICK_DIV=1). The guest time-of-day runs fast, but a timedemo
+  // (renders every frame regardless) is unaffected. PIT register reads stay correct
+  // (the RTL PIT is still wired); only IR0's edge source changes.
+  // VEN_FIXED_IRQ0_CYC is now only the RESET DEFAULT (mirrored by ven_soc_axil's
+  // R_FIXED_IRQ0_HALF reset = VEN_FIXED_IRQ0_CYC/2 - 1 = 1999 for the default 4000).
+  // The LIVE threshold is the runtime register fixed_irq0_half, swept via devmem.
+  `ifndef VEN_FIXED_IRQ0_CYC
+    `define VEN_FIXED_IRQ0_CYC 4000
+  `endif
+  // Effective threshold: the runtime register, with 0 as a "use the compile-time
+  // default" sentinel. The board drives a reset of 1999 (== 4000/2-1) via ven_soc_axil,
+  // so it never reads 0 there; the bare-ventium_top sim leaves the port undriven (=0),
+  // which falls back to the SAME 1999 => the default sim reproduces today's 4000-cycle
+  // IR0 with no testbench change. A half-period of 0 is degenerate anyway (it would
+  // toggle every cycle), so 0 is a safe sentinel — the densest sweep value of interest
+  // is 128. Swept (any non-zero) on-board via devmem with no FPGA rebuild.
+  logic [31:0] fxirq_half_eff;
+  assign fxirq_half_eff = (fixed_irq0_half == 32'd0)
+                        ? ($unsigned(`VEN_FIXED_IRQ0_CYC)/2 - 1)
+                        : fixed_irq0_half;
+  logic [31:0] fxirq_cnt;
+  logic        fxirq_lvl;
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin
+      fxirq_cnt <= '0; fxirq_lvl <= 1'b0;
+    end else if (fxirq_cnt >= fxirq_half_eff) begin
+      fxirq_cnt <= '0; fxirq_lvl <= ~fxirq_lvl;   // half-period toggle => square wave
+    end else begin
+      fxirq_cnt <= fxirq_cnt + 1'b1;
+    end
+  end
+`endif
+  always_comb begin
+    pic_irq_in    = dev_irq_ps;
+`ifdef VEN_RTL_IRQ_FIXED
+    pic_irq_in[0] = fxirq_lvl;     // dense fixed-cycle IRQ0 (preempts the reflector)
+`else
+    pic_irq_in[0] = pit_out0;      // RTL PIT (honors the guest-programmed count)
+`endif
+  end
+  // io seam interception: PIT/PIC accesses are now PIPELINED (the pp_* stall above
+  // breaks the long GPR->device path); their read data comes from the captured
+  // pp_rdata flop and their ack is delayed to PP_ACK. Every other port still goes to
+  // the PS (waits on io_ack). The PS-facing io_req is gated so the PS never sees a
+  // PIT/PIC access; io_we/addr/size/wdata pass through unchanged.
+  assign cio_rdata = (cs_pit || cs_pic) ? {24'd0, pp_rdata}   // captured device read data
+                   : io_rdata;                                // PS-returned data
+  assign cio_ack   = (cs_pit || cs_pic) ? (pp_state == PP_ACK) : io_ack;
+  assign io_req    = cio_req && !(cs_pit || cs_pic);
+  assign io_we     = cio_we;
+  assign io_addr   = cio_addr;
+  assign io_size   = cio_size;
+  assign io_wdata  = cio_wdata;
+`endif
+
   core u_core (
       .clk          (clk),
       .rst_n        (rst_n),
@@ -310,6 +492,9 @@ module ventium_top
 `ifdef VEN_L1_AXI
       .real_bus     (l1axi_en),
       .bus_err      (l1_bus_err),
+      // Phase D.6: northbridge → icache snoop (DMA-loaded code coherence).
+      .ic_snoop_valid (ic_snoop_v),
+      .ic_snoop_addr  (ic_snoop_a),
 `endif
       .errata_en    (errata_en),
       .cpu_hung     (cpu_hung),
@@ -339,6 +524,19 @@ module ventium_top
       .syscall_arg_edi    (syscall_arg_edi),
       .syscall_arg_ebp    (syscall_arg_ebp),
       .cosim_en     (cosim_en),
+`ifdef VEN_RTL_IRQ
+      // VEN_RTL_IRQ: the core's io_* bus is INTERCEPTED below (the PIT/PIC live in
+      // the PL, not the PS), so it binds to internal cio_* nets. The PS-facing io_*
+      // OUTPUT ports are driven from cio_* MINUS the PIT/PIC port range (so the PS
+      // never sees 0x40-0x43 / 0x20-0x21 / 0xA0-0xA1 / 0x4D0-0x4D1 I/O).
+      .io_req       (cio_req),
+      .io_we        (cio_we),
+      .io_addr      (cio_addr),
+      .io_size      (cio_size),
+      .io_wdata     (cio_wdata),
+      .io_rdata     (cio_rdata),
+      .io_ack       (cio_ack),
+`else
       .io_req       (io_req),
       .io_we        (io_we),
       .io_addr      (io_addr),
@@ -346,18 +544,32 @@ module ventium_top
       .io_wdata     (io_wdata),
       .io_rdata     (io_rdata),
       .io_ack       (io_ack),
+`endif
 `ifdef VEN_KV260_SOC
       // F3 KV260: the PS injects maskable INTR through ven_soc_axil R_INTR. soc_en
       // comes from MODE bit 6 (default 0 -> this whole path is dead and the F2 KV260
       // behavior is unchanged). inta_valid mirrors the intr level: the staged vector
       // is meaningful exactly while the injection is asserted (the divert latches
       // inta_vector unconditionally anyway, like the always-valid master 8259).
+`ifdef VEN_RTL_IRQ
+      // VEN_RTL_IRQ: the maskable INTR comes from the RTL 8259 (u_pic) below, not the
+      // PS R_INTR seam. soc_en still ungates the divert (the PS sets MODE.SOCEN). The
+      // core's inta strobe drives u_pic.inta; inta is ALSO exposed on the top port so
+      // the PS still sees the INTA boundary (it intacks its device-IRQ bookkeeping).
+      .soc_en       (soc_en),
+      .intr         (pic_int_out),
+      .nmi          (1'b0),
+      .inta         (core_inta_w),
+      .inta_vector  (pic_inta_vector),
+      .inta_valid   (1'b1),            // the master 8259 always supplies a vector
+`else
       .soc_en       (soc_en),
       .intr         (intr),
       .nmi          (1'b0),
       .inta         (inta),
       .inta_vector  (inta_vector),
       .inta_valid   (intr),
+`endif
 `else
       // M8.1: the external-interrupt path is the M8 ventium_soc's; ventium_top
       // (the verification top) TIES IT OFF so every existing gate stays
@@ -425,6 +637,58 @@ module ventium_top
       .dbg_halted   (dbg_halted)
 `endif
   );
+
+`ifdef VEN_RTL_IRQ
+  // ===========================================================================
+  // VEN_RTL_IRQ device instances (copied from rtl/soc/ventium_soc.sv). The PIT's
+  // IR0 cadence is now a fixed function of the core clock / TICK_DIV — fully
+  // cycle-deterministic — instead of the PS pacing it over R_INTR.
+  // ===========================================================================
+  // The top-level inta output still carries the INTA boundary so the PS can intack
+  // its remaining device-IRQ bookkeeping (IDE/kbd/RTC), even though the RTL PIC now
+  // resolves the priority/vector. dev_rst is the PC active-HIGH reset (core is _n).
+  assign inta = core_inta_w;
+  logic dev_rst_irq;
+  assign dev_rst_irq = ~rst_n;
+
+  ven_pic u_pic (
+      .clk         (clk),
+      .rst         (dev_rst_irq),
+      // WNS FIX: the IO-bus request is REGISTERED (pp_* pipeline above) before
+      // reaching the device — pp_cs_pic is a 1-cycle pulse, pp_we/pp_addr/pp_wdata
+      // are the latched datum. The INTR/INTA pins below are NOT IO-bus and stay direct.
+      .cs          (pp_cs_pic),
+      .we          (pp_we),
+      .addr        (pp_addr),
+      .wdata       (pp_wdata[7:0]),      // byte I/O (outb/inb)
+      .rdata       (pic_rdata),
+      .irq_in      (pic_irq_in),
+      .int_out     (pic_int_out),
+      .inta        (core_inta_w),
+      .inta_vector (pic_inta_vector)
+  );
+
+  // ven_pit: the tick is prescaled from clk by VEN_PIT_TICK_DIV (default 1024) so the
+  // IRQ0 cadence is far slower than the instruction rate; overridable via +define for
+  // a faster sim timer. Identical to the ventium_soc.sv instance.
+`ifndef VEN_PIT_TICK_DIV
+  `define VEN_PIT_TICK_DIV 1024
+`endif
+  localparam int unsigned PIT_TICK_DIV = `VEN_PIT_TICK_DIV;
+  ven_pit #(.TICK_DIV(PIT_TICK_DIV), .TICK_INC(1)) u_pit (
+      .clk    (clk),
+      .rst    (dev_rst_irq),
+      // WNS FIX: registered IO-bus request (pp_* pipeline above). pp_cs_pit is a
+      // 1-cycle pulse so the count/control write commits exactly once; pp_wdata is
+      // the latched GPR datum — this flop is what breaks the GPR->latched_count path.
+      .cs     (pp_cs_pit),
+      .we     (pp_we),
+      .addr   (pp_addr),
+      .wdata  (pp_wdata[7:0]),
+      .rdata  (pit_rdata),
+      .out0   (pit_out0)
+  );
+`endif
 
 `ifdef VEN_DBG_CORE
   // Committed-state half of the debug bundle (tapped from the retire wires the
@@ -673,12 +937,14 @@ module ventium_top
   localparam logic [31:0] L1AXI_ADDR_MASK  = 32'hFFFF_FFFF;
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
+  logic        ic_snoop_v; logic [31:0] ic_snoop_a;   // Phase D.6: NB → icache snoop
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all),
       .golden_l1 (golden_l1),
       .shutdown  (shutdown), .m_idle (m_idle),
+      .icache_snoop_valid (ic_snoop_v), .icache_snoop_addr (ic_snoop_a),
 `ifdef VEN_DBG_CORE
       .dbg_rd_valid (dbg_rd_valid), .dbg_rd_addr (dbg_rd_addr), .dbg_rd_data (dbg_rd_data),
 `endif

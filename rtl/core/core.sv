@@ -211,6 +211,11 @@ module core
     // cpu_hung (the PS observes it + resets) instead of executing the aborted line's
     // garbage. A #MC exception delivery is a later refinement (needs the IDT up).
     input  logic        bus_err,
+    // Phase D.6: per-line snoop-invalidate from the northbridge (a DMA write to a
+    // line that may hold code) — routed to u_icache so DMA-loaded code is coherent.
+    // Tied 0 in bus modes 0/1; absent in the default build → byte-identical.
+    input  logic        ic_snoop_valid,
+    input  logic [31:0] ic_snoop_addr,
 `endif
 
     // M6: errata-enable bus (docs/m6-errata-spec.md). DEFAULT 0 = clean core
@@ -4407,9 +4412,14 @@ module core
     .tch2_en   (ic_tch2_en),
     .tch2_set  (ic_tch2_set),
     .tch2_tag  (ic_tch2_tag),
-    // Phase A: snoop-invalidate tied inert until DMA coherence is wired (Phase D).
+    // Phase D.6: snoop-invalidate from the northbridge (VEN_L1_AXI); 0 otherwise.
+`ifdef VEN_L1_AXI
+    .snoop_inv_valid (ic_snoop_valid),
+    .snoop_inv_addr  (ic_snoop_addr)
+`else
     .snoop_inv_valid (1'b0),
     .snoop_inv_addr  (32'd0)
+`endif
   );
 
 `ifdef VEN_UOPCACHE
