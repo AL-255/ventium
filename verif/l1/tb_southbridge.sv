@@ -88,11 +88,17 @@ module tb_southbridge;
     mmio_w(32'h000B_8000, 32'h1234_5678);
     mmio_r(32'h000B_8000, d); chk("framebuffer @B8000", d, 32'h1234_5678);
 
-    $display("[3] DMA: program 0x00C0 block → engine bus-masters device→mem");
+    $display("[3] DMA via the REAL 8237 registers: program channel 0 → device→mem");
     devidx = 0;
-    io_w(16'h00C0, 32'h0000_7000);            // start address
-    io_w(16'h00C4, 32'h0000_0008);            // count = 8 words
-    io_w(16'h00C8, 32'h0000_0000);            // ctrl: dir=0 (device→mem), GO
+    io_w(16'h000C, 32'h00);                   // clear byte-pointer flip-flop
+    io_w(16'h0000, 32'h00);                   // ch0 addr LSB = 0x00
+    io_w(16'h0000, 32'h70);                   // ch0 addr MSB = 0x70  → 0x7000
+    io_w(16'h0001, 32'h07);                   // ch0 count LSB = 7 (8257 N-1; transfer 8)
+    io_w(16'h0001, 32'h00);                   // ch0 count MSB = 0
+    io_w(16'h0087, 32'h00);                   // ch0 page = 0
+    io_w(16'h000B, 32'h44);                   // ch0 mode: single, WRITE (device→mem)
+    io_w(16'h000A, 32'h00);                   // single-mask: unmask ch0
+    io_w(16'h0009, 32'h04);                   // request register: set request, ch0 → GO
     begin int g; g=0; forever begin @(posedge clk); #1; if (dma_tc) break;
       if (++g>2000) begin $display("  FAIL DMA never completed"); errors++; break; end end end
     for (int w=0; w<8; w++)

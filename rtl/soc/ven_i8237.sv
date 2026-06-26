@@ -41,7 +41,18 @@ module ven_i8237 (
     input  wire logic        we,         // 1 = OUT (CPU write), 0 = IN (CPU read)
     input  wire logic [15:0] addr,       // I/O port address
     input  wire logic [7:0]  wdata,
-    output logic [7:0]       rdata        // COMBINATIONAL off the registers
+    output logic [7:0]       rdata,       // COMBINATIONAL off the registers
+
+    // ---- channel state + transfer-request taps (Phase D.3 wiring) -------------
+    // Additive outputs so the southbridge can drive ven_i8237_dma from the REAL 8237
+    // register programming. Inert for the differential test (it never writes the
+    // request register 0x09, so ch_xreq stays 0 and nothing is exported as a request).
+    output logic [15:0]      ch_addr_o  [0:3],   // channel base address (now_addr)
+    output logic [15:0]      ch_count_o [0:3],   // channel base count (N-1, 8257 convention)
+    output logic [7:0]       ch_page_o  [0:3],   // channel page register (addr[23:16])
+    output logic [7:0]       ch_mode_o  [0:3],   // channel mode (bits[3:2] = transfer type)
+    output logic [3:0]       ch_mask_o,          // per-channel mask (1 = masked)
+    output logic [3:0]       ch_xreq_o           // 1-clock software-request pulse per channel
 );
 
   // ---- per-channel state (controller 0: 4 channels) ------------------------
@@ -148,6 +159,27 @@ module ven_i8237 (
       else if (is_cont && ip == 3'd0)  status    <= status & 8'hF0;
     end
   end
+
+  // ---- channel-state taps + software-request pulse (additive; Phase D.3) -----
+  logic [3:0] xreq_r;
+  always_ff @(posedge clk) begin
+    if (rst) xreq_r <= 4'd0;
+    else begin
+      xreq_r <= 4'd0;                     // 1-clock pulse
+      // request register (0x09) write with the "set request" bit (bit 2) → request the
+      // selected channel (bits[1:0]). This is the i8257 DMA-run trigger (the former
+      // oracle boundary); the southbridge turns it into a ven_i8237_dma `go`.
+      if (cs && we && is_cont && (ip==3'd1) && wdata[2]) xreq_r[wdata[1:0]] <= 1'b1;
+    end
+  end
+  always_comb for (int i=0;i<4;i++) begin
+    ch_addr_o[i]  = now_addr[i];
+    ch_count_o[i] = base_count[i];
+    ch_page_o[i]  = page[i];
+    ch_mode_o[i]  = mode[i];
+  end
+  assign ch_mask_o = mask[3:0];
+  assign ch_xreq_o = xreq_r;
 
 endmodule : ven_i8237
 

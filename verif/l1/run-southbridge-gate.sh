@@ -12,7 +12,8 @@ trap 'rm -rf "$OBJ"' EXIT
 verilator --binary --assert -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
     -Wno-INITIALDLY -Wno-IMPLICITSTATIC -Wno-TIMESCALEMOD -Wno-CASEINCOMPLETE -Wno-UNOPTFLAT \
     --top-module tb_southbridge -Mdir "$OBJ" -o tb_southbridge \
-    "$ROOT/rtl/northbridge/ven_hostbridge_cfg.sv" "$ROOT/rtl/soc/ven_i8237_dma.sv" \
+    "$ROOT/rtl/northbridge/ven_hostbridge_cfg.sv" "$ROOT/rtl/soc/ven_i8237.sv" \
+    "$ROOT/rtl/soc/ven_i8237_dma.sv" \
     "$ROOT/rtl/northbridge/ven_southbridge.sv" "$ROOT/verif/l1/tb_southbridge.sv" > "$OBJ/build.log" 2>&1 \
     || { echo "SOUTHBRIDGE-GATE-FAIL (build)"; tail -40 "$OBJ/build.log"; exit 1; }
 

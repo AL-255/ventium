@@ -86,27 +86,30 @@ module ven_southbridge (
       .pam(cfg_pam), .dramc(cfg_dramc), .cc(cfg_cc), .tom_mb4(cfg_tom_mb4), .smram(cfg_smram));
 
   // ===========================================================================
-  // DMA control registers (0x00C0-0x00CF) → ven_i8237_dma programming
-  //   0xC0 start_addr[31:0]   0xC4 count[15:0]   0xC8 ctrl: [0]=dir, write→go pulse
+  // 8237 DMA: the REAL register file (ven_i8237 at I/O 0x00-0x0F + page 0x80-0x8F)
+  // drives the transfer engine (ven_i8237_dma). Channel 0 is wired to the engine;
+  // the cascaded channels 1-3/secondary controller are a follow-up.
   // ===========================================================================
-  logic [31:0] dma_start; logic [15:0] dma_count; logic dma_dir, dma_go;
-  wire is_dmac = (io_addr[15:4]==12'h00C);    // 0xC0..0xCF
-  always_ff @(posedge clk) begin
-    if (!rst_n) begin dma_start<=32'd0; dma_count<=16'd0; dma_dir<=1'b0; dma_go<=1'b0; end
-    else begin
-      dma_go <= 1'b0;
-      if (io_req && io_we && is_dmac) unique case (io_addr[3:0])
-        4'h0: dma_start <= io_wdata;
-        4'h4: dma_count <= io_wdata[15:0];
-        4'h8: begin dma_dir <= io_wdata[0]; dma_go <= 1'b1; end   // write to ctrl arms a transfer
-        default: ;
-      endcase
-    end
-  end
+  logic [7:0]  i8237_rdata;
+  logic [15:0] ch_addr [0:3], ch_count [0:3]; logic [7:0] ch_page [0:3], ch_mode [0:3];
+  logic [3:0]  ch_mask, ch_xreq;
+  wire is_dma8237 = (io_addr[15:4]==12'h000) || (io_addr[15:4]==12'h008);  // 0x00-0x0F, 0x80-0x8F
+  ven_i8237 u_i8237 (
+      .clk(clk), .rst(~rst_n), .cs(io_req & is_dma8237), .we(io_we),
+      .addr(io_addr), .wdata(io_wdata[7:0]), .rdata(i8237_rdata),
+      .ch_addr_o(ch_addr), .ch_count_o(ch_count), .ch_page_o(ch_page), .ch_mode_o(ch_mode),
+      .ch_mask_o(ch_mask), .ch_xreq_o(ch_xreq));
+
+  // channel 0 → the transfer engine. start = {page,addr} (8237 24-bit), count = N+1
+  // (8257 stores N-1), dir from the mode transfer-type field (10=read mem→dev, 01=write).
+  wire        ch0_go    = ch_xreq[0] & ~ch_mask[0];
+  wire [31:0] ch0_start = {8'd0, ch_page[0], ch_addr[0]};
+  wire [15:0] ch0_count = ch_count[0] + 16'd1;
+  wire        ch0_dir   = (ch_mode[0][3:2]==2'b10);
 
   ven_i8237_dma u_dma (
       .clk(clk), .rst_n(rst_n),
-      .go(dma_go), .start_addr(dma_start), .count(dma_count), .dir(dma_dir),
+      .go(ch0_go), .start_addr(ch0_start), .count(ch0_count), .dir(ch0_dir),
       .busy(dma_busy), .tc(dma_tc),
       .dev_rd(dev_rd), .dev_rdata(dev_rdata), .dev_wr(dev_wr), .dev_wdata(dev_wdata),
       .m_req(dma_req), .m_we(dma_we), .m_addr(dma_addr), .m_wdata(dma_wdata),
@@ -114,8 +117,9 @@ module ven_southbridge (
 
   // ---- port-I/O response: single-cycle ack; data from the selected block ------
   assign io_ack   = io_req;                  // all decoded ports ack in one cycle
-  assign io_rdata = is_cf8 ? config_addr
-                  : is_cfc ? (cfg_hit ? hostcfg_rdata : 32'hFFFF_FFFF)   // master-abort = all 1s
+  assign io_rdata = is_cf8      ? config_addr
+                  : is_cfc      ? (cfg_hit ? hostcfg_rdata : 32'hFFFF_FFFF) // master-abort = all 1s
+                  : is_dma8237  ? {24'd0, i8237_rdata}
                   : 32'd0;
   always_ff @(posedge clk) if (!rst_n) config_addr<=32'd0;
                             else if (io_req && io_we && is_cf8) config_addr<=io_wdata;
