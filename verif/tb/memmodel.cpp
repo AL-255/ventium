@@ -35,12 +35,21 @@ static inline uint32_t fold(uint32_t a) { return a; }
 #endif
 
 MemModel::Page& MemModel::page_for(uint32_t addr) {
-    return pages_[addr >> PAGE_SHIFT];   // default-constructs (zeroed) if absent
+    uint32_t pidx = addr >> PAGE_SHIFT;
+    Page& pg = pages_[pidx];                  // default-constructs (zeroed) if absent
+    // keep the read cache coherent: if it holds this index (possibly as "absent"),
+    // refresh the pointer so a later read sees the now-present page.
+    if (cache_valid_ && cache_pidx_ == pidx) cache_page_ = &pg;
+    return pg;
 }
 
 const MemModel::Page* MemModel::page_lookup(uint32_t addr) const {
-    auto it = pages_.find(addr >> PAGE_SHIFT);
-    return (it == pages_.end()) ? nullptr : &it->second;
+    uint32_t pidx = addr >> PAGE_SHIFT;
+    if (cache_valid_ && cache_pidx_ == pidx) return cache_page_;   // hot path: no find()
+    auto it = pages_.find(pidx);
+    const Page* p = (it == pages_.end()) ? nullptr : &it->second;
+    cache_pidx_ = pidx; cache_page_ = p; cache_valid_ = true;
+    return p;
 }
 
 uint8_t MemModel::read8(uint32_t addr) const {
@@ -55,7 +64,18 @@ void MemModel::write8(uint32_t addr, uint8_t val) {
 }
 
 uint32_t MemModel::read32(uint32_t addr) const {
-    // Little-endian; byte-wise to be safe across page boundaries.
+    addr = fold(addr);
+    uint32_t off = addr & PAGE_MASK;
+    if (off <= PAGE_SIZE - 4) {                 // 4 bytes in one page: a SINGLE lookup
+        const Page* p = page_lookup(addr);
+        if (!p) return 0u;                      // unmapped reads as 0 (M0)
+        const uint8_t* b = &p->b[off];
+        return  (uint32_t)b[0]
+             | ((uint32_t)b[1] << 8)
+             | ((uint32_t)b[2] << 16)
+             | ((uint32_t)b[3] << 24);
+    }
+    // rare page-crossing word: byte-wise (read8 re-folds, harmless)
     return  (uint32_t)read8(addr)
          | ((uint32_t)read8(addr + 1) << 8)
          | ((uint32_t)read8(addr + 2) << 16)
@@ -125,6 +145,7 @@ void MemModel::restore(FILE* f) {
     if (std::fread(&magic, 4, 1, f) != 1 || magic != 0x564D454Du) return;
     if (std::fread(&np, 4, 1, f) != 1) return;
     pages_.clear();
+    cache_valid_ = false; cache_page_ = nullptr; cache_pidx_ = ~0u;  // stale after clear
     for (uint32_t i = 0; i < np; ++i) {
         uint32_t pn = 0;
         if (std::fread(&pn, 4, 1, f) != 1) break;

@@ -227,19 +227,78 @@ module ventium_soc
 
   // Two bus masters share the mem bus with the core: the IDE DMA (M8.4f) and the
   // fw_cfg DMA (F3). They are mutually exclusive; IDE has priority, then fw_cfg.
-  assign mem_req        = ide_dma_busy ? ide_dma_mem_req   : fwcfg_dma_busy ? fwcfg_dma_mem_req   : core_mem_req;
-  assign mem_we         = ide_dma_busy ? ide_dma_mem_we    : fwcfg_dma_busy ? fwcfg_dma_mem_we    : core_mem_we;
-  assign mem_wdata      = ide_dma_busy ? ide_dma_mem_wdata : fwcfg_dma_busy ? fwcfg_dma_mem_wdata : core_mem_wdata;
-  assign mem_wstrb      = ide_dma_busy ? ide_dma_mem_wstrb : fwcfg_dma_busy ? fwcfg_dma_mem_wstrb : core_mem_wstrb;
-  // ack routing: to a DMA engine while it owns the bus, else to the core.
-  assign core_mem_ack   = (ide_dma_busy || fwcfg_dma_busy) ? 1'b0 : mem_ack;
-  // The CPU A20 gate masks ONLY the core's address; bus-master DMA addresses the
-  // physical bus directly (qemu pci_dma_read/write bypass A20), so the DMA address is
-  // muxed in UN-masked. (The <1MiB test buffer makes this a no-op, but it is the
-  // faithful behavior — M8.4f review fold-back.)
-  assign mem_addr = ide_dma_busy   ? ide_dma_mem_addr
+  // The muxed CPU+DMA request stream (xm_*). The CPU A20 gate masks ONLY the core's
+  // address; bus-master DMA addresses the physical bus directly (qemu pci_dma_* bypass
+  // A20), so the DMA address is muxed in UN-masked.
+  logic [31:0] xm_addr; logic xm_req, xm_we; logic [31:0] xm_wdata; logic [3:0] xm_wstrb;
+  assign xm_req   = ide_dma_busy ? ide_dma_mem_req   : fwcfg_dma_busy ? fwcfg_dma_mem_req   : core_mem_req;
+  assign xm_we    = ide_dma_busy ? ide_dma_mem_we    : fwcfg_dma_busy ? fwcfg_dma_mem_we    : core_mem_we;
+  assign xm_wdata = ide_dma_busy ? ide_dma_mem_wdata : fwcfg_dma_busy ? fwcfg_dma_mem_wdata : core_mem_wdata;
+  assign xm_wstrb = ide_dma_busy ? ide_dma_mem_wstrb : fwcfg_dma_busy ? fwcfg_dma_mem_wstrb : core_mem_wstrb;
+  assign xm_addr  = ide_dma_busy   ? ide_dma_mem_addr
                   : fwcfg_dma_busy ? fwcfg_dma_mem_addr
                   : (eff_a20 ? core_mem_addr : (core_mem_addr & ~32'h0010_0000));
+
+  // cmem_* = the response seen by the consumers (CPU + DMA engines). VEN_SOC_L2 off:
+  // a transparent pass-through of the TB's mem_* (byte-identical to the original SoC).
+  logic [31:0] cmem_rdata; logic cmem_ack;
+`ifndef VEN_SOC_L2
+  // ---- default: the muxed stream drives the TB mem bus directly (no cache) --------
+  assign mem_req = xm_req; assign mem_we = xm_we; assign mem_addr = xm_addr;
+  assign mem_wdata = xm_wdata; assign mem_wstrb = xm_wstrb;
+  assign cmem_rdata = mem_rdata; assign cmem_ack = mem_ack;
+`else
+  // ---- VEN_SOC_L2: the System Bridge (L1 + cachemap KEN# + L2/northbridge) sits
+  //      between the muxed CPU+DMA stream and the TB DRAM. CPU and DMA share one L1,
+  //      so coherence is automatic (write-through L1; later reads hit the updated line).
+  //      Caching collapses the ~7 cyc/insn uncached-memory stall, cutting boot cycles.
+  localparam logic [55:0] SB_PAM     = 56'h77_7777_7777_7770;  // ROM windows R/W+cacheable
+  localparam logic [7:0]  SB_DRAMC   = 8'h01, SB_CC = 8'h41;   // no hole; FLCE=1, SCS=01
+  localparam logic [7:0]  SB_TOM_MB4 = 8'd255, SB_SMRAM = 8'h00;
+  logic        sb_ready;
+  logic        sb_l1c;  logic sb_to_dram, sb_l2c; logic [3:0] sb_region;
+  ven_cachemap u_sb_cmap (
+      .addr(xm_addr), .is_write(xm_we), .is_code(1'b0), .smm_active(1'b0),
+      .pam(SB_PAM), .dramc(SB_DRAMC), .cc(SB_CC), .tom_mb4(SB_TOM_MB4), .smram(SB_SMRAM),
+      .to_dram(sb_to_dram), .l1_cacheable(sb_l1c), .l2_cacheable(sb_l2c), .region(sb_region));
+  // L1 backing master (m_*) → NB upstream
+  logic        sb_m_req, sb_m_we; logic [31:0] sb_m_addr, sb_m_wdata; logic [3:0] sb_m_wstrb;
+  logic [31:0] sb_m_rdata; logic sb_m_ack;
+  logic        sb_snoop_v; logic [31:0] sb_snoop_a;
+  ven_l1d u_sb_l1d (
+      .clk(clk), .rst_n(rst_n & sb_ready), .flush_all(1'b0), .golden(1'b0),
+      .cacheable(sb_l1c), .snoop_inv_valid(sb_snoop_v), .snoop_inv_addr(sb_snoop_a),
+      .c_req(xm_req), .c_we(xm_we), .c_addr(xm_addr), .c_wdata(xm_wdata), .c_wstrb(xm_wstrb),
+      .c_rdata(cmem_rdata), .c_ack(cmem_ack),
+      .m_req(sb_m_req), .m_we(sb_m_we), .m_addr(sb_m_addr), .m_wdata(sb_m_wdata),
+      .m_wstrb(sb_m_wstrb), .m_rdata(sb_m_rdata), .m_ack(sb_m_ack));
+  // northbridge: L2 + cachemap + uncacheable bypass + MMIO split. d_*/mmio_* merge to
+  // the TB mem bus (only one active per txn). dma_* unused (DMA flows through the L1).
+  logic        nb_d_req, nb_d_we; logic [31:0] nb_d_addr, nb_d_wdata; logic [3:0] nb_d_wstrb;
+  logic        nb_mmio_req, nb_mmio_we; logic [31:0] nb_mmio_addr, nb_mmio_wdata; logic [3:0] nb_mmio_wstrb;
+  ven_northbridge #(.L2_CAP_BYTES(65536), .L2_LINE(32), .L2_WAYS(4)) u_sb_nb (
+      .clk(clk), .rst_n(rst_n), .ready(sb_ready),
+      .cfg_pam(SB_PAM), .cfg_dramc(SB_DRAMC), .cfg_cc(SB_CC),
+      .cfg_tom_mb4(SB_TOM_MB4), .cfg_smram(SB_SMRAM), .smm_active(1'b0),
+      .u_req(sb_m_req), .u_we(sb_m_we), .u_addr(sb_m_addr), .u_wdata(sb_m_wdata),
+      .u_wstrb(sb_m_wstrb), .u_rdata(sb_m_rdata), .u_ack(sb_m_ack),
+      .d_req(nb_d_req), .d_we(nb_d_we), .d_addr(nb_d_addr), .d_wdata(nb_d_wdata),
+      .d_wstrb(nb_d_wstrb), .d_rdata(mem_rdata), .d_ack(mem_ack),
+      .dma_req(1'b0), .dma_we(1'b0), .dma_addr(32'd0), .dma_wdata(32'd0), .dma_wstrb(4'd0),
+      .dma_rdata(/*unused*/), .dma_ack(/*unused*/),
+      .snoop_inv_valid(sb_snoop_v), .snoop_inv_addr(sb_snoop_a),
+      .mmio_req(nb_mmio_req), .mmio_we(nb_mmio_we), .mmio_addr(nb_mmio_addr),
+      .mmio_wdata(nb_mmio_wdata), .mmio_wstrb(nb_mmio_wstrb),
+      .mmio_rdata(mem_rdata), .mmio_ack(mem_ack));
+  // merge the two downstreams onto the single TB mem bus (one active at a time)
+  assign mem_req   = nb_d_req | nb_mmio_req;
+  assign mem_we    = nb_mmio_req ? nb_mmio_we    : nb_d_we;
+  assign mem_addr  = nb_mmio_req ? nb_mmio_addr  : nb_d_addr;
+  assign mem_wdata = nb_mmio_req ? nb_mmio_wdata : nb_d_wdata;
+  assign mem_wstrb = nb_mmio_req ? nb_mmio_wstrb : nb_d_wstrb;
+`endif
+  // ack routing: to a DMA engine while it owns the bus, else to the core.
+  assign core_mem_ack   = (ide_dma_busy || fwcfg_dma_busy) ? 1'b0 : cmem_ack;
 
   // Device side outputs the M8.2 SoC observes but does not act on (yet):
   //  * rtc_nmi_dis : RTC index-port bit7 (NMI mask). NMI is tied off in this SoC.
@@ -697,10 +756,12 @@ module ventium_soc
   logic        cs_vram;
   logic [31:0] vram_rdata;
   logic [15:0] masked_mem_addr;
-  assign masked_mem_addr = mem_addr[15:0];   // window offset (0xA0000 base is 64K-aligned)
+  // use the PRE-cache muxed address (xm_addr) so the VGA-window decode is unaffected by
+  // the System Bridge; xm_addr == the old mem_addr when VEN_SOC_L2 is off (byte-identical).
+  assign masked_mem_addr = xm_addr[15:0];    // window offset (0xA0000 base is 64K-aligned)
   assign chain4_en = vga_seq_mem_mode[3] && (vga_gfx_misc[3:2] inside {2'b00, 2'b01});
   assign cs_vram   = core_mem_req && !ide_dma_busy && chain4_en &&
-                     (mem_addr >= 32'h000A_0000) && (mem_addr <= 32'h000A_FFFF);
+                     (xm_addr >= 32'h000A_0000) && (xm_addr <= 32'h000A_FFFF);
 
   ven_vga_fb u_vga_fb (
       .clk        (clk),
@@ -717,7 +778,7 @@ module ventium_soc
   );
 
   // The core's read bus: VRAM data on a chain-4 framebuffer hit, else the TB's.
-  assign core_mem_rdata = cs_vram ? vram_rdata : mem_rdata;
+  assign core_mem_rdata = cs_vram ? vram_rdata : cmem_rdata;
 
   // ACPI PM timer (PIIX4 PM base + 0x08 => 0x608).  Free-running 24-bit counter
   // derived from clk by a fractional accumulator (average rate PM_TIMER_FREQ).
@@ -794,8 +855,8 @@ module ventium_soc
       .dma_mem_addr  (ide_dma_mem_addr),
       .dma_mem_wdata (ide_dma_mem_wdata),
       .dma_mem_wstrb (ide_dma_mem_wstrb),
-      .dma_mem_rdata (mem_rdata),
-      .dma_mem_ack   (ide_dma_busy & mem_ack)   // ack only while the DMA owns the bus
+      .dma_mem_rdata (cmem_rdata),
+      .dma_mem_ack   (ide_dma_busy & cmem_ack)  // ack only while the DMA owns the bus
   );
 
   // M8.4e: the SECONDARY channel's master — the empty ATAPI CD-ROM qemu's
@@ -1037,11 +1098,11 @@ module ventium_soc
                     fwdma_actl <= bswap32(io_wdata);  // BE low half = the struct address
                     fwdma_xoff <= 32'd0; fwdma_pend <= 1'b1; fwd_st <= FWD_C;
                   end
-        FWD_C:  if (mem_ack) begin fwdma_ctl <= bswap32(mem_rdata); fwd_st <= FWD_L;  end
-        FWD_L:  if (mem_ack) begin fwdma_len <= bswap32(mem_rdata); fwd_st <= FWD_AH; end
-        FWD_AH: if (mem_ack) begin                    /* address high (assumed 0) */ fwd_st <= FWD_AL; end
-        FWD_AL: if (mem_ack) begin
-                  fwdma_tgt <= bswap32(mem_rdata);    // address low half (the buffer)
+        FWD_C:  if (cmem_ack) begin fwdma_ctl <= bswap32(cmem_rdata); fwd_st <= FWD_L;  end
+        FWD_L:  if (cmem_ack) begin fwdma_len <= bswap32(cmem_rdata); fwd_st <= FWD_AH; end
+        FWD_AH: if (cmem_ack) begin                    /* address high (assumed 0) */ fwd_st <= FWD_AL; end
+        FWD_AL: if (cmem_ack) begin
+                  fwdma_tgt <= bswap32(cmem_rdata);    // address low half (the buffer)
                   if (fwdma_ctl[3]) begin fwcfg_sel <= fwdma_ctl[31:16]; fwcfg_off <= 16'd0; end // SELECT
                   if (fwdma_ctl[1] && fwdma_len != 32'd0) fwd_st <= FWD_X;            // READ
                   else begin
@@ -1049,12 +1110,12 @@ module ventium_soc
                     fwd_st <= FWD_WB;
                   end
                 end
-        FWD_X:  if (mem_ack) begin
+        FWD_X:  if (cmem_ack) begin
                   if (fwdma_xoff + 32'd1 >= fwdma_len) begin
                     fwcfg_off <= fwcfg_off + fwdma_len[15:0]; fwd_st <= FWD_WB;
                   end else fwdma_xoff <= fwdma_xoff + 32'd1;
                 end
-        FWD_WB: if (mem_ack) begin fwdma_pend <= 1'b0; fwd_st <= FWD_IDLE; end
+        FWD_WB: if (cmem_ack) begin fwdma_pend <= 1'b0; fwd_st <= FWD_IDLE; end
         default: fwd_st <= FWD_IDLE;
       endcase
     end

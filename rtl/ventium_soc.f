@@ -66,3 +66,9 @@ soc/ven_i8272.sv
 soc/ven_ide.sv
 // M8.5 NS16550A COM1 serial UART (0x3F8-0x3FF, IRQ4):
 soc/ven_uart16550.sv
+// System Bridge (VEN_SOC_L2): L1 cache + cachemap(KEN#) + L2/northbridge. Compiled
+// always; instantiated only under +define+VEN_SOC_L2 (unused/pruned otherwise).
+mem/ven_l1d.sv
+northbridge/ven_cachemap.sv
+northbridge/ven_l2.sv
+northbridge/ven_northbridge.sv
