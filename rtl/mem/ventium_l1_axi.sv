@@ -103,6 +103,18 @@ module ventium_l1_axi #(
     output logic [31:0] dma_rdata,
     output logic        dma_ack,
 `endif
+`ifdef VEN_NB_MMIO
+    // ---- Phase D.5: device MMIO master (to_dram=0 → the southbridge device fabric).
+    // Gated by VEN_NB_MMIO so ventium_top / the board build are untouched. Without it,
+    // device space falls through to the AXI/DDR backing (pre-D.5 behavior).
+    output logic        mmio_req,
+    output logic        mmio_we,
+    output logic [31:0] mmio_addr,
+    output logic [31:0] mmio_wdata,
+    output logic [3:0]  mmio_wstrb,
+    input  logic [31:0] mmio_rdata,
+    input  logic        mmio_ack,
+`endif
 
 `ifdef VEN_DBG_CORE
     // ---- read-beat trace (VEN_DBG_CORE): pass-through from ven_axi_master ------
@@ -313,7 +325,12 @@ module ventium_l1_axi #(
           .to_dram(core_to_dram_u), .l1_cacheable(core_l1c), .l2_cacheable(core_l2c_u),
           .region(core_cm_region));
       assign l1d_cacheable = core_l1c;
-      // Phase C: the northbridge (cachemap + L2 + uncacheable bypass) sits in the seam.
+      // NB downstreams: nb_d_* = DDR (L2 + DRAM-bypass), nb_mmio_* = device MMIO (D.5).
+      logic        nb_d_req, nb_d_we; logic [31:0] nb_d_addr, nb_d_wdata; logic [3:0] nb_d_wstrb;
+      logic [31:0] nb_d_rdata; logic nb_d_ack;
+      logic        nb_mmio_req, nb_mmio_we; logic [31:0] nb_mmio_addr, nb_mmio_wdata; logic [3:0] nb_mmio_wstrb;
+      logic [31:0] nb_mmio_rdata; logic nb_mmio_ack;
+      // Phase C: the northbridge (cachemap + L2 + uncacheable bypass + MMIO split).
       ven_northbridge #(.L2_CAP_BYTES(L2_CAP_BYTES), .L2_LINE(L1_LINE), .L2_WAYS(L2_WAYS)) u_nb (
           .clk   (core_clk),
           .rst_n (l1d_rst_n),       // L2's own reset (NOT gated on its own ready)
@@ -323,19 +340,47 @@ module ventium_l1_axi #(
           // upstream slave ⇐ the L1's backing master
           .u_req (m_req),  .u_we (m_we),  .u_addr (m_addr), .u_wdata (m_wdata),
           .u_wstrb(m_wstrb), .u_rdata(m_rdata), .u_ack (m_ack),
-          // downstream master ⇒ the AXI master / CDC backing slave
-          .d_req (b_req),  .d_we (b_we),  .d_addr (b_addr), .d_wdata (b_wdata),
-          .d_wstrb(b_wstrb), .d_rdata(b_rdata), .d_ack (b_ack),
+          // DDR downstream master ⇒ the AXI master / CDC backing slave
+          .d_req (nb_d_req),  .d_we (nb_d_we),  .d_addr (nb_d_addr), .d_wdata (nb_d_wdata),
+          .d_wstrb(nb_d_wstrb), .d_rdata(nb_d_rdata), .d_ack (nb_d_ack),
           // coherent DMA requester + snoop broadcast (Phase D)
           .dma_req(nb_dma_req), .dma_we(nb_dma_we), .dma_addr(nb_dma_addr),
           .dma_wdata(nb_dma_wdata), .dma_wstrb(nb_dma_wstrb),
           .dma_rdata(nb_dma_rdata), .dma_ack(nb_dma_ack),
-          .snoop_inv_valid(l1d_snoop_valid), .snoop_inv_addr(l1d_snoop_addr)
+          .snoop_inv_valid(l1d_snoop_valid), .snoop_inv_addr(l1d_snoop_addr),
+          // MMIO downstream master ⇒ device fabric (southbridge) — D.5
+          .mmio_req(nb_mmio_req), .mmio_we(nb_mmio_we), .mmio_addr(nb_mmio_addr),
+          .mmio_wdata(nb_mmio_wdata), .mmio_wstrb(nb_mmio_wstrb),
+          .mmio_rdata(nb_mmio_rdata), .mmio_ack(nb_mmio_ack)
 `ifdef VEN_DBG_CORE
           , .dbg_hits(l2_hits_w), .dbg_misses(l2_misses_w), .dbg_wbacks(l2_wbacks_w),
             .dbg_bypass(l2_bypass_w)
 `endif
       );
+`ifdef VEN_NB_MMIO
+      // device MMIO exits on the external port; DDR path goes to the AXI master.
+      assign b_req = nb_d_req; assign b_we = nb_d_we; assign b_addr = nb_d_addr;
+      assign b_wdata = nb_d_wdata; assign b_wstrb = nb_d_wstrb;
+      assign nb_d_rdata = b_rdata; assign nb_d_ack = b_ack;
+      assign mmio_req = nb_mmio_req; assign mmio_we = nb_mmio_we; assign mmio_addr = nb_mmio_addr;
+      assign mmio_wdata = nb_mmio_wdata; assign mmio_wstrb = nb_mmio_wstrb;
+      assign nb_mmio_rdata = mmio_rdata; assign nb_mmio_ack = mmio_ack;
+`else
+      // no external device fabric in this build: MERGE the MMIO master back onto the
+      // single AXI backing (device space falls through to DDR — keeps the pre-D.5 gates
+      // byte-identical, since only one of nb_d_*/nb_mmio_* is ever active at a time).
+      assign b_req   = nb_d_req | nb_mmio_req;
+      assign b_we    = nb_mmio_req ? nb_mmio_we    : nb_d_we;
+      assign b_addr  = nb_mmio_req ? nb_mmio_addr  : nb_d_addr;
+      assign b_wdata = nb_mmio_req ? nb_mmio_wdata : nb_d_wdata;
+      assign b_wstrb = nb_mmio_req ? nb_mmio_wstrb : nb_d_wstrb;
+      // route the shared backing response to BOTH (ungated — the NB's stable mmio_sel
+      // picks which one matters; only one path is active per single-outstanding txn).
+      // Gating by *_req here would drop the ack when the requester deasserts at the ack
+      // edge → the NB lock would stick (the same footgun as the snoop latch).
+      assign nb_d_rdata    = b_rdata; assign nb_d_ack    = b_ack;
+      assign nb_mmio_rdata = b_rdata; assign nb_mmio_ack = b_ack;
+`endif
     end else begin : g_nol2
       // L2 bypassed: the backing port is transparent (byte-identical to pre-L2).
       assign b_req = m_req;   assign b_we = m_we;   assign b_addr = m_addr;
@@ -345,6 +390,10 @@ module ventium_l1_axi #(
       assign l1d_cacheable = 1'b1;       // cache everything (byte-identical to pre-L2)
       assign l1d_snoop_valid = 1'b0; assign l1d_snoop_addr = 32'd0;   // no snoop (no DMA path)
       assign nb_dma_rdata = 32'd0; assign nb_dma_ack = 1'b0;          // no DMA path
+`ifdef VEN_NB_MMIO
+      assign mmio_req=1'b0; assign mmio_we=1'b0; assign mmio_addr=32'd0;
+      assign mmio_wdata=32'd0; assign mmio_wstrb=4'd0;                // no NB → no MMIO master
+`endif
     end
   endgenerate
   // Pin the observability wires to 0 wherever the generate does NOT drive them (the
