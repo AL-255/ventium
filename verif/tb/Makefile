@@ -118,12 +118,23 @@ rtl:
 # ONLY here (they are not in ventium.f); -DVEN_L1_AXI reaches the C++ TB too.
 # Run: make l1axi && ./obj_dir_l1axi/tb_ventium --l1-axi <image> ...
 L1AXI_RTL := $(RTL_DIR)/mem/ven_l1d.sv $(RTL_DIR)/mem/ven_axi_master.sv \
+             $(RTL_DIR)/northbridge/ven_cachemap.sv $(RTL_DIR)/northbridge/ven_l2.sv \
+             $(RTL_DIR)/northbridge/ven_northbridge.sv \
              $(RTL_DIR)/mem/ventium_l1_axi.sv
 .PHONY: l1axi
 l1axi:
 	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/obj_dir_l1axi/$(EXE)"
+
+# ---- l1axi_l2: the L1+AXI build with the L2/northbridge stack ON (+VEN_EN_L2) ----
+# EN_L2=1 routes the core's backing through ven_northbridge (ven_cachemap + ven_l2 +
+# uncacheable bypass). Proves the REAL core runs through the L2 + cacheability routing.
+.PHONY: l1axi_l2
+l1axi_l2:
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_EN_L2 -CFLAGS "-DVEN_L1_AXI" \
+	  -Mdir obj_dir_l1axi_l2 -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (L1+AXI + L2/NB, EN_L2=1): $(CURDIR)/obj_dir_l1axi_l2/$(EXE)"
 
 # ---- l1axi_kv: the DEPLOYED KV260 memory config (+VEN_L1_AXI +VEN_KV260_SOC) ---
 # Same as l1axi but REMAP_BASE=0x4000_0000 (the carveout) — reproduces the
@@ -202,6 +213,46 @@ l1axi_kv_dos_q:
 	  -Mdir obj_dir_l1axi_kvdosq \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)
 	@echo "built (DOS + 64MiB extmem for Quake): $(CURDIR)/obj_dir_l1axi_kvdosq/$(EXE)"
+
+# ---- l1axi_kv_dos_q_rtlirq: l1axi_kv_dos_q + VEN_RTL_IRQ (the 8254 PIT + 8259 PIC
+# moved from the PS C-models INTO the PL/RTL, so the IRQ0 cadence is cycle-deterministic
+# and the sim == the board). TICK_DIV (the PIT prescaler) overridable for the cadence
+# sweep: make l1axi_kv_dos_q_rtlirq VEN_PIT_TICK_DIV_DEF="+define+VEN_PIT_TICK_DIV=33".
+.PHONY: l1axi_kv_dos_q_rtlirq
+l1axi_kv_dos_q_rtlirq:
+	$(VERILATOR) $(VL_FLAGS) --savable $(KV_FULL_DEFS) +define+VEN_DBG_CORE +define+VEN_RTL_IRQ $(VEN_PIT_TICK_DIV_DEF) $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_RTL_IRQ -DVEN_SAVABLE -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir obj_dir_l1axi_kvdosq_rtlirq \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)
+	@echo "built (RTL-IRQ: in-PL ven_pit/ven_pic, cycle-deterministic IRQ0): $(CURDIR)/obj_dir_l1axi_kvdosq_rtlirq/$(EXE)"
+
+# ---- l1axi_kv_dos_q_rtlirq_fpps: the EXACT deployed FP_PS_ALL=1 RTL_IRQ=1 bitstream
+# config. = l1axi_kv_dos_q_rtlirq PLUS the board's FP_PS_ALL area-relief build (the x87
+# COMPUTE datapath is REMOVED from the PL and EVERY x87 arithmetic/compare/transcendental
+# op is PS-trapped to the A53/SoftFloat via the fptrap seam). Mirrors impl_kv260_soc.tcl
+# FP_PS_ALL=1 exactly: ADD VEN_FP_PS_ALL + VEN_FPTRAP, and STRIP the six area-bulk defines
+# VEN_TRANSCENDENTAL VEN_FPREM VEN_SRT_ITER VEN_BCD_ITER VEN_FP_PIPE VEN_FP_PIPE2 (the
+# first two are not in KV_FULL_DEFS; the latter four ARE, so build the list by filtering
+# them out of KV_FULL_DEFS rather than using it wholesale). RTL_IRQ=1 adds BOTH
+# VEN_RTL_IRQ and VEN_RTL_IRQ_FIXED (the dense fixed-cycle IR0 = the DOS-Quake #DE fix).
+# This is the FP-board-faithful repro: the in-PL-FPU rtlirq sim passed #DE=0 to 13M, but
+# the board (FP_PS_ALL) still faults (cs=0x2b eip=0x24e); this build sees if the FP
+# divergence is the cause. NOTE: the TB's service_fptrap (-DVEN_FPTRAP) only implements
+# FPATAN (atan2l); any other PS-trapped op is serviced as atan2 — a known faithfulness
+# gap, reported per-run. Separate obj dir so every other build stays byte-identical.
+KV_FPPS_DEFS := $(filter-out +define+VEN_FP_PIPE +define+VEN_FP_PIPE2 +define+VEN_SRT_ITER +define+VEN_BCD_ITER,$(KV_FULL_DEFS))
+# VL_FLAGS hard-codes +define+VEN_FPREM (shared base, used by every target). FP_PS_ALL
+# STRIPS the iterative FPREM engine, so for THIS build the define must be absent —
+# filter it out of a target-local copy of the flags (the shared VL_FLAGS is untouched,
+# so no other target changes). This is the last of the six FP_PS_ALL-stripped defines.
+VL_FLAGS_FPPS := $(filter-out +define+VEN_FPREM,$(VL_FLAGS))
+.PHONY: l1axi_kv_dos_q_rtlirq_fpps
+l1axi_kv_dos_q_rtlirq_fpps:
+	$(VERILATOR) $(VL_FLAGS_FPPS) --savable $(KV_FPPS_DEFS) +define+VEN_FP_PS_ALL +define+VEN_FPTRAP +define+VEN_RTL_IRQ +define+VEN_RTL_IRQ_FIXED +define+VEN_DBG_CORE $(VEN_PIT_TICK_DIV_DEF) $(VL_EXTRA_DEFINES) \
+	  -CFLAGS "-DVEN_L1_AXI -DVEN_KV260_SOC -DVEN_DOS_MODELS -DVEN_DBG_CORE -DVEN_RTL_IRQ -DVEN_FPTRAP -DVEN_SAVABLE -DVEN_RTC_EXTMEM_KB=64512 -I$(VENTIUM_ROOT)/sw/ps_periph" \
+	  -Mdir obj_dir_l1axi_kvdosq_rtlirq_fpps \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS) $(DOS_PERIPH)
+	@echo "built (FP_PS_ALL=1 RTL_IRQ=1: x87 compute removed/PS-trapped + fixed-cycle IR0; FP-board-faithful): $(CURDIR)/obj_dir_l1axi_kvdosq_rtlirq_fpps/$(EXE)"
 
 # ---- l1axi_kv_dos_q_xover: l1axi_kv_dos_q + --public-flat-rw (task #102) ------
 # IDENTICAL config to l1axi_kv_dos_q, plus Verilator --public-flat-rw so the C++ tb

@@ -47,7 +47,15 @@ module ventium_l1_axi #(
     // drives this; the board flips it in Phase E behind the northbridge). The L2 is
     // WRITE-BACK, so with EN_L2=1 the AXI traffic shape CHANGES (stores are absorbed
     // until eviction) — which is why AXI-pattern gates keep the default 0.
-    parameter bit          EN_L2        = 1'b0,
+    // Phase E: the DEFAULT follows the +VEN_EN_L2 build define, so the full-core L1AXI
+    // build can turn the L2/northbridge on without editing ventium_top's instantiation.
+    // No define → 0 (every existing L1AXI gate + the board build stay byte-identical).
+    parameter bit          EN_L2        =
+`ifdef VEN_EN_L2
+                                          1'b1,
+`else
+                                          1'b0,
+`endif
     parameter int          L2_CAP_BYTES = 2*1024*1024,     // 2 MiB (= all 64 URAM288)
     parameter int          L2_WAYS      = 8,
     // ---- Phase C: ven_northbridge cacheability config (the 430FX TSC registers).
@@ -90,6 +98,16 @@ module ventium_l1_axi #(
     // ---- clean-shutdown quiesce (pass-through to ven_axi_master) ---------------
     input  logic        shutdown,        // 1 = stop new AXI txns, drain in-flight
     output logic        m_idle,          // 1 = AXI master drained -> safe to remove overlay
+
+`ifdef VEN_L1_AXI
+    // ---- icache snoop-invalidate (Phase D.6): the SAME northbridge snoop that
+    // invalidates ven_l1d, exposed so ventium_top can thread it into the core's
+    // icache (DMA-loaded code coherence). 0 when EN_L2=0 / no DMA, so it is inert
+    // until the southbridge DMA path is wired. Gated by VEN_L1_AXI so the standalone
+    // L1 unit gates (which don't define it) don't need to bind these outputs.
+    output logic        icache_snoop_valid,
+    output logic [31:0] icache_snoop_addr,
+`endif
 
 `ifdef VEN_NB_DMA
     // ---- Phase D: coherent DMA requester (a non-CPU bus master via the southbridge).
@@ -241,6 +259,11 @@ module ventium_l1_axi #(
   // branches (g_l2 → NB snoop; g_nol2 → 0, byte-identical).
   logic        l1d_snoop_valid;
   logic [31:0] l1d_snoop_addr;
+`ifdef VEN_L1_AXI
+  // expose the same snoop upward to the core's icache (Phase D.6).
+  assign icache_snoop_valid = l1d_snoop_valid;
+  assign icache_snoop_addr  = l1d_snoop_addr;
+`endif
   // DMA requester into the northbridge: from the external port (VEN_NB_DMA) or tied off
   // (CPU-only). Responses (rdata/ack) are driven by the generate (NB present or 0).
   logic        nb_dma_req, nb_dma_we; logic [31:0] nb_dma_addr, nb_dma_wdata; logic [3:0] nb_dma_wstrb;
