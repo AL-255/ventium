@@ -67,7 +67,12 @@ module ventium_l1_axi #(
     parameter logic [7:0]  NB_CC      = 8'h41,             // FLCE=1, SCS=01, SCFMI=0
     parameter logic [7:0]  NB_DRAMC   = 8'h01,             // HEN=00 (no hole)
     parameter logic [7:0]  NB_TOM_MB4 = 8'd255,            // ~1020 MiB cacheable DRAM
-    parameter logic [55:0] NB_PAM     = 56'h0,             // ROM windows uncacheable by default
+    // ROM windows (0xC0000-0xFFFFF) default to R/W + cacheable ({CE,WE,RE}=0x7 per segment;
+    // PAM0=0x70 for 0xF0000, PAM1-6=0x77). The system BIOS is DRAM-backed and no host bridge
+    // programs PAM yet, so without this the BIOS executes UNCACHED (every fetch is a bypass→DDR
+    // round-trip) — SeaBIOS POST takes tens of minutes. Revert to 0 once ven_hostbridge_cfg is
+    // wired so SeaBIOS programs PAM itself (the architecturally-correct reset is uncacheable).
+    parameter logic [55:0] NB_PAM     = 56'h77_7777_7777_7770,
     parameter logic [7:0]  NB_SMRAM   = 8'h00
 ) (
     (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 core_clk CLK" *)
