@@ -181,47 +181,38 @@ module ven_northbridge #(
   assign dma_rdata = a_rdata;  assign dma_ack =  gnt_dma & a_ack;
 
   // ---- grant lock ------------------------------------------------------------
-  // Hold the grant for the WHOLE transaction: a READ streams WORDS acks (a line), a
-  // WRITE is one ack. Releasing on the first ack would tear a read mid-stream and let
-  // the other requester steal the L2. (All reads through the NB — L1 fills, L1 bypass
-  // fills, DMA line reads — are full WORDS-word lines; all writes are single-ack.)
-  localparam int WORDS = L2_LINE/4;
-  logic [$clog2(WORDS):0] ack_cnt;
-  logic last_ack;
-  // the transaction's we/addr LATCHED at grant time (stable for the whole txn) — so the
-  // snoop is robust to the requester deasserting its req/we at the ack edge.
-  logic        lk_we; logic [31:0] lk_addr;
-  // Use the LATCHED lk_we (not the combinational a_we, which the requester drops at the
-  // ack edge): a write completes on its single ack, a read after WORDS acks.
-  assign last_ack = a_ack && (lk_we || (ack_cnt == WORDS-1));
+  // Hold the grant for the WHOLE transaction and release on its TRUE BOUNDARY: when the
+  // granted requester drops its req (gnt_req low). The L1D holds m_req continuously through
+  // an 8-word fill and drops it at the boundary; the DMA engine likewise holds req for the
+  // duration of a transaction. (Earlier this counted WORDS acks to find the end — but a
+  // stale ack_cnt could fire the release MID-FILL, tearing the stream and WEDGING the lock,
+  // and could even admit the other requester into the middle of a fill. The req edge is the
+  // unambiguous boundary.) The we/addr are LATCHED at grant for the snoop.
+  logic        lk_we; logic [31:0] lk_addr; logic lk_byp;
+  wire         gnt_req = gnt_dma ? dma_req : u_req;     // the granted requester's req
   always_ff @(posedge clk) begin
-    if (!rst_n) begin locked <= 1'b0; lock_dma <= 1'b0; ack_cnt <= '0; lk_we <= 1'b0; lk_addr <= '0; end
+    if (!rst_n) begin locked <= 1'b0; lock_dma <= 1'b0; lk_we <= 1'b0; lk_addr <= '0; lk_byp <= 1'b0; end
     else if (!locked) begin
-      ack_cnt <= '0;
       if (dma_req || u_req) begin
-        locked <= 1'b1; lock_dma <= gnt_dma; lk_we <= a_we; lk_addr <= a_addr;
+        locked <= 1'b1; lock_dma <= gnt_dma; lk_we <= a_we; lk_addr <= a_addr; lk_byp <= ~route;
       end
-    end else begin
-      if (a_ack && !lk_we) ack_cnt <= (ack_cnt == WORDS-1) ? '0 : ack_cnt + 1'b1;
-      if (last_ack) locked <= 1'b0;          // transaction complete → re-arbitrate
-    end
+    end else if (!gnt_req) locked <= 1'b0;     // requester dropped req → transaction done
   end
 
-  // ---- snoop-invalidate generation: pulse one clock when a DMA WRITE completes. Uses
-  // the LATCHED grant/we/addr + last_ack (the L2's clean registered ack), so it does not
-  // depend on when the DMA master drops its signals. Conservative (every DMA write,
-  // cacheable or not — invalidating an absent line is harmless), and ATOMIC with the
-  // write becoming visible, so a CPU read after this misses L1 and refills the new data.
-  // The L1 is write-through, so L1 ⊆ L2 in dirtiness — invalidate suffices, no write-back.
-  assign snoop_inv_valid = last_ack & lock_dma & lk_we;
+  // ---- snoop-invalidate generation: pulse on a DMA WRITE's ack (the L2's clean registered
+  // ack), using the LATCHED grant/we/addr — robust to the master dropping its signals at
+  // the edge. Conservative (every DMA write, cacheable or not — invalidating an absent line
+  // is harmless), ATOMIC with the write becoming visible, so a CPU read after this misses L1
+  // and refills. The L1 is write-through (L1 ⊆ L2 in dirtiness), so invalidate suffices.
+  assign snoop_inv_valid = lock_dma & lk_we & a_ack;
   assign snoop_inv_addr  = lk_addr;
 
 `ifdef VEN_DBG_CORE
   // count uncacheable (bypass) transactions: one per completed bypass transaction
-  // (last_ack, robust to the requester dropping its req at the ack edge).
+  // (the latched-bypass lock releasing on its req-drop boundary).
   always_ff @(posedge clk) begin
     if (!rst_n) dbg_bypass <= '0;
-    else if (last_ack && !route) dbg_bypass <= dbg_bypass + 32'd1;
+    else if (locked && lk_byp && a_ack) dbg_bypass <= dbg_bypass + 32'd1;   // per bypass beat
   end
 `endif
 
