@@ -195,6 +195,33 @@ extern "C" void vtm_retire(
                 "[GPTRACE] n=%llu pc=0x%05x eax=%x ebx=%x ecx=%x edx=%x esi=%x edi=%x bp=%x sp=%x ds=%x es=%x ss=%x\n",
                 (unsigned long long)n, pc, eax, ebx, ecx, edx, esi, edi, ebp, esp, ds, es, ss);
         }
+        // go32-window trace: the divergence is in cs=0x18:0x2b04..0x2b73 (RTL spuriously
+        // flips to cs=0x2b/ring3). Log cs=0x18 in that offset window near the fault to
+        // diff against QEMU's golden offset sequence (0x2b04 0x2b09 0x2b0a 0x2b0d ...).
+        if (gptrace && cs == 0x18 && (pc & 0xffff) >= 0x2b00 && (pc & 0xffff) <= 0x2c00
+            && n > 8900000ull) {
+            std::fprintf(stderr, "[GO32W] n=%llu cs=18 eip=0x%x ss=%x esp=%x eflags=%08x\n",
+                         (unsigned long long)n, pc & 0xffff, (unsigned)ss, esp, eflags);
+        }
+        // WORKER-RESUME trace: the coroutine worker runs at cs=0x87; its first eip after
+        // each task switch is the resume point (QEMU golden: 0x233 0x24e 0x258 0x26d ...).
+        // The first iteration where this diverges = where the worker derailed.
+        if (gptrace && cs == 0x87 && n > 8900000ull) {
+            static unsigned prev87 = 0;
+            if (pc != prev87 + 1 && pc != prev87 + 2 && pc != prev87 + 3 && pc != prev87 + 4
+                && pc != prev87 + 5 && pc != prev87 + 6) {
+                std::fprintf(stderr, "[WRK] n=%llu cs=87 eip=0x%x eax=%x ebx=%x ss=%04x esp=%x\n",
+                             (unsigned long long)n, pc, eax, ebx, (unsigned)ss, esp);
+            }
+            prev87 = pc;
+        }
+        // ALL-RETIRE trace across the LTR/task-gate gap (n=8907560..8907607) to see the
+        // exact failure mode of the far-jmp-to-task-gate at go32 0x2b70-0x2b73.
+        if (gptrace && ((n >= 8907555ull && n <= 8907615ull) ||
+                        (n >= 8908060ull && n <= 8908115ull))) {
+            std::fprintf(stderr, "[GAP] n=%llu cs=%04x eip=0x%x cpl=%u eax=%x ebx=%x ecx=%x ss=%04x esp=%x eflags=%08x\n",
+                         (unsigned long long)n, (unsigned)cs, pc, (unsigned)(cs & 3), eax, ebx, ecx, (unsigned)ss, esp, eflags);
+        }
         // VM/cs transition trace: log when EFLAGS.VM (bit17) or cs changes near the fault,
         // to pinpoint the V86<->PM transition the #GP comes from. Off unless VEN_GPTRACE.
         if (gptrace && n > 8800000ull) {
