@@ -526,15 +526,15 @@ int main(int argc, char** argv) {
         // clock. Installing from the start means the core's FIRST INT10h read of IVT[0x10]
         // already sees our stub (so a cached IVT entry caches OUR value — no core flush
         // needed, which ventium_soc's core has no port for). VEN_SOFTVGA-gated.
-        if (soft_vga) {
-            if (!svga_installed) {
-                svga_install();
-                svga_installed = true;
-                std::fprintf(stderr, "tb_soc: soft-VGA INT10h installed (stub@C000:0, trap 0x2E0) @retire=%llu\n",
-                             (unsigned long long)trace.retired());
-            } else {
-                svga_gw16(0x40, 0x0000); svga_gw16(0x42, 0xC000);  // keep IVT[0x10] hooked each clock
-            }
+        // Install ONCE after POST has finished (past the boot-sector load ~8M retired) so we
+        // do NOT disturb SeaBIOS's POST (a per-clock IVT rewrite during POST corrupts it and
+        // the boot never reaches the disk). After this point FreeDOS owns INT10h; hooking
+        // IVT[0x10] once to our stub captures its console.
+        if (soft_vga && !svga_installed && trace.retired() >= 8000000ull) {
+            svga_install();
+            svga_installed = true;
+            std::fprintf(stderr, "tb_soc: soft-VGA INT10h installed (stub@C000:0, trap 0x2E0) @retire=%llu\n",
+                         (unsigned long long)trace.retired());
         }
 
         // --type-at typist: one scancode at a time through the i8042 inj port.
