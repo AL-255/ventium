@@ -526,15 +526,24 @@ int main(int argc, char** argv) {
         // clock. Installing from the start means the core's FIRST INT10h read of IVT[0x10]
         // already sees our stub (so a cached IVT entry caches OUR value — no core flush
         // needed, which ventium_soc's core has no port for). VEN_SOFTVGA-gated.
-        // Install ONCE after POST has finished (past the boot-sector load ~8M retired) so we
-        // do NOT disturb SeaBIOS's POST (a per-clock IVT rewrite during POST corrupts it and
-        // the boot never reaches the disk). After this point FreeDOS owns INT10h; hooking
-        // IVT[0x10] once to our stub captures its console.
-        if (soft_vga && !svga_installed && trace.retired() >= 8000000ull) {
-            svga_install();
-            svga_installed = true;
-            std::fprintf(stderr, "tb_soc: soft-VGA INT10h installed (stub@C000:0, trap 0x2E0) @retire=%llu\n",
-                         (unsigned long long)trace.retired());
+        // Install ONCE the instant POST hands off to the boot sector — when the PC first
+        // executes in low memory (real-mode linear < 0x90000, i.e. the 0x7C00 boot sector /
+        // FreeDOS), past early SeaBIOS blips (retired>2M). This is BEFORE FreeDOS prints its
+        // banner, so we catch its console; and it does NOT touch SeaBIOS's POST (no per-clock
+        // rewrite — that corrupted POST). The core's dcache is timing-only (data from
+        // mem_rdata), so this memmodel IVT write IS seen by the core's INT10h dispatch.
+        if (soft_vga && !svga_installed && trace.retired() > 2000000ull) {
+            uint32_t lin = ((uint32_t)ventium::g_last_arch.seg[0] << 4)
+                         + (ventium::g_last_arch.pc & 0xffff);
+            // the INT19 boot-sector handoff executes at linear 0x7C00 — an unambiguous
+            // POST-DONE marker (SeaBIOS's own POST runs in F000 + relocated low-mem code
+            // elsewhere). Installing here is after POST (safe) + before FreeDOS prints.
+            if (lin >= 0x00007C00u && lin < 0x00007E00u) {
+                svga_install();
+                svga_installed = true;
+                std::fprintf(stderr, "tb_soc: soft-VGA INT10h installed (stub@C000:0, trap 0x2E0) @retire=%llu pc_lin=0x%05x\n",
+                             (unsigned long long)trace.retired(), lin);
+            }
         }
 
         // --type-at typist: one scancode at a time through the i8042 inj port.
