@@ -195,6 +195,17 @@ extern "C" void vtm_retire(
                 "[GPTRACE] n=%llu pc=0x%05x eax=%x ebx=%x ecx=%x edx=%x esi=%x edi=%x bp=%x sp=%x ds=%x es=%x ss=%x\n",
                 (unsigned long long)n, pc, eax, ebx, ecx, edx, esi, edi, ebp, esp, ds, es, ss);
         }
+        // VM/cs transition trace: log when EFLAGS.VM (bit17) or cs changes near the fault,
+        // to pinpoint the V86<->PM transition the #GP comes from. Off unless VEN_GPTRACE.
+        if (gptrace && n > 8800000ull) {
+            static unsigned prev_cs = 0xffff; static int prev_vm = -1;
+            int vm = (eflags >> 17) & 1;
+            if ((unsigned)cs != prev_cs || vm != prev_vm) {
+                std::fprintf(stderr, "[VMTRACE] n=%llu cs=%04x eip=0x%x VM=%d eflags=%08x ss=%04x esp=%x\n",
+                             (unsigned long long)n, (unsigned)cs, pc, vm, eflags, (unsigned)ss, esp);
+                prev_cs = (unsigned)cs; prev_vm = vm;
+            }
+        }
     }
 
     // --- F4 DERAIL TRIPWIRE -------------------------------------------------
