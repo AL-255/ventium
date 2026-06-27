@@ -4101,7 +4101,15 @@ module core
       S_FENV_LD:       cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00};
       S_STORE: begin
         cur_is_w = 1'b1;
-        cur_lin = (q_kind==K_STR) ? dbase_edi+str_store_addr : dbase+st_addr;
+        // F3/paging fix: POP r/m16 (8F) writes its operand in the operand's OWN
+        // segment (DS default/override), NOT the SS that `dbase` forces for the
+        // pop's stack READ. core_bus_driver.svh already uses `stbase` for the store
+        // mem_addr; the page-walk linear here MUST match or (under paging) the store
+        // walks SS:disp and writes the wrong page. This was the DOS-Quake #GP root:
+        // go32's `pop ds; pop word [ds:0x4f6c]` (ds!=ss, paging on) stored the popped
+        // value to SS_base+0x4f6c instead of DS_base+0x4f6c, corrupting the coroutine
+        // fault-dispatch word. stbase==dbase for every non-pop store (byte-identical).
+        cur_lin = (q_kind==K_STR) ? dbase_edi+str_store_addr : stbase+st_addr;
       end
       S_USEQ: begin
         if (q_sm==SM_PUSHA) begin
@@ -5168,4 +5176,19 @@ module core
                    inta_valid};
   // verilator lint_on UNUSED
 
+`ifdef VEN_DBG_POP
+  // DOS-Quake #GP triage: trace the go32 fault-dispatcher `pop word [ds:0x4f6c]`
+  // (cs=2b:0x3e83) memory load (stack read) + store (operand write), to see why
+  // the popped value never lands at [ds:0x4f6c]. Inert unless +define+VEN_DBG_POP.
+  always_ff @(posedge clk) begin
+    if (seg_sel[SG_CS][15:0]==16'h002b && q_pc[15:0]==16'h3e83 && mem_req && mem_ack) begin
+      if (state==S_LOAD)
+        $display("[POP-LD] q_pc=%05x addr=%08x rdata=%08x", q_pc, mem_addr, mem_rdata);
+      else if (state==S_STORE)
+        $display("[POP-ST] q_pc=%05x addr=%08x wdata=%08x wstrb=%x", q_pc, mem_addr, mem_wdata, mem_wstrb);
+      else
+        $display("[POP-?]  q_pc=%05x state=%0d addr=%08x rdata=%08x we=%b wdata=%08x", q_pc, state, mem_addr, mem_rdata, mem_we, mem_wdata);
+    end
+  end
+`endif
 endmodule : core
