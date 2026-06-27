@@ -217,10 +217,9 @@ extern "C" void vtm_retire(
         }
         // ALL-RETIRE trace across the LTR/task-gate gap (n=8907560..8907607) to see the
         // exact failure mode of the far-jmp-to-task-gate at go32 0x2b70-0x2b73.
-        if (gptrace && ((n >= 8907555ull && n <= 8907615ull) ||
-                        (n >= 8908060ull && n <= 8908115ull))) {
-            std::fprintf(stderr, "[GAP] n=%llu cs=%04x eip=0x%x cpl=%u eax=%x ebx=%x ecx=%x ss=%04x esp=%x eflags=%08x\n",
-                         (unsigned long long)n, (unsigned)cs, pc, (unsigned)(cs & 3), eax, ebx, ecx, (unsigned)ss, esp, eflags);
+        if (gptrace && n >= 8907560ull && n <= 8908115ull) {
+            std::fprintf(stderr, "[GAP] cs=%04x eip=0x%x eax=%x ebx=%x ecx=%x edx=%x fl=%x\n",
+                         (unsigned)cs, pc, eax, ebx, ecx, edx, eflags & 0x8d5);
         }
         // VM/cs transition trace: log when EFLAGS.VM (bit17) or cs changes near the fault,
         // to pinpoint the V86<->PM transition the #GP comes from. Off unless VEN_GPTRACE.
