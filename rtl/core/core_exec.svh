@@ -191,6 +191,19 @@
                     q_seg_from_mem <= 1'b1;
                     do_retire       = 1'b0;
                     state          <= S_SEGLD;
+                  end else if (!seg_real) begin
+                    // PM far-ptr LSS/LFS/LGS (DOS-Quake go32 `lss esp,cs:[..]`): the
+                    // selector is the HIGH half of the 4-byte read (16-bit m16:16 ptr)
+                    // or the 2-byte 2nd read (32-bit m16:32 ptr, q_w==4). Walk the
+                    // GDT/LDT in S_SEGLD (target = q_lseg, e.g. SG_SS). The GPR (offset)
+                    // write ALREADY committed via q_writes_reg in THIS S_EXEC cycle
+                    // (gpr_wb runs in S_EXEC regardless of do_retire), so only the
+                    // segment load is deferred. Was real-mode-only -> PM HALTed here.
+                    seg_mem_sel    <= (q_w==3'd4) ? mem_load_data2[15:0]
+                                                  : mem_load_data[31:16];
+                    q_seg_from_mem <= 1'b1;
+                    do_retire       = 1'b0;
+                    state          <= S_SEGLD;
                   end else begin
                     // F3 MOV Sreg,[mem]: the 2-byte read IS the selector (LOW half);
                     // LES/LDS read a 4-byte far pointer and take the selector from the
