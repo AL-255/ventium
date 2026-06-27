@@ -262,7 +262,7 @@
                      + (gpr_o[R_ESP] - {27'd0, (int_step + 4'd1), 1'b0});
           unique case (int_step)
             4'd0:    mem_wdata = {16'd0, eflags[15:0]};
-            4'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
+            4'd1:    mem_wdata = {16'd0, int_old_cs};   // interrupted CS (NOT handler) - DOS-Quake #GP fix
             4'd2:    mem_wdata = {16'd0, int_ret_eip[15:0]};
             default: mem_wdata = {16'd0, int_err[15:0]};
           endcase
@@ -273,7 +273,7 @@
                      - ({28'd0, int_step} * 32'd4) - 32'd4;
           unique case (int_step)
             4'd0:    mem_wdata = eflags;
-            4'd1:    mem_wdata = {16'd0, seg_sel[SG_CS]};
+            4'd1:    mem_wdata = {16'd0, int_old_cs};   // interrupted CS (NOT handler) - DOS-Quake #GP fix
             4'd2:    mem_wdata = int_ret_eip;
             default: mem_wdata = int_err;
           endcase

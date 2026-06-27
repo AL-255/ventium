@@ -102,6 +102,17 @@
                 start_fault(desc_present(cattr) ? 8'd13 : 8'd11, 1'b1,
                             {16'd0, int_gate_sel[15:3], 3'b010}, int_src_pc);
               end else begin
+                // FIX (DOS-Quake #GP): capture the interrupted CS for the same-priv
+                // frame push BEFORE seg_sel[SG_CS] is overwritten with the handler CS.
+                // The same-priv S_INT_PUSH CS-push (core_bus_driver.svh) read
+                // seg_sel[SG_CS], which by then already held int_gate_sel -> it pushed
+                // the HANDLER CS, not the interrupted CS. Masked in the corpus (handler
+                // CS == interrupted CS, both 0x08); exposed by DPMI int 0x31 (cs 0x87
+                // client -> 0x2b host, both DPL3 = same-priv): the resume frame then
+                // restored the HOST CS and the worker resumed as the host instead of
+                // the client -> #GP. (The cross-priv arm re-captures int_old_cs below;
+                // same value, harmless.)
+                int_old_cs       <= seg_sel[SG_CS];
                 seg_sel  [SG_CS] <= int_gate_sel;
                 seg_base [SG_CS] <= desc_base(desc);
                 seg_limit[SG_CS] <= desc_limit(desc);
