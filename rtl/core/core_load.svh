@@ -29,17 +29,31 @@
             // F3 — FF /5 JMPF / FF /3 CALLF (far indirect through memory): mem_rdata
             // is the 4-byte {selector[31:16], offset[15:0]} far pointer just read.
             if (q_jmpf_mem) begin
-              // real-mode far JMP: CS.sel=sel, CS.base=sel<<4, EIP=off; retire now.
-              seg_sel [SG_CS] <= mem_rdata[31:16];
-              seg_base[SG_CS] <= {12'd0, mem_rdata[31:16], 4'd0};
-              seg_attr[SG_CS] <= 8'h9B;
-              eip <= {16'd0, mem_rdata[15:0]};
-              retire_valid <= 1'b1; state <= S_PIPE;
+              if (q_w==3'd4) begin
+                // 32-bit far JMP indirect (m16:32): off = full mem_rdata; the 2-byte
+                // selector is at [mem+4] -> 2nd S_LOAD2 read, then commit CS:EIP.
+                q_ljmp_off <= mem_rdata;
+                state <= S_LOAD2;
+              end else begin
+                // real-mode far JMP (m16:16): CS.sel=sel, CS.base=sel<<4, EIP=off.
+                seg_sel [SG_CS] <= mem_rdata[31:16];
+                seg_base[SG_CS] <= {12'd0, mem_rdata[31:16], 4'd0};
+                seg_attr[SG_CS] <= 8'h9B;
+                eip <= {16'd0, mem_rdata[15:0]};
+                retire_valid <= 1'b1; state <= S_PIPE;
+              end
             end else if (q_callf_mem) begin
-              // stage the target; S_LCALL then pushes CS:next_eip + loads CS:off.
-              q_ljmp_off <= {16'd0, mem_rdata[15:0]};
-              q_ljmp_sel <= mem_rdata[31:16];
-              seg_step   <= 1'b0; state <= S_LCALL;
+              if (q_w==3'd4) begin
+                // 32-bit far CALL indirect (m16:32): off = full mem_rdata; selector
+                // @[mem+4] via S_LOAD2, then S_LCALL pushes CS:next_eip + loads CS:off.
+                q_ljmp_off <= mem_rdata;
+                state <= S_LOAD2;
+              end else begin
+                // stage the target; S_LCALL then pushes CS:next_eip + loads CS:off.
+                q_ljmp_off <= {16'd0, mem_rdata[15:0]};
+                q_ljmp_sel <= mem_rdata[31:16];
+                seg_step   <= 1'b0; state <= S_LCALL;
+              end
             end
             else if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
             // BOUND / CMPXCHG8B read a SECOND word ([mem+w]) before executing.
@@ -52,14 +66,27 @@
         end
         S_LOAD2: begin
           if (mem_ack) begin
-            mem_load_data2<=mem_rdata; state<=S_EXEC;
-            // CMPS second operand [EDI] is also a data load -> D-cache access.
-            // dc_lu_hit/dc_acc_* are driven to gpr_o[R_EDI] this clock (S_LOAD2).
-            if (cycle_mode) begin
-              logic [6:0] pen; pen=7'd0;
-              if (!dc_lu_hit)               pen = pen + P5_DMISS;
-              if (gpr_o[R_EDI][1:0]!=2'b00)   pen = pen + P5_MISALIGN;
-              pending_mem_pen <= pen;
+            // 32-bit far JMP/CALL indirect (m16:32): the 2nd read is the 2-byte
+            // selector @[mem+4]; q_ljmp_off already holds the full 32-bit offset.
+            if (q_jmpf_mem) begin
+              seg_sel [SG_CS] <= mem_rdata[15:0];
+              seg_base[SG_CS] <= {12'd0, mem_rdata[15:0], 4'd0};
+              seg_attr[SG_CS] <= 8'h9B;
+              eip <= q_ljmp_off;                 // full 32-bit offset (NOT truncated)
+              retire_valid <= 1'b1; state <= S_PIPE;
+            end else if (q_callf_mem) begin
+              q_ljmp_sel <= mem_rdata[15:0];     // q_ljmp_off already 32-bit
+              seg_step   <= 1'b0; state <= S_LCALL;
+            end else begin
+              mem_load_data2<=mem_rdata; state<=S_EXEC;
+              // CMPS second operand [EDI] is also a data load -> D-cache access.
+              // dc_lu_hit/dc_acc_* are driven to gpr_o[R_EDI] this clock (S_LOAD2).
+              if (cycle_mode) begin
+                logic [6:0] pen; pen=7'd0;
+                if (!dc_lu_hit)               pen = pen + P5_DMISS;
+                if (gpr_o[R_EDI][1:0]!=2'b00)   pen = pen + P5_MISALIGN;
+                pending_mem_pen <= pen;
+              end
             end
           end
         end

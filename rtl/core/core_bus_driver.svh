@@ -50,6 +50,9 @@
         if (q_kind==K_BOUND || q_kind==K_CX8B) mem_addr=dbase+q_ea+{28'd0,q_w};
         // 32-bit far-ptr load (LDS/LES/LSS/LFS/LGS): selector is 2 bytes at [mem+4].
         else if (q_seg_load) mem_addr=dbase+q_ea+{28'd0,q_w};
+        // 32-bit far JMP/CALL indirect (m16:32): selector 2 bytes at [mem+4]; use
+        // opbase to match the first read (opbase+q_ea, S_LOAD line 44).
+        else if (q_jmpf_mem || q_callf_mem) mem_addr=opbase+q_ea+{28'd0,q_w};
         else mem_addr=dbase_edi+str_edi;   // CMPS second operand ([EDI])
       end
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
