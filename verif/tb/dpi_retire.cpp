@@ -250,8 +250,8 @@ extern "C" void vtm_retire(
         // ALL-RETIRE trace across the LTR/task-gate gap (n=8907560..8907607) to see the
         // exact failure mode of the far-jmp-to-task-gate at go32 0x2b70-0x2b73.
         if (gptrace && n >= 8907560ull && n <= 8908115ull) {
-            std::fprintf(stderr, "[GAP] cs=%04x eip=0x%x eax=%x ebx=%x ecx=%x edx=%x fl=%x\n",
-                         (unsigned)cs, pc, eax, ebx, ecx, edx, eflags & 0x8d5);
+            std::fprintf(stderr, "[GAP] n=%llu cs=%04x eip=0x%x eax=%x ebx=%x ecx=%x edx=%x esi=%x edi=%x ebp=%x esp=%x fl=%x\n",
+                         (unsigned long long)n, (unsigned)cs, pc, eax, ebx, ecx, edx, esi, edi, ebp, esp, eflags & 0x8d5);
         }
         // SRC: the go32 TSS-setup movsw at cs=26ac:0x5317 — log ds/esi/edi/cs to find the
         // SOURCE template segment (ds:esi) so its EBX/EDX high-word construction can be traced.
