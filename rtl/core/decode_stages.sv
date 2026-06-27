@@ -1206,15 +1206,15 @@ module decode_stages
             // gates are out of scope. d_callf_mem/d_jmpf_mem are serviced after the
             // S_LOAD reads the pointer: JMPF loads CS:IP inline, CALLF stages it then
             // S_LCALL pushes CS:next_eip + loads.
-            3'd3: begin // CALLF m16:16
+            3'd3: begin // CALLF m16:16 (16-bit) / m16:32 (0x66, 32-bit far ptr)
               if (modrm_mod!=2'b11 && seg_real && !paging_on) begin
-                d_callf_mem=1'b1; d_mem_read=1'b1; d_w=3'd2;
+                d_callf_mem=1'b1; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
                 d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
               end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
             end
-            3'd5: begin // JMPF m16:16
+            3'd5: begin // JMPF m16:16 (16-bit) / m16:32 (0x66, 32-bit far ptr)
               if (modrm_mod!=2'b11 && seg_real && !paging_on) begin
-                d_jmpf_mem=1'b1; d_mem_read=1'b1; d_w=3'd2;
+                d_jmpf_mem=1'b1; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
                 d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
               end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
             end
