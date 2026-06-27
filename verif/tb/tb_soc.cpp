@@ -547,6 +547,24 @@ int main(int argc, char** argv) {
             }
         }
 
+        // DOS-Quake #GP triage: when the faulting PM program (cs=0x2b) runs, resolve its
+        // base via the GDTR (dbg_seg) -> GDT[5], then dump the code at the faulting offset
+        // (0x79d/0x7a0) + the descriptor, to identify the exact faulting instruction.
+        {
+            static int gp_dumped = 0;
+            uint32_t off = ventium::g_last_arch.pc & 0xffff;
+            if (gp_dumped < 6 && ventium::g_last_arch.seg[0] == 0x2b && off >= 0x780 && off <= 0x7b0
+                && trace.retired() > 5000000ull) {
+                uint32_t gdtr = (uint32_t)((uint64_t)top->dbg_seg & 0xffffffffu);
+                uint32_t d = gdtr + 5*8;
+                uint32_t base = mem.read8(d+2) | (mem.read8(d+3)<<8) | (mem.read8(d+4)<<16) | (mem.read8(d+7)<<24);
+                uint64_t ibuf = (uint64_t)top->dbg_ibuf;
+                std::fprintf(stderr, "tb_soc: [GPDUMP] n=%llu cs=0x2b off=0x%x GDT5.base=0x%08x ibuf@eip=%016llx\n",
+                             (unsigned long long)trace.retired(), off, base, (unsigned long long)ibuf);
+                gp_dumped++;
+            }
+        }
+
         // --type-at typist: one scancode at a time through the i8042 inj port.
         if (type_idx < type_codes.size() && trace.retired() >= args.type_at_n) {
             if (type_gap) {

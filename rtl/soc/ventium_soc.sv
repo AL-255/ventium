@@ -107,7 +107,9 @@ module ventium_soc
     output logic [15:0] io_ps_addr,
     output logic [7:0]  io_ps_wdata,
     input  wire logic [7:0]  io_ps_rdata,
-    input  wire logic        io_ps_ack
+    input  wire logic        io_ps_ack,
+    output logic [63:0] dbg_seg,         // {31:0}=GDTR base, [32]=CS.D — DOS-Quake #GP triage
+    output logic [63:0] dbg_ibuf         // 8 fetch bytes at committed EIP — DOS-Quake #GP triage
 );
 
   // ===========================================================================
@@ -380,7 +382,15 @@ module ventium_soc
       .retire_cr2        (core_cr2),
       .retire_cr3        (core_cr3),
       .retire_cr4        (core_cr4)
+`ifdef VEN_DBG_CORE
+      , .dbg_seg         (dbg_seg)
+      , .dbg_ibuf        (dbg_ibuf)
+`endif
   );
+`ifndef VEN_DBG_CORE
+  assign dbg_seg = 64'd0;
+  assign dbg_ibuf = 64'd0;
+`endif
 
   // ===========================================================================
   // PMIO DECODER (combinational, mirrors the mem_* single-beat protocol).
