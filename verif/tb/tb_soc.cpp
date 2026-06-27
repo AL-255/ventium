@@ -192,6 +192,7 @@ Args parse_args(int argc, char** argv) {
             a.dump_file = v.substr(p3+1);
         }
         else if (k == "-h" || k == "--help") usage(argv[0], 0);
+        else if (!k.empty() && k[0] == '+') { /* Verilator +plusarg (e.g. +ven_segfaultdbg) — already registered via commandArgs */ }
         else {
             std::fprintf(stderr, "%s: unknown argument '%s'\n", argv[0], k.c_str());
             usage(argv[0], 2);
