@@ -195,8 +195,14 @@
                     // F3 MOV Sreg,[mem]: the 2-byte read IS the selector (LOW half);
                     // LES/LDS read a 4-byte far pointer and take the selector from the
                     // HIGH half. Both load base=sel<<4 (real/v86), limit 0xFFFF, attr 0x93.
-                    seg_sel  [q_lseg] <= q_seg_load_lo ? mem_load_data[15:0]  : mem_load_data[31:16];
+                    // 16-bit far ptr: sel = high 16b of the 4-byte read (mem_load_data[31:16]).
+                    // 32-bit far ptr (q_w=4): off was the full 4 bytes; sel = the 2-byte 2nd
+                    // read at [mem+4] (mem_load_data2[15:0]).
+                    seg_sel  [q_lseg] <= q_seg_load_lo ? mem_load_data[15:0]
+                                       : (q_w==3'd4)   ? mem_load_data2[15:0]
+                                                       : mem_load_data[31:16];
                     seg_base [q_lseg] <= q_seg_load_lo ? {12'd0, mem_load_data[15:0],  4'd0}
+                                       : (q_w==3'd4)   ? {12'd0, mem_load_data2[15:0], 4'd0}
                                                        : {12'd0, mem_load_data[31:16], 4'd0};
                     seg_limit[q_lseg] <= 32'h0000_FFFF;
                     seg_attr [q_lseg] <= 8'h93;

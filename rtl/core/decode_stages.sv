@@ -474,9 +474,12 @@ module decode_stages
         // m16:16 far pointer. Same real-mode-16-bit mechanism as LES/LDS (single
         // 4-byte read {sel,off}; GPR<-off, seg<-sel base=sel<<4). Out of scope -> HALT.
         8'hB2, 8'hB4, 8'hB5: begin
-          if (modrm_mod!=2'b11 && seg_real && eff_opsize) begin
+          // real-mode LSS/LFS/LGS: 16-bit (eff_opsize) reads a 4-byte m16:16 ptr
+          // (off=low16, sel=high16); 32-bit (0x66, !eff_opsize) reads a 6-byte m16:32
+          // ptr (off=4 bytes @[mem], sel=2 bytes @[mem+4] via a 2nd S_LOAD2 read).
+          if (modrm_mod!=2'b11 && seg_real) begin
             d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
-            d_mem_read=1'b1; d_w=3'd2; d_seg_load=1'b1;
+            d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4; d_seg_load=1'b1;
             d_lseg=(op1==8'hB2)?3'(SG_SS):(op1==8'hB4)?3'(SG_FS):3'(SG_GS);
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end else begin d_unknown=1'b1; d_len=pfx_len+4'd3; end
@@ -905,9 +908,9 @@ module decode_stages
         // gets sel (base=sel<<4) via the q_seg_load exec hook. The reg form is #UD,
         // and 32-bit (0x66) / protected-mode are out of scope -> HALT loudly.
         8'hC4, 8'hC5: begin
-          if (modrm_mod!=2'b11 && seg_real && eff_opsize) begin
+          if (modrm_mod!=2'b11 && seg_real) begin   // 16b: m16:16; 32b (0x66): m16:32 (2nd read)
             d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
-            d_mem_read=1'b1; d_w=3'd2;
+            d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
             d_seg_load=1'b1; d_lseg=(op0==8'hC4)?3'(SG_ES):3'(SG_DS);
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
