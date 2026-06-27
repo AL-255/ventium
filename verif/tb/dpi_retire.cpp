@@ -184,6 +184,19 @@ extern "C" void vtm_retire(
     g_last_arch.seg[0]=cs; g_last_arch.seg[1]=ss; g_last_arch.seg[2]=ds;
     g_last_arch.seg[3]=es; g_last_arch.seg[4]=fs; g_last_arch.seg[5]=gs;
 
+    // VEN_GPTRACE: log the faulting protected-mode program's retire stream (the DOS-Quake
+    // #GP runs at cs=0x2b). Shows the instruction path into the fault + which insn sets the
+    // bad selector (ebx=0x26ac), for the seg-load #GP back-trace. Off unless env-set.
+    {
+        static int gptrace = -1;
+        if (gptrace < 0) gptrace = std::getenv("VEN_GPTRACE") ? 1 : 0;
+        if (gptrace && cs == 0x2b) {
+            std::fprintf(stderr,
+                "[GPTRACE] n=%llu pc=0x%05x eax=%x ebx=%x ecx=%x edx=%x esi=%x edi=%x bp=%x sp=%x ds=%x es=%x ss=%x\n",
+                (unsigned long long)n, pc, eax, ebx, ecx, edx, esi, edi, ebp, esp, ds, es, ss);
+        }
+    }
+
     // --- F4 DERAIL TRIPWIRE -------------------------------------------------
     // A committed EIP in [0x1000_0000, 0x4000_0000) is NEVER legitimate for the
     // Quake user image (code = 0x0804_xxxx..0x080B_xxxx, brk-heap = 0x0a00_0000+,
