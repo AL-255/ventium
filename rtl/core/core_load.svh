@@ -44,6 +44,9 @@
             else if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
             // BOUND / CMPXCHG8B read a SECOND word ([mem+w]) before executing.
             else if (q_kind==K_BOUND || q_kind==K_CX8B) state<=S_LOAD2;
+            // 32-bit far-ptr load (LDS/LES/LSS/LFS/LGS, m16:32): off=mem_load_data
+            // (@[mem]); the SELECTOR is 2 bytes @[mem+4] -> a 2nd S_LOAD2 read.
+            else if (q_seg_load && !q_seg_load_lo && q_w==3'd4) state<=S_LOAD2;
             else state<=S_EXEC;
           end
         end
