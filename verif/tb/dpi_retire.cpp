@@ -200,9 +200,10 @@ extern "C" void vtm_retire(
         if (gptrace && n > 8800000ull) {
             static unsigned prev_cs = 0xffff; static int prev_vm = -1;
             int vm = (eflags >> 17) & 1;
+            int pe = g_last_cr0 & 1;
             if ((unsigned)cs != prev_cs || vm != prev_vm) {
-                std::fprintf(stderr, "[VMTRACE] n=%llu cs=%04x eip=0x%x VM=%d eflags=%08x ss=%04x esp=%x\n",
-                             (unsigned long long)n, (unsigned)cs, pc, vm, eflags, (unsigned)ss, esp);
+                std::fprintf(stderr, "[VMTRACE] n=%llu cs=%04x eip=0x%x VM=%d PE=%d cr0=%08x eflags=%08x ss=%04x esp=%x\n",
+                             (unsigned long long)n, (unsigned)cs, pc, vm, pe, g_last_cr0, eflags, (unsigned)ss, esp);
                 prev_cs = (unsigned)cs; prev_vm = vm;
             }
         }
