@@ -89,7 +89,12 @@
                   gpr_we[R_EAX]=1'b1;
                   gpr_wd[R_EAX]=reg_merge(gpr_o[R_EAX], {24'd0, mem_load_data[7:0]}, 3'd1, 1'b0);
                 end
-                else if (q_is_lea) begin gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=q_ea; end
+                // LEA writes the effective address at the OPERAND size: a 16-bit LEA
+                // (lea r16,[m]) writes only the low 16 bits, preserving dest[31:16];
+                // only a 32-bit LEA overwrites the full register. (DOS-Quake root: go32's
+                // `lea bx,[bp-0x18]` must keep EBX[31:16]=the client's EBX high half.)
+                else if (q_is_lea) begin gpr_we[q_dst_reg]=1'b1;
+                  gpr_wd[q_dst_reg]=reg_merge(gpr_o[q_dst_reg], q_ea, q_w, 1'b0); end
                 else if (q_is_pop && q_mem_write) begin end
                 else if (q_is_pop && q_pop_sreg) begin
                   gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+{28'd0,q_w};

@@ -229,6 +229,24 @@ extern "C" void vtm_retire(
                 }
             }
         }
+        // LDR: go32 exec() loader EBX trajectory at the exact QEMU trajectory points, to pin
+        // where the RTL's EBX first diverges from QEMU (0xdb400->0xe0000->0xe0006). DOS-Quake
+        // data-divergence hunt. (VEN_GPTRACE only.)
+        {
+            unsigned lp = pc & 0xffff;
+            // EBXTRACE: log every EBX change (excluding the cs=f000 BIOS IRQ handler) in the
+            // window just before the frame-builder push, to catch EBX -> 0x6 + the instruction.
+            static uint32_t pebx = 0;
+            if (gptrace && cs != 0xf000 && n > 8862500ull && n < 8864300ull && ebx != pebx) {
+                static int ec = 0;
+                if (ec < 80) {
+                    std::fprintf(stderr, "[EBX] n=%llu cs=%04x eip=0x%x prev=%08x ebx=%08x eax=%08x ds=%04x\n",
+                                 (unsigned long long)n, (unsigned)cs, lp, pebx, ebx, eax, (unsigned)ds);
+                    ec++;
+                }
+            }
+            pebx = ebx;
+        }
         // ALL-RETIRE trace across the LTR/task-gate gap (n=8907560..8907607) to see the
         // exact failure mode of the far-jmp-to-task-gate at go32 0x2b70-0x2b73.
         if (gptrace && n >= 8907560ull && n <= 8908115ull) {
