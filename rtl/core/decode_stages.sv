@@ -474,10 +474,14 @@ module decode_stages
         // m16:16 far pointer. Same real-mode-16-bit mechanism as LES/LDS (single
         // 4-byte read {sel,off}; GPR<-off, seg<-sel base=sel<<4). Out of scope -> HALT.
         8'hB2, 8'hB4, 8'hB5: begin
-          // real-mode LSS/LFS/LGS: 16-bit (eff_opsize) reads a 4-byte m16:16 ptr
+          // LSS/LFS/LGS: 16-bit (eff_opsize) reads a 4-byte m16:16 ptr
           // (off=low16, sel=high16); 32-bit (0x66, !eff_opsize) reads a 6-byte m16:32
           // ptr (off=4 bytes @[mem], sel=2 bytes @[mem+4] via a 2nd S_LOAD2 read).
-          if (modrm_mod!=2'b11 && seg_real) begin
+          // PROTECTED mode (DOS-Quake go32 `lss esp,cs:[..]` restores its PM stack after
+          // an int-0x31 real-mode-int sim): identical far-ptr read + GPR-offset write;
+          // the SEG load walks the GDT/LDT in S_SEGLD (the PM far-ptr arm in
+          // core_exec.svh) instead of base=sel<<4. (Was gated to real-mode -> PM HALTed.)
+          if (modrm_mod!=2'b11) begin
             d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=modrm_reg;
             d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4; d_seg_load=1'b1;
             d_lseg=(op1==8'hB2)?3'(SG_SS):(op1==8'hB4)?3'(SG_FS):3'(SG_GS);
