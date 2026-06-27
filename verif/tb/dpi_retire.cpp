@@ -215,6 +215,20 @@ extern "C" void vtm_retire(
             }
             prev87 = pc;
         }
+        // BOOT: trace a real-mode boot-sector unit test (linear 0x7c00..0x7f00) — used to
+        // diagnose the 32-bit POP-to-memory (66 8F /0) DOS-Quake root. Logs the instruction
+        // flow + esp through the suspect op. (VEN_GPTRACE only.)
+        {
+            uint32_t lin = ((uint32_t)cs << 4) + (pc & 0xffff);
+            if (gptrace && pc < 0x10000 && cs < 0x1000 && lin >= 0x7c00 && lin < 0x7f00) {
+                static int bcnt = 0;
+                if (bcnt < 120) {
+                    std::fprintf(stderr, "[BOOT] n=%llu lin=0x%x cs=%04x eip=0x%x esp=%08x eax=%08x ebx=%08x\n",
+                                 (unsigned long long)n, lin, (unsigned)cs, pc, esp, eax, ebx);
+                    bcnt++;
+                }
+            }
+        }
         // ALL-RETIRE trace across the LTR/task-gate gap (n=8907560..8907607) to see the
         // exact failure mode of the far-jmp-to-task-gate at go32 0x2b70-0x2b73.
         if (gptrace && n >= 8907560ull && n <= 8908115ull) {
