@@ -221,6 +221,12 @@ extern "C" void vtm_retire(
             std::fprintf(stderr, "[GAP] cs=%04x eip=0x%x eax=%x ebx=%x ecx=%x edx=%x fl=%x\n",
                          (unsigned)cs, pc, eax, ebx, ecx, edx, eflags & 0x8d5);
         }
+        // SRC: the go32 TSS-setup movsw at cs=26ac:0x5317 — log ds/esi/edi/cs to find the
+        // SOURCE template segment (ds:esi) so its EBX/EDX high-word construction can be traced.
+        if (gptrace && (pc & 0xffff) == 0x5317 && cs == 0x26ac && n > 8900000ull) {
+            std::fprintf(stderr, "[SRC] n=%llu cs=26ac eip=0x5317 ds=%04x es=%04x esi=%x edi=%x ebx=%x edx=%x\n",
+                         (unsigned long long)n, (unsigned)ds, (unsigned)es, esi, edi, ebx, edx);
+        }
         // VM/cs transition trace: log when EFLAGS.VM (bit17) or cs changes near the fault,
         // to pinpoint the V86<->PM transition the #GP comes from. Off unless VEN_GPTRACE.
         if (gptrace && n > 8800000ull) {
