@@ -49,15 +49,33 @@ unchanged — these are an analysis catalog):
 | **TRANSC** | 10 | `F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FYL2XP1/FSINCOS/FSIN/FCOS` are deferred → HALT without `+VEN_TRANSCENDENTAL` (work in the FLAGS/feature build); `FPREM1` differs on the `fstat` C2 flag. |
 | **MODE-CPL0** | 3 | `CLI/STI/POPF` diverge on IF/IOPL — these are CPL0 ops; the difference is CPL3-user-mode semantics, validated properly by the (TODO) real-mode / PM-CPL0 mode lanes. |
 
-## Dimensions still being generated
+## Dimensions
 
 | dimension | status |
 |-----------|--------|
-| operand cases (reg/mem/imm, all ModRM/SIB via LEA) | done, validated |
-| PM32 / CPL3 (user) | done (217 PASS) |
-| **x87** opcodes (D8–DF, 141) | generator TODO |
-| **branches** (Jcc/CALL/JMP/LOOP, J*) | generator TODO |
-| **modes**: real-mode + PM32-CPL0 (privileged ops, 16-bit defaults) | mode-lane TODO |
+| operand cases (reg/mem/imm, all ModRM/SIB via LEA) | done, EA sweep EQUIVALENT to QEMU |
+| PM32 / CPL3 (user) — integer | done |
+| **x87** (D8–DF, 141 incl. distinct transcendentals via `sec_opcd`) | done |
+| **branches** (Jcc rel8/rel32, CALL/JMP/RET, LOOP, JECXZ, near-indirect) | done |
+| special operands (LEA/SHLD/SHRD/AAD/AAM/CMPXCHG8B/string/PUSH-POP-rm) | done |
+| **mode**: real-mode / CPL0 (flags, IF/IOPL, privileged MOV CR0/DR7, 16-bit) | done (vs qemu-system) |
+| mode: PM32-CPL0 + more privileged/IO/far/seg streams | framework in place (`gen_modes.py`) |
+| MANUAL (priv/io/far/seg/MOV-Sreg/MOV-moffs/fault) | listed in `opgen_status.txt` |
 
-The generated tests (`tests/op_*`, `tests/ea_sweep`) are build artifacts of the
-generators (gitignored) — run the pipeline to (re)create them.
+**PM32/user: 423 GEN, 383 PASS + 29 KNOWN + 0 NEW-FAIL** (clean). The 29 KNOWN
+(`known_diverge.txt`) are real findings: CORE-GAP (BT/BTS/BTR/BTC and SHLD/SHRD
+with a **memory** operand HALT; POP ES/SS/DS/GS HALT), TRANSC (transcendentals
+deferred without `+VEN_TRANSCENDENTAL`), MODE-CPL0 (CLI/STI/POPF).
+
+**Mode lane** (`run-modes.sh`): the real-mode flag/IF/IOPL/privileged stream is
+**EQUIVALENT to qemu-system at CPL0** — confirming the MODE-CPL0 findings are
+CPL3-user-mode semantics, not core bugs, and covering the privileged paths the
+user lane can't reach.
+
+```sh
+bash run-opgen.sh    # PM32/user, parallel, vs qemu-i386
+bash run-modes.sh    # real-mode/CPL0, vs qemu-system
+```
+
+Generated tests (`tests/`, `modes/`) are gitignored build artifacts — run the
+generators to (re)create them.
