@@ -296,6 +296,37 @@ PM32_BODY = r"""
 """
 
 
+PM32_PAGING4K_BODY = r"""
+    /* ---- 4 KiB 2-level paging: PD@0x20000 -> PT@0x21000, identity-map 1 MiB - */
+    movl    $0x00020000, %edi
+    xorl    %eax, %eax
+    movl    $1024, %ecx
+    pushl   %edi
+    rep stosl
+    popl    %edi
+    movl    $0x00021007, (%edi)        /* PDE0 = PT@0x21000 | P|RW|US */
+    movl    $0x00021000, %edi          /* fill 256 PTEs: identity-map [0,1MiB) */
+    movl    $0x00000007, %eax
+    movl    $256, %ecx
+2:  movl    %eax, (%edi)
+    addl    $0x1000, %eax
+    addl    $4, %edi
+    loop    2b
+    movl    $0x00020000, %eax
+    movl    %eax, %cr3                 /* page-directory base (4 KiB pages) */
+    movl    %cr0, %eax
+    orl     $0x80000000, %eax
+    movl    %eax, %cr0                 /* CR0.PG=1 -> 4 KiB paging on */
+    /* ---- touch MANY distinct pages -> diverse TLB TAGS toggle (read + write
+     * sets A/D bits, each page is a different tag) ------------------------- */
+    movl    $0x00000010, %ebx
+    movl    $200, %ecx
+3:  movl    (%ebx), %eax
+    movl    %eax, (%ebx)
+    addl    $0x1000, %ebx
+    loop    3b
+"""
+
 PM32_INTGATE_BODY = r"""
     /* ---- IDT @ 0x1000: vector 0x40 = 32-bit interrupt gate -> h_same -------- */
     movl    $h_same, %eax
@@ -407,6 +438,7 @@ def main():
     write_image("realmode_far", REALMODE_FAR)
     write_pm_image("pm32_cpl0", PM32_BODY)
     write_pm_image("pm32_intgate", PM32_INTGATE_BODY)
+    write_pm_image("pm32_paging4k", PM32_PAGING4K_BODY)
 
 
 if __name__ == "__main__":
