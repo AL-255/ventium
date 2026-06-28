@@ -176,6 +176,23 @@ module tb_l1_axi;
     @(negedge clk); shutdown <= 1'b0;                   // resume -> normal AXI traffic returns
     do_read(32'h0000_2000, d); chk("post-shutdown read OK", d, 32'h2000 ^ 32'hA5A5_0000);
 
+    // [9] COVERAGE sweep: diverse L1 traffic -> diverse AXI transactions so the
+    // ven_axi_master address/data/burst datapath (araddr/awaddr/wdata/wstrb)
+    // toggles. Pure toggle stimulus (no chk -> cannot fail the gate).
+    $display("[9] COVERAGE sweep: diverse AXI read/write/evict transactions");
+    for (int i=0;i<128;i++) begin
+      automatic logic [31:0] s = 32'(i) * 32'h20;
+      do_write(s,             32'h1 << (i%32));    // write-through -> AW + WDATA
+      do_read (s + 32'h1000,  d);                   // miss -> AR
+      do_read (s + 32'h2000,  d);                   // 3rd tag -> eviction (write-back AW if dirty)
+      do_read (s,             d);                    // refill
+    end
+    for (int i=0;i<32;i++) do_write(32'h0000_0040 + 32'(i)*4, 32'h1 << i);  // walking WDATA
+    for (int i=2;i<20;i++) begin
+      do_read (32'h1 << i, d);                       // walking araddr bits
+      do_write(32'h1 << i, ~(32'h1 << i));           // walking awaddr + wdata
+    end
+
     if (errors==0) $display("L1AXI-GATE-OK (all checks pass)");
     else           $display("L1AXI-GATE-FAIL (%0d errors)", errors);
     $finish;
