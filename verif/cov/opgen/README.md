@@ -76,7 +76,7 @@ unchanged — these are an analysis catalog):
 | special operands (LEA/SHLD/SHRD/AAD/AAM/CMPXCHG8B/string/PUSH-POP-rm) | done |
 | **mode**: real-mode / CPL0 (flags, IF/IOPL, privileged MOV CR0/DR7, 16-bit) | done (vs qemu-system) |
 | **mode**: real-mode/CPL0 far + INT/IRET streams (9A/CB/CA/EA/FF3,5, INT/INTO/IRET) | done (vs qemu-system) |
-| mode: PM32-CPL0 (protected-mode privileged) | next |
+| **mode**: PM32-CPL0 (protected-mode entry + CLI/STI/POPF + MOV CR/DR) | done (vs qemu-system) |
 | MANUAL (priv/io/far/seg/MOV-Sreg/MOV-moffs/fault) | listed in `opgen_status.txt` |
 
 **PM32/user: 436 GEN, 397 PASS + 29 KNOWN + 0 NEW-FAIL** (clean). The 29 KNOWN

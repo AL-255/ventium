@@ -54,3 +54,12 @@ op_0f01_7 CORE-GAP  INVLPG  halts (unimplemented)
 #     the (label-_start16+_start16_off) link-time offset; all PASS.
 # --- CORE-GAP: MOV moffs (A0-A3, direct-offset accumulator) not decoded --------
 #   (documented earlier; A0-A3 -> d_unknown -> HALT). Listed, no differential test.
+# --- CORE-GAP: PM descriptor-op group (0F 00/02/03) -> HALT (PM32-CPL0 lane) ---
+#   the protected-mode entry + CLI/STI/POPF + MOV CR/DR all PASS vs qemu-system;
+#   the segment access-rights/limit/verify ops are unimplemented:
+op_0f02   CORE-GAP  LAR   r,r/m16   halts (PM segment access-rights load)
+op_0f03   CORE-GAP  LSL   r,r/m16   halts (PM segment limit load)
+op_0f00_0 CORE-GAP  SLDT  r/m16     halts (0F00 descriptor group)
+op_0f00_1 CORE-GAP  STR   r/m16     halts
+op_0f00_4 CORE-GAP  VERR  r/m16     halts
+op_0f00_5 CORE-GAP  VERW  r/m16     halts
