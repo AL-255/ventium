@@ -378,7 +378,27 @@ go32-DPMI + self-modifying-code interaction, NOT an opcode gap (opgen 0 NEW-FAIL
 SP-drift. Next: decode the SMC store at cs=0x87:0x334 and verify its computed addr(0x29d30)/value
 (0x26dfe82d), and check the core re-fetches patched code (SMC coherence) at the stub.
 
-## 19. Bottom line
+## 19. opgen POP-seg "CORE-GAP" RECLASSIFIED: cov-tb environment, not a core bug
+
+Triaged the opgen POP ES/SS/DS/GS divergence (op_07/17/1f/0fa9: RTL retires 8 records vs qemu's 12,
+first 8 match -> RTL idles ON the POP). Findings:
+- All five seg-pops (07/17/1f + 0F A1/A9) share the SAME decode (default d_kind=K_ALU, d_pop_sreg)
+  and the SAME exec arm (core_exec.svh:151 -> PM -> S_SEGLD). So no per-sreg code difference.
+- POP FS PASSES because FS=0 (NULL) in PM32 user mode -> S_SEGLD null path, no GDT walk. POP
+  ES/DS/SS/GS reload the VALID selector 0x2b -> S_SEGLD walks the GDT.
+- The cov-tb (tb_main.cpp:132) **loads segments DIRECTLY from the producer's initial-process-image
+  JSON** (selector + hidden base/attr from qemu) and does NOT lay down a walkable GDT. So a non-null
+  PM seg RELOAD reads garbage at gdt_base+idx*8 and stalls/halts — a **cov-tb environment limit**.
+- The core's PM POP-seg is CORRECT: verify-sys 949/949 (real GDT) AND commit `6a6fa62` fixed exactly
+  DOS-Quake's `pop ds` (CWSDPMI reflector, PM, sel 0x33) — Quake now runs PAST it to 9.64M.
+
+So op_07/17/1f/0fa9 are MODE/ENV, not CORE-GAP — no opcode work needed. (LAR/LSL `0F 02/03` ARE
+genuinely unimplemented, but likewise can't be exercised in the GDT-less cov-tb, and would IDLE not
+crash — so they are NOT the Quake divergence either.) Net: the real opcode gaps (SHLD/SHRD mem, BT/
+BTS/BTR/BTC mem) are implemented + validated; the remaining opgen findings are environment or
+non-Quake-relevant. The Quake render blocker remains the go32 self-modifying-stub interaction (§18).
+
+## 20. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
