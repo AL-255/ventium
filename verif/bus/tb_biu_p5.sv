@@ -548,22 +548,26 @@ module tb_biu_p5;
     begin
       $display("[scenario] PIPELINED datapath sweep (walking cyc_addr/cyc_wdata)");
       for (i=0;i<29;i=i+1) begin
-        @(negedge clk);                                  // 1st cycle (read) at a fixed addr
-        req=1; req_we=0; req_cache=0; req_lock=0; req_addr=29'h00000010; req_be=8'hFF;
+        // BOTH cycles are WRITEs with walking addr/data/byte-enable so whichever
+        // becomes the current (cyc_*) and the saved (bsv_*) buffer toggles its bits.
+        @(negedge clk);                                  // 1st (current) write, walking i
+        req=1; req_we=1; req_cache=0; req_lock=0;
+        req_addr=(29'h1<<i); req_be=~(8'h1<<(i%8));
+        req_wdata=(64'h1<<i)|(64'h1<<((i*3+5)%64))|(64'hFF<<((i*8)%56));
         @(posedge clk); while (!req_ack) @(posedge clk);
         @(negedge clk); req=0;
         wait (dbg_state==S_T2);
-        @(negedge clk); nan=0;                           // pipeline 2nd cycle (write), walking bit
+        @(negedge clk); nan=0;                           // pipeline 2nd (saved/bsv) write, ~i
         req=1; req_we=1; req_lock=0;
-        req_addr=(29'h1<<i);
-        req_wdata=(64'h1<<i)|(64'h1<<((i*2+1)%64))|(64'hFF<<((i*8)%56));
+        req_addr=((~(29'h1<<i)) & 29'h1FFFFFFF); req_be=(8'h1<<(i%8));
+        req_wdata=(~((64'h1<<i)|(64'h1<<((i*3+5)%64)))) ;
         @(posedge clk); while (!req_ack) @(posedge clk);
         @(negedge clk); req=0; nan=1;
         wait (dbg_state==S_T2P);
-        @(negedge clk); brdyn=0; d_in=(64'h2<<i);        // complete the read
+        @(negedge clk); brdyn=0;                         // complete 1st write
         @(posedge clk); @(negedge clk); brdyn=1;
-        wait (dbg_state==S_T2);                           // write promoted
-        @(negedge clk); brdyn=0;                          // complete the write
+        wait (dbg_state==S_T2);                           // 2nd write promoted
+        @(negedge clk); brdyn=0;                          // complete 2nd write
         @(posedge clk); @(negedge clk); brdyn=1;
         tick(1);
       end
