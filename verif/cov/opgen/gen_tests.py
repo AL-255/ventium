@@ -453,6 +453,15 @@ def emit_lines(s):
                 L.append(f"    {mn.lower()}{SUF[w]}  %{other}, {m}")
             else:
                 L.append(f"    {mn.lower()}{SUF[w]}  {m}, %{other}")
+        # operand-size (66) prefix: 16-bit form of a 32-bit op exercises the
+        # operand-size-override decode + the 16-bit datapath the suite else misses.
+        if w == 32:
+            w16 = safe_regs(16); o16 = w16[0]
+            for rm in w16[1:4]:
+                if dst_a == "E":
+                    L.append(f"    {mn.lower()}w  %{o16}, %{rm}")
+                else:
+                    L.append(f"    {mn.lower()}w  %{rm}, %{o16}")
         return L, "GEN", "rm,reg"
 
     # --- pattern: E,I (group 80/81/83, TEST, MOV imm, ...) ------------------
