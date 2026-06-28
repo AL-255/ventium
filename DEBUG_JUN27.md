@@ -991,6 +991,29 @@ to a fixable CORE control-flow bug (a branch/condition evaluated differently) ra
 memory desync. Next: capture the LDT-build write SEQUENCE in the burst (which PC writes 0x15 vs 0x16, in
 what order) to localize the diverging branch; then a bounded register differential over 8.90-8.91M.
 
+## 23aa. LDT-build POPULATION order: slots built 0x10->0x16 in order; LDTs identical to qemu
+
+Captured the non-zero LDT population writes in the DPMI-init burst (after a bulk zero of 0x10-0x1f by
+cs=26ac:52df). Order + content:
+```
+  0x10-0x13  base 0x228f0/0x227f0/0x22730  present   cs=26ac:0272/027f/0285/0299  (go32 segs)
+  0x14       base 0x10000000  access 0xfb (code)     cs=26ac:1999/1a33/1a68/19e8   (client CODE)
+  0x15       base 0x10000000  access 0xf3 (data)     cs=26ac:1999/1a33/1a68/19e8   (client DATA)
+  0x16       base 0x00046010  access 0xf2 (data)     cs=26ac:17dd/1c10/1c1e        (real-mode BUFFER)
+```
+Slots are populated strictly in order 0x10->0x16. qemu's segment usage shows the SAME 7 LDT selectors
+(0x87,0x8f,0x97,0x9f,0xa7,0xaf,0xb7 = slots 0x10-0x16) -> the LDTs are IDENTICAL. The ONLY divergence
+is which selector the op (cs=0x87:0x256 fn0000) returns + stores at [0x626]: RTL 0xaf/0x15 (client DATA)
+vs qemu 0xb7/0x16 (BUFFER). So the op-call is positioned ONE allocation earlier in the RTL's go32 init
+call-sequence than in qemu's: an allocation call-ORDER / count divergence inside go32 (cs=0x87) during
+DPMI init, NOT a descriptor, base, or allocator-table bug (the final tables match exactly).
+
+ROOT (bounded, fixable target): a control-flow divergence in go32's DPMI init (cs=0x87) at ~8.908M makes
+its fn0000 call-sequence off by one, so the buffer-selector store at [0x626] gets the client-DATA selector
+instead. NEXT: a cs=0x87 PC-sequence differential RTL-vs-qemu across the init window (qemu's init op is
+near oracle line ~2.70M) to find the first divergent branch -> the core instruction whose result/flag
+differs. This is now a small, bounded compare, not a 9.64M-wide search.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
