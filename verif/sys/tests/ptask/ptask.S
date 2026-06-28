@@ -141,13 +141,13 @@ pm32_entry:
     movl    $task2,      0x00004020     /* EIP = task2 */
     movl    $0x00000002, 0x00004024     /* EFLAGS = 0x2 (reserved bit; IF=0) */
     movl    $0xAAAAAAAA, 0x00004028     /* EAX (marker: reloaded from TSS2) */
-    movl    $0xC1C2C3C4, 0x0000402C     /* ECX */
-    movl    $0xD5D6D7D8, 0x00004030     /* EDX */
+    movl    $0xFFFFFFFF, 0x0000402C     /* ECX */
+    movl    $0xFFFFFFFF, 0x00004030     /* EDX */
     movl    $0xBBBBBBBB, 0x00004034     /* EBX (marker: reloaded from TSS2) */
     movl    $0x00070000, 0x00004038     /* ESP = task2 private stack top */
-    movl    $0xBE5A1234, 0x0000403C     /* EBP */
-    movl    $0x5AA5F00F, 0x00004040     /* ESI */
-    movl    $0xFEDCBA98, 0x00004044     /* EDI */
+    movl    $0xFFFFFFFF, 0x0000403C     /* EBP */
+    movl    $0xFFFFFFFF, 0x00004040     /* ESI */
+    movl    $0xFFFFFFFF, 0x00004044     /* EDI */
     movl    $0x00000010, 0x00004048     /* ES = 0x10 */
     movl    $0x00000008, 0x0000404C     /* CS = 0x08 */
     movl    $0x00000010, 0x00004050     /* SS = 0x10 */
