@@ -453,6 +453,15 @@ def emit_lines(s):
                 L.append(f"    {mn.lower()}{SUF[w]}  %{other}, {m}")
             else:
                 L.append(f"    {mn.lower()}{SUF[w]}  {m}, %{other}")
+        # carry-in diversity: ADC/SBB results depend on CF -> run each with CF=0
+        # and CF=1 so the carry-in adder path is exercised both ways.
+        if mn in ("ADC", "SBB"):
+            for cf in ("clc", "stc"):
+                L.append(f"    {cf}")
+                if dst_a == "E":
+                    L.append(f"    {mn.lower()}{SUF[w]}  %{other}, %{wr[1]}")
+                else:
+                    L.append(f"    {mn.lower()}{SUF[w]}  %{wr[1]}, %{other}")
         # operand-size (66) prefix: 16-bit form of a 32-bit op exercises the
         # operand-size-override decode + the 16-bit datapath the suite else misses.
         if w == 32:
@@ -482,6 +491,10 @@ def emit_lines(s):
         w = width_of(types[0])
         for r in safe_regs(w):
             L.append(f"    {mn.lower()}{SUF[w]}  %cl, %{r}")
+        # RCL/RCR rotate THROUGH carry -> exercise CF=0 and CF=1 in.
+        if mn in ("RCL", "RCR"):
+            for cf in ("clc", "stc"):
+                L += [f"    {cf}", f"    {mn.lower()}{SUF[w]}  %cl, %{safe_regs(w)[1]}"]
         return L, "GEN", "shift-cl"
 
     # --- pattern: G,E,I  three-operand IMUL --------------------------------
