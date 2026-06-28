@@ -354,7 +354,31 @@ far-helper — trace how 0x3272 is entered (a mis-landed jump / wrong boundary),
 go32 bytes at 0x3272 differ from the on-disk Quake image (a load/relocation issue). The exact failing
 instructions are now pinned (0x3272 near-call, 0x595d/0x5966 far-ret, 0x31fa the PUSH DI).
 
-## 18. Bottom line
+## 18. PIVOT: the crash region is go32 SELF-MODIFYING CODE (runtime stub patching)
+
+`--watch-write` on the near-call byte (lin 0x29d32) + helper byte (lin 0x2c41d), with no RTL changes,
+shows the real-mode stub is **built and patched at runtime**, not static:
+- retire ~5.16M, cs=0x08 (PM flat): a byte-wise **bzero** clears the 0x2c41x region.
+- retire ~8.75M, cs=0xf000 (BIOS): an esi/edi/ecx **copy loop** loads the stub bytes into 0x29d3x
+  (e.g. wdata 0x14a0/0x4689/0x83f6 with edi stepping +2, ecx counting down).
+- retire **9,642,324**, cs=**0x0087:0x0334** (go32 PM): a 32-bit **`mov [0x29d30], 0x26dfe82d`** —
+  go32 **patches its own real-mode call stub** ~1000 instructions before the #UD at 9,643,312.
+
+The early dumps confirm the far-RETF helper (0x2c41d=`cb`) is legitimately LOADED (re-loaded after the
+bzero), and the near-call byte is present too. So the near-CALL/far-RET mismatch (§17) is the RESULT
+of go32's runtime patch: go32 dynamically writes the call into the stub. The patch value 0x26dfe82d
+(bytes `2d e8 df 26`) overwrites 0x29d30..0x29d33, which previously held `b1 0c e8 d1` (MOV CL,0xc;
+CALL ...0x5946) — i.e. it rewrites the CL-load + call target.
+
+So the Goal-2 root is now in **go32's DPMI self-modifying stub patch**: either (a) the core computes
+the patch store's address/value wrong at cs=0x87:0x334 (an addressing/ALU bug feeding the SMC), or
+(b) the core executes the freshly-patched stub bytes differently than real hardware (an SMC/prefetch/
+decode-coherence issue — the patched bytes must be re-fetched, not a stale decode). This is a deep
+go32-DPMI + self-modifying-code interaction, NOT an opcode gap (opgen 0 NEW-FAIL), the timer, VESA, or
+SP-drift. Next: decode the SMC store at cs=0x87:0x334 and verify its computed addr(0x29d30)/value
+(0x26dfe82d), and check the core re-fetches patched code (SMC coherence) at the stub.
+
+## 19. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
