@@ -266,7 +266,29 @@ VESA/VBE model + a capturable linear FB. The cs=0x34 #UD is the VBE far-call lan
 the VBE interface isn't really provided. This is a video/VBE bring-up task, NOT a CPU opcode gap
 (opgen: 0 NEW-FAIL) and NOT the timer (PIT ticks correctly).
 
-## 14. Bottom line
+## 14. VESA theory RULED OUT — the cs=0x34 crash is a plain real-mode far-jump to data
+
+Made the soft-VGA report VBE-unsupported (int10 AH=0x4F -> AX=0) and re-ran with a log: **VBE-FAIL
+count = 0** — the soft-VGA hook NEVER saw an int10 AH=0x4F call, and the run still halts at the exact
+same 9,643,312. So Quake's crash path does NOT use standard VBE-via-int10; my "Quake uses VESA"
+reading (from `eax=0x101`) was wrong (that was just a register value, not a VBE mode). Reverted the
+no-op change.
+
+Re-characterized Goal-2 blocker (what's actually known, no theory):
+- After the go32 DPMI->real-mode switch, real-mode execution reaches cs=0x34 and runs **512+
+  straight-line instructions through a DATA region** (consecutive words 0x14f,0x150,… per peek-mem)
+  into `0x63` (#UD in real mode) -> S_HALT at 9.64M.
+- cs=0x34 is **not** in the IVT (not an int handler) and **not** reached by int10/VBE. It's a
+  computed far-jump to a wrong target (cs=0x34:~0x595d, which is data). The far-jump SOURCE (which
+  go32/real-mode instruction computed cs=0x34:* and from what value) is the unknown.
+- Confirmed NOT: a missing opcode (opgen 0 NEW-FAIL), the timer (PIT correct), VBE-via-int10.
+
+Next concrete step (not yet done): trace the instruction that performs the cs=0x26ac -> cs=0x34
+far-jump and where it sourced the (wrong) target — a retire/operand trace of the go32 real-mode stub
+right before the transition. This is the remaining Goal-2 blocker: a deep real-mode/DPMI control-flow
+bug, distinct from the (now substantially closed) opcode work.
+
+## 15. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
