@@ -48,6 +48,11 @@ regression cannot hide. `make opgen-modes` runs the real-mode/CPL0 lane.
 * **16-bit addressing** (`addr16`/0x67) added to the EA sweep (721 forms,
   EQUIVALENT to QEMU).
 * **prefix-combination** decode test (LOCK / segment-override / 66 / 67 / REP).
+* **carry-in diversity** — ADC/SBB/RCL/RCR run with CF=0 and CF=1.
+* **mode streams** (5, all EQUIVALENT to qemu-system at CPL0): `realmode_flags`,
+  `realmode_seg`, `realmode_priv` (MOV CR/DR, LGDT/LIDT), `realmode_int`
+  (INT/INT3/INTO/IRET), `realmode_far` (9A/CB/CA/EA + indirect FF/3,/5).
+* **generator self-test** (`selftest.sh`) — CI that regen holds the invariants.
 
 ### Findings analysis (`known_diverge.txt`) — surfaced, NOT fixed here
 
@@ -70,7 +75,8 @@ unchanged — these are an analysis catalog):
 | **branches** (Jcc rel8/rel32, CALL/JMP/RET, LOOP, JECXZ, near-indirect) | done |
 | special operands (LEA/SHLD/SHRD/AAD/AAM/CMPXCHG8B/string/PUSH-POP-rm) | done |
 | **mode**: real-mode / CPL0 (flags, IF/IOPL, privileged MOV CR0/DR7, 16-bit) | done (vs qemu-system) |
-| mode: PM32-CPL0 + more privileged/IO/far/seg streams | framework in place (`gen_modes.py`) |
+| **mode**: real-mode/CPL0 far + INT/IRET streams (9A/CB/CA/EA/FF3,5, INT/INTO/IRET) | done (vs qemu-system) |
+| mode: PM32-CPL0 (protected-mode privileged) | next |
 | MANUAL (priv/io/far/seg/MOV-Sreg/MOV-moffs/fault) | listed in `opgen_status.txt` |
 
 **PM32/user: 436 GEN, 397 PASS + 29 KNOWN + 0 NEW-FAIL** (clean). The 29 KNOWN
