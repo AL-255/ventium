@@ -420,7 +420,31 @@ Next concrete step: differential qemu-vs-RTL trace SCOPED to the go32 stub regio
 against the RTL's near-CALL@0x3272 / far-RETF@0x595d (§17) — the first structural difference is the
 bug. `/tmp/quake.raw` is kept for this. This is the path to actually fixing Goal 2.
 
-## 21. Bottom line
+## 21. Differential at the crash site: near/far is CORRECT — the bug is a value divergence (DI)
+
+Traced qemu's go32 stub region (`-d in_asm -dfilter`). qemu's stub is at DIFFERENT linear addresses
+(different memory map: ~0x2bxxx vs RTL's 0x29d3x) but the CODE is byte-identical:
+- shift helper ends in **`cb` (far-RETF)** in qemu too: `8bda d3e8 d3ea f6d9 80c110 d3e3 0bc3 cb`
+- reached by the SAME **near-CALL**: `... b1 0c e8 d1 26` (MOV CL,0x0c; near CALL)
+
+So the near-CALL/far-RETF "mismatch" (§17) is **intentional, correct go32 code — NOT the bug**. It's a
+compiler far-call thunk: the function (ENTER 12,0 @0x31f5; PUSH SI; PUSH DI) is laid out so the saved
+DI sits at [SP+2] above the near-call's return IP, and the helper's far-RETF pops {IP, DI} — i.e. the
+function CONVENTION is **DI = the real-mode segment to far-return to**. qemu has the right segment in
+DI; the RTL has **DI = 0x34**.
+
+So the Goal-2 bug is an **upstream STATE divergence**: within the RTL, DI should equal the RTL's own
+stub segment (~0x26ac) but is 0x34. (Caveat: qemu's stub segment differs from the RTL's by memory
+map, so DI's absolute value legitimately differs across the two — the bug is that 0x34 != the RTL's
+own 0x26ac.) The same wrong 0x34 is what §16 saw corrupt the return CS. So earlier in execution the
+RTL computes/loads 0x34 where its stub segment belongs.
+
+Next: a CODE-ALIGNED differential (compare register state at the same stub OFFSET, since absolute
+addresses differ by memory map) to find where DI / that segment value first becomes 0x34 — that is
+the actual core bug. The near/far rabbit hole is now closed; this is a concrete register-divergence
+hunt with a working oracle.
+
+## 22. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
