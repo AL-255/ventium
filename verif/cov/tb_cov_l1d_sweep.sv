@@ -107,6 +107,29 @@ module tb_cov_l1d_sweep;
     @(negedge clk); flush_all = 1; @(posedge clk); @(negedge clk); flush_all = 0;
     do_read(mk(1, 0, 1), d);  chk(d, 32'hDEAD_0000, "post-flush refill set 0");
 
+    // 7) WALKING-BIT data through every line/word so the cache DATA array
+    //    (rd_line/dc_val) toggles every bit — the structured seed above leaves it
+    //    mostly static. Pure toggle stimulus (write-then-read, self-consistent).
+    for (int s = 0; s < SETS; s++)
+      for (int w = 0; w < LINE/4; w++) begin
+        logic [31:0] wa = mk(1, s, w);
+        do_write(wa, 32'h1 << ((s*8 + w) % 32));
+        do_read (wa, d);          // no chk: pure toggle
+      end
+    for (int s = 0; s < SETS; s++)
+      for (int w = 0; w < LINE/4; w++) begin
+        logic [31:0] wa = mk(2, s, w);
+        do_write(wa, ~(32'h1 << ((s*5 + w*3) % 32)));   // complementary -> 1->0
+        do_read (wa, d);
+      end
+    // 8) fill way0+way1 of every set then evict (toggles valid/LRU both ways)
+    for (int s = 0; s < SETS; s++) begin
+      do_read(mk(1, s, 0), d);
+      do_read(mk(2, s, 0), d);
+      do_read(mk(3, s, 0), d);   // 3rd tag -> eviction
+    end
+    @(negedge clk); flush_all = 1; @(posedge clk); @(negedge clk); flush_all = 0;
+
     if (errors == 0) $display("L1DSWEEP-OK (128 sets x 2 ways swept)");
     else             $display("L1DSWEEP-FAIL (%0d errors)", errors);
     $finish;
