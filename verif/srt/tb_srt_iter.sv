@@ -23,10 +23,21 @@ module tb_srt_iter;
   logic        clk = 1'b0, rst_n = 1'b0, start = 1'b0, buggy = 1'b0;
   logic [79:0] a = '0, b = '0;
   logic [1:0]  rc = 2'd0;
+  // Drive the unified-FDIV control pins the golden was generated with:
+  //   mode = FD_DIV (2'd0), prem1 = 0 (div, not FPREM1),
+  //   pc   = 2'b11 -> 64-bit extended precision (== fx_srt_div(...,2'b11,...)).
+  // Leaving pc unconnected defaulted it to 2'b00 (24-bit) which rounded every
+  // result to single precision -> the 1214 numeric mismatches.
+  logic [1:0]  mode  = 2'd0;
+  logic        prem1 = 1'b0;
+  logic [1:0]  pc    = 2'b11;
   logic        busy, done;
-  logic [80:0] result;
+  logic [82:0] result;
+  logic [2:0]  rem_q012;
+  logic        rem_c2, rem_ie;
 
-  fpu_srt_div dut (.clk, .rst_n, .start, .a, .b, .rc, .buggy, .busy, .done, .result);
+  fpu_srt_div dut (.clk, .rst_n, .start, .mode, .prem1, .a, .b, .rc, .pc, .buggy,
+                   .busy, .done, .result, .rem_q012, .rem_c2, .rem_ie);
 
   initial forever #5 clk = ~clk;
 

@@ -125,7 +125,10 @@ pm32_entry:
     /* TSS1 @ 0x3000 (outgoing-save target) + TSS2 @ 0x4000 (incoming image). */
     movl    $0x00003000, %edi
     xorl    %eax, %eax
-    movl    $84, %ecx                   /* 84 dwords = 336 bytes = three TSSes */
+    movl    $52, %ecx                   /* 52 dwords zero TSS1 (the outgoing-save target);
+                                         * TSS2/TSS3 are field-initialised below + low RAM
+                                         * resets to 0, so this need only clear TSS1. Kept
+                                         * small so the task switch lands within max_insn. */
 1:  movl    %eax, (%edi)
     addl    $4, %edi
     loop    1b
@@ -143,14 +146,14 @@ pm32_entry:
     movl    $0x00000000, 0x0000401C     /* CR3 = 0 (paging off) */
     movl    $task2,      0x00004020     /* EIP = task2 */
     movl    $0x000008D7, 0x00004024     /* EFLAGS diverse status flags (CF/PF/AF/ZF/SF/OF) */
-    movl    $0xFFFFFFFF, 0x00004028     /* EAX all-ones (full tsw_gpr toggle) */
-    movl    $0xFFFFFFFF, 0x0000402C     /* ECX */
-    movl    $0xFFFFFFFF, 0x00004030     /* EDX */
-    movl    $0xFFFFFFFF, 0x00004034     /* EBX all-ones */
-    movl    $0xFFFFFFF0, 0x00004038     /* ESP all-high (unused; tsw_gpr ESP toggle) */
-    movl    $0xFFFFFFFF, 0x0000403C     /* EBP */
-    movl    $0xFFFFFFFF, 0x00004040     /* ESI */
-    movl    $0xFFFFFFFF, 0x00004044     /* EDI */
+    movl    $0xAAAAAAAA, 0x00004028     /* EAX MARKER (run-sys-golden 5d asserts this); toggles odd bits */
+    movl    $0xFFFFFFFF, 0x0000402C     /* ECX all-ones (free GPR: full tsw_gpr toggle) */
+    movl    $0xFFFFFFFF, 0x00004030     /* EDX all-ones (free GPR) */
+    movl    $0xBBBBBBBB, 0x00004034     /* EBX MARKER (run-sys-golden 5d asserts this) */
+    movl    $0x00070000, 0x00004038     /* ESP MARKER = task2 stack top (run-sys-golden 5d asserts this) */
+    movl    $0xFFFFFFFF, 0x0000403C     /* EBP all-ones (free GPR) */
+    movl    $0xFFFFFFFF, 0x00004040     /* ESI all-ones (free GPR) */
+    movl    $0xFFFFFFFF, 0x00004044     /* EDI all-ones (free GPR) */
     movl    $0x00000010, 0x00004048     /* ES = 0x10 */
     movl    $0x00000008, 0x0000404C     /* CS = 0x08 */
     movl    $0x00000010, 0x00004050     /* SS = 0x10 */

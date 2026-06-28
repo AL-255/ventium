@@ -50,7 +50,7 @@ module tb_sqrt_iter;
     run_sqrt(fx_make(1'b0,15'h4001,64'h8000000000000000), 2'd0, got); // sqrt(4.0)
     $display("sqrt(4.0) = %020h inexact=%b (expect 2.0, inexact=0)", got[79:0], got[80]);
     run_sqrt(fx_make(1'b0,15'h4000,64'h8000000000000000), 2'd0, got); // sqrt(2.0)
-    ref_ = fx_sqrt(fx_make(1'b0,15'h4000,64'h8000000000000000), 2'd0);
+    ref_ = fx_sqrt(fx_make(1'b0,15'h4000,64'h8000000000000000), 2'd0, 2'b11);
     $display("sqrt(2.0) = %020h inexact=%b (ref %020h inexact=%b)", got[79:0], got[80], ref_[79:0], ref_[80]);
 
     // random normal-operand corpus across all 4 rounding modes
@@ -61,7 +61,7 @@ module tb_sqrt_iter;
       rc  = $urandom() % 4;
       xa  = fx_make(1'b0, exp, man);
       run_sqrt(xa, rc, got);
-      ref_ = fx_sqrt(xa, rc);
+      ref_ = fx_sqrt(xa, rc, 2'b11);   /* pc=extended (64-bit) to match the iterative DUT */
       if (got !== ref_) begin
         fail++;
         if (fail <= 8) $display("FAIL[%0d] a=%020h rc=%0d got=%023h ref=%023h", i, xa, rc, got, ref_);

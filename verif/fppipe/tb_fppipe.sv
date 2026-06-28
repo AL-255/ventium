@@ -42,17 +42,21 @@ module tb_fppipe;
   int fail, k, idx;
   logic [2:0] s;
   logic [1:0] rc;
+  logic [1:0] pc;
+  logic       ferr;
   logic [79:0] a, b;
   logic [82:0] ref_, got;
   fx_pipe_t p;
   logic [2:0] subs [4];
 
   task automatic chk(input logic [2:0] sub, input logic [79:0] aa, input logic [79:0] bb,
-                     input logic [1:0] rcc);
-    logic [82:0] rf, gt; fx_pipe_t pp;
-    rf = f_eval(sub, aa, bb, rcc, 1'b0);
-    pp = f_eval_s1(sub, aa, bb, rcc, 1'b0);
-    gt = f_eval_s2(pp, rcc);
+                     input logic [1:0] rcc, input logic [1:0] pcc, input logic ferrc);
+    logic [84:0] rf, gt; fx_pipe_t pp;
+    // EQUIVALENCE: single-step f_eval must equal pipelined f_eval_s1->f_eval_s2.
+    // All three calls MUST receive the SAME pc and SAME fdiv_err for equality.
+    rf = f_eval(sub, aa, bb, rcc, pcc, ferrc);
+    pp = f_eval_s1(sub, aa, bb, rcc, pcc, ferrc);
+    gt = f_eval_s2(pp, rcc, pcc);
     if (gt !== rf) begin
       fail++;
       if (fail<=12) $display("FAIL sub=%0d rc=%0d a=%020h b=%020h ref=%021h got=%021h",
@@ -63,21 +67,23 @@ module tb_fppipe;
   initial begin
     subs[0]=3'd0; subs[1]=3'd1; subs[2]=3'd4; subs[3]=3'd5;
     fail=0;
-    // directed sanity
+    // directed sanity (consistent pc/fdiv_err across the 3 internal calls)
     chk(3'd0, fx_make(1'b0,15'h3fff,64'h8000000000000000),
-              fx_make(1'b0,15'h3fff,64'h8000000000000000), 2'd0);          // 1+1
+              fx_make(1'b0,15'h3fff,64'h8000000000000000), 2'd0, 2'b11, 1'b0);  // 1+1
     chk(3'd1, fx_make(1'b0,15'h4000,64'h8000000000000000),
-              fx_make(1'b0,15'h4000,64'hC000000000000000), 2'd0);          // 2*3
+              fx_make(1'b0,15'h4000,64'hC000000000000000), 2'd0, 2'b11, 1'b0);  // 2*3
     chk(3'd4, fx_make(1'b0,15'h3fff,64'h8000000000000000),
-              fx_make(1'b0,15'h3fff,64'h8000000000000000), 2'd1);          // 1-1 (cancel, RC-down)
+              fx_make(1'b0,15'h3fff,64'h8000000000000000), 2'd1, 2'b11, 1'b0);  // 1-1 (cancel, RC-down)
     // random corpus
     for (k=0; k<N; k++) begin
-      a   = rnd_op();
-      b   = rnd_op();
-      rc  = 2'($urandom());
-      idx = $urandom() % 4;
-      s   = subs[idx];
-      chk(s, a, b, rc);
+      a    = rnd_op();
+      b    = rnd_op();
+      rc   = 2'($urandom());
+      pc   = 2'($urandom());           // sweep precision control for coverage
+      ferr = $urandom() & 1;           // same fdiv_err threaded to all 3 calls in chk
+      idx  = $urandom() % 4;
+      s    = subs[idx];
+      chk(s, a, b, rc, pc, ferr);
     end
     if (fail==0) $display("FPPIPE-GATE-OK  (%0d random + directed, f_eval_s2(f_eval_s1)==f_eval for add/sub/mul)", N);
     else         $display("FPPIPE-GATE-FAIL  (%0d mismatches)", fail);
