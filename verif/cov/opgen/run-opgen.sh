@@ -89,6 +89,23 @@ done
 say "OPGEN: ${#SEL[@]} opcode tests across $JOBS cores (golden=$GOLDEN)"
 printf '%s\n' "${SEL[@]}" | xargs -P "$JOBS" -I{} bash -c 'opgen_worker "$@"' _ {}
 
+# ---- CYCLE-mode coverage pass (dual-issue fast path; coverage-only) --------
+# Single-issue functional runs miss the decode.sv FP fast-decode + the U/V
+# fast path; a --cycle pass over the same flats lifts decode.sv to ~100%.
+if [ "${CYCLE:-1}" = 1 ] && [ "$GOLDEN" = 1 ]; then
+    say "CYCLE-mode coverage pass (fast path)"
+    mkdir -p "$DAT/cyc"
+    cyc_worker(){
+        local FLAT="$1" NM XF
+        NM="$(basename "$FLAT" .flat)"
+        XF=""; grep -q '"x87": true' "$(dirname "$FLAT")/../../../verif/cov/opgen/tests/$NM/manifest.json" 2>/dev/null && XF="--x87"
+        VEN_COV_DAT="$DAT/cyc/$NM.dat" timeout 30 "$TB" --image "$FLAT" --load 0x08048000 \
+            --entry 0x08048000 --init-esp 0x40c34910 --cycle $XF --out /dev/null --max-insn 400 >/dev/null 2>&1 || true
+    }
+    export -f cyc_worker; export DAT TB
+    ls "$WORK"/op_*.flat 2>/dev/null | xargs -P "$JOBS" -I{} bash -c 'cyc_worker "$@"' _ {}
+fi
+
 # ---- aggregate (KNOWN findings vs NEW failures) ----------------------------
 say "OPGEN PM32/user differential result"
 KNOWN="$HERE/known_diverge.txt"

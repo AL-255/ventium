@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help
 
 help:
@@ -209,9 +209,11 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pintr
 	bash verif/sys/run-sys-golden.sh pintr16
 	bash verif/sys/run-sys-golden.sh pfault
+	bash verif/sys/run-sys-golden.sh pfcpl3
 	bash verif/sys/run-sys-golden.sh pde
 	bash verif/sys/run-sys-golden.sh pcpl
 	bash verif/sys/run-sys-golden.sh ptask
+	bash verif/sys/run-sys-golden.sh ptaskcpl
 	bash verif/sys/run-sys-golden.sh psmm
 	bash verif/sys/run-sys-golden.sh pdebug
 	bash verif/sys/run-sys-golden.sh ppopf
@@ -259,6 +261,21 @@ coverage-unit:
 	bash verif/cov/run-unit-cov.sh
 coverage-all:
 	bash verif/cov/run-all-cov.sh
+
+# --- per-opcode ISA regression suite (verif/cov/opgen/) ---------------------
+# Script-generated ONE test per P54C opcode (from x86reference.xml), all
+# operand/ModRM/SIB cases, parallel differential vs qemu-i386 (PM32/user) +
+# qemu-system (real-mode/CPL0 mode lane). `opgen` regenerates + runs everything
+# and prints the 555-opcode coverage accounting; `opgen-modes` runs the CPL0
+# mode lane. New divergences fail; cataloged findings (known_diverge.txt) don't.
+opgen:
+	python3 verif/cov/opgen/gen_opspec.py
+	python3 verif/cov/opgen/gen_easweep.py
+	python3 verif/cov/opgen/gen_tests.py
+	bash   verif/cov/opgen/run-opgen.sh
+	python3 verif/cov/opgen/coverage_report.py
+opgen-modes:
+	bash verif/cov/opgen/run-modes.sh
 
 # --- SRT divider gate (verif/srt/run-srt-gate.sh) ---------------------------
 # Standalone Verilator unit gate for the genuine radix-4 SRT divider
