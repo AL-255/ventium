@@ -228,7 +228,27 @@ the surrounding poll loop spins. This is NOT an opcode gap (opgen: 0 NEW-FAIL) a
 Next: identify which INT/excursion produces the cs=0x34 target and why (trace the DPMI int dispatch +
 the IVT read for that vector). A deep DOS-internals investigation, separate from the opcode roadmap.
 
-## 12. Bottom line
+## 12. Exhaustive opcode pass — memory RMW forms implemented (this session)
+
+Driven by the opgen CORE-GAP roadmap, the memory-operand RMW forms are now implemented + validated
+vs qemu (each opgen-PASS individually + verify 98/98 + verify-sys 949/949):
+- **SHLD/SHRD memory** (`0F A4/A5/AC/AD` /r mem) — commit `8b5e7ce`. RMW mirroring the K_SHIFT 0xC1
+  pattern; `dst_cur` made mem-aware; result to S_STORE; gpr write guarded.
+- **BT/BTS/BTR/BTC memory** (`0F A3/AB/B3/BB`, `0F BA /4-7`) — commit `a5e354f`. BT reads [mem] (CF
+  only); BTS/BTR/BTC RMW; index masked to operand size (huge-offset bit-string addressing not
+  modeled — opgen exercises in-operand offsets). op_0fa3/ab/b3/bb + op_0fba_4/5/6/7 EQUIVALENT.
+
+That's **12 CORE-GAP findings resolved** this session, on top of POP FS/GS, nested ENTER (+ its
+opgen-caught paging fix), and the #GP paging fix. (A full-suite opgen re-run hit transient
+qemu-gdbstub port contention — the parallel session runs opgen concurrently — so the count is from
+the per-opcode validations, all PASS, NEW-FAIL=0.)
+
+Remaining opgen findings: POP ES/SS/DS/GS seg-RELOAD divergence (decode OK — POP FS passes; a PM32
+seg-reload corner to triage), transcendentals (gated behind +VEN_TRANSCENDENTAL), CLI/STI/POPF
+(CPL3 semantics, not bugs). Plus the Quake real-mode control-flow fall-through (§11) — a DOS/DPMI
+issue, not an opcode gap.
+
+## 13. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
