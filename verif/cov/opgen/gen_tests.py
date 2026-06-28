@@ -82,10 +82,7 @@ SKIP = {
     # string ops with implicit DS:SI/ES:DI + REP -> covered by t_string/t_rep
     "MOVS": "string", "STOS": "string", "LODS": "string", "SCAS": "string",
     "CMPS": "string", "XLAT": "string", "XLATB": "string",
-    # control transfers handled by dedicated tests (need targets/setup)
-    "CALL": "branch", "JMP": "branch", "RET": "branch", "RETN": "branch",
-    "LOOP": "branch", "LOOPE": "branch", "LOOPNE": "branch", "LOOPZ": "branch",
-    "LOOPNZ": "branch", "JCXZ": "branch", "JECXZ": "branch", "ENTER": "stackframe",
+    "ENTER": "stackframe",
     # not P54C / undocumented-removed / undefined
     "LOADALL": "not-p54c", "UD": "undef", "UD1": "undef", "UD0": "undef",
     "SALC": "undoc", "SETALC": "undoc", "LEAVE": "stackframe",
@@ -140,6 +137,43 @@ X87_TWO_ST = {"fadd", "fmul", "fsub", "fsubr", "fdiv", "fdivr"}
 X87_POP = {"faddp", "fmulp", "fsubp", "fsubrp", "fdivp", "fdivrp"}
 
 
+def emit_branch(s, MN):
+    mn = MN.lower()
+    far = (s["esc"] == "0F") or (s["opval"] in ("E9", "E8"))   # rel32 forms
+    has_imm = any(o["a"] == "I" for o in s["operands"])
+    L = []
+    if mn == "jmp":
+        L += (["    jmp  8f", "    .fill 200,1,0x90", "8:"] if far
+              else ["    jmp  1f", "    nop", "1:"])
+        return L, "GEN", "jmp-rel"
+    if mn == "call":
+        # call a routine that returns; balance an extra slot for a possible ret imm.
+        L += ["    pushl $0", "    call 9f", "    jmp  7f", "9:", "    ret  $4", "7:"]
+        return L, "GEN", "call-rel"
+    if mn in ("ret", "retn"):
+        if has_imm:   # RET imm16 — caller pushes the slot it pops
+            L += ["    pushl $0", "    call 9f", "    jmp  7f", "9:", "    ret  $4", "7:"]
+        else:         # RET near
+            L += ["    call 9f", "    jmp  7f", "9:", "    ret", "7:"]
+        return L, "GEN", "ret"
+    if mn in ("jcxz", "jecxz"):
+        L += ["    xorl %ecx, %ecx", f"    {mn}  1f", "    nop", "1:",   # taken
+              "    movl $1, %ecx",  f"    {mn}  1f", "    nop", "1:"]    # not taken
+        return L, "GEN", "jcxz"
+    if mn in ("loop", "loope", "loopz", "loopne", "loopnz"):
+        L += ["    movl $3, %ecx", "    xorl %eax, %eax", "1:",
+              "    cmpl %eax, %eax",          # ZF=1 (for loope/loopz)
+              f"    {mn}  1b"]
+        return L, "GEN", "loop"
+    # conditional Jcc
+    if far:
+        L += [f"    {mn}  8f", "    jmp  8f", "    .fill 200,1,0x90", "8:"]
+    else:
+        L += ["    xorl %eax, %eax", f"    {mn}  1f", "    nop", "1:",
+              "    incl %eax",       f"    {mn}  1f", "    nop", "1:"]
+    return L, "GEN", "jcc"
+
+
 def emit_x87(s):
     mn = s["mnem"].lower()
     # obsolete/no-effect control ops gas may not assemble (the doc='u' undocumented
@@ -189,6 +223,30 @@ def emit_lines(s):
         return None, "MANUAL", "undoc-alias"          # (FSTP1/FCOM2/FFREEP/...)
     if s["is_x87"]:
         return emit_x87(s)
+    # --- near INDIRECT call/jmp (FF /2 = CALL r/m, FF /4 = JMP r/m) ----------
+    if mn in ("CALL", "JMP") and s["opval"] == "FF" and s["opcd_ext"] in ("2", "4"):
+        L = []
+        if mn == "JMP":
+            # jump (reg + mem indirect) through a pointer to a forward label
+            L += ["    leal 1f, %eax", "    jmp  *%eax", "1:",
+                  "    leal 2f, %eax", "    movl %eax, (%esi)", "    jmp  *(%esi)", "2:"]
+        else:
+            # call a routine via reg + mem indirect; the routine rets
+            L += ["    leal 9f, %eax", "    call *%eax", "    jmp 7f",
+                  "9:", "    ret", "7:",
+                  "    leal 9b, %eax", "    movl %eax, (%esi)", "    call *(%esi)", "    jmp 6f",
+                  "6:"]
+        return L, "GEN", "indirect-near"
+    # --- far indirect / direct (FF /3,/5 m16:16; 9A; EA) -> out of scope -----
+    if mn in ("CALL", "JMP") and (s["opcd_ext"] in ("3", "5") or s["opval"] in ("9A", "EA")):
+        return None, "MANUAL", "far-transfer"
+
+    # --- control transfers (relative) ---------------------------------------
+    if any(o["a"] == "J" for o in s["operands"]) or \
+            (mn in ("CALL", "JMP", "RET", "RETN", "LOOP", "LOOPE", "LOOPNE",
+                    "LOOPZ", "LOOPNZ", "JCXZ", "JECXZ")
+             and not any(o["a"] in ("E", "M", "A") for o in s["operands"])):
+        return emit_branch(s, mn)
     ops = s["operands"]
     methods = [o["a"] for o in ops]
     types = [o["t"] for o in ops]
@@ -367,7 +425,7 @@ def write_test(s, lines):
     body.append("    xorl  %ebx, %ebx")
     body.append("    int   $0x80")
     open(os.path.join(d, f"op_{key}.s"), "w").write("\n".join(body) + "\n")
-    n = len(lines) + len(setup_prologue()) + 10
+    n = (len(lines) + len(setup_prologue())) * 2 + 60   # margin for LOOP iterations
     json.dump({
         "name": "op_" + key, "src": f"op_{key}/op_{key}.s",
         "elf": f"op_{key}/op_{key}.elf", "image": f"op_{key}/op_{key}.flat",
