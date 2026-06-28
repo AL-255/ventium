@@ -672,6 +672,28 @@ its 0x000e0021 — back to its producing op; high word 0x000e + low 0x0021 look 
 (a relocation/fixup delta) that should be 0 for this intra-segment call. That producing op is the
 core-bug candidate.
 
+## 23l. Found+fixed a REAL bug (16-bit PUSHAW/POPAW) — but it is NOT the Quake root
+
+Traced EBX=0x000e0021 (the SMC-patch delta) to a write tap; the writer looked like POPA's hardcoded
+`gpr_we[R_EBX]=mem_rdata` (S_USEQ). Inspecting the PUSHA/POPA path found a genuine ISA bug: the bus
+driver (core_bus_driver.svh) and writeback (core_gpr_wb.svh) HARDCODE 32-bit (4-byte spacing,
+mem_wstrb=1111, full-width register writes, ESP+=32) and ignore q_w. So the 16-bit forms PUSHAW/POPAW
+(q_w=2, used in CS16/D=0 code) were mis-executed as 32-bit — corrupting each register's high 16 and
+mis-stepping ESP. opgen/verify only exercise PM32 (D=1 = the 32-bit form), so it was uncaught. Fixed
+(commit 78cd911): parameterize on q_w (strb_of(q_w), q_w-spaced addresses, reg_merge to preserve high
+halves on POPAW, ESP +/- 8*q_w). The 32-bit path is byte-identical; **verify 98/98 GREEN, FreeDOS
+still boots, verify-sys system-diff EQUIVALENT** (the 5d hardware-task-switch failure is pre-existing,
+unrelated). This is a real correctness fix worth keeping.
+
+HOWEVER, an instrumented post-fix run proves it does **NOT** fix Quake: identical 9,643,312-insn stop,
+**EBX@cs0x87:0x338 still = 0x000e0021**, crash (cs=0x34) still reached. And the post-fix detector shows
+**POPAW EBX-writes = 0** — so the EBX=0x000e0021 feeding the bad SMC patch does NOT come from the POPAW
+path. The "POPAW writes EBX" attribution was WRONG — the q_w=2 capture and the post-fix behavior
+conflict, i.e. the actual EBX=0x000e0021 producer is a 32-bit-unaffected path I have not yet isolated.
+This is the SAME recurring trap (mistaking a propagating value for its origin) that the truncation
+theory (§23e->§23h) hit; without an operation-aligned qemu reference (env-blocked) I keep mis-rooting
+the value. NET: a real bug fixed + committed; Quake root still NOT found; crash unchanged.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
