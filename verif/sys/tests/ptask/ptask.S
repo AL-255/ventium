@@ -143,10 +143,10 @@ pm32_entry:
     movl    $0x00000000, 0x0000401C     /* CR3 = 0 (paging off) */
     movl    $task2,      0x00004020     /* EIP = task2 */
     movl    $0x00000002, 0x00004024     /* EFLAGS = 0x2 (reserved bit; IF=0) */
-    movl    $0xAAAAAAAA, 0x00004028     /* EAX (marker: reloaded from TSS2) */
+    movl    $0xFFFFFFFF, 0x00004028     /* EAX all-ones (full tsw_gpr toggle) */
     movl    $0xFFFFFFFF, 0x0000402C     /* ECX */
     movl    $0xFFFFFFFF, 0x00004030     /* EDX */
-    movl    $0xBBBBBBBB, 0x00004034     /* EBX (marker: reloaded from TSS2) */
+    movl    $0xFFFFFFFF, 0x00004034     /* EBX all-ones */
     movl    $0x00070000, 0x00004038     /* ESP = task2 private stack top */
     movl    $0xFFFFFFFF, 0x0000403C     /* EBP */
     movl    $0xFFFFFFFF, 0x00004040     /* ESI */
