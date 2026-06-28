@@ -483,6 +483,12 @@ def emit_lines(s):
         L += REINIT
         for imm in IMM[iw]:
             L.append(f"    {mn.lower()}{SUF[w]}  {imm}, (%esi)")
+        # operand-size (66) prefix: 16-bit imm-form exercises the operand-size
+        # decode + 16-bit immediate path for the group-1 / TEST / shift-imm ops.
+        if w == 32:
+            iw16 = min(iw, 16)
+            for r in safe_regs(16)[:3]:
+                L.append(f"    {mn.lower()}w  {IMM[iw16][1]}, %{r}")
         return L, "GEN", "rm,imm"
 
     # --- pattern: E,1 or E,CL  shifts/rotates (D0-D3, C0-C1) ----------------
