@@ -469,10 +469,23 @@ core mis-computes the patched rel16 (an ALU/addressing bug feeding the SMC) or t
 that is the fix for Goal 2 (then VESA capture to see frames). The bug is now a single wrong constant
 (+0xe) with a known oracle value (0x26d1).
 
-## 23. Bottom line
-- FreeDOS boot: **done, validated** (98/98 + 949/949).
-- DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
-  translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
-- Goal 2 (render) & Goal 3 (long run): blocked by a NEW video-init/idle issue at 9.64M (VESA vs
-  mode-13h vs a HLT-wait-for-IRQ) — needs the southbridge/video work above. The single CPU bug that
-  blocked the entire prior session is resolved; this is a fresh, peripheral-side blocker.
+## 23. Bottom line (current, supersedes earlier)
+- **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
+  committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
+  (POP FS/GS), `17a630a`+`4b9225d` (nested ENTER + its paging), `8b5e7ce` (SHLD/SHRD mem), `a5e354f`
+  (BT/BTS/BTR/BTC mem). Opcode roadmap: real gaps implemented; the remaining opgen "findings" are
+  cov-env (POP-seg, §19) or non-crash-relevant.
+- **Reference established (§20): qemu-system renders Quake on this exact disk** (640x400 VESA). So
+  the RTL failure is a REAL, FIXABLE core bug, not a disk/setup problem.
+- **Goal-2 root, narrowed to one wrong constant (§21-22):** the go32 real-mode call works by a
+  near-CALL to a far-RETF shift helper via a PUSH-CS thunk (qemu confirms this is correct). On the
+  crashing iteration the RTL's SMC-patched near-CALL targets **0x5954** (rel16 0x26df) instead of the
+  thunk **0x5946** (rel16 0x26d1) — **+0xe, exactly the thunk length** — so the PUSH CS is skipped and
+  the far-RETF pops the stale saved DI (0x34) as CS -> cs=0x34 -> #UD. RULED OUT: opcode gaps (opgen
+  0 NEW-FAIL), timer, VESA-via-int10, SP-drift, code corruption, the near/far mechanism, DI value.
+- **Goals 2/3: NOT met.** Remaining: (a) root the +0xe — find where go32's PM SMC-patch computation
+  selects the near-entry 0x5954 instead of the far-thunk 0x5946 (a wrong far-vs-near selection /
+  relocation in go32's PM code at cs=0x87:0x334), via a deeper PM trace or a memory-map-matched
+  code-aligned qemu diff; (b) fix that core divergence; (c) extend ven_vga_fb to capture VESA so the
+  rendered frames are visible. The bug is pinned to a single +0xe with a known oracle value (0x26d1);
+  the fix path is concrete but a focused multi-step effort.
