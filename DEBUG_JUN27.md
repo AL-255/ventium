@@ -398,7 +398,29 @@ crash — so they are NOT the Quake divergence either.) Net: the real opcode gap
 BTS/BTR/BTC mem) are implemented + validated; the remaining opgen findings are environment or
 non-Quake-relevant. The Quake render blocker remains the go32 self-modifying-stub interaction (§18).
 
-## 20. Bottom line
+## 20. REFERENCE ESTABLISHED: qemu renders Quake on this exact disk
+
+Converted the IDE disk (`xxd -r -p` of quake.disk.hex -> 67 MB raw) and booted it under
+**qemu-system-i386 8.2.2** (`-hda quake.raw -m 64`, headless). A monitor `screendump` at 55 s
+captured a **640x400 framebuffer with 104 distinct colors** (Quake's brown UI/scene palette, dark
+browns 0x402818/0x472818/... — a real rendered graphics frame, not text). Saved `/tmp/qemu_q.ppm`.
+
+Consequences (this reframes the whole Goal-2 picture):
+1. The disk + Quake install are **VALID** — a working reference renders Quake. So the RTL failure is
+   a **real, fixable core bug**, NOT a disk/setup problem and NOT unfixable.
+2. The RTL diverges from qemu somewhere before the go32 SMC crash; with qemu as the oracle, a
+   **differential trace is now feasible** (it was not before — that was the missing piece behind the
+   "rabbit hole" status).
+3. Quake renders at **640x400 = a VESA/VBE mode** (confirms §13: Quake uses VBE, not mode 13h). So to
+   actually SEE Quake frames from the RTL, `ven_vga_fb` (mode-13h, 64 KiB @ 0xA0000) must be extended
+   to a capturable VESA linear framebuffer, on TOP of fixing the core divergence.
+
+Next concrete step: differential qemu-vs-RTL trace SCOPED to the go32 stub region (qemu `-d in_asm
+-dfilter <0x28000..0x2d000>` for the real-mode stub) to compare qemu's stub control flow (far-call?)
+against the RTL's near-CALL@0x3272 / far-RETF@0x595d (§17) — the first structural difference is the
+bug. `/tmp/quake.raw` is kept for this. This is the path to actually fixing Goal 2.
+
+## 21. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
