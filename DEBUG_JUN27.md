@@ -1144,6 +1144,30 @@ diff (extend the trace to log the stub + the block-allocation cells, or a reloca
 to catch the exact write that puts the 0xe / 0x119 into DOS memory -- the register diff has proven the
 core is faithful and pinned the divergence to the DPMI DOS allocator's block placement/contents.
 
+## 23ah. SEED found: first boot divergence is a BIOS-POST device/config VALUE (not a core bug)
+
+Lockstep-diffed the full traces from boot. FIRST divergence @insn#104916, cs=0x08:0xf3519 =
+"MOV EAX,[ESP+0x18]" -> EAX = 0 (RTL) vs 0x0c000000 (qemu). The BIOS is byte-identical (md5 match), so the
+instruction is the same; the STACK LOCAL [ESP+0x18] already held 0 vs 0x0c000000, i.e. a value the BIOS
+POST computed earlier from a DEVICE/CONFIG source the RTL models differently than qemu. Surrounding code
+(cs=0x08:0xf3519..0xf353c) is a region/map loop: MOV EAX,[ESP+0x18]; CALL; MOV [ESP+0x18],EAX;
+XOR ESI,ESI; CMP ESI,[ESP+0x18]; JAE; MOV EDX,0x40; LEA EAX,[ESP+0x30]; CALL; MOV ECX,9 -- a memory-map /
+SMBIOS / PCI-region build. With [ESP+0x18]=0 the RTL skips the loop; qemu (0x0c000000) runs it.
+
+COMPLETE PROVEN PICTURE (via the user-requested aligned per-instruction diff, NOT the stale oracle):
+ - The RTL CORE IS FAITHFUL to qemu: register pre-state MATCHES at the op (cs=0x87:0x258) AND the corruptor
+   (cs=0x87:0x338, EBX=0x000e0021 both). The Quake #UD is NOT a core register bug.
+ - The crash is a MEMORY/ALLOCATION-state divergence: real-mode block placed 0x119 paras higher in the RTL,
+   stub left un-un-relocated (RTL runs ~344 fewer block insns -> skips the un-relocation), corruptor ADDs
+   the delta -> CALL 0x5954 -> #UD.
+ - The SEED is at BIOS POST: a device/config value (0x0c000000 vs 0) the RTL's PERIPHERAL/MEMORY MODEL
+   produces differently than qemu (candidate: fw_cfg / e820 / PCI region / RAM-map source). It shifts the
+   DOS conventional-memory layout, which propagates to the real-mode block placement.
+So the fixable root is in the RTL's DEVICE/MEMORY MODEL of the boot environment (verif/tb/memmodel.cpp or
+the ven_* peripherals), NOT rtl/core. ~30 cycles of core-fix hypotheses were aimed at the wrong layer; the
+aligned diff redirects to the boot device/config model. NEXT: decode the source of 0x0c000000 (which
+device/port/cfg the BIOS reads at cs=0x08:~0xf3500) and match it to qemu.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
