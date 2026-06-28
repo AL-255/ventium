@@ -629,6 +629,27 @@ cs=0x87 routine, and check whether the divergent input comes from an x87 FPU res
 integer op — that op is the core bug. (Supersedes §23e/§23h: not a register truncation; it's a wrong
 shift-count value.)
 
+## 23j. What is CONFIRMED vs hypothesis (applying the §23h lesson)
+
+CONFIRMED (from the RTL's own frozen-at-crash state + decoded bytes, no qemu alignment needed):
+- The crashing near-CALL at cs=0x26ac:0x3272 targets **0x5954 (the bare shift helper)**, executed
+  straight after, and 0x5954 is PAST the PUSH-CS adapter thunk at 0x5946 (`POP BX; PUSH CS; PUSH BX;
+  CMP CL,0x10; JNB`). The shift helper ends in `cb` (far-RETF). So calling 0x5954 skips PUSH CS, the
+  far-RETF pops a stale CS, and execution lands in cs=0x34 garbage -> #UD. **This crash MECHANISM is
+  solid.** The call should target the thunk 0x5946 (which pushes CS for ANY count and then dispatches
+  by CL) — so go32 patched the WRONG call target (0x5954 vs 0x5946, +0xe).
+- The patch is one PM store (cs=0x87) of the dword to lin 0x29d31 = `MOV CL,imm` byte + the CALL.
+
+HYPOTHESIS, NOT confirmed (same op-alignment caveat that made §23e wrong): that the RTL's CL=0x2d(45)
+is "wrong vs 12". The stub is SMC-patched per shift operation, so the RTL's crashing-op count (45) and
+the qemu count (12) I saw may be DIFFERENT operations. I must not assert the count is the root without
+an operation-aligned comparison. What's certain is only the wrong CALL TARGET (thunk vs bare helper).
+
+Net: the crash mechanism is fully understood (skip-the-PUSH-CS-thunk -> stale far-RETF CS). The ROOT —
+why go32's SMC patch selects 0x5954 instead of 0x5946 — is NOT established; it needs an
+operation-aligned qemu differential, which the environment currently blocks (qemu emulation runs are
+killed). I am explicitly NOT claiming the shift-count (§23i) is confirmed as the cause.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
