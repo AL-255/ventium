@@ -92,7 +92,7 @@ printf '%s\n' "${SEL[@]}" | xargs -P "$JOBS" -I{} bash -c 'opgen_worker "$@"' _ 
 # ---- CYCLE-mode coverage pass (dual-issue fast path; coverage-only) --------
 # Single-issue functional runs miss the decode.sv FP fast-decode + the U/V
 # fast path; a --cycle pass over the same flats lifts decode.sv to ~100%.
-if [ "${CYCLE:-1}" = 1 ] && [ "$GOLDEN" = 1 ]; then
+if [ "${CYCLE:-1}" = 1 ]; then
     say "CYCLE-mode coverage pass (fast path)"
     mkdir -p "$DAT/cyc"
     cyc_worker(){

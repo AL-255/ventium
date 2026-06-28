@@ -43,13 +43,18 @@ say "LANE 6/8 — HALT arms (invalid-opcode d_unknown defaults)"
 bash "$SCRIPT_DIR/run-halt-cov.sh" || true
 say "LANE 7/8 — CPUID/RDTSC/INVD via --cosim"
 bash "$SCRIPT_DIR/run-cosim-cov.sh" || true
-say "LANE 8/8 — build-flags (feature-rich variant: FE_PIPE/UOPCACHE/FP_PIPE/TRANSCENDENTAL/...)"
+say "LANE 8/9 — build-flags (feature-rich variant: FE_PIPE/UOPCACHE/FP_PIPE/TRANSCENDENTAL/...)"
 bash "$SCRIPT_DIR/run-flags-cov.sh" || true
+say "LANE 9/9 — per-opcode ISA suite (opgen: every P54C opcode, func+cycle+mode)"
+# coverage-only (GOLDEN=0) — fast, no qemu; the differential is the make opgen gate.
+GOLDEN=0 CYCLE=1 bash "$SCRIPT_DIR/opgen/run-opgen.sh" >/dev/null 2>&1 || true
+bash "$SCRIPT_DIR/opgen/run-modes.sh" >/dev/null 2>&1 || true
 
 # ---- combined CORE coverage (every ventium_top lane, same top) -------------
-say "COMBINED CORE COVERAGE (ISA + system + cycle + halt + cosim + build-flags)"
+say "COMBINED CORE COVERAGE (ISA + system + cycle + halt + cosim + build-flags + opgen)"
 CORE_DATS=$(ls "$COV"/dat/*.dat "$COV"/sys/dat/*.dat "$COV"/cyc/dat/*.dat \
-    "$COV"/halt/dat/*.dat "$COV"/cosim/dat/*.dat "$COV"/flags/dat/*.dat 2>/dev/null || true)
+    "$COV"/halt/dat/*.dat "$COV"/cosim/dat/*.dat "$COV"/flags/dat/*.dat \
+    "$COV"/opgen/dat/*.dat "$COV"/opgen/dat/cyc/*.dat "$COV"/opgen/modes/dat/*.dat 2>/dev/null || true)
 if [ -n "$CORE_DATS" ]; then
     # shellcheck disable=SC2086
     "$VERILATOR_COVERAGE" --write "$COMB/core.dat" $CORE_DATS > "$COMB/merge.log" 2>&1 \
