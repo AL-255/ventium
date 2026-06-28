@@ -923,6 +923,27 @@ memory-alloc result that feeds it is the concrete next probe. NOTE: this is CWSD
 behavior driven by an earlier alloc-state divergence — descriptors+regs match the oracle, so still no
 isolated fixable CORE bug; the divergence is in CWSDPMI's free-list state evolution.
 
+## 23x. Crash trigger is a ONE-TIME DPMI op (~9.64M), not the per-call path
+
+The buffer-alloc routine at cs=0x87:0x256 (INT 0x31 fn0000) runs EXACTLY ONCE in the whole run (AX
+captured 1x = 0xaf), right before the crash. So the crash is triggered by a SPECIFIC one-time Quake
+DPMI operation near 9.64M (likely a graphics/VESA setup or a one-shot real-mode call), NOT the general
+per-real-mode-call path (which runs many times fine, cs=26ac). At that one op the RTL's CWSDPMI returns
+the OCCUPIED 0xaf where qemu returns free 0xb7 -> the wrong (high-mem 0x10000000) DS -> stub mishandle
+-> #UD.
+
+So by 9.64M the RTL's CWSDPMI LDT free-state has DIVERGED from qemu's (accumulated over the run's many
+per-call alloc/frees), and the one-time op at 9.64M is where it first bites. The seed is an earlier
+alloc/free whose RESULT diverged; the alloc results are register data (AX) so a register/alloc-result
+differential RTL-vs-qemu over the run is the path, but it is a LARGE effort (9.64M insns, per-TB-vs-
+per-insn alignment) and the alloc points are at many PCs. Descriptors+regs match the oracle at every
+checkpoint -> no isolated fixable CORE bug; the divergence is CWSDPMI free-list state evolution.
+
+STATUS: Quake crash precisely localized (one-time DPMI op -> CWSDPMI alloc returns occupied/high-mem
+buffer); root is an accumulated CWSDPMI free-list divergence reachable only by a large alloc-result
+differential. No safe speculative fix (descriptors/regs match; risk to verify-sys 949/949). Goal 1
+solid; Goals 2/3 unmet, at the practical limit of single-context register-oracle debugging.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
