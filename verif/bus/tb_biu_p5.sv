@@ -539,6 +539,38 @@ module tb_biu_p5;
     end
   endtask
 
+  // PIPELINED datapath sweep: pipeline pairs of cycles over WALKING-BIT addresses
+  // and write data, so the SAVED pipelined-cycle regs (cyc_addr[28:0]/cyc_wdata
+  // [63:0], only loaded on a pipelined launch) toggle every bit. Single cycles
+  // bypass these regs, which is why they were the residual untoggled datapath.
+  task automatic run_pipelined_sweep;
+    integer i;
+    begin
+      $display("[scenario] PIPELINED datapath sweep (walking cyc_addr/cyc_wdata)");
+      for (i=0;i<29;i=i+1) begin
+        @(negedge clk);                                  // 1st cycle (read) at a fixed addr
+        req=1; req_we=0; req_cache=0; req_lock=0; req_addr=29'h00000010; req_be=8'hFF;
+        @(posedge clk); while (!req_ack) @(posedge clk);
+        @(negedge clk); req=0;
+        wait (dbg_state==S_T2);
+        @(negedge clk); nan=0;                           // pipeline 2nd cycle (write), walking bit
+        req=1; req_we=1; req_lock=0;
+        req_addr=(29'h1<<i);
+        req_wdata=(64'h1<<i)|(64'h1<<((i*2+1)%64))|(64'hFF<<((i*8)%56));
+        @(posedge clk); while (!req_ack) @(posedge clk);
+        @(negedge clk); req=0; nan=1;
+        wait (dbg_state==S_T2P);
+        @(negedge clk); brdyn=0; d_in=(64'h2<<i);        // complete the read
+        @(posedge clk); @(negedge clk); brdyn=1;
+        wait (dbg_state==S_T2);                           // write promoted
+        @(negedge clk); brdyn=0;                          // complete the write
+        @(posedge clk); @(negedge clk); brdyn=1;
+        tick(1);
+      end
+      chk(dbg_outstanding==0, "pipelined sweep drained");
+    end
+  endtask
+
   // [FIX-1] CORNER: NA# coincident with the TERMINATING BRDY# while a 2nd req is
   // ready. The 2nd cycle must be issued exactly once (a single new ADS#), with no
   // double req_ack and no stranded cycle.  We drive NA#+BRDY# on the SAME clock as
@@ -936,6 +968,7 @@ module tb_biu_p5;
     run_locked_split(29'h03000044, 64'h00DD_00DD_00DD_00DD);  // [FIX-7] SCYC asserted
     run_pipelined   (29'h04000000, 29'h04000008);
     run_pipelined_locked(29'h04100000, 29'h04100008);   // pipelined + locked promotion
+    run_pipelined_sweep();                              // walking cyc_addr/cyc_wdata toggle
 
     // snoop set
     run_snoop       (27'h0AAAA02, 1'b1, 1'b0, 1'b1);   // hit, not modified
