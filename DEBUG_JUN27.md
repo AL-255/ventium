@@ -842,6 +842,25 @@ SESSION SUMMARY of the qemu-oracle breakthrough (supersedes ALL earlier root hyp
   to it). So the bug is precisely LOCALIZED (CWSDPMI LDT allocation) but the seed is not reachable
   without a qemu-memory diff. No safe speculative fix (would risk the green verify-sys baseline).
 
+## 23t. Descriptors MATCH (not a core descriptor bug); it's the selector VALUE in [0x626]
+
+Checked qemu's base for selector 0xaf: it is 0x10000000 (762,937x) — IDENTICAL to the RTL. So the LDT
+descriptor contents match between RTL and qemu (LDT[0x15]=base 0x10000000 in both); this is NOT a core
+descriptor-read/write bug. 0xaf (base 0x10000000) is the DPMI CLIENT's heavily-used data/stack segment;
+0xb7 (base 0x46010) is the real-mode-call transfer BUFFER. So at the real-mode-call setup, go32 stores
+the BUFFER selector 0xb7 into [0x626] (qemu) but the RTL has the CLIENT selector 0xaf there. The bug is
+which selector VALUE lands in [0x626] — a memory-value divergence in go32/CWSDPMI's selector pick,
+seeded earlier (a wrong value the core computed/loaded, or a wrong structure field), NOT a wrong
+descriptor.
+
+This is the cleanest statement of the wall: descriptors/registers MATCH; the divergence is a specific
+memory VALUE ([0x626] selector; the stub un-relocation; the LDT free-slot the alloc returns), and
+pinning which earlier write produced the wrong value requires qemu's MEMORY trace, which is
+exhaustively env-blocked (gdbstub/monitor[unix,stdio,yes-stream]/in_asm/-trace/background qemu all
+fail; only foreground `-d cpu` regs work, and these ops are direct-memory/invisible). No fixable core
+descriptor bug; no safe speculative fix. Goal-2 root = a memory-value seed reachable only with a
+qemu-memory channel.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
