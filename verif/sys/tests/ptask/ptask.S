@@ -147,7 +147,7 @@ pm32_entry:
     movl    $0xFFFFFFFF, 0x0000402C     /* ECX */
     movl    $0xFFFFFFFF, 0x00004030     /* EDX */
     movl    $0xFFFFFFFF, 0x00004034     /* EBX all-ones */
-    movl    $0x00070000, 0x00004038     /* ESP = task2 private stack top */
+    movl    $0xFFFFFFF0, 0x00004038     /* ESP all-high (unused; tsw_gpr ESP toggle) */
     movl    $0xFFFFFFFF, 0x0000403C     /* EBP */
     movl    $0xFFFFFFFF, 0x00004040     /* ESI */
     movl    $0xFFFFFFFF, 0x00004044     /* EDI */
@@ -162,7 +162,7 @@ pm32_entry:
     /* TSS3 (incoming GPRs all ZERO -> tsw_gpr 1->0 after the all-ones 1st switch) */
     movl    $task3,      0x00005020     /* EIP = task3 */
     movl    $0x00000002, 0x00005024     /* EFLAGS = 0x2 */
-    movl    $0x00060000, 0x00005038     /* ESP = task3 stack */
+    movl    $0x0000000C, 0x00005038     /* ESP all-low (1->0 the high bits) */
     movl    $0x00000018, 0x00005048     /* ES = 0x18 (diverse -> tsw_sel toggle) */
     movl    $0x00000008, 0x0000504C     /* CS */
     movl    $0x00000018, 0x00005050     /* SS = 0x18 */
