@@ -77,8 +77,8 @@ _start16:
     movl    $0x00CF9A00, 12(%ebx)
     movl    $0x0000FFFF, 16(%ebx)       /* idx2 0x10 data0 */
     movl    $0x00CF9200, 20(%ebx)
-    movl    $0x00000000, 24(%ebx)       /* idx3 0x18 filler (zero) */
-    movl    $0x00000000, 28(%ebx)
+    movl    $0x0000FFFF, 24(%ebx)       /* idx3 0x18 data32 flat (2nd data sel) */
+    movl    $0x00CF9200, 28(%ebx)
     /* idx4 0x20 TSS1: base 0x00003000, limit 0x67, access 0x89 (32-bit avail TSS) */
     movl    $0x30000067, 32(%ebx)       /* limit=0x0067, base[15:0]=0x3000 */
     movl    $0x00008900, 36(%ebx)       /* base[23:16]=0,access=0x89,gran=0,base[31:24]=0 */
@@ -163,12 +163,12 @@ pm32_entry:
     movl    $task3,      0x00005020     /* EIP = task3 */
     movl    $0x00000002, 0x00005024     /* EFLAGS = 0x2 */
     movl    $0x00060000, 0x00005038     /* ESP = task3 stack */
-    movl    $0x00000010, 0x00005048     /* ES */
+    movl    $0x00000018, 0x00005048     /* ES = 0x18 (diverse -> tsw_sel toggle) */
     movl    $0x00000008, 0x0000504C     /* CS */
-    movl    $0x00000010, 0x00005050     /* SS */
-    movl    $0x00000010, 0x00005054     /* DS */
-    movl    $0x00000010, 0x00005058     /* FS */
-    movl    $0x00000010, 0x0000505C     /* GS */
+    movl    $0x00000018, 0x00005050     /* SS = 0x18 */
+    movl    $0x00000018, 0x00005054     /* DS = 0x18 */
+    movl    $0x00000018, 0x00005058     /* FS = 0x18 */
+    movl    $0x00000018, 0x0000505C     /* GS = 0x18 */
     movw    $0x0068,     0x00005066     /* I/O map base */
 
     /* LTR TSS1 (selector 0x20): TR now points at the CURRENT task = TSS1. */
