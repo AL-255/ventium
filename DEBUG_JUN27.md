@@ -820,6 +820,28 @@ i.e. at the crash routine (already known), not the memory seed. So the root is l
 descriptor/relocation state) but not reachable here without a qemu-memory channel. Honest state:
 oracle-confirmed localization of a memory-state divergence; no fix; Goals 2/3 unmet; blocked on tooling.
 
+## 23s. Allocation localized to CWSDPMI (CS=0x8e47); seed = an earlier LDT free-slot divergence
+
+qemu's allocation of the DS selector 0xb7 happens inside CWSDPMI's descriptor code at CS=0x8e47
+(base 0x8e470), EIP=0xcedd (EAX=00b7, ECX=d9, EDX=46). CWSDPMI's LDT-allocation scans the LDT for a
+free descriptor; the RTL finds LDT[0x15] free (-> 0xaf) where qemu finds it OCCUPIED (-> 0xb7). So
+some EARLIER DPMI descriptor allocation occupied LDT[0x15] in qemu but not the RTL -> the RTL is one
+LDT slot behind. The seed is an earlier LDT-table-state divergence, which can only be traced with
+qemu's MEMORY (the LDT contents over time) — env-blocked.
+
+SESSION SUMMARY of the qemu-oracle breakthrough (supersedes ALL earlier root hypotheses):
+- qemu (foreground `-d cpu`) is a valid aligned oracle; EBX/PUSHAW/task-switch theories were WRONG.
+- Crash mechanism (solid): SMC-patched real-mode-call stub @0x29d31 ends up 0x26dfe82d (->CALL 0x5954,
+  skips PUSH-CS thunk) -> stale far-RETF CS -> cs=0x34 -> #UD @9.643M. qemu: stub stays 0x26d1e80c
+  (->0x5946 thunk) 138k x, never crashes.
+- Root chain (memory divergences, regs match): off-by-one LDT alloc (RTL 0xaf vs qemu 0xb7) -> wrong
+  DPMI segment bases (DS=0x10000000) -> the stub un-relocation in CWSDPMI's real-mode-call setup
+  misses -> stub over-relocated -> crash. All seeded by an earlier LDT-state divergence.
+- BLOCKER: every qemu-MEMORY channel fails here (gdbstub/monitor/in_asm/-trace/background qemu);
+  only foreground `-d cpu` (regs, per-TB) works, and the stub/LDT ops are direct-memory (invisible
+  to it). So the bug is precisely LOCALIZED (CWSDPMI LDT allocation) but the seed is not reachable
+  without a qemu-memory diff. No safe speculative fix (would risk the green verify-sys baseline).
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
