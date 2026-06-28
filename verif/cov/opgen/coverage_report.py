@@ -43,8 +43,8 @@ for s in spec:
         lines, st, reason = emit_lines(s)
         # reason -> which lane/justification covers it
         COSIM2={"io","gated"}
-        MODE2={"priv","sys","sys-mem","seg","far-transfer"}
-        DEFER2={"far","fault","branch","stackframe","string"}
+        MODE2={"priv","sys","sys-mem","seg","far-transfer","far","fault"}
+        DEFER2={"branch","stackframe","string"}
         SKIP2={"not-p54c","undef","undoc","undoc-alias","x87-undoc","x87-obsolete",
                "prefix","pop-cs-invalid","far","mov-moffs-coregap"}
         r=reason or "uncovered"

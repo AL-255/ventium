@@ -29,6 +29,8 @@ chk "repros generated (>= 12)"                       "[ \$(ls repros/*/repro.s 2
 # 100% accounting must hold (UNCOVERED == 0)
 UNC=$(python3 coverage_report.py 2>/dev/null | grep -oE 'UNCOVERED *[0-9]+' | grep -oE '[0-9]+' | head -1)
 chk "coverage accounting UNCOVERED == 0 (got ${UNC:-?})"  "[ '${UNC:-1}' -eq 0 ]"
+N_MODE=$(python3 gen_modes.py >/dev/null 2>&1; grep -c "write_image" gen_modes.py)
+chk "mode lane has >= 5 streams" "[ \$(grep -c write_image gen_modes.py) -ge 6 ]"
 
 # a sample of generated tests must assemble (catch a generation regression)
 asm_ok=1
