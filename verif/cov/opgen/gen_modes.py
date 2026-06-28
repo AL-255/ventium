@@ -296,6 +296,44 @@ PM32_BODY = r"""
 """
 
 
+PM32_INTGATE_BODY = r"""
+    /* ---- IDT @ 0x1000: vector 0x40 = 32-bit interrupt gate -> h_same -------- */
+    movl    $h_same, %eax
+    movw    %ax, 0x1000 + 0x40*8
+    movw    $0x08, 0x1000 + 0x40*8 + 2
+    movw    $0x8E00, 0x1000 + 0x40*8 + 4
+    shrl    $16, %eax
+    movw    %ax, 0x1000 + 0x40*8 + 6
+    /* vector 0x41 = trap gate (0x8F) -> h_same */
+    movl    $h_same, %eax
+    movw    %ax, 0x1000 + 0x41*8
+    movw    $0x08, 0x1000 + 0x41*8 + 2
+    movw    $0x8F00, 0x1000 + 0x41*8 + 4
+    shrl    $16, %eax
+    movw    %ax, 0x1000 + 0x41*8 + 6
+    /* vector 3 = INT3 -> h_same */
+    movl    $h_same, %eax
+    movw    %ax, 0x1000 + 3*8
+    movw    $0x08, 0x1000 + 3*8 + 2
+    movw    $0x8E00, 0x1000 + 3*8 + 4
+    shrl    $16, %eax
+    movw    %ax, 0x1000 + 3*8 + 6
+    movw    $0x07FF, 0x1500
+    movl    $0x1000, 0x1502
+    lidt    0x1500
+    /* ---- software INTs through the gates (same-priv CPL0) -> IRET ---------- */
+    int     $0x40                    /* interrupt gate (clears IF) */
+    int     $0x41                    /* trap gate (leaves IF) */
+    int3                             /* CC breakpoint */
+    /* set OF then INTO (vector 4 -> #UD here since no gate; instead use a 5th INT) */
+    jmp     past_h
+h_same:
+    movl    $0x1234, %ecx            /* observable handler effect */
+    iret                            /* protected-mode IRET (same-priv) */
+past_h:
+"""
+
+
 def write_pm_image(name, body32):
     d = os.path.join(MODES, name)
     os.makedirs(d, exist_ok=True)
@@ -368,6 +406,7 @@ def main():
     write_image("realmode_int", REALMODE_INT)
     write_image("realmode_far", REALMODE_FAR)
     write_pm_image("pm32_cpl0", PM32_BODY)
+    write_pm_image("pm32_intgate", PM32_INTGATE_BODY)
 
 
 if __name__ == "__main__":
