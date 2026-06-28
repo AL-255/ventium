@@ -59,6 +59,34 @@ far_rtn_imm:
 past_rtns:
 """
 
+REALMODE_INT = r"""
+    /* set up real-mode IVT entries -> a handler in this segment (CS=0xF000).
+     * the 16-bit offset is (handler - _start16 + _start16_off): a section-local
+     * difference (assembly-time) plus the linker-computed segment offset. */
+    movw    $(handler - _start16 + _start16_off), %ax
+    movw    %ax, 0x100        /* IVT[0x40].off (vec*4 = 0x40*4) */
+    movw    $0xF000, 0x102    /* IVT[0x40].seg */
+    movw    %ax, 0x0c         /* IVT[3].off  (INT3) */
+    movw    $0xF000, 0x0e
+    movw    %ax, 0x10         /* IVT[4].off  (INTO) */
+    movw    $0xF000, 0x12
+    /* ---- INT n (CD 40) -> push flags:cs:ip, vector to handler, IRET back -- */
+    int     $0x40
+    /* ---- INT3 (CC) ----------------------------------------------------- */
+    int3
+    /* ---- INTO (CE): set OF then INTO (taken) --------------------------- */
+    movb    $0x7f, %al
+    addb    $0x7f, %al        /* OF=1 */
+    into
+    /* ---- INTO with OF=0 (not taken, falls through) --------------------- */
+    xorb    %al, %al
+    into
+    jmp     int_done
+handler:
+    iret                      /* CF: pop ip:cs:flags */
+int_done:
+"""
+
 REALMODE_PRIV = r"""
     /* ---- MOV r32, CRn / CRn, r32 (0F 20/22) privileged, CPL0 ------------- */
     movl    %cr0, %eax
@@ -232,6 +260,7 @@ def main():
     write_image("realmode_flags", REALMODE_BODY)
     write_image("realmode_seg", REALMODE_SEG)
     write_image("realmode_priv", REALMODE_PRIV)
+    write_image("realmode_int", REALMODE_INT)
 
 
 if __name__ == "__main__":
