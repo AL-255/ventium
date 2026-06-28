@@ -11,30 +11,32 @@ register widths, AXI burst/straddle structure), as pure stimulus (no value check
 that would fail gates). Every change is verified `EQUIVALENT` vs qemu-system-i386 (or
 its module gate's self-check) before commit; the user's in-progress RTL is untouched.
 
-## Headline result (REPRODUCIBLE — re-derived by a clean `run-all-cov.sh`)
-- **Combined-core toggle: 70.58% → 74.08% (+3.50 points)**, line 89.28→89.85%.
+## Headline result (REPRODUCIBLE — re-derived by `run-all-cov.sh`)
+- **Combined-core toggle: 70.58% → 74.94% (+4.36 points)**, line 89.28→89.85%.
 - **12 standalone-TB RTL modules** lifted from 14–69% to 60–100% toggle (reproduce via their own gates).
 - **2 new standalone TBs authored** for previously TB-less core-internal modules.
-- **~92 commits**, all gates green / differentials EQUIVALENT.
+- **~93 commits**, all gates green / differentials EQUIVALENT.
 
-### Reproducibility correction (important — read this)
-An earlier in-session figure of **77.46% (+6.88)** was reached by *ad-hoc folding* mode/
-FP dats produced at full sweep length / on a custom FP_PIPE build. A clean `run-all-cov.sh`
-re-derives only **74.08% (+3.50)** because the standard harness does NOT capture the full
-sweeps:
-- **run-modes uses `--max-insn 120`** (golden/RTL length-match design) — my mode sweeps
-  (pm32_sysregs/segbase/segsel/ltr/intsweep, +DR/CR/seg) are hundreds of instructions, so
-  only their first ~120 reproduce (e.g. seg_base 328→**113**, creg4 12→**1**). The coverage
-  is REAL at full length; the harness truncates it. **Fix needed: per-test max-insn in
-  run-modes** (or front-load each sweep's highest-value ops).
-- **run-transc/run-flags use the cov-feat build (no `VEN_FP_PIPE`)**, where FPATAN stalls/
+### Reproducibility audit + correction (important)
+An earlier in-session figure of **77.46% (+6.88)** was reached by *ad-hoc folding* mode/FP
+dats at full sweep length / on a custom FP_PIPE build. A clean `run-all-cov.sh` first
+re-derived only **74.08%** — the standard harness wasn't capturing the full sweeps. Two
+root causes, one now FIXED:
+- ✅ **FIXED — run-modes truncated long sweeps at `--max-insn 120`.** My mode sweeps run
+  hundreds of insns; only their first ~120 reproduced (seg_base 328→113, creg4 12→1).
+  qemu stops on out-0xf4 so golden/RTL lengths still match at the natural exit — each long
+  sweep verified EQUIVALENT at 4000. Patched run-modes to a **per-test budget** (4000 for
+  pm32_segbase/sysregs/intsweep/paging4k, 120 for the rest). Recovers seg_base→328,
+  creg4→12, dr0→46, idt_base, tr_base, int_gate_off → **+0.86% combined (74.08→74.94%)**.
+- ⚠ **OPEN — run-transc/run-flags use the cov-feat build (no `VEN_FP_PIPE`)**, so FPATAN
   takes the non-pipe path → `fpu_fpatan` reproduces at **42.6%**, not the 77.4% my custom
-  `obj_dir_transc` (+FP_PIPE) build reached; `fpp2_s1` (split-pipe) doesn't appear at all.
-  **Fix needed: a +VEN_FP_PIPE coverage lane** to bank the FP-pipeline + fpatan coverage.
+  `obj_dir_transc` (+FP_PIPE) build reached; `fpp2_s1` (split-pipe) doesn't appear.
+  **Fix needed: a +VEN_FP_PIPE coverage lane** to bank the FP-pipeline + fpatan coverage
+  (~+2.5% combined, REAL but not yet in the standard headline).
 
-What DOES reproduce cleanly in the standard headline: ptask tsw_gpr **506/512**, the early
-parts of the system-register sweeps (creg3 39, dr0 17, dr7 13, idt_base 19, seg_sel 115,
-tr_base 26), and all 12 standalone-module gates + the 2 new TBs.
+Lesson: an over-claim (77.46%) was caught by re-running the clean suite, traced to two
+harness gaps, one fixed (per-test max-insn), one documented (FP_PIPE lane). The honest
+reproducible number is **74.94% (+4.36)**; the remaining ~2.5% is real but harness-gapped.
 
 ## Per-area wins
 | Area | Result | Method |
