@@ -31,12 +31,23 @@ bash    run-opgen.sh      # PARALLEL build+golden+diff across all cores
 * **`run-opgen.sh`** fans the per-opcode workload out across **all cores**
   (`xargs -P $(nproc)`); each worker spins its own qemu-i386 gdbstub.
 
-## Status (PM32 / user, CPL3) — integer + x87
+## Status (PM32 / user, CPL3) — integer + x87 + branches + special
 
-`run-opgen.sh` (parallel, ~17 s on 32 cores): **325 PASS + 25 KNOWN + 0 NEW-FAIL
-+ 0 ASM-FAIL** (clean). 356 op_* tests generated (integer + all x87 D8–DF,
-including the distinct transcendentals F2XM1…FCOS keyed by `sec_opcd`). The
-runner fails only on a **NEW** divergence, so a regression cannot hide.
+`make opgen` (parallel, ~20 s on 32 cores): **397 PASS + 29 KNOWN + 0 NEW-FAIL
++ 0 ASM-FAIL** (clean), 436 op_* tests + the EA sweep + the synthetic
+`op_prefixes` test. The runner fails only on a **NEW** divergence, so a
+regression cannot hide. `make opgen-modes` runs the real-mode/CPL0 lane.
+
+### Self-improvement log (continuous campaign)
+
+* **cycle-mode coverage pass** — a `--cycle` pass over the flats lifts
+  `decode.sv` 69 %→**100 %** line, core_fastpath 92.6 %, opgen core 56→60 %.
+* **minimal repros** (`gen_repros.py` → `repros/`, `REPROS.md`) — one isolating
+  instruction per finding for the RTL owner.
+* **16-bit operand-size (66-prefix)** variants on the two-operand ALU/MOV ops.
+* **16-bit addressing** (`addr16`/0x67) added to the EA sweep (721 forms,
+  EQUIVALENT to QEMU).
+* **prefix-combination** decode test (LOCK / segment-override / 66 / 67 / REP).
 
 ### Findings analysis (`known_diverge.txt`) — surfaced, NOT fixed here
 
