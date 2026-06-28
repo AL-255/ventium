@@ -444,7 +444,32 @@ addresses differ by memory map) to find where DI / that segment value first beco
 the actual core bug. The near/far rabbit hole is now closed; this is a concrete register-divergence
 hunt with a working oracle.
 
-## 22. Bottom line
+## 22. ROOT PINNED: the SMC patch sends the near-CALL +0xe past a push-CS thunk
+
+EDI-per-retire trace (frozen at crash) overturns the DI theory: EDI=0x34 is NORMAL — set every
+iteration in cs=0x18 PM code and saved/restored by the crash function (PUSH DI @0x31fa / POP DI
+@0x31f1). The function runs with EDI=0x34 on EVERY iteration but only crashes on the last. The real
+differentiator is the **near-CALL target**, from the execution traces (unambiguous):
+- RTL retire ring: `[8186] cs=0x26ac:0x3272` (near-CALL) -> `[8187] cs=0x26ac:0x5954` (helper). So
+  the RTL call has rel16 = 0x5954-0x3275 = **0x26df** -> target **0x5954**.
+- qemu trace: `b1 0c e8 d1 26` = MOV CL,0x0c; near-CALL rel16 **0x26d1** -> target **0x5946**.
+- Difference = **+0xe (14 bytes)**, exactly the **push-CS thunk** at 0x5946..0x5953 (the value-watch
+  saw `pc=0x5947` store 0x26ac = PUSH CS — it sets up the far-RETF's return segment).
+
+So qemu calls the thunk (push CS=0x26ac, then the shift helper that far-RETFs back to cs=0x26ac);
+the RTL's call SKIPS the thunk (jumps straight to 0x5954), so no CS is pushed and the far-RETF pops
+the stale saved DI (0x34) as CS -> cs=0x34:0x3275 -> #UD. The RTL got 0x26df via the go32 **SMC patch**
+(cs=0x87:0x334 writes to lin 0x29d30, §18) — at 9M the call was the correct `e8 d1 26` (->0x5946); the
+patch changed it to `e8 df 26` (->0x5954). So the RTL's self-modifying patch lands the call **+0xe off**,
+skipping the push-CS thunk.
+
+This is the actual core bug locus: the go32 SMC patch computes/writes rel16 0x26df instead of 0x26d1
+(+14 = the thunk length). Final step: decode the patch store at cs=0x87:0x334 and check whether the
+core mis-computes the patched rel16 (an ALU/addressing bug feeding the SMC) or the store lands wrong —
+that is the fix for Goal 2 (then VESA capture to see frames). The bug is now a single wrong constant
+(+0xe) with a known oracle value (0x26d1).
+
+## 23. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
