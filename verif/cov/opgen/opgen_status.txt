@@ -1,0 +1,427 @@
+opgen status — 555 P54C opcodes
+  GEN (auto test written): 238
+  MANUAL (needs handling): 317
+======================================================================
+
+## MANUAL — explicit list (nothing silently dropped):
+
+  [x87]  (141)
+      D8/0 FADD
+      D8/1 FMUL
+      D8/2 FCOM
+      D8/2 FCOM
+      D8/3 FCOMP
+      D8/3 FCOMP
+      D8/4 FSUB
+      D8/5 FSUBR
+      D8/6 FDIV
+      D8/7 FDIVR
+      D9/0 FLD
+      D9/1 FXCH
+      D9/1 FXCH
+      D9/2 FST
+      D9/2 FNOP
+      D9/3 FSTP
+      D9/3 FSTP1
+      D9/4 FLDENV
+      D9/4 FCHS
+      D9/4 FABS
+      D9/4 FTST
+      D9/4 FXAM
+      D9/5 FLDCW
+      D9/5 FLD1
+      D9/5 FLDL2T
+      D9/5 FLDL2E
+      D9/5 FLDPI
+      D9/5 FLDLG2
+      D9/5 FLDLN2
+      D9/5 FLDZ
+      D9/6 FNSTENV
+      D9/6 FSTENV
+      D9/6 F2XM1
+      D9/6 FYL2X
+      D9/6 FPTAN
+      D9/6 FPATAN
+      D9/6 FXTRACT
+      D9/6 FPREM1
+      D9/6 FDECSTP
+      D9/6 FINCSTP
+      D9/7 FNSTCW
+      D9/7 FSTCW
+      D9/7 FPREM
+      D9/7 FYL2XP1
+      D9/7 FSQRT
+      D9/7 FSINCOS
+      D9/7 FRNDINT
+      D9/7 FSCALE
+      D9/7 FSIN
+      D9/7 FCOS
+      DA/0 FIADD
+      DA/1 FIMUL
+      DA/2 FICOM
+      DA/3 FICOMP
+      DA/4 FISUB
+      DA/5 FISUBR
+      DA/5 FUCOMPP
+      DA/6 FIDIV
+      DA/7 FIDIVR
+      DB/0 FILD
+      DB/2 FIST
+      DB/3 FISTP
+      DB/4 FNENI
+      DB/4 FENI
+      DB/4 FNDISI
+      DB/4 FDISI
+      DB/4 FNCLEX
+      DB/4 FCLEX
+      DB/4 FNINIT
+      DB/4 FINIT
+      DB/4 FNSETPM
+      DB/4 FSETPM
+      DB/5 FLD
+      DB/7 FSTP
+      DC/0 FADD
+      DC/0 FADD
+      DC/1 FMUL
+      DC/1 FMUL
+      DC/2 FCOM
+      DC/2 FCOM2
+      DC/3 FCOMP
+      DC/3 FCOMP3
+      DC/4 FSUB
+      DC/4 FSUBR
+      DC/5 FSUBR
+      DC/5 FSUB
+      DC/6 FDIV
+      DC/6 FDIVR
+      DC/7 FDIVR
+      DC/7 FDIV
+      DD/0 FLD
+      DD/0 FFREE
+      DD/1 FXCH4
+      DD/2 FST
+      DD/2 FST
+      DD/3 FSTP
+      DD/3 FSTP
+      DD/4 FRSTOR
+      DD/4 FUCOM
+      DD/4 FUCOM
+      DD/5 FUCOMP
+      DD/5 FUCOMP
+      DD/6 FNSAVE
+      DD/6 FSAVE
+      DD/7 FNSTSW
+      DD/7 FSTSW
+      DE/0 FIADD
+      DE/0 FADDP
+      DE/0 FADDP
+      DE/1 FIMUL
+      DE/1 FMULP
+      DE/1 FMULP
+      DE/2 FICOM
+      DE/2 FCOMP5
+      DE/3 FICOMP
+      DE/3 FCOMPP
+      DE/4 FISUB
+      DE/4 FSUBRP
+      DE/4 FSUBRP
+      DE/5 FISUBR
+      DE/5 FSUBP
+      DE/5 FSUBP
+      DE/6 FIDIV
+      DE/6 FDIVRP
+      DE/6 FDIVRP
+      DE/7 FIDIVR
+      DE/7 FDIVP
+      DE/7 FDIVP
+      DF/0 FILD
+      DF/0 FFREEP
+      DF/1 FXCH7
+      DF/2 FIST
+      DF/2 FSTP8
+      DF/3 FISTP
+      DF/3 FSTP9
+      DF/4 FBLD
+      DF/4 FNSTSW
+      DF/4 FSTSW
+      DF/5 FILD
+      DF/6 FBSTP
+      DF/7 FISTP
+
+  [operand-pattern:Jbs]  (16)
+      70 JO
+      71 JNO
+      72 JB
+      73 JNB
+      74 JZ
+      75 JNZ
+      76 JBE
+      77 JNBE
+      78 JS
+      79 JNS
+      7A JP
+      7B JNP
+      7C JL
+      7D JNL
+      7E JLE
+      7F JNLE
+
+  [string]  (16)
+      A4 MOVS
+      A5 MOVS
+      A5 MOVS
+      A6 CMPS
+      A7 CMPS
+      A7 CMPS
+      AA STOS
+      AB STOS
+      AB STOS
+      AC LODS
+      AD LODS
+      AD LODS
+      AE SCAS
+      AF SCAS
+      AF SCAS
+      D7 XLAT
+
+  [operand-pattern:Jvds]  (16)
+      0F 80 JO
+      0F 81 JNO
+      0F 82 JB
+      0F 83 JNB
+      0F 84 JZ
+      0F 85 JNZ
+      0F 86 JBE
+      0F 87 JNBE
+      0F 88 JS
+      0F 89 JNS
+      0F 8A JP
+      0F 8B JNP
+      0F 8C JL
+      0F 8D JNL
+      0F 8E JLE
+      0F 8F JNLE
+
+  [io]  (14)
+      6C INS
+      6D INS
+      6D INS
+      6E OUTS
+      6F OUTS
+      6F OUTS
+      E4 IN
+      E5 IN
+      E6 OUT
+      E7 OUT
+      EC IN
+      ED IN
+      EE OUT
+      EF OUT
+
+  [priv]  (13)
+      F4 HLT
+      0F 00/2 LLDT
+      0F 00/3 LTR
+      0F 01/2 LGDT
+      0F 01/3 LIDT
+      0F 01/6 LMSW
+      0F 01/7 INVLPG
+      0F 06 CLTS
+      0F 08 INVD
+      0F 09 WBINVD
+      0F 30 WRMSR
+      0F 32 RDMSR
+      0F AA RSM
+
+  [prefix]  (11)
+      26 ES
+      2E CS
+      36 SS
+      3E DS
+      64 FS
+      65 GS
+      F0 LOCK
+      F2 REPNZ
+      F2 REP
+      F3 REPZ
+      F3 REP
+
+  [branch]  (11)
+      C2 RETN
+      C3 RETN
+      E0 LOOPNZ
+      E1 LOOPZ
+      E2 LOOP
+      E3 JCXZ
+      E8 CALL
+      E9 JMP
+      EB JMP
+      FF/2 CALL
+      FF/4 JMP
+
+  [sys]  (10)
+      63 ARPL
+      CF IRET
+      CF IRETD
+      0F 00/0 SLDT
+      0F 00/1 STR
+      0F 00/4 VERR
+      0F 00/5 VERW
+      0F 01/4 SMSW
+      0F 02 LAR
+      0F 03 LSL
+
+  [fault]  (6)
+      62 BOUND
+      CC INT
+      CD INT
+      CE INTO
+      F1 INT1
+      0F 0B UD2
+
+  [far]  (6)
+      9A CALLF
+      CA RETF
+      CB RETF
+      EA JMPF
+      FF/3 CALLF
+      FF/5 JMPF
+
+  [seg]  (5)
+      C4 LES
+      C5 LDS
+      0F B2 LSS
+      0F B4 LFS
+      0F B5 LGS
+
+  [operand-pattern:#rDX,#rAX,Evqp]  (4)
+      F7/4 MUL
+      F7/5 IMUL
+      F7/6 DIV
+      F7/7 IDIV
+
+  [stackframe]  (2)
+      C8 ENTER
+      C9 LEAVE
+
+  [operand-pattern:#AL,#AH,Ib]  (2)
+      D4 AMX
+      D5 ADX
+
+  [operand-pattern:#AX,#AL,Eb]  (2)
+      F6/4 MUL
+      F6/5 IMUL
+
+  [operand-pattern:#AL,#AH,#AX,Eb]  (2)
+      F6/6 DIV
+      F6/7 IDIV
+
+  [sys-mem]  (2)
+      0F 01/0 SGDT
+      0F 01/1 SIDT
+
+  [not-p54c]  (2)
+      0F 05 LOADALL
+      0F 07 LOADALL
+
+  [gated]  (2)
+      0F 31 RDTSC
+      0F A2 CPUID
+
+  [operand-pattern:Evqp,Gvqp,Ib]  (2)
+      0F A4 SHLD
+      0F AC SHRD
+
+  [operand-pattern:Evqp,Gvqp,#CL]  (2)
+      0F A5 SHLD
+      0F AD SHRD
+
+  [pop-cs-invalid]  (1)
+      0F POP
+
+  [operand-pattern:Mw,Sw]  (1)
+      8C MOV
+
+  [operand-pattern:Gvqp,M]  (1)
+      8D LEA
+
+  [operand-pattern:Sw,Ew]  (1)
+      8E MOV
+
+  [operand-pattern:Ev,#SS:[rSP]]  (1)
+      8F/0 POP
+
+  [operand-pattern:#AL,Ob]  (1)
+      A0 MOV
+
+  [operand-pattern:#rAX,Ovqp]  (1)
+      A1 MOV
+
+  [operand-pattern:Ob,#AL]  (1)
+      A2 MOV
+
+  [operand-pattern:Ovqp,#rAX]  (1)
+      A3 MOV
+
+  [undoc]  (1)
+      D6 SALC
+
+  [operand-pattern:#SS:[rSP],Ev]  (1)
+      FF/6 PUSH
+
+  [operand-pattern:Rd,Cd]  (1)
+      0F 20 MOV
+
+  [operand-pattern:Hd,Cd]  (1)
+      0F 20 MOV
+
+  [operand-pattern:Rd,Dd]  (1)
+      0F 21 MOV
+
+  [operand-pattern:Hd,Dd]  (1)
+      0F 21 MOV
+
+  [operand-pattern:Rq,Dq]  (1)
+      0F 21 MOV
+
+  [operand-pattern:Hq,Dq]  (1)
+      0F 21 MOV
+
+  [operand-pattern:Cd,Rd]  (1)
+      0F 22 MOV
+
+  [operand-pattern:Cd,Hd]  (1)
+      0F 22 MOV
+
+  [operand-pattern:Dd,Rd]  (1)
+      0F 23 MOV
+
+  [operand-pattern:Dq,Hq]  (1)
+      0F 23 MOV
+
+  [operand-pattern:Dq,Rq]  (1)
+      0F 23 MOV
+
+  [operand-pattern:Rd,Td]  (1)
+      0F 24 MOV
+
+  [operand-pattern:Hd,Td]  (1)
+      0F 24 MOV
+
+  [operand-pattern:Td,Rd]  (1)
+      0F 26 MOV
+
+  [operand-pattern:Td,Hd]  (1)
+      0F 26 MOV
+
+  [operand-pattern:Eb,#AL,Gb]  (1)
+      0F B0 CMPXCHG
+
+  [operand-pattern:Evqp,#rAX,Gvqp]  (1)
+      0F B1 CMPXCHG
+
+  [undef]  (1)
+      0F B9 UD
+
+  [operand-pattern:Mq,#EAX,#EDX,#EBX,#ECX]  (1)
+      0F C7/1 CMPXCHG8B
