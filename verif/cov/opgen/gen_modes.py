@@ -35,6 +35,30 @@ REALMODE_IO = r"""
     inw     %dx, %ax
 """
 
+REALMODE_FAR = r"""
+    /* ---- direct far CALL (9A) + far RET (CB) ---------------------------- */
+    lcallw  $0xF000, $far_rtn
+    /* ---- direct far CALL + far RET imm16 (CA) --------------------------- */
+    lcallw  $0xF000, $far_rtn_imm
+    /* ---- direct far JMP ptr16:16 (EA) ----------------------------------- */
+    ljmpw   $0xF000, $after_fjmp
+after_fjmp:
+    /* ---- indirect far CALL (FF/3) + far JMP (FF/5) via mem ptr ---------- */
+    movw    $far_rtn, 0x640
+    movw    $0xF000, 0x642
+    lcallw  *0x640
+    movw    $after_ijmp, 0x644
+    movw    $0xF000, 0x646
+    ljmpw   *0x644
+after_ijmp:
+    jmp     past_rtns
+far_rtn:
+    lretw
+far_rtn_imm:
+    lretw   $0
+past_rtns:
+"""
+
 REALMODE_PRIV = r"""
     /* ---- MOV r32, CRn / CRn, r32 (0F 20/22) privileged, CPL0 ------------- */
     movl    %cr0, %eax

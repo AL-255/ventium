@@ -49,3 +49,6 @@ op_0f01_6 CORE-GAP  LMSW    halts (only MOV CR0 PE-load path implemented)
 op_0f01_7 CORE-GAP  INVLPG  halts (unimplemented)
 #   0F08 INVD / 0F09 WBINVD gate on cosim_en||soc_en -> covered by the --cosim
 #   covtsc lane (HALT in plain --system, as designed).
+# --- FAR transfers: 9A (far CALL) + CB (far RET) covered by the sys lane
+#     (verif/sys/tests/psocfarcall, real-mode, vs qemu-system). EA/CA/FF3/FF5
+#     need hand-encoded 16-bit far pointers (psocfarcall pattern) -- TODO stream.
