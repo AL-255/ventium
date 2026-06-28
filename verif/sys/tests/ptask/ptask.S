@@ -85,8 +85,11 @@ _start16:
     /* idx5 0x28 TSS2: base 0x00004000, limit 0x67, access 0x89 */
     movl    $0x40000067, 40(%ebx)       /* limit=0x0067, base[15:0]=0x4000 */
     movl    $0x00008900, 44(%ebx)       /* base[23:16]=0,access=0x89,gran=0,base[31:24]=0 */
+    /* idx6 0x30 TSS3: base 0x00005000, limit 0x67, access 0x89 (coverage 2nd switch) */
+    movl    $0x50000067, 48(%ebx)
+    movl    $0x00008900, 52(%ebx)
 
-    movw    $0x002F, 0x0480             /* GDT limit = 48-1 = 0x2F (6 entries) */
+    movw    $0x0037, 0x0480             /* GDT limit = 48-1 = 0x2F (6 entries) */
     movl    $0x00000500, 0x0482        /* GDT base = 0x0500 */
     lgdt    0x0480
 
@@ -122,7 +125,7 @@ pm32_entry:
     /* TSS1 @ 0x3000 (outgoing-save target) + TSS2 @ 0x4000 (incoming image). */
     movl    $0x00003000, %edi
     xorl    %eax, %eax
-    movl    $52, %ecx                   /* 52 dwords = 208 bytes = both TSSes */
+    movl    $84, %ecx                   /* 84 dwords = 336 bytes = three TSSes */
 1:  movl    %eax, (%edi)
     addl    $4, %edi
     loop    1b
@@ -156,6 +159,17 @@ pm32_entry:
     movl    $0x00000010, 0x0000405C     /* GS = 0x10 */
     movl    $0x00000000, 0x00004060     /* LDTR = 0 (no LDT) */
     movw    $0x0068,     0x00004066     /* I/O map base (empty) */
+    /* TSS3 (incoming GPRs all ZERO -> tsw_gpr 1->0 after the all-ones 1st switch) */
+    movl    $task3,      0x00005020     /* EIP = task3 */
+    movl    $0x00000002, 0x00005024     /* EFLAGS = 0x2 */
+    movl    $0x00060000, 0x00005038     /* ESP = task3 stack */
+    movl    $0x00000010, 0x00005048     /* ES */
+    movl    $0x00000008, 0x0000504C     /* CS */
+    movl    $0x00000010, 0x00005050     /* SS */
+    movl    $0x00000010, 0x00005054     /* DS */
+    movl    $0x00000010, 0x00005058     /* FS */
+    movl    $0x00000010, 0x0000505C     /* GS */
+    movw    $0x0068,     0x00005066     /* I/O map base */
 
     /* LTR TSS1 (selector 0x20): TR now points at the CURRENT task = TSS1. */
     movw    $0x0020, %ax
@@ -233,11 +247,18 @@ task2:
     shll    $8, %edi
     orl     0x00002034, %edi            /* edi = (TSS1_acc<<8)|TSS2_acc = 0x898B */
 
+    /* SECOND task switch -> TSS3 (incoming GPRs=0) so the GPR-reload datapath
+     * (core_tsw.svh tsw_gpr[]) toggles 1->0 -- completing both directions. Pure
+     * coverage; task3 does the exit. */
+    ljmp    $0x30, $0
+
+    .align 16
+    .global task3
+task3:
     /* isa-debug-exit: out 0xf4, 0x42 -> qemu status (0x42<<1)|1 = 0x85. */
     movl    $0x42, %eax
     movw    $0xF4, %dx
     outb    %al, %dx
-
 hang2:
     hlt
     jmp     hang2
