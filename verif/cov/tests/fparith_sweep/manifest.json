@@ -1,0 +1,8 @@
+{
+  "name": "fparith_sweep",
+  "src": "fparith_sweep/fparith_sweep.s",
+  "x87": true,
+  "load_addr": "0x08048000",
+  "entry": "0x08048000",
+  "max_insn": 722
+}
