@@ -968,6 +968,29 @@ write to LDT[0x15]'s access byte (was 0xaf wrongly FREED right before, or is the
 a still-present descriptor). Root is a CWSDPMI free-list memory corruption seeded by an earlier core
 divergence; descriptors+regs match the oracle so still no isolated fixable CORE bug at this layer.
 
+## 23z. TIMING: the wrong selector is set at 8.908M (DPMI-INIT burst), 735K before the crash
+
+Timing probe results:
+- crash-op cs=0x87:0x258 runs EXACTLY ONCE, first @retire=8,908,304, AX=0x00af (the wrong selector).
+- LDT[0x15] access word written 21x, LAST @retire=8,910,557 by cs=26ac:1a11 (configured right around the op).
+- Pre-op LDT dump at 8.90M (lin 0x2d688): ENTIRELY EMPTY (all 64 descriptors zero).
+- 9.64M LDT dump: fully populated (slots 0x10-0x16). So the LDT is BUILT in a burst at ~8.9M.
+
+Reframing: the wrong [0x626]=0xaf is stored at 8.908M — 735K instructions BEFORE the 9.643M crash — and
+the LDT is EMPTY just before, so this is Quake's DPMI-client INITIALIZATION (the LDT build), not a mid-run
+buffer alloc or a late corruption. The op allocates 0xaf/LDT[0x15] where qemu allocates 0xb7/LDT[0x16].
+Crucially the FINAL LDTs are IDENTICAL (both 0x15=client data base 0x10000000, 0x16=buffer base 0x46010,
+both present, §23y) — so this is an allocation-ORDER off-by-one in the init burst: in qemu 0x15 (client
+data) is allocated BEFORE the op so the op gets 0x16 (buffer); in the RTL the op gets 0x15 (which later
+collides with / becomes the client data), so [0x626] points at the client's high-mem flat segment that
+real mode can't address -> the 9.64M #UD.
+
+This is a MAJOR narrowing: the root is a control-flow / allocator-state divergence inside a BOUNDED
+~10K-instruction DPMI-init window at 8.9M (not a 9.64M-wide corruption), and an order divergence points
+to a fixable CORE control-flow bug (a branch/condition evaluated differently) rather than an unreachable
+memory desync. Next: capture the LDT-build write SEQUENCE in the burst (which PC writes 0x15 vs 0x16, in
+what order) to localize the diverging branch; then a bounded register differential over 8.90-8.91M.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
