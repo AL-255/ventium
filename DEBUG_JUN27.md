@@ -903,6 +903,26 @@ alloc returning 0xaf vs 0xb7 (the known symptom) but not the free-list memory ca
 isolated (descriptors + registers match; the divergence is CWSDPMI's internal memory state). No safe
 speculative fix. FINAL localization for this environment.
 
+## 23w. RTL-side LDT[0x15] descriptor trace: CWSDPMI (cs=26ac) alloc/frees the buffer slot
+
+NEW RTL-side capability realized: I can dump the RTL's OWN memory + descriptors (no qemu memory needed
+for the RTL side; qemu regs are the oracle). Traced writes to the LDT[0x15] descriptor (lin 0x2d730 =
+ldt_base 0x2d688 + 0x15*8): it is set (limit 0xffff @cs=26ac:19e8, flags @1a11) and zeroed/freed
+(@cs=26ac:00cd writes all 8 bytes =0; @cs=26ac:52df word-zeros) REPEATEDLY by CWSDPMI code at cs=26ac.
+So CWSDPMI manages LDT[0x15] as the real-mode-call buffer descriptor in the RTL, where qemu uses
+LDT[0x16] (0xb7). The buffer descriptor's base = 0x10000000 (HIGH memory, the client region) in the RTL
+vs 0x46010 (LOW/conventional) in qemu — and real-mode code CANNOT address high memory, so the call
+fails -> stub mishandling -> #UD.
+
+So the bug = CWSDPMI's DPMI allocators (LDT + memory) hand the real-mode-call buffer a wrong (high-
+memory / occupied-client) resource. The descriptor-management PCs are now known (cs=26ac:19e8/1a11/
+00cd/52df = CWSDPMI alloc/free/set). The remaining step is to diff the alloc/free RESULT sequence
+RTL-vs-qemu to find the FIRST divergent alloc/free (register data = tractable). The base-set write
+(LDT[0x15].base<-0x10000000) is set early (before the captured window); tracing it + the fn0501/fn0100
+memory-alloc result that feeds it is the concrete next probe. NOTE: this is CWSDPMI/DPMI-host program
+behavior driven by an earlier alloc-state divergence — descriptors+regs match the oracle, so still no
+isolated fixable CORE bug; the divergence is in CWSDPMI's free-list state evolution.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
