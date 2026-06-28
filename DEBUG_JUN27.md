@@ -1194,6 +1194,26 @@ environment. To find any REMAINING core/peripheral bug, the comparison must be r
 environments (qemu with fw_cfg disabled, or the RTL with fw_cfg populated). Goal 1 solid; Goals 2/3 root
 = a boot-environment (fw_cfg/RAM-map) divergence, core proven correct.
 
+## 23aj. EXACT ROOT + FIX: ventium_soc.sv fwcfg_byte returns 0 for the file directory (only sig+ID stubbed)
+
+Read the SoC fw_cfg impl. rtl/soc/ventium_soc.sv:1047 fwcfg_byte() returns ONLY:
+  sel 0x0000 (SIGNATURE) -> "QEMU"   ; sel 0x0001 (ID) -> 0x03 (trad+DMA) ; EVERYTHING ELSE -> 0x00.
+Its comment: "Other items qemu's bare `-machine pc -m 32` exposes (file_dir count, ... acpi_tables,
+smbios_entries) all read back 0 here -> the default 0x00 already matches. Non-zero blobs are added as the
+walk reaches them." So SeaBIOS DETECTS fw_cfg (sig+ID present) but reads the FILE-DIRECTORY COUNT = 0 ->
+zero fw_cfg files -> it builds the e820/RAM map from CMOS. The assumption "qemu exposes 0 file_dir
+entries" is FALSE for the actual oracle/board qemu (`-machine pc -m 64` + drive + devices): my aligned
+diff shows SeaBIOS there reads 12 (the BSWAP'd 0x0c at cs=0x08:0xf4828). That count=12-vs-0 is the FIRST
+divergence (insn#104916) and the seed of the whole Quake chain.
+
+EXACT FIX (rtl/soc/ventium_soc.sv fwcfg_byte, the parallel session's F3 fw_cfg WIP): populate the missing
+fw_cfg items so the SoC matches the oracle qemu -- at minimum FW_CFG_FILE_DIR (count + the 12 entries) and
+the etc/e820 / RAM-map blob (so SeaBIOS's DPMI/CWSDPMI memory layout matches qemu, fixing the real-mode
+block placement that over-relocates the stub). The per-instruction diff PROVES this is the cause and that
+rtl/core is FAITHFUL (regs match qemu at the op AND the corruptor). Goal-2/3 fix is this fw_cfg
+population, NOT a core change. (NOTE: ventium_soc.sv is the parallel session's file; this is the precise
+hand-off, not a change I should land into their SoC code.)
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
