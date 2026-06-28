@@ -270,6 +270,26 @@ PM32_BODY = r"""
     movl    %cr0, %eax
     movl    %cr3, %ebx
     movl    %dr7, %ecx
+    /* ---- enable PAGING (PSE 4 MiB identity map): covers the paging-on
+     * decode + a paged load/store ----------------------------------------- */
+    movl    $0x00010000, %edi
+    pushl   %edi
+    movl    $1024, %ecx
+    xorl    %eax, %eax
+    rep stosl                        /* zero the page directory */
+    popl    %edi
+    movl    $0x00000083, (%edi)      /* PDE0 = identity [0,4MiB) large page (P|RW|PS) */
+    movl    %cr4, %eax
+    orl     $0x10, %eax
+    movl    %eax, %cr4               /* CR4.PSE=1 */
+    movl    $0x00010000, %eax
+    movl    %eax, %cr3               /* page-directory base */
+    movl    %cr0, %eax
+    orl     $0x80000000, %eax
+    movl    %eax, %cr0               /* CR0.PG=1 -> paging ON */
+    movl    $0x12345678, %eax
+    movl    %eax, 0x00080000         /* paged store (identity-mapped) */
+    movl    0x00080000, %esi         /* read back -> esi = 0x12345678 */
     /* NOTE: LAR/LSL/VERR/VERW/ARPL/SLDT/STR/LLDT/LTR (the 0F 00/02/03 descriptor
      * op group) HALT the core (unimplemented) -> cataloged in known_diverge.txt;
      * excluded here so the PM-entry + working-op stream stays clean. */
