@@ -77,6 +77,12 @@ Each is the single instruction that halts/diverges, isolated. Build with
   fld1
   fptan
   ```
+* **fxtract** — FXTRACT HALTs even WITH +VEN_TRANSCENDENTAL (genuine gap; it is an exact exponent/mantissa split, not an approximation)
+  ```
+  finit
+  fldpi
+  fxtract
+  ```
 * **mov_moffs** — MOV moffs (A0) not decoded -> HALT (raw bytes A0+disp32)
   ```
   .byte 0xa0, 0x00, 0x00, 0x04, 0x08

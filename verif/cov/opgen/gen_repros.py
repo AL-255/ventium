@@ -37,6 +37,9 @@ REPROS = {
     "fcos":       ("FCOS deferred->HALT", ["    finit", "    fld1", "    fcos"], True),
     "f2xm1":      ("F2XM1 deferred->HALT", ["    finit", "    fldz", "    f2xm1"], True),
     "fptan":      ("FPTAN deferred->HALT", ["    finit", "    fld1", "    fptan"], True),
+    "fxtract":    ("FXTRACT HALTs even WITH +VEN_TRANSCENDENTAL (genuine gap; it is an "
+                   "exact exponent/mantissa split, not an approximation)",
+                   ["    finit", "    fldpi", "    fxtract"], True),
     "mov_moffs":  ("MOV moffs (A0) not decoded -> HALT (raw bytes A0+disp32)",
                    ["    .byte 0xa0, 0x00, 0x00, 0x04, 0x08"], False),
 }
