@@ -2236,6 +2236,19 @@ module core
       st_data = sh_out;
     end else if (q_kind==K_SHLDRD) begin
       st_data = ex_shld_r;          // SHLD/SHRD memory destination RMW result
+    end else if (q_kind==K_BITTEST) begin
+      // BTS/BTR/BTC memory RMW: write the bit-modified [mem] value (dst_cur is mem-aware).
+      logic [4:0] bidx; logic [31:0] bcur, bsrcv;
+      bcur  = wmask(dst_cur,q_w);
+      bsrcv = reg_read(q_src_reg,3'd4,1'b0);
+      bidx  = q_bit_imm ? q_imm[4:0] : bsrcv[4:0];
+      if (q_w==3'd2) bidx = {1'b0, bidx[3:0]};
+      unique case (q_bit_op)
+        3'd5:    st_data = bcur | (32'd1<<bidx);   // BTS
+        3'd6:    st_data = bcur & ~(32'd1<<bidx);  // BTR
+        3'd7:    st_data = bcur ^ (32'd1<<bidx);   // BTC
+        default: st_data = bcur;                   // BT (no write; harmless)
+      endcase
     end else if (q_kind==K_XCHG) begin
       st_data = reg_read(q_src_reg,q_w,q_src_high8);
     end else if (q_kind==K_CMPXCHG) begin
