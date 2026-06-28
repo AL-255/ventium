@@ -4094,7 +4094,19 @@ module core
           cur_lin = (q_st==ST_SCAS) ? dbase+str_edi : dbase+str_esi;
         else                                           cur_lin = opbase+q_ea;  // M7.1 opbase
       end
-      S_LOAD2: cur_lin = dbase_edi+str_edi;
+      // The paging lookup MUST translate the SAME linear the bus driver accesses in
+      // S_LOAD2 (core_bus_driver.svh:50-56). Previously this only handled the CMPS
+      // [EDI] 2nd operand, so under paging the far-ptr seg-load (LSS/LFS/LGS), BOUND/
+      // CMPXCHG8B, and far JMP/CALL indirect (m16:32) 2nd read had cur_lin = a STALE
+      // dbase_edi+str_edi -> dtlb lookup translated the wrong page -> wrong physical
+      // (DOS-Quake go32 `lss esp,cs:[..]`: 2nd read read 0 -> null SS -> #GP). Mirror
+      // the four bus-driver arms EXACTLY. Inert without paging (mem_xlate==lin).
+      S_LOAD2: begin
+        if (q_kind==K_BOUND || q_kind==K_CX8B) cur_lin = dbase+q_ea+{28'd0,q_w};
+        else if (q_seg_load)                   cur_lin = dbase+q_ea+{28'd0,q_w};
+        else if (q_jmpf_mem || q_callf_mem)    cur_lin = opbase+q_ea+{28'd0,q_w};
+        else                                   cur_lin = dbase_edi+str_edi;
+      end
       S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
       S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end
       S_FENV_ST: begin cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00}; cur_is_w = 1'b1; end
@@ -5191,4 +5203,5 @@ module core
     end
   end
 `endif
+
 endmodule : core
