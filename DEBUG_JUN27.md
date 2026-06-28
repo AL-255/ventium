@@ -310,7 +310,27 @@ DPMI control-flow corruption — NOT an opcode gap (opgen 0 NEW-FAIL), NOT the t
 concrete step: find WHERE cs=0x34:0x3275 is pushed/written (the far-CALL or the RMCS CS:IP store that
 put 0x0034 on the stack, or the PM->real switch target) — that write is the actual bug site.
 
-## 16. Bottom line
+## 16. SP-drift REFUTED — it's an intermittent single CS-word corruption
+
+Captured {cs,pc,ESP} per retire. The cs=0x26ac loop ESP is **stable** — it returns to `0x6fa8` on
+every iteration ([1057],[2550],[4043],[5536],[6250],[7278] all esp=0x6fa8). So **no stack-pointer
+leak/drift**. Decisive comparison of the same RETF site:
+- early (correct): RETF -> **cs=0x26ac:0x3275** (esp~0x6f90 region)
+- crash  (wrong):  RETF -> **cs=0x34:0x3275**  (esp=0x6f94) — **IP word 0x3275 correct, CS word
+  0x26ac -> 0x34**.
+
+So the saved far-return (or RMCS) **CS word is corrupted 0x26ac->0x34 once**, IP intact, with the SP
+healthy. go32 makes MANY internal real-mode calls in its own segment (CS=0x26ac); exactly one gets
+CS=0x34, right after a nested deeper call ([6305]-[7081], esp dips to ~0x6e88). Ruled OUT so far:
+opcode gap (opgen 0 NEW-FAIL), timer (PIT ok), VESA (VBE-FAIL 0), **SP drift (esp stable)**. So this
+is a **targeted bad write of 0x0034** to a real-mode return-CS / RMCS slot — a data corruption in
+go32's DPMI real-mode path, not a clean core SP/opcode bug.
+
+Next concrete step: value-watch — log any store of 16-bit `0x0034` to the real-mode stack CS slot
+(needs SS captured at the RETF to compute the linear address), or trace the nested call at
+[6305]-[7081] that precedes the corruption. That store is the bug site.
+
+## 17. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
