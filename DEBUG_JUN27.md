@@ -861,6 +861,29 @@ fail; only foreground `-d cpu` regs work, and these ops are direct-memory/invisi
 descriptor bug; no safe speculative fix. Goal-2 root = a memory-value seed reachable only with a
 qemu-memory channel.
 
+## 23u. PINNED: the bug is the DPMI Allocate-LDT-Descriptors call returning an OCCUPIED slot
+
+Traced the [0x626] selector to its exact producer. The real-mode-call setup at cs=0x87:0x250 decodes:
+```
+  0x250  89 06 24 06   MOV [0x624],AX     ; store prior selector (0xa7)
+  0x254  31 c0         XOR AX,AX          ; AX=0
+  0x256  cd 31         INT 0x31           ; DPMI fn 0000 = Allocate LDT Descriptors (CX descriptors)
+  0x258  0f 82 ..      JC error
+  0x25c  89 06 26 06   MOV [0x626],AX     ; store the ALLOCATED selector  <-- RTL 0xaf vs qemu 0xb7
+```
+So `[0x626]` = the result of DPMI Allocate-LDT-Descriptors. RTL returns **0xaf** (LDT[0x15]); qemu returns
+**0xb7** (LDT[0x16]). And qemu's 0xaf descriptor is PRESENT (flags 0x..f300 = the client's data segment,
+base 0x10000000) — so the RTL's CWSDPMI allocator handed out an **already-occupied** descriptor.
+
+ROOT (as deep as registers reach): CWSDPMI's free-descriptor scan/free-list returns LDT[0x15] as free in
+the RTL where qemu has it occupied -> an EARLIER allocation (the client data segment, which lands at
+LDT[0x15] in qemu) used a different slot in the RTL, OR an extra free. The allocation RESULTS are register
+data (AX), so the seed IS findable by diffing the allocation-result SEQUENCE RTL-vs-qemu — the one
+remaining tractable avenue (not memory-blocked). Obstacle: the general allocator-return PC isn't cleanly
+isolated yet (cs=0x8e47:0xcedd is only one specific exit, 6x), so a clean per-allocation AX diff needs the
+CWSDPMI return point identified first. NET: bug pinned to one DPMI call; the seed is the first divergent
+LDT alloc/free, reachable via a register-sequence diff (tractable) or qemu memory (blocked).
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
