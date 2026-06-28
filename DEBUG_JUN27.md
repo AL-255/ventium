@@ -1075,6 +1075,27 @@ This is the ORIGINAL "over-relocation / skips the un-reloc sub" bug (778760a), n
 INTO cs=0x87:0x338 (which branch leads there) + decode the cs=0x87:0x320-0x350 routine to see the
 ADD-EBX and the guarding condition the core evaluates wrong. This is the fixable core target.
 
+## 23ae. Corruptor DECODED + path: ADD FS:[BX+SI+0x20],EBX reached via a kernel(cs=0x18) dispatch
+
+Decoded the cs=0x87 routine (dumped code):
+```
+  0x331: 1e             PUSH DS
+  0x332: 0f a1          POP FS            ; FS = old DS
+  0x334: 8e 1e 26 06    MOV DS,[0x0626]   ; DS = 0xaf
+  0x338: 66 64 01 58 20 ADD FS:[BX+SI+0x20], EBX   ; <-- adds EBX (delta) to the stub dword = over-reloc
+```
+So the corruptor is a RELOCATION FIXUP (ADD <reloc-delta EBX> to the stub). The valid stub (CALL 0x26d1
+->0x5946) was already written by the BIOS; this fixup adds EBX again -> CALL 0x26df ->0x5954 -> #UD.
+
+Path INTO it (96-deep ring): cs=0x26ac (real-mode stub/CWSDPMI) -> cs=0x18 (KERNEL handler, 0x2b04-0x2b70,
+a long run) -> cs=0x87:2b73 (go32 dispatch) -> 0x331 -> ... -> 0x338. qemu DOES reach cs=0x87:2b73 (it is
+in the matching post-op path) but NEVER 0x331 -> so cs=0x87:2b73 is the DIVERGENCE POINT: a dispatcher
+that the RTL routes into the fixup and qemu routes elsewhere. The cs=0x18 kernel hop strongly implies an
+EXCEPTION (likely #PF demand-paging, or #GP) fired in the RTL that did not in qemu, whose handler then
+applied the spurious stub fixup. NEXT: the last delivered vector at the corruptor (probe running) +
+decode cs=0x87:2b73's dispatch key -> the exception/condition the core raises wrongly. The corruptor and
+the divergence point (2b73) are now identified; the trigger is the last layer.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
