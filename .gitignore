@@ -81,3 +81,4 @@ verif/cov/build_cov.log
 # opgen generated per-opcode tests (regenerate via verif/cov/opgen/gen_*.py)
 verif/cov/opgen/tests/
 verif/cov/opgen/modes/
+verif/cov/opgen/repros/
