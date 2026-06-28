@@ -546,6 +546,24 @@ high-16 divergence back to the exact opcode via the qemu `-d cpu` differential (
 `-d cpu` run, grep for the first `EBX=000eXXXX`), then fix that opcode's D=0 32-bit handling in the
 core. This is a real, fixable core bug — the root cause, not just the symptom.
 
+## 23f. RTL-side narrowing of the D=0 truncation + environment block
+
+Checked the decode for the 32-bit-truncation bug (§23e): all unconditional `d_w=3'd2` are legitimately
+16-bit (LTR/LLDT, MOV Sreg, SMSW r16, BCD AAA/DAA on AX); `eff_opsize = pfx_opsize ^ def16` (l.216) is
+correct for both D-bits; LES/LDS/LSS use `d_w=eff_opsize?2:4`. So the truncation is NOT an obvious
+hardcoded-width decode bug — it's a subtler specific-opcode/execution path that drops the high 16 of a
+32-bit GPR write in a D=0 segment. The robust evidence stands: qemu keeps `edx=0x00800002 / ebx=
+0x000e3772` at the patch op while the RTL has `edx=2 / ebx=0x3772` (high 16 = 0), and ebx's lost 0xe is
+the call rel16 +0xe.
+
+To pinpoint the exact opcode I need the qemu `-d cpu` differential to find the instruction that sets
+edx/ebx's high bits (then check the RTL does it 16-bit). That worked once (it gave §23e) but the
+environment now **consistently kills qemu's emulation runs** (binary `--version` works; the long `-d`
+runs get SIGTERM'd; the gdbstub too). So the final pinpoint+fix is currently env-blocked. FIX PATH when
+qemu runs again: `-d cpu` trace, grep first `EBX=000e…`, read the TB, fix that opcode's D=0 32-bit
+writeback in the core; alternatively an RTL detector (log GPR writes in def16 segs with a 0x66 prefix
+whose committed q_w != 4) can find it qemu-free but needs care vs false positives.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
