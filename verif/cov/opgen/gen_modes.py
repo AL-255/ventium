@@ -19,6 +19,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODES = os.path.join(HERE, "modes")
 
 # the mode/privilege-sensitive opcode body, real-mode CPL0 (16-bit).
+REALMODE_IO = r"""
+    /* ---- OUT imm8/DX, IN imm8/DX (E4-E7, EC-EF) at CPL0 real mode -------- */
+    /* port 0x80 = POST diagnostic (OUT harmless; IN open-bus). */
+    movb    $0x5a, %al
+    outb    %al, $0x80              /* OUT imm8, AL */
+    movw    $0x00eb, %ax
+    outw    %ax, $0x80
+    movw    $0x0080, %dx
+    movb    $0x33, %al
+    outb    %al, %dx                /* OUT DX, AL */
+    outw    %ax, %dx
+    inb     $0x80, %al              /* IN AL, imm8 */
+    inb     %dx, %al                /* IN AL, DX */
+    inw     %dx, %ax
+"""
+
 REALMODE_SEG = r"""
     /* ---- MOV Sreg <-> r/m (8C/8E) — selector reads/loads (real mode) ----- */
     movw    %ds, %ax
