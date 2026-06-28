@@ -54,16 +54,22 @@ regression cannot hide. `make opgen-modes` runs the real-mode/CPL0 lane.
   (INT/INT3/INTO/IRET), `realmode_far` (9A/CB/CA/EA + indirect FF/3,/5).
 * **generator self-test** (`selftest.sh`) — CI that regen holds the invariants.
 
-### Findings analysis (`known_diverge.txt`) — surfaced, NOT fixed here
+### Findings — surfaced here, fixed by the RTL owner, auto-tracked by the suite
 
-The 25 KNOWN are real divergences (4 SHLD/SHRD-mem findings were RESOLVED in RTL and the suite auto-promoted them to must-pass) the per-opcode sweep found (the core is
-unchanged — these are an analysis catalog):
+The runner flags any cataloged finding that now PASSes as **RESOLVED**, and the
+catalog self-corrects (the fixed op joins the must-pass/regression-protected set).
+This has already driven **12 real RTL fixes** the owner landed in response —
+**SHLD/SHRD-on-memory** (op_0fa4/a5/ac/ad) and **BT/BTS/BTR/BTC-on-memory**
+(op_0fa3/ab/b3/bb + op_0fba_4-7) — each detected automatically.
+
+Remaining open findings the sweep surfaced:
 
 | class | n | what |
 |-------|--:|------|
-| **CORE-GAP** | 12 | `BT/BTS/BTR/BTC` with a **memory** operand HALT (reg-direct passes) — bit-string-on-memory looks unimplemented; `POP ES/SS/DS/GS` HALT (segment-POP gaps). |
-| **TRANSC** | 10 | `F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FYL2XP1/FSINCOS/FSIN/FCOS` are deferred → HALT without `+VEN_TRANSCENDENTAL` (work in the FLAGS/feature build); `FPREM1` differs on the `fstat` C2 flag. |
-| **MODE-CPL0** | 3 | `CLI/STI/POPF` diverge on IF/IOPL — these are CPL0 ops; the difference is CPL3-user-mode semantics, validated properly by the (TODO) real-mode / PM-CPL0 mode lanes. |
+| **CORE-GAP** | 4 | `POP ES/SS/DS/GS` HALT (segment-POP gaps). *(BT/SHLD-on-memory now RESOLVED.)* |
+| **TRANSC** | ~10 | `F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FYL2XP1/FSINCOS/FSIN/FCOS` deferred → HALT without `+VEN_TRANSCENDENTAL`; `FPREM1` differs on the `fstat` C2 flag. Verify they're feature-gated (not broken): `make -C verif/tb cov-feat && bash run-transc.sh`. |
+| **MODE-CPL0** | 3 | `CLI/STI/POPF` diverge on IF/IOPL at CPL3 — CPL3-user semantics, confirmed correct at CPL0 by the mode lane (not core bugs). |
+| **PM descriptor** | 6 | `LAR/LSL/VERR/VERW/SLDT/STR` (0F 00/02/03) HALT — found by the PM32-CPL0 stream. |
 
 ## Dimensions
 
