@@ -88,6 +88,19 @@ module tb_hostcfg;
     else $display("  ok   VID/DID = %08x", cfg_rdata);
     @(negedge clk); cfg_sel<=0;
 
+    // [COV] diverse config-write sweep over the NB register space (PAM/DRAMC/CC/
+    //       SMRAM/DRB/TOM) with walking data + diverse byte-enables, then read each
+    //       back -> toggles cfg_wdata/cfg_rdata/cfg_be and the pam/dramc/... outputs
+    //       broadly (the directed checks set only a few values). Pure stimulus, last.
+    for (int off = 8'h50; off < 8'h80; off += 4) begin
+      for (int j = 0; j < 8; j++) begin
+        cfg_w(8'(off), 4'hF, (32'h1 << (j * 4)) ^ 32'(off) * 32'h0102_0408);
+        cfg_w(8'(off), 4'(1 << (j & 3)), ~(32'h0101_0101 << j));
+      end
+      @(negedge clk); cfg_sel<=1; cfg_we<=0; cfg_off<=8'(off); @(posedge clk); #1;  // readback
+    end
+    @(negedge clk); cfg_sel<=0; cfg_we<=0;
+
     if (errors==0) $display("HOSTCFG-GATE-OK (all checks pass)");
     else           $display("HOSTCFG-GATE-FAIL (%0d errors)", errors);
     $finish;
