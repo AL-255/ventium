@@ -441,6 +441,16 @@ cov:
 	  -F $(RTL_FILELIST) $(CPP_SRCS)
 	@echo "built (coverage): $(CURDIR)/$(COV_OBJ)/$(EXE)"
 
+# ---- feature-flag coverage variant (in-RTL x87 transcendentals + FPREM) -----
+# Same coverage core as `cov`, but with +VEN_TRANSCENDENTAL +VEN_FPREM so the
+# opgen TRANSC findings (F2XM1/FSIN/FCOS/... deferred->HALT in the plain build)
+# can be confirmed to WORK here -> proving they are feature-gated, not broken.
+# Used by verif/cov/opgen/run-transc.sh.
+.PHONY: cov-feat
+cov-feat:
+	$(MAKE) cov COV_OBJ=obj_dir_cov_feat \
+	  COV_DEFS="$(COV_DEFS) +define+VEN_TRANSCENDENTAL +define+VEN_FPREM"
+
 # ---- selftest target: build against the throwaway stub ----------------------
 # Built into a separate obj dir so it never clobbers a real-core build. ENTRY
 # is set via -GENTRY so the stub's deterministic pc values track --entry; the
