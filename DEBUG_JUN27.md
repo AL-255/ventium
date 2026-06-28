@@ -694,6 +694,26 @@ This is the SAME recurring trap (mistaking a propagating value for its origin) t
 theory (§23e->§23h) hit; without an operation-aligned qemu reference (env-blocked) I keep mis-rooting
 the value. NET: a real bug fixed + committed; Quake root still NOT found; crash unchanged.
 
+## 23m. EBX=0x000e0021 is a PRESERVED value, not a fresh corruption — the wall, restated
+
+Clean-packed precise capture of the EBX<-0x000e0021 writers (frozen at crash): dominant writer is
+cs=0x87:0x2b73 (and a few cs=0x2b/cs=0x87:0x480), all w=2 (16-bit), value source NEITHER alu_out
+(=0xd0) NOR mem_rdata (=0). Decisive: for a 16-bit write `reg_merge(old_EBX, X, w=2) = {old_EBX[31:16],
+X[15:0]}`, and the result 0x000e0021 means old_EBX[31:16] was ALREADY 0x000e — so this write PRESERVES
+the high half; it does not create it. The high 0x000e originates from some earlier 32-bit (w=4) EBX
+write and is then carried through many legitimate 16-bit ops. State flags (S_TSW_*/S_INT_*/S_IRET/
+S_LTR/S_USEQ) all read OTHER, so it is NOT a task-switch/interrupt/POPA writer either (the task-switch
+theory is also out; the verify-sys 5d failure is the parallel session's separate WIP).
+
+THE WALL (restated honestly): every value I trace is correctly PROPAGATED by the core; the divergence
+is an upstream value (EBX high = 0x000e) whose CORRECTNESS I cannot verify RTL-only — I need an
+operation-aligned qemu reference to know whether 0x000e is right or wrong, and the environment blocks
+qemu's emulation runs. This is why successive root hypotheses (truncation §23e, EBX-corruption,
+POPAW §23l) each tested false: they were propagating values mistaken for origins. Real result this
+session: a genuine 16-bit PUSHAW/POPAW bug found+fixed+verified (78cd911); Quake root NOT found;
+crash unchanged. Resolving Goal 2/3 fundamentally requires the aligned qemu differential (or the
+parallel session's task-switch/other work), not more single-context RTL tracing.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
