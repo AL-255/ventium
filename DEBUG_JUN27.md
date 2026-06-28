@@ -118,7 +118,43 @@ Two hypotheses to resolve next (both are "southbridge/peripheral" per the loop g
 Next diagnostic: dump the opcode at `cs=0x87:0x331` (HLT vs spin) and check whether IRQ0/IRQ14 fire
 after 9.64M.
 
-## 7. Bottom line
+## 7. Systematic unimplemented-opcode work (user directive)
+
+The 9.64M idle was NOT a HLT-wait — `state==S_HALT` (8), `IF=1`: the core hit an
+**unimplemented opcode**. (`pit_ticks=4`, `inta_rises=1`, `core_intr=1` unacked at the end — the
+pending IRQ is just ignored because the core is dead in S_HALT, not waiting.) Mechanism:
+`decode_stages.sv` raises `d_unknown`/`d_halt` for out-of-scope opcodes → core parks in S_HALT.
+
+**Method to find the exact opcode** (re-addable; reverted to keep the tree clean): a ring-buffer tap
+in core.sv gated on `VEN_DBG_UNK` capturing `{cs,eip,ibuf[7:0]}` whenever `state==S_DECODE &&
+(d_unknown||d_halt)`, read in tb_soc.cpp via `top->rootp->ventium_soc__DOT__u_core__DOT__dbg_unk_*`.
+Run with `+define+VEN_DBG_UNK` and `VEN_DBGUNK=1`. The last entry = the halting opcode.
+
+**Implemented this session:** `POP FS` / `POP GS` (`0F A1`/`0F A9`) — commit `af05d38`. Mirror the
+one-byte POP ES/SS/DS; execution path already generic over `q_sys_sreg`. verify/verify-sys green;
+Quake advances past it.
+
+**Next blocker (identified, not yet implemented):** `ENTER imm16, level` (`0xC8`) with **level>0**
+(nested display copies) — currently `d_unknown` (only level-0 is implemented). DOS-Quake hits it in
+REAL MODE (PE=0, cr0=0x10) at cs=0x34:0x3762 (`c8 14 02 22` = ENTER 0x214, level 0x22→eff 2), a
+real-mode function prologue reached via the go32 DPMI→real switch. Needs a memory-read-and-push
+micro-sequence (push EBP; ×(level-1){EBP-=w; push [EBP]}; push FrameTemp; EBP=FrameTemp; ESP-=alloc)
+in S_USEQ — substantial; should land WITH a dedicated validation test (verify-sys does not cover it).
+
+**Static survey of remaining gaps** (from a decoder audit, for completeness — implement as they
+surface or proactively):
+- One-byte: `0x63` ARPL, `0x6E/6F` OUTSB/OUTSD, `0xD6`, `0xF1` INT1; `0xC8` ENTER level>0.
+- Two-byte `0F`: `0F 02/03` LAR/LSL, `0F 06` CLTS, big gaps `0F 0C-1D`, `0F 24-30`, `0F 32-7F`
+  (RDMSR/WRMSR/SYSENTER/P6+); memory forms of `0F A3/AB/B3/BB` (BT/BTS/BTR/BTC) + `0F BA`; memory
+  forms of `0F A4/A5/AC/AD` (SHLD/SHRD); `0F 00` /0,/4,/5 (SLDT/VERR/VERW); `0F 01` /6,/7 (LMSW/INVLPG).
+- x87: transcendentals (`D9 F0-F3/F9/FB/FE/FF`) and FPREM (`D9 F8/F5`) are gated off
+  (VEN_TRANSCENDENTAL/VEN_FPTRAP/VEN_FPREM); FCMOVcc (`DA/DB/DC/DD/DF` reg forms) deferred.
+
+Approach: drive iteratively with the VEN_DBG_UNK tap (each Quake run surfaces the next real one),
+implement + regression-gate (verify 98/98 + verify-sys 949/949) each, and proactively fill the
+common static gaps. This is the path to Goal 2/3.
+
+## 8. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
