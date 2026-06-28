@@ -154,7 +154,42 @@ Approach: drive iteratively with the VEN_DBG_UNK tap (each Quake run surfaces th
 implement + regression-gate (verify 98/98 + verify-sys 949/949) each, and proactively fill the
 common static gaps. This is the path to Goal 2/3.
 
-## 8. Bottom line
+## 8. Systematic opcode coverage via verif/cov/opgen (the right tool for the directive)
+
+A per-opcode differential generator (`verif/cov/opgen/`, built in a parallel effort) generates ONE
+test per P54C opcode, assembles it (gas), runs it on the RTL + a qemu-i386 gdbstub golden, and diffs
+— so every opcode gap/incorrectness surfaces as a DIVERGE vs qemu (never a silent miss). This IS the
+systematic survey+validate loop the directive needs. Run: `bash verif/cov/opgen/run-opgen.sh [op_..]`.
+
+Opcodes implemented this session, validated through this loop + the verify gates:
+- **POP FS (`0F A1`) — PASSES opgen** (op_0fa1 EQUIVALENT vs qemu, PM32/user).
+- POP GS (`0F A9`), nested ENTER (`0xC8` level>0), #GP paging fix — committed, verify 98/98 +
+  verify-sys 949/949 green.
+
+Remaining CORE-GAP findings (from `known_diverge.txt`, the opcode roadmap) — implement + re-run opgen:
+- **BT/BTS/BTR/BTC with a MEMORY operand** (`0F A3/AB/B3/BB`, `0F BA /4-7`) — memory r/m halts
+  (reg-direct passes). Needs the bit-string EA (`EA += bit_index/8`) for the reg-index form + RMW.
+- **SHLD/SHRD with a MEMORY destination** (`0F A4/A5/AC/AD`) — memory dst halts. Needs RMW reusing
+  the existing shift logic.
+- **POP ES/DS/GS opgen divergence** — op_07/op_1f/op_0fa9 retire FEWER records than qemu (`push <seg>;
+  pop <seg>`), while POP FS matches. `seg_load_fault` already handles null correctly, so the cause is
+  non-obvious (PM32/user CPL3 corner, or a PUSH-seg value diff) — needs a dbg run on op_0fa9 to find
+  the divergence point before fixing. NOT a simple gap.
+- TRANSC (transcendentals) deferred behind `+VEN_TRANSCENDENTAL`; CLI/STI/POPF are CPL3-semantics
+  (validated at CPL0 by `run-modes.sh`), not bugs.
+
+## 9. Quake render path: a control-flow bug beyond the opcode gaps
+
+After POP FS/GS + nested ENTER, DOS-Quake (in a go32 DPMI->real-mode excursion, cs=0x34, PE=0) runs
+into a **data table** at cs=0x34:0x3810+ (peek-mem confirms consecutive 16-bit words 0x14f,0x150,…):
+i.e. execution FELL THROUGH into data (a wrong branch/return), then S_HALTs on `0x63` (a data byte;
+ARPL is #UD in real mode anyway). This is a CONTROL-FLOW/correctness issue, NOT a missing opcode (the
+core executed the data as valid opcodes until 0x63). opgen reports 0 NEW-FAIL (no wrong-result
+divergences in implemented opcodes), so the wrong branch is subtle — likely a real-mode-specific
+path or the DPMI real-mode-int target. Needs a focused control-flow trace (which branch/jump at
+~cs:0x3810 should have diverted) — separate from the opcode work.
+
+## 10. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
