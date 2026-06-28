@@ -476,19 +476,24 @@
           if (mem_ack) begin
             if (q_kind==K_CX8B) begin end
             else if (q_sm==SM_PUSHA) begin
-              if (step==4'd7) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=pusha_esp - (32'd4*8); end
+              // Width-aware ESP delta: PUSHAD pops 32 (8x4), PUSHAW 16 (8x2).
+              if (step==4'd7) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=pusha_esp - (32'd8*{29'd0,q_w}); end
             end else begin // POPA
+              // reg_merge(...,q_w,..): POPAD (q_w=4) writes the full 32-bit slot; POPAW
+              // (q_w=2, the CS16/D=0 form go32 uses) writes only the low 16 and PRESERVES
+              // each register's high half. The prior raw `=mem_rdata` corrupted the high
+              // 16 of every register under POPAW (the DOS-Quake EBX-high root cause).
               unique case (step)
-                4'd0: begin gpr_we[R_EDI]=1'b1; gpr_wd[R_EDI]=mem_rdata; end
-                4'd1: begin gpr_we[R_ESI]=1'b1; gpr_wd[R_ESI]=mem_rdata; end
-                4'd2: begin gpr_we[R_EBP]=1'b1; gpr_wd[R_EBP]=mem_rdata; end
+                4'd0: begin gpr_we[R_EDI]=1'b1; gpr_wd[R_EDI]=reg_merge(gpr_o[R_EDI], mem_rdata, q_w, 1'b0); end
+                4'd1: begin gpr_we[R_ESI]=1'b1; gpr_wd[R_ESI]=reg_merge(gpr_o[R_ESI], mem_rdata, q_w, 1'b0); end
+                4'd2: begin gpr_we[R_EBP]=1'b1; gpr_wd[R_EBP]=reg_merge(gpr_o[R_EBP], mem_rdata, q_w, 1'b0); end
                 4'd3: ; // skip ESP slot
-                4'd4: begin gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=mem_rdata; end
-                4'd5: begin gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=mem_rdata; end
-                4'd6: begin gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=mem_rdata; end
-                default: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=mem_rdata; end
+                4'd4: begin gpr_we[R_EBX]=1'b1; gpr_wd[R_EBX]=reg_merge(gpr_o[R_EBX], mem_rdata, q_w, 1'b0); end
+                4'd5: begin gpr_we[R_EDX]=1'b1; gpr_wd[R_EDX]=reg_merge(gpr_o[R_EDX], mem_rdata, q_w, 1'b0); end
+                4'd6: begin gpr_we[R_ECX]=1'b1; gpr_wd[R_ECX]=reg_merge(gpr_o[R_ECX], mem_rdata, q_w, 1'b0); end
+                default: begin gpr_we[R_EAX]=1'b1; gpr_wd[R_EAX]=reg_merge(gpr_o[R_EAX], mem_rdata, q_w, 1'b0); end
               endcase
-              if (step==4'd7) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+(32'd4*8); end
+              if (step==4'd7) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP]+(32'd8*{29'd0,q_w}); end
             end
           end
         end
