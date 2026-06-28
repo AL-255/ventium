@@ -650,6 +650,28 @@ why go32's SMC patch selects 0x5954 instead of 0x5946 — is NOT established; it
 operation-aligned qemu differential, which the environment currently blocks (qemu emulation runs are
 killed). I am explicitly NOT claiming the shift-count (§23i) is confirmed as the cause.
 
+## 23k. The SMC patch is `ADD [stub], EBX` — and EBX is the whole delta
+
+Decoded the patch store at cs=0x87:0x338 (cs=0x87 base 0x228f0 -> lin 0x22c28):
+```
+  cs=0x87:0x334  8e 1e 26 06       MOV DS,[0x0626]
+  cs=0x87:0x338  66 64 01 58 20    ADD dword [fs:bx+si+0x20], EBX   ; [stub@0x29d31] += EBX
+```
+So go32 PATCHES the stub call by ADDING EBX to it (not a MOV). From the captured regs EBX = **0x000e0021**.
+And `RTL_dword - correct_dword = 0x26dfe82d - 0x26d1e80c = 0x000e0021 = EBX`. So EBX adds `0x21` to the
+count byte (0x0c->0x2d) and `0x0e` to the rel16 byte (0xd1->0xdf, thunk->helper). **The entire
+divergence is the single value EBX=0x000e0021 added by this one ADD.** The fix target is now: why is
+EBX 0x000e0021 here when the result should be 0x26d1e80c (i.e. EBX should be 0x00000000, a no-op add,
+if the stub template already holds the correct call).
+
+CAVEAT (per §23h): I have NOT proven via an aligned reference that the qemu EBX is 0 / template is the
+same — inferred from the dword arithmetic assuming the pre-ADD template matches. But this is now a
+SINGLE register at a SINGLE identified instruction (`add [fs:bx+si+0x20],ebx` @cs=0x87:0x338), with the
+needed value known (the add should net 0x26d1e80c). NEXT (qemu-free): trace EBX into cs=0x87:0x338 —
+its 0x000e0021 — back to its producing op; high word 0x000e + low 0x0021 look like two packed fields
+(a relocation/fixup delta) that should be 0 for this intra-segment call. That producing op is the
+core-bug candidate.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
