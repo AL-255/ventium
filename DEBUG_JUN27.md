@@ -801,6 +801,25 @@ the two share this root needs qemu's MEMORY trace — and the env blocks every q
 register tracing works). NEXT: trace the [0x626] selector write + the CWSDPMI ldt-alloc/free path to
 find the one divergent allocation; or get qemu memory working to diff the LDT/[0x626] directly.
 
+## 23r. The wall: the root is a MEMORY divergence; all qemu-memory paths are env-blocked
+
+Two facts close off the remaining RTL-only avenues:
+- The stub values (0x26d1e80c/0x26c3e7eb/0x26dfe82d) appear in ZERO qemu registers — so the stub
+  relocation/un-relocation are DIRECT-memory ops (`add/sub [stub],ebx`), invisible to `-d cpu`.
+- 0xaf is NOT simply "wrong": qemu uses EAX=0xaf 147x and EAX=0xb7 124x. So the off-by-one [0x626]
+  selector is a selector CONFUSION (the RTL stored a valid-elsewhere selector where 0xb7 was needed),
+  not a count error — confirming it's seeded by an earlier MEMORY/LDT-table state divergence.
+
+Both the stub over-relocation and the [0x626] selector are MEMORY divergences with MATCHING registers
+at the crash routine — so the seed is an earlier memory write, and tracing it needs qemu's MEMORY.
+Every qemu-memory path fails in this env: gdbstub (`-gdb tcp`) won't bind, the monitor (unix socket,
+and `-monitor stdio` with piped commands) produces nothing, `-d in_asm` is empty, and ANY backgrounded
+qemu is killed. Only FOREGROUND `qemu -d cpu` (per-TB registers) works. A register-level differential
+(the one avenue left with -d cpu) would only surface the divergence where it first hits a REGISTER —
+i.e. at the crash routine (already known), not the memory seed. So the root is localized (CWSDPMI
+descriptor/relocation state) but not reachable here without a qemu-memory channel. Honest state:
+oracle-confirmed localization of a memory-state divergence; no fix; Goals 2/3 unmet; blocked on tooling.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
