@@ -19,6 +19,42 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODES = os.path.join(HERE, "modes")
 
 # the mode/privilege-sensitive opcode body, real-mode CPL0 (16-bit).
+REALMODE_SEG = r"""
+    /* ---- MOV Sreg <-> r/m (8C/8E) — selector reads/loads (real mode) ----- */
+    movw    %ds, %ax
+    movw    %es, %bx
+    movw    %ss, %cx
+    movw    %cs, %dx
+    movw    %ax, %es
+    movw    %ax, %ds
+    /* ---- segment loads LDS/LES/LSS/LFS/LGS (real-mode far ptr in RAM) ----- */
+    movw    $0x1000, 0x600           /* offset */
+    movw    $0x2000, 0x602           /* segment */
+    lds     0x600, %si
+    les     0x600, %di
+    lss     0x600, %bp
+    lfs     0x600, %si
+    lgs     0x600, %di
+    /* ---- SGDT / SIDT to memory (non-privileged) -------------------------- */
+    sgdt    0x610
+    sidt    0x618
+    /* ---- conversions CBW/CWD/CWDE/CDQ ------------------------------------- */
+    movw    $0xff80, %ax
+    cbtw                              /* CBW (AL->AX) */
+    cwtd                              /* CWD (AX->DX:AX) */
+    cwtl                              /* CWDE */
+    cltd                              /* CDQ */
+    /* ---- BCD adjust DAA/DAS/AAA/AAS --------------------------------------- */
+    movw    $0x9a, %ax
+    daa
+    movw    $0x9a, %ax
+    das
+    movw    $0x010a, %ax
+    aaa
+    movw    $0x010a, %ax
+    aas
+"""
+
 REALMODE_BODY = r"""
     /* ---- flag ops (CLC/STC/CMC/CLD/STD/CLI/STI) — IF/DF/CF differ by mode -- */
     stc
@@ -128,6 +164,7 @@ clean:
 def main():
     os.makedirs(MODES, exist_ok=True)
     write_image("realmode_flags", REALMODE_BODY)
+    write_image("realmode_seg", REALMODE_SEG)
 
 
 if __name__ == "__main__":
