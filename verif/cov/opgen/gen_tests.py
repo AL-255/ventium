@@ -558,6 +558,36 @@ def write_test(s, lines):
     }, open(os.path.join(d, "manifest.json"), "w"), indent=2)
 
 
+def write_rep_test():
+    """REP/REPE/REPNE string loops with the data-dependent termination paths the
+    minimal op_prefixes test doesn't reach: a full-count REP MOVS, a REPE CMPS
+    that terminates EARLY when bytes differ (ZF->0), a REPNE SCAS that stops on a
+    match (ZF->1), and a REP with ECX=0 (immediate no-op)."""
+    d = os.path.join(TESTS, "op_rep")
+    os.makedirs(d, exist_ok=True)
+    L = ["# GENERATED op_rep: REP/REPE/REPNE termination paths",
+         "    .text", "    .globl _start", "_start:"]
+    L += setup_prologue()
+    L += [
+        "    movl  %esp, %esi", "    leal  -64(%esp), %edi",
+        "    movl  $0x44332211, (%esi)", "    movl  $0x88776655, 4(%esi)",
+        "    movl  $8, %ecx", "    cld", "    rep movsb",
+        "    movl  %esp, %esi", "    leal  -64(%esp), %edi",
+        "    movl  $0x000000ff, 4(%edi)",
+        "    movl  $16, %ecx", "    repe cmpsb",
+        "    movl  %esp, %edi", "    movb  $0x22, %al",
+        "    movl  $16, %ecx", "    repne scasb",
+        "    movl  %esp, %esi", "    leal  -64(%esp), %edi",
+        "    xorl  %ecx, %ecx", "    rep movsb",
+    ]
+    L += ["    movl  $1, %eax", "    xorl  %ebx, %ebx", "    int   $0x80"]
+    open(os.path.join(d, "op_rep.s"), "w").write("\n".join(L) + "\n")
+    json.dump({"name": "op_rep", "src": "op_rep/op_rep.s",
+               "elf": "op_rep/op_rep.elf", "image": "op_rep/op_rep.flat",
+               "load_addr": "0x08048000", "entry": "0x08048000", "max_insn": 120},
+              open(os.path.join(d, "manifest.json"), "w"), indent=2)
+
+
 def write_prefix_test():
     """Synthetic cross-cutting test for the legacy PREFIX opcodes (LOCK F0,
     REP/REPNE F3/F2, segment-overrides 26/2E/36/3E/64/65, operand/addr-size
@@ -617,6 +647,7 @@ def main():
             status[st if st in status else "MANUAL"].append((key_of(s), tag, reason))
 
     write_prefix_test()
+    write_rep_test()
     rep = []
     rep.append(f"opgen status — {len(spec)} P54C opcodes")
     rep.append(f"  GEN (auto test written): {len(status['GEN'])}")
