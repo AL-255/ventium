@@ -37,8 +37,11 @@ for d in $TESTS; do
     python3 "$GEN" --qemu "$QEMU" --elf "$W/$n.elf" --out "$W/${n}_q.vt" --max-insn 40 --x87 --port "$port" >/dev/null 2>&1 \
         || { echo "  gold-fail $n"; halt=$((halt+1)); continue; }
     esp=$(python3 -c "import json;f=open('$W/${n}_q.vt');f.readline();print(json.loads(f.readline())['esp'])" 2>/dev/null || echo 0x40c34910)
-    "$TB" --image "$W/$n.flat" --load 0x08048000 --entry 0x08048000 --init-esp "$esp" --x87 \
-        --out "$W/${n}_r.vt" --max-insn 40 >/dev/null 2>&1 || true
+    # dump coverage too — the in-RTL transcendental/FPREM engine is ONLY reachable
+    # in this +VEN_TRANSCENDENTAL build, so these dats cover RTL the plain lane can't.
+    mkdir -p "$W/dat"
+    VEN_COV_DAT="$W/dat/$n.dat" "$TB" --image "$W/$n.flat" --load 0x08048000 --entry 0x08048000 \
+        --init-esp "$esp" --x87 --out "$W/${n}_r.vt" --max-insn 40 >/dev/null 2>&1 || true
     if python3 "$CMP" --mode func "$W/${n}_q.vt" "$W/${n}_r.vt" >"$W/$n.cmp" 2>&1; then
         echo "  EXACT   $n  (bit-exact vs qemu softfloat)"; pass=$((pass+1))
     elif grep -qi "LENGTH" "$W/$n.cmp"; then
@@ -47,6 +50,18 @@ for d in $TESTS; do
         echo "  INEXACT $n  (computes, differs in low bits — approximation vs softfloat)"; inexact=$((inexact+1))
     fi
 done
+# ---- coverage sweep: drive the in-RTL transcendental/FPREM engine over many
+# inputs (range reduction + iteration paths) so its modules light up. -----------
+python3 "$HERE/gen_transc_sweep.py" >/dev/null 2>&1
+if gcc -m32 -march=pentium -nostdlib -static -Wl,--build-id=none -Wl,-Ttext=0x08048000 \
+        -o "$W/sweep.elf" "$HERE/tests/transc_sweep/transc_sweep.s" 2>/dev/null; then
+    python3 "$E2F" "$W/sweep.elf" --out "$W/sweep.flat" --base 0x08048000 >/dev/null 2>&1
+    mkdir -p "$W/dat"
+    VEN_COV_DAT="$W/dat/transc_sweep.dat" "$TB" --image "$W/sweep.flat" --load 0x08048000 \
+        --entry 0x08048000 --init-esp 0x40c34910 --x87 --out /dev/null --max-insn 1000 >/dev/null 2>&1 || true
+    echo "  transcendental-engine coverage sweep: $(ls "$W"/dat/*.dat 2>/dev/null | wc -l) dats"
+fi
+
 echo "TRANSC (feature build): EXACT=$pass INEXACT=${inexact:-0} HALT=${halt:-0}"
 if [ "${halt:-0}" -eq 0 ]; then
     echo "-> CONFIRMED: every transcendental COMPUTES with +VEN_TRANSCENDENTAL (none HALT)."
