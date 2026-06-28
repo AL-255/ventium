@@ -116,6 +116,25 @@ module tb_cachemap;
     chk("smram_smm",       32'h000A_8000, 0, 0, 1, 1, 1);
     smm_active = 1'b0; smram = 8'h00;
 
+    // [COV] walking-bit config + address toggle sweep. ven_cachemap is combinational
+    //       (pam/dramc/cc/tom_mb4/smram + addr -> cacheability); driving diverse
+    //       inputs toggles the PAM/TOM/SMRAM/DRAMC decode datapaths (pam was 0%).
+    //       Pure toggle stimulus (no chk) -- exercises every config bit both ways.
+    for (int i = 0; i < 56; i++) begin
+      pam = 56'h1 << i;  addr = 32'h1 << (i % 32);  is_write = i[0]; is_code = i[1];
+      smm_active = i[2]; dramc = 8'h1 << (i % 8);  cc = 8'(i * 3);
+      tom_mb4 = 8'(i * 5 + 1); smram = 8'(i * 7); #1;
+      pam = ~(56'h1 << i); addr = ~(32'h1 << (i % 32)); dramc = ~(8'h1 << (i % 8));
+      cc = ~8'(i * 3); tom_mb4 = ~8'(i); smram = ~8'(i * 3); #1;
+    end
+    // diverse multi-bit address regions (A0000 video, F0000 BIOS, 100000 ext, TOM edge)
+    for (int i = 0; i < 32; i++) begin
+      addr = (32'hF000_0000 >> (i % 24)) ^ 32'(i * 32'h0008_4210);
+      pam = 56'(i) * 56'h0102_0408_1020; tom_mb4 = 8'(i * 9);
+      is_code = i[0]; is_write = i[1]; smm_active = i[2]; #1;
+    end
+    pam = '0; dramc = '0; cc = '0; tom_mb4 = '0; smram = '0; smm_active = 1'b0; #1;
+
     $display("== %0d checks, %0d errors ==", checks, errors);
     if (errors == 0) $display("CACHEMAP-GATE-OK");
     else             $display("CACHEMAP-GATE-FAIL");
