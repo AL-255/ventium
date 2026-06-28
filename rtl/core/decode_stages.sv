@@ -596,12 +596,18 @@ module decode_stages
         // 32 unless a 0x66 operand-size prefix keeps it 16). Reuses the one-byte
         // PUSH-sreg datapath (d_push_sreg: store data = seg_sel[d_sys_sreg]; K_ALU
         // default kind drives the push). The POP counterparts (0F A1/A9) reload the
-        // selector and a hidden base, which needs the protected-mode descriptor path
-        // — deferred to the segment batch, so they stay the loud HALT for now.
+        // selector + hidden base via the SAME d_pop_sreg path as the one-byte POP
+        // ES/SS/DS (07/17/1F): real/v86 base=sel<<4, protected-mode walks the GDT/LDT
+        // descriptor in S_SEGLD (target = q_sys_sreg). DOS-Quake's go32/CWSDPMI reflector
+        // does `pop fs` (0F A1) — without this the core HALTed loudly on it.
         8'hA0: begin d_len=pfx_len+4'd2; d_is_push=1'b1; d_mem_write=1'b1;
                      d_push_sreg=1'b1; d_sys_sreg=3'(SG_FS); d_w=eff_opsize?3'd2:3'd4; end
         8'hA8: begin d_len=pfx_len+4'd2; d_is_push=1'b1; d_mem_write=1'b1;
                      d_push_sreg=1'b1; d_sys_sreg=3'(SG_GS); d_w=eff_opsize?3'd2:3'd4; end
+        8'hA1: begin d_len=pfx_len+4'd2; d_is_pop=1'b1; d_mem_read=1'b1;
+                     d_pop_sreg=1'b1; d_sys_sreg=3'(SG_FS); d_w=eff_opsize?3'd2:3'd4; end
+        8'hA9: begin d_len=pfx_len+4'd2; d_is_pop=1'b1; d_mem_read=1'b1;
+                     d_pop_sreg=1'b1; d_sys_sreg=3'(SG_GS); d_w=eff_opsize?3'd2:3'd4; end
         // ---- 0F C7: CMPXCHG8B (/1, memory only) ------------------------------
         // The ONLY valid form is a MEMORY destination (mod != 11). A REGISTER
         // destination (mod == 11) is an invalid opcode (#UD). The clean core does
