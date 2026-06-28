@@ -189,7 +189,26 @@ divergences in implemented opcodes), so the wrong branch is subtle — likely a 
 path or the DPMI real-mode-int target. Needs a focused control-flow trace (which branch/jump at
 ~cs:0x3810 should have diverted) — separate from the opcode work.
 
-## 10. Bottom line
+## 10. opgen validation state (this session)
+
+Full `run-opgen.sh` (PM32/user, vs qemu-i386): **384 PASS, 29 KNOWN, 0 NEW-FAIL** — my opcode
+work introduced zero regressions, and opgen *caught a real bug in my nested ENTER*: under paging the
+`S_ENTER` micro-sequence skipped address translation (missing from the `translatable` set) and
+stalled. Fixed (`4b9225d`); `op_c8ent` (hand-added ENTER level-3 test) now EQUIVALENT to qemu. POP FS
+also confirmed PASS. This is the systematic survey+validate loop working — exactly the directive.
+
+Session opcode commits (all verify 98/98 + verify-sys 949/949 + opgen-clean):
+`6a6fa62` #GP paging cur_lin; `af05d38` POP FS/GS; `17a630a` nested ENTER; `4b9225d` S_ENTER paging.
+
+Remaining opgen CORE-GAP findings (the roadmap, 0 NEW-FAIL so none hide):
+- BT/BTS/BTR/BTC memory (`0F A3/AB/B3/BB`, `0F BA /4-7`) + SHLD/SHRD memory (`0F A4/A5/AC/AD`) — RMW
+  forms halt; the next implementations.
+- POP ES/SS/DS/GS (op_07/17/1f/0fa9) DIVERGE (RTL retires fewer records) while POP FS PASSES — the
+  decode is fine (FS passes); the PM32 seg-RELOAD of a valid selector (0x2b) halts/faults in a way
+  qemu doesn't. Needs a triage of op_07's RTL trace (likely a GDT-limit/descriptor corner in the
+  cov-TB PM32 env vs qemu) before deciding core-fix vs test-env.
+
+## 11. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
