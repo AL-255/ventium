@@ -1168,6 +1168,32 @@ the ven_* peripherals), NOT rtl/core. ~30 cycles of core-fix hypotheses were aim
 aligned diff redirects to the boot device/config model. NEXT: decode the source of 0x0c000000 (which
 device/port/cfg the BIOS reads at cs=0x08:~0xf3500) and match it to qemu.
 
+## 23ai. SEED IDENTIFIED: fw_cfg -- the RTL & qemu boot DIFFERENT environments (comparison confound)
+
+Decoded the first boot divergence's source. cs=0x08:0xf4828 is BSWAP EAX; the divergent value is a
+big-endian COUNT byte-swapped: qemu reads 12 (0x0c -> 0x0c000000), the RTL reads 0. That is SeaBIOS
+reading the fw_cfg file-directory count. Confirmed in RTL source: rtl/soc/ventium_soc.sv DOES decode
+fw_cfg ports (0x510 sel / 0x511 data, DMA 0x514/0x518) BUT rtl/soc/ven_rtc.sv:78-85 documents they are
+OPEN-BUS 0xFF on this SoC, so SeaBIOS's qemu_cfg_detect FAILS and it sizes RAM from CMOS only
+(VEN_RTC_EXTMEM_KB), whereas qemu's SeaBIOS uses its 12 fw_cfg files (e820/SMBIOS/etc.).
+
+CONSEQUENCE (methodological): the RTL boots a DIFFERENT firmware environment than the qemu oracle
+(no-fw_cfg CMOS-sized vs fw_cfg). So the per-instruction comparison is CONFOUNDED from insn#104916
+onward: the divergences (the memory map, then the DOS conventional layout 0x119, then the real-mode
+block placement, then the stub un-relocation/over-relocation) all descend from this environment delta,
+not from a core defect. This is consistent with the aligned diff's proof that the RTL CORE IS FAITHFUL
+(registers match qemu exactly at the op cs=0x87:0x258 AND the corruptor cs=0x87:0x338). The Quake #UD is
+a downstream effect of the RTL's no-fw_cfg memory layout breaking the qemu-built image's go32 stub
+relocation -- NOT an rtl/core bug.
+
+FIXABLE ROOT (SoC/firmware-config layer, not the core): make the RTL's boot environment produce a
+memory layout the Quake image's go32/CWSDPMI relocation handles like qemu's -- options: (a) give the SoC
+a FUNCTIONAL fw_cfg (populate the e820/RAM map qemu provides) instead of open-bus, (b) match the CMOS
+RAM sizing (VEN_RTC_EXTMEM_KB) to qemu's -m, or (c) rebuild the Quake disk image for the no-fw_cfg
+environment. To find any REMAINING core/peripheral bug, the comparison must be re-run with MATCHED
+environments (qemu with fw_cfg disabled, or the RTL with fw_cfg populated). Goal 1 solid; Goals 2/3 root
+= a boot-environment (fw_cfg/RAM-map) divergence, core proven correct.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
