@@ -59,6 +59,28 @@ far_rtn_imm:
 past_rtns:
 """
 
+REALMODE_FAR = r"""
+    /* far transfers, real mode. offset = (label - _start16 + _start16_off):
+     * assembly-local difference + the linker segment offset (fits 16-bit). */
+    lcallw  $0xF000, $(far_rtn - _start16 + _start16_off)          /* 9A direct far CALL + CB far RET */
+    lcallw  $0xF000, $(far_rtn_imm - _start16 + _start16_off)      /* 9A + CA far RET imm16 */
+    ljmpw   $0xF000, $(after_fjmp - _start16 + _start16_off)       /* EA direct far JMP */
+after_fjmp:
+    movw    $(far_rtn - _start16 + _start16_off), 0x640            /* FF/3 indirect far CALL via mem */
+    movw    $0xF000, 0x642
+    lcallw  *0x640
+    movw    $(after_ijmp - _start16 + _start16_off), 0x644         /* FF/5 indirect far JMP via mem */
+    movw    $0xF000, 0x646
+    ljmpw   *0x644
+after_ijmp:
+    jmp     past_rtns
+far_rtn:
+    lretw
+far_rtn_imm:
+    lretw   $0
+past_rtns:
+"""
+
 REALMODE_INT = r"""
     /* set up real-mode IVT entries -> a handler in this segment (CS=0xF000).
      * the 16-bit offset is (handler - _start16 + _start16_off): a section-local
@@ -261,6 +283,7 @@ def main():
     write_image("realmode_seg", REALMODE_SEG)
     write_image("realmode_priv", REALMODE_PRIV)
     write_image("realmode_int", REALMODE_INT)
+    write_image("realmode_far", REALMODE_FAR)
 
 
 if __name__ == "__main__":
