@@ -734,6 +734,30 @@ qemu reference (fs_base/bx/si correctness), which the env blocks. NET this sessi
 fix committed; task-switch ruled out; EBX likely legit; the true divergence (address vs value) is
 unresolvable single-context. The honest conclusion stands: Goal 2/3 need the aligned qemu differential.
 
+## 23o. BREAKTHROUGH: qemu works as oracle; EBX is CORRECT; bug = stub OVER-relocation
+
+qemu was NOT actually env-blocked — FOREGROUND `qemu-system-i386 -d cpu` produces a 1.5GB register
+trace fine (earlier failures were background/quoting/disk, and the "signal 15" was my own `timeout`).
+With the aligned oracle, the whole EBX line of investigation is OVERTURNED:
+- qemu has the EXACT same EBX=000e0021 (546x), edx=00800002, etc. **EBX is CORRECT** — the high 0x000e
+  is a legit 0x000Exxxx pointer. Every prior EBX/truncation/POPAW/task-switch theory was a wrong lead.
+- qemu calls the PUSH-CS thunk 0x5946 **138,339x** and the bare helper 0x5954 **ZERO** times, and never
+  reaches cs=0x34. So qemu's go32 real-mode-call stub @0x29d31 is ALWAYS valid (=0x26d1e80c -> 0x5946).
+- The disk (md5-identical to the RTL's) holds the stub at off 0xd406e = `8b 07 b1 0c e8 d1 26 8b` =
+  0x26d1e80c (the VALID, already-relocated form, CL=0x0c rel16=0x26d1).
+
+THE BUG (qemu-confirmed): the patch is `add [fs:bx+si+0x20], ebx` @cs=0x87:0x338, fs:off resolves to
+0x29d31 in BOTH (FS=0x8f base 0x228f0 via `PUSH DS; POP FS`). For the result to be the VALID 0x26d1e80c
+(qemu), the stub BEFORE the add must be 0x26c3e7eb = 0x26d1e80c - EBX. So **qemu UN-relocates the stub
+(subtract EBX) before re-relocating it with this add — net valid.** The RTL skips the un-relocation:
+its stub stays 0x26d1e80c (the disk value), so the add OVER-relocates -> 0x26dfe82d -> CL=0x2d, CALL
+0x5954 (skips PUSH CS) -> stale far-RETF CS -> cs=0x34 -> #UD at 9.643M.
+
+NEXT (now tractable — qemu is the oracle): instruction-level differential of go32/CWSDPMI's real-mode-
+call setup (cs=0x87 ~0x320-0x338 + the INT 0x31 handler) to find the missed `sub [stub],ebx` un-
+relocation (or the control-flow / segment condition that skips it). That op (or its skip) is the real
+core bug. This supersedes ALL earlier root hypotheses; EBX/PUSHAW/task-switch are NOT the cause.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
