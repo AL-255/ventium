@@ -205,6 +205,17 @@ module tb_l1d;
     end
     do_snoop(32'h0004_0000); do_snoop(32'h0008_0000); do_snoop(32'h000F_0000);
 
+    // [14] fill EVERY set x both ways (valid 0->1) then snoop-invalidate every
+    // one (valid 1->0) so dc_val toggles both directions across the whole array.
+    for (int i=0;i<128;i++) begin
+      do_read(32'(i)*32'h20,             d);   // set i, tag 0 -> way A
+      do_read(32'(i)*32'h20 + 32'h1000,  d);   // set i, tag 1 -> way B
+    end
+    for (int i=0;i<128;i++) begin
+      do_snoop(32'(i)*32'h20);                  // invalidate way A
+      do_snoop(32'(i)*32'h20 + 32'h1000);       // invalidate way B
+    end
+
     if (errors==0) $display("L1D-GATE-OK (all checks pass)");
     else           $display("L1D-GATE-FAIL (%0d errors)", errors);
     $finish;
