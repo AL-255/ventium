@@ -93,8 +93,35 @@ Build: `make -C verif/tb soc VEN_IDE_DISK_HEX=/tmp/quake.disk.hex VL_EXTRA_DEFIN
 Run: `VEN_SOFTVGA=1 obj_dir_soc/tb_soc --image <bios.bin> --out /dev/null --max-insn N --max-cycles 300000000000 --quiesce 200000000`
 (`--max-cycles` must be large; the default 1<<24 stops at ~2.3M insn.)
 
-## 6. Bottom line
+## 6. Goal 2 (render frames) — current blocker: video-init idle at 9.64M
+
+With the #GP fixed, DOS-Quake runs to **9,642,323 instructions** then the core goes **idle** (quiesce:
+no retire for 200M clocks) at `cs=0x87:0x331`, IF=1. The framebuffer never gets pixels:
+- `ven_vga_fb` (mode-13h, 0xA0000) FB dumps every 0.5M insn from 0.5M→9.5M are **all zero** — Quake
+  is NOT rendering to mode 13h.
+- The trace right before the idle shows the **video init**: go32 (cs=0x87) → DPMI real-mode-int →
+  cs=0x18 loop → the **real-mode video BIOS (cs=0xf000)** → back to go32, with `eax=0x101`
+  (**VESA mode 0x101 = 640×480×256**). So Quake wants **VESA**, not mode 13h.
+- The soft-VGA int10 C model (`tb_soc.cpp svga_service`, lines 362-373) implements only
+  teletype/setmode-record/getmode/getcursor; **VESA (AH=0x4F) hits `default: break` (no-op)**. The
+  no-op leaves AL≠0x4F so a VESA probe *should* read "unsupported", yet Quake still does not render to
+  mode 13h — so either it has no mode-13h fallback, or the mode-13h path is also stuck, or the idle is
+  a **HLT waiting for an interrupt** the southbridge never delivers (IF=1, zero retires after).
+
+Two hypotheses to resolve next (both are "southbridge/peripheral" per the loop goal):
+1. **Video**: Quake needs a working video mode. Either add VESA (0x4F00/01/02 + a 640×480 FB the TB
+   can capture) to the soft-VGA, or make VESA cleanly fail AND verify the mode-13h render path lands
+   pixels in `ven_vga_fb` (the pure-RTL FB).
+2. **Interrupt delivery**: if `cs=0x87:0x331` is a HLT-wait, find which IRQ it waits on (PIT IRQ0 /
+   IDE IRQ14) and why the PIC/PIT/IDE southbridge isn't waking it.
+
+Next diagnostic: dump the opcode at `cs=0x87:0x331` (HLT vs spin) and check whether IRQ0/IRQ14 fire
+after 9.64M.
+
+## 7. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
-- DOS-Quake null-SS #GP: **fixed** (`cur_lin` S_LOAD2 paging-translation), validated (#GP gone to 15M+
-  insn; `verify`/`verify-sys` still green). Cache was a red herring.
-- Remaining: confirm Quake renders frames + soak a long clean run.
+- DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
+  translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
+- Goal 2 (render) & Goal 3 (long run): blocked by a NEW video-init/idle issue at 9.64M (VESA vs
+  mode-13h vs a HLT-wait-for-IRQ) — needs the southbridge/video work above. The single CPU bug that
+  blocked the entire prior session is resolved; this is a fresh, peripheral-side blocker.
