@@ -79,9 +79,6 @@ SKIP = {
     "IRETD": "sys", "BOUND": "fault", "UD2": "fault", "F00F": "fault",
     # port I/O -> #GP in user mode (covered by --cosim covio)
     "IN": "io", "OUT": "io", "INS": "io", "OUTS": "io",
-    # string ops with implicit DS:SI/ES:DI + REP -> covered by t_string/t_rep
-    "MOVS": "string", "STOS": "string", "LODS": "string", "SCAS": "string",
-    "CMPS": "string", "XLAT": "string", "XLATB": "string",
     "ENTER": "stackframe",
     # not P54C / undocumented-removed / undefined
     "LOADALL": "not-p54c", "UD": "undef", "UD1": "undef", "UD0": "undef",
@@ -298,6 +295,61 @@ def emit_lines(s):
             for imm in IMM[w]:
                 L.append(f"    mov{SUF[w]}  {imm}, %{r}")
         return L, "GEN", "mov-reg-imm"
+
+    # --- LEA reg, mem -------------------------------------------------------
+    if mn == "LEA":
+        dreg = safe_regs(32)[0]
+        for m in MEM + ["(%esi,%edi,2)", "0x40(%esi,%edi,8)"]:
+            L.append(f"    leal  {m}, %{dreg}")
+        return L, "GEN", "lea"
+
+    # --- SHLD / SHRD  (Ev, Gv, Ib|CL) ---------------------------------------
+    if mn in ("SHLD", "SHRD") and len(ops) == 3:
+        w = width_of(types[0]); g = safe_regs(w)[1]
+        cnt = "%cl" if any(o["a"] == "#" for o in ops[2:]) else IMM[8][1]
+        for r in safe_regs(w):
+            L.append(f"    {mn.lower()}{SUF[w]}  {cnt}, %{g}, %{r}")
+        L += REINIT
+        L.append(f"    {mn.lower()}{SUF[w]}  {cnt}, %{g}, (%esi)")
+        return L, "GEN", "shld/shrd"
+
+    # --- AAD / AAM (#AL,#AH,Ib) ---------------------------------------------
+    if mn in ("AAD", "AAM"):
+        # bare form (base 10) + explicit-base imm form
+        L.append(f"    movw  $0x0905, %ax")
+        L.append(f"    {mn.lower()}")
+        L.append(f"    movw  $0x0905, %ax")
+        L.append(f"    .byte 0x{ 'd5' if mn=='AAD' else 'd4' }, 0x10")  # base 16
+        return L, "GEN", "aad/aam"
+
+    # --- CMPXCHG8B  (Mq) ----------------------------------------------------
+    if mn == "CMPXCHG8B":
+        L += ["    movl $0x11223344, (%esi)", "    movl $0x55667788, 4(%esi)",
+              "    cmpxchg8b (%esi)",          # mismatch -> EDX:EAX <- mem, ZF=0
+              "    cmpxchg8b (%esi)"]          # now match -> mem <- ECX:EBX, ZF=1
+        return L, "GEN", "cmpxchg8b"
+
+    # --- string ops (MOVS/STOS/LODS/SCAS/CMPS): DS:ESI / ES:EDI in-buffer ----
+    if mn in ("MOVS", "STOS", "LODS", "SCAS", "CMPS"):
+        w = width_of(types[-1]) if types else 8
+        sfx = SUF[w]
+        L += ["    cld", "    movl %esp, %esi", "    leal 80(%esp), %edi"]
+        L.append(f"    {mn.lower()}{sfx}")    # one element (no REP; deterministic)
+        L.append(f"    {mn.lower()}{sfx}")
+        return L, "GEN", "string"
+    if mn in ("XLAT", "XLATB"):
+        L += ["    movl %esp, %ebx", "    xorl %eax, %eax", "    xlatb"]
+        return L, "GEN", "xlat"
+
+    # --- PUSH/POP r/m (FF/6 PUSH Ev, 8F/0 POP Ev) ---------------------------
+    if mn in ("PUSH", "POP") and len(ops) >= 1 and \
+            any(o["a"] in ("E", "M") for o in ops):
+        w = 32
+        for r in safe_regs(w):
+            L.append(f"    {mn.lower()}l  %{r}")
+        L += REINIT
+        L.append(f"    {mn.lower()}l  (%esi)")
+        return L, "GEN", "push/pop-rm"
 
     # --- pattern: no explicit operands (NOP, CLC, CWDE, ...) ----------------
     if not ops or all(o["a"] == "#" for o in ops):
