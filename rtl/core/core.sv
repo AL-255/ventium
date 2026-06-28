@@ -1907,7 +1907,11 @@ module core
   logic        sh_cfout;
 
   always_comb begin
-    dst_cur = gpr_o[q_dst_reg];
+    // SHLD/SHRD (K_SHLDRD) memory RMW: the shifted operand is [mem] for a memory dst
+    // (q_mem_dst). Register ops (q_mem_dst=0) keep gpr_o[q_dst_reg]. K_ALU/K_SHIFT mem RMW
+    // use a_op/sh_val (already mem-aware) and skip the gpr write under q_mem_write, so this
+    // only changes the K_SHLDRD result/flag source for the memory form.
+    dst_cur = (q_mem_read && q_mem_dst) ? wmask(mem_load_data,q_w) : gpr_o[q_dst_reg];
     a_op = (q_mem_read && q_mem_dst) ? wmask(mem_load_data,q_w) : reg_read(q_dst_reg,q_w,q_dst_high8);
     if (q_use_imm) b_op = wmask(q_imm,q_w);
     else if (q_mem_read && !q_mem_dst) b_op = wmask(mem_load_data,q_w);
@@ -2230,6 +2234,8 @@ module core
       st_strb = 4'b0001;
     end else if (q_kind==K_SHIFT) begin
       st_data = sh_out;
+    end else if (q_kind==K_SHLDRD) begin
+      st_data = ex_shld_r;          // SHLD/SHRD memory destination RMW result
     end else if (q_kind==K_XCHG) begin
       st_data = reg_read(q_src_reg,q_w,q_src_high8);
     end else if (q_kind==K_CMPXCHG) begin

@@ -260,6 +260,9 @@
 
               K_SHLDRD: begin
                 logic [31:0] shm1;
+                // memory destination (SHLD/SHRD Ev,Gv,*): RMW — write ex_shld_r to [mem]
+                // (S_STORE) instead of a GPR. Flags still commit here in S_EXEC.
+                if (q_mem_dst) begin do_store=1'b1; do_retire=1'b0; end
                 // R3 HOIST: cnt (ex_shld_cnt) and the SHLD/SHRD result r (ex_shld_r)
                 // are computed ONCE at module scope (core.sv) and shared with the gpr
                 // writeback driver (core_gpr_wb.svh, K_SHLDRD arm). shm1 is FSM-only

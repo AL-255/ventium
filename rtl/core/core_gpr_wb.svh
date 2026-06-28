@@ -121,6 +121,7 @@
                 // module-scope values (core.sv); the FSM arm uses the same ones for
                 // the cnt==0 guard + flags. No local recompute / second shifter.
                 if (ex_shld_cnt==6'd0) begin end
+                else if (q_mem_write) begin end   // memory dst: result stored to [mem] (S_STORE), no GPR
                 else begin
                   gpr_we[q_dst_reg]=1'b1; gpr_wd[q_dst_reg]=reg_merge(dst_cur, ex_shld_r, q_w, 1'b0);
                 end
