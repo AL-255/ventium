@@ -1052,6 +1052,29 @@ the call target (0x26d1 vs 0x26df) are wrong. NEXT: capture the writes that lay 
 near the crash (who/what computes CL=0x2d and rel16=0x26df) -> the diverging core op. This is the true,
 bounded target; the op/[0x626]/LDT was a long detour now closed off (all verified == qemu).
 
+## 23ad. BREAKTHROUGH: the corruptor is cs=0x87:0x338, over-relocating the stub by EBX
+
+Captured every write to the stub bytes [lin 0x29d30..0x29d38] before the crash:
+```
+  [0-8]  cs=0008:48fb   zero the region
+  [9-13] cs=f000:b904   write the VALID stub: b1 0c e8 d1 26  (MOV CL,0x0c; CALL ->0x26d1 ->0x5946 thunk)
+  [14]   cs=0087:0338   OVERWRITE lin 0x29d31 with 0x26dfe82d   <-- THE CORRUPTION
+```
+And the value is conclusive: 0x26d1e80c (valid) + 0x000e0021 = 0x26dfe82d (corrupt), and 0x000e0021 is
+EXACTLY EBX. So cs=0x87:0x338 does a read-modify-write that ADDS EBX (the relocation delta) to the stub
+-> over-relocation: CL 0x0c->0x2d and CALL target 0x26d1->0x26df (0x5946 PUSH-CS thunk -> 0x5954 bare
+helper) -> the far-RETF pops a stale CS -> #UD.
+
+qemu side (oracle): 0 hits for BOTH 0x26dfe82d and 0x26d1e80c, and qemu NEVER reaches cs=0x87:0x330-0x33a.
+So qemu does NOT execute the stub-relocation at all -- its stub stays the BIOS-written valid bytes. This
+is a CONTROL-FLOW divergence: the RTL spuriously enters the stub-relocation path (cs=0x87:0x334->0x338)
+near the crash and over-relocates by EBX; qemu's real-mode-call setup skips it.
+
+This is the ORIGINAL "over-relocation / skips the un-reloc sub" bug (778760a), now pinned to ONE store
+(cs=0x87:0x338) and its cause (a spurious ADD-EBX / a branch that should not be taken). NEXT: the path
+INTO cs=0x87:0x338 (which branch leads there) + decode the cs=0x87:0x320-0x350 routine to see the
+ADD-EBX and the guarding condition the core evaluates wrong. This is the fixable core target.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
