@@ -564,6 +564,26 @@ qemu runs again: `-d cpu` trace, grep first `EBX=000e…`, read the TB, fix that
 writeback in the core; alternatively an RTL detector (log GPR writes in def16 segs with a 0x66 prefix
 whose committed q_w != 4) can find it qemu-free but needs care vs false positives.
 
+## 23g. RTL detector: decode width is CORRECT; truncation (if real) is exec-level; alignment caveat
+
+Built an RTL detector (S_DECODE, def16 segment, GPR write, 0x66-prefix-present, `d_w==2`) to catch a
+mishandled-operand-size decode. It fired 1837 times but **all false positives** (the 0x66 was the
+NEXT instruction's prefix; the current opcode was `8c`/`90`/`31`...). The decisive filter — a LEADING
+`ibuf[0]==0x66` with `d_w==2` — matched **ZERO** times. So the decode width is **correct** (32-bit
+ops get `d_w=4`); the bug is NOT a decode-width mistake. If the §23e truncation is real, it is in the
+execution/value path (a 32-bit op with correct d_w=4 producing high16=0, i.e. a wrong loaded/stored/
+computed value), not the prefix/width decode.
+
+Honest caveat on §23e: qemu's `-d cpu` showed BOTH high-set (`edx=0x00800002,ebx=0x000e3772`) AND
+high-0 (`edx=2,ebx=0x130e`) versions of these regs at the patch routine (different per-op iterations).
+The RTL's high-0 values may match qemu's high-0 ITERATION rather than prove a truncation — i.e. the
+divergence could be a different OP being selected, not a width truncation. The matching `0xe`
+(ebx-high vs rel16 +0xe) is suggestive but not conclusive without confirming the two traces are at the
+same operation. Re-verifying needs the qemu differential, which the environment is now killing
+(qemu emulation runs get SIGTERM'd). So: decode ruled out; exec-vs-op-selection unresolved; final
+pinpoint blocked. Method to resume: when qemu runs, single-step-align the patch op (match eax+the full
+GPR set) before trusting the ebx/edx delta, then localize the producing instruction.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
