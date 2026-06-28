@@ -134,6 +134,18 @@ module tb_dma8237;
     for (int w=0; w<8; w++)
       chk($sformatf("device[%0d] == mem 0x6000+%0d", w, w), devbuf[w], 32'hBEEF_0000 + w);
 
+    // [COV] diverse DMA transfers: walking-bit device data + diverse start_addr,
+    //       count and direction so the DMA datapath (rbuf/wbuf, start_addr/addr/
+    //       m_addr, count/cnt, dev_rdata/dev_wdata/m_wdata) toggles broadly. The
+    //       directed checks above use only two fixed transfers. Pure stimulus.
+    for (int k = 0; k < 24; k++) begin
+      for (int i = 0; i < 64; i++)
+        devbuf[i] = (32'h1 << ((i + k) % 32)) ^ 32'(k * 32'h0408_1020 + i);
+      devidx = 0;
+      run_dma((32'h0001_0000 + (32'h20 << (k % 14))) & 32'h000F_FFE0,
+              16'((16'h1 << (k % 7)) + 1), k[0]);   // diverse addr / count(1..65) / dir
+    end
+
     if (errors==0) $display("DMA8237-GATE-OK (all checks pass)");
     else           $display("DMA8237-GATE-FAIL (%0d errors)", errors);
     $finish;
