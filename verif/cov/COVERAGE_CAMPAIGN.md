@@ -12,10 +12,10 @@ that would fail gates). Every change is verified `EQUIVALENT` vs qemu-system-i38
 its module gate's self-check) before commit; the user's in-progress RTL is untouched.
 
 ## Headline result (REPRODUCIBLE — re-derived by `run-all-cov.sh`)
-- **Combined-core toggle: 70.58% → 74.94% (+4.36 points)**, line 89.28→89.85%.
+- **Combined-core toggle: 70.58% → 77.54% (+6.96 points)**, line 89.28→89.85%.
 - **12 standalone-TB RTL modules** lifted from 14–69% to 60–100% toggle (reproduce via their own gates).
 - **2 new standalone TBs authored** for previously TB-less core-internal modules.
-- **~93 commits**, all gates green / differentials EQUIVALENT.
+- **~96 commits**, all gates green / differentials EQUIVALENT.
 
 ### Reproducibility audit + correction (important)
 An earlier in-session figure of **77.46% (+6.88)** was reached by *ad-hoc folding* mode/FP
@@ -28,15 +28,15 @@ root causes, one now FIXED:
   sweep verified EQUIVALENT at 4000. Patched run-modes to a **per-test budget** (4000 for
   pm32_segbase/sysregs/intsweep/paging4k, 120 for the rest). Recovers seg_base→328,
   creg4→12, dr0→46, idt_base, tr_base, int_gate_off → **+0.86% combined (74.08→74.94%)**.
-- ⚠ **OPEN — run-transc/run-flags use the cov-feat build (no `VEN_FP_PIPE`)**, so FPATAN
-  takes the non-pipe path → `fpu_fpatan` reproduces at **42.6%**, not the 77.4% my custom
-  `obj_dir_transc` (+FP_PIPE) build reached; `fpp2_s1` (split-pipe) doesn't appear.
-  **Fix needed: a +VEN_FP_PIPE coverage lane** to bank the FP-pipeline + fpatan coverage
-  (~+2.5% combined, REAL but not yet in the standard headline).
+- ✅ **FIXED — run-transc/run-flags use the cov-feat build (no `VEN_FP_PIPE`)**, so FPATAN
+  took the non-pipe path → `fpu_fpatan` reproduced at 42.6% and `fpp2_s1` (split-pipe) was
+  dark. Added **`run-fppipe-cov.sh`** (LANE 11): builds the `+VEN_FP_PIPE/+VEN_FP_PIPE2`
+  (no FPTRAP) variant and runs the transc + fparith sweeps on it; wired into run-all-cov
+  with its dats folded. fpu_fpatan 42.6→**77.4%** → **+2.60% combined (74.94→77.54%)**.
 
 Lesson: an over-claim (77.46%) was caught by re-running the clean suite, traced to two
-harness gaps, one fixed (per-test max-insn), one documented (FP_PIPE lane). The honest
-reproducible number is **74.94% (+4.36)**; the remaining ~2.5% is real but harness-gapped.
+harness gaps, and BOTH FIXED (per-test max-insn + the FP_PIPE lane). The reproducible
+number is now **77.54% (+6.96)** — and durable: a clean `run-all-cov.sh` reproduces it.
 
 ## Per-area wins
 | Area | Result | Method |
