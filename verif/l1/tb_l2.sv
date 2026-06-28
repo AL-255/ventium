@@ -259,6 +259,21 @@ module tb_l2;
     rd_check_line("N@0x500", 32'h0000_0500, 32'hC0DE_0000);   // evicts LRU == 0x100
     chk_int("NO writeback evicting the untouched line L (dirty==modified)", ddr_wr-w0, 0);
 
+    // COVERAGE sweep: walk data / byte-strobe / address through the L2 data
+    // buffers (wd1/nwd1/be1/nbe1 store path, fill_buf on miss, wb_buf on dirty
+    // eviction). l2_read/l2_write don't check values -> pure toggle stimulus.
+    $display("[COV] L2 buffer sweep: walking data/strb/addr + dirty evictions");
+    for (int i=0;i<64;i++) begin
+      automatic logic [31:0] s = 32'(i) * 32'h20;
+      l2_write(s,            32'h1 << (i%32),       4'hF);                 // wd1 walking data
+      l2_write(s + 32'h4,    ~(32'h1 << (i%32)),    4'((1 << (i%4)) | 1));// nwd1 + varied byte strobe (be1/nbe1)
+      l2_read (s + 32'h2000, w);                                          // 2nd tag -> fill_buf
+      l2_read (s + 32'h4000, w);                                          // 3rd tag -> evict DIRTY -> wb_buf
+      l2_read (s,            w);                                          // refill
+    end
+    for (int i=0;i<32;i++) l2_write(32'h0000_0040 + 32'(i)*4, 32'h1 << i, 4'hF);  // walking data in a line
+    for (int i=5;i<16;i++) l2_read (32'h1 << i, w);                       // walking-bit tag addresses
+
     if (errors==0) $display("L2-GATE-OK (all checks pass)");
     else           $display("L2-GATE-FAIL (%0d errors)", errors);
     $finish;
