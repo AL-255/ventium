@@ -42,3 +42,10 @@ op_0fa4  CORE-GAP  SHLD Ev,Gv,Ib  memory destination halts (reg-direct passes)
 op_0fa5  CORE-GAP  SHLD Ev,Gv,CL  memory destination halts
 op_0fac  CORE-GAP  SHRD Ev,Gv,Ib  memory destination halts
 op_0fad  CORE-GAP  SHRD Ev,Gv,CL  memory destination halts
+# --- MODE-LANE findings (real-mode CPL0 vs qemu-system) -----------------------
+#   privileged system ops the core HALTs on (or gates) in plain --system mode:
+op_0f06   CORE-GAP  CLTS    halts (unimplemented)
+op_0f01_6 CORE-GAP  LMSW    halts (only MOV CR0 PE-load path implemented)
+op_0f01_7 CORE-GAP  INVLPG  halts (unimplemented)
+#   0F08 INVD / 0F09 WBINVD gate on cosim_en||soc_en -> covered by the --cosim
+#   covtsc lane (HALT in plain --system, as designed).
