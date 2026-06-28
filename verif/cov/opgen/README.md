@@ -33,7 +33,7 @@ bash    run-opgen.sh      # PARALLEL build+golden+diff across all cores
 
 ## Status (PM32 / user, CPL3) — integer + x87 + branches + special
 
-`make opgen` (parallel, ~20 s on 32 cores): **397 PASS + 29 KNOWN + 0 NEW-FAIL
+`make opgen` (parallel, ~20 s on 32 cores): **401 PASS + 25 KNOWN + 0 NEW-FAIL
 + 0 ASM-FAIL** (clean), 436 op_* tests + the EA sweep + the synthetic
 `op_prefixes` test. The runner fails only on a **NEW** divergence, so a
 regression cannot hide. `make opgen-modes` runs the real-mode/CPL0 lane.
@@ -56,7 +56,7 @@ regression cannot hide. `make opgen-modes` runs the real-mode/CPL0 lane.
 
 ### Findings analysis (`known_diverge.txt`) — surfaced, NOT fixed here
 
-The 29 KNOWN are real divergences the per-opcode sweep found (the core is
+The 25 KNOWN are real divergences (4 SHLD/SHRD-mem findings were RESOLVED in RTL and the suite auto-promoted them to must-pass) the per-opcode sweep found (the core is
 unchanged — these are an analysis catalog):
 
 | class | n | what |
