@@ -1014,6 +1014,27 @@ instead. NEXT: a cs=0x87 PC-sequence differential RTL-vs-qemu across the init wi
 near oracle line ~2.70M) to find the first divergent branch -> the core instruction whose result/flag
 differs. This is now a small, bounded compare, not a 9.64M-wide search.
 
+## 23ab. CRITICAL CORRECTION: [0x626]=0xaf is IDENTICAL in qemu — the LDT/DPMI theory is DISPROVEN
+
+Directly verified qemu's op in the oracle: CS=0x0087 EIP=0x0258 occurs EXACTLY ONCE with AX=0x00af
+(EAX=000100af). So qemu stores 0xaf at [0x626] too — the SAME as the RTL. The "[0x626] = RTL 0xaf vs
+qemu 0xb7" divergence that drove ~10 cycles (LDT off-by-one, DPMI allocator desync, free-list
+corruption, alloc-ORDER, etc.) DOES NOT EXIST. The qemu "0xb7" was never actually observed at the op;
+it was an unverified assumption that propagated. qemu's full state at the op: DS=0x8f (base 0x228f0),
+EBX=000e0006, ESI=0x786, EDI=0x34, EBP=0x91e, ESP=0x770, EFL=0x3246. The LDTs, [0x626], and the op AX
+all MATCH the RTL. NONE of the DPMI/LDT allocation is the bug.
+
+The REAL divergence is CONTROL FLOW AFTER the op. qemu's post-op cs=0x87 path is
+0x25c,0x26d,0x271,0x292,0x2a5,0x2b2,0x2c3,0x2cd,0x2da,0x2e2,0x2f5,0x33e,0x46c,0x477,0x479,0x360,0x47d,
+0x48d,0x37d,...,0x3d8(loop). qemu hits 0x33e and NEVER 0x334; the RTL reaches 0x334 (MOV DS,[0x626] ->
+DS=0xaf base 0x10000000, the path into the stub over-relocation). So both store the same [0x626]=0xaf,
+then the RTL's control flow diverges to 0x334 where qemu goes 0x33e/0x360/... This re-centres on the
+ORIGINAL finding (778760a): the go32 real-mode stub OVER-relocation (patched near-CALL -> 0x5954 helper
+instead of 0x5946 PUSH-CS thunk). NEXT: capture the RTL's post-op cs=0x87 path, diff vs qemu's above,
+find the FIRST divergent PC -> the branch whose condition/flag the core computes differently = the
+fixable core bug. (The DPMI/LDT cycles were not wasted: they PROVED the descriptor/allocator state is
+correct, eliminating a whole class of hypotheses.)
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
