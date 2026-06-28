@@ -111,12 +111,15 @@ say "OPGEN PM32/user differential result"
 KNOWN="$HERE/known_diverge.txt"
 is_known(){ grep -qE "^$1[[:space:]]" "$KNOWN" 2>/dev/null; }
 declare -A C=([PASS]=0 [KNOWN]=0 [FAIL]=0 [ASMFAIL]=0 [GOLDFAIL]=0)
-NEWFAIL=""
+NEWFAIL=""; RESOLVED=""
 for r in "$WORK"/*.res; do
     [ -f "$r" ] || continue
     read -r s n rest < "$r"
     case "$s" in
-        PASS)     C[PASS]=$((C[PASS]+1));;
+        PASS)     C[PASS]=$((C[PASS]+1))
+                  # a cataloged finding that now PASSES -> RESOLVED in RTL; the
+                  # catalog should promote it to must-pass (drop the entry).
+                  if is_known "$n"; then RESOLVED+="$n\n"; fi;;
         ASMFAIL)  C[ASMFAIL]=$((C[ASMFAIL]+1)); NEWFAIL+="ASM   $n $rest\n";;
         GOLDFAIL) C[GOLDFAIL]=$((C[GOLDFAIL]+1)); NEWFAIL+="GOLD  $n\n";;
         DIVERGE)  if is_known "$n"; then C[KNOWN]=$((C[KNOWN]+1));
@@ -126,6 +129,10 @@ done
 printf '  PASS=%d  KNOWN-finding=%d  NEW-FAIL=%d  ASM-FAIL=%d  GOLD-FAIL=%d   (of %d)\n' \
     "${C[PASS]}" "${C[KNOWN]}" "${C[FAIL]}" "${C[ASMFAIL]}" "${C[GOLDFAIL]}" "${#SEL[@]}"
 if [ -n "$NEWFAIL" ]; then echo "--- NEW failures (must fix) ---"; printf "$NEWFAIL" | head -40; fi
+if [ -n "$RESOLVED" ]; then
+    echo "--- RESOLVED findings (now PASS — remove from known_diverge.txt + regression-protect) ---"
+    printf "$RESOLVED" | sort -u | sed 's/^/  /'
+fi
 echo "  KNOWN findings (CORE-GAP / MODE-CPL0): see $KNOWN"
 echo "  coverage dats: $(ls "$DAT"/*.dat 2>/dev/null | wc -l)"
 [ "${C[FAIL]}" -eq 0 ] && [ "${C[ASMFAIL]}" -eq 0 ] && echo "OPGEN PM32/user: CLEAN (all PASS or KNOWN)" || echo "OPGEN PM32/user: NEW FAILURES present"
