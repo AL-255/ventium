@@ -584,6 +584,25 @@ same operation. Re-verifying needs the qemu differential, which the environment 
 pinpoint blocked. Method to resume: when qemu runs, single-step-align the patch op (match eax+the full
 GPR set) before trusting the ebx/edx delta, then localize the producing instruction.
 
+## 23h. CORRECTION: §23e truncation REFUTED — no register truncation
+
+Cross-checking my OWN RTL data resolves the §23g caveat against the truncation hypothesis. At the
+ACTUAL patch store (`cs=0x87:0x334`, the instruction that writes 0x26dfe82d to 0x29d30) the RTL regs
+are `eax=0x101, edx=0x008000b7, ebx=0x000e0021` — the **high bytes 0x80 (edx) and 0x0e (ebx) are SET**,
+matching qemu (`edx=0x00800002, ebx=0x000e3772`, high 0x80/0x0e). So the RTL does NOT truncate edx/ebx;
+§23e compared a MISALIGNED point (RTL cs=0x18:0x2b6d, where edx=2 transiently, vs qemu's later EIP).
+**The 32-bit-truncation root cause (§23e) is wrong** — retract it.
+
+What remains CONFIRMED: the crash is the near-CALL going to the bare helper 0x5954 (rel16 0x26df)
+instead of the PUSH-CS thunk 0x5946 (rel16 0x26d1) — a real +0xe in the SMC-patched call (verified
+from qemu's `-d in_asm` showing `e8 d1 26` at the same address). The patch value 0x26dfe82d is a
+copied template (in no GPR at the store), so the wrong rel16 was baked in earlier. The +0xe = the
+thunk length, so it's a **thunk-vs-helper (far-vs-near) selection or a template-relocation divergence**
+in go32's PM code — NOT a register width bug. Pinpointing still needs an operation-aligned qemu
+differential, which the environment now blocks entirely (qemu emulation runs are killed; only the
+binary `--version` succeeds). HONEST state: root cause NOT identified; the prior "breakthrough" was a
+misalignment artifact; the confirmed fact is the +0xe wrong call target, origin unrooted.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
