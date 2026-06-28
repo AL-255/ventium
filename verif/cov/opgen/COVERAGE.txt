@@ -3,9 +3,9 @@ P54C opcode coverage accounting — 555 encodings
   TESTED      406
   FINDING      30
   COSIM        16
-  MODE         38
-  DEFER         7
-  SKIP         58
+  MODE         50
+  DEFER         1
+  SKIP         52
   UNCOVERED     0
 
   COVERED (tested/finding/lane/skip-justified): 555/555 = 100.0%
