@@ -1035,6 +1035,23 @@ find the FIRST divergent PC -> the branch whose condition/flag the core computes
 fixable core bug. (The DPMI/LDT cycles were not wasted: they PROVED the descriptor/allocator state is
 correct, eliminating a whole class of hypotheses.)
 
+## 23ac. Post-op path MATCHES qemu -> divergence is near the 9.64M crash (stub generation), not the op
+
+Captured the RTL's cs=0x87 path for 256 PCs from the op (0x258) onward and diffed vs qemu's TB-start
+sequence. qemu's TB entries (025c,026d,0271,0292,02a5,02b2,02c3,02cd,02da,02e2,02f5,033e,046c,0477,0479,
+0360,047d,048d,037d,0380,03a7,03b2,03d8) are ALL present in the RTL path (the RTL just lists every PC;
+qemu lists only TB entries). So the post-op control flow MATCHES qemu, and the RTL does NOT hit 0x334
+here -- it hits 0x33e like qemu and then LOOPS at 0x3d8 (and 0x477). So the op + its aftermath are
+correct; the earlier "RTL reaches 0x334" was from a later point and is not a near-op divergence.
+
+CONCLUSION: the divergence is NOT at 8.908M (the op) -- it is between ~8.91M and the 9.643M crash, inside
+the real-mode-call STUB GENERATION. This fully re-centres on the ORIGINAL finding: the go32 real-mode
+shift stub at lin 0x29d31 is "MOV CL,<n>; CALL <rel16>" = valid b1 0c e8 d1 26 (CL=0x0c -> 0x5946 PUSH-CS
+thunk) but RTL b1 2d e8 df 26 (CL=0x2d -> 0x5954 bare helper). BOTH the shift count (CL 0x0c vs 0x2d) and
+the call target (0x26d1 vs 0x26df) are wrong. NEXT: capture the writes that lay down those stub bytes
+near the crash (who/what computes CL=0x2d and rel16=0x26df) -> the diverging core op. This is the true,
+bounded target; the op/[0x626]/LDT was a long detour now closed off (all verified == qemu).
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
