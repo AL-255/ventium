@@ -177,6 +177,19 @@ module cdc_harness #(
     repeat(6) @(posedge core_clk);
     do_read(32'h0000_2500, d); chk("post-reset read", d, 32'h2500 ^ 32'hA5A5_0000);
 
+    // [COV] walking-bit address + data traffic through the CDC (runs at each of the
+    //       4 clock ratios) -> toggle the address paths (aaddr_q/a_addr/c_addr high
+    //       bits) and the read/write data paths (c_rdata/a_rdata/rsp_wr_data/
+    //       rsp_rd_data). Pure stimulus after all checks (no chk).
+    for (int i = 2; i < 19; i++) begin
+      do_write(32'h1 << i, ~(32'h1 << i));
+      do_read (32'h1 << i, d);
+    end
+    for (int i = 0; i < 16; i++) begin
+      do_write((32'h5A5A_5A5A >> i) & 32'h0007_FFFC, 32'(i) ^ 32'hF0F0_0F0F);
+      do_read ((32'hA5A5_A5A5 >> i) & 32'h0007_FFFC, d);
+    end
+
     if (errs==0) $display("  ok  [%s] all CDC checks pass", TAG);
     done <= 1'b1;
   end
