@@ -488,6 +488,24 @@ thunk 0x5946). NEXT (now feasible): code-aligned diff of go32's PM patch routine
 the call template it copies — find where the RTL gets target 0x5954 (helper) instead of 0x5946
 (thunk), i.e. the +0xe. That instruction/value is the core bug. Then VESA capture for frames.
 
+## 23c. The divergence is ONE PM store; byte-confusion resolved
+
+`--watch-write 0x29d30` over the whole run: near the crash (last_n>9.6M) the **only** write to the
+call region is the single SMC store at **cs=0x87:0x334**, value **0x26dfe82d** (`2d e8 df 26`), at
+retire 9,642,324, with ecx=0, esi=0x7400, edi=0x63400. So the crashing call's bytes come entirely
+from this one PM store (over the BIOS-loaded stub). The call is `e8 df 26` (rel16 **0x26df** ->
+0x5954, the bare helper) where go32 wants `e8 d1 26` (**0x26d1** -> 0x5946, the PUSH-CS thunk). So the
+whole Goal-2 bug is **one wrong dword written by one PM instruction** — go32 computes 0x26dfe82d on
+the RTL but 0x26d1e82d on qemu (+0xe in the rel16). The store value isn't in ecx/esi/edi, so it's in
+eax/ebx/edx/ebp — built/loaded just before cs=0x87:0x334.
+
+CONTINUATION (precisely scoped, maps aligned): trace the source of 0x26dfe82d at cs=0x87:0x334 —
+capture eax/ebx/edx/ebp there + the few instructions before, and dump the candidate template source
+(esi=0x7400 / a reloc entry) in BOTH RTL and qemu (now same addresses). Whichever shows 0x26df vs
+0x26d1 localizes the core bug: a wrong rel16 computation (target 0x5954 vs 0x5946) or a mis-relocated
+call template. Then fix + VESA capture. The bug is reduced to a single dword with a known correct
+value (0x26d1e82d).
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
