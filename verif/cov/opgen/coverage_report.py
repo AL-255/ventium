@@ -17,6 +17,7 @@ import importlib.util
 _sp=importlib.util.spec_from_file_location("gen_tests", f"{H}/gen_tests.py")
 _gt=importlib.util.module_from_spec(_sp); _sp.loader.exec_module(_gt)
 key_of=_gt.key_of
+emit_lines=_gt.emit_lines
 # reasons that are covered by another lane (not a gap)
 COSIM={"io","gated"}                       # IN/OUT/CPUID/RDTSC/INVD/WBINVD via --cosim
 MODE={"priv","sys","sys-mem","seg"}        # privileged/seg via the real-mode lane (partial)
@@ -39,29 +40,23 @@ for s in spec:
     if k in tests:
         cnt["FINDING" if k in known else "TESTED"]+=1
     else:
-        # find its MANUAL reason
-        r=None
-        for mk,mv in manual.items():
-            pass
-        # approximate by mnem-based reason isn't reliable; use the opspec doc/skip + reason fields
-        reason = "uncovered"
-        if s.get("doc")=="u" or s.get("part_alias"): reason="undoc"
-        # classify by mnem
-        mn=s["mnem"]
-        if mn in ("IN","OUT","INS","OUTS"): reason="io"
-        elif mn in ("CPUID","RDTSC","INVD","WBINVD"): reason="gated"
-        elif mn in ("INT","INT1","INT3","INTO","BOUND","UD","UD2"): reason="fault"
-        elif mn in ("CALL","JMP","RET","RETF","CALLF","JMPF"): reason="far"
-        elif re.search(r"^(MOV)$",mn) and any(o["a"] in ("C","D","T","S") for o in s["operands"]): reason="priv-seg"
-        elif mn in ("CLTS","LMSW","INVLPG","LGDT","LIDT","LLDT","LTR","SLDT","STR","SGDT","SIDT","SMSW","ARPL","LAR","LSL","VERR","VERW","RDMSR","WRMSR","RDPMC","RSM","HLT"): reason="priv"
-        elif mn in ("LDS","LES","LSS","LFS","LGS"): reason="seg"
-        elif mn in ("MOVS","STOS","LODS","SCAS","CMPS","XLAT","XLATB"): reason="string"
-        elif mn=="LOADALL": reason="not-p54c"
-        if reason in COSIM: cnt["COSIM"]+=1
-        elif reason in MODE or reason=="priv-seg": cnt["MODE"]+=1
-        elif reason in DEFER: cnt["DEFER"]+=1
-        elif reason in SKIPOK or reason=="undoc": cnt["SKIP"]+=1
-        else: cnt["UNCOVERED"]+=1; unc.append(f"{s['opcode']}{'/'+s['opcd_ext'] if s['opcd_ext'] else ''} {s['mnem']} [{reason}]")
+        lines, st, reason = emit_lines(s)
+        # reason -> which lane/justification covers it
+        COSIM2={"io","gated"}
+        MODE2={"priv","sys","sys-mem","seg","far-transfer"}
+        DEFER2={"far","fault","branch","stackframe","string"}
+        SKIP2={"not-p54c","undef","undoc","undoc-alias","x87-undoc","x87-obsolete",
+               "prefix","pop-cs-invalid","far","mov-moffs-coregap"}
+        r=reason or "uncovered"
+        # operand-pattern reasons covered by the mode lanes / not-P54C
+        if r in ("operand-pattern:Mw,Sw","operand-pattern:Sw,Ew"): r="seg"   # MOV Sreg -> realmode_seg
+        elif r.startswith("operand-pattern:") and any(x in r for x in ("Cd","Dd","Dq")): r="priv"  # MOV CR/DR -> realmode_priv
+        elif r.startswith("operand-pattern:") and ("Td" in r): r="not-p54c"  # MOV TR removed on Pentium
+        if r in COSIM2: cnt["COSIM"]+=1
+        elif r in MODE2: cnt["MODE"]+=1
+        elif r in SKIP2: cnt["SKIP"]+=1
+        elif r in DEFER2: cnt["DEFER"]+=1
+        else: cnt["UNCOVERED"]+=1; unc.append(f"{s['opcode']}{'/'+s['opcd_ext'] if s['opcd_ext'] else ''} {s['mnem']} [{r}]")
 tot=len(spec); covered=cnt["TESTED"]+cnt["FINDING"]+cnt["COSIM"]+cnt["MODE"]+cnt["DEFER"]+cnt["SKIP"]
 print(f"P54C opcode coverage accounting — {tot} encodings")
 print("="*60)
