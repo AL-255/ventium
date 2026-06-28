@@ -1,6 +1,6 @@
 opgen status — 555 P54C opcodes
-  GEN (auto test written): 423
-  MANUAL (needs handling): 132
+  GEN (auto test written): 436
+  MANUAL (needs handling): 119
 ======================================================================
 
 ## MANUAL — explicit list (nothing silently dropped):
@@ -120,27 +120,11 @@ opgen status — 555 P54C opcodes
       0F B4 LFS
       0F B5 LGS
 
-  [operand-pattern:#rDX,#rAX,Evqp]  (4)
-      F7/4 MUL
-      F7/5 IMUL
-      F7/6 DIV
-      F7/7 IDIV
-
-  [stackframe]  (2)
-      C8 ENTER
-      C9 LEAVE
-
-  [operand-pattern:#AL,#AH,Ib]  (2)
-      D4 AMX
-      D5 ADX
-
-  [operand-pattern:#AX,#AL,Eb]  (2)
-      F6/4 MUL
-      F6/5 IMUL
-
-  [operand-pattern:#AL,#AH,#AX,Eb]  (2)
-      F6/6 DIV
-      F6/7 IDIV
+  [mov-moffs-coregap]  (4)
+      A0 MOV
+      A1 MOV
+      A2 MOV
+      A3 MOV
 
   [sys-mem]  (2)
       0F 01/0 SGDT
@@ -163,17 +147,8 @@ opgen status — 555 P54C opcodes
   [operand-pattern:Sw,Ew]  (1)
       8E MOV
 
-  [operand-pattern:#AL,Ob]  (1)
-      A0 MOV
-
-  [operand-pattern:#rAX,Ovqp]  (1)
-      A1 MOV
-
-  [operand-pattern:Ob,#AL]  (1)
-      A2 MOV
-
-  [operand-pattern:Ovqp,#rAX]  (1)
-      A3 MOV
+  [stackframe]  (1)
+      C9 LEAVE
 
   [undoc]  (1)
       D6 SALC
@@ -201,12 +176,6 @@ opgen status — 555 P54C opcodes
 
   [operand-pattern:Td,Rd]  (1)
       0F 26 MOV
-
-  [operand-pattern:Eb,#AL,Gb]  (1)
-      0F B0 CMPXCHG
-
-  [operand-pattern:Evqp,#rAX,Gvqp]  (1)
-      0F B1 CMPXCHG
 
   [undef]  (1)
       0F B9 UD

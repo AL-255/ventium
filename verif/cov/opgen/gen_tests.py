@@ -79,7 +79,6 @@ SKIP = {
     "IRETD": "sys", "BOUND": "fault", "UD2": "fault", "F00F": "fault",
     # port I/O -> #GP in user mode (covered by --cosim covio)
     "IN": "io", "OUT": "io", "INS": "io", "OUTS": "io",
-    "ENTER": "stackframe",
     # not P54C / undocumented-removed / undefined
     "LOADALL": "not-p54c", "UD": "undef", "UD1": "undef", "UD0": "undef",
     "SALC": "undoc", "SETALC": "undoc", "LEAVE": "stackframe",
@@ -295,6 +294,57 @@ def emit_lines(s):
             for imm in IMM[w]:
                 L.append(f"    mov{SUF[w]}  {imm}, %{r}")
         return L, "GEN", "mov-reg-imm"
+
+    # --- MUL/IMUL/DIV/IDIV (F6/F7 group /4-/7, implicit AX or EDX:EAX) ------
+    if mn in ("MUL", "IMUL", "DIV", "IDIV") and s["opval"] in ("F6", "F7") \
+            and s["opcd_ext"] in ("4", "5", "6", "7"):
+        w = width_of(types[-1])
+        sfx = SUF[w]
+        if mn in ("MUL", "IMUL"):
+            for r in safe_regs(w):      # multiplier = any r/m
+                L.append(f"    {mn.lower()}{sfx}  %{r}")
+            L += REINIT
+            L.append(f"    {mn.lower()}{sfx}  (%esi)")
+        else:                            # DIV/IDIV — divisor must not overlap the dividend
+            dividend = ("    movw $0x0041, %ax" if w == 8
+                        else "    xorl %edx, %edx\n    movl $0x00004141, %eax")
+            setd = (lambda r: f"    movb $7, %{r}") if w == 8 else (lambda r: f"    movl $7, %{r}")
+            div_regs = (["bl", "cl", "dl", "bh", "ch", "dh"] if w == 8
+                        else ["ecx", "ebx", "esi", "edi"])
+            for r in div_regs:
+                L += [dividend, setd(r), f"    {mn.lower()}{sfx}  %{r}"]
+            L += REINIT + [dividend,
+                           ("    movb $7, (%esi)" if w == 8 else "    movl $7, (%esi)"),
+                           f"    {mn.lower()}{sfx}  (%esi)"]
+        return L, "GEN", "mul/div"
+
+    # --- CMPXCHG (0F B0/B1: r/m, r; implicit AL/eAX) ------------------------
+    if mn == "CMPXCHG":
+        w = width_of(types[0]); g = safe_regs(w)[1]
+        for r in safe_regs(w):
+            L.append(f"    {mn.lower()}{SUF[w]}  %{g}, %{r}")
+        L += REINIT
+        L.append(f"    {mn.lower()}{SUF[w]}  %{g}, (%esi)")
+        return L, "GEN", "cmpxchg"
+
+    # --- AAM / AAD (reference mnem AMX / ADX) -------------------------------
+    if mn in ("AAM", "AAD", "AMX", "ADX"):
+        base = "d4" if mn in ("AAM", "AMX") else "d5"
+        L += ["    movw $0x0905, %ax", f"    .byte 0x{base}, 0x0a",   # base 10
+              "    movw $0x0905, %ax", f"    .byte 0x{base}, 0x10"]   # base 16
+        return L, "GEN", "aam/aad"
+
+    # --- ENTER / LEAVE (stack frame) ---------------------------------------
+    if mn == "ENTER":
+        L += ["    enter $0, $0", "    leave", "    enter $16, $0", "    leave"]
+        return L, "GEN", "enter"
+    if mn == "LEAVE":
+        L += ["    movl %esp, %ebp", "    pushl $0", "    leave"]
+        return L, "GEN", "leave"
+
+    # --- MOV moffs (A0-A3) — known core gap (A0-A3 not decoded); cataloged --
+    if mn == "MOV" and any(o["a"] == "O" for o in ops):
+        return None, "MANUAL", "mov-moffs-coregap"
 
     # --- LEA reg, mem -------------------------------------------------------
     if mn == "LEA":

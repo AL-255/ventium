@@ -52,3 +52,5 @@ op_0f01_7 CORE-GAP  INVLPG  halts (unimplemented)
 # --- FAR transfers: 9A (far CALL) + CB (far RET) covered by the sys lane
 #     (verif/sys/tests/psocfarcall, real-mode, vs qemu-system). EA/CA/FF3/FF5
 #     need hand-encoded 16-bit far pointers (psocfarcall pattern) -- TODO stream.
+# --- CORE-GAP: MOV moffs (A0-A3, direct-offset accumulator) not decoded --------
+#   (documented earlier; A0-A3 -> d_unknown -> HALT). Listed, no differential test.
