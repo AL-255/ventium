@@ -758,6 +758,29 @@ call setup (cs=0x87 ~0x320-0x338 + the INT 0x31 handler) to find the missed `sub
 relocation (or the control-flow / segment condition that skips it). That op (or its skip) is the real
 core bug. This supersedes ALL earlier root hypotheses; EBX/PUSHAW/task-switch are NOT the cause.
 
+## 23p. Concrete oracle-confirmed lead: RTL DS base = 0x10000000 (qemu: 0x46010)
+
+Decoded the real-mode-call setup at cs=0x87 (verified bases via qemu: cs/ds/ss/es=0x228f0):
+```
+  0x32f INT 0x31              ; DPMI simulate-real-mode-call (CWSDPMI handler)
+  0x331 PUSH DS              ; DS=0x8f (base 0x228f0)
+  0x332 POP FS               ; FS := DS = 0x8f  (so the add below uses the OLD ds via FS)
+  0x334 MOV DS,[0x626]       ; DS reloaded
+  0x338 ADD [fs:bx+si+0x20],EBX  ; fs:0x7441 -> 0x29d31, the stub
+```
+RTL tap at the add: **DS base = 0x10000000** (256MB, beyond the 64MB of RAM). qemu in cs=0x87 only ever
+has DS sel 0xb7/base 0x46010 or sel 0x8f/base 0x228f0 — **NEVER 0x10000000**. So the RTL's
+`MOV DS,[0x626]` (or the descriptor it loads) computes a WRONG base. This is a real, oracle-confirmed
+segment-load/descriptor divergence (core domain). It does not directly mis-target the crashing add
+(which uses FS, correct), but it shows the RTL diverges in this very routine's segment setup — and the
+missing stub un-relocation (§23o) is almost certainly in the same INT 0x31 / segment-setup path.
+
+TOOLING NOTE: qemu `-d cpu` (file) works as the oracle; the gdbstub (`-gdb tcp`) and `-d in_asm` do NOT
+produce output in this env, so I can't yet watch qemu's stub memory writes directly. NEXT: (a) capture
+the RTL's DS SELECTOR + [0x626] value + the GDT/LDT descriptor at 0x334 to localize the segment-load
+bug (selector-read vs descriptor-base), and (b) trace the INT 0x31 (CWSDPMI) handler RTL-vs-qemu by EIP
+to find the skipped stub un-relocation. Both are now tractable with the working oracle.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
