@@ -189,9 +189,13 @@ module tb_l1_axi;
       do_read (s,             d);                    // refill
     end
     for (int i=0;i<32;i++) do_write(32'h0000_0040 + 32'(i)*4, 32'h1 << i);  // walking WDATA
-    for (int i=2;i<25;i++) begin
-      do_read (32'h1 << i, d);                       // walking araddr bits 2..24 (to ~16 MiB)
+    for (int i=2;i<29;i++) begin
+      do_read (32'h1 << i, d);                       // walking araddr bits 2..28 (to ~256 MiB)
       do_write(32'h1 << i, ~(32'h1 << i));           // walking awaddr + wdata
+    end
+    for (int i=0;i<24;i++) begin                     // diverse multi-bit addr combos
+      do_read ((32'hA5A5_A5A5 >> i) & 32'h0FFF_FFFC, d);
+      do_write((32'h5A5A_5A5A >> i) & 32'h0FFF_FFFC, 32'(i) ^ 32'hF0F0_0F0F);
     end
 
     if (errors==0) $display("L1AXI-GATE-OK (all checks pass)");
