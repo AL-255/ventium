@@ -537,8 +537,16 @@ module decode_stages
             if (d_shift_cl) d_len=pfx_len+4'd3;
             else begin d_shift_imm=ibuf[m_idx+1][4:0]; d_imm={24'd0,ibuf[m_idx+1]}; d_len=pfx_len+4'd4; end
           end else begin
-            d_unknown=1'b1;
-            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+(d_shift_cl?4'd0:4'd1);
+            // memory destination RMW (SHLD/SHRD Ev,Gv,Ib/CL): read [mem], shift it with
+            // src_reg + count, write [mem] back. d_src_reg=modrm_reg (above) is the bits
+            // shifted in. Mirrors the K_SHIFT memory RMW (0xC1 /r). Was d_unknown->HALT.
+            d_mem_read=1'b1; d_mem_write=1'b1; d_mem_dst=1'b1;
+            if (d_shift_cl) d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+            else begin
+              d_shift_imm=ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)][4:0];
+              d_imm={24'd0,ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+              d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
+            end
           end
         end
         8'b1100_1???: begin // BSWAP r32
