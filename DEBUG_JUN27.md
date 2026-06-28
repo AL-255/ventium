@@ -1122,6 +1122,28 @@ not the stale oracle). NEXT: trace the write of the 0x44000-vs-0x45000 page deci
 free-page list (a memory diff, or extend the trace with the allocator's key memory cells); the diff tool
 makes this tractable. Goal 1 solid; Goals 2/3 root now an aligned-diff-confirmed allocator page divergence.
 
+## 23ag. CORE EXECUTES CORRECTLY -- the divergence is MEMORY/ALLOCATION state, not a register bug
+
+Anchored the aligned diff at the corruptor cs=0x87:0x338 itself: pre-state MATCHES EXACTLY (EBX=0x000e0021
+in BOTH, all GPRs+segs equal). cs=0x87:0x338 runs ONCE in both (RTL#9642325 / qemu#9832744). So BOTH add
+the same delta 0x000e0021 to the stub dword -> the stub MEMORY already differs by 0xe BEFORE the ADD
+(qemu's was un-relocated to (valid-0x000e0021); the RTL's was left at valid -> over-relocates). Confirms
+the original "skipped un-relocation SUB" mechanism.
+
+KEY CONCLUSION (from an aligned per-instruction diff, not the stale oracle): the RTL's REGISTERS MATCH
+qemu at every checkpoint -- the anchor op (cs=0x87:0x258) pre-state MATCHES, and the corruptor pre-state
+MATCHES. So the CORE EXECUTES CORRECTLY (identical register results to qemu). The Quake divergence is
+NOT a core register-computation bug; it is a MEMORY / DPMI-DOS-ALLOCATION state divergence:
+  - the real-mode-call code+data BLOCK is allocated 0x119 paragraphs higher in the RTL (cs=0x26ac/ds=0x2c70
+    vs qemu cs=0x2593/ds=0x2b57) -- a DOS-memory allocation difference, and
+  - a block field is 0xe higher (ebx briefly = 0x000e130e vs 0x000e1300 when loaded at cs=26ac:0x2ca6),
+    which is what leaves the stub 0xe over-relocated.
+Both are MEMORY values seeded earlier in the DPMI setup (the registers that wrote/loaded them re-converge,
+so the writes happened during a transient where a memory-sourced value diverged). NEXT: a MEMORY-level
+diff (extend the trace to log the stub + the block-allocation cells, or a relocation-aware block compare)
+to catch the exact write that puts the 0xe / 0x119 into DOS memory -- the register diff has proven the
+core is faithful and pinned the divergence to the DPMI DOS allocator's block placement/contents.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
