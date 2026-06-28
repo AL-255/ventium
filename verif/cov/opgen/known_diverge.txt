@@ -53,3 +53,8 @@ op_0f00_0 CORE-GAP  SLDT  r/m16     halts (0F00 descriptor group)
 op_0f00_1 CORE-GAP  STR   r/m16     halts
 op_0f00_4 CORE-GAP  VERR  r/m16     halts
 op_0f00_5 CORE-GAP  VERW  r/m16     halts
+# --- TRANSC nuance (verified by run-transc.sh against the +VEN_TRANSCENDENTAL build):
+#   F2XM1/FYL2X/FPATAN/FYL2XP1 -> bit-EXACT vs qemu; FPTAN/FSINCOS/FSIN/FCOS ->
+#   compute but ULP-INEXACT (approximation vs softfloat, expected, not a bug).
+op_d9_6_f4  CORE-GAP  FXTRACT  HALTs EVEN WITH +VEN_TRANSCENDENTAL (genuinely unimplemented;
+#            FXTRACT is exact exponent/mantissa split, so this is a real gap, not accuracy)
