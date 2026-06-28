@@ -67,10 +67,23 @@ def main():
             d2, _ = load(dvs); consts.append((d2, dvs))
             L += [f"    fldl {d2}", f"    fldl {d1}", f"    {mn}",
                   "    fstp %st(0)", "    fstp %st(0)"]
+    # FP-environment save/restore — exercise the fpu_writeback FP env pointers
+    # (fp_eptr_fip/fcs/fds: last-FP-instruction + data-operand addresses) and the
+    # env status/control words. Interleave diverse FP ops (varying FIP/FDS) with
+    # FNSTENV/FNSAVE/FLDENV/FRSTOR so the env datapath toggles.
+    for j, v in enumerate(INPUTS):
+        nm, val = load(v); consts.append((nm, val))
+        L += [f"    fldl {nm}", "    fsin",
+              "    fnstenv fenv0", "    fldenv fenv0",
+              "    fnsave fstate", "    frstor fstate",
+              f"    fldl {nm}", "    fadd %st(0), %st(0)", "    fnstenv fenv1"]
     L += ["    movl $1, %eax", "    xorl %ebx, %ebx", "    int $0x80"]
     # data section
     L.append("    .data")
-    L.append("    .align 8")
+    L.append("    .align 16")
+    L.append("fenv0: .zero 28")
+    L.append("fenv1: .zero 28")
+    L.append("fstate: .zero 108")
     for nm, val in consts:
         L.append(f"{nm}: .double {val}")
     open(os.path.join(OUT, "transc_sweep.s"), "w").write("\n".join(L) + "\n")
