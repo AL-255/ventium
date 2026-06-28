@@ -882,6 +882,42 @@ module tb_biu_p5;
     end
   endtask
 
+  // BOFF# with two outstanding WRITES over walking data, so the SAVED (bsv_*)
+  // pipeline buffer holds a write with diverse data/addr -> toggles bsv_wdata/
+  // bsv_addr/bsv_be (the deep 3rd-level buffer single/read cycles never load).
+  task automatic run_boff_writes_sweep;
+    integer i;
+    begin
+      $display("[scenario] BOFF# + two outstanding WRITES sweep (bsv_* toggle)");
+      for (i=0;i<20;i=i+1) begin
+        @(negedge clk);
+        req=1; req_we=1; req_cache=0; req_lock=0;
+        req_addr=(29'h1<<i); req_be=~(8'h1<<(i%8));
+        req_wdata=(64'h1<<i)|(64'hFF00<<((i*4)%48));
+        @(posedge clk); while (!req_ack) @(posedge clk);
+        @(negedge clk); req=0;
+        wait (dbg_state==S_T2);
+        @(negedge clk); nan=0; req=1; req_we=1;
+        req_addr=((~(29'h1<<i))&29'h1FFFFFFF); req_be=(8'h1<<(i%8));
+        req_wdata=(~(64'h1<<i));
+        @(posedge clk); while (!req_ack) @(posedge clk);
+        @(negedge clk); req=0; nan=1;
+        wait (dbg_state==S_T2P);
+        @(negedge clk); boffn=0;          // backoff with two writes outstanding -> save to bsv
+        @(posedge clk); @(posedge clk);
+        @(negedge clk); boffn=1;           // restart both
+        wait (dbg_state==S_T2);
+        @(negedge clk); brdyn=0;           // complete 1st restarted write
+        @(posedge clk); @(negedge clk); brdyn=1;
+        wait (dbg_state==S_T2 && dbg_outstanding==1);
+        @(negedge clk); brdyn=0;           // complete 2nd
+        @(posedge clk); @(negedge clk); brdyn=1;
+        tick(1);
+      end
+      chk(dbg_outstanding==0, "boff-writes sweep drained");
+    end
+  endtask
+
   task automatic run_hold;
     begin
       $display("[scenario] HOLD / HLDA arbitration");
@@ -985,6 +1021,7 @@ module tb_biu_p5;
     // arbitration / abort
     run_boff();
     run_boff_two_outstanding(29'h06000000, 29'h06000008);  // [FIX-3]
+    run_boff_writes_sweep();                               // bsv_* buffer toggle
     run_hold();
     run_hold_during_reset();                               // [FIX-12]
     run_hold_during_lock(29'h05000080);
