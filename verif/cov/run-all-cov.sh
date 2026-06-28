@@ -24,6 +24,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COV="$ROOT/build/cov"; COMB="$COV/combined"
 PYTHON="${PYTHON:-python3}"
 VERILATOR_COVERAGE="${VERILATOR_COVERAGE:-verilator_coverage}"
+MAKE="${MAKE:-make}"
 COV_SUM="$SCRIPT_DIR/cov_summary.py"
 say() { printf '\n########## %s ##########\n' "$*"; }
 
@@ -45,16 +46,23 @@ say "LANE 7/8 — CPUID/RDTSC/INVD via --cosim"
 bash "$SCRIPT_DIR/run-cosim-cov.sh" || true
 say "LANE 8/9 — build-flags (feature-rich variant: FE_PIPE/UOPCACHE/FP_PIPE/TRANSCENDENTAL/...)"
 bash "$SCRIPT_DIR/run-flags-cov.sh" || true
-say "LANE 9/9 — per-opcode ISA suite (opgen: every P54C opcode, func+cycle+mode)"
+say "LANE 9/10 — per-opcode ISA suite (opgen: every P54C opcode, func+cycle+mode)"
 # coverage-only (GOLDEN=0) — fast, no qemu; the differential is the make opgen gate.
 GOLDEN=0 CYCLE=1 bash "$SCRIPT_DIR/opgen/run-opgen.sh" >/dev/null 2>&1 || true
 bash "$SCRIPT_DIR/opgen/run-modes.sh" >/dev/null 2>&1 || true
+say "LANE 10/10 — transcendental engine (in-RTL F2XM1/FYL2X/FPATAN/FSINCOS/FPREM sweep)"
+# the transcendental/FPREM engine is ONLY instantiated in the +VEN_TRANSCENDENTAL
+# build; the input sweep toggles its wide CORDIC/polynomial datapaths -> big toggle
+# gain. Build the feature TB on demand, then run-transc dumps coverage dats.
+[ -x "$ROOT/verif/tb/obj_dir_cov_feat/tb_ventium" ] || $MAKE -C "$ROOT/verif/tb" cov-feat >/dev/null 2>&1 || true
+bash "$SCRIPT_DIR/opgen/run-transc.sh" >/dev/null 2>&1 || true
 
 # ---- combined CORE coverage (every ventium_top lane, same top) -------------
-say "COMBINED CORE COVERAGE (ISA + system + cycle + halt + cosim + build-flags + opgen)"
+say "COMBINED CORE COVERAGE (ISA + system + cycle + halt + cosim + build-flags + opgen + transc)"
 CORE_DATS=$(ls "$COV"/dat/*.dat "$COV"/sys/dat/*.dat "$COV"/cyc/dat/*.dat \
     "$COV"/halt/dat/*.dat "$COV"/cosim/dat/*.dat "$COV"/flags/dat/*.dat \
-    "$COV"/opgen/dat/*.dat "$COV"/opgen/dat/cyc/*.dat "$COV"/opgen/modes/dat/*.dat 2>/dev/null || true)
+    "$COV"/opgen/dat/*.dat "$COV"/opgen/dat/cyc/*.dat "$COV"/opgen/modes/dat/*.dat \
+    "$COV"/opgen/transc/dat/*.dat 2>/dev/null || true)
 if [ -n "$CORE_DATS" ]; then
     # shellcheck disable=SC2086
     "$VERILATOR_COVERAGE" --write "$COMB/core.dat" $CORE_DATS > "$COMB/merge.log" 2>&1 \
