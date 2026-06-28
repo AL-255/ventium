@@ -510,6 +510,35 @@ module tb_biu_p5;
     end
   endtask
 
+  // PIPELINED + LOCKED: a locked READ pipelined ahead of a locked WRITE, so the
+  // promotion of the 2nd (locked) cycle exercises the p_lock arm in the promote
+  // block (lock_active<=1) and the locked-write lock RELEASE on its completion.
+  task automatic run_pipelined_locked(input [28:0] a0, input [28:0] a1);
+    begin
+      $display("[scenario] PIPELINED + LOCKED a0=%h a1=%h", a0, a1);
+      @(negedge clk);
+      req=1; req_we=0; req_cache=0; req_lock=1; req_split=0; req_addr=a0; req_be=8'hFF;
+      @(posedge clk); while (!req_ack) @(posedge clk);
+      @(negedge clk); req=0;
+      wait (dbg_state==S_T2);
+      @(negedge clk); nan=0;                       // allow pipelining
+      req=1; req_we=1; req_lock=1; req_addr=a1; req_wdata=64'hDEAD_BEEF_CAFE_BABE;
+      @(posedge clk); while (!req_ack) @(posedge clk);
+      @(negedge clk); req=0; nan=1;
+      wait (dbg_state==S_T2P);
+      @(negedge clk); brdyn=0; d_in=64'h3333_3333_3333_3333;   // complete locked read
+      @(posedge clk);
+      @(negedge clk); brdyn=1;
+      wait (dbg_state==S_T2);                       // 2nd (locked write) promoted -> current
+      @(negedge clk); brdyn=0;                      // complete locked WRITE -> lock releases
+      @(posedge clk);
+      @(negedge clk); brdyn=1;
+      tick(2);
+      chk(dbg_outstanding==0, "pipelined locked pair completed");
+      chk(lockn==1'b1, "LOCK# released after the locked write");
+    end
+  endtask
+
   // [FIX-1] CORNER: NA# coincident with the TERMINATING BRDY# while a 2nd req is
   // ready. The 2nd cycle must be issued exactly once (a single new ADS#), with no
   // double req_ack and no stranded cycle.  We drive NA#+BRDY# on the SAME clock as
@@ -877,6 +906,7 @@ module tb_biu_p5;
     run_locked_rmw  (29'h03000040, 64'hAABB_CCDD_EEFF_0011);
     run_locked_split(29'h03000044, 64'h00DD_00DD_00DD_00DD);  // [FIX-7] SCYC asserted
     run_pipelined   (29'h04000000, 29'h04000008);
+    run_pipelined_locked(29'h04100000, 29'h04100008);   // pipelined + locked promotion
 
     // snoop set
     run_snoop       (27'h0AAAA02, 1'b1, 1'b0, 1'b1);   // hit, not modified
