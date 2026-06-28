@@ -41,7 +41,8 @@ opgen_worker() {
     NAME="$("$PYTHON" -c "import json,sys;print(json.load(open(sys.argv[1]))['name'])" "$MAN")"
     DIR="$(dirname "$MAN")"
     SRC="$DIR/$("$PYTHON" -c "import json,sys,os;print(os.path.basename(json.load(open(sys.argv[1]))['src']))" "$MAN")"
-    read -r LOAD ENTRY MAX <<<"$("$PYTHON" -c "import json,sys;m=json.load(open(sys.argv[1]));print(m['load_addr'],m['entry'],m['max_insn'])" "$MAN")"
+    read -r LOAD ENTRY MAX X87 <<<"$("$PYTHON" -c "import json,sys;m=json.load(open(sys.argv[1]));print(m['load_addr'],m['entry'],m['max_insn'],int(bool(m.get('x87'))))" "$MAN")"
+    local XF=""; [ "$X87" = 1 ] && XF="--x87"
     ELF="$WORK/$NAME.elf"; FLAT="$WORK/$NAME.flat"
     if ! "$CC" -m32 -march=pentium -nostdlib -static -Wl,--build-id=none -Wl,-Ttext="$LOAD" \
             -o "$ELF" "$SRC" 2>"$WORK/$NAME.asm.log"; then
@@ -51,18 +52,20 @@ opgen_worker() {
         || { echo "ASMFAIL $NAME elf2flat" > "$WORK/$NAME.res"; return; }
     INIT_ESP="0x40c34910"
     if [ "$GOLDEN" = 1 ]; then
-        PORT=$(( 20000 + ($(cksum <<<"$NAME" | cut -d' ' -f1) % 40000) ))
-        if ! "$PYTHON" "$GEN_TRACE" --qemu "$QEMU" --elf "$ELF" --out "$WORK/${NAME}_q.vtrace" \
-                --max-insn "$MAX" --port "$PORT" >"$WORK/$NAME.gold.log" 2>&1; then
-            echo "GOLDFAIL $NAME" > "$WORK/$NAME.res"; return
-        fi
+        local base=$(( 20000 + ($(cksum <<<"$NAME" | cut -d' ' -f1) % 40000) )) ok=0 a
+        for a in 0 1 2 3; do   # retry on a fresh port to ride out gdbstub bind races
+            if "$PYTHON" "$GEN_TRACE" --qemu "$QEMU" --elf "$ELF" --out "$WORK/${NAME}_q.vtrace" \
+                    --max-insn "$MAX" --port $(( base + a * 1009 )) $XF >"$WORK/$NAME.gold.log" 2>&1; then
+                ok=1; break; fi
+        done
+        [ "$ok" = 1 ] || { echo "GOLDFAIL $NAME" > "$WORK/$NAME.res"; return; }
         INIT_ESP="$("$PYTHON" -c "import json,sys
 try:
  f=open(sys.argv[1]);f.readline();print(json.loads(f.readline())['esp'])
 except Exception:print('0x40c34910')" "$WORK/${NAME}_q.vtrace")"
     fi
     VEN_COV_DAT="$DAT/$NAME.dat" "$TB" --image "$FLAT" --load "$LOAD" --entry "$ENTRY" \
-        --init-esp "$INIT_ESP" --out "$WORK/${NAME}_r.vtrace" --max-insn "$MAX" >"$WORK/$NAME.rtl.log" 2>&1 || true
+        --init-esp "$INIT_ESP" --out "$WORK/${NAME}_r.vtrace" --max-insn "$MAX" $XF >"$WORK/$NAME.rtl.log" 2>&1 || true
     if [ "$GOLDEN" = 1 ]; then
         if "$PYTHON" "$COMPARE" --mode func "$WORK/${NAME}_q.vtrace" "$WORK/${NAME}_r.vtrace" >"$WORK/$NAME.cmp" 2>&1; then
             echo "PASS $NAME" > "$WORK/$NAME.res"

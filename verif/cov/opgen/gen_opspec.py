@@ -107,6 +107,10 @@ def main():
                 sib = any(mm in MODRM_MEM_METHODS for mm in methods) or \
                       (ext is not None and not entry.get("mod") == "11")
                 pref = text(entry, "pref")             # mandatory prefix (66/F2/F3/9B)
+                sec = text(entry, "sec_opcd")          # x87 reg-form byte (F0..FF, C9..)
+                mod_a = entry.get("mod")               # 'mem' / 'nomem' / None
+                doc = entry.get("doc")                 # 'u' = undocumented
+                palias = entry.get("part_alias")       # set => a redundant alias encoding
                 imm = [t for (_k, mm, t) in ops if mm in IMM_METHODS]
                 is_x87 = any(mm in ("EST", "ES") for mm in methods) or \
                          opval in ("D8", "D9", "DA", "DB", "DC", "DD", "DE", "DF")
@@ -122,6 +126,10 @@ def main():
                     "operands": [{"k": k, "a": mm, "t": t} for (k, mm, t) in ops],
                     "has_modrm": bool(has_modrm),
                     "opcd_ext": ext,                  # group /digit or None
+                    "sec_opcd": sec,                  # x87/2nd-byte reg-form selector
+                    "mod_attr": mod_a,                # mem / nomem (x87 form)
+                    "doc": doc,                       # 'u' undocumented
+                    "part_alias": palias,             # redundant alias encoding
                     "sib_possible": bool(sib),
                     "pref": pref,
                     "imm": imm,
@@ -136,7 +144,10 @@ def main():
     # de-dup identical (opcode, mnem, opcd_ext, pref) keeping first
     seen = set(); uniq = []
     for s in specs:
-        key = (s["opcode"], s["mnem"], s["opcd_ext"], s["pref"], tuple(o["a"]+o["t"] for o in s["operands"]))
+        # sec_opcd + mod_attr distinguish the x87 reg-form ops that share opcode+
+        # /digit (F2XM1..FCOS, FCHS, FNOP, ...) — without them they collapse to one.
+        key = (s["opcode"], s["mnem"], s["opcd_ext"], s["sec_opcd"], s["mod_attr"],
+               s["pref"], tuple(o["a"]+o["t"] for o in s["operands"]))
         if key in seen:
             continue
         seen.add(key); uniq.append(s)
