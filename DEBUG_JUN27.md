@@ -330,7 +330,31 @@ Next concrete step: value-watch — log any store of 16-bit `0x0034` to the real
 (needs SS captured at the RETF to compute the linear address), or trace the nested call at
 [6305]-[7081] that precedes the corruption. That store is the bug site.
 
-## 17. Bottom line
+## 17. ROOT MECHANISM: a near-CALL to a far-RET helper over-pops a saved register as CS
+
+Value-watched the corrupted stack CS slot (SS=0x2c70, esp~0x6f90 -> lin 0x33692) and froze the log at
+the first cs=0x34 retire. The bad write is **cs=0x26ac:0x31fa storing 0x0034** to the CS slot — and
+decoding the code reveals the full chain:
+- `cs=0x26ac:0x31f5` = `c8 0c 00 00` = **ENTER 12,0** (function prologue)
+- `cs=0x26ac:0x31f9` = `56` = PUSH SI;  `cs=0x26ac:0x31fa` = `57` = **PUSH DI** (DI=0x0034) — normal
+  callee-save. THIS is the 0x0034 that later becomes the bogus CS.
+- `cs=0x26ac:0x3272` = `e8 df 26` = **near CALL 0x5954** (pushes only IP=0x3275)
+- `0x5950..0x5966` = two 32-bit shift helpers (SHR/SHL/OR/XCHG), each ending in `cb` = **far RETF**
+  (0x595d, 0x5966) — i.e. compiler FAR-helpers.
+
+So the far RETF at 0x595d pops IP=0x3275 (correct) **plus one extra word** as CS; that extra word is
+the saved DI = 0x0034 -> jumps to **cs=0x34:0x3275** (data) -> #UD. Early the stale slot happened to
+hold 0x26ac so the same RETF "worked" by luck; once PUSH DI leaves 0x34 there, it crashes.
+
+This is a **near-CALL / far-RET mismatch** in the EXECUTED code, NOT a core opcode bug: opgen
+validates near-CALL (pushes 1 word) and far-RET (pops 2) individually, and both behave per their
+bytes. So an UPSTREAM divergence puts execution onto this mismatched path (we near-call a far-helper
+that real go32 would far-call). Remaining root work: find why 0x3272 is reached as a near-CALL to a
+far-helper — trace how 0x3272 is entered (a mis-landed jump / wrong boundary), or whether the loaded
+go32 bytes at 0x3272 differ from the on-disk Quake image (a load/relocation issue). The exact failing
+instructions are now pinned (0x3272 near-call, 0x595d/0x5966 far-ret, 0x31fa the PUSH DI).
+
+## 18. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
