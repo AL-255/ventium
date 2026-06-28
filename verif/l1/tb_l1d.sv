@@ -172,6 +172,23 @@ module tb_l1d;
     do_snoop(32'h0000_4000);                            // northbridge invalidates the line
     do_read(32'h0000_4000, d); chk("post-snoop refill",  d, 32'h0BAD_C0DE);            // miss -> fresh data
 
+    // ----- COVERAGE sweep: walk data/address across every set, way and tag so
+    // the cache DATA array (rd_line/bp_line), VALID/LRU bits (dc_val/dc_lru) and
+    // TAGs toggle. No chk() -> pure toggle stimulus, cannot fail the gate. -------
+    $display("[11] COVERAGE sweep: walking data/addr across sets/ways/tags");
+    for (int i=0;i<128;i++) begin
+      automatic logic [31:0] s = 32'(i) * 32'h20;          // one line per set (addr[11:5])
+      do_write(s,             32'h1 << (i%32));            // way A, walking data
+      do_write(s + 32'h1000,  ~(32'h1 << (i%32)));         // way B (same set), complement
+      do_read (s + 32'h2000, d);                            // 3rd tag -> LRU eviction
+      do_read (s + 32'h8000, d);                            // 4th tag (high addr bit) -> tag toggle
+      do_read (s,            d);                             // refill the evicted way A
+    end
+    for (int i=0;i<32;i++) do_write(32'h0000_0040 + 32'(i)*4, 32'h1 << i);  // walking data in a line
+    for (int i=0;i<32;i++) do_read (32'h0000_0040 + 32'(i)*4, d);
+    for (int i=0;i<16;i++) do_read (32'(i)*32'h10000, d);   // walking-bit TAGs (64 KiB stride)
+    do_snoop(32'h0000_2000); do_snoop(32'h0000_8000); do_snoop(32'h0001_0000);
+
     if (errors==0) $display("L1D-GATE-OK (all checks pass)");
     else           $display("L1D-GATE-FAIL (%0d errors)", errors);
     $finish;
