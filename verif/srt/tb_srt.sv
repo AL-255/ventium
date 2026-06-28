@@ -25,8 +25,8 @@ module tb_srt;
     $readmemh("build/srt/vec_eb.hex", eb);
     fail = 0;
     for (int i=0; i<N; i++) begin
-      gotc = fx_srt_div(av[i], bv[i], 2'd0, 1'b0)[79:0];   // correct PLA
-      gotb = fx_srt_div(av[i], bv[i], 2'd0, 1'b1)[79:0];   // buggy   PLA
+      gotc = fx_srt_div(av[i], bv[i], 2'd0, 2'b11, 1'b0)[79:0];   // correct PLA
+      gotb = fx_srt_div(av[i], bv[i], 2'd0, 2'b11, 1'b1)[79:0];   // buggy   PLA
       if (gotc !== ec[i]) begin
         fail++; if (fail<=8) $display("FAIL[%0d] correct: a=%020h b=%020h got=%020h exp=%020h", i,av[i],bv[i],gotc,ec[i]);
       end
@@ -35,8 +35,8 @@ module tb_srt;
       end
     end
     // headline: the famous FDIV pair, both PLAs (vector 0).
-    $display("FDIV 4195835/3145727 correct = %020h (expect 3fffaabaa0e3e35a14bd)", fx_srt_div(av[0],bv[0],2'd0,1'b0)[79:0]);
-    $display("FDIV 4195835/3145727 flawed  = %020h (expect 3fffaab7f6392a768638)", fx_srt_div(av[0],bv[0],2'd0,1'b1)[79:0]);
+    $display("FDIV 4195835/3145727 correct = %020h (expect 3fffaabaa0e3e35a14bd)", fx_srt_div(av[0],bv[0],2'd0,2'b11,1'b0)[79:0]);
+    $display("FDIV 4195835/3145727 flawed  = %020h (expect 3fffaab7f6392a768638)", fx_srt_div(av[0],bv[0],2'd0,2'b11,1'b1)[79:0]);
     if (fail==0) $display("SRT-GATE-OK  (%0d vectors x 2 PLAs bit-exact vs golden)", N);
     else         $display("SRT-GATE-FAIL  (%0d mismatches)", fail);
     $finish;
