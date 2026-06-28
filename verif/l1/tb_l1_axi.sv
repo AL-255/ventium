@@ -198,6 +198,16 @@ module tb_l1_axi;
       do_write((32'h5A5A_5A5A >> i) & 32'h0FFF_FFFC, 32'(i) ^ 32'hF0F0_0F0F);
     end
 
+    // [10] COVERAGE: MISALIGNED non-cacheable stores that straddle a 32-bit word
+    //      boundary -> the AXI master must issue a 2-beat write (beat B), toggling
+    //      wdata2_q / awaddr2_q / wstrb2_q / xword_q (0% before). NC region 0x4000+;
+    //      de-assert shutdown so the writes actually issue AW.
+    @(negedge clk); shutdown <= 1'b0; repeat (2) @(posedge clk);
+    for (int off=1; off<4; off++)                    // byte offsets 1,2,3 -> spill high
+      for (int i=0;i<32;i++)
+        do_write(32'h0000_4000 + 32'(off) + 32'(i)*4, (32'h1 << i) ^ 32'hC3C3_5A5A);
+    repeat (4) @(posedge clk);
+
     if (errors==0) $display("L1AXI-GATE-OK (all checks pass)");
     else           $display("L1AXI-GATE-FAIL (%0d errors)", errors);
     $finish;
