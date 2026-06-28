@@ -1281,11 +1281,13 @@ module decode_stages
           // real-mode form DOS Quake's CWSDPMI uses) pushes BP+2-byte frame. Both
           // share the C8 iw ib encoding (alloc16=ib1:ib0, level=ib2). The nested form
           // (level>0, a read+push micro-loop) stays the loud HALT (d_unknown).
-          if (ibuf[pfx_len+3]==8'd0) begin
-            d_kind=K_STKMISC; d_sm=SM_ENTER; d_mem_write=1'b1;
-            d_w = eff_opsize ? 3'd2 : 3'd4;                     // 16-bit (real) vs 32-bit frame
-            d_imm={16'd0, ibuf[pfx_len+2], ibuf[pfx_len+1]};   // alloc (bytes to subtract)
-          end else d_unknown=1'b1;                              // nested (level>0) -> HALT
+          // d_imm = {level[4:0] (imm8 mod 32), alloc16}. level 0 => the existing
+          // single-push S_STORE form; level>0 => the nested display-copy micro-sequence
+          // (S_ENTER). The level lives in d_imm[20:16]; alloc stays d_imm[15:0] so the
+          // level-0 path (which reads q_imm[15:0]) is byte-identical.
+          d_kind=K_STKMISC; d_sm=SM_ENTER; d_mem_write=1'b1;
+          d_w = eff_opsize ? 3'd2 : 3'd4;                       // 16-bit (real) vs 32-bit frame
+          d_imm={11'd0, ibuf[pfx_len+3][4:0], ibuf[pfx_len+2], ibuf[pfx_len+1]};
         end
         // ---- D7: XLATB — AL <- [DS:(E)BX + zero-extend(AL)] (table lookup) ----
         // One-byte, no ModR/M. The default (no 0x67) 32-bit address form: linear

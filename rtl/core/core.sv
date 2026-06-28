@@ -56,6 +56,7 @@ typedef enum logic [4:0] {
 // exactly filled a [4:0] enum).
 typedef enum logic [5:0] {
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
+    S_ENTER,    // nested ENTER (level>0): read-display + push micro-sequence
     S_FLOAD, S_FEXEC, S_FSTORE,
 `ifdef VEN_SRT_ITER
     S_FP_BUSY,   // wait for the iterative SRT FDIV/FSQRT engine
@@ -1843,6 +1844,12 @@ module core
 
   logic [31:0] mem_load_data, mem_load_data2;
   logic [3:0]  step;            // micro-sequence step counter
+  // nested ENTER (level>0) micro-sequence state: ent_k = current push index (1..level+1),
+  // ent_rd = this beat reads the display source [SS:EBP-(k-1)*w] before the push,
+  // ent_val = the value to push (EBP / read display entry / FrameTemp).
+  logic [5:0]  ent_k;
+  logic        ent_rd;
+  logic [31:0] ent_val;
   logic [31:0] str_next_eip;    // EIP target after a string element commit
   logic [31:0] str_store_addr;  // [EDI] (pre-increment) for a MOVS/STOS store
   logic [31:0] str_store_data;  // value to store this string element
@@ -4106,6 +4113,15 @@ module core
         else if (q_seg_load)                   cur_lin = dbase+q_ea+{28'd0,q_w};
         else if (q_jmpf_mem || q_callf_mem)    cur_lin = opbase+q_ea+{28'd0,q_w};
         else                                   cur_lin = dbase_edi+str_edi;
+      end
+      // nested ENTER: mirror the bus driver S_ENTER address so paging translates the same
+      // linear (inert in real mode where the case is exercised; correct under paging).
+      S_ENTER: begin
+        logic [31:0] koff, joff;
+        koff = {26'd0, ent_k} * {29'd0, q_w};
+        joff = ({26'd0, ent_k} - 32'd1) * {29'd0, q_w};
+        if (ent_rd) cur_lin = seg_base[SG_SS] + stk16(gpr_o[R_EBP] - joff);
+        else begin  cur_lin = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - koff); cur_is_w = 1'b1; end
       end
       S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
       S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end

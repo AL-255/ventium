@@ -55,6 +55,23 @@
         else if (q_jmpf_mem || q_callf_mem) mem_addr=opbase+q_ea+{28'd0,q_w};
         else mem_addr=dbase_edi+str_edi;   // CMPS second operand ([EDI])
       end
+      // Nested ENTER (level>0) micro-sequence: all accesses are STACK-relative (SS).
+      // ent_rd beat reads the display source SS:[EBP-(ent_k-1)*w]; the push beat writes
+      // ent_val to SS:[ESP-ent_k*w]. ESP/EBP stay at their pre-ENTER values until the
+      // final commit (gpr_wb), so every address is a function of ent_k off the originals.
+      S_ENTER: begin
+        logic [31:0] koff, joff;
+        koff = {26'd0, ent_k} * {29'd0, q_w};
+        joff = ({26'd0, ent_k} - 32'd1) * {29'd0, q_w};
+        mem_req = 1'b1;
+        if (ent_rd) begin
+          mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_EBP] - joff);
+        end else begin
+          mem_we = 1'b1; mem_wstrb = strb_of(q_w);
+          mem_addr  = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - koff);
+          mem_wdata = ent_val;
+        end
+      end
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
       S_LGDT: begin mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
       S_SEGLD: begin
