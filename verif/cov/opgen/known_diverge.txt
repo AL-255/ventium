@@ -58,3 +58,8 @@ op_0f00_5 CORE-GAP  VERW  r/m16     halts
 #   compute but ULP-INEXACT (approximation vs softfloat, expected, not a bug).
 op_d9_6_f4  CORE-GAP  FXTRACT  HALTs EVEN WITH +VEN_TRANSCENDENTAL (genuinely unimplemented;
 #            FXTRACT is exact exponent/mantissa split, so this is a real gap, not accuracy)
+# --- CORE-GAP (feature build): transcendental engine HALTs on IEEE special inputs
+#   FSIN/FCOS/... of +inf/-inf/NaN HALT instead of setting C2(invalid)+returning NaN
+#   (range reduction of a non-finite operand is unhandled). Found by the edge-input
+#   probe of the transcendental sweep. Repro: finit; fldl <inf>; fsin -> HALT.
+op_fsin_inf  CORE-GAP  FSIN/FCOS/FPTAN of inf/NaN halts (feature build; IEEE special-input gap)
