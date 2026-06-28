@@ -24,3 +24,16 @@ op_0fa9  CORE-GAP   POP GS  halts
 op_fa    MODE-CPL0  CLI  clears IF in-core; linux-user keeps IF (IOPL guard)
 op_fb    MODE-CPL0  STI  one-instruction IF delay differs in user mode
 op_9d    MODE-CPL0  POPF IOPL field not write-protected the same in user mode
+# --- TRANSCENDENTAL: deferred (d_unknown->HALT) without +VEN_TRANSCENDENTAL ----
+#     (covered in the FLAGS/feature-build lane; default build halts loudly)
+op_d9_6_f0  TRANSC  F2XM1   deferred (needs VEN_TRANSCENDENTAL)
+op_d9_6_f1  TRANSC  FYL2X   deferred
+op_d9_6_f2  TRANSC  FPTAN   deferred
+op_d9_6_f3  TRANSC  FPATAN  deferred
+op_d9_6_f4  TRANSC  FXTRACT deferred
+op_d9_7_f9  TRANSC  FYL2XP1 deferred
+op_d9_7_fb  TRANSC  FSINCOS deferred
+op_d9_7_fe  TRANSC  FSIN    deferred
+op_d9_7_ff  TRANSC  FCOS    deferred
+op_d9_6_f5  TRANSC  FPREM1  fstat C2 flag differs (status-flag corner)
+# --- undocumented FFREEP (DF C0+i) -> HALT ------------------------------------

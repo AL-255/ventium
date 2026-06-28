@@ -31,17 +31,23 @@ bash    run-opgen.sh      # PARALLEL build+golden+diff across all cores
 * **`run-opgen.sh`** fans the per-opcode workload out across **all cores**
   (`xargs -P $(nproc)`); each worker spins its own qemu-i386 gdbstub.
 
-## Status (PM32 / user, CPL3)
+## Status (PM32 / user, CPL3) — integer + x87
 
-`run-opgen.sh`: **217 PASS + 15 KNOWN + 0 NEW-FAIL** (clean). The 15 KNOWN are
-real findings surfaced by the sweep (`known_diverge.txt`):
+`run-opgen.sh` (parallel, ~17 s on 32 cores): **325 PASS + 25 KNOWN + 0 NEW-FAIL
++ 0 ASM-FAIL** (clean). 356 op_* tests generated (integer + all x87 D8–DF,
+including the distinct transcendentals F2XM1…FCOS keyed by `sec_opcd`). The
+runner fails only on a **NEW** divergence, so a regression cannot hide.
 
-* **CORE-GAP** — `BT/BTS/BTR/BTC` with a *memory* operand HALT (reg-direct OK);
-  `POP ES/SS/DS/GS` HALT (segment-POP gaps).
-* **MODE-CPL0** — `CLI/STI/POPF` diverge on IF/IOPL because they are
-  CPL0/system-mode ops (re-tested by the mode lanes, not a CPL3 bug).
+### Findings analysis (`known_diverge.txt`) — surfaced, NOT fixed here
 
-The runner fails only on a **new** divergence, so a regression cannot hide.
+The 25 KNOWN are real divergences the per-opcode sweep found (the core is
+unchanged — these are an analysis catalog):
+
+| class | n | what |
+|-------|--:|------|
+| **CORE-GAP** | 12 | `BT/BTS/BTR/BTC` with a **memory** operand HALT (reg-direct passes) — bit-string-on-memory looks unimplemented; `POP ES/SS/DS/GS` HALT (segment-POP gaps). |
+| **TRANSC** | 10 | `F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FYL2XP1/FSINCOS/FSIN/FCOS` are deferred → HALT without `+VEN_TRANSCENDENTAL` (work in the FLAGS/feature build); `FPREM1` differs on the `fstat` C2 flag. |
+| **MODE-CPL0** | 3 | `CLI/STI/POPF` diverge on IF/IOPL — these are CPL0 ops; the difference is CPL3-user-mode semantics, validated properly by the (TODO) real-mode / PM-CPL0 mode lanes. |
 
 ## Dimensions still being generated
 

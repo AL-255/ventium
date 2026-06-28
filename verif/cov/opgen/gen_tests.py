@@ -89,6 +89,10 @@ SKIP = {
     # not P54C / undocumented-removed / undefined
     "LOADALL": "not-p54c", "UD": "undef", "UD1": "undef", "UD0": "undef",
     "SALC": "undoc", "SETALC": "undoc", "LEAVE": "stackframe",
+    # undocumented x87 alias mnemonics gas cannot assemble (redundant encodings)
+    "FSTP1": "x87-undoc", "FCOM2": "x87-undoc", "FCOMP3": "x87-undoc",
+    "FXCH4": "x87-undoc", "FCOMP5": "x87-undoc", "FXCH7": "x87-undoc",
+    "FSTP8": "x87-undoc", "FSTP9": "x87-undoc", "FFREEP": "x87-undoc",
     # standalone prefix opcodes (covered in combination, not alone)
     "LOCK": "prefix", "REP": "prefix", "REPE": "prefix", "REPNE": "prefix",
     "REPZ": "prefix", "REPNZ": "prefix", "REPN": "prefix",
@@ -111,7 +115,64 @@ def key_of(s):
         k += "_" + s["opcd_ext"]
     if s["pref"]:
         k += "_p" + s["pref"]
+    # x87 (and other) reg-form ops share opcode+/digit but differ by the secondary
+    # byte (sec_opcd: F0=F2XM1 .. FF=FCOS, C9=FXCH, ...) and mem/nomem form — fold
+    # both into the key so each encoding gets its OWN test (no collapse).
+    if s.get("sec_opcd"):
+        k += "_" + s["sec_opcd"]
+    elif s.get("mod_attr"):
+        k += "_" + s["mod_attr"][:3]      # mem / nom
+    elif s["is_x87"]:
+        ms = [o["a"] for o in s["operands"]]
+        k += "_m" if any(m == "M" for m in ms) else \
+             "_r" if any(m in ("ES", "EST") for m in ms) else "_n"
     return k.lower()
+
+
+# x87 memory operand-type -> gas size suffix (plain real/int loads+stores).
+X87SUF = {"sr": "s", "dr": "l", "er": "t", "wi": "s", "di": "l", "qi": "ll"}
+# mnemonics whose size is implied by the mnemonic itself (no extra suffix).
+X87_IMPLIED = ("fldcw", "fnstcw", "fstcw", "fldenv", "fnstenv", "fstenv",
+               "frstor", "fnsave", "fsave", "fbld", "fbstp", "fnstsw", "fstsw")
+# reg-form two-operand x87 with the RESULT in ST0:  <mn> %st(i), %st
+X87_TWO_ST = {"fadd", "fmul", "fsub", "fsubr", "fdiv", "fdivr"}
+# the POP variants put the result in ST(i):           <mn> %st, %st(i)
+X87_POP = {"faddp", "fmulp", "fsubp", "fsubrp", "fdivp", "fdivrp"}
+
+
+def emit_x87(s):
+    mn = s["mnem"].lower()
+    # obsolete/no-effect control ops gas may not assemble (the doc='u' undocumented
+    # aliases are already routed out at the top of emit_lines).
+    if mn in ("feni", "fdisi", "fsetpm", "fneni", "fndisi", "fnsetpm"):
+        return None, "MANUAL", "x87-obsolete"
+    ops = s["operands"]
+    methods = [o["a"] for o in ops]
+    types = [o["t"] for o in ops]
+    # FNSTSW AX / FSTSW AX
+    if any(o["t"] == "AX" for o in ops):
+        return [f"    {mn}  %ax"], "GEN", "x87-stsw-ax"
+    # no-operand (FNOP/FCHS/FABS/FLD1/FNINIT/F2XM1/FYL2X/FSQRT/FUCOMPP/FCOMPP...)
+    if all(o["a"] == "#" for o in ops):
+        return [f"    {mn}"], "GEN", "x87-noop"
+    # memory form
+    mem = next((o["t"] for o in ops if o["a"] == "M"), None)
+    if mem is not None:
+        suf = "" if mn in X87_IMPLIED else X87SUF.get(mem, "")
+        # FLDENV/FRSTOR/FNSAVE read/write a big block — the 256B buffer covers it.
+        return [f"    {mn}{suf}  (%esi)", f"    {mn}{suf}  32(%esi)"], "GEN", "x87-mem"
+    # register (stack) form: sweep ST(i)
+    if any(o["a"] in ("ES", "EST") for o in ops):
+        L = []
+        for i in range(8):
+            if mn in X87_TWO_ST:
+                L.append(f"    {mn}  %st({i}), %st")
+            elif mn in X87_POP:
+                L.append(f"    {mn}  %st, %st({i})")
+            else:
+                L.append(f"    {mn}  %st({i})")
+        return L, "GEN", "x87-reg"
+    return None, "MANUAL", "x87-other"
 
 
 def first_two_methods(s):
@@ -124,8 +185,10 @@ def emit_lines(s):
     mn = s["mnem"]
     if mn in SKIP:
         return None, "MANUAL", SKIP[mn]
+    if s.get("doc") == "u" or s.get("part_alias"):   # undoc / redundant alias
+        return None, "MANUAL", "undoc-alias"          # (FSTP1/FCOM2/FFREEP/...)
     if s["is_x87"]:
-        return None, "MANUAL", "x87"        # handled by gen_x87.py path
+        return emit_x87(s)
     ops = s["operands"]
     methods = [o["a"] for o in ops]
     types = [o["t"] for o in ops]
@@ -293,6 +356,11 @@ def write_test(s, lines):
     body.append("    .globl _start")
     body.append("_start:")
     body += setup_prologue()
+    if s["is_x87"]:
+        # finit + fill all 8 stack slots with distinct constants so reg-form ops
+        # (ST(0..7)) and stores have valid operands.
+        body += ["    finit", "    fldz", "    fld1", "    fldl2t", "    fldl2e",
+                 "    fldpi", "    fldlg2", "    fldln2", "    fld1"]
     body += lines
     body.append("    addl  $256, %esp")
     body.append("    movl  $1, %eax")
