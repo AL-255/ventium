@@ -545,6 +545,44 @@ def write_test(s, lines):
     }, open(os.path.join(d, "manifest.json"), "w"), indent=2)
 
 
+def write_prefix_test():
+    """Synthetic cross-cutting test for the legacy PREFIX opcodes (LOCK F0,
+    REP/REPNE F3/F2, segment-overrides 26/2E/36/3E/64/65, operand/addr-size
+    66/67) — they are skip-as-standalone but their decode IS testable applied to
+    a real instruction. Covers the prefix-handling decode the per-opcode tests
+    never reach."""
+    d = os.path.join(TESTS, "op_prefixes")
+    os.makedirs(d, exist_ok=True)
+    L = ["# GENERATED op_prefixes: legacy prefix decode in combination",
+         "    .text", "    .globl _start", "_start:"]
+    L += setup_prologue()
+    L += [
+        "    lock addl  %eax, (%esi)",        # F0 LOCK + ALU mem
+        "    lock orl   $1, (%esi)",
+        "    lock xchgl %eax, (%esi)",        # LOCK + XCHG (implicit lock)
+        "    movl  %es:(%esi), %eax",         # 26 ES override
+        "    movl  %cs:(%esi), %ebx",         # 2E CS override
+        "    movl  %ss:(%esi), %ecx",         # 36 SS override
+        "    movl  %ds:(%esi), %edx",         # 3E DS override
+        "    addw  %ax, (%esi)",              # 66 operand-size override
+        "    leal  (%bx,%si), %eax",          # 67 address-size override
+        "    movl  %esp, %esi",               # restore (DS:ESI default for string)
+        "    leal  80(%esp), %edi",
+        "    movl  $3, %ecx",
+        "    rep movsb",                      # F3 REP + string
+        "    movl  %esp, %esi", "    movl  $0, %ecx",
+        "    repe cmpsb",                     # F3 REPE
+        "    movl  $0, %ecx",
+        "    repne scasb",                    # F2 REPNE
+    ]
+    L += ["    movl  $1, %eax", "    xorl  %ebx, %ebx", "    int   $0x80"]
+    open(os.path.join(d, "op_prefixes.s"), "w").write("\n".join(L) + "\n")
+    json.dump({"name": "op_prefixes", "src": "op_prefixes/op_prefixes.s",
+               "elf": "op_prefixes/op_prefixes.elf", "image": "op_prefixes/op_prefixes.flat",
+               "load_addr": "0x08048000", "entry": "0x08048000", "max_insn": 80},
+              open(os.path.join(d, "manifest.json"), "w"), indent=2)
+
+
 def main():
     spec = json.load(open(SPEC))
     os.makedirs(TESTS, exist_ok=True)
@@ -565,6 +603,7 @@ def main():
         else:
             status[st if st in status else "MANUAL"].append((key_of(s), tag, reason))
 
+    write_prefix_test()
     rep = []
     rep.append(f"opgen status — {len(spec)} P54C opcodes")
     rep.append(f"  GEN (auto test written): {len(status['GEN'])}")
