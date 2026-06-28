@@ -49,9 +49,32 @@ def main():
             # st0 = a op b : load b then a so st0=a, st1=b; faddp-style via two-operand
             L += [f"    fldl {nb}", f"    fldl {na}", f"    {op} %st(1), %st(0)",
                   "    fstp %st(0)", "    fstp %st(0)"]
+    # UNARY ops over diverse operands: exercise the SRT sqrt, rounding, sign,
+    # exponent-scale and FP<->int conversion datapaths (distinct from add/mul).
+    for op in ("fsqrt", "fabs", "fchs", "frndint"):
+        for v in INPUTS:
+            nm = k(v if op != "fsqrt" else f"abs({v})" if False else v)
+            L += [f"    fldl {nm}", f"    {op}", "    fstp %st(0)"]
+    # FSCALE (st0 * 2^st1) over diverse (x, scale) pairs -> exponent path
+    for i in range(n):
+        x, sc = INPUTS[i], INPUTS[(i * 5 + 1) % n]
+        nx, ns = k(x), k(sc)
+        L += [f"    fldl {ns}", f"    fldl {nx}", "    fscale",
+              "    fstp %st(0)", "    fstp %st(0)"]
+    # FP -> int (fistp) and int -> FP (fild) round-trips: the int-convert datapath
+    for v in INPUTS:
+        nm = k(v)
+        L += [f"    fldl {nm}", "    fistpl iscratch", "    fildl iscratch", "    fstp %st(0)"]
+    # comparisons (fcomi sets EFLAGS from the FP compare unit)
+    for i in range(n):
+        a, b = INPUTS[i], INPUTS[(i * 3 + 2) % n]
+        na, nb = k(a), k(b)
+        L += [f"    fldl {nb}", f"    fldl {na}", "    fcomi %st(1), %st(0)",
+              "    fstp %st(0)", "    fstp %st(0)"]
     L += ["    movl $1, %eax", "    xorl %ebx, %ebx", "    int $0x80"]
     L.append("    .data")
     L.append("    .align 8")
+    L.append("iscratch: .zero 8")
     for nm, val in consts:
         L.append(f"{nm}: .double {val}")
     open(os.path.join(OUT, "fparith_sweep.s"), "w").write("\n".join(L) + "\n")
