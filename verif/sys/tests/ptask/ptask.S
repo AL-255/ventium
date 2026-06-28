@@ -142,7 +142,7 @@ pm32_entry:
      * Base of TSS2 = 0x4000, so field X is at 0x4000+X.                       */
     movl    $0x00000000, 0x0000401C     /* CR3 = 0 (paging off) */
     movl    $task2,      0x00004020     /* EIP = task2 */
-    movl    $0x00000002, 0x00004024     /* EFLAGS = 0x2 (reserved bit; IF=0) */
+    movl    $0x000008D7, 0x00004024     /* EFLAGS diverse status flags (CF/PF/AF/ZF/SF/OF) */
     movl    $0xFFFFFFFF, 0x00004028     /* EAX all-ones (full tsw_gpr toggle) */
     movl    $0xFFFFFFFF, 0x0000402C     /* ECX */
     movl    $0xFFFFFFFF, 0x00004030     /* EDX */
@@ -161,7 +161,7 @@ pm32_entry:
     movw    $0x0068,     0x00004066     /* I/O map base (empty) */
     /* TSS3 (incoming GPRs all ZERO -> tsw_gpr 1->0 after the all-ones 1st switch) */
     movl    $task3,      0x00005020     /* EIP = task3 */
-    movl    $0x00000002, 0x00005024     /* EFLAGS = 0x2 */
+    movl    $0x00000002, 0x00005024     /* EFLAGS = 0x2 (complementary -> tsw_eflags 1->0) */
     movl    $0x0000000C, 0x00005038     /* ESP all-low (1->0 the high bits) */
     movl    $0x00000018, 0x00005048     /* ES = 0x18 (diverse -> tsw_sel toggle) */
     movl    $0x00000008, 0x0000504C     /* CS */
