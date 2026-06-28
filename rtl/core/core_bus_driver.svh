@@ -186,8 +186,12 @@
           mem_addr=dbase+q_ea+(step==4'd0 ? 32'd0 : {28'd0,q_w});
           mem_wdata=(step==4'd0) ? gpr_o[R_EBX] : gpr_o[R_ECX];
         end else if (q_sm==SM_PUSHA) begin
-          mem_we=1'b1; mem_wstrb=4'b1111;
-          mem_addr=dbase+stk16(pusha_esp - (32'd4*({28'd0,step}+32'd1)));
+          // Width-aware: PUSHAD (q_w=4) pushes 8x32-bit @4-byte spacing; PUSHAW (q_w=2,
+          // a CS16/D=0 segment, e.g. go32's DPMI context-save) pushes 8x16-bit @2-byte
+          // spacing. The hardcoded-32-bit form silently corrupted PUSHAW/POPAW (the DOS-
+          // Quake go32 high-half + ESP corruption). strb_of(q_w) selects the 16-bit lanes.
+          mem_we=1'b1; mem_wstrb=strb_of(q_w);
+          mem_addr=dbase+stk16(pusha_esp - (({28'd0,step}+32'd1)*{29'd0,q_w}));
           unique case (step)
             4'd0: mem_wdata=gpr_o[R_EAX];
             4'd1: mem_wdata=gpr_o[R_ECX];
@@ -198,8 +202,8 @@
             4'd6: mem_wdata=gpr_o[R_ESI];
             default: mem_wdata=gpr_o[R_EDI];
           endcase
-        end else begin // POPA: read ascending from ESP
-          mem_we=1'b0; mem_addr=dbase+stk16(gpr_o[R_ESP] + (32'd4*{28'd0,step}));
+        end else begin // POPA: read ascending from ESP (q_w-spaced: POPAW=2, POPAD=4)
+          mem_we=1'b0; mem_addr=dbase+stk16(gpr_o[R_ESP] + ({28'd0,step}*{29'd0,q_w}));
         end
       end
       // M2S.2 — the page-walk reads/writes the page tables in PHYSICAL memory.
