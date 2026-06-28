@@ -469,7 +469,26 @@ core mis-computes the patched rel16 (an ALU/addressing bug feeding the SMC) or t
 that is the fix for Goal 2 (then VESA capture to see frames). The bug is now a single wrong constant
 (+0xe) with a known oracle value (0x26d1).
 
-## 23. Bottom line (current, supersedes earlier)
+## 23b. UNBLOCKED: maps aligned (same bios.bin) + thunk fully decoded
+
+Re-ran qemu with the SAME `bios.bin` the SoC uses (not qemu's default) + `-m 64`: qemu's go32 stub now
+loads at the **identical linear addresses** as the RTL (0x26ac0, 0x29d3x, 0x2c406, ...). So a direct
+code-aligned differential is now feasible (the earlier mismatch was just qemu's default-BIOS memory
+map). Confirmed at the aligned address:
+- qemu near-CALL @0x29d32 = `... b1 0c e8 d1 26` -> rel16 **0x26d1** -> 0x5946 (thunk). RTL = 0x26df ->
+  0x5954 (bare helper).
+- qemu thunk @0x2c406 (=cs=0x26ac:0x5946) = `5b 0e 53 80 f9 10 73 10` = **POP BX; PUSH CS; PUSH BX;
+  CMP CL,0x10; JNB +0x10**. This is the far-call ADAPTER: it pops the near-CALL return IP (BX),
+  **PUSH CS** (the segment the far-RETF will pop), re-pushes BX, then dispatches the shift by CL. So
+  after the thunk the stack is {IP, CS} and the helper's far-RETF returns correctly to cs=0x26ac.
+
+The RTL's +0xe-skip jumps straight to 0x5954 (past `PUSH CS`), so the far-RETF pops the stale saved
+DI (0x34). Root is the SMC patch writing rel16 0x26df where go32 wants 0x26d1 (target 0x5954 vs the
+thunk 0x5946). NEXT (now feasible): code-aligned diff of go32's PM patch routine (cs=0x87:~0x334) /
+the call template it copies — find where the RTL gets target 0x5954 (helper) instead of 0x5946
+(thunk), i.e. the +0xe. That instruction/value is the core bug. Then VESA capture for frames.
+
+## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
   (POP FS/GS), `17a630a`+`4b9225d` (nested ENTER + its paging), `8b5e7ce` (SHLD/SHRD mem), `a5e354f`
