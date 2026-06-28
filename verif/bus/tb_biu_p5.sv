@@ -681,6 +681,35 @@ module tb_biu_p5;
     end
   endtask
 
+  // SNOOP HITM -> writeback that is PIPELINED behind a read, so the writeback
+  // write is PROMOTED (not issued from idle) -> exercises the promote-block HITM#
+  // release arm (wb_req && cyc_we && cyc_wb -> wb_req<=0; hitmn<=1, biu_p5:556-557).
+  task automatic run_snoop_writeback_pipelined(input [26:0] saddr);
+    begin
+      $display("[scenario] SNOOP hit-modified -> PIPELINED WRITEBACK");
+      run_snoop(saddr, 1'b1, 1'b1, 1'b0);            // HITM# -> wb_req set
+      @(negedge clk);                                 // a normal read in flight
+      req=1; req_we=0; req_wb=0; req_cache=0; req_lock=0; req_addr=29'h0BBBB000; req_be=8'hFF;
+      @(posedge clk); while (!req_ack) @(posedge clk);
+      @(negedge clk); req=0;
+      wait (dbg_state==S_T2);
+      @(negedge clk); nan=0;                          // pipeline the writeback write behind it
+      req=1; req_we=1; req_wb=1; req_addr={saddr,2'b00}; req_wdata=64'h1357_2468_ACE0_BDF9;
+      @(posedge clk); while (!req_ack) @(posedge clk);
+      @(negedge clk); req=0; req_wb=0; nan=1;
+      wait (dbg_state==S_T2P);
+      @(negedge clk); brdyn=0; d_in=64'h0;            // complete the read
+      @(posedge clk);
+      @(negedge clk); brdyn=1;
+      wait (dbg_state==S_T2);                          // writeback promoted -> current
+      @(negedge clk); brdyn=0;                         // complete the writeback -> HITM# release
+      @(posedge clk);
+      @(negedge clk); brdyn=1;
+      tick(2);
+      chk(hitmn && !wb_req, "HITM# released after pipelined writeback");
+    end
+  endtask
+
   // [FIX-6] CORNER: after a hit-modified, an UNRELATED core write runs BEFORE
   // the writeback. HITM# must NOT release on that unrelated write.
   task automatic run_unrelated_write_holds_hitm(input [26:0] saddr);
@@ -912,6 +941,7 @@ module tb_biu_p5;
     run_snoop       (27'h0AAAA02, 1'b1, 1'b0, 1'b1);   // hit, not modified
     run_snoop       (27'h0000000, 1'b0, 1'b0, 1'b1);   // miss
     run_snoop_writeback(27'h0AAAA01);                  // hit-modified, INV=0 (-> S)
+    run_snoop_writeback_pipelined(27'h0BBBB01);        // pipelined writeback (HITM release in promote)
     run_snoop_modified_inv();                          // [FIX-2] hit-modified, INV=1 (-> I)
     run_unrelated_write_holds_hitm(27'h0CCCC01);       // [FIX-6]
 
