@@ -35,6 +35,32 @@ REALMODE_IO = r"""
     inw     %dx, %ax
 """
 
+REALMODE_PRIV = r"""
+    /* ---- MOV r32, CRn / CRn, r32 (0F 20/22) privileged, CPL0 ------------- */
+    movl    %cr0, %eax
+    movl    %eax, %cr0
+    movl    %cr2, %ebx
+    movl    %ebx, %cr2
+    movl    %cr3, %ecx
+    movl    %ecx, %cr3
+    movl    %cr4, %edx
+    movl    %edx, %cr4
+    /* ---- MOV r32, DRn / DRn, r32 (0F 21/23) ----------------------------- */
+    movl    %dr0, %eax
+    movl    %dr1, %ebx
+    movl    %dr2, %ecx
+    movl    %dr3, %edx
+    movl    %dr6, %esi
+    movl    %dr7, %edi
+    movl    %edi, %dr7
+    /* ---- INVLPG (no arch reg effect; CLTS/WBINVD/INVD gated-> cosim lane) ----- */
+    /* ---- LGDT / LIDT (load from a 6-byte pseudo-descriptor in low RAM) --- */
+    movw    $0x00ff, 0x630
+    movl    $0x00010000, 0x632
+    lgdtl   0x630
+    lidtl   0x630
+"""
+
 REALMODE_SEG = r"""
     /* ---- MOV Sreg <-> r/m (8C/8E) — selector reads/loads (real mode) ----- */
     movw    %ds, %ax
@@ -181,6 +207,7 @@ def main():
     os.makedirs(MODES, exist_ok=True)
     write_image("realmode_flags", REALMODE_BODY)
     write_image("realmode_seg", REALMODE_SEG)
+    write_image("realmode_priv", REALMODE_PRIV)
 
 
 if __name__ == "__main__":
