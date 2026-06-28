@@ -714,6 +714,26 @@ session: a genuine 16-bit PUSHAW/POPAW bug found+fixed+verified (78cd911); Quake
 crash unchanged. Resolving Goal 2/3 fundamentally requires the aligned qemu differential (or the
 parallel session's task-switch/other work), not more single-context RTL tracing.
 
+## 23n. Task switch round-trips EBX correctly; EBX high=0x000e is likely a LEGIT pointer
+
+Two RTL-verified negatives this cycle:
+1. The EBX origin (high->0x000e) is a far JMP to selector 0x60 = a HARDWARE TASK SWITCH. Read the impl
+   (core_tsw.svh + tsw_save_off/tsw_read_off in ventium_sys_pkg.sv): SAVE writes EBX->TSS+0x34 (beat 5),
+   READ loads EBX<-TSS+0x34 (beat 6), S_TSW_BUSY reloads all GPRs. **Offsets consistent -> the switch
+   round-trips EBX correctly.** So 0x000e0021 is RESTORED, not corrupted by the task switch. (The
+   verify-sys 5d failure is the CALL/task-gate path, not this JMP path — separate WIP.)
+2. Captured the FIRST EBX[31:16]->0x000e transitions from run start: it is a RECURRING high across many
+   distinct instructions (0x000e9720, 0x000e0010, 0x000ef000, 0x000e0021), loaded from memory (e.g.
+   `8b 1b` MOV EBX,[EBX] @cs=0x08:0x4c54). EBX is very likely a LEGITIMATE pointer into the 0x000Exxxx
+   region — so the "EBX high should be 0x0000" derivation (§23m-ish) is itself suspect.
+
+Re-framing: if EBX=0x000e0021 is a legit pointer, the bug is more likely the `add [fs:bx+si+0x20],ebx`
+TARGET ADDRESS (the RTL resolving fs:bx+si+0x20 to the call dword 0x29d31 when it should hit a data
+slot), or the control flow reaching this add — NOT EBX. Resolving which needs the operation-aligned
+qemu reference (fs_base/bx/si correctness), which the env blocks. NET this session: real PUSHAW/POPAW
+fix committed; task-switch ruled out; EBX likely legit; the true divergence (address vs value) is
+unresolvable single-context. The honest conclusion stands: Goal 2/3 need the aligned qemu differential.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
