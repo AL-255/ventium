@@ -781,6 +781,26 @@ the RTL's DS SELECTOR + [0x626] value + the GDT/LDT descriptor at 0x334 to local
 bug (selector-read vs descriptor-base), and (b) trace the INT 0x31 (CWSDPMI) handler RTL-vs-qemu by EIP
 to find the skipped stub un-relocation. Both are now tractable with the working oracle.
 
+## 23q. Deepest divergence: OFF-BY-ONE LDT selector (RTL 0xaf vs qemu 0xb7) at [0x626]
+
+Localized the DS=0x10000000 anomaly (§23p): RTL DS at the add = **sel 0x00af -> LDT[0x15], base
+0x10000000**; qemu DS = **sel 0x00b7 -> LDT[0x16], base 0x46010**. The selector SOURCE `[0x626]`
+(lin 0x22f16) holds **0xaf in the RTL vs 0xb7 in qemu** -> an **OFF-BY-ONE LDT descriptor selector**
+(index 0x15 vs 0x16; both TI=1/LDT, RPL=3). RTL ldt_base=0x2d688, gdt_base=0x2ce00.
+
+So the RTL's CWSDPMI DPMI-descriptor allocation is one LDT slot BEHIND qemu's (allocated one fewer, or
+freed one extra, earlier) -> wrong selector in [0x626] -> wrong DS base (LDT[0x15]=0x10000000, a segment
+beyond the 64MB RAM). This is the deepest, most concrete divergence found, and the registers MATCH at
+cs=0x87:0x331 (so this is a MEMORY/descriptor-table divergence with matching regs, seeded earlier).
+
+CAVEAT: the crashing add uses FS (base 0x228f0, correct in both), so DS=0xaf does not DIRECTLY mis-
+target it. But the off-by-one LDT allocation is a strong candidate ROOT: it cascades to wrong DPMI
+segment bases, and the stub un-relocation (§23o) may use such a (now-wrong) selector and miss. Whether
+the two share this root needs qemu's MEMORY trace — and the env blocks every qemu memory path
+(gdbstub TCP, monitor unix/stdio, in_asm, and any backgrounded qemu all fail; only FOREGROUND `-d cpu`
+register tracing works). NEXT: trace the [0x626] selector write + the CWSDPMI ldt-alloc/free path to
+find the one divergent allocation; or get qemu memory working to diff the LDT/[0x626] directly.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
