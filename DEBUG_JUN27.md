@@ -288,7 +288,29 @@ far-jump and where it sourced the (wrong) target — a retire/operand trace of t
 right before the transition. This is the remaining Goal-2 blocker: a deep real-mode/DPMI control-flow
 bug, distinct from the (now substantially closed) opcode work.
 
-## 15. Bottom line
+## 15. Far-jump traced: the crash is a RETF to a corrupted real-mode target (DPMI)
+
+Retire-ring (8192) located the exact transition into the data region:
+- `[7464] 0034:595d <-- 26ac:595b` then `[7465] 0034:3275 <-- 0034:595d`.
+- Peeked the source bytes at cs=0x26ac:0x595b (lin 0x2c41b): `0b c3 cb` = **OR AX,BX ; RETF**.
+  So a **RETF at cs=0x26ac:0x595d** (inside go32's real-mode code) pops a far return address of
+  **cs=0x34:0x3275** off the real-mode stack and jumps there — and cs=0x34:0x3275 is the **data**
+  region (the 512+ straight-line run into the #UD).
+
+Reading: go32's real-mode code (cs=0x26ac, which the ring shows running a long loop just before)
+returns via RETF to **cs=0x34:0x3275, a wrong/corrupted real-mode CS:IP**. cs=0x34 is a suspiciously
+LOW real-mode segment (base 0x340 = the IVT/BIOS-data area) — far too low to be a real DOS allocation
+or code segment, so the **segment value itself looks wrong** (a truncated/miscomputed selector→segment
+or a corrupted DPMI Real-Mode-Call-Structure CS field). The data at cs=0x34:0x32xx even decodes bytes
+as `call far cs=0x26ac:*`, which is why go32's loop is reached from it — execution bounces between the
+garbage and go32's real stub.
+
+Goal-2 root: **a DPMI real-mode call/return lands at a wrong real-mode segment (cs=0x34)**. Real-mode/
+DPMI control-flow corruption — NOT an opcode gap (opgen 0 NEW-FAIL), NOT the timer, NOT VESA. Next
+concrete step: find WHERE cs=0x34:0x3275 is pushed/written (the far-CALL or the RMCS CS:IP store that
+put 0x0034 on the stack, or the PM->real switch target) — that write is the actual bug site.
+
+## 16. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
