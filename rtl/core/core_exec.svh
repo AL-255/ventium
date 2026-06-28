@@ -441,6 +441,9 @@
 
               K_BITTEST: begin
                 logic [4:0] idx; logic bv; logic [31:0] cur,res,srcv;
+                // BTS/BTR/BTC memory destination: RMW — write the modified [mem] (S_STORE).
+                // BT memory (q_mem_write=0) only reads [mem] for CF (retires directly).
+                if (q_mem_write) begin do_store=1'b1; do_retire=1'b0; end
                 // Register-direct / immediate bit index is taken modulo the
                 // operand size: mod 16 for a 0x66-prefixed (16-bit) operand,
                 // mod 32 otherwise. (Memory-operand bit-string forms, which use

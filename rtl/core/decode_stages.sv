@@ -512,14 +512,25 @@ module decode_stages
           endcase
           if (modrm_mod==2'b11) begin
             d_dst_reg=modrm_rm; d_writes_reg=(op1!=8'hA3); d_len=pfx_len+4'd3;
-          end else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base); end
+          end else begin
+            // memory bit op: BT (A3) reads [mem] (CF only); BTS/BTR/BTC RMW [mem].
+            // d_src_reg=modrm_reg is the index reg; idx is masked to the operand size
+            // (the huge-offset bit-string addressing is not modeled — not exercised).
+            d_mem_read=1'b1; d_mem_dst=1'b1; d_mem_write=(op1!=8'hA3);
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
+          end
         end
         8'hBA: begin // BT/BTS/BTR/BTC imm
           d_kind=K_BITTEST; d_writes_flags=1'b1; d_bit_imm=1'b1; d_bit_op=modrm_reg;
           if (modrm_mod==2'b11) begin
             d_dst_reg=modrm_rm; d_imm={24'd0,ibuf[m_idx+1]};
             d_writes_reg=(modrm_reg!=3'd4); d_len=pfx_len+4'd4;
-          end else begin d_unknown=1'b1; d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1; end
+          end else begin
+            // memory imm bit op: BT (/4) reads [mem]; BTS/BTR/BTC (/5,/6,/7) RMW [mem].
+            d_mem_read=1'b1; d_mem_dst=1'b1; d_mem_write=(modrm_reg!=3'd4);
+            d_imm={24'd0,ibuf[m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)]};
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base)+4'd1;
+          end
         end
         8'hBC,8'hBD: begin // BSF/BSR
           d_kind=K_BITSCAN; d_writes_reg=1'b1; d_writes_flags=1'b1; d_dst_reg=modrm_reg;
