@@ -37,6 +37,10 @@ REPROS = {
     "fcos":       ("FCOS deferred->HALT", ["    finit", "    fld1", "    fcos"], True),
     "f2xm1":      ("F2XM1 deferred->HALT", ["    finit", "    fldz", "    f2xm1"], True),
     "fptan":      ("FPTAN deferred->HALT", ["    finit", "    fld1", "    fptan"], True),
+    "fsin_inf":   ("FSIN of +inf HALTs (feature build): IEEE special-input gap — "
+                   "should set C2+return NaN, not halt",
+                   ["    finit", "    fldl 1f", "    fsin", "    jmp 2f",
+                    "    .align 8", "1:  .quad 0x7FF0000000000000", "2:"], True),
     "fxtract":    ("FXTRACT HALTs even WITH +VEN_TRANSCENDENTAL (genuine gap; it is an "
                    "exact exponent/mantissa split, not an approximation)",
                    ["    finit", "    fldpi", "    fxtract"], True),
