@@ -185,6 +185,32 @@ REALMODE_BODY = r"""
     movl    %dr7, %ebx          /* MOV r32, DR7  (privileged) */
 """
 
+REALMODE_PUSHA = r"""
+    /* ---- 16-bit PUSHAW/POPAW (60/61) + PUSH/POP r16 -- the q_w GPR writeback +
+     * bus path (fixed in 78cd911: bus+wb had hardcoded 32-bit, ignoring q_w). Diverse
+     * 16-bit GPRs so the all-regs push/pop datapath + pusha_esp toggle. */
+    movw    $0x1234, %ax
+    movw    $0x5678, %cx
+    movw    $0x9abc, %dx
+    movw    $0xdef0, %bx
+    movw    $0x0f1e, %bp
+    movw    $0x2d3c, %si
+    movw    $0x4b5a, %di
+    pushaw
+    movw    $0x1111, %ax
+    movw    $0x2222, %cx
+    movw    $0x3333, %dx
+    popaw
+    pushaw
+    popaw
+    pushw   %ax
+    pushw   %cx
+    pushw   $0xbeef
+    popw    %dx
+    popw    %bx
+    popw    %si
+"""
+
 
 def write_image(name, code16_body):
     d = os.path.join(MODES, name)
@@ -870,6 +896,7 @@ def main():
     os.makedirs(MODES, exist_ok=True)
     write_image("realmode_flags", REALMODE_BODY)
     write_image("realmode_seg", REALMODE_SEG)
+    write_image("realmode_pusha", REALMODE_PUSHA)
     write_image("realmode_priv", REALMODE_PRIV)
     write_image("realmode_int", REALMODE_INT)
     write_image("realmode_far", REALMODE_FAR)
