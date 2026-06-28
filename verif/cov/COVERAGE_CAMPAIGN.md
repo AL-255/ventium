@@ -11,11 +11,30 @@ register widths, AXI burst/straddle structure), as pure stimulus (no value check
 that would fail gates). Every change is verified `EQUIVALENT` vs qemu-system-i386 (or
 its module gate's self-check) before commit; the user's in-progress RTL is untouched.
 
-## Headline result
-- **Combined-core toggle: 70.58% → 77.46% (+6.88 points)**, line 89.28→89.85%.
-- **12 standalone-TB RTL modules** lifted from 14–69% to 60–100% toggle.
+## Headline result (REPRODUCIBLE — re-derived by a clean `run-all-cov.sh`)
+- **Combined-core toggle: 70.58% → 74.08% (+3.50 points)**, line 89.28→89.85%.
+- **12 standalone-TB RTL modules** lifted from 14–69% to 60–100% toggle (reproduce via their own gates).
 - **2 new standalone TBs authored** for previously TB-less core-internal modules.
-- **~91 commits**, all gates green / differentials EQUIVALENT.
+- **~92 commits**, all gates green / differentials EQUIVALENT.
+
+### Reproducibility correction (important — read this)
+An earlier in-session figure of **77.46% (+6.88)** was reached by *ad-hoc folding* mode/
+FP dats produced at full sweep length / on a custom FP_PIPE build. A clean `run-all-cov.sh`
+re-derives only **74.08% (+3.50)** because the standard harness does NOT capture the full
+sweeps:
+- **run-modes uses `--max-insn 120`** (golden/RTL length-match design) — my mode sweeps
+  (pm32_sysregs/segbase/segsel/ltr/intsweep, +DR/CR/seg) are hundreds of instructions, so
+  only their first ~120 reproduce (e.g. seg_base 328→**113**, creg4 12→**1**). The coverage
+  is REAL at full length; the harness truncates it. **Fix needed: per-test max-insn in
+  run-modes** (or front-load each sweep's highest-value ops).
+- **run-transc/run-flags use the cov-feat build (no `VEN_FP_PIPE`)**, where FPATAN stalls/
+  takes the non-pipe path → `fpu_fpatan` reproduces at **42.6%**, not the 77.4% my custom
+  `obj_dir_transc` (+FP_PIPE) build reached; `fpp2_s1` (split-pipe) doesn't appear at all.
+  **Fix needed: a +VEN_FP_PIPE coverage lane** to bank the FP-pipeline + fpatan coverage.
+
+What DOES reproduce cleanly in the standard headline: ptask tsw_gpr **506/512**, the early
+parts of the system-register sweeps (creg3 39, dr0 17, dr7 13, idt_base 19, seg_sel 115,
+tr_base 26), and all 12 standalone-module gates + the 2 new TBs.
 
 ## Per-area wins
 | Area | Result | Method |
