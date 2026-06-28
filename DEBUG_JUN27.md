@@ -884,6 +884,25 @@ isolated yet (cs=0x8e47:0xcedd is only one specific exit, 6x), so a clean per-al
 CWSDPMI return point identified first. NET: bug pinned to one DPMI call; the seed is the first divergent
 LDT alloc/free, reachable via a register-sequence diff (tractable) or qemu memory (blocked).
 
+## 23v. The failure is ITERATION-SPECIFIC: a transient CWSDPMI free-list corruption
+
+Selector usage (qemu): 0xaf (LDT 0x15) used 762,893x = the client DATA segment; 0xb7 (the real-mode
+buffer) only 1,385x (alloc'd + freed PER real-mode call). The RTL boots FreeDOS + runs Quake to 9.64M,
+so the buffer-alloc (INT 0x31 fn0000 @cs=0x87:0x256) SUCCEEDS many times before the crash. So the
+failure is ITERATION-SPECIFIC: only at the crash iteration does the RTL's CWSDPMI free-scan return the
+OCCUPIED 0xaf (client data, present) as if free. CWSDPMI's free-scan looks for a zero/not-present LDT
+slot; at the crash iteration the RTL's LDT[0x15] is seen free but is actually the present client data ->
+a transient free-list/descriptor desync right before the crash (a wrong free, or a scan reading stale
+state). The buffer is alloc'd/freed every call, so this is a per-call alloc/free bookkeeping divergence
+that goes wrong on one specific iteration.
+
+This is the deepest reachable point: bug = one DPMI call returning an occupied slot on one iteration;
+root = a transient CWSDPMI LDT free-list/descriptor desync, which requires the LDT + CWSDPMI free-list
+MEMORY over time to pin — env-blocked (no qemu memory channel). A register-result diff would show the
+alloc returning 0xaf vs 0xb7 (the known symptom) but not the free-list memory cause. No fixable core bug
+isolated (descriptors + registers match; the divergence is CWSDPMI's internal memory state). No safe
+speculative fix. FINAL localization for this environment.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
