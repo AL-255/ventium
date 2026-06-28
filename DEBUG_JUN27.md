@@ -208,7 +208,27 @@ Remaining opgen CORE-GAP findings (the roadmap, 0 NEW-FAIL so none hide):
   qemu doesn't. Needs a triage of op_07's RTL trace (likely a GDT-limit/descriptor corner in the
   cov-TB PM32 env vs qemu) before deciding core-fix vs test-env.
 
-## 11. Bottom line
+## 11. Quake render blocker — refined via a retire-ring trace (last 8192 retires)
+
+A 64/512/8192-deep retire ring (cs:pc of every retire, read via rootp) characterizes the stall:
+- go32 **polls in a loop**: cs=0x87:0x03d8 retired **4315×** in the last 8192 retires, interleaved
+  with repeated real-mode DPMI calls (cs=0x26ac → DOS cs=0x05f7/0x00d9 → **BIOS cs=0xf000** → back).
+  So Quake is hammering a DOS/BIOS service and waiting on its result.
+- The **PIT is NOT the problem**: ~4 ticks in 271M cycles ≈ 18.2 Hz over the ~0.22 s of sim time —
+  correct. (Earlier "timer barely ticks" was a misread; the rate is right.) So the stall is not a
+  missing timer interrupt.
+- The halt itself: **one anomalous excursion lands in real-mode cs=0x34 at a DATA region** and runs
+  **512+ instructions straight-line with zero branches** (0x3425→0x3835, confirmed data via peek-mem:
+  consecutive words 0x14f,0x150,…) into `0x63` (#UD in real mode) → S_HALT. The other excursions
+  (DOS/BIOS) are normal; this one's real-mode target is wrong.
+
+So the Quake render blocker is a **DOS/DPMI/real-mode interaction**: a specific DPMI real-mode-int (or
+its IVT target / register setup) lands at the wrong real-mode CS:IP (cs=0x34 data) for one INT, while
+the surrounding poll loop spins. This is NOT an opcode gap (opgen: 0 NEW-FAIL) and NOT the timer.
+Next: identify which INT/excursion produces the cs=0x34 target and why (trace the DPMI int dispatch +
+the IVT read for that vector). A deep DOS-internals investigation, separate from the opcode roadmap.
+
+## 12. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
