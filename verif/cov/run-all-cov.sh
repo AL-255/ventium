@@ -56,13 +56,15 @@ say "LANE 10/10 — transcendental engine (in-RTL F2XM1/FYL2X/FPATAN/FSINCOS/FPR
 # gain. Build the feature TB on demand, then run-transc dumps coverage dats.
 [ -x "$ROOT/verif/tb/obj_dir_cov_feat/tb_ventium" ] || $MAKE -C "$ROOT/verif/tb" cov-feat >/dev/null 2>&1 || true
 bash "$SCRIPT_DIR/opgen/run-transc.sh" >/dev/null 2>&1 || true
+say "LANE 11 — FP-pipeline (+VEN_FP_PIPE, no FPTRAP): split-pipe fpp2_s1 + fpu_fpatan CORDIC"
+bash "$SCRIPT_DIR/run-fppipe-cov.sh" >/dev/null 2>&1 || true
 
 # ---- combined CORE coverage (every ventium_top lane, same top) -------------
 say "COMBINED CORE COVERAGE (ISA + system + cycle + halt + cosim + build-flags + opgen + transc)"
 CORE_DATS=$(ls "$COV"/dat/*.dat "$COV"/sys/dat/*.dat "$COV"/cyc/dat/*.dat \
     "$COV"/halt/dat/*.dat "$COV"/cosim/dat/*.dat "$COV"/flags/dat/*.dat \
     "$COV"/opgen/dat/*.dat "$COV"/opgen/dat/cyc/*.dat "$COV"/opgen/modes/dat/*.dat \
-    "$COV"/opgen/transc/dat/*.dat 2>/dev/null || true)
+    "$COV"/opgen/transc/dat/*.dat "$COV"/fppipe/dat/*.dat 2>/dev/null || true)
 if [ -n "$CORE_DATS" ]; then
     # shellcheck disable=SC2086
     "$VERILATOR_COVERAGE" --write "$COMB/core.dat" $CORE_DATS > "$COMB/merge.log" 2>&1 \
