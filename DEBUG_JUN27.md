@@ -944,6 +944,30 @@ buffer); root is an accumulated CWSDPMI free-list divergence reachable only by a
 differential. No safe speculative fix (descriptors/regs match; risk to verify-sys 949/949). Goal 1
 solid; Goals 2/3 unmet, at the practical limit of single-context register-oracle debugging.
 
+## 23y. LDT DUMP: descriptors are CORRECT — bug is the selector VALUE, not the buffer base
+
+Dumped the RTL's full LDT (64 descriptors at ldt_base 0x2d688) just before the 9.64M crash and decoded
+every entry. Ground truth:
+```
+  slot 0x14  sel 0xa7  base 0x10000000  type=code  P=1   client CODE
+  slot 0x15  sel 0xaf  base 0x10000000  type=data  P=1   client DATA (occupied)
+  slot 0x16  sel 0xb7  base 0x00046010  type=data  P=1   real-mode BUFFER — LOW memory, present, CORRECT
+```
+This OVERTURNS the earlier "RTL buffer is at high memory 0x10000000" framing (§23w). The buffer (0xb7)
+EXISTS at the correct low/conventional base 0x46010 — identical to qemu. The descriptors MATCH qemu.
+
+So the ONLY divergence is [0x626] = 0xaf (the occupied client-DATA selector) where qemu has 0xb7 (the
+buffer). The real-mode-call setup's INT 0x31 fn0000 returned an OCCUPIED slot (0xaf, present per its own
+descriptor) instead of a free one / the just-freed buffer (0xb7). Both 0xaf and 0xb7 are present in the
+LDT, so this is NOT a descriptor or memory-base bug and NOT a missing buffer — it is a CWSDPMI
+free-LIST / allocator-state desync: the host's free bookkeeping says LDT[0x15] is free while its own
+descriptor says present. Also the paired fn0501 memory alloc returns the client region (0x10000000), so
+BOTH allocators hand back in-use client resources at this one op -> a broad CWSDPMI allocator-state
+corruption, recent (the op runs once near the crash). Next: timing probe (when the op runs) + the last
+write to LDT[0x15]'s access byte (was 0xaf wrongly FREED right before, or is the free-list desynced with
+a still-present descriptor). Root is a CWSDPMI free-list memory corruption seeded by an earlier core
+divergence; descriptors+regs match the oracle so still no isolated fixable CORE bug at this layer.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
