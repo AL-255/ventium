@@ -248,7 +248,25 @@ seg-reload corner to triage), transcendentals (gated behind +VEN_TRANSCENDENTAL)
 (CPL3 semantics, not bugs). Plus the Quake real-mode control-flow fall-through (§11) — a DOS/DPMI
 issue, not an opcode gap.
 
-## 13. Bottom line
+## 13. Quake render blocker is VESA/video, not (only) the crash
+
+Two new facts (dump at the halt):
+- **`mem[0x449] = 0`** — Quake NEVER set a standard BIOS video mode (mode-13h would write 0x13). It is
+  using **VESA/VBE** (consistent with the earlier `eax=0x101` = VBE mode 0x101 = 640×480×256).
+- **No IVT entry points to cs=0x34** (scanned all 256 real-mode vectors) — so the crashing excursion
+  is NOT a DPMI simulate-real-mode-int handler. It is a computed far-jump (almost certainly a VBE
+  **bank-switch / protected-mode-interface** call) to an address (cs=0x34:0x595d) that is DATA →
+  512+ straight-line instructions → `0x63` (#UD in real mode) → S_HALT.
+
+Implication for Goal 2: the RTL framebuffer `ven_vga_fb` is **mode-13h (320×200, 64 KiB @ 0xA0000)
+only** — it cannot capture a VESA 640×480 linear framebuffer even if Quake rendered. So "render frames
+to the RTL FB" requires EITHER (a) steering Quake to **mode 13h** (so it draws to 0xA0000 → ven_vga_fb),
+which means making VBE cleanly unavailable so Quake's software renderer falls back; OR (b) adding a
+VESA/VBE model + a capturable linear FB. The cs=0x34 #UD is the VBE far-call landing in garbage because
+the VBE interface isn't really provided. This is a video/VBE bring-up task, NOT a CPU opcode gap
+(opgen: 0 NEW-FAIL) and NOT the timer (PIT ticks correctly).
+
+## 14. Bottom line
 - FreeDOS boot: **done, validated** (98/98 + 949/949).
 - DOS-Quake null-SS #GP: **FIXED + committed (`6a6fa62`) + validated** (`cur_lin` S_LOAD2 paging
   translation). Quake now runs **past the old 8.9M crash to 9.64M**. Cache was a red herring.
