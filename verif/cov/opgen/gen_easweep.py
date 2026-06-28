@@ -72,6 +72,16 @@ def main():
                     # mod=00 with base=EBP is encoded as disp32; gas handles it.
                     lea(f"{disp}(%{b},%{idx},{scale})")
 
+    # ---- 16-bit addressing (0x67 addr-size prefix): mod 00/01/10 x the 8
+    #      16-bit r/m base combos [BX+SI]..[BX]. Covers the addr16 EA decode the
+    #      32-bit sweep above never reaches. LEA -> no memory access, EA wraps at
+    #      64 KiB; result is a deterministic function of BX/BP/SI/DI -> diffable.
+    A16 = ["(%bx,%si)", "(%bx,%di)", "(%bp,%si)", "(%bp,%di)",
+           "(%si)", "(%di)", "(%bp)", "(%bx)"]
+    for disp in ("", "0x12", "0x1234"):
+        for ea in A16:
+            lea(f"{disp}{ea}")
+
     # exit
     L.append("    movl  $1, %eax")
     L.append("    xorl  %ebx, %ebx")
