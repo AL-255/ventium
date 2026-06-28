@@ -918,6 +918,37 @@ module tb_biu_p5;
     end
   endtask
 
+  // SNOOP address sweep with the CORRECT model expectations (biu_p5:672: HIT#
+  // when a_in!=0, MODIFIED when a_in[0]==1). Walks a_in[26:1] as non-modified
+  // hits (toggles the snoop-address input + snoop_hit/snoop_inv datapath) and
+  // does the a_in[0]=1 modified case + its writeback (also covers the HITM#
+  // release arm). Each snoop idles first so no stale pending state.
+  task automatic run_ain_sweep;
+    integer i;
+    begin
+      $display("[scenario] SNOOP a_in sweep (model: hit iff a_in!=0)");
+      idle_inputs; tick(2);
+      run_snoop(27'd0, 1'b0, 1'b0, 1'b0);                 // a_in==0 -> clean MISS
+      for (i=1;i<27;i=i+1) begin
+        idle_inputs; tick(2);
+        run_snoop((27'h1<<i), 1'b1, 1'b0, (i[0]));        // hit, not modified, vary INV
+        idle_inputs; tick(1);
+        run_snoop(((~(27'h1<<i))&27'h7FFFFFE), 1'b1, 1'b0, (~i[0])); // complement, bit0=0
+      end
+      // a_in[0]==1 -> HIT + MODIFIED -> HITM# + writeback request
+      idle_inputs; tick(2);
+      run_snoop(27'h0000001, 1'b1, 1'b1, 1'b0);
+      @(negedge clk);                                      // clear the writeback (HITM# release)
+      req=1; req_we=1; req_wb=1; req_cache=0; req_lock=0; req_addr={27'h0000001,2'b00};
+      req_be=8'hFF; req_wdata=64'h0;
+      @(posedge clk); while (!req_ack) @(posedge clk);
+      @(negedge clk); req=0; req_wb=0;
+      wait (dbg_state==S_T2);
+      @(negedge clk); brdyn=0; @(posedge clk); @(negedge clk); brdyn=1; tick(2);
+      chk(hitmn && !wb_req, "HITM# released after a_in-sweep writeback");
+    end
+  endtask
+
   task automatic run_hold;
     begin
       $display("[scenario] HOLD / HLDA arbitration");
@@ -1017,6 +1048,7 @@ module tb_biu_p5;
     run_snoop_writeback_pipelined(27'h0BBBB01);        // pipelined writeback (HITM release in promote)
     run_snoop_modified_inv();                          // [FIX-2] hit-modified, INV=1 (-> I)
     run_unrelated_write_holds_hitm(27'h0CCCC01);       // [FIX-6]
+    run_ain_sweep();                                   // walking a_in snoop-addr toggle
 
     // arbitration / abort
     run_boff();
