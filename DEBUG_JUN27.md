@@ -506,6 +506,23 @@ capture eax/ebx/edx/ebp there + the few instructions before, and dump the candid
 call template. Then fix + VESA capture. The bug is reduced to a single dword with a known correct
 value (0x26d1e82d).
 
+## 23d. The patch value is a COPIED template (relocated rel16) — root is a reloc/template divergence
+
+Traced the source of the patch value 0x26dfe82d at the store (cs=0x87:0x334). It is in **NO GPR** at
+the store: eax=0x101, ecx=0, edx=0x008000b7, ebx=0x000e0021, ebp=0x91e, esp=0x770, esi=0x7400,
+edi=0x63400 — none = 0x26dfe82d. And esi=0x7400 holds CODE (`e3 22 ac ae...`), not the value. So the
+store is a **memory->memory copy of a pre-built call template** (bytes `2d e8 df 26`), whose source is
+ds_base-relative (PM segmentation) — not resolvable from the physical write address alone.
+
+So the wrong rel16 (0x26df) was baked into the template EARLIER, i.e. at go32's **load-time relocation**
+of the call (`rel16 = target - site`). With maps aligned the target/site should match qemu, so the
+divergence is in the relocation arithmetic or its inputs — one more layer, at load time, not at the
+9.64M crash. This is the layer where iterative single-shot RTL tracing reaches its practical limit:
+rooting it needs either source-read instrumentation (capture the mem_addr the template is read from,
+follow it to the reloc that wrote it) or a full instruction-by-instruction code-aligned qemu<->RTL
+diff of go32's PM relocation pass (now feasible since maps align). The bug remains a single dword with
+a known correct value (0x26d1e82d); what's unrooted is which load-time reloc instruction bakes 0x26df.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
