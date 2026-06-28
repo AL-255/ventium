@@ -63,3 +63,7 @@ op_d9_6_f4  CORE-GAP  FXTRACT  HALTs EVEN WITH +VEN_TRANSCENDENTAL (genuinely un
 #   (range reduction of a non-finite operand is unhandled). Found by the edge-input
 #   probe of the transcendental sweep. Repro: finit; fldl <inf>; fsin -> HALT.
 op_fsin_inf  CORE-GAP  FSIN/FCOS/FPTAN of inf/NaN halts (feature build; IEEE special-input gap)
+# --- COVERAGE-NOTE: iterative FBLD (ven_bcd_to_fp, +VEN_BCD_ITER) HANGS without
+#     +VEN_FP_PIPE (the FP pipeline drives the engine handshake). gen_bcd_sweep.py
+#     is ready; it needs a cov-feat build that also defines VEN_FP_PIPE to toggle
+#     the iterative BCD datapath (the flags lane has it). Not a user-mode opcode gap.

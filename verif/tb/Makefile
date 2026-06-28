@@ -449,7 +449,8 @@ cov:
 .PHONY: cov-feat
 cov-feat:
 	$(MAKE) cov COV_OBJ=obj_dir_cov_feat \
-	  COV_DEFS="$(COV_DEFS) +define+VEN_TRANSCENDENTAL +define+VEN_FPREM"
+	  COV_DEFS="$(COV_DEFS) +define+VEN_TRANSCENDENTAL +define+VEN_FPREM \
+	           +define+VEN_BCD_ITER +define+VEN_SRT_ITER"
 
 # ---- selftest target: build against the throwaway stub ----------------------
 # Built into a separate obj dir so it never clobbers a real-core build. ENTRY
