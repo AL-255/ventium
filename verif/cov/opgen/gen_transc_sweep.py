@@ -46,6 +46,18 @@ def main():
             consts.append((nm, val))
             # y=1.0 in st1, x=v in st0
             L += ["    fld1", f"    fldl {nm}", f"    {mn}", "    fstp %st(0)"]
+    # DENSE atan2(y,x) sweep — diverse magnitudes, ratios, signs and quadrants so the
+    # fpu_fpatan CORDIC range-reduction + the c-table ROM are exercised across their
+    # full input space (a y=1 sweep alone leaves most of the 6 k-point engine dark).
+    FA_MAGS = ["1.0", "2.0", "0.5", "1e-10", "1e10", "3.14159", "0.001", "1000.0",
+               "1.5", "0.7", "1e-5", "1e5", "123.4", "0.0001", "7.0", "0.125"]
+    for i, ym in enumerate(FA_MAGS):
+        x = FA_MAGS[(i * 5 + 3) % len(FA_MAGS)]
+        for sx in ("", "-"):
+            for sy in ("", "-"):
+                ny, _ = load(sy + ym); consts.append((ny, sy + ym))
+                nx, _ = load(sx + x);  consts.append((nx, sx + x))
+                L += [f"    fldl {ny}", f"    fldl {nx}", "    fpatan", "    fstp %st(0)"]
     # FPREM / FPREM1 (st0 mod st1) — iterative; sweep dividend/divisor pairs that
     # need multiple reduction steps (large quotient) + small ones.
     for mn in ("fprem", "fprem1"):
