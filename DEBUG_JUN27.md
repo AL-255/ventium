@@ -1096,6 +1096,32 @@ applied the spurious stub fixup. NEXT: the last delivered vector at the corrupto
 decode cs=0x87:2b73's dispatch key -> the exception/condition the core raises wrongly. The corruptor and
 the divergence point (2b73) are now identified; the trigger is the last layer.
 
+## 23af. FULL INSTRUCTION DIFF (user-requested): root is a buffer allocated 1 PAGE higher; stale oracle retraction
+
+Built a complete per-instruction RTL-vs-qemu comparison (scratchpad/cmpdiff.py + gen_qemu_trace.py + the
+VEN_CMPTRACE compact binary writer in dpi_retire.cpp). Compact 56-byte/record traces (RTL via vtm_retire;
+qemu via `-cpu pentium -accel tcg,one-insn-per-tb=on -d cpu` parsed on-the-fly through a FIFO so the 15GB+
+verbose log is never stored). Diff aligns by PC (post/pre off-by-one corrected), resyncs ISR/IRQ0
+excursions, tolerates benign data divergences, anchors at a unique loc, with a progress bar + segment
+disk-management.
+
+CRITICAL RETRACTION: the prior "qemu NEVER reaches cs=0x87:0x338 -> control-flow divergence" (§23ad/§23ae)
+was an ARTIFACT OF THE STALE ORACLE /tmp/qcpu.log, which is qemu's DEFAULT cpu (family-6, EDX=0x663). With
+the correct `-cpu pentium` (family-5, EDX=0x543) oracle, qemu DOES execute cs=0x87:0x331 + 0x338 (the stub
+relocation) at qemu#9,832,744. So BOTH run the relocation; the bug is a DATA divergence, NOT control flow.
+
+ROOT CHAIN (from the diff, anchored at the op cs=0x87:0x258 where pre-state MATCHES exactly):
+1. The DPMI real-mode-call BUFFER is allocated ONE PAGE HIGHER in the RTL: eax=0x45000 vs qemu 0x44000
+   (first seen @cs=0x18:0x2b54), giving buffer segment ds/es/ss=0x2c70 vs 0x2b57.
+2. The load at cs=26ac:0x2ca6 reads a buffer field 0xe higher: ebx=0x000e130e vs 0x000e1300.
+3. That SAME 0xe propagates to the stub near-CALL target: 0x5954 vs 0x5946 (0x5954-0x5946 = 0xe) -> #UD.
+So the over-relocated stub is a downstream symptom; the true root is CWSDPMI's PAGE/memory allocator
+handing the real-mode buffer a different physical page (0x45000 vs 0x44000) -- a free-list/allocation-state
+divergence (consistent with the earlier alloc-state findings, now PROVEN by an aligned per-instruction diff,
+not the stale oracle). NEXT: trace the write of the 0x44000-vs-0x45000 page decision in CWSDPMI's
+free-page list (a memory diff, or extend the trace with the allocator's key memory cells); the diff tool
+makes this tractable. Goal 1 solid; Goals 2/3 root now an aligned-diff-confirmed allocator page divergence.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
