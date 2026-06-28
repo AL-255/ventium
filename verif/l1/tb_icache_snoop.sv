@@ -87,6 +87,35 @@ module tb_icache_snoop;
     @(posedge clk); #1;
     chk("0x4000 (set0/way1) invalidated", ic_val_o[0][1], 1'b0);
 
+    // [COV] full breadth sweep: fill EVERY set x way with walking-bit data + diverse
+    //       tags, read every line, touch diverse (age/LRU), then snoop-invalidate all
+    //       -> toggles ic_val/ic_val_o (all lines), rd_lineA/rd_lineB (line data),
+    //       ic_age, ic_victim_o, the tag arrays. Pure stimulus, after all checks.
+    for (int s = 0; s < IC_SETS; s++)
+      for (int wy = 0; wy < IC_WAYS; wy++) begin
+        @(negedge clk);
+        for (int w = 0; w < 8; w++) begin
+          fill_en<=1; fill_set<=IDXW'(s); fill_way<=WAYW'(wy); fill_off<=5'(w*4);
+          fill_data<=(32'h1 << ((s + wy*4 + w) % 32)) ^ 32'(s*32'h0204_0801 + w);
+          fill_done<=(w==7); fill_tag<=TAGW'(s*7 + wy*131 + w + 1);
+          @(negedge clk);
+        end
+        fill_en<=0; fill_done<=0;
+      end
+    for (int s = 0; s < IC_SETS; s++)                 // read every line (rd_lineA/B)
+      for (int wy = 0; wy < IC_WAYS; wy++) begin
+        @(negedge clk); rd_setA<=IDXW'(s); rd_wayA<=WAYW'(wy);
+        rd_setB<=IDXW'(IC_SETS-1-s); rd_wayB<=WAYW'(wy); @(posedge clk);
+      end
+    for (int s = 0; s < IC_SETS; s++) begin           // touch -> age/LRU
+      @(negedge clk); tch0_en<=1; tch0_set<=IDXW'(s); tch0_tag<=TAGW'(s);
+      tch1_en<=1; tch1_set<=IDXW'(s); tch1_tag<=TAGW'(s+1);
+      tch2_en<=1; tch2_set<=IDXW'(s); tch2_tag<=TAGW'(s*3); @(negedge clk);
+      tch0_en<=0; tch1_en<=0; tch2_en<=0;
+    end
+    for (int s = 0; s < IC_SETS; s++)                 // snoop-invalidate all (ic_val 1->0)
+      snoop((32'(s) << 5) ^ 32'hC000_0000);
+
     if (errors==0) $display("ICSNOOP-GATE-OK (all checks pass)");
     else           $display("ICSNOOP-GATE-FAIL (%0d errors)", errors);
     $finish;
