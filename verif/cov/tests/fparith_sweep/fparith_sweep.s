@@ -483,11 +483,636 @@ _start:
     fdiv %st(1), %st(0)
     fstp %st(0)
     fstp %st(0)
+    fldl c193
+    fsqrt
+    fstp %st(0)
+    fldl c194
+    fsqrt
+    fstp %st(0)
+    fldl c195
+    fsqrt
+    fstp %st(0)
+    fldl c196
+    fsqrt
+    fstp %st(0)
+    fldl c197
+    fsqrt
+    fstp %st(0)
+    fldl c198
+    fsqrt
+    fstp %st(0)
+    fldl c199
+    fsqrt
+    fstp %st(0)
+    fldl c200
+    fsqrt
+    fstp %st(0)
+    fldl c201
+    fsqrt
+    fstp %st(0)
+    fldl c202
+    fsqrt
+    fstp %st(0)
+    fldl c203
+    fsqrt
+    fstp %st(0)
+    fldl c204
+    fsqrt
+    fstp %st(0)
+    fldl c205
+    fsqrt
+    fstp %st(0)
+    fldl c206
+    fsqrt
+    fstp %st(0)
+    fldl c207
+    fsqrt
+    fstp %st(0)
+    fldl c208
+    fsqrt
+    fstp %st(0)
+    fldl c209
+    fsqrt
+    fstp %st(0)
+    fldl c210
+    fsqrt
+    fstp %st(0)
+    fldl c211
+    fsqrt
+    fstp %st(0)
+    fldl c212
+    fsqrt
+    fstp %st(0)
+    fldl c213
+    fsqrt
+    fstp %st(0)
+    fldl c214
+    fsqrt
+    fstp %st(0)
+    fldl c215
+    fsqrt
+    fstp %st(0)
+    fldl c216
+    fsqrt
+    fstp %st(0)
+    fldl c217
+    fabs
+    fstp %st(0)
+    fldl c218
+    fabs
+    fstp %st(0)
+    fldl c219
+    fabs
+    fstp %st(0)
+    fldl c220
+    fabs
+    fstp %st(0)
+    fldl c221
+    fabs
+    fstp %st(0)
+    fldl c222
+    fabs
+    fstp %st(0)
+    fldl c223
+    fabs
+    fstp %st(0)
+    fldl c224
+    fabs
+    fstp %st(0)
+    fldl c225
+    fabs
+    fstp %st(0)
+    fldl c226
+    fabs
+    fstp %st(0)
+    fldl c227
+    fabs
+    fstp %st(0)
+    fldl c228
+    fabs
+    fstp %st(0)
+    fldl c229
+    fabs
+    fstp %st(0)
+    fldl c230
+    fabs
+    fstp %st(0)
+    fldl c231
+    fabs
+    fstp %st(0)
+    fldl c232
+    fabs
+    fstp %st(0)
+    fldl c233
+    fabs
+    fstp %st(0)
+    fldl c234
+    fabs
+    fstp %st(0)
+    fldl c235
+    fabs
+    fstp %st(0)
+    fldl c236
+    fabs
+    fstp %st(0)
+    fldl c237
+    fabs
+    fstp %st(0)
+    fldl c238
+    fabs
+    fstp %st(0)
+    fldl c239
+    fabs
+    fstp %st(0)
+    fldl c240
+    fabs
+    fstp %st(0)
+    fldl c241
+    fchs
+    fstp %st(0)
+    fldl c242
+    fchs
+    fstp %st(0)
+    fldl c243
+    fchs
+    fstp %st(0)
+    fldl c244
+    fchs
+    fstp %st(0)
+    fldl c245
+    fchs
+    fstp %st(0)
+    fldl c246
+    fchs
+    fstp %st(0)
+    fldl c247
+    fchs
+    fstp %st(0)
+    fldl c248
+    fchs
+    fstp %st(0)
+    fldl c249
+    fchs
+    fstp %st(0)
+    fldl c250
+    fchs
+    fstp %st(0)
+    fldl c251
+    fchs
+    fstp %st(0)
+    fldl c252
+    fchs
+    fstp %st(0)
+    fldl c253
+    fchs
+    fstp %st(0)
+    fldl c254
+    fchs
+    fstp %st(0)
+    fldl c255
+    fchs
+    fstp %st(0)
+    fldl c256
+    fchs
+    fstp %st(0)
+    fldl c257
+    fchs
+    fstp %st(0)
+    fldl c258
+    fchs
+    fstp %st(0)
+    fldl c259
+    fchs
+    fstp %st(0)
+    fldl c260
+    fchs
+    fstp %st(0)
+    fldl c261
+    fchs
+    fstp %st(0)
+    fldl c262
+    fchs
+    fstp %st(0)
+    fldl c263
+    fchs
+    fstp %st(0)
+    fldl c264
+    fchs
+    fstp %st(0)
+    fldl c265
+    frndint
+    fstp %st(0)
+    fldl c266
+    frndint
+    fstp %st(0)
+    fldl c267
+    frndint
+    fstp %st(0)
+    fldl c268
+    frndint
+    fstp %st(0)
+    fldl c269
+    frndint
+    fstp %st(0)
+    fldl c270
+    frndint
+    fstp %st(0)
+    fldl c271
+    frndint
+    fstp %st(0)
+    fldl c272
+    frndint
+    fstp %st(0)
+    fldl c273
+    frndint
+    fstp %st(0)
+    fldl c274
+    frndint
+    fstp %st(0)
+    fldl c275
+    frndint
+    fstp %st(0)
+    fldl c276
+    frndint
+    fstp %st(0)
+    fldl c277
+    frndint
+    fstp %st(0)
+    fldl c278
+    frndint
+    fstp %st(0)
+    fldl c279
+    frndint
+    fstp %st(0)
+    fldl c280
+    frndint
+    fstp %st(0)
+    fldl c281
+    frndint
+    fstp %st(0)
+    fldl c282
+    frndint
+    fstp %st(0)
+    fldl c283
+    frndint
+    fstp %st(0)
+    fldl c284
+    frndint
+    fstp %st(0)
+    fldl c285
+    frndint
+    fstp %st(0)
+    fldl c286
+    frndint
+    fstp %st(0)
+    fldl c287
+    frndint
+    fstp %st(0)
+    fldl c288
+    frndint
+    fstp %st(0)
+    fldl c290
+    fldl c289
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c292
+    fldl c291
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c294
+    fldl c293
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c296
+    fldl c295
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c298
+    fldl c297
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c300
+    fldl c299
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c302
+    fldl c301
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c304
+    fldl c303
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c306
+    fldl c305
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c308
+    fldl c307
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c310
+    fldl c309
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c312
+    fldl c311
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c314
+    fldl c313
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c316
+    fldl c315
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c318
+    fldl c317
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c320
+    fldl c319
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c322
+    fldl c321
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c324
+    fldl c323
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c326
+    fldl c325
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c328
+    fldl c327
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c330
+    fldl c329
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c332
+    fldl c331
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c334
+    fldl c333
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c336
+    fldl c335
+    fscale
+    fstp %st(0)
+    fstp %st(0)
+    fldl c337
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c338
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c339
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c340
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c341
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c342
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c343
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c344
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c345
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c346
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c347
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c348
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c349
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c350
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c351
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c352
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c353
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c354
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c355
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c356
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c357
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c358
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c359
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c360
+    fistpl iscratch
+    fildl iscratch
+    fstp %st(0)
+    fldl c362
+    fldl c361
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c364
+    fldl c363
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c366
+    fldl c365
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c368
+    fldl c367
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c370
+    fldl c369
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c372
+    fldl c371
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c374
+    fldl c373
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c376
+    fldl c375
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c378
+    fldl c377
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c380
+    fldl c379
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c382
+    fldl c381
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c384
+    fldl c383
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c386
+    fldl c385
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c388
+    fldl c387
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c390
+    fldl c389
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c392
+    fldl c391
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c394
+    fldl c393
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c396
+    fldl c395
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c398
+    fldl c397
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c400
+    fldl c399
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c402
+    fldl c401
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c404
+    fldl c403
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c406
+    fldl c405
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
+    fldl c408
+    fldl c407
+    fcomi %st(1), %st(0)
+    fstp %st(0)
+    fstp %st(0)
     movl $1, %eax
     xorl %ebx, %ebx
     int $0x80
     .data
     .align 8
+iscratch: .zero 8
 c1: .double 1.0
 c2: .double 1.5
 c3: .double 2.0
@@ -680,3 +1305,219 @@ c189: .double -0.0
 c190: .double 1e300
 c191: .double 65536.5
 c192: .double 9007199254740993.0
+c193: .double 1.0
+c194: .double 2.0
+c195: .double 0.5
+c196: .double 1.5
+c197: .double 1.25
+c198: .double 1.3333333333333333
+c199: .double 1.0000000000000002
+c200: .double 1.9999999999999998
+c201: .double 3.141592653589793
+c202: .double 2.718281828459045
+c203: .double 1e-300
+c204: .double 1e-30
+c205: .double 1e30
+c206: .double 1e300
+c207: .double -1.5
+c208: .double -7.0
+c209: .double -1e15
+c210: .double 123456789.123456789
+c211: .double 0.1
+c212: .double 0.7
+c213: .double 9007199254740993.0
+c214: .double 6.103515625e-05
+c215: .double -0.0
+c216: .double 65536.5
+c217: .double 1.0
+c218: .double 2.0
+c219: .double 0.5
+c220: .double 1.5
+c221: .double 1.25
+c222: .double 1.3333333333333333
+c223: .double 1.0000000000000002
+c224: .double 1.9999999999999998
+c225: .double 3.141592653589793
+c226: .double 2.718281828459045
+c227: .double 1e-300
+c228: .double 1e-30
+c229: .double 1e30
+c230: .double 1e300
+c231: .double -1.5
+c232: .double -7.0
+c233: .double -1e15
+c234: .double 123456789.123456789
+c235: .double 0.1
+c236: .double 0.7
+c237: .double 9007199254740993.0
+c238: .double 6.103515625e-05
+c239: .double -0.0
+c240: .double 65536.5
+c241: .double 1.0
+c242: .double 2.0
+c243: .double 0.5
+c244: .double 1.5
+c245: .double 1.25
+c246: .double 1.3333333333333333
+c247: .double 1.0000000000000002
+c248: .double 1.9999999999999998
+c249: .double 3.141592653589793
+c250: .double 2.718281828459045
+c251: .double 1e-300
+c252: .double 1e-30
+c253: .double 1e30
+c254: .double 1e300
+c255: .double -1.5
+c256: .double -7.0
+c257: .double -1e15
+c258: .double 123456789.123456789
+c259: .double 0.1
+c260: .double 0.7
+c261: .double 9007199254740993.0
+c262: .double 6.103515625e-05
+c263: .double -0.0
+c264: .double 65536.5
+c265: .double 1.0
+c266: .double 2.0
+c267: .double 0.5
+c268: .double 1.5
+c269: .double 1.25
+c270: .double 1.3333333333333333
+c271: .double 1.0000000000000002
+c272: .double 1.9999999999999998
+c273: .double 3.141592653589793
+c274: .double 2.718281828459045
+c275: .double 1e-300
+c276: .double 1e-30
+c277: .double 1e30
+c278: .double 1e300
+c279: .double -1.5
+c280: .double -7.0
+c281: .double -1e15
+c282: .double 123456789.123456789
+c283: .double 0.1
+c284: .double 0.7
+c285: .double 9007199254740993.0
+c286: .double 6.103515625e-05
+c287: .double -0.0
+c288: .double 65536.5
+c289: .double 1.0
+c290: .double 2.0
+c291: .double 2.0
+c292: .double 1.0000000000000002
+c293: .double 0.5
+c294: .double 1e-30
+c295: .double 1.5
+c296: .double -1e15
+c297: .double 1.25
+c298: .double 6.103515625e-05
+c299: .double 1.3333333333333333
+c300: .double 0.5
+c301: .double 1.0000000000000002
+c302: .double 1.9999999999999998
+c303: .double 1.9999999999999998
+c304: .double 1e30
+c305: .double 3.141592653589793
+c306: .double 123456789.123456789
+c307: .double 2.718281828459045
+c308: .double -0.0
+c309: .double 1e-300
+c310: .double 1.5
+c311: .double 1e-30
+c312: .double 3.141592653589793
+c313: .double 1e30
+c314: .double 1e300
+c315: .double 1e300
+c316: .double 0.1
+c317: .double -1.5
+c318: .double 65536.5
+c319: .double -7.0
+c320: .double 1.25
+c321: .double -1e15
+c322: .double 2.718281828459045
+c323: .double 123456789.123456789
+c324: .double -1.5
+c325: .double 0.1
+c326: .double 0.7
+c327: .double 0.7
+c328: .double 1.0
+c329: .double 9007199254740993.0
+c330: .double 1.3333333333333333
+c331: .double 6.103515625e-05
+c332: .double 1e-300
+c333: .double -0.0
+c334: .double -7.0
+c335: .double 65536.5
+c336: .double 9007199254740993.0
+c337: .double 1.0
+c338: .double 2.0
+c339: .double 0.5
+c340: .double 1.5
+c341: .double 1.25
+c342: .double 1.3333333333333333
+c343: .double 1.0000000000000002
+c344: .double 1.9999999999999998
+c345: .double 3.141592653589793
+c346: .double 2.718281828459045
+c347: .double 1e-300
+c348: .double 1e-30
+c349: .double 1e30
+c350: .double 1e300
+c351: .double -1.5
+c352: .double -7.0
+c353: .double -1e15
+c354: .double 123456789.123456789
+c355: .double 0.1
+c356: .double 0.7
+c357: .double 9007199254740993.0
+c358: .double 6.103515625e-05
+c359: .double -0.0
+c360: .double 65536.5
+c361: .double 1.0
+c362: .double 0.5
+c363: .double 2.0
+c364: .double 1.3333333333333333
+c365: .double 0.5
+c366: .double 3.141592653589793
+c367: .double 1.5
+c368: .double 1e-30
+c369: .double 1.25
+c370: .double -1.5
+c371: .double 1.3333333333333333
+c372: .double 123456789.123456789
+c373: .double 1.0000000000000002
+c374: .double 9007199254740993.0
+c375: .double 1.9999999999999998
+c376: .double 65536.5
+c377: .double 3.141592653589793
+c378: .double 0.5
+c379: .double 2.718281828459045
+c380: .double 1.3333333333333333
+c381: .double 1e-300
+c382: .double 3.141592653589793
+c383: .double 1e-30
+c384: .double 1e-30
+c385: .double 1e30
+c386: .double -1.5
+c387: .double 1e300
+c388: .double 123456789.123456789
+c389: .double -1.5
+c390: .double 9007199254740993.0
+c391: .double -7.0
+c392: .double 65536.5
+c393: .double -1e15
+c394: .double 0.5
+c395: .double 123456789.123456789
+c396: .double 1.3333333333333333
+c397: .double 0.1
+c398: .double 3.141592653589793
+c399: .double 0.7
+c400: .double 1e-30
+c401: .double 9007199254740993.0
+c402: .double -1.5
+c403: .double 6.103515625e-05
+c404: .double 123456789.123456789
+c405: .double -0.0
+c406: .double 9007199254740993.0
+c407: .double 65536.5
+c408: .double 65536.5
