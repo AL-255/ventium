@@ -182,14 +182,15 @@ module tb_l1_axi;
     $display("[9] COVERAGE sweep: diverse AXI read/write/evict transactions");
     for (int i=0;i<128;i++) begin
       automatic logic [31:0] s = 32'(i) * 32'h20;
-      do_write(s,             32'h1 << (i%32));    // write-through -> AW + WDATA
-      do_read (s + 32'h1000,  d);                   // miss -> AR
-      do_read (s + 32'h2000,  d);                   // 3rd tag -> eviction (write-back AW if dirty)
+      do_write(s,             32'h1 << (i%32));    // DIRTY way A
+      do_write(s + 32'h1000,  ~(32'h1 << (i%32))); // DIRTY way B (same set)
+      do_read (s + 32'h2000,  d);                   // 3rd tag -> evict a DIRTY way -> write-back BURST (wdata2_q/awaddr2_q)
+      do_read (s + 32'h4000,  d);                   // 4th tag -> evict the other dirty way
       do_read (s,             d);                    // refill
     end
     for (int i=0;i<32;i++) do_write(32'h0000_0040 + 32'(i)*4, 32'h1 << i);  // walking WDATA
-    for (int i=2;i<20;i++) begin
-      do_read (32'h1 << i, d);                       // walking araddr bits
+    for (int i=2;i<25;i++) begin
+      do_read (32'h1 << i, d);                       // walking araddr bits 2..24 (to ~16 MiB)
       do_write(32'h1 << i, ~(32'h1 << i));           // walking awaddr + wdata
     end
 
