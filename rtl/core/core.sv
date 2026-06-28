@@ -4184,7 +4184,7 @@ module core
     logic translatable;
     unique case (state)
       S_FETCH, S_PF, S_PIPE,
-      S_LOAD, S_LOAD2, S_FLOAD, S_FSTORE, S_STORE, S_USEQ,
+      S_LOAD, S_LOAD2, S_FLOAD, S_FSTORE, S_STORE, S_USEQ, S_ENTER,
       // M2S.3 IDT delivery reads/writes are translated when paging is on.
       // M2S.4 adds the inter-priv IRET SS pop (S_IRET_SS) — a genuine stack pop,
       // translated like the other stack accesses.
