@@ -35,12 +35,19 @@ for d in "$HERE"/modes/*/; do
     make -C "$d" >/dev/null 2>"$OUT/$NAME.build.log" || { echo "  build FAIL"; C[FAIL]=$((C[FAIL]+1)); continue; }
     IMG="$d/$NAME.bin"
     PORT=$(( 28800 + (RANDOM % 4000) ))
+    # Per-test instruction budget: the long sweep streams run hundreds of insns and
+    # must NOT be truncated at 120 (qemu stops on out-0xf4, so golden/RTL lengths still
+    # match at their natural exit -- verified EQUIVALENT for each). Short modes keep 120.
+    case "$NAME" in
+        pm32_segbase|pm32_sysregs|pm32_intsweep|pm32_paging4k) MAX=4000; MCYC=40000000 ;;
+        *)                                                     MAX=120;  MCYC=4000000  ;;
+    esac
     if ! "$PYTHON" "$GEN_TRACE" --qemu "$QSYS" --system --image "$IMG" --image-mode bios \
-            --out "$OUT/${NAME}_q.vtrace" --max-insn 120 --port "$PORT" >"$OUT/$NAME.gold.log" 2>&1; then
+            --out "$OUT/${NAME}_q.vtrace" --max-insn "$MAX" --port "$PORT" >"$OUT/$NAME.gold.log" 2>&1; then
         echo "  golden FAIL"; C[FAIL]=$((C[FAIL]+1)); continue
     fi
     VEN_COV_DAT="$DAT/$NAME.dat" "$TB" --image "$IMG" --system --out "$OUT/${NAME}_r.vtrace" \
-        --max-cycles 4000000 --max-insn 120 >"$OUT/$NAME.rtl.log" 2>&1 || true
+        --max-cycles "$MCYC" --max-insn "$MAX" >"$OUT/$NAME.rtl.log" 2>&1 || true
     if "$PYTHON" "$COMPARE" --mode func "$OUT/${NAME}_q.vtrace" "$OUT/${NAME}_r.vtrace" >"$OUT/$NAME.cmp" 2>&1; then
         echo "  PASS (matches qemu-system at CPL0/real-mode)"; C[PASS]=$((C[PASS]+1))
     else
