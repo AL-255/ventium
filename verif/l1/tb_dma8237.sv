@@ -146,6 +146,23 @@ module tb_dma8237;
               16'((16'h1 << (k % 7)) + 1), k[0]);   // diverse addr / count(1..65) / dir
     end
 
+    // [COV] walking-bit CORE traffic (reads + writes) at diverse addresses so the
+    //       core_addr/core_rdata/core_wdata path + the cache->AXI fill/evict
+    //       addresses (m_addr, m_axi_awaddr/araddr, m_wdata) toggle their high bits.
+    //       Pure stimulus (no chk). Addresses kept < 1 MiB (the seeded slave range).
+    for (int i = 2; i < 20; i++) begin
+      do_read(32'h1 << i, d);
+      @(negedge clk); c_req<=1'b1; c_we<=1'b1; c_addr<=32'h1 << i;
+      c_wdata<=~(32'h1 << i); c_wstrb<=4'hF;
+      do begin @(posedge clk); #1; end while(!c_ack); @(negedge clk); c_req<=0; c_we<=0;
+    end
+    for (int i = 0; i < 20; i++) begin
+      do_read((32'hA5A5_A5A5 >> i) & 32'h000F_FFFC, d);
+      @(negedge clk); c_req<=1'b1; c_we<=1'b1; c_addr<=(32'h5A5A_5A5A >> i) & 32'h000F_FFFC;
+      c_wdata<=32'(i) ^ 32'hF0F0_0F0F; c_wstrb<=4'hF;
+      do begin @(posedge clk); #1; end while(!c_ack); @(negedge clk); c_req<=0; c_we<=0;
+    end
+
     if (errors==0) $display("DMA8237-GATE-OK (all checks pass)");
     else           $display("DMA8237-GATE-FAIL (%0d errors)", errors);
     $finish;
