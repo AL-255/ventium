@@ -51,7 +51,7 @@ regression cannot hide. `make opgen-modes` runs the real-mode/CPL0 lane.
 
 ### Findings analysis (`known_diverge.txt`) — surfaced, NOT fixed here
 
-The 25 KNOWN are real divergences the per-opcode sweep found (the core is
+The 29 KNOWN are real divergences the per-opcode sweep found (the core is
 unchanged — these are an analysis catalog):
 
 | class | n | what |
@@ -73,7 +73,7 @@ unchanged — these are an analysis catalog):
 | mode: PM32-CPL0 + more privileged/IO/far/seg streams | framework in place (`gen_modes.py`) |
 | MANUAL (priv/io/far/seg/MOV-Sreg/MOV-moffs/fault) | listed in `opgen_status.txt` |
 
-**PM32/user: 423 GEN, 383 PASS + 29 KNOWN + 0 NEW-FAIL** (clean). The 29 KNOWN
+**PM32/user: 436 GEN, 397 PASS + 29 KNOWN + 0 NEW-FAIL** (clean). The 29 KNOWN
 (`known_diverge.txt`) are real findings: CORE-GAP (BT/BTS/BTR/BTC and SHLD/SHRD
 with a **memory** operand HALT; POP ES/SS/DS/GS HALT), TRANSC (transcendentals
 deferred without `+VEN_TRANSCENDENTAL`), MODE-CPL0 (CLI/STI/POPF).
@@ -100,9 +100,9 @@ Every one of the **555 P54C opcodes** is accounted for (`python3 coverage_report
 | TESTED | 406 | generated `op_*` test, differential **PASS** vs qemu-i386 |
 | FINDING | 30 | generated test that diverges — real core bug, **cataloged** (`known_diverge.txt`), for the RTL owner to fix |
 | COSIM | 16 | IN/OUT/CPUID/RDTSC/INVD/WBINVD — covered by the `--cosim` lane (gated ops) |
-| MODE | 38 | privileged / seg / flag ops — covered by the real-mode/CPL0 streams (`run-modes.sh`, vs qemu-system) |
-| DEFER | 7 | far CALL/RET (psocfarcall) + INT/IRET (sys lane) |
-| SKIP | 58 | prefixes, undocumented x87 aliases, removed-on-Pentium (TR regs), invalid POP CS — not standalone-testable |
+| MODE | 50 | privileged / seg / flag / **far / INT-IRET** ops — covered by the 5 real-mode/CPL0 streams (`run-modes.sh`, vs qemu-system) |
+| DEFER | 1 | residual |
+| SKIP | 52 | prefixes, undocumented x87 aliases, removed-on-Pentium (TR regs), invalid POP CS — not standalone-testable |
 | **UNCOVERED** | **0** | — |
 
 **100.0% covered.** No opcode is un-addressed: each is validated, a cataloged
