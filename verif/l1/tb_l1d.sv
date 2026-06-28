@@ -216,6 +216,16 @@ module tb_l1d;
       do_snoop(32'(i)*32'h20 + 32'h1000);       // invalidate way B
     end
 
+    // [15] walking-bit ADDRESS sweeps to toggle the high address-register bits
+    // (m_addr/c_addr/fbase/rd_addr_q) + the bypass buffer + snoop-invalidate addr.
+    cacheable = 1'b0;
+    for (int i=2;i<20;i++) begin                 // bit 2..19 within the 1 MiB backing
+      do_read (32'h1 << i, d);                    // nc read -> bypass + c_addr/m_addr bit i
+      do_write(32'h1 << i, 32'hF0F0_0F0F);
+    end
+    cacheable = 1'b1;
+    for (int i=5;i<27;i++) do_snoop(32'h1 << i);  // walking-bit snoop-invalidate addresses
+
     if (errors==0) $display("L1D-GATE-OK (all checks pass)");
     else           $display("L1D-GATE-FAIL (%0d errors)", errors);
     $finish;
