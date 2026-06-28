@@ -274,6 +274,15 @@ module tb_l2;
     for (int i=0;i<32;i++) l2_write(32'h0000_0040 + 32'(i)*4, 32'h1 << i, 4'hF);  // walking data in a line
     for (int i=5;i<16;i++) l2_read (32'h1 << i, w);                       // walking-bit tag addresses
 
+    // [COV] cross-line straddle stores with diverse data + spill amounts (offsets
+    //       29/30/31 -> 3/2/1 bytes into L+1) so the second-line write path
+    //       (wd1/be1/nwd1/nbe1, the spilled bytes) toggles. Placed last (no later
+    //       check) since these leave straddled lines dirty -- pure toggle stimulus.
+    for (int ln=0; ln<24; ln++)
+      for (int off=29; off<32; off++)
+        l2_write(32'h0000_2000 + 32'(ln)*32 + 32'(off),
+                 (32'h0101_0101 << (ln & 7)) ^ 32'(ln*32'h0204_0801), 4'hF);
+
     if (errors==0) $display("L2-GATE-OK (all checks pass)");
     else           $display("L2-GATE-FAIL (%0d errors)", errors);
     $finish;
