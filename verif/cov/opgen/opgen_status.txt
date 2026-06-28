@@ -1,27 +1,9 @@
 opgen status — 555 P54C opcodes
-  GEN (auto test written): 399
-  MANUAL (needs handling): 156
+  GEN (auto test written): 423
+  MANUAL (needs handling): 132
 ======================================================================
 
 ## MANUAL — explicit list (nothing silently dropped):
-
-  [string]  (16)
-      A4 MOVS
-      A5 MOVS
-      A5 MOVS
-      A6 CMPS
-      A7 CMPS
-      A7 CMPS
-      AA STOS
-      AB STOS
-      AB STOS
-      AC LODS
-      AD LODS
-      AD LODS
-      AE SCAS
-      AF SCAS
-      AF SCAS
-      D7 XLAT
 
   [undoc-alias]  (15)
       C0/6 SAL
@@ -172,28 +154,14 @@ opgen status — 555 P54C opcodes
       0F 31 RDTSC
       0F A2 CPUID
 
-  [operand-pattern:Evqp,Gvqp,Ib]  (2)
-      0F A4 SHLD
-      0F AC SHRD
-
-  [operand-pattern:Evqp,Gvqp,#CL]  (2)
-      0F A5 SHLD
-      0F AD SHRD
-
   [pop-cs-invalid]  (1)
       0F POP
 
   [operand-pattern:Mw,Sw]  (1)
       8C MOV
 
-  [operand-pattern:Gvqp,M]  (1)
-      8D LEA
-
   [operand-pattern:Sw,Ew]  (1)
       8E MOV
-
-  [operand-pattern:Ev,#SS:[rSP]]  (1)
-      8F/0 POP
 
   [operand-pattern:#AL,Ob]  (1)
       A0 MOV
@@ -209,9 +177,6 @@ opgen status — 555 P54C opcodes
 
   [undoc]  (1)
       D6 SALC
-
-  [operand-pattern:#SS:[rSP],Ev]  (1)
-      FF/6 PUSH
 
   [operand-pattern:Rd,Cd]  (1)
       0F 20 MOV
@@ -245,6 +210,3 @@ opgen status — 555 P54C opcodes
 
   [undef]  (1)
       0F B9 UD
-
-  [operand-pattern:Mq,#EAX,#EDX,#EBX,#ECX]  (1)
-      0F C7/1 CMPXCHG8B
