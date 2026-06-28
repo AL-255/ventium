@@ -189,6 +189,22 @@ module tb_l1d;
     for (int i=0;i<16;i++) do_read (32'(i)*32'h10000, d);   // walking-bit TAGs (64 KiB stride)
     do_snoop(32'h0000_2000); do_snoop(32'h0000_8000); do_snoop(32'h0001_0000);
 
+    // [12] NON-CACHEABLE bypass sweep: walking data/addr through the bypass-line
+    // buffer (bp_line) which only the cacheable=0 path loads.
+    cacheable = 1'b0;
+    for (int i=0;i<64;i++) begin
+      do_write(32'h0000_5000 + 32'(i)*4, 32'h1 << (i%32));
+      do_read (32'h0000_5000 + 32'(i)*4, d);
+      do_read ((32'(i)<<8) ^ 32'h0009_1100, d);            // diverse nc addresses (m_addr/c_addr)
+    end
+    cacheable = 1'b1;
+    // [13] more cacheable line fills over diverse tags to flip the rest of dc_val
+    for (int i=0;i<64;i++) begin
+      do_read (32'h0008_0000 + 32'(i)*32'h20, d);          // a fresh region, all sets
+      do_write(32'h0008_0000 + 32'(i)*32'h20, ~(32'h2 << (i%30)));
+    end
+    do_snoop(32'h0004_0000); do_snoop(32'h0008_0000); do_snoop(32'h000F_0000);
+
     if (errors==0) $display("L1D-GATE-OK (all checks pass)");
     else           $display("L1D-GATE-FAIL (%0d errors)", errors);
     $finish;
