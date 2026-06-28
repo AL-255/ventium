@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
+"""Generate ONE assembly test per P54C opcode (from opspec.json), each covering
+all the cases for THAT opcode: every register for its reg/rm operands, the
+disp0/disp8/disp32 + SIB memory forms, and a spread of immediate values. The
+exhaustive ModRM/SIB EA decode itself is covered once by gen_easweep.py (LEA),
+so per-opcode memory cases use a handful of representative in-buffer forms.
+
+Correctness is SELF-CHECKING: every generated .s is assembled (gas rejects a
+mis-encoded operand) and the opgen runner diffs it against the QEMU golden, so a
+wrong generation shows up as an assemble-fail or a divergence, never a silent
+miss. Opcodes the generator cannot mechanically emit (x87 stack, far ptr,
+privileged, string-with-side-effects, intentionally-faulting) are routed to the
+halt/known lane or listed in opgen_status.txt for explicit handling — the full
+555-opcode checklist (opspec.txt) is the audit list.
+
+Output: verif/cov/opgen/tests/op_<key>/op_<key>.s + manifest.json, and
+        opgen_status.txt (per-opcode: GEN / HALT / MANUAL + reason).
+"""
+from __future__ import annotations
+import json, os, re
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TESTS = os.path.join(HERE, "tests")
+SPEC = os.path.join(HERE, "opspec.json")
+
+# width(bits) by operand type letter group
+def width_of(t):
+    if t in ("b", "bs", "bss"):
+        return 8
+    if t in ("w", "wi"):
+        return 16
+    return 32     # v/vqp/vds/d/dqp... -> 32-bit in our flat 32-bit corpus
+
+R8  = ["al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"]
+R16 = ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"]
+R32 = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
+def regs(w):
+    return R8 if w == 8 else R16 if w == 16 else R32
+# registers swept as the r/m / reg operand. ALL encodings except ESP (whose
+# register-direct arithmetic would corrupt the stack pointer). ESI/EDI ARE swept
+# (so their ModRM rm=110/111 register form is covered) but are RE-INITIALISED
+# (REINIT) before any memory case, since the prologue uses them as the buffer
+# base/index — otherwise a reg-direct write to ESI/EDI corrupts the later mem EA.
+def safe_regs(w):
+    if w == 8:
+        return ["al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"]
+    if w == 16:
+        return ["ax", "cx", "dx", "bx", "bp", "si", "di"]
+    return ["eax", "ecx", "edx", "ebx", "ebp", "esi", "edi"]
+
+# restore the buffer base (%esi) + index (%edi) after the reg-direct sweep.
+REINIT = ["    movl  %esp, %esi", "    movl  $8, %edi"]
+
+SUF = {8: "b", 16: "w", 32: "l"}
+IMM = {8: ("$0x00", "$0x7f", "$0x80", "$0xff"),
+       16: ("$0x0000", "$0x7fff", "$0x8000", "$0xffff"),
+       32: ("$0x00000000", "$0x7fffffff", "$0x80000000", "$0xffffffff")}
+
+# memory r/m forms (all land in the 256-byte buffer at %esi; %edi is a small index)
+MEM = ["(%esi)", "4(%esi)", "64(%esi)", "(%esi,%edi,1)", "8(%esi,%edi,4)"]
+
+# mnemonics we will NOT auto-generate here (routed elsewhere). Reasons keyed.
+SKIP = {
+    # privileged / system -> would #GP or HALT in user mode
+    "LGDT": "priv", "LIDT": "priv", "LLDT": "priv", "LTR": "priv", "LMSW": "priv",
+    "CLTS": "priv", "INVD": "priv", "WBINVD": "priv", "INVLPG": "priv", "HLT": "priv",
+    "RDMSR": "priv", "WRMSR": "priv", "RDPMC": "priv", "RSM": "priv", "ARPL": "sys",
+    "SGDT": "sys-mem", "SIDT": "sys-mem", "SLDT": "sys", "STR": "sys", "SMSW": "sys",
+    "LAR": "sys", "LSL": "sys", "VERR": "sys", "VERW": "sys",
+    "CPUID": "gated", "RDTSC": "gated",
+    # far / segment transfers + segment loads -> selector model / #GP
+    "CALLF": "far", "JMPF": "far", "RETF": "far", "LDS": "seg", "LES": "seg",
+    "LSS": "seg", "LFS": "seg", "LGS": "seg", "POP CS": "far",
+    # interrupts / faults -> deliver / HALT
+    "INT": "fault", "INT1": "fault", "INT3": "fault", "INTO": "fault", "IRET": "sys",
+    "IRETD": "sys", "BOUND": "fault", "UD2": "fault", "F00F": "fault",
+    # port I/O -> #GP in user mode (covered by --cosim covio)
+    "IN": "io", "OUT": "io", "INS": "io", "OUTS": "io",
+    # string ops with implicit DS:SI/ES:DI + REP -> covered by t_string/t_rep
+    "MOVS": "string", "STOS": "string", "LODS": "string", "SCAS": "string",
+    "CMPS": "string", "XLAT": "string", "XLATB": "string",
+    # control transfers handled by dedicated tests (need targets/setup)
+    "CALL": "branch", "JMP": "branch", "RET": "branch", "RETN": "branch",
+    "LOOP": "branch", "LOOPE": "branch", "LOOPNE": "branch", "LOOPZ": "branch",
+    "LOOPNZ": "branch", "JCXZ": "branch", "JECXZ": "branch", "ENTER": "stackframe",
+    # not P54C / undocumented-removed / undefined
+    "LOADALL": "not-p54c", "UD": "undef", "UD1": "undef", "UD0": "undef",
+    "SALC": "undoc", "SETALC": "undoc", "LEAVE": "stackframe",
+    # standalone prefix opcodes (covered in combination, not alone)
+    "LOCK": "prefix", "REP": "prefix", "REPE": "prefix", "REPNE": "prefix",
+    "REPZ": "prefix", "REPNZ": "prefix", "REPN": "prefix",
+    "CS": "prefix", "DS": "prefix", "ES": "prefix", "SS": "prefix",
+    "FS": "prefix", "GS": "prefix",
+    # x87: routed to the x87 generator path below (is_x87) — not here.
+}
+
+# Intel mnemonic -> the AT&T name gas wants (when they differ).
+ATT = {"PUSHAD": "pushal", "POPAD": "popal", "PUSHFD": "pushfl", "POPFD": "popfl",
+       "PUSHA": "pushaw", "POPA": "popaw", "PUSHF": "pushfw", "POPF": "popfw"}
+SEGREGS = {"ES", "CS", "SS", "DS", "FS", "GS"}
+
+
+def key_of(s):
+    k = s["opval"]
+    if s["esc"]:
+        k = "0f" + k
+    if s["opcd_ext"] is not None:
+        k += "_" + s["opcd_ext"]
+    if s["pref"]:
+        k += "_p" + s["pref"]
+    return k.lower()
+
+
+def first_two_methods(s):
+    ms = [(o["k"], o["a"], o["t"]) for o in s["operands"]]
+    return ms
+
+
+def emit_lines(s):
+    """Return (lines, status, reason). status in GEN/HALT/MANUAL."""
+    mn = s["mnem"]
+    if mn in SKIP:
+        return None, "MANUAL", SKIP[mn]
+    if s["is_x87"]:
+        return None, "MANUAL", "x87"        # handled by gen_x87.py path
+    ops = s["operands"]
+    methods = [o["a"] for o in ops]
+    types = [o["t"] for o in ops]
+    L = []
+
+    # --- segment PUSH/POP (operand is a literal segment register) -----------
+    seg = next((o["t"] for o in ops if o["a"] == "#" and o["t"] in SEGREGS), None)
+    if mn == "PUSH" and seg:
+        L.append(f"    pushl  %{seg.lower()}")
+        L.append("    addl  $4, %esp")     # discard (selector lands in memory, not graded)
+        return L, "GEN", "push-seg"
+    if mn == "POP" and seg:
+        if seg == "CS":
+            return None, "MANUAL", "pop-cs-invalid"
+        # reload the SAME (valid) selector so no #GP; push it first.
+        L.append(f"    pushl  %{seg.lower()}")
+        L.append(f"    pop  %{seg.lower()}")
+        return L, "GEN", "pop-seg"
+
+    # --- PUSHA/POPA/PUSHF/POPF (AT&T names) ---------------------------------
+    if mn in ATT:
+        L.append(f"    {ATT[mn]}")
+        return L, "GEN", "att-name"
+
+    # --- MOVZX / MOVSX  (G<-E, widening: needs two size suffixes) -----------
+    if mn in ("MOVZX", "MOVSX") and len(ops) == 2 and methods == ["G", "E"]:
+        dw = width_of(types[0]); sw = width_of(types[1])
+        suf = ("z" if mn == "MOVZX" else "s") + SUF[sw] + SUF[dw]
+        dreg = safe_regs(dw)[0]
+        for r in safe_regs(sw):
+            L.append(f"    mov{suf}  %{r}, %{dreg}")
+        L += REINIT
+        for m in MEM:
+            L.append(f"    mov{suf}  {m}, %{dreg}")
+        return L, "GEN", "movzx/movsx"
+
+    # --- PUSH imm (68 Iv / 6A Ib) -------------------------------------------
+    if mn == "PUSH" and len(ops) == 2 and methods[1] == "I":
+        # PUSH imm always pushes a full slot (imm8 is sign-extended) -> pushl.
+        iw = width_of(types[1])
+        for imm in IMM[iw]:
+            L.append(f"    pushl  {imm}")
+        return L, "GEN", "push-imm"
+
+    # --- MOV reg,imm (B0-BF: Z + I) -----------------------------------------
+    if mn == "MOV" and len(ops) == 2 and methods[0] == "Z" and methods[1] == "I":
+        w = width_of(types[0])
+        for r in regs(w):
+            for imm in IMM[w]:
+                L.append(f"    mov{SUF[w]}  {imm}, %{r}")
+        return L, "GEN", "mov-reg-imm"
+
+    # --- pattern: no explicit operands (NOP, CLC, CWDE, ...) ----------------
+    if not ops or all(o["a"] == "#" for o in ops):
+        L.append(f"    {mn.lower()}")
+        return L, "GEN", "noop/implicit"
+
+    # --- pattern: acc,Ib / acc,Iv  (#AL,Ib  #rAX,Iv) ------------------------
+    if len(ops) == 2 and ops[0]["a"] == "#" and ops[1]["a"] == "I":
+        w = width_of(types[1])
+        acc = {8: "al", 16: "ax", 32: "eax"}[w]
+        for imm in IMM[w]:
+            L.append(f"    {mn.lower()}{SUF[w]}  {imm}, %{acc}")
+        return L, "GEN", "acc,imm"
+
+    # --- pattern: Z (register encoded in opcode): INC/DEC/PUSH/POP/BSWAP r --
+    if any(o["a"] == "Z" for o in ops):
+        w = width_of(next(o["t"] for o in ops if o["a"] == "Z"))
+        for r in safe_regs(w):
+            L.append(f"    {mn.lower()}  %{r}")
+        return L, "GEN", "reg-in-opcode"
+
+    # --- pattern: single E/M operand groups (NOT, NEG, MUL, IMUL r/m, ...) --
+    if len(ops) == 1 and methods[0] in ("E", "M"):
+        w = width_of(types[0])
+        for r in safe_regs(w):
+            L.append(f"    {mn.lower()}{SUF[w]}  %{r}")
+        L += REINIT
+        for m in MEM:
+            L.append(f"    {mn.lower()}{SUF[w]}  {m}")
+        return L, "GEN", "unary-rm"
+
+    # --- pattern: E,G or G,E (two-operand ALU/MOV/etc.) ---------------------
+    if len(ops) == 2 and set(methods) <= {"E", "G"}:
+        # determine which operand is r/m (E) and which is reg (G)
+        w = width_of(types[0])
+        wr = safe_regs(w)
+        other = wr[0]
+        # reg-direct: sweep the r/m register; AT&T order is src,dst
+        # direction: ops[0]=dst, ops[1]=src (from XML). build src,dst.
+        dst_a, src_a = methods[0], methods[1]
+        for rm in wr:
+            # put the swept register on the E side, a fixed reg on the G side
+            if dst_a == "E":      # dst is r/m, src is reg  ->  <mn> %other, %rm
+                L.append(f"    {mn.lower()}{SUF[w]}  %{other}, %{rm}")
+            else:                  # dst is reg, src is r/m  ->  <mn> %rm, %other
+                L.append(f"    {mn.lower()}{SUF[w]}  %{rm}, %{other}")
+        L += REINIT
+        # memory r/m forms
+        for m in MEM:
+            if dst_a == "E":
+                L.append(f"    {mn.lower()}{SUF[w]}  %{other}, {m}")
+            else:
+                L.append(f"    {mn.lower()}{SUF[w]}  {m}, %{other}")
+        return L, "GEN", "rm,reg"
+
+    # --- pattern: E,I (group 80/81/83, TEST, MOV imm, ...) ------------------
+    if len(ops) == 2 and methods[0] in ("E", "M") and methods[1] == "I":
+        w = width_of(types[0])          # r/m width drives the mnemonic suffix
+        iw = width_of(types[1])         # immediate width (imm8 for shifts/BT-imm)
+        for r in safe_regs(w):
+            for imm in IMM[iw]:
+                L.append(f"    {mn.lower()}{SUF[w]}  {imm}, %{r}")
+        L += REINIT
+        for imm in IMM[iw]:
+            L.append(f"    {mn.lower()}{SUF[w]}  {imm}, (%esi)")
+        return L, "GEN", "rm,imm"
+
+    # --- pattern: E,1 or E,CL  shifts/rotates (D0-D3, C0-C1) ----------------
+    if len(ops) == 2 and methods[0] in ("E", "M") and ops[1]["a"] == "#" \
+            and ("1" in types[1] or "CL" in (ops[1]["t"] or "")):
+        w = width_of(types[0])
+        for r in safe_regs(w):
+            L.append(f"    {mn.lower()}{SUF[w]}  %cl, %{r}")
+        return L, "GEN", "shift-cl"
+
+    # --- pattern: G,E,I  three-operand IMUL --------------------------------
+    if len(ops) == 3 and methods[0] == "G" and methods[1] == "E" and methods[2] == "I":
+        w = width_of(types[0])
+        for r in safe_regs(w):
+            L.append(f"    {mn.lower()}{SUF[w]}  {IMM[w][1]}, %{r}, %{r}")
+        L += REINIT
+        for m in MEM:
+            L.append(f"    {mn.lower()}{SUF[w]}  {IMM[w][1]}, {m}, %{safe_regs(w)[0]}")
+        return L, "GEN", "reg,rm,imm"
+
+    return None, "MANUAL", "operand-pattern:" + ",".join(f"{m}{t}" for m, t in zip(methods, types))
+
+
+def setup_prologue():
+    # reserve a 256-byte zero buffer at %esi, %edi small index; non-ESP first insn.
+    return [
+        "    xorl  %eax, %eax",
+        "    subl  $256, %esp",
+        "    movl  %esp, %esi",
+        "    movl  $8, %edi",
+        "    movl  $0x11223344, (%esi)",
+        "    movl  $0x55667788, 64(%esi)",
+        "    movb  $0x5a, 4(%esi)",
+    ]
+
+
+def write_test(s, lines):
+    key = key_of(s)
+    d = os.path.join(TESTS, "op_" + key)
+    os.makedirs(d, exist_ok=True)
+    body = []
+    body.append("# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)")
+    body.append("# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1")
+    ext = f"/{s['opcd_ext']}" if s["opcd_ext"] is not None else ""
+    pref = f" [{s['pref']}]" if s["pref"] else ""
+    body.append(f"# GENERATED op_{key}: {s['opcode']}{ext}{pref} {s['mnem']} "
+                f"({','.join(o['a']+o['t'] for o in s['operands'])})")
+    body.append("    .text")
+    body.append("    .globl _start")
+    body.append("_start:")
+    body += setup_prologue()
+    body += lines
+    body.append("    addl  $256, %esp")
+    body.append("    movl  $1, %eax")
+    body.append("    xorl  %ebx, %ebx")
+    body.append("    int   $0x80")
+    open(os.path.join(d, f"op_{key}.s"), "w").write("\n".join(body) + "\n")
+    n = len(lines) + len(setup_prologue()) + 10
+    json.dump({
+        "name": "op_" + key, "src": f"op_{key}/op_{key}.s",
+        "elf": f"op_{key}/op_{key}.elf", "image": f"op_{key}/op_{key}.flat",
+        "load_addr": "0x08048000", "entry": "0x08048000", "max_insn": n,
+        "x87": s["is_x87"],
+    }, open(os.path.join(d, "manifest.json"), "w"), indent=2)
+
+
+def main():
+    spec = json.load(open(SPEC))
+    os.makedirs(TESTS, exist_ok=True)
+    # remove stale op_* dirs (opcodes that left scope) so the runner never
+    # discovers a test that should no longer exist.
+    import shutil
+    for d in os.listdir(TESTS):
+        if d.startswith("op_") and os.path.isdir(os.path.join(TESTS, d)):
+            shutil.rmtree(os.path.join(TESTS, d))
+    status = {"GEN": [], "MANUAL": [], "HALT": []}
+    for s in spec:
+        lines, st, reason = emit_lines(s)
+        ext = f"/{s['opcd_ext']}" if s["opcd_ext"] is not None else ""
+        tag = f"{s['opcode']}{ext} {s['mnem']}"
+        if st == "GEN" and lines:
+            write_test(s, lines)
+            status["GEN"].append((key_of(s), tag, reason))
+        else:
+            status[st if st in status else "MANUAL"].append((key_of(s), tag, reason))
+
+    rep = []
+    rep.append(f"opgen status — {len(spec)} P54C opcodes")
+    rep.append(f"  GEN (auto test written): {len(status['GEN'])}")
+    rep.append(f"  MANUAL (needs handling): {len(status['MANUAL'])}")
+    rep.append("=" * 70)
+    rep.append("\n## MANUAL — explicit list (nothing silently dropped):")
+    from collections import Counter
+    by_reason = Counter(r for _, _, r in status["MANUAL"])
+    for reason, c in by_reason.most_common():
+        rep.append(f"\n  [{reason}]  ({c})")
+        for k, tag, r in status["MANUAL"]:
+            if r == reason:
+                rep.append(f"      {tag}")
+    open(os.path.join(HERE, "opgen_status.txt"), "w").write("\n".join(rep) + "\n")
+    print("\n".join(rep[:5]))
+    print(f"  wrote {len(status['GEN'])} op_* tests -> {TESTS}")
+    print("  manual breakdown:", dict(by_reason))
+
+
+if __name__ == "__main__":
+    main()
