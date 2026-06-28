@@ -603,6 +603,32 @@ differential, which the environment now blocks entirely (qemu emulation runs are
 binary `--version` succeeds). HONEST state: root cause NOT identified; the prior "breakthrough" was a
 misalignment artifact; the confirmed fact is the +0xe wrong call target, origin unrooted.
 
+## 23i. PRECISE ROOT SYMPTOM: the patched SHIFT COUNT is wrong (45 vs 12)
+
+Located the patch exactly (qemu-free, via a template-value tap): the dword `0x26dfe82d` is stored ONCE
+by `cs=0x87:0x338` to lin **0x29d31**, and the real-mode stub at cs=0x26ac:0x3266 reads/runs it.
+Decoding the stub (cs=0x26ac base 0x26ac0) resolves the off-by-one and the real divergence:
+```
+  cs=0x26ac:0x3266  c4 5e fc       LES BX,[BP-4]          ; far ptr ES:BX
+            0x3269  26 8b 57 02    MOV DX,ES:[BX+2]       ; hi 16
+            0x326d  26 8b 07       MOV AX,ES:[BX]         ; lo 16  -> DX:AX = 32-bit value
+            0x3270  b1 2d          MOV CL,0x2d  (=45)     ; <-- RTL.  qemu = b1 0c (CL=12)
+            0x3272  e8 df 26       CALL 0x5954 (helper)   ; <-- RTL.  qemu = e8 d1 26 (CALL 0x5946 thunk)
+```
+So go32 patches `MOV CL,<count>; CALL <shift-helper>` to shift a 32-bit DX:AX by CL. The **shift count
+diverges: 45 (RTL) vs 12 (qemu)**, and the count selects which helper entry the call targets (so the
++0xe rel16 is a CONSEQUENCE of the wrong count, not an independent bug). The patch dword differs in two
+bytes: byte0 `0x2d` vs `0x0c` (the count) and byte2 `0xdf` vs `0xd1` (the rel16). 45>32 shifts the
+value to garbage; the wrong helper skips PUSH CS -> stale far-RETF CS -> #UD.
+
+So the ROOT is go32's computation of this **shift/normalize count** (cs=0x87 PM math: the decoded
+fragment does `AND EAX,0x1ff; ADD ECX,EAX` with CL=ECX). 45 vs 12 -> off by 33. This is Quake/go32
+fixed-point or float normalization; the count likely derives from an exponent or a bit-scan (BSR/BSF)
+or an FPU result. NEXT (qemu-free, correct value known = 12): trace ECX/ESI feeding the count in the
+cs=0x87 routine, and check whether the divergent input comes from an x87 FPU result or a bit-scan/
+integer op — that op is the core bug. (Supersedes §23e/§23h: not a register truncation; it's a wrong
+shift-count value.)
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
