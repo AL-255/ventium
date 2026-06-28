@@ -684,7 +684,19 @@
                   // ENTER (level 0): push EBP now (store driven by the st_data mux:
                   // st_addr=ESP-w, st_data=EBP); S_STORE then sets EBP=ESP-w and
                   // ESP=ESP-w-alloc and retires.
-                  SM_ENTER: begin do_store=1'b1; do_retire=1'b0; end
+                  SM_ENTER: begin
+                    if (q_imm[20:16]==5'd0) begin
+                      do_store=1'b1; do_retire=1'b0;       // level 0: single push (S_STORE)
+                    end else begin
+                      // nested ENTER (level>0): run the display-copy micro-sequence in
+                      // S_ENTER. Beat 1 pushes EBP @ SS:[ESP-w] (ent_rd=0, ent_val=EBP);
+                      // beats for j=1..level-1 read SS:[EBP-j*w] then push; the last push
+                      // is FrameTemp(=ESP-w). do_store stays 0 so the dispatch leaves
+                      // state at S_ENTER (set here), not S_STORE.
+                      ent_k <= 6'd1; ent_rd <= 1'b0; ent_val <= gpr_o[R_EBP];
+                      do_store=1'b0; do_retire=1'b0; state <= S_ENTER;
+                    end
+                  end
                   default: ;
                 endcase
                 flags_we=1'b0;

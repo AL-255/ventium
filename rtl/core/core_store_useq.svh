@@ -172,3 +172,30 @@
             end
           end
         end
+
+        // -------------------------------------------------------------------
+        // S_ENTER: nested ENTER (level>0) display-copy micro-sequence. Beats:
+        //   push #1        = EBP        (ent_rd=0, ent_val=EBP, set in S_EXEC)
+        //   push #2..level = display[j] : read SS:[EBP-j*w] (ent_rd=1) then push it
+        //   push #level+1  = FrameTemp  = ESP-w
+        // EBP/ESP commit on the final push is in core_gpr_wb.svh (S_ENTER arm).
+        S_ENTER: begin
+          if (mem_ack) begin
+            if (ent_rd) begin
+              // display source read completed -> latch it, then push it next beat
+              ent_val <= wmask(mem_rdata, q_w);
+              ent_rd  <= 1'b0;
+            end else if (({1'b0, q_imm[20:16]} + 6'd1) == ent_k) begin
+              // just pushed FrameTemp (the (level+1)th push) -> done
+              eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+            end else begin
+              ent_k <= ent_k + 6'd1;
+              if ((ent_k + 6'd1) <= {1'b0, q_imm[20:16]}) begin
+                ent_rd <= 1'b1;                         // next push is a display copy: read first
+              end else begin
+                ent_rd  <= 1'b0;                        // next push is FrameTemp = ESP-w
+                ent_val <= wmask(gpr_o[R_ESP] - {28'd0, q_w}, q_w);
+              end
+            end
+          end
+        end

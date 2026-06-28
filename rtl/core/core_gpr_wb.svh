@@ -493,6 +493,19 @@
         end
 
         // -------------------------------------------------------------------
+        // S_ENTER: nested ENTER final commit (on the (level+1)th push). EBP<-FrameTemp
+        // (=ESP-w), ESP<-ESP-(level+1)*w-alloc. reg_merge keeps the high half for the
+        // 16-bit real-mode form (q_w=2); full write for the 32-bit form.
+        S_ENTER: begin
+          if (mem_ack && !ent_rd && (({1'b0, q_imm[20:16]} + 6'd1) == ent_k)) begin
+            logic [31:0] tot;
+            tot = ({26'd0, ({1'b0, q_imm[20:16]} + 6'd1)} * {29'd0, q_w}) + {16'd0, q_imm[15:0]};
+            gpr_we[R_EBP]=1'b1; gpr_wd[R_EBP]=reg_merge(gpr_o[R_EBP], gpr_o[R_ESP]-{28'd0,q_w}, q_w, 1'b0);
+            gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=reg_merge(gpr_o[R_ESP], gpr_o[R_ESP]-tot,        q_w, 1'b0);
+          end
+        end
+
+        // -------------------------------------------------------------------
         // M9.5 real-mode far CALL / RET arms (gpr write only on beat 1).
         S_LCALL: begin
           if (mem_ack && seg_step) begin
