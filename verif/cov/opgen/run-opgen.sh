@@ -126,8 +126,15 @@ for r in "$WORK"/*.res; do
                   else C[FAIL]=$((C[FAIL]+1)); NEWFAIL+="DIVERGE $n $rest\n"; fi;;
     esac
 done
-printf '  PASS=%d  KNOWN-finding=%d  NEW-FAIL=%d  ASM-FAIL=%d  GOLD-FAIL=%d   (of %d)\n' \
-    "${C[PASS]}" "${C[KNOWN]}" "${C[FAIL]}" "${C[ASMFAIL]}" "${C[GOLDFAIL]}" "${#SEL[@]}"
+NRES=$(ls "$WORK"/*.res 2>/dev/null | wc -l)
+printf '  PASS=%d  KNOWN-finding=%d  NEW-FAIL=%d  ASM-FAIL=%d  GOLD-FAIL=%d   (of %d, ran %d)\n' \
+    "${C[PASS]}" "${C[KNOWN]}" "${C[FAIL]}" "${C[ASMFAIL]}" "${C[GOLDFAIL]}" "${#SEL[@]}" "$NRES"
+# completeness guard: missing .res files mean workers died (usually qemu gdbstub
+# port/resource exhaustion under high -P) — warn instead of reporting a false-clean.
+if [ "$NRES" -lt "${#SEL[@]}" ]; then
+    echo "  !! INCOMPLETE: $(( ${#SEL[@]} - NRES )) tests produced no result"
+    echo "  !! (likely resource contention at -P $JOBS; re-run with e.g. JOBS=8)"
+fi
 if [ -n "$NEWFAIL" ]; then echo "--- NEW failures (must fix) ---"; printf "$NEWFAIL" | head -40; fi
 if [ -n "$RESOLVED" ]; then
     echo "--- RESOLVED findings (now PASS — remove from known_diverge.txt + regression-protect) ---"
@@ -135,4 +142,10 @@ if [ -n "$RESOLVED" ]; then
 fi
 echo "  KNOWN findings (CORE-GAP / MODE-CPL0): see $KNOWN"
 echo "  coverage dats: $(ls "$DAT"/*.dat 2>/dev/null | wc -l)"
-[ "${C[FAIL]}" -eq 0 ] && [ "${C[ASMFAIL]}" -eq 0 ] && echo "OPGEN PM32/user: CLEAN (all PASS or KNOWN)" || echo "OPGEN PM32/user: NEW FAILURES present"
+if [ "${C[FAIL]}" -eq 0 ] && [ "${C[ASMFAIL]}" -eq 0 ] && [ "$NRES" -ge "${#SEL[@]}" ]; then
+    echo "OPGEN PM32/user: CLEAN (all PASS or KNOWN)"
+elif [ "$NRES" -lt "${#SEL[@]}" ]; then
+    echo "OPGEN PM32/user: INCOMPLETE (re-run with lower JOBS) — not a clean verdict"
+else
+    echo "OPGEN PM32/user: NEW FAILURES present"
+fi
