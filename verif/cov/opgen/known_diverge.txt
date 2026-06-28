@@ -6,15 +6,8 @@
 # The runner counts these as KNOWN (not a hard FAIL); a NEW diverging opcode IS
 # a hard FAIL, so a regression cannot hide.
 #
-# --- CORE-GAP: BT/BTS/BTR/BTC with a MEMORY operand -> S_HALT (reg-direct OK) --
-op_0fa3  CORE-GAP   BT  Ev,Gv  memory r/m halts (reg-direct passes)
-op_0fab  CORE-GAP   BTS Ev,Gv  memory r/m halts
-op_0fb3  CORE-GAP   BTR Ev,Gv  memory r/m halts
-op_0fbb  CORE-GAP   BTC Ev,Gv  memory r/m halts
-op_0fba_4 CORE-GAP  BT  Ev,Ib  memory r/m halts
-op_0fba_5 CORE-GAP  BTS Ev,Ib  memory r/m halts
-op_0fba_6 CORE-GAP  BTR Ev,Ib  memory r/m halts
-op_0fba_7 CORE-GAP  BTC Ev,Ib  memory r/m halts
+# RESOLVED: BT/BTS/BTR/BTC on memory (reg+imm forms) now handled by the
+# committed RTL -> op_0fa3/ab/b3/bb + op_0fba_4..7 PASS + regression-protected.
 # --- CORE-GAP: segment POP -> S_HALT (POP FS/GS unimplemented; ES/SS/DS gaps) --
 op_07    CORE-GAP   POP ES  halts
 op_17    CORE-GAP   POP SS  halts

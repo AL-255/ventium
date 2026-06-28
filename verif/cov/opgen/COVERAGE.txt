@@ -1,7 +1,7 @@
 P54C opcode coverage accounting — 555 encodings
 ============================================================
-  TESTED      410
-  FINDING      26
+  TESTED      418
+  FINDING      18
   COSIM        16
   MODE         50
   DEFER         1
