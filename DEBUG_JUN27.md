@@ -523,6 +523,29 @@ follow it to the reloc that wrote it) or a full instruction-by-instruction code-
 diff of go32's PM relocation pass (now feasible since maps align). The bug remains a single dword with
 a known correct value (0x26d1e82d); what's unrooted is which load-time reloc instruction bakes 0x26df.
 
+## 23e. BREAKTHROUGH: register-level differential -> 32-bit truncation in go32's CS16 code
+
+The qemu gdbstub is killed by the env, but **qemu `-d cpu` works** (no gdbstub) and `-d cpu` reports the
+segment bases: **cs=0x18 base=0x26ac0, cs=0x87 base=0x228f0** (both DPL CS16 = D=0, 16-bit). Grepping
+qemu's `-d cpu` log against the RTL's patch-routine register trace gives the decisive comparison — at
+the operation reaching `eax=0x80000068` (matches in BOTH):
+- **qemu**: `ebx=0x000e3772  edx=0x00800002`
+- **RTL** : `ebx=0x00003772  edx=0x00000002`
+
+**Low 16 bits identical, high 16 bits ZEROED in the RTL** — the textbook 16-vs-32-bit operand
+signature. And ebx's lost high nibble is **0xe** — exactly the +0xe by which the call rel16 is wrong
+(0x26d1 -> 0x26df). So the single-dword bug is the downstream symptom of the RTL **truncating 32-bit
+register values to 16 bits inside go32's CS16 (D=0) code segment**. This is why opgen (PM32, D=1) and
+the sys gate never caught it: D=0 32-bit-operand (0x66-in-16-bit-seg) handling is under-tested.
+
+`eff_opsize = pfx_opsize ^ def16` (decode_stages.sv:216) and the 4-prefix machine (l.190) look
+correct, and eax's 32-bit ops DO work — so it's a SPECIFIC instruction/opcode whose 32-bit writeback
+or memory width is wrong in D=0 (the high `0xe`/`0x80` of ebx/edx is computed/loaded as 0 before the
+captured window, i.e. before cs=0x18:0x2afc). FIX PATH (well-scoped, method proven): trace ebx's
+high-16 divergence back to the exact opcode via the qemu `-d cpu` differential (regenerate with a ~10s
+`-d cpu` run, grep for the first `EBX=000eXXXX`), then fix that opcode's D=0 32-bit handling in the
+core. This is a real, fixable core bug — the root cause, not just the symptom.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
