@@ -1627,6 +1627,32 @@ wait never satisfies, deliver it. The novel placement mystery is SOLVED+validate
 bounded interrupt-timing bug. My temp ventium_soc.sv edits (fwcfg DPI hook + 32-bit offset + detectors) are
 REVERTED; the reusable harness lives in tb_soc.cpp (fwcfg_dpi_byte, gated) + the extractor in scratchpad.
 
+## 23ba. *** CORRECTION *** the fw_cfg did NOT fix Quake -- block is STILL +0x119 (I over-claimed)
+
+A COMPLETE RTL-with-fwcfg trace (9.41M records, gap-free on nvme) shows the truth I missed: with the
+fw_cfg served, go32's block is STILL at cs=0x26ac (the +0x119 block) -- 113515 occurrences vs ZERO for
+qemu's correct cs=0x2593. The stub at cs=0x26ac:0x3272 (lin 0x29d32) STILL CALLs the OVER-RELOCATED 0x5954
+(the original #UD target), exactly as before the fw_cfg.
+
+MY ERROR (sec 23aw): I claimed the fw_cfg "fixed the placement root, validated by the qemu-identical MCB
+chain." That CONFLATED two different things:
+  - the DOS MCB chain (kernel/COMMAND/QUAKE/CWSDPMI allocation) -- the fw_cfg DID make this qemu-identical;
+  - go32's real-mode BLOCK placement (the stub's segment) -- the fw_cfg did NOT fix this; still +0x119.
+The MCB-chain match was a RED HERRING. The actual Quake bug (block +0x119 -> over-relocated stub) PERSISTS
+with the fw_cfg. The symptom merely shifted: 0x5954 is now valid code (the fw_cfg changed the layout) so
+instead of an immediate #UD, the stub runs, far-RETs to cs=0x34 (a wrong target), executes there, and
+halts at IF=0. NOT a fix -- the same root, a later failure point.
+
+CONSEQUENCE: the acpi=off reproduction (sec 23av: qemu's OWN block base moves +0x119 with acpi=off) is real
+for QEMU but does NOT translate to the RTL -- serving the RTL the full fw_cfg/ACPI did not move its block
+base off +0x119. So the RTL's +0x119 is NOT (just) the SeaBIOS boot-work timing; it is go32's mem-walk
+reading a value that stays +0x119 regardless of the fw_cfg. The root (sec 23as: RTL skips an un-relocation
+/ the +0x119 block-base walk) is UNFIXED. Honest state: Goal 2 (Quake) and Goal 3 (Win95) NOT met; the
+fw_cfg work produced real findings + a reusable harness but did NOT fix the bug. The gated temp edits are
+reverted; the committed harness (tb_soc.cpp fwcfg_dpi_byte) stays inert. The complete RTL-fwcfg trace
+(/home/yukidama/rtlfw.vtrace) + qemuf remain for a cleaner +0x119 walk comparison, but the selectors still
+differ (0x26ac vs 0x2593) so alignment is as hard as before. I should not have claimed validation.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
