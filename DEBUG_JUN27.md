@@ -1756,6 +1756,32 @@ wrong claims this session (fwcfg-validated, boot-work mechanism, ACPI-not-placed
 Goal 1 MET; Goals 2 (Quake frames) + 3 (Win95) NOT met -- no working fix. Artifacts + the full elimination
 log are on disk for a timing-domain continuation. This is an honest hand-off, not a fix.
 
+## 23bf. REFRAME: the divergence is in the SeaBIOS POST (n~360k), NOT go32 -- +0x119 is a downstream cascade
+
+Ran the FIRST data-identical diff: RTL-fwcfg (binary-converted from rtlfw.vtrace) vs qemu FULL-ACPI (qemuf)
+-- same disk, BIOS, fw_cfg. First divergence is at n~360079 (cs=0x08:0xf4b50), in the EARLY SeaBIOS POST,
+NOT at go32's walk (n=8.49M). Extracted the exact records: at f4b50 the RTL reads dl=0x25 ('%') from a
+string @eax=0xf7b20, while qemu's identical printf-scanner reads 'F','o','u','n','d' (the string "Found ")
+@0xf7b46..0xf7bf8. They are executing DIFFERENT printf calls with DIFFERENT strings -- the cmpdiff's
+control-flow resync spuriously matched two different '%' scans (both dl=0x25), masking that SeaBIOS is at
+different POST points with data laid out at different addresses (~0x1577 apart in the 0xf7bxx region).
+
+=> MAJOR REFRAME: the +0x119 block placement at go32 (n=8.49M) is a DOWNSTREAM CASCADE of a SeaBIOS-POST
+divergence at n~360k. Every go32/CWSDPMI/MCB-walk thing I chased (sec 23as..23be) is a SYMPTOM, not the
+root. The RTL's SeaBIOS lays out its data differently from qemu's from early POST -- most likely because the
+RTL serves fw_cfg via the byte-by-byte DPI/DMA whose TIMING + sub-byte behavior differs from qemu's native
+fw_cfg, so SeaBIOS's fw_cfg-driven allocations/relocations land differently. CAVEAT: the early POST is
+confounded by exactly this DMA-handling difference (the RTL polls its DMA engine; qemu's is synchronous), so
+the cmpdiff can't cleanly isolate the FIRST true divergence -- it resyncs past the benign DMA-poll splits
+and then mis-matches the diverged-data printfs.
+
+HONEST STATE: Goal 1 MET; Goals 2/3 NOT met, no fix. But this is a real, useful reframe -- the bug is a
+SeaBIOS-POST data-layout divergence (n~360k) driven by the fw_cfg DMA serving, cascading to go32's +0x119,
+NOT a go32-specific or core-instruction bug. NEXT (concrete): capture SeaBIOS's debugcon output for the RTL
+vs qemu to see which POST message first differs; and/or compare the fw_cfg DMA-written RAM byte-for-byte
+(the served blob landing) RTL vs qemu right after POST. The fix lives in the fw_cfg serving fidelity (F3,
+parallel session) + the SoC DMA timing, not in go32. Five of my own wrong claims corrected this session.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
