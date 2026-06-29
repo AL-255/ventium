@@ -2226,3 +2226,23 @@ SoC/southbridge memory config MATCHES qemu (e820/CMOS/RAM-bound/A20 all verified
 not a peripheral bug. RESOLVING Goals 2/3 needs the CWSDPMI/go32 SOURCE (to read the allocation
 logic and identify which input the RTL feeds wrong) or core-team PM/V86 expertise -- beyond what
 register-trace comparison can isolate. Full validated tooling + trail preserved (§23br-§23by).
+
+## 23bz. REFINED: RTL disk I/O == qemu EXCEPT ONE read whose buffer lands INSIDE CWSDPMI's region
+
+RTL es-distribution at the IDE rep-insw (cs=0xf000:0xaa41) MATCHES qemu's: es=0x2420 (~98K, the go32
+transfer buffer) + es=0x4bXX..0x4dXX (file loads). So the RTL does essentially the SAME disk I/O as
+the rendering qemu -- EXCEPT one anomalous file load into es=0x2bac..0x2cac (9 sectors) that qemu
+NEVER does. Traced the buffer source: BIOS INT13h (legacy, es:bx) at cs=0xf000:0xaa01 loads
+eax=0x2bac0 (linear) then shr4 -> es=0x2bac. go32 handed this read a buffer at linear 0x2bac0.
+KEY: 0x2bac0 is INSIDE CWSDPMI's allocated MCB region (CWSDPMI psp 0x269b, ends ~0x336c) and ds=0x2c70
+(go32 data) is in the same region -- so the load streams disk bytes over CWSDPMI/go32's own data
+([0x426]=0x2cb26). qemu places this same read's buffer in FREE memory (es=0x4cXX, above 0x336c).
+=> The defect is ONE go32/QUAKE DPMI memory allocation that returns an IN-USE conventional address
+(inside CWSDPMI) in the RTL but a free address in qemu. Everything else (transfer buffer, all other
+reads) matches qemu. So it's NOT a systematic memory-map error -- it's a single allocation/heap-state
+divergence. The originating instruction is where go32/QUAKE computes this buffer's linear address;
+it regresses into go32's DPMI conventional-memory allocator state (which, since the MCB chain looked
+identical in dumps, means the allocator's INTERNAL free-list/heap pointer differs, OR the dumps were
+confounded -- worth re-verifying the MCB free pointer with the -icount-matched data). NEXT: trace the
+go32 PM computation of es/linear=0x2bac0 (the DPMI 0x300 RMI structure fill before n=8588008), or
+watchpoint the RMI structure, to find the allocator output that diverges from qemu's.
