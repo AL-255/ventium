@@ -1416,6 +1416,31 @@ value, or a specific device/port read during go32 init that the SoC answers diff
 gdbstub-aligned same-point dump, or trace go32's stub-relocation arithmetic (the +0x315 vs +0x42e offset)
 in the register trace back to its first divergent source.
 
+## 23as. RE-CONFIRMED: RTL skips an un-relocation; block +0x119 crosses the QUAKE/CWSDPMI boundary
+
+Dumped RTL conv mem at 9.64M (PRE-corruptor, the corruptor is 9.6433M) and read the stub: lin 0x29d30 =
+b1 0c e8 d1 26 = the VALID/RELOCATED stub (0x26d1e80c). So just before the corruptor's `ADD ebx`
+(ebx=delta=0x000e0021), the RTL stub is ALREADY relocated; qemu's is UN-relocated (valid-delta=0x26c3e7eb).
+The ADD then OVER-relocates the RTL's -> 0x26dfe82d = b1 2d e8 df 26 -> CALL 0x5954 -> #UD. So the RTL
+genuinely SKIPS the un-relocation `SUB delta` that go32 does in its real-mode-call RETURN path (re-confirms
+the original sec-23ag framing; my sec-23aq "recording artifact" note applies only to the PM-entry at
+0x2b01, NOT to this un-relocation).
+
+So the chain is: go32 places the real-mode block +0x119 paras higher in the RTL (lin 0x26ac0 vs 0x25930) ->
+it spills past the QUAKE exe image (MCB 'QUAKE' 0x227e..0x268f) into CWSDPMI's region (0x269b+) -> go32's
+post-real-mode-call logic (which conditionally un-relocates the stub) takes the wrong branch -> un-reloc
+SUB skipped -> stub stays relocated -> next ADD over-relocates -> #UD. The +0x119 is the SEED.
+
+The +0x119 is DETERMINISTIC and ROBUST: bit-identical crash (retire=9643312, clocks=271906917) across
+EVERY input changed -- fw_cfg, video BDA, RAM-top probe. ELIMINATED: fw_cfg/e820, BIOS conv-size/EBDA,
+geometry, ext-mem size+probe, full DOS MCB layout, video BDA, phantom-RAM. The block lin-to-lin dump diff
+is CONFOUNDED (RTL dump is pre-crash; qemu's is mid-timedemo -- the real-mode block is transient and holds
+different content at the two points; only 51/4096 bytes match shifted). The seed value go32 reads to place
+the block is none of the tested static inputs -> remaining: an interrupt-timing/timer-derived value or a
+device/port read during go32 init. PINNING needs a SAME-LOGICAL-POINT dump (qemu paused at the op via
+gdbstub, GDT decoded for cs=0x87's base) -- the only un-confounded comparison left. This is the precise,
+honest state: mechanism fully understood, seed value unpinned, requires gdbstub-aligned tooling.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
