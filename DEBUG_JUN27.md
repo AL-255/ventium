@@ -2201,3 +2201,28 @@ single-instruction origin of the memory-size divergence remains the open item; i
 go32/CWSDPMI's DPMI-init memory computation. Validated tooling in place: -icount layout-matched 28GB
 qemu trace, tb_soc --watch-write, binary-compact membership diff. NEXT: watch/trace the buffer-base
 allocation call (the DPMI/DOS allocate that returns 0x2bac vs qemu's 0x4cXX) and diff its inputs.
+
+## 23by. Onset localized to cs=0x5f7:0x7d69; A20 ruled out; honest limit of trace archaeology
+
+Membership over the full go32 region (6.0M..9.477M, with cs): RTL is 94.6% bit-identical to the
+rendering -icount qemu. First SUSTAINED PM miss-run (the divergence onset) = ri=8622285, len=22805,
+dom cs=0x26ac, starting at cs=0x5f7:0x7d69 (ecx=0x269c=CWSDPMI seg, esi=0x66, edi=0x94, esp=0x8e4).
+This is just AFTER the es=0x2bac disk read (8.59M) -- note es is NOT in the membership tuple, so the
+es/buffer divergence isn't flagged; the gpr divergence manifests here. At cs=0x5f7:0x7d69 EVERY
+individual register value IS within qemu's observed set (esp even constant 0x8e4) -- it's the
+COMBINATION that's RTL-unique, i.e. a PATH difference, which regresses further upstream.
+A20 RULED OUT: the SoC has a real A20 gate (ven_i8042.sv a20_gate), and qemu's -d cpu shows A20=1 for
+all 36M captured records, so A20 is on throughout go32 in both -- not the differentiator.
+
+HONEST LIMIT: after an exhaustive trace-archaeology campaign (the -icount layout-matched 28GB qemu
+trace was the key breakthrough; plus tb_soc --watch-write, binary-compact membership diffs), the
+Quake blocker is COMPREHENSIVELY CHARACTERIZED and LOCALIZED but its single-instruction root keeps
+regressing through go32/CWSDPMI's PM-mode DPMI memory allocation (panic <- bad descriptor <- [0x426]
+clobbered by a disk read into a buffer es=0x2bac that overlaps go32 data <- buffer placed ~132KB low
+<- go32 DPMI heap/memory-size divergence <- a subtle PM path divergence at cs=0x5f7:0x7d69 <- ...).
+Each step is a symptom of an earlier one. Validated facts: Goal-1 MET (FreeDOS boots pure-RTL); the
+SoC/southbridge memory config MATCHES qemu (e820/CMOS/RAM-bound/A20 all verified); the RTL core is
+~95% bit-identical to a RENDERING qemu -> the defect is ONE localized go32/PM execution divergence,
+not a peripheral bug. RESOLVING Goals 2/3 needs the CWSDPMI/go32 SOURCE (to read the allocation
+logic and identify which input the RTL feeds wrong) or core-team PM/V86 expertise -- beyond what
+register-trace comparison can isolate. Full validated tooling + trail preserved (§23br-§23by).
