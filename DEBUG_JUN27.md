@@ -1268,6 +1268,33 @@ etc/e820 + large blobs are DMA'd (not in the byte-read trace) -- capture them wi
 (IN 0x511 byte-port) over serial, or from qemu's hw/i386 fw_cfg build. This is the precise hand-off for the
 parallel session's F3 fw_cfg WIP (ventium_soc.sv).
 
+## 23am. CORRECTION: fw_cfg is NOT the Quake crash root (tested + disproven)
+
+I over-pursued the fw_cfg hypothesis. Two pieces of evidence now DISPROVE it as the Quake root:
+ 1. TEST: added the captured fw_cfg scalars (ram_size=0x4000000, nb_cpus, max_cpus, irq0_override) to
+    fwcfg_byte, rebuilt with the Quake disk, ran to 9.8M. Result: Quake STILL stops at retire=9643310
+    (vs 9643312 before -- a 2-insn shift), same idle/halt. FreeDOS still boots (GUESTCON: FreeCom). The
+    crash is essentially UNCHANGED. ram_size was redundant anyway (SeaBIOS already sizes 64MB from CMOS).
+ 2. SOURCE: qemu/hw/i386/e820_memory_layout.c + pc.c show that for `-machine pc -m 64` the etc/e820 file
+    is a SINGLE entry {address=0, length=0x04000000, type=E820_RAM} -- NO reserved regions (the AMD_HT and
+    above-4g and SGX entries are not added for an Intel pentium / 64MiB / no-SGX machine). That is
+    identical to what SeaBIOS derives from CMOS. So the fw_cfg memory map == the CMOS memory map; fw_cfg
+    does NOT change the e820 the OS sees.
+CONCLUSION: the first boot divergence at insn#104916 (fw_cfg file_dir count 12-vs-0, sec 23ah-23al) is
+REAL but BENIGN for Quake -- it only changes ACPI/SMBIOS/table processing (which DOS/Quake ignore) and the
+SeaBIOS instruction COUNT (a timing shift), not the memory STATE the loaders use. Sections 23ah/23ai/23aj/
+23al proposing "populate fw_cfg" as the Quake fix are RETRACTED. The reverted-clean [TEST] edit confirms it.
+
+STILL SOLID (unchanged): rtl/core is FAITHFUL (regs match qemu at the op cs=0x87:0x258 AND the corruptor
+cs=0x87:0x338); Win95 independently corroborates (its loaders run clean, fail only at memory PLACEMENT).
+So the Quake #UD is a MEMORY-STATE divergence (the go32 stub left over-relocated / un-relocation skipped)
+whose true cause is NOT fw_cfg and remains UNPINNED. Most-likely remaining sources, to investigate next:
+ - a PERIPHERAL / memory-model read returning a different value than qemu (device state, uninitialised
+   memory, timer/IRQ-derived value) that the go32/CWSDPMI relocation path branches on; OR
+ - a transient between the proven-matching checkpoints. Next concrete step: re-anchor the per-instruction
+   diff tightly around the stub WRITE (not the boot) and find the first MEMORY write whose value/address
+   diverges in the cs=0x26ac relocation block -- ignore the (benign) boot/fw_cfg divergence entirely.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
