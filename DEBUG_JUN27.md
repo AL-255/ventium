@@ -1706,6 +1706,32 @@ to find the exact reserved delta go32's walk is sensitive to; (3) if CWSDPMI rea
 the FADT field it branches on. The complete RTL-fwcfg trace (/home/yukidama/rtlfw.vtrace) + qna(acpi=off) +
 qemuf(full-ACPI) are all on disk for that diff.
 
+## 23bd. INT15h ruled out too; remaining candidate is the IRQ/cycle-interleaving timing (hardest)
+
+RTL-fwcfg INT15h memory queries: E820 x5 (n=6.6M, cs=0x13e7 = HIMEM), AH=88 x143, E801 x0. The block base
+is ROBUST to both the E820 result and the AH=88 ext-mem size (both tested), AND bit-identical with the
+32-bit-offset ACPI fix (correct vs corrupt 128KB tables) -> CWSDPMI does NOT branch on ACPI content. So the
+e820/INT15h/ACPI-content hypotheses are all OUT.
+
+REVISED understanding of my own "boot work can't matter" claim (sec 23bb): that was too strong. Boot work
+changes the CYCLE count, and the RTL's IRQ0 (PIT) fires on CYCLES, so more/less boot work shifts the IRQ0
+interleaving RELATIVE to go32/CWSDPMI's instruction stream -> it CAN reorder an IRQ-driven event vs the
+walk. qemu acpi=off does ~0.3M less boot work -> different IRQ interleaving -> +0x119; the RTL matches
+acpi=off's interleaving. So the most-consistent-remaining root is the IRQ0/cycle-interleaving timing
+(go32/CWSDPMI's memory-block carve vs go32's walk, reordered by where IRQ0 lands), which is the HARDEST to
+isolate or fix: it depends on the RTL's deterministic PIT timing vs qemu's, and changing it is not
+bit-stable so it can't be A/B tested cheaply.
+
+FINAL HONEST STATE OF THIS DEEP DIVE: Goal 1 (FreeDOS pure-RTL) MET. Goals 2 (Quake frames) + 3 (Win95) NOT
+met -- no fix achieved. What IS done + solid: the acpi=off reproduction, the VERIFIED RTL==acpi=off match,
+the decoded MCB-chain walk, and the elimination of EVERY concrete memory/config hypothesis (conv size,
+ext-mem, RAM-top, e820 size+entries, scalars, BDA, ACPI presence, ACPI content, MCB layout). I also
+corrected THREE of my own wrong claims this session (fwcfg "validated", boot-work mechanism, ACPI-not-
+placed). The root that remains is a deterministic IRQ/cycle-interleaving divergence between the RTL and
+qemu-full-ACPI that I could not isolate to a single fixable value in this session despite exhaustive
+elimination. Artifacts for continuation are all on disk (rtlfw.vtrace, qna, qemuf, fwcfg_blob, the gated
+DPI harness). This is a precise, honest hand-off, not a fix.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
