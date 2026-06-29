@@ -2158,3 +2158,23 @@ write (value + the retiring cs:eip) in the RTL run; the writers (and the missing
 the exact instruction/path. Then map that to core.sv. Note: neither register-trace shows writes, so
 the watchpoint is required to go further. Validated: 95% of RTL go32 states bit-identical to a
 RENDERING qemu, so this is one localized cell, not pervasive.
+
+## 23bw. REFRAME: 0x3864 is IDE DISK DATA read into a buffer (es=0x2cac) that OVERLAPS [0x426]
+
+tb_soc --watch-write 0x2cb20 caught the origin: the FIRST write of 0x3864 to [0x426] (linear 0x2cb26)
+is from cs=0xf000:0xaa41 = `a32 rep insw` reading port 0x1f0 (IDE DATA; edx=0x03f4_01f0) into es:edi.
+At n=8590723: es=0x2cac, edi=0x66 -> es:0x66 = 0x2cac0+0x66 = 0x2cb26 = exactly ds:0x426 (ds=0x2c70).
+So 0x3864 is DISK DATA streamed into a transfer buffer that OVERLAPS go32's [0x426]; the later
+0x325c/0x3300 writes (0x3956/restore-0x3864) just preserve it.
+DECISIVE COMPARISON: in the layout-matched RENDERING qemu, the same `rep insw` (cs=0xf000:0xaa41,
+360314x) targets es = {0x2420(98431x), 0x4601, 0x4cXX, ...} and NEVER es=0x2cac (count 0). So qemu's
+disk reads go to buffers that do NOT overlap [0x426]; the RTL's read goes to es=0x2cac which DOES.
+=> The Quake blocker is a DISK/DPMI TRANSFER-BUFFER placement divergence, not a CPU-arithmetic bug:
+the RTL issues an INT13h (DPMI real-mode) disk read into es=0x2cac, clobbering go32's [0x426] with
+disk data -> wrong descriptor value -> CWSDPMI panic. qemu places the buffer elsewhere.
+This is on the IDE/southbridge/DPMI-transfer path (ties back to the original +0x119 "real-mode block
+placement" thread -- but now CONCRETE: it's where the disk buffer lands). NEXT: trace why the RTL's
+go32 sets es:bx=0x2cac:.. for this INT13h (the DPMI real-mode-callback buffer setup) vs qemu's
+separate buffer -- i.e. the earlier instruction that computes the transfer-buffer segment. Watch the
+es:bx INT13h setup, or diff the go32 DPMI real-mode-call path. ven_ide returns data correctly (DOS
+booted); the defect is the BUFFER ADDRESS the RTL hands to the read.
