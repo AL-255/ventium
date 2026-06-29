@@ -1344,6 +1344,31 @@ go32/CWSDPMI's mem init to the FIRST divergent allocation. Candidate non-config 
 (equipment/floppy/serial), an RTC/timer-seeded value, or a CWSDPMI extended-mem probe (INT15h 88h/E801/
 e820 path) that the SoC answers a few KiB differently.
 
+## 23ap. BREAKTHROUGH: DOS-level MCB chain is IDENTICAL; divergence is INSIDE CWSDPMI's region
+
+Dumped RTL conventional mem (--dump-mem-at 0x0,0x40000 @9.64M) and qemu's (monitor pmemsave 0 0x40000,
+~28s into the timedemo), parsed both DOS MCB chains. EVERY DOS-level allocation MATCHES exactly (same size
+AND same segment):
+   SD 868para(13888B)@0291 ; SC 2781(44496B)@05f6 ; COMMAND 4499(71984B)@10de ;
+   QUAKE 1040(16640B)@227e ; CWSDPMI 3281(52496B)@269b.
+So the FreeDOS KERNEL, COMMAND.COM, the Quake PSP, AND CWSDPMI's DOS allocation are all bit-identical
+RTL-vs-qemu. The ~0x119-paragraph divergence is NOT at the DOS/MCB level at all.
+
+It is INSIDE CWSDPMI's own region (0x269b..0x336d, 52496B, identical extent): the real-mode call block
+(ds=0x2c70 RTL vs 0x2b57 qemu) sits at offset +0x5D5 vs +0x4BC into CWSDPMI -- i.e. the DPMI structures
+that CWSDPMI builds BEFORE the real-mode block (its page directory/page tables / DPMI heap) are ~0x119
+paragraphs (~4496B ~ one 4KiB page table) LARGER in the RTL. A page-aligned addr in that code also
+diverges by exactly 0x1000 (eax=0x45000 RTL vs 0x44000 qemu at cs=0x18:0x2b50). So CWSDPMI maps ~one extra
+4KiB page-table's worth in the RTL, pushing its real-mode block up -> stub over-relocated -> #UD.
+
+ELIMINATED so far (all by direct comparison): core (faithful), fw_cfg/e820 (identical), BIOS conv-size
+(639KiB) + EBDA, disk geometry, extended-mem SIZE (63MiB), FreeDOS kernel layout, COMMAND.COM, even
+CWSDPMI's DOS-level allocation. The bug is in what CWSDPMI's INTERNAL page-table/DPMI setup computes from
+the SoC -- most likely its INT15h extended-memory PROBE (E801/88h/e820 walk) returning a slightly
+different shape (not size) than qemu, or a per-page reserved/usable decision. NEXT: byte-diff the CWSDPMI
+region (0x269b0..0x336d0) RTL-vs-qemu to find the first differing page-table entry, and trace which INT15h
+response CWSDPMI built it from.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
