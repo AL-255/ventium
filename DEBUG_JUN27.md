@@ -1241,6 +1241,33 @@ defect. Win95 is the independent second witness that rtl/core is correct and the
 memory/firmware-config layer. (The 0x8000=512KB target is suggestive of a top-of-conventional-memory /
 RAM-map value the loader computes from -- consistent with the fw_cfg/e820 seed.)
 
+## 23al. PRECISE fw_cfg MANIFEST captured from the oracle qemu (the exact hand-off data)
+
+Captured qemu's real fw_cfg via its own trace events (qemu 8.2.2 supports them):
+  qemu-system-i386 -machine pc -cpu pentium -accel tcg -m 64 -drive file=<disk>,format=raw,if=ide \
+     -trace 'fw_cfg_add_file' -trace 'fw_cfg_select' -trace 'fw_cfg_read' -display none -no-reboot
+qemu `-machine pc -m 64` exposes these (the SoC's fwcfg_byte must match them; it currently returns 0 for
+ALL of these except sig+id):
+  SCALARS:  sel 0x03 ram_size  = 0x0000000004000000 (i64, 64MiB)   <-- SoC returns 0 !!
+            sel 0x05 nb_cpus   = 1 (i16)      sel 0x0f max_cpus = 1 (i16)
+            sel 0x04 nographic = 0 (i16)      sel 0x0e boot_menu = 0 (i16)
+            sel 0x01 id        = 0x3 (i32)    sel 0x8002 irq0_override = 1 (i32)
+  FILES (12, via FW_CFG_FILE_DIR sel 0x19; selectors 0x20+ in add order):
+    etc/boot-fail-wait(4)  etc/e820(20)  genroms/kvmvapic.bin(9216)  etc/system-states(6)
+    etc/acpi/tables(131072)  etc/table-loader(4096)  etc/tpm/log(0)  etc/acpi/rsdp(20)
+    etc/smbios/smbios-tables(327)  etc/smbios/smbios-anchor(24)  bootorder(0)  bios-geometry(0)
+
+KEY BUG: the SoC sets the SIGNATURE (so SeaBIOS qemu_cfg_present=TRUE) but returns 0 for ram_size (sel
+0x03) AND an empty file_dir (no etc/e820). So SeaBIOS takes the fw_cfg path with ram_size=0 / no e820 and
+builds a memory map that diverges from qemu's -> the OS-loader mis-placement seen in BOTH Quake (#UD) and
+Win95 (bad jump to 0x8000). The MEMORY-MAP-relevant subset to fix first: sel 0x03 ram_size = 0x4000000 and
+the etc/e820 file (only 20 bytes = 1 entry: u64 base, u64 len, u32 type). NOTE: full parity is impractical
+in a pure byte-function (etc/acpi/tables is 128KiB) -- the SoC's fw_cfg DMA should source these blobs from
+a ROM/memory region; the byte function should at minimum carry the scalars + file_dir + etc/e820. The
+etc/e820 + large blobs are DMA'd (not in the byte-read trace) -- capture them with a tiny guest reader
+(IN 0x511 byte-port) over serial, or from qemu's hw/i386 fw_cfg build. This is the precise hand-off for the
+parallel session's F3 fw_cfg WIP (ventium_soc.sv).
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
