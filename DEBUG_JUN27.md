@@ -1295,6 +1295,32 @@ whose true cause is NOT fw_cfg and remains UNPINNED. Most-likely remaining sourc
    diff tightly around the stub WRITE (not the boot) and find the first MEMORY write whose value/address
    diverges in the cs=0x26ac relocation block -- ignore the (benign) boot/fw_cfg divergence entirely.
 
+## 23an. PINPOINTED: the divergence is CONVENTIONAL-MEMORY ALLOCATION (RTL allocates higher), core faithful
+
+Side-by-side dump of the block-exit -> corruptor in both aligned traces (RTL @9642283.., qemu @9832702..),
+EIP-aligned (block code identical, different segment):
+  AT the corruptor cs=0x87:0x338 the GPRs MATCH EXACTLY (eax=0x101 ebx=0x000e0021 ecx=0 edx=0x008000b7
+  esi=0x7400 edi=0x63400 ds=es=0x8f) -- core faithful, re-confirmed.
+  BEFORE it (the go32/CWSDPMI mem code at cs=0x26ac block + cs=0x18 kernel) several ADDRESSES diverge, RTL
+  always HIGHER:
+    ds   = 0x2c70 (RTL) vs 0x2b57 (qemu)   -> block seg, +0x119 paragraphs (linear +0x1190)
+    eax  = 0x45000 (RTL) vs 0x44000 (qemu) -> a page-aligned addr, +0x1000 (exactly one 4KiB page)
+    es   = 0x4601 vs 0x4501                -> linear +0x1000
+    ebx  = 0x130e vs 0x1300                -> transient +0xe (re-converges to 0x3772 both at 0x2b4c)
+  All are MEMORY ADDRESSES, and they re-converge at the corruptor (reloaded from elsewhere). Both the
+  conventional block (linear 0x2c700~182KiB RTL vs 0x2b570~177KiB) and the page (0x45000~276KiB vs
+  0x44000~272KiB) live in CONVENTIONAL memory (<640KiB) and are HIGHER in the RTL.
+
+INTERPRETATION: the RTL's DOS/go32 conventional-memory layout is shifted HIGHER than qemu's by ~one page /
+0x119 paragraphs -- i.e. something early uses ~4-5KiB MORE low memory in the RTL, pushing every subsequent
+allocation (the real-mode block, the CWSDPMI page) up. go32/CWSDPMI computes the stub relocation from these
+addresses; the higher placement is what leaves the stub over-relocated -> #UD. This is NOT the core (proven
+faithful) and NOT fw_cfg (the e820 map is identical, sec 23am). It is a low-memory layout divergence.
+NEXT: find what consumes ~4-5KiB more conventional memory in the RTL boot -- a driver/buffer sized off a
+device read (disk geometry?, a BIOS/BDA field like conventional-KiB at 0x413 or the EBDA size), or an extra
+DOS allocation. Trace the page addr 0x45000-vs-0x44000 (read at cs=0x18:0x2b50) back to the structure that
+holds it, and/or diff the conventional free-pointer / INT 21h AH=48h results from the DOS boot.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
