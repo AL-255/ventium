@@ -2178,3 +2178,26 @@ go32 sets es:bx=0x2cac:.. for this INT13h (the DPMI real-mode-callback buffer se
 separate buffer -- i.e. the earlier instruction that computes the transfer-buffer segment. Watch the
 es:bx INT13h setup, or diff the go32 DPMI real-mode-call path. ven_ide returns data correctly (DOS
 booted); the defect is the BUFFER ADDRESS the RTL hands to the read.
+
+## 23bx. FULL CIRCLE: the DPMI transfer/file buffer is misplaced INTO go32's own data (the +0x119 was REAL)
+
+Found es=0x2cac is set by `mov es,ax` at cs=0xf000:0xaa33; the buffer INCREMENTS per sector
+(es=0x2bac,0x2bcc,0x2bec,...,0x2cac = 9 sectors) = a sequential FILE LOAD via INT13h. Buffer BASE =
+es=0x2bac (0x2bac0), which is INSIDE the go32/QUAKE region (QUAKE psp 0x227f .. ~0x2c8e) and the load
+runs UP through [0x426] (ds=0x2c70:0x426 = 0x2cb26 = es=0x2cac:0x66). So the RTL streams disk sectors
+THROUGH go32's own working data, clobbering [0x426] with disk byte 0x3864.
+DECISIVE vs RENDERING qemu: the same load targets es=0x4cXX (separate region, ~132KB higher) -- NEVER
+overlapping go32's data. So the buffer is placed ~132KB too LOW in the RTL, inside its own segment.
+=> This REVERSES the earlier "+0x119 baseline artifact" reframe (23bm): the go32 real-mode transfer/
+file buffer IS genuinely misplaced (overlapping go32 data), exactly the ORIGINAL +0x119 thread. The
+complete, validated failure chain:
+  (memory-size/DPMI-heap divergence) -> go32 places its real-mode transfer/file buffer ~132KB too low,
+  inside its own data segment -> an INT13h file read streams disk sectors over go32's [0x426] ->
+  the corrupted value (0x3864 disk byte) feeds a DPMI descriptor CWSDPMI rejects -> CLI;HLT panic.
+  qemu sizes memory correctly -> buffer is separate -> [0x426] intact -> renders.
+ROOT = the buffer-base allocation (where go32/CWSDPMI computes the real-mode transfer buffer segment),
+which depends on the memory layout/size (ties to 23bl ~6KB XMS delta and the original +0x119). The
+single-instruction origin of the memory-size divergence remains the open item; it regresses through
+go32/CWSDPMI's DPMI-init memory computation. Validated tooling in place: -icount layout-matched 28GB
+qemu trace, tb_soc --watch-write, binary-compact membership diff. NEXT: watch/trace the buffer-base
+allocation call (the DPMI/DOS allocate that returns 0x2bac vs qemu's 0x4cXX) and diff its inputs.
