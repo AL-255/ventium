@@ -1321,6 +1321,29 @@ device read (disk geometry?, a BIOS/BDA field like conventional-KiB at 0x413 or 
 DOS allocation. Trace the page addr 0x45000-vs-0x44000 (read at cs=0x18:0x2b50) back to the structure that
 holds it, and/or diff the conventional free-pointer / INT 21h AH=48h results from the DOS boot.
 
+## 23ao. ELIMINATIONS on the conventional-memory divergence; one concrete hw-config diff (floppy)
+
+Dumped the RTL BDA (--dump-mem-at 0x400,256 @6.5M) and read the Quake disk (mtools). RULED OUT as the
+~4-5KiB conventional-shift cause:
+ - BIOS conventional size: RTL 0x413 = 639 KiB, EBDA 0x40E = 0x9fc0 (1KiB) -- IDENTICAL to qemu -m64.
+ - CONFIG.SYS / drivers: there is NO CONFIG.SYS on quake_hdd.img -- only KERNEL.SYS(FreeDOS)+COMMAND.COM+
+   \QUAKE; AUTOEXEC = "cd \QUAKE & quake -nosound -nocdaudio -timedemo demo1". So no driver consumes it.
+ - Disk geometry: partition start=63, 130cyl/16head/63spt = 131040 sec -- matches the build (CYLS=130).
+ - Extended memory: both 63 MiB.
+ONE concrete divergence found: RTL equipment word 0x410 = 0x0206 -> bit0=0 (NO floppy drive). qemu's
+default `-machine pc` has floppy drives (bit0=1). The SoC has an FDC but SeaBIOS finds no DRIVE. Direction
+is puzzling (fewer drives -> less mem, but RTL uses MORE), so likely not the direct cause, but it is a real
+RTL-vs-oracle hardware-config delta worth controlling (run the oracle with `-machine pc,floppy=off` to
+remove it from the diff; or check if FreeDOS's drive/DPB enumeration shifts go32's first allocation).
+
+NET: the Quake root is a SUBTLE conventional-memory allocation divergence inside FreeDOS-KERNEL.SYS or
+go32/CWSDPMI (the only code present), not any obvious config (fw_cfg, conv-size, geometry, ext-mem,
+drivers -- all matched/eliminated). Core proven faithful; the placement (block +0x119 paras, page +0x1000)
+is what mis-relocates the stub. Remaining hunt is deep: trace FreeDOS's INT21h/48h allocation chain or
+go32/CWSDPMI's mem init to the FIRST divergent allocation. Candidate non-config sources: a device PROBE
+(equipment/floppy/serial), an RTC/timer-seeded value, or a CWSDPMI extended-mem probe (INT15h 88h/E801/
+e820 path) that the SoC answers a few KiB differently.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
