@@ -2053,3 +2053,25 @@ with the active core PM/V86 work (commit 19736cc "V86 task switch segment load #
 exact instruction needs a layout-matched per-instruction qemu diff (blocked: one-insn-per-tb perturbs
 the boot layout) or the >16MB GDT to disassemble cs=0x34's panic-branch condition. Goal 2/3 blocked
 on this core bug, NOT the southbridge.
+
+## 23br. BREAKTHROUGH: -icount gives a LAYOUT-MATCHED qemu trace; divergence is a STACK/retf frame
+
+KEY TOOLING WIN: qemu with `-icount shift=auto -accel tcg,one-insn-per-tb=on` makes the timer
+instruction-deterministic, so one-insn-per-tb NO LONGER perturbs the boot layout. Result: the
+-icount qemu trace has the go32 stub at cs=0x26ac (264389x), cs=0x2593 ABSENT -- it MATCHES the RTL
+layout exactly. (Old qemuf trace was wall-clock, hence the spurious +0x119/cs=0x2593.)
+
+DECISIVE: in the matched qemu trace, CS=0034 NEVER appears (0x) and EIP=0x3275 is only ever cs=0x26ac/
+0x5f7/0x8e47 -- qemu NEVER enters the cs=0x34 panic handler. qemu does NOT panic; it renders. So the
+RTL's cs=0x34 panic is a genuine EXECUTION divergence from a byte-identical qemu at identical layout.
+
+PINPOINTED the symptom: cs=0x26ac:0x5954 is a 32-bit shift helper:
+  5954 neg cl ; 5956 add cl,0x10 ; 5959 shl bx,cl ; 595b or ax,bx ; 595d RETF
+The RETF at 0x595d: qemu pops return cs:ip = 0x26ac:0x0269 (normal, ESP 0x6f9e->0x6fa2); the RTL pops
+0x34:0x3275 (the CWSDPMI panic handler). So the RTL returns through a DIFFERENT stack frame -- the
+caller/return-address on the stack differs, and the RTL's ESP (0x6f90) is ~0xe below qemu's (0x6f9e),
+echoing the old "CALL 0x5954 vs 0x5946 = 0xe" note. The shift helper is called 48531x (a utility), so
+this RETF is a SYMPTOM: the RTL is already on a divergent path with a corrupted/misaligned stack by
+the time it reaches here. ROOT = an earlier STACK divergence (a push/pop/call/ret the core mishandles,
+leaving ESP ~0xe off) in go32's DPMI init. NEXT: systematic register-tuple diff RTL-vs-icount-qemu
+(now possible -- layout matched) to find the FIRST instruction where ESP/regs diverge = the core bug.
