@@ -2075,3 +2075,24 @@ this RETF is a SYMPTOM: the RTL is already on a divergent path with a corrupted/
 the time it reaches here. ROOT = an earlier STACK divergence (a push/pop/call/ret the core mishandles,
 leaving ESP ~0xe off) in go32's DPMI init. NEXT: systematic register-tuple diff RTL-vs-icount-qemu
 (now possible -- layout matched) to find the FIRST instruction where ESP/regs diverge = the core bug.
+
+## 23bs. Layout-matched diff built; BIOS hardware-timing noise forces go32-region alignment
+
+Built a register-trace diff (RTL rtl_idle.vtrace vs -icount qemu /home/yukidama/ictrace/qic.log,
+compact in q_compact.txt) with a resync engine (/tmp/resync2.py) that skips poll/delay loops.
+Findings:
+ * Traces are EIP-lockstep from instruction 0 (both start cs=0xf000:0xfff0).
+ * Clean early diff: edx=0x543(qemu)/0(RTL) at reset -- qemu loads the P5 CPUID signature into EDX
+   at reset; the RTL's regfile reset arm gates that on boot_mode/cosim_en and leaves it 0 in the SoC
+   boot (core.sv:2894). Real but likely-harmless (BIOS overwrites edx before DOS). Worth a fix.
+ * The boot has GENUINE BIOS control-flow divergences (SeaBIOS poll loop @0xe9f88 with very different
+   iteration counts; a dispatch @0xfec57 -> qemu 0xfd06f vs RTL 0xeb83a). These are HARDWARE-TIMING
+   dependent (device/timer response differs RTL vs qemu) and WASH OUT by DOS (MCB chain byte-identical),
+   but they make a global lockstep diff impossible -- can't align cleanly through SeaBIOS POST.
+CONCLUSION/PLAN: the go32 panic bug is in the DETERMINISTIC DPMI-init region (no HW polling), not the
+BIOS. Next iteration must align THERE specifically: re-extract qemu compact WITH cs+linear (cs_base+eip),
+isolate the go32 stub (cs=0x26ac, linear ~0x2C6xx) and CWSDPMI PM code, find a unique anchor in the
+one-time DPMI setup, and diff forward to the first register/stack divergence = the core bug. The big
+win this round: -icount makes qemu's layout match the RTL, and qemu provably renders (never enters
+cs=0x34) -- so the comparison is now VALID; only the alignment through BIOS noise remains.
+Artifacts kept: /home/yukidama/ictrace/qic.log (28GB, layout-matched), q_compact.txt, /tmp/resync2.py.
