@@ -2009,3 +2009,27 @@ extended memory, not yet dumped), and per-instruction qemu tracing perturbs the 
 can't be diffed against the RTL at matching layout. NEXT: dump >16MB to get the GDT+disassemble the
 cs=0x26ac callback and the cs=0x34 check; trace back to the operation that first sets the eax=0x406
 error path; that operation (DPMI/DOS service or peripheral) vs qemu is the true Goal-2 root.
+
+## 23bp. UNIFYING ROOT: the panic traces to a DPMI memory-block SIZE (eax=0x406) -> extended/XMS mem
+
+Disassembled (16-bit, clean) the instruction that sets the panic's eax=0x406 at cs=0x26ac:0x3266:
+  les bx,[bp-0x4]        ; load far ptr to a DPMI mem-block descriptor
+  mov dx,[es:bx+0x2]     ; dx = high word
+  mov ax,[es:bx]         ; ax = low word  -> dx:ax = 0x00000406
+  mov cl,0xc             ; shift 12 = pages(4K)->bytes  -> 0x406 pages ~= 4 MB
+So eax=0x406 is a MEMORY-BLOCK SIZE (in 4KB pages) loaded from a DPMI descriptor; CWSDPMI later
+finds it inconsistent and BRANCHES to its panic (cs=0x34:0x3275 -> CLI;HLT). This UNIFIES the whole
+investigation: the blocker is that the RTL presents a DIFFERENT memory size to go32/CWSDPMI than
+qemu does (cf. 23bl: HIMEM resident esi=0x0d30 vs 0x0d2a, ~6KB). The mis-sized DPMI block -> the
+panic. NOT the stub position (byte-identical to qemu), NOT ACPI/e820/CMOS (all verified matching).
+
+The residual puzzle: e820 + CMOS extmem + conventional layout ALL match qemu, yet HIMEM/CWSDPMI end
+up with a different size. So the delta is in a DRIVER-LEVEL computation (HIMEM XMS free-mem, or a
+write-then-read RAM probe) that the obvious BIOS-level inputs don't capture. memmodel.cpp already
+has VEN_RAM_TOP_MB to bound phantom RAM (the documented +0x119 mechanism), but a prior test found it
+inert -- worth RE-testing now that the panic is understood as a size mismatch (the earlier "inert"
+may have been confounded). HONEST STATUS: diminishing returns on solo trace archaeology; the precise
+mechanism (which size, computed where) needs either the go32/CWSDPMI source, a layout-matched qemu
+trace (blocked: one-insn-per-tb perturbs layout), or the >16MB GDT to disassemble correctly. Goal 2
+(Quake render) + Goal 3 (WIN95, same DPMI path) remain blocked on this single size-mismatch root.
+NEXT: (1) re-test VEN_RAM_TOP_MB=64 cleanly; (2) find where the 0x406-page DPMI block is sized vs qemu.
