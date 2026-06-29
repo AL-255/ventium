@@ -1862,6 +1862,27 @@ whether 256KB + e1000 + VGA BARs + SMM-stub now boots AND lands go32's block cor
 the remaining work is a real VGA framebuffer for actual frame rendering (mode-13h to 0xA0000).
 Whether the SMM no-op stub is safe (SMRAM never really set up) is still being verified by the run.
 
+## 23bj. 256KB BIOS BOOTS (4 SoC gaps fixed); block +0x119 invariant; RAM-bound INERT; SMM suspect
+
+MILESTONE: with the 256KB BIOS + e1000 + VGA BARs + SMM-stub (0xb3=0), the RTL now BOOTS
+FreeDOS (kernel + FreeCom) and reaches Quake's go32 -- POST byte-identical to qemu, e820 identical.
+
+But go32's block is STILL +0x119 (cs=0x26ac 113515x, cs=0x2593=0) -- IDENTICAL count across
+EVERY fix (e1000, 128KB->256KB BIOS, VGA BARs, SMM-stub). The block is INVARIANT to the POST.
+
+RAM-bound test (VEN_RAM_TOP_MB=64, the §23ap "phantom RAM" fix I'd NEVER actually set): first
+broke the boot at 212K insns -- the memmodel open-bus hole hardcoded the 128KB BIOS alias bound
+0xFFFE0000, so the 256KB BIOS 4G-top low half (0xFFFC0000-0xFFFDFFFF) read open-bus garbage. FIX
+(memmodel.cpp, mine): bound = 0xFFFC0000 (covers both BIOS sizes). Re-ran bounded: **bit-identical
+halt at retire=9478189** -- VEN_RAM_TOP_MB=64 is INERT. So §23ap's phantom-RAM theory is WRONG;
+the +0x119 is NOT the RAM probe.
+
+NEW SUSPECT = SMM. The +0x119 reproduces with qemu `acpi=off`, which also disables SMM. My RTL
+SMM-stub makes SMM functionally OFF (no SMRAM, no handler) -- exactly like acpi=off. Testing qemu
+`-machine pc,smm=off` (full ACPI, SMM off): if it -> +0x119, SMM (the SMRAM/SMBASE reservation
+that shifts the conventional/MCB layout) is the real block determinant, and the RTL needs REAL
+SMM not a stub. If smm=off -> correct block, it's the ACPI tables themselves and SMM is benign.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`

@@ -51,7 +51,11 @@ static inline uint32_t ram_top_bytes() {
 }
 static inline bool above_ram(uint32_t a) {
     uint32_t t = ram_top_bytes();
-    return t && a >= t && a < 0xFFFE0000u;     // hole between RAM top and the BIOS 4G alias
+    // hole between RAM top and the BIOS 4G alias. The alias starts at 0xFFFE0000 for a
+    // 128KB BIOS but at 0xFFFC0000 for a 256KB BIOS (bios-256k.bin) -- use the lower bound
+    // so the 256KB alias's low half (0xFFFC0000-0xFFFDFFFF) is NOT mistaken for open bus
+    // (that made SeaBIOS read garbage from its own 4G-top image and hang early in POST).
+    return t && a >= t && a < 0xFFFC0000u;
 }
 
 MemModel::Page& MemModel::page_for(uint32_t addr) {
