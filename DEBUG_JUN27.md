@@ -1963,3 +1963,27 @@ rather than a memory-layout problem. CAVEAT: not yet 100% confirmed the renderin
 RTL's -- needs a non-trace-mode qemu render verified against the RTL's QUAKE position. NEXT: identify
 the PM instruction at the halt (need the go32 GDT/selector base or a memory-access trace) and check
 the RTL core's handling of it vs qemu; this is the true Goal-2 blocker, not the +0x119.
+
+## 23bn. PROXIMATE CAUSE: RTL takes a WRONG INDIRECT JUMP into a jump table -> garbage -> CWSDPMI panic
+
+Disassembling the halt at cs=0x34:eip=0x3820 (a ring-0 PM/V86 selector; GDT for cs=0x34 lives in
+extended mem, not in the 0-640K dump, so base unknown -- but the BYTES are visible): the code is
+`57 01 58 01 59 01 5a 01 ...` = incrementing 16-bit words 0x0157,0x0158,0x0159... -- a JUMP/LOOKUP
+TABLE, not real instructions. So the RTL JUMPED INTO the table and is executing its entries as
+code (push edi; add [eax+1],ebx; pop ecx; ...) -> garbage -> CWSDPMI detects the fault and panics
+(CLI; HLT, IF=0, permanent). The RTL's indirect jump computed the TABLE'S ADDRESS instead of
+dereferencing THROUGH it (or read a wrong index). This is the proximate Goal-2 blocker.
+
+CRITICAL CAVEAT on root: the prior go32-input-diff workflow compared the RTL against the qemuf
+*trace* (one-insn-per-tb, QUAKE@0x2166) -- the WRONG baseline (a normal qemu run / our memory dump
+loads QUAKE@0x227e == the RTL). So that workflow's esi/JMP-target deltas are the LAYOUT difference
+RTL-vs-tracemode, NOT the RTL's bug. With the RTL's layout MATCHING a normal qemu, the wrong jump
+is an EXECUTION divergence (a core indirect-JMP/PM-mode mishandle, or a wrong memory read) at the
+SAME layout -- consistent with this being a core PM/V86 defect (cf. recent V86-task-switch #DE fix),
+NOT a memory-layout problem. UNRESOLVED because: per-instruction qemu tracing perturbs the layout
+(can't diff RTL vs a layout-matched qemu), and the go32 GDT/binary needed to disassemble the real
+jump aren't in the captured data. NEXT (concrete, for whoever continues): (a) capture a qemu -d cpu
+trace WITHOUT one-insn-per-tb (preserves QUAKE@0x227e layout) and find the TB where the indirect
+jump diverges; (b) extract the go32/CWSDPMI image+GDT from the disk or an extended-mem dump to
+disassemble the jump and identify the exact instruction; (c) audit the core's indirect-JMP and
+PM/V86 segment handling at that instruction vs qemu.
