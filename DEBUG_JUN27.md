@@ -1441,6 +1441,28 @@ device/port read during go32 init. PINNING needs a SAME-LOGICAL-POINT dump (qemu
 gdbstub, GDT decoded for cs=0x87's base) -- the only un-confounded comparison left. This is the precise,
 honest state: mechanism fully understood, seed value unpinned, requires gdbstub-aligned tooling.
 
+## 23at. NEW: the MCB chain DIVERGES at block-allocation time (allocation ORDER differs)
+
+Dumped both at the block-allocation moment (RTL @8.75M just before the block executes @8.79M; qemu @18s),
+parsed the MCB chains. Unlike the FINAL chains (identical), they DIFFER here:
+  RTL @8.75M : ... QUAKE(227e,1040) ; 268f own=227f ; 269b own=227f sz=3301 NONAME ; 3381 FREE
+  qemu @18s  : ... QUAKE(227e,1040) ; 268f FREE     ; 269b own=269c sz=3281 'CWSDPMI' ; 336d own=227f(76064B)
+So at allocation time the RTL has the 0x269b region still OWNED BY QUAKE (227f) and +20 paras larger, with
+CWSDPMI NOT yet a separate MCB; qemu already has CWSDPMI carved at 0x269b and QUAKE's 2nd block up at 336d.
+=> the ORDER/interleaving of go32's QUAKE allocations vs CWSDPMI's DOS allocation DIVERGES. go32 places its
+real-mode block inside the QUAKE-owned 0x269b region (-> 0x26ac) in the RTL, vs inside the first QUAKE block
+(-> 0x2593) in qemu. That IS the +0x119, and in the RTL the block ends up where CWSDPMI later lands (a
+latent overlap) -> the mis-relocation -> #UD.
+
+This is the FIRST real chain divergence found (every prior comparison showed identical state). It is an
+ALLOCATION-ORDER divergence -- go32/CWSDPMI interleave their DOS memory allocations differently, which is
+driven by EXECUTION ORDER/TIMING (robust to fw_cfg/BDA/RAM-top, which don't change the order). CAVEAT: the
+two dumps are at slightly different sequence points so part of the delta is dump-timing; the SOLID part is
+that the RTL's block lands in the 0x269b region (QUAKE-owned at alloc time) where CWSDPMI later sits, while
+qemu's block is cleanly in the 227e region. NEXT: dump the RTL across 8.6/8.7/8.8/8.9M to capture the
+allocation SEQUENCE and pin the exact interleaving event (which alloc/free reorders) -- that event (likely
+a CWSDPMI DOS-alloc vs a go32 realloc, gated by an interrupt/timing) is the true seed.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
