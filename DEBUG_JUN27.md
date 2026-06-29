@@ -1575,6 +1575,58 @@ bm_wdata) so a non-BMIC access can't spuriously arm it; re-run Quake; add +VEN_T
 build for the render; then retry Win95. The hard/novel part -- proving and fixing the placement root -- is
 DONE and validated; the remainder is bounded SoC-integration debugging.
 
+## 23ay. CORRECTION: dma_launch IS already gated; the stall is an un-pinned DMA bus-park (needs instrumentation)
+
+Re-read ven_ide.sv:318 -- dma_launch ALREADY includes `cs_bm && we && (addr[3:0]==0)`, so my sec-23ax
+"spurious launch off live bm_wdata" hypothesis is WRONG (dma_launch only fires on a real BMIC-START write,
+and line 1018 transitions to DMA_PRD0 the same clock). So the permanent park (40M idle clocks, core req=1
+unacked, muxed mem_req=0) is NOT explained by dma_launch. What IS solid: core_mem_ack is forced 0 only when
+(ide_dma_busy || fwcfg_dma_busy), so a DMA engine is asserting busy for 40M clocks. The bus mux gives IDE
+priority (xm_req = ide_dma_busy ? ide_req : fwcfg_dma_busy ? fwcfg_req : core), and fwcfg_dma asserts
+mem_req=1 in every non-IDLE state -- so muxed mem_req=0 with a DMA busy points at an ide/fwcfg arbitration
+interaction (e.g. fwcfg_dma_busy stuck with its request masked by ide priority, or vice-versa), now that the
+fwcfg engine is HEAVILY exercised serving the 145KB blob (it was near-dormant with the empty default).
+This is UN-PINNED -- I mis-diagnosed once; not guessing again without data.
+CLEAN NEXT STEP: rebuild the fwcfg DPI TB with --public-flat-rw and peek {ide_dma_busy, fwcfg_dma_busy,
+u_ide.dma_state, fwd_st, fwdma_*} at the stall -> that names the stuck engine + state definitively, then
+the fix is local. (Plus the render still needs +VEN_TRANSCENDENTAL in the SoC build, and Win95 a retry.)
+
+HONEST BOUNDARY: the NOVEL, hard result is DONE and validated -- the Quake/Win95 memory-placement root is
+the missing fw_cfg/ACPI boot work (proven by qemu acpi=off reproducing +0x119, validated by the served
+blob making the RTL MCB chain byte-identical to qemu). The remainder (pin+fix this DMA park, add the SoC
+transcendental engine, retry Win95) is bounded SoC-integration debugging in the F3/IDE/FPU domain, not the
+deep CPU/placement mystery this log chased. Quake has NOT rendered a frame yet; goals 2/3 remain open.
+
+## 23az. The post-fix stall is a core HALT at IF=0 with a pending IRQ (interrupt-timing deadlock)
+
+Instrumented the stall directly (gated detectors in ventium_soc.sv under VEN_FWCFG_DPI):
+ - STALL-DETECTOR (DMA busy 2M clocks): NEVER fired -> NO DMA is stuck. The "bus park" read of the
+   --peek-pc snapshot was misleading. (corrects sec 23ax/23ay.)
+ - IDLE-DETECTOR (core not retiring 3M clocks): fires at the stall with
+     core_intr=1  IF=0  lastpc=0x3838  pic_irq_in=0000  pit0=0 ide14=0  ide_busy=0 fwcfg_busy=0
+   => the core is HALTED/idle with interrupts DISABLED (IF=0), while the PIC holds a LATCHED interrupt
+   (core_intr=1, no live IRQ line) that IF=0 blocks. A CLI+HLT-style deadlock, NOT a DMA park and NOT a
+   core "won't-wake-from-HLT" bug (the core correctly won't take a maskable IRQ at IF=0).
+
+INTERPRETATION: serving the fw_cfg fixed the MEMORY-PLACEMENT root (+0x119, validated: MCB chain
+qemu-identical). But the RTL's IRQ timing is DETERMINISTIC and differs from qemu's, so once go32 gets past
+the placement bug it reaches a point where the core is at IF=0 (a critical section / an ISR with IF
+auto-cleared, or a STI/IRET that didn't restore IF) and halts with a maskable IRQ pending -> deadlock. This
+is a SECOND, timing-related issue distinct from the placement root, in the core/PIC/IDE interrupt domain.
+The original (open-bus fwcfg) #UD'd at the placement bug BEFORE reaching this point, so it never exposed it.
+
+WHERE IT STANDS (precise + honest):
+ 1. FreeDOS pure-RTL boot: MET (boots through the full fw_cfg/ACPI path).
+ 2. Quake timedemo: NOT rendered. Placement root FIXED+validated; now blocked by this IF=0 interrupt-
+    deadlock during go32 init, then (still ahead) the per-frame FSIN/FP needs the SoC transcendental engine.
+ 3. Win95: not retried; shares the (now-fixed) placement root + the same interrupt path.
+NEXT (for the core/interrupt owner): trace the IF history into lastpc=cs0x34:0x3838 (was it a STI/IRET that
+failed to set IF, or a genuine CLI;HLT?) and which IRQ is latched in the PIC IRR; if it's a core IF-restore
+bug, fix in core.sv; if it's the IDE DMA-completion IRQ being gated under nIEN (ven_ide.sv:1048) so go32's
+wait never satisfies, deliver it. The novel placement mystery is SOLVED+validated; this is a separate,
+bounded interrupt-timing bug. My temp ventium_soc.sv edits (fwcfg DPI hook + 32-bit offset + detectors) are
+REVERTED; the reusable harness lives in tb_soc.cpp (fwcfg_dpi_byte, gated) + the extractor in scratchpad.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
