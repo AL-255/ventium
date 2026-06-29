@@ -2033,3 +2033,23 @@ mechanism (which size, computed where) needs either the go32/CWSDPMI source, a l
 trace (blocked: one-insn-per-tb perturbs layout), or the >16MB GDT to disassemble correctly. Goal 2
 (Quake render) + Goal 3 (WIN95, same DPMI path) remain blocked on this single size-mismatch root.
 NEXT: (1) re-test VEN_RAM_TOP_MB=64 cleanly; (2) find where the 0x406-page DPMI block is sized vs qemu.
+
+## 23bq. DECISIVE: VEN_RAM_TOP_MB=64 BIT-IDENTICAL -> the blocker is a CORE bug, SoC is correct
+
+Re-ran with VEN_RAM_TOP_MB=64 (bound RAM to 64MB exactly like qemu -m 64): result is BIT-IDENTICAL
+to unbounded -- 9478189 instructions, same final halt cs=0x34:0x3835. Zero effect. This is decisive:
+  * go32/CWSDPMI NEVER reads above 64MB (else a bounded read would diverge) -> the DPMI size is NOT
+    from phantom RAM; the memmodel +0x119/phantom-RAM hypothesis (23ap) is DISPROVEN for this halt.
+  * Combined with: e820 identical, CMOS extmem identical, conventional/MCB layout identical, go32
+    stub byte-identical to qemu -- EVERY memory/SoC input matches qemu, yet the RTL takes CWSDPMI's
+    panic branch where qemu renders.
+CONCLUSION: the Quake blocker is a CORE INSTRUCTION-EXECUTION divergence (the RTL's CPU computes a
+different result running the SAME go32/CWSDPMI code on the SAME memory), NOT a southbridge/memory/
+firmware issue. The SoC work (fwcfg, ACPI, PCI/e1000, VGA BARs, SMM, memory model, RTC) is COMPLETE
+and CORRECT for this path -- FreeDOS boots, go32 loads, the DOS image matches qemu byte-for-byte.
+The remaining defect is in core.sv: a protected-mode/V86 instruction the core mishandles in go32's
+DPMI init, yielding a bad value -> CWSDPMI panic (cs=0x34:0x595d -> 0x3275 -> CLI;HLT). This aligns
+with the active core PM/V86 work (commit 19736cc "V86 task switch segment load #DE fix"). Pinning the
+exact instruction needs a layout-matched per-instruction qemu diff (blocked: one-insn-per-tb perturbs
+the boot layout) or the >16MB GDT to disassemble cs=0x34's panic-branch condition. Goal 2/3 blocked
+on this core bug, NOT the southbridge.
