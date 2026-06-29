@@ -1463,6 +1463,34 @@ qemu's block is cleanly in the 227e region. NEXT: dump the RTL across 8.6/8.7/8.
 allocation SEQUENCE and pin the exact interleaving event (which alloc/free reorders) -- that event (likely
 a CWSDPMI DOS-alloc vs a go32 realloc, gated by an interrupt/timing) is the true seed.
 
+## 23au. ROOT (best theory): block base = a chain WALK read at a TRANSIENT state due to the fw_cfg TIMING shift
+
+Two new facts pin this:
+ 1. RTL MCB chain @8.9M now MATCHES qemu (269b=CWSDPMI 3281, 336d=QUAKE 4754). The @8.75M difference
+    (269b=QUAKE 3301, no CWSDPMI yet) was a TRANSIENT mid-carve state -- CWSDPMI carves 0x269b out of a
+    QUAKE-owned region between 8.75M and 8.9M.
+ 2. The block base is computed by a LOOP that WALKS a structure accumulating into eax (qemu cs=0x5eb,
+    eip 0x7a8e..0x7b25: eax 0x214d->0x2576->0x254d->...->0x2582 over iterations, ADDing variable amounts;
+    ecx=0x8ca edi=0xce5(=3301!) constant). edi=0xce5=3301 = the size of the QUAKE-owned 0x269b region at
+    the transient state -- the walk reads the chain.
+
+THEORY (most consistent with ALL evidence): go32 walks the DOS/CWSDPMI memory chain to find the block
+placement; the RTL reaches that walk ~0.2M insns EARLIER (relative to CWSDPMI's 0x269b carve) than qemu,
+because qemu does ~0.3M MORE boot work processing its 12 fw_cfg files while the RTL (open-bus fw_cfg) skips
+it. So the RTL's walk reads the chain MID-CARVE (0x269b still QUAKE-owned, +20 paras) -> a different
+accumulation -> block base +0x119 -> block lands in CWSDPMI's eventual region -> skipped un-reloc -> #UD.
+This RE-OPENS fw_cfg as the root, but for its TIMING effect (when the walk fires vs the carve), NOT its
+memory map (which IS identical, sec 23am). Consistent with: bit-identical robustness to fw_cfg-SCALARS,
+BDA, RAM-top (none change the file-dir PROCESSING work that drives the timing shift); the core being
+FAITHFUL (same instructions, but the chain STATE at the walk differs); the final chains being identical.
+
+PREDICTED FIX: make the RTL's SeaBIOS do the SAME fw_cfg file-dir processing as qemu (populate the 12-file
+FW_CFG_FILE_DIR so SeaBIOS walks+loads them), matching the boot timing so go32's walk fires after the carve
+like qemu. That is the ventium_soc.sv fwcfg_byte work (parallel session's F3) -- now motivated by TIMING.
+Alternative test: inject ~0.3M insns of equivalent boot work, or compare the RTL walk's chain-read live.
+CAVEAT: still a theory -- not yet proven by making them match; but it is the first explanation consistent
+with every observation, and it converts "unpinnable" into a concrete, testable hypothesis.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
