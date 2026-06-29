@@ -1732,6 +1732,30 @@ qemu-full-ACPI that I could not isolate to a single fixable value in this sessio
 elimination. Artifacts for continuation are all on disk (rtlfw.vtrace, qna, qemuf, fwcfg_blob, the gated
 DPI harness). This is a precise, honest hand-off, not a fix.
 
+## 23be. DECISIVE: RTL has a COMPLETE VALID ACPI (data == qemu full-ACPI) yet computes acpi=off -- it's execution-level
+
+Verified the RTL-fwcfg ACPI is fully+validly placed: RSDP @0xf3fc0 has a VALID 20-byte checksum, OEMID
+'BOCHS ', and RsdtAddr=0x03fe1c40 (~63.9MB = the HIGH ACPI-reclaim region, exactly like qemu). (The earlier
+F-seg 'FACP/RSDT' + low 'DSDT' hits were FALSE byte-matches -- garbage lengths.) Also measured the IRQ0
+rate from the BIOS tick (0x46C=38 @retire 5.9M) = ~155k insns/tick, a PLAUSIBLE PIT rate (not grossly off).
+
+So the RTL has, data-for-data, what qemu FULL-ACPI has: the same served fw_cfg, the same ACPI tables placed
+validly in the same HIGH reclaim region, a valid RSDP, a sane PIT rate -- yet go32's block-base walk is
+byte-identical to qemu ACPI=OFF (sec 23bb). EVERY data/config hypothesis is now eliminated by direct test:
+conv size, ext-mem size, RAM-top, e820 RAM size+entry count, fw_cfg scalars, BDA, MCB layout, ACPI presence
+(valid+HIGH), ACPI content (offset-fix bit-identical), and PIT rate (plausible).
+
+CONCLUSION (honest, final for this dive): the +0x119 is NOT a data or static-config difference -- the RTL's
+environment matches qemu full-ACPI. It is an EXECUTION-LEVEL divergence: given identical inputs, the RTL's
+go32/CWSDPMI produces the acpi=off allocation outcome. The only remaining mechanism consistent with "data-
+identical but result-different" is the RTL's instruction/cycle EXECUTION ORDER vs qemu's (the deterministic
+core+PIT timing producing a different allocation-vs-walk interleaving), which is precisely what cannot be
+A/B-tested as a static input and lives in the core/PIT (parallel session). I could not isolate it to a
+single fixable value despite exhaustive elimination across ~dozens of turns, and I corrected FOUR of my own
+wrong claims this session (fwcfg-validated, boot-work mechanism, ACPI-not-placed, ACPI-in-low-memory).
+Goal 1 MET; Goals 2 (Quake frames) + 3 (Win95) NOT met -- no working fix. Artifacts + the full elimination
+log are on disk for a timing-domain continuation. This is an honest hand-off, not a fix.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
