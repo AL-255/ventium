@@ -1835,6 +1835,33 @@ needs the VGA BARs in the SoC PCI config (devfn 0x10) + the SeaVGABIOS content (
 39424B, present in pc-bios) loaded so it runs + does the conventional pmm alloc like qemu. Testing
 whether the 256KB BIOS + e1000 alone (broken VGA) already corrects the block before doing the VGA.
 
+## 23bi. 256KB BIOS exercises SoC features the RTL lacks: option-ROM window, VGA BARs, SMM
+
+After switching to qemu's actual BIOS (bios-256k.bin), the RTL POST is byte-identical to qemu
+through the reloc + PCI, but hits a SERIES of SoC-fidelity gaps the minimal 128KB BIOS never did:
+
+1. **option-ROM window** (tb_soc loader): the 1MB-top map placed the BIOS low-128KB into
+   0xC0000-0xDFFFF (must be free for option ROMs). FIX (tb_soc.cpp, mine): clear that window
+   for >128KB BIOSes -> matches qemu (full image at 4G-top + top-128KB legacy at 0xE0000).
+2. **VGA BARs**: the SoC's std-VGA (00:02.0) returned no BARs; the 256KB SeaBIOS then read the
+   VGA exp-ROM BAR as 0 and ran garbage. FIX (ventium_soc.sv, gated): probeable VGA BARs
+   (BAR0 prefmem 16MB, BAR2 mem 4KB, exp-ROM 64KB) -> now map exactly like qemu
+   (fd000000/febf0000/febe0000).
+3. **SMM** (the real hang): traced the POST spin to cs=0x08:0xea6dd --
+   `out 0xb3,1; out 0xb2,0 (trigger SMI); .l: in 0xb3; test; jnz .l`. The 256KB BIOS
+   (CONFIG_USE_SMM=y) triggers an SMI and waits for the SMM handler to clear APMC status port
+   0xb3. The SoC has NO SMM -> 0xb3 reads open-bus 0xFF forever -> infinite spin. The 128KB
+   BIOS had CONFIG_USE_SMM=n, which is why only the 256KB hangs. STUB (ventium_soc.sv, gated):
+   port 0xb3 reads 0 so the SMI self-test passes (handler is a no-op; DOS/Quake never use SMM).
+
+KEY REFRAME: the RTL's SoC was designed for the MINIMAL 128KB BIOS (no SMM, no VGA HW, no ACPI
+generation). qemu uses the FULL 256KB BIOS (SMM + VGA + ACPI). The 128KB BIOS boots in the RTL
+but its memory layout gives go32 the +0x119 block (crash); the 256KB BIOS gives the go32-friendly
+layout but needs SMM/VGA the RTL doesn't model. The e1000 was a qemu-only determinant. Testing
+whether 256KB + e1000 + VGA BARs + SMM-stub now boots AND lands go32's block correctly. If yes,
+the remaining work is a real VGA framebuffer for actual frame rendering (mode-13h to 0xA0000).
+Whether the SMM no-op stub is safe (SMRAM never really set up) is still being verified by the run.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`

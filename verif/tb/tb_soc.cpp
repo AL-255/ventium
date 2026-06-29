@@ -313,6 +313,17 @@ int main(int argc, char** argv) {
             mem.load_image(args.image, hi_at);
             std::fprintf(stderr, "tb_soc: BIOS 4G-top alias at 0x%08x\n", hi_at);
         }
+        // 256KB BIOS (bios-256k.bin): the 1 MiB-top map above places the BIOS's LOW
+        // 128 KiB into the option-ROM window 0xC0000-0xDFFFF. On a real PC / qemu that
+        // window is FREE (the 256KB BIOS lives only at the 4G top + the top-128KB legacy
+        // at 0xE0000); SeaBIOS loads real option ROMs there (e.g. the VGA BIOS at 0xC0000).
+        // Leaving the BIOS low-half there made SeaBIOS's VGA option-rom scan run garbage
+        // and hang right after "Enabling 00:02.0 for primary VGA". Clear the window so it
+        // matches qemu; SeaBIOS re-populates it during POST (its reloc copy + option ROMs).
+        if (sz > 0x20000) {
+            for (uint32_t a = 0x000C0000u; a < 0x000E0000u; ++a) mem.write8(a, 0);
+            std::fprintf(stderr, "tb_soc: cleared option-ROM window 0xC0000-0xDFFFF (>128KB BIOS)\n");
+        }
     }
 
     // VGA option ROM at 0xC0000 (real PCs map the video BIOS there; SeaBIOS scans
@@ -510,6 +521,9 @@ int main(int argc, char** argv) {
                 // and branches on 0xFF; returning 0 diverged. Matches the PS app's
                 // service_in default. (Modeled ports below overwrite rd.)
                 uint8_t  rd   = 0xFF;
+                // isa-debugcon (0x402) readback is 0xE9 -> SeaBIOS detects it present and
+                // KEEPS its POST debug log enabled (else it goes silent after the banner).
+                if (port == 0x402) rd = 0xE9;
                 // SeaBIOS debug log: port 0xE9 (the "debugcon" hack) and 0x402
                 // (isa-debugcon) are byte-write character sinks. Echo them to stderr
                 // so the boot log is visible when chasing a POST hang.
