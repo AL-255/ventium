@@ -1903,3 +1903,21 @@ SMM not a stub. If smm=off -> correct block, it's the ACPI tables themselves and
   code-aligned qemu diff; (b) fix that core divergence; (c) extend ven_vga_fb to capture VESA so the
   rendered frames are visible. The bug is pinned to a single +0xe with a known oracle value (0x26d1);
   the fix path is concrete but a focused multi-step effort.
+
+## 23bk. BREAKTHROUGH: DOS MCB chain is IDENTICAL (RTL == qemu full-ACPI) -- +0x119 is INSIDE go32
+
+Dumped conventional memory (0-640KB) from the RTL (256KB BIOS, full ACPI, via tb_soc --dump-mem-at
+9400000) and from qemu full-ACPI (pmemsave), walked both MCB chains. They are BYTE-IDENTICAL:
+  0x0291 'SD'  0x05f6 'SC'  0x10de 'COMMAND'(0x1193)  0x227e 'QUAKE'(0x410)  0x269b 'CWSDPMI'(0xcd1)
+Every block -- owner PSP, size, name -- matches. So the DOS memory LAYOUT is identical; the RTL is
+NOT acpi=off in its DOS allocation. This INVALIDATES the entire ACPI/e820/seg-0x60-table line
+(the prior workflow's root) -- those were red herrings; the verifiers' determinant=False was right.
+
+Yet the traces still show go32's real-mode block executing at cs=0x26ac (RTL) vs cs=0x2593 (qemu)
+and the walk at cs=0x5f7 vs cs=0x5eb. With an IDENTICAL MCB chain, the only way go32 lands its
+block +0x119 higher is that go32/CWSDPMI's OWN block-placement computation reads an INPUT that
+differs -- the extended-memory size it probes, an INT 15h return, an I/O port, or a >1MB memory
+read -- NOT the conventional MCB chain. The +0x119 is now localized to go32's internal sizing,
+comparable cleanly in the QUAKE region (cs~0x227e) where go32 runs from its own image (no fw_cfg
+DMA confound). NEXT: align RTL vs qemu-full go32 by cs:eip in cs=0x227e.., find the first register
+divergence = the differing input. This is the tightest the +0x119 has ever been pinned.
