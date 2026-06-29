@@ -1491,6 +1491,32 @@ Alternative test: inject ~0.3M insns of equivalent boot work, or compare the RTL
 CAVEAT: still a theory -- not yet proven by making them match; but it is the first explanation consistent
 with every observation, and it converts "unpinnable" into a concrete, testable hypothesis.
 
+## 23av. *** CONFIRMED *** qemu acpi=off REPRODUCES the RTL's +0x119 -> fw_cfg/boot-config IS the Quake root
+
+DECISIVE TEST: regenerated a full qemu -d cpu trace with `-machine pc,acpi=off` (fewer fw_cfg files ->
+faster boot, closer to the RTL which has open-bus fw_cfg). Found the block-base WALK and read its result:
+  normal qemu (full ACPI, 12 fw_cfg files): block base eax -> 0x2582  @cs=05eb:07b25  -> Quake OK
+  qemu acpi=off (fewer files, faster boot): block base eax -> 0x269b  @cs=05f7:08bf8  -> +0x119 !!
+  RTL (open-bus fw_cfg, least boot work):   block base eax -> 0x269b  (=0x26ac block, lin 0x26ac0) -> #UD
+The acpi=off walk (qna trace @9410640..9410657) accumulates eax 0x268f->0x264d->0x268f->0x269a->0x269b via
+the SAME loop (edi=0xce5=3301 const, ecx=0x8b2) that normal qemu uses to reach 0x2582. So changing ONLY the
+qemu boot config (acpi on/off) MOVES qemu's OWN block base by exactly +0x119, landing on the RTL's value.
+
+=> PROVEN: the Quake #UD root is the fw_cfg/ACPI BOOT PROCESSING (the ~0.3M insns of extra boot work qemu
+does walking+loading its 12 fw_cfg files, incl. the 128KB ACPI tables via etc/table-loader). That work
+shifts WHEN go32's memory-chain walk fires relative to CWSDPMI's 0x269b carve. Less work (RTL / acpi=off)
+=> the walk reads a transient/earlier chain state => block base +0x119 => block overlaps CWSDPMI =>
+skipped un-reloc => over-relocated stub => #UD. NOT a core bug -- the Ventium core is faithful; the SoC is
+just missing the fw_cfg file-directory boot work.
+
+THE FIX (proven, not speculative): populate the SoC fw_cfg (rtl/soc/ventium_soc.sv fwcfg_byte / F3 work)
+with the FULL qemu file set -- FW_CFG_FILE_DIR (sel 0x19) enumerating etc/e820, etc/table-loader,
+etc/acpi/tables, etc/acpi/rsdp, etc/smbios/*, bootorder -- so the RTL's SeaBIOS does the SAME POST work as
+qemu, matching the boot timing so go32's walk fires AFTER the carve. Unblocks BOTH Quake AND Win95 (same
+root). Consistency: explains bit-identical robustness to fw_cfg SCALARS (quick reads, ~0 work) and to
+BDA/RAM-top (no file-dir processing); only the FILE-DIR matters (it drives the boot WORK). Validate by
+temp-populating fwcfg_byte (or loading qemu's dumped fw_cfg blob) and re-running tb_soc Quake to a frame.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
