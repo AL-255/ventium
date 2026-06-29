@@ -1680,6 +1680,32 @@ mem query) to find the exact reserved delta, then reproduce it in the SoC (RTC e
 entry). HONEST: still UNFIXED, but the mechanism is now correctly identified + verified (RTL==acpi=off),
 replacing both the MCB-chain red herring AND the boot-work mis-hypothesis.
 
+## 23bc. The ACPI IS placed in the RTL, yet it stays acpi=off-identical -- the root resists every hypothesis
+
+Dumped RTL-fwcfg RAM 0x0-0x100000 @5.9M: the served ACPI IS placed -- RSD PTR @0xf3fc0, FACP @0xf5f9b,
+RSDT @0xf5fb9, XSDT @0xf5f7b (the F-segment 0xf0000-0xfffff). So SeaBIOS DID process+place the served
+fwcfg ACPI. Despite that, the block-base walk is byte-identical to qemu acpi=off (sec 23bb). And the walk's
+intermediate values differ INSIDE QUAKE's data (acpi=off 0x264d vs full-ACPI 0x254d, +0x100), so go32 reads
+an ACPI-affected value from its OWN data, not a BIOS memory-size value.
+
+WHAT I'VE NOW RULED OUT for the +0x119 (by direct test or trace-match): conventional size, extended-mem
+size, RAM-top, e820 RAM size, fwcfg scalars, video BDA, the DOS MCB final layout, AND now "the ACPI isn't
+placed" (it IS). The block base is ROBUST to every memory SIZE yet DIFFERS between qemu full-ACPI and
+acpi=off and is IDENTICAL to acpi=off in the RTL. The remaining candidates are narrow + subtle: (a) the
+e820 RESERVED entries (type-3 ACPI-reclaim) IF CWSDPMI walks E820 (not E801) and counts reserved ranges;
+(b) CWSDPMI/go32 actually READING the ACPI tables' content (FADT/RSDP) and branching on it; (c) a value go32
+stores in its own QUAKE-region data computed from an ACPI-derived input. I have NOT isolated which, and the
+honest truth is the root has resisted ~dozens of turns of disciplined elimination.
+
+STATE: Goal 1 MET; Goals 2 (Quake frames) + 3 (Win95) NOT met. Major real result: the acpi=off
+reproduction + the verified RTL==acpi=off characterization + the decoded MCB-chain walk. NOT achieved: a
+working fix. I corrected three of my own wrong claims this session (fwcfg "validated", boot-work mechanism,
+"ACPI not placed"). Concrete next steps for whoever continues: (1) trace which INT15h memory call CWSDPMI
+makes (e820 vs e801 vs 88) in the RTL-fwcfg trace; (2) diff qemu full-ACPI vs acpi=off E820 buffers in RAM
+to find the exact reserved delta go32's walk is sensitive to; (3) if CWSDPMI reads the ACPI content, find
+the FADT field it branches on. The complete RTL-fwcfg trace (/home/yukidama/rtlfw.vtrace) + qna(acpi=off) +
+qemuf(full-ACPI) are all on disk for that diff.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
