@@ -1369,6 +1369,29 @@ different shape (not size) than qemu, or a per-page reserved/usable decision. NE
 region (0x269b0..0x336d0) RTL-vs-qemu to find the first differing page-table entry, and trace which INT15h
 response CWSDPMI built it from.
 
+## 23aq. video BDA tested (NOT the cause); block-exit is the PM-entry (recording artifact, not un-reloc)
+
+Two corrections from this cycle:
+ 1. Found the RTL soft-VGA leaves the VIDEO BDA + font/save vectors uninitialised (zeros) vs qemu's real
+    VGA BIOS (mode/cols/rows/charht/CRTC/flags set; INT 1Fh/43h font ptrs; SAVE_POINTER_TABLE@0x4A8). Added
+    a real-VGA-style BDA init to tb_soc.cpp svga_install (correct regardless). TESTED: Quake still halts at
+    EXACTLY retire=9643312 (BIT-IDENTICAL) -> go32/Quake does NOT read those BDA fields before the crash;
+    the video BDA is BENIGN for the Quake #UD (a red herring like fw_cfg). Kept the fix for soft-VGA
+    fidelity (may matter for Win95's GUI) but it does NOT fix Quake.
+ 2. Decoded the block bytes at cs=0x26ac:0x2af7..0x2b09: it is the real->protected mode ENTRY
+    (0f01 1e..=LIDT ; 0f20c0=MOV EAX,CR0 ; 0c01=OR AL,1 ; 0f22c0=MOV CR0,EAX ; ea 09 2b 18 00=JMP 0x18:0x2b09).
+    The earlier "RTL exits block at 0x2b01 vs qemu 0x2b04" is the testbench recording cs=0x18 ONE INSN early
+    across the CR0/JMP-FAR transition (linear addr is identical; both execute the JMP FAR and reach
+    cs=0x18:0x2b09). It is a SEG-RECORDING ARTIFACT, NOT a skipped un-relocation -- my earlier
+    "un-relocation skipped" framing (sec 23ag etc.) is WRONG for this point.
+
+STILL TRUE: the real divergence is the real-mode block's LOCATION (ds=0x2c70 RTL vs 0x2b57 qemu, +0x119
+paras), set by CWSDPMI's INTERNAL placement BEFORE this PM-entry code runs; the DOS MCB chain is identical;
+core is faithful at the op + corruptor. First differing value inside CWSDPMI's region is a 16-bit segment
+pointer (0x4601 RTL vs 0x228f qemu at offset 0xec4) but the two dumps are at different runtime points so it
+is confounded. ELIMINATED now: fw_cfg, BIOS, geometry, ext-mem, full DOS layout, video BDA. The root is a
+subtle value CWSDPMI computes during DPMI init -- still UNPINNED after extensive elimination.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`

@@ -347,6 +347,34 @@ int main(int argc, char** argv) {
     auto svga_install = [&](){
         for (size_t i=0;i<sizeof(svga_stub);i++) mem.write8(SVGA_STUB+(uint32_t)i, svga_stub[i]);
         svga_gw16(0x40, 0x0000); svga_gw16(0x42, 0xC000);   // IVT[0x10] -> C000:0
+        // A real VGA BIOS sets up the VIDEO BDA + font/save vectors at POST. The soft-VGA
+        // must too -- else go32/CWSDPMI/Quake read ZEROS where qemu (real VGA) has real
+        // values, shifting CWSDPMI's internal placement (the Quake #UD root, DEBUG_JUN27 23ap).
+        // POST text-mode (mode 3, 80x25) BDA fields:
+        mem.write8(0x449, 0x03);             // video mode = 3 (80x25 text)
+        svga_gw16(0x44A, 80);                // columns
+        svga_gw16(0x44C, 0x1000);            // page size (bytes)
+        svga_gw16(0x44E, 0x0000);            // page start offset
+        svga_gw16(0x460, 0x0607);            // cursor type (start 6, end 7)
+        mem.write8 (0x462, 0x00);            // active page
+        svga_gw16(0x463, 0x03D4);            // CRTC port base
+        mem.write8 (0x465, 0x29);            // CRT mode register shadow
+        mem.write8 (0x466, 0x30);            // CGA palette shadow
+        mem.write8 (0x484, 24);              // rows - 1 (25 rows)
+        svga_gw16(0x485, 16);                // char cell height
+        mem.write8 (0x487, 0x60);            // video control
+        mem.write8 (0x488, 0x09);            // feature/switches
+        mem.write8 (0x489, 0x51);            // video flags (VGA active, color)
+        mem.write8 (0x48A, 0x08);            // display combination code (VGA color)
+        // font bitmaps + save table live in the C000 stub region (zeroed glyphs are fine --
+        // go32/Quake need the POINTERS non-garbage, not the pixels):
+        const uint32_t F16=0xC1000u, F8=0xC1800u, SAVE=0xC2000u, VPT=0xC2100u;
+        for (uint32_t i=0;i<0x1300;i++) mem.write8(F16+i, 0);   // clear font+save+VPT span
+        svga_gw16(0x10C, 0x1000); svga_gw16(0x10E, 0xC000);     // INT 43h (active font) -> C000:1000
+        svga_gw16(0x7C , 0x1800); svga_gw16(0x7E , 0xC000);     // INT 1Fh (8x8 hi font) -> C000:1800
+        svga_gw16(0x4A8, 0x2000); svga_gw16(0x4AA, 0xC000);     // SAVE_POINTER_TABLE -> C000:2000
+        mem.write8(SAVE+0,0x00); mem.write8(SAVE+1,0x21);       // save[0] -> video param table
+        mem.write8(SAVE+2,0x00); mem.write8(SAVE+3,0xC0);       //          C000:2100
     };
     static char svga_cb[256]; static int svga_cn = 0;
     auto svga_emit = [&](char ch){                           // accumulate a console line -> stderr
