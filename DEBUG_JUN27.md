@@ -1811,6 +1811,30 @@ trace): RTL reloc size 44000 vs qemu 85472; RTL VGA returns no BARs ("No VGA fou
 SeaVGABIOS/VBE). The VGA framebuffer is the next piece for Quake to actually render (mode 13h
 to 0xA0000). 5+ wrong claims were corrected before this; this one is trace-reproduced + A/B'd.
 
+## 23bh. THE REAL CONFOUND: RTL used the 128KB BIOS, qemu the 256KB BIOS
+
+The e1000 fix made the RTL's PCI enumeration byte-identical to qemu but did NOT move the block
+(cs=0x26ac still 113515x, cs=0x2593=0 -- IDENTICAL to before). So the e1000 is a real qemu
+determinant but a RED HERRING for the RTL. Re-diffing the POST exposed the true root:
+**reloc size 44000 (RTL) vs 85472 (qemu)** with the SAME SeaBIOS version banner -> different
+BIOS BUILDS. qemu `-machine pc` defaults to **bios-256k.bin (256KB)**; the RTL loaded
+**bios.bin (128KB)**. The ENTIRE per-instruction + POST comparison was cross-BIOS.
+
+Switching the RTL to `--image bios-256k.bin` (tb_soc's loader sizes automatically: load_at =
+0x100000-sz = 0xC0000, hi_at = 4G-sz = 0xFFFC0000) makes the POST match qemu byte-for-byte:
+"Relocating init from 0x000d4120 to 0x02feb180 (size 85472)" IDENTICAL, Found 6 PCI devices,
+PCI: IO c000-c04f. **The ONLY remaining POST difference is the VGA**: qemu maps the VGA BARs
+(BAR0 prefmem 16MB @fd000000, BAR2 mmio 4KB, exp-ROM 64KB @febe0000) + runs SeaVGABIOS, which
+does a `pmm call` allocating CONVENTIONAL memory (512B) + a VGA stack -- the RTL's VGA returns
+no BARs -> "No VGA found" -> none of those allocations -> conventional layout still shifted.
+
+Two caveats for the 256KB switch: (1) tb_soc's loader maps the full 256KB at 0xC0000, OVERLAPPING
+the option-ROM area 0xC0000-0xDFFFF -- the legacy map should be only the TOP 128KB at 0xE0000,
+full 256KB at 0xFFFC0000; needs fixing for the VGA option ROM to live at 0xC0000. (2) The VGA fix
+needs the VGA BARs in the SoC PCI config (devfn 0x10) + the SeaVGABIOS content (vgabios-stdvga.bin,
+39424B, present in pc-bios) loaded so it runs + does the conventional pmm alloc like qemu. Testing
+whether the 256KB BIOS + e1000 alone (broken VGA) already corrects the block before doing the VGA.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
