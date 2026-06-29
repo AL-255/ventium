@@ -1392,6 +1392,30 @@ pointer (0x4601 RTL vs 0x228f qemu at offset 0xec4) but the two dumps are at dif
 is confounded. ELIMINATED now: fw_cfg, BIOS, geometry, ext-mem, full DOS layout, video BDA. The root is a
 subtle value CWSDPMI computes during DPMI init -- still UNPINNED after extensive elimination.
 
+## 23ar. RAM-top probe hypothesis DISPROVEN; block is in go32's SELF-RELOCATION (QUAKE image), not CWSDPMI
+
+Added a configurable RAM-top limit to memmodel.cpp (VEN_RAM_TOP_MB: reads above N MiB -> 0xFF, writes
+dropped, like qemu -m N; env-gated so tb_main's high-load ELF + the goldens are unaffected). Hypothesis:
+the sparse model backs phantom RAM, so CWSDPMI's physical-RAM probe over-sizes page tables. TESTED with
+VEN_RAM_TOP_MB=64: Quake halts BIT-IDENTICAL (retire=9643312, clocks=271906917, bus reads=161125112 all
+unchanged) -> NOTHING accesses above 64MiB -> CWSDPMI does NOT probe physical RAM beyond the BIOS report.
+Hypothesis DISPROVEN. (Kept the limit; it's a correct model improvement + may matter for Win95, but it is
+INERT for Quake.)
+
+RE-EXAMINED the block location with the MCB map: qemu's real-mode block cs=0x2593 (lin 0x25930) is INSIDE
+the QUAKE exe image (MCB 'QUAKE' @0x227e..0x268f); the RTL's cs=0x26ac (lin 0x26ac0) is +0x119 paras higher,
+spilling just past QUAKE into CWSDPMI's region. So the block is part of go32's allocation WITHIN the Quake
+executable image (same load seg 0x227e, same size), and go32 places its real-mode stub at offset +0x315
+(qemu) vs +0x42e (RTL) into that image -- a go32 SELF-RELOCATION divergence of +0x119, NOT a CWSDPMI page-
+table-size issue.
+
+CRASH IS DETERMINISTIC + ROBUST: retire=9643312 is BIT-IDENTICAL across fw_cfg-scalars, video-BDA, and
+RAM-top changes. So the divergent input go32 reads is none of: fw_cfg, video BDA, BIOS mem size, geometry,
+ext-mem size/probe, DOS layout. Candidates left: a TIMER/RTC-seeded value, an interrupt-timing-derived
+value, or a specific device/port read during go32 init that the SoC answers differently than qemu. NEXT:
+gdbstub-aligned same-point dump, or trace go32's stub-relocation arithmetic (the +0x315 vs +0x42e offset)
+in the register trace back to its first divergent source.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
