@@ -8,6 +8,7 @@
 #include "memmodel.h"
 
 #include <cstdio>
+#include <cstdlib>
 
 namespace ventium {
 
@@ -34,6 +35,25 @@ static inline uint32_t fold(uint32_t a) { return a & CARVEOUT_MASK; }
 static inline uint32_t fold(uint32_t a) { return a; }
 #endif
 
+// VEN_RAM_TOP_MB: bound the backed RAM to N MiB, exactly like qemu `-m N`. Above the
+// top (but below the 0xFFFE_0000 4G-top BIOS alias) reads return 0xFF (open bus) and
+// writes are dropped -- so a guest's write-then-read RAM PROBE (CWSDPMI / Win95 IO.SYS
+// finding the top of physical memory) FAILS there instead of finding phantom RAM in the
+// sparse model. Phantom RAM over-sizes the DPMI host's page tables, shifting its
+// real-mode block up (+0x119 paras) -> over-relocated go32 stub -> #UD (DEBUG_JUN27 23ap).
+// Unset (0) = unlimited (tb_main's high-load ELF tests at 0x0804_8000 etc. unchanged).
+static inline uint32_t ram_top_bytes() {
+    static uint32_t t = []() -> uint32_t {
+        const char* e = std::getenv("VEN_RAM_TOP_MB");
+        return e ? (uint32_t)(std::strtoul(e, nullptr, 10) * 0x100000u) : 0u;
+    }();
+    return t;
+}
+static inline bool above_ram(uint32_t a) {
+    uint32_t t = ram_top_bytes();
+    return t && a >= t && a < 0xFFFE0000u;     // hole between RAM top and the BIOS 4G alias
+}
+
 MemModel::Page& MemModel::page_for(uint32_t addr) {
     uint32_t pidx = addr >> PAGE_SHIFT;
     Page& pg = pages_[pidx];                  // default-constructs (zeroed) if absent
@@ -54,17 +74,20 @@ const MemModel::Page* MemModel::page_lookup(uint32_t addr) const {
 
 uint8_t MemModel::read8(uint32_t addr) const {
     addr = fold(addr);
+    if (above_ram(addr)) return 0xFFu;        // above configured RAM -> open bus (like qemu)
     const Page* p = page_lookup(addr);
     return p ? p->b[addr & PAGE_MASK] : 0u;   // unmapped reads as 0 (M0)
 }
 
 void MemModel::write8(uint32_t addr, uint8_t val) {
     addr = fold(addr);
+    if (above_ram(addr)) return;              // above configured RAM -> dropped (no phantom RAM)
     page_for(addr).b[addr & PAGE_MASK] = val;
 }
 
 uint32_t MemModel::read32(uint32_t addr) const {
     addr = fold(addr);
+    if (above_ram(addr)) return 0xFFFFFFFFu;   // above configured RAM -> open bus (like qemu)
     uint32_t off = addr & PAGE_MASK;
     if (off <= PAGE_SIZE - 4) {                 // 4 bytes in one page: a SINGLE lookup
         const Page* p = page_lookup(addr);
