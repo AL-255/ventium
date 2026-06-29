@@ -1987,3 +1987,25 @@ trace WITHOUT one-insn-per-tb (preserves QUAKE@0x227e layout) and find the TB wh
 jump diverges; (b) extract the go32/CWSDPMI image+GDT from the disk or an extended-mem dump to
 disassemble the jump and identify the exact instruction; (c) audit the core's indirect-JMP and
 PM/V86 segment handling at that instruction vs qemu.
+
+## 23bo. PRECISE: panic is a go32/CWSDPMI BRANCH after a bad result (eax=0x406), not a wrong jump
+
+Traced the exact entry into the halt (rtl_idle.vtrace, n=9477457..9478188):
+  cs=0x26ac:0x5954 -> 0x5956 -> 0x5959 -> 0x595b  (a short callback, eax=0x406 throughout)
+  -> cs=0x34:0x595d  (sp 0x6f90->0x6f94, a far-return/iret INTO CWSDPMI ring-0)
+  -> cs=0x34:0x3275  (a BRANCH -- CWSDPMI checked the result and jumped to its panic handler)
+  -> cs=0x34:0x3820..0x3835 loop -> CLI;HLT (permanent).
+So the halt is NOT garbage-execution of a table (earlier guess); it's a DELIBERATE panic BRANCH:
+CWSDPMI got a bad result (eax=0x406 carried across the return) and jumped to its panic. qemu, with
+the SAME go32 stub at the SAME address (cs=0x26ac, byte-identical in the fresh-qemu dump), does NOT
+take this branch -- it renders. So the +0x119/stub-position is NOT the cause (confirmed: stub
+matches qemu); the cause is an EXECUTION divergence earlier that yields the bad result/eax=0x406.
+
+This is a go32/CWSDPMI/DOS operation that SUCCEEDS in qemu but FAILS in the RTL (-> eax=0x406 ->
+panic). Candidates: a DPMI/DOS service the RTL's core mishandles in PM/V86 (cf. recent V86 #DE fix),
+or a peripheral op (IDE/timer) returning differently mid-DPMI-init. UNRESOLVED root because: the
+diverging op is earlier than the captured panic window, the segment bases need the GDT (in >16MB
+extended memory, not yet dumped), and per-instruction qemu tracing perturbs the boot layout so it
+can't be diffed against the RTL at matching layout. NEXT: dump >16MB to get the GDT+disassemble the
+cs=0x26ac callback and the cs=0x34 check; trace back to the operation that first sets the eax=0x406
+error path; that operation (DPMI/DOS service or peripheral) vs qemu is the true Goal-2 root.
