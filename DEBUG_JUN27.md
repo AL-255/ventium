@@ -1940,3 +1940,26 @@ likely an XMS/HMA/A20 reservation that differs. NOTE/caveat: a fresh qemu DUMP s
 (matching the RTL), while the qemuf TRACE had QUAKE@0x2166 -- a config/timing discrepancy in the
 baseline to resolve; the +0x119 vs qemuf is real but the "correct" baseline config needs pinning.
 NEXT: find the 6 KB -- trace HIMEM init (n<7M) XMS free-mem computation, or instrument the XMS query.
+
+## 23bm. REFRAME: +0x119 was largely a BASELINE ARTIFACT; the real bug is a PROTECTED-MODE HALT
+
+Evidence forcing the reframe:
+1. Memory-dump MCB walk: RTL conventional image == fresh qemu dump (BOTH QUAKE@0x227e, CWSDPMI@0x269b,
+   identical SD/SC/COMMAND). So the RTL's DOS memory layout MATCHES a normally-run qemu.
+2. The qemuf *trace* baseline (the +0x119 reference, block cs=0x2593, QUAKE@0x2166) was generated with
+   `-accel tcg,one-insn-per-tb=on`. That trace mode perturbs boot TIMING and thus the memory LAYOUT --
+   it loads QUAKE 0x119 paragraphs LOWER than a normal run. So the RTL-vs-qemuf "+0x119" was comparing
+   the RTL against an INCONSISTENT (trace-mode) baseline, NOT the rendering config. The workflow
+   independently flagged this (qemu QUAKE 0x119 lower than RTL).
+3. The RTL halt is at cs=0x34:eip~0x3820 with ds/es=0x2c70/0x4300; disassembling that as real-mode
+   (phys 0x3B60) yields a DATA table (57 01 58 01 59 01...), proving cs=0x34 is a PROTECTED-MODE
+   selector. The RTL permanently halts inside go32's PM code, where a normal qemu run renders.
+
+So: the DOS-memory/+0x119 line (and the 6 KB extended-mem delta, which only shifts the layout the
+trace-mode baseline also shifts) is NOT the blocker for rendering. The blocker is a PM-mode
+execution divergence -> permanent halt (core idle, IF unclear, 60M+ clocks no retire). This is
+plausibly a CORE protected-mode/V86 issue (cf. the recent "V86 task switch segment load" #DE fix)
+rather than a memory-layout problem. CAVEAT: not yet 100% confirmed the rendering qemu's layout ==
+RTL's -- needs a non-trace-mode qemu render verified against the RTL's QUAKE position. NEXT: identify
+the PM instruction at the halt (need the go32 GDT/selector base or a memory-access trace) and check
+the RTL core's handling of it vs qemu; this is the true Goal-2 blocker, not the +0x119.
