@@ -2117,3 +2117,25 @@ NEXT (concrete): add segment bases (hidden descriptor cache) + a linear retire-P
 (dpi_retire/tb_soc are mine), re-run, and re-do the membership/align by LINEAR address -- then the
 cs=0x34 panic path is provably absent from qemu and the first RTL-only linear PC = the divergence.
 Tooling kept: /tmp/{member,npdiff2,bootdiff}.py, both *_compact.bin, 28GB qic.log.
+
+## 23bu. PINPOINTED: divergent register is ESI, loaded from go32 variable [0x426]
+
+With cs added (q_cs.bin/r_cs.bin) the membership test cleanly isolates the panic lead-up. Comparing
+the RTL's panic-path states (cs=0x26ac:0x3258..0x595b) against ALL qemu states at the same
+instruction (cs=0x26ac:0x3258, 16079 qemu occurrences):
+  qemu ESI at this point: 18 distinct, all SMALL = {0xe,0x40,0x41,0x42,0x43,0x44,...}
+  RTL  ESI = 0x3864  -- NEVER occurs in qemu (the ONLY register outside qemu's observed set;
+             ecx=0x1000, edx=0x4300, edi=0x34, esp=0x6f92 ALL match qemu's sets).
+The disasm at 0x325c is `mov si,[0x426]` (next: `mov word [0x426],0x3956`), so ESI is loaded from the
+go32 data variable [0x426]. The RTL's [0x426]=0x3864 (a code-offset-like value ~ the 0x3956 written
+nearby) whereas qemu's [0x426] holds small values. So the RTL carries a WRONG value in go32 variable
+[0x426], which propagates (shifted/used downstream) into the bad DPMI descriptor -> CWSDPMI panic.
+
+So the Quake blocker is now pinned to ONE diverging quantity: go32's [0x426] = 0x3864 (RTL) vs small
+(qemu). This is consistent with the whole chain (the "memory-size/descriptor" value, the panic
+branch). The remaining question is WHERE [0x426] is written differently -- a memory write the
+register-only trace can't show. NEXT: add a memory WATCHPOINT in tb_soc (mine) on the linear address
+of [0x426] (need ds at that point; ds is real-mode-style for cs=0x26ac), re-run, capture the cs:eip
+of the instruction that writes 0x3864 to [0x426], and compare that instruction's inputs to qemu --
+that is the exact core divergence. Validated context: 95% of RTL go32 states are bit-identical to a
+rendering qemu, so this is a single localized defect, not pervasive.
