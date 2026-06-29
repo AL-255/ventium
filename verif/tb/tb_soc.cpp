@@ -65,6 +65,62 @@ ven_periph_t* ven_acpipm_new(void);
 ven_periph_t* ven_i8272_new(void);
 ven_periph_t* ven_vgaregs_new(void);
 
+// ---- F3 fw_cfg VALIDATION harness (DEBUG_JUN27 §23av) -----------------------
+// Serves qemu's EXACT fw_cfg blob (extracted via the boot-sector dumper, the raw
+// serial stream [count BE32][count*64 dir entries][file0..fileN]) so the RTL's
+// SeaBIOS does the SAME fw_cfg/ACPI POST work as qemu — matching the boot timing
+// that decides where go32 places its real-mode block (the PROVEN Quake #UD root:
+// qemu acpi=off reproduces the RTL's +0x119). GATED by env VEN_FWCFG_BLOB=<path>:
+// unset -> serves only signature+ID+scalars (== the RTL's prior fwcfg_byte
+// behavior, inert for goldens). ventium_soc.sv fwcfg_byte() calls this by DPI.
+extern "C" int fwcfg_dpi_byte(int sel, int off) {
+    static int loaded = 0, have = 0, dirlen = 0;
+    static std::vector<uint8_t> blob;            // raw serial dump
+    static int fbase[0x30], fsize[0x30];         // sel 0x20.. -> (offset,size) in blob
+    if (!loaded) {
+        loaded = 1;
+        for (int i = 0; i < 0x30; ++i) { fbase[i] = 0; fsize[i] = 0; }
+        const char* p = std::getenv("VEN_FWCFG_BLOB");
+        if (p) {
+            FILE* f = std::fopen(p, "rb");
+            if (f) {
+                std::fseek(f, 0, SEEK_END); long n = std::ftell(f); std::fseek(f, 0, SEEK_SET);
+                if (n >= 4) {
+                    blob.resize((size_t)n);
+                    if (std::fread(blob.data(), 1, (size_t)n, f) == (size_t)n) {
+                        uint32_t cnt = ((uint32_t)blob[0]<<24)|((uint32_t)blob[1]<<16)
+                                     | ((uint32_t)blob[2]<<8)|(uint32_t)blob[3];
+                        dirlen = 4 + (int)cnt * 64; int q = dirlen;
+                        for (uint32_t k = 0; k < cnt; ++k) {
+                            int e = 4 + (int)k * 64;
+                            uint32_t sz = ((uint32_t)blob[e]<<24)|((uint32_t)blob[e+1]<<16)
+                                        | ((uint32_t)blob[e+2]<<8)|(uint32_t)blob[e+3];
+                            uint16_t fs = ((uint16_t)blob[e+4]<<8)|(uint16_t)blob[e+5];
+                            if (fs < 0x30) { fbase[fs] = q; fsize[fs] = (int)sz; }
+                            q += (int)sz;
+                        }
+                        have = 1;
+                        std::fprintf(stderr, "[fwcfg] qemu blob served: %ld B, %u files, dirlen=%d\n",
+                                     n, cnt, dirlen);
+                    }
+                }
+                std::fclose(f);
+            }
+        }
+        if (!have) std::fprintf(stderr, "[fwcfg] VEN_FWCFG_BLOB unset/bad -> sig+ID+scalars only\n");
+    }
+    if (sel == 0x0000) { static const char q[4] = {'Q','E','M','U'};
+                         return (off >= 0 && off < 4) ? (unsigned char)q[off] : 0; }
+    if (sel == 0x0001) return (off == 0) ? 0x03 : 0;              // FW_CFG_ID (trad+DMA)
+    if (sel == 0x0005 || sel == 0x000f) return (off == 0) ? 1 : 0; // nb_cpus / max_cpus = 1
+    if (sel == 0x8002) return (off == 0) ? 1 : 0;                 // irq0_override = 1 (i32 LE)
+    if (!have) return 0;                                          // no blob -> prior behavior
+    if (sel == 0x0019) return (off >= 0 && off < dirlen) ? blob[off] : 0;     // FW_CFG_FILE_DIR
+    if (sel >= 0x20 && sel < 0x30)
+        return (off >= 0 && off < fsize[sel]) ? blob[fbase[sel] + off] : 0;   // file content
+    return 0;
+}
+
 namespace {
 
 // (dev, lo, hi) -> the C model servicing that forwarded I/O port range.

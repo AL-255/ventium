@@ -1517,6 +1517,36 @@ root). Consistency: explains bit-identical robustness to fw_cfg SCALARS (quick r
 BDA/RAM-top (no file-dir processing); only the FILE-DIR matters (it drives the boot WORK). Validate by
 temp-populating fwcfg_byte (or loading qemu's dumped fw_cfg blob) and re-running tb_soc Quake to a frame.
 
+## 23aw. VALIDATED on the RTL SoC: serving qemu's fw_cfg blob makes the MCB chain qemu-identical (+0x119 GONE)
+
+Built the end-to-end fix harness and ran it on the real ventium_soc:
+ - EXTRACTED qemu's exact fw_cfg: wrote a 512-byte boot-sector dumper (scratchpad/fwcfg_dump.asm) that
+   reads FW_CFG_FILE_DIR (sel 0x19) + every file via 0x510/0x511 and streams to serial. qemu -serial
+   captured 145557 B = [dir 772][12 files]. Parsed to /tmp/fwcfg_blob.bin. Files: etc/acpi/tables(131072),
+   etc/table-loader(4096), genroms/kvmvapic.bin(9216), etc/e820(20), etc/acpi/rsdp(20), smbios x2,
+   system-states, boot-fail-wait, bootorder, bios-geometry, tpm/log. (manifest via qemu -trace fw_cfg_add_file)
+ - SERVED it: added fwcfg_dpi_byte() to verif/tb/tb_soc.cpp (env VEN_FWCFG_BLOB-gated, inert otherwise) and
+   wired ventium_soc.sv fwcfg_byte() to it under +define+VEN_FWCFG_DPI (separate obj_dir_soc_fwcfg; the
+   parallel session's obj_dir_soc stays byte-identical). DPI serves sig+ID+scalars+dir(0x19)+files(0x20..0x2b).
+ - RESULT: FreeDOS boots through the FULL SeaBIOS fw_cfg/ACPI path (boot sector at retire=5.7M vs 2M = the
+   ~3.7M of boot work restored; kernel+FreeCom+63MB disk all OK). And the DECISIVE check -- the DOS MCB chain
+   at go32 init is now BYTE-IDENTICAL TO QEMU: QUAKE@0x227e, 0x268f free, CWSDPMI@0x269b(3281,'CWSDPMI'),
+   0x336d=QUAKE(4754). This is qemu's layout, NOT the RTL's old +0x119 transient (269b QUAKE-owned 3301).
+   => CONFIRMED on the RTL: the fw_cfg boot work fixes the allocation-timing root; go32's walk now fires
+   AFTER CWSDPMI's carve, so the +0x119 is GONE. The proven root (sec 23av) is validated end-to-end.
+
+REMAINING (separate, mundane): the first run stalled at 9.411M with the CORE PARKED ON THE BUS (req=1
+unacked) in CWSDPMI/go32 PM code (cs=0x34) -- a stuck DMA holding core_mem_ack low, NOT a #UD. Found the
+cause: the fwcfg path used a 16-BIT offset (fwcfg_byte's `off`=[15:0], DMA passed fwdma_xoff[15:0]), which
+WRAPS for the 131072-byte etc/acpi/tables -> the 2nd 64KB served the 1st 64KB's bytes -> corrupt ACPI ->
+downstream stall. FIXED: widened fwcfg_byte `off` to [31:0] and the DMA caller to full fwdma_xoff (the mem
+ADDRESS fwdma_tgt+fwdma_xoff was already full-width; only the data offset truncated). Re-validating.
+
+THE PERMANENT FIX (for the F3 fwcfg work in ventium_soc.sv): (1) widen the fwcfg offset to 32-bit so files
+>64KB serve correctly (the 128KB ACPI needs it), (2) populate fwcfg_byte to return qemu's blob (FILE_DIR +
+the 12 files) -- a $readmemh ROM of /tmp/fwcfg_blob.bin indexed by (sel,off), or equivalent. This unblocks
+BOTH Quake (timedemo) and Win95 (same memory-placement root), validated by the qemu-identical MCB chain.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
