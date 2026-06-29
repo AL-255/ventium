@@ -1547,6 +1547,34 @@ THE PERMANENT FIX (for the F3 fwcfg work in ventium_soc.sv): (1) widen the fwcfg
 the 12 files) -- a $readmemh ROM of /tmp/fwcfg_blob.bin indexed by (sel,off), or equivalent. This unblocks
 BOTH Quake (timedemo) and Win95 (same memory-placement root), validated by the qemu-identical MCB chain.
 
+## 23ax. Re-validation: the remaining stall is a SEPARATE IDE-DMA bus-park, NOT the placement root
+
+Rebuilt with the 32-bit fwcfg offset (correct 128KB ACPI) and re-ran: STOP IS BIT-IDENTICAL -- retired
+9411450, cs=0x34:0x3835, core parked (req=1 unacked), same as before. So the ACPI-offset fix did NOT move
+the stall => the stall is NOT caused by the ACPI data; it's a stuck DMA.
+DIAGNOSIS (from ven_ide.sv): the peek shows the muxed bus mem_req=0 while a DMA holds core_mem_ack low.
+fwcfg_dma asserts mem_req=1 in every non-IDLE state, so mem_req=0 => it's the IDE DMA: ide_dma_busy=1 with
+ide_dma_mem_req=0 => dma_state==DMA_IDLE AND dma_launch stuck=1 (dma_busy = (state!=IDLE)||dma_launch).
+dma_launch (ven_ide.sv:319) = bm_wdata[0] && !r_bmic[0] && dma_pending && (state==IDLE) -- it keys off LIVE
+bm_wdata[0]. HYPOTHESIS: with a DMA pending (READ-DMA commanded, not yet launched) and the core issuing a
+NON-BMIC access whose data has bit0=1, dma_launch spuriously asserts -> dma_busy=1 -> core parks; but the
+FSM only advances to DMA_PRD0 on `cs_bm && we` (a real BMIC write, line 1018), which never comes while the
+core is parked on a non-BMIC access -> permanent deadlock. The original (open-bus fwcfg) #UD'd at the go32
+init BEFORE hitting this load path, so it never exposed the bug; with the placement root FIXED, go32 gets
+further and the IDE-DMA launch handshake deadlocks. This is the parallel session's M8.4f DMA / bus domain,
+NOT the memory-placement root I proved+fixed.
+
+STATE OF THE THREE GOALS, precise:
+ 1. FreeDOS pure-RTL boot: MET (and still boots through the full fw_cfg/ACPI path).
+ 2. Quake timedemo: NOT rendered. Root (memory placement) FIXED+validated (qemu-identical MCB chain), but
+    blocked downstream by (a) this IDE-DMA launch deadlock, then (b) Quake's per-frame FSIN/FP needs the
+    in-RTL transcendental engine (+VEN_TRANSCENDENTAL, proven in the l1axi crossover builds) in the SoC.
+ 3. Win95 desktop: not retried with the fix yet; shares the placement root (now fixed) + the same IDE path.
+FOLLOW-ON (clear, scoped): fix the IDE dma_launch to use a REGISTERED start (don't gate dma_busy on live
+bm_wdata) so a non-BMIC access can't spuriously arm it; re-run Quake; add +VEN_TRANSCENDENTAL to the SoC
+build for the render; then retry Win95. The hard/novel part -- proving and fixing the placement root -- is
+DONE and validated; the remainder is bounded SoC-integration debugging.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
