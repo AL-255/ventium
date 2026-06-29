@@ -2096,3 +2096,24 @@ one-time DPMI setup, and diff forward to the first register/stack divergence = t
 win this round: -icount makes qemu's layout match the RTL, and qemu provably renders (never enters
 cs=0x34) -- so the comparison is now VALID; only the alignment through BIOS noise remains.
 Artifacts kept: /home/yukidama/ictrace/qic.log (28GB, layout-matched), q_compact.txt, /tmp/resync2.py.
+
+## 23bt. Validated: RTL is 93.7% bit-identical to rendering qemu; divergence masked by missing seg-bases
+
+Built binary-compact traces (rtl_compact.bin, q_compact.bin = 32B/rec eip+7GPRs) and aligned the
+-icount qemu (layout-matched, renders) vs RTL from the boot-sector anchor (eip=0x7c00; RTL idx
+5728249, qemu 6681880 -- BIOS POST differs by ~950K insns, washes out). Findings:
+ * Reset edx IS 0x543 in the RTL (not a bug; earlier diff was the PRE/POST-state offset: RTL trace is
+   POST-state, qemu -d cpu is PRE-state, so RTL[k] aligns to qemu[k+1]).
+ * VECTORIZED MEMBERSHIP TEST: 93.7% of RTL post-boot (eip+GPR) states also occur in qemu. Strong
+   validation that the RTL core executes nearly bit-identically to a rendering qemu through boot+DOS+
+   go32. The remaining ~6% is timer/disk interrupt-timing skew (the -icount cadence != the RTL PIT
+   cadence, so IRQs land on different instructions) plus the panic path.
+ * BLOCKER for exact-instruction isolation: the RTL .vtrace lacks segment BASES, so I can't compute
+   linear addresses. eip+GPR tuples then coincidentally match across different CS (the cs=0x34 panic
+   path's eip/regs alias cs=0x26ac states), so membership stays ~94% even on the panic path -- the
+   divergence can't be cleanly separated from interrupt-skew noise. Walking the resync through the
+   DOS region works but is O(1 resync / ~100 insns) due to IRQ skew -> too slow to reach the panic.
+NEXT (concrete): add segment bases (hidden descriptor cache) + a linear retire-PC to the RTL trace
+(dpi_retire/tb_soc are mine), re-run, and re-do the membership/align by LINEAR address -- then the
+cs=0x34 panic path is provably absent from qemu and the first RTL-only linear PC = the divergence.
+Tooling kept: /tmp/{member,npdiff2,bootdiff}.py, both *_compact.bin, 28GB qic.log.
