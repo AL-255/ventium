@@ -1921,3 +1921,22 @@ read -- NOT the conventional MCB chain. The +0x119 is now localized to go32's in
 comparable cleanly in the QUAKE region (cs~0x227e) where go32 runs from its own image (no fw_cfg
 DMA confound). NEXT: align RTL vs qemu-full go32 by cs:eip in cs=0x227e.., find the first register
 divergence = the differing input. This is the tightest the +0x119 has ever been pinned.
+
+## 23bl. ROOT (workflow go32-input-diff): RTL sees ~6 KB MORE extended/XMS memory -> +0x119
+
+Two independent trace-diff methods (RTL rtl_idle.vtrace vs qemu qemuf) converged: the FreeDOS
+HIMEM/disk-cache resident (MCB 'SC', seg 0x5f6 RTL / 0x5ea qemu, hooks INT 15h) carries the free
+memory size in esi = 0x0d30 (RTL, 3376 KB) vs 0x0d2a (qemu, 3370 KB) -- RTL sees ~6 KB MORE.
+Because the resident sizes a conventional buffer PROPORTIONAL to (X)MS memory, ~6 KB extra ->
+its footprint is ~0x119 paragraphs (4496 B ~= one 4KB page) larger -> it sits +0xc para higher
+(seg 0x5f6 vs 0x5ea) -> QUAKE PSP 0x227f(RTL) vs 0x2166(qemu) -> go32 transfer block 0x26ac vs
+0x2593 = +0x119. The shifts are page-granular and OPPOSITE-SIGN (extender -0x11d, stub +0xc,
+ds/ss -2) = a size-dependent RELAYOUT, NOT a uniform image offset -- rules out a load-address bug,
+confirms a memory-size-proportional allocation. INT 15h E801/E820/88 are NOT used (only timer-IRQ
+noise); the value comes via XMS (INT 2Fh AX=4310 + far CALL into HIMEM), invisible to BIOS-excursion
+scans, so the literal source of the 6 KB was not single-stepped. e820 + CMOS extmem (0x34/35=0x300)
++ conventional top all match qemu -- so the 6 KB is a DRIVER-LEVEL (HIMEM/cache) free-memory delta,
+likely an XMS/HMA/A20 reservation that differs. NOTE/caveat: a fresh qemu DUMP showed QUAKE@0x227e
+(matching the RTL), while the qemuf TRACE had QUAKE@0x2166 -- a config/timing discrepancy in the
+baseline to resolve; the +0x119 vs qemuf is real but the "correct" baseline config needs pinning.
+NEXT: find the 6 KB -- trace HIMEM init (n<7M) XMS free-mem computation, or instrument the XMS query.
