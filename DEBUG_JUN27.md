@@ -1653,6 +1653,33 @@ reverted; the committed harness (tb_soc.cpp fwcfg_dpi_byte) stays inert. The com
 (/home/yukidama/rtlfw.vtrace) + qemuf remain for a cleaner +0x119 walk comparison, but the selectors still
 differ (0x26ac vs 0x2593) so alignment is as hard as before. I should not have claimed validation.
 
+## 23bb. VERIFIED root mechanism: RTL == qemu acpi=off; the ACPI's MEMORY effect (not boot work) shifts the walk
+
+Read the actual block-base walk in the complete RTL-fwcfg trace (cs=0x5f7, eip 0x8b60..0x8bf8) and it is
+BYTE-IDENTICAL to qemu acpi=off (qna): same eip stream, same eax accumulation 0x227e->0x268e->0x268f->
+0x264d->...->0x269b, same edi=0xce5 ecx=0x8b2. So the RTL-with-fwcfg behaves EXACTLY like qemu ACPI=OFF
+(not full-ACPI), confirming the served fwcfg did NOT change the RTL's relevant environment.
+
+The walk DECODED: eax = MCB_seg + MCB_size = next MCB (0x227e QUAKE + 0x410 size = 0x268e ...), i.e. it
+WALKS THE DOS MCB CHAIN to the last block. In acpi=off/RTL the chain-at-walk-time includes CWSDPMI so the
+walk lands on 0x269b -> block 0x26ac (+0x119). In qemu FULL-ACPI the walk lands on 0x2582 (CWSDPMI not yet
+in the chain at walk time) -> block 0x2593.
+
+KEY CORRECTION OF MY OWN HYPOTHESIS: the fw_cfg "boot work" theory (sec 23av) is WRONG in mechanism. Boot
+work shifts the ENTIRE timeline (the walk AND CWSDPMI's MCB creation) equally, so it CANNOT change their
+RELATIVE order -> it cannot move the walk result. That is why serving the RTL the full fwcfg/ACPI left it
+acpi=off-identical. The ACPI's true effect is a MEMORY/ALLOCATION one: the ACPI tables occupy RAM (a
+reserved region near the top of usable memory), which changes WHERE/WHEN CWSDPMI carves its DOS block
+relative to go32's chain walk -> in full-ACPI CWSDPMI's MCB isn't in the chain yet when go32 walks it.
+
+=> THE FIX DIRECTION (corrected): make the RTL's usable-memory map match qemu FULL-ACPI -- i.e. reserve the
+ACPI region so CWSDPMI's DOS allocation lands such that its MCB is NOT in the chain at go32's walk (giving
+0x2582, block 0x2593, correct relocation). This is a MEMORY-MAP (e820/INT15h/usable-RAM) fix, NOT a boot-
+timing fix. NEXT: diff qemu full-ACPI vs acpi=off usable-memory (the E820 reserved entries / the CWSDPMI
+mem query) to find the exact reserved delta, then reproduce it in the SoC (RTC ext-mem / an e820 reserved
+entry). HONEST: still UNFIXED, but the mechanism is now correctly identified + verified (RTL==acpi=off),
+replacing both the MCB-chain red herring AND the boot-work mis-hypothesis.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
