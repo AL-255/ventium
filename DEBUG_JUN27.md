@@ -1782,6 +1782,35 @@ vs qemu to see which POST message first differs; and/or compare the fw_cfg DMA-w
 (the served blob landing) RTL vs qemu right after POST. The fix lives in the fw_cfg serving fidelity (F3,
 parallel session) + the SoC DMA timing, not in go32. Five of my own wrong claims corrected this session.
 
+## 23bg. ROOT CAUSE FOUND + FIX: the +0x119 is the MISSING e1000 PCI device
+
+Method that cracked it: forwarded SeaBIOS's debug port 0x402 (isa-debugcon) to io_ps (gated
+VEN_FWCFG_DPI) + made tb_soc return 0xE9 on the 0x402 probe so SeaBIOS keeps its POST log on.
+qemu's log needs `-device isa-debugcon,iobase=0x402` (NOT `-debugcon`, which defaults to 0xE9).
+This gives a MESSAGE-LEVEL RTL-vs-qemu POST diff -- immune to the byte-by-byte fw_cfg-DMA
+instruction-stream confound that defeated every per-instruction trace diff.
+
+Diff (RTL vs qemu-full): RTL enumerates **5 PCI devices vs qemu's 6 -- missing e1000 00:03.0
+(id=8086:100e)**; e820 MATCHES. DECISIVE control: qemu FULL-ACPI but `-nic none` (5 devices)
+**REPRODUCES the exact +0x119** -- block cs=0x26ac (24271x), correct cs=0x2593 (0x), walk
+eax->0x269b @cs=0x5f7:0x8bf8 (vs qemu-full eax->0x2582 @cs=0x5eb). So go32's real-mode block
+placement is FRAGILE on the PCI device set: 6 devices -> correct block; 5 (RTL/-nic none) ->
++0x119 -> over-relocated stub -> CALL 0x5954 -> #UD/halt. NOT execution-level, NOT ACPI, NOT
+the e820 -- a missing SoC PCI device that shifts SeaBIOS's POST layout.
+
+FIX (rtl/soc/ventium_soc.sv, gated VEN_FWCFG_DPI for the proof; parallel session lands it
+ungated): add the 6th PCI function 00:03.0 = e1000 with PROBEABLE BARs -- BAR0 mem 128KB
+(reg 0x10), BAR1 I/O 64B (reg 0x14), exp-ROM 256KB (reg 0x30); each a R/W reg that masks the
+write to the BAR's size alignment so SeaBIOS's 0xFFFFFFFF size-probe reads back the right mask.
+RESULT (verified POST debugcon): RTL now "Found 6 PCI devices", "PCI: IO: c000-c04f", e1000
+BAR1@c000 + **IDE BAR4 shifts to c040** + e1000 mem BARs @febc0000/feb80000 -- BYTE-IDENTICAL
+to qemu-full's allocation. Block-walk correction + Quake-proceeds-past-crash test running.
+
+Caveats (separate SoC PCI-model incompletenesses, NOT the +0x119 determinant per the -nic none
+trace): RTL reloc size 44000 vs qemu 85472; RTL VGA returns no BARs ("No VGA found" -> no
+SeaVGABIOS/VBE). The VGA framebuffer is the next piece for Quake to actually render (mode 13h
+to 0xA0000). 5+ wrong claims were corrected before this; this one is trace-reproduced + A/B'd.
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
