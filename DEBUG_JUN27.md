@@ -2139,3 +2139,22 @@ of [0x426] (need ds at that point; ds is real-mode-style for cs=0x26ac), re-run,
 of the instruction that writes 0x3864 to [0x426], and compare that instruction's inputs to qemu --
 that is the exact core divergence. Validated context: 95% of RTL go32 states are bit-identical to a
 rendering qemu, so this is a single localized defect, not pervasive.
+
+## 23bv. ROOT NARROWED: go32 var [ds:0x426] is STUCK at 0x3864 in RTL vs varied/incrementing in qemu
+
+Verified ds matches (RTL ds=ss=0x2c70 cr0=0x10 real-mode; qemu ds=0x2c70 base 0x2c700 at the same
+cs=0x26ac:0x325c) -> SAME memory (linear 0x2cb26). Then:
+  RTL [0x426] (esi loaded at 0x325c, sampled at eip=0x3260): exactly ONE value, 0x3864 (constant).
+  qemu [0x426] at the same instruction: 18 distinct SMALL values {0xe,0x40,0x41,0x42,0x43,0x44,...}
+                                        that INCREMENT -- i.e. qemu updates [0x426]; the RTL does not.
+The routine (0x325c mov si,[0x426]; 0x3260 mov word [0x426],0x3956) is a save/restore of [0x426]
+across a nested call. So [0x426] is a go32 "current value/counter" that qemu maintains (small,
+incrementing) but the RTL leaves frozen at 0x3864 -> the saved/restored value is wrong -> propagates
+to the bad DPMI descriptor -> CWSDPMI panic. ds/es/ss/eip all match qemu; ONLY this memory cell (and
+hence esi) diverges. This is the localized core defect's fingerprint: a WRITE to [0x426] that qemu
+performs but the RTL drops or misdirects (a store the core mishandles, or a code path the RTL skips).
+NEXT (definitive): instrument tb_soc/memmodel (mine) with a WATCHPOINT on linear 0x2cb26 -- log every
+write (value + the retiring cs:eip) in the RTL run; the writers (and the missing increment) localize
+the exact instruction/path. Then map that to core.sv. Note: neither register-trace shows writes, so
+the watchpoint is required to go further. Validated: 95% of RTL go32 states bit-identical to a
+RENDERING qemu, so this is one localized cell, not pervasive.
