@@ -1214,6 +1214,33 @@ rtl/core is FAITHFUL (regs match qemu at the op AND the corruptor). Goal-2/3 fix
 population, NOT a core change. (NOTE: ventium_soc.sv is the parallel session's file; this is the precise
 hand-off, not a change I should land into their SoC code.)
 
+## 23ak. WIN95 PROBE corroborates: core faithful, failure is memory PLACEMENT (not execution)
+
+Booted Windows 95 (the win95.qcow2, truncated 2GB->128MB, all data <=104MB, valid MBR) on the pure-RTL
+tb_soc. Disk-prep notes: VEN_IDE_DISK_SECTORS=262080, and the disk's BPB geometry is 128 heads/63 spt
+(qemu's LBA-assist for 2GB) -> must build VEN_IDE_HEADS=128 VEN_IDE_SECS=63 VEN_IDE_CYLS=32, else SeaBIOS
+rejects the partition's head-32 start-CHS and the MBR prints "Error loading operating system". mtools
+confirms the truncated image is INTACT (root dir: WIN95/, COMMAND.COM, WINDOWS/, even QUAKE/; FAT clean).
+
+RESULTS (retire trace via VEN_CMPTRACE, dpi_retire.cpp IS linked into tb_soc):
+ - Win95's MBR + boot sector + IO.SYS real-mode loader run CLEANLY on the SoC -- 5.93M insns of BIOS POST,
+   then the boot sector at lin 0x7c00, then IO.SYS at cs=0x0070. NO core crash through real-mode boot.
+ - IO.SYS reads its sectors via INT13h AH=02 to LOW memory (es:bx = 0x0700,0x0900,0x0b00,0x0d00 ...),
+   does a 62-byte REP MOVSB (f000:7c00 -> 8000:000a), then FAR-JUMPS to cs=0x8000:0x0280 (lin 0x80280).
+ - But 0x80000 is all ZEROS -> the CPU runs a multi-thousand-insn "ADD [bx+si],al" sled (ZF set, regs
+   frozen eax=0x8000 ebx=0xff53) until it quiesces (HLT/idle). i.e. IO.SYS jumps to where its kernel was
+   supposed to be, but the kernel was loaded LOW (0x700..) and never placed at 0x8000 -> jump to garbage.
+
+CONCLUSION (corroborates the Quake root): in BOTH Win95 and Quake the RTL CORE EXECUTES FAITHFULLY through
+the OS loader, and the failure is a MEMORY-PLACEMENT / address-computation divergence -- code that should
+land at (or be relocated to) a high address ends up wrong:
+   Quake  -> go32 stub relocated/over-relocated (corrupt CALL target) -> #UD at 9.643M.
+   Win95  -> IO.SYS kernel placed low but jumped-to high (0x8000) -> garbage sled -> idle.
+Both are downstream of a boot-environment/memory-map divergence (the fw_cfg seed, sec 23aj), NOT a core
+defect. Win95 is the independent second witness that rtl/core is correct and the fix lives in the SoC
+memory/firmware-config layer. (The 0x8000=512KB target is suggestive of a top-of-conventional-memory /
+RAM-map value the loader computes from -- consistent with the fw_cfg/e820 seed.)
+
 ## 24. Bottom line (current, supersedes earlier)
 - **Goal 1 — FreeDOS boot: DONE + validated** (verify 98/98 + verify-sys 949/949). Core fixes
   committed: `3925df5` (PM LSS/LFS/LGS), `6a6fa62` (S_LOAD2 paging cur_lin / null-SS #GP), `af05d38`
