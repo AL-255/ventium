@@ -1,0 +1,170 @@
+// ps_shim.cpp — glue between the real MiSTer HPS software (x86.cpp/ide.cpp) and
+// the verilated ao486 SoC. Implements the FPGA-access primitives the MiSTer code
+// bottoms out on (SPI/mgmt + shmem), file I/O over stdio, and no-op stubs for the
+// CD-ROM / VHD / CHD / minimig / shared-folder branches not on the raw-image path.
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+#include "Vsystem.h"
+#include "spi.h"
+#include "fpga_io.h"
+#include "shmem.h"
+#include "user_io.h"
+#include "file_io.h"
+#include "hardware.h"
+#include "cfg.h"
+#include "support/vhd/vhdcfg.h"
+#include "support/chd/mister_chd.h"
+
+// --- provided by sim_main.cpp ---
+extern Vsystem  *top;
+extern uint64_t *ddr;          // 256MB host DDR backing store
+extern void      ps_clock_tick();   // advance the verilated RTL one clock
+
+// ===========================================================================
+// shmem: the HPS view of FPGA DDR -> our ddr[] array (offset = addr-SHMEM_ADDR)
+// ===========================================================================
+void *shmem_map(uint32_t address, uint32_t size)  { (void)size; return (uint8_t*)ddr + (address - SHMEM_ADDR); }
+int   shmem_unmap(void *map, uint32_t size)        { (void)map; (void)size; return 1; }
+int   shmem_put(uint32_t a, uint32_t s, void *buf) { memcpy((uint8_t*)ddr + (a - SHMEM_ADDR), buf, s); return 1; }
+int   shmem_get(uint32_t a, uint32_t s, void *buf) { memcpy(buf, (uint8_t*)ddr + (a - SHMEM_ADDR), s); return 1; }
+
+// ===========================================================================
+// mgmt-bus driver: replays the UIO_DMA SPI protocol onto top->mgmt_*.
+// Registers (low nibble != 0xF) auto-increment per word; the data buffer
+// (low nibble == 0xF) keeps a fixed address (FPGA's internal counter advances).
+// ===========================================================================
+static int      txn_dir = 0;   // 0=write, 1=read
+static int      txn_pos = 0;   // 0=expect cmd, 1=expect addr, 2=expect addr-hi/data
+static uint32_t txn_addr = 0;
+
+// constructed by sim_main from the raw request outputs (set each poll)
+extern "C" uint16_t ps_sd_req();
+
+static inline void addr_step() { if ((txn_addr & 0xF) != 0xF) txn_addr++; }   // regs increment, buffer fixed
+
+static uint16_t mgmt_wr(uint16_t d) {
+    top->mgmt_address = txn_addr & 0xFFFF; top->mgmt_writedata = d; top->mgmt_write = 1;
+    ps_clock_tick();
+    top->mgmt_write = 0; addr_step(); return 0;
+}
+static uint16_t mgmt_rd() {
+    top->mgmt_address = txn_addr & 0xFFFF; top->mgmt_read = 1;
+    ps_clock_tick();
+    uint16_t d = top->mgmt_readdata; top->mgmt_read = 0; addr_step(); return d;
+}
+
+void EnableIO()  { txn_pos = 0; }
+void DisableIO() { top->mgmt_write = 0; top->mgmt_read = 0; }
+
+uint8_t spi_b(uint8_t parm) {
+    if (txn_pos == 0) { txn_dir = (parm == UIO_DMA_READ) ? 1 : 0; txn_pos = 1; }
+    return 0;
+}
+uint16_t spi_w(uint16_t word) {
+    if (txn_pos == 0) {                        // ide_check(): UIO_DMA_SDIO status query
+        if (word == UIO_DMA_SDIO) { txn_pos = 9; return ps_sd_req(); }
+        txn_dir = (word == UIO_DMA_READ) ? 1 : 0; txn_pos = 1; return 0;
+    }
+    if (txn_pos == 9) return 0;                // SDIO second read
+    if (txn_pos < 2) txn_pos = 2;
+    return txn_dir ? mgmt_rd() : mgmt_wr(word);
+}
+void     spi32_b(uint32_t parm) { if (txn_pos == 1) { txn_addr = parm; txn_pos = 2; } }
+uint32_t spi32_w(uint32_t parm) {
+    if (txn_pos == 1) { txn_addr = parm; txn_pos = 2; return 0; }
+    return txn_dir ? mgmt_rd() : mgmt_wr((uint16_t)parm);
+}
+uint16_t fpga_spi_fast(uint16_t word) {
+    if (txn_pos == 0) { txn_dir = (word == UIO_DMA_READ) ? 1 : 0; txn_pos = 1; return 0; }
+    if (txn_pos == 1) { txn_addr = word; txn_pos = 2; return 0; }           // addr low 16
+    if (txn_pos == 2) { txn_addr |= (uint32_t)word << 16; txn_pos = 3; return 0; } // addr high 16
+    return txn_dir ? mgmt_rd() : mgmt_wr(word);
+}
+void fpga_spi_fast_block_write(const uint16_t *buf, uint32_t length)  { while (length--) mgmt_wr(*buf++); }
+void fpga_spi_fast_block_read(uint16_t *buf, uint32_t length)         { while (length--) *buf++ = mgmt_rd(); }
+void fpga_spi_fast_block_write_8(const uint8_t *buf, uint32_t length) { while (length--) mgmt_wr(*buf++); }
+void fpga_spi_fast_block_read_8(uint8_t *buf, uint32_t length)        { while (length--) *buf++ = (uint8_t)mgmt_rd(); }
+void fpga_spi_fast_block_write_be(const uint16_t *buf, uint32_t length){ while (length--) { uint16_t w=*buf++; mgmt_wr((w>>8)|(w<<8)); } }
+void fpga_spi_fast_block_read_be(uint16_t *buf, uint32_t length)      { while (length--) { uint16_t w=mgmt_rd(); *buf++=(w>>8)|(w<<8); } }
+
+// ===========================================================================
+// file I/O over stdio
+// ===========================================================================
+fileTYPE::fileTYPE()  { filp=0; mode=0; type=0; zip=0; size=0; offset=0; path[0]=0; name[0]=0; }
+fileTYPE::~fileTYPE() { if (filp) fclose(filp); }
+int fileTYPE::opened() { return filp != 0; }
+
+const char *getFullPath(const char *name) { return name; }   // images passed as direct paths
+
+int FileOpenEx(fileTYPE *f, const char *name, int mode, char mute, int use_zip) {
+    (void)mute; (void)use_zip;
+    const char *m = (mode & O_RDWR) ? "r+b" : "rb";
+    f->filp = fopen(name, m);
+    if (!f->filp) { if (!mute) fprintf(stderr, "FileOpenEx: cannot open %s\n", name); f->size = 0; return 0; }
+    f->mode = mode;
+    struct stat st; if (!fstat(fileno(f->filp), &st)) f->size = st.st_size;
+    snprintf(f->path, sizeof(f->path), "%s", name);
+    snprintf(f->name, sizeof(f->name), "%s", name);
+    f->offset = 0;
+    return 1;
+}
+int FileOpen(fileTYPE *f, const char *name, char mute) { return FileOpenEx(f, name, O_RDONLY, mute, 1); }
+void FileClose(fileTYPE *f) { if (f->filp) { fclose(f->filp); f->filp = 0; } }
+int FileSeek(fileTYPE *f, __off64_t offset, int origin) { return f->filp ? (fseeko(f->filp, offset, origin) == 0) : 0; }
+int FileSeekLBA(fileTYPE *f, uint32_t lba) { return f->filp ? (fseeko(f->filp, (off_t)lba * 512, SEEK_SET) == 0) : 0; }
+int FileReadAdv(fileTYPE *f, void *buf, int length, int failres) { (void)failres; return f->filp ? (int)fread(buf, 1, length, f->filp) : 0; }
+int FileReadSec(fileTYPE *f, void *buf) { return f->filp ? (fread(buf, 512, 1, f->filp) == 1) : 0; }
+int FileWriteAdv(fileTYPE *f, void *buf, int length, int failres) { (void)failres; return f->filp ? (int)fwrite(buf, 1, length, f->filp) : 0; }
+int FileWriteSec(fileTYPE *f, void *buf) { return f->filp ? (fwrite(buf, 512, 1, f->filp) == 1) : 0; }
+int FileCanWrite(const char *name) { return access(name, W_OK) == 0; }
+int FileSaveConfig(const char *name, void *buf, int size) { (void)name; (void)buf; (void)size; return 1; }
+int FileLoadConfig(const char *name, void *buf, int size) { (void)name; (void)buf; (void)size; return 0; }
+
+// ===========================================================================
+// user_io / framework stubs (x86 core, no Amiga/PCXT/OSD)
+// ===========================================================================
+uint32_t user_io_status_get(const char *opt, int ex) { (void)ex; if(opt && opt[1]=='1' && opt[2]=='1') return 1; return 0; }  // [11] memcfg=1 -> 16MB
+void     user_io_status_set(const char *opt, uint32_t value, int ex) { (void)opt; (void)value; (void)ex; }
+char    *user_io_get_core_name(int orig) { (void)orig; static char s[] = "ao486"; return s; }
+char    *user_io_get_core_path(const char *suffix) { (void)suffix; static char s[] = "."; return s; }
+char     is_x86()     { return 1; }
+char     is_pcxt()    { return 0; }
+char     is_minimig() { return 0; }
+
+// the BIOS ROM filenames x86_init loads via user_io_make_filepath(home, "bootN.rom")
+char *user_io_make_filepath(const char *path, const char *filename) {
+    (void)path; static char s[1024];
+    snprintf(s, sizeof(s), "../3rd-party/ao486_MiSTer/releases/%s", filename);
+    return s;
+}
+
+cfg_t   cfg = {};
+#include "support/minimig/minimig_config.h"
+mm_configTYPE minimig_config = {};
+uint8_t rstval = 0;
+void hexdump(void *data, uint16_t size, uint16_t offset) { (void)data; (void)size; (void)offset; }
+
+// ===========================================================================
+// stubs for branches the raw-HDD/-floppy boot path never enters
+// ===========================================================================
+struct ide_config;
+int  cdrom_handle_cmd(ide_config*) { return 1; }
+void cdrom_handle_pkt(ide_config*) {}
+void cdrom_read(ide_config*) {}
+void cdrom_reply(ide_config*, uint8_t, uint8_t, uint8_t, bool) {}
+void cdrom_mode_select(ide_config*) {}
+void ide_cdda_send_sector() {}
+const char* cdrom_parse(uint32_t, const char*) { return 0; }
+vhd_error parse_vhd_config(drive_t*) { return VHD_NOERROR; }
+int mister_load_chd(const char*, fileTYPE*) { return 1; }
+int mister_chd_read_sector(chd_file*, uint32_t, uint32_t, uint32_t, void*, int*, uint8_t*) { return 1; }
+
+// x86_share (shared-folder feature) — not needed to boot
+void x86_share_reset() {}
+void x86_share_poll() {}
