@@ -347,6 +347,25 @@ module iderd(input clk, input rdone, input [15:0] raddr, input [31:0] rdata);
 endmodule
 bind system iderd iderd_i(.clk(clk_sys), .rdone(cpu_io_read_done), .raddr(cpu_io_read_address[15:0]), .rdata(cpu_io_read_data));
 
+
+// RTC io probe: index writes (0x70) + data reads (0x71)
+module rtcio(input clk, input iow, input rdone, input [15:0] wa, input [15:0] ra, input [31:0] wd, input [31:0] rd);
+    import "DPI-C" function void ao486_rtcio(int kind, int val);
+    always @(posedge clk) begin
+        if (iow && wa==16'h0070) ao486_rtcio(0, wd);      // index write
+        if (rdone && ra==16'h0071) ao486_rtcio(1, rd);    // data read
+    end
+endmodule
+bind system rtcio rtcio_i(.clk(clk_sys), .iow(iobus_write), .rdone(cpu_io_read_done), .wa(iobus_address[15:0]), .ra(cpu_io_read_address[15:0]), .wd(iobus_writedata), .rd(cpu_io_read_data));
+
+
+// CPU memory-bus (avm/L2) stall probe
+module memp(input clk, input rd, input wr, input wait_, input rdv, input [31:0] addr);
+    import "DPI-C" function void ao486_mem(int rd,int wr,int wait_,int rdv,int addr);
+    always @(posedge clk) ao486_mem({31'd0,rd},{31'd0,wr},{31'd0,wait_},{31'd0,rdv},addr);
+endmodule
+bind system memp memp_i(.clk(clk_sys), .rd(mem_read), .wr(mem_write), .wait_(mem_waitrequest), .rdv(mem_readdatavalid), .addr(mem_address));
+
 bind system idewr idewr_i(.clk(clk_sys), .iow(iobus_write), .ioa(iobus_address[15:0]), .iod(iobus_writedata));
 
 bind vga vgaretrace vgaretrace_i(.clk(clk_sys), .vretrace(host_io_vertical_retrace), .outvsync(vga_vert_sync));
