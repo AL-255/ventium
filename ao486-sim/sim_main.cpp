@@ -293,6 +293,10 @@ static void load_state(const char *fn) {
 static uint32_t g_clock_rate = 4000000;   // timer base (low => timed delays complete fast)
 static int g_l1dis = 0, g_l2dis = 0;       // cache disables (debug)
 static void tie_static_inputs() {
+    // pit.v's divider degenerates if clk_rate(=11*clock_rate) <= INCREMENT(26.25M),
+    // i.e. clock_rate <= 2.386MHz: ce fires every cycle, sum overflows, timer runs
+    // wild. Clamp so a too-low --rate can't silently break the PIT/timer/interrupts.
+    if (g_clock_rate < 2500000) { fprintf(stderr, "[warn] clock_rate %u too low for PIT; clamping to 4MHz\n", g_clock_rate); g_clock_rate = 4000000; }
     top->clock_rate = g_clock_rate; top->clock_rate_vga = 90000000;
     top->l1_disable = g_l1dis; top->l2_disable = g_l2dis; top->bootcfg = 0; top->uma_ram = 0;
     top->joystick_dis = 3;
