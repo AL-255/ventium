@@ -112,6 +112,10 @@ static int g_ideion=0;
 extern "C" void ao486_ideio(int rw,int addr,int data){ if(g_ideion<4000){ if(rw==2) fprintf(stderr,"[IDEIO] sw_reset=%d\n",data); else fprintf(stderr,"[IDEIO] WR ioaddr=%d data=0x%02x\n",addr,data&0xff); g_ideion++; } }
 static int g_reg5n=0;
 extern "C" void ide_reg5_log(uint32_t addr, int before, int after){ if(g_reg5n<800){fprintf(stderr,"[REG5] write F005 ide0_request %d->%d\n",before,after);g_reg5n++;} }
+static int g_irdn=0;
+extern "C" void ao486_ideread(int addr,int data){ if(g_irdn<3000){ const char* n=(addr==0x1F7)?" [STATUS]":(addr==0x3F6)?" [ALTSTATUS]":""; fprintf(stderr,"[IDERD] port 0x%04x -> 0x%02x%s\n",addr,data&0xff,n); g_irdn++; } }
+static int g_iwrn=0;
+extern "C" void ao486_idewrite(int addr,int data){ if(g_iwrn<2000){ const char* n=(addr==0x3F6)?" <-- DEVCTRL/SRST":""; fprintf(stderr,"[IDEWR] port 0x%04x = 0x%02x%s\n",addr,data&0xff,n); g_iwrn++; } }
 uint64_t g_vret_hi=0, g_ovs_hi=0, g_vret_edges=0; static int g_pvr=0;
 extern "C" void ao486_vretrace(int vr, int ovs){ if(vr)g_vret_hi++; if(ovs)g_ovs_hi++; if(vr&&!g_pvr)g_vret_edges++; g_pvr=vr; }
 extern "C" void ao486_iobus(int rdo,int rdone,int wdo,int wdone,int brd,int bwr,int bwait,int baddr){

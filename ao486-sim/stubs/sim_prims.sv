@@ -331,6 +331,24 @@ module rtcp(input clk, input [2:0] divi, input [3:0] prate, input pena, input ue
 endmodule
 bind rtc rtcp rtcp_i(.clk(clk), .divi(divider), .prate(periodic_rate), .pena(crb_int_periodic_ena), .uena(crb_int_update_ena), .aena(crb_int_alarm_ena), .pint(periodic_interrupt), .uint_(update_interrupt), .irqv(irq));
 
+
+// CPU shutdown (triple-fault) probe
+
+
+// IDE-region io-write probe (bind system works)
+module idewr(input clk, input iow, input [15:0] ioa, input [31:0] iod);
+    import "DPI-C" function void ao486_idewrite(int addr, int data);
+    always @(posedge clk) if (iow && ((ioa>=16'h01F0 && ioa<=16'h01F7) || ioa==16'h03F6)) ao486_idewrite({16'd0,ioa},iod);
+endmodule
+
+module iderd(input clk, input rdone, input [15:0] raddr, input [31:0] rdata);
+    import "DPI-C" function void ao486_ideread(int addr, int data);
+    always @(posedge clk) if (rdone && ((raddr>=16'h01F0 && raddr<=16'h01F7) || raddr==16'h03F6)) ao486_ideread({16'd0,raddr}, rdata);
+endmodule
+bind system iderd iderd_i(.clk(clk_sys), .rdone(cpu_io_read_done), .raddr(cpu_io_read_address[15:0]), .rdata(cpu_io_read_data));
+
+bind system idewr idewr_i(.clk(clk_sys), .iow(iobus_write), .ioa(iobus_address[15:0]), .iod(iobus_writedata));
+
 bind vga vgaretrace vgaretrace_i(.clk(clk_sys), .vretrace(host_io_vertical_retrace), .outvsync(vga_vert_sync));
 
 bind system iobuswatch iobuswatch_i(
