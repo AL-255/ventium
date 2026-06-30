@@ -27,6 +27,8 @@ static bool     wburst = false;
 static uint32_t waddr  = 0;
 static int      wrem   = 0;
 static int      g_ddr_lat = 2;         // DDR read latency (cycles); tunable via --ddrlat
+static uint64_t g_mem_top_words = 0;   // open-bus above this word addr (0=unlimited); set by --mem
+static uint64_t g_max_waddr = 0;
 static FILE    *floppy_img = nullptr;  // M3 floppy disk-serving
 static bool     floppy_en  = false;
 static uint8_t  fdsector[512];
@@ -188,13 +190,19 @@ static void ddr_service() {
     if (top->DDRAM_WE) {
         if (!wburst) { waddr = top->DDRAM_ADDR; wrem = top->DDRAM_BURSTCNT ? top->DDRAM_BURSTCNT : 1; wburst = true; }
         uint32_t a = waddr & (DDR_WORDS - 1);
+        if ((uint64_t)a * 8 > g_max_waddr) g_max_waddr = (uint64_t)a * 8;
+        if (g_mem_top_words && a >= g_mem_top_words) { waddr++; if (--wrem <= 0) wburst = false; }
+        else {
         uint64_t din = top->DDRAM_DIN; uint8_t be = top->DDRAM_BE, mask8 = 0; uint64_t mask = 0;
         for (int b = 0; b < 8; b++) if (be & (1 << b)) mask |= (0xffull << (b * 8));
         (void)mask8; ddr[a] = (ddr[a] & ~mask) | (din & mask);
         waddr++; if (--wrem <= 0) wburst = false;
+        }
     }
     if (!rd_fifo.empty() && main_time >= rd_fifo.front().ready) {
-        top->DDRAM_DOUT = ddr[rd_fifo.front().addr]; top->DDRAM_DOUT_READY = 1; rd_fifo.pop_front();
+        uint32_t ra = rd_fifo.front().addr;
+        top->DDRAM_DOUT = (g_mem_top_words && ra >= g_mem_top_words) ? (~((uint64_t)ra * 0x0100000001000001ull)) : ddr[ra];
+        top->DDRAM_DOUT_READY = 1; rd_fifo.pop_front();
     } else {
         top->DDRAM_DOUT_READY = 0;
     }
@@ -514,7 +522,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--save-at") && i + 1 < argc) g_save_at = strtoull(argv[++i], nullptr, 0);
         else if (!strcmp(argv[i], "--state") && i + 1 < argc) g_statefile = argv[++i];
         else if (!strcmp(argv[i], "--load")) g_load = true;
-        else if (!strcmp(argv[i], "--mem") && i + 1 < argc) g_mem_mb = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--mem") && i + 1 < argc) { g_mem_mb = atoi(argv[++i]); g_mem_top_words = (uint64_t)g_mem_mb * 0x20000ull; }
         else if (!strcmp(argv[i], "--vcd") && i + 1 < argc) { vcd_end = strtoull(argv[++i], 0, 0);
 #if VM_TRACE
             Verilated::traceEverOn(true); tfp = new VerilatedVcdC;
@@ -597,6 +605,7 @@ int main(int argc, char **argv) {
                 dump_ring();
             }
             prev_retire = retire_count;
+            fprintf(stderr, "          max_DDR_write=0x%llx  last_IO_read=port0x%04x\n", (unsigned long long)g_max_waddr, g_last_ioread & 0xffff);
             eip_min = 0xffffffff; eip_max = 0;
         }
     }
