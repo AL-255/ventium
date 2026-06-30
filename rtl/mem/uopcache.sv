@@ -115,11 +115,52 @@ module uopcache
   // so the spine
   // re-walks (a perf event, never a wrong opcode). Behavior-neutral in 2-state sim.
   logic                  rd_collA_q,  rd_collB_q;
+`ifdef VEN_UOPCACHE_RDW_X
+  // SIM-ONLY DECISIVE-CONFIRMATION MODEL (default OFF): emulate the real RAMB36
+  // read-during-write collision the 2-state functional array model IDEALIZES away.
+  // On silicon, a registered read that launches off {set,way} in the SAME cycle the
+  // W_WRITE walker writes that exact {set,way} returns GARBAGE (not the clean OLD
+  // value the array gives). We inject 'x into the slot/bmap registered read on that
+  // collision so a sim that CONSUMES the slot read (cycle_mode=1 fast path) would
+  // observe the corruption — and a sim that does NOT consume it (func mode) stays
+  // bit-identical. If the board fetch #DE reproduces ONLY with this define -> the
+  // uopcache RDW collision is the root cause; if it does NOT reproduce -> ruled out.
+  function automatic logic [NSLOT*FPDW-1:0] rdw_x_slots(input logic coll,
+                                                         input logic [NSLOT*FPDW-1:0] clean);
+    rdw_x_slots = coll ? {NSLOT*FPDW{1'bx}} : clean;
+  endfunction
+  function automatic logic [IC_LINE*4-1:0] rdw_x_bmap(input logic coll,
+                                                       input logic [IC_LINE*4-1:0] clean);
+    rdw_x_bmap = coll ? {IC_LINE*4{1'bx}} : clean;
+  endfunction
+  logic collA_pre, collB_pre;
+  always_comb begin
+    collA_pre = (wst == W_WRITE) && ({rd_setA, rd_wayA} == {wset, wway});
+    collB_pre = (wst == W_WRITE) && ({rd_setB, rd_wayB} == {wset, wway});
+  end
+`ifdef VEN_UOP_PERF
+  // count the raw RDW collisions injected (proves the model is non-vacuous).
+  longint unsigned rdwx_collA, rdwx_collB;
+  always_ff @(posedge clk) if (rst_n) begin
+    if (collA_pre) rdwx_collA <= rdwx_collA + 1;
+    if (collB_pre) rdwx_collB <= rdwx_collB + 1;
+  end
+  final $display("[RDWX] uopcache RDW collisions: portA=%0d portB=%0d (x-injected slot reads)",
+                 rdwx_collA, rdwx_collB);
+`endif
+`endif
   always_ff @(posedge clk) begin
+`ifdef VEN_UOPCACHE_RDW_X
+    rdslots_a_q <= rdw_x_slots(collA_pre, store_slots_a[{rd_setA, rd_wayA}]);
+    rdslots_b_q <= rdw_x_slots(collB_pre, store_slots_b[{rd_setB, rd_wayB}]);
+    rdbmap_a_q  <= rdw_x_bmap (collA_pre, store_bmap_a [{rd_setA, rd_wayA}]);
+    rdbmap_b_q  <= rdw_x_bmap (collB_pre, store_bmap_b [{rd_setB, rd_wayB}]);
+`else
     rdslots_a_q <= store_slots_a[{rd_setA, rd_wayA}];
     rdslots_b_q <= store_slots_b[{rd_setB, rd_wayB}];
     rdbmap_a_q  <= store_bmap_a [{rd_setA, rd_wayA}];
     rdbmap_b_q  <= store_bmap_b [{rd_setB, rd_wayB}];
+`endif
     rdpdv_a_q   <= store_pdv[{rd_setA, rd_wayA}];
     rdpdv_b_q   <= store_pdv[{rd_setB, rd_wayB}];
     rd_collA_q  <= (wst == W_WRITE) && ({rd_setA, rd_wayA} == {wset, wway});

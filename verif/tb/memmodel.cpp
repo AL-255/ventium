@@ -76,8 +76,59 @@ const MemModel::Page* MemModel::page_lookup(uint32_t addr) const {
     return p;
 }
 
+// VEN_VGA_OPTROM: serve the std-VGA option ROM (loaded at 0xC0000) at the VGA PCI
+// expansion-ROM BAR window (0xFEBE0000, 64KB) so SeaBIOS finds the 0x55AA signature
+// and RUNS the VGA BIOS (matching qemu) instead of skipping it. Gated test.
+static inline bool vga_optrom_on() {
+    static int v = -1;
+    if (v < 0) v = std::getenv("VEN_VGA_OPTROM") ? 1 : 0;
+    return v;
+}
+// Stable snapshot of the std-VGA option ROM. The live 0xC0000 copy gets overwritten
+// by SeaBIOS POST shadowing before the VGA option-rom scan, so we serve the VGA
+// expansion-ROM BAR window (0xFEBE0000) from this snapshot taken at load time.
+static uint8_t g_optrom[65536];
+static bool    g_optrom_valid = false;
+
+// e1000 PXE option ROM served at the e1000 exp-ROM BAR (0xFEB80000, 256KB window) so
+// the option-ROM/UMB layout matches qemu (qemu's e1000 device serves the PXE ROM here;
+// without it kvmvapic lands first and the whole layout -> CWSDPMI memory map diverges).
+static uint8_t g_e1000rom[262144];
+static int     g_e1000_valid = -1;   // -1 untried, 0 absent, 1 loaded
+static void load_e1000_rom() {
+    if (g_e1000_valid >= 0) return;
+    g_e1000_valid = 0;
+    const char* p = std::getenv("VEN_E1000_ROM");
+    if (!p) return;
+    FILE* f = std::fopen(p, "rb");
+    if (!f) return;
+    size_t n = std::fread(g_e1000rom, 1, sizeof(g_e1000rom), f);
+    std::fclose(f);
+    if (n == 0) return;
+    g_e1000_valid = 1;
+    // qemu fixes the option ROM's checksum at load (the raw file carries a placeholder).
+    // SeaBIOS rejects a nonzero byte-sum -> a different (bad-checksum) code path that
+    // diverges. Adjust the last byte of the declared image (size=ROM[2]*512) so sum==0.
+    uint32_t romsz = (uint32_t)g_e1000rom[2] * 512u;
+    uint8_t sum = 0;
+    for (uint32_t i = 0; i < romsz && i < n; i++) sum = (uint8_t)(sum + g_e1000rom[i]);
+    std::fprintf(stderr, "[e1000-rom] loaded n=%zu hdr=%02x%02x sz=%u presum=%02x\n",
+                 n, g_e1000rom[0], g_e1000rom[1], romsz, sum);
+    if (romsz >= 2 && romsz <= n) {
+        g_e1000rom[romsz - 1] = (uint8_t)(g_e1000rom[romsz - 1] - sum);
+        uint8_t s2 = 0; for (uint32_t i = 0; i < romsz; i++) s2 = (uint8_t)(s2 + g_e1000rom[i]);
+        std::fprintf(stderr, "[e1000-rom] patched last byte -> postsum=%02x\n", s2);
+    }
+}
+
 uint8_t MemModel::read8(uint32_t addr) const {
     addr = fold(addr);
+    if (vga_optrom_on() && g_optrom_valid && (addr & 0xFFFF0000u) == 0xFEBE0000u)
+        return g_optrom[addr & 0xFFFFu];
+    if (vga_optrom_on() && (addr & 0xFFFC0000u) == 0xFEB80000u) {
+        load_e1000_rom();
+        if (g_e1000_valid == 1) return g_e1000rom[addr & 0x3FFFFu];
+    }
     if (above_ram(addr)) return 0xFFu;        // above configured RAM -> open bus (like qemu)
     const Page* p = page_lookup(addr);
     return p ? p->b[addr & PAGE_MASK] : 0u;   // unmapped reads as 0 (M0)
@@ -86,11 +137,41 @@ uint8_t MemModel::read8(uint32_t addr) const {
 void MemModel::write8(uint32_t addr, uint8_t val) {
     addr = fold(addr);
     if (above_ram(addr)) return;              // above configured RAM -> dropped (no phantom RAM)
+    // VEN_MEMWATCH=<linear>: log every NONZERO byte store to the 2 bytes [addr,addr+2)
+    // of the watched word. This is the single choke point for ALL memory writes (core,
+    // IDE DMA, fw_cfg DMA -- mem.service funnels every master here AFTER the SoC mux/A20),
+    // so it catches the [ds:0x426] clobber even if it is not a core-bus store.
+    {
+        static uint32_t mw = []() -> uint32_t {
+            const char* e = std::getenv("VEN_MEMWATCH");
+            return e ? (uint32_t)std::strtoul(e, nullptr, 0) : 0;
+        }();
+        if (mw && addr >= mw && addr < mw + 2 && val)
+            std::fprintf(stderr, "[memwr] addr=0x%05x val=0x%02x  (writes_so_far=%llu)\n",
+                         addr, val, (unsigned long long)writes_);
+    }
     page_for(addr).b[addr & PAGE_MASK] = val;
 }
 
 uint32_t MemModel::read32(uint32_t addr) const {
     addr = fold(addr);
+    if (vga_optrom_on() && g_optrom_valid && (addr & 0xFFFF0000u) == 0xFEBE0000u) {
+        uint32_t o = addr & 0xFFFFu;
+        return  (uint32_t)g_optrom[o]
+             | ((uint32_t)g_optrom[(o + 1) & 0xFFFF] << 8)
+             | ((uint32_t)g_optrom[(o + 2) & 0xFFFF] << 16)
+             | ((uint32_t)g_optrom[(o + 3) & 0xFFFF] << 24);
+    }
+    if (vga_optrom_on() && (addr & 0xFFFC0000u) == 0xFEB80000u) {
+        load_e1000_rom();
+        if (g_e1000_valid == 1) {
+            uint32_t o = addr & 0x3FFFFu;
+            return  (uint32_t)g_e1000rom[o]
+                 | ((uint32_t)g_e1000rom[(o + 1) & 0x3FFFF] << 8)
+                 | ((uint32_t)g_e1000rom[(o + 2) & 0x3FFFF] << 16)
+                 | ((uint32_t)g_e1000rom[(o + 3) & 0x3FFFF] << 24);
+        }
+    }
     if (above_ram(addr)) return 0xFFFFFFFFu;   // above configured RAM -> open bus (like qemu)
     uint32_t off = addr & PAGE_MASK;
     if (off <= PAGE_SIZE - 4) {                 // 4 bytes in one page: a SINGLE lookup
@@ -124,6 +205,7 @@ long MemModel::load_image(const std::string& path, uint32_t load_addr) {
     uint32_t a = load_addr;
     while ((c = std::fgetc(f)) != EOF) {
         write8(a++, (uint8_t)c);
+        if (load_addr == 0xC0000u && n < 65536) { g_optrom[n] = (uint8_t)c; g_optrom_valid = true; }
         ++n;
     }
     std::fclose(f);
