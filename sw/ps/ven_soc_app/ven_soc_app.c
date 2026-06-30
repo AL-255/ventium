@@ -277,6 +277,11 @@ static uint32_t      g_extmem_kb = 0;    // --extmem-kb N: seed CMOS RAM-size >1
 static ven_periph_t *g_i8042, *g_pic, *g_vga, *g_pit, *g_rtc, *g_ide;
 static int           g_dac_dirty = 0;    // guest wrote the DAC -> re-export
 static const char   *VGA_DAC_EXPORT = "/dev/shm/ven_vga_dac";
+static int           g_rtl_irq_nodev = 0; // VEN_RTL_IRQ_NODEV=1: gate off device-IRQ publishing (board #DE isolation test)
+static int           g_rtl_irq = 0;      // VEN_RTL_IRQ=1: the 8254 PIT + 8259 PIC live in the
+                                         // PL (cycle-deterministic IRQ0). The PS just publishes
+                                         // the raw device-IRQ levels to R_IRQ_IN; the RTL PIC
+                                         // does priority/INTA. Auto-disabled if R_IRQ_IN is absent.
 
 // --- live VGA display: kms-draw runs alongside the app by default (--dos) ------
 // User directive: kms-draw is a default companion of ven_soc_app so the board's
@@ -755,6 +760,24 @@ int main(int argc, char **argv) {
     // divert (and selects the qemu-system CPUID arm the FreeDOS golden used).
     wr(VEN_R_INTR, VEN_INTR_INTA_SEEN);  // clear any leftover injection from a prior run
     wr(VEN_R_INTR, 0);                    // (else a stale ASSERT|vec derails the fresh core)
+    // VEN_RTL_IRQ: opt-in (env) + a register-presence probe. Write a sentinel to
+    // R_IRQ_IN and read it back; only a +VEN_RTL_IRQ bitstream round-trips it (on an
+    // older bitstream the write is undecoded and the read returns 0). When confirmed,
+    // the PS publishes raw device-IRQ levels to R_IRQ_IN and the RTL PIC owns priority/
+    // INTA (and the RTL PIT owns IR0); otherwise we keep the PS-PIC R_INTR injection.
+    if (g_dos && getenv("VEN_RTL_IRQ")) {
+        wr(VEN_R_IRQ_IN, 0x00AA);                // sentinel (bit0 cleared so the PIT keeps IR0)
+        g_rtl_irq = ((rd(VEN_R_IRQ_IN) & 0xFFFF) == 0x00AA);
+        g_rtl_irq_nodev = (getenv("VEN_RTL_IRQ_NODEV") != NULL);  // test: suppress device-IRQ publish
+        { const char *h = getenv("VEN_FIXED_IRQ0_HALF");          // on-board sweep of the dense IR0 period
+          if (g_rtl_irq && h && *h) { uint32_t hv = (uint32_t)strtoul(h, NULL, 0);
+            wr(VEN_R_FIXED_IRQ0_HALF, hv);
+            fprintf(stderr, "ven_soc: IR0 half-period -> %u (full=%u core-clk) via VEN_FIXED_IRQ0_HALF\n", hv, (hv+1)*2); } }
+        wr(VEN_R_IRQ_IN, 0);                     // clear the sentinel before the core runs
+        fprintf(stderr, "ven_soc: VEN_RTL_IRQ %s (RTL 8254 PIT + 8259 PIC%s)\n",
+                g_rtl_irq ? "enabled" : "requested but R_IRQ_IN absent -> PS-PIC fallback",
+                g_rtl_irq ? "; PS publishes device IRQs to R_IRQ_IN" : "");
+    }
     // clear any leftover DBG run-control from a prior --bp/single-step run, else a
     // stale halt_req/bp_en parks the freshly-booted core (retired stays 0).
     if (rd(VEN_R_DBG_CAP) == VEN_DBG_CAP_MAGIC) {
@@ -996,11 +1019,27 @@ int main(int argc, char **argv) {
 
         // ---- F3 interrupt pump (the PS *is* the PIC + keyboard) ---------------
         if (g_dos) {
-            uint32_t seam, desired;
-            static int pit_pending = 0;
             // 1. USB keyboard -> scancode FIFO -> i8042 OBF (one byte at a time)
             hid_kbd_poll();
             hid_kbd_pump(g_i8042);
+          if (g_rtl_irq) {
+            // ---- VEN_RTL_IRQ: the PIT + PIC are in the PL. The RTL PIT owns IR0 (its
+            // cadence is fixed by the core clock, so no PS pacing/INTA dance). The PS
+            // only PUBLISHES the remaining device-IRQ levels (kbd IR1, IDE IR14, RTC
+            // IR8) to R_IRQ_IN; the RTL 8259 resolves priority + supplies the vector on
+            // the core's inta. We do NOT touch R_INTR here (that is the PS-PIC mode) and
+            // do NOT drive IR0 (bit 0 is ignored by the RTL — the PIT overrides it).
+            uint16_t levels = 0;
+            if (!g_rtl_irq_nodev) {   // VEN_RTL_IRQ_NODEV=1: publish NO device IRQs (isolate the board #DE to the pure timer-IR0 path, matching the sim's dev_irq_ps=0)
+            if (g_i8042->irq(g_i8042)) levels |= (1u << 1);   // IR1  keyboard
+            if (g_ide->irq(g_ide))     levels |= (1u << 14);  // IR14 primary IDE
+            { int r8 = g_rtc->irq(g_rtc); if (r8 > 0) levels |= (1u << 8); }  // IR8 RTC
+            }
+            static uint16_t irqin_shadow = 0xFFFF;
+            if (levels != irqin_shadow) { wr(VEN_R_IRQ_IN, levels); irqin_shadow = levels; }
+          } else {
+            uint32_t seam, desired;
+            static int pit_pending = 0;
             // 2. PIT IRQ0 — paced by EMULATED CORE TIME, not host wall-clock.
             //    ROOT-CAUSE FIX (DOS-Quake go32 #DE): wall-clock pacing makes the
             //    IRQ0 rate float free of how fast the core actually executes
@@ -1062,6 +1101,7 @@ int main(int argc, char **argv) {
             uint8_t pv = ven_pic_peek_vector(g_pic);
             desired = (g_pic->irq(g_pic) && pv >= 0x08) ? (VEN_INTR_ASSERT | pv) : 0;
             if (desired != intr_shadow) { wr(VEN_R_INTR, desired); intr_shadow = desired; }
+          } // end PS-PIC injection (else of g_rtl_irq)
             // 6. periodic: publish the DAC for the fb_vnc daemon
             if ((++housekeep & 0xFFFF) == 0 && g_dac_dirty) { export_dac(); g_dac_dirty = 0; }
         }

@@ -148,6 +148,71 @@ The default (knob unset) leaves the boot path byte-identical. This is a starting
 scaffold — widen the sled / vary the branch displacements to sweep the fetch
 address space if the simple loop does not trip the divergence.
 
+### GLS_TIMESIM=1 — post-implementation TIMING sim (SDF back-annotation)
+
+Goal: run the **routed** netlist with the **real APR cell+net delays** so xsim's
+`$setup/$hold/$recovery/$removal` timing-check primitives can fire — violations
+the zero-delay funcsim and Verilator are structurally blind to (the board-only
+fetch bug is funcsim-clean + STA-hold-met, so the suspect is an under-constrained
+path or a real-delay corner).
+
+Flow:
+
+```sh
+# 1. one-time: generate the timing netlist + SDF from the deployed routed DCP
+source /tools/Xilinx/2025.2/Vivado/settings64.sh
+vivado -mode batch -source verif/gls/gen_timesim.tcl
+#   -> verif/gls/ventium_top_timesim.v  (timesim netlist, sdf_anno=true)
+#      verif/gls/ventium_top.sdf         (min/typ/max delays, 397.5k SETUPHOLD/RECREM)
+#      verif/gls/gen_timesim.rpt         (cell path + dbg? summary)
+
+# 2. run (setup / slow corner)
+GLS_TIMESIM=1 GLS_SDF_CORNER=max GLS_MAX_CYCLES=20000 bash verif/gls/run_gls_freedos.sh
+# 2b. fast corner (HOLD races — the clock-independent suspect)
+GLS_TIMESIM=1 GLS_SDF_CORNER=min GLS_MAX_CYCLES=20000 bash verif/gls/run_gls_freedos.sh
+```
+
+`run_gls_freedos.sh` (GLS_TIMESIM=1) compiles `ventium_top_timesim.v`, auto-enables
+`VEN_DBG_CORE` (the ff3 routed netlist HAS the dbg_* taps), and `xelab`s with SDF
+annotation on `tb_gls_soc.u_dut` plus the timing-sim flags `-sdfmax|-sdfmin
+-transport_int_delays -pulse_r 0 -pulse_int_r 0 -pulse_e 0 -pulse_int_e 0`. Env:
+`GLS_SDF_CORNER=max|typ|min`, `GLS_SDF=<path>`.
+
+**BLOCKER (as of this build): the cell-scoped netlist is NOT driveable.** The ff3
+implementation synthesized the BD with the default `synth_design`
+(`-flatten_hierarchy rebuilt`), which **boundary-optimizes away the `ventium_top`
+IP-internal boundary**. In the routed DCP the `ventium_top` cell
+(`design_kv260_i/u_kv260/inst/u_kv260/u_core`, REF `design_kv260_u_kv260_0_ventium_top`)
+survives only as a flattened scope: `write_verilog -mode timesim -cell <it>` emits a
+module with **810 flattened port stubs** in which only `core_clk` / `core_rst_n`
+survive — the entire functional interface (`m_axi_*`, `io_req/io_we/io_addr/io_size/
+io_wdata/io_rdata/io_ack`, `boot_mode`, `l1axi_en`, `cosim_en`, `soc_en`, `intr`/
+`inta`, …) was pulled up into the parent and no longer exists at this scope. So
+`tb_gls_soc.sv` (which instantiates the clean `ventium_top`) fails elaboration:
+`ERROR [VRFC 10-2063] Module <ventium_top> not found`. There is no AXI master to
+feed memory and no io-bridge to service port I/O at this scope — a SeaBIOS boot or
+fetch-stress run is structurally impossible against it.
+
+The parent `ventium_kv260_core` (`u_kv260`, 229 pins) DOES keep a clean boundary,
+but a *different, narrowed* interface: a non-burst `m_axi_*` (no `arvalid/arlen/
+arsize/arburst/rlast`), an AXI-Lite config window (`s_axil_*`), `irq_out`, `clk`/
+`aresetn` — and **no `io_*` port-I/O bridge and no config inputs** (boot_mode etc.
+are tied off inside the BD). Driving it needs a brand-new tb and the port-I/O
+peripherals (which SeaBIOS POST needs) are internal/unavailable — not a drop-in.
+
+**Fix path** (requires a re-implementation, ~1.5-2 h APR — intentionally NOT run
+here): rebuild the deployed bitstream with the `ventium_top` IP boundary preserved
+so the routed cell keeps its clean ports. Either set
+`synth_design -flatten_hierarchy none` (or `-keep_equivalent_registers` won't help —
+need hierarchy retention), or put `(* keep_hierarchy = "yes" *)` /
+`set_property DONT_TOUCH true [get_cells .../u_core]` on the `ventium_top` instance
+before `synth_design` in `fpga/scripts/bd_kv260_soc.tcl`. Then re-run
+`gen_timesim.tcl` against the new routed DCP; the cell-scoped timesim will keep the
+clean `ventium_top` interface and `tb_gls_soc.sv` drops straight in with the SDF
+flags already wired above. (`gen_timesim.tcl` + the `GLS_TIMESIM` run path are in
+place and verified end-to-end up to elaboration — only the netlist boundary blocks
+the run.)
+
 Env knobs: `GLS_DISK` (default `verif/freedos/f4a/fdhi.img`), `GLS_BIOS`
 (default `sw/ps/kv260/assets/seabios.bin`), `GLS_MAX_CYCLES`, `GLS_REPORT`,
 `GLS_SKIP_COMPILE=1` (re-run only), `GLS_TRACE=1` (+ `GLS_TRACE_N=<bursts>`) for

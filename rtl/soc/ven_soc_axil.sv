@@ -129,6 +129,22 @@ module ven_soc_axil #(
 
     // ---- interrupt to PS (GIC pl_ps_irq0) -----------------------------------------
     output logic        irq_out
+`ifdef VEN_RTL_IRQ
+    ,
+    // ---- PS -> RTL-PIC device-IRQ seam (VEN_RTL_IRQ, R_IRQ_IN) ---------------------
+    // When the 8254 PIT + 8259 PIC live in the PL (VEN_RTL_IRQ), the IDE/RTC/kbd device
+    // models still run on the PS. The PS publishes their IRQ levels here (low 16 bits of
+    // R_IRQ_IN) and the RTL PIC (in ventium_top) does the priority/INTA. Bit 0 is ignored
+    // (the RTL PIT owns IR0). Separate from the R_INTR vector-injection path (which is the
+    // PS-PIC mode, used when VEN_RTL_IRQ is OFF).
+    output logic [15:0] dev_irq_ps,
+    // VEN_RTL_IRQ_FIXED knob (R_FIXED_IRQ0_HALF): the runtime half-period threshold for
+    // the dense fixed-cycle IR0 square wave in ventium_top. Reset = 1999 (== 4000/2 - 1)
+    // so an un-written register reproduces today's 4000-core-clock IR0 cadence exactly.
+    // Sweep DENSER periods on-board via devmem (no FPGA rebuild) to tune the reflector
+    // preemption window. Only consumed by ventium_top under VEN_RTL_IRQ_FIXED.
+    output logic [31:0] fixed_irq0_half
+`endif
 `ifdef VEN_DBG_CORE
     ,
     // ---- VEN_DBG_CORE: debug/trace register window (0x80+) <-> ven_soc_dbg ----
@@ -204,6 +220,8 @@ module ven_soc_axil #(
   localparam logic [7:0] R_IO_RDATA  = 8'h30;
   localparam logic [7:0] R_IO_CTRL   = 8'h34;  // W1P: [0]ACK [1]IRQ_CLR
   localparam logic [7:0] R_INTR      = 8'h38;  // F3: [7:0]vector [8]assert [9]inta-seen(R/W1C) [16]inta-irq-en
+  localparam logic [7:0] R_IRQ_IN    = 8'h3C;  // VEN_RTL_IRQ: [15:0] device-IRQ levels -> the RTL PIC
+  localparam logic [7:0] R_FIXED_IRQ0_HALF = 8'h74; // VEN_RTL_IRQ: RW half-period (cyc/2-1) for the dense fixed IR0; reset 1999
   localparam logic [7:0] R_IRQ_STAT  = 8'h70;  // R/W1C: [0]io [1]inta-seen
   localparam logic [7:0] R_IDENT     = 8'h7C;
 `ifdef VEN_PS_PROXY
@@ -295,6 +313,18 @@ module ven_soc_axil #(
   logic        intr_pend_r;      // assert level on the core's intr pin
   logic        intr_seen_r;      // sticky: the core pulsed inta (R/W1C)
   logic        intr_irq_en_r;    // 1 = intr_seen_r also raises irq_out (GIC notify)
+
+`ifdef VEN_RTL_IRQ
+  // VEN_RTL_IRQ: PS-published device-IRQ levels for the RTL PIC (R_IRQ_IN). The PS
+  // writes the raw IDE/RTC/kbd IR levels; the RTL 8259 resolves priority/INTA. Reset 0
+  // -> all lines low until the PS drives them, so an un-driven seam is inert.
+  logic [15:0] dev_irq_ps_r;
+  assign dev_irq_ps = dev_irq_ps_r;
+  // VEN_RTL_IRQ_FIXED runtime IR0 half-period (R_FIXED_IRQ0_HALF). Reset 1999 so an
+  // un-written register == 4000-cycle IR0 (today's compile-time default behavior).
+  logic [31:0] fixed_irq0_half_r;
+  assign fixed_irq0_half = fixed_irq0_half_r;
+`endif
 
 `ifdef VEN_PS_PROXY
   // ---- int-0x80 syscall proxy state ---------------------------------------------
@@ -447,6 +477,10 @@ module ven_soc_axil #(
           R_IO_WDATA:  s_axil_rdata <= io_wdata_q;
           R_IO_RDATA:  s_axil_rdata <= io_rdata_r;
           R_INTR:      s_axil_rdata <= {15'd0, intr_irq_en_r, 6'd0, intr_seen_r, intr_pend_r, intr_vec_r};
+`ifdef VEN_RTL_IRQ
+          R_IRQ_IN:    s_axil_rdata <= {16'd0, dev_irq_ps_r};
+          R_FIXED_IRQ0_HALF: s_axil_rdata <= fixed_irq0_half_r;
+`endif
           R_IRQ_STAT:  s_axil_rdata <= {30'd0, intr_seen_r, irq_pending};
           R_IDENT:     s_axil_rdata <= IDENT;
 `ifdef VEN_PS_PROXY
@@ -540,6 +574,16 @@ module ven_soc_axil #(
       l1axi_en_r <= 1'b0; proxy_en_r <= 1'b0; cosim_en_r <= 1'b0; errata_en_r <= 5'd0;
       soc_en_r <= 1'b0; golden_l1_r <= 1'b0;
       intr_vec_r <= 8'd0; intr_pend_r <= 1'b0; intr_seen_r <= 1'b0; intr_irq_en_r <= 1'b0;
+`ifdef VEN_RTL_IRQ
+      dev_irq_ps_r <= 16'd0;
+`ifndef VEN_FIXED_IRQ0_CYC
+  `define VEN_FIXED_IRQ0_CYC 4000
+`endif
+      // Bug-fix: derive the reset from the compile-time default (was hardcoded 32'd1999,
+      // which made a FIXED_IRQ0_CYC build inert — its IR0 stayed 4000). Runtime devmem of
+      // R_FIXED_IRQ0_HALF still overrides this for the no-respin sweep.
+      fixed_irq0_half_r <= ($unsigned(`VEN_FIXED_IRQ0_CYC)/2 - 1);
+`endif
       io_rdata_r <= 32'd0;
       flush_all <= 1'b0; ps_ack_pulse <= 1'b0; irq_clr_pulse <= 1'b0;
       shutdown  <= 1'b0;
@@ -627,6 +671,22 @@ module ven_soc_axil #(
             end
             if (s_axil_wstrb[2]) intr_irq_en_r <= s_axil_wdata[16];
           end
+`ifdef VEN_RTL_IRQ
+          // VEN_RTL_IRQ: the PS posts the raw device-IRQ levels (low 16 bits) for the
+          // RTL PIC. The PS recomputes + rewrites the whole word whenever a level changes.
+          R_IRQ_IN: begin
+            if (s_axil_wstrb[0]) dev_irq_ps_r[7:0]  <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) dev_irq_ps_r[15:8] <= s_axil_wdata[15:8];
+          end
+          // VEN_RTL_IRQ_FIXED IR0 half-period knob: full 32-bit RW (byte-strobed),
+          // swept on-board via devmem to densen the fixed IR0 (no FPGA rebuild).
+          R_FIXED_IRQ0_HALF: begin
+            if (s_axil_wstrb[0]) fixed_irq0_half_r[7:0]   <= s_axil_wdata[7:0];
+            if (s_axil_wstrb[1]) fixed_irq0_half_r[15:8]  <= s_axil_wdata[15:8];
+            if (s_axil_wstrb[2]) fixed_irq0_half_r[23:16] <= s_axil_wdata[23:16];
+            if (s_axil_wstrb[3]) fixed_irq0_half_r[31:24] <= s_axil_wdata[31:24];
+          end
+`endif
           R_IRQ_STAT: if (s_axil_wstrb[0]) begin
             if (s_axil_wdata[0]) irq_clr_pulse <= 1'b1;        // W1C io irq
             if (s_axil_wdata[1]) intr_seen_r   <= 1'b0;        // W1C inta-seen

@@ -931,6 +931,26 @@ module ventium_soc
   logic [31:0] pci_cfg_addr;     // CONFIG_ADDRESS latch (0xCF8)
   logic [15:0] pci_cmd;          // PCI_COMMAND (IDE reg 0x04 low word; R/W)
   logic [31:0] pci_bar4;         // IDE BAR4 (reg 0x20; R/W)
+`ifdef VEN_FWCFG_DPI
+  // TEST (DEBUG_JUN27 e1000-root): a 6th PCI function 00:03.0 = e1000 with probeable
+  // BARs, so SeaBIOS enumerates 6 devices + allocates BARs like qemu -> POST layout
+  // matches qemu-full -> go32 block base lands at 0x2593 (not the +0x119 0x26ac).
+  logic [31:0] pci_e1000_bar0;   // mem 128KB  (reg 0x10)
+  logic [31:0] pci_e1000_bar1;   // I/O 64B    (reg 0x14)
+  logic [31:0] pci_e1000_rom;    // exp ROM 256KB (reg 0x30)
+  // std-VGA (00:02.0) probeable BARs: without these the 256KB SeaBIOS reads the VGA's
+  // exp-ROM BAR as 0, copies a "ROM" from linear 0 (the IVT) and runs garbage -> hang
+  // right after "Enabling 00:02.0". Valid BARs -> SeaBIOS reads a clean (zero) ROM region
+  // -> no 0x55AA -> skips it. Matches qemu: BAR0 prefmem 16MB, BAR2 mem 4KB, exp-ROM 64KB.
+  logic [31:0] pci_vga_bar0;     // prefmem 16MB (reg 0x10)
+  logic [31:0] pci_vga_bar2;     // mem 4KB      (reg 0x18)
+  logic [31:0] pci_vga_rom;      // exp ROM 64KB (reg 0x30)
+  logic [15:0] pci_vga_cmd;      // VGA PCI_COMMAND (reg 0x04 low word; R/W). ROOT-FIX:
+                                 // SeaBIOS RMW-enables 00:02.0 (IO|MEM|SERR=0x0103); without a
+                                 // persisting reg the read-back was 0 vs qemu 0x0103 -> the
+                                 // firmware diverged (idx 450970) -> ~9M insns later the
+                                 // go32/CWSDPMI cs=0x34 panic. Persisting it keeps lockstep.
+`endif
   // a config access targets bus 0 with the enable bit set; pci_devfn selects the
   // function, pci_reg the dword register.
   wire         pci_sel   = pci_cfg_addr[31] && (pci_cfg_addr[23:16] == 8'h00);
@@ -953,6 +973,33 @@ module ventium_soc
       end
     end
   end
+
+`ifdef VEN_FWCFG_DPI
+  // e1000 (00:03.0) BAR probe registers: a write masks io_wdata to the BAR's size
+  // alignment (preserving the type bits) so SeaBIOS's FFFFFFFF size-probe reads back the
+  // correct size mask, then its address write sticks. Matches qemu: BAR0 mem 128KB,
+  // BAR1 I/O 64B, exp-ROM 256KB (ROM disabled -> no option-rom content, like the disk boot).
+  always_ff @(posedge clk) begin
+    if (dev_rst) begin
+      pci_e1000_bar0 <= 32'h0000_0000;   // mem, 32-bit, non-prefetch
+      pci_e1000_bar1 <= 32'h0000_0001;   // I/O indicator
+      pci_e1000_rom  <= 32'h0000_0000;   // exp-ROM disabled
+      pci_vga_bar0   <= 32'h0000_0008;   // mem, 32-bit, prefetchable
+      pci_vga_bar2   <= 32'h0000_0000;   // mem, 32-bit, non-prefetch
+      pci_vga_rom    <= 32'h0000_0000;   // exp-ROM disabled
+      pci_vga_cmd    <= 16'h0000;        // VGA PCI_COMMAND (root-fix)
+    end else if (cs_pci_data && io_we && pci_sel && pci_devfn == 8'h18) begin
+      if (pci_reg == 8'h10) pci_e1000_bar0 <= {io_wdata[31:17], 17'h0};          // 128KB align
+      if (pci_reg == 8'h14) pci_e1000_bar1 <= {io_wdata[31:6], 5'h0, 1'b1};      // 64B I/O
+      if (pci_reg == 8'h30) pci_e1000_rom  <= {io_wdata[31:18], 18'h0};          // 256KB ROM
+    end else if (cs_pci_data && io_we && pci_sel && pci_devfn == 8'h10) begin
+      if (pci_reg == 8'h04) pci_vga_cmd  <= io_wdata[15:0] & 16'h0147;           // ROOT-FIX: persist IO|MEM|MASTER|PARITY|SERR (SeaBIOS writes 0x0103)
+      if (pci_reg == 8'h10) pci_vga_bar0 <= {io_wdata[31:24], 20'h0, 4'b1000};   // 16MB prefmem (bit3=pref)
+      if (pci_reg == 8'h18) pci_vga_bar2 <= {io_wdata[31:12], 12'h0};            // 4KB mem
+      if (pci_reg == 8'h30) pci_vga_rom  <= {io_wdata[31:16], 16'h0};            // 64KB ROM
+    end
+  end
+`endif
 
   // combinational CONFIG_DATA read: a per-devfn config table for the modeled bus-0
   // functions (values empirically pinned to the live gate qemu). An absent devfn /
@@ -996,9 +1043,30 @@ module ventium_soc
         8'h10: unique case (pci_reg)                     // 00:02.0 std-VGA
                  8'h00:   pci_cfg_rdata = 32'h1111_1234;
                  8'h08:   pci_cfg_rdata = 32'h0300_0002; // class (VGA display)
+`ifdef VEN_FWCFG_DPI
+                 8'h04:   pci_cfg_rdata = {16'h0000, pci_vga_cmd}; // ROOT-FIX: status 0 | command (R/W) — was default 0 -> dropped SeaBIOS's 0x0103 enable
+                 8'h10:   pci_cfg_rdata = pci_vga_bar0;   // BAR0 prefmem 16MB
+                 8'h18:   pci_cfg_rdata = pci_vga_bar2;   // BAR2 mem 4KB
+                 8'h30:   pci_cfg_rdata = pci_vga_rom;    // expansion ROM BAR 64KB
+`endif
                  8'h2C:   pci_cfg_rdata = 32'h1100_1AF4;
                  default: pci_cfg_rdata = 32'h0000_0000;
                endcase
+`ifdef VEN_FWCFG_DPI
+`ifndef VEN_NO_E1000
+        8'h18: unique case (pci_reg)                     // 00:03.0 e1000 NIC (test root-fix)
+                 8'h00:   pci_cfg_rdata = 32'h100E_8086; // vendor/device
+                 8'h04:   pci_cfg_rdata = 32'h0010_0000; // status 0x0010 | command 0
+                 8'h08:   pci_cfg_rdata = 32'h0200_0003; // class (ethernet) / rev
+                 8'h10:   pci_cfg_rdata = pci_e1000_bar0; // BAR0 mem 128KB
+                 8'h14:   pci_cfg_rdata = pci_e1000_bar1; // BAR1 I/O 64B
+                 8'h2C:   pci_cfg_rdata = 32'h1100_1AF4; // subsystem
+                 8'h30:   pci_cfg_rdata = pci_e1000_rom;  // expansion ROM BAR 256KB
+                 8'h3C:   pci_cfg_rdata = 32'h0000_0100; // interrupt pin A
+                 default: pci_cfg_rdata = 32'h0000_0000;
+               endcase
+`endif
+`endif
         default: pci_cfg_rdata = 32'hFFFF_FFFF;          // unmodeled devfn -> absent reply
       endcase
     end
@@ -1044,7 +1112,15 @@ module ventium_soc
   assign fwcfg_dma_busy = (fwd_st != FWD_IDLE);
 
   // byte stream per (selector, offset). Unmodeled item / past end -> 0x00.
-  function automatic logic [7:0] fwcfg_byte(input logic [15:0] sel, input logic [15:0] off);
+`ifdef VEN_FWCFG_DPI
+  import "DPI-C" function int fwcfg_dpi_byte(input int sel, input int off);
+`endif
+  function automatic logic [7:0] fwcfg_byte(input logic [15:0] sel, input logic [31:0] off);
+`ifdef VEN_FWCFG_DPI
+    automatic logic [31:0] r;
+    r = fwcfg_dpi_byte({16'd0, sel}, off);
+    fwcfg_byte = r[7:0];
+`else
     fwcfg_byte = 8'h00;
     unique case (sel)
       16'h0000: unique case (off)                     // FW_CFG_SIGNATURE = "QEMU"
@@ -1055,11 +1131,9 @@ module ventium_soc
                   default: fwcfg_byte = 8'h00;
                 endcase
       16'h0001: fwcfg_byte = (off == 16'd0) ? 8'h03 : 8'h00;  // FW_CFG_ID = 0x03 (trad+DMA)
-      // Other items qemu's bare `-machine pc -m 32` exposes (file_dir count, numa,
-      // max_cpus, acpi_tables, smbios_entries, ...) all read back 0 here -> the
-      // default 0x00 already matches. Non-zero blobs are added as the walk reaches them.
       default: fwcfg_byte = 8'h00;
     endcase
+`endif
   endfunction
 
   // CONFIG_DATA-style little-endian assembly for byte/word/dword reads at 0x511.
@@ -1080,7 +1154,7 @@ module ventium_soc
       FWD_X:  begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_we=1'b1;          // 1 byte
                     fwcfg_dma_mem_addr  = fwdma_tgt + fwdma_xoff;
                     fwcfg_dma_mem_wstrb = 4'b0001;
-                    fwcfg_dma_mem_wdata = {24'd0, fwcfg_byte(fwcfg_sel, fwcfg_off + fwdma_xoff[15:0])}; end
+                    fwcfg_dma_mem_wdata = {24'd0, fwcfg_byte(fwcfg_sel, fwcfg_off + fwdma_xoff)}; end
       FWD_WB: begin fwcfg_dma_mem_req=1'b1; fwcfg_dma_mem_we=1'b1;          // clear control
                     fwcfg_dma_mem_addr=fwdma_actl; fwcfg_dma_mem_wstrb=4'b1111; fwcfg_dma_mem_wdata=32'd0; end
       default: ;
@@ -1137,9 +1211,16 @@ module ventium_soc
   // io_ps so the TB services INT10h (mirrors guest console to stderr). Off by default.
   logic cs_softvga;
   assign cs_softvga = io_req && (io_addr == 16'h02E0);
+`ifdef VEN_FWCFG_DPI
+  // DEBUG: forward the SeaBIOS debug port 0x402 (isa-debugcon) to io_ps so tb_soc
+  // echoes the POST log -> enables a message-level RTL-vs-qemu POST diff.
+  logic cs_debugcon;
+  assign cs_debugcon = io_req && (io_addr == 16'h0402);
+`endif
   logic io_ps_sel;
   always_comb begin
     io_ps_sel = 1'b0;
+`ifdef VEN_FWCFG_DPI io_ps_sel = io_ps_sel | cs_debugcon; `endif
 `ifdef VEN_SOFTVGA   io_ps_sel = io_ps_sel | cs_softvga; `endif
 `ifdef VEN_PIC_PS    io_ps_sel = io_ps_sel | cs_pic;    `endif
 `ifdef VEN_PIT_PS    io_ps_sel = io_ps_sel | cs_pit;    `endif
@@ -1176,7 +1257,21 @@ module ventium_soc
     // the SoC top uses this decode (ventium_top/make verify never instances it), and
     // the M8 gates only read CLAIMED ports, so they are unaffected.
     io_rdata = 32'hFFFF_FFFF;
+`ifdef VEN_NO_DEBUGCON
+    // 0x402 = SeaBIOS debug-port probe. Returning 0xff (not the sticky 0xe9) makes
+    // SeaBIOS find NO debug port and skip all POST logging -- matching qemu run
+    // WITHOUT -debugcon, so the boot streams stay byte-aligned (no log-buffer drift).
+    if      (io_req && io_addr == 16'h0402) io_rdata = 32'h0000_00FF;
+    else
+`endif
     if      (io_ps_sel) io_rdata = {24'd0, io_ps_rdata};
+`ifdef VEN_FWCFG_DPI
+    // SMM stub: the 256KB SeaBIOS (CONFIG_USE_SMM=y) triggers an SMI (out 0xb2) then
+    // polls the APMC status port 0xb3 until the SMM handler clears it. The SoC has no
+    // SMM, so 0xb3 reads open-bus 0xFF forever -> infinite POST spin. Return 0 so the
+    // SMI self-test passes (the handler is a no-op here; DOS/Quake never use SMM).
+    else if (io_req && io_addr == 16'h00B3) io_rdata = 32'd0;
+`endif
     else if (cs_pic)    io_rdata = {24'd0, pic_rdata};
     else if (cs_pit)    io_rdata = {24'd0, pit_rdata};
     else if (cs_rtc)    io_rdata = {24'd0, rtc_rdata};

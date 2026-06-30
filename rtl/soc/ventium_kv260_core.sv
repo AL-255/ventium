@@ -101,6 +101,15 @@ module ventium_kv260_core #(
   logic [31:0] io_wdata, io_rdata; logic io_ack;
   // F3 PS->core interrupt-injection seam (ven_soc_axil R_INTR <-> ventium_top).
   logic        core_intr; logic [7:0] core_intr_vec; logic core_inta;
+`ifdef VEN_RTL_IRQ
+  // VEN_RTL_IRQ: the PS-published device-IRQ levels (ven_soc_axil R_IRQ_IN) feed the
+  // RTL PIC inside ventium_top (which now owns the 8259+8254). Bit 0 is ignored (the
+  // RTL PIT drives IR0). Inert/absent in a non-RTL_IRQ build.
+  logic [15:0] core_dev_irq;
+  // VEN_RTL_IRQ_FIXED: runtime IR0 half-period (ven_soc_axil R_FIXED_IRQ0_HALF) ->
+  // the dense fixed-cycle IR0 generator in ventium_top. Reset 1999 (== today's 4000).
+  logic [31:0] core_fixed_irq0_half;
+`endif
 
 `ifdef VEN_PS_PROXY
   // F4 int-0x80 syscall proxy seam (ven_soc_axil 0x40-0x6C <-> ventium_top/core).
@@ -198,6 +207,13 @@ module ventium_kv260_core #(
       .io_wdata(io_wdata), .io_rdata(io_rdata), .io_ack(io_ack),
       .intr_out(core_intr), .intr_vec(core_intr_vec), .inta(core_inta),
       .irq_out(irq_out)
+`ifdef VEN_RTL_IRQ
+      ,
+      // VEN_RTL_IRQ: R_IRQ_IN -> the device-IRQ levels for the RTL PIC in ventium_top.
+      .dev_irq_ps(core_dev_irq),
+      // R_FIXED_IRQ0_HALF -> the dense fixed-cycle IR0 half-period in ventium_top.
+      .fixed_irq0_half(core_fixed_irq0_half)
+`endif
 `ifdef VEN_PS_PROXY
       ,
       // int-0x80 syscall window <-> core seam (the response/commit side).
@@ -305,6 +321,13 @@ module ventium_kv260_core #(
       // MODE.SOCEN and writes R_INTR — the F2 boot flow never touches either.
       .soc_en(cfg_soc_en),
       .intr(core_intr), .inta_vector(core_intr_vec), .inta(core_inta)
+`ifdef VEN_RTL_IRQ
+      ,
+      // VEN_RTL_IRQ: PS-published device-IRQ levels -> the RTL PIC (IR1/IR8/IR14/...).
+      .dev_irq_ps(core_dev_irq),
+      // VEN_RTL_IRQ_FIXED: runtime IR0 half-period -> the dense fixed IR0 generator.
+      .fixed_irq0_half(core_fixed_irq0_half)
+`endif
 `ifdef VEN_DBG_CORE
       ,
       .dbg_retire_valid(dbg_retire_valid), .dbg_eip(dbg_eip), .dbg_cs(dbg_cs),

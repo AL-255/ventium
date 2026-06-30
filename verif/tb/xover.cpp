@@ -87,6 +87,28 @@ void xover_extract(Vventium_top* top, XoverArch& a) {
     }
 }
 
+uint32_t xover_read_cr2(Vventium_top* top) {
+    return (uint32_t)CORE(creg2);
+}
+
+uint8_t xover_read_fault_state(Vventium_top* top, XoverFaultState& fs) {
+    fs.walk_lin      = (uint32_t)CORE(walk_lin);
+    fs.walk_is_write = (uint8_t)CORE(walk_is_write);
+    fs.walk_step     = (uint8_t)CORE(walk_step);
+    fs.fe_dtlb_hit   = (uint8_t)CORE(fe_dtlb_hit);
+    fs.fe_dtlb_v     = (uint8_t)CORE(fe_dtlb_v);
+    fs.fe_dtlb_dirty = (uint8_t)CORE(fe_dtlb_dirty);
+    fs.fe_dtlb_page  = (uint32_t)CORE(fe_dtlb_page);
+    fs.fe_dtlb_phys  = (uint32_t)CORE(fe_dtlb_phys);
+    fs.dtlb_lk_hit   = (uint8_t)CORE(dtlb_lk_hit);
+    fs.dtlb_lk_dirty = (uint8_t)CORE(dtlb_lk_dirty);
+    fs.dtlb_lk_phys  = (uint32_t)CORE(dtlb_lk_phys);
+    fs.xlate_miss    = (uint8_t)CORE(xlate_miss);
+    fs.cur_lin       = (uint32_t)CORE(cur_lin);
+    fs.pf_errcode    = (uint32_t)CORE(pf_errcode);
+    return (uint8_t)CORE(walk_pf);
+}
+
 void xover_inject(Vventium_top* top, const XoverArch& a) {
     for (int i = 0; i < 8; ++i) RF(gpr)[i] = a.gpr[i];
 

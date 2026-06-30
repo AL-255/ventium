@@ -21,7 +21,7 @@ if [ "${VENSLOW:-0}" = "1" ]; then
   NEWV=$(printf '0x%08x' $(( (CRLV & 0xffc0c0ff) | 0x00203f00 )))   # DIV0=63 DIV1=32 -> ~496 kHz
   sudo busybox devmem 0xFF5E00C0 32 "$NEWV"
   echo "VENSLOW: PL0_REF_CTRL $CRLV -> $(sudo busybox devmem 0xFF5E00C0)  (~496 kHz, DIV0=63 DIV1=32)"
-  sudo sh -c 'nohup ./ven_soc_app_q --sys --dos --bios seabios.bin --disk quake_ven.img \
+  sudo sh -c 'nohup env VEN_RTL_IRQ=1 VEN_FIXED_IRQ0_HALF=$(cat /tmp/ven_irq0_half 2>/dev/null) ./ven_soc_app_q --sys --dos --bios seabios.bin --disk quake_ven.img \
     --extmem-kb 64512 --vga-dump /tmp/qframe.ppm >/tmp/vsa.log 2>&1 & echo $! >/tmp/vsa.pid'
   echo "VENSLOW: ven_soc_app pid=$(cat /tmp/vsa.pid); watching for the #DE at <1MHz (up to ~40min)"
   RES="CLEAN"
@@ -42,7 +42,7 @@ if [ "${VENSLOW:-0}" = "1" ]; then
   sudo kill "$(cat /tmp/vsa.pid)" 2>/dev/null; sleep 1; sudo pkill -f kms-draw 2>/dev/null
   echo "VENSLOW DONE"; exit 0
 fi
-sudo sh -c 'nohup ./ven_soc_app_q --sys --dos --bios seabios.bin --disk quake_ven.img \
+sudo sh -c 'nohup env VEN_RTL_IRQ=1 VEN_FIXED_IRQ0_HALF=$(cat /tmp/ven_irq0_half 2>/dev/null) ./ven_soc_app_q --sys --dos --bios seabios.bin --disk quake_ven.img \
   --extmem-kb 64512 --vga-dump /tmp/qframe.ppm >/tmp/vsa.log 2>&1 & echo $! >/tmp/vsa.pid'
 echo "ven_soc_app pid=$(cat /tmp/vsa.pid)"
 # ---- STRICT CLOCK-STEP validation: freeze the core clock, pulse 1 clk at a time,
@@ -86,7 +86,10 @@ echo "comparator armed: cfg=$CMP_CFG range=$CMP_RANGE"
 # (Divide error / SIGFPE / abort), capture the fault-time state and KILL the run.
 # Running on past a fault is pointless and can corrupt memory -> PS lock-up.
 PREV=""
-for i in $(seq 1 4000); do
+# RUNITERS bounds the run length (each iter ~25ms of devmem polling). Default is long
+# enough for Quake's ~4-6 min on-silicon Alpha_Init + the timedemo to render; the
+# early-exit on a real guest fault / core-halt below still stops it the instant it faults.
+for i in $(seq 1 ${RUNITERS:-24000}); do
   EV=$(sudo busybox devmem 0xA00000CC)
   if [ "$EV" != "$PREV" ]; then
     PREV=$EV

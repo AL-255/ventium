@@ -41,6 +41,14 @@ typedef struct ven_periph {
 // A model's constructor allocates + resets its state and returns the vtable.
 typedef ven_periph_t* (*ps_periph_ctor_t)(void);
 
+// PIT-only: switch the 8254 model onto an EMULATED nanosecond time base and set
+// the current emulated-ns value. Callers (the --dos TB; ven_soc_app on the board)
+// derive `ns` from the core's progress at the emulated clock rate so the IRQ0
+// cadence tracks the guest's PIT programming instead of host wall-clock. Without
+// any call, the model stays on CLOCK_MONOTONIC (the psoc gate default). See
+// ven_pit.c. Idempotent; the first call latches the emulated base.
+void ven_pit_set_emu_ns(ven_periph_t* p, uint64_t ns);
+
 // One row of the generated dispatch table (verif/tb/ps_periph_table.inc).
 typedef struct {
     const char*      dev;

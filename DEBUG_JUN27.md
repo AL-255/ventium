@@ -2246,3 +2246,500 @@ identical in dumps, means the allocator's INTERNAL free-list/heap pointer differ
 confounded -- worth re-verifying the MCB free pointer with the -icount-matched data). NEXT: trace the
 go32 PM computation of es/linear=0x2bac0 (the DPMI 0x300 RMI structure fill before n=8588008), or
 watchpoint the RMI structure, to find the allocator output that diverges from qemu's.
+
+## 23ca. Jun 29: PIT-timing DISCONFIRMED; panic is DETERMINISTic; VGA-render is a SECOND blocker
+
+A full cycle testing whether the go32 panic is interrupt-timing-sensitive (hypothesis B) via the
+SoC's PIT prescaler `VEN_PIT_TICK_DIV` (default 1024 = core_clk/1024 -> the 1.193182 MHz PIT). RESULT:
+**B is disconfirmed; the panic is deterministic.**
+
+- The full baseline build command (recovered, authoritative): `make -C verif/tb soc
+  VEN_IDE_DISK_HEX=/tmp/quake.disk.hex VL_EXTRA_DEFINES="+define+VEN_FWCFG_DPI
+  +define+VEN_IDE_DISK_SECTORS=131040 +define+VEN_IDE_CYLS=130 +define+VEN_RTC_EXTMEM_KB=64512
+  +define+VEN_SOFTVGA"`. /tmp/quake.disk.hex = 201 MB hex = 67 MB image = 131040 sectors (CHS 130/16/63).
+- WASTED CYCLES (logged so they are not repeated): an initial PIT sweep (33/84/512/768/1536/2048) was
+  ENTIRELY INVALID -- those builds defaulted `VEN_IDE_DISK_HEX` to the 64 KiB pide test disk (no FreeDOS),
+  so they all "boot-hung" at retire~5728xxx in the test disk's boot sector. The hang had NOTHING to do
+  with the PIT; it was the wrong disk + the missing DISK_SECTORS/CYLS/RTC/SOFTVGA defines (a too-small
+  IDE array makes $readmemh on the 67 MB image abort: "address beyond bounds of array").
+- Valid PIT test (full define set): PIT=512 boots FreeDOS+FreeCom cleanly and panics at retire=9478600
+  vs the baseline 1024's 9478189 -- a ~411-insn delta = the effect of ~2 extra IRQ0s. The PIT fires
+  only ~2-4 times in the whole 9.48M-insn run (the guest programs a slow divisor; IRQ0 period =
+  divisor*TICK_DIV core clocks >> the run), so it CANNOT perturb the panic. B is dead.
+- VEN_RAM_TOP_MB=64 (runtime, on the KNOWN-GOOD baseline): retired EXACTLY 9478189 -- byte-identical to
+  the unbounded baseline. Phantom-RAM heap-shift is genuinely inert (the earlier "ruled out" was right,
+  not a wrong-disk artifact). CWSDPMI's memory top comes from e820/CMOS, not a write-probe that the
+  sparse model would inflate.
+- soft-VGA is NOT the panic cause: dropping VEN_SOFTVGA (env) still panics, at retire=9464649 (~13.5K
+  earlier; the delta is just the real-VGA-text-console INT10h path vs the soft stub). Panic is robust.
+- NET: the panic is DETERMINISTIC, robust to {PIT rate, RAM top, soft-VGA, A20, IF, memory size}. It is
+  the single CWSDPMI/go32 conventional-memory allocation that returns an in-use address (linear 0x2bac0,
+  inside CWSDPMI) in the RTL vs free in qemu (23bz). Isolating it needs a precise lockstep co-sim that
+  records SEGMENT bases (the vtrace omits es -> 23bt's "missing seg-bases" wall), not more env sweeps.
+- SECOND, INDEPENDENT blocker for "Quake renders frames": the real VGA model does NOT init -- SeaBIOS
+  logs "No VGA found" (with AND without soft-VGA), even though the stdvga PCI dev (1234:1111) is probed
+  and BARs mapped. The soft-VGA stub is TEXT-ONLY (INT10h teletype; no mode-13h set), so even past the
+  panic Quake's 320x200 mode-13h would not render. Goal 2 = clear the deterministic panic AND complete
+  the VGA model (mode-13h set + 0xA0000->framebuffer so --dump-fb-every captures frames).
+
+## 23cb. Jun 29 BREAKTHROUGH: buffer theory was a RED HERRING; bug is ONE stack return-CS slot
+
+Re-ran against the SURVIVING layout-matched -icount qemu golden (/home/yukidama/ictrace/qic.log, 28GB,
+the RENDERING reference) with a fresh RTL VEN_CMPTRACE (56-byte recs WITH segments). Two findings:
+
+1. **The entire 23bu-23bz buffer-overlap analysis is INVALID** (it used a confounded, non-layout-matched
+   qemu). The -icount golden has the IDENTICAL "anomalous" state and RENDERS:
+   - es=0x2bac at the INT13h read: qemu 290 times vs RTL 289. SAME buffer placement.
+   - es=0x2420 (transfer buffer): qemu 111070. SAME.
+   - cs=0x26ac (CWSDPMI real-mode seg): qemu 7,171,797 times -- a normal, heavily-used segment.
+   - esi=0x3864 at cs=0x26ac:0x3300 (the [0x426] write): qemu's esi is ALSO 0x3864.
+   So the buffer overlap, [0x426]=0x3864, esi=0x3864, cs=0x26ac are ALL NORMAL. qemu does every one of
+   them and still renders. The panic is NOT the buffer.
+
+2. **The real divergence is ONE stack slot.** RTL panic entry (first cs=0x34 at n=9477461):
+   path cs=0x26ac:0x3272 -> 0x5954 -> 0x595b = a **retf** (esp 0x6f90->0x6f94, pops 4B cs:ip). RTL pops
+   cs=0x34,ip=0x595d -> cs=0x34:0x595d -> 0x3275 = the CWSDPMI panic HLT. qemu at the SAME retf returns
+   to **cs=0x26ac:0x595d (48,531 times)** and reaches **cs=0x34 ZERO times**. At the landing, ALL
+   registers match qemu byte-for-byte (esi=0x3864 edi=0x34 ebp=0x6fa2 ...). The ONLY difference is the
+   popped return-CS: **0x34 (RTL) vs 0x26ac (qemu)**, same return-ip 0x595d.
+   => The bug is a single wrong value on the stack: the return-CS slot at ss=0x2c70:0x6f92 (linear
+   ~0x33692) holds 0x0034 in the RTL but 0x26ac in qemu. A far-jump-via-retf (push seg; push off; retf)
+   whose pushed SEGMENT is wrong only in the RTL -- a clean, localized, likely-fixable core bug, NOT a
+   heap/allocator divergence. NEXT: --watch-write 0x33690 to find the instruction that writes 0x34 to
+   the return-CS slot. 0x34 looks like a PM selector (GDT index 6); the RTL may be pushing a STALE/PM cs
+   where the real-mode cs (0x26ac) is expected -- a real<->protected mode-switch save/restore bug.
+
+## 23cc. Jun 29: panic mechanism = near-call/far-ret in a Watcom shift helper; need true lockstep
+
+Disassembled the panic path (dumped RTL code at the retire, objdump -Maddr16):
+  3260: movw $0x3956,0x426      ; the "[0x426] write" -- NORMAL (qemu does it too)
+  3266: les  -0x4(%bp),%bx      ; load far ptr
+  3269: mov  %es:0x2(%bx),%dx   ; dx:ax = 32-bit value
+  326d: mov  %es:(%bx),%ax
+  3270: mov  $0x2d,%cl          ; cl = shift count 0x2d (45)
+  3272: call 0x5954             ; NEAR call into a 32-bit shift helper
+  ...
+  5954: neg %cl; 5956: add $0x10,%cl; 5959: shl %cl,%bx; 595b: or %bx,%ax; 595d: lret  ; FAR return
+The helper is NEAR-called but returns via `lret` (far): it pops ip (0x3275, correct) + a CS from the
+NEXT stack word. In qemu that CS is 0x26ac (-> cs=0x26ac:0x3275, runs `mov %ax,%di`, continues; lret at
+0x595d is hit 48,531x, cs=0x34 0x). In the RTL the popped CS is 0x34 -> cs=0x34:0x3275 -> the panic HLT.
+
+So the panic is one wrong far-return CS. BUT ad-hoc landmark matching is unreliable: the shift helper's
+lret runs 48,531x and the regs (esi=0x3864, edi=0x34, ebp=0x6fa2) recur across invocations, so the qemu
+block I matched (eax=0, ecx=0x1004, esp=0x6f8e) is a DIFFERENT invocation than the RTL panic
+(eax=0x406, ecx=0x10e3, esp=0x6f90); qemu has NO block with the RTL's exact (eax=0x406,ecx=0x10e3) at
+0x595d. => the divergence (a wrong CS on the stack, or a wrong eax/ecx/esp feeding it) is UPSTREAM and
+cannot be pinned by eyeballing recurring states. DEFINITIVE NEXT STEP: a real lockstep diff -- align the
+RTL VEN_CMPTRACE (56B recs, /home/yukidama/rcmp/r_*.bin, full regs+segs) against the -icount qemu golden
+(qic.log) from a unique landmark, accounting for RTL=POST / qemu=PRE (RTL[k] vs qemu[k+1]) and skipping
+IRQ handlers, then report the FIRST (cs:eip-aligned) register/CS divergence. That first diverging
+instruction is the core bug. The data to do this all survives; it needs a proper aligner, not grep.
+CONFIRMED-DEAD theories: buffer overlap, [0x426], esi=0x3864, cs=0x26ac, PIT rate, RAM top, soft-VGA,
+A20, memory size -- every one is present in the RENDERING qemu golden.
+
+================================================================================
+§23ce  ROOT CAUSE FOUND (Jun 29) -- RTL PCI model drops the VGA Command-reg write
+================================================================================
+A multi-strategy lockstep aligner (Workflow, 3 strategies: fwd fork-bridging /
+anchor-sequence / backward-from-panic + adversarial verify) finally pinned the
+EARLIEST genuine RTL-vs-qemu divergence, bridging the benign BIOS I/O-port forks
+that defeated every prior aligner.
+
+FIRST GENUINE DIVERGENCE: RTL idx 450970, cs=0008:000e9244, `in ax,dx` (dx=0xCFC,
+PCI CONFIG_DATA). RTL ax=0x0000, qemu ax=0x0103.  divergenceKind = io-read.
+Pre-state byte-identical (eax=0x80001004, edx=0xCFC); only the IN result differs.
+VERIFIED: 40/40 eip-run match, the +1 POST/PRE GPR map byte-perfect for 25 instrs
+before; lockstep 64/64 at sampled points 1k..450k. Not a misalignment artifact.
+
+MECHANISM: SeaBIOS enables PCI 00:02.0 (std-VGA, id=1234:1111) via a read-modify-
+write of its PCI_COMMAND (reg 0x04): read 0x0000, OR 0x0103 (IO|MEM|SERR), write
+back 0x80000103. The WRITE is byte-identical in RTL and qemu (r=449106==q=447772).
+But on READ-BACK, qemu returns 0x0103 (write persisted) while the RTL returns
+0x0000 -- the write was DROPPED. ventium_soc.sv only modeled a writable Command
+for the IDE function (devfn 0x09, `pci_cmd`); dev2 (devfn 0x10) reg 0x04 fell to
+the read `default: 0` and had no write handler -> the enable never stuck.
+
+CAUSAL CHAIN: the misconfigured Command (=0) re-bites when the device is actually
+used: at RTL idx 1604496 the firmware re-reads dev2 reg4, gets 0x0000 vs qemu
+0x0103, and THIS time the control flow forks PERMANENTLY (unbridgeable break at
+idx 1608003). RTL then wanders ~7.8M instructions down the wrong path to its panic
+(first cs=0x0034 at idx 9477461). The long-chased downstream symptom (cs=26ac:3092
+`cmp ax,[bp+6]`, linear 0x33690, first hit idx 8828757) is ~1.94M insns DOWNSTREAM
+of the real root -- a consequence, not the cause. Also explains "No VGA found"
+(Command=0 -> VGA mem/IO decode disabled -> SeaBIOS can't see it).
+
+FIX (rtl/soc/ventium_soc.sv, gated VEN_FWCFG_DPI for the proof; the parallel
+session should land it permanently): added `logic [15:0] pci_vga_cmd` -- a writable
+PCI_COMMAND for dev2. Reset 0; write on (devfn 0x10, reg 0x04) masked &0x0147
+(IO|MEM|MASTER|PARITY|SERR); read reg 0x04 = {16'h0000, pci_vga_cmd}. This makes
+the SeaBIOS enable persist (read-back 0x0103 == qemu), keeping lockstep past idx
+450970. NB: only a few lines, isolated to the PCI cfg shim; no core/memory change.
+VERIFYING: rebuilt obj_dir_soc_fwcfg + re-running the Quake boot to confirm the
+cs=0x34 panic clears (boot proceeds past the old 9478189 quiesce) and the VGA is
+found. If confirmed, Goal 2's root is fixed (and likely the VGA path for rendering;
+Win95's IO.SYS retf-derail is plausibly the same class -- a peripheral readback the
+RTL drops -- to re-check next).
+
+================================================================================
+§23cf  VGA Command fix VERIFIED; SECOND divergence = VGA option-ROM path (Jun 29)
+================================================================================
+VERIFIED the pci_vga_cmd fix end-to-end: rebuilt obj_dir_soc_fwcfg, SeaBIOS POST
+changed "Enabling 00:02.0 ... No VGA found" -> "PCI: Using 00:02.0 for primary VGA".
+First root (dropped VGA Command write) is fixed. The disk auto-runs
+`quake -nosound -nocdaudio -timedemo demo1` (AUTOEXEC.BAT -> \QUAKE\QUAKE.EXE +
+CWSDPMI.EXE). But the cs=0x34 panic PERSISTS (quiesce ~9465015) -> a SECOND root.
+
+Captured a fresh VGA-fixed cmptrace WITHOUT soft-VGA (rcmp2/, 9,465,015 recs) so it
+matches qemu's real-VGA setup. Built a standalone detached aligner (align3.py, runs
+under nohup-style background, survives the session instability that kept killing the
+Workflow). Key aligner lessons: (1) key on EIP ONLY (cs has a POST/PRE offset at far
+jumps/mode switches -> false forks). (2) resync must be BOTH-SIDED (R-gram hash
+reconvergence) because benign forks (SeaBIOS 0x402 debug-port logging: RTL returns
+0xe9 -> logs, qemu 0xff -> doesn't) take different code on BOTH sides then rejoin.
+
+With both-sided bridging the aligner walks 1842 benign forks and hits a PERMANENT
+fork at RTL idx 1605648 / qemu 1619588 (PAST the VGA fix), at the SeaBIOS relocated
+init (cs=0008:02fefXXX). Context: CONFIG_ADDRESS=0x80001030 = dev2 (VGA) reg 0x30 =
+the EXPANSION-ROM BAR; qemu has ebx=0x000c0000 (the legacy option-ROM window) about
+to process the VGA option ROM; RTL has ebx=0. ebp diverges hard (RTL=02fea1c0 vs
+qemu=00009a00) THROUGHOUT the window -> the real divergence is EARLIER (eip-only
+bridging passed it). This is the VGA-BIOS-init / option-ROM path: qemu RUNS the VGA
+option ROM (vgabios-stdvga) and inits the VGA BIOS (-> mode 13h works -> Quake can
+render); the RTL skips/diverges. NB ventium_soc.sv lines 941-944 DELIBERATELY make
+SeaBIOS skip the VGA option ROM (exp-ROM BAR -> zero region -> no 0x55AA) "to avoid
+a hang" -- exactly the opposite of qemu, so this is the rendering blocker.
+
+NEXT: eliminate the 0x402 logging noise (make tb's 0x402 probe return 0xff like
+qemu, gated) for a clean alignment, re-capture, re-align to pin the exact EARLIER
+point where ebp/the stack first diverges; then fix the VGA option-ROM handling so
+the RTL runs the real vgabios (matching qemu) -> VGA BIOS init -> mode-13h -> render.
+Goal-2 is now two roots deep: #1 (VGA Command) FIXED+verified; #2 (VGA option ROM /
+stack divergence) localized to idx ~1.6M, in the rendering path.
+
+================================================================================
+§23cg  CONFIRMED: the Quake-panic causal root is "RTL does not run the VGA BIOS"
+================================================================================
+Hardened align3.py (eip-only keys; BOTH-SIDED R-gram resync to bridge benign forks;
+PRE/POST +1 corrected for the state check; track ONLY ebx/esp/ebp so rep-movs
+esi/edi/ecx granularity + mov-imm post/pre artifacts are filtered). Ruled out two
+false roots: idx 20350 (mov $imm constant; PRE/POST artifact) and idx 85879 (rep
+movsb granularity). idx 373770 (ebx 0 vs 3 in a fwcfg-string scan loop at 02ff345b)
+RECONVERGES -- ebx is overwritten by `mov %eax,%ebx` at 02ff34c4 -- so it is benign.
+The ONE non-reconverging PERMANENT fork is idx 1605648: ebp=02fea1c0 (RTL) vs
+00009a00 (qemu) while processing dev2 reg 0x30 (VGA expansion-ROM BAR). qemu's ebp
+is an option-ROM execution stack; the RTL's is the SeaBIOS init stack -> qemu RAN
+the VGA option ROM and the RTL DID NOT.
+
+ROOT (definitive): the RTL has no working VGA BIOS. The SoC has ven_vgaregs (VGA
+reg file, ports 0x3B0-0x3DF) + u_vga_fb (mode-13h VRAM), but not enough for the
+stdvga option ROM to init, so ventium_soc.sv deliberately points the VGA exp-ROM
+BAR at a zero region -> SeaBIOS finds no 0x55AA -> skips the VGA BIOS. qemu runs it.
+This single missing component blocks BOTH: (a) the panic -- the un-run VGA BIOS
+leaves POST state (BDA video vars, int vectors, the option-ROM memory map) that
+diverges from qemu, cascading ~7.8M instrs to the go32/CWSDPMI cs=0x34 panic
+(idx 9477461) BEFORE Quake ever renders; and (b) rendering itself (mode-13h needs
+the VGA BIOS / a complete VGA). VERIFIED empirically: with the mode-13h soft-VGA
+added to tb_soc (case 0x00 -> set BDA 0x449/0x44A/0x44C/0x462/0x487), Quake STILL
+panics at retire 9478555 and all 6 framebuffer dumps (u_vga_fb.vram) are 0/64000
+nonzero -- the panic precedes rendering, so the soft-VGA mode-13h fix is necessary
+but not sufficient.
+
+To finish Goal-2 requires implementing a sufficient VGA model so the stdvga option
+ROM runs (or fully emulating its POST side-effects at the right point), then the
+mode-13h path renders. That is a substantial missing component, largely in the SoC
+RTL (ven_vgaregs / u_vga_fb / the exp-ROM BAR decode) -- the parallel session's.
+DELIVERED THIS PASS: root #1 (VGA Command) fixed+verified, the mode-13h soft-VGA,
+a robust session-death-proof aligner, and the definitive root for the residual panic.
+
+ATTEMPTED + RULED OUT (the fix is SoC-side, not tb-side): added a gated memmodel
+alias (VEN_VGA_OPTROM, memmodel.cpp read8/read32) serving the vgabios (loaded at
+0xC0000) at the VGA exp-ROM BAR window 0xFEBE0000 so SeaBIOS would find 0x55AA and
+RUN the VGA BIOS. RESULT: byte-identical boot (retired 9465015 unchanged) -> the
+SoC decodes the option-ROM/BIOS-shadow region (0xC0000-0xFFFFF and the febxxxxx PCI
+MMIO) INTERNALLY in ventium_soc.sv, NOT through the tb memmodel, so a tb/memmodel
+alias never reaches the core. CONCLUSION: making the RTL run the stdvga option ROM
+(and modeling the VGA well enough for it to init like qemu) must be done in the SoC
+RTL (ventium_soc.sv exp-ROM BAR decode + ven_vgaregs/u_vga_fb) -- the parallel
+session's domain. This is the single missing component gating Quake (panic + render).
+The mode-13h soft-VGA path (tb_soc.cpp) is ready for when that lands.
+
+================================================================================
+§23ch  BREAKTHROUGH: VGA opt-rom served from a STABLE snapshot -> panic CLEARED
+================================================================================
+The "ruled out" above was WRONG. Instrumenting the alias showed SeaBIOS DOES read
+0xFEBE0000 through the memmodel (4 hits at offset 0), but the live 0xC0000 it aliased
+to had been OVERWRITTEN by SeaBIOS POST shadowing before the VGA scan -> no 0x55AA.
+FIX (memmodel.cpp, gated VEN_VGA_OPTROM): load_image now snapshots the std-VGA option
+ROM into a stable 64KB buffer g_optrom[] at load time; read8/read32 serve the VGA
+exp-ROM BAR window (0xFEBE0000) from g_optrom (not the clobbered 0xC0000).
+
+RESULT (VEN_VGA_OPTROM=1, real vgabios, no soft-VGA): SeaBIOS now prints
+"Running option rom at c000:0003" -> "Start SeaVGABIOS" -> "enter vga_post" ->
+"No VBE DISPI ... falling back to stdvga" -> "set VGA mode 3". The VGA BIOS RUNS
+(matching qemu). The cs=0x34 panic is GONE: boot advances from 9.46M (old panic) to
+retire 10,044,535 and FreeDOS boots cleanly to FreeCom (verified via --peek-vga: the
+0xB8000 text shows the full FreeDOS kernel banner + "FreeCom version 0.86"). So the
+root analysis was right (un-run VGA BIOS -> POST divergence -> panic) AND it IS
+fixable from my domain. New blocker: quiesce at ~10.04M (Quake init / mode-13h on the
+incomplete ven_vgaregs model) -- u_vga_fb framebuffer still 0 at the 9M dump; checking
+finer dumps 9-10.1M for any rendered pixels next.
+
+================================================================================
+§23ci  Option-ROM layout chain: serve each PCI device's exp-ROM (same pattern)
+================================================================================
+After the VGA fix the cs=0x34 panic recurred LATER (cs=0x0034:0x3835, the CWSDPMI
+panic handler). align3.py (hardened: eip-only keys, both-sided R-gram resync,
+PRE/POST +1, track ebx/esp/ebp only) shows the permanent fork marching forward as
+each POST divergence is fixed -- the RTL must reproduce qemu's EXACT option-ROM /
+UMB layout (CWSDPMI reads the memory map). Chain of forks + fixes (all gated
+VEN_VGA_OPTROM in memmodel.cpp; VEN_E1000_ROM=path to pxe-e1000.rom):
+  * 1.60M : VGA exp-ROM not served      -> serve vgabios snapshot @0xFEBE0000 (g_optrom)
+  * 2.35M : e1000 PXE ROM not served    -> serve pxe-e1000.rom @0xFEB80000 (g_e1000rom);
+            iPXE now runs ("captured int19"); boot 10.04M -> 10.54M
+  * 2.87M : e1000 ROM bad checksum (b9) -> qemu patches the ROM checksum at load; the
+            raw file doesn't. Fix: load_e1000_rom adjusts the last byte of the declared
+            image (ROM[2]*512) so the byte-sum==0, like qemu. (testing now)
+Each fix extends the RTL==qemu match (1.6M->2.35M->2.87M->...) and pushes the boot
+further (9.46M->10.04M->10.54M). Quake LAUNCHES (runs CWSDPMI) and gets further each
+time. The pattern is mechanical: every PCI device's option ROM must be served from a
+checksum-patched snapshot at its exp-ROM BAR so SeaBIOS builds qemu's exact layout.
+Framebuffer (u_vga_fb.vram) still 0 -- panic precedes render -- but the wall is broken.
+
+================================================================================
+§23cj  STATE after the option-ROM chain (honest assessment)
+================================================================================
+NET PROGRESS this pass (the session-long wall is BROKEN):
+  * Quake went from NEVER launching -> LAUNCHES + runs CWSDPMI every run.
+  * Boot advanced 9.46M (old panic, no VGA BIOS) -> 10.04M (VGA BIOS) -> 10.54M (e1000).
+  * RTL==qemu lockstep match extended 1.6M -> 2.35M -> 2.87M.
+  * Fixes (all mine, gated): VGA Command reg (ventium_soc.sv pci_vga_cmd); VGA option
+    ROM snapshot @0xFEBE0000 + e1000 PXE ROM @0xFEB80000 + checksum patch (memmodel.cpp
+    VEN_VGA_OPTROM / VEN_E1000_ROM). BUILD NOTE: make does not reliably recompile
+    memmodel.cpp on edit (clock-skew mtime) -- `rm obj_dir_soc_fwcfg/memmodel.o` first.
+  * The e1000 "bad checksum b9" is NOT a bug: the raw ROM is sum=0, but iPXE
+    self-modifies when it runs -> post-run sum=b9 (SeaBIOS warns, runs it anyway).
+
+REMAINING (the residual cs=0x34:0x3835 CWSDPMI panic, ~10.5M):
+  2.87M fork = option-ROM DEPLOYMENT ORDER differs (RTL puts the 67KB e1000 ROM at
+  0xCA000; qemu has a small ROM there + e1000 elsewhere). Matching qemu now needs the
+  exact SeaBIOS ROM-ordering, not just contents -- a subtler POST layer. This is a deep
+  byte-for-byte POST-matching chain (each fix exposes a finer divergence). EVEN after
+  it, rendering needs ven_vgaregs/u_vga_fb to support mode-13h (Quake's writes to
+  0xA0000) -- a separate SoC-RTL gap. So the full rendered timedemo needs (a) finish the
+  POST-match chain AND (b) complete the SoC VGA model. Both substantial; (b) is the
+  parallel session's RTL. The crux (un-run VGA BIOS -> panic) is SOLVED and Quake runs.
+
+================================================================================
+§23cl  CLEAN no-e1000/no-debugcon alignment + panic root CONFIRMED (Jun 29)
+================================================================================
+Acting on the user's "remove ethernet from BOTH sides" idea, the comparison was
+cleaned of its two biggest POST-noise sources:
+  * VEN_NO_E1000 (ventium_soc.sv, gated): dev 0x18 reads 0xFFFFFFFF -> SeaBIOS does
+    not enumerate the e1000, collapsing the whole iPXE/option-ROM divergence chain.
+  * VEN_NO_DEBUGCON (ventium_soc.sv, gated): I/O 0x402 reads 0xff (not the sticky
+    0xe9), so SeaBIOS finds NO debug port and skips POST logging. qemu run WITHOUT
+    -debugcon to match. Removes log-buffer stack drift. (-2708 RTL instrs.)
+  * qemu golden config locked: -cpu pentium -accel tcg,one-insn-per-tb=on -nic none
+    (one-insn-per-tb was THE fix for the early-boot "divergence" -- it was only
+    per-TB vs per-instruction logging granularity, never a real fork. e05b is
+    `cmpl %cs:0x6228` (a memory-var branch), NOT the debug-port check.)
+
+ALIGNMENT (align3.py, esp-tracker added): early boot byte-aligns (k=qi=0). The
+forward aligner hits LARGE BENIGN PHASE differences in POST -- SeaBIOS loops with
+different iteration counts that converge later (e.g. RTL at e9f88 while qemu still
+iterates 16-byte entries at 0xf52xx via 02fec7ab->02ff6e69, then converges to e9f84).
+These defeat eip-bridging (coincidental eip matches w/ different caller context), so
+the reported "permanent fork" at ~2.23M (RTL in relocated-init 02ffxxxx vs qemu in
+BIOS 000exxxx) is the ACCUMULATED phase skew, not the root.
+
+PANIC ROOT (confirmed from the fresh clean trace, idx ~10.018M):
+  cs=26ac:325c loads esi=0x3864 from [ds:0x426] (linear 0x2cb26); a far-ret at
+  cs=26ac:595b pops cs=0034 -> CWSDPMI fault path (3275... -> 3835 CLI;HLT).
+  0x3864 = IDE disk data: go32's DPMI transfer buffer (es~0x2bac, lin 0x2bac0) sits
+  ~132KB too low and OVERLAPS [ds:0x426]; the disk read streams data over it ->
+  bad DPMI descriptor -> panic. qemu places the same buffer at es=0x4cXX (clear).
+
+MEMPROBE (tb_soc.cpp VEN_MEMPROBE, mine) -- conventional memory is CORRECT:
+  [0x413]=639KB, [0x40E] EBDA=0x9fc0 (top 0x9fc00) -- both MATCH qemu exactly.
+  [ds:0x426]@0x2cb26 = 0x3956 (clobbered, post-panic). So the LOW-memory layout is
+  right; the divergence is in HIGH memory (the ~6KB XMS delta from BIOS table sizes
+  at top-of-RAM, the f52xx-loop region) which shifts go32's conventional allocator.
+  The fwcfg blob is NOT a stale with-e1000 snapshot (no e1000/pxe strings).
+
+NEXT: identify the 0xf52xx 16-byte-entry table (likely $PIR / SMBIOS / PCI list) and
+make the RTL's device enumeration build the byte-identical table qemu does, so the
+top-of-RAM reservation (hence XMS, hence go32's buffer base) matches. That removes the
+[ds:0x426] overlap -> no clobber -> no panic. Then rendering still needs the SoC VGA
+mode-13h path (separate gap).
+
+§23cl-b  HIGH-MEM TABLE DIVERGENCE PINNED: RTL builds NO SMBIOS (Jun 29)
+------------------------------------------------------------------------
+Extended MEMPROBE (tb_soc.cpp) F-segment signature scan at the panic:
+  RTL has:  _MP_@f5480  $PIR@f5560  $PnP@f60c0   (+ ACPI FACS@0x3fe0000)
+  RTL LACKS: _SM_  (SMBIOS 2.x entry point) -- NONE found in 0xf0000-0xfffff.
+qemu's f52xx-loop (02fec7ab->02ff6e69, copying 16B/iter to 0xf5250+) WAS building
+SMBIOS structures ~560 bytes BEFORE the RTL's first table (_MP_@f5480). The fwcfg
+blob DOES contain etc/smbios/smbios-anchor + etc/smbios/smbios-tables.
+CORRECTION/REFINED: the fwcfg DPI (tb_soc.cpp:78 fwcfg_dpi_byte) DOES correctly serve
+all 12 blob files -- the dir (sel 0x19) + file content (sel 0x20..0x2B, all < the 0x30
+table limit). So the SMBIOS DATA reaches SeaBIOS; fwcfg serving is NOT the gap. And the
+"no _SM_" result is UNCONFIRMED: modern SeaBIOS allocates the SMBIOS entry point via
+malloc_high (HIGH memory ~0x3fexxxx), which the F-segment-only scan cannot see. So do
+NOT assume SMBIOS is missing.
+DISPROVEN (Jun 29, full-RAM scan): the RTL DOES build the SMBIOS -- it uses the 3.x
+anchor _SM3_@0xf52c0 (my first scan only looked for the 2.x "_SM_", so it was missed).
+The f5240-f5490 dump shows the RTL builds the COMPLETE table set: RSD PTR @0xf52a0,
+_SM3_ @0xf52c0 (SeaBIOS rel-1.16.3, "QEMU Standard PC (i440FX+PIIX,1996)", pc-i440fx-8.2),
+plus _MP_@f5480 $PIR@f5560 $PnP@f60c0 -- byte-plausibly identical to qemu. So the
+"0xf5250 missing table" was a mis-read of qemu's own RSDP/SMBIOS build (which the RTL
+ALSO does). ==> THE BIOS MEMORY LAYOUT IS *NOT* THE DIVERGENCE. Conventional (639/EBDA),
+F-seg tables, and SMBIOS all match. This RULES OUT the whole memory-layout branch.
+
+REDIRECT (the real mechanism): the panic-driving value [ds:0x426]@0x2cb26 is STALE in
+the RTL (0x3864) while qemu updates it with small values -- i.e. the RTL DROPS or
+MISDIRECTS a guest store to linear 0x2cb26 (a store-commit / mem-ordering bug in the
+core or the SoC mem path), NOT a memory-map issue. This is consistent with the earlier
+"95% bit-identical, one localized cell diverges" framing.
+ACTIONABLE NEXT: use the TB's existing --watch-write 0x2cb20 to log every store into
+[0x2cb20,0x2cb30) with PC over the whole Quake run; find the store the RTL drops or
+sends to the wrong address vs qemu's update stream; map that PC/access to core.sv (store
+buffer / forwarding / segment-base) or the SoC mem decode. That dropped store is the root.
+
+§23cl-c  *** NON-DETERMINISM uncovered (Jun 29) -- likely the true blocker ***
+------------------------------------------------------------------------------
+The --watch-write 0x2cb20 run shows 0x2cb26 ([ds:0x426]) is written ONLY by the BIOS
+PM memory-clear (rep-stosb, cs=0008:000ea05e, wdata=0, ecx counting down) at retire
+~5.28M, then NEVER AGAIN. Yet the MEMPROBE reads [ds:0x426] as 0x3956 on the probe2/3
+builds but 0x0000 on the probe4 (extended-probe) build -- SAME RTL defines, SAME run
+args (--max-insn 10100000 --quiesce 20000000), SAME retire count 10019388, differing
+ONLY in post-run C++ probe code. => the RTL RUN ITSELF IS NON-DETERMINISTIC: identical
+model+inputs produce different guest memory at the panic.
+Ruled out as the source: TB memmodel (absent pages default-construct ZEROED -- qemu-like,
+memmodel.cpp:63), and ven_rtc.c (explicitly "no host clock" -- deterministic).
+=> the non-determinism is UNINITIALIZED RTL STATE that Verilator X-initializes (a cache
+or buffer with no reset -- the uopcache rtl/mem/uopcache.sv is a prime suspect, and is in
+the working-tree modified set). The boot aligns deterministically (the caches are cold/
+flushed early), but the long Quake/go32 phase reads an X-initialized structure whose
+Verilated value varies build-to-build -> the bad descriptor -> CWSDPMI panic.
+*** RETRACTED (Jun 29, definitive test): NO non-determinism. ***
+Same binary run TWICE in parallel => BYTE-IDENTICAL (6183081 insns, 65414201 clocks,
+[ds:0x426]=0x0000 both). The sim IS deterministic. The 0x3956-vs-0x0000 difference was
+the STOP POINT, not the run: under `timeout 700`, a run with extra probe/log overhead (or
+parallel CPU contention) only reaches ~6.18M insns and stops there (quiesce/kill) BEFORE
+the [ds:0x426] clobber, which happens at ~9-10M. So [ds:0x426]=0 == "not clobbered yet";
+0x3956 == "clobbered (reached the panic at 10.019M)". The clobber is REAL + REPRODUCIBLE.
+Consequence: the earlier --watch-write run also stopped at ~5-6M (its log ends at the
+5.28M BIOS clear), so it NEVER reached the ~10M clobber store -- that is why it caught no
+write to 0x2cb26. RE-RUN the watchpoint with a LONGER timeout (>=1100s) to reach 10M and
+catch the actual clobber store (PC + wdata). The store-tracing plan (§23cl-b) stands; it
+just needs to run far enough. [Everything below this line about X-init was the mistaken
+non-determinism theory; ignore it.]
+------------------------------------------------------------------------------
+(superseded) CORRECTION: the `soc` make target (Makefile:109) uses VL_FLAGS WITHOUT the XINIT_FLAGS
+(`--x-initial unique --x-assign unique --x-initial-edge` is only on a separate kv target,
+line 169-172). So this build uses Verilator's DEFAULT 0-init -- deterministic. So the
+variance is NOT Verilator X-randomization. The two values (0x3956 vs 0x0000) came from
+two DIFFERENT BUILDS (probe2 = conv-probe only; probe4 = +F-seg/SMBIOS/f5250 probe), with
+the differing C++ all POST-run -- which should NOT change a deterministic sim. So either
+(a) a tb-side C++ non-determinism leaks into the run (e.g. std::unordered_map<pidx,Page>
+pages_ iteration order, an uninitialized host var, a pointer/ASLR-dependent value), or
+(b) a genuinely reset-less RTL array whose Verilated 0-init is perturbed by codegen.
+ACTIONABLE NEXT (highest priority -- DEFINITIVE TEST FIRST):
+  1. Run the SAME binary twice, compare [ds:0x426]. SAME => build-dependent (bisect the
+     C++ delta / check pages_ ordering use). DIFFERENT => runtime non-determinism (host
+     var / map order) -- grep the TB hot path for unordered_map iteration + uninit reads.
+  2. Audit reset coverage of rtl/mem/uopcache.sv + any TLB/predictor/fill buffer (cold
+     read must MISS, not return stale/0-but-wrong data).
+  3. Until the run is provably reproducible, the ~10M panic analysis is unreliable past
+     the cache-warm point -- restore determinism BEFORE chasing the residual logic diff.
+TOOLING NOTE (Jun 29): the Bash dangerouslyDisableSandbox path began failing mid-session
+(shell init exits 1); the normal sandbox works for read-only cmds. Build/run that need
+writes may need the sandbox-disable restored.
+
+§23cl-d  BUILD-DEPENDENT QUIESCE POINT -> likely uninitialized TB C++ var (Jun 29)
+----------------------------------------------------------------------------------
+The extended-probe build QUIESCES at exactly 6183081 insns / 65414201 clocks (verified:
+2 parallel runs + the long-timeout watch run ALL identical 6183081), while the earlier
+runprobe2 build reached the 10019388 panic. Same RTL +defines; the ONLY delta is post-run
+C++ MEMPROBE code. A deterministic sim cannot change its stop point from post-run-only
+edits -> the run must read an UNINITIALIZED C++ variable in the TB whose value depends on
+binary memory layout (deterministic per-binary, varies across binaries). This ALSO explains
+the earlier 0x3956-vs-0x0000 "variance" (different builds stop at different insns; 0x0000 =
+stopped at 6.18M before the ~10M clobber; 0x3956 = reached the 10M panic).
+ACTIONABLE NEXT (do FIRST -- it gates everything): build tb_soc with -fsanitize=memory (or
+run under valgrind --track-origins=yes) and find the uninitialized read on the run path
+(tb_soc.cpp / memmodel.cpp / dpi_retire.cpp / xover.cpp). Fix it -> the stop point becomes
+build-stable -> THEN re-run the --watch-write 0x2cb20 to reach 10M and capture the clobber
+store PC. Until then the panic point is not build-portable.
+
+§23cl-e  RETRACTION of §23cl-d (Jun 29): the 6.18M stop is a FALSE QUIESCE
+--------------------------------------------------------------------------
+With --quiesce raised 20M->120M, the run does NOT stop at 6183081 (no early "retired"
+line; it kept running until the wall-clock timeout). So 6183081 was the --quiesce 20M
+threshold tripping on a LEGITIMATE long wait right after the 5.28M BIOS memory-clear
+(SeaBIOS/DOS spins HLT-idle waiting on the PIT or disk for >20M core clocks there). It
+is NOT an uninitialized TB variable, and NOT non-determinism -- both prior theories
+(§23cl-c, §23cl-d) are RETRACTED. The sim is deterministic and DOES reach the ~10M panic
+given a large enough --quiesce. LESSON: for the long Quake run, use --quiesce >=120000000
+(the 20M default false-trips on Quake/CWSDPMI idle spins). The --watch-write run is slow
+(~2x: per-write window check over 5.6M writes) so reaching 10M needs timeout ~1800s.
+Pending: ww4.log (--quiesce 120M, timeout 1750) to finally capture the [0x2cb26] clobber
+store PC -- the direct bug site for the 0x3864 bad-descriptor panic.
+
+§23cl-g  Jun 30: "non-determinism" is BENIGN delay-loop length (retracts §23cl-c/d)
+-----------------------------------------------------------------------------------
+RESOLVED the build-dependent stop puzzle. At ~6.18M the core sits in a `loop $` timed
+delay (rcmpnd R6183700+: cs=1fe0:00007dcf, ecx counts 0x200->0, eip constant, IF=1),
+right after the soft-VGA "set VGA mode 3". These VGA/startup delays are LONG and their
+sim-clock duration varies with binary speed, so the default --quiesce (20M-60M) FALSE-
+TRIPS mid-delay -> the build-dependent "stop at 6183081/6183700". It is NOT an uninit
+read and NOT a correctness divergence: with --quiesce 400000000 the run RESUMES and
+executes the identical path (verified: VGA init -> "set VGA mode 3" -> Quake startup).
+So §23cl-c (non-determinism) and §23cl-d (uninit var) are RETRACTED. The execution and
+final memory state are deterministic; only the idle/delay duration is layout-sensitive.
+PRACTICAL RULES for the long Quake run:
+  * use --quiesce >=400000000 (the delays exceed 60M core-clocks).
+  * runs are SLOW (~1hr to 10M) because the sim evaluates every clock through the
+    multi-100M-clock delays at ~110K clk/s. A real speedup would need to shorten the
+    VGA-mode-set / startup delays (cap the retrace/tick wait) -- separate task.
+CLOBBER PATH: the top->mem_we core-bus watchpoint caught NO store to 0x2cb26 across the
+run -> the [ds:0x426] clobber is NOT a core store. Added a memmodel write8-level watch
+(VEN_MEMWATCH, catches ALL masters incl IDE-DMA after the SoC mux) to capture it; the
+--quiesce 400M run is in flight to reach the ~10M clobber and log its value+timing.
+WIN95 (fresh-ish): boots full POST + e820 map + "Booting from Hard Disk 0000:7c00" +
+soft-VGA INT10h, then derails/idles at ~5.74M (the documented IO.SYS kernel-placement
+garbage-spin, §23cf) -- same root class as Quake's value divergence.
+RENDER GAP: Quake targets VESA 0x101 (640x480x256 linear FB); SoC ven_vga_fb models only
+mode-13h (64KB @0xA0000). A 640x480 LFB aperture is a substantial missing SoC component.
+
+§23cl-h  Jun 30 02:14: slow-run blocker = parallel session's PIT-readback WIP
+-----------------------------------------------------------------------------
+The instrumented Quake runs stall at exactly 6183700 insns / 133296579 clocks (a >60M-
+core-clock guest DELAY at cs=1fe0:7dcf `loop $` after "set VGA mode 3"). Tracked to ROOT:
+  * probe2 (06-29 RTL) reached 10M FAST (~12min). ALL 06-30 builds stall at 6.18M --
+    EVEN the minimal layout (probe2's MEMPROBE + only the write8 watch). So it is NOT a
+    build-layout uninit (retract that worry) and NOT my instrumentation.
+  * The variable is the RTL: ven_pit.sv + uopcache.sv were edited at 02:12 (live WIP).
+    git diff ven_pit.sv = an in-progress rework of the COUNTER READBACK (f_get_count /
+    f_get_out, the d%count / (2d)%count value returned on a port-0x40 read).
+  * The guest's startup delay CALIBRATION reads the PIT counter (port 0x40). A wrong
+    readback during the rework -> the calibration computes a huge delay-loop count ->
+    the >60M-clock stall -> runs crawl (multiple such delays => ~1hr to 10M, infeasible).
+CONSEQUENCE: the Quake clobber-capture + panic analysis are BLOCKED on the parallel
+session's PIT readback landing correctly. It is transient (their WIP). When the PIT
+counter readback is fixed, the guest delays return to normal and runs are fast again.
+MY SIDE IS READY: memmodel write8 watch (VEN_MEMWATCH, catches all masters incl IDE-DMA)
++ the minimal MEMPROBE are in place to capture the [ds:0x426] clobber the moment runs are
+fast. The clobber is confirmed NOT a core-bus store (IDE-DMA/other master).
+DO NOT edit ven_pit.sv from this session (parallel session owns it + is mid-edit).
+
+§23cl-i  Jun 30: Win95 5.74M = REAL hang (not false-quiesce); Quake 6.18M = finite delay
+---------------------------------------------------------------------------------------
+Win95 re-run with --quiesce 1000000000 STILL quiesced at 5740461 insns (idled the full
+1B clocks -> quiesce). So Win95's 5.74M stop is a REAL HANG/derail (the IO.SYS jump to
+0x8000 garbage, §23cf), NOT a finite delay -- correcting my prior false-quiesce guess.
+Contrast: Quake's 6.18M is a FINITE delay (the --quiesce 400M run RESUMED past it). So the
+two are different stop TYPES, but both trace to the same CLASS: a disk-sector read landing
+at the wrong guest address (Quake: buffer over [ds:0x426]; Win95: kernel not at 0x8000).
+=> the Quake clobber-capture (patient run, --quiesce 1B, in flight) is the key: its root
+(why a sector read is mis-placed) should also explain Win95's kernel mis-placement.

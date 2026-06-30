@@ -88,3 +88,5 @@ mem/tlb.sv
 // biu_p5 is self-contained (its own localparams, no ventium_pkg import).
 bus/biu_p5.sv
 bus/biu.sv
+soc/ven_pic.sv
+soc/ven_pit.sv

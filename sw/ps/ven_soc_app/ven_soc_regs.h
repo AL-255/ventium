@@ -31,6 +31,10 @@
 #define VEN_R_IO_RDATA   0x30   // RW (PS writes the IN return value)
 #define VEN_R_IO_CTRL    0x34   // W1P: [0]ACK [1]IRQ_CLR
 #define VEN_R_INTR       0x38   // RW: PS->core interrupt-injection seam (F3)
+#define VEN_R_IRQ_IN     0x3C   // RW: VEN_RTL_IRQ device-IRQ levels [15:0] -> the RTL PIC
+                                //     (present only in a +VEN_RTL_IRQ bitstream; bit 0 = IR0
+                                //     is ignored, the RTL PIT owns it)
+#define VEN_R_FIXED_IRQ0_HALF 0x74 // RW: VEN_RTL_IRQ_FIXED IR0 half-period (cyc/2-1); default 1999=4000-cyc IR0; devmem 0xA0000074
 // int-0x80 syscall window (0x40-0x6C; present only in a +VEN_PS_PROXY bitstream).
 // The core stalls in S_SYSCALL_WAIT on a cd80; the PS reads {nr,args}, stages the
 // kernel memory effects into the DDR carveout, writes RET/GS, then W1P SYS_CTRL.
@@ -117,6 +121,12 @@
 #define VEN_R_FPT_RES    0xF8  // W   result word -> res[IDX] (IDX 0-2)
 #define VEN_R_FPT_CTRL   0xFC  // W1P [0]=commit -> the core resumes
 #define VEN_FPT_STAT_ACTIVE  (1u << 0)   // a FP trap is pending + operands valid
+// FPT_STAT op field: {27'd0, fptrap_op, fptrap_active} (ven_soc_axil.sv) — op is the
+// fxop_e identity (0 = FPATAN, the legacy FPATAN-only tie-off) above the active bit.
+#define VEN_FPT_OP_SHIFT     1            // op field starts at bit[1] (active is bit[0])
+#define VEN_FPT_OP_MASK      0x7Fu        // 7-bit fxop_e (FP_PS_ALL full x87 dispatcher)
+// FPT_CTRL: [0]=commit; FP_PS_ALL packs the 4-bit res stack-action above it ([4:1]).
+#define VEN_FPT_ACT_SHIFT    1            // stack-action field starts at bit[1] (commit is bit[0])
 
 // ---- CTRL bits ------------------------------------------------------------
 #define VEN_CTRL_CORE_RUN   (1u << 0)   // 1 = release the core's reset

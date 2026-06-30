@@ -322,16 +322,29 @@ module ven_ide #(
     assign       dma_busy = HAS_DMA && ((dma_state != DMA_IDLE) || dma_launch);
 
     // ---- backing stores --------------------------------------------------
+`ifdef VEN_IDE_DPI_DISK
+    // Host-file IDE backing (DPI): the image is served on demand from a raw file by
+    // the TB (tb_soc.cpp: ven_ide_disk_rd/wr) instead of being baked into a Verilated
+    // $readmemh array. This lets multi-GiB images (e.g. Win95, 2 GiB) back the IDE
+    // without exceeding Verilator's ~1-billion-bit unpacked-array limit. GATED: the
+    // default branch below is byte-for-byte unchanged. Env VEN_IDE_DISK_RAW = raw img.
+    import "DPI-C" function byte unsigned ven_ide_disk_rd(input int unsigned addr);
+    import "DPI-C" function void          ven_ide_disk_wr(input int unsigned addr,
+                                                          input byte unsigned data);
+`else
     logic [7:0]  disk [0:DISK_SECTORS*512-1];   // raw image, $readmemh
+`endif
     logic [15:0] identify_words [0:255];        // built at time 0 (constants)
     // F3: byte-address width into disk[]. For the default 128-sector (64 KiB) disk
     // this is 16, so the pre-F3 [15:0] addressing is byte-identical; a larger FreeDOS
     // disk (DISK_SECTORS overridden via +define) widens it so sector N no longer
     // aliases to N&127 (the xfer_lba[6:0]/16-bit cap was the 64 KiB ceiling).
     localparam int DBW = $clog2(DISK_SECTORS*512);
+`ifndef VEN_IDE_DPI_DISK
 `ifdef VEN_IDE_DISK_HEX
     // HAS_DISK=0 (the empty ATAPI CD) -> no backing image to load.
     initial if (HAS_DISK) $readmemh(`VEN_IDE_DISK_HEX, disk);
+`endif
 `endif
 
     // ---- IDENTIFY DEVICE block (qemu 8.2.2 ide_identify, this -drive config) --
@@ -420,7 +433,13 @@ module ven_ide #(
                 8'd88:   data_word = r_w88;            // ultra DMA
                 default: data_word = identify_words[data_idx[7:0]];
             endcase
-        end else data_word = {disk[disk_byte + 16'd1], disk[disk_byte]};
+        end else begin
+`ifdef VEN_IDE_DPI_DISK
+            data_word = {ven_ide_disk_rd(32'(disk_byte) + 32'd1), ven_ide_disk_rd(32'(disk_byte))};
+`else
+            data_word = {disk[disk_byte + 16'd1], disk[disk_byte]};
+`endif
+        end
     end
 
     always_comb begin
@@ -475,8 +494,13 @@ module ven_ide #(
                 dma_mem_wstrb = 4'hF;
                 dma_mem_addr  = prd_base + {23'd0, dma_beat, 2'b00};   // base + beat*4
                 // little-endian dword from disk[] (byte-identical to a PIO READ)
+`ifdef VEN_IDE_DPI_DISK
+                dma_mem_wdata = {ven_ide_disk_rd(32'(dma_doff) + 32'd3), ven_ide_disk_rd(32'(dma_doff) + 32'd2),
+                                 ven_ide_disk_rd(32'(dma_doff) + 32'd1), ven_ide_disk_rd(32'(dma_doff))};
+`else
                 dma_mem_wdata = {disk[dma_doff + 16'd3], disk[dma_doff + 16'd2],
                                  disk[dma_doff + 16'd1], disk[dma_doff]};
+`endif
             end
             default: ;  // DMA_IDLE: bus idle
         endcase
@@ -572,8 +596,13 @@ module ven_ide #(
                             // sector's words are DROPPED (disk[] never mutated) —
                             // qemu fills the buffer then aborts without writing.
                             if (xfer_lba < NSECT28) begin
+`ifdef VEN_IDE_DPI_DISK
+                                ven_ide_disk_wr(32'(disk_byte),          wdata[7:0]);
+                                ven_ide_disk_wr(32'(disk_byte) + 32'd1,  wdata[15:8]);
+`else
                                 disk[disk_byte]         <= wdata[7:0];
                                 disk[disk_byte + 16'd1] <= wdata[15:8];
+`endif
                             end
                             // advance/commit logic OUTSIDE the in-range gate (the
                             // host always fills all 256 words, even for an OOR

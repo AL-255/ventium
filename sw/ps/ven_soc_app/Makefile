@@ -25,9 +25,27 @@ TBDIR   := ../../../verif/tb
 OBJDIR  := build
 
 # C sources (control app + the F4 syscall-trace module + the F3 peripheral C models).
-C_SRC   := ven_soc_app.c ven_systrace.c hid_kbd.c \
+C_SRC   := ven_soc_app.c ven_systrace.c hid_kbd.c ven_fp_ps.c \
            $(PERIPH)/ven_i8042.c $(PERIPH)/ven_pic.c $(PERIPH)/ven_vgaregs.c \
            $(PERIPH)/ven_pit.c $(PERIPH)/ven_rtc.c $(PERIPH)/ven_ide.c
+
+# ---- SoftFloat-3e extF80 (the x87 floatx80 math for the FP_PS_ALL trap handler) ----
+# aarch64 `long double` is 128-bit IEEE, NOT floatx80, so ven_fp_ps.c uses Berkeley
+# SoftFloat-3e extF80 (8086-SSE specialization = x87-faithful). Built here from the
+# verif/fpu87 submodule with the SAME CC (so a CROSS_COMPILE=... build cross-builds it).
+SF_DIR    := $(abspath ../../../verif/fpu87/extern/berkeley-softfloat-3)
+SF_SRC    := $(SF_DIR)/source
+# platform build dir: native x86_64 for a host compile-check; ARM VFPv2 for the
+# aarch64 cross build (CROSS_COMPILE set). Both are FAST_INT64 by-value extF80.
+ifneq ($(CROSS_COMPILE),)
+SF_BUILD  := $(SF_DIR)/build/Linux-x86_64-GCC
+else
+SF_BUILD  := $(SF_DIR)/build/Linux-x86_64-GCC
+endif
+SF_SPEC   := 8086-SSE
+SF_OBJDIR := $(abspath $(OBJDIR))/softfloat
+SF_LIB    := $(SF_OBJDIR)/softfloat.a
+SF_CFLAGS := -DSOFTFLOAT_FAST_INT64 -DLITTLEENDIAN=1 -I$(SF_SRC)/include
 # C++ sources (F4 Quake proxy: board glue + g_ddr-backed MemModel + the ported
 # verif/tb emulator/loader, compiled with -I$(TBDIR) so they pick up that header
 # set; the board MemModel bodies in mem_carveout.cpp are the ones that link).
@@ -44,17 +62,27 @@ all: ven_soc_app ven_fb_vnc
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
+# SoftFloat library (built once with the active CC; cross-compiles via CROSS_COMPILE).
+$(SF_LIB): | $(OBJDIR)
+	@mkdir -p $(SF_OBJDIR)
+	@cp -f $(SF_BUILD)/platform.h $(SF_OBJDIR)/platform.h
+	$(MAKE) -C $(SF_OBJDIR) -f $(SF_BUILD)/Makefile \
+		SOURCE_DIR=$(SF_SRC) SPECIALIZE_TYPE=$(SF_SPEC) CC="$(CC)"
+
+# ven_fp_ps.o needs the SoftFloat include path (extF80 API).
+$(OBJDIR)/ven_fp_ps.o: ven_fp_ps.c ven_fp_ps.h ven_soc_regs.h | $(OBJDIR)
+	$(CC) $(CFLAGS) $(SF_CFLAGS) -I$(PERIPH) -c $< -o $@
+
 $(OBJDIR)/%.o: %.c ven_soc_regs.h | $(OBJDIR)
 	$(CC) $(CFLAGS) -I$(PERIPH) -c $< -o $@
 
 $(OBJDIR)/%.o: %.cpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -I. -I$(TBDIR) -c $< -o $@
 
-# link with the C++ driver so libstdc++ is pulled in; -lm for the FPATAN trap's
-# atan2/ldexp/frexp (floatx80<->double conversion in ven_soc_app.c). -lm trails the
-# objects so the static archive resolves the references.
-ven_soc_app: $(C_OBJ) $(CXX_OBJ)
-	$(CXX) $(LDFLAGS) -o $@ $^ -lm
+# link with the C++ driver so libstdc++ is pulled in; -lm for the trap's libm
+# transcendental bridge; the SoftFloat archive trails so its extF80 refs resolve.
+ven_soc_app: $(C_OBJ) $(CXX_OBJ) $(SF_LIB)
+	$(CXX) $(LDFLAGS) -o $@ $(C_OBJ) $(CXX_OBJ) $(SF_LIB) -lm
 
 ven_fb_vnc: fb_vnc.c ven_soc_regs.h
 	$(CC) $(CFLAGS) -o $@ fb_vnc.c

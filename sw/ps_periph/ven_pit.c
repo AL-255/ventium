@@ -42,9 +42,55 @@ typedef struct {
     uint64_t irq0_seen;         // # of ch0 periods already delivered as IRQ0
 } pit_state_t;
 
-static uint64_t now_ns(void) {
+// ---- PIT time base ---------------------------------------------------------
+// The 8254's elapsed-tick `d` is computed from a nanosecond clock. There are two
+// time bases, selected at run time:
+//
+//   * WALL-CLOCK (default): CLOCK_MONOTONIC. Faithful to QEMU's ~real-time PIT;
+//     used by the standalone psoc gate and any caller that does not inject a clock.
+//
+//   * EMULATED (when a caller calls ven_pit_set_emu_ns()): a nanosecond clock the
+//     host advances from the CORE's progress (cycle count at the emulated MHz,
+//     or instruction throughput on the board) instead of wall time. This is the
+//     timer-cadence fix: with wall-clock time the IRQ0 rate floats free of how
+//     fast the (slow, ~40 MHz / Verilated) core actually executes, so a timer
+//     tick can land inside a CWSDPMI real-mode-reflection window and corrupt its
+//     bookkeeping (the DOS-Quake go32 "Division by Zero eip=0x24e" #DE). Tying
+//     the PIT to emulated time makes the tick-to-instruction ratio match real
+//     hardware/qemu, so the tick no longer lands in the reentrancy window.
+//
+// The register model (count reload, get_count, get_out, read/latch state) is
+// IDENTICAL in both bases — only the `now_ns()` source differs — so the psoc
+// "C == RTL == qemu" register-equivalence gate (which never injects a clock and
+// drives ven_pit.sv, not this C model) is unaffected.
+static int      pit_emu_active = 0;   // 0 = wall-clock, 1 = caller-driven emulated ns
+static uint64_t pit_emu_ns     = 0;   // last emulated-ns value the caller injected
+
+static uint64_t now_ns_wall(void) {
     struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint64_t)t.tv_sec * 1000000000ull + t.tv_nsec;
+}
+
+static uint64_t now_ns(void) {
+    return pit_emu_active ? pit_emu_ns : now_ns_wall();
+}
+
+// Switch the PIT onto the emulated time base and set the current emulated-ns
+// value. The TB calls this each clock with (cycles * 1e9 / emu_hz); the board
+// calls it with an emulated-time estimate derived from core progress. Idempotent;
+// the FIRST call latches the emulated base so subsequent load_ns origins are also
+// emulated (a reload taken after the switch records an emulated origin).
+void ven_pit_set_emu_ns(ven_periph_t* p, uint64_t ns) {
+    if (!pit_emu_active) {
+        // First activation: the channel load_ns origins were recorded in the
+        // wall-clock base (by pit_reset, before any emulated tick). Rebase them
+        // onto the emulated base so `elapsed_d = now_ns() - load_ns` starts from
+        // zero here instead of underflowing across the base switch.
+        pit_state_t* s = (pit_state_t*)p->state;
+        for (int i = 0; i < 3; i++) s->load_ns[i] = ns;
+        pit_emu_active = 1;
+    }
+    pit_emu_ns = ns;
 }
 
 // QEMU `d`: elapsed PIT ticks since this channel's count was last loaded.

@@ -60,6 +60,11 @@ set svfiles {
     soc/ven_fan_ctrl.sv
 }
 foreach f $svfiles { add_files -norecurse $ROOT/rtl/$f }
+# RTL_IRQ=1: the in-PL 8254 PIT + 8259 PIC (DOS-Quake #DE fix; see the DEFS note below).
+if {[envor RTL_IRQ 0]} {
+    add_files -norecurse $ROOT/rtl/soc/ven_pic.sv
+    add_files -norecurse $ROOT/rtl/soc/ven_pit.sv
+}
 add_files -norecurse $ROOT/rtl/soc/ventium_kv260_top.v
 add_files -norecurse $ROOT/rtl/soc/ven_fan_ctrl_top.v
 set_property file_type SystemVerilog [get_files *.sv]
@@ -71,6 +76,14 @@ set_property include_dirs [list $ROOT/rtl/core $ROOT/rtl/fpu] [current_fileset]
 set DEFS {SYNTHESIS VTM_NO_DPI VEN_SRT_ITER VEN_IDIV_ITER VEN_BCD_ITER \
     VEN_FP_PIPE VEN_FP_PIPE2 VEN_CACHE_HALF \
     VEN_L1_AXI VEN_KV260_SOC}
+# RTL_IRQ=1 (default OFF): the DOS-Quake #DE FIX. Move the 8254 PIT + 8259 PIC from the
+# PS C-models INTO the PL (ven_pit/ven_pic in ventium_top behind VEN_RTL_IRQ), with IR0
+# from a DENSE fixed-cycle square wave (VEN_RTL_IRQ_FIXED, period VEN_FIXED_IRQ0_CYC=4000
+# core-clk). The sparse PS-modeled IRQ0 never preempts CWSDPMI's int-0x31 reflector (->
+# the 0x60 task resumes at cs=0x2b CPL3 running CPL0 code -> #GP); a dense in-PL IRQ0 does
+# (-> the timer's cs=0x18 CPL0 dispatch -> clean). Proven in l1axi_kv_dos_q_rtlirq sim
+# (sim==board: #GP=0 to 13M insns vs every PIT cadence faulting @retire 8.46M). OFF default.
+if {[envor RTL_IRQ 0]} { lappend DEFS VEN_RTL_IRQ VEN_RTL_IRQ_FIXED "VEN_FIXED_IRQ0_CYC=[envor FIXED_IRQ0_CYC 4000]" }
 # IC_BRAM=0 drops the RAMB36 icache line buffer for the LUTRAM (distributed)
 # path — used to test whether the board-only upper-fetch-word corruption is the
 # BRAM cross-port read path (the RAMB36 collision is not modeled by Verilator).
@@ -117,6 +130,29 @@ if {[envor FPREM 1]} { lappend DEFS VEN_FPREM }
 # WITH TRANSCENDENTAL=0 to fit the xck26 (the 4 iterative engines are ~2x over). The
 # two are mutually exclusive for D9 F3 decode — never set both to 1.
 if {[envor FPTRAP 0]} { lappend DEFS VEN_FPTRAP }
+# FP_PS_ALL=1 (default OFF): the STRATEGIC AREA-RELIEF build. Remove the ENTIRE x87
+# COMPUTE datapath from the PL (the iterative engines fpu_srt_div/fpu_sqrt_iter/
+# fpu_fpatan/fyl2x/fsincos/f2xm1/fprem + ven_bcd + the fx_add/fx_mul/fx_div/fx_sqrt/
+# compare/frndint/fscale combinational cones in fpu_writeback) and PS-TRAP every x87
+# arithmetic/compare/transcendental op to the A53 (ven_soc_app, SoftFloat extF80).
+# The small x87 STATE FILE (fpu_top: 8x80 stack + cw/sw/tag) + the data-movement ops
+# (FLD/FST/FILD/FIST/FXCH/FLDCONST/FNINIT/...) STAY in PL. Frees a large amount of LUT
+# so the xck26 routes with low congestion -> route_design/phys_opt_design get room to
+# insert real hold-fixing delay on the marginal uopcache fetch-path hold paths (the
+# F4A board-only DOS-Quake fetch #DE root cause). Implies VEN_FPTRAP (the trap seam)
+# and FORCES the iterative engines OFF (they are the bulk of the area being removed).
+if {[envor FP_PS_ALL 0]} {
+    lappend DEFS VEN_FP_PS_ALL VEN_FPTRAP
+    # strip the iterative-engine defines so the engines are NOT instantiated and their
+    # combinational fallbacks in fpu_writeback are the pruned (gated-to-const) arms.
+    set DEFS [lsearch -all -inline -not -exact $DEFS VEN_TRANSCENDENTAL]
+    set DEFS [lsearch -all -inline -not -exact $DEFS VEN_FPREM]
+    set DEFS [lsearch -all -inline -not -exact $DEFS VEN_SRT_ITER]
+    set DEFS [lsearch -all -inline -not -exact $DEFS VEN_BCD_ITER]
+    set DEFS [lsearch -all -inline -not -exact $DEFS VEN_FP_PIPE]
+    set DEFS [lsearch -all -inline -not -exact $DEFS VEN_FP_PIPE2]
+    puts "=== FP_PS_ALL=1: x87 COMPUTE datapath removed from PL; all FP ops PS-trapped (SoftFloat extF80 on A53). Iterative engines + fx_* cones gated out. ==="
+}
 set_property verilog_define $DEFS [current_fileset]
 
 # FAN_CTRL=1 (default ON): add the temperature-controlled cooling fan — a PL
@@ -235,7 +271,21 @@ set_property top design_kv260_wrapper [current_fileset]
 update_compile_order -fileset sources_1
 
 # ---- SYNTH ---------------------------------------------------------------------
+# Synthesize the out-of-context module-reference / IP runs FIRST and WAIT for them,
+# so the top synth_1 + opt_design see the resolved OOC checkpoints (not black-box
+# stubs). Launching synth_1 alone can race the parallel OOC runs and leave
+# 'design_kv260_u_kv260_0' a black box at opt_design (DRC INBB-3). Explicitly
+# draining the child synth runs before the top + impl is the deterministic order.
 puts "=== SYNTH (jobs=$THREADS) ==="
+set child_synth {}
+foreach r [get_runs *_synth_1] {
+    if {$r ne "synth_1"} { lappend child_synth $r }
+}
+if {[llength $child_synth] > 0} {
+    puts "=== OOC child synth runs first: $child_synth ==="
+    launch_runs $child_synth -jobs $THREADS
+    foreach r $child_synth { wait_on_run $r }
+}
 launch_runs synth_1 -jobs $THREADS
 wait_on_run synth_1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {

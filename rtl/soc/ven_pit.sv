@@ -95,6 +95,25 @@ module ven_pit #(
     // 32 bits is ample headroom over the 17-bit count.
     logic [31:0] d_q           [3];
 
+    // SINGLE maintained per-channel modulo remainder  dmod1_q == d_q % count_q,
+    // advanced incrementally each tick (ALWAYS step +1, mode-independent) so the
+    // module needs NO hardware divider at all. Both divide-using helpers derive
+    // their value from this one register with only a shift / compare / subtract:
+    //   * f_get_count mode 2:  count - dmod1_q                 (== count - d%count)
+    //   * f_get_count mode 3:  count - ((2*dmod1_q) mod count) (2*d%count via 1 sub)
+    //   * f_get_out   mode 2:  (dmod1_q==0) && (d!=0)
+    //   * f_get_out   mode 3:  dmod1_q < (count+1)>>1
+    // Keeping ONE remainder ( d%count, not the mode-3-specific 2d%count ) lets the
+    // mode-3 OUT bit (status_q[7], the old top board path) reuse it -- it needs
+    // d%count, which 2d%count could not supply. For modes 0/1/4/5 the remainder is
+    // unused (those use count-d / d-vs-count directly), so the +1 advance is
+    // harmless. dmod1_q < count_q (<= 0x10000) so it fits in 16 bits; the advance
+    // compare/wrap is done at 17 bits to be safe at the count==0x10000 boundary.
+    // dmod1_q is held in PERFECT lock-step with d_q: zeroed in EVERY place d_q is
+    // zeroed (reset + every count load), plus on a bare control-word (mode/access)
+    // write so a mode change without a reload restarts the remainder at 0.
+    logic [15:0] dmod1_q       [3];
+
     // PIT tick enable (one PIT tick per asserted cycle).
     logic        tick_en;
 
@@ -126,50 +145,54 @@ module ven_pit #(
     // Combinational helpers (mirror pit_get_count / pit_get_out)
     // ------------------------------------------------------------------------
     // pit_get_count: live count given elapsed ticks d, count c, mode m.
+    // Performs NO hardware divide. dmod1 is the single maintained remainder
+    // (d % count). Modes 0/1/4/5 use count - d (mod 65536); mode 2 uses
+    // count - dmod1; mode 3 needs (2*d) % count, derived from dmod1 by one
+    // conditional subtract of count: since dmod1 < count, 2*dmod1 < 2*count, so
+    //   r3 = (2*dmod1 >= count) ? 2*dmod1 - count : 2*dmod1
+    // is exact ( == (2*d) % count ). The compare/subtract is at 17 bits because
+    // 2*dmod1 can reach ~2*0x10000; c17 is the full 17-bit count for that path.
+    // d is passed low-16 only (the count-minus-d subtraction is mod 65536, so
+    // d[31:16] never affects it).
     function automatic logic [15:0] f_get_count(input logic [2:0]  m,
-                                                input logic [16:0] c,
-                                                input logic [31:0] d);
-        logic [32:0] cc;         // count zero-extended to 33b (>= 2*d range)
-        logic [32:0] twod;       // 2*d, 33b
-        logic [15:0] dmod;       // remainder (< count <= 0x10000, fits in 16b)
+                                                input logic [16:0] c17,
+                                                input logic [15:0] d,
+                                                input logic [15:0] dmod1);
+        logic [16:0] twor;       // 2*dmod1, 17b
+        logic [15:0] r3;         // (2*d) % count (always < count <= 0x10000 -> 16b)
         begin
-            cc   = {16'b0, c};
-            twod = {d, 1'b0};                                     // 2*d (33b)
+            twor = {dmod1, 1'b0};                                 // 2*dmod1 (17b)
+            // (2*d) % count : since dmod1 < count, 2*dmod1 < 2*count, one subtract.
+            r3   = (twor >= c17) ? (twor[15:0] - c17[15:0]) : twor[15:0];
             unique case (m)
                 3'd0, 3'd1, 3'd4, 3'd5:
-                    f_get_count = c[15:0] - d[15:0];              // (count - d) & 0xffff
-                3'd3: begin
-                    // count - ((2*d) % count)   (XXX odd-count caveat per QEMU)
-                    dmod = 16'(twod % cc);                        // (2*d) % count
-                    f_get_count = c[15:0] - dmod;
-                end
-                default: begin                                    // mode 2 (and 6/7)
-                    dmod = 16'({1'b0, d} % cc);                   // d % count
-                    f_get_count = c[15:0] - dmod;
-                end
+                    f_get_count = c17[15:0] - d;                  // (count - d) & 0xffff
+                3'd3:
+                    f_get_count = c17[15:0] - r3;                 // count - ((2*d)%count)
+                default:                                          // mode 2 (and 6/7)
+                    f_get_count = c17[15:0] - dmod1;              // count - (d % count)
             endcase
         end
     endfunction
 
-    // pit_get_out: OUT bit given elapsed ticks d, count c, mode m.
+    // pit_get_out: OUT bit given elapsed ticks d, count c, mode m. Performs NO
+    // hardware divide -- modes 2 and 3 reuse the single maintained remainder
+    // dmod1 (== d % count). Mode 2 (rate gen): OUT high only on the terminal tick
+    // (dmod1==0 with d!=0). Mode 3 (square wave): OUT high for the first half of
+    // the period (dmod1 < (count+1)>>1). Modes 4/5 (strobe) and 0/1 compare d to
+    // count directly (no modulo).
     function automatic logic f_get_out(input logic [2:0]  m,
                                        input logic [16:0] c,
-                                       input logic [31:0] d);
-        logic [32:0] cc;         // count zero-extended to 33b
-        logic [15:0] dmod;       // remainder (< count <= 0x10000)
+                                       input logic [31:0] d,
+                                       input logic [15:0] dmod1);
         logic [16:0] half;       // (count+1)>>1
         begin
-            cc   = {16'b0, c};
             half = 17'((c + 17'd1) >> 1);
             unique case (m)
-                3'd2: begin                                       // rate generator
-                    dmod = 16'({1'b0, d} % cc);
-                    f_get_out = (dmod == 16'd0) && (d != 32'd0);
-                end
-                3'd3: begin                                       // square wave
-                    dmod = 16'({1'b0, d} % cc);
-                    f_get_out = ({1'b0, dmod} < half);
-                end
+                3'd2:                                             // rate generator
+                    f_get_out = (dmod1 == 16'd0) && (d != 32'd0);
+                3'd3:                                             // square wave
+                    f_get_out = ({1'b0, dmod1} < half);
                 3'd4, 3'd5:                                       // strobe
                     f_get_out = (d == {15'b0, c});
                 default:                                          // mode 0,1
@@ -206,7 +229,7 @@ module ven_pit #(
             f_read = 8'h00;
             if (s != 2'd3) begin
                 lc   = latched_count[s];
-                live = f_get_count(mode_q[s], count_q[s], d_q[s]);
+                live = f_get_count(mode_q[s], count_q[s], d_q[s][15:0], dmod1_q[s]);
                 if (status_latched[s]) begin
                     f_read = status_q[s];
                 end else if (count_latched[s] != 3'd0) begin
@@ -238,7 +261,7 @@ module ven_pit #(
     // ------------------------------------------------------------------------
     // OUT pin (ch0) -- combinational off architectural state.
     // ------------------------------------------------------------------------
-    assign out0 = f_get_out(mode_q[0], count_q[0], d_q[0]);
+    assign out0 = f_get_out(mode_q[0], count_q[0], d_q[0], dmod1_q[0]);
 
     // ------------------------------------------------------------------------
     // CLOCKED state update
@@ -263,12 +286,25 @@ module ven_pit #(
                 mode_q[i]         <= 3'd3;
                 bcd_q[i]          <= 1'b0;
                 d_q[i]            <= 32'd0;
+                dmod1_q[i]        <= 16'h0000;   // lock-step with d_q reset
             end
         end else begin
             // ---- free-running tick: advance each channel's elapsed count ----
+            // Also advance the single maintained remainder dmod1_q[i] == d%count in
+            // lock-step so NO divider is ever needed: ALWAYS +1, wrap to 0 when it
+            // would REACH count (mode-independent -- modes 2/3 derive their value
+            // from this one register, see f_get_count/f_get_out; modes 0/1/4/5 do
+            // not read it). The compare/wrap is at 17 bits (count_q is [0..0x10000])
+            // to be safe at the count==0x10000 boundary; dmod1_q stays < count_q so
+            // 16 bits hold it.
             if (tick_en) begin
                 for (i = 0; i < 3; i = i + 1) begin
                     d_q[i] <= d_q[i] + 32'd1;
+                    // d % count : add 1, wrap to 0 when it would reach count.
+                    if (({1'b0, dmod1_q[i]} + 17'd1) >= count_q[i])
+                        dmod1_q[i] <= 16'd0;
+                    else
+                        dmod1_q[i] <= dmod1_q[i] + 16'd1;
                 end
             end
 
@@ -284,12 +320,12 @@ module ven_pit #(
                             if (wdata[1 + i]) begin               // 2<<channel
                                 if (!wdata[5]) begin              // !bit5: latch count
                                     if (count_latched[i] == 3'd0) begin
-                                        latched_count[i] <= f_get_count(mode_q[i], count_q[i], d_q[i]);
+                                        latched_count[i] <= f_get_count(mode_q[i], count_q[i], d_q[i][15:0], dmod1_q[i]);
                                         count_latched[i] <= rw_mode[i];
                                     end
                                 end
                                 if (!wdata[4] && !status_latched[i]) begin // !bit4: latch status
-                                    status_q[i] <= { f_get_out(mode_q[i], count_q[i], d_q[i]),
+                                    status_q[i] <= { f_get_out(mode_q[i], count_q[i], d_q[i], dmod1_q[i]),
                                                      1'b0,                 // null count (XXX not modeled)
                                                      rw_mode[i][1:0],
                                                      mode_q[i],
@@ -305,7 +341,8 @@ module ven_pit #(
                             if (count_latched[cw_channel] == 3'd0) begin
                                 latched_count[cw_channel] <= f_get_count(mode_q[cw_channel],
                                                                           count_q[cw_channel],
-                                                                          d_q[cw_channel]);
+                                                                          d_q[cw_channel][15:0],
+                                                                          dmod1_q[cw_channel]);
                                 count_latched[cw_channel] <= rw_mode[cw_channel];
                             end
                         end else begin
@@ -314,6 +351,14 @@ module ven_pit #(
                             write_state[cw_channel] <= {1'b0, cw_access};
                             mode_q[cw_channel]      <= cw_mode;
                             bcd_q[cw_channel]       <= cw_bcd;
+                            // A bare control word sets the mode but (like QEMU) does
+                            // NOT reset d_q. dmod1_q (== d%count) is mode-independent
+                            // now, but a count read between a bare mode write and the
+                            // eventual reload is non-architectural (QEMU reloads too);
+                            // restarting the remainder at 0 here keeps it consistent
+                            // with the standard guest sequence (control word THEN a
+                            // count load, which re-zeros both d_q and dmod1_q).
+                            dmod1_q[cw_channel]     <= 16'h0000;
                         end
                     end
                 end else begin
@@ -322,6 +367,7 @@ module ven_pit #(
                         RW_MSB: begin
                             count_q[sel] <= f_loadval({wdata, 8'h00});  // val<<8
                             d_q[sel]     <= 32'd0;
+                            dmod1_q[sel] <= 16'h0000;   // lock-step with d_q load
                         end
                         RW_WORD0: begin
                             write_latch[sel]  <= wdata;
@@ -330,11 +376,13 @@ module ven_pit #(
                         RW_WORD1: begin
                             count_q[sel] <= f_loadval({wdata, write_latch[sel]});
                             d_q[sel]     <= 32'd0;
+                            dmod1_q[sel] <= 16'h0000;   // lock-step with d_q load
                             write_state[sel] <= RW_WORD0;
                         end
                         default: begin                            // RW_LSB
                             count_q[sel] <= f_loadval({8'h00, wdata});
                             d_q[sel]     <= 32'd0;
+                            dmod1_q[sel] <= 16'h0000;   // lock-step with d_q load
                         end
                     endcase
                 end

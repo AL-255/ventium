@@ -1364,8 +1364,22 @@ int main(int argc, char** argv) {
         VerilatedRestore is; is.open((prefix + ".vlt").c_str());
         is >> *top; is.close();
         top->eval();                                     // settle combinational off restored flops
-        std::fprintf(stderr, "tb: RESTORED state @ cyc=%llu -> resuming\n",
-                     (unsigned long long)cycles);
+        // CADENCE-RESONANCE PROBE (task #102 follow-up): phase-shift the NEXT IRQ0
+        // tick relative to the restored checkpoint by VEN_IRQ0_PHASE core-cycles
+        // (signed; +advance the tick later, -fire it sooner). Sweeping this across
+        // a full ~tick period maps the FAULT (#GP@cs=0x2b:0x7a0) vs CLEAN regions
+        // and answers whether a robust safe timer cadence exists. Off by default
+        // (phase 0 = the original checkpointed cadence => the baseline #GP).
+        if (const char* ph = std::getenv("VEN_IRQ0_PHASE")) {
+            long long d = strtoll(ph, nullptr, 0);
+            // dos_irq0_next is a cycle count; clamp so a large negative can't wrap.
+            if (d < 0 && (unsigned long long)(-d) > dos_irq0_next) dos_irq0_next = cycles;
+            else dos_irq0_next = (uint64_t)((long long)dos_irq0_next + d);
+            std::fprintf(stderr, "tb: IRQ0-PHASE shift %+lld -> next tick @ cyc=%llu\n",
+                         d, (unsigned long long)dos_irq0_next);
+        }
+        std::fprintf(stderr, "tb: RESTORED state @ cyc=%llu (next IRQ0 @ %llu) -> resuming\n",
+                     (unsigned long long)cycles, (unsigned long long)dos_irq0_next);
     }
 #endif
 
@@ -1458,11 +1472,20 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+#ifdef VEN_RTL_IRQ
+            // RTL-IRQ: the in-PL ven_pit owns IR0 (the guest programs it via the
+            // intercepted 0x40-0x43 IO) and ven_pic drives the core's intr directly,
+            // so the IRQ0 cadence is cycle-deterministic (== the board). The TB feeds
+            // only the device-IRQ levels (IDE/RTC are polled in this sim => all 0).
+            top->soc_en     = 1;
+            top->dev_irq_ps = 0;
+#else
             ven_pic_set_irq(g_pic, 0, dos_pit_pending);
             uint8_t pv = ven_pic_peek_vector(g_pic);
             top->soc_en = 1;
             if (g_pic->irq(g_pic) && pv >= 0x08) { top->intr = 1; top->inta_vector = pv; }
             else                                 { top->intr = 0; }
+#endif
         }
 #endif
 
@@ -1538,6 +1561,29 @@ int main(int argc, char** argv) {
         service_io();
         top->eval();          // <- DPI vtm_retire calls happen here; the core
                               //    latches the proxied syscall effects here too
+#ifdef VEN_XOVER
+        // VEN_FAULT_EA: cycle-precise #PF forensic. walk_pf is high for the cycle the
+        // page-walk raises vec=14 (CR2<=walk_lin), BEFORE any handler runs — so this
+        // catches the EXACT faulting linear addr + the FE_PIPE/dtlb micro-state. Prints
+        // only on the rising edge of walk_pf. Env-gated/inert by default.
+        if (std::getenv("VEN_FAULT_EA")) {
+            static uint8_t prev_walk_pf = 0;
+            static long fea_n = 0;
+            ventium::XoverFaultState fs;
+            uint8_t wpf = ventium::xover_read_fault_state(top, fs);
+            if (wpf && !prev_walk_pf && fea_n++ < 40) {
+                std::fprintf(stderr,
+                    "tb: [FAULT-EA] cyc=%llu walk_lin=%08x is_w=%u step=%u errcode=%x cur_lin=%08x xlate_miss=%u\n"
+                    "tb: [FAULT-EA]   fe_dtlb: hit=%u v=%u page=%05x phys=%05x dirty=%u | dtlb_lk: hit=%u phys=%08x dirty=%u\n",
+                    (unsigned long long)cycles, fs.walk_lin, fs.walk_is_write, fs.walk_step,
+                    fs.pf_errcode, fs.cur_lin, fs.xlate_miss,
+                    fs.fe_dtlb_hit, fs.fe_dtlb_v, fs.fe_dtlb_page, fs.fe_dtlb_phys, fs.fe_dtlb_dirty,
+                    fs.dtlb_lk_hit, fs.dtlb_lk_phys, fs.dtlb_lk_dirty);
+                std::fflush(stderr);
+            }
+            prev_walk_pf = wpf;
+        }
+#endif
 #ifdef VEN_DBG_CORE
         // read-beat trace selftest: sample dbg_rd_valid at the SAME instant ven_soc_dbg's
         // ring does (post-edge eval, after axi_capture snapped the pre-edge R handshake,
@@ -1789,8 +1835,9 @@ int main(int argc, char** argv) {
             uint32_t key = ((uint32_t)top->dbg_cs << 16) ^ e;
             if ((g_ven_f4a_arm || f4a_force) && cycles >= f4a_lo && cycles <= f4a_hi && f4a_n < 400000 && key != f4a_last) {
                 f4a_last = key; f4a_n++;
-                std::fprintf(stderr, "f4a cs=%04x eip=%04x ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x\n",
+                std::fprintf(stderr, "f4a cs=%04x eip=%04x fl=%08x IF=%d intr=%d ax=%08x bx=%08x cx=%08x dx=%08x si=%08x di=%08x bp=%08x sp=%08x\n",
                     (unsigned)top->dbg_cs, e,
+                    ventium::g_last_arch.eflags, (int)((ventium::g_last_arch.eflags>>9)&1), (int)top->intr,
                     ventium::g_last_arch.gpr[0], ventium::g_last_arch.gpr[3],
                     ventium::g_last_arch.gpr[1], ventium::g_last_arch.gpr[2],
                     ventium::g_last_arch.gpr[6], ventium::g_last_arch.gpr[7],
@@ -1861,7 +1908,40 @@ int main(int argc, char** argv) {
                     (unsigned)top->dbg_int_vec, (unsigned)top->dbg_cs, (uint32_t)top->dbg_eip,
                     fpc, (unsigned long long)top->dbg_ibuf, (unsigned long long)cycles);
                 std::fflush(stderr);
+#ifdef VEN_XOVER
+                // VEN_FAULT_CR2: dump CR2 (the #PF linear address) at each new fault so a
+                // crossover #PF whose insn never retires can still be localized. Env-gated.
+                if (std::getenv("VEN_FAULT_CR2"))
+                    std::fprintf(stderr, "tb: [FAULT-CR2] cr2=%08x\n", ventium::xover_read_cr2(top));
+#endif
                 prev_fpc = fpc;
+                // CADENCE-RESONANCE CLASSIFIER (VEN_RESON_CLASS): the residual #GP is
+                // vec 0x0d at cs=0x2b:0x7a0 (mov es,0x2593 in the wrongly-resumed
+                // reflector ctx). Detect it and stop LOUD+early so a phase sweep can
+                // bin this run as FAULT in one line. Off by default.
+                if (std::getenv("VEN_RESON_CLASS") &&
+                    (unsigned)top->dbg_int_vec == 0x0d &&
+                    (unsigned)top->dbg_cs == 0x2b &&
+                    (uint32_t)top->dbg_eip == 0x7a0) {
+                    std::fprintf(stderr, "tb: [RESON] FAULT (#GP cs=0x2b:0x7a0) @ cyc=%llu retired=%llu\n",
+                        (unsigned long long)cycles, (unsigned long long)trace.retired());
+                    std::fflush(stderr);
+                    break;
+                }
+            }
+        }
+        // CADENCE-RESONANCE CLEAN decision: if we run past the #GP decision window
+        // (a retire count comfortably beyond where the fault fires) without the
+        // cs=0x2b:0x7a0 #GP, this phase is CLEAN. VEN_RESON_CLEAN_AT = the retire
+        // count to declare CLEAN at (default: ~1200 past the checkpoint's bug point).
+        if (std::getenv("VEN_RESON_CLASS")) {
+            static uint64_t clean_at = std::getenv("VEN_RESON_CLEAN_AT")
+                ? strtoull(std::getenv("VEN_RESON_CLEAN_AT"),0,0) : 3000ull;
+            if (trace.retired() >= clean_at) {
+                std::fprintf(stderr, "tb: [RESON] CLEAN (no #GP through retire %llu) @ cyc=%llu\n",
+                    (unsigned long long)trace.retired(), (unsigned long long)cycles);
+                std::fflush(stderr);
+                break;
             }
         }
         // Patchable opcode-capture hook: arm via VEN_HOOK (e.g. 0x3 = enable + DIV/IDIV
@@ -1895,6 +1975,28 @@ int main(int argc, char** argv) {
         if ((cycles & 0x1FFFFFull) == 0) {
             long nz = 0;
             for (int i = 0; i < 64000; ++i) if (mem.read8(0xA0000u + i)) ++nz;
+            // VEN_FRAME_SEQ: periodic 0xA0000 frame dump (sim_vga13_seqNNN.bin) so an
+            // ANIMATING live game loop can be captured as a sequence (motion across
+            // frames). Dumps when the frame content CHANGES (a cheap 64-byte stride
+            // hash) so identical frames aren't re-dumped. Env-gated; inert by default.
+            if (std::getenv("VEN_FRAME_SEQ") && nz > 1000) {
+                static uint64_t prev_hash = 0; static int seq_n = 0;
+                uint64_t h = 1469598103934665603ull;
+                for (int i = 0; i < 64000; i += 61) { h ^= mem.read8(0xA0000u+i); h *= 1099511628211ull; }
+                if (h != prev_hash) {
+                    prev_hash = h;
+                    char fn[128]; std::snprintf(fn, sizeof(fn), "/tmp/sim_vga13_seq%03d.bin", seq_n);
+                    if (FILE* sf = std::fopen(fn, "wb")) {
+                        for (int i = 0; i < 64000; ++i) { uint8_t p = mem.read8(0xA0000u+i); std::fwrite(&p,1,1,sf); }
+                        std::fclose(sf);
+                        // also dump the DAC palette alongside the first frame
+                        std::fprintf(stderr, "tb: [FRAME-SEQ] #%d cyc=%llu retired=%llu nz=%ld -> %s\n",
+                            seq_n, (unsigned long long)cycles, (unsigned long long)trace.retired(), nz, fn);
+                        std::fflush(stderr);
+                    }
+                    seq_n++;
+                }
+            }
             if (nz > 1000 && !std::getenv("VEN_NO_FRAME_EXIT")) {
                 std::fprintf(stderr, "tb: FRAME! %ld nonzero VGA px @cycle %llu retired %llu\n",
                              nz, (unsigned long long)cycles,

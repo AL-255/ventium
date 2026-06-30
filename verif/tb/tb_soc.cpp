@@ -37,6 +37,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <fcntl.h>     // VEN_IDE_DPI_DISK: host-file IDE backing
+#include <unistd.h>
 
 #include "verilated.h"
 #include "Vventium_soc.h"
@@ -119,6 +121,51 @@ extern "C" int fwcfg_dpi_byte(int sel, int off) {
     if (sel >= 0x20 && sel < 0x30)
         return (off >= 0 && off < fsize[sel]) ? blob[fbase[sel] + off] : 0;   // file content
     return 0;
+}
+
+// ---- VEN_IDE_DPI_DISK: host-file IDE backing -------------------------------
+// ven_ide.sv (gated) calls these instead of $readmemh'ing the whole image into a
+// Verilated array. The raw image (env VEN_IDE_DISK_RAW) is served byte-on-demand
+// with a 1-sector read cache, so a multi-GiB disk (Win95) costs O(1) RAM in the TB
+// and no array. Reads past EOF / no-image return 0xFF (open bus). Writes are
+// write-through (Win95 mutates the FS during boot: registry, swap, dirty bits).
+namespace {
+int           g_ide_fd   = -2;     // -2 = not yet opened
+long          g_ide_csec = -1;     // cached sector number
+unsigned char g_ide_buf[512];
+inline void ide_open_once() {
+    if (g_ide_fd != -2) return;
+    const char* p = std::getenv("VEN_IDE_DISK_RAW");
+    g_ide_fd = (p && *p) ? open(p, O_RDWR) : -1;
+    if (g_ide_fd < 0)
+        std::fprintf(stderr, "[ide-dpi] VEN_IDE_DISK_RAW %s -> reads return 0xFF\n",
+                     (p && *p) ? "open failed" : "unset");
+    else
+        std::fprintf(stderr, "[ide-dpi] host-file IDE backing: %s\n", p);
+}
+}  // namespace
+extern "C" unsigned char ven_ide_disk_rd(unsigned int addr) {
+    ide_open_once();
+    if (g_ide_fd < 0) return 0xFF;
+    long sec = (long)addr >> 9;                 // /512
+    if (sec != g_ide_csec) {
+        if (std::getenv("VEN_IDE_RDLOG")) {
+            static long nrd = 0;
+            if (nrd < 6000) std::fprintf(stderr, "[ide-rd] LBA=%ld\n", sec);
+            ++nrd;
+        }
+        std::memset(g_ide_buf, 0, 512);
+        pread(g_ide_fd, g_ide_buf, 512, (off_t)sec << 9);
+        g_ide_csec = sec;
+    }
+    return g_ide_buf[addr & 511];
+}
+extern "C" void ven_ide_disk_wr(unsigned int addr, unsigned char data) {
+    ide_open_once();
+    if (g_ide_fd < 0) return;
+    long sec = (long)addr >> 9;
+    if (sec == g_ide_csec) g_ide_buf[addr & 511] = data;   // keep cache coherent
+    pwrite(g_ide_fd, &data, 1, (off_t)addr);
 }
 
 namespace {
@@ -461,7 +508,13 @@ int main(int argc, char** argv) {
             case 0x13: {                                     // write string ES:BP, length CX
                 uint32_t p=((uint32_t)es<<4)+bp; uint8_t step=(al&0x02)?2:1;
                 for (uint16_t i=0;i<cx;i++) svga_emit((char)mem.read8(p+(uint32_t)i*step)); break; }
-            case 0x00: mem.write8(0x449, al); break;          // set mode (record only)
+            case 0x00:                                       // set video mode
+                if (al == 0x13) {                            // mode-13h (graphics 320x200x8): set full VGA BDA state Quake reads
+                    mem.write8(0x449, 0x13);
+                    svga_gw16(0x44A, 40); svga_gw16(0x44C, 0);          // columns / regen size
+                    mem.write8(0x462, 0); mem.write8(0x487, 0x60);      // active page / VGA mode flags (graphics)
+                } else mem.write8(0x449, al);
+                break;
             case 0x0F: svga_gw16(SVGA_REGBUF+0,(uint16_t)((80<<8)|mem.read8(0x449))); break; // get mode
             case 0x03: svga_gw16(SVGA_REGBUF+4,0); svga_gw16(SVGA_REGBUF+6,svga_gr16(0x450)); break; // get cursor
             default: break;                                  // ack everything else (no-op)
@@ -816,6 +869,23 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "%02x ", mem.read8(args.peek_mem + row*16 + i));
             std::fprintf(stderr, "\n");
         }
+    }
+
+    // ---- conventional-memory layout probe (go32/CWSDPMI buffer-placement root) ----
+    // The Quake panic = go32's DPMI transfer buffer (es~0x2bac) placed too low, overlapping
+    // [ds:0x426]@0x2cb26; disk data 0x3864 clobbers it -> bad descriptor. The buffer base is
+    // derived by go32 from the DOS/conventional-memory layout, which the BIOS reports here.
+    if (std::getenv("VEN_MEMPROBE")) {
+        auto rw16=[&](uint32_t a){ return (uint32_t)(mem.read8(a) | (mem.read8(a+1)<<8)); };
+        std::fprintf(stderr, "tb_soc: MEMPROBE conv-mem layout:\n");
+        std::fprintf(stderr, "  [0x413] conv-KB    = %u (0x%x)  [qemu w/EBDA expects 639]\n", rw16(0x413), rw16(0x413));
+        std::fprintf(stderr, "  [0x40E] EBDA seg   = 0x%04x (top=0x%05x)\n", rw16(0x40E), rw16(0x40E)<<4);
+        std::fprintf(stderr, "  [ds:0x426]@0x2cb26 = 0x%04x  (panic descriptor; 0x3864 => clobbered)\n", rw16(0x2cb26));
+        std::fprintf(stderr, "  buf@0x2bac0: ");
+        for (int i=0;i<16;i++) std::fprintf(stderr, "%02x ", mem.read8(0x2bac0+i));
+        std::fprintf(stderr, "\n  reg@0x4c000: ");
+        for (int i=0;i<16;i++) std::fprintf(stderr, "%02x ", mem.read8(0x4c000+i));
+        std::fprintf(stderr, "\n");
     }
 
     top->final();

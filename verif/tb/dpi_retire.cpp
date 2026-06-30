@@ -184,6 +184,30 @@ extern "C" void vtm_retire(
     g_last_arch.seg[0]=cs; g_last_arch.seg[1]=ss; g_last_arch.seg[2]=ds;
     g_last_arch.seg[3]=es; g_last_arch.seg[4]=fs; g_last_arch.seg[5]=gs;
 
+    // VEN_CMPTRACE: compact per-retire binary trace for the full RTL-vs-qemu instruction diff.
+    // 56-byte record (14 x u32): eip, eflags, eax,ecx,edx,ebx,esp,ebp,esi,edi, cs|ss<<16,
+    // ds|es<<16, fs|gs<<16, n_low. Segmented (2M recs = 112MB/seg). Env VEN_CMPTRACE = base path.
+    {
+        static int   ci = 0; static const char* cbase = nullptr;
+        static std::FILE* cf = nullptr; static long long crec = 0; static long long cseg = 0;
+        if (!ci) { ci = 1; cbase = std::getenv("VEN_CMPTRACE"); }
+        if (cbase) {
+            const long long SEGREC = 2000000;
+            if (!cf || (crec % SEGREC) == 0) {
+                if (cf) std::fclose(cf);
+                char fn[600]; std::snprintf(fn, sizeof fn, "%s_%05lld.bin", cbase, cseg++);
+                cf = std::fopen(fn, "wb");
+            }
+            if (cf) {
+                unsigned int w[14] = { pc, eflags, eax, ecx, edx, ebx, esp, ebp, esi, edi,
+                    ((unsigned)cs)|((unsigned)ss<<16), ((unsigned)ds)|((unsigned)es<<16),
+                    ((unsigned)fs)|((unsigned)gs<<16), (unsigned)(n & 0xffffffffu) };
+                std::fwrite(w, 4, 14, cf);
+                if ((++crec % 200000) == 0) std::fflush(cf);
+            }
+        }
+    }
+
     // VEN_GPTRACE: log the faulting protected-mode program's retire stream (the DOS-Quake
     // #GP runs at cs=0x2b). Shows the instruction path into the fault + which insn sets the
     // bad selector (ebx=0x26ac), for the seg-load #GP back-trace. Off unless env-set.

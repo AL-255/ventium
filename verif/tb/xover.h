@@ -90,6 +90,30 @@ void xover_extract(Vventium_top* top, XoverArch& a);
 // responsible for L1 cache flush + next-fetch redirect afterwards.
 void xover_inject(Vventium_top* top, const XoverArch& a);
 
+// Read the core's CR2 (the page-fault linear address) directly out of the flat
+// hierarchy — for fault diagnostics where the faulting insn never retires (so the
+// XoverArch snapshot can't catch it).
+uint32_t xover_read_cr2(Vventium_top* top);
+
+// Cycle-precise #PF forensic snapshot. `walk_pf` is the page-walk's fault-raise
+// flag (set the same edge CR2<=walk_lin + start_fault(14) fire, BEFORE any handler
+// runs). When it's high this reads walk_lin (the EXACT faulting linear addr) plus
+// the FE_PIPE/dtlb micro-state so an RTL-addressing-bug (spurious #PF on a mapped
+// page) can be told apart from a genuine not-present access. Returns walk_pf.
+struct XoverFaultState {
+    uint32_t walk_lin;       // faulting linear address (the EA the walk used)
+    uint8_t  walk_is_write;
+    uint8_t  walk_step;
+    uint8_t  fe_dtlb_hit, fe_dtlb_v, fe_dtlb_dirty;
+    uint32_t fe_dtlb_page, fe_dtlb_phys;
+    uint8_t  dtlb_lk_hit, dtlb_lk_dirty;
+    uint32_t dtlb_lk_phys;
+    uint8_t  xlate_miss;
+    uint32_t cur_lin;
+    uint32_t pf_errcode;
+};
+uint8_t xover_read_fault_state(Vventium_top* top, XoverFaultState& fs);
+
 // Serialize: write <prefix>.arch (the XoverArch blob) + <prefix>.mem (full
 // MemModel snapshot via mem.snapshot()). Returns true on success.
 bool xover_save(const std::string& prefix, const XoverArch& a, const MemModel& mem);
