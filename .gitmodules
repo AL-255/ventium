@@ -10,3 +10,6 @@
 [submodule "verif/fpu87/extern/berkeley-testfloat-3"]
 	path = verif/fpu87/extern/berkeley-testfloat-3
 	url = https://github.com/ucb-bar/berkeley-testfloat-3
+[submodule "3rd-party/ao486_MiSTer"]
+	path = 3rd-party/ao486_MiSTer
+	url = https://github.com/MiSTer-devel/ao486_MiSTer.git

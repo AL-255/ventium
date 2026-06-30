@@ -82,3 +82,4 @@ verif/cov/build_cov.log
 verif/cov/opgen/tests/
 verif/cov/opgen/modes/
 verif/cov/opgen/repros/
+tmp/
