@@ -100,6 +100,18 @@ int g_i0w,g_i1w,g_i0nd,g_i1nd,g_i0r,g_i1r;
 int g_brdo,g_brdone,g_bwdo,g_bwdone,g_bbrd,g_bbwr,g_bbwait,g_bbaddr;
 uint64_t g_3da_reads=0, g_3da_bit3_hi=0;
 extern "C" void ao486_rd3da(int addr, int data){ (void)addr; g_3da_reads++; if(data&0x8) g_3da_bit3_hi++; }
+static int g_rdiv=0,g_rprate=0,g_rpena=0,g_ruena=0,g_raena=0; static uint64_t g_rpint=0,g_ruint=0,g_rirq=0;
+extern "C" void ao486_rtc(int divi,int prate,int pena,int uena,int aena,int pint,int uint_,int irqv){ g_rdiv=divi;g_rprate=prate;g_rpena=pena;g_ruena=uena;g_raena=aena; if(pint)g_rpint++; if(uint_)g_ruint++; if(irqv)g_rirq++; }
+static uint64_t g_ido=0,g_idone=0,g_i0=0,g_i8=0,g_i1=0,g_intn=0;
+extern "C" void ao486_intr(int ido,int idone,int i0,int i8,int i1){ if(ido)g_ido++; if(idone)g_idone++; if(i0)g_i0++; if(i8)g_i8++; if(i1)g_i1++; g_intn++; }
+static uint64_t g_iwn=0;
+extern "C" void ao486_idewait(int i0w,int i1w,int i0nd,int iadr,int ird,int i0cs,int i0req){
+  if(g_iwn<30 && (i0w||i1w)){fprintf(stderr,"[IWAIT] ide0_wait=%d ide1_wait=%d ide0_nodata=%d ide_address=%d iobus_read=%d ide0_cs=%d ide0_req=%d\n",i0w,i1w,i0nd,iadr,ird,i0cs,i0req);g_iwn++;}
+}
+static int g_ideion=0;
+extern "C" void ao486_ideio(int rw,int addr,int data){ if(g_ideion<4000){ if(rw==2) fprintf(stderr,"[IDEIO] sw_reset=%d\n",data); else fprintf(stderr,"[IDEIO] WR ioaddr=%d data=0x%02x\n",addr,data&0xff); g_ideion++; } }
+static int g_reg5n=0;
+extern "C" void ide_reg5_log(uint32_t addr, int before, int after){ if(g_reg5n<800){fprintf(stderr,"[REG5] write F005 ide0_request %d->%d\n",before,after);g_reg5n++;} }
 uint64_t g_vret_hi=0, g_ovs_hi=0, g_vret_edges=0; static int g_pvr=0;
 extern "C" void ao486_vretrace(int vr, int ovs){ if(vr)g_vret_hi++; if(ovs)g_ovs_hi++; if(vr&&!g_pvr)g_vret_edges++; g_pvr=vr; }
 extern "C" void ao486_iobus(int rdo,int rdone,int wdo,int wdone,int brd,int bwr,int bwait,int baddr){
@@ -609,9 +621,11 @@ int main(int argc, char **argv) {
         main_time++;
         video_capture(); vcd_dump();
         if ((c & 0x7ffff) == 0x7ffff) {
-            fprintf(stderr, "[%9llu] instr=%llu eip=%05x[%05x-%05x] ddr_wr=%llu rst=%llu ide0=%u frames=%d\n",
+            fprintf(stderr, "[%9llu] instr=%llu eip=%05x[%05x-%05x] ddr_wr=%llu rst=%llu ide0=%u frames=%d ido=%llu i0=%llu i8=%llu\n",
                     (unsigned long long)c, (unsigned long long)retire_count, last_eip, eip_min, eip_max,
-                    (unsigned long long)ddr_writes, (unsigned long long)nresets, top->ide0_request, vframe);
+                    (unsigned long long)ddr_writes, (unsigned long long)nresets, top->ide0_request, vframe,
+                    (unsigned long long)g_ido, (unsigned long long)g_i0, (unsigned long long)g_i8);
+            fprintf(stderr,"          RTC: divider=%d prate=%d pena=%d uena=%d aena=%d pint_hi=%llu uint_hi=%llu irq_hi=%llu\n",g_rdiv,g_rprate,g_rpena,g_ruena,g_raena,(unsigned long long)g_rpint,(unsigned long long)g_ruint,(unsigned long long)g_rirq);
             // CPU-halt detector: retire_count frozen across two stats windows.
             static uint64_t prev_retire = 0; static int halt_seen = 0;
             if (c > 0x100000 && retire_count == prev_retire && !halt_seen) {
@@ -633,6 +647,7 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr,">>> VGA retrace: host_io_vert_retrace high %llu cyc, edges %llu; output vsync high %llu cyc\n",(unsigned long long)g_vret_hi,(unsigned long long)g_vret_edges,(unsigned long long)g_ovs_hi);
     fprintf(stderr,">>> 0x3DA reads=%llu, of which bit3(retrace)=1 in %llu\n",(unsigned long long)g_3da_reads,(unsigned long long)g_3da_bit3_hi);
+    fprintf(stderr,">>> INTR over %llu cyc: interrupt_do=%llu interrupt_done=%llu irq0(PIT)=%llu irq8(RTC)=%llu irq1=%llu\n",(unsigned long long)g_intn,(unsigned long long)g_ido,(unsigned long long)g_idone,(unsigned long long)g_i0,(unsigned long long)g_i8,(unsigned long long)g_i1);
     dump_vga_text();
     dump_ring();      // control-flow path at end (diagnoses hangs)
     dump_ppm(9999);   // final frame snapshot

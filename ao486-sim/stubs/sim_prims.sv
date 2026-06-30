@@ -304,6 +304,33 @@ module rd3da(input clk, input rdone, input [15:0] raddr, input [31:0] rdata);
 endmodule
 bind system rd3da rd3da_i(.clk(clk_sys), .rdone(cpu_io_read_done), .raddr(cpu_io_read_address), .rdata(cpu_io_read_data));
 
+
+// IDE Device-Control (SRST) write probe + status-read tracking
+
+
+// IDE/iobus wait-state probe (bind system - works)
+module idewaitp(input clk, input i0w, input i1w, input i0nd, input [3:0] iadr, input ird, input i0cs, input [2:0] i0req);
+    import "DPI-C" function void ao486_idewait(int i0w, int i1w, int i0nd, int iadr, int ird, int i0cs, int i0req);
+    always @(posedge clk) ao486_idewait({31'd0,i0w},{31'd0,i1w},{31'd0,i0nd},{28'd0,iadr},{31'd0,ird},{31'd0,i0cs},{29'd0,i0req});
+endmodule
+bind system idewaitp idewaitp_i(.clk(clk_sys), .i0w(ide0_wait), .i1w(ide1_wait), .i0nd(ide0_nodata), .iadr(ide_address), .ird(iobus_read), .i0cs(ide0_cs), .i0req(ide0_request));
+
+
+// interrupt delivery probe
+module intrp(input clk, input ido, input idone, input i0, input i8, input i1);
+    import "DPI-C" function void ao486_intr(int ido,int idone,int i0,int i8,int i1);
+    always @(posedge clk) ao486_intr({31'd0,ido},{31'd0,idone},{31'd0,i0},{31'd0,i8},{31'd0,i1});
+endmodule
+bind system intrp intrp_i(.clk(clk_sys), .ido(interrupt_do), .idone(interrupt_done), .i0(irq_0), .i8(irq_8), .i1(irq_1));
+
+
+// RTC config/interrupt probe (rtc is single instance)
+module rtcp(input clk, input [2:0] divi, input [3:0] prate, input pena, input uena, input aena, input pint, input uint_, input irqv);
+    import "DPI-C" function void ao486_rtc(int divi,int prate,int pena,int uena,int aena,int pint,int uint_,int irqv);
+    always @(posedge clk) ao486_rtc({29'd0,divi},{28'd0,prate},{31'd0,pena},{31'd0,uena},{31'd0,aena},{31'd0,pint},{31'd0,uint_},{31'd0,irqv});
+endmodule
+bind rtc rtcp rtcp_i(.clk(clk), .divi(divider), .prate(periodic_rate), .pena(crb_int_periodic_ena), .uena(crb_int_update_ena), .aena(crb_int_alarm_ena), .pint(periodic_interrupt), .uint_(update_interrupt), .irqv(irq));
+
 bind vga vgaretrace vgaretrace_i(.clk(clk_sys), .vretrace(host_io_vertical_retrace), .outvsync(vga_vert_sync));
 
 bind system iobuswatch iobuswatch_i(
