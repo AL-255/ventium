@@ -366,6 +366,14 @@ module memp(input clk, input rd, input wr, input wait_, input rdv, input [31:0] 
 endmodule
 bind system memp memp_i(.clk(clk_sys), .rd(mem_read), .wr(mem_write), .wait_(mem_waitrequest), .rdv(mem_readdatavalid), .addr(mem_address));
 
+
+// interrupt_possible probe (IF & pending) - bind ao486
+module intposs(input clk, input ip, input ido, input idone);
+    import "DPI-C" function void ao486_intposs(int ip, int ido, int idone);
+    always @(posedge clk) ao486_intposs({31'd0,ip},{31'd0,ido},{31'd0,idone});
+endmodule
+bind ao486 intposs intposs_i(.clk(clk), .ip(wr_interrupt_possible), .ido(interrupt_do), .idone(interrupt_done));
+
 bind system idewr idewr_i(.clk(clk_sys), .iow(iobus_write), .ioa(iobus_address[15:0]), .iod(iobus_writedata));
 
 bind vga vgaretrace vgaretrace_i(.clk(clk_sys), .vretrace(host_io_vertical_retrace), .outvsync(vga_vert_sync));

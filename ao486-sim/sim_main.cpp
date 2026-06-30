@@ -112,6 +112,8 @@ static int g_ideion=0;
 extern "C" void ao486_ideio(int rw,int addr,int data){ if(g_ideion<4000){ if(rw==2) fprintf(stderr,"[IDEIO] sw_reset=%d\n",data); else fprintf(stderr,"[IDEIO] WR ioaddr=%d data=0x%02x\n",addr,data&0xff); g_ideion++; } }
 static int g_reg5n=0;
 extern "C" void ide_reg5_log(uint32_t addr, int before, int after){ if(g_reg5n<800){fprintf(stderr,"[REG5] write F005 ide0_request %d->%d\n",before,after);g_reg5n++;} }
+static uint64_t g_ipn=0; static int g_iplast=0;
+extern "C" void ao486_intposs(int ip,int ido,int idone){ (void)ido;(void)idone; if(ip)g_ipn++; g_iplast=ip; }
 static uint64_t g_mrd=0,g_mwait=0,g_mrdv=0; static uint32_t g_maddr=0; static int g_mrdlast=0;
 extern "C" void ao486_mem(int rd,int wr,int wait_,int rdv,int addr){ (void)wr; if(rd){g_mrd++;g_maddr=addr;} if(wait_)g_mwait++; if(rdv)g_mrdv++; g_mrdlast=rd; }
 static int g_rtion=0, g_rtidx=0;
@@ -637,6 +639,7 @@ int main(int argc, char **argv) {
                     (unsigned long long)c, (unsigned long long)retire_count, last_eip, eip_min, eip_max,
                     (unsigned long long)ddr_writes, (unsigned long long)nresets, top->ide0_request, vframe,
                     (unsigned long long)g_ido, (unsigned long long)g_idone, (unsigned long long)g_i0, (unsigned long long)g_i8);
+            fprintf(stderr,"          INTPOSS: now=%d high_cycles=%llu\n",g_iplast,(unsigned long long)g_ipn);
             fprintf(stderr,"          MEM: mem_read=%d last_addr=0x%08x rd_hi=%llu wait_hi=%llu rdv_hi=%llu\n",g_mrdlast,g_maddr,(unsigned long long)g_mrd,(unsigned long long)g_mwait,(unsigned long long)g_mrdv);
             fprintf(stderr,"          RTC: divider=%d prate=%d pena=%d uena=%d aena=%d pint_hi=%llu uint_hi=%llu irq_hi=%llu\n",g_rdiv,g_rprate,g_rpena,g_ruena,g_raena,(unsigned long long)g_rpint,(unsigned long long)g_ruint,(unsigned long long)g_rirq);
             // CPU-halt detector: retire_count frozen across two stats windows.
