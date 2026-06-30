@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-soc verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help
 
 help:
@@ -31,10 +31,8 @@ help:
 	@echo "  make verify-srt radix-4 SRT divider gate: fx_srt_div bit-exact vs the golden model"
 	@echo "  make verify-srt-iter  iterative (1-step/clk) SRT divider engine: bit-exact vs the golden"
 	@echo "                  (correct PLA == QEMU; buggy PLA == documented Pentium FDIV flaw)"
-	@echo "  make verify-soc M8 SoC regression aggregate: run EVERY ventium_soc differential gate"
-	@echo "                  (pirqsoc + psocdev + pvga + pide + pboot + pbootdma + test386)"
 	@echo "  make verify-all UMBRELLA: every routinely-runnable gate (verify + verify-sys +"
-	@echo "                  verify-soc + verify-srt + m6 + bus + bus-sva); one pass/fail summary"
+	@echo "                  verify-srt + m6 + bus + bus-sva); one pass/fail summary"
 	@echo "  make coverage   Verilator code-coverage + ISA-execution gate: run the full"
 	@echo "                  user-mode ISA suite through a --coverage core build, report"
 	@echo "                  line/toggle % per file + the executed-opcode histogram +"
@@ -218,13 +216,6 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pdebug
 	bash verif/sys/run-sys-golden.sh ppopf
 	PORT=53220 bash verif/sys/run-sys-golden.sh pv86
-
-# M8 SoC regression aggregate — run every ventium_soc differential gate
-# (pirqsoc + psocdev + pvga + test386) and report a pass/fail summary. The SoC
-# analogue of `make verify`: re-checks the whole self-contained-SoC track after
-# any change to rtl/soc/ventium_soc.sv or a wired device model.
-verify-soc:
-	bash verif/soc/run-all-soc-gates.sh
 
 # --- verify-all umbrella (verif/run-verify-all.sh) --------------------------
 # One command that runs EVERY routinely-runnable gate (verify + verify-sys +

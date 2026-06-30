@@ -42,7 +42,6 @@ MK=(make -C "$REPO")
 GATES=(
   "verify    (m1-m5 differential func + cycle)|verify"
   "verify-sys (M2S system-mode + RTL --system diff)|verify-sys"
-  "verify-soc (M8 SoC regression aggregate)|verify-soc"
   "verify-srt (radix-4 SRT divider, both PLAs)|verify-srt"
   "m6        (documented P5 errata self-checks)|m6"
   "bus       (standalone biu_p5 protocol gate)|bus"

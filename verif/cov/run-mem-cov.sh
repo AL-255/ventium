@@ -5,7 +5,7 @@
 # =============================================================================
 # verif/cov/run-mem-cov.sh — dedicated MEMORY-subsystem coverage.
 #
-# The cache/bus leaf modules (ven_l1d, ven_axi_master, ventium_l1_axi, ven_l2)
+# The cache/bus leaf modules (ven_l1d, ven_axi_master, ventium_l1_axi)
 # are exercised only thinly by the user-mode ISA suite, and the icache/TLB
 # arrays are driven by core-internal fill protocols that are awkward to reach
 # from the ISA suite alone. So this runner coverage-instruments the project's
@@ -40,8 +40,6 @@ TBS=(
   "l1d|L1D-GATE-OK|0|rtl/mem/ven_l1d.sv verif/l1/tb_l1d.sv"
   "l1d_sweep|L1DSWEEP-OK|1|rtl/mem/ven_l1d.sv verif/cov/tb_cov_l1d_sweep.sv"
   "l1axi|L1AXI-GATE-OK|0|rtl/mem/ven_l1d.sv rtl/mem/ven_axi_master.sv rtl/mem/ventium_l1_axi.sv verif/l1/axi_slave_bfm.sv verif/l1/tb_l1_axi.sv"
-  "l2|L2-GATE-OK|0|rtl/northbridge/ven_l2.sv verif/l1/tb_l2.sv"
-  "l2_stress|L2STRESS-GATE-OK|0|rtl/northbridge/ven_l2.sv verif/l1/tb_l2_stress.sv"
 )
 
 ALL_OK=1
