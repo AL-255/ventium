@@ -59,6 +59,7 @@ static char ps_img[6][1024] = {{0}};   // [0,1]=floppy A/B, [2..5]=IDE hdd0..3
 static uint64_t g_save_at = 0;          // --save-at: snapshot at this cycle
 static const char *g_statefile = "../tmp/ao486.state";
 static bool g_load = false;             // --load: restore instead of POST
+static int g_mem_mb = 0;                // --mem: override CMOS RAM size (0=leave x86_init default 16MB)
 void ps_clock_tick();                  // defined after tick()
 extern "C" uint16_t ps_sd_req() {      // request bits for ide_check(), from raw RTL outputs
     return (uint16_t)((top->ide0_request & 7) | ((top->ide1_request & 7) << 3) | ((top->fdd_request & 3) << 6));
@@ -478,6 +479,19 @@ static void ide_handle(){
     }
 }
 
+// Override the CMOS RAM size (x86_init defaults to 16MB; a full memory test of
+// that is ~200M cycles). Recomputes the 0x10-0x2D checksum via mgmt reads.
+static void cmos_set_mem_mb(int mb) {
+    auto wr = [&](int a, int d){ top->mgmt_address = 0xF400 | a; top->mgmt_writedata = d & 0xFF; top->mgmt_write = 1; tick(); top->mgmt_write = 0; };
+    auto rd = [&](int a)->int{ top->mgmt_address = 0xF400 | a; top->mgmt_read = 1; tick(); int v = top->mgmt_readdata & 0xFF; top->mgmt_read = 0; return v; };
+    int ext = (mb - 1) * 1024; if (ext > 0x3C00) ext = 0x3C00;   // KB above 1MB, 16-bit field caps at 15MB
+    wr(0x17, ext & 0xFF); wr(0x18, (ext >> 8) & 0xFF);
+    wr(0x30, ext & 0xFF); wr(0x31, (ext >> 8) & 0xFF);
+    wr(0x34, 0); wr(0x35, 0);
+    int sum = 0; for (int i = 0x10; i <= 0x2D; i++) sum += rd(i);
+    wr(0x2E, (sum >> 8) & 0xFF); wr(0x2F, sum & 0xFF);
+    fprintf(stderr, ">>> CMOS RAM set to %d MB (ext=0x%04x, checksum=0x%04x)\n", mb, ext, sum & 0xFFFF);
+}
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0); setvbuf(stderr, nullptr, _IONBF, 0);
     Verilated::commandArgs(argc, argv);
@@ -500,6 +514,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--save-at") && i + 1 < argc) g_save_at = strtoull(argv[++i], nullptr, 0);
         else if (!strcmp(argv[i], "--state") && i + 1 < argc) g_statefile = argv[++i];
         else if (!strcmp(argv[i], "--load")) g_load = true;
+        else if (!strcmp(argv[i], "--mem") && i + 1 < argc) g_mem_mb = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--vcd") && i + 1 < argc) { vcd_end = strtoull(argv[++i], 0, 0);
 #if VM_TRACE
             Verilated::traceEverOn(true); tfp = new VerilatedVcdC;
@@ -534,6 +549,7 @@ int main(int argc, char **argv) {
         if (ps_img[0][0]) x86_set_image(0, ps_img[0]);   // floppy A
         if (ps_img[2][0]) x86_set_image(2, ps_img[2]);   // IDE hdd 0
         x86_init();
+        if (g_mem_mb > 0) cmos_set_mem_mb(g_mem_mb);
         for (int i = 0; i < 16; i++) tick();
         top->reset = 0;
     }
