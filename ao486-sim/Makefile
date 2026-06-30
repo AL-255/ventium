@@ -8,7 +8,7 @@ OBJDIR  := ao486-sim/obj_dir
 EXE     := ao486sim
 
 VERILATOR ?= verilator
-DBGFLAGS := $(if $(DBG),--trace +define+AO486_TRACE_EIP,--threads 6)
+DBGFLAGS := $(if $(DBG),--trace +define+AO486_TRACE_EIP,--threads 1)
 # Real MiSTer PS software (drives the verilated mgmt bus via ps_shim.cpp).
 PS_INC  := -I$(REPO)/ao486-sim/ps
 PS_SRCS := ao486-sim/ps/ps_shim.cpp ao486-sim/ps/support/x86/x86.cpp ao486-sim/ps/ide.cpp

@@ -290,6 +290,22 @@ module iobuswatch(input clk, input rdo, input rdone, input wdo, input wdone, inp
     import "DPI-C" function void ao486_iobus(int rdo,int rdone,int wdo,int wdone,int brd,int bwr,int bwait,int baddr);
     always @(posedge clk) if (rdo|wdo) ao486_iobus({31'd0,rdo},{31'd0,rdone},{31'd0,wdo},{31'd0,wdone},{31'd0,brd},{31'd0,bwr},{31'd0,bwait},{16'd0,baddr});
 endmodule
+
+// VGA vertical-retrace probe: does host_io_vertical_retrace (0x3DA bit3) toggle?
+module vgaretrace(input clk, input vretrace, input outvsync);
+    import "DPI-C" function void ao486_vretrace(int vr, int ovs);
+    always @(posedge clk) ao486_vretrace({31'd0,vretrace}, {31'd0,outvsync});
+endmodule
+
+// capture the data the CPU actually receives for 0x3DA reads
+module rd3da(input clk, input rdone, input [15:0] raddr, input [31:0] rdata);
+    import "DPI-C" function void ao486_rd3da(int addr, int data);
+    always @(posedge clk) if (rdone && raddr==16'h03DA) ao486_rd3da({16'd0,raddr}, rdata);
+endmodule
+bind system rd3da rd3da_i(.clk(clk_sys), .rdone(cpu_io_read_done), .raddr(cpu_io_read_address), .rdata(cpu_io_read_data));
+
+bind vga vgaretrace vgaretrace_i(.clk(clk_sys), .vretrace(host_io_vertical_retrace), .outvsync(vga_vert_sync));
+
 bind system iobuswatch iobuswatch_i(
     .clk(clk_sys), .rdo(cpu_io_read_do), .rdone(cpu_io_read_done), .wdo(cpu_io_write_do), .wdone(cpu_io_write_done),
     .brd(iobus_read), .bwr(iobus_write), .bwait(ide0_wait|ide1_wait), .baddr(iobus_address)

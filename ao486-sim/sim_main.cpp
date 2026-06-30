@@ -86,9 +86,22 @@ static int ring_pos = 0;
 static FILE *trace_fp = nullptr;       // optional full CS:EIP trace
 static bool  crash_dumped = false;
 static void dump_ring();
+static void dump_vga_text() {
+    uint8_t *b = (uint8_t*)ddr;
+    fprintf(stderr, "=== VGA text buffer (0xB8000, 80x25) ===\n");
+    for (int row = 0; row < 25; row++) { char line[81];
+        for (int col = 0; col < 80; col++) { uint8_t c = b[0xB8000 + (row*80+col)*2]; line[col] = (c>=32 && c<127)?c:' '; }
+        line[80]=0; fprintf(stderr, "|%s|\n", line);
+    }
+}
+
 int  g_last_ioread = -1; uint64_t g_ioread_since = 0;
 int g_i0w,g_i1w,g_i0nd,g_i1nd,g_i0r,g_i1r;
 int g_brdo,g_brdone,g_bwdo,g_bwdone,g_bbrd,g_bbwr,g_bbwait,g_bbaddr;
+uint64_t g_3da_reads=0, g_3da_bit3_hi=0;
+extern "C" void ao486_rd3da(int addr, int data){ (void)addr; g_3da_reads++; if(data&0x8) g_3da_bit3_hi++; }
+uint64_t g_vret_hi=0, g_ovs_hi=0, g_vret_edges=0; static int g_pvr=0;
+extern "C" void ao486_vretrace(int vr, int ovs){ if(vr)g_vret_hi++; if(ovs)g_ovs_hi++; if(vr&&!g_pvr)g_vret_edges++; g_pvr=vr; }
 extern "C" void ao486_iobus(int rdo,int rdone,int wdo,int wdone,int brd,int bwr,int bwait,int baddr){
     g_brdo=rdo;g_brdone=rdone;g_bwdo=wdo;g_bwdone=wdone;g_bbrd=brd;g_bbwr=bwr;g_bbwait=bwait;g_bbaddr=baddr; }
 extern "C" void ao486_ide_state(int i0w,int i1w,int i0nd,int i1nd,int i0r,int i1r){ g_i0w=i0w;g_i1w=i1w;g_i0nd=i0nd;g_i1nd=i1nd;g_i0r=i0r;g_i1r=i1r; }
@@ -209,15 +222,24 @@ static void ddr_service() {
     top->DDRAM_BUSY = 0;
 }
 
+// clk_vga is driven as a divided clock (step_vga_clock) so the VGA pixel domain
+// runs slower than clk_sys. Tying clk_vga=clk_sys made the 0x3DA vertical-retrace
+// flag (clk_vga domain) race the host-bus read (clk_sys): the CPU sampled it as
+// set only ~0.05% of the time instead of its true ~30% duty, so the VGA BIOS's
+// retrace-wait subroutine (palette loads etc.) almost always hit its timeout and
+// POST crawled for billions of cycles. A slower clk_vga keeps the flag stable
+// across each host read so the waits resolve immediately.
+static int g_vga_phase = 0;
+static inline void step_vga_clock() { if (++g_vga_phase >= 4) { g_vga_phase = 0; top->clk_vga = !top->clk_vga; } }
 static inline void set_clocks(int v) {
-    top->clk_sys = v; top->clk_vga = v; top->clk_audio = v;
+    top->clk_sys = v; top->clk_audio = v;
     top->clk_uart1 = v; top->clk_uart2 = v; top->clk_mpu = v;
 }
 
 // One full clock with DDR service on the posedge.
 static void tick() {
     set_clocks(0); top->eval();
-    set_clocks(1); top->eval();
+    set_clocks(1); step_vga_clock(); top->eval();
     ddr_service();  top->eval();
     main_time++;
     vcd_dump();
@@ -573,7 +595,7 @@ int main(int argc, char **argv) {
         { static bool saved = false; if (g_save_at && !saved && main_time >= g_save_at) { saved = true; save_state(g_statefile); } }
 
         set_clocks(0); top->eval();
-        set_clocks(1); top->eval();
+        set_clocks(1); step_vga_clock(); top->eval();
         // Service disk requests with the real MiSTer HPS code when the RTL raises
         // a request line (x86_poll's mgmt transfers advance the clock themselves).
         if ((c & 0x7f) == 0 && (top->fdd_request || top->ide0_request || top->ide1_request)) { g_polls++; x86_poll(0); }
@@ -609,6 +631,9 @@ int main(int argc, char **argv) {
             eip_min = 0xffffffff; eip_max = 0;
         }
     }
+    fprintf(stderr,">>> VGA retrace: host_io_vert_retrace high %llu cyc, edges %llu; output vsync high %llu cyc\n",(unsigned long long)g_vret_hi,(unsigned long long)g_vret_edges,(unsigned long long)g_ovs_hi);
+    fprintf(stderr,">>> 0x3DA reads=%llu, of which bit3(retrace)=1 in %llu\n",(unsigned long long)g_3da_reads,(unsigned long long)g_3da_bit3_hi);
+    dump_vga_text();
     dump_ring();      // control-flow path at end (diagnoses hangs)
     dump_ppm(9999);   // final frame snapshot
     fprintf(stderr, "DONE: cycles=%llu ddr_rd=%llu ddr_wr=%llu bios_rd=%llu frames=%d\n",
