@@ -631,11 +631,18 @@ int main(int argc, char **argv) {
         if (reset_hold > 0) { top->reset = 1; reset_hold--; } else { top->reset = 0; }
         { static bool saved = false; if (g_save_at && !saved && main_time >= g_save_at) { saved = true; save_state(g_statefile); } }
 
-        // Detect an IDE soft-reset request clearing (6->0) and linger so x86_poll
-        // still runs ide_io(0,0)/(1,0) to finish the reset (set RDY). See ps_sd_req.
-        { static unsigned pi0 = 0, pi1 = 0;
+        // Detect the *real* IDE soft-reset clear so x86_poll runs ide_io(0,0)/(1,0)
+        // (reset finish -> RDY). While SRST is HELD, ide.v re-asserts request=6 every
+        // cycle and ide_set_regs clears it, so the request oscillates 6<->0 - we must
+        // NOT treat that as a clear (it would flood the phantom and prematurely finish
+        // the reset). Debounce: a 6->0 arms a confirm timer; if request goes back to 6
+        // (still in reset) cancel it; only if it stays 0 through the timer is it a real
+        // SRST clear -> linger. See ps_sd_req for the phantom that keeps ide_io running.
+        { static unsigned pi0 = 0, pi1 = 0; static int confirm = 0;
           unsigned i0 = top->ide0_request & 7, i1 = top->ide1_request & 7;
-          if ((pi0 == 6 && i0 == 0) || (pi1 == 6 && i1 == 0)) g_reset_linger = 24;
+          if ((pi0 == 6 && i0 == 0) || (pi1 == 6 && i1 == 0)) confirm = 12;
+          if (i0 == 6 || i1 == 6) confirm = 0;
+          if (confirm > 0 && --confirm == 0) g_reset_linger = 24;
           pi0 = i0; pi1 = i1; }
 
         set_clocks(0); top->eval();
