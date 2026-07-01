@@ -49,15 +49,24 @@ extern "C" uint16_t ps_sd_req();
 
 static inline void addr_step() { if ((txn_addr & 0xF) != 0xF) txn_addr++; }   // regs increment, buffer fixed
 
+// ide.v advances its internal buffer index (mgmt_cnt) on the FALLING edge of
+// mgmt_write/mgmt_read (see rtl/soc/ide.v: `if((old_wr & ~mgmt_write)|...) mgmt_cnt++`).
+// So each mgmt access must be clocked with the strobe HIGH and then again with it LOW,
+// or ide.v never sees the deassertion and mgmt_cnt stays 0 -> every buffer word lands
+// at index 0 (IDENTIFY / disk sectors come back all-but-first-word zero). Clock both.
 static uint16_t mgmt_wr(uint16_t d) {
     top->mgmt_address = txn_addr & 0xFFFF; top->mgmt_writedata = d; top->mgmt_write = 1;
     ps_clock_tick();
-    top->mgmt_write = 0; addr_step(); return 0;
+    top->mgmt_write = 0;
+    ps_clock_tick();
+    addr_step(); return 0;
 }
 static uint16_t mgmt_rd() {
     top->mgmt_address = txn_addr & 0xFFFF; top->mgmt_read = 1;
     ps_clock_tick();
-    uint16_t d = top->mgmt_readdata; top->mgmt_read = 0; addr_step(); return d;
+    uint16_t d = top->mgmt_readdata; top->mgmt_read = 0;
+    ps_clock_tick();
+    addr_step(); return d;
 }
 
 void EnableIO()  { txn_pos = 0; }
