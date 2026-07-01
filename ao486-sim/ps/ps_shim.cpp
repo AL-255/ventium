@@ -110,7 +110,11 @@ int FileOpenEx(fileTYPE *f, const char *name, int mode, char mute, int use_zip) 
     f->mode = mode;
     struct stat st; if (!fstat(fileno(f->filp), &st)) f->size = st.st_size;
     snprintf(f->path, sizeof(f->path), "%s", name);
-    snprintf(f->name, sizeof(f->name), "%s", name);
+    // name is the short basename on real MiSTer (path is the full path). ide.cpp
+    // builds the ATA IDENTIFY model string from f->name; passing the full path here
+    // put "../tmp/..." (leading "..") into the model number the BIOS formats.
+    const char *bn = strrchr(name, '/'); bn = bn ? bn + 1 : name;
+    snprintf(f->name, sizeof(f->name), "%s", bn);
     f->offset = 0;
     return 1;
 }

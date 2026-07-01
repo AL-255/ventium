@@ -21,7 +21,7 @@
 static const uint64_t DDR_WORDS = (1ull << 25);   // 256 MiB / 8
 uint64_t *ddr = nullptr;   // non-static: ps_shim.cpp (shmem) maps into this
 
-struct RdBeat { uint32_t addr; uint64_t ready; };
+struct RdBeat { uint32_t addr; uint64_t ready; uint64_t data; };
 static std::deque<RdBeat> rd_fifo;     // pending DDR read beats with ready-time
 static bool     wburst = false;
 static uint32_t waddr  = 0;
@@ -229,8 +229,16 @@ static void ddr_service() {
     // data to a later request).
     if (top->DDRAM_RD && !prev_rd) {
         uint32_t a = top->DDRAM_ADDR; int n = top->DDRAM_BURSTCNT ? top->DDRAM_BURSTCNT : 1;
-        for (int i = 0; i < n; i++)
-            rd_fifo.push_back({ (uint32_t)((a + i) & (DDR_WORDS - 1)), main_time + g_ddr_lat });
+        for (int i = 0; i < n; i++) {
+            uint32_t ra = (uint32_t)((a + i) & (DDR_WORDS - 1));
+            // Capture the read DATA now (at issue), not when the beat is served: a
+            // write to the same word between issue and serve must NOT be seen by this
+            // read (it was issued first). Serving ddr[ra] later returned post-write
+            // data and corrupted CPU register loads (pop/mov landing on a store).
+            uint64_t rd = (g_mem_top_words && ra >= g_mem_top_words)
+                          ? (~((uint64_t)ra * 0x0100000001000001ull)) : ddr[ra];
+            rd_fifo.push_back({ ra, main_time + g_ddr_lat, rd });
+        }
     }
     prev_rd = top->DDRAM_RD;
     if (top->DDRAM_WE) {
@@ -246,8 +254,7 @@ static void ddr_service() {
         }
     }
     if (!rd_fifo.empty() && main_time >= rd_fifo.front().ready) {
-        uint32_t ra = rd_fifo.front().addr;
-        top->DDRAM_DOUT = (g_mem_top_words && ra >= g_mem_top_words) ? (~((uint64_t)ra * 0x0100000001000001ull)) : ddr[ra];
+        top->DDRAM_DOUT = rd_fifo.front().data;   // data captured at issue time
         top->DDRAM_DOUT_READY = 1; rd_fifo.pop_front();
     } else {
         top->DDRAM_DOUT_READY = 0;
