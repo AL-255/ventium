@@ -72,8 +72,14 @@ void ps_clock_tick();                  // defined after tick()
 int g_reset_linger = 0;                // set by main loop on a 6->0 request transition
 extern "C" uint16_t ps_sd_req() {      // request bits for ide_check(), from raw RTL outputs
     uint16_t r = (uint16_t)((top->ide0_request & 7) | ((top->ide1_request & 7) << 3) | ((top->fdd_request & 3) << 6));
-    if (r == 0 && g_reset_linger > 0) { g_reset_linger--; return 0x08; } // phantom ide1 req -> x86_poll still calls ide_io(0,0) (reset finish)
-    return r;
+    // Config bits ide_check() also carries: x86_init builds hotswap[2] as
+    // ((cfg>>8)&1)^1, so bit 8 = 0 made it create a PLACEHOLDER CD on the secondary
+    // master. The BIOS then probes that phantom ATAPI drive and hangs (our cdrom_*
+    // handlers are stubs). Set bit 8 = 1 (no placeholder) - we have no CD. Keep the
+    // linger's phantom on the low request bits (bit 8 must not defeat the r==0 test).
+    const uint16_t cfg = 0x100;
+    if (r == 0 && g_reset_linger > 0) { g_reset_linger--; return 0x08 | cfg; } // phantom -> ide_io(0,0) reset finish
+    return r | cfg;
 }
 static vluint64_t main_time = 0;
 static VerilatedVcdC *tfp = nullptr;
