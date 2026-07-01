@@ -116,6 +116,8 @@ static uint64_t g_ipn=0; static int g_iplast=0;
 extern "C" void ao486_intposs(int ip,int ido,int idone){ (void)ido;(void)idone; if(ip)g_ipn++; g_iplast=ip; }
 static uint64_t g_mrd=0,g_mwait=0,g_mrdv=0; static uint32_t g_maddr=0; static int g_mrdlast=0;
 extern "C" void ao486_mem(int rd,int wr,int wait_,int rdv,int addr){ (void)wr; if(rd){g_mrd++;g_maddr=addr;} if(wait_)g_mwait++; if(rdv)g_mrdv++; g_mrdlast=rd; }
+static char g_biosbuf[8192]; static int g_biosn=0;
+extern "C" void ao486_bioscon(int addr,int ch){ (void)addr; if(g_biosn<8190){ g_biosbuf[g_biosn++]=(char)(ch&0xff); g_biosbuf[g_biosn]=0; } }
 static int g_rtion=0, g_rtidx=0;
 extern "C" void ao486_rtcio(int kind,int val){ if(kind==0){g_rtidx=val&0xff;} if(g_rtion<3000){ if(kind==0)fprintf(stderr,"[RTC] index=0x%02x\n",val&0xff); else fprintf(stderr,"[RTC] read reg0x%02x -> 0x%02x\n",g_rtidx,val&0xff); g_rtion++; } }
 static int g_irdn=0;
@@ -624,7 +626,14 @@ int main(int argc, char **argv) {
         set_clocks(1); step_vga_clock(); top->eval();
         // Service disk requests with the real MiSTer HPS code when the RTL raises
         // a request line (x86_poll's mgmt transfers advance the clock themselves).
-        if ((c & 0x7f) == 0 && (top->fdd_request || top->ide0_request || top->ide1_request)) { g_polls++; x86_poll(0); }
+        // Gate x86_poll's mgmt-bus servicing so it never overlaps a CPU iobus
+        // transaction: my mgmt driver advances the FPGA clock during transfers,
+        // and mgmt writes to the IDE that collide with a concurrent CPU iobus IDE
+        // read wedge the iobus (cpu_read_do stuck, cpu_read_done never asserts).
+        // Real MiSTer's ARM is async and doesn't touch the FPGA clock, so it never
+        // collides. Skipping the poll while the CPU is mid-io lets the read finish.
+        if ((c & 0x7f) == 0 && (top->fdd_request || top->ide0_request || top->ide1_request)
+            && !g_brdo && !g_bwdo) { g_polls++; x86_poll(0); }
         if (top->DDRAM_RD) {
             ddr_reads++; last_addr = top->DDRAM_ADDR;
             uint32_t a = top->DDRAM_ADDR;
@@ -664,6 +673,7 @@ int main(int argc, char **argv) {
     fprintf(stderr,">>> VGA retrace: host_io_vert_retrace high %llu cyc, edges %llu; output vsync high %llu cyc\n",(unsigned long long)g_vret_hi,(unsigned long long)g_vret_edges,(unsigned long long)g_ovs_hi);
     fprintf(stderr,">>> 0x3DA reads=%llu, of which bit3(retrace)=1 in %llu\n",(unsigned long long)g_3da_reads,(unsigned long long)g_3da_bit3_hi);
     fprintf(stderr,">>> INTR over %llu cyc: interrupt_do=%llu interrupt_done=%llu irq0(PIT)=%llu irq8(RTC)=%llu irq1=%llu\n",(unsigned long long)g_intn,(unsigned long long)g_ido,(unsigned long long)g_idone,(unsigned long long)g_i0,(unsigned long long)g_i8,(unsigned long long)g_i1);
+    fprintf(stderr,"=== BIOS serial/debug console ===\n%s\n=== end console ===\n", g_biosbuf);
     dump_vga_text();
     dump_ring();      // control-flow path at end (diagnoses hangs)
     dump_ppm(9999);   // final frame snapshot

@@ -374,6 +374,14 @@ module intposs(input clk, input ip, input ido, input idone);
 endmodule
 bind ao486 intposs intposs_i(.clk(clk), .ip(wr_interrupt_possible), .ido(interrupt_do), .idone(interrupt_done));
 
+
+// BIOS serial/debug console capture (0x3f8 UART THR, 0xe9, 0x402/0x403)
+module bioscon(input clk, input iow, input [15:0] ioa, input [31:0] iod);
+    import "DPI-C" function void ao486_bioscon(int addr, int ch);
+    always @(posedge clk) if (iow && (ioa==16'h03f8 || ioa==16'h00e9 || ioa==16'h0402 || ioa==16'h0403 || ioa==16'h0401)) ao486_bioscon({16'd0,ioa}, {24'd0,iod[7:0]});
+endmodule
+bind system bioscon bioscon_i(.clk(clk_sys), .iow(iobus_write), .ioa(iobus_address[15:0]), .iod(iobus_writedata));
+
 bind system idewr idewr_i(.clk(clk_sys), .iow(iobus_write), .ioa(iobus_address[15:0]), .iod(iobus_writedata));
 
 bind vga vgaretrace vgaretrace_i(.clk(clk_sys), .vretrace(host_io_vertical_retrace), .outvsync(vga_vert_sync));
