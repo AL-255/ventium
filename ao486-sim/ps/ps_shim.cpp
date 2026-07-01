@@ -18,6 +18,7 @@
 #include "file_io.h"
 #include "hardware.h"
 #include "cfg.h"
+#include "ide.h"          // drive_t (for parse_vhd_config geometry)
 #include "support/vhd/vhdcfg.h"
 #include "support/chd/mister_chd.h"
 
@@ -165,7 +166,17 @@ void cdrom_reply(ide_config*, uint8_t, uint8_t, uint8_t, bool) {}
 void cdrom_mode_select(ide_config*) {}
 void ide_cdda_send_sector() {}
 const char* cdrom_parse(uint32_t, const char*) { return 0; }
-vhd_error parse_vhd_config(drive_t*) { return VHD_NOERROR; }
+// Our images are raw. The x86_init hard-disk path calls ide_img_set(..., sectors=0,
+// heads=0) and relies on parse_vhd_config to fill drive->spt/heads; leaving them 0
+// made ide_set_geometry default spt to the INVALID 256 (>63, doesn't fit INT 13h's
+// 6-bit sector field), so the BIOS formatted a bogus geometry and overflowed a stack
+// buffer during POST. Assign the standard small-disk CHS (16 heads / 63 sectors) and
+// return success so ide.cpp's else-branch ide_set_geometry(drive->spt, drive->heads)
+// gets a valid geometry (cylinders are recomputed from the file size).
+vhd_error parse_vhd_config(drive_t* drive) {
+    if (drive && drive->f) { drive->heads = 16; drive->spt = 63; }
+    return VHD_NOERROR;
+}
 int mister_load_chd(const char*, fileTYPE*) { return 1; }
 int mister_chd_read_sector(chd_file*, uint32_t, uint32_t, uint32_t, void*, int*, uint8_t*) { return 1; }
 
