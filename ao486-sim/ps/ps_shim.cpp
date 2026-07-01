@@ -78,7 +78,13 @@ uint8_t spi_b(uint8_t parm) {
 }
 uint16_t spi_w(uint16_t word) {
     if (txn_pos == 0) {                        // ide_check(): UIO_DMA_SDIO status query
-        if (word == UIO_DMA_SDIO) { txn_pos = 9; return ps_sd_req(); }
+        // Advance the FPGA clock on every status query. The real ide_check() issues a
+        // real SPI transaction that clocks the bus, so the FPGA keeps running while the
+        // HPS polls. ide.cpp's multi-sector read/write loops busy-wait on this
+        // (`while(!ide_req) ide_req = ide_check()...`) for the core to raise the
+        // next-sector request; without a tick here the core is frozen and it spins
+        // forever (single-sector transfers break out before that loop, so they worked).
+        if (word == UIO_DMA_SDIO) { txn_pos = 9; ps_clock_tick(); return ps_sd_req(); }
         txn_dir = (word == UIO_DMA_READ) ? 1 : 0; txn_pos = 1; return 0;
     }
     if (txn_pos == 9) return 0;                // SDIO second read
