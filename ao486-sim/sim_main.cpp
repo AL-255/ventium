@@ -63,8 +63,17 @@ static const char *g_statefile = "../tmp/ao486.state";
 static bool g_load = false;             // --load: restore instead of POST
 static int g_mem_mb = 0;                // --mem: override CMOS RAM size (0=leave x86_init default 16MB)
 void ps_clock_tick();                  // defined after tick()
+// After an IDE soft-reset clears (request 6->0 once ide.cpp writes reg5), the drive
+// stays BSY until ide_io(0,0)/ide_io(1,0) runs its "reset finish" (sets RDY). But
+// x86_poll only calls ide_io when sd_req!=0, and once ide0/ide1 clear to 0 there may
+// be no other request to keep it polling (real MiSTer's floppy keeps one pending).
+// So after a request drops 6->0, linger a phantom request on the OTHER channel (req
+// code 1 = no-op in ide_io) so x86_poll still calls ide_io(0,0)/(1,0) to finish the reset.
+int g_reset_linger = 0;                // set by main loop on a 6->0 request transition
 extern "C" uint16_t ps_sd_req() {      // request bits for ide_check(), from raw RTL outputs
-    return (uint16_t)((top->ide0_request & 7) | ((top->ide1_request & 7) << 3) | ((top->fdd_request & 3) << 6));
+    uint16_t r = (uint16_t)((top->ide0_request & 7) | ((top->ide1_request & 7) << 3) | ((top->fdd_request & 3) << 6));
+    if (r == 0 && g_reset_linger > 0) { g_reset_linger--; return 0x08; } // phantom ide1 req -> x86_poll still calls ide_io(0,0) (reset finish)
+    return r;
 }
 static vluint64_t main_time = 0;
 static VerilatedVcdC *tfp = nullptr;
@@ -622,6 +631,13 @@ int main(int argc, char **argv) {
         if (reset_hold > 0) { top->reset = 1; reset_hold--; } else { top->reset = 0; }
         { static bool saved = false; if (g_save_at && !saved && main_time >= g_save_at) { saved = true; save_state(g_statefile); } }
 
+        // Detect an IDE soft-reset request clearing (6->0) and linger so x86_poll
+        // still runs ide_io(0,0)/(1,0) to finish the reset (set RDY). See ps_sd_req.
+        { static unsigned pi0 = 0, pi1 = 0;
+          unsigned i0 = top->ide0_request & 7, i1 = top->ide1_request & 7;
+          if ((pi0 == 6 && i0 == 0) || (pi1 == 6 && i1 == 0)) g_reset_linger = 24;
+          pi0 = i0; pi1 = i1; }
+
         set_clocks(0); top->eval();
         set_clocks(1); step_vga_clock(); top->eval();
         // Service disk requests with the real MiSTer HPS code when the RTL raises
@@ -632,8 +648,7 @@ int main(int argc, char **argv) {
         // read wedge the iobus (cpu_read_do stuck, cpu_read_done never asserts).
         // Real MiSTer's ARM is async and doesn't touch the FPGA clock, so it never
         // collides. Skipping the poll while the CPU is mid-io lets the read finish.
-        if ((top->fdd_request || top->ide0_request || top->ide1_request)
-            && !g_brdo && !g_bwdo) { g_polls++; x86_poll(0); }
+        if ((top->fdd_request || top->ide0_request || top->ide1_request || g_reset_linger > 0) && !g_brdo && !g_bwdo) { g_polls++; x86_poll(0); }
         if (top->DDRAM_RD) {
             ddr_reads++; last_addr = top->DDRAM_ADDR;
             uint32_t a = top->DDRAM_ADDR;

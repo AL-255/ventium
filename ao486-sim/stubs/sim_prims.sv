@@ -288,7 +288,7 @@ bind system idewatch idewatch_i(
 // iobus snoop: why does a read not complete when bus_wait=0?
 module iobuswatch(input clk, input rdo, input rdone, input wdo, input wdone, input brd, input bwr, input bwait, input [15:0] baddr);
     import "DPI-C" function void ao486_iobus(int rdo,int rdone,int wdo,int wdone,int brd,int bwr,int bwait,int baddr);
-    always @(posedge clk) if (rdo|wdo) ao486_iobus({31'd0,rdo},{31'd0,rdone},{31'd0,wdo},{31'd0,wdone},{31'd0,brd},{31'd0,bwr},{31'd0,bwait},{16'd0,baddr});
+    always @(posedge clk) ao486_iobus({31'd0,rdo},{31'd0,rdone},{31'd0,wdo},{31'd0,wdone},{31'd0,brd},{31'd0,bwr},{31'd0,bwait},{16'd0,baddr});
 endmodule
 
 // VGA vertical-retrace probe: does host_io_vertical_retrace (0x3DA bit3) toggle?
