@@ -632,7 +632,7 @@ int main(int argc, char **argv) {
         // read wedge the iobus (cpu_read_do stuck, cpu_read_done never asserts).
         // Real MiSTer's ARM is async and doesn't touch the FPGA clock, so it never
         // collides. Skipping the poll while the CPU is mid-io lets the read finish.
-        if ((c & 0x7f) == 0 && (top->fdd_request || top->ide0_request || top->ide1_request)
+        if ((top->fdd_request || top->ide0_request || top->ide1_request)
             && !g_brdo && !g_bwdo) { g_polls++; x86_poll(0); }
         if (top->DDRAM_RD) {
             ddr_reads++; last_addr = top->DDRAM_ADDR;
