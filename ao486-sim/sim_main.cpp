@@ -70,6 +70,10 @@ void ps_clock_tick();                  // defined after tick()
 // So after a request drops 6->0, linger a phantom request on the OTHER channel (req
 // code 1 = no-op in ide_io) so x86_poll still calls ide_io(0,0)/(1,0) to finish the reset.
 int g_reset_linger = 0;                // set by main loop on a 6->0 request transition
+static int g_shutdown = 0;
+extern "C" void ao486_shutdown(int s) { g_shutdown = s; }
+static int g_l2st=0,g_l2vb=0,g_l2cb=0,g_l2vrd=0,g_l2vwe=0;
+extern "C" void ao486_l2(int st,int vb,int cb,int vrd,int vwe){ g_l2st=st;g_l2vb=vb;g_l2cb=cb;g_l2vrd=vrd;g_l2vwe=vwe; }
 extern "C" uint16_t ps_sd_req() {      // request bits for ide_check(), from raw RTL outputs
     uint16_t r = (uint16_t)((top->ide0_request & 7) | ((top->ide1_request & 7) << 3) | ((top->fdd_request & 3) << 6));
     // Config bits ide_check() also carries: x86_init builds hotswap[2] as
@@ -660,6 +664,27 @@ int main(int argc, char **argv) {
 
         set_clocks(0); top->eval();
         set_clocks(1); step_vga_clock(); top->eval();
+        // Service the DDR immediately after the posedge (matching ps_clock_tick's
+        // order) and BEFORE x86_poll. x86_poll advances the clock via ps_clock_tick,
+        // which ALSO services the DDR; when ddr_service ran AFTER x86_poll it served a
+        // fresh read-beat right on top of x86_poll's last-served beat with no posedge
+        // between them, so the L2 never latched that beat -> a cache-line fill lost a
+        // beat and stalled forever in FILLCACHE whenever a poll coincided with a fill.
+        if (top->DDRAM_RD) {
+            ddr_reads++; last_addr = top->DDRAM_ADDR;
+            uint32_t a = top->DDRAM_ADDR;
+            if (a >= 0x18000 && a < 0x20000) bios_reads++;
+        }
+        if (top->DDRAM_WE) ddr_writes++;
+        ddr_service();
+        { static uint64_t lr = 0, lrt = 0;
+          if (retire_count != lr) { lr = retire_count; lrt = main_time; }
+          else if (main_time - lrt >= 300000 && retire_count > 8180000 && !crash_dumped) {
+              crash_dumped = true;
+              fprintf(stderr, ">>> STALL @%llu %04x:%04x | L2 state=%d vgabusy=%d CPU_BUSY=%d VGA_RD=%d VGA_WE=%d | DDRAM RD=%d WE=%d BUSY=%d SHUTDOWN=%d\n",
+                      (unsigned long long)retire_count, last_cs, last_eip, g_l2st, g_l2vb, g_l2cb, g_l2vrd, g_l2vwe,
+                      (int)top->DDRAM_RD, (int)top->DDRAM_WE, (int)top->DDRAM_BUSY, g_shutdown);
+          } }
         // Service disk requests with the real MiSTer HPS code when the RTL raises
         // a request line (x86_poll's mgmt transfers advance the clock themselves).
         // Gate x86_poll's mgmt-bus servicing so it never overlaps a CPU iobus
@@ -669,13 +694,6 @@ int main(int argc, char **argv) {
         // Real MiSTer's ARM is async and doesn't touch the FPGA clock, so it never
         // collides. Skipping the poll while the CPU is mid-io lets the read finish.
         if ((top->fdd_request || top->ide0_request || top->ide1_request || g_reset_linger > 0) && !g_brdo && !g_bwdo) { g_polls++; x86_poll(0); }
-        if (top->DDRAM_RD) {
-            ddr_reads++; last_addr = top->DDRAM_ADDR;
-            uint32_t a = top->DDRAM_ADDR;
-            if (a >= 0x18000 && a < 0x20000) bios_reads++;
-        }
-        if (top->DDRAM_WE) ddr_writes++;
-        ddr_service();           // DDR response registered: applied at next edge (physical, no 0-cycle path)
         main_time++;
         video_capture(); vcd_dump();
         if ((c & 0x7ffff) == 0x7ffff) {
