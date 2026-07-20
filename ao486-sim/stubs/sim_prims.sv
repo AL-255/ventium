@@ -212,16 +212,132 @@ module cpu_probe(
     input  [15:0] cs,
     input  [31:0] eip,
     input  [31:0] esp,
-    input  [31:0] eax
+    input  [31:0] eax,
+    input  [63:0] cs_cache
 );
     import "DPI-C" function void ao486_cpu_trace2(input int cs, input int eip,
-                                                  input int esp, input int eax);
-    always @(posedge clk) if (new_export) ao486_cpu_trace2({16'd0, cs}, eip, esp, eax);
+                                                  input int esp, input int eax,
+                                                  input int lin);
+    import "DPI-C" function void ao486_dbg_cscache(input int lo, input int hi);
+    // True code linear = CS descriptor base + eip, packed as { cs_cache[63:56],
+    // cs_cache[39:16] } (see read_segment.v). Correct in real & protected mode,
+    // unlike (cs<<4)+eip which is wrong for LDT/GDT selectors with a nonzero base.
+    //
+    // GATED behind AO486_TRUE_LIN. The cs_cache read here is a pure observer and was
+    // verified execution-neutral (two builds, one reading cs_cache and one binding it
+    // to 0, retire byte-for-byte identically). It is gated only as a conservative
+    // default so the mainline build stays bit-identical to the original 4-input probe;
+    // define AO486_TRUE_LIN for a disasm build that needs the true protected-mode
+    // linear (LDT/GDT selectors with a nonzero base, where (cs<<4)+eip is wrong).
+`ifdef AO486_TRUE_LIN
+    wire [31:0] cs_base = { cs_cache[63:56], cs_cache[39:16] };
+    always @(posedge clk) if (new_export) begin
+        ao486_cpu_trace2({16'd0, cs}, eip, esp, eax, cs_base + eip);
+        ao486_dbg_cscache(cs_cache[31:0], cs_cache[63:32]);
+    end
+`else
+    always @(posedge clk) if (new_export)
+        ao486_cpu_trace2({16'd0, cs}, eip, esp, eax, (cs << 4) + eip);
+`endif
 endmodule
 
+`ifdef AO486_TRUE_LIN
 bind pipeline cpu_probe cpu_probe_i(
-    .clk(clk), .new_export(exe_ready), .cs(cs), .eip(exe_eip_final), .esp(esp), .eax(eax)
+    .clk(clk), .new_export(exe_ready), .cs(cs), .eip(exe_eip_final), .esp(esp), .eax(eax),
+    .cs_cache(cs_cache)
 );
+`else
+bind pipeline cpu_probe cpu_probe_i(
+    .clk(clk), .new_export(exe_ready), .cs(cs), .eip(exe_eip_final), .esp(esp), .eax(eax),
+    .cs_cache(64'd0)
+);
+`endif
+
+// Co-simulated x87 FPU: forward each retiring ESC op (CMD_fpu=50 / CMDEX_ESC_STEP_0=1)
+// to the C x87 model, and snapshot the paging state it needs to resolve the operand's
+// linear address to physical. FNSTSW AX is a separate command (CMD_FNSTSW) handled in
+// the execute datapath, so it does NOT fire this probe.
+module fpu_probe(input clk, input fire, input escfire, input fpu_active, input [15:0] opmodrm, input [31:0] lin,
+                 input [31:0] eipv, input [31:0] cr3v, input pg, input em, input ts);
+    import "DPI-C" function void ao486_fpu_op(input int op_modrm, input int lin);
+    import "DPI-C" function void ao486_paging(input int cr3, input int pg);
+    import "DPI-C" function void ao486_emts(input int em, input int ts, input int esctrap);
+    reg pem = 0, pts = 0;
+    // `fire` (exe_ready && CMD_fpu && ESC_STEP_0) is HELD high while the ESC op sits in execute
+    // across stall / mgmt cycles, so a level-triggered DPI call delivers the same op many times.
+    // The C side used to de-dup by (opmodrm, lin) -- but that is indistinguishable from a tight
+    // loop whose body is a single ESC instruction, e.g. Q_atof's
+    //     0xe96e: fdiv st(1),st(0)   /  dec ecx / cmp ecx,esi / jg 0xe96e
+    // whose iterations were silently swallowed (800.000000 parsed as 8000000.0). Deliver on the
+    // RISING edge of `fire` instead (or when the op/operand changes while it stays high): that is
+    // exactly once per retired ESC instruction, loop iterations included.
+    //
+    // BUT the rising edge alone DOUBLE-DELIVERS a memory-operand ESC op: FILD/FCOM/FADD m32 stall in
+    // execute for the operand fetch, during which `fire` drops (exe_ready deasserts) and RE-RISES when
+    // the operand is ready and the op re-enters ESC_STEP_0 -- all WITHIN THE SAME instruction (exe_cmd
+    // stays CMD_fpu the whole time). Each spurious re-fire applies the op twice: an extra FILD push /
+    // FSTP pop that leaks the x87 stack, eventually clobbering a live transform/view-origin register ->
+    // Quake's camera flies out of bounds. Fix: a rising edge only counts as a NEW instruction if the
+    // ESC op actually LEFT execute since the last delivery, i.e. some non-CMD_fpu op ran in between
+    // (`armed`). A within-op stall keeps exe_cmd==CMD_fpu (fpu_active), so armed stays 0 and the
+    // re-rise is ignored. Loop iterations (and consecutive different ESC ops) still deliver: the
+    // dec/cmp/jg between iterations drop fpu_active (re-arm), and different ops fire on opmodrm/lin.
+    //
+    // BUT `armed` + (opmodrm/lin) is NOT enough for TWO CONSECUTIVE IDENTICAL register ESC ops with no
+    // non-FPU op between them, e.g. the demo-interpolation epilogue
+    //     0x2a64: fstp st(0)   /   0x2a66: fstp st(0)
+    // Both are register ops: same opmodrm (dd/d8) AND same lin (register ops carry lin=cs_base, constant),
+    // and fpu_active never drops between them, so armed stays 0 -> the SECOND fstp is swallowed. That
+    // drops one x87 pop -> a stale const (+100 teleport bound) leaks up the stack, so the entity-origin
+    // lerp reads its frac from ST(3)=100 instead of ~1 and the player origin overshoots ~100x -> Quake's
+    // camera flies out of bounds at frame r_000034. Discriminate consecutive instructions by their eip:
+    // it is CONSTANT across a within-op operand-fetch stall (so the double-fire fix above still holds) but
+    // CHANGES between two distinct instructions (so both fstp deliver). This is the exact "one delivery
+    // per retired ESC instruction" invariant we want.
+    reg        pfire    = 1'b0;
+    reg [15:0] popmodrm = 16'hffff;
+    reg [31:0] plin     = 32'hffffffff;
+    reg [31:0] peip     = 32'hffffffff;
+    reg        armed    = 1'b1;
+    always @(posedge clk) begin
+        ao486_paging(cr3v, {31'd0, pg});
+        if (fire && ((!pfire && armed) || opmodrm !== popmodrm || lin !== plin || eipv !== peip)) begin
+            ao486_fpu_op({16'd0, opmodrm}, lin);
+            armed <= 1'b0;                       // delivered this op; do not re-deliver on a within-op stall re-rise
+        end
+        if (!fpu_active) armed <= 1'b1;          // ESC op left execute (a non-FPU op ran) -> next rising edge is a real new op
+        pfire    <= fire;
+        popmodrm <= opmodrm;
+        plin     <= lin;
+        peip     <= eipv;
+        // Log every CR0.EM / CR0.TS change: the co-sim ESC path fires only while EM=0 && TS=0;
+        // the instant either is set, ESC ops trap (NM/INT7) and the co-sim goes silent. escfire
+        // marks an ESC op that is being TRAPPED (em||ts set) -> the co-sim silently loses it.
+        if (em !== pem || ts !== pts) ao486_emts({31'd0, em}, {31'd0, ts}, {31'd0, (escfire & (em | ts))});
+        if (escfire & (em | ts)) ao486_emts({31'd0, em}, {31'd0, ts}, 32'd2);   // ESC op trapped
+        pem <= em; pts <= ts;
+    end
+endmodule
+bind pipeline fpu_probe fpu_probe_i(
+    .clk(clk),
+    .fire(exe_ready && exe_cmd == 7'd50 && exe_cmdex == 4'd1),   // co-sim FPU: process each ESC op (ao486 is 486SX, no HW FPU)
+    .escfire(exe_cmd == 7'd50 && exe_cmdex == 4'd1),             // ESC op in execute (traps if EM||TS -> co-sim silent)
+    .fpu_active(exe_cmd == 7'd50),                               // ANY step of an ESC op in execute: high across a within-op operand-fetch stall
+    .opmodrm(exe_decoder[15:0]),
+    .lin(exe_linear),
+    .eipv(exe_eip_final),                                       // per-instruction eip: constant across a within-op stall, changes between two distinct consecutive ESC ops
+    .cr3v(cr3),
+    .pg(cr0_pg),
+    .em(cr0_em),
+    .ts(cr0_ts)
+);
+
+// debug: confirm DF-E0 decoded to CMD_FNSTSW (7'd118) and retired
+module fnstsw_probe(input clk, input fire);
+    import "DPI-C" function void ao486_fnstsw_dbg();
+    always @(posedge clk) if (fire) ao486_fnstsw_dbg();
+endmodule
+bind pipeline fnstsw_probe fnstsw_probe_i(.clk(clk), .fire(exe_ready && exe_cmd == 7'd118));
 
 // L1 icache output checker: every completed fetch, compare the data the icache
 // returns to the known BIOS bytes in DDR -> pins the exact corrupted fetch.
@@ -252,6 +368,18 @@ bind l1_icache icache_dprobe icache_dprobe_i(
     .cpuaddr(CPU_ADDR)
 );
 
+// CPU-write snoop for FPU read-side coherency: forward every committed CPU->memory write
+// (avalon_mem's snoop bus, asserted at write-commit — a few cycles before the write drains
+// through the write-through L2 into ddr[]) to the co-sim, which overlays not-yet-drained
+// stores onto FPU operand reads so a load never sees stale DDR bytes.
+module snoop_probe(input clk, input we, input [27:2] addr, input [31:0] data, input [3:0] be);
+    import "DPI-C" function void ao486_snoop_write(input int addr, input int data, input int be);
+    always @(posedge clk) if (we) ao486_snoop_write({4'd0, addr, 2'b00}, data, {28'd0, be});
+endmodule
+bind avalon_mem snoop_probe snoop_probe_i(
+    .clk(clk), .we(snoop_we), .addr(snoop_addr), .data(snoop_data), .be(snoop_be)
+);
+
 // I/O-write snoop: capture the Bochs debug console (port 0xE9) to read BIOS
 // debug/panic messages directly, bypassing the VGA framebuffer.
 module iowatch(input clk, input wdo, input [15:0] waddr, input [31:0] wdata);
@@ -273,6 +401,23 @@ module ioreadwatch(input clk, input rdo, input rdone, input [15:0] raddr);
 endmodule
 bind system ioreadwatch ioreadwatch_i(
     .clk(clk_sys), .rdo(cpu_io_read_do), .rdone(cpu_io_read_done), .raddr(cpu_io_read_address)
+);
+
+// RTC access snoop: port 0x70 write = register select, port 0x71 read = data value.
+// Used to see exactly which RTC register a stuck boot loop polls and the value it waits for.
+module rtcsnoop(input clk, input rdone, input [15:0] raddr, input [31:0] rdata,
+                input wdo, input [15:0] waddr, input [31:0] wdata);
+    import "DPI-C" function void ao486_rtc_acc(int rw, int val);
+    reg pwdo = 0;
+    always @(posedge clk) begin
+        if (wdo && !pwdo && waddr == 16'h0070) ao486_rtc_acc(1, {24'd0, wdata[7:0]});
+        if (rdone && raddr == 16'h0071)         ao486_rtc_acc(0, {24'd0, rdata[7:0]});
+        pwdo <= wdo;
+    end
+endmodule
+bind system rtcsnoop rtcsnoop_i(
+    .clk(clk_sys), .rdone(cpu_io_read_done), .raddr(cpu_io_read_address), .rdata(cpu_io_read_data),
+    .wdo(cpu_io_write_do), .waddr(cpu_io_write_address), .wdata(cpu_io_write_data)
 );
 
 // IDE wait/nodata/request snoop (bus_wait = ide0_wait|ide1_wait blocks ALL io).
@@ -331,8 +476,43 @@ module rtcp(input clk, input [2:0] divi, input [3:0] prate, input pena, input ue
 endmodule
 bind rtc rtcp rtcp_i(.clk(clk), .divi(divider), .prate(periodic_rate), .pena(crb_int_periodic_ena), .uena(crb_int_update_ena), .aena(crb_int_alarm_ena), .pint(periodic_interrupt), .uint_(update_interrupt), .irqv(irq));
 
+// RTC periodic-NCO probe: does ce_8192hz tick, does periodic_major count, does periodic_enabled hold?
+module rtc_perprobe(input clk, input ce8192, input [12:0] pmajor, input pen, input pint);
+    import "DPI-C" function void ao486_rtc_per(int ce8192, int pmajor, int pen, int pint);
+    always @(posedge clk) ao486_rtc_per({31'd0,ce8192}, {19'd0,pmajor}, {31'd0,pen}, {31'd0,pint});
+endmodule
+bind rtc rtc_perprobe rtc_perprobe_i(.clk(clk), .ce8192(ce_8192hz), .pmajor(periodic_major), .pen(periodic_enabled), .pint(periodic_interrupt));
+
 
 // CPU shutdown (triple-fault) probe
+module cpu_shutdown_probe(input clk, input sd);
+    import "DPI-C" function void ao486_shutdown(int s);
+    always @(posedge clk) ao486_shutdown(sd ? 1 : 0);
+endmodule
+bind exception cpu_shutdown_probe cpu_shutdown_probe_i(.clk(clk), .sd(shutdown));
+
+// Page-fault probe (co-sim wedge hunt): DISABLED for now. Binding a new observer into
+// `ao486` can perturb Verilator's eval order for the UNOPTFLAT comb loops in the core and
+// flip a timing-sensitive race, so keep the model execution-identical to the verified
+// TRUE_LIN profile. Re-enable only if a DATA page fault's CR2 is specifically needed.
+// module pf_probe(input clk, input rdpf, input wrpf, input [31:0] rcr2, input [31:0] wcr2,
+//                 input [31:0] exeip, input [31:0] wreip, input [31:0] cr3v, input pg);
+//     import "DPI-C" function void ao486_pagefault(int kind, int cr2, int exeip, int wreip, int cr3, int pg);
+//     always @(posedge clk) begin
+//         if (rdpf) ao486_pagefault(1, rcr2, exeip, wreip, cr3v, {31'd0, pg});
+//         if (wrpf) ao486_pagefault(2, wcr2, exeip, wreip, cr3v, {31'd0, pg});
+//     end
+// endmodule
+// bind ao486 pf_probe pf_probe_i(.clk(clk), .rdpf(read_page_fault), .wrpf(write_page_fault),
+//     .rcr2(tlb_read_pf_cr2), .wcr2(tlb_write_pf_cr2), .exeip(exe_eip), .wreip(wr_eip),
+//     .cr3v(cr3), .pg(cr0_pg));
+
+// L2 cache state + VGA-write probe (capture text the BIOS prints to VGA memory)
+module l2_probe(input clk, input [3:0] st, input vb, input cb, input [16:0] vaddr, input [7:0] vdout, input vwe);
+    import "DPI-C" function void ao486_l2(int st, int vb, int cb, int vaddr, int vdout, int vwe);
+    always @(posedge clk) ao486_l2({28'd0,st}, {31'd0,vb}, {31'd0,cb}, {15'd0,vaddr}, {24'd0,vdout}, {31'd0,vwe});
+endmodule
+bind l2_cache l2_probe l2_probe_i(.clk(CLK), .st(state), .vb(vgabusy), .cb(CPU_BUSY), .vaddr(VGA_ADDR), .vdout(VGA_DOUT), .vwe(VGA_WE));
 
 
 // IDE-region io-write probe (bind system works)

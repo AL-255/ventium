@@ -110,4 +110,7 @@
 3rd-party/ao486_MiSTer/rtl/soc/vga.v
 3rd-party/ao486_MiSTer/rtl/system.v
 3rd-party/ao486_MiSTer/rtl/hps_ext.v
+rtl/fpu/fpu_x87_pkg.sv
+rtl/core/ventium_x87_pkg.sv
+ao486-sim/stubs/ven_fpu_dpi.sv
 ao486-sim/stubs/sim_prims.sv

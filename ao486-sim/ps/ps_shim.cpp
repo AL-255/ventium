@@ -62,8 +62,16 @@ static uint16_t mgmt_wr(uint16_t d) {
     addr_step(); return 0;
 }
 static uint16_t mgmt_rd() {
+    // The register reads (mgmt_address 0..5) are one registered stage: valid after one
+    // posedge. The BUFFER read (mgmt_address low-nibble 0xF) comes from the io_buf dpram,
+    // whose q_a is itself registered, so mgmt_readdata reflects it one cycle later. Give
+    // the buffer path that extra settle tick, or disk WRITES read the buffer off-by-one
+    // and corrupt the image (the read path is unaffected — the CPU reads the buffer over
+    // its own io port, not over mgmt).
+    int is_buf = ((txn_addr & 0xF) == 0xF);
     top->mgmt_address = txn_addr & 0xFFFF; top->mgmt_read = 1;
     ps_clock_tick();
+    if (is_buf) ps_clock_tick();
     uint16_t d = top->mgmt_readdata; top->mgmt_read = 0;
     ps_clock_tick();
     addr_step(); return d;
@@ -181,16 +189,22 @@ void cdrom_reply(ide_config*, uint8_t, uint8_t, uint8_t, bool) {}
 void cdrom_mode_select(ide_config*) {}
 void ide_cdda_send_sector() {}
 const char* cdrom_parse(uint32_t, const char*) { return 0; }
-// Our images are raw. The x86_init hard-disk path calls ide_img_set(..., sectors=0,
-// heads=0) and relies on parse_vhd_config to fill drive->spt/heads; leaving them 0
-// made ide_set_geometry default spt to the INVALID 256 (>63, doesn't fit INT 13h's
-// 6-bit sector field), so the BIOS formatted a bogus geometry and overflowed a stack
-// buffer during POST. Assign the standard small-disk CHS (16 heads / 63 sectors) and
-// return success so ide.cpp's else-branch ide_set_geometry(drive->spt, drive->heads)
-// gets a valid geometry (cylinders are recomputed from the file size).
+// A raw VHD has no .cfg geometry sidecar, so report "no config loaded" -- exactly what
+// real MiSTer's parse_vhd_config does (VHD_NO_CONFIG) for a bare image. ide_img_set's
+// caller (x86.cpp:495-518) then applies the geometry IT already chose from the image
+// size: 63 SPT / 16 heads for images <= 8.4GB (line 516) -- which is what this 2GB
+// Win95 VHD receives -- or the 16/256 default for larger disks. That is the exact
+// geometry a real ao486 reports; because CMOS 0x39 = LBA, the BIOS derives INT 13h
+// geometry from the total sector count regardless, and the data path is LBA, so this
+// value is correct rather than merely "valid". The sim's vhd_error enum has only
+// {VHD_NOERROR=0, VHD_ERROR=1}; return the non-zero ("no config") value so ide.cpp
+// takes the `ide_set_geometry(drive, sectors, heads)` branch. Do NOT hard-set
+// drive->spt/heads here -- the previous 16/63 override duplicated the caller's value
+// and masked, rather than fixed, whatever early-POST fault the 256-SPT default once hit
+// (that fault was resolved by the DDR/mgmt read-timing fixes; see AO486_SOC_FIX.md).
 vhd_error parse_vhd_config(drive_t* drive) {
-    if (drive && drive->f) { drive->heads = 16; drive->spt = 63; }
-    return VHD_NOERROR;
+    (void)drive;
+    return VHD_ERROR;   // "no .cfg" -> caller applies its size-based geometry (real MiSTer behavior)
 }
 int mister_load_chd(const char*, fileTYPE*) { return 1; }
 int mister_chd_read_sector(chd_file*, uint32_t, uint32_t, uint32_t, void*, int*, uint8_t*) { return 1; }

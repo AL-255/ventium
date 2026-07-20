@@ -83,3 +83,18 @@ verif/cov/opgen/tests/
 verif/cov/opgen/modes/
 verif/cov/opgen/repros/
 tmp/
+
+# ao486-sim run/scratch dirs — 2GB Win95 disk images, state snapshots, logs, captures.
+# The disk image is external (see ao486-sim/REPRODUCE.md); everything here is regenerated.
+ao486-sim/run_*/
+ao486-sim/*.log
+ao486-sim/.build_ide.log
+ao486-sim/**/*.bak
+# host scratch (time_shim.so is rebuilt by setup.sh; framebuffer captures land here)
+/tmp/
+/run_probe/
+/run_vfpu/
+
+# logs and editor/script backups are scratch anywhere in the tree
+*.log
+*.bak

@@ -1,0 +1,232 @@
+diff --git a/rtl/ao486/autogen/decode_commands.v b/rtl/ao486/autogen/decode_commands.v
+index f77d94b..799545f 100644
+--- a/rtl/ao486/autogen/decode_commands.v
++++ b/rtl/ao486/autogen/decode_commands.v
+@@ -200,6 +200,7 @@ assign dec_cmd =
+     (cond_63 && ~cond_22)? ( `CMD_LGDT) :
+     (cond_64 && ~cond_22)? ( `CMD_LIDT) :
+     (cond_65 && ~cond_4)? ( `CMD_PUSHA) :
++    (dec_ready_modregrm_one && decoder[7:0]==8'hDF && decoder[15:8]==8'hE0 && ~cond_4)? ( `CMD_FNSTSW) :
+     (cond_66 && ~cond_4)? ( `CMD_fpu) :
+     (cond_67 && ~cond_4)? ( `CMD_fpu) :
+     (cond_68 && ~cond_4)? ( `CMD_SETcc) :
+diff --git a/rtl/ao486/autogen/defines.v b/rtl/ao486/autogen/defines.v
+index d06999b..0744f31 100644
+--- a/rtl/ao486/autogen/defines.v
++++ b/rtl/ao486/autogen/defines.v
+@@ -446,4 +446,5 @@
+ `define CMDEX_CALL_Ap_STEP_1 4'd6
+ `define CMDEX_CALL_Ap_STEP_0 4'd3
+ `define CMD_INVD 7'd9
++`define CMD_FNSTSW 7'd118
+ `define CMDEX_PUSH_immediate_se 4'd1
+diff --git a/rtl/ao486/autogen/execute_commands.v b/rtl/ao486/autogen/execute_commands.v
+index 691a17a..2c45942 100644
+--- a/rtl/ao486/autogen/execute_commands.v
++++ b/rtl/ao486/autogen/execute_commands.v
+@@ -1055,7 +1055,9 @@ assign exe_glob_descriptor_set =
+     (cond_184 && ~cond_44)? (`TRUE) :
+     (cond_185)? ( exe_ready) :
+     1'd0;
++import "DPI-C" function int ao486_fpu_status();
+ assign exe_result =
++    (exe_cmd == `CMD_FNSTSW)? ( { 16'd0, ao486_fpu_status()[15:0] } ) :
+     (cond_0)? (  exe_arith_add[31:0]) :
+     (cond_1)? ( exe_buffer) :
+     (cond_48)? ( { 16'd0, e_seg_by_cmdex }) :
+diff --git a/rtl/ao486/autogen/read_commands.v b/rtl/ao486/autogen/read_commands.v
+index 2722747..85c9aea 100644
+--- a/rtl/ao486/autogen/read_commands.v
++++ b/rtl/ao486/autogen/read_commands.v
+@@ -454,6 +454,7 @@ assign address_stack_for_ret_first =
+     (cond_158)? (`TRUE) :
+     1'd0;
+ assign rd_req_eax =
++    (rd_cmd == `CMD_FNSTSW)? (`TRUE) :
+     (cond_67)? (`TRUE) :
+     (cond_107)? (`TRUE) :
+     (cond_127)? (`TRUE) :
+diff --git a/rtl/ao486/autogen/write_commands.v b/rtl/ao486/autogen/write_commands.v
+index b97e9d9..3767f49 100644
+--- a/rtl/ao486/autogen/write_commands.v
++++ b/rtl/ao486/autogen/write_commands.v
+@@ -555,6 +555,7 @@ assign ldtr_cache_to_reg =
+     (cond_242 && cond_243)? (         glob_descriptor) :
+     ldtr_cache;
+ assign eax_to_reg =
++    (wr_cmd == `CMD_FNSTSW)? ( { eax[31:16], result[15:0] }) :
+     (cond_66)? ( { eax[31:16], result[15:0] }) :
+     (cond_100)? ( (wr_is_8bit || wr_operand_16bit)? { eax[31:16], result[15:0] } : result) :
+     (cond_129 && ~cond_5)? ( (wr_is_8bit)? { eax[31:8], result2[7:0] } : (wr_operand_16bit)? { eax[31:16], result2[15:0] } : result2) :
+diff --git a/rtl/ao486/pipeline/read.v b/rtl/ao486/pipeline/read.v
+index f0cb4c6..a7e53e0 100644
+--- a/rtl/ao486/pipeline/read.v
++++ b/rtl/ao486/pipeline/read.v
+@@ -375,7 +375,17 @@ wire rd_dst_is_eip;
+ 
+ //------------------------------------------------------------------------------
+ 
+-assign rd_ready = ~(rd_reset) && ~(rd_waiting) && rd_cmd != `CMD_NULL && ~(exe_busy);
++// Co-simulated x87 FPU operand-address fix: CMD_fpu (ESC opcodes D8-DF) have no <read>
++// microcode step, so without this a memory ESC op leaves the read stage in a single cycle
++// and latches exe_linear from the still-stale, 1-cycle-lagged registered rd_address_effective
++// (= the PREVIOUS read-stage op's effective address). The software FPU model then loads/
++// stores at the wrong guest address, corrupting descriptors/stack and crashing DOS-Quake.
++// Hold a memory-operand ESC op one extra cycle until rd_address_effective_ready, so the
++// registered rd_address_effective settles to THIS op's EA before exe_linear latches it.
++// (Ordinary memory instructions already dwell like this via their read handshake.)
++wire rd_fpu_ea_wait = (rd_cmd == `CMD_fpu) && (rd_modregrm_mod != 2'b11) && ~(rd_address_effective_ready);
++
++assign rd_ready = ~(rd_reset) && ~(rd_waiting) && rd_cmd != `CMD_NULL && ~(exe_busy) && ~(rd_fpu_ea_wait);
+ 
+ assign rd_busy  = rd_waiting || (rd_ready == `FALSE && rd_cmd != `CMD_NULL);
+ 
+diff --git a/rtl/cache/l2_cache.v b/rtl/cache/l2_cache.v
+index 846d737..3c378f7 100644
+--- a/rtl/cache/l2_cache.v
++++ b/rtl/cache/l2_cache.v
+@@ -6,6 +6,13 @@ module l2_cache #(parameter ADDRBITS = 24)
+ 
+ 	input         DISABLE,
+ 
++	// FPU co-sim cache-line invalidation:
++	// pulse l2_inv_pulse high for one cycle to mark all ways of the set
++	// selected by l2_inv_addr's line-index bits as needing-refetch.
++	// l2_inv_addr is in the same units as read_addr (64-bit-beat address = byte_addr>>3).
++	input         l2_inv_pulse,
++	input [ADDRBITS:0] l2_inv_addr,
++
+ 	// CPU bus, master, 32bit
+ 	input  [29:0] CPU_ADDR,
+ 	input  [31:0] CPU_DIN,
+@@ -64,6 +71,14 @@ wire   [ADDRBITS-RAMSIZEBITS:0] tags_read[0:ASSOCIATIVITY-1];
+ reg                             update_tag_we;
+ reg    [LINE_BITS-1:0]          update_tag_addr;
+ 
++// dirtyram write-port mux: state-machine tag write has priority; when the
++// state machine is not writing, an l2_inv_pulse invalidates (all ways = dirty)
++// the set selected by l2_inv_addr's line-index bits. Harness only pulses when
++// the CPU bus is idle, so the two never collide in practice.
++wire   [ASSOCIATIVITY-1:0]      dirtyram_data   = update_tag_we ? tags_dirty_in : (l2_inv_pulse ? {ASSOCIATIVITY{1'b1}} : tags_dirty_in);
++wire   [LINE_BITS-1:0]          dirtyram_wraddr = update_tag_we ? update_tag_addr : l2_inv_addr[LINEMASKMSB:LINEMASKLSB];
++wire                            dirtyram_wren   = update_tag_we | l2_inv_pulse;
++
+ reg    [ASSO_BITS-1:0] LRU_in [0:ASSOCIATIVITY-1];
+ reg    [ASSO_BITS-1:0] LRU_out[0:ASSOCIATIVITY-1];
+ reg                             LRU_we;
+@@ -497,11 +512,11 @@ altdpram #(
+ dirtyram (
+ 	.inclock(CLK),
+ 	.outclock(CLK),
+-	
+-	.data(tags_dirty_in),
++
++	.data(dirtyram_data),
+ 	.rdaddress(read_addr[LINEMASKMSB:LINEMASKLSB]),
+-	.wraddress(update_tag_addr),
+-	.wren(update_tag_we),
++	.wraddress(dirtyram_wraddr),
++	.wren(dirtyram_wren),
+ 	.q(tags_dirty_out)
+ );
+ 
+diff --git a/rtl/soc/rtc.v b/rtl/soc/rtc.v
+index 343aeba..0882941 100644
+--- a/rtl/soc/rtc.v
++++ b/rtl/soc/rtc.v
+@@ -54,27 +54,36 @@ module rtc(
+ reg [27:0] clk_rate;
+ always @(posedge clk) clk_rate <= clock_rate;
+ 
+-reg ce_800hz;
++// NOTE: originally these ce generators used blocking (=) assignments to
++// ce_800hz/ce_8192hz inside a clocked always. On real silicon that infers a
++// clean flip-flop (Q stable for the whole cycle, all readers agree), but the
++// verilated sim treats a blocking-assigned reg read from OTHER clocked blocks
++// as an evaluation-order hazard: the periodic_major decrement block saw the
++// NEW ce_8192hz (so it counted) while the periodic_interrupt set block saw the
++// STALE value (so IRQ8 periodic NEVER fired -> Win95 VTD 1024Hz tick dead).
++// Rewritten to the PIT's registered non-blocking (<=) pattern: identical
++// synthesis, but ce is a proper 1-cycle-stable FF so all readers agree.
++reg [27:0] sum_800hz = 0;
++reg ce_800hz = 0;
+ always @(posedge clk) begin
+-	reg [27:0] sum = 0;
+-
+-	ce_800hz = 0;
+-	sum = sum + 28'd800;
+-	if(sum >= clk_rate) begin
+-		sum = sum - clk_rate;
+-		ce_800hz = 1;
++	if((sum_800hz + 28'd800) >= clk_rate) begin
++		sum_800hz <= (sum_800hz + 28'd800) - clk_rate;
++		ce_800hz  <= 1'b1;
++	end else begin
++		sum_800hz <= sum_800hz + 28'd800;
++		ce_800hz  <= 1'b0;
+ 	end
+ end
+ 
+-reg ce_8192hz;
++reg [27:0] sum_8192hz = 0;
++reg ce_8192hz = 0;
+ always @(posedge clk) begin
+-	reg [27:0] sum = 0;
+-
+-	ce_8192hz = 0;
+-	sum = sum + 28'd8192;
+-	if(sum >= clk_rate) begin
+-		sum = sum - clk_rate;
+-		ce_8192hz = 1;
++	if((sum_8192hz + 28'd8192) >= clk_rate) begin
++		sum_8192hz <= (sum_8192hz + 28'd8192) - clk_rate;
++		ce_8192hz  <= 1'b1;
++	end else begin
++		sum_8192hz <= sum_8192hz + 28'd8192;
++		ce_8192hz  <= 1'b0;
+ 	end
+ end
+ 
+diff --git a/rtl/system.v b/rtl/system.v
+index 6b23e68..ee15b5d 100644
+--- a/rtl/system.v
++++ b/rtl/system.v
+@@ -5,10 +5,17 @@ module system
+ 
+ 	input         clk_sys,
+ 	input  [27:0] clock_rate,
++	input  [27:0] rtc_clock_rate,   // sim-only: RTC time-base rate (smaller => RTC seconds advance faster; PIT unaffected)
+ 
+ 	input         l1_disable,
+ 	input         l2_disable,
+ 
++	// FPU co-sim L2 cache-line invalidation. Harness supplies the guest
++	// PHYSICAL BYTE address of the FPU store in l2_fpu_inv_addr and pulses
++	// l2_fpu_inv_pulse high for one clk_sys posedge after each store.
++	input         l2_fpu_inv_pulse,
++	input  [31:0] l2_fpu_inv_addr,
++
+ 	output [1:0]  fdd_request,
+ 	output [2:0]  ide0_request,
+ 	output [2:0]  ide1_request,
+@@ -247,6 +254,11 @@ l2_cache cache
+ 
+ 	.DISABLE           (l2_disable),
+ 
++	// FPU co-sim invalidation. l2_inv_addr is a 64-bit-beat address (byte>>3);
++	// ADDRBITS=24 so slice byte-address bits [27:3] -> l2_inv_addr[24:0].
++	.l2_inv_pulse      (l2_fpu_inv_pulse),
++	.l2_inv_addr       (l2_fpu_inv_addr[27:3]),
++
+ 	.CPU_ADDR          (mem_address),
+ 	.CPU_DIN           (mem_writedata),
+ 	.CPU_DOUT          (mem_readdata),
+@@ -624,7 +636,7 @@ rtc rtc
+ 	.clk               (clk_sys),
+ 	.rst_n             (~reset),
+ 
+-	.clock_rate        (clock_rate),
++	.clock_rate        (rtc_clock_rate),
+ 
+ 	.io_address        (iobus_address[0]),
+ 	.io_writedata      (iobus_writedata[7:0]),
