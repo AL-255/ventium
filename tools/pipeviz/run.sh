@@ -15,7 +15,10 @@ for a in "$@"; do
   if [ "$a" = "--build" ]; then BUILD=1; else ARGS+=("$a"); fi
 done
 
-if [ "$BUILD" = "1" ] || [ ! -f "$HERE/libventium_viz.so" ]; then
+if [ "$BUILD" = "1" ] || [ ! -f "$HERE/libventium_viz.so" ] \
+   || [ "$HERE/ventium_viz.cpp" -nt "$HERE/libventium_viz.so" ] \
+   || [ "$HERE/ventium_viz.h" -nt "$HERE/libventium_viz.so" ] \
+   || [ "$HERE/build.sh" -nt "$HERE/libventium_viz.so" ]; then
   echo "[run] building backend ..."
   bash "$HERE/build.sh"
 fi

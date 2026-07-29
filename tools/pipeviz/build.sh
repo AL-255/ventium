@@ -2,7 +2,7 @@
 # Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 #
-# tools/pipeviz/build.sh — verilate ventium_top with --public-flat-rw (so the
+# tools/pipeviz/build.sh — verilate ventium_top with --public-flat-rw + --savable (so the
 # pipeline visualizer's C++ bridge can read every internal core/cache/TLB/FPU
 # signal via the generated ___024root struct) and link the bridge into the
 # shared library libventium_viz.so consumed by the PySide6 GUI (pipeviz/).
@@ -18,7 +18,9 @@ OBJO="$HERE/build_o"
 RTL_F="$ROOT/rtl/ventium.f"
 TB="$ROOT/verif/tb"
 VERILATOR="${VERILATOR:-verilator}"
-JOBS="$(nproc 2>/dev/null || echo 4)"
+# Allow callers/CI to cap parallelism. Large Verilator translation units can use
+# substantial RAM, so blindly taking every host CPU makes a rebuild fragile.
+JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
 echo "[pipeviz] verilator: $($VERILATOR --version 2>&1 | head -1)"
 
@@ -45,7 +47,7 @@ build_variant() {
   local objo="$objd.o"
   echo "[pipeviz] verilating $top (--public-flat-rw) ..."
   rm -rf "$objd"
-  "$VERILATOR" --cc --public-flat-rw \
+  "$VERILATOR" --cc --public-flat-rw --savable \
     -sv --top-module "$top" \
     -Wall -Wno-UNUSED -Wno-fatal -Wno-DECLFILENAME -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-LATCH \
     -Mdir "$objd" \
@@ -57,7 +59,7 @@ build_variant() {
                   -I"$objd" -I"$VINC" -I"$VINC/vltstd" -I"$TB" -I"$HERE")
   [ -n "$define" ] && CXXFLAGS+=("$define")
   local SRCS=( "$objd"/*.cpp "$VINC/verilated.cpp" "$VINC/verilated_threads.cpp"
-               "$VINC/verilated_dpi.cpp" "$HERE/ventium_viz.cpp" "$TB/memmodel.cpp" )
+               "$VINC/verilated_dpi.cpp" "$VINC/verilated_save.cpp" "$HERE/ventium_viz.cpp" "$TB/memmodel.cpp" )
   local fail=0
   for src in "${SRCS[@]}"; do
     local o="$objo/$(printf '%s' "$src" | md5sum | cut -c1-16)_$(basename "$src").o"

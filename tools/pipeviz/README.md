@@ -31,6 +31,14 @@ tools/pipeviz/run.sh build/m2/mb_imiss.flat          # I-cache misses (fills the
 tools/pipeviz/run.sh build/m2/mb_fpindep.flat        # x87 FP pipe
 tools/pipeviz/run.sh build/m2/mb_brrandom.flat       # random-branch mispredicts
 
+# normal linker output works too: ELF PT_LOAD segments and e_entry are automatic
+tools/pipeviz/run.sh my_program.elf
+# override raw-image setup from the command line when no manifest is available
+tools/pipeviz/run.sh firmware.bin --load 0x00100000 --entry 0x00100000
+
+# resume a full-model snapshot made by verif/tb/tb_main.cpp --save-state
+tools/pipeviz/run.sh --snapshot runs/pre_bug_state
+
 # system / paging examples (slow-path waterfall + TLB + page walks)
 tools/pipeviz/run.sh verif/sys/tests/ppage/ppage.bin
 tools/pipeviz/run.sh verif/sys/tests/ptask/ptask.bin
@@ -47,6 +55,11 @@ tools/pipeviz/run.sh --build
 Requirements (all already present in this repo's toolchain): `verilator` (5.x),
 a C++17 compiler, `python3` with **PySide6** and **capstone**
 (`pip install PySide6 capstone`).
+
+For guided, reproducible investigations of dual issue, cache pressure, x87, and
+system paging, see [the user guide](docs/user-guide.md).  Its examples have an
+offscreen regression check: `QT_QPA_PLATFORM=offscreen python3
+tools/pipeviz/verify_examples.py`.
 
 ## What you see
 
@@ -124,8 +137,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 
 | control | action |
 |---|---|
-| **Open image…** | load a flat binary (honours a sibling `manifest.json` for `entry`/`load_addr`) |
-| entry / load / esp | reset-time architectural state (hex) |
+| **Open image…** | load a flat binary or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Flat images honour a sibling `manifest.json` for `entry`/`load_addr`. |
+| **Open snapshot…** | resume a host testbench `--save-state` checkpoint. Select either `<prefix>.aux` or `<prefix>.vlt`; the visualizer loads the pair and begins a new visible timeline at that exact state. The **Restore snapshot** button returns to the same point after exploring. |
+| entry / load / esp | reset-time architectural state (hex). The command-line equivalents `--entry`, `--load`, and `--esp` take precedence over file metadata; `--system` / `--soc` select raw system boot mode. |
 | **cycle (dual-issue)** | enable the U/V fast path — **on by default** (the V pipe only issues in cycle mode) |
 | **system** | cold-boot in system mode (real-mode reset at `F000:FFF0`; needed for paging/TLB) |
 | **SoC** | run the full `ventium_soc` (internal port-I/O / PIC / PIT) — needed for bare-metal images like test386. Requires `build.sh --soc`; auto-ticked for test386. |
@@ -135,6 +149,11 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 | **Step N** | advance N clocks |
 | **Run / Pause** (`F5`) | free-run at *speed* clocks per refresh tick |
 | **event** ◀ / ▶ (`[` / `]`) | jump the playhead to the prev / next pipeline event (mispredict / stall / I-fill / page-walk) |
+
+Keyboard: `Ctrl+O` opens a program, `Ctrl+Shift+O` opens a snapshot, `R` resets
+(or restores a snapshot), `.` advances one clock, `I` / `Space` advances to the
+next retirement, and `F5` runs or pauses. `F1` opens the complete shortcut
+reference.
 
 Mouse interactions: **click** a Konata cell or a trace row to pin the registers
 to that instruction and drop a cycle playhead (the trace ↔ pipeline selection is
@@ -165,6 +184,18 @@ unpins the registers back to the live state.
 * `pipeviz/backend.py` — ctypes mirror of the C ABI (with a `sizeof` self-check).
 * `pipeviz/disasm.py` — capstone disassembly + the FSM-state → pipeline-stage map.
 
+### Snapshot replay
+
+Pipeviz consumes the full-model snapshots produced by the host testbench's
+`--save-state <prefix>` / `--save-at-cycle` options: `<prefix>.vlt` contains the
+Verilator model and `<prefix>.aux` contains the cycle counters and sparse
+`MemModel`. The backend is built with `--savable` and resumes from the next clock;
+the pre-snapshot retirement history is not in this format, so the trace and Konata
+timeline intentionally start fresh at the restore point. Snapshot files must come
+from the matching RTL and Verilator version. Snapshots with serialized DOS
+peripheral models are rejected because the standalone visualizer has no equivalent
+host I/O drivers.
+
 ## Notes on fidelity
 
 * The Ventium core is FSM-driven, not a textbook latch-per-stage superscalar, so
@@ -189,3 +220,5 @@ unpins the registers back to the live state.
 | `pipeviz/` | the PySide6 application |
 | `smoke_test.c` | minimal C end-to-end check of the C ABI |
 | `verify_gui.py` | offscreen GUI smoke + screenshot |
+| `verify_examples.py` | offscreen checks for every documented workload |
+| `docs/user-guide.md` | guided workflow examples and their regression commands |

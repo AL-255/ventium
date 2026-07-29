@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cstdio>
 #include <deque>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -24,6 +25,7 @@
 // internal port-I/O / PIC / PIT (e.g. test386) actually run. Both instantiate
 // the SAME `core u_core`, so only the top type + the __DOT__ prefix change.
 #include "verilated.h"
+#include "verilated_save.h"
 #ifdef VV_SOC
 #  include "Vventium_soc.h"
 #  include "Vventium_soc___024root.h"
@@ -57,6 +59,7 @@ using ventium::MemModel;
 #define ITLB(f)   (R->ROOT_PFX(u_itlb__DOT__##f))
 #define DTLB(f)   (R->ROOT_PFX(u_dtlb__DOT__##f))
 #define FPU(f)    (R->ROOT_PFX(u_fpu_state__DOT__##f))
+#define REGFILE(f) (R->ROOT_PFX(u_regfile__DOT__##f))
 
 // ---- fpd_t packed-struct bit offsets (ventium_decode_pkg.sv, LSB-relative) --
 // fpd_t is 160 bits; the first declared field is the MSB. These are the LSB
@@ -75,7 +78,7 @@ enum {
   FPD_SIMPLE_LSB     = 159
 };
 
-static inline uint32_t w5fld(const VlWide<5>& w, int lsb, int width) {
+static inline uint32_t w5fld(const VlWide<6>& w, int lsb, int width) {
   uint32_t v = 0;
   for (int i = 0; i < width; ++i) {
     int b = lsb + i;
@@ -110,6 +113,7 @@ struct Viz {
 
   // last-seen control registers (only sys retires carry them; flat user => 0)
   uint32_t cr0 = 0, cr2 = 0, cr3 = 0, cr4 = 0;
+  std::string last_error;
 
   // retirement ring (architectural order)
   std::deque<vv_retire_t> retires;
@@ -132,6 +136,45 @@ struct Viz {
 Viz* g_viz = nullptr;   // single core, single thread: a global is sufficient
 
 }  // namespace
+
+// The testbench's full-model checkpoint deliberately keeps non-RTL state in a
+// small sidecar. Validate that sidecar before mutating the live visualizer: it
+// prevents a partially restored sparse memory from being mistaken for a usable
+// snapshot. Standalone pipeviz has no DOS peripheral models, so snapshots with
+// serialized PIC/RTC/PIT/kbd/VGA/IDE state are rejected instead of resuming with
+// silently disconnected I/O.
+bool validate_snapshot_aux(FILE* f, uint64_t* cycles_out, std::string* err) {
+  static constexpr uint64_t SAVE_MAGIC = 0x56454e5341564531ull; // "VENSAVE1"
+  static constexpr uint32_t MEM_MAGIC = 0x564d454du;            // "VMEM"
+  uint64_t magic = 0, cycles = 0, discard64 = 0;
+  uint32_t discard32 = 0, mem_magic = 0, npages = 0;
+  auto rd = [&](void* p, size_t n) { return std::fread(p, 1, n, f) == n; };
+  if (!rd(&magic, 8) || magic != SAVE_MAGIC || !rd(&cycles, 8) ||
+      !rd(&discard64, 8) || !rd(&discard32, 4) || !rd(&discard32, 4)) {
+    *err = "invalid or truncated snapshot auxiliary header"; return false;
+  }
+  for (int i = 0; i < 5; ++i)
+    if (!rd(&discard64, 8)) { *err = "truncated snapshot auxiliary counters"; return false; }
+  if (!rd(&mem_magic, 4) || mem_magic != MEM_MAGIC || !rd(&npages, 4)) {
+    *err = "snapshot has no valid MemModel image"; return false;
+  }
+  uint8_t page[ventium::MemModel::PAGE_SIZE];
+  for (uint32_t i = 0; i < npages; ++i) {
+    if (!rd(&discard32, 4) || !rd(page, sizeof(page))) {
+      *err = "truncated snapshot memory image"; return false;
+    }
+  }
+  for (int i = 0; i < 6; ++i) {
+    uint8_t present = 0;
+    if (!rd(&present, 1)) { *err = "truncated snapshot peripheral section"; return false; }
+    if (present) {
+      *err = "snapshot includes host peripheral state; pipeviz only supports standalone-core snapshots";
+      return false;
+    }
+  }
+  *cycles_out = cycles;
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // DPI callbacks invoked by the RTL during the rising-edge eval(). Mirrors the
@@ -349,6 +392,76 @@ void vv_mem_read(void* h, uint32_t addr, uint8_t* buf, uint32_t n) {
   for (uint32_t i = 0; i < n; ++i) buf[i] = v->mem.read8(addr + i);
 }
 
+int vv_load_snapshot(void* h, const char* prefix) {
+  Viz* v = (Viz*)h;
+  v->last_error.clear();
+  if (!prefix || !*prefix) {
+    v->last_error = "snapshot prefix is empty";
+    return -1;
+  }
+  const std::string base(prefix);
+  const std::string aux_name = base + ".aux";
+  const std::string vlt_name = base + ".vlt";
+  FILE* vf = std::fopen(vlt_name.c_str(), "rb");
+  if (!vf) {
+    v->last_error = "cannot open " + vlt_name;
+    return -1;
+  }
+  std::fclose(vf);
+  FILE* af = std::fopen(aux_name.c_str(), "rb");
+  if (!af) {
+    v->last_error = "cannot open " + aux_name;
+    return -1;
+  }
+  uint64_t saved_cycles = 0;
+  if (!validate_snapshot_aux(af, &saved_cycles, &v->last_error)) {
+    std::fclose(af);
+    return -1;
+  }
+  // validate_snapshot_aux finishes exactly after the fixed 72-byte header plus
+  // the memory/peripheral payload. Rewind to the MemModel record, whose reader
+  // owns its page-table layout and restores its lookup cache correctly.
+  if (std::fseek(af, 72, SEEK_SET) != 0) {
+    v->last_error = "cannot seek snapshot memory image";
+    std::fclose(af);
+    return -1;
+  }
+  v->mem.restore(af);
+  std::fclose(af);
+
+  // The Verilator stream itself has version/model checks. A checkpoint must be
+  // generated from the matching rtl + Verilator version, just like the host TB.
+  VerilatedRestore is;
+  is.open(vlt_name.c_str());
+  is >> *v->top;
+  is.close();
+
+  g_viz = v;
+  v->top->clk = 0;              // host TB resumes at the next low phase
+  tie_off_inputs(v->top);       // pipeviz has no external I/O/proxy drivers
+  v->top->rst_n = 1;
+  v->top->eval();               // settle combinational state after restore
+  v->in_reset = false;
+  v->done = false;
+  v->idle = 0;
+  v->clk = saved_cycles;
+  v->cur_cyc = saved_cycles;
+  auto* R = v->top->rootp;
+  v->system = CORE(sys_mode) ? 1 : 0;
+  v->retires.clear(); v->cycles.clear(); v->pend.clear(); v->clk_retires.clear();
+  // The host checkpoint intentionally does not contain historical retire/cycle
+  // records. New callbacks retain their architectural n values; the GUI starts
+  // a fresh visible timeline from this restore point.
+  v->retire_total = v->retire_base = 0;
+  v->cycle_total = v->cycle_base = 0;
+  return 0;
+}
+
+const char* vv_last_error(void* h) {
+  Viz* v = (Viz*)h;
+  return v ? v->last_error.c_str() : "invalid backend handle";
+}
+
 // ABI sanity-check for the Python ctypes mirror: 0=state 1=tlb 2=cline 3=retire 4=cycle.
 uint32_t vv_sizeof(int which) {
   switch (which) {
@@ -430,7 +543,7 @@ void vv_get_state(void* h, vv_state_t* out) {
   out->fetch_word = CORE(fetch_word);
   for (int i = 0; i < VV_IBUF; ++i) out->ibuf[i] = CORE(ibuf)[i];
 
-  for (int i = 0; i < VV_NGPR; ++i) out->gpr[i] = CORE(gpr)[i];
+  for (int i = 0; i < VV_NGPR; ++i) out->gpr[i] = REGFILE(gpr)[i];
   out->eflags = CORE(eflags);
   for (int i = 0; i < VV_NSEG; ++i) {
     out->seg_sel[i]   = CORE(seg_sel)[i];
@@ -475,8 +588,8 @@ void vv_get_state(void* h, vv_state_t* out) {
     out->fpr[i][8]=(uint8_t)w2; out->fpr[i][9]=(uint8_t)(w2>>8);
   }
 
-  const VlWide<5>& ud = CORE(u_d);
-  const VlWide<5>& vd = CORE(v_d);
+  const VlWide<6>& ud = CORE(u_d);
+  const VlWide<6>& vd = CORE(v_d);
   out->ud_len = w5fld(ud, FPD_LEN_LSB, 4);
   out->vd_len = w5fld(vd, FPD_LEN_LSB, 4);
   out->ud_simple = w5fld(ud, FPD_SIMPLE_LSB, 1);
@@ -521,9 +634,11 @@ int vv_get_icache(void* h, vv_cline_t* out, int max) {
       if (!ICACHE(ic_val)[s][w]) continue;
       vv_cline_t& c = out[n++];
       c.set = (uint8_t)s; c.way = (uint8_t)w; c.valid = 1;
-      c.lru = ICACHE(ic_lru)[s];
+      c.lru = ICACHE(ic_age)[s][0] == 0 ? 0 : 1;  // way with age 0 = MRU
       c.tag = ICACHE(ic_tag)[s][w];
-      for (int b = 0; b < VV_LINE; ++b) c.data[b] = ICACHE(ic_data)[s][w][b];
+      const VlWide<8>& line = ICACHE(ic_line)[s * VV_WAYS + w];
+      for (int b = 0; b < VV_LINE; ++b)
+        c.data[b] = (uint8_t)(line[b >> 2] >> ((b & 3) * 8));
     }
   }
   return n;
@@ -538,7 +653,7 @@ int vv_get_dcache(void* h, vv_cline_t* out, int max) {
       if (!DCACHE(dc_val)[s][w]) continue;
       vv_cline_t& c = out[n++];
       c.set = (uint8_t)s; c.way = (uint8_t)w; c.valid = 1;
-      c.lru = DCACHE(dc_lru)[s];
+      c.lru = DCACHE(dc_age)[s][0] == 0 ? 0 : 1;  // way with age 0 = MRU
       c.tag = DCACHE(dc_tag)[s][w];
       std::memset(c.data, 0, VV_LINE);   // timing-only D-cache: no data array
     }

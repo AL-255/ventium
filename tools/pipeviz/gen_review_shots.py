@@ -82,13 +82,17 @@ def _watermark(path, tag):
 # the workload whose table tabs get the full 9-tab sweep (richest table data)
 TAB_SWEEP = "brloop"
 
-# (tag, image, steps, soc) — representative workloads
+# (tag, candidate images, steps, soc) — representative workloads.  Developer
+# builds keep the small microbenchmarks under build/verify while release-style
+# builds put them under build/m2, so accept either layout.  This makes the
+# visual audit useful from a fresh checkout instead of silently auditing only
+# whichever external images happen to be present.
 SHOTS = [
-    ("dmiss",   "build/m2/mb_dmiss.flat",                                     160,  False),
-    ("brloop",  "build/m2/mb_brloop.flat",                                    120,  False),
-    ("fp",      "build/m2/mb_fpindep.flat",                                   420,  False),
-    ("test386", "ventium-refs/09-external-cpu-tests/test386.asm/test386.bin", 3000, True),
-    ("ppage",   "verif/sys/tests/ppage/ppage.bin",                           240,  False),
+    ("dmiss",   ("build/m2/mb_dmiss.flat", "build/verify/mb_dmiss.cycle.flat"), 160, False),
+    ("brloop",  ("build/m2/mb_brloop.flat", "build/verify/mb_brloop.cycle.flat"), 120, False),
+    ("fp",      ("build/m2/mb_fpindep.flat", "build/verify/mb_fpindep.cycle.flat"), 420, False),
+    ("test386", ("ventium-refs/09-external-cpu-tests/test386.asm/test386.bin",), 3000, True),
+    ("ppage",   ("verif/sys/tests/ppage/ppage.bin",),                           240, False),
 ]
 
 app = QApplication(sys.argv)
@@ -97,9 +101,28 @@ win = MainWindow()
 win.resize(1640, 980)
 win.show()
 
-for tag, img, steps, soc in SHOTS:
-    if not os.path.exists(img):
-        print(f"skip {tag}: {img} missing"); continue
+for tag, candidates, steps, soc in SHOTS:
+    img = next((path for path in candidates if os.path.exists(path)), None)
+    if img is None:
+        print(f"skip {tag}: none of {', '.join(candidates)} found"); continue
+    # Do not let a stale pre-replay SoC .so abort this entire visual review.
+    # The interactive UI reports this condition and falls back safely; the
+    # audit records it as a skipped workload until build.sh --soc supplies the
+    # compatible model.
+    if soc:
+        # Inspect exports without dlopening the library.  A stale verilated SoC
+        # binary can itself abort during construction/destruction, so ctypes is
+        # deliberately unsafe as a compatibility probe here.
+        soc_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "libventium_viz_soc.so")
+        try:
+            exports = subprocess.check_output(["nm", "-D", soc_lib], text=True,
+                                              stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            exports = ""
+        if "vv_load_snapshot" not in exports or "vv_last_error" not in exports:
+            print(f"skip {tag}: SoC backend is stale; rebuild with build.sh --soc")
+            continue
     win.load_image(img)
     app.processEvents()
     win.do_step(steps, False)

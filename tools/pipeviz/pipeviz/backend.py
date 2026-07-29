@@ -108,6 +108,15 @@ class Backend:
         L.vv_mem_read8.argtypes = [C.c_void_p, u32]
         L.vv_mem_read8.restype = u8
         L.vv_mem_read.argtypes = [C.c_void_p, u32, C.POINTER(u8), u32]
+        # The optional SoC backend may predate snapshot replay while the normal
+        # core backend has it. Do not make ordinary SoC image loading fail just
+        # because that older shared object lacks these two new symbols.
+        self._has_snapshot = hasattr(L, "vv_load_snapshot") and hasattr(L, "vv_last_error")
+        if self._has_snapshot:
+            L.vv_load_snapshot.argtypes = [C.c_void_p, C.c_char_p]
+            L.vv_load_snapshot.restype = C.c_int
+            L.vv_last_error.argtypes = [C.c_void_p]
+            L.vv_last_error.restype = C.c_char_p
         L.vv_sizeof.argtypes = [C.c_int]
         L.vv_sizeof.restype = u32
         L.vv_reset.argtypes = [C.c_void_p, u32, u32, C.c_int, C.c_int]
@@ -162,6 +171,17 @@ class Backend:
     def load_bytes(self, data: bytes, addr):
         buf = (u8 * len(data)).from_buffer_copy(data)
         self.lib.vv_load_bytes(self.h, buf, len(data), addr)
+
+    def load_snapshot(self, prefix):
+        """Restore a host-TB ``--save-state`` prefix and resume from its next clock.
+        The paired ``.vlt``/``.aux`` files must match this Verilator model."""
+        if not self._has_snapshot:
+            raise RuntimeError("this backend was built without snapshot replay support; "
+                               "rebuild it with tools/pipeviz/build.sh")
+        rc = self.lib.vv_load_snapshot(self.h, str(prefix).encode())
+        if rc:
+            msg = self.lib.vv_last_error(self.h)
+            raise RuntimeError(msg.decode() if msg else "snapshot restore failed")
 
     def mem_read(self, addr, n):
         buf = (u8 * n)()

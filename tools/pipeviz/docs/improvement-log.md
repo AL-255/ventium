@@ -9,6 +9,27 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## Iteration 22 — program-loading recovery path
+
+**Self-critique:** the polished debugger only accepted a single flat byte blob.
+That made ordinary compiler/linker output awkward or silently wrong: an ELF has
+an entry point and often multiple non-contiguous loadable segments. The documented
+`--entry` option was also applied before `load_image()`, which then overwrote it.
+No visual improvement matters if reaching the first useful trace is unreliable.
+
+**Changes:** the loader now recognises little-endian ELF32/x86 files, loads every
+`PT_LOAD` file segment at its declared address, seeds the entry field from
+`e_entry`, and keeps raw images as the existing one-segment workflow. The Open
+dialog and window drop target accept both formats; the title/status identify the
+loaded type; and `--entry`, `--load` (flat only), `--esp`, `--system`, and `--soc`
+are applied after file metadata. The load-address field is disabled for ELF so it
+cannot imply a false single-address model. System boot explicitly rejects ELF
+instead of concatenating its segments into a bogus BIOS image.
+
+**Verification:** `py_compile` passes, and synthetic raw plus one- and two-segment
+ELF32 fixtures exercise the loader. Full screenshot smoke remains environment
+dependent because this checkout has no PySide6 installation.
+
 ## Current UI (keep this in sync each iteration — critics read it)
 - **Pipeline panel** = (a) a small LIVE *stage board* snapshot on top (3 lanes
   U/V/FP × P5 stages, current clock only; the FP group collapses to a thin "FP

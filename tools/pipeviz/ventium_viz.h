@@ -172,6 +172,13 @@ long     vv_load_image(void* h, const char* path, uint32_t load_addr);
 void     vv_load_bytes(void* h, const uint8_t* data, uint32_t n, uint32_t addr);
 uint8_t  vv_mem_read8(void* h, uint32_t addr);
 void     vv_mem_read(void* h, uint32_t addr, uint8_t* buf, uint32_t n);
+// Resume a full-model checkpoint made by verif/tb/tb_main.cpp's
+// --save-state. `prefix` names the pair prefix, not either suffix: it loads
+// <prefix>.vlt (Verilator state) and <prefix>.aux (cycle counters + MemModel).
+// Returns 0 on success, -1 on an invalid/incompatible/unsupported snapshot;
+// vv_last_error() then gives a user-facing explanation.
+int      vv_load_snapshot(void* h, const char* prefix);
+const char* vv_last_error(void* h);
 uint32_t vv_sizeof(int which);   // 0=state 1=tlb 2=cline 3=retire 4=cycle
 
 // Cold reset: latch entry/esp, choose cycle_mode (dual issue) + system boot.
