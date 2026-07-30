@@ -9,6 +9,20 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — unclipped compact Segments header
+
+**Register-header audit:** at 900×620 the narrow register page hard-clipped
+`Segments/control · sel base limit` after `li`, with no intentional ellipsis.
+The complete data rows fit; only the group-box title was misleadingly broken.
+
+**Changes:** the on-canvas title is the concise `Segments + control`. Its
+tooltip and accessible description give the exact selector/base/limit row order
+plus control/mode contents.
+
+**Verification:** minimum-layout acceptance selects the Segments page, requires
+the full title to fit its group width by font measurement, checks tooltip and
+accessible identity, validates all 11 complete rows, and captures the result.
+
 ## July 30 continuation — natural `any` event feedback
 
 **Navigation-language audit:** the selector's compact class name `any` leaked

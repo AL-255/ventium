@@ -146,7 +146,9 @@ explanation. Control / mode shows the captured pre-execution USER/SYS, CPL, and
 SMM state rather than duplicating the pin banner. The page-independent strip
 above the register bank always says
 **LIVE** or **PINNED n=… · retire cyc=…**. Check it before interpreting values,
-especially in compact mode where the Segments page may not be open. Click its
+especially in compact mode where the Segments page may not be open. Its compact
+**Segments + control** title stays readable; hover it for the
+selector/base/limit column order. Click the strip's
 **Unpin** button to return to the current live state and clear the cycle
 playhead without advancing the model. It also clears the selected Trace/timing
 row, dependency edges, PC-group shading, and Assembly line marker while keeping

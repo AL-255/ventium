@@ -204,8 +204,14 @@ class RegsView(QWidget):
             g2.addWidget(sel, i + 1, 1); g2.addWidget(base, i + 1, 2); g2.addWidget(lim, i + 1, 3)
         g2.addWidget(QWidget(), 0, 4); g2.setColumnStretch(4, 1)   # absorb slack on the right
         col2.addWidget(sg)
-        self.seg_compact_group = QGroupBox(
-            "Segments/control · sel base limit")
+        self.seg_compact_group = QGroupBox("Segments + control")
+        self.seg_compact_group.setAccessibleName(
+            "Segments and control registers")
+        self.seg_compact_group.setToolTip(
+            "Compact register table: each segment row is selector, base, "
+            "then limit; control rows show CR0/CR2/CR3/CR4 and mode")
+        self.seg_compact_group.setAccessibleDescription(
+            self.seg_compact_group.toolTip())
         seg_compact_layout = QVBoxLayout(self.seg_compact_group)
         seg_compact_layout.setContentsMargins(6, 4, 4, 4)
         self.seg_compact_lbl = QLabel()

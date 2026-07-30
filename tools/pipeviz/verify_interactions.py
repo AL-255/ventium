@@ -2776,6 +2776,16 @@ def scenario_layout(app, outdir):
         assert win.regs.seg_group.isHidden()
         assert win.regs.control_group.isHidden()
         assert not win.regs.seg_compact_group.isHidden()
+        assert win.regs.seg_compact_group.title() == "Segments + control"
+        assert win.regs.seg_compact_group.accessibleName() == (
+            "Segments and control registers")
+        assert "selector, base, then limit" in (
+            win.regs.seg_compact_group.toolTip())
+        assert win.regs.seg_compact_group.accessibleDescription() == (
+            win.regs.seg_compact_group.toolTip())
+        assert win.regs.seg_compact_group.fontMetrics().horizontalAdvance(
+            win.regs.seg_compact_group.title()) <= (
+                win.regs.seg_compact_group.width() - 16)
         segment_lines = win.regs.seg_compact_lbl.text().splitlines()
         assert len(segment_lines) == 11
         assert segment_lines[0] == "CS 0000 00000000 ffffffff"
