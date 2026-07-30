@@ -55,6 +55,8 @@ tuple changes.
 The example submenu and all program/snapshot load entry points now pause Run
 before nested menus, choosers, or early format/restore errors. Rejected loads
 leave the old backend intact and paused instead of advancing invisibly.
+Drop routing pauses at its boundary too, before a dirty Assembly/C replacement
+can open Save/Discard/Cancel while the Visualizer still runs.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

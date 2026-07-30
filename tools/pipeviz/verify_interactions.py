@@ -1414,6 +1414,21 @@ def scenario_branch_transport(app, outdir):
         assert not win._running and not win.timer.isActive()
         assert "before loading a snapshot" in win.action_hint.text()
 
+        dropped_assembly = os.path.join(outdir, "running-drop.S")
+        with open(dropped_assembly, "w", encoding="utf-8") as source_file:
+            source_file.write(
+                ".intel_syntax noprefix\n.global _start\n_start:\n    hlt\n")
+        win.on_run_toggle()
+        drop_cycle = win.backend.cycle_count()
+        assert win._load_dropped_path(dropped_assembly)
+        settle(app)
+        assert not win._running and not win.timer.isActive()
+        assert win.backend.cycle_count() == drop_cycle
+        assert win.workspace.currentWidget() is win.assembly
+        assert win.assembly.editor.toPlainText().endswith("    hlt\n")
+        win.workspace.setCurrentWidget(win.visualizer_tab)
+        settle(app)
+
         # Bad reset addresses are rejected visibly before replacing the backend.
         old_backend = win.backend
         invalid_seen = []

@@ -1448,6 +1448,10 @@ class MainWindow(QMainWindow):
 
     def _load_dropped_path(self, path):
         """Route dropped source, snapshot, and program files by their type."""
+        # Source replacement may ask Save/Discard/Cancel before its workspace
+        # switch would otherwise pause Run. Stop at the drop boundary so every
+        # routed type is safe, including rejected dirty-source replacement.
+        self._pause_for_obscuring_ui("loading a dropped file")
         suffix = Path(path).suffix.lower()
         if suffix in (".s", ".asm"):
             if self.assembly.load_source(path):
