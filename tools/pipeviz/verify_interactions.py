@@ -1161,11 +1161,18 @@ def scenario_startup(app, outdir):
         assert win._guide_dialog.index.count() >= 9
         assert win._guide_dialog.index.accessibleName() == "User guide topic index"
         assert win._guide_dialog.page.accessibleName() == "User guide topic content"
+        assert win._guide_dialog.index.horizontalScrollBarPolicy() == (
+            Qt.ScrollBarAlwaysOff)
+        assert all(
+            win._guide_dialog.index.item(row).toolTip()
+            == win._guide_dialog.index.item(row).text()
+            for row in range(win._guide_dialog.index.count()))
         guide_screen = win._guide_dialog.screen().availableGeometry()
         assert win._guide_dialog.width() <= guide_screen.width() - 48
         assert win._guide_dialog.height() <= guide_screen.height() - 64
-        assert 170 <= win._guide_dialog.index.width() <= 205
-        assert win._guide_dialog.page.width() >= 400
+        assert 140 <= win._guide_dialog.index.width() <= 205
+        assert win._guide_dialog.page.width() >= min(
+            400, win._guide_dialog.width() - 190)
         assert "Ctrl+F" in win._guide_dialog.page.accessibleDescription()
         assert app.focusWidget() is win._guide_dialog.index
         assert win._guide_dialog.index.currentItem().text() == "Getting started"
@@ -2332,10 +2339,13 @@ def scenario_dcache_memory(app, outdir):
         settle(app)
         assert len(win.tables.accmap._pts) == len(accesses)
         map_image = win.tables.accmap.grab().toImage()
+        map_dpr = map_image.devicePixelRatio()
         point_x, point_y, point_i = win.tables.accmap._pts[0]
         expected_point_color = (
             "#e3b341" if accesses[point_i][3] else "#79c0ff")
-        assert map_image.pixelColor(point_x + 2, point_y).name() == (
+        assert map_image.pixelColor(
+            round((point_x + 2) * map_dpr),
+            round(point_y * map_dpr)).name() == (
             expected_point_color)
         assert win.tables.accmap.accessibleName() == "Memory access map"
         assert "Left and Right" in win.tables.accmap.accessibleDescription()

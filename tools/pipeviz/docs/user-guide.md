@@ -10,6 +10,9 @@ trace, analysis tabs, and register history to explain *why* it occurred.
 Press `F1` for the in-application indexed guide. Its focused **Assembly and
 source editing** and **C compiler workbench** topics keep the C→Assembly/U-V
 experiment separate from the longer shared editor reference.
+The guide sizes to the monitor's logical work area at high DPI; its topic index
+narrows with intentional right ellipses and full-title tooltips, while content
+wraps/scrolls instead of forcing the dialog off-screen.
 
 ## Start a session
 
@@ -323,7 +326,9 @@ Clicking or scrolling the source editor dismisses completion so it cannot
 remain detached from the caret; scrolling inside the popup still browses its
 list. At edge carets the rich popup flips above and clamps within the Pipeviz
 window whenever it fits, falling back to monitor bounds only for an unusually
-small host window.
+small host window. If high-DPI screen coordinates are smaller than an already
+visible Pipeviz window, owner containment takes priority so the popup cannot
+drift outside the workbench.
 Accepted mnemonics preserve the token's existing convention: `AD` completes as
 `ADD`, `Ad` as `Add`, and lowercase source remains lowercase. This also works
 when completion replaces the remainder of a token after the cursor. Digit-bearing

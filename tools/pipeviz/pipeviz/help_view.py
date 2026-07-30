@@ -44,6 +44,9 @@ status or the last-action message for its complete untruncated text.</p>
 <p>Muted semantic text—axes, source line numbers, zero/empty values, and
 empty-state instructions—retains normal-text contrast. Error, warning, lane,
 and pinned-state meaning never depends on color alone.</p>
+<p>At high DPI this guide fits the monitor's logical work area; the index
+narrows and the topic content wraps or scrolls rather than pushing the dialog
+off-screen.</p>
 <p>Launch fields and mode switches are disabled until a program exists. A
 change that differs from the running setup turns Reset into
 <b>Apply + Reset</b>; returning every field to its applied value removes that
@@ -316,7 +319,8 @@ statement while ignoring separators/comment markers inside quoted data.
 Clicking or scrolling the editor dismisses the popup so it never remains
 detached from its caret anchor; its own list remains pointer-scrollable. At a
 right/bottom-edge caret it flips above and remains inside Pipeviz whenever the
-window is large enough for the complete rich preview.
+window is large enough for the complete rich preview, including when high-DPI
+screen coordinates are smaller than that already-visible owner.
 Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
 style, including when completion replaces text on both sides of the cursor.
 Digits keep refining names such as <code>cmpxchg8b</code>, while Backspace and
@@ -550,8 +554,11 @@ class UserGuideDialog(QDialog):
         screen = parent.screen() if parent is not None else QGuiApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
-            width = max(600, min(980, available.width() - 48))
-            height = max(480, min(700, available.height() - 64))
+            # Keep the independent guide on-screen in logical coordinates at
+            # high DPI. Its panes scroll and wrap below the normal desktop
+            # target; forcing a 600×480 floor pushed it off small screens.
+            width = max(360, min(980, available.width() - 48))
+            height = max(320, min(700, available.height() - 64))
         else:
             width, height = 980, 700
         self.resize(width, height)
@@ -601,8 +608,12 @@ class UserGuideDialog(QDialog):
         body = QHBoxLayout()
         self.index = QListWidget()
         self.index.setAccessibleName("User guide topic index")
-        self.index.setFixedWidth(max(170, min(205, width // 4)))
+        self.index.setFixedWidth(max(140, min(205, width // 4)))
+        self.index.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.index.setTextElideMode(Qt.ElideRight)
         self.index.addItems(PAGES.keys())
+        for row, topic in enumerate(PAGES):
+            self.index.item(row).setToolTip(topic)
         self.page = QTextBrowser()
         self.page.setAccessibleName("User guide topic content")
         self.page.setOpenExternalLinks(False)

@@ -1187,6 +1187,22 @@ class InstructionInfoPane(QWidget):
             + ";font-size:9px;")
 
 
+def _completion_bounds(owner_rect, available, width, height):
+    """Choose containment bounds without mistaking DPI clipping for a tiny owner."""
+    visible_owner = available.intersected(owner_rect)
+
+    def fits(rect):
+        return rect.width() >= width and rect.height() >= height
+
+    if fits(visible_owner):
+        return visible_owner
+    if fits(owner_rect):
+        # A high-DPI platform can report a logical screen smaller than an
+        # already-visible top-level window. Preserve workbench containment.
+        return owner_rect
+    return available
+
+
 class CompletionPopup(QFrame):
     accepted = Signal(str)
 
@@ -1279,15 +1295,12 @@ class CompletionPopup(QFrame):
             owner = self.editor.window()
             owner_rect = QRect(
                 owner.mapToGlobal(QPoint(0, 0)), owner.size())
-            owner_bounds = available.intersected(owner_rect)
-            # Prefer the workbench over the desktop. Very small host windows
-            # still fall back to screen bounds rather than cropping the rich
-            # list/description/preview popup.
-            bounds = (
-                owner_bounds
-                if (owner_bounds.width() >= width
-                    and owner_bounds.height() >= height)
-                else available)
+            # Prefer the visible owner intersection, then the owner itself.
+            # High-DPI backends may expose a smaller logical screen rectangle
+            # than an already-visible top-level window. Only a genuinely tiny
+            # owner falls back to screen bounds.
+            bounds = _completion_bounds(
+                owner_rect, available, width, height)
             x = max(
                 bounds.left(),
                 min(below.x(), bounds.right() - width + 1))

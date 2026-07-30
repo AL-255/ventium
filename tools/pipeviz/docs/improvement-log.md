@@ -9,6 +9,28 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — high-DPI overlays stay contained
+
+**150% scaling audit:** Qt's offscreen high-DPI backend reported a 533-pixel
+logical screen around an already-visible 900-pixel Pipeviz window. Completion
+mistook the clipped screen/window intersection for a genuinely tiny owner and
+placed its 650-pixel rich preview 118 pixels outside the workbench. The Help
+dialog's hard 600×480 floor also exceeded that logical work area.
+
+**Changes:** completion now chooses the visible owner intersection when it
+fits, the full owner when high-DPI screen geometry clips an otherwise adequate
+owner, and screen bounds only for a genuinely undersized host. Indexed Help
+uses a 360×320 compact floor and a 140-pixel index at small logical sizes, with
+right-elided/full-tooltip topics instead of a horizontal scrollbar and with
+wrapping/scrolling content. The access-map pixel probe now converts logical
+coordinates by the captured image's device-pixel ratio.
+
+**Verification:** both complete authoring and interaction suites pass at
+`QT_SCALE_FACTOR=1.5`, including the minimum 900×620 workbenches, edge-caret
+completion, indexed Help navigation/search, cache-map selection sampling, and
+the full simulation/example matrix. Pure geometry checks lock all three popup
+containment branches.
+
 ## July 30 continuation — readable semantic secondary text
 
 **Contrast audit:** several meaningful 6–10 pt labels used `#586069` or

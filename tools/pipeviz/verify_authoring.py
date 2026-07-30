@@ -436,6 +436,15 @@ def verify_toolchain():
 
 
 def scenario(app, outdir):
+    assert source_module._completion_bounds(
+        QRect(1, 1, 900, 620), QRect(0, 0, 533, 533), 650, 257
+    ) == QRect(1, 1, 900, 620)
+    assert source_module._completion_bounds(
+        QRect(20, 20, 900, 620), QRect(0, 0, 1200, 800), 650, 257
+    ) == QRect(20, 20, 900, 620)
+    assert source_module._completion_bounds(
+        QRect(20, 20, 500, 400), QRect(0, 0, 1200, 800), 650, 257
+    ) == QRect(0, 0, 1200, 800)
     win = MainWindow()
     win.resize(1500, 920)
     win.show()
@@ -1237,8 +1246,12 @@ def scenario(app, outdir):
             QGuiApplication.screenAt(editor.completion.frameGeometry().center())
             or QGuiApplication.primaryScreen())
         assert screen is not None
-        assert screen.availableGeometry().contains(
-            editor.completion.frameGeometry())
+        owner_rect = QRect(
+            win.mapToGlobal(QPoint(0, 0)), win.size())
+        assert (
+            owner_rect.contains(editor.completion.frameGeometry())
+            or screen.availableGeometry().contains(
+                editor.completion.frameGeometry()))
         assert editor.completion.list.count() == len(CATALOG)
         assert editor.completion.accessibleName() == "Opcode completion popup"
         assert editor.completion.hint.accessibleName() == (
