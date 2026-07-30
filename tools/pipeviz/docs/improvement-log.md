@@ -9,6 +9,29 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — focused indexed authoring help
+
+**Help-density audit:** the index had one “Assembly and C workbenches” entry
+whose long page mixed file safety, editor gestures, completion, diagnostics,
+source linking, compilation, and the U/V experiment. Selecting it produced a
+wall of text with the C workflow below several screens—the content existed, but
+the index did not help a C user reach it.
+
+**Changes:** Help now exposes separate **Assembly and source editing** and
+**C compiler workbench** topics, plus matching direct Help-menu entries. The C
+page keeps C→editable Assembly, optimization intent, and the complete
+dual-Fibonacci comparison above the fold. The shared page now has visible
+sections for files/safe replacement, editing, navigation/structure, find,
+opcode completion, diagnostics, and source linking. Each page points to the
+other where their workflows meet.
+
+**Verification:** the interaction harness requires all nine indexed topics and
+both direct menu actions, checks the C page's optimization and measured U/V
+contract, and captures focused Assembly and C help screenshots. Offscreen visual
+review confirms the 760×690 guide shows the C experiment and its required
+result/performance thresholds without scrolling; the complete interaction
+suite remains green.
+
 ## July 30 continuation — understandable C optimization choices
 
 **C-toolbar terminology audit:** the workbench exposed bare `-O0/-O1/-O2/-Os`

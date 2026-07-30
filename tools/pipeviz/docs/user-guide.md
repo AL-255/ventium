@@ -7,6 +7,9 @@ SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 Pipeviz is most useful when it answers a concrete performance question.  Load a
 program, run far enough to establish a pattern, then use the linked timeline,
 trace, analysis tabs, and register history to explain *why* it occurred.
+Press `F1` for the in-application indexed guide. Its focused **Assembly and
+source editing** and **C compiler workbench** topics keep the C→Assembly/U-V
+experiment separate from the longer shared editor reference.
 
 ## Start a session
 

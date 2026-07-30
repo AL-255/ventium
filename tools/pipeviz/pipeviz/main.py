@@ -476,10 +476,14 @@ class MainWindow(QMainWindow):
         pipeline = QAction("How to read the Pipeline View", self)
         pipeline.triggered.connect(lambda: self._show_guide("Reading the Pipeline View"))
         menu.addAction(pipeline)
-        authoring = QAction("Assembly and C workbenches", self)
+        authoring = QAction("Assembly and source editing", self)
         authoring.triggered.connect(
-            lambda: self._show_guide("Assembly and C workbenches"))
+            lambda: self._show_guide("Assembly and source editing"))
         menu.addAction(authoring)
+        c_compiler = QAction("C compiler workbench", self)
+        c_compiler.triggered.connect(
+            lambda: self._show_guide("C compiler workbench"))
+        menu.addAction(c_compiler)
         shortcuts = QAction("Keyboard and mouse shortcuts", self)
         shortcuts.triggered.connect(self._show_shortcuts)
         menu.addAction(shortcuts)

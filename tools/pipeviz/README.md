@@ -96,7 +96,9 @@ tools/pipeviz/verify_examples.py`.
 The in-application **Help** menu (`F1`) contains an indexed guide, including
 loading/program-format help, a dedicated “Reading the Pipeline View” page with
 branch, cache-stall, x87, and dual-Fibonacci examples, and the integrated
-Assembly/C authoring workflow.
+authoring workflow. Assembly/source-editing and C compiler guidance are separate
+indexed topics, so the C→Assembly and built-in U/V experiment instructions are
+visible without searching through the full editor reference.
 
 ## What you see
 

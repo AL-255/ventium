@@ -1092,7 +1092,7 @@ def scenario_startup(app, outdir):
             "Visualizer", "Assembly", "C source"]
         assert [action.shortcut().toString() for action in win._workspace_actions] == [
             "Alt+V", "Alt+A", "Alt+C"]
-        assert "Assembly and C workbenches" in {
+        assert {"Assembly and source editing", "C compiler workbench"} <= {
             action.text() for action in win._help_menu.actions()}
         assert [action.text() for action in win._analysis_actions] == [
             win.tables.tabs.tabText(i) for i in range(win.tables.tabs.count())]
@@ -1125,7 +1125,7 @@ def scenario_startup(app, outdir):
         QTest.keyClick(win, Qt.Key_F1)
         settle(app)
         assert win._guide_dialog is not None and win._guide_dialog.isVisible()
-        assert win._guide_dialog.index.count() >= 8
+        assert win._guide_dialog.index.count() >= 9
         assert win._guide_dialog.index.accessibleName() == "User guide topic index"
         assert win._guide_dialog.page.accessibleName() == "User guide topic content"
         guide_screen = win._guide_dialog.screen().availableGeometry()
@@ -1208,11 +1208,11 @@ def scenario_startup(app, outdir):
         assert app.focusWidget() is win._guide_dialog.index
         authoring_row = next(i for i in range(win._guide_dialog.index.count())
                              if win._guide_dialog.index.item(i).text()
-                             == "Assembly and C workbenches")
+                             == "Assembly and source editing")
         win._guide_dialog.index.setCurrentRow(authoring_row)
         settle(app)
         guide_text = win._guide_dialog.page.toPlainText()
-        assert "Ctrl+Space" in guide_text and "Compile → Assembly" in guide_text
+        assert "Ctrl+Space" in guide_text and "Assemble + Run" in guide_text
         assert "Ctrl+Tab" in guide_text and "Ctrl+Shift+Tab" in guide_text
         assert "Ctrl+/" in guide_text
         assert "Ctrl+G" in guide_text
@@ -1222,6 +1222,21 @@ def scenario_startup(app, outdir):
         authoring_shot = os.path.join(
             outdir, "00_help_authoring_guide.png")
         assert win._guide_dialog.grab().save(authoring_shot)
+        c_compiler_row = next(
+            i for i in range(win._guide_dialog.index.count())
+            if win._guide_dialog.index.item(i).text()
+            == "C compiler workbench")
+        win._guide_dialog.index.setCurrentRow(c_compiler_row)
+        settle(app)
+        c_guide_text = win._guide_dialog.page.toPlainText()
+        assert "Compile → Assembly" in c_guide_text
+        assert "O0 is the most direct" in c_guide_text
+        assert "volatile, runtime-loaded 120 iterations" in c_guide_text
+        assert "0x198c09a0" in c_guide_text
+        assert "more than 400 V retirements" in c_guide_text
+        c_authoring_shot = os.path.join(
+            outdir, "00_help_c_compiler_guide.png")
+        assert win._guide_dialog.grab().save(c_authoring_shot)
         shortcuts_row = next(
             i for i in range(win._guide_dialog.index.count())
             if win._guide_dialog.index.item(i).text() == "Shortcuts")

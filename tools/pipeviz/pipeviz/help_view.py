@@ -197,8 +197,11 @@ stopped</b> only when the backend is terminal and stepping is disabled.</p>
  <code>fadd</code> to inspect its post-retirement x87 stack.</li>
 </ul>
 """),
-    ("Assembly and C workbenches", """
-<h1>Assembly and C workbenches</h1>
+    ("Assembly and source editing", """
+<h1>Assembly and source editing</h1>
+<p>This topic covers the Assembly→RTL path and editing controls shared by both
+source workspaces. Choose <b>C compiler workbench</b> in the index for the
+focused C→Assembly workflow and dual-Fibonacci experiment.</p>
 <h2>Assembly → RTL</h2>
 <p>Open the <b>Assembly</b> workspace (Alt+A) for a line-numbered, highlighted
 GNU Intel-syntax editor. <b>Assemble + Run</b> invokes GNU <code>as</code> and
@@ -207,8 +210,8 @@ into the same real RTL backend as an opened program. Ctrl+Enter is the keyboard
 equivalent. A bare instruction snippet is automatically wrapped in
 <code>.intel_syntax</code>, <code>_start</code>, and a fall-through HLT; an
 explicit <code>_start:</code> is assembled exactly as written.</p>
-<p>Ctrl+B assembles without loading the backend. In C, Ctrl+B and Ctrl+Enter
-both compile into the editable Assembly workspace.</p>
+<p>Ctrl+B assembles without loading the backend.</p>
+<h2>Files and safe replacement</h2>
 <p>Within either source workspace, Ctrl+N creates its runnable template, Ctrl+O
 opens that source type, Ctrl+S saves the current file, and Ctrl+Shift+S saves
 under a new name. An asterisk on the Assembly or C tab marks unsaved changes.
@@ -224,7 +227,9 @@ New/Open, C-to-Assembly replacement, and Quit offer
 Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
 program-opening role. Dropped <code>.s/.S/.asm</code> and
 <code>.c/.h</code> files open in their source workspace rather than being
-treated as raw executables. Each workspace remembers its last folder, and Enter
+treated as raw executables.</p>
+<h2>Editing comfortably</h2>
+<p>Each workspace remembers its last folder, and Enter
 preserves indentation or advances it after labels/braces. A closing C brace
 typed on a blank indented line dedents one level. Plain Tab indents source;
 Ctrl+Tab moves to diagnostics and Ctrl+Shift+Tab moves toward the primary
@@ -235,6 +240,7 @@ undoable edit rather than replacing the selection. In leading whitespace,
 Backspace removes spaces to the previous four-column stop as one undoable edit.
 Ctrl+/ toggles <code>#</code> Assembly or <code>//</code> C line comments,
 preserving indentation and handling a selected block in one undo step.</p>
+<h2>Navigation and structure</h2>
 <p>Home first moves to the line's first non-whitespace column, then toggles to
 column zero; Shift+Home extends the selection and Ctrl+Home still moves to the
 start of the document. Ctrl+-/Ctrl+= changes source text and line-number size
@@ -258,12 +264,14 @@ tracks the active source caret independently of transient build messages; an
 or press Ctrl+G to enter a validated line number and return focus to the
 centered editor line. Both workbenches remain usable at the tested
 900×620 compact window size.</p>
+<h2>Find in source</h2>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
 backward, and Escape closes the search. It is a case-insensitive literal search;
 navigation disables for an empty/no-match query, and the live result is announced
 accessibly. Highlighting caps at 2,000 matches for responsiveness. Click a line
 number to select the whole source line and return typing focus to the editor.</p>
+<h2>Opcode completion</h2>
 <p>Ctrl+Space opens the Ventium/P54C opcode catalogue. Every entry includes its
 operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operations
@@ -279,7 +287,9 @@ detached from its caret anchor; its own list remains pointer-scrollable.
 Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
 style, including when completion replaces text on both sides of the cursor.
 Digits keep refining names such as <code>cmpxchg8b</code>, while Backspace and
-Delete refresh the current matches. Build errors highlight their source line
+Delete refresh the current matches.</p>
+<h2>Diagnostics and build freshness</h2>
+<p>Build errors highlight their source line
 in red; successful GCC/GNU-as warnings remain runnable but mark their line and
 diagnostics in amber. The first diagnostic line is actionable:
 focus it and press Enter, or double-click it, to return to the marked editor
@@ -299,6 +309,9 @@ Unsaved and linked state coexist as <b>Assembly * · L…</b>. Editing after a
 build invalidates that map until the next assembly, preventing stale links.
 Selecting a generated wrapper instruction with no editor line clears the prior
 marker rather than showing a stale association.</p>
+"""),
+    ("C compiler workbench", """
+<h1>C compiler workbench</h1>
 <h2>C → editable assembly</h2>
 <p>Open <b>C</b> (Alt+C), write a freestanding
 <code>int main(void)</code>, choose O0/O1/O2/Os, then click
@@ -313,6 +326,7 @@ clears the prior compiler result and asks for a fresh compile.</p>
 source-like, O1 is a moderate compromise, O2 is the performance-oriented
 default for U/V experiments, and Os favors compact code. Every advertised level
 is compiled and assembled by the authoring regression.</p>
+<h2>Run the built-in U/V experiment</h2>
 <p>The built-in C template is a real U/V experiment: two independent Fibonacci
 chains run for a volatile, runtime-loaded 120 iterations, so O2 cannot replace
 them with constants. Compile at O2, Assemble + Run, then run the same ELF once
@@ -322,6 +336,12 @@ hundreds of V retirements and finish materially sooner. The regression requires
 more than 400 V retirements and at least a 20% cycle advantage.</p>
 <p>Generated artifacts stay under <code>tools/pipeviz/.generated/</code> and
 are ignored by Git.</p>
+<h2>Shared source controls</h2>
+<p>Ctrl+N creates the C demo; Ctrl+O opens C; Ctrl+S and Ctrl+Shift+S save.
+Ctrl+B and Ctrl+Enter both compile into Assembly. Ctrl+F searches, Ctrl+G goes
+to a line, and Ctrl+/ toggles C line comments. For indentation, gutter
+selection, matching delimiters, zoom, diagnostics, and source-linked
+investigation details, choose <b>Assembly and source editing</b> in the index.</p>
 """),
     ("Trace and filters", """
 <h1>Retired-instruction trace</h1>
