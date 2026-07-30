@@ -84,6 +84,24 @@ class Backend:
     full-SoC model (libventium_viz_soc.so) so bare-metal images that need the
     SoC's internal port-I/O / PIC / PIT (e.g. test386) run."""
 
+    @staticmethod
+    def supports_snapshot(libpath=None, soc=False):
+        """Check the replay ABI without constructing a verilated model.
+
+        This is also the compatibility probe for optional SoC libraries.  A
+        stale model can abort in ``vv_create``/``vv_destroy`` before Python can
+        turn the failure into a dialog, while merely loading its symbol table is
+        safe and sufficient to identify a current build.
+        """
+        path = libpath or _default_lib_path(soc)
+        if not os.path.isfile(path):
+            return False
+        try:
+            lib = C.CDLL(path)
+        except OSError:
+            return False
+        return hasattr(lib, "vv_load_snapshot") and hasattr(lib, "vv_last_error")
+
     def __init__(self, libpath=None, soc=False):
         self.soc = soc
         libpath = libpath or _default_lib_path(soc)

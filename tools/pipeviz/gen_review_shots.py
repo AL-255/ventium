@@ -92,7 +92,8 @@ SHOTS = [
     ("brloop",  ("build/m2/mb_brloop.flat", "build/verify/mb_brloop.cycle.flat"), 120, False),
     ("fp",      ("build/m2/mb_fpindep.flat", "build/verify/mb_fpindep.cycle.flat"), 420, False),
     ("test386", ("ventium-refs/09-external-cpu-tests/test386.asm/test386.bin",), 3000, True),
-    ("ppage",   ("verif/sys/tests/ppage/ppage.bin",),                           240, False),
+    # 1200 reaches CR0.PG + real I/D TLB residency; 240 only captures setup.
+    ("ppage",   ("verif/sys/tests/ppage/ppage.bin",),                          1200, False),
 ]
 
 app = QApplication(sys.argv)

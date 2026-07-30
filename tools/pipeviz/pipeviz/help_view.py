@@ -1,0 +1,150 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+"""Indexed in-application user guide."""
+from collections import OrderedDict
+
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
+                               QListWidget, QTextBrowser, QVBoxLayout)
+
+
+PAGES = OrderedDict((
+    ("Getting started", """
+<h1>Getting started</h1>
+<p>Pipeviz runs the real verilated Ventium core. Open a raw image or 32-bit x86
+ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
+<b>Step N</b>, or <b>Run</b>.</p>
+<ol>
+ <li>Open or drop a program. ELF entry and segments are automatic.</li>
+ <li>Use Step N to establish a useful timeline.</li>
+ <li>Find an event in the sparkline or with <code>[</code>/<code>]</code>.</li>
+ <li>Click its timing/trace row to pin architectural state.</li>
+ <li>Use the analysis tabs to explain the event.</li>
+</ol>
+<p>The four panes are linked: Pipeline and Trace selections pin Registers;
+Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p>
+"""),
+    ("Reading the Pipeline View", """
+<h1>How to read the Pipeline View</h1>
+<h2>Axes and rows</h2>
+<p>Each row is one retired instruction; time moves left to right in core cycles.
+The frozen label gives retirement number, U/V lane, PC, mnemonic, and total
+latency. Repeated PCs are shaded together, which makes loop iterations easy to
+recognize.</p>
+<h2>Stage glyphs</h2>
+<table cellspacing="5">
+ <tr><td><b>F</b></td><td>fetch</td><td><b>L</b></td><td>I-cache fill</td>
+     <td><b>D</b></td><td>decode</td></tr>
+ <tr><td><b>X</b></td><td>integer or x87 execute</td>
+     <td><b>M</b></td><td>memory</td><td><b>W</b></td><td>writeback</td></tr>
+ <tr><td><b>=</b></td><td>stall</td><td><b>!</b></td><td>mispredict flush</td>
+     <td><b>S</b></td><td>system/microcode</td></tr>
+</table>
+<p>U and V rows retiring in the same cycle are a dual-issued pair. A clean,
+dense diagonal means the front end is feeding the pipes. A long horizontal
+run of stall cells means one instruction held resources for several cycles.</p>
+<h2>Selections and dependencies</h2>
+<p>Click a row to place the cyan playhead, synchronize the Trace, pin Registers
+after that retirement, and draw producer-to-consumer edges. An amber thick edge
+marks a gating dependency such as a load-use stall. Shift-click another row to
+place an amber anchor and measure the cycle delta.</p>
+<h2>Examples</h2>
+<ul>
+ <li><b>Dual Fibonacci:</b> two independent recurrence chains let adjacent
+ arithmetic occupy U and V together. Compare cycle mode on/off; paired mode
+ completes the same results in fewer cycles.</li>
+ <li><b>mb_brloop:</b> repeating <code>dec</code>/<code>jne</code> diagonals
+ expose branch pairing and the flags dependency. Red event pixels locate
+ mispredict recovery.</li>
+ <li><b>mb_dmiss:</b> a load row stretches through stall cells. Click it, then
+ use Data$, Memory →access, and Mem map to connect latency to an address stride.</li>
+ <li><b>mb_fpindep:</b> purple FP execution cells show x87 overlap. Pin an
+ <code>fadd</code> to inspect its post-retirement x87 stack.</li>
+</ul>
+"""),
+    ("Trace and filters", """
+<h1>Retired-instruction trace</h1>
+<p>The compact trace lists retire number/cycle, stall delta, U/V lane, PC, raw
+bytes, disassembly, and architectural effects. Byte colors separate x86
+prefixes, opcode, ModRM/SIB, displacement, immediate, and branch-relative
+fields.</p>
+<p>Filters combine with spaces: <code>mov</code>, <code>pc:08048</code>,
+<code>cyc&gt;=133</code>, <code>pipe:V</code>, <code>stall</code>, and
+<code>@</code> for memory accesses. Click any result to synchronize the timing
+view and pin Registers.</p>
+"""),
+    ("Caches and memory", """
+<h1>Caches and memory</h1>
+<p>Code$ and Data$ show set/way residency and occupancy. Data$ replays the
+observed access stream through the matching 2-way geometry to estimate misses.
+Hotspots attributes cycle cost and D-cache misses to PCs.</p>
+<p>Memory can follow EIP, ESP, or the latest access. Mem map plots address
+against retirement order: a diagonal is a stride, a horizontal band is a hot
+location, and a cloud is irregular access. Click a point to select its trace
+row, pin Registers, and highlight its exact bytes in Memory.</p>
+"""),
+    ("System and snapshots", """
+<h1>System mode and snapshots</h1>
+<p>System mode places a BIOS-style raw image so its last byte ends at 1 MiB and
+starts the core at F000:FFF0. Use it for paging and protected-mode fixtures.
+The SoC option additionally requires a current <code>build.sh --soc</code>
+library for port I/O, PIC, and PIT behavior.</p>
+<p>Open Snapshot accepts a matching <code>.aux</code>/<code>.vlt</code> pair.
+Its timeline begins at the restored point because the snapshot stores model
+and memory state, not the earlier visual history.</p>
+"""),
+    ("Shortcuts", """
+<h1>Keyboard and mouse reference</h1>
+<table cellspacing="6">
+ <tr><td><b>Ctrl+O</b></td><td>open program</td></tr>
+ <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
+ <tr><td><b>R</b></td><td>reset or restore snapshot</td></tr>
+ <tr><td><b>.</b></td><td>one clock</td></tr>
+ <tr><td><b>I / Space</b></td><td>next retired instruction</td></tr>
+ <tr><td><b>F5</b></td><td>run/pause</td></tr>
+ <tr><td><b>[ / ]</b></td><td>previous/next pipeline event</td></tr>
+ <tr><td><b>F1</b></td><td>this guide</td></tr>
+</table>
+<p>Click a trace/timing row to pin it. Shift-click a second timing row to
+measure cycle distance. Click the IPC sparkline to seek a cycle.</p>
+"""),
+))
+
+
+class UserGuideDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pipeviz User Guide")
+        self.resize(980, 700)
+        root = QVBoxLayout(self)
+        heading = QLabel("Pipeviz help")
+        heading.setStyleSheet("font-size:16px;font-weight:bold;padding:4px;")
+        root.addWidget(heading)
+        body = QHBoxLayout()
+        self.index = QListWidget()
+        self.index.setFixedWidth(205)
+        self.index.addItems(PAGES.keys())
+        self.page = QTextBrowser()
+        self.page.setOpenExternalLinks(False)
+        font = QFont()
+        font.setPointSize(10)
+        self.page.setFont(font)
+        body.addWidget(self.index)
+        body.addWidget(self.page, 1)
+        root.addLayout(body, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.close)
+        root.addWidget(buttons)
+        self.index.currentTextChanged.connect(self._set_page)
+        self.show_page("Getting started")
+
+    def _set_page(self, title):
+        if title in PAGES:
+            self.page.setHtml(PAGES[title])
+
+    def show_page(self, title):
+        titles = list(PAGES)
+        row = titles.index(title) if title in PAGES else 0
+        self.index.setCurrentRow(row)
+        self._set_page(titles[row])
+        self.page.verticalScrollBar().setValue(0)

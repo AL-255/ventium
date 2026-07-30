@@ -1084,11 +1084,19 @@ class SparklineStrip(QWidget):
         k = 0
         while k < n and self.ret[n - 1 - k] == 0:
             k += 1
-        if k >= 64 and self._last_state in ("S_DECODE", "S_FETCH", "S_HALT", "S_F00F_HANG"):
+        if k >= 64 and self._last_state in ("S_DECODE", "S_FETCH", "S_F00F_HANG"):
             p.fillRect(QRect(labelw, ipc_y0, plotw, ipc_h), QColor(40, 12, 12))
             p.setPen(QColor(C_MISPRED)); p.setFont(_mono(8, True))
             p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
                        f"⚠ stuck in {self._last_state} — {k}c, 0 retired")
+        elif k >= 64 and self._last_state == "S_HALT":
+            # HALT is a normal terminal outcome for system fixtures, not a
+            # front-end livelock.  Keep the end-state visible without presenting
+            # a successful boot/test completion as a red failure.
+            p.fillRect(QRect(labelw, ipc_y0, plotw, ipc_h), QColor(12, 32, 22))
+            p.setPen(QColor("#3fb950")); p.setFont(_mono(8, True))
+            p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
+                       f"halted — program stopped ({k} idle clocks)")
         # left labels: current windowed IPC (last 64 cyc)
         cur = sum(self.ret[max(0, n - 64):]) / min(64, n)
         p.setPen(QColor("#9aa3ad")); p.setFont(_mono(8, True))

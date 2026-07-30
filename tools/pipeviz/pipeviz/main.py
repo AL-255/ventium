@@ -22,6 +22,7 @@ from .pipeline_view import PipelineView
 from .tables_view import TablesView
 from .trace_view import TraceView
 from .regs_view import RegsView
+from .help_view import UserGuideDialog
 
 DEF_ENTRY = 0x08048000
 DEF_ESP = 0x40c34910
@@ -151,6 +152,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._build_toolbar()
+        self._build_help_menu()
         self._build_central()
 
         self.timer = QTimer(self)
@@ -161,6 +163,29 @@ class MainWindow(QMainWindow):
         self._running = False
         self._set_transport_enabled(False)
         self._refresh_status()
+
+    def _build_help_menu(self):
+        menu = self.menuBar().addMenu("&Help")
+        guide = QAction("User Guide", self)
+        guide.setShortcut(QKeySequence(Qt.Key_F1))
+        guide.triggered.connect(lambda: self._show_guide("Getting started"))
+        menu.addAction(guide)
+        pipeline = QAction("How to read the Pipeline View", self)
+        pipeline.triggered.connect(lambda: self._show_guide("Reading the Pipeline View"))
+        menu.addAction(pipeline)
+        shortcuts = QAction("Keyboard and mouse shortcuts", self)
+        shortcuts.triggered.connect(self._show_shortcuts)
+        menu.addAction(shortcuts)
+        self._help_menu = menu
+        self._guide_dialog = None
+
+    def _show_guide(self, topic="Getting started"):
+        if self._guide_dialog is None:
+            self._guide_dialog = UserGuideDialog(self)
+        self._guide_dialog.show_page(topic)
+        self._guide_dialog.show()
+        self._guide_dialog.raise_()
+        self._guide_dialog.activateWindow()
 
     # ---- UI construction ----
     def _build_toolbar(self):
@@ -227,7 +252,9 @@ class MainWindow(QMainWindow):
         self.run_btn.clicked.connect(self.on_run_toggle)
         self.run_btn.setStyleSheet(
             "QPushButton{background:#238636;color:#ffffff;font-weight:bold;border:1px "
-            "solid #2ea043;padding:3px 12px;} QPushButton:hover{background:#2ea043;}")
+            "solid #2ea043;padding:3px 12px;} QPushButton:hover{background:#2ea043;}"
+            "QPushButton:disabled{background:#21262d;color:#6e7681;"
+            "border-color:#30363d;}")
         tb.addWidget(self.run_btn)
         self.run_btn.setToolTip("Run or pause continuous execution (F5)")
         tb.addWidget(QLabel(" speed "))
@@ -262,8 +289,7 @@ class MainWindow(QMainWindow):
         for key, fn in [(Qt.Key_Period, lambda: self.do_step(1, False)),
                         (Qt.Key_Space, lambda: self.do_step(200000, True)),
                         (Qt.Key_F5, self.on_run_toggle),
-                        (Qt.Key_R, self.on_reset),
-                        (Qt.Key_F1, self._show_shortcuts)]:
+                        (Qt.Key_R, self.on_reset)]:
             a = QAction(self); a.setShortcut(QKeySequence(key)); a.triggered.connect(fn)
             self.addAction(a)
         for seq, fn in [("Ctrl+O", self.on_open), ("Ctrl+Shift+O", self.on_open_snapshot)]:
@@ -285,14 +311,7 @@ class MainWindow(QMainWindow):
         self.notice_timer.start(ms)
 
     def _show_shortcuts(self):
-        QMessageBox.information(
-            self, "Debugger shortcuts",
-            "Open program: Ctrl+O\nOpen snapshot: Ctrl+Shift+O\n"
-            "Reset / restore snapshot: R\nRun / pause: F5\n"
-            "Step one clock: .\nStep one instruction: I or Space\n"
-            "Previous / next event: [ / ]\n\n"
-            "Click a trace or pipeline row to pin registers at that retirement. "
-            "Shift-click a second pipeline row to measure cycle distance.")
+        self._show_guide("Shortcuts")
 
     def _build_central(self):
         outer = QSplitter(Qt.Horizontal)
@@ -301,6 +320,7 @@ class MainWindow(QMainWindow):
         self.trace = TraceView()
         left.addWidget(self.pipeline)
         left.addWidget(self.trace)
+        left.setMinimumWidth(700)
         left.setStretchFactor(0, 3); left.setStretchFactor(1, 2)
         left.setSizes([500, 470])
         right = QSplitter(Qt.Vertical)
@@ -316,6 +336,12 @@ class MainWindow(QMainWindow):
         right.setSizes([600, 300])
         outer.addWidget(left); outer.addWidget(right)
         outer.setStretchFactor(0, 3); outer.setStretchFactor(1, 2)
+        # Give the linked trace/timeline enough room at compact window sizes.
+        # Relying only on stretch factors makes QSplitter shrink the left side
+        # all the way to its minimum while preserving excess width on the right.
+        # An explicit 55:45 starting allocation keeps trace operands/effects
+        # readable and also gives the ten analysis tabs enough room at 1640px.
+        outer.setSizes([900, 740])
         for sp in (outer, left, right):
             sp.setHandleWidth(4)
         self.setCentralWidget(outer)
@@ -478,16 +504,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         try:
-            self.backend = Backend(self._libpath, soc=soc)
-            # A current SoC library is built by build.sh with --savable and
-            # therefore exposes snapshot replay.  Treat an older library that
-            # lacks that ABI as unavailable: attempting to drive an arbitrary
-            # stale verilated .so can abort the entire Qt process rather than
-            # giving the user a recoverable load error.
-            if soc and not self.backend._has_snapshot:
-                self.backend.close()
+            if soc and not Backend.supports_snapshot(self._libpath, soc=True):
                 raise FileNotFoundError(
-                    "libventium_viz_soc.so is stale (missing the current replay ABI)")
+                    "libventium_viz_soc.so is stale or unreadable "
+                    "(missing the current replay ABI)")
+            self.backend = Backend(self._libpath, soc=soc)
         except FileNotFoundError as e:
             if soc:
                 QMessageBox.warning(self, "SoC model missing",

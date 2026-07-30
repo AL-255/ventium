@@ -61,6 +61,10 @@ system paging, see [the user guide](docs/user-guide.md).  Its examples have an
 offscreen regression check: `QT_QPA_PLATFORM=offscreen python3
 tools/pipeviz/verify_examples.py`.
 
+The in-application **Help** menu (`F1`) contains an indexed guide, including a
+dedicated “Reading the Pipeline View” page with branch, cache-stall, x87, and
+dual-Fibonacci examples.
+
 ## What you see
 
 The window is four linked panels (see the screenshot above): the **Pipelines**
@@ -221,4 +225,7 @@ host I/O drivers.
 | `smoke_test.c` | minimal C end-to-end check of the C ABI |
 | `verify_gui.py` | offscreen GUI smoke + screenshot |
 | `verify_examples.py` | offscreen checks for every documented workload |
+| `verify_interactions.py` | QTest-driven controls, linked views, loading, layout, Help, and U–V comparison |
+| `examples/fibonacci_uv.c` | freestanding dual-chain C example demonstrating U/V issue |
 | `docs/user-guide.md` | guided workflow examples and their regression commands |
+| `TESTING_Jul29.md` | full interactive acceptance procedure, observations, and limitations |

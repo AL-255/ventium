@@ -27,8 +27,10 @@ CASES = (
      lambda b: b.retire_count() >= 40 and len(b.dcache()) >= 8),
     ("x87 overlap", "build/verify/mb_fpindep.cycle.flat", 420,
      lambda b: b.retire_count() >= 200 and len(b.icache()) >= 8),
-    ("system paging", "verif/sys/tests/ppage/ppage.bin", 240,
-     lambda b: b.retire_count() >= 20 and len(b.icache()) >= 3 and len(b.dcache()) >= 1),
+    ("system paging", "verif/sys/tests/ppage/ppage.bin", 1200,
+     lambda b: (b.retire_count() >= 100 and len(b.icache()) >= 3
+                and len(b.dcache()) >= 1
+                and any(entry.valid for side in (0, 1) for entry in b.tlb(side)))),
 )
 
 

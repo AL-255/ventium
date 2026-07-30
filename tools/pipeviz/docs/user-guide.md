@@ -30,11 +30,39 @@ all shortcuts.
 
 ## Worked examples
 
-All commands below are run from the repository root.  The same examples are
-checked by `tools/pipeviz/verify_examples.py`, so documentation and expected
-visual evidence stay exercised as the UI evolves.
+All commands below are run from the repository root.  The supplied fixture
+examples are checked by `tools/pipeviz/verify_examples.py`; the compiled
+dual-Fibonacci comparison and GUI interactions are checked by
+`tools/pipeviz/verify_interactions.py`.
 
-### 1. Dual issue and branch recovery
+### 1. U–V advantage with dual Fibonacci
+
+`examples/fibonacci_uv.c` is a freestanding C program containing two independent
+Fibonacci recurrences. Build it and open the resulting ELF:
+
+```sh
+gcc -m32 -march=pentium -O2 -ffreestanding -fno-pic -fno-pie \
+  -fno-stack-protector -nostdlib -static -Wl,--build-id=none \
+  -Wl,-Ttext=0x08048000 -Wl,-e,_start -DDUAL=1 \
+  -o /tmp/fibonacci_dual.elf tools/pipeviz/examples/fibonacci_uv.c
+tools/pipeviz/run.sh /tmp/fibonacci_dual.elf
+```
+
+First untick **cycle**, Reset, and advance 600 clocks: every retirement is in
+the U lane. Then tick **cycle**, Reset, and advance the same amount: the Trace
+and timing diagram show adjacent arithmetic in U/V pairs. Continue each run to
+completion to compare the status line. In the July 29 acceptance run, the same
+two-chain result took 2,451 clocks at 0.461 IPC without U–V issue and 1,984
+clocks at 0.571 IPC with it; 85.3% of the instructions were paired. The
+interactive regression verifies both the computed Fibonacci values and a
+minimum 20% IPC advantage:
+
+```sh
+QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
+  tools/pipeviz/verify_interactions.py
+```
+
+### 2. Dual issue and branch recovery
 
 ```sh
 tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
@@ -51,7 +79,7 @@ measure the steady-state iteration cost.
 This is the fastest way to distinguish a branch-limited loop from one that is
 simply not finding V-pipe pairings.
 
-### 2. D-cache pressure, latency, and address stride
+### 3. D-cache pressure, latency, and address stride
 
 ```sh
 tools/pipeviz/run.sh build/verify/mb_dmiss.cycle.flat
@@ -68,7 +96,7 @@ outlier to jump directly to its trace row and pinned architectural state.
 Use **Hotspots** after this drill-down to identify the PCs that own the cost,
 rather than merely observing that the global IPC fell.
 
-### 3. x87 throughput and architectural results
+### 4. x87 throughput and architectural results
 
 ```sh
 tools/pipeviz/run.sh build/verify/mb_fpindep.cycle.flat
@@ -82,15 +110,16 @@ instruction’s post-commit x87 stack, control word, status word, tags, and the
 rows in the timeline to see whether the FP pipe is the limiting resource or is
 overlapping successfully.
 
-### 4. System boot, translation, and cache warm-up
+### 5. System boot, translation, and cache warm-up
 
 ```sh
 tools/pipeviz/run.sh verif/sys/tests/ppage/ppage.bin
 ```
 
 Pipeviz automatically selects **system** mode for this BIOS-style image.  Step
-**240 clocks**.  Watch the status row for fill/walk activity, then inspect the
-**TLB** tab and the Code$/Data$ occupancy heatmaps.  The trace uses the live
+**1200 clocks**—the early setup code has not enabled paging yet at 240 clocks.
+Watch the status row for fill/walk activity, then inspect the **TLB** tab and
+the Code$/Data$ occupancy heatmaps.  The trace uses the live
 16/32-bit code-segment mode for disassembly, so it remains readable while the
 boot code changes execution mode.  Use the **Cycles** tab to separate page
 walk or fill time from ordinary issue/retirement time.
