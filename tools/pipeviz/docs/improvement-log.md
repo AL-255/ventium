@@ -80,6 +80,10 @@ between complete indicators, moving into a two-column, five-row side grid
 beside the upper GPRs at the true minimum and returning to a single footer row
 when space permits. Its accessible description enumerates all nine values and
 which flags changed from the prior time point.
+Code$/Data$ summaries no longer end in a cropped dash at narrow widths. They
+select complete compact forms that retain residency, geometry, and—for
+Data$—replay origin and miss rate, while their full geometry, counts, and replay
+breakdown remain available in the tooltip and accessible description.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

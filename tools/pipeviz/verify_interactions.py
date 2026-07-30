@@ -2448,6 +2448,26 @@ def scenario_layout(app, outdir):
         assert "cycle 160" in win.status_lbl.toolTip()
         assert "EIP 0x08048015" in win.status_lbl.toolTip()
         assert "I$ 1/256" in win.status_lbl.toolTip()
+        assert win.tables.ic_lbl.displayText() == (
+            "I$ 1/256 · 0% · 8K/2w/32B")
+        assert not win.tables.ic_lbl.displayText().endswith("…")
+        assert win.tables.ic_lbl.fontMetrics().horizontalAdvance(
+            win.tables.ic_lbl.displayText()) <= (
+                win.tables.ic_lbl.contentsRect().width())
+        assert "8 KB, 2-way, 32-byte line, 128 sets" in (
+            win.tables.ic_lbl.accessibleDescription())
+        QTest.keyClick(win, Qt.Key_2, Qt.AltModifier)
+        settle(app)
+        assert win.tables.dc_lbl.displayText() == (
+            "D$ 14/256 · [empty] · 100% miss")
+        assert not win.tables.dc_lbl.displayText().endswith("…")
+        assert win.tables.dc_lbl.fontMetrics().horizontalAdvance(
+            win.tables.dc_lbl.displayText()) <= (
+                win.tables.dc_lbl.contentsRect().width())
+        assert "replay [empty] 100% miss (14/14)" in (
+            win.tables.dc_lbl.accessibleDescription())
+        QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
+        settle(app)
         assert win.regs.state_banner.text() == "LIVE · current state"
         assert win.regs.state_banner.fullText() == (
             "LIVE · current architectural state")

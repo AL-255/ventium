@@ -211,6 +211,49 @@ class _HintTable(QTableWidget):
         self._hint.setGeometry(0, 0, self.viewport().width(), self.viewport().height())
 
 
+class _ResponsiveSummary(QLabel):
+    """Paint a deliberate compact summary while retaining the complete value."""
+
+    def __init__(self, accessible_name, parent=None):
+        super().__init__("", parent)
+        self._full_text = ""
+        self._compact_text = ""
+        self._display_text = ""
+        self.setAccessibleName(accessible_name)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+    def set_summary(self, full_text, compact_text=None, description=None):
+        self._full_text = str(full_text)
+        self._compact_text = str(
+            compact_text if compact_text is not None else full_text)
+        self.setAccessibleDescription(description or self._full_text)
+        self._sync_text()
+
+    def setText(self, text):
+        self.set_summary(text)
+
+    def text(self):
+        """Return the complete semantic value, not its responsive rendering."""
+        return self._full_text
+
+    def displayText(self):
+        return self._display_text
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_text()
+
+    def _sync_text(self):
+        width = max(0, self.contentsRect().width())
+        full_fits = (
+            self.fontMetrics().horizontalAdvance(self._full_text) <= width)
+        candidate = self._full_text if full_fits else self._compact_text
+        self._display_text = self.fontMetrics().elidedText(
+            candidate, Qt.ElideRight, width)
+        QLabel.setText(self, self._display_text)
+
+
 def _mk_table(cols, widths=None, hint=""):
     t = _HintTable(0, len(cols), hint)
     t.setHorizontalHeaderLabels(cols)
@@ -556,7 +599,7 @@ class TablesView(QWidget):
         lay.addWidget(self.tabs)
 
         # --- I-cache (code). 'way' shows '*' for the MRU way (LRU dropped). ---
-        self.ic_lbl = QLabel()
+        self.ic_lbl = _ResponsiveSummary("Instruction cache summary")
         self.ic_map = CacheMap()
         self.ic = _mk_table(["set", "way *=MRU", "tag", "line addr", "32 line bytes"],
                             [46, 74, 60, 86, 9999],
@@ -580,7 +623,7 @@ class TablesView(QWidget):
         self.tabs.setTabToolTip(0, "Instruction cache (I$): resident lines and set/way map")
 
         # --- D-cache (data, timing-only) ---
-        self.dc_lbl = QLabel(); self.dc_lbl.setWordWrap(True)
+        self.dc_lbl = _ResponsiveSummary("Data cache summary")
         self.dc_map = CacheMap()
         self.dc = _mk_table(["set", "way *=MRU", "tag", "line addr"],
                             [56, 74, 90, 9999],
@@ -743,6 +786,7 @@ class TablesView(QWidget):
         }
         self._session_active = False
         self._dcache_seed = []
+        self._dcache_resident = 0
         self.set_session_active(False)
 
     def set_session_active(self, active):
@@ -978,9 +1022,13 @@ class TablesView(QWidget):
         # I-cache
         ic = backend.icache()
         self.ic_map.set_lines(ic)
-        self.ic_lbl.setText(
+        ic_full = (
             f"{len(ic)} / 256 lines resident ({100*len(ic)//256}% full)  "
             f"— 8 KB, 2-way, 32-byte line, 128 sets")
+        self.ic_lbl.set_summary(
+            ic_full,
+            f"I$ {len(ic)}/256 · {100*len(ic)//256}% · 8K/2w/32B")
+        self.ic_lbl.setToolTip(ic_full)
         rows = []
         for l in ic:
             base = (l.tag << 12) | (l.set << 5)
@@ -994,13 +1042,19 @@ class TablesView(QWidget):
 
         # D-cache
         dc = backend.dcache()
+        self._dcache_resident = len(dc)
         self.dc_map.set_lines(dc)
-        self.dc_lbl.setText(
+        dc_full = (
             f"{len(dc)}/256 lines ({100*len(dc)//256}%) · "
             "8 KB, 2-way × 32 B · timing only")
-        self.dc_lbl.setToolTip(
+        dc_compact = (
+            f"D$ {len(dc)}/256 · {100*len(dc)//256}% · 8K/2w/32B")
+        dc_detail = (
             "Resident D-cache tags and replacement state. The RTL model has "
             "no data array; inspect bytes in Memory.")
+        self.dc_lbl.set_summary(
+            dc_full, dc_compact, f"{dc_full}. {dc_detail}")
+        self.dc_lbl.setToolTip(dc_detail)
         rows = []
         for l in dc:
             base = (l.tag << 12) | (l.set << 5)
@@ -1045,13 +1099,20 @@ class TablesView(QWidget):
                 "session-start lines and their MRU order."
                 if self._dcache_seed
                 else "Replay began from an empty session-start cache.")
-            self.dc_lbl.setText(
-                self.dc_lbl.text() +
-                f" · replay [{origin}] {round(100 * miss / n)}% miss ({miss}/{n})")
-            self.dc_lbl.setToolTip(
-                self.dc_lbl.toolTip() + "\n"
+            full = (
+                self.dc_lbl.text()
+                + f" · replay [{origin}] "
+                f"{round(100 * miss / n)}% miss ({miss}/{n})")
+            compact = (
+                f"D$ {self._dcache_resident}/256 · [{origin}] · "
+                f"{round(100 * miss / n)}% miss")
+            detail = (
                 f"{n} replayed accesses: {_hits} hits, {cold} cold fills, "
                 f"{conflict} conflict evictions. {origin_detail}")
+            tooltip = self.dc_lbl.toolTip() + "\n" + detail
+            self.dc_lbl.set_summary(
+                full, compact, f"{full}. {tooltip}")
+            self.dc_lbl.setToolTip(tooltip)
 
 
 class _PrefetchView(QWidget):
