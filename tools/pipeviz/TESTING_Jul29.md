@@ -532,8 +532,9 @@ The screenshot review found and corrected the following:
     explicit operands retain effective, linear, and physical addresses. Tests
     cover DS-based retirement resolution, SS defaults, `0x67` address-size
     overrides, FS overrides, 4 KiB pages, 4 MiB PSE pages, absent/PAE rejection,
-    flat D-cache identity, and the real-mode reset vector. The native smoke
-    verifier also rejects any C-header/shared-library struct-size drift.
+    a non-identity-paged live stage-board opcode, flat D-cache identity, and the
+    real-mode reset vector. The native smoke verifier also rejects any
+    C-header/shared-library struct-size drift.
 
 ## Coverage limits
 

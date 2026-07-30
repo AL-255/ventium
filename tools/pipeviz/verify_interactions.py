@@ -29,7 +29,7 @@ import pipeviz.main as main_module
 import pipeviz.disasm as disasm_module
 import pipeviz.pipeline_view as pipeline_module
 import pipeviz.trace_view as trace_module
-from pipeviz.backend import Backend, VVCline, VVRetire
+from pipeviz.backend import Backend, VVCline, VVRetire, VVState
 from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
 from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
@@ -213,6 +213,7 @@ def scenario_startup(app, outdir):
     # selection, and address-size overrides before exercising the real model.
     class PageMemory:
         translate_linear = Backend.translate_linear
+        mem_read_linear = Backend.mem_read_linear
 
         def __init__(self):
             self.bytes = {}
@@ -231,6 +232,9 @@ def scenario_startup(app, outdir):
     assert pager.translate_linear(0x00401234, 0, 0, 0) == 0x00401234
     assert pager.translate_linear(
         0x00401234, 1 << 31, 0x1000, 0) == 0x00009234
+    pager.bytes[0x9234] = 0x90
+    assert pager.mem_read_linear(
+        0x00401234, 1, 1 << 31, 0x1000, 0) == b"\x90"
     pager.put_u32(0x1008, 0x01400083)  # PDE[2], present + 4 MiB page
     assert pager.translate_linear(
         0x00805678, 1 << 31, 0x1000, 1 << 4) == 0x01405678
@@ -238,6 +242,23 @@ def scenario_startup(app, outdir):
         0x00C00000, 1 << 31, 0x1000, 0) is None
     assert pager.translate_linear(
         0x00401234, 1 << 31, 0x1000, 1 << 5) is None
+
+    class PagedLiveBackend(PageMemory):
+        @staticmethod
+        def state_name(_state):
+            return "S_FETCH"
+
+    live_backend = PagedLiveBackend()
+    live_backend.bytes.update(pager.bytes)
+    live = VVState()
+    live.eip = 0x00401234
+    live.cs_d = 1
+    live.cr0 = 1 << 31
+    live.cr3 = 0x1000
+    live_board = pipeline_module.StageBoard()
+    live_board.set_state(live, live_backend, 32)
+    assert live_board._cells["U"][1] == "nop"
+    live_board.deleteLater()
 
     bp16 = disasm_module.mem_operand(b"\x8b\x46\x10", bits=16)
     assert bp16[6:] == (1, 0xFFFF)  # BP defaults to SS, 16-bit address

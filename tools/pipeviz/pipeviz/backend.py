@@ -236,6 +236,26 @@ class Backend:
             return None
         return ((pte & 0xFFFFF000) | (linear & 0xFFF)) & 0xFFFFFFFF
 
+    def mem_read_linear(self, linear, count, cr0=0, cr3=0, cr4=0):
+        """Read bytes through segmentation's already-added linear address.
+
+        Each spanned page is translated independently so an instruction crossing
+        a boundary remains correct even when adjacent virtual pages are not
+        physically contiguous. Returns ``None`` if any page is unmapped.
+        """
+        data = bytearray()
+        cursor = int(linear) & 0xFFFFFFFF
+        remaining = max(0, int(count))
+        while remaining:
+            physical = self.translate_linear(cursor, cr0, cr3, cr4)
+            if physical is None:
+                return None
+            chunk = min(remaining, 0x1000 - (cursor & 0xFFF))
+            data.extend(self.mem_read(physical, chunk))
+            cursor = (cursor + chunk) & 0xFFFFFFFF
+            remaining -= chunk
+        return bytes(data)
+
     def reset(self, entry, esp, cycle_mode=1, system=0):
         self.lib.vv_reset(self.h, entry, esp, int(cycle_mode), int(system))
 

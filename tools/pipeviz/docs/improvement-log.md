@@ -150,10 +150,11 @@ non-identity paging was equally wrong. The retirement ABI now captures
 pre-execution segment bases plus CR0/CR3/CR4. The bridge reads retired code
 through those legacy page tables; Trace retains effective, segment-linear, and
 physical forms of explicit operands; Memory follows exact physical EIP/ESP and
-access bytes; Mem map deliberately remains in timing-D-cache effective-offset
-space. Synthetic 4 KiB/PSE/override tests and the real reset vector lock the
-distinction. The UI/docs explicitly limit operand replay to explicit Capstone
-memory operands rather than claiming implicit stack/string traffic.
+access bytes; the live stage board disassembles through the same page-aware
+reader; Mem map deliberately remains in timing-D-cache effective-offset space.
+Synthetic 4 KiB/PSE/override/live-opcode tests and the real reset vector lock
+the distinction. The UI/docs explicitly limit operand replay to explicit
+Capstone memory operands rather than claiming implicit stack/string traffic.
 
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 

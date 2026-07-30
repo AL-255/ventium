@@ -74,7 +74,12 @@ class StageBoard(QWidget):
         base = s.cs_base
 
         def dis(addr):
-            t, sz = disasm.text(backend.mem_read(base + addr, 16), addr, bits)
+            code = backend.mem_read_linear(
+                (int(base) + int(addr)) & 0xFFFFFFFF, 16,
+                s.cr0, s.cr3, s.cr4)
+            if code is None:
+                return "unmapped"
+            t, sz = disasm.text(code, addr, bits)
             return t
 
         issuing = (name == "S_PIPE" and s.stall_cnt == 0 and s.mispred_bubbles == 0
