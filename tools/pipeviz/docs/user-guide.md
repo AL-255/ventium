@@ -357,8 +357,11 @@ instruction’s effective offset through its pre-execution segment base and
 legacy 4 KiB/4 MiB page tables; `→ EIP` and `→ ESP` do the same for the live
 state. **Mem map** deliberately keeps the effective offset—the address used by
 the timing D-cache—so this workload’s stride appears as a diagonal scatter;
-click an outlier to jump directly to its trace row, pinned architectural state,
-and translated physical bytes. These captured/replayed points cover explicit
+click an outlier, or focus the plot and use arrows, Page Up/Page Down, Home, or
+End, to jump directly to its trace row, pinned architectural state, and
+translated physical bytes. Enter/Space reopens the selected point. An
+untranslated point clears any prior physical-byte highlight rather than
+leaving a stale one. These captured/replayed points cover explicit
 Capstone memory operands; implicit stack and repeated-string traffic remains
 visible in cycle timing but is not claimed in the scatter or replay rate.
 

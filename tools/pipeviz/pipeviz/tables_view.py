@@ -528,6 +528,7 @@ class TablesView(QWidget):
         # a Mem-map point click also pins the Memory tab to that access's bytes (no
         # forced tab switch — switch to Memory to see exactly what the load/store hit).
         self.accmap.accessClicked.connect(self.mem.goto_access)
+        self.accmap.accessUnavailable.connect(self.mem.clear_clicked_access)
         # drill-down: clicking a Hotspots / Branches row jumps the trace to that PC.
         self.hot.cellClicked.connect(lambda r, _c: self._emit_pc(self.hot, r))
         self.br.cellClicked.connect(lambda r, _c: self._emit_pc(self.br, r))
@@ -997,6 +998,7 @@ class AccessMap(QWidget):
     client-side from the trace's already-resolved effective addresses."""
     pointSelected = Signal(int)     # retire-n of the clicked access -> drill to trace
     accessClicked = Signal(int, int)  # (addr, size) of the clicked access -> Memory tab
+    accessUnavailable = Signal()    # selected access has no physical translation
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1009,6 +1011,14 @@ class AccessMap(QWidget):
         self.session_active = False
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName("Memory access map")
+        self.setAccessibleDescription(
+            "Address versus retirement scatter. Use Left and Right to traverse "
+            "accesses; Enter opens the selected retirement and physical bytes.")
+        self.setToolTip(
+            "Click a point or use ←/→, Page Up/Down, Home/End to select an "
+            "access. Enter/Space reopens its Trace row and physical Memory bytes.")
 
     def set_session_active(self, active):
         self.session_active = bool(active)
@@ -1022,6 +1032,14 @@ class AccessMap(QWidget):
 
     def clear_selection(self):
         self.sel_n = None
+        self.update()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
         self.update()
 
     def _sel_idx(self):
@@ -1046,6 +1064,9 @@ class AccessMap(QWidget):
                        if self.session_active else
                        "no program loaded — open a program to inspect memory accesses")
             p.drawText(self.rect(), Qt.AlignCenter, message)
+            if self.hasFocus():
+                p.setPen(QColor("#1f6feb"))
+                p.drawRect(self.rect().adjusted(0, 0, -1, -1))
             p.end(); return
         ns = [a[0] for a in accs]; addrs = [a[2] for a in accs]
         n0, n1 = min(ns), max(ns); a0, a1 = min(addrs), max(addrs)
@@ -1120,9 +1141,26 @@ class AccessMap(QWidget):
             p.setPen(QColor("#f0f0f0"))
             p.drawLine(L, py, W - R, py); p.drawLine(px, T, px, T + ph)
             p.drawEllipse(px - 4, py - 4, 8, 8)
+        if self.hasFocus():
+            p.setPen(QColor("#1f6feb"))
+            p.drawRect(self.rect().adjusted(0, 0, -1, -1))
         p.end()
 
+    def _activate_index(self, index):
+        if not 0 <= index < len(self.accesses):
+            return
+        a = self.accesses[index]
+        self.sel_n = int(a[0])
+        self.update()
+        self.pointSelected.emit(int(a[0]))
+        physical = a[7] if len(a) > 7 else a[2]
+        if physical is not None:
+            self.accessClicked.emit(int(physical), int(a[4]))
+        else:
+            self.accessUnavailable.emit()
+
     def mousePressEvent(self, ev):
+        self.setFocus(Qt.MouseFocusReason)
         if not self._pts:
             return
         cx = ev.position().x() if hasattr(ev, "position") else ev.x()
@@ -1134,14 +1172,39 @@ class AccessMap(QWidget):
             if d < bd:
                 bd, best = d, i
         if best is not None and bd <= 18 * 18:
-            a = self.accesses[best]
-            self.sel_n = int(a[0])                             # stable identity
-            self.update()
-            self.pointSelected.emit(int(a[0]))                 # -> jump the trace
-            physical = a[7] if len(a) > 7 else a[2]
-            if physical is not None:
-                self.accessClicked.emit(
-                    int(physical), int(a[4]))                   # -> physical Memory bytes
+            self._activate_index(best)
+
+    def keyPressEvent(self, ev):
+        key = ev.key()
+        navigation = {
+            Qt.Key_Left: -1, Qt.Key_Up: -1,
+            Qt.Key_Right: 1, Qt.Key_Down: 1,
+            Qt.Key_PageUp: -10, Qt.Key_PageDown: 10,
+        }
+        if not self.accesses:
+            super().keyPressEvent(ev)
+            return
+        current = self._sel_idx()
+        if key == Qt.Key_Home:
+            target = 0
+        elif key == Qt.Key_End:
+            target = len(self.accesses) - 1
+        elif key in navigation:
+            if current is None:
+                target = 0 if navigation[key] > 0 else len(self.accesses) - 1
+            else:
+                target = max(
+                    0, min(len(self.accesses) - 1,
+                           current + navigation[key]))
+        elif key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self._activate_index(current if current is not None else 0)
+            ev.accept()
+            return
+        else:
+            super().keyPressEvent(ev)
+            return
+        self._activate_index(target)
+        ev.accept()
 
 
 class MemoryView(QWidget):

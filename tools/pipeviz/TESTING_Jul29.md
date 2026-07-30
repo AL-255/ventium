@@ -224,9 +224,11 @@ Procedure:
    unselected filter and require Trace to return to the newest retirement.
 3. Open Data$ and inspect residency plus replayed miss reporting.
 4. Open Memory and click `→access`.
-5. Open Mem map and click a midpoint in the plotted stride.
-6. Verify the point selects the matching trace retirement, pins Registers, and
-   pins the exact accessed bytes in Memory.
+5. Open Mem map; use Home/Right/End/Enter to traverse exact access identities,
+   then click a midpoint in the plotted stride.
+6. Verify keyboard and pointer selections choose the matching Trace retirement,
+   pin Registers, and pin the exact translated bytes in Memory. A synthetic
+   untranslated selection must clear any earlier physical-byte highlight.
 
 Observed evidence:
 

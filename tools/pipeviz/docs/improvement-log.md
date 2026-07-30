@@ -111,6 +111,14 @@ keeps every row visible, disables traversal, and exposes the exact correction
 in the red field/count tooltip; friendly leading-zero decimal values work.
 Free-text no-match behavior remains unchanged.
 
+**Mem-map keyboard audit:** the address/retirement scatter was a mouse-only
+drill-down even though Hotspots, Branches, Trace, and Pipeline all supported
+keyboard investigation. It now exposes a strong-focus outline and accessible
+name/description; arrows, Page Up/Page Down, Home, and End select exact access
+identities through the same Trace/Register/physical-Memory path as clicking,
+and Enter/Space reactivates the selection. Selecting an untranslated point also
+clears a prior physical-byte highlight instead of leaving stale evidence.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

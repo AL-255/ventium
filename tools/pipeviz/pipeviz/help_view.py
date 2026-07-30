@@ -248,9 +248,11 @@ I/O micro-operations.</p>
 memory operand are resolved through segmentation and legacy page tables. Mem
 map intentionally plots the effective offset used by the timing D-cache against
 retirement order: a diagonal is a stride, a horizontal band is a hot location,
-and a cloud is irregular access. Click a point to select its trace row, pin
-Registers, and highlight its translated physical bytes. Implicit stack and
-repeated-string traffic is not included in this client-side operand replay.</p>
+and a cloud is irregular access. Click a point or use arrows, Page Up/Page Down,
+Home, and End on the focused plot to select its trace row, pin Registers, and
+highlight its translated physical bytes; Enter/Space reopens the selection.
+Implicit stack and repeated-string traffic is not included in this client-side
+operand replay.</p>
 """),
     ("System and snapshots", """
 <h1>System mode and snapshots</h1>

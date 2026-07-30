@@ -182,7 +182,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   * **Mem map** — an **address-vs-retire-order scatter** of explicit memory
     operand effective offsets
     (a strided walk reads as a diagonal, a hot location as a band) with the dominant
-    stride; **click a point** to jump the trace + Registers + Memory tab to it.
+    stride; **click a point** or traverse with arrows/Page Up/Page Down/Home/End
+    to jump the trace + Registers + Memory tab to it.
 * **Trace panel** (bottom-left) — one row per retired instruction: `n`, retire
   cycle, **Δ** (stall gap), pipe (U/V), PC, raw **bytes** (coloured by x86 field:
   prefix gray / opcode blue / ModRM green / SIB purple / displacement gold /
@@ -275,8 +276,9 @@ Enter/F3 and Shift+Enter/Shift+F3 navigation, and an explicit match count.
 Mouse interactions: **click** a Konata cell or a trace row to pin the registers
 to that instruction and drop a cycle playhead (the trace ↔ pipeline selection is
 two-way); **shift-click** a second Konata row to measure the cycle Δ between two
-instructions; **click** a point in the **Mem map** to jump the trace + Memory tab
-to that load/store; **click** the IPC sparkline to seek the playhead. Click
+instructions; **click** a point in the **Mem map**, or focus it and use
+arrows/Page Up/Page Down/Home/End, to jump the trace + Memory tab to that
+load/store; **click** the IPC sparkline to seek the playhead. Click
 **Unpin** beside the amber register strip to return to LIVE without advancing;
 focus the Pipeline diagram and press Escape with an empty Trace filter for the
 keyboard equivalent. Stepping also unpins. All three routes clear the linked

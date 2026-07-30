@@ -1531,6 +1531,24 @@ def scenario_dcache_memory(app, outdir):
         win.tables.accmap.repaint()
         settle(app)
         assert len(win.tables.accmap._pts) == len(accesses)
+        assert win.tables.accmap.accessibleName() == "Memory access map"
+        assert "Left and Right" in win.tables.accmap.accessibleDescription()
+        win.tables.accmap.setFocus()
+        QTest.keyClick(win.tables.accmap, Qt.Key_Home)
+        settle(app)
+        assert win.tables.accmap.sel_n == accesses[0][0]
+        assert win._pinned_n == accesses[0][0]
+        QTest.keyClick(win.tables.accmap, Qt.Key_Right)
+        settle(app)
+        assert win.tables.accmap.sel_n == accesses[1][0]
+        assert win._pinned_n == accesses[1][0]
+        assert win.tables.mem._click_hl == (accesses[1][7], accesses[1][4])
+        QTest.keyClick(win.tables.accmap, Qt.Key_End)
+        settle(app)
+        assert win.tables.accmap.sel_n == accesses[-1][0]
+        QTest.keyClick(win.tables.accmap, Qt.Key_Return)
+        settle(app)
+        assert win._pinned_n == accesses[-1][0]
         px, py, idx = win.tables.accmap._pts[len(win.tables.accmap._pts) // 2]
         chosen = accesses[idx]
         click(app, win.tables.accmap, pos=QPoint(px, py))
@@ -1539,6 +1557,15 @@ def scenario_dcache_memory(app, outdir):
         assert win.tables.mem._click_hl == (chosen[7], chosen[4])
         assert int(win.trace.tbl.item(win.trace.tbl.currentRow(), 0).text()) == chosen[0]
         save_shot(app, win, outdir, "03_dcache_memmap_drilldown")
+        # An untranslated selection must clear, not retain, the prior physical
+        # Memory highlight. Exercise the signal path without mutating Trace.
+        untranslated = list(chosen)
+        untranslated[7] = None
+        win.tables.accmap.set_accesses([tuple(untranslated)])
+        win.tables.accmap._activate_index(0)
+        settle(app)
+        assert win.tables.mem._click_hl is None
+        win.tables.accmap.set_accesses(accesses)
         selected_cycle = win.backend.state().core_cyc
         click(app, win.regs.unpin_btn)
         settle(app)
