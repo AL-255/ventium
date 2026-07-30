@@ -1835,10 +1835,14 @@ class MainWindow(QMainWindow):
         prev = next((r for r in recs if r.n == n - 1), None)
         self._pinned_n = n
         self.regs.show_retire(rec, prev)
-        line = self._highlight_assembly_pc(
-            rec.pc, f"Retired instruction n={int(rec.n)}")
         lane = "U" if int(rec.pipe) == 0 else (
             "V" if int(rec.pipe) == 1 else "—")
+        source_context = (
+            f"Retired {lane}-lane instruction n={int(rec.n)}"
+            if lane in ("U", "V") else
+            f"Retired instruction n={int(rec.n)}")
+        line = self._highlight_assembly_pc(
+            rec.pc, source_context)
         source = f" · Assembly L{line}" if line is not None else ""
         self._notice(
             f"Pinned retirement n={int(rec.n)} · cycle {int(rec.cyc)} · "

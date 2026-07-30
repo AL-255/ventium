@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — preserve U/V identity in linked source
+
+**Cross-workspace context audit:** selecting a retirement correctly preserved
+its exact U/V row and highlighted the right Assembly line, but the Assembly
+status reduced both to the generic phrase “Retired instruction.” Once the user
+pressed Alt+A, the editor no longer said which half of a same-cycle pair had
+led there.
+
+**Changes:** retired source-link context now includes `U-lane` or `V-lane`
+before the retirement number. The existing tab line marker, PC, source line,
+pipeline selection, and register pin remain unchanged.
+
+**Verification:** the C authoring scenario no longer accepts the first mapped
+wrapper instruction as visual evidence. It finds a real V-pipe `add` inside
+the optimized dual-Fibonacci `main`, selects that exact Trace row, requires the
+same retirement ID to be pinned, checks the generated source line, and asserts
+the Assembly status says `Retired V-lane instruction`. Its screenshot now shows
+the loop addition, UV-pairable instruction preview, and V-lane context together.
+
 ## July 30 continuation — focused indexed authoring help
 
 **Help-density audit:** the index had one “Assembly and C workbenches” entry

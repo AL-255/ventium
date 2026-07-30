@@ -305,6 +305,8 @@ and PC links coherent.</p>
 stage cell, a Trace row, or a Pipeline timing row therefore marks the exact
 assembly line for that PC; the Assembly tab displays its line number without
 stealing focus from the Visualizer. Hovering a live cell exposes its lane and PC.
+The Assembly status retains U or V for a retired selection, so the source view
+does not discard which half of a same-cycle pair led there.
 Unsaved and linked state coexist as <b>Assembly * · L…</b>. Editing after a
 build invalidates that map until the next assembly, preventing stale links.
 Selecting a generated wrapper instruction with no editor line clears the prior

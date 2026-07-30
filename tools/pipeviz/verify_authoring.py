@@ -1933,13 +1933,24 @@ def scenario(app, outdir):
         dual_cycles = win.backend.state().core_cyc
         dual_stats = win.pipeline.stats()
         assert dual_stats["vret"] > 400
-        c_pc = next(
-            int(win.trace.tbl.item(r, 4).text(), 16)
+        wrapper_line = next(
+            number for number, text in enumerate(
+                win.assembly.editor.toPlainText().splitlines(), 1)
+            if text.strip() == "_start:")
+        c_row = next(
+            r
             for r in range(win.trace.tbl.rowCount())
-            if int(win.trace.tbl.item(r, 4).text(), 16) in c_result.source_map)
-        select_trace_pc(win, c_pc)
+            if win.trace.tbl.item(r, 3).text() == "V"
+            and win.trace.tbl.item(r, 6).text().lower().startswith("add ")
+            and int(win.trace.tbl.item(r, 4).text(), 16) in c_result.source_map
+            and c_result.source_map[
+                int(win.trace.tbl.item(r, 4).text(), 16)] < wrapper_line)
+        c_pc = int(win.trace.tbl.item(c_row, 4).text(), 16)
+        win.trace.tbl.setCurrentCell(c_row, 0)
         settle(app)
         assert win.assembly.editor._execution_line == c_result.source_map[c_pc]
+        assert "Retired V-lane instruction" in win.assembly.status.text()
+        assert win._pinned_n == int(win.trace.tbl.item(c_row, 0).text())
         win.workspace.setCurrentWidget(win.assembly)
         settle(app)
         save(win, outdir, "05_c_run_source_link")
