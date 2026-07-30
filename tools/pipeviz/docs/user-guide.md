@@ -275,6 +275,9 @@ For longer generated files, `Ctrl+F` opens an inline search with highlighted
 matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
 moves backward, and Escape closes it. Click a line number to select that whole
 source line and return typing focus to the editor.
+Search is a case-insensitive literal match. Navigation stays unavailable for an
+empty query or no matches; the live current/total result is announced to
+assistive technology and caps highlighting at 2,000 matches for responsiveness.
 
 The assembler emits a DWARF line table. After running, click any occupied live
 U/V/FP stage cell, authored Trace row, or Pipeline timing row: the Assembly tab

@@ -415,6 +415,20 @@ def scenario(app, outdir):
         assert win.assembly.find_bar.isVisible()
         assert win.assembly.find_bar.query.text().strip() == "mov eax, 0"
         win.assembly.find_bar.query.clear()
+        assert not win.assembly.find_bar.previous_btn.isEnabled()
+        assert not win.assembly.find_bar.next_btn.isEnabled()
+        assert win.assembly.find_bar.count.accessibleName() == (
+            "Source search match count")
+        assert win.assembly.find_bar.count.accessibleDescription() == (
+            "No active source search")
+        QTest.keyClicks(win.assembly.find_bar.query, "absent")
+        settle(app)
+        assert win.assembly.find_bar.count.text() == "No matches"
+        assert "'absent'" in (
+            win.assembly.find_bar.count.accessibleDescription())
+        assert not win.assembly.find_bar.previous_btn.isEnabled()
+        assert not win.assembly.find_bar.next_btn.isEnabled()
+        win.assembly.find_bar.query.clear()
         search_start = editor.textCursor()
         search_start.clearSelection()
         search_start.movePosition(QTextCursor.Start)
@@ -425,6 +439,10 @@ def scenario(app, outdir):
         assert win.assembly.find_bar.count.text() == "1 / 2", (
             win.assembly.find_bar.query.text(),
             win.assembly.find_bar.count.text())
+        assert win.assembly.find_bar.count.accessibleDescription() == (
+            "Match 1 of 2 for 'mov'")
+        assert win.assembly.find_bar.previous_btn.isEnabled()
+        assert win.assembly.find_bar.next_btn.isEnabled()
         assert editor.textCursor().selectedText().lower() == "mov"
         assert editor.textCursor().blockNumber() + 1 == 5
         QTest.keyClick(win.assembly.find_bar.query, Qt.Key_Return)

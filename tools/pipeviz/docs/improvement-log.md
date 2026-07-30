@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source-find state audit:** a newly opened/cleared Find bar left Previous and
+Next visually enabled despite having no query or target, and its live count was
+an unnamed visual-only label. Empty and no-match searches now lock navigation;
+the query documents case-insensitive literal semantics, its label is a keyboard
+buddy, and the named count announces query, current/total, truncation, or empty
+state. Authoring acceptance covers empty, absent, and two-match transitions.
+
 **Completion-discoverability audit:** the rich opcode popup exposed no visible
 interaction instructions, forcing first-time users to guess how to navigate or
 insert without taking editor focus. A compact footer now advertises arrow/Page

@@ -308,9 +308,13 @@ class SourceFindBar(QFrame):
         self.query = QLineEdit()
         self.query.setAccessibleName("Source search")
         self.query.setPlaceholderText("text in source")
+        self.query.setToolTip("Case-insensitive literal search in this source editor")
         self.query.setClearButtonEnabled(True)
+        label.setBuddy(self.query)
         row.addWidget(self.query, 1)
         self.count = QLabel("")
+        self.count.setAccessibleName("Source search match count")
+        self.count.setAccessibleDescription("No active source search")
         self.count.setFixedWidth(70)
         self.count.setAlignment(Qt.AlignCenter)
         self.count.setStyleSheet("border:0;color:#8b949e;")
@@ -344,6 +348,7 @@ class SourceFindBar(QFrame):
             lambda: self.find(-1))
         QShortcut(QKeySequence("Escape"), self.query).activated.connect(
             self.hide_find)
+        self._set_navigation(False)
         self.hide()
 
     def show_find(self):
@@ -369,13 +374,14 @@ class SourceFindBar(QFrame):
         total = self.editor.set_find_text(text)
         if not text:
             self.count.setText("")
+            self.count.setAccessibleDescription("No active source search")
             self._set_navigation(False)
             return
         self._set_navigation(total > 0)
         if total:
             self._set_count(*self.editor.find_text(1))
         else:
-            self.count.setText("No matches")
+            self._set_count(0, 0)
 
     def _set_navigation(self, enabled):
         self.previous_btn.setEnabled(enabled)
@@ -385,6 +391,17 @@ class SourceFindBar(QFrame):
         suffix = "+" if self.editor._find_truncated else ""
         self.count.setText(
             f"{index} / {total}{suffix}" if total else "No matches")
+        if not total:
+            description = (
+                f"No matches for {self.query.text()!r} in this source editor")
+        elif self.editor._find_truncated:
+            description = (
+                f"Match {index} of at least {total} for "
+                f"{self.query.text()!r}; result count capped at 2000")
+        else:
+            description = (
+                f"Match {index} of {total} for {self.query.text()!r}")
+        self.count.setAccessibleDescription(description)
 
     def find(self, direction):
         if not self.query.text():

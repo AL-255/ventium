@@ -204,8 +204,10 @@ preserves indentation or advances it after labels/braces. A closing C brace
 typed on a blank indented line dedents one level.</p>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
-backward, and Escape closes the search. Click a line number to select the whole
-source line and return typing focus to the editor.</p>
+backward, and Escape closes the search. It is a case-insensitive literal search;
+navigation disables for an empty/no-match query, and the live result is announced
+accessibly. Highlighting caps at 2,000 matches for responsiveness. Click a line
+number to select the whole source line and return typing focus to the editor.</p>
 <p>Ctrl+Space opens the Ventium/P54C opcode catalogue. Every entry includes its
 operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operations
