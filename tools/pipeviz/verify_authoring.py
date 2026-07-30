@@ -523,6 +523,21 @@ def scenario(app, outdir):
         assert win.assembly.find_bar.query.text() == "needle"
         assert win.assembly.editor.toPlainText() == source_before_find_edit
         win.assembly.find_bar.hide_find()
+        diagnostic_probe = "Assembly:7: operand mismatch"
+        win.assembly.diagnostics.failure(diagnostic_probe)
+        win.assembly.diagnostics.selectAll()
+        win.assembly.diagnostics.setFocus()
+        settle(app)
+        assert win.copy_source_action.isEnabled()
+        assert win.select_all_source_action.isEnabled()
+        assert not win.cut_source_action.isEnabled()
+        assert not win.paste_source_action.isEnabled()
+        QApplication.clipboard().clear()
+        win.copy_source_action.trigger()
+        assert QApplication.clipboard().text() == diagnostic_probe
+        assert win.assembly.editor.toPlainText() == source_before_find_edit
+        win.assembly.diagnostics.reset()
+        win.assembly.editor.setFocus()
         win.assembly.editor.moveCursor(QTextCursor.Start)
         win.assembly.editor.document().setModified(False)
         QTest.keyClick(win.assembly.editor, Qt.Key_C, Qt.AltModifier)

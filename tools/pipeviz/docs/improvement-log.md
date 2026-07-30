@@ -9,6 +9,21 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — Edit safely copies focused diagnostics
+
+**Read-only focus audit:** focus routing covered source and inline Find, but a
+selected build/compiler diagnostic still left Edit actions pointed at the
+underlying editor. Menu Copy could therefore copy a stale source selection, and
+generic selection state would have made Cut appear meaningful on read-only text.
+
+**Changes:** focused diagnostics are now an explicit Edit target. Copy and
+Select All follow the selected diagnostic text; Cut and Paste require a writable
+target and remain disabled. Source and Find routing are unchanged.
+
+**Verification:** acceptance selects a concrete Assembly diagnostic, requires
+Copy/Select All on and Cut/Paste off, copies its exact text through the menu,
+and proves the Assembly buffer is unchanged.
+
 ## July 30 continuation — Edit follows the focused source text control
 
 **Focus-routing audit:** direct clipboard keys were correctly consumed by the

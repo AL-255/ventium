@@ -207,7 +207,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     The workspace-aware **Edit** menu exposes Undo/Redo, Cut/Copy/Paste,
     Select All, Find, and Go to Line, follows whichever source workspace is
     active, follows the inline Find query while it has focus, and disables
-    completely in Visualizer.
+    completely in Visualizer. Focused read-only diagnostics support Copy and
+    Select All without enabling Cut/Paste.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses

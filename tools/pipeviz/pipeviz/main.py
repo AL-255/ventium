@@ -496,6 +496,10 @@ class MainWindow(QMainWindow):
                 lambda _available: self._sync_source_edit_actions())
             editor.copyAvailable.connect(
                 lambda _available: self._sync_source_edit_actions())
+        for diagnostics in (
+                self.assembly.diagnostics, self.c_source.diagnostics):
+            diagnostics.copyAvailable.connect(
+                lambda _available: self._sync_source_edit_actions())
         for query in (
                 self.assembly.find_bar.query, self.c_source.find_bar.query):
             query.selectionChanged.connect(self._sync_source_edit_actions)
@@ -1358,7 +1362,7 @@ class MainWindow(QMainWindow):
         if source is None:
             return None
         focus = QApplication.focusWidget()
-        if focus is source.find_bar.query:
+        if focus in (source.find_bar.query, source.diagnostics):
             return focus
         return source.editor
 
@@ -1380,7 +1384,8 @@ class MainWindow(QMainWindow):
         has_selection = enabled and (
             target.hasSelectedText() if line_edit
             else target.textCursor().hasSelection())
-        self.cut_source_action.setEnabled(has_selection)
+        self.cut_source_action.setEnabled(
+            has_selection and not target.isReadOnly())
         self.copy_source_action.setEnabled(has_selection)
         can_paste = (
             not target.isReadOnly()
