@@ -82,7 +82,8 @@ exact linked Assembly line. The Visualizer stays open and the Assembly tab gains
 <b>L…</b>; press Alt+A when you want to inspect or edit that line. A finished
 HLT remains an occupied, clickable cell so the stop location is explicit.
 <b>[paired]</b> means U/V issue now; <b>[blocked]</b> means a candidate pair is
-held by a current hazard.</p>
+held by a current hazard. A grey <code>stall · …</code> cell names that held
+instruction; it does not claim that the instruction caused the hazard.</p>
 <p>Click a row to place the cyan playhead, synchronize the Trace, pin Registers
 after that retirement, and draw producer-to-consumer edges. An amber thick edge
 marks a gating dependency such as a load-use stall. Shift-click another row to
@@ -123,7 +124,8 @@ Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
 program-opening role. Dropped <code>.s/.S/.asm</code> and
 <code>.c/.h</code> files open in their source workspace rather than being
 treated as raw executables. Each workspace remembers its last folder, and Enter
-preserves indentation or advances it after labels/braces.</p>
+preserves indentation or advances it after labels/braces. A closing C brace
+typed on a blank indented line dedents one level.</p>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
 backward, and Escape closes the search.</p>
@@ -176,7 +178,13 @@ labels a newest-cycle window after very large steps.</p>
 <h1>Caches and memory</h1>
 <p>Code$ and Data$ show set/way residency and occupancy. Data$ replays the
 observed access stream through the matching 2-way geometry to estimate misses.
-Hotspots attributes cycle cost and D-cache misses to PCs.</p>
+Hotspots attributes fetch-to-retire latency and D-cache misses to PCs. Its
+<b>Σ lat</b> column sums the latency of every dynamic instruction at that PC;
+because in-flight instructions overlap, this instruction-cycle total can exceed
+the retired-lifecycle span shown in the header. That span is printed against the
+full captured cycle window, exposing an in-flight tail. A held PC can be waiting
+on an older instruction, so use <b>D$ miss</b> to identify the memory PC
+producing replayed misses.</p>
 <p>Memory can follow EIP, ESP, or the latest access. Mem map plots address
 against retirement order: a diagonal is a stride, a horizontal band is a hot
 location, and a cloud is irregular access. Click a point to select its trace

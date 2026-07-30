@@ -47,7 +47,9 @@ PC, then click it to highlight that in-flight instruction's linked Assembly
 line. The Visualizer remains in place and the Assembly tab gains `L…`; use
 `Alt+A` to inspect the marked line. `[paired]` means U and V are issuing
 together now; `[blocked]` means a legal candidate is currently held by a
-hazard. Click a retired Trace row or timing cell to
+hazard, and the grey `stall · …` cell names the held instruction (not
+necessarily the older instruction or memory request causing the hazard).
+Click a retired Trace row or timing cell to
 additionally pin the registers to that retirement; use Shift-click on a second
 timing row to measure the cycle distance. `F1` lists all shortcuts.
 
@@ -103,7 +105,9 @@ GNU as semicolons separate statements, so completion and the instruction
 preview also follow a second opcode on the same source line. Statement scanning
 respects quoted data: a semicolon or `#`/`//` inside `.asciz "…"` is never
 mistaken for a separator or comment.
-Enter preserves the current indentation and advances one level after a label.
+Enter preserves the current indentation and advances one level after an
+assembly label or C opening brace. Typing a closing C brace on an otherwise
+blank indented line dedents one level first.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.
@@ -221,9 +225,11 @@ Step **120 clocks**.  In the status row, look for a high `pair%` and nonzero
 `mispred`.  The U/V rows in the timing view form a dense diagonal.  Select a
 `jne` row near the bottom: the dependency overlay highlights the EFLAGS
 producer, while same-PC highlighting makes repeated loop iterations obvious.
-Open **Branches** to compare the branch’s taken rate and BTB result with the
-mispredict event markers in the sparkline.  Shift-click two loop iterations to
-measure the steady-state iteration cost.
+Open **Branches** to compare the branch’s resolved taken rate and bias with the
+mispredict event markers in the sparkline. A branch at the capture tail has no
+next retired PC yet, so it remains a hit but is excluded from the taken-rate
+denominator. Shift-click two loop iterations to measure the steady-state
+iteration cost.
 
 This is the fastest way to distinguish a branch-limited loop from one that is
 simply not finding V-pipe pairings.
@@ -242,8 +248,16 @@ most recent load/store and see its bytes outlined in gold.  Finally, open
 **Mem map**: this workload’s stride appears as a diagonal scatter; click an
 outlier to jump directly to its trace row and pinned architectural state.
 
-Use **Hotspots** after this drill-down to identify the PCs that own the cost,
-rather than merely observing that the global IPC fell.
+Use **Hotspots** after this drill-down to identify where latency accumulates,
+rather than merely observing that the global IPC fell. **Σ lat** is the sum of
+fetch-to-retire latency for every dynamic instruction at that PC. A held
+instruction can be waiting on an older operation, so compare it with **D$
+miss**, which identifies the memory PC that generated replayed misses. In-flight
+instructions overlap, so the instruction-cycle sum can be larger than the
+retired-lifecycle span printed beside it; **share** compares PCs within that
+summed latency, not against wall time. The header also shows that retired span
+against the full captured cycle window, so an in-flight tail is explicit rather
+than silently attributed to the last retirement.
 
 ### 4. x87 throughput and architectural results
 

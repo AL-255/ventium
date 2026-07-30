@@ -788,6 +788,8 @@ def scenario(app, outdir):
         win.c_source.editor.setTextCursor(cursor)
         QTest.keyClick(win.c_source.editor, Qt.Key_Return)
         assert win.c_source.editor.toPlainText() == "int main(void)\n{\n    "
+        QTest.keyClicks(win.c_source.editor, "}")
+        assert win.c_source.editor.toPlainText() == "int main(void)\n{\n}"
         win.c_source.editor.document().setModified(False)
         win.c_source.new_template()
         win.c_source.editor.appendPlainText("/* unsaved */")

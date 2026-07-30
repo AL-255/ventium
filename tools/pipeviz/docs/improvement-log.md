@@ -88,6 +88,24 @@ compares the bridge enum before proving live U=`dec`/1 byte and V=`jne`/2 bytes.
 A stalled legal pair candidate now says `[blocked]`, reserving `[paired]` for an
 instruction pair that is actually issuing.
 
+**Analysis-semantics and theme audit:** the all-tabs gallery found that the
+hand-composed Prefetch page inherited Fusion's medium-grey canvas while every
+table/custom plot used the dark theme. It now owns an explicit palette Window
+brush, covered by an offscreen assertion. Blocked stage cells now retain the
+held mnemonic (`stall · dec ecx`) so their source-link has visible meaning,
+while Help warns that the held instruction need not be the hazard's cause.
+
+The same gallery exposed two accounting traps. Hotspots called overlapping
+fetch-to-retire sums “cycles total,” and its illustrative first F/D shadow could
+begin at cycle -1. Synthetic cells are now clamped to the actual capture start
+and suppressed whenever any real front-end phase exists. Hotspots labels
+`Σ lat`, separately reports retired-lifecycle coverage against captured cycles,
+and explains that an in-flight tail is not attributed yet. Branches previously
+treated a newest-row branch with no successor PC as not-taken; hits now remain
+visible, only resolved outcomes enter T%, and `T/res` makes the denominator
+explicit (the tight loop is correctly 104/104 = 100%). A final editor pass added
+one-level closing-brace dedent to complement its existing smart Enter behavior.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

@@ -197,6 +197,14 @@ def close_window(win):
 
 
 def scenario_startup(app, outdir):
+    # Synthetic fast-path shadows must stay inside the capture and must never
+    # duplicate a real front-end phase that occurs after an initial stall.
+    synthetic = pipeline_module._add_frontend(
+        [(12, "X", "#fff")], history_start=11)
+    assert [cell[:2] for cell in synthetic] == [(11, "D"), (12, "X")]
+    real_frontend = [(10, "=", "#aaa"), (11, "L", "#bbb"), (12, "X", "#fff")]
+    assert pipeline_module._add_frontend(real_frontend, 1) == real_frontend
+
     class CycleSample:
         def __init__(self, cyc):
             self.cyc = cyc
@@ -650,6 +658,9 @@ def scenario_branch_transport(app, outdir):
         assert (v_mnemonic, v_size, live.vd_len) == ("jne", 2, 2)
         assert not live.ud_is_branch and live.vd_is_branch
         assert win.pipeline.board._cells["V"][1].startswith("jne ")
+        lifecycles = win.pipeline.konata.plot.insns
+        assert min(item["c0"] for item in lifecycles) >= 1
+        assert max(item["c1"] for item in lifecycles) <= live.core_cyc
         stats = win.pipeline.waterfall.stats()
         assert stats["vret"] >= 80 and stats["mispred"] > 0
         assert "pair(win)" not in win.status_lbl.text()
@@ -664,6 +675,13 @@ def scenario_branch_transport(app, outdir):
         win.pipeline.konata._history_truncated = False
         win._refresh_status(win.backend.state())
         assert win.tables.br.rowCount() >= 1 and win.tables.mix.rowCount() >= 2
+        # The newest row is a JNE whose successor has not retired yet. It is a
+        # hit, not a fabricated not-taken outcome: resolved loop iterations are
+        # all taken and therefore remain 100%.
+        assert win.tables.br.item(0, 3).text() == "105"
+        assert win.tables.br.item(0, 4).text() == "104/104"
+        assert win.tables.br.item(0, 5).text() == "100"
+        assert "104/105 outcomes resolved" in win.tables.br_lbl.text()
         assert len(win.pipeline.konata.plot.insns) == win.trace.tbl.rowCount()
 
         # Reload validates preserved setup before touching the running session.
@@ -865,6 +883,8 @@ def scenario_dcache_memory(app, outdir):
         assert len(accesses) >= 10 and win.trace.last_access is not None
         assert "[blocked]" in win.pipeline.board._status
         assert "[paired]" not in win.pipeline.board._status
+        held = win.pipeline.board._cells["U"][1]
+        assert held.startswith("stall · ") and held != "stall · "
 
         stalls = set_filter(app, win.trace, "stall")
         assert stalls > 0
@@ -875,6 +895,12 @@ def scenario_dcache_memory(app, outdir):
         select_tab(app, win.tables.tabs, 1)
         assert win.tables.dc.rowCount() >= 10
         assert "miss" in win.tables.dc_lbl.text().lower()
+
+        select_tab(app, win.tables.tabs, 4)
+        assert "instruction-cycles" in win.tables.hot_lbl.text()
+        assert "retired span 154/160 captured cycles" in win.tables.hot_lbl.text()
+        assert "in-flight tail" in win.tables.hot_lbl.toolTip()
+        assert win.tables.hot.horizontalHeaderItem(2).text() == "Σ lat"
 
         select_tab(app, win.tables.tabs, 8)
         old_addr = win.tables.mem.addr
@@ -1007,7 +1033,7 @@ def scenario_elf_and_random_branches(app, outdir):
         select_tab(app, win.tables.tabs, 5)
         total_branch_hits = sum(int(win.tables.br.item(r, 3).text())
                                 for r in range(win.tables.br.rowCount()))
-        outcomes = {int(win.tables.br.item(r, 4).text())
+        outcomes = {int(win.tables.br.item(r, 4).text().split("/", 1)[0])
                     for r in range(win.tables.br.rowCount())}
         assert total_branch_hits >= 40 and outcomes == {0, 1}
         save_shot(app, win, outdir, "05_elf_random_branches")

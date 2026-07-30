@@ -90,7 +90,10 @@ class StageBoard(QWidget):
                     cells["V"] = ([3, 4], dis(s.eip + s.ud_len))
                     pcs["V"] = s.eip + s.ud_len
             else:
-                cells["U"] = ([3], "stall")
+                # Keep naming the held instruction while the pipe is blocked.  A
+                # bare "stall" cell stated the symptom but hid which source line
+                # owns it—the most useful fact for the cell's click-through.
+                cells["U"] = ([3], f"stall · {dis(s.eip)}")
                 pcs["U"] = s.eip
                 self._statecol = C_STG_STALL    # not exec-green
         elif name == "S_PF":
@@ -394,18 +397,27 @@ def _recolor_fp(cells, mnem):
     return [(cy, ch, C_FP if co == C_STG_EXEC else co) for (cy, ch, co) in cells]
 
 
-def _add_frontend(cells):
+def _add_frontend(cells, history_start=1):
     """The dual-issue fast path collapses fetch/decode/execute into one clock, so
     a fast-path op reconstructs as a single 'X' cell. The Ventium is still a P5
     5-stage pipeline, so synthesise the in-flight Fetch + Decode stages in the two
     cycles preceding the commit — this makes consecutive instructions cascade
     through F -> D -> X like a real superscalar pipeline diagram, instead of a
     lone X. Only added when the op has NO real front-end cells already (an
-    I-cache fill 'L' or slow-path F/D); a stall '=' or bare 'X' gets the shadow."""
-    if not cells or cells[0][1] in ("L", "F", "D", "M", "W"):
+    I-cache fill 'L' or slow-path F/D); a stall '=' or bare 'X' gets the shadow.
+    Clamp that illustrative shadow to the captured timeline: the first
+    instruction must never invent cycle -1/0 (or pre-snapshot history)."""
+    # Inspect the whole pending lifecycle, not only its first cell. A short
+    # pre-fill stall followed by real L/F/D work used to receive an additional
+    # synthetic F/D prefix, visually duplicating the front end.
+    if not cells or any(cell[1] in ("L", "F", "D", "M", "W") for cell in cells):
         return cells
     a0 = cells[0][0]
-    return [(a0 - 2, "F", C_STG_FETCH), (a0 - 1, "D", C_STG_DEC)] + cells
+    frontend = [
+        (a0 - 2, "F", C_STG_FETCH),
+        (a0 - 1, "D", C_STG_DEC),
+    ]
+    return [cell for cell in frontend if cell[0] >= history_start] + cells
 
 
 def _stage_cell(name, ret, stall, mispred):
@@ -608,7 +620,8 @@ class _KonataPlot(QWidget):
             if c.retU:
                 mn = self._mn(c.pcU)
                 reads, writes, rfl, wfl = self._regs(c.pcU)
-                cells = _add_frontend(_recolor_fp(self._pending, mn))
+                cells = _add_frontend(
+                    _recolor_fp(self._pending, mn), self.history_start)
                 self.insns.append(dict(n=c.nU, pc=c.pcU, pipe="U", mnem=mn,
                                        cells=cells, c0=cells[0][0], c1=c.cyc,
                                        reads=reads, writes=writes, rfl=rfl, wfl=wfl))
@@ -619,7 +632,8 @@ class _KonataPlot(QWidget):
                 mn = self._mn(c.pcV)
                 reads, writes, rfl, wfl = self._regs(c.pcV)
                 vcol = C_FP if (mn[:1] == "f" and mn[:2] not in ("fs", "gs")) else C_PIPE
-                cells = _add_frontend([(c.cyc, "X", vcol)])
+                cells = _add_frontend(
+                    [(c.cyc, "X", vcol)], self.history_start)
                 self.insns.append(dict(n=c.nV, pc=c.pcV, pipe="V", mnem=mn,
                                        cells=cells, c0=cells[0][0], c1=c.cyc,
                                        reads=reads, writes=writes, rfl=rfl, wfl=wfl))

@@ -100,8 +100,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     branch; amber+thick when it's the gating load-use that lifted a stall). It also
     **PC-group-highlights** every other execution of the same PC (loop iterations).
     **Shift-click** a second row for a **Δ-measure band** (latency between two
-    instructions). A red **"stuck"** banner overlays if the core wedges in a
-    front-end / halt state.
+    instructions). Occupied live U/V/FP cells also click through to the exact
+    linked Assembly line before retirement. A red **"stuck"** banner overlays
+    abnormal fetch/decode/F00F hangs; a program's intentional HLT gets a green
+    stopped banner and a source-linked terminal cell.
   * *IPC / stall sparkline* — a windowed IPC track (0/1/2 axis) with per-cycle
     event pixels (mispredict / stall / I-fill / page-walk) that doubles as a
     **clickable seek bar** for the playhead.
@@ -113,7 +115,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     preview for every completion. **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
     Pipeline row highlights the exact responsible assembly line. Source drops
-    route to this workspace, and labels/new blocks auto-indent.
+    route to this workspace; labels/new blocks auto-indent and a closing C brace
+    typed on a blank indented line dedents one level.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses
@@ -128,10 +131,13 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     `dcache_timing` geometry, so it names the cause of the load-stall bubbles).
   * **TLB** — valid split I/D entries (only populated under paging).
   * **Prefetch** — the `ibuf[16]` + the fast-path fetch window, with a live decode.
-  * **Hotspots** — a per-PC cycle-cost profile (perf/VTune-style; stalls inflate
-    cost so the slow PCs bubble up), with a **D$ miss** column attributing the
-    replayed misses to each load/store PC.
-  * **Branches** — a per-branch-PC BTB profile (type / target / hits / taken% / bias).
+  * **Hotspots** — a per-PC fetch-to-retire latency profile (perf/VTune-style;
+    stalls inflate **Σ lat** where instructions are held), with retired-lifecycle
+    coverage printed against the full captured window because overlapping and
+    still-in-flight instructions require separate accounting, and a **D$ miss**
+    column identifying the load/store PCs that generated replayed misses.
+  * **Branches** — a per-branch-PC observed-outcome profile
+    (type / target / hits / resolved taken% / bias).
   * **Instr mix** — an instruction-class histogram + the realised **U/V dual-issue**
     split.
   * **Cycles** — a **cycle-attribution** breakdown (every cycle classified by FSM

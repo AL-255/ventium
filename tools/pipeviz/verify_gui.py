@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QColor, QPalette
 from pipeviz.main import MainWindow, _apply_dark
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,6 +32,11 @@ out = sys.argv[4] if len(sys.argv) > 4 else "/tmp/pipeviz_shot.png"
 app = QApplication(sys.argv)
 _apply_dark(app)
 win = MainWindow()
+# The Prefetch page is a hand-composed QWidget (not a QTableWidget), so verify
+# that it supplies the same dark canvas on every Qt style/platform.  This caught
+# the medium-grey Fusion background visible in the full per-tab visual sweep.
+assert win.tables.pf.autoFillBackground()
+assert win.tables.pf.palette().color(QPalette.Window) == QColor("#0d1117")
 win.resize(1640, 980)
 win.entry_e.setText(f"0x{entry:08x}")
 win.load_e.setText(f"0x{entry:08x}")

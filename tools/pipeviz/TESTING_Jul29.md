@@ -488,10 +488,19 @@ The screenshot review found and corrected the following:
 14. Visual/smoke scripts resolved fixtures from the process working directory.
     They now use repository-relative paths and run from any directory.
 15. The live V cell decoded `std` from a branch displacement because RTL
-    `fpd_t` gained a low `is_fxch_free` bit while all C++ bridge offsets remained
-    one bit low. All decoded fields now match the 161-bit packed layout, the
-    regression derives every expected offset from RTL, and blocked pair
-    candidates are labeled `[blocked]` rather than falsely `[paired]`.
+   `fpd_t` gained a low `is_fxch_free` bit while all C++ bridge offsets remained
+   one bit low. All decoded fields now match the 161-bit packed layout, the
+   regression derives every expected offset from RTL, and blocked pair
+   candidates are labeled `[blocked]` rather than falsely `[paired]`.
+16. The complete per-tab gallery exposed a default-grey Prefetch canvas,
+    ambiguous bare `stall` cells, and analysis-accounting edge cases. Prefetch
+    now owns the dark Window palette; a blocked cell names its held instruction;
+    Hotspots separates summed instruction latency, retired-lifecycle coverage,
+    and the full captured window without inventing pre-capture F/D cycles; and
+    Branches excludes an unresolved capture-tail outcome from T% while showing
+    `taken/resolved` explicitly. The source editor also dedents a closing C
+    brace on an otherwise blank indented line. Offscreen assertions cover each
+    behavior, including the tight loop's 104/104 resolved taken outcomes.
 
 ## Coverage limits
 

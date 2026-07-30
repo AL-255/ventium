@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QLineEdit, QPushButton, QCheckBox,
                                QStyledItemDelegate, QStyle)
 from PySide6.QtGui import (QFont, QColor, QBrush, QPainter, QFontMetrics,
-                           QRegularExpressionValidator)
+                           QPalette, QRegularExpressionValidator)
 from PySide6.QtCore import Qt, QRect, Signal, QRegularExpression
 
 from .backend import DC_SETS, WAYS, LINE
@@ -430,26 +430,35 @@ class TablesView(QWidget):
 
         # --- Hotspots (per-PC cycle-cost profile, perf/VTune-style) ---
         self.hot_lbl = QLabel()
-        self.hot = _mk_table(["PC", "hits", "cycles", "cyc%", "D$ miss", "cost", "instruction"],
+        self.hot = _mk_table(["PC", "hits", "Σ lat", "share", "D$ miss", "cost", "instruction"],
                              [76, 50, 64, 50, 62, 120, 9999],
                              hint="no instructions retired yet — step the core")
+        self.hot.horizontalHeaderItem(2).setToolTip(
+            "Sum of each dynamic instruction's fetch-to-retire latency at this PC; "
+            "a held instruction may be waiting on an older operation")
+        self.hot.horizontalHeaderItem(3).setToolTip(
+            "Share of all summed instruction latency (overlapping instructions count separately)")
         # field-colour the instruction column to match the trace / Konata gutter
         self.hot.setItemDelegateForColumn(6, InsnCellDelegate(_mono(), self.hot))
         _right_align_headers(self.hot, (1, 2, 3, 4))  # hits/cycles/cyc%/D$miss match data
         _align_headers(self.hot, (5,), Qt.AlignLeft)  # 'cost' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
-        self.tabs.setTabToolTip(4, "Per-PC cycle cost and attributed D-cache misses")
+        self.tabs.setTabToolTip(
+            4, "Per-PC summed latency and attributed D-cache misses")
 
-        # --- Branches (per-branch-PC taken/not-taken profile) ---
+        # --- Branches (per-branch-PC observed taken/not-taken profile) ---
         self.br_lbl = QLabel()
-        self.br = _mk_table(["PC", "branch", "target", "hits", "taken", "T%", "bias"],
-                            [70, 64, 76, 46, 46, 46, 9999],
+        self.br = _mk_table(["PC", "branch", "target", "hits", "T/res", "T%", "bias"],
+                            [70, 64, 76, 46, 60, 46, 9999],
                             hint="no branches retired yet — step the core through a "
                                  "jump/call/loop")
-        _right_align_headers(self.br, (3, 4, 5))     # hits / taken / T% match the data
+        self.br.horizontalHeaderItem(4).setToolTip(
+            "Taken outcomes / resolved outcomes; capture-tail hits may be unresolved")
+        _right_align_headers(self.br, (3, 4, 5))     # hits / T-resolved / T% match data
         _align_headers(self.br, (6,), Qt.AlignLeft)   # 'bias' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
-        self.tabs.setTabToolTip(5, "Per-branch target, hit count, taken rate, and bias")
+        self.tabs.setTabToolTip(
+            5, "Per-branch target, hit count, resolved taken rate, and bias")
 
         # --- Instruction mix (class histogram + U/V issue-port split) ---
         self.mix_lbl = QLabel()
@@ -579,7 +588,9 @@ class TablesView(QWidget):
     def set_branches(self, insns):
         """Per-branch-PC profile: identify branch instructions and infer taken vs
         not-taken from whether the NEXT retired instruction landed on the parsed
-        branch target (direct) or fell through. Indirect/ret count as taken."""
+        branch target (direct) or fell through. Indirect/ret count as taken.
+        A branch at the capture tail has no next retired PC yet, so its hit is
+        visible but deliberately excluded from the outcome denominator."""
         agg = {}
         n = len(insns)
         for i, it in enumerate(insns):
@@ -589,7 +600,8 @@ class TablesView(QWidget):
                 continue
             e = agg.get(it["pc"])
             if e is None:
-                e = {"mn": mn.split(" ")[0], "tgt": "", "hits": 0, "taken": 0}
+                e = {"mn": mn.split(" ")[0], "tgt": "", "hits": 0,
+                     "resolved": 0, "taken": 0}
                 agg[it["pc"]] = e
             e["hits"] += 1
             m = re.search(r"0x([0-9a-fA-F]+)", mn)
@@ -597,21 +609,25 @@ class TablesView(QWidget):
             if tgt is not None:
                 e["tgt"] = f"{tgt:08x}"
             if i + 1 < n:
+                e["resolved"] += 1
                 nxt = insns[i + 1]["pc"]
                 taken = (nxt == tgt) if tgt is not None else (nxt != it["pc"])
                 if taken:
                     e["taken"] += 1
         ranked = sorted(agg.items(), key=lambda kv: -kv[1]["hits"])[:300]
-        self.br_lbl.setText(f"{len(agg)} branch site{'' if len(agg) == 1 else 's'} — taken "
-                            f"inferred from the next retired PC "
-                            f"(direct: == target; indirect/ret: transferred)")
+        hits = sum(e["hits"] for e in agg.values())
+        resolved = sum(e["resolved"] for e in agg.values())
+        self.br_lbl.setText(
+            f"{len(agg)} branch site{'' if len(agg) == 1 else 's'} · "
+            f"{resolved}/{hits} outcomes resolved from the next retired PC "
+            f"— an unresolved capture-tail branch is excluded from T%")
         rows = []
         for pc, e in ranked:
-            pct = (100.0 * e["taken"] / e["hits"]) if e["hits"] else 0.0
+            pct = (100.0 * e["taken"] / e["resolved"]) if e["resolved"] else 0.0
             nb = max(0, min(10, round(pct / 10)))
             bias = "T" * nb + "·" * (10 - nb)
             rows.append([f"{pc:08x}", e["mn"], e["tgt"] or "—", e["hits"],
-                         e["taken"], f"{pct:.0f}", bias])
+                         f"{e['taken']}/{e['resolved']}", f"{pct:.0f}", bias])
         _fill(self.br, rows, dim_cols=(0, 2, 3), right_cols=(3, 4, 5))
         for r in range(self.br.rowCount()):
             it = self.br.item(r, 6)
@@ -621,7 +637,7 @@ class TablesView(QWidget):
     def set_bits(self, bits):
         self._bits = bits
 
-    def set_hotspots(self, insns, accesses=()):
+    def set_hotspots(self, insns, accesses=(), captured_span=None):
         """Per-PC cycle-cost profile (perf-style): aggregate the reconstructed
         instruction lifecycles by PC -> hit count + total cycles occupied; the
         top consumers (often stalled loads/branches) bubble to the top. The
@@ -639,10 +655,21 @@ class TablesView(QWidget):
                 e[0] += 1; e[1] += span
         ranked = sorted(agg.items(), key=lambda kv: -kv[1][1])[:300]
         miss_by_pc = _dcache_per_pc(accesses) if accesses else {}
+        retired_span = (
+            max(it["c1"] for it in insns) - min(it["c0"] for it in insns) + 1
+            if insns else 0)
+        captured_span = max(0, int(captured_span or retired_span))
         self.hot_lbl.setText(
-            f"{len(agg)} distinct PC{'' if len(agg) == 1 else 's'}, {total} cycles total "
-            f"— top consumers first "
-            f"(cycles = total clocks each PC occupied; stalls inflate it)")
+            f"{len(agg)} distinct PC{'' if len(agg) == 1 else 's'} · "
+            f"Σ latency {total} instruction-cycles · retired span "
+            f"{retired_span}/{captured_span} captured cycles "
+            f"— overlap counts separately")
+        self.hot_lbl.setToolTip(
+            "Σ latency sums fetch-to-retire time for retired instructions. "
+            f"Their visible lifecycle span covers {retired_span} of "
+            f"{captured_span} captured cycles; an in-flight tail is not yet "
+            "attributed. Overlapping instructions count separately, and stalls "
+            "inflate their held latency.")
         rows = []
         maxc = ranked[0][1][1] if ranked else 1
         for pc, (hits, cyc, mnem) in ranked:
@@ -748,6 +775,15 @@ class _PrefetchView(QWidget):
     (flin / eip). Shows the raw bytes and a tentative decode."""
     def __init__(self, parent=None):
         super().__init__(parent)
+        # QTabWidget pages do not inherit the application's QPalette.Window brush
+        # reliably on every Qt platform/style.  An unpainted page consequently used
+        # the Fusion default medium grey while every custom Pipeviz canvas is nearly
+        # black.  Give this page an explicit, palette-aware canvas (rather than a
+        # descendant-wide stylesheet that would also flatten the byte-cell colours).
+        palette = self.palette()
+        palette.setColor(QPalette.Window, QColor("#0d1117"))
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
         v = QVBoxLayout(self); v.setContentsMargins(8, 8, 8, 8)
         self.info = QLabel(); self.info.setStyleSheet("color:#8b949e;")
         v.addWidget(self.info)

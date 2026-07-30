@@ -188,8 +188,27 @@ class CodeEditor(QPlainTextEdit):
         # Preserve indentation in both workbenches, and indent one level after
         # an assembly label or C block/case opener. QPlainTextEdit otherwise
         # drops back to column zero on every newline.
+        modifiers = event.modifiers()
+        if (event.text() == "}" and not (modifiers
+                                         & (Qt.ControlModifier | Qt.AltModifier
+                                            | Qt.MetaModifier))):
+            # Match the Enter-after-"{" behavior: when a closing C brace is
+            # typed on an otherwise blank indented line, remove exactly one
+            # indentation level first.  Never touch indentation before content
+            # or a selected range, so this remains safe in assembly/data text.
+            cursor = self.textCursor()
+            before = cursor.block().text()[:cursor.positionInBlock()]
+            if not cursor.hasSelection() and before and not before.strip():
+                trim = 1 if before.endswith("\t") else min(
+                    4, len(before) - len(before.rstrip(" ")))
+                if trim:
+                    cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor, trim)
+                    cursor.removeSelectedText()
+                    self.setTextCursor(cursor)
+            super().keyPressEvent(event)
+            return
         if (event.key() in (Qt.Key_Return, Qt.Key_Enter)
-                and not (event.modifiers()
+                and not (modifiers
                          & (Qt.ControlModifier | Qt.AltModifier
                             | Qt.MetaModifier))):
             cursor = self.textCursor()

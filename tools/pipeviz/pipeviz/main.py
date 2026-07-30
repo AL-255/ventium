@@ -1377,7 +1377,10 @@ class MainWindow(QMainWindow):
         self.trace.update_from(self.backend)   # FIRST: refreshes the access stream the
         #   Hotspots D$-miss column + Mem map + →access all read this same frame
         self.tables.update_from(self.backend, s)
-        self.tables.set_hotspots(self.pipeline.konata.plot.insns, self.trace.accesses)
+        captured_span = max(
+            0, int(s.core_cyc) - self.pipeline.konata.plot.history_start + 1)
+        self.tables.set_hotspots(
+            self.pipeline.konata.plot.insns, self.trace.accesses, captured_span)
         self.tables.set_branches(self.pipeline.konata.plot.insns)
         self.tables.set_instr_mix(self.pipeline.konata.plot.insns)
         self.tables.mem.set_state(self.backend, s, self.trace.last_access)
