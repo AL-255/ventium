@@ -45,6 +45,15 @@ Cycles recognizes new ENTER/HLT-wait/FP states, and the regression parses the
 complete default `state_e` and compares it to the live ABI before asserting zero
 false halts in the x87 workload.
 
+**In-flight source-link audit:** Trace/Konata navigation covered only completed
+retirements, while the actual live U/V/FP stage board was display-only. Occupied
+stage cells now expose a lane/PC hover affordance and click directly through the
+DWARF map without requiring a retirement record or leaving Visualizer. Slow-path
+cells use the latched `q_pc` rather than the next fetch EIP. The authoring
+regression advances through the first I-fill, clicks simultaneously occupied U
+and V cells, and requires two distinct exact source lines and the composed tab
+marker.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

@@ -716,6 +716,11 @@ class MainWindow(QMainWindow):
         # post-commit architectural state + drops a playhead at its cycle.
         self.trace.instSelected.connect(self._pin_to)
         self.pipeline.konata.plot.rowClicked.connect(self._pin_to)
+        # The stage board represents the instructions that are live *now*, before
+        # they necessarily have a retirement record. Link its occupied U/V/FP
+        # cells directly by PC so authored source navigation works in-flight too.
+        self.pipeline.board.instructionClicked.connect(
+            self._live_instruction_clicked)
         # drill-down: click a Hotspots / Branches PC row -> jump the trace to it
         self.tables.pcClicked.connect(self.trace.select_pc)
         # drill-down: click a Mem-map access point -> jump the trace to that retire n
@@ -1257,6 +1262,35 @@ class MainWindow(QMainWindow):
         return True
 
     # ---- register pinning (AS-OF a retired instruction) + playhead ----
+    def _highlight_assembly_pc(self, pc, context):
+        """Highlight one live/retired PC without requiring a retirement record."""
+        pc = int(pc)
+        line = self._assembly_source_map.get(pc)
+        if (line is not None
+                and self.assembly.highlight_pc(pc, line, context)):
+            self._assembly_link_line = line
+            self._update_assembly_tab()
+            self.workspace.setTabToolTip(
+                1, f"{context} at PC 0x{pc:08x} maps to assembly line {line}"
+                + (" · source has unsaved changes"
+                   if self.assembly.editor.document().isModified() else ""))
+            return line
+        # A generated wrapper/fall-through instruction has no editor line.
+        # Never leave the previously selected source line looking current.
+        self._clear_assembly_marker(pc)
+        return None
+
+    def _live_instruction_clicked(self, pc, lane):
+        context = f"In-flight {lane}-lane instruction"
+        line = self._highlight_assembly_pc(pc, context)
+        if line is None:
+            self._notice(
+                f"{context} at 0x{int(pc):08x} has no linked Assembly line")
+        else:
+            self._notice(
+                f"{context} at 0x{int(pc):08x} → Assembly line {line} "
+                "(Alt+A to inspect)")
+
     def _pin_to(self, n):
         recs = self.backend.get_retires(max(0, n - 1), 2)
         rec = next((r for r in recs if r.n == n), None)
@@ -1265,18 +1299,8 @@ class MainWindow(QMainWindow):
         prev = next((r for r in recs if r.n == n - 1), None)
         self._pinned_n = n
         self.regs.show_retire(rec, prev)
-        line = self._assembly_source_map.get(int(rec.pc))
-        if line is not None and self.assembly.highlight_pc(rec.pc, line):
-            self._assembly_link_line = line
-            self._update_assembly_tab()
-            self.workspace.setTabToolTip(
-                1, f"Selected PC 0x{int(rec.pc):08x} maps to assembly line {line}"
-                + (" · source has unsaved changes"
-                   if self.assembly.editor.document().isModified() else ""))
-        else:
-            # A generated wrapper/fall-through instruction has no editor line.
-            # Never leave the previously selected source line looking current.
-            self._clear_assembly_marker(rec.pc)
+        self._highlight_assembly_pc(
+            rec.pc, f"Retired instruction n={int(rec.n)}")
 
     def _unpin(self):
         if getattr(self, "_pinned_n", None) is not None:

@@ -1256,12 +1256,13 @@ class AssemblyView(QWidget):
             self.runRequested.emit(result.elf_path, dict(result.source_map))
         return result
 
-    def highlight_pc(self, pc, line):
+    def highlight_pc(self, pc, line, context="Selected instruction"):
         if not self.mapping_current:
             return False
         self.editor.mark_execution_line(
-            line, f"Retired instruction at PC 0x{int(pc):08x} · source line {line}")
-        self.status.setText(f"Selected PC 0x{int(pc):08x} · assembly line {line}")
+            line, f"{context} at PC 0x{int(pc):08x} · source line {line}")
+        self.status.setText(
+            f"{context} · PC 0x{int(pc):08x} · assembly line {line}")
         self.status.setStyleSheet("color:#7ce0e8;padding:2px;")
         return True
 

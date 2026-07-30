@@ -76,6 +76,10 @@ recognize.</p>
 dense diagonal means the front end is feeding the pipes. A long horizontal
 run of stall cells means one instruction held resources for several cycles.</p>
 <h2>Selections and dependencies</h2>
+<p>The compact stage board above the timeline is the live, pre-retirement view.
+Move over an occupied U, V, or FP cell to see its PC, then click it to mark the
+exact linked Assembly line. The Visualizer stays open and the Assembly tab gains
+<b>L…</b>; press Alt+A when you want to inspect or edit that line.</p>
 <p>Click a row to place the cyan playhead, synchronize the Trace, pin Registers
 after that retirement, and draw producer-to-consumer edges. An amber thick edge
 marks a gating dependency such as a load-use stall. Shift-click another row to
@@ -128,10 +132,11 @@ slot; elsewhere the full catalogue is safe, reference-only help. GNU as
 semicolons separate statements, and completion follows the opcode in each
 statement. Build errors highlight their source line.</p>
 <h2>Source-linked investigation</h2>
-<p>Assembly is built with a DWARF line table. Clicking a Trace or Pipeline row
-therefore marks the exact assembly line for that PC; the Assembly tab displays
-its line number without stealing focus from the Visualizer. Unsaved and linked
-state coexist as <b>Assembly * · L…</b>. Editing after a
+<p>Assembly is built with a DWARF line table. Clicking an occupied live U/V/FP
+stage cell, a Trace row, or a Pipeline timing row therefore marks the exact
+assembly line for that PC; the Assembly tab displays its line number without
+stealing focus from the Visualizer. Hovering a live cell exposes its lane and PC.
+Unsaved and linked state coexist as <b>Assembly * · L…</b>. Editing after a
 build invalidates that map until the next assembly, preventing stale links.
 Selecting a generated wrapper instruction with no editor line clears the prior
 marker rather than showing a stale association.</p>

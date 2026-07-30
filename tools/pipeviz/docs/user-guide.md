@@ -42,9 +42,12 @@ Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
 next retirement, and **Step N** for a useful analysis window.  `F5` runs and
 pauses. Choose an event class (any, mispredict, stall, I-fill, or page-walk);
 `[` and `]` jump among only those visible events.
-Click a trace row or timing cell to pin the registers to that retirement; use
-Shift-click on a second timing row to measure the cycle distance.  `F1` lists
-all shortcuts.
+The upper U/V/FP stage board is live: hover an occupied cell to see its lane and
+PC, then click it to highlight that in-flight instruction's linked Assembly
+line. The Visualizer remains in place and the Assembly tab gains `L…`; use
+`Alt+A` to inspect the marked line. Click a retired Trace row or timing cell to
+additionally pin the registers to that retirement; use Shift-click on a second
+timing row to measure the cycle distance. `F1` lists all shortcuts.
 
 The timing diagram itself is keyboard accessible: Up/Down selects adjacent
 retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture
@@ -115,12 +118,14 @@ For longer generated files, `Ctrl+F` opens an inline search with highlighted
 matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
 moves backward, and Escape closes it.
 
-The assembler emits a DWARF line table. After running, click any authored
-instruction in Trace or the Pipeline view: the Assembly tab becomes
-**Assembly · L…** and that exact source line is highlighted. U and V
-retirements sharing a cycle retain separate line identities. Editing the
-source invalidates the old map until it is assembled again, so a stale build
-cannot highlight the wrong line.
+The assembler emits a DWARF line table. After running, click any occupied live
+U/V/FP stage cell, authored Trace row, or Pipeline timing row: the Assembly tab
+becomes **Assembly · L…** and that exact source line is highlighted. Live U and
+V issue slots and U/V retirements sharing a cycle retain separate line
+identities. Live-cell navigation does not require the instruction to have
+retired, and it does not steal focus from the Visualizer. Editing the source
+invalidates the old map until it is assembled again, so a stale build cannot
+highlight the wrong line.
 When the current built source has not been saved, both states remain visible as
 **Assembly * · L…** rather than one label hiding the other.
 Instructions synthesized outside the editor, such as a bare snippet's
@@ -162,7 +167,7 @@ QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
 It verifies the 291-mnemonic catalogue against every current RTL decoder family,
 syntax highlighting, opcode-scoped completion and its description/pipeline
 preview, compact layout, transactional load failure, build errors, ELF/DWARF
-mapping, exact U/V source identity, a hand-written assembly result, and
+mapping, exact live and retired U/V source identity, a hand-written assembly result, and
 C → assembly → RTL execution. It also compiles an array loop without hidden
 library calls and runs floating-point C through generated x87 assembly on the
 RTL, verifying EAX = 3 and exact assembly-line navigation.

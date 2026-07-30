@@ -221,6 +221,8 @@ def scenario(app, outdir):
         assert win.assembly.editor.accessibleName() == "Assembly source editor"
         assert win.assembly.editor.completion.list.accessibleName()
         assert win.assembly.diagnostics.accessibleName()
+        assert win.pipeline.board.accessibleName() == "Live pipeline stage board"
+        assert "clicked" in win.pipeline.board.accessibleDescription()
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
 
         editor = win.assembly.editor
@@ -471,6 +473,45 @@ def scenario(app, outdir):
         assert win._assembly_source_map == result.source_map
         assert win.assembly.mapping_current
         assert win.workspace.tabText(1) == "Assembly *"
+
+        # The live stage board is the actual in-flight view, not merely retired
+        # history. Advance through the first I-fill so both current U/V issue
+        # slots are visible, then click each occupied lane and require its exact
+        # authored PC/line without relying on a retirement record.
+        board = win.pipeline.board
+        assert not board._lane_rects  # reset itself is not an in-flight instruction
+        win.do_step(1, False)
+        assert not board._lane_rects  # hit targets wait for the matching paint frame
+        settle(app)
+        assert board._lane_rects, (
+            board.isVisible(), board.size(), board._cells, board._lane_pcs)
+        win.do_step(1, False)
+        assert not board._lane_rects  # never retain a previous frame's PC hit target
+        settle(app)
+        win.do_step(7, False)
+        settle(app)
+        assert set(board._lane_pcs) >= {"U", "V"}
+        assert board._lane_pcs["U"] in result.source_map
+        assert board._lane_pcs["V"] in result.source_map
+        live_lines = {}
+        for lane in ("U", "V"):
+            rect = next(
+                rect for rect, cell_lane, _pc in board._lane_rects
+                if cell_lane == lane)
+            QTest.mouseMove(board, rect.center())
+            settle(app)
+            assert "in-flight instruction" in board.toolTip()
+            QTest.mouseClick(board, Qt.LeftButton, Qt.NoModifier, rect.center())
+            settle(app)
+            line = result.source_map[board._lane_pcs[lane]]
+            live_lines[lane] = line
+            assert editor._execution_line == line
+            assert f"In-flight {lane}-lane" in editor._execution_tip
+            assert win.workspace.tabText(1) == f"Assembly * · L{line}"
+            assert f"Assembly line {line}" in win.action_hint.text()
+        assert live_lines["U"] != live_lines["V"]
+        save(win, outdir, "02a_live_uv_source_link")
+
         win.on_run_toggle()
         assert win._running and win.timer.isActive()
         close_event = QCloseEvent()
@@ -784,6 +825,10 @@ def scenario(app, outdir):
               "assembly result=55, C Fibonacci result=144, "
               "C x87 result=3, exact PC↔source links")
     finally:
+        # Teardown must never mask an earlier assertion behind a modal unsaved
+        # source prompt. Save/Discard/Cancel is exercised explicitly above.
+        win.assembly.editor.document().setModified(False)
+        win.c_source.editor.document().setModified(False)
         win.close()
         settle(app)
 

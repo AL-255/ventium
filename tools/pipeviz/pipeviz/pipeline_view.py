@@ -45,11 +45,19 @@ def _mono(pt=9, bold=False):
 # Live stage board
 # ===========================================================================
 class StageBoard(QWidget):
+    instructionClicked = Signal(int, str)  # live PC, U/V/FP lane
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(100)   # tightened so the starved Konata view gets the rows
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMouseTracking(True)
+        self.setAccessibleName("Live pipeline stage board")
+        self.setAccessibleDescription(
+            "Occupied U, V, and FP cells can be clicked to locate authored assembly")
         self._cells = self._blank()
+        self._lane_pcs = {}
+        self._lane_rects = []
         self._status = "no image loaded"
         self._statecol = _DIM
 
@@ -61,6 +69,7 @@ class StageBoard(QWidget):
         lane, stage, color, desc = disasm.stage_of(name)
         self._statecol = color
         cells = self._blank()
+        pcs = {}
 
         base = s.cs_base
 
@@ -73,36 +82,55 @@ class StageBoard(QWidget):
         if name == "S_PIPE":
             if s.ud_is_fp:
                 cells["FP"] = ([0, 1, 3], dis(s.eip))
+                pcs["FP"] = s.eip
             elif issuing:
                 cells["U"] = ([3, 4], dis(s.eip))
+                pcs["U"] = s.eip
                 if s.pipe_pair:
                     cells["V"] = ([3, 4], dis(s.eip + s.ud_len))
+                    pcs["V"] = s.eip + s.ud_len
             else:
                 cells["U"] = ([3], "stall")
+                pcs["U"] = s.eip
                 self._statecol = C_STG_STALL    # not exec-green
         elif name == "S_PF":
             cells["U"] = ([0], f"I-fill {s.pf_word}/8")
+            pcs["U"] = s.eip
         elif name == "S_FETCH":
             cells["U"] = ([0], dis(s.eip))
+            pcs["U"] = s.eip
         elif name == "S_DECODE":
             cells["U"] = ([1, 2], dis(s.eip))
+            pcs["U"] = s.eip
         elif name in ("S_LOAD", "S_LOAD2"):
-            cells["U"] = ([3], "load " + dis(s.eip))
+            cells["U"] = ([3], "load " + dis(s.q_pc))
+            pcs["U"] = s.q_pc
         elif name == "S_EXEC":
-            cells["U"] = ([3], dis(s.eip))
+            cells["U"] = ([3], dis(s.q_pc))
+            pcs["U"] = s.q_pc
         elif name in ("S_STORE", "S_USEQ", "S_IO", "S_INS"):
-            cells["U"] = ([4], dis(s.eip))
+            cells["U"] = ([4], dis(s.q_pc))
+            pcs["U"] = s.q_pc
         elif name == "S_FLOAD":
             cells["FP"] = ([0], "fp load")
+            pcs["FP"] = s.q_pc
         elif name == "S_FEXEC":
-            cells["FP"] = ([0, 1], dis(s.eip))
+            cells["FP"] = ([0, 1], dis(s.q_pc))
+            pcs["FP"] = s.q_pc
         elif name in ("S_FSTORE", "S_FENV_ST", "S_FENV_LD"):
             cells["FP"] = ([3], "fp store")
+            pcs["FP"] = s.q_pc
 
         if s.fp_occ_pending and not cells["FP"][0]:
             cells["FP"] = ([0, 1, 3], "occ (busy)")
+            pcs["FP"] = s.eip
 
         self._cells = cells
+        self._lane_pcs = pcs
+        # Hit rectangles embed the PC from the frame that painted them. Invalidate
+        # them immediately so a click delivered between a timer update and the
+        # queued repaint can never navigate to the previous instruction.
+        self._lane_rects = []
         haz = []
         if s.stall_cnt: haz.append(f"stall={s.stall_cnt}")
         if s.mispred_bubbles: haz.append(f"mispredict-bubble={s.mispred_bubbles}")
@@ -115,7 +143,13 @@ class StageBoard(QWidget):
         self.update()
 
     def reset(self):
-        self._cells = self._blank(); self._status = "reset"; self._statecol = _DIM
+        self._cells = self._blank()
+        self._lane_pcs = {}
+        self._lane_rects = []
+        self._status = "reset"
+        self._statecol = _DIM
+        self.unsetCursor()
+        self.setToolTip("")
         self.update()
 
     def paintEvent(self, ev):
@@ -171,6 +205,7 @@ class StageBoard(QWidget):
         lanes = [("U", "U", INT_STAGES, lane_label_w, icw, False),
                  ("V", "V", INT_STAGES, lane_label_w, icw, False),
                  ("FP", "FP", FP_STAGES, fp_x0, fcw, fp_idle)]
+        self._lane_rects = []
         for r, (key, label, stages, x0, cw, idle) in enumerate(lanes):
             y = top + r * lane_h
             # lane label: as bright as U/V even when idle (was a near-invisible grey),
@@ -195,6 +230,9 @@ class StageBoard(QWidget):
                 if i in lit_idxs:
                     p.fillRect(cell, QColor(self._statecol))
                     p.setPen(QColor(self._statecol).lighter(130)); p.drawRect(cell)
+                    if key in self._lane_pcs:
+                        self._lane_rects.append(
+                            (QRect(cell), key, int(self._lane_pcs[key])))
                 else:
                     # de-emphasise empty cells: faint fill, no hard border, so the
                     # single active stage is what the eye lands on.
@@ -224,6 +262,41 @@ class StageBoard(QWidget):
         p.setFont(_mono(9)); p.setPen(QColor(_TXT))
         p.drawText(QRect(4, top + 3 * lane_h + 2, W - 8, 14), Qt.AlignLeft, self._status)
         p.end()
+
+    def _lane_at(self, point):
+        return next(
+            ((lane, pc) for rect, lane, pc in self._lane_rects
+             if rect.contains(point)),
+            None)
+
+    def mouseMoveEvent(self, event):
+        point = event.position().toPoint()
+        hit = self._lane_at(point)
+        if hit is None:
+            self.unsetCursor()
+            self.setToolTip("")
+        else:
+            lane, pc = hit
+            self.setCursor(Qt.PointingHandCursor)
+            self.setToolTip(
+                f"{lane} in-flight instruction · PC 0x{pc:08x}\n"
+                "Click to highlight its line in linked Assembly source")
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self.unsetCursor()
+        self.setToolTip("")
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            hit = self._lane_at(event.position().toPoint())
+            if hit is not None:
+                lane, pc = hit
+                self.instructionClicked.emit(pc, lane)
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
 
 # ===========================================================================

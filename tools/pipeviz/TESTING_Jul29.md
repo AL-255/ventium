@@ -384,9 +384,12 @@ Procedure:
 5. Assemble+run the default sum loop and require EAX = 55 on the real RTL.
    Keep the source unsaved and require `Assembly *` to survive loading/running.
    Cancel a Quit while free-running and require the timer/run state to resume.
-6. Select authored Trace and Konata rows; require exact PC→assembly-line
-   highlighting, including distinct U/V rows retiring on one cycle, while the
-   composed `Assembly * · L…` label retains both states.
+6. After the initial I-fill, hover and click the live occupied U and V stage
+   cells; require distinct pre-retirement PCs to mark their exact Assembly
+   lines while Visualizer keeps focus. Then select authored Trace and Konata
+   rows and require exact retired PC→line highlighting, including distinct U/V
+   rows retiring on one cycle. In every path the composed
+   `Assembly * · L…` label retains both states.
 7. Reject a candidate replacement load and require the prior live backend,
    program bytes, source map, marker, and tab label to remain coherent. Then edit
    after build and require the map to become stale rather than use obsolete PCs.
@@ -417,7 +420,8 @@ reach HLT with the expected result.
 Captures: `00_assembly_workbench.png`, `00a_assembly_compact.png`,
 `00b_assembly_find.png`,
 `01_opcode_completion_popup.png`,
-`02_assembly_source_link.png`, `03_c_workbench.png`,
+`02_assembly_source_link.png`, `02a_live_uv_source_link.png`,
+`03_c_workbench.png`,
 `04_c_generated_assembly.png`, `05_c_run_source_link.png`,
 `06_c_x87_source_link.png`.
 
