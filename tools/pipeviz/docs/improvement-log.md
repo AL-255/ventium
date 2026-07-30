@@ -16,7 +16,8 @@ click-only in the IPC/event history. A left drag now emits each newly crossed
 captured cycle, continuously moves the Konata playhead, and deliberately leaves
 the exact U/V retirement, Trace row, Registers, dependencies, and Assembly link
 unchanged. Release ends scrubbing; reset cancels it. Accessibility now says
-input-neutral “cycle selected” and documents pointer plus keyboard routes.
+input-neutral “cycle selected” and documents pointer plus keyboard routes. The
+active plot uses a horizontal-scrub cursor rather than a click-only hand.
 
 **Cache map↔table hover audit:** the historical high-value list's only genuine
 remainder was two-way occupancy-map/table inspection. Hover now resolves every

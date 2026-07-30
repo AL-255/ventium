@@ -1815,7 +1815,7 @@ class SparklineStrip(QWidget):
             self._sync_accessible_description()
             self.cycleClicked.emit(int(cyc))
         if cyc is not None:
-            self.setCursor(Qt.PointingHandCursor)
+            self.setCursor(Qt.SizeHorCursor)
             i = len(self.ev) - 1 - (self._last_cyc - cyc)
             ev_name = {"m": "mispredict", "s": "stall", "f": "I-fill", "w": "page-walk"}.get(self.ev[i], "")
             self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired"

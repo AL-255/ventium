@@ -1603,7 +1603,7 @@ def scenario_branch_transport(app, outdir):
             QPoint(spark._LABELW - 1, 8))
         assert plot.playhead == before_label_click
         QTest.mouseMove(spark, QPoint(spark._LABELW + 2, 8))
-        assert spark.cursor().shape() == Qt.PointingHandCursor
+        assert spark.cursor().shape() == Qt.SizeHorCursor
         assert spark.next_event(first_cyc - 1, -1) is None
         assert spark.next_event(spark._last_cyc + 1, 1) is None
         spark.setFocus()
