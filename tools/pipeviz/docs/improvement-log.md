@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Completion-style audit:** opcode matching accepted uppercase input but always
+inserted the catalogue's lowercase mnemonic, creating mixed-style source one
+completion at a time. Acceptance now derives casing from the entire token being
+replaced—also when the cursor is in its middle—and preserves uppercase,
+capitalized, or lowercase conventions. Authoring acceptance locks `AD` → `ADD`
+and middle-of-token `Mov` replacement without weakening case-insensitive search.
+
 **Compact status-priority audit:** a long pin/seek message squeezed the status
 row from the right, and EIP was the last group, so the current PC disappeared
 first at 1280px. Cycle/state/EIP now precede performance and cache groups. Both

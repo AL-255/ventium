@@ -792,6 +792,15 @@ class CompletionPopup(QFrame):
         self.hide()
 
 
+def _match_completion_case(mnemonic, sample):
+    """Apply the casing convention of a partially typed opcode."""
+    if sample.isupper():
+        return mnemonic.upper()
+    if len(sample) > 1 and sample[0].isupper() and sample[1:].islower():
+        return mnemonic.capitalize()
+    return mnemonic
+
+
 class AssemblyEditor(CodeEditor):
     completionNotice = Signal(str)
 
@@ -802,6 +811,7 @@ class AssemblyEditor(CodeEditor):
         self.completion.accepted.connect(self._insert_completion)
         self._completion_span = None
         self._completion_insertable = True
+        self._completion_case_sample = ""
 
     def _word_prefix(self):
         cursor = self.textCursor()
@@ -839,14 +849,17 @@ class AssemblyEditor(CodeEditor):
             prefix = ""
             self._completion_span = None
             self._completion_insertable = False
+            self._completion_case_sample = ""
         else:
             suffix = re.match(
                 r"\w*", cursor.block().text()[cursor.positionInBlock():])
-            suffix_len = len(suffix.group(0)) if suffix else 0
+            suffix_text = suffix.group(0) if suffix else ""
+            suffix_len = len(suffix_text)
             self._completion_span = (
                 cursor.position() - len(prefix),
                 cursor.position() + suffix_len)
             self._completion_insertable = True
+            self._completion_case_sample = prefix + suffix_text
         self.completion.show_for(prefix)
         return self.completion.isVisible()
 
@@ -856,6 +869,8 @@ class AssemblyEditor(CodeEditor):
             self.completionNotice.emit(
                 "Completion is reference-only here — move the cursor to an opcode position")
             return
+        mnemonic = _match_completion_case(
+            mnemonic, self._completion_case_sample)
         if self._completion_span is None:
             cursor = self.textCursor()
             cursor.select(QTextCursor.WordUnderCursor)
@@ -869,6 +884,7 @@ class AssemblyEditor(CodeEditor):
             cursor.insertText(" ")
         self.setTextCursor(cursor)
         self._completion_span = None
+        self._completion_case_sample = ""
 
     def keyPressEvent(self, event):
         if self.completion.isVisible():

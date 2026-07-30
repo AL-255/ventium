@@ -556,6 +556,29 @@ def scenario(app, outdir):
         settle(app)
         assert win.assembly.info.signature.text().startswith("add ")
 
+        # Completion follows the source's mnemonic casing convention and uses
+        # the entire replaced token even when the cursor sits in its middle.
+        editor.setPlainText("AD")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        editor.completion.move_selection(1)  # adc, add
+        editor.completion.accept_current()
+        assert editor.toPlainText() == "ADD "
+
+        editor.setPlainText("Mov")
+        cursor = editor.textCursor()
+        cursor.setPosition(2)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        mov_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic == "mov")
+        editor.completion.list.setCurrentRow(mov_row)
+        editor.completion.accept_current()
+        assert editor.toPlainText() == "Mov "
+
         # Statement scanning is lexical, not a raw split/search: comment markers
         # and semicolons inside data strings neither trigger nor suppress opcode
         # completion in the real statement that follows.

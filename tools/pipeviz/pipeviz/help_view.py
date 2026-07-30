@@ -212,8 +212,10 @@ and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operatio
 say so explicitly. Completion inserts only when the cursor is in an opcode
 slot; elsewhere the full catalogue is safe, reference-only help. GNU as
 semicolons separate statements, and completion follows the opcode in each
-statement while ignoring separators/comment markers inside quoted data. Build
-errors, including fatal compiler errors, highlight their source line. Editing
+statement while ignoring separators/comment markers inside quoted data.
+Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
+style, including when completion replaces text on both sides of the cursor.
+Build errors, including fatal compiler errors, highlight their source line. Editing
 the source clears diagnostics from the old revision instead of leaving a stale
 green or red result visible. Ctrl+Shift+R is intentionally Visualizer-only:
 it reloads an already-built program rather than rebuilding editor text. Use

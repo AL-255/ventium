@@ -232,6 +232,9 @@ description, mode/build availability, approximate latency, pairing class
 (`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
 At a directive, comment, or operand it remains a reference-only catalogue, so
 accepting an entry cannot corrupt non-opcode text.
+Accepted mnemonics preserve the token's existing convention: `AD` completes as
+`ADD`, `Ad` as `Add`, and lowercase source remains lowercase. This also works
+when completion replaces the remainder of a token after the cursor.
 `Ctrl+Shift+R` is disabled in Assembly/C because it re-reads an already-built
 program rather than compiling current editor text. Use **Assemble + Run** (or
 **Compile → Assembly**, then run) so edits and PC links stay coherent.
