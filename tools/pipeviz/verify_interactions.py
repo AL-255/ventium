@@ -1163,6 +1163,8 @@ def scenario_startup(app, outdir):
         assert "Ctrl+-" in pipeline_guide
         assert "Tab to the board" in pipeline_guide
         assert "Page Up/Page Down for 64 cycles" in pipeline_guide
+        assert "captured match count" in pipeline_guide
+        assert "enabled only when" in pipeline_guide
         assert "left-drag across the strip" in pipeline_guide
         assert "2,451 clocks" in pipeline_guide
         assert "1,984 clocks" in pipeline_guide
@@ -1220,6 +1222,8 @@ def scenario_startup(app, outdir):
         assert "Ctrl+G" in guide_text
         assert "close a live completion popup" in guide_text
         assert "source badge" in guide_text
+        assert "middle ellipsis" in guide_text
+        assert "right ellipsis" in guide_text
         assert "press Enter, or double-click it" in guide_text
         authoring_shot = os.path.join(
             outdir, "00_help_authoring_guide.png")

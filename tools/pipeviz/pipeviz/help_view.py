@@ -169,7 +169,11 @@ current bridge records x87 on every retirement. A partial or legacy record
 without that snapshot shows explicit <code>x87 n/a</code> rows instead of stale
 values.</p>
 <p>The event selector beside ◀/▶ narrows <code>[</code>/<code>]</code>
-navigation to any event, mispredicts, stalls, I-cache fills, or page walks.
+navigation to any event, mispredicts, stalls, I-cache fills, or page walks. Its
+label includes the captured match count. An arrow is enabled only when a
+matching event is reachable in that direction; an empty class or capture edge
+is explained by the selector/action text and tooltip rather than moving the
+playhead.
 The IPC/event strip is also a captured-history navigator: Tab to its blue
 outline, use Left/Right for one cycle, Page Up/Page Down for 64 cycles, or
 Home/End for the captured edges, then Enter to reopen the selected cycle.
@@ -255,12 +259,13 @@ and C line/block comments are ignored.</p>
 <p>Click a line number to select that complete source line, then drag or
 Shift-click another number to extend a whole-line range for Tab/Shift+Tab
 indentation and Ctrl+/ comment toggling.</p>
-<p>The source badge may elide a long filename visually; its tooltip and
-accessible description retain the complete saved path or generated/template
-origin plus not-saved and unsaved-change state.</p>
-<p>The adjacent Assembly/C status preserves its full build, stale-map, or
-PC/line message in both a tooltip and accessible description if the compact
-label is clipped. A persistent one-based <b>Ln · Col</b> readout beside it
+<p>The source badge uses a middle ellipsis for a long filename while retaining
+the trailing dirty/not-saved state; its tooltip and accessible description
+retain the complete saved path or generated/template origin.</p>
+<p>The adjacent Assembly/C status uses a right ellipsis for a long build,
+stale-map, PC/line, or filename message and preserves the full value in both a
+tooltip and accessible description. A persistent one-based <b>Ln · Col</b>
+readout beside it
 tracks the active source caret independently of transient build messages; an
 <b>nL</b> suffix confirms how many lines a selection spans. Click that readout
 or press Ctrl+G to enter a validated line number and return focus to the

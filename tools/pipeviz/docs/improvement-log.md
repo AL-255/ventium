@@ -9,6 +9,22 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — indexed Help matches current interactions
+
+**Guide-consistency audit:** the indexed Pipeline page still described event
+classes without their captured counts or direction-aware arrows. Authoring Help
+likewise described generic clipping instead of the new deliberate ellipsis
+behavior.
+
+**Changes:** Pipeline Help now explains match counts, reachable-direction
+enablement, empty classes, and capture edges. Authoring Help distinguishes
+middle-elided source identity from right-elided status and names which
+trailing/full state remains available.
+
+**Verification:** startup interaction acceptance reads the rendered indexed
+pages, checks the new event and ellipsis explanations, and retains the existing
+screenshots of both Help topics.
+
 ## July 30 continuation — completion stays inside the workbench
 
 **Popup-edge audit:** completion correctly stayed on the monitor, but ignored
