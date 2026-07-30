@@ -2379,7 +2379,7 @@ def scenario_layout(app, outdir):
             f"compact instruction column is only "
             f"{win.trace.tbl.columnWidth(6)}px")
         assert win.tables.width() >= 570
-        assert win.status_lbl.width() >= 900 and "IPC" in win.status_lbl.text()
+        assert win.status_lbl.width() >= 1000 and "IPC" in win.status_lbl.text()
         status_text = win.status_lbl.text()
         assert status_text.index("eip") < status_text.index("ret")
         assert "EIP 0x" in win.status_lbl.toolTip()
@@ -2388,6 +2388,7 @@ def scenario_layout(app, outdir):
         assert win.status_lbl.accessibleDescription() == win.status_lbl.toolTip()
         assert win.action_hint.accessibleName() == "Last action"
         assert win.action_hint.toolTip() == win.action_hint.text()
+        assert win.action_hint.width() <= 260
         assert win.trace.tbl.verticalHeader().defaultSectionSize() == 22
 
         # Pin state must remain unmistakable on every compact register page.
@@ -2425,6 +2426,9 @@ def scenario_layout(app, outdir):
                    for _tag, hexv, _value in win.regs.st_lbls)
         assert win._assembly_source_map == pinned_map
         assert "linked selection cleared" in win.action_hint.text()
+        assert win.action_hint.displayText().endswith("…")
+        assert win.action_hint.displayText() != win.action_hint.text()
+        assert win.action_hint.toolTip() == win.action_hint.text()
         save_shot(app, win, outdir, "08_compact_layout")
         print(f"OK layout: true minimum=900x620, supported compact="
               f"{win.width()}x{win.height()}, responsive trace/register "

@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QToolBar, QLa
                                QComboBox, QTabWidget, QToolButton)
 from PySide6.QtGui import (QAction, QFont, QPalette, QColor, QKeySequence,
                            QShortcut, QRegularExpressionValidator)
-from PySide6.QtCore import Qt, QTimer, QRegularExpression
+from PySide6.QtCore import Qt, QTimer, QRegularExpression, QSize
 
 from .backend import Backend
 from .pipeline_view import PipelineView
@@ -45,6 +45,45 @@ _EXAMPLES = (
      ("build/m2/mb_fpindep.flat", "build/verify/mb_fpindep.cycle.flat")),
     ("System paging", ("verif/sys/tests/ppage/ppage.bin",)),
 )
+
+
+class _ElidedLabel(QLabel):
+    """Keep a full accessible value while painting a width-bounded summary."""
+
+    def __init__(self, maximum_width, parent=None):
+        self._full_text = ""
+        self._display_text = ""
+        self._maximum_text_width = maximum_width
+        super().__init__("", parent)
+        self.setMaximumWidth(maximum_width)
+        self.setMinimumWidth(0)
+
+    def setText(self, text):
+        self._full_text = str(text)
+        self.updateGeometry()
+        self._sync_display()
+
+    def text(self):
+        return self._full_text
+
+    def displayText(self):
+        """Return the actually painted string for visual regression tests."""
+        return self._display_text
+
+    def sizeHint(self):
+        base = QLabel.sizeHint(self)
+        natural = self.fontMetrics().horizontalAdvance(self._full_text) + 16
+        return QSize(min(self._maximum_text_width, natural), base.height())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_display()
+
+    def _sync_display(self):
+        width = max(0, self.contentsRect().width())
+        self._display_text = self.fontMetrics().elidedText(
+            self._full_text, Qt.ElideRight, width)
+        QLabel.setText(self, self._display_text)
 
 
 def _first_repo_file(candidates):
@@ -676,7 +715,7 @@ class MainWindow(QMainWindow):
         self.status_lbl.setMinimumWidth(600)
         f = QFont("monospace"); f.setStyleHint(QFont.Monospace); self.status_lbl.setFont(f)
         sb.addWidget(self.status_lbl)
-        self.action_hint = QLabel("")
+        self.action_hint = _ElidedLabel(260)
         self.action_hint.setAccessibleName("Last action")
         self.action_hint.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         self.action_hint.setStyleSheet("color:#8b949e;padding-left:12px;")

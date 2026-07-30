@@ -25,6 +25,10 @@ Disabled transport controls now explain why they cannot run: before load they
 point to Open/examples, while after terminal quiescence they point to Reset.
 Run's tooltip and accessibility description also switch to Pause during
 continuous execution.
+At the supported compact width, transient last-action text no longer takes
+unbounded space from persistent cycle/IPC/cache status. It is capped and
+right-elided on screen while its full value remains available through the
+tooltip and accessibility description.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
