@@ -355,7 +355,8 @@ Procedure:
    require the owned popup frame to stay inside the active screen, and require
    forced completion on a directive to remain reference-only. Accept a
    completion mid-opcode and require the whole token—not only its prefix—to be
-   replaced.
+   replaced. Complete a second opcode after GNU as's `;` statement separator
+   and require the preview to follow that statement.
 4. Feed an invalid opcode and require line 5 to be highlighted without starting
    a backend session.
 5. Assemble+run the default sum loop and require EAX = 55 on the real RTL.
@@ -368,13 +369,21 @@ Procedure:
    program bytes, source map, marker, and tab label to remain coherent. Then edit
    after build and require the map to become stale rather than use obsolete PCs.
    Cancel generated-source replacement and require the dirty text to survive.
-8. Verify C keyword/function highlighting and compiler error-line navigation.
+   Run a bare snippet and require selecting its generated fall-through HLT to
+   clear—not retain—the previously linked editor line.
+8. Verify C keyword/function highlighting, quoted comment markers, multiline
+   comments, and compiler error-line navigation.
    Confirm unsaved edits mark `C *`, Cancel preserves them, and explicit Discard
    permits a new template and clears the marker.
 9. Compile the freestanding Fibonacci C template at O2 into editable Intel
    assembly, assemble+run it, and require EAX = 144.
 10. Select the C-generated entry/loop in Trace and require its emitted assembly
     line to highlight.
+11. Compile an array-initialization loop and require self-contained assembly
+    with no implicit `memset` call.
+12. Compile a floating-point C example and require Pentium x87—not SSE—
+    assembly, assemble+run it on the RTL to EAX = 3, and require its selected
+    in-flight instruction to highlight the exact generated assembly line.
 
 Evidence: GNU as/ld produces an ELF32 at `0x08048000`; DWARF decoded-line data
 maps every checked PC to the editor. The completion catalogue contains 291
@@ -385,7 +394,8 @@ Captures: `00_assembly_workbench.png`, `00a_assembly_compact.png`,
 `00b_assembly_find.png`,
 `01_opcode_completion_popup.png`,
 `02_assembly_source_link.png`, `03_c_workbench.png`,
-`04_c_generated_assembly.png`, `05_c_run_source_link.png`.
+`04_c_generated_assembly.png`, `05_c_run_source_link.png`,
+`06_c_x87_source_link.png`.
 
 ## Visual review findings and changes made
 

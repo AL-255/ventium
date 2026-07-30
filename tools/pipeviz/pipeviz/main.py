@@ -796,8 +796,17 @@ class MainWindow(QMainWindow):
 
     def _clear_assembly_source_link(self):
         self._assembly_source_map = {}
+        self._clear_assembly_marker()
+
+    def _clear_assembly_marker(self, pc=None):
+        """Clear only the selected line while retaining the live PC map."""
         self._assembly_link_line = None
         self.assembly.editor.mark_execution_line(None)
+        if (pc is not None and self._assembly_source_map
+                and self.assembly.mapping_current):
+            self.assembly.status.setText(
+                f"Selected PC 0x{int(pc):08x} is generated and has no editor source line")
+            self.assembly.status.setStyleSheet("color:#8b949e;padding:2px;")
         self._update_assembly_tab()
 
     def _update_assembly_tab(self):
@@ -1247,6 +1256,10 @@ class MainWindow(QMainWindow):
                 1, f"Selected PC 0x{int(rec.pc):08x} maps to assembly line {line}"
                 + (" · source has unsaved changes"
                    if self.assembly.editor.document().isModified() else ""))
+        else:
+            # A generated wrapper/fall-through instruction has no editor line.
+            # Never leave the previously selected source line looking current.
+            self._clear_assembly_marker(rec.pc)
 
     def _unpin(self):
         if getattr(self, "_pinned_n", None) is not None:

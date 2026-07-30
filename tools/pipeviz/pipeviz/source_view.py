@@ -359,8 +359,11 @@ class AssemblyHighlighter(QSyntaxHighlighter):
                 rf"\b{registers}\b",
                 QRegularExpression.CaseInsensitiveOption), _fmt("#56d364")),
             (QRegularExpression(r"\b(?:0x[0-9a-fA-F]+|[0-9]+)\b"), _fmt("#f2cc60")),
-            (QRegularExpression(r"[\[\]+*,:-]"), _fmt("#8b949e")),
-            (QRegularExpression(r"[#;].*$"), _fmt("#6e7681", italic=True)),
+            (QRegularExpression(r"[\[\]+*,:;-]"), _fmt("#8b949e")),
+            # In GNU as, ';' separates statements; '#' and '//' introduce
+            # comments. Treating ';' as a comment hid and disabled the second
+            # instruction in compact hand-written lines.
+            (QRegularExpression(r"(?:#|//).*$"), _fmt("#6e7681", italic=True)),
         ]
 
     def highlightBlock(self, text):
@@ -388,11 +391,9 @@ class CHighlighter(QSyntaxHighlighter):
             (QRegularExpression(
                 r"\b(?:0[xX][0-9a-fA-F]+|[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?)\b"),
              _fmt("#f2cc60")),
-            (QRegularExpression(r'"(?:\\.|[^"\\])*"'), _fmt("#a5d6ff")),
-            (QRegularExpression(r"'(?:\\.|[^'\\])+'"), _fmt("#a5d6ff")),
             (QRegularExpression(r"^\s*#.*$"), _fmt("#79c0ff")),
-            (QRegularExpression(r"//.*$"), _fmt("#6e7681", italic=True)),
         ]
+        self.string = _fmt("#a5d6ff")
         self.comment = _fmt("#6e7681", italic=True)
 
     def highlightBlock(self, text):
@@ -401,19 +402,46 @@ class CHighlighter(QSyntaxHighlighter):
             while it.hasNext():
                 match = it.next()
                 self.setFormat(match.capturedStart(), match.capturedLength(), form)
+        # Apply strings and comments with a tiny stateful lexer. Independent
+        # regex rules incorrectly turned the tail of "https://…" or "/*…*/"
+        # into a comment, and could color quoted text inside a real comment.
         self.setCurrentBlockState(0)
-        start = 0 if self.previousBlockState() == 1 else text.find("/*")
-        while start >= 0:
-            end = text.find("*/", start + 2)
+        index = 0
+        if self.previousBlockState() == 1:
+            end = text.find("*/")
             if end < 0:
+                self.setFormat(0, len(text), self.comment)
                 self.setCurrentBlockState(1)
-                length = len(text) - start
-            else:
-                length = end - start + 2
-            self.setFormat(start, length, self.comment)
-            if end < 0:
-                break
-            start = text.find("/*", start + length)
+                return
+            self.setFormat(0, end + 2, self.comment)
+            index = end + 2
+        while index < len(text):
+            if text.startswith("//", index):
+                self.setFormat(index, len(text) - index, self.comment)
+                return
+            if text.startswith("/*", index):
+                end = text.find("*/", index + 2)
+                if end < 0:
+                    self.setFormat(index, len(text) - index, self.comment)
+                    self.setCurrentBlockState(1)
+                    return
+                self.setFormat(index, end + 2 - index, self.comment)
+                index = end + 2
+                continue
+            if text[index] in "\"'":
+                quote = text[index]
+                start = index
+                index += 1
+                while index < len(text):
+                    if text[index] == "\\":
+                        index = min(len(text), index + 2)
+                        continue
+                    index += 1
+                    if text[index - 1] == quote:
+                        break
+                self.setFormat(start, index - start, self.string)
+                continue
+            index += 1
 
 
 class InstructionPipelinePreview(QWidget):
@@ -632,9 +660,12 @@ class AssemblyEditor(CodeEditor):
         """Return the mnemonic prefix only when the cursor is in opcode position."""
         cursor = self.textCursor()
         before = cursor.block().text()[:cursor.positionInBlock()]
-        comment = re.search(r"[#;]", before)
+        comment = re.search(r"#|//", before)
         if comment is not None:
             return None
+        # GAS accepts multiple statements separated by ';'. Completion belongs
+        # to the current statement, not only to the first opcode on the line.
+        before = before.rsplit(";", 1)[-1]
         word = re.search(r"([A-Za-z]\w*)$", before)
         prefix = word.group(1) if word else ""
         stem = before[:word.start()] if word else before
@@ -834,7 +865,10 @@ def compile_c_source(source, optimization="-O2"):
     source_path.write_text(source.rstrip() + "\n", encoding="utf-8")
     command = [
         compiler, "-m32", "-march=pentium", "-mtune=pentium",
-        optimization, "-ffreestanding", "-fno-pic", "-fno-pie",
+        "-std=gnu11", optimization, "-ffreestanding", "-fno-builtin",
+        "-fno-tree-loop-distribute-patterns",
+        "-mno-mmx", "-mno-sse", "-mno-sse2",
+        "-fno-pic", "-fno-pie",
         "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
         "-fno-ident", "-masm=intel", "-S",
         "-o", str(asm_path), str(source_path),
@@ -1027,8 +1061,13 @@ class AssemblyView(QWidget):
         self.statusChanged.emit(text)
 
     def _cursor_instruction(self):
-        text = self.editor.textCursor().block().text()
-        text = re.sub(r"[#;].*$", "", text)
+        cursor = self.editor.textCursor()
+        line = cursor.block().text()
+        position = cursor.positionInBlock()
+        start = line.rfind(";", 0, position) + 1
+        end = line.find(";", position)
+        text = line[start:end if end >= 0 else len(line)]
+        text = re.sub(r"(?:#|//).*$", "", text)
         match = re.match(
             r"^\s*(?:[.$A-Za-z_][\w.$]*:\s*)?"
             r"(?:(?:lock|rep|repe|repz|repne|repnz)\s+)*([A-Za-z]\w*)",

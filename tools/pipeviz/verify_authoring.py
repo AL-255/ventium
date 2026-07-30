@@ -19,6 +19,28 @@ from pipeviz.source_view import (
     _ASM_TEMPLATE, _C_TEMPLATE, assemble_source, compile_c_source,
 )
 
+_C_ARRAY_TEMPLATE = """volatile unsigned values[256];
+
+int main(void)
+{
+    for (unsigned i = 0; i < 256; ++i)
+        values[i] = 0;
+    return (int)values[255];
+}
+"""
+
+_C_X87_TEMPLATE = """/* Exercise the Pentium x87 path through C and editable assembly. */
+volatile float result;
+
+int main(void)
+{
+    volatile float a = 1.5f;
+    volatile float b = 2.25f;
+    result = a + b;
+    return (int)result;
+}
+"""
+
 
 def settle(app):
     app.processEvents()
@@ -41,6 +63,16 @@ def format_colors(editor, line):
         for span in block.layout().formats()
         if span.format.foreground().style() != Qt.NoBrush
     }
+
+
+def format_color_at(editor, line, column):
+    block = editor.document().findBlockByNumber(line - 1)
+    for span in block.layout().formats():
+        if span.start <= column < span.start + span.length:
+            color = span.format.foreground().color()
+            if span.format.foreground().style() != Qt.NoBrush:
+                return color.name()
+    return None
 
 
 def select_trace_pc(win, pc):
@@ -136,8 +168,12 @@ def verify_toolchain():
     assert "_start:" in generated and "call main" in generated
     compiled = assemble_source(generated)
     assert len(compiled.source_map) >= 10
+    array_assembly, _log = compile_c_source(_C_ARRAY_TEMPLATE)
+    assert "memset" not in array_assembly
+    assert "_start:" in array_assembly
+    assert len(assemble_source(array_assembly).source_map) >= 10
     print("OK toolchain: GNU as/ld ELF + DWARF source map; "
-          "freestanding C → Intel assembly → ELF")
+          "self-contained freestanding C → Intel assembly → ELF")
 
 
 def scenario(app, outdir):
@@ -300,6 +336,21 @@ def scenario(app, outdir):
         editor.completion.accept_current()
         assert editor.toPlainText() == ".loop: add "
 
+        # GNU as uses ';' as a statement separator. Completion and the persistent
+        # preview must understand the second opcode rather than grey it as a
+        # NASM-style comment.
+        editor.setPlainText("mov eax, 1; ad")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        assert editor.completion.list.count() == 2  # adc, add
+        editor.completion.move_selection(1)
+        editor.completion.accept_current()
+        assert editor.toPlainText() == "mov eax, 1; add "
+        settle(app)
+        assert win.assembly.info.signature.text().startswith("add ")
+
         # A syntax error is line-linked and never starts a backend session.
         editor.setPlainText(
             ".intel_syntax noprefix\n.section .text\n.global _start\n_start:\n"
@@ -420,6 +471,31 @@ def scenario(app, outdir):
         assert win.assembly.save_source()
         assert win.workspace.tabText(1) == "Assembly"
 
+        # Bare snippets get a generated fall-through HLT. Selecting it must
+        # clear a previous linked line instead of falsely retaining that marker.
+        assert win.assembly.set_source("mov eax, 7\n", "bare-snippet regression")
+        snippet_result = win.assembly.build(True)
+        settle(app)
+        assert snippet_result is not None
+        run_to_stop(win)
+        mapped_row = next(
+            r for r in range(win.trace.tbl.rowCount())
+            if int(win.trace.tbl.item(r, 4).text(), 16)
+            in snippet_result.source_map)
+        unmapped_row = next(
+            r for r in range(win.trace.tbl.rowCount())
+            if int(win.trace.tbl.item(r, 4).text(), 16)
+            not in snippet_result.source_map)
+        win.trace.tbl.setCurrentCell(mapped_row, 0)
+        settle(app)
+        assert editor._execution_line == 1
+        assert win.workspace.tabText(1) == "Assembly · L1"
+        win.trace.tbl.setCurrentCell(unmapped_row, 0)
+        settle(app)
+        assert editor._execution_line is None
+        assert win.workspace.tabText(1) == "Assembly"
+        assert "no editor source line" in win.assembly.status.text()
+
         # C syntax highlighting and error navigation.
         win.workspace.setCurrentWidget(win.c_source)
         win.c_source.new_template()
@@ -432,6 +508,23 @@ def scenario(app, outdir):
         settle(app)
         assert "#ff7b72" in format_colors(win.c_source.editor, 4)  # int
         assert "#d2a8ff" in format_colors(win.c_source.editor, 4)  # main
+        lexical_probe = (
+            'const char *url = "https://example.test/*literal*/"; // comment\n'
+            "/* block comment\n"
+            '   "quoted text" */\n')
+        win.c_source.editor.setPlainText(lexical_probe)
+        win.c_source.highlighter.rehighlight()
+        settle(app)
+        string_slashes = lexical_probe.splitlines()[0].index("//")
+        trailing_comment = lexical_probe.splitlines()[0].rindex("//")
+        assert format_color_at(
+            win.c_source.editor, 1, string_slashes) == "#a5d6ff"
+        assert format_color_at(
+            win.c_source.editor, 1, trailing_comment) == "#6e7681"
+        assert format_color_at(
+            win.c_source.editor, 3, 4) == "#6e7681"
+        win.c_source.editor.document().setModified(False)
+        win.c_source.new_template()
         win.c_source.editor.appendPlainText("/* unsaved */")
         assert win.workspace.tabText(2) == "C *"
         dirty_c = win.c_source.editor.toPlainText()
@@ -481,8 +574,44 @@ def scenario(app, outdir):
         win.workspace.setCurrentWidget(win.assembly)
         settle(app)
         save(win, outdir, "05_c_run_source_link")
+
+        # Floating-point C must stay within the Pentium x87 ISA, remain
+        # editable, execute on the real RTL, and retain source navigation.
+        win.workspace.setCurrentWidget(win.c_source)
+        win.c_source.editor.setPlainText(_C_X87_TEMPLATE)
+        generated = win.c_source.compile()
+        settle(app)
+        assert generated is not None
+        emitted = win.assembly.editor.toPlainText()
+        assert re.search(r"(?m)^\s*f(?:ld|add|addp|istp|stp)\b", emitted)
+        assert not re.search(r"(?mi)^\s*(?:mov[adqup]*s|add[ps]s|cvt)", emitted)
+        x87_result = win.assembly.build(True)
+        settle(app)
+        assert x87_result is not None
+        run_to_stop(win)
+        assert win.backend.state().gpr[0] == 3
+        x87_pc = next(
+            int(win.trace.tbl.item(r, 4).text(), 16)
+            for r in range(win.trace.tbl.rowCount())
+            if (int(win.trace.tbl.item(r, 4).text(), 16)
+                in x87_result.source_map
+                and win.trace.tbl.item(r, 6).text().lower().startswith("f")))
+        select_trace_pc(win, x87_pc)
+        settle(app)
+        assert (win.assembly.editor._execution_line
+                == x87_result.source_map[x87_pc])
+        win.workspace.setCurrentWidget(win.assembly)
+        settle(app)
+        save(win, outdir, "06_c_x87_source_link")
+
+        # Keep shutdown non-interactive: the C source was injected directly to
+        # exercise dirty replacement, so save it as acceptance-test evidence.
+        win.workspace.setCurrentWidget(win.c_source)
+        win.c_source._path = os.path.join(outdir, "x87-workbench.c")
+        assert win.c_source.save_source()
         print("OK GUI authoring: completion/preview, syntax/error lines, "
-              "assembly result=55, C Fibonacci result=144, exact PC↔source links")
+              "assembly result=55, C Fibonacci result=144, "
+              "C x87 result=3, exact PC↔source links")
     finally:
         win.close()
         settle(app)

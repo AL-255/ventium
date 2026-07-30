@@ -94,6 +94,8 @@ description, mode/build availability, approximate latency, pairing class
 (`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
 At a directive, comment, or operand it remains a reference-only catalogue, so
 accepting an entry cannot corrupt non-opcode text.
+GNU as semicolons separate statements, so completion and the instruction
+preview also follow a second opcode on the same source line.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.
@@ -116,6 +118,9 @@ source invalidates the old map until it is assembled again, so a stale build
 cannot highlight the wrong line.
 When the current built source has not been saved, both states remain visible as
 **Assembly * · L…** rather than one label hiding the other.
+Instructions synthesized outside the editor, such as a bare snippet's
+fall-through HLT, explicitly clear the prior line marker instead of leaving a
+stale source association.
 
 GNU `as`, `ld`, and `objdump` must be available in `PATH`. Generated source,
 object, and ELF files stay in `tools/pipeviz/.generated/`, which Git ignores.
@@ -129,7 +134,9 @@ or `-Os`, then press **Compile → Assembly** (`Ctrl+Enter`). Pipeviz invokes:
 
 - GCC's 32-bit Pentium target;
 - Intel assembly syntax with SSE/MMX excluded by the P5 target;
-- freestanding, non-PIE, stack-protector-free code; and
+- GNU C11, freestanding, non-PIE, stack-protector-free code;
+- no builtin calls or loop-to-`memset` substitutions, so generated snippets
+  remain self-contained; and
 - a tiny `_start` wrapper that calls `main` and halts.
 
 The generated source opens in Assembly rather than running immediately. This
@@ -149,7 +156,9 @@ It verifies the 291-mnemonic catalogue against every current RTL decoder family,
 syntax highlighting, opcode-scoped completion and its description/pipeline
 preview, compact layout, transactional load failure, build errors, ELF/DWARF
 mapping, exact U/V source identity, a hand-written assembly result, and
-C → assembly → RTL execution.
+C → assembly → RTL execution. It also compiles an array loop without hidden
+library calls and runs floating-point C through generated x87 assembly on the
+RTL, verifying EAX = 3 and exact assembly-line navigation.
 
 ## Worked examples
 

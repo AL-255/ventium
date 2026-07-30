@@ -121,19 +121,23 @@ backward, and Escape closes the search.</p>
 operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operations
 say so explicitly. Completion inserts only when the cursor is in an opcode
-slot; elsewhere the full catalogue is safe, reference-only help. Build errors
-highlight their source line.</p>
+slot; elsewhere the full catalogue is safe, reference-only help. GNU as
+semicolons separate statements, and completion follows the opcode in each
+statement. Build errors highlight their source line.</p>
 <h2>Source-linked investigation</h2>
 <p>Assembly is built with a DWARF line table. Clicking a Trace or Pipeline row
 therefore marks the exact assembly line for that PC; the Assembly tab displays
 its line number without stealing focus from the Visualizer. Unsaved and linked
 state coexist as <b>Assembly * · L…</b>. Editing after a
-build invalidates that map until the next assembly, preventing stale links.</p>
+build invalidates that map until the next assembly, preventing stale links.
+Selecting a generated wrapper instruction with no editor line clears the prior
+marker rather than showing a stale association.</p>
 <h2>C → editable assembly</h2>
 <p>Open <b>C</b> (Alt+C), write a freestanding
 <code>int main(void)</code>, choose O0/O1/O2/Os, then click
-<b>Compile → Assembly</b>. Pipeviz uses GCC's 32-bit Pentium target with no
-libc, adds a small <code>_start</code>/HLT wrapper, and opens the generated
+<b>Compile → Assembly</b>. Pipeviz uses GCC's freestanding GNU C11 32-bit
+Pentium target with no libc, builtins, MMX, or SSE; floating point therefore
+uses x87. It adds a small <code>_start</code>/HLT wrapper and opens the generated
 Intel-syntax source in Assembly. Review or edit it before running. Compiler
 errors also highlight their C line.</p>
 <p>Generated artifacts stay under <code>tools/pipeviz/.generated/</code> and

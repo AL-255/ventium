@@ -9,6 +9,28 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 29 continuation — self-contained C/x87 and source-marker correctness
+
+**Self-critique:** the initial C path targeted Pentium but still allowed GCC
+loop-pattern and builtin substitutions that could introduce an unresolved
+library call. Floating-point generation was not proven end-to-end, a generated
+fall-through HLT could leave the prior assembly line highlighted, GNU as
+semicolon-separated opcodes were mistaken for comments, and C comment markers
+inside strings confused syntax coloring.
+
+**Changes:** C compilation now pins GNU C11, disables builtins, loop-to-library
+substitution, MMX, and SSE/SSE2, while retaining x87. The acceptance path
+compiles an array loop with no `memset`, then compiles floating-point C, checks
+that the editable output is x87, runs it on the RTL to EAX=3, and source-links
+an actual `fld`. Assembly completion/preview now follows each GAS statement
+after `;`. Selecting a synthesized instruction with no editor line clears the
+prior marker without discarding the usable PC map. The C highlighter now lexes
+strings and line/block comments statefully.
+
+**Verification:** `verify_authoring.py` covers all new cases alongside the
+291-entry decoder-coupled catalogue, generated-source replacement protection,
+exact U/V identity, C Fibonacci, and the hand-authored sum loop.
+
 ## Iteration 22 — program-loading recovery path
 
 **Self-critique:** the polished debugger only accepted a single flat byte blob.
