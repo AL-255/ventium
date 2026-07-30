@@ -411,6 +411,8 @@ def scenario(app, outdir):
         assert editor.completion.info.preview.info.mnemonic == "add"
         assert editor.completion.info.description.text()
         assert editor.completion.info.preview.info.stages == ("F", "D", "X")
+        assert editor.completion.info.availability.text() == "Availability · user"
+        assert "cycle" not in editor.completion.info.availability.text()
         save(editor.completion, outdir, "01_opcode_completion_popup")
         reference_source = editor.toPlainText()
         editor.completion.accept_current()
@@ -860,6 +862,36 @@ def scenario(app, outdir):
         x87_result = win.assembly.build(True)
         settle(app)
         assert x87_result is not None
+
+        # Live source linkage must include the x87 lane, not only the U/V cells
+        # exercised by the integer template above. Stop on the first authored
+        # FP operation while it is still in flight and click its live cell.
+        board = win.pipeline.board
+        for _ in range(300):
+            win.do_step(1, False)
+            settle(app)
+            if (board._lane_pcs.get("FP") in x87_result.source_map
+                    and any(lane == "FP"
+                            for _rect, lane, _pc in board._lane_rects)):
+                break
+        else:
+            raise AssertionError(
+                "authored x87 operation never reached the live FP lane")
+        fp_pc = board._lane_pcs["FP"]
+        fp_rect = next(
+            rect for rect, lane, pc in board._lane_rects
+            if lane == "FP" and pc == fp_pc)
+        QTest.mouseMove(board, fp_rect.center())
+        settle(app)
+        assert "FP in-flight instruction" in board.toolTip()
+        QTest.mouseClick(
+            board, Qt.LeftButton, Qt.NoModifier, fp_rect.center())
+        settle(app)
+        assert win.workspace.currentWidget() is win.visualizer_tab
+        assert win.assembly.editor._execution_line == x87_result.source_map[fp_pc]
+        assert "In-flight FP-lane" in win.assembly.editor._execution_tip
+        save(win, outdir, "06a_c_x87_inflight_source_link")
+
         run_to_stop(win)
         assert win.backend.state().gpr[0] == 3
         x87_pc = next(

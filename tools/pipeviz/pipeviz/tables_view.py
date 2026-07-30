@@ -723,7 +723,7 @@ class TablesView(QWidget):
             bar = "█" * max(1, int(round(12 * cyc / maxc))) if cyc else ""
             ma = miss_by_pc.get(pc)
             miss = f"{ma[1]}/{ma[0]}" if ma else ""    # D$ misses / accesses for a mem PC
-            rows.append([f"{pc:08x}", hits, cyc, f"{pct:.1f}", miss, bar, mnem])
+            rows.append([f"{pc:08x}", hits, cyc, f"{pct:.1f}%", miss, bar, mnem])
         _fill(self.hot, rows, dim_cols=(0, 1), right_cols=(1, 2, 3, 4))
         for r, (pc, _e) in enumerate(ranked):
             cb = self.hot.item(r, 5)                   # cost bar -> amber

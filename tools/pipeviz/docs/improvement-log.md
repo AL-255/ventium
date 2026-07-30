@@ -135,6 +135,14 @@ seed both replay paths from that exact state. The UI states whether replay began
 breakdown in a tooltip to preserve table height, and a two-way synthetic
 regression proves both a resident hit and correct LRU eviction.
 
+**Live-FP and compact-metadata audit:** authored source-link acceptance proved
+live U/V cells and retired x87 rows, but never clicked an x87 instruction while
+it was still in the FP lane. The C→assembly→RTL regression now stops on that
+live cell, checks its FP-specific hover text, clicks it, and requires the exact
+generated source line before continuing to the verified result. The compact
+Assembly sidebar no longer repeats pipe/latency above its own pipeline preview,
+and Hotspots shares now carry an explicit percent sign.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

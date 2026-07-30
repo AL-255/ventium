@@ -638,8 +638,10 @@ class InstructionInfoPane(QWidget):
             return
         self.signature.setText(info.signature)
         self.description.setText(info.description)
-        self.availability.setText(
-            f"{info.pipe} · {info.latency} · availability: {info.availability}")
+        # Pipe class and latency are already rendered directly beneath this
+        # label in the miniature pipeline. Repeating both here produced a dense,
+        # near-duplicate line in the compact Assembly sidebar.
+        self.availability.setText(f"Availability · {info.availability}")
 
 
 class CompletionPopup(QFrame):

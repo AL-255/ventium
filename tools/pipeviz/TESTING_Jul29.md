@@ -428,8 +428,9 @@ Procedure:
    at its C source line instead of becoming a later unresolved linker error,
    and a fatal missing-header diagnostic to mark line 1.
 12. Compile a floating-point C example and require Pentium x87—not SSE—
-    assembly, assemble+run it on the RTL to EAX = 3, and require its selected
-    in-flight instruction to highlight the exact generated assembly line.
+    assembly, assemble it, stop on and click its live FP-lane cell, and require
+    the exact generated assembly line while the instruction is still in flight.
+    Then run it to completion on the RTL to EAX = 3 and recheck retired linkage.
 
 Evidence: GNU as/ld produces an ELF32 at `0x08048000`; DWARF decoded-line data
 maps every checked PC to the editor. The completion catalogue contains 291
@@ -443,7 +444,7 @@ Captures: `00_assembly_workbench.png`, `00a_assembly_compact.png`,
 `02b_terminal_hlt_source_link.png`,
 `03_c_workbench.png`,
 `04_c_generated_assembly.png`, `05_c_run_source_link.png`,
-`06_c_x87_source_link.png`.
+`06a_c_x87_inflight_source_link.png`, `06_c_x87_source_link.png`.
 
 ## Visual review findings and changes made
 

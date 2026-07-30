@@ -230,9 +230,10 @@ for tag, candidates, steps, soc in SHOTS:
         app.processEvents()
     # all-tabs sweep for ONE rich workload — the per-workload `_tables.png` crop
     # only ever shows the DEFAULT (Code$) tab, so the review misses the others
-    # (Data$/TLB/Prefetch/Hotspots/Branches/Instr-mix/Cycles/Memory). brloop's tight
-    # branch loop populates Hotspots/Branches/Cycles/Instr-mix + the I-cache richly,
-    # so its tab sweep gives the critics real per-tab rendering to scrutinise.
+    # (Data$/TLB/Prefetch/Hotspots/Branches/Instr-mix/Cycles/Memory/Mem-map).
+    # brloop's tight branch loop populates Hotspots/Branches/Cycles/Instr-mix +
+    # the I-cache richly, so its tab sweep gives the critics real per-tab
+    # rendering to scrutinise.
     if tag == TAB_SWEEP:
         tabs = win.tables.tabs
         for ti in range(tabs.count()):
