@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Cache map↔table hover audit:** the historical high-value list's only genuine
+remainder was two-way occupancy-map/table inspection. Hover now resolves every
+painted cell to exact set/way state; resident cells add tag and line address,
+highlight and center the matching Code$/Data$ row, and clear transient
+selection on leave. Tooltip and accessible description track the same state,
+making even few-pixel cells inspectable at narrow widths.
+
 **True-minimum Visualizer audit:** the real 900×620 minimum had only manual
 coverage while “compact” acceptance began at 1280×800. It now asserts all three
 toolbars avoid overflow, the 700/170+ pane split remains viable, critical

@@ -29,21 +29,33 @@ class CacheMap(QWidget):
     TOP = 13         # top band for the title/legend
     WAYH = 13        # height of each way row
     BOT = 12         # bottom band for set ticks
+    lineHovered = Signal(int, int)
+    hoverCleared = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.cells = [(False, False)] * 256   # (valid, is_mru) by idx = set*2+way
+        self._line_details = {}
+        self._hovered_cell = None
         self.n_valid = 0
-        self.setAccessibleDescription(
+        self._base_accessible_description = (
             "No cache lines are resident; all 128 sets and both ways are empty.")
+        self.setAccessibleDescription(self._base_accessible_description)
+        self.setToolTip("Hover a set/way cell to identify its cache-table row")
+        self.setMouseTracking(True)
         self.setFixedHeight(self.TOP + 2 * self.WAYH + self.BOT)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_lines(self, lines):
         cells = [(False, False)] * 256
+        details = {}
         for l in lines:
             cells[l.set * 2 + l.way] = (True, l.lru == l.way)
+            details[(int(l.set), int(l.way))] = (
+                int(l.tag), (int(l.tag) << 12) | (int(l.set) << 5),
+                int(l.lru) == int(l.way))
         self.cells = cells
+        self._line_details = details
         self.n_valid = len(lines)
         occupied = []
         for cache_set in range(self.SETS):
@@ -57,13 +69,63 @@ class CacheMap(QWidget):
                 occupied.append(
                     f"set {cache_set}: {', '.join(ways)}")
         if occupied:
-            self.setAccessibleDescription(
+            self._base_accessible_description = (
                 f"{self.n_valid} of 256 cache line slots resident across "
                 f"{len(occupied)} of 128 sets. " + "; ".join(occupied) + ".")
         else:
-            self.setAccessibleDescription(
+            self._base_accessible_description = (
                 "No cache lines are resident; all 128 sets and both ways are empty.")
+        self.setAccessibleDescription(self._base_accessible_description)
+        if self._hovered_cell is not None:
+            # A live cache refresh can replace the row under a stationary
+            # pointer. Clear the transient link rather than retaining stale
+            # tag/address text and selection until the mouse moves again.
+            self._clear_hover()
         self.update()
+
+    def _cell_at(self, point):
+        plot_width = self.width() - self.LX - 4
+        if plot_width <= 0 or not (
+                self.LX <= point.x() < self.LX + plot_width
+                and self.TOP <= point.y() < self.TOP + 2 * self.WAYH):
+            return None
+        cache_set = min(
+            self.SETS - 1,
+            int((point.x() - self.LX) * self.SETS / plot_width))
+        way = min(1, int((point.y() - self.TOP) / self.WAYH))
+        return cache_set, way
+
+    def mouseMoveEvent(self, event):
+        cell = self._cell_at(event.position().toPoint())
+        if cell is None:
+            self._clear_hover()
+            return
+        cache_set, way = cell
+        self._hovered_cell = cell
+        detail = self._line_details.get(cell)
+        if detail is None:
+            text = f"set {cache_set} · way {way} · empty"
+        else:
+            tag, address, mru = detail
+            text = (
+                f"set {cache_set} · way {way} · "
+                f"{'MRU' if mru else 'resident'} · tag 0x{tag:05x} · "
+                f"line 0x{address:08x}")
+        self.setToolTip(text)
+        self.setAccessibleDescription(
+            f"{self._base_accessible_description} Hovered {text}.")
+        self.lineHovered.emit(cache_set, way)
+        event.accept()
+
+    def _clear_hover(self):
+        self._hovered_cell = None
+        self.setToolTip("Hover a set/way cell to identify its cache-table row")
+        self.setAccessibleDescription(self._base_accessible_description)
+        self.hoverCleared.emit()
+
+    def leaveEvent(self, event):
+        self._clear_hover()
+        super().leaveEvent(event)
 
     def paintEvent(self, ev):
         p = QPainter(self)
@@ -491,6 +553,11 @@ class TablesView(QWidget):
                             hint="I-cache empty — step the core to fetch code into it")
         self.ic.setAccessibleName("Instruction cache lines")
         self.ic_map.setAccessibleName("Instruction cache occupancy map")
+        self.ic_map.lineHovered.connect(
+            lambda cache_set, way:
+            self._highlight_cache_row(self.ic, cache_set, way))
+        self.ic_map.hoverCleared.connect(
+            lambda: self._clear_cache_hover(self.ic))
         self.ic.setWordWrap(True)
         self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code$")
         self.tabs.setTabToolTip(0, "Instruction cache (I$): resident lines and set/way map")
@@ -504,6 +571,11 @@ class TablesView(QWidget):
                                  "loads/stores yet")
         self.dc.setAccessibleName("Data cache lines")
         self.dc_map.setAccessibleName("Data cache occupancy map")
+        self.dc_map.lineHovered.connect(
+            lambda cache_set, way:
+            self._highlight_cache_row(self.dc, cache_set, way))
+        self.dc_map.hoverCleared.connect(
+            lambda: self._clear_cache_hover(self.dc))
         self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data$")
         self.tabs.setTabToolTip(1, "Data cache (D$): residency and replayed miss rate")
 
@@ -814,6 +886,27 @@ class TablesView(QWidget):
             v.addWidget(cmap)
         v.addWidget(table)
         return w
+
+    @staticmethod
+    def _highlight_cache_row(table, cache_set, way):
+        for row in range(table.rowCount()):
+            set_item = table.item(row, 0)
+            way_item = table.item(row, 1)
+            if set_item is None or way_item is None:
+                continue
+            if (set_item.text() == str(cache_set)
+                    and way_item.text().rstrip("*") == str(way)):
+                table.setCurrentCell(row, 0)
+                table.selectRow(row)
+                table.scrollToItem(
+                    set_item, QAbstractItemView.PositionAtCenter)
+                return
+        TablesView._clear_cache_hover(table)
+
+    @staticmethod
+    def _clear_cache_hover(table):
+        table.clearSelection()
+        table.setCurrentCell(-1, -1)
 
     def update_from(self, backend, state):
         if not self._session_active:

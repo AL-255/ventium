@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMessageBox, QPushButton,
                                QToolBar, QToolButton)
@@ -1768,6 +1768,41 @@ def scenario_dcache_memory(app, outdir):
         cache_map_accessible = win.tables.dc_map.accessibleDescription()
         assert "14 of 256 cache line slots resident" in cache_map_accessible
         assert "set " in cache_map_accessible and "way " in cache_map_accessible
+        cache_line = win.backend.dcache()[0]
+        cache_map = win.tables.dc_map
+        cache_map.repaint()
+        settle(app)
+        plot_width = cache_map.width() - cache_map.LX - 4
+        hover_y = (
+            cache_map.TOP + int(cache_line.way) * cache_map.WAYH
+            + cache_map.WAYH // 2)
+        hover_points = [
+            QPoint(x, hover_y)
+            for x in range(cache_map.LX, cache_map.LX + plot_width)
+            if cache_map._cell_at(QPoint(x, hover_y))
+            == (int(cache_line.set), int(cache_line.way))]
+        assert hover_points
+        QTest.mouseMove(cache_map, hover_points[len(hover_points) // 2])
+        settle(app)
+        line_address = (
+            (int(cache_line.tag) << 12) | (int(cache_line.set) << 5))
+        assert f"set {int(cache_line.set)}" in cache_map.toolTip()
+        assert f"way {int(cache_line.way)}" in cache_map.toolTip()
+        assert f"line 0x{line_address:08x}" in cache_map.toolTip()
+        assert "Hovered set" in cache_map.accessibleDescription()
+        hovered_row = win.tables.dc.currentRow()
+        assert hovered_row >= 0
+        assert win.tables.dc.item(hovered_row, 0).text() == str(cache_line.set)
+        assert (
+            win.tables.dc.item(hovered_row, 1).text().rstrip("*")
+            == str(cache_line.way))
+        save_shot(app, win, outdir, "02aa_dcache_map_hover")
+        QApplication.sendEvent(cache_map, QEvent(QEvent.Leave))
+        settle(app)
+        assert not win.tables.dc.selectedIndexes()
+        assert win.tables.dc.currentRow() < 0
+        assert cache_map.toolTip().startswith("Hover a set/way cell")
+        assert "Hovered set" not in cache_map.accessibleDescription()
         cycle_accessible = win.tables.cyc.accessibleDescription()
         assert (
             f"{sum(win.tables.cyc.counts.values())} captured clocks"

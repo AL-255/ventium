@@ -288,7 +288,9 @@ structured syntax announces the correction while retaining every row.</p>
 <p>Code$ and Data$ show set/way residency and occupancy. Data$ replays the
 observed access stream through the matching 2-way geometry to estimate misses.
 Each occupancy map exposes its resident count and exact set/way/MRU geometry as
-a textual description in addition to the painted grid. Empty analysis tables
+a textual description in addition to the painted grid. Hover a cell for its
+set, way, residency/MRU, tag, and line address; resident cells highlight and
+center their corresponding table row until the pointer leaves. Empty analysis tables
 announce the same explanation they paint; populated tables announce their row
 count instead of retaining a stale empty-state message.
 For a restored snapshot it seeds replay from the resident tags and MRU order at

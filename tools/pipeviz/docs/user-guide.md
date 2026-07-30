@@ -424,7 +424,9 @@ started `[empty]` or was `[seed N]` from the resident tags and MRU order of a
 restored snapshot; hover it for hit/cold/conflict totals. This prevents the
 visualization boundary from looking like a cold cache. Code$/Data$ occupancy
 maps expose their resident count and exact set/way/MRU geometry textually as
-well as visually. The **Cycles** chart likewise announces every non-empty
+well as visually. Hover any map cell for its exact set, way, residency/MRU,
+tag, and line address; a resident cell highlights and centers the corresponding
+table row until the pointer leaves. The **Cycles** chart likewise announces every non-empty
 category's clock count and percentage, total retirement, and IPC. In
 all analysis tables, a painted empty-state explanation is also exposed
 textually and is replaced with the current row count when data appears. In
