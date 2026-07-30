@@ -292,7 +292,9 @@ I/O micro-operations.</p>
 <p>Memory displays physical backend bytes. EIP, ESP, and the latest explicit
 memory operand are resolved through segmentation and legacy page tables. Page
 Up/Page Down or the arrow buttons moves by 256 physical bytes and exits follow
-mode; navigation is disabled before a program is loaded. Mem
+mode; navigation is disabled before a program is loaded. Its custom-painted
+dump exposes the visible range, each hex/ASCII row, and visible marker addresses
+as an accessible textual description. Mem
 map intentionally plots the effective offset used by the timing D-cache against
 retirement order: a diagonal is a stride, a horizontal band is a hot location,
 and a cloud is irregular access. Click a point or use arrows, Page Up/Page Down,

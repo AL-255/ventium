@@ -409,7 +409,9 @@ instruction’s effective offset through its pre-execution segment base and
 legacy 4 KiB/4 MiB page tables; `→ EIP` and `→ ESP` do the same for the live
 state. Page Up/Page Down (or the adjacent arrows) moves the inspector by 256
 physical bytes and leaves follow mode. Those navigators remain disabled until
-a program is loaded. **Mem map** deliberately keeps the effective offset—the address used by
+a program is loaded. The custom-painted dump also exposes its visible physical
+range, every hex/ASCII row, and any EIP/ESP/access marker as a textual
+description for assistive technology. **Mem map** deliberately keeps the effective offset—the address used by
 the timing D-cache—so this workload’s stride appears as a diagonal scatter;
 click an outlier, or focus the plot and use arrows, Page Up/Page Down, Home, or
 End, to jump directly to its trace row, pinned architectural state, and

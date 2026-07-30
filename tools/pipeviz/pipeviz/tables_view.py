@@ -946,6 +946,8 @@ class _HexDump(QWidget):
     def clear(self, message=""):
         self.data = b""
         self.message = message
+        self.setAccessibleDescription(
+            message or "No physical memory bytes are displayed.")
         self.update()
 
     def set(self, backend, base, eip, esp, access=None):
@@ -956,6 +958,28 @@ class _HexDump(QWidget):
         self.esp = esp
         self.acc_addr, self.acc_size = access if access else (None, 0)
         self.message = ""
+        end = (self.base + max(0, len(self.data) - 1)) & 0xFFFFFFFF
+        parts = [
+            f"Physical memory bytes 0x{self.base:08x} through 0x{end:08x}."]
+        visible_end = self.base + len(self.data)
+        if self.base <= self.eip < visible_end:
+            parts.append(f"EIP marker at 0x{self.eip:08x}.")
+        if self.base <= self.esp < visible_end:
+            parts.append(f"ESP marker at 0x{self.esp:08x}.")
+        if (self.acc_addr is not None
+                and self.base <= self.acc_addr < visible_end):
+            parts.append(
+                f"Access marker at 0x{self.acc_addr:08x}, "
+                f"{self.acc_size} byte{'s' if self.acc_size != 1 else ''}.")
+        for offset in range(0, len(self.data), 16):
+            row = self.data[offset:offset + 16]
+            address = (self.base + offset) & 0xFFFFFFFF
+            hex_bytes = " ".join(f"{byte:02x}" for byte in row)
+            ascii_bytes = "".join(
+                chr(byte) if 32 <= byte < 127 else "." for byte in row)
+            parts.append(
+                f"0x{address:08x}: {hex_bytes}; ASCII {ascii_bytes}.")
+        self.setAccessibleDescription(" ".join(parts))
         self.update()
 
     def paintEvent(self, _ev):
@@ -1279,14 +1303,18 @@ class MemoryView(QWidget):
         bar.addWidget(self.addr_e)
         go = QPushButton("Go")
         go.setAccessibleName("Open physical memory address")
+        go.setToolTip("Open the typed physical address (Enter)")
         go.clicked.connect(self._go); bar.addWidget(go)
         be = QPushButton("→EIP")
+        be.setAccessibleName("Follow instruction pointer in physical memory")
         be.setToolTip("Follow current CS:EIP after segmentation and paging")
         be.clicked.connect(lambda: self._set_follow("eip")); bar.addWidget(be)
         bs = QPushButton("→ESP")
+        bs.setAccessibleName("Follow stack pointer in physical memory")
         bs.setToolTip("Follow current SS:ESP after segmentation and paging")
         bs.clicked.connect(lambda: self._set_follow("esp")); bar.addWidget(bs)
         ba = QPushButton("→access")
+        ba.setAccessibleName("Follow latest data access in physical memory")
         ba.setToolTip(
             "Follow the most-recent explicit load/store at its translated physical address")
         ba.clicked.connect(lambda: self._set_follow("access")); bar.addWidget(ba)
@@ -1305,6 +1333,7 @@ class MemoryView(QWidget):
             b.clicked.connect(lambda _=0, dd=d: self._page(dd)); bar.addWidget(b)
             self.page_buttons.append(b)
         self.follow_lbl = QLabel(""); self.follow_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
+        self.follow_lbl.setAccessibleName("Physical memory navigation state")
         bar.addWidget(self.follow_lbl); bar.addStretch(1)
         v.addLayout(bar)
         self.dump = _HexDump()
@@ -1325,6 +1354,7 @@ class MemoryView(QWidget):
         if not active:
             self.backend = None
             self.follow_lbl.setText("No program loaded")
+            self.follow_lbl.setAccessibleDescription("No program loaded")
             self.dump.clear("Open a program to inspect memory.")
 
     def reset(self):
@@ -1364,6 +1394,8 @@ class MemoryView(QWidget):
         except ValueError:
             self.addr_e.setStyleSheet("border:1px solid #f85149;")
             self.follow_lbl.setText("invalid 32-bit address")
+            self.follow_lbl.setAccessibleDescription(
+                "Invalid 32-bit physical memory address")
             self.follow_lbl.setStyleSheet("color:#f85149;font-size:8px;")
             self.addr_e.selectAll()
             return
@@ -1449,6 +1481,7 @@ class MemoryView(QWidget):
         else:
             follow_text = "cyan=EIP  amber=ESP  gold=access · physical view"
         self.follow_lbl.setText(follow_text)
+        self.follow_lbl.setAccessibleDescription(follow_text)
         self.follow_lbl.setToolTip(
             "Memory displays physical backend bytes. EIP and ESP are translated "
             "from their segment-relative offsets; access follows the translation "

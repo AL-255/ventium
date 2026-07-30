@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Memory-inspector accessibility audit:** the physical hex dump had an
+accessible name but its custom-painted bytes and EIP/ESP/access highlights were
+pixel-only. Every refresh now supplies a textual range, marker addresses, and
+row-by-row hex/ASCII equivalent; empty state is explicit. The symbolic EIP, ESP,
+and access controls have unambiguous names, Go documents Enter, and the named
+navigation-state label announces invalid input and active follow mode.
+
 **Source-find state audit:** a newly opened/cleared Find bar left Previous and
 Next visually enabled despite having no query or target, and its live count was
 an unnamed visual-only label. Empty and no-match searches now lock navigation;

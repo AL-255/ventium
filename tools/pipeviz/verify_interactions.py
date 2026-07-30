@@ -831,6 +831,7 @@ def scenario_startup(app, outdir):
             win.tables.br: "Branch behavior",
             win.tables.mix: "Instruction mix",
             win.tables.mem.addr_e: "Physical memory address",
+            win.tables.mem.follow_lbl: "Physical memory navigation state",
             win.tables.mem.dump: "Physical memory hex and ASCII dump",
             win.regs._compact_tabs.tabBar(): "Register group tabs",
             win.assembly.editor: "Assembly source editor",
@@ -1742,13 +1743,23 @@ def scenario_dcache_memory(app, outdir):
         assert win.tables.mem.addr == old_addr
         assert "#f85149" in win.tables.mem.addr_e.styleSheet()
         assert "invalid" in win.tables.mem.follow_lbl.text()
+        assert "Invalid 32-bit" in (
+            win.tables.mem.follow_lbl.accessibleDescription())
         access_button = next(b for b in win.tables.mem.findChildren(QPushButton)
                              if b.text() == "→access")
+        assert access_button.accessibleName() == (
+            "Follow latest data access in physical memory")
         click(app, access_button)
         assert not win.tables.mem.addr_e.styleSheet()
         assert win.tables.mem.follow == "access"
         assert win.tables.mem.addr == (win.trace.last_access[0] & 0xfffffff0)
         assert "following ACCESS" in win.tables.mem.follow_lbl.text()
+        dump_accessible = win.tables.mem.dump.accessibleDescription()
+        assert f"0x{win.tables.mem.addr:08x}" in dump_accessible
+        assert "Access marker at" in dump_accessible
+        assert "ASCII" in dump_accessible
+        assert win.tables.mem.follow_lbl.accessibleDescription() == (
+            win.tables.mem.follow_lbl.text())
         access_page = win.tables.mem.addr
         win.tables.mem.addr_e.setFocus()
         QTest.keyClick(win.tables.mem.addr_e, Qt.Key_PageDown)
