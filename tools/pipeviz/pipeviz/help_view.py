@@ -35,7 +35,9 @@ Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p
 potentially long backend build. It also rebuilds when bridge/ABI, RTL
 sources/file lists/includes, or the memory BFM is newer than the backend.
 <code>run.sh --check</code> reports readiness without building or opening the
-GUI and names the first stale input.</p>
+GUI and names the first stale input. Add <code>--soc</code> to check both
+variants; <code>run.sh --build --soc</code> builds and launches the SoC
+variant rather than dropping the flag at the build step.</p>
 <ul>
  <li><b>File → Open example</b> rescans and opens any built verification
  workload.</li>

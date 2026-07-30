@@ -61,6 +61,14 @@ newer path. A non-mutating `--check` mode makes the decision inspectable; a
 temporary fake-repository regression proves ready→stale behavior and exit code
 2 without rebuilding or launching Qt.
 
+**SoC launcher-contract audit:** the documented `run.sh --build --soc` path
+silently called `build.sh` without `--soc`, then asked the GUI to use a library
+it had not built. The launcher now tracks explicit SoC intent, checks both
+artifacts with `--check --soc`, reports a missing SoC RTL file list distinctly,
+auto-rebuilds a stale/missing SoC variant when its file list exists, and forwards
+`--soc` to both build and application. Inert fake executables lock both argument
+destinations without paying a Verilator build in the regression.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority

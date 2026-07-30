@@ -236,6 +236,65 @@ def scenario_startup(app, outdir):
         ["bash", launcher_copy, "--check"], cwd=launcher_root,
         env=launcher_env, text=True, capture_output=True, check=False)
     assert ready.returncode == 0 and "backend ready" in ready.stdout
+
+    fake_soc_filelist = os.path.join(launcher_root, "rtl", "ventium_soc.f")
+    fake_soc_backend = os.path.join(
+        launcher_dir, "libventium_viz_soc.so")
+    with open(fake_soc_filelist, "w", encoding="utf-8") as soc_file:
+        soc_file.write("ventium_soc.sv\n")
+    with open(fake_soc_backend, "wb") as soc_backend:
+        soc_backend.write(b"soc-probe")
+    os.utime(fake_soc_filelist, (1_000_000, 1_000_000))
+    os.utime(fake_soc_backend, (2_000_000, 2_000_000))
+    soc_ready = subprocess.run(
+        ["bash", launcher_copy, "--check", "--soc"], cwd=launcher_root,
+        env=launcher_env, text=True, capture_output=True, check=False)
+    assert soc_ready.returncode == 0
+    assert "SoC backend ready" in soc_ready.stdout
+    os.remove(fake_soc_backend)
+    soc_missing = subprocess.run(
+        ["bash", launcher_copy, "--check", "--soc"], cwd=launcher_root,
+        env=launcher_env, text=True, capture_output=True, check=False)
+    assert soc_missing.returncode == 2
+    assert "SoC backend is missing" in soc_missing.stderr
+    assert "--build --soc" in soc_missing.stderr
+
+    # `run.sh --build --soc` used to drop --soc when invoking build.sh while
+    # still forwarding it to the GUI. Use inert fake build/Python commands to
+    # prove both destinations receive the flag without compiling or opening Qt.
+    fake_build = os.path.join(launcher_dir, "build.sh")
+    with open(fake_build, "w", encoding="utf-8") as build_file:
+        build_file.write(
+            "#!/usr/bin/env bash\n"
+            "HERE=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
+            "printf '%s\\n' \"$@\" > \"$HERE/build.args\"\n"
+            ": > \"$HERE/libventium_viz.so\"\n"
+            ": > \"$HERE/libventium_viz_soc.so\"\n")
+    os.chmod(fake_build, 0o755)
+    fake_python = os.path.join(launcher_dir, "fake-python")
+    with open(fake_python, "w", encoding="utf-8") as python_file:
+        python_file.write(
+            "#!/usr/bin/env bash\n"
+            "if [ \"${1:-}\" = '-c' ]; then exit 0; fi\n"
+            "HERE=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
+            "printf '%s\\n' \"$@\" > \"$HERE/python.args\"\n")
+    os.chmod(fake_python, 0o755)
+    build_env = dict(os.environ, PIPEVIZ_PYTHON=fake_python)
+    built_soc = subprocess.run(
+        ["bash", launcher_copy, "--build", "--soc", "--help"],
+        cwd=launcher_root, env=build_env, text=True,
+        capture_output=True, check=False)
+    assert built_soc.returncode == 0
+    with open(os.path.join(launcher_dir, "build.args"),
+              encoding="utf-8") as build_args_file:
+        assert build_args_file.read().splitlines() == ["--soc"]
+    with open(os.path.join(launcher_dir, "python.args"),
+              encoding="utf-8") as python_args_file:
+        python_args = python_args_file.read().splitlines()
+    assert python_args == ["-m", "pipeviz.main", "--soc", "--help"]
+
+    os.utime(fake_build, (1_000_000, 1_000_000))
+    os.utime(fake_backend, (2_000_000, 2_000_000))
     os.utime(fake_rtl, (3_000_000, 3_000_000))
     stale = subprocess.run(
         ["bash", launcher_copy, "--check"], cwd=launcher_root,

@@ -31,6 +31,9 @@ The launcher also rebuilds when the bridge/ctypes ABI, RTL sources, file
 lists/includes, or memory BFM is newer than the ignored backend. Run
 `tools/pipeviz/run.sh --check` for a non-mutating readiness report that names a
 stale input without building or opening the GUI.
+Add `--soc` to check both native variants. `run.sh --build --soc` builds the SoC
+variant and also launches the GUI in SoC mode; a missing SoC RTL file list is
+reported explicitly instead of treating an old library as ready.
 
 `Open…` accepts raw `.flat`/`.bin`/`.img`/`.rom` images and little-endian
 32-bit x86 ELF files. Empty files and DOS/PE executables are rejected with a

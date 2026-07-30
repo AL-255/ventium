@@ -91,6 +91,10 @@ Launcher dependency preflight is exercised first in a disposable `/tmp`
 repository. `run.sh --check` must accept a backend newer than its RTL, then
 return status 2, name `core.sv changed`, and recommend `--build` after that RTL
 becomes newer. The check never builds or opens Qt.
+The same fake repository requires `--check --soc` to distinguish ready and
+missing SoC artifacts. Inert fake build/Python commands then prove
+`--build --soc` passes `--soc` to `build.sh` and retains it for
+`pipeviz.main`, without compiling or launching.
 
 Procedure:
 

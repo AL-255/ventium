@@ -11,12 +11,16 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 BUILD=0
 CHECK=0
+SOC_REQUESTED=0
 ARGS=()
 for a in "$@"; do
   if [ "$a" = "--build" ]; then
     BUILD=1
   elif [ "$a" = "--check" ]; then
     CHECK=1
+  elif [ "$a" = "--soc" ]; then
+    SOC_REQUESTED=1
+    ARGS+=("$a")
   else
     ARGS+=("$a")
   fi
@@ -36,33 +40,50 @@ if ! "$PYTHON_BIN" -c 'import PySide6, capstone' >/dev/null 2>&1; then
   exit 1
 fi
 
-BACKEND="$HERE/libventium_viz.so"
-REBUILD_REASON=""
-if [ "$BUILD" = "1" ]; then
-  REBUILD_REASON="requested by --build"
-elif [ ! -f "$BACKEND" ]; then
-  REBUILD_REASON="backend is missing"
-else
+backend_reason() {
+  local backend="$1" label="$2" dep rtl_newer
+  if [ ! -f "$backend" ]; then
+    echo "$label backend is missing"
+    return
+  fi
   for dep in "$HERE/ventium_viz.cpp" "$HERE/ventium_viz.h" \
              "$HERE/build.sh" "$HERE/pipeviz/backend.py"; do
-    if [ -f "$dep" ] && [ "$dep" -nt "$BACKEND" ]; then
-      REBUILD_REASON="$dep changed"
-      break
+    if [ -f "$dep" ] && [ "$dep" -nt "$backend" ]; then
+      echo "$dep changed"
+      return
     fi
   done
-  if [ -z "$REBUILD_REASON" ]; then
-    RTL_NEWER="$(find "$ROOT/rtl" -type f \
-      \( -name '*.sv' -o -name '*.svh' -o -name '*.f' \) \
-      -newer "$BACKEND" -print -quit 2>/dev/null || true)"
-    [ -z "$RTL_NEWER" ] || REBUILD_REASON="$RTL_NEWER changed"
+  rtl_newer="$(find "$ROOT/rtl" -type f \
+    \( -name '*.sv' -o -name '*.svh' -o -name '*.f' \) \
+    -newer "$backend" -print -quit 2>/dev/null || true)"
+  if [ -n "$rtl_newer" ]; then
+    echo "$rtl_newer changed"
+    return
   fi
-  if [ -z "$REBUILD_REASON" ]; then
-    for dep in "$ROOT/verif/tb/memmodel.cpp" "$ROOT/verif/tb/memmodel.h"; do
-      if [ -f "$dep" ] && [ "$dep" -nt "$BACKEND" ]; then
-        REBUILD_REASON="$dep changed"
-        break
-      fi
-    done
+  for dep in "$ROOT/verif/tb/memmodel.cpp" "$ROOT/verif/tb/memmodel.h"; do
+    if [ -f "$dep" ] && [ "$dep" -nt "$backend" ]; then
+      echo "$dep changed"
+      return
+    fi
+  done
+}
+
+BACKEND="$HERE/libventium_viz.so"
+SOC_BACKEND="$HERE/libventium_viz_soc.so"
+SOC_FILELIST="$ROOT/rtl/ventium_soc.f"
+if [ "$BUILD" = "1" ]; then
+  REBUILD_REASON="requested by --build"
+else
+  REBUILD_REASON="$(backend_reason "$BACKEND" "core")"
+fi
+SOC_REASON=""
+if [ "$SOC_REQUESTED" = "1" ]; then
+  if [ ! -f "$SOC_FILELIST" ]; then
+    SOC_REASON="SoC RTL file list is missing: $SOC_FILELIST"
+  elif [ "$BUILD" = "1" ]; then
+    SOC_REASON="requested by --build --soc"
+  else
+    SOC_REASON="$(backend_reason "$SOC_BACKEND" "SoC")"
   fi
 fi
 
@@ -72,13 +93,28 @@ if [ "$CHECK" = "1" ]; then
     echo "[run] rebuild with: $HERE/run.sh --build" >&2
     exit 2
   fi
+  if [ -n "$SOC_REASON" ]; then
+    echo "[run] SoC backend unavailable or stale: $SOC_REASON" >&2
+    echo "[run] rebuild with: $HERE/run.sh --build --soc" >&2
+    exit 2
+  fi
   echo "[run] backend ready: $BACKEND"
+  if [ "$SOC_REQUESTED" = "1" ]; then
+    echo "[run] SoC backend ready: $SOC_BACKEND"
+  fi
   exit 0
 fi
 
-if [ -n "$REBUILD_REASON" ]; then
-  echo "[run] building backend ($REBUILD_REASON) ..."
-  bash "$HERE/build.sh"
+if [ -n "$REBUILD_REASON" ] \
+   || { [ -n "$SOC_REASON" ] && [ -f "$SOC_FILELIST" ]; }; then
+  BUILD_REASON="$REBUILD_REASON"
+  [ -n "$BUILD_REASON" ] || BUILD_REASON="$SOC_REASON"
+  echo "[run] building backend ($BUILD_REASON) ..."
+  if [ "$SOC_REQUESTED" = "1" ]; then
+    bash "$HERE/build.sh" --soc
+  else
+    bash "$HERE/build.sh"
+  fi
 fi
 
 # run from the repo root so default image paths (build/...) resolve, with the
