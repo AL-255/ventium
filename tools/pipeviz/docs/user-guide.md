@@ -381,9 +381,9 @@ silently discard a dirty editor: choose Save, Discard, or Cancel.
 The source badge visually elides long names but exposes the complete saved path
 or generated/template origin, not-saved state, and unsaved-change state through
 both its tooltip and accessible description.
-The adjacent Assembly/C status similarly retains its full build, stale-map, or
-PC/line message in a tooltip and accessible description when compact layout
-clips the visible label.
+The adjacent Assembly/C status uses a visible right ellipsis for long build,
+stale-map, PC/line, or filename messages while retaining the full value in its
+tooltip and accessible description.
 Both authoring command rows, editors, preview/diagnostics, and status areas are
 regression-rendered at 900×620—the window's practical minimum-size range—as
 well as the normal wide layout.

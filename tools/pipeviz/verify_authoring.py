@@ -919,6 +919,24 @@ def scenario(app, outdir):
         assert 0 <= cursor_corner.x() < win.width()
         assert 0 <= cursor_corner.y() < win.height()
         assert editor.width() >= 500 and editor.height() >= 400
+        original_assembly_status = win.assembly.status.text()
+        long_assembly_status = (
+            "Saved dual-fibonacci-scheduling-experiment-with-a-deliberately-"
+            "long-source-name-for-compact-layout.s")
+        win.assembly.status.setText(long_assembly_status)
+        settle(app)
+        assert win.assembly.status.text() == long_assembly_status
+        assert "…" in win.assembly.status.displayText()
+        assert QFontMetrics(
+            win.assembly.status.font()).horizontalAdvance(
+                win.assembly.status.displayText()) <= (
+                    win.assembly.status.contentsRect().width() + 1)
+        assert win.assembly.status.toolTip() == long_assembly_status
+        assert win.assembly.status.accessibleDescription() == (
+            long_assembly_status)
+        save(win, outdir, "00aa_assembly_compact_long_status")
+        win.assembly.status.setText(original_assembly_status)
+        settle(app)
         assert "Ctrl+Tab" in editor.accessibleDescription()
         assert "Ctrl+/" in editor.accessibleDescription()
         editor.setFocus()

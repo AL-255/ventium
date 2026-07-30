@@ -1760,31 +1760,17 @@ class _Diagnostics(QPlainTextEdit):
             self.lineActivated.emit(self._line)
 
 
-class _StatusLabel(QLabel):
-    """A compact status whose full plain text survives visual clipping."""
+class _ElidedSemanticLabel(QLabel):
+    """Paint a width-aware value while retaining its complete semantic text."""
 
-    def __init__(self, text, accessible_name, parent=None):
-        super().__init__(text, parent)
-        self.setAccessibleName(accessible_name)
-        self.setToolTip(text)
-        self.setAccessibleDescription(text)
-
-    def setText(self, text):
-        super().setText(text)
-        self.setToolTip(text)
-        self.setAccessibleDescription(text)
-
-
-class _SourceBadge(QLabel):
-    """Paint a width-aware identity while retaining its complete semantic text."""
-
-    def __init__(self, parent=None):
+    def __init__(self, text="", mode=Qt.ElideRight, parent=None):
         super().__init__("", parent)
-        self._full_text = ""
+        self._full_text = str(text)
         self._display_text = ""
-        self.setMinimumWidth(200)
-        self.setMaximumWidth(330)
+        self._elide_mode = mode
+        self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self._sync_display()
 
     def setText(self, text):
         self._full_text = str(text)
@@ -1811,8 +1797,33 @@ class _SourceBadge(QLabel):
     def _sync_display(self):
         width = max(0, self.contentsRect().width())
         self._display_text = QFontMetrics(self.font()).elidedText(
-            self._full_text, Qt.ElideMiddle, width)
+            self._full_text, self._elide_mode, width)
         QLabel.setText(self, self._display_text)
+
+
+class _StatusLabel(_ElidedSemanticLabel):
+    """A compact status whose full plain text survives visual clipping."""
+
+    def __init__(self, text, accessible_name, parent=None):
+        super().__init__(text, Qt.ElideRight, parent)
+        self.setAccessibleName(accessible_name)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setToolTip(text)
+        self.setAccessibleDescription(text)
+
+    def setText(self, text):
+        super().setText(text)
+        self.setToolTip(text)
+        self.setAccessibleDescription(text)
+
+
+class _SourceBadge(_ElidedSemanticLabel):
+    """Middle-elide identity while keeping dirty/not-saved state at the tail."""
+
+    def __init__(self, parent=None):
+        super().__init__("", Qt.ElideMiddle, parent)
+        self.setMinimumWidth(200)
+        self.setMaximumWidth(330)
 
 
 class _CursorPositionLabel(QToolButton):

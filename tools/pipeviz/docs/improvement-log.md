@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — explicit compact status elision
+
+**Authoring-status audit:** the neighboring Assembly/C status retained its full
+tooltip but still allowed Qt to hard-clip long saved filenames and stale
+PC/source-map messages. The abrupt edge looked like missing feedback.
+
+**Changes:** authoring status and source identity now share one semantic,
+resize-aware label implementation. Status text right-elides (preserving its
+leading outcome); source identity middle-elides (preserving its dirty/not-saved
+tail). Both continue returning their full text to application logic and
+assistive technology.
+
+**Verification:** a 900×620 regression state injects a realistic long saved
+assembly filename, measures the painted message against its exact content
+rectangle, requires a visible ellipsis, and independently requires the full
+tooltip and accessible description.
+
 ## July 30 continuation — intentional compact source identity
 
 **Compact-authoring audit:** the C source badge fit inside the 900-pixel window,
