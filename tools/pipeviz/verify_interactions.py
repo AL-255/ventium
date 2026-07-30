@@ -846,6 +846,7 @@ def scenario_startup(app, outdir):
         assert "no image loaded" in win.status_lbl.text()
         assert win.cyc_cb.text() == "U/V issue"
         assert all(not widget.isEnabled() for widget in win._config_widgets)
+        assert "QCheckBox:disabled{color:#586069;}" in app.styleSheet()
         assert win.regs._session_hint.isVisible()
         assert not win.regs.state_banner.isVisible()
         assert not win.regs.unpin_btn.isVisible()
@@ -1134,6 +1135,17 @@ def scenario_branch_transport(app, outdir):
         assert "Apply + Reset" in win.reset_btn.text()
         assert "#e3b341" in win.reset_btn.styleSheet()
         win.cyc_cb.setChecked(True)
+        assert win.reset_btn.text().strip() == "Reset"
+        assert not win.reset_btn.styleSheet()
+        assert "no reset needed" in win.action_hint.text()
+        applied_entry = win.entry_e.text()
+        win.entry_e.setText("0x08048001")
+        win.entry_e.textEdited.emit(win.entry_e.text())
+        assert "Apply + Reset" in win.reset_btn.text()
+        win.entry_e.setText(applied_entry.upper())
+        win.entry_e.textEdited.emit(win.entry_e.text())
+        assert win.reset_btn.text().strip() == "Reset"
+        assert not win.reset_btn.styleSheet()
         win.on_reset()
         assert win.reset_btn.text().strip() == "Reset"
         assert not win.reset_btn.styleSheet()

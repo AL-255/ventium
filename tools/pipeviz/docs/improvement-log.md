@@ -94,6 +94,15 @@ Alt+V, which made Qt report an ambiguous shortcut and ignore the workspace
 action. View now uses Alt+W while Alt+V remains dedicated to Visualizer; tests
 exercise the actual keystrokes rather than only inspecting shortcut strings.
 
+**Launch-control truth audit:** empty-session checkboxes were functionally
+disabled but retained enabled-looking text, and changing a reset field away
+from then back to the running value left an amber Apply + Reset false alarm.
+The disabled palette now dims checkboxes explicitly. Reset-required state is
+derived from a normalized snapshot of the configuration actually applied to
+the backend, including only fields consumed by the selected user/system/ELF
+mode; semantically equal hex spellings clear the warning without executing a
+reset. Interaction checks cover mode and address round trips.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

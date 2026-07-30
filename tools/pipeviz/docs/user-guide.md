@@ -75,7 +75,9 @@ current program,
 **Ctrl+Shift+R** re-reads it from disk while preserving the displayed reset
 addresses and mode switches.
 Changing entry/load/ESP or a mode switch marks the control **Apply + Reset**;
-the running backend is unchanged until you apply it. Invalid addresses are
+the running backend is unchanged until you apply it. If you change the setup
+back to the values already running, the amber warning clears without resetting.
+Invalid addresses are
 highlighted and rejected instead of silently falling back to a default;
 reload also leaves the current session intact until its preserved setup
 validates.

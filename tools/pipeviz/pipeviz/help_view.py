@@ -25,6 +25,10 @@ ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
 </ol>
 <p>The four panes are linked: Pipeline and Trace selections pin Registers;
 Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p>
+<p>Launch fields and mode switches are disabled until a program exists. A
+change that differs from the running setup turns Reset into
+<b>Apply + Reset</b>; returning every field to its applied value removes that
+warning without disturbing the model.</p>
 """),
     ("Loading programs", """
 <h1>Loading programs</h1>

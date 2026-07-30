@@ -203,6 +203,8 @@ def _apply_dark(app):
     p.setColor(QPalette.PlaceholderText, QColor("#6e7681"))
     p.setColor(QPalette.ToolTipBase, QColor("#161b22"))
     p.setColor(QPalette.ToolTipText, QColor("#c9d1d9"))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        p.setColor(QPalette.Disabled, role, QColor("#586069"))
     app.setPalette(p)
     app.setStyleSheet(
         "QToolBar{background:#161b22;border-bottom:1px solid #30363d;spacing:4px;padding:3px;}"
@@ -217,6 +219,7 @@ def _apply_dark(app):
         "QPushButton{background:#21262d;border:1px solid #30363d;padding:3px 8px;}"
         "QPushButton:hover{background:#30363d;}"
         "QPushButton:disabled{color:#6e7681;}"
+        "QCheckBox:disabled{color:#586069;}"
         "QSplitter::handle{background:#30363d;}"
         "QSplitter::handle:hover{background:#484f58;}"
         "QToolBar QLabel{color:#8b949e;}"
@@ -271,6 +274,7 @@ class MainWindow(QMainWindow):
         self.image_segments = []
         self.image_kind = None
         self.snapshot_prefix = None
+        self._applied_reset_config = None
         self._session_start_cyc = 1
         self._assembly_source_map = {}
         self._assembly_link_line = None
@@ -598,11 +602,37 @@ class MainWindow(QMainWindow):
     def _mark_reset_required(self, *_args):
         if not self._has_session() or self.snapshot_prefix:
             return
+        if self._current_reset_config() == self._applied_reset_config:
+            self._clear_reset_required()
+            self._notice("Setup matches running model · no reset needed")
+            return
         self.reset_btn.setText(" Apply + Reset")
         self.reset_btn.setStyleSheet("border:1px solid #e3b341;")
         self.reset_btn.setToolTip(
             "Apply changed addresses/mode on a fresh model (R)")
         self._notice("Setup changed — Reset to apply")
+
+    def _current_reset_config(self):
+        """Return only launch fields consumed by Reset, normalized by value."""
+        if self.image_bytes is None or self.snapshot_prefix:
+            return None
+
+        def hex_value(field):
+            try:
+                value = int(field.text(), 0)
+                return value if 0 <= value <= 0xffffffff else None
+            except ValueError:
+                return None
+
+        soc = self.soc_cb.isChecked()
+        system = self.sys_cb.isChecked() or soc
+        return (
+            self.cyc_cb.isChecked(), system, soc,
+            None if system else hex_value(self.entry_e),
+            None if system else hex_value(self.esp_e),
+            (hex_value(self.load_e)
+             if not system and self.image_kind == "flat image" else None),
+        )
 
     def _soc_toggled(self, checked):
         if checked and not self.sys_cb.isChecked():
@@ -1219,6 +1249,7 @@ class MainWindow(QMainWindow):
         self.image_segments = []
         self.image_kind = "snapshot"
         self.snapshot_prefix = prefix
+        self._applied_reset_config = None
         self._clear_assembly_source_link()
         self._last_snapshot_dir = os.path.dirname(os.path.abspath(prefix))
         self.reload_action.setEnabled(False)
@@ -1359,6 +1390,7 @@ class MainWindow(QMainWindow):
         self.tables.start_session(self.backend)
         self.regs.start_session()
         self._unpin()
+        self._applied_reset_config = self._current_reset_config()
         self._clear_reset_required()
         self._refresh_all()
         self._set_transport_enabled(True)

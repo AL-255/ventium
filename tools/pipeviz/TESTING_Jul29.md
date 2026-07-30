@@ -110,6 +110,8 @@ Procedure:
    double-failure; require the existing live handle and requested mode to
    survive with actionable errors.
 4. Confirm Reset, Clock, Insn, Step N, Run, and event navigation are disabled.
+   Require disabled launch checkboxes to use the dim disabled palette rather
+   than looking interactive.
 5. Confirm Pipeline, IPC history, Trace, Registers, caches, Prefetch, Cycles, Memory, and Mem map
    explicitly say that no program is loaded; Memory navigation is disabled.
 6. Confirm `.`, `R`, `F5`, `Ctrl+O`, `Ctrl+Shift+O`, `Ctrl+Shift+R`,
