@@ -1130,76 +1130,144 @@ class _PrefetchView(QWidget):
         self.setPalette(palette)
         self.setAutoFillBackground(True)
         v = QVBoxLayout(self); v.setContentsMargins(8, 8, 8, 8)
-        self.info = QLabel(); self.info.setStyleSheet("color:#8b949e;")
-        self.info.setAccessibleName("Prefetch address state")
+        self.info = _ResponsiveSummary("Prefetch address state")
+        self.info.setStyleSheet("color:#8b949e;")
         v.addWidget(self.info)
-        grid = QGridLayout(); grid.setSpacing(3)
+        self.grid = QGridLayout(); self.grid.setSpacing(3)
+        self.idx_lbls = []
         self.byte_lbls = []
-        hdr = QLabel("ibuf[0..15] (slow-path fetch buffer):")
-        hdr.setStyleSheet("font-weight:bold;")
-        v.addWidget(hdr)
-        gw = QWidget(); gw.setLayout(grid)
+        self.hdr = _ResponsiveSummary("Prefetch buffer byte range")
+        self.hdr.set_summary(
+            "ibuf[0..15] (slow-path fetch buffer):",
+            "ibuf[0..15] · slow path")
+        self.hdr.setStyleSheet("font-weight:bold;")
+        self.hdr.setToolTip("Sixteen-byte slow-path instruction fetch buffer")
+        v.addWidget(self.hdr)
+        self.grid_host = QWidget(); self.grid_host.setLayout(self.grid)
         for i in range(16):
             idx = QLabel(f"{i:02d}"); idx.setAlignment(Qt.AlignCenter)
             idx.setStyleSheet("color:#6e7681; font-size:8px;")
-            grid.addWidget(idx, 0, i)
+            idx.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            self.idx_lbls.append(idx)
             b = QLabel("00"); b.setAlignment(Qt.AlignCenter); b.setFont(_mono(11))
             b.setAccessibleName(f"Prefetch buffer byte {i}")
-            b.setStyleSheet("background:#161b22; border:1px solid #30363d; padding:4px;")
-            grid.addWidget(b, 1, i)
+            b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             self.byte_lbls.append(b)
-        v.addWidget(gw)
+        v.addWidget(self.grid_host)
         self.decode = QLabel(); self.decode.setFont(_mono(10))
         self.decode.setAccessibleName("Prefetch buffer decode")
         self.decode.setWordWrap(True)
         v.addWidget(self.decode)
         v.addStretch(1)
+        self._compact = None
+        self._decode_full = ""
+        self._decode_compact = ""
+        self._decode_description = ""
+        self._set_compact(self.width() < 520)
         self.set_session_active(False)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._set_compact(event.size().width() < 520)
+
+    def _set_compact(self, compact):
+        if compact == self._compact:
+            return
+        self._compact = compact
+        for label in (*self.idx_lbls, *self.byte_lbls):
+            self.grid.removeWidget(label)
+        self.grid.setHorizontalSpacing(1 if compact else 3)
+        self.grid.setVerticalSpacing(2 if compact else 3)
+        for index, (idx, byte) in enumerate(
+                zip(self.idx_lbls, self.byte_lbls)):
+            if compact:
+                block, column = divmod(index, 8)
+                index_row = block * 2
+            else:
+                column = index
+                index_row = 0
+            self.grid.addWidget(idx, index_row, column)
+            self.grid.addWidget(byte, index_row + 1, column)
+            byte.setFont(_mono(9 if compact else 11))
+            self._style_byte(byte, byte.text() == "—")
+        self._sync_decode()
+        self.grid.invalidate()
+
+    def _style_byte(self, byte, unavailable=False):
+        padding = 1 if self._compact else 4
+        color = "color:#586069;" if unavailable else ""
+        byte.setStyleSheet(
+            f"{color}background:#161b22;border:1px solid #30363d;"
+            f"padding:{padding}px;")
+
+    def _set_decode(self, full, compact, description, style):
+        self._decode_full = full
+        self._decode_compact = compact
+        self._decode_description = description
+        self.decode.setStyleSheet(style)
+        self.decode.setToolTip(description)
+        self.decode.setAccessibleDescription(description)
+        self._sync_decode()
+
+    def _sync_decode(self):
+        self.decode.setText(
+            self._decode_compact if self._compact else self._decode_full)
 
     def set_session_active(self, active):
         if active:
             return
-        self.info.setText("No program loaded")
+        self.info.set_summary("No program loaded")
+        self.info.setToolTip("No program loaded")
         for byte in self.byte_lbls:
             byte.setText("—")
-            byte.setStyleSheet(
-                "color:#586069;background:#161b22;border:1px solid #30363d;padding:4px;")
-        self.decode.setText(
-            "<i>Open a program to inspect its slow-path prefetch buffer.</i>")
-        self.decode.setStyleSheet("color:#586069;")
+            self._style_byte(byte, unavailable=True)
+        self._set_decode(
+            "<i>Open a program to inspect its slow-path prefetch buffer.</i>",
+            "Open a program to inspect ibuf.",
+            "No program loaded. Open a program to inspect its slow-path "
+            "prefetch buffer.",
+            "color:#586069;")
         self.setAccessibleDescription(
             "No program loaded. Open a program to inspect its slow-path "
             "prefetch buffer.")
 
     def update_from(self, s, bits):
-        self.info.setText(
+        info_full = (
             f"flin (linear fetch addr) = 0x{s.flin:08x}    eip = 0x{s.eip:08x}    "
             f"fetch_word = {s.fetch_word}")
+        info_compact = (
+            f"F:{s.flin:08x} E:{s.eip:08x} W:{s.fetch_word}")
+        self.info.set_summary(info_full, info_compact)
+        self.info.setToolTip(info_full)
         ib = bytes(s.ibuf[i] for i in range(16))
         for i in range(16):
             self.byte_lbls[i].setText(f"{ib[i]:02x}")
-            self.byte_lbls[i].setStyleSheet(
-                "background:#161b22;border:1px solid #30363d;padding:4px;")
+            self._style_byte(self.byte_lbls[i])
         if not any(ib):
             # An all-zero ibuf is the IDLE slow-path buffer — the core is on the fast
             # dual-issue path, fetching straight from the I-cache, so the slow-path
             # decoder is not engaged. Decoding the zeros would render the classic
             # `00 00` -> `add byte ptr [eax], al` artifact and falsely label it
             # '@ eip', contradicting the real instruction at eip (shown in Memory).
-            self.decode.setText(
+            decode_full = (
                 "<i>ibuf idle — fast-path fetch from the I-cache; "
                 "slow-path decoder not engaged</i>")
-            self.decode.setStyleSheet("color:#6e7681;")
+            decode_compact = "idle · fast-path I$ fetch"
             decode_state = (
                 "Buffer idle; fast-path fetch from the instruction cache, "
                 "slow-path decoder not engaged.")
+            decode_style = "color:#6e7681;"
         else:
             txt, sz = disasm.text(ib, s.eip, bits)
-            self.decode.setText(f"ibuf decode @ eip:  <b>{txt}</b>  ({sz} bytes)")
-            self.decode.setStyleSheet("color:#c9d1d9;")
+            decode_full = (
+                f"ibuf decode @ eip:  <b>{txt}</b>  ({sz} bytes)")
+            decode_compact = f"@EIP: {txt} · {sz}B"
             decode_state = (
                 f"Buffer decodes at EIP as {txt}, {sz} "
                 f"byte{'s' if sz != 1 else ''}.")
+            decode_style = "color:#c9d1d9;"
+        self._set_decode(
+            decode_full, decode_compact, decode_state, decode_style)
         self.setAccessibleDescription(
             f"Linear fetch address 0x{int(s.flin):08x}; "
             f"EIP 0x{int(s.eip):08x}; fetch word {int(s.fetch_word)}. "

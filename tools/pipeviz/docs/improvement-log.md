@@ -84,6 +84,11 @@ Code$/Data$ summaries no longer end in a cropped dash at narrow widths. They
 select complete compact forms that retain residency, geometry, and—for
 Data$—replay origin and miss rate, while their full geometry, counts, and replay
 breakdown remain available in the tooltip and accessible description.
+Prefetch no longer crushes its sixteen byte cells to negative content widths
+in the 196 px analysis pane. Below 520 px it reflows them into two indexed rows
+of eight with measured compact padding/font, abbreviates the address and decode
+captions without losing flin/EIP/fetch-word/decode state, and restores the
+single 16-byte row and full prose when widened.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

@@ -2466,6 +2466,29 @@ def scenario_layout(app, outdir):
                 win.tables.dc_lbl.contentsRect().width())
         assert "replay [empty] 100% miss (14/14)" in (
             win.tables.dc_lbl.accessibleDescription())
+        QTest.keyClick(win, Qt.Key_4, Qt.AltModifier)
+        settle(app)
+        prefetch = win.tables.pf
+        assert win.tables.tabs.currentIndex() == 3
+        assert prefetch._compact
+        assert prefetch.info.displayText() == (
+            "F:08048015 E:08048015 W:0")
+        assert not prefetch.info.displayText().endswith("…")
+        for index, byte in enumerate(prefetch.byte_lbls):
+            row, column, _row_span, _column_span = (
+                prefetch.grid.getItemPosition(
+                    prefetch.grid.indexOf(byte)))
+            assert row == (index // 8) * 2 + 1
+            assert column == index % 8
+            assert byte.contentsRect().width() >= (
+                byte.fontMetrics().horizontalAdvance(byte.text()))
+        assert prefetch.decode.text().startswith(
+            "@EIP: lea esi, [0x8049000]")
+        assert prefetch.decode.text().endswith("· 6B")
+        assert "6 bytes" in prefetch.decode.accessibleDescription()
+        save_shot(
+            app, win, outdir, "08d_true_minimum_prefetch",
+            min_width=900, min_height=620)
         QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
         settle(app)
         assert win.regs.state_banner.text() == "LIVE · current state"
@@ -2572,6 +2595,16 @@ def scenario_layout(app, outdir):
             f"compact instruction column is only "
             f"{win.trace.tbl.columnWidth(6)}px")
         assert win.tables.width() >= 570
+        QTest.keyClick(win, Qt.Key_4, Qt.AltModifier)
+        settle(app)
+        assert not win.tables.pf._compact
+        row, column, _row_span, _column_span = (
+            win.tables.pf.grid.getItemPosition(
+                win.tables.pf.grid.indexOf(
+                    win.tables.pf.byte_lbls[15])))
+        assert (row, column) == (1, 15)
+        QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
+        settle(app)
         QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
         settle(app)
         assert win.tables.mem._navigation_mode == "wide"
