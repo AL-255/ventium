@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Authoring direct-manipulation regression audit:** acceptance now drives real
+pointer events through both documented source interactions. A line-number click
+must select exactly that full line and restore editor focus. An opcode
+single-click must update the description and miniature pipeline without
+changing source; a double-click must insert the selected mnemonic, dismiss the
+non-activating popup, and return typing focus to the editor.
+
 **Indexed-guide evidence cross-check:** the Pipeline topic's Dual Fibonacci
 example now includes the verified 2,451→1,984-clock and 0.461→0.571-IPC result
 plus its 85.3% pairing rate, making the U–V benefit concrete without leaving

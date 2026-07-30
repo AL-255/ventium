@@ -469,6 +469,16 @@ def scenario(app, outdir):
         settle(app)
         assert not win.assembly.find_bar.isVisible()
         assert not editor._find_ranges
+        line_five = editor.document().findBlockByNumber(4)
+        line_five_y = round(editor.blockBoundingGeometry(line_five).translated(
+            editor.contentOffset()).center().y())
+        QTest.mouseClick(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(5, line_five_y))
+        settle(app)
+        assert editor.textCursor().blockNumber() + 1 == 5
+        assert editor.textCursor().selectedText() == "    mov eax, 0"
+        assert app.focusWidget() is editor
         save(win, outdir, "00_assembly_workbench")
         win.resize(900, 620)
         settle(app)
@@ -638,6 +648,37 @@ def scenario(app, outdir):
         editor.completion.list.setCurrentRow(add_row)
         editor.completion.accept_current()
         assert editor.toPlainText() == ".loop: add "
+
+        # Pointer completion is deliberately two-stage: one click previews
+        # without touching source; a double-click inserts and restores typing
+        # focus to the non-activating tooltip's editor.
+        editor.setPlainText("ad")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        editor.setFocus()
+        assert editor.request_completion()
+        add_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic == "add")
+        add_rect = editor.completion.list.visualItemRect(
+            editor.completion.list.item(add_row))
+        QTest.mouseClick(
+            editor.completion.list.viewport(), Qt.LeftButton, Qt.NoModifier,
+            add_rect.center())
+        settle(app)
+        assert editor.completion.list.currentRow() == add_row
+        assert editor.completion.info.preview.info.mnemonic == "add"
+        assert editor.toPlainText() == "ad"
+        assert editor.completion.isVisible()
+        assert app.focusWidget() is editor
+        QTest.mouseDClick(
+            editor.completion.list.viewport(), Qt.LeftButton, Qt.NoModifier,
+            add_rect.center())
+        settle(app)
+        assert editor.toPlainText() == "add "
+        assert not editor.completion.isVisible()
+        assert app.focusWidget() is editor
 
         # GNU as uses ';' as a statement separator. Completion and the persistent
         # preview must understand the second opcode rather than grey it as a
