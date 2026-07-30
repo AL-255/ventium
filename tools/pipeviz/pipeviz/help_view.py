@@ -227,7 +227,8 @@ Ctrl+Tab moves to diagnostics and Ctrl+Shift+Tab moves toward the primary
 Run/Compile control without changing source. These navigation chords also close
 a live completion popup instead of inserting its selected opcode. With one or
 more lines selected, Tab and Shift+Tab indent/outdent the complete block as one
-undoable edit rather than replacing the selection.</p>
+undoable edit rather than replacing the selection. In leading whitespace,
+Backspace removes spaces to the previous four-column stop as one undoable edit.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>

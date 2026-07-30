@@ -291,6 +291,7 @@ blank indented line dedents one level first. Plain `Tab` indents source;
 `Ctrl+Tab` and `Ctrl+Shift+Tab` leave either editor without changing it.
 With lines selected, `Tab`/`Shift+Tab` indent or outdent the whole block as one
 undoable edit; a caret-only Tab inserts spaces to the next four-column stop.
+Backspace in leading whitespace returns to the previous stop in one edit.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.

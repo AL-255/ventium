@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Soft-indentation deletion audit:** auto-indent and caret Tab create four-space
+stops, but ordinary Backspace removed only one space at a time. In leading
+whitespace it now returns to the previous four-column stop (or removes one
+literal tab) as one undoable edit; Backspace after content keeps its normal
+single-character behavior. Acceptance covers a full auto-indent removal/undo
+and a six-to-four-space partial stop.
+
 **Toolchain-warning severity audit:** GCC and GNU-as warnings returned success,
 so both workbenches previously painted them green and offered no source jump.
 Successful output still flows into editable Assembly/run, but warnings now use

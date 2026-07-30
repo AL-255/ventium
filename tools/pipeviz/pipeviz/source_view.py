@@ -311,6 +311,23 @@ class CodeEditor(QPlainTextEdit):
                 or bool(event.modifiers() & Qt.ShiftModifier))
             event.accept()
             return
+        if (event.key() == Qt.Key_Backspace
+                and not event.modifiers()
+                & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)):
+            cursor = self.textCursor()
+            before = cursor.block().text()[:cursor.positionInBlock()]
+            if (not cursor.hasSelection() and before
+                    and not before.strip()):
+                remove = (
+                    1 if before.endswith("\t") else
+                    cursor.positionInBlock() % 4 or
+                    min(4, cursor.positionInBlock()))
+                cursor.movePosition(
+                    QTextCursor.Left, QTextCursor.KeepAnchor, remove)
+                cursor.removeSelectedText()
+                self.setTextCursor(cursor)
+                event.accept()
+                return
         # Preserve indentation in both workbenches, and indent one level after
         # an assembly label or C block/case opener. QPlainTextEdit otherwise
         # drops back to column zero on every newline.
