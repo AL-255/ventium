@@ -155,6 +155,10 @@ and clear results. With the Pipeline diagram focused and the filter already
 empty, Escape instead returns a pinned retirement to LIVE without advancing.
 If you only inspected a filter, clearing it restores the
 newest live rows; if you selected a result, that historical context remains.
+Malformed structured terms (for example `n>200` or `pc:xyz`) turn red, explain
+the accepted syntax on hover, and leave the trace visible while you correct
+them; a valid free-text query with no hits still shows an ordinary zero-result
+state.
 Hotspots and Branches rows activate with Enter as well as the mouse.
 Large steps remain bounded and honest: Trace labels its newest 6,000
 retirements, Pipeline labels its newest 50,000-cycle window, and the compact

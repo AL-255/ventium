@@ -194,6 +194,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   and physical translation is retained for Memory drill-down. A **filter box** accepts
   `mov` / `pc:08048` / `n>=100` / `cyc>=133` / `pipe:V` / `stall` / `@` (memory-accessing
   rows); `/` focuses it, Enter/F3 and Shift+F3 navigate results, and Escape clears it.
+  Malformed structured terms stay visibly red with an exact syntax hint and do
+  not hide the trace while they are corrected.
   Selecting a row links by retirement ID, so U and V remain distinguishable
   even when they commit in the same cycle. Clearing an exploratory filter
   returns to the newest rows when no result was chosen; a chosen result keeps

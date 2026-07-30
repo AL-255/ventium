@@ -140,6 +140,9 @@ Procedure:
     `pair(win)`/`mispred(win)` while retaining lifetime retirement/IPC.
 17. Run a real six-byte loop for 9,000 clocks in one refresh and require backend,
     Pipeline, IPC, Cycles, and newest-6,000 Trace endpoints to agree.
+18. Exercise malformed structured Trace terms. Invalid operators or values must
+    show an exact syntax hint, disable match navigation, and preserve every row;
+    leading-zero decimal values remain accepted.
 
 Expected and observed:
 
@@ -153,6 +156,8 @@ Expected and observed:
   the repository, while a generic large `.bin` stays a fresh user workload.
 - Historical timing mnemonics/dependencies use captured retirement bytes and
   never re-read mutable code through the current mapping.
+- `01a_invalid_trace_filter.png` shows the red invalid-state label while the
+  complete trace remains available as correction context.
 - Disabled Run is visibly gray rather than looking executable.
 - F1 opens the indexed user guide.
 - The Pipeline page explains axes, U/V pairs, F/L/D/X/M/W/=/!/S glyphs,

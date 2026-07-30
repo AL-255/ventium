@@ -1312,6 +1312,17 @@ def scenario_branch_transport(app, outdir):
             or int(win.trace.tbl.item(row, 0).text()) >= 200
             for row in range(win.trace.tbl.rowCount())
         )
+        # Structured typos are not legitimate zero-result searches: explain
+        # the syntax and retain all rows as context while the query is fixed.
+        total_rows = win.trace.tbl.rowCount()
+        assert set_filter(app, win.trace, "n>200") == total_rows
+        assert win.trace.match_lbl.text() == "invalid filter"
+        assert "use >=" in win.trace.filt.toolTip()
+        assert not win.trace.next_match_btn.isEnabled()
+        assert set_filter(app, win.trace, "pc:xyz") == total_rows
+        assert "hexadecimal PC" in win.trace.filt.toolTip()
+        save_shot(app, win, outdir, "01a_invalid_trace_filter")
+        assert set_filter(app, win.trace, "n>=0200") == 12
         set_filter(app, win.trace, "not-a-real-retirement")
         assert not win.trace.next_match_btn.isEnabled()
         assert "#f85149" in win.trace.filt.styleSheet()

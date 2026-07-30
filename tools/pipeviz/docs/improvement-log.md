@@ -103,6 +103,14 @@ the backend, including only fields consumed by the selected user/system/ELF
 mode; semantically equal hex spellings clear the warning without executing a
 reset. Interaction checks cover mode and address round trips.
 
+**Trace-filter syntax audit:** malformed structured terms such as `n>200`,
+`n>=oops`, or `pc:xyz` were indistinguishable from a valid zero-result text
+search and hid the entire trace. Structured filters now validate operators,
+numeric formats, pipe names, and PC hex width before filtering. Invalid input
+keeps every row visible, disables traversal, and exposes the exact correction
+in the red field/count tooltip; friendly leading-zero decimal values work.
+Free-text no-match behavior remains unchanged.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

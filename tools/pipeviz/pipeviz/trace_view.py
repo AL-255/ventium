@@ -270,11 +270,12 @@ class TraceView(QWidget):
         self.filt = _TraceFilter()
         self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:V   stall   @  (mem)")
         self.filt.setClearButtonEnabled(True)
-        self.filt.setToolTip(
+        self._filter_help = (
             "Space-separated terms are ANDed.\n"
             "Examples: mov, pc:08048, n>=100, cyc<=200, pipe:U, stall, @.\n"
             "/ focuses search; Enter or F3 selects the next match; "
             "Shift+F3 selects the previous match; Esc clears.")
+        self.filt.setToolTip(self._filter_help)
         mfilt = QFont("monospace"); mfilt.setStyleHint(QFont.Monospace); mfilt.setPointSize(9)
         self.filt.setFont(mfilt)
         self.filt.textChanged.connect(self._on_filter)
@@ -720,6 +721,46 @@ class TraceView(QWidget):
             self._filter_return_tail = False
 
     @staticmethod
+    def _filter_int(text):
+        """Accept friendly decimal (including leading zeroes) or explicit hex."""
+        value = int(text, 16) if text.lower().startswith("0x") else int(text, 10)
+        if value < 0:
+            raise ValueError("filter values must be non-negative")
+        return value
+
+    @classmethod
+    def _filter_error(cls, tokens):
+        for tok in tokens:
+            if tok.startswith("pipe:"):
+                if tok[5:] not in ("u", "v", "-"):
+                    return f"{tok!r}: pipe must be U, V, or -"
+                continue
+            numeric = next((
+                (prefix, tok[len(prefix):])
+                for prefix in ("n>=", "n<=", "n=", "cyc>=", "cyc<=", "cyc=")
+                if tok.startswith(prefix)), None)
+            if numeric is not None:
+                _prefix, value = numeric
+                try:
+                    cls._filter_int(value)
+                except ValueError:
+                    return (
+                        f"{tok!r}: expected a non-negative decimal or 0x hex value")
+                continue
+            if tok.startswith("pc:"):
+                value = tok[3:].removeprefix("0x")
+                if not value or len(value) > 8 or any(
+                        char not in "0123456789abcdef" for char in value):
+                    return f"{tok!r}: expected 1–8 hexadecimal PC digits"
+                continue
+            if tok.startswith(("n>", "n<", "cyc>", "cyc<")):
+                return f"{tok!r}: use >= or <= (for example n>=100)"
+            if tok.startswith(("n:", "pc=", "cyc:")):
+                return (
+                    f"{tok!r}: use n=, cyc=, or pc: according to the field")
+        return None
+
+    @staticmethod
     def _match(filt, tokens):
         hay, retire_n, pc, cyc, pipe, stall = filt
         for tok in tokens:
@@ -729,22 +770,22 @@ class TraceView(QWidget):
                     if not query or pipe.lower() != query:
                         return False
                 elif tok.startswith("n>="):
-                    if retire_n < int(tok[3:], 0):
+                    if retire_n < TraceView._filter_int(tok[3:]):
                         return False
                 elif tok.startswith("n<="):
-                    if retire_n > int(tok[3:], 0):
+                    if retire_n > TraceView._filter_int(tok[3:]):
                         return False
                 elif tok.startswith("n="):
-                    if retire_n != int(tok[2:], 0):
+                    if retire_n != TraceView._filter_int(tok[2:]):
                         return False
                 elif tok.startswith("cyc>="):
-                    if cyc < int(tok[5:], 0):
+                    if cyc < TraceView._filter_int(tok[5:]):
                         return False
                 elif tok.startswith("cyc<="):
-                    if cyc > int(tok[5:], 0):
+                    if cyc > TraceView._filter_int(tok[5:]):
                         return False
                 elif tok.startswith("cyc="):
-                    if cyc != int(tok[4:], 0):
+                    if cyc != TraceView._filter_int(tok[4:]):
                         return False
                 elif tok.startswith("pc:"):
                     query = tok[3:].removeprefix("0x")
@@ -762,20 +803,34 @@ class TraceView(QWidget):
     def _apply_filter(self):
         toks = self._tokens
         n = self.tbl.rowCount()
+        error = self._filter_error(toks)
         shown = 0
         for row in range(n):
             it = self.tbl.item(row, 0)
             filt = it.data(_FILT_ROLE) if it is not None else None
-            ok = (not toks) or (filt is not None and self._match(filt, toks))
+            # Invalid structured syntax must not erase the trace while the user
+            # is correcting it. A valid free-text query with no hits still
+            # behaves as an ordinary zero-result search.
+            ok = (
+                bool(error) or not toks
+                or (filt is not None and self._match(filt, toks)))
             self.tbl.setRowHidden(row, not ok)
             shown += ok
         active = bool(toks)
-        self.match_lbl.setText("" if not active else f"{shown}/{n} match")
+        self.match_lbl.setText(
+            "" if not active else
+            "invalid filter" if error else
+            f"{shown}/{n} match")
         self.match_lbl.setStyleSheet(
-            "color:#f85149;font-size:8px;" if active and shown == 0
+            "color:#f85149;font-size:8px;" if error or (active and shown == 0)
             else "color:#8b949e;font-size:8px;")
+        self.match_lbl.setToolTip(error or "")
         self.filt.setStyleSheet(
-            "border:1px solid #f85149;" if active and shown == 0 else "")
+            "border:1px solid #f85149;"
+            if error or (active and shown == 0) else "")
+        self.filt.setToolTip(
+            f"Invalid filter: {error}\n\n{self._filter_help}"
+            if error else self._filter_help)
         for button in (self.prev_match_btn, self.next_match_btn):
             button.setVisible(active)
-            button.setEnabled(shown > 0)
+            button.setEnabled(not error and shown > 0)
