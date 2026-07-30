@@ -15,7 +15,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QToolBar, QLabel,
                                QLineEdit, QPushButton, QCheckBox, QSpinBox, QSplitter,
                                QFileDialog, QMessageBox, QStyle, QSizePolicy,
-                               QComboBox, QTabWidget)
+                               QComboBox, QTabWidget, QToolButton)
 from PySide6.QtGui import (QAction, QFont, QPalette, QColor, QKeySequence,
                            QShortcut, QRegularExpressionValidator)
 from PySide6.QtCore import Qt, QTimer, QRegularExpression
@@ -352,6 +352,8 @@ class MainWindow(QMainWindow):
         examples_menu.aboutToShow.connect(self._refresh_example_actions)
         self._refresh_example_actions()
         self._examples_menu = examples_menu
+        self.program_open_btn.setMenu(examples_menu)
+        self.program_open_btn.setPopupMode(QToolButton.MenuButtonPopup)
         file_menu.addSeparator()
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence("Ctrl+Q"))
@@ -507,13 +509,22 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
         self.session_toolbar = tb
 
-        openbtn = QPushButton(" Open…")
-        openbtn.setMinimumWidth(92)
-        openbtn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
-        openbtn.clicked.connect(self.on_open)
-        openbtn.setAccessibleName("Open program")
-        openbtn.setToolTip("Open a flat binary or x86 ELF executable (you can also drag a file here)")
-        tb.addWidget(openbtn)
+        self.program_open_btn = QToolButton()
+        self.program_open_btn.setText("Open…")
+        self.program_open_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.program_open_btn.setMinimumWidth(92)
+        self.program_open_btn.setIcon(
+            self.style().standardIcon(QStyle.SP_DirOpenIcon))
+        self.program_open_btn.clicked.connect(self.on_open)
+        self.program_open_btn.setAccessibleName(
+            "Open program or choose a built example")
+        self.program_open_btn.setAccessibleDescription(
+            "Click the main button to choose a flat binary or x86 ELF; "
+            "open the arrow menu to choose a built verification example.")
+        self.program_open_btn.setToolTip(
+            "Open a program; use the arrow for built examples "
+            "(you can also drag a file here)")
+        tb.addWidget(self.program_open_btn)
 
         snapbtn = QPushButton(" Snapshot…")
         snapbtn.setMinimumWidth(104)

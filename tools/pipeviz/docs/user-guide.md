@@ -71,9 +71,11 @@ program's custom value. The `.bin` suffix alone never forces BIOS boot; set
 architectural clock remains absolute, but Trace retirement IDs, IPC, Pipeline,
 sparkline, and Cycles attribution begin a fresh visible epoch at the restore
 point because the checkpoint does not contain earlier visual history.
-Use **File → Open example** to load an available verification workload without
-locating its build path. The menu rescans whenever it opens, so an example built
-after pipeviz starts becomes available immediately. After recompiling the
+Use the arrow beside the toolbar’s **Open…** split button, or
+**File → Open example**, to load an available verification workload without
+locating its build path. Clicking the main Open face still opens the normal
+file chooser. Both example-menu routes rescan whenever they open, so an example
+built after pipeviz starts becomes available immediately. After recompiling the
 current program,
 **Ctrl+Shift+R** re-reads it from disk while preserving the displayed reset
 addresses and mode switches.

@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**First-run example-discovery audit:** startup empty states recommended built
+examples, but the only actual route was nested in File. The existing 92-pixel
+Open control is now a split button: its main face retains file selection while
+the arrow exposes the same live-rescanned example menu. This adds no compact
+toolbar width; acceptance locks menu identity, accessible action distinction,
+and 900-pixel no-overflow geometry.
+
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
 correctly remained enabled until quiescence. It now says “halted — waiting for

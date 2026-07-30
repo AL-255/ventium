@@ -28,9 +28,9 @@ stopped with the program, or exhausted its safety limit.</p>
 early at terminal quiescence, so a smaller-than-requested clock count is never
 left unexplained.</p>
 <ol>
- <li>Open or drop a program. ELF entry and segments are automatic. The
- <b>File → Open example</b> menu rescans and exposes the built verification
- workloads.</li>
+ <li>Open or drop a program. ELF entry and segments are automatic. The arrow
+ beside <b>Open…</b> and <b>File → Open example</b> expose the same rescanned
+ built verification workloads.</li>
  <li>Use Step N to establish a useful timeline.</li>
  <li>Find an event in the sparkline or with <code>[</code>/<code>]</code>.</li>
  <li>Click its timing/trace row to pin architectural state.</li>
@@ -60,8 +60,9 @@ variants; <code>run.sh --build --soc</code> builds and launches the SoC
 variant rather than dropping the flag at the build step.
 <code>run.sh --help</code> never builds or requires the native model.</p>
 <ul>
- <li><b>File → Open example</b> rescans and opens any built verification
- workload.</li>
+ <li>The arrow beside <b>Open…</b>, or <b>File → Open example</b>, rescans and
+ opens any built verification workload. Clicking the main Open face retains
+ the ordinary file chooser.</li>
  <li><b>Ctrl+O</b>, the Open button, or dropping a file opens a program.</li>
  <li><b>Ctrl+Shift+R</b> reloads rebuilt bytes while preserving the displayed
  reset addresses and mode switches.</li>

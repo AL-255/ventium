@@ -979,6 +979,28 @@ def scenario_startup(app, outdir):
             action.text() for action in win._examples_menu.actions()
             if action.isEnabled()
         }
+        assert isinstance(win.program_open_btn, QToolButton)
+        assert (win.program_open_btn.popupMode()
+                == QToolButton.MenuButtonPopup)
+        assert win.program_open_btn.menu() is win._examples_menu
+        assert "main button" in (
+            win.program_open_btn.accessibleDescription())
+        assert "arrow menu" in (
+            win.program_open_btn.accessibleDescription())
+        example_popup_seen = []
+
+        def close_example_popup():
+            example_popup_seen.append(win._examples_menu.isVisible())
+            win._examples_menu.close()
+
+        QTimer.singleShot(50, close_example_popup)
+        QTest.mouseClick(
+            win.program_open_btn, Qt.LeftButton, Qt.NoModifier,
+            QPoint(win.program_open_btn.width() - 4,
+                   win.program_open_btn.height() // 2))
+        settle(app)
+        assert example_popup_seen == [True]
+        assert not win._examples_menu.isVisible()
         assert {"Dual issue and branches", "D-cache pressure",
                 "x87 overlap"} <= enabled_examples
         real_example_lookup = main_module._first_repo_file
@@ -2258,6 +2280,10 @@ def scenario_layout(app, outdir):
             overflow = toolbar.findChild(QToolButton, "qt_toolbar_ext_button")
             assert overflow is None or not overflow.isVisible(), (
                 f"{toolbar.windowTitle()} toolbar overflowed at true minimum")
+        open_corner = win.program_open_btn.mapTo(
+            win, win.program_open_btn.rect().bottomRight())
+        assert 0 <= open_corner.x() < win.width()
+        assert win.program_open_btn.menu() is win._examples_menu
         assert win.outer_split.sizes()[0] >= 690
         assert win.outer_split.sizes()[1] >= 170
         status_html = win.status_lbl.text()
