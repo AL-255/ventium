@@ -261,6 +261,10 @@ _start:
 also loads the resulting ELF into the Visualizer. Diagnostics name and
 highlight the failing line. Their first line is an actionable jump: focus the
 diagnostic and press Enter, or double-click it, to return to that editor line.
+Successful GCC/GNU-as warnings still emit runnable Assembly, but use an amber
+source mark and the same Enter/double-click jump rather than appearing as a
+clean green build. After a warning-producing C compile switches to Assembly,
+its amber status says to use `Alt+C` for the source diagnostic.
 `Ctrl+Space` opens completion over the complete
 Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
 description, mode/build availability, approximate latency, pairing class

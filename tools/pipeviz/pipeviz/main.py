@@ -1225,7 +1225,18 @@ class MainWindow(QMainWindow):
                 "C compiled, but generated assembly was not opened")
             return
         self.workspace.setCurrentWidget(self.assembly)
-        self._notice("C compiled — review or edit the generated assembly, then run")
+        if self.c_source.diagnostics._severity == "warning":
+            self.assembly.status.setText(
+                "Generated assembly ready · C compiled with warnings "
+                "(Alt+C for source details)")
+            self.assembly.status.setStyleSheet(
+                "color:#e3b341;padding:2px;")
+            self._notice(
+                "C compiled with warnings — Alt+C for source details; "
+                "generated Assembly is ready")
+        else:
+            self._notice(
+                "C compiled — review or edit the generated assembly, then run")
 
     def _run_assembly(self, path, source_map):
         if self.load_image(path):

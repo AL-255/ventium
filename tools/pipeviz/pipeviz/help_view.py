@@ -253,10 +253,12 @@ statement while ignoring separators/comment markers inside quoted data.
 Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
 style, including when completion replaces text on both sides of the cursor.
 Digits keep refining names such as <code>cmpxchg8b</code>, while Backspace and
-Delete refresh the current matches. Build errors, including fatal compiler
-errors, highlight their source line. The first diagnostic line is actionable:
+Delete refresh the current matches. Build errors highlight their source line
+in red; successful GCC/GNU-as warnings remain runnable but mark their line and
+diagnostics in amber. The first diagnostic line is actionable:
 focus it and press Enter, or double-click it, to return to the marked editor
-line. Editing
+line. When a warning-producing C compile opens Assembly, its amber status points
+back to the C details with Alt+C. Fatal compiler errors use the same jump path. Editing
 the source clears diagnostics from the old revision instead of leaving a stale
 green or red result visible. Ctrl+Shift+R is intentionally Visualizer-only:
 it reloads an already-built program rather than rebuilding editor text. Use

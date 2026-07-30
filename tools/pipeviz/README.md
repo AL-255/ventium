@@ -145,7 +145,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
     Pipeline row highlights the exact responsible assembly line. Editing clears
     prior build diagnostics and PC links so green results never describe stale
-    text. Source drops route to this workspace; labels/new blocks auto-indent
+    text. Errors are red and line-linked; successful toolchain warnings remain
+    runnable but use an amber line-linked diagnostic. Source drops route to
+    this workspace; labels/new blocks auto-indent
     and a closing C brace typed on a blank indented line dedents one level.
     `Ctrl+Tab`/`Ctrl+Shift+Tab` leaves either source editor without inserting
     indentation. Tab/Shift+Tab safely indent or outdent selected lines as one

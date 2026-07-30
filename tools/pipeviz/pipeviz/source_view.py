@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+from typing import Optional
 
 from PySide6.QtCore import Qt, QPoint, QRect, QSize, Signal, QRegularExpression
 from PySide6.QtGui import (
@@ -81,6 +82,7 @@ class CodeEditor(QPlainTextEdit):
         self._line_area = _LineNumberArea(self)
         self._execution_line = None
         self._error_line = None
+        self._warning_line = None
         self._execution_tip = ""
         self._find_text = ""
         self._find_ranges = []
@@ -127,6 +129,8 @@ class CodeEditor(QPlainTextEdit):
                 line = number + 1
                 if line == self._error_line:
                     color = QColor("#f85149")
+                elif line == self._warning_line:
+                    color = QColor("#e3b341")
                 elif line == self._execution_line:
                     color = QColor("#7ce0e8")
                 elif line == self.textCursor().blockNumber() + 1:
@@ -171,6 +175,10 @@ class CodeEditor(QPlainTextEdit):
         if execution is not None:
             execution.format.setProperty(QTextFormat.OutlinePen, QColor("#39c5cf"))
             selections.append(execution)
+        warning = self._selection(self._warning_line, "#3a2c0e")
+        if warning is not None:
+            warning.format.setProperty(QTextFormat.OutlinePen, QColor("#e3b341"))
+            selections.append(warning)
         error = self._selection(self._error_line, "#351418")
         if error is not None:
             error.format.setProperty(QTextFormat.OutlinePen, QColor("#f85149"))
@@ -193,6 +201,8 @@ class CodeEditor(QPlainTextEdit):
 
     def mark_error_line(self, line):
         self._error_line = int(line) if line else None
+        if self._error_line:
+            self._warning_line = None
         self._refresh_selections()
         if self._error_line:
             cursor = QTextCursor(
@@ -200,9 +210,26 @@ class CodeEditor(QPlainTextEdit):
             self.setTextCursor(cursor)
             self.centerCursor()
 
+    def mark_warning_line(self, line):
+        self._warning_line = int(line) if line else None
+        if self._warning_line:
+            self._error_line = None
+        self._refresh_selections()
+        if self._warning_line:
+            cursor = QTextCursor(
+                self.document().findBlockByNumber(self._warning_line - 1))
+            self.setTextCursor(cursor)
+            self.centerCursor()
+
+    def clear_diagnostic_marks(self):
+        self._error_line = None
+        self._warning_line = None
+        self._refresh_selections()
+
     def clear_marks(self):
         self._execution_line = None
         self._error_line = None
+        self._warning_line = None
         self.setToolTip("")
         self._refresh_selections()
 
@@ -1047,6 +1074,7 @@ class AssemblyBuild:
     elf_path: str
     source_map: dict
     log: str
+    warning_line: Optional[int] = None
 
 
 class BuildFailure(RuntimeError):
@@ -1072,14 +1100,16 @@ def _run_tool(command, timeout=20):
         raise BuildFailure(str(error)) from error
     output = (proc.stdout + proc.stderr).strip()
     if proc.returncode:
-        line = None
-        match = re.search(
-            r":(\d+):(?:\d+:)?\s*(?:fatal\s+)?error:",
-            output, re.IGNORECASE)
-        if match:
-            line = int(match.group(1))
+        line = _tool_message_line(output, "error")
         raise BuildFailure(output or f"{command[0]} exited with {proc.returncode}", line)
     return output
+
+
+def _tool_message_line(output, severity):
+    label = r"(?:fatal\s+)?error" if severity == "error" else r"warning"
+    match = re.search(
+        rf":(\d+):(?:\d+:)?\s*{label}:", output or "", re.IGNORECASE)
+    return int(match.group(1)) if match else None
 
 
 def _source_map(elf_path, source_name, prefix_lines, source_lines):
@@ -1150,8 +1180,16 @@ def assemble_source(source):
     if not mapping:
         raise BuildFailure(
             "Assembly succeeded, but no PC-to-source line table was generated.")
-    return AssemblyBuild(str(elf_path), mapping, "\n".join(
-        part for part in (as_log, ld_log, f"Built {elf_path}") if part))
+    warning_line = _tool_message_line(as_log, "warning")
+    if warning_line is not None:
+        warning_line -= len(prefix)
+        if not 1 <= warning_line <= len(original.splitlines()):
+            warning_line = None
+    return AssemblyBuild(
+        str(elf_path), mapping,
+        "\n".join(
+            part for part in (as_log, ld_log, f"Built {elf_path}") if part),
+        warning_line)
 
 
 def compile_c_source(source, optimization="-O2"):
@@ -1240,6 +1278,7 @@ class _Diagnostics(QPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._line = None
+        self._severity = None
         self.setReadOnly(True)
         self.setFont(_mono(8))
         self.setMaximumBlockCount(1000)
@@ -1249,6 +1288,7 @@ class _Diagnostics(QPlainTextEdit):
 
     def reset(self):
         self._line = None
+        self._severity = None
         self.setStyleSheet("color:#8b949e;background:#0b0f14;")
         self.setToolTip("")
         self.setAccessibleDescription("No build diagnostics.")
@@ -1256,13 +1296,31 @@ class _Diagnostics(QPlainTextEdit):
 
     def success(self, text):
         self._line = None
+        self._severity = "success"
         self.setStyleSheet("color:#3fb950;background:#0b0f14;")
         self.setToolTip("")
         self.setAccessibleDescription(str(text))
         self.setPlainText(text)
 
+    def warning(self, text, line=None):
+        self._line = int(line) if line else None
+        self._severity = "warning"
+        self.setStyleSheet("color:#e3b341;background:#0b0f14;")
+        if self._line:
+            action = (
+                f"→ Warning line {self._line}: press Enter or double-click to jump")
+            self.setPlainText(f"{action}\n{text}")
+            self.setToolTip(action)
+            self.setAccessibleDescription(f"{action}. {text}")
+        else:
+            self.setPlainText(text)
+            self.setToolTip("Build completed with warnings")
+            self.setAccessibleDescription(
+                f"Build completed with warnings. {text}")
+
     def failure(self, text, line=None):
         self._line = int(line) if line else None
+        self._severity = "error"
         self.setStyleSheet("color:#ff7b72;background:#0b0f14;")
         if self._line:
             action = (
@@ -1475,10 +1533,16 @@ class AssemblyView(QWidget):
             self.editor.setFocus(Qt.OtherFocusReason)
 
     def _activate_diagnostic(self, line):
-        self.editor.mark_error_line(line)
+        warning = self.diagnostics._severity == "warning"
+        if warning:
+            self.editor.mark_warning_line(line)
+        else:
+            self.editor.mark_error_line(line)
         self.editor.setFocus(Qt.OtherFocusReason)
-        self.status.setText(f"Build error at line {line}")
-        self.status.setStyleSheet("color:#f85149;padding:2px;")
+        self.status.setText(
+            f"Build {'warning' if warning else 'error'} at line {line}")
+        self.status.setStyleSheet(
+            f"color:{'#e3b341' if warning else '#f85149'};padding:2px;")
 
     def _sync_source_badge(self):
         _sync_source_badge(
@@ -1503,7 +1567,7 @@ class AssemblyView(QWidget):
             self._diagnostic_revision >= 0
             and revision != self._diagnostic_revision)
         if diagnostics_stale:
-            self.editor.mark_error_line(None)
+            self.editor.clear_diagnostic_marks()
             self.diagnostics.reset()
             self._diagnostic_revision = -1
         if self._built_revision >= 0 and not self.mapping_current:
@@ -1643,7 +1707,7 @@ class AssemblyView(QWidget):
     def build(self, run=False):
         self._focus_editor()
         self.editor.completion.hide()
-        self.editor.mark_error_line(None)
+        self.editor.clear_diagnostic_marks()
         self.status.setText("Assembling and linking…")
         self.status.setStyleSheet("color:#e3b341;padding:2px;")
         try:
@@ -1660,11 +1724,21 @@ class AssemblyView(QWidget):
         self._source_map = result.source_map
         self._built_revision = self.editor.document().revision()
         self._diagnostic_revision = self._built_revision
-        self.diagnostics.success(
+        detail = (
             f"{result.log}\n{len(result.source_map)} instruction addresses mapped")
-        self.status.setText(
-            f"Build succeeded · {len(result.source_map)} source-linked instructions")
-        self.status.setStyleSheet("color:#3fb950;padding:2px;")
+        if re.search(r"\bwarning:", result.log, re.IGNORECASE):
+            self.editor.mark_warning_line(result.warning_line)
+            self.diagnostics.warning(detail, result.warning_line)
+            self.status.setText(
+                "Build succeeded with warnings · "
+                f"{len(result.source_map)} source-linked instructions")
+            self.status.setStyleSheet("color:#e3b341;padding:2px;")
+        else:
+            self.diagnostics.success(detail)
+            self.status.setText(
+                f"Build succeeded · {len(result.source_map)} "
+                "source-linked instructions")
+            self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
         if run:
             self.runRequested.emit(result.elf_path, dict(result.source_map))
@@ -1797,10 +1871,16 @@ class CView(QWidget):
             self.editor.setFocus(Qt.OtherFocusReason)
 
     def _activate_diagnostic(self, line):
-        self.editor.mark_error_line(line)
+        warning = self.diagnostics._severity == "warning"
+        if warning:
+            self.editor.mark_warning_line(line)
+        else:
+            self.editor.mark_error_line(line)
         self.editor.setFocus(Qt.OtherFocusReason)
-        self.status.setText(f"Compile error at line {line}")
-        self.status.setStyleSheet("color:#f85149;padding:2px;")
+        self.status.setText(
+            f"Compile {'warning' if warning else 'error'} at line {line}")
+        self.status.setStyleSheet(
+            f"color:{'#e3b341' if warning else '#f85149'};padding:2px;")
 
     def _sync_source_badge(self):
         _sync_source_badge(
@@ -1811,7 +1891,7 @@ class CView(QWidget):
         if (self._diagnostic_revision < 0
                 or revision == self._diagnostic_revision):
             return
-        self.editor.mark_error_line(None)
+        self.editor.clear_diagnostic_marks()
         self.diagnostics.reset()
         self._diagnostic_revision = -1
         self._compiled_optimization = None
@@ -1823,7 +1903,7 @@ class CView(QWidget):
         if (self._compiled_optimization is None
                 or optimization == self._compiled_optimization):
             return
-        self.editor.mark_error_line(None)
+        self.editor.clear_diagnostic_marks()
         self.diagnostics.reset()
         self._diagnostic_revision = -1
         self._compiled_optimization = None
@@ -1921,7 +2001,7 @@ class CView(QWidget):
 
     def compile(self):
         self._focus_editor()
-        self.editor.mark_error_line(None)
+        self.editor.clear_diagnostic_marks()
         self.status.setText("Compiling C to assembly…")
         self.status.setStyleSheet("color:#e3b341;padding:2px;")
         try:
@@ -1937,11 +2017,21 @@ class CView(QWidget):
             self.status.setStyleSheet("color:#f85149;padding:2px;")
             self.statusChanged.emit(self.status.text())
             return None
-        self.diagnostics.success(log)
+        warning_line = _tool_message_line(log, "warning")
+        if warning_line is not None:
+            self.editor.mark_warning_line(warning_line)
+            self.diagnostics.warning(log, warning_line)
+        else:
+            self.diagnostics.success(log)
         self._diagnostic_revision = self.editor.document().revision()
         self._compiled_optimization = self.optimization.currentText()
-        self.status.setText("Compiled successfully · assembly tab is ready")
-        self.status.setStyleSheet("color:#3fb950;padding:2px;")
+        if warning_line is not None:
+            self.status.setText(
+                "Compiled with warnings · assembly tab is ready")
+            self.status.setStyleSheet("color:#e3b341;padding:2px;")
+        else:
+            self.status.setText("Compiled successfully · assembly tab is ready")
+            self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
         self.assemblyGenerated.emit(assembly, self.optimization.currentText())
         return assembly

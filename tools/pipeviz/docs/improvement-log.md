@@ -11,6 +11,16 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Toolchain-warning severity audit:** GCC and GNU-as warnings returned success,
+so both workbenches previously painted them green and offered no source jump.
+Successful output still flows into editable Assembly/run, but warnings now use
+amber diagnostics and an amber source-line outline. Their first line supports
+the same Enter/double-click jump as errors, reports warning rather than error
+after activation, and disappears on the first source edit. Acceptance generates
+real warnings in both toolchains and verifies the complete handoff and jump.
+Because C compilation immediately opens Assembly, that destination now carries
+an amber Alt+C pointer back to the otherwise hidden C warning details.
+
 **Selected-source indentation audit:** Qt's default plain-text behavior replaced
 an entire multi-line selection with one tab and offered no Shift+Tab outdent.
 Both workbenches now indent/outdent every selected line as a single undoable

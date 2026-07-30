@@ -178,6 +178,11 @@ def verify_toolchain():
     assert segments and len(assembled.source_map) >= 6
     snippet = assemble_source("mov eax, 7\n")
     assert set(snippet.source_map.values()) == {1}
+    warned = assemble_source(
+        ".intel_syntax noprefix\n.global _start\n_start:\n"
+        '.warning "acceptance warning"\nhlt\n')
+    assert warned.warning_line == 4
+    assert "warning:" in warned.log.lower()
     generated, _log = compile_c_source(_C_TEMPLATE)
     assert ".intel_syntax noprefix" in generated
     assert "_start:" in generated and "call main" in generated
@@ -187,6 +192,10 @@ def verify_toolchain():
     assert "memset" not in array_assembly
     assert "_start:" in array_assembly
     assert len(assemble_source(array_assembly).source_map) >= 10
+    _warning_assembly, warning_log = compile_c_source(
+        "int main(void) { int unused; return 0; }\n")
+    assert "warning:" in warning_log.lower()
+    assert "unused variable" in warning_log
     try:
         compile_c_source(
             "int main(void)\n{\n    return unavailable_runtime();\n}\n")
@@ -844,6 +853,34 @@ def scenario(app, outdir):
         assert "#8b949e" in win.assembly.diagnostics.styleSheet()
         editor.document().setModified(False)
 
+        # Successful assembler warnings stay runnable but are amber, source-
+        # linked, and never masquerade as a clean green build.
+        editor.setPlainText(
+            ".intel_syntax noprefix\n.section .text\n.global _start\n_start:\n"
+            '    .warning "check this schedule"\n'
+            "    hlt\n")
+        warning_result = win.assembly.build(False)
+        settle(app)
+        assert warning_result is not None
+        assert warning_result.warning_line == 5
+        assert editor._warning_line == 5 and editor._error_line is None
+        assert win.assembly.diagnostics._severity == "warning"
+        assert win.assembly.diagnostics.toPlainText().startswith(
+            "→ Warning line 5: press Enter or double-click to jump")
+        assert "#e3b341" in win.assembly.diagnostics.styleSheet()
+        assert "succeeded with warnings" in win.assembly.status.text()
+        win.assembly.diagnostics.setFocus()
+        QTest.keyClick(win.assembly.diagnostics, Qt.Key_Return)
+        settle(app)
+        assert app.focusWidget() is editor
+        assert editor.textCursor().blockNumber() + 1 == 5
+        assert win.assembly.status.text() == "Build warning at line 5"
+        save(win, outdir, "01b_assembly_warning_jump")
+        editor.insertPlainText(" ")
+        assert editor._warning_line is None
+        assert not win.assembly.diagnostics.toPlainText()
+        editor.document().setModified(False)
+
         # Assemble and run the editable template. The result (1+...+10) proves
         # execution used the authored bytes, not a demo fallback.
         win.assembly.new_template()
@@ -1368,6 +1405,41 @@ def scenario(app, outdir):
         assert win.c_source.editor._error_line is None
         assert not win.c_source.diagnostics.toPlainText()
         assert "#8b949e" in win.c_source.diagnostics.styleSheet()
+        win.c_source.editor.document().setModified(False)
+
+        # GCC warnings generate editable assembly normally, but remain amber
+        # and line-actionable in the originating C workbench.
+        win.c_source.editor.setPlainText(
+            "int main(void)\n{\n    int unused;\n    return 0;\n}\n")
+        warning_assembly = win.c_source.compile()
+        settle(app)
+        assert warning_assembly is not None
+        assert win.workspace.currentWidget() is win.assembly
+        assert "C compiled with warnings" in win.assembly.status.text()
+        assert "Alt+C" in win.assembly.status.text()
+        assert "#e3b341" in win.assembly.status.styleSheet()
+        assert "C compiled with warnings" in win.action_hint.text()
+        assert win.c_source.editor._warning_line == 3
+        assert win.c_source.editor._error_line is None
+        assert win.c_source.diagnostics._severity == "warning"
+        assert win.c_source.diagnostics.toPlainText().startswith(
+            "→ Warning line 3: press Enter or double-click to jump")
+        assert "unused variable" in win.c_source.diagnostics.toPlainText()
+        assert "#e3b341" in win.c_source.diagnostics.styleSheet()
+        assert win.c_source.status.text() == (
+            "Compiled with warnings · assembly tab is ready")
+        win.workspace.setCurrentWidget(win.c_source)
+        settle(app)
+        win.c_source.diagnostics.setFocus()
+        QTest.keyClick(win.c_source.diagnostics, Qt.Key_Return)
+        settle(app)
+        assert app.focusWidget() is win.c_source.editor
+        assert win.c_source.editor.textCursor().blockNumber() + 1 == 3
+        assert win.c_source.status.text() == "Compile warning at line 3"
+        save(win, outdir, "03c_c_warning_jump")
+        win.c_source.editor.insertPlainText(" ")
+        assert win.c_source.editor._warning_line is None
+        assert not win.c_source.diagnostics.toPlainText()
         win.c_source.editor.document().setModified(False)
 
         # Compile real C, inspect/edit the emitted assembly, then assemble/run it.
