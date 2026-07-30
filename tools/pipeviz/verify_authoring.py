@@ -1574,6 +1574,8 @@ def scenario(app, outdir):
         settle(app)
         assert app.focusWidget() is editor
         assert editor._error_line == 5
+        assert "Build error highlighted at source line 5" in (
+            editor.accessibleDescription())
         assert "Error" in win.assembly.diagnostics.toPlainText()
         assert "Assembly:5:" in win.assembly.diagnostics.toPlainText()
         assert str(source_module._GENERATED_DIR) not in (
@@ -1594,6 +1596,7 @@ def scenario(app, outdir):
         assert not win._has_session()
         editor.insertPlainText(" ")
         assert editor._error_line is None
+        assert "Build error highlighted" not in editor.accessibleDescription()
         assert not win.assembly.diagnostics.toPlainText()
         assert "#8b949e" in win.assembly.diagnostics.styleSheet()
         editor.document().setModified(False)
@@ -1609,6 +1612,8 @@ def scenario(app, outdir):
         assert warning_result is not None
         assert warning_result.warning_line == 5
         assert editor._warning_line == 5 and editor._error_line is None
+        assert "Build warning highlighted at source line 5" in (
+            editor.accessibleDescription())
         assert win.assembly.diagnostics._severity == "warning"
         assert win.assembly.diagnostics.toPlainText().startswith(
             "→ Warning line 5: press Enter or double-click to jump")
@@ -1626,6 +1631,7 @@ def scenario(app, outdir):
         save(win, outdir, "01b_assembly_warning_jump")
         editor.insertPlainText(" ")
         assert editor._warning_line is None
+        assert "Build warning highlighted" not in editor.accessibleDescription()
         assert not win.assembly.diagnostics.toPlainText()
         editor.document().setModified(False)
 
@@ -1688,6 +1694,10 @@ def scenario(app, outdir):
             live_lines[lane] = line
             assert editor._execution_line == line
             assert f"In-flight {lane}-lane" in editor._execution_tip
+            assert (
+                f"Source-linked selection: In-flight {lane}-lane instruction"
+                in editor.accessibleDescription())
+            assert f"source line {line}" in editor.accessibleDescription()
             assert win.workspace.tabText(1) == f"Assembly * · L{line}"
             assert f"Assembly line {line}" in win.action_hint.text()
         assert live_lines["U"] != live_lines["V"]
@@ -1727,6 +1737,7 @@ def scenario(app, outdir):
         assert win._pinned_n is None
         assert win._assembly_link_line is None
         assert editor._execution_line is None
+        assert "Source-linked selection" not in editor.accessibleDescription()
         assert win.workspace.tabText(1) == "Assembly *"
         assert win._assembly_source_map == source_map_before
         assert win.assembly.mapping_current
@@ -2274,6 +2285,8 @@ def scenario(app, outdir):
         settle(app)
         assert app.focusWidget() is win.c_source.editor
         assert win.c_source.editor._error_line == 3
+        assert "Build error highlighted at source line 3" in (
+            win.c_source.editor.accessibleDescription())
         assert "undeclared" in win.c_source.diagnostics.toPlainText()
         assert re.search(
             r"C source:3:\d+:\s+error:",
@@ -2308,6 +2321,8 @@ def scenario(app, outdir):
         settle(app)
         win.c_source.editor.insertPlainText(" ")
         assert win.c_source.editor._error_line is None
+        assert "Build error highlighted" not in (
+            win.c_source.editor.accessibleDescription())
         assert not win.c_source.diagnostics.toPlainText()
         assert win.c_source.diagnostics.height() <= 54
         assert "#8b949e" in win.c_source.diagnostics.styleSheet()
@@ -2327,6 +2342,8 @@ def scenario(app, outdir):
         assert "C compiled with warnings" in win.action_hint.text()
         assert win.c_source.editor._warning_line == 3
         assert win.c_source.editor._error_line is None
+        assert "Build warning highlighted at source line 3" in (
+            win.c_source.editor.accessibleDescription())
         assert win.c_source.diagnostics._severity == "warning"
         assert win.c_source.diagnostics.toPlainText().startswith(
             "→ Warning line 3: press Enter or double-click to jump")
@@ -2349,6 +2366,8 @@ def scenario(app, outdir):
         save(win, outdir, "03c_c_warning_jump")
         win.c_source.editor.insertPlainText(" ")
         assert win.c_source.editor._warning_line is None
+        assert "Build warning highlighted" not in (
+            win.c_source.editor.accessibleDescription())
         assert not win.c_source.diagnostics.toPlainText()
         assert win.c_source.diagnostics.height() <= 54
         win.c_source.editor.document().setModified(False)
@@ -2403,6 +2422,10 @@ def scenario(app, outdir):
         win.trace.tbl.setCurrentCell(c_row, 0)
         settle(app)
         assert win.assembly.editor._execution_line == c_result.source_map[c_pc]
+        assert "Retired V-lane instruction" in (
+            win.assembly.editor.accessibleDescription())
+        assert f"source line {c_result.source_map[c_pc]}" in (
+            win.assembly.editor.accessibleDescription())
         assert "Retired V-lane instruction" in win.assembly.status.text()
         assert win._pinned_n == int(win.trace.tbl.item(c_row, 0).text())
         win.workspace.setCurrentWidget(win.assembly)

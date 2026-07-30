@@ -418,6 +418,9 @@ highlight the wrong line. A terminal HLT remains visible and clickable after
 the run stops, which makes the experiment's exact stopping instruction clear.
 When the current built source has not been saved, both states remain visible as
 **Assembly * · L…** rather than one label hiding the other.
+The editor's accessible description announces the same lane, PC, and source
+line. It also announces build-error and build-warning line marks; obsolete
+context clears when the source changes or execution advances.
 Instructions synthesized outside the editor, such as a bare snippet's
 fall-through HLT, explicitly clear the prior line marker instead of leaving a
 stale source association. When the selected retirement came from U or V, the

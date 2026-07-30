@@ -9,6 +9,22 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — source highlights carry assistive context
+
+**Authoring accessibility audit:** execution, build-error, and build-warning
+line marks were visually distinct, but an assistive user entering the editor
+still heard only its generic editing help.
+
+**Changes:** the shared source editor now composes durable editing/zoom help
+with transient diagnostic and PC-to-line selection context. Assembly and C
+error/warning lines announce severity and line; an in-flight or retired
+selection announces its lane, PC, and source line. Editing or advancing clears
+only the obsolete context.
+
+**Verification:** authoring acceptance covers assembly and C error/warning
+appearance and invalidation, live U/V line selection and next-clock clearing,
+and a retired generated-C V-lane source link.
+
 ## July 30 continuation — pinned register semantics are accessible
 
 **Time-point accessibility audit:** pinned `PC*`, `base*`, segment limits,

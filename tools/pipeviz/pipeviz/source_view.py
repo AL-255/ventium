@@ -142,6 +142,8 @@ class CodeEditor(QPlainTextEdit):
         self._error_line = None
         self._warning_line = None
         self._execution_tip = ""
+        self._accessible_base = ""
+        self._accessible_font_size = None
         self._find_text = ""
         self._find_ranges = []
         self._find_truncated = False
@@ -158,6 +160,27 @@ class CodeEditor(QPlainTextEdit):
         self._rebuild_bracket_index()
         self._refresh_selections()
 
+    def set_source_accessible_description(self, text):
+        """Set durable editor help around transient source-line context."""
+        self._accessible_base = str(text)
+        self._sync_accessible_description()
+
+    def _sync_accessible_description(self):
+        details = [self._accessible_base]
+        if self._accessible_font_size is not None:
+            details.append(
+                f"Current text size: {self._accessible_font_size} point.")
+        if self._error_line is not None:
+            details.append(
+                f"Build error highlighted at source line {self._error_line}.")
+        elif self._warning_line is not None:
+            details.append(
+                f"Build warning highlighted at source line {self._warning_line}.")
+        if self._execution_line is not None and self._execution_tip:
+            details.append(f"Source-linked selection: {self._execution_tip}.")
+        self.setAccessibleDescription(
+            " ".join(detail for detail in details if detail).strip())
+
     def _set_source_font_size(self, size):
         size = max(8, min(24, int(size)))
         if size == self._font_size:
@@ -170,11 +193,8 @@ class CodeEditor(QPlainTextEdit):
             QFontMetrics(self.font()).horizontalAdvance(" ") * 4)
         self._update_line_area_width()
         self._line_area.update()
-        base = re.sub(
-            r"\s+Current text size: \d+ point\.$", "",
-            self.accessibleDescription())
-        self.setAccessibleDescription(
-            f"{base} Current text size: {size} point.".strip())
+        self._accessible_font_size = size
+        self._sync_accessible_description()
 
     def line_number_area_width(self):
         digits = max(2, len(str(max(1, self.blockCount()))))
@@ -410,8 +430,9 @@ class CodeEditor(QPlainTextEdit):
 
     def mark_execution_line(self, line, tooltip=""):
         self._execution_line = int(line) if line else None
-        self._execution_tip = tooltip
+        self._execution_tip = str(tooltip) if self._execution_line else ""
         self._refresh_selections()
+        self._sync_accessible_description()
         if self._execution_line:
             cursor = QTextCursor(
                 self.document().findBlockByNumber(self._execution_line - 1))
@@ -426,6 +447,7 @@ class CodeEditor(QPlainTextEdit):
         if self._error_line:
             self._warning_line = None
         self._refresh_selections()
+        self._sync_accessible_description()
         if self._error_line:
             cursor = QTextCursor(
                 self.document().findBlockByNumber(self._error_line - 1))
@@ -437,6 +459,7 @@ class CodeEditor(QPlainTextEdit):
         if self._warning_line:
             self._error_line = None
         self._refresh_selections()
+        self._sync_accessible_description()
         if self._warning_line:
             cursor = QTextCursor(
                 self.document().findBlockByNumber(self._warning_line - 1))
@@ -447,13 +470,16 @@ class CodeEditor(QPlainTextEdit):
         self._error_line = None
         self._warning_line = None
         self._refresh_selections()
+        self._sync_accessible_description()
 
     def clear_marks(self):
         self._execution_line = None
+        self._execution_tip = ""
         self._error_line = None
         self._warning_line = None
         self.setToolTip("")
         self._refresh_selections()
+        self._sync_accessible_description()
 
     def _indent_source(self, outdent=False):
         """Indent selected blocks, or edit one caret line, without data loss."""
@@ -1999,7 +2025,7 @@ class AssemblyView(QWidget):
         split = QSplitter(Qt.Horizontal)
         self.editor = AssemblyEditor()
         self.editor.setAccessibleName("Assembly source editor")
-        self.editor.setAccessibleDescription(
+        self.editor.set_source_accessible_description(
             "Edit GNU Intel-syntax assembly. Tab indents; Ctrl+/ toggles "
             "comments; matching delimiters highlight beside the caret; "
             "Ctrl+Tab and Ctrl+Shift+Tab leave the editor.")
@@ -2366,7 +2392,7 @@ class CView(QWidget):
         split = QSplitter(Qt.Vertical)
         self.editor = CodeEditor()
         self.editor.setAccessibleName("C source editor")
-        self.editor.setAccessibleDescription(
+        self.editor.set_source_accessible_description(
             "Edit freestanding GNU C. Tab indents; Ctrl+/ toggles comments; "
             "matching delimiters highlight beside the caret; "
             "Ctrl+Tab and Ctrl+Shift+Tab leave the editor.")

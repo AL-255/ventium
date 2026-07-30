@@ -342,6 +342,9 @@ does not discard which half of a same-cycle pair led there. Retired x87
 operations are labeled FP rather than U.
 Unsaved and linked state coexist as <b>Assembly * · L…</b>. Editing after a
 build invalidates that map until the next assembly, preventing stale links.
+The editor's accessible description announces the same lane, PC, and source
+line, as well as build-error and build-warning line marks; obsolete context
+clears when source or execution state moves on.
 Selecting a generated wrapper instruction with no editor line clears the prior
 marker rather than showing a stale association.</p>
 """),
