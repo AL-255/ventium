@@ -1001,6 +1001,18 @@ def scenario_startup(app, outdir):
         settle(app)
         assert example_popup_seen == [True]
         assert not win._examples_menu.isVisible()
+        keyboard_popup_seen = []
+
+        def close_keyboard_popup():
+            keyboard_popup_seen.append(win._examples_menu.isVisible())
+            win._examples_menu.close()
+
+        win.program_open_btn.setFocus(Qt.ShortcutFocusReason)
+        QTimer.singleShot(50, close_keyboard_popup)
+        QTest.keyClick(win.program_open_btn, Qt.Key_Down)
+        settle(app)
+        assert keyboard_popup_seen == [True]
+        assert not win._examples_menu.isVisible()
         assert {"Dual issue and branches", "D-cache pressure",
                 "x87 overlap"} <= enabled_examples
         real_example_lookup = main_module._first_repo_file

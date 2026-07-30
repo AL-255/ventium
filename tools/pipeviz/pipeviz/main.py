@@ -520,11 +520,18 @@ class MainWindow(QMainWindow):
             "Open program or choose a built example")
         self.program_open_btn.setAccessibleDescription(
             "Click the main button to choose a flat binary or x86 ELF; "
-            "open the arrow menu to choose a built verification example.")
+            "open the arrow menu, or focus this button and press Down or "
+            "Alt+Down, to choose a built verification example.")
         self.program_open_btn.setToolTip(
-            "Open a program; use the arrow for built examples "
+            "Open a program; use the arrow or Down/Alt+Down for built examples "
             "(you can also drag a file here)")
         tb.addWidget(self.program_open_btn)
+        self._example_menu_shortcuts = []
+        for keys in ("Down", "Alt+Down"):
+            shortcut = QShortcut(QKeySequence(keys), self.program_open_btn)
+            shortcut.setContext(Qt.WidgetShortcut)
+            shortcut.activated.connect(self.program_open_btn.showMenu)
+            self._example_menu_shortcuts.append(shortcut)
 
         snapbtn = QPushButton(" Snapshot…")
         snapbtn.setMinimumWidth(104)

@@ -62,7 +62,8 @@ variant rather than dropping the flag at the build step.
 <ul>
  <li>The arrow beside <b>Open…</b>, or <b>File → Open example</b>, rescans and
  opens any built verification workload. Clicking the main Open face retains
- the ordinary file chooser.</li>
+ the ordinary file chooser. With the split button focused, Down or Alt+Down
+ opens its example menu.</li>
  <li><b>Ctrl+O</b>, the Open button, or dropping a file opens a program.</li>
  <li><b>Ctrl+Shift+R</b> reloads rebuilt bytes while preserving the displayed
  reset addresses and mode switches.</li>

@@ -16,7 +16,9 @@ examples, but the only actual route was nested in File. The existing 92-pixel
 Open control is now a split button: its main face retains file selection while
 the arrow exposes the same live-rescanned example menu. This adds no compact
 toolbar width; acceptance locks menu identity, accessible action distinction,
-and 900-pixel no-overflow geometry.
+and 900-pixel no-overflow geometry. Because Qt's split control did not provide
+a default keyboard route to its arrow, focus-scoped Down and Alt+Down now open
+the same menu and are exercised through its real nested popup loop.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

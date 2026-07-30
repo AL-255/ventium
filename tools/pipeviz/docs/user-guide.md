@@ -74,9 +74,9 @@ point because the checkpoint does not contain earlier visual history.
 Use the arrow beside the toolbar’s **Open…** split button, or
 **File → Open example**, to load an available verification workload without
 locating its build path. Clicking the main Open face still opens the normal
-file chooser. Both example-menu routes rescan whenever they open, so an example
-built after pipeviz starts becomes available immediately. After recompiling the
-current program,
+file chooser; with the split button focused, Down or Alt+Down opens its example
+menu. Both example-menu routes rescan whenever they open, so an example built
+after pipeviz starts becomes available immediately. After recompiling the current program,
 **Ctrl+Shift+R** re-reads it from disk while preserving the displayed reset
 addresses and mode switches.
 Changing entry/load/ESP or a mode switch marks the control **Apply + Reset**;
