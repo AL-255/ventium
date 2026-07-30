@@ -45,6 +45,9 @@ space does.
 Critical `[DONE]`/`[HUNG]` badges now sit beside the FSM state instead of at
 the clip-prone far right. Terminal/hung meaning is also included in the status
 tooltip and accessible description rather than being color-only screen text.
+The example menu now exposes QAction tooltips. A disabled workload therefore
+shows its exact missing build path(s), matching the indexed and repository
+guides, instead of appearing as an unexplained dead command.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

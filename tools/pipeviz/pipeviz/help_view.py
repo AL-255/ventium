@@ -68,6 +68,9 @@ variant rather than dropping the flag at the build step.
  <li><b>Ctrl+Shift+R</b> reloads rebuilt bytes while preserving the displayed
  reset addresses and mode switches.</li>
 </ul>
+<p>An unavailable example is disabled, but hovering it shows the exact
+repository build path(s) pipeviz rescans. Build that workload, then reopen the
+menu; no application restart is needed.</p>
 <p>A successful program, example, or snapshot load reveals the Visualizer even
 when it starts from Assembly/C, so transport and status never remain hidden
 behind an editor. Dropped Assembly/C source opens its matching workbench

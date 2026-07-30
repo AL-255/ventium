@@ -385,6 +385,9 @@ class MainWindow(QMainWindow):
         self.reload_action.setEnabled(False)
         file_menu.addAction(self.reload_action)
         examples_menu = file_menu.addMenu("Open example")
+        # Disabled actions carry the exact expected build paths; QMenu hides
+        # QAction tooltips unless this is explicitly enabled.
+        examples_menu.setToolTipsVisible(True)
         self._example_actions = []
         for label, candidates in _EXAMPLES:
             action = QAction(label, self)

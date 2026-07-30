@@ -1002,6 +1002,7 @@ def scenario_startup(app, outdir):
         assert (win.program_open_btn.popupMode()
                 == QToolButton.MenuButtonPopup)
         assert win.program_open_btn.menu() is win._examples_menu
+        assert win._examples_menu.toolTipsVisible()
         assert "main button" in (
             win.program_open_btn.accessibleDescription())
         assert "arrow menu" in (
@@ -1040,6 +1041,13 @@ def scenario_startup(app, outdir):
             win._refresh_example_actions()
             assert all(not action.isEnabled()
                        for action, _candidates in win._example_actions)
+            assert all(
+                action.toolTip().startswith("Not built; expected ")
+                for action, _candidates in win._example_actions)
+            assert all(
+                candidate in action.toolTip()
+                for action, candidates in win._example_actions
+                for candidate in candidates)
         finally:
             main_module._first_repo_file = real_example_lookup
             win._refresh_example_actions()
@@ -1111,6 +1119,8 @@ def scenario_startup(app, outdir):
         settle(app)
         assert "PT_LOAD" in win._guide_dialog.page.toPlainText()
         assert "Ctrl+Shift+R" in win._guide_dialog.page.toPlainText()
+        assert "exact repository build path" in (
+            win._guide_dialog.page.toPlainText())
         pipeline_row = next(i for i in range(win._guide_dialog.index.count())
                             if win._guide_dialog.index.item(i).text()
                             == "Reading the Pipeline View")
