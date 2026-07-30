@@ -85,6 +85,12 @@ rejects both plot boundaries explicitly, shows the hand cursor only over a real
 cycle, and gives non-plot hover guidance. Edge hit tests prove label clicks
 leave the playhead unchanged.
 
+**Source-gutter audit:** line numbers communicated cursor, execution, and error
+state but ignored clicks, contrary to the standard editor affordance and making
+long generated assembly harder to manipulate precisely. A left click now
+selects the exact whole source line and restores editor focus. The real
+sum-template line and accessible gutter identity are acceptance-tested.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a

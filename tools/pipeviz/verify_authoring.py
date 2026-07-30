@@ -8,7 +8,7 @@ import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
@@ -365,13 +365,32 @@ def scenario(app, outdir):
         assert format_color_at(editor, 2, 1) == "#ff7b72"  # directive, not INT
         editor.document().setModified(False)
         assert win.assembly.new_template()
+        assert editor._line_area.accessibleName() == "Source line numbers"
+        line_cursor = QTextCursor(
+            editor.document().findBlockByNumber(4))
+        line_y = editor.cursorRect(line_cursor).center().y()
+        QTest.mouseClick(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(editor._line_area.width() // 2, line_y))
+        assert app.focusWidget() is editor
+        assert editor.textCursor().blockNumber() == 4
+        assert editor.textCursor().selectedText().strip() == "mov eax, 0"
         editor.setFocus()
         QTest.keyClick(editor, Qt.Key_F, Qt.ControlModifier)
         settle(app)
         assert win.assembly.find_bar.isVisible()
+        assert win.assembly.find_bar.query.text().strip() == "mov eax, 0"
+        win.assembly.find_bar.query.clear()
+        search_start = editor.textCursor()
+        search_start.clearSelection()
+        search_start.movePosition(QTextCursor.Start)
+        editor.setTextCursor(search_start)
+        win.assembly.find_bar.query.setFocus()
         QTest.keyClicks(win.assembly.find_bar.query, "mov")
         settle(app)
-        assert win.assembly.find_bar.count.text() == "1 / 2"
+        assert win.assembly.find_bar.count.text() == "1 / 2", (
+            win.assembly.find_bar.query.text(),
+            win.assembly.find_bar.count.text())
         assert editor.textCursor().selectedText().lower() == "mov"
         assert editor.textCursor().blockNumber() + 1 == 5
         QTest.keyClick(win.assembly.find_bar.query, Qt.Key_Return)

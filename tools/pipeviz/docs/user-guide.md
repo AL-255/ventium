@@ -242,7 +242,8 @@ New/Open, generated C-to-Assembly replacement, and application close never
 silently discard a dirty editor: choose Save, Discard, or Cancel.
 For longer generated files, `Ctrl+F` opens an inline search with highlighted
 matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
-moves backward, and Escape closes it.
+moves backward, and Escape closes it. Click a line number to select that whole
+source line and return typing focus to the editor.
 
 The assembler emits a DWARF line table. After running, click any occupied live
 U/V/FP stage cell, authored Trace row, or Pipeline timing row: the Assembly tab

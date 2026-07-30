@@ -8,7 +8,7 @@ import re
 import shutil
 import subprocess
 
-from PySide6.QtCore import Qt, QRect, QSize, Signal, QRegularExpression
+from PySide6.QtCore import Qt, QPoint, QRect, QSize, Signal, QRegularExpression
 from PySide6.QtGui import (
     QColor, QFont, QFontMetrics, QGuiApplication, QKeySequence, QPainter, QShortcut,
     QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextFormat,
@@ -39,12 +39,28 @@ class _LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
         self.editor = editor
+        self.setAccessibleName("Source line numbers")
+        self.setToolTip("Click a line number to select that source line")
 
     def sizeHint(self):
         return QSize(self.editor.line_number_area_width(), 0)
 
     def paintEvent(self, event):
         self.editor.paint_line_numbers(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            y = int(
+                event.position().y()
+                if hasattr(event, "position") else event.y())
+            cursor = self.editor.cursorForPosition(QPoint(0, y))
+            if cursor.block().isValid():
+                cursor.select(QTextCursor.LineUnderCursor)
+                self.editor.setTextCursor(cursor)
+                self.editor.setFocus(Qt.MouseFocusReason)
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
 
 class CodeEditor(QPlainTextEdit):
