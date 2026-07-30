@@ -287,6 +287,10 @@ clips the visible label.
 Both authoring command rows, editors, preview/diagnostics, and status areas are
 regression-rendered at 900×620—the window's practical minimum-size range—as
 well as the normal wide layout.
+The Visualizer is also regression-rendered there: its three toolbars remain
+overflow-free, the critical cycle/state/EIP status survives, the narrow
+analysis/register side remains usable through scrolling, and Alt+1…Alt+0 still
+reaches tabs that are not currently painted.
 For longer generated files, `Ctrl+F` opens an inline search with highlighted
 matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
 moves backward, and Escape closes it. Click a line number to select that whole

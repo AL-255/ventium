@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**True-minimum Visualizer audit:** the real 900×620 minimum had only manual
+coverage while “compact” acceptance began at 1280×800. It now asserts all three
+toolbars avoid overflow, the 700/170+ pane split remains viable, critical
+cycle/EIP status and full tooltip survive, and Alt+0/Alt+1 reaches a visually
+scrolled-off analysis tab and returns. A dark-theme screenshot locks the narrow
+analysis/register side before the existing 1280 responsive-layout checks.
+
 **True-minimum authoring audit:** source-workspace acceptance called 1280×800
 “compact” even though the window's real minimum hint is below 900×620, leaving
 dense command rows unguarded. Assembly and C now render at 900×620 and assert

@@ -177,13 +177,13 @@ def set_filter(app, trace, text):
     return sum(not trace.tbl.isRowHidden(row) for row in range(trace.tbl.rowCount()))
 
 
-def save_shot(app, win, outdir, name):
+def save_shot(app, win, outdir, name, min_width=1280, min_height=800):
     settle(app)
     win.repaint()
     settle(app)
     path = os.path.join(outdir, f"{name}.png")
     pix = win.grab()
-    assert pix.width() >= 1280 and pix.height() >= 800
+    assert pix.width() >= min_width and pix.height() >= min_height
     assert pix.save(path), f"failed to write {path}"
     return path
 
@@ -2127,6 +2127,34 @@ def scenario_layout(app, outdir):
     try:
         win.load_image(repo_path("build/verify/mb_dmiss.cycle.flat"))
         win.do_step(160, False)
+        win.resize(900, 620)
+        settle(app, 8)
+        assert win.width() == 900, (
+            f"true-minimum request expanded to {win.width()}px")
+        assert win.minimumSizeHint().width() <= 900
+        for toolbar in win.findChildren(QToolBar):
+            overflow = toolbar.findChild(QToolButton, "qt_toolbar_ext_button")
+            assert overflow is None or not overflow.isVisible(), (
+                f"{toolbar.windowTitle()} toolbar overflowed at true minimum")
+        assert win.outer_split.sizes()[0] >= 690
+        assert win.outer_split.sizes()[1] >= 170
+        status_html = win.status_lbl.text()
+        assert status_html.index(">cyc</span>") < status_html.index(">eip</span>")
+        assert "cycle 160" in win.status_lbl.toolTip()
+        assert "EIP 0x08048015" in win.status_lbl.toolTip()
+        assert "I$ 1/256" in win.status_lbl.toolTip()
+        QTest.keyClick(win, Qt.Key_0, Qt.AltModifier)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 9
+        assert app.focusWidget() is win.tables.accmap
+        QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 0
+        assert app.focusWidget() is win.tables.ic
+        save_shot(
+            app, win, outdir, "08a_true_minimum_layout",
+            min_width=900, min_height=620)
+
         win.resize(1280, 800)
         settle(app, 8)
         assert win.width() == 1280, (
@@ -2219,8 +2247,9 @@ def scenario_layout(app, outdir):
         assert win._assembly_source_map == pinned_map
         assert "linked selection cleared" in win.action_hint.text()
         save_shot(app, win, outdir, "08_compact_layout")
-        print(f"OK layout: true compact window={win.width()}x{win.height()}, "
-              "responsive trace/register columns, all panels in bounds")
+        print(f"OK layout: true minimum=900x620, supported compact="
+              f"{win.width()}x{win.height()}, responsive trace/register "
+              "columns, all panels in bounds")
     finally:
         close_window(win)
 
