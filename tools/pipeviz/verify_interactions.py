@@ -1457,6 +1457,10 @@ def scenario_startup(app, outdir):
         assert int(win.trace.tbl.item(
             win.trace.tbl.rowCount() - 1, 0).text()) == total_retired - 1
         assert f"of {total_retired:,}" in win.trace.title.text()
+        assert set_filter(app, win.trace, "pc:08048") == (
+            trace_module._MAX_ROWS)
+        assert win.trace.match_lbl.text() == "6,000/6,000 match"
+        win.trace.filt.clear()
         print("OK startup/help/load: disabled transport, shortcuts, indexed "
               "Pipeline guide, honest empty states, examples, numeric manifest, "
               "9k-clock refresh")
@@ -1773,9 +1777,11 @@ def scenario_branch_transport(app, outdir):
 
         visible_v = set_filter(app, win.trace, "pipe:V")
         assert 50 <= visible_v < win.trace.tbl.rowCount()
-        assert f"{visible_v}/{win.trace.tbl.rowCount()} match" == win.trace.match_lbl.text()
         assert (
-            f"{visible_v} of {win.trace.tbl.rowCount()} retirements match"
+            f"{visible_v:,}/{win.trace.tbl.rowCount():,} match"
+            == win.trace.match_lbl.text())
+        assert (
+            f"{visible_v:,} of {win.trace.tbl.rowCount():,} retirements match"
             in win.trace.match_lbl.accessibleDescription())
         assert win.trace.filt.accessibleDescription() == (
             win.trace.match_lbl.accessibleDescription())

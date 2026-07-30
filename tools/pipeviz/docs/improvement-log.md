@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — readable capped search counts
+
+**Counter-cap audit:** source search reserved 70 pixels, but its ungrouped
+maximum `2000 / 2000+` already needed 72. The truncation marker could therefore
+disappear precisely when it mattered. Trace's 6,000-row count was readable but
+ungrouped.
+
+**Changes:** the source counter fits and groups `2,000 / 2,000+`; Trace groups
+its visible/retained count as `6,000/6,000 match`. The `+` continues to state
+that source highlighting stopped at its responsiveness cap.
+
+**Verification:** authoring acceptance creates 2,001 real matches, wraps
+backward to retained match 2,000, requires the grouped capped text and `+`,
+measures it against the painted rectangle, and captures it. Interaction
+acceptance filters the real rolled 6,000-row Trace window and requires its
+grouped full-match label.
+
 ## July 30 continuation — readable event counts at retention cap
 
 **Count-width audit:** the event selector retains up to 12,000 captured cycles,

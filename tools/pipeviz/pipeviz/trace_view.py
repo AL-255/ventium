@@ -900,7 +900,7 @@ class TraceView(QWidget):
         self.match_lbl.setText(
             "" if not active else
             f"invalid · {self._filter_error_summary(error)}" if error else
-            f"{shown}/{n} match")
+            f"{shown:,}/{n:,} match")
         self.match_lbl.setStyleSheet(
             "color:#f85149;font-size:8px;" if error or (active and shown == 0)
             else "color:#8b949e;font-size:8px;")
@@ -912,7 +912,7 @@ class TraceView(QWidget):
                 f"Invalid trace filter: {error}. All {n} rows remain visible.")
         else:
             filter_state = (
-                f"{shown} of {n} retirements match "
+                f"{shown:,} of {n:,} retirements match "
                 f"{self.filt.text()!r}.")
         self.match_lbl.setAccessibleDescription(filter_state)
         self.filt.setAccessibleDescription(filter_state)

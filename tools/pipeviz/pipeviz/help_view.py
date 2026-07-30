@@ -277,7 +277,9 @@ current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
 backward, and Escape closes the search. It is a case-insensitive literal search;
 navigation disables for an empty/no-match query, and the live result is announced
 accessibly. Highlighting caps at 2,000 matches for responsiveness. Click a line
-number to select the whole source line and return typing focus to the editor.</p>
+number to select the whole source line and return typing focus to the editor.
+At the cap, <code>2,000 / 2,000+</code> uses <code>+</code> to say more matches
+exist beyond the highlighted set.</p>
 <h2>Opcode completion</h2>
 <p>Ctrl+Space opens the Ventium/P54C opcode catalogue. Every entry includes its
 operand form, description, availability, estimated latency, U/V pairing class,

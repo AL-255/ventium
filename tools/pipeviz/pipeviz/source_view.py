@@ -761,7 +761,9 @@ class SourceFindBar(QFrame):
         self.count = QLabel("")
         self.count.setAccessibleName("Source search match count")
         self.count.setAccessibleDescription("No active source search")
-        self.count.setFixedWidth(70)
+        # Fits the largest retained position with grouping and the truncation
+        # marker: "2,000 / 2,000+".
+        self.count.setFixedWidth(90)
         self.count.setAlignment(Qt.AlignCenter)
         self.count.setStyleSheet("border:0;color:#8b949e;")
         row.addWidget(self.count)
@@ -836,7 +838,7 @@ class SourceFindBar(QFrame):
     def _set_count(self, index, total):
         suffix = "+" if self.editor._find_truncated else ""
         self.count.setText(
-            f"{index} / {total}{suffix}" if total else "No matches")
+            f"{index:,} / {total:,}{suffix}" if total else "No matches")
         if not total:
             description = (
                 f"No matches for {self.query.text()!r} in this source editor")

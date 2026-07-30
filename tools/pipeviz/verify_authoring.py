@@ -832,6 +832,27 @@ def scenario(app, outdir):
         settle(app)
         assert not win.assembly.find_bar.isVisible()
         assert not editor._find_ranges
+        find_source = editor.toPlainText()
+        editor.setPlainText("x\n" * 2001)
+        editor.moveCursor(QTextCursor.Start)
+        win.assembly.find_bar.show_find()
+        win.assembly.find_bar.query.setText("x")
+        settle(app)
+        assert editor._find_truncated
+        win.assembly.find_bar.find(-1)
+        settle(app)
+        assert win.assembly.find_bar.count.text() == "2,000 / 2,000+"
+        assert "at least 2000" in (
+            win.assembly.find_bar.count.accessibleDescription())
+        assert QFontMetrics(
+            win.assembly.find_bar.count.font()).horizontalAdvance(
+                win.assembly.find_bar.count.text()) <= (
+                    win.assembly.find_bar.count.contentsRect().width())
+        save(win, outdir, "00ba_assembly_find_cap")
+        win.assembly.find_bar.hide_find()
+        editor.setPlainText(find_source)
+        editor.document().setModified(False)
+        settle(app)
         line_five = editor.document().findBlockByNumber(4)
         line_five_y = round(editor.blockBoundingGeometry(line_five).translated(
             editor.contentOffset()).center().y())
