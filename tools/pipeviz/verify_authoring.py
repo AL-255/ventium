@@ -301,6 +301,8 @@ def scenario(app, outdir):
         assert "clicked" in win.pipeline.board.accessibleDescription()
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
         assert "Ctrl+B" in win.assembly.build_btn.toolTip()
+        assert "Ctrl+N" in win.assembly.template_btn.toolTip()
+        assert "Ctrl+Shift+S" in win.assembly.save_btn.toolTip()
         build_requests = []
         real_build = win.assembly.build
         win.assembly.build = (
@@ -1624,6 +1626,8 @@ def scenario(app, outdir):
             "No compiler diagnostics.")
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+B" in win.c_source.compile_btn.toolTip()
+        assert "Ctrl+N" in win.c_source.template_btn.toolTip()
+        assert "Ctrl+Shift+S" in win.c_source.save_btn.toolTip()
         compile_requests = []
         real_compile = win.c_source.compile
         win.c_source.compile = lambda: compile_requests.append("compile")

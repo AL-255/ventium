@@ -34,7 +34,9 @@ each live shortcut and verifies Assemble versus Compile routing.
 keyboard equivalent while Open/Save/Save As did. File now exposes a contextual
 Ctrl+N action, labeled for Assembly or C and disabled in Visualizer. It routes
 through the existing Save/Discard/Cancel protection; acceptance dispatches the
-actual shortcut and verifies workspace-specific labels and scope.
+actual shortcut and verifies workspace-specific labels and scope. New-template
+and Save-As button tooltips/accessibility now advertise Ctrl+N and Ctrl+Shift+S
+beside the pointer actions as well.
 
 **Source Save-As audit:** both workbenches exposed Save As by pointer but only
 ordinary Save by keyboard. File now provides a workspace-aware Ctrl+Shift+S

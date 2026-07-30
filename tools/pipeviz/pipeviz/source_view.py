@@ -1847,11 +1847,13 @@ class AssemblyView(QWidget):
         controls.addWidget(dialect)
         controls.addStretch(1)
         self.template_btn = QPushButton("New template")
-        self.template_btn.setToolTip("Replace the editor with a runnable sum-loop template")
+        self.template_btn.setToolTip(
+            "Replace the editor with a runnable sum-loop template (Ctrl+N)")
         self.open_btn = QPushButton("Open…")
         self.open_btn.setToolTip("Open GNU Intel-syntax source (Ctrl+O)")
         self.save_btn = QPushButton("Save as…")
-        self.save_btn.setToolTip("Save assembly source under a chosen name")
+        self.save_btn.setToolTip(
+            "Save assembly source under a chosen name (Ctrl+Shift+S)")
         self.complete_btn = QPushButton("Complete")
         self.complete_btn.setToolTip("Open opcode completion (Ctrl+Space)")
         self.build_btn = QPushButton("Assemble")
@@ -2201,11 +2203,13 @@ class CView(QWidget):
         controls.addWidget(note)
         controls.addStretch(1)
         self.template_btn = QPushButton("New template")
-        self.template_btn.setToolTip("Replace the editor with a Fibonacci C template")
+        self.template_btn.setToolTip(
+            "Replace the editor with a Fibonacci C template (Ctrl+N)")
         self.open_btn = QPushButton("Open…")
         self.open_btn.setToolTip("Open freestanding C source (Ctrl+O)")
         self.save_btn = QPushButton("Save as…")
-        self.save_btn.setToolTip("Save C source under a chosen name")
+        self.save_btn.setToolTip(
+            "Save C source under a chosen name (Ctrl+Shift+S)")
         controls.addWidget(self.template_btn)
         controls.addWidget(self.open_btn)
         controls.addWidget(self.save_btn)
