@@ -117,7 +117,8 @@ Procedure:
 6. Confirm `.`, `R`, `F5`, `Ctrl+O`, `Ctrl+Shift+O`, `Ctrl+Shift+R`,
    `Ctrl+0`, `Alt+V/A/C`, `Alt+1…0`, and the File/View/Help menus exist.
 7. Switch analysis tabs with the Alt shortcuts and focus Trace search with `/`
-   while another pane owns focus.
+   while another pane owns focus. Require the shortcut to focus the selected
+   table/control, including Code$, Memory, and Mem map.
 8. Press F1 through `QTest`.
 9. Select “Reading the Pipeline View” from the Help index.
 10. Confirm at least eight indexed topics, dedicated loading and Assembly/C

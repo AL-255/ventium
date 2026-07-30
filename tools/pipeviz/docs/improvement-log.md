@@ -126,6 +126,13 @@ carry explicit 256-byte tooltips, and share Page Up/Page Down shortcuts scoped
 to the Memory pane. Paging exits follow/click-highlight mode truthfully; a
 keyboard round-trip regression proves the exact physical address.
 
+**Analysis-focus audit:** Alt+1…Alt+0 changed the visible analysis tab but left
+focus in Pipeline, so the next arrow could navigate an unrelated retirement
+instead of the selected table/Mem-map. Each shortcut now defers focus to that
+tab's primary table, Memory address field, or access map; display-only
+Prefetch/Cycles pages use the tab strip. Startup and live D-cache regressions
+exercise actual Alt+1/Alt+9/Alt+0 dispatch and assert the resulting focus owner.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

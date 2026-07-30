@@ -429,6 +429,27 @@ class MainWindow(QMainWindow):
         if 0 <= index < self.tables.tabs.count():
             self.tables.tabs.setCurrentIndex(index)
             self._notice(f"Analysis: {self.tables.tabs.tabText(index)}")
+            QTimer.singleShot(
+                0, lambda selected=index:
+                self._focus_analysis_content(selected))
+
+    def _focus_analysis_content(self, index):
+        if (self.workspace.currentIndex() != 0
+                or self.tables.tabs.currentIndex() != index):
+            return
+        targets = (
+            self.tables.ic, self.tables.dc, self.tables.tlb, None,
+            self.tables.hot, self.tables.br, self.tables.mix, None,
+            self.tables.mem.addr_e, self.tables.accmap,
+        )
+        target = targets[index] if 0 <= index < len(targets) else None
+        if target is None or not target.isEnabled():
+            target = self.tables.tabs.tabBar()
+        if hasattr(target, "rowCount") and target.rowCount():
+            if target.currentRow() < 0:
+                target.setCurrentCell(0, 0)
+        if target.isVisible():
+            target.setFocus(Qt.ShortcutFocusReason)
 
     def _show_guide(self, topic="Getting started"):
         if self._guide_dialog is None:

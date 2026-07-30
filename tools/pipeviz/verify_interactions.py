@@ -929,9 +929,11 @@ def scenario_startup(app, outdir):
         QTest.keyClick(win, Qt.Key_0, Qt.AltModifier)
         settle(app)
         assert win.tables.tabs.currentIndex() == 9
+        assert app.focusWidget() is win.tables.accmap
         QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
         settle(app)
         assert win.tables.tabs.currentIndex() == 0
+        assert app.focusWidget() is win.tables.ic
         win.trace.filt.setText("mov")
         win.tables.tabs.setFocus()
         QTest.keyClick(win.tables.tabs, Qt.Key_Slash)
@@ -1513,7 +1515,10 @@ def scenario_dcache_memory(app, outdir):
             win.tables.hot.item(row, 3).text().endswith("%")
             for row in range(win.tables.hot.rowCount()))
 
-        select_tab(app, win.tables.tabs, 8)
+        QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 8
+        assert app.focusWidget() is win.tables.mem.addr_e
         old_addr = win.tables.mem.addr
         win.tables.mem.addr_e.setText("not-hex")
         win.tables.mem._go()
@@ -1540,7 +1545,10 @@ def scenario_dcache_memory(app, outdir):
         assert win.tables.mem.follow == "access"
         save_shot(app, win, outdir, "02_dcache_memory_follow")
 
-        select_tab(app, win.tables.tabs, 9)
+        QTest.keyClick(win.tables.mem.addr_e, Qt.Key_0, Qt.AltModifier)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 9
+        assert app.focusWidget() is win.tables.accmap
         win.tables.accmap.repaint()
         settle(app)
         assert len(win.tables.accmap._pts) == len(accesses)

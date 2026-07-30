@@ -142,7 +142,8 @@ page survives a wide/compact transition. This keeps every value readable and
 its time point explicit at 1280×800. **View → Reset panel layout**
 (`Ctrl+0`) restores the recommended proportions after exploratory resizing.
 `Alt+1` through `Alt+0` jump directly among Code$, Data$, TLB, Prefetch,
-Hotspots, Branches, Mix, Cycles, Memory, and Mem map.
+Hotspots, Branches, Mix, Cycles, Memory, and Mem map and focus the active
+table/control; display-only Prefetch/Cycles pages focus the tab strip.
 
 Trace filters are space-separated AND terms: free text plus exact-field
 `pc:08048`, retirement `n>=100` / `n<=200` / `n=150`, cycle
