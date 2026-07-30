@@ -1166,6 +1166,14 @@ def scenario_startup(app, outdir):
         settle(app)
         assert win._guide_dialog.find_bar.isVisible()
         assert app.focusWidget() is win._guide_dialog.find_edit
+        unnamed_guide_focus = [
+            (type(widget).__name__, widget.objectName())
+            for widget in win._guide_dialog.findChildren(QWidget)
+            if (widget.isVisibleTo(win._guide_dialog) and widget.isEnabled()
+                and widget.focusPolicy() != Qt.NoFocus
+                and not widget.accessibleName())
+        ]
+        assert not unnamed_guide_focus, unnamed_guide_focus
         win._guide_dialog.find_edit.setText("cycle")
         settle(app)
         find_count = re.fullmatch(

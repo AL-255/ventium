@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Indexed-guide accessibility audit:** the native Close button was the guide's
+only visible focusable control without an explicit assistive name. It now has a
+guide-specific name and description; the Find trigger, query, and previous/next
+controls likewise expose their precise current-topic behavior, and the visual
+Find label is associated with its editor. Acceptance now rejects any unnamed
+focusable control while the transient Find bar is open.
+
 **Source-editor keyboard escape audit:** plain Tab is intentionally an editing
 command, but that made keyboard-only users appear trapped inside Assembly and C
 source. Ctrl+Tab now moves to diagnostics and Ctrl+Shift+Tab moves back toward
