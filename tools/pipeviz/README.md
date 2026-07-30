@@ -194,6 +194,12 @@ splitter proportions. `Alt+V`, `Alt+A`, and `Alt+C` switch workspaces;
 `Alt+1` through `Alt+0` select the ten analysis tabs.
 `/` focuses the trace filter from anywhere; Enter/F3 and Shift+F3 move
 among its results; Escape clears it. `F1` opens the complete shortcut reference.
+Inside Assembly/C, `Ctrl+O` instead opens that source type and `Ctrl+S` saves
+the current source; an asterisk on its workspace tab marks unsaved edits.
+New/Open, generated-source replacement, and Quit protect those edits with
+Save/Discard/Cancel.
+`Ctrl+F` opens an inline source search with all-match highlighting, wraparound
+Enter/F3 and Shift+Enter/Shift+F3 navigation, and an explicit match count.
 
 Mouse interactions: **click** a Konata cell or a trace row to pin the registers
 to that instruction and drop a cycle playhead (the trace ↔ pipeline selection is

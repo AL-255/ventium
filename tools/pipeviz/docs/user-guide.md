@@ -96,6 +96,16 @@ A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.
 
+`Ctrl+O` opens Assembly source and `Ctrl+S` saves it; the corresponding buttons
+remain available for mouse use. The Assembly tab gains `*` while changes are
+unsaved. In the C workspace the same shortcuts open/save C, and its tab uses the
+same dirty marker. Visualizer restores Ctrl+O to opening executable programs.
+New/Open, generated C-to-Assembly replacement, and application close never
+silently discard a dirty editor: choose Save, Discard, or Cancel.
+For longer generated files, `Ctrl+F` opens an inline search with highlighted
+matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
+moves backward, and Escape closes it.
+
 The assembler emits a DWARF line table. After running, click any authored
 instruction in Trace or the Pipeline view: the Assembly tab becomes
 **Assembly · L…** and that exact source line is highlighted. U and V

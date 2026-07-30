@@ -326,12 +326,13 @@ def scenario_startup(app, outdir):
             action.shortcut().toString()
             for action in [*win.actions(), *menu_actions]
         }
-        for expected in ("F5", "Ctrl+O", "Ctrl+Shift+O", "Ctrl+Shift+R",
+        for expected in ("F5", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+O", "Ctrl+Shift+R",
                          "Ctrl+Q", "Ctrl+0", "R", "."):
             assert expected in shortcuts, f"missing global shortcut {expected}"
         file_actions = {action.text() for action in win._file_menu.actions()}
-        assert {"Open program…", "Open snapshot…", "Reload program from disk",
-                "Open example", "Quit"} <= file_actions
+        assert {"Open program…", "Save source", "Open snapshot…",
+                "Reload program from disk", "Open example", "Quit"} <= file_actions
+        assert not win.save_source_action.isEnabled()
         assert not win.reload_action.isEnabled()
         enabled_examples = {
             action.text() for action in win._examples_menu.actions()

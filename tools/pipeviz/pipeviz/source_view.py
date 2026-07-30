@@ -14,8 +14,8 @@ from PySide6.QtGui import (
     QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextFormat,
 )
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPlainTextEdit, QPushButton, QSizePolicy, QSplitter,
+    QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QSplitter,
     QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -60,9 +60,13 @@ class CodeEditor(QPlainTextEdit):
         self._execution_line = None
         self._error_line = None
         self._execution_tip = ""
+        self._find_text = ""
+        self._find_ranges = []
+        self._find_truncated = False
         self.blockCountChanged.connect(self._update_line_area_width)
         self.updateRequest.connect(self._update_line_area)
         self.cursorPositionChanged.connect(self._refresh_selections)
+        self.textChanged.connect(self._rebuild_find_ranges)
         self._update_line_area_width()
         self._refresh_selections()
 
@@ -133,6 +137,14 @@ class CodeEditor(QPlainTextEdit):
             self.textCursor().blockNumber() + 1, "#121a24")
         if current is not None:
             selections.append(current)
+        for start, end in self._find_ranges:
+            sel = QTextEdit.ExtraSelection()
+            cursor = QTextCursor(self.document())
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.KeepAnchor)
+            sel.cursor = cursor
+            sel.format.setBackground(QColor("#5a4515"))
+            selections.append(sel)
         execution = self._selection(self._execution_line, "#10313a")
         if execution is not None:
             execution.format.setProperty(QTextFormat.OutlinePen, QColor("#39c5cf"))
@@ -171,6 +183,154 @@ class CodeEditor(QPlainTextEdit):
         self._error_line = None
         self.setToolTip("")
         self._refresh_selections()
+
+    def _rebuild_find_ranges(self):
+        self._find_ranges = []
+        self._find_truncated = False
+        if self._find_text:
+            cursor = QTextCursor(self.document())
+            while len(self._find_ranges) < 2000:
+                found = self.document().find(self._find_text, cursor)
+                if found.isNull():
+                    break
+                self._find_ranges.append(
+                    (found.selectionStart(), found.selectionEnd()))
+                cursor.setPosition(found.selectionEnd())
+            if len(self._find_ranges) == 2000:
+                self._find_truncated = not self.document().find(
+                    self._find_text, cursor).isNull()
+        self._refresh_selections()
+        return len(self._find_ranges)
+
+    def set_find_text(self, text):
+        self._find_text = text or ""
+        return self._rebuild_find_ranges()
+
+    def find_text(self, direction=1):
+        """Select the next/previous match, wrapping at document boundaries."""
+        ranges = self._find_ranges
+        if not ranges:
+            return 0, 0
+        cursor = self.textCursor()
+        current = (cursor.selectionStart(), cursor.selectionEnd())
+        try:
+            index = ranges.index(current)
+            index = (index + (1 if direction > 0 else -1)) % len(ranges)
+        except ValueError:
+            pos = cursor.selectionEnd() if direction > 0 else cursor.selectionStart()
+            if direction > 0:
+                index = next(
+                    (i for i, (start, _end) in enumerate(ranges)
+                     if start >= pos), 0)
+            else:
+                index = next(
+                    (i for i in range(len(ranges) - 1, -1, -1)
+                     if ranges[i][1] <= pos), len(ranges) - 1)
+        start, end = ranges[index]
+        found = QTextCursor(self.document())
+        found.setPosition(start)
+        found.setPosition(end, QTextCursor.KeepAnchor)
+        self.setTextCursor(found)
+        self.centerCursor()
+        return index + 1, len(ranges)
+
+
+class SourceFindBar(QFrame):
+    """Compact, shared find UI for the Assembly and C source editors."""
+
+    def __init__(self, editor, parent=None):
+        super().__init__(parent)
+        self.editor = editor
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet("QFrame{background:#161b22;border:1px solid #30363d;}")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(4, 2, 4, 2)
+        row.setSpacing(4)
+        label = QLabel("Find")
+        label.setStyleSheet("border:0;color:#8b949e;")
+        row.addWidget(label)
+        self.query = QLineEdit()
+        self.query.setAccessibleName("Source search")
+        self.query.setPlaceholderText("text in source")
+        self.query.setClearButtonEnabled(True)
+        row.addWidget(self.query, 1)
+        self.count = QLabel("")
+        self.count.setFixedWidth(70)
+        self.count.setAlignment(Qt.AlignCenter)
+        self.count.setStyleSheet("border:0;color:#8b949e;")
+        row.addWidget(self.count)
+        self.previous_btn = QToolButton()
+        self.previous_btn.setText("↑")
+        self.previous_btn.setToolTip("Previous match (Shift+F3)")
+        self.next_btn = QToolButton()
+        self.next_btn.setText("↓")
+        self.next_btn.setToolTip("Next match (F3 or Enter)")
+        self.close_btn = QToolButton()
+        self.close_btn.setText("×")
+        self.close_btn.setToolTip("Close source search (Escape)")
+        for button in (self.previous_btn, self.next_btn, self.close_btn):
+            button.setAutoRaise(True)
+            button.setFixedSize(24, 22)
+            row.addWidget(button)
+        self.query.textChanged.connect(self._query_changed)
+        self.query.returnPressed.connect(lambda: self.find(1))
+        self.previous_btn.clicked.connect(lambda: self.find(-1))
+        self.next_btn.clicked.connect(lambda: self.find(1))
+        self.close_btn.clicked.connect(self.hide_find)
+        QShortcut(QKeySequence("Ctrl+F"), editor).activated.connect(self.show_find)
+        QShortcut(QKeySequence("F3"), editor).activated.connect(lambda: self.find(1))
+        QShortcut(QKeySequence("Shift+F3"), editor).activated.connect(
+            lambda: self.find(-1))
+        QShortcut(QKeySequence("Shift+Return"), self.query).activated.connect(
+            lambda: self.find(-1))
+        QShortcut(QKeySequence("Escape"), self.query).activated.connect(
+            self.hide_find)
+        self.hide()
+
+    def show_find(self):
+        cursor = self.editor.textCursor()
+        seed = cursor.selectedText()
+        if not seed or "\n" in seed:
+            probe = QTextCursor(cursor)
+            probe.select(QTextCursor.WordUnderCursor)
+            seed = probe.selectedText()
+        self.show()
+        if seed and len(seed) <= 80:
+            self.query.setText(seed)
+        self.query.setFocus(Qt.ShortcutFocusReason)
+        self.query.selectAll()
+
+    def hide_find(self):
+        self.query.clear()
+        self.editor.set_find_text("")
+        self.hide()
+        self.editor.setFocus(Qt.ShortcutFocusReason)
+
+    def _query_changed(self, text):
+        total = self.editor.set_find_text(text)
+        if not text:
+            self.count.setText("")
+            self._set_navigation(False)
+            return
+        self._set_navigation(total > 0)
+        if total:
+            self._set_count(*self.editor.find_text(1))
+        else:
+            self.count.setText("No matches")
+
+    def _set_navigation(self, enabled):
+        self.previous_btn.setEnabled(enabled)
+        self.next_btn.setEnabled(enabled)
+
+    def _set_count(self, index, total):
+        suffix = "+" if self.editor._find_truncated else ""
+        self.count.setText(
+            f"{index} / {total}{suffix}" if total else "No matches")
+
+    def find(self, direction):
+        if not self.query.text():
+            return
+        self._set_count(*self.editor.find_text(direction))
 
 
 def _fmt(color, bold=False, italic=False):
@@ -715,9 +875,26 @@ class _Diagnostics(QPlainTextEdit):
         self.setPlainText(text)
 
 
+def _confirm_source_replacement(view, label, action):
+    """Protect edited source before replacing it or closing the application."""
+    if not view.editor.document().isModified():
+        return True
+    choice = QMessageBox.warning(
+        view, f"Unsaved {label} source",
+        f"The {label} source has unsaved changes. Save it before {action}?",
+        QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+        QMessageBox.Save)
+    if choice == QMessageBox.Cancel:
+        return False
+    if choice == QMessageBox.Save:
+        return bool(view.save_source())
+    return True
+
+
 class AssemblyView(QWidget):
     runRequested = Signal(str, object)
     statusChanged = Signal(str)
+    dirtyChanged = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -751,6 +928,8 @@ class AssemblyView(QWidget):
         self.editor = AssemblyEditor()
         self.editor.setAccessibleName("Assembly source editor")
         self.editor.setPlainText(_ASM_TEMPLATE)
+        self.find_bar = SourceFindBar(self.editor)
+        layout.addWidget(self.find_bar)
         sidebar = QWidget()
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(4, 0, 0, 0)
@@ -776,9 +955,12 @@ class AssemblyView(QWidget):
         self._path = None
         self.editor.cursorPositionChanged.connect(self._cursor_instruction)
         self.editor.textChanged.connect(self._source_changed)
+        self.editor.document().modificationChanged.connect(
+            self.dirtyChanged.emit)
         self.template_btn.clicked.connect(self.new_template)
         self.open_btn.clicked.connect(self.open_source)
-        self.save_btn.clicked.connect(self.save_source)
+        self.save_btn.clicked.connect(
+            lambda: self.save_source(save_as=True))
         self.complete_btn.clicked.connect(
             lambda: self.editor.request_completion(force=True))
         self.build_btn.clicked.connect(lambda: self.build(False))
@@ -786,6 +968,7 @@ class AssemblyView(QWidget):
         QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
             lambda: self.build(True))
         self._cursor_instruction()
+        self.editor.document().setModified(False)
 
     @property
     def mapping_current(self):
@@ -814,54 +997,74 @@ class AssemblyView(QWidget):
             instruction_info(match.group(1)) if match else None)
 
     def new_template(self):
+        if not self.confirm_safe_to_discard("creating a new template"):
+            return False
         self._source_map = {}
         self._built_revision = -1
         self.editor.setPlainText(_ASM_TEMPLATE)
+        self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
         self.diagnostics.clear()
         self.status.setText("New assembly template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
+        return True
 
-    def set_source(self, text, origin="generated"):
+    def set_source(self, text, origin="generated", confirm=True):
+        if confirm and not self.confirm_safe_to_discard(
+                "replacing it with generated assembly"):
+            return False
         self._source_map = {}
         self._built_revision = -1
         self.editor.setPlainText(text)
+        self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
         self.diagnostics.success(f"Loaded assembly from {origin}. Review, edit, then run.")
         self.status.setText(f"Assembly generated from {origin}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
+        return True
 
     def open_source(self):
+        if not self.confirm_safe_to_discard("opening another file"):
+            return False
         path, _ = QFileDialog.getOpenFileName(
             self, "Open assembly", str(_TOOL_DIR),
             "Assembly (*.s *.S *.asm);;All files (*)")
         if not path:
-            return
+            return False
         try:
             text = Path(path).read_text(encoding="utf-8")
         except OSError as error:
             self.diagnostics.failure(str(error))
-            return
-        self.set_source(text, os.path.basename(path))
+            return False
+        self.set_source(text, os.path.basename(path), confirm=False)
         self._path = path
+        return True
 
-    def save_source(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save assembly", self._path or str(_TOOL_DIR / "program.s"),
-            "Assembly (*.s);;All files (*)")
-        if not path:
-            return
+    def confirm_safe_to_discard(self, action):
+        return _confirm_source_replacement(
+            self, "Assembly", action)
+
+    def save_source(self, save_as=False):
+        path = self._path
+        if save_as or not path:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save assembly", path or str(_TOOL_DIR / "program.s"),
+                "Assembly (*.s);;All files (*)")
+            if not path:
+                return False
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except OSError as error:
             self.diagnostics.failure(str(error))
-            return
+            return False
         self._path = path
+        self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
+        return True
 
     def build(self, run=False):
         self.editor.mark_error_line(None)
@@ -902,6 +1105,7 @@ class AssemblyView(QWidget):
 class CView(QWidget):
     assemblyGenerated = Signal(str, str)
     statusChanged = Signal(str)
+    dirtyChanged = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -938,6 +1142,8 @@ class CView(QWidget):
         self.editor.setAccessibleName("C source editor")
         self.highlighter = CHighlighter(self.editor.document())
         self.editor.setPlainText(_C_TEMPLATE)
+        self.find_bar = SourceFindBar(self.editor)
+        layout.addWidget(self.find_bar)
         self.diagnostics = _Diagnostics()
         self.diagnostics.setMaximumHeight(165)
         split.addWidget(self.editor)
@@ -953,46 +1159,66 @@ class CView(QWidget):
 
         self.template_btn.clicked.connect(self.new_template)
         self.open_btn.clicked.connect(self.open_source)
-        self.save_btn.clicked.connect(self.save_source)
+        self.save_btn.clicked.connect(
+            lambda: self.save_source(save_as=True))
         self.compile_btn.clicked.connect(self.compile)
         QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
             self.compile)
+        self.editor.document().modificationChanged.connect(
+            self.dirtyChanged.emit)
+        self.editor.document().setModified(False)
 
     def new_template(self):
+        if not self.confirm_safe_to_discard("creating a new template"):
+            return False
         self.editor.setPlainText(_C_TEMPLATE)
+        self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
         self.diagnostics.clear()
         self.status.setText("New freestanding C template")
+        return True
 
     def open_source(self):
+        if not self.confirm_safe_to_discard("opening another file"):
+            return False
         path, _ = QFileDialog.getOpenFileName(
             self, "Open C source", str(_TOOL_DIR),
             "C source (*.c *.h);;All files (*)")
         if not path:
-            return
+            return False
         try:
             self.editor.setPlainText(Path(path).read_text(encoding="utf-8"))
         except OSError as error:
             self.diagnostics.failure(str(error))
-            return
+            return False
+        self.editor.document().setModified(False)
         self._path = path
         self.editor.clear_marks()
         self.status.setText(f"Opened {os.path.basename(path)}")
+        return True
 
-    def save_source(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save C source", self._path or str(_TOOL_DIR / "program.c"),
-            "C source (*.c);;All files (*)")
-        if not path:
-            return
+    def confirm_safe_to_discard(self, action):
+        return _confirm_source_replacement(
+            self, "C", action)
+
+    def save_source(self, save_as=False):
+        path = self._path
+        if save_as or not path:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save C source", path or str(_TOOL_DIR / "program.c"),
+                "C source (*.c);;All files (*)")
+            if not path:
+                return False
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except OSError as error:
             self.diagnostics.failure(str(error))
-            return
+            return False
         self._path = path
+        self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
+        return True
 
     def compile(self):
         self.editor.mark_error_line(None)

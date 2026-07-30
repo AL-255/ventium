@@ -9,9 +9,9 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QCloseEvent, QTextCursor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pipeviz.isa_catalog import CATALOG, MNEMONICS, instruction_info
 from pipeviz.main import MainWindow, _apply_dark, _read_program
@@ -155,6 +155,10 @@ def scenario(app, outdir):
         toolbars = (
             win.session_toolbar, win.transport_toolbar, win.status_toolbar)
         assert all(toolbar.isHidden() for toolbar in toolbars)
+        assert win.open_action.text() == "Open assembly source…"
+        assert win.open_action.shortcut().toString() == "Ctrl+O"
+        assert win.save_source_action.isEnabled()
+        assert win.save_source_action.shortcut().toString() == "Ctrl+S"
 
         editor = win.assembly.editor
         editor.clear()
@@ -162,13 +166,59 @@ def scenario(app, outdir):
         QTest.keyClicks(editor, "i r . [ ] /")
         settle(app)
         assert editor.toPlainText() == "i r . [ ] /"
+        assert win.workspace.tabText(1) == "Assembly *"
         assert all(not action.isEnabled()
                    for action in win._transport_shortcut_actions)
+        close_event = QCloseEvent()
+        real_warning = QMessageBox.warning
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Cancel)
+        try:
+            win.closeEvent(close_event)
+        finally:
+            QMessageBox.warning = real_warning
+        assert not close_event.isAccepted()
+        assert win.isVisible()
+        opened = []
+        real_open_source = win.assembly.open_source
+        win.assembly.open_source = lambda: opened.append("assembly")
+        try:
+            QTest.keyClick(editor, Qt.Key_O, Qt.ControlModifier)
+            settle(app)
+        finally:
+            win.assembly.open_source = real_open_source
+        assert opened == ["assembly"]
+        os.makedirs(outdir, exist_ok=True)
+        save_path = os.path.join(outdir, "keyboard-saved.s")
+        win.assembly._path = save_path
+        QTest.keyClick(editor, Qt.Key_S, Qt.ControlModifier)
+        settle(app)
+        assert Path(save_path).read_text(encoding="utf-8") == "i r . [ ] /"
+        assert not editor.document().isModified()
+        assert win.workspace.tabText(1) == "Assembly"
         win.assembly.new_template()
         win.assembly.editor.highlighter.rehighlight()
         settle(app)
         assert "#79c0ff" in format_colors(editor, 5)  # mov mnemonic
         assert "#56d364" in format_colors(editor, 5)  # eax register
+        editor.setFocus()
+        QTest.keyClick(editor, Qt.Key_F, Qt.ControlModifier)
+        settle(app)
+        assert win.assembly.find_bar.isVisible()
+        QTest.keyClicks(win.assembly.find_bar.query, "mov")
+        settle(app)
+        assert win.assembly.find_bar.count.text() == "1 / 2"
+        assert editor.textCursor().selectedText().lower() == "mov"
+        assert editor.textCursor().blockNumber() + 1 == 5
+        QTest.keyClick(win.assembly.find_bar.query, Qt.Key_Return)
+        settle(app)
+        assert win.assembly.find_bar.count.text() == "2 / 2"
+        assert editor.textCursor().blockNumber() + 1 == 6
+        save(win, outdir, "00b_assembly_find")
+        QTest.keyClick(win.assembly.find_bar.query, Qt.Key_Escape)
+        settle(app)
+        assert not win.assembly.find_bar.isVisible()
+        assert not editor._find_ranges
         save(win, outdir, "00_assembly_workbench")
         win.resize(1280, 800)
         settle(app)
@@ -255,6 +305,8 @@ def scenario(app, outdir):
         settle(app)
         assert result is not None
         assert win.workspace.currentWidget() is win.visualizer_tab
+        assert win.open_action.text() == "Open program…"
+        assert not win.save_source_action.isEnabled()
         assert all(not toolbar.isHidden() for toolbar in toolbars)
         assert all(action.isEnabled()
                    for action in win._transport_shortcut_actions)
@@ -320,21 +372,55 @@ def scenario(app, outdir):
         assert "assemble again" in win.assembly.status.text()
         assert editor._execution_line is None
         assert not win._assembly_source_map
-        assert win.workspace.tabText(1) == "Assembly"
+        assert win.workspace.tabText(1) == "Assembly *"
         select_trace_pc(win, pc)
         settle(app)
         assert editor._execution_line is None  # stale maps never retain/move a marker
+        assert win.workspace.tabText(1) == "Assembly *"
+        dirty_source = editor.toPlainText()
+        real_warning = QMessageBox.warning
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Cancel)
+        try:
+            assert not win.assembly.set_source("hlt\n", "cancelled replacement")
+        finally:
+            QMessageBox.warning = real_warning
+        assert editor.toPlainText() == dirty_source
+        assert win.workspace.tabText(1) == "Assembly *"
+        win.assembly._path = os.path.join(outdir, "edited-after-build.s")
+        assert win.assembly.save_source()
+        assert win.workspace.tabText(1) == "Assembly"
 
         # C syntax highlighting and error navigation.
         win.workspace.setCurrentWidget(win.c_source)
         win.c_source.new_template()
         assert all(toolbar.isHidden() for toolbar in toolbars)
+        assert win.open_action.text() == "Open C source…"
+        assert win.save_source_action.isEnabled()
         assert all(not action.isEnabled()
                    for action in win._transport_shortcut_actions)
         win.c_source.highlighter.rehighlight()
         settle(app)
         assert "#ff7b72" in format_colors(win.c_source.editor, 4)  # int
         assert "#d2a8ff" in format_colors(win.c_source.editor, 4)  # main
+        win.c_source.editor.appendPlainText("/* unsaved */")
+        assert win.workspace.tabText(2) == "C *"
+        dirty_c = win.c_source.editor.toPlainText()
+        real_warning = QMessageBox.warning
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Cancel)
+        try:
+            assert not win.c_source.new_template()
+        finally:
+            QMessageBox.warning = real_warning
+        assert win.c_source.editor.toPlainText() == dirty_c
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Discard)
+        try:
+            assert win.c_source.new_template()
+        finally:
+            QMessageBox.warning = real_warning
+        assert win.workspace.tabText(2) == "C"
         save(win, outdir, "03_c_workbench")
         win.c_source.editor.setPlainText(
             "int main(void)\n{\n    return missing_symbol;\n}\n")

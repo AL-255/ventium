@@ -140,6 +140,13 @@ miniature pipeline diagram. GNU as/ld build a 32-bit ELF with DWARF line data;
 Assemble+Run loads it on the existing RTL backend. Trace/Konata selection maps
 the exact PC back to its assembly line, including distinct U/V instructions on
 one cycle; an edit invalidates the old map until rebuild.
+Contextual Ctrl+O opens the active program/Assembly/C type, Ctrl+S saves source,
+and `*` tab markers expose unsaved editor state without consuming screen space.
+New/Open, C-generated replacement, and Quit all use Save/Discard/Cancel guards,
+closing the last silent-data-loss paths in the authoring loop.
+Both editors also have an on-demand Ctrl+F bar with highlighted matches,
+current/total feedback, wraparound forward/backward navigation, and no permanent
+layout cost while search is closed.
 
 The C workspace adds line-numbered C highlighting, O0/O1/O2/Os selection, GCC
 error navigation, and a freestanding 32-bit Pentium compile path. It emits

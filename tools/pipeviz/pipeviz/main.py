@@ -272,10 +272,15 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self):
         file_menu = self.menuBar().addMenu("&File")
-        open_action = QAction("Open program…", self)
-        open_action.setShortcut(QKeySequence("Ctrl+O"))
-        open_action.triggered.connect(self.on_open)
-        file_menu.addAction(open_action)
+        self.open_action = QAction("Open program…", self)
+        self.open_action.setShortcut(QKeySequence("Ctrl+O"))
+        self.open_action.triggered.connect(self.on_open)
+        file_menu.addAction(self.open_action)
+        self.save_source_action = QAction("Save source", self)
+        self.save_source_action.setShortcut(QKeySequence("Ctrl+S"))
+        self.save_source_action.setEnabled(False)
+        self.save_source_action.triggered.connect(self._save_active_source)
+        file_menu.addAction(self.save_source_action)
         snapshot_action = QAction("Open snapshot…", self)
         snapshot_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
         snapshot_action.triggered.connect(self.on_open_snapshot)
@@ -363,6 +368,7 @@ class MainWindow(QMainWindow):
         menu.addAction(shortcuts)
         self._help_menu = menu
         self._guide_dialog = None
+        self._sync_workspace_file_actions()
 
     def _refresh_example_actions(self):
         """Discover builds lazily so examples compiled after launch appear."""
@@ -697,8 +703,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.workspace)
         self.assembly.runRequested.connect(self._run_assembly)
         self.assembly.statusChanged.connect(self._authoring_notice)
+        self.assembly.dirtyChanged.connect(self._assembly_dirty_changed)
         self.c_source.assemblyGenerated.connect(self._accept_compiled_assembly)
         self.c_source.statusChanged.connect(self._authoring_notice)
+        self.c_source.dirtyChanged.connect(self._c_dirty_changed)
         # two-way link: trace row <-> Konata instruction row
         self.trace.rowSelected.connect(self.pipeline.highlight_cycle)
         self.pipeline.konata.plot.rowClicked.connect(self.trace.select_n)
@@ -759,13 +767,58 @@ class MainWindow(QMainWindow):
             for toolbar, shown in zip(toolbars, visibility):
                 toolbar.setVisible(shown)
             self._source_workspace_active = False
+        self._sync_workspace_file_actions()
+
+    def _sync_workspace_file_actions(self):
+        if not hasattr(self, "open_action"):
+            return
+        index = self.workspace.currentIndex()
+        labels = (
+            ("Open program…", "Open a raw image or 32-bit x86 ELF"),
+            ("Open assembly source…", "Open GNU Intel-syntax assembly"),
+            ("Open C source…", "Open a freestanding C source file"),
+        )
+        label, tip = labels[index] if 0 <= index < len(labels) else labels[0]
+        self.open_action.setText(label)
+        self.open_action.setToolTip(f"{tip} (Ctrl+O)")
+        self.save_source_action.setEnabled(index in (1, 2))
+        self.save_source_action.setText(
+            "Save assembly source" if index == 1 else
+            "Save C source" if index == 2 else "Save source")
+
+    def _save_active_source(self):
+        source = (
+            self.assembly if self.workspace.currentIndex() == 1 else
+            self.c_source if self.workspace.currentIndex() == 2 else None)
+        if source is not None:
+            source.save_source()
 
     def _clear_assembly_source_link(self):
         self._assembly_source_map = {}
         self.assembly.editor.mark_execution_line(None)
-        self.workspace.setTabText(1, "Assembly")
+        self.workspace.setTabText(
+            1, "Assembly *"
+            if self.assembly.editor.document().isModified() else "Assembly")
         self.workspace.setTabToolTip(
             1, "Edit, complete, assemble, and run 32-bit Intel-syntax assembly")
+
+    def _assembly_dirty_changed(self, dirty):
+        if dirty:
+            self.workspace.setTabText(1, "Assembly *")
+            self.workspace.setTabToolTip(
+                1, "Assembly has unsaved changes; Ctrl+S saves the source")
+        elif self.workspace.tabText(1) == "Assembly *":
+            self.workspace.setTabText(1, "Assembly")
+            self.workspace.setTabToolTip(
+                1, "Edit, complete, assemble, and run 32-bit Intel-syntax assembly")
+
+    def _c_dirty_changed(self, dirty):
+        self.workspace.setTabText(2, "C *" if dirty else "C")
+        self.workspace.setTabToolTip(
+            2,
+            "C has unsaved changes; Ctrl+S saves the source"
+            if dirty else
+            "Compile a freestanding C experiment into editable assembly")
 
     def _authoring_notice(self, text):
         if text in ("Assembly source modified", "Assembly source replaced"):
@@ -773,7 +826,14 @@ class MainWindow(QMainWindow):
         self._notice(text)
 
     def _accept_compiled_assembly(self, source, optimization):
-        self.assembly.set_source(source, f"C compiler ({optimization})")
+        if not self.assembly.set_source(
+                source, f"C compiler ({optimization})"):
+            self.c_source.status.setText(
+                "C compiled · keeping unsaved Assembly (replacement cancelled)")
+            self.c_source.status.setStyleSheet("color:#e3b341;padding:2px;")
+            self._notice(
+                "C compiled, but generated assembly was not opened")
+            return
         self.workspace.setTabText(1, "Assembly")
         self.workspace.setCurrentWidget(self.assembly)
         self._notice("C compiled — review or edit the generated assembly, then run")
@@ -788,6 +848,12 @@ class MainWindow(QMainWindow):
 
     # ---- image loading ----
     def on_open(self):
+        if self.workspace.currentWidget() is self.assembly:
+            self.assembly.open_source()
+            return
+        if self.workspace.currentWidget() is self.c_source:
+            self.c_source.open_source()
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Open program", self._last_program_dir,
             _PROGRAM_FILTER)
@@ -974,6 +1040,12 @@ class MainWindow(QMainWindow):
         # Closing while Run is active must not leave a timer dispatching into a
         # destroyed Verilator handle during Qt's deferred teardown.
         self.stop_run()
+        if not self.assembly.confirm_safe_to_discard("closing pipeviz"):
+            event.ignore()
+            return
+        if not self.c_source.confirm_safe_to_discard("closing pipeviz"):
+            event.ignore()
+            return
         self.backend.close()
         super().closeEvent(event)
 

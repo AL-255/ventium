@@ -109,6 +109,14 @@ into the same real RTL backend as an opened program. Ctrl+Enter is the keyboard
 equivalent. A bare instruction snippet is automatically wrapped in
 <code>.intel_syntax</code>, <code>_start</code>, and a fall-through HLT; an
 explicit <code>_start:</code> is assembled exactly as written.</p>
+<p>Within either source workspace, Ctrl+O opens that source type and Ctrl+S
+saves the current file. An asterisk on the Assembly or C tab marks unsaved
+changes. New/Open, C-to-Assembly replacement, and Quit offer
+Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
+program-opening role.</p>
+<p>Ctrl+F opens an inline source search with all-match highlighting and a
+current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
+backward, and Escape closes the search.</p>
 <p>Ctrl+Space opens the Ventium/P54C opcode catalogue. Every entry includes its
 operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operations
@@ -168,7 +176,10 @@ and memory state, not the earlier visual history.</p>
     ("Shortcuts", """
 <h1>Keyboard and mouse reference</h1>
 <table cellspacing="6">
- <tr><td><b>Ctrl+O</b></td><td>open program</td></tr>
+ <tr><td><b>Ctrl+O</b></td><td>open program, Assembly, or C for the active workspace</td></tr>
+ <tr><td><b>Ctrl+S</b></td><td>save the active Assembly or C source</td></tr>
+ <tr><td><b>Ctrl+F</b></td><td>find in the active Assembly or C source</td></tr>
+ <tr><td><b>F3 / Shift+F3</b></td><td>next / previous source or Trace match</td></tr>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
  <tr><td><b>Ctrl+Shift+R</b></td><td>reload the current program from disk</td></tr>
  <tr><td><b>Ctrl+0</b></td><td>reset panel proportions</td></tr>
@@ -182,8 +193,8 @@ and memory state, not the earlier visual history.</p>
  <tr><td><b>Ctrl+- / Ctrl+=</b></td><td>zoom the focused Pipeline cycle axis</td></tr>
  <tr><td><b>↑/↓, PgUp/PgDn, Home/End</b></td><td>traverse focused Pipeline rows</td></tr>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
- <tr><td><b>Enter / F3</b></td><td>next filtered retirement</td></tr>
- <tr><td><b>Shift+F3</b></td><td>previous filtered retirement</td></tr>
+ <tr><td><b>Enter / F3</b></td><td>next filtered retirement (Visualizer)</td></tr>
+ <tr><td><b>Shift+F3</b></td><td>previous filtered retirement (Visualizer)</td></tr>
  <tr><td><b>Escape</b></td><td>clear the trace filter</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>

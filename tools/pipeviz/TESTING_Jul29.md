@@ -345,6 +345,10 @@ Procedure:
    current RTL decoder family to an advertised entry, and check representative
    integer, system, x87, mode-gated, and build-gated families.
 2. Render the Assembly editor and verify mnemonic/register syntax formats.
+   Type every single-key debugger binding as source, require an `Assembly *`
+   dirty marker, then require contextual Ctrl+O and Ctrl+S to open/save source.
+   Open Ctrl+F, require two highlighted `mov` matches, traverse both, and close
+   the bar with Escape.
 3. Open the complete Ctrl+Space popup; require its description, availability,
    latency, pairing class, and pipeline stage preview. Confirm automatic
    completion appears in opcode position but never interrupts operands/comments.
@@ -356,7 +360,10 @@ Procedure:
 7. Reject a candidate replacement load and require the prior live backend,
    program bytes, source map, marker, and tab label to remain coherent. Then edit
    after build and require the map to become stale rather than use obsolete PCs.
+   Cancel generated-source replacement and require the dirty text to survive.
 8. Verify C keyword/function highlighting and compiler error-line navigation.
+   Confirm unsaved edits mark `C *`, Cancel preserves them, and explicit Discard
+   permits a new template and clears the marker.
 9. Compile the freestanding Fibonacci C template at O2 into editable Intel
    assembly, assemble+run it, and require EAX = 144.
 10. Select the C-generated entry/loop in Trace and require its emitted assembly
@@ -368,6 +375,7 @@ unique mnemonics and excludes SSE/MMX/later-x86 examples. Both authored programs
 reach HLT with the expected result.
 
 Captures: `00_assembly_workbench.png`, `00a_assembly_compact.png`,
+`00b_assembly_find.png`,
 `01_opcode_completion_popup.png`,
 `02_assembly_source_link.png`, `03_c_workbench.png`,
 `04_c_generated_assembly.png`, `05_c_run_source_link.png`.
