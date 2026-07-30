@@ -396,8 +396,10 @@ receives `.s` or `.c` automatically. A successful save clears the dirty marker
 and reports the final on-disk filename in both the workbench and global action
 row. If a save or open/read fails, the old source text, identity, and dirty state
 remain unchanged while diagnostics, persistent status,
-tooltip/accessibility text, and the global action row all switch to the same
-red `Save failed` or `Open failed` explanation. Retrying the same source at a
+tooltip/accessibility text, and the global action row all switch to a red
+`Save failed` or `Open failed` explanation. The footer keeps this to the
+filename and reason so a long path cannot crowd out the cursor and source
+identity; hover it or read diagnostics for the full path. Retrying the same source at a
 writable destination clears that obsolete red file-I/O diagnostic and reports
 the successful path; unrelated assembler/compiler warnings are not cleared
 merely by saving. Opening

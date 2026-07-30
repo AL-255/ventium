@@ -247,8 +247,9 @@ C-compiler origin, and its tooltip gives the full path.
 Open reports that same real filename in both places; Assembly never labels an
 opened file as compiler-generated. A failed source save or open/read retains
 the old text, identity, and dirty state while diagnostics, persistent status,
-tooltip/accessibility text, and the global notice all show the same red Save
-failed or Open failed explanation.
+tooltip/accessibility text, and the global notice all show a red Save failed or
+Open failed explanation. The footer keeps the filename and reason compact;
+hover it or read diagnostics for the full path.
 Retrying at a writable destination clears that obsolete file-I/O diagnostic
 and reports the successful path without clearing an unrelated build/compiler
 warning merely because the source was saved.

@@ -724,11 +724,14 @@ def scenario(app, outdir):
         assert app.focusWidget() is editor
         assert win.assembly.status.text().startswith("Save failed · ")
         assert "cannot-save-assembly.s" in win.assembly.status.text()
-        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert str(blocked_artifacts) not in win.assembly.status.text()
+        assert blocked_assembly_save in win.assembly.status.toolTip()
         assert win.assembly.status.accessibleDescription() == (
-            win.assembly.status.text())
+            win.assembly.status.toolTip())
         assert "#f85149" in win.assembly.status.styleSheet()
         assert win.assembly.diagnostics._severity == "error"
+        assert blocked_assembly_save in (
+            win.assembly.diagnostics.toPlainText())
         assert win.assembly.status.text() in (
             win.assembly.diagnostics.accessibleDescription())
         assert win.action_hint.text() == win.assembly.status.text()
@@ -2146,11 +2149,14 @@ def scenario(app, outdir):
         assert "decode" in win.assembly.diagnostics.toPlainText().lower()
         assert win.assembly.status.text().startswith("Open failed · ")
         assert "invalid-encoding.s" in win.assembly.status.text()
-        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert str(invalid_assembly_path) not in win.assembly.status.text()
+        assert str(invalid_assembly_path) in win.assembly.status.toolTip()
         assert win.assembly.status.accessibleDescription() == (
-            win.assembly.status.text())
+            win.assembly.status.toolTip())
         assert "#f85149" in win.assembly.status.styleSheet()
         assert win.assembly.diagnostics._severity == "error"
+        assert str(invalid_assembly_path) in (
+            win.assembly.diagnostics.toPlainText())
         assert win.assembly.status.text() in (
             win.assembly.diagnostics.accessibleDescription())
         assert win.action_hint.text() == win.assembly.status.text()
@@ -2253,11 +2259,13 @@ def scenario(app, outdir):
         assert app.focusWidget() is win.c_source.editor
         assert win.c_source.status.text().startswith("Save failed · ")
         assert "cannot-save-c.c" in win.c_source.status.text()
-        assert win.c_source.status.toolTip() == win.c_source.status.text()
+        assert str(blocked_artifacts) not in win.c_source.status.text()
+        assert blocked_c_save in win.c_source.status.toolTip()
         assert win.c_source.status.accessibleDescription() == (
-            win.c_source.status.text())
+            win.c_source.status.toolTip())
         assert "#f85149" in win.c_source.status.styleSheet()
         assert win.c_source.diagnostics._severity == "error"
+        assert blocked_c_save in win.c_source.diagnostics.toPlainText()
         assert win.c_source.status.text() in (
             win.c_source.diagnostics.accessibleDescription())
         assert win.action_hint.text() == win.c_source.status.text()
@@ -2301,11 +2309,14 @@ def scenario(app, outdir):
         assert "decode" in win.c_source.diagnostics.toPlainText().lower()
         assert win.c_source.status.text().startswith("Open failed · ")
         assert "invalid-encoding.c" in win.c_source.status.text()
-        assert win.c_source.status.toolTip() == win.c_source.status.text()
+        assert str(invalid_c_path) not in win.c_source.status.text()
+        assert str(invalid_c_path) in win.c_source.status.toolTip()
         assert win.c_source.status.accessibleDescription() == (
-            win.c_source.status.text())
+            win.c_source.status.toolTip())
         assert "#f85149" in win.c_source.status.styleSheet()
         assert win.c_source.diagnostics._severity == "error"
+        assert str(invalid_c_path) in (
+            win.c_source.diagnostics.toPlainText())
         assert win.c_source.status.text() in (
             win.c_source.diagnostics.accessibleDescription())
         assert win.action_hint.text() == win.c_source.status.text()

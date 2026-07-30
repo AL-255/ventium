@@ -194,9 +194,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     press `Ctrl+G` to go to a validated line.
     Source save/read I/O errors replace stale success text in diagnostics,
     status, tooltip/accessibility, and the global notice while preserving the
-    old source text, identity, and dirty state. A successful retry clears only
-    that obsolete I/O diagnostic; it does not erase an unrelated
-    assembler/compiler warning.
+    old source text, identity, and dirty state. The footer shows a compact
+    filename/reason summary while diagnostics and hover/accessibility retain
+    the full path. A successful retry clears only that obsolete I/O diagnostic;
+    it does not erase an unrelated assembler/compiler warning.
     `Ctrl+wheel` also scales source text through the same 8–24 pt range.
     Moving beside `()`, `[]`, or `{}` highlights its matching pair; an
     unmatched delimiter is marked red, while delimiters inside comments and

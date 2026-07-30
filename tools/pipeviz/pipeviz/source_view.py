@@ -2041,13 +2041,23 @@ def _confirm_source_replacement(view, label, action):
 
 
 def _report_source_io_failure(view, operation, error, path=None):
-    """Replace any stale success state with one persistent file-I/O failure."""
+    """Show a concise failure persistently while retaining actionable detail."""
     target = f"{os.path.basename(path)} · " if path else ""
-    message = f"{operation} failed · {target}{error}"
-    view.diagnostics.failure(message)
+    if isinstance(error, OSError) and error.strerror:
+        errno = f"[Errno {error.errno}] " if error.errno is not None else ""
+        reason = f"{errno}{error.strerror}"
+    else:
+        reason = str(error)
+    message = f"{operation} failed · {target}{reason}"
+    detail = message
+    if path:
+        detail = f"{message}\nFull path: {os.path.abspath(path)}"
+    view.diagnostics.failure(detail)
     view._diagnostic_revision = view.editor.document().revision()
     view._file_io_failure_revision = view._diagnostic_revision
     view.status.setText(message)
+    view.status.setToolTip(detail)
+    view.status.setAccessibleDescription(detail)
     view.status.setStyleSheet("color:#f85149;padding:2px;")
     view.statusChanged.emit(message)
     view._focus_editor()

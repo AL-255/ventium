@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — compact file failures retain full detail
+
+**Failure-state visual audit:** a failed source Save displayed the target
+basename and then repeated its long absolute path inside the raw OS exception.
+At normal width, that single red status consumed almost the entire footer and
+crowded the persistent cursor/source identity.
+
+**Changes:** source I/O status now keeps only operation, basename, errno (when
+available), and reason. Diagnostics, status hover, and accessible description
+retain the full absolute path on a separate labelled line. The global notice
+uses the same concise summary, so the important failure remains visible without
+turning routine workspace depth into UI noise.
+
+**Verification:** Assembly and C Save/Open failures require the full attempted
+path to be absent from visible status but present in diagnostics, tooltip, and
+accessible description. The screenshots exercise long write paths and invalid
+UTF-8 reads at full width.
+
 ## July 30 continuation — successful save retry clears obsolete error
 
 **Recovery-completion audit:** after a red source save failure, retrying Save As
