@@ -861,6 +861,8 @@ def scenario_startup(app, outdir):
         assert "No program loaded" in win.tables.pf.info.text()
         assert all(not control.isEnabled()
                    for control in win.tables.mem._session_controls)
+        assert all(not button.isEnabled()
+                   for button in win.tables.mem.page_buttons)
         assert not win.tables.mem.access_btn.isEnabled()
         assert "No program loaded" in win.tables.mem.follow_lbl.text()
         win.soc_cb.setChecked(True)
@@ -1525,6 +1527,17 @@ def scenario_dcache_memory(app, outdir):
         assert win.tables.mem.follow == "access"
         assert win.tables.mem.addr == (win.trace.last_access[0] & 0xfffffff0)
         assert "following ACCESS" in win.tables.mem.follow_lbl.text()
+        access_page = win.tables.mem.addr
+        win.tables.mem.addr_e.setFocus()
+        QTest.keyClick(win.tables.mem.addr_e, Qt.Key_PageDown)
+        settle(app)
+        assert win.tables.mem.addr == access_page + 0x100
+        assert win.tables.mem.follow is None
+        QTest.keyClick(win.tables.mem.addr_e, Qt.Key_PageUp)
+        settle(app)
+        assert win.tables.mem.addr == access_page
+        click(app, access_button)
+        assert win.tables.mem.follow == "access"
         save_shot(app, win, outdir, "02_dcache_memory_follow")
 
         select_tab(app, win.tables.tabs, 9)

@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QLineEdit, QPushButton, QCheckBox,
                                QStyledItemDelegate, QStyle)
 from PySide6.QtGui import (QFont, QColor, QBrush, QPainter, QFontMetrics,
-                           QPalette, QRegularExpressionValidator)
+                           QPalette, QKeySequence, QRegularExpressionValidator,
+                           QShortcut)
 from PySide6.QtCore import Qt, QRect, Signal, QRegularExpression
 
 from .backend import DC_SETS, WAYS, LINE
@@ -1239,15 +1240,25 @@ class MemoryView(QWidget):
         self.access_btn = ba
         self._access = None       # (addr, size) of the newest memory access
         self._click_hl = None     # (addr, size) pinned by a Mem-map point click
-        for d, lab in ((-256, "◀"), (256, "▶")):
-            b = QPushButton(lab); b.setFixedWidth(28)
+        self.page_buttons = []
+        for d, lab, tip in (
+                (-256, "◀", "Previous 256 physical bytes (Page Up)"),
+                (256, "▶", "Next 256 physical bytes (Page Down)")):
+            b = QPushButton(lab); b.setFixedWidth(28); b.setToolTip(tip)
             b.clicked.connect(lambda _=0, dd=d: self._page(dd)); bar.addWidget(b)
+            self.page_buttons.append(b)
         self.follow_lbl = QLabel(""); self.follow_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
         bar.addWidget(self.follow_lbl); bar.addStretch(1)
         v.addLayout(bar)
         self.dump = _HexDump()
         v.addWidget(self.dump, 1)
-        self._session_controls = (self.addr_e, go, be, bs)
+        self._session_controls = (
+            self.addr_e, go, be, bs, *self.page_buttons)
+        for key, delta in (("PgUp", -256), ("PgDown", 256)):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(
+                lambda step=delta: self._page(step))
         self.set_session_active(False)
 
     def set_session_active(self, active):
@@ -1320,6 +1331,8 @@ class MemoryView(QWidget):
         self._refresh()
 
     def _page(self, delta):
+        if self.backend is None:
+            return
         self.follow = None
         self._click_hl = None
         self.addr = (self.addr + delta) & 0xFFFFFFF0

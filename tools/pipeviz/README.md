@@ -178,7 +178,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     page-walk / x87 / system / halt), so the tallest bar is the bottleneck.
   * **Memory** — a physical hex/ASCII inspector (type an address, or follow
     segment-relative EIP / ESP / the most-recent explicit load-store **access**
-    through legacy page translation, which gold-outlines the touched bytes).
+    through legacy page translation, which gold-outlines the touched bytes);
+    Page Up/Page Down moves by 256 physical bytes.
   * **Mem map** — an **address-vs-retire-order scatter** of explicit memory
     operand effective offsets
     (a strided walk reads as a diagonal, a hot location as a band) with the dominant

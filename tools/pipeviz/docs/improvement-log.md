@@ -119,6 +119,13 @@ identities through the same Trace/Register/physical-Memory path as clicking,
 and Enter/Space reactivates the selection. Selecting an untranslated point also
 clears a prior physical-byte highlight instead of leaving stale evidence.
 
+**Memory-page control audit:** Memory's previous/next-page buttons were omitted
+from the session-control set, so they looked active and changed a hidden address
+before any backend existed. They now disable with every other Memory navigator,
+carry explicit 256-byte tooltips, and share Page Up/Page Down shortcuts scoped
+to the Memory pane. Paging exits follow/click-highlight mode truthfully; a
+keyboard round-trip regression proves the exact physical address.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

@@ -355,7 +355,9 @@ visualization boundary from looking like a cold cache. In **Memory**, choose
 and see its physical bytes outlined in gold. Pipeviz resolves the retired
 instruction’s effective offset through its pre-execution segment base and
 legacy 4 KiB/4 MiB page tables; `→ EIP` and `→ ESP` do the same for the live
-state. **Mem map** deliberately keeps the effective offset—the address used by
+state. Page Up/Page Down (or the adjacent arrows) moves the inspector by 256
+physical bytes and leaves follow mode. Those navigators remain disabled until
+a program is loaded. **Mem map** deliberately keeps the effective offset—the address used by
 the timing D-cache—so this workload’s stride appears as a diagonal scatter;
 click an outlier, or focus the plot and use arrows, Page Up/Page Down, Home, or
 End, to jump directly to its trace row, pinned architectural state, and

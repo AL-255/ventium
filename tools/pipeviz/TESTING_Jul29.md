@@ -224,6 +224,8 @@ Procedure:
    unselected filter and require Trace to return to the newest retirement.
 3. Open Data$ and inspect residency plus replayed miss reporting.
 4. Open Memory and click `→access`.
+   Require Page Down/Page Up to move forward/back by 256 physical bytes and
+   exit follow mode; every Memory navigator is disabled before a session.
 5. Open Mem map; use Home/Right/End/Enter to traverse exact access identities,
    then click a midpoint in the plotted stride.
 6. Verify keyboard and pointer selections choose the matching Trace retirement,
