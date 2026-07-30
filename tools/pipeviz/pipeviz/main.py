@@ -364,6 +364,11 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self):
         file_menu = self.menuBar().addMenu("&File")
+        self.new_source_action = QAction("New source template", self)
+        self.new_source_action.setShortcut(QKeySequence("Ctrl+N"))
+        self.new_source_action.setEnabled(False)
+        self.new_source_action.triggered.connect(self._new_active_source)
+        file_menu.addAction(self.new_source_action)
         self.open_action = QAction("Open program…", self)
         self.open_action.setShortcut(QKeySequence("Ctrl+O"))
         self.open_action.triggered.connect(self.on_open)
@@ -1152,8 +1157,12 @@ class MainWindow(QMainWindow):
         self.open_action.setText(label)
         self.open_action.setToolTip(f"{tip} (Ctrl+O)")
         source_active = index in (1, 2)
+        self.new_source_action.setEnabled(source_active)
         self.save_source_action.setEnabled(source_active)
         self.save_source_as_action.setEnabled(source_active)
+        self.new_source_action.setText(
+            "New assembly template" if index == 1 else
+            "New C template" if index == 2 else "New source template")
         self.save_source_action.setText(
             "Save assembly source" if index == 1 else
             "Save C source" if index == 2 else "Save source")
@@ -1165,6 +1174,13 @@ class MainWindow(QMainWindow):
         # run an older generated ELF and invalidate source links behind the
         # user's current text. Authoring has explicit Compile/Assemble actions.
         self.reload_action.setEnabled(index == 0 and self.image_path is not None)
+
+    def _new_active_source(self):
+        source = (
+            self.assembly if self.workspace.currentIndex() == 1 else
+            self.c_source if self.workspace.currentIndex() == 2 else None)
+        if source is not None:
+            source.new_template()
 
     def _save_active_source(self, save_as=False):
         source = (

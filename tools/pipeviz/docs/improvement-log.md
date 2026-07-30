@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source New-template audit:** the primary New template button had no direct
+keyboard equivalent while Open/Save/Save As did. File now exposes a contextual
+Ctrl+N action, labeled for Assembly or C and disabled in Visualizer. It routes
+through the existing Save/Discard/Cancel protection; acceptance dispatches the
+actual shortcut and verifies workspace-specific labels and scope.
+
 **Source Save-As audit:** both workbenches exposed Save As by pointer but only
 ordinary Save by keyboard. File now provides a workspace-aware Ctrl+Shift+S
 action whose label follows Assembly/C and is disabled in Visualizer,

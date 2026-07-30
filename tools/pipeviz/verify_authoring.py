@@ -229,6 +229,7 @@ def scenario(app, outdir):
     try:
         assert [win.workspace.tabText(i) for i in range(3)] == [
             "Visualizer", "Assembly", "C"]
+        assert not win.new_source_action.isEnabled()
         assert not win.save_source_action.isEnabled()
         assert not win.save_source_as_action.isEnabled()
         assert [action.shortcut().toString()
@@ -261,6 +262,9 @@ def scenario(app, outdir):
             assert toolbar.isHidden()
         assert win.open_action.text() == "Open assembly source…"
         assert win.open_action.shortcut().toString() == "Ctrl+O"
+        assert win.new_source_action.isEnabled()
+        assert win.new_source_action.shortcut().toString() == "Ctrl+N"
+        assert win.new_source_action.text() == "New assembly template"
         assert win.save_source_action.isEnabled()
         assert win.save_source_action.shortcut().toString() == "Ctrl+S"
         assert win.save_source_as_action.isEnabled()
@@ -288,6 +292,15 @@ def scenario(app, outdir):
         assert win.pipeline.board.accessibleName() == "Live pipeline stage board"
         assert "clicked" in win.pipeline.board.accessibleDescription()
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
+        new_requests = []
+        real_new_template = win.assembly.new_template
+        win.assembly.new_template = lambda: new_requests.append("assembly")
+        try:
+            QTest.keyClick(win.assembly.editor, Qt.Key_N, Qt.ControlModifier)
+            settle(app)
+        finally:
+            win.assembly.new_template = real_new_template
+        assert new_requests == ["assembly"]
 
         # Analysis shortcuts are global navigation, not hidden background
         # mutations. From a source editor they must reveal the Visualizer and
@@ -328,6 +341,17 @@ def scenario(app, outdir):
             QMessageBox.warning = real_warning
         assert not close_event.isAccepted()
         assert win.isVisible()
+        dirty_before_cancelled_new = editor.toPlainText()
+        real_warning = QMessageBox.warning
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Cancel)
+        try:
+            QTest.keyClick(editor, Qt.Key_N, Qt.ControlModifier)
+            settle(app)
+        finally:
+            QMessageBox.warning = real_warning
+        assert editor.toPlainText() == dirty_before_cancelled_new
+        assert win.workspace.tabText(1) == "Assembly *"
         opened = []
         real_open_source = win.assembly.open_source
         win.assembly.open_source = lambda: opened.append("assembly")
@@ -1527,6 +1551,8 @@ def scenario(app, outdir):
         assert "#8b949e" in win.c_source.status.styleSheet()
         assert all(toolbar.isHidden() for toolbar in toolbars)
         assert win.open_action.text() == "Open C source…"
+        assert win.new_source_action.isEnabled()
+        assert win.new_source_action.text() == "New C template"
         assert win.save_source_action.isEnabled()
         assert win.save_source_as_action.isEnabled()
         assert win.save_source_as_action.text() == "Save C source as…"

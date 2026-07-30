@@ -207,9 +207,10 @@ into the same real RTL backend as an opened program. Ctrl+Enter is the keyboard
 equivalent. A bare instruction snippet is automatically wrapped in
 <code>.intel_syntax</code>, <code>_start</code>, and a fall-through HLT; an
 explicit <code>_start:</code> is assembled exactly as written.</p>
-<p>Within either source workspace, Ctrl+O opens that source type, Ctrl+S saves
-the current file, and Ctrl+Shift+S saves under a new name. An asterisk on the
-Assembly or C tab marks unsaved changes. Save as appends <code>.s</code> or
+<p>Within either source workspace, Ctrl+N creates its runnable template, Ctrl+O
+opens that source type, Ctrl+S saves the current file, and Ctrl+Shift+S saves
+under a new name. An asterisk on the Assembly or C tab marks unsaved changes.
+Save as appends <code>.s</code> or
 <code>.c</code> to a bare name when its typed-file filter is selected and
 reports the final filename globally.
 The lower-right source badge remains visible when a later Build/Compile replaces
@@ -407,6 +408,7 @@ fresh visible epoch at that point.</p>
     ("Shortcuts", """
 <h1>Keyboard and mouse reference</h1>
 <table cellspacing="6">
+ <tr><td><b>Ctrl+N</b></td><td>new Assembly or C template in the active source workspace</td></tr>
  <tr><td><b>Ctrl+O</b></td><td>open program, Assembly, or C for the active workspace</td></tr>
  <tr><td><b>Ctrl+S</b></td><td>save the active Assembly or C source</td></tr>
  <tr><td><b>Ctrl+Shift+S</b></td><td>save the active source under a new name</td></tr>
