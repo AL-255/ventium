@@ -1101,6 +1101,28 @@ def _default_save_suffix(path, selected_filter, filter_prefix, suffix):
     return path
 
 
+def _sync_source_badge(badge, editor, path, origin):
+    """Render persistent source identity independently of transient build status."""
+    dirty = editor.document().isModified()
+    if path:
+        full = os.path.abspath(path)
+        identity = os.path.basename(path)
+        suffix = " *" if dirty else ""
+    else:
+        full = f"{origin} (not saved)"
+        identity = origin
+        suffix = " *" if dirty else " · not saved"
+    display = QFontMetrics(badge.font()).elidedText(
+        identity, Qt.ElideMiddle, 215)
+    badge.setText(f"source · {display}{suffix}")
+    badge.setToolTip(
+        full + ("\nUnsaved changes" if dirty else ""))
+    badge.setStyleSheet(
+        "color:#e3b341;padding:2px;" if dirty else
+        "color:#79c0ff;padding:2px;" if not path else
+        "color:#8b949e;padding:2px;")
+
+
 class AssemblyView(QWidget):
     runRequested = Signal(str, object)
     statusChanged = Signal(str)
@@ -1161,21 +1183,32 @@ class AssemblyView(QWidget):
         split.setStretchFactor(1, 2)
         split.setSizes([850, 420])
         layout.addWidget(split, 1)
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
         self.status = QLabel(
             "Ready · Ctrl+Space completes opcodes · Ctrl+Enter assembles and runs")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
-        layout.addWidget(self.status)
+        status_row.addWidget(self.status, 1)
+        self.source_badge = QLabel()
+        self.source_badge.setAccessibleName("Assembly source identity")
+        self.source_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.source_badge.setMaximumWidth(330)
+        status_row.addWidget(self.source_badge)
+        layout.addLayout(status_row)
 
         self._built_revision = -1
         self._diagnostic_revision = -1
         self._source_map = {}
         self._path = None
+        self._source_origin = "built-in template"
         self._last_dir = str(_TOOL_DIR)
         self.editor.cursorPositionChanged.connect(self._cursor_instruction)
         self.editor.textChanged.connect(self._source_changed)
         self.editor.completionNotice.connect(self._completion_notice)
         self.editor.document().modificationChanged.connect(
             self.dirtyChanged.emit)
+        self.editor.document().modificationChanged.connect(
+            lambda _dirty: self._sync_source_badge())
         self.template_btn.clicked.connect(self.new_template)
         self.open_btn.clicked.connect(self.open_source)
         self.save_btn.clicked.connect(
@@ -1188,10 +1221,15 @@ class AssemblyView(QWidget):
             lambda: self.build(True))
         self._cursor_instruction()
         self.editor.document().setModified(False)
+        self._sync_source_badge()
 
     def _focus_editor(self):
         if self.isVisible():
             self.editor.setFocus(Qt.OtherFocusReason)
+
+    def _sync_source_badge(self):
+        _sync_source_badge(
+            self.source_badge, self.editor, self._path, self._source_origin)
 
     def _request_completion(self):
         # The popup deliberately does not activate itself. Give the editor the
@@ -1257,10 +1295,12 @@ class AssemblyView(QWidget):
         self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
+        self._source_origin = "built-in template"
         self.diagnostics.reset()
         self.status.setText("New assembly template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
+        self._sync_source_badge()
         self._focus_editor()
         return True
 
@@ -1275,11 +1315,13 @@ class AssemblyView(QWidget):
         self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
+        self._source_origin = origin
         self.diagnostics.success(f"Loaded assembly from {origin}. Review, edit, then run.")
         self._diagnostic_revision = self.editor.document().revision()
         self.status.setText(f"Assembly generated from {origin}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
+        self._sync_source_badge()
         self._focus_editor()
         return True
 
@@ -1303,11 +1345,13 @@ class AssemblyView(QWidget):
         if not self.set_source(text, os.path.basename(path), confirm=True):
             return False
         self._path = path
+        self._source_origin = os.path.basename(path)
         self._last_dir = os.path.dirname(os.path.abspath(path))
         name = os.path.basename(path)
         self.status.setText(f"Opened {name}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         self.statusChanged.emit(f"Opened assembly source: {name}")
+        self._sync_source_badge()
         return True
 
     def confirm_safe_to_discard(self, action):
@@ -1333,11 +1377,13 @@ class AssemblyView(QWidget):
             self._focus_editor()
             return False
         self._path = path
+        self._source_origin = os.path.basename(path)
         self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
+        self._sync_source_badge()
         self._focus_editor()
         return True
 
@@ -1439,11 +1485,20 @@ class CView(QWidget):
         split.setStretchFactor(0, 5)
         split.setStretchFactor(1, 1)
         layout.addWidget(split, 1)
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
         self.status = QLabel(
             "Define int main(void); Compile emits editable GNU Intel assembly")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
-        layout.addWidget(self.status)
+        status_row.addWidget(self.status, 1)
+        self.source_badge = QLabel()
+        self.source_badge.setAccessibleName("C source identity")
+        self.source_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.source_badge.setMaximumWidth(330)
+        status_row.addWidget(self.source_badge)
+        layout.addLayout(status_row)
         self._path = None
+        self._source_origin = "built-in template"
         self._last_dir = str(_TOOL_DIR)
         self._diagnostic_revision = -1
         self._compiled_optimization = None
@@ -1457,14 +1512,21 @@ class CView(QWidget):
             self.compile)
         self.editor.document().modificationChanged.connect(
             self.dirtyChanged.emit)
+        self.editor.document().modificationChanged.connect(
+            lambda _dirty: self._sync_source_badge())
         self.editor.textChanged.connect(self._source_changed)
         self.optimization.currentTextChanged.connect(
             self._optimization_changed)
         self.editor.document().setModified(False)
+        self._sync_source_badge()
 
     def _focus_editor(self):
         if self.isVisible():
             self.editor.setFocus(Qt.OtherFocusReason)
+
+    def _sync_source_badge(self):
+        _sync_source_badge(
+            self.source_badge, self.editor, self._path, self._source_origin)
 
     def _source_changed(self):
         revision = self.editor.document().revision()
@@ -1499,12 +1561,14 @@ class CView(QWidget):
         self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
+        self._source_origin = "built-in template"
         self.diagnostics.reset()
         self._diagnostic_revision = -1
         self._compiled_optimization = None
         self.status.setText("New freestanding C template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         self.statusChanged.emit("C source replaced")
+        self._sync_source_badge()
         self._focus_editor()
         return True
 
@@ -1530,6 +1594,7 @@ class CView(QWidget):
         self.editor.setPlainText(text)
         self.editor.document().setModified(False)
         self._path = path
+        self._source_origin = os.path.basename(path)
         self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.clear_marks()
         self.diagnostics.reset()
@@ -1539,6 +1604,7 @@ class CView(QWidget):
         self.status.setText(f"Opened {name}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         self.statusChanged.emit(f"Opened C source: {name}")
+        self._sync_source_badge()
         self._focus_editor()
         return True
 
@@ -1565,11 +1631,13 @@ class CView(QWidget):
             self._focus_editor()
             return False
         self._path = path
+        self._source_origin = os.path.basename(path)
         self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
+        self._sync_source_badge()
         self._focus_editor()
         return True
 

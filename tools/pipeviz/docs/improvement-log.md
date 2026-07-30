@@ -34,6 +34,14 @@ leaving subsequent typing on a toolbar button. Pointer and shortcut routes now
 return focus to the relevant editor; button-driven completion and real GNU
 assembler/compiler failures verify the exact focus and error line.
 
+**Source-identity audit:** Open/Save reported a filename only in the transient
+status line, which the next Build/Compile immediately replaced. Both
+workbenches now keep a compact lower-right source badge showing the saved
+basename, built-in template, or C-compiler origin; its tooltip holds the full
+path and its colour/asterisk exposes unsaved state. Acceptance verifies opened,
+template-dirty, and generated-assembly identities while retaining the compact
+1280×800 layout.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a
