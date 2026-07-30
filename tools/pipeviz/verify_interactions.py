@@ -1615,7 +1615,7 @@ def scenario_branch_transport(app, outdir):
         assert win.action_hint.text() == (
             f"Pipeline cycle {spark._kbd_cyc} selected · "
             f"retirement pin n={pinned_n} unchanged")
-        assert f"Keyboard cycle {spark._kbd_cyc} selected" in (
+        assert f"Cycle {spark._kbd_cyc} selected" in (
             spark.accessibleDescription())
         assert f"Playhead cycle {spark._kbd_cyc}" in (
             plot.accessibleDescription())
@@ -1647,6 +1647,29 @@ def scenario_branch_transport(app, outdir):
         assert plot.sel_pc == selected_pc
         assert int(win.trace.tbl.item(
             win.trace.tbl.currentRow(), 0).text()) == trace_n
+        drag_start = QPoint(spark._LABELW + 2, 8)
+        drag_end = QPoint(spark.width() - 8, 8)
+        drag_start_cycle = spark._cyc_at(drag_start.x())
+        drag_end_cycle = spark._cyc_at(drag_end.x())
+        assert (
+            drag_start_cycle is not None
+            and drag_end_cycle is not None
+            and drag_start_cycle < drag_end_cycle)
+        QTest.mousePress(spark, Qt.LeftButton, Qt.NoModifier, drag_start)
+        assert spark._dragging
+        QTest.mouseMove(spark, drag_end)
+        QTest.mouseRelease(spark, Qt.LeftButton, Qt.NoModifier, drag_end)
+        settle(app)
+        assert not spark._dragging
+        assert spark._kbd_cyc == drag_end_cycle
+        assert plot.playhead == drag_end_cycle
+        assert win._pinned_n == pinned_n
+        assert plot.sel_row == selected_row and plot.sel_pc == selected_pc
+        assert win.action_hint.text() == (
+            f"Pipeline cycle {drag_end_cycle} selected · "
+            f"retirement pin n={pinned_n} unchanged")
+        assert f"Cycle {drag_end_cycle} selected" in (
+            spark.accessibleDescription())
         plot.setFocus()
         old_playhead = plot.playhead
         click(app, win.evprev_btn)

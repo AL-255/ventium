@@ -1537,13 +1537,15 @@ class SparklineStrip(QWidget):
             "captured cycles; Enter reopens the selected cycle")
         self._hover_x = -1
         self._kbd_cyc = None
+        self._dragging = False
         self.setToolTip("Open a program and step to collect navigable history")
         self._sync_accessible_description()
 
     def _sync_accessible_description(self):
         navigation = (
-            "Use Left and Right, Page Up and Page Down, Home and End to choose "
-            "a captured cycle; Enter reopens it.")
+            "Click or drag across the history to seek. Use Left and Right, "
+            "Page Up and Page Down, Home and End to choose a captured cycle; "
+            "Enter reopens it.")
         bounds = self._cycle_bounds()
         if bounds is None:
             state = (
@@ -1555,7 +1557,7 @@ class SparklineStrip(QWidget):
         ipc = sum(recent) / max(1, len(recent))
         events = sum(1 for event in self.ev if event)
         chosen = (
-            f" Keyboard cycle {int(self._kbd_cyc)} selected."
+            f" Cycle {int(self._kbd_cyc)} selected."
             if self._kbd_cyc is not None else "")
         self.setAccessibleDescription(
             f"Captured cycles {bounds[0]} through {bounds[1]}; recent IPC "
@@ -1569,6 +1571,7 @@ class SparklineStrip(QWidget):
         self.ret = []; self.ev = []
         self._last_state = ""
         self._kbd_cyc = None
+        self._dragging = False
         self.setFocusPolicy(Qt.NoFocus)
         self.setToolTip("Step the core to collect keyboard-navigable history")
         self._sync_accessible_description()
@@ -1608,7 +1611,7 @@ class SparklineStrip(QWidget):
         self.setFocusPolicy(Qt.StrongFocus if self.ret else Qt.NoFocus)
         if self.ret:
             self.setToolTip(
-                "Click to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
+                "Click or drag to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
                 "Enter")
         bounds = self._cycle_bounds()
         if self._kbd_cyc is not None and bounds is not None:
@@ -1783,7 +1786,8 @@ class SparklineStrip(QWidget):
 
     def mousePressEvent(self, ev):
         cyc = self._cyc_at(ev.position().x() if hasattr(ev, "position") else ev.x())
-        if cyc is not None:
+        if cyc is not None and ev.button() == Qt.LeftButton:
+            self._dragging = True
             self._kbd_cyc = int(cyc)
             self._sync_accessible_description()
             self.setFocus(Qt.MouseFocusReason)
@@ -1796,7 +1800,7 @@ class SparklineStrip(QWidget):
         self._hover_x = -1
         self.unsetCursor()
         self.setToolTip(
-            "Click to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
+            "Click or drag to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
             "Enter")
         self.update()
         super().leaveEvent(event)
@@ -1805,19 +1809,31 @@ class SparklineStrip(QWidget):
         x = int(ev.position().x() if hasattr(ev, "position") else ev.x())
         self._hover_x = x
         cyc = self._cyc_at(x)
+        if (self._dragging and ev.buttons() & Qt.LeftButton
+                and cyc is not None and int(cyc) != self._kbd_cyc):
+            self._kbd_cyc = int(cyc)
+            self._sync_accessible_description()
+            self.cycleClicked.emit(int(cyc))
         if cyc is not None:
             self.setCursor(Qt.PointingHandCursor)
             i = len(self.ev) - 1 - (self._last_cyc - cyc)
             ev_name = {"m": "mispredict", "s": "stall", "f": "I-fill", "w": "page-walk"}.get(self.ev[i], "")
             self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired"
                             + (f", {ev_name}" if ev_name else "")
-                            + "  ·  click to seek; arrows navigate")
+                            + "  ·  click/drag to seek; arrows navigate")
         else:
             self._hover_x = -1
             self.unsetCursor()
             self.setToolTip(
                 "IPC/key labels are not seek targets; move over the history plot")
         self.update()
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self._dragging:
+            self._dragging = False
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
 
     def focusInEvent(self, event):
         if self._kbd_cyc is None and self.ret:

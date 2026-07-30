@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Cycle-scrubbing audit:** the historical draggable-playhead item remained
+click-only in the IPC/event history. A left drag now emits each newly crossed
+captured cycle, continuously moves the Konata playhead, and deliberately leaves
+the exact U/V retirement, Trace row, Registers, dependencies, and Assembly link
+unchanged. Release ends scrubbing; reset cancels it. Accessibility now says
+input-neutral “cycle selected” and documents pointer plus keyboard routes.
+
 **Cache map↔table hover audit:** the historical high-value list's only genuine
 remainder was two-way occupancy-map/table inspection. Hover now resolves every
 painted cell to exact set/way state; resident cells add tag and line address,

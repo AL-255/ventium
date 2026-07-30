@@ -157,6 +157,7 @@ navigation to any event, mispredicts, stalls, I-cache fills, or page walks.
 The IPC/event strip is also a captured-history navigator: Tab to its blue
 outline, use Left/Right for one cycle, Page Up/Page Down for 64 cycles, or
 Home/End for the captured edges, then Enter to reopen the selected cycle.
+Click or left-drag across the strip to scrub the same playhead continuously.
 Seeking moves only the cycle playhead; it never guesses U or V from an
 ambiguous dual-retire cycle or changes an exact Trace/Register pin. The action
 line states the selected cycle and whether a retirement pin remained unchanged.

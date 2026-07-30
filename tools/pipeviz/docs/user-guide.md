@@ -197,7 +197,8 @@ nothing.
 Large steps remain bounded and honest: Trace labels its newest 6,000
 retirements, Pipeline labels its newest 50,000-cycle window, and the compact
 IPC strip retains the newest 12,000 cycles.
-The IPC strip is also keyboard navigation: Tab to its blue outline, then use
+The IPC strip is also a playhead scrubber and keyboard navigator: click or
+left-drag across it to seek continuously, or Tab to its blue outline and use
 Left/Right for one cycle, Page Up/Page Down for 64 cycles, or Home/End for the
 captured edges. Enter reopens its selected cycle in the Pipeline view. Seeking
 moves only the cycle playhead; it never guesses U or V from a dual-retire cycle
