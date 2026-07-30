@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — persistent compact load-failure feedback
+
+**Loading-recovery audit:** failed program/snapshot reads paused safely and
+showed a modal, but after dismissal the persistent action row still said only
+that loading had begun. The actual failure and attempted file vanished, making
+misspelled paths and unsupported inputs harder to diagnose.
+
+**Changes:** program parse/placement and snapshot restore failures now leave an
+eight-second red action summary with operation, basename, errno/reason, while
+hover and accessible description retain the full attempted path. Subsequent
+normal notices restore neutral color. Transactional load rollback now also
+restores the prior notice's full tooltip, accessible description, and semantic
+color rather than only its visible text.
+
+**Verification:** acceptance fails a program and a snapshot while running,
+requires both to pause without advancing or replacing the backend, requires the
+full path absent from visible status but present in hover/accessibility, checks
+red severity, then opens a dropped source and requires neutral notice color.
+
 ## July 30 continuation — one-click Save after naming
 
 **Mouse-workflow audit:** the visible source button was permanently labelled

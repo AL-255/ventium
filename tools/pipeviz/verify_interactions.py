@@ -1569,7 +1569,14 @@ def scenario_branch_transport(app, outdir):
         assert failed_loads and failed_loads[0][0] == "Open failed"
         assert not win._running and not win.timer.isActive()
         assert win.backend.cycle_count() == failed_cycle
-        assert "before loading a program" in win.action_hint.text()
+        missing_program = os.path.join(outdir, "missing-program.flat")
+        assert win.action_hint.text().startswith(
+            "Open failed · missing-program.flat · ")
+        assert str(outdir) not in win.action_hint.text()
+        assert missing_program in win.action_hint.toolTip()
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#f85149" in win.action_hint.styleSheet()
 
         win.on_run_toggle()
         snapshot_cycle = win.backend.cycle_count()
@@ -1588,7 +1595,15 @@ def scenario_branch_transport(app, outdir):
         assert win.backend is snapshot_backend and win.backend.h
         assert win.backend.cycle_count() == snapshot_cycle
         assert not win._running and not win.timer.isActive()
-        assert "before loading a snapshot" in win.action_hint.text()
+        missing_snapshot = os.path.join(
+            outdir, "missing-checkpoint.aux")
+        assert win.action_hint.text().startswith(
+            "Snapshot restore failed · missing-checkpoint.aux · ")
+        assert str(outdir) not in win.action_hint.text()
+        assert missing_snapshot in win.action_hint.toolTip()
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#f85149" in win.action_hint.styleSheet()
 
         dropped_assembly = os.path.join(outdir, "running-drop.S")
         with open(dropped_assembly, "w", encoding="utf-8") as source_file:
@@ -1602,6 +1617,7 @@ def scenario_branch_transport(app, outdir):
         assert win.backend.cycle_count() == drop_cycle
         assert win.workspace.currentWidget() is win.assembly
         assert win.assembly.editor.toPlainText().endswith("    hlt\n")
+        assert "#8b949e" in win.action_hint.styleSheet()
         win.workspace.setCurrentWidget(win.visualizer_tab)
         settle(app)
 

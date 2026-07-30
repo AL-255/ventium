@@ -58,7 +58,9 @@ tools/pipeviz/run.sh --check
 `--snapshot` is an exclusive startup target: it never falls through to an
 auto-loaded demo and cannot be combined with reset-address or mode overrides.
 An explicit missing program path is reported instead of silently opening an
-empty window.
+empty window. Failed program/snapshot reads preserve and pause any prior live
+session; after the modal closes, a compact red action summary remains for eight
+seconds and exposes the full attempted path through hover/accessibility text.
 
 Requirements (all already present in this repo's toolchain): `verilator` (5.x),
 a C++17 compiler, GNU `gcc`/`as`/`ld`/`objdump`, and `python3` with

@@ -36,6 +36,10 @@ left unexplained.</p>
  <li>Click its timing/trace row to pin architectural state.</li>
  <li>Use the analysis tabs to explain the event.</li>
 </ol>
+<p>A failed program or snapshot read leaves the prior session intact and paused.
+After the modal explanation closes, a red action summary remains for eight
+seconds; it keeps the footer compact and exposes the full attempted path on
+hover and to assistive technology.</p>
 <p>The four panes are linked: Pipeline and Trace selections pin Registers;
 Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p>
 <p>The compact status row orders cycle/state/EIP before performance and cache

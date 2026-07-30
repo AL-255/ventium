@@ -51,7 +51,9 @@ from the default.  ELF `PT_LOAD` addresses and its entry point are used
 automatically. Dropping a file on the window does the same thing. Successful
 program, example, and snapshot loads reveal the Visualizer even when they start
 from Assembly/C; source-file drops instead open their matching workbench. A
-failed load leaves the current workspace and live session intact.
+failed load leaves the current workspace and live session intact. After its
+modal explanation closes, an eight-second red action summary retains the
+filename and reason; hover it for the full attempted path.
 Opening the example menu or beginning any program/snapshot load first pauses
 continuous Run, including failures that occur before Reset; pipeviz never
 auto-resumes behind a menu, chooser, or error dialog. Dropped source files also

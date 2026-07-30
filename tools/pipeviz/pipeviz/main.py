@@ -104,6 +104,28 @@ def _first_repo_file(candidates):
                  if os.path.isfile(os.path.join(_REPO_ROOT, relative))), None)
 
 
+def _path_failure_text(operation, path, error):
+    """Return compact visible text plus complete hover/accessibility detail."""
+    raw_reason = str(error)
+    if isinstance(error, OSError) and error.strerror:
+        errno = f"[Errno {error.errno}] " if error.errno is not None else ""
+        reason = f"{errno}{error.strerror}"
+    else:
+        reason = raw_reason
+    if path:
+        directory_prefix = os.path.dirname(os.path.abspath(path)) + os.sep
+        reason = reason.replace(directory_prefix, "")
+        reason = reason.replace(str(path), os.path.basename(path))
+    name = os.path.basename(path) if path else "unknown path"
+    summary = f"{operation} · {name} · {reason}"
+    detail = (
+        f"{summary}\nFull path: {os.path.abspath(path)}"
+        if path else summary)
+    if raw_reason and raw_reason != reason:
+        detail += f"\nDetails: {raw_reason}"
+    return summary, detail
+
+
 def _load_startup_target(window, image=None, snapshot=None):
     """Load exactly one startup target.
 
@@ -1106,10 +1128,16 @@ class MainWindow(QMainWindow):
             if count else "no captured matches")
         self._notice(f"Event navigation · {label} · {summary}")
 
-    def _notice(self, text, ms=3500):
+    def _notice(self, text, ms=3500, severity=None, detail=None):
         self.action_hint.setText(text)
-        self.action_hint.setToolTip(text)
-        self.action_hint.setAccessibleDescription(text)
+        semantic_detail = detail or text
+        self.action_hint.setToolTip(semantic_detail)
+        self.action_hint.setAccessibleDescription(semantic_detail)
+        color = (
+            "#f85149" if severity == "error" else
+            "#e3b341" if severity == "warning" else "#8b949e")
+        self.action_hint.setStyleSheet(
+            f"color:{color};padding-left:12px;")
         self.notice_timer.start(ms)
         if hasattr(self, "status_resize_timer"):
             self.status_resize_timer.start(0)
@@ -1118,6 +1146,7 @@ class MainWindow(QMainWindow):
         self.action_hint.setText("")
         self.action_hint.setToolTip("")
         self.action_hint.setAccessibleDescription("")
+        self.action_hint.setStyleSheet("color:#8b949e;padding-left:12px;")
         if hasattr(self, "status_resize_timer"):
             self.status_resize_timer.start(0)
 
@@ -1476,7 +1505,11 @@ class MainWindow(QMainWindow):
     def _authoring_notice(self, text):
         if text in ("Assembly source modified", "Assembly source replaced"):
             self._clear_assembly_source_link()
-        self._notice(text)
+        severity = (
+            "error"
+            if text.startswith(("Save failed", "Open failed"))
+            else None)
+        self._notice(text, severity=severity)
 
     def _pause_for_obscuring_ui(self, context):
         """Pause before a dialog/window hides live transport feedback."""
@@ -1584,6 +1617,9 @@ class MainWindow(QMainWindow):
             "reset_description": self.reset_btn.accessibleDescription(),
             "reset_style": self.reset_btn.styleSheet(),
             "notice": self.action_hint.text(),
+            "notice_tip": self.action_hint.toolTip(),
+            "notice_accessible": self.action_hint.accessibleDescription(),
+            "notice_style": self.action_hint.styleSheet(),
         }
         setup = None
         if preserve_setup:
@@ -1620,7 +1656,11 @@ class MainWindow(QMainWindow):
             segments, entry, kind = _read_program(path)
             data = b"".join(chunk for _, chunk in segments)
         except (OSError, ValueError, struct.error) as e:
-            QMessageBox.critical(self, "Open failed", str(e)); return False
+            QMessageBox.critical(self, "Open failed", str(e))
+            summary, detail = _path_failure_text("Open failed", path, e)
+            self._notice(
+                summary, ms=8000, severity="error", detail=detail)
+            return False
         # Honour a sibling manifest transactionally. A malformed later field
         # must not leave an earlier entry/load override partially applied.
         man = os.path.join(os.path.dirname(path), "manifest.json")
@@ -1671,6 +1711,9 @@ class MainWindow(QMainWindow):
             _validate_segments(segments)
         except ValueError as e:
             QMessageBox.critical(self, "Open failed", str(e))
+            summary, detail = _path_failure_text("Open failed", path, e)
+            self._notice(
+                summary, ms=8000, severity="error", detail=detail)
             return False
         self.image_path = path
         self.image_bytes = data
@@ -1756,8 +1799,10 @@ class MainWindow(QMainWindow):
                 previous["reset_description"])
             self.reset_btn.setStyleSheet(previous["reset_style"])
             self.action_hint.setText(previous["notice"])
-            self.action_hint.setToolTip(previous["notice"])
-            self.action_hint.setAccessibleDescription(previous["notice"])
+            self.action_hint.setToolTip(previous["notice_tip"])
+            self.action_hint.setAccessibleDescription(
+                previous["notice_accessible"])
+            self.action_hint.setStyleSheet(previous["notice_style"])
             self._sync_config_enabled()
             self._sync_workspace_file_actions()
             return False
@@ -1865,6 +1910,10 @@ class MainWindow(QMainWindow):
             if candidate is not None:
                 candidate.close()
             QMessageBox.critical(self, "Snapshot restore failed", str(e))
+            summary, detail = _path_failure_text(
+                "Snapshot restore failed", path, e)
+            self._notice(
+                summary, ms=8000, severity="error", detail=detail)
             return False
         old = self.backend
         self.backend = candidate
