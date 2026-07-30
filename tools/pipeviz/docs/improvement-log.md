@@ -75,6 +75,11 @@ phrases by measured width, restores the fully spelled form when widened, and
 retains the exact retirement identity and semantic explanation accessibly. At
 the narrow breakpoint the adjacent named/tooltipped Unpin control contracts to
 `×`, reserving enough room for both retirement number and cycle.
+The compact Integer page no longer loses IF/DF/OF: decoded EFLAGS now wrap only
+between complete indicators, moving into a two-column, five-row side grid
+beside the upper GPRs at the true minimum and returning to a single footer row
+when space permits. Its accessible description enumerates all nine values and
+which flags changed from the prior time point.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

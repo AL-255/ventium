@@ -2457,6 +2457,18 @@ def scenario_layout(app, outdir):
             <= win.regs.state_banner.contentsRect().width())
         assert "most recent model clock" in (
             win.regs.state_banner.accessibleDescription())
+        assert win.regs.flags_lbl.wordWrap()
+        assert "&nbsp;" not in win.regs.flags_lbl.text()
+        assert win.regs._flags_side
+        assert win.regs.flags_lbl.height() >= (
+            5 * win.regs.flags_lbl.fontMetrics().height())
+        flag_corner = win.regs.flags_lbl.mapTo(
+            win.regs.int_pane, win.regs.flags_lbl.rect().bottomRight())
+        assert flag_corner.x() < win.regs.int_pane.width()
+        assert flag_corner.y() < win.regs.int_pane.height()
+        assert win.regs.flags_lbl.accessibleName() == "Decoded EFLAGS"
+        for flag in ("CF", "PF", "AF", "ZF", "SF", "TF", "IF", "DF", "OF"):
+            assert f"{flag}=" in win.regs.flags_lbl.accessibleDescription()
         QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
         settle(app)
         memory = win.tables.mem
@@ -2498,6 +2510,8 @@ def scenario_layout(app, outdir):
             f"compact request expanded to {win.width()}px")
         assert win.minimumSizeHint().width() <= 1280
         assert win.regs._compact and win.regs._compact_tabs.count() == 3
+        assert not win.regs._flags_side
+        assert "<br>" not in win.regs.flags_lbl.text()
         assert [win.regs._compact_tabs.tabText(i) for i in range(3)] == [
             "Integer", "Segments", "x87"]
         # A selected compact category survives a wide/compact transition.

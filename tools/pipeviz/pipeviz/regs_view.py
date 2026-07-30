@@ -164,11 +164,17 @@ class RegsView(QWidget):
         g.addWidget(self._k("EFL"), len(GPR_NAMES) + 1, 0)
         self.efl_lbl = QLabel("00000000"); self.efl_lbl.setFont(_mono())
         g.addWidget(self.efl_lbl, len(GPR_NAMES) + 1, 1)
-        self.flags_lbl = QLabel(""); self.flags_lbl.setFont(_mono(9))
-        # span the flag row across 3 columns and let the 3rd absorb the panel's
-        # slack, so the name (col 0) + hex value (col 1) pack tightly on the left
-        # instead of the value drifting to the far right of a stretched column.
+        self.flags_lbl = QLabel("")
+        self.flags_lbl.setFont(_mono(9))
+        self.flags_lbl.setWordWrap(True)
+        self.flags_lbl.setAccessibleName("Decoded EFLAGS")
+        self._flag_parts = ()
+        self._flags_side = False
+        # In normal widths, span the flag footer across all 3 columns and let
+        # the 3rd absorb slack. At the true minimum _sync_flag_layout reuses
+        # that absorber as a five-row side grid, preserving every indicator.
         g.addWidget(self.flags_lbl, len(GPR_NAMES) + 2, 0, 1, 3)
+        self._int_grid = g
         g.setColumnStretch(2, 1)
         col1.addWidget(gp)
 
@@ -343,11 +349,72 @@ class RegsView(QWidget):
             self.unpin_btn.setMinimumWidth(0)
             self.unpin_btn.setMaximumWidth(16777215)
             self.unpin_btn.setText("× Unpin")
+        self._sync_flag_layout(narrow)
         self._set_compact(event.size().width() < self.COMPACT_WIDTH)
 
     def _k(self, t):
         l = QLabel(t); l.setStyleSheet("color:#8b949e;"); l.setFont(_mono(9, True))
         return l
+
+    def _show_flags(self, eflags, previous=None):
+        """Render all named EFLAGS, wrapping only between complete indicators."""
+        parts = []
+        values = []
+        changed_names = []
+        for bit, name in _FLAGS:
+            enabled = (eflags >> bit) & 1
+            changed = (
+                previous is not None
+                and ((previous >> bit) & 1) != enabled)
+            color = "#e3b341" if enabled else "#4b535d"
+            style = (
+                f"color:{color}"
+                + (";text-decoration:underline" if changed else ""))
+            parts.append(
+                f"<span style='{style}'>{name}{enabled}</span>")
+            values.append(f"{name}={enabled}")
+            if changed:
+                changed_names.append(name)
+        self._flag_parts = tuple(parts)
+        self._sync_flag_layout(self.width() < 260)
+        comparison = (
+            " Changed since the prior time point: "
+            + ", ".join(changed_names) + "."
+            if changed_names else
+            " No named flag changed since the prior time point."
+            if previous is not None else
+            " No prior time point is available for change comparison.")
+        self.flags_lbl.setAccessibleDescription(
+            "Decoded EFLAGS: " + ", ".join(values) + "." + comparison)
+
+    def _sync_flag_layout(self, narrow):
+        if not self._flag_parts:
+            return
+        if narrow != self._flags_side:
+            self._int_grid.removeWidget(self.flags_lbl)
+            if narrow:
+                # Use the otherwise-empty absorber column beside the upper GPR
+                # rows. Five pair rows need no extra vertical space and fit the
+                # 164 px content width without shrinking the hex values.
+                self._int_grid.addWidget(
+                    self.flags_lbl, 0, 2, 5, 1,
+                    alignment=Qt.AlignLeft | Qt.AlignTop)
+            else:
+                self._int_grid.addWidget(
+                    self.flags_lbl, len(GPR_NAMES) + 2, 0, 1, 3)
+            self._flags_side = narrow
+        if narrow:
+            rows = [
+                " ".join(self._flag_parts[index:index + 2])
+                for index in range(0, len(self._flag_parts), 2)]
+            text = "<br>".join(rows)
+            self.flags_lbl.setMinimumHeight(
+                len(rows) * self.flags_lbl.fontMetrics().height())
+        else:
+            text = " ".join(self._flag_parts)
+            self.flags_lbl.setMinimumHeight(
+                self.flags_lbl.fontMetrics().height())
+        self.flags_lbl.setText(text)
 
     def update_from(self, s):
         self._show_live_banner()
@@ -368,17 +435,10 @@ class RegsView(QWidget):
         efl_chg = prev is not None and prev["eflags"] != s.eflags
         self.efl_lbl.setText(f"{s.eflags:08x}")
         self.efl_lbl.setStyleSheet(chg if efl_chg else same)
-        # full named-bit grid: every flag shown (set = amber, clear = dim); a bit
+        # Full named-bit grid: every flag shown (set = amber, clear = dim); a bit
         # that changed since the previous step is underlined.
         prev_efl = prev["eflags"] if prev is not None else None
-        parts = []
-        for bit, nm in _FLAGS:
-            f_on = (s.eflags >> bit) & 1
-            f_chg = prev_efl is not None and ((prev_efl >> bit) & 1) != f_on
-            col = "#e3b341" if f_on else "#4b535d"
-            style = f"color:{col}" + (";text-decoration:underline" if f_chg else "")
-            parts.append(f"<span style='{style}'>{nm}{f_on}</span>")
-        self.flags_lbl.setText("&nbsp;".join(parts))
+        self._show_flags(s.eflags, prev_efl)
         self._prev = {"gpr": list(s.gpr), "eip": s.eip, "eflags": s.eflags}
         for i, name in enumerate(SEG_NAMES):
             sel, base, lim = self.seg_lbls[name]
@@ -452,14 +512,7 @@ class RegsView(QWidget):
         self.efl_lbl.setText(f"{rec.eflags:08x}")
         self.efl_lbl.setStyleSheet(chg if efl_chg else same)
         prev_efl = prev.eflags if prev is not None else None
-        parts = []
-        for bit, nm in _FLAGS:
-            f_on = (rec.eflags >> bit) & 1
-            f_chg = prev_efl is not None and ((prev_efl >> bit) & 1) != f_on
-            col = "#e3b341" if f_on else "#4b535d"
-            style = f"color:{col}" + (";text-decoration:underline" if f_chg else "")
-            parts.append(f"<span style='{style}'>{nm}{f_on}</span>")
-        self.flags_lbl.setText("&nbsp;".join(parts))
+        self._show_flags(rec.eflags, prev_efl)
         # Selectors are architectural post-state. Bases and CR0/3/4 are captured
         # pre-execution for exact address translation, so mark the header and
         # explain the time point instead of presenting them as post-state.
