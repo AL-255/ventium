@@ -298,6 +298,10 @@ tracks the active source caret independently of transient build messages; an
 or press Ctrl+G to enter a validated line number and return focus to the
 centered editor line. Both workbenches remain usable at the tested
 900×620 compact window size.</p>
+<p>The workspace-aware <b>Edit</b> menu exposes Undo/Redo,
+Cut/Copy/Paste, Select All, Find, and Go to Line. Its actions follow the active
+Assembly or C editor and disable in Visualizer, so a menu command cannot alter
+a hidden source buffer.</p>
 <h2>Find in source</h2>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
@@ -529,6 +533,9 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Ctrl+O</b></td><td>open program, Assembly, or C for the active workspace</td></tr>
  <tr><td><b>Ctrl+S</b></td><td>save the active Assembly or C source</td></tr>
  <tr><td><b>Ctrl+Shift+S</b></td><td>save the active source under a new name</td></tr>
+ <tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>undo / redo in the active source editor</td></tr>
+ <tr><td><b>Ctrl+X / Ctrl+C / Ctrl+V</b></td><td>cut / copy / paste active source text</td></tr>
+ <tr><td><b>Ctrl+A</b></td><td>select all active source text</td></tr>
  <tr><td><b>Ctrl+F</b></td><td>find in the active Assembly or C source</td></tr>
  <tr><td><b>F3 / Shift+F3</b></td><td>next / previous source or Trace match</td></tr>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>

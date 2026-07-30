@@ -1040,7 +1040,8 @@ def scenario_startup(app, outdir):
                        win.run_btn, win.evprev_btn, win.evnext_btn):
             assert not widget.isEnabled(), f"{widget.text()} active before a program is loaded"
         menu_actions = [
-            action for menu in (win._file_menu, win._view_menu, win._help_menu)
+            action for menu in (
+                win._file_menu, win._edit_menu, win._view_menu, win._help_menu)
             for action in menu.actions()
         ]
         shortcuts = {
@@ -1055,6 +1056,14 @@ def scenario_startup(app, outdir):
                 "Reload program from disk", "Open example", "Quit"} <= file_actions
         assert not win.save_source_action.isEnabled()
         assert not win.reload_action.isEnabled()
+        assert win._edit_menu.title() == "&Edit"
+        assert all(
+            not action.isEnabled()
+            for action in (
+                win.undo_source_action, win.redo_source_action,
+                win.cut_source_action, win.copy_source_action,
+                win.paste_source_action, win.select_all_source_action,
+                win.find_source_action, win.goto_source_action))
         enabled_examples = {
             action.text() for action in win._examples_menu.actions()
             if action.isEnabled()

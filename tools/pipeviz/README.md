@@ -204,6 +204,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     quoted text are ignored.
     Click a line number to select that line; drag or Shift-click through the
     gutter to extend a complete block for indentation or comment commands.
+    The workspace-aware **Edit** menu exposes Undo/Redo, Cut/Copy/Paste,
+    Select All, Find, and Go to Line, follows whichever source workspace is
+    active, and disables completely in Visualizer.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses

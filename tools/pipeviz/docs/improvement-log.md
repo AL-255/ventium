@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — workspace-aware Edit menu
+
+**Discoverability audit:** both source editors already honored conventional
+editing keys and exposed search/go-to-line through less obvious controls, but
+the menu bar jumped directly from File to View. Mouse users and newcomers had
+no discoverable Undo/Redo, clipboard, Select All, Find, or Go-to-Line surface.
+
+**Changes:** a standard Edit menu now targets the active Assembly or C editor.
+Undo/Redo and Cut/Copy enable from live document/selection state, Paste follows
+clipboard availability, and Select All/Find/Go to Line enable only for an
+active source workspace. The entire edit surface disables in Visualizer so a
+menu action cannot mutate hidden source.
+
+**Verification:** acceptance exercises Assembly undo/redo through the actions,
+copies an exact selection, selects the whole document, opens inline Find with
+query focus, verifies the same navigation actions in C, then returns to
+Visualizer and requires every edit action to disable.
+
 ## July 30 continuation — compact file failures retain full detail
 
 **Failure-state visual audit:** a failed source Save displayed the target

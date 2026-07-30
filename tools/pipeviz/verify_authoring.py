@@ -458,19 +458,70 @@ def scenario(app, outdir):
         assert not win.save_source_as_action.isEnabled()
         assert [action.shortcut().toString()
                 for action in win._workspace_actions] == ["Alt+V", "Alt+A", "Alt+C"]
+        assert win._edit_menu.title() == "&Edit"
+        source_edit_actions = (
+            win.undo_source_action, win.redo_source_action,
+            win.cut_source_action, win.copy_source_action,
+            win.paste_source_action, win.select_all_source_action,
+            win.find_source_action, win.goto_source_action)
+        assert all(not action.isEnabled() for action in source_edit_actions)
         assert win._view_menu.title() == "Vie&w"
         QTest.keyClick(win, Qt.Key_A, Qt.AltModifier)
         settle(app)
         assert win.workspace.currentWidget() is win.assembly
         assert app.focusWidget() is win.assembly.editor
+        assert win.select_all_source_action.isEnabled()
+        assert win.find_source_action.isEnabled()
+        assert win.goto_source_action.isEnabled()
+        assert not win.undo_source_action.isEnabled()
+        assert not win.redo_source_action.isEnabled()
+        assert not win.cut_source_action.isEnabled()
+        assert not win.copy_source_action.isEnabled()
+        edit_probe = win.assembly.editor.toPlainText()
+        win.assembly.editor.moveCursor(QTextCursor.End)
+        win.assembly.editor.insertPlainText("#")
+        assert win.undo_source_action.isEnabled()
+        win.undo_source_action.trigger()
+        assert win.assembly.editor.toPlainText() == edit_probe
+        assert app.focusWidget() is win.assembly.editor
+        assert win.redo_source_action.isEnabled()
+        win.redo_source_action.trigger()
+        assert win.assembly.editor.toPlainText() == edit_probe + "#"
+        win.undo_source_action.trigger()
+        assert win.assembly.editor.toPlainText() == edit_probe
+        selection = win.assembly.editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(6, QTextCursor.KeepAnchor)
+        win.assembly.editor.setTextCursor(selection)
+        assert win.cut_source_action.isEnabled()
+        assert win.copy_source_action.isEnabled()
+        win.copy_source_action.trigger()
+        assert QApplication.clipboard().text() == edit_probe[:6]
+        win.select_all_source_action.trigger()
+        assert win.assembly.editor.textCursor().selectionStart() == 0
+        assert win.assembly.editor.textCursor().selectionEnd() == len(edit_probe)
+        selection = win.assembly.editor.textCursor()
+        selection.clearSelection()
+        selection.movePosition(QTextCursor.Start)
+        win.assembly.editor.setTextCursor(selection)
+        win.find_source_action.trigger()
+        settle(app)
+        assert win.assembly.find_bar.isVisible()
+        assert app.focusWidget() is win.assembly.find_bar.query
+        win.assembly.find_bar.hide_find()
+        win.assembly.editor.moveCursor(QTextCursor.Start)
+        win.assembly.editor.document().setModified(False)
         QTest.keyClick(win.assembly.editor, Qt.Key_C, Qt.AltModifier)
         settle(app)
         assert win.workspace.currentWidget() is win.c_source
         assert app.focusWidget() is win.c_source.editor
+        assert win.find_source_action.isEnabled()
+        assert win.goto_source_action.isEnabled()
         QTest.keyClick(win.c_source.editor, Qt.Key_V, Qt.AltModifier)
         settle(app)
         assert win.workspace.currentWidget() is win.visualizer_tab
         assert app.focusWidget() is win.pipeline.konata.plot
+        assert all(not action.isEnabled() for action in source_edit_actions)
         QTest.keyClick(win.pipeline.konata.plot, Qt.Key_A, Qt.AltModifier)
         settle(app)
         assert win.workspace.currentWidget() is win.assembly

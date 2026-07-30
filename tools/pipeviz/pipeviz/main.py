@@ -435,6 +435,71 @@ class MainWindow(QMainWindow):
         file_menu.addAction(quit_action)
         self._file_menu = file_menu
 
+        edit_menu = self.menuBar().addMenu("&Edit")
+        self.undo_source_action = QAction("&Undo", self)
+        self.undo_source_action.setShortcut(QKeySequence.Undo)
+        self.undo_source_action.setToolTip("Undo the last source edit (Ctrl+Z)")
+        self.undo_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("undo"))
+        edit_menu.addAction(self.undo_source_action)
+        self.redo_source_action = QAction("&Redo", self)
+        self.redo_source_action.setShortcut(QKeySequence.Redo)
+        self.redo_source_action.setToolTip("Redo the last source edit (Ctrl+Y)")
+        self.redo_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("redo"))
+        edit_menu.addAction(self.redo_source_action)
+        edit_menu.addSeparator()
+        self.cut_source_action = QAction("Cu&t", self)
+        self.cut_source_action.setShortcut(QKeySequence.Cut)
+        self.cut_source_action.setToolTip("Cut the source selection (Ctrl+X)")
+        self.cut_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("cut"))
+        edit_menu.addAction(self.cut_source_action)
+        self.copy_source_action = QAction("&Copy", self)
+        self.copy_source_action.setShortcut(QKeySequence.Copy)
+        self.copy_source_action.setToolTip("Copy the source selection (Ctrl+C)")
+        self.copy_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("copy"))
+        edit_menu.addAction(self.copy_source_action)
+        self.paste_source_action = QAction("&Paste", self)
+        self.paste_source_action.setShortcut(QKeySequence.Paste)
+        self.paste_source_action.setToolTip(
+            "Paste plain text into the source editor (Ctrl+V)")
+        self.paste_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("paste"))
+        edit_menu.addAction(self.paste_source_action)
+        self.select_all_source_action = QAction("Select &all", self)
+        self.select_all_source_action.setShortcut(QKeySequence.SelectAll)
+        self.select_all_source_action.setToolTip(
+            "Select all source text (Ctrl+A)")
+        self.select_all_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("selectAll"))
+        edit_menu.addAction(self.select_all_source_action)
+        edit_menu.addSeparator()
+        self.find_source_action = QAction("&Find in source…\tCtrl+F", self)
+        self.find_source_action.setToolTip(
+            "Open literal source search (Ctrl+F)")
+        self.find_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("find"))
+        edit_menu.addAction(self.find_source_action)
+        self.goto_source_action = QAction("&Go to line…\tCtrl+G", self)
+        self.goto_source_action.setToolTip(
+            "Jump to a validated source line (Ctrl+G)")
+        self.goto_source_action.triggered.connect(
+            lambda: self._invoke_source_edit("goto"))
+        edit_menu.addAction(self.goto_source_action)
+        edit_menu.aboutToShow.connect(self._sync_source_edit_actions)
+        for editor in (self.assembly.editor, self.c_source.editor):
+            editor.document().undoAvailable.connect(
+                lambda _available: self._sync_source_edit_actions())
+            editor.document().redoAvailable.connect(
+                lambda _available: self._sync_source_edit_actions())
+            editor.copyAvailable.connect(
+                lambda _available: self._sync_source_edit_actions())
+        QApplication.clipboard().dataChanged.connect(
+            self._sync_source_edit_actions)
+        self._edit_menu = edit_menu
+
         # Alt+V is the documented Visualizer workspace shortcut. Giving the
         # menu the same mnemonic makes QAction dispatch ambiguous on Qt/X11,
         # so retain keyboard menu access on Alt+W instead.
@@ -503,6 +568,7 @@ class MainWindow(QMainWindow):
         self._help_menu = menu
         self._guide_dialog = None
         self._sync_workspace_file_actions()
+        self._sync_source_edit_actions()
 
     def _refresh_example_actions(self):
         """Discover builds lazily so examples compiled after launch appear."""
@@ -1227,6 +1293,7 @@ class MainWindow(QMainWindow):
                 toolbar.setVisible(shown)
             self._source_workspace_active = False
         self._sync_workspace_file_actions()
+        self._sync_source_edit_actions()
         # A workspace shortcut should complete the navigation, not strand
         # keyboard focus on a now-hidden tab. Defer until the tab switch event
         # finishes so mouse/shortcut dispatch cannot immediately steal it back.
@@ -1274,6 +1341,44 @@ class MainWindow(QMainWindow):
         # run an older generated ELF and invalidate source links behind the
         # user's current text. Authoring has explicit Compile/Assemble actions.
         self.reload_action.setEnabled(index == 0 and self.image_path is not None)
+
+    def _active_source_view(self):
+        index = self.workspace.currentIndex()
+        return self.assembly if index == 1 else self.c_source if index == 2 else None
+
+    def _sync_source_edit_actions(self):
+        if not hasattr(self, "undo_source_action"):
+            return
+        source = self._active_source_view()
+        editor = source.editor if source is not None else None
+        enabled = editor is not None
+        self.undo_source_action.setEnabled(
+            enabled and editor.document().isUndoAvailable())
+        self.redo_source_action.setEnabled(
+            enabled and editor.document().isRedoAvailable())
+        has_selection = enabled and editor.textCursor().hasSelection()
+        self.cut_source_action.setEnabled(has_selection)
+        self.copy_source_action.setEnabled(has_selection)
+        self.paste_source_action.setEnabled(enabled and editor.canPaste())
+        self.select_all_source_action.setEnabled(
+            enabled and not editor.document().isEmpty())
+        self.find_source_action.setEnabled(enabled)
+        self.goto_source_action.setEnabled(enabled)
+
+    def _invoke_source_edit(self, operation):
+        source = self._active_source_view()
+        if source is None:
+            return
+        if operation == "find":
+            source.find_bar.show_find()
+            return
+        if operation == "goto":
+            source.cursor_position.go_to_line()
+            return
+        editor = source.editor
+        getattr(editor, operation)()
+        editor.setFocus(Qt.ShortcutFocusReason)
+        self._sync_source_edit_actions()
 
     def _new_active_source(self):
         source = (
