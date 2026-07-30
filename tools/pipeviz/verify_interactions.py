@@ -2782,6 +2782,23 @@ def scenario_layout(app, outdir):
         assert not clipped_plain_labels, clipped_plain_labels
         win.tables.tabs.setCurrentIndex(0)
         settle(app)
+        register_tabs = win.regs._compact_tabs.tabBar()
+        assert register_tabs.tabRect(
+            win.regs._compact_tabs.count() - 1).right() < (
+                register_tabs.width())
+        assert all(
+            not button.isVisible()
+            for button in register_tabs.findChildren(QToolButton)
+            if button.objectName() in ("ScrollLeftButton", "ScrollRightButton"))
+        win.tables.analysis_selector.setFocus(Qt.OtherFocusReason)
+        QTest.keyClick(win.tables.analysis_selector, Qt.Key_Tab)
+        settle(app)
+        assert app.focusWidget() is register_tabs
+        QTest.keyClick(register_tabs, Qt.Key_Tab)
+        settle(app)
+        assert app.focusWidget() is win.program_open_btn
+        win.trace.tbl.setCurrentCell(win.trace.tbl.rowCount() - 1, 0)
+        settle(app)
         win.trace.tbl.setFocus(Qt.OtherFocusReason)
         QTest.keyClick(win.trace.tbl, Qt.Key_Tab)
         settle(app)
@@ -2805,6 +2822,8 @@ def scenario_layout(app, outdir):
             settle(app)
             assert app.focusWidget() is win.trace.tbl
         win.tables.tabs.setCurrentIndex(0)
+        win._return_live()
+        win._clear_notice()
         settle(app)
         cache_map = win.tables.ic_map
         ticks = cache_map._axis_ticks()

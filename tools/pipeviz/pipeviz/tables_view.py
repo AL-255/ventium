@@ -702,7 +702,13 @@ class TablesView(QWidget):
         lay.setContentsMargins(2, 2, 2, 2)
         self.tabs = QTabWidget()
         self.tabs.setAccessibleName("Analysis views")
+        self.tabs.setAccessibleDescription(
+            "Choose one of ten cache, translation, performance, cycle, "
+            "or memory analysis views.")
         self.tabs.tabBar().setAccessibleName("Analysis view tabs")
+        self.tabs.tabBar().setAccessibleDescription(
+            "Choose one of ten analysis views; Alt+1 through Alt+0 "
+            "select them directly.")
         lay.addWidget(self.tabs)
 
         # --- I-cache (code). 'way' shows '*' for the MRU way (LRU dropped). ---

@@ -129,6 +129,12 @@ views can contain thousands of rows, so Qt's default cell-by-cell Tab behavior
 created an effective keyboard trap; arrow keys still navigate table content,
 while Tab/Shift+Tab now leave the table in one press. Forward and reverse focus
 escape are interaction-tested.
+The compact Register page bar no longer inserts an unexplained 16 px
+`Scroll Right` focus stop when Integer, Segments, and x87 already fit. Its scroll
+buttons are disabled, all three complete tabs remain in bounds, and compact
+forward traversal is now Selector → Register pages → Open. Workspace, analysis,
+and register tab containers/bars also expose their purpose and direct keyboard
+shortcuts through accessibility descriptions.
 The Mem-map scatter now adapts its own painted geometry too. At 188 px it
 reclaims the unused y-axis gutter, reduces five overlapping retirement ticks to
 three inward-aligned ticks, and selects a measured complete summary such as

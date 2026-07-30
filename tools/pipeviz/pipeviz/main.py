@@ -1001,7 +1001,12 @@ class MainWindow(QMainWindow):
         self.workspace.setDocumentMode(True)
         self.workspace.setTabPosition(QTabWidget.North)
         self.workspace.setAccessibleName("Pipeviz workspace")
+        self.workspace.setAccessibleDescription(
+            "Choose the Visualizer, Assembly editor, or C editor workspace.")
         self.workspace.tabBar().setAccessibleName("Workspace tabs")
+        self.workspace.tabBar().setAccessibleDescription(
+            "Choose Visualizer, Assembly, or C; Alt+V, Alt+A, and Alt+C "
+            "select them directly.")
         self.visualizer_tab = outer
         self.assembly = AssemblyView()
         self.c_source = CView()

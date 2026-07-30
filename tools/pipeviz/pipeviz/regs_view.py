@@ -284,7 +284,14 @@ class RegsView(QWidget):
         self._compact_tabs = QTabWidget()
         self._compact_tabs.setDocumentMode(True)
         self._compact_tabs.setAccessibleName("Register groups")
+        self._compact_tabs.setAccessibleDescription(
+            "Choose the Integer, Segments, or x87 architectural register page.")
+        self._compact_tabs.tabBar().setUsesScrollButtons(False)
         self._compact_tabs.tabBar().setAccessibleName("Register group tabs")
+        self._compact_tabs.tabBar().setAccessibleDescription(
+            "Choose the Integer, Segments, or x87 architectural register page.")
+        self._compact_tabs.tabBar().setToolTip(
+            "Register pages: Integer, Segments/control, and x87")
         root.addWidget(self._wide_host)
         root.addWidget(self._compact_tabs)
         self._wide_host.hide()
