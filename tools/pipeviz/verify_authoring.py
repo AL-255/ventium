@@ -215,6 +215,8 @@ def verify_toolchain():
     segments, entry, kind = _read_program(assembled.elf_path)
     assert kind == "ELF" and entry == 0x08048000
     assert segments and len(assembled.source_map) >= 6
+    assert "Built .generated/assembly.elf" in assembled.log
+    assert str(source_module._GENERATED_DIR) not in assembled.log
     snippet = assemble_source("mov eax, 7\n")
     assert set(snippet.source_map.values()) == {1}
     warned = assemble_source(
@@ -222,6 +224,8 @@ def verify_toolchain():
         '.warning "acceptance warning"\nhlt\n')
     assert warned.warning_line == 4
     assert "warning:" in warned.log.lower()
+    assert "Assembly:4:" in warned.log
+    assert str(source_module._GENERATED_DIR) not in warned.log
     for optimization in ("-O0", "-O1", "-O2", "-Os"):
         generated, _log = compile_c_source(
             _C_TEMPLATE, optimization=optimization)
@@ -237,6 +241,8 @@ def verify_toolchain():
         "int main(void) { int unused; return 0; }\n")
     assert "warning:" in warning_log.lower()
     assert "unused variable" in warning_log
+    assert "C source:1:" in warning_log
+    assert str(source_module._GENERATED_DIR) not in warning_log
     try:
         compile_c_source(
             "int main(void)\n{\n    return unavailable_runtime();\n}\n")
@@ -1246,6 +1252,9 @@ def scenario(app, outdir):
         assert app.focusWidget() is editor
         assert editor._error_line == 5
         assert "Error" in win.assembly.diagnostics.toPlainText()
+        assert "Assembly:5:" in win.assembly.diagnostics.toPlainText()
+        assert str(source_module._GENERATED_DIR) not in (
+            win.assembly.diagnostics.toPlainText())
         assert win.assembly.diagnostics.toPlainText().startswith(
             "→ Line 5: press Enter or double-click to jump")
         assert "Line 5" in win.assembly.diagnostics.toolTip()
@@ -1280,6 +1289,9 @@ def scenario(app, outdir):
         assert win.assembly.diagnostics._severity == "warning"
         assert win.assembly.diagnostics.toPlainText().startswith(
             "→ Warning line 5: press Enter or double-click to jump")
+        assert "Assembly:5:" in win.assembly.diagnostics.toPlainText()
+        assert str(source_module._GENERATED_DIR) not in (
+            win.assembly.diagnostics.toPlainText())
         assert "#e3b341" in win.assembly.diagnostics.styleSheet()
         assert "succeeded with warnings" in win.assembly.status.text()
         win.assembly.diagnostics.setFocus()
@@ -1904,17 +1916,24 @@ def scenario(app, outdir):
         assert app.focusWidget() is win.c_source.editor
         assert win.c_source.editor._error_line == 3
         assert "undeclared" in win.c_source.diagnostics.toPlainText()
+        assert re.search(
+            r"C source:3:\d+:\s+error:",
+            win.c_source.diagnostics.toPlainText())
+        assert str(source_module._GENERATED_DIR) not in (
+            win.c_source.diagnostics.toPlainText())
         assert win.c_source.diagnostics.height() >= 92
-        # Long generated paths and GCC context wrap in the visible pane rather
-        # than requiring a hidden horizontal-scroll gesture.
+        # The useful GCC error fits at the supported minimum width now that the
+        # internal generated path is replaced with a compact editor-facing name.
         win.resize(900, 620)
         settle(app)
-        assert any(
-            block.layout().lineCount() > 1
-            for block in (
+        primary_error = next(
+            block for block in (
                 win.c_source.diagnostics.document().findBlockByNumber(i)
                 for i in range(
-                    win.c_source.diagnostics.document().blockCount())))
+                    win.c_source.diagnostics.document().blockCount()))
+            if block.text().startswith("C source:3:"))
+        assert primary_error.layout().lineCount() == 1
+        assert win.c_source.diagnostics.horizontalScrollBar().maximum() == 0
         assert win.c_source.diagnostics.toPlainText().startswith(
             "→ Line 3: press Enter or double-click to jump")
         win.c_source.editor.moveCursor(QTextCursor.Start)
@@ -1953,6 +1972,9 @@ def scenario(app, outdir):
         assert win.c_source.diagnostics.toPlainText().startswith(
             "→ Warning line 3: press Enter or double-click to jump")
         assert "unused variable" in win.c_source.diagnostics.toPlainText()
+        assert "C source:3:" in win.c_source.diagnostics.toPlainText()
+        assert str(source_module._GENERATED_DIR) not in (
+            win.c_source.diagnostics.toPlainText())
         assert win.c_source.diagnostics.height() >= 92
         assert "#e3b341" in win.c_source.diagnostics.styleSheet()
         assert win.c_source.status.text() == (

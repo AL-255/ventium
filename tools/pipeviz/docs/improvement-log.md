@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — concise authoring diagnostics
+
+**Compact-error audit:** assembler and GCC errors spent most of the narrow
+diagnostic pane repeating an absolute `.generated/assembly.s` or `program.c`
+path. The actual error wrapped late, and a C error could require scrolling
+before its useful context became visible.
+
+**Changes:** toolchain output now replaces only the known generated source path
+with `Assembly` or `C source`, preserving severity plus exact line/column.
+Successful build feedback likewise reports `.generated/assembly.elf` instead
+of the workspace's absolute path. External filenames and arbitrary compiler
+text are not rewritten.
+
+**Verification:** toolchain and GUI acceptance require friendly locations for
+assembly warnings/errors and C warnings/errors, reject leakage of the generated
+directory, retain line-linked Enter/double-click navigation, and capture both
+compact error views for visual review.
+
 ## July 30 continuation — consistent FP execution-lane labels
 
 **Cross-view semantics audit:** after source linking learned to say `FP-lane`,

@@ -1478,6 +1478,16 @@ def _tool_message_line(output, severity):
     return int(match.group(1)) if match else None
 
 
+def _friendly_tool_output(output, source_path, label):
+    """Replace an internal generated source path with an editor-facing name."""
+    text = str(output or "")
+    candidates = {str(source_path), os.path.realpath(source_path)}
+    for candidate in sorted(candidates, key=len, reverse=True):
+        if candidate:
+            text = text.replace(candidate, label)
+    return text
+
+
 def _source_map(elf_path, source_name, prefix_lines, source_lines):
     objdump = _require_tool("objdump")
     decoded = _run_tool(
@@ -1536,7 +1546,10 @@ def assemble_source(source):
         ])
     except BuildFailure as error:
         line = error.line - len(prefix) if error.line else None
-        raise BuildFailure(str(error), line if line and line > 0 else None) from error
+        raise BuildFailure(
+            _friendly_tool_output(error, source_path, "Assembly"),
+            line if line and line > 0 else None) from error
+    as_log = _friendly_tool_output(as_log, source_path, "Assembly")
     ld_log = _run_tool([
         linker, "-m", "elf_i386", "-Ttext", f"0x{_ENTRY:08x}",
         "-e", "_start", "-o", str(elf_path), str(object_path),
@@ -1554,7 +1567,8 @@ def assemble_source(source):
     return AssemblyBuild(
         str(elf_path), mapping,
         "\n".join(
-            part for part in (as_log, ld_log, f"Built {elf_path}") if part),
+            part for part in (
+                as_log, ld_log, f"Built .generated/{elf_path.name}") if part),
         warning_line)
 
 
@@ -1585,7 +1599,10 @@ def compile_c_source(source, optimization="-O2"):
     try:
         log = _run_tool(command)
     except BuildFailure as error:
-        raise BuildFailure(str(error), error.line) from error
+        raise BuildFailure(
+            _friendly_tool_output(error, source_path, "C source"),
+            error.line) from error
+    log = _friendly_tool_output(log, source_path, "C source")
     try:
         assembly = asm_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:

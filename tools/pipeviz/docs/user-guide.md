@@ -269,6 +269,8 @@ _start:
 `Ctrl+B` and `Ctrl+Enter` both perform **Compile → Assembly**. Diagnostics name and
 highlight the failing line. Their first line is an actionable jump: focus the
 diagnostic and press Enter, or double-click it, to return to that editor line.
+Tool output uses compact `Assembly:` and `C source:` locations in place of the
+internal generated-file path while retaining the original line and column.
 Successful GCC/GNU-as warnings still emit runnable Assembly, but use an amber
 source mark and the same Enter/double-click jump rather than appearing as a
 clean green build. After a warning-producing C compile switches to Assembly,
@@ -431,7 +433,8 @@ Assembly. Press Enter on the focused diagnostic, or double-click it, to jump
 to the marked C/Assembly line. The empty C diagnostics affordance stays shallow
 to maximize editor height, expands for a warning or error, and collapses again
 when an edit clears the stale result. Long paths and GCC messages wrap at the
-pane edge; vertical scrolling remains available, while there is no hidden
+pane edge; internal generated paths are shortened to `Assembly:` or
+`C source:` before display. Vertical scrolling remains available, with no hidden
 horizontal-scroll requirement. Empty and warning states use Compiler
 terminology in C, distinct from Assembly's Build diagnostics. Build/compiler diagnostics
 belong to the exact source revision that produced them: editing either source

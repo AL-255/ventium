@@ -156,7 +156,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     Assembly-side status retains U/V identity or labels x87 as FP. Editing clears
     prior build diagnostics and PC links so green results never describe stale
     text. Errors are red and line-linked; successful toolchain warnings remain
-    runnable but use an amber line-linked diagnostic. Source drops route to
+    runnable but use an amber line-linked diagnostic. Diagnostics use compact
+    **Assembly:** and **C source:** locations instead of long internal generated
+    paths, preserving line/column information in narrow windows. Source drops
+    route to
     this workspace; labels/new blocks auto-indent
     and a closing C brace typed on a blank indented line dedents one level.
     `Ctrl+Tab`/`Ctrl+Shift+Tab` leaves either source editor without inserting

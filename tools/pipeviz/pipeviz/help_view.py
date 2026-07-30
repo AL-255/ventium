@@ -301,7 +301,9 @@ Delete refresh the current matches.</p>
 in red; successful GCC/GNU-as warnings remain runnable but mark their line and
 diagnostics in amber. The first diagnostic line is actionable:
 focus it and press Enter, or double-click it, to return to the marked editor
-line. When a warning-producing C compile opens Assembly, its amber status points
+line. Tool output says <code>Assembly:</code> or <code>C source:</code> instead
+of spending the compact pane on an internal generated-file path; exact
+line/column locations remain intact. When a warning-producing C compile opens Assembly, its amber status points
 back to the C details with Alt+C. Fatal compiler errors use the same jump path. Editing
 the source clears diagnostics from the old revision instead of leaving a stale
 green or red result visible. Ctrl+Shift+R is intentionally Visualizer-only:
@@ -335,7 +337,8 @@ double-click it to jump there. Editing C or changing the optimization level
 clears the prior compiler result and asks for a fresh compile. The diagnostic
 pane stays shallow while empty, expands for real output, and collapses after
 that output becomes stale. Long compiler lines wrap to the pane width instead
-of requiring horizontal scrolling.</p>
+of requiring horizontal scrolling, and generated paths are shortened to
+<code>C source:</code>.</p>
 <p>Hover an optimization choice for its purpose: O0 is the most direct and
 source-like, O1 is a moderate compromise, O2 is the performance-oriented
 default for U/V experiments, and Os favors compact code. Every advertised level
