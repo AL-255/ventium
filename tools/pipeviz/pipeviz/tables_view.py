@@ -915,6 +915,7 @@ class _PrefetchView(QWidget):
         self.setAutoFillBackground(True)
         v = QVBoxLayout(self); v.setContentsMargins(8, 8, 8, 8)
         self.info = QLabel(); self.info.setStyleSheet("color:#8b949e;")
+        self.info.setAccessibleName("Prefetch address state")
         v.addWidget(self.info)
         grid = QGridLayout(); grid.setSpacing(3)
         self.byte_lbls = []
@@ -927,11 +928,13 @@ class _PrefetchView(QWidget):
             idx.setStyleSheet("color:#6e7681; font-size:8px;")
             grid.addWidget(idx, 0, i)
             b = QLabel("00"); b.setAlignment(Qt.AlignCenter); b.setFont(_mono(11))
+            b.setAccessibleName(f"Prefetch buffer byte {i}")
             b.setStyleSheet("background:#161b22; border:1px solid #30363d; padding:4px;")
             grid.addWidget(b, 1, i)
             self.byte_lbls.append(b)
         v.addWidget(gw)
         self.decode = QLabel(); self.decode.setFont(_mono(10))
+        self.decode.setAccessibleName("Prefetch buffer decode")
         self.decode.setWordWrap(True)
         v.addWidget(self.decode)
         v.addStretch(1)
@@ -948,6 +951,9 @@ class _PrefetchView(QWidget):
         self.decode.setText(
             "<i>Open a program to inspect its slow-path prefetch buffer.</i>")
         self.decode.setStyleSheet("color:#586069;")
+        self.setAccessibleDescription(
+            "No program loaded. Open a program to inspect its slow-path "
+            "prefetch buffer.")
 
     def update_from(self, s, bits):
         self.info.setText(
@@ -968,10 +974,21 @@ class _PrefetchView(QWidget):
                 "<i>ibuf idle — fast-path fetch from the I-cache; "
                 "slow-path decoder not engaged</i>")
             self.decode.setStyleSheet("color:#6e7681;")
+            decode_state = (
+                "Buffer idle; fast-path fetch from the instruction cache, "
+                "slow-path decoder not engaged.")
         else:
             txt, sz = disasm.text(ib, s.eip, bits)
             self.decode.setText(f"ibuf decode @ eip:  <b>{txt}</b>  ({sz} bytes)")
             self.decode.setStyleSheet("color:#c9d1d9;")
+            decode_state = (
+                f"Buffer decodes at EIP as {txt}, {sz} "
+                f"byte{'s' if sz != 1 else ''}.")
+        self.setAccessibleDescription(
+            f"Linear fetch address 0x{int(s.flin):08x}; "
+            f"EIP 0x{int(s.eip):08x}; fetch word {int(s.fetch_word)}. "
+            f"Sixteen buffer bytes: {' '.join(f'{byte:02x}' for byte in ib)}. "
+            f"{decode_state}")
 
 
 class _HexDump(QWidget):

@@ -936,6 +936,14 @@ def scenario_startup(app, outdir):
         assert win.tables.ic._hint.accessibleName() == (
             "Empty analysis table explanation")
         assert "No program loaded" in win.tables.pf.info.text()
+        assert "No program loaded" in (
+            win.tables.pf.accessibleDescription())
+        assert win.tables.pf.info.accessibleName() == "Prefetch address state"
+        assert win.tables.pf.decode.accessibleName() == (
+            "Prefetch buffer decode")
+        assert all(
+            byte.accessibleName() == f"Prefetch buffer byte {index}"
+            for index, byte in enumerate(win.tables.pf.byte_lbls))
         assert all(not control.isEnabled()
                    for control in win.tables.mem._session_controls)
         assert all(not button.isEnabled()
@@ -1750,6 +1758,12 @@ def scenario_dcache_memory(app, outdir):
         assert "miss" in win.tables.dc_lbl.text().lower()
         assert "replay [empty]" in win.tables.dc_lbl.text()
         assert "14 cold fills" in win.tables.dc_lbl.toolTip()
+        prefetch_accessible = win.tables.pf.accessibleDescription()
+        assert "Linear fetch address 0x" in prefetch_accessible
+        assert "Sixteen buffer bytes:" in prefetch_accessible
+        assert (
+            "Buffer idle" in prefetch_accessible
+            or "Buffer decodes at EIP" in prefetch_accessible)
         assert win.tables.dc.accessibleDescription() == "14 populated rows."
         cache_map_accessible = win.tables.dc_map.accessibleDescription()
         assert "14 of 256 cache line slots resident" in cache_map_accessible

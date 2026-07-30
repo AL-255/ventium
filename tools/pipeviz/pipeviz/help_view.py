@@ -297,6 +297,8 @@ producing replayed misses.</p>
 and decode; <b>slow path</b> combines integer execute, load/store, string, and
 I/O micro-operations. Its accessible description reports clocks and percentages
 for every non-empty category, plus retired count and IPC.</p>
+<p>Prefetch announces its linear fetch address, EIP, fetch word, all 16 buffer
+bytes, and whether the slow-path buffer is idle or what it decodes.</p>
 <p>Memory displays physical backend bytes. EIP, ESP, and the latest explicit
 memory operand are resolved through segmentation and legacy page tables. Page
 Up/Page Down or the arrow buttons moves by 256 physical bytes and exits follow

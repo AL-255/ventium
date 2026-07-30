@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Prefetch semantic-state audit:** the display-only Prefetch page relied on
+assistive traversal of anonymous address/decode/byte labels, with no coherent
+state equivalent. It now announces linear fetch address, EIP, fetch word, all
+16 bytes, and idle-versus-decoded interpretation. Address/decode fields and
+each indexed byte have stable names; startup and live workload states are
+covered without adding a dead focus stop.
+
 **Trace semantic-state audit:** the retired trace painted honest no-program and
 no-retirement overlays but retained a generic table description, while its
 live match/error label was unnamed. The table now announces the current empty
