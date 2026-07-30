@@ -91,6 +91,12 @@ long generated assembly harder to manipulate precisely. A left click now
 selects the exact whole source line and restores editor focus. The real
 sum-template line and accessible gutter identity are acceptance-tested.
 
+**Source-gutter boundary follow-up:** Qt's `cursorForPosition` maps blank space
+below a short document to its last block. The first gutter implementation
+therefore selected the final line even where no number was painted. Hit-testing
+now requires the pointer to fall inside that block's visible geometry; a
+bottom-gutter click provably preserves the existing selection.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a

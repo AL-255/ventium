@@ -375,6 +375,16 @@ def scenario(app, outdir):
         assert app.focusWidget() is editor
         assert editor.textCursor().blockNumber() == 4
         assert editor.textCursor().selectedText().strip() == "mov eax, 0"
+        selected_range = (
+            editor.textCursor().selectionStart(),
+            editor.textCursor().selectionEnd())
+        QTest.mouseClick(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(editor._line_area.width() // 2,
+                   editor._line_area.height() - 2))
+        assert (
+            editor.textCursor().selectionStart(),
+            editor.textCursor().selectionEnd()) == selected_range
         editor.setFocus()
         QTest.keyClick(editor, Qt.Key_F, Qt.ControlModifier)
         settle(app)

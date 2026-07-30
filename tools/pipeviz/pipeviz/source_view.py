@@ -54,7 +54,11 @@ class _LineNumberArea(QWidget):
                 event.position().y()
                 if hasattr(event, "position") else event.y())
             cursor = self.editor.cursorForPosition(QPoint(0, y))
-            if cursor.block().isValid():
+            block = cursor.block()
+            top = round(self.editor.blockBoundingGeometry(block).translated(
+                self.editor.contentOffset()).top())
+            height = round(self.editor.blockBoundingRect(block).height())
+            if block.isValid() and top <= y < top + height:
                 cursor.select(QTextCursor.LineUnderCursor)
                 self.editor.setTextCursor(cursor)
                 self.editor.setFocus(Qt.MouseFocusReason)
