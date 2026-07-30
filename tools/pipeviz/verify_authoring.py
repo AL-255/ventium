@@ -506,8 +506,11 @@ def scenario(app, outdir):
         QInputDialog.getInt = staticmethod(
             lambda *_args, **_kwargs: next(answers))
         try:
+            assert editor.request_completion(force=True)
+            assert editor.completion.isVisible()
             QTest.keyClick(editor, Qt.Key_G, Qt.ControlModifier)
             settle(app)
+            assert not editor.completion.isVisible()
             assert editor.textCursor().blockNumber() + 1 == 2
             assert editor.textCursor().positionInBlock() == 0
             assert win.assembly.cursor_position.text() == "Ln 2 · Col 1"

@@ -20,6 +20,8 @@ status; 900×620 acceptance locks both readouts inside the window.
 The readout is also an auto-raised Go-to-Line button: pointer or Ctrl+G accepts
 only the document's 1-based range, centers the target, and returns editor focus
 after either acceptance or cancellation. Acceptance covers all three flows.
+Opening it also dismisses a live opcode-completion tooltip before presenting
+the line dialog, preventing stacked transient overlays.
 
 **Long-source readability audit:** Assembly/C text and line numbers were fixed
 at 10 pt, while their Ctrl+0 still reset hidden Visualizer splitters. Source

@@ -1530,6 +1530,9 @@ class _CursorPositionLabel(QToolButton):
         self.setAccessibleDescription(detail)
 
     def go_to_line(self):
+        completion = getattr(self.editor, "completion", None)
+        if completion is not None:
+            completion.hide()
         current = self.editor.textCursor().blockNumber() + 1
         line, accepted = QInputDialog.getInt(
             self.editor, "Go to source line", "Line number:",
