@@ -624,15 +624,23 @@ class TablesView(QWidget):
 
         # --- Branches (per-branch-PC observed taken/not-taken profile) ---
         self.br_lbl = QLabel()
-        self.br = _mk_table(["PC", "branch", "target", "hits", "T/res", "T%", "bias"],
-                            [70, 64, 76, 46, 60, 46, 9999],
+        self.br = _mk_table(
+            ["PC", "branch", "target", "hits", "taken/resolved", "taken %",
+             "bias bar"],
+                            [70, 64, 76, 46, 100, 64, 9999],
                             hint="no branches retired yet — step the core through a "
                                  "jump/call/loop")
         self.br.setAccessibleName("Branch behavior")
         self.br.horizontalHeaderItem(4).setToolTip(
             "Taken outcomes / resolved outcomes; capture-tail hits may be unresolved")
+        self.br.horizontalHeaderItem(5).setToolTip(
+            "100 × taken / resolved outcomes; unresolved capture-tail hits "
+            "are excluded")
+        self.br.horizontalHeaderItem(6).setToolTip(
+            "Ten-slot taken-rate bar: each T represents one taken decile")
         _right_align_headers(self.br, (3, 4, 5))     # hits / T-resolved / T% match data
-        _align_headers(self.br, (6,), Qt.AlignLeft)   # 'bias' sits over its left-pinned bar
+        _align_headers(
+            self.br, (6,), Qt.AlignLeft)  # caption sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
         self.tabs.setTabToolTip(
             5, "Per-branch target, hit count, resolved taken rate, and bias")

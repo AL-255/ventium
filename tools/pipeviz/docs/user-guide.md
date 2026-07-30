@@ -405,8 +405,9 @@ producer, while same-PC highlighting makes repeated loop iterations obvious.
 Open **Branches** to compare the branch’s resolved taken rate and bias with the
 mispredict event markers in the sparkline. A branch at the capture tail has no
 next retired PC yet, so it remains a hit but is excluded from the taken-rate
-denominator. Shift-click two loop iterations to measure the steady-state
-iteration cost.
+denominator. The self-defining **taken/resolved**, **taken %**, and ten-slot
+**bias bar** columns expose that distinction directly. Shift-click two loop
+iterations to measure the steady-state iteration cost.
 
 This is the fastest way to distinguish a branch-limited loop from one that is
 simply not finding V-pipe pairings.

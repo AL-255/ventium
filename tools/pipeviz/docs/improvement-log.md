@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Branch-header semantic audit:** abbreviated “T/res,” “T%,” and “bias”
+headings ran together under subtle table dividers. They now read
+“taken/resolved,” “taken %,” and “bias bar,” with header tooltips explaining
+capture-tail exclusion and the ten-slot decile encoding. The indexed and
+repository guides name the same visible columns.
+
 **Hotspot-header semantic audit:** adjacent “D$ miss” and generic “cost”
 headers visually read as “D$ miss cost,” even though the amber bar encoded
 normalized total instruction latency. The final self-defining headers now read

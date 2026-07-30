@@ -283,6 +283,9 @@ labels a newest-cycle window after very large steps. Hotspots and Branches use
 Pipeline's longer analysis window; if their PC has fallen out of Trace,
 drill-down selects its nearest retained Pipeline retirement and reports that
 fallback instead of becoming a silent no-op.</p>
+<p>Branches reports <b>taken/resolved</b>, <b>taken %</b>, and a ten-slot
+<b>bias bar</b>. A capture-tail branch remains a hit but has no next retired PC,
+so it is excluded from the resolved denominator and taken percentage.</p>
 <p>The Trace table announces whether no program or no retirement exists, then
 its populated row count. Filter results announce visible/total counts; invalid
 structured syntax announces the correction while retaining every row.</p>

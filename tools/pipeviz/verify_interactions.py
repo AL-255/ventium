@@ -1400,6 +1400,12 @@ def scenario_branch_transport(app, outdir):
         assert win.tables.br.item(0, 4).text() == "104/104"
         assert win.tables.br.item(0, 5).text() == "100"
         assert "104/105 outcomes resolved" in win.tables.br_lbl.text()
+        assert win.tables.br.horizontalHeaderItem(4).text() == "taken/resolved"
+        assert win.tables.br.horizontalHeaderItem(5).text() == "taken %"
+        assert win.tables.br.horizontalHeaderItem(6).text() == "bias bar"
+        assert "capture-tail" in win.tables.br.horizontalHeaderItem(5).toolTip()
+        assert "taken decile" in (
+            win.tables.br.horizontalHeaderItem(6).toolTip())
         assert len(win.pipeline.konata.plot.insns) == win.trace.tbl.rowCount()
 
         # A retire cycle can contain both U and V. Clicking either Trace row
