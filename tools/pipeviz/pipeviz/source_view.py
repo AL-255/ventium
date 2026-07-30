@@ -41,8 +41,11 @@ class _LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
         self.editor = editor
+        self._drag_anchor = None
         self.setAccessibleName("Source line numbers")
-        self.setToolTip("Click a line number to select that source line")
+        self.setToolTip(
+            "Click a line number to select it; drag to select complete lines")
+        self.setAccessibleDescription(self.toolTip())
 
     def sizeHint(self):
         return QSize(self.editor.line_number_area_width(), 0)
@@ -50,23 +53,60 @@ class _LineNumberArea(QWidget):
     def paintEvent(self, event):
         self.editor.paint_line_numbers(event)
 
+    @staticmethod
+    def _event_y(event):
+        return int(
+            event.position().y()
+            if hasattr(event, "position") else event.y())
+
+    def _block_at(self, y):
+        cursor = self.editor.cursorForPosition(QPoint(0, y))
+        block = cursor.block()
+        top = round(self.editor.blockBoundingGeometry(block).translated(
+            self.editor.contentOffset()).top())
+        height = round(self.editor.blockBoundingRect(block).height())
+        return block if block.isValid() and top <= y < top + height else None
+
+    def _select_through(self, target):
+        anchor = self._drag_anchor
+        if anchor is None or target is None:
+            return False
+        cursor = QTextCursor(self.editor.document())
+        if target.blockNumber() >= anchor.blockNumber():
+            cursor.setPosition(anchor.position())
+            cursor.setPosition(
+                target.position() + len(target.text()), QTextCursor.KeepAnchor)
+        else:
+            cursor.setPosition(anchor.position() + len(anchor.text()))
+            cursor.setPosition(target.position(), QTextCursor.KeepAnchor)
+        self.editor.setTextCursor(cursor)
+        return True
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            y = int(
-                event.position().y()
-                if hasattr(event, "position") else event.y())
-            cursor = self.editor.cursorForPosition(QPoint(0, y))
-            block = cursor.block()
-            top = round(self.editor.blockBoundingGeometry(block).translated(
-                self.editor.contentOffset()).top())
-            height = round(self.editor.blockBoundingRect(block).height())
-            if block.isValid() and top <= y < top + height:
-                cursor.select(QTextCursor.LineUnderCursor)
-                self.editor.setTextCursor(cursor)
+            self._drag_anchor = self._block_at(self._event_y(event))
+            if self._select_through(self._drag_anchor):
                 self.editor.setFocus(Qt.MouseFocusReason)
                 event.accept()
                 return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (self._drag_anchor is not None
+                and event.buttons() & Qt.LeftButton
+                and self._select_through(
+                    self._block_at(self._event_y(event)))):
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._drag_anchor is not None:
+            self._select_through(self._block_at(self._event_y(event)))
+            self._drag_anchor = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class CodeEditor(QPlainTextEdit):

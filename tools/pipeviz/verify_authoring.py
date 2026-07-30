@@ -421,6 +421,7 @@ def scenario(app, outdir):
         editor.document().setModified(False)
         assert win.assembly.new_template()
         assert editor._line_area.accessibleName() == "Source line numbers"
+        assert "drag" in editor._line_area.accessibleDescription()
         line_cursor = QTextCursor(
             editor.document().findBlockByNumber(4))
         line_y = editor.cursorRect(line_cursor).center().y()
@@ -430,6 +431,34 @@ def scenario(app, outdir):
         assert app.focusWidget() is editor
         assert editor.textCursor().blockNumber() == 4
         assert editor.textCursor().selectedText().strip() == "mov eax, 0"
+        drag_end_block = editor.document().findBlockByNumber(7)
+        drag_end_y = editor.cursorRect(
+            QTextCursor(drag_end_block)).center().y()
+        gutter_x = editor._line_area.width() // 2
+        QTest.mousePress(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(gutter_x, line_y))
+        QTest.mouseMove(
+            editor._line_area, QPoint(gutter_x, drag_end_y))
+        QTest.mouseRelease(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(gutter_x, drag_end_y))
+        assert editor.textCursor().selectionStart() == line_cursor.block().position()
+        assert editor.textCursor().selectionEnd() == (
+            drag_end_block.position() + len(drag_end_block.text()))
+        QTest.mousePress(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(gutter_x, drag_end_y))
+        QTest.mouseMove(editor._line_area, QPoint(gutter_x, line_y))
+        QTest.mouseRelease(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(gutter_x, line_y))
+        assert editor.textCursor().selectionStart() == line_cursor.block().position()
+        assert editor.textCursor().selectionEnd() == (
+            drag_end_block.position() + len(drag_end_block.text()))
+        QTest.mouseClick(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(gutter_x, line_y))
         selected_range = (
             editor.textCursor().selectionStart(),
             editor.textCursor().selectionEnd())

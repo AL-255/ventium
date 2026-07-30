@@ -18,6 +18,14 @@ marks an unmatched or misnested delimiter red. The index ignores quoted text,
 escaped characters, Assembly `#` comments, and C line/block comments.
 Acceptance covers Assembly nesting/mismatch behavior and C lexical exclusions.
 
+**Source gutter selection audit:** a line-number click selected one row, but
+dragging did nothing. The shared gutter now drag-selects exact complete-line
+ranges in either direction, preserving the single-click behavior and editor
+focus. This makes pointer-driven block indentation/outdent/comment commands
+practical; the tooltip and accessible description expose the gesture.
+Acceptance covers downward and upward range selection plus invalid empty-gutter
+click safety.
+
 **Long-source orientation audit:** line numbers identified rows, but neither
 workbench exposed the active column or a persistent location once transient
 status changed. Both status rows now include a compact one-based Ln · Col

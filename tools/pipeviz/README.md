@@ -161,6 +161,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     Moving beside `()`, `[]`, or `{}` highlights its matching pair; an
     unmatched delimiter is marked red, while delimiters inside comments and
     quoted text are ignored.
+    Click a line number to select that line, or drag through the gutter to
+    select a complete block for indentation or comment commands.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses
