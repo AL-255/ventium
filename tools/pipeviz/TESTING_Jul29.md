@@ -347,8 +347,8 @@ Procedure:
 5. Select compact x87, widen to the three-column register view, narrow again,
    and require x87 to remain selected.
 6. While x87 remains selected, pin the newest retirement and require the
-   page-independent amber `PINNED n=… · retire cyc=…` strip; unpin and require
-   the strip to return to `LIVE` without changing pages.
+   page-independent amber `PINNED n=… · retire cyc=…` strip; click its Unpin
+   control and require LIVE without changing pages or advancing the model.
 
 Observed evidence:
 
@@ -360,6 +360,7 @@ Observed evidence:
   pane cannot fit all columns, then return to three simultaneous columns when widened.
 - LIVE/PINNED state remains visible above every compact page rather than being
   discoverable only on Segments.
+- Unpin clears the historical selection and playhead without consuming a clock.
 - The compact trace displays substantially more retirements vertically, while
   retaining readable 9-point text and row selection.
 

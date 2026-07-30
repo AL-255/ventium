@@ -23,6 +23,12 @@ transitions across integer, x87, and paged-system workloads. The 1280×800
 layout test pins while x87 stays selected, captures the amber state strip, then
 unpins and proves both the LIVE state and page selection survive.
 
+**Follow-up interaction audit:** the only route from a pinned retirement back
+to LIVE was to step or reset, mutating the machine merely to clear a visual
+selection. The pinned strip now carries an accessible **Unpin** control. It
+clears the retirement/playhead, restores live values, preserves the selected
+compact page, and provably consumes zero clocks.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority

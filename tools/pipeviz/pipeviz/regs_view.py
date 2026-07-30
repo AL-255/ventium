@@ -3,9 +3,10 @@
 """Architectural register panel — GPRs, EFLAGS (decoded), segments, control
 registers, and the x87 stack (logical ST(0..7) with decoded floatx80 values)."""
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
-                               QLabel, QGroupBox, QTabWidget, QSizePolicy)
+                               QLabel, QGroupBox, QTabWidget, QSizePolicy,
+                               QToolButton)
 from PySide6.QtGui import QFont
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 
 from .backend import GPR_NAMES, SEG_NAMES
 
@@ -48,6 +49,7 @@ def floatx80_to_float(b10: bytes):
 
 
 class RegsView(QWidget):
+    unpinRequested = Signal()
     COMPACT_WIDTH = 744
 
     def __init__(self, parent=None):
@@ -60,6 +62,11 @@ class RegsView(QWidget):
         root.setContentsMargins(4, 4, 4, 4)
         root.setSpacing(0)
         self._session_active = False
+        self.state_bar = QWidget()
+        self.state_bar.setFixedHeight(20)
+        state_row = QHBoxLayout(self.state_bar)
+        state_row.setContentsMargins(0, 0, 0, 0)
+        state_row.setSpacing(0)
         self.state_banner = QLabel("LIVE · current architectural state")
         self.state_banner.setAccessibleName("Register state time point")
         self.state_banner.setFont(_mono(9, True))
@@ -69,7 +76,21 @@ class RegsView(QWidget):
             "padding:1px 5px;")
         self.state_banner.setToolTip(
             "Live architectural state after the most recent model clock")
-        root.addWidget(self.state_banner)
+        state_row.addWidget(self.state_banner, 1)
+        self.unpin_btn = QToolButton()
+        self.unpin_btn.setText("× Unpin")
+        self.unpin_btn.setAccessibleName("Unpin registers")
+        self.unpin_btn.setFixedHeight(20)
+        self.unpin_btn.setToolTip(
+            "Return Registers to current live state without advancing the model")
+        self.unpin_btn.setStyleSheet(
+            "QToolButton{color:#e3b341;background:#211a08;"
+            "border:1px solid #6e5420;padding:1px 6px;}"
+            "QToolButton:hover{background:#3a2d0c;color:#f0c95c;}")
+        self.unpin_btn.clicked.connect(self.unpinRequested.emit)
+        self.unpin_btn.hide()
+        state_row.addWidget(self.unpin_btn)
+        root.addWidget(self.state_bar)
         self._session_hint = QLabel(
             "No program loaded\n\nOpen a program or restore a snapshot "
             "to inspect architectural state.")
@@ -233,7 +254,7 @@ class RegsView(QWidget):
         self._sync_session_visibility()
 
     def _sync_session_visibility(self):
-        self.state_banner.setVisible(self._session_active)
+        self.state_bar.setVisible(self._session_active)
         self._session_hint.setVisible(not self._session_active)
         self._compact_tabs.setVisible(
             self._session_active and self._compact)
@@ -257,6 +278,7 @@ class RegsView(QWidget):
             "padding:1px 5px;")
         self.state_banner.setToolTip(
             "Live architectural state after the most recent model clock")
+        self.unpin_btn.hide()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -340,10 +362,11 @@ class RegsView(QWidget):
         self.state_banner.setText(f"PINNED n={rec.n} · retire cyc={rec.cyc}")
         self.state_banner.setStyleSheet(
             "color:#e3b341;background:#211a08;border:1px solid #6e5420;"
-            "padding:1px 5px;")
+            "border-right:0;padding:1px 5px;")
         self.state_banner.setToolTip(
             "Pinned retirement: architectural values are post-commit; "
             "starred instruction/translation context is pre-execution")
+        self.unpin_btn.show()
         for i, name in enumerate(GPR_NAMES):
             changed = prev is not None and prev.gpr[i] != rec.gpr[i]
             self.gpr_lbls[name].setText(f"{rec.gpr[i]:08x}")

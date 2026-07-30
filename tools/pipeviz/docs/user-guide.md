@@ -98,7 +98,9 @@ linked bytes. Segment limits and CR2 read `n/a` because the retirement record
 does not capture them; hover a starred heading or value for the time-point
 explanation. The page-independent strip above the register bank always says
 **LIVE** or **PINNED n=… · retire cyc=…**. Check it before interpreting values,
-especially in compact mode where the Segments page may not be open.
+especially in compact mode where the Segments page may not be open. Click its
+**Unpin** button to return to the current live state and clear the cycle
+playhead without advancing the model; stepping also unpins automatically.
 
 The timing diagram itself is keyboard accessible: Up/Down selects adjacent
 retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture

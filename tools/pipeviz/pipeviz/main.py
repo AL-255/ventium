@@ -686,6 +686,7 @@ class MainWindow(QMainWindow):
         self.right_split = right
         self.tables = TablesView()
         self.regs = RegsView()
+        self.regs.unpinRequested.connect(self._unpin)
         # Tables can scroll and the register bank becomes tabbed when its three
         # complete columns no longer fit.
         # Ignore their wide content hints so the outer splitter can truly honor

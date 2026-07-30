@@ -193,7 +193,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   `PINNED n=… · retire cyc=…` banner above the whole register bank shows that
   instruction's post-commit state. The same page-independent banner says
   `LIVE` after unpinning, so compact Integer, Segments, and x87 pages cannot
-  disguise which time point they show.
+  disguise which time point they show. Its adjacent **Unpin** button returns to
+  live state without executing or changing the model.
   `PC*`, segment `base*`, and CR0/CR3/CR4 are explicitly starred because they
   are the instruction's pre-execution translation context; segment limits and
   CR2 honestly show `n/a` because they are not captured per retirement. At compact
@@ -245,8 +246,9 @@ Mouse interactions: **click** a Konata cell or a trace row to pin the registers
 to that instruction and drop a cycle playhead (the trace ↔ pipeline selection is
 two-way); **shift-click** a second Konata row to measure the cycle Δ between two
 instructions; **click** a point in the **Mem map** to jump the trace + Memory tab
-to that load/store; **click** the IPC sparkline to seek the playhead. Stepping
-unpins the registers back to the live state.
+to that load/store; **click** the IPC sparkline to seek the playhead. Click
+**Unpin** beside the amber register strip to return to LIVE without advancing;
+stepping also unpins.
 
 ## Architecture
 

@@ -112,7 +112,9 @@ and CR2 show <code>n/a</code> because they are not captured per retirement;
 hover a starred label for the exact time-point explanation. The strip above
 every register page says <b>LIVE</b> or
 <b>PINNED n=… · retire cyc=…</b>, so the current time point remains explicit
-even when compact mode is showing only Integer or x87.</p>
+even when compact mode is showing only Integer or x87. Click <b>Unpin</b> on
+that strip to return to LIVE and clear the playhead without executing a
+clock.</p>
 <p>The event selector beside ◀/▶ narrows <code>[</code>/<code>]</code>
 navigation to any event, mispredicts, stalls, I-cache fills, or page walks.</p>
 <h2>Examples</h2>
@@ -267,7 +269,8 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>
 </table>
-<p>Click a trace/timing row to pin it. Shift-click a second timing row to
+<p>Click a trace/timing row to pin it; use the register strip's <b>Unpin</b>
+button to return to LIVE without executing. Shift-click a second timing row to
 measure cycle distance. Click the IPC sparkline to seek a cycle.</p>
 """),
 ))

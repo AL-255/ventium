@@ -714,6 +714,7 @@ def scenario_startup(app, outdir):
         assert all(not widget.isEnabled() for widget in win._config_widgets)
         assert win.regs._session_hint.isVisible()
         assert not win.regs.state_banner.isVisible()
+        assert not win.regs.unpin_btn.isVisible()
         assert not win.regs._wide_host.isVisible()
         assert "No program loaded" in win.regs._session_hint.text()
         assert win.trace.tbl._empty_hint.isVisible()
@@ -850,6 +851,7 @@ def scenario_startup(app, outdir):
         assert not win.regs._session_hint.isVisible()
         assert win.regs.state_banner.isVisible()
         assert win.regs.state_banner.text().startswith("LIVE")
+        assert not win.regs.unpin_btn.isVisible()
         assert win.regs._wide_host.isVisible()
         assert win.trace.tbl._empty_hint.isVisible()
         assert "No instructions retired" in win.trace.tbl._empty_hint.text()
@@ -1178,6 +1180,8 @@ def scenario_branch_transport(app, outdir):
             f"PINNED n={selected_n} ·")
         assert "post-commit" in win.regs.state_banner.toolTip()
         assert "pre-execution" in win.regs.state_banner.toolTip()
+        assert win.regs.unpin_btn.isVisible()
+        assert "without advancing" in win.regs.unpin_btn.toolTip()
         assert win.pipeline.konata.plot.playhead is not None
 
         plot = win.pipeline.konata.plot
@@ -1650,12 +1654,16 @@ def scenario_layout(app, outdir):
         assert win.regs.state_banner.text().startswith(
             f"PINNED n={pin_n} ·")
         save_shot(app, win, outdir, "08a_compact_pinned_state")
-        win._unpin()
+        pinned_cycle = win.backend.state().core_cyc
+        click(app, win.regs.unpin_btn)
+        assert win.backend.state().core_cyc == pinned_cycle
         win._refresh_all()
         settle(app)
         assert win._pinned_n is None
         assert win.regs._compact_tabs.currentIndex() == 2
         assert win.regs.state_banner.text().startswith("LIVE")
+        assert not win.regs.unpin_btn.isVisible()
+        assert win.pipeline.konata.plot.playhead is None
         save_shot(app, win, outdir, "08_compact_layout")
         print(f"OK layout: true compact window={win.width()}x{win.height()}, "
               "responsive trace/register columns, all panels in bounds")
