@@ -233,7 +233,8 @@ Ctrl+/ toggles <code>#</code> Assembly or <code>//</code> C line comments,
 preserving indentation and handling a selected block in one undo step.</p>
 <p>Home first moves to the line's first non-whitespace column, then toggles to
 column zero; Shift+Home extends the selection and Ctrl+Home still moves to the
-start of the document.</p>
+start of the document. Ctrl+-/Ctrl+= changes source text and line-number size
+from 8 to 24 pt; Ctrl+0 restores 10 pt while in Assembly/C.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>
@@ -396,7 +397,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>F3 / Shift+F3</b></td><td>next / previous source or Trace match</td></tr>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
  <tr><td><b>Ctrl+Shift+R</b></td><td>reload the current program from disk</td></tr>
- <tr><td><b>Ctrl+0</b></td><td>reset panel proportions</td></tr>
+ <tr><td><b>Ctrl+0</b></td><td>reset Visualizer panel proportions, or source text to 10 pt</td></tr>
  <tr><td><b>Alt+V / Alt+A / Alt+C</b></td><td>switch workspace and focus Pipeline / Assembly / C</td></tr>
  <tr><td><b>Alt+1 … Alt+0</b></td><td>open Visualizer, then select and focus Code$ … Mem map analysis</td></tr>
  <tr><td><b>R</b></td><td>reset or restore snapshot</td></tr>
@@ -404,7 +405,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>I / Space</b></td><td>next retired instruction</td></tr>
  <tr><td><b>F5</b></td><td>run/pause</td></tr>
  <tr><td><b>[ / ]</b></td><td>previous/next selected event class</td></tr>
- <tr><td><b>Ctrl+- / Ctrl+=</b></td><td>zoom the focused Pipeline cycle axis</td></tr>
+ <tr><td><b>Ctrl+- / Ctrl+=</b></td><td>zoom the focused Pipeline cycle axis, or Assembly/C source text</td></tr>
  <tr><td><b>↑/↓, PgUp/PgDn, Home/End</b></td><td>traverse focused Pipeline rows</td></tr>
  <tr><td><b>Tab / Shift+Tab</b></td><td>leave a focused Trace or analysis table; arrows navigate its content</td></tr>
  <tr><td><b>Board arrows + Enter</b></td><td>choose and open an occupied live U/V/FP source line</td></tr>

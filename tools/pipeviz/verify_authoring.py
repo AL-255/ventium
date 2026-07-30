@@ -283,6 +283,7 @@ def scenario(app, outdir):
         assert win.workspace.currentWidget() is win.visualizer_tab
         assert win.tables.tabs.currentIndex() == 0
         assert app.focusWidget() is win.tables.ic
+        assert win.reset_layout_action.isEnabled()
         assert all(action.isEnabled()
                    for action in win._toolbar_visibility_actions)
         assert all(not toolbar.isHidden() for toolbar in toolbars)
@@ -290,6 +291,7 @@ def scenario(app, outdir):
         settle(app)
         assert win.workspace.currentWidget() is win.assembly
         assert app.focusWidget() is win.assembly.editor
+        assert not win.reset_layout_action.isEnabled()
         assert all(toolbar.isHidden() for toolbar in toolbars)
 
         editor = win.assembly.editor
@@ -536,6 +538,25 @@ def scenario(app, outdir):
         settle(app)
         assert app.focusWidget() is win.assembly.run_btn
         assert editor.toPlainText() == original_source
+        assert not win.reset_layout_action.isEnabled()
+        base_tab_stop = editor.tabStopDistance()
+        QTest.keyClick(editor, Qt.Key_Plus, Qt.ControlModifier)
+        assert editor.font().pointSize() == 11
+        assert editor.tabStopDistance() > base_tab_stop
+        assert editor._line_area.width() == editor.line_number_area_width()
+        assert "Current text size: 11 point" in (
+            editor.accessibleDescription())
+        QTest.keyClick(editor, Qt.Key_Minus, Qt.ControlModifier)
+        assert editor.font().pointSize() == 10
+        for _ in range(6):
+            QTest.keyClick(editor, Qt.Key_Minus, Qt.ControlModifier)
+        assert editor.font().pointSize() == 8
+        for _ in range(20):
+            QTest.keyClick(editor, Qt.Key_Plus, Qt.ControlModifier)
+        assert editor.font().pointSize() == 24
+        QTest.keyClick(editor, Qt.Key_0, Qt.ControlModifier)
+        assert editor.font().pointSize() == 10
+        assert editor.tabStopDistance() == base_tab_stop
         indentation_probe = "mov eax, 1\nadd eax, 2\nhlt\n"
         editor.setPlainText(indentation_probe)
         selection = editor.textCursor()
@@ -1359,6 +1380,13 @@ def scenario(app, outdir):
             and win.c_source.editor.height() >= 320)
         assert "Ctrl+Tab" in win.c_source.editor.accessibleDescription()
         assert "Ctrl+/" in win.c_source.editor.accessibleDescription()
+        assert not win.reset_layout_action.isEnabled()
+        QTest.keyClick(
+            win.c_source.editor, Qt.Key_Plus, Qt.ControlModifier)
+        assert win.c_source.editor.font().pointSize() == 11
+        QTest.keyClick(
+            win.c_source.editor, Qt.Key_0, Qt.ControlModifier)
+        assert win.c_source.editor.font().pointSize() == 10
         win.c_source.editor.setFocus()
         original_c_source = win.c_source.editor.toPlainText()
         QTest.keyClick(

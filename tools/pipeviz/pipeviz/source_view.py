@@ -76,7 +76,9 @@ class CodeEditor(QPlainTextEdit):
     def __init__(self, parent=None, comment_prefix="//"):
         super().__init__(parent)
         self._comment_prefix = comment_prefix
-        self.setFont(_mono(10))
+        self._default_font_size = 10
+        self._font_size = self._default_font_size
+        self.setFont(_mono(self._font_size))
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.setTabStopDistance(QFontMetrics(self.font()).horizontalAdvance(" ") * 4)
         self.setCenterOnScroll(True)
@@ -94,6 +96,24 @@ class CodeEditor(QPlainTextEdit):
         self.textChanged.connect(self._rebuild_find_ranges)
         self._update_line_area_width()
         self._refresh_selections()
+
+    def _set_source_font_size(self, size):
+        size = max(8, min(24, int(size)))
+        if size == self._font_size:
+            return
+        self._font_size = size
+        font = self.font()
+        font.setPointSize(size)
+        self.setFont(font)
+        self.setTabStopDistance(
+            QFontMetrics(self.font()).horizontalAdvance(" ") * 4)
+        self._update_line_area_width()
+        self._line_area.update()
+        base = re.sub(
+            r"\s+Current text size: \d+ point\.$", "",
+            self.accessibleDescription())
+        self.setAccessibleDescription(
+            f"{base} Current text size: {size} point.".strip())
 
     def line_number_area_width(self):
         digits = max(2, len(str(max(1, self.blockCount()))))
@@ -358,6 +378,21 @@ class CodeEditor(QPlainTextEdit):
         self.setTextCursor(restored)
 
     def keyPressEvent(self, event):
+        if (event.modifiers() & Qt.ControlModifier
+                and not event.modifiers()
+                & (Qt.AltModifier | Qt.MetaModifier)):
+            if event.key() in (Qt.Key_Plus, Qt.Key_Equal):
+                self._set_source_font_size(self._font_size + 1)
+                event.accept()
+                return
+            if event.key() == Qt.Key_Minus:
+                self._set_source_font_size(self._font_size - 1)
+                event.accept()
+                return
+            if event.key() == Qt.Key_0:
+                self._set_source_font_size(self._default_font_size)
+                event.accept()
+                return
         if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
                 and event.modifiers() & Qt.ControlModifier):
             forward = (

@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Long-source readability audit:** Assembly/C text and line numbers were fixed
+at 10 pt, while their Ctrl+0 still reset hidden Visualizer splitters. Source
+editors now zoom together from 8–24 pt on Ctrl+-/Ctrl+=, recompute tab stops and
+gutter width, expose the current point size assistively, and reset to 10 pt on
+Ctrl+0. Panel-layout reset is now Visualizer-scoped. Acceptance covers both
+bounds, reset, gutter/tab metrics, and shortcut ownership.
+
 **Source Home-key navigation audit:** generic QPlainTextEdit Home always jumped
 past indentation to column zero. Both code workbenches now use code-editor
 semantics: Home moves to the first non-whitespace column and a second press

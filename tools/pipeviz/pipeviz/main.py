@@ -430,10 +430,10 @@ class MainWindow(QMainWindow):
             self._workspace_actions.append(action)
         self._workspace_menu = workspace_menu
         view_menu.addSeparator()
-        reset_layout = QAction("Reset panel layout", self)
-        reset_layout.setShortcut(QKeySequence("Ctrl+0"))
-        reset_layout.triggered.connect(self._reset_layout)
-        view_menu.addAction(reset_layout)
+        self.reset_layout_action = QAction("Reset panel layout", self)
+        self.reset_layout_action.setShortcut(QKeySequence("Ctrl+0"))
+        self.reset_layout_action.triggered.connect(self._reset_layout)
+        view_menu.addAction(self.reset_layout_action)
         view_menu.addSeparator()
         self._toolbar_visibility_actions = []
         for toolbar in (self.session_toolbar, self.transport_toolbar, self.status_toolbar):
@@ -1094,6 +1094,8 @@ class MainWindow(QMainWindow):
             action.setEnabled(visualizer)
         for shortcut in self._debug_shortcuts:
             shortcut.setEnabled(visualizer)
+        if hasattr(self, "reset_layout_action"):
+            self.reset_layout_action.setEnabled(visualizer)
         for action in getattr(self, "_toolbar_visibility_actions", ()):
             # Source workspaces intentionally own the full height. Prevent the
             # View menu or toolbar context menu from reintroducing Visualizer

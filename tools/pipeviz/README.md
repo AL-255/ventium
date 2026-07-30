@@ -153,7 +153,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     indentation. Tab/Shift+Tab safely indent or outdent selected lines as one
     undoable edit; Backspace removes leading soft indentation one stop at a time,
     `Ctrl+/` toggles language-correct line comments, and Home toggles between
-    the first code column and column zero.
+    the first code column and column zero. Source text/line numbers scale from
+    8–24 pt with `Ctrl+-`/`Ctrl+=`; `Ctrl+0` restores 10 pt.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses
