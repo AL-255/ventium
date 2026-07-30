@@ -24,6 +24,9 @@ obscuring the live debugger; canceling or closing them does not auto-resume.</p>
 <p>Insn advances clocks until the next retirement boundary; its feedback names
 the actual elapsed clocks separately from whether it reached a retirement,
 stopped with the program, or exhausted its safety limit.</p>
+<p>Clock and Step N likewise add <b>program stopped</b> when the backend returns
+early at terminal quiescence, so a smaller-than-requested clock count is never
+left unexplained.</p>
 <ol>
  <li>Open or drop a program. ELF entry and segments are automatic. The
  <b>File → Open example</b> menu rescans and exposes the built verification
@@ -165,7 +168,9 @@ Seeking moves only the cycle playhead; it never guesses U or V from an
 ambiguous dual-retire cycle or changes an exact Trace/Register pin. The action
 line states the selected cycle and whether a retirement pin remained unchanged.
 Selecting a Trace/Pipeline instruction instead reports its retirement, cycle,
-lane, PC, and linked Assembly line.</p>
+lane, PC, and linked Assembly line. A long HLT tail says <b>waiting for
+interrupt</b> while transport is still available, then <b>quiesced — program
+stopped</b> only when the backend is terminal and stepping is disabled.</p>
 <h2>Examples</h2>
 <ul>
  <li><b>Dual Fibonacci:</b> two independent recurrence chains let adjacent

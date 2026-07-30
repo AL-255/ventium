@@ -1529,6 +1529,7 @@ class SparklineStrip(QWidget):
         self.ret = []        # retirements per cycle (0/1/2)
         self.ev = []         # '' | 'm' mispred | 's' stall | 'f' fill | 'w' walk
         self._last_state = ""
+        self._done = False
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.NoFocus)
         self.setAccessibleName("IPC and pipeline event history")
@@ -1559,9 +1560,11 @@ class SparklineStrip(QWidget):
         chosen = (
             f" Cycle {int(self._kbd_cyc)} selected."
             if self._kbd_cyc is not None else "")
+        idle_status = self._idle_status()
+        terminal = f" {idle_status}." if idle_status else ""
         self.setAccessibleDescription(
             f"Captured cycles {bounds[0]} through {bounds[1]}; recent IPC "
-            f"{ipc:.2f}; {events} marked events.{chosen} {navigation}")
+            f"{ipc:.2f}; {events} marked events.{terminal}{chosen} {navigation}")
 
     def reset(self, backend):
         self.backend = backend
@@ -1570,6 +1573,7 @@ class SparklineStrip(QWidget):
         self._last_cyc = int(backend.cycle_count())
         self.ret = []; self.ev = []
         self._last_state = ""
+        self._done = False
         self._kbd_cyc = None
         self._dragging = False
         self.setFocusPolicy(Qt.NoFocus)
@@ -1581,6 +1585,9 @@ class SparklineStrip(QWidget):
         if self.backend is None:
             return
         total = self.backend.cycle_count()
+        self._done = (
+            bool(self.backend.is_done())
+            if hasattr(self.backend, "is_done") else False)
         if total - self._last_cyc > self.CAP:
             self.ret = []
             self.ev = []
@@ -1618,6 +1625,21 @@ class SparklineStrip(QWidget):
             self._kbd_cyc = max(bounds[0], min(bounds[1], self._kbd_cyc))
         self._sync_accessible_description()
         self.update()
+
+    def _trailing_idle(self):
+        count = 0
+        while count < len(self.ret) and self.ret[len(self.ret) - 1 - count] == 0:
+            count += 1
+        return count
+
+    def _idle_status(self):
+        idle = self._trailing_idle()
+        if idle < 64 or self._last_state not in ("S_HALT", "S_HLTWAIT"):
+            return ""
+        return (
+            f"quiesced — program stopped ({idle} idle clocks)"
+            if self._done else
+            f"halted — waiting for interrupt ({idle} idle clocks)")
 
     # stall = grey (C_STG_STALL), matching the Konata '=' stall convention and
     # distinct from the amber I-fill (they were both amber and indistinguishable).
@@ -1689,22 +1711,20 @@ class SparklineStrip(QWidget):
         # 'stuck' diagnostic: a long trailing run of zero-retire cycles in a
         # front-end state (S_DECODE/S_FETCH livelock) — the strip would otherwise
         # read as a dead flat band rather than "the core is wedged, not idle".
-        k = 0
-        while k < n and self.ret[n - 1 - k] == 0:
-            k += 1
+        k = self._trailing_idle()
         if k >= 64 and self._last_state in ("S_DECODE", "S_FETCH", "S_F00F_HANG"):
             p.fillRect(QRect(labelw, ipc_y0, plotw, ipc_h), QColor(40, 12, 12))
             p.setPen(QColor(C_MISPRED)); p.setFont(_mono(8, True))
             p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
                        f"⚠ stuck in {self._last_state} — {k}c, 0 retired")
         elif k >= 64 and self._last_state in ("S_HALT", "S_HLTWAIT"):
-            # HALT is a normal terminal outcome for system fixtures, not a
-            # front-end livelock.  Keep the end-state visible without presenting
-            # a successful boot/test completion as a red failure.
+            # HALT is an interrupt-wait state until the backend later declares
+            # quiescence. Keep that distinction consistent with enabled/disabled
+            # transport instead of calling a still-runnable session "stopped."
             p.fillRect(QRect(labelw, ipc_y0, plotw, ipc_h), QColor(12, 32, 22))
             p.setPen(QColor("#3fb950")); p.setFont(_mono(8, True))
             p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
-                       f"halted — program stopped ({k} idle clocks)")
+                       self._idle_status())
         # left labels: current windowed IPC (last 64 cyc)
         cur = sum(self.ret[max(0, n - 64):]) / min(64, n)
         p.setPen(QColor("#9aa3ad")); p.setFont(_mono(8, True))

@@ -207,6 +207,8 @@ def scenario_startup(app, outdir):
     assert _session_progress(
         1_000_001, 5001, 5001, 1_000_000, snapshot=True) == (1, 1, 1.0)
     assert _step_notice(1) == "Advanced 1 clock"
+    assert _step_notice(1384, done=True) == (
+        "Advanced 1384 clocks · program stopped")
     assert _step_notice(7, True, 10, 11) == (
         "Advanced 7 clocks · reached next retirement")
     assert _step_notice(4, True, 10, 10, done=True) == (
@@ -2144,6 +2146,11 @@ def scenario_system_and_switch(app, outdir):
         win.stepn.setValue(1200)
         click(app, win.stepn_btn)
         state = win.backend.state()
+        assert not win.backend.is_done() and win.run_btn.isEnabled()
+        assert "halted — waiting for interrupt" in (
+            win.pipeline.spark._idle_status())
+        assert "waiting for interrupt" in (
+            win.pipeline.spark.accessibleDescription())
         assert state.sys_mode and "SYS" in win.regs.mode_lbl.text()
         assert win.backend.retire_count() >= 100
         assert len(win.backend.icache()) >= 3 and len(win.backend.dcache()) >= 1
@@ -2404,9 +2411,17 @@ def scenario_fibonacci_uv(app, outdir):
             win.stepn.setValue(5000)
             click(app, win.stepn_btn)
             assert win.backend.is_done()
+            assert "quiesced — program stopped" in (
+                win.pipeline.spark._idle_status())
+            assert "quiesced — program stopped" in (
+                win.pipeline.spark.accessibleDescription())
+            assert "program stopped" in win.action_hint.text()
             assert win.reset_btn.isEnabled()
             assert not win.step1_btn.isEnabled() and not win.run_btn.isEnabled()
             assert win.evprev_btn.isEnabled() and win.evnext_btn.isEnabled()
+            if cycle_mode:
+                save_shot(
+                    app, win, outdir, "09a_fibonacci_uv_quiesced")
             # The global F5 shortcut remains addressable even while its toolbar
             # button is disabled; it must not restart a terminal session.
             win.on_run_toggle()

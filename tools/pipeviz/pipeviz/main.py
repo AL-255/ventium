@@ -268,7 +268,9 @@ def _step_notice(stepped, stop_on_retire=False, retired_before=0,
     stepped = int(stepped)
     clocks = f"{stepped} clock" + ("" if stepped == 1 else "s")
     if not stop_on_retire:
-        return f"Advanced {clocks}"
+        return (
+            f"Advanced {clocks} · program stopped"
+            if done else f"Advanced {clocks}")
     if int(retired_after) > int(retired_before):
         outcome = "reached next retirement"
     elif done:
@@ -1696,7 +1698,8 @@ class MainWindow(QMainWindow):
                 stepped, True, retired_before, retired_after,
                 self.backend.is_done()))
         else:
-            self._notice(_step_notice(stepped))
+            self._notice(_step_notice(
+                stepped, done=self.backend.is_done()))
         if self.backend.is_done():
             self.stop_run()
 

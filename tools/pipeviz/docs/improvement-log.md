@@ -11,6 +11,16 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
+clocks even though the backend was still in an interrupt-wait state and Run
+correctly remained enabled until quiescence. It now says “halted — waiting for
+interrupt” while resumable, then “quiesced — program stopped” only when backend
+termination disables stepping. Painted and accessible state are driven by the
+same helper and tested against system-wait plus authored terminal workloads.
+Clock/Step N feedback now also appends “program stopped” when termination
+returns fewer clocks than requested, instead of reporting an unexplained short
+advance.
+
 **Branch-header semantic audit:** abbreviated “T/res,” “T%,” and “bias”
 headings ran together under subtle table dividers. They now read
 “taken/resolved,” “taken %,” and “bias bar,” with header tooltips explaining

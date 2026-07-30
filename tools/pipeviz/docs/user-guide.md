@@ -206,6 +206,13 @@ or changes an exact Trace/Register retirement pin.
 The action line confirms that distinction: a cycle seek names its cycle and
 whether the retirement pin stayed unchanged, while an instruction selection
 reports the exact retirement, cycle, lane, PC, and linked Assembly line.
+A long architectural HLT tail is labeled **waiting for interrupt** while
+transport remains available; only backend quiescence changes it to **program
+stopped** and disables stepping. This keeps the strip consistent with Run
+instead of presenting a resumable wait as terminal.
+If Clock or Step N reaches that terminal state before consuming its requested
+count, the last-action line reports both the clocks actually advanced and
+**program stopped**, making the short step explicit.
 **Cycles** classifies every captured clock exactly once. **front end** combines
 fetch/decode, while **slow path** combines the integer execute, load/store,
 string, and I/O micro-operation states; neither label pretends `S_EXEC` is
