@@ -24,6 +24,10 @@ from the default.  ELF `PT_LOAD` addresses and its entry point are used
 automatically.  Dropping a file on the window does the same thing.
 A flat image may use a sibling `manifest.json`; its `entry` and `load_addr`
 accept either JSON integers or `0x…` strings.
+**Open snapshot…** accepts a matching host-testbench `.aux`/`.vlt` pair. The
+architectural clock remains absolute, but Trace retirement IDs, IPC, Pipeline,
+sparkline, and Cycles attribution begin a fresh visible epoch at the restore
+point because the checkpoint does not contain earlier visual history.
 Use **File → Open example** to load an available verification workload without
 locating its build path. The menu rescans whenever it opens, so an example built
 after pipeviz starts becomes available immediately. After recompiling the
@@ -73,6 +77,10 @@ the mouse.
 Large steps remain bounded and honest: Trace labels its newest 6,000
 retirements, Pipeline labels its newest 50,000-cycle window, and the compact
 IPC strip retains the newest 12,000 cycles.
+**Cycles** classifies every captured clock exactly once. **front end** combines
+fetch/decode, while **slow path** combines the integer execute, load/store,
+string, and I/O micro-operation states; neither label pretends `S_EXEC` is
+always a memory access.
 
 ## Write and run an assembly experiment
 

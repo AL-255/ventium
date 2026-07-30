@@ -18,7 +18,7 @@ while ignored authoring build products stay in `tools/pipeviz/.generated/`.
 
 ## Environment
 
-Review date and timezone: 2026-07-29, America/Detroit.
+Review dates and timezone: 2026-07-29 through 2026-07-30, America/Detroit.
 
 | component | reviewed version |
 |---|---|
@@ -26,7 +26,7 @@ Review date and timezone: 2026-07-29, America/Detroit.
 | PySide6 | 6.11.1 |
 | Capstone | 5.0.7 |
 | Verilator | 5.046 (2026-02-28) |
-| continuation baseline | `11a1afb` plus the authoring/timeline changes below |
+| continuation baseline | `5a8fb3f` plus the snapshot-epoch changes below |
 | Qt platform for repeatability | `offscreen`, Fusion dark style |
 | principal window | 1640×980 |
 | compact request | 1280×800; honored exactly with responsive register pages |
@@ -66,6 +66,13 @@ Run the broad per-tab visual capture sweep:
 ```sh
 QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python -u \
   tools/pipeviz/gen_review_shots.py /tmp/pipeviz_review_jul29
+```
+
+Rebuild and run the native ABI verifier (it is caller-directory independent):
+
+```sh
+JOBS=4 tools/pipeviz/build.sh
+tools/pipeviz/smoke_test
 ```
 
 Static checks used at the end of the review:
@@ -501,6 +508,15 @@ The screenshot review found and corrected the following:
     `taken/resolved` explicitly. The source editor also dedents a closing C
     brace on an otherwise blank indented line. Offscreen assertions cover each
     behavior, including the tight loop's 104/104 resolved taken outcomes.
+17. Snapshot epoch review found that an absolute restored clock and preserved
+    RTL retirement sequence could be mistaken for missing GUI history: a single
+    new sample looked like a truncated 50,000-cycle window, the first retirement
+    could say “latest 6,000,” and IPC used pre-snapshot time. Konata, sparkline,
+    Cycles, Trace, and status now share a post-restore epoch; the bridge rebases
+    finalized retire IDs without disturbing DPI lookup keys. Synthetic tests
+    cover clock 5,000 and retirement 1,000,000 starts. The native ABI smoke test
+    now resolves its fixture from its own binary, rejects failed loads, checks
+    real activity, and is rebuilt with an `$ORIGIN` runtime path.
 
 ## Coverage limits
 
@@ -509,7 +525,9 @@ The screenshot review found and corrected the following:
   claimed. The incompatible-library recovery path is tested.
 - No matching `.aux`/`.vlt` snapshot fixture exists in the checkout, so this
   run does not claim end-to-end snapshot restore coverage. Snapshot parsing and
-  restore had separate backend coverage when the feature was introduced.
+  restore had separate backend coverage when the feature was introduced; the
+  new visible-epoch contract is covered with synthetic high-clock/high-retire
+  backends.
 - Native desktop file-picker chrome and OS drag delivery are not represented by
   Qt’s offscreen plugin. Program loading itself is covered with raw, system, and
   multi-segment ELF inputs; keyboard/menu and internal drop-routing code remain

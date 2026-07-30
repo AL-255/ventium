@@ -141,7 +141,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   * **Instr mix** — an instruction-class histogram + the realised **U/V dual-issue**
     split.
   * **Cycles** — a **cycle-attribution** breakdown (every cycle classified by FSM
-    state: retire / issue-stall / mispredict / I-fill / decode / load-store /
+    state: retire / issue-stall / mispredict / I-fill / front-end / slow-path /
     page-walk / x87 / system / halt), so the tallest bar is the bottleneck.
   * **Memory** — a hex/ASCII inspector (type an address, or follow EIP / ESP / the
     most-recent load-store **access**, which gold-outlines the touched bytes).
@@ -247,7 +247,9 @@ Pipeviz consumes the full-model snapshots produced by the host testbench's
 Verilator model and `<prefix>.aux` contains the cycle counters and sparse
 `MemModel`. The backend is built with `--savable` and resumes from the next clock;
 the pre-snapshot retirement history is not in this format, so the trace and Konata
-timeline intentionally start fresh at the restore point. Snapshot files must come
+timeline intentionally start fresh at the restore point. The architectural clock
+remains absolute, while visible retirement IDs and IPC are rebased to that new
+session epoch. Snapshot files must come
 from the matching RTL and Verilator version. Snapshots with serialized DOS
 peripheral models are rejected because the standalone visualizer has no equivalent
 host I/O drivers.
@@ -284,6 +286,11 @@ host I/O drivers.
 | `verify_authoring.py` | Assembly/C completion, diagnostics, build, execution, and PC↔source regression |
 | `pipeviz/source_view.py` | line-numbered Assembly/C editors, GNU toolchain integration, and source mapping |
 | `pipeviz/isa_catalog.py` | Ventium/P54C mnemonic descriptions, availability, and pipeline metadata |
+
+After `build.sh`, run `tools/pipeviz/smoke_test` from any directory for a
+native C ABI check. It locates the verification image relative to its own
+binary and fails if the fixture cannot be loaded or no real activity is
+observed.
 | `examples/fibonacci_uv.c` | freestanding dual-chain C example demonstrating U/V issue |
 | `docs/user-guide.md` | guided workflow examples and their regression commands |
 | `TESTING_Jul29.md` | full interactive acceptance procedure, observations, and limitations |

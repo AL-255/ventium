@@ -348,6 +348,7 @@ class TraceView(QWidget):
         leg.addStretch(1)
         lay.addLayout(leg)
         self._seen = 0      # next retire n to fetch
+        self._session_first_n = None
         self._bits = 32
 
     def _apply_column_profile(self):
@@ -454,6 +455,7 @@ class TraceView(QWidget):
         self.tbl.sync_empty_hint()
         self.title.setText("Retired-instruction trace")
         self._seen = 0
+        self._session_first_n = None
         self._last_cyc = None
         self._prev_eff = None
         self._prev_fstat = None
@@ -473,9 +475,21 @@ class TraceView(QWidget):
         total = backend.retire_count()
         if total <= self._seen:
             return
+        # Retire IDs are architectural and survive a full-model snapshot, while
+        # the visual history intentionally starts fresh. Discover the live
+        # deque's first ID before sizing the window: treating an initial
+        # n=1,000,000 as one million missing GUI rows made the first restored
+        # retirement say "latest 6,000" and seeded its pre-state from itself.
+        front = backend.get_retires(self._seen, 1)
+        if not front:
+            self._seen = total
+            return
+        front_n = int(front[0].n)
+        if self._session_first_n is None:
+            self._session_first_n = front_n
         # pull only the new retirements
-        want = total - self._seen
-        start = self._seen
+        start = max(self._seen, front_n)
+        want = total - start
         if want > _MAX_ROWS:
             # One fast Run/Step can retire more than the display cap between
             # paints. Keep the newest window, not the oldest window followed by
@@ -493,7 +507,7 @@ class TraceView(QWidget):
             # x87, effective-address, and delta calculations remain accurate.
             if start:
                 previous = backend.get_retires(start - 1, 1)
-                if previous:
+                if previous and int(previous[-1].n) == start - 1:
                     prev = previous[-1]
                     self._last_cyc = int(prev.cyc)
                     self._prev_eff = int(prev.eflags)
@@ -603,9 +617,10 @@ class TraceView(QWidget):
                 self.tbl.setItem(row, c, it)
         self._seen = total
         self.tbl.sync_empty_hint()
+        session_total = max(0, total - int(self._session_first_n or 0))
         self.title.setText(
-            f"Retired-instruction trace — latest {_MAX_ROWS:,} of {total:,}"
-            if total > _MAX_ROWS else "Retired-instruction trace")
+            f"Retired-instruction trace — latest {_MAX_ROWS:,} of {session_total:,}"
+            if session_total > _MAX_ROWS else "Retired-instruction trace")
         # rolling cap
         excess = self.tbl.rowCount() - _MAX_ROWS
         if excess > 0:

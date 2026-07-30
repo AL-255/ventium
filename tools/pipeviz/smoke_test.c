@@ -1,16 +1,64 @@
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 // Quick end-to-end check of the libventium_viz C ABI.
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include "ventium_viz.h"
 
 int main(int argc, char** argv) {
-  const char* img = argc > 1 ? argv[1] : "build/m2/mb_brloop.flat";
+  char default_img[4096] = {0};
+  const char* img = argc > 1 ? argv[1] : NULL;
+  if (!img) {
+    // Resolve from the verifier binary, not the caller's working directory.
+    // build.sh places smoke_test beside this source/library.
+    char executable[4096];
+    ssize_t len = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+    if (len > 0) {
+      executable[len] = '\0';
+      char* slash = strrchr(executable, '/');
+      if (slash) {
+        *slash = '\0';
+        static const char suffix[] =
+          "/../../build/verify/mb_brloop.cycle.flat";
+        size_t base_len = strlen(executable);
+        if (base_len + sizeof(suffix) <= sizeof(default_img)) {
+          memcpy(default_img, executable, base_len);
+          memcpy(default_img + base_len, suffix, sizeof(suffix));
+        }
+      }
+    }
+    // Portable/caller-relative fallbacks keep an informative error possible
+    // if /proc is unavailable.
+    const char* fallbacks[] = {
+      default_img,
+      "build/verify/mb_brloop.cycle.flat",
+      "../../build/verify/mb_brloop.cycle.flat",
+      NULL
+    };
+    for (int i = 0; fallbacks[i]; ++i) {
+      if (fallbacks[i][0] && access(fallbacks[i], R_OK) == 0) {
+        img = fallbacks[i];
+        break;
+      }
+    }
+  }
+  if (!img) {
+    fprintf(stderr, "smoke_test: cannot locate mb_brloop.cycle.flat; "
+                    "pass an image path explicitly\n");
+    return 2;
+  }
   uint32_t entry  = argc > 2 ? (uint32_t)strtoul(argv[2], 0, 0) : 0x08048000u;
   void* h = vv_create();
   long n = vv_load_image(h, img, entry);
+  if (n <= 0) {
+    fprintf(stderr, "smoke_test: failed to load %s (%ld)\n", img, n);
+    vv_destroy(h);
+    return 2;
+  }
   printf("loaded %ld bytes from %s @ 0x%08x\n", n, img, entry);
   vv_reset(h, entry, 0x40c34910u, /*cycle_mode=*/1, /*system=*/0);
 
@@ -57,6 +105,13 @@ int main(int argc, char** argv) {
            (unsigned long long)cc[i].cyc, vv_state_name(cc[i].state), cc[i].eip,
            cc[i].stall_cnt, cc[i].retU, cc[i].retV);
 
+  int ok = total == 400 && s.core_cyc == 400
+           && vv_retire_count(h) > 0 && ic > 0 && got > 0 && gc > 0;
   vv_destroy(h);
+  if (!ok) {
+    fprintf(stderr, "smoke_test: backend invariants failed\n");
+    return 3;
+  }
+  puts("OK native C ABI smoke");
   return 0;
 }

@@ -185,6 +185,9 @@ the retired-lifecycle span shown in the header. That span is printed against the
 full captured cycle window, exposing an in-flight tail. A held PC can be waiting
 on an older instruction, so use <b>D$ miss</b> to identify the memory PC
 producing replayed misses.</p>
+<p>Cycles classifies every captured clock once. <b>front end</b> combines fetch
+and decode; <b>slow path</b> combines integer execute, load/store, string, and
+I/O micro-operations.</p>
 <p>Memory can follow EIP, ESP, or the latest access. Mem map plots address
 against retirement order: a diagonal is a stride, a horizontal band is a hot
 location, and a cloud is irregular access. Click a point to select its trace
@@ -198,7 +201,9 @@ The SoC option additionally requires a current <code>build.sh --soc</code>
 library for port I/O, PIC, and PIT behavior.</p>
 <p>Open Snapshot accepts a matching <code>.aux</code>/<code>.vlt</code> pair.
 Its timeline begins at the restored point because the snapshot stores model
-and memory state, not the earlier visual history.</p>
+and memory state, not the earlier visual history. The architectural clock stays
+absolute, while retirement IDs, IPC, Pipeline, sparkline, and Cycles start a
+fresh visible epoch at that point.</p>
 """),
     ("Shortcuts", """
 <h1>Keyboard and mouse reference</h1>

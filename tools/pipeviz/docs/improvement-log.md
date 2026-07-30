@@ -106,6 +106,25 @@ visible, only resolved outcomes enter T%, and `T/res` makes the denominator
 explicit (the tight loop is correctly 104/104 = 100%). A final editor pass added
 one-level closing-brace dedent to complement its existing smart Enter behavior.
 
+**Snapshot/rolling-history audit:** restored models keep an absolute clock and
+RTL retirement sequence but intentionally have no pre-restore visualization
+records. Konata, Sparkline, and Cycles had nevertheless reset their cursors to
+zero, so the first new clock could look like a truncated 50,000-cycle history
+and accept synthetic stages before the restore. Trace likewise interpreted a
+large first retirement ID as thousands of missing rows and could seed that
+row's pre-state from itself. All time panels now anchor at the backend's current
+clock, Trace discovers the live deque front, status IPC uses a dedicated session
+clock origin, and the bridge rebases finalized post-restore retirements to
+visible n=0 after DPI correlation. Synthetic high-epoch tests cover the no-
+fixture case. The audit also renamed Cycles' misleading `decode`/`load-store`
+bins to `front end`/`slow path`, matching the actual mixed `S_EXEC` state.
+
+The native C smoke verifier was false-green when launched from Pipeviz: its old
+repository-root-relative fixture loaded `-1` bytes, yet it continued over zero
+memory and returned success. It now resolves the fixture from `/proc/self/exe`,
+fails failed/empty loads and absent activity, carries an `$ORIGIN` rpath, and is
+rebuilt by `build.sh`.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

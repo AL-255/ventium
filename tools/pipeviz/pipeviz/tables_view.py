@@ -270,17 +270,22 @@ class InsnCellDelegate(QStyledItemDelegate):
 class CycleBreakdown(QWidget):
     """perf/VTune-style attribution of WHERE the cycles go: every cycle is
     classified by the core FSM state into a category (retire / issue-stall /
-    mispredict / I-fill / decode / load-store / page-walk / x87 / system /
+    mispredict / I-fill / front-end / slow-path / page-walk / x87 / system /
     halt), tallied incrementally, and drawn as %-bars sorted biggest-first.
     Answers 'why is IPC low?' at a glance — the tall bar is the bottleneck."""
     CATS = [("retire", "#3fb950"), ("issue-stall", "#7a828d"),
-            ("mispredict", "#f85149"), ("I-fill", "#e0a72e"), ("decode", "#39c5cf"),
-            ("load/store", "#f0883e"), ("page-walk", "#f778ba"), ("x87 FP", "#bc8cff"),
+            ("mispredict", "#f85149"), ("I-fill", "#e0a72e"),
+            ("front end", "#39c5cf"), ("slow path", "#f0883e"),
+            ("page-walk", "#f778ba"), ("x87 FP", "#bc8cff"),
             ("system", "#e3b341"), ("halt", "#8b949e")]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setToolTip(
+            "Every captured clock is classified once. Front end combines "
+            "S_FETCH/S_DECODE; slow path combines integer execute, load/store, "
+            "string, and I/O micro-operations.")
         self.backend = None
         self.session_active = False
         self._zero()
@@ -297,6 +302,10 @@ class CycleBreakdown(QWidget):
     def reset(self, backend=None):
         self.backend = backend
         self._zero()
+        if backend is not None:
+            # Restored snapshots retain an absolute clock but no earlier cycle
+            # records; attribution intentionally begins after the restore.
+            self._last_cyc = int(backend.cycle_count())
         self.update()
 
     @staticmethod
@@ -310,11 +319,11 @@ class CycleBreakdown(QWidget):
         if name == "S_PF":
             return "I-fill"
         if name in ("S_FETCH", "S_DECODE"):
-            return "decode"
+            return "front end"
         if name in (
                 "S_LOAD", "S_LOAD2", "S_STORE", "S_EXEC", "S_USEQ",
                 "S_ENTER", "S_IO", "S_INS"):
-            return "load/store"
+            return "slow path"
         if name == "S_WALK":
             return "page-walk"
         if name in (

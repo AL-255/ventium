@@ -32,7 +32,8 @@ from pipeviz.backend import VVRetire
 from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
 from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
-                          _system_load_address, _validate_segments)
+                          _session_progress, _system_load_address,
+                          _validate_segments)
 from pipeviz.pipeline_view import ROW_H
 from pipeviz.tables_view import CycleBreakdown
 
@@ -197,6 +198,15 @@ def close_window(win):
 
 
 def scenario_startup(app, outdir):
+    assert _session_progress(212, 120, 1) == (212, 120, 212 / 120)
+    assert _session_progress(
+        1_000_001, 5001, 5001, 1_000_000, snapshot=True) == (1, 1, 1.0)
+    probe_cycle = type("ProbeCycle", (), {
+        "mispred_bubbles": 0, "retU": 0, "retV": 0,
+    })()
+    assert CycleBreakdown._classify("S_FETCH", probe_cycle) == "front end"
+    assert CycleBreakdown._classify("S_EXEC", probe_cycle) == "slow path"
+
     # Synthetic fast-path shadows must stay inside the capture and must never
     # duplicate a real front-end phase that occurs after an initial stall.
     synthetic = pipeline_module._add_frontend(
@@ -218,12 +228,14 @@ def scenario_startup(app, outdir):
     class CycleBackend:
         def __init__(self, count):
             self.records = [CycleSample(cyc) for cyc in range(1, count + 1)]
+            self.current = 0
 
         def cycle_count(self):
-            return len(self.records)
+            return self.current
 
         def get_cycles(self, since_cyc, maximum):
-            return self.records[since_cyc - 1:since_cyc - 1 + maximum]
+            end = min(self.current, since_cyc - 1 + maximum)
+            return self.records[since_cyc - 1:end]
 
         @staticmethod
         def state_name(_state):
@@ -235,6 +247,7 @@ def scenario_startup(app, outdir):
     try:
         overflow_konata = pipeline_module.Konata()
         overflow_konata.reset(cycle_backend, 32)
+        cycle_backend.current = len(cycle_backend.records)
         overflow_konata.update_from(cycle_backend)
         assert overflow_konata._last_cyc == 9000
         assert overflow_konata.plot.history_start == 8901
@@ -244,17 +257,43 @@ def scenario_startup(app, outdir):
         overflow_konata.deleteLater()
     overflow_spark = pipeline_module.SparklineStrip()
     overflow_spark.CAP = 100
+    cycle_backend.current = 0
     overflow_spark.reset(cycle_backend)
+    cycle_backend.current = len(cycle_backend.records)
     overflow_spark.ingest()
     assert overflow_spark._last_cyc == 9000
     assert len(overflow_spark.ret) == len(overflow_spark.ev) == 100
     overflow_cycles = CycleBreakdown()
+    cycle_backend.current = 0
     overflow_cycles.reset(cycle_backend)
+    cycle_backend.current = len(cycle_backend.records)
     overflow_cycles.ingest(cycle_backend)
     assert overflow_cycles._last_cyc == 9000
     assert sum(overflow_cycles.counts.values()) == 9000
     overflow_spark.deleteLater()
     overflow_cycles.deleteLater()
+
+    class SnapshotClock:
+        @staticmethod
+        def cycle_count():
+            return 5000
+
+    snapshot_clock = SnapshotClock()
+    snapshot_konata = pipeline_module.Konata()
+    snapshot_konata.reset(snapshot_clock, 32)
+    assert snapshot_konata.plot.history_start == 5001
+    assert snapshot_konata._last_cyc == 5000
+    assert not snapshot_konata._history_truncated
+    snapshot_spark = pipeline_module.SparklineStrip()
+    snapshot_spark.reset(snapshot_clock)
+    assert snapshot_spark._last_cyc == 5000 and not snapshot_spark.ret
+    snapshot_cycles = CycleBreakdown()
+    snapshot_cycles.reset(snapshot_clock)
+    assert snapshot_cycles._last_cyc == 5000
+    assert sum(snapshot_cycles.counts.values()) == 0
+    snapshot_konata.deleteLater()
+    snapshot_spark.deleteLater()
+    snapshot_cycles.deleteLater()
 
     class RetireBackend:
         def __init__(self, count):
@@ -291,6 +330,37 @@ def scenario_startup(app, outdir):
     finally:
         trace_module._MAX_ROWS = original_trace_cap
         overflow_trace.deleteLater()
+
+    offset_record = VVRetire()
+    offset_record.n = 1_000_000
+    offset_record.cyc = 5001
+    offset_record.pc = 0x08048000
+    offset_record.d32 = 1
+    offset_record.nbytes = 1
+    offset_record.bytes[0] = 0x90
+    offset_record.eflags = 2
+
+    class OffsetRetireBackend:
+        def __init__(self):
+            self.calls = []
+
+        @staticmethod
+        def retire_count():
+            return 1_000_001
+
+        def get_retires(self, since_n, maximum):
+            self.calls.append((since_n, maximum))
+            return [offset_record] if since_n <= offset_record.n else []
+
+    offset_backend = OffsetRetireBackend()
+    offset_trace = trace_module.TraceView()
+    offset_trace.update_from(offset_backend)
+    assert offset_trace.tbl.rowCount() == 1
+    assert offset_trace.tbl.item(0, 0).text() == "1000000"
+    assert offset_trace.title.text() == "Retired-instruction trace"
+    assert offset_trace._session_first_n == 1_000_000
+    assert all(since in (0, 1_000_000) for since, _maximum in offset_backend.calls)
+    offset_trace.deleteLater()
 
     assert _system_load_address(0x10000) == 0x000F0000
     for invalid_size in (0, 0x100001):
@@ -671,7 +741,7 @@ def scenario_branch_transport(app, outdir):
             200 * stats["vret"] / (stats["uret"] + stats["vret"]))
         assert "pair(win)" in win.status_lbl.text()
         assert f"&nbsp;{expected_pair}%" in win.status_lbl.text()
-        assert "lifetime totals" in win.status_lbl.toolTip()
+        assert "current program/restore session" in win.status_lbl.toolTip()
         win.pipeline.konata._history_truncated = False
         win._refresh_status(win.backend.state())
         assert win.tables.br.rowCount() >= 1 and win.tables.mix.rowCount() >= 2

@@ -1218,8 +1218,15 @@ class Konata(QWidget):
         return w
 
     def reset(self, backend, bits):
-        self.plot.reset(backend, bits)
-        self._last_cyc = 0
+        # A snapshot retains its absolute clock but intentionally has no
+        # pre-restore visual history. Anchor the new timeline at the *next*
+        # clock; assuming cycle 1 made the first post-snapshot sample look like
+        # a truncated 50k-cycle capture and allowed synthetic F/D cells before
+        # the restore point. A cold model's cycle_count() is zero, so this is
+        # unchanged for ordinary program loads.
+        history_start = max(1, int(backend.cycle_count()) + 1)
+        self.plot.reset(backend, bits, history_start=history_start)
+        self._last_cyc = history_start - 1
         self._history_truncated = False
         self.title.setText("Pipeline view  (gem5/Konata — instruction × cycle)")
         self._stick_v = True
@@ -1323,7 +1330,9 @@ class SparklineStrip(QWidget):
 
     def reset(self, backend):
         self.backend = backend
-        self._last_cyc = 0
+        # Like Konata, snapshots begin a fresh *visible* history at their
+        # restored absolute clock rather than backfilling nonexistent samples.
+        self._last_cyc = int(backend.cycle_count())
         self.ret = []; self.ev = []
         self._last_state = ""
         self.update()

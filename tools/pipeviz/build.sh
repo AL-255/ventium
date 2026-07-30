@@ -79,6 +79,11 @@ build_variant() {
 # full-SoC library (libventium_viz_soc.so) so bare-metal images like test386 run.
 build_variant ventium_top "$RTL_F" "$OBJ" "" "$HERE/libventium_viz.so"
 
+echo "[pipeviz] compiling native C ABI smoke verifier ..."
+"${CC:-cc}" -std=c11 -O2 -Wall -Wextra -I"$HERE" \
+  "$HERE/smoke_test.c" -L"$HERE" -lventium_viz \
+  -Wl,-rpath,'$ORIGIN' -o "$HERE/smoke_test"
+
 SOC_F="$ROOT/rtl/ventium_soc.f"
 if [ "${1:-}" = "--soc" ] || [ "${SOC:-0}" = "1" ] || [ "${BUILD_SOC:-0}" = "1" ]; then
   if [ -f "$SOC_F" ]; then

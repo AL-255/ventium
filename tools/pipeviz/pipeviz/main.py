@@ -237,6 +237,21 @@ def _parse_hex(e):
         return None
 
 
+def _session_progress(raw_ret, core_cyc, start_cyc, first_visible_n=None,
+                      snapshot=False):
+    """Return (visible retirements, elapsed session clocks, IPC).
+
+    Snapshot-capable libraries before the retirement-epoch bridge fix expose a
+    large first retirement ID. Subtract it only for a restored session; normal
+    programs retain lifetime totals even if their GUI row ring has rolled.
+    """
+    retired = (
+        max(0, int(raw_ret) - int(first_visible_n))
+        if snapshot and first_visible_n is not None else int(raw_ret))
+    elapsed = max(0, int(core_cyc) - int(start_cyc) + 1)
+    return retired, elapsed, retired / max(1, elapsed)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, libpath=None):
         super().__init__()
@@ -249,6 +264,7 @@ class MainWindow(QMainWindow):
         self.image_segments = []
         self.image_kind = None
         self.snapshot_prefix = None
+        self._session_start_cyc = 1
         self._assembly_source_map = {}
         self._assembly_link_line = None
         self._source_workspace_active = False
@@ -1135,6 +1151,7 @@ class MainWindow(QMainWindow):
         self._sync_config_enabled()
         self.setWindowTitle(f"Ventium pipeline visualizer — snapshot {os.path.basename(prefix)}")
         s = self.backend.state()
+        self._session_start_cyc = int(self.backend.cycle_count()) + 1
         bits = 32 if s.cs_d else 16
         for v in (self.pipeline, self.trace, self.tables):
             if hasattr(v, "set_bits"):
@@ -1246,6 +1263,7 @@ class MainWindow(QMainWindow):
             for address, chunk in segments:
                 self.backend.load_bytes(chunk, address)
             self.backend.reset(entry, esp, cycle_mode=self.cyc_cb.isChecked(), system=0)
+        self._session_start_cyc = int(self.backend.cycle_count()) + 1
         bits = 16 if system else 32
         for v in (self.pipeline, self.trace, self.tables):
             if hasattr(v, "set_bits"):
@@ -1397,10 +1415,15 @@ class MainWindow(QMainWindow):
                 "  no image loaded — Open a program or choose File → Open example  ")
             return
         name = self.backend.state_name(s.state)
-        ret = self.backend.retire_count()
-        cyc = max(1, s.core_cyc)
+        raw_ret = self.backend.retire_count()
+        first_n = getattr(self.trace, "_session_first_n", None)
+        # Current bridges rebase post-snapshot retirement IDs to zero. Keep the
+        # subtraction as compatibility for older snapshot-capable libraries
+        # whose first visible row retained the RTL's large architectural ID.
+        ret, _session_cyc, ipc = _session_progress(
+            raw_ret, s.core_cyc, self._session_start_cyc, first_n,
+            bool(self.snapshot_prefix))
         st = self.pipeline.waterfall.stats()
-        ipc = ret / cyc
         captured_ret = st["uret"] + st["vret"]
         # Plot history can intentionally be bounded after a very large step.
         # Pairing must use that same captured denominator, never lifetime `ret`.
@@ -1443,7 +1466,7 @@ class MainWindow(QMainWindow):
         self.status_lbl.setText(html)
         self.status_lbl.setToolTip(
             "pair and mispredict cover the latest Pipeline cycle window; "
-            "ret and IPC are lifetime totals"
+            "ret and IPC cover the current program/restore session"
             if windowed else
             "ret, IPC, pair, and mispredict cover the captured session")
 

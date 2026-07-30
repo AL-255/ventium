@@ -120,6 +120,12 @@ struct Viz {
   std::deque<vv_retire_t> retires;
   uint64_t retire_total = 0;
   uint64_t retire_base  = 0;   // n of retires.front()
+  // A Verilator snapshot preserves RTL's architectural retirement sequence,
+  // but the visual history intentionally starts fresh. Rebase finalized
+  // retirements (after all DPI scratch lookups) so every GUI session begins at
+  // visible n=0 without touching the restored model state.
+  bool     rebase_retire_n = false;
+  uint64_t retire_n_origin = UINT64_MAX;
 
   // per-clock microarch sample ring
   std::deque<vv_cycle_t>  cycles;
@@ -297,7 +303,11 @@ void tie_off_inputs(VTop* top) {
 }
 
 // Push a finalized retire into the ring (bounded).
-void push_retire(Viz* v, const vv_retire_t& r) {
+void push_retire(Viz* v, vv_retire_t& r) {
+  if (v->rebase_retire_n) {
+    if (v->retire_n_origin == UINT64_MAX) v->retire_n_origin = r.n;
+    r.n -= v->retire_n_origin;
+  }
   v->retires.push_back(r);
   v->retire_total = r.n + 1;
   while (v->retires.size() > Viz::RETIRE_CAP) { v->retires.pop_front(); v->retire_base++; }
@@ -350,6 +360,14 @@ bool clock_once(Viz* v) {
   c.pf_word = CORE(pf_word);
 
   bool retired = false;
+  if (v->rebase_retire_n && v->retire_n_origin == UINT64_MAX
+      && !v->clk_retires.empty()) {
+    // U/V callbacks can share a clock; do not depend on DPI callback order.
+    // The lower architectural sequence is visible n=0.
+    v->retire_n_origin = v->clk_retires.front().n;
+    for (const auto& pending : v->clk_retires)
+      if (pending.n < v->retire_n_origin) v->retire_n_origin = pending.n;
+  }
   for (auto& r : v->clk_retires) {
     push_retire(v, r);
     retired = true;
@@ -463,9 +481,11 @@ int vv_load_snapshot(void* h, const char* prefix) {
   v->system = CORE(sys_mode) ? 1 : 0;
   v->retires.clear(); v->cycles.clear(); v->pend.clear(); v->clk_retires.clear();
   // The host checkpoint intentionally does not contain historical retire/cycle
-  // records. New callbacks retain their architectural n values; the GUI starts
-  // a fresh visible timeline from this restore point.
+  // records. The first finalized callback establishes a visible n=0 epoch;
+  // pending DPI maps still use the untouched architectural n until then.
   v->retire_total = v->retire_base = 0;
+  v->rebase_retire_n = true;
+  v->retire_n_origin = UINT64_MAX;
   v->cycle_total = v->cycle_base = 0;
   return 0;
 }
@@ -497,6 +517,8 @@ void vv_reset(void* h, uint32_t entry, uint32_t esp, int cycle_mode, int system)
   v->clk = 0; v->cur_cyc = 0; v->idle = 0; v->done = false;
   v->retires.clear(); v->cycles.clear(); v->pend.clear(); v->clk_retires.clear();
   v->retire_total = v->retire_base = 0;
+  v->rebase_retire_n = false;
+  v->retire_n_origin = UINT64_MAX;
   v->cycle_total = v->cycle_base = 0;
   v->cr0 = v->cr2 = v->cr3 = v->cr4 = 0;
 
