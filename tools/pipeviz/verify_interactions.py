@@ -1094,6 +1094,11 @@ def scenario_startup(app, outdir):
         QTest.keyClick(win._guide_dialog.find_edit, Qt.Key_Escape)
         settle(app)
         assert not win._guide_dialog.find_bar.isVisible()
+        assert not win._guide_dialog.find_edit.text()
+        assert not win._guide_dialog.find_result.text()
+        assert not win._guide_dialog.page.textCursor().hasSelection()
+        assert not win._guide_dialog.find_prev.isEnabled()
+        assert not win._guide_dialog.find_next.isEnabled()
         assert app.focusWidget() is win._guide_dialog.index
         authoring_row = next(i for i in range(win._guide_dialog.index.count())
                              if win._guide_dialog.index.item(i).text()

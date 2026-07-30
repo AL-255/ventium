@@ -474,6 +474,7 @@ class UserGuideDialog(QDialog):
         self.find_edit.selectAll()
 
     def _hide_find(self):
+        self.find_edit.clear()
         self.find_bar.hide()
         self.index.setFocus(Qt.ShortcutFocusReason)
 
