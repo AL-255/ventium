@@ -142,7 +142,8 @@ post-commit state. `PC*`, segment `base*`, and CR0/CR3/CR4 are starred because
 they are the pre-execution instruction/translation context used to find the
 linked bytes. Segment limits and CR2 read `n/a` because the retirement record
 does not capture them; hover a starred heading or value for the time-point
-explanation. Control / mode shows the captured pre-execution USER/SYS, CPL, and
+explanation; the same explanation is exposed to assistive technology. Control
+/ mode shows the captured pre-execution USER/SYS, CPL, and
 SMM state rather than duplicating the pin banner. The page-independent strip
 above the register bank always says
 **LIVE** or **PINNED n=… · retire cyc=…**. Check it before interpreting values,

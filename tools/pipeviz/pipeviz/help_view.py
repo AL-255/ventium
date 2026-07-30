@@ -155,7 +155,8 @@ individually selectable even when a pair commits in the same cycle.</p>
 the retiring instruction's pre-execution translation context. Segment limits
 and CR2 show <code>n/a</code> because they are not captured per retirement;
 Control / mode shows captured pre-execution USER/SYS, CPL, and SMM state.
-Hover a starred label for the exact time-point explanation. The strip above
+Hover a starred label for the exact time-point explanation; its accessible
+description carries the same semantics. The strip above
 every register page says <b>LIVE</b> or
 <b>PINNED n=… · retire cyc=…</b>, so the current time point remains explicit
 even when compact mode is showing only Integer or x87. Click <b>Unpin</b> on

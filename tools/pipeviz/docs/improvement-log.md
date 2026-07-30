@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — pinned register semantics are accessible
+
+**Time-point accessibility audit:** pinned `PC*`, `base*`, segment limits,
+CR0/2/3/4, and mode correctly explained pre-execution versus post-commit or
+not-captured state in mouse tooltips, but their accessible descriptions were
+empty. LIVE correctly removed the tooltips.
+
+**Changes:** one helper now updates pointer and assistive explanations
+atomically. Every affected pinned heading/value exposes the same description;
+each segment `n/a` limit explicitly says it was not captured. Returning LIVE
+clears both channels together.
+
+**Verification:** system-pin acceptance checks tooltip/accessible equality for
+every affected register and all six segment base/limit pairs, then a later
+Unpin requires every transient explanation to be empty while live values are
+restored.
+
 ## July 30 continuation — unclipped compact Segments header
 
 **Register-header audit:** at 900×620 the narrow register page hard-clipped

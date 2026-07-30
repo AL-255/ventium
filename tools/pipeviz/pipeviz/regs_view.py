@@ -26,6 +26,12 @@ def _fmt80(hexs: str) -> str:
     return hexs[:4] + " " + hexs[4:]
 
 
+def _set_explanation(widget, text):
+    """Keep pointer and assistive explanations synchronized across time points."""
+    widget.setToolTip(text)
+    widget.setAccessibleDescription(text)
+
+
 def floatx80_to_float(b10: bytes):
     """Decode a 10-byte little-endian floatx80 to a Python float for display."""
     if len(b10) < 10:
@@ -508,9 +514,9 @@ class RegsView(QWidget):
     def update_from(self, s):
         self._show_live_banner()
         self.eip_name_lbl.setText("EIP")
-        self.eip_name_lbl.setToolTip("")
+        _set_explanation(self.eip_name_lbl, "")
         self.seg_base_hdr.setText("base")
-        self.seg_base_hdr.setToolTip("")
+        _set_explanation(self.seg_base_hdr, "")
         prev = getattr(self, "_prev", None)
         chg = "color:#e3b341;font-weight:bold;"   # changed since last step (amber)
         same = "color:#c9d1d9;"
@@ -534,15 +540,15 @@ class RegsView(QWidget):
             sel.setText(f"{s.seg_sel[i]:04x}")
             base.setText(f"{s.seg_base[i]:08x}"); base.setStyleSheet("")   # clear pinned n/a
             lim.setText(f"{s.seg_limit[i]:08x}"); lim.setStyleSheet("")
-            base.setToolTip("")
-            lim.setToolTip("")
+            _set_explanation(base, "")
+            _set_explanation(lim, "")
         for k, val in (("CR0", s.cr0), ("CR2", s.cr2), ("CR3", s.cr3), ("CR4", s.cr4)):
             self.cr_lbls[k].setText(f"{val:08x}"); self.cr_lbls[k].setStyleSheet("")
-            self.cr_lbls[k].setToolTip("")
+            _set_explanation(self.cr_lbls[k], "")
         self.mode_lbl.setText(
             f"{'SYS' if s.sys_mode else 'USER'}  CPL={s.cpl}"
             f"{'  SMM' if s.smm_active else ''}")
-        self.mode_lbl.setToolTip("")
+        _set_explanation(self.mode_lbl, "")
         self._sync_segment_compact()
         # x87 — logical ST(i) = physical fpr[(ftop+i)&7]
         logical_tag = sum(
@@ -606,7 +612,8 @@ class RegsView(QWidget):
         # post-commit next EIP. Do not give that different time point an EIP
         # label merely because the live register bank uses one.
         self.eip_name_lbl.setText("PC*")
-        self.eip_name_lbl.setToolTip(
+        _set_explanation(
+            self.eip_name_lbl,
             "* retiring instruction PC; post-commit next EIP is not captured")
         self.eip_lbl.setText(f"{rec.pc:08x}"); self.eip_lbl.setStyleSheet(same)
         efl_chg = prev is not None and prev.eflags != rec.eflags
@@ -619,27 +626,34 @@ class RegsView(QWidget):
         # explain the time point instead of presenting them as post-state.
         na = "color:#4b535d;font-style:italic;"
         self.seg_base_hdr.setText("base*")
-        self.seg_base_hdr.setToolTip(
+        _set_explanation(
+            self.seg_base_hdr,
             "* pre-execution segment base used for address translation")
         for i, name in enumerate(SEG_NAMES):
             sel, base, lim = self.seg_lbls[name]
             sel.setText(f"{rec.seg[i]:04x}")
             base.setText(f"{rec.seg_base[i]:08x}"); base.setStyleSheet("")
-            base.setToolTip("Pre-execution base captured for this retirement")
+            _set_explanation(
+                base, "Pre-execution base captured for this retirement")
             lim.setText("n/a"); lim.setStyleSheet(na)
+            _set_explanation(
+                lim, "Segment limit is not captured per retirement")
         for k, value in (("CR0", rec.cr0), ("CR3", rec.cr3), ("CR4", rec.cr4)):
             self.cr_lbls[k].setText(f"{value:08x}")
             self.cr_lbls[k].setStyleSheet("")
-            self.cr_lbls[k].setToolTip(
+            _set_explanation(
+                self.cr_lbls[k],
                 "Pre-execution control register used for address translation")
         self.cr_lbls["CR2"].setText("n/a")
         self.cr_lbls["CR2"].setStyleSheet(na)
-        self.cr_lbls["CR2"].setToolTip("CR2 is not captured per retirement")
+        _set_explanation(
+            self.cr_lbls["CR2"], "CR2 is not captured per retirement")
         self.mode_lbl.setText(
             f"{'SYS' if rec.sys_mode else 'USER'}  CPL={rec.cpl}"
             f"{'  SMM' if rec.smm_active else ''}")
         self.mode_lbl.setStyleSheet(same)
-        self.mode_lbl.setToolTip(
+        _set_explanation(
+            self.mode_lbl,
             "Execution mode sampled before this retirement; GPRs/selectors are "
             "post-commit; PC*, base*, and CR0/CR3/CR4 are pre-execution context")
         self._sync_segment_compact()

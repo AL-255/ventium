@@ -2551,21 +2551,36 @@ def scenario_system_and_switch(app, outdir):
             f"PINNED n={pin_n} ·")
         assert win.regs.eip_name_lbl.text() == "PC*"
         assert "next EIP is not captured" in win.regs.eip_name_lbl.toolTip()
+        assert win.regs.eip_name_lbl.accessibleDescription() == (
+            win.regs.eip_name_lbl.toolTip())
         assert win.regs.eip_lbl.text() == f"{pin_rec.pc:08x}"
         assert win.regs.seg_base_hdr.text() == "base*"
+        assert win.regs.seg_base_hdr.accessibleDescription() == (
+            win.regs.seg_base_hdr.toolTip())
         assert [
             base.text() for _sel, base, _limit in win.regs.seg_lbls.values()
         ] == [f"{pin_rec.seg_base[i]:08x}" for i in range(6)]
         assert all(limit.text() == "n/a"
                    for _sel, _base, limit in win.regs.seg_lbls.values())
+        for _selector, base, limit in win.regs.seg_lbls.values():
+            assert base.accessibleDescription() == base.toolTip()
+            assert limit.toolTip() == (
+                "Segment limit is not captured per retirement")
+            assert limit.accessibleDescription() == limit.toolTip()
         for name in ("CR0", "CR3", "CR4"):
             assert win.regs.cr_lbls[name].text() == (
                 f"{getattr(pin_rec, name.lower()):08x}")
+            assert win.regs.cr_lbls[name].accessibleDescription() == (
+                win.regs.cr_lbls[name].toolTip())
         assert win.regs.cr_lbls["CR2"].text() == "n/a"
+        assert win.regs.cr_lbls["CR2"].accessibleDescription() == (
+            win.regs.cr_lbls["CR2"].toolTip())
         assert win.regs.mode_lbl.text() == (
             f"{'SYS' if pin_rec.sys_mode else 'USER'}  CPL={pin_rec.cpl}"
             f"{'  SMM' if pin_rec.smm_active else ''}")
         assert "pre-execution" in win.regs.mode_lbl.toolTip()
+        assert win.regs.mode_lbl.accessibleDescription() == (
+            win.regs.mode_lbl.toolTip())
         if win.regs._compact:
             win.regs._compact_tabs.setCurrentIndex(1)
         save_shot(app, win, outdir, "06b_system_pinned_translation")
@@ -3171,6 +3186,15 @@ def scenario_layout(app, outdir):
         assert win.trace.tbl.currentRow() < 0
         assert not win.trace.tbl.selectedIndexes()
         assert win.regs.eip_name_lbl.text() == "EIP"
+        live_explanation_widgets = [
+            win.regs.eip_name_lbl, win.regs.seg_base_hdr,
+            win.regs.mode_lbl, *win.regs.cr_lbls.values(),
+            *(widget for _selector, base, limit in win.regs.seg_lbls.values()
+              for widget in (base, limit)),
+        ]
+        assert all(not widget.toolTip()
+                   and not widget.accessibleDescription()
+                   for widget in live_explanation_widgets)
         assert win.regs.eip_lbl.text() == (
             f"{win.backend.state().eip:08x}")
         assert win.regs.fphdr.text().startswith("TOP=")
