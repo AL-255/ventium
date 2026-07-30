@@ -134,7 +134,9 @@ equivalent. A bare instruction snippet is automatically wrapped in
 explicit <code>_start:</code> is assembled exactly as written.</p>
 <p>Within either source workspace, Ctrl+O opens that source type and Ctrl+S
 saves the current file. An asterisk on the Assembly or C tab marks unsaved
-changes. New/Open, C-to-Assembly replacement, and Quit offer
+changes. Save as appends <code>.s</code> or <code>.c</code> to a bare name
+when its typed-file filter is selected and reports the final filename globally.
+New/Open, C-to-Assembly replacement, and Quit offer
 Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
 program-opening role. Dropped <code>.s/.S/.asm</code> and
 <code>.c/.h</code> files open in their source workspace rather than being

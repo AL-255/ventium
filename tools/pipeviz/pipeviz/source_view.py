@@ -1093,6 +1093,14 @@ def _confirm_source_replacement(view, label, action):
     return True
 
 
+def _default_save_suffix(path, selected_filter, filter_prefix, suffix):
+    """Honor the typed-file filter when a save dialog returns a bare name."""
+    if (path and selected_filter.startswith(filter_prefix)
+            and not Path(path).suffix):
+        return path + suffix
+    return path
+
+
 class AssemblyView(QWidget):
     runRequested = Signal(str, object)
     statusChanged = Signal(str)
@@ -1278,12 +1286,14 @@ class AssemblyView(QWidget):
     def save_source(self, save_as=False):
         path = self._path
         if save_as or not path:
-            path, _ = QFileDialog.getSaveFileName(
+            path, selected_filter = QFileDialog.getSaveFileName(
                 self, "Save assembly",
                 path or os.path.join(self._last_dir, "program.s"),
                 "Assembly (*.s);;All files (*)")
             if not path:
                 return False
+            path = _default_save_suffix(
+                path, selected_filter, "Assembly", ".s")
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except (OSError, UnicodeError) as error:
@@ -1294,6 +1304,7 @@ class AssemblyView(QWidget):
         self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
+        self.statusChanged.emit(self.status.text())
         return True
 
     def build(self, run=False):
@@ -1465,12 +1476,14 @@ class CView(QWidget):
     def save_source(self, save_as=False):
         path = self._path
         if save_as or not path:
-            path, _ = QFileDialog.getSaveFileName(
+            path, selected_filter = QFileDialog.getSaveFileName(
                 self, "Save C source",
                 path or os.path.join(self._last_dir, "program.c"),
                 "C source (*.c);;All files (*)")
             if not path:
                 return False
+            path = _default_save_suffix(
+                path, selected_filter, "C source", ".c")
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except OSError as error:
@@ -1481,6 +1494,7 @@ class CView(QWidget):
         self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
+        self.statusChanged.emit(self.status.text())
         return True
 
     def compile(self):

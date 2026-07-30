@@ -208,6 +208,14 @@ The checkbox now changes only after a fallback candidate exists. A synthetic
 double-failure regression requires both warning/diagnostic paths, the old live
 handle, and the requested system/SoC controls to remain intact.
 
+**Source-save audit:** Save as accepted a bare name exactly as typed, producing
+extensionless Assembly/C files despite the selected typed-file filter; success
+also stayed local to the workbench while other actions report globally. The
+typed Assembly/C filters now append `.s`/`.c` only when no suffix was supplied,
+and both save paths emit the final filename through the global action row.
+Authoring acceptance verifies actual bytes, stored path, dirty-state clearing,
+and notices for both languages.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

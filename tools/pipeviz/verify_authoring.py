@@ -298,6 +298,19 @@ def scenario(app, outdir):
         assert Path(save_path).read_text(encoding="utf-8") == "i r . [ ] /"
         assert not editor.document().isModified()
         assert win.workspace.tabText(1) == "Assembly"
+        assembly_bare_path = os.path.join(outdir, "assembly-no-extension")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (assembly_bare_path, "Assembly (*.s)"))
+        try:
+            assert win.assembly.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.assembly._path == assembly_bare_path + ".s"
+        assert Path(assembly_bare_path + ".s").read_text(
+            encoding="utf-8") == "i r . [ ] /"
+        assert "Saved assembly-no-extension.s" in win.action_hint.text()
         dropped_assembly = Path(outdir) / "dropped-source.S"
         dropped_assembly.write_text(
             ".intel_syntax noprefix\nmov eax, 17\n", encoding="utf-8")
@@ -728,6 +741,19 @@ def scenario(app, outdir):
         assert win.backend is old_backend
         win.c_source.new_template()
         assert win.c_source._last_dir == str(Path(outdir).resolve())
+        c_bare_path = os.path.join(outdir, "c-no-extension")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (c_bare_path, "C source (*.c)"))
+        try:
+            assert win.c_source.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.c_source._path == c_bare_path + ".c"
+        assert Path(c_bare_path + ".c").read_text(
+            encoding="utf-8") == win.c_source.editor.toPlainText()
+        assert "Saved c-no-extension.c" in win.action_hint.text()
         invalid_c_path = Path(outdir) / "invalid-encoding.c"
         invalid_c_path.write_bytes(b"\x80\x81")
         preserved_c = win.c_source.editor.toPlainText()

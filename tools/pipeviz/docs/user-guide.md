@@ -160,7 +160,10 @@ A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `Ctrl+O` opens Assembly source and `Ctrl+S` saves it; the corresponding buttons
 remain available for mouse use. The Assembly tab gains `*` while changes are
 unsaved. In the C workspace the same shortcuts open/save C, and its tab uses the
-same dirty marker. Visualizer restores Ctrl+O to opening executable programs.
+same dirty marker. When the typed-file filter is selected, a bare Save As name
+receives `.s` or `.c` automatically. A successful save clears the dirty marker
+and reports the final on-disk filename in both the workbench and global action
+row. Visualizer restores Ctrl+O to opening executable programs.
 Dropping `.s`/`.S`/`.asm` or `.c`/`.h` routes the file to its source workspace;
 it is never mistaken for a raw executable.
 Each workbench remembers its most recent source folder for later Open/Save As
