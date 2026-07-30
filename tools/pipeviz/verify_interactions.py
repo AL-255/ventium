@@ -713,6 +713,7 @@ def scenario_startup(app, outdir):
         assert win.cyc_cb.text() == "U/V issue"
         assert all(not widget.isEnabled() for widget in win._config_widgets)
         assert win.regs._session_hint.isVisible()
+        assert not win.regs.state_banner.isVisible()
         assert not win.regs._wide_host.isVisible()
         assert "No program loaded" in win.regs._session_hint.text()
         assert win.trace.tbl._empty_hint.isVisible()
@@ -847,6 +848,8 @@ def scenario_startup(app, outdir):
         assert win.reload_action.isEnabled() and win.step1_btn.isEnabled()
         assert all(widget.isEnabled() for widget in win._config_widgets)
         assert not win.regs._session_hint.isVisible()
+        assert win.regs.state_banner.isVisible()
+        assert win.regs.state_banner.text().startswith("LIVE")
         assert win.regs._wide_host.isVisible()
         assert win.trace.tbl._empty_hint.isVisible()
         assert "No instructions retired" in win.trace.tbl._empty_hint.text()
@@ -1171,6 +1174,10 @@ def scenario_branch_transport(app, outdir):
         selected_n = int(win.trace.tbl.item(row, 0).text())
         assert win._pinned_n == selected_n
         assert "PINNED" in win.regs.mode_lbl.text()
+        assert win.regs.state_banner.text().startswith(
+            f"PINNED n={selected_n} ·")
+        assert "post-commit" in win.regs.state_banner.toolTip()
+        assert "pre-execution" in win.regs.state_banner.toolTip()
         assert win.pipeline.konata.plot.playhead is not None
 
         plot = win.pipeline.konata.plot
@@ -1261,6 +1268,7 @@ def scenario_branch_transport(app, outdir):
 
         click(app, win.reset_btn)
         settle(app)
+        assert win.regs.state_banner.text().startswith("LIVE")
         assert win.pipeline.konata.plot.width() == 1
         assert win.pipeline.konata.scroll.horizontalScrollBar().maximum() == 0
         win.speed.setValue(8)
@@ -1406,6 +1414,8 @@ def scenario_x87(app, outdir):
         chosen_n = int(win.trace.tbl.item(fp_rows[-4], 0).text())
         assert win._pinned_n == chosen_n
         assert "PINNED" in win.regs.mode_lbl.text()
+        assert win.regs.state_banner.text().startswith(
+            f"PINNED n={chosen_n} ·")
         assert win.regs.fphdr.text().startswith("pin ctrl=")
         chosen_rec = next(
             rec for rec in win.backend.get_retires(chosen_n, 1)
@@ -1507,6 +1517,8 @@ def scenario_system_and_switch(app, outdir):
             rec for rec in win.backend.get_retires(pin_n, 1)
             if rec.n == pin_n)
         assert win._pinned_n == pin_n
+        assert win.regs.state_banner.text().startswith(
+            f"PINNED n={pin_n} ·")
         assert win.regs.eip_name_lbl.text() == "PC*"
         assert "next EIP is not captured" in win.regs.eip_name_lbl.toolTip()
         assert win.regs.eip_lbl.text() == f"{pin_rec.pc:08x}"
@@ -1625,6 +1637,25 @@ def scenario_layout(app, outdir):
         assert win.tables.width() >= 570
         assert win.status_lbl.width() >= 900 and "IPC" in win.status_lbl.text()
         assert win.trace.tbl.verticalHeader().defaultSectionSize() == 22
+
+        # Pin state must remain unmistakable on every compact register page.
+        # The former badge lived only inside Segments, so x87 could silently
+        # look live while it actually showed an old retirement.
+        pin_row = win.trace.tbl.rowCount() - 1
+        select_table_row(app, win.trace.tbl, pin_row)
+        pin_n = int(win.trace.tbl.item(pin_row, 0).text())
+        assert win._pinned_n == pin_n
+        assert win.regs._compact_tabs.currentIndex() == 2
+        assert win.regs.state_banner.isVisible()
+        assert win.regs.state_banner.text().startswith(
+            f"PINNED n={pin_n} ·")
+        save_shot(app, win, outdir, "08a_compact_pinned_state")
+        win._unpin()
+        win._refresh_all()
+        settle(app)
+        assert win._pinned_n is None
+        assert win.regs._compact_tabs.currentIndex() == 2
+        assert win.regs.state_banner.text().startswith("LIVE")
         save_shot(app, win, outdir, "08_compact_layout")
         print(f"OK layout: true compact window={win.width()}x{win.height()}, "
               "responsive trace/register columns, all panels in bounds")

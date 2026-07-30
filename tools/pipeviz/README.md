@@ -190,7 +190,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   `floatx80` and an authoritative logical empty mask, so +0.0 is not confused
   with an unused slot). Values that changed this step are amber; the panel can be **pinned
   AS-OF a retired instruction** (click a trace row / Konata cell) — an amber
-  `PINNED n=… cyc=…` banner shows that instruction's post-commit state.
+  `PINNED n=… · retire cyc=…` banner above the whole register bank shows that
+  instruction's post-commit state. The same page-independent banner says
+  `LIVE` after unpinning, so compact Integer, Segments, and x87 pages cannot
+  disguise which time point they show.
   `PC*`, segment `base*`, and CR0/CR3/CR4 are explicitly starred because they
   are the instruction's pre-execution translation context; segment limits and
   CR2 honestly show `n/a` because they are not captured per retirement. At compact

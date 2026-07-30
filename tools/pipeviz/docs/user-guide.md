@@ -96,7 +96,9 @@ post-commit state. `PC*`, segment `base*`, and CR0/CR3/CR4 are starred because
 they are the pre-execution instruction/translation context used to find the
 linked bytes. Segment limits and CR2 read `n/a` because the retirement record
 does not capture them; hover a starred heading or value for the time-point
-explanation.
+explanation. The page-independent strip above the register bank always says
+**LIVE** or **PINNED n=… · retire cyc=…**. Check it before interpreting values,
+especially in compact mode where the Segments page may not be open.
 
 The timing diagram itself is keyboard accessible: Up/Down selects adjacent
 retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture
@@ -107,7 +109,9 @@ faithful across self-modifying code and segment/page-table transitions.
 
 The register bank automatically changes from three simultaneous columns to
 indexed **Integer / Segments / x87** pages when the right pane becomes narrow.
-This keeps every value readable at 1280×800. **View → Reset panel layout**
+The LIVE/PINNED strip remains visible while switching pages, and the selected
+page survives a wide/compact transition. This keeps every value readable and
+its time point explicit at 1280×800. **View → Reset panel layout**
 (`Ctrl+0`) restores the recommended proportions after exploratory resizing.
 `Alt+1` through `Alt+0` jump directly among Code$, Data$, TLB, Prefetch,
 Hotspots, Branches, Mix, Cycles, Memory, and Mem map.

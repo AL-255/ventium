@@ -60,6 +60,16 @@ class RegsView(QWidget):
         root.setContentsMargins(4, 4, 4, 4)
         root.setSpacing(0)
         self._session_active = False
+        self.state_banner = QLabel("LIVE · current architectural state")
+        self.state_banner.setAccessibleName("Register state time point")
+        self.state_banner.setFont(_mono(9, True))
+        self.state_banner.setFixedHeight(20)
+        self.state_banner.setStyleSheet(
+            "color:#8b949e;background:#0d1117;border:1px solid #30363d;"
+            "padding:1px 5px;")
+        self.state_banner.setToolTip(
+            "Live architectural state after the most recent model clock")
+        root.addWidget(self.state_banner)
         self._session_hint = QLabel(
             "No program loaded\n\nOpen a program or restore a snapshot "
             "to inspect architectural state.")
@@ -223,6 +233,7 @@ class RegsView(QWidget):
         self._sync_session_visibility()
 
     def _sync_session_visibility(self):
+        self.state_banner.setVisible(self._session_active)
         self._session_hint.setVisible(not self._session_active)
         self._compact_tabs.setVisible(
             self._session_active and self._compact)
@@ -236,7 +247,16 @@ class RegsView(QWidget):
     def start_session(self):
         """Expose the bank for a fresh model without comparing to stale values."""
         self._prev = None
+        self._show_live_banner()
         self.set_session_active(True)
+
+    def _show_live_banner(self):
+        self.state_banner.setText("LIVE · current architectural state")
+        self.state_banner.setStyleSheet(
+            "color:#8b949e;background:#0d1117;border:1px solid #30363d;"
+            "padding:1px 5px;")
+        self.state_banner.setToolTip(
+            "Live architectural state after the most recent model clock")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -247,6 +267,7 @@ class RegsView(QWidget):
         return l
 
     def update_from(self, s):
+        self._show_live_banner()
         self.eip_name_lbl.setText("EIP")
         self.eip_name_lbl.setToolTip("")
         self.seg_base_hdr.setText("base")
@@ -316,6 +337,13 @@ class RegsView(QWidget):
         context; limits and CR2 remain unavailable."""
         chg = "color:#e3b341;font-weight:bold;"
         same = "color:#c9d1d9;"
+        self.state_banner.setText(f"PINNED n={rec.n} · retire cyc={rec.cyc}")
+        self.state_banner.setStyleSheet(
+            "color:#e3b341;background:#211a08;border:1px solid #6e5420;"
+            "padding:1px 5px;")
+        self.state_banner.setToolTip(
+            "Pinned retirement: architectural values are post-commit; "
+            "starred instruction/translation context is pre-execution")
         for i, name in enumerate(GPR_NAMES):
             changed = prev is not None and prev.gpr[i] != rec.gpr[i]
             self.gpr_lbls[name].setText(f"{rec.gpr[i]:08x}")
@@ -382,4 +410,5 @@ class RegsView(QWidget):
         self._prev = None   # next live refresh re-highlights from scratch
 
     def unpin(self):
+        self._show_live_banner()
         self.mode_lbl.setStyleSheet("color:#8b949e;")

@@ -346,6 +346,9 @@ Procedure:
    disassembly while compacting bytes/effects to 104/150 pixels.
 5. Select compact x87, widen to the three-column register view, narrow again,
    and require x87 to remain selected.
+6. While x87 remains selected, pin the newest retirement and require the
+   page-independent amber `PINNED n=… · retire cyc=…` strip; unpin and require
+   the strip to return to `LIVE` without changing pages.
 
 Observed evidence:
 
@@ -355,10 +358,12 @@ Observed evidence:
 - All ten analysis tabs and all toolbar controls remain directly visible.
 - Registers switch to non-clipping Integer/Segments/x87 pages when the right
   pane cannot fit all columns, then return to three simultaneous columns when widened.
+- LIVE/PINNED state remains visible above every compact page rather than being
+  discoverable only on Segments.
 - The compact trace displays substantially more retirements vertically, while
   retaining readable 9-point text and row selection.
 
-Capture: `08_compact_layout.png`.
+Captures: `08a_compact_pinned_state.png` and `08_compact_layout.png`.
 
 ### 9. Dual-Fibonacci U/V benefit
 

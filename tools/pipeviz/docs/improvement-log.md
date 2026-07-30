@@ -9,6 +9,20 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — compact register time-point clarity
+
+**Self-critique:** the historical-state indicator lived inside the Segments
+page. At compact widths, selecting a retirement while Integer or x87 was open
+could therefore leave old values looking live. The register bank now has a
+dense, page-independent **LIVE / PINNED n=… · retire cyc=…** strip with an
+exact time-point tooltip. It is hidden before a program is loaded, returns to
+LIVE on reset/unpin, and does not disturb the selected compact page.
+
+**Verification:** interaction acceptance locks unloaded/live/pinned
+transitions across integer, x87, and paged-system workloads. The 1280×800
+layout test pins while x87 stays selected, captures the amber state strip, then
+unpins and proves both the LIVE state and page selection survive.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority

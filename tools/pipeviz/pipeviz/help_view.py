@@ -109,7 +109,10 @@ individually selectable even when a pair commits in the same cycle.</p>
 <b>PC*</b>, segment <b>base*</b>, and CR0/CR3/CR4 are starred because they are
 the retiring instruction's pre-execution translation context. Segment limits
 and CR2 show <code>n/a</code> because they are not captured per retirement;
-hover a starred label for the exact time-point explanation.</p>
+hover a starred label for the exact time-point explanation. The strip above
+every register page says <b>LIVE</b> or
+<b>PINNED n=… · retire cyc=…</b>, so the current time point remains explicit
+even when compact mode is showing only Integer or x87.</p>
 <p>The event selector beside ◀/▶ narrows <code>[</code>/<code>]</code>
 navigation to any event, mispredicts, stalls, I-cache fills, or page walks.</p>
 <h2>Examples</h2>
