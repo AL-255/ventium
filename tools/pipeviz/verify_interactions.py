@@ -1037,6 +1037,11 @@ def scenario_startup(app, outdir):
         assert win._guide_dialog.index.count() >= 8
         assert win._guide_dialog.index.accessibleName() == "User guide topic index"
         assert win._guide_dialog.page.accessibleName() == "User guide topic content"
+        guide_screen = win._guide_dialog.screen().availableGeometry()
+        assert win._guide_dialog.width() <= guide_screen.width() - 48
+        assert win._guide_dialog.height() <= guide_screen.height() - 64
+        assert 170 <= win._guide_dialog.index.width() <= 205
+        assert win._guide_dialog.page.width() >= 400
         assert app.focusWidget() is win._guide_dialog.index
         assert win._guide_dialog.index.currentItem().text() == "Getting started"
         QTest.keyClick(win._guide_dialog.index, Qt.Key_Down)
@@ -1060,6 +1065,7 @@ def scenario_startup(app, outdir):
         assert "Ctrl+-" in pipeline_guide
         assert "Tab to the board" in pipeline_guide
         assert "Page Up/Page Down for 64 cycles" in pipeline_guide
+        assert "left-drag across the strip" in pipeline_guide
         authoring_row = next(i for i in range(win._guide_dialog.index.count())
                              if win._guide_dialog.index.item(i).text()
                              == "Assembly and C workbenches")

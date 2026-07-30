@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Small-screen indexed-Help audit:** the guide's fixed 980×700 initial size
+could extend beyond Pipeviz's compact display target. It now sizes within the
+available screen with deliberate margins and proportionally narrows its topic
+index while preserving a readable content column. Acceptance locks the bounds,
+index/content proportions, keyboard topic navigation, and current cycle-drag
+guidance under the smaller offscreen test display.
+
 **Cycle-scrubbing audit:** the historical draggable-playhead item remained
 click-only in the IPC/event history. A left drag now emits each newly crossed
 captured cycle, continuously moves the Konata playhead, and deliberately leaves

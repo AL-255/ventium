@@ -3,7 +3,7 @@
 """Indexed in-application user guide."""
 from collections import OrderedDict
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
                                QListWidget, QTextBrowser, QVBoxLayout)
 
@@ -381,7 +381,14 @@ class UserGuideDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Pipeviz User Guide")
-        self.resize(980, 700)
+        screen = parent.screen() if parent is not None else QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = max(600, min(980, available.width() - 48))
+            height = max(480, min(700, available.height() - 64))
+        else:
+            width, height = 980, 700
+        self.resize(width, height)
         root = QVBoxLayout(self)
         heading = QLabel("Pipeviz help")
         heading.setStyleSheet("font-size:16px;font-weight:bold;padding:4px;")
@@ -389,7 +396,7 @@ class UserGuideDialog(QDialog):
         body = QHBoxLayout()
         self.index = QListWidget()
         self.index.setAccessibleName("User guide topic index")
-        self.index.setFixedWidth(205)
+        self.index.setFixedWidth(max(170, min(205, width // 4)))
         self.index.addItems(PAGES.keys())
         self.page = QTextBrowser()
         self.page.setAccessibleName("User guide topic content")
