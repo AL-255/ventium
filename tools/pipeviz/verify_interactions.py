@@ -398,8 +398,12 @@ def scenario_startup(app, outdir):
     live.cr0 = 1 << 31
     live.cr3 = 0x1000
     live_board = pipeline_module.StageBoard()
+    assert live_board.focusPolicy() == Qt.NoFocus
     live_board.set_state(live, live_backend, 32)
     assert live_board._cells["U"][1] == "nop"
+    assert live_board.focusPolicy() == Qt.StrongFocus
+    live_board.reset()
+    assert live_board.focusPolicy() == Qt.NoFocus
     live_board.deleteLater()
 
     # Retired timing rows must decode the immutable bytes captured with that
@@ -590,6 +594,7 @@ def scenario_startup(app, outdir):
         pipeline_module._KONATA_CYCLE_CAP = original_cycle_cap
         overflow_konata.deleteLater()
     overflow_spark = pipeline_module.SparklineStrip()
+    assert overflow_spark.focusPolicy() == Qt.NoFocus
     overflow_spark.CAP = 100
     cycle_backend.current = 0
     overflow_spark.reset(cycle_backend)
@@ -597,6 +602,7 @@ def scenario_startup(app, outdir):
     overflow_spark.ingest()
     assert overflow_spark._last_cyc == 9000
     assert len(overflow_spark.ret) == len(overflow_spark.ev) == 100
+    assert overflow_spark.focusPolicy() == Qt.StrongFocus
     overflow_cycles = CycleBreakdown()
     cycle_backend.current = 0
     overflow_cycles.reset(cycle_backend)
@@ -621,6 +627,7 @@ def scenario_startup(app, outdir):
     snapshot_spark = pipeline_module.SparklineStrip()
     snapshot_spark.reset(snapshot_clock)
     assert snapshot_spark._last_cyc == 5000 and not snapshot_spark.ret
+    assert snapshot_spark.focusPolicy() == Qt.NoFocus
     snapshot_cycles = CycleBreakdown()
     snapshot_cycles.reset(snapshot_clock)
     assert snapshot_cycles._last_cyc == 5000
@@ -856,6 +863,8 @@ def scenario_startup(app, outdir):
         assert "No program loaded" in win.trace.tbl._empty_hint.text()
         assert "no program loaded" in win.pipeline.konata.plot.empty_message
         assert win.pipeline.spark.backend is None
+        assert win.pipeline.board.focusPolicy() == Qt.NoFocus
+        assert win.pipeline.spark.focusPolicy() == Qt.NoFocus
         assert win.tables.ic._hint.isVisible()
         assert "no program loaded" in win.tables.ic._hint.text().lower()
         assert "No program loaded" in win.tables.pf.info.text()

@@ -53,7 +53,7 @@ class StageBoard(QWidget):
         self.setFixedHeight(100)   # tightened so the starved Konata view gets the rows
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.NoFocus)
         self.setAccessibleName("Live pipeline stage board")
         self.setAccessibleDescription(
             "Occupied U, V, and FP cells can be clicked or selected with arrow "
@@ -160,6 +160,9 @@ class StageBoard(QWidget):
 
         self._cells = cells
         self._lane_pcs = pcs
+        # Do not put a dead, empty snapshot into the Tab order. It becomes a
+        # keyboard control only while at least one lane has a source target.
+        self.setFocusPolicy(Qt.StrongFocus if pcs else Qt.NoFocus)
         if self._kbd_lane not in pcs:
             self._kbd_lane = next(
                 (lane for lane in ("U", "V", "FP") if lane in pcs), None)
@@ -198,6 +201,7 @@ class StageBoard(QWidget):
         self._lane_pcs = {}
         self._lane_rects = []
         self._kbd_lane = None
+        self.setFocusPolicy(Qt.NoFocus)
         self._status = "reset"
         self._statecol = _DIM
         self.unsetCursor()
@@ -1449,7 +1453,7 @@ class SparklineStrip(QWidget):
         self.ev = []         # '' | 'm' mispred | 's' stall | 'f' fill | 'w' walk
         self._last_state = ""
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.NoFocus)
         self.setAccessibleName("IPC and pipeline event history")
         self.setAccessibleDescription(
             "Use Left and Right, Page Up and Page Down, Home and End to seek "
@@ -1457,9 +1461,7 @@ class SparklineStrip(QWidget):
         self._hover_x = -1
         self._kbd_cyc = None
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(
-            "Click to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
-            "Enter")
+        self.setToolTip("Open a program and step to collect navigable history")
 
     def reset(self, backend):
         self.backend = backend
@@ -1469,6 +1471,8 @@ class SparklineStrip(QWidget):
         self.ret = []; self.ev = []
         self._last_state = ""
         self._kbd_cyc = None
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setToolTip("Step the core to collect keyboard-navigable history")
         self.update()
 
     def ingest(self):
@@ -1502,6 +1506,11 @@ class SparklineStrip(QWidget):
                 self._last_state = name
         if len(self.ret) > self.CAP:
             self.ret = self.ret[-self.CAP:]; self.ev = self.ev[-self.CAP:]
+        self.setFocusPolicy(Qt.StrongFocus if self.ret else Qt.NoFocus)
+        if self.ret:
+            self.setToolTip(
+                "Click to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
+                "Enter")
         bounds = self._cycle_bounds()
         if self._kbd_cyc is not None and bounds is not None:
             self._kbd_cyc = max(bounds[0], min(bounds[1], self._kbd_cyc))

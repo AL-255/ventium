@@ -20,6 +20,12 @@ captured-edge Home/End, and Enter activation. Real assembled U/V source
 lines and captured execution history verify identical pointer and keyboard
 outcomes.
 
+**Empty-focus follow-up:** the two new controls initially remained in the Tab
+order while empty, creating blue focus targets on which every key was a no-op.
+The board now becomes focusable only when a lane has a live source target, and
+the IPC strip only after a cycle is captured; reset removes both immediately.
+Synthetic reset, snapshot, overflow, and startup checks lock each transition.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a
