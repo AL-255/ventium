@@ -1042,6 +1042,7 @@ def scenario_startup(app, outdir):
         assert win._guide_dialog.height() <= guide_screen.height() - 64
         assert 170 <= win._guide_dialog.index.width() <= 205
         assert win._guide_dialog.page.width() >= 400
+        assert "Ctrl+F" in win._guide_dialog.page.accessibleDescription()
         assert app.focusWidget() is win._guide_dialog.index
         assert win._guide_dialog.index.currentItem().text() == "Getting started"
         QTest.keyClick(win._guide_dialog.index, Qt.Key_Down)
@@ -1066,6 +1067,34 @@ def scenario_startup(app, outdir):
         assert "Tab to the board" in pipeline_guide
         assert "Page Up/Page Down for 64 cycles" in pipeline_guide
         assert "left-drag across the strip" in pipeline_guide
+        QTest.keyClick(win._guide_dialog, Qt.Key_F, Qt.ControlModifier)
+        settle(app)
+        assert win._guide_dialog.find_bar.isVisible()
+        assert app.focusWidget() is win._guide_dialog.find_edit
+        win._guide_dialog.find_edit.setText("cycle")
+        settle(app)
+        find_count = re.fullmatch(
+            r"1 of ([0-9]+)", win._guide_dialog.find_result.text())
+        assert find_count and int(find_count.group(1)) > 1
+        find_shot = os.path.join(outdir, "00_help_find.png")
+        assert win._guide_dialog.grab().save(find_shot)
+        first_match = win._guide_dialog.page.textCursor().selectionStart()
+        QTest.keyClick(win._guide_dialog.find_edit, Qt.Key_Return)
+        settle(app)
+        assert win._guide_dialog.page.textCursor().selectionStart() > first_match
+        QTest.keyClick(win._guide_dialog.find_edit, Qt.Key_F3,
+                       Qt.ShiftModifier)
+        settle(app)
+        assert win._guide_dialog.page.textCursor().selectionStart() == first_match
+        win._guide_dialog.find_edit.setText("definitely absent phrase")
+        settle(app)
+        assert win._guide_dialog.find_result.text() == "No matches"
+        assert not win._guide_dialog.find_prev.isEnabled()
+        assert not win._guide_dialog.find_next.isEnabled()
+        QTest.keyClick(win._guide_dialog.find_edit, Qt.Key_Escape)
+        settle(app)
+        assert not win._guide_dialog.find_bar.isVisible()
+        assert app.focusWidget() is win._guide_dialog.index
         authoring_row = next(i for i in range(win._guide_dialog.index.count())
                              if win._guide_dialog.index.item(i).text()
                              == "Assembly and C workbenches")

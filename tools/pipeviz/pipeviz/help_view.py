@@ -3,9 +3,12 @@
 """Indexed in-application user guide."""
 from collections import OrderedDict
 
-from PySide6.QtGui import QFont, QGuiApplication
+from PySide6.QtCore import Qt
+from PySide6.QtGui import (QFont, QGuiApplication, QKeySequence, QShortcut,
+                           QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
-                               QListWidget, QTextBrowser, QVBoxLayout)
+                               QLineEdit, QListWidget, QPushButton, QTextBrowser,
+                               QVBoxLayout, QWidget)
 
 
 PAGES = OrderedDict((
@@ -366,6 +369,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Escape</b></td><td>clear a focused Trace filter; in focused Pipeline, Unpin to LIVE</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
+ <tr><td><b>Ctrl+F, F3 / Shift+F3</b></td><td>find text in this guide topic</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>
 </table>
 <p>Click a trace/timing row to pin it; use the register strip's <b>Unpin</b>
@@ -392,7 +396,35 @@ class UserGuideDialog(QDialog):
         root = QVBoxLayout(self)
         heading = QLabel("Pipeviz help")
         heading.setStyleSheet("font-size:16px;font-weight:bold;padding:4px;")
-        root.addWidget(heading)
+        header = QHBoxLayout()
+        header.addWidget(heading)
+        header.addStretch()
+        find_button = QPushButton("Find…  Ctrl+F")
+        find_button.setAccessibleName("Find in current guide topic")
+        find_button.clicked.connect(self._focus_find)
+        header.addWidget(find_button)
+        root.addLayout(header)
+        self.find_bar = QWidget()
+        find_layout = QHBoxLayout(self.find_bar)
+        find_layout.setContentsMargins(0, 0, 0, 0)
+        find_layout.addWidget(QLabel("Find in current topic:"))
+        self.find_edit = QLineEdit()
+        self.find_edit.setAccessibleName("Find text in current guide topic")
+        self.find_edit.setPlaceholderText("Search this page…")
+        self.find_edit.setClearButtonEnabled(True)
+        find_layout.addWidget(self.find_edit, 1)
+        self.find_prev = QPushButton("Previous")
+        self.find_prev.setAccessibleName("Previous guide match")
+        self.find_next = QPushButton("Next")
+        self.find_next.setAccessibleName("Next guide match")
+        find_layout.addWidget(self.find_prev)
+        find_layout.addWidget(self.find_next)
+        self.find_result = QLabel("")
+        self.find_result.setAccessibleName("Guide search result")
+        self.find_result.setMinimumWidth(88)
+        find_layout.addWidget(self.find_result)
+        root.addWidget(self.find_bar)
+        self.find_bar.hide()
         body = QHBoxLayout()
         self.index = QListWidget()
         self.index.setAccessibleName("User guide topic index")
@@ -411,11 +443,87 @@ class UserGuideDialog(QDialog):
         buttons.rejected.connect(self.close)
         root.addWidget(buttons)
         self.index.currentTextChanged.connect(self._set_page)
+        self.find_edit.textChanged.connect(self._find_first)
+        self.find_edit.returnPressed.connect(self._find_next_match)
+        self.find_prev.clicked.connect(self._find_previous_match)
+        self.find_next.clicked.connect(self._find_next_match)
+        find_shortcut = QShortcut(QKeySequence.Find, self)
+        find_shortcut.activated.connect(self._focus_find)
+        next_shortcut = QShortcut(QKeySequence.FindNext, self)
+        next_shortcut.activated.connect(self._find_next_match)
+        previous_shortcut = QShortcut(QKeySequence.FindPrevious, self)
+        previous_shortcut.activated.connect(self._find_previous_match)
+        hide_find_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self.find_bar)
+        hide_find_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        hide_find_shortcut.activated.connect(self._hide_find)
+        self._find_shortcuts = (find_shortcut, next_shortcut, previous_shortcut,
+                                hide_find_shortcut)
         self.show_page("Getting started")
 
     def _set_page(self, title):
         if title in PAGES:
             self.page.setHtml(PAGES[title])
+            self.page.setAccessibleDescription(
+                f"{title}. Use Ctrl+F to find text in this topic; "
+                "Shift+Tab returns to the topic index.")
+            self._find_first()
+
+    def _focus_find(self):
+        self.find_bar.show()
+        self.find_edit.setFocus(Qt.ShortcutFocusReason)
+        self.find_edit.selectAll()
+
+    def _hide_find(self):
+        self.find_bar.hide()
+        self.index.setFocus(Qt.ShortcutFocusReason)
+
+    def _find_first(self):
+        self._find_match(restart=True)
+
+    def _find_next_match(self):
+        self._find_match()
+
+    def _find_previous_match(self):
+        self._find_match(backward=True)
+
+    def _find_match(self, backward=False, restart=False):
+        query = self.find_edit.text()
+        folded_query = query.casefold()
+        total = self.page.toPlainText().casefold().count(folded_query) if query else 0
+        enabled = bool(total)
+        self.find_prev.setEnabled(enabled)
+        self.find_next.setEnabled(enabled)
+        if not query:
+            self.find_result.clear()
+            self.find_result.setAccessibleDescription("No guide search is active.")
+            cursor = self.page.textCursor()
+            cursor.clearSelection()
+            self.page.setTextCursor(cursor)
+            return
+        if not total:
+            self.find_result.setText("No matches")
+            self.find_result.setAccessibleDescription(
+                f'No matches for "{query}" in this topic.')
+            cursor = self.page.textCursor()
+            cursor.clearSelection()
+            self.page.setTextCursor(cursor)
+            return
+        flags = QTextDocument.FindBackward if backward else QTextDocument.FindFlags()
+        if restart:
+            cursor = self.page.textCursor()
+            cursor.movePosition(QTextCursor.End if backward else QTextCursor.Start)
+            self.page.setTextCursor(cursor)
+        if not self.page.find(query, flags):
+            cursor = self.page.textCursor()
+            cursor.movePosition(QTextCursor.End if backward else QTextCursor.Start)
+            self.page.setTextCursor(cursor)
+            self.page.find(query, flags)
+        cursor = self.page.textCursor()
+        ordinal = (self.page.toPlainText()[:cursor.selectionStart()]
+                   .casefold().count(folded_query) + 1)
+        self.find_result.setText(f"{ordinal} of {total}")
+        self.find_result.setAccessibleDescription(
+            f'Match {ordinal} of {total} for "{query}" in this topic.')
 
     def show_page(self, title):
         titles = list(PAGES)

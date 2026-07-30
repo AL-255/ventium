@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Indexed-guide search audit:** eight indexed topics still left long articles
+without a direct route to one term. A visible Find control now exposes
+Ctrl+F, case-insensitive current-topic search, Enter/F3 and Shift+F3 traversal,
+wraparound ordinal feedback, honest zero-result disabled controls, and
+assistive descriptions. Escape from the find bar returns to the topic index;
+Escape there retains the dialog's normal close behavior.
+
 **Small-screen indexed-Help audit:** the guide's fixed 980×700 initial size
 could extend beyond Pipeviz's compact display target. It now sizes within the
 available screen with deliberate margins and proportionally narrows its topic
