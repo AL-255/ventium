@@ -1930,6 +1930,12 @@ def scenario_dcache_memory(app, outdir):
         win.tables.accmap.repaint()
         settle(app)
         assert len(win.tables.accmap._pts) == len(accesses)
+        map_image = win.tables.accmap.grab().toImage()
+        point_x, point_y, point_i = win.tables.accmap._pts[0]
+        expected_point_color = (
+            "#e3b341" if accesses[point_i][3] else "#79c0ff")
+        assert map_image.pixelColor(point_x + 2, point_y).name() == (
+            expected_point_color)
         assert win.tables.accmap.accessibleName() == "Memory access map"
         assert "Left and Right" in win.tables.accmap.accessibleDescription()
         win.tables.accmap.setFocus()

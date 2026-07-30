@@ -1363,11 +1363,18 @@ class AccessMap(QWidget):
                 p.drawText(QRect(x + 2, H - B + 1, 48, 12), Qt.AlignLeft | Qt.AlignTop, f"n{nv}")
             else:
                 p.drawText(QRect(x - 24, H - B + 1, 48, 12), Qt.AlignHCenter | Qt.AlignTop, f"n{nv}")
+        # Keep ordinary traces individually legible without turning long,
+        # dense captures into a solid ribbon. The pointer hit radius below is
+        # deliberately larger than either painted footprint.
+        point_radius = 2 if len(accs) <= 256 else 1
         for i, a in enumerate(accs):
             n, addr, st = a[0], a[2], a[3]
             px, py = xof(n), yof(addr)
             self._pts.append((px, py, i))
-            p.fillRect(QRect(px - 1, py - 1, 3, 3), QColor("#e3b341") if st else QColor("#79c0ff"))
+            p.fillRect(
+                QRect(px - point_radius, py - point_radius,
+                      2 * point_radius + 1, 2 * point_radius + 1),
+                QColor("#e3b341") if st else QColor("#79c0ff"))
         # selection crosshair ring on top
         if si is not None:
             sa = accs[si]

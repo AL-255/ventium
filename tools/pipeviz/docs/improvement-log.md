@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Mem-map point-legibility audit:** individual load/store marks were only 3×3
+pixels even in sparse, full-size plots, making their cyan/gold distinction
+unnecessarily difficult to discover. Captures up to 256 accesses now use 5×5
+marks while denser histories retain compact 3×3 marks to avoid becoming a
+solid ribbon. The existing 18-pixel pointer hit radius remains, and a pixel
+regression locks the larger sparse-trace footprint.
+
 **Indexed-guide search audit:** eight indexed topics still left long articles
 without a direct route to one term. A visible Find control now exposes
 Ctrl+F, case-insensitive current-topic search, Enter/F3 and Shift+F3 traversal,
