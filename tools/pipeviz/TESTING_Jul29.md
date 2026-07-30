@@ -368,6 +368,11 @@ Procedure:
    perform the same zero-clock LIVE transition.
 9. Require the pinned Control / mode row to retain its captured USER/SYS, CPL,
    and SMM values rather than repeating the PINNED banner.
+10. Require live and pinned x87 headers to define empty-mask bit i=1, pinned
+    rows to be labeled `logical`, and every ST row hover to agree with its
+    authoritative empty bit. In wide mode, require the content-weighted x87
+    column to exceed Integer/Segments and keep the full metadata header on one
+    rendered line.
 
 Observed evidence:
 

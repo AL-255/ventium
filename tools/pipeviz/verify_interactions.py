@@ -1545,6 +1545,7 @@ def scenario_x87(app, outdir):
             ((fp_state.fptag >> ((fp_state.ftop + i) & 7)) & 1) << i
             for i in range(8))
         assert f"empty={logical_empty:02x}" in win.regs.fphdr.text()
+        assert "bit i = 1" in win.regs.fphdr.toolTip()
         fp_rows = [r for r in range(win.trace.tbl.rowCount())
                    if win.trace.tbl.item(r, 6).text().lower().startswith("f")]
         assert len(fp_rows) >= 80
@@ -1553,7 +1554,9 @@ def scenario_x87(app, outdir):
         assert win._pinned_n == chosen_n
         assert win.regs.state_banner.text().startswith(
             f"PINNED n={chosen_n} ·")
-        assert win.regs.fphdr.text().startswith("pin ctrl=")
+        assert win.regs.fphdr.text().startswith("logical ctrl=")
+        assert win.regs.fphdr.fontMetrics().horizontalAdvance(
+            win.regs.fphdr.text()) <= win.regs.fphdr.width()
         chosen_rec = next(
             rec for rec in win.backend.get_retires(chosen_n, 1)
             if rec.n == chosen_n)
@@ -1561,7 +1564,11 @@ def scenario_x87(app, outdir):
             f"{'SYS' if chosen_rec.sys_mode else 'USER'}  CPL={chosen_rec.cpl}"
             f"{'  SMM' if chosen_rec.smm_active else ''}")
         assert f"empty={chosen_rec.ftag & 0xff:02x}" in win.regs.fphdr.text()
+        assert "already rotated" in win.regs.fphdr.toolTip()
         assert all(tag.text().endswith("·") == bool((chosen_rec.ftag >> i) & 1)
+                   for i, (tag, _hexv, _value) in enumerate(win.regs.st_lbls))
+        assert all(("empty" in tag.toolTip()) == bool(
+                       (chosen_rec.ftag >> i) & 1)
                    for i, (tag, _hexv, _value) in enumerate(win.regs.st_lbls))
         assert any(ins["mnem"].lower().startswith("f")
                    for ins in win.pipeline.konata.plot.insns)
@@ -1751,6 +1758,8 @@ def scenario_layout(app, outdir):
         settle(app, 6)
         assert not win.regs._compact
         assert all(pane.isVisible() for pane, _label, _tip in win.regs._panes)
+        assert win.regs.fp_pane.width() > win.regs.int_pane.width()
+        assert win.regs.fp_pane.width() > win.regs.seg_pane.width()
         assert win.regs.flags_lbl.width() >= win.regs.flags_lbl.sizeHint().width()
         assert all(hexv.width() >= hexv.sizeHint().width()
                    for _tag, hexv, _val in win.regs.st_lbls)

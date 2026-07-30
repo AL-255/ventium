@@ -202,7 +202,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   amber, changed underlined), segments, control registers, and the **x87 stack**
   (logical ST(0..7) with the 80-bit hex split sign/exp ␣ mantissa + decoded
   `floatx80` and an authoritative logical empty mask, so +0.0 is not confused
-  with an unused slot). Values that changed this step are amber; the panel can be **pinned
+  with an unused slot). Header/row hovers define empty-mask bit *i*=1 as
+  ST(*i*) empty; pinned values say `logical` because they are already rotated
+  and do not need TOP. Values that changed this step are amber; the panel can be **pinned
   AS-OF a retired instruction** (click a trace row / Konata cell) — an amber
   `PINNED n=… · retire cyc=…` banner above the whole register bank shows that
   instruction's post-commit state. The same page-independent banner says

@@ -118,6 +118,11 @@ the source map ready for the next selection. A Mem-map-originated pin also
 clears its selected point and the clicked-byte Memory highlight; stepping also
 unpins automatically.
 
+In x87, `empty=xx` is a logical ST mask: bit *i*=1 means ST(*i*) is empty.
+Pinned values are labeled `logical` because the retirement record already
+rotates the physical stack by TOP; hover the header or an ST row for the exact
+interpretation.
+
 The timing diagram itself is keyboard accessible: Up/Down selects adjacent
 retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture
 edges. `Ctrl+-` and `Ctrl+=` zoom the cycle axis around the selected cycle.

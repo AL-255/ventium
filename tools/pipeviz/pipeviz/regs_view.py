@@ -246,7 +246,12 @@ class RegsView(QWidget):
             # Equal stretch distributes any spare room; each pane's measured
             # content hint still protects its labels at the wide-mode threshold.
             for pane, _label, _tip in self._panes:
-                self._wide_layout.addWidget(pane, 1)
+                # x87 carries a 20-hex-digit value plus decoded text and a
+                # longer metadata header. Allocate it proportionally more of
+                # the wide bank; Integer and Segments remain comfortably above
+                # their measured content widths.
+                self._wide_layout.addWidget(
+                    pane, 3 if pane is self.fp_pane else 2)
                 # Non-current QTabWidget pages are hidden; reparenting alone
                 # preserves that state, so explicitly reveal every wide column.
                 pane.show()
@@ -341,6 +346,9 @@ class RegsView(QWidget):
         self.fphdr.setText(
             f"TOP={s.ftop}  ctrl={s.fctrl:04x}  stat={s.fstat:04x}  "
             f"empty={logical_tag:02x}")
+        self.fphdr.setToolTip(
+            "Live x87 stack: TOP selects the physical stack head; empty mask "
+            "bit i = 1 means logical ST(i) is empty")
         for i in range(8):
             phys = (s.ftop + i) & 7
             b10 = bytes(s.fpr[phys][k] for k in range(10))
@@ -348,6 +356,8 @@ class RegsView(QWidget):
             empty = bool((s.fptag >> phys) & 1)   # fptag bit i: 1 = empty
             tag, hexv, val = self.st_lbls[i]
             tag.setText(f"ST{i}" + ("·" if empty else ""))
+            tag.setToolTip(
+                f"Logical ST({i}) is {'empty' if empty else 'occupied'}")
             hexv.setText(_fmt80(hexs))
             hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
             fv = floatx80_to_float(b10)
@@ -420,16 +430,23 @@ class RegsView(QWidget):
             "Execution mode sampled before this retirement; GPRs/selectors are "
             "post-commit; PC*, base*, and CR0/CR3/CR4 are pre-execution context")
         if rec.x87_valid:
-            # tight single-space header (the "PINNED" banner already flags the
-            # mode) so the 4-digit tag value never clips off the panel's right edge.
+            # Values are already rotated into logical ST(0..7), so label that
+            # useful fact instead of repeating the global PINNED banner.
             self.fphdr.setText(
-                f"pin ctrl={rec.fctrl:04x} stat={rec.fstat:04x} "
+                f"logical ctrl={rec.fctrl:04x} stat={rec.fstat:04x} "
                 f"empty={rec.ftag & 0xff:02x}")
+            self.fphdr.setToolTip(
+                "Pinned post-commit logical ST(0..7); empty mask bit i = 1 "
+                "means ST(i) is empty (values are already rotated, so TOP is "
+                "not needed)")
             for i in range(8):
                 b10 = bytes(rec.st[i][k] for k in range(10))   # logical ST(i) in the record
                 empty = bool((rec.ftag >> i) & 1)
                 tag, hexv, val = self.st_lbls[i]
                 tag.setText(f"ST{i}" + ("·" if empty else ""))   # match the live empty marker
+                tag.setToolTip(
+                    f"Pinned logical ST({i}) is "
+                    f"{'empty' if empty else 'occupied'}")
                 hexv.setText(_fmt80(b10[::-1].hex()))
                 hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
                 val.setText("—" if empty else f"{floatx80_to_float(b10):.6g}")

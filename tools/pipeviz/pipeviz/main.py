@@ -705,9 +705,10 @@ class MainWindow(QMainWindow):
         # Give the linked trace/timeline enough room at compact window sizes.
         # Relying only on stretch factors makes QSplitter shrink the left side
         # all the way to its minimum while preserving excess width on the right.
-        # An explicit 55:45 starting allocation keeps trace operands/effects
-        # readable and also gives the ten analysis tabs enough room at 1640px.
-        outer.setSizes([880, 760])
+        # Give the right side enough room for the content-weighted x87 column
+        # (20 hex digits + decoded value + metadata) while retaining a wide
+        # 850px linked Trace/timeline at the 1640px reference size.
+        outer.setSizes([850, 790])
         for sp in (outer, left, right):
             sp.setHandleWidth(4)
         self.workspace = QTabWidget()

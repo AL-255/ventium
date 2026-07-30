@@ -123,6 +123,9 @@ even when compact mode is showing only Integer or x87. Click <b>Unpin</b> on
 that strip to return to LIVE and clear the linked Trace/timing row, dependency
 edges, playhead, Mem-map/Memory highlight, and Assembly line without executing
 a clock. The source map remains ready for the next selection.</p>
+<p>In x87, <code>empty=xx</code> is a logical ST mask: bit i=1 means ST(i) is
+empty. A pinned header says <b>logical</b> because its values are already
+rotated by TOP; hover the header or row for the exact interpretation.</p>
 <p>The event selector beside ◀/▶ narrows <code>[</code>/<code>]</code>
 navigation to any event, mispredicts, stalls, I-cache fills, or page walks.</p>
 <h2>Examples</h2>

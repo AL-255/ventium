@@ -53,6 +53,17 @@ CPL, and SMM alongside CS.D/translation context. Pinned Registers display those
 truthful values while the global strip alone carries selection state. ABI-size,
 user/x87, and real paged-system regressions lock the new fields.
 
+**x87 metadata audit:** the x87 header still repeated `pin` despite the global
+strip and exposed `empty=fc` without defining its polarity. Pinned values now
+say `logical`, which describes their already-TOP-rotated ST(0..7) order. Live
+and pinned header hovers define bit i=1 as empty, and every ST row hover states
+occupied/empty from that same authoritative mask. Regression checks tie all
+eight row descriptions to the captured bits. A first render showed `logical`
+pushing `empty=fc` onto a second line; shrinking the font still wrapped and
+hurt readability. Wide mode now distributes Integer:Segments:x87 as 2:2:3,
+matching their content, and a font-metrics assertion keeps the 9pt header on
+one line.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend
