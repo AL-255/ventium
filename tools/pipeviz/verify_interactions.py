@@ -1121,6 +1121,8 @@ def scenario_startup(app, outdir):
         assert "Ctrl+Shift+R" in win._guide_dialog.page.toPlainText()
         assert "exact repository build path" in (
             win._guide_dialog.page.toPlainText())
+        assert "pauses continuous Run" in (
+            win._guide_dialog.page.toPlainText())
         pipeline_row = next(i for i in range(win._guide_dialog.index.count())
                             if win._guide_dialog.index.item(i).text()
                             == "Reading the Pipeline View")
@@ -1345,6 +1347,23 @@ def scenario_branch_transport(app, outdir):
         assert win._running and win.timer.isActive()
         assert win.run_btn.toolTip() == "Pause continuous execution (F5)"
         assert win.run_btn.accessibleDescription() == win.run_btn.toolTip()
+        menu_cycle = win.backend.cycle_count()
+        menu_seen = []
+
+        def close_running_example_menu():
+            menu_seen.append(win._examples_menu.isVisible())
+            win._examples_menu.close()
+
+        QTimer.singleShot(50, close_running_example_menu)
+        win.program_open_btn.showMenu()
+        settle(app)
+        assert menu_seen == [True]
+        assert not win._running and not win.timer.isActive()
+        assert win.backend.cycle_count() == menu_cycle
+        assert "before opening the example menu" in win.action_hint.text()
+
+        win.on_run_toggle()
+        assert win._running and win.timer.isActive()
         chooser_cycle = win.backend.cycle_count()
         real_open_dialog = QFileDialog.getOpenFileName
         QFileDialog.getOpenFileName = staticmethod(
@@ -1356,6 +1375,44 @@ def scenario_branch_transport(app, outdir):
         assert not win._running and not win.timer.isActive()
         assert win.backend.cycle_count() == chooser_cycle
         assert "before opening the program chooser" in win.action_hint.text()
+
+        # A load that fails before Reset must still pause first; otherwise its
+        # modal error would hide a model that continues to advance.
+        win.on_run_toggle()
+        failed_cycle = win.backend.cycle_count()
+        failed_loads = []
+        old_critical = QMessageBox.critical
+        QMessageBox.critical = staticmethod(
+            lambda _parent, title, text:
+            failed_loads.append((title, text)))
+        try:
+            assert not win.load_image(
+                os.path.join(outdir, "missing-program.flat"))
+        finally:
+            QMessageBox.critical = old_critical
+        assert failed_loads and failed_loads[0][0] == "Open failed"
+        assert not win._running and not win.timer.isActive()
+        assert win.backend.cycle_count() == failed_cycle
+        assert "before loading a program" in win.action_hint.text()
+
+        win.on_run_toggle()
+        snapshot_cycle = win.backend.cycle_count()
+        snapshot_backend = win.backend
+        failed_snapshots = []
+        QMessageBox.critical = staticmethod(
+            lambda _parent, title, text:
+            failed_snapshots.append((title, text)))
+        try:
+            assert not win.load_snapshot(
+                os.path.join(outdir, "missing-checkpoint.aux"))
+        finally:
+            QMessageBox.critical = old_critical
+        assert failed_snapshots
+        assert failed_snapshots[0][0] == "Snapshot restore failed"
+        assert win.backend is snapshot_backend and win.backend.h
+        assert win.backend.cycle_count() == snapshot_cycle
+        assert not win._running and not win.timer.isActive()
+        assert "before loading a snapshot" in win.action_hint.text()
 
         # Bad reset addresses are rejected visibly before replacing the backend.
         old_backend = win.backend

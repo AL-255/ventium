@@ -75,7 +75,9 @@ menu; no application restart is needed.</p>
 <p>A successful program, example, or snapshot load reveals the Visualizer even
 when it starts from Assembly/C, so transport and status never remain hidden
 behind an editor. Dropped Assembly/C source opens its matching workbench
-instead; a failed load leaves the current workspace and session intact.</p>
+instead; a failed load leaves the current workspace and session intact. Opening
+the example menu or starting any program/snapshot load pauses continuous Run
+before a menu, chooser, or error can obscure it; resuming is explicit.</p>
 <h2>ELF versus raw images</h2>
 <p>A little-endian 32-bit x86 ELF supplies its entry point and every
  <code>PT_LOAD</code> address automatically; the load field is disabled because

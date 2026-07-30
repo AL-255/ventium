@@ -52,6 +52,9 @@ Apply + Reset now names the pending launch fields/modes in its tooltip,
 accessible description, and action feedback. The comparison is mode-aware:
 switching to/from system boot does not falsely report disabled entry/load/ESP
 tuple changes.
+The example submenu and all program/snapshot load entry points now pause Run
+before nested menus, choosers, or early format/restore errors. Rejected loads
+leave the old backend intact and paused instead of advancing invisibly.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

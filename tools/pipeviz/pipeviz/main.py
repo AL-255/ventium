@@ -396,6 +396,9 @@ class MainWindow(QMainWindow):
                 self._open_example(example_candidates))
             examples_menu.addAction(action)
             self._example_actions.append((action, candidates))
+        examples_menu.aboutToShow.connect(
+            lambda: self._pause_for_obscuring_ui(
+                "opening the example menu"))
         examples_menu.aboutToShow.connect(self._refresh_example_actions)
         self._refresh_example_actions()
         self._examples_menu = examples_menu
@@ -1228,6 +1231,9 @@ class MainWindow(QMainWindow):
             self.load_image(self.image_path, preserve_setup=True)
 
     def load_image(self, path, preserve_setup=False):
+        # Read/format/backend errors can open modal messages before Reset gets a
+        # chance to stop Run. Pause first so no failure path advances invisibly.
+        self._pause_for_obscuring_ui("loading a program")
         previous = {
             "image_path": self.image_path,
             "image_bytes": self.image_bytes,
@@ -1496,7 +1502,7 @@ class MainWindow(QMainWindow):
     def load_snapshot(self, path):
         """Restore the host TB's paired <prefix>.{vlt,aux} state checkpoint.
         Build/restore failures leave the currently running backend untouched."""
-        self.stop_run()
+        self._pause_for_obscuring_ui("loading a snapshot")
         prefix = self._snapshot_prefix(path)
         candidate = None
         try:
