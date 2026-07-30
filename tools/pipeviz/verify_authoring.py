@@ -417,6 +417,15 @@ def scenario(app, outdir):
         cursor = editor.textCursor()
         cursor.movePosition(QTextCursor.End)
         editor.setTextCursor(cursor)
+        QTest.mouseClick(win.assembly.complete_btn, Qt.LeftButton)
+        settle(app)
+        assert app.focusWidget() is editor
+        assert editor.completion.isVisible()
+        assert editor.completion.list.count() == len(CATALOG)
+        QTest.keyClick(editor, Qt.Key_Down)
+        assert editor.completion.list.currentRow() == 1
+        QTest.keyClick(editor, Qt.Key_Escape)
+        assert not editor.completion.isVisible()
         QTest.keyClick(editor, Qt.Key_Space, Qt.ControlModifier)
         settle(app)
         assert editor.completion.isVisible()
@@ -513,7 +522,9 @@ def scenario(app, outdir):
         editor.setPlainText(
             ".intel_syntax noprefix\n.section .text\n.global _start\n_start:\n"
             "    frobnicate eax\n")
-        assert win.assembly.build(False) is None
+        QTest.mouseClick(win.assembly.build_btn, Qt.LeftButton)
+        settle(app)
+        assert app.focusWidget() is editor
         assert editor._error_line == 5
         assert "Error" in win.assembly.diagnostics.toPlainText()
         assert not win._has_session()
@@ -901,7 +912,9 @@ def scenario(app, outdir):
         save(win, outdir, "03_c_workbench")
         win.c_source.editor.setPlainText(
             "int main(void)\n{\n    return missing_symbol;\n}\n")
-        assert win.c_source.compile() is None
+        QTest.mouseClick(win.c_source.compile_btn, Qt.LeftButton)
+        settle(app)
+        assert app.focusWidget() is win.c_source.editor
         assert win.c_source.editor._error_line == 3
         assert "undeclared" in win.c_source.diagnostics.toPlainText()
         win.c_source.editor.insertPlainText(" ")

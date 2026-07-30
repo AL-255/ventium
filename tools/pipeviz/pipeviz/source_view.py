@@ -1181,13 +1181,24 @@ class AssemblyView(QWidget):
         self.save_btn.clicked.connect(
             lambda: self.save_source(save_as=True))
         self.complete_btn.clicked.connect(
-            lambda: self.editor.request_completion(force=True))
+            self._request_completion)
         self.build_btn.clicked.connect(lambda: self.build(False))
         self.run_btn.clicked.connect(lambda: self.build(True))
         QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
             lambda: self.build(True))
         self._cursor_instruction()
         self.editor.document().setModified(False)
+
+    def _focus_editor(self):
+        if self.isVisible():
+            self.editor.setFocus(Qt.OtherFocusReason)
+
+    def _request_completion(self):
+        # The popup deliberately does not activate itself. Give the editor the
+        # key stream first so arrows/Enter/Escape work after a button click just
+        # as they do after Ctrl+Space.
+        self._focus_editor()
+        self.editor.request_completion(force=True)
 
     @property
     def mapping_current(self):
@@ -1250,6 +1261,7 @@ class AssemblyView(QWidget):
         self.status.setText("New assembly template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
+        self._focus_editor()
         return True
 
     def set_source(self, text, origin="generated", confirm=True):
@@ -1268,6 +1280,7 @@ class AssemblyView(QWidget):
         self.status.setText(f"Assembly generated from {origin}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
+        self._focus_editor()
         return True
 
     def open_source(self):
@@ -1285,6 +1298,7 @@ class AssemblyView(QWidget):
         except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
             self._diagnostic_revision = self.editor.document().revision()
+            self._focus_editor()
             return False
         if not self.set_source(text, os.path.basename(path), confirm=True):
             return False
@@ -1316,6 +1330,7 @@ class AssemblyView(QWidget):
         except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
             self._diagnostic_revision = self.editor.document().revision()
+            self._focus_editor()
             return False
         self._path = path
         self._last_dir = os.path.dirname(os.path.abspath(path))
@@ -1323,9 +1338,11 @@ class AssemblyView(QWidget):
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
+        self._focus_editor()
         return True
 
     def build(self, run=False):
+        self._focus_editor()
         self.editor.mark_error_line(None)
         self.status.setText("Assembling and linking…")
         self.status.setStyleSheet("color:#e3b341;padding:2px;")
@@ -1445,6 +1462,10 @@ class CView(QWidget):
             self._optimization_changed)
         self.editor.document().setModified(False)
 
+    def _focus_editor(self):
+        if self.isVisible():
+            self.editor.setFocus(Qt.OtherFocusReason)
+
     def _source_changed(self):
         revision = self.editor.document().revision()
         if (self._diagnostic_revision < 0
@@ -1484,6 +1505,7 @@ class CView(QWidget):
         self.status.setText("New freestanding C template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         self.statusChanged.emit("C source replaced")
+        self._focus_editor()
         return True
 
     def open_source(self):
@@ -1501,6 +1523,7 @@ class CView(QWidget):
         except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
             self._diagnostic_revision = self.editor.document().revision()
+            self._focus_editor()
             return False
         if not self.confirm_safe_to_discard("opening another file"):
             return False
@@ -1516,6 +1539,7 @@ class CView(QWidget):
         self.status.setText(f"Opened {name}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         self.statusChanged.emit(f"Opened C source: {name}")
+        self._focus_editor()
         return True
 
     def confirm_safe_to_discard(self, action):
@@ -1538,6 +1562,7 @@ class CView(QWidget):
         except OSError as error:
             self.diagnostics.failure(str(error))
             self._diagnostic_revision = self.editor.document().revision()
+            self._focus_editor()
             return False
         self._path = path
         self._last_dir = os.path.dirname(os.path.abspath(path))
@@ -1545,9 +1570,11 @@ class CView(QWidget):
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
+        self._focus_editor()
         return True
 
     def compile(self):
+        self._focus_editor()
         self.editor.mark_error_line(None)
         self.status.setText("Compiling C to assembly…")
         self.status.setStyleSheet("color:#e3b341;padding:2px;")

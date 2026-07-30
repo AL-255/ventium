@@ -26,6 +26,14 @@ The board now becomes focusable only when a lane has a live source target, and
 the IPC strip only after a cycle is captured; reset removes both immediately.
 Synthetic reset, snapshot, overflow, and startup checks lock each transition.
 
+**Authoring focus-path audit:** the Assembly Complete button opened a
+non-activating popup while leaving focus on the button, so its advertised
+arrow/Enter navigation worked via Ctrl+Space but not by pointer. New/Open/Save
+and failed Build/Compile could likewise place the caret on an error while
+leaving subsequent typing on a toolbar button. Pointer and shortcut routes now
+return focus to the relevant editor; button-driven completion and real GNU
+assembler/compiler failures verify the exact focus and error line.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a
