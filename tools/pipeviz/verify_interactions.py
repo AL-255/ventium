@@ -10,6 +10,7 @@ requested output directory (normally /tmp).
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -40,6 +41,41 @@ def repo_path(relative):
     if not os.path.isfile(path):
         raise AssertionError(f"required fixture is missing: {path}")
     return path
+
+
+def default_rtl_state_names():
+    """Parse state_e as build.sh's default configuration (no optional defines)."""
+    core = open(
+        os.path.join(ROOT, "rtl/core/core.sv"),
+        encoding="utf-8").read()
+    match = re.search(
+        r"typedef\s+enum\s+logic\s*\[5:0\]\s*\{(.*?)\}\s*state_e\s*;",
+        core, re.DOTALL)
+    assert match, "state_e enum was not found"
+    active = True
+    stack = []
+    kept = []
+    for line in match.group(1).splitlines():
+        directive = line.strip()
+        if directive.startswith("`ifdef"):
+            stack.append((active, False))
+            active = False
+        elif directive.startswith("`ifndef"):
+            stack.append((active, True))
+            active = active
+        elif directive.startswith("`else"):
+            parent, condition = stack[-1]
+            condition = not condition
+            stack[-1] = (parent, condition)
+            active = parent and condition
+        elif directive.startswith("`endif"):
+            active, _condition = stack.pop()
+        elif active:
+            kept.append(line)
+    assert not stack
+    body = re.sub(r"/\*.*?\*/", "", "\n".join(kept), flags=re.DOTALL)
+    body = re.sub(r"//.*", "", body)
+    return re.findall(r"\bS_[A-Z0-9_]+\b", body)
 
 
 def settle(app, rounds=4):
@@ -806,6 +842,12 @@ def scenario_dcache_memory(app, outdir):
 def scenario_x87(app, outdir):
     win = new_window(app)
     try:
+        # Compare the complete default RTL enum to the bridge; a newly inserted
+        # state must not silently shift Cycles/status/stuck classifications.
+        rtl_states = default_rtl_state_names()
+        assert rtl_states == [
+            win.backend.state_name(index) for index in range(len(rtl_states))]
+        assert win.backend.state_name(len(rtl_states)) == "S_?"
         win.load_image(repo_path("build/verify/mb_fpindep.cycle.flat"))
         win.stepn.setValue(420)
         click(app, win.stepn_btn)
@@ -837,6 +879,9 @@ def scenario_x87(app, outdir):
         assert "fp" in classes
         select_tab(app, win.tables.tabs, 7)
         assert sum(win.tables.cyc.counts.values()) >= 400
+        assert win.tables.cyc.counts["halt"] == 0
+        assert win.tables.cyc.counts["retire"] > 0
+        assert win.tables.cyc.counts["I-fill"] > 0
         save_shot(app, win, outdir, "04_x87_pinned")
 
         click(app, win.step1_btn)
@@ -990,12 +1035,18 @@ def scenario_layout(app, outdir):
             assert panel.width() >= 300 and panel.height() >= 180
         assert win.trace.width() >= 690, (
             f"compact layout collapsed the trace to {win.trace.width()}px")
+        assert win.trace._compact_columns
+        assert win.trace.tbl.columnWidth(5) == 104
+        assert win.trace.tbl.columnWidth(7) == 150
+        assert win.trace.tbl.columnWidth(6) >= 180, (
+            f"compact instruction column is only "
+            f"{win.trace.tbl.columnWidth(6)}px")
         assert win.tables.width() >= 570
         assert win.status_lbl.width() >= 900 and "IPC" in win.status_lbl.text()
         assert win.trace.tbl.verticalHeader().defaultSectionSize() == 22
         save_shot(app, win, outdir, "08_compact_layout")
         print(f"OK layout: true compact window={win.width()}x{win.height()}, "
-              "responsive register tabs, all panels in bounds")
+              "responsive trace/register columns, all panels in bounds")
     finally:
         close_window(win)
 

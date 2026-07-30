@@ -706,14 +706,20 @@ int vv_get_cycles(void* h, uint64_t since_cyc, vv_cycle_t* out, int max) {
 }
 
 const char* vv_state_name(uint32_t s) {
-  // mirrors the state_e enum order in rtl/core/core.sv (typedef enum logic[5:0]).
+  // Mirrors the DEFAULT (no optional +VEN_* state insertion) state_e order in
+  // rtl/core/core.sv. Keep every unconditional member here: omitting S_ENTER
+  // used to shift S_PF/S_PIPE into "S_PIPE"/"S_F00F_HANG", making active x87
+  // workloads appear 63% halted and corrupting every later system-state name.
+  // verify_interactions.py pins early, pipeline, and late-system anchors so a
+  // future enum edit fails the Pipeviz acceptance suite conspicuously.
   static const char* names[] = {
     "S_RESET","S_FETCH","S_DECODE","S_LOAD","S_LOAD2","S_EXEC","S_STORE","S_USEQ",
-    "S_HALT","S_FLOAD","S_FEXEC","S_FSTORE","S_FENV_ST","S_FENV_LD","S_IO","S_INS",
-    "S_PF","S_PIPE","S_F00F_HANG","S_LGDT","S_SEGLD","S_LJMP","S_WALK","S_INT_GATE",
-    "S_INT_CS","S_INT_PUSH","S_IRET","S_INT_CS_RET","S_LTR","S_INT_TSS","S_INT_SS",
-    "S_IRET_SS","S_TSW_SAVE","S_TSW_READ","S_TSW_SEG","S_TSW_BUSY","S_SMI_SAVE",
-    "S_RSM","S_DB_EXTRA"
+    "S_HALT","S_ENTER","S_FLOAD","S_FEXEC","S_FSTORE","S_FENV_ST","S_FENV_LD",
+    "S_IO","S_INS","S_PF","S_PIPE","S_F00F_HANG","S_LGDT","S_SEGLD","S_LJMP",
+    "S_LCALL","S_RETF","S_SGDT","S_RMINT_RD","S_RMINT_PUSH","S_RMIRET","S_HLTWAIT",
+    "S_WALK","S_INT_GATE","S_INT_CS","S_INT_PUSH","S_IRET","S_INT_CS_RET","S_LTR",
+    "S_INT_TSS","S_INT_SS","S_IRET_SS","S_TSW_SAVE","S_TSW_READ","S_TSW_LDT",
+    "S_TSW_SEG","S_TSW_BUSY","S_SMI_SAVE","S_RSM","S_DB_EXTRA"
   };
   if (s < sizeof(names)/sizeof(names[0])) return names[s];
   return "S_?";

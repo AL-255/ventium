@@ -32,6 +32,19 @@ color-priority case, cancelled chooser behavior, source drop routing, accessible
 control labels, auto-indent, all-entry completion metadata, and confirms the
 existing Assembly/Fibonacci/x87 execution and exact PC linkage still pass.
 
+**Follow-up visual review:** the 1280×800 capture still let fixed 176-pixel raw
+bytes and 192-pixel effects squeeze Trace disassembly into a clipped sliver.
+Trace now switches below 820 pixels to 104/150-pixel detail columns, preserving
+at least 180 pixels for instructions; tooltips retain full byte/effect text.
+
+The x87 Cycles capture also exposed a correctness failure, not a palette issue:
+`vv_state_name()` omitted unconditional FSM members and shifted `S_PF`/`S_PIPE`
+into `S_PIPE`/`S_F00F_HANG`. That falsely attributed 265 of 420 active clocks to
+halt and hid every I-fill. The bridge now mirrors all 48 default RTL states,
+Cycles recognizes new ENTER/HLT-wait/FP states, and the regression parses the
+complete default `state_e` and compares it to the live ABI before asserting zero
+false halts in the x87 workload.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

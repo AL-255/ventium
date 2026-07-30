@@ -199,13 +199,18 @@ Procedure:
 3. Verify the timing data contains FP instructions and the register panel shows
    a pinned x87 control/status/tag and logical stack.
 4. Open Instr mix and require the FP class.
-5. Open Cycles and require the full cycle sample count.
+5. Compare the full default RTL `state_e` order with the C ABI state names.
+   Open Cycles, require the full sample count, nonzero retire/I-fill cycles, and
+   zero false halt cycles.
 6. Click Clock and verify pinning clears back to live state.
 
 Observed evidence:
 
 - 263 retirements, including 88 x87 trace rows.
 - 421 classified cycle samples.
+- At the 420-clock capture, Cycles now attributes 155 I-fill, 154 retire, and
+  111 issue-stall clocks with zero halt clocks; the former stale name table
+  incorrectly reported 265 halt clocks.
 - Pinned retirement 251 shows `st0=84`, x87 status `0x3000`, and the 80-bit
   stack representation.
 
@@ -291,8 +296,9 @@ Procedure:
 2. Verify every major panel remains within window bounds and at usable size.
 3. Require at least 690 pixels for the linked Trace/timeline column and at
    least 570 pixels for analysis.
-4. Require fixed 22-pixel trace rows, no toolbar/tab overflow, and intact
-   status metrics.
+4. Require fixed 22-pixel trace rows, no toolbar/tab overflow, intact status
+   metrics, and a responsive trace profile that keeps at least 180 pixels for
+   disassembly while compacting bytes/effects to 104/150 pixels.
 5. Select compact x87, widen to the three-column register view, narrow again,
    and require x87 to remain selected.
 
@@ -435,20 +441,27 @@ The screenshot review found and corrected the following:
    is now 1200 clocks and requires valid translations.
 6. The retired trace used the Qt default row height. It now uses fixed compact
    22-pixel rows.
-7. Help was limited to a shortcut dialog. The Help menu now opens an indexed
+   Its fixed wide byte/effect columns also squeezed compact disassembly into a
+   sliver; the 1280-pixel profile now preserves a readable stretched
+   instruction column while full width retains the detailed columns.
+7. The bridge state-name table omitted unconditional RTL FSM members, shifting
+   `S_PF`/`S_PIPE` into `S_PIPE`/`S_F00F_HANG` and making the x87 capture look
+   63% halted. All 48 default states now match `state_e`; the regression parses
+   and compares the complete enum before checking cycle attribution.
+8. Help was limited to a shortcut dialog. The Help menu now opens an indexed
    guide with dedicated loading, Pipeline View, and Assembly/C pages.
-8. Stale SoC detection occurred after dangerous model construction. It now
+9. Stale SoC detection occurred after dangerous model construction. It now
    occurs before construction.
-9. Register/table content hints forced the loaded window to 1446 pixels.
+10. Register/table content hints forced the loaded window to 1446 pixels.
    Registers now switch to indexed pages and analysis can shrink safely.
-10. The trace filter lacked traversal and weakly signaled empty results. It now
+11. The trace filter lacked traversal and weakly signaled empty results. It now
     has keyboard/button navigation and visible zero-match feedback.
-11. New programs inherited stale Memory addresses and active trace filters.
+12. New programs inherited stale Memory addresses and active trace filters.
     Program/snapshot starts now clear the query and follow their own EIP.
-12. Reset-time modes and addresses could diverge silently from the running
+13. Reset-time modes and addresses could diverge silently from the running
     backend. The button now becomes **Apply + Reset**, and malformed addresses
     are rejected visibly.
-13. Visual/smoke scripts resolved fixtures from the process working directory.
+14. Visual/smoke scripts resolved fixtures from the process working directory.
     They now use repository-relative paths and run from any directory.
 
 ## Coverage limits

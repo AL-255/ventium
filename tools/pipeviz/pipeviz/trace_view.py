@@ -323,12 +323,11 @@ class TraceView(QWidget):
         mono = QFont("monospace"); mono.setStyleHint(QFont.Monospace); mono.setPointSize(9)
         self.tbl.setFont(mono)
         hh = self.tbl.horizontalHeader()
-        for i, w in enumerate((52, 54, 40, 38, 74, 176)):          # n cyc Δ pipe PC bytes
-            self.tbl.setColumnWidth(i, w)
-        self.tbl.setColumnWidth(_EFFECT_COL, 192)                  # effect: fits 'reg=val + @addr'
+        self._compact_columns = None
         # the INSTRUCTION column stretches (full operands, no truncation while the
         # short effect column sat on a wide stretch) — effect is short and fixed.
         hh.setSectionResizeMode(_INSN_COL, QHeaderView.Stretch)
+        self._apply_column_profile()
         self.tbl.setItemDelegateForColumn(_BYTES_COL, BytesDelegate(mono, self.tbl))
         self.tbl.setItemDelegateForColumn(_INSN_COL, InsnDelegate(mono, self.tbl))
         self.tbl.setItemDelegateForColumn(_EFFECT_COL, EffectDelegate(mono, self.tbl))
@@ -350,6 +349,25 @@ class TraceView(QWidget):
         lay.addLayout(leg)
         self._seen = 0      # next retire n to fetch
         self._bits = 32
+
+    def _apply_column_profile(self):
+        """Protect disassembly width when the debugger's left pane is compact."""
+        compact = self.width() < 820
+        if compact == self._compact_columns:
+            return
+        self._compact_columns = compact
+        widths = (
+            (44, 48, 34, 34, 74, 104)
+            if compact else
+            (52, 54, 40, 38, 74, 176))
+        for column, width in enumerate(widths):
+            self.tbl.setColumnWidth(column, width)
+        self.tbl.setColumnWidth(_EFFECT_COL, 150 if compact else 192)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "tbl"):
+            self._apply_column_profile()
 
     def _k(self, t):
         l = QLabel(t); l.setStyleSheet("color:#8b949e;font-size:8px;")

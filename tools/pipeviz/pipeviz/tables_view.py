@@ -311,13 +311,18 @@ class CycleBreakdown(QWidget):
             return "I-fill"
         if name in ("S_FETCH", "S_DECODE"):
             return "decode"
-        if name in ("S_LOAD", "S_LOAD2", "S_STORE", "S_EXEC", "S_USEQ", "S_IO", "S_INS"):
+        if name in (
+                "S_LOAD", "S_LOAD2", "S_STORE", "S_EXEC", "S_USEQ",
+                "S_ENTER", "S_IO", "S_INS"):
             return "load/store"
         if name == "S_WALK":
             return "page-walk"
-        if name in ("S_FLOAD", "S_FEXEC", "S_FSTORE", "S_FENV_ST", "S_FENV_LD"):
+        if name in (
+                "S_FLOAD", "S_FEXEC", "S_FEXEC_EX", "S_FSTORE",
+                "S_FP_BUSY", "S_TRSC_BUSY", "S_FPREM_BUSY",
+                "S_FENV_ST", "S_FENV_LD"):
             return "x87 FP"
-        if name in ("S_HALT", "S_F00F_HANG"):
+        if name in ("S_HALT", "S_HLTWAIT", "S_F00F_HANG"):
             return "halt"
         return "system"
 
