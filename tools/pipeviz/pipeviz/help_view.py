@@ -303,7 +303,9 @@ status notice without creating a build diagnostic. GNU as
 semicolons separate statements, and completion follows the opcode in each
 statement while ignoring separators/comment markers inside quoted data.
 Clicking or scrolling the editor dismisses the popup so it never remains
-detached from its caret anchor; its own list remains pointer-scrollable.
+detached from its caret anchor; its own list remains pointer-scrollable. At a
+right/bottom-edge caret it flips above and remains inside Pipeviz whenever the
+window is large enough for the complete rich preview.
 Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
 style, including when completion replaces text on both sides of the cursor.
 Digits keep refining names such as <code>cmpxchg8b</code>, while Backspace and

@@ -9,6 +9,22 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — completion stays inside the workbench
+
+**Popup-edge audit:** completion correctly stayed on the monitor, but ignored
+the Pipeviz window boundary. Near the editor's right/bottom edge, its rich
+650×257 list/description/pipeline preview could float over the desktop.
+
+**Changes:** popup placement now intersects monitor availability with the
+owning window, clamps horizontally, and flips above a bottom-edge caret. Only a
+host window too small to contain the popup falls back to monitor bounds, so the
+preview is never cropped.
+
+**Verification:** minimum-size acceptance creates 70 source lines plus a
+100-column opcode, scrolls to that bottom/right caret, opens completion,
+requires the complete native frame inside the 900×620 Pipeviz rectangle and
+above the caret, and captures the result.
+
 ## July 30 continuation — explicit compact status elision
 
 **Authoring-status audit:** the neighboring Assembly/C status retained its full

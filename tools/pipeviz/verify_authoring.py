@@ -8,7 +8,7 @@ import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import (
     QCloseEvent, QFontMetrics, QGuiApplication, QTextCursor, QWheelEvent,
 )
@@ -1089,6 +1089,32 @@ def scenario(app, outdir):
         editor.setPlainText(original_source)
         editor.document().setModified(False)
         save(win, outdir, "00a_assembly_compact")
+        edge_source = "\n".join(
+            ["    nop"] * 70 + [" " * 100 + "ad"])
+        editor.setPlainText(edge_source)
+        edge_cursor = editor.textCursor()
+        edge_cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(edge_cursor)
+        editor.ensureCursorVisible()
+        settle(app)
+        edge_scroll = editor.verticalScrollBar()
+        edge_scroll.setValue(max(
+            edge_scroll.minimum(), edge_scroll.value() - 15))
+        settle(app)
+        edge_caret = editor.mapToGlobal(
+            editor.cursorRect().bottomLeft())
+        assert editor.request_completion()
+        settle(app)
+        owner_bounds = QRect(
+            win.mapToGlobal(QPoint(0, 0)), win.size())
+        popup_frame = editor.completion.frameGeometry()
+        assert owner_bounds.contains(popup_frame), (
+            owner_bounds, popup_frame)
+        assert popup_frame.top() < edge_caret.y()
+        save(editor.completion, outdir, "01_opcode_compact_edge_popup")
+        editor.completion.hide()
+        editor.setPlainText(original_source)
+        editor.document().setModified(False)
         win.resize(1500, 920)
         settle(app)
 

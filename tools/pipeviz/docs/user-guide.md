@@ -315,7 +315,9 @@ At a directive, comment, or operand it remains a reference-only catalogue, so
 accepting an entry cannot corrupt non-opcode text.
 Clicking or scrolling the source editor dismisses completion so it cannot
 remain detached from the caret; scrolling inside the popup still browses its
-list.
+list. At edge carets the rich popup flips above and clamps within the Pipeviz
+window whenever it fits, falling back to monitor bounds only for an unusually
+small host window.
 Accepted mnemonics preserve the token's existing convention: `AD` completes as
 `ADD`, `Ad` as `Add`, and lowercase source remains lowercase. This also works
 when completion replaces the remainder of a token after the cursor. Digit-bearing

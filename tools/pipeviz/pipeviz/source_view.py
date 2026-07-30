@@ -1244,37 +1244,49 @@ class CompletionPopup(QFrame):
         above = self.editor.mapToGlobal(cursor_rect.topLeft())
         screen = QGuiApplication.screenAt(below) or QGuiApplication.primaryScreen()
         pos = below
+        bounds = None
         if screen is not None:
             available = screen.availableGeometry()
             width, height = self.width(), self.height()
+            owner = self.editor.window()
+            owner_rect = QRect(
+                owner.mapToGlobal(QPoint(0, 0)), owner.size())
+            owner_bounds = available.intersected(owner_rect)
+            # Prefer the workbench over the desktop. Very small host windows
+            # still fall back to screen bounds rather than cropping the rich
+            # list/description/preview popup.
+            bounds = (
+                owner_bounds
+                if (owner_bounds.width() >= width
+                    and owner_bounds.height() >= height)
+                else available)
             x = max(
-                available.left(),
-                min(below.x(), available.right() - width + 1))
+                bounds.left(),
+                min(below.x(), bounds.right() - width + 1))
             y = below.y()
-            if y + height - 1 > available.bottom():
+            if y + height - 1 > bounds.bottom():
                 y = above.y() - height
             y = max(
-                available.top(),
-                min(y, available.bottom() - height + 1))
+                bounds.top(),
+                min(y, bounds.bottom() - height + 1))
             pos.setX(x)
             pos.setY(y)
         self.move(pos)
         self.show()
         # Native window-frame margins are only known after the tooltip gets a
         # platform window. Correct the final frame, not just its client rect.
-        if screen is not None:
+        if bounds is not None:
             frame = self.frameGeometry()
-            available = screen.availableGeometry()
             dx = (
-                available.left() - frame.left()
-                if frame.left() < available.left() else
-                available.right() - frame.right()
-                if frame.right() > available.right() else 0)
+                bounds.left() - frame.left()
+                if frame.left() < bounds.left() else
+                bounds.right() - frame.right()
+                if frame.right() > bounds.right() else 0)
             dy = (
-                available.top() - frame.top()
-                if frame.top() < available.top() else
-                available.bottom() - frame.bottom()
-                if frame.bottom() > available.bottom() else 0)
+                bounds.top() - frame.top()
+                if frame.top() < bounds.top() else
+                bounds.bottom() - frame.bottom()
+                if frame.bottom() > bounds.bottom() else 0)
             if dx or dy:
                 self.move(self.x() + dx, self.y() + dy)
 
