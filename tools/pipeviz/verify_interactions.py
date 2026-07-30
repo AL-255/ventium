@@ -25,7 +25,7 @@ from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMessageBox, QPushButton,
-                               QToolBar, QToolButton)
+                               QLabel, QToolBar, QToolButton, QWidget)
 
 import pipeviz.main as main_module
 import pipeviz.disasm as disasm_module
@@ -819,6 +819,14 @@ def scenario_startup(app, outdir):
             win.event_kind: "Pipeline event type",
             win.evprev_btn: "Previous pipeline event",
             win.evnext_btn: "Next pipeline event",
+            win.cyc_cb: "Enable U/V dual issue",
+            win.sys_cb: "Boot in system mode",
+            win.soc_cb: "Run full SoC model",
+            win.reset_btn: "Reset program",
+            win.step1_btn: "Advance one clock",
+            win.stepi_btn: "Advance to next retired instruction",
+            win.stepn_btn: "Advance selected clock count",
+            win.run_btn: "Run continuous execution",
             win.workspace.tabBar(): "Workspace tabs",
             win.pipeline.konata.plot: "Pipeline timing diagram",
             win.pipeline.konata.zoom_out_btn: "Zoom pipeline cycles out",
@@ -931,6 +939,9 @@ def scenario_startup(app, outdir):
         assert "Open a program or choose a built example" in (
             win.run_btn.toolTip())
         assert win.run_btn.accessibleDescription() == win.run_btn.toolTip()
+        assert all(
+            control.accessibleDescription() == control.toolTip()
+            for control in (win.cyc_cb, win.sys_cb, win.soc_cb))
         assert "available after opening" in win.reset_btn.toolTip()
         assert "Open a program or choose a built example" in (
             win.evnext_btn.toolTip())
@@ -1385,6 +1396,8 @@ def scenario_branch_transport(app, outdir):
         # extra clock; resuming remains explicit.
         win.on_run_toggle()
         assert win._running and win.timer.isActive()
+        assert win.run_btn.accessibleName() == (
+            "Pause continuous execution")
         assert win.run_btn.toolTip() == "Pause continuous execution (F5)"
         assert win.run_btn.accessibleDescription() == win.run_btn.toolTip()
         menu_cycle = win.backend.cycle_count()
@@ -1494,6 +1507,8 @@ def scenario_branch_transport(app, outdir):
         assert not win.entry_e.styleSheet()
         win.cyc_cb.setChecked(False)
         assert "Apply + Reset" in win.reset_btn.text()
+        assert win.reset_btn.accessibleName() == (
+            "Apply setup and reset program")
         assert "#e3b341" in win.reset_btn.styleSheet()
         assert "Pending: U/V issue" in win.reset_btn.toolTip()
         assert win.reset_btn.accessibleDescription() == (
@@ -1502,6 +1517,7 @@ def scenario_branch_transport(app, outdir):
         save_shot(app, win, outdir, "01a_pending_uv_reset")
         win.cyc_cb.setChecked(True)
         assert win.reset_btn.text().strip() == "Reset"
+        assert win.reset_btn.accessibleName() == "Reset program"
         assert not win.reset_btn.styleSheet()
         assert "Pending:" not in win.reset_btn.toolTip()
         assert "no reset needed" in win.action_hint.text()
@@ -1985,9 +2001,12 @@ def scenario_branch_transport(app, outdir):
         QTest.qWait(100)
         settle(app)
         assert win.run_btn.text().strip() == "Pause"
+        assert win.run_btn.accessibleName() == (
+            "Pause continuous execution")
         assert win.run_btn.toolTip() == "Pause continuous execution (F5)"
         click(app, win.run_btn)
         assert not win._running and win.backend.state().core_cyc > before
+        assert win.run_btn.accessibleName() == "Run continuous execution"
         assert win.run_btn.toolTip() == "Run continuous execution (F5)"
         save_shot(app, win, outdir, "01_branch_transport")
         print(f"OK branch/transport: V rows={visible_v}, stats={stats}")
@@ -2730,6 +2749,39 @@ def scenario_layout(app, outdir):
         settle(app)
         assert win.tables.tabs.currentIndex() == 0
         assert app.focusWidget() is win.tables.ic
+        unnamed_focus_stops = []
+        clipped_plain_labels = []
+        for tab_index in range(win.tables.tabs.count()):
+            win.tables.tabs.setCurrentIndex(tab_index)
+            settle(app)
+            for widget in win.findChildren(QWidget):
+                if (not widget.isVisibleTo(win) or not widget.isEnabled()
+                        or widget.focusPolicy() == Qt.NoFocus):
+                    continue
+                if (widget.objectName() == "qt_spinbox_lineedit"
+                        and widget.parentWidget() is not None
+                        and widget.parentWidget().accessibleName()):
+                    continue
+                if not widget.accessibleName():
+                    unnamed_focus_stops.append(
+                        (tab_index, type(widget).__name__,
+                         widget.objectName()))
+            for label in win.findChildren(QLabel):
+                text = (
+                    label.displayText()
+                    if hasattr(label, "displayText") else label.text())
+                if (not label.isVisibleTo(win) or not text
+                        or label.wordWrap() or "<" in text or "\n" in text):
+                    continue
+                if label.fontMetrics().horizontalAdvance(text) > (
+                        label.contentsRect().width() + 1):
+                    clipped_plain_labels.append(
+                        (tab_index, label.accessibleName(), text,
+                         label.contentsRect().width()))
+        assert not unnamed_focus_stops, unnamed_focus_stops
+        assert not clipped_plain_labels, clipped_plain_labels
+        win.tables.tabs.setCurrentIndex(0)
+        settle(app)
         cache_map = win.tables.ic_map
         ticks = cache_map._axis_ticks()
         assert [cache_set for cache_set, _x, _rect, _align in ticks] == [

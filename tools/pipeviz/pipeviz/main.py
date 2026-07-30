@@ -614,18 +614,24 @@ class MainWindow(QMainWindow):
         tb.addSeparator()   # file/load | config
 
         self.cyc_cb = QCheckBox("U/V issue"); self.cyc_cb.setChecked(True)
+        self.cyc_cb.setAccessibleName("Enable U/V dual issue")
         self.cyc_cb.setToolTip(
             "Enable Pentium-style U/V dual issue (applies on Reset); "
             "untick to compare single issue")
+        self.cyc_cb.setAccessibleDescription(self.cyc_cb.toolTip())
         tb.addWidget(self.cyc_cb)
         self.sys_cb = QCheckBox("system")
+        self.sys_cb.setAccessibleName("Boot in system mode")
         self.sys_cb.setToolTip(
             "Boot a raw BIOS image at F000:FFF0 (applies on Reset)")
+        self.sys_cb.setAccessibleDescription(self.sys_cb.toolTip())
         tb.addWidget(self.sys_cb)
         self.soc_cb = QCheckBox("SoC")
+        self.soc_cb.setAccessibleName("Run full SoC model")
         self.soc_cb.setToolTip("Run the full ventium_soc (internal port-I/O / PIC / "
                                "PIT) — needed for bare-metal images like test386. "
                                "Requires build.sh --soc; applies on Reset.")
+        self.soc_cb.setAccessibleDescription(self.soc_cb.toolTip())
         tb.addWidget(self.soc_cb)
         self._config_widgets = (
             self.entry_e, self.load_e, self.esp_e,
@@ -645,16 +651,20 @@ class MainWindow(QMainWindow):
         self.transport_toolbar = ctl
 
         self.reset_btn = QPushButton(" Reset")
+        self.reset_btn.setAccessibleName("Reset program")
         self.reset_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.reset_btn.clicked.connect(self.on_reset)
         self.reset_btn.setToolTip("Reset the loaded program (R)")
         ctl.addWidget(self.reset_btn)
 
         self.step1_btn = QPushButton("Clock")
+        self.step1_btn.setAccessibleName("Advance one clock")
         self.step1_btn.clicked.connect(lambda: self.do_step(1, False))
         self.step1_btn.setToolTip("Advance one clock (.)")
         ctl.addWidget(self.step1_btn)
         self.stepi_btn = QPushButton("Insn")
+        self.stepi_btn.setAccessibleName(
+            "Advance to next retired instruction")
         self.stepi_btn.clicked.connect(lambda: self.do_step(200000, True))
         self.stepi_btn.setToolTip("Advance to the next retired instruction (I or Space)")
         ctl.addWidget(self.stepi_btn)
@@ -665,11 +675,14 @@ class MainWindow(QMainWindow):
         self.stepn.setToolTip("Number of clocks advanced by Step N")
         self.stepn.setFixedWidth(90); ctl.addWidget(self.stepn)
         self.stepn_btn = QPushButton("Step N")
+        self.stepn_btn.setAccessibleName(
+            "Advance selected clock count")
         self.stepn_btn.clicked.connect(lambda: self.do_step(self.stepn.value(), False))
         self.stepn_btn.setToolTip("Advance the selected number of clocks")
         ctl.addWidget(self.stepn_btn)
 
         self.run_btn = QPushButton(" Run")
+        self.run_btn.setAccessibleName("Run continuous execution")
         self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.run_btn.clicked.connect(self.on_run_toggle)
         self.run_btn.setStyleSheet(
@@ -755,6 +768,8 @@ class MainWindow(QMainWindow):
         pending = self._pending_reset_fields()
         pending_text = ", ".join(pending) if pending else "launch setup"
         self.reset_btn.setText(" Apply + Reset")
+        self.reset_btn.setAccessibleName(
+            "Apply setup and reset program")
         self.reset_btn.setStyleSheet("border:1px solid #e3b341;")
         tip = (
             "Apply changed addresses/mode on a fresh model (R)\n"
@@ -854,6 +869,7 @@ class MainWindow(QMainWindow):
 
     def _clear_reset_required(self):
         self.reset_btn.setText(" Reset")
+        self.reset_btn.setAccessibleName("Reset program")
         self.reset_btn.setStyleSheet("")
         tip = "Re-cold-reset the loaded program on a fresh model (R)"
         self.reset_btn.setToolTip(tip)
@@ -1251,6 +1267,8 @@ class MainWindow(QMainWindow):
             "title": self.windowTitle(),
             "reset_text": self.reset_btn.text(),
             "reset_tip": self.reset_btn.toolTip(),
+            "reset_name": self.reset_btn.accessibleName(),
+            "reset_description": self.reset_btn.accessibleDescription(),
             "reset_style": self.reset_btn.styleSheet(),
             "notice": self.action_hint.text(),
         }
@@ -1420,6 +1438,9 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(previous["title"])
             self.reset_btn.setText(previous["reset_text"])
             self.reset_btn.setToolTip(previous["reset_tip"])
+            self.reset_btn.setAccessibleName(previous["reset_name"])
+            self.reset_btn.setAccessibleDescription(
+                previous["reset_description"])
             self.reset_btn.setStyleSheet(previous["reset_style"])
             self.action_hint.setText(previous["notice"])
             self.action_hint.setToolTip(previous["notice"])
@@ -1532,7 +1553,11 @@ class MainWindow(QMainWindow):
         self.sys_cb.setChecked(False)
         self.soc_cb.setChecked(False)
         self.reset_btn.setText(" Restore snapshot")
-        self.reset_btn.setToolTip("Discard continued execution and restore this snapshot again")
+        self.reset_btn.setAccessibleName("Restore snapshot")
+        restore_tip = (
+            "Discard continued execution and restore this snapshot again")
+        self.reset_btn.setToolTip(restore_tip)
+        self.reset_btn.setAccessibleDescription(restore_tip)
         self.reset_btn.setStyleSheet("")
         self._sync_config_enabled()
         self.setWindowTitle(f"Ventium pipeline visualizer — snapshot {os.path.basename(prefix)}")
@@ -1866,6 +1891,7 @@ class MainWindow(QMainWindow):
         elif self._has_session() and not self.backend.is_done():
             self._running = True
             self.run_btn.setText(" Pause")
+            self.run_btn.setAccessibleName("Pause continuous execution")
             self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
             tip = "Pause continuous execution (F5)"
             self.run_btn.setToolTip(tip)
@@ -1876,6 +1902,7 @@ class MainWindow(QMainWindow):
         self._running = False
         self.timer.stop()
         self.run_btn.setText(" Run")
+        self.run_btn.setAccessibleName("Run continuous execution")
         self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         if self.run_btn.isEnabled():
             tip = "Run continuous execution (F5)"

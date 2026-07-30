@@ -116,6 +116,14 @@ in addition to the existing wide reference. This locks wrapping for the
 Pipeline, trace, cache-table, register, and access-map guidance before a program
 exists, as well as compact selector synchronization and the empty scatter's
 non-focusable contract.
+All enabled visible focus stops now have an explicit accessible action name.
+The audit filled the remaining gaps for U/V/system/SoC configuration and
+Reset/Clock/Insn/Step-N/Run transport controls. Dynamic names follow
+Apply+Reset, snapshot Restore, and Run/Pause states; a rejected load restores
+the prior name and description with the visible control state. A structural
+minimum-width sweep now visits every analysis destination and rejects unnamed
+focus stops or clipped non-wrapping plain labels (while measuring responsive
+labels by their actual painted text).
 The Mem-map scatter now adapts its own painted geometry too. At 188 px it
 reclaims the unused y-axis gutter, reduces five overlapping retirement ticks to
 three inward-aligned ticks, and selects a measured complete summary such as
