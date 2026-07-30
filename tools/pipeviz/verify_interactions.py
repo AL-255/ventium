@@ -1162,6 +1162,9 @@ def scenario_startup(app, outdir):
         assert "Tab to the board" in pipeline_guide
         assert "Page Up/Page Down for 64 cycles" in pipeline_guide
         assert "left-drag across the strip" in pipeline_guide
+        assert "2,451 clocks" in pipeline_guide
+        assert "1,984 clocks" in pipeline_guide
+        assert "85.3%" in pipeline_guide
         QTest.keyClick(win._guide_dialog, Qt.Key_F, Qt.ControlModifier)
         settle(app)
         assert win._guide_dialog.find_bar.isVisible()
@@ -1210,6 +1213,8 @@ def scenario_startup(app, outdir):
         settle(app)
         guide_text = win._guide_dialog.page.toPlainText()
         assert "Ctrl+Space" in guide_text and "Compile → Assembly" in guide_text
+        assert "Ctrl+Tab" in guide_text and "Ctrl+Shift+Tab" in guide_text
+        assert "close a live completion popup" in guide_text
         assert "source badge" in guide_text
         assert "press Enter, or double-click it" in guide_text
         authoring_shot = os.path.join(

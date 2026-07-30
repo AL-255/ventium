@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Indexed-guide evidence cross-check:** the Pipeline topic's Dual Fibonacci
+example now includes the verified 2,451→1,984-clock and 0.461→0.571-IPC result
+plus its 85.3% pairing rate, making the U–V benefit concrete without leaving
+in-app Help. The authoring topic now explains plain-Tab indentation,
+Ctrl+Tab/Ctrl+Shift+Tab escape, and their precedence over opcode insertion.
+Acceptance requires both sets of guidance in their indexed pages.
+
 **Indexed-guide accessibility audit:** the native Close button was the guide's
 only visible focusable control without an explicit assistive name. It now has a
 guide-specific name and description; the Find trigger, query, and previous/next

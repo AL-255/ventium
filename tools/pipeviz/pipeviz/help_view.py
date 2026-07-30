@@ -185,7 +185,9 @@ stopped</b> only when the backend is terminal and stepping is disabled.</p>
 <ul>
  <li><b>Dual Fibonacci:</b> two independent recurrence chains let adjacent
  arithmetic occupy U and V together. Compare U/V issue on/off; paired mode
- completes the same results in fewer cycles.</li>
+ completes the same results in fewer cycles. The current acceptance run
+ measures 2,451 clocks / 0.461 IPC in single-issue mode versus 1,984 clocks /
+ 0.571 IPC with U/V enabled, with 85.3% of instructions paired.</li>
  <li><b>mb_brloop:</b> repeating <code>dec</code>/<code>jne</code> diagonals
  expose branch pairing and the flags dependency. Red event pixels locate
  mispredict recovery.</li>
@@ -220,7 +222,10 @@ program-opening role. Dropped <code>.s/.S/.asm</code> and
 <code>.c/.h</code> files open in their source workspace rather than being
 treated as raw executables. Each workspace remembers its last folder, and Enter
 preserves indentation or advances it after labels/braces. A closing C brace
-typed on a blank indented line dedents one level.</p>
+typed on a blank indented line dedents one level. Plain Tab indents source;
+Ctrl+Tab moves to diagnostics and Ctrl+Shift+Tab moves toward the primary
+Run/Compile control without changing source. These navigation chords also close
+a live completion popup instead of inserting its selected opcode.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>
