@@ -57,6 +57,14 @@ scrolls every event into view, including non-retire cycles, and moves only the
 playhead while preserving the exact linked row/PC/pin. The branch regression
 locks all four identities across edge and 64-cycle keyboard seeks.
 
+**Drill-down signal audit:** Pipeline rows and Mem-map points both selected a
+Trace row—which already pins through `instSelected`—and called `_pin_to`
+directly, duplicating retirement reads plus Register/Assembly status updates.
+Both origins now use one trace-aware route: a retained Trace row performs the
+single linked transaction; only an older row outside Trace's shorter rolling
+window pins directly. A real Pipeline keyboard selection requires exactly one
+retirement read.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a

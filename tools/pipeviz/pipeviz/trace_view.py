@@ -426,14 +426,15 @@ class TraceView(QWidget):
 
     def select_n(self, n):
         """Select + scroll to the trace row for retire `n` (linked from a click
-        in the Konata pipeline view)."""
+        in the Konata pipeline view). Return whether the row is retained."""
         target = str(int(n))
         for row in range(self.tbl.rowCount()):
             it = self.tbl.item(row, 0)
             if it is not None and it.text() == target:
                 self.tbl.setCurrentCell(row, 0)
                 self.tbl.scrollToItem(it, QAbstractItemView.PositionAtCenter)
-                return
+                return True
+        return False
 
     def clear_selection(self):
         """Remove the linked retirement cue without emitting a new pin."""

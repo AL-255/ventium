@@ -1389,8 +1389,17 @@ def scenario_branch_transport(app, outdir):
         # The timing diagram is a debugger surface, not a static picture: it
         # must be traversable from the keyboard and keep Trace/Registers linked.
         plot.setFocus()
-        QTest.keyClick(plot, Qt.Key_End)
-        settle(app)
+        retire_reads = []
+        real_get_retires = win.backend.get_retires
+        win.backend.get_retires = lambda *args: (
+            retire_reads.append(args), real_get_retires(*args))[1]
+        try:
+            QTest.keyClick(plot, Qt.Key_End)
+            settle(app)
+        finally:
+            win.backend.get_retires = real_get_retires
+        assert len(retire_reads) == 1, (
+            f"Pipeline selection performed {len(retire_reads)} pin reads")
         assert plot.sel_row == len(plot.insns) - 1
         assert win._pinned_n == plot.insns[-1]["n"]
         QTest.keyClick(plot, Qt.Key_Up)

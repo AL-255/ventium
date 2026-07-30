@@ -791,11 +791,11 @@ class MainWindow(QMainWindow):
         # two-way link: trace row <-> exact Konata retirement. A cycle-only
         # trace link is ambiguous whenever U and V retire together.
         self.trace.instSelected.connect(self.pipeline.select_n)
-        self.pipeline.konata.plot.rowClicked.connect(self.trace.select_n)
+        self.pipeline.konata.plot.rowClicked.connect(
+            self._select_retirement_origin)
         # selecting an instruction (either side) PINS the register panel to its
         # post-commit architectural state + drops a playhead at its cycle.
         self.trace.instSelected.connect(self._pin_to)
-        self.pipeline.konata.plot.rowClicked.connect(self._pin_to)
         self.pipeline.konata.plot.escapeRequested.connect(
             self._escape_visualizer)
         # The stage board represents the instructions that are live *now*, before
@@ -807,8 +807,8 @@ class MainWindow(QMainWindow):
         self.tables.pcClicked.connect(self.trace.select_pc)
         # drill-down: click a Mem-map access point -> jump the trace to that retire n
         # (+ pin regs), so an outlier/stripe in the scatter is one click from its row.
-        self.tables.accmap.pointSelected.connect(self.trace.select_n)
-        self.tables.accmap.pointSelected.connect(self._pin_to)
+        self.tables.accmap.pointSelected.connect(
+            self._select_retirement_origin)
 
         # keyboard-driven stepping / navigation (a debugger should be drivable from
         # the keyboard): . = step 1 clk, i = step 1 instruction, ] / [ = jump to the
@@ -1418,6 +1418,19 @@ class MainWindow(QMainWindow):
         return True
 
     # ---- register pinning (AS-OF a retired instruction) + playhead ----
+    def _select_retirement_origin(self, n):
+        """Route non-Trace drill-down through one exact pin transaction.
+
+        Trace's currentCellChanged signal already synchronizes Pipeline,
+        Registers, and Assembly. Pipeline/Mem-map retain a longer history, so
+        fall back to a direct pin only when their retirement is no longer in
+        Trace's rolling table.
+        """
+        n = int(n)
+        retained = self.trace.select_n(n)
+        if not retained or getattr(self, "_pinned_n", None) != n:
+            self._pin_to(n)
+
     def _highlight_assembly_pc(self, pc, context):
         """Highlight one live/retired PC without requiring a retirement record."""
         pc = int(pc)
