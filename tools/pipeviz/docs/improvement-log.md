@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — name the C experiment at its entry point
+
+**Demo-discoverability audit:** the source and guide now made the U/V experiment
+honest, but the control that creates it still said only `New template`, and the
+source badge said `built-in template`. A user looking at the C toolbar had to
+hover or read transient status before learning that the promised experiment was
+already available.
+
+**Changes:** the C-only button now says **New U/V demo**, the contextual Ctrl+N
+File action says **New C U/V demo**, and its persistent source badge says
+`built-in U/V demo`. Assembly retains its correctly generic New template. Button
+tooltip and accessibility continue to spell out dual Fibonacci and the shortcut.
+
+**Verification:** authoring acceptance distinguishes the Assembly and C labels,
+checks the contextual File action and full accessible source identity, and
+reruns the complete demo. The 900×620 visual capture confirms the explicit label
+fits beside Open, Save, Optimize, and Compile without clipping or overlap.
+
 ## July 30 continuation — preserve U/V identity in linked source
 
 **Cross-workspace context audit:** selecting a retirement correctly preserved

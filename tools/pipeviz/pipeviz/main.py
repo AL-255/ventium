@@ -1166,7 +1166,7 @@ class MainWindow(QMainWindow):
         self.save_source_as_action.setEnabled(source_active)
         self.new_source_action.setText(
             "New assembly template" if index == 1 else
-            "New C template" if index == 2 else "New source template")
+            "New C U/V demo" if index == 2 else "New source template")
         self.save_source_action.setText(
             "Save assembly source" if index == 1 else
             "Save C source" if index == 2 else "Save source")

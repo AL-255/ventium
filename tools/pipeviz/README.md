@@ -177,7 +177,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     `_start`/HLT wrapper into the Assembly tab; compiler and assembler errors
     highlight their source line. Editing C or changing optimization clears the
     prior compiler result and asks for a fresh compile. C/header drops route
-    here without disturbing the running program. The built-in template is a
+    here without disturbing the running program. The visible **New U/V demo** is a
     runtime-counted, dual-chain Fibonacci workload: it prevents `-O2` constant
     folding and provides a direct U/V-on versus U/V-off experiment. The
     authoring regression requires the same `0x198c09a0` result in both modes,

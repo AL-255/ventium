@@ -1603,7 +1603,7 @@ def scenario(app, outdir):
         assert all(toolbar.isHidden() for toolbar in toolbars)
         assert win.open_action.text() == "Open C source…"
         assert win.new_source_action.isEnabled()
-        assert win.new_source_action.text() == "New C template"
+        assert win.new_source_action.text() == "New C U/V demo"
         assert win.save_source_action.isEnabled()
         assert win.save_source_as_action.isEnabled()
         assert win.save_source_as_action.text() == "Save C source as…"
@@ -1622,7 +1622,8 @@ def scenario(app, outdir):
         assert "column" in (
             win.c_source.cursor_position.accessibleDescription())
         assert win.c_source.source_badge.accessibleDescription() == (
-            "Source origin built-in template; not saved. No unsaved changes.")
+            "Source origin built-in U/V demo; not saved. No unsaved changes.")
+        assert win.c_source.template_btn.text() == "New U/V demo"
         assert win.c_source.optimization.accessibleName()
         assert win.c_source.optimization.count() == 4
         for index in range(win.c_source.optimization.count()):

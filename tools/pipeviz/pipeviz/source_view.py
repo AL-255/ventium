@@ -2218,7 +2218,7 @@ class CView(QWidget):
         note.setStyleSheet("color:#8b949e;")
         controls.addWidget(note)
         controls.addStretch(1)
-        self.template_btn = QPushButton("New template")
+        self.template_btn = QPushButton("New U/V demo")
         self.template_btn.setToolTip(
             "Replace the editor with a dual-Fibonacci U/V template (Ctrl+N)")
         self.open_btn = QPushButton("Open…")
@@ -2249,7 +2249,7 @@ class CView(QWidget):
         self.compile_btn.setStyleSheet(
             "background:#1f6feb;color:white;font-weight:bold;border:1px solid #388bfd;")
         c_actions = (
-            (self.template_btn, "Create new C template"),
+            (self.template_btn, "Create new dual-Fibonacci U/V demo"),
             (self.open_btn, "Open C source"),
             (self.save_btn, "Save C source as"),
             (self.compile_btn, "Compile C to assembly"),
@@ -2296,7 +2296,7 @@ class CView(QWidget):
         status_row.addWidget(self.source_badge)
         layout.addLayout(status_row)
         self._path = None
-        self._source_origin = "built-in template"
+        self._source_origin = "built-in U/V demo"
         self._last_dir = str(_TOOL_DIR)
         self._diagnostic_revision = -1
         self._compiled_optimization = None
@@ -2391,7 +2391,7 @@ class CView(QWidget):
         self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
-        self._source_origin = "built-in template"
+        self._source_origin = "built-in U/V demo"
         self.diagnostics.reset()
         self._diagnostic_revision = -1
         self._compiled_optimization = None

@@ -422,7 +422,7 @@ belong to the exact source revision that produced them: editing either source
 clears the prior result, and changing C's optimization level clears the old
 compiler result and prompts you to compile again.
 
-The built-in C template is itself a reproducible U/V demonstration. It advances
+The C toolbar's **New U/V demo** is itself a reproducible demonstration. It advances
 two independent Fibonacci recurrences for a runtime-loaded 120 iterations;
 `volatile` input and result storage prevent `-O2` from replacing the work with
 constants. Compile it at `-O2`, assemble and run it, then return to Visualizer:

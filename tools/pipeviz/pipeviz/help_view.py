@@ -329,7 +329,7 @@ source-like, O1 is a moderate compromise, O2 is the performance-oriented
 default for U/V experiments, and Os favors compact code. Every advertised level
 is compiled and assembled by the authoring regression.</p>
 <h2>Run the built-in U/V experiment</h2>
-<p>The built-in C template is a real U/V experiment: two independent Fibonacci
+<p>The C toolbar's <b>New U/V demo</b> is a real experiment: two independent Fibonacci
 chains run for a volatile, runtime-loaded 120 iterations, so O2 cannot replace
 them with constants. Compile at O2, Assemble + Run, then run the same ELF once
 with <b>U/V issue</b> enabled and once disabled (apply/reset after each change).
@@ -339,7 +339,7 @@ more than 400 V retirements and at least a 20% cycle advantage.</p>
 <p>Generated artifacts stay under <code>tools/pipeviz/.generated/</code> and
 are ignored by Git.</p>
 <h2>Shared source controls</h2>
-<p>Ctrl+N creates the C demo; Ctrl+O opens C; Ctrl+S and Ctrl+Shift+S save.
+<p>Ctrl+N activates <b>New U/V demo</b>; Ctrl+O opens C; Ctrl+S and Ctrl+Shift+S save.
 Ctrl+B and Ctrl+Enter both compile into Assembly. Ctrl+F searches, Ctrl+G goes
 to a line, and Ctrl+/ toggles C line comments. For indentation, gutter
 selection, matching delimiters, zoom, diagnostics, and source-linked
