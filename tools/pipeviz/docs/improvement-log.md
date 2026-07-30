@@ -9,6 +9,28 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — every Reset rejection remains actionable
+
+**Reset-path audit:** malformed address text had durable feedback, but four
+later rejection points did not. An ELF forced into system mode, an oversized
+BIOS, out-of-range program placement, or backend construction failure showed a
+modal and then exposed an older action. A successful stale-SoC fallback was
+also immediately relabelled as an ordinary load/reset, hiding that execution
+was using the core-only model.
+
+**Changes:** every user-correctable rejection now leaves an eight-second amber
+`Reset blocked` action with the exact recovery detail; backend and double
+SoC/core construction failures leave red `Reset failed` actions. Candidate
+program rollback retains that new failure while restoring every field and the
+still-live session. Successful SoC-to-core fallback remains amber and explicitly
+says `using core model` after both direct Reset and program load.
+
+**Verification:** offscreen interaction tests cover direct core failure, double
+SoC/core failure, candidate-load rollback, ELF/system mismatch, oversized BIOS,
+32-bit-crossing placement, and successful stale-SoC fallback. Each case locks
+backend identity, requested-mode coherence, exact status, complete
+tooltip/accessibility detail, and semantic color.
+
 ## July 30 continuation — invalid Reset feedback completes its lifecycle
 
 **Reset-validation audit:** Apply + Reset already red-outlined/focused an

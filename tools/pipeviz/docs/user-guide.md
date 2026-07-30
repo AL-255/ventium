@@ -107,12 +107,19 @@ reload also leaves the current session intact until its preserved setup
 validates. An invalid reload focuses and red-outlines the blocking field and
 retains an eight-second amber correction in the action row. Apply + Reset does
 the same, and a corrected reset replaces that stale warning with a neutral
-completion notice.
+completion notice. ELF/system mismatch, oversized BIOS placement, and
+out-of-range segments likewise preserve the live session and retain an amber
+reason after their dialog closes. A backend-construction failure retains a red
+reason; if it happened while opening a replacement program, Pipeviz rolls the
+workload controls back without losing that explanation.
 System boot disables entry/load/ESP because the architectural reset vector,
 BIOS top-alignment, and firmware stack setup determine those values.
 If a requested SoC model is unavailable, Pipeviz warns and uses the core model.
 The checkbox changes only after that fallback is constructed; if both
 constructions fail, the old live session and its requested mode remain intact.
+The action row stays amber and says **using core model** after a successful
+fallback, or red if both models failed, so the active model is never implied
+only by a dismissed dialog.
 
 Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
 next retirement, and **Step N** for a useful analysis window. Insn feedback

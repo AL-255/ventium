@@ -334,9 +334,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 | **Open snapshot…** | resume a host testbench `--save-state` checkpoint. Select either `<prefix>.aux` or `<prefix>.vlt`; the visualizer loads the pair and begins a new visible timeline at that exact state. The **Restore snapshot** button returns to the same point after exploring. |
 | entry / load / esp | validated 32-bit-hex reset state. Edits mark **Apply + Reset** rather than silently diverging from the running model. An invalid reset focuses/red-outlines the field and leaves an amber correction; a valid reset replaces it with neutral completion. The command-line equivalents `--entry`, `--load`, and `--esp` take precedence over file metadata. |
 | **U/V issue** | enable the U/V fast path — **on by default**; changing it marks **Apply + Reset** because issue mode is selected at reset. Returning all setup fields to their applied values removes that warning. |
-| **system** | cold-boot in system mode (real-mode reset at `F000:FFF0`; needed for paging/TLB). Entry/load/ESP are disabled because system placement and firmware determine them. |
-| **SoC** | run the full `ventium_soc` (internal port-I/O / PIC / PIT) — needed for bare-metal images like test386. Requires `build.sh --soc`; auto-ticked for test386. |
-| **Reset** | re-cold-reset on a fresh model (clears memory) |
+| **system** | cold-boot a raw BIOS in system mode (real-mode reset at `F000:FFF0`; needed for paging/TLB). Entry/load/ESP are disabled because system placement and firmware determine them. An ELF mismatch or oversized BIOS leaves the live session intact and an amber recovery reason. |
+| **SoC** | run the full `ventium_soc` (internal port-I/O / PIC / PIT) — needed for bare-metal images like test386. Requires `build.sh --soc`; auto-ticked for test386. A successful core-only fallback remains explicitly amber; a double failure remains red and preserves the old session and requested mode. |
+| **Reset** | re-cold-reset on a fresh model (clears memory). Invalid placement keeps the live backend intact and retains an amber reason; backend construction failure retains a red reason, including after candidate-load rollback. |
 | **Step clk** (`.`) | advance one core clock |
 | **Step insn** (`i`) | advance until the next retirement |
 | **Step N** | advance N clocks |

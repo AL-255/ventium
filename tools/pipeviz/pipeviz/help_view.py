@@ -113,12 +113,18 @@ explicit.</p>
  invalid preserved address leaves the live backend untouched, focuses that
  field, and retains an amber correction after the modal warning. Apply + Reset
  uses the same correction and replaces it with a neutral completion notice
- after a valid reset.</p>
+ after a valid reset. ELF/system mismatch, an oversized BIOS, or an out-of-range
+ segment also preserves the live session and retains an amber reason. A backend
+ construction failure leaves a red reason even when a candidate program is
+ rolled back.</p>
 <h2>System images and snapshots</h2>
 <p>Use <b>system</b> for a raw BIOS image that boots at F000:FFF0. <b>SoC</b>
  implies system and additionally needs a current <code>build.sh --soc</code>
  backend. Entry/load/ESP are disabled in system mode because reset-vector
- placement and firmware determine them. Use <b>Open snapshot</b> for a paired host-testbench
+ placement and firmware determine them. If SoC falls back successfully, the
+ action row stays amber and says <b>using core model</b>; if both models fail,
+ it stays red while the old session and requested mode remain intact. Use
+ <b>Open snapshot</b> for a paired host-testbench
  <code>.aux</code>/<code>.vlt</code> checkpoint. On the command line,
  <code>--snapshot</code> is exclusive and restores exactly that target; it does
  not auto-load a demo afterward.</p>

@@ -927,6 +927,13 @@ def scenario_startup(app, outdir):
         assert win.backend is old_backend and old_backend.h
         assert reset_errors == [
             ("Backend reset failed", "synthetic construction failure")]
+        assert win.action_hint.text() == (
+            "Reset failed · backend unavailable")
+        assert win.action_hint.toolTip() == (
+            "synthetic construction failure")
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#f85149" in win.action_hint.styleSheet()
 
         class FailSocFallback:
             @staticmethod
@@ -956,6 +963,11 @@ def scenario_startup(app, outdir):
         assert win.soc_cb.isChecked() and win.sys_cb.isChecked()
         assert [title for title, _text in fallback_messages] == [
             "SoC model missing", "Backend reset failed"]
+        assert win.action_hint.text() == (
+            "Reset failed · SoC and core backends unavailable")
+        assert "synthetic fallback construction failure" in (
+            win.action_hint.toolTip())
+        assert "#f85149" in win.action_hint.styleSheet()
         win.soc_cb.setChecked(False)
         win.sys_cb.setChecked(False)
 
@@ -1630,6 +1642,40 @@ def scenario_branch_transport(app, outdir):
             win.action_hint.toolTip())
         assert "#f85149" in win.action_hint.styleSheet()
 
+        # If a valid candidate reaches Reset but backend construction fails,
+        # restore the complete prior session while retaining the new failure
+        # reason rather than resurrecting a stale success notice.
+        candidate_path = repo_path("build/verify/mb_dmiss.cycle.flat")
+        prior_image_path = win.image_path
+        prior_backend = win.backend
+        prior_cycle = prior_backend.cycle_count()
+        real_backend = main_module.Backend
+        reset_failures = []
+
+        def reject_candidate_backend(*_args, **_kwargs):
+            raise RuntimeError("synthetic replacement construction failure")
+
+        try:
+            main_module.Backend = reject_candidate_backend
+            QMessageBox.critical = staticmethod(
+                lambda _parent, title, text:
+                reset_failures.append((title, text)))
+            assert not win.load_image(candidate_path)
+        finally:
+            main_module.Backend = real_backend
+            QMessageBox.critical = old_critical
+        assert reset_failures == [
+            ("Backend reset failed",
+             "synthetic replacement construction failure")]
+        assert win.backend is prior_backend and win.backend.h
+        assert win.backend.cycle_count() == prior_cycle
+        assert win.image_path == prior_image_path
+        assert win.action_hint.text() == (
+            "Reset failed · backend unavailable")
+        assert win.action_hint.toolTip() == (
+            "synthetic replacement construction failure")
+        assert "#f85149" in win.action_hint.styleSheet()
+
         win.on_run_toggle()
         snapshot_cycle = win.backend.cycle_count()
         snapshot_backend = win.backend
@@ -1907,6 +1953,13 @@ def scenario_branch_transport(app, outdir):
         assert invalid_seen == ["Invalid program placement"]
         assert win.backend is old_backend
         assert win.backend.retire_count() == old_retired
+        assert win.action_hint.text() == (
+            "Reset blocked · invalid program placement")
+        assert "crosses the 32-bit address-space limit" in (
+            win.action_hint.toolTip())
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#e3b341" in win.action_hint.styleSheet()
         win.load_e.setText("0x08048000")
 
         visible_v = set_filter(app, win.trace, "pipe:V")
@@ -2622,6 +2675,29 @@ def scenario_elf_and_random_branches(app, outdir):
         assert not win.load_e.isEnabled()
         assert win.entry_e.isEnabled() and win.esp_e.isEnabled()
         assert int(win.entry_e.text(), 0) == 0x08048000
+        # ELF segments are user-mode payloads. Accidentally ticking System
+        # must preserve the live session and leave an actionable warning after
+        # the modal closes.
+        old_backend = win.backend
+        warnings = []
+        old_warning = QMessageBox.warning
+        try:
+            QMessageBox.warning = staticmethod(
+                lambda _parent, title, text:
+                warnings.append((title, text)))
+            win.sys_cb.setChecked(True)
+            assert not win.on_reset()
+        finally:
+            QMessageBox.warning = old_warning
+        assert warnings and warnings[-1][0] == "ELF is a user-mode program"
+        assert win.backend is old_backend and old_backend.h
+        assert win.action_hint.text() == (
+            "Reset blocked · ELF requires user mode")
+        assert "Untick system and SoC" in win.action_hint.toolTip()
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#e3b341" in win.action_hint.styleSheet()
+        win.sys_cb.setChecked(False)
         win.stepn.setValue(800)
         click(app, win.stepn_btn)
         stats = win.pipeline.waterfall.stats()
@@ -2653,6 +2729,29 @@ def scenario_system_and_switch(app, outdir):
                    for mode in (win.cyc_cb, win.sys_cb, win.soc_cb))
         assert "F000:FFF0" in win.entry_e.toolTip()
         assert "top-aligned" in win.load_e.toolTip()
+        # A BIOS cannot be top-aligned when it exceeds the 1 MiB real-mode
+        # aperture. Reject it without discarding the running system session.
+        old_backend = win.backend
+        real_image_bytes = win.image_bytes
+        warnings = []
+        old_warning = QMessageBox.warning
+        try:
+            QMessageBox.warning = staticmethod(
+                lambda _parent, title, text:
+                warnings.append((title, text)))
+            win.image_bytes = b"\0" * 0x100001
+            assert not win.on_reset()
+        finally:
+            win.image_bytes = real_image_bytes
+            QMessageBox.warning = old_warning
+        assert warnings and warnings[-1][0] == "Invalid system image"
+        assert win.backend is old_backend and old_backend.h
+        assert win.action_hint.text() == (
+            "Reset blocked · invalid system image")
+        assert "between 1 byte and 1 MiB" in win.action_hint.toolTip()
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#e3b341" in win.action_hint.styleSheet()
         reset_state = win.backend.state()
         assert reset_state.eip == 0xFFF0 and reset_state.cs_base == 0x000F0000
         assert win.tables.mem.addr == 0x000FFFF0
@@ -2772,6 +2871,12 @@ def scenario_stale_soc_fallback(app, outdir):
         assert not win.soc_cb.isChecked() and not win.backend.soc
         assert win.sys_cb.isChecked()
         assert win._has_session() and win.step1_btn.isEnabled()
+        assert win.action_hint.text().endswith("· using core model")
+        assert "libventium_viz_soc.so is stale or unreadable" in (
+            win.action_hint.toolTip())
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#e3b341" in win.action_hint.styleSheet()
         save_shot(app, win, outdir, "07_stale_soc_safe_fallback")
         print("OK stale SoC: recoverable warning and core/system fallback (no process abort)")
     finally:

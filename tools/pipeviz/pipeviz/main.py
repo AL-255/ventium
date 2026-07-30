@@ -1777,6 +1777,15 @@ class MainWindow(QMainWindow):
         self._sync_config_enabled()
         self.setWindowTitle(f"Ventium pipeline visualizer — {os.path.basename(path)} ({kind})")
         if not self.on_reset():
+            # Preserve the rejection raised by Reset while rolling every
+            # workload field back to the still-live session.
+            failure_notice = {
+                "notice": self.action_hint.text(),
+                "notice_tip": self.action_hint.toolTip(),
+                "notice_accessible":
+                    self.action_hint.accessibleDescription(),
+                "notice_style": self.action_hint.styleSheet(),
+            }
             # Reset validates placement and constructs a replacement backend
             # transactionally. If it rejects the candidate, keep every visible
             # part of the still-live prior session coherent with that backend.
@@ -1811,11 +1820,11 @@ class MainWindow(QMainWindow):
             self.reset_btn.setAccessibleDescription(
                 previous["reset_description"])
             self.reset_btn.setStyleSheet(previous["reset_style"])
-            self.action_hint.setText(previous["notice"])
-            self.action_hint.setToolTip(previous["notice_tip"])
+            self.action_hint.setText(failure_notice["notice"])
+            self.action_hint.setToolTip(failure_notice["notice_tip"])
             self.action_hint.setAccessibleDescription(
-                previous["notice_accessible"])
-            self.action_hint.setStyleSheet(previous["notice_style"])
+                failure_notice["notice_accessible"])
+            self.action_hint.setStyleSheet(failure_notice["notice_style"])
             self._sync_config_enabled()
             self._sync_workspace_file_actions()
             return False
@@ -1824,13 +1833,21 @@ class MainWindow(QMainWindow):
         loaded_text = (
             f"{'Reloaded' if preserve_setup else 'Loaded'} {kind}: "
             f"{os.path.basename(path)}")
-        if manifest_warning_detail is not None:
+        fallback_detail = getattr(
+            self, "_backend_fallback_detail", None)
+        if manifest_warning_detail is not None or fallback_detail is not None:
+            qualifications = []
+            details = [loaded_text]
+            if manifest_warning_detail is not None:
+                qualifications.append("manifest ignored")
+                details.append(manifest_warning_detail)
+            if fallback_detail is not None:
+                qualifications.append("using core model")
+                details.append(fallback_detail)
             self._notice(
-                f"{loaded_text} · manifest ignored",
+                f"{loaded_text} · {' · '.join(qualifications)}",
                 ms=8000, severity="warning",
-                detail=(
-                    f"{loaded_text} · manifest ignored\n"
-                    f"{manifest_warning_detail}"))
+                detail="\n\n".join(details))
         else:
             self._notice(loaded_text)
         return True
@@ -1982,6 +1999,7 @@ class MainWindow(QMainWindow):
     def _fresh_backend(self, soc=False):
         candidate = None
         fell_back_to_core = False
+        self._backend_fallback_detail = None
         try:
             if soc and not Backend.supports_snapshot(self._libpath, soc=True):
                 raise FileNotFoundError(
@@ -1990,18 +2008,30 @@ class MainWindow(QMainWindow):
             candidate = Backend(self._libpath, soc=soc)
         except (FileNotFoundError, OSError, RuntimeError) as e:
             if soc:
-                QMessageBox.warning(self, "SoC model missing",
-                                    f"{e}\n\nFalling back to ventium_top. Run "
-                                    "`tools/pipeviz/build.sh --soc` to build it.")
+                fallback_detail = (
+                    f"{e}\n\nFalling back to ventium_top. Run "
+                    "`tools/pipeviz/build.sh --soc` to build it.")
+                QMessageBox.warning(
+                    self, "SoC model missing", fallback_detail)
                 fell_back_to_core = True
                 try:
                     candidate = Backend(self._libpath, soc=False)
                 except (FileNotFoundError, OSError, RuntimeError) as fallback_error:
                     QMessageBox.critical(
                         self, "Backend reset failed", str(fallback_error))
+                    self._notice(
+                        "Reset failed · SoC and core backends unavailable",
+                        ms=8000, severity="error",
+                        detail=(
+                            f"SoC model unavailable:\n{e}\n\n"
+                            f"Core fallback failed:\n{fallback_error}"))
                     return False
+                self._backend_fallback_detail = fallback_detail
             else:
                 QMessageBox.critical(self, "Backend reset failed", str(e))
+                self._notice(
+                    "Reset failed · backend unavailable",
+                    ms=8000, severity="error", detail=str(e))
                 return False
         old = self.backend
         self.backend = candidate
@@ -2024,9 +2054,14 @@ class MainWindow(QMainWindow):
         soc = self.soc_cb.isChecked()
         system = self.sys_cb.isChecked() or soc      # SoC always boots system mode
         if system and self.image_kind == "ELF":
-            QMessageBox.warning(self, "ELF is a user-mode program",
-                                "System/SoC boot expects a raw BIOS image. Untick system "
-                                "and SoC to run this ELF at its entry point.")
+            message = (
+                "System/SoC boot expects a raw BIOS image. Untick system "
+                "and SoC to run this ELF at its entry point.")
+            QMessageBox.warning(
+                self, "ELF is a user-mode program", message)
+            self._notice(
+                "Reset blocked · ELF requires user mode",
+                ms=8000, severity="warning", detail=message)
             return False
         entry = esp = load = None
         if not system:
@@ -2063,6 +2098,9 @@ class MainWindow(QMainWindow):
                 load = _system_load_address(len(self.image_bytes))
             except ValueError as e:
                 QMessageBox.warning(self, "Invalid system image", str(e))
+                self._notice(
+                    "Reset blocked · invalid system image",
+                    ms=8000, severity="warning", detail=str(e))
                 return False
             segments = None
         else:
@@ -2075,6 +2113,9 @@ class MainWindow(QMainWindow):
                 _validate_segments(segments)
             except ValueError as e:
                 QMessageBox.warning(self, "Invalid program placement", str(e))
+                self._notice(
+                    "Reset blocked · invalid program placement",
+                    ms=8000, severity="warning", detail=str(e))
                 return False
         # fresh model => clean memory
         if not self._fresh_backend(soc=soc):
@@ -2106,9 +2147,18 @@ class MainWindow(QMainWindow):
         self._clear_reset_required()
         self._refresh_all()
         self._set_transport_enabled(True)
-        self._notice(
+        reset_text = (
             "Applied setup and reset program"
             if applying_setup else "Reset program")
+        if self._backend_fallback_detail:
+            self._notice(
+                f"{reset_text} · using core model",
+                ms=8000, severity="warning",
+                detail=(
+                    f"{reset_text} using the core model.\n"
+                    f"{self._backend_fallback_detail}"))
+        else:
+            self._notice(reset_text)
         return True
 
     # ---- register pinning (AS-OF a retired instruction) + playhead ----
