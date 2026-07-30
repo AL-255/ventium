@@ -129,7 +129,9 @@ The gold `@…` value is the instruction’s effective offset—the same address
 domain used by the timing D-cache. Memory drill-down separately retains its
 segment-linear and translated physical address.
 Use `/` from anywhere, then Enter/F3, Shift+F3, and Escape to focus, traverse,
-and clear results. If you only inspected a filter, clearing it restores the
+and clear results. With the Pipeline diagram focused and the filter already
+empty, Escape instead returns a pinned retirement to LIVE without advancing.
+If you only inspected a filter, clearing it restores the
 newest live rows; if you selected a result, that historical context remains.
 Hotspots and Branches rows activate with Enter as well as the mouse.
 Large steps remain bounded and honest: Trace labels its newest 6,000

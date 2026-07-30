@@ -353,6 +353,8 @@ Procedure:
 7. Require Unpin to clear Trace current/selection, Pipeline row/PC/playhead/
    dependency cues, Mem-map/Memory drill-down highlights, and any Assembly
    execution marker while retaining the source map.
+8. Focus the timing diagram and require Escape with an empty Trace filter to
+   perform the same zero-clock LIVE transition.
 
 Observed evidence:
 

@@ -236,7 +236,9 @@ next retirement, and `F5` runs or pauses. `Ctrl+0` restores the recommended
 splitter proportions. `Alt+V`, `Alt+A`, and `Alt+C` switch workspaces;
 `Alt+1` through `Alt+0` select the ten analysis tabs.
 `/` focuses the trace filter from anywhere; Enter/F3 and Shift+F3 move
-among its results; Escape clears it. `F1` opens the complete shortcut reference.
+among its results; Escape clears a nonempty filter, or unpins the current
+retirement when the filter is already empty and the Pipeline diagram has focus.
+`F1` opens the complete shortcut reference.
 Inside Assembly/C, `Ctrl+O` instead opens that source type and `Ctrl+S` saves
 the current source; an asterisk on its workspace tab marks unsaved edits.
 New/Open, generated-source replacement, and Quit protect those edits with
@@ -250,8 +252,10 @@ two-way); **shift-click** a second Konata row to measure the cycle Δ between tw
 instructions; **click** a point in the **Mem map** to jump the trace + Memory tab
 to that load/store; **click** the IPC sparkline to seek the playhead. Click
 **Unpin** beside the amber register strip to return to LIVE without advancing;
-stepping also unpins. Both routes clear the linked historical selection while
-leaving any assembled source map available for the next click.
+focus the Pipeline diagram and press Escape with an empty Trace filter for the
+keyboard equivalent. Stepping also unpins. All three routes clear the linked
+historical selection while leaving any assembled source map available for the
+next click.
 
 ## Architecture
 

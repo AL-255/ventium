@@ -741,6 +741,8 @@ class MainWindow(QMainWindow):
         # post-commit architectural state + drops a playhead at its cycle.
         self.trace.instSelected.connect(self._pin_to)
         self.pipeline.konata.plot.rowClicked.connect(self._pin_to)
+        self.pipeline.konata.plot.escapeRequested.connect(
+            self._escape_visualizer)
         # The stage board represents the instructions that are live *now*, before
         # they necessarily have a retirement record. Link its occupied U/V/FP
         # cells directly by PC so authored source navigation works in-flight too.
@@ -773,6 +775,13 @@ class MainWindow(QMainWindow):
         self._debug_shortcuts.append(search_shortcut)
         self.workspace.currentChanged.connect(self._workspace_changed)
         self._workspace_changed(self.workspace.currentIndex())
+
+    def _escape_visualizer(self):
+        """Resolve Escape from the narrowest transient context outward."""
+        if self.trace.filt.text():
+            self.trace.filt.clear()
+        elif getattr(self, "_pinned_n", None) is not None:
+            self._return_live()
 
     def _select_workspace(self, index):
         if 0 <= index < self.workspace.count():

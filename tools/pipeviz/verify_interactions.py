@@ -1089,6 +1089,17 @@ def scenario_branch_transport(app, outdir):
             assert plot.playhead == pair_cycle
             assert win._pinned_n == exact_n
 
+        # Escape is the keyboard equivalent of Unpin, but only after the
+        # narrower Trace-filter Escape behavior has nothing to clear.
+        escape_cycle = win.backend.state().core_cyc
+        plot.setFocus()
+        QTest.keyClick(plot, Qt.Key_Escape)
+        settle(app)
+        assert win.backend.state().core_cyc == escape_cycle
+        assert win._pinned_n is None
+        assert win.regs.state_banner.text().startswith("LIVE")
+        assert win.trace.tbl.currentRow() < 0 and plot.sel_row is None
+
         # Reload validates preserved setup before touching the running session.
         old_backend = win.backend
         old_retired = win.backend.retire_count()

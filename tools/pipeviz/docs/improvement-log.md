@@ -39,6 +39,13 @@ Assembly execution marker; retain the DWARF map; and leave the RTL cycle
 unchanged. The D-cache and authoring regressions cover both drill-down and
 source-linked origins rather than relying only on an unmapped fixture.
 
+**Keyboard-parity audit:** returning to LIVE was still pointer-only. Escape in
+the focused Pipeline now resolves the narrowest context first: it clears a
+nonempty Trace filter, otherwise it performs the same atomic zero-clock Unpin.
+The binding lives on the timing widget, so it cannot conflict with Assembly/C
+completion or inline-search Escape. A focused-timing regression proves cycle
+invariance and cue clearing.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority

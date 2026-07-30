@@ -265,13 +265,14 @@ fresh visible epoch at that point.</p>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
  <tr><td><b>Enter / F3</b></td><td>next filtered retirement (Visualizer)</td></tr>
  <tr><td><b>Shift+F3</b></td><td>previous filtered retirement (Visualizer)</td></tr>
- <tr><td><b>Escape</b></td><td>clear the trace filter</td></tr>
+ <tr><td><b>Escape</b></td><td>clear a focused Trace filter; in focused Pipeline, Unpin to LIVE</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>
 </table>
 <p>Click a trace/timing row to pin it; use the register strip's <b>Unpin</b>
-button to return to LIVE without executing. Shift-click a second timing row to
+button or focused-Pipeline Escape with an empty filter to return to LIVE without executing.
+Shift-click a second timing row to
 measure cycle distance. Click the IPC sparkline to seek a cycle.</p>
 """),
 ))

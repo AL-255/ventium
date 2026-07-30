@@ -82,7 +82,8 @@ class RegsView(QWidget):
         self.unpin_btn.setAccessibleName("Unpin registers")
         self.unpin_btn.setFixedHeight(20)
         self.unpin_btn.setToolTip(
-            "Return Registers to current live state without advancing the model")
+            "Return Registers to current live state without advancing the model "
+            "(or focus Pipeline and press Escape with an empty Trace filter)")
         self.unpin_btn.setStyleSheet(
             "QToolButton{color:#e3b341;background:#211a08;"
             "border:1px solid #6e5420;padding:1px 6px;}"

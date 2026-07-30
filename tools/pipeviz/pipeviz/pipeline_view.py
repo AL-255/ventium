@@ -463,6 +463,7 @@ class _KonataPlot(QWidget):
     lifecycles from the per-cycle trace and paints only the visible region."""
     rowClicked = Signal(int)     # emits the retire n of the clicked instruction
     zoomRequested = Signal(int)  # focused Ctrl+- / Ctrl+=, reliable after dialogs
+    escapeRequested = Signal()   # clear filter first, otherwise return pin to LIVE
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -915,6 +916,10 @@ class _KonataPlot(QWidget):
     def keyPressEvent(self, event):
         """Make the timing diagram usable without pixel-precise clicking."""
         key = event.key()
+        if key == Qt.Key_Escape:
+            self.escapeRequested.emit()
+            event.accept()
+            return
         if event.modifiers() & Qt.ControlModifier:
             if key == Qt.Key_Minus:
                 self.zoomRequested.emit(-1)
