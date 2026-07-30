@@ -387,7 +387,8 @@ object, and ELF files stay in `tools/pipeviz/.generated/`, which Git ignores.
 Select **C** (`Alt+C`) and write a freestanding `int main(void)`. Standard
 library calls and hosted headers are intentionally unavailable; the point is a
 small, inspectable microarchitecture experiment. Choose `-O0`, `-O1`, `-O2`,
-or `-Os`, then press **Compile → Assembly** (`Ctrl+Enter`). Pipeviz invokes:
+or `-Os`, then press **Compile → Assembly** (`Ctrl+B` or `Ctrl+Enter`). Pipeviz
+invokes:
 
 - GCC's 32-bit Pentium target;
 - Intel assembly syntax with SSE/MMX excluded by the P5 target;

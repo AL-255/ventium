@@ -1907,7 +1907,8 @@ class AssemblyView(QWidget):
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
         self.status = _StatusLabel(
-            "Ready · Ctrl+Space completes opcodes · Ctrl+Enter assembles and runs",
+            "Ready · Ctrl+Space completes · Ctrl+B assembles · "
+            "Ctrl+Enter assembles and runs",
             "Assembly workbench status")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         status_row.addWidget(self.status, 1)
@@ -2261,7 +2262,7 @@ class CView(QWidget):
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
         self.status = _StatusLabel(
-            "Define int main(void); Compile emits editable GNU Intel assembly",
+            "Define int main(void); Ctrl+B or Ctrl+Enter compiles to Assembly",
             "C compiler workbench status")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         status_row.addWidget(self.status, 1)

@@ -229,6 +229,7 @@ def scenario(app, outdir):
     try:
         assert [win.workspace.tabText(i) for i in range(3)] == [
             "Visualizer", "Assembly", "C"]
+        assert "Ctrl+B or Ctrl+Enter" in win.c_source.status.text()
         assert not win.new_source_action.isEnabled()
         assert not win.save_source_action.isEnabled()
         assert not win.save_source_as_action.isEnabled()
@@ -273,6 +274,8 @@ def scenario(app, outdir):
         assert win.assembly.editor.accessibleName() == "Assembly source editor"
         assert win.assembly.status.accessibleName() == (
             "Assembly workbench status")
+        assert "Ctrl+B assembles" in win.assembly.status.text()
+        assert "Ctrl+Enter assembles and runs" in win.assembly.status.text()
         assert win.assembly.status.toolTip() == win.assembly.status.text()
         assert win.assembly.status.accessibleDescription() == (
             win.assembly.status.text())

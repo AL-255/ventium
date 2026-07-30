@@ -35,7 +35,9 @@ assemble-only remained pointer-only, making a safe preflight less convenient.
 Ctrl+B now assembles without loading the backend in Assembly and performs
 Compile→Assembly in C. Both it and Ctrl+Enter use editor-scoped shortcuts, so
 hidden source workspaces cannot steal Visualizer input. Acceptance dispatches
-each live shortcut and verifies Assemble versus Compile routing.
+each live shortcut and verifies Assemble versus Compile routing. Initial
+Assembly/C status text and the dedicated C guide now advertise both paths
+consistently.
 
 **Source New-template audit:** the primary New template button had no direct
 keyboard equivalent while Open/Save/Save As did. File now exposes a contextual
