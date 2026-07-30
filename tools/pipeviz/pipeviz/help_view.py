@@ -144,7 +144,10 @@ The IPC/event strip is also a captured-history navigator: Tab to its blue
 outline, use Left/Right for one cycle, Page Up/Page Down for 64 cycles, or
 Home/End for the captured edges, then Enter to reopen the selected cycle.
 Seeking moves only the cycle playhead; it never guesses U or V from an
-ambiguous dual-retire cycle or changes an exact Trace/Register pin.</p>
+ambiguous dual-retire cycle or changes an exact Trace/Register pin. The action
+line states the selected cycle and whether a retirement pin remained unchanged.
+Selecting a Trace/Pipeline instruction instead reports its retirement, cycle,
+lane, PC, and linked Assembly line.</p>
 <h2>Examples</h2>
 <ul>
  <li><b>Dual Fibonacci:</b> two independent recurrence chains let adjacent

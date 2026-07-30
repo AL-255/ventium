@@ -1301,6 +1301,8 @@ def scenario_branch_transport(app, outdir):
             assert plot.insns[plot.sel_row]["n"] == exact_n
             assert plot.playhead == pair_cycle
             assert win._pinned_n == exact_n
+            assert win.action_hint.text().startswith(
+                f"Pinned retirement n={exact_n} · cycle {pair_cycle} · ")
 
         # Escape is the keyboard equivalent of Unpin, but only after the
         # narrower Trace-filter Escape behavior has nothing to clear.
@@ -1511,6 +1513,9 @@ def scenario_branch_transport(app, outdir):
         settle(app)
         assert spark._kbd_cyc == spark._last_cyc - 1
         assert plot.playhead == spark._kbd_cyc
+        assert win.action_hint.text() == (
+            f"Pipeline cycle {spark._kbd_cyc} selected · "
+            f"retirement pin n={pinned_n} unchanged")
         QTest.keyClick(spark, Qt.Key_PageUp)
         settle(app)
         assert spark._kbd_cyc == max(first_cyc, spark._last_cyc - 65)

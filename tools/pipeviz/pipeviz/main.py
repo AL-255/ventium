@@ -825,6 +825,7 @@ class MainWindow(QMainWindow):
         # cells directly by PC so authored source navigation works in-flight too.
         self.pipeline.board.instructionClicked.connect(
             self._live_instruction_clicked)
+        self.pipeline.spark.cycleClicked.connect(self._cycle_seeked)
         # drill-down: click a Hotspots / Branches PC row -> jump the trace to it
         self.tables.pcClicked.connect(self._select_pc_origin)
         # drill-down: click a Mem-map access point -> jump the trace to that retire n
@@ -1507,16 +1508,31 @@ class MainWindow(QMainWindow):
                 f"{context} at 0x{int(pc):08x} → Assembly line {line} "
                 "(Alt+A to inspect)")
 
+    def _cycle_seeked(self, cyc):
+        """Describe a playhead-only seek without implying an instruction pin."""
+        pinned = self._pinned_n
+        self._notice(
+            f"Pipeline cycle {int(cyc)} selected · "
+            + (f"retirement pin n={pinned} unchanged"
+               if pinned is not None else "no instruction pinned"))
+
     def _pin_to(self, n):
         recs = self.backend.get_retires(max(0, n - 1), 2)
         rec = next((r for r in recs if r.n == n), None)
         if rec is None:
+            self._notice(f"Retirement n={int(n)} is no longer available to pin")
             return
         prev = next((r for r in recs if r.n == n - 1), None)
         self._pinned_n = n
         self.regs.show_retire(rec, prev)
-        self._highlight_assembly_pc(
+        line = self._highlight_assembly_pc(
             rec.pc, f"Retired instruction n={int(rec.n)}")
+        lane = "U" if int(rec.pipe) == 0 else (
+            "V" if int(rec.pipe) == 1 else "—")
+        source = f" · Assembly L{line}" if line is not None else ""
+        self._notice(
+            f"Pinned retirement n={int(rec.n)} · cycle {int(rec.cyc)} · "
+            f"{lane} · PC 0x{int(rec.pc):08x}{source}")
 
     def _unpin(self):
         if getattr(self, "_pinned_n", None) is not None:

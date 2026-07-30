@@ -181,6 +181,9 @@ Left/Right for one cycle, Page Up/Page Down for 64 cycles, or Home/End for the
 captured edges. Enter reopens its selected cycle in the Pipeline view. Seeking
 moves only the cycle playhead; it never guesses U or V from a dual-retire cycle
 or changes an exact Trace/Register retirement pin.
+The action line confirms that distinction: a cycle seek names its cycle and
+whether the retirement pin stayed unchanged, while an instruction selection
+reports the exact retirement, cycle, lane, PC, and linked Assembly line.
 **Cycles** classifies every captured clock exactly once. **front end** combines
 fetch/decode, while **slow path** combines the integer execute, load/store,
 string, and I/O micro-operation states; neither label pretends `S_EXEC` is

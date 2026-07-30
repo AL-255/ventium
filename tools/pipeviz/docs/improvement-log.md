@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Selection-feedback audit:** Pipeline/Trace pinning and IPC-history seeks could
+leave an older transport message in the action line, obscuring whether the user
+selected a cycle or an exact instruction. Retirement selections now report n,
+cycle, U/V lane, PC, and any Assembly line; playhead-only seeks report the cycle
+and explicitly preserve the exact pin (or state that none exists). Dual-retire
+and keyboard IPC navigation checks lock both identities.
+
 **Focus-announcement audit:** the main keyboard chain reached raw-value spin
 boxes, a blank event selector, an unlabeled Trace table, and unlabeled analysis
 tabs; the Pipeline scroll wrapper also inserted a visually inert focus stop
