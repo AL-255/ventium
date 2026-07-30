@@ -61,6 +61,10 @@ Every Trace/cache/TLB/Hotspots/Branches/Mix column now has a semantic header
 tooltip, including units, denominators, bit order, large/dirty flags, and bar
 normalization. A structural regression audits all seven tables so a future
 abbreviation cannot silently ship unexplained.
+The retired trace row is now 20 px for the measured 14 px font, down from
+22 px while retaining 6 px of breathing room. This exposes about 10% more
+retirements per viewport; row hit-testing, snapping, selection, and compact
+screenshots remain regression-covered.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

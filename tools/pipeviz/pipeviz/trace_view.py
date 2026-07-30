@@ -341,12 +341,13 @@ class TraceView(QWidget):
             if _hi is not None:
                 _hi.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.tbl.verticalHeader().setVisible(False)
-        # A trace is read by scanning many adjacent retirements.  Qt's default
-        # ~30px row wastes vertical space for this single-line data, so use a
-        # fixed compact row while retaining enough height for the 9pt font.
+        # A trace is read by scanning many adjacent retirements. The 9pt
+        # monospace font measures 14 px high in the supported Qt environment;
+        # 20 px retains 6 px of selection/glyph breathing room without spending
+        # more than a third of every row on empty vertical padding.
         self.tbl.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        self.tbl.verticalHeader().setMinimumSectionSize(19)
-        self.tbl.verticalHeader().setDefaultSectionSize(22)
+        self.tbl.verticalHeader().setMinimumSectionSize(18)
+        self.tbl.verticalHeader().setDefaultSectionSize(20)
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)

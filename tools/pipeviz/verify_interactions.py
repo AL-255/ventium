@@ -2516,7 +2516,12 @@ def scenario_layout(app, outdir):
         assert win.action_hint.accessibleName() == "Last action"
         assert win.action_hint.toolTip() == win.action_hint.text()
         assert win.action_hint.width() <= 260
-        assert win.trace.tbl.verticalHeader().defaultSectionSize() == 22
+        assert win.trace.tbl.verticalHeader().defaultSectionSize() == 20
+        assert win.trace.tbl.fontMetrics().height() <= 14
+        assert (
+            win.trace.tbl.verticalHeader().defaultSectionSize()
+            - win.trace.tbl.fontMetrics().height()
+        ) >= 6
 
         # Pin state must remain unmistakable on every compact register page.
         # The former badge lived only inside Segments, so x87 could silently
