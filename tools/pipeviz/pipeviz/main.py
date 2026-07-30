@@ -1672,17 +1672,32 @@ class MainWindow(QMainWindow):
         was_running = self._running
         self.stop_run()
         if not self.assembly.confirm_safe_to_discard("closing pipeviz"):
-            if was_running:
-                self.on_run_toggle()
+            self._close_blocked(
+                self.assembly, "Assembly", was_running)
             event.ignore()
             return
         if not self.c_source.confirm_safe_to_discard("closing pipeviz"):
-            if was_running:
-                self.on_run_toggle()
+            self._close_blocked(
+                self.c_source, "C", was_running)
             event.ignore()
             return
         self.backend.close()
         super().closeEvent(event)
+
+    def _close_blocked(self, source_view, label, resume):
+        """Keep the close reason visible after restoring a paused run."""
+        if resume:
+            self.on_run_toggle()
+        if (getattr(source_view, "_replacement_block_reason", None)
+                == "save_failed"):
+            text = (
+                f"Close blocked by {label} source · "
+                f"{source_view.status.text()}")
+        else:
+            text = f"Close cancelled at unsaved {label} source"
+        if resume:
+            text += " · continuous execution resumed"
+        self._notice(text)
 
     def on_open_snapshot(self):
         self._pause_for_obscuring_ui("opening the snapshot chooser")

@@ -2018,7 +2018,10 @@ def _confirm_source_replacement(view, label, action):
     if choice == QMessageBox.Save:
         if view.save_source():
             return True
-        view._replacement_block_reason = "save_failed"
+        view._replacement_block_reason = (
+            "save_failed"
+            if getattr(view, "_last_save_outcome", None) == "failed"
+            else "cancelled")
         return False
     return True
 
@@ -2342,6 +2345,7 @@ class AssemblyView(QWidget):
             self, "Assembly", action)
 
     def save_source(self, save_as=False):
+        self._last_save_outcome = None
         path = self._path
         if save_as or not path:
             path, selected_filter = QFileDialog.getSaveFileName(
@@ -2349,12 +2353,14 @@ class AssemblyView(QWidget):
                 path or os.path.join(self._last_dir, "program.s"),
                 "Assembly (*.s);;All files (*)")
             if not path:
+                self._last_save_outcome = "cancelled"
                 return False
             path = _default_save_suffix(
                 path, selected_filter, "Assembly", ".s")
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except (OSError, UnicodeError) as error:
+            self._last_save_outcome = "failed"
             _report_source_io_failure(self, "Save", error, path)
             return False
         self._path = path
@@ -2366,6 +2372,7 @@ class AssemblyView(QWidget):
         self.statusChanged.emit(self.status.text())
         self._sync_source_badge()
         self._focus_editor()
+        self._last_save_outcome = "saved"
         return True
 
     def build(self, run=False):
@@ -2670,6 +2677,7 @@ class CView(QWidget):
             self, "C", action)
 
     def save_source(self, save_as=False):
+        self._last_save_outcome = None
         path = self._path
         if save_as or not path:
             path, selected_filter = QFileDialog.getSaveFileName(
@@ -2677,12 +2685,14 @@ class CView(QWidget):
                 path or os.path.join(self._last_dir, "program.c"),
                 "C source (*.c);;All files (*)")
             if not path:
+                self._last_save_outcome = "cancelled"
                 return False
             path = _default_save_suffix(
                 path, selected_filter, "C source", ".c")
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except (OSError, UnicodeError) as error:
+            self._last_save_outcome = "failed"
             _report_source_io_failure(self, "Save", error, path)
             return False
         self._path = path
@@ -2694,6 +2704,7 @@ class CView(QWidget):
         self.statusChanged.emit(self.status.text())
         self._sync_source_badge()
         self._focus_editor()
+        self._last_save_outcome = "saved"
         return True
 
     def compile(self):

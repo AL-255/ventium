@@ -350,7 +350,9 @@ opens that source type, `Ctrl+S` saves the current source, and `Ctrl+Shift+S`
 saves it under a new name; an asterisk on its workspace tab marks unsaved
 edits.
 New/Open, generated-source replacement, and Quit protect those edits with
-Save/Discard/Cancel.
+Save/Discard/Cancel. Canceling a subsequent Save As chooser remains a
+cancellation; if blocked Quit resumes a prior continuous run, its global notice
+still names the cancellation or source-save failure.
 `Ctrl+F` opens an inline source search with all-match highlighting, wraparound
 Enter/F3 and Shift+Enter/Shift+F3 navigation, and an explicit match count.
 

@@ -410,6 +410,11 @@ Each workbench remembers its most recent source folder for later Open/Save As
 dialogs, including after starting a new template.
 New/Open, generated C-to-Assembly replacement, and application close never
 silently discard a dirty editor: choose Save, Discard, or Cancel.
+Choosing Save and then canceling an unnamed source's Save As chooser is treated
+as cancellation, not an I/O failure. If close is canceled or a protective save
+fails while continuous execution was active, execution resumes but the global
+notice retains the close-canceled/blocked reason instead of reverting to a
+generic running message.
 The source badge visually elides long names but exposes the complete saved path
 or generated/template origin, not-saved state, and unsaved-change state through
 both its tooltip and accessible description.

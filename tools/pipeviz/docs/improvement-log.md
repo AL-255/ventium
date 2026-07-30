@@ -9,6 +9,28 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — blocked close retains its reason
+
+**Prompt-outcome audit:** selecting Save in a dirty-source prompt and then
+canceling the unnamed source's Save As chooser was grouped with an actual I/O
+failure. Separately, closing during continuous execution paused for the prompt
+and correctly resumed after Cancel/save failure, but the resume action replaced
+the global reason with a generic running notice.
+
+**Changes:** both source views now record `saved`, `cancelled`, or `failed` for
+each save attempt, and replacement protection maps only the last outcome to
+`cancelled` versus `save_failed`. A shared close-blocked path resumes the timer
+first, then publishes a persistent close-cancel notice or the complete
+source-save error plus “continuous execution resumed.”
+
+**Verification:** acceptance chooses Save then cancels Save As and requires
+unchanged dirty source plus a cancellation outcome. The live-run close test
+requires its explicit Cancel/resumed message, then repeats Close with a
+protective save into a child of a regular file and requires ignored close,
+active timer, `failed`/`save_failed` outcomes, red source status, and the full
+close-blocked tooltip/accessibility notice after execution resumes. Normal
+keyboard save requires a `saved` outcome.
+
 ## July 30 continuation — generated replacement names save failure
 
 **Cross-workspace safety audit:** C compilation protects dirty Assembly before

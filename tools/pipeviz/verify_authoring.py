@@ -614,6 +614,21 @@ def scenario(app, outdir):
             QMessageBox.warning = real_warning
         assert editor.toPlainText() == dirty_before_cancelled_new
         assert win.workspace.tabText(1) == "Assembly *"
+        real_warning = QMessageBox.warning
+        real_save_dialog = QFileDialog.getSaveFileName
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Save)
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs: ("", ""))
+        try:
+            assert not win.assembly.new_template()
+        finally:
+            QMessageBox.warning = real_warning
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert editor.toPlainText() == dirty_before_cancelled_new
+        assert win.assembly._last_save_outcome == "cancelled"
+        assert win.assembly._replacement_block_reason == "cancelled"
+        assert win.workspace.tabText(1) == "Assembly *"
         opened = []
         real_open_source = win.assembly.open_source
         win.assembly.open_source = lambda: opened.append("assembly")
@@ -657,6 +672,7 @@ def scenario(app, outdir):
         QTest.keyClick(editor, Qt.Key_S, Qt.ControlModifier)
         settle(app)
         assert Path(save_path).read_text(encoding="utf-8") == "i r . [ ] /"
+        assert win.assembly._last_save_outcome == "saved"
         assert not editor.document().isModified()
         assert win.workspace.tabText(1) == "Assembly"
         keyboard_save_as_path = os.path.join(
@@ -1867,6 +1883,35 @@ def scenario(app, outdir):
             QMessageBox.warning = real_warning
         assert not close_event.isAccepted()
         assert win._running and win.timer.isActive()
+        assert win.action_hint.text() == (
+            "Close cancelled at unsaved Assembly source · "
+            "continuous execution resumed")
+        original_close_path = win.assembly._path
+        win.assembly._path = str(
+            blocked_artifacts / "close-save.s")
+        win.assembly._sync_source_badge()
+        close_event = QCloseEvent()
+        real_warning = QMessageBox.warning
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Save)
+        try:
+            win.closeEvent(close_event)
+        finally:
+            QMessageBox.warning = real_warning
+        assert not close_event.isAccepted()
+        assert win._running and win.timer.isActive()
+        assert win.assembly._last_save_outcome == "failed"
+        assert win.assembly._replacement_block_reason == "save_failed"
+        assert win.assembly.status.text().startswith("Save failed · ")
+        assert win.action_hint.text().startswith(
+            "Close blocked by Assembly source · Save failed · ")
+        assert win.action_hint.text().endswith(
+            " · continuous execution resumed")
+        assert win.action_hint.toolTip() == win.action_hint.text()
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.text())
+        win.assembly._path = original_close_path
+        win.assembly._sync_source_badge()
         # Moving into a source editor hides every transport/status control, so
         # continuous execution must pause synchronously rather than running
         # invisibly behind the authoring workspace.
@@ -2160,6 +2205,7 @@ def scenario(app, outdir):
         finally:
             QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
         assert win.c_source._path == saved_c_path
+        assert win.c_source._last_save_outcome == "failed"
         assert win.c_source.editor.document().isModified()
         assert win.workspace.tabText(2) == "C *"
         assert win.c_source.source_badge.text().endswith("*")
@@ -2611,6 +2657,7 @@ def scenario(app, outdir):
             assembly_before_failed_replacement)
         assert win.assembly.editor.document().isModified()
         assert win.assembly._replacement_block_reason == "save_failed"
+        assert win.assembly._last_save_outcome == "failed"
         assert win.assembly.status.text().startswith("Save failed · ")
         assert "replacement-save.s" in win.assembly.status.text()
         assert win.assembly.diagnostics._severity == "error"

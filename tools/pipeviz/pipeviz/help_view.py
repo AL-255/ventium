@@ -250,7 +250,10 @@ the old text, identity, and dirty state while diagnostics, persistent status,
 tooltip/accessibility text, and the global notice all show the same red Save
 failed or Open failed explanation.
 New/Open, C-to-Assembly replacement, and Quit offer
-Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
+Save/Discard/Cancel protection. Canceling the Save As chooser after selecting
+Save remains a cancellation, not an I/O failure. If a blocked close resumes
+continuous execution, the global notice retains its cancellation/save-failure
+reason. Back in Visualizer, Ctrl+O resumes its
 program-opening role. Dropped <code>.s/.S/.asm</code> and
 <code>.c/.h</code> files open in their source workspace rather than being
 treated as raw executables.</p>
