@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source-editor keyboard escape audit:** plain Tab is intentionally an editing
+command, but that made keyboard-only users appear trapped inside Assembly and C
+source. Ctrl+Tab now moves to diagnostics and Ctrl+Shift+Tab moves back toward
+the primary run/compile action without modifying source. Both editors expose
+that contract to assistive technology; compact acceptance checks the exact
+focus destinations and byte-for-byte source preservation.
+
 **First-run example-discovery audit:** startup empty states recommended built
 examples, but the only actual route was nested in File. The existing 92-pixel
 Open control is now a split button: its main face retains file selection while

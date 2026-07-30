@@ -70,6 +70,8 @@ class _LineNumberArea(QWidget):
 class CodeEditor(QPlainTextEdit):
     """Monospace editor with line numbers and independent execution/error marks."""
 
+    focusEscapeRequested = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFont(_mono(10))
@@ -205,6 +207,14 @@ class CodeEditor(QPlainTextEdit):
         self._refresh_selections()
 
     def keyPressEvent(self, event):
+        if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
+                and event.modifiers() & Qt.ControlModifier):
+            forward = (
+                event.key() != Qt.Key_Backtab
+                and not event.modifiers() & Qt.ShiftModifier)
+            self.focusEscapeRequested.emit(forward)
+            event.accept()
+            return
         # Preserve indentation in both workbenches, and indent one level after
         # an assembly label or C block/case opener. QPlainTextEdit otherwise
         # drops back to column zero on every newline.
@@ -1318,6 +1328,9 @@ class AssemblyView(QWidget):
         split = QSplitter(Qt.Horizontal)
         self.editor = AssemblyEditor()
         self.editor.setAccessibleName("Assembly source editor")
+        self.editor.setAccessibleDescription(
+            "Edit GNU Intel-syntax assembly. Tab indents; Ctrl+Tab and "
+            "Ctrl+Shift+Tab leave the editor.")
         self.editor.setPlainText(_ASM_TEMPLATE)
         self.find_bar = SourceFindBar(self.editor)
         layout.addWidget(self.find_bar)
@@ -1361,6 +1374,10 @@ class AssemblyView(QWidget):
         self.editor.cursorPositionChanged.connect(self._cursor_instruction)
         self.editor.textChanged.connect(self._source_changed)
         self.editor.completionNotice.connect(self._completion_notice)
+        self.editor.focusEscapeRequested.connect(
+            lambda forward: (
+                self.diagnostics if forward else self.run_btn).setFocus(
+                    Qt.TabFocusReason))
         self.editor.document().modificationChanged.connect(
             self.dirtyChanged.emit)
         self.editor.document().modificationChanged.connect(
@@ -1644,6 +1661,9 @@ class CView(QWidget):
         split = QSplitter(Qt.Vertical)
         self.editor = CodeEditor()
         self.editor.setAccessibleName("C source editor")
+        self.editor.setAccessibleDescription(
+            "Edit freestanding GNU C. Tab indents; Ctrl+Tab and "
+            "Ctrl+Shift+Tab leave the editor.")
         self.highlighter = CHighlighter(self.editor.document())
         self.editor.setPlainText(_C_TEMPLATE)
         self.find_bar = SourceFindBar(self.editor)
@@ -1681,6 +1701,10 @@ class CView(QWidget):
         self.save_btn.clicked.connect(
             lambda: self.save_source(save_as=True))
         self.compile_btn.clicked.connect(self.compile)
+        self.editor.focusEscapeRequested.connect(
+            lambda forward: (
+                self.diagnostics if forward else self.compile_btn).setFocus(
+                    Qt.TabFocusReason))
         QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
             self.compile)
         self.editor.document().modificationChanged.connect(

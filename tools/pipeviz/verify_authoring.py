@@ -502,6 +502,20 @@ def scenario(app, outdir):
         assert 0 <= badge_corner.x() < win.width()
         assert 0 <= badge_corner.y() < win.height()
         assert editor.width() >= 500 and editor.height() >= 400
+        assert "Ctrl+Tab" in editor.accessibleDescription()
+        editor.setFocus()
+        original_source = editor.toPlainText()
+        QTest.keyClick(editor, Qt.Key_Tab, Qt.ControlModifier)
+        settle(app)
+        assert app.focusWidget() is win.assembly.diagnostics
+        assert editor.toPlainText() == original_source
+        editor.setFocus()
+        QTest.keyClick(
+            editor, Qt.Key_Backtab,
+            Qt.ControlModifier | Qt.ShiftModifier)
+        settle(app)
+        assert app.focusWidget() is win.assembly.run_btn
+        assert editor.toPlainText() == original_source
         save(win, outdir, "00a_assembly_compact")
         win.resize(1500, 920)
         settle(app)
@@ -1134,6 +1148,21 @@ def scenario(app, outdir):
         assert (
             win.c_source.editor.width() >= 800
             and win.c_source.editor.height() >= 320)
+        assert "Ctrl+Tab" in win.c_source.editor.accessibleDescription()
+        win.c_source.editor.setFocus()
+        original_c_source = win.c_source.editor.toPlainText()
+        QTest.keyClick(
+            win.c_source.editor, Qt.Key_Tab, Qt.ControlModifier)
+        settle(app)
+        assert app.focusWidget() is win.c_source.diagnostics
+        assert win.c_source.editor.toPlainText() == original_c_source
+        win.c_source.editor.setFocus()
+        QTest.keyClick(
+            win.c_source.editor, Qt.Key_Backtab,
+            Qt.ControlModifier | Qt.ShiftModifier)
+        settle(app)
+        assert app.focusWidget() is win.c_source.compile_btn
+        assert win.c_source.editor.toPlainText() == original_c_source
         save(win, outdir, "03a_c_compact")
         win.resize(1500, 920)
         settle(app)

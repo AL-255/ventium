@@ -283,7 +283,8 @@ respects quoted data: a semicolon or `#`/`//` inside `.asciz "…"` is never
 mistaken for a separator or comment.
 Enter preserves the current indentation and advances one level after an
 assembly label or C opening brace. Typing a closing C brace on an otherwise
-blank indented line dedents one level first.
+blank indented line dedents one level first. Plain `Tab` indents source;
+`Ctrl+Tab` and `Ctrl+Shift+Tab` leave either editor without changing it.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.

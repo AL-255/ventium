@@ -400,6 +400,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Escape</b></td><td>clear a focused Trace filter; in focused Pipeline, Unpin to LIVE</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
+ <tr><td><b>Ctrl+Tab / Ctrl+Shift+Tab</b></td><td>leave an Assembly or C editor without inserting indentation</td></tr>
  <tr><td><b>Ctrl+F, F3 / Shift+F3</b></td><td>find text in this guide topic</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>
 </table>

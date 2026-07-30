@@ -147,6 +147,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     prior build diagnostics and PC links so green results never describe stale
     text. Source drops route to this workspace; labels/new blocks auto-indent
     and a closing C brace typed on a blank indented line dedents one level.
+    `Ctrl+Tab`/`Ctrl+Shift+Tab` leaves either source editor without inserting
+    indentation.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses
