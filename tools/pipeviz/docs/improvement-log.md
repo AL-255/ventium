@@ -89,6 +89,13 @@ in the 196 px analysis pane. Below 520 px it reflows them into two indexed rows
 of eight with measured compact padding/font, abbreviates the address and decode
 captions without losing flin/EIP/fetch-word/decode state, and restores the
 single 16-byte row and full prose when widened.
+The painted Memory dump no longer renders a nominal 16-byte row mostly outside
+the 188 px compact pane. It now chooses 16/8/4-byte rows from actual monospace
+font geometry, preserves ASCII whenever the chosen density permits, and reloads
+exactly the visible byte capacity when its width class changes. Page Up/Down
+advance by that contiguous visible block, so compact rows cannot create silent
+gaps in memory navigation; paint bounds, byte capacity, accessible contents,
+and paging continuity are regression-locked at the supported minimum.
 TLB, Hotspots, Branches, Mix, and Mem-map headers now use the same semantic
 responsive contract: each has a measured compact phrase containing its key
 counts/denominator/axes instead of a cropped sentence, plus the complete

@@ -1352,14 +1352,24 @@ class _PrefetchView(QWidget):
 
 
 class _HexDump(QWidget):
-    """Classic 16-bytes-per-row hex + ASCII dump, painted; highlights the bytes
-    at EIP (cyan fill) and ESP (amber fill), and the most-recent load/store ACCESS
-    (gold outline + its exact byte span) when they fall in the viewed window."""
+    """Responsive hex + ASCII dump, painted; highlights the bytes at EIP (cyan
+    fill) and ESP (amber fill), and the most-recent load/store ACCESS (gold
+    outline + its exact byte span) when they fall in the viewed window.
+
+    Rows contain 16, 8, or 4 bytes according to measured font geometry.  A
+    narrower row is preferable to painting an apparently complete row whose
+    right-hand bytes are actually outside the viewport.
+    """
     ROW_H = 15
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAccessibleName("Physical memory hex and ASCII dump")
+        self._backend = None
+        self._display_bytes_per_row = self._layout()[0]
+        self._display_capacity = (
+            max(8, self.height() // self.ROW_H)
+            * self._display_bytes_per_row)
         self.data = b""
         self.base = 0
         self.eip = 0
@@ -1370,16 +1380,78 @@ class _HexDump(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def clear(self, message=""):
+        self._backend = None
         self.data = b""
         self.message = message
         self.setAccessibleDescription(
             message or "No physical memory bytes are displayed.")
         self.update()
 
-    def set(self, backend, base, eip, esp, access=None):
+    def _layout(self, width=None):
+        """Return (bytes/row, show ASCII, char width, hex x, ASCII x, end x).
+
+        The end coordinate is exposed so acceptance tests can lock the central
+        invariant of this custom painter: every rendered column is in bounds.
+        """
+        fm = QFontMetrics(_mono(9))
+        cw = max(1, fm.horizontalAdvance("0"))
+        available = self.width() if width is None else int(width)
+        ax = 4
+        # The address is exactly eight hexadecimal characters.  Use a small
+        # pixel gutter rather than reserving a ninth full monospace cell; that
+        # reclaimed space is enough to retain four ASCII characters at the
+        # supported 900 px application minimum.
+        hx = ax + 8 * cw + 2
+        # Prefer the densest row that fits.  Preserve ASCII when it does not
+        # require dropping to the next smaller byte count.
+        candidates = []
+        for bytes_per_row in (16, 8, 4):
+            group_gap = cw if bytes_per_row == 16 else 0
+            hex_end = hx + (3 * (bytes_per_row - 1) + 2) * cw + group_gap
+            ascii_x = hex_end + cw
+            ascii_end = ascii_x + bytes_per_row * cw
+            candidates.extend((
+                (bytes_per_row, True, cw, hx, ascii_x, ascii_end),
+                (bytes_per_row, False, cw, hx, None, hex_end)))
+        # candidates are currently 16+ASCII, 16-only, 8+ASCII, 8-only, ...
+        # which retains the largest byte count before considering a smaller
+        # row.  Leave two pixels for the widget's right edge.
+        for layout in candidates:
+            if layout[-1] + 2 <= available:
+                return layout
+        # The supported application minimum fits four hex bytes; retain a
+        # deterministic fallback for unusually small embedded/test widgets.
+        return candidates[-1]
+
+    def page_span(self):
+        """Number of contiguous bytes represented by one visible viewport."""
         rows = max(8, self.height() // self.ROW_H)
+        span = rows * self._layout()[0]
+        # Navigation addresses remain 16-byte aligned, so round down rather
+        # than leaving either a gap or a surprising unaligned first row.
+        return max(16, (span // 16) * 16)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        bytes_per_row = self._layout(event.size().width())[0]
+        capacity = (
+            max(8, event.size().height() // self.ROW_H)
+            * bytes_per_row)
+        if (capacity != self._display_capacity
+                and self._backend is not None):
+            self.set(
+                self._backend, self.base, self.eip, self.esp,
+                ((self.acc_addr, self.acc_size)
+                 if self.acc_addr is not None else None))
+
+    def set(self, backend, base, eip, esp, access=None):
+        self._backend = backend
+        bytes_per_row = self._layout()[0]
+        self._display_bytes_per_row = bytes_per_row
+        rows = max(8, self.height() // self.ROW_H)
+        self._display_capacity = rows * bytes_per_row
         self.base = base & 0xFFFFFFFF
-        self.data = backend.mem_read(self.base, rows * 16)
+        self.data = backend.mem_read(self.base, self._display_capacity)
         self.eip = eip
         self.esp = esp
         self.acc_addr, self.acc_size = access if access else (None, 0)
@@ -1397,8 +1469,8 @@ class _HexDump(QWidget):
             parts.append(
                 f"Access marker at 0x{self.acc_addr:08x}, "
                 f"{self.acc_size} byte{'s' if self.acc_size != 1 else ''}.")
-        for offset in range(0, len(self.data), 16):
-            row = self.data[offset:offset + 16]
+        for offset in range(0, len(self.data), bytes_per_row):
+            row = self.data[offset:offset + bytes_per_row]
             address = (self.base + offset) & 0xFFFFFFFF
             hex_bytes = " ".join(f"{byte:02x}" for byte in row)
             ascii_bytes = "".join(
@@ -1417,22 +1489,24 @@ class _HexDump(QWidget):
             p.drawText(self.rect(), Qt.AlignCenter, self.message)
             p.end()
             return
-        from PySide6.QtGui import QFontMetrics
-        fm = QFontMetrics(p.font())
-        cw = fm.horizontalAdvance("0")
+        bytes_per_row, show_ascii, cw, hx, asc, _end = self._layout()
         ax = 4
-        hx = ax + 9 * cw                    # hex column start
-        asc = hx + (16 * 3 + 1) * cw + cw   # ascii column start
-        rows = len(self.data) // 16
+        rows = (
+            len(self.data) + bytes_per_row - 1) // bytes_per_row
         for r in range(rows):
             y = r * self.ROW_H
-            a = self.base + r * 16
+            a = self.base + r * bytes_per_row
             p.setPen(QColor("#586069"))
-            p.drawText(QRect(ax, y, 9 * cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{a:08x}")
-            for c in range(16):
-                b = self.data[r * 16 + c]
+            p.drawText(
+                QRect(ax, y, 8 * cw, self.ROW_H),
+                Qt.AlignVCenter | Qt.AlignLeft, f"{a:08x}")
+            for c in range(bytes_per_row):
+                data_index = r * bytes_per_row + c
+                if data_index >= len(self.data):
+                    break
+                b = self.data[data_index]
                 addr = a + c
-                gap = 1 if c >= 8 else 0
+                gap = 1 if bytes_per_row == 16 and c >= 8 else 0
                 x = hx + (c * 3 + gap) * cw
                 if self.eip <= addr < self.eip + 4:
                     p.fillRect(QRect(x - 1, y + 1, 2 * cw + 1, self.ROW_H - 2), QColor(40, 70, 90))
@@ -1446,9 +1520,13 @@ class _HexDump(QWidget):
                     p.drawRect(QRect(x - 1, y + 1, 2 * cw, self.ROW_H - 3))
                 p.setPen(QColor("#c9d1d9" if b else "#3d444d"))
                 p.drawText(QRect(x, y, 2 * cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{b:02x}")
-                ch = chr(b) if 32 <= b < 127 else "."
-                p.setPen(QColor("#79c0ff" if 32 <= b < 127 else "#3d444d"))
-                p.drawText(QRect(asc + c * cw, y, cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, ch)
+                if show_ascii:
+                    ch = chr(b) if 32 <= b < 127 else "."
+                    p.setPen(QColor(
+                        "#79c0ff" if 32 <= b < 127 else "#3d444d"))
+                    p.drawText(
+                        QRect(asc + c * cw, y, cw, self.ROW_H),
+                        Qt.AlignVCenter | Qt.AlignLeft, ch)
         p.end()
 
 
@@ -1769,8 +1847,8 @@ class MemoryView(QWidget):
         self._click_hl = None     # (addr, size) pinned by a Mem-map point click
         self.page_buttons = []
         for d, lab, tip in (
-                (-256, "◀", "Previous 256 physical bytes (Page Up)"),
-                (256, "▶", "Next 256 physical bytes (Page Down)")):
+                (-1, "◀", "Previous visible memory block (Page Up)"),
+                (1, "▶", "Next visible memory block (Page Down)")):
             b = QPushButton(lab); b.setFixedWidth(28); b.setToolTip(tip)
             b.setAccessibleName(
                 "Previous physical memory page"
@@ -1792,11 +1870,11 @@ class MemoryView(QWidget):
         v.addWidget(self.dump, 1)
         self._session_controls = (
             self.addr_e, go, be, bs, *self.page_buttons)
-        for key, delta in (("PgUp", -256), ("PgDown", 256)):
+        for key, direction in (("PgUp", -1), ("PgDown", 1)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.WidgetWithChildrenShortcut)
             shortcut.activated.connect(
-                lambda step=delta: self._page(step))
+                lambda step=direction: self._page(step))
         self.set_session_active(False)
 
     def resizeEvent(self, event):
@@ -1921,12 +1999,14 @@ class MemoryView(QWidget):
             self.addr = self._access[0] & 0xFFFFFFF0
         self._refresh()
 
-    def _page(self, delta):
+    def _page(self, direction):
         if self.backend is None:
             return
         self.follow = None
         self._click_hl = None
-        self.addr = (self.addr + delta) & 0xFFFFFFF0
+        self.addr = (
+            self.addr + int(direction) * self.dump.page_span()
+        ) & 0xFFFFFFF0
         self._refresh()
 
     def set_state(self, backend, state, access=None):

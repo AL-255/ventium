@@ -2099,10 +2099,13 @@ def scenario_dcache_memory(app, outdir):
         assert win.tables.mem.follow_lbl.accessibleDescription() == (
             win.tables.mem.follow_lbl.text())
         access_page = win.tables.mem.addr
+        page_span = win.tables.mem.dump.page_span()
+        assert page_span == (
+            len(win.tables.mem.dump.data) // 16) * 16
         win.tables.mem.addr_e.setFocus()
         QTest.keyClick(win.tables.mem.addr_e, Qt.Key_PageDown)
         settle(app)
-        assert win.tables.mem.addr == access_page + 0x100
+        assert win.tables.mem.addr == access_page + page_span
         assert win.tables.mem.follow is None
         QTest.keyClick(win.tables.mem.addr_e, Qt.Key_PageUp)
         settle(app)
@@ -2613,6 +2616,28 @@ def scenario_layout(app, outdir):
         assert memory.follow_lbl.wordWrap()
         assert memory.follow_lbl.accessibleDescription() == (
             memory.follow_lbl.text())
+        dump = memory.dump
+        bytes_per_row, show_ascii, _cw, _hx, _asc, painted_end = (
+            dump._layout())
+        assert bytes_per_row == 4
+        assert show_ascii, (
+            f"compact dump lost ASCII at width {dump.width()}: "
+            f"{dump._layout()}")
+        assert painted_end + 2 <= dump.width()
+        assert len(dump.data) == (
+            max(8, dump.height() // dump.ROW_H) * bytes_per_row)
+        assert dump.page_span() <= len(dump.data)
+        assert dump.page_span() >= len(dump.data) - 15
+        dump_description = dump.accessibleDescription()
+        assert f"0x{dump.base:08x}" in dump_description
+        assert "ASCII" in dump_description
+        for test_width, expected in (
+                (600, (16, True)), (450, (16, False)),
+                (350, (8, True)), (250, (8, False)),
+                (180, (4, True)), (150, (4, False))):
+            layout = dump._layout(test_width)
+            assert layout[:2] == expected
+            assert layout[-1] + 2 <= test_width
         save_shot(
             app, win, outdir, "08b_true_minimum_memory",
             min_width=900, min_height=620)
