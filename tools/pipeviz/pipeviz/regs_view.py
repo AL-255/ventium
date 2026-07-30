@@ -393,16 +393,22 @@ class RegsView(QWidget):
         # 164 px. Keep the complete architectural 80-bit value on-canvas and
         # expose the decoded value through its tooltip/accessibility metadata.
         self._fp_grid.setHorizontalSpacing(1 if narrow else 2)
+        self._fp_grid.setVerticalSpacing(0 if narrow else 2)
         left, top, right, bottom = self._fp_grid_margins
         self._fp_grid.setContentsMargins(
             6 if narrow else left, top,
             6 if narrow else right, bottom)
         self._fp_grid.setColumnMinimumWidth(0, 22 if narrow else 30)
         self._fp_grid.setColumnMinimumWidth(2, 0 if narrow else 12)
+        self.fphdr.setMinimumHeight(
+            2 * self.fphdr.fontMetrics().height()
+            if narrow else self.fphdr.fontMetrics().height())
+        self.fp_reg_hdr.setVisible(not narrow)
+        self.fp_hex_hdr.setVisible(not narrow)
         self.fp_value_hdr.setVisible(not narrow)
         for tag, raw, decoded in self.st_lbls:
-            tag.setFont(_mono(8 if narrow else 9))
-            raw.setFont(_mono(8 if narrow else 9))
+            tag.setFont(_mono(7 if narrow else 9))
+            raw.setFont(_mono(7 if narrow else 9))
             decoded.setVisible(not narrow)
 
     def _sync_segment_compact(self):

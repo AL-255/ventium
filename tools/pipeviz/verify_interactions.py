@@ -2557,11 +2557,18 @@ def scenario_layout(app, outdir):
             min_width=900, min_height=620)
         win.regs._compact_tabs.setCurrentIndex(2)
         settle(app)
+        assert win.regs.fp_reg_hdr.isHidden()
+        assert win.regs.fp_hex_hdr.isHidden()
         assert win.regs.fp_value_hdr.isHidden()
+        assert win.regs.fphdr.height() >= (
+            win.regs.fphdr.heightForWidth(win.regs.fphdr.width()))
+        assert win.regs.fphdr.height() >= (
+            2 * win.regs.fphdr.fontMetrics().height())
         for index, (_tag, raw, decoded) in enumerate(win.regs.st_lbls):
             assert decoded.isHidden()
             assert raw.fontMetrics().horizontalAdvance(raw.text()) <= (
                 raw.contentsRect().width())
+            assert raw.height() >= raw.fontMetrics().height()
             assert f"Logical ST({index})" in raw.accessibleDescription()
             assert "raw 80-bit value" in raw.accessibleDescription()
             assert "decoded value" in raw.accessibleDescription()
@@ -2617,6 +2624,10 @@ def scenario_layout(app, outdir):
         assert not win.regs.control_group.isHidden()
         assert win.regs.seg_compact_group.isHidden()
         assert not win.regs.fp_value_hdr.isHidden()
+        assert not win.regs.fp_reg_hdr.isHidden()
+        assert not win.regs.fp_hex_hdr.isHidden()
+        assert win.regs.fphdr.minimumHeight() == (
+            win.regs.fphdr.fontMetrics().height())
         assert all(not decoded.isHidden()
                    for _tag, _raw, decoded in win.regs.st_lbls)
         assert [win.regs._compact_tabs.tabText(i) for i in range(3)] == [

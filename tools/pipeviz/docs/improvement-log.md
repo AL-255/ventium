@@ -98,7 +98,8 @@ Segments/control uses one measured 11-line `selector base limit`/CR summary
 instead of two overcompressed grids. x87 hides only the decoded-value column at
 the true minimum, gives its space to the complete raw 80-bit value, and retains
 the decoded float in each row's tooltip/accessibility metadata; both normal
-grids return unchanged when widened.
+grids return unchanged when widened. The compact x87 header also reserves both
+measured lines, so TOP/control can no longer hide status/empty-mask below it.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
