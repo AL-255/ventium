@@ -429,6 +429,11 @@ def scenario(app, outdir):
         assert not win.assembly.find_bar.previous_btn.isEnabled()
         assert not win.assembly.find_bar.next_btn.isEnabled()
         win.assembly.find_bar.query.clear()
+        QTest.keyClicks(win.assembly.find_bar.query, "MOV")
+        settle(app)
+        assert win.assembly.find_bar.count.text().endswith("/ 2")
+        assert editor.textCursor().selectedText() == "mov"
+        win.assembly.find_bar.query.clear()
         search_start = editor.textCursor()
         search_start.clearSelection()
         search_start.movePosition(QTextCursor.Start)
