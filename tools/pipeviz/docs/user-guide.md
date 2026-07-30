@@ -309,9 +309,10 @@ A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.
 
-`Ctrl+O` opens Assembly source and `Ctrl+S` saves it; the corresponding buttons
-remain available for mouse use. The Assembly tab gains `*` while changes are
-unsaved. A persistent source badge at the lower right keeps the filename, built-in
+`Ctrl+O` opens Assembly source, `Ctrl+S` saves it, and `Ctrl+Shift+S` saves it
+under a new name; the corresponding buttons remain available for mouse use.
+The Assembly tab gains `*` while changes are unsaved. A persistent source badge
+at the lower right keeps the filename, built-in
 template, or C-compiler origin visible after transient build messages replace
 the status text; hover it for the full path, and `*` still marks edits. In the C
 workspace the same shortcuts open/save C, and its tab uses the

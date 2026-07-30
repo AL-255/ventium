@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source Save-As audit:** both workbenches exposed Save As by pointer but only
+ordinary Save by keyboard. File now provides a workspace-aware Ctrl+Shift+S
+action whose label follows Assembly/C and is disabled in Visualizer,
+complementing Ctrl+S without stealing a debugger key. Acceptance dispatches the
+actual shortcut and verifies the chosen path and bytes.
+
 **Source delimiter audit:** C blocks and Assembly memory operands had no
 matching feedback, making nested edits unnecessarily error-prone. Moving beside
 `()`, `[]`, or `{}` now highlights both ends of a structurally valid pair and

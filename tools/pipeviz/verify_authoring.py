@@ -229,6 +229,8 @@ def scenario(app, outdir):
     try:
         assert [win.workspace.tabText(i) for i in range(3)] == [
             "Visualizer", "Assembly", "C"]
+        assert not win.save_source_action.isEnabled()
+        assert not win.save_source_as_action.isEnabled()
         assert [action.shortcut().toString()
                 for action in win._workspace_actions] == ["Alt+V", "Alt+A", "Alt+C"]
         assert win._view_menu.title() == "Vie&w"
@@ -261,6 +263,9 @@ def scenario(app, outdir):
         assert win.open_action.shortcut().toString() == "Ctrl+O"
         assert win.save_source_action.isEnabled()
         assert win.save_source_action.shortcut().toString() == "Ctrl+S"
+        assert win.save_source_as_action.isEnabled()
+        assert win.save_source_as_action.shortcut().toString() == "Ctrl+Shift+S"
+        assert win.save_source_as_action.text() == "Save assembly source as…"
         assert win.assembly.editor.accessibleName() == "Assembly source editor"
         assert win.assembly.status.accessibleName() == (
             "Assembly workbench status")
@@ -368,6 +373,22 @@ def scenario(app, outdir):
         assert Path(save_path).read_text(encoding="utf-8") == "i r . [ ] /"
         assert not editor.document().isModified()
         assert win.workspace.tabText(1) == "Assembly"
+        keyboard_save_as_path = os.path.join(
+            outdir, "keyboard-save-as.s")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (keyboard_save_as_path, "Assembly (*.s)"))
+        try:
+            QTest.keyClick(
+                editor, Qt.Key_S,
+                Qt.ControlModifier | Qt.ShiftModifier)
+            settle(app)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.assembly._path == keyboard_save_as_path
+        assert Path(keyboard_save_as_path).read_text(
+            encoding="utf-8") == "i r . [ ] /"
         assembly_bare_path = os.path.join(outdir, "assembly-no-extension")
         real_save_dialog = QFileDialog.getSaveFileName
         QFileDialog.getSaveFileName = staticmethod(
@@ -1450,6 +1471,8 @@ def scenario(app, outdir):
         assert all(toolbar.isHidden() for toolbar in toolbars)
         assert win.open_action.text() == "Open C source…"
         assert win.save_source_action.isEnabled()
+        assert win.save_source_as_action.isEnabled()
+        assert win.save_source_as_action.text() == "Save C source as…"
         assert all(not action.isEnabled()
                    for action in win._transport_shortcut_actions)
         assert win.c_source.editor.accessibleName() == "C source editor"

@@ -373,6 +373,12 @@ class MainWindow(QMainWindow):
         self.save_source_action.setEnabled(False)
         self.save_source_action.triggered.connect(self._save_active_source)
         file_menu.addAction(self.save_source_action)
+        self.save_source_as_action = QAction("Save source as…", self)
+        self.save_source_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.save_source_as_action.setEnabled(False)
+        self.save_source_as_action.triggered.connect(
+            lambda _checked=False: self._save_active_source(True))
+        file_menu.addAction(self.save_source_as_action)
         snapshot_action = QAction("Open snapshot…", self)
         snapshot_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
         snapshot_action.triggered.connect(self.on_open_snapshot)
@@ -1145,22 +1151,27 @@ class MainWindow(QMainWindow):
         label, tip = labels[index] if 0 <= index < len(labels) else labels[0]
         self.open_action.setText(label)
         self.open_action.setToolTip(f"{tip} (Ctrl+O)")
-        self.save_source_action.setEnabled(index in (1, 2))
+        source_active = index in (1, 2)
+        self.save_source_action.setEnabled(source_active)
+        self.save_source_as_action.setEnabled(source_active)
         self.save_source_action.setText(
             "Save assembly source" if index == 1 else
             "Save C source" if index == 2 else "Save source")
+        self.save_source_as_action.setText(
+            "Save assembly source as…" if index == 1 else
+            "Save C source as…" if index == 2 else "Save source as…")
         # Reload means "re-read the already-built program", not "rebuild this
         # source editor." Keeping it active over Assembly/C makes Ctrl+Shift+R
         # run an older generated ELF and invalidate source links behind the
         # user's current text. Authoring has explicit Compile/Assemble actions.
         self.reload_action.setEnabled(index == 0 and self.image_path is not None)
 
-    def _save_active_source(self):
+    def _save_active_source(self, save_as=False):
         source = (
             self.assembly if self.workspace.currentIndex() == 1 else
             self.c_source if self.workspace.currentIndex() == 2 else None)
         if source is not None:
-            source.save_source()
+            source.save_source(save_as=save_as)
 
     def _clear_assembly_source_link(self):
         self._assembly_source_map = {}

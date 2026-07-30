@@ -288,8 +288,9 @@ retirement when the filter is already empty and the Pipeline diagram has focus.
 `F1` opens the complete shortcut reference.
 Arrow keys navigate Trace/analysis table content; `Tab` / `Shift+Tab` leave a
 table in one press instead of walking every cell.
-Inside Assembly/C, `Ctrl+O` instead opens that source type and `Ctrl+S` saves
-the current source; an asterisk on its workspace tab marks unsaved edits.
+Inside Assembly/C, `Ctrl+O` instead opens that source type, `Ctrl+S` saves the
+current source, and `Ctrl+Shift+S` saves it under a new name; an asterisk on its
+workspace tab marks unsaved edits.
 New/Open, generated-source replacement, and Quit protect those edits with
 Save/Discard/Cancel.
 `Ctrl+F` opens an inline source search with all-match highlighting, wraparound

@@ -207,10 +207,11 @@ into the same real RTL backend as an opened program. Ctrl+Enter is the keyboard
 equivalent. A bare instruction snippet is automatically wrapped in
 <code>.intel_syntax</code>, <code>_start</code>, and a fall-through HLT; an
 explicit <code>_start:</code> is assembled exactly as written.</p>
-<p>Within either source workspace, Ctrl+O opens that source type and Ctrl+S
-saves the current file. An asterisk on the Assembly or C tab marks unsaved
-changes. Save as appends <code>.s</code> or <code>.c</code> to a bare name
-when its typed-file filter is selected and reports the final filename globally.
+<p>Within either source workspace, Ctrl+O opens that source type, Ctrl+S saves
+the current file, and Ctrl+Shift+S saves under a new name. An asterisk on the
+Assembly or C tab marks unsaved changes. Save as appends <code>.s</code> or
+<code>.c</code> to a bare name when its typed-file filter is selected and
+reports the final filename globally.
 The lower-right source badge remains visible when a later Build/Compile replaces
 the transient status message; it names the saved file, built-in template, or
 C-compiler origin, and its tooltip gives the full path.
@@ -404,6 +405,7 @@ fresh visible epoch at that point.</p>
 <table cellspacing="6">
  <tr><td><b>Ctrl+O</b></td><td>open program, Assembly, or C for the active workspace</td></tr>
  <tr><td><b>Ctrl+S</b></td><td>save the active Assembly or C source</td></tr>
+ <tr><td><b>Ctrl+Shift+S</b></td><td>save the active source under a new name</td></tr>
  <tr><td><b>Ctrl+F</b></td><td>find in the active Assembly or C source</td></tr>
  <tr><td><b>F3 / Shift+F3</b></td><td>next / previous source or Trace match</td></tr>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
