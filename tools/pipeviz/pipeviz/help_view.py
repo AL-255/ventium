@@ -278,7 +278,9 @@ fallback instead of becoming a silent no-op.</p>
 <p>Code$ and Data$ show set/way residency and occupancy. Data$ replays the
 observed access stream through the matching 2-way geometry to estimate misses.
 Each occupancy map exposes its resident count and exact set/way/MRU geometry as
-a textual description in addition to the painted grid.
+a textual description in addition to the painted grid. Empty analysis tables
+announce the same explanation they paint; populated tables announce their row
+count instead of retaining a stale empty-state message.
 For a restored snapshot it seeds replay from the resident tags and MRU order at
 the session boundary, so the first post-restore access is not falsely cold.
 Hotspots attributes fetch-to-retire latency and D-cache misses to PCs. Its

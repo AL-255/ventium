@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Analysis-table empty-state audit:** Code$, Data$, TLB, Hotspots, Branches,
+and Mix painted helpful zero-row explanations as child overlays but left the
+focusable table itself semantically blank. The table now announces the same
+honest no-program/no-activity message while empty and replaces it with the
+current populated row count when data arrives. The overlay itself is named,
+and startup plus real 14-line D-cache acceptance prove both transitions.
+
 **Analysis-chart accessibility audit:** cache occupancy grids and cycle
 attribution bars were the last named-but-pixel-only custom charts. Code$/Data$
 maps now announce resident totals plus exact occupied set/way/MRU geometry.

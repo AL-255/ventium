@@ -406,6 +406,8 @@ visualization boundary from looking like a cold cache. Code$/Data$ occupancy
 maps expose their resident count and exact set/way/MRU geometry textually as
 well as visually. The **Cycles** chart likewise announces every non-empty
 category's clock count and percentage, total retirement, and IPC. In
+all analysis tables, a painted empty-state explanation is also exposed
+textually and is replaced with the current row count when data appears. In
 **Memory**, choose
 `→ access` to follow the most recent load/store
 and see its physical bytes outlined in gold. Pipeviz resolves the retired

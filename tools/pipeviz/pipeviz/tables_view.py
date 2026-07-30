@@ -121,6 +121,7 @@ class _HintTable(QTableWidget):
     def __init__(self, rows, cols, hint=""):
         super().__init__(rows, cols)
         self._hint = QLabel(hint, self.viewport())
+        self._hint.setAccessibleName("Empty analysis table explanation")
         self._hint.setAlignment(Qt.AlignCenter)
         self._hint.setWordWrap(True)
         self._hint.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -135,8 +136,13 @@ class _HintTable(QTableWidget):
         if self.rowCount() == 0 and self._hint.text():
             self._hint.setGeometry(0, 0, self.viewport().width(), self.viewport().height())
             self._hint.show(); self._hint.raise_()
+            self.setAccessibleDescription(
+                f"Empty table. {self._hint.text()}")
         else:
             self._hint.hide()
+            self.setAccessibleDescription(
+                f"{self.rowCount()} populated "
+                f"row{'s' if self.rowCount() != 1 else ''}.")
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)

@@ -925,6 +925,10 @@ def scenario_startup(app, outdir):
             win.pipeline.konata.plot.accessibleDescription().lower())
         assert win.tables.ic._hint.isVisible()
         assert "no program loaded" in win.tables.ic._hint.text().lower()
+        assert "no program loaded" in (
+            win.tables.ic.accessibleDescription().lower())
+        assert win.tables.ic._hint.accessibleName() == (
+            "Empty analysis table explanation")
         assert "No program loaded" in win.tables.pf.info.text()
         assert all(not control.isEnabled()
                    for control in win.tables.mem._session_controls)
@@ -1728,6 +1732,7 @@ def scenario_dcache_memory(app, outdir):
         assert "miss" in win.tables.dc_lbl.text().lower()
         assert "replay [empty]" in win.tables.dc_lbl.text()
         assert "14 cold fills" in win.tables.dc_lbl.toolTip()
+        assert win.tables.dc.accessibleDescription() == "14 populated rows."
         cache_map_accessible = win.tables.dc_map.accessibleDescription()
         assert "14 of 256 cache line slots resident" in cache_map_accessible
         assert "set " in cache_map_accessible and "way " in cache_map_accessible
