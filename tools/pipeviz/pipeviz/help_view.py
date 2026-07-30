@@ -113,7 +113,10 @@ explicit <code>_start:</code> is assembled exactly as written.</p>
 saves the current file. An asterisk on the Assembly or C tab marks unsaved
 changes. New/Open, C-to-Assembly replacement, and Quit offer
 Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
-program-opening role.</p>
+program-opening role. Dropped <code>.s/.S/.asm</code> and
+<code>.c/.h</code> files open in their source workspace rather than being
+treated as raw executables. Each workspace remembers its last folder, and Enter
+preserves indentation or advances it after labels/braces.</p>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
 backward, and Escape closes the search.</p>

@@ -9,6 +9,29 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 29 continuation — source-editor recovery and loading ergonomics
+
+**Self-critique:** valid quoted comment markers were miscolored, token priority
+could paint `eax:` as a register and `if (` as a function, edits left stale red
+diagnostics, implicit C calls failed only at link time, and source drag/drop was
+mistaken for executable loading. Open also prompted about dirty text before the
+file chooser, even if the chooser was cancelled.
+
+**Changes:** both highlighters now scan quoted strings and comments with correct
+structural/keyword precedence and complete C11 keywords. Editors auto-indent
+after labels/braces, clear obsolete error state on the first edit, normalize
+status colors, accept UTF-8 BOMs, diagnose invalid encodings/build directories,
+and remember their last folders. C treats implicit functions as line-linked
+errors. Open reads and validates the selected file before any replacement
+prompt; `.s/.S/.asm` and `.c/.h` drops route directly to the matching workspace
+without replacing the live backend. Controls now expose accessible names and
+action/shortcut tooltips.
+
+**Verification:** the expanded authoring regression covers every recovery and
+color-priority case, cancelled chooser behavior, source drop routing, accessible
+control labels, auto-indent, all-entry completion metadata, and confirms the
+existing Assembly/Fibonacci/x87 execution and exact PC linkage still pass.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

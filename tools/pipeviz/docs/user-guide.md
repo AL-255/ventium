@@ -96,6 +96,7 @@ At a directive, comment, or operand it remains a reference-only catalogue, so
 accepting an entry cannot corrupt non-opcode text.
 GNU as semicolons separate statements, so completion and the instruction
 preview also follow a second opcode on the same source line.
+Enter preserves the current indentation and advances one level after a label.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.
@@ -104,6 +105,10 @@ A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 remain available for mouse use. The Assembly tab gains `*` while changes are
 unsaved. In the C workspace the same shortcuts open/save C, and its tab uses the
 same dirty marker. Visualizer restores Ctrl+O to opening executable programs.
+Dropping `.s`/`.S`/`.asm` or `.c`/`.h` routes the file to its source workspace;
+it is never mistaken for a raw executable.
+Each workbench remembers its most recent source folder for later Open/Save As
+dialogs, including after starting a new template.
 New/Open, generated C-to-Assembly replacement, and application close never
 silently discard a dirty editor: choose Save, Discard, or Cancel.
 For longer generated files, `Ctrl+F` opens an inline search with highlighted
@@ -137,6 +142,8 @@ or `-Os`, then press **Compile → Assembly** (`Ctrl+Enter`). Pipeviz invokes:
 - GNU C11, freestanding, non-PIE, stack-protector-free code;
 - no builtin calls or loop-to-`memset` substitutions, so generated snippets
   remain self-contained; and
+- line-linked errors for implicit function calls rather than deferred link
+  failures; and
 - a tiny `_start` wrapper that calls `main` and halts.
 
 The generated source opens in Assembly rather than running immediately. This

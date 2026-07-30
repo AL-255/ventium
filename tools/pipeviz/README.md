@@ -112,13 +112,15 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     mode/build availability notes, and a description plus miniature pipeline
     preview for every completion. **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
-    Pipeline row highlights the exact responsible assembly line.
+    Pipeline row highlights the exact responsible assembly line. Source drops
+    route to this workspace, and labels/new blocks auto-indent.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses
     x87. **Compile → Assembly** emits editable Intel-syntax code with a small
     `_start`/HLT wrapper into the Assembly tab; compiler and assembler errors
-    highlight their source line.
+    highlight their source line. C/header drops route here without disturbing
+    the running program.
 * **Analysis tabs** (top-right) — ten tabs over the live microarch state:
   * **Code$ / Data$** — resident cache lines + a **256-cell set×way occupancy
     heatmap**; the Data$ header also reports a **replayed miss-rate** (the resolved

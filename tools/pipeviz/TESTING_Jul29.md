@@ -343,12 +343,27 @@ Procedure:
 
 1. Require at least 250 unique Ventium/P54C completion mnemonics, map every
    current RTL decoder family to an advertised entry, and check representative
-   integer, system, x87, mode-gated, and build-gated families.
-2. Render the Assembly editor and verify mnemonic/register syntax formats.
+   integer, system, x87, mode-gated, and build-gated families. Require every
+   entry to have a signature, description, availability, latency, pairing
+   class, and a stage sequence drawable by the popup pipeline preview.
+2. Render the Assembly editor and verify mnemonic/register syntax formats,
+   including comment markers inside quoted data versus a real trailing comment,
+   and require labels/directives named like registers/opcodes to retain their
+   structural colors.
    Type every single-key debugger binding as source, require an `Assembly *`
    dirty marker, then require contextual Ctrl+O and Ctrl+S to open/save source.
    Open Ctrl+F, require two highlighted `mov` matches, traverse both, and close
-   the bar with Escape.
+   the bar with Escape. Require Enter after an assembly label and a C opening
+   brace to preserve and advance indentation.
+   Attempt to open invalid UTF-8 Assembly and C files; require a diagnostic,
+   unchanged editor text, and a recoverable neutral state after New.
+   Open UTF-8-BOM source without exposing the BOM in the editor, and require an
+   empty Assembly build to report an actionable empty-source diagnostic.
+   Cancel the file chooser with dirty source and require no discard prompt.
+   Drop `.S` and `.c` files and require routing to their source workspaces
+   without loading either as executable bytes or replacing the active backend.
+   Point the artifact directory at a regular file and require a normal
+   `BuildFailure` diagnostic with no backend session or raw Python exception.
 3. Open the complete Ctrl+Space popup; require its description, availability,
    latency, pairing class, and pipeline stage preview. Confirm automatic
    completion appears in opcode position but never interrupts operands/comments;
@@ -358,7 +373,8 @@ Procedure:
    replaced. Complete a second opcode after GNU as's `;` statement separator
    and require the preview to follow that statement.
 4. Feed an invalid opcode and require line 5 to be highlighted without starting
-   a backend session.
+   a backend session. Edit it and require the now-stale marker/diagnostics to
+   clear immediately and return to neutral styling.
 5. Assemble+run the default sum loop and require EAX = 55 on the real RTL.
    Keep the source unsaved and require `Assembly *` to survive loading/running.
    Cancel a Quit while free-running and require the timer/run state to resume.
@@ -371,8 +387,9 @@ Procedure:
    Cancel generated-source replacement and require the dirty text to survive.
    Run a bare snippet and require selecting its generated fall-through HLT to
    clear—not retain—the previously linked editor line.
-8. Verify C keyword/function highlighting, quoted comment markers, multiline
-   comments, and compiler error-line navigation.
+8. Verify C keyword/function priority (including `if (`), quoted comment markers, multiline
+   comments, and compiler error-line navigation. Editing a compiler error must
+   clear its stale line marker and red diagnostics state immediately.
    Confirm unsaved edits mark `C *`, Cancel preserves them, and explicit Discard
    permits a new template and clears the marker.
 9. Compile the freestanding Fibonacci C template at O2 into editable Intel
@@ -380,7 +397,8 @@ Procedure:
 10. Select the C-generated entry/loop in Trace and require its emitted assembly
     line to highlight.
 11. Compile an array-initialization loop and require self-contained assembly
-    with no implicit `memset` call.
+    with no implicit `memset` call. Require an implicit function call to fail
+    at its C source line instead of becoming a later unresolved linker error.
 12. Compile a floating-point C example and require Pentium x87—not SSE—
     assembly, assemble+run it on the RTL to EAX = 3, and require its selected
     in-flight instruction to highlight the exact generated assembly line.

@@ -10,6 +10,7 @@ import sys
 import json
 import argparse
 import struct
+from pathlib import Path
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QToolBar, QLabel,
                                QLineEdit, QPushButton, QCheckBox, QSpinBox, QSplitter,
@@ -1045,11 +1046,27 @@ class MainWindow(QMainWindow):
         urls = event.mimeData().urls()
         if len(urls) == 1 and urls[0].isLocalFile():
             path = urls[0].toLocalFile()
-            if path.endswith((".aux", ".vlt")):
-                self.load_snapshot(path)
-            else:
-                self.load_image(path)
+            self._load_dropped_path(path)
             event.acceptProposedAction()
+
+    def _load_dropped_path(self, path):
+        """Route dropped source, snapshot, and program files by their type."""
+        suffix = Path(path).suffix.lower()
+        if suffix in (".s", ".asm"):
+            if self.assembly.load_source(path):
+                self.workspace.setCurrentWidget(self.assembly)
+                self._notice(f"Opened assembly source: {os.path.basename(path)}")
+                return True
+            return False
+        if suffix in (".c", ".h"):
+            if self.c_source.load_source(path):
+                self.workspace.setCurrentWidget(self.c_source)
+                self._notice(f"Opened C source: {os.path.basename(path)}")
+                return True
+            return False
+        if suffix in (".aux", ".vlt"):
+            return bool(self.load_snapshot(path))
+        return bool(self.load_image(path))
 
     def closeEvent(self, event):
         # Closing while Run is active must not leave a timer dispatching into a

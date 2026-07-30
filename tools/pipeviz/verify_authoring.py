@@ -11,12 +11,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QTextCursor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+import pipeviz.source_view as source_module
 from pipeviz.isa_catalog import CATALOG, MNEMONICS, instruction_info
 from pipeviz.main import MainWindow, _apply_dark, _read_program
 from pipeviz.source_view import (
-    _ASM_TEMPLATE, _C_TEMPLATE, assemble_source, compile_c_source,
+    _ASM_TEMPLATE, _C_TEMPLATE, BuildFailure, assemble_source, compile_c_source,
 )
 
 _C_ARRAY_TEMPLATE = """volatile unsigned values[256];
@@ -94,6 +95,14 @@ def run_to_stop(win, clocks=4000):
 
 def verify_catalog():
     assert len(CATALOG) == len(MNEMONICS) >= 250
+    for info in CATALOG:
+        assert info.signature.split()[0] == info.mnemonic
+        assert info.description.strip()
+        assert info.pipe in {"UV", "PU", "PV", "NP", "FP", "SYS"}
+        assert info.stages
+        assert set(info.stages) <= {"F", "D", "X", "M", "W", "S", "FP", "=", "!", "."}
+        assert info.latency.strip()
+        assert info.availability.strip()
     required = {
         "aaa", "adc", "add", "bound", "bswap", "bt", "call", "cmpxchg8b",
         "cpuid", "endbr32", "f2xm1", "fadd", "fbld", "fldenv", "fprem1",
@@ -157,6 +166,12 @@ def verify_catalog():
 
 
 def verify_toolchain():
+    try:
+        assemble_source("")
+    except BuildFailure as error:
+        assert "empty" in str(error).lower()
+    else:
+        raise AssertionError("empty assembly was not rejected clearly")
     assembled = assemble_source(_ASM_TEMPLATE)
     segments, entry, kind = _read_program(assembled.elf_path)
     assert kind == "ELF" and entry == 0x08048000
@@ -172,6 +187,14 @@ def verify_toolchain():
     assert "memset" not in array_assembly
     assert "_start:" in array_assembly
     assert len(assemble_source(array_assembly).source_map) >= 10
+    try:
+        compile_c_source(
+            "int main(void)\n{\n    return unavailable_runtime();\n}\n")
+    except BuildFailure as error:
+        assert error.line == 3
+        assert "implicit declaration" in str(error)
+    else:
+        raise AssertionError("implicit function call was not rejected in C")
     print("OK toolchain: GNU as/ld ELF + DWARF source map; "
           "self-contained freestanding C → Intel assembly → ELF")
 
@@ -195,6 +218,10 @@ def scenario(app, outdir):
         assert win.open_action.shortcut().toString() == "Ctrl+O"
         assert win.save_source_action.isEnabled()
         assert win.save_source_action.shortcut().toString() == "Ctrl+S"
+        assert win.assembly.editor.accessibleName() == "Assembly source editor"
+        assert win.assembly.editor.completion.list.accessibleName()
+        assert win.assembly.diagnostics.accessibleName()
+        assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
 
         editor = win.assembly.editor
         editor.clear()
@@ -224,7 +251,35 @@ def scenario(app, outdir):
         finally:
             win.assembly.open_source = real_open_source
         assert opened == ["assembly"]
+        dirty_before_cancelled_open = editor.toPlainText()
+        real_open_dialog = QFileDialog.getOpenFileName
+        real_warning = QMessageBox.warning
+        QFileDialog.getOpenFileName = staticmethod(
+            lambda *_args, **_kwargs: ("", ""))
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("cancelled file chooser prompted for discard")))
+        try:
+            assert not win.assembly.open_source()
+        finally:
+            QFileDialog.getOpenFileName = staticmethod(real_open_dialog)
+            QMessageBox.warning = real_warning
+        assert editor.toPlainText() == dirty_before_cancelled_open
         os.makedirs(outdir, exist_ok=True)
+        blocked_artifacts = Path(outdir) / "not-a-build-directory"
+        blocked_artifacts.write_text("regular file", encoding="utf-8")
+        real_generated_dir = source_module._GENERATED_DIR
+        source_module._GENERATED_DIR = blocked_artifacts
+        try:
+            try:
+                assemble_source("mov eax, 1\n")
+            except BuildFailure as error:
+                assert "build directory" in str(error)
+            else:
+                raise AssertionError("invalid build directory was not diagnosed")
+        finally:
+            source_module._GENERATED_DIR = real_generated_dir
+        assert not win._has_session()
         save_path = os.path.join(outdir, "keyboard-saved.s")
         win.assembly._path = save_path
         QTest.keyClick(editor, Qt.Key_S, Qt.ControlModifier)
@@ -232,11 +287,38 @@ def scenario(app, outdir):
         assert Path(save_path).read_text(encoding="utf-8") == "i r . [ ] /"
         assert not editor.document().isModified()
         assert win.workspace.tabText(1) == "Assembly"
+        dropped_assembly = Path(outdir) / "dropped-source.S"
+        dropped_assembly.write_text(
+            ".intel_syntax noprefix\nmov eax, 17\n", encoding="utf-8")
+        assert win._load_dropped_path(str(dropped_assembly))
+        assert win.workspace.currentWidget() is win.assembly
+        assert editor.toPlainText().endswith("mov eax, 17\n")
+        assert win.assembly._path == str(dropped_assembly)
+        assert win.assembly._last_dir == str(Path(outdir).resolve())
+        assert not win._has_session()
         win.assembly.new_template()
+        assert win.assembly._last_dir == str(Path(outdir).resolve())
         win.assembly.editor.highlighter.rehighlight()
         settle(app)
         assert "#79c0ff" in format_colors(editor, 5)  # mov mnemonic
         assert "#56d364" in format_colors(editor, 5)  # eax register
+        assembly_literal = '.asciz "https://example.test/#literal" # comment'
+        editor.setPlainText(assembly_literal)
+        editor.highlighter.rehighlight()
+        settle(app)
+        assert format_color_at(
+            editor, 1, assembly_literal.index("//")) == "#a5d6ff"
+        assert format_color_at(
+            editor, 1, assembly_literal.rindex("#")) == "#6e7681"
+        structural_probe = "eax: add eax, 1\n.int 3"
+        editor.setPlainText(structural_probe)
+        editor.highlighter.rehighlight()
+        settle(app)
+        assert format_color_at(editor, 1, 0) == "#d2a8ff"  # label, not EAX
+        assert format_color_at(editor, 1, 5) == "#79c0ff"  # ADD opcode
+        assert format_color_at(editor, 2, 1) == "#ff7b72"  # directive, not INT
+        editor.document().setModified(False)
+        assert win.assembly.new_template()
         editor.setFocus()
         QTest.keyClick(editor, Qt.Key_F, Qt.ControlModifier)
         settle(app)
@@ -350,6 +432,12 @@ def scenario(app, outdir):
         assert editor.toPlainText() == "mov eax, 1; add "
         settle(app)
         assert win.assembly.info.signature.text().startswith("add ")
+        editor.setPlainText(".loop:")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        QTest.keyClick(editor, Qt.Key_Return)
+        assert editor.toPlainText() == ".loop:\n    "
 
         # A syntax error is line-linked and never starts a backend session.
         editor.setPlainText(
@@ -359,6 +447,11 @@ def scenario(app, outdir):
         assert editor._error_line == 5
         assert "Error" in win.assembly.diagnostics.toPlainText()
         assert not win._has_session()
+        editor.insertPlainText(" ")
+        assert editor._error_line is None
+        assert not win.assembly.diagnostics.toPlainText()
+        assert "#8b949e" in win.assembly.diagnostics.styleSheet()
+        editor.document().setModified(False)
 
         # Assemble and run the editable template. The result (1+...+10) proves
         # execution used the authored bytes, not a demo fallback.
@@ -470,6 +563,30 @@ def scenario(app, outdir):
         win.assembly._path = os.path.join(outdir, "edited-after-build.s")
         assert win.assembly.save_source()
         assert win.workspace.tabText(1) == "Assembly"
+        bom_assembly_path = Path(outdir) / "utf8-bom.s"
+        bom_assembly_path.write_bytes(
+            b"\xef\xbb\xbf.intel_syntax noprefix\nmov eax, 9\n")
+        real_open_dialog = QFileDialog.getOpenFileName
+        QFileDialog.getOpenFileName = staticmethod(
+            lambda *_args, **_kwargs: (str(bom_assembly_path), ""))
+        try:
+            assert win.assembly.open_source()
+        finally:
+            QFileDialog.getOpenFileName = staticmethod(real_open_dialog)
+        assert win.assembly.editor.toPlainText().startswith(".intel_syntax")
+        assert "\ufeff" not in win.assembly.editor.toPlainText()
+        invalid_assembly_path = Path(outdir) / "invalid-encoding.s"
+        invalid_assembly_path.write_bytes(b"\xff\xfe\x00")
+        preserved_source = editor.toPlainText()
+        real_open_dialog = QFileDialog.getOpenFileName
+        QFileDialog.getOpenFileName = staticmethod(
+            lambda *_args, **_kwargs: (str(invalid_assembly_path), ""))
+        try:
+            assert not win.assembly.open_source()
+        finally:
+            QFileDialog.getOpenFileName = staticmethod(real_open_dialog)
+        assert editor.toPlainText() == preserved_source
+        assert "decode" in win.assembly.diagnostics.toPlainText().lower()
 
         # Bare snippets get a generated fall-through HLT. Selecting it must
         # clear a previous linked line instead of falsely retaining that marker.
@@ -498,16 +615,54 @@ def scenario(app, outdir):
 
         # C syntax highlighting and error navigation.
         win.workspace.setCurrentWidget(win.c_source)
+        old_backend = win.backend
+        dropped_c = Path(outdir) / "dropped-source.c"
+        dropped_c.write_text(
+            "int main(void) { return 23; }\n", encoding="utf-8")
+        assert win._load_dropped_path(str(dropped_c))
+        assert win.workspace.currentWidget() is win.c_source
+        assert "return 23" in win.c_source.editor.toPlainText()
+        assert win.c_source._path == str(dropped_c)
+        assert win.c_source._last_dir == str(Path(outdir).resolve())
+        assert win.backend is old_backend
         win.c_source.new_template()
+        assert win.c_source._last_dir == str(Path(outdir).resolve())
+        invalid_c_path = Path(outdir) / "invalid-encoding.c"
+        invalid_c_path.write_bytes(b"\x80\x81")
+        preserved_c = win.c_source.editor.toPlainText()
+        real_open_dialog = QFileDialog.getOpenFileName
+        QFileDialog.getOpenFileName = staticmethod(
+            lambda *_args, **_kwargs: (str(invalid_c_path), ""))
+        try:
+            assert not win.c_source.open_source()
+        finally:
+            QFileDialog.getOpenFileName = staticmethod(real_open_dialog)
+        assert win.c_source.editor.toPlainText() == preserved_c
+        assert "decode" in win.c_source.diagnostics.toPlainText().lower()
+        assert win.c_source.new_template()
+        assert "#8b949e" in win.c_source.diagnostics.styleSheet()
+        assert "#8b949e" in win.c_source.status.styleSheet()
         assert all(toolbar.isHidden() for toolbar in toolbars)
         assert win.open_action.text() == "Open C source…"
         assert win.save_source_action.isEnabled()
         assert all(not action.isEnabled()
                    for action in win._transport_shortcut_actions)
+        assert win.c_source.editor.accessibleName() == "C source editor"
+        assert win.c_source.optimization.accessibleName()
+        assert win.c_source.diagnostics.accessibleName()
+        assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
         win.c_source.highlighter.rehighlight()
         settle(app)
         assert "#ff7b72" in format_colors(win.c_source.editor, 4)  # int
         assert "#d2a8ff" in format_colors(win.c_source.editor, 4)  # main
+        c_priority_probe = "int main(void) { if (main()) return 1; }\n"
+        win.c_source.editor.setPlainText(c_priority_probe)
+        win.c_source.highlighter.rehighlight()
+        settle(app)
+        assert format_color_at(
+            win.c_source.editor, 1, c_priority_probe.index("if")) == "#ff7b72"
+        assert format_color_at(
+            win.c_source.editor, 1, c_priority_probe.index("main")) == "#d2a8ff"
         lexical_probe = (
             'const char *url = "https://example.test/*literal*/"; // comment\n'
             "/* block comment\n"
@@ -523,6 +678,17 @@ def scenario(app, outdir):
             win.c_source.editor, 1, trailing_comment) == "#6e7681"
         assert format_color_at(
             win.c_source.editor, 3, 4) == "#6e7681"
+        win.c_source.editor.document().setModified(False)
+        win.c_source._path = os.path.join(outdir, "indent-probe.c")
+        assert win.c_source.save_source()
+        assert "#3fb950" in win.c_source.status.styleSheet()
+        win.c_source.new_template()
+        win.c_source.editor.setPlainText("int main(void)\n{")
+        cursor = win.c_source.editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        win.c_source.editor.setTextCursor(cursor)
+        QTest.keyClick(win.c_source.editor, Qt.Key_Return)
+        assert win.c_source.editor.toPlainText() == "int main(void)\n{\n    "
         win.c_source.editor.document().setModified(False)
         win.c_source.new_template()
         win.c_source.editor.appendPlainText("/* unsaved */")
@@ -549,6 +715,11 @@ def scenario(app, outdir):
         assert win.c_source.compile() is None
         assert win.c_source.editor._error_line == 3
         assert "undeclared" in win.c_source.diagnostics.toPlainText()
+        win.c_source.editor.insertPlainText(" ")
+        assert win.c_source.editor._error_line is None
+        assert not win.c_source.diagnostics.toPlainText()
+        assert "#8b949e" in win.c_source.diagnostics.styleSheet()
+        win.c_source.editor.document().setModified(False)
 
         # Compile real C, inspect/edit the emitted assembly, then assemble/run it.
         win.c_source.new_template()

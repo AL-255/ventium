@@ -184,6 +184,23 @@ class CodeEditor(QPlainTextEdit):
         self.setToolTip("")
         self._refresh_selections()
 
+    def keyPressEvent(self, event):
+        # Preserve indentation in both workbenches, and indent one level after
+        # an assembly label or C block/case opener. QPlainTextEdit otherwise
+        # drops back to column zero on every newline.
+        if (event.key() in (Qt.Key_Return, Qt.Key_Enter)
+                and not (event.modifiers()
+                         & (Qt.ControlModifier | Qt.AltModifier
+                            | Qt.MetaModifier))):
+            cursor = self.textCursor()
+            before = cursor.block().text()[:cursor.positionInBlock()]
+            leading = re.match(r"\s*", before).group(0)
+            extra = "    " if before.rstrip().endswith(("{", ":")) else ""
+            super().keyPressEvent(event)
+            self.insertPlainText(leading + extra)
+            return
+        super().keyPressEvent(event)
+
     def _rebuild_find_ranges(self):
         self._find_ranges = []
         self._find_truncated = False
@@ -350,8 +367,6 @@ class AssemblyHighlighter(QSyntaxHighlighter):
             r"(?:e?[abcd]x|e?(?:si|di|sp|bp)|[abcd][lh]|"
             r"[cdefgs]s|cr[0-4]|dr[0-7]|st(?:\([0-7]\))?)")
         self.rules = [
-            (QRegularExpression(r"^\s*[.$A-Za-z_][\w.$]*:"), _fmt("#d2a8ff", True)),
-            (QRegularExpression(r"^\s*\.[A-Za-z_][\w.]*"), _fmt("#ff7b72")),
             (QRegularExpression(
                 rf"\b(?:{mnemonic_pattern})\b",
                 QRegularExpression.CaseInsensitiveOption), _fmt("#79c0ff", True)),
@@ -360,11 +375,13 @@ class AssemblyHighlighter(QSyntaxHighlighter):
                 QRegularExpression.CaseInsensitiveOption), _fmt("#56d364")),
             (QRegularExpression(r"\b(?:0x[0-9a-fA-F]+|[0-9]+)\b"), _fmt("#f2cc60")),
             (QRegularExpression(r"[\[\]+*,:;-]"), _fmt("#8b949e")),
-            # In GNU as, ';' separates statements; '#' and '//' introduce
-            # comments. Treating ';' as a comment hid and disabled the second
-            # instruction in compact hand-written lines.
-            (QRegularExpression(r"(?:#|//).*$"), _fmt("#6e7681", italic=True)),
+            # Apply syntactic heads last so a label/directive named like an
+            # opcode or register retains its structural color.
+            (QRegularExpression(r"^\s*\.[A-Za-z_][\w.]*"), _fmt("#ff7b72")),
+            (QRegularExpression(r"^\s*[.$A-Za-z_][\w.$]*:"), _fmt("#d2a8ff", True)),
         ]
+        self.string = _fmt("#a5d6ff")
+        self.comment = _fmt("#6e7681", italic=True)
 
     def highlightBlock(self, text):
         for pattern, form in self.rules:
@@ -372,6 +389,28 @@ class AssemblyHighlighter(QSyntaxHighlighter):
             while it.hasNext():
                 match = it.next()
                 self.setFormat(match.capturedStart(), match.capturedLength(), form)
+        # In GNU as, ';' separates statements; '#' and '//' introduce
+        # comments. Scan quotes so .asciz "https://…" stays a string rather
+        # than turning grey at its slashes.
+        index = 0
+        while index < len(text):
+            if text.startswith("//", index) or text[index] == "#":
+                self.setFormat(index, len(text) - index, self.comment)
+                return
+            if text[index] in "\"'":
+                quote = text[index]
+                start = index
+                index += 1
+                while index < len(text):
+                    if text[index] == "\\":
+                        index = min(len(text), index + 2)
+                        continue
+                    index += 1
+                    if text[index - 1] == quote:
+                        break
+                self.setFormat(start, index - start, self.string)
+                continue
+            index += 1
 
 
 class CHighlighter(QSyntaxHighlighter):
@@ -379,15 +418,18 @@ class CHighlighter(QSyntaxHighlighter):
         "auto break case char const continue default do double else enum extern "
         "float for goto if inline int long register restrict return short signed "
         "sizeof static struct switch typedef union unsigned void volatile while "
-        "_Bool _Alignas _Alignof"
+        "_Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary "
+        "_Noreturn _Static_assert _Thread_local"
     ).split()
 
     def __init__(self, document):
         super().__init__(document)
         words = "|".join(self._KEYWORDS)
         self.rules = [
-            (QRegularExpression(rf"\b(?:{words})\b"), _fmt("#ff7b72", True)),
             (QRegularExpression(r"\b[A-Za-z_]\w*(?=\s*\()"), _fmt("#d2a8ff")),
+            # Keywords such as if/for/while also precede '('; apply them after
+            # the generic call rule so they remain keywords, not functions.
+            (QRegularExpression(rf"\b(?:{words})\b"), _fmt("#ff7b72", True)),
             (QRegularExpression(
                 r"\b(?:0[xX][0-9a-fA-F]+|[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?)\b"),
              _fmt("#f2cc60")),
@@ -557,6 +599,7 @@ class CompletionPopup(QFrame):
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
         self.list = QListWidget()
+        self.list.setAccessibleName("Ventium opcode completions")
         self.list.setFixedWidth(285)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list.setTextElideMode(Qt.ElideRight)
@@ -815,7 +858,9 @@ def _source_map(elf_path, source_name, prefix_lines, source_lines):
 
 def assemble_source(source):
     """Assemble/link editor text and return ELF path plus PC→editor-line map."""
-    _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    if not source.strip():
+        raise BuildFailure(
+            "Assembly source is empty. Add at least one instruction before building.")
     assembler = _require_tool("as")
     linker = _require_tool("ld")
     source_path = _GENERATED_DIR / "assembly.s"
@@ -834,7 +879,13 @@ def assemble_source(source):
     # the editor mapping; complete sources with an explicit _start stay exact.
     suffix = ["hlt"] if auto_start else []
     body = "\n".join(prefix + [original.rstrip()] + suffix + [""]) + "\n"
-    source_path.write_text(body, encoding="utf-8")
+    try:
+        _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(body, encoding="utf-8")
+    except OSError as error:
+        raise BuildFailure(
+            f"Cannot prepare assembly build directory '{_GENERATED_DIR}': "
+            f"{error}") from error
     try:
         as_log = _run_tool([
             assembler, "--32", "--gdwarf-5", "--noexecstack",
@@ -858,16 +909,23 @@ def assemble_source(source):
 
 def compile_c_source(source, optimization="-O2"):
     """Compile freestanding 32-bit C to editable GNU Intel assembly text."""
-    _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     compiler = _require_tool("gcc")
     source_path = _GENERATED_DIR / "program.c"
     asm_path = _GENERATED_DIR / "program-from-c.s"
-    source_path.write_text(source.rstrip() + "\n", encoding="utf-8")
+    try:
+        _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(source.rstrip() + "\n", encoding="utf-8")
+    except OSError as error:
+        raise BuildFailure(
+            f"Cannot prepare C build directory '{_GENERATED_DIR}': "
+            f"{error}") from error
     command = [
         compiler, "-m32", "-march=pentium", "-mtune=pentium",
         "-std=gnu11", optimization, "-ffreestanding", "-fno-builtin",
         "-fno-tree-loop-distribute-patterns",
         "-mno-mmx", "-mno-sse", "-mno-sse2",
+        "-Wall", "-Wextra", "-Werror=implicit-function-declaration",
+        "-Werror=implicit-int",
         "-fno-pic", "-fno-pie",
         "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
         "-fno-ident", "-masm=intel", "-S",
@@ -877,7 +935,11 @@ def compile_c_source(source, optimization="-O2"):
         log = _run_tool(command)
     except BuildFailure as error:
         raise BuildFailure(str(error), error.line) from error
-    assembly = asm_path.read_text(encoding="utf-8")
+    try:
+        assembly = asm_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise BuildFailure(
+            f"Cannot read generated assembly '{asm_path}': {error}") from error
     if not re.search(r"(?m)^main:\s*$", assembly):
         raise BuildFailure(
             "Compilation produced no 'main' symbol. Define int main(void) as the entry.")
@@ -934,6 +996,10 @@ class _Diagnostics(QPlainTextEdit):
         self.setPlaceholderText("Build diagnostics appear here.")
         self.setStyleSheet("color:#8b949e;background:#0b0f14;")
 
+    def reset(self):
+        self.setStyleSheet("color:#8b949e;background:#0b0f14;")
+        self.clear()
+
     def success(self, text):
         self.setStyleSheet("color:#3fb950;background:#0b0f14;")
         self.setPlainText(text)
@@ -978,12 +1044,17 @@ class AssemblyView(QWidget):
         controls.addWidget(dialect)
         controls.addStretch(1)
         self.template_btn = QPushButton("New template")
+        self.template_btn.setToolTip("Replace the editor with a runnable sum-loop template")
         self.open_btn = QPushButton("Open…")
+        self.open_btn.setToolTip("Open GNU Intel-syntax source (Ctrl+O)")
         self.save_btn = QPushButton("Save as…")
+        self.save_btn.setToolTip("Save assembly source under a chosen name")
         self.complete_btn = QPushButton("Complete")
         self.complete_btn.setToolTip("Open opcode completion (Ctrl+Space)")
         self.build_btn = QPushButton("Assemble")
+        self.build_btn.setToolTip("Check, assemble, and link without loading the RTL")
         self.run_btn = QPushButton("Assemble + Run")
+        self.run_btn.setToolTip("Assemble, load in the Visualizer, and reset (Ctrl+Enter)")
         self.run_btn.setStyleSheet(
             "background:#238636;color:white;font-weight:bold;border:1px solid #2ea043;")
         for button in (
@@ -1006,6 +1077,7 @@ class AssemblyView(QWidget):
         side.addWidget(self.info)
         side.addWidget(QLabel("<b>Build diagnostics</b>"))
         self.diagnostics = _Diagnostics()
+        self.diagnostics.setAccessibleName("Assembly build diagnostics")
         side.addWidget(self.diagnostics, 1)
         split.addWidget(self.editor)
         split.addWidget(sidebar)
@@ -1021,6 +1093,7 @@ class AssemblyView(QWidget):
         self._built_revision = -1
         self._source_map = {}
         self._path = None
+        self._last_dir = str(_TOOL_DIR)
         self.editor.cursorPositionChanged.connect(self._cursor_instruction)
         self.editor.textChanged.connect(self._source_changed)
         self.editor.completionNotice.connect(self._completion_notice)
@@ -1046,6 +1119,11 @@ class AssemblyView(QWidget):
             and self.editor.document().revision() == self._built_revision)
 
     def _source_changed(self):
+        if self.editor._error_line is not None:
+            self.editor.mark_error_line(None)
+            self.diagnostics.reset()
+            self.status.setText("Source changed — assemble again to refresh diagnostics")
+            self.status.setStyleSheet("color:#8b949e;padding:2px;")
         if self._built_revision >= 0 and not self.mapping_current:
             self._built_revision = -1
             self._source_map = {}
@@ -1084,7 +1162,7 @@ class AssemblyView(QWidget):
         self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
-        self.diagnostics.clear()
+        self.diagnostics.reset()
         self.status.setText("New assembly template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
@@ -1107,20 +1185,24 @@ class AssemblyView(QWidget):
         return True
 
     def open_source(self):
-        if not self.confirm_safe_to_discard("opening another file"):
-            return False
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open assembly", str(_TOOL_DIR),
+            self, "Open assembly", self._last_dir,
             "Assembly (*.s *.S *.asm);;All files (*)")
         if not path:
             return False
+        return self.load_source(path)
+
+    def load_source(self, path):
+        """Load a known source path safely (shared by dialog and drag/drop)."""
         try:
-            text = Path(path).read_text(encoding="utf-8")
-        except OSError as error:
+            text = Path(path).read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
             return False
-        self.set_source(text, os.path.basename(path), confirm=False)
+        if not self.set_source(text, os.path.basename(path), confirm=True):
+            return False
         self._path = path
+        self._last_dir = os.path.dirname(os.path.abspath(path))
         return True
 
     def confirm_safe_to_discard(self, action):
@@ -1131,18 +1213,21 @@ class AssemblyView(QWidget):
         path = self._path
         if save_as or not path:
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save assembly", path or str(_TOOL_DIR / "program.s"),
+                self, "Save assembly",
+                path or os.path.join(self._last_dir, "program.s"),
                 "Assembly (*.s);;All files (*)")
             if not path:
                 return False
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
-        except OSError as error:
+        except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
             return False
         self._path = path
+        self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
+        self.status.setStyleSheet("color:#3fb950;padding:2px;")
         return True
 
     def build(self, run=False):
@@ -1200,17 +1285,25 @@ class CView(QWidget):
         controls.addWidget(note)
         controls.addStretch(1)
         self.template_btn = QPushButton("New template")
+        self.template_btn.setToolTip("Replace the editor with a Fibonacci C template")
         self.open_btn = QPushButton("Open…")
+        self.open_btn.setToolTip("Open freestanding C source (Ctrl+O)")
         self.save_btn = QPushButton("Save as…")
+        self.save_btn.setToolTip("Save C source under a chosen name")
         controls.addWidget(self.template_btn)
         controls.addWidget(self.open_btn)
         controls.addWidget(self.save_btn)
         controls.addWidget(QLabel(" optimization "))
         self.optimization = QComboBox()
+        self.optimization.setAccessibleName("Compiler optimization")
+        self.optimization.setToolTip(
+            "GCC optimization level used for generated editable assembly")
         self.optimization.addItems(["-O0", "-O1", "-O2", "-Os"])
         self.optimization.setCurrentText("-O2")
         controls.addWidget(self.optimization)
         self.compile_btn = QPushButton("Compile → Assembly")
+        self.compile_btn.setToolTip(
+            "Compile to editable GNU Intel assembly (Ctrl+Enter)")
         self.compile_btn.setStyleSheet(
             "background:#1f6feb;color:white;font-weight:bold;border:1px solid #388bfd;")
         controls.addWidget(self.compile_btn)
@@ -1224,6 +1317,7 @@ class CView(QWidget):
         self.find_bar = SourceFindBar(self.editor)
         layout.addWidget(self.find_bar)
         self.diagnostics = _Diagnostics()
+        self.diagnostics.setAccessibleName("C compiler diagnostics")
         self.diagnostics.setMaximumHeight(165)
         split.addWidget(self.editor)
         split.addWidget(self.diagnostics)
@@ -1235,6 +1329,7 @@ class CView(QWidget):
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         layout.addWidget(self.status)
         self._path = None
+        self._last_dir = str(_TOOL_DIR)
 
         self.template_btn.clicked.connect(self.new_template)
         self.open_btn.clicked.connect(self.open_source)
@@ -1245,7 +1340,17 @@ class CView(QWidget):
             self.compile)
         self.editor.document().modificationChanged.connect(
             self.dirtyChanged.emit)
+        self.editor.textChanged.connect(self._source_changed)
         self.editor.document().setModified(False)
+
+    def _source_changed(self):
+        if self.editor._error_line is None:
+            return
+        self.editor.mark_error_line(None)
+        self.diagnostics.reset()
+        self.status.setText("Source changed — compile again to refresh diagnostics")
+        self.status.setStyleSheet("color:#8b949e;padding:2px;")
+        self.statusChanged.emit(self.status.text())
 
     def new_template(self):
         if not self.confirm_safe_to_discard("creating a new template"):
@@ -1254,27 +1359,36 @@ class CView(QWidget):
         self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
-        self.diagnostics.clear()
+        self.diagnostics.reset()
         self.status.setText("New freestanding C template")
+        self.status.setStyleSheet("color:#8b949e;padding:2px;")
         return True
 
     def open_source(self):
-        if not self.confirm_safe_to_discard("opening another file"):
-            return False
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open C source", str(_TOOL_DIR),
+            self, "Open C source", self._last_dir,
             "C source (*.c *.h);;All files (*)")
         if not path:
             return False
+        return self.load_source(path)
+
+    def load_source(self, path):
+        """Load a known source path safely (shared by dialog and drag/drop)."""
         try:
-            self.editor.setPlainText(Path(path).read_text(encoding="utf-8"))
-        except OSError as error:
+            text = Path(path).read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
             return False
+        if not self.confirm_safe_to_discard("opening another file"):
+            return False
+        self.editor.setPlainText(text)
         self.editor.document().setModified(False)
         self._path = path
+        self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.clear_marks()
+        self.diagnostics.reset()
         self.status.setText(f"Opened {os.path.basename(path)}")
+        self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         return True
 
     def confirm_safe_to_discard(self, action):
@@ -1285,7 +1399,8 @@ class CView(QWidget):
         path = self._path
         if save_as or not path:
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save C source", path or str(_TOOL_DIR / "program.c"),
+                self, "Save C source",
+                path or os.path.join(self._last_dir, "program.c"),
                 "C source (*.c);;All files (*)")
             if not path:
                 return False
@@ -1295,8 +1410,10 @@ class CView(QWidget):
             self.diagnostics.failure(str(error))
             return False
         self._path = path
+        self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.document().setModified(False)
         self.status.setText(f"Saved {os.path.basename(path)}")
+        self.status.setStyleSheet("color:#3fb950;padding:2px;")
         return True
 
     def compile(self):
