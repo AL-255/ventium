@@ -29,7 +29,7 @@ import pipeviz.main as main_module
 import pipeviz.disasm as disasm_module
 import pipeviz.pipeline_view as pipeline_module
 import pipeviz.trace_view as trace_module
-from pipeviz.backend import Backend, VVCline, VVRetire, VVState
+from pipeviz.backend import Backend, VVCline, VVCycle, VVRetire, VVState
 from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
 from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
@@ -259,6 +259,51 @@ def scenario_startup(app, outdir):
     live_board.set_state(live, live_backend, 32)
     assert live_board._cells["U"][1] == "nop"
     live_board.deleteLater()
+
+    # Retired timing rows must decode the immutable bytes captured with that
+    # retirement. A current-memory re-read can see a self-modified opcode or
+    # use the wrong post-transition segment/page mapping.
+    retire = VVRetire()
+    retire.n = 7
+    retire.cyc = 1
+    retire.pc = 0x00401234
+    retire.d32 = 1
+    retire.nbytes = 1
+    retire.bytes[0] = 0x40                       # inc eax
+    cycle = VVCycle()
+    cycle.cyc = 1
+    cycle.retU = 1
+    cycle.nU = retire.n
+    cycle.pcU = retire.pc
+
+    class RetiredBytesBackend:
+        @staticmethod
+        def state_name(_state):
+            return "S_PIPE"
+
+        @staticmethod
+        def get_cycles(_since, _maximum):
+            return [cycle]
+
+        @staticmethod
+        def get_retires(_since, _maximum):
+            return [retire]
+
+        @staticmethod
+        def mem_read(_address, _count):
+            raise AssertionError(
+                "timing decode re-read mutable/current program memory")
+
+    retired_backend = RetiredBytesBackend()
+    retired_plot = pipeline_module._KonataPlot()
+    retired_plot.reset(retired_backend, 32)
+    assert retired_plot.ingest(retired_backend, 1) == 1
+    assert retired_plot.insns[0]["mnem"] == "inc eax"
+    assert retired_plot.insns[0]["reads"] == [0]
+    assert retired_plot.insns[0]["writes"] == [0]
+    assert retired_plot.insns[0]["rfl"] is False
+    assert retired_plot.insns[0]["wfl"] is True
+    retired_plot.deleteLater()
 
     bp16 = disasm_module.mem_operand(b"\x8b\x46\x10", bits=16)
     assert bp16[6:] == (1, 0xFFFF)  # BP defaults to SS, 16-bit address

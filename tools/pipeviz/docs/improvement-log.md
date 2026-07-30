@@ -173,6 +173,15 @@ diagram by architectural retirement ID; cycle-only navigation remains reserved
 for the sparkline/event seek controls. The branch regression clicks both lanes
 of one paired cycle and requires the exact row, exact pin, and shared playhead.
 
+**Immutable timing-decode audit:** the timing gutter and dependency edges
+re-read `current CS.base + retired PC` from model memory. That could decode
+physical bytes as linear bytes under paging, use a later segment/page context,
+or silently rewrite an old row after self-modifying code; Trace already used
+the correct captured bytes. Pipeline now batches the matching retirement
+records and derives mnemonic, GPR/flag reads, and writes from each record's
+immutable bytes and D-bit. A synthetic backend makes all current-memory reads
+fatal while proving `inc eax` and its exact dependency metadata still render.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

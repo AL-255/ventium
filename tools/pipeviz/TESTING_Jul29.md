@@ -112,15 +112,20 @@ Procedure:
 13. Feed synthetic streams beyond the per-read/view caps and require Pipeline,
     IPC, Cycles, and Trace to reach the newest sample, label bounded history,
     and preserve predecessor-derived Trace state.
-14. Require bounded-history status to use a captured U+V denominator and label
+14. Give Pipeline immutable retired bytes while making current-memory reads
+    fail; require its mnemonic and register/flag dependencies to decode solely
+    from the retirement record.
+15. Require bounded-history status to use a captured U+V denominator and label
     `pair(win)`/`mispred(win)` while retaining lifetime retirement/IPC.
-15. Run a real six-byte loop for 9,000 clocks in one refresh and require backend,
+16. Run a real six-byte loop for 9,000 clocks in one refresh and require backend,
     Pipeline, IPC, Cycles, and newest-6,000 Trace endpoints to agree.
 
 Expected and observed:
 
 - Status says no image is loaded.
 - Every data pane distinguishes unloaded state from sampled zero/empty state.
+- Historical timing mnemonics/dependencies use captured retirement bytes and
+  never re-read mutable code through the current mapping.
 - Disabled Run is visibly gray rather than looking executable.
 - F1 opens the indexed user guide.
 - The Pipeline page explains axes, U/V pairs, F/L/D/X/M/W/=/!/S glyphs,

@@ -93,7 +93,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     instructions cascade diagonally (the classic superscalar diagram); a stalled
     instruction stretches (a D-cache miss is a long `=N` run before its `X`). A
     frozen gutter holds the labels (n / U·V pipe / PC / mnemonic) + a colour-graded
-    **latency badge** (`Nc`, red when heavy). **Interactive analysis:** click an
+    **latency badge** (`Nc`, red when heavy). Mnemonics and dependency metadata
+    come from each retirement's captured instruction bytes, so later
+    self-modification or mapping changes cannot rewrite history.
+    **Interactive analysis:** click an
     instruction (cell or trace row) to **pin the registers AS-OF that retirement**,
     drop a cyan cycle **playhead**, and draw **producer→consumer dependency edges**
     (a line from each source register's writer; the flag-edge for a conditional

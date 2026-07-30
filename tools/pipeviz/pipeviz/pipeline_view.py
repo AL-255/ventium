@@ -469,8 +469,6 @@ class _KonataPlot(QWidget):
         self.bits = 32
         self.cs_base = 0
         self.backend = None
-        self._mn_cache = {}
-        self._rw_cache = {}      # pc -> (read_gpr_idxs, write_gpr_idxs) for dep edges
         self.insns = []          # [{n,pc,pipe,mnem,cells:[(cyc,ch,color)],c0,c1,reads,writes}]
         self.history_start = 1
         self.base_cyc = 1
@@ -497,8 +495,6 @@ class _KonataPlot(QWidget):
     def reset(self, backend, bits, history_start=1):
         self.backend = backend
         self.bits = bits
-        self._mn_cache = {}
-        self._rw_cache = {}
         self.insns = []
         self.history_start = max(1, int(history_start))
         self.base_cyc = self.history_start
@@ -533,29 +529,25 @@ class _KonataPlot(QWidget):
         self._resize_canvas()
         self.update()
 
-    def _mn(self, pc):
-        key = (pc, self.cs_base, self.bits)
-        t = self._mn_cache.get(key)
-        if t is None and self.backend is not None:
-            sz, mn, ops, _ = disasm.disasm_one(
-                self.backend.mem_read(self.cs_base + pc, 16), pc, self.bits)
-            t = f"{mn} {ops}".strip()
-            self._mn_cache[key] = t
-        return t or "?"
+    def _retired_decode(self, backend, rec, pc):
+        """Decode the immutable bytes captured for this retirement.
 
-    def _regs(self, pc):
-        """(read_gprs, write_gprs, reads_flags, writes_flags) for the instruction at
-        pc, cached — the raw material for the producer→consumer dependency overlay
-        (the flags pair drives the conditional-branch `jne` ← flags ← cmp/dec edge)."""
-        key = (pc, self.cs_base, self.bits)
-        rw = self._rw_cache.get(key)
-        if rw is None and self.backend is not None:
-            code = self.backend.mem_read(self.cs_base + pc, 16)
-            reads, rflags = disasm.read_regs(code, pc, self.bits)
-            writes, wflags = disasm.written_regs(code, pc, self.bits)
-            rw = (reads, writes, rflags, wflags)
-            self._rw_cache[key] = rw
-        return rw or ([], [], False, False)
+        Re-reading ``current CS.base + PC`` is wrong after paging/segmentation
+        changes and for self-modifying code. It can also make the dependency
+        overlay analyze a different opcode than Trace. Older/incomplete bridges
+        may omit a record, so retain a clearly scoped live-memory fallback.
+        """
+        if rec is not None and int(rec.nbytes):
+            code = bytes(rec.bytes[:int(rec.nbytes)])
+            bits = 32 if rec.d32 else 16
+        else:
+            code = backend.mem_read(self.cs_base + pc, 16)
+            bits = self.bits
+        _size, mn, ops, _fields = disasm.disasm_one(code, pc, bits)
+        text = f"{mn} {ops}".strip() or "?"
+        reads, rflags = disasm.read_regs(code, pc, bits)
+        writes, wflags = disasm.written_regs(code, pc, bits)
+        return text, reads, writes, rflags, wflags
 
     def _compute_deps(self, row):
         """For the selected consumer row, find the PRODUCER of each source GPR — the
@@ -601,6 +593,25 @@ class _KonataPlot(QWidget):
 
     def ingest(self, backend, since_cyc):
         new = backend.get_cycles(since_cyc, 8192)
+        # Fetch the matching immutable retirement records once per cycle batch.
+        # U/V IDs are contiguous in current bridges, but build the map by the
+        # actual record ID so snapshot epochs and a missing old record stay safe.
+        retire_ids = [
+            int(retire_n)
+            for cycle in new
+            for retired, retire_n in (
+                (getattr(cycle, "retU", 0), getattr(cycle, "nU", 0)),
+                (getattr(cycle, "retV", 0), getattr(cycle, "nV", 0)))
+            if retired
+        ]
+        retire_by_n = {}
+        if retire_ids:
+            first_n, last_n = min(retire_ids), max(retire_ids)
+            retire_by_n = {
+                int(record.n): record
+                for record in backend.get_retires(
+                    first_n, last_n - first_n + 1)
+            }
         for c in new:
             name = backend.state_name(c.state)
             # Bubble/penalty registers retain their last value outside S_PIPE.
@@ -623,8 +634,8 @@ class _KonataPlot(QWidget):
             if stall and name == "S_PIPE":
                 self.stat["stall"] += 1
             if c.retU:
-                mn = self._mn(c.pcU)
-                reads, writes, rfl, wfl = self._regs(c.pcU)
+                mn, reads, writes, rfl, wfl = self._retired_decode(
+                    backend, retire_by_n.get(int(c.nU)), c.pcU)
                 cells = _add_frontend(
                     _recolor_fp(self._pending, mn), self.history_start)
                 self.insns.append(dict(n=c.nU, pc=c.pcU, pipe="U", mnem=mn,
@@ -634,8 +645,8 @@ class _KonataPlot(QWidget):
                 self.stat["uret"] += 1
                 self._pending = []
             if c.retV:
-                mn = self._mn(c.pcV)
-                reads, writes, rfl, wfl = self._regs(c.pcV)
+                mn, reads, writes, rfl, wfl = self._retired_decode(
+                    backend, retire_by_n.get(int(c.nV)), c.pcV)
                 vcol = C_FP if (mn[:1] == "f" and mn[:2] not in ("fs", "gs")) else C_PIPE
                 cells = _add_frontend(
                     [(c.cyc, "X", vcol)], self.history_start)

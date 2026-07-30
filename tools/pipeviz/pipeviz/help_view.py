@@ -62,7 +62,9 @@ Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p
 <p>Each row is one retired instruction; time moves left to right in core cycles.
 The frozen label gives retirement number, U/V lane, PC, mnemonic, and total
 latency. Repeated PCs are shaded together, which makes loop iterations easy to
-recognize.</p>
+recognize. Mnemonics and dependency reads/writes come from the immutable bytes
+captured with that retirement, so later code or address-map changes cannot
+rewrite an older row.</p>
 <h2>Stage glyphs</h2>
 <table cellspacing="5">
  <tr><td><b>F</b></td><td>fetch</td><td><b>L</b></td><td>I-cache fill</td>

@@ -68,6 +68,9 @@ explanation.
 The timing diagram itself is keyboard accessible: Up/Down selects adjacent
 retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture
 edges. `Ctrl+-` and `Ctrl+=` zoom the cycle axis around the selected cycle.
+Its mnemonic and producer/consumer analysis use the bytes captured with each
+retirement, not a later read through the current memory map. This keeps old rows
+faithful across self-modifying code and segment/page-table transitions.
 
 The register bank automatically changes from three simultaneous columns to
 indexed **Integer / Segments / x87** pages when the right pane becomes narrow.
