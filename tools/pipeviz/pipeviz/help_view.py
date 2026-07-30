@@ -244,9 +244,9 @@ while in Assembly/C.</p>
 highlights its structurally matching pair; an unmatched or misnested delimiter
 is marked red. Delimiters inside quoted text, Assembly <code>#</code> comments,
 and C line/block comments are ignored.</p>
-<p>Click a line number to select that complete source line, or drag upward or
-downward in the gutter to select whole-line ranges for Tab/Shift+Tab indentation
-and Ctrl+/ comment toggling.</p>
+<p>Click a line number to select that complete source line, then drag or
+Shift-click another number to extend a whole-line range for Tab/Shift+Tab
+indentation and Ctrl+/ comment toggling.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>

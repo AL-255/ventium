@@ -506,6 +506,16 @@ def scenario(app, outdir):
         drag_end_y = editor.cursorRect(
             QTextCursor(drag_end_block)).center().y()
         gutter_x = editor._line_area.width() // 2
+        QTest.mouseClick(
+            editor._line_area, Qt.LeftButton, Qt.ShiftModifier,
+            QPoint(gutter_x, drag_end_y))
+        assert editor.textCursor().selectionStart() == line_cursor.block().position()
+        assert editor.textCursor().selectionEnd() == (
+            drag_end_block.position() + len(drag_end_block.text()))
+        assert win.assembly.cursor_position.text().endswith(" · 4L")
+        QTest.mouseClick(
+            editor._line_area, Qt.LeftButton, Qt.NoModifier,
+            QPoint(gutter_x, line_y))
         QTest.mousePress(
             editor._line_area, Qt.LeftButton, Qt.NoModifier,
             QPoint(gutter_x, line_y))

@@ -306,8 +306,9 @@ In Assembly/C, `Ctrl+-`/`Ctrl+=` scales source text and line numbers from
 Moving the caret immediately before or after `()`, `[]`, or `{}` highlights
 the structurally matching pair; an unmatched delimiter is marked red.
 Delimiters in quoted text and `#`, `//`, or `/* … */` comments are ignored.
-Clicking a gutter line number selects its complete line; dragging up or down
-selects whole-line ranges ready for `Tab`, `Shift+Tab`, or `Ctrl+/`.
+Clicking a gutter line number selects its complete line; dragging up/down or
+Shift-clicking another number extends a whole-line range ready for `Tab`,
+`Shift+Tab`, or `Ctrl+/`.
 In Visualizer, the zoom/reset keys retain Pipeline-axis zoom and panel-layout
 reset.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,

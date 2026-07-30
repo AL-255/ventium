@@ -44,7 +44,8 @@ class _LineNumberArea(QWidget):
         self._drag_anchor = None
         self.setAccessibleName("Source line numbers")
         self.setToolTip(
-            "Click a line number to select it; drag to select complete lines")
+            "Click a line number to select it; drag or Shift-click to extend "
+            "a complete-line selection")
         self.setAccessibleDescription(self.toolTip())
 
     def sizeHint(self):
@@ -84,8 +85,15 @@ class _LineNumberArea(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self._drag_anchor = self._block_at(self._event_y(event))
-            if self._select_through(self._drag_anchor):
+            target = self._block_at(self._event_y(event))
+            if target is not None and event.modifiers() & Qt.ShiftModifier:
+                cursor = self.editor.textCursor()
+                self._drag_anchor = self.editor.document().findBlock(
+                    cursor.anchor() if cursor.hasSelection()
+                    else cursor.position())
+            else:
+                self._drag_anchor = target
+            if self._select_through(target):
                 self.editor.setFocus(Qt.MouseFocusReason)
                 event.accept()
                 return

@@ -60,7 +60,9 @@ ranges in either direction, preserving the single-click behavior and editor
 focus. This makes pointer-driven block indentation/outdent/comment commands
 practical; the tooltip and accessible description expose the gesture.
 Acceptance covers downward and upward range selection plus invalid empty-gutter
-click safety.
+click safety. Shift-click now extends from the existing selection anchor as
+well, enabling long whole-line selections after scrolling without a continuous
+drag.
 
 **Long-source orientation audit:** line numbers identified rows, but neither
 workbench exposed the active column or a persistent location once transient
