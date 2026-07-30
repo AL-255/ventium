@@ -229,7 +229,9 @@ Qt/Capstone imports failed as a Python traceback. The launcher now honors
 `PIPEVIZ_PYTHON`, preflights the interpreter plus both imports, and emits an
 exact requirements install command. A local `requirements.txt` constrains
 PySide6 and Capstone, and acceptance proves both the selected-interpreter help
-path and actionable missing-interpreter failure.
+path and actionable missing-interpreter failure. A follow-up moved this cheap
+preflight ahead of the first/forced Verilator build; the regression deliberately
+passes `--build` with a missing interpreter and forbids any build banner.
 
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 

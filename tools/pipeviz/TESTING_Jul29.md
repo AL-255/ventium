@@ -92,7 +92,8 @@ Procedure:
 1. Verify explicit-image, explicit-snapshot, and no-argument demo startup
    resolution are mutually distinct (a snapshot never falls through to a demo).
    Launch `run.sh --help` through the selected Miniconda interpreter and require
-   a missing `PIPEVIZ_PYTHON` to fail with an actionable override hint.
+   a missing `PIPEVIZ_PYTHON --build` to fail with an actionable override hint
+   before invoking the backend build.
 2. Construct and show a fresh `MainWindow`.
 3. Inject a backend-construction failure and a separate SoC-plus-core
    double-failure; require the existing live handle and requested mode to

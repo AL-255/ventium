@@ -31,7 +31,8 @@ Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p
 <h2>Fast paths</h2>
 <p>The launcher uses <code>python3</code>, or the interpreter named by
 <code>PIPEVIZ_PYTHON</code>. It preflights PySide6 and Capstone and points to
-<code>requirements.txt</code> if either import is missing.</p>
+<code>requirements.txt</code> if either import is missing, before starting a
+potentially long backend build.</p>
 <ul>
  <li><b>File → Open example</b> rescans and opens any built verification
  workload.</li>

@@ -15,17 +15,8 @@ for a in "$@"; do
   if [ "$a" = "--build" ]; then BUILD=1; else ARGS+=("$a"); fi
 done
 
-if [ "$BUILD" = "1" ] || [ ! -f "$HERE/libventium_viz.so" ] \
-   || [ "$HERE/ventium_viz.cpp" -nt "$HERE/libventium_viz.so" ] \
-   || [ "$HERE/ventium_viz.h" -nt "$HERE/libventium_viz.so" ] \
-   || [ "$HERE/build.sh" -nt "$HERE/libventium_viz.so" ]; then
-  echo "[run] building backend ..."
-  bash "$HERE/build.sh"
-fi
-
-# run from the repo root so default image paths (build/...) resolve, with the
-# package dir on PYTHONPATH so `import pipeviz` works.
-cd "$ROOT"
+# Validate the cheap Python side before a potentially long first Verilator
+# build. A missing GUI environment should fail in milliseconds, not afterward.
 PYTHON_BIN="${PIPEVIZ_PYTHON:-python3}"
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "[run] Python interpreter not found: $PYTHON_BIN" >&2
@@ -37,5 +28,17 @@ if ! "$PYTHON_BIN" -c 'import PySide6, capstone' >/dev/null 2>&1; then
   echo "[run] install with: $PYTHON_BIN -m pip install -r $HERE/requirements.txt" >&2
   exit 1
 fi
+
+if [ "$BUILD" = "1" ] || [ ! -f "$HERE/libventium_viz.so" ] \
+   || [ "$HERE/ventium_viz.cpp" -nt "$HERE/libventium_viz.so" ] \
+   || [ "$HERE/ventium_viz.h" -nt "$HERE/libventium_viz.so" ] \
+   || [ "$HERE/build.sh" -nt "$HERE/libventium_viz.so" ]; then
+  echo "[run] building backend ..."
+  bash "$HERE/build.sh"
+fi
+
+# run from the repo root so default image paths (build/...) resolve, with the
+# package dir on PYTHONPATH so `import pipeviz` works.
+cd "$ROOT"
 exec env PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" \
   "$PYTHON_BIN" -m pipeviz.main "${ARGS[@]}"

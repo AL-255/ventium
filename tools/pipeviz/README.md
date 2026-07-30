@@ -65,8 +65,9 @@ a C++17 compiler, GNU `gcc`/`as`/`ld`/`objdump`, and `python3` with
 python3 -m pip install -r tools/pipeviz/requirements.txt
 ```
 
-`run.sh` checks those imports before opening Qt and prints that command instead
-of a traceback when they are absent. Set `PIPEVIZ_PYTHON` to select an
+`run.sh` checks the interpreter and imports before any potentially long
+Verilator build, and prints that command instead of a traceback when they are
+absent. Set `PIPEVIZ_PYTHON` to select an
 environment explicitly, for example:
 
 ```sh

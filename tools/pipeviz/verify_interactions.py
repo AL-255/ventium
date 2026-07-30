@@ -648,10 +648,11 @@ def scenario_startup(app, outdir):
     assert "Ventium pipeline visualizer" in launcher.stdout
     launcher_env["PIPEVIZ_PYTHON"] = "/missing/pipeviz-python"
     launcher = subprocess.run(
-        ["bash", os.path.join(HERE, "run.sh"), "--help"],
+        ["bash", os.path.join(HERE, "run.sh"), "--build", "--help"],
         cwd=HERE, env=launcher_env, text=True, capture_output=True)
     assert launcher.returncode == 1
     assert "set PIPEVIZ_PYTHON=/path/to/python" in launcher.stderr
+    assert "[run] building backend" not in launcher.stdout
 
     win = new_window(app)
     try:

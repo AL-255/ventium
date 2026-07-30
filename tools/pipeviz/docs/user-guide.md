@@ -24,7 +24,8 @@ PIPEVIZ_PYTHON="$HOME/miniconda3/bin/python" \
 ```
 
 If PySide6 or Capstone is missing, the launcher prints the exact
-`pip install -r tools/pipeviz/requirements.txt` command before exiting.
+`pip install -r tools/pipeviz/requirements.txt` command before exiting and
+before spending time on a backend build.
 
 `Open…` accepts raw `.flat`/`.bin`/`.img`/`.rom` images and little-endian
 32-bit x86 ELF files. Empty files and DOS/PE executables are rejected with a
