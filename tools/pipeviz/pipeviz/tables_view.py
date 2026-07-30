@@ -181,13 +181,13 @@ class CacheMap(QWidget):
             tw = 6 + 7 * len(lab)
             lx -= tw
             p.fillRect(QRect(lx, 3, 7, 7), QColor(col))
-            p.setPen(QColor("#6e7681"))
+            p.setPen(QColor("#7d8590"))
             p.drawText(QRect(lx + 9, 0, tw, self.TOP - 1), Qt.AlignVCenter | Qt.AlignLeft, lab)
             lx -= 6
         # way labels + cells
         for way in range(2):
             y = self.TOP + way * self.WAYH
-            p.setPen(QColor("#6e7681"))
+            p.setPen(QColor("#7d8590"))
             p.drawText(QRect(0, y, self.LX - 4, self.WAYH), Qt.AlignVCenter | Qt.AlignRight,
                        f"way{way}")
             for s in range(self.SETS):
@@ -202,7 +202,7 @@ class CacheMap(QWidget):
             p.drawRect(hovered.adjusted(0, 0, -1, -1))
         # Put the axis title in the otherwise-unused left gutter; drawing
         # "set →" over the rightmost tick made 112 look like "112→".
-        p.setPen(QColor("#586069"))
+        p.setPen(QColor("#7d8590"))
         ty = self.TOP + 2 * self.WAYH
         p.drawText(
             QRect(0, ty, self.LX - 4, self.BOT),
@@ -231,7 +231,7 @@ class _HintTable(QTableWidget):
         self._hint.setAlignment(Qt.AlignCenter)
         self._hint.setWordWrap(True)
         self._hint.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._hint.setStyleSheet("color:#586069; font-style:italic; background:transparent;")
+        self._hint.setStyleSheet("color:#7d8590; font-style:italic; background:transparent;")
         self._hint.hide()
 
     def set_hint(self, text):
@@ -1354,7 +1354,7 @@ class _PrefetchView(QWidget):
         self.grid_host = QWidget(); self.grid_host.setLayout(self.grid)
         for i in range(16):
             idx = QLabel(f"{i:02d}"); idx.setAlignment(Qt.AlignCenter)
-            idx.setStyleSheet("color:#6e7681; font-size:8px;")
+            idx.setStyleSheet("color:#7d8590; font-size:8px;")
             idx.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             self.idx_lbls.append(idx)
             b = QLabel("00"); b.setAlignment(Qt.AlignCenter); b.setFont(_mono(11))
@@ -1403,7 +1403,7 @@ class _PrefetchView(QWidget):
 
     def _style_byte(self, byte, unavailable=False):
         padding = 1 if self._compact else 4
-        color = "color:#586069;" if unavailable else ""
+        color = "color:#7d8590;" if unavailable else ""
         byte.setStyleSheet(
             f"{color}background:#161b22;border:1px solid #30363d;"
             f"padding:{padding}px;")
@@ -1434,7 +1434,7 @@ class _PrefetchView(QWidget):
             "Open a program to inspect ibuf.",
             "No program loaded. Open a program to inspect its slow-path "
             "prefetch buffer.",
-            "color:#586069;")
+            "color:#7d8590;")
         self.setAccessibleDescription(
             "No program loaded. Open a program to inspect its slow-path "
             "prefetch buffer.")
@@ -1464,7 +1464,7 @@ class _PrefetchView(QWidget):
             decode_state = (
                 "Buffer idle; fast-path fetch from the instruction cache, "
                 "slow-path decoder not engaged.")
-            decode_style = "color:#6e7681;"
+            decode_style = "color:#7d8590;"
         else:
             txt, sz = disasm.text(ib, s.eip, bits)
             decode_full = (
@@ -1617,7 +1617,7 @@ class _HexDump(QWidget):
         p.fillRect(self.rect(), QColor("#0b0f14"))
         p.setFont(_mono(9))
         if not self.data and self.message:
-            p.setPen(QColor("#586069"))
+            p.setPen(QColor("#7d8590"))
             p.drawText(self.rect(), Qt.AlignCenter, self.message)
             p.end()
             return
@@ -1628,7 +1628,7 @@ class _HexDump(QWidget):
         for r in range(rows):
             y = r * self.ROW_H
             a = self.base + r * bytes_per_row
-            p.setPen(QColor("#586069"))
+            p.setPen(QColor("#7d8590"))
             p.drawText(
                 QRect(ax, y, 8 * cw, self.ROW_H),
                 Qt.AlignVCenter | Qt.AlignLeft, f"{a:08x}")
@@ -1650,12 +1650,12 @@ class _HexDump(QWidget):
                 if self.acc_addr is not None and self.acc_addr <= addr < self.acc_addr + self.acc_size:
                     p.setPen(QColor("#e3b341"))
                     p.drawRect(QRect(x - 1, y + 1, 2 * cw, self.ROW_H - 3))
-                p.setPen(QColor("#c9d1d9" if b else "#3d444d"))
+                p.setPen(QColor("#c9d1d9" if b else "#7d8590"))
                 p.drawText(QRect(x, y, 2 * cw, self.ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{b:02x}")
                 if show_ascii:
                     ch = chr(b) if 32 <= b < 127 else "."
                     p.setPen(QColor(
-                        "#79c0ff" if 32 <= b < 127 else "#3d444d"))
+                        "#79c0ff" if 32 <= b < 127 else "#7d8590"))
                     p.drawText(
                         QRect(asc + c * cw, y, cw, self.ROW_H),
                         Qt.AlignVCenter | Qt.AlignLeft, ch)
@@ -1890,7 +1890,7 @@ class AccessMap(QWidget):
         accs = self.accesses
         self._pts = []
         if not accs:
-            p.setPen(QColor("#586069")); p.setFont(_mono(10))
+            p.setPen(QColor("#7d8590")); p.setFont(_mono(10))
             message = (
                 "No memory accesses yet.\nStep a workload that loads or stores."
                 if self.session_active else
@@ -1923,7 +1923,7 @@ class AccessMap(QWidget):
             av = a0 + aspan * k // 4
             y = yof(av)
             p.setPen(QColor("#1c232b")); p.drawLine(L, y, W - R, y)
-            p.setPen(QColor("#6e7681"))
+            p.setPen(QColor("#7d8590"))
             # the bottom-most label, centred on its gridline, would drop INTO the x-tick
             # row and collide with the leftmost 'n' tick at the origin — sit it just ABOVE
             # its gridline instead (the others keep their centred placement).
@@ -1933,7 +1933,7 @@ class AccessMap(QWidget):
             W, H, L, R, B, tick_count)
         for k, (_x, rect, alignment) in enumerate(tick_rects):
             nv = n0 + nspan * k // max(1, tick_count - 1)
-            p.setPen(QColor("#6e7681"))
+            p.setPen(QColor("#7d8590"))
             p.drawText(rect, alignment, f"n{nv}")
         # Keep ordinary traces individually legible without turning long,
         # dense captures into a solid ribbon. The pointer hit radius below is

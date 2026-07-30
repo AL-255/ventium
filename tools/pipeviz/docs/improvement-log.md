@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — readable semantic secondary text
+
+**Contrast audit:** several meaningful 6–10 pt labels used `#586069` or
+`#4b535d` on the dark canvas—about 3.0:1 and 2.4:1 contrast. Pinned `n/a`
+values, unset flags, line numbers, cycle/address axes, zero bytes, comments,
+and empty-state instructions could be difficult to read. Disabled chrome and
+decorative grids are a separate state and remain subdued.
+
+**Changes:** semantic secondary text now uses `#7d8590`, at least 5.0:1 against
+the two principal canvas backgrounds. This covers Pipeline/IPC axes and row
+identity, Trace deltas/empty states, cache/memory axes and zero bytes, source
+comments/line numbers/preview hints, and register zero/empty/not-captured
+values. Primary and alert colors are unchanged.
+
+**Verification:** startup acceptance locks the semantic color above the 4.5:1
+normal-text threshold and checks the live empty-state styles; syntax acceptance
+checks Assembly and C comment formats, while the full screenshot matrix covers
+loaded, empty, pinned, source, memory, and compact states.
+
 ## July 30 continuation — source highlights carry assistive context
 
 **Authoring accessibility audit:** execution, build-error, and build-warning
@@ -2678,8 +2697,9 @@ perennial "rel byte is yellow" finding: the f8 byte renders red-orange
 pixels in the bytes column. It is a CONCLUSIVE perception error; the colour stands.
 - **Fix (CONFIRMED) — split the x87 80-bit hex + dim empty slots.** The 20-hex
   blob is now `4005 ae00000000000000` (sign/exp word ␣ 64-bit mantissa) so the
-  floatx80 fields are readable, and an empty stack slot's all-zero hex is dimmed to
-  `#4b535d` (live and pinned) so it reads as empty, not as data.
+  floatx80 fields are readable, and an empty stack slot's all-zero hex is
+  visually secondary (live and pinned) so it reads as empty, not as data. The
+  July 30 contrast pass later raised that secondary color to `#7d8590`.
 - **Fix (HIGH, recurring) — stage-board FP lane.** The FP lane label was a
   near-invisible grey, the "FP idle" status was orphaned in the top-right corner,
   and idle FP showed 4 unexplained ghost stage cells. Now: the FP label is as bright

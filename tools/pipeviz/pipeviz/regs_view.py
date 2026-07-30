@@ -148,7 +148,7 @@ class RegsView(QWidget):
         self._session_hint.setAlignment(Qt.AlignCenter)
         self._session_hint.setWordWrap(True)
         self._session_hint.setStyleSheet(
-            "color:#586069;font-style:italic;padding:20px;")
+            "color:#7d8590;font-style:italic;padding:20px;")
         root.addWidget(self._session_hint, 1)
 
         # --- integer column ---
@@ -461,7 +461,7 @@ class RegsView(QWidget):
             changed = (
                 previous is not None
                 and ((previous >> bit) & 1) != enabled)
-            color = "#e3b341" if enabled else "#4b535d"
+            color = "#e3b341" if enabled else "#7d8590"
             style = (
                 f"color:{color}"
                 + (";text-decoration:underline" if changed else ""))
@@ -572,11 +572,11 @@ class RegsView(QWidget):
                 f"Logical ST({i}) is {'empty' if empty else 'occupied'}")
             raw_text = _fmt80(hexs)
             hexv.setText(raw_text)
-            hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
+            hexv.setStyleSheet("color:#7d8590;" if empty else "color:#c9d1d9;")
             fv = floatx80_to_float(b10)
             decoded_text = "—" if empty else f"{fv:.6g}"
             val.setText(decoded_text)
-            val.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
+            val.setStyleSheet("color:#7d8590;" if empty else "color:#c9d1d9;")
             detail = (
                 f"Logical ST({i}), physical register {phys}: "
                 f"{'empty' if empty else 'occupied'}; raw 80-bit value "
@@ -624,7 +624,7 @@ class RegsView(QWidget):
         # Selectors are architectural post-state. Bases and CR0/3/4 are captured
         # pre-execution for exact address translation, so mark the header and
         # explain the time point instead of presenting them as post-state.
-        na = "color:#4b535d;font-style:italic;"
+        na = "color:#7d8590;font-style:italic;"
         self.seg_base_hdr.setText("base*")
         _set_explanation(
             self.seg_base_hdr,
@@ -678,12 +678,12 @@ class RegsView(QWidget):
                     f"{'empty' if empty else 'occupied'}")
                 raw_text = _fmt80(b10[::-1].hex())
                 hexv.setText(raw_text)
-                hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
+                hexv.setStyleSheet("color:#7d8590;" if empty else "color:#c9d1d9;")
                 decoded_text = (
                     "—" if empty else f"{floatx80_to_float(b10):.6g}")
                 val.setText(decoded_text)
                 val.setStyleSheet(
-                    "color:#4b535d;" if empty else "color:#c9d1d9;")
+                    "color:#7d8590;" if empty else "color:#c9d1d9;")
                 detail = (
                     f"Pinned logical ST({i}): "
                     f"{'empty' if empty else 'occupied'}; raw 80-bit value "

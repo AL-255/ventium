@@ -945,7 +945,7 @@ class _KonataPlot(QWidget):
                 prod = self.insns[j]
                 ex = self._x(prod["c1"]) + self.cell_w // 2
                 ey = j * ROW_H + ROW_H // 2
-                col = QColor("#e3b341" if gating else "#6e7681")
+                col = QColor("#e3b341" if gating else "#7d8590")
                 pen = QPen(col); pen.setWidth(2 if gating else 1)
                 p.setPen(pen)
                 p.drawLine(ex, ey, cx, cy)
@@ -1151,7 +1151,7 @@ class _KonataGutter(QWidget):
             elif self.plot.sel_pc is not None and it["pc"] == self.plot.sel_pc:
                 p.fillRect(QRect(0, y, self.width(), ROW_H), QColor("#172230"))
                 p.fillRect(QRect(0, y, 2, ROW_H), QColor("#3b82c4"))  # same-PC marker
-            p.setPen(QColor("#586069"))
+            p.setPen(QColor("#7d8590"))
             p.drawText(QRect(2, y, 42, ROW_H), Qt.AlignVCenter | Qt.AlignRight, str(it["n"]))
             pipe_color = {
                 "U": "#79c0ff", "V": "#e3b341", "FP": C_FP,
@@ -1160,7 +1160,7 @@ class _KonataGutter(QWidget):
             p.drawText(
                 QRect(45, y, 16, ROW_H),
                 Qt.AlignVCenter | Qt.AlignHCenter, it["pipe"])
-            p.setPen(QColor("#6e7681"))
+            p.setPen(QColor("#7d8590"))
             p.drawText(QRect(63, y, 53, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{it['pc']:08x}")
             # stall badge: total cycles this instruction occupied (>2 = it stalled)
             span = it["c1"] - it["c0"] + 1
@@ -1171,7 +1171,7 @@ class _KonataGutter(QWidget):
                 # colour-grade the latency by magnitude — dim for a normal fast-path
                 # op, amber for a moderate stall, red for a heavy one — so the slow
                 # instructions pop out of the gutter at a glance.
-                lc = "#6e7681" if span <= 4 else (C_STALL if span < 10 else C_MISPRED)
+                lc = "#7d8590" if span <= 4 else (C_STALL if span < 10 else C_MISPRED)
                 p.setPen(QColor(lc))
                 p.drawText(QRect(GUTTER_W - bw - 6, y, bw, ROW_H),
                            Qt.AlignVCenter | Qt.AlignRight, f"{span}c")
@@ -1218,7 +1218,7 @@ class _KonataHeader(QWidget):
         p.drawText(QRect(2, 0, GUTTER_W - 4, HDR_H), Qt.AlignVCenter | Qt.AlignLeft,
                    "inst ↓ / cycle →")
         # label the per-row latency column (the '3c'/'11c' badges) in the gutter band
-        p.setPen(QColor("#6e7681"))
+        p.setPen(QColor("#7d8590"))
         p.drawText(QRect(GUTTER_W - 50, 0, 44, HDR_H), Qt.AlignVCenter | Qt.AlignRight, "lat")
         tick = _cycle_tick_step(self.plot.cell_w)
         c = base + ((tick - base % tick) % tick)
@@ -1227,7 +1227,7 @@ class _KonataHeader(QWidget):
             if x > self.width():
                 break
             if x >= GUTTER_W:
-                p.setPen(QColor("#586069"))
+                p.setPen(QColor("#7d8590"))
                 label_w = max(40, len(str(c)) * 7 + 8)
                 p.drawText(
                     QRect(x - label_w // 2, 0, label_w, HDR_H),
@@ -1248,7 +1248,7 @@ class Konata(QWidget):
         title_row.addWidget(self.title)
         title_row.addStretch(1)
         zoom_caption = QLabel("cycle zoom")
-        zoom_caption.setStyleSheet("color:#6e7681;font-size:8px;")
+        zoom_caption.setStyleSheet("color:#7d8590;font-size:8px;")
         title_row.addWidget(zoom_caption)
         self.zoom_out_btn = QToolButton()
         self.zoom_out_btn.setText("−")
@@ -1689,7 +1689,7 @@ class SparklineStrip(QWidget):
             p.setPen(QColor("#8b949e"))
             p.drawText(QRect(kx + 11, key_y, 50, 12), Qt.AlignVCenter | Qt.AlignLeft, lbl)
             kx += 11 + len(lbl) * 6 + 14
-        p.setPen(QColor("#586069")); p.setFont(_mono(7))
+        p.setPen(QColor("#7d8590")); p.setFont(_mono(7))
         p.drawText(QRect(2, key_y, labelw - 4, 12), Qt.AlignVCenter | Qt.AlignRight, "key")
         if n == 0:
             p.setPen(QColor(_MUT)); p.setFont(_mono(8))
@@ -1755,11 +1755,11 @@ class SparklineStrip(QWidget):
         p.setPen(QColor("#9aa3ad")); p.setFont(_mono(8, True))
         p.drawText(QRect(2, ipc_y0, labelw - 4, ipc_h), Qt.AlignRight | Qt.AlignVCenter,
                    f"IPC\n{cur:.2f}")
-        p.setPen(QColor("#586069")); p.setFont(_mono(7))
+        p.setPen(QColor("#7d8590")); p.setFont(_mono(7))
         p.drawText(QRect(2, evt_y0 - 1, labelw - 4, evt_h + 2),
                    Qt.AlignRight | Qt.AlignVCenter, "evt")
         # IPC y-axis caps: 2 (top), 1 (mid), 0 (bottom)
-        p.setPen(QColor("#3d444d")); p.setFont(_mono(6))
+        p.setPen(QColor("#7d8590")); p.setFont(_mono(6))
         p.drawText(QRect(labelw + 1, ipc_y0 - 1, 12, 8), Qt.AlignLeft, "2")
         p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h // 2 - 4, 12, 8), Qt.AlignLeft, "1")
         p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h - 8, 12, 8), Qt.AlignLeft, "0")

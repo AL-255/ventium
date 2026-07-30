@@ -252,7 +252,7 @@ def _apply_dark(app):
     p.setColor(QPalette.ButtonText, QColor("#c9d1d9"))
     p.setColor(QPalette.Highlight, QColor("#1f6feb"))
     p.setColor(QPalette.HighlightedText, QColor("#ffffff"))
-    p.setColor(QPalette.PlaceholderText, QColor("#6e7681"))
+    p.setColor(QPalette.PlaceholderText, QColor("#7d8590"))
     p.setColor(QPalette.ToolTipBase, QColor("#161b22"))
     p.setColor(QPalette.ToolTipText, QColor("#c9d1d9"))
     for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
@@ -2130,7 +2130,7 @@ class MainWindow(QMainWindow):
 
         def chip(lab, val, alert=False):
             col = "#e3b341" if alert else "#e6edf3"
-            return (f"<span style='color:#6e7681'>{lab}</span>"
+            return (f"<span style='color:#7d8590'>{lab}</span>"
                     f"<span style='color:{col}'>&nbsp;{val}</span>")
         sep = " <span style='color:#30363d'>&#9474;</span> "
         if self.snapshot_prefix:
@@ -2140,7 +2140,7 @@ class MainWindow(QMainWindow):
                      if self.image_path else "no image")
         state_group = (
             f"<span style='color:#79c0ff'>{name}</span> "
-            f"<span style='color:#6e7681'>{mode}</span>")
+            f"<span style='color:#7d8590'>{mode}</span>")
         if done:
             state_group += (
                 " <span style='color:#3fb950;font-weight:bold'>[DONE]</span>")

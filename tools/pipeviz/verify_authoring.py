@@ -708,7 +708,7 @@ def scenario(app, outdir):
         assert format_color_at(
             editor, 1, assembly_literal.index("//")) == "#a5d6ff"
         assert format_color_at(
-            editor, 1, assembly_literal.rindex("#")) == "#6e7681"
+            editor, 1, assembly_literal.rindex("#")) == "#7d8590"
         structural_probe = "eax: add eax, 1\n.int 3"
         editor.setPlainText(structural_probe)
         editor.highlighter.rehighlight()
@@ -2242,9 +2242,9 @@ def scenario(app, outdir):
         assert format_color_at(
             win.c_source.editor, 1, string_slashes) == "#a5d6ff"
         assert format_color_at(
-            win.c_source.editor, 1, trailing_comment) == "#6e7681"
+            win.c_source.editor, 1, trailing_comment) == "#7d8590"
         assert format_color_at(
-            win.c_source.editor, 3, 4) == "#6e7681"
+            win.c_source.editor, 3, 4) == "#7d8590"
         win.c_source.editor.document().setModified(False)
         win.c_source._path = os.path.join(outdir, "indent-probe.c")
         assert win.c_source.save_source()

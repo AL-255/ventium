@@ -52,6 +52,25 @@ def repo_path(relative):
     return path
 
 
+def contrast_ratio(foreground, background):
+    """WCAG relative contrast for two #rrggbb colors."""
+    def luminance(color):
+        channels = [int(color[index:index + 2], 16) / 255.0
+                    for index in (1, 3, 5)]
+        linear = [
+            value / 12.92 if value <= 0.04045 else
+            ((value + 0.055) / 1.055) ** 2.4
+            for value in channels
+        ]
+        return (
+            0.2126 * linear[0] + 0.7152 * linear[1]
+            + 0.0722 * linear[2])
+
+    light, dark = sorted(
+        (luminance(foreground), luminance(background)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
 def default_rtl_state_names():
     """Parse state_e as build.sh's default configuration (no optional defines)."""
     core = open(
@@ -957,13 +976,16 @@ def scenario_startup(app, outdir):
         assert "Open a program or choose a built example" in (
             win.evnext_btn.toolTip())
         assert "QCheckBox:disabled{color:#586069;}" in app.styleSheet()
+        assert contrast_ratio("#7d8590", "#0d1117") >= 4.5
         assert win.regs._session_hint.isVisible()
+        assert "#7d8590" in win.regs._session_hint.styleSheet()
         assert not win.regs.state_banner.isVisible()
         assert not win.regs.unpin_btn.isVisible()
         assert not win.regs._wide_host.isVisible()
         assert "No program loaded" in win.regs._session_hint.text()
         assert "its arrow" in win.regs._session_hint.text()
         assert win.trace.tbl._empty_hint.isVisible()
+        assert "#7d8590" in win.trace.tbl._empty_hint.styleSheet()
         assert "No program loaded" in win.trace.tbl._empty_hint.text()
         assert "its arrow" in win.trace.tbl._empty_hint.text()
         assert win.trace.tbl._empty_hint.accessibleName() == (

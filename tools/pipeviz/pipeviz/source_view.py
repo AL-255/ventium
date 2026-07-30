@@ -249,7 +249,7 @@ class CodeEditor(QPlainTextEdit):
                 elif line == self.textCursor().blockNumber() + 1:
                     color = QColor("#c9d1d9")
                 else:
-                    color = QColor("#586069")
+                    color = QColor("#7d8590")
                 painter.setPen(color)
                 painter.drawText(
                     0, top, self._line_area.width() - 6, fm.height(),
@@ -914,7 +914,7 @@ class AssemblyHighlighter(QSyntaxHighlighter):
             (QRegularExpression(r"^\s*[.$A-Za-z_][\w.$]*:"), _fmt("#d2a8ff", True)),
         ]
         self.string = _fmt("#a5d6ff")
-        self.comment = _fmt("#6e7681", italic=True)
+        self.comment = _fmt("#7d8590", italic=True)
 
     def highlightBlock(self, text):
         for pattern, form in self.rules:
@@ -969,7 +969,7 @@ class CHighlighter(QSyntaxHighlighter):
             (QRegularExpression(r"^\s*#.*$"), _fmt("#79c0ff")),
         ]
         self.string = _fmt("#a5d6ff")
-        self.comment = _fmt("#6e7681", italic=True)
+        self.comment = _fmt("#7d8590", italic=True)
 
     def highlightBlock(self, text):
         for pattern, form in self.rules:
@@ -1100,7 +1100,7 @@ class InstructionPipelinePreview(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#0b0f14"))
         if self.info is None:
-            painter.setPen(QColor("#586069"))
+            painter.setPen(QColor("#7d8590"))
             painter.setFont(_mono(9))
             painter.drawText(
                 self.rect(), Qt.AlignCenter,
@@ -1110,7 +1110,7 @@ class InstructionPipelinePreview(QWidget):
         colors = {
             "F": "#4a9eff", "D": "#39c5cf", "X": "#3fb950", "M": "#f0883e",
             "W": "#7d8fc9", "S": "#a87f55", "FP": "#bc8cff", "=": "#7a828d",
-            "!": "#f85149", ".": "#6e7681",
+            "!": "#f85149", ".": "#7d8590",
         }
         painter.setFont(_mono(8, True))
         painter.setPen(QColor("#8b949e"))
@@ -1130,7 +1130,7 @@ class InstructionPipelinePreview(QWidget):
         cell_w = max(34, min(62, (self.width() - 10) // max(1, len(stages))))
         for stage in stages:
             rect = QRect(x, y, cell_w - 3, cell_h)
-            painter.fillRect(rect, QColor(colors.get(stage, "#6e7681")))
+            painter.fillRect(rect, QColor(colors.get(stage, "#7d8590")))
             painter.setPen(QColor("#0d1117"))
             painter.drawText(rect, Qt.AlignCenter, stage)
             x += cell_w

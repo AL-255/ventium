@@ -119,6 +119,9 @@ an empty search without moving the playhead.
 The compact status row prioritizes cycle/state/EIP before performance and cache
 groups so the execution point survives narrow windows. Hover the status or
 last-action text for its complete untruncated message.
+Muted semantic text—including axes, source line numbers, zero/empty register
+values, and empty-state instructions—still meets normal-text contrast; color is
+never the only carrier for an error, warning, lane, or pinned-state meaning.
 The upper U/V/FP stage board is live: hover an occupied cell to see its lane and
 PC, then click it to highlight that in-flight instruction's linked Assembly
 line. From the keyboard, Tab to the blue-outlined board, use arrows or Home/End

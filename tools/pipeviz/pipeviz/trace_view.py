@@ -87,7 +87,7 @@ class BytesDelegate(QStyledItemDelegate):
         x = x0
         for i, (b, fld) in enumerate(fields):
             if x + adv > limit and i < len(fields):
-                painter.setPen(QColor("#6e7681"))
+                painter.setPen(QColor("#7d8590"))
                 painter.drawText(QRect(x, option.rect.y(), adv + 4, option.rect.height()),
                                  Qt.AlignVCenter | Qt.AlignLeft, "…")
                 break
@@ -140,7 +140,7 @@ class InsnDelegate(QStyledItemDelegate):
                 # this; without it a long imm (ppage's `mov [ebx+0x14], 0xcf90000`)
                 # truncated to `0xcf9` with NO `…`, silently dropping the value.
                 if ox + fm.horizontalAdvance(txt) > limit:
-                    painter.setPen(QColor("#6e7681"))
+                    painter.setPen(QColor("#7d8590"))
                     painter.drawText(QRect(min(ox, limit - ell), r.y(), ell + 6, r.height()),
                                      Qt.AlignVCenter | Qt.AlignLeft, "…")
                     break
@@ -229,7 +229,7 @@ class _TraceTable(QTableWidget):
         self._empty_hint.setWordWrap(True)
         self._empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
         self._empty_hint.setStyleSheet(
-            "color:#586069;font-style:italic;background:transparent;")
+            "color:#7d8590;font-style:italic;background:transparent;")
 
     def set_empty_hint(self, text):
         self._empty_hint.setText(text)
@@ -716,7 +716,7 @@ class TraceView(QWidget):
                         hay, int(r.n), int(r.pc), int(r.cyc), pipe, stall))
                 if c == 2:                              # delta cyc
                     it.setTextAlignment(Qt.AlignCenter)
-                    it.setForeground(QBrush(QColor("#d2a24c" if stall else "#586069")))
+                    it.setForeground(QBrush(QColor("#d2a24c" if stall else "#7d8590")))
                 if c == 3:                              # execution lane
                     it.setTextAlignment(Qt.AlignCenter)
                     it.setForeground(QBrush(QColor(
