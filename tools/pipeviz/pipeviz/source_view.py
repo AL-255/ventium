@@ -514,7 +514,10 @@ class CompletionPopup(QFrame):
     accepted = Signal(str)
 
     def __init__(self, editor):
-        super().__init__(None, Qt.ToolTip)
+        # Keep tooltip window semantics while tying lifetime to its editor; a
+        # parentless popup could survive application-window teardown if closed
+        # while completion was still visible.
+        super().__init__(editor, Qt.ToolTip)
         self.editor = editor
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setStyleSheet(
@@ -578,6 +581,23 @@ class CompletionPopup(QFrame):
             pos.setY(y)
         self.move(pos)
         self.show()
+        # Native window-frame margins are only known after the tooltip gets a
+        # platform window. Correct the final frame, not just its client rect.
+        if screen is not None:
+            frame = self.frameGeometry()
+            available = screen.availableGeometry()
+            dx = (
+                available.left() - frame.left()
+                if frame.left() < available.left() else
+                available.right() - frame.right()
+                if frame.right() > available.right() else 0)
+            dy = (
+                available.top() - frame.top()
+                if frame.top() < available.top() else
+                available.bottom() - frame.bottom()
+                if frame.bottom() > available.bottom() else 0)
+            if dx or dy:
+                self.move(self.x() + dx, self.y() + dy)
 
     def move_selection(self, delta):
         if not self.isVisible() or self.list.count() == 0:
@@ -593,12 +613,15 @@ class CompletionPopup(QFrame):
 
 
 class AssemblyEditor(CodeEditor):
+    completionNotice = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.highlighter = AssemblyHighlighter(self.document())
         self.completion = CompletionPopup(self)
         self.completion.accepted.connect(self._insert_completion)
         self._completion_span = None
+        self._completion_insertable = True
 
     def _word_prefix(self):
         cursor = self.textCursor()
@@ -629,14 +652,25 @@ class AssemblyEditor(CodeEditor):
                 self.completion.hide()
                 return False
             prefix = ""
-            self._completion_span = (cursor.position(), cursor.position())
+            self._completion_span = None
+            self._completion_insertable = False
         else:
+            suffix = re.match(
+                r"\w*", cursor.block().text()[cursor.positionInBlock():])
+            suffix_len = len(suffix.group(0)) if suffix else 0
             self._completion_span = (
-                cursor.position() - len(prefix), cursor.position())
+                cursor.position() - len(prefix),
+                cursor.position() + suffix_len)
+            self._completion_insertable = True
         self.completion.show_for(prefix)
         return self.completion.isVisible()
 
     def _insert_completion(self, mnemonic):
+        if not self._completion_insertable:
+            self._completion_span = None
+            self.completionNotice.emit(
+                "Completion is reference-only here — move the cursor to an opcode position")
+            return
         if self._completion_span is None:
             cursor = self.textCursor()
             cursor.select(QTextCursor.WordUnderCursor)
@@ -955,6 +989,7 @@ class AssemblyView(QWidget):
         self._path = None
         self.editor.cursorPositionChanged.connect(self._cursor_instruction)
         self.editor.textChanged.connect(self._source_changed)
+        self.editor.completionNotice.connect(self._completion_notice)
         self.editor.document().modificationChanged.connect(
             self.dirtyChanged.emit)
         self.template_btn.clicked.connect(self.new_template)
@@ -985,6 +1020,11 @@ class AssemblyView(QWidget):
                 "Source changed since the last build — assemble again to refresh PC links")
             self.status.setStyleSheet("color:#e3b341;padding:2px;")
             self.statusChanged.emit("Assembly source modified")
+
+    def _completion_notice(self, text):
+        self.status.setText(text)
+        self.status.setStyleSheet("color:#e3b341;padding:2px;")
+        self.statusChanged.emit(text)
 
     def _cursor_instruction(self):
         text = self.editor.textCursor().block().text()

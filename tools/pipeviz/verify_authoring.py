@@ -9,7 +9,7 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent, QTextCursor
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -261,6 +261,13 @@ def scenario(app, outdir):
         QTest.keyClick(editor, Qt.Key_Space, Qt.ControlModifier)
         settle(app)
         assert editor.completion.isVisible()
+        assert editor.completion.parent() is editor
+        screen = (
+            QGuiApplication.screenAt(editor.completion.frameGeometry().center())
+            or QGuiApplication.primaryScreen())
+        assert screen is not None
+        assert screen.availableGeometry().contains(
+            editor.completion.frameGeometry())
         assert editor.completion.list.count() == len(CATALOG)
         names = {
             editor.completion.list.item(i).data(Qt.UserRole).mnemonic
@@ -276,10 +283,14 @@ def scenario(app, outdir):
         assert editor.completion.info.description.text()
         assert editor.completion.info.preview.info.stages == ("F", "D", "X")
         save(editor.completion, outdir, "01_opcode_completion_popup")
-        editor.completion.hide()
-        editor.setPlainText(".loop: ad")
+        reference_source = editor.toPlainText()
+        editor.completion.accept_current()
+        assert editor.toPlainText() == reference_source
+        assert "reference-only" in win.assembly.status.text()
+        editor.setPlainText(".loop: adc")
         cursor = editor.textCursor()
         cursor.movePosition(QTextCursor.End)
+        cursor.movePosition(QTextCursor.PreviousCharacter)
         editor.setTextCursor(cursor)
         assert editor.request_completion()
         add_row = next(
@@ -301,6 +312,8 @@ def scenario(app, outdir):
         # Assemble and run the editable template. The result (1+...+10) proves
         # execution used the authored bytes, not a demo fallback.
         win.assembly.new_template()
+        editor.appendPlainText("# intentionally unsaved authoring session")
+        assert win.workspace.tabText(1) == "Assembly *"
         result = win.assembly.build(True)
         settle(app)
         assert result is not None
@@ -313,6 +326,20 @@ def scenario(app, outdir):
         assert win.image_kind == "ELF"
         assert win._assembly_source_map == result.source_map
         assert win.assembly.mapping_current
+        assert win.workspace.tabText(1) == "Assembly *"
+        win.on_run_toggle()
+        assert win._running and win.timer.isActive()
+        close_event = QCloseEvent()
+        real_warning = QMessageBox.warning
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Cancel)
+        try:
+            win.closeEvent(close_event)
+        finally:
+            QMessageBox.warning = real_warning
+        assert not close_event.isAccepted()
+        assert win._running and win.timer.isActive()
+        win.stop_run()
         run_to_stop(win)
         assert win.backend.state().gpr[0] == 55
         mapped_pcs = set(win._assembly_source_map)
@@ -324,7 +351,7 @@ def scenario(app, outdir):
         settle(app)
         line = result.source_map[pc]
         assert editor._execution_line == line
-        assert win.workspace.tabText(1) == f"Assembly · L{line}"
+        assert win.workspace.tabText(1) == f"Assembly * · L{line}"
 
         # Exact U/V row identity survives round-tripping through Trace, and each
         # row maps to its own source line even when U and V share a cycle.
@@ -342,7 +369,9 @@ def scenario(app, outdir):
             chosen = plot.insns[index]
             assert plot.sel_row == index
             assert win._pinned_n == chosen["n"]
-            assert editor._execution_line == result.source_map[chosen["pc"]]
+            chosen_line = result.source_map[chosen["pc"]]
+            assert editor._execution_line == chosen_line
+            assert win.workspace.tabText(1) == f"Assembly * · L{chosen_line}"
 
         # A rejected replacement load must leave the live backend, authored
         # bytes, source map, marker, and tab label as one coherent old session.

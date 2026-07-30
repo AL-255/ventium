@@ -92,6 +92,8 @@ highlight the failing line. `Ctrl+Space` opens completion over the complete
 Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
 description, mode/build availability, approximate latency, pairing class
 (`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
+At a directive, comment, or operand it remains a reference-only catalogue, so
+accepting an entry cannot corrupt non-opcode text.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.
@@ -112,6 +114,8 @@ instruction in Trace or the Pipeline view: the Assembly tab becomes
 retirements sharing a cycle retain separate line identities. Editing the
 source invalidates the old map until it is assembled again, so a stale build
 cannot highlight the wrong line.
+When the current built source has not been saved, both states remain visible as
+**Assembly * · L…** rather than one label hiding the other.
 
 GNU `as`, `ld`, and `objdump` must be available in `PATH`. Generated source,
 object, and ELF files stay in `tools/pipeviz/.generated/`, which Git ignores.

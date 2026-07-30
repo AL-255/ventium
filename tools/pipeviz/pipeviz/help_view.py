@@ -120,11 +120,14 @@ backward, and Escape closes the search.</p>
 <p>Ctrl+Space opens the Ventium/P54C opcode catalogue. Every entry includes its
 operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operations
-say so explicitly. Build errors highlight their source line.</p>
+say so explicitly. Completion inserts only when the cursor is in an opcode
+slot; elsewhere the full catalogue is safe, reference-only help. Build errors
+highlight their source line.</p>
 <h2>Source-linked investigation</h2>
 <p>Assembly is built with a DWARF line table. Clicking a Trace or Pipeline row
 therefore marks the exact assembly line for that PC; the Assembly tab displays
-its line number without stealing focus from the Visualizer. Editing after a
+its line number without stealing focus from the Visualizer. Unsaved and linked
+state coexist as <b>Assembly * · L…</b>. Editing after a
 build invalidates that map until the next assembly, preventing stale links.</p>
 <h2>C → editable assembly</h2>
 <p>Open <b>C</b> (Alt+C), write a freestanding

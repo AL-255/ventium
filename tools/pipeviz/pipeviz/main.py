@@ -249,6 +249,7 @@ class MainWindow(QMainWindow):
         self.image_kind = None
         self.snapshot_prefix = None
         self._assembly_source_map = {}
+        self._assembly_link_line = None
         self._source_workspace_active = False
         self._visual_toolbar_visibility = None
         verify_dir = os.path.join(_REPO_ROOT, "build", "verify")
@@ -795,22 +796,28 @@ class MainWindow(QMainWindow):
 
     def _clear_assembly_source_link(self):
         self._assembly_source_map = {}
+        self._assembly_link_line = None
         self.assembly.editor.mark_execution_line(None)
-        self.workspace.setTabText(
-            1, "Assembly *"
-            if self.assembly.editor.document().isModified() else "Assembly")
-        self.workspace.setTabToolTip(
-            1, "Edit, complete, assemble, and run 32-bit Intel-syntax assembly")
+        self._update_assembly_tab()
 
-    def _assembly_dirty_changed(self, dirty):
-        if dirty:
-            self.workspace.setTabText(1, "Assembly *")
-            self.workspace.setTabToolTip(
-                1, "Assembly has unsaved changes; Ctrl+S saves the source")
-        elif self.workspace.tabText(1) == "Assembly *":
-            self.workspace.setTabText(1, "Assembly")
-            self.workspace.setTabToolTip(
-                1, "Edit, complete, assemble, and run 32-bit Intel-syntax assembly")
+    def _update_assembly_tab(self):
+        dirty = self.assembly.editor.document().isModified()
+        label = "Assembly *" if dirty else "Assembly"
+        if self._assembly_link_line is not None and self.assembly.mapping_current:
+            label += f" · L{self._assembly_link_line}"
+        self.workspace.setTabText(1, label)
+        if self._assembly_link_line is not None and self.assembly.mapping_current:
+            tip = (
+                f"Selected assembly line {self._assembly_link_line}"
+                + (" · source has unsaved changes" if dirty else ""))
+        elif dirty:
+            tip = "Assembly has unsaved changes; Ctrl+S saves the source"
+        else:
+            tip = "Edit, complete, assemble, and run 32-bit Intel-syntax assembly"
+        self.workspace.setTabToolTip(1, tip)
+
+    def _assembly_dirty_changed(self, _dirty):
+        self._update_assembly_tab()
 
     def _c_dirty_changed(self, dirty):
         self.workspace.setTabText(2, "C *" if dirty else "C")
@@ -834,14 +841,13 @@ class MainWindow(QMainWindow):
             self._notice(
                 "C compiled, but generated assembly was not opened")
             return
-        self.workspace.setTabText(1, "Assembly")
         self.workspace.setCurrentWidget(self.assembly)
         self._notice("C compiled — review or edit the generated assembly, then run")
 
     def _run_assembly(self, path, source_map):
         if self.load_image(path):
             self._assembly_source_map = dict(source_map)
-            self.workspace.setTabText(1, "Assembly")
+            self._update_assembly_tab()
             self.workspace.setCurrentWidget(self.visualizer_tab)
             self._notice(
                 f"Running authored assembly · {len(source_map)} source-linked instructions")
@@ -1039,11 +1045,16 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # Closing while Run is active must not leave a timer dispatching into a
         # destroyed Verilator handle during Qt's deferred teardown.
+        was_running = self._running
         self.stop_run()
         if not self.assembly.confirm_safe_to_discard("closing pipeviz"):
+            if was_running:
+                self.on_run_toggle()
             event.ignore()
             return
         if not self.c_source.confirm_safe_to_discard("closing pipeviz"):
+            if was_running:
+                self.on_run_toggle()
             event.ignore()
             return
         self.backend.close()
@@ -1230,9 +1241,12 @@ class MainWindow(QMainWindow):
         self.regs.show_retire(rec, prev)
         line = self._assembly_source_map.get(int(rec.pc))
         if line is not None and self.assembly.highlight_pc(rec.pc, line):
-            self.workspace.setTabText(1, f"Assembly · L{line}")
+            self._assembly_link_line = line
+            self._update_assembly_tab()
             self.workspace.setTabToolTip(
-                1, f"Selected PC 0x{int(rec.pc):08x} maps to assembly line {line}")
+                1, f"Selected PC 0x{int(rec.pc):08x} maps to assembly line {line}"
+                + (" · source has unsaved changes"
+                   if self.assembly.editor.document().isModified() else ""))
 
     def _unpin(self):
         if getattr(self, "_pinned_n", None) is not None:

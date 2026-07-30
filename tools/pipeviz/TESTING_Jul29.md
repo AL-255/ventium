@@ -351,12 +351,19 @@ Procedure:
    the bar with Escape.
 3. Open the complete Ctrl+Space popup; require its description, availability,
    latency, pairing class, and pipeline stage preview. Confirm automatic
-   completion appears in opcode position but never interrupts operands/comments.
+   completion appears in opcode position but never interrupts operands/comments;
+   require the owned popup frame to stay inside the active screen, and require
+   forced completion on a directive to remain reference-only. Accept a
+   completion mid-opcode and require the whole token—not only its prefix—to be
+   replaced.
 4. Feed an invalid opcode and require line 5 to be highlighted without starting
    a backend session.
 5. Assemble+run the default sum loop and require EAX = 55 on the real RTL.
+   Keep the source unsaved and require `Assembly *` to survive loading/running.
+   Cancel a Quit while free-running and require the timer/run state to resume.
 6. Select authored Trace and Konata rows; require exact PC→assembly-line
-   highlighting, including distinct U/V rows retiring on one cycle.
+   highlighting, including distinct U/V rows retiring on one cycle, while the
+   composed `Assembly * · L…` label retains both states.
 7. Reject a candidate replacement load and require the prior live backend,
    program bytes, source map, marker, and tab label to remain coherent. Then edit
    after build and require the map to become stale rather than use obsolete PCs.

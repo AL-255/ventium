@@ -147,6 +147,14 @@ closing the last silent-data-loss paths in the authoring loop.
 Both editors also have an on-demand Ctrl+F bar with highlighted matches,
 current/total feedback, wraparound forward/backward navigation, and no permanent
 layout cost while search is closed.
+The completion tooltip is editor-owned and clamps its native frame to the active
+screen, preventing orphan windows and border clipping at desktop edges.
+Forced catalogue browsing outside an opcode slot is reference-only, preventing
+an accepted item from being concatenated into a directive, comment, or operand.
+Assembly tab state is composed rather than overwritten, so an unsaved but
+currently built/mapped source is shown as `Assembly * · L…`.
+Canceling an unsaved-source Quit now restores a previously free-running session
+instead of silently leaving it paused.
 
 The C workspace adds line-numbered C highlighting, O0/O1/O2/Os selection, GCC
 error navigation, and a freestanding 32-bit Pentium compile path. It emits
