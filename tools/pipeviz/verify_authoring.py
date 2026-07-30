@@ -1640,6 +1640,7 @@ def scenario(app, outdir):
             "Compiler diagnostics appear here.")
         assert win.c_source.diagnostics.accessibleDescription() == (
             "No compiler diagnostics.")
+        assert win.c_source.diagnostics.height() <= 54
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+B" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+N" in win.c_source.template_btn.toolTip()
@@ -1848,6 +1849,7 @@ def scenario(app, outdir):
         assert app.focusWidget() is win.c_source.editor
         assert win.c_source.editor._error_line == 3
         assert "undeclared" in win.c_source.diagnostics.toPlainText()
+        assert win.c_source.diagnostics.height() >= 92
         assert win.c_source.diagnostics.toPlainText().startswith(
             "→ Line 3: press Enter or double-click to jump")
         win.c_source.editor.moveCursor(QTextCursor.Start)
@@ -1862,6 +1864,7 @@ def scenario(app, outdir):
         win.c_source.editor.insertPlainText(" ")
         assert win.c_source.editor._error_line is None
         assert not win.c_source.diagnostics.toPlainText()
+        assert win.c_source.diagnostics.height() <= 54
         assert "#8b949e" in win.c_source.diagnostics.styleSheet()
         win.c_source.editor.document().setModified(False)
 
@@ -1883,6 +1886,7 @@ def scenario(app, outdir):
         assert win.c_source.diagnostics.toPlainText().startswith(
             "→ Warning line 3: press Enter or double-click to jump")
         assert "unused variable" in win.c_source.diagnostics.toPlainText()
+        assert win.c_source.diagnostics.height() >= 92
         assert "#e3b341" in win.c_source.diagnostics.styleSheet()
         assert win.c_source.status.text() == (
             "Compiled with warnings · assembly tab is ready")
@@ -1898,6 +1902,7 @@ def scenario(app, outdir):
         win.c_source.editor.insertPlainText(" ")
         assert win.c_source.editor._warning_line is None
         assert not win.c_source.diagnostics.toPlainText()
+        assert win.c_source.diagnostics.height() <= 54
         win.c_source.editor.document().setModified(False)
 
         # Compile real C, inspect/edit the emitted assembly, then assemble/run it.

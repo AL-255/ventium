@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — reclaim empty C diagnostics height
+
+**Vertical-density audit:** the C diagnostics pane permanently received one
+splitter share even when it contained only “Compiler diagnostics appear here.”
+At 900×620 that placeholder consumed useful source rows; at full size it left
+an even larger empty band.
+
+**Changes:** empty C diagnostics now retain a shallow 42–54 px affordance, while
+real compiler warnings/errors expand to a 92–165 px region and receive a
+140 px splitter target. Editing the source or changing optimization clears the
+stale diagnostic and immediately returns the space to the editor. Assembly's
+side-by-side diagnostic layout is intentionally unaffected.
+
+**Verification:** authoring acceptance asserts initial/cleared heights at or
+below 54 px and error/warning heights at or above 92 px, in addition to the
+existing content, color, focus, and line-jump checks. Compact visual review
+shows more C rows and a still-readable placeholder; error capture shows the
+actionable jump and GCC context without crowding the editor.
+
 ## July 30 continuation — name the C experiment at its entry point
 
 **Demo-discoverability audit:** the source and guide now made the U/V experiment

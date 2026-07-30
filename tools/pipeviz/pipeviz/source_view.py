@@ -2274,11 +2274,13 @@ class CView(QWidget):
         self.diagnostics = _Diagnostics("Compiler")
         self.diagnostics.setAccessibleName("C compiler diagnostics")
         self.diagnostics.lineActivated.connect(self._activate_diagnostic)
-        self.diagnostics.setMaximumHeight(165)
         split.addWidget(self.editor)
         split.addWidget(self.diagnostics)
         split.setStretchFactor(0, 5)
         split.setStretchFactor(1, 1)
+        self._source_split = split
+        self.diagnostics.textChanged.connect(self._sync_diagnostics_height)
+        self._sync_diagnostics_height()
         layout.addWidget(split, 1)
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
@@ -2383,6 +2385,15 @@ class CView(QWidget):
         text = f"{optimization}: {description}"
         self.optimization.setToolTip(text)
         self.optimization.setAccessibleDescription(text)
+
+    def _sync_diagnostics_height(self):
+        """Keep an empty diagnostic affordance without taxing editor height."""
+        populated = bool(self.diagnostics.toPlainText().strip())
+        minimum, maximum, target = (
+            (92, 165, 140) if populated else (42, 54, 50))
+        self.diagnostics.setMinimumHeight(minimum)
+        self.diagnostics.setMaximumHeight(maximum)
+        self._source_split.setSizes([1000, target])
 
     def new_template(self):
         if not self.confirm_safe_to_discard("creating a new template"):
