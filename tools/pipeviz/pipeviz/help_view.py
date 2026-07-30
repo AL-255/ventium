@@ -111,7 +111,7 @@ explicit.</p>
 <h1>How to read the Pipeline View</h1>
 <h2>Axes and rows</h2>
 <p>Each row is one retired instruction; time moves left to right in core cycles.
-The frozen label gives retirement number, U/V lane, PC, mnemonic, and total
+The frozen label gives retirement number, U/V/FP execution lane, PC, mnemonic, and total
 latency. Repeated PCs are shaded together, which makes loop iterations easy to
 recognize. Mnemonics and dependency reads/writes come from the immutable bytes
 captured with that retirement, so later code or address-map changes cannot
@@ -194,7 +194,9 @@ stopped</b> only when the backend is terminal and stepping is disabled.</p>
  <li><b>mb_dmiss:</b> a load row stretches through stall cells. Click it, then
  use Data$, Memory →access, and Mem map to connect latency to an address stride.</li>
  <li><b>mb_fpindep:</b> purple FP execution cells show x87 overlap. Pin an
- <code>fadd</code> to inspect its post-retirement x87 stack.</li>
+ <code>fadd</code> or filter Trace with <code>pipe:FP</code> to inspect its
+ post-retirement x87 stack. The FP label describes execution; its Trace tooltip
+ retains the underlying U dispatch detail.</li>
 </ul>
 """),
     ("Assembly and source editing", """
@@ -358,12 +360,16 @@ investigation details, choose <b>Assembly and source editing</b> in the index.</
 """),
     ("Trace and filters", """
 <h1>Retired-instruction trace</h1>
-<p>The compact trace lists retire number/cycle, stall delta, U/V lane, PC, raw
+<p>The compact trace lists retire number/cycle, stall delta, U/V/FP execution
+lane, PC, raw
 bytes, disassembly, and architectural effects. Byte colors separate x86
 prefixes, opcode, ModRM/SIB, displacement, immediate, and branch-relative
-fields.</p>
+fields. x87 rows say <b>FP</b> instead of exposing their U dispatch slot; hover
+the lane cell to see both facts. U/V counters still count the physical issue
+slots.</p>
 <p>Filters combine with spaces: <code>mov</code>, <code>pc:08048</code>,
 <code>n&gt;=100</code>, <code>cyc&gt;=133</code>, <code>pipe:V</code>,
+<code>pipe:FP</code>,
 <code>stall</code>, and
 <code>@</code> for memory accesses. Click any result to synchronize the timing
 view and pin Registers. Press <code>/</code> to focus the filter, Enter or F3

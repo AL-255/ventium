@@ -352,13 +352,19 @@ _SYS = {"mov", "lgdt", "lidt", "ltr", "lldt", "hlt", "cli", "sti", "rsm",
         "wrmsr", "rdmsr", "invlpg", "cpuid", "clts"}
 
 
+def is_x87_mnemonic(mnemonic: str):
+    """True for an x87 opcode (accepting a full disassembly string)."""
+    m = (mnemonic or "").strip().lower().split(" ", 1)[0]
+    return (m.startswith("f") and m not in ("fs", "gs")) or m == "wait"
+
+
 def insn_class(mnemonic: str):
     m = (mnemonic or "").lower()
     if not m:
         return ("other", CC_OTHER)
     if m[0] == "j" or m in _BR:
         return ("branch", CC_BRANCH)
-    if m[0] == "f" and m not in ("fs", "gs"):
+    if is_x87_mnemonic(m):
         return ("fp", CC_FP)
     if m in _MEM:
         return ("mem", CC_MEM)

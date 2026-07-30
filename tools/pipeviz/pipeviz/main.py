@@ -1839,9 +1839,7 @@ class MainWindow(QMainWindow):
         raw = bytes(rec.bytes[:rec.nbytes])
         _size, mnemonic, _operands, _shown = disasm.disasm_one(
             raw, int(rec.pc), 32 if rec.d32 else 16)
-        is_fp = (
-            disasm.insn_class(mnemonic)[0] == "fp"
-            or mnemonic.lower() in ("wait", "fwait"))
+        is_fp = disasm.is_x87_mnemonic(mnemonic)
         lane = "FP" if is_fp else (
             "U" if int(rec.pipe) == 0 else
             "V" if int(rec.pipe) == 1 else "—")

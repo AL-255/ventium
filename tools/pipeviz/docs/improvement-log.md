@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — consistent FP execution-lane labels
+
+**Cross-view semantics audit:** after source linking learned to say `FP-lane`,
+the same retired `fadd` still appeared as U in the compact Trace and frozen
+Pipeline gutter. That made three linked views disagree and made an FP-only
+search impossible, even though the timing cells were already purple.
+
+**Changes:** one x87 classifier now drives the Trace, Pipeline, live-cell
+recolouring, and source-link labels. Retired x87 rows display a purple **FP**,
+the Trace accepts `pipe:FP`, and the FP lane tooltip preserves the lower-level
+fact that this microarchitecture dispatches x87 through the U issue slot. Raw
+U/V retirement counters and pair statistics remain based on physical slots.
+
+**Verification:** the x87 interaction now requires at least 80 x87 rows, checks
+every one for an FP label and U-dispatch tooltip, proves `pipe:FP` returns
+exactly that set, and requires every corresponding Pipeline row to say FP.
+The full-resolution screenshot also verifies that the two-character label fits
+both compact gutters without crowding the PC or mnemonic.
+
 ## July 30 continuation — truthful x87 source-link lane
 
 **Lane-semantics audit:** an authored `fld` correctly highlighted its generated

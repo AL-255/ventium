@@ -2338,6 +2338,13 @@ def scenario_x87(app, outdir):
         fp_rows = [r for r in range(win.trace.tbl.rowCount())
                    if win.trace.tbl.item(r, 6).text().lower().startswith("f")]
         assert len(fp_rows) >= 80
+        assert all(win.trace.tbl.item(row, 3).text() == "FP"
+                   for row in fp_rows)
+        assert all("U issue slot" in win.trace.tbl.item(row, 3).toolTip()
+                   for row in fp_rows)
+        visible_fp = set_filter(app, win.trace, "pipe:FP")
+        assert visible_fp == len(fp_rows)
+        set_filter(app, win.trace, "")
         select_table_row(app, win.trace.tbl, fp_rows[-4])
         chosen_n = int(win.trace.tbl.item(fp_rows[-4], 0).text())
         assert win._pinned_n == chosen_n
@@ -2359,8 +2366,11 @@ def scenario_x87(app, outdir):
         assert all(("empty" in tag.toolTip()) == bool(
                        (chosen_rec.ftag >> i) & 1)
                    for i, (tag, _hexv, _value) in enumerate(win.regs.st_lbls))
-        assert any(ins["mnem"].lower().startswith("f")
-                   for ins in win.pipeline.konata.plot.insns)
+        fp_pipeline_rows = [
+            ins for ins in win.pipeline.konata.plot.insns
+            if ins["mnem"].lower().startswith("f")]
+        assert fp_pipeline_rows
+        assert all(ins["pipe"] == "FP" for ins in fp_pipeline_rows)
 
         select_tab(app, win.tables.tabs, 6)
         classes = {win.tables.mix.item(r, 0).text().lower()

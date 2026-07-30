@@ -490,7 +490,7 @@ _GLYPH_STAGE = {"F": "Fetch", "L": "I-cache line fill", "D": "Decode",
 def _recolor_fp(cells, mnem):
     """Cycle-mode x87 ops execute on the S_PIPE fast path (green X); recolour
     their execute cells to the FP purple when the mnemonic is an x87 op."""
-    if not (mnem[:1] == "f" and mnem[:2] not in ("fs", "gs")):
+    if not disasm.is_x87_mnemonic(mnem):
         return list(cells)
     return [(cy, ch, C_FP if co == C_STG_EXEC else co) for (cy, ch, co) in cells]
 
@@ -772,7 +772,8 @@ class _KonataPlot(QWidget):
                     backend, retire_by_n.get(int(c.nU)), c.pcU)
                 cells = _add_frontend(
                     _recolor_fp(self._pending, mn), self.history_start)
-                self.insns.append(dict(n=c.nU, pc=c.pcU, pipe="U", mnem=mn,
+                display_pipe = "FP" if disasm.is_x87_mnemonic(mn) else "U"
+                self.insns.append(dict(n=c.nU, pc=c.pcU, pipe=display_pipe, mnem=mn,
                                        cells=cells, c0=cells[0][0], c1=c.cyc,
                                        reads=reads, writes=writes, rfl=rfl, wfl=wfl))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
@@ -781,10 +782,12 @@ class _KonataPlot(QWidget):
             if c.retV:
                 mn, reads, writes, rfl, wfl = self._retired_decode(
                     backend, retire_by_n.get(int(c.nV)), c.pcV)
-                vcol = C_FP if (mn[:1] == "f" and mn[:2] not in ("fs", "gs")) else C_PIPE
+                is_fp = disasm.is_x87_mnemonic(mn)
+                vcol = C_FP if is_fp else C_PIPE
                 cells = _add_frontend(
                     [(c.cyc, "X", vcol)], self.history_start)
-                self.insns.append(dict(n=c.nV, pc=c.pcV, pipe="V", mnem=mn,
+                self.insns.append(dict(
+                    n=c.nV, pc=c.pcV, pipe="FP" if is_fp else "V", mnem=mn,
                                        cells=cells, c0=cells[0][0], c1=c.cyc,
                                        reads=reads, writes=writes, rfl=rfl, wfl=wfl))
                 self._cyc_row[c.cyc] = len(self.insns) - 1
@@ -1150,10 +1153,15 @@ class _KonataGutter(QWidget):
                 p.fillRect(QRect(0, y, 2, ROW_H), QColor("#3b82c4"))  # same-PC marker
             p.setPen(QColor("#586069"))
             p.drawText(QRect(2, y, 42, ROW_H), Qt.AlignVCenter | Qt.AlignRight, str(it["n"]))
-            p.setPen(QColor("#79c0ff" if it["pipe"] == "U" else "#e3b341"))
-            p.drawText(QRect(46, y, 12, ROW_H), Qt.AlignVCenter | Qt.AlignHCenter, it["pipe"])
+            pipe_color = {
+                "U": "#79c0ff", "V": "#e3b341", "FP": C_FP,
+            }.get(it["pipe"], "#8b949e")
+            p.setPen(QColor(pipe_color))
+            p.drawText(
+                QRect(45, y, 16, ROW_H),
+                Qt.AlignVCenter | Qt.AlignHCenter, it["pipe"])
             p.setPen(QColor("#6e7681"))
-            p.drawText(QRect(60, y, 56, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{it['pc']:08x}")
+            p.drawText(QRect(63, y, 53, ROW_H), Qt.AlignVCenter | Qt.AlignLeft, f"{it['pc']:08x}")
             # stall badge: total cycles this instruction occupied (>2 = it stalled)
             span = it["c1"] - it["c0"] + 1
             mnem_w = GUTTER_W - 120

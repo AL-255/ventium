@@ -193,7 +193,11 @@ its component labels also have stable names.
 
 Trace filters are space-separated AND terms: free text plus exact-field
 `pc:08048`, retirement `n>=100` / `n<=200` / `n=150`, cycle
-`cyc>=133`, `pipe:U` / `pipe:V`, `stall`, and `@` for memory accesses.
+`cyc>=133`, `pipe:U` / `pipe:V` / `pipe:FP`, `stall`, and `@` for memory
+accesses. The lane column and Pipeline gutter say **FP** for x87 execution
+instead of exposing its underlying U dispatch slot; hover an FP Trace cell to
+see that dispatch detail. U/V statistics continue to count physical issue
+slots, so this display label does not inflate or redefine dual-issue results.
 The gold `@…` value is the instruction’s effective offset—the same address
 domain used by the timing D-cache. Memory drill-down separately retains its
 segment-linear and translated physical address.
@@ -583,9 +587,12 @@ D-cache miss-cost bar.
 tools/pipeviz/run.sh build/verify/mb_fpindep.cycle.flat
 ```
 
-Step **420 clocks**.  The FP lane on the stage board and purple timing cells
-show when x87 work overlaps integer issue.  Click an FP retirement near the
-end of the trace.  The Registers panel becomes pinned and displays that
+Step **420 clocks**.  The FP lane on the stage board, purple timing cells, and
+**FP** labels in the Trace and Pipeline gutter show when x87 work overlaps
+integer issue. Filter with `pipe:FP`, then click an FP retirement near the end
+of the trace. The lane tooltip notes that x87 dispatches through U while the
+display consistently describes where it executes. The Registers panel becomes
+pinned and displays that
 instruction’s post-commit x87 stack, control word, status word, tags, and the
 80-bit representation of ST values.  Compare its cycle with adjacent integer
 rows in the timeline to see whether the FP pipe is the limiting resource or is

@@ -225,7 +225,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     stride; **click a point** or traverse with arrows/Page Up/Page Down/Home/End
     to jump the trace + Registers + Memory tab to it.
 * **Trace panel** (bottom-left) — one row per retired instruction: `n`, retire
-  cycle, **Δ** (stall gap), pipe (U/V), PC, raw **bytes** (coloured by x86 field:
+  cycle, **Δ** (stall gap), visible execution lane (U/V/FP), PC, raw **bytes** (coloured by x86 field:
   prefix gray / opcode blue / ModRM green / SIB purple / displacement gold /
   immediate salmon / branch-rel orange), the **disassembly** (field-coloured to
   match, 16/32-bit per the live CS.D), and an **effect** column showing what each
@@ -233,8 +233,12 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   changed flags (teal), x87 ST(0) result (purple), x87 exceptions (amber), and the
   resolved effective offset of an explicit memory operand (gold); its segment-linear
   and physical translation is retained for Memory drill-down. A **filter box** accepts
-  `mov` / `pc:08048` / `n>=100` / `cyc>=133` / `pipe:V` / `stall` / `@` (memory-accessing
+  `mov` / `pc:08048` / `n>=100` / `cyc>=133` / `pipe:V` / `pipe:FP` /
+  `stall` / `@` (memory-accessing
   rows); `/` focuses it, Enter/F3 and Shift+F3 navigate results, and Escape clears it.
+  x87 rows use **FP** rather than the underlying U dispatch slot; hover that
+  lane cell to see both facts. Raw U/V counters and pairing statistics still
+  describe the issue slots.
   Malformed structured terms stay visibly red with an exact syntax hint and do
   not hide the trace while they are corrected.
   Selecting a row links by retirement ID, so U and V remain distinguishable

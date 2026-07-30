@@ -1,7 +1,7 @@
 # Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 """Assembly trace panel — one row per retired instruction, with its raw bytes,
-the issuing pipe (U/V), and a capstone disassembly. Appends incrementally."""
+visible execution lane (U/V/FP), and a capstone disassembly. Appends incrementally."""
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTableWidgetItem, QHeaderView, QAbstractItemView,
                                QLabel, QStyledItemDelegate, QStyle, QLineEdit,
@@ -300,11 +300,11 @@ class TraceView(QWidget):
         top.addWidget(self.title)
         self.filt = _TraceFilter()
         self.filt.setAccessibleName("Retired instruction filter")
-        self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:V   stall   @  (mem)")
+        self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:FP   stall   @  (mem)")
         self.filt.setClearButtonEnabled(True)
         self._filter_help = (
             "Space-separated terms are ANDed.\n"
-            "Examples: mov, pc:08048, n>=100, cyc<=200, pipe:U, stall, @.\n"
+            "Examples: mov, pc:08048, n>=100, cyc<=200, pipe:U, pipe:FP, stall, @.\n"
             "/ focuses search; Enter or F3 selects the next match; "
             "Shift+F3 selects the previous match; Esc clears.")
         self.filt.setToolTip(self._filter_help)
@@ -700,7 +700,9 @@ class TraceView(QWidget):
             self._last_cyc = int(r.cyc)
             row = self.tbl.rowCount()
             self.tbl.insertRow(row)
-            pipe = "U" if r.pipe == 0 else ("V" if r.pipe == 1 else "-")
+            is_fp = disasm.is_x87_mnemonic(mn)
+            pipe = "FP" if is_fp else (
+                "U" if r.pipe == 0 else "V" if r.pipe == 1 else "-")
             vals = [str(r.n), str(r.cyc), dcyc, pipe, f"{r.pc:08x}",
                     " ".join(f"{b:02x}" for b in shown), txt, eff]
             hay = f"{r.pc:08x} {vals[5]} {txt} {eff}".lower()
@@ -715,9 +717,15 @@ class TraceView(QWidget):
                 if c == 2:                              # delta cyc
                     it.setTextAlignment(Qt.AlignCenter)
                     it.setForeground(QBrush(QColor("#d2a24c" if stall else "#586069")))
-                if c == 3:                              # pipe (U=blue, V=amber)
+                if c == 3:                              # execution lane
                     it.setTextAlignment(Qt.AlignCenter)
-                    it.setForeground(QBrush(QColor(_V_COL if r.pipe == 1 else _U_COL)))
+                    it.setForeground(QBrush(QColor(
+                        C_FP if is_fp else
+                        _V_COL if r.pipe == 1 else _U_COL)))
+                    it.setToolTip(
+                        "x87 FP execution (dispatched through the U issue slot)"
+                        if is_fp else
+                        f"{pipe} retirement lane")
                 if c == _BYTES_COL:
                     it.setData(_BYTES_ROLE, fields)     # painted by BytesDelegate
                     it.setToolTip(v)                    # full bytes — never lost to the … clip
@@ -789,8 +797,8 @@ class TraceView(QWidget):
     def _filter_error(cls, tokens):
         for tok in tokens:
             if tok.startswith("pipe:"):
-                if tok[5:] not in ("u", "v", "-"):
-                    return f"{tok!r}: pipe must be U, V, or -"
+                if tok[5:] not in ("u", "v", "fp", "-"):
+                    return f"{tok!r}: pipe must be U, V, FP, or -"
                 continue
             numeric = next((
                 (prefix, tok[len(prefix):])
