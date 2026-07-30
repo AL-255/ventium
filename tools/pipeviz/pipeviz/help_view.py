@@ -307,11 +307,16 @@ so it is excluded from the resolved denominator and taken percentage.</p>
 <p>The Trace table announces whether no program or no retirement exists, then
 its populated row count. Filter results announce visible/total counts; invalid
 structured syntax announces the correction while retaining every row.</p>
+<p>Hover any Trace or analysis-table header for its full field meaning, units,
+denominator, flag order, or bar normalization; compact labels such as
+<b>Δ</b>, <b>U/W/P</b>, <b>big</b>, and <b>D</b> are never left implicit.</p>
 """),
     ("Caches and memory", """
 <h1>Caches and memory</h1>
 <p>Code$ and Data$ show set/way residency and occupancy. Data$ replays the
 observed access stream through the matching 2-way geometry to estimate misses.
+Every table header has a semantic tooltip; hover abbreviated cache/TLB/profile
+columns for address bits, permission order, units, and normalization.
 Each occupancy map exposes its resident count and exact set/way/MRU geometry as
 a textual description in addition to the painted grid. Hover a cell for its
 set, way, residency/MRU, tag, and line address; resident cells highlight and

@@ -845,6 +845,21 @@ def scenario_startup(app, outdir):
         for control, expected_name in accessible_controls.items():
             assert control.accessibleName() == expected_name, (
                 type(control).__name__, control.accessibleName(), expected_name)
+        semantic_tables = (
+            win.tables.ic, win.tables.dc, win.tables.tlb, win.tables.hot,
+            win.tables.br, win.tables.mix, win.trace.tbl)
+        for table in semantic_tables:
+            for column in range(table.columnCount()):
+                item = table.horizontalHeaderItem(column)
+                assert item is not None and item.toolTip(), (
+                    table.accessibleName(), column,
+                    item.text() if item is not None else None)
+        assert "user / writable / present" in (
+            win.tables.tlb.horizontalHeaderItem(5).toolTip())
+        assert "previous retirement" in (
+            win.trace.tbl.horizontalHeaderItem(2).toolTip())
+        assert "normalized" in (
+            win.tables.mix.horizontalHeaderItem(3).toolTip())
         assert "all 128 sets" in win.tables.ic_map.accessibleDescription()
         assert "No program loaded" in (
             win.tables.cyc.accessibleDescription())

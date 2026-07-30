@@ -229,6 +229,16 @@ def _mk_table(cols, widths=None, hint=""):
     return t
 
 
+def _set_header_tips(table, tips):
+    """Make every compact/abbreviated column self-defining on hover."""
+    if len(tips) != table.columnCount():
+        raise ValueError("header tooltip count must match table columns")
+    for column, tip in enumerate(tips):
+        item = table.horizontalHeaderItem(column)
+        if item is not None:
+            item.setToolTip(tip)
+
+
 def _fill(table, rows, dim_cols=(), right_cols=()):
     table.setRowCount(len(rows))
     for r, row in enumerate(rows):
@@ -552,6 +562,13 @@ class TablesView(QWidget):
                             [46, 74, 60, 86, 9999],
                             hint="I-cache empty — step the core to fetch code into it")
         self.ic.setAccessibleName("Instruction cache lines")
+        _set_header_tips(self.ic, (
+            "Instruction-cache set index (address bits 11:5)",
+            "Resident way; * marks the most recently used way",
+            "Physical line tag above the set-index bits",
+            "32-byte-aligned physical base address of this cache line",
+            "All 32 resident instruction bytes, shown as two 16-byte rows",
+        ))
         self.ic_map.setAccessibleName("Instruction cache occupancy map")
         self.ic_map.lineHovered.connect(
             lambda cache_set, way:
@@ -570,6 +587,12 @@ class TablesView(QWidget):
                             hint="D-cache empty — this workload has issued no data "
                                  "loads/stores yet")
         self.dc.setAccessibleName("Data cache lines")
+        _set_header_tips(self.dc, (
+            "Data-cache set index (address bits 11:5)",
+            "Resident way; * marks the most recently used way",
+            "Physical line tag above the set-index bits",
+            "32-byte-aligned physical base address; data bytes live in Memory",
+        ))
         self.dc_map.setAccessibleName("Data cache occupancy map")
         self.dc_map.lineHovered.connect(
             lambda cache_set, way:
@@ -586,6 +609,16 @@ class TablesView(QWidget):
             [44, 40, 30, 110, 150, 90, 40, 9999],
             hint="TLB empty — paging is off or no translations have been resolved yet")
         self.tlb.setAccessibleName("Translation lookaside buffer entries")
+        _set_header_tips(self.tlb, (
+            "Translation side: I for instruction fetch, D for data access",
+            "Direct-mapped TLB entry index (linear address bits 15:12)",
+            "Valid-entry flag; only valid entries are listed",
+            "Page size and page-aligned linear address",
+            "Virtual page number mapped to physical frame number",
+            "Permission bits in user / writable / present order",
+            "Y when this is a 4 MiB large-page translation",
+            "Y when the translation's page dirty bit is set",
+        ))
         self.tabs.addTab(self._wrap(self.tlb_lbl, self.tlb), "TLB")
         self.tabs.setTabToolTip(2, "Instruction and data translation lookaside buffers")
 
@@ -603,16 +636,18 @@ class TablesView(QWidget):
                              [76, 50, 64, 50, 86, 100, 9999],
                              hint="no instructions retired yet — step the core")
         self.hot.setAccessibleName("Instruction hotspots")
-        self.hot.horizontalHeaderItem(2).setToolTip(
+        _set_header_tips(self.hot, (
+            "Instruction address used to group dynamic retirements",
+            "Number of captured dynamic retirements at this PC",
             "Sum of each dynamic instruction's fetch-to-retire latency at this PC; "
-            "a held instruction may be waiting on an older operation")
-        self.hot.horizontalHeaderItem(3).setToolTip(
-            "Share of all summed instruction latency (overlapping instructions count separately)")
-        self.hot.horizontalHeaderItem(4).setToolTip(
+            "a held instruction may be waiting on an older operation",
+            "Share of all summed instruction latency; overlapping instructions "
+            "count separately",
             "Replay-estimated D-cache misses / explicit memory accesses "
-            "attributed to this instruction PC")
-        self.hot.horizontalHeaderItem(5).setToolTip(
-            "Visual bar normalized to the largest Σ latency among visible PCs")
+            "attributed to this instruction PC",
+            "Visual bar normalized to the largest Σ latency among visible PCs",
+            "Decoded instruction observed at this PC",
+        ))
         # field-colour the instruction column to match the trace / Konata gutter
         self.hot.setItemDelegateForColumn(6, InsnCellDelegate(_mono(), self.hot))
         _right_align_headers(self.hot, (1, 2, 3, 4))  # hits/cycles/cyc%/D$miss match data
@@ -631,13 +666,16 @@ class TablesView(QWidget):
                             hint="no branches retired yet — step the core through a "
                                  "jump/call/loop")
         self.br.setAccessibleName("Branch behavior")
-        self.br.horizontalHeaderItem(4).setToolTip(
-            "Taken outcomes / resolved outcomes; capture-tail hits may be unresolved")
-        self.br.horizontalHeaderItem(5).setToolTip(
+        _set_header_tips(self.br, (
+            "Address of the branch instruction",
+            "Decoded branch mnemonic",
+            "Decoded direct target, or the observed target for indirect control flow",
+            "Number of captured dynamic executions at this branch PC",
+            "Taken outcomes / resolved outcomes; capture-tail hits may be unresolved",
             "100 × taken / resolved outcomes; unresolved capture-tail hits "
-            "are excluded")
-        self.br.horizontalHeaderItem(6).setToolTip(
-            "Ten-slot taken-rate bar: each T represents one taken decile")
+            "are excluded",
+            "Ten-slot taken-rate bar: each T represents one taken decile",
+        ))
         _right_align_headers(self.br, (3, 4, 5))     # hits / T-resolved / T% match data
         _align_headers(
             self.br, (6,), Qt.AlignLeft)  # caption sits over its left-pinned bar
@@ -651,6 +689,12 @@ class TablesView(QWidget):
             ["class", "count", "%", "bar"], [88, 60, 56, 9999],
             hint="no instructions retired yet — step the core")
         self.mix.setAccessibleName("Instruction mix")
+        _set_header_tips(self.mix, (
+            "Decoded instruction class (ALU, memory, branch, FP, system, or other)",
+            "Captured dynamic retirements in this class",
+            "Percentage of all captured retirements in this class",
+            "Relative count bar normalized to the largest visible class",
+        ))
         _align_headers(self.mix, (3,), Qt.AlignLeft)  # 'bar' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.mix_lbl, self.mix), "Mix")
         self.tabs.setTabToolTip(6, "Instruction-class mix and U/V issue split")

@@ -321,6 +321,18 @@ class TraceView(QWidget):
             "for an example")
         self.tbl.focusFilter.connect(self.focus_filter)
         self.tbl.setHorizontalHeaderLabels(_COLS)
+        header_tips = (
+            "Retirement sequence number within the current session",
+            "Core cycle on which this instruction retired",
+            "Cycles since the previous retirement; gaps expose stalls",
+            "Retirement lane: U, V, or floating-point",
+            "Instruction address before execution",
+            "Captured raw x86 instruction encoding",
+            "Decoded instruction and operands",
+            "Architectural registers, flags, x87 state, or memory address written",
+        )
+        for column, tip in enumerate(header_tips):
+            self.tbl.horizontalHeaderItem(column).setToolTip(tip)
         # left-align the headers whose data is left-aligned (n/cyc/PC/bytes/instr)
         # so a caption sits directly over its column's first glyph instead of
         # floating centred over the wide bytes/instruction gutter.

@@ -176,6 +176,9 @@ shortcut never changes an invisible background tab; display-only
 Prefetch/Cycles pages focus the tab strip.
 An empty Mem map likewise keeps focus on the tab strip until a traversable
 access exists.
+Hover any Trace or analysis-table column header for its complete semantics,
+including units/denominators, cache address meaning, TLB `U/W/P` bit order,
+`big`/`D` flags, and histogram/bar normalization.
 The display-only Prefetch page exposes a single coherent description containing
 its fetch address, EIP, fetch word, all 16 bytes, and idle/decode interpretation;
 its component labels also have stable names.
