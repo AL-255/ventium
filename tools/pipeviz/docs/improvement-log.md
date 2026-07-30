@@ -21,6 +21,10 @@ a default keyboard route to its arrow, focus-scoped Down and Alt+Down now open
 the same menu and are exercised through its real nested popup loop. Startup
 status, Pipeline, Trace, analysis, and Registers empty states now teach this
 visible route consistently instead of sending users only into a nested menu.
+Disabled transport controls now explain why they cannot run: before load they
+point to Open/examples, while after terminal quiescence they point to Reset.
+Run's tooltip and accessibility description also switch to Pause during
+continuous execution.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

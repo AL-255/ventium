@@ -783,14 +783,48 @@ class MainWindow(QMainWindow):
 
     def _set_transport_enabled(self, enabled):
         """Keep controls honest: a fresh window cannot accidentally look runnable."""
+        no_session = (
+            "Open a program or choose a built example to enable execution.")
+        stopped = "Program has stopped. Use Reset (R) to run it again."
+        reset_tip = (
+            "Reset is available after opening a program or snapshot"
+            if not enabled else self.reset_btn.toolTip())
+        self.reset_btn.setToolTip(reset_tip)
+        self.reset_btn.setAccessibleDescription(reset_tip)
         self.reset_btn.setEnabled(enabled)
         for w in (self.evprev_btn, self.evnext_btn):
             w.setEnabled(enabled)
         self.event_kind.setEnabled(enabled)
         runnable = enabled and not self.backend.is_done()
-        for w in (self.step1_btn, self.stepi_btn, self.stepn,
-                  self.stepn_btn, self.run_btn, self.speed):
+        controls = (
+            (self.step1_btn, "Advance one clock (.)"),
+            (self.stepi_btn,
+             "Advance to the next retired instruction (I or Space)"),
+            (self.stepn, "Number of clocks advanced by Step N"),
+            (self.stepn_btn, "Advance the selected number of clocks"),
+            (self.run_btn,
+             "Pause continuous execution (F5)" if self._running
+             else "Run continuous execution (F5)"),
+            (self.speed,
+             "Clocks simulated per UI timer tick while Run is active"),
+        )
+        reason = stopped if enabled else no_session
+        for w, normal_tip in controls:
             w.setEnabled(runnable)
+            tip = normal_tip if runnable else f"{normal_tip}\n{reason}"
+            w.setToolTip(tip)
+            w.setAccessibleDescription(tip)
+        event_tips = (
+            (self.event_kind, "Choose which pipeline event [ and ] navigate"),
+            (self.evprev_btn,
+             "Jump the playhead to the previous captured pipeline event ([)"),
+            (self.evnext_btn,
+             "Jump the playhead to the next captured pipeline event (])"),
+        )
+        for widget, normal_tip in event_tips:
+            tip = normal_tip if enabled else f"{normal_tip}\n{no_session}"
+            widget.setToolTip(tip)
+            widget.setAccessibleDescription(tip)
 
     def _notice(self, text, ms=3500):
         self.action_hint.setText(text)
@@ -1728,6 +1762,9 @@ class MainWindow(QMainWindow):
             self._running = True
             self.run_btn.setText(" Pause")
             self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            tip = "Pause continuous execution (F5)"
+            self.run_btn.setToolTip(tip)
+            self.run_btn.setAccessibleDescription(tip)
             self.timer.start(30)
 
     def stop_run(self):
@@ -1735,6 +1772,10 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         self.run_btn.setText(" Run")
         self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        if self.run_btn.isEnabled():
+            tip = "Run continuous execution (F5)"
+            self.run_btn.setToolTip(tip)
+            self.run_btn.setAccessibleDescription(tip)
 
     def _on_run_tick(self):
         if not self._has_session() or self.backend.is_done():

@@ -908,6 +908,15 @@ def scenario_startup(app, outdir):
         assert "its arrow" in win.status_lbl.text()
         assert win.cyc_cb.text() == "U/V issue"
         assert all(not widget.isEnabled() for widget in win._config_widgets)
+        assert not win.reset_btn.isEnabled()
+        assert not win.step1_btn.isEnabled()
+        assert not win.run_btn.isEnabled()
+        assert "Open a program or choose a built example" in (
+            win.run_btn.toolTip())
+        assert win.run_btn.accessibleDescription() == win.run_btn.toolTip()
+        assert "available after opening" in win.reset_btn.toolTip()
+        assert "Open a program or choose a built example" in (
+            win.evnext_btn.toolTip())
         assert "QCheckBox:disabled{color:#586069;}" in app.styleSheet()
         assert win.regs._session_hint.isVisible()
         assert not win.regs.state_banner.isVisible()
@@ -1318,6 +1327,8 @@ def scenario_branch_transport(app, outdir):
         # extra clock; resuming remains explicit.
         win.on_run_toggle()
         assert win._running and win.timer.isActive()
+        assert win.run_btn.toolTip() == "Pause continuous execution (F5)"
+        assert win.run_btn.accessibleDescription() == win.run_btn.toolTip()
         chooser_cycle = win.backend.cycle_count()
         real_open_dialog = QFileDialog.getOpenFileName
         QFileDialog.getOpenFileName = staticmethod(
@@ -1825,8 +1836,11 @@ def scenario_branch_transport(app, outdir):
         click(app, win.run_btn)
         QTest.qWait(100)
         settle(app)
+        assert win.run_btn.text().strip() == "Pause"
+        assert win.run_btn.toolTip() == "Pause continuous execution (F5)"
         click(app, win.run_btn)
         assert not win._running and win.backend.state().core_cyc > before
+        assert win.run_btn.toolTip() == "Run continuous execution (F5)"
         save_shot(app, win, outdir, "01_branch_transport")
         print(f"OK branch/transport: V rows={visible_v}, stats={stats}")
     finally:
@@ -2462,6 +2476,13 @@ def scenario_fibonacci_uv(app, outdir):
             assert win.reset_btn.isEnabled()
             assert not win.step1_btn.isEnabled() and not win.run_btn.isEnabled()
             assert win.evprev_btn.isEnabled() and win.evnext_btn.isEnabled()
+            for control in (
+                    win.step1_btn, win.stepi_btn, win.stepn,
+                    win.stepn_btn, win.run_btn, win.speed):
+                assert "Program has stopped. Use Reset (R)" in (
+                    control.toolTip())
+                assert control.accessibleDescription() == control.toolTip()
+            assert "Program has stopped" not in win.evnext_btn.toolTip()
             if cycle_mode:
                 save_shot(
                     app, win, outdir, "09a_fibonacci_uv_quiesced")
