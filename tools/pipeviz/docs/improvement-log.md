@@ -111,6 +111,11 @@ as width permits. Alt+1…Alt+0, pointer selection, and combo-arrow navigation
 all update the same tab model. Focus fallback for painter-only views now lands
 on this visible selector instead of a hidden tab bar, with the selected view's
 purpose and shortcut available through tooltip/accessibility text.
+The first-run state is now captured at 900×620 on both Code$ and empty Mem map,
+in addition to the existing wide reference. This locks wrapping for the
+Pipeline, trace, cache-table, register, and access-map guidance before a program
+exists, as well as compact selector synchronization and the empty scatter's
+non-focusable contract.
 The Mem-map scatter now adapts its own painted geometry too. At 188 px it
 reclaims the unused y-axis gutter, reduces five overlapping retirement ticks to
 three inward-aligned ticks, and selects a measured complete summary such as

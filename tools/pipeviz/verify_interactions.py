@@ -1205,6 +1205,29 @@ def scenario_startup(app, outdir):
         assert not win._guide_dialog.isVisible()
         win._clear_notice()  # keep the startup reference capture transient-free
         save_shot(app, win, outdir, "00_startup")
+        win.resize(900, 620)
+        settle(app, 6)
+        assert win.tables._compact_navigation
+        assert win.tables.analysis_selector.isVisible()
+        assert win.tables.analysis_selector.currentText() == "Alt+1 · Code$"
+        save_shot(
+            app, win, outdir, "00a_startup_true_minimum",
+            min_width=900, min_height=620)
+        win.tables.analysis_selector.setCurrentIndex(9)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 9
+        assert win.tables.accmap.focusPolicy() == Qt.NoFocus
+        assert win.tables.analysis_selector.currentText() == (
+            "Alt+0 · Mem map")
+        save_shot(
+            app, win, outdir, "00b_startup_true_minimum_memmap",
+            min_width=900, min_height=620)
+        win.tables.analysis_selector.setCurrentIndex(0)
+        win._clear_notice()
+        win.resize(1640, 980)
+        settle(app, 6)
+        assert not win.tables._compact_navigation
+        assert win.tables.tabs.tabBar().isVisible()
         branch_example = next(
             action for action in win._examples_menu.actions()
             if action.text() == "Dual issue and branches")
