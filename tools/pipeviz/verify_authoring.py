@@ -658,6 +658,23 @@ def scenario(app, outdir):
         assert editor._execution_line == live_lines["V"]
         save(win, outdir, "02a_live_uv_source_link")
 
+        # A live lane is not a retirement pin, but its source marker is still
+        # time-specific. Advancing must clear that stale visual claim while
+        # preserving the valid address map for the next live/retired selection.
+        source_map_before = dict(win._assembly_source_map)
+        cycle_before = win.backend.cycle_count()
+        win.do_step(1, False)
+        settle(app)
+        assert win.backend.cycle_count() == cycle_before + 1
+        assert win._pinned_n is None
+        assert win._assembly_link_line is None
+        assert editor._execution_line is None
+        assert win.workspace.tabText(1) == "Assembly *"
+        assert win._assembly_source_map == source_map_before
+        assert win.assembly.mapping_current
+        assert "prior in-flight source marker cleared" in (
+            win.assembly.status.text())
+
         win.on_run_toggle()
         assert win._running and win.timer.isActive()
         close_event = QCloseEvent()

@@ -278,6 +278,7 @@ class MainWindow(QMainWindow):
         self._session_start_cyc = 1
         self._assembly_source_map = {}
         self._assembly_link_line = None
+        self._pinned_n = None
         self._source_workspace_active = False
         self._visual_toolbar_visibility = None
         verify_dir = os.path.join(_REPO_ROOT, "build", "verify")
@@ -1299,7 +1300,7 @@ class MainWindow(QMainWindow):
         self.trace.reset()
         self.tables.start_session(self.backend)
         self.regs.start_session()
-        self._unpin()
+        self._clear_selection_for_advance()
         self._refresh_all()
         self._set_transport_enabled(True)
         self._notice(f"Restored snapshot at clock {s.clk}")
@@ -1417,7 +1418,7 @@ class MainWindow(QMainWindow):
         self.trace.reset()
         self.tables.start_session(self.backend)
         self.regs.start_session()
-        self._unpin()
+        self._clear_selection_for_advance()
         self._applied_reset_config = self._current_reset_config()
         self._clear_reset_required()
         self._refresh_all()
@@ -1521,6 +1522,27 @@ class MainWindow(QMainWindow):
             return True
         return False
 
+    def _clear_selection_for_advance(self):
+        """Clear any instruction-specific view before model state changes.
+
+        Retired selections own a register pin and are handled atomically by
+        `_unpin`.  A live U/V/FP click has no retirement to pin, but its source
+        marker is equally transient: after the next clock that PC may no longer
+        be in flight.  Keep the valid address-to-line map in either case.
+        """
+        if self._unpin():
+            return True
+        if self._assembly_link_line is None:
+            return False
+        had_source_context = bool(
+            self._assembly_source_map and self.assembly.mapping_current)
+        self._clear_assembly_marker()
+        if had_source_context:
+            self.assembly.status.setText(
+                "Execution advanced · prior in-flight source marker cleared")
+            self.assembly.status.setStyleSheet("color:#8b949e;padding:2px;")
+        return True
+
     def _return_live(self):
         """Clear a historical selection without consuming a model clock."""
         if not self._unpin():
@@ -1559,7 +1581,7 @@ class MainWindow(QMainWindow):
     def do_step(self, n, stop_on_retire):
         if not self._has_session():
             return
-        self._unpin()
+        self._clear_selection_for_advance()
         stepped = self.backend.step(n, stop_on_retire)
         self._refresh_all()
         unit = "instruction boundary" if stop_on_retire else "clock" + ("s" if stepped != 1 else "")
@@ -1585,7 +1607,7 @@ class MainWindow(QMainWindow):
     def _on_run_tick(self):
         if not self._has_session() or self.backend.is_done():
             self.stop_run(); self._refresh_all(); return
-        self._unpin()
+        self._clear_selection_for_advance()
         self.backend.step(self.speed.value(), False)
         self._refresh_all()
         if self.backend.is_done():

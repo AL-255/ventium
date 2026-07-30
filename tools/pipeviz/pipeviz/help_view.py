@@ -106,6 +106,9 @@ exact linked Assembly line. The Visualizer stays open and the Assembly tab gains
 pointer, Tab to the board's blue outline, choose an occupied lane with arrows
 or Home/End, and press Enter. A finished
 HLT remains an occupied, clickable cell so the stop location is explicit.
+The live source mark describes this clock only: Clock, Insn, Step N, Run, and
+Apply + Reset clear it before execution moves, while retaining the assembled
+address map for the next selection.
 <b>[paired]</b> means U/V issue now; <b>[blocked]</b> means a candidate pair is
 held by a current hazard. A grey <code>stall · …</code> cell names that held
 instruction; it does not claim that the instruction caused the hazard.</p>

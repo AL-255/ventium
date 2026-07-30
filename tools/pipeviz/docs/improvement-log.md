@@ -11,6 +11,14 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Transient source-time audit:** clicking a live U/V/FP cell marked its Assembly
+line without creating a retirement pin, so Clock/Insn/Step/Run could previously
+leave that line looking current after the instruction moved. Every model advance
+and reset now clears either kind of time-specific selection through one path,
+while retaining the valid address map. The real dual-issued authoring scenario
+verifies that the cycle advances, the marker and tab suffix disappear, and the
+next source link remains available.
+
 **Interactive-canvas focus audit:** the live U/V/FP board and IPC history were
 clickable but missing from the keyboard focus chain, while the keyboard-enabled
 Pipeline timing grid had no visible focus cue. All three now draw a blue focus
