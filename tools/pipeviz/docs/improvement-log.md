@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**True-minimum authoring audit:** source-workspace acceptance called 1280×800
+“compact” even though the window's real minimum hint is below 900×620, leaving
+dense command rows unguarded. Assembly and C now render at 900×620 and assert
+every command remains in bounds, the editor retains useful dimensions, and the
+preview/diagnostics/status composition fits; wide-layout coverage still follows.
+
 **Workbench-status clipping audit:** Assembly/C status lines share compact
 width with the source badge and could clip build failures, stale-map warnings,
 or exact PC/line links with no way to recover the full message from keyboard or

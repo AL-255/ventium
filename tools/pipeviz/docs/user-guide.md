@@ -284,6 +284,9 @@ both its tooltip and accessible description.
 The adjacent Assembly/C status similarly retains its full build, stale-map, or
 PC/line message in a tooltip and accessible description when compact layout
 clips the visible label.
+Both authoring command rows, editors, preview/diagnostics, and status areas are
+regression-rendered at 900×620—the window's practical minimum-size range—as
+well as the normal wide layout.
 For longer generated files, `Ctrl+F` opens an inline search with highlighted
 matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
 moves backward, and Escape closes it. Click a line number to select that whole

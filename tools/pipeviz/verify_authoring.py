@@ -470,8 +470,10 @@ def scenario(app, outdir):
         assert not win.assembly.find_bar.isVisible()
         assert not editor._find_ranges
         save(win, outdir, "00_assembly_workbench")
-        win.resize(1280, 800)
+        win.resize(900, 620)
         settle(app)
+        assert win.width() == 900
+        assert win.minimumSizeHint().width() <= 900
         for button in (
                 win.assembly.template_btn, win.assembly.open_btn,
                 win.assembly.save_btn, win.assembly.complete_btn,
@@ -479,7 +481,13 @@ def scenario(app, outdir):
             corner = button.mapTo(win, button.rect().bottomRight())
             assert 0 <= corner.x() < win.width()
             assert 0 <= corner.y() < win.height()
-        assert editor.height() >= 550
+        badge_corner = win.assembly.source_badge.mapTo(
+            win, win.assembly.source_badge.rect().bottomRight())
+        assert win.assembly.source_badge.isVisible()
+        assert win.assembly.source_badge.width() >= 200
+        assert 0 <= badge_corner.x() < win.width()
+        assert 0 <= badge_corner.y() < win.height()
+        assert editor.width() >= 500 and editor.height() >= 400
         save(win, outdir, "00a_assembly_compact")
         win.resize(1500, 920)
         settle(app)
@@ -1060,6 +1068,29 @@ def scenario(app, outdir):
         assert win.c_source.optimization.accessibleName()
         assert win.c_source.diagnostics.accessibleName()
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
+        win.resize(900, 620)
+        settle(app)
+        assert win.width() == 900
+        assert win.minimumSizeHint().width() <= 900
+        for control in (
+                win.c_source.template_btn, win.c_source.open_btn,
+                win.c_source.save_btn, win.c_source.optimization,
+                win.c_source.compile_btn):
+            corner = control.mapTo(win, control.rect().bottomRight())
+            assert 0 <= corner.x() < win.width()
+            assert 0 <= corner.y() < win.height()
+        badge_corner = win.c_source.source_badge.mapTo(
+            win, win.c_source.source_badge.rect().bottomRight())
+        assert win.c_source.source_badge.isVisible()
+        assert win.c_source.source_badge.width() >= 200
+        assert 0 <= badge_corner.x() < win.width()
+        assert 0 <= badge_corner.y() < win.height()
+        assert (
+            win.c_source.editor.width() >= 800
+            and win.c_source.editor.height() >= 320)
+        save(win, outdir, "03a_c_compact")
+        win.resize(1500, 920)
+        settle(app)
         win.c_source.highlighter.rehighlight()
         settle(app)
         assert "#ff7b72" in format_colors(win.c_source.editor, 4)  # int
