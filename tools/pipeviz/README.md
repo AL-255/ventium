@@ -81,6 +81,8 @@ It also rebuilds when the bridge, ctypes ABI, RTL/file lists/includes, or memory
 BFM is newer than the ignored backend. `run.sh --check` reports readiness
 without building or opening the GUI; a stale result names the first changed
 input and exits with status 2.
+`run.sh --help` validates only the Python environment and prints usage without
+requiring or rebuilding the native model—even if `--build` was also typed.
 With `--soc`, readiness covers both core and SoC artifacts.
 `run.sh --build --soc` forwards `--soc` to both the backend build and the GUI,
 so the documented one-command full-SoC path cannot accidentally rebuild only

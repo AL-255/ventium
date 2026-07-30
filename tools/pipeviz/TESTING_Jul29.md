@@ -95,6 +95,8 @@ The same fake repository requires `--check --soc` to distinguish ready and
 missing SoC artifacts. Inert fake build/Python commands then prove
 `--build --soc` passes `--soc` to `build.sh` and retains it for
 `pipeviz.main`, without compiling or launching.
+Finally, the fake backend is removed and `--build --help` must reach Python
+argparse without invoking the inert build script.
 
 Procedure:
 

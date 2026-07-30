@@ -34,6 +34,8 @@ stale input without building or opening the GUI.
 Add `--soc` to check both native variants. `run.sh --build --soc` builds the SoC
 variant and also launches the GUI in SoC mode; a missing SoC RTL file list is
 reported explicitly instead of treating an old library as ready.
+`run.sh --help` is also non-building: it checks Python imports, then prints
+usage without requiring a backend.
 
 `Open…` accepts raw `.flat`/`.bin`/`.img`/`.rom` images and little-endian
 32-bit x86 ELF files. Empty files and DOS/PE executables are rejected with a

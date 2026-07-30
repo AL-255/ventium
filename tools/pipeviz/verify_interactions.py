@@ -281,7 +281,7 @@ def scenario_startup(app, outdir):
     os.chmod(fake_python, 0o755)
     build_env = dict(os.environ, PIPEVIZ_PYTHON=fake_python)
     built_soc = subprocess.run(
-        ["bash", launcher_copy, "--build", "--soc", "--help"],
+        ["bash", launcher_copy, "--build", "--soc", "probe.bin"],
         cwd=launcher_root, env=build_env, text=True,
         capture_output=True, check=False)
     assert built_soc.returncode == 0
@@ -291,7 +291,7 @@ def scenario_startup(app, outdir):
     with open(os.path.join(launcher_dir, "python.args"),
               encoding="utf-8") as python_args_file:
         python_args = python_args_file.read().splitlines()
-    assert python_args == ["-m", "pipeviz.main", "--soc", "--help"]
+    assert python_args == ["-m", "pipeviz.main", "--soc", "probe.bin"]
 
     os.utime(fake_build, (1_000_000, 1_000_000))
     os.utime(fake_backend, (2_000_000, 2_000_000))
@@ -302,6 +302,24 @@ def scenario_startup(app, outdir):
     assert stale.returncode == 2
     assert "backend stale" in stale.stderr and "core.sv changed" in stale.stderr
     assert "--build" in stale.stderr
+
+    # Help needs Python imports but no model. Even an explicit --build must not
+    # invoke build.sh or require an existing backend merely to print argparse.
+    os.remove(fake_backend)
+    build_args_path = os.path.join(launcher_dir, "build.args")
+    python_args_path = os.path.join(launcher_dir, "python.args")
+    for transient in (build_args_path, python_args_path):
+        if os.path.exists(transient):
+            os.remove(transient)
+    help_only = subprocess.run(
+        ["bash", launcher_copy, "--build", "--help"],
+        cwd=launcher_root, env=build_env, text=True,
+        capture_output=True, check=False)
+    assert help_only.returncode == 0
+    assert not os.path.exists(build_args_path)
+    with open(python_args_path, encoding="utf-8") as python_args_file:
+        assert python_args_file.read().splitlines() == [
+            "-m", "pipeviz.main", "--help"]
 
     probe_cycle = type("ProbeCycle", (), {
         "mispred_bubbles": 0, "retU": 0, "retV": 0,

@@ -69,6 +69,13 @@ auto-rebuilds a stale/missing SoC variant when its file list exists, and forward
 `--soc` to both build and application. Inert fake executables lock both argument
 destinations without paying a Verilator build in the regression.
 
+**Help fast-path audit:** launcher help still evaluated native freshness, so a
+missing/stale backend could trigger minutes of Verilator work before printing
+usage. `--help`/`-h` now preflight only the selected Python environment and
+executes argparse before any backend check; even a stray `--build` remains
+non-mutating. The fake-repository test removes the backend and proves help
+reaches Python without invoking the inert builder.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority

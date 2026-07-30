@@ -37,7 +37,8 @@ sources/file lists/includes, or the memory BFM is newer than the backend.
 <code>run.sh --check</code> reports readiness without building or opening the
 GUI and names the first stale input. Add <code>--soc</code> to check both
 variants; <code>run.sh --build --soc</code> builds and launches the SoC
-variant rather than dropping the flag at the build step.</p>
+variant rather than dropping the flag at the build step.
+<code>run.sh --help</code> never builds or requires the native model.</p>
 <ul>
  <li><b>File → Open example</b> rescans and opens any built verification
  workload.</li>

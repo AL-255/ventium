@@ -12,6 +12,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 BUILD=0
 CHECK=0
 SOC_REQUESTED=0
+HELP=0
 ARGS=()
 for a in "$@"; do
   if [ "$a" = "--build" ]; then
@@ -20,6 +21,9 @@ for a in "$@"; do
     CHECK=1
   elif [ "$a" = "--soc" ]; then
     SOC_REQUESTED=1
+    ARGS+=("$a")
+  elif [ "$a" = "--help" ] || [ "$a" = "-h" ]; then
+    HELP=1
     ARGS+=("$a")
   else
     ARGS+=("$a")
@@ -38,6 +42,18 @@ if ! "$PYTHON_BIN" -c 'import PySide6, capstone' >/dev/null 2>&1; then
   echo "[run] missing Python GUI dependencies for $PYTHON_BIN" >&2
   echo "[run] install with: $PYTHON_BIN -m pip install -r $HERE/requirements.txt" >&2
   exit 1
+fi
+
+launch_app() {
+  cd "$ROOT"
+  exec env PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PYTHON_BIN" -m pipeviz.main "${ARGS[@]}"
+}
+
+# argparse help imports the Python UI but never constructs a backend. Do not
+# turn a usage question into a multi-minute Verilator build.
+if [ "$HELP" = "1" ]; then
+  launch_app
 fi
 
 backend_reason() {
@@ -117,8 +133,6 @@ if [ -n "$REBUILD_REASON" ] \
   fi
 fi
 
-# run from the repo root so default image paths (build/...) resolve, with the
+# Run from the repo root so default image paths (build/...) resolve, with the
 # package dir on PYTHONPATH so `import pipeviz` works.
-cd "$ROOT"
-exec env PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" \
-  "$PYTHON_BIN" -m pipeviz.main "${ARGS[@]}"
+launch_app
