@@ -2118,9 +2118,9 @@ class AssemblyView(QWidget):
             "Replace the editor with a runnable sum-loop template (Ctrl+N)")
         self.open_btn = QPushButton("Open…")
         self.open_btn.setToolTip("Open GNU Intel-syntax source (Ctrl+O)")
-        self.save_btn = QPushButton("Save as…")
+        self.save_btn = QPushButton("Save")
         self.save_btn.setToolTip(
-            "Save assembly source under a chosen name (Ctrl+Shift+S)")
+            "Save assembly source (Ctrl+S); use Ctrl+Shift+S to Save As")
         self.complete_btn = QPushButton("Complete")
         self.complete_btn.setToolTip("Open opcode completion (Ctrl+Space)")
         self.build_btn = QPushButton("Assemble")
@@ -2133,7 +2133,7 @@ class AssemblyView(QWidget):
         assembly_actions = (
             (self.template_btn, "Create new assembly template"),
             (self.open_btn, "Open assembly source"),
-            (self.save_btn, "Save assembly source as"),
+            (self.save_btn, "Save assembly source"),
             (self.complete_btn, "Open assembly opcode completion"),
             (self.build_btn, "Assemble assembly source"),
             (self.run_btn, "Assemble and run assembly source"),
@@ -2207,8 +2207,7 @@ class AssemblyView(QWidget):
             lambda _dirty: self._sync_source_badge())
         self.template_btn.clicked.connect(self.new_template)
         self.open_btn.clicked.connect(self.open_source)
-        self.save_btn.clicked.connect(
-            lambda: self.save_source(save_as=True))
+        self.save_btn.clicked.connect(lambda: self.save_source())
         self.complete_btn.clicked.connect(
             self._request_completion)
         self.build_btn.clicked.connect(lambda: self.build(False))
@@ -2484,9 +2483,9 @@ class CView(QWidget):
             "Replace the editor with a dual-Fibonacci U/V template (Ctrl+N)")
         self.open_btn = QPushButton("Open…")
         self.open_btn.setToolTip("Open freestanding C source (Ctrl+O)")
-        self.save_btn = QPushButton("Save as…")
+        self.save_btn = QPushButton("Save")
         self.save_btn.setToolTip(
-            "Save C source under a chosen name (Ctrl+Shift+S)")
+            "Save C source (Ctrl+S); use Ctrl+Shift+S to Save As")
         controls.addWidget(self.template_btn)
         controls.addWidget(self.open_btn)
         controls.addWidget(self.save_btn)
@@ -2512,7 +2511,7 @@ class CView(QWidget):
         c_actions = (
             (self.template_btn, "Create new dual-Fibonacci U/V demo"),
             (self.open_btn, "Open C source"),
-            (self.save_btn, "Save C source as"),
+            (self.save_btn, "Save C source"),
             (self.compile_btn, "Compile C to assembly"),
         )
         for button, accessible_name in c_actions:
@@ -2566,8 +2565,7 @@ class CView(QWidget):
 
         self.template_btn.clicked.connect(self.new_template)
         self.open_btn.clicked.connect(self.open_source)
-        self.save_btn.clicked.connect(
-            lambda: self.save_source(save_as=True))
+        self.save_btn.clicked.connect(lambda: self.save_source())
         self.compile_btn.clicked.connect(self.compile)
         self.editor.focusEscapeRequested.connect(
             lambda forward: (

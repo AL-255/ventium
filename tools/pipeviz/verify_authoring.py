@@ -608,6 +608,8 @@ def scenario(app, outdir):
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
         assert "Ctrl+B" in win.assembly.build_btn.toolTip()
         assert "Ctrl+N" in win.assembly.template_btn.toolTip()
+        assert win.assembly.save_btn.text() == "Save"
+        assert "Ctrl+S" in win.assembly.save_btn.toolTip()
         assert "Ctrl+Shift+S" in win.assembly.save_btn.toolTip()
         build_requests = []
         real_build = win.assembly.build
@@ -785,6 +787,22 @@ def scenario(app, outdir):
             encoding="utf-8") == "i r . [ ] /"
         assert "Saved assembly-no-extension.s" in win.action_hint.text()
         saved_assembly_path = win.assembly._path
+        editor.document().setModified(True)
+        real_save_dialog = QFileDialog.getSaveFileName
+
+        def unexpected_assembly_save_dialog(*_args, **_kwargs):
+            raise AssertionError("Save button reopened Save As for a named file")
+
+        QFileDialog.getSaveFileName = staticmethod(
+            unexpected_assembly_save_dialog)
+        try:
+            QTest.mouseClick(win.assembly.save_btn, Qt.LeftButton)
+            settle(app)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.assembly._path == saved_assembly_path
+        assert win.assembly._last_save_outcome == "saved"
+        assert not editor.document().isModified()
         editor.document().setModified(True)
         assert win.workspace.tabText(1) == "Assembly *"
         blocked_assembly_save = str(
@@ -2321,6 +2339,21 @@ def scenario(app, outdir):
         assert "Saved c-no-extension.c" in win.action_hint.text()
         saved_c_path = win.c_source._path
         win.c_source.editor.document().setModified(True)
+        real_save_dialog = QFileDialog.getSaveFileName
+
+        def unexpected_c_save_dialog(*_args, **_kwargs):
+            raise AssertionError("Save button reopened Save As for a named file")
+
+        QFileDialog.getSaveFileName = staticmethod(unexpected_c_save_dialog)
+        try:
+            QTest.mouseClick(win.c_source.save_btn, Qt.LeftButton)
+            settle(app)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.c_source._path == saved_c_path
+        assert win.c_source._last_save_outcome == "saved"
+        assert not win.c_source.editor.document().isModified()
+        win.c_source.editor.document().setModified(True)
         assert win.workspace.tabText(2) == "C *"
         blocked_c_save = str(blocked_artifacts / "cannot-save-c.c")
         real_save_dialog = QFileDialog.getSaveFileName
@@ -2454,6 +2487,8 @@ def scenario(app, outdir):
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+B" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+N" in win.c_source.template_btn.toolTip()
+        assert win.c_source.save_btn.text() == "Save"
+        assert "Ctrl+S" in win.c_source.save_btn.toolTip()
         assert "Ctrl+Shift+S" in win.c_source.save_btn.toolTip()
         compile_requests = []
         real_compile = win.c_source.compile

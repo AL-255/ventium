@@ -198,6 +198,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     filename/reason summary while diagnostics and hover/accessibility retain
     the full path. A successful retry clears only that obsolete I/O diagnostic;
     it does not erase an unrelated assembler/compiler warning.
+    The visible **Save** button opens a chooser only for an unnamed source;
+    later clicks write directly to the known path. File → Save As and
+    `Ctrl+Shift+S` remain available for renaming.
     `Ctrl+wheel` also scales source text through the same 8–24 pt range.
     Moving beside `()`, `[]`, or `{}` highlights its matching pair; an
     unmatched delimiter is marked red, while delimiters inside comments and

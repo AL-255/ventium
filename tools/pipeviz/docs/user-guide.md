@@ -385,7 +385,9 @@ A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 
 `Ctrl+N` creates the active language's runnable template, `Ctrl+O` opens
 Assembly source, `Ctrl+S` saves it, and `Ctrl+Shift+S` saves it under a new
-name; the corresponding buttons remain available for mouse use.
+name. The visible **Save** button follows the same rule: it opens Save As for an
+unnamed source, then writes directly to that known path on later clicks; explicit
+Save As remains in File.
 The Assembly tab gains `*` while changes are unsaved. A persistent source badge
 at the lower right keeps the filename, built-in
 template, or C-compiler origin visible after transient build messages replace

@@ -237,7 +237,9 @@ preserved transactionally.</p>
 <h2>Files and safe replacement</h2>
 <p>Within either source workspace, Ctrl+N creates its runnable template, Ctrl+O
 opens that source type, Ctrl+S saves the current file, and Ctrl+Shift+S saves
-under a new name. An asterisk on the Assembly or C tab marks unsaved changes.
+under a new name. The visible Save button opens Save As only while the source
+is unnamed, then writes directly to its known path on later clicks. An asterisk
+on the Assembly or C tab marks unsaved changes.
 Save as appends <code>.s</code> or
 <code>.c</code> to a bare name when its typed-file filter is selected and
 reports the final filename globally.

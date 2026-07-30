@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — one-click Save after naming
+
+**Mouse-workflow audit:** the visible source button was permanently labelled
+Save As and always reopened the chooser, even after Assembly/C had a known path.
+Keyboard Ctrl+S already behaved normally, leaving mouse users with unnecessary
+dialog churn and a nonstandard primary save affordance.
+
+**Changes:** both workbenches now expose a compact Save button wired to normal
+save semantics. An unnamed source still opens Save As and applies the typed-file
+suffix; once named, later clicks write directly to that path. File → Save As and
+Ctrl+Shift+S remain the explicit rename path, and hover/accessibility text names
+both shortcuts.
+
+**Verification:** after naming one Assembly and one C file, acceptance marks
+each document dirty, replaces the Save As dialog with a hard failure sentinel,
+clicks Save, and requires successful in-place writes, unchanged paths, and clean
+documents without invoking the chooser.
+
 ## July 30 continuation — Edit safely copies focused diagnostics
 
 **Read-only focus audit:** focus routing covered source and inline Find, but a
