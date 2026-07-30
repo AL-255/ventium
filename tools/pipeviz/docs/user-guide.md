@@ -163,7 +163,9 @@ unsaved. In the C workspace the same shortcuts open/save C, and its tab uses the
 same dirty marker. When the typed-file filter is selected, a bare Save As name
 receives `.s` or `.c` automatically. A successful save clears the dirty marker
 and reports the final on-disk filename in both the workbench and global action
-row. Visualizer restores Ctrl+O to opening executable programs.
+row. Opening likewise identifies the real filename—an Assembly file is never
+mislabelled as compiler-generated—and clears any obsolete PC map before the
+new source can be linked. Visualizer restores Ctrl+O to opening executable programs.
 Dropping `.s`/`.S`/`.asm` or `.c`/`.h` routes the file to its source workspace;
 it is never mistaken for a raw executable.
 Each workbench remembers its most recent source folder for later Open/Save As

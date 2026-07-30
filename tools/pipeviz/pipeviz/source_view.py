@@ -1277,6 +1277,10 @@ class AssemblyView(QWidget):
             return False
         self._path = path
         self._last_dir = os.path.dirname(os.path.abspath(path))
+        name = os.path.basename(path)
+        self.status.setText(f"Opened {name}")
+        self.status.setStyleSheet("color:#79c0ff;padding:2px;")
+        self.statusChanged.emit(f"Opened assembly source: {name}")
         return True
 
     def confirm_safe_to_discard(self, action):
@@ -1465,8 +1469,10 @@ class CView(QWidget):
         self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.clear_marks()
         self.diagnostics.reset()
-        self.status.setText(f"Opened {os.path.basename(path)}")
+        name = os.path.basename(path)
+        self.status.setText(f"Opened {name}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
+        self.statusChanged.emit(f"Opened C source: {name}")
         return True
 
     def confirm_safe_to_discard(self, action):

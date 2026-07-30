@@ -400,6 +400,8 @@ Procedure:
    dirty marker, then require contextual Ctrl+O and Ctrl+S to open/save source.
    Save Assembly and C through their typed filters with bare filenames; require
    `.s`/`.c`, exact contents, clean tabs, and the final global save notice.
+   Open/drop valid Assembly and C and require their actual filenames in both
+   local and global status (never “generated” for an opened Assembly file).
    Open Ctrl+F, require two highlighted `mov` matches, traverse both, and close
    the bar with Escape. Require Enter after an assembly label and a C opening
    brace to preserve and advance indentation.

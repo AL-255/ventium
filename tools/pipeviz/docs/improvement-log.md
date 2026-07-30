@@ -216,6 +216,13 @@ and both save paths emit the final filename through the global action row.
 Authoring acceptance verifies actual bytes, stored path, dirty-state clearing,
 and notices for both languages.
 
+**Source-open status audit:** Assembly reused its generated-source setter when
+opening a file, leaving the local status at “generated from filename”; C named
+the file locally but emitted no global confirmation. Both source loaders now
+finish with an accurate `Opened <name>` workbench state and an exact global
+Assembly/C notice after replacement safety/map invalidation. Drop-path
+acceptance locks both filenames and both status surfaces.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

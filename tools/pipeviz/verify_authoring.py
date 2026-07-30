@@ -319,6 +319,8 @@ def scenario(app, outdir):
         assert editor.toPlainText().endswith("mov eax, 17\n")
         assert win.assembly._path == str(dropped_assembly)
         assert win.assembly._last_dir == str(Path(outdir).resolve())
+        assert win.assembly.status.text() == "Opened dropped-source.S"
+        assert "Opened assembly source: dropped-source.S" in win.action_hint.text()
         assert not win._has_session()
         win.assembly.new_template()
         assert win.assembly._last_dir == str(Path(outdir).resolve())
@@ -738,6 +740,8 @@ def scenario(app, outdir):
         assert "return 23" in win.c_source.editor.toPlainText()
         assert win.c_source._path == str(dropped_c)
         assert win.c_source._last_dir == str(Path(outdir).resolve())
+        assert win.c_source.status.text() == "Opened dropped-source.c"
+        assert "Opened C source: dropped-source.c" in win.action_hint.text()
         assert win.backend is old_backend
         win.c_source.new_template()
         assert win.c_source._last_dir == str(Path(outdir).resolve())

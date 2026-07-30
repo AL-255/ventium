@@ -136,6 +136,8 @@ explicit <code>_start:</code> is assembled exactly as written.</p>
 saves the current file. An asterisk on the Assembly or C tab marks unsaved
 changes. Save as appends <code>.s</code> or <code>.c</code> to a bare name
 when its typed-file filter is selected and reports the final filename globally.
+Open reports that same real filename in both places; Assembly never labels an
+opened file as compiler-generated.
 New/Open, C-to-Assembly replacement, and Quit offer
 Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
 program-opening role. Dropped <code>.s/.S/.asm</code> and
