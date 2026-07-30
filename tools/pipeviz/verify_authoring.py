@@ -695,6 +695,19 @@ def scenario(app, outdir):
         assert app.focusWidget() is editor
         assert editor._error_line == 5
         assert "Error" in win.assembly.diagnostics.toPlainText()
+        assert win.assembly.diagnostics.toPlainText().startswith(
+            "→ Line 5: press Enter or double-click to jump")
+        assert "Line 5" in win.assembly.diagnostics.toolTip()
+        assert "press Enter" in (
+            win.assembly.diagnostics.accessibleDescription())
+        editor.moveCursor(QTextCursor.Start)
+        win.assembly.diagnostics.setFocus()
+        QTest.keyClick(win.assembly.diagnostics, Qt.Key_Return)
+        settle(app)
+        assert app.focusWidget() is editor
+        assert editor.textCursor().blockNumber() + 1 == 5
+        assert win.assembly.status.text() == "Build error at line 5"
+        save(win, outdir, "01a_assembly_error_jump")
         assert not win._has_session()
         editor.insertPlainText(" ")
         assert editor._error_line is None
@@ -1164,6 +1177,17 @@ def scenario(app, outdir):
         assert app.focusWidget() is win.c_source.editor
         assert win.c_source.editor._error_line == 3
         assert "undeclared" in win.c_source.diagnostics.toPlainText()
+        assert win.c_source.diagnostics.toPlainText().startswith(
+            "→ Line 3: press Enter or double-click to jump")
+        win.c_source.editor.moveCursor(QTextCursor.Start)
+        QTest.mouseDClick(
+            win.c_source.diagnostics.viewport(), Qt.LeftButton,
+            Qt.NoModifier, win.c_source.diagnostics.viewport().rect().center())
+        settle(app)
+        assert app.focusWidget() is win.c_source.editor
+        assert win.c_source.editor.textCursor().blockNumber() + 1 == 3
+        assert win.c_source.status.text() == "Compile error at line 3"
+        save(win, outdir, "03b_c_error_jump")
         win.c_source.editor.insertPlainText(" ")
         assert win.c_source.editor._error_line is None
         assert not win.c_source.diagnostics.toPlainText()

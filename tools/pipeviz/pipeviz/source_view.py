@@ -1151,25 +1151,57 @@ int main(void)
 
 
 class _Diagnostics(QPlainTextEdit):
+    lineActivated = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._line = None
         self.setReadOnly(True)
         self.setFont(_mono(8))
         self.setMaximumBlockCount(1000)
         self.setPlaceholderText("Build diagnostics appear here.")
         self.setStyleSheet("color:#8b949e;background:#0b0f14;")
+        self.setAccessibleDescription("No build diagnostics.")
 
     def reset(self):
+        self._line = None
         self.setStyleSheet("color:#8b949e;background:#0b0f14;")
+        self.setToolTip("")
+        self.setAccessibleDescription("No build diagnostics.")
         self.clear()
 
     def success(self, text):
+        self._line = None
         self.setStyleSheet("color:#3fb950;background:#0b0f14;")
+        self.setToolTip("")
+        self.setAccessibleDescription(str(text))
         self.setPlainText(text)
 
-    def failure(self, text):
+    def failure(self, text, line=None):
+        self._line = int(line) if line else None
         self.setStyleSheet("color:#ff7b72;background:#0b0f14;")
-        self.setPlainText(text)
+        if self._line:
+            action = (
+                f"→ Line {self._line}: press Enter or double-click to jump")
+            self.setPlainText(f"{action}\n{text}")
+            self.setToolTip(action)
+            self.setAccessibleDescription(f"{action}. {text}")
+        else:
+            self.setPlainText(text)
+            self.setToolTip("")
+            self.setAccessibleDescription(str(text))
+
+    def keyPressEvent(self, event):
+        if self._line and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.lineActivated.emit(self._line)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        super().mouseDoubleClickEvent(event)
+        if self._line:
+            self.lineActivated.emit(self._line)
 
 
 class _StatusLabel(QLabel):
@@ -1290,6 +1322,7 @@ class AssemblyView(QWidget):
         side.addWidget(QLabel("<b>Build diagnostics</b>"))
         self.diagnostics = _Diagnostics()
         self.diagnostics.setAccessibleName("Assembly build diagnostics")
+        self.diagnostics.lineActivated.connect(self._activate_diagnostic)
         side.addWidget(self.diagnostics, 1)
         split.addWidget(self.editor)
         split.addWidget(sidebar)
@@ -1341,6 +1374,12 @@ class AssemblyView(QWidget):
     def _focus_editor(self):
         if self.isVisible():
             self.editor.setFocus(Qt.OtherFocusReason)
+
+    def _activate_diagnostic(self, line):
+        self.editor.mark_error_line(line)
+        self.editor.setFocus(Qt.OtherFocusReason)
+        self.status.setText(f"Build error at line {line}")
+        self.status.setStyleSheet("color:#f85149;padding:2px;")
 
     def _sync_source_badge(self):
         _sync_source_badge(
@@ -1511,7 +1550,7 @@ class AssemblyView(QWidget):
             result = assemble_source(self.editor.toPlainText())
         except BuildFailure as error:
             self.editor.mark_error_line(error.line)
-            self.diagnostics.failure(str(error))
+            self.diagnostics.failure(str(error), error.line)
             self._diagnostic_revision = self.editor.document().revision()
             self.status.setText(
                 f"Build failed{f' at line {error.line}' if error.line else ''}")
@@ -1594,6 +1633,7 @@ class CView(QWidget):
         layout.addWidget(self.find_bar)
         self.diagnostics = _Diagnostics()
         self.diagnostics.setAccessibleName("C compiler diagnostics")
+        self.diagnostics.lineActivated.connect(self._activate_diagnostic)
         self.diagnostics.setMaximumHeight(165)
         split.addWidget(self.editor)
         split.addWidget(self.diagnostics)
@@ -1639,6 +1679,12 @@ class CView(QWidget):
     def _focus_editor(self):
         if self.isVisible():
             self.editor.setFocus(Qt.OtherFocusReason)
+
+    def _activate_diagnostic(self, line):
+        self.editor.mark_error_line(line)
+        self.editor.setFocus(Qt.OtherFocusReason)
+        self.status.setText(f"Compile error at line {line}")
+        self.status.setStyleSheet("color:#f85149;padding:2px;")
 
     def _sync_source_badge(self):
         _sync_source_badge(
@@ -1767,7 +1813,7 @@ class CView(QWidget):
                 self.editor.toPlainText(), self.optimization.currentText())
         except BuildFailure as error:
             self.editor.mark_error_line(error.line)
-            self.diagnostics.failure(str(error))
+            self.diagnostics.failure(str(error), error.line)
             self._diagnostic_revision = self.editor.document().revision()
             self._compiled_optimization = self.optimization.currentText()
             self.status.setText(

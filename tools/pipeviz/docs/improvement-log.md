@@ -32,6 +32,9 @@ tooltip and accessibility description.
 The Pipeline timing canvas now fills its viewport before the first retirement,
 and its empty guidance wraps inside that space. Startup and in-flight-only
 sessions no longer clip the message inside a tiny pre-retirement cycle canvas.
+Assembler and compiler failures now begin with an actionable source-line link.
+Enter from the focused diagnostic or a double-click returns directly to the
+marked editor line; editing clears both the diagnostic and its stale target.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
