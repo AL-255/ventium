@@ -38,6 +38,7 @@ from pipeviz.main import (DEF_ENTRY, DEF_ESP, MainWindow, _PROGRAM_FILTER, _appl
                           _session_progress, _system_load_address,
                           _validate_segments)
 from pipeviz.pipeline_view import ROW_H
+from pipeviz.regs_view import RegsView
 from pipeviz.tables_view import (CycleBreakdown, TablesView, _dcache_per_pc,
                                  _dcache_replay)
 
@@ -212,6 +213,29 @@ def scenario_startup(app, outdir):
         pass
     else:
         raise AssertionError("numeric manifest mode was accepted as a boolean")
+
+    # The current bridge snapshots x87 on every retirement, but the view also
+    # accepts partial/legacy records. Prove an unavailable snapshot cannot leak
+    # stale live values under a different pinned time point.
+    probe_regs = RegsView()
+    probe_regs.start_session()
+    missing_fp = VVRetire()
+    missing_fp.n = 91
+    missing_fp.cyc = 23
+    assert not missing_fp.x87_valid
+    probe_regs.show_retire(missing_fp, None)
+    assert probe_regs.fphdr.text().startswith("x87 n/a")
+    assert all(hexv.text() == "n/a"
+               for _tag, hexv, _value in probe_regs.st_lbls)
+    live_regs = VVState()
+    live_regs.ftop = 3
+    live_regs.fptag = 0xff
+    probe_regs.update_from(live_regs)
+    assert probe_regs.fphdr.text().startswith("TOP=3")
+    assert all(hexv.text() != "n/a"
+               for _tag, hexv, _value in probe_regs.st_lbls)
+    probe_regs.close()
+    probe_regs.deleteLater()
 
     # Backend readiness includes the model inputs, not only the C++ bridge:
     # changed RTL must not leave the GUI confidently visualizing an old ignored
@@ -1309,6 +1333,8 @@ def scenario_branch_transport(app, outdir):
         assert "pre-execution" in win.regs.state_banner.toolTip()
         assert win.regs.unpin_btn.isVisible()
         assert "without advancing" in win.regs.unpin_btn.toolTip()
+        assert selected_rec.x87_valid
+        assert win.regs.fphdr.text().startswith("logical")
         assert win.pipeline.konata.plot.playhead is not None
 
         plot = win.pipeline.konata.plot
@@ -1822,6 +1848,9 @@ def scenario_layout(app, outdir):
         assert win.regs.eip_name_lbl.text() == "EIP"
         assert win.regs.eip_lbl.text() == (
             f"{win.backend.state().eip:08x}")
+        assert win.regs.fphdr.text().startswith("TOP=")
+        assert all(hexv.text() != "n/a"
+                   for _tag, hexv, _value in win.regs.st_lbls)
         assert win._assembly_source_map == pinned_map
         assert "linked selection cleared" in win.action_hint.text()
         save_shot(app, win, outdir, "08_compact_layout")

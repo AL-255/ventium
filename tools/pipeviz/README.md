@@ -204,7 +204,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   `floatx80` and an authoritative logical empty mask, so +0.0 is not confused
   with an unused slot). Header/row hovers define empty-mask bit *i*=1 as
   ST(*i*) empty; pinned values say `logical` because they are already rotated
-  and do not need TOP. Values that changed this step are amber; the panel can be **pinned
+  and do not need TOP. The current bridge captures x87 on every retirement; if
+  a partial or legacy backend record lacks it, the view shows explicit
+  `x87 n/a` rows rather than stale values. Values that changed this step are
+  amber; the panel can be **pinned
   AS-OF a retired instruction** (click a trace row / Konata cell) — an amber
   `PINNED n=… · retire cyc=…` banner above the whole register bank shows that
   instruction's post-commit state. The same page-independent banner says

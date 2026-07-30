@@ -64,6 +64,15 @@ hurt readability. Wide mode now distributes Integer:Segments:x87 as 2:2:3,
 matching their content, and a font-metrics assertion keeps the 9pt header on
 one line.
 
+**Uncaptured-x87 correctness audit:** `show_retire()` updated x87 only when the
+selected record had `x87_valid`; a partial or legacy backend record could
+therefore leave the previous live or pinned stack visible beneath a different
+PINNED banner. Such records now replace the header and all eight rows with
+explicit uncaptured `n/a`, while a live refresh clears those styles and restores
+the complete current stack. A synthetic missing-snapshot regression covers
+n/a→LIVE; current-backend branch and x87 workloads prove that the bridge
+captures logical values and empty bits on every retirement.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

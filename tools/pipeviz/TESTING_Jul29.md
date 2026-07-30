@@ -373,6 +373,9 @@ Procedure:
     authoritative empty bit. In wide mode, require the content-weighted x87
     column to exceed Integer/Segments and keep the full metadata header on one
     rendered line.
+11. Feed the register view a synthetic partial/legacy retirement with
+    `x87_valid=0` and require an explicit uncaptured header plus eight `n/a`
+    rows; a live refresh must restore the complete TOP/stack immediately.
 
 Observed evidence:
 

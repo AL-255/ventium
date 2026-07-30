@@ -356,12 +356,14 @@ class RegsView(QWidget):
             empty = bool((s.fptag >> phys) & 1)   # fptag bit i: 1 = empty
             tag, hexv, val = self.st_lbls[i]
             tag.setText(f"ST{i}" + ("·" if empty else ""))
+            tag.setStyleSheet("")
             tag.setToolTip(
                 f"Logical ST({i}) is {'empty' if empty else 'occupied'}")
             hexv.setText(_fmt80(hexs))
             hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
             fv = floatx80_to_float(b10)
             val.setText("—" if empty else f"{fv:.6g}")
+            val.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
 
     def show_retire(self, rec, prev):
         """Pin the panel to a retired instruction's post-commit architectural
@@ -444,12 +446,31 @@ class RegsView(QWidget):
                 empty = bool((rec.ftag >> i) & 1)
                 tag, hexv, val = self.st_lbls[i]
                 tag.setText(f"ST{i}" + ("·" if empty else ""))   # match the live empty marker
+                tag.setStyleSheet("")
                 tag.setToolTip(
                     f"Pinned logical ST({i}) is "
                     f"{'empty' if empty else 'occupied'}")
                 hexv.setText(_fmt80(b10[::-1].hex()))
                 hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
                 val.setText("—" if empty else f"{floatx80_to_float(b10):.6g}")
+                val.setStyleSheet(
+                    "color:#4b535d;" if empty else "color:#c9d1d9;")
+        else:
+            # A partial/legacy backend record may not carry an x87 snapshot.
+            # Never leave the last live or pinned values under a new pin.
+            self.fphdr.setText("x87 n/a · not captured for this retirement")
+            self.fphdr.setToolTip(
+                "This retirement did not capture x87 post-commit state; use a "
+                "complete backend record or return to LIVE")
+            for i, (tag, hexv, val) in enumerate(self.st_lbls):
+                tag.setText(f"ST{i}")
+                tag.setStyleSheet(na)
+                tag.setToolTip(
+                    f"ST({i}) is unavailable for this retirement")
+                hexv.setText("n/a")
+                hexv.setStyleSheet(na)
+                val.setText("—")
+                val.setStyleSheet(na)
         self._prev = None   # next live refresh re-highlights from scratch
 
     def unpin(self):
