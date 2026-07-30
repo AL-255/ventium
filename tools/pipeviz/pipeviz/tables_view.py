@@ -708,7 +708,9 @@ class TablesView(QWidget):
             for table, hint in self._activity_hints.items():
                 table.set_hint(hint)
         else:
-            message = "no program loaded — use File → Open example or Ctrl+O"
+            message = (
+                "no program loaded — use Open… for a file or its arrow "
+                "for an example")
             for table in self._activity_hints:
                 table.set_hint(message)
             for label in (self.ic_lbl, self.dc_lbl, self.tlb_lbl,

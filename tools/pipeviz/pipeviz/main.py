@@ -1769,7 +1769,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_status(self, s=None):
         if s is None:
-            empty = "no image loaded — Open a program or choose File → Open example"
+            empty = (
+                "no image loaded — use Open… for a file or its arrow "
+                "for a built example")
             self.status_lbl.setText(f"  {empty}  ")
             description = empty[0].upper() + empty[1:]
             self.status_lbl.setToolTip(description)

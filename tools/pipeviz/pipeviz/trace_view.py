@@ -317,7 +317,8 @@ class TraceView(QWidget):
         self.tbl = _TraceTable(0, len(_COLS))
         self.tbl.setAccessibleName("Retired instruction trace")
         self.tbl.set_empty_hint(
-            "No program loaded — use File → Open example or Ctrl+O")
+            "No program loaded — use Open… for a file or its arrow "
+            "for an example")
         self.tbl.focusFilter.connect(self.focus_filter)
         self.tbl.setHorizontalHeaderLabels(_COLS)
         # left-align the headers whose data is left-aligned (n/cyc/PC/bytes/instr)

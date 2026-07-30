@@ -578,7 +578,8 @@ class _KonataPlot(QWidget):
         self._pending = []       # accumulated cells since the last retirement
         self._cyc_row = {}       # retire cyc -> row index
         self.empty_message = (
-            "no program loaded — use File → Open example or Ctrl+O")
+            "no program loaded — use Open… for a file or its arrow "
+            "for an example")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAccessibleName("Pipeline timing diagram")

@@ -93,8 +93,8 @@ class RegsView(QWidget):
         state_row.addWidget(self.unpin_btn)
         root.addWidget(self.state_bar)
         self._session_hint = QLabel(
-            "No program loaded\n\nOpen a program or restore a snapshot "
-            "to inspect architectural state.")
+            "No program loaded\n\nUse Open… for a file, its arrow for an "
+            "example, or Snapshot… to inspect architectural state.")
         self._session_hint.setAlignment(Qt.AlignCenter)
         self._session_hint.setWordWrap(True)
         self._session_hint.setStyleSheet(

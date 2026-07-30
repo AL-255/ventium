@@ -905,6 +905,7 @@ def scenario_startup(app, outdir):
         win.sys_cb.setChecked(False)
 
         assert "no image loaded" in win.status_lbl.text()
+        assert "its arrow" in win.status_lbl.text()
         assert win.cyc_cb.text() == "U/V issue"
         assert all(not widget.isEnabled() for widget in win._config_widgets)
         assert "QCheckBox:disabled{color:#586069;}" in app.styleSheet()
@@ -913,8 +914,10 @@ def scenario_startup(app, outdir):
         assert not win.regs.unpin_btn.isVisible()
         assert not win.regs._wide_host.isVisible()
         assert "No program loaded" in win.regs._session_hint.text()
+        assert "its arrow" in win.regs._session_hint.text()
         assert win.trace.tbl._empty_hint.isVisible()
         assert "No program loaded" in win.trace.tbl._empty_hint.text()
+        assert "its arrow" in win.trace.tbl._empty_hint.text()
         assert win.trace.tbl._empty_hint.accessibleName() == (
             "Empty retired instruction trace explanation")
         assert "No program loaded" in (
@@ -922,6 +925,7 @@ def scenario_startup(app, outdir):
         assert win.trace.match_lbl.accessibleName() == (
             "Retired instruction filter result")
         assert "no program loaded" in win.pipeline.konata.plot.empty_message
+        assert "its arrow" in win.pipeline.konata.plot.empty_message
         assert win.pipeline.spark.backend is None
         assert win.pipeline.board.focusPolicy() == Qt.NoFocus
         assert win.pipeline.spark.focusPolicy() == Qt.NoFocus
@@ -933,6 +937,7 @@ def scenario_startup(app, outdir):
             win.pipeline.konata.plot.accessibleDescription().lower())
         assert win.tables.ic._hint.isVisible()
         assert "no program loaded" in win.tables.ic._hint.text().lower()
+        assert "its arrow" in win.tables.ic._hint.text()
         assert "no program loaded" in (
             win.tables.ic.accessibleDescription().lower())
         assert win.tables.ic._hint.accessibleName() == (
