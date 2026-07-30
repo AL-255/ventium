@@ -49,6 +49,14 @@ and shortcut table now document board lane traversal, 1/64-cycle IPC seeking,
 Enter activation, and source identity. Help acceptance asserts those exact
 control contracts rather than merely checking the old section headings.
 
+**Cycle-seek selection audit:** IPC/event seeking used a cycle→row map to tint
+one instruction as selected. A U/V pair shares a cycle, so the map chose the
+last row (usually V) while Trace and Registers stayed pinned to a different
+retirement—a visually contradictory fabricated selection. Cycle seek now
+scrolls every event into view, including non-retire cycles, and moves only the
+playhead while preserving the exact linked row/PC/pin. The branch regression
+locks all four identities across edge and 64-cycle keyboard seeks.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a

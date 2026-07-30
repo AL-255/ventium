@@ -168,7 +168,9 @@ retirements, Pipeline labels its newest 50,000-cycle window, and the compact
 IPC strip retains the newest 12,000 cycles.
 The IPC strip is also keyboard navigation: Tab to its blue outline, then use
 Left/Right for one cycle, Page Up/Page Down for 64 cycles, or Home/End for the
-captured edges. Enter reopens its selected cycle in the Pipeline view.
+captured edges. Enter reopens its selected cycle in the Pipeline view. Seeking
+moves only the cycle playhead; it never guesses U or V from a dual-retire cycle
+or changes an exact Trace/Register retirement pin.
 **Cycles** classifies every captured clock exactly once. **front end** combines
 fetch/decode, while **slow path** combines the integer execute, load/store,
 string, and I/O micro-operation states; neither label pretends `S_EXEC` is

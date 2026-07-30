@@ -1347,10 +1347,22 @@ class Konata(QWidget):
         self.plot.playhead = cyc
         row = self.plot._cyc_row.get(cyc)
         if row is None:
-            self.plot.update(); return
-        self.plot.sel_row = row
-        self.scroll.ensureVisible(self.plot._x(cyc), row * ROW_H + ROW_H // 2, 40, 60)
-        self.plot.update(); self.gutter.update()
+            # A cycle without a retirement still needs to scroll into view.
+            # Keep the current vertical investigation position rather than
+            # jumping to an unrelated instruction row.
+            y = (
+                self.scroll.verticalScrollBar().value()
+                + self.scroll.viewport().height() // 2)
+        else:
+            y = row * ROW_H + ROW_H // 2
+        self.scroll.ensureVisible(self.plot._x(cyc), y, 40, 60)
+        # Cycle seek and instruction selection are deliberately independent.
+        # U and V may retire together, so choosing one row from _cyc_row would
+        # silently fabricate an exact selection while Trace/Registers remained
+        # pinned to another retirement. Preserve the existing exact row (or
+        # none) and move only the playhead.
+        self.plot.update()
+        self.gutter.update()
 
     def select_n(self, n):
         """Select one exact retirement.

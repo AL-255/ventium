@@ -1427,6 +1427,11 @@ def scenario_branch_transport(app, outdir):
 
         old_playhead = plot.playhead
         spark = win.pipeline.spark
+        pinned_n = win._pinned_n
+        selected_row = plot.sel_row
+        selected_pc = plot.sel_pc
+        trace_n = int(win.trace.tbl.item(
+            win.trace.tbl.currentRow(), 0).text())
         first_cyc = spark._last_cyc - len(spark.ev) + 1
         assert spark.next_event(first_cyc - 1, -1) is None
         assert spark.next_event(spark._last_cyc + 1, 1) is None
@@ -1443,11 +1448,27 @@ def scenario_branch_transport(app, outdir):
         QTest.keyClick(spark, Qt.Key_Home)
         settle(app)
         assert spark._kbd_cyc == first_cyc and plot.playhead == first_cyc
+        hb = win.pipeline.konata.scroll.horizontalScrollBar()
+        assert (
+            hb.value()
+            <= plot._x(first_cyc)
+            <= hb.value() + win.pipeline.konata.scroll.viewport().width())
         QTest.keyClick(spark, Qt.Key_End)
         QTest.keyClick(spark, Qt.Key_Return)
         settle(app)
         assert spark._kbd_cyc == spark._last_cyc
         assert plot.playhead == spark._last_cyc
+        assert (
+            hb.value()
+            <= plot._x(spark._last_cyc)
+            <= hb.value() + win.pipeline.konata.scroll.viewport().width())
+        # Cycle seek never invents one exact instruction from an ambiguous U/V
+        # retire cycle or desynchronizes the existing linked pin.
+        assert win._pinned_n == pinned_n == trace_n
+        assert plot.sel_row == selected_row
+        assert plot.sel_pc == selected_pc
+        assert int(win.trace.tbl.item(
+            win.trace.tbl.currentRow(), 0).text()) == trace_n
         plot.setFocus()
         old_playhead = plot.playhead
         click(app, win.evprev_btn)
