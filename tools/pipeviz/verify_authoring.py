@@ -495,6 +495,13 @@ def scenario(app, outdir):
         assert screen.availableGeometry().contains(
             editor.completion.frameGeometry())
         assert editor.completion.list.count() == len(CATALOG)
+        assert editor.completion.accessibleName() == "Opcode completion popup"
+        assert editor.completion.hint.accessibleName() == (
+            "Completion keyboard help")
+        assert "Enter/Tab insert" in editor.completion.hint.text()
+        completion_accessible = editor.completion.list.accessibleDescription()
+        assert f"{len(CATALOG)} matching opcodes" in completion_accessible
+        assert "Enter or Tab to insert" in completion_accessible
         names = {
             editor.completion.list.item(i).data(Qt.UserRole).mnemonic
             for i in range(editor.completion.list.count())

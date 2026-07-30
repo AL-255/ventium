@@ -704,9 +704,12 @@ class CompletionPopup(QFrame):
             "QListWidget{border:0;background:#0d1117;}"
             "QListWidget::item{padding:3px;}"
             "QListWidget::item:selected{background:#1f6feb;color:white;}")
-        layout = QHBoxLayout(self)
+        self.setAccessibleName("Opcode completion popup")
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
+        body = QHBoxLayout()
+        body.setSpacing(0)
         self.list = QListWidget()
         self.list.setAccessibleName("Ventium opcode completions")
         self.list.setFixedWidth(285)
@@ -714,9 +717,18 @@ class CompletionPopup(QFrame):
         self.list.setTextElideMode(Qt.ElideRight)
         self.info = InstructionInfoPane()
         self.info.setMinimumWidth(330)
-        layout.addWidget(self.list)
-        layout.addWidget(self.info, 1)
-        self.resize(650, 235)
+        body.addWidget(self.list)
+        body.addWidget(self.info, 1)
+        layout.addLayout(body, 1)
+        self.hint = QLabel(
+            "↑/↓ choose · PgUp/PgDn jump · Enter/Tab insert · "
+            "Esc close · double-click insert")
+        self.hint.setAccessibleName("Completion keyboard help")
+        self.hint.setStyleSheet(
+            "border:0;border-top:1px solid #30363d;"
+            "color:#8b949e;background:#0d1117;padding:3px 6px;")
+        layout.addWidget(self.hint)
+        self.resize(650, 257)
         self.list.currentItemChanged.connect(self._current_changed)
         self.list.itemDoubleClicked.connect(lambda _item: self.accept_current())
 
@@ -739,6 +751,11 @@ class CompletionPopup(QFrame):
         if not matches:
             self.hide()
             return
+        scope = f"prefix {prefix}" if prefix else "the complete catalogue"
+        self.list.setAccessibleDescription(
+            f"{len(matches)} matching opcodes for {scope}. "
+            "Use arrows or Page Up and Page Down to choose, Enter or Tab to "
+            "insert, Escape to close, or double-click an entry to insert it.")
         self.list.setCurrentRow(0)
         cursor_rect = self.editor.cursorRect()
         below = self.editor.mapToGlobal(cursor_rect.bottomLeft())

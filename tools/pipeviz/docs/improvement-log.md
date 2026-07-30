@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Completion-discoverability audit:** the rich opcode popup exposed no visible
+interaction instructions, forcing first-time users to guess how to navigate or
+insert without taking editor focus. A compact footer now advertises arrow/Page
+navigation, Enter/Tab and double-click insertion, and Escape. The popup and
+footer are named for assistive technology, while the list dynamically announces
+its match count, active prefix scope, and the same interaction contract.
+
 **Digit-bearing completion audit:** completion refreshed only after alphabetic
 keypresses, so entering the `8` in `cmpxchg8b` dismissed useful opcode help;
 Backspace also closed it instead of broadening results. Filtering now tracks

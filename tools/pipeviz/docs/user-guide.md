@@ -230,6 +230,8 @@ highlight the failing line. `Ctrl+Space` opens completion over the complete
 Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
 description, mode/build availability, approximate latency, pairing class
 (`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
+Use Up/Down or Page Up/Page Down to choose, Enter/Tab or a double-click to
+insert, and Escape to close; the popup keeps these controls visible at its foot.
 At a directive, comment, or operand it remains a reference-only catalogue, so
 accepting an entry cannot corrupt non-opcode text.
 Accepted mnemonics preserve the token's existing convention: `AD` completes as
