@@ -2018,9 +2018,10 @@ def _confirm_source_replacement(view, label, action):
     return True
 
 
-def _report_source_save_failure(view, error):
-    """Replace any stale success state with one persistent save failure."""
-    message = f"Save failed · {error}"
+def _report_source_io_failure(view, operation, error, path=None):
+    """Replace any stale success state with one persistent file-I/O failure."""
+    target = f"{os.path.basename(path)} · " if path else ""
+    message = f"{operation} failed · {target}{error}"
     view.diagnostics.failure(message)
     view._diagnostic_revision = view.editor.document().revision()
     view.status.setText(message)
@@ -2317,9 +2318,7 @@ class AssemblyView(QWidget):
         try:
             text = Path(path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError) as error:
-            self.diagnostics.failure(str(error))
-            self._diagnostic_revision = self.editor.document().revision()
-            self._focus_editor()
+            _report_source_io_failure(self, "Open", error, path)
             return False
         if not self.set_source(text, os.path.basename(path), confirm=True):
             return False
@@ -2351,7 +2350,7 @@ class AssemblyView(QWidget):
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except (OSError, UnicodeError) as error:
-            _report_source_save_failure(self, error)
+            _report_source_io_failure(self, "Save", error, path)
             return False
         self._path = path
         self._source_origin = os.path.basename(path)
@@ -2640,9 +2639,7 @@ class CView(QWidget):
         try:
             text = Path(path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError) as error:
-            self.diagnostics.failure(str(error))
-            self._diagnostic_revision = self.editor.document().revision()
-            self._focus_editor()
+            _report_source_io_failure(self, "Open", error, path)
             return False
         if not self.confirm_safe_to_discard("opening another file"):
             return False
@@ -2681,7 +2678,7 @@ class CView(QWidget):
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except (OSError, UnicodeError) as error:
-            _report_source_save_failure(self, error)
+            _report_source_io_failure(self, "Save", error, path)
             return False
         self._path = path
         self._source_origin = os.path.basename(path)

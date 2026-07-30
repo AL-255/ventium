@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — source open failures preserve and explain
+
+**Read-path audit:** invalid UTF-8 and filesystem read errors had the same
+stale-message problem as save errors: only diagnostics changed. The old source
+was safely retained, but status/global feedback could still be green and the
+retained dirty/path state was not covered by acceptance.
+
+**Changes:** the shared source I/O transition now handles both `Save failed` and
+`Open failed` for Assembly and C. A read/decode failure preserves current text,
+path, source badge, and dirty state, retains editor focus, and synchronizes the
+red diagnostic, persistent elided status, full tooltip/accessibility text, and
+global last-action notice.
+
+**Verification:** the existing invalid-encoding fixtures now start from dirty,
+named Assembly/C sources and require every preserved-state and synchronized
+error surface above. Both settled recovery states are captured before the tests
+clear dirty state and continue through the build/run matrix.
+
 ## July 30 continuation — source save failures replace stale success
 
 **Persistence audit:** Assembly and C save I/O errors appeared only in their

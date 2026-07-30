@@ -2042,6 +2042,8 @@ def scenario(app, outdir):
         invalid_assembly_path = Path(outdir) / "invalid-encoding.s"
         invalid_assembly_path.write_bytes(b"\xff\xfe\x00")
         preserved_source = editor.toPlainText()
+        preserved_assembly_path = win.assembly._path
+        editor.document().setModified(True)
         real_open_dialog = QFileDialog.getOpenFileName
         QFileDialog.getOpenFileName = staticmethod(
             lambda *_args, **_kwargs: (str(invalid_assembly_path), ""))
@@ -2050,7 +2052,24 @@ def scenario(app, outdir):
         finally:
             QFileDialog.getOpenFileName = staticmethod(real_open_dialog)
         assert editor.toPlainText() == preserved_source
+        assert win.assembly._path == preserved_assembly_path
+        assert editor.document().isModified()
+        assert win.workspace.tabText(1) == "Assembly *"
+        assert win.assembly.source_badge.text().endswith("*")
         assert "decode" in win.assembly.diagnostics.toPlainText().lower()
+        assert win.assembly.status.text().startswith("Open failed · ")
+        assert "invalid-encoding.s" in win.assembly.status.text()
+        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert win.assembly.status.accessibleDescription() == (
+            win.assembly.status.text())
+        assert "#f85149" in win.assembly.status.styleSheet()
+        assert win.assembly.diagnostics._severity == "error"
+        assert win.assembly.status.text() in (
+            win.assembly.diagnostics.accessibleDescription())
+        assert win.action_hint.text() == win.assembly.status.text()
+        settle(app)
+        save(win, outdir, "00d_assembly_open_failure")
+        editor.document().setModified(False)
 
         # Bare snippets get a generated fall-through HLT. Selecting it must
         # clear a previous linked line instead of falsely retaining that marker.
@@ -2160,6 +2179,8 @@ def scenario(app, outdir):
         invalid_c_path = Path(outdir) / "invalid-encoding.c"
         invalid_c_path.write_bytes(b"\x80\x81")
         preserved_c = win.c_source.editor.toPlainText()
+        preserved_c_path = win.c_source._path
+        win.c_source.editor.document().setModified(True)
         real_open_dialog = QFileDialog.getOpenFileName
         QFileDialog.getOpenFileName = staticmethod(
             lambda *_args, **_kwargs: (str(invalid_c_path), ""))
@@ -2168,7 +2189,24 @@ def scenario(app, outdir):
         finally:
             QFileDialog.getOpenFileName = staticmethod(real_open_dialog)
         assert win.c_source.editor.toPlainText() == preserved_c
+        assert win.c_source._path == preserved_c_path
+        assert win.c_source.editor.document().isModified()
+        assert win.workspace.tabText(2) == "C *"
+        assert win.c_source.source_badge.text().endswith("*")
         assert "decode" in win.c_source.diagnostics.toPlainText().lower()
+        assert win.c_source.status.text().startswith("Open failed · ")
+        assert "invalid-encoding.c" in win.c_source.status.text()
+        assert win.c_source.status.toolTip() == win.c_source.status.text()
+        assert win.c_source.status.accessibleDescription() == (
+            win.c_source.status.text())
+        assert "#f85149" in win.c_source.status.styleSheet()
+        assert win.c_source.diagnostics._severity == "error"
+        assert win.c_source.status.text() in (
+            win.c_source.diagnostics.accessibleDescription())
+        assert win.action_hint.text() == win.c_source.status.text()
+        settle(app)
+        save(win, outdir, "03e_c_open_failure")
+        win.c_source.editor.document().setModified(False)
         assert win.c_source.new_template()
         assert "#8b949e" in win.c_source.diagnostics.styleSheet()
         assert "#8b949e" in win.c_source.status.styleSheet()
