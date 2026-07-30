@@ -20,15 +20,17 @@ dialog's hard 600×480 floor also exceeded that logical work area.
 **Changes:** completion now chooses the visible owner intersection when it
 fits, the full owner when high-DPI screen geometry clips an otherwise adequate
 owner, and screen bounds only for a genuinely undersized host. Indexed Help
-uses a 360×320 compact floor and a 140-pixel index at small logical sizes, with
-right-elided/full-tooltip topics instead of a horizontal scrollbar and with
-wrapping/scrolling content. The access-map pixel probe now converts logical
-coordinates by the captured image's device-pixel ratio.
+uses the remaining logical work area without a hard floor and scales its index
+from 100–205 pixels, with right-elided/full-tooltip topics instead of a
+horizontal scrollbar and with wrapping/scrolling content. The access-map pixel
+probe now converts logical coordinates by the captured image's device-pixel
+ratio.
 
-**Verification:** both complete authoring and interaction suites pass at
-`QT_SCALE_FACTOR=1.5`, including the minimum 900×620 workbenches, edge-caret
-completion, indexed Help navigation/search, cache-map selection sampling, and
-the full simulation/example matrix. Pure geometry checks lock all three popup
+**Verification:** both complete authoring and interaction suites pass at 150%,
+and both pass again at 200% after removing the final guide floor. Coverage
+includes the minimum 900×620 workbenches, edge-caret completion, indexed Help
+navigation/search, cache-map selection sampling, and the full
+simulation/example matrix. Pure geometry checks lock all three popup
 containment branches.
 
 ## July 30 continuation — readable semantic secondary text

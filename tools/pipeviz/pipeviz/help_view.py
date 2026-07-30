@@ -556,9 +556,9 @@ class UserGuideDialog(QDialog):
             available = screen.availableGeometry()
             # Keep the independent guide on-screen in logical coordinates at
             # high DPI. Its panes scroll and wrap below the normal desktop
-            # target; forcing a 600×480 floor pushed it off small screens.
-            width = max(360, min(980, available.width() - 48))
-            height = max(320, min(700, available.height() - 64))
+            # target, so no hard floor may exceed the remaining work area.
+            width = max(1, min(980, available.width() - 48))
+            height = max(1, min(700, available.height() - 64))
         else:
             width, height = 980, 700
         self.resize(width, height)
@@ -608,7 +608,7 @@ class UserGuideDialog(QDialog):
         body = QHBoxLayout()
         self.index = QListWidget()
         self.index.setAccessibleName("User guide topic index")
-        self.index.setFixedWidth(max(140, min(205, width // 4)))
+        self.index.setFixedWidth(max(100, min(205, width // 4)))
         self.index.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.index.setTextElideMode(Qt.ElideRight)
         self.index.addItems(PAGES.keys())

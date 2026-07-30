@@ -21,8 +21,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QFontMetrics, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMessageBox, QPushButton,
                                QLabel, QStyle, QStyleOptionComboBox, QToolBar,
@@ -1170,7 +1170,7 @@ def scenario_startup(app, outdir):
         guide_screen = win._guide_dialog.screen().availableGeometry()
         assert win._guide_dialog.width() <= guide_screen.width() - 48
         assert win._guide_dialog.height() <= guide_screen.height() - 64
-        assert 140 <= win._guide_dialog.index.width() <= 205
+        assert 100 <= win._guide_dialog.index.width() <= 205
         assert win._guide_dialog.page.width() >= min(
             400, win._guide_dialog.width() - 190)
         assert "Ctrl+F" in win._guide_dialog.page.accessibleDescription()
@@ -2245,7 +2245,13 @@ def scenario_dcache_memory(app, outdir):
             if cache_map._cell_at(QPoint(x, hover_y))
             == (int(cache_line.set), int(cache_line.way))]
         assert hover_points
-        QTest.mouseMove(cache_map, hover_points[len(hover_points) // 2])
+        hover_point = hover_points[len(hover_points) // 2]
+        hover_global = cache_map.mapToGlobal(hover_point)
+        QApplication.sendEvent(
+            cache_map,
+            QMouseEvent(
+                QEvent.MouseMove, QPointF(hover_point), QPointF(hover_global),
+                Qt.NoButton, Qt.NoButton, Qt.NoModifier))
         settle(app)
         line_address = (
             (int(cache_line.tag) << 12) | (int(cache_line.set) << 5))
