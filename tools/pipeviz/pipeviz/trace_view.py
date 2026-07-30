@@ -215,10 +215,15 @@ class _TraceFilter(QLineEdit):
 
 class _TraceTable(QTableWidget):
     focusFilter = Signal()
+    _navigation_description = (
+        "Activating a row links Pipeline, Registers, analysis tables, "
+        "and Assembly source.")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._empty_hint = QLabel("", self.viewport())
+        self._empty_hint.setAccessibleName(
+            "Empty retired instruction trace explanation")
         self._empty_hint.setAlignment(Qt.AlignCenter)
         self._empty_hint.setWordWrap(True)
         self._empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -236,6 +241,13 @@ class _TraceTable(QTableWidget):
             self._empty_hint.text()))
         if self._empty_hint.isVisible():
             self._empty_hint.raise_()
+            self.setAccessibleDescription(
+                f"{self._empty_hint.text()}. {self._navigation_description}")
+        else:
+            self.setAccessibleDescription(
+                f"{self.rowCount()} retirement "
+                f"row{'s' if self.rowCount() != 1 else ''}. "
+                f"{self._navigation_description}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -284,6 +296,7 @@ class TraceView(QWidget):
         self.filt.navigate.connect(self._select_match)
         top.addWidget(self.filt, 1)
         self.match_lbl = QLabel(""); self.match_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
+        self.match_lbl.setAccessibleName("Retired instruction filter result")
         top.addWidget(self.match_lbl)
         self.prev_match_btn = QToolButton()
         self.prev_match_btn.setText("↑")
@@ -303,9 +316,6 @@ class TraceView(QWidget):
         lay.addLayout(top)
         self.tbl = _TraceTable(0, len(_COLS))
         self.tbl.setAccessibleName("Retired instruction trace")
-        self.tbl.setAccessibleDescription(
-            "One row per retirement; activating a row links Pipeline, "
-            "Registers, analysis tables, and Assembly source.")
         self.tbl.set_empty_hint(
             "No program loaded — use File → Open example or Ctrl+O")
         self.tbl.focusFilter.connect(self.focus_filter)
@@ -834,6 +844,17 @@ class TraceView(QWidget):
             "color:#f85149;font-size:8px;" if error or (active and shown == 0)
             else "color:#8b949e;font-size:8px;")
         self.match_lbl.setToolTip(error or "")
+        if not active:
+            filter_state = f"No trace filter active; {n} rows available."
+        elif error:
+            filter_state = (
+                f"Invalid trace filter: {error}. All {n} rows remain visible.")
+        else:
+            filter_state = (
+                f"{shown} of {n} retirements match "
+                f"{self.filt.text()!r}.")
+        self.match_lbl.setAccessibleDescription(filter_state)
+        self.filt.setAccessibleDescription(filter_state)
         self.filt.setStyleSheet(
             "border:1px solid #f85149;"
             if error or (active and shown == 0) else "")

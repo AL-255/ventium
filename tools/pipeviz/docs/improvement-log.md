@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Trace semantic-state audit:** the retired trace painted honest no-program and
+no-retirement overlays but retained a generic table description, while its
+live match/error label was unnamed. The table now announces the current empty
+reason or populated row count plus linked-view behavior. The named result and
+filter announce exact visible/total matches, zero results, and structured
+syntax errors—including that invalid syntax deliberately retains every row.
+
 **Analysis-table empty-state audit:** Code$, Data$, TLB, Hotspots, Branches,
 and Mix painted helpful zero-row explanations as child overlays but left the
 focusable table itself semantically blank. The table now announces the same

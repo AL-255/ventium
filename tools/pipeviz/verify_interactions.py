@@ -913,6 +913,12 @@ def scenario_startup(app, outdir):
         assert "No program loaded" in win.regs._session_hint.text()
         assert win.trace.tbl._empty_hint.isVisible()
         assert "No program loaded" in win.trace.tbl._empty_hint.text()
+        assert win.trace.tbl._empty_hint.accessibleName() == (
+            "Empty retired instruction trace explanation")
+        assert "No program loaded" in (
+            win.trace.tbl.accessibleDescription())
+        assert win.trace.match_lbl.accessibleName() == (
+            "Retired instruction filter result")
         assert "no program loaded" in win.pipeline.konata.plot.empty_message
         assert win.pipeline.spark.backend is None
         assert win.pipeline.board.focusPolicy() == Qt.NoFocus
@@ -1420,6 +1426,14 @@ def scenario_branch_transport(app, outdir):
         visible_v = set_filter(app, win.trace, "pipe:V")
         assert 50 <= visible_v < win.trace.tbl.rowCount()
         assert f"{visible_v}/{win.trace.tbl.rowCount()} match" == win.trace.match_lbl.text()
+        assert (
+            f"{visible_v} of {win.trace.tbl.rowCount()} retirements match"
+            in win.trace.match_lbl.accessibleDescription())
+        assert win.trace.filt.accessibleDescription() == (
+            win.trace.match_lbl.accessibleDescription())
+        assert (
+            f"{win.trace.tbl.rowCount()} retirement rows"
+            in win.trace.tbl.accessibleDescription())
         assert win.trace.prev_match_btn.isVisible()
         assert win.trace.next_match_btn.isVisible()
         QTest.keyClick(win.trace.filt, Qt.Key_Return)
@@ -1459,6 +1473,10 @@ def scenario_branch_transport(app, outdir):
         assert set_filter(app, win.trace, "n>200") == total_rows
         assert win.trace.match_lbl.text() == "invalid filter"
         assert "use >=" in win.trace.filt.toolTip()
+        assert "Invalid trace filter" in (
+            win.trace.match_lbl.accessibleDescription())
+        assert f"All {total_rows} rows remain visible" in (
+            win.trace.match_lbl.accessibleDescription())
         assert not win.trace.next_match_btn.isEnabled()
         assert set_filter(app, win.trace, "pc:xyz") == total_rows
         assert "hexadecimal PC" in win.trace.filt.toolTip()
