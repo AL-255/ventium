@@ -825,11 +825,14 @@ def scenario_startup(app, outdir):
             win.trace.tbl: "Retired instruction trace",
             win.tables.tabs.tabBar(): "Analysis view tabs",
             win.tables.ic: "Instruction cache lines",
+            win.tables.ic_map: "Instruction cache occupancy map",
             win.tables.dc: "Data cache lines",
+            win.tables.dc_map: "Data cache occupancy map",
             win.tables.tlb: "Translation lookaside buffer entries",
             win.tables.hot: "Instruction hotspots",
             win.tables.br: "Branch behavior",
             win.tables.mix: "Instruction mix",
+            win.tables.cyc: "Cycle attribution",
             win.tables.mem.addr_e: "Physical memory address",
             win.tables.mem.follow_lbl: "Physical memory navigation state",
             win.tables.mem.dump: "Physical memory hex and ASCII dump",
@@ -840,6 +843,9 @@ def scenario_startup(app, outdir):
         for control, expected_name in accessible_controls.items():
             assert control.accessibleName() == expected_name, (
                 type(control).__name__, control.accessibleName(), expected_name)
+        assert "all 128 sets" in win.tables.ic_map.accessibleDescription()
+        assert "No program loaded" in (
+            win.tables.cyc.accessibleDescription())
         assert win.pipeline.konata.scroll.focusPolicy() == Qt.NoFocus
         assert win.stepn.toolTip() and win.speed.toolTip()
 
@@ -1722,6 +1728,14 @@ def scenario_dcache_memory(app, outdir):
         assert "miss" in win.tables.dc_lbl.text().lower()
         assert "replay [empty]" in win.tables.dc_lbl.text()
         assert "14 cold fills" in win.tables.dc_lbl.toolTip()
+        cache_map_accessible = win.tables.dc_map.accessibleDescription()
+        assert "14 of 256 cache line slots resident" in cache_map_accessible
+        assert "set " in cache_map_accessible and "way " in cache_map_accessible
+        cycle_accessible = win.tables.cyc.accessibleDescription()
+        assert (
+            f"{sum(win.tables.cyc.counts.values())} captured clocks"
+            in cycle_accessible)
+        assert "IPC " in cycle_accessible and "slow path" in cycle_accessible
         save_shot(app, win, outdir, "02a_dcache_replay")
 
         select_tab(app, win.tables.tabs, 4)

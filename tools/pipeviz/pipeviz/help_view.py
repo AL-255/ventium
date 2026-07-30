@@ -277,6 +277,8 @@ fallback instead of becoming a silent no-op.</p>
 <h1>Caches and memory</h1>
 <p>Code$ and Data$ show set/way residency and occupancy. Data$ replays the
 observed access stream through the matching 2-way geometry to estimate misses.
+Each occupancy map exposes its resident count and exact set/way/MRU geometry as
+a textual description in addition to the painted grid.
 For a restored snapshot it seeds replay from the resident tags and MRU order at
 the session boundary, so the first post-restore access is not falsely cold.
 Hotspots attributes fetch-to-retire latency and D-cache misses to PCs. Its
@@ -288,7 +290,8 @@ on an older instruction, so use <b>D$ miss</b> to identify the memory PC
 producing replayed misses.</p>
 <p>Cycles classifies every captured clock once. <b>front end</b> combines fetch
 and decode; <b>slow path</b> combines integer execute, load/store, string, and
-I/O micro-operations.</p>
+I/O micro-operations. Its accessible description reports clocks and percentages
+for every non-empty category, plus retired count and IPC.</p>
 <p>Memory displays physical backend bytes. EIP, ESP, and the latest explicit
 memory operand are resolved through segmentation and legacy page tables. Page
 Up/Page Down or the arrow buttons moves by 256 physical bytes and exits follow

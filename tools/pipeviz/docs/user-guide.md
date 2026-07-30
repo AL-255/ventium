@@ -402,7 +402,11 @@ edge show which consumer was held back.  In **Data$**, inspect the resident
 lines and replayed miss-rate. The bracketed origin says whether replay
 started `[empty]` or was `[seed N]` from the resident tags and MRU order of a
 restored snapshot; hover it for hit/cold/conflict totals. This prevents the
-visualization boundary from looking like a cold cache. In **Memory**, choose
+visualization boundary from looking like a cold cache. Code$/Data$ occupancy
+maps expose their resident count and exact set/way/MRU geometry textually as
+well as visually. The **Cycles** chart likewise announces every non-empty
+category's clock count and percentage, total retirement, and IPC. In
+**Memory**, choose
 `→ access` to follow the most recent load/store
 and see its physical bytes outlined in gold. Pipeviz resolves the retired
 instruction’s effective offset through its pre-execution segment base and

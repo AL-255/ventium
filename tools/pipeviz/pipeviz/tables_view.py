@@ -34,6 +34,8 @@ class CacheMap(QWidget):
         super().__init__(parent)
         self.cells = [(False, False)] * 256   # (valid, is_mru) by idx = set*2+way
         self.n_valid = 0
+        self.setAccessibleDescription(
+            "No cache lines are resident; all 128 sets and both ways are empty.")
         self.setFixedHeight(self.TOP + 2 * self.WAYH + self.BOT)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -43,6 +45,24 @@ class CacheMap(QWidget):
             cells[l.set * 2 + l.way] = (True, l.lru == l.way)
         self.cells = cells
         self.n_valid = len(lines)
+        occupied = []
+        for cache_set in range(self.SETS):
+            ways = []
+            for way in range(2):
+                valid, mru = cells[cache_set * 2 + way]
+                if valid:
+                    ways.append(
+                        f"way {way}{' MRU' if mru else ' resident'}")
+            if ways:
+                occupied.append(
+                    f"set {cache_set}: {', '.join(ways)}")
+        if occupied:
+            self.setAccessibleDescription(
+                f"{self.n_valid} of 256 cache line slots resident across "
+                f"{len(occupied)} of 128 sets. " + "; ".join(occupied) + ".")
+        else:
+            self.setAccessibleDescription(
+                "No cache lines are resident; all 128 sets and both ways are empty.")
         self.update()
 
     def paintEvent(self, ev):
@@ -318,9 +338,11 @@ class CycleBreakdown(QWidget):
         self.backend = None
         self.session_active = False
         self._zero()
+        self._sync_accessible_description()
 
     def set_session_active(self, active):
         self.session_active = bool(active)
+        self._sync_accessible_description()
         self.update()
 
     def _zero(self):
@@ -335,7 +357,27 @@ class CycleBreakdown(QWidget):
             # Restored snapshots retain an absolute clock but no earlier cycle
             # records; attribution intentionally begins after the restore.
             self._last_cyc = int(backend.cycle_count())
+        self._sync_accessible_description()
         self.update()
+
+    def _sync_accessible_description(self):
+        total = sum(self.counts.values())
+        if not total:
+            self.setAccessibleDescription(
+                "Step the core to attribute cycles."
+                if self.session_active else
+                "No program loaded; open a program to attribute cycles.")
+            return
+        ipc = self.total_ret / total
+        categories = sorted(
+            ((name, count) for name, count in self.counts.items() if count),
+            key=lambda item: -item[1])
+        detail = "; ".join(
+            f"{name} {count} clocks, {100.0 * count / total:.1f} percent"
+            for name, count in categories)
+        self.setAccessibleDescription(
+            f"{total} captured clocks, {self.total_ret} retired, "
+            f"IPC {ipc:.3f}. {detail}.")
 
     @staticmethod
     def _classify(name, c):
@@ -379,6 +421,7 @@ class CycleBreakdown(QWidget):
                 self.counts[self._classify(backend.state_name(c.state), c)] += 1
                 self.total_ret += (1 if c.retU else 0) + (1 if c.retV else 0)
                 self._last_cyc = c.cyc
+        self._sync_accessible_description()
         self.update()
 
     def paintEvent(self, _ev):

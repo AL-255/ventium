@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Analysis-chart accessibility audit:** cache occupancy grids and cycle
+attribution bars were the last named-but-pixel-only custom charts. Code$/Data$
+maps now announce resident totals plus exact occupied set/way/MRU geometry.
+Cycles announces empty/live state and, when populated, captured clocks,
+retirement, IPC, and each non-empty category's clock count and percentage.
+Startup and real D-cache-pressure acceptance lock both representations.
+
 **Memory-inspector accessibility audit:** the physical hex dump had an
 accessible name but its custom-painted bytes and EIP/ESP/access highlights were
 pixel-only. Every refresh now supplies a textual range, marker addresses, and
