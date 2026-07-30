@@ -294,6 +294,8 @@ undoable edit; a caret-only Tab inserts spaces to the next four-column stop.
 Backspace in leading whitespace returns to the previous stop in one edit.
 `Ctrl+/` toggles indentation-preserving `#` Assembly or `//` C comments across
 the current line or selected block as one undoable edit.
+`Home` toggles between the first non-whitespace column and column zero;
+`Shift+Home` extends the selection, while `Ctrl+Home` remains document-start.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.

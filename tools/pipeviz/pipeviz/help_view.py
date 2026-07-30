@@ -231,6 +231,9 @@ undoable edit rather than replacing the selection. In leading whitespace,
 Backspace removes spaces to the previous four-column stop as one undoable edit.
 Ctrl+/ toggles <code>#</code> Assembly or <code>//</code> C line comments,
 preserving indentation and handling a selected block in one undo step.</p>
+<p>Home first moves to the line's first non-whitespace column, then toggles to
+column zero; Shift+Home extends the selection and Ctrl+Home still moves to the
+start of the document.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>
@@ -413,6 +416,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
  <tr><td><b>Ctrl+/</b></td><td>toggle Assembly/C line comments</td></tr>
+ <tr><td><b>Home / Shift+Home</b></td><td>in a source editor, toggle first code column/column zero, optionally selecting</td></tr>
  <tr><td><b>Ctrl+Tab / Ctrl+Shift+Tab</b></td><td>leave an Assembly or C editor without inserting indentation</td></tr>
  <tr><td><b>Ctrl+F, F3 / Shift+F3</b></td><td>find text in this guide topic</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>

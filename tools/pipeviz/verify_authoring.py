@@ -878,6 +878,19 @@ def scenario(app, outdir):
         editor.moveCursor(QTextCursor.End)
         QTest.keyClick(editor, Qt.Key_Backspace)
         assert editor.toPlainText() == "mov"
+        editor.setPlainText("    mov eax, 1")
+        editor.moveCursor(QTextCursor.End)
+        QTest.keyClick(editor, Qt.Key_Home)
+        assert editor.textCursor().positionInBlock() == 4
+        QTest.keyClick(editor, Qt.Key_Home)
+        assert editor.textCursor().positionInBlock() == 0
+        QTest.keyClick(editor, Qt.Key_Home)
+        assert editor.textCursor().positionInBlock() == 4
+        editor.moveCursor(QTextCursor.End)
+        QTest.keyClick(editor, Qt.Key_Home, Qt.ShiftModifier)
+        assert editor.textCursor().selectedText() == "mov eax, 1"
+        QTest.keyClick(editor, Qt.Key_Home, Qt.ControlModifier)
+        assert editor.textCursor().position() == 0
 
         # A syntax error is line-linked and never starts a backend session.
         editor.setPlainText(

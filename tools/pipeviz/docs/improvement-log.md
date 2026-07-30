@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source Home-key navigation audit:** generic QPlainTextEdit Home always jumped
+past indentation to column zero. Both code workbenches now use code-editor
+semantics: Home moves to the first non-whitespace column and a second press
+toggles to zero; Shift extends the same motion, while Ctrl+Home retains its
+document-start behavior. Acceptance covers all four transitions.
+
 **Source comment-toggle audit:** both workbenches now provide the standard
 Ctrl+/ editing command. It inserts/removes <code>#</code> for GNU Assembly and
 <code>//</code> for C after existing indentation, toggles a selected block as

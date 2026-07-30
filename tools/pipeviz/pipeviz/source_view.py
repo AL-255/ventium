@@ -373,6 +373,23 @@ class CodeEditor(QPlainTextEdit):
             self._toggle_source_comment()
             event.accept()
             return
+        if (event.key() == Qt.Key_Home
+                and not event.modifiers()
+                & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)):
+            cursor = self.textCursor()
+            text = cursor.block().text()
+            first_content = len(text) - len(text.lstrip())
+            target_column = (
+                0 if cursor.positionInBlock() == first_content
+                else first_content)
+            cursor.setPosition(
+                cursor.block().position() + target_column,
+                QTextCursor.KeepAnchor
+                if event.modifiers() & Qt.ShiftModifier
+                else QTextCursor.MoveAnchor)
+            self.setTextCursor(cursor)
+            event.accept()
+            return
         if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
                 and not event.modifiers()
                 & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)):
