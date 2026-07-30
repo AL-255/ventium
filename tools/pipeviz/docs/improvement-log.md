@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**C diagnostics terminology audit:** the C pane inherited Assembly's “Build
+diagnostics” empty text and warning description, conflicting with the
+Compile→Assembly controls around it. The shared pane now carries an operation
+kind: Assembly says Build, while C consistently says Compiler in visible
+placeholder, warning tooltip, and accessible empty/result descriptions.
+
 **Source build-shortcut audit:** Assembly offered keyboard Assemble+Run but
 assemble-only remained pointer-only, making a safe preflight less convenient.
 Ctrl+B now assembles without loading the backend in Assembly and performs

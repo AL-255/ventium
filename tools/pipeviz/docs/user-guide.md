@@ -401,10 +401,11 @@ lets you compare optimization levels, edit scheduling or register choices,
 inspect completion previews, and only then assemble and run it. Compiler errors
 remain in C and highlight their responsible line; assembler errors remain in
 Assembly. Press Enter on the focused diagnostic, or double-click it, to jump
-to the marked C/Assembly line. Build/compiler diagnostics belong to the exact source revision that
-produced them: editing either source clears the prior result, and changing C's
-optimization level clears the old compiler result and prompts you to compile
-again.
+to the marked C/Assembly line. Empty and warning states use Compiler terminology
+in C, distinct from Assembly's Build diagnostics. Build/compiler diagnostics
+belong to the exact source revision that produced them: editing either source
+clears the prior result, and changing C's optimization level clears the old
+compiler result and prompts you to compile again.
 
 Run the dedicated regression for the entire authoring path:
 

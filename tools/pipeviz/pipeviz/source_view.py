@@ -1628,23 +1628,26 @@ int main(void)
 class _Diagnostics(QPlainTextEdit):
     lineActivated = Signal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, kind="Build", parent=None):
         super().__init__(parent)
+        self._kind = str(kind)
+        self._empty_description = (
+            f"No {self._kind.lower()} diagnostics.")
         self._line = None
         self._severity = None
         self.setReadOnly(True)
         self.setFont(_mono(8))
         self.setMaximumBlockCount(1000)
-        self.setPlaceholderText("Build diagnostics appear here.")
+        self.setPlaceholderText(f"{self._kind} diagnostics appear here.")
         self.setStyleSheet("color:#8b949e;background:#0b0f14;")
-        self.setAccessibleDescription("No build diagnostics.")
+        self.setAccessibleDescription(self._empty_description)
 
     def reset(self):
         self._line = None
         self._severity = None
         self.setStyleSheet("color:#8b949e;background:#0b0f14;")
         self.setToolTip("")
-        self.setAccessibleDescription("No build diagnostics.")
+        self.setAccessibleDescription(self._empty_description)
         self.clear()
 
     def success(self, text):
@@ -1667,9 +1670,9 @@ class _Diagnostics(QPlainTextEdit):
             self.setAccessibleDescription(f"{action}. {text}")
         else:
             self.setPlainText(text)
-            self.setToolTip("Build completed with warnings")
+            self.setToolTip(f"{self._kind} completed with warnings")
             self.setAccessibleDescription(
-                f"Build completed with warnings. {text}")
+                f"{self._kind} completed with warnings. {text}")
 
     def failure(self, text, line=None):
         self._line = int(line) if line else None
@@ -2240,7 +2243,7 @@ class CView(QWidget):
         self.editor.setPlainText(_C_TEMPLATE)
         self.find_bar = SourceFindBar(self.editor)
         layout.addWidget(self.find_bar)
-        self.diagnostics = _Diagnostics()
+        self.diagnostics = _Diagnostics("Compiler")
         self.diagnostics.setAccessibleName("C compiler diagnostics")
         self.diagnostics.lineActivated.connect(self._activate_diagnostic)
         self.diagnostics.setMaximumHeight(165)

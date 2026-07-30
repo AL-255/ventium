@@ -289,6 +289,10 @@ def scenario(app, outdir):
         assert "not saved" in win.assembly.source_badge.text()
         assert win.assembly.editor.completion.list.accessibleName()
         assert win.assembly.diagnostics.accessibleName()
+        assert win.assembly.diagnostics.placeholderText() == (
+            "Build diagnostics appear here.")
+        assert win.assembly.diagnostics.accessibleDescription() == (
+            "No build diagnostics.")
         assert win.pipeline.board.accessibleName() == "Live pipeline stage board"
         assert "clicked" in win.pipeline.board.accessibleDescription()
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
@@ -1610,6 +1614,10 @@ def scenario(app, outdir):
             "Source origin built-in template; not saved. No unsaved changes.")
         assert win.c_source.optimization.accessibleName()
         assert win.c_source.diagnostics.accessibleName()
+        assert win.c_source.diagnostics.placeholderText() == (
+            "Compiler diagnostics appear here.")
+        assert win.c_source.diagnostics.accessibleDescription() == (
+            "No compiler diagnostics.")
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+B" in win.c_source.compile_btn.toolTip()
         compile_requests = []
