@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Workbench-status clipping audit:** Assembly/C status lines share compact
+width with the source badge and could clip build failures, stale-map warnings,
+or exact PC/line links with no way to recover the full message from keyboard or
+assistive access. A shared status label now mirrors every update into its
+tooltip and accessible description, with stable Assembly/C identities.
+
 **Source-identity accessibility audit:** Assembly/C badges intentionally elide
 long paths and exposed the full identity only as a pointer tooltip. Each badge
 now describes the complete saved path or template/compiler origin, explicitly

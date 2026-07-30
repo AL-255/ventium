@@ -205,6 +205,9 @@ typed on a blank indented line dedents one level.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>
+<p>The adjacent Assembly/C status preserves its full build, stale-map, or
+PC/line message in both a tooltip and accessible description if the compact
+label is clipped.</p>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
 backward, and Escape closes the search. It is a case-insensitive literal search;

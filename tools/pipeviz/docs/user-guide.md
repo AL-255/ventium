@@ -281,6 +281,9 @@ silently discard a dirty editor: choose Save, Discard, or Cancel.
 The source badge visually elides long names but exposes the complete saved path
 or generated/template origin, not-saved state, and unsaved-change state through
 both its tooltip and accessible description.
+The adjacent Assembly/C status similarly retains its full build, stale-map, or
+PC/line message in a tooltip and accessible description when compact layout
+clips the visible label.
 For longer generated files, `Ctrl+F` opens an inline search with highlighted
 matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
 moves backward, and Escape closes it. Click a line number to select that whole

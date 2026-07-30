@@ -1172,6 +1172,21 @@ class _Diagnostics(QPlainTextEdit):
         self.setPlainText(text)
 
 
+class _StatusLabel(QLabel):
+    """A compact status whose full plain text survives visual clipping."""
+
+    def __init__(self, text, accessible_name, parent=None):
+        super().__init__(text, parent)
+        self.setAccessibleName(accessible_name)
+        self.setToolTip(text)
+        self.setAccessibleDescription(text)
+
+    def setText(self, text):
+        super().setText(text)
+        self.setToolTip(text)
+        self.setAccessibleDescription(text)
+
+
 def _confirm_source_replacement(view, label, action):
     """Protect edited source before replacing it or closing the application."""
     if not view.editor.document().isModified():
@@ -1284,8 +1299,9 @@ class AssemblyView(QWidget):
         layout.addWidget(split, 1)
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
-        self.status = QLabel(
-            "Ready · Ctrl+Space completes opcodes · Ctrl+Enter assembles and runs")
+        self.status = _StatusLabel(
+            "Ready · Ctrl+Space completes opcodes · Ctrl+Enter assembles and runs",
+            "Assembly workbench status")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         status_row.addWidget(self.status, 1)
         self.source_badge = QLabel()
@@ -1586,8 +1602,9 @@ class CView(QWidget):
         layout.addWidget(split, 1)
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
-        self.status = QLabel(
-            "Define int main(void); Compile emits editable GNU Intel assembly")
+        self.status = _StatusLabel(
+            "Define int main(void); Compile emits editable GNU Intel assembly",
+            "C compiler workbench status")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         status_row.addWidget(self.status, 1)
         self.source_badge = QLabel()

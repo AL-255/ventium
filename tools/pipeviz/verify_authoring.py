@@ -249,6 +249,11 @@ def scenario(app, outdir):
         assert win.save_source_action.isEnabled()
         assert win.save_source_action.shortcut().toString() == "Ctrl+S"
         assert win.assembly.editor.accessibleName() == "Assembly source editor"
+        assert win.assembly.status.accessibleName() == (
+            "Assembly workbench status")
+        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert win.assembly.status.accessibleDescription() == (
+            win.assembly.status.text())
         assert win.assembly.source_badge.accessibleName() == "Assembly source identity"
         assert win.assembly.source_badge.accessibleDescription() == (
             "Source origin built-in template; not saved. No unsaved changes.")
@@ -368,6 +373,7 @@ def scenario(app, outdir):
             f"Source file {dropped_assembly.resolve()}. No unsaved changes.")
         assert win.assembly._last_dir == str(Path(outdir).resolve())
         assert win.assembly.status.text() == "Opened dropped-source.S"
+        assert win.assembly.status.toolTip() == "Opened dropped-source.S"
         assert "Opened assembly source: dropped-source.S" in win.action_hint.text()
         assert not win._has_session()
         win.assembly.new_template()
@@ -1044,6 +1050,11 @@ def scenario(app, outdir):
                    for action in win._transport_shortcut_actions)
         assert win.c_source.editor.accessibleName() == "C source editor"
         assert win.c_source.source_badge.accessibleName() == "C source identity"
+        assert win.c_source.status.accessibleName() == (
+            "C compiler workbench status")
+        assert win.c_source.status.toolTip() == win.c_source.status.text()
+        assert win.c_source.status.accessibleDescription() == (
+            win.c_source.status.text())
         assert win.c_source.source_badge.accessibleDescription() == (
             "Source origin built-in template; not saved. No unsaved changes.")
         assert win.c_source.optimization.accessibleName()
@@ -1136,6 +1147,9 @@ def scenario(app, outdir):
             "Source origin C compiler (-O2); not saved. No unsaved changes.")
         assert "call main" in win.assembly.editor.toPlainText()
         assert "Assembly generated from C compiler" in win.assembly.status.text()
+        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert win.assembly.status.accessibleDescription() == (
+            win.assembly.status.text())
         save(win, outdir, "04_c_generated_assembly")
         # The green origin/result text describes one exact editor revision.
         # Editing generated source must retire it just like a build diagnostic.
