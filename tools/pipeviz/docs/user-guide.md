@@ -282,7 +282,9 @@ description, mode/build availability, approximate latency, pairing class
 Common ALU and no-op descriptions name the selected operation itself rather
 than showing a family sentence about a different mnemonic. Conditional jumps
 and SETcc aliases spell out their exact CF/ZF/SF/OF/PF predicate; LOOP and
-JCXZ variants explain which counter and ZF state they test.
+JCXZ variants explain which counter and ZF state they test. x87 entries call
+out reverse arithmetic direction, pop count, integer conversion, the selected
+constant, stack/tag effect, and whether a control form includes WAIT.
 Ordinary `user` availability is neutral; system, build-flag, SMM, and
 co-simulation restrictions turn amber so the color signals a real constraint.
 The completion list does not repeat the mnemonic inside its operand form; the

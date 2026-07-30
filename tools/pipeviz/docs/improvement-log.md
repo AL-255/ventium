@@ -9,6 +9,26 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — precise x87 completion semantics
+
+**Floating-point metadata audit:** x87 completion exposed exact mnemonics and
+timing but grouped direction-sensitive operations under phrases such as “x87
+divide family.” A user comparing `fdivp` with `fdivrp` could not tell which
+stack value was the numerator, whether an instruction popped, what a constant
+loaded, or whether an FN/F control form implied WAIT.
+
+**Changes:** 59 load/store, add/subtract/multiply/divide, compare, sign,
+constant, tag/TOP, and control-word/status mnemonics now have form-specific
+descriptions. Reverse arithmetic names both operands; pop forms name their
+destination and pop count; integer/BCD conversions, unordered compares,
+constants, stack rotation, and WAIT/no-WAIT forms are explicit.
+
+**Verification:** catalogue acceptance samples every ambiguity class and
+forbids all ten former family descriptions across the 291-entry catalogue.
+Popup interaction selects `fdivrp`, checks the exact `ST(0) / ST(i)` plus pop
+semantics and FP metadata, then captures its full five-cell
+F→D→FP→stall→W preview.
+
 ## July 30 continuation — exact condition-code completion help
 
 **Catalogue-description audit:** 60 Jcc/SETcc entries had exact signatures but

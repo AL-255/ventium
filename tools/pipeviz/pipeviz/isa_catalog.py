@@ -231,6 +231,69 @@ _add("fwait wait", "", "Wait for pending x87 work (modeled as the P5 wait/no-op 
      "FP", stages=("F", "D", "FP"))
 
 
+_DESCRIPTION_OVERRIDES = {
+    "fld": "Push a real memory value or x87 register onto the x87 stack.",
+    "fild": "Convert a signed integer memory value to extended real and push it.",
+    "fbld": "Convert a packed-BCD memory value to extended real and push it.",
+    "fst": "Store ST(0) as a real value without popping the x87 stack.",
+    "fstp": "Store ST(0) as a real value, then pop the x87 stack.",
+    "fist": "Convert and store ST(0) as a signed integer without popping.",
+    "fistp": "Convert and store ST(0) as a signed integer, then pop.",
+    "fbstp": "Convert and store ST(0) as packed BCD, then pop.",
+    "fadd": "Add the source to the selected x87 destination.",
+    "faddp": "Add ST(0) to ST(i), store in ST(i), then pop.",
+    "fiadd": "Add a signed integer memory source to ST(0).",
+    "fsub": "Subtract the source from the selected x87 destination.",
+    "fsubp": "Subtract ST(0) from ST(i), store in ST(i), then pop.",
+    "fsubr": "Reverse subtract: source minus the selected x87 destination.",
+    "fsubrp": "Store ST(0) minus ST(i) in ST(i), then pop.",
+    "fisub": "Subtract a signed integer memory source from ST(0).",
+    "fisubr": "Store signed integer memory source minus ST(0) in ST(0).",
+    "fmul": "Multiply the selected x87 destination by the source.",
+    "fmulp": "Multiply ST(i) by ST(0), store in ST(i), then pop.",
+    "fimul": "Multiply ST(0) by a signed integer memory source.",
+    "fdiv": "Divide the selected x87 destination by the source.",
+    "fdivp": "Divide ST(i) by ST(0), store in ST(i), then pop.",
+    "fdivr": "Reverse divide: source divided by the selected x87 destination.",
+    "fdivrp": "Store ST(0) divided by ST(i) in ST(i), then pop.",
+    "fidiv": "Divide ST(0) by a signed integer memory source.",
+    "fidivr": "Store signed integer memory source divided by ST(0) in ST(0).",
+    "fcom": "Compare ST(0) with the source and update x87 condition flags.",
+    "fcomp": "Compare ST(0) with the source, update x87 flags, then pop.",
+    "fcompp": "Compare ST(0) with ST(1), update x87 flags, then pop twice.",
+    "ficom": "Compare ST(0) with a signed integer memory source.",
+    "ficomp": "Compare ST(0) with a signed integer memory source, then pop.",
+    "fucom": "Unordered-compare ST(0) with the source; NaNs are handled quietly.",
+    "fucomp": "Unordered-compare ST(0) with the source, then pop.",
+    "fucompp": "Unordered-compare ST(0) with ST(1), then pop twice.",
+    "ftst": "Compare ST(0) with zero and update x87 condition flags.",
+    "fxam": "Classify ST(0) and report its sign/type in x87 condition flags.",
+    "fchs": "Toggle the sign of ST(0).",
+    "fabs": "Clear the sign of ST(0), producing its absolute value.",
+    "fld1": "Push the x87 constant 1.0.",
+    "fldz": "Push the x87 constant 0.0.",
+    "fldpi": "Push the x87 constant π.",
+    "fldl2e": "Push log2(e).",
+    "fldl2t": "Push log2(10).",
+    "fldlg2": "Push log10(2).",
+    "fldln2": "Push ln(2).",
+    "fxch": "Exchange ST(0) with ST(i).",
+    "ffree": "Mark ST(i)'s x87 tag as empty.",
+    "fincstp": "Increment x87 TOP, rotating the logical stack.",
+    "fdecstp": "Decrement x87 TOP, rotating the logical stack.",
+    "fnop": "Perform no x87 operation.",
+    "fldcw": "Load the x87 control word from memory.",
+    "fnstcw": "Store the x87 control word without an implicit WAIT.",
+    "fstcw": "Wait for pending x87 work, then store the control word.",
+    "fnclex": "Clear pending x87 exceptions without an implicit WAIT.",
+    "fclex": "Wait for pending x87 work, then clear x87 exceptions.",
+    "fninit": "Initialize x87 state without an implicit WAIT.",
+    "finit": "Wait for pending x87 work, then initialize x87 state.",
+    "fnstsw": "Store the x87 status word without an implicit WAIT.",
+    "fstsw": "Wait for pending x87 work, then store the status word.",
+}
+
+
 _CC_CONDITIONS = {
     "o": "overflow is set (OF=1)",
     "no": "overflow is clear (OF=0)",
@@ -274,9 +337,12 @@ _LOOP_DESCRIPTIONS = {
 }
 
 
-def _specialize_condition_description(info):
-    """Make completion useful for each Jcc/SETcc spelling, including aliases."""
+def _specialize_description(info):
+    """Replace family prose where a mnemonic's exact behavior matters."""
     mnemonic = info.mnemonic
+    description = _DESCRIPTION_OVERRIDES.get(mnemonic)
+    if description:
+        info = replace(info, description=description)
     suffix = (
         mnemonic[3:] if mnemonic.startswith("set")
         else mnemonic[1:] if mnemonic.startswith("j")
@@ -295,7 +361,7 @@ def _specialize_condition_description(info):
 # One entry per insertion token. Families intentionally share descriptions, but
 # aliases remain separate completion choices because users type them directly.
 CATALOG = tuple(sorted(
-    (_specialize_condition_description(item) for item in _catalog),
+    (_specialize_description(item) for item in _catalog),
     key=lambda item: item.mnemonic))
 BY_MNEMONIC = {item.mnemonic: item for item in CATALOG}
 MNEMONICS = frozenset(BY_MNEMONIC)

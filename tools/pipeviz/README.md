@@ -148,6 +148,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     and operands once; the detail pane retains the full signature.
     Jcc/SETcc aliases name their exact signed/unsigned flag predicate, while
     LOOP/JCXZ entries explain their counter and ZF behavior.
+    x87 load/store/arithmetic/compare/constant/stack/control entries distinguish
+    reverse operands, stack pops, integer conversions, constants, and WAIT forms.
     Regression coverage checks every RTL decoder family and all 121 exact
     32-bit mnemonics named by the independent P5 timing classifier.
     Arrows/Page Up/Page Down traverse matches,

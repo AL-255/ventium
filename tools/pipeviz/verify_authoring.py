@@ -139,6 +139,36 @@ def verify_catalog():
         "Decrement (E)CX and jump when nonzero and ZF=0.")
     assert instruction_info("jecxz").description == (
         "Jump when ECX is zero; flags are unchanged.")
+    expected_x87_details = {
+        "fild": "signed integer",
+        "fstp": "then pop",
+        "fsubr": "Reverse subtract",
+        "fsubrp": "ST(0) minus ST(i)",
+        "fdivr": "Reverse divide",
+        "fdivrp": "ST(0) divided by ST(i)",
+        "fcompp": "pop twice",
+        "fxam": "Classify ST(0)",
+        "fldpi": "constant π",
+        "ffree": "tag as empty",
+        "fincstp": "Increment x87 TOP",
+        "fnstcw": "without an implicit WAIT",
+        "fstcw": "then store the control word",
+    }
+    for mnemonic, detail in expected_x87_details.items():
+        assert detail in instruction_info(mnemonic).description
+    obsolete_x87_help = {
+        "Push a real, integer, BCD, constant, or x87 register value.",
+        "Store/convert ST(0), optionally popping it.",
+        "x87 add/subtract family.",
+        "x87 multiply family.",
+        "x87 divide family.",
+        "Compare/classify x87 operands and update the x87 status word.",
+        "Change or clear ST(0)'s sign.",
+        "Push a built-in x87 constant.",
+        "Manipulate the x87 stack/tag state.",
+        "Load, store, clear, initialize, or inspect x87 control/status state.",
+    }
+    assert not any(info.description in obsolete_x87_help for info in CATALOG)
     obsolete_condition_help = {
         "Conditional branch selected by EFLAGS.",
         "Assembler alias for a conditional branch selected by EFLAGS.",
@@ -1062,6 +1092,16 @@ def scenario(app, outdir):
             "Jump when not equal / nonzero (ZF=0).")
         assert editor.completion.info.preview.info.pipe == "PV"
         save(editor.completion, outdir, "01_opcode_branch_popup")
+        fdivrp_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic
+            == "fdivrp")
+        editor.completion.list.setCurrentRow(fdivrp_row)
+        settle(app)
+        assert editor.completion.info.description.text() == (
+            "Store ST(0) divided by ST(i) in ST(i), then pop.")
+        assert editor.completion.info.preview.info.pipe == "FP"
+        save(editor.completion, outdir, "01_opcode_x87_popup")
         editor.completion.list.setCurrentRow(add_row)
         reference_source = editor.toPlainText()
         editor.completion.accept_current()

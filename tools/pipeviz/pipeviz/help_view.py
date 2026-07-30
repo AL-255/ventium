@@ -279,7 +279,9 @@ operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Common ALU/no-op entries describe
 the selected operation rather than an unrelated family member. Jcc/SETcc
 spellings show their exact signed/unsigned flag predicate, including aliases;
-LOOP/JCXZ entries name the counter and ZF test. Normal user
+LOOP/JCXZ entries name the counter and ZF test. x87 descriptions distinguish
+reverse operands, pops, conversions, constants, tag/TOP effects, and WAIT
+forms. Normal user
 availability is neutral; mode- or build-gated operations say so explicitly in
 amber. Each list row shows mnemonic, pipe class, and operands without repeating
 the mnemonic; the detail pane shows the complete signature. Regression covers
