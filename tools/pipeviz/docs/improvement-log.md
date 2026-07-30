@@ -9,6 +9,21 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — readable event counts at retention cap
+
+**Count-width audit:** the event selector retains up to 12,000 captured cycles,
+but its 87-pixel painted field truncated the longest possible label,
+`mispredict (12,000)`, to `mispredict (1…)`.
+
+**Changes:** the selector gains 24 pixels from the transport row's existing
+spare width, and event counts use thousands separators. All transport controls
+still fit the 900-pixel practical minimum.
+
+**Verification:** startup acceptance asks the active Qt style for the combo's
+actual edit-field rectangle and requires the font width of the 12,000-cycle
+worst case to fit. The existing minimum-layout bounds capture and all five live
+class-count checks remain in force.
+
 ## July 30 continuation — indexed Help matches current interactions
 
 **Guide-consistency audit:** the indexed Pipeline page still described event

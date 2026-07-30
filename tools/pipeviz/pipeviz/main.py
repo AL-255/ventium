@@ -731,7 +731,9 @@ class MainWindow(QMainWindow):
         self.event_kind.addItem("stall", "s")
         self.event_kind.addItem("I-fill", "f")
         self.event_kind.addItem("page-walk", "w")
-        self.event_kind.setFixedWidth(112)
+        # Wide enough for the longest class plus the 12,000-cycle retention cap
+        # ("mispredict (12,000)") without sacrificing the 900px toolbar.
+        self.event_kind.setFixedWidth(136)
         self.event_kind.setAccessibleName("Pipeline event type")
         self.event_kind.setToolTip(
             "Choose which pipeline event [ and ] navigate")
@@ -951,7 +953,7 @@ class MainWindow(QMainWindow):
             for index in range(self.event_kind.count()):
                 code = self.event_kind.itemData(index)
                 self.event_kind.setItemText(
-                    index, f"{_EVENT_LABELS[code]} ({counts[code]})")
+                    index, f"{_EVENT_LABELS[code]} ({counts[code]:,})")
         finally:
             self.event_kind.blockSignals(blocked)
         self.event_kind.setEnabled(session_enabled)

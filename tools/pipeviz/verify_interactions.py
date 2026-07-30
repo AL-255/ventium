@@ -25,7 +25,8 @@ from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMessageBox, QPushButton,
-                               QLabel, QToolBar, QToolButton, QWidget)
+                               QLabel, QStyle, QStyleOptionComboBox, QToolBar,
+                               QToolButton, QWidget)
 
 import pipeviz.main as main_module
 import pipeviz.disasm as disasm_module
@@ -877,6 +878,14 @@ def scenario_startup(app, outdir):
         assert win.stepn.toolTip() and win.speed.toolTip()
         assert win.event_kind.currentText() == "any (0)"
         assert "Open a program" in win.event_kind.toolTip()
+        event_option = QStyleOptionComboBox()
+        win.event_kind.initStyleOption(event_option)
+        event_text_rect = win.event_kind.style().subControlRect(
+            QStyle.CC_ComboBox, event_option,
+            QStyle.SC_ComboBoxEditField, win.event_kind)
+        assert QFontMetrics(win.event_kind.font()).horizontalAdvance(
+            f"mispredict ({win.pipeline.spark.CAP:,})") <= (
+                event_text_rect.width())
 
         old_backend = win.backend
         old_backend_class = main_module.Backend
@@ -2049,7 +2058,7 @@ def scenario_branch_transport(app, outdir):
         for index in range(win.event_kind.count()):
             code = win.event_kind.itemData(index)
             assert win.event_kind.itemText(index).endswith(
-                f"({expected_event_counts[code]})")
+                f"({expected_event_counts[code]:,})")
         mispred_idx = win.event_kind.findData("m")
         assert mispred_idx >= 0
         win.event_kind.setCurrentIndex(mispred_idx)
