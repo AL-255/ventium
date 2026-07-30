@@ -903,6 +903,12 @@ def scenario_startup(app, outdir):
         assert win.pipeline.spark.backend is None
         assert win.pipeline.board.focusPolicy() == Qt.NoFocus
         assert win.pipeline.spark.focusPolicy() == Qt.NoFocus
+        assert "No occupied source-linked lane" in (
+            win.pipeline.board.accessibleDescription())
+        assert "No program loaded" in (
+            win.pipeline.spark.accessibleDescription())
+        assert "no program loaded" in (
+            win.pipeline.konata.plot.accessibleDescription().lower())
         assert win.tables.ic._hint.isVisible()
         assert "no program loaded" in win.tables.ic._hint.text().lower()
         assert "No program loaded" in win.tables.pf.info.text()
@@ -1251,6 +1257,10 @@ def scenario_branch_transport(app, outdir):
         assert (v_mnemonic, v_size, live.vd_len) == ("jne", 2, 2)
         assert not live.ud_is_branch and live.vd_is_branch
         assert win.pipeline.board._cells["V"][1].startswith("jne ")
+        board_description = win.pipeline.board.accessibleDescription()
+        assert "S_PIPE" in board_description
+        assert f"V: PC 0x{v_pc:08x}, jne " in board_description
+        assert "Keyboard lane U selected" in board_description
         lifecycles = win.pipeline.konata.plot.insns
         assert min(item["c0"] for item in lifecycles) >= 1
         assert max(item["c1"] for item in lifecycles) <= live.core_cyc
@@ -1303,6 +1313,8 @@ def scenario_branch_transport(app, outdir):
             assert win._pinned_n == exact_n
             assert win.action_hint.text().startswith(
                 f"Pinned retirement n={exact_n} · cycle {pair_cycle} · ")
+            assert f"Selected retirement n={exact_n}" in (
+                plot.accessibleDescription())
 
         # Escape is the keyboard equivalent of Unpin, but only after the
         # narrower Trace-filter Escape behavior has nothing to clear.
@@ -1516,6 +1528,10 @@ def scenario_branch_transport(app, outdir):
         assert win.action_hint.text() == (
             f"Pipeline cycle {spark._kbd_cyc} selected · "
             f"retirement pin n={pinned_n} unchanged")
+        assert f"Keyboard cycle {spark._kbd_cyc} selected" in (
+            spark.accessibleDescription())
+        assert f"Playhead cycle {spark._kbd_cyc}" in (
+            plot.accessibleDescription())
         QTest.keyClick(spark, Qt.Key_PageUp)
         settle(app)
         assert spark._kbd_cyc == max(first_cyc, spark._last_cyc - 65)
@@ -1711,6 +1727,8 @@ def scenario_dcache_memory(app, outdir):
         settle(app)
         assert win.tables.accmap.sel_n == accesses[0][0]
         assert win._pinned_n == accesses[0][0]
+        assert f"Selected retirement n={accesses[0][0]}" in (
+            win.tables.accmap.accessibleDescription())
         QTest.keyClick(win.tables.accmap, Qt.Key_Right)
         settle(app)
         assert win.tables.accmap.sel_n == accesses[1][0]
@@ -1738,6 +1756,7 @@ def scenario_dcache_memory(app, outdir):
         win.tables.accmap._activate_index(0)
         settle(app)
         assert win.tables.mem._click_hl is None
+        assert "untranslated" in win.tables.accmap.accessibleDescription()
         win.tables.accmap.set_accesses(accesses)
         selected_cycle = win.backend.state().core_cyc
         click(app, win.regs.unpin_btn)

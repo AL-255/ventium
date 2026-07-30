@@ -11,6 +11,15 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Dynamic-canvas accessibility audit:** custom-painted pipeline and memory
+visuals had stable names but static descriptions, so their live content was
+available only as pixels or pointer tooltips. The stage board now describes its
+FSM status, occupied lanes, PCs, instructions, and keyboard lane; the timing
+plot describes its captured range, exact retirement, and independent playhead;
+the IPC strip describes range, recent IPC, events, and chosen cycle; the memory
+map describes counts and its exact selected access. Startup and real dual-issue
+navigation verify those descriptions advance with the rendered state.
+
 **Selection-feedback audit:** Pipeline/Trace pinning and IPC-history seeks could
 leave an older transport message in the action line, obscuring whether the user
 selected a cycle or an exact instruction. Retirement selections now report n,

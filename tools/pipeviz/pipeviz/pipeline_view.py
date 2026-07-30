@@ -64,6 +64,29 @@ class StageBoard(QWidget):
         self._kbd_lane = None
         self._status = "no image loaded"
         self._statecol = _DIM
+        self._sync_accessible_description()
+
+    def _sync_accessible_description(self):
+        navigation = (
+            "Occupied lanes can be clicked, or use arrow keys to choose one "
+            "and Enter to open its linked Assembly line.")
+        if not self._lane_pcs:
+            self.setAccessibleDescription(
+                f"{self._status}. No occupied source-linked lane. {navigation}")
+            return
+        occupied = []
+        for lane in ("U", "V", "FP"):
+            if lane not in self._lane_pcs:
+                continue
+            text = self._cells[lane][1] or "instruction"
+            occupied.append(
+                f"{lane}: PC 0x{int(self._lane_pcs[lane]):08x}, {text}")
+        selected = (
+            f" Keyboard lane {self._kbd_lane} selected."
+            if self._kbd_lane in self._lane_pcs else "")
+        self.setAccessibleDescription(
+            f"{self._status}. Occupied " + "; ".join(occupied)
+            + f".{selected} {navigation}")
 
     def _blank(self):
         return {"U": ([], ""), "V": ([], ""), "FP": ([], "")}
@@ -194,6 +217,7 @@ class StageBoard(QWidget):
         else:
             pair = "  [single]"
         self._status = f"{name}  ({desc})   eip=0x{s.eip:08x}   cyc={s.core_cyc}{pair}{hz}"
+        self._sync_accessible_description()
         self.update()
 
     def reset(self):
@@ -206,6 +230,7 @@ class StageBoard(QWidget):
         self._statecol = _DIM
         self.unsetCursor()
         self.setToolTip("")
+        self._sync_accessible_description()
         self.update()
 
     def paintEvent(self, ev):
@@ -359,6 +384,7 @@ class StageBoard(QWidget):
             if hit is not None:
                 lane, pc = hit
                 self._kbd_lane = lane
+                self._sync_accessible_description()
                 self.setFocus(Qt.MouseFocusReason)
                 self.instructionClicked.emit(pc, lane)
                 event.accept()
@@ -370,6 +396,7 @@ class StageBoard(QWidget):
             self._kbd_lane = next(
                 (lane for lane in ("U", "V", "FP")
                  if lane in self._lane_pcs), None)
+        self._sync_accessible_description()
         self.update()
         super().focusInEvent(event)
 
@@ -396,6 +423,7 @@ class StageBoard(QWidget):
                 delta = -1 if key in (Qt.Key_Left, Qt.Key_Up) else 1
                 index = max(0, min(len(lanes) - 1, current + delta))
             self._kbd_lane = lanes[index]
+            self._sync_accessible_description()
             self.update()
             event.accept()
             return
@@ -560,6 +588,7 @@ class _KonataPlot(QWidget):
         self.setToolTip(
             "Click a row to pin it; Shift-click sets a cycle-distance anchor. "
             "Use Up/Down, Page Up/Down, Home, and End to traverse retirements.")
+        self._sync_accessible_description()
 
     def reset(self, backend, bits, history_start=1):
         self.backend = backend
@@ -585,6 +614,7 @@ class _KonataPlot(QWidget):
         # a shorter replacement session cannot inherit the old giant canvas and
         # stale scrollbar range until its first retirement.
         self.setFixedSize(1, 1)
+        self._sync_accessible_description()
 
     def _resize_canvas(self):
         w = (self.max_cyc - self.base_cyc + 3) * self.cell_w
@@ -592,6 +622,28 @@ class _KonataPlot(QWidget):
         # newest instruction fully visible (never a clipped half-row at the top).
         h = max(1, len(self.insns) * ROW_H + ROW_H)
         self.setFixedSize(max(1, w), h)
+
+    def _sync_accessible_description(self):
+        navigation = (
+            "Use Up and Down, Page Up and Page Down, Home and End to select "
+            "retirements; Control plus and minus zoom; Escape returns live.")
+        if not self.insns:
+            self.setAccessibleDescription(f"{self.empty_message}. {navigation}")
+            return
+        context = (
+            f"{len(self.insns)} retirements, cycles {self.base_cyc} through "
+            f"{self.max_cyc}.")
+        if self.sel_row is not None and 0 <= self.sel_row < len(self.insns):
+            insn = self.insns[self.sel_row]
+            context += (
+                f" Selected retirement n={int(insn['n'])}, lane {insn['pipe']}, "
+                f"PC 0x{int(insn['pc']):08x}, {insn['mnem']}, "
+                f"cycles {int(insn['c0'])} through {int(insn['c1'])}.")
+        else:
+            context += " No exact retirement selected."
+        if self.playhead is not None:
+            context += f" Playhead cycle {int(self.playhead)}."
+        self.setAccessibleDescription(f"{context} {navigation}")
 
     def set_cell_width(self, width):
         self.cell_w = max(6, int(width))
@@ -734,6 +786,7 @@ class _KonataPlot(QWidget):
         self.base_cyc = (self.insns[0]["c0"] if self.insns
                          else self.history_start)
         self._resize_canvas()
+        self._sync_accessible_description()
         return self.max_cyc
 
     def _x(self, cyc):
@@ -982,6 +1035,7 @@ class _KonataPlot(QWidget):
         if ev.modifiers() & Qt.ShiftModifier:
             # second marker: measure the cycle range to the current playhead.
             self.anchor = None if self.anchor == cyc else cyc
+            self._sync_accessible_description()
             self.update()
             return
         self.select_row(r)
@@ -994,6 +1048,7 @@ class _KonataPlot(QWidget):
         self.sel_row = row
         self.sel_pc = selected["pc"]
         self.playhead = selected["c1"]
+        self._sync_accessible_description()
         self.update()
         if emit:
             self.rowClicked.emit(int(selected["n"]))
@@ -1369,6 +1424,7 @@ class Konata(QWidget):
         # silently fabricate an exact selection while Trace/Registers remained
         # pinned to another retirement. Preserve the existing exact row (or
         # none) and move only the playhead.
+        self.plot._sync_accessible_description()
         self.plot.update()
         self.gutter.update()
 
@@ -1402,6 +1458,7 @@ class Konata(QWidget):
         self.plot.sel_pc = None
         self.plot._dep_edges = []
         self.plot._dep_for_row = -1
+        self.plot._sync_accessible_description()
         self.plot.update()
         self.gutter.update()
 
@@ -1481,6 +1538,28 @@ class SparklineStrip(QWidget):
         self._hover_x = -1
         self._kbd_cyc = None
         self.setToolTip("Open a program and step to collect navigable history")
+        self._sync_accessible_description()
+
+    def _sync_accessible_description(self):
+        navigation = (
+            "Use Left and Right, Page Up and Page Down, Home and End to choose "
+            "a captured cycle; Enter reopens it.")
+        bounds = self._cycle_bounds()
+        if bounds is None:
+            state = (
+                "No captured cycle history."
+                if self.backend is not None else "No program loaded.")
+            self.setAccessibleDescription(f"{state} {navigation}")
+            return
+        recent = self.ret[max(0, len(self.ret) - 64):]
+        ipc = sum(recent) / max(1, len(recent))
+        events = sum(1 for event in self.ev if event)
+        chosen = (
+            f" Keyboard cycle {int(self._kbd_cyc)} selected."
+            if self._kbd_cyc is not None else "")
+        self.setAccessibleDescription(
+            f"Captured cycles {bounds[0]} through {bounds[1]}; recent IPC "
+            f"{ipc:.2f}; {events} marked events.{chosen} {navigation}")
 
     def reset(self, backend):
         self.backend = backend
@@ -1492,6 +1571,7 @@ class SparklineStrip(QWidget):
         self._kbd_cyc = None
         self.setFocusPolicy(Qt.NoFocus)
         self.setToolTip("Step the core to collect keyboard-navigable history")
+        self._sync_accessible_description()
         self.update()
 
     def ingest(self):
@@ -1533,6 +1613,7 @@ class SparklineStrip(QWidget):
         bounds = self._cycle_bounds()
         if self._kbd_cyc is not None and bounds is not None:
             self._kbd_cyc = max(bounds[0], min(bounds[1], self._kbd_cyc))
+        self._sync_accessible_description()
         self.update()
 
     # stall = grey (C_STG_STALL), matching the Konata '=' stall convention and
@@ -1704,6 +1785,7 @@ class SparklineStrip(QWidget):
         cyc = self._cyc_at(ev.position().x() if hasattr(ev, "position") else ev.x())
         if cyc is not None:
             self._kbd_cyc = int(cyc)
+            self._sync_accessible_description()
             self.setFocus(Qt.MouseFocusReason)
             self.cycleClicked.emit(int(cyc))     # seek the Konata playhead here
             ev.accept()
@@ -1740,6 +1822,7 @@ class SparklineStrip(QWidget):
     def focusInEvent(self, event):
         if self._kbd_cyc is None and self.ret:
             self._kbd_cyc = self._last_cyc
+        self._sync_accessible_description()
         self.update()
         super().focusInEvent(event)
 
@@ -1770,6 +1853,7 @@ class SparklineStrip(QWidget):
                     }[key]
                     current = max(bounds[0], min(bounds[1], current + delta))
                 self._kbd_cyc = int(current)
+                self._sync_accessible_description()
                 self.cycleClicked.emit(self._kbd_cyc)
                 self.update()
             event.accept()

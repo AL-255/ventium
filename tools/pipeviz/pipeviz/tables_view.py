@@ -1034,9 +1034,11 @@ class AccessMap(QWidget):
         self.setToolTip(
             "Click a point or use ←/→, Page Up/Down, Home/End to select an "
             "access. Enter/Space reopens its Trace row and physical Memory bytes.")
+        self._sync_accessible_description()
 
     def set_session_active(self, active):
         self.session_active = bool(active)
+        self._sync_accessible_description()
         self.update()
 
     def set_accesses(self, accs):
@@ -1046,11 +1048,42 @@ class AccessMap(QWidget):
         # Keep an empty scatter out of the Tab order. It becomes a keyboard
         # control as soon as there is a point arrows can actually traverse.
         self.setFocusPolicy(Qt.StrongFocus if accs else Qt.NoFocus)
+        self._sync_accessible_description()
         self.update()
 
     def clear_selection(self):
         self.sel_n = None
+        self._sync_accessible_description()
         self.update()
+
+    def _sync_accessible_description(self):
+        navigation = (
+            "Use Left and Right or Up and Down, Page Up and Page Down, Home "
+            "and End to select an access; Enter opens its retirement and "
+            "physical bytes.")
+        if not self.accesses:
+            state = (
+                "No memory accesses captured."
+                if self.session_active else "No program loaded.")
+            self.setAccessibleDescription(f"{state} {navigation}")
+            return
+        loads = sum(1 for access in self.accesses if not access[3])
+        stores = len(self.accesses) - loads
+        selected = self._sel_idx()
+        context = (
+            f"{len(self.accesses)} accesses: {loads} loads and {stores} stores.")
+        if selected is not None:
+            access = self.accesses[selected]
+            physical = access[7] if len(access) > 7 else access[2]
+            context += (
+                f" Selected retirement n={int(access[0])}, cycle "
+                f"{int(access[1])}, {'store' if access[3] else 'load'}, "
+                f"effective address 0x{int(access[2]):08x}")
+            context += (
+                ", untranslated."
+                if physical is None else
+                f", physical address 0x{int(physical):08x}.")
+        self.setAccessibleDescription(f"{context} {navigation}")
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -1169,6 +1202,7 @@ class AccessMap(QWidget):
             return
         a = self.accesses[index]
         self.sel_n = int(a[0])
+        self._sync_accessible_description()
         self.update()
         self.pointSelected.emit(int(a[0]))
         physical = a[7] if len(a) > 7 else a[2]
