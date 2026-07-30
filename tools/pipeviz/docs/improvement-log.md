@@ -17,6 +17,12 @@ action whose label follows Assembly/C and is disabled in Visualizer,
 complementing Ctrl+S without stealing a debugger key. Acceptance dispatches the
 actual shortcut and verifies the chosen path and bytes.
 
+**Source selection-orientation audit:** after whole-line gutter dragging, the
+location control still looked like a single caret and provided no span
+confirmation. It now adds a compact `nL` suffix whenever selection exists and
+announces the expanded line count assistively. Selection changes refresh even
+when the caret position itself does not; 900×620 bounds remain covered.
+
 **Source delimiter audit:** C blocks and Assembly memory operands had no
 matching feedback, making nested edits unnecessarily error-prone. Moving beside
 `()`, `[]`, or `{}` now highlights both ends of a structurally valid pair and

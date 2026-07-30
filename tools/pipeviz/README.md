@@ -156,7 +156,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     the first code column and column zero. Source text/line numbers scale from
     8–24 pt with `Ctrl+-`/`Ctrl+=`; `Ctrl+0` restores 10 pt. A persistent
     one-based `Ln · Col` readout tracks the caret beside build/source status;
-    click it or press `Ctrl+G` to go to a validated line.
+    a compact `nL` suffix confirms the selected line span. Click the readout or
+    press `Ctrl+G` to go to a validated line.
     `Ctrl+wheel` also scales source text through the same 8–24 pt range.
     Moving beside `()`, `[]`, or `{}` highlights its matching pair; an
     unmatched delimiter is marked red, while delimiters inside comments and

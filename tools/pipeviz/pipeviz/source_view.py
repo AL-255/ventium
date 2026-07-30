@@ -1696,9 +1696,10 @@ class _CursorPositionLabel(QToolButton):
         self.setAccessibleName("Go to source line")
         self.setAutoRaise(True)
         self.setMinimumWidth(92)
-        self.setMaximumWidth(145)
+        self.setMaximumWidth(175)
         self.setStyleSheet("color:#8b949e;padding:2px 6px;text-align:right;")
         editor.cursorPositionChanged.connect(self.refresh)
+        editor.selectionChanged.connect(self.refresh)
         self.clicked.connect(self.go_to_line)
         go_shortcut = QShortcut(QKeySequence("Ctrl+G"), editor)
         go_shortcut.activated.connect(self.go_to_line)
@@ -1709,10 +1710,23 @@ class _CursorPositionLabel(QToolButton):
         cursor = self.editor.textCursor()
         line = cursor.blockNumber() + 1
         column = cursor.positionInBlock() + 1
-        self.setText(f"Ln {line} · Col {column}")
+        selection_lines = 0
+        if cursor.hasSelection():
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            first = self.editor.document().findBlock(start).blockNumber()
+            last = self.editor.document().findBlock(
+                max(start, end - 1)).blockNumber()
+            selection_lines = last - first + 1
+        selection_text = (
+            f" · {selection_lines}L" if selection_lines else "")
+        self.setText(f"Ln {line} · Col {column}{selection_text}")
         detail = (
             f"Cursor at source line {line}, column {column}. "
-            "Click or press Ctrl+G to go to a line.")
+            + (f"Selection spans {selection_lines} "
+               f"{'line' if selection_lines == 1 else 'lines'}. "
+               if selection_lines else "")
+            + "Click or press Ctrl+G to go to a line.")
         self.setToolTip(detail)
         self.setAccessibleDescription(detail)
 

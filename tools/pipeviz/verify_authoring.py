@@ -467,6 +467,9 @@ def scenario(app, outdir):
         assert editor.textCursor().selectionStart() == line_cursor.block().position()
         assert editor.textCursor().selectionEnd() == (
             drag_end_block.position() + len(drag_end_block.text()))
+        assert win.assembly.cursor_position.text().endswith(" · 4L")
+        assert "Selection spans 4 lines" in (
+            win.assembly.cursor_position.accessibleDescription())
         QTest.mousePress(
             editor._line_area, Qt.LeftButton, Qt.NoModifier,
             QPoint(gutter_x, drag_end_y))
@@ -477,12 +480,14 @@ def scenario(app, outdir):
         assert editor.textCursor().selectionStart() == line_cursor.block().position()
         assert editor.textCursor().selectionEnd() == (
             drag_end_block.position() + len(drag_end_block.text()))
+        assert win.assembly.cursor_position.text().endswith(" · 4L")
         QTest.mouseClick(
             editor._line_area, Qt.LeftButton, Qt.NoModifier,
             QPoint(gutter_x, line_y))
         selected_range = (
             editor.textCursor().selectionStart(),
             editor.textCursor().selectionEnd())
+        assert win.assembly.cursor_position.text().endswith(" · 1L")
         QTest.mouseClick(
             editor._line_area, Qt.LeftButton, Qt.NoModifier,
             QPoint(editor._line_area.width() // 2,
