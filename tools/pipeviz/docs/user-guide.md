@@ -291,6 +291,9 @@ _start:
 `Ctrl+B` and `Ctrl+Enter` both perform **Compile → Assembly**. Diagnostics name and
 highlight the failing line. Their first line is an actionable jump: focus the
 diagnostic and press Enter, or double-click it, to return to that editor line.
+If assembly/linking succeeds but the new RTL session cannot load or reset, the
+Assembly status stays amber and distinguishes that partial success: the run did
+not start and the previous Visualizer session was preserved transactionally.
 Tool output uses compact `Assembly:` and `C source:` locations in place of the
 internal generated-file path while retaining the original line and column.
 Successful GCC/GNU-as warnings still emit runnable Assembly, but use an amber

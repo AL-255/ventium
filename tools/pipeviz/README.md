@@ -169,7 +169,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     mnemonics, operands, descriptions, lanes, latency, and availability;
     Backspace edits the query and Delete clears it. `Ctrl+B` assembles without loading
     the backend; **Assemble + Run** builds a source-mapped
-    32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
+    32-bit ELF and executes it on the same RTL backend. A load/reset failure
+    reports the successful build but failed run persistently in amber while
+    preserving the previous Visualizer session. Selecting a Trace or
     Pipeline row highlights the exact responsible assembly line, and the
     Assembly-side status retains U/V identity or labels x87 as FP. Editing clears
     prior build diagnostics and PC links so green results never describe stale

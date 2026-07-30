@@ -1369,13 +1369,24 @@ class MainWindow(QMainWindow):
                 "C compiled — review or edit the generated assembly, then run")
 
     def _run_assembly(self, path, source_map):
-        if self.load_image(path):
-            self._assembly_source_map = dict(source_map)
-            self.pipeline.board.set_source_links(self._assembly_source_map)
-            self._update_assembly_tab()
-            self.workspace.setCurrentWidget(self.visualizer_tab)
+        if not self.load_image(path):
+            text = (
+                "Build succeeded · run failed to start · "
+                "previous Visualizer session preserved")
+            self.assembly.status.setText(text)
+            self.assembly.status.setStyleSheet(
+                "color:#e3b341;padding:2px;")
             self._notice(
-                f"Running authored assembly · {len(source_map)} source-linked instructions")
+                "Authored assembly built, but run failed to start — "
+                "previous session preserved")
+            return False
+        self._assembly_source_map = dict(source_map)
+        self.pipeline.board.set_source_links(self._assembly_source_map)
+        self._update_assembly_tab()
+        self.workspace.setCurrentWidget(self.visualizer_tab)
+        self._notice(
+            f"Running authored assembly · {len(source_map)} source-linked instructions")
+        return True
 
     # ---- image loading ----
     def on_open(self):

@@ -229,7 +229,10 @@ GNU Intel-syntax editor. <b>Assemble + Run</b> invokes GNU <code>as</code> and
 into the same real RTL backend as an opened program. Ctrl+Enter is the keyboard
 equivalent. A bare instruction snippet is automatically wrapped in
 <code>.intel_syntax</code>, <code>_start</code>, and a fall-through HLT; an
-explicit <code>_start:</code> is assembled exactly as written.</p>
+explicit <code>_start:</code> is assembled exactly as written. If the build
+succeeds but the new RTL session cannot load or reset, the amber Assembly status
+says the run did not start and that the previous Visualizer session was
+preserved transactionally.</p>
 <p>Ctrl+B assembles without loading the backend.</p>
 <h2>Files and safe replacement</h2>
 <p>Within either source workspace, Ctrl+N creates its runnable template, Ctrl+O

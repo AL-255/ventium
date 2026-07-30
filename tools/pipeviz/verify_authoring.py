@@ -1911,10 +1911,13 @@ def scenario(app, outdir):
         old_line = editor._execution_line
         old_tab = win.workspace.tabText(1)
         candidate = assemble_source("mov eax, 7\n")
+        win.workspace.setCurrentWidget(win.assembly)
+        settle(app)
         real_reset = win.on_reset
         win.on_reset = lambda: False
         try:
-            assert not win.load_image(candidate.elf_path)
+            assert not win._run_assembly(
+                candidate.elf_path, candidate.source_map)
         finally:
             win.on_reset = real_reset
         assert win.backend is old_backend
@@ -1922,9 +1925,18 @@ def scenario(app, outdir):
         assert win._assembly_source_map == old_map
         assert editor._execution_line == old_line
         assert win.workspace.tabText(1) == old_tab
+        assert win.workspace.currentWidget() is win.assembly
+        assert win.assembly.status.text() == (
+            "Build succeeded · run failed to start · "
+            "previous Visualizer session preserved")
+        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert win.assembly.status.accessibleDescription() == (
+            win.assembly.status.text())
+        assert "#e3b341" in win.assembly.status.styleSheet()
+        assert win.action_hint.text() == (
+            "Authored assembly built, but run failed to start — "
+            "previous session preserved")
 
-        win.workspace.setCurrentWidget(win.assembly)
-        settle(app)
         save(win, outdir, "02_assembly_source_link")
         assert not win.reload_action.isEnabled()
         pre_reload_backend = win.backend

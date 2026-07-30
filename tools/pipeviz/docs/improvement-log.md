@@ -9,6 +9,26 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — partial build/run success stays explicit
+
+**Recovery-state audit:** Assemble + Run could successfully produce an ELF and
+then fail while loading/resetting the replacement backend. Transactional load
+already preserved the old backend, bytes, map, marker, and tab identity, but
+after the modal error the persistent Assembly status still said only “Build
+succeeded,” which could make a user experiment against the wrong session.
+
+**Changes:** the authored-run bridge now returns success and handles the failed
+load branch explicitly. It leaves the user in Assembly, retains the complete
+old Visualizer session, and sets an amber status plus global notice saying the
+build succeeded, the run failed to start, and the previous session was
+preserved. Normal successful runs are unchanged.
+
+**Verification:** the existing transactional replacement regression now invokes
+the real authored-run bridge from Assembly, forces reset rejection, and requires
+the old backend/image/map/exact source marker/tab to survive together with the
+new persistent status, tooltip, accessible description, amber state, global
+notice, and unchanged workspace.
+
 ## July 30 continuation — searchable full opcode reference
 
 **Reference-discovery audit:** prefix completion was fast while typing an
