@@ -102,7 +102,9 @@ run of stall cells means one instruction held resources for several cycles.</p>
 <p>The compact stage board above the timeline is the live, pre-retirement view.
 Move over an occupied U, V, or FP cell to see its PC, then click it to mark the
 exact linked Assembly line. The Visualizer stays open and the Assembly tab gains
-<b>L…</b>; press Alt+A when you want to inspect or edit that line. A finished
+<b>L…</b>; press Alt+A when you want to inspect or edit that line. Without a
+pointer, Tab to the board's blue outline, choose an occupied lane with arrows
+or Home/End, and press Enter. A finished
 HLT remains an occupied, clickable cell so the stop location is explicit.
 <b>[paired]</b> means U/V issue now; <b>[blocked]</b> means a candidate pair is
 held by a current hazard. A grey <code>stall · …</code> cell names that held
@@ -134,7 +136,10 @@ current bridge records x87 on every retirement. A partial or legacy record
 without that snapshot shows explicit <code>x87 n/a</code> rows instead of stale
 values.</p>
 <p>The event selector beside ◀/▶ narrows <code>[</code>/<code>]</code>
-navigation to any event, mispredicts, stalls, I-cache fills, or page walks.</p>
+navigation to any event, mispredicts, stalls, I-cache fills, or page walks.
+The IPC/event strip is also a captured-history navigator: Tab to its blue
+outline, use Left/Right for one cycle, Page Up/Page Down for 64 cycles, or
+Home/End for the captured edges, then Enter to reopen the selected cycle.</p>
 <h2>Examples</h2>
 <ul>
  <li><b>Dual Fibonacci:</b> two independent recurrence chains let adjacent
@@ -163,6 +168,9 @@ explicit <code>_start:</code> is assembled exactly as written.</p>
 saves the current file. An asterisk on the Assembly or C tab marks unsaved
 changes. Save as appends <code>.s</code> or <code>.c</code> to a bare name
 when its typed-file filter is selected and reports the final filename globally.
+The lower-right source badge remains visible when a later Build/Compile replaces
+the transient status message; it names the saved file, built-in template, or
+C-compiler origin, and its tooltip gives the full path.
 Open reports that same real filename in both places; Assembly never labels an
 opened file as compiler-generated.
 New/Open, C-to-Assembly replacement, and Quit offer
@@ -289,6 +297,8 @@ fresh visible epoch at that point.</p>
  <tr><td><b>[ / ]</b></td><td>previous/next selected event class</td></tr>
  <tr><td><b>Ctrl+- / Ctrl+=</b></td><td>zoom the focused Pipeline cycle axis</td></tr>
  <tr><td><b>↑/↓, PgUp/PgDn, Home/End</b></td><td>traverse focused Pipeline rows</td></tr>
+ <tr><td><b>Board arrows + Enter</b></td><td>choose and open an occupied live U/V/FP source line</td></tr>
+ <tr><td><b>IPC arrows/Pg/Home/End</b></td><td>seek captured cycles; Enter reopens one</td></tr>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
  <tr><td><b>Enter / F3</b></td><td>next filtered retirement (Visualizer)</td></tr>
  <tr><td><b>Shift+F3</b></td><td>previous filtered retirement (Visualizer)</td></tr>
@@ -300,7 +310,8 @@ fresh visible epoch at that point.</p>
 <p>Click a trace/timing row to pin it; use the register strip's <b>Unpin</b>
 button or focused-Pipeline Escape with an empty filter to return to LIVE without executing.
 Shift-click a second timing row to
-measure cycle distance. Click the IPC sparkline to seek a cycle.</p>
+measure cycle distance. Click or keyboard-navigate the IPC sparkline to seek a
+cycle.</p>
 """),
 ))
 

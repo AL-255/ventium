@@ -970,8 +970,11 @@ def scenario_startup(app, outdir):
                             == "Reading the Pipeline View")
         win._guide_dialog.index.setCurrentRow(pipeline_row)
         settle(app)
-        assert "Stage glyphs" in win._guide_dialog.page.toPlainText()
-        assert "Ctrl+-" in win._guide_dialog.page.toPlainText()
+        pipeline_guide = win._guide_dialog.page.toPlainText()
+        assert "Stage glyphs" in pipeline_guide
+        assert "Ctrl+-" in pipeline_guide
+        assert "Tab to the board" in pipeline_guide
+        assert "Page Up/Page Down for 64 cycles" in pipeline_guide
         authoring_row = next(i for i in range(win._guide_dialog.index.count())
                              if win._guide_dialog.index.item(i).text()
                              == "Assembly and C workbenches")
@@ -979,6 +982,7 @@ def scenario_startup(app, outdir):
         settle(app)
         guide_text = win._guide_dialog.page.toPlainText()
         assert "Ctrl+Space" in guide_text and "Compile → Assembly" in guide_text
+        assert "source badge" in guide_text
         authoring_shot = os.path.join(
             outdir, "00_help_authoring_guide.png")
         assert win._guide_dialog.grab().save(authoring_shot)

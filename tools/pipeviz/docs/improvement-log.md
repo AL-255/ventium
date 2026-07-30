@@ -42,6 +42,13 @@ path and its colour/asterisk exposes unsaved state. Acceptance verifies opened,
 template-dirty, and generated-assembly identities while retaining the compact
 1280×800 layout.
 
+**Indexed-help synchronization audit:** the in-app Pipeline page still described
+the live board and IPC strip as pointer-only after their keyboard work landed,
+and the workbench page omitted the persistent source badge. The indexed guide
+and shortcut table now document board lane traversal, 1/64-cycle IPC seeking,
+Enter activation, and source identity. Help acceptance asserts those exact
+control contracts rather than merely checking the old section headings.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a
