@@ -914,6 +914,39 @@ def scenario(app, outdir):
         editor.completion.accept_current()
         assert editor.toPlainText() == ".loop: add "
 
+        # Pointer movement in the editor invalidates the popup's caret anchor.
+        # Dismiss it on a click or wheel instead of leaving a detached overlay.
+        editor.setPlainText("ad")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        QTest.mouseClick(
+            editor.viewport(), Qt.LeftButton, Qt.NoModifier,
+            editor.cursorRect().center())
+        assert not editor.completion.isVisible()
+        assert editor.toPlainText() == "ad"
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        completion_wheel = QWheelEvent(
+            QPoint(20, 20), QPoint(20, 20), QPoint(), QPoint(0, 120),
+            Qt.NoButton, Qt.ControlModifier, Qt.NoScrollPhase, False)
+        QApplication.sendEvent(editor.viewport(), completion_wheel)
+        assert completion_wheel.isAccepted()
+        assert not editor.completion.isVisible()
+        assert editor.font().pointSize() == 11
+        QTest.keyClick(editor, Qt.Key_0, Qt.ControlModifier)
+        editor.setPlainText(
+            "ad\n" + "\n".join(f"nop # {line}" for line in range(200)))
+        cursor = editor.textCursor()
+        cursor.setPosition(2)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        assert editor.verticalScrollBar().maximum() > 0
+        editor.verticalScrollBar().setValue(20)
+        assert not editor.completion.isVisible()
+
         # Pointer completion is deliberately two-stage: one click previews
         # without touching source; a double-click inserts and restores typing
         # focus to the non-activating tooltip's editor.

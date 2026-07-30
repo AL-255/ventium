@@ -30,6 +30,9 @@ assistive description, and leave source text/caret unchanged. Modified
 Ctrl+Home retains document navigation and closes the transient popup. Any
 whole-document replacement or non-completion edit now also closes stale
 matches; ordinary opcode typing rebuilds them immediately from current text.
+Editor clicks, wheel input, and scrollbar movement likewise dismiss completion
+before its visual anchor can drift, without affecting pointer browsing inside
+the popup.
 
 **Source delimiter audit:** C blocks and Assembly memory operands had no
 matching feedback, making nested edits unnecessarily error-prone. Moving beside

@@ -1277,6 +1277,8 @@ class AssemblyEditor(CodeEditor):
         self.completion = CompletionPopup(self)
         self.completion.accepted.connect(self._insert_completion)
         self.textChanged.connect(self.completion.hide)
+        self.verticalScrollBar().valueChanged.connect(self.completion.hide)
+        self.horizontalScrollBar().valueChanged.connect(self.completion.hide)
         self._completion_span = None
         self._completion_insertable = True
         self._completion_case_sample = ""
@@ -1397,6 +1399,14 @@ class AssemblyEditor(CodeEditor):
         elif self.completion.isVisible() and event.key() not in (
                 Qt.Key_Shift, Qt.Key_Control):
             self.completion.hide()
+
+    def mousePressEvent(self, event):
+        self.completion.hide()
+        super().mousePressEvent(event)
+
+    def wheelEvent(self, event):
+        self.completion.hide()
+        super().wheelEvent(event)
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)

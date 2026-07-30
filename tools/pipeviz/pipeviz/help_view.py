@@ -271,6 +271,8 @@ the cursor is in an opcode slot;
 elsewhere the full catalogue is safe, reference-only help. GNU as
 semicolons separate statements, and completion follows the opcode in each
 statement while ignoring separators/comment markers inside quoted data.
+Clicking or scrolling the editor dismisses the popup so it never remains
+detached from its caret anchor; its own list remains pointer-scrollable.
 Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
 style, including when completion replaces text on both sides of the cursor.
 Digits keep refining names such as <code>cmpxchg8b</code>, while Backspace and
