@@ -100,6 +100,9 @@ an explicit Run/F5. Opening a program/snapshot chooser or Help also pauses
 before obscuring live feedback, and cancel/close never auto-resumes. Choose an
 event class (any, mispredict, stall, I-fill, or page-walk);
 `[` and `]` jump among only those visible events.
+The compact status row prioritizes cycle/state/EIP before performance and cache
+groups so the execution point survives narrow windows. Hover the status or
+last-action text for its complete untruncated message.
 The upper U/V/FP stage board is live: hover an occupied cell to see its lane and
 PC, then click it to highlight that in-flight instruction's linked Assembly
 line. From the keyboard, Tab to the blue-outlined board, use arrows or Home/End

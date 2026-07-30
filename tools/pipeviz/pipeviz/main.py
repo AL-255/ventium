@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self._on_run_tick)
         self.notice_timer = QTimer(self)
         self.notice_timer.setSingleShot(True)
-        self.notice_timer.timeout.connect(lambda: self.action_hint.setText(""))
+        self.notice_timer.timeout.connect(self._clear_notice)
         self._running = False
         self._set_transport_enabled(False)
         self._sync_config_enabled()
@@ -648,6 +648,7 @@ class MainWindow(QMainWindow):
         sb = QToolBar("status"); sb.setMovable(False); self.addToolBar(sb)
         self.status_toolbar = sb
         self.status_lbl = QLabel("  no image loaded  ")
+        self.status_lbl.setAccessibleName("Simulation status")
         # Let the status consume the row's spare width while retaining the
         # high-value left-hand metrics. QToolBar can shrink this below its rich
         # text hint, so it no longer forces the whole window wider.
@@ -656,6 +657,7 @@ class MainWindow(QMainWindow):
         f = QFont("monospace"); f.setStyleHint(QFont.Monospace); self.status_lbl.setFont(f)
         sb.addWidget(self.status_lbl)
         self.action_hint = QLabel("")
+        self.action_hint.setAccessibleName("Last action")
         self.action_hint.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         self.action_hint.setStyleSheet("color:#8b949e;padding-left:12px;")
         sb.addWidget(self.action_hint)
@@ -772,7 +774,14 @@ class MainWindow(QMainWindow):
 
     def _notice(self, text, ms=3500):
         self.action_hint.setText(text)
+        self.action_hint.setToolTip(text)
+        self.action_hint.setAccessibleDescription(text)
         self.notice_timer.start(ms)
+
+    def _clear_notice(self):
+        self.action_hint.setText("")
+        self.action_hint.setToolTip("")
+        self.action_hint.setAccessibleDescription("")
 
     def _show_shortcuts(self):
         self._show_guide("Shortcuts")
@@ -1259,6 +1268,8 @@ class MainWindow(QMainWindow):
             self.reset_btn.setToolTip(previous["reset_tip"])
             self.reset_btn.setStyleSheet(previous["reset_style"])
             self.action_hint.setText(previous["notice"])
+            self.action_hint.setToolTip(previous["notice"])
+            self.action_hint.setAccessibleDescription(previous["notice"])
             self._sync_config_enabled()
             self._sync_workspace_file_actions()
             return False
@@ -1737,8 +1748,11 @@ class MainWindow(QMainWindow):
 
     def _refresh_status(self, s=None):
         if s is None:
-            self.status_lbl.setText(
-                "  no image loaded — Open a program or choose File → Open example  ")
+            empty = "no image loaded — Open a program or choose File → Open example"
+            self.status_lbl.setText(f"  {empty}  ")
+            description = empty[0].upper() + empty[1:]
+            self.status_lbl.setToolTip(description)
+            self.status_lbl.setAccessibleDescription(description)
             return
         name = self.backend.state_name(s.state)
         raw_ret = self.backend.retire_count()
@@ -1774,6 +1788,7 @@ class MainWindow(QMainWindow):
             f"<span style='color:#8b949e'>{image}</span>",
             chip("cyc", s.core_cyc),
             f"<span style='color:#79c0ff'>{name}</span> <span style='color:#6e7681'>{mode}</span>",
+            chip("eip", f"0x{s.eip:08x}"),
             chip("ret", ret) + "&nbsp;&nbsp;" + chip("IPC", f"{ipc:.2f}")
                 + "&nbsp;&nbsp;" + chip("pair(win)" if windowed else "pair",
                                         f"{prate:.0f}%")
@@ -1782,7 +1797,6 @@ class MainWindow(QMainWindow):
             chip("I$", f"{icn}/256") + "&nbsp;&nbsp;" + chip("D$", f"{dcn}/256")
                 + "&nbsp;&nbsp;" + chip("fills", st["fill"])
                 + "&nbsp;&nbsp;" + chip("walks", st["walk"], st["walk"] > 0),
-            chip("eip", f"0x{s.eip:08x}"),
         ]
         html = "&nbsp;" + sep.join(groups)
         if self.backend.is_done():
@@ -1790,11 +1804,21 @@ class MainWindow(QMainWindow):
         if s.cpu_hung:
             html += " <span style='color:#f85149;font-weight:bold'>[HUNG]</span>"
         self.status_lbl.setText(html)
-        self.status_lbl.setToolTip(
+        scope = (
             "pair and mispredict cover the latest Pipeline cycle window; "
             "ret and IPC cover the current program/restore session"
             if windowed else
             "ret, IPC, pair, and mispredict cover the captured session")
+        details = (
+            f"{image}\ncycle {int(s.core_cyc)} · {name} {mode} · "
+            f"EIP 0x{int(s.eip):08x}\n"
+            f"ret {ret} · IPC {ipc:.2f} · "
+            f"{'pair(win)' if windowed else 'pair'} {prate:.0f}% · "
+            f"{'mispred(win)' if windowed else 'mispred'} {st['mispred']}\n"
+            f"I$ {icn}/256 · D$ {dcn}/256 · fills {st['fill']} · "
+            f"walks {st['walk']}\n{scope}")
+        self.status_lbl.setToolTip(details)
+        self.status_lbl.setAccessibleDescription(details)
 
 
 def main():

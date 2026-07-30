@@ -1053,7 +1053,7 @@ def scenario_startup(app, outdir):
         QTest.keyClick(win._guide_dialog.index, Qt.Key_Escape)
         settle(app)
         assert not win._guide_dialog.isVisible()
-        win.action_hint.clear()  # keep the startup reference capture transient-free
+        win._clear_notice()  # keep the startup reference capture transient-free
         save_shot(app, win, outdir, "00_startup")
         branch_example = next(
             action for action in win._examples_menu.actions()
@@ -2111,6 +2111,14 @@ def scenario_layout(app, outdir):
             f"{win.trace.tbl.columnWidth(6)}px")
         assert win.tables.width() >= 570
         assert win.status_lbl.width() >= 900 and "IPC" in win.status_lbl.text()
+        status_text = win.status_lbl.text()
+        assert status_text.index("eip") < status_text.index("ret")
+        assert "EIP 0x" in win.status_lbl.toolTip()
+        assert "I$ " in win.status_lbl.toolTip()
+        assert win.status_lbl.accessibleName() == "Simulation status"
+        assert win.status_lbl.accessibleDescription() == win.status_lbl.toolTip()
+        assert win.action_hint.accessibleName() == "Last action"
+        assert win.action_hint.toolTip() == win.action_hint.text()
         assert win.trace.tbl.verticalHeader().defaultSectionSize() == 22
 
         # Pin state must remain unmistakable on every compact register page.

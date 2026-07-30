@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Compact status-priority audit:** a long pin/seek message squeezed the status
+row from the right, and EIP was the last group, so the current PC disappeared
+first at 1280px. Cycle/state/EIP now precede performance and cache groups. Both
+status and last-action labels expose complete plain-text tooltips plus accessible
+descriptions, including metrics that visual elision may hide; the action tooltip
+clears with its transient label. Compact acceptance locks order and full text.
+
 **Instruction-step wording audit:** the backend returns elapsed clocks for an
 Insn step, but the action line labeled that number “instruction boundary,”
 yielding claims such as “Advanced 7 instruction boundary.” Insn feedback now
