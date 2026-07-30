@@ -283,7 +283,9 @@ LOOP/JCXZ entries name the counter and ZF test. x87 descriptions distinguish
 reverse operands, pops, conversions, constants, tag/TOP effects, and WAIT
 forms. String/I/O-string entries name width and DS:SI/ES:DI/port direction,
 and flag/prefix entries state their exact effect. Their miniature preview
-shows the microcode/memory path rather than a generic ALU cell. Normal user
+shows the microcode/memory path rather than a generic ALU cell. Common integer
+forms distinguish carry/borrow, signedness, bit direction, shifts/rotates, and
+stack/flag order. Normal user
 availability is neutral; mode- or build-gated operations say so explicitly in
 amber. Each list row shows mnemonic, pipe class, and operands without repeating
 the mnemonic; the detail pane shows the complete signature. Regression covers

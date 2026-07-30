@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — form-specific integer completion help
+
+**Everyday-opcode audit:** the generated Fibonacci loop's `dec` preview still
+said “Increment/decrement,” hiding its carry-preserving behavior. ADC/SBB,
+MOVSX/MOVZX, signed/unsigned multiply/divide, bit-test mutations, shifts,
+rotates, and stack/flag transfers had the same family-level ambiguity.
+
+**Changes:** 44 common integer mnemonics now name their exact operation:
+carry/borrow inputs, INC/DEC carry preservation, extension and arithmetic
+signedness, implicit accumulator pairs, least/highest bit scan, BT/BTC/BTR/BTS
+mutation, zero/sign/carry shift behavior, double-shift source direction, and
+16/32-bit stack and flag order.
+
+**Verification:** catalogue acceptance samples every form family and forbids
+all 15 former grouped descriptions. Popup interaction selects the same `dec`
+used by the Fibonacci experiment, checks its carry-preserving description and
+UV-pairable preview, and captures the result.
+
 ## July 30 continuation — truthful string and flag completion
 
 **String/flag metadata audit:** MOVS/STOS, LODS/SCAS, and INS/OUTS pairs shared

@@ -201,6 +201,55 @@ def verify_catalog():
         "Read or write an I/O port.",
     }
     assert not any(info.description in obsolete_string_help for info in CATALOG)
+    expected_integer_details = {
+        "movsx": "Sign-extend",
+        "movzx": "Zero-extend",
+        "adc": "source and carry flag",
+        "sbb": "carry/borrow",
+        "dec": "preserving the carry flag",
+        "not": "without changing flags",
+        "mul": "Unsigned-multiply",
+        "imul": "Signed multiply",
+        "div": "Unsigned-divide",
+        "idiv": "Signed-divide",
+        "cwde": "AX into EAX",
+        "cdq": "EDX:EAX",
+        "bsf": "least-significant set",
+        "bsr": "most-significant set",
+        "btc": "then complement",
+        "btr": "then clear",
+        "bts": "then set",
+        "shr": "fill high bits with zero",
+        "sar": "replicate the sign bit",
+        "rcl": "through CF",
+        "shrd": "pulling high-order bits",
+        "push": "Decrement the stack pointer",
+        "pop": "increment the stack pointer",
+        "pushad": "original ESP",
+        "popad": "skip ESP",
+        "pushfd": "32-bit EFLAGS",
+        "sahf": "SF, ZF, AF, PF, and CF",
+    }
+    for mnemonic, detail in expected_integer_details.items():
+        assert detail in instruction_info(mnemonic).description
+    obsolete_integer_help = {
+        "Sign-extend or zero-extend a byte/word into a register.",
+        "Add/subtract with carry. May lead a pair but cannot occupy V.",
+        "Increment/decrement while preserving carry.",
+        "Two's-complement negate or bitwise complement.",
+        "Integer multiply; IMUL also has two- and three-operand forms.",
+        "Unsigned/signed divide of the implicit accumulator pair.",
+        "Sign-extend AL/AX/EAX into the wider implicit accumulator pair.",
+        "Find the first/last set bit.",
+        "Test, complement, reset, or set a selected bit.",
+        "Shift or rotate by 1, CL, or an immediate. Immediate forms may lead U/V.",
+        "Double-precision shift using two operands.",
+        "Push or pop a register, immediate, segment, or memory value.",
+        "Push or pop the complete general-register set.",
+        "Push or pop architectural flags.",
+        "Transfer selected status flags to/from AH.",
+    }
+    assert not any(info.description in obsolete_integer_help for info in CATALOG)
     obsolete_condition_help = {
         "Conditional branch selected by EFLAGS.",
         "Assembler alias for a conditional branch selected by EFLAGS.",
@@ -1147,6 +1196,16 @@ def scenario(app, outdir):
         assert editor.completion.info.availability.text() == (
             "Availability · user")
         save(editor.completion, outdir, "01_opcode_string_popup")
+        dec_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic
+            == "dec")
+        editor.completion.list.setCurrentRow(dec_row)
+        settle(app)
+        assert editor.completion.info.description.text() == (
+            "Subtract one from the destination while preserving the carry flag.")
+        assert editor.completion.info.preview.info.pipe == "UV"
+        save(editor.completion, outdir, "01_opcode_fibonacci_popup")
         editor.completion.list.setCurrentRow(add_row)
         reference_source = editor.toPlainText()
         editor.completion.accept_current()

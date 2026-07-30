@@ -287,6 +287,9 @@ out reverse arithmetic direction, pop count, integer conversion, the selected
 constant, stack/tag effect, and whether a control form includes WAIT. String
 and I/O-string entries identify element width and DS:SI/ES:DI/port direction,
 while flag and REP/LOCK prefixes name the exact state they change or test.
+Integer descriptions distinguish carry versus borrow, signed versus unsigned
+multiply/divide/extension, bit-test mutation, shift/rotate direction, and the
+exact register/flag stack order.
 Ordinary `user` availability is neutral; system, build-flag, SMM, and
 co-simulation restrictions turn amber so the color signals a real constraint.
 The completion list does not repeat the mnemonic inside its operand form; the
