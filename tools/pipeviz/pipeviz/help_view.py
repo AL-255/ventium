@@ -14,6 +14,9 @@ PAGES = OrderedDict((
 <p>Pipeviz runs the real verilated Ventium core. Open a raw image or 32-bit x86
 ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
 <b>Step N</b>, or <b>Run</b>.</p>
+<p>Entering Assembly or C automatically pauses continuous Run before the
+transport toolbar is hidden. Returning to Visualizer never resumes without an
+explicit F5/Run action.</p>
 <ol>
  <li>Open or drop a program. ELF entry and segments are automatic. The
  <b>File → Open example</b> menu rescans and exposes the built verification

@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Hidden-execution audit:** switching to Assembly/C hid transport and status
+while the Run timer continued advancing the model in the background. Entering a
+source workspace now pauses continuous execution synchronously, updates the Run
+control, and consumes no additional clock; returning to Visualizer requires an
+explicit resume. The close-cancel/run acceptance now transitions directly into
+Assembly and locks timer, cycle, control text, and feedback together.
+
 **External-load visibility audit:** File → Open example and program drops were
 available from Assembly/C, but a successful load replaced the backend while
 leaving all transport/status chrome hidden behind the source editor. Successful

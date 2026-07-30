@@ -884,6 +884,11 @@ class MainWindow(QMainWindow):
     def _workspace_changed(self, index):
         """Plain debugger keys must remain ordinary text in source editors."""
         visualizer = index == 0
+        if not visualizer and getattr(self, "_running", False):
+            # Never let the model advance invisibly after every transport and
+            # status control has been hidden by an authoring workspace.
+            self.stop_run()
+            self._notice("Paused continuous execution before entering source editor")
         for action in self._transport_shortcut_actions:
             action.setEnabled(visualizer)
         for shortcut in self._debug_shortcuts:

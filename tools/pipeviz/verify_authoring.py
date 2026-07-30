@@ -711,7 +711,18 @@ def scenario(app, outdir):
             QMessageBox.warning = real_warning
         assert not close_event.isAccepted()
         assert win._running and win.timer.isActive()
-        win.stop_run()
+        # Moving into a source editor hides every transport/status control, so
+        # continuous execution must pause synchronously rather than running
+        # invisibly behind the authoring workspace.
+        cycle_before_authoring = win.backend.cycle_count()
+        win.workspace.setCurrentWidget(win.assembly)
+        settle(app)
+        assert not win._running and not win.timer.isActive()
+        assert win.backend.cycle_count() == cycle_before_authoring
+        assert win.run_btn.text().strip() == "Run"
+        assert "Paused continuous execution" in win.action_hint.text()
+        win.workspace.setCurrentWidget(win.visualizer_tab)
+        settle(app)
         run_to_stop(win)
         assert win.backend.state().gpr[0] == 55
 
