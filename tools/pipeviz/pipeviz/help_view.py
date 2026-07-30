@@ -330,7 +330,8 @@ the cursor is in an opcode slot;
 elsewhere the full catalogue is safe, reference-only help. Type there to search
 mnemonics, operands, descriptions, lanes, latency, and availability without
 editing source; Backspace edits the query and Delete clears it. Zero matches
-remain visible as an explicit empty result.
+remain visible as an explicit empty result. Exact mnemonics rank first, followed
+by mnemonic prefixes/signatures and then broader metadata matches.
 An unsupported opcode prefix closes the popup and produces a specific amber
 status notice without creating a build diagnostic. GNU as
 semicolons separate statements, and completion follows the opcode in each

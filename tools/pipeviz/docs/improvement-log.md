@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — direct opcode hits rank first
+
+**Search-order audit:** reference search correctly found behavior and metadata,
+but retained global alphabetical order. Searching `add` therefore selected
+`aaa` first because its description mentions addition, with the exact `add`
+opcode third; the rich preview initially answered a less relevant question.
+
+**Changes:** nonempty reference results now rank an exact mnemonic first,
+followed by mnemonic prefixes, signature hits, and broader metadata matches,
+with deterministic mnemonic ordering inside each tier. Filtering coverage and
+source-safe keyboard behavior are unchanged.
+
+**Verification:** acceptance clears a long/empty query, searches `add`, requires
+all fourteen metadata matches, the exact opcode in row zero, its `add` pipeline
+preview selected immediately, and unchanged directive source before clearing
+back to the complete catalogue.
+
 ## July 30 continuation — blocked close retains its reason
 
 **Prompt-outcome audit:** selecting Save in a dirty-source prompt and then

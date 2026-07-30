@@ -1265,6 +1265,20 @@ class CompletionPopup(QFrame):
                 info for info in CATALOG
                 if all(term in info.search_text for term in terms)
             ]
+            query = " ".join(terms)
+            if query:
+                # Discovery searches span rich metadata, but an exact/direct
+                # opcode should remain the obvious first answer.
+                def relevance(info):
+                    signature = info.signature.lower()
+                    return (
+                        0 if info.mnemonic == query else
+                        1 if info.mnemonic.startswith(query) else
+                        2 if all(term in signature for term in terms) else
+                        3,
+                        info.mnemonic,
+                    )
+                matches.sort(key=relevance)
         self.list.clear()
         for info in matches:
             item = QListWidgetItem(

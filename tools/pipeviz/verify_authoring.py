@@ -1363,6 +1363,15 @@ def scenario(app, outdir):
                 editor.completion.frameGeometry()))
         QTest.keyClick(editor, Qt.Key_Delete)
         assert editor.completion.list.count() == len(CATALOG)
+        QTest.keyClicks(editor, "add")
+        settle(app)
+        assert editor.toPlainText() == reference_source
+        assert editor.completion.list.count() == 14
+        assert (
+            editor.completion.list.item(0).data(Qt.UserRole).mnemonic
+            == "add")
+        assert editor.completion.info.preview.info.mnemonic == "add"
+        QTest.keyClick(editor, Qt.Key_Delete)
         names = {
             editor.completion.list.item(i).data(Qt.UserRole).mnemonic
             for i in range(editor.completion.list.count())

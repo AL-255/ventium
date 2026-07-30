@@ -167,6 +167,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     while Home/End jump to catalogue bounds. Outside an opcode slot, the safe
     reference catalogue supports non-destructive type-to-search across
     mnemonics, operands, descriptions, lanes, latency, and availability;
+    exact mnemonic/prefix/signature hits rank ahead of broader metadata.
     Backspace edits the query and Delete clears it. `Ctrl+B` assembles without loading
     the backend; **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. A load/reset failure

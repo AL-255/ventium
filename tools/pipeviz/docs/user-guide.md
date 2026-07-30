@@ -336,7 +336,9 @@ accepting an entry cannot corrupt non-opcode text. In that reference mode,
 typing searches across mnemonics, operands, descriptions, lane classes,
 latencies, and availability without changing the editor; Backspace edits the
 query and Delete clears it. A zero-match query keeps the popup open with an
-explicit empty result instead of silently disappearing.
+explicit empty result instead of silently disappearing. Exact mnemonic matches
+rank first, then mnemonic prefixes and signature hits, before broader metadata
+matches.
 Clicking or scrolling the source editor dismisses completion so it cannot
 remain detached from the caret; scrolling inside the popup still browses its
 list. At edge carets the rich popup flips above and clamps within the Pipeviz
