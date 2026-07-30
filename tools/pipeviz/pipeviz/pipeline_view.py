@@ -63,18 +63,25 @@ class StageBoard(QWidget):
         self._lane_pcs = {}
         self._lane_rects = []
         self._kbd_lane = None
+        self._source_link_available = False
         self._status = "no image loaded"
         self._statecol = _DIM
         self._sync_accessible_description()
 
     def _sync_accessible_description(self):
-        navigation = (
-            "Occupied lanes can be clicked, or use arrow keys to choose one "
-            "and Enter to mark its linked Assembly line. Double-click opens "
-            "that line in the Assembly workspace.")
+        if self._source_link_available:
+            navigation = (
+                "Occupied lanes can be clicked, or use arrow keys to choose "
+                "one and Enter to mark its linked Assembly line. Double-click "
+                "opens that line in the Assembly workspace.")
+        else:
+            navigation = (
+                "Occupied lanes can still be clicked or selected with arrow "
+                "keys to inspect their lane and PC. No authored Assembly "
+                "source map is active for line navigation.")
         if not self._lane_pcs:
             self.setAccessibleDescription(
-                f"{self._status}. No occupied source-linked lane. {navigation}")
+                f"{self._status}. No occupied live lane. {navigation}")
             return
         occupied = []
         for lane in ("U", "V", "FP"):
@@ -89,6 +96,12 @@ class StageBoard(QWidget):
         self.setAccessibleDescription(
             f"{self._status}. Occupied " + "; ".join(occupied)
             + f".{selected} {navigation}")
+
+    def set_source_link_available(self, available):
+        self._source_link_available = bool(available)
+        self.unsetCursor()
+        self.setToolTip("")
+        self._sync_accessible_description()
 
     def _blank(self):
         return {"U": ([], ""), "V": ([], ""), "FP": ([], "")}
@@ -369,10 +382,16 @@ class StageBoard(QWidget):
             self.setToolTip("")
         else:
             lane, pc = hit
-            self.setCursor(Qt.PointingHandCursor)
+            if self._source_link_available:
+                self.setCursor(Qt.PointingHandCursor)
+                action = (
+                    "Click to mark its linked Assembly line; "
+                    "double-click to open it")
+            else:
+                self.unsetCursor()
+                action = "No authored Assembly source map is active"
             self.setToolTip(
-                f"{lane} in-flight instruction · PC 0x{pc:08x}\n"
-                "Click to mark its linked Assembly line; double-click to open it")
+                f"{lane} in-flight instruction · PC 0x{pc:08x}\n{action}")
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):

@@ -1671,6 +1671,7 @@ def scenario(app, outdir):
                    for action in win._transport_shortcut_actions)
         assert win.image_kind == "ELF"
         assert win._assembly_source_map == result.source_map
+        assert win.pipeline.board._source_link_available
         assert win.assembly.mapping_current
         assert win.workspace.tabText(1) == "Assembly *"
 
@@ -1911,6 +1912,7 @@ def scenario(app, outdir):
         assert "#8b949e" in win.assembly.diagnostics.styleSheet()
         assert editor._execution_line is None
         assert not win._assembly_source_map
+        assert not board._source_link_available
         assert win.workspace.tabText(1) == "Assembly *"
         select_trace_pc(win, pc)
         settle(app)

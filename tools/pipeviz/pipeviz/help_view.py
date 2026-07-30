@@ -143,7 +143,10 @@ pointer, Tab to the board's blue outline, choose an occupied lane with arrows
 or Home/End, and press Enter. A finished
 HLT remains an occupied, clickable cell so the stop location is explicit.
 Double-click an occupied lane to mark and open its Assembly line in one
-gesture. The live source mark describes this clock only: Clock, Insn, Step N, Run, and
+gesture. For an externally loaded ELF or flat image, lane and PC inspection
+still works, but the board explicitly says no authored Assembly source map is
+active instead of promising an unavailable source jump. The live source mark
+describes this clock only: Clock, Insn, Step N, Run, and
 Apply + Reset clear it before execution moves, while retaining the assembled
 address map for the next selection.
 <b>[paired]</b> means U/V issue now; <b>[blocked]</b> means a candidate pair is

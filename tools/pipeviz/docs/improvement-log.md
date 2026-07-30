@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — live source affordance reflects map state
+
+**Affordance-honesty audit:** every occupied live lane advertised
+click/double-click Assembly navigation, even when a normal external
+ELF/flat-image session had no authoring source map. The eventual “no linked
+line” notice was safe but made the hover promise misleading.
+
+**Changes:** the stage board now tracks source-map availability separately
+from occupied-lane inspection. Authored runs expose the pointer, mark/open
+instructions, and assistive navigation help; external loads, snapshots, and
+source edits retain lane/PC inspection but say no authored Assembly map is
+active. Successful authored loads enable the affordance only after their DWARF
+map is installed; transactional load failure cannot disturb the old state.
+
+**Verification:** external branch acceptance requires the unavailable-map
+description with real U/V lanes. Authoring acceptance requires availability
+after Assemble + Run and its removal as soon as source edits invalidate the
+map, while existing single/double-click exact-line tests remain in force.
+
 ## July 30 continuation — double-click opens a live source line
 
 **Source-navigation audit:** single-clicking a live U/V/FP lane correctly

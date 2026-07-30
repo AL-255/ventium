@@ -132,6 +132,9 @@ to choose an occupied lane, and press Enter. The Visualizer remains in
 place and the Assembly tab gains `L…`; use `Alt+A` to inspect the marked line.
 Double-click an occupied lane when you want to mark and open its Assembly line
 in one gesture.
+For an externally loaded ELF or flat image, the lane and PC remain available
+for inspection, but the board explicitly says that no authored Assembly source
+map is active instead of promising a source jump it cannot provide.
 That live mark describes the current clock only, so Clock, Insn, Step N, Run,
 and Apply + Reset clear it before the machine moves. The assembled address map
 stays active, and clicking the next live or retired instruction creates a fresh

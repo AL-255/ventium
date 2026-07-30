@@ -1000,7 +1000,7 @@ def scenario_startup(app, outdir):
         assert win.pipeline.spark.backend is None
         assert win.pipeline.board.focusPolicy() == Qt.NoFocus
         assert win.pipeline.spark.focusPolicy() == Qt.NoFocus
-        assert "No occupied source-linked lane" in (
+        assert "No occupied live lane" in (
             win.pipeline.board.accessibleDescription())
         assert "No program loaded" in (
             win.pipeline.spark.accessibleDescription())
@@ -1703,6 +1703,18 @@ def scenario_branch_transport(app, outdir):
         assert "S_PIPE" in board_description
         assert f"V: PC 0x{v_pc:08x}, jne " in board_description
         assert "Keyboard lane U selected" in board_description
+        assert "No authored Assembly source map" in board_description
+        assert not win.pipeline.board._source_link_available
+        v_rect = next(
+            rect for rect, lane, _pc in win.pipeline.board._lane_rects
+            if lane == "V")
+        QTest.mouseMove(win.pipeline.board, v_rect.center())
+        settle(app)
+        assert f"PC 0x{v_pc:08x}" in win.pipeline.board.toolTip()
+        assert "No authored Assembly source map" in (
+            win.pipeline.board.toolTip())
+        assert "linked Assembly line" not in win.pipeline.board.toolTip()
+        assert win.pipeline.board.cursor().shape() == Qt.ArrowCursor
         lifecycles = win.pipeline.konata.plot.insns
         assert min(item["c0"] for item in lifecycles) >= 1
         assert max(item["c1"] for item in lifecycles) <= live.core_cyc
