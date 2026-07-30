@@ -11,7 +11,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QTextCursor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import (
+    QApplication, QFileDialog, QInputDialog, QMessageBox, QWidget,
+)
 
 import pipeviz.source_view as source_module
 from pipeviz.isa_catalog import CATALOG, MNEMONICS, instruction_info
@@ -265,9 +267,10 @@ def scenario(app, outdir):
             win.assembly.status.text())
         assert win.assembly.cursor_position.text() == "Ln 1 · Col 1"
         assert win.assembly.cursor_position.accessibleName() == (
-            "Source cursor position")
+            "Go to source line")
         assert win.assembly.cursor_position.accessibleDescription() == (
-            "Cursor at source line 1, column 1")
+            "Cursor at source line 1, column 1. "
+            "Click or press Ctrl+G to go to a line.")
         assert win.assembly.source_badge.accessibleName() == "Assembly source identity"
         assert win.assembly.source_badge.accessibleDescription() == (
             "Source origin built-in template; not saved. No unsaved changes.")
@@ -498,6 +501,30 @@ def scenario(app, outdir):
         assert win.assembly.cursor_position.text().startswith("Ln 5 · Col ")
         assert "source line 5" in (
             win.assembly.cursor_position.accessibleDescription())
+        real_get_int = QInputDialog.getInt
+        answers = iter(((2, True), (6, True), (6, False)))
+        QInputDialog.getInt = staticmethod(
+            lambda *_args, **_kwargs: next(answers))
+        try:
+            QTest.keyClick(editor, Qt.Key_G, Qt.ControlModifier)
+            settle(app)
+            assert editor.textCursor().blockNumber() + 1 == 2
+            assert editor.textCursor().positionInBlock() == 0
+            assert win.assembly.cursor_position.text() == "Ln 2 · Col 1"
+            assert app.focusWidget() is editor
+            QTest.mouseClick(
+                win.assembly.cursor_position, Qt.LeftButton)
+            settle(app)
+            assert editor.textCursor().blockNumber() + 1 == 6
+            assert win.assembly.cursor_position.text() == "Ln 6 · Col 1"
+            position_before_cancel = editor.textCursor().position()
+            QTest.mouseClick(
+                win.assembly.cursor_position, Qt.LeftButton)
+            settle(app)
+            assert editor.textCursor().position() == position_before_cancel
+            assert app.focusWidget() is editor
+        finally:
+            QInputDialog.getInt = staticmethod(real_get_int)
         save(win, outdir, "00_assembly_workbench")
         win.resize(900, 620)
         settle(app)
@@ -1352,7 +1379,7 @@ def scenario(app, outdir):
         assert win.c_source.status.accessibleDescription() == (
             win.c_source.status.text())
         assert win.c_source.cursor_position.accessibleName() == (
-            "Source cursor position")
+            "Go to source line")
         assert win.c_source.cursor_position.text().startswith("Ln ")
         assert "column" in (
             win.c_source.cursor_position.accessibleDescription())

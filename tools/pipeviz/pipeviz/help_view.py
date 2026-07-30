@@ -241,8 +241,10 @@ origin plus not-saved and unsaved-change state.</p>
 <p>The adjacent Assembly/C status preserves its full build, stale-map, or
 PC/line message in both a tooltip and accessible description if the compact
 label is clipped. A persistent one-based <b>Ln · Col</b> readout beside it
-tracks the active source caret independently of transient build messages. Both
-workbenches remain usable at the tested 900×620 compact window size.</p>
+tracks the active source caret independently of transient build messages. Click
+that readout or press Ctrl+G to enter a validated line number and return focus
+to the centered editor line. Both workbenches remain usable at the tested
+900×620 compact window size.</p>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
 backward, and Escape closes the search. It is a case-insensitive literal search;
@@ -418,6 +420,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
  <tr><td><b>Ctrl+/</b></td><td>toggle Assembly/C line comments</td></tr>
+ <tr><td><b>Ctrl+G</b></td><td>go to a source line in Assembly/C</td></tr>
  <tr><td><b>Home / Shift+Home</b></td><td>in a source editor, toggle first code column/column zero, optionally selecting</td></tr>
  <tr><td><b>Ctrl+Tab / Ctrl+Shift+Tab</b></td><td>leave an Assembly or C editor without inserting indentation</td></tr>
  <tr><td><b>Ctrl+F, F3 / Shift+F3</b></td><td>find text in this guide topic</td></tr>

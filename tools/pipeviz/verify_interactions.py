@@ -1215,6 +1215,7 @@ def scenario_startup(app, outdir):
         assert "Ctrl+Space" in guide_text and "Compile → Assembly" in guide_text
         assert "Ctrl+Tab" in guide_text and "Ctrl+Shift+Tab" in guide_text
         assert "Ctrl+/" in guide_text
+        assert "Ctrl+G" in guide_text
         assert "close a live completion popup" in guide_text
         assert "source badge" in guide_text
         assert "press Enter, or double-click it" in guide_text

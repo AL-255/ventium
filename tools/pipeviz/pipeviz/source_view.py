@@ -16,8 +16,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QSplitter,
-    QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy,
+    QSplitter, QTextEdit, QToolButton, QVBoxLayout, QWidget, QInputDialog,
 )
 
 from .isa_catalog import CATALOG, MNEMONICS, instruction_info
@@ -1500,18 +1500,22 @@ class _StatusLabel(QLabel):
         self.setAccessibleDescription(text)
 
 
-class _CursorPositionLabel(QLabel):
-    """Persistent one-based source location independent of build status."""
+class _CursorPositionLabel(QToolButton):
+    """Persistent one-based source location and a compact Go-to-Line control."""
 
     def __init__(self, editor, parent=None):
         super().__init__(parent)
         self.editor = editor
-        self.setAccessibleName("Source cursor position")
-        self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.setAccessibleName("Go to source line")
+        self.setAutoRaise(True)
         self.setMinimumWidth(92)
         self.setMaximumWidth(145)
-        self.setStyleSheet("color:#8b949e;padding:2px 6px;")
+        self.setStyleSheet("color:#8b949e;padding:2px 6px;text-align:right;")
         editor.cursorPositionChanged.connect(self.refresh)
+        self.clicked.connect(self.go_to_line)
+        go_shortcut = QShortcut(QKeySequence("Ctrl+G"), editor)
+        go_shortcut.activated.connect(self.go_to_line)
+        self._go_shortcut = go_shortcut
         self.refresh()
 
     def refresh(self):
@@ -1519,9 +1523,23 @@ class _CursorPositionLabel(QLabel):
         line = cursor.blockNumber() + 1
         column = cursor.positionInBlock() + 1
         self.setText(f"Ln {line} · Col {column}")
-        detail = f"Cursor at source line {line}, column {column}"
+        detail = (
+            f"Cursor at source line {line}, column {column}. "
+            "Click or press Ctrl+G to go to a line.")
         self.setToolTip(detail)
         self.setAccessibleDescription(detail)
+
+    def go_to_line(self):
+        current = self.editor.textCursor().blockNumber() + 1
+        line, accepted = QInputDialog.getInt(
+            self.editor, "Go to source line", "Line number:",
+            current, 1, max(1, self.editor.blockCount()), 1)
+        if accepted:
+            cursor = QTextCursor(
+                self.editor.document().findBlockByNumber(line - 1))
+            self.editor.setTextCursor(cursor)
+            self.editor.centerCursor()
+        self.editor.setFocus(Qt.ShortcutFocusReason)
 
 
 def _confirm_source_replacement(view, label, action):

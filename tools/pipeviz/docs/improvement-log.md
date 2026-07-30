@@ -17,6 +17,9 @@ status changed. Both status rows now include a compact one-based Ln · Col
 readout with full tooltip/accessibility text. It updates for keyboard, gutter,
 diagnostic, and execution-link navigation without consuming build/source
 status; 900×620 acceptance locks both readouts inside the window.
+The readout is also an auto-raised Go-to-Line button: pointer or Ctrl+G accepts
+only the document's 1-based range, centers the target, and returns editor focus
+after either acceptance or cancellation. Acceptance covers all three flows.
 
 **Long-source readability audit:** Assembly/C text and line numbers were fixed
 at 10 pt, while their Ctrl+0 still reset hidden Visualizer splitters. Source

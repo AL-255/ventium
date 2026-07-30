@@ -319,6 +319,8 @@ Dropping `.s`/`.S`/`.asm` or `.c`/`.h` routes the file to its source workspace;
 it is never mistaken for a raw executable.
 The adjacent one-based `Ln · Col` readout tracks the active caret independently
 of build/source status and exposes the full location to assistive technology.
+Click it or press `Ctrl+G` to enter a validated line number, center that line,
+and return typing focus to the editor.
 Each workbench remembers its most recent source folder for later Open/Save As
 dialogs, including after starting a new template.
 New/Open, generated C-to-Assembly replacement, and application close never
