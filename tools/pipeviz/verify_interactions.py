@@ -1417,6 +1417,26 @@ def scenario_branch_transport(app, outdir):
         first_cyc = spark._last_cyc - len(spark.ev) + 1
         assert spark.next_event(first_cyc - 1, -1) is None
         assert spark.next_event(spark._last_cyc + 1, 1) is None
+        spark.setFocus()
+        settle(app)
+        QTest.keyClick(spark, Qt.Key_Left)
+        settle(app)
+        assert spark._kbd_cyc == spark._last_cyc - 1
+        assert plot.playhead == spark._kbd_cyc
+        QTest.keyClick(spark, Qt.Key_PageUp)
+        settle(app)
+        assert spark._kbd_cyc == max(first_cyc, spark._last_cyc - 65)
+        assert plot.playhead == spark._kbd_cyc
+        QTest.keyClick(spark, Qt.Key_Home)
+        settle(app)
+        assert spark._kbd_cyc == first_cyc and plot.playhead == first_cyc
+        QTest.keyClick(spark, Qt.Key_End)
+        QTest.keyClick(spark, Qt.Key_Return)
+        settle(app)
+        assert spark._kbd_cyc == spark._last_cyc
+        assert plot.playhead == spark._last_cyc
+        plot.setFocus()
+        old_playhead = plot.playhead
         click(app, win.evprev_btn)
         assert plot.playhead is not None and plot.playhead <= old_playhead
         click(app, win.evnext_btn)

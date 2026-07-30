@@ -578,6 +578,24 @@ def scenario(app, outdir):
             assert win.workspace.tabText(1) == f"Assembly * · L{line}"
             assert f"Assembly line {line}" in win.action_hint.text()
         assert live_lines["U"] != live_lines["V"]
+
+        # The same in-flight source link must be reachable without a pointer.
+        # Home/End select the first/last occupied lane; Enter activates exactly
+        # the highlighted lane and leaves the author on the Visualizer.
+        board.setFocus()
+        settle(app)
+        assert app.focusWidget() is board
+        QTest.keyClick(board, Qt.Key_Home)
+        assert board._kbd_lane == "U"
+        QTest.keyClick(board, Qt.Key_Return)
+        settle(app)
+        assert editor._execution_line == live_lines["U"]
+        assert win.workspace.currentWidget() is win.visualizer_tab
+        QTest.keyClick(board, Qt.Key_End)
+        assert board._kbd_lane == "V"
+        QTest.keyClick(board, Qt.Key_Return)
+        settle(app)
+        assert editor._execution_line == live_lines["V"]
         save(win, outdir, "02a_live_uv_source_link")
 
         win.on_run_toggle()

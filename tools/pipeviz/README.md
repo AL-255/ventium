@@ -280,7 +280,10 @@ to that instruction and drop a cycle playhead (the trace ↔ pipeline selection 
 two-way); **shift-click** a second Konata row to measure the cycle Δ between two
 instructions; **click** a point in the **Mem map**, or focus it and use
 arrows/Page Up/Page Down/Home/End, to jump the trace + Memory tab to that
-load/store; **click** the IPC sparkline to seek the playhead. Click
+load/store. The live U/V/FP board and IPC sparkline also accept keyboard focus:
+arrows/Home/End choose an occupied lane on the board, while arrows,
+Page Up/Page Down, and Home/End seek captured sparkline cycles; Enter activates
+either selection. Click
 **Unpin** beside the amber register strip to return to LIVE without advancing;
 focus the Pipeline diagram and press Escape with an empty Trace filter for the
 keyboard equivalent. Stepping also unpins. All three routes clear the linked

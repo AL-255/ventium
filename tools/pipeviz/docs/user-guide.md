@@ -93,8 +93,10 @@ pauses. Choose an event class (any, mispredict, stall, I-fill, or page-walk);
 `[` and `]` jump among only those visible events.
 The upper U/V/FP stage board is live: hover an occupied cell to see its lane and
 PC, then click it to highlight that in-flight instruction's linked Assembly
-line. The Visualizer remains in place and the Assembly tab gains `L…`; use
-`Alt+A` to inspect the marked line. `[paired]` means U and V are issuing
+line. From the keyboard, Tab to the blue-outlined board, use arrows or Home/End
+to choose an occupied lane, and press Enter. The Visualizer remains in
+place and the Assembly tab gains `L…`; use `Alt+A` to inspect the marked line.
+`[paired]` means U and V are issuing
 together now; `[blocked]` means a legal candidate is currently held by a
 hazard, and the grey `stall · …` cell names the held instruction (not
 necessarily the older instruction or memory request causing the hazard).
@@ -164,6 +166,9 @@ Hotspots and Branches rows activate with Enter as well as the mouse.
 Large steps remain bounded and honest: Trace labels its newest 6,000
 retirements, Pipeline labels its newest 50,000-cycle window, and the compact
 IPC strip retains the newest 12,000 cycles.
+The IPC strip is also keyboard navigation: Tab to its blue outline, then use
+Left/Right for one cycle, Page Up/Page Down for 64 cycles, or Home/End for the
+captured edges. Enter reopens its selected cycle in the Pipeline view.
 **Cycles** classifies every captured clock exactly once. **front end** combines
 fetch/decode, while **slow path** combines the integer execute, load/store,
 string, and I/O micro-operation states; neither label pretends `S_EXEC` is

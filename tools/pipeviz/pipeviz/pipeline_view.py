@@ -34,6 +34,7 @@ _GRID = "#30363d"
 _DIM = "#161b22"
 _TXT = "#c9d1d9"
 _MUT = "#8b949e"
+_FOCUS = "#58a6ff"
 
 
 def _mono(pt=9, bold=False):
@@ -52,12 +53,15 @@ class StageBoard(QWidget):
         self.setFixedHeight(100)   # tightened so the starved Konata view gets the rows
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setAccessibleName("Live pipeline stage board")
         self.setAccessibleDescription(
-            "Occupied U, V, and FP cells can be clicked to locate authored assembly")
+            "Occupied U, V, and FP cells can be clicked or selected with arrow "
+            "keys and Enter to locate authored assembly")
         self._cells = self._blank()
         self._lane_pcs = {}
         self._lane_rects = []
+        self._kbd_lane = None
         self._status = "no image loaded"
         self._statecol = _DIM
 
@@ -156,6 +160,9 @@ class StageBoard(QWidget):
 
         self._cells = cells
         self._lane_pcs = pcs
+        if self._kbd_lane not in pcs:
+            self._kbd_lane = next(
+                (lane for lane in ("U", "V", "FP") if lane in pcs), None)
         # Hit rectangles embed the PC from the frame that painted them. Invalidate
         # them immediately so a click delivered between a timer update and the
         # queued repaint can never navigate to the previous instruction.
@@ -190,6 +197,7 @@ class StageBoard(QWidget):
         self._cells = self._blank()
         self._lane_pcs = {}
         self._lane_rects = []
+        self._kbd_lane = None
         self._status = "reset"
         self._statecol = _DIM
         self.unsetCursor()
@@ -305,6 +313,15 @@ class StageBoard(QWidget):
                 p.drawLine(gx, top, gx, top + 3 * lane_h)
         p.setFont(_mono(9)); p.setPen(QColor(_TXT))
         p.drawText(QRect(4, top + 3 * lane_h + 2, W - 8, 14), Qt.AlignLeft, self._status)
+        if self.hasFocus():
+            # A full-widget ring makes Tab/Shift+Tab location obvious; a second
+            # outline identifies the exact occupied lane Enter will open.
+            focus_pen = QPen(QColor(_FOCUS)); focus_pen.setWidth(2)
+            p.setPen(focus_pen)
+            p.drawRect(self.rect().adjusted(1, 1, -2, -2))
+            for rect, lane, _pc in self._lane_rects:
+                if lane == self._kbd_lane:
+                    p.drawRect(rect.adjusted(1, 1, -1, -1))
         p.end()
 
     def _lane_at(self, point):
@@ -337,10 +354,54 @@ class StageBoard(QWidget):
             hit = self._lane_at(event.position().toPoint())
             if hit is not None:
                 lane, pc = hit
+                self._kbd_lane = lane
+                self.setFocus(Qt.MouseFocusReason)
                 self.instructionClicked.emit(pc, lane)
                 event.accept()
                 return
         super().mousePressEvent(event)
+
+    def focusInEvent(self, event):
+        if self._kbd_lane not in self._lane_pcs:
+            self._kbd_lane = next(
+                (lane for lane in ("U", "V", "FP")
+                 if lane in self._lane_pcs), None)
+        self.update()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        self.update()
+        super().focusOutEvent(event)
+
+    def keyPressEvent(self, event):
+        lanes = [lane for lane in ("U", "V", "FP") if lane in self._lane_pcs]
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_Up, Qt.Key_Right, Qt.Key_Down,
+                   Qt.Key_Home, Qt.Key_End):
+            if not lanes:
+                event.accept()
+                return
+            if key == Qt.Key_Home:
+                index = 0
+            elif key == Qt.Key_End:
+                index = len(lanes) - 1
+            else:
+                current = (
+                    lanes.index(self._kbd_lane)
+                    if self._kbd_lane in lanes else 0)
+                delta = -1 if key in (Qt.Key_Left, Qt.Key_Up) else 1
+                index = max(0, min(len(lanes) - 1, current + delta))
+            self._kbd_lane = lanes[index]
+            self.update()
+            event.accept()
+            return
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            if self._kbd_lane in self._lane_pcs:
+                self.instructionClicked.emit(
+                    int(self._lane_pcs[self._kbd_lane]), self._kbd_lane)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 # ===========================================================================
@@ -489,6 +550,9 @@ class _KonataPlot(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAccessibleName("Pipeline timing diagram")
+        self.setAccessibleDescription(
+            "Use arrows, Page Up and Page Down, Home and End to select "
+            "retirements; Ctrl plus and minus zoom; Escape returns to live state")
         self.setToolTip(
             "Click a row to pin it; Shift-click sets a cycle-distance anchor. "
             "Use Up/Down, Page Up/Down, Home, and End to traverse retirements.")
@@ -677,6 +741,9 @@ class _KonataPlot(QWidget):
         if not self.insns:
             p.setPen(QColor(_MUT)); p.setFont(_mono(10))
             p.drawText(self.rect(), Qt.AlignCenter, self.empty_message)
+            if self.hasFocus():
+                pen = QPen(QColor(_FOCUS)); pen.setWidth(2); p.setPen(pen)
+                p.drawRect(ev.rect().adjusted(1, 1, -2, -2))
             p.end(); return
         vis = ev.rect()
         if self._dep_for_row != self.sel_row:        # recompute dep edges on re-select
@@ -855,7 +922,21 @@ class _KonataPlot(QWidget):
                 p.fillRect(QRect(bx, vis.top(), tw, 13), QColor("#0b3036"))
                 p.setPen(QColor("#7ce0e8"))
                 p.drawText(QRect(bx, vis.top(), tw, 13), Qt.AlignCenter, lbl)
+        if self.hasFocus():
+            # The plot is a large canvas inside a scroll area, so outline the
+            # currently exposed paint region rather than its mostly off-screen
+            # full geometry.
+            pen = QPen(QColor(_FOCUS)); pen.setWidth(2); p.setPen(pen)
+            p.drawRect(vis.adjusted(1, 1, -2, -2))
         p.end()
+
+    def focusInEvent(self, event):
+        self.update()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        self.update()
+        super().focusOutEvent(event)
 
     def mouseMoveEvent(self, ev):
         x = (ev.position().x() if hasattr(ev, "position") else ev.x())
@@ -1368,8 +1449,17 @@ class SparklineStrip(QWidget):
         self.ev = []         # '' | 'm' mispred | 's' stall | 'f' fill | 'w' walk
         self._last_state = ""
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName("IPC and pipeline event history")
+        self.setAccessibleDescription(
+            "Use Left and Right, Page Up and Page Down, Home and End to seek "
+            "captured cycles; Enter reopens the selected cycle")
         self._hover_x = -1
+        self._kbd_cyc = None
         self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(
+            "Click to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
+            "Enter")
 
     def reset(self, backend):
         self.backend = backend
@@ -1378,6 +1468,7 @@ class SparklineStrip(QWidget):
         self._last_cyc = int(backend.cycle_count())
         self.ret = []; self.ev = []
         self._last_state = ""
+        self._kbd_cyc = None
         self.update()
 
     def ingest(self):
@@ -1411,6 +1502,9 @@ class SparklineStrip(QWidget):
                 self._last_state = name
         if len(self.ret) > self.CAP:
             self.ret = self.ret[-self.CAP:]; self.ev = self.ev[-self.CAP:]
+        bounds = self._cycle_bounds()
+        if self._kbd_cyc is not None and bounds is not None:
+            self._kbd_cyc = max(bounds[0], min(bounds[1], self._kbd_cyc))
         self.update()
 
     # stall = grey (C_STG_STALL), matching the Konata '=' stall convention and
@@ -1445,6 +1539,9 @@ class SparklineStrip(QWidget):
                        "step the core to collect IPC / stall history")
             p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
                        message)
+            if self.hasFocus():
+                pen = QPen(QColor(_FOCUS)); pen.setWidth(2); p.setPen(pen)
+                p.drawRect(self.rect().adjusted(1, 1, -2, -2))
             p.end(); return
         start = max(0, n - plotw)
         shown = n - start
@@ -1472,6 +1569,11 @@ class SparklineStrip(QWidget):
         if self._hover_x >= labelw:
             p.setPen(QColor("#39c5cf"))
             p.drawLine(self._hover_x, ipc_y0, self._hover_x, evt_y0 + evt_h)
+        if self.hasFocus() and self._kbd_cyc is not None:
+            marker_x = self._x_for_cyc(self._kbd_cyc)
+            if marker_x is not None:
+                pen = QPen(QColor(_FOCUS)); pen.setWidth(2); p.setPen(pen)
+                p.drawLine(marker_x, ipc_y0, marker_x, evt_y0 + evt_h)
         # 'stuck' diagnostic: a long trailing run of zero-retire cycles in a
         # front-end state (S_DECODE/S_FETCH livelock) — the strip would otherwise
         # read as a dead flat band rather than "the core is wedged, not idle".
@@ -1504,7 +1606,30 @@ class SparklineStrip(QWidget):
         p.drawText(QRect(labelw + 1, ipc_y0 - 1, 12, 8), Qt.AlignLeft, "2")
         p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h // 2 - 4, 12, 8), Qt.AlignLeft, "1")
         p.drawText(QRect(labelw + 1, ipc_y0 + ipc_h - 8, 12, 8), Qt.AlignLeft, "0")
+        if self.hasFocus():
+            pen = QPen(QColor(_FOCUS)); pen.setWidth(2); p.setPen(pen)
+            p.drawRect(self.rect().adjusted(1, 1, -2, -2))
         p.end()
+
+    def _cycle_bounds(self):
+        if not self.ret:
+            return None
+        return self._last_cyc - len(self.ret) + 1, self._last_cyc
+
+    def _x_for_cyc(self, cyc):
+        bounds = self._cycle_bounds()
+        if bounds is None:
+            return None
+        n = len(self.ret)
+        plotw = max(1, self.width() - self._LABELW - 4)
+        start = max(0, n - plotw)
+        shown = n - start
+        first_shown = bounds[0] + start
+        index = int(cyc) - first_shown
+        if not 0 <= index < shown:
+            return None
+        bw = plotw / shown
+        return self._LABELW + int((index + 0.5) * bw)
 
     def next_event(self, from_cyc, direction, cls="any"):
         """Cycle of the next (direction +1) / previous (-1) event — a mispredict
@@ -1547,6 +1672,8 @@ class SparklineStrip(QWidget):
     def mousePressEvent(self, ev):
         cyc = self._cyc_at(ev.position().x() if hasattr(ev, "position") else ev.x())
         if cyc is not None:
+            self._kbd_cyc = int(cyc)
+            self.setFocus(Qt.MouseFocusReason)
             self.cycleClicked.emit(int(cyc))     # seek the Konata playhead here
 
     def leaveEvent(self, _ev):
@@ -1561,8 +1688,53 @@ class SparklineStrip(QWidget):
             i = len(self.ev) - 1 - (self._last_cyc - cyc)
             ev_name = {"m": "mispredict", "s": "stall", "f": "I-fill", "w": "page-walk"}.get(self.ev[i], "")
             self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired"
-                            + (f", {ev_name}" if ev_name else "") + "  ·  click to seek")
+                            + (f", {ev_name}" if ev_name else "")
+                            + "  ·  click to seek; arrows navigate")
         self.update()
+
+    def focusInEvent(self, event):
+        if self._kbd_cyc is None and self.ret:
+            self._kbd_cyc = self._last_cyc
+        self.update()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        self.update()
+        super().focusOutEvent(event)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        nav = (Qt.Key_Left, Qt.Key_Right, Qt.Key_PageUp, Qt.Key_PageDown,
+               Qt.Key_Home, Qt.Key_End)
+        if key in nav:
+            bounds = self._cycle_bounds()
+            if bounds is not None:
+                current = (
+                    self._kbd_cyc
+                    if self._kbd_cyc is not None else bounds[1])
+                if key == Qt.Key_Home:
+                    current = bounds[0]
+                elif key == Qt.Key_End:
+                    current = bounds[1]
+                else:
+                    delta = {
+                        Qt.Key_Left: -1,
+                        Qt.Key_Right: 1,
+                        Qt.Key_PageUp: -64,
+                        Qt.Key_PageDown: 64,
+                    }[key]
+                    current = max(bounds[0], min(bounds[1], current + delta))
+                self._kbd_cyc = int(current)
+                self.cycleClicked.emit(self._kbd_cyc)
+                self.update()
+            event.accept()
+            return
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            if self._kbd_cyc is not None:
+                self.cycleClicked.emit(int(self._kbd_cyc))
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 # ===========================================================================

@@ -11,6 +11,15 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Interactive-canvas focus audit:** the live U/V/FP board and IPC history were
+clickable but missing from the keyboard focus chain, while the keyboard-enabled
+Pipeline timing grid had no visible focus cue. All three now draw a blue focus
+ring. The live board exposes arrow/Home/End lane selection plus Enter
+source linkage; the IPC strip exposes exact-cycle arrows, 64-cycle paging,
+captured-edge Home/End, and Enter activation. Real assembled U/V source
+lines and captured execution history verify identical pointer and keyboard
+outcomes.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a
