@@ -435,7 +435,9 @@ compiler result and prompts you to compile again.
 The C toolbar's **New U/V demo** is itself a reproducible demonstration. It advances
 two independent Fibonacci recurrences for a runtime-loaded 120 iterations;
 `volatile` input and result storage prevent `-O2` from replacing the work with
-constants. Compile it at `-O2`, assemble and run it, then return to Visualizer:
+constants. Its first two comments preserve the same-ELF procedure and expected
+EAX inside any saved copy. Compile it at `-O2`, assemble and run it, then return
+to Visualizer:
 
 1. Leave **U/V issue** enabled, apply/reset, and run to HLT. Adjacent independent
    adds and moves retire through both U and V.

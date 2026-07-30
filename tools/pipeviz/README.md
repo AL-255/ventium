@@ -185,7 +185,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     wrap long compiler paths/messages instead of requiring horizontal scroll. The
     visible **New U/V demo** is a
     runtime-counted, dual-chain Fibonacci workload: it prevents `-O2` constant
-    folding and provides a direct U/V-on versus U/V-off experiment. The
+    folding and provides a direct U/V-on versus U/V-off experiment. Its opening
+    comments state the same-ELF procedure and expected EAX, so saved copies
+    remain self-verifying. The
     authoring regression requires the same `0x198c09a0` result in both modes,
     more than 400 V-pipe retirements, and at least a 20% cycle reduction.
     Hover help explains the readability/performance intent of every optimization

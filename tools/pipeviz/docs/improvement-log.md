@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — make the C demo self-verifying
+
+**Experiment-portability audit:** the toolbar and guides explained the
+dual-Fibonacci contract, but a user saving or copying only the C source lost the
+U/V-on/off procedure and expected result. The artifact that performs the
+experiment did not carry its own verification note.
+
+**Changes:** the built-in source now opens with two compact comments: why its
+independent chains exist, and “At -O2, run the same ELF U/V on/off; default EAX
+must be 0x198c09a0.” No executable code or timing changes.
+
+**Verification:** toolchain acceptance requires both the comparison phrase and
+expected hexadecimal result inside `_C_TEMPLATE`, then still compiles all four
+optimization levels and executes the full O2 contract at 2,233→1,759 clocks.
+The 900×620 capture shows both notes above the complete 24-line program without
+horizontal or vertical obstruction.
+
 ## July 30 continuation — remove duplicate mnemonics from completion rows
 
 **Completion-density audit:** list rows rendered `add  UV  add dst, src` and

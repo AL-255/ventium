@@ -338,7 +338,8 @@ is compiled and assembled by the authoring regression.</p>
 <h2>Run the built-in U/V experiment</h2>
 <p>The C toolbar's <b>New U/V demo</b> is a real experiment: two independent Fibonacci
 chains run for a volatile, runtime-loaded 120 iterations, so O2 cannot replace
-them with constants. Compile at O2, Assemble + Run, then run the same ELF once
+them with constants. Its opening comments retain the same-ELF procedure and
+expected EAX in saved copies. Compile at O2, Assemble + Run, then run the same ELF once
 with <b>U/V issue</b> enabled and once disabled (apply/reset after each change).
 Both runs return EAX <code>0x198c09a0</code>; the enabled run should show
 hundreds of V retirements and finish materially sooner. The regression requires

@@ -1622,6 +1622,7 @@ _start:
 """
 
 _C_TEMPLATE = """/* Two independent Fibonacci chains expose Pentium U/V pairing. */
+/* At -O2, run the same ELF U/V on/off; default EAX must be 0x198c09a0. */
 volatile unsigned iterations = 120;
 volatile unsigned results[4];
 

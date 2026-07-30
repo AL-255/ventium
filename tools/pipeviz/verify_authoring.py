@@ -187,6 +187,8 @@ def verify_catalog():
 
 
 def verify_toolchain():
+    assert "same ELF U/V on/off" in _C_TEMPLATE
+    assert "0x198c09a0" in _C_TEMPLATE
     try:
         assemble_source("")
     except BuildFailure as error:
