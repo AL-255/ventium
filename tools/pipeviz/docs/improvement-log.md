@@ -135,6 +135,11 @@ buttons are disabled, all three complete tabs remain in bounds, and compact
 forward traversal is now Selector → Register pages → Open. Workspace, analysis,
 and register tab containers/bars also expose their purpose and direct keyboard
 shortcuts through accessibility descriptions.
+The compact authoring workspaces now satisfy the same focus invariant. All six
+Assembly actions (template/open/save/completion/assemble/run) and all four C
+actions (template/open/save/compile) have explicit action-oriented names and
+tooltip-matched descriptions. The 900×620 authoring acceptance pass rejects any
+remaining enabled visible unnamed focus stop in either workspace.
 The Mem-map scatter now adapts its own painted geometry too. At 188 px it
 reclaims the unused y-axis gutter, reduces five overlapping retirement ticks to
 three inward-aligned ticks, and selects a measured complete summary such as

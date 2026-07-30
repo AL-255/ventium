@@ -1301,9 +1301,17 @@ class AssemblyView(QWidget):
         self.run_btn.setToolTip("Assemble, load in the Visualizer, and reset (Ctrl+Enter)")
         self.run_btn.setStyleSheet(
             "background:#238636;color:white;font-weight:bold;border:1px solid #2ea043;")
-        for button in (
-                self.template_btn, self.open_btn, self.save_btn,
-                self.complete_btn, self.build_btn, self.run_btn):
+        assembly_actions = (
+            (self.template_btn, "Create new assembly template"),
+            (self.open_btn, "Open assembly source"),
+            (self.save_btn, "Save assembly source as"),
+            (self.complete_btn, "Open assembly opcode completion"),
+            (self.build_btn, "Assemble assembly source"),
+            (self.run_btn, "Assemble and run assembly source"),
+        )
+        for button, accessible_name in assembly_actions:
+            button.setAccessibleName(accessible_name)
+            button.setAccessibleDescription(button.toolTip())
             controls.addWidget(button)
         layout.addLayout(controls)
 
@@ -1621,6 +1629,15 @@ class CView(QWidget):
             "Compile to editable GNU Intel assembly (Ctrl+Enter)")
         self.compile_btn.setStyleSheet(
             "background:#1f6feb;color:white;font-weight:bold;border:1px solid #388bfd;")
+        c_actions = (
+            (self.template_btn, "Create new C template"),
+            (self.open_btn, "Open C source"),
+            (self.save_btn, "Save C source as"),
+            (self.compile_btn, "Compile C to assembly"),
+        )
+        for button, accessible_name in c_actions:
+            button.setAccessibleName(accessible_name)
+            button.setAccessibleDescription(button.toolTip())
         controls.addWidget(self.compile_btn)
         layout.addLayout(controls)
 

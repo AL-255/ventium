@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QTextCursor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
 
 import pipeviz.source_view as source_module
 from pipeviz.isa_catalog import CATALOG, MNEMONICS, instruction_info
@@ -481,6 +481,20 @@ def scenario(app, outdir):
             corner = button.mapTo(win, button.rect().bottomRight())
             assert 0 <= corner.x() < win.width()
             assert 0 <= corner.y() < win.height()
+            assert button.accessibleName()
+            assert button.accessibleDescription() == button.toolTip()
+        unnamed_assembly_focus = [
+            (type(widget).__name__, widget.objectName())
+            for widget in win.findChildren(QWidget)
+            if (widget.isVisibleTo(win) and widget.isEnabled()
+                and widget.focusPolicy() != Qt.NoFocus
+                and not widget.accessibleName()
+                and not (
+                    widget.objectName() == "qt_spinbox_lineedit"
+                    and widget.parentWidget() is not None
+                    and widget.parentWidget().accessibleName()))
+        ]
+        assert not unnamed_assembly_focus, unnamed_assembly_focus
         badge_corner = win.assembly.source_badge.mapTo(
             win, win.assembly.source_badge.rect().bottomRight())
         assert win.assembly.source_badge.isVisible()
@@ -1097,6 +1111,20 @@ def scenario(app, outdir):
             corner = control.mapTo(win, control.rect().bottomRight())
             assert 0 <= corner.x() < win.width()
             assert 0 <= corner.y() < win.height()
+            assert control.accessibleName()
+            assert control.accessibleDescription() or control.toolTip()
+        unnamed_c_focus = [
+            (type(widget).__name__, widget.objectName())
+            for widget in win.findChildren(QWidget)
+            if (widget.isVisibleTo(win) and widget.isEnabled()
+                and widget.focusPolicy() != Qt.NoFocus
+                and not widget.accessibleName()
+                and not (
+                    widget.objectName() == "qt_spinbox_lineedit"
+                    and widget.parentWidget() is not None
+                    and widget.parentWidget().accessibleName()))
+        ]
+        assert not unnamed_c_focus, unnamed_c_focus
         badge_corner = win.c_source.source_badge.mapTo(
             win, win.c_source.source_badge.rect().bottomRight())
         assert win.c_source.source_badge.isVisible()
