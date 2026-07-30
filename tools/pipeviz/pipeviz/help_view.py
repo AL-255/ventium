@@ -264,9 +264,10 @@ number to select the whole source line and return typing focus to the editor.</p
 <p>Ctrl+Space opens the Ventium/P54C opcode catalogue. Every entry includes its
 operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operations
-say so explicitly. Use Up/Down or Page Up/Page Down to choose, Enter/Tab or a
-double-click to insert, and Escape to close; these controls remain visible in
-the popup footer. Completion inserts only when the cursor is in an opcode slot;
+say so explicitly. Use Up/Down or Page Up/Page Down to choose, Home/End for the
+first/last entry, Enter/Tab or a double-click to insert, and Escape to close;
+these controls remain visible in the popup footer. Completion inserts only when
+the cursor is in an opcode slot;
 elsewhere the full catalogue is safe, reference-only help. GNU as
 semicolons separate statements, and completion follows the opcode in each
 statement while ignoring separators/comment markers inside quoted data.

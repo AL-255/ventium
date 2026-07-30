@@ -141,7 +141,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   * Assembly is a line-numbered GNU Intel-syntax editor with syntax highlighting,
     build diagnostics, `Ctrl+Space` completion over 291 Ventium/P54C mnemonics,
     mode/build availability notes, and a description plus miniature pipeline
-    preview for every completion. **Assemble + Run** builds a source-mapped
+    preview for every completion. Arrows/Page Up/Page Down traverse matches,
+    while Home/End jump to catalogue bounds. **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
     Pipeline row highlights the exact responsible assembly line. Editing clears
     prior build diagnostics and PC links so green results never describe stale

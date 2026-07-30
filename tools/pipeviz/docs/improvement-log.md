@@ -23,6 +23,14 @@ confirmation. It now adds a compact `nL` suffix whenever selection exists and
 announces the expanded line count assistively. Selection changes refresh even
 when the caret position itself does not; 900×620 bounds remain covered.
 
+**Opcode completion boundary-key audit:** while arrows and paging traversed the
+popup, plain Home/End unexpectedly moved the editor and dismissed it. They now
+select the first/last opcode, are documented in the persistent footer and
+assistive description, and leave source text/caret unchanged. Modified
+Ctrl+Home retains document navigation and closes the transient popup. Any
+whole-document replacement or non-completion edit now also closes stale
+matches; ordinary opcode typing rebuilds them immediately from current text.
+
 **Source delimiter audit:** C blocks and Assembly memory operands had no
 matching feedback, making nested edits unnecessarily error-prone. Moving beside
 `()`, `[]`, or `{}` now highlights both ends of a structurally valid pair and

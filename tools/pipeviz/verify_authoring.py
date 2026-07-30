@@ -830,6 +830,23 @@ def scenario(app, outdir):
         assert editor.completion.list.count() == len(CATALOG)
         QTest.keyClick(editor, Qt.Key_Down)
         assert editor.completion.list.currentRow() == 1
+        reference_text = editor.toPlainText()
+        QTest.keyClick(editor, Qt.Key_End)
+        assert editor.completion.list.currentRow() == len(CATALOG) - 1
+        assert editor.completion.isVisible()
+        QTest.keyClick(editor, Qt.Key_Home)
+        assert editor.completion.list.currentRow() == 0
+        assert editor.toPlainText() == reference_text
+        assert editor.completion.isVisible()
+        QTest.keyClick(editor, Qt.Key_Home, Qt.ControlModifier)
+        assert editor.textCursor().position() == 0
+        assert not editor.completion.isVisible()
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        QTest.mouseClick(win.assembly.complete_btn, Qt.LeftButton)
+        settle(app)
+        assert editor.completion.isVisible()
         QTest.keyClick(editor, Qt.Key_Escape)
         assert not editor.completion.isVisible()
         QTest.keyClick(editor, Qt.Key_Space, Qt.ControlModifier)
@@ -850,6 +867,7 @@ def scenario(app, outdir):
         completion_accessible = editor.completion.list.accessibleDescription()
         assert f"{len(CATALOG)} matching opcodes" in completion_accessible
         assert "Enter or Tab to insert" in completion_accessible
+        assert "Home or End" in completion_accessible
         names = {
             editor.completion.list.item(i).data(Qt.UserRole).mnemonic
             for i in range(editor.completion.list.count())
@@ -1046,6 +1064,7 @@ def scenario(app, outdir):
         QTest.keyClick(editor, Qt.Key_Backspace)
         assert editor.toPlainText() == "mov"
         editor.setPlainText("    mov eax, 1")
+        assert not editor.completion.isVisible()
         editor.moveCursor(QTextCursor.End)
         QTest.keyClick(editor, Qt.Key_Home)
         assert editor.textCursor().positionInBlock() == 4

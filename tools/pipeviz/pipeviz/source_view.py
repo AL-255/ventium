@@ -1170,7 +1170,7 @@ class CompletionPopup(QFrame):
         body.addWidget(self.info, 1)
         layout.addLayout(body, 1)
         self.hint = QLabel(
-            "↑/↓ choose · PgUp/PgDn jump · Enter/Tab insert · "
+            "↑/↓ choose · PgUp/PgDn jump · Home/End bounds · Enter/Tab insert · "
             "Esc close · double-click insert")
         self.hint.setAccessibleName("Completion keyboard help")
         self.hint.setStyleSheet(
@@ -1203,8 +1203,9 @@ class CompletionPopup(QFrame):
         scope = f"prefix {prefix}" if prefix else "the complete catalogue"
         self.list.setAccessibleDescription(
             f"{len(matches)} matching opcodes for {scope}. "
-            "Use arrows or Page Up and Page Down to choose, Enter or Tab to "
-            "insert, Escape to close, or double-click an entry to insert it.")
+            "Use arrows or Page Up and Page Down to choose, Home or End for "
+            "the first or last entry, Enter or Tab to insert, Escape to close, "
+            "or double-click an entry to insert it.")
         self.list.setCurrentRow(0)
         cursor_rect = self.editor.cursorRect()
         below = self.editor.mapToGlobal(cursor_rect.bottomLeft())
@@ -1275,6 +1276,7 @@ class AssemblyEditor(CodeEditor):
         self.highlighter = AssemblyHighlighter(self.document())
         self.completion = CompletionPopup(self)
         self.completion.accepted.connect(self._insert_completion)
+        self.textChanged.connect(self.completion.hide)
         self._completion_span = None
         self._completion_insertable = True
         self._completion_case_sample = ""
@@ -1360,6 +1362,13 @@ class AssemblyEditor(CodeEditor):
                     Qt.Key_PageUp: -8, Qt.Key_PageDown: 8,
                 }[event.key()]
                 self.completion.move_selection(delta)
+                event.accept()
+                return
+            if (event.key() in (Qt.Key_Home, Qt.Key_End)
+                    and not event.modifiers()):
+                self.completion.list.setCurrentRow(
+                    0 if event.key() == Qt.Key_Home
+                    else self.completion.list.count() - 1)
                 event.accept()
                 return
             if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):

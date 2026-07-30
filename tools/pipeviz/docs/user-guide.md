@@ -269,8 +269,9 @@ its amber status says to use `Alt+C` for the source diagnostic.
 Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
 description, mode/build availability, approximate latency, pairing class
 (`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
-Use Up/Down or Page Up/Page Down to choose, Enter/Tab or a double-click to
-insert, and Escape to close; the popup keeps these controls visible at its foot.
+Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,
+Enter/Tab or a double-click to insert, and Escape to close; the popup keeps
+these controls visible at its foot.
 At a directive, comment, or operand it remains a reference-only catalogue, so
 accepting an entry cannot corrupt non-opcode text.
 Accepted mnemonics preserve the token's existing convention: `AD` completes as
