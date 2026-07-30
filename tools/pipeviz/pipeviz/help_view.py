@@ -100,7 +100,9 @@ explicit.</p>
  <code>load_addr</code>, and <code>esp</code> as JSON integers or
  <code>"0x…"</code> strings, plus boolean <code>uv_issue</code>,
  <code>system</code>, and <code>soc</code>. SoC implies system mode. The
- manifest is applied as one validated unit.</p>
+ manifest is applied as one validated unit. If rejected, the program still
+ loads from its own metadata and an amber eight-second action retains the
+ reason/path after the modal warning.</p>
 <p>A new program receives the default ESP unless its manifest specifies one;
  Reload still preserves the currently displayed setup. A generic
  <code>.bin</code> stays in user mode unless a manifest, command-line option,

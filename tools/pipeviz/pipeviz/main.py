@@ -1669,6 +1669,7 @@ class MainWindow(QMainWindow):
         manifest_uv = None
         manifest_system = None
         manifest_soc = None
+        manifest_warning_detail = None
         if os.path.exists(man):
             try:
                 with open(man, encoding="utf-8") as mf:
@@ -1701,8 +1702,11 @@ class MainWindow(QMainWindow):
                 manifest_system = candidate_system
                 manifest_soc = candidate_soc
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
-                QMessageBox.warning(self, "Manifest ignored",
-                                    f"Could not read {man}: {e}\nLoading the program metadata instead.")
+                manifest_warning_detail = (
+                    f"Could not read {man}: {e}\n"
+                    "Loading the program metadata instead.")
+                QMessageBox.warning(
+                    self, "Manifest ignored", manifest_warning_detail)
         # A manifest's load address is a flat-image convention.  ELF carries
         # individual virtual addresses in PT_LOAD and must retain those.
         if kind == "flat image":
@@ -1808,9 +1812,18 @@ class MainWindow(QMainWindow):
             return False
         if hasattr(self, "assembly"):
             self._clear_assembly_source_link()
-        self._notice(
+        loaded_text = (
             f"{'Reloaded' if preserve_setup else 'Loaded'} {kind}: "
             f"{os.path.basename(path)}")
+        if manifest_warning_detail is not None:
+            self._notice(
+                f"{loaded_text} · manifest ignored",
+                ms=8000, severity="warning",
+                detail=(
+                    f"{loaded_text} · manifest ignored\n"
+                    f"{manifest_warning_detail}"))
+        else:
+            self._notice(loaded_text)
         return True
 
     def dragEnterEvent(self, event):

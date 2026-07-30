@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — degraded manifest load stays visible
+
+**Successful-load warning audit:** a malformed sibling manifest correctly
+failed transactionally and the program loaded from intrinsic/default metadata,
+but after the warning dialog closed the action row immediately said only
+`Loaded`. Users could no longer see that their entry/load/mode configuration
+had been ignored.
+
+**Changes:** a successful program load with a rejected manifest now leaves an
+eight-second amber `manifest ignored` action. Its compact text names the loaded
+file; hover/accessibility retain the complete manifest path, validation reason,
+and metadata-fallback explanation. The next ordinary load restores neutral
+notice color.
+
+**Verification:** the numeric-manifest scenario rejects a boolean type error,
+requires default metadata to remain transactional, then checks the exact amber
+loaded-with-warning summary, full manifest/reason detail, and neutral color
+after the following valid manifest load.
+
 ## July 30 continuation — persistent compact load-failure feedback
 
 **Loading-recovery audit:** failed program/snapshot reads paused safely and

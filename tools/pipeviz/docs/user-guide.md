@@ -77,7 +77,10 @@ Mode values must be JSON booleans; `soc: true` implies system boot and cannot
 be combined with `system: false`. A malformed manifest is ignored as one unit,
 so a valid early field cannot leak out of a later error. A new program without
 `esp` starts from Pipeviz's default stack instead of inheriting the previous
-program's custom value. The `.bin` suffix alone never forces BIOS boot; set
+program's custom value. The program still loads from its own metadata, and an
+eight-second amber `manifest ignored` action retains the validation reason and
+manifest path after the modal warning closes. The `.bin` suffix alone never
+forces BIOS boot; set
 `system: true`, use `--system`, or toggle **system** explicitly.
 **Open snapshot…** accepts a matching host-testbench `.aux`/`.vlt` pair. The
 architectural clock remains absolute, but Trace retirement IDs, IPC, Pipeline,

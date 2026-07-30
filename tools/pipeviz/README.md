@@ -325,7 +325,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 
 | control | action |
 |---|---|
-| **Open program…** | load a raw `.flat`/`.bin`/`.img`/`.rom` or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Empty files and DOS/PE executables are rejected explicitly. Flat images honour a sibling `manifest.json` for `entry`, `load_addr`, `esp`, `uv_issue`, `system`, and `soc`. A generic large `.bin` remains a user image unless its manifest opts into system boot. |
+| **Open program…** | load a raw `.flat`/`.bin`/`.img`/`.rom` or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Empty files and DOS/PE executables are rejected explicitly. Flat images honour a sibling `manifest.json` for `entry`, `load_addr`, `esp`, `uv_issue`, `system`, and `soc`; a rejected manifest leaves an eight-second amber loaded-with-warning action while the program uses its own metadata. A generic large `.bin` remains a user image unless its manifest opts into system boot. |
 | **File → Open example** | open an available dual-issue, D-cache, x87, or system-paging verification workload directly. The menu rescans each time it opens, so newly built examples appear without restarting pipeviz. |
 | **Assembly** (`Alt+A`) | edit highlighted GNU Intel syntax, inspect opcode/pipeline completion, save (`.s` is added for a bare name), then assemble or assemble+run. |
 | **C** (`Alt+C`) | write/save (`.c` is added for a bare name), then compile a freestanding `int main(void)` for Pentium into editable Assembly. |

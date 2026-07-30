@@ -1447,6 +1447,15 @@ def scenario_startup(app, outdir):
         assert "system must be true or false" in manifest_warnings[0][1]
         assert int(win.entry_e.text(), 0) == DEF_ENTRY
         assert int(win.load_e.text(), 0) == DEF_ENTRY
+        assert win.action_hint.text() == (
+            "Loaded flat image: partial.flat · manifest ignored")
+        assert "system must be true or false" in win.action_hint.toolTip()
+        assert os.path.join(
+            invalid_manifest_dir, "manifest.json") in (
+                win.action_hint.toolTip())
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#e3b341" in win.action_hint.styleSheet()
 
         explicit_system_dir = os.path.join(outdir, "manifest_system")
         os.makedirs(explicit_system_dir, exist_ok=True)
@@ -1458,6 +1467,7 @@ def scenario_startup(app, outdir):
                   encoding="utf-8") as manifest_file:
             json.dump({"system": True, "uv_issue": True}, manifest_file)
         win.load_image(explicit_system_image)
+        assert "#8b949e" in win.action_hint.styleSheet()
         assert win.sys_cb.isChecked() and not win.soc_cb.isChecked()
         assert win.cyc_cb.isChecked()
         assert int(win.load_e.text(), 0) == 0x000F8000
