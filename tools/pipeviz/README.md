@@ -315,7 +315,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 | **Step insn** (`i`) | advance until the next retirement |
 | **Step N** | advance N clocks |
 | **Run / Pause** (`F5`) | free-run at *speed* clocks per refresh tick |
-| **event type + ◀ / ▶** (`[` / `]`) | choose any/mispredict/stall/I-fill/page-walk, then jump to the previous or next matching event |
+| **event type + ◀ / ▶** (`[` / `]`) | choose any/mispredict/stall/I-fill/page-walk; the selector shows the captured match count, and only arrows with a reachable matching event are enabled |
 | **cycle zoom** (`Ctrl+-` / `Ctrl+=`) | zoom the Pipeline time axis while preserving the selected investigation point |
 
 Keyboard: `Ctrl+O` opens a program, `Ctrl+Shift+O` opens a snapshot, `R` resets

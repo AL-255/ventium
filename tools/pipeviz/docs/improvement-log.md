@@ -9,6 +9,26 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — honest event-navigation endpoints
+
+**Navigation-edge audit:** both event arrows remained enabled after reset, for
+an absent event class, and at the first/last matching event. Clicking them could
+only report that no destination existed, while the selector hid whether a class
+had any captured matches at all.
+
+**Changes:** each event-class label now includes its captured match count.
+Previous/next enablement follows both the active class and current playhead;
+tooltips name the exact target cycle or explain the empty class/capture edge.
+Changing class refreshes the last-action row so it cannot retain a contradictory
+message from the prior class. Bracket shortcuts retain visible empty-search
+feedback.
+
+**Verification:** interaction acceptance covers the no-session zero count,
+live aggregate count, last-mispredict endpoint, absent page-walk class, keyboard
+fallback, and stopped-program navigation. It derives expected arrow state from
+the same captured history after terminal execution instead of assuming both
+directions are always actionable.
+
 ## July 30 continuation — inline Trace-filter corrections
 
 **Invalid-filter audit:** malformed structured filters safely retained every

@@ -46,6 +46,13 @@ _EXAMPLES = (
      ("build/m2/mb_fpindep.flat", "build/verify/mb_fpindep.cycle.flat")),
     ("System paging", ("verif/sys/tests/ppage/ppage.bin",)),
 )
+_EVENT_LABELS = {
+    "any": "any",
+    "m": "mispredict",
+    "s": "stall",
+    "f": "I-fill",
+    "w": "page-walk",
+}
 
 
 class _ElidedLabel(QLabel):
@@ -728,6 +735,8 @@ class MainWindow(QMainWindow):
         self.event_kind.setAccessibleName("Pipeline event type")
         self.event_kind.setToolTip(
             "Choose which pipeline event [ and ] navigate")
+        self.event_kind.currentIndexChanged.connect(
+            self._event_kind_changed)
         ctl.addWidget(self.event_kind)
         self.evprev_btn = QPushButton("◀")
         self.evprev_btn.setAccessibleName("Previous pipeline event")
@@ -902,9 +911,6 @@ class MainWindow(QMainWindow):
         self.reset_btn.setToolTip(reset_tip)
         self.reset_btn.setAccessibleDescription(reset_tip)
         self.reset_btn.setEnabled(enabled)
-        for w in (self.evprev_btn, self.evnext_btn):
-            w.setEnabled(enabled)
-        self.event_kind.setEnabled(enabled)
         runnable = enabled and not self.backend.is_done()
         controls = (
             (self.step1_btn, "Advance one clock (.)"),
@@ -924,17 +930,97 @@ class MainWindow(QMainWindow):
             tip = normal_tip if runnable else f"{normal_tip}\n{reason}"
             w.setToolTip(tip)
             w.setAccessibleDescription(tip)
-        event_tips = (
-            (self.event_kind, "Choose which pipeline event [ and ] navigate"),
-            (self.evprev_btn,
-             "Jump the playhead to the previous captured pipeline event ([)"),
-            (self.evnext_btn,
-             "Jump the playhead to the next captured pipeline event (])"),
-        )
-        for widget, normal_tip in event_tips:
-            tip = normal_tip if enabled else f"{normal_tip}\n{no_session}"
-            widget.setToolTip(tip)
-            widget.setAccessibleDescription(tip)
+        self._refresh_event_navigation(session_enabled=enabled)
+
+    def _refresh_event_navigation(self, *_args, session_enabled=None):
+        """Expose event counts and disable arrows which cannot currently act."""
+        if session_enabled is None:
+            session_enabled = self._has_session()
+        spark = self.pipeline.spark
+        events = tuple(spark.ev) if session_enabled else ()
+        counts = {
+            code: (
+                sum(1 for event in events if event)
+                if code == "any" else events.count(code))
+            for code in _EVENT_LABELS
+        }
+        # Counts make a missing class discoverable before the user repeatedly
+        # presses an inert arrow. Keep stable codes in itemData for navigation.
+        blocked = self.event_kind.blockSignals(True)
+        try:
+            for index in range(self.event_kind.count()):
+                code = self.event_kind.itemData(index)
+                self.event_kind.setItemText(
+                    index, f"{_EVENT_LABELS[code]} ({counts[code]})")
+        finally:
+            self.event_kind.blockSignals(blocked)
+        self.event_kind.setEnabled(session_enabled)
+
+        code = self.event_kind.currentData()
+        label = _EVENT_LABELS.get(code, "pipeline")
+        count = counts.get(code, 0)
+        combo_tip = (
+            f"{count:,} captured {label} "
+            f"{'event' if count == 1 else 'events'} · "
+            "choose what [ and ] navigate"
+            if session_enabled else
+            "Choose which pipeline event [ and ] navigate\n"
+            "Open a program or choose a built example to enable execution.")
+        self.event_kind.setToolTip(combo_tip)
+        self.event_kind.setAccessibleDescription(combo_tip)
+
+        plot = self.pipeline.konata.plot
+        cur = plot.playhead
+        previous_origin = plot.max_cyc + 1 if cur is None else cur
+        next_origin = plot.base_cyc - 1 if cur is None else cur
+        targets = {
+            -1: (
+                spark.next_event(previous_origin, -1, code)
+                if session_enabled else None),
+            1: (
+                spark.next_event(next_origin, 1, code)
+                if session_enabled else None),
+        }
+        for direction, button, key in (
+                (-1, self.evprev_btn, "["),
+                (1, self.evnext_btn, "]")):
+            target = targets[direction]
+            button.setEnabled(session_enabled and target is not None)
+            where = "previous" if direction < 0 else "next"
+            if not session_enabled:
+                tip = (
+                    f"Jump to the {where} captured pipeline event ({key})\n"
+                    "Open a program or choose a built example to enable "
+                    "execution.")
+            elif target is not None:
+                tip = (
+                    f"Jump to the {where} {label} event at cycle "
+                    f"{int(target):,} ({key})")
+            elif not events:
+                tip = "No captured cycle history yet"
+            elif count == 0:
+                tip = f"No captured {label} events"
+            else:
+                edge = (
+                    f"cycle {int(cur):,}" if cur is not None
+                    else "the capture edge")
+                tip = f"No {where} {label} event from {edge}"
+            button.setToolTip(tip)
+            button.setAccessibleDescription(tip)
+
+    def _event_kind_changed(self, *_args):
+        """Keep the last-action row coherent with a newly selected event class."""
+        self._refresh_event_navigation()
+        code = self.event_kind.currentData()
+        label = _EVENT_LABELS.get(code, "pipeline")
+        events = tuple(self.pipeline.spark.ev)
+        count = (
+            sum(1 for event in events if event)
+            if code == "any" else events.count(code))
+        summary = (
+            f"{count:,} captured {'event' if count == 1 else 'events'}"
+            if count else "no captured matches")
+        self._notice(f"Event navigation · {label} · {summary}")
 
     def _notice(self, text, ms=3500):
         self.action_hint.setText(text)
@@ -1821,6 +1907,7 @@ class MainWindow(QMainWindow):
 
     def _cycle_seeked(self, cyc):
         """Describe a playhead-only seek without implying an instruction pin."""
+        self._refresh_event_navigation()
         pinned = self._pinned_n
         self._notice(
             f"Pipeline cycle {int(cyc)} selected · "
@@ -1853,6 +1940,7 @@ class MainWindow(QMainWindow):
         self._notice(
             f"Pinned retirement n={int(rec.n)} · cycle {int(rec.cyc)} · "
             f"{lane} · PC 0x{int(rec.pc):08x}{source}")
+        self._refresh_event_navigation()
 
     def _unpin(self):
         if getattr(self, "_pinned_n", None) is not None:
@@ -1913,20 +2001,21 @@ class MainWindow(QMainWindow):
         cyc = self.pipeline.spark.next_event(cur, direction, event_code)
         if cyc is not None:
             self.pipeline.highlight_cycle(cyc)
-            label = self.event_kind.currentText()
+            label = _EVENT_LABELS.get(event_code, "pipeline")
             self._notice(
                 f"{'Next' if direction > 0 else 'Previous'} {label} event "
                 f"at cycle {cyc}")
         else:
             label = (
                 "pipeline event"
-                if event_code == "any" else self.event_kind.currentText())
+                if event_code == "any" else _EVENT_LABELS[event_code])
             where = "later" if direction > 0 else "earlier"
             if not self.pipeline.spark.ev:
                 self._notice("No captured cycle history yet")
             else:
                 self._notice(
                     f"No {where} {label} in the captured timeline")
+        self._refresh_event_navigation()
 
     def do_step(self, n, stop_on_retire):
         if not self._has_session():

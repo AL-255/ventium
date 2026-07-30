@@ -111,8 +111,11 @@ pauses. Entering Assembly/C pauses continuous Run synchronously before its
 transport controls are hidden; returning to Visualizer does not resume without
 an explicit Run/F5. Opening a program/snapshot chooser or Help also pauses
 before obscuring live feedback, and cancel/close never auto-resumes. Choose an
-event class (any, mispredict, stall, I-fill, or page-walk);
-`[` and `]` jump among only those visible events.
+event class (any, mispredict, stall, I-fill, or page-walk). The selector reports
+the number of matching events in the captured window; unavailable arrows are
+disabled when that class is absent or the playhead is already at the
+corresponding edge. `[` and `]` jump among only those visible events and report
+an empty search without moving the playhead.
 The compact status row prioritizes cycle/state/EIP before performance and cache
 groups so the execution point survives narrow windows. Hover the status or
 last-action text for its complete untruncated message.

@@ -875,6 +875,8 @@ def scenario_startup(app, outdir):
             win.tables.cyc.accessibleDescription())
         assert win.pipeline.konata.scroll.focusPolicy() == Qt.NoFocus
         assert win.stepn.toolTip() and win.speed.toolTip()
+        assert win.event_kind.currentText() == "any (0)"
+        assert "Open a program" in win.event_kind.toolTip()
 
         old_backend = win.backend
         old_backend_class = main_module.Backend
@@ -2021,22 +2023,56 @@ def scenario_branch_transport(app, outdir):
         old_playhead = plot.playhead
         click(app, win.evprev_btn)
         assert plot.playhead is not None and plot.playhead <= old_playhead
+        assert not win.evnext_btn.isEnabled()
+        assert "No next any event" in win.evnext_btn.toolTip()
+        plot.playhead = None
+        win._refresh_event_navigation()
         click(app, win.evnext_btn)
         assert plot.playhead is not None
+        assert not win.evprev_btn.isEnabled()
+        assert "No previous any event" in win.evprev_btn.toolTip()
+        total_events = sum(bool(event) for event in spark.ev)
+        assert win.event_kind.currentText() == f"any ({total_events})"
+        assert f"{total_events:,} captured any events" in (
+            win.event_kind.toolTip())
+        expected_event_counts = {
+            "any": total_events,
+            "m": spark.ev.count("m"),
+            "s": spark.ev.count("s"),
+            "f": spark.ev.count("f"),
+            "w": spark.ev.count("w"),
+        }
+        for index in range(win.event_kind.count()):
+            code = win.event_kind.itemData(index)
+            assert win.event_kind.itemText(index).endswith(
+                f"({expected_event_counts[code]})")
         mispred_idx = win.event_kind.findData("m")
         assert mispred_idx >= 0
         win.event_kind.setCurrentIndex(mispred_idx)
         plot.playhead = None
+        win._refresh_event_navigation()
         click(app, win.evprev_btn)
         event_i = (
             len(win.pipeline.spark.ev) - 1
             - (win.pipeline.spark._last_cyc - plot.playhead))
         assert win.pipeline.spark.ev[event_i] == "m"
         assert "mispredict event at cycle" in win.action_hint.text()
+        assert not win.evnext_btn.isEnabled()
+        assert "No next mispredict event" in win.evnext_btn.toolTip()
         walk_idx = win.event_kind.findData("w")
         win.event_kind.setCurrentIndex(walk_idx)
         plot.playhead = None
-        click(app, win.evnext_btn)
+        win._refresh_event_navigation()
+        assert win.event_kind.currentText() == "page-walk (0)"
+        assert not win.evprev_btn.isEnabled()
+        assert not win.evnext_btn.isEnabled()
+        assert win.evnext_btn.toolTip() == "No captured page-walk events"
+        assert win.action_hint.text() == (
+            "Event navigation · page-walk · no captured matches")
+        save_shot(app, win, outdir, "01b_event_navigation_empty")
+        # The keyboard shortcut still explains an empty search even though the
+        # toolbar accurately presents it as unavailable.
+        win._jump_event(1)
         assert "No later page-walk" in win.action_hint.text()
         win.event_kind.setCurrentIndex(win.event_kind.findData("any"))
         QTest.keyClick(plot, Qt.Key_End)
@@ -3174,7 +3210,20 @@ def scenario_fibonacci_uv(app, outdir):
                 win.status_lbl.toolTip())
             assert win.reset_btn.isEnabled()
             assert not win.step1_btn.isEnabled() and not win.run_btn.isEnabled()
-            assert win.evprev_btn.isEnabled() and win.evnext_btn.isEnabled()
+            event_code = win.event_kind.currentData()
+            playhead = win.pipeline.konata.plot.playhead
+            previous_origin = (
+                win.pipeline.konata.plot.max_cyc + 1
+                if playhead is None else playhead)
+            next_origin = (
+                win.pipeline.konata.plot.base_cyc - 1
+                if playhead is None else playhead)
+            assert win.evprev_btn.isEnabled() == (
+                win.pipeline.spark.next_event(
+                    previous_origin, -1, event_code) is not None)
+            assert win.evnext_btn.isEnabled() == (
+                win.pipeline.spark.next_event(
+                    next_origin, 1, event_code) is not None)
             for control in (
                     win.step1_btn, win.stepi_btn, win.stepn,
                     win.stepn_btn, win.run_btn, win.speed):
