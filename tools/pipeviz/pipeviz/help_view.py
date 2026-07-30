@@ -220,7 +220,9 @@ repeated-string traffic is not included in this client-side operand replay.</p>
 <p>System mode places a BIOS-style raw image so its last byte ends at 1 MiB and
 starts the core at F000:FFF0. Use it for paging and protected-mode fixtures.
 The SoC option additionally requires a current <code>build.sh --soc</code>
-library for port I/O, PIC, and PIT behavior.</p>
+library for port I/O, PIC, and PIT behavior. If it is unavailable, Pipeviz
+warns and falls back to the core model. If that fallback also fails, the old
+live backend and visible mode remain unchanged.</p>
 <p>Open Snapshot accepts a matching <code>.aux</code>/<code>.vlt</code> pair.
 Its timeline begins at the restored point because the snapshot stores model
 and memory state, not the earlier visual history. The architectural clock stays

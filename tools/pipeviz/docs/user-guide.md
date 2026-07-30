@@ -60,6 +60,9 @@ reload also leaves the current session intact until its preserved setup
 validates.
 System boot disables entry/load/ESP because the architectural reset vector,
 BIOS top-alignment, and firmware stack setup determine those values.
+If a requested SoC model is unavailable, Pipeviz warns and uses the core model.
+The checkbox changes only after that fallback is constructed; if both
+constructions fail, the old live session and its requested mode remain intact.
 
 Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
 next retirement, and **Step N** for a useful analysis window.  `F5` runs and

@@ -1219,6 +1219,7 @@ class MainWindow(QMainWindow):
     # ---- driving ----
     def _fresh_backend(self, soc=False):
         candidate = None
+        fell_back_to_core = False
         try:
             if soc and not Backend.supports_snapshot(self._libpath, soc=True):
                 raise FileNotFoundError(
@@ -1230,7 +1231,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "SoC model missing",
                                     f"{e}\n\nFalling back to ventium_top. Run "
                                     "`tools/pipeviz/build.sh --soc` to build it.")
-                self.soc_cb.setChecked(False)
+                fell_back_to_core = True
                 try:
                     candidate = Backend(self._libpath, soc=False)
                 except (FileNotFoundError, OSError, RuntimeError) as fallback_error:
@@ -1243,6 +1244,11 @@ class MainWindow(QMainWindow):
         old = self.backend
         self.backend = candidate
         old.close()
+        # Only advertise the core fallback after its construction succeeded.
+        # On a double failure the still-live old backend and visible requested
+        # mode must remain coherent.
+        if fell_back_to_core:
+            self.soc_cb.setChecked(False)
         return True
 
     def on_reset(self):

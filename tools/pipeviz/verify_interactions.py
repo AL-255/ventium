@@ -645,6 +645,7 @@ def scenario_startup(app, outdir):
         old_backend = win.backend
         old_backend_class = main_module.Backend
         old_critical = QMessageBox.critical
+        old_warning = QMessageBox.warning
         reset_errors = []
 
         def fail_backend(*_args, **_kwargs):
@@ -662,6 +663,37 @@ def scenario_startup(app, outdir):
         assert win.backend is old_backend and old_backend.h
         assert reset_errors == [
             ("Backend reset failed", "synthetic construction failure")]
+
+        class FailSocFallback:
+            @staticmethod
+            def supports_snapshot(_libpath, soc=False):
+                return not soc
+
+            def __init__(self, *_args, **_kwargs):
+                raise RuntimeError("synthetic fallback construction failure")
+
+        fallback_messages = []
+        win.sys_cb.setChecked(True)
+        win.soc_cb.setChecked(True)
+        try:
+            main_module.Backend = FailSocFallback
+            QMessageBox.warning = (
+                lambda _parent, title, text:
+                fallback_messages.append((title, text)))
+            QMessageBox.critical = (
+                lambda _parent, title, text:
+                fallback_messages.append((title, text)))
+            assert not win._fresh_backend(True)
+        finally:
+            main_module.Backend = old_backend_class
+            QMessageBox.warning = old_warning
+            QMessageBox.critical = old_critical
+        assert win.backend is old_backend and old_backend.h
+        assert win.soc_cb.isChecked() and win.sys_cb.isChecked()
+        assert [title for title, _text in fallback_messages] == [
+            "SoC model missing", "Backend reset failed"]
+        win.soc_cb.setChecked(False)
+        win.sys_cb.setChecked(False)
 
         assert "no image loaded" in win.status_lbl.text()
         assert win.cyc_cb.text() == "U/V issue"

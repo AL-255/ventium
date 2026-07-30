@@ -201,6 +201,13 @@ the default stack while Reload still preserves the displayed setup. Acceptance
 covers numeric/string addresses, invalid pseudo-booleans without partial
 application, explicit external system boot, and a 32 KiB user `.bin`.
 
+**SoC fallback transaction audit:** `_fresh_backend` cleared the SoC checkbox
+before constructing its core fallback. If that second construction also
+failed, the old SoC backend remained live while the visible mode claimed core.
+The checkbox now changes only after a fallback candidate exists. A synthetic
+double-failure regression requires both warning/diagnostic paths, the old live
+handle, and the requested system/SoC controls to remain intact.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

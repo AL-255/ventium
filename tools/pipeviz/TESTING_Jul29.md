@@ -92,8 +92,9 @@ Procedure:
 1. Verify explicit-image, explicit-snapshot, and no-argument demo startup
    resolution are mutually distinct (a snapshot never falls through to a demo).
 2. Construct and show a fresh `MainWindow`.
-3. Inject a backend-construction failure and require the existing live handle
-   to survive with an actionable error.
+3. Inject a backend-construction failure and a separate SoC-plus-core
+   double-failure; require the existing live handle and requested mode to
+   survive with actionable errors.
 4. Confirm Reset, Clock, Insn, Step N, Run, and event navigation are disabled.
 5. Confirm Pipeline, IPC history, Trace, Registers, caches, Prefetch, Cycles, Memory, and Mem map
    explicitly say that no program is loaded; Memory navigation is disabled.
@@ -127,6 +128,8 @@ Procedure:
 Expected and observed:
 
 - Status says no image is loaded.
+- Backend replacement is transactional across both direct and SoC-fallback
+  construction failures.
 - Every data pane distinguishes unloaded state from sampled zero/empty state.
 - Manifest launch settings apply atomically; explicit system mode works outside
   the repository, while a generic large `.bin` stays a fresh user workload.
