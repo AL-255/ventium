@@ -2043,16 +2043,16 @@ def scenario_branch_transport(app, outdir):
         click(app, win.evprev_btn)
         assert plot.playhead is not None and plot.playhead <= old_playhead
         assert not win.evnext_btn.isEnabled()
-        assert "No next any event" in win.evnext_btn.toolTip()
+        assert "No next pipeline event" in win.evnext_btn.toolTip()
         plot.playhead = None
         win._refresh_event_navigation()
         click(app, win.evnext_btn)
         assert plot.playhead is not None
         assert not win.evprev_btn.isEnabled()
-        assert "No previous any event" in win.evprev_btn.toolTip()
+        assert "No previous pipeline event" in win.evprev_btn.toolTip()
         total_events = sum(bool(event) for event in spark.ev)
         assert win.event_kind.currentText() == f"any ({total_events})"
-        assert f"{total_events:,} captured any events" in (
+        assert f"{total_events:,} captured pipeline events" in (
             win.event_kind.toolTip())
         expected_event_counts = {
             "any": total_events,

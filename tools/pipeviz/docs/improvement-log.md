@@ -9,6 +9,20 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — natural `any` event feedback
+
+**Navigation-language audit:** the selector's compact class name `any` leaked
+into sentences as `captured any events` and `Next any event`, even though it
+means any pipeline event.
+
+**Changes:** the dropdown retains the useful `any (N)` label, while counts,
+targets, endpoint explanations, and successful jumps now say `pipeline
+event(s)`. Specific classes remain mispredict, stall, I-fill, and page-walk.
+
+**Verification:** branch/transport acceptance requires natural pipeline-event
+phrasing for aggregate counts and both directional endpoints, while retaining
+all per-class count and target checks.
+
 ## July 30 continuation — readable capped search counts
 
 **Counter-cap audit:** source search reserved 70 pixels, but its ungrouped

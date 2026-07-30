@@ -55,6 +55,11 @@ _EVENT_LABELS = {
 }
 
 
+def _event_object(code):
+    """Noun used in sentences; the selector's `any` means any pipeline event."""
+    return "pipeline" if code == "any" else _EVENT_LABELS.get(code, "pipeline")
+
+
 class _ElidedLabel(QLabel):
     """Keep a full accessible value while painting a width-bounded summary."""
 
@@ -959,10 +964,10 @@ class MainWindow(QMainWindow):
         self.event_kind.setEnabled(session_enabled)
 
         code = self.event_kind.currentData()
-        label = _EVENT_LABELS.get(code, "pipeline")
+        event_object = _event_object(code)
         count = counts.get(code, 0)
         combo_tip = (
-            f"{count:,} captured {label} "
+            f"{count:,} captured {event_object} "
             f"{'event' if count == 1 else 'events'} · "
             "choose what [ and ] navigate"
             if session_enabled else
@@ -996,17 +1001,17 @@ class MainWindow(QMainWindow):
                     "execution.")
             elif target is not None:
                 tip = (
-                    f"Jump to the {where} {label} event at cycle "
+                    f"Jump to the {where} {event_object} event at cycle "
                     f"{int(target):,} ({key})")
             elif not events:
                 tip = "No captured cycle history yet"
             elif count == 0:
-                tip = f"No captured {label} events"
+                tip = f"No captured {event_object} events"
             else:
                 edge = (
                     f"cycle {int(cur):,}" if cur is not None
                     else "the capture edge")
-                tip = f"No {where} {label} event from {edge}"
+                tip = f"No {where} {event_object} event from {edge}"
             button.setToolTip(tip)
             button.setAccessibleDescription(tip)
 
@@ -2003,14 +2008,12 @@ class MainWindow(QMainWindow):
         cyc = self.pipeline.spark.next_event(cur, direction, event_code)
         if cyc is not None:
             self.pipeline.highlight_cycle(cyc)
-            label = _EVENT_LABELS.get(event_code, "pipeline")
+            label = _event_object(event_code)
             self._notice(
                 f"{'Next' if direction > 0 else 'Previous'} {label} event "
                 f"at cycle {cyc}")
         else:
-            label = (
-                "pipeline event"
-                if event_code == "any" else _EVENT_LABELS[event_code])
+            label = f"{_event_object(event_code)} event"
             where = "later" if direction > 0 else "earlier"
             if not self.pipeline.spark.ev:
                 self._notice("No captured cycle history yet")
