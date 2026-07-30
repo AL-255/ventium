@@ -355,6 +355,8 @@ Procedure:
    execution marker while retaining the source map.
 8. Focus the timing diagram and require Escape with an empty Trace filter to
    perform the same zero-clock LIVE transition.
+9. Require the pinned Control / mode row to retain its captured USER/SYS, CPL,
+   and SMM values rather than repeating the PINNED banner.
 
 Observed evidence:
 

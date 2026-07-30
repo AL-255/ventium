@@ -104,11 +104,17 @@ int main(int argc, char** argv) {
 
   static vv_retire_t rr[16];
   int got = vv_get_retires(h, 0, rr, 16);
+  int modes_ok = 1;
   printf("first %d retires:\n", got);
-  for (int i = 0; i < got; ++i)
-    printf("  n=%llu cyc=%llu pc=0x%08x pipe=%u paired=%u bytes=%02x %02x %02x\n",
+  for (int i = 0; i < got; ++i) {
+    modes_ok &= !rr[i].sys_mode && rr[i].cpl == 0 && !rr[i].smm_active;
+    printf("  n=%llu cyc=%llu pc=0x%08x pipe=%u paired=%u mode=%s CPL=%u%s "
+           "bytes=%02x %02x %02x\n",
            (unsigned long long)rr[i].n, (unsigned long long)rr[i].cyc, rr[i].pc,
-           rr[i].pipe, rr[i].paired, rr[i].bytes[0], rr[i].bytes[1], rr[i].bytes[2]);
+           rr[i].pipe, rr[i].paired, rr[i].sys_mode ? "SYS" : "USER", rr[i].cpl,
+           rr[i].smm_active ? " SMM" : "",
+           rr[i].bytes[0], rr[i].bytes[1], rr[i].bytes[2]);
+  }
 
   static vv_cycle_t cc[8];
   int gc = vv_get_cycles(h, 0, cc, 8);
@@ -119,7 +125,8 @@ int main(int argc, char** argv) {
            cc[i].stall_cnt, cc[i].retU, cc[i].retV);
 
   int ok = total == 400 && s.core_cyc == 400
-           && vv_retire_count(h) > 0 && ic > 0 && got > 0 && gc > 0;
+           && vv_retire_count(h) > 0 && ic > 0 && got > 0 && gc > 0
+           && modes_ok;
   vv_destroy(h);
   if (!ok) {
     fprintf(stderr, "smoke_test: backend invariants failed\n");

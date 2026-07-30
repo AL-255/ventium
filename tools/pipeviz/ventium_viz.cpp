@@ -108,6 +108,7 @@ struct Viz {
   uint64_t clk        = 0;     // completed clocks since reset
   uint64_t cur_cyc    = 0;     // clock index being evaluated (for retire stamping)
   uint8_t  cur_d32    = 1;     // CS.D pre-edge this clock (retire disasm width)
+  uint8_t  cur_sys_mode = 0, cur_cpl = 0, cur_smm_active = 0;
   uint32_t cur_cs_base = 0;    // CS base pre-edge (bytes live at cs_base + EIP)
   uint32_t cur_seg_base[VV_NSEG] = {};
   uint32_t cur_cr0 = 0, cur_cr3 = 0, cur_cr4 = 0;
@@ -293,6 +294,9 @@ extern "C" void vtm_retire(
   for (int i = 0; i < VV_NSEG; ++i) r.seg_base[i] = v->cur_seg_base[i];
   r.cr0 = v->cur_cr0; r.cr3 = v->cur_cr3; r.cr4 = v->cur_cr4;
   r.d32 = v->cur_d32;
+  r.sys_mode = v->cur_sys_mode;
+  r.cpl = v->cur_cpl;
+  r.smm_active = v->cur_smm_active;
   // Read instruction bytes through the PRE-EXECUTION CS base and page tables.
   // This keeps Trace disassembly exact in real mode and non-identity paging,
   // rather than treating a linear address as a physical BFM address.
@@ -380,6 +384,9 @@ bool clock_once(Viz* v) {
   // instruction executed under (so the trace disassembles real vs 32-bit code).
   { auto* R = top->rootp;
     v->cur_d32 = CORE(cs_d) ? 1 : 0;
+    v->cur_sys_mode = CORE(sys_mode) ? 1 : 0;
+    v->cur_cpl = (uint8_t)CORE(cpl_r);
+    v->cur_smm_active = CORE(smm_active) ? 1 : 0;
     for (int i = 0; i < VV_NSEG; ++i)
       v->cur_seg_base[i] = CORE(seg_base)[i];
     v->cur_cs_base = v->cur_seg_base[0];    // SG_CS = 0

@@ -63,7 +63,9 @@ class VVRetire(C.Structure):
                 ("gpr", u32 * NGPR), ("seg", u16 * NSEG),
                 ("seg_base", u32 * NSEG),
                 ("cr0", u32), ("cr3", u32), ("cr4", u32),
-                ("pipe", u8), ("paired", u8), ("d32", u8), ("nbytes", u8), ("bytes", u8 * 16),
+                ("pipe", u8), ("paired", u8), ("d32", u8),
+                ("sys_mode", u8), ("cpl", u8), ("smm_active", u8),
+                ("nbytes", u8), ("bytes", u8 * 16),
                 ("x87_valid", u8), ("fctrl", u16), ("fstat", u16), ("ftag", u16),
                 ("st", (u8 * 10) * NFPR)]
 

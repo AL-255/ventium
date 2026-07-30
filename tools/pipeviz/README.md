@@ -199,7 +199,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   selection cues.
   `PC*`, segment `base*`, and CR0/CR3/CR4 are explicitly starred because they
   are the instruction's pre-execution translation context; segment limits and
-  CR2 honestly show `n/a` because they are not captured per retirement. At compact
+  CR2 honestly show `n/a` because they are not captured per retirement.
+  Control / mode retains the captured pre-execution `USER`/`SYS`, CPL, and SMM
+  state instead of repeating the global PINNED label. At compact
   widths it becomes indexed **Integer / Segments / x87** pages so long values
   remain readable instead of widening the window.
 * **Status bar** — `cyc` · FSM state/mode · `ret` / `IPC` / dual-issue `pair%` /

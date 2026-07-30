@@ -1185,8 +1185,14 @@ def scenario_branch_transport(app, outdir):
         row = win.trace.tbl.rowCount() - 5
         select_table_row(app, win.trace.tbl, row)
         selected_n = int(win.trace.tbl.item(row, 0).text())
+        selected_rec = next(
+            rec for rec in win.backend.get_retires(selected_n, 1)
+            if rec.n == selected_n)
         assert win._pinned_n == selected_n
-        assert "PINNED" in win.regs.mode_lbl.text()
+        assert win.regs.mode_lbl.text() == (
+            f"{'SYS' if selected_rec.sys_mode else 'USER'}  "
+            f"CPL={selected_rec.cpl}"
+            f"{'  SMM' if selected_rec.smm_active else ''}")
         assert win.regs.state_banner.text().startswith(
             f"PINNED n={selected_n} ·")
         assert "post-commit" in win.regs.state_banner.toolTip()
@@ -1435,13 +1441,15 @@ def scenario_x87(app, outdir):
         select_table_row(app, win.trace.tbl, fp_rows[-4])
         chosen_n = int(win.trace.tbl.item(fp_rows[-4], 0).text())
         assert win._pinned_n == chosen_n
-        assert "PINNED" in win.regs.mode_lbl.text()
         assert win.regs.state_banner.text().startswith(
             f"PINNED n={chosen_n} ·")
         assert win.regs.fphdr.text().startswith("pin ctrl=")
         chosen_rec = next(
             rec for rec in win.backend.get_retires(chosen_n, 1)
             if rec.n == chosen_n)
+        assert win.regs.mode_lbl.text() == (
+            f"{'SYS' if chosen_rec.sys_mode else 'USER'}  CPL={chosen_rec.cpl}"
+            f"{'  SMM' if chosen_rec.smm_active else ''}")
         assert f"empty={chosen_rec.ftag & 0xff:02x}" in win.regs.fphdr.text()
         assert all(tag.text().endswith("·") == bool((chosen_rec.ftag >> i) & 1)
                    for i, (tag, _hexv, _value) in enumerate(win.regs.st_lbls))
@@ -1460,7 +1468,7 @@ def scenario_x87(app, outdir):
         save_shot(app, win, outdir, "04_x87_pinned")
 
         click(app, win.step1_btn)
-        assert win._pinned_n is None and "PINNED" not in win.regs.mode_lbl.text()
+        assert win._pinned_n is None
         assert win.trace.tbl.currentRow() < 0
         assert win.pipeline.konata.plot.sel_row is None
         print(f"OK x87: fp trace rows={len(fp_rows)}, cycle samples="
@@ -1556,6 +1564,9 @@ def scenario_system_and_switch(app, outdir):
             assert win.regs.cr_lbls[name].text() == (
                 f"{getattr(pin_rec, name.lower()):08x}")
         assert win.regs.cr_lbls["CR2"].text() == "n/a"
+        assert win.regs.mode_lbl.text() == (
+            f"{'SYS' if pin_rec.sys_mode else 'USER'}  CPL={pin_rec.cpl}"
+            f"{'  SMM' if pin_rec.smm_active else ''}")
         assert "pre-execution" in win.regs.mode_lbl.toolTip()
         if win.regs._compact:
             win.regs._compact_tabs.setCurrentIndex(1)

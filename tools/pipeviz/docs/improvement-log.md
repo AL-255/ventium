@@ -46,6 +46,13 @@ The binding lives on the timing widget, so it cannot conflict with Assembly/C
 completion or inline-search Escape. A focused-timing regression proves cycle
 invariance and cue clearing.
 
+**Pinned-mode audit:** after adding the global state strip, the Segments page
+still repeated `PINNED n=… cyc=…` in its Control / mode row, wasting space and
+hiding execution mode. The retirement ABI now captures pre-edge `sys_mode`,
+CPL, and SMM alongside CS.D/translation context. Pinned Registers display those
+truthful values while the global strip alone carries selection state. ABI-size,
+user/x87, and real paged-system regressions lock the new fields.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority

@@ -412,11 +412,13 @@ class RegsView(QWidget):
         self.cr_lbls["CR2"].setText("n/a")
         self.cr_lbls["CR2"].setStyleSheet(na)
         self.cr_lbls["CR2"].setToolTip("CR2 is not captured per retirement")
-        self.mode_lbl.setText(f"PINNED n={rec.n} cyc={rec.cyc}")
-        self.mode_lbl.setStyleSheet("color:#e3b341;")
+        self.mode_lbl.setText(
+            f"{'SYS' if rec.sys_mode else 'USER'}  CPL={rec.cpl}"
+            f"{'  SMM' if rec.smm_active else ''}")
+        self.mode_lbl.setStyleSheet(same)
         self.mode_lbl.setToolTip(
-            "GPRs/selectors are post-commit; PC*, base*, and CR0/CR3/CR4 are "
-            "pre-execution instruction/translation context")
+            "Execution mode sampled before this retirement; GPRs/selectors are "
+            "post-commit; PC*, base*, and CR0/CR3/CR4 are pre-execution context")
         if rec.x87_valid:
             # tight single-space header (the "PINNED" banner already flags the
             # mode) so the 4-digit tag value never clips off the panel's right edge.
