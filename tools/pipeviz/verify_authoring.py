@@ -124,6 +124,30 @@ def verify_catalog():
     assert instruction_info("nop").description == (
         "Perform no architectural operation.")
     assert "CET compatibility" in instruction_info("endbr32").description
+    assert instruction_info("jnz").description == (
+        "Jump when not equal / nonzero (ZF=0).")
+    assert instruction_info("ja").description == (
+        "Jump when unsigned above (CF=0 and ZF=0).")
+    assert instruction_info("jl").description == (
+        "Jump when signed less-than (SF≠OF).")
+    assert instruction_info("setz").description == (
+        "Store 1 when equal / zero (ZF=1); otherwise store 0.")
+    assert instruction_info("setg").description == (
+        "Store 1 when signed greater-than (ZF=0 and SF=OF); "
+        "otherwise store 0.")
+    assert instruction_info("loopne").description == (
+        "Decrement (E)CX and jump when nonzero and ZF=0.")
+    assert instruction_info("jecxz").description == (
+        "Jump when ECX is zero; flags are unchanged.")
+    obsolete_condition_help = {
+        "Conditional branch selected by EFLAGS.",
+        "Assembler alias for a conditional branch selected by EFLAGS.",
+        "Store a one-byte Boolean selected by EFLAGS.",
+        "Assembler alias for a one-byte SETcc result.",
+        "Counted/zero-count branch handled on the slow control path.",
+    }
+    assert not any(
+        info.description in obsolete_condition_help for info in CATALOG)
     required = {
         "aaa", "adc", "add", "bound", "bswap", "bt", "call", "cmpxchg8b",
         "cpuid", "endbr32", "f2xm1", "fadd", "fbld", "fldenv", "fprem1",
@@ -1029,6 +1053,16 @@ def scenario(app, outdir):
             editor.completion.info.availability.styleSheet())
         editor.completion.info.set_instruction(instruction_info("add"))
         save(editor.completion, outdir, "01_opcode_completion_popup")
+        jnz_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic == "jnz")
+        editor.completion.list.setCurrentRow(jnz_row)
+        settle(app)
+        assert editor.completion.info.description.text() == (
+            "Jump when not equal / nonzero (ZF=0).")
+        assert editor.completion.info.preview.info.pipe == "PV"
+        save(editor.completion, outdir, "01_opcode_branch_popup")
+        editor.completion.list.setCurrentRow(add_row)
         reference_source = editor.toPlainText()
         editor.completion.accept_current()
         assert editor.toPlainText() == reference_source

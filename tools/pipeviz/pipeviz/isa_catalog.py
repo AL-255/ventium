@@ -8,7 +8,7 @@ derived from ``rtl/core/decode_stages.sv`` and the P5 timing classifier in
 the description/status text so completion never silently advertises SSE/MMX or
 a later-x86 instruction that the modeled P54C cannot execute.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -231,9 +231,72 @@ _add("fwait wait", "", "Wait for pending x87 work (modeled as the P5 wait/no-op 
      "FP", stages=("F", "D", "FP"))
 
 
+_CC_CONDITIONS = {
+    "o": "overflow is set (OF=1)",
+    "no": "overflow is clear (OF=0)",
+    "b": "unsigned below / carry (CF=1)",
+    "c": "unsigned below / carry (CF=1)",
+    "nae": "unsigned below / carry (CF=1)",
+    "nb": "unsigned above or equal / no carry (CF=0)",
+    "nc": "unsigned above or equal / no carry (CF=0)",
+    "ae": "unsigned above or equal / no carry (CF=0)",
+    "z": "equal / zero (ZF=1)",
+    "e": "equal / zero (ZF=1)",
+    "nz": "not equal / nonzero (ZF=0)",
+    "ne": "not equal / nonzero (ZF=0)",
+    "be": "unsigned below or equal (CF=1 or ZF=1)",
+    "na": "unsigned below or equal (CF=1 or ZF=1)",
+    "nbe": "unsigned above (CF=0 and ZF=0)",
+    "a": "unsigned above (CF=0 and ZF=0)",
+    "s": "the sign flag is set (SF=1)",
+    "ns": "the sign flag is clear (SF=0)",
+    "p": "parity is even (PF=1)",
+    "pe": "parity is even (PF=1)",
+    "np": "parity is odd (PF=0)",
+    "po": "parity is odd (PF=0)",
+    "l": "signed less-than (SF≠OF)",
+    "nge": "signed less-than (SF≠OF)",
+    "nl": "signed greater-than-or-equal (SF=OF)",
+    "ge": "signed greater-than-or-equal (SF=OF)",
+    "le": "signed less-than-or-equal (ZF=1 or SF≠OF)",
+    "ng": "signed less-than-or-equal (ZF=1 or SF≠OF)",
+    "nle": "signed greater-than (ZF=0 and SF=OF)",
+    "g": "signed greater-than (ZF=0 and SF=OF)",
+}
+_LOOP_DESCRIPTIONS = {
+    "loop": "Decrement (E)CX and jump when the result is nonzero.",
+    "loopz": "Decrement (E)CX and jump when nonzero and ZF=1.",
+    "loope": "Decrement (E)CX and jump when nonzero and ZF=1.",
+    "loopnz": "Decrement (E)CX and jump when nonzero and ZF=0.",
+    "loopne": "Decrement (E)CX and jump when nonzero and ZF=0.",
+    "jcxz": "Jump when CX is zero; flags are unchanged.",
+    "jecxz": "Jump when ECX is zero; flags are unchanged.",
+}
+
+
+def _specialize_condition_description(info):
+    """Make completion useful for each Jcc/SETcc spelling, including aliases."""
+    mnemonic = info.mnemonic
+    suffix = (
+        mnemonic[3:] if mnemonic.startswith("set")
+        else mnemonic[1:] if mnemonic.startswith("j")
+        else "")
+    condition = _CC_CONDITIONS.get(suffix)
+    if condition:
+        description = (
+            f"Store 1 when {condition}; otherwise store 0."
+            if mnemonic.startswith("set")
+            else f"Jump when {condition}.")
+        return replace(info, description=description)
+    description = _LOOP_DESCRIPTIONS.get(mnemonic)
+    return replace(info, description=description) if description else info
+
+
 # One entry per insertion token. Families intentionally share descriptions, but
 # aliases remain separate completion choices because users type them directly.
-CATALOG = tuple(sorted(_catalog, key=lambda item: item.mnemonic))
+CATALOG = tuple(sorted(
+    (_specialize_condition_description(item) for item in _catalog),
+    key=lambda item: item.mnemonic))
 BY_MNEMONIC = {item.mnemonic: item for item in CATALOG}
 MNEMONICS = frozenset(BY_MNEMONIC)
 

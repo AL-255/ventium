@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — exact condition-code completion help
+
+**Catalogue-description audit:** 60 Jcc/SETcc entries had exact signatures but
+only said “selected by EFLAGS” or “assembler alias.” LOOP/JCXZ variants shared
+one generic slow-path sentence. The popup therefore could not teach why `ja`
+differs from `jg`, or which flags `jnz` consumes, while editing a branch-heavy
+experiment.
+
+**Changes:** every canonical and alias Jcc now states its exact
+CF/ZF/SF/OF/PF predicate with signed or unsigned meaning. SETcc uses the same
+predicate and explains its 1/0 result. LOOP/LOOPE/LOOPNE and JCXZ/JECXZ name
+their counter width, decrement behavior, and ZF condition.
+
+**Verification:** catalogue acceptance checks representative unsigned, signed,
+zero, alias, SETcc, LOOP, and zero-count entries and forbids every former
+generic sentence across all 291 completions. Popup interaction selects `jnz`,
+requires its `ZF=0` explanation and PV preview, and records a dedicated visual
+capture.
+
 ## July 30 continuation — concise authoring diagnostics
 
 **Compact-error audit:** assembler and GCC errors spent most of the narrow
