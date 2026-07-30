@@ -270,6 +270,8 @@ its amber status says to use `Alt+C` for the source diagnostic.
 Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
 description, mode/build availability, approximate latency, pairing class
 (`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
+With no opcode selected, the persistent sidebar uses one compact empty state
+and points to caret placement or `Ctrl+Space`.
 Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,
 Enter/Tab or a double-click to insert, and Escape to close; the popup keeps
 these controls visible at its foot.

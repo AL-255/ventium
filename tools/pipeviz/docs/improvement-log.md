@@ -11,6 +11,12 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Compact instruction-preview hierarchy audit:** the empty Assembly sidebar
+repeated “Instruction preview” as both its section heading and field value, then
+duplicated the same placement instruction in the diagram. The field now says
+“No opcode selected,” leaves its description empty, and keeps one actionable
+caret/Ctrl+Space hint in the diagram and accessible description.
+
 **C diagnostics terminology audit:** the C pane inherited Assembly's “Build
 diagnostics” empty text and warning description, conflicting with the
 Compile→Assembly controls around it. The shared pane now carries an operation

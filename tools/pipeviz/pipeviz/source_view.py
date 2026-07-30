@@ -1038,13 +1038,15 @@ class InstructionPipelinePreview(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setAccessibleName("Instruction pipeline preview")
         self.setAccessibleDescription(
-            "No instruction selected; place the cursor on an opcode")
+            "No instruction selected; place the caret on an opcode or press "
+            "Ctrl+Space")
 
     def set_instruction(self, info):
         self.info = info
         if info is None:
             self.setAccessibleDescription(
-                "No instruction selected; place the cursor on an opcode")
+                "No instruction selected; place the caret on an opcode or "
+                "press Ctrl+Space")
         else:
             lane = {
                 "UV": "U or V, pairable",
@@ -1066,7 +1068,9 @@ class InstructionPipelinePreview(QWidget):
         if self.info is None:
             painter.setPen(QColor("#586069"))
             painter.setFont(_mono(9))
-            painter.drawText(self.rect(), Qt.AlignCenter, "Place the cursor on an opcode")
+            painter.drawText(
+                self.rect(), Qt.AlignCenter,
+                "Place the caret on an opcode\nor press Ctrl+Space")
             return
         info = self.info
         colors = {
@@ -1110,12 +1114,11 @@ class InstructionInfoPane(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
-        self.signature = QLabel("Instruction preview")
+        self.signature = QLabel("No opcode selected")
         self.signature.setAccessibleName("Instruction signature")
         self.signature.setStyleSheet("font-weight:bold;color:#e6edf3;")
         self.signature.setWordWrap(True)
-        self.description = QLabel(
-            "Place the cursor on an opcode or open completion with Ctrl+Space.")
+        self.description = QLabel("")
         self.description.setAccessibleName("Instruction description")
         self.description.setWordWrap(True)
         self.description.setStyleSheet("color:#9aa3ad;")
@@ -1133,9 +1136,8 @@ class InstructionInfoPane(QWidget):
     def set_instruction(self, info):
         self.preview.set_instruction(info)
         if info is None:
-            self.signature.setText("Instruction preview")
-            self.description.setText(
-                "Place the cursor on an opcode or open completion with Ctrl+Space.")
+            self.signature.setText("No opcode selected")
+            self.description.setText("")
             self.availability.setText("")
             return
         self.signature.setText(info.signature)

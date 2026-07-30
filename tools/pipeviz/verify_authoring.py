@@ -289,6 +289,10 @@ def scenario(app, outdir):
         assert "not saved" in win.assembly.source_badge.text()
         assert win.assembly.editor.completion.list.accessibleName()
         assert win.assembly.diagnostics.accessibleName()
+        assert win.assembly.info.signature.text() == "No opcode selected"
+        assert not win.assembly.info.description.text()
+        assert "Ctrl+Space" in (
+            win.assembly.info.preview.accessibleDescription())
         assert win.assembly.diagnostics.placeholderText() == (
             "Build diagnostics appear here.")
         assert win.assembly.diagnostics.accessibleDescription() == (
