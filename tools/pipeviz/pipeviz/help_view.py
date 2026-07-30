@@ -80,7 +80,9 @@ run of stall cells means one instruction held resources for several cycles.</p>
 Move over an occupied U, V, or FP cell to see its PC, then click it to mark the
 exact linked Assembly line. The Visualizer stays open and the Assembly tab gains
 <b>L…</b>; press Alt+A when you want to inspect or edit that line. A finished
-HLT remains an occupied, clickable cell so the stop location is explicit.</p>
+HLT remains an occupied, clickable cell so the stop location is explicit.
+<b>[paired]</b> means U/V issue now; <b>[blocked]</b> means a candidate pair is
+held by a current hazard.</p>
 <p>Click a row to place the cyan playhead, synchronize the Trace, pin Registers
 after that retirement, and draw producer-to-consumer edges. An amber thick edge
 marks a gating dependency such as a load-use stall. Shift-click another row to
@@ -131,7 +133,8 @@ and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operatio
 say so explicitly. Completion inserts only when the cursor is in an opcode
 slot; elsewhere the full catalogue is safe, reference-only help. GNU as
 semicolons separate statements, and completion follows the opcode in each
-statement. Build errors highlight their source line.</p>
+statement while ignoring separators/comment markers inside quoted data. Build
+errors, including fatal compiler errors, highlight their source line.</p>
 <h2>Source-linked investigation</h2>
 <p>Assembly is built with a DWARF line table. Clicking an occupied live U/V/FP
 stage cell, a Trace row, or a Pipeline timing row therefore marks the exact

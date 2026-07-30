@@ -62,20 +62,21 @@ using ventium::MemModel;
 #define REGFILE(f) (R->ROOT_PFX(u_regfile__DOT__##f))
 
 // ---- fpd_t packed-struct bit offsets (ventium_decode_pkg.sv, LSB-relative) --
-// fpd_t is 160 bits; the first declared field is the MSB. These are the LSB
-// positions of the fields the visualizer surfaces. (If fpd_t changes, only the
-// U/V slot decoration is affected; nothing crashes.)
+// fpd_t is 161 bits; the first declared field is the MSB. These are the LSB
+// positions of the fields the visualizer surfaces. Live V-source navigation
+// uses U.len, so verify_interactions.py parses the RTL layout and locks every
+// constant below to its field rather than allowing a silent one-bit drift.
 enum {
-  FPD_FP_OCC_LSB     = 0,   // [6:0]
-  FPD_IS_FP_LSB      = 26,
-  FPD_FP_KIND_LSB    = 23,  // [25:23]
-  FPD_PAIRS_SEC_LSB  = 29,
-  FPD_PAIRS_FIRST_LSB= 30,
-  FPD_IS_BRANCH_LSB  = 93,
-  FPD_IS_LOAD_LSB    = 107,
-  FPD_ALU_OP_LSB     = 150, // [154:150]
-  FPD_LEN_LSB        = 155, // [158:155]
-  FPD_SIMPLE_LSB     = 159
+  FPD_FP_OCC_LSB     = 1,   // [7:1], above is_fxch_free
+  FPD_IS_FP_LSB      = 27,
+  FPD_FP_KIND_LSB    = 24,  // [26:24]
+  FPD_PAIRS_SEC_LSB  = 30,
+  FPD_PAIRS_FIRST_LSB= 31,
+  FPD_IS_BRANCH_LSB  = 94,
+  FPD_IS_LOAD_LSB    = 108,
+  FPD_ALU_OP_LSB     = 151, // [155:151]
+  FPD_LEN_LSB        = 156, // [159:156]
+  FPD_SIMPLE_LSB     = 160
 };
 
 static inline uint32_t w5fld(const VlWide<6>& w, int lsb, int width) {

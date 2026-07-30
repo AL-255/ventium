@@ -70,6 +70,24 @@ live hazard labels are now gated to the consuming `S_PIPE` state. The terminal
 tail is clean, while the random-branch fixture reports 71 actual bubble clocks
 instead of 92 mixed-state samples.
 
+**Authoring lexer audit:** completion still found statement boundaries with raw
+`rsplit(";")` and raw comment searches. That misread `;`, `#`, or `//` inside
+quoted `.asciz` data: string contents could look like an opcode, or an earlier
+URL could suppress a genuine following statement. A shared quote/escape-aware
+GAS scanner now drives both completion and the persistent instruction preview.
+Compiler diagnostic parsing also recognizes GCC's `fatal error:` form, so a
+missing header marks line 1 instead of producing an unlocated red log.
+
+**Decoded-slot ABI audit:** the gallery's branch live board showed U `dec ecx`
+but V `std`—the JNE displacement byte. RTL had appended the one-bit
+`is_fxch_free` field to the LSB end of packed `fpd_t`, growing it to 161 bits,
+while all C++ extraction offsets stayed at their former values. Every surfaced
+field (length, simple/load/branch/pair/FP class, ALU op) is now shifted to its
+actual bit. The regression parses the RTL declaration, computes each LSB, and
+compares the bridge enum before proving live U=`dec`/1 byte and V=`jne`/2 bytes.
+A stalled legal pair candidate now says `[blocked]`, reserving `[paired]` for an
+instruction pair that is actually issuing.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

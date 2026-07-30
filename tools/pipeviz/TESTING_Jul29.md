@@ -130,7 +130,9 @@ Procedure:
 1. Click Clock and verify exactly one core cycle advances.
 2. Click Insn and verify at least one new retirement.
 3. Click Reset and verify retirement history clears.
-4. Set N=120 and click Step N.
+4. Set N=120 and click Step N. Parse the RTL `fpd_t` layout and require every
+   C++ packed-field offset to match it; require the live U `dec` and V `jne`
+   lengths/branch flags to be 1/2 and false/true respectively.
 5. Type `pipe:V` into the Trace filter and verify the visible row count.
 6. Navigate matches with Enter/F3 and Shift+F3, reject a zero-match query
    visibly, clear with Escape, and focus/select the query with `/`.
@@ -156,6 +158,8 @@ Observed evidence:
 - 212 instructions retired in 120 clocks.
 - 106 U retirements and 106 V retirements; the filter reports 106 V rows.
 - Pairing is effectively 100%; four mispredict event cycles are visible.
+- The live board renders U `dec ecx` and V `jne 0x0804800a`; it no longer
+  decodes the JNE displacement byte as `std`.
 - Trace, timing selection, pinned registers, Hotspots, and PC navigation agree.
 - Invalid addresses are rejected before model replacement; filter navigation
   wraps deterministically; reload preserves reset configuration.
@@ -169,6 +173,8 @@ Fixture: `build/verify/mb_dmiss.cycle.flat`, N=160.
 Procedure:
 
 1. Step 160 clocks.
+   Require the live board to say `[blocked]`, not `[paired]`, while the current
+   `S_PIPE` instruction is held by a stall.
 2. Filter by `stall`, then by `@` (resolved memory access).
 3. Open Data$ and inspect residency plus replayed miss reporting.
 4. Open Memory and click `→access`.
@@ -379,7 +385,9 @@ Procedure:
    forced completion on a directive to remain reference-only. Accept a
    completion mid-opcode and require the whole token—not only its prefix—to be
    replaced. Complete a second opcode after GNU as's `;` statement separator
-   and require the preview to follow that statement.
+   and require the preview to follow that statement. Put semicolons and
+   `#`/`//` markers inside quoted data and require them neither to trigger
+   completion inside the string nor suppress a real following statement.
 4. Feed an invalid opcode and require line 5 to be highlighted without starting
    a backend session. Edit it and require the now-stale marker/diagnostics to
    clear immediately and return to neutral styling.
@@ -409,8 +417,9 @@ Procedure:
 10. Select the C-generated entry/loop in Trace and require its emitted assembly
     line to highlight.
 11. Compile an array-initialization loop and require self-contained assembly
-    with no implicit `memset` call. Require an implicit function call to fail
-    at its C source line instead of becoming a later unresolved linker error.
+   with no implicit `memset` call. Require an implicit function call to fail
+   at its C source line instead of becoming a later unresolved linker error,
+   and a fatal missing-header diagnostic to mark line 1.
 12. Compile a floating-point C example and require Pentium x87—not SSE—
     assembly, assemble+run it on the RTL to EAX = 3, and require its selected
     in-flight instruction to highlight the exact generated assembly line.
@@ -478,6 +487,11 @@ The screenshot review found and corrected the following:
     are rejected visibly.
 14. Visual/smoke scripts resolved fixtures from the process working directory.
     They now use repository-relative paths and run from any directory.
+15. The live V cell decoded `std` from a branch displacement because RTL
+    `fpd_t` gained a low `is_fxch_free` bit while all C++ bridge offsets remained
+    one bit low. All decoded fields now match the 161-bit packed layout, the
+    regression derives every expected offset from RTL, and blocked pair
+    candidates are labeled `[blocked]` rather than falsely `[paired]`.
 
 ## Coverage limits
 

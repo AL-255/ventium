@@ -79,6 +79,60 @@ def default_rtl_state_names():
     return re.findall(r"\bS_[A-Z0-9_]+\b", body)
 
 
+def verify_fpd_bridge_layout():
+    """Lock C++ packed-field offsets to the current RTL fpd_t declaration."""
+    package_path = os.path.join(
+        ROOT, "rtl/core/ventium_decode_pkg.sv")
+    package = open(package_path, encoding="utf-8").read()
+    match = re.search(
+        r"typedef\s+struct\s+packed\s*\{(.*?)\}\s*fpd_t\s*;",
+        package, re.DOTALL)
+    assert match, "fpd_t packed struct was not found"
+    fields = re.findall(
+        r"\blogic\s*(?:\[(\d+)\s*:\s*(\d+)\])?\s+"
+        r"([A-Za-z_]\w*)\s*;",
+        re.sub(r"//.*", "", match.group(1)))
+    assert fields
+    offsets = {}
+    bit = 0
+    for high, low, name in reversed(fields):
+        width = int(high) - int(low) + 1 if high else 1
+        offsets[name] = bit
+        bit += width
+
+    bridge = open(
+        os.path.join(HERE, "ventium_viz.cpp"), encoding="utf-8").read()
+    enum_match = re.search(
+        r"// ---- fpd_t packed-struct bit offsets.*?"
+        r"enum\s*\{(.*?)\};",
+        bridge, re.DOTALL)
+    assert enum_match, "Pipeviz fpd_t bridge offset enum was not found"
+    constants = {
+        name: int(value)
+        for name, value in re.findall(
+            r"\b(FPD_[A-Z_]+)\s*=\s*(\d+)", enum_match.group(1))
+    }
+    contract = {
+        "FPD_FP_OCC_LSB": "fp_occ",
+        "FPD_IS_FP_LSB": "is_fp",
+        "FPD_FP_KIND_LSB": "fp_kind",
+        "FPD_PAIRS_SEC_LSB": "pairs_second",
+        "FPD_PAIRS_FIRST_LSB": "pairs_first",
+        "FPD_IS_BRANCH_LSB": "is_branch",
+        "FPD_IS_LOAD_LSB": "is_load",
+        "FPD_ALU_OP_LSB": "alu_op",
+        "FPD_LEN_LSB": "len",
+        "FPD_SIMPLE_LSB": "simple",
+    }
+    assert bit == 161, f"review the fpd_t ABI width: now {bit} bits"
+    assert set(constants) == set(contract)
+    for constant, field in contract.items():
+        assert constants[constant] == offsets[field], (
+            f"{constant}={constants[constant]}, but RTL {field} starts at "
+            f"bit {offsets[field]}")
+    return bit
+
+
 def settle(app, rounds=4):
     for _ in range(rounds):
         app.processEvents()
@@ -582,6 +636,20 @@ def scenario_branch_transport(app, outdir):
         click(app, win.stepn_btn)
         assert win.backend.state().core_cyc == 120
         assert win.backend.retire_count() >= 180
+        live = win.backend.state()
+        u_size, u_mnemonic, _u_ops, _u_bytes = (
+            pipeline_module.disasm.disasm_one(
+                win.backend.mem_read(live.cs_base + live.eip, 16),
+                live.eip, 32))
+        v_pc = live.eip + u_size
+        v_size, v_mnemonic, _v_ops, _v_bytes = (
+            pipeline_module.disasm.disasm_one(
+                win.backend.mem_read(live.cs_base + v_pc, 16),
+                v_pc, 32))
+        assert (u_mnemonic, u_size, live.ud_len) == ("dec", 1, 1)
+        assert (v_mnemonic, v_size, live.vd_len) == ("jne", 2, 2)
+        assert not live.ud_is_branch and live.vd_is_branch
+        assert win.pipeline.board._cells["V"][1].startswith("jne ")
         stats = win.pipeline.waterfall.stats()
         assert stats["vret"] >= 80 and stats["mispred"] > 0
         assert "pair(win)" not in win.status_lbl.text()
@@ -795,6 +863,8 @@ def scenario_dcache_memory(app, outdir):
         accesses = win.trace.accesses
         assert len(win.backend.dcache()) >= 10
         assert len(accesses) >= 10 and win.trace.last_access is not None
+        assert "[blocked]" in win.pipeline.board._status
+        assert "[paired]" not in win.pipeline.board._status
 
         stalls = set_filter(app, win.trace, "stall")
         assert stalls > 0
@@ -845,6 +915,7 @@ def scenario_x87(app, outdir):
     try:
         # Compare the complete default RTL enum to the bridge; a newly inserted
         # state must not silently shift Cycles/status/stuck classifications.
+        assert verify_fpd_bridge_layout() == 161
         rtl_states = default_rtl_state_names()
         assert rtl_states == [
             win.backend.state_name(index) for index in range(len(rtl_states))]

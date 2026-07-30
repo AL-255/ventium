@@ -195,6 +195,15 @@ def verify_toolchain():
         assert "implicit declaration" in str(error)
     else:
         raise AssertionError("implicit function call was not rejected in C")
+    try:
+        compile_c_source(
+            "#include <pipeviz_header_that_does_not_exist.h>\n"
+            "int main(void) { return 0; }\n")
+    except BuildFailure as error:
+        assert error.line == 1
+        assert "fatal error" in str(error).lower()
+    else:
+        raise AssertionError("missing C header was not rejected")
     print("OK toolchain: GNU as/ld ELF + DWARF source map; "
           "self-contained freestanding C → Intel assembly → ELF")
 
@@ -434,6 +443,33 @@ def scenario(app, outdir):
         assert editor.toPlainText() == "mov eax, 1; add "
         settle(app)
         assert win.assembly.info.signature.text().startswith("add ")
+
+        # Statement scanning is lexical, not a raw split/search: comment markers
+        # and semicolons inside data strings neither trigger nor suppress opcode
+        # completion in the real statement that follows.
+        quoted_statements = (
+            '.asciz "https://example.test/#payload;ad"; ad')
+        editor.setPlainText(quoted_statements)
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        assert editor.completion.list.count() == 2  # adc, add
+        editor.completion.move_selection(1)
+        editor.completion.accept_current()
+        assert editor.toPlainText().endswith("; add ")
+        settle(app)
+        assert win.assembly.info.signature.text().startswith("add ")
+
+        inside_string = '.asciz "payload;add"'
+        editor.setPlainText(inside_string)
+        cursor = editor.textCursor()
+        cursor.setPosition(inside_string.index("add") + 3)
+        editor.setTextCursor(cursor)
+        assert not editor.request_completion()
+        settle(app)
+        assert win.assembly.info.preview.info is None
+
         editor.setPlainText(".loop:")
         cursor = editor.textCursor()
         cursor.movePosition(QTextCursor.End)

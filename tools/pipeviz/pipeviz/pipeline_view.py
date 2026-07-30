@@ -165,8 +165,16 @@ class StageBoard(QWidget):
                 haz.append(f"D$-pen={s.pending_mem_pen}")
         if s.fp_occ_pending: haz.append("fp-occupancy")
         hz = ("    " + ", ".join(haz)) if haz else ""
-        pair = "  [paired]" if (name == "S_PIPE" and s.pipe_pair) else (
-            "  [single]" if name == "S_PIPE" else "")
+        if name != "S_PIPE":
+            pair = ""
+        elif not issuing:
+            pair = "  [blocked]"
+        elif s.ud_is_fp:
+            pair = "  [FP]"
+        elif s.pipe_pair:
+            pair = "  [paired]"
+        else:
+            pair = "  [single]"
         self._status = f"{name}  ({desc})   eip=0x{s.eip:08x}   cyc={s.core_cyc}{pair}{hz}"
         self.update()
 

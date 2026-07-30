@@ -486,6 +486,49 @@ class CHighlighter(QSyntaxHighlighter):
             index += 1
 
 
+def _gas_statement_span(text, position):
+    """Return the current GAS statement, respecting quotes and comments.
+
+    Semicolons separate statements only outside quoted data, and ``#``/``//``
+    start comments only outside quotes. ``None`` means the cursor is in a
+    comment, where completion/preview must remain inactive.
+    """
+    position = max(0, min(int(position), len(text)))
+    start = 0
+    end = len(text)
+    quote = None
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in "\"'":
+            quote = char
+            index += 1
+            continue
+        if char == "#" or text.startswith("//", index):
+            if position >= index:
+                return None
+            end = index
+            break
+        if char == ";":
+            if index < position:
+                start = index + 1
+            else:
+                end = index
+                break
+        index += 1
+    return start, end
+
+
 class InstructionPipelinePreview(QWidget):
     """Small AP-500-style preview used both persistently and in completion."""
 
@@ -702,13 +745,15 @@ class AssemblyEditor(CodeEditor):
     def _opcode_prefix(self):
         """Return the mnemonic prefix only when the cursor is in opcode position."""
         cursor = self.textCursor()
-        before = cursor.block().text()[:cursor.positionInBlock()]
-        comment = re.search(r"#|//", before)
-        if comment is not None:
+        line = cursor.block().text()
+        position = cursor.positionInBlock()
+        span = _gas_statement_span(line, position)
+        if span is None:
             return None
         # GAS accepts multiple statements separated by ';'. Completion belongs
-        # to the current statement, not only to the first opcode on the line.
-        before = before.rsplit(";", 1)[-1]
+        # to the current quote-aware statement, not a ';' inside string data.
+        start, _end = span
+        before = line[start:position]
         word = re.search(r"([A-Za-z]\w*)$", before)
         prefix = word.group(1) if word else ""
         stem = before[:word.start()] if word else before
@@ -828,7 +873,9 @@ def _run_tool(command, timeout=20):
     output = (proc.stdout + proc.stderr).strip()
     if proc.returncode:
         line = None
-        match = re.search(r":(\d+):(?:\d+:)?\s*(?:Error|error):", output)
+        match = re.search(
+            r":(\d+):(?:\d+:)?\s*(?:fatal\s+)?error:",
+            output, re.IGNORECASE)
         if match:
             line = int(match.group(1))
         raise BuildFailure(output or f"{command[0]} exited with {proc.returncode}", line)
@@ -1142,10 +1189,8 @@ class AssemblyView(QWidget):
         cursor = self.editor.textCursor()
         line = cursor.block().text()
         position = cursor.positionInBlock()
-        start = line.rfind(";", 0, position) + 1
-        end = line.find(";", position)
-        text = line[start:end if end >= 0 else len(line)]
-        text = re.sub(r"(?:#|//).*$", "", text)
+        span = _gas_statement_span(line, position)
+        text = line[slice(*span)] if span is not None else ""
         match = re.match(
             r"^\s*(?:[.$A-Za-z_][\w.$]*:\s*)?"
             r"(?:(?:lock|rep|repe|repz|repne|repnz)\s+)*([A-Za-z]\w*)",

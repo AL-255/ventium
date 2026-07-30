@@ -45,7 +45,9 @@ pauses. Choose an event class (any, mispredict, stall, I-fill, or page-walk);
 The upper U/V/FP stage board is live: hover an occupied cell to see its lane and
 PC, then click it to highlight that in-flight instruction's linked Assembly
 line. The Visualizer remains in place and the Assembly tab gains `L…`; use
-`Alt+A` to inspect the marked line. Click a retired Trace row or timing cell to
+`Alt+A` to inspect the marked line. `[paired]` means U and V are issuing
+together now; `[blocked]` means a legal candidate is currently held by a
+hazard. Click a retired Trace row or timing cell to
 additionally pin the registers to that retirement; use Shift-click on a second
 timing row to measure the cycle distance. `F1` lists all shortcuts.
 
@@ -98,7 +100,9 @@ description, mode/build availability, approximate latency, pairing class
 At a directive, comment, or operand it remains a reference-only catalogue, so
 accepting an entry cannot corrupt non-opcode text.
 GNU as semicolons separate statements, so completion and the instruction
-preview also follow a second opcode on the same source line.
+preview also follow a second opcode on the same source line. Statement scanning
+respects quoted data: a semicolon or `#`/`//` inside `.asciz "…"` is never
+mistaken for a separator or comment.
 Enter preserves the current indentation and advances one level after a label.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
@@ -147,9 +151,9 @@ or `-Os`, then press **Compile → Assembly** (`Ctrl+Enter`). Pipeviz invokes:
 - Intel assembly syntax with SSE/MMX excluded by the P5 target;
 - GNU C11, freestanding, non-PIE, stack-protector-free code;
 - no builtin calls or loop-to-`memset` substitutions, so generated snippets
-  remain self-contained; and
+  remain self-contained;
 - line-linked errors for implicit function calls rather than deferred link
-  failures; and
+  failures, including fatal errors such as a missing header; and
 - a tiny `_start` wrapper that calls `main` and halts.
 
 The generated source opens in Assembly rather than running immediately. This
