@@ -17,6 +17,10 @@ guide-specific name and description; the Find trigger, query, and previous/next
 controls likewise expose their precise current-topic behavior, and the visual
 Find label is associated with its editor. Acceptance now rejects any unnamed
 focusable control while the transient Find bar is open.
+Closing the guide from that bar now also clears its query, match selection, and
+expanded state. A later F1 opens Getting Started cleanly instead of resurrecting
+a stale search from a different topic; acceptance exercises the complete
+find→Close→reopen path.
 
 **Source-editor keyboard escape audit:** plain Tab is intentionally an editing
 command, but that made keyboard-only users appear trapped inside Assembly and C

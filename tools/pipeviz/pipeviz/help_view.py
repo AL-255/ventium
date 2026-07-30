@@ -485,10 +485,10 @@ class UserGuideDialog(QDialog):
         root.addLayout(body, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.close)
-        close_button = buttons.button(QDialogButtonBox.Close)
-        close_button.setAccessibleName("Close Pipeviz user guide")
-        close_button.setToolTip("Close this guide and return to Pipeviz")
-        close_button.setAccessibleDescription(close_button.toolTip())
+        self.close_btn = buttons.button(QDialogButtonBox.Close)
+        self.close_btn.setAccessibleName("Close Pipeviz user guide")
+        self.close_btn.setToolTip("Close this guide and return to Pipeviz")
+        self.close_btn.setAccessibleDescription(self.close_btn.toolTip())
         root.addWidget(buttons)
         self.index.currentTextChanged.connect(self._set_page)
         self.find_edit.textChanged.connect(self._find_first)
@@ -522,9 +522,19 @@ class UserGuideDialog(QDialog):
         self.find_edit.selectAll()
 
     def _hide_find(self):
+        self._reset_find()
+        self.index.setFocus(Qt.ShortcutFocusReason)
+
+    def _reset_find(self):
         self.find_edit.clear()
         self.find_bar.hide()
-        self.index.setFocus(Qt.ShortcutFocusReason)
+
+    def hideEvent(self, event):
+        # Find is a transient interaction, not guide-navigation history. A
+        # Close-button dismissal must not resurrect an old query/selection when
+        # a later F1 invocation opens a different topic.
+        self._reset_find()
+        super().hideEvent(event)
 
     def _find_first(self):
         self._find_match(restart=True)

@@ -1219,6 +1219,31 @@ def scenario_startup(app, outdir):
         settle(app)
         guide_shot = os.path.join(outdir, "00_help_pipeline_guide.png")
         assert win._guide_dialog.grab().save(guide_shot)
+        win._guide_dialog._focus_find()
+        win._guide_dialog.find_edit.setText("cycle")
+        settle(app)
+        assert win._guide_dialog.find_bar.isVisible()
+        assert win._guide_dialog.page.textCursor().hasSelection()
+        QTest.mouseClick(win._guide_dialog.close_btn, Qt.LeftButton)
+        settle(app)
+        assert not win._guide_dialog.isVisible()
+        assert not win._guide_dialog.find_bar.isVisible()
+        assert not win._guide_dialog.find_edit.text()
+        assert not win._guide_dialog.find_result.text()
+        assert not win._guide_dialog.page.textCursor().hasSelection()
+        # The offscreen QPA does not reactivate the owning window after closing
+        # a dialog; real window managers do. Recreate that transition before
+        # exercising the application-level F1 shortcut.
+        win.activateWindow()
+        win.setFocus(Qt.OtherFocusReason)
+        settle(app)
+        QTest.keyClick(win, Qt.Key_F1)
+        settle(app)
+        assert win._guide_dialog.isVisible()
+        assert win._guide_dialog.index.currentItem().text() == "Getting started"
+        assert not win._guide_dialog.find_bar.isVisible()
+        assert not win._guide_dialog.find_edit.text()
+        assert app.focusWidget() is win._guide_dialog.index
         QTest.keyClick(win._guide_dialog.index, Qt.Key_Escape)
         settle(app)
         assert not win._guide_dialog.isVisible()
