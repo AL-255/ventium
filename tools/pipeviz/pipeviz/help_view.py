@@ -427,8 +427,12 @@ fresh visible epoch at that point.</p>
  <tr><td><b>F5</b></td><td>run/pause</td></tr>
  <tr><td><b>[ / ]</b></td><td>previous/next selected event class</td></tr>
  <tr><td><b>Ctrl+- / Ctrl+=</b></td><td>zoom the focused Pipeline cycle axis, or Assembly/C source text</td></tr>
+ <tr><td><b>Ctrl+wheel</b></td><td>zoom Assembly/C source text under the pointer</td></tr>
  <tr><td><b>↑/↓, PgUp/PgDn, Home/End</b></td><td>traverse focused Pipeline rows</td></tr>
  <tr><td><b>Tab / Shift+Tab</b></td><td>leave a focused Trace or analysis table; arrows navigate its content</td></tr>
+ <tr><td><b>Source Tab / Shift+Tab</b></td><td>indent/outdent the caret or selected source lines</td></tr>
+ <tr><td><b>Source Backspace</b></td><td>remove leading soft indentation to the previous four-column stop</td></tr>
+ <tr><td><b>Gutter click / drag / Shift-click</b></td><td>select or extend complete source-line ranges</td></tr>
  <tr><td><b>Board arrows + Enter</b></td><td>choose and open an occupied live U/V/FP source line</td></tr>
  <tr><td><b>IPC arrows/Pg/Home/End</b></td><td>seek captured cycles; Enter reopens one</td></tr>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
@@ -436,6 +440,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Shift+F3</b></td><td>previous filtered retirement (Visualizer)</td></tr>
  <tr><td><b>Escape</b></td><td>clear a focused Trace filter; in focused Pipeline, Unpin to LIVE</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
+ <tr><td><b>Popup Home / End</b></td><td>first / last opcode completion without moving source</td></tr>
  <tr><td><b>Ctrl+B</b></td><td>assemble without running, or compile C to Assembly</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
  <tr><td><b>Ctrl+/</b></td><td>toggle Assembly/C line comments</td></tr>

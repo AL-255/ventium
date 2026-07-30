@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Indexed shortcut-reference audit:** the authoring topic documented recent
+editor gestures, but the dedicated Shortcuts page omitted source Ctrl+wheel,
+Tab/Shift+Tab, soft-indent Backspace, gutter drag/Shift-click, and completion
+Home/End. The indexed quick reference now includes each with workspace-specific
+wording, and help acceptance checks the page rather than relying only on the
+long-form topic.
+
 **Compact instruction-preview hierarchy audit:** the empty Assembly sidebar
 repeated “Instruction preview” as both its section heading and field value, then
 duplicated the same placement instruction in the diagram. The field now says

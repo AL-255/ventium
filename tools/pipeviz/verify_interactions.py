@@ -1222,6 +1222,17 @@ def scenario_startup(app, outdir):
         authoring_shot = os.path.join(
             outdir, "00_help_authoring_guide.png")
         assert win._guide_dialog.grab().save(authoring_shot)
+        shortcuts_row = next(
+            i for i in range(win._guide_dialog.index.count())
+            if win._guide_dialog.index.item(i).text() == "Shortcuts")
+        win._guide_dialog.index.setCurrentRow(shortcuts_row)
+        settle(app)
+        shortcut_text = win._guide_dialog.page.toPlainText()
+        for expected in (
+                "Ctrl+wheel", "Source Tab / Shift+Tab",
+                "Source Backspace", "Gutter click / drag / Shift-click",
+                "Popup Home / End"):
+            assert expected in shortcut_text
         win._guide_dialog.index.setCurrentRow(pipeline_row)
         settle(app)
         guide_shot = os.path.join(outdir, "00_help_pipeline_guide.png")
