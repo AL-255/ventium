@@ -69,6 +69,12 @@ The Memory navigator now reflows at 520 px and 260 px instead of crushing its
 address, EIP/ESP/access, and page controls into fragments. Its exact physical
 navigation state has a full-width row in the normal layout and a wrapped
 accessible label beside paging at the true 900 px application minimum.
+The register time-point banner no longer clips the word “state” at that
+minimum. It selects complete `LIVE · current state` / `PIN n=… · c=…`
+phrases by measured width, restores the fully spelled form when widened, and
+retains the exact retirement identity and semantic explanation accessibly. At
+the narrow breakpoint the adjacent named/tooltipped Unpin control contracts to
+`×`, reserving enough room for both retirement number and cycle.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

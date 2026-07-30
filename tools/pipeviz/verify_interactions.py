@@ -2448,6 +2448,15 @@ def scenario_layout(app, outdir):
         assert "cycle 160" in win.status_lbl.toolTip()
         assert "EIP 0x08048015" in win.status_lbl.toolTip()
         assert "I$ 1/256" in win.status_lbl.toolTip()
+        assert win.regs.state_banner.text() == "LIVE · current state"
+        assert win.regs.state_banner.fullText() == (
+            "LIVE · current architectural state")
+        assert (
+            win.regs.state_banner.fontMetrics().horizontalAdvance(
+                win.regs.state_banner.text())
+            <= win.regs.state_banner.contentsRect().width())
+        assert "most recent model clock" in (
+            win.regs.state_banner.accessibleDescription())
         QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
         settle(app)
         memory = win.tables.mem
@@ -2567,6 +2576,29 @@ def scenario_layout(app, outdir):
         assert win.regs.state_banner.text().startswith(
             f"PINNED n={pin_n} ·")
         save_shot(app, win, outdir, "08a_compact_pinned_state")
+        win.resize(900, 620)
+        settle(app, 6)
+        assert win.regs.unpin_btn.text() == "×"
+        assert win.regs.unpin_btn.width() == 24
+        assert win.regs.unpin_btn.accessibleName() == "Unpin registers"
+        assert win.regs.state_banner.text().startswith(
+            f"PIN n={pin_n} · c=")
+        assert win.regs.state_banner.fullText().startswith(
+            f"PINNED n={pin_n} · retire cyc=")
+        assert (
+            win.regs.state_banner.fontMetrics().horizontalAdvance(
+                win.regs.state_banner.text())
+            <= win.regs.state_banner.contentsRect().width())
+        assert f"Pinned retirement n={pin_n}" in (
+            win.regs.state_banner.accessibleDescription())
+        save_shot(
+            app, win, outdir, "08c_true_minimum_pinned_state",
+            min_width=900, min_height=620)
+        win.resize(1280, 800)
+        settle(app, 6)
+        assert win.regs.unpin_btn.text() == "× Unpin"
+        assert win.regs.state_banner.text().startswith(
+            f"PINNED n={pin_n} ·")
         pinned_cycle = win.backend.state().core_cyc
         pinned_map = dict(win._assembly_source_map)
         click(app, win.regs.unpin_btn)

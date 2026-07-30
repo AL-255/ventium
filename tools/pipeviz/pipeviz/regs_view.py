@@ -48,6 +48,48 @@ def floatx80_to_float(b10: bytes):
         return sign * float("inf")
 
 
+class _StateBanner(QLabel):
+    """Choose the clearest complete time-point phrase that fits its pane."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full_text = ""
+        self._variants = ()
+        # The outer splitter is allowed to make Registers very narrow. Its
+        # truth-critical LIVE/PINNED marker must yield layout width rather than
+        # force the application wider, then choose a deliberate compact phrase
+        # instead of letting QLabel crop arbitrary trailing words.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumWidth(0)
+
+    def set_state(self, full_text, variants, description):
+        self._full_text = str(full_text)
+        self._variants = tuple(str(text) for text in variants)
+        self.setToolTip(description)
+        self.setAccessibleDescription(description)
+        self._sync_text()
+
+    def fullText(self):
+        return self._full_text
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_text()
+
+    def _sync_text(self):
+        width = max(0, self.contentsRect().width())
+        candidates = (self._full_text, *self._variants)
+        chosen = next(
+            (text for text in candidates
+             if self.fontMetrics().horizontalAdvance(text) <= width),
+            None)
+        if chosen is None:
+            shortest = candidates[-1] if candidates else ""
+            chosen = self.fontMetrics().elidedText(
+                shortest, Qt.ElideRight, width)
+        QLabel.setText(self, chosen)
+
+
 class RegsView(QWidget):
     unpinRequested = Signal()
     COMPACT_WIDTH = 744
@@ -67,14 +109,16 @@ class RegsView(QWidget):
         state_row = QHBoxLayout(self.state_bar)
         state_row.setContentsMargins(0, 0, 0, 0)
         state_row.setSpacing(0)
-        self.state_banner = QLabel("LIVE · current architectural state")
+        self.state_banner = _StateBanner()
         self.state_banner.setAccessibleName("Register state time point")
         self.state_banner.setFont(_mono(9, True))
         self.state_banner.setFixedHeight(20)
         self.state_banner.setStyleSheet(
             "color:#8b949e;background:#0d1117;border:1px solid #30363d;"
             "padding:1px 5px;")
-        self.state_banner.setToolTip(
+        self.state_banner.set_state(
+            "LIVE · current architectural state",
+            ("LIVE · current state", "LIVE"),
             "Live architectural state after the most recent model clock")
         state_row.addWidget(self.state_banner, 1)
         self.unpin_btn = QToolButton()
@@ -280,16 +324,25 @@ class RegsView(QWidget):
         self.set_session_active(True)
 
     def _show_live_banner(self):
-        self.state_banner.setText("LIVE · current architectural state")
         self.state_banner.setStyleSheet(
             "color:#8b949e;background:#0d1117;border:1px solid #30363d;"
             "padding:1px 5px;")
-        self.state_banner.setToolTip(
+        self.state_banner.set_state(
+            "LIVE · current architectural state",
+            ("LIVE · current state", "LIVE"),
             "Live architectural state after the most recent model clock")
         self.unpin_btn.hide()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        narrow = event.size().width() < 260
+        if narrow and self.unpin_btn.text() != "×":
+            self.unpin_btn.setText("×")
+            self.unpin_btn.setFixedWidth(24)
+        elif not narrow and self.unpin_btn.text() != "× Unpin":
+            self.unpin_btn.setMinimumWidth(0)
+            self.unpin_btn.setMaximumWidth(16777215)
+            self.unpin_btn.setText("× Unpin")
         self._set_compact(event.size().width() < self.COMPACT_WIDTH)
 
     def _k(self, t):
@@ -374,12 +427,14 @@ class RegsView(QWidget):
         context; limits and CR2 remain unavailable."""
         chg = "color:#e3b341;font-weight:bold;"
         same = "color:#c9d1d9;"
-        self.state_banner.setText(f"PINNED n={rec.n} · retire cyc={rec.cyc}")
         self.state_banner.setStyleSheet(
             "color:#e3b341;background:#211a08;border:1px solid #6e5420;"
             "border-right:0;padding:1px 5px;")
-        self.state_banner.setToolTip(
-            "Pinned retirement: architectural values are post-commit; "
+        self.state_banner.set_state(
+            f"PINNED n={rec.n} · retire cyc={rec.cyc}",
+            (f"PIN n={rec.n} · c={rec.cyc}", f"PIN n={rec.n}"),
+            f"Pinned retirement n={rec.n} at retirement cycle {rec.cyc}: "
+            "architectural values are post-commit; "
             "starred instruction/translation context is pre-execution")
         self.unpin_btn.show()
         for i, name in enumerate(GPR_NAMES):
