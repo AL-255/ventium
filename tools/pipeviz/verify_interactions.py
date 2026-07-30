@@ -1705,6 +1705,7 @@ def scenario_branch_transport(app, outdir):
         assert "Keyboard lane U selected" in board_description
         assert "No authored Assembly source map" in board_description
         assert not win.pipeline.board._source_link_available
+        assert not win.pipeline.board._source_links
         v_rect = next(
             rect for rect, lane, _pc in win.pipeline.board._lane_rects
             if lane == "V")

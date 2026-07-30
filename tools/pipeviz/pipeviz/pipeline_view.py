@@ -63,17 +63,29 @@ class StageBoard(QWidget):
         self._lane_pcs = {}
         self._lane_rects = []
         self._kbd_lane = None
+        self._source_links = {}
         self._source_link_available = False
         self._status = "no image loaded"
         self._statecol = _DIM
         self._sync_accessible_description()
 
     def _sync_accessible_description(self):
-        if self._source_link_available:
+        linked_lanes = [
+            lane for lane, pc in self._lane_pcs.items()
+            if pc in self._source_links]
+        if linked_lanes:
             navigation = (
-                "Occupied lanes can be clicked, or use arrow keys to choose "
-                "one and Enter to mark its linked Assembly line. Double-click "
-                "opens that line in the Assembly workspace.")
+                f"Source-linked lanes ({', '.join(linked_lanes)}) can be "
+                "clicked, or selected with arrow keys and Enter, to mark their "
+                "Assembly line. Double-click opens that line in the Assembly "
+                "workspace. Other occupied lanes remain available for lane "
+                "and PC inspection.")
+        elif self._source_link_available:
+            navigation = (
+                "An authored Assembly source map is active, but no currently "
+                "occupied lane has an editor source line. Occupied lanes can "
+                "still be clicked or selected with arrow keys to inspect their "
+                "lane and PC.")
         else:
             navigation = (
                 "Occupied lanes can still be clicked or selected with arrow "
@@ -87,9 +99,15 @@ class StageBoard(QWidget):
         for lane in ("U", "V", "FP"):
             if lane not in self._lane_pcs:
                 continue
+            pc = int(self._lane_pcs[lane])
             text = self._cells[lane][1] or "instruction"
+            source = (
+                f", Assembly line {self._source_links[pc]}"
+                if pc in self._source_links else
+                ", no editor source line"
+                if self._source_link_available else "")
             occupied.append(
-                f"{lane}: PC 0x{int(self._lane_pcs[lane]):08x}, {text}")
+                f"{lane}: PC 0x{pc:08x}, {text}{source}")
         selected = (
             f" Keyboard lane {self._kbd_lane} selected."
             if self._kbd_lane in self._lane_pcs else "")
@@ -97,8 +115,10 @@ class StageBoard(QWidget):
             f"{self._status}. Occupied " + "; ".join(occupied)
             + f".{selected} {navigation}")
 
-    def set_source_link_available(self, available):
-        self._source_link_available = bool(available)
+    def set_source_links(self, source_map):
+        self._source_links = {
+            int(pc): int(line) for pc, line in dict(source_map or {}).items()}
+        self._source_link_available = bool(self._source_links)
         self.unsetCursor()
         self.setToolTip("")
         self._sync_accessible_description()
@@ -382,11 +402,17 @@ class StageBoard(QWidget):
             self.setToolTip("")
         else:
             lane, pc = hit
-            if self._source_link_available:
+            line = self._source_links.get(pc)
+            if line is not None:
                 self.setCursor(Qt.PointingHandCursor)
                 action = (
-                    "Click to mark its linked Assembly line; "
+                    f"Assembly line {line} · click to mark; "
                     "double-click to open it")
+            elif self._source_link_available:
+                self.unsetCursor()
+                action = (
+                    "Authored source map active · this generated instruction "
+                    "has no editor source line")
             else:
                 self.unsetCursor()
                 action = "No authored Assembly source map is active"

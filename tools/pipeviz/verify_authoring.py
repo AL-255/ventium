@@ -1672,6 +1672,7 @@ def scenario(app, outdir):
         assert win.image_kind == "ELF"
         assert win._assembly_source_map == result.source_map
         assert win.pipeline.board._source_link_available
+        assert win.pipeline.board._source_links == result.source_map
         assert win.assembly.mapping_current
         assert win.workspace.tabText(1) == "Assembly *"
 
@@ -1701,13 +1702,14 @@ def scenario(app, outdir):
                 rect for rect, cell_lane, _pc in board._lane_rects
                 if cell_lane == lane)
             live_rects[lane] = rect
+            line = result.source_map[board._lane_pcs[lane]]
             QTest.mouseMove(board, rect.center())
             settle(app)
             assert "in-flight instruction" in board.toolTip()
+            assert f"Assembly line {line}" in board.toolTip()
             assert "double-click to open" in board.toolTip()
             QTest.mouseClick(board, Qt.LeftButton, Qt.NoModifier, rect.center())
             settle(app)
-            line = result.source_map[board._lane_pcs[lane]]
             live_lines[lane] = line
             assert editor._execution_line == line
             assert f"In-flight {lane}-lane" in editor._execution_tip
@@ -1963,6 +1965,27 @@ def scenario(app, outdir):
         settle(app)
         assert snippet_result is not None
         run_to_stop(win)
+        settle(app)
+        board = win.pipeline.board
+        snippet_hlt_pc = board._lane_pcs["U"]
+        assert snippet_hlt_pc not in snippet_result.source_map
+        snippet_hlt_rect = next(
+            rect for rect, lane, pc in board._lane_rects
+            if lane == "U" and pc == snippet_hlt_pc)
+        assert "no editor source line" in board.accessibleDescription()
+        QTest.mouseMove(board, snippet_hlt_rect.center())
+        settle(app)
+        assert f"PC 0x{snippet_hlt_pc:08x}" in board.toolTip()
+        assert "generated instruction" in board.toolTip()
+        assert "no editor source line" in board.toolTip()
+        assert "double-click" not in board.toolTip()
+        assert board.cursor().shape() == Qt.ArrowCursor
+        QTest.mouseDClick(
+            board, Qt.LeftButton, Qt.NoModifier, snippet_hlt_rect.center())
+        settle(app)
+        assert win.workspace.currentWidget() is win.visualizer_tab
+        assert editor._execution_line is None
+        assert "has no linked Assembly line" in win.action_hint.text()
         mapped_row = next(
             r for r in range(win.trace.tbl.rowCount())
             if int(win.trace.tbl.item(r, 4).text(), 16)

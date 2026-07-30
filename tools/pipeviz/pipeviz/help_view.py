@@ -143,7 +143,10 @@ pointer, Tab to the board's blue outline, choose an occupied lane with arrows
 or Home/End, and press Enter. A finished
 HLT remains an occupied, clickable cell so the stop location is explicit.
 Double-click an occupied lane to mark and open its Assembly line in one
-gesture. For an externally loaded ELF or flat image, lane and PC inspection
+gesture. A mapped PC's hover text names the destination line before you click;
+auto-generated wrapper/fall-through instructions instead say they have no
+editor source line and keep the normal inspection cursor. For an externally
+loaded ELF or flat image, lane and PC inspection
 still works, but the board explicitly says no authored Assembly source map is
 active instead of promising an unavailable source jump. The live source mark
 describes this clock only: Clock, Insn, Step N, Run, and

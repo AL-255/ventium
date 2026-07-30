@@ -1291,7 +1291,7 @@ class MainWindow(QMainWindow):
 
     def _clear_assembly_source_link(self):
         self._assembly_source_map = {}
-        self.pipeline.board.set_source_link_available(False)
+        self.pipeline.board.set_source_links({})
         self._clear_assembly_marker()
 
     def _clear_assembly_marker(self, pc=None):
@@ -1371,8 +1371,7 @@ class MainWindow(QMainWindow):
     def _run_assembly(self, path, source_map):
         if self.load_image(path):
             self._assembly_source_map = dict(source_map)
-            self.pipeline.board.set_source_link_available(
-                bool(self._assembly_source_map))
+            self.pipeline.board.set_source_links(self._assembly_source_map)
             self._update_assembly_tab()
             self.workspace.setCurrentWidget(self.visualizer_tab)
             self._notice(

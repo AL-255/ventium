@@ -131,8 +131,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     branch; amber+thick when it's the gating load-use that lifted a stall). It also
     **PC-group-highlights** every other execution of the same PC (loop iterations).
     **Shift-click** a second row for a **Δ-measure band** (latency between two
-    instructions). Occupied live U/V/FP cells also click through to the exact
-    linked Assembly line before retirement. A red **"stuck"** banner overlays
+    instructions). Occupied live U/V/FP cells with an authored PC map also
+    click through to the exact linked Assembly line before retirement; generated
+    wrapper PCs and external programs retain lane/PC inspection without
+    advertising an unavailable source jump. A red **"stuck"** banner overlays
     abnormal fetch/decode/F00F hangs; a program's intentional HLT gets a green
     stopped banner and a source-linked terminal cell.
   * *IPC / stall sparkline* — a windowed IPC track (0/1/2 axis) with per-cycle

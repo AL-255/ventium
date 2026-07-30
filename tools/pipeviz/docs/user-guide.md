@@ -132,6 +132,9 @@ to choose an occupied lane, and press Enter. The Visualizer remains in
 place and the Assembly tab gains `L…`; use `Alt+A` to inspect the marked line.
 Double-click an occupied lane when you want to mark and open its Assembly line
 in one gesture.
+When the live PC is mapped, its hover text names the destination line before
+you click. Auto-generated wrapper/fall-through instructions instead say they
+have no editor source line and keep the normal inspection cursor.
 For an externally loaded ELF or flat image, the lane and PC remain available
 for inspection, but the board explicitly says that no authored Assembly source
 map is active instead of promising a source jump it cannot provide.

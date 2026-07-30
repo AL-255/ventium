@@ -9,6 +9,27 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — live source affordances are exact per PC
+
+**Per-instruction audit:** session-level source-map availability was still too
+coarse. A bare Assembly snippet has a valid map for its editor instructions,
+but Pipeviz synthesizes a fall-through HLT outside that map. The live HLT
+therefore inherited the pointer and “linked Assembly line” hover promise even
+though selecting it correctly found no editor line.
+
+**Changes:** the stage board now receives the complete PC→line map and resolves
+every occupied lane independently. A mapped hover names its exact destination
+line and enables the pointer/mark/open affordance; an unmapped generated PC
+states that it has no editor line and remains inspection-only. Its accessible
+lane description carries the same distinction. External programs still report
+that no authored map is active.
+
+**Verification:** authored U/V acceptance now requires the board's installed
+map and exact hover line before selection. The existing bare-snippet regression
+now stops on its synthesized live HLT and requires the exact PC, no-line
+tooltip, normal cursor, accessible no-line state, and a double-click that leaves
+the Visualizer open without a stale editor marker.
+
 ## July 30 continuation — live source affordance reflects map state
 
 **Affordance-honesty audit:** every occupied live lane advertised
