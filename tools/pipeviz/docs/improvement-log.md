@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — successful save retry clears obsolete error
+
+**Recovery-completion audit:** after a red source save failure, retrying Save As
+to a writable destination correctly turned status green and cleared dirty
+state, but the old red file-I/O diagnostic remained visible. Clearing every
+diagnostic on save would instead erase a legitimate assembler/compiler warning.
+
+**Changes:** file-I/O failures are now tagged with their exact document
+revision. A successful save clears diagnostics only when the visible diagnostic
+is that same revision's file-I/O failure. Source edits/replacements,
+optimization changes, and new build/compile attempts retire the tag when they
+supersede it; ordinary saves preserve unrelated build/compiler results.
+
+**Verification:** both Assembly and C failure scenarios now retry Save As to
+valid paths without editing. Acceptance requires `saved` outcome, new path,
+clean document, empty/neutral diagnostics, cleared I/O tag, and precise green
+Saved status. Separate warning scenarios require an ordinary Save As to retain
+the amber line-linked warning in each workbench.
+
 ## July 30 continuation — direct opcode hits rank first
 
 **Search-order audit:** reference search correctly found behavior and metadata,

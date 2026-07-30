@@ -249,6 +249,9 @@ opened file as compiler-generated. A failed source save or open/read retains
 the old text, identity, and dirty state while diagnostics, persistent status,
 tooltip/accessibility text, and the global notice all show the same red Save
 failed or Open failed explanation.
+Retrying at a writable destination clears that obsolete file-I/O diagnostic
+and reports the successful path without clearing an unrelated build/compiler
+warning merely because the source was saved.
 New/Open, C-to-Assembly replacement, and Quit offer
 Save/Discard/Cancel protection. Canceling the Save As chooser after selecting
 Save remains a cancellation, not an I/O failure. If a blocked close resumes

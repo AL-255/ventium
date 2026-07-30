@@ -2046,6 +2046,7 @@ def _report_source_io_failure(view, operation, error, path=None):
     message = f"{operation} failed · {target}{error}"
     view.diagnostics.failure(message)
     view._diagnostic_revision = view.editor.document().revision()
+    view._file_io_failure_revision = view._diagnostic_revision
     view.status.setText(message)
     view.status.setStyleSheet("color:#f85149;padding:2px;")
     view.statusChanged.emit(message)
@@ -2178,6 +2179,7 @@ class AssemblyView(QWidget):
 
         self._built_revision = -1
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self._source_map = {}
         self._path = None
         self._source_origin = "built-in template"
@@ -2255,6 +2257,7 @@ class AssemblyView(QWidget):
             self.editor.clear_diagnostic_marks()
             self.diagnostics.reset()
             self._diagnostic_revision = -1
+            self._file_io_failure_revision = None
         if self._built_revision >= 0 and not self.mapping_current:
             self._built_revision = -1
             self._source_map = {}
@@ -2293,6 +2296,7 @@ class AssemblyView(QWidget):
         self._source_map = {}
         self._built_revision = -1
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self.editor.setPlainText(_ASM_TEMPLATE)
         self.editor.document().setModified(False)
         self.editor.clear_marks()
@@ -2313,6 +2317,7 @@ class AssemblyView(QWidget):
         self._source_map = {}
         self._built_revision = -1
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self.editor.setPlainText(text)
         self.editor.document().setModified(False)
         self.editor.clear_marks()
@@ -2381,6 +2386,11 @@ class AssemblyView(QWidget):
         self._source_origin = os.path.basename(path)
         self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.document().setModified(False)
+        if (self._file_io_failure_revision
+                == self.editor.document().revision()):
+            self.diagnostics.reset()
+            self._diagnostic_revision = -1
+            self._file_io_failure_revision = None
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
@@ -2391,6 +2401,7 @@ class AssemblyView(QWidget):
 
     def build(self, run=False):
         self._focus_editor()
+        self._file_io_failure_revision = None
         self.editor.completion.hide()
         self.editor.clear_diagnostic_marks()
         self.status.setText("Assembling and linking…")
@@ -2540,6 +2551,7 @@ class CView(QWidget):
         self._source_origin = "built-in U/V demo"
         self._last_dir = str(_TOOL_DIR)
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self._compiled_optimization = None
 
         self.template_btn.clicked.connect(self.new_template)
@@ -2598,6 +2610,7 @@ class CView(QWidget):
         self.editor.clear_diagnostic_marks()
         self.diagnostics.reset()
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self._compiled_optimization = None
         self.status.setText("Source changed — compile again to refresh diagnostics")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
@@ -2611,6 +2624,7 @@ class CView(QWidget):
         self.editor.clear_diagnostic_marks()
         self.diagnostics.reset()
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self._compiled_optimization = None
         self.status.setText(
             f"Optimization changed to {optimization} — compile again · "
@@ -2644,6 +2658,7 @@ class CView(QWidget):
         self._source_origin = "built-in U/V demo"
         self.diagnostics.reset()
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self._compiled_optimization = None
         self.status.setText("New dual-Fibonacci U/V template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
@@ -2677,6 +2692,7 @@ class CView(QWidget):
         self.editor.clear_marks()
         self.diagnostics.reset()
         self._diagnostic_revision = -1
+        self._file_io_failure_revision = None
         self._compiled_optimization = None
         name = os.path.basename(path)
         self.status.setText(f"Opened {name}")
@@ -2713,6 +2729,11 @@ class CView(QWidget):
         self._source_origin = os.path.basename(path)
         self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.document().setModified(False)
+        if (self._file_io_failure_revision
+                == self.editor.document().revision()):
+            self.diagnostics.reset()
+            self._diagnostic_revision = -1
+            self._file_io_failure_revision = None
         self.status.setText(f"Saved {os.path.basename(path)}")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
@@ -2723,6 +2744,7 @@ class CView(QWidget):
 
     def compile(self):
         self._focus_editor()
+        self._file_io_failure_revision = None
         self.editor.clear_diagnostic_marks()
         self.status.setText("Compiling C to assembly…")
         self.status.setStyleSheet("color:#e3b341;padding:2px;")

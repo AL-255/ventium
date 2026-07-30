@@ -397,7 +397,10 @@ and reports the final on-disk filename in both the workbench and global action
 row. If a save or open/read fails, the old source text, identity, and dirty state
 remain unchanged while diagnostics, persistent status,
 tooltip/accessibility text, and the global action row all switch to the same
-red `Save failed` or `Open failed` explanation. Opening
+red `Save failed` or `Open failed` explanation. Retrying the same source at a
+writable destination clears that obsolete red file-I/O diagnostic and reports
+the successful path; unrelated assembler/compiler warnings are not cleared
+merely by saving. Opening
 likewise identifies the real filename—an Assembly file is never
 mislabelled as compiler-generated—and clears any obsolete PC map before the
 new source can be linked. Visualizer restores Ctrl+O to opening executable programs.

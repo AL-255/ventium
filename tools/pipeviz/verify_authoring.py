@@ -734,7 +734,24 @@ def scenario(app, outdir):
         assert win.action_hint.text() == win.assembly.status.text()
         settle(app)
         save(win, outdir, "00c_assembly_save_failure")
-        editor.document().setModified(False)
+        recovered_assembly_path = os.path.join(
+            outdir, "recovered-after-save-failure.s")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (recovered_assembly_path, "Assembly (*.s)"))
+        try:
+            assert win.assembly.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.assembly._last_save_outcome == "saved"
+        assert win.assembly._path == recovered_assembly_path
+        assert not editor.document().isModified()
+        assert not win.assembly.diagnostics.toPlainText()
+        assert win.assembly.diagnostics._severity is None
+        assert win.assembly._file_io_failure_revision is None
+        assert win.assembly.status.text() == (
+            "Saved recovered-after-save-failure.s")
         dropped_assembly = Path(outdir) / "dropped-source.S"
         dropped_assembly.write_text(
             ".intel_syntax noprefix\nmov eax, 17\n", encoding="utf-8")
@@ -1742,6 +1759,21 @@ def scenario(app, outdir):
             win.assembly.diagnostics.toPlainText())
         assert "#e3b341" in win.assembly.diagnostics.styleSheet()
         assert "succeeded with warnings" in win.assembly.status.text()
+        warning_save_path = os.path.join(
+            outdir, "assembly-warning-preserved.s")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (warning_save_path, "Assembly (*.s)"))
+        try:
+            assert win.assembly.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.assembly._path == warning_save_path
+        assert win.assembly._file_io_failure_revision is None
+        assert win.assembly.diagnostics._severity == "warning"
+        assert "Assembly:5:" in win.assembly.diagnostics.toPlainText()
+        assert editor._warning_line == 5
         win.assembly.diagnostics.setFocus()
         QTest.keyClick(win.assembly.diagnostics, Qt.Key_Return)
         settle(app)
@@ -2231,7 +2263,24 @@ def scenario(app, outdir):
         assert win.action_hint.text() == win.c_source.status.text()
         settle(app)
         save(win, outdir, "03d_c_save_failure")
-        win.c_source.editor.document().setModified(False)
+        recovered_c_path = os.path.join(
+            outdir, "recovered-after-save-failure.c")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (recovered_c_path, "C source (*.c)"))
+        try:
+            assert win.c_source.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.c_source._last_save_outcome == "saved"
+        assert win.c_source._path == recovered_c_path
+        assert not win.c_source.editor.document().isModified()
+        assert not win.c_source.diagnostics.toPlainText()
+        assert win.c_source.diagnostics._severity is None
+        assert win.c_source._file_io_failure_revision is None
+        assert win.c_source.status.text() == (
+            "Saved recovered-after-save-failure.c")
         invalid_c_path = Path(outdir) / "invalid-encoding.c"
         invalid_c_path.write_bytes(b"\x80\x81")
         preserved_c = win.c_source.editor.toPlainText()
@@ -2626,6 +2675,21 @@ def scenario(app, outdir):
             "Compiled with warnings · assembly tab is ready")
         win.workspace.setCurrentWidget(win.c_source)
         settle(app)
+        c_warning_save_path = os.path.join(
+            outdir, "c-warning-preserved.c")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (c_warning_save_path, "C source (*.c)"))
+        try:
+            assert win.c_source.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.c_source._path == c_warning_save_path
+        assert win.c_source._file_io_failure_revision is None
+        assert win.c_source.diagnostics._severity == "warning"
+        assert "C source:3:" in win.c_source.diagnostics.toPlainText()
+        assert win.c_source.editor._warning_line == 3
         win.c_source.diagnostics.setFocus()
         QTest.keyClick(win.c_source.diagnostics, Qt.Key_Return)
         settle(app)
