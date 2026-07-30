@@ -156,6 +156,16 @@ Synthetic 4 KiB/PSE/override/live-opcode tests and the real reset vector lock
 the distinction. The UI/docs explicitly limit operand replay to explicit
 Capstone memory operands rather than claiming implicit stack/string traffic.
 
+**Pinned translation-context audit:** retirement records already retained the
+six pre-execution segment bases and CR0/CR3/CR4 for exact address translation,
+but pinned Registers discarded them as `n/a` while presenting the retiring PC
+under the live-state `EIP` label. The Segments page now shows those captured
+values, labels the instruction address `PC*` and segment column `base*`, and
+explains their time point in hover text. Truly uncaptured segment limits, CR2,
+and post-commit next EIP remain explicit `n/a`/unclaimed. A real paged-system
+interaction pins a retirement, compares every displayed field to its record,
+and captures the result.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

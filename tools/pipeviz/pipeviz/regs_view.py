@@ -81,7 +81,8 @@ class RegsView(QWidget):
             v = QLabel("00000000"); v.setFont(_mono())
             self.gpr_lbls[name] = v
             g.addWidget(v, i, 1)
-        g.addWidget(self._k("EIP"), len(GPR_NAMES), 0)
+        self.eip_name_lbl = self._k("EIP")
+        g.addWidget(self.eip_name_lbl, len(GPR_NAMES), 0)
         self.eip_lbl = QLabel("00000000"); self.eip_lbl.setFont(_mono())
         g.addWidget(self.eip_lbl, len(GPR_NAMES), 1)
         g.addWidget(self._k("EFL"), len(GPR_NAMES) + 1, 0)
@@ -103,7 +104,9 @@ class RegsView(QWidget):
         g2 = QGridLayout(sg)
         g2.setVerticalSpacing(2)
         g2.setHorizontalSpacing(5)
-        g2.addWidget(self._k("sel"), 0, 1); g2.addWidget(self._k("base"), 0, 2)
+        g2.addWidget(self._k("sel"), 0, 1)
+        self.seg_base_hdr = self._k("base")
+        g2.addWidget(self.seg_base_hdr, 0, 2)
         g2.addWidget(self._k("limit"), 0, 3)
         self.seg_lbls = {}
         for i, name in enumerate(SEG_NAMES):
@@ -244,6 +247,10 @@ class RegsView(QWidget):
         return l
 
     def update_from(self, s):
+        self.eip_name_lbl.setText("EIP")
+        self.eip_name_lbl.setToolTip("")
+        self.seg_base_hdr.setText("base")
+        self.seg_base_hdr.setToolTip("")
         prev = getattr(self, "_prev", None)
         chg = "color:#e3b341;font-weight:bold;"   # changed since last step (amber)
         same = "color:#c9d1d9;"
@@ -274,11 +281,15 @@ class RegsView(QWidget):
             sel.setText(f"{s.seg_sel[i]:04x}")
             base.setText(f"{s.seg_base[i]:08x}"); base.setStyleSheet("")   # clear pinned n/a
             lim.setText(f"{s.seg_limit[i]:08x}"); lim.setStyleSheet("")
+            base.setToolTip("")
+            lim.setToolTip("")
         for k, val in (("CR0", s.cr0), ("CR2", s.cr2), ("CR3", s.cr3), ("CR4", s.cr4)):
             self.cr_lbls[k].setText(f"{val:08x}"); self.cr_lbls[k].setStyleSheet("")
+            self.cr_lbls[k].setToolTip("")
         self.mode_lbl.setText(
             f"{'SYS' if s.sys_mode else 'USER'}  CPL={s.cpl}"
             f"{'  SMM' if s.smm_active else ''}")
+        self.mode_lbl.setToolTip("")
         # x87 — logical ST(i) = physical fpr[(ftop+i)&7]
         logical_tag = sum(
             ((s.fptag >> ((s.ftop + i) & 7)) & 1) << i
@@ -301,13 +312,20 @@ class RegsView(QWidget):
     def show_retire(self, rec, prev):
         """Pin the panel to a retired instruction's post-commit architectural
         state (from the retire record), highlighting what changed vs the previous
-        retirement. Segment bases/limits + CRs aren't in the record (shown dim)."""
+        retirement. Translation bases and CR0/3/4 are the record's pre-execution
+        context; limits and CR2 remain unavailable."""
         chg = "color:#e3b341;font-weight:bold;"
         same = "color:#c9d1d9;"
         for i, name in enumerate(GPR_NAMES):
             changed = prev is not None and prev.gpr[i] != rec.gpr[i]
             self.gpr_lbls[name].setText(f"{rec.gpr[i]:08x}")
             self.gpr_lbls[name].setStyleSheet(chg if changed else same)
+        # The record stores the retiring instruction's source PC, not the
+        # post-commit next EIP. Do not give that different time point an EIP
+        # label merely because the live register bank uses one.
+        self.eip_name_lbl.setText("PC*")
+        self.eip_name_lbl.setToolTip(
+            "* retiring instruction PC; post-commit next EIP is not captured")
         self.eip_lbl.setText(f"{rec.pc:08x}"); self.eip_lbl.setStyleSheet(same)
         efl_chg = prev is not None and prev.eflags != rec.eflags
         self.efl_lbl.setText(f"{rec.eflags:08x}")
@@ -321,18 +339,32 @@ class RegsView(QWidget):
             style = f"color:{col}" + (";text-decoration:underline" if f_chg else "")
             parts.append(f"<span style='{style}'>{nm}{f_on}</span>")
         self.flags_lbl.setText("&nbsp;".join(parts))
-        # base/limit + CRs aren't in the retire record: dim italic "n/a" reads as
-        # "not captured" rather than a bright dot-run that looks like real data.
+        # Selectors are architectural post-state. Bases and CR0/3/4 are captured
+        # pre-execution for exact address translation, so mark the header and
+        # explain the time point instead of presenting them as post-state.
         na = "color:#4b535d;font-style:italic;"
+        self.seg_base_hdr.setText("base*")
+        self.seg_base_hdr.setToolTip(
+            "* pre-execution segment base used for address translation")
         for i, name in enumerate(SEG_NAMES):
             sel, base, lim = self.seg_lbls[name]
             sel.setText(f"{rec.seg[i]:04x}")
-            base.setText("n/a"); base.setStyleSheet(na)
+            base.setText(f"{rec.seg_base[i]:08x}"); base.setStyleSheet("")
+            base.setToolTip("Pre-execution base captured for this retirement")
             lim.setText("n/a"); lim.setStyleSheet(na)
-        for k in ("CR0", "CR2", "CR3", "CR4"):
-            self.cr_lbls[k].setText("n/a"); self.cr_lbls[k].setStyleSheet(na)
+        for k, value in (("CR0", rec.cr0), ("CR3", rec.cr3), ("CR4", rec.cr4)):
+            self.cr_lbls[k].setText(f"{value:08x}")
+            self.cr_lbls[k].setStyleSheet("")
+            self.cr_lbls[k].setToolTip(
+                "Pre-execution control register used for address translation")
+        self.cr_lbls["CR2"].setText("n/a")
+        self.cr_lbls["CR2"].setStyleSheet(na)
+        self.cr_lbls["CR2"].setToolTip("CR2 is not captured per retirement")
         self.mode_lbl.setText(f"PINNED n={rec.n} cyc={rec.cyc}")
         self.mode_lbl.setStyleSheet("color:#e3b341;")
+        self.mode_lbl.setToolTip(
+            "GPRs/selectors are post-commit; PC*, base*, and CR0/CR3/CR4 are "
+            "pre-execution instruction/translation context")
         if rec.x87_valid:
             # tight single-space header (the "PINNED" banner already flags the
             # mode) so the 4-digit tag value never clips off the panel's right edge.

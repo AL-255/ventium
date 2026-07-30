@@ -262,8 +262,11 @@ Procedure:
 2. Require entry/load/ESP to be disabled with reset-vector/placement tooltips.
 3. Require top-of-1-MiB placement (`load=0x000f0000`).
 4. Step 1200 clocks, open TLB, and require actual valid entries.
-5. Load the user-mode branch fixture into the same window.
-6. Require system/SoC options, trace filter, accesses, and Memory click pin to
+5. Pin a system retirement and require `PC*`, all six segment `base*` values,
+   and CR0/CR3/CR4 to match its captured pre-execution translation context;
+   require uncaptured limits and CR2 to say `n/a`.
+6. Load the user-mode branch fixture into the same window.
+7. Require system/SoC options, trace filter, accesses, and Memory click pin to
    reset; Memory must begin by following the new program's EIP.
 
 Observed evidence:
@@ -272,12 +275,16 @@ Observed evidence:
 - 12 Code$ and 8 Data$ lines are resident.
 - Six valid I/D TLB entries are displayed, including 4 KiB and large-page
   mappings.
+- The pinned Segments page exposes the exact context used for linked-byte
+  translation and visually distinguishes it from post-commit architectural
+  values instead of showing stale live data.
 - The expected terminal `S_HALT` is shown as a neutral green “halted” state,
   not a red “stuck” error.
 - Switching to the branch image yields a clean user-mode session with no stale
   trace filter or memory selection/address.
 
-Captures: `06a_system_reset_vector_memory.png`, `06_system_paging.png`.
+Captures: `06a_system_reset_vector_memory.png`, `06_system_paging.png`,
+`06b_system_pinned_translation.png`.
 
 ### 7. Stale SoC library recovery
 

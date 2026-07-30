@@ -56,6 +56,12 @@ necessarily the older instruction or memory request causing the hazard).
 Click a retired Trace row or timing cell to
 additionally pin the registers to that retirement; use Shift-click on a second
 timing row to measure the cycle distance. `F1` lists all shortcuts.
+In a pinned register view, GPRs, EFLAGS, segment selectors, and x87 are the
+post-commit state. `PC*`, segment `base*`, and CR0/CR3/CR4 are starred because
+they are the pre-execution instruction/translation context used to find the
+linked bytes. Segment limits and CR2 read `n/a` because the retirement record
+does not capture them; hover a starred heading or value for the time-point
+explanation.
 
 The timing diagram itself is keyboard accessible: Up/Down selects adjacent
 retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture

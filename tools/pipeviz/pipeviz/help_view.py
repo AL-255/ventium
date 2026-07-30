@@ -91,6 +91,11 @@ place an amber anchor and measure the cycle delta. Use Up/Down, Page Up/Down,
 Home, and End while the diagram has focus to select exact retirements. The cycle
 zoom buttons (or Ctrl+- / Ctrl+=) trade context for cell detail without losing
 the selected cycle.</p>
+<p>In pinned Registers, GPRs, flags, selectors, and x87 are post-commit.
+<b>PC*</b>, segment <b>base*</b>, and CR0/CR3/CR4 are starred because they are
+the retiring instruction's pre-execution translation context. Segment limits
+and CR2 show <code>n/a</code> because they are not captured per retirement;
+hover a starred label for the exact time-point explanation.</p>
 <p>The event selector beside ◀/▶ narrows <code>[</code>/<code>]</code>
 navigation to any event, mispredicts, stalls, I-cache fills, or page walks.</p>
 <h2>Examples</h2>

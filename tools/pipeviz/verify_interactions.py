@@ -1303,6 +1303,35 @@ def scenario_system_and_switch(app, outdir):
         select_tab(app, win.tables.tabs, 2)
         save_shot(app, win, outdir, "06_system_paging")
 
+        # A pinned system retirement must expose the translation context that
+        # made its linked bytes meaningful. The record's source PC and
+        # pre-execution bases/CRs are explicitly starred; unavailable fields
+        # remain honest instead of inheriting stale live values.
+        pin_row = win.trace.tbl.rowCount() - 1
+        select_table_row(app, win.trace.tbl, pin_row)
+        pin_n = int(win.trace.tbl.item(pin_row, 0).text())
+        pin_rec = next(
+            rec for rec in win.backend.get_retires(pin_n, 1)
+            if rec.n == pin_n)
+        assert win._pinned_n == pin_n
+        assert win.regs.eip_name_lbl.text() == "PC*"
+        assert "next EIP is not captured" in win.regs.eip_name_lbl.toolTip()
+        assert win.regs.eip_lbl.text() == f"{pin_rec.pc:08x}"
+        assert win.regs.seg_base_hdr.text() == "base*"
+        assert [
+            base.text() for _sel, base, _limit in win.regs.seg_lbls.values()
+        ] == [f"{pin_rec.seg_base[i]:08x}" for i in range(6)]
+        assert all(limit.text() == "n/a"
+                   for _sel, _base, limit in win.regs.seg_lbls.values())
+        for name in ("CR0", "CR3", "CR4"):
+            assert win.regs.cr_lbls[name].text() == (
+                f"{getattr(pin_rec, name.lower()):08x}")
+        assert win.regs.cr_lbls["CR2"].text() == "n/a"
+        assert "pre-execution" in win.regs.mode_lbl.toolTip()
+        if win.regs._compact:
+            win.regs._compact_tabs.setCurrentIndex(1)
+        save_shot(app, win, outdir, "06b_system_pinned_translation")
+
         # Switching workload classes must discard all system/memory/transient state.
         assert set_filter(app, win.trace, "mov") > 0
         win.tables.mem.follow = None
