@@ -9,6 +9,27 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — generated replacement names save failure
+
+**Cross-workspace safety audit:** C compilation protects dirty Assembly before
+installing generated output. When the user chose Save and that Assembly save
+failed, both buffers were retained correctly, but the C/global message used the
+same generic “replacement cancelled” outcome as a deliberate Cancel and hid
+the actionable I/O cause from the current workspace.
+
+**Changes:** safe replacement now records whether it was blocked by Cancel or a
+failed protective save. The C bridge preserves its existing cancellation
+message for Cancel; on save failure it keeps both buffers, leaves the complete
+red error in Assembly, and reports the save failure explicitly in C's amber
+persistent status, tooltip/accessibility text, and the global notice.
+
+**Verification:** acceptance dirties Assembly, points its existing path beneath
+a regular file, compiles valid C, chooses Save, and requires generated output
+to remain uninstalled with both buffers preserved, a `save_failed` outcome,
+Assembly's exact red error, C's synchronized amber explanation, global notice,
+unchanged C workspace, and a settled screenshot. The independent Cancel
+regression now requires a `cancelled` outcome.
+
 ## July 30 continuation — source open failures preserve and explain
 
 **Read-path audit:** invalid UTF-8 and filesystem read errors had the same

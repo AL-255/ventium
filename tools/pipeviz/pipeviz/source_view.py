@@ -2004,6 +2004,7 @@ class _CursorPositionLabel(QToolButton):
 
 def _confirm_source_replacement(view, label, action):
     """Protect edited source before replacing it or closing the application."""
+    view._replacement_block_reason = None
     if not view.editor.document().isModified():
         return True
     choice = QMessageBox.warning(
@@ -2012,9 +2013,13 @@ def _confirm_source_replacement(view, label, action):
         QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
         QMessageBox.Save)
     if choice == QMessageBox.Cancel:
+        view._replacement_block_reason = "cancelled"
         return False
     if choice == QMessageBox.Save:
-        return bool(view.save_source())
+        if view.save_source():
+            return True
+        view._replacement_block_reason = "save_failed"
+        return False
     return True
 
 

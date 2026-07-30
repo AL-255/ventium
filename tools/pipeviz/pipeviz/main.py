@@ -1348,10 +1348,21 @@ class MainWindow(QMainWindow):
     def _accept_compiled_assembly(self, source, optimization):
         if not self.assembly.set_source(
                 source, f"C compiler ({optimization})"):
-            self.c_source.status.setText(
-                "C compiled · keeping unsaved Assembly (replacement cancelled)")
+            save_failed = (
+                getattr(self.assembly, "_replacement_block_reason", None)
+                == "save_failed")
+            text = (
+                "C compiled · Assembly save failed; generated Assembly "
+                "was not opened"
+                if save_failed else
+                "C compiled · keeping unsaved Assembly "
+                "(replacement cancelled)")
+            self.c_source.status.setText(text)
             self.c_source.status.setStyleSheet("color:#e3b341;padding:2px;")
             self._notice(
+                "C compiled, but Assembly save failed — generated assembly "
+                "was not opened"
+                if save_failed else
                 "C compiled, but generated assembly was not opened")
             return
         self.workspace.setCurrentWidget(self.assembly)

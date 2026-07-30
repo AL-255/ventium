@@ -490,7 +490,12 @@ remain in C and highlight their responsible line; assembler errors remain in
 Assembly. Press Enter on the focused diagnostic, or double-click it, to jump
 to the marked C/Assembly line. The empty C diagnostics affordance stays shallow
 to maximize editor height, expands for a warning or error, and collapses again
-when an edit clears the stale result. Long paths and GCC messages wrap at the
+when an edit clears the stale result.
+If dirty Assembly blocks replacement, choosing Cancel keeps both buffers and
+reports cancellation. Choosing Save when that protective save fails also keeps
+both buffers, but C and the global notice explicitly say the Assembly save
+failed while the hidden Assembly workbench retains the full red I/O diagnostic.
+Long paths and GCC messages wrap at the
 pane edge; internal generated paths are shortened to `Assembly:` or
 `C source:` before display. Vertical scrolling remains available, with no hidden
 horizontal-scroll requirement. Empty and warning states use Compiler

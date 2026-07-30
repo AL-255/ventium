@@ -384,7 +384,11 @@ errors also highlight their C line; press Enter on the focused diagnostic or
 double-click it to jump there. Editing C or changing the optimization level
 clears the prior compiler result and asks for a fresh compile. The diagnostic
 pane stays shallow while empty, expands for real output, and collapses after
-that output becomes stale. Long compiler lines wrap to the pane width instead
+that output becomes stale.
+If dirty Assembly blocks replacement, Cancel keeps both buffers and reports
+cancellation. If its protective Save fails, both buffers still survive, but C
+and the global notice explicitly report the Assembly save failure while
+Assembly retains the full red I/O diagnostic. Long compiler lines wrap to the pane width instead
 of requiring horizontal scrolling, and generated paths are shortened to
 <code>C source:</code>.</p>
 <p>Hover an optimization choice for its purpose: O0 is the most direct and

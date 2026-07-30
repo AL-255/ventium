@@ -207,7 +207,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     Intel-syntax code with a small
     `_start`/HLT wrapper into the Assembly tab; compiler and assembler errors
     highlight their source line. Editing C or changing optimization clears the
-    prior compiler result and asks for a fresh compile. C/header drops route
+    prior compiler result and asks for a fresh compile. Dirty-Assembly
+    replacement distinguishes user cancellation from a failed protective save,
+    preserving both buffers and naming the real blocker. C/header drops route
     here without disturbing the running program. C diagnostics stay as a
     compact affordance when empty, expand automatically for real output, and
     wrap long compiler paths/messages instead of requiring horizontal scroll. The

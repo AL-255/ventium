@@ -2023,6 +2023,7 @@ def scenario(app, outdir):
         finally:
             QMessageBox.warning = real_warning
         assert editor.toPlainText() == dirty_source
+        assert win.assembly._replacement_block_reason == "cancelled"
         assert win.workspace.tabText(1) == "Assembly *"
         win.assembly._path = os.path.join(outdir, "edited-after-build.s")
         assert win.assembly.save_source()
@@ -2584,6 +2585,47 @@ def scenario(app, outdir):
         assert not win.c_source.diagnostics.toPlainText()
         assert win.c_source.diagnostics.height() <= 54
         win.c_source.editor.document().setModified(False)
+
+        # If generated C output cannot replace dirty Assembly because the
+        # requested protective save fails, distinguish that I/O failure from
+        # a user cancellation and retain both source buffers.
+        assembly_before_failed_replacement = (
+            win.assembly.editor.toPlainText())
+        win.assembly.editor.appendPlainText(
+            "# unsaved before generated replacement")
+        win.assembly._path = str(
+            blocked_artifacts / "replacement-save.s")
+        win.assembly._sync_source_badge()
+        assert win.workspace.tabText(1).startswith("Assembly *")
+        real_warning = QMessageBox.warning
+        QMessageBox.warning = staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.Save)
+        try:
+            replacement_output = win.c_source.compile()
+        finally:
+            QMessageBox.warning = real_warning
+        settle(app)
+        assert replacement_output is not None
+        assert win.workspace.currentWidget() is win.c_source
+        assert win.assembly.editor.toPlainText().startswith(
+            assembly_before_failed_replacement)
+        assert win.assembly.editor.document().isModified()
+        assert win.assembly._replacement_block_reason == "save_failed"
+        assert win.assembly.status.text().startswith("Save failed · ")
+        assert "replacement-save.s" in win.assembly.status.text()
+        assert win.assembly.diagnostics._severity == "error"
+        assert win.c_source.status.text() == (
+            "C compiled · Assembly save failed; generated Assembly "
+            "was not opened")
+        assert win.c_source.status.toolTip() == win.c_source.status.text()
+        assert win.c_source.status.accessibleDescription() == (
+            win.c_source.status.text())
+        assert "#e3b341" in win.c_source.status.styleSheet()
+        assert win.action_hint.text() == (
+            "C compiled, but Assembly save failed — generated assembly "
+            "was not opened")
+        save(win, outdir, "03f_c_replacement_save_failure")
+        win.assembly.editor.document().setModified(False)
 
         # Compile real C, inspect/edit the emitted assembly, then assemble/run it.
         win.c_source.new_template()
