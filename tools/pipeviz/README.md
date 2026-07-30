@@ -142,7 +142,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   the Visualizer:
   * Assembly is a line-numbered GNU Intel-syntax editor with syntax highlighting,
     build diagnostics, `Ctrl+Space` completion over 291 Ventium/P54C mnemonics,
-    mode/build availability notes, and an opcode-specific description plus miniature pipeline
+    mode/build availability notes (amber only when restricted), and an
+    opcode-specific description plus miniature pipeline
     preview for every completion. Arrows/Page Up/Page Down traverse matches,
     while Home/End jump to catalogue bounds. `Ctrl+B` assembles without loading
     the backend; **Assemble + Run** builds a source-mapped

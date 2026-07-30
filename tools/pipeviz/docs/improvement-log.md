@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — reserve amber for opcode restrictions
+
+**Preview-color audit:** `Availability · user` used the same amber as
+SoC-only, SMM-only, protected-mode, and build-gated instructions. The color
+made the normal case look cautionary and gave actual restrictions no distinct
+semantic emphasis.
+
+**Changes:** exact `user` availability is now neutral secondary text. Every
+restricted availability string remains amber in both the completion popup and
+persistent Assembly preview. Empty preview state resets to neutral too.
+
+**Verification:** the authoring harness selects ordinary ADD and requires the
+neutral style, then injects CPUID into the same preview and requires its
+`SoC/co-simulation` text plus amber style before restoring ADD for the screenshot.
+All accessibility text and instruction metadata remain present without relying
+on color alone.
+
 ## July 30 continuation — opcode-specific common ALU descriptions
 
 **Completion-semantics audit:** selecting `add` in the generated Fibonacci loop

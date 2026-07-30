@@ -985,7 +985,15 @@ def scenario(app, outdir):
         assert editor.completion.info.availability.accessibleName() == (
             "Instruction availability")
         assert editor.completion.info.availability.text() == "Availability · user"
+        assert "#8b949e" in (
+            editor.completion.info.availability.styleSheet())
         assert "cycle" not in editor.completion.info.availability.text()
+        editor.completion.info.set_instruction(instruction_info("cpuid"))
+        assert "SoC/co-simulation" in (
+            editor.completion.info.availability.text())
+        assert "#e3b341" in (
+            editor.completion.info.availability.styleSheet())
+        editor.completion.info.set_instruction(instruction_info("add"))
         save(editor.completion, outdir, "01_opcode_completion_popup")
         reference_source = editor.toPlainText()
         editor.completion.accept_current()

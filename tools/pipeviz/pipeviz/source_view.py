@@ -1131,7 +1131,7 @@ class InstructionInfoPane(QWidget):
         self.availability = QLabel("")
         self.availability.setAccessibleName("Instruction availability")
         self.availability.setWordWrap(True)
-        self.availability.setStyleSheet("color:#e3b341;font-size:9px;")
+        self.availability.setStyleSheet("color:#8b949e;font-size:9px;")
         self.preview = InstructionPipelinePreview()
         layout.addWidget(self.signature)
         layout.addWidget(self.description)
@@ -1145,6 +1145,7 @@ class InstructionInfoPane(QWidget):
             self.signature.setText("No opcode selected")
             self.description.setText("")
             self.availability.setText("")
+            self.availability.setStyleSheet("color:#8b949e;font-size:9px;")
             return
         self.signature.setText(info.signature)
         self.description.setText(info.description)
@@ -1152,6 +1153,10 @@ class InstructionInfoPane(QWidget):
         # label in the miniature pipeline. Repeating both here produced a dense,
         # near-duplicate line in the compact Assembly sidebar.
         self.availability.setText(f"Availability · {info.availability}")
+        self.availability.setStyleSheet(
+            "color:"
+            + ("#8b949e" if info.availability == "user" else "#e3b341")
+            + ";font-size:9px;")
 
 
 class CompletionPopup(QFrame):
