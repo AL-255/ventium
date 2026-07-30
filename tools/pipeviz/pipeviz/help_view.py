@@ -178,6 +178,8 @@ labels a newest-cycle window after very large steps.</p>
 <h1>Caches and memory</h1>
 <p>Code$ and Data$ show set/way residency and occupancy. Data$ replays the
 observed access stream through the matching 2-way geometry to estimate misses.
+For a restored snapshot it seeds replay from the resident tags and MRU order at
+the session boundary, so the first post-restore access is not falsely cold.
 Hotspots attributes fetch-to-retire latency and D-cache misses to PCs. Its
 <b>Σ lat</b> column sums the latency of every dynamic instruction at that PC;
 because in-flight instructions overlap, this instruction-cycle total can exceed

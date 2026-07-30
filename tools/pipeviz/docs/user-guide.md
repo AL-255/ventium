@@ -251,8 +251,12 @@ tools/pipeviz/run.sh build/verify/mb_dmiss.cycle.flat
 Step **160 clocks**, then jump among events with `]`.  Select a long-latency
 load in the timing view: its stretched stall cells and the amber dependency
 edge show which consumer was held back.  In **Data$**, inspect the resident
-lines and replayed miss-rate.  In **Memory**, choose `→ access` to follow the
-most recent load/store and see its bytes outlined in gold.  Finally, open
+lines and replayed miss-rate. The bracketed origin says whether replay
+started `[empty]` or was `[seed N]` from the resident tags and MRU order of a
+restored snapshot; hover it for hit/cold/conflict totals. This prevents the
+visualization boundary from looking like a cold cache. In **Memory**, choose
+`→ access` to follow the most recent load/store
+and see its bytes outlined in gold.  Finally, open
 **Mem map**: this workload’s stride appears as a diagonal scatter; click an
 outlier to jump directly to its trace row and pinned architectural state.
 

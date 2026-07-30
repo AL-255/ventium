@@ -28,14 +28,15 @@ from PySide6.QtWidgets import (QApplication, QMessageBox, QPushButton,
 import pipeviz.main as main_module
 import pipeviz.pipeline_view as pipeline_module
 import pipeviz.trace_view as trace_module
-from pipeviz.backend import VVRetire
+from pipeviz.backend import VVCline, VVRetire
 from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
 from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
                           _session_progress, _system_load_address,
                           _validate_segments)
 from pipeviz.pipeline_view import ROW_H
-from pipeviz.tables_view import CycleBreakdown
+from pipeviz.tables_view import (CycleBreakdown, TablesView, _dcache_per_pc,
+                                 _dcache_replay)
 
 
 def repo_path(relative):
@@ -206,6 +207,53 @@ def scenario_startup(app, outdir):
     })()
     assert CycleBreakdown._classify("S_FETCH", probe_cycle) == "front end"
     assert CycleBreakdown._classify("S_EXEC", probe_cycle) == "slow path"
+
+    # Snapshot sessions must begin D-cache replay from resident tags and the
+    # exact MRU order, not fabricate a cold cache. A new conflicting tag evicts
+    # the seeded LRU while the seeded MRU remains a hit.
+    seed = [
+        (0, 1, 0x20, 0),  # deliberately listed before the MRU way
+        (0, 0, 0x10, 0),
+    ]
+    seeded_accesses = [
+        (0, 1, 0x30 << 12, 0, 4, 0x08048000),
+        (1, 2, 0x10 << 12, 0, 4, 0x08048004),
+    ]
+    assert _dcache_replay(seeded_accesses, seed) == (2, 1, 1, 0, 1)
+    seeded_pc = _dcache_per_pc(seeded_accesses, seed)
+    assert seeded_pc[0x08048000] == [1, 1]
+    assert seeded_pc[0x08048004] == [1, 0]
+    resident_access = [(0, 1, 0x10 << 12, 0, 4, 0x08048008)]
+    assert _dcache_replay(resident_access, seed) == (1, 1, 0, 0, 0)
+
+    seed_lines = []
+    for s, way, tag, mru_way in seed:
+        line = VVCline()
+        line.set, line.way, line.tag, line.lru = s, way, tag, mru_way
+        seed_lines.append(line)
+
+    class SnapshotCacheBackend:
+        @staticmethod
+        def cycle_count():
+            return 5000
+
+        @staticmethod
+        def dcache():
+            return seed_lines
+
+    seeded_tables = TablesView()
+    seeded_tables.start_session(SnapshotCacheBackend())
+    assert seeded_tables._dcache_seed == seed
+    seeded_tables.dc_lbl.setText("snapshot residency")
+    seeded_tables.set_dcache_replay(resident_access)
+    assert "0% miss" in seeded_tables.dc_lbl.text()
+    assert "replay [seed 2]" in seeded_tables.dc_lbl.text()
+    assert "2 resident session-start lines" in seeded_tables.dc_lbl.toolTip()
+    seeded_tables.set_hotspots([{
+        "pc": 0x08048008, "c0": 1, "c1": 1, "mnem": "mov eax, [esi]",
+    }], resident_access, captured_span=1)
+    assert seeded_tables.hot.item(0, 4).text() == "0/1"
+    seeded_tables.deleteLater()
 
     # Synthetic fast-path shadows must stay inside the capture and must never
     # duplicate a real front-end phase that occurs after an initial stall.
@@ -965,6 +1013,9 @@ def scenario_dcache_memory(app, outdir):
         select_tab(app, win.tables.tabs, 1)
         assert win.tables.dc.rowCount() >= 10
         assert "miss" in win.tables.dc_lbl.text().lower()
+        assert "replay [empty]" in win.tables.dc_lbl.text()
+        assert "14 cold fills" in win.tables.dc_lbl.toolTip()
+        save_shot(app, win, outdir, "02a_dcache_replay")
 
         select_tab(app, win.tables.tabs, 4)
         assert "instruction-cycles" in win.tables.hot_lbl.text()

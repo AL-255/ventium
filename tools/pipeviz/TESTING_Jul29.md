@@ -198,7 +198,7 @@ Observed evidence:
 - The clicked map point selected retirement 31 at address `0x080490e0`; the
   Trace, playhead, Registers, and Memory highlight all moved together.
 
-Captures: `02_dcache_memory_follow.png`,
+Captures: `02a_dcache_replay.png`, `02_dcache_memory_follow.png`,
 `03_dcache_memmap_drilldown.png`.
 
 ### 4. x87 pipeline and post-retirement state
@@ -517,6 +517,12 @@ The screenshot review found and corrected the following:
     cover clock 5,000 and retirement 1,000,000 starts. The native ABI smoke test
     now resolves its fixture from its own binary, rejects failed loads, checks
     real activity, and is rebuilt with an `$ORIGIN` runtime path.
+18. Snapshot D-cache replay still started empty even when the restored hardware
+    already contained valid lines. It now snapshots resident tags and the exact
+    per-set MRU order at the visible-session boundary, then seeds both aggregate
+    replay and per-PC miss attribution from that state. A synthetic two-way set
+    proves a seeded resident hit and proves that a conflict evicts the seeded
+    LRU—not MRU—tag.
 
 ## Coverage limits
 

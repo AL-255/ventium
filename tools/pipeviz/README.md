@@ -129,6 +129,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     heatmap**; the Data$ header also reports a **replayed miss-rate** (the resolved
     access stream run through a client-side 2-way-LRU model matching the hardware
     `dcache_timing` geometry, so it names the cause of the load-stall bubbles).
+    Restored snapshots seed that replay from their resident tags and MRU state,
+    rather than fabricating cold misses at the visualization boundary.
   * **TLB** — valid split I/D entries (only populated under paging).
   * **Prefetch** — the `ibuf[16]` + the fast-path fetch window, with a live decode.
   * **Hotspots** — a per-PC fetch-to-retire latency profile (perf/VTune-style;

@@ -125,6 +125,16 @@ memory and returned success. It now resolves the fixture from `/proc/self/exe`,
 fails failed/empty loads and absent activity, carries an `$ORIGIN` rpath, and is
 rebuilt by `build.sh`.
 
+**Snapshot D-cache audit:** aggregate and per-PC D-cache replay still assumed an
+empty cache at the visualization boundary. That is correct for a fresh reset,
+but restored snapshots may already have valid tags, so their first accesses
+were falsely classified cold and could perturb every later eviction. Tables now
+freeze the hardware's resident tags plus per-set MRU way at session start and
+seed both replay paths from that exact state. The UI states whether replay began
+`[empty]` or from `[seed N]` snapshot lines, keeps the detailed hit/cold/conflict
+breakdown in a tooltip to preserve table height, and a two-way synthetic
+regression proves both a resident hit and correct LRU eviction.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

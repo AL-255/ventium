@@ -160,15 +160,43 @@ _LINE_SHIFT = LINE.bit_length() - 1          # 32B line -> 5
 _SET_MASK = DC_SETS - 1                       # 128 sets -> 0x7f
 
 
-def _dcache_replay(accs):
+def _dcache_seed_sets(lines=()):
+    """Convert session-start resident lines into sets ordered MRU -> LRU.
+
+    ``vv_get_dcache`` returns only valid ways and repeats the set's MRU-way
+    index in each record's ``lru`` field.  Keeping that replacement order is
+    important after a snapshot restore: starting replay empty would mislabel
+    every already-resident line as a cold miss.
+    """
+    sets = [[] for _ in range(DC_SETS)]
+    grouped = {}
+    for line in lines:
+        if isinstance(line, tuple):
+            s, way, tag, mru_way = map(int, line)
+        else:
+            s, way, tag, mru_way = (
+                int(line.set), int(line.way), int(line.tag), int(line.lru))
+        if 0 <= s < DC_SETS and 0 <= way < WAYS:
+            grouped.setdefault(s, []).append((way, tag, mru_way))
+    for s, resident in grouped.items():
+        mru_way = resident[0][2]
+        resident.sort(key=lambda item: item[0] != mru_way)
+        for _way, tag, _mru in resident[:WAYS]:
+            if tag not in sets[s]:
+                sets[s].append(tag)
+    return sets
+
+
+def _dcache_replay(accs, seed=()):
     """Replay the resolved load/store address stream through a client-side model of
     the real D-cache geometry (DC_SETS sets × WAYS-way × LINE-byte, LRU) and tally
     hit / cold-miss / conflict-evict per access. The hardware (rtl/mem/dcache_timing)
     is exactly this 2-way-LRU model, so the miss-rate is faithful — and it answers a
     question the geometric STRIDE can't: dmiss strides +0x20 = the line size (100%
     miss) while test386 strides +0x2 < the line size (~92% HIT), yet both read
-    'stride (100%)'. Returns (accesses, hits, misses, cold, conflict)."""
-    sets = [[] for _ in range(DC_SETS)]       # each set: tags, MRU first
+    'stride (100%)'. ``seed`` is session-start residency/LRU, notably from a
+    restored snapshot. Returns (accesses, hits, misses, cold, conflict)."""
+    sets = _dcache_seed_sets(seed)             # each set: tags, MRU first
     hits = cold = conflict = 0
     for a in accs:
         line = a[2] >> _LINE_SHIFT
@@ -186,13 +214,13 @@ def _dcache_replay(accs):
     return len(accs), hits, cold + conflict, cold, conflict
 
 
-def _dcache_per_pc(accs):
+def _dcache_per_pc(accs, seed=()):
     """Per-PC (accesses, misses) from the SAME LRU replay, attributing each miss to
     the access's own PC (carried in the tuple, so it's robust to the Konata insns
     rolling window) — so the Hotspots profile can name WHICH load/store PC misses
     (dmiss's `mov eax,[esi]` = 14/14, vs test386's `[eax*4]` 3/17 while `[eax*4+2]`
     0/17), not just how many cycles each PC burned."""
-    sets = [[] for _ in range(DC_SETS)]
+    sets = _dcache_seed_sets(seed)
     stat = {}
     for a in accs:
         line = a[2] >> _LINE_SHIFT
@@ -517,6 +545,7 @@ class TablesView(QWidget):
             self.mix: "no instructions retired yet — step the core",
         }
         self._session_active = False
+        self._dcache_seed = []
         self.set_session_active(False)
 
     def set_session_active(self, active):
@@ -544,6 +573,13 @@ class TablesView(QWidget):
         model can start at a larger clock than the previous session.
         """
         self.set_session_active(True)
+        # A reset starts empty, while a restored snapshot may already contain
+        # valid tags. Freeze primitive metadata at the visible-session boundary
+        # so later live-cache updates cannot move replay's starting point.
+        self._dcache_seed = [
+            (int(line.set), int(line.way), int(line.tag), int(line.lru))
+            for line in backend.dcache()
+        ]
         self.cyc.reset(backend)
         self.mem.start_session()
         self.accmap.set_accesses([])
@@ -663,7 +699,8 @@ class TablesView(QWidget):
             else:
                 e[0] += 1; e[1] += span
         ranked = sorted(agg.items(), key=lambda kv: -kv[1][1])[:300]
-        miss_by_pc = _dcache_per_pc(accesses) if accesses else {}
+        miss_by_pc = (
+            _dcache_per_pc(accesses, self._dcache_seed) if accesses else {})
         retired_span = (
             max(it["c1"] for it in insns) - min(it["c0"] for it in insns) + 1
             if insns else 0)
@@ -734,8 +771,11 @@ class TablesView(QWidget):
         dc = backend.dcache()
         self.dc_map.set_lines(dc)
         self.dc_lbl.setText(
-            f"{len(dc)} / 256 lines resident ({100*len(dc)//256}% full)  "
-            f"— 8 KB, 2-way, 32-byte line, timing model (no data array)")
+            f"{len(dc)}/256 lines ({100*len(dc)//256}%) · "
+            "8 KB, 2-way × 32 B · timing only")
+        self.dc_lbl.setToolTip(
+            "Resident D-cache tags and replacement state. The RTL model has "
+            "no data array; inspect bytes in Memory.")
         rows = []
         for l in dc:
             base = (l.tag << 12) | (l.set << 5)
@@ -771,12 +811,22 @@ class TablesView(QWidget):
         OUTCOME that the resident-line snapshot and the Mem-map geometric stride
         never report. Re-appends each frame onto the residency text update_from just
         set, so it never accumulates."""
-        n, _hits, miss, cold, conflict = _dcache_replay(accs)
+        n, _hits, miss, cold, conflict = _dcache_replay(
+            accs, self._dcache_seed)
         if n:
+            origin = f"seed {len(self._dcache_seed)}" if self._dcache_seed else "empty"
+            origin_detail = (
+                f"Replay began from {len(self._dcache_seed)} resident "
+                "session-start lines and their MRU order."
+                if self._dcache_seed
+                else "Replay began from an empty session-start cache.")
             self.dc_lbl.setText(
                 self.dc_lbl.text() +
-                f"   ·   D$ replay: {round(100 * miss / n)}% miss "
-                f"({miss}/{n} · {cold} cold, {conflict} conflict)")
+                f" · replay [{origin}] {round(100 * miss / n)}% miss ({miss}/{n})")
+            self.dc_lbl.setToolTip(
+                self.dc_lbl.toolTip() + "\n"
+                f"{n} replayed accesses: {_hits} hits, {cold} cold fills, "
+                f"{conflict} conflict evictions. {origin_detail}")
 
 
 class _PrefetchView(QWidget):
