@@ -1637,12 +1637,16 @@ class MainWindow(QMainWindow):
                     None)
                 if invalid is not None:
                     widget, label = invalid
-                    widget.setFocus()
                     message = (
                         f"Cannot reload while {label} is invalid. Enter a "
                         "32-bit hexadecimal address, then reload again.")
                     QMessageBox.warning(
                         self, "Invalid address", message)
+                    self.activateWindow()
+                    widget.setFocus(Qt.OtherFocusReason)
+                    QTimer.singleShot(
+                        0, lambda target=widget:
+                        target.setFocus(Qt.OtherFocusReason))
                     self._notice(
                         f"Reload blocked · invalid {label} · "
                         "enter a 32-bit hexadecimal address",
@@ -2015,6 +2019,8 @@ class MainWindow(QMainWindow):
             return bool(self.load_snapshot(self.snapshot_prefix))
         if self.image_bytes is None:
             return False
+        applying_setup = (
+            self._current_reset_config() != self._applied_reset_config)
         soc = self.soc_cb.isChecked()
         system = self.sys_cb.isChecked() or soc      # SoC always boots system mode
         if system and self.image_kind == "ELF":
@@ -2036,11 +2042,20 @@ class MainWindow(QMainWindow):
                 ) if value is None), None)
             if invalid is not None:
                 widget, label = invalid
-                widget.setFocus()
-                QMessageBox.warning(
-                    self, "Invalid address",
+                message = (
                     f"{label} must be a 32-bit hexadecimal address "
                     "(for example 0x08048000).")
+                QMessageBox.warning(
+                    self, "Invalid address", message)
+                self.activateWindow()
+                widget.setFocus(Qt.OtherFocusReason)
+                QTimer.singleShot(
+                    0, lambda target=widget:
+                    target.setFocus(Qt.OtherFocusReason))
+                self._notice(
+                    f"Reset blocked · invalid {label} · "
+                    "enter a 32-bit hexadecimal address",
+                    ms=8000, severity="warning", detail=message)
                 return False
         # Validate placement while the current backend is still intact.
         if system:
@@ -2091,6 +2106,9 @@ class MainWindow(QMainWindow):
         self._clear_reset_required()
         self._refresh_all()
         self._set_transport_enabled(True)
+        self._notice(
+            "Applied setup and reset program"
+            if applying_setup else "Reset program")
         return True
 
     # ---- register pinning (AS-OF a retired instruction) + playhead ----

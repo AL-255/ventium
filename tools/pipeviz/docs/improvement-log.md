@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — invalid Reset feedback completes its lifecycle
+
+**Reset-validation audit:** Apply + Reset already red-outlined/focused an
+invalid address and showed a modal, but its persistent action could still
+describe an older pending setup. Correcting and resetting also left that stale
+failure visible until an unrelated action replaced it.
+
+**Changes:** invalid Reset now retains an eight-second amber correction naming
+the field and required 32-bit hex form. Every successful direct Reset emits a
+neutral `Reset program` or `Applied setup and reset program` completion, while
+program loading can still replace that immediately with its more specific
+Loaded notice.
+
+**Verification:** the existing real-modal invalid-entry scenario now requires
+field focus, red outline, exact amber summary and accessible detail, unchanged
+backend, then requires the corrected Reset to clear the field error and replace
+the warning with exact neutral completion.
+
 ## July 30 continuation — invalid reload setup retains correction
 
 **Reload-validation audit:** reload correctly rejected an invalid preserved

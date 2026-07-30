@@ -1676,6 +1676,9 @@ def scenario_branch_transport(app, outdir):
         # Bad reset addresses are rejected visibly before replacing the backend.
         old_backend = win.backend
         invalid_seen = []
+        win.activateWindow()
+        win.pipeline.konata.plot.setFocus()
+        settle(app)
 
         def dismiss_invalid():
             for widget in app.topLevelWidgets():
@@ -1693,9 +1696,21 @@ def scenario_branch_transport(app, outdir):
         assert invalid_seen == ["Invalid address"]
         assert win.backend is old_backend
         assert "#f85149" in win.entry_e.styleSheet()
+        assert app.focusWidget() is win.entry_e
+        assert win.action_hint.text() == (
+            "Reset blocked · invalid entry · "
+            "enter a 32-bit hexadecimal address")
+        assert win.action_hint.toolTip() == (
+            "entry must be a 32-bit hexadecimal address "
+            "(for example 0x08048000).")
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.toolTip())
+        assert "#e3b341" in win.action_hint.styleSheet()
         win.entry_e.setText("0x08048000")
         win.on_reset()
         assert not win.entry_e.styleSheet()
+        assert win.action_hint.text() == "Reset program"
+        assert "#8b949e" in win.action_hint.styleSheet()
         win.cyc_cb.setChecked(False)
         assert "Apply + Reset" in win.reset_btn.text()
         assert win.reset_btn.accessibleName() == (
