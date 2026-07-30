@@ -526,6 +526,44 @@ def scenario(app, outdir):
         settle(app)
         assert app.focusWidget() is win.assembly.run_btn
         assert editor.toPlainText() == original_source
+        indentation_probe = "mov eax, 1\nadd eax, 2\nhlt\n"
+        editor.setPlainText(indentation_probe)
+        selection = editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(
+            indentation_probe.index("hlt"), QTextCursor.KeepAnchor)
+        editor.setTextCursor(selection)
+        QTest.keyClick(editor, Qt.Key_Tab)
+        indented_probe = "    mov eax, 1\n    add eax, 2\nhlt\n"
+        assert editor.toPlainText() == indented_probe
+        editor.document().undo()
+        assert editor.toPlainText() == indentation_probe
+        editor.document().redo()
+        assert editor.toPlainText() == indented_probe
+        selection = editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(
+            indented_probe.index("hlt"), QTextCursor.KeepAnchor)
+        editor.setTextCursor(selection)
+        QTest.keyClick(editor, Qt.Key_Backtab, Qt.ShiftModifier)
+        assert editor.toPlainText() == indentation_probe
+        assert editor.textCursor().hasSelection()
+        caret = editor.textCursor()
+        caret.setPosition(3)
+        editor.setTextCursor(caret)
+        QTest.keyClick(editor, Qt.Key_Tab)
+        assert editor.document().firstBlock().text() == "mov  eax, 1"
+        editor.document().undo()
+        assert editor.toPlainText() == indentation_probe
+        editor.setPlainText("    mov eax, 1\n")
+        caret = editor.textCursor()
+        caret.setPosition(8)
+        editor.setTextCursor(caret)
+        QTest.keyClick(editor, Qt.Key_Backtab, Qt.ShiftModifier)
+        assert editor.toPlainText() == "mov eax, 1\n"
+        assert editor.textCursor().positionInBlock() == 4
+        editor.setPlainText(original_source)
+        editor.document().setModified(False)
         save(win, outdir, "00a_assembly_compact")
         win.resize(1500, 920)
         settle(app)
@@ -1229,6 +1267,21 @@ def scenario(app, outdir):
         settle(app)
         assert app.focusWidget() is win.c_source.compile_btn
         assert win.c_source.editor.toPlainText() == original_c_source
+        c_indent_probe = "int a;\nint b;\n"
+        win.c_source.editor.setPlainText(c_indent_probe)
+        selection = win.c_source.editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(
+            c_indent_probe.index("int b"), QTextCursor.KeepAnchor)
+        win.c_source.editor.setTextCursor(selection)
+        QTest.keyClick(win.c_source.editor, Qt.Key_Tab)
+        assert win.c_source.editor.toPlainText() == (
+            "    int a;\nint b;\n")
+        QTest.keyClick(
+            win.c_source.editor, Qt.Key_Backtab, Qt.ShiftModifier)
+        assert win.c_source.editor.toPlainText() == c_indent_probe
+        win.c_source.editor.setPlainText(original_c_source)
+        win.c_source.editor.document().setModified(False)
         save(win, outdir, "03a_c_compact")
         win.resize(1500, 920)
         settle(app)

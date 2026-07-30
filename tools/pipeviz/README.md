@@ -148,7 +148,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     text. Source drops route to this workspace; labels/new blocks auto-indent
     and a closing C brace typed on a blank indented line dedents one level.
     `Ctrl+Tab`/`Ctrl+Shift+Tab` leaves either source editor without inserting
-    indentation.
+    indentation. Tab/Shift+Tab safely indent or outdent selected lines as one
+    undoable edit.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses

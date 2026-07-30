@@ -206,6 +206,67 @@ class CodeEditor(QPlainTextEdit):
         self.setToolTip("")
         self._refresh_selections()
 
+    def _indent_source(self, outdent=False):
+        """Indent selected blocks, or edit one caret line, without data loss."""
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            if not outdent:
+                spaces = 4 - (cursor.positionInBlock() % 4)
+                cursor.insertText(" " * spaces)
+                return
+            block = cursor.block()
+            text = block.text()
+            remove = 1 if text.startswith("\t") else min(
+                4, len(text) - len(text.lstrip(" ")))
+            if not remove:
+                return
+            column = cursor.positionInBlock()
+            edit = QTextCursor(self.document())
+            edit.beginEditBlock()
+            edit.setPosition(block.position())
+            edit.setPosition(block.position() + remove, QTextCursor.KeepAnchor)
+            edit.removeSelectedText()
+            edit.endEditBlock()
+            cursor.setPosition(
+                block.position() + max(0, column - remove))
+            self.setTextCursor(cursor)
+            return
+
+        selection_start = cursor.selectionStart()
+        selection_end = cursor.selectionEnd()
+        first = self.document().findBlock(selection_start)
+        # A selection ending exactly at the next block's start conventionally
+        # covers the preceding line, not that untouched next line.
+        last_probe = max(selection_start, selection_end - 1)
+        last = self.document().findBlock(last_probe)
+        lines = []
+        block = first
+        while block.isValid():
+            text = block.text()
+            if outdent:
+                remove = 1 if text.startswith("\t") else min(
+                    4, len(text) - len(text.lstrip(" ")))
+                text = text[remove:]
+            else:
+                text = "    " + text
+            lines.append(text)
+            if block == last:
+                break
+            block = block.next()
+        replacement = "\n".join(lines)
+        start = first.position()
+        end = last.position() + len(last.text())
+        edit = QTextCursor(self.document())
+        edit.beginEditBlock()
+        edit.setPosition(start)
+        edit.setPosition(end, QTextCursor.KeepAnchor)
+        edit.insertText(replacement)
+        edit.endEditBlock()
+        selected = QTextCursor(self.document())
+        selected.setPosition(start)
+        selected.setPosition(start + len(replacement), QTextCursor.KeepAnchor)
+        self.setTextCursor(selected)
+
     def keyPressEvent(self, event):
         if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
                 and event.modifiers() & Qt.ControlModifier):
@@ -213,6 +274,14 @@ class CodeEditor(QPlainTextEdit):
                 event.key() != Qt.Key_Backtab
                 and not event.modifiers() & Qt.ShiftModifier)
             self.focusEscapeRequested.emit(forward)
+            event.accept()
+            return
+        if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
+                and not event.modifiers()
+                & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)):
+            self._indent_source(
+                event.key() == Qt.Key_Backtab
+                or bool(event.modifiers() & Qt.ShiftModifier))
             event.accept()
             return
         # Preserve indentation in both workbenches, and indent one level after

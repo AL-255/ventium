@@ -285,6 +285,8 @@ Enter preserves the current indentation and advances one level after an
 assembly label or C opening brace. Typing a closing C brace on an otherwise
 blank indented line dedents one level first. Plain `Tab` indents source;
 `Ctrl+Tab` and `Ctrl+Shift+Tab` leave either editor without changing it.
+With lines selected, `Tab`/`Shift+Tab` indent or outdent the whole block as one
+undoable edit; a caret-only Tab inserts spaces to the next four-column stop.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own
 `_start:` remains exact.

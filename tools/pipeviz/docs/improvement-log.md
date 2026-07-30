@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Selected-source indentation audit:** Qt's default plain-text behavior replaced
+an entire multi-line selection with one tab and offered no Shift+Tab outdent.
+Both workbenches now indent/outdent every selected line as a single undoable
+edit. Caret-only Tab inserts spaces to the next four-column stop; caret-only
+Shift+Tab removes one leading indentation level. Assembly and C acceptance
+prove exact source preservation across an indent/outdent round trip.
+
 **Authoring direct-manipulation regression audit:** acceptance now drives real
 pointer events through both documented source interactions. A line-number click
 must select exactly that full line and restore editor focus. An opcode
