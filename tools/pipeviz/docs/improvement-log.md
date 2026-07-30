@@ -17,6 +17,10 @@ source. Ctrl+Tab now moves to diagnostics and Ctrl+Shift+Tab moves back toward
 the primary run/compile action without modifying source. Both editors expose
 that contract to assistive technology; compact acceptance checks the exact
 focus destinations and byte-for-byte source preservation.
+Those navigation chords now also take precedence over a live opcode-completion
+popup, so Ctrl+Tab cannot accidentally insert its current selection. Starting
+an assemble/run closes the popup as well, preventing stale suggestions from
+floating above fresh build diagnostics or the Visualizer.
 
 **First-run example-discovery audit:** startup empty states recommended built
 examples, but the only actual route was nested in File. The existing 92-pixel

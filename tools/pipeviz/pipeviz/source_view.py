@@ -926,6 +926,11 @@ class AssemblyEditor(CodeEditor):
         self._completion_case_sample = ""
 
     def keyPressEvent(self, event):
+        if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
+                and event.modifiers() & Qt.ControlModifier):
+            self.completion.hide()
+            super().keyPressEvent(event)
+            return
         if self.completion.isVisible():
             if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown):
                 delta = {
@@ -1568,6 +1573,7 @@ class AssemblyView(QWidget):
 
     def build(self, run=False):
         self._focus_editor()
+        self.editor.completion.hide()
         self.editor.mark_error_line(None)
         self.status.setText("Assembling and linking…")
         self.status.setStyleSheet("color:#e3b341;padding:2px;")

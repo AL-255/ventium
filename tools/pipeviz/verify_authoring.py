@@ -538,6 +538,28 @@ def scenario(app, outdir):
         settle(app)
         assert not editor.completion.isVisible()
 
+        # Workbench navigation chords outrank the popup's plain-Tab insertion:
+        # completion closes, focus escapes, and the opcode token stays exact.
+        editor.setPlainText("ad")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        QTest.keyClick(editor, Qt.Key_Tab, Qt.ControlModifier)
+        settle(app)
+        assert app.focusWidget() is win.assembly.diagnostics
+        assert editor.toPlainText() == "ad"
+        assert not editor.completion.isVisible()
+        editor.setFocus()
+        assert editor.request_completion()
+        QTest.keyClick(
+            editor, Qt.Key_Backtab,
+            Qt.ControlModifier | Qt.ShiftModifier)
+        settle(app)
+        assert app.focusWidget() is win.assembly.run_btn
+        assert editor.toPlainText() == "ad"
+        assert not editor.completion.isVisible()
+
         # Ctrl+Space / Complete remains a full catalogue reference even when
         # the cursor is not currently in an opcode token.
         editor.setPlainText(".intel_syntax noprefix")
@@ -748,9 +770,12 @@ def scenario(app, outdir):
         win.assembly.new_template()
         editor.appendPlainText("# intentionally unsaved authoring session")
         assert win.workspace.tabText(1) == "Assembly *"
+        assert editor.request_completion(force=True)
+        assert editor.completion.isVisible()
         result = win.assembly.build(True)
         settle(app)
         assert result is not None
+        assert not editor.completion.isVisible()
         assert "built-in template" in win.assembly.source_badge.text()
         assert win.assembly.source_badge.text().endswith("*")
         assert win.assembly.source_badge.accessibleDescription().endswith(
