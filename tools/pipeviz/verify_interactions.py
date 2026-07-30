@@ -2492,6 +2492,12 @@ def scenario_fibonacci_uv(app, outdir):
             assert "quiesced — program stopped" in (
                 win.pipeline.spark.accessibleDescription())
             assert "program stopped" in win.action_hint.text()
+            assert "[DONE]" in win.status_lbl.text()
+            assert win.status_lbl.text().index("[DONE]") < (
+                win.status_lbl.text().index(">eip</span>"))
+            assert "program stopped" in win.status_lbl.toolTip()
+            assert win.status_lbl.accessibleDescription() == (
+                win.status_lbl.toolTip())
             assert win.reset_btn.isEnabled()
             assert not win.step1_btn.isEnabled() and not win.run_btn.isEnabled()
             assert win.evprev_btn.isEnabled() and win.evnext_btn.isEnabled()

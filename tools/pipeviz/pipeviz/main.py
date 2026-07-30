@@ -1901,6 +1901,8 @@ class MainWindow(QMainWindow):
         icn = sum(1 for v, _ in self.tables.ic_map.cells if v)
         dcn = sum(1 for v, _ in self.tables.dc_map.cells if v)
         mode = "SYS" if s.sys_mode else "USR"
+        done = bool(self.backend.is_done())
+        hung = bool(s.cpu_hung)
 
         def chip(lab, val, alert=False):
             col = "#e3b341" if alert else "#e6edf3"
@@ -1912,9 +1914,18 @@ class MainWindow(QMainWindow):
         else:
             image = (f"{self.image_kind}: {os.path.basename(self.image_path)}"
                      if self.image_path else "no image")
+        state_group = (
+            f"<span style='color:#79c0ff'>{name}</span> "
+            f"<span style='color:#6e7681'>{mode}</span>")
+        if done:
+            state_group += (
+                " <span style='color:#3fb950;font-weight:bold'>[DONE]</span>")
+        if hung:
+            state_group += (
+                " <span style='color:#f85149;font-weight:bold'>[HUNG]</span>")
         groups = [
             chip("cyc", s.core_cyc),
-            f"<span style='color:#79c0ff'>{name}</span> <span style='color:#6e7681'>{mode}</span>",
+            state_group,
             chip("eip", f"0x{s.eip:08x}"),
             chip("ret", ret) + "&nbsp;&nbsp;" + chip("IPC", f"{ipc:.2f}")
                 + "&nbsp;&nbsp;" + chip("pair(win)" if windowed else "pair",
@@ -1932,18 +1943,18 @@ class MainWindow(QMainWindow):
             groups.insert(
                 0, f"<span style='color:#8b949e'>{image}</span>")
         html = "&nbsp;" + sep.join(groups)
-        if self.backend.is_done():
-            html += " <span style='color:#3fb950;font-weight:bold'>[DONE]</span>"
-        if s.cpu_hung:
-            html += " <span style='color:#f85149;font-weight:bold'>[HUNG]</span>"
         self.status_lbl.setText(html)
         scope = (
             "pair and mispredict cover the latest Pipeline cycle window; "
             "ret and IPC cover the current program/restore session"
             if windowed else
             "ret, IPC, pair, and mispredict cover the captured session")
+        state_detail = (
+            f"{name} {mode}"
+            + (" · program stopped" if done else "")
+            + (" · CPU hung" if hung else ""))
         details = (
-            f"{image}\ncycle {int(s.core_cyc)} · {name} {mode} · "
+            f"{image}\ncycle {int(s.core_cyc)} · {state_detail} · "
             f"EIP 0x{int(s.eip):08x}\n"
             f"ret {ret} · IPC {ipc:.2f} · "
             f"{'pair(win)' if windowed else 'pair'} {prate:.0f}% · "

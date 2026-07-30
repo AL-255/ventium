@@ -42,6 +42,9 @@ transient action needs room), it omits the redundant visible image name so
 cycle/EIP/IPC/cache/fill state survives. The window title, tooltip, and
 accessible description retain full image identity, and the name returns when
 space does.
+Critical `[DONE]`/`[HUNG]` badges now sit beside the FSM state instead of at
+the clip-prone far right. Terminal/hung meaning is also included in the status
+tooltip and accessible description rather than being color-only screen text.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
