@@ -1210,8 +1210,12 @@ def _sync_source_badge(badge, editor, path, origin):
     display = QFontMetrics(badge.font()).elidedText(
         identity, Qt.ElideMiddle, 215)
     badge.setText(f"source · {display}{suffix}")
-    badge.setToolTip(
-        full + ("\nUnsaved changes" if dirty else ""))
+    detail = full + ("\nUnsaved changes" if dirty else "")
+    badge.setToolTip(detail)
+    badge.setAccessibleDescription(
+        (f"Source file {full}."
+         if path else f"Source origin {origin}; not saved.")
+        + (" Unsaved changes." if dirty else " No unsaved changes."))
     badge.setStyleSheet(
         "color:#e3b341;padding:2px;" if dirty else
         "color:#79c0ff;padding:2px;" if not path else

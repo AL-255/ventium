@@ -250,6 +250,8 @@ def scenario(app, outdir):
         assert win.save_source_action.shortcut().toString() == "Ctrl+S"
         assert win.assembly.editor.accessibleName() == "Assembly source editor"
         assert win.assembly.source_badge.accessibleName() == "Assembly source identity"
+        assert win.assembly.source_badge.accessibleDescription() == (
+            "Source origin built-in template; not saved. No unsaved changes.")
         assert "built-in template" in win.assembly.source_badge.text()
         assert "not saved" in win.assembly.source_badge.text()
         assert win.assembly.editor.completion.list.accessibleName()
@@ -362,6 +364,8 @@ def scenario(app, outdir):
         assert win.assembly._path == str(dropped_assembly)
         assert "dropped-source.S" in win.assembly.source_badge.text()
         assert win.assembly.source_badge.toolTip() == str(dropped_assembly.resolve())
+        assert win.assembly.source_badge.accessibleDescription() == (
+            f"Source file {dropped_assembly.resolve()}. No unsaved changes.")
         assert win.assembly._last_dir == str(Path(outdir).resolve())
         assert win.assembly.status.text() == "Opened dropped-source.S"
         assert "Opened assembly source: dropped-source.S" in win.action_hint.text()
@@ -694,6 +698,8 @@ def scenario(app, outdir):
         assert result is not None
         assert "built-in template" in win.assembly.source_badge.text()
         assert win.assembly.source_badge.text().endswith("*")
+        assert win.assembly.source_badge.accessibleDescription().endswith(
+            "Unsaved changes.")
         assert win.workspace.currentWidget() is win.visualizer_tab
         assert win.open_action.text() == "Open program…"
         assert not win.save_source_action.isEnabled()
@@ -1038,6 +1044,8 @@ def scenario(app, outdir):
                    for action in win._transport_shortcut_actions)
         assert win.c_source.editor.accessibleName() == "C source editor"
         assert win.c_source.source_badge.accessibleName() == "C source identity"
+        assert win.c_source.source_badge.accessibleDescription() == (
+            "Source origin built-in template; not saved. No unsaved changes.")
         assert win.c_source.optimization.accessibleName()
         assert win.c_source.diagnostics.accessibleName()
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
@@ -1124,6 +1132,8 @@ def scenario(app, outdir):
         assert app.focusWidget() is win.assembly.editor
         assert "C compiler (-O2)" in win.assembly.source_badge.text()
         assert "not saved" in win.assembly.source_badge.text()
+        assert win.assembly.source_badge.accessibleDescription() == (
+            "Source origin C compiler (-O2); not saved. No unsaved changes.")
         assert "call main" in win.assembly.editor.toPlainText()
         assert "Assembly generated from C compiler" in win.assembly.status.text()
         save(win, outdir, "04_c_generated_assembly")

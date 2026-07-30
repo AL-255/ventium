@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source-identity accessibility audit:** Assembly/C badges intentionally elide
+long paths and exposed the full identity only as a pointer tooltip. Each badge
+now describes the complete saved path or template/compiler origin, explicitly
+distinguishes not-saved content, and reports clean versus unsaved changes.
+Acceptance covers built-in Assembly/C, a dropped absolute path, a dirty
+authoring run, and compiler-generated Assembly.
+
 **Prefetch semantic-state audit:** the display-only Prefetch page relied on
 assistive traversal of anonymous address/decode/byte labels, with no coherent
 state equivalent. It now announces linear fetch address, EIP, fetch word, all
