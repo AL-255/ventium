@@ -9,6 +9,21 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — explicit no-match completion state
+
+**Empty-completion audit:** a supported prefix exposed its count, but an
+unsupported opcode made the popup disappear silently. The user could not tell
+whether completion had no matches, failed to open, or lost focus.
+
+**Changes:** an opcode-position request with zero catalogue matches now closes
+the popup and emits `No Ventium/P54C opcode matches '…'` in the persistent amber
+Assembly status. It leaves editor focus and source text intact and does not
+populate red build diagnostics; free-form editing remains available.
+
+**Verification:** interaction acceptance requests an unsupported token,
+requires a hidden popup plus exact amber/status tooltip/accessible text, and
+captures the full workbench showing empty diagnostics and unchanged source.
+
 ## July 30 continuation — visible completion match count
 
 **Completion-navigation audit:** the popup exposed its match count only through

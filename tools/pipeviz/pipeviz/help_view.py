@@ -297,7 +297,9 @@ Up/Page Down to choose, Home/End for the
 first/last entry, Enter/Tab or a double-click to insert, and Escape to close;
 these controls remain visible in the popup footer. Completion inserts only when
 the cursor is in an opcode slot;
-elsewhere the full catalogue is safe, reference-only help. GNU as
+elsewhere the full catalogue is safe, reference-only help.
+An unsupported opcode prefix closes the popup and produces a specific amber
+status notice without creating a build diagnostic. GNU as
 semicolons separate statements, and completion follows the opcode in each
 statement while ignoring separators/comment markers inside quoted data.
 Clicking or scrolling the editor dismisses the popup so it never remains

@@ -298,6 +298,9 @@ The completion list does not repeat the mnemonic inside its operand form; the
 adjacent detail pane still shows the complete signature.
 The footer changes from `291 opcodes` to the live prefix-match count while
 keeping selection, insertion, pointer, and close controls visible.
+If a prefix has no supported Ventium/P54C opcode, the popup closes and the
+Assembly status names that token in amber. Continue editing freely; only
+**Assemble** creates a build diagnostic.
 With no opcode selected, the persistent sidebar uses one compact empty state
 and points to caret placement or `Ctrl+Space`.
 Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,

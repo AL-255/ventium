@@ -1358,7 +1358,11 @@ class AssemblyEditor(CodeEditor):
             self._completion_insertable = True
             self._completion_case_sample = prefix + suffix_text
         self.completion.show_for(prefix)
-        return self.completion.isVisible()
+        visible = self.completion.isVisible()
+        if not visible and prefix:
+            self.completionNotice.emit(
+                f"No Ventium/P54C opcode matches '{prefix}'")
+        return visible
 
     def _insert_completion(self, mnemonic):
         if not self._completion_insertable:

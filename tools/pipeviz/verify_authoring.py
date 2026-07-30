@@ -1108,6 +1108,20 @@ def scenario(app, outdir):
         assert editor.toPlainText() == "ad"
         assert not editor.completion.isVisible()
 
+        editor.setPlainText("zzunknown")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert not editor.request_completion()
+        assert not editor.completion.isVisible()
+        assert win.assembly.status.text() == (
+            "No Ventium/P54C opcode matches 'zzunknown'")
+        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert win.assembly.status.accessibleDescription() == (
+            win.assembly.status.text())
+        assert "#e3b341" in win.assembly.status.styleSheet()
+        save(win, outdir, "01_opcode_no_match")
+
         # Ctrl+Space / Complete remains a full catalogue reference even when
         # the cursor is not currently in an opcode token.
         editor.setPlainText(".intel_syntax noprefix")

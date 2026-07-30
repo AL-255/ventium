@@ -147,6 +147,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     preview for every completion. The compact list shows mnemonic, pipe class,
     and operands once; the detail pane retains the full signature. Its footer
     reports all 291 opcodes or the current prefix-match count beside the controls.
+    An unsupported opcode prefix closes the popup but leaves a specific amber
+    no-match notice; it does not masquerade as an assembler diagnostic.
     Jcc/SETcc aliases name their exact signed/unsigned flag predicate, while
     LOOP/JCXZ entries explain their counter and ZF behavior.
     x87 load/store/arithmetic/compare/constant/stack/control entries distinguish
