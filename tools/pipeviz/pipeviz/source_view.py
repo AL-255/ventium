@@ -73,8 +73,9 @@ class CodeEditor(QPlainTextEdit):
 
     focusEscapeRequested = Signal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, comment_prefix="//"):
         super().__init__(parent)
+        self._comment_prefix = comment_prefix
         self.setFont(_mono(10))
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.setTabStopDistance(QFontMetrics(self.font()).horizontalAdvance(" ") * 4)
@@ -294,6 +295,68 @@ class CodeEditor(QPlainTextEdit):
         selected.setPosition(start + len(replacement), QTextCursor.KeepAnchor)
         self.setTextCursor(selected)
 
+    def _toggle_source_comment(self):
+        """Toggle language-appropriate line comments as one document edit."""
+        cursor = self.textCursor()
+        had_selection = cursor.hasSelection()
+        selection_start = cursor.selectionStart()
+        selection_end = cursor.selectionEnd()
+        first = self.document().findBlock(selection_start)
+        last_probe = (
+            max(selection_start, selection_end - 1)
+            if had_selection else selection_start)
+        last = self.document().findBlock(last_probe)
+        original_column = cursor.positionInBlock()
+        lines = []
+        block = first
+        while block.isValid():
+            lines.append(block.text())
+            if block == last:
+                break
+            block = block.next()
+        nonblank = [line for line in lines if line.strip()]
+        commented = bool(nonblank) and all(
+            line.lstrip().startswith(self._comment_prefix)
+            for line in nonblank)
+        transformed = []
+        caret_delta = 0
+        for line in lines:
+            indent = len(line) - len(line.lstrip())
+            rest = line[indent:]
+            if commented and rest.startswith(self._comment_prefix):
+                remove = len(self._comment_prefix)
+                if rest[remove:remove + 1] == " ":
+                    remove += 1
+                transformed.append(line[:indent] + rest[remove:])
+                if len(lines) == 1 and original_column > indent:
+                    caret_delta = -min(remove, original_column - indent)
+            elif not commented and (rest or len(lines) == 1):
+                insertion = self._comment_prefix + " "
+                transformed.append(line[:indent] + insertion + rest)
+                if len(lines) == 1 and original_column >= indent:
+                    caret_delta = len(insertion)
+            else:
+                transformed.append(line)
+        replacement = "\n".join(transformed)
+        start = first.position()
+        end = last.position() + len(last.text())
+        edit = QTextCursor(self.document())
+        edit.beginEditBlock()
+        edit.setPosition(start)
+        edit.setPosition(end, QTextCursor.KeepAnchor)
+        edit.insertText(replacement)
+        edit.endEditBlock()
+        restored = QTextCursor(self.document())
+        if had_selection:
+            restored.setPosition(start)
+            restored.setPosition(
+                start + len(replacement), QTextCursor.KeepAnchor)
+        else:
+            restored.setPosition(
+                start + max(
+                    0, min(len(replacement), original_column + caret_delta)))
+        self.setTextCursor(restored)
+
     def keyPressEvent(self, event):
         if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
                 and event.modifiers() & Qt.ControlModifier):
@@ -301,6 +364,13 @@ class CodeEditor(QPlainTextEdit):
                 event.key() != Qt.Key_Backtab
                 and not event.modifiers() & Qt.ShiftModifier)
             self.focusEscapeRequested.emit(forward)
+            event.accept()
+            return
+        if (event.key() == Qt.Key_Slash
+                and event.modifiers() & Qt.ControlModifier
+                and not event.modifiers()
+                & (Qt.AltModifier | Qt.MetaModifier)):
+            self._toggle_source_comment()
             event.accept()
             return
         if (event.key() in (Qt.Key_Tab, Qt.Key_Backtab)
@@ -962,7 +1032,7 @@ class AssemblyEditor(CodeEditor):
     completionNotice = Signal(str)
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, "#")
         self.highlighter = AssemblyHighlighter(self.document())
         self.completion = CompletionPopup(self)
         self.completion.accepted.connect(self._insert_completion)
@@ -1478,8 +1548,8 @@ class AssemblyView(QWidget):
         self.editor = AssemblyEditor()
         self.editor.setAccessibleName("Assembly source editor")
         self.editor.setAccessibleDescription(
-            "Edit GNU Intel-syntax assembly. Tab indents; Ctrl+Tab and "
-            "Ctrl+Shift+Tab leave the editor.")
+            "Edit GNU Intel-syntax assembly. Tab indents; Ctrl+/ toggles "
+            "comments; Ctrl+Tab and Ctrl+Shift+Tab leave the editor.")
         self.editor.setPlainText(_ASM_TEMPLATE)
         self.find_bar = SourceFindBar(self.editor)
         layout.addWidget(self.find_bar)
@@ -1828,8 +1898,8 @@ class CView(QWidget):
         self.editor = CodeEditor()
         self.editor.setAccessibleName("C source editor")
         self.editor.setAccessibleDescription(
-            "Edit freestanding GNU C. Tab indents; Ctrl+Tab and "
-            "Ctrl+Shift+Tab leave the editor.")
+            "Edit freestanding GNU C. Tab indents; Ctrl+/ toggles comments; "
+            "Ctrl+Tab and Ctrl+Shift+Tab leave the editor.")
         self.highlighter = CHighlighter(self.editor.document())
         self.editor.setPlainText(_C_TEMPLATE)
         self.find_bar = SourceFindBar(self.editor)

@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source comment-toggle audit:** both workbenches now provide the standard
+Ctrl+/ editing command. It inserts/removes <code>#</code> for GNU Assembly and
+<code>//</code> for C after existing indentation, toggles a selected block as
+one undoable edit, skips blank lines in multi-line selections, and preserves a
+single-line caret. Help, accessible editor descriptions, and acceptance expose
+and verify the same contract.
+
 **Soft-indentation deletion audit:** auto-indent and caret Tab create four-space
 stops, but ordinary Backspace removed only one space at a time. In leading
 whitespace it now returns to the previous four-column stop (or removes one

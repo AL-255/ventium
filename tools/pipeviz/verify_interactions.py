@@ -1214,6 +1214,7 @@ def scenario_startup(app, outdir):
         guide_text = win._guide_dialog.page.toPlainText()
         assert "Ctrl+Space" in guide_text and "Compile → Assembly" in guide_text
         assert "Ctrl+Tab" in guide_text and "Ctrl+Shift+Tab" in guide_text
+        assert "Ctrl+/" in guide_text
         assert "close a live completion popup" in guide_text
         assert "source badge" in guide_text
         assert "press Enter, or double-click it" in guide_text

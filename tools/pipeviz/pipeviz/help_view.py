@@ -228,7 +228,9 @@ Run/Compile control without changing source. These navigation chords also close
 a live completion popup instead of inserting its selected opcode. With one or
 more lines selected, Tab and Shift+Tab indent/outdent the complete block as one
 undoable edit rather than replacing the selection. In leading whitespace,
-Backspace removes spaces to the previous four-column stop as one undoable edit.</p>
+Backspace removes spaces to the previous four-column stop as one undoable edit.
+Ctrl+/ toggles <code>#</code> Assembly or <code>//</code> C line comments,
+preserving indentation and handling a selected block in one undo step.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>
@@ -410,6 +412,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Escape</b></td><td>clear a focused Trace filter; in focused Pipeline, Unpin to LIVE</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
+ <tr><td><b>Ctrl+/</b></td><td>toggle Assembly/C line comments</td></tr>
  <tr><td><b>Ctrl+Tab / Ctrl+Shift+Tab</b></td><td>leave an Assembly or C editor without inserting indentation</td></tr>
  <tr><td><b>Ctrl+F, F3 / Shift+F3</b></td><td>find text in this guide topic</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>

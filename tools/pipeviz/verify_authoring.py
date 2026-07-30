@@ -522,6 +522,7 @@ def scenario(app, outdir):
         assert 0 <= badge_corner.y() < win.height()
         assert editor.width() >= 500 and editor.height() >= 400
         assert "Ctrl+Tab" in editor.accessibleDescription()
+        assert "Ctrl+/" in editor.accessibleDescription()
         editor.setFocus()
         original_source = editor.toPlainText()
         QTest.keyClick(editor, Qt.Key_Tab, Qt.ControlModifier)
@@ -557,6 +558,38 @@ def scenario(app, outdir):
         QTest.keyClick(editor, Qt.Key_Backtab, Qt.ShiftModifier)
         assert editor.toPlainText() == indentation_probe
         assert editor.textCursor().hasSelection()
+        comment_probe = "    mov eax, 1\n\nadd eax, 2\n"
+        editor.setPlainText(comment_probe)
+        selection = editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(
+            len(comment_probe) - 1, QTextCursor.KeepAnchor)
+        editor.setTextCursor(selection)
+        QTest.keyClick(editor, Qt.Key_Slash, Qt.ControlModifier)
+        commented_probe = "    # mov eax, 1\n\n# add eax, 2\n"
+        assert editor.toPlainText() == commented_probe
+        editor.document().undo()
+        assert editor.toPlainText() == comment_probe
+        editor.document().redo()
+        assert editor.toPlainText() == commented_probe
+        selection = editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(
+            len(commented_probe) - 1, QTextCursor.KeepAnchor)
+        editor.setTextCursor(selection)
+        QTest.keyClick(editor, Qt.Key_Slash, Qt.ControlModifier)
+        assert editor.toPlainText() == comment_probe
+        editor.setPlainText("    mov eax, 1")
+        caret = editor.textCursor()
+        caret.setPosition(8)
+        editor.setTextCursor(caret)
+        QTest.keyClick(editor, Qt.Key_Slash, Qt.ControlModifier)
+        assert editor.toPlainText() == "    # mov eax, 1"
+        assert editor.textCursor().positionInBlock() == 10
+        QTest.keyClick(editor, Qt.Key_Slash, Qt.ControlModifier)
+        assert editor.toPlainText() == "    mov eax, 1"
+        assert editor.textCursor().positionInBlock() == 8
+        editor.setPlainText(indentation_probe)
         caret = editor.textCursor()
         caret.setPosition(3)
         editor.setTextCursor(caret)
@@ -1312,6 +1345,7 @@ def scenario(app, outdir):
             win.c_source.editor.width() >= 800
             and win.c_source.editor.height() >= 320)
         assert "Ctrl+Tab" in win.c_source.editor.accessibleDescription()
+        assert "Ctrl+/" in win.c_source.editor.accessibleDescription()
         win.c_source.editor.setFocus()
         original_c_source = win.c_source.editor.toPlainText()
         QTest.keyClick(
@@ -1339,6 +1373,27 @@ def scenario(app, outdir):
         QTest.keyClick(
             win.c_source.editor, Qt.Key_Backtab, Qt.ShiftModifier)
         assert win.c_source.editor.toPlainText() == c_indent_probe
+        c_comment_probe = "    int a;\nint b;\n"
+        win.c_source.editor.setPlainText(c_comment_probe)
+        selection = win.c_source.editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(
+            win.c_source.editor.document().findBlockByNumber(1).position(),
+            QTextCursor.KeepAnchor)
+        win.c_source.editor.setTextCursor(selection)
+        QTest.keyClick(
+            win.c_source.editor, Qt.Key_Slash, Qt.ControlModifier)
+        assert win.c_source.editor.toPlainText() == (
+            "    // int a;\nint b;\n")
+        selection = win.c_source.editor.textCursor()
+        selection.setPosition(0)
+        selection.setPosition(
+            win.c_source.editor.document().findBlockByNumber(1).position(),
+            QTextCursor.KeepAnchor)
+        win.c_source.editor.setTextCursor(selection)
+        QTest.keyClick(
+            win.c_source.editor, Qt.Key_Slash, Qt.ControlModifier)
+        assert win.c_source.editor.toPlainText() == c_comment_probe
         win.c_source.editor.setPlainText(original_c_source)
         win.c_source.editor.document().setModified(False)
         save(win, outdir, "03a_c_compact")
