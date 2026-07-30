@@ -59,6 +59,15 @@ class RegsView(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(4, 4, 4, 4)
         root.setSpacing(0)
+        self._session_active = False
+        self._session_hint = QLabel(
+            "No program loaded\n\nOpen a program or restore a snapshot "
+            "to inspect architectural state.")
+        self._session_hint.setAlignment(Qt.AlignCenter)
+        self._session_hint.setWordWrap(True)
+        self._session_hint.setStyleSheet(
+            "color:#586069;font-style:italic;padding:20px;")
+        root.addWidget(self._session_hint, 1)
 
         # --- integer column ---
         self.int_pane = QWidget()
@@ -171,12 +180,14 @@ class RegsView(QWidget):
         # Start compact: it gives QSplitter an honest small minimum before the
         # final window width is known. resizeEvent promotes it when room exists.
         self._set_compact(True)
+        self.set_session_active(False)
 
     def minimumSizeHint(self):
         return QSize(340, 220)
 
     def _set_compact(self, compact):
         if compact == self._compact:
+            self._sync_session_visibility()
             return
         if compact:
             self._wide_host.hide()
@@ -206,6 +217,23 @@ class RegsView(QWidget):
                 pane.show()
             self._wide_host.show()
         self._compact = compact
+        self._sync_session_visibility()
+
+    def _sync_session_visibility(self):
+        self._session_hint.setVisible(not self._session_active)
+        self._compact_tabs.setVisible(
+            self._session_active and self._compact)
+        self._wide_host.setVisible(
+            self._session_active and not self._compact)
+
+    def set_session_active(self, active):
+        self._session_active = bool(active)
+        self._sync_session_visibility()
+
+    def start_session(self):
+        """Expose the bank for a fresh model without comparing to stale values."""
+        self._prev = None
+        self.set_session_active(True)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -52,6 +52,11 @@ tools/pipeviz/run.sh ventium-refs/09-external-cpu-tests/test386.asm/test386.bin
 tools/pipeviz/run.sh --build
 ```
 
+`--snapshot` is an exclusive startup target: it never falls through to an
+auto-loaded demo and cannot be combined with reset-address or mode overrides.
+An explicit missing program path is reported instead of silently opening an
+empty window.
+
 Requirements (all already present in this repo's toolchain): `verilator` (5.x),
 a C++17 compiler, `python3` with **PySide6** and **capstone**
 (`pip install PySide6 capstone`).
@@ -130,6 +135,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   resolved memory-access address of a load/store (gold). A **filter box** accepts
   `mov` / `pc:08048` / `n>=100` / `cyc>=133` / `pipe:V` / `stall` / `@` (memory-accessing
   rows); `/` focuses it, Enter/F3 and Shift+F3 navigate results, and Escape clears it.
+  Long refreshes retain and label the newest 6,000 retirements rather than
+  silently skipping the tail.
 * **Registers panel** (bottom-right) — GPRs, **EFLAGS** as a named-bit grid (set =
   amber, changed underlined), segments, control registers, and the **x87 stack**
   (logical ST(0..7) with the 80-bit hex split sign/exp ␣ mantissa + decoded
@@ -141,18 +148,20 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   remain readable instead of widening the window.
 * **Status bar** — `cyc` · FSM state/mode · `ret` / `IPC` / dual-issue `pair%` /
   `mispred` · I$/D$ occupancy / I-cache `fills` / page-table `walks` · `eip`.
+  After bounded long-run capture, windowed metrics are labeled `pair(win)` and
+  `mispred(win)` while retirement/IPC remain lifetime totals.
 
 ## Controls
 
 | control | action |
 |---|---|
-| **Open program…** | load a flat binary or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Flat images honour a sibling `manifest.json` for `entry`/`load_addr`. |
-| **File → Open example** | open an available dual-issue, D-cache, x87, or system-paging verification workload directly. |
+| **Open program…** | load a raw `.flat`/`.bin`/`.img`/`.rom` or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Empty files and DOS/PE executables are rejected explicitly. Flat images honour a sibling `manifest.json` for `entry`/`load_addr`, written as JSON integers or `0x…` strings. |
+| **File → Open example** | open an available dual-issue, D-cache, x87, or system-paging verification workload directly. The menu rescans each time it opens, so newly built examples appear without restarting pipeviz. |
 | **Reload program** (`Ctrl+Shift+R`) | re-read the current image from disk after rebuilding it while preserving the displayed reset addresses and mode switches. |
 | **Open snapshot…** | resume a host testbench `--save-state` checkpoint. Select either `<prefix>.aux` or `<prefix>.vlt`; the visualizer loads the pair and begins a new visible timeline at that exact state. The **Restore snapshot** button returns to the same point after exploring. |
 | entry / load / esp | validated 32-bit-hex reset state. Edits mark **Apply + Reset** rather than silently diverging from the running model. The command-line equivalents `--entry`, `--load`, and `--esp` take precedence over file metadata. |
 | **U/V issue** | enable the U/V fast path — **on by default**; changing it marks **Apply + Reset** because issue mode is selected at reset |
-| **system** | cold-boot in system mode (real-mode reset at `F000:FFF0`; needed for paging/TLB) |
+| **system** | cold-boot in system mode (real-mode reset at `F000:FFF0`; needed for paging/TLB). Entry/load/ESP are disabled because system placement and firmware determine them. |
 | **SoC** | run the full `ventium_soc` (internal port-I/O / PIC / PIT) — needed for bare-metal images like test386. Requires `build.sh --soc`; auto-ticked for test386. |
 | **Reset** | re-cold-reset on a fresh model (clears memory) |
 | **Step clk** (`.`) | advance one core clock |
@@ -164,7 +173,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 Keyboard: `Ctrl+O` opens a program, `Ctrl+Shift+O` opens a snapshot, `R` resets
 (or restores a snapshot), `.` advances one clock, `I` / `Space` advances to the
 next retirement, and `F5` runs or pauses. `Ctrl+0` restores the recommended
-splitter proportions. `/` focuses the trace filter; Enter/F3 and Shift+F3 move
+splitter proportions. `Alt+1` through `Alt+0` select the ten analysis tabs.
+`/` focuses the trace filter from anywhere; Enter/F3 and Shift+F3 move
 among its results; Escape clears it. `F1` opens the complete shortcut reference.
 
 Mouse interactions: **click** a Konata cell or a trace row to pin the registers
@@ -221,6 +231,9 @@ host I/O drivers.
   translation), which is correct.
 * The D-cache is a timing-only model in the RTL (tag/valid/LRU, no data array),
   so its table shows residency, not bytes.
+* Pipeline rendering is bounded to the newest 50,000 captured cycles and says
+  so in its title after a large step; IPC history keeps the newest 12,000.
+  Cycle attribution drains every available backend chunk.
 
 ## Files
 

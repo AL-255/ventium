@@ -25,7 +25,7 @@ Review date and timezone: 2026-07-29, America/Detroit.
 | PySide6 | 6.11.1 |
 | Capstone | 5.0.7 |
 | Verilator | 5.046 (2026-02-28) |
-| continuation baseline | `ddb783f` plus the responsive/ergonomic fixes below |
+| continuation baseline | `f956912` plus the honest-state/keyboard fixes below |
 | Qt platform for repeatability | `offscreen`, Fusion dark style |
 | principal window | 1640×980 |
 | compact request | 1280×800; honored exactly with responsive register pages |
@@ -73,18 +73,38 @@ git diff --check -- tools/pipeviz
 
 Procedure:
 
-1. Construct and show a fresh `MainWindow`.
-2. Confirm Reset, Clock, Insn, Step N, Run, and event navigation are disabled.
-3. Confirm `.`, `R`, `F5`, `Ctrl+O`, `Ctrl+Shift+O`, `Ctrl+Shift+R`,
-   `Ctrl+0`, and the File/View/Help menus exist.
-4. Press F1 through `QTest`.
-5. Select “Reading the Pipeline View” from the Help index.
-6. Confirm at least seven indexed topics, dedicated loading help, and the
+1. Verify explicit-image, explicit-snapshot, and no-argument demo startup
+   resolution are mutually distinct (a snapshot never falls through to a demo).
+2. Construct and show a fresh `MainWindow`.
+3. Inject a backend-construction failure and require the existing live handle
+   to survive with an actionable error.
+4. Confirm Reset, Clock, Insn, Step N, Run, and event navigation are disabled.
+5. Confirm Pipeline, IPC history, Trace, Registers, caches, Prefetch, Cycles, Memory, and Mem map
+   explicitly say that no program is loaded; Memory navigation is disabled.
+6. Confirm `.`, `R`, `F5`, `Ctrl+O`, `Ctrl+Shift+O`, `Ctrl+Shift+R`,
+   `Ctrl+0`, `Alt+1…0`, and the File/View/Help menus exist.
+7. Switch analysis tabs with the Alt shortcuts and focus Trace search with `/`
+   while another pane owns focus.
+8. Press F1 through `QTest`.
+9. Select “Reading the Pipeline View” from the Help index.
+10. Confirm at least seven indexed topics, dedicated loading help, and the
    stage-glyph explanation.
+11. Load a temporary flat image whose manifest mixes a JSON integer entry with
+    a hexadecimal-string load address; verify EIP, bytes, and displayed fields.
+12. Require empty files and MZ `.exe` inputs to fail with actionable errors,
+    while the Open filter advertises `.rom` and no unsupported generic `.exe`.
+13. Feed synthetic streams beyond the per-read/view caps and require Pipeline,
+    IPC, Cycles, and Trace to reach the newest sample, label bounded history,
+    and preserve predecessor-derived Trace state.
+14. Require bounded-history status to use a captured U+V denominator and label
+    `pair(win)`/`mispred(win)` while retaining lifetime retirement/IPC.
+15. Run a real six-byte loop for 9,000 clocks in one refresh and require backend,
+    Pipeline, IPC, Cycles, and newest-6,000 Trace endpoints to agree.
 
 Expected and observed:
 
 - Status says no image is loaded.
+- Every data pane distinguishes unloaded state from sampled zero/empty state.
 - Disabled Run is visibly gray rather than looking executable.
 - F1 opens the indexed user guide.
 - The Pipeline page explains axes, U/V pairs, F/L/D/X/M/W/=/!/S glyphs,
@@ -112,9 +132,14 @@ Procedure:
    playhead follows.
 10. Shift-click an earlier timing row and verify the delta anchor.
 11. Click previous/next event controls.
-12. Select Hotspots, click its top row, and verify the trace jumps to that PC.
+12. Select Hotspots, activate its top row with Enter, and verify the trace
+    jumps to that PC.
 13. Reload from disk and require the custom ESP/reset configuration to survive.
-14. Reset, click Run, wait for timer ticks, click Pause, and verify cycles
+14. Attempt reload with an invalid preserved entry and require the active
+    backend, retirements, and Trace to remain unchanged.
+15. Attempt a flat placement that crosses 4 GiB and require rejection before
+    the active backend is closed.
+16. Reset, click Run, wait for timer ticks, click Pause, and verify cycles
     advanced and the timer stopped.
 
 Observed evidence:
@@ -205,10 +230,11 @@ Fixture: `verif/sys/tests/ppage/ppage.bin`, N=1200.
 Procedure:
 
 1. Load the BIOS-style raw image and require automatic system mode.
-2. Require top-of-1-MiB placement (`load=0x000f0000`).
-3. Step 1200 clocks, open TLB, and require actual valid entries.
-4. Load the user-mode branch fixture into the same window.
-5. Require system/SoC options, trace filter, accesses, and Memory click pin to
+2. Require entry/load/ESP to be disabled with reset-vector/placement tooltips.
+3. Require top-of-1-MiB placement (`load=0x000f0000`).
+4. Step 1200 clocks, open TLB, and require actual valid entries.
+5. Load the user-mode branch fixture into the same window.
+6. Require system/SoC options, trace filter, accesses, and Memory click pin to
    reset; Memory must begin by following the new program's EIP.
 
 Observed evidence:

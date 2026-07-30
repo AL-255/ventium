@@ -58,6 +58,62 @@ navigation, invalid addresses, reload setup preservation, clean program
 switches, and terminal control state. The guide workloads and compiled
 dual-Fibonacci correctness/performance contract run under base Miniconda.
 
+## July 29 continuation — honest state and keyboard reachability
+
+**Self-critique:** before a session, blank tables and zero-filled registers
+looked like sampled machine state. The Memory controls also accepted navigation
+with no backend, while system boot left entry/load/ESP editable even though that
+mode ignores them. Trace `/` worked only after the table already had focus, and
+analysis/drill-down navigation was unnecessarily mouse-dependent.
+
+**Changes:** unloaded Pipeline/IPC history, Trace, Registers, caches, Prefetch,
+Cycles, Memory, and Mem map now carry explicit contextual empty states; Memory navigation is
+disabled until a model is active, and `→access` stays disabled until an access
+exists. System mode disables its ignored address fields and explains the
+reset-vector/BIOS behavior in tooltips. `/` focuses Trace search window-wide,
+View exposes `Alt+1…0` shortcuts for all ten analysis tabs, and Hotspots plus
+Branches activate from Enter as well as clicks.
+Analysis accumulators now reset explicitly for every program or snapshot
+instead of guessing from whether its clock is lower, and reload validates the
+preserved setup before touching the active session.
+CLI startup now treats an explicit image or snapshot as authoritative:
+snapshots no longer fall through to a demo, missing image paths reach the
+visible open error, and incompatible snapshot overrides are rejected.
+Manifest addresses accept both ordinary JSON numbers and `0x…` strings;
+`load_addr` is restricted to flat images so an ELF never displays ignored
+placement metadata.
+The file picker now advertises `.rom` but not unsupported generic `.exe`
+inputs, and empty or DOS/PE files fail with an actionable format message.
+Raw/ELF segment ranges and top-aligned BIOS sizes are preflighted before the
+current backend is closed, eliminating 32-bit wraparound placement.
+Reset constructs and validates a candidate model before closing the live one;
+core failure and failed SoC fallback therefore leave the current investigation
+usable, matching snapshot restore's transactional behavior.
+Long-refresh ingestion no longer consumes one 8,192-sample chunk and skips or
+strands the remainder. Trace keeps the newest 6,000 retirements (with a seeded
+predecessor for correct effects), Pipeline drains a bounded newest 50,000-cycle
+window, IPC retains its newest 12,000, and Cycles drains every available chunk.
+Truncated view titles state the retained window explicitly.
+The status bar then labels `pair(win)`/`mispred(win)` and computes pairing from
+the captured U+V denominator, while retirement and IPC remain lifetime totals.
+
+**Verification:** the QTest suite asserts unloaded-versus-loaded transitions,
+Memory control state, user/ELF/system address-field matrices, all ten analysis
+shortcuts, global search focus, keyboard Hotspots drill-down, transactional
+invalid reload, and cycle-attribution reset across workload switches.
+Pure startup-target checks also prove explicit-image, snapshot, and demo
+fallback paths are mutually distinct; a temporary flat image proves numeric
+manifest parsing and actual backend placement. Format checks cover empty and
+MZ executable rejection plus the advertised raw/ELF filter; boundary checks
+cover valid/overflowing 32-bit segments and BIOS sizes.
+An injected constructor failure proves the existing backend handle survives.
+Synthetic 9,000-cycle and over-cap retirement streams prove multi-chunk
+draining, newest-window selection, predecessor seeding, and visible truncation
+labels without requiring a slow million-clock fixture.
+Status assertions cover the windowed labels, tooltip, and corrected pair ratio.
+A real six-byte loop stepped 9,000 clocks in one refresh independently confirms
+the backend endpoint, Pipeline, IPC, Cycles, and newest-6,000 Trace window.
+
 ## Current UI (keep this in sync each iteration — critics read it)
 - **Pipeline panel** = (a) a small LIVE *stage board* snapshot on top (3 lanes
   U/V/FP × P5 stages, current clock only; the FP group collapses to a thin "FP

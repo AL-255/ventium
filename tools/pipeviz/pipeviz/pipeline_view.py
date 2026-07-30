@@ -238,6 +238,7 @@ class StageBoard(QWidget):
 # ===========================================================================
 ROW_H = 16
 CELL_W = 20      # per-cycle column width — wide enough for a legible F/D/X glyph
+_KONATA_CYCLE_CAP = 50000
                  # AND so the steep dual-issue diagonal fills more of the panel
                  # (fewer cycles per viewport-width) instead of a thin right strip.
 GUTTER_W = 340   # widened to fit full mnemonics (e.g. 'mov eax, dword ptr [esi]')
@@ -335,6 +336,7 @@ class _KonataPlot(QWidget):
         self._mn_cache = {}
         self._rw_cache = {}      # pc -> (read_gpr_idxs, write_gpr_idxs) for dep edges
         self.insns = []          # [{n,pc,pipe,mnem,cells:[(cyc,ch,color)],c0,c1,reads,writes}]
+        self.history_start = 1
         self.base_cyc = 1
         self.max_cyc = 1
         self.sel_row = None
@@ -346,16 +348,19 @@ class _KonataPlot(QWidget):
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
         self._pending = []       # accumulated cells since the last retirement
         self._cyc_row = {}       # retire cyc -> row index
+        self.empty_message = (
+            "no program loaded — use File → Open example or Ctrl+O")
         self.setMouseTracking(True)
 
-    def reset(self, backend, bits):
+    def reset(self, backend, bits, history_start=1):
         self.backend = backend
         self.bits = bits
         self._mn_cache = {}
         self._rw_cache = {}
         self.insns = []
-        self.base_cyc = 1
-        self.max_cyc = 1
+        self.history_start = max(1, int(history_start))
+        self.base_cyc = self.history_start
+        self.max_cyc = self.history_start - 1
         self.sel_row = None
         self.sel_pc = None
         self._dep_edges = []
@@ -365,6 +370,10 @@ class _KonataPlot(QWidget):
         self.stat = dict(uret=0, vret=0, fill=0, stall=0, mispred=0, walk=0)
         self._pending = []
         self._cyc_row = {}
+        self.empty_message = (
+            "no instructions retired in the captured cycle window"
+            if self.history_start > 1 else
+            "no instructions retired yet — use Insn, Step N, or Run")
         self.setMinimumSize(1, 1)
 
     def _mn(self, pc):
@@ -478,7 +487,8 @@ class _KonataPlot(QWidget):
             if self.sel_row is not None:
                 self.sel_row -= drop
             self._dep_for_row = -1        # row indices shifted → recompute dep edges
-        self.base_cyc = self.insns[0]["c0"] if self.insns else 1
+        self.base_cyc = (self.insns[0]["c0"] if self.insns
+                         else self.history_start)
         w = (self.max_cyc - self.base_cyc + 3) * CELL_W
         # one row of bottom slack so a row-aligned bottom-follow scroll keeps the
         # newest instruction fully visible (never a clipped half-row at the top).
@@ -494,7 +504,7 @@ class _KonataPlot(QWidget):
         p.fillRect(ev.rect(), QColor(_BG))
         if not self.insns:
             p.setPen(QColor(_MUT)); p.setFont(_mono(10))
-            p.drawText(self.rect(), Qt.AlignCenter, "step the core to fill the pipeline view")
+            p.drawText(self.rect(), Qt.AlignCenter, self.empty_message)
             p.end(); return
         vis = ev.rect()
         if self._dep_for_row != self.sel_row:        # recompute dep edges on re-select
@@ -832,9 +842,9 @@ class Konata(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         v = QVBoxLayout(self); v.setContentsMargins(2, 2, 2, 2); v.setSpacing(2)
-        title = QLabel("Pipeline view  (gem5/Konata — instruction × cycle)")
-        title.setStyleSheet("font-weight:bold;")
-        v.addWidget(title)
+        self.title = QLabel("Pipeline view  (gem5/Konata — instruction × cycle)")
+        self.title.setStyleSheet("font-weight:bold;")
+        v.addWidget(self.title)
         # legend on its OWN line so it can't clip off the right edge
         lw = self._legend_widget()
         lh = QHBoxLayout(); lh.setContentsMargins(0, 0, 0, 0)
@@ -872,6 +882,7 @@ class Konata(QWidget):
         self.scroll.verticalScrollBar().valueChanged.connect(self._on_vscroll)
         self.scroll.horizontalScrollBar().valueChanged.connect(self._on_hscroll)
         self._last_cyc = 0
+        self._history_truncated = False
 
     def _on_vscroll(self, val):
         # Force a FULL repaint of the plot's visible area on every scroll. The
@@ -913,6 +924,8 @@ class Konata(QWidget):
     def reset(self, backend, bits):
         self.plot.reset(backend, bits)
         self._last_cyc = 0
+        self._history_truncated = False
+        self.title.setText("Pipeline view  (gem5/Konata — instruction × cycle)")
         self._stick_v = True
         self._stick_h = True
         self.gutter.update(); self.header.update()
@@ -941,7 +954,23 @@ class Konata(QWidget):
         total = backend.cycle_count()
         if total <= self._last_cyc:
             return
-        self._last_cyc = self.plot.ingest(backend, self._last_cyc + 1)
+        start = self._last_cyc + 1
+        if total - start + 1 > _KONATA_CYCLE_CAP:
+            start = total - _KONATA_CYCLE_CAP + 1
+            self.plot.reset(backend, self.plot.bits, history_start=start)
+            self._last_cyc = start - 1
+            self._history_truncated = True
+        while self._last_cyc < total:
+            previous = self._last_cyc
+            self._last_cyc = self.plot.ingest(
+                backend, self._last_cyc + 1)
+            if self._last_cyc <= previous:
+                break
+        if self._history_truncated:
+            captured = max(0, self._last_cyc - self.plot.history_start + 1)
+            self.title.setText(
+                "Pipeline view  "
+                f"(latest {captured:,} of {total:,} cycles — instruction × cycle)")
         self.plot.update(); self.gutter.update(); self.header.update()
         # re-stick to the newest row/cycle unless the user scrolled away. Guard so
         # these programmatic scrolls don't clear the stick via the scroll handlers.
@@ -1002,22 +1031,31 @@ class SparklineStrip(QWidget):
     def ingest(self):
         if self.backend is None:
             return
-        for c in self.backend.get_cycles(self._last_cyc + 1, 8192):
-            self.ret.append((1 if c.retU else 0) + (1 if c.retV else 0))
-            name = self.backend.state_name(c.state)
-            if c.mispred_bubbles > 0:
-                e = "m"
-            elif name == "S_WALK":
-                e = "w"
-            elif name == "S_PF":
-                e = "f"
-            elif c.stall_cnt > 0 or c.pending_mem_pen > 0:
-                e = "s"
-            else:
-                e = ""
-            self.ev.append(e)
-            self._last_cyc = c.cyc
-            self._last_state = name
+        total = self.backend.cycle_count()
+        if total - self._last_cyc > self.CAP:
+            self.ret = []
+            self.ev = []
+            self._last_cyc = total - self.CAP
+        while self._last_cyc < total:
+            new = self.backend.get_cycles(self._last_cyc + 1, 8192)
+            if not new:
+                break
+            for c in new:
+                self.ret.append((1 if c.retU else 0) + (1 if c.retV else 0))
+                name = self.backend.state_name(c.state)
+                if c.mispred_bubbles > 0:
+                    e = "m"
+                elif name == "S_WALK":
+                    e = "w"
+                elif name == "S_PF":
+                    e = "f"
+                elif c.stall_cnt > 0 or c.pending_mem_pen > 0:
+                    e = "s"
+                else:
+                    e = ""
+                self.ev.append(e)
+                self._last_cyc = c.cyc
+                self._last_state = name
         if len(self.ret) > self.CAP:
             self.ret = self.ret[-self.CAP:]; self.ev = self.ev[-self.CAP:]
         self.update()
@@ -1049,8 +1087,11 @@ class SparklineStrip(QWidget):
         p.drawText(QRect(2, key_y, labelw - 4, 12), Qt.AlignVCenter | Qt.AlignRight, "key")
         if n == 0:
             p.setPen(QColor(_MUT)); p.setFont(_mono(8))
+            message = ("open a program to collect IPC / stall history"
+                       if self.backend is None else
+                       "step the core to collect IPC / stall history")
             p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
-                       "IPC / stall sparkline — click to seek")
+                       message)
             p.end(); return
         start = max(0, n - plotw)
         shown = n - start

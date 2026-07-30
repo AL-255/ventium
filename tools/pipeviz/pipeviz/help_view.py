@@ -16,7 +16,8 @@ ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
 <b>Step N</b>, or <b>Run</b>.</p>
 <ol>
  <li>Open or drop a program. ELF entry and segments are automatic. The
- <b>File → Open example</b> menu exposes the built verification workloads.</li>
+ <b>File → Open example</b> menu rescans and exposes the built verification
+ workloads.</li>
  <li>Use Step N to establish a useful timeline.</li>
  <li>Find an event in the sparkline or with <code>[</code>/<code>]</code>.</li>
  <li>Click its timing/trace row to pin architectural state.</li>
@@ -29,7 +30,8 @@ Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p
 <h1>Loading programs</h1>
 <h2>Fast paths</h2>
 <ul>
- <li><b>File → Open example</b> opens any built verification workload.</li>
+ <li><b>File → Open example</b> rescans and opens any built verification
+ workload.</li>
  <li><b>Ctrl+O</b>, the Open button, or dropping a file opens a program.</li>
  <li><b>Ctrl+Shift+R</b> reloads rebuilt bytes while preserving the displayed
  reset addresses and mode switches.</li>
@@ -38,17 +40,21 @@ Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p
 <p>A little-endian 32-bit x86 ELF supplies its entry point and every
  <code>PT_LOAD</code> address automatically; the load field is disabled because
  an ELF may have several segments. A raw <code>.flat</code>, <code>.bin</code>,
- or <code>.img</code> uses the entry, load, and ESP fields. A sibling
+ <code>.img</code>, or <code>.rom</code> uses the entry, load, and ESP fields.
+ Empty files and DOS/PE executables are rejected with a format explanation. A sibling
  <code>manifest.json</code> may provide <code>entry</code> and
- <code>load_addr</code>.</p>
+ <code>load_addr</code> as JSON integers or <code>"0x…"</code> strings.</p>
 <p>Editing an address or mode marks <b>Apply + Reset</b>. Addresses must be
  32-bit hexadecimal values such as <code>0x08048000</code>; invalid input is
  highlighted and never silently replaced with a default.</p>
 <h2>System images and snapshots</h2>
 <p>Use <b>system</b> for a raw BIOS image that boots at F000:FFF0. <b>SoC</b>
  implies system and additionally needs a current <code>build.sh --soc</code>
- backend. Use <b>Open snapshot</b> for a paired host-testbench
- <code>.aux</code>/<code>.vlt</code> checkpoint.</p>
+ backend. Entry/load/ESP are disabled in system mode because reset-vector
+ placement and firmware determine them. Use <b>Open snapshot</b> for a paired host-testbench
+ <code>.aux</code>/<code>.vlt</code> checkpoint. On the command line,
+ <code>--snapshot</code> is exclusive and restores exactly that target; it does
+ not auto-load a demo afterward.</p>
 """),
     ("Reading the Pipeline View", """
 <h1>How to read the Pipeline View</h1>
@@ -101,6 +107,9 @@ fields.</p>
 view and pin Registers. Press <code>/</code> to focus the filter, Enter or F3
 to move to the next result, Shift+F3 for the previous result, and Escape to
 clear it. The arrows beside the match count provide the same navigation.</p>
+<p>If a single fast step produces more rows than fit in the rolling view, Trace
+keeps and labels the newest 6,000 retirements. The Pipeline title similarly
+labels a newest-cycle window after very large steps.</p>
 """),
     ("Caches and memory", """
 <h1>Caches and memory</h1>
@@ -129,12 +138,13 @@ and memory state, not the earlier visual history.</p>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
  <tr><td><b>Ctrl+Shift+R</b></td><td>reload the current program from disk</td></tr>
  <tr><td><b>Ctrl+0</b></td><td>reset panel proportions</td></tr>
+ <tr><td><b>Alt+1 … Alt+0</b></td><td>select Code$ … Mem map analysis tab</td></tr>
  <tr><td><b>R</b></td><td>reset or restore snapshot</td></tr>
  <tr><td><b>.</b></td><td>one clock</td></tr>
  <tr><td><b>I / Space</b></td><td>next retired instruction</td></tr>
  <tr><td><b>F5</b></td><td>run/pause</td></tr>
  <tr><td><b>[ / ]</b></td><td>previous/next pipeline event</td></tr>
- <tr><td><b>/</b></td><td>focus the trace filter</td></tr>
+ <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
  <tr><td><b>Enter / F3</b></td><td>next filtered retirement</td></tr>
  <tr><td><b>Shift+F3</b></td><td>previous filtered retirement</td></tr>
  <tr><td><b>Escape</b></td><td>clear the trace filter</td></tr>

@@ -8,6 +8,7 @@ the linked-view behavior a user relies on.  Screenshots are written only to the
 requested output directory (normally /tmp).
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -23,8 +24,15 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QMessageBox, QPushButton,
                                QToolBar, QToolButton)
 
-from pipeviz.main import MainWindow, _apply_dark
+import pipeviz.main as main_module
+import pipeviz.pipeline_view as pipeline_module
+import pipeviz.trace_view as trace_module
+from pipeviz.backend import VVRetire
+from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
+                          _load_startup_target, _manifest_address, _read_program,
+                          _system_load_address, _validate_segments)
 from pipeviz.pipeline_view import ROW_H
+from pipeviz.tables_view import CycleBreakdown
 
 
 def repo_path(relative):
@@ -98,11 +106,211 @@ def close_window(win):
 
 
 def scenario_startup(app, outdir):
+    class CycleSample:
+        def __init__(self, cyc):
+            self.cyc = cyc
+            self.state = 2
+            self.retU = 0
+            self.retV = 0
+            self.mispred_bubbles = 0
+            self.stall_cnt = 0
+            self.pending_mem_pen = 0
+
+    class CycleBackend:
+        def __init__(self, count):
+            self.records = [CycleSample(cyc) for cyc in range(1, count + 1)]
+
+        def cycle_count(self):
+            return len(self.records)
+
+        def get_cycles(self, since_cyc, maximum):
+            return self.records[since_cyc - 1:since_cyc - 1 + maximum]
+
+        @staticmethod
+        def state_name(_state):
+            return "S_DECODE"
+
+    cycle_backend = CycleBackend(9000)  # deliberately exceeds one 8192-sample read
+    original_cycle_cap = pipeline_module._KONATA_CYCLE_CAP
+    pipeline_module._KONATA_CYCLE_CAP = 100
+    try:
+        overflow_konata = pipeline_module.Konata()
+        overflow_konata.reset(cycle_backend, 32)
+        overflow_konata.update_from(cycle_backend)
+        assert overflow_konata._last_cyc == 9000
+        assert overflow_konata.plot.history_start == 8901
+        assert "latest 100 of 9,000 cycles" in overflow_konata.title.text()
+    finally:
+        pipeline_module._KONATA_CYCLE_CAP = original_cycle_cap
+        overflow_konata.deleteLater()
+    overflow_spark = pipeline_module.SparklineStrip()
+    overflow_spark.CAP = 100
+    overflow_spark.reset(cycle_backend)
+    overflow_spark.ingest()
+    assert overflow_spark._last_cyc == 9000
+    assert len(overflow_spark.ret) == len(overflow_spark.ev) == 100
+    overflow_cycles = CycleBreakdown()
+    overflow_cycles.reset(cycle_backend)
+    overflow_cycles.ingest(cycle_backend)
+    assert overflow_cycles._last_cyc == 9000
+    assert sum(overflow_cycles.counts.values()) == 9000
+    overflow_spark.deleteLater()
+    overflow_cycles.deleteLater()
+
+    class RetireBackend:
+        def __init__(self, count):
+            self.records = []
+            for n in range(count):
+                record = VVRetire()
+                record.n = n
+                record.cyc = n + 1
+                record.pc = 0x08048000 + n
+                record.d32 = 1
+                record.nbytes = 1
+                record.bytes[0] = 0x90
+                record.gpr[0] = n
+                record.eflags = 2
+                self.records.append(record)
+
+        def retire_count(self):
+            return len(self.records)
+
+        def get_retires(self, since_n, maximum):
+            return self.records[since_n:since_n + maximum]
+
+    original_trace_cap = trace_module._MAX_ROWS
+    trace_module._MAX_ROWS = 10
+    try:
+        overflow_trace = trace_module.TraceView()
+        overflow_trace.update_from(RetireBackend(15))
+        assert overflow_trace.tbl.rowCount() == 10
+        assert overflow_trace.tbl.item(0, 0).text() == "5"
+        assert overflow_trace.tbl.item(9, 0).text() == "14"
+        assert overflow_trace._seen == 15
+        assert "latest 10 of 15" in overflow_trace.title.text()
+        assert overflow_trace._prev_gpr[0] == 14
+    finally:
+        trace_module._MAX_ROWS = original_trace_cap
+        overflow_trace.deleteLater()
+
+    assert _system_load_address(0x10000) == 0x000F0000
+    for invalid_size in (0, 0x100001):
+        try:
+            _system_load_address(invalid_size)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid system-image size accepted: {invalid_size}")
+    _validate_segments([(0xFFFFFFF0, b"\0" * 16)])
+    try:
+        _validate_segments([(0xFFFFFFF0, b"\0" * 17)])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("32-bit-crossing segment accepted")
+    assert "*.rom" in _PROGRAM_FILTER and "*.exe" not in _PROGRAM_FILTER
+    assert _manifest_address(0x08048000, "entry") == 0x08048000
+    assert _manifest_address("0x08048000", "entry") == 0x08048000
+    for invalid in (True, -1, 0x1_0000_0000, None):
+        try:
+            _manifest_address(invalid, "entry")
+        except (TypeError, ValueError):
+            pass
+        else:
+            raise AssertionError(f"invalid manifest address accepted: {invalid!r}")
+    invalid_dir = os.path.join(outdir, "invalid_programs")
+    os.makedirs(invalid_dir, exist_ok=True)
+    empty_program = os.path.join(invalid_dir, "empty.flat")
+    mz_program = os.path.join(invalid_dir, "unsupported.exe")
+    with open(empty_program, "wb"):
+        pass
+    with open(mz_program, "wb") as program_file:
+        program_file.write(b"MZ" + b"\0" * 62)
+    for path, message in ((empty_program, "empty"),
+                          (mz_program, "DOS/PE")):
+        try:
+            _read_program(path)
+        except ValueError as error:
+            assert message in str(error)
+        else:
+            raise AssertionError(f"unsupported program accepted: {path}")
+
+    class StartupRecorder:
+        def __init__(self):
+            self.images = []
+            self.snapshots = []
+
+        def load_image(self, path):
+            self.images.append(path)
+
+        def load_snapshot(self, path):
+            self.snapshots.append(path)
+
+    recorder = StartupRecorder()
+    assert _load_startup_target(
+        recorder, image="/missing/explicit-program.elf") == "image"
+    assert recorder.images == ["/missing/explicit-program.elf"]
+    assert recorder.snapshots == []
+    recorder = StartupRecorder()
+    assert _load_startup_target(
+        recorder, snapshot="/tmp/checkpoint") == "snapshot"
+    assert recorder.snapshots == ["/tmp/checkpoint"] and not recorder.images
+    recorder = StartupRecorder()
+    assert _load_startup_target(recorder) == "demo"
+    assert len(recorder.images) == 1 and not recorder.snapshots
+    conflict = subprocess.run(
+        [sys.executable, "-m", "pipeviz.main", "program.flat",
+         "--snapshot", "checkpoint"],
+        cwd=HERE, text=True, capture_output=True)
+    assert conflict.returncode == 2
+    assert "mutually exclusive" in conflict.stderr
+    conflict = subprocess.run(
+        [sys.executable, "-m", "pipeviz.main", "--snapshot", "checkpoint",
+         "--system"],
+        cwd=HERE, text=True, capture_output=True)
+    assert conflict.returncode == 2
+    assert "cannot be combined" in conflict.stderr
+
     win = new_window(app)
     try:
+        old_backend = win.backend
+        old_backend_class = main_module.Backend
+        old_critical = QMessageBox.critical
+        reset_errors = []
+
+        def fail_backend(*_args, **_kwargs):
+            raise RuntimeError("synthetic construction failure")
+
+        try:
+            main_module.Backend = fail_backend
+            QMessageBox.critical = (
+                lambda _parent, title, text:
+                reset_errors.append((title, text)))
+            assert not win._fresh_backend(False)
+        finally:
+            main_module.Backend = old_backend_class
+            QMessageBox.critical = old_critical
+        assert win.backend is old_backend and old_backend.h
+        assert reset_errors == [
+            ("Backend reset failed", "synthetic construction failure")]
+
         assert "no image loaded" in win.status_lbl.text()
         assert win.cyc_cb.text() == "U/V issue"
         assert all(not widget.isEnabled() for widget in win._config_widgets)
+        assert win.regs._session_hint.isVisible()
+        assert not win.regs._wide_host.isVisible()
+        assert "No program loaded" in win.regs._session_hint.text()
+        assert win.trace.tbl._empty_hint.isVisible()
+        assert "No program loaded" in win.trace.tbl._empty_hint.text()
+        assert "no program loaded" in win.pipeline.konata.plot.empty_message
+        assert win.pipeline.spark.backend is None
+        assert win.tables.ic._hint.isVisible()
+        assert "no program loaded" in win.tables.ic._hint.text().lower()
+        assert "No program loaded" in win.tables.pf.info.text()
+        assert all(not control.isEnabled()
+                   for control in win.tables.mem._session_controls)
+        assert not win.tables.mem.access_btn.isEnabled()
+        assert "No program loaded" in win.tables.mem.follow_lbl.text()
         win.soc_cb.setChecked(True)
         assert win.sys_cb.isChecked()
         win.sys_cb.setChecked(False)
@@ -131,9 +339,43 @@ def scenario_startup(app, outdir):
         }
         assert {"Dual issue and branches", "D-cache pressure",
                 "x87 overlap"} <= enabled_examples
+        real_example_lookup = main_module._first_repo_file
+        try:
+            main_module._first_repo_file = lambda _candidates: None
+            win._refresh_example_actions()
+            assert all(not action.isEnabled()
+                       for action, _candidates in win._example_actions)
+        finally:
+            main_module._first_repo_file = real_example_lookup
+            win._refresh_example_actions()
+        assert {"Dual issue and branches", "D-cache pressure",
+                "x87 overlap"} <= {
+            action.text() for action, _candidates in win._example_actions
+            if action.isEnabled()}
         view_actions = {action.text() for action in win._view_menu.actions()}
         assert {"Reset panel layout", "Show session toolbar",
-                "Show transport toolbar", "Show status toolbar"} <= view_actions
+                "Show transport toolbar", "Show status toolbar",
+                "Analysis tab"} <= view_actions
+        assert [action.text() for action in win._analysis_actions] == [
+            win.tables.tabs.tabText(i) for i in range(win.tables.tabs.count())]
+        assert [action.shortcut().toString() for action in win._analysis_actions] == [
+            "Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5",
+            "Alt+6", "Alt+7", "Alt+8", "Alt+9", "Alt+0"]
+        QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 8
+        QTest.keyClick(win, Qt.Key_0, Qt.AltModifier)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 9
+        QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 0
+        win.trace.filt.setText("mov")
+        win.tables.tabs.setFocus()
+        QTest.keyClick(win.tables.tabs, Qt.Key_Slash)
+        settle(app)
+        assert win.trace.filt.selectedText() == "mov"
+        win.trace.filt.clear()
         help_actions = {action.text() for action in win._help_menu.actions()}
         assert {"User Guide", "How to read the Pipeline View",
                 "Keyboard and mouse shortcuts"} <= help_actions
@@ -159,6 +401,7 @@ def scenario_startup(app, outdir):
         guide_shot = os.path.join(outdir, "00_help_pipeline_guide.png")
         assert win._guide_dialog.grab().save(guide_shot)
         win._guide_dialog.close()
+        win.action_hint.clear()  # keep the startup reference capture transient-free
         save_shot(app, win, outdir, "00_startup")
         branch_example = next(
             action for action in win._examples_menu.actions()
@@ -168,8 +411,56 @@ def scenario_startup(app, outdir):
         assert win.image_path and "mb_brloop" in os.path.basename(win.image_path)
         assert win.reload_action.isEnabled() and win.step1_btn.isEnabled()
         assert all(widget.isEnabled() for widget in win._config_widgets)
+        assert not win.regs._session_hint.isVisible()
+        assert win.regs._wide_host.isVisible()
+        assert win.trace.tbl._empty_hint.isVisible()
+        assert "No instructions retired" in win.trace.tbl._empty_hint.text()
+        assert "no instructions retired" in win.pipeline.konata.plot.empty_message
+        assert win.pipeline.spark.backend is win.backend
+        assert "no program loaded" not in win.tables.ic._hint.text().lower()
+        assert all(control.isEnabled()
+                   for control in win.tables.mem._session_controls)
+        assert not win.tables.mem.access_btn.isEnabled()
+
+        manifest_dir = os.path.join(outdir, "numeric_manifest")
+        os.makedirs(manifest_dir, exist_ok=True)
+        manifest_image = os.path.join(manifest_dir, "tiny.flat")
+        manifest_bytes = b"\x90\xf4"
+        with open(manifest_image, "wb") as image_file:
+            image_file.write(manifest_bytes)
+        with open(os.path.join(manifest_dir, "manifest.json"), "w",
+                  encoding="utf-8") as manifest_file:
+            json.dump({"entry": 0x00100000,
+                       "load_addr": "0x00100000"}, manifest_file)
+        win.load_image(manifest_image)
+        assert int(win.entry_e.text(), 0) == 0x00100000
+        assert int(win.load_e.text(), 0) == 0x00100000
+        assert win.backend.state().eip == 0x00100000
+        assert win.backend.mem_read(0x00100000, 2) == manifest_bytes
+
+        long_loop = os.path.join(outdir, "long_refresh.flat")
+        with open(long_loop, "wb") as loop_file:
+            # mov eax,eax; mov ebx,ebx; jmp back to the first mov
+            loop_file.write(b"\x89\xc0\x89\xdb\xeb\xfa")
+        win.load_image(long_loop)
+        win.do_step(9000, False)
+        total_retired = win.backend.retire_count()
+        assert win.backend.cycle_count() == 9000
+        assert win.pipeline.konata._last_cyc == 9000
+        assert win.pipeline.spark._last_cyc == 9000
+        assert win.tables.cyc._last_cyc == 9000
+        assert sum(win.tables.cyc.counts.values()) == 9000
+        assert len(win.pipeline.spark.ret) == 9000
+        assert total_retired > trace_module._MAX_ROWS
+        assert win.trace.tbl.rowCount() == trace_module._MAX_ROWS
+        assert int(win.trace.tbl.item(0, 0).text()) == (
+            total_retired - trace_module._MAX_ROWS)
+        assert int(win.trace.tbl.item(
+            win.trace.tbl.rowCount() - 1, 0).text()) == total_retired - 1
+        assert f"of {total_retired:,}" in win.trace.title.text()
         print("OK startup/help/load: disabled transport, shortcuts, indexed "
-              "Pipeline guide, built-in example")
+              "Pipeline guide, honest empty states, examples, numeric manifest, "
+              "9k-clock refresh")
     finally:
         close_window(win)
 
@@ -225,6 +516,7 @@ def scenario_branch_transport(app, outdir):
         win.reload_action.trigger()
         settle(app)
         assert win.backend.retire_count() == 0
+        assert sum(win.tables.cyc.counts.values()) == 0
         assert win.esp_e.text() == "0x40c34000"
         assert win.backend.state().gpr[4] == 0x40c34000
         click(app, win.reset_btn)
@@ -235,8 +527,48 @@ def scenario_branch_transport(app, outdir):
         assert win.backend.retire_count() >= 180
         stats = win.pipeline.waterfall.stats()
         assert stats["vret"] >= 80 and stats["mispred"] > 0
+        assert "pair(win)" not in win.status_lbl.text()
+        assert "captured session" in win.status_lbl.toolTip()
+        win.pipeline.konata._history_truncated = True
+        win._refresh_status(win.backend.state())
+        expected_pair = round(
+            200 * stats["vret"] / (stats["uret"] + stats["vret"]))
+        assert "pair(win)" in win.status_lbl.text()
+        assert f"&nbsp;{expected_pair}%" in win.status_lbl.text()
+        assert "lifetime totals" in win.status_lbl.toolTip()
+        win.pipeline.konata._history_truncated = False
+        win._refresh_status(win.backend.state())
         assert win.tables.br.rowCount() >= 1 and win.tables.mix.rowCount() >= 2
         assert len(win.pipeline.konata.plot.insns) == win.trace.tbl.rowCount()
+
+        # Reload validates preserved setup before touching the running session.
+        old_backend = win.backend
+        old_retired = win.backend.retire_count()
+        old_rows = win.trace.tbl.rowCount()
+        invalid_seen.clear()
+        invalid_timer.start(5)
+        win.entry_e.setText("not-hex")
+        win.reload_action.trigger()
+        invalid_timer.stop()
+        settle(app)
+        assert invalid_seen == ["Invalid address"]
+        assert win.backend is old_backend
+        assert win.backend.retire_count() == old_retired
+        assert win.trace.tbl.rowCount() == old_rows
+        win.entry_e.setText("0x08048000")
+
+        # A placement that crosses 4 GiB is rejected before the live model is
+        # closed, just like malformed address text.
+        invalid_seen.clear()
+        invalid_timer.start(5)
+        win.load_e.setText("0xfffffff0")
+        win.on_reset()
+        invalid_timer.stop()
+        settle(app)
+        assert invalid_seen == ["Invalid program placement"]
+        assert win.backend is old_backend
+        assert win.backend.retire_count() == old_retired
+        win.load_e.setText("0x08048000")
 
         visible_v = set_filter(app, win.trace, "pipe:V")
         assert 50 <= visible_v < win.trace.tbl.rowCount()
@@ -310,7 +642,10 @@ def scenario_branch_transport(app, outdir):
 
         set_filter(app, win.trace, "no-visible-hotspot-row")
         select_tab(app, win.tables.tabs, 4)
-        select_table_row(app, win.tables.hot, 0)
+        win.tables.hot.setCurrentCell(0, 0)
+        win.tables.hot.setFocus()
+        QTest.keyClick(win.tables.hot, Qt.Key_Return)
+        settle(app)
         selected_pc = int(win.tables.hot.item(0, 0).text(), 16)
         assert int(win.trace.tbl.item(win.trace.tbl.currentRow(), 4).text(), 16) == selected_pc
         assert not win.trace.filt.text()
@@ -435,6 +770,7 @@ def scenario_elf_and_random_branches(app, outdir):
         assert win.image_kind == "ELF"
         assert len(win.image_segments) >= 2
         assert not win.load_e.isEnabled()
+        assert win.entry_e.isEnabled() and win.esp_e.isEnabled()
         assert int(win.entry_e.text(), 0) == 0x08048000
         win.stepn.setValue(800)
         click(app, win.stepn_btn)
@@ -461,6 +797,12 @@ def scenario_system_and_switch(app, outdir):
         win.load_image(repo_path("verif/sys/tests/ppage/ppage.bin"))
         assert win.sys_cb.isChecked() and not win.soc_cb.isChecked()
         assert win.load_e.text().lower() == "0x000f0000"
+        assert all(not field.isEnabled()
+                   for field in (win.entry_e, win.load_e, win.esp_e))
+        assert all(mode.isEnabled()
+                   for mode in (win.cyc_cb, win.sys_cb, win.soc_cb))
+        assert "F000:FFF0" in win.entry_e.toolTip()
+        assert "top-aligned" in win.load_e.toolTip()
         win.stepn.setValue(1200)
         click(app, win.stepn_btn)
         state = win.backend.state()
@@ -481,7 +823,10 @@ def scenario_system_and_switch(app, outdir):
         win.load_image(repo_path("build/verify/mb_brloop.cycle.flat"))
         settle(app)
         assert not win.sys_cb.isChecked() and not win.soc_cb.isChecked()
+        assert all(field.isEnabled()
+                   for field in (win.entry_e, win.load_e, win.esp_e))
         assert not win.backend.state().sys_mode
+        assert sum(win.tables.cyc.counts.values()) == 0
         assert win.trace.tbl.rowCount() == 0
         assert not win.trace.filt.text() and not win.trace._tokens
         assert win.trace.accesses == [] and win.tables.mem._click_hl is None

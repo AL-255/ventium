@@ -216,6 +216,31 @@ class _TraceFilter(QLineEdit):
 class _TraceTable(QTableWidget):
     focusFilter = Signal()
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._empty_hint = QLabel("", self.viewport())
+        self._empty_hint.setAlignment(Qt.AlignCenter)
+        self._empty_hint.setWordWrap(True)
+        self._empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._empty_hint.setStyleSheet(
+            "color:#586069;font-style:italic;background:transparent;")
+
+    def set_empty_hint(self, text):
+        self._empty_hint.setText(text)
+        self.sync_empty_hint()
+
+    def sync_empty_hint(self):
+        self._empty_hint.setGeometry(
+            0, 0, self.viewport().width(), self.viewport().height())
+        self._empty_hint.setVisible(self.rowCount() == 0 and bool(
+            self._empty_hint.text()))
+        if self._empty_hint.isVisible():
+            self._empty_hint.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.sync_empty_hint()
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Slash and event.modifiers() == Qt.NoModifier:
             self.focusFilter.emit()
@@ -271,6 +296,8 @@ class TraceView(QWidget):
             top.addWidget(button)
         lay.addLayout(top)
         self.tbl = _TraceTable(0, len(_COLS))
+        self.tbl.set_empty_hint(
+            "No program loaded — use File → Open example or Ctrl+O")
         self.tbl.focusFilter.connect(self.focus_filter)
         self.tbl.setHorizontalHeaderLabels(_COLS)
         # left-align the headers whose data is left-aligned (n/cyc/PC/bytes/instr)
@@ -406,6 +433,8 @@ class TraceView(QWidget):
 
     def reset(self):
         self.tbl.setRowCount(0)
+        self.tbl.sync_empty_hint()
+        self.title.setText("Retired-instruction trace")
         self._seen = 0
         self._last_cyc = None
         self._prev_eff = None
@@ -419,6 +448,8 @@ class TraceView(QWidget):
     def start_session(self):
         """Clear search state which would otherwise silently hide a new program."""
         self.filt.clear()
+        self.tbl.set_empty_hint(
+            "No instructions retired yet — use Insn, Step N, or Run")
 
     def update_from(self, backend):
         total = backend.retire_count()
@@ -426,7 +457,34 @@ class TraceView(QWidget):
             return
         # pull only the new retirements
         want = total - self._seen
-        recs = backend.get_retires(self._seen, min(want, _MAX_ROWS))
+        start = self._seen
+        if want > _MAX_ROWS:
+            # One fast Run/Step can retire more than the display cap between
+            # paints. Keep the newest window, not the oldest window followed by
+            # a cursor jump over unseen rows.
+            start = total - _MAX_ROWS
+            self.tbl.setRowCount(0)
+            self._last_cyc = None
+            self._prev_eff = None
+            self._prev_fstat = None
+            self._prev_st0 = None
+            self._prev_gpr = None
+            self.last_access = None
+            self.accesses = []
+            # Seed pre-instruction state for the first visible row so its flag,
+            # x87, effective-address, and delta calculations remain accurate.
+            if start:
+                previous = backend.get_retires(start - 1, 1)
+                if previous:
+                    prev = previous[-1]
+                    self._last_cyc = int(prev.cyc)
+                    self._prev_eff = int(prev.eflags)
+                    self._prev_gpr = list(prev.gpr)
+                    if prev.x87_valid:
+                        self._prev_fstat = int(prev.fstat)
+                        self._prev_st0 = bytes(
+                            prev.st[0][k] for k in range(10))
+        recs = backend.get_retires(start, min(total - start, _MAX_ROWS))
         if not recs:
             self._seen = total
             return
@@ -526,6 +584,10 @@ class TraceView(QWidget):
                         it.setToolTip(v)
                 self.tbl.setItem(row, c, it)
         self._seen = total
+        self.tbl.sync_empty_hint()
+        self.title.setText(
+            f"Retired-instruction trace — latest {_MAX_ROWS:,} of {total:,}"
+            if total > _MAX_ROWS else "Retired-instruction trace")
         # rolling cap
         excess = self.tbl.rowCount() - _MAX_ROWS
         if excess > 0:

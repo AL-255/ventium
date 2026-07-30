@@ -16,17 +16,27 @@ From the repository root, build and launch with a supplied program:
 tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
 ```
 
-`Open…` accepts raw images and little-endian 32-bit x86 ELF files.  For a raw
+`Open…` accepts raw `.flat`/`.bin`/`.img`/`.rom` images and little-endian
+32-bit x86 ELF files. Empty files and DOS/PE executables are rejected with a
+clear format error. For a raw
 image, set **entry**, **load**, and **esp** before Reset when its layout differs
 from the default.  ELF `PT_LOAD` addresses and its entry point are used
 automatically.  Dropping a file on the window does the same thing.
+A flat image may use a sibling `manifest.json`; its `entry` and `load_addr`
+accept either JSON integers or `0x…` strings.
 Use **File → Open example** to load an available verification workload without
-locating its build path.  After recompiling the current program,
+locating its build path. The menu rescans whenever it opens, so an example built
+after pipeviz starts becomes available immediately. After recompiling the
+current program,
 **Ctrl+Shift+R** re-reads it from disk while preserving the displayed reset
 addresses and mode switches.
 Changing entry/load/ESP or a mode switch marks the control **Apply + Reset**;
 the running backend is unchanged until you apply it. Invalid addresses are
-highlighted and rejected instead of silently falling back to a default.
+highlighted and rejected instead of silently falling back to a default;
+reload also leaves the current session intact until its preserved setup
+validates.
+System boot disables entry/load/ESP because the architectural reset vector,
+BIOS top-alignment, and firmware stack setup determine those values.
 
 Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
 next retirement, and **Step N** for a useful analysis window.  `F5` runs and
@@ -39,11 +49,18 @@ The register bank automatically changes from three simultaneous columns to
 indexed **Integer / Segments / x87** pages when the right pane becomes narrow.
 This keeps every value readable at 1280×800. **View → Reset panel layout**
 (`Ctrl+0`) restores the recommended proportions after exploratory resizing.
+`Alt+1` through `Alt+0` jump directly among Code$, Data$, TLB, Prefetch,
+Hotspots, Branches, Mix, Cycles, Memory, and Mem map.
 
 Trace filters are space-separated AND terms: free text plus exact-field
 `pc:08048`, retirement `n>=100` / `n<=200` / `n=150`, cycle
 `cyc>=133`, `pipe:U` / `pipe:V`, `stall`, and `@` for memory accesses.
-Use `/`, Enter/F3, Shift+F3, and Escape to focus, traverse, and clear results.
+Use `/` from anywhere, then Enter/F3, Shift+F3, and Escape to focus, traverse,
+and clear results. Hotspots and Branches rows activate with Enter as well as
+the mouse.
+Large steps remain bounded and honest: Trace labels its newest 6,000
+retirements, Pipeline labels its newest 50,000-cycle window, and the compact
+IPC strip retains the newest 12,000 cycles.
 
 ## Worked examples
 

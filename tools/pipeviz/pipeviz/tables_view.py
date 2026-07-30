@@ -106,6 +106,10 @@ class _HintTable(QTableWidget):
         self._hint.setStyleSheet("color:#586069; font-style:italic; background:transparent;")
         self._hint.hide()
 
+    def set_hint(self, text):
+        self._hint.setText(text)
+        self.sync_hint()
+
     def sync_hint(self):
         if self.rowCount() == 0 and self._hint.text():
             self._hint.setGeometry(0, 0, self.viewport().width(), self.viewport().height())
@@ -130,6 +134,9 @@ def _mk_table(cols, widths=None, hint=""):
         for i, w in enumerate(widths):
             t.setColumnWidth(i, w)
         t.horizontalHeader().setSectionResizeMode(len(cols) - 1, QHeaderView.Stretch)
+    # The table is born empty.  Do not wait for the first backend refresh to
+    # explain that state; this is especially important on the startup screen.
+    t.sync_hint()
     return t
 
 
@@ -275,7 +282,12 @@ class CycleBreakdown(QWidget):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.backend = None
+        self.session_active = False
         self._zero()
+
+    def set_session_active(self, active):
+        self.session_active = bool(active)
+        self.update()
 
     def _zero(self):
         self._last_cyc = 0
@@ -316,10 +328,14 @@ class CycleBreakdown(QWidget):
             self._zero()
         if total <= self._last_cyc:
             return
-        for c in backend.get_cycles(self._last_cyc + 1, 8192):
-            self.counts[self._classify(backend.state_name(c.state), c)] += 1
-            self.total_ret += (1 if c.retU else 0) + (1 if c.retV else 0)
-            self._last_cyc = c.cyc
+        while self._last_cyc < total:
+            new = backend.get_cycles(self._last_cyc + 1, 8192)
+            if not new:
+                break
+            for c in new:
+                self.counts[self._classify(backend.state_name(c.state), c)] += 1
+                self.total_ret += (1 if c.retU else 0) + (1 if c.retV else 0)
+                self._last_cyc = c.cyc
         self.update()
 
     def paintEvent(self, _ev):
@@ -335,7 +351,9 @@ class CycleBreakdown(QWidget):
                    f"cycle attribution — {total} cyc · {self.total_ret} retired · IPC {ipc:.3f}")
         if total == 0:
             p.setPen(QColor("#8b949e")); p.setFont(f)
-            p.drawText(self.rect(), Qt.AlignCenter, "step the core to attribute cycles")
+            message = ("step the core to attribute cycles" if self.session_active else
+                       "no program loaded — open a program to attribute cycles")
+            p.drawText(self.rect(), Qt.AlignCenter, message)
             p.end(); return
         colmap = dict(self.CATS)
         rows = sorted(((k, v) for k, v in self.counts.items() if v),
@@ -430,7 +448,9 @@ class TablesView(QWidget):
 
         # --- Instruction mix (class histogram + U/V issue-port split) ---
         self.mix_lbl = QLabel()
-        self.mix = _mk_table(["class", "count", "%", "bar"], [88, 60, 56, 9999])
+        self.mix = _mk_table(
+            ["class", "count", "%", "bar"], [88, 60, 56, 9999],
+            hint="no instructions retired yet — step the core")
         _align_headers(self.mix, (3,), Qt.AlignLeft)  # 'bar' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.mix_lbl, self.mix), "Mix")
         self.tabs.setTabToolTip(6, "Instruction-class mix and U/V issue split")
@@ -459,7 +479,51 @@ class TablesView(QWidget):
         # drill-down: clicking a Hotspots / Branches row jumps the trace to that PC.
         self.hot.cellClicked.connect(lambda r, _c: self._emit_pc(self.hot, r))
         self.br.cellClicked.connect(lambda r, _c: self._emit_pc(self.br, r))
+        # QTableWidget emits cellActivated for Enter/Return and double-click.
+        # Keep the single-click path above, while making drill-down keyboard
+        # accessible for users navigating rows with the arrow keys.
+        self.hot.cellActivated.connect(lambda r, _c: self._emit_pc(self.hot, r))
+        self.br.cellActivated.connect(lambda r, _c: self._emit_pc(self.br, r))
         self._bits = 32
+        self._activity_hints = {
+            self.ic: "I-cache empty — step the core to fetch code into it",
+            self.dc: "D-cache empty — this workload has issued no data loads/stores yet",
+            self.tlb: "TLB empty — paging is off or no translations have been resolved yet",
+            self.hot: "no instructions retired yet — step the core",
+            self.br: "no branches retired yet — step the core through a jump/call/loop",
+            self.mix: "no instructions retired yet — step the core",
+        }
+        self._session_active = False
+        self.set_session_active(False)
+
+    def set_session_active(self, active):
+        """Distinguish 'nothing loaded' from a real, currently empty structure."""
+        self._session_active = bool(active)
+        if active:
+            for table, hint in self._activity_hints.items():
+                table.set_hint(hint)
+        else:
+            message = "no program loaded — use File → Open example or Ctrl+O"
+            for table in self._activity_hints:
+                table.set_hint(message)
+            for label in (self.ic_lbl, self.dc_lbl, self.tlb_lbl,
+                          self.hot_lbl, self.br_lbl, self.mix_lbl):
+                label.setText("No program loaded")
+        self.pf.set_session_active(active)
+        self.cyc.set_session_active(active)
+        self.mem.set_session_active(active)
+        self.accmap.set_session_active(active)
+
+    def start_session(self, backend):
+        """Reset every analysis accumulator before exposing a fresh model.
+
+        Comparing clock numbers is insufficient for snapshots: a newly restored
+        model can start at a larger clock than the previous session.
+        """
+        self.set_session_active(True)
+        self.cyc.reset(backend)
+        self.mem.start_session()
+        self.accmap.set_accesses([])
 
     def _emit_pc(self, table, row):
         it = table.item(row, 0)   # the PC column holds an 8-hex-digit address
@@ -485,10 +549,12 @@ class TablesView(QWidget):
         self.mix.setRowCount(0)
         if total == 0:
             self.mix_lbl.setText("no instructions yet")
+            self.mix.sync_hint()
             return
         maxc = max(cls.values())
         order = sorted(cls.items(), key=lambda kv: -kv[1])
         self.mix.setRowCount(len(order))
+        self.mix.sync_hint()
         for r, (name, n) in enumerate(order):
             bar = "█" * max(1, round(14 * n / maxc))
             for c, v in enumerate([name, str(n), f"{100 * n / total:.1f}%", bar]):
@@ -602,6 +668,8 @@ class TablesView(QWidget):
         return w
 
     def update_from(self, backend, state):
+        if not self._session_active:
+            self.set_session_active(True)
         self._bits = 32 if state.cs_d else 16
         self.cyc.ingest(backend)        # accumulate the cycle-attribution breakdown
         # I-cache
@@ -697,6 +765,19 @@ class _PrefetchView(QWidget):
         self.decode.setWordWrap(True)
         v.addWidget(self.decode)
         v.addStretch(1)
+        self.set_session_active(False)
+
+    def set_session_active(self, active):
+        if active:
+            return
+        self.info.setText("No program loaded")
+        for byte in self.byte_lbls:
+            byte.setText("—")
+            byte.setStyleSheet(
+                "color:#586069;background:#161b22;border:1px solid #30363d;padding:4px;")
+        self.decode.setText(
+            "<i>Open a program to inspect its slow-path prefetch buffer.</i>")
+        self.decode.setStyleSheet("color:#586069;")
 
     def update_from(self, s, bits):
         self.info.setText(
@@ -705,6 +786,8 @@ class _PrefetchView(QWidget):
         ib = bytes(s.ibuf[i] for i in range(16))
         for i in range(16):
             self.byte_lbls[i].setText(f"{ib[i]:02x}")
+            self.byte_lbls[i].setStyleSheet(
+                "background:#161b22;border:1px solid #30363d;padding:4px;")
         if not any(ib):
             # An all-zero ibuf is the IDLE slow-path buffer — the core is on the fast
             # dual-issue path, fetching straight from the I-cache, so the slow-path
@@ -735,7 +818,13 @@ class _HexDump(QWidget):
         self.esp = 0
         self.acc_addr = None     # (start) of the most-recent memory access
         self.acc_size = 0
+        self.message = ""
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def clear(self, message=""):
+        self.data = b""
+        self.message = message
+        self.update()
 
     def set(self, backend, base, eip, esp, access=None):
         rows = max(8, self.height() // self.ROW_H)
@@ -744,12 +833,18 @@ class _HexDump(QWidget):
         self.eip = eip
         self.esp = esp
         self.acc_addr, self.acc_size = access if access else (None, 0)
+        self.message = ""
         self.update()
 
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#0b0f14"))
         p.setFont(_mono(9))
+        if not self.data and self.message:
+            p.setPen(QColor("#586069"))
+            p.drawText(self.rect(), Qt.AlignCenter, self.message)
+            p.end()
+            return
         from PySide6.QtGui import QFontMetrics
         fm = QFontMetrics(p.font())
         cw = fm.horizontalAdvance("0")
@@ -804,8 +899,13 @@ class AccessMap(QWidget):
                                     # so the selection survives the trace's rolling cap
                                     # dropping older accesses off the front of the list)
         self._pts = []              # cached [(px, py, idx)] from the last paint, for hit-test
+        self.session_active = False
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
+
+    def set_session_active(self, active):
+        self.session_active = bool(active)
+        self.update()
 
     def set_accesses(self, accs):
         if accs is not self.accesses:
@@ -831,8 +931,10 @@ class AccessMap(QWidget):
         self._pts = []
         if not accs:
             p.setPen(QColor("#586069")); p.setFont(_mono(10))
-            p.drawText(self.rect(), Qt.AlignCenter,
-                       "no memory accesses yet — step a workload that loads/stores")
+            message = ("no memory accesses yet — step a workload that loads/stores"
+                       if self.session_active else
+                       "no program loaded — open a program to inspect memory accesses")
+            p.drawText(self.rect(), Qt.AlignCenter, message)
             p.end(); return
         ns = [a[0] for a in accs]; addrs = [a[2] for a in accs]
         n0, n1 = min(ns), max(ns); a0, a1 = min(addrs), max(addrs)
@@ -944,6 +1046,7 @@ class MemoryView(QWidget):
         bs = QPushButton("→ESP"); bs.clicked.connect(lambda: self._set_follow("esp")); bar.addWidget(bs)
         ba = QPushButton("→access"); ba.setToolTip("follow the most-recent load/store address")
         ba.clicked.connect(lambda: self._set_follow("access")); bar.addWidget(ba)
+        self.access_btn = ba
         self._access = None       # (addr, size) of the newest memory access
         self._click_hl = None     # (addr, size) pinned by a Mem-map point click
         for d, lab in ((-256, "◀"), (256, "▶")):
@@ -954,6 +1057,17 @@ class MemoryView(QWidget):
         v.addLayout(bar)
         self.dump = _HexDump()
         v.addWidget(self.dump, 1)
+        self._session_controls = (self.addr_e, go, be, bs)
+        self.set_session_active(False)
+
+    def set_session_active(self, active):
+        for control in self._session_controls:
+            control.setEnabled(active)
+        self.access_btn.setEnabled(active and self._access is not None)
+        if not active:
+            self.backend = None
+            self.follow_lbl.setText("No program loaded")
+            self.dump.clear("Open a program to inspect memory.")
 
     def reset(self):
         """Clear the transient Mem-map-click pin on a new image load, so the panel
@@ -962,6 +1076,7 @@ class MemoryView(QWidget):
 
     def start_session(self):
         """Start a program/snapshot at its instruction pointer, not stale memory."""
+        self.set_session_active(False)
         self.follow = "eip"
         self.addr = 0x08048000
         self._access = None
@@ -1015,6 +1130,9 @@ class MemoryView(QWidget):
         self._eip = state.eip
         self._esp = state.gpr[4]
         self._access = access
+        for control in self._session_controls:
+            control.setEnabled(True)
+        self.access_btn.setEnabled(access is not None)
         if self.follow == "eip":
             self.addr = self._eip & 0xFFFFFFF0
         elif self.follow == "esp":
