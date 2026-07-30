@@ -309,6 +309,13 @@ Intel-syntax source in Assembly. Review or edit it before running. Compiler
 errors also highlight their C line; press Enter on the focused diagnostic or
 double-click it to jump there. Editing C or changing the optimization level
 clears the prior compiler result and asks for a fresh compile.</p>
+<p>The built-in C template is a real U/V experiment: two independent Fibonacci
+chains run for a volatile, runtime-loaded 120 iterations, so O2 cannot replace
+them with constants. Compile at O2, Assemble + Run, then run the same ELF once
+with <b>U/V issue</b> enabled and once disabled (apply/reset after each change).
+Both runs return EAX <code>0x198c09a0</code>; the enabled run should show
+hundreds of V retirements and finish materially sooner. The regression requires
+more than 400 V retirements and at least a 20% cycle advantage.</p>
 <p>Generated artifacts stay under <code>tools/pipeviz/.generated/</code> and
 are ignored by Git.</p>
 """),

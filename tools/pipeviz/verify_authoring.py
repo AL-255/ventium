@@ -1763,8 +1763,14 @@ def scenario(app, outdir):
         settle(app)
         win.c_source.highlighter.rehighlight()
         settle(app)
-        assert "#ff7b72" in format_colors(win.c_source.editor, 4)  # int
-        assert "#d2a8ff" in format_colors(win.c_source.editor, 4)  # main
+        c_main_line = next(
+            number for number, text in enumerate(
+                original_c_source.splitlines(), 1)
+            if "int main(" in text)
+        assert "#ff7b72" in format_colors(
+            win.c_source.editor, c_main_line)  # int
+        assert "#d2a8ff" in format_colors(
+            win.c_source.editor, c_main_line)  # main
         c_priority_probe = "int main(void) { if (main()) return 1; }\n"
         win.c_source.editor.setPlainText(c_priority_probe)
         win.c_source.highlighter.rehighlight()
@@ -1910,7 +1916,11 @@ def scenario(app, outdir):
         settle(app)
         assert c_result is not None and win.workspace.currentWidget() is win.visualizer_tab
         run_to_stop(win)
-        assert win.backend.state().gpr[0] == 144
+        expected_fibonacci = 0x198C09A0
+        assert win.backend.state().gpr[0] == expected_fibonacci
+        dual_cycles = win.backend.state().core_cyc
+        dual_stats = win.pipeline.stats()
+        assert dual_stats["vret"] > 400
         c_pc = next(
             int(win.trace.tbl.item(r, 4).text(), 16)
             for r in range(win.trace.tbl.rowCount())
@@ -1921,6 +1931,23 @@ def scenario(app, outdir):
         win.workspace.setCurrentWidget(win.assembly)
         settle(app)
         save(win, outdir, "05_c_run_source_link")
+
+        # The built-in C template must be a real U/V experiment, not a
+        # constant-folded Fibonacci ornament. Re-run the exact generated ELF
+        # with pairing disabled and require identical output plus an obvious
+        # cycle advantage from the default dual-issue run.
+        win.workspace.setCurrentWidget(win.visualizer_tab)
+        win.cyc_cb.setChecked(False)
+        assert win.on_reset()
+        run_to_stop(win)
+        assert win.backend.state().gpr[0] == expected_fibonacci
+        single_cycles = win.backend.state().core_cyc
+        single_stats = win.pipeline.stats()
+        assert single_stats["vret"] == 0
+        assert single_cycles >= dual_cycles * 1.20, (
+            f"dual Fibonacci advantage too small: "
+            f"single={single_cycles}, dual={dual_cycles}")
+        win.cyc_cb.setChecked(True)
 
         # Floating-point C must stay within the Pentium x87 ISA, remain
         # editable, execute on the real RTL, and retain source navigation.
@@ -1997,7 +2024,8 @@ def scenario(app, outdir):
         win.c_source._path = os.path.join(outdir, "x87-workbench.c")
         assert win.c_source.save_source()
         print("OK GUI authoring: completion/preview, syntax/error lines, "
-              "assembly result=55, C Fibonacci result=144, "
+              f"assembly result=55, C dual Fibonacci result=0x"
+              f"{expected_fibonacci:08x} ({single_cycles}→{dual_cycles} clocks), "
               "C x87 result=3, exact PC↔source links")
     finally:
         # Teardown must never mask an earlier assertion behind a modal unsaved

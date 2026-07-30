@@ -9,6 +9,30 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — C template as an honest U/V experiment
+
+**Experiment-validity audit:** the original built-in C template advanced one
+fixed 12-iteration Fibonacci chain. At O2 the compiler could replace that work
+with a constant, and one dependency chain could not make the benefit of
+independent U/V issue obvious even if it survived. The example was pleasant
+source text but a weak microarchitecture experiment.
+
+**Changes:** the built-in template now advances two independent Fibonacci
+chains for a volatile runtime-loaded 120 iterations and stores both pairs
+through volatile result memory. O2 must retain the loop, while the independent
+adds and moves give the second issue pipe useful work. Its control tooltip and
+indexed authoring guide identify it as the U/V demo and describe a same-ELF,
+U/V-on/off comparison.
+
+**Verification:** the end-to-end authoring harness compiles the template,
+assembles its editable output, runs the real RTL with U/V enabled, selects its
+DWARF-linked source, resets the exact ELF with U/V disabled, and runs again. It
+requires identical EAX `0x198c09a0`, no V retirements in single-issue mode,
+more than 400 V retirements when enabled, and at least a 20% cycle advantage.
+The current base-Miniconda run measures 2,233 single-issue clocks versus 1,759
+U/V clocks (483 V retirements). Syntax checks now locate `main` semantically
+instead of assuming the old template's line number.
+
 ## July 30 continuation — compact register time-point clarity
 
 **Indexed shortcut-reference audit:** the authoring topic documented recent

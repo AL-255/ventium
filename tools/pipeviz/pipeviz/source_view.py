@@ -1610,18 +1610,27 @@ _start:
     hlt
 """
 
-_C_TEMPLATE = """/* Freestanding 32-bit C: no libc; main returns into pipeviz's HLT wrapper. */
-volatile unsigned result;
+_C_TEMPLATE = """/* Two independent Fibonacci chains expose Pentium U/V pairing. */
+volatile unsigned iterations = 120;
+volatile unsigned results[4];
 
 int main(void)
 {
+    unsigned count = iterations;
     unsigned a = 0, b = 1;
-    for (unsigned i = 0; i < 12; ++i) {
-        unsigned next = a + b;
+    unsigned c = 2, d = 3;
+    while (count--) {
+        unsigned next_a = a + b;
+        unsigned next_c = c + d;
         a = b;
-        b = next;
+        b = next_a;
+        c = d;
+        d = next_c;
     }
-    result = a;
+    results[0] = a;
+    results[1] = b;
+    results[2] = c;
+    results[3] = d;
     return (int)a;
 }
 """
@@ -2205,7 +2214,7 @@ class CView(QWidget):
         controls.addStretch(1)
         self.template_btn = QPushButton("New template")
         self.template_btn.setToolTip(
-            "Replace the editor with a Fibonacci C template (Ctrl+N)")
+            "Replace the editor with a dual-Fibonacci U/V template (Ctrl+N)")
         self.open_btn = QPushButton("Open…")
         self.open_btn.setToolTip("Open freestanding C source (Ctrl+O)")
         self.save_btn = QPushButton("Save as…")
@@ -2262,7 +2271,7 @@ class CView(QWidget):
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
         self.status = _StatusLabel(
-            "Define int main(void); Ctrl+B or Ctrl+Enter compiles to Assembly",
+            "Dual-Fibonacci U/V demo · Ctrl+B or Ctrl+Enter compiles to Assembly",
             "C compiler workbench status")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         status_row.addWidget(self.status, 1)
@@ -2364,7 +2373,7 @@ class CView(QWidget):
         self.diagnostics.reset()
         self._diagnostic_revision = -1
         self._compiled_optimization = None
-        self.status.setText("New freestanding C template")
+        self.status.setText("New dual-Fibonacci U/V template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         self.statusChanged.emit("C source replaced")
         self._sync_source_badge()

@@ -410,6 +410,24 @@ belong to the exact source revision that produced them: editing either source
 clears the prior result, and changing C's optimization level clears the old
 compiler result and prompts you to compile again.
 
+The built-in C template is itself a reproducible U/V demonstration. It advances
+two independent Fibonacci recurrences for a runtime-loaded 120 iterations;
+`volatile` input and result storage prevent `-O2` from replacing the work with
+constants. Compile it at `-O2`, assemble and run it, then return to Visualizer:
+
+1. Leave **U/V issue** enabled, apply/reset, and run to HLT. Adjacent independent
+   adds and moves retire through both U and V.
+2. Untick **U/V issue**, apply/reset, and run the exact same ELF again. Every
+   retirement now uses U.
+3. Compare the `cyc`, `ret`, IPC, and `pair%` fields. Both runs must return EAX
+   `0x198c09a0`; only their scheduling and timing may differ.
+
+The authoring regression observed 1,759 clocks with U/V versus 2,233 clocks
+without it (26.9% more clocks in single-issue mode), with 483 V-pipe
+retirements. It enforces identical results, more than 400 V retirements, and a
+minimum 20% cycle advantage so future compiler or RTL changes cannot silently
+turn the template into a decorative example.
+
 Run the dedicated regression for the entire authoring path:
 
 ```sh
@@ -421,7 +439,8 @@ It verifies the 291-mnemonic catalogue against every current RTL decoder family,
 syntax highlighting, opcode-scoped completion and its description/pipeline
 preview, compact layout, transactional load failure, build errors, ELF/DWARF
 mapping, exact live and retired U/V source identity, a hand-written assembly result, and
-C → assembly → RTL execution. It also compiles an array loop without hidden
+C → assembly → RTL execution including the dual-Fibonacci U/V performance
+contract. It also compiles an array loop without hidden
 library calls and runs floating-point C through generated x87 assembly on the
 RTL, verifying EAX = 3 and exact assembly-line navigation.
 
