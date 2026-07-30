@@ -166,6 +166,13 @@ and post-commit next EIP remain explicit `n/a`/unclaimed. A real paged-system
 interaction pins a retirement, compares every displayed field to its record,
 and captures the result.
 
+**Exact paired-row linkage audit:** Trace used a retire cycle to select a timing
+row. Since a U/V pair shares that cycle, clicking U could visibly highlight V
+while Registers and Assembly correctly pinned U. Trace now links to the timing
+diagram by architectural retirement ID; cycle-only navigation remains reserved
+for the sparkline/event seek controls. The branch regression clicks both lanes
+of one paired cycle and requires the exact row, exact pin, and shared playhead.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

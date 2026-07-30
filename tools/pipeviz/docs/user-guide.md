@@ -55,7 +55,9 @@ hazard, and the grey `stall · …` cell names the held instruction (not
 necessarily the older instruction or memory request causing the hazard).
 Click a retired Trace row or timing cell to
 additionally pin the registers to that retirement; use Shift-click on a second
-timing row to measure the cycle distance. `F1` lists all shortcuts.
+timing row to measure the cycle distance. Trace-to-timing selection follows the
+retirement ID rather than only the cycle, so the exact U or V row remains
+selected when a pair commits together. `F1` lists all shortcuts.
 In a pinned register view, GPRs, EFLAGS, segment selectors, and x87 are the
 post-commit state. `PC*`, segment `base*`, and CR0/CR3/CR4 are starred because
 they are the pre-execution instruction/translation context used to find the

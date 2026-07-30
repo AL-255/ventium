@@ -146,8 +146,8 @@ Procedure:
 7. Enter an invalid reset address and require a visible warning without
    replacing the running backend.
 8. Toggle U/V mode and require **Apply + Reset**.
-9. Click a trace row and verify Registers becomes pinned and the timing
-   playhead follows.
+9. Click both U and V Trace rows from one paired retirement cycle; require each
+   exact timing row in turn, pinned Registers, and the shared-cycle playhead.
 10. Shift-click an earlier timing row and verify the delta anchor.
 11. Click previous/next event controls.
 12. Select Hotspots, activate its top row with Enter, and verify the trace
@@ -167,7 +167,8 @@ Observed evidence:
 - Pairing is effectively 100%; four mispredict event cycles are visible.
 - The live board renders U `dec ecx` and V `jne 0x0804800a`; it no longer
   decodes the JNE displacement byte as `std`.
-- Trace, timing selection, pinned registers, Hotspots, and PC navigation agree.
+- Trace, exact same-cycle U/V timing selection, pinned registers, Hotspots, and
+  PC navigation agree.
 - Invalid addresses are rejected before model replacement; filter navigation
   wraps deterministically; reload preserves reset configuration.
 

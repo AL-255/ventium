@@ -90,7 +90,8 @@ marks a gating dependency such as a load-use stall. Shift-click another row to
 place an amber anchor and measure the cycle delta. Use Up/Down, Page Up/Down,
 Home, and End while the diagram has focus to select exact retirements. The cycle
 zoom buttons (or Ctrl+- / Ctrl+=) trade context for cell detail without losing
-the selected cycle.</p>
+the selected cycle. Trace links use the retirement ID, so U and V remain
+individually selectable even when a pair commits in the same cycle.</p>
 <p>In pinned Registers, GPRs, flags, selectors, and x87 are post-commit.
 <b>PC*</b>, segment <b>base*</b>, and CR0/CR3/CR4 are starred because they are
 the retiring instruction's pre-execution translation context. Segment limits

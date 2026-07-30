@@ -889,7 +889,7 @@ class _KonataPlot(QWidget):
             return
         self.select_row(r)
 
-    def select_row(self, row):
+    def select_row(self, row, emit=True):
         if not self.insns:
             return
         row = max(0, min(int(row), len(self.insns) - 1))
@@ -898,14 +898,8 @@ class _KonataPlot(QWidget):
         self.sel_pc = selected["pc"]
         self.playhead = selected["c1"]
         self.update()
-        self.rowClicked.emit(int(selected["n"]))
-        # Trace's legacy cycle signal runs synchronously and can map a dual-retire
-        # cycle to its V row. Restore the exact retirement the user chose so an
-        # Up/Down move from V to U does not visually bounce straight back to V.
-        self.sel_row = row
-        self.sel_pc = selected["pc"]
-        self.playhead = selected["c1"]
-        self.update()
+        if emit:
+            self.rowClicked.emit(int(selected["n"]))
 
     def keyPressEvent(self, event):
         """Make the timing diagram usable without pixel-precise clicking."""
@@ -1257,6 +1251,29 @@ class Konata(QWidget):
         self.scroll.ensureVisible(self.plot._x(cyc), row * ROW_H + ROW_H // 2, 40, 60)
         self.plot.update(); self.gutter.update()
 
+    def select_n(self, n):
+        """Select one exact retirement.
+
+        A retire cycle is insufficient because U and V commonly commit in the
+        same cycle. Trace-originated navigation therefore resolves by the
+        architectural retirement ID and updates the timing row without
+        re-emitting the timing-to-Trace signal.
+        """
+        n = int(n)
+        row = next(
+            (index for index, insn in enumerate(self.plot.insns)
+             if int(insn["n"]) == n),
+            None)
+        if row is None:
+            return False
+        self.plot.select_row(row, emit=False)
+        selected = self.plot.insns[row]
+        self.scroll.ensureVisible(
+            self.plot._x(selected["c1"]),
+            row * ROW_H + ROW_H // 2, 40, 60)
+        self.gutter.update()
+        return True
+
     def clear_playhead(self):
         self.plot.playhead = None
         self.plot.anchor = None
@@ -1566,6 +1583,9 @@ class PipelineView(QWidget):
 
     def highlight_cycle(self, cyc):
         self.konata.highlight_cycle(cyc)
+
+    def select_n(self, n):
+        return self.konata.select_n(n)
 
     def clear_playhead(self):
         self.konata.clear_playhead()

@@ -901,6 +901,31 @@ def scenario_branch_transport(app, outdir):
         assert "104/105 outcomes resolved" in win.tables.br_lbl.text()
         assert len(win.pipeline.konata.plot.insns) == win.trace.tbl.rowCount()
 
+        # A retire cycle can contain both U and V. Clicking either Trace row
+        # must select that exact timing row, not whichever lane happened to be
+        # last in the cycle->row lookup.
+        plot = win.pipeline.konata.plot
+        paired_rows = next(
+            ((index - 1, index)
+             for index in range(1, len(plot.insns))
+             if (plot.insns[index - 1]["c1"] == plot.insns[index]["c1"]
+                 and {plot.insns[index - 1]["pipe"],
+                      plot.insns[index]["pipe"]} == {"U", "V"})),
+            None)
+        assert paired_rows is not None
+        trace_row_for_n = {
+            int(win.trace.tbl.item(row, 0).text()): row
+            for row in range(win.trace.tbl.rowCount())
+        }
+        pair_cycle = plot.insns[paired_rows[0]]["c1"]
+        for timing_row in paired_rows:
+            exact_n = plot.insns[timing_row]["n"]
+            select_table_row(app, win.trace.tbl, trace_row_for_n[exact_n])
+            assert plot.sel_row == timing_row
+            assert plot.insns[plot.sel_row]["n"] == exact_n
+            assert plot.playhead == pair_cycle
+            assert win._pinned_n == exact_n
+
         # Reload validates preserved setup before touching the running session.
         old_backend = win.backend
         old_retired = win.backend.retire_count()

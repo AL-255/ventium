@@ -725,8 +725,9 @@ class MainWindow(QMainWindow):
         self.c_source.assemblyGenerated.connect(self._accept_compiled_assembly)
         self.c_source.statusChanged.connect(self._authoring_notice)
         self.c_source.dirtyChanged.connect(self._c_dirty_changed)
-        # two-way link: trace row <-> Konata instruction row
-        self.trace.rowSelected.connect(self.pipeline.highlight_cycle)
+        # two-way link: trace row <-> exact Konata retirement. A cycle-only
+        # trace link is ambiguous whenever U and V retire together.
+        self.trace.instSelected.connect(self.pipeline.select_n)
         self.pipeline.konata.plot.rowClicked.connect(self.trace.select_n)
         # selecting an instruction (either side) PINS the register panel to its
         # post-commit architectural state + drops a playhead at its cycle.
