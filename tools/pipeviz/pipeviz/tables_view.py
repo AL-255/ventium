@@ -597,8 +597,10 @@ class TablesView(QWidget):
 
         # --- Hotspots (per-PC cycle-cost profile, perf/VTune-style) ---
         self.hot_lbl = QLabel()
-        self.hot = _mk_table(["PC", "hits", "Σ lat", "share", "D$ miss", "cost", "instruction"],
-                             [76, 50, 64, 50, 62, 120, 9999],
+        self.hot = _mk_table(
+            ["PC", "hits", "Σ lat", "share", "D$ miss/access", "Σlat bar",
+             "instruction"],
+                             [76, 50, 64, 50, 86, 100, 9999],
                              hint="no instructions retired yet — step the core")
         self.hot.setAccessibleName("Instruction hotspots")
         self.hot.horizontalHeaderItem(2).setToolTip(
@@ -606,10 +608,16 @@ class TablesView(QWidget):
             "a held instruction may be waiting on an older operation")
         self.hot.horizontalHeaderItem(3).setToolTip(
             "Share of all summed instruction latency (overlapping instructions count separately)")
+        self.hot.horizontalHeaderItem(4).setToolTip(
+            "Replay-estimated D-cache misses / explicit memory accesses "
+            "attributed to this instruction PC")
+        self.hot.horizontalHeaderItem(5).setToolTip(
+            "Visual bar normalized to the largest Σ latency among visible PCs")
         # field-colour the instruction column to match the trace / Konata gutter
         self.hot.setItemDelegateForColumn(6, InsnCellDelegate(_mono(), self.hot))
         _right_align_headers(self.hot, (1, 2, 3, 4))  # hits/cycles/cyc%/D$miss match data
-        _align_headers(self.hot, (5,), Qt.AlignLeft)  # 'cost' sits over its left-pinned bar
+        _align_headers(
+            self.hot, (5,), Qt.AlignLeft)  # caption sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
         self.tabs.setTabToolTip(
             4, "Per-PC summed latency and attributed D-cache misses")

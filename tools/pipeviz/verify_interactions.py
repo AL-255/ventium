@@ -1878,6 +1878,11 @@ def scenario_dcache_memory(app, outdir):
         assert "retired span 154/160 captured cycles" in win.tables.hot_lbl.text()
         assert "in-flight tail" in win.tables.hot_lbl.toolTip()
         assert win.tables.hot.horizontalHeaderItem(2).text() == "Σ lat"
+        assert win.tables.hot.horizontalHeaderItem(4).text() == "D$ miss/access"
+        assert win.tables.hot.horizontalHeaderItem(5).text() == "Σlat bar"
+        assert "misses / explicit memory accesses" in (
+            win.tables.hot.horizontalHeaderItem(4).toolTip())
+        assert "normalized" in win.tables.hot.horizontalHeaderItem(5).toolTip()
         assert all(
             win.tables.hot.item(row, 3).text().endswith("%")
             for row in range(win.tables.hot.rowCount()))

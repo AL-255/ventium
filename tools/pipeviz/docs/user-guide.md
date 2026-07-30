@@ -454,12 +454,14 @@ Use **Hotspots** after this drill-down to identify where latency accumulates,
 rather than merely observing that the global IPC fell. **Σ lat** is the sum of
 fetch-to-retire latency for every dynamic instruction at that PC. A held
 instruction can be waiting on an older operation, so compare it with **D$
-miss**, which identifies the memory PC that generated replayed misses. In-flight
+miss/access**, which identifies the memory PC that generated replayed misses. In-flight
 instructions overlap, so the instruction-cycle sum can be larger than the
 retired-lifecycle span printed beside it; **share** compares PCs within that
 summed latency, not against wall time. The header also shows that retired span
 against the full captured cycle window, so an in-flight tail is explicit rather
-than silently attributed to the last retirement.
+than silently attributed to the last retirement. The separate **Σlat bar** is
+normalized to the largest visible Σ-latency PC; it is not a
+D-cache miss-cost bar.
 
 ### 4. x87 throughput and architectural results
 

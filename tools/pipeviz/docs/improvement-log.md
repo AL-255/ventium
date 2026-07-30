@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Hotspot-header semantic audit:** adjacent “D$ miss” and generic “cost”
+headers visually read as “D$ miss cost,” even though the amber bar encoded
+normalized total instruction latency. The final self-defining headers now read
+“D$ miss/access” and “Σlat bar.” Header tooltips define both replayed
+attribution and normalization, and both indexed/in-repository guides explicitly
+separate latency from miss cost.
+
 **Mem-map point-legibility audit:** individual load/store marks were only 3×3
 pixels even in sparse, full-size plots, making their cyan/gold distinction
 unnecessarily difficult to discover. Captures up to 256 accesses now use 5×5

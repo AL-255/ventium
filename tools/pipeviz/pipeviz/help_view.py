@@ -304,8 +304,9 @@ Hotspots attributes fetch-to-retire latency and D-cache misses to PCs. Its
 because in-flight instructions overlap, this instruction-cycle total can exceed
 the retired-lifecycle span shown in the header. That span is printed against the
 full captured cycle window, exposing an in-flight tail. A held PC can be waiting
-on an older instruction, so use <b>D$ miss</b> to identify the memory PC
-producing replayed misses.</p>
+on an older instruction, so use <b>D$ miss/access</b> to identify the memory PC
+producing replayed misses; the separate <b>Σlat bar</b> is normalized to the
+largest Σ-latency PC and does not represent miss cost.</p>
 <p>Cycles classifies every captured clock once. <b>front end</b> combines fetch
 and decode; <b>slow path</b> combines integer execute, load/store, string, and
 I/O micro-operations. Its accessible description reports clocks and percentages
