@@ -30,6 +30,34 @@ instead of concatenating its segments into a bogus BIOS image.
 ELF32 fixtures exercise the loader. Full screenshot smoke remains environment
 dependent because this checkout has no PySide6 installation.
 
+## July 29 continuation — responsive and execution-loop ergonomics
+
+**Self-critique:** the toolbar-overflow fix still left the loaded window at a
+1446-pixel effective minimum because register and analysis content controlled
+the outer splitter. Program switching retained a stale Memory address and trace
+query. Filtering advertised a useful grammar but offered no result traversal,
+and reset-time fields/modes could diverge silently from the running backend.
+
+**Changes:** Registers now switch between three simultaneous columns and compact
+indexed Integer/Segments/x87 pages; 1280×800 is honored exactly. Wide columns
+use measured content widths, status text shrinks without losing its high-value
+metrics, and placeholder contrast is explicit. Trace filtering gains `/`,
+Enter/F3, Shift+F3, Escape, arrow buttons, wrapping, and zero-match feedback.
+New sessions clear stale queries and follow their own EIP in Memory. File exposes
+built examples and reload-from-disk while retaining reset setup. The ambiguous
+`cycle` switch is now **U/V issue**; setup edits mark **Apply + Reset**, malformed
+addresses are rejected before backend replacement, SoC/system stay coupled, and
+terminal runs disable only controls that can no longer advance. Visual/smoke
+scripts now resolve fixtures independently of the caller's working directory.
+Pinned and live x87 stacks also use an authoritative TOP-relative empty mask
+captured from the FPU state, so a legitimate +0.0 value is never labeled empty.
+
+**Verification:** the interaction harness covers true compact geometry,
+wide/compact category persistence, toolbar/tab overflow, filter keyboard
+navigation, invalid addresses, reload setup preservation, clean program
+switches, and terminal control state. The guide workloads and compiled
+dual-Fibonacci correctness/performance contract run under base Miniconda.
+
 ## Current UI (keep this in sync each iteration — critics read it)
 - **Pipeline panel** = (a) a small LIVE *stage board* snapshot on top (3 lanes
   U/V/FP × P5 stages, current clock only; the FP group collapses to a thin "FP
@@ -160,8 +188,12 @@ dependent because this checkout has no PySide6 installation.
   — no forced tab switch, so switching to Memory shows precisely what that load/store
   hit) — so an outlier or a stripe in the scatter is one click from its source row
   AND its memory.
-- **Trace panel**: search/filter box (`mov` / `pc:08048` / `cyc>=133` / `pipe:V` /
+- **Trace panel**: search/filter box (`mov` / exact-field `pc:08048` /
+  `n>=100` / `cyc>=133` / `pipe:V` /
   `stall` / **`@`** to isolate memory-accessing rows — the placeholder advertises it);
+  `/` focuses/selects the query, Enter/F3 and Shift+F3 wrap through visible
+  retirements, Escape clears it, arrow buttons expose the same traversal, and a
+  zero-match query gets red field/count feedback;
   columns n | cyc | Δ | pipe | PC | bytes |
   instruction | **effect** (Δ shows `+N` only on a stall gap — steady-state 0/1
   suppressed); the **effect column** shows what each retired instruction
@@ -202,10 +234,15 @@ dependent because this checkout has no PySide6 installation.
   unpins back to the live state. The x87 stack's ST-label column has a fixed min
   width so a populated row never butts the exponent against the label (`ST1 3fff`,
   not `ST13fff`) in any mode/state, and the empty-slot `·` marker renders in pinned
-  mode too — so the pinned stack matches the live layout exactly.
+  mode too — so the pinned stack matches the live layout exactly. When narrow, the
+  bank becomes indexed Integer/Segments/x87 pages; above it all three categories
+  share measured columns. The selected compact page survives width transitions.
 - **Status bar** (grouped, coloured): cyc · state/mode · ret/IPC/pair%/mispred ·
   I$/D$ occupancy/fills/walks · eip.
-- **Toolbar** (grouped file | config | transport, accented Run, + **event-jump**
+- **Toolbar** (responsive session | transport | status rows, explicit **U/V
+  issue**, validated reset addresses, **Apply + Reset** dirty-state affordance,
+  built-in examples/reload in File, reset-layout/toolbars in View, accented Run,
+  + **event-jump**
   ◀/▶ that move the Konata playhead to the prev/next pipeline event —
   mispredict/stall/I-fill/page-walk — for fast "jump to the action" navigation).
 - Backends: `ventium_top` (user + system) and `ventium_soc` (test386 etc.).

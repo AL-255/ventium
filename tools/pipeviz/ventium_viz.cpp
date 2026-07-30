@@ -194,7 +194,19 @@ extern "C" void vtm_retire_x87(
   if (!g_viz) return;
   vv_retire_t& r = g_viz->pend[n];
   r.x87_valid = 1;
-  r.fctrl = (uint16_t)fctrl; r.fstat = (uint16_t)fstat; r.ftag = (uint16_t)ftag;
+  r.fctrl = (uint16_t)fctrl; r.fstat = (uint16_t)fstat;
+  // The architectural retire port intentionally exports QEMU's abridged
+  // constant ftag=0. Pipeviz needs actual empty/non-empty slots so a legitimate
+  // +0.0 value is not mistaken for an empty stack entry. Capture the internal
+  // compressed tag bits and rotate physical registers into the same logical
+  // ST(0..7) order as the values passed below.
+  auto* R = g_viz->top->rootp;
+  uint8_t physical_tag = (uint8_t)FPU(fptag);
+  uint8_t top = (uint8_t)FPU(ftop);
+  uint8_t logical_tag = 0;
+  for (int i = 0; i < 8; ++i)
+    logical_tag |= ((physical_tag >> ((top + i) & 7)) & 1u) << i;
+  r.ftag = logical_tag;
   const unsigned long long lo[8] = {st0_lo,st1_lo,st2_lo,st3_lo,st4_lo,st5_lo,st6_lo,st7_lo};
   const unsigned short     hi[8] = {st0_hi,st1_hi,st2_hi,st3_hi,st4_hi,st5_hi,st6_hi,st7_hi};
   for (int i = 0; i < 8; ++i) {

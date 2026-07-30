@@ -3,9 +3,9 @@
 """Architectural register panel — GPRs, EFLAGS (decoded), segments, control
 registers, and the x87 stack (logical ST(0..7) with decoded floatx80 values)."""
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
-                               QLabel, QGroupBox)
+                               QLabel, QGroupBox, QTabWidget, QSizePolicy)
 from PySide6.QtGui import QFont
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 
 from .backend import GPR_NAMES, SEG_NAMES
 
@@ -48,12 +48,22 @@ def floatx80_to_float(b10: bytes):
 
 
 class RegsView(QWidget):
+    COMPACT_WIDTH = 744
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        root = QHBoxLayout(self); root.setContentsMargins(4, 4, 4, 4); root.setSpacing(8)
+        # The full three-column register bank needs roughly 740px.  Let the outer
+        # splitter shrink below that and switch to indexed pages rather than
+        # forcing the entire application wider or silently clipping x87 values.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(4, 4, 4, 4)
+        root.setSpacing(0)
 
         # --- integer column ---
-        col1 = QVBoxLayout(); root.addLayout(col1, 1)
+        self.int_pane = QWidget()
+        col1 = QVBoxLayout(self.int_pane)
+        col1.setContentsMargins(0, 0, 0, 0)
         gp = QGroupBox("Integer / flags")
         g = QGridLayout(gp); g.setSpacing(2)
         self.gpr_lbls = {}
@@ -77,9 +87,13 @@ class RegsView(QWidget):
         col1.addWidget(gp)
 
         # --- segment + control column ---
-        col2 = QVBoxLayout(); root.addLayout(col2, 1)
+        self.seg_pane = QWidget()
+        col2 = QVBoxLayout(self.seg_pane)
+        col2.setContentsMargins(0, 0, 0, 0)
         sg = QGroupBox("Segments")
-        g2 = QGridLayout(sg); g2.setSpacing(2)
+        g2 = QGridLayout(sg)
+        g2.setVerticalSpacing(2)
+        g2.setHorizontalSpacing(5)
         g2.addWidget(self._k("sel"), 0, 1); g2.addWidget(self._k("base"), 0, 2)
         g2.addWidget(self._k("limit"), 0, 3)
         self.seg_lbls = {}
@@ -105,7 +119,9 @@ class RegsView(QWidget):
         col2.addWidget(cr)
 
         # --- x87 column ---
-        col3 = QVBoxLayout(); root.addLayout(col3, 1)
+        self.fp_pane = QWidget()
+        col3 = QVBoxLayout(self.fp_pane)
+        col3.setContentsMargins(0, 0, 0, 0)
         fp = QGroupBox("x87 FPU")
         g4 = QGridLayout(fp); g4.setSpacing(2)
         self.fphdr = QLabel(""); self.fphdr.setFont(_mono(9))
@@ -136,6 +152,64 @@ class RegsView(QWidget):
         # stretching each register row to ~2x its text height (the "wasted gaps").
         for _c in (col1, col2, col3):
             _c.addStretch(1)
+
+        self._panes = (
+            (self.int_pane, "Integer", "General registers and decoded EFLAGS"),
+            (self.seg_pane, "Segments", "Segments, control registers, and CPU mode"),
+            (self.fp_pane, "x87", "Logical x87 stack, control, status, and tags"),
+        )
+        self._wide_host = QWidget()
+        self._wide_layout = QHBoxLayout(self._wide_host)
+        self._wide_layout.setContentsMargins(0, 0, 0, 0)
+        self._wide_layout.setSpacing(4)
+        self._compact_tabs = QTabWidget()
+        self._compact_tabs.setDocumentMode(True)
+        root.addWidget(self._wide_host)
+        root.addWidget(self._compact_tabs)
+        self._wide_host.hide()
+        self._compact = False
+        # Start compact: it gives QSplitter an honest small minimum before the
+        # final window width is known. resizeEvent promotes it when room exists.
+        self._set_compact(True)
+
+    def minimumSizeHint(self):
+        return QSize(340, 220)
+
+    def _set_compact(self, compact):
+        if compact == self._compact:
+            return
+        if compact:
+            self._wide_host.hide()
+            for pane, label, tip in self._panes:
+                self._wide_layout.removeWidget(pane)
+                self._compact_tabs.addTab(pane, label)
+                self._compact_tabs.setTabToolTip(
+                    self._compact_tabs.indexOf(pane), tip)
+            self._compact_tabs.setCurrentIndex(
+                min(getattr(self, "_compact_index", 0),
+                    self._compact_tabs.count() - 1))
+            self._compact_tabs.show()
+        else:
+            self._compact_index = max(0, self._compact_tabs.currentIndex())
+            self._compact_tabs.hide()
+            for pane, _label, _tip in self._panes:
+                idx = self._compact_tabs.indexOf(pane)
+                if idx >= 0:
+                    self._compact_tabs.removeTab(idx)
+                pane.setParent(self._wide_host)
+            # Equal stretch distributes any spare room; each pane's measured
+            # content hint still protects its labels at the wide-mode threshold.
+            for pane, _label, _tip in self._panes:
+                self._wide_layout.addWidget(pane, 1)
+                # Non-current QTabWidget pages are hidden; reparenting alone
+                # preserves that state, so explicitly reveal every wide column.
+                pane.show()
+            self._wide_host.show()
+        self._compact = compact
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._set_compact(event.size().width() < self.COMPACT_WIDTH)
 
     def _k(self, t):
         l = QLabel(t); l.setStyleSheet("color:#8b949e;"); l.setFont(_mono(9, True))
@@ -178,7 +252,12 @@ class RegsView(QWidget):
             f"{'SYS' if s.sys_mode else 'USER'}  CPL={s.cpl}"
             f"{'  SMM' if s.smm_active else ''}")
         # x87 — logical ST(i) = physical fpr[(ftop+i)&7]
-        self.fphdr.setText(f"TOP={s.ftop}  ctrl={s.fctrl:04x}  stat={s.fstat:04x}  tag={s.fptag:02x}")
+        logical_tag = sum(
+            ((s.fptag >> ((s.ftop + i) & 7)) & 1) << i
+            for i in range(8))
+        self.fphdr.setText(
+            f"TOP={s.ftop}  ctrl={s.fctrl:04x}  stat={s.fstat:04x}  "
+            f"empty={logical_tag:02x}")
         for i in range(8):
             phys = (s.ftop + i) & 7
             b10 = bytes(s.fpr[phys][k] for k in range(10))
@@ -229,10 +308,12 @@ class RegsView(QWidget):
         if rec.x87_valid:
             # tight single-space header (the "PINNED" banner already flags the
             # mode) so the 4-digit tag value never clips off the panel's right edge.
-            self.fphdr.setText(f"pin ctrl={rec.fctrl:04x} stat={rec.fstat:04x} tag={rec.ftag:04x}")
+            self.fphdr.setText(
+                f"pin ctrl={rec.fctrl:04x} stat={rec.fstat:04x} "
+                f"empty={rec.ftag & 0xff:02x}")
             for i in range(8):
                 b10 = bytes(rec.st[i][k] for k in range(10))   # logical ST(i) in the record
-                empty = (b10 == b"\x00" * 10)
+                empty = bool((rec.ftag >> i) & 1)
                 tag, hexv, val = self.st_lbls[i]
                 tag.setText(f"ST{i}" + ("·" if empty else ""))   # match the live empty marker
                 hexv.setText(_fmt80(b10[::-1].hex()))

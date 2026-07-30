@@ -101,6 +101,12 @@ def scenario_startup(app, outdir):
     win = new_window(app)
     try:
         assert "no image loaded" in win.status_lbl.text()
+        assert win.cyc_cb.text() == "U/V issue"
+        assert all(not widget.isEnabled() for widget in win._config_widgets)
+        win.soc_cb.setChecked(True)
+        assert win.sys_cb.isChecked()
+        win.sys_cb.setChecked(False)
+        assert not win.soc_cb.isChecked()
         for widget in (win.reset_btn, win.step1_btn, win.stepi_btn, win.stepn_btn,
                        win.run_btn, win.evprev_btn, win.evnext_btn):
             assert not widget.isEnabled(), f"{widget.text()} active before a program is loaded"
@@ -112,11 +118,19 @@ def scenario_startup(app, outdir):
             action.shortcut().toString()
             for action in [*win.actions(), *menu_actions]
         }
-        for expected in ("F5", "Ctrl+O", "Ctrl+Shift+O", "Ctrl+Q",
-                         "Ctrl+0", "R", "."):
+        for expected in ("F5", "Ctrl+O", "Ctrl+Shift+O", "Ctrl+Shift+R",
+                         "Ctrl+Q", "Ctrl+0", "R", "."):
             assert expected in shortcuts, f"missing global shortcut {expected}"
         file_actions = {action.text() for action in win._file_menu.actions()}
-        assert {"Open program…", "Open snapshot…", "Quit"} <= file_actions
+        assert {"Open program…", "Open snapshot…", "Reload program from disk",
+                "Open example", "Quit"} <= file_actions
+        assert not win.reload_action.isEnabled()
+        enabled_examples = {
+            action.text() for action in win._examples_menu.actions()
+            if action.isEnabled()
+        }
+        assert {"Dual issue and branches", "D-cache pressure",
+                "x87 overlap"} <= enabled_examples
         view_actions = {action.text() for action in win._view_menu.actions()}
         assert {"Reset panel layout", "Show session toolbar",
                 "Show transport toolbar", "Show status toolbar"} <= view_actions
@@ -128,7 +142,14 @@ def scenario_startup(app, outdir):
         QTest.keyClick(win, Qt.Key_F1)
         settle(app)
         assert win._guide_dialog is not None and win._guide_dialog.isVisible()
-        assert win._guide_dialog.index.count() >= 6
+        assert win._guide_dialog.index.count() >= 7
+        loading_row = next(i for i in range(win._guide_dialog.index.count())
+                           if win._guide_dialog.index.item(i).text()
+                           == "Loading programs")
+        win._guide_dialog.index.setCurrentRow(loading_row)
+        settle(app)
+        assert "PT_LOAD" in win._guide_dialog.page.toPlainText()
+        assert "Ctrl+Shift+R" in win._guide_dialog.page.toPlainText()
         pipeline_row = next(i for i in range(win._guide_dialog.index.count())
                             if win._guide_dialog.index.item(i).text()
                             == "Reading the Pipeline View")
@@ -139,7 +160,16 @@ def scenario_startup(app, outdir):
         assert win._guide_dialog.grab().save(guide_shot)
         win._guide_dialog.close()
         save_shot(app, win, outdir, "00_startup")
-        print("OK startup/help: disabled transport, shortcuts, indexed Pipeline guide")
+        branch_example = next(
+            action for action in win._examples_menu.actions()
+            if action.text() == "Dual issue and branches")
+        branch_example.trigger()
+        settle(app)
+        assert win.image_path and "mb_brloop" in os.path.basename(win.image_path)
+        assert win.reload_action.isEnabled() and win.step1_btn.isEnabled()
+        assert all(widget.isEnabled() for widget in win._config_widgets)
+        print("OK startup/help/load: disabled transport, shortcuts, indexed "
+              "Pipeline guide, built-in example")
     finally:
         close_window(win)
 
@@ -152,6 +182,37 @@ def scenario_branch_transport(app, outdir):
         assert win.image_kind == "flat image" and win._has_session()
         assert win.step1_btn.isEnabled() and not win.sys_cb.isChecked()
 
+        # Bad reset addresses are rejected visibly before replacing the backend.
+        old_backend = win.backend
+        invalid_seen = []
+
+        def dismiss_invalid():
+            for widget in app.topLevelWidgets():
+                if isinstance(widget, QMessageBox):
+                    invalid_seen.append(widget.windowTitle())
+                    widget.accept()
+
+        invalid_timer = QTimer()
+        invalid_timer.timeout.connect(dismiss_invalid)
+        invalid_timer.start(5)
+        win.entry_e.setText("not-hex")
+        win.on_reset()
+        invalid_timer.stop()
+        settle(app)
+        assert invalid_seen == ["Invalid address"]
+        assert win.backend is old_backend
+        assert "#f85149" in win.entry_e.styleSheet()
+        win.entry_e.setText("0x08048000")
+        win.on_reset()
+        assert not win.entry_e.styleSheet()
+        win.cyc_cb.setChecked(False)
+        assert "Apply + Reset" in win.reset_btn.text()
+        assert "#e3b341" in win.reset_btn.styleSheet()
+        win.cyc_cb.setChecked(True)
+        win.on_reset()
+        assert win.reset_btn.text().strip() == "Reset"
+        assert not win.reset_btn.styleSheet()
+
         c0 = win.backend.state().core_cyc
         click(app, win.step1_btn)
         assert win.backend.state().core_cyc == c0 + 1
@@ -159,6 +220,13 @@ def scenario_branch_transport(app, outdir):
         click(app, win.stepi_btn)
         assert win.backend.retire_count() > r0
 
+        assert win.reload_action.isEnabled()
+        win.esp_e.setText("0x40c34000")
+        win.reload_action.trigger()
+        settle(app)
+        assert win.backend.retire_count() == 0
+        assert win.esp_e.text() == "0x40c34000"
+        assert win.backend.state().gpr[4] == 0x40c34000
         click(app, win.reset_btn)
         assert win.backend.retire_count() == 0
         win.stepn.setValue(120)
@@ -173,7 +241,51 @@ def scenario_branch_transport(app, outdir):
         visible_v = set_filter(app, win.trace, "pipe:V")
         assert 50 <= visible_v < win.trace.tbl.rowCount()
         assert f"{visible_v}/{win.trace.tbl.rowCount()} match" == win.trace.match_lbl.text()
-        set_filter(app, win.trace, "")
+        assert win.trace.prev_match_btn.isVisible()
+        assert win.trace.next_match_btn.isVisible()
+        QTest.keyClick(win.trace.filt, Qt.Key_Return)
+        settle(app)
+        first_match = win.trace.tbl.currentRow()
+        assert first_match >= 0
+        assert win.trace.tbl.item(first_match, 3).text() == "V"
+        QTest.keyClick(win.trace.filt, Qt.Key_F3)
+        settle(app)
+        second_match = win.trace.tbl.currentRow()
+        assert second_match > first_match
+        assert win.trace.tbl.item(second_match, 3).text() == "V"
+        QTest.keyClick(win.trace.filt, Qt.Key_F3, Qt.ShiftModifier)
+        settle(app)
+        assert win.trace.tbl.currentRow() == first_match
+        pc_matches = set_filter(app, win.trace, "pc:0804800a")
+        assert pc_matches > 50
+        assert all(
+            win.trace.tbl.isRowHidden(row)
+            or win.trace.tbl.item(row, 4).text() == "0804800a"
+            for row in range(win.trace.tbl.rowCount())
+        )
+        n_matches = set_filter(app, win.trace, "n>=200")
+        assert n_matches == 12
+        assert all(
+            win.trace.tbl.isRowHidden(row)
+            or int(win.trace.tbl.item(row, 0).text()) >= 200
+            for row in range(win.trace.tbl.rowCount())
+        )
+        set_filter(app, win.trace, "not-a-real-retirement")
+        assert not win.trace.next_match_btn.isEnabled()
+        assert "#f85149" in win.trace.filt.styleSheet()
+        QTest.keyClick(win.trace.filt, Qt.Key_Escape)
+        settle(app)
+        assert not win.trace.filt.text()
+        assert not win.trace.next_match_btn.isVisible()
+        win.trace.filt.setText("mov")
+        win.trace.tbl.setFocus()
+        QTest.keyClick(win.trace.tbl, Qt.Key_Slash)
+        settle(app)
+        # Offscreen Qt does not reactivate a parent window after a modal closes,
+        # so focusWidget() is unreliable here; selectAll proves the slash handler
+        # reached the editor and is exactly what a visible session presents.
+        assert win.trace.filt.selectedText() == "mov"
+        win.trace.filt.clear()
 
         row = win.trace.tbl.rowCount() - 5
         select_table_row(app, win.trace.tbl, row)
@@ -196,10 +308,13 @@ def scenario_branch_transport(app, outdir):
         click(app, win.evnext_btn)
         assert plot.playhead is not None
 
+        set_filter(app, win.trace, "no-visible-hotspot-row")
         select_tab(app, win.tables.tabs, 4)
         select_table_row(app, win.tables.hot, 0)
         selected_pc = int(win.tables.hot.item(0, 0).text(), 16)
         assert int(win.trace.tbl.item(win.trace.tbl.currentRow(), 4).text(), 16) == selected_pc
+        assert not win.trace.filt.text()
+        assert win.trace.tbl.currentRow() >= win.trace.tbl.rowCount() - 10
 
         click(app, win.reset_btn)
         win.speed.setValue(8)
@@ -236,9 +351,16 @@ def scenario_dcache_memory(app, outdir):
         assert "miss" in win.tables.dc_lbl.text().lower()
 
         select_tab(app, win.tables.tabs, 8)
+        old_addr = win.tables.mem.addr
+        win.tables.mem.addr_e.setText("not-hex")
+        win.tables.mem._go()
+        assert win.tables.mem.addr == old_addr
+        assert "#f85149" in win.tables.mem.addr_e.styleSheet()
+        assert "invalid" in win.tables.mem.follow_lbl.text()
         access_button = next(b for b in win.tables.mem.findChildren(QPushButton)
                              if b.text() == "→access")
         click(app, access_button)
+        assert not win.tables.mem.addr_e.styleSheet()
         assert win.tables.mem.follow == "access"
         assert win.tables.mem.addr == (win.trace.last_access[0] & 0xfffffff0)
         assert "following ACCESS" in win.tables.mem.follow_lbl.text()
@@ -268,13 +390,25 @@ def scenario_x87(app, outdir):
         win.load_image(repo_path("build/verify/mb_fpindep.cycle.flat"))
         win.stepn.setValue(420)
         click(app, win.stepn_btn)
+        fp_state = win.backend.state()
+        logical_empty = sum(
+            ((fp_state.fptag >> ((fp_state.ftop + i) & 7)) & 1) << i
+            for i in range(8))
+        assert f"empty={logical_empty:02x}" in win.regs.fphdr.text()
         fp_rows = [r for r in range(win.trace.tbl.rowCount())
                    if win.trace.tbl.item(r, 6).text().lower().startswith("f")]
         assert len(fp_rows) >= 80
         select_table_row(app, win.trace.tbl, fp_rows[-4])
-        assert win._pinned_n == int(win.trace.tbl.item(fp_rows[-4], 0).text())
+        chosen_n = int(win.trace.tbl.item(fp_rows[-4], 0).text())
+        assert win._pinned_n == chosen_n
         assert "PINNED" in win.regs.mode_lbl.text()
         assert win.regs.fphdr.text().startswith("pin ctrl=")
+        chosen_rec = next(
+            rec for rec in win.backend.get_retires(chosen_n, 1)
+            if rec.n == chosen_n)
+        assert f"empty={chosen_rec.ftag & 0xff:02x}" in win.regs.fphdr.text()
+        assert all(tag.text().endswith("·") == bool((chosen_rec.ftag >> i) & 1)
+                   for i, (tag, _hexv, _value) in enumerate(win.regs.st_lbls))
         assert any(ins["mnem"].lower().startswith("f")
                    for ins in win.pipeline.konata.plot.insns)
 
@@ -340,13 +474,20 @@ def scenario_system_and_switch(app, outdir):
         save_shot(app, win, outdir, "06_system_paging")
 
         # Switching workload classes must discard all system/memory/transient state.
+        assert set_filter(app, win.trace, "mov") > 0
+        win.tables.mem.follow = None
+        win.tables.mem.addr = 0xDEADBEE0
+        win.tables.mem._refresh()
         win.load_image(repo_path("build/verify/mb_brloop.cycle.flat"))
         settle(app)
         assert not win.sys_cb.isChecked() and not win.soc_cb.isChecked()
         assert not win.backend.state().sys_mode
         assert win.trace.tbl.rowCount() == 0
+        assert not win.trace.filt.text() and not win.trace._tokens
         assert win.trace.accesses == [] and win.tables.mem._click_hl is None
-        print("OK system/switch: real-mode placement, SYS state, clean user-mode reload")
+        assert win.tables.mem.follow == "eip"
+        assert win.tables.mem.addr == (win.backend.state().eip & 0xFFFFFFF0)
+        print("OK system/switch: real-mode placement, clean filter/memory user-mode reload")
     finally:
         close_window(win)
 
@@ -386,6 +527,25 @@ def scenario_layout(app, outdir):
         win.do_step(160, False)
         win.resize(1280, 800)
         settle(app, 8)
+        assert win.width() == 1280, (
+            f"compact request expanded to {win.width()}px")
+        assert win.minimumSizeHint().width() <= 1280
+        assert win.regs._compact and win.regs._compact_tabs.count() == 3
+        assert [win.regs._compact_tabs.tabText(i) for i in range(3)] == [
+            "Integer", "Segments", "x87"]
+        # A selected compact category survives a wide/compact transition.
+        win.regs._compact_tabs.setCurrentIndex(2)
+        win.resize(1640, 800)
+        settle(app, 6)
+        assert not win.regs._compact
+        assert all(pane.isVisible() for pane, _label, _tip in win.regs._panes)
+        assert win.regs.flags_lbl.width() >= win.regs.flags_lbl.sizeHint().width()
+        assert all(hexv.width() >= hexv.sizeHint().width()
+                   for _tag, hexv, _val in win.regs.st_lbls)
+        win.resize(1280, 800)
+        settle(app, 6)
+        assert win.width() == 1280 and win.regs._compact
+        assert win.regs._compact_tabs.currentIndex() == 2
         for toolbar in win.findChildren(QToolBar):
             overflow = toolbar.findChild(QToolButton, "qt_toolbar_ext_button")
             assert overflow is None or not overflow.isVisible(), (
@@ -401,9 +561,12 @@ def scenario_layout(app, outdir):
             assert panel.width() >= 300 and panel.height() >= 180
         assert win.trace.width() >= 690, (
             f"compact layout collapsed the trace to {win.trace.width()}px")
+        assert win.tables.width() >= 570
+        assert win.status_lbl.width() >= 900 and "IPC" in win.status_lbl.text()
         assert win.trace.tbl.verticalHeader().defaultSectionSize() == 22
         save_shot(app, win, outdir, "08_compact_layout")
-        print(f"OK layout: effective compact window={win.width()}x{win.height()}, all panels in bounds")
+        print(f"OK layout: true compact window={win.width()}x{win.height()}, "
+              "responsive register tabs, all panels in bounds")
     finally:
         close_window(win)
 
@@ -443,6 +606,13 @@ def scenario_fibonacci_uv(app, outdir):
             win.stepn.setValue(5000)
             click(app, win.stepn_btn)
             assert win.backend.is_done()
+            assert win.reset_btn.isEnabled()
+            assert not win.step1_btn.isEnabled() and not win.run_btn.isEnabled()
+            assert win.evprev_btn.isEnabled() and win.evnext_btn.isEnabled()
+            # The global F5 shortcut remains addressable even while its toolbar
+            # button is disabled; it must not restart a terminal session.
+            win.on_run_toggle()
+            assert not win._running and not win.timer.isActive()
             state = win.backend.state()
             stats = win.pipeline.waterfall.stats()
             retired = win.backend.retire_count()

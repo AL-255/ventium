@@ -13,9 +13,10 @@ import struct
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QToolBar, QLabel,
                                QLineEdit, QPushButton, QCheckBox, QSpinBox, QSplitter,
-                               QFileDialog, QMessageBox, QStyle)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QShortcut
-from PySide6.QtCore import Qt, QTimer
+                               QFileDialog, QMessageBox, QStyle, QSizePolicy)
+from PySide6.QtGui import (QAction, QFont, QPalette, QColor, QKeySequence,
+                           QShortcut, QRegularExpressionValidator)
+from PySide6.QtCore import Qt, QTimer, QRegularExpression
 
 from .backend import Backend
 from .pipeline_view import PipelineView
@@ -26,6 +27,22 @@ from .help_view import UserGuideDialog
 
 DEF_ENTRY = 0x08048000
 DEF_ESP = 0x40c34910
+_TOOL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = os.path.dirname(os.path.dirname(_TOOL_DIR))
+_EXAMPLES = (
+    ("Dual issue and branches",
+     ("build/m2/mb_brloop.flat", "build/verify/mb_brloop.cycle.flat")),
+    ("D-cache pressure",
+     ("build/m2/mb_dmiss.flat", "build/verify/mb_dmiss.cycle.flat")),
+    ("x87 overlap",
+     ("build/m2/mb_fpindep.flat", "build/verify/mb_fpindep.cycle.flat")),
+    ("System paging", ("verif/sys/tests/ppage/ppage.bin",)),
+)
+
+
+def _first_repo_file(candidates):
+    return next((os.path.join(_REPO_ROOT, relative) for relative in candidates
+                 if os.path.isfile(os.path.join(_REPO_ROOT, relative))), None)
 
 
 def _read_program(path):
@@ -103,6 +120,7 @@ def _apply_dark(app):
     p.setColor(QPalette.ButtonText, QColor("#c9d1d9"))
     p.setColor(QPalette.Highlight, QColor("#1f6feb"))
     p.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    p.setColor(QPalette.PlaceholderText, QColor("#6e7681"))
     p.setColor(QPalette.ToolTipBase, QColor("#161b22"))
     p.setColor(QPalette.ToolTipText, QColor("#c9d1d9"))
     app.setPalette(p)
@@ -126,15 +144,22 @@ def _apply_dark(app):
 def _hex_edit(val, width=92):
     e = QLineEdit(f"0x{val:08x}")
     e.setFixedWidth(width)
+    e.setValidator(QRegularExpressionValidator(
+        QRegularExpression(r"0[xX][0-9a-fA-F]{1,8}"), e))
     f = QFont("monospace"); f.setStyleHint(QFont.Monospace); e.setFont(f)
     return e
 
 
-def _parse_hex(e, default):
+def _parse_hex(e):
     try:
-        return int(e.text(), 0) & 0xFFFFFFFF
+        value = int(e.text(), 0)
+        if not 0 <= value <= 0xFFFFFFFF:
+            raise ValueError
+        e.setStyleSheet("")
+        return value
     except ValueError:
-        return default
+        e.setStyleSheet("border:1px solid #f85149;")
+        return None
 
 
 class MainWindow(QMainWindow):
@@ -149,6 +174,9 @@ class MainWindow(QMainWindow):
         self.image_segments = []
         self.image_kind = None
         self.snapshot_prefix = None
+        verify_dir = os.path.join(_REPO_ROOT, "build", "verify")
+        self._last_program_dir = verify_dir if os.path.isdir(verify_dir) else os.getcwd()
+        self._last_snapshot_dir = os.getcwd()
         self.setAcceptDrops(True)
 
         self._build_toolbar()
@@ -162,6 +190,8 @@ class MainWindow(QMainWindow):
         self.notice_timer.timeout.connect(lambda: self.action_hint.setText(""))
         self._running = False
         self._set_transport_enabled(False)
+        for widget in self._config_widgets:
+            widget.setEnabled(False)
         self._refresh_status()
 
     def _build_menus(self):
@@ -174,6 +204,26 @@ class MainWindow(QMainWindow):
         snapshot_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
         snapshot_action.triggered.connect(self.on_open_snapshot)
         file_menu.addAction(snapshot_action)
+        self.reload_action = QAction("Reload program from disk", self)
+        self.reload_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        self.reload_action.setToolTip(
+            "Re-read the current program after rebuilding it")
+        self.reload_action.triggered.connect(self.reload_program)
+        self.reload_action.setEnabled(False)
+        file_menu.addAction(self.reload_action)
+        examples_menu = file_menu.addMenu("Open example")
+        for label, candidates in _EXAMPLES:
+            path = _first_repo_file(candidates)
+            action = QAction(label, self)
+            action.setToolTip(
+                os.path.relpath(path, _REPO_ROOT) if path else
+                "Not built; expected " + " or ".join(candidates))
+            action.setEnabled(path is not None)
+            action.triggered.connect(
+                lambda _checked=False, example_path=path:
+                self.load_image(example_path))
+            examples_menu.addAction(action)
+        self._examples_menu = examples_menu
         file_menu.addSeparator()
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence("Ctrl+Q"))
@@ -208,7 +258,7 @@ class MainWindow(QMainWindow):
         self._guide_dialog = None
 
     def _reset_layout(self):
-        self.outer_split.setSizes([900, 740])
+        self.outer_split.setSizes([880, 760])
         self.left_split.setSizes([500, 470])
         self.right_split.setSizes([600, 300])
         self._notice("Panel layout reset")
@@ -241,22 +291,45 @@ class MainWindow(QMainWindow):
         tb.addWidget(snapbtn)
 
         tb.addWidget(QLabel("  entry "))
-        self.entry_e = _hex_edit(DEF_ENTRY); tb.addWidget(self.entry_e)
+        self.entry_e = _hex_edit(DEF_ENTRY)
+        self.entry_e.setToolTip(
+            "Initial instruction pointer (32-bit hex; applies on Reset)")
+        tb.addWidget(self.entry_e)
         tb.addWidget(QLabel(" load "))
-        self.load_e = _hex_edit(DEF_ENTRY); tb.addWidget(self.load_e)
+        self.load_e = _hex_edit(DEF_ENTRY)
+        self.load_e.setToolTip(
+            "Flat-image load address (32-bit hex; applies on Reset)")
+        tb.addWidget(self.load_e)
         tb.addWidget(QLabel(" esp "))
-        self.esp_e = _hex_edit(DEF_ESP); tb.addWidget(self.esp_e)
+        self.esp_e = _hex_edit(DEF_ESP)
+        self.esp_e.setToolTip(
+            "Initial stack pointer (32-bit hex; applies on Reset)")
+        tb.addWidget(self.esp_e)
         tb.addSeparator()   # file/load | config
 
-        self.cyc_cb = QCheckBox("cycle"); self.cyc_cb.setChecked(True)
-        self.cyc_cb.setToolTip("Cycle mode: show both integer issue lanes (dual issue)")
+        self.cyc_cb = QCheckBox("U/V issue"); self.cyc_cb.setChecked(True)
+        self.cyc_cb.setToolTip(
+            "Enable Pentium-style U/V dual issue (applies on Reset); "
+            "untick to compare single issue")
         tb.addWidget(self.cyc_cb)
-        self.sys_cb = QCheckBox("system"); tb.addWidget(self.sys_cb)
+        self.sys_cb = QCheckBox("system")
+        self.sys_cb.setToolTip(
+            "Boot a raw BIOS image at F000:FFF0 (applies on Reset)")
+        tb.addWidget(self.sys_cb)
         self.soc_cb = QCheckBox("SoC")
         self.soc_cb.setToolTip("Run the full ventium_soc (internal port-I/O / PIC / "
                                "PIT) — needed for bare-metal images like test386. "
-                               "Requires build.sh --soc.")
+                               "Requires build.sh --soc; applies on Reset.")
         tb.addWidget(self.soc_cb)
+        self._config_widgets = (
+            self.entry_e, self.load_e, self.esp_e,
+            self.cyc_cb, self.sys_cb, self.soc_cb,
+        )
+        for edit in (self.entry_e, self.load_e, self.esp_e):
+            edit.textEdited.connect(self._mark_reset_required)
+        self.cyc_cb.toggled.connect(self._mark_reset_required)
+        self.sys_cb.toggled.connect(self._system_toggled)
+        self.soc_cb.toggled.connect(self._soc_toggled)
 
         # Transport gets its own row. Keeping file/config and execution controls
         # separate avoids QToolBar's overflow chevron on 1280px displays.
@@ -321,9 +394,15 @@ class MainWindow(QMainWindow):
         sb = QToolBar("status"); sb.setMovable(False); self.addToolBar(sb)
         self.status_toolbar = sb
         self.status_lbl = QLabel("  no image loaded  ")
+        # Let the status consume the row's spare width while retaining the
+        # high-value left-hand metrics. QToolBar can shrink this below its rich
+        # text hint, so it no longer forces the whole window wider.
+        self.status_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.status_lbl.setMinimumWidth(600)
         f = QFont("monospace"); f.setStyleHint(QFont.Monospace); self.status_lbl.setFont(f)
         sb.addWidget(self.status_lbl)
         self.action_hint = QLabel("")
+        self.action_hint.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         self.action_hint.setStyleSheet("color:#8b949e;padding-left:12px;")
         sb.addWidget(self.action_hint)
 
@@ -338,12 +417,39 @@ class MainWindow(QMainWindow):
     def _has_session(self):
         return self.image_bytes is not None or self.snapshot_prefix is not None
 
+    def _mark_reset_required(self, *_args):
+        if not self._has_session() or self.snapshot_prefix:
+            return
+        self.reset_btn.setText(" Apply + Reset")
+        self.reset_btn.setStyleSheet("border:1px solid #e3b341;")
+        self.reset_btn.setToolTip(
+            "Apply changed addresses/mode on a fresh model (R)")
+        self._notice("Setup changed — Reset to apply")
+
+    def _soc_toggled(self, checked):
+        if checked and not self.sys_cb.isChecked():
+            self.sys_cb.setChecked(True)
+        self._mark_reset_required()
+
+    def _system_toggled(self, checked):
+        if not checked and self.soc_cb.isChecked():
+            self.soc_cb.setChecked(False)
+        self._mark_reset_required()
+
+    def _clear_reset_required(self):
+        self.reset_btn.setText(" Reset")
+        self.reset_btn.setStyleSheet("")
+        self.reset_btn.setToolTip("Re-cold-reset the loaded program on a fresh model (R)")
+
     def _set_transport_enabled(self, enabled):
         """Keep controls honest: a fresh window cannot accidentally look runnable."""
-        for w in (self.reset_btn, self.step1_btn, self.stepi_btn, self.stepn,
-                  self.stepn_btn, self.run_btn, self.speed,
-                  self.evprev_btn, self.evnext_btn):
+        self.reset_btn.setEnabled(enabled)
+        for w in (self.evprev_btn, self.evnext_btn):
             w.setEnabled(enabled)
+        runnable = enabled and not self.backend.is_done()
+        for w in (self.step1_btn, self.stepi_btn, self.stepn,
+                  self.stepn_btn, self.run_btn, self.speed):
+            w.setEnabled(runnable)
 
     def _notice(self, text, ms=3500):
         self.action_hint.setText(text)
@@ -368,6 +474,11 @@ class MainWindow(QMainWindow):
         self.right_split = right
         self.tables = TablesView()
         self.regs = RegsView()
+        # Tables can scroll and the register bank becomes tabbed when its three
+        # complete columns no longer fit.
+        # Ignore their wide content hints so the outer splitter can truly honor
+        # a 1280px application window.
+        self.tables.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         right.addWidget(self.tables)
         right.addWidget(self.regs)
         # give the register/FPU panel real vertical room (was a crammed 25% bottom
@@ -383,7 +494,7 @@ class MainWindow(QMainWindow):
         # all the way to its minimum while preserving excess width on the right.
         # An explicit 55:45 starting allocation keeps trace operands/effects
         # readable and also gives the ten analysis tabs enough room at 1640px.
-        outer.setSizes([900, 740])
+        outer.setSizes([880, 760])
         for sp in (outer, left, right):
             sp.setHandleWidth(4)
         self.setCentralWidget(outer)
@@ -414,16 +525,28 @@ class MainWindow(QMainWindow):
 
     # ---- image loading ----
     def on_open(self):
-        start = os.path.join(os.getcwd(), "build")
-        if not os.path.isdir(start):
-            start = os.getcwd()
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open flat image", start,
+            self, "Open program", self._last_program_dir,
             "Programs (*.flat *.bin *.img *.elf *.exe);;All files (*)")
         if path:
             self.load_image(path)
 
-    def load_image(self, path):
+    def reload_program(self):
+        if self.image_path:
+            self.load_image(self.image_path, preserve_setup=True)
+
+    def load_image(self, path, preserve_setup=False):
+        setup = None
+        if preserve_setup:
+            setup = {
+                "kind": self.image_kind,
+                "entry": self.entry_e.text(),
+                "load": self.load_e.text(),
+                "esp": self.esp_e.text(),
+                "cycle": self.cyc_cb.isChecked(),
+                "system": self.sys_cb.isChecked(),
+                "soc": self.soc_cb.isChecked(),
+            }
         try:
             segments, entry, kind = _read_program(path)
             data = b"".join(chunk for _, chunk in segments)
@@ -450,8 +573,11 @@ class MainWindow(QMainWindow):
         self.image_segments = segments
         self.image_kind = kind
         self.snapshot_prefix = None
-        self.reset_btn.setText(" Reset")
-        self.reset_btn.setToolTip("Re-cold-reset the loaded program on a fresh model")
+        self._last_program_dir = os.path.dirname(os.path.abspath(path))
+        self.reload_action.setEnabled(True)
+        for widget in self._config_widgets:
+            widget.setEnabled(True)
+        self._clear_reset_required()
         # heuristic: bare-metal/system images (.bin under sys/, ~64 KiB) boot in
         # system mode (real-mode reset at F000:FFF0). Auto-tick `system` so they
         # "just work"; the user can override.
@@ -464,13 +590,30 @@ class MainWindow(QMainWindow):
         self.soc_cb.setChecked(looks_soc)
         self.entry_e.setText(f"0x{entry:08x}")
         self.load_e.setText(f"0x{load:08x}")
+        if setup is not None:
+            # Reload is the edit/compile/debug loop: retain the user's reset
+            # configuration while re-reading bytes and ELF segments from disk.
+            if setup["kind"] == kind:
+                self.entry_e.setText(setup["entry"])
+                if kind == "flat image":
+                    self.load_e.setText(setup["load"])
+            self.esp_e.setText(setup["esp"])
+            self.cyc_cb.setChecked(setup["cycle"])
+            self.sys_cb.setChecked(setup["system"])
+            self.soc_cb.setChecked(setup["soc"])
+        for field in (self.entry_e, self.load_e, self.esp_e):
+            field.setStyleSheet("")
         is_flat = kind == "flat image"
         self.load_e.setEnabled(is_flat)
         self.load_e.setToolTip("Load address for a flat image" if is_flat else
                                "ELF segment addresses come from its PT_LOAD headers")
         self.setWindowTitle(f"Ventium pipeline visualizer — {os.path.basename(path)} ({kind})")
+        self.trace.start_session()
+        self.tables.mem.start_session()
         self.on_reset()
-        self._notice(f"Loaded {kind}: {os.path.basename(path)}")
+        self._notice(
+            f"{'Reloaded' if preserve_setup else 'Loaded'} {kind}: "
+            f"{os.path.basename(path)}")
 
     def dragEnterEvent(self, event):
         urls = event.mimeData().urls()
@@ -487,10 +630,16 @@ class MainWindow(QMainWindow):
                 self.load_image(path)
             event.acceptProposedAction()
 
+    def closeEvent(self, event):
+        # Closing while Run is active must not leave a timer dispatching into a
+        # destroyed Verilator handle during Qt's deferred teardown.
+        self.stop_run()
+        self.backend.close()
+        super().closeEvent(event)
+
     def on_open_snapshot(self):
-        start = os.getcwd()
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open host snapshot", start,
+            self, "Open host snapshot", self._last_snapshot_dir,
             "Ventium snapshots (*.aux *.vlt);;All files (*)")
         if path:
             self.load_snapshot(path)
@@ -521,10 +670,15 @@ class MainWindow(QMainWindow):
         self.image_segments = []
         self.image_kind = "snapshot"
         self.snapshot_prefix = prefix
+        self._last_snapshot_dir = os.path.dirname(os.path.abspath(prefix))
+        self.reload_action.setEnabled(False)
         self.sys_cb.setChecked(False)
         self.soc_cb.setChecked(False)
         self.reset_btn.setText(" Restore snapshot")
         self.reset_btn.setToolTip("Discard continued execution and restore this snapshot again")
+        self.reset_btn.setStyleSheet("")
+        for widget in self._config_widgets:
+            widget.setEnabled(False)
         self.setWindowTitle(f"Ventium pipeline visualizer — snapshot {os.path.basename(prefix)}")
         s = self.backend.state()
         bits = 32 if s.cs_d else 16
@@ -532,8 +686,9 @@ class MainWindow(QMainWindow):
             if hasattr(v, "set_bits"):
                 v.set_bits(bits)
         self.pipeline.reset(self.backend)
+        self.trace.start_session()
         self.trace.reset()
-        self.tables.mem.reset()
+        self.tables.mem.start_session()
         self._unpin()
         self._refresh_all()
         self._set_transport_enabled(True)
@@ -575,6 +730,26 @@ class MainWindow(QMainWindow):
                                 "System/SoC boot expects a raw BIOS image. Untick system "
                                 "and SoC to run this ELF at its entry point.")
             return
+        entry = esp = load = None
+        if not system:
+            entry = _parse_hex(self.entry_e)
+            esp = _parse_hex(self.esp_e)
+            if self.image_kind == "flat image":
+                load = _parse_hex(self.load_e)
+            invalid = next((
+                (widget, label) for widget, label, value in (
+                    (self.entry_e, "entry", entry),
+                    (self.load_e, "load", load if self.image_kind == "flat image" else 0),
+                    (self.esp_e, "esp", esp),
+                ) if value is None), None)
+            if invalid is not None:
+                widget, label = invalid
+                widget.setFocus()
+                QMessageBox.warning(
+                    self, "Invalid address",
+                    f"{label} must be a 32-bit hexadecimal address "
+                    "(for example 0x08048000).")
+                return
         # fresh model => clean memory
         self._fresh_backend(soc=soc)
         soc = self.backend.soc                        # may have fallen back
@@ -587,12 +762,10 @@ class MainWindow(QMainWindow):
             self.backend.load_bytes(self.image_bytes, load)
             self.backend.reset(0, 0, cycle_mode=self.cyc_cb.isChecked(), system=1)
         else:
-            entry = _parse_hex(self.entry_e, DEF_ENTRY)
-            esp = _parse_hex(self.esp_e, DEF_ESP)
             # ELF images can have several non-contiguous PT_LOAD segments.  A
             # flat image remains one segment, so this also keeps the old workflow.
             if self.image_kind == "flat image":
-                segments = [(_parse_hex(self.load_e, DEF_ENTRY), self.image_bytes)]
+                segments = [(load, self.image_bytes)]
             else:
                 segments = self.image_segments
             for address, chunk in segments:
@@ -606,6 +779,7 @@ class MainWindow(QMainWindow):
         self.trace.reset()
         self.tables.mem.reset()        # drop any stale Mem-map-click pin from the old image
         self._unpin()
+        self._clear_reset_required()
         self._refresh_all()
         self._set_transport_enabled(True)
 
@@ -652,7 +826,7 @@ class MainWindow(QMainWindow):
     def on_run_toggle(self):
         if self._running:
             self.stop_run()
-        elif self._has_session():
+        elif self._has_session() and not self.backend.is_done():
             self._running = True
             self.run_btn.setText(" Pause")
             self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
@@ -689,10 +863,12 @@ class MainWindow(QMainWindow):
         if getattr(self, "_pinned_n", None) is None:
             self.regs.update_from(s)   # else keep the pinned AS-OF display
         self._refresh_status(s)
+        self._set_transport_enabled(True)
 
     def _refresh_status(self, s=None):
         if s is None:
-            self.status_lbl.setText("  no image loaded — Open an image (e.g. build/m2/mb_brloop.flat)  ")
+            self.status_lbl.setText(
+                "  no image loaded — Open a program or choose File → Open example  ")
             return
         name = self.backend.state_name(s.state)
         ret = self.backend.retire_count()
@@ -761,10 +937,14 @@ def main():
         win.load_snapshot(args.snapshot)
         img = None
     if img is None:
-        for cand in ("build/m2/mb_brloop.flat", "build/m2/mb_fpindep.flat",
-                     "build/m2/smoke.flat"):
-            if os.path.exists(cand):
-                img = cand; break
+        for candidates in (entry[1] for entry in _EXAMPLES[:3]):
+            img = _first_repo_file(candidates)
+            if img:
+                break
+        if img is None:
+            smoke = os.path.join(_REPO_ROOT, "build", "m2", "smoke.flat")
+            if os.path.exists(smoke):
+                img = smoke
     if img and os.path.exists(img):
         win.load_image(img)
         # Apply command-line choices *after* program metadata.  Previously

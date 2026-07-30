@@ -103,7 +103,10 @@ win.resize(1640, 980)
 win.show()
 
 for tag, candidates, steps, soc in SHOTS:
-    img = next((path for path in candidates if os.path.exists(path)), None)
+    # Candidate paths are repository-relative; resolve them here so the visual
+    # audit behaves identically from the repo root, this tool directory, or CI.
+    img = next((os.path.join(_ROOT, path) for path in candidates
+                if os.path.exists(os.path.join(_ROOT, path))), None)
     if img is None:
         print(f"skip {tag}: none of {', '.join(candidates)} found"); continue
     # Do not let a stale pre-replay SoC .so abort this entire visual review.
@@ -225,8 +228,8 @@ for tag, candidates, steps, soc in SHOTS:
         _watermark(am, f"{tag} · Mem map ({len(win.trace.accesses)} accesses)")
         win.tables.tabs.setCurrentIndex(0)
         app.processEvents()
-    # all-9-tabs sweep for ONE rich workload — the per-workload `_tables.png` crop
-    # only ever shows the DEFAULT (Code$) tab, so the review never saw the other 8
+    # all-tabs sweep for ONE rich workload — the per-workload `_tables.png` crop
+    # only ever shows the DEFAULT (Code$) tab, so the review misses the others
     # (Data$/TLB/Prefetch/Hotspots/Branches/Instr-mix/Cycles/Memory). brloop's tight
     # branch loop populates Hotspots/Branches/Cycles/Instr-mix + the I-cache richly,
     # so its tab sweep gives the critics real per-tab rendering to scrutinise.

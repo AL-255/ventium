@@ -20,6 +20,13 @@ tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
 image, set **entry**, **load**, and **esp** before Reset when its layout differs
 from the default.  ELF `PT_LOAD` addresses and its entry point are used
 automatically.  Dropping a file on the window does the same thing.
+Use **File → Open example** to load an available verification workload without
+locating its build path.  After recompiling the current program,
+**Ctrl+Shift+R** re-reads it from disk while preserving the displayed reset
+addresses and mode switches.
+Changing entry/load/ESP or a mode switch marks the control **Apply + Reset**;
+the running backend is unchanged until you apply it. Invalid addresses are
+highlighted and rejected instead of silently falling back to a default.
 
 Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
 next retirement, and **Step N** for a useful analysis window.  `F5` runs and
@@ -27,6 +34,16 @@ pauses; `[` and `]` jump among visible stalls, fills, walks, and mispredicts.
 Click a trace row or timing cell to pin the registers to that retirement; use
 Shift-click on a second timing row to measure the cycle distance.  `F1` lists
 all shortcuts.
+
+The register bank automatically changes from three simultaneous columns to
+indexed **Integer / Segments / x87** pages when the right pane becomes narrow.
+This keeps every value readable at 1280×800. **View → Reset panel layout**
+(`Ctrl+0`) restores the recommended proportions after exploratory resizing.
+
+Trace filters are space-separated AND terms: free text plus exact-field
+`pc:08048`, retirement `n>=100` / `n<=200` / `n=150`, cycle
+`cyc>=133`, `pipe:U` / `pipe:V`, `stall`, and `@` for memory accesses.
+Use `/`, Enter/F3, Shift+F3, and Escape to focus, traverse, and clear results.
 
 ## Worked examples
 
@@ -48,9 +65,9 @@ gcc -m32 -march=pentium -O2 -ffreestanding -fno-pic -fno-pie \
 tools/pipeviz/run.sh /tmp/fibonacci_dual.elf
 ```
 
-First untick **cycle**, Reset, and advance 600 clocks: every retirement is in
-the U lane. Then tick **cycle**, Reset, and advance the same amount: the Trace
-and timing diagram show adjacent arithmetic in U/V pairs. Continue each run to
+First untick **U/V issue**, apply/reset, and advance 600 clocks: every retirement
+is in the U lane. Then tick **U/V issue**, apply/reset, and advance the same
+amount: the Trace and timing diagram show adjacent arithmetic in U/V pairs. Continue each run to
 completion to compare the status line. In the July 29 acceptance run, the same
 two-chain result took 2,451 clocks at 0.461 IPC without U–V issue and 1,984
 clocks at 0.571 IPC with it; 85.3% of the instructions were paired. The

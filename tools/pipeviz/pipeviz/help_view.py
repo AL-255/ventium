@@ -15,7 +15,8 @@ PAGES = OrderedDict((
 ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
 <b>Step N</b>, or <b>Run</b>.</p>
 <ol>
- <li>Open or drop a program. ELF entry and segments are automatic.</li>
+ <li>Open or drop a program. ELF entry and segments are automatic. The
+ <b>File → Open example</b> menu exposes the built verification workloads.</li>
  <li>Use Step N to establish a useful timeline.</li>
  <li>Find an event in the sparkline or with <code>[</code>/<code>]</code>.</li>
  <li>Click its timing/trace row to pin architectural state.</li>
@@ -23,6 +24,31 @@ ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
 </ol>
 <p>The four panes are linked: Pipeline and Trace selections pin Registers;
 Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p>
+"""),
+    ("Loading programs", """
+<h1>Loading programs</h1>
+<h2>Fast paths</h2>
+<ul>
+ <li><b>File → Open example</b> opens any built verification workload.</li>
+ <li><b>Ctrl+O</b>, the Open button, or dropping a file opens a program.</li>
+ <li><b>Ctrl+Shift+R</b> reloads rebuilt bytes while preserving the displayed
+ reset addresses and mode switches.</li>
+</ul>
+<h2>ELF versus raw images</h2>
+<p>A little-endian 32-bit x86 ELF supplies its entry point and every
+ <code>PT_LOAD</code> address automatically; the load field is disabled because
+ an ELF may have several segments. A raw <code>.flat</code>, <code>.bin</code>,
+ or <code>.img</code> uses the entry, load, and ESP fields. A sibling
+ <code>manifest.json</code> may provide <code>entry</code> and
+ <code>load_addr</code>.</p>
+<p>Editing an address or mode marks <b>Apply + Reset</b>. Addresses must be
+ 32-bit hexadecimal values such as <code>0x08048000</code>; invalid input is
+ highlighted and never silently replaced with a default.</p>
+<h2>System images and snapshots</h2>
+<p>Use <b>system</b> for a raw BIOS image that boots at F000:FFF0. <b>SoC</b>
+ implies system and additionally needs a current <code>build.sh --soc</code>
+ backend. Use <b>Open snapshot</b> for a paired host-testbench
+ <code>.aux</code>/<code>.vlt</code> checkpoint.</p>
 """),
     ("Reading the Pipeline View", """
 <h1>How to read the Pipeline View</h1>
@@ -51,7 +77,7 @@ place an amber anchor and measure the cycle delta.</p>
 <h2>Examples</h2>
 <ul>
  <li><b>Dual Fibonacci:</b> two independent recurrence chains let adjacent
- arithmetic occupy U and V together. Compare cycle mode on/off; paired mode
+ arithmetic occupy U and V together. Compare U/V issue on/off; paired mode
  completes the same results in fewer cycles.</li>
  <li><b>mb_brloop:</b> repeating <code>dec</code>/<code>jne</code> diagonals
  expose branch pairing and the flags dependency. Red event pixels locate
@@ -69,9 +95,12 @@ bytes, disassembly, and architectural effects. Byte colors separate x86
 prefixes, opcode, ModRM/SIB, displacement, immediate, and branch-relative
 fields.</p>
 <p>Filters combine with spaces: <code>mov</code>, <code>pc:08048</code>,
-<code>cyc&gt;=133</code>, <code>pipe:V</code>, <code>stall</code>, and
+<code>n&gt;=100</code>, <code>cyc&gt;=133</code>, <code>pipe:V</code>,
+<code>stall</code>, and
 <code>@</code> for memory accesses. Click any result to synchronize the timing
-view and pin Registers.</p>
+view and pin Registers. Press <code>/</code> to focus the filter, Enter or F3
+to move to the next result, Shift+F3 for the previous result, and Escape to
+clear it. The arrows beside the match count provide the same navigation.</p>
 """),
     ("Caches and memory", """
 <h1>Caches and memory</h1>
@@ -98,11 +127,17 @@ and memory state, not the earlier visual history.</p>
 <table cellspacing="6">
  <tr><td><b>Ctrl+O</b></td><td>open program</td></tr>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
+ <tr><td><b>Ctrl+Shift+R</b></td><td>reload the current program from disk</td></tr>
+ <tr><td><b>Ctrl+0</b></td><td>reset panel proportions</td></tr>
  <tr><td><b>R</b></td><td>reset or restore snapshot</td></tr>
  <tr><td><b>.</b></td><td>one clock</td></tr>
  <tr><td><b>I / Space</b></td><td>next retired instruction</td></tr>
  <tr><td><b>F5</b></td><td>run/pause</td></tr>
  <tr><td><b>[ / ]</b></td><td>previous/next pipeline event</td></tr>
+ <tr><td><b>/</b></td><td>focus the trace filter</td></tr>
+ <tr><td><b>Enter / F3</b></td><td>next filtered retirement</td></tr>
+ <tr><td><b>Shift+F3</b></td><td>previous filtered retirement</td></tr>
+ <tr><td><b>Escape</b></td><td>clear the trace filter</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>
 </table>
 <p>Click a trace/timing row to pin it. Shift-click a second timing row to

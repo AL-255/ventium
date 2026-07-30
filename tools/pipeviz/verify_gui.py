@@ -9,7 +9,21 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QCoreApplication
 from pipeviz.main import MainWindow, _apply_dark
 
-img = sys.argv[1] if len(sys.argv) > 1 else "build/m2/mb_brloop.flat"
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if len(sys.argv) > 1:
+    img = sys.argv[1]
+else:
+    img = next(
+        (candidate for candidate in (
+            "build/m2/mb_brloop.flat",
+            "build/verify/mb_brloop.cycle.flat",
+        ) if os.path.isfile(os.path.join(ROOT, candidate))),
+        "build/m2/mb_brloop.flat",
+    )
+if not os.path.isabs(img):
+    img = os.path.join(ROOT, img)
+if not os.path.isfile(img):
+    raise SystemExit(f"image not found: {img}")
 entry = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0x08048000
 clocks = int(sys.argv[3]) if len(sys.argv) > 3 else 220
 out = sys.argv[4] if len(sys.argv) > 4 else "/tmp/pipeviz_shot.png"

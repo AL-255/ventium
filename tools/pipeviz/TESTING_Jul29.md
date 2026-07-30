@@ -25,10 +25,10 @@ Review date and timezone: 2026-07-29, America/Detroit.
 | PySide6 | 6.11.1 |
 | Capstone | 5.0.7 |
 | Verilator | 5.046 (2026-02-28) |
-| starting Pipeviz commit | `4b3f5fe` plus the fixes described below |
+| continuation baseline | `ddb783f` plus the responsive/ergonomic fixes below |
 | Qt platform for repeatability | `offscreen`, Fusion dark style |
 | principal window | 1640×980 |
-| compact request | 1280×800; Qt honors the UI minimum as 1446×800 |
+| compact request | 1280×800; honored exactly with responsive register pages |
 
 The offscreen Qt plugin prints `This plugin does not support
 propagateSizeHints()` and, when opening Help, `does not support raise()`. These
@@ -75,10 +75,12 @@ Procedure:
 
 1. Construct and show a fresh `MainWindow`.
 2. Confirm Reset, Clock, Insn, Step N, Run, and event navigation are disabled.
-3. Confirm `.`, `R`, `F5`, `Ctrl+O`, and `Ctrl+Shift+O` actions exist.
+3. Confirm `.`, `R`, `F5`, `Ctrl+O`, `Ctrl+Shift+O`, `Ctrl+Shift+R`,
+   `Ctrl+0`, and the File/View/Help menus exist.
 4. Press F1 through `QTest`.
 5. Select “Reading the Pipeline View” from the Help index.
-6. Confirm at least six indexed topics and the stage-glyph explanation.
+6. Confirm at least seven indexed topics, dedicated loading help, and the
+   stage-glyph explanation.
 
 Expected and observed:
 
@@ -101,12 +103,18 @@ Procedure:
 3. Click Reset and verify retirement history clears.
 4. Set N=120 and click Step N.
 5. Type `pipe:V` into the Trace filter and verify the visible row count.
-6. Click a trace row and verify Registers becomes pinned and the timing
+6. Navigate matches with Enter/F3 and Shift+F3, reject a zero-match query
+   visibly, clear with Escape, and focus/select the query with `/`.
+7. Enter an invalid reset address and require a visible warning without
+   replacing the running backend.
+8. Toggle U/V mode and require **Apply + Reset**.
+9. Click a trace row and verify Registers becomes pinned and the timing
    playhead follows.
-7. Shift-click an earlier timing row and verify the delta anchor.
-8. Click previous/next event controls.
-9. Select Hotspots, click its top row, and verify the trace jumps to that PC.
-10. Reset, click Run, wait for timer ticks, click Pause, and verify cycles
+10. Shift-click an earlier timing row and verify the delta anchor.
+11. Click previous/next event controls.
+12. Select Hotspots, click its top row, and verify the trace jumps to that PC.
+13. Reload from disk and require the custom ESP/reset configuration to survive.
+14. Reset, click Run, wait for timer ticks, click Pause, and verify cycles
     advanced and the timer stopped.
 
 Observed evidence:
@@ -115,6 +123,8 @@ Observed evidence:
 - 106 U retirements and 106 V retirements; the filter reports 106 V rows.
 - Pairing is effectively 100%; four mispredict event cycles are visible.
 - Trace, timing selection, pinned registers, Hotspots, and PC navigation agree.
+- Invalid addresses are rejected before model replacement; filter navigation
+  wraps deterministically; reload preserves reset configuration.
 
 Capture: `01_branch_transport.png`.
 
@@ -198,7 +208,8 @@ Procedure:
 2. Require top-of-1-MiB placement (`load=0x000f0000`).
 3. Step 1200 clocks, open TLB, and require actual valid entries.
 4. Load the user-mode branch fixture into the same window.
-5. Require system/SoC options, trace, accesses, and Memory click pin to reset.
+5. Require system/SoC options, trace filter, accesses, and Memory click pin to
+   reset; Memory must begin by following the new program's EIP.
 
 Observed evidence:
 
@@ -209,7 +220,7 @@ Observed evidence:
 - The expected terminal `S_HALT` is shown as a neutral green “halted” state,
   not a red “stuck” error.
 - Switching to the branch image yields a clean user-mode session with no stale
-  trace or memory selection.
+  trace filter or memory selection/address.
 
 Capture: `06_system_paging.png`.
 
@@ -243,15 +254,21 @@ Procedure:
 
 1. Request 1280×800.
 2. Verify every major panel remains within window bounds and at usable size.
-3. Require at least 690 pixels for the linked Trace/timeline column.
-4. Require fixed 22-pixel trace rows.
+3. Require at least 690 pixels for the linked Trace/timeline column and at
+   least 570 pixels for analysis.
+4. Require fixed 22-pixel trace rows, no toolbar/tab overflow, and intact
+   status metrics.
+5. Select compact x87, widen to the three-column register view, narrow again,
+   and require x87 to remain selected.
 
 Observed evidence:
 
-- Qt selects 1446×800 from the content minimum.
-- The left analysis column remains 700 pixels rather than collapsing to its
-  former 573-pixel minimum.
-- All ten analysis tabs remain visible at the normal 1640-pixel size.
+- Qt honors exactly 1280×800.
+- The left analysis column remains 700 pixels and the right analysis column
+  remains 576 pixels.
+- All ten analysis tabs and all toolbar controls remain directly visible.
+- Registers switch to non-clipping Integer/Segments/x87 pages when the right
+  pane cannot fit all columns, then return to three simultaneous columns when widened.
 - The compact trace displays substantially more retirements vertically, while
   retaining readable 9-point text and row selection.
 
@@ -262,7 +279,7 @@ Capture: `08_compact_layout.png`.
 Source: `tools/pipeviz/examples/fibonacci_uv.c`.
 
 The harness compiles the same freestanding, two-chain Fibonacci C program and
-runs it twice: cycle mode off (U only) and cycle mode on (U/V). It captures
+runs it twice: U/V issue off (U only) and U/V issue on. It captures
 both at cycle 600, then runs to completion and verifies four 32-bit results in
 target memory:
 
@@ -275,7 +292,7 @@ Observed comparison:
 | mode | clocks | retired | IPC | paired |
 |---|---:|---:|---:|---:|
 | single issue | 2451 | 1130 | 0.461 | 0.0% |
-| U/V cycle mode | 1984 | 1133 | 0.571 | 85.3% |
+| U/V issue | 1984 | 1133 | 0.571 | 85.3% |
 
 U/V mode computes the same two recurrences in 467 fewer clocks (19.1% lower)
 and raises IPC by 23.9%. At cycle 600, the single-issue trace contains only U
@@ -306,9 +323,20 @@ The screenshot review found and corrected the following:
 6. The retired trace used the Qt default row height. It now uses fixed compact
    22-pixel rows.
 7. Help was limited to a shortcut dialog. The Help menu now opens an indexed
-   six-page guide, with a detailed Pipeline View page and examples.
+   seven-page guide, with dedicated loading and Pipeline View pages.
 8. Stale SoC detection occurred after dangerous model construction. It now
    occurs before construction.
+9. Register/table content hints forced the loaded window to 1446 pixels.
+   Registers now switch to indexed pages and analysis can shrink safely.
+10. The trace filter lacked traversal and weakly signaled empty results. It now
+    has keyboard/button navigation and visible zero-match feedback.
+11. New programs inherited stale Memory addresses and active trace filters.
+    Program/snapshot starts now clear the query and follow their own EIP.
+12. Reset-time modes and addresses could diverge silently from the running
+    backend. The button now becomes **Apply + Reset**, and malformed addresses
+    are rejected visibly.
+13. Visual/smoke scripts resolved fixtures from the process working directory.
+    They now use repository-relative paths and run from any directory.
 
 ## Coverage limits
 

@@ -9,8 +9,9 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QAbstractItemView, QLabel, QGridLayout, QSizePolicy,
                                QLineEdit, QPushButton, QCheckBox,
                                QStyledItemDelegate, QStyle)
-from PySide6.QtGui import QFont, QColor, QBrush, QPainter, QFontMetrics
-from PySide6.QtCore import Qt, QRect, Signal
+from PySide6.QtGui import (QFont, QColor, QBrush, QPainter, QFontMetrics,
+                           QRegularExpressionValidator)
+from PySide6.QtCore import Qt, QRect, Signal, QRegularExpression
 
 from .backend import DC_SETS, WAYS, LINE
 
@@ -932,6 +933,9 @@ class MemoryView(QWidget):
         bar = QHBoxLayout(); bar.setSpacing(5)
         bar.addWidget(QLabel("addr"))
         self.addr_e = QLineEdit("0x08048000"); self.addr_e.setFixedWidth(96)
+        self.addr_e.setValidator(QRegularExpressionValidator(
+            QRegularExpression(r"0[xX][0-9a-fA-F]{1,8}"), self.addr_e))
+        self.addr_e.setToolTip("32-bit hexadecimal address")
         self.addr_e.setFont(_mono(9))
         self.addr_e.returnPressed.connect(self._go)
         bar.addWidget(self.addr_e)
@@ -956,6 +960,13 @@ class MemoryView(QWidget):
         never shows a stale 'showing clicked access' highlight from the old program."""
         self._click_hl = None
 
+    def start_session(self):
+        """Start a program/snapshot at its instruction pointer, not stale memory."""
+        self.follow = "eip"
+        self.addr = 0x08048000
+        self._access = None
+        self._click_hl = None
+
     def goto_access(self, addr, size):
         """Jump to (and gold-highlight) a SPECIFIC access — a Mem-map point click
         navigates here without forcing a tab switch, so switching to this tab shows
@@ -968,9 +979,16 @@ class MemoryView(QWidget):
 
     def _go(self):
         try:
-            self.addr = int(self.addr_e.text(), 0) & 0xFFFFFFF0
+            value = int(self.addr_e.text(), 0)
+            if not 0 <= value <= 0xFFFFFFFF:
+                raise ValueError
         except ValueError:
+            self.addr_e.setStyleSheet("border:1px solid #f85149;")
+            self.follow_lbl.setText("invalid 32-bit address")
+            self.follow_lbl.setStyleSheet("color:#f85149;font-size:8px;")
+            self.addr_e.selectAll()
             return
+        self.addr = value & 0xFFFFFFF0
         self.follow = None
         self._click_hl = None
         self._refresh()
@@ -1009,6 +1027,8 @@ class MemoryView(QWidget):
         if self.backend is None:
             return
         hl = self._click_hl or self._access      # a clicked access pins over the live one
+        self.addr_e.setStyleSheet("")
+        self.follow_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
         self.addr_e.setText(f"0x{self.addr:08x}")
         self.follow_lbl.setText("showing clicked access" if self._click_hl else
                                 (f"following {self.follow.upper()}" if self.follow else

@@ -4,7 +4,8 @@
 the issuing pipe (U/V), and a capstone disassembly. Appends incrementally."""
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTableWidgetItem, QHeaderView, QAbstractItemView,
-                               QLabel, QStyledItemDelegate, QStyle, QLineEdit)
+                               QLabel, QStyledItemDelegate, QStyle, QLineEdit,
+                               QToolButton)
 from PySide6.QtGui import QColor, QFont, QBrush, QFontMetrics
 from PySide6.QtCore import Qt, QRect, Signal
 
@@ -57,7 +58,7 @@ def _effect(written_gprs, flags_written, gpr, eflags, prev_eflags,
 _MAX_ROWS = 6000   # rolling cap on displayed rows
 _BYTES_ROLE = Qt.UserRole + 1
 _CYC_ROLE = Qt.UserRole + 2
-_FILT_ROLE = Qt.UserRole + 3   # (haystack, cyc, pipe, stall) for the filter box
+_FILT_ROLE = Qt.UserRole + 3   # (haystack, n, pc, cyc, pipe, stall) for filtering
 _INSN_ROLE = Qt.UserRole + 4   # (mnemonic, operands, class-colour) for split paint
 _U_COL = "#79c0ff"   # U pipe (blue)
 _V_COL = "#e3b341"   # V pipe (amber)
@@ -192,6 +193,37 @@ class EffectDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class _TraceFilter(QLineEdit):
+    """Search field with local result-navigation keys.
+
+    Handling these in the focused editor is more reliable than a window shortcut
+    after a modal dialog and avoids F3 being consumed by platform text controls.
+    """
+    navigate = Signal(int)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F3:
+            self.navigate.emit(-1 if event.modifiers() & Qt.ShiftModifier else 1)
+            event.accept()
+            return
+        if event.key() == Qt.Key_Escape:
+            self.clear()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class _TraceTable(QTableWidget):
+    focusFilter = Signal()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Slash and event.modifiers() == Qt.NoModifier:
+            self.focusFilter.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class TraceView(QWidget):
     rowSelected = Signal(int)     # emits the retire cycle of the selected row
     instSelected = Signal(int)    # emits the retire n of the selected row (for pinning)
@@ -208,17 +240,38 @@ class TraceView(QWidget):
         self.title = QLabel("Retired-instruction trace")
         self.title.setStyleSheet("font-weight:bold;")
         top.addWidget(self.title)
-        self.filt = QLineEdit()
+        self.filt = _TraceFilter()
         self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:V   stall   @  (mem)")
         self.filt.setClearButtonEnabled(True)
+        self.filt.setToolTip(
+            "Space-separated terms are ANDed.\n"
+            "Examples: mov, pc:08048, n>=100, cyc<=200, pipe:U, stall, @.\n"
+            "/ focuses search; Enter or F3 selects the next match; "
+            "Shift+F3 selects the previous match; Esc clears.")
         mfilt = QFont("monospace"); mfilt.setStyleHint(QFont.Monospace); mfilt.setPointSize(9)
         self.filt.setFont(mfilt)
         self.filt.textChanged.connect(self._on_filter)
+        self.filt.returnPressed.connect(lambda: self._select_match(1))
+        self.filt.navigate.connect(self._select_match)
         top.addWidget(self.filt, 1)
         self.match_lbl = QLabel(""); self.match_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
         top.addWidget(self.match_lbl)
+        self.prev_match_btn = QToolButton()
+        self.prev_match_btn.setText("↑")
+        self.prev_match_btn.setToolTip("Previous matching retirement (Shift+F3)")
+        self.prev_match_btn.clicked.connect(lambda: self._select_match(-1))
+        self.next_match_btn = QToolButton()
+        self.next_match_btn.setText("↓")
+        self.next_match_btn.setToolTip("Next matching retirement (Enter or F3)")
+        self.next_match_btn.clicked.connect(lambda: self._select_match(1))
+        for button in (self.prev_match_btn, self.next_match_btn):
+            button.setAutoRaise(True)
+            button.setFixedSize(22, 20)
+            button.hide()
+            top.addWidget(button)
         lay.addLayout(top)
-        self.tbl = QTableWidget(0, len(_COLS))
+        self.tbl = _TraceTable(0, len(_COLS))
+        self.tbl.focusFilter.connect(self.focus_filter)
         self.tbl.setHorizontalHeaderLabels(_COLS)
         # left-align the headers whose data is left-aligned (n/cyc/PC/bytes/instr)
         # so a caption sits directly over its column's first glyph instead of
@@ -278,6 +331,26 @@ class TraceView(QWidget):
     def set_bits(self, bits):
         self._bits = bits
 
+    def focus_filter(self):
+        self.filt.setFocus()
+        self.filt.selectAll()
+
+    def _select_match(self, direction):
+        """Select the next visible filtered row, wrapping at either edge."""
+        rows = [row for row in range(self.tbl.rowCount())
+                if not self.tbl.isRowHidden(row)]
+        if not rows:
+            return
+        current = self.tbl.currentRow()
+        if current not in rows:
+            target = rows[0] if direction > 0 else rows[-1]
+        else:
+            target = rows[(rows.index(current) + direction) % len(rows)]
+        item = self.tbl.item(target, 0)
+        self.tbl.setCurrentCell(target, 0)
+        if item is not None:
+            self.tbl.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+
     def _on_row(self, row, col, prow, pcol):
         if row < 0:
             return
@@ -303,15 +376,33 @@ class TraceView(QWidget):
                 return
 
     def select_pc(self, pc):
-        """Select + scroll to the FIRST trace row at PC `pc` — the drill-down from
-        clicking a row in the Hotspots / Branches analysis tabs."""
+        """Select a context-preserving trace row at PC ``pc``.
+
+        Hotspot/branch PCs often repeat thousands of times. Prefer the matching
+        row nearest the current investigation, or the newest match when nothing
+        is selected. If the active query hides every match, clear that query so
+        drill-down never lands on an invisible row.
+        """
         target = f"{int(pc):08x}"
-        for row in range(self.tbl.rowCount()):
-            it = self.tbl.item(row, 4)            # PC column
-            if it is not None and it.text() == target:
-                self.tbl.setCurrentCell(row, 0)
-                self.tbl.scrollToItem(it, QAbstractItemView.PositionAtCenter)
-                return
+        matches = [
+            row for row in range(self.tbl.rowCount())
+            if (self.tbl.item(row, 4) is not None
+                and self.tbl.item(row, 4).text() == target)
+        ]
+        if not matches:
+            return
+        visible = [row for row in matches if not self.tbl.isRowHidden(row)]
+        if not visible and self._tokens:
+            self.filt.clear()
+            visible = matches
+        candidates = visible or matches
+        current = self.tbl.currentRow()
+        row = (min(candidates, key=lambda candidate: abs(candidate - current))
+               if current >= 0 else candidates[-1])
+        item = self.tbl.item(row, 0)
+        self.tbl.setCurrentCell(row, 0)
+        if item is not None:
+            self.tbl.scrollToItem(item, QAbstractItemView.PositionAtCenter)
 
     def reset(self):
         self.tbl.setRowCount(0)
@@ -319,9 +410,15 @@ class TraceView(QWidget):
         self._last_cyc = None
         self._prev_eff = None
         self._prev_fstat = None
+        self._prev_st0 = None
         self._prev_gpr = None     # prior retirement's committed GPRs (pre-state for EA)
         self.last_access = None   # newest resolved load/store address (Memory '→access')
         self.accesses = []        # access stream for the access map
+        self._apply_filter()
+
+    def start_session(self):
+        """Clear search state which would otherwise silently hide a new program."""
+        self.filt.clear()
 
     def update_from(self, backend):
         total = backend.retire_count()
@@ -408,7 +505,8 @@ class TraceView(QWidget):
                     it.setForeground(QBrush(QColor("#8b949e")))
                 if c == 0:
                     it.setData(_CYC_ROLE, int(r.cyc))   # for click-to-link
-                    it.setData(_FILT_ROLE, (hay, int(r.cyc), pipe, stall))
+                    it.setData(_FILT_ROLE, (
+                        hay, int(r.n), int(r.pc), int(r.cyc), pipe, stall))
                 if c == 2:                              # delta cyc
                     it.setTextAlignment(Qt.AlignCenter)
                     it.setForeground(QBrush(QColor("#d2a24c" if stall else "#586069")))
@@ -445,11 +543,21 @@ class TraceView(QWidget):
 
     @staticmethod
     def _match(filt, tokens):
-        hay, cyc, pipe, stall = filt
+        hay, retire_n, pc, cyc, pipe, stall = filt
         for tok in tokens:
             try:
                 if tok.startswith("pipe:"):
-                    if pipe.lower() != tok[5:]:
+                    query = tok[5:]
+                    if not query or pipe.lower() != query:
+                        return False
+                elif tok.startswith("n>="):
+                    if retire_n < int(tok[3:], 0):
+                        return False
+                elif tok.startswith("n<="):
+                    if retire_n > int(tok[3:], 0):
+                        return False
+                elif tok.startswith("n="):
+                    if retire_n != int(tok[2:], 0):
                         return False
                 elif tok.startswith("cyc>="):
                     if cyc < int(tok[5:], 0):
@@ -461,7 +569,8 @@ class TraceView(QWidget):
                     if cyc != int(tok[4:], 0):
                         return False
                 elif tok.startswith("pc:"):
-                    if tok[3:] not in hay:
+                    query = tok[3:].removeprefix("0x")
+                    if not query or query not in f"{pc:08x}":
                         return False
                 elif tok == "stall":
                     if not stall:
@@ -469,8 +578,7 @@ class TraceView(QWidget):
                 elif tok not in hay:
                     return False
             except ValueError:
-                if tok not in hay:
-                    return False
+                return False
         return True
 
     def _apply_filter(self):
@@ -483,4 +591,13 @@ class TraceView(QWidget):
             ok = (not toks) or (filt is not None and self._match(filt, toks))
             self.tbl.setRowHidden(row, not ok)
             shown += ok
-        self.match_lbl.setText("" if not toks else f"{shown}/{n} match")
+        active = bool(toks)
+        self.match_lbl.setText("" if not active else f"{shown}/{n} match")
+        self.match_lbl.setStyleSheet(
+            "color:#f85149;font-size:8px;" if active and shown == 0
+            else "color:#8b949e;font-size:8px;")
+        self.filt.setStyleSheet(
+            "border:1px solid #f85149;" if active and shown == 0 else "")
+        for button in (self.prev_match_btn, self.next_match_btn):
+            button.setVisible(active)
+            button.setEnabled(shown > 0)

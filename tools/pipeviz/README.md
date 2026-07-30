@@ -61,7 +61,8 @@ system paging, see [the user guide](docs/user-guide.md).  Its examples have an
 offscreen regression check: `QT_QPA_PLATFORM=offscreen python3
 tools/pipeviz/verify_examples.py`.
 
-The in-application **Help** menu (`F1`) contains an indexed guide, including a
+The in-application **Help** menu (`F1`) contains a seven-page indexed guide,
+including loading/program-format help and a
 dedicated “Reading the Pipeline View” page with branch, cache-stall, x87, and
 dual-Fibonacci examples.
 
@@ -127,13 +128,17 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   instruction architecturally *wrote* — destination GPR + committed value (blue),
   changed flags (teal), x87 ST(0) result (purple), x87 exceptions (amber), and the
   resolved memory-access address of a load/store (gold). A **filter box** accepts
-  `mov` / `pc:08048` / `cyc>=133` / `pipe:V` / `stall` / `@` (memory-accessing rows).
+  `mov` / `pc:08048` / `n>=100` / `cyc>=133` / `pipe:V` / `stall` / `@` (memory-accessing
+  rows); `/` focuses it, Enter/F3 and Shift+F3 navigate results, and Escape clears it.
 * **Registers panel** (bottom-right) — GPRs, **EFLAGS** as a named-bit grid (set =
   amber, changed underlined), segments, control registers, and the **x87 stack**
   (logical ST(0..7) with the 80-bit hex split sign/exp ␣ mantissa + decoded
-  `floatx80`). Values that changed this step are amber; the panel can be **pinned
+  `floatx80` and an authoritative logical empty mask, so +0.0 is not confused
+  with an unused slot). Values that changed this step are amber; the panel can be **pinned
   AS-OF a retired instruction** (click a trace row / Konata cell) — an amber
-  `PINNED n=… cyc=…` banner shows that instruction's post-commit state.
+  `PINNED n=… cyc=…` banner shows that instruction's post-commit state. At compact
+  widths it becomes indexed **Integer / Segments / x87** pages so long values
+  remain readable instead of widening the window.
 * **Status bar** — `cyc` · FSM state/mode · `ret` / `IPC` / dual-issue `pair%` /
   `mispred` · I$/D$ occupancy / I-cache `fills` / page-table `walks` · `eip`.
 
@@ -141,10 +146,12 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 
 | control | action |
 |---|---|
-| **Open image…** | load a flat binary or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Flat images honour a sibling `manifest.json` for `entry`/`load_addr`. |
+| **Open program…** | load a flat binary or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Flat images honour a sibling `manifest.json` for `entry`/`load_addr`. |
+| **File → Open example** | open an available dual-issue, D-cache, x87, or system-paging verification workload directly. |
+| **Reload program** (`Ctrl+Shift+R`) | re-read the current image from disk after rebuilding it while preserving the displayed reset addresses and mode switches. |
 | **Open snapshot…** | resume a host testbench `--save-state` checkpoint. Select either `<prefix>.aux` or `<prefix>.vlt`; the visualizer loads the pair and begins a new visible timeline at that exact state. The **Restore snapshot** button returns to the same point after exploring. |
-| entry / load / esp | reset-time architectural state (hex). The command-line equivalents `--entry`, `--load`, and `--esp` take precedence over file metadata; `--system` / `--soc` select raw system boot mode. |
-| **cycle (dual-issue)** | enable the U/V fast path — **on by default** (the V pipe only issues in cycle mode) |
+| entry / load / esp | validated 32-bit-hex reset state. Edits mark **Apply + Reset** rather than silently diverging from the running model. The command-line equivalents `--entry`, `--load`, and `--esp` take precedence over file metadata. |
+| **U/V issue** | enable the U/V fast path — **on by default**; changing it marks **Apply + Reset** because issue mode is selected at reset |
 | **system** | cold-boot in system mode (real-mode reset at `F000:FFF0`; needed for paging/TLB) |
 | **SoC** | run the full `ventium_soc` (internal port-I/O / PIC / PIT) — needed for bare-metal images like test386. Requires `build.sh --soc`; auto-ticked for test386. |
 | **Reset** | re-cold-reset on a fresh model (clears memory) |
@@ -156,8 +163,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 
 Keyboard: `Ctrl+O` opens a program, `Ctrl+Shift+O` opens a snapshot, `R` resets
 (or restores a snapshot), `.` advances one clock, `I` / `Space` advances to the
-next retirement, and `F5` runs or pauses. `F1` opens the complete shortcut
-reference.
+next retirement, and `F5` runs or pauses. `Ctrl+0` restores the recommended
+splitter proportions. `/` focuses the trace filter; Enter/F3 and Shift+F3 move
+among its results; Escape clears it. `F1` opens the complete shortcut reference.
 
 Mouse interactions: **click** a Konata cell or a trace row to pin the registers
 to that instruction and drop a cycle playhead (the trace ↔ pipeline selection is
@@ -206,8 +214,8 @@ host I/O drivers.
   the stage board maps each FSM `state` to the P5 stage it corresponds to rather
   than inventing per-stage instruction latches. The timeline shows the genuine
   emergent cadence (issue, stalls, fills, FP occupancy).
-* The **U/V dual issue** only activates in **cycle mode** (default on); in func
-  mode the core is single-issue. **FP** ops appear on the FP lane.
+* **U/V issue** is enabled by default; untick it and apply/reset for
+  single-issue mode. **FP** ops appear on the FP lane.
 * The **TLB** only fills when paging is active — load a system/paging image and
   tick **system** to see I/D TLB entries. In flat user mode it stays empty (no
   translation), which is correct.
