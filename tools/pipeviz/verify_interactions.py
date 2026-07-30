@@ -1443,6 +1443,18 @@ def scenario_branch_transport(app, outdir):
         trace_n = int(win.trace.tbl.item(
             win.trace.tbl.currentRow(), 0).text())
         first_cyc = spark._last_cyc - len(spark.ev) + 1
+        assert spark._cyc_at(spark._LABELW - 1) is None
+        assert spark._cyc_at(spark._LABELW) is not None
+        assert spark._cyc_at(spark.width() - 4) is None
+        QTest.mouseMove(spark, QPoint(spark._LABELW - 1, 8))
+        assert spark.cursor().shape() == Qt.ArrowCursor
+        before_label_click = plot.playhead
+        QTest.mouseClick(
+            spark, Qt.LeftButton, Qt.NoModifier,
+            QPoint(spark._LABELW - 1, 8))
+        assert plot.playhead == before_label_click
+        QTest.mouseMove(spark, QPoint(spark._LABELW + 2, 8))
+        assert spark.cursor().shape() == Qt.PointingHandCursor
         assert spark.next_event(first_cyc - 1, -1) is None
         assert spark.next_event(spark._last_cyc + 1, 1) is None
         spark.setFocus()

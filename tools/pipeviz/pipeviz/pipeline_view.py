@@ -1472,7 +1472,6 @@ class SparklineStrip(QWidget):
             "captured cycles; Enter reopens the selected cycle")
         self._hover_x = -1
         self._kbd_cyc = None
-        self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Open a program and step to collect navigable history")
 
     def reset(self, backend):
@@ -1684,10 +1683,13 @@ class SparklineStrip(QWidget):
         if n == 0:
             return None
         plotw = max(1, self.width() - self._LABELW - 4)
+        x = int(x)
+        if x < self._LABELW or x >= self._LABELW + plotw:
+            return None
         start = max(0, n - plotw)
         shown = n - start
         bw = plotw / shown                          # must match paintEvent's scale
-        i = start + int((int(x) - self._LABELW) / bw)
+        i = start + int((x - self._LABELW) / bw)
         return self._last_cyc - (n - 1 - i) if 0 <= i < n else None
 
     def mousePressEvent(self, ev):
@@ -1696,21 +1698,35 @@ class SparklineStrip(QWidget):
             self._kbd_cyc = int(cyc)
             self.setFocus(Qt.MouseFocusReason)
             self.cycleClicked.emit(int(cyc))     # seek the Konata playhead here
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
 
-    def leaveEvent(self, _ev):
+    def leaveEvent(self, event):
         self._hover_x = -1
+        self.unsetCursor()
+        self.setToolTip(
+            "Click to seek; keyboard: Left/Right, Page Up/Down, Home/End, "
+            "Enter")
         self.update()
+        super().leaveEvent(event)
 
     def mouseMoveEvent(self, ev):
         x = int(ev.position().x() if hasattr(ev, "position") else ev.x())
         self._hover_x = x
         cyc = self._cyc_at(x)
         if cyc is not None:
+            self.setCursor(Qt.PointingHandCursor)
             i = len(self.ev) - 1 - (self._last_cyc - cyc)
             ev_name = {"m": "mispredict", "s": "stall", "f": "I-fill", "w": "page-walk"}.get(self.ev[i], "")
             self.setToolTip(f"cyc {cyc}: {self.ret[i]} retired"
                             + (f", {ev_name}" if ev_name else "")
                             + "  ·  click to seek; arrows navigate")
+        else:
+            self._hover_x = -1
+            self.unsetCursor()
+            self.setToolTip(
+                "IPC/key labels are not seek targets; move over the history plot")
         self.update()
 
     def focusInEvent(self, event):

@@ -78,6 +78,13 @@ now follows the access stream: Alt+0 falls back to the analysis tab strip while
 empty, then focuses the keyboard-navigable scatter as soon as a point exists.
 Startup, populated, and cleared transitions are all asserted.
 
+**IPC hit-boundary audit:** `_cyc_at` used Python's truncation toward zero, so a
+click one pixel left of the history plot could turn a small negative fraction
+into index zero and seek from the noninteractive IPC/key label. The strip now
+rejects both plot boundaries explicitly, shows the hand cursor only over a real
+cycle, and gives non-plot hover guidance. Edge hit tests prove label clicks
+leave the playhead unchanged.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a
