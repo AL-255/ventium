@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QLabel, QStyledItemDelegate, QStyle, QLineEdit,
                                QToolButton)
 from PySide6.QtGui import QColor, QFont, QBrush, QFontMetrics
-from PySide6.QtCore import Qt, QRect, QTimer, Signal
+from PySide6.QtCore import Qt, QRect, QTimer, Signal, QEvent
 
 from . import disasm
 from .disasm import C_PIPE, C_FP, FIELD_COLOR
@@ -215,6 +215,7 @@ class _TraceFilter(QLineEdit):
 
 class _TraceTable(QTableWidget):
     focusFilter = Signal()
+    focusNextRequested = Signal()
     _navigation_description = (
         "Activating a row links Pipeline, Registers, analysis tables, "
         "and Assembly source.")
@@ -253,6 +254,23 @@ class _TraceTable(QTableWidget):
         super().resizeEvent(event)
         self.sync_empty_hint()
 
+    def event(self, event):
+        # QAbstractItemView consumes Tab before keyPressEvent. Intercept it at
+        # the event boundary so a thousands-row trace remains one Tab away from
+        # the analysis navigator instead of cycling internal cell focus.
+        if event.type() == QEvent.KeyPress and event.key() in (
+                Qt.Key_Tab, Qt.Key_Backtab):
+            backward = (
+                event.key() == Qt.Key_Backtab
+                or event.modifiers() & Qt.ShiftModifier)
+            if backward:
+                self.focusFilter.emit()
+            else:
+                self.focusNextRequested.emit()
+            event.accept()
+            return True
+        return super().event(event)
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Slash and event.modifiers() == Qt.NoModifier:
             self.focusFilter.emit()
@@ -264,6 +282,7 @@ class _TraceTable(QTableWidget):
 class TraceView(QWidget):
     rowSelected = Signal(int)     # emits the retire cycle of the selected row
     instSelected = Signal(int)    # emits the retire n of the selected row (for pinning)
+    focusNextRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -320,6 +339,7 @@ class TraceView(QWidget):
             "No program loaded — use Open… for a file or its arrow "
             "for an example")
         self.tbl.focusFilter.connect(self.focus_filter)
+        self.tbl.focusNextRequested.connect(self.focusNextRequested.emit)
         self.tbl.setHorizontalHeaderLabels(_COLS)
         header_tips = (
             "Retirement sequence number within the current session",
@@ -351,6 +371,10 @@ class TraceView(QWidget):
         self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
+        # The trace can contain thousands of rows; default QTableWidget Tab
+        # navigation otherwise traps keyboard traversal inside every cell.
+        # Arrow keys remain the row-navigation mechanism.
+        self.tbl.setTabKeyNavigation(False)
         self.tbl.setShowGrid(False)
         self.tbl.setAlternatingRowColors(True)     # zebra striping
         self.tbl.setVerticalScrollMode(QAbstractItemView.ScrollPerItem)  # whole-row snap

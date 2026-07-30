@@ -2782,6 +2782,30 @@ def scenario_layout(app, outdir):
         assert not clipped_plain_labels, clipped_plain_labels
         win.tables.tabs.setCurrentIndex(0)
         settle(app)
+        win.trace.tbl.setFocus(Qt.OtherFocusReason)
+        QTest.keyClick(win.trace.tbl, Qt.Key_Tab)
+        settle(app)
+        assert app.focusWidget() is win.tables.analysis_selector
+        win.trace.tbl.setFocus(Qt.OtherFocusReason)
+        QTest.keyClick(win.trace.tbl, Qt.Key_Backtab)
+        settle(app)
+        assert app.focusWidget() is win.trace.filt
+        for table_index, table in (
+                (0, win.tables.ic), (1, win.tables.dc),
+                (2, win.tables.tlb), (4, win.tables.hot),
+                (5, win.tables.br), (6, win.tables.mix)):
+            win.tables.tabs.setCurrentIndex(table_index)
+            settle(app)
+            table.setFocus(Qt.OtherFocusReason)
+            QTest.keyClick(table, Qt.Key_Tab)
+            settle(app)
+            assert app.focusWidget() is win.tables.analysis_selector
+            table.setFocus(Qt.OtherFocusReason)
+            QTest.keyClick(table, Qt.Key_Backtab)
+            settle(app)
+            assert app.focusWidget() is win.trace.tbl
+        win.tables.tabs.setCurrentIndex(0)
+        settle(app)
         cache_map = win.tables.ic_map
         ticks = cache_map._axis_ticks()
         assert [cache_set for cache_set, _x, _rect, _align in ticks] == [

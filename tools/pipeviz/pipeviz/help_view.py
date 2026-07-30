@@ -391,6 +391,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>[ / ]</b></td><td>previous/next selected event class</td></tr>
  <tr><td><b>Ctrl+- / Ctrl+=</b></td><td>zoom the focused Pipeline cycle axis</td></tr>
  <tr><td><b>↑/↓, PgUp/PgDn, Home/End</b></td><td>traverse focused Pipeline rows</td></tr>
+ <tr><td><b>Tab / Shift+Tab</b></td><td>leave a focused Trace or analysis table; arrows navigate its content</td></tr>
  <tr><td><b>Board arrows + Enter</b></td><td>choose and open an occupied live U/V/FP source line</td></tr>
  <tr><td><b>IPC arrows/Pg/Home/End</b></td><td>seek captured cycles; Enter reopens one</td></tr>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>

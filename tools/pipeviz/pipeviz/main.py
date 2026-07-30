@@ -969,6 +969,9 @@ class MainWindow(QMainWindow):
         self.right_split = right
         self.tables = TablesView()
         self.regs = RegsView()
+        self.trace.focusNextRequested.connect(
+            lambda: self.tables.analysis_navigation_control().setFocus(
+                Qt.TabFocusReason))
         self.regs.unpinRequested.connect(self._return_live)
         # Tables can scroll and the register bank becomes tabbed when its three
         # complete columns no longer fit.

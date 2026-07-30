@@ -254,6 +254,16 @@ class _HintTable(QTableWidget):
         super().resizeEvent(ev)
         self._hint.setGeometry(0, 0, self.viewport().width(), self.viewport().height())
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Tab, Qt.Key_Backtab):
+            forward = not (
+                event.key() == Qt.Key_Backtab
+                or event.modifiers() & Qt.ShiftModifier)
+            QWidget.focusNextPrevChild(self, forward)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
 
 class _ResponsiveSummary(QLabel):
     """Paint a deliberate compact summary while retaining the complete value."""
@@ -304,6 +314,9 @@ def _mk_table(cols, widths=None, hint=""):
     t.verticalHeader().setVisible(False)
     t.setEditTriggers(QAbstractItemView.NoEditTriggers)
     t.setSelectionBehavior(QAbstractItemView.SelectRows)
+    # Arrows navigate rows/cells.  Let Tab leave the table in one press instead
+    # of walking every cell in potentially thousands of rows.
+    t.setTabKeyNavigation(False)
     t.setShowGrid(False)
     t.setFont(_mono())
     if widths:
