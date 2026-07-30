@@ -26,9 +26,10 @@ from PySide6.QtWidgets import (QApplication, QMessageBox, QPushButton,
                                QToolBar, QToolButton)
 
 import pipeviz.main as main_module
+import pipeviz.disasm as disasm_module
 import pipeviz.pipeline_view as pipeline_module
 import pipeviz.trace_view as trace_module
-from pipeviz.backend import VVCline, VVRetire
+from pipeviz.backend import Backend, VVCline, VVRetire
 from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
 from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
@@ -207,6 +208,83 @@ def scenario_startup(app, outdir):
     })()
     assert CycleBreakdown._classify("S_FETCH", probe_cycle) == "front end"
     assert CycleBreakdown._classify("S_EXEC", probe_cycle) == "slow path"
+
+    # Memory displays physical BFM bytes. Lock legacy page translation, segment
+    # selection, and address-size overrides before exercising the real model.
+    class PageMemory:
+        translate_linear = Backend.translate_linear
+
+        def __init__(self):
+            self.bytes = {}
+
+        def put_u32(self, address, value):
+            for offset in range(4):
+                self.bytes[address + offset] = (value >> (8 * offset)) & 0xFF
+
+        def mem_read(self, address, count):
+            return bytes(self.bytes.get(address + offset, 0)
+                         for offset in range(count))
+
+    pager = PageMemory()
+    pager.put_u32(0x1004, 0x2003)  # PDE[1] -> page table
+    pager.put_u32(0x2004, 0x9003)  # PTE[1] -> frame 0x9000
+    assert pager.translate_linear(0x00401234, 0, 0, 0) == 0x00401234
+    assert pager.translate_linear(
+        0x00401234, 1 << 31, 0x1000, 0) == 0x00009234
+    pager.put_u32(0x1008, 0x01400083)  # PDE[2], present + 4 MiB page
+    assert pager.translate_linear(
+        0x00805678, 1 << 31, 0x1000, 1 << 4) == 0x01405678
+    assert pager.translate_linear(
+        0x00C00000, 1 << 31, 0x1000, 0) is None
+    assert pager.translate_linear(
+        0x00401234, 1 << 31, 0x1000, 1 << 5) is None
+
+    bp16 = disasm_module.mem_operand(b"\x8b\x46\x10", bits=16)
+    assert bp16[6:] == (1, 0xFFFF)  # BP defaults to SS, 16-bit address
+    eax_override = disasm_module.mem_operand(b"\x67\x8b\x00", bits=16)
+    assert eax_override[6:] == (2, 0xFFFFFFFF)  # 0x67 -> 32-bit DS:EAX
+    fs_absolute = disasm_module.mem_operand(
+        b"\x64\xa1\x00\x10\x00\x00", bits=32)
+    assert fs_absolute[6:] == (4, 0xFFFFFFFF)
+
+    prior = VVRetire()
+    prior.n, prior.cyc, prior.pc = 0, 1, 0x08048000
+    prior.d32, prior.nbytes, prior.bytes[0] = 1, 1, 0x90
+    prior.gpr[6] = 0x20
+    prior.seg_base[2] = 0x1000
+    access_record = VVRetire()
+    access_record.n, access_record.cyc, access_record.pc = 1, 2, 0x08048001
+    access_record.d32, access_record.nbytes = 1, 2
+    access_record.bytes[0], access_record.bytes[1] = 0x8B, 0x06  # mov eax,[esi]
+    access_record.gpr[6] = 0x20
+    access_record.seg_base[2] = 0x1000
+
+    class SegmentedRetireBackend:
+        records = [prior, access_record]
+
+        @staticmethod
+        def retire_count():
+            return 2
+
+        @classmethod
+        def get_retires(cls, since_n, maximum):
+            return [
+                record for record in cls.records
+                if int(record.n) >= since_n][:maximum]
+
+        @staticmethod
+        def translate_linear(linear, _cr0, _cr3, _cr4):
+            return int(linear)
+
+    segmented_trace = trace_module.TraceView()
+    segmented_trace.update_from(SegmentedRetireBackend())
+    assert len(segmented_trace.accesses) == 1
+    segmented_access = segmented_trace.accesses[0]
+    assert segmented_access[2] == 0x20       # D$ effective offset
+    assert segmented_access[6] == 0x1020     # DS base + offset
+    assert segmented_access[7] == 0x1020     # paging-off physical
+    assert segmented_trace.last_access == (0x1020, 4)
+    segmented_trace.deleteLater()
 
     # Snapshot sessions must begin D-cache replay from resident tags and the
     # exact MRU order, not fabricate a cold cache. A new conflicting tag evicts
@@ -999,6 +1077,10 @@ def scenario_dcache_memory(app, outdir):
         accesses = win.trace.accesses
         assert len(win.backend.dcache()) >= 10
         assert len(accesses) >= 10 and win.trace.last_access is not None
+        assert all(
+            len(access) == 8
+            and access[2] == access[6] == access[7]
+            for access in accesses)
         assert "[blocked]" in win.pipeline.board._status
         assert "[paired]" not in win.pipeline.board._status
         held = win.pipeline.board._cells["U"][1]
@@ -1051,7 +1133,7 @@ def scenario_dcache_memory(app, outdir):
         click(app, win.tables.accmap, pos=QPoint(px, py))
         assert win.tables.accmap.sel_n == chosen[0]
         assert win._pinned_n == chosen[0]
-        assert win.tables.mem._click_hl == (chosen[2], chosen[4])
+        assert win.tables.mem._click_hl == (chosen[7], chosen[4])
         assert int(win.trace.tbl.item(win.trace.tbl.currentRow(), 0).text()) == chosen[0]
         save_shot(app, win, outdir, "03_dcache_memmap_drilldown")
         print(f"OK D-cache/memory: lines={len(win.backend.dcache())}, "
@@ -1179,6 +1261,15 @@ def scenario_system_and_switch(app, outdir):
                    for mode in (win.cyc_cb, win.sys_cb, win.soc_cb))
         assert "F000:FFF0" in win.entry_e.toolTip()
         assert "top-aligned" in win.load_e.toolTip()
+        reset_state = win.backend.state()
+        assert reset_state.eip == 0xFFF0 and reset_state.cs_base == 0x000F0000
+        assert win.tables.mem.addr == 0x000FFFF0
+        assert win.backend.mem_read(win.tables.mem.addr, 4) != b"\0\0\0\0"
+        assert (
+            win.tables.mem.follow_lbl.text()
+            == "EIP off 0000fff0 → phys 000ffff0")
+        select_tab(app, win.tables.tabs, 8)
+        save_shot(app, win, outdir, "06a_system_reset_vector_memory")
         win.stepn.setValue(1200)
         click(app, win.stepn_btn)
         state = win.backend.state()

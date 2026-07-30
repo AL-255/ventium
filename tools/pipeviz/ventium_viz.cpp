@@ -109,6 +109,8 @@ struct Viz {
   uint64_t cur_cyc    = 0;     // clock index being evaluated (for retire stamping)
   uint8_t  cur_d32    = 1;     // CS.D pre-edge this clock (retire disasm width)
   uint32_t cur_cs_base = 0;    // CS base pre-edge (bytes live at cs_base + EIP)
+  uint32_t cur_seg_base[VV_NSEG] = {};
+  uint32_t cur_cr0 = 0, cur_cr3 = 0, cur_cr4 = 0;
   uint32_t idle       = 0;     // consecutive clocks with no retirement
   uint32_t quiesce    = 256;
 
@@ -141,6 +143,39 @@ struct Viz {
 };
 
 Viz* g_viz = nullptr;   // single core, single thread: a global is sufficient
+
+static uint32_t mem_u32(Viz* v, uint32_t address) {
+  return (uint32_t)v->mem.read8(address)
+       | ((uint32_t)v->mem.read8(address + 1) << 8)
+       | ((uint32_t)v->mem.read8(address + 2) << 16)
+       | ((uint32_t)v->mem.read8(address + 3) << 24);
+}
+
+// Translate legacy 32-bit linear addresses exactly as the standalone core's
+// paging mode does. A retired instruction necessarily came from a present
+// mapping; false is retained for corrupt/unsupported PAE contexts rather than
+// silently reading the linear address as physical.
+static bool linear_to_physical(
+    Viz* v, uint32_t linear, uint32_t cr0, uint32_t cr3, uint32_t cr4,
+    uint32_t* physical) {
+  if (!(cr0 & (1u << 31))) {
+    *physical = linear;
+    return true;
+  }
+  if (cr4 & (1u << 5)) return false;  // PAE is outside this core/ABI model
+  uint32_t pde = mem_u32(
+      v, (cr3 & 0xfffff000u) + ((linear >> 22) * 4u));
+  if (!(pde & 1u)) return false;
+  if ((cr4 & (1u << 4)) && (pde & (1u << 7))) {
+    *physical = (pde & 0xffc00000u) | (linear & 0x003fffffu);
+    return true;
+  }
+  uint32_t pte = mem_u32(
+      v, (pde & 0xfffff000u) + (((linear >> 12) & 0x3ffu) * 4u));
+  if (!(pte & 1u)) return false;
+  *physical = (pte & 0xfffff000u) | (linear & 0xfffu);
+  return true;
+}
 
 }  // namespace
 
@@ -255,14 +290,22 @@ extern "C" void vtm_retire(
   r.gpr[0]=eax; r.gpr[1]=ecx; r.gpr[2]=edx; r.gpr[3]=ebx;
   r.gpr[4]=esp; r.gpr[5]=ebp; r.gpr[6]=esi; r.gpr[7]=edi;
   r.seg[0]=cs; r.seg[1]=ss; r.seg[2]=ds; r.seg[3]=es; r.seg[4]=fs; r.seg[5]=gs;
+  for (int i = 0; i < VV_NSEG; ++i) r.seg_base[i] = v->cur_seg_base[i];
+  r.cr0 = v->cur_cr0; r.cr3 = v->cur_cr3; r.cr4 = v->cur_cr4;
   r.d32 = v->cur_d32;
-  // instruction bytes: read up to 16 from the BFM memory at the LINEAR fetch
-  // address cs_base + EIP (real mode / based segments need the base; flat user
-  // mode has cs_base==0). capstone refines the true length. Non-identity paged
-  // code is best-effort (no linear->physical translation here).
-  r.nbytes = VV_MAXBYTES;
-  for (int i = 0; i < VV_MAXBYTES; ++i)
-    r.bytes[i] = v->mem.read8(v->cur_cs_base + pc + (uint32_t)i);
+  // Read instruction bytes through the PRE-EXECUTION CS base and page tables.
+  // This keeps Trace disassembly exact in real mode and non-identity paging,
+  // rather than treating a linear address as a physical BFM address.
+  r.nbytes = 0;
+  for (int i = 0; i < VV_MAXBYTES; ++i) {
+    uint32_t physical = 0;
+    if (!linear_to_physical(
+            v, v->cur_cs_base + pc + (uint32_t)i,
+            v->cur_cr0, v->cur_cr3, v->cur_cr4, &physical))
+      break;
+    r.bytes[i] = v->mem.read8(physical);
+    r.nbytes++;
+  }
   v->clk_retires.push_back(r);
 }
 
@@ -337,7 +380,12 @@ bool clock_once(Viz* v) {
   // instruction executed under (so the trace disassembles real vs 32-bit code).
   { auto* R = top->rootp;
     v->cur_d32 = CORE(cs_d) ? 1 : 0;
-    v->cur_cs_base = CORE(seg_base)[0]; }   // SG_CS = 0
+    for (int i = 0; i < VV_NSEG; ++i)
+      v->cur_seg_base[i] = CORE(seg_base)[i];
+    v->cur_cs_base = v->cur_seg_base[0];    // SG_CS = 0
+    v->cur_cr0 = CORE(creg0);
+    v->cur_cr3 = CORE(creg3);
+    v->cur_cr4 = CORE(creg4); }
 
   // clk high: rising edge; the vtm_retire* DPI calls fire inside eval()
   top->clk = 1;
@@ -586,7 +634,11 @@ void vv_get_state(void* h, vv_state_t* out) {
     out->seg_limit[i] = CORE(seg_limit)[i];
     out->seg_attr[i]  = CORE(seg_attr)[i];
   }
-  out->cr0 = v->cr0; out->cr2 = v->cr2; out->cr3 = v->cr3; out->cr4 = v->cr4;
+  // Read the live RTL registers directly. The old last-retirement mirror was
+  // stale immediately after snapshot restore and between a control-register
+  // update and its next GUI retirement sample.
+  out->cr0 = CORE(creg0); out->cr2 = CORE(creg2);
+  out->cr3 = CORE(creg3); out->cr4 = CORE(creg4);
   out->sys_mode = CORE(sys_mode);
   out->cpl = CORE(cpl_r);
   out->smm_active = CORE(smm_active);

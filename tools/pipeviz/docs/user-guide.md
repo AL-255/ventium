@@ -71,6 +71,9 @@ Hotspots, Branches, Mix, Cycles, Memory, and Mem map.
 Trace filters are space-separated AND terms: free text plus exact-field
 `pc:08048`, retirement `n>=100` / `n<=200` / `n=150`, cycle
 `cyc>=133`, `pipe:U` / `pipe:V`, `stall`, and `@` for memory accesses.
+The gold `@…` value is the instruction’s effective offset—the same address
+domain used by the timing D-cache. Memory drill-down separately retains its
+segment-linear and translated physical address.
 Use `/` from anywhere, then Enter/F3, Shift+F3, and Escape to focus, traverse,
 and clear results. Hotspots and Branches rows activate with Enter as well as
 the mouse.
@@ -256,9 +259,15 @@ started `[empty]` or was `[seed N]` from the resident tags and MRU order of a
 restored snapshot; hover it for hit/cold/conflict totals. This prevents the
 visualization boundary from looking like a cold cache. In **Memory**, choose
 `→ access` to follow the most recent load/store
-and see its bytes outlined in gold.  Finally, open
-**Mem map**: this workload’s stride appears as a diagonal scatter; click an
-outlier to jump directly to its trace row and pinned architectural state.
+and see its physical bytes outlined in gold. Pipeviz resolves the retired
+instruction’s effective offset through its pre-execution segment base and
+legacy 4 KiB/4 MiB page tables; `→ EIP` and `→ ESP` do the same for the live
+state. **Mem map** deliberately keeps the effective offset—the address used by
+the timing D-cache—so this workload’s stride appears as a diagonal scatter;
+click an outlier to jump directly to its trace row, pinned architectural state,
+and translated physical bytes. These captured/replayed points cover explicit
+Capstone memory operands; implicit stack and repeated-string traffic remains
+visible in cycle timing but is not claimed in the scatter or replay rate.
 
 Use **Hotspots** after this drill-down to identify where latency accumulates,
 rather than merely observing that the global IPC fell. **Σ lat** is the sum of

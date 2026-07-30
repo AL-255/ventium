@@ -61,6 +61,8 @@ class VVCline(C.Structure):
 class VVRetire(C.Structure):
     _fields_ = [("n", u64), ("cyc", u64), ("pc", u32), ("eflags", u32),
                 ("gpr", u32 * NGPR), ("seg", u16 * NSEG),
+                ("seg_base", u32 * NSEG),
+                ("cr0", u32), ("cr3", u32), ("cr4", u32),
                 ("pipe", u8), ("paired", u8), ("d32", u8), ("nbytes", u8), ("bytes", u8 * 16),
                 ("x87_valid", u8), ("fctrl", u16), ("fstat", u16), ("ftag", u16),
                 ("st", (u8 * 10) * NFPR)]
@@ -205,6 +207,34 @@ class Backend:
         buf = (u8 * n)()
         self.lib.vv_mem_read(self.h, addr, buf, n)
         return bytes(buf)
+
+    def translate_linear(self, linear, cr0=0, cr3=0, cr4=0):
+        """Translate one legacy 32-bit linear address through target page tables.
+
+        Returns a physical address, or ``None`` for a non-present/unsupported
+        translation. Ventium implements legacy 4 KiB and PSE 4 MiB paging; PAE
+        is deliberately rejected instead of displaying bytes from a guessed
+        address.
+        """
+        linear = int(linear) & 0xFFFFFFFF
+        cr0, cr3, cr4 = int(cr0), int(cr3), int(cr4)
+        if not (cr0 & (1 << 31)):
+            return linear
+        if cr4 & (1 << 5):  # CR4.PAE
+            return None
+
+        def read_u32(address):
+            return int.from_bytes(self.mem_read(address & 0xFFFFFFFF, 4), "little")
+
+        pde = read_u32((cr3 & 0xFFFFF000) + ((linear >> 22) * 4))
+        if not (pde & 1):
+            return None
+        if (cr4 & (1 << 4)) and (pde & (1 << 7)):  # CR4.PSE + PDE.PS
+            return ((pde & 0xFFC00000) | (linear & 0x003FFFFF)) & 0xFFFFFFFF
+        pte = read_u32((pde & 0xFFFFF000) + (((linear >> 12) & 0x3FF) * 4))
+        if not (pte & 1):
+            return None
+        return ((pte & 0xFFFFF000) | (linear & 0xFFF)) & 0xFFFFFFFF
 
     def reset(self, entry, esp, cycle_mode=1, system=0):
         self.lib.vv_reset(self.h, entry, esp, int(cycle_mode), int(system))

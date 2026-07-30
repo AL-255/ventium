@@ -519,7 +519,8 @@ class TablesView(QWidget):
         # --- Memory-access map (address-vs-sequence scatter / access pattern) ---
         self.accmap = AccessMap()
         amw = QWidget(); amv = QVBoxLayout(amw); amv.setContentsMargins(4, 4, 4, 4)
-        self.accmap_lbl = QLabel("memory access pattern — load/store address vs retire order")
+        self.accmap_lbl = QLabel(
+            "explicit memory operands — effective offset vs retire order")
         self.accmap_lbl.setStyleSheet("color:#8b949e;")
         amv.addWidget(self.accmap_lbl); amv.addWidget(self.accmap, 1)
         self.tabs.addTab(amw, "Mem map")
@@ -994,7 +995,8 @@ class AccessMap(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.accesses = []          # [(n, cyc, addr, is_store, size, pc)]
+        # (n, cyc, effective offset, is_store, size, pc, linear, physical)
+        self.accesses = []
         self.sel_n = None           # retire-n of the clicked access (a STABLE identity,
                                     # so the selection survives the trace's rolling cap
                                     # dropping older accesses off the front of the list)
@@ -1058,10 +1060,16 @@ class AccessMap(QWidget):
         p.setPen(QColor("#8b949e")); p.setFont(hf)
         if si is not None:
             sn, scy, sa, sst = accs[si][:4]
+            physical = accs[si][7] if len(accs[si]) > 7 else sa
+            mapped = (
+                " · untranslated"
+                if physical is None else
+                f" → phys {physical:08x}" if physical != sa else "")
             p.setPen(QColor("#e3b341" if sst else "#79c0ff"))
             p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
                        f"selected  n={sn} cyc={scy} @{sa:08x} {'store' if sst else 'load'}"
-                       f"   ·   {len(accs)} accesses · 0x{a0:x}..0x{a1:x}{stride_str}")
+                       f"{mapped}   ·   {len(accs)} accesses · "
+                       f"0x{a0:x}..0x{a1:x}{stride_str}")
         else:
             p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
                        f"{len(accs)} accesses · 0x{a0:x}..0x{a1:x}{stride_str} · "
@@ -1121,7 +1129,10 @@ class AccessMap(QWidget):
             self.sel_n = int(a[0])                             # stable identity
             self.update()
             self.pointSelected.emit(int(a[0]))                 # -> jump the trace
-            self.accessClicked.emit(int(a[2]), int(a[4]))      # -> Memory tab (addr, size)
+            physical = a[7] if len(a) > 7 else a[2]
+            if physical is not None:
+                self.accessClicked.emit(
+                    int(physical), int(a[4]))                   # -> physical Memory bytes
 
 
 class MemoryView(QWidget):
@@ -1137,15 +1148,22 @@ class MemoryView(QWidget):
         self.addr_e = QLineEdit("0x08048000"); self.addr_e.setFixedWidth(96)
         self.addr_e.setValidator(QRegularExpressionValidator(
             QRegularExpression(r"0[xX][0-9a-fA-F]{1,8}"), self.addr_e))
-        self.addr_e.setToolTip("32-bit hexadecimal address")
+        self.addr_e.setToolTip("32-bit physical address in the backend memory image")
         self.addr_e.setFont(_mono(9))
         self.addr_e.returnPressed.connect(self._go)
         bar.addWidget(self.addr_e)
         go = QPushButton("Go"); go.clicked.connect(self._go); bar.addWidget(go)
-        be = QPushButton("→EIP"); be.clicked.connect(lambda: self._set_follow("eip")); bar.addWidget(be)
-        bs = QPushButton("→ESP"); bs.clicked.connect(lambda: self._set_follow("esp")); bar.addWidget(bs)
-        ba = QPushButton("→access"); ba.setToolTip("follow the most-recent load/store address")
+        be = QPushButton("→EIP")
+        be.setToolTip("Follow current CS:EIP after segmentation and paging")
+        be.clicked.connect(lambda: self._set_follow("eip")); bar.addWidget(be)
+        bs = QPushButton("→ESP")
+        bs.setToolTip("Follow current SS:ESP after segmentation and paging")
+        bs.clicked.connect(lambda: self._set_follow("esp")); bar.addWidget(bs)
+        ba = QPushButton("→access")
+        ba.setToolTip(
+            "Follow the most-recent explicit load/store at its translated physical address")
         ba.clicked.connect(lambda: self._set_follow("access")); bar.addWidget(ba)
+        self.eip_btn, self.esp_btn = be, bs
         self.access_btn = ba
         self._access = None       # (addr, size) of the newest memory access
         self._click_hl = None     # (addr, size) pinned by a Mem-map point click
@@ -1185,8 +1203,8 @@ class MemoryView(QWidget):
     def goto_access(self, addr, size):
         """Jump to (and gold-highlight) a SPECIFIC access — a Mem-map point click
         navigates here without forcing a tab switch, so switching to this tab shows
-        exactly what that load/store touched. The pinned highlight clears the moment
-        the user navigates away (Go / a follow button / paging)."""
+        the translated physical bytes that load/store touched. The pinned highlight
+        clears the moment the user navigates away (Go / a follow button / paging)."""
         self.follow = None
         self.addr = addr & 0xFFFFFFF0
         self._click_hl = (addr, size)
@@ -1212,9 +1230,13 @@ class MemoryView(QWidget):
         self.follow = which
         self._click_hl = None
         if which == "eip":
-            self.addr = getattr(self, "_eip", self.addr) & 0xFFFFFFF0
+            physical = getattr(self, "_eip", None)
+            if physical is not None:
+                self.addr = physical & 0xFFFFFFF0
         elif which == "esp":
-            self.addr = getattr(self, "_esp", self.addr) & 0xFFFFFFF0
+            physical = getattr(self, "_esp", None)
+            if physical is not None:
+                self.addr = physical & 0xFFFFFFF0
         elif which == "access" and self._access is not None:
             self.addr = self._access[0] & 0xFFFFFFF0
         self._refresh()
@@ -1227,15 +1249,25 @@ class MemoryView(QWidget):
 
     def set_state(self, backend, state, access=None):
         self.backend = backend
-        self._eip = state.eip
-        self._esp = state.gpr[4]
+        self._eip_offset = int(state.eip)
+        self._esp_offset = int(state.gpr[4])
+        self._eip_linear = (
+            int(state.cs_base) + self._eip_offset) & 0xFFFFFFFF
+        self._esp_linear = (
+            int(state.seg_base[1]) + self._esp_offset) & 0xFFFFFFFF
+        self._eip = backend.translate_linear(
+            self._eip_linear, state.cr0, state.cr3, state.cr4)
+        self._esp = backend.translate_linear(
+            self._esp_linear, state.cr0, state.cr3, state.cr4)
         self._access = access
         for control in self._session_controls:
             control.setEnabled(True)
+        self.eip_btn.setEnabled(self._eip is not None)
+        self.esp_btn.setEnabled(self._esp is not None)
         self.access_btn.setEnabled(access is not None)
-        if self.follow == "eip":
+        if self.follow == "eip" and self._eip is not None:
             self.addr = self._eip & 0xFFFFFFF0
-        elif self.follow == "esp":
+        elif self.follow == "esp" and self._esp is not None:
             self.addr = self._esp & 0xFFFFFFF0
         elif self.follow == "access" and access is not None:
             self.addr = access[0] & 0xFFFFFFF0
@@ -1248,8 +1280,34 @@ class MemoryView(QWidget):
         self.addr_e.setStyleSheet("")
         self.follow_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
         self.addr_e.setText(f"0x{self.addr:08x}")
-        self.follow_lbl.setText("showing clicked access" if self._click_hl else
-                                (f"following {self.follow.upper()}" if self.follow else
-                                 "cyan=EIP  amber=ESP  gold=access"))
-        self.dump.set(self.backend, self.addr, getattr(self, "_eip", 0),
-                      getattr(self, "_esp", 0), hl)
+        if self._click_hl:
+            follow_text = "showing clicked access (physical)"
+        elif self.follow in ("eip", "esp"):
+            physical = self._eip if self.follow == "eip" else self._esp
+            linear = (
+                self._eip_linear if self.follow == "eip" else self._esp_linear)
+            offset = (
+                self._eip_offset if self.follow == "eip" else self._esp_offset)
+            follow_text = (
+                f"{self.follow.upper()} translation unavailable"
+                if physical is None else
+                f"{self.follow.upper()} lin {linear:08x} → phys {physical:08x}"
+                if physical != linear else
+                f"{self.follow.upper()} off {offset:08x} → phys {physical:08x}"
+                if linear != offset else
+                f"following {self.follow.upper()}")
+        elif self.follow == "access":
+            follow_text = "following ACCESS (physical)"
+        else:
+            follow_text = "cyan=EIP  amber=ESP  gold=access · physical view"
+        self.follow_lbl.setText(follow_text)
+        self.follow_lbl.setToolTip(
+            "Memory displays physical backend bytes. EIP and ESP are translated "
+            "from their segment-relative offsets; access follows the translation "
+            "captured for that retirement.")
+        eip = getattr(self, "_eip", None)
+        esp = getattr(self, "_esp", None)
+        self.dump.set(
+            self.backend, self.addr,
+            eip if eip is not None else -8,
+            esp if esp is not None else -8, hl)

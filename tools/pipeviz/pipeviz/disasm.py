@@ -110,6 +110,7 @@ for _i, _names in enumerate([("eax", "ax", "al", "ah"), ("ecx", "cx", "cl", "ch"
                              ("esi", "si", "sil"), ("edi", "di", "dil")]):
     for _n in _names:
         _GPR_OF[_n] = _i
+_SEG_OF = {"cs": 0, "ss": 1, "ds": 2, "es": 3, "fs": 4, "gs": 5}
 
 
 def written_regs(code: bytes, addr: int = 0, bits: int = 32):
@@ -167,9 +168,11 @@ def mem_operand(code: bytes, addr: int = 0, bits: int = 32):
     """The instruction's first explicit memory operand that is actually accessed
     (a load/store, NOT an `lea` address computation), as the raw material for
     resolving the effective address it touched from the committed register file:
-    `(base_gpr_idx, index_gpr_idx, scale, disp, is_store, size)` with -1 for an
-    absent base/index and `size` the access width in bytes — or None when the
-    instruction makes no memory access."""
+    `(base_gpr_idx, index_gpr_idx, scale, disp, is_store, size, segment_idx,
+    address_mask)` with -1 for an absent base/index, `size` the access width in
+    bytes, and the architectural default/overridden segment plus actual
+    16/32-bit address-size mask — or None when the instruction makes no memory
+    access."""
     md = _md16d if bits == 16 else _md32d
     try:
         for insn in md.disasm(code, addr):
@@ -183,8 +186,20 @@ def mem_operand(code: bytes, addr: int = 0, bits: int = 32):
                     m = o.mem
                     bnm = (insn.reg_name(m.base) or "").lower() if m.base else ""
                     inm = (insn.reg_name(m.index) or "").lower() if m.index else ""
+                    snm = (
+                        (insn.reg_name(m.segment) or "").lower()
+                        if m.segment else "")
+                    # x86 defaults BP/SP-based addresses to SS and all others to
+                    # DS. An explicit segment prefix wins. Base—not index—
+                    # selects the default segment.
+                    segment = _SEG_OF.get(
+                        snm, 1 if bnm in ("bp", "ebp", "sp", "esp") else 2)
+                    address_mask = (
+                        0xFFFF if getattr(insn, "addr_size", bits // 8) == 2
+                        else 0xFFFFFFFF)
                     return (_GPR_OF.get(bnm, -1), _GPR_OF.get(inm, -1),
-                            m.scale, m.disp, bool(o.access & CS_AC_WRITE), o.size)
+                            m.scale, m.disp, bool(o.access & CS_AC_WRITE), o.size,
+                            segment, address_mask)
             return None
     except Exception:
         pass

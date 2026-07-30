@@ -135,6 +135,12 @@ typedef struct {
   uint32_t eflags;
   uint32_t gpr[VV_NGPR];
   uint16_t seg[VV_NSEG];     // CS SS DS ES FS GS
+  // Pre-execution translation context. Selectors/GPRs above are the committed
+  // post-state used by Registers; these bases/control registers are sampled
+  // before the retiring edge so code and explicit memory operands can be
+  // resolved to the physical bytes the instruction actually used.
+  uint32_t seg_base[VV_NSEG];
+  uint32_t cr0, cr3, cr4;
   uint8_t  pipe;             // 0=U, 1=V, 2=none
   uint8_t  paired;           // issued paired with its sibling
   uint8_t  d32;              // CS.D at execute time (0=16-bit, 1=32-bit) for disasm

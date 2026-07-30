@@ -143,6 +143,18 @@ generated source line before continuing to the verified result. The compact
 Assembly sidebar no longer repeats pipe/latency above its own pipeline preview,
 and Hotspots shares now carry an explicit percent sign.
 
+**Segmented/paged address audit:** Memory consumed physical BFM addresses but
+followed raw EIP, ESP, and trace effective offsets. Thus reset `F000:FFF0`
+silently displayed `0x0000fff0`, not the executing bytes at `0x000ffff0`, and
+non-identity paging was equally wrong. The retirement ABI now captures
+pre-execution segment bases plus CR0/CR3/CR4. The bridge reads retired code
+through those legacy page tables; Trace retains effective, segment-linear, and
+physical forms of explicit operands; Memory follows exact physical EIP/ESP and
+access bytes; Mem map deliberately remains in timing-D-cache effective-offset
+space. Synthetic 4 KiB/PSE/override tests and the real reset vector lock the
+distinction. The UI/docs explicitly limit operand replay to explicit Capstone
+memory operands rather than claiming implicit stack/string traffic.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

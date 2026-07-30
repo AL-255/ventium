@@ -277,7 +277,7 @@ Observed evidence:
 - Switching to the branch image yields a clean user-mode session with no stale
   trace filter or memory selection/address.
 
-Capture: `06_system_paging.png`.
+Captures: `06a_system_reset_vector_memory.png`, `06_system_paging.png`.
 
 ### 7. Stale SoC library recovery
 
@@ -524,6 +524,16 @@ The screenshot review found and corrected the following:
     replay and per-PC miss attribution from that state. A synthetic two-way set
     proves a seeded resident hit and proves that a conflict evicts the seeded
     LRU—not MRU—tag.
+19. Memory previously treated EIP, ESP, and trace effective offsets as physical
+    BFM addresses. At reset that made `F000:FFF0` inspect `0x0000fff0` instead
+    of the executing bytes at `0x000ffff0`; non-identity paging had the same
+    failure. Retirement records now carry pre-execution segment bases and
+    CR0/CR3/CR4, instruction bytes are fetched through those page tables, and
+    explicit operands retain effective, linear, and physical addresses. Tests
+    cover DS-based retirement resolution, SS defaults, `0x67` address-size
+    overrides, FS overrides, 4 KiB pages, 4 MiB PSE pages, absent/PAE rejection,
+    flat D-cache identity, and the real-mode reset vector. The native smoke
+    verifier also rejects any C-header/shared-library struct-size drift.
 
 ## Coverage limits
 

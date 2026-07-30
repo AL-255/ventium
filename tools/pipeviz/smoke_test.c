@@ -10,6 +10,19 @@
 #include "ventium_viz.h"
 
 int main(int argc, char** argv) {
+  const size_t abi_sizes[] = {
+    sizeof(vv_state_t), sizeof(vv_tlb_t), sizeof(vv_cline_t),
+    sizeof(vv_retire_t), sizeof(vv_cycle_t)
+  };
+  for (unsigned which = 0; which < sizeof(abi_sizes) / sizeof(abi_sizes[0]);
+       ++which) {
+    if (vv_sizeof((int)which) != abi_sizes[which]) {
+      fprintf(stderr, "smoke_test: ABI size mismatch for struct %u "
+                      "(library=%u header=%zu)\n",
+              which, vv_sizeof((int)which), abi_sizes[which]);
+      return 2;
+    }
+  }
   char default_img[4096] = {0};
   const char* img = argc > 1 ? argv[1] : NULL;
   if (!img) {

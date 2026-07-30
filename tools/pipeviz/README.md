@@ -145,9 +145,11 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   * **Cycles** — a **cycle-attribution** breakdown (every cycle classified by FSM
     state: retire / issue-stall / mispredict / I-fill / front-end / slow-path /
     page-walk / x87 / system / halt), so the tallest bar is the bottleneck.
-  * **Memory** — a hex/ASCII inspector (type an address, or follow EIP / ESP / the
-    most-recent load-store **access**, which gold-outlines the touched bytes).
-  * **Mem map** — an **address-vs-retire-order scatter** of the load/store stream
+  * **Memory** — a physical hex/ASCII inspector (type an address, or follow
+    segment-relative EIP / ESP / the most-recent explicit load-store **access**
+    through legacy page translation, which gold-outlines the touched bytes).
+  * **Mem map** — an **address-vs-retire-order scatter** of explicit memory
+    operand effective offsets
     (a strided walk reads as a diagonal, a hot location as a band) with the dominant
     stride; **click a point** to jump the trace + Registers + Memory tab to it.
 * **Trace panel** (bottom-left) — one row per retired instruction: `n`, retire
@@ -157,7 +159,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   match, 16/32-bit per the live CS.D), and an **effect** column showing what each
   instruction architecturally *wrote* — destination GPR + committed value (blue),
   changed flags (teal), x87 ST(0) result (purple), x87 exceptions (amber), and the
-  resolved memory-access address of a load/store (gold). A **filter box** accepts
+  resolved effective offset of an explicit memory operand (gold); its segment-linear
+  and physical translation is retained for Memory drill-down. A **filter box** accepts
   `mov` / `pc:08048` / `n>=100` / `cyc>=133` / `pipe:V` / `stall` / `@` (memory-accessing
   rows); `/` focuses it, Enter/F3 and Shift+F3 navigate results, and Escape clears it.
   Long refreshes retain and label the newest 6,000 retirements rather than

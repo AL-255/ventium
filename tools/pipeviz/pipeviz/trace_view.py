@@ -257,7 +257,9 @@ class TraceView(QWidget):
         super().__init__(parent)
         self._last_cyc = None
         self.last_access = None
-        self.accesses = []        # [(retire_n, address, is_store)] for the access map
+        # Explicit memory operands:
+        # (n, cyc, effective offset, store, size, pc, linear, physical)
+        self.accesses = []
         self._tokens = []
         lay = QVBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
@@ -350,6 +352,8 @@ class TraceView(QWidget):
         self._seen = 0      # next retire n to fetch
         self._session_first_n = None
         self._bits = 32
+        self._prev_seg_base = None
+        self._prev_cr0 = self._prev_cr3 = self._prev_cr4 = 0
 
     def _apply_column_profile(self):
         """Protect disassembly width when the debugger's left pane is compact."""
@@ -461,6 +465,8 @@ class TraceView(QWidget):
         self._prev_fstat = None
         self._prev_st0 = None
         self._prev_gpr = None     # prior retirement's committed GPRs (pre-state for EA)
+        self._prev_seg_base = None
+        self._prev_cr0 = self._prev_cr3 = self._prev_cr4 = 0
         self.last_access = None   # newest resolved load/store address (Memory '→access')
         self.accesses = []        # access stream for the access map
         self._apply_filter()
@@ -501,6 +507,8 @@ class TraceView(QWidget):
             self._prev_fstat = None
             self._prev_st0 = None
             self._prev_gpr = None
+            self._prev_seg_base = None
+            self._prev_cr0 = self._prev_cr3 = self._prev_cr4 = 0
             self.last_access = None
             self.accesses = []
             # Seed pre-instruction state for the first visible row so its flag,
@@ -512,6 +520,10 @@ class TraceView(QWidget):
                     self._last_cyc = int(prev.cyc)
                     self._prev_eff = int(prev.eflags)
                     self._prev_gpr = list(prev.gpr)
+                    self._prev_seg_base = list(prev.seg_base)
+                    self._prev_cr0 = int(prev.cr0)
+                    self._prev_cr3 = int(prev.cr3)
+                    self._prev_cr4 = int(prev.cr4)
                     if prev.x87_valid:
                         self._prev_fstat = int(prev.fstat)
                         self._prev_st0 = bytes(
@@ -544,37 +556,63 @@ class TraceView(QWidget):
                 if mn.startswith("f") and st0 != getattr(self, "_prev_st0", None):
                     fp_write = f"st0={floatx80_to_float(st0):.6g}"
                 self._prev_st0 = st0
-            # resolved memory-access address: a load/store's effective address =
-            # base + index*scale + disp evaluated on the PRE-instruction register file
-            # (the prior retirement's committed GPRs — exact for a U-pipe op, which is
-            # always the senior of its dual-issue pair, so its inputs are the prior
-            # commit). Surfaced as '@<ea>' so a cache-missing load's stride is visible.
+            # Resolve an explicit memory operand through all three x86 address
+            # layers: effective offset from the pre-instruction GPRs, linear from
+            # its default/overridden segment base, and physical through the
+            # pre-execution page tables. The trace keeps @<effective> because that
+            # is what the timing-only D-cache model keys on; Memory follows the
+            # translated physical bytes.
             mem_ea = None
             mo = disasm.mem_operand(bs, r.pc, bits)
             if mo is not None:
-                base, index, scale, disp, _store, size = mo
+                (base, index, scale, disp, _store, size,
+                 segment, address_mask) = mo
                 needs_reg = base >= 0 or index >= 0
                 pre = getattr(self, "_prev_gpr", None)
                 if not needs_reg or (r.pipe == 0 and pre is not None):
                     g = pre if pre is not None else [0] * 8
                     ea = ((g[base] if base >= 0 else 0)
                           + (g[index] if index >= 0 else 0) * scale + disp)
-                    mask = 0xffffffff if bits == 32 else 0xffff
-                    ea &= mask
+                    ea &= address_mask
+                    pre_bases = (
+                        self._prev_seg_base
+                        if self._prev_seg_base is not None
+                        else list(r.seg_base))
+                    linear = (int(pre_bases[segment]) + ea) & 0xFFFFFFFF
+                    cr0 = (
+                        self._prev_cr0 if self._prev_seg_base is not None
+                        else int(r.cr0))
+                    cr3 = (
+                        self._prev_cr3 if self._prev_seg_base is not None
+                        else int(r.cr3))
+                    cr4 = (
+                        self._prev_cr4 if self._prev_seg_base is not None
+                        else int(r.cr4))
+                    physical = backend.translate_linear(linear, cr0, cr3, cr4)
                     mem_ea = (f"@{ea:08x}" if bits == 32 else f"@{ea:04x}")
-                    self.last_access = (ea, size)   # newest access -> Memory '→access'
-                    # accumulate the (retire-n, cyc, address, is_store, size, pc) access
-                    # stream for the access-pattern map + the per-PC D$-miss attribution.
+                    # Memory reads the BFM's physical image. Preserve the
+                    # D-cache/effective offset separately, but only enable
+                    # →access when the exact physical translation is known.
+                    self.last_access = (
+                        (physical, size) if physical is not None else None)
+                    # Accumulate effective + translated addresses for the Mem map,
+                    # physical inspector, and per-PC D$-miss attribution.
                     # pc is carried HERE so the attribution doesn't depend on the Konata
                     # insns rolling window (which can drop a PC the access stream still
                     # holds for a long, sparse-memory run). Capped, rolling.
-                    self.accesses.append((int(r.n), int(r.cyc), ea, _store, size, int(r.pc)))
+                    self.accesses.append((
+                        int(r.n), int(r.cyc), ea, _store, size, int(r.pc),
+                        linear, physical))
                     if len(self.accesses) > 4000:
                         del self.accesses[:len(self.accesses) - 4000]
             eff = _effect(wgpr, wflags, list(r.gpr), efl, getattr(self, "_prev_eff", None),
                           xv, fsw, getattr(self, "_prev_fstat", None), fp_write, mem_ea)
             self._prev_eff = efl
             self._prev_gpr = list(r.gpr)
+            self._prev_seg_base = list(r.seg_base)
+            self._prev_cr0 = int(r.cr0)
+            self._prev_cr3 = int(r.cr3)
+            self._prev_cr4 = int(r.cr4)
             if xv:
                 self._prev_fstat = fsw
             # delta cycles since the previous retirement (surfaces stalls); a
