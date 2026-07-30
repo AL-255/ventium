@@ -137,22 +137,24 @@ _add("loop loopz loope loopnz loopne jcxz jecxz", "target",
      latency="about 5 cycles")
 _add("movs movsb movsw movsd stos stosb stosw stosd", "",
      "Move or store one string element; REP is micro-sequenced.",
-     latency="memory/string pipeline")
+     stages=("F", "D", "S", "M"), latency="memory/string pipeline")
 _add("lods lodsb lodsw lodsd scas scasb scasw scasd", "",
      "Load or scan one string element; REP is micro-sequenced.",
-     latency="memory/string pipeline")
+     stages=("F", "D", "S", "M"), latency="memory/string pipeline")
 _add("cmps cmpsb cmpsw cmpsd", "",
      "Compare string elements and update flags; REP is micro-sequenced.",
-     latency="memory/string pipeline")
+     stages=("F", "D", "S", "M"), latency="memory/string pipeline")
 _add("ins insb insw insd outs outsb outsw outsd", "",
      "Transfer a string element through an I/O port.",
-     latency="I/O handshake", availability="SoC/co-simulation")
+     stages=("F", "D", "S", "M"), latency="I/O handshake",
+     availability="SoC/co-simulation")
 _add("rep repe repz repne repnz lock", "instruction",
      "Legacy repetition/atomic prefix accepted by the decoder.",
      latency="depends on following instruction")
-_add("clc stc cmc cld std cli sti", "",
-     "Clear, set, or complement carry/direction/interrupt control flags.",
-     availability="CLI/STI are system-oriented")
+_add("clc stc cmc cld std", "",
+     "Clear, set, or complement carry/direction control flags.")
+_add("cli sti", "", "Clear or set the interrupt-enable flag.",
+     availability="system-oriented")
 _add("lahf sahf", "", "Transfer selected status flags to/from AH.")
 _add("hlt", "", "Stop retirement and enter the terminal halted state.",
      "NP", stages=("F", "D", "."), latency="terminal")
@@ -232,6 +234,49 @@ _add("fwait wait", "", "Wait for pending x87 work (modeled as the P5 wait/no-op 
 
 
 _DESCRIPTION_OVERRIDES = {
+    "movs": "Move one operand-sized element from DS:[(E)SI] to ES:[(E)DI].",
+    "movsb": "Move one byte from DS:[(E)SI] to ES:[(E)DI].",
+    "movsw": "Move one word from DS:[(E)SI] to ES:[(E)DI].",
+    "movsd": "Move one dword from DS:[(E)SI] to ES:[(E)DI].",
+    "stos": "Store the operand-sized accumulator in ES:[(E)DI].",
+    "stosb": "Store AL in ES:[(E)DI].",
+    "stosw": "Store AX in ES:[(E)DI].",
+    "stosd": "Store EAX in ES:[(E)DI].",
+    "lods": "Load one operand-sized element from DS:[(E)SI] into the accumulator.",
+    "lodsb": "Load one byte from DS:[(E)SI] into AL.",
+    "lodsw": "Load one word from DS:[(E)SI] into AX.",
+    "lodsd": "Load one dword from DS:[(E)SI] into EAX.",
+    "scas": "Compare the accumulator with one operand-sized element at ES:[(E)DI].",
+    "scasb": "Compare AL with the byte at ES:[(E)DI].",
+    "scasw": "Compare AX with the word at ES:[(E)DI].",
+    "scasd": "Compare EAX with the dword at ES:[(E)DI].",
+    "cmps": "Compare operand-sized DS:[(E)SI] and ES:[(E)DI] elements.",
+    "cmpsb": "Compare the bytes at DS:[(E)SI] and ES:[(E)DI].",
+    "cmpsw": "Compare the words at DS:[(E)SI] and ES:[(E)DI].",
+    "cmpsd": "Compare the dwords at DS:[(E)SI] and ES:[(E)DI].",
+    "ins": "Read one operand-sized element from I/O port DX into ES:[(E)DI].",
+    "insb": "Read one byte from I/O port DX into ES:[(E)DI].",
+    "insw": "Read one word from I/O port DX into ES:[(E)DI].",
+    "insd": "Read one dword from I/O port DX into ES:[(E)DI].",
+    "outs": "Write one operand-sized DS:[(E)SI] element to I/O port DX.",
+    "outsb": "Write one byte from DS:[(E)SI] to I/O port DX.",
+    "outsw": "Write one word from DS:[(E)SI] to I/O port DX.",
+    "outsd": "Write one dword from DS:[(E)SI] to I/O port DX.",
+    "clc": "Clear the carry flag (CF=0).",
+    "stc": "Set the carry flag (CF=1).",
+    "cmc": "Complement the carry flag (CF=¬CF).",
+    "cld": "Clear the direction flag so string indexes increment.",
+    "std": "Set the direction flag so string indexes decrement.",
+    "cli": "Clear IF, disabling maskable interrupts after this instruction.",
+    "sti": "Set IF, enabling maskable interrupts after the interrupt shadow.",
+    "lock": "Request atomic memory access for the following supported instruction.",
+    "rep": "Repeat the following string instruction while (E)CX is nonzero.",
+    "repe": "Repeat while (E)CX is nonzero and ZF=1.",
+    "repz": "Repeat while (E)CX is nonzero and ZF=1.",
+    "repne": "Repeat while (E)CX is nonzero and ZF=0.",
+    "repnz": "Repeat while (E)CX is nonzero and ZF=0.",
+    "in": "Read an I/O port into AL, AX, or EAX.",
+    "out": "Write AL, AX, or EAX to an I/O port.",
     "fld": "Push a real memory value or x87 register onto the x87 stack.",
     "fild": "Convert a signed integer memory value to extended real and push it.",
     "fbld": "Convert a packed-BCD memory value to extended real and push it.",

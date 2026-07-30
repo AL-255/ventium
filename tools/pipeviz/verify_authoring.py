@@ -169,6 +169,38 @@ def verify_catalog():
         "Load, store, clear, initialize, or inspect x87 control/status state.",
     }
     assert not any(info.description in obsolete_x87_help for info in CATALOG)
+    expected_string_details = {
+        "movsb": "one byte from DS:[(E)SI] to ES:[(E)DI]",
+        "stosd": "Store EAX in ES:[(E)DI]",
+        "lodsw": "into AX",
+        "scasd": "Compare EAX with the dword",
+        "cmpsb": "bytes at DS:[(E)SI] and ES:[(E)DI]",
+        "insd": "I/O port DX into ES:[(E)DI]",
+        "outsw": "from DS:[(E)SI] to I/O port DX",
+        "repne": "(E)CX is nonzero and ZF=0",
+        "std": "string indexes decrement",
+        "cli": "disabling maskable interrupts",
+    }
+    for mnemonic, detail in expected_string_details.items():
+        assert detail in instruction_info(mnemonic).description
+    assert instruction_info("movsd").stages == ("F", "D", "S", "M")
+    assert instruction_info("outsb").stages == ("F", "D", "S", "M")
+    assert instruction_info("clc").availability == "user"
+    assert instruction_info("std").availability == "user"
+    assert instruction_info("cli").availability == "system-oriented"
+    assert instruction_info("sti").availability == "system-oriented"
+    obsolete_string_help = {
+        "Move or store one string element; REP is micro-sequenced.",
+        "Load or scan one string element; REP is micro-sequenced.",
+        "Compare string elements and update flags; REP is micro-sequenced.",
+        "Transfer a string element through an I/O port.",
+        "Legacy repetition/atomic prefix accepted by the decoder.",
+        "Clear, set, or complement carry/direction/interrupt control flags.",
+        "Clear, set, or complement carry/direction control flags.",
+        "Clear or set the interrupt-enable flag.",
+        "Read or write an I/O port.",
+    }
+    assert not any(info.description in obsolete_string_help for info in CATALOG)
     obsolete_condition_help = {
         "Conditional branch selected by EFLAGS.",
         "Assembler alias for a conditional branch selected by EFLAGS.",
@@ -1102,6 +1134,19 @@ def scenario(app, outdir):
             "Store ST(0) divided by ST(i) in ST(i), then pop.")
         assert editor.completion.info.preview.info.pipe == "FP"
         save(editor.completion, outdir, "01_opcode_x87_popup")
+        movsd_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic
+            == "movsd")
+        editor.completion.list.setCurrentRow(movsd_row)
+        settle(app)
+        assert editor.completion.info.description.text() == (
+            "Move one dword from DS:[(E)SI] to ES:[(E)DI].")
+        assert editor.completion.info.preview.info.stages == (
+            "F", "D", "S", "M")
+        assert editor.completion.info.availability.text() == (
+            "Availability · user")
+        save(editor.completion, outdir, "01_opcode_string_popup")
         editor.completion.list.setCurrentRow(add_row)
         reference_source = editor.toPlainText()
         editor.completion.accept_current()

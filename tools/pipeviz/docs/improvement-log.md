@@ -9,6 +9,26 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — truthful string and flag completion
+
+**String/flag metadata audit:** MOVS/STOS, LODS/SCAS, and INS/OUTS pairs shared
+directionless prose and advertised an F→D→X ALU preview despite taking the
+micro-sequenced memory path. The grouped flag entry also marked harmless
+CLC/STC/CLD/STD as “CLI/STI system-oriented,” turning normal user instructions
+amber.
+
+**Changes:** all 28 string and I/O-string spellings now name element width and
+DS:SI, ES:DI, accumulator, or port-DX direction, with an F→D→system→memory
+preview. CLC/STC/CMC, CLD/STD, and CLI/STI state their exact flag effect; only
+CLI/STI are restricted. REP/REPE/REPNE/LOCK and scalar IN/OUT likewise explain
+their counter/ZF/atomic or port direction.
+
+**Verification:** catalogue acceptance samples every direction family, requires
+the microcode/memory stages, proves user versus system availability, and
+forbids all former grouped descriptions. Popup interaction selects `movsd`,
+checks its exact dword DS:SI→ES:DI prose, neutral availability, and four-stage
+preview, then records it for visual review.
+
 ## July 30 continuation — precise x87 completion semantics
 
 **Floating-point metadata audit:** x87 completion exposed exact mnemonics and
