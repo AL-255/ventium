@@ -303,7 +303,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Ctrl+Shift+R</b></td><td>reload the current program from disk</td></tr>
  <tr><td><b>Ctrl+0</b></td><td>reset panel proportions</td></tr>
  <tr><td><b>Alt+V / Alt+A / Alt+C</b></td><td>switch workspace and focus Pipeline / Assembly / C</td></tr>
- <tr><td><b>Alt+1 … Alt+0</b></td><td>select and focus Code$ … Mem map analysis</td></tr>
+ <tr><td><b>Alt+1 … Alt+0</b></td><td>open Visualizer, then select and focus Code$ … Mem map analysis</td></tr>
  <tr><td><b>R</b></td><td>reset or restore snapshot</td></tr>
  <tr><td><b>.</b></td><td>one clock</td></tr>
  <tr><td><b>I / Space</b></td><td>next retired instruction</td></tr>

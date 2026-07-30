@@ -365,10 +365,13 @@ class MainWindow(QMainWindow):
         reset_layout.triggered.connect(self._reset_layout)
         view_menu.addAction(reset_layout)
         view_menu.addSeparator()
+        self._toolbar_visibility_actions = []
         for toolbar in (self.session_toolbar, self.transport_toolbar, self.status_toolbar):
             action = toolbar.toggleViewAction()
             action.setText(f"Show {toolbar.windowTitle()} toolbar")
+            action.setEnabled(self.workspace.currentIndex() == 0)
             view_menu.addAction(action)
+            self._toolbar_visibility_actions.append(action)
         analysis_menu = view_menu.addMenu("Analysis tab")
         self._analysis_actions = []
         for index in range(self.tables.tabs.count()):
@@ -428,6 +431,12 @@ class MainWindow(QMainWindow):
 
     def _select_analysis_tab(self, index):
         if 0 <= index < self.tables.tabs.count():
+            # Analysis lives in the Visualizer. Complete the documented
+            # navigation even when Alt+1…Alt+0 starts in Assembly or C; changing
+            # a hidden tab with no visible outcome makes the shortcut appear
+            # broken.
+            if self.workspace.currentWidget() is not self.visualizer_tab:
+                self.workspace.setCurrentWidget(self.visualizer_tab)
             self.tables.tabs.setCurrentIndex(index)
             self._notice(f"Analysis: {self.tables.tabs.tabText(index)}")
             QTimer.singleShot(
@@ -873,6 +882,12 @@ class MainWindow(QMainWindow):
             action.setEnabled(visualizer)
         for shortcut in self._debug_shortcuts:
             shortcut.setEnabled(visualizer)
+        for action in getattr(self, "_toolbar_visibility_actions", ()):
+            # Source workspaces intentionally own the full height. Prevent the
+            # View menu or toolbar context menu from reintroducing Visualizer
+            # chrome over an editor while still preserving each user's chosen
+            # visibility for the next Visualizer visit.
+            action.setEnabled(visualizer)
         toolbars = (
             self.session_toolbar, self.transport_toolbar, self.status_toolbar)
         if not visualizer and not self._source_workspace_active:

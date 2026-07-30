@@ -238,6 +238,12 @@ def scenario(app, outdir):
         toolbars = (
             win.session_toolbar, win.transport_toolbar, win.status_toolbar)
         assert all(toolbar.isHidden() for toolbar in toolbars)
+        assert all(not action.isEnabled()
+                   for action in win._toolbar_visibility_actions)
+        for toolbar, action in zip(
+                toolbars, win._toolbar_visibility_actions):
+            action.trigger()
+            assert toolbar.isHidden()
         assert win.open_action.text() == "Open assembly source…"
         assert win.open_action.shortcut().toString() == "Ctrl+O"
         assert win.save_source_action.isEnabled()
@@ -251,6 +257,24 @@ def scenario(app, outdir):
         assert win.pipeline.board.accessibleName() == "Live pipeline stage board"
         assert "clicked" in win.pipeline.board.accessibleDescription()
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
+
+        # Analysis shortcuts are global navigation, not hidden background
+        # mutations. From a source editor they must reveal the Visualizer and
+        # focus the requested analysis content, then restore editor focus on
+        # the way back.
+        QTest.keyClick(win.assembly.editor, Qt.Key_1, Qt.AltModifier)
+        settle(app)
+        assert win.workspace.currentWidget() is win.visualizer_tab
+        assert win.tables.tabs.currentIndex() == 0
+        assert app.focusWidget() is win.tables.ic
+        assert all(action.isEnabled()
+                   for action in win._toolbar_visibility_actions)
+        assert all(not toolbar.isHidden() for toolbar in toolbars)
+        QTest.keyClick(win.tables.ic, Qt.Key_A, Qt.AltModifier)
+        settle(app)
+        assert win.workspace.currentWidget() is win.assembly
+        assert app.focusWidget() is win.assembly.editor
+        assert all(toolbar.isHidden() for toolbar in toolbars)
 
         editor = win.assembly.editor
         editor.clear()

@@ -149,7 +149,9 @@ its time point explicit at 1280×800. **View → Reset panel layout**
 (`Ctrl+0`) restores the recommended proportions after exploratory resizing.
 `Alt+1` through `Alt+0` jump directly among Code$, Data$, TLB, Prefetch,
 Hotspots, Branches, Mix, Cycles, Memory, and Mem map and focus the active
-table/control; display-only Prefetch/Cycles pages focus the tab strip.
+table/control. They also return from Assembly/C to the Visualizer, so the
+shortcut never changes an invisible background tab; display-only
+Prefetch/Cycles pages focus the tab strip.
 An empty Mem map likewise keeps focus on the tab strip until a traversable
 access exists.
 

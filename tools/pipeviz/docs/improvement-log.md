@@ -11,6 +11,15 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Cross-workspace View audit:** Visualizer toolbars were programmatically hidden
+over Assembly/C but their View actions remained enabled, allowing debugger
+chrome to cover an editor. Likewise Alt+1…Alt+0 changed an invisible analysis
+tab without leaving the source workspace, contradicting “select and focus.”
+Toolbar actions are now locked while authoring (with the user's Visualizer
+visibility preserved), and every analysis shortcut returns to Visualizer before
+focusing its content. A real keyboard round trip verifies focus and chrome in
+both directions.
+
 **Dynamic-canvas accessibility audit:** custom-painted pipeline and memory
 visuals had stable names but static descriptions, so their live content was
 available only as pixels or pointer tooltips. The stage board now describes its
