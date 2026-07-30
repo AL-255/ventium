@@ -790,6 +790,17 @@ def scenario(app, outdir):
         win.workspace.setCurrentWidget(win.assembly)
         settle(app)
         save(win, outdir, "02_assembly_source_link")
+        assert not win.reload_action.isEnabled()
+        pre_reload_backend = win.backend
+        pre_reload_cycle = win.backend.state().core_cyc
+        pre_reload_map = dict(win._assembly_source_map)
+        pre_reload_line = editor._execution_line
+        win.reload_action.trigger()
+        settle(app)
+        assert win.backend is pre_reload_backend
+        assert win.backend.state().core_cyc == pre_reload_cycle
+        assert win._assembly_source_map == pre_reload_map
+        assert editor._execution_line == pre_reload_line
 
         # Unpin is a pure linked-view operation: it clears every historical
         # selection cue and refreshes live registers immediately, while neither

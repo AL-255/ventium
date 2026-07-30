@@ -935,6 +935,11 @@ class MainWindow(QMainWindow):
         self.save_source_action.setText(
             "Save assembly source" if index == 1 else
             "Save C source" if index == 2 else "Save source")
+        # Reload means "re-read the already-built program", not "rebuild this
+        # source editor." Keeping it active over Assembly/C makes Ctrl+Shift+R
+        # run an older generated ELF and invalidate source links behind the
+        # user's current text. Authoring has explicit Compile/Assemble actions.
+        self.reload_action.setEnabled(index == 0 and self.image_path is not None)
 
     def _save_active_source(self):
         source = (
@@ -1142,7 +1147,7 @@ class MainWindow(QMainWindow):
         self.image_kind = kind
         self.snapshot_prefix = None
         self._last_program_dir = os.path.dirname(os.path.abspath(path))
-        self.reload_action.setEnabled(True)
+        self._sync_workspace_file_actions()
         self._clear_reset_required()
         # Known repository system tests boot at F000:FFF0. A generic large
         # `.bin` is not sufficient evidence: user flat binaries commonly use
@@ -1218,6 +1223,7 @@ class MainWindow(QMainWindow):
             self.reset_btn.setStyleSheet(previous["reset_style"])
             self.action_hint.setText(previous["notice"])
             self._sync_config_enabled()
+            self._sync_workspace_file_actions()
             return False
         if hasattr(self, "assembly"):
             self._clear_assembly_source_link()
@@ -1311,7 +1317,7 @@ class MainWindow(QMainWindow):
         self._applied_reset_config = None
         self._clear_assembly_source_link()
         self._last_snapshot_dir = os.path.dirname(os.path.abspath(prefix))
-        self.reload_action.setEnabled(False)
+        self._sync_workspace_file_actions()
         self.sys_cb.setChecked(False)
         self.soc_cb.setChecked(False)
         self.reset_btn.setText(" Restore snapshot")

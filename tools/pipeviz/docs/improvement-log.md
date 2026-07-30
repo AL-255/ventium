@@ -11,6 +11,14 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Authored-reload safety audit:** after Assemble + Run, Reload remained enabled
+over the Assembly/C workspaces. Ctrl+Shift+R there re-read the previous generated
+ELF rather than rebuilding current editor text, silently clearing the valid
+source map and creating a stale-binary trap. Reload is now Visualizer-only;
+source workspaces keep Compile/Assemble as their truthful build actions. A live
+authored session verifies that a disabled reload preserves backend identity,
+cycle, PC map, and marked line.
+
 **Cross-workspace View audit:** Visualizer toolbars were programmatically hidden
 over Assembly/C but their View actions remained enabled, allowing debugger
 chrome to cover an editor. Likewise Alt+1…Alt+0 changed an invisible analysis

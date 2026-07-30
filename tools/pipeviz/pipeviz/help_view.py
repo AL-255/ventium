@@ -201,7 +201,10 @@ semicolons separate statements, and completion follows the opcode in each
 statement while ignoring separators/comment markers inside quoted data. Build
 errors, including fatal compiler errors, highlight their source line. Editing
 the source clears diagnostics from the old revision instead of leaving a stale
-green or red result visible.</p>
+green or red result visible. Ctrl+Shift+R is intentionally Visualizer-only:
+it reloads an already-built program rather than rebuilding editor text. Use
+Assemble + Run, or Compile → Assembly followed by Assemble + Run, to keep edits
+and PC links coherent.</p>
 <h2>Source-linked investigation</h2>
 <p>Assembly is built with a DWARF line table. Clicking an occupied live U/V/FP
 stage cell, a Trace row, or a Pipeline timing row therefore marks the exact
