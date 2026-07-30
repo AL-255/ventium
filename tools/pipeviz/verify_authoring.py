@@ -9,7 +9,9 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QTextCursor
+from PySide6.QtGui import (
+    QCloseEvent, QGuiApplication, QTextCursor, QWheelEvent,
+)
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QInputDialog, QMessageBox, QWidget,
@@ -599,6 +601,23 @@ def scenario(app, outdir):
         QTest.keyClick(editor, Qt.Key_0, Qt.ControlModifier)
         assert editor.font().pointSize() == 10
         assert editor.tabStopDistance() == base_tab_stop
+        wheel_up = QWheelEvent(
+            QPoint(20, 20), QPoint(20, 20), QPoint(), QPoint(0, 120),
+            Qt.NoButton, Qt.ControlModifier, Qt.NoScrollPhase, False)
+        QApplication.sendEvent(editor.viewport(), wheel_up)
+        assert wheel_up.isAccepted()
+        assert editor.font().pointSize() == 11
+        wheel_down = QWheelEvent(
+            QPoint(20, 20), QPoint(20, 20), QPoint(), QPoint(0, -120),
+            Qt.NoButton, Qt.ControlModifier, Qt.NoScrollPhase, False)
+        QApplication.sendEvent(editor.viewport(), wheel_down)
+        assert wheel_down.isAccepted()
+        assert editor.font().pointSize() == 10
+        plain_wheel = QWheelEvent(
+            QPoint(20, 20), QPoint(20, 20), QPoint(), QPoint(0, -120),
+            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+        QApplication.sendEvent(editor.viewport(), plain_wheel)
+        assert editor.font().pointSize() == 10
         indentation_probe = "mov eax, 1\nadd eax, 2\nhlt\n"
         editor.setPlainText(indentation_probe)
         selection = editor.textCursor()

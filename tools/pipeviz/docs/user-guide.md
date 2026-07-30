@@ -297,7 +297,7 @@ the current line or selected block as one undoable edit.
 `Home` toggles between the first non-whitespace column and column zero;
 `Shift+Home` extends the selection, while `Ctrl+Home` remains document-start.
 In Assembly/C, `Ctrl+-`/`Ctrl+=` scales source text and line numbers from
-8–24 pt and `Ctrl+0` restores 10 pt. In Visualizer, those keys retain
+8–24 pt, `Ctrl+wheel` uses the same bounds, and `Ctrl+0` restores 10 pt. In Visualizer, those keys retain
 Pipeline-axis zoom and panel-layout reset.
 A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
 `_start`, and a fall-through HLT boilerplate. A source that declares its own

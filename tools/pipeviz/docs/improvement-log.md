@@ -29,6 +29,8 @@ editors now zoom together from 8–24 pt on Ctrl+-/Ctrl+=, recompute tab stops a
 gutter width, expose the current point size assistively, and reset to 10 pt on
 Ctrl+0. Panel-layout reset is now Visualizer-scoped. Acceptance covers both
 bounds, reset, gutter/tab metrics, and shortcut ownership.
+Ctrl+wheel now follows that same bounded path; unmodified wheel events retain
+ordinary scrolling and never alter the font.
 
 **Source Home-key navigation audit:** generic QPlainTextEdit Home always jumped
 past indentation to column zero. Both code workbenches now use code-editor

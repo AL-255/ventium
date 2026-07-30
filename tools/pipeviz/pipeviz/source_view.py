@@ -136,6 +136,17 @@ class CodeEditor(QPlainTextEdit):
         self._line_area.setGeometry(
             QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
 
+    def wheelEvent(self, event):
+        if (event.modifiers() & Qt.ControlModifier
+                and event.angleDelta().y()):
+            notches = max(1, abs(event.angleDelta().y()) // 120)
+            direction = 1 if event.angleDelta().y() > 0 else -1
+            self._set_source_font_size(
+                self._font_size + direction * notches)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
     def paint_line_numbers(self, event):
         painter = QPainter(self._line_area)
         painter.fillRect(event.rect(), QColor("#0b0f14"))
