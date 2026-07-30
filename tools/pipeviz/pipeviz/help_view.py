@@ -277,7 +277,9 @@ operand form, description, availability, estimated latency, U/V pairing class,
 and a miniature F→D→X/M/W/FP pipeline preview. Common ALU/no-op entries describe
 the selected operation rather than an unrelated family member. Normal user
 availability is neutral; mode- or build-gated operations say so explicitly in
-amber. Use Up/Down or Page Up/Page Down to choose, Home/End for the
+amber. Each list row shows mnemonic, pipe class, and operands without repeating
+the mnemonic; the detail pane shows the complete signature. Use Up/Down or Page
+Up/Page Down to choose, Home/End for the
 first/last entry, Enter/Tab or a double-click to insert, and Escape to close;
 these controls remain visible in the popup footer. Completion inserts only when
 the cursor is in an opcode slot;

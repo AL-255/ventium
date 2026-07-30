@@ -22,6 +22,11 @@ class InstructionInfo:
     availability: str = "user"
 
     @property
+    def operands(self):
+        """Operand portion of the signature, without its repeated mnemonic."""
+        return self.signature[len(self.mnemonic):].strip()
+
+    @property
     def search_text(self):
         return " ".join((
             self.mnemonic, self.signature, self.description, self.pipe,

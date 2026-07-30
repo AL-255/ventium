@@ -1214,7 +1214,7 @@ class CompletionPopup(QFrame):
         self.list.clear()
         for info in matches:
             item = QListWidgetItem(
-                f"{info.mnemonic:<10}  {info.pipe:<3}  {info.signature}")
+                f"{info.mnemonic:<10}  {info.pipe:<3}  {info.operands}".rstrip())
             item.setData(Qt.UserRole, info)
             item.setToolTip(info.description)
             self.list.addItem(item)

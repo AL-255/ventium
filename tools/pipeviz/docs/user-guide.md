@@ -277,6 +277,8 @@ Common ALU and no-op descriptions name the selected operation itself rather
 than showing a family sentence about a different mnemonic.
 Ordinary `user` availability is neutral; system, build-flag, SMM, and
 co-simulation restrictions turn amber so the color signals a real constraint.
+The completion list does not repeat the mnemonic inside its operand form; the
+adjacent detail pane still shows the complete signature.
 With no opcode selected, the persistent sidebar uses one compact empty state
 and points to caret placement or `Ctrl+Space`.
 Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,

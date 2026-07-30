@@ -101,6 +101,8 @@ def verify_catalog():
     assert len(CATALOG) == len(MNEMONICS) >= 250
     for info in CATALOG:
         assert info.signature.split()[0] == info.mnemonic
+        assert info.signature == (
+            f"{info.mnemonic} {info.operands}".rstrip())
         assert info.description.strip()
         assert info.pipe in {"UV", "PU", "PV", "NP", "FP", "SYS"}
         assert info.stages
@@ -966,6 +968,14 @@ def scenario(app, outdir):
         add_row = next(
             i for i in range(editor.completion.list.count())
             if editor.completion.list.item(i).data(Qt.UserRole).mnemonic == "add")
+        add_list_text = editor.completion.list.item(add_row).text()
+        assert add_list_text.count("add") == 1
+        assert add_list_text.rstrip().endswith("dst, src")
+        aaa_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic == "aaa")
+        assert editor.completion.list.item(aaa_row).text().split() == [
+            "aaa", "NP"]
         editor.completion.list.setCurrentRow(add_row)
         settle(app)
         assert editor.completion.info.preview.info.mnemonic == "add"

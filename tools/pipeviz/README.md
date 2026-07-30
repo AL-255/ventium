@@ -144,7 +144,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     build diagnostics, `Ctrl+Space` completion over 291 Ventium/P54C mnemonics,
     mode/build availability notes (amber only when restricted), and an
     opcode-specific description plus miniature pipeline
-    preview for every completion. Arrows/Page Up/Page Down traverse matches,
+    preview for every completion. The compact list shows mnemonic, pipe class,
+    and operands once; the detail pane retains the full signature.
+    Arrows/Page Up/Page Down traverse matches,
     while Home/End jump to catalogue bounds. `Ctrl+B` assembles without loading
     the backend; **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or

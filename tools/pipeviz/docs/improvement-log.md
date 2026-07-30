@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — remove duplicate mnemonics from completion rows
+
+**Completion-density audit:** list rows rendered `add  UV  add dst, src` and
+even `aaa  NP  aaa` because the left field displayed the mnemonic and the
+right field reused a signature that already began with it. This wasted scarce
+popup width and made the list look noisier than the source it was completing.
+
+**Changes:** instruction metadata now exposes its operand-only suffix. The list
+renders mnemonic, pairing class, and that suffix exactly once, while the detail
+pane continues to show the full signature. Operand-less rows end cleanly after
+their pipe class.
+
+**Verification:** catalogue acceptance reconstructs every full signature from
+mnemonic plus operand suffix. Popup acceptance requires ADD to contain one
+`add` and end with `dst, src`, while AAA tokenizes to exactly `aaa NP`. Visual
+capture confirms longer operand forms gain useful room without changing popup
+size or its 291 entries.
+
 ## July 30 continuation — reserve amber for opcode restrictions
 
 **Preview-color audit:** `Availability · user` used the same amber as
