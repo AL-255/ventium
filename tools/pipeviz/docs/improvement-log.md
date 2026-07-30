@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**External-load visibility audit:** File → Open example and program drops were
+available from Assembly/C, but a successful load replaced the backend while
+leaving all transport/status chrome hidden behind the source editor. Successful
+program, example, and snapshot loads now reveal the Visualizer and focus its
+Pipeline; source drops still open their workbench and failures stay in place.
+Real example-menu and dropped-program routes verify a fresh visible session.
+
 **Authored-reload safety audit:** after Assemble + Run, Reload remained enabled
 over the Assembly/C workspaces. Ctrl+Shift+R there re-read the previous generated
 ELF rather than rebuilding current editor text, silently clearing the valid

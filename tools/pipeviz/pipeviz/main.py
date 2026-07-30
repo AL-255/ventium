@@ -418,10 +418,16 @@ class MainWindow(QMainWindow):
     def _open_example(self, candidates):
         path = _first_repo_file(candidates)
         if path is not None:
-            self.load_image(path)
+            if self.load_image(path):
+                self._reveal_visualizer()
         else:
             self._refresh_example_actions()
             self._notice("Example is not built yet")
+
+    def _reveal_visualizer(self):
+        """Show debugger chrome after a successful external workload load."""
+        if self.workspace.currentWidget() is not self.visualizer_tab:
+            self.workspace.setCurrentWidget(self.visualizer_tab)
 
     def _reset_layout(self):
         self.outer_split.setSizes([880, 760])
@@ -1261,7 +1267,10 @@ class MainWindow(QMainWindow):
             return False
         if suffix in (".aux", ".vlt"):
             return bool(self.load_snapshot(path))
-        return bool(self.load_image(path))
+        loaded = bool(self.load_image(path))
+        if loaded:
+            self._reveal_visualizer()
+        return loaded
 
     def closeEvent(self, event):
         # Closing while Run is active must not leave a timer dispatching into a
@@ -1339,6 +1348,7 @@ class MainWindow(QMainWindow):
         self._clear_selection_for_advance()
         self._refresh_all()
         self._set_transport_enabled(True)
+        self._reveal_visualizer()
         self._notice(f"Restored snapshot at clock {s.clk}")
         return True
 

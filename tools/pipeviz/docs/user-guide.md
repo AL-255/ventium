@@ -42,7 +42,10 @@ usage without requiring a backend.
 clear format error. For a raw
 image, set **entry**, **load**, and **esp** before Reset when its layout differs
 from the default.  ELF `PT_LOAD` addresses and its entry point are used
-automatically.  Dropping a file on the window does the same thing.
+automatically. Dropping a file on the window does the same thing. Successful
+program, example, and snapshot loads reveal the Visualizer even when they start
+from Assembly/C; source-file drops instead open their matching workbench. A
+failed load leaves the current workspace and live session intact.
 A flat image may use a sibling `manifest.json`; its `entry` and `load_addr`
 accept either JSON integers or `0x…` strings. It can fully describe a
 repeatable launch:

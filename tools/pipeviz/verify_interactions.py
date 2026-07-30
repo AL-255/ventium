@@ -1051,8 +1051,16 @@ def scenario_startup(app, outdir):
         branch_example = next(
             action for action in win._examples_menu.actions()
             if action.text() == "Dual issue and branches")
+        win.workspace.setCurrentWidget(win.assembly)
+        settle(app)
+        win.assembly.editor.setFocus(Qt.OtherFocusReason)
+        settle(app)
+        assert all(toolbar.isHidden() for toolbar in (
+            win.session_toolbar, win.transport_toolbar, win.status_toolbar))
         branch_example.trigger()
         settle(app)
+        assert win.workspace.currentWidget() is win.visualizer_tab
+        assert win.pipeline.konata.plot.isVisible()
         assert win.image_path and "mb_brloop" in os.path.basename(win.image_path)
         assert win.reload_action.isEnabled() and win.step1_btn.isEnabled()
         assert all(widget.isEnabled() for widget in win._config_widgets)
@@ -1069,6 +1077,18 @@ def scenario_startup(app, outdir):
         assert all(control.isEnabled()
                    for control in win.tables.mem._session_controls)
         assert not win.tables.mem.access_btn.isEnabled()
+
+        # A program dropped over either source editor is also an external load:
+        # reveal the resulting debugger instead of replacing its backend behind
+        # hidden transport/status chrome.
+        loaded_example = win.image_path
+        win.workspace.setCurrentWidget(win.c_source)
+        settle(app)
+        assert win._load_dropped_path(loaded_example)
+        settle(app)
+        assert win.workspace.currentWidget() is win.visualizer_tab
+        assert win.pipeline.konata.plot.isVisible()
+        assert win.backend.retire_count() == 0
 
         manifest_dir = os.path.join(outdir, "numeric_manifest")
         os.makedirs(manifest_dir, exist_ok=True)
