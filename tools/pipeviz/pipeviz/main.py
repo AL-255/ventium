@@ -469,6 +469,7 @@ class MainWindow(QMainWindow):
             target.setFocus(Qt.ShortcutFocusReason)
 
     def _show_guide(self, topic="Getting started"):
+        self._pause_for_obscuring_ui("opening Help")
         if self._guide_dialog is None:
             self._guide_dialog = UserGuideDialog(self)
         self._guide_dialog.show_page(topic)
@@ -1006,6 +1007,14 @@ class MainWindow(QMainWindow):
             self._clear_assembly_source_link()
         self._notice(text)
 
+    def _pause_for_obscuring_ui(self, context):
+        """Pause before a dialog/window hides live transport feedback."""
+        if not getattr(self, "_running", False):
+            return False
+        self.stop_run()
+        self._notice(f"Paused continuous execution before {context}")
+        return True
+
     def _accept_compiled_assembly(self, source, optimization):
         if not self.assembly.set_source(
                 source, f"C compiler ({optimization})"):
@@ -1034,6 +1043,7 @@ class MainWindow(QMainWindow):
         if self.workspace.currentWidget() is self.c_source:
             self.c_source.open_source()
             return
+        self._pause_for_obscuring_ui("opening the program chooser")
         path, _ = QFileDialog.getOpenFileName(
             self, "Open program", self._last_program_dir,
             _PROGRAM_FILTER)
@@ -1296,6 +1306,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def on_open_snapshot(self):
+        self._pause_for_obscuring_ui("opening the snapshot chooser")
         path, _ = QFileDialog.getOpenFileName(
             self, "Open host snapshot", self._last_snapshot_dir,
             "Ventium snapshots (*.aux *.vlt);;All files (*)")

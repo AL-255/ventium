@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Obscured-execution audit:** Run also continued inside the nested event loop of
+program/snapshot choosers and behind the Help window, allowing the model to race
+ahead while transport feedback was unavailable. These entry points now pause
+synchronously before obscuring the debugger and never auto-resume after
+cancel/close. A canceled program chooser locks timer, cycle, Run state, and
+feedback without requiring a real native dialog.
+
 **Hidden-execution audit:** switching to Assembly/C hid transport and status
 while the Run timer continued advancing the model in the background. Entering a
 source workspace now pauses continuous execution synchronously, updates the Run

@@ -94,7 +94,9 @@ Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
 next retirement, and **Step N** for a useful analysis window.  `F5` runs and
 pauses. Entering Assembly/C pauses continuous Run synchronously before its
 transport controls are hidden; returning to Visualizer does not resume without
-an explicit Run/F5. Choose an event class (any, mispredict, stall, I-fill, or page-walk);
+an explicit Run/F5. Opening a program/snapshot chooser or Help also pauses
+before obscuring live feedback, and cancel/close never auto-resumes. Choose an
+event class (any, mispredict, stall, I-fill, or page-walk);
 `[` and `]` jump among only those visible events.
 The upper U/V/FP stage board is live: hover an occupied cell to see its lane and
 PC, then click it to highlight that in-flight instruction's linked Assembly

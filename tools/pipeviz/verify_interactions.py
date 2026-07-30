@@ -23,7 +23,7 @@ sys.path.insert(0, HERE)
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import (QApplication, QMessageBox, QPushButton,
+from PySide6.QtWidgets import (QApplication, QFileDialog, QMessageBox, QPushButton,
                                QToolBar, QToolButton)
 
 import pipeviz.main as main_module
@@ -1199,6 +1199,23 @@ def scenario_branch_transport(app, outdir):
         settle(app)
         assert win.image_kind == "flat image" and win._has_session()
         assert win.step1_btn.isEnabled() and not win.sys_cb.isChecked()
+
+        # A nested file chooser must not let a running model race ahead behind
+        # an obscured debugger. Cancel leaves execution paused and consumes no
+        # extra clock; resuming remains explicit.
+        win.on_run_toggle()
+        assert win._running and win.timer.isActive()
+        chooser_cycle = win.backend.cycle_count()
+        real_open_dialog = QFileDialog.getOpenFileName
+        QFileDialog.getOpenFileName = staticmethod(
+            lambda *_args, **_kwargs: ("", ""))
+        try:
+            win.on_open()
+        finally:
+            QFileDialog.getOpenFileName = real_open_dialog
+        assert not win._running and not win.timer.isActive()
+        assert win.backend.cycle_count() == chooser_cycle
+        assert "before opening the program chooser" in win.action_hint.text()
 
         # Bad reset addresses are rejected visibly before replacing the backend.
         old_backend = win.backend

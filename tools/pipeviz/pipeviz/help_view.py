@@ -16,7 +16,8 @@ ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
 <b>Step N</b>, or <b>Run</b>.</p>
 <p>Entering Assembly or C automatically pauses continuous Run before the
 transport toolbar is hidden. Returning to Visualizer never resumes without an
-explicit F5/Run action.</p>
+explicit F5/Run action. Program/snapshot choosers and Help also pause before
+obscuring the live debugger; canceling or closing them does not auto-resume.</p>
 <ol>
  <li>Open or drop a program. ELF entry and segments are automatic. The
  <b>File → Open example</b> menu rescans and exposes the built verification
