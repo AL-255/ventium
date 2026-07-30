@@ -194,7 +194,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   instruction's post-commit state. The same page-independent banner says
   `LIVE` after unpinning, so compact Integer, Segments, and x87 pages cannot
   disguise which time point they show. Its adjacent **Unpin** button returns to
-  live state without executing or changing the model.
+  live state without executing or changing the model, and clears the linked
+  Trace, Pipeline, dependency, playhead, Mem-map/Memory, and Assembly-line
+  selection cues.
   `PC*`, segment `base*`, and CR0/CR3/CR4 are explicitly starred because they
   are the instruction's pre-execution translation context; segment limits and
   CR2 honestly show `n/a` because they are not captured per retirement. At compact
@@ -248,7 +250,8 @@ two-way); **shift-click** a second Konata row to measure the cycle Δ between tw
 instructions; **click** a point in the **Mem map** to jump the trace + Memory tab
 to that load/store; **click** the IPC sparkline to seek the playhead. Click
 **Unpin** beside the amber register strip to return to LIVE without advancing;
-stepping also unpins.
+stepping also unpins. Both routes clear the linked historical selection while
+leaving any assembled source map available for the next click.
 
 ## Architecture
 

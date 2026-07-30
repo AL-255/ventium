@@ -1285,10 +1285,15 @@ class Konata(QWidget):
         self.gutter.update()
         return True
 
-    def clear_playhead(self):
+    def clear_selection(self):
         self.plot.playhead = None
         self.plot.anchor = None
+        self.plot.sel_row = None
+        self.plot.sel_pc = None
+        self.plot._dep_edges = []
+        self.plot._dep_for_row = -1
         self.plot.update()
+        self.gutter.update()
 
     def update_from(self, backend):
         total = backend.cycle_count()
@@ -1598,8 +1603,8 @@ class PipelineView(QWidget):
     def select_n(self, n):
         return self.konata.select_n(n)
 
-    def clear_playhead(self):
-        self.konata.clear_playhead()
+    def clear_selection(self):
+        self.konata.clear_selection()
 
     def update_from(self, backend, state):
         bits = 32 if state.cs_d else 16

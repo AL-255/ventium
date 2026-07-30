@@ -593,6 +593,11 @@ class TablesView(QWidget):
             except ValueError:
                 pass
 
+    def clear_linked_selection(self):
+        """Clear historical drill-down cues while retaining analysis data."""
+        self.accmap.clear_selection()
+        self.mem.clear_clicked_access()
+
     _CLS_COLOR = {"branch": disasm.CC_BRANCH, "fp": disasm.CC_FP, "mem": disasm.CC_MEM,
                   "alu": disasm.CC_ALU, "sys": disasm.CC_SYS, "other": disasm.CC_OTHER}
 
@@ -1015,6 +1020,10 @@ class AccessMap(QWidget):
         self.accesses = accs
         self.update()
 
+    def clear_selection(self):
+        self.sel_n = None
+        self.update()
+
     def _sel_idx(self):
         """Current index of the selected access (by its stable retire-n), or None if
         it's been dropped off the front by the rolling cap / never set."""
@@ -1209,6 +1218,12 @@ class MemoryView(QWidget):
         self.addr = addr & 0xFFFFFFF0
         self._click_hl = (addr, size)
         self._refresh()
+
+    def clear_clicked_access(self):
+        """Drop only the Mem-map selection highlight, not the chosen address."""
+        self._click_hl = None
+        if self.backend is not None:
+            self._refresh()
 
     def _go(self):
         try:

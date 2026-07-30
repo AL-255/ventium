@@ -686,7 +686,7 @@ class MainWindow(QMainWindow):
         self.right_split = right
         self.tables = TablesView()
         self.regs = RegsView()
-        self.regs.unpinRequested.connect(self._unpin)
+        self.regs.unpinRequested.connect(self._return_live)
         # Tables can scroll and the register bank becomes tabbed when its three
         # complete columns no longer fit.
         # Ignore their wide content hints so the outer splitter can truly honor
@@ -1380,7 +1380,28 @@ class MainWindow(QMainWindow):
         if getattr(self, "_pinned_n", None) is not None:
             self._pinned_n = None
             self.regs.unpin()
-            self.pipeline.clear_playhead()
+            self.pipeline.clear_selection()
+            self.trace.clear_selection()
+            self.tables.clear_linked_selection()
+            had_source_context = bool(
+                self._assembly_source_map and self.assembly.mapping_current)
+            self._clear_assembly_marker()
+            if had_source_context:
+                self.assembly.status.setText(
+                    "Instruction selection cleared · source map remains active")
+                self.assembly.status.setStyleSheet(
+                    "color:#8b949e;padding:2px;")
+            return True
+        return False
+
+    def _return_live(self):
+        """Clear a historical selection without consuming a model clock."""
+        if not self._unpin():
+            return
+        # `_unpin` changes selection state only. Refresh immediately so the
+        # newly LIVE banner can never sit above stale retirement values.
+        self._refresh_all()
+        self._notice("Returned Registers to LIVE · linked selection cleared")
 
     def _jump_event(self, direction):
         """Move the Konata playhead to the next/prev pipeline event (mispredict /

@@ -29,6 +29,16 @@ selection. The pinned strip now carries an accessible **Unpin** control. It
 clears the retirement/playhead, restores live values, preserves the selected
 compact page, and provably consumes zero clocks.
 
+**Linked-selection follow-up:** the first Unpin regression called a manual
+refresh after clicking and therefore hid two real problems: the LIVE strip could
+sit above still-pinned values, and blue Trace/timing plus Assembly markers could
+remain selected. Unpin now performs one atomic linked-view transition: refresh
+live registers immediately; clear Trace current/selection, Konata row/PC,
+dependency edges, anchor/playhead, Mem-map point/Memory byte highlight, and the
+Assembly execution marker; retain the DWARF map; and leave the RTL cycle
+unchanged. The D-cache and authoring regressions cover both drill-down and
+source-linked origins rather than relying only on an unmapped fixture.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority

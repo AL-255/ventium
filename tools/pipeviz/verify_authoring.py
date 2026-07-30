@@ -656,6 +656,27 @@ def scenario(app, outdir):
         win.workspace.setCurrentWidget(win.assembly)
         settle(app)
         save(win, outdir, "02_assembly_source_link")
+
+        # Unpin is a pure linked-view operation: it clears every historical
+        # selection cue and refreshes live registers immediately, while neither
+        # advancing the RTL nor invalidating the still-current DWARF map.
+        pinned_cycle = win.backend.state().core_cyc
+        linked_map = dict(win._assembly_source_map)
+        assert editor._execution_line is not None
+        QTest.mouseClick(win.regs.unpin_btn, Qt.LeftButton)
+        settle(app)
+        assert win.backend.state().core_cyc == pinned_cycle
+        assert win._pinned_n is None
+        assert win.trace.tbl.currentRow() < 0
+        assert plot.sel_row is None and plot.sel_pc is None
+        assert plot.playhead is None and not plot._dep_edges
+        assert editor._execution_line is None
+        assert win.workspace.tabText(1) == "Assembly *"
+        assert win._assembly_source_map == linked_map
+        assert win.assembly.mapping_current
+        assert "selection cleared" in win.assembly.status.text()
+        assert win.regs.eip_name_lbl.text() == "EIP"
+
         editor.appendPlainText("# edited after build")
         assert not win.assembly.mapping_current
         assert "assemble again" in win.assembly.status.text()

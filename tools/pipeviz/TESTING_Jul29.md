@@ -348,7 +348,11 @@ Procedure:
    and require x87 to remain selected.
 6. While x87 remains selected, pin the newest retirement and require the
    page-independent amber `PINNED n=… · retire cyc=…` strip; click its Unpin
-   control and require LIVE without changing pages or advancing the model.
+   control and require immediate live register values without changing pages or
+   advancing the model.
+7. Require Unpin to clear Trace current/selection, Pipeline row/PC/playhead/
+   dependency cues, Mem-map/Memory drill-down highlights, and any Assembly
+   execution marker while retaining the source map.
 
 Observed evidence:
 
@@ -360,7 +364,8 @@ Observed evidence:
   pane cannot fit all columns, then return to three simultaneous columns when widened.
 - LIVE/PINNED state remains visible above every compact page rather than being
   discoverable only on Segments.
-- Unpin clears the historical selection and playhead without consuming a clock.
+- Unpin atomically refreshes LIVE values and clears every linked historical cue
+  without consuming a clock or invalidating DWARF source linkage.
 - The compact trace displays substantially more retirements vertically, while
   retaining readable 9-point text and row selection.
 

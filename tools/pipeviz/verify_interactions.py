@@ -1362,6 +1362,13 @@ def scenario_dcache_memory(app, outdir):
         assert win.tables.mem._click_hl == (chosen[7], chosen[4])
         assert int(win.trace.tbl.item(win.trace.tbl.currentRow(), 0).text()) == chosen[0]
         save_shot(app, win, outdir, "03_dcache_memmap_drilldown")
+        selected_cycle = win.backend.state().core_cyc
+        click(app, win.regs.unpin_btn)
+        settle(app)
+        assert win.backend.state().core_cyc == selected_cycle
+        assert win.tables.accmap.sel_n is None
+        assert win.tables.mem._click_hl is None
+        assert win._pinned_n is None and win.trace.tbl.currentRow() < 0
         print(f"OK D-cache/memory: lines={len(win.backend.dcache())}, "
               f"accesses={len(accesses)}, stalls={stalls}")
     finally:
@@ -1443,6 +1450,8 @@ def scenario_x87(app, outdir):
 
         click(app, win.step1_btn)
         assert win._pinned_n is None and "PINNED" not in win.regs.mode_lbl.text()
+        assert win.trace.tbl.currentRow() < 0
+        assert win.pipeline.konata.plot.sel_row is None
         print(f"OK x87: fp trace rows={len(fp_rows)}, cycle samples="
               f"{sum(win.tables.cyc.counts.values())}")
     finally:
@@ -1655,15 +1664,25 @@ def scenario_layout(app, outdir):
             f"PINNED n={pin_n} ·")
         save_shot(app, win, outdir, "08a_compact_pinned_state")
         pinned_cycle = win.backend.state().core_cyc
+        pinned_map = dict(win._assembly_source_map)
         click(app, win.regs.unpin_btn)
         assert win.backend.state().core_cyc == pinned_cycle
-        win._refresh_all()
         settle(app)
         assert win._pinned_n is None
         assert win.regs._compact_tabs.currentIndex() == 2
         assert win.regs.state_banner.text().startswith("LIVE")
         assert not win.regs.unpin_btn.isVisible()
         assert win.pipeline.konata.plot.playhead is None
+        assert win.pipeline.konata.plot.sel_row is None
+        assert win.pipeline.konata.plot.sel_pc is None
+        assert not win.pipeline.konata.plot._dep_edges
+        assert win.trace.tbl.currentRow() < 0
+        assert not win.trace.tbl.selectedIndexes()
+        assert win.regs.eip_name_lbl.text() == "EIP"
+        assert win.regs.eip_lbl.text() == (
+            f"{win.backend.state().eip:08x}")
+        assert win._assembly_source_map == pinned_map
+        assert "linked selection cleared" in win.action_hint.text()
         save_shot(app, win, outdir, "08_compact_layout")
         print(f"OK layout: true compact window={win.width()}x{win.height()}, "
               "responsive trace/register columns, all panels in bounds")

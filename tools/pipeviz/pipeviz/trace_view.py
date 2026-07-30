@@ -434,6 +434,15 @@ class TraceView(QWidget):
                 self.tbl.scrollToItem(it, QAbstractItemView.PositionAtCenter)
                 return
 
+    def clear_selection(self):
+        """Remove the linked retirement cue without emitting a new pin."""
+        blocked = self.tbl.blockSignals(True)
+        try:
+            self.tbl.clearSelection()
+            self.tbl.setCurrentCell(-1, -1)
+        finally:
+            self.tbl.blockSignals(blocked)
+
     def select_pc(self, pc):
         """Select a context-preserving trace row at PC ``pc``.
 

@@ -100,7 +100,11 @@ explanation. The page-independent strip above the register bank always says
 **LIVE** or **PINNED n=… · retire cyc=…**. Check it before interpreting values,
 especially in compact mode where the Segments page may not be open. Click its
 **Unpin** button to return to the current live state and clear the cycle
-playhead without advancing the model; stepping also unpins automatically.
+playhead without advancing the model. It also clears the selected Trace/timing
+row, dependency edges, PC-group shading, and Assembly line marker while keeping
+the source map ready for the next selection. A Mem-map-originated pin also
+clears its selected point and the clicked-byte Memory highlight; stepping also
+unpins automatically.
 
 The timing diagram itself is keyboard accessible: Up/Down selects adjacent
 retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture
