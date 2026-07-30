@@ -484,6 +484,19 @@ def scenario(app, outdir):
         assert editor.completion.info.preview.info.mnemonic == "add"
         assert editor.completion.info.description.text()
         assert editor.completion.info.preview.info.stages == ("F", "D", "X")
+        assert editor.completion.info.preview.accessibleName() == (
+            "Instruction pipeline preview")
+        preview_accessible = (
+            editor.completion.info.preview.accessibleDescription())
+        assert "add dst, src" in preview_accessible
+        assert "Stages F, then D, then X" in preview_accessible
+        assert "Latency 1 cycle" in preview_accessible
+        assert editor.completion.info.signature.accessibleName() == (
+            "Instruction signature")
+        assert editor.completion.info.description.accessibleName() == (
+            "Instruction description")
+        assert editor.completion.info.availability.accessibleName() == (
+            "Instruction availability")
         assert editor.completion.info.availability.text() == "Availability · user"
         assert "cycle" not in editor.completion.info.availability.text()
         save(editor.completion, outdir, "01_opcode_completion_popup")

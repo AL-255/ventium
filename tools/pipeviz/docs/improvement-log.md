@@ -104,6 +104,13 @@ topics. Every Help entry now focuses the named topic index after showing;
 the content pane is named separately. Acceptance drives Down from Getting
 started to Loading programs and closes predictably with Escape.
 
+**Completion accessibility audit:** the opcode list was named, but its custom
+miniature pipeline and adjacent signature/description/availability labels were
+anonymous to assistive technology. The preview now exposes a dynamic sentence
+with operand signature, decoded lane/pairability, ordered lettered stages,
+latency, and availability; every detail label is named. The `add` completion
+locks the visual and accessible F→D→X contract together.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a

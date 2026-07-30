@@ -576,9 +576,28 @@ class InstructionPipelinePreview(QWidget):
         self.info = None
         self.setMinimumHeight(105)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setAccessibleName("Instruction pipeline preview")
+        self.setAccessibleDescription(
+            "No instruction selected; place the cursor on an opcode")
 
     def set_instruction(self, info):
         self.info = info
+        if info is None:
+            self.setAccessibleDescription(
+                "No instruction selected; place the cursor on an opcode")
+        else:
+            lane = {
+                "UV": "U or V, pairable",
+                "PU": "U, may lead a pair",
+                "PV": "V slot or branch",
+                "NP": "U, non-pairable",
+                "FP": "x87 floating-point lane",
+                "SYS": "system or microcode",
+            }.get(info.pipe, info.pipe)
+            stages = ", then ".join(info.stages or ("F", "D", "X"))
+            self.setAccessibleDescription(
+                f"{info.signature}. Lane {lane}. Stages {stages}. "
+                f"Latency {info.latency}. Availability {info.availability}.")
         self.update()
 
     def paintEvent(self, event):
@@ -632,13 +651,16 @@ class InstructionInfoPane(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
         self.signature = QLabel("Instruction preview")
+        self.signature.setAccessibleName("Instruction signature")
         self.signature.setStyleSheet("font-weight:bold;color:#e6edf3;")
         self.signature.setWordWrap(True)
         self.description = QLabel(
             "Place the cursor on an opcode or open completion with Ctrl+Space.")
+        self.description.setAccessibleName("Instruction description")
         self.description.setWordWrap(True)
         self.description.setStyleSheet("color:#9aa3ad;")
         self.availability = QLabel("")
+        self.availability.setAccessibleName("Instruction availability")
         self.availability.setWordWrap(True)
         self.availability.setStyleSheet("color:#e3b341;font-size:9px;")
         self.preview = InstructionPipelinePreview()
