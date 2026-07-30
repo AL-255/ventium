@@ -208,6 +208,8 @@ class RegsView(QWidget):
         self._wide_layout.setSpacing(4)
         self._compact_tabs = QTabWidget()
         self._compact_tabs.setDocumentMode(True)
+        self._compact_tabs.setAccessibleName("Register groups")
+        self._compact_tabs.tabBar().setAccessibleName("Register group tabs")
         root.addWidget(self._wide_host)
         root.addWidget(self._compact_tabs)
         self._wide_host.hide()

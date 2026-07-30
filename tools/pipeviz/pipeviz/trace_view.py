@@ -268,6 +268,7 @@ class TraceView(QWidget):
         self.title.setStyleSheet("font-weight:bold;")
         top.addWidget(self.title)
         self.filt = _TraceFilter()
+        self.filt.setAccessibleName("Retired instruction filter")
         self.filt.setPlaceholderText("filter:  mov   pc:08048   cyc>=133   pipe:V   stall   @  (mem)")
         self.filt.setClearButtonEnabled(True)
         self._filter_help = (
@@ -286,10 +287,12 @@ class TraceView(QWidget):
         top.addWidget(self.match_lbl)
         self.prev_match_btn = QToolButton()
         self.prev_match_btn.setText("↑")
+        self.prev_match_btn.setAccessibleName("Previous matching retirement")
         self.prev_match_btn.setToolTip("Previous matching retirement (Shift+F3)")
         self.prev_match_btn.clicked.connect(lambda: self._select_match(-1))
         self.next_match_btn = QToolButton()
         self.next_match_btn.setText("↓")
+        self.next_match_btn.setAccessibleName("Next matching retirement")
         self.next_match_btn.setToolTip("Next matching retirement (Enter or F3)")
         self.next_match_btn.clicked.connect(lambda: self._select_match(1))
         for button in (self.prev_match_btn, self.next_match_btn):
@@ -299,6 +302,10 @@ class TraceView(QWidget):
             top.addWidget(button)
         lay.addLayout(top)
         self.tbl = _TraceTable(0, len(_COLS))
+        self.tbl.setAccessibleName("Retired instruction trace")
+        self.tbl.setAccessibleDescription(
+            "One row per retirement; activating a row links Pipeline, "
+            "Registers, analysis tables, and Assembly source.")
         self.tbl.set_empty_hint(
             "No program loaded — use File → Open example or Ctrl+O")
         self.tbl.focusFilter.connect(self.focus_filter)

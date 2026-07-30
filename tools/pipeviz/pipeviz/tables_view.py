@@ -430,6 +430,8 @@ class TablesView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
         self.tabs = QTabWidget()
+        self.tabs.setAccessibleName("Analysis views")
+        self.tabs.tabBar().setAccessibleName("Analysis view tabs")
         lay.addWidget(self.tabs)
 
         # --- I-cache (code). 'way' shows '*' for the MRU way (LRU dropped). ---
@@ -438,6 +440,8 @@ class TablesView(QWidget):
         self.ic = _mk_table(["set", "way *=MRU", "tag", "line addr", "32 line bytes"],
                             [46, 74, 60, 86, 9999],
                             hint="I-cache empty — step the core to fetch code into it")
+        self.ic.setAccessibleName("Instruction cache lines")
+        self.ic_map.setAccessibleName("Instruction cache occupancy map")
         self.ic.setWordWrap(True)
         self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code$")
         self.tabs.setTabToolTip(0, "Instruction cache (I$): resident lines and set/way map")
@@ -449,6 +453,8 @@ class TablesView(QWidget):
                             [56, 74, 90, 9999],
                             hint="D-cache empty — this workload has issued no data "
                                  "loads/stores yet")
+        self.dc.setAccessibleName("Data cache lines")
+        self.dc_map.setAccessibleName("Data cache occupancy map")
         self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data$")
         self.tabs.setTabToolTip(1, "Data cache (D$): residency and replayed miss rate")
 
@@ -458,11 +464,13 @@ class TablesView(QWidget):
             ["side", "idx", "V", "page (4K/4M)", "vpn->pfn", "perm U/W/P", "big", "D"],
             [44, 40, 30, 110, 150, 90, 40, 9999],
             hint="TLB empty — paging is off or no translations have been resolved yet")
+        self.tlb.setAccessibleName("Translation lookaside buffer entries")
         self.tabs.addTab(self._wrap(self.tlb_lbl, self.tlb), "TLB")
         self.tabs.setTabToolTip(2, "Instruction and data translation lookaside buffers")
 
         # --- Prefetch buffer (ibuf) ---
         self.pf = _PrefetchView()
+        self.pf.setAccessibleName("Prefetch and decode state")
         self.tabs.addTab(self.pf, "Prefetch")
         self.tabs.setTabToolTip(3, "Prefetch buffer, fetch window, and live decode")
 
@@ -471,6 +479,7 @@ class TablesView(QWidget):
         self.hot = _mk_table(["PC", "hits", "Σ lat", "share", "D$ miss", "cost", "instruction"],
                              [76, 50, 64, 50, 62, 120, 9999],
                              hint="no instructions retired yet — step the core")
+        self.hot.setAccessibleName("Instruction hotspots")
         self.hot.horizontalHeaderItem(2).setToolTip(
             "Sum of each dynamic instruction's fetch-to-retire latency at this PC; "
             "a held instruction may be waiting on an older operation")
@@ -490,6 +499,7 @@ class TablesView(QWidget):
                             [70, 64, 76, 46, 60, 46, 9999],
                             hint="no branches retired yet — step the core through a "
                                  "jump/call/loop")
+        self.br.setAccessibleName("Branch behavior")
         self.br.horizontalHeaderItem(4).setToolTip(
             "Taken outcomes / resolved outcomes; capture-tail hits may be unresolved")
         _right_align_headers(self.br, (3, 4, 5))     # hits / T-resolved / T% match data
@@ -503,17 +513,20 @@ class TablesView(QWidget):
         self.mix = _mk_table(
             ["class", "count", "%", "bar"], [88, 60, 56, 9999],
             hint="no instructions retired yet — step the core")
+        self.mix.setAccessibleName("Instruction mix")
         _align_headers(self.mix, (3,), Qt.AlignLeft)  # 'bar' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.mix_lbl, self.mix), "Mix")
         self.tabs.setTabToolTip(6, "Instruction-class mix and U/V issue split")
 
         # --- Cycle attribution (where the cycles go / why IPC is low) ---
         self.cyc = CycleBreakdown()
+        self.cyc.setAccessibleName("Cycle attribution")
         self.tabs.addTab(self.cyc, "Cycles")
         self.tabs.setTabToolTip(7, "Cycle attribution: retire, stalls, fills, walks, and system")
 
         # --- Memory hex/ASCII inspector (follow EIP/ESP) ---
         self.mem = MemoryView()
+        self.mem.setAccessibleName("Physical memory inspector")
         self.tabs.addTab(self.mem, "Memory")
         self.tabs.setTabToolTip(8, "Hex/ASCII memory inspector with EIP, ESP, and access following")
 
@@ -920,6 +933,7 @@ class _HexDump(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAccessibleName("Physical memory hex and ASCII dump")
         self.data = b""
         self.base = 0
         self.eip = 0
@@ -1222,13 +1236,16 @@ class MemoryView(QWidget):
         bar = QHBoxLayout(); bar.setSpacing(5)
         bar.addWidget(QLabel("addr"))
         self.addr_e = QLineEdit("0x08048000"); self.addr_e.setFixedWidth(96)
+        self.addr_e.setAccessibleName("Physical memory address")
         self.addr_e.setValidator(QRegularExpressionValidator(
             QRegularExpression(r"0[xX][0-9a-fA-F]{1,8}"), self.addr_e))
         self.addr_e.setToolTip("32-bit physical address in the backend memory image")
         self.addr_e.setFont(_mono(9))
         self.addr_e.returnPressed.connect(self._go)
         bar.addWidget(self.addr_e)
-        go = QPushButton("Go"); go.clicked.connect(self._go); bar.addWidget(go)
+        go = QPushButton("Go")
+        go.setAccessibleName("Open physical memory address")
+        go.clicked.connect(self._go); bar.addWidget(go)
         be = QPushButton("→EIP")
         be.setToolTip("Follow current CS:EIP after segmentation and paging")
         be.clicked.connect(lambda: self._set_follow("eip")); bar.addWidget(be)
@@ -1248,6 +1265,9 @@ class MemoryView(QWidget):
                 (-256, "◀", "Previous 256 physical bytes (Page Up)"),
                 (256, "▶", "Next 256 physical bytes (Page Down)")):
             b = QPushButton(lab); b.setFixedWidth(28); b.setToolTip(tip)
+            b.setAccessibleName(
+                "Previous physical memory page"
+                if d < 0 else "Next physical memory page")
             b.clicked.connect(lambda _=0, dd=d: self._page(dd)); bar.addWidget(b)
             self.page_buttons.append(b)
         self.follow_lbl = QLabel(""); self.follow_lbl.setStyleSheet("color:#8b949e;font-size:8px;")

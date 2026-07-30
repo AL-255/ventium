@@ -477,11 +477,13 @@ class MainWindow(QMainWindow):
         openbtn.setMinimumWidth(92)
         openbtn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         openbtn.clicked.connect(self.on_open)
+        openbtn.setAccessibleName("Open program")
         openbtn.setToolTip("Open a flat binary or x86 ELF executable (you can also drag a file here)")
         tb.addWidget(openbtn)
 
         snapbtn = QPushButton(" Snapshot…")
         snapbtn.setMinimumWidth(104)
+        snapbtn.setAccessibleName("Open snapshot")
         snapbtn.setToolTip("Resume a host-testbench --save-state checkpoint (.aux + .vlt pair)")
         snapbtn.clicked.connect(self.on_open_snapshot)
         tb.addWidget(snapbtn)
@@ -489,18 +491,21 @@ class MainWindow(QMainWindow):
         self.entry_label = QLabel("  entry ")
         tb.addWidget(self.entry_label)
         self.entry_e = _hex_edit(DEF_ENTRY)
+        self.entry_e.setAccessibleName("Program entry address")
         self.entry_e.setToolTip(
             "Initial instruction pointer (32-bit hex; applies on Reset)")
         tb.addWidget(self.entry_e)
         self.load_label = QLabel(" load ")
         tb.addWidget(self.load_label)
         self.load_e = _hex_edit(DEF_ENTRY)
+        self.load_e.setAccessibleName("Flat-image load address")
         self.load_e.setToolTip(
             "Flat-image load address (32-bit hex; applies on Reset)")
         tb.addWidget(self.load_e)
         self.esp_label = QLabel(" esp ")
         tb.addWidget(self.esp_label)
         self.esp_e = _hex_edit(DEF_ESP)
+        self.esp_e.setAccessibleName("Initial stack pointer")
         self.esp_e.setToolTip(
             "Initial stack pointer (32-bit hex; applies on Reset)")
         tb.addWidget(self.esp_e)
@@ -554,6 +559,8 @@ class MainWindow(QMainWindow):
 
         ctl.addWidget(QLabel(" N "))
         self.stepn = QSpinBox(); self.stepn.setRange(1, 1000000); self.stepn.setValue(100)
+        self.stepn.setAccessibleName("Step clock count")
+        self.stepn.setToolTip("Number of clocks advanced by Step N")
         self.stepn.setFixedWidth(90); ctl.addWidget(self.stepn)
         self.stepn_btn = QPushButton("Step N")
         self.stepn_btn.clicked.connect(lambda: self.do_step(self.stepn.value(), False))
@@ -572,6 +579,9 @@ class MainWindow(QMainWindow):
         self.run_btn.setToolTip("Run or pause continuous execution (F5)")
         ctl.addWidget(QLabel(" speed "))
         self.speed = QSpinBox(); self.speed.setRange(1, 20000); self.speed.setValue(200)
+        self.speed.setAccessibleName("Run clocks per timer tick")
+        self.speed.setToolTip(
+            "Clocks simulated per UI timer tick while Run is active")
         self.speed.setSuffix(" clk/tick"); self.speed.setFixedWidth(110)
         ctl.addWidget(self.speed)
 
@@ -584,15 +594,18 @@ class MainWindow(QMainWindow):
         self.event_kind.addItem("I-fill", "f")
         self.event_kind.addItem("page-walk", "w")
         self.event_kind.setFixedWidth(112)
+        self.event_kind.setAccessibleName("Pipeline event type")
         self.event_kind.setToolTip(
             "Choose which pipeline event [ and ] navigate")
         ctl.addWidget(self.event_kind)
         self.evprev_btn = QPushButton("◀")
+        self.evprev_btn.setAccessibleName("Previous pipeline event")
         self.evprev_btn.setToolTip("Jump the playhead to the PREVIOUS pipeline event "
                                    "(mispredict / stall / I-fill / page-walk)")
         self.evprev_btn.clicked.connect(lambda: self._jump_event(-1))
         ctl.addWidget(self.evprev_btn)
         self.evnext_btn = QPushButton("▶")
+        self.evnext_btn.setAccessibleName("Next pipeline event")
         self.evnext_btn.setToolTip("Jump the playhead to the NEXT pipeline event "
                                    "(mispredict / stall / I-fill / page-walk)")
         self.evnext_btn.clicked.connect(lambda: self._jump_event(1))
@@ -777,6 +790,7 @@ class MainWindow(QMainWindow):
         self.workspace.setDocumentMode(True)
         self.workspace.setTabPosition(QTabWidget.North)
         self.workspace.setAccessibleName("Pipeviz workspace")
+        self.workspace.tabBar().setAccessibleName("Workspace tabs")
         self.visualizer_tab = outer
         self.assembly = AssemblyView()
         self.c_source = CView()

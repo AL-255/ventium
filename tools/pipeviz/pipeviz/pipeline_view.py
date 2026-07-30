@@ -1174,12 +1174,15 @@ class Konata(QWidget):
         title_row.addWidget(zoom_caption)
         self.zoom_out_btn = QToolButton()
         self.zoom_out_btn.setText("−")
+        self.zoom_out_btn.setAccessibleName("Zoom pipeline cycles out")
         self.zoom_out_btn.setToolTip("Zoom out the cycle axis (Ctrl+-)")
         self.zoom_reset_btn = QToolButton()
         self.zoom_reset_btn.setText("100%")
+        self.zoom_reset_btn.setAccessibleName("Reset pipeline cycle zoom")
         self.zoom_reset_btn.setToolTip("Restore the default cycle scale")
         self.zoom_in_btn = QToolButton()
         self.zoom_in_btn.setText("+")
+        self.zoom_in_btn.setAccessibleName("Zoom pipeline cycles in")
         self.zoom_in_btn.setToolTip("Zoom in the cycle axis (Ctrl+=)")
         for button in (self.zoom_out_btn, self.zoom_reset_btn, self.zoom_in_btn):
             button.setAutoRaise(True)
@@ -1196,6 +1199,11 @@ class Konata(QWidget):
         v.addLayout(lh)
 
         self.scroll = QScrollArea()
+        # The timing plot is the keyboard control and exposes row navigation,
+        # selection, and focus feedback. The containing scroll area otherwise
+        # creates an unlabeled, visually inert Tab stop immediately before it.
+        self.scroll.setFocusPolicy(Qt.NoFocus)
+        self.scroll.setAccessibleName("Pipeline timing viewport")
         self.scroll.setWidgetResizable(False)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)

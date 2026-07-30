@@ -11,6 +11,14 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Focus-announcement audit:** the main keyboard chain reached raw-value spin
+boxes, a blank event selector, an unlabeled Trace table, and unlabeled analysis
+tabs; the Pipeline scroll wrapper also inserted a visually inert focus stop
+immediately before the real timing plot. Ambiguous controls and data regions now
+have stable accessible names, the two numeric controls explain their units, and
+the wrapper is skipped. Startup acceptance walks the main, analysis, register,
+memory, and authoring surfaces and locks their announced identities.
+
 **Transient source-time audit:** clicking a live U/V/FP cell marked its Assembly
 line without creating a retirement pin, so Clock/Insn/Step/Run could previously
 leave that line looking current after the instruction moved. Every model advance

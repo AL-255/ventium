@@ -797,6 +797,44 @@ def scenario_startup(app, outdir):
 
     win = new_window(app)
     try:
+        # Every ambiguous focus stop must announce its purpose without relying
+        # on an adjacent visual label. The plot owns pipeline keyboard input;
+        # its QScrollArea wrapper must not add an unlabeled inert stop first.
+        accessible_controls = {
+            win.entry_e: "Program entry address",
+            win.load_e: "Flat-image load address",
+            win.esp_e: "Initial stack pointer",
+            win.stepn: "Step clock count",
+            win.speed: "Run clocks per timer tick",
+            win.event_kind: "Pipeline event type",
+            win.evprev_btn: "Previous pipeline event",
+            win.evnext_btn: "Next pipeline event",
+            win.workspace.tabBar(): "Workspace tabs",
+            win.pipeline.konata.plot: "Pipeline timing diagram",
+            win.pipeline.konata.zoom_out_btn: "Zoom pipeline cycles out",
+            win.pipeline.konata.zoom_reset_btn: "Reset pipeline cycle zoom",
+            win.pipeline.konata.zoom_in_btn: "Zoom pipeline cycles in",
+            win.trace.filt: "Retired instruction filter",
+            win.trace.tbl: "Retired instruction trace",
+            win.tables.tabs.tabBar(): "Analysis view tabs",
+            win.tables.ic: "Instruction cache lines",
+            win.tables.dc: "Data cache lines",
+            win.tables.tlb: "Translation lookaside buffer entries",
+            win.tables.hot: "Instruction hotspots",
+            win.tables.br: "Branch behavior",
+            win.tables.mix: "Instruction mix",
+            win.tables.mem.addr_e: "Physical memory address",
+            win.tables.mem.dump: "Physical memory hex and ASCII dump",
+            win.regs._compact_tabs.tabBar(): "Register group tabs",
+            win.assembly.editor: "Assembly source editor",
+            win.c_source.editor: "C source editor",
+        }
+        for control, expected_name in accessible_controls.items():
+            assert control.accessibleName() == expected_name, (
+                type(control).__name__, control.accessibleName(), expected_name)
+        assert win.pipeline.konata.scroll.focusPolicy() == Qt.NoFocus
+        assert win.stepn.toolTip() and win.speed.toolTip()
+
         old_backend = win.backend
         old_backend_class = main_module.Backend
         old_critical = QMessageBox.critical
