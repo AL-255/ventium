@@ -959,6 +959,14 @@ def scenario_startup(app, outdir):
         settle(app)
         assert win._guide_dialog is not None and win._guide_dialog.isVisible()
         assert win._guide_dialog.index.count() >= 8
+        assert win._guide_dialog.index.accessibleName() == "User guide topic index"
+        assert win._guide_dialog.page.accessibleName() == "User guide topic content"
+        assert app.focusWidget() is win._guide_dialog.index
+        assert win._guide_dialog.index.currentItem().text() == "Getting started"
+        QTest.keyClick(win._guide_dialog.index, Qt.Key_Down)
+        settle(app)
+        assert win._guide_dialog.index.currentItem().text() == "Loading programs"
+        assert "PT_LOAD" in win._guide_dialog.page.toPlainText()
         loading_row = next(i for i in range(win._guide_dialog.index.count())
                            if win._guide_dialog.index.item(i).text()
                            == "Loading programs")
@@ -991,7 +999,9 @@ def scenario_startup(app, outdir):
         settle(app)
         guide_shot = os.path.join(outdir, "00_help_pipeline_guide.png")
         assert win._guide_dialog.grab().save(guide_shot)
-        win._guide_dialog.close()
+        QTest.keyClick(win._guide_dialog.index, Qt.Key_Escape)
+        settle(app)
+        assert not win._guide_dialog.isVisible()
         win.action_hint.clear()  # keep the startup reference capture transient-free
         save_shot(app, win, outdir, "00_startup")
         branch_example = next(

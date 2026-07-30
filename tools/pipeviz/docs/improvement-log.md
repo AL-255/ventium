@@ -97,6 +97,13 @@ therefore selected the final line even where no number was painted. Hit-testing
 now requires the pointer to fall inside that block's visible geometry; a
 bottom-gutter click provably preserves the existing selection.
 
+**Indexed-dialog keyboard audit:** F1 exposed a topic index but did not
+deterministically focus it, especially after reopening a previously used
+dialog, so arrow keys could scroll content or land on Close instead of changing
+topics. Every Help entry now focuses the named topic index after showing;
+the content pane is named separately. Acceptance drives Down from Getting
+started to Loading programs and closes predictably with Escape.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a

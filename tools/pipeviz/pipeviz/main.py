@@ -459,6 +459,12 @@ class MainWindow(QMainWindow):
         self._guide_dialog.show()
         self._guide_dialog.raise_()
         self._guide_dialog.activateWindow()
+        # The guide is explicitly indexed; make that index the deterministic
+        # keyboard entry point on first open and every topic-action reopen.
+        QTimer.singleShot(
+            0, lambda dialog=self._guide_dialog:
+            dialog.index.setFocus(Qt.ShortcutFocusReason)
+            if dialog.isVisible() else None)
 
     # ---- UI construction ----
     def _build_toolbar(self):
