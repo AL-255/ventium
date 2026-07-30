@@ -13,7 +13,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QPoint, QRect, QSize, Signal, QRegularExpression
 from PySide6.QtGui import (
     QColor, QFont, QFontMetrics, QGuiApplication, QKeySequence, QPainter, QShortcut,
-    QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextFormat,
+    QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextFormat, QTextOption,
 )
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -1654,6 +1654,9 @@ class _Diagnostics(QPlainTextEdit):
         self._severity = None
         self.setReadOnly(True)
         self.setFont(_mono(8))
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setMaximumBlockCount(1000)
         self.setPlaceholderText(f"{self._kind} diagnostics appear here.")
         self.setStyleSheet("color:#8b949e;background:#0b0f14;")

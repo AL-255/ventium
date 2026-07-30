@@ -178,7 +178,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     highlight their source line. Editing C or changing optimization clears the
     prior compiler result and asks for a fresh compile. C/header drops route
     here without disturbing the running program. C diagnostics stay as a
-    compact affordance when empty and expand automatically for real output. The
+    compact affordance when empty, expand automatically for real output, and
+    wrap long compiler paths/messages instead of requiring horizontal scroll. The
     visible **New U/V demo** is a
     runtime-counted, dual-chain Fibonacci workload: it prevents `-O2` constant
     folding and provides a direct U/V-on versus U/V-off experiment. The

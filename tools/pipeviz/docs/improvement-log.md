@@ -9,6 +9,26 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — wrap compiler diagnostics at compact width
+
+**Diagnostic-readability audit:** automatic expansion made compiler output
+available, but generated absolute paths and GCC explanations were still
+single-line text. At compact width their actionable tail lived behind a
+horizontal-scroll gesture with no visible reason to try it.
+
+**Changes:** shared build/compiler diagnostics now wrap at word boundaries (and
+within an overlong token when necessary) and suppress the horizontal scrollbar.
+Vertical scrolling continues to handle genuinely long logs. This benefits the
+Assembly sidebar too, while keeping exact diagnostic text, line activation, and
+copy behavior intact.
+
+**Verification:** authoring acceptance checks widget-width wrapping and the
+absence of a horizontal scrollbar, then deliberately resizes a real GCC error
+to 900×620 and requires at least one laid-out block to span multiple visual
+lines. The compact screenshot shows the generated path and undeclared-symbol
+message wrapping inside the expanded pane while the source error line remains
+visible.
+
 ## July 30 continuation — reclaim empty C diagnostics height
 
 **Vertical-density audit:** the C diagnostics pane permanently received one

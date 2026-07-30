@@ -14,7 +14,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QInputDialog, QMessageBox, QWidget,
+    QApplication, QFileDialog, QInputDialog, QMessageBox, QPlainTextEdit, QWidget,
 )
 
 import pipeviz.source_view as source_module
@@ -1641,6 +1641,10 @@ def scenario(app, outdir):
         assert win.c_source.diagnostics.accessibleDescription() == (
             "No compiler diagnostics.")
         assert win.c_source.diagnostics.height() <= 54
+        assert (win.c_source.diagnostics.lineWrapMode()
+                == QPlainTextEdit.WidgetWidth)
+        assert (win.c_source.diagnostics.horizontalScrollBarPolicy()
+                == Qt.ScrollBarAlwaysOff)
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+B" in win.c_source.compile_btn.toolTip()
         assert "Ctrl+N" in win.c_source.template_btn.toolTip()
@@ -1850,6 +1854,16 @@ def scenario(app, outdir):
         assert win.c_source.editor._error_line == 3
         assert "undeclared" in win.c_source.diagnostics.toPlainText()
         assert win.c_source.diagnostics.height() >= 92
+        # Long generated paths and GCC context wrap in the visible pane rather
+        # than requiring a hidden horizontal-scroll gesture.
+        win.resize(900, 620)
+        settle(app)
+        assert any(
+            block.layout().lineCount() > 1
+            for block in (
+                win.c_source.diagnostics.document().findBlockByNumber(i)
+                for i in range(
+                    win.c_source.diagnostics.document().blockCount())))
         assert win.c_source.diagnostics.toPlainText().startswith(
             "→ Line 3: press Enter or double-click to jump")
         win.c_source.editor.moveCursor(QTextCursor.Start)
@@ -1861,6 +1875,8 @@ def scenario(app, outdir):
         assert win.c_source.editor.textCursor().blockNumber() + 1 == 3
         assert win.c_source.status.text() == "Compile error at line 3"
         save(win, outdir, "03b_c_error_jump")
+        win.resize(1500, 920)
+        settle(app)
         win.c_source.editor.insertPlainText(" ")
         assert win.c_source.editor._error_line is None
         assert not win.c_source.diagnostics.toPlainText()

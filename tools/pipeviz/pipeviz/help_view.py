@@ -325,7 +325,8 @@ errors also highlight their C line; press Enter on the focused diagnostic or
 double-click it to jump there. Editing C or changing the optimization level
 clears the prior compiler result and asks for a fresh compile. The diagnostic
 pane stays shallow while empty, expands for real output, and collapses after
-that output becomes stale.</p>
+that output becomes stale. Long compiler lines wrap to the pane width instead
+of requiring horizontal scrolling.</p>
 <p>Hover an optimization choice for its purpose: O0 is the most direct and
 source-like, O1 is a moderate compromise, O2 is the performance-oriented
 default for U/V experiments, and Os favors compact code. Every advertised level

@@ -418,7 +418,9 @@ remain in C and highlight their responsible line; assembler errors remain in
 Assembly. Press Enter on the focused diagnostic, or double-click it, to jump
 to the marked C/Assembly line. The empty C diagnostics affordance stays shallow
 to maximize editor height, expands for a warning or error, and collapses again
-when an edit clears the stale result. Empty and warning states use Compiler
+when an edit clears the stale result. Long paths and GCC messages wrap at the
+pane edge; vertical scrolling remains available, while there is no hidden
+horizontal-scroll requirement. Empty and warning states use Compiler
 terminology in C, distinct from Assembly's Build diagnostics. Build/compiler diagnostics
 belong to the exact source revision that produced them: editing either source
 clears the prior result, and changing C's optimization level clears the old
