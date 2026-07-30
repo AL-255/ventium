@@ -578,7 +578,7 @@ class _KonataPlot(QWidget):
         self._pending = []       # accumulated cells since the last retirement
         self._cyc_row = {}       # retire cyc -> row index
         self.empty_message = (
-            "no program loaded — use Open… for a file or its arrow "
+            "No program loaded — use Open… for a file or its arrow "
             "for an example")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -608,16 +608,28 @@ class _KonataPlot(QWidget):
         self._pending = []
         self._cyc_row = {}
         self.empty_message = (
-            "no instructions retired in the captured cycle window"
+            "No retirements in the captured cycle window"
             if self.history_start > 1 else
-            "no instructions retired yet — use Insn, Step N, or Run")
+            "No retirements yet — use Insn, Step N, or Run")
         # setFixedSize() is used while populated. Reset both constraints here so
-        # a shorter replacement session cannot inherit the old giant canvas and
-        # stale scrollbar range until its first retirement.
-        self.setFixedSize(1, 1)
+        # the empty canvas can fill the viewport (and a shorter replacement
+        # session cannot inherit a giant stale scrollbar range).
+        self.setMinimumSize(1, 1)
+        self.setMaximumSize(16777215, 16777215)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.resize(1, 1)
         self._sync_accessible_description()
 
     def _resize_canvas(self):
+        if not self.insns:
+            # There is no meaningful cycle grid until an instruction retires.
+            # Leave the canvas resizable so QScrollArea gives the empty-state
+            # guidance its entire viewport instead of clipping it inside the
+            # tiny number of pre-retirement cycles captured so far.
+            self.setMinimumSize(1, 1)
+            self.setMaximumSize(16777215, 16777215)
+            self.updateGeometry()
+            return
         w = (self.max_cyc - self.base_cyc + 3) * self.cell_w
         # one row of bottom slack so a row-aligned bottom-follow scroll keeps the
         # newest instruction fully visible (never a clipped half-row at the top).
@@ -798,7 +810,9 @@ class _KonataPlot(QWidget):
         p.fillRect(ev.rect(), QColor(_BG))
         if not self.insns:
             p.setPen(QColor(_MUT)); p.setFont(_mono(10))
-            p.drawText(self.rect(), Qt.AlignCenter, self.empty_message)
+            p.drawText(
+                self.rect().adjusted(12, 8, -12, -8),
+                Qt.AlignCenter | Qt.TextWordWrap, self.empty_message)
             if self.hasFocus():
                 pen = QPen(QColor(_FOCUS)); pen.setWidth(2); p.setPen(pen)
                 p.drawRect(ev.rect().adjusted(1, 1, -2, -2))
@@ -1260,7 +1274,9 @@ class Konata(QWidget):
         # creates an unlabeled, visually inert Tab stop immediately before it.
         self.scroll.setFocusPolicy(Qt.NoFocus)
         self.scroll.setAccessibleName("Pipeline timing viewport")
-        self.scroll.setWidgetResizable(False)
+        # Empty guidance must occupy the viewport; a populated plot constrains
+        # itself to the exact cycle/row canvas and remains normally scrollable.
+        self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.plot = _KonataPlot()

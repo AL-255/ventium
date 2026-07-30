@@ -933,7 +933,8 @@ def scenario_startup(app, outdir):
             win.trace.tbl.accessibleDescription())
         assert win.trace.match_lbl.accessibleName() == (
             "Retired instruction filter result")
-        assert "no program loaded" in win.pipeline.konata.plot.empty_message
+        assert "no program loaded" in (
+            win.pipeline.konata.plot.empty_message.lower())
         assert "its arrow" in win.pipeline.konata.plot.empty_message
         assert win.pipeline.spark.backend is None
         assert win.pipeline.board.focusPolicy() == Qt.NoFocus
@@ -944,6 +945,10 @@ def scenario_startup(app, outdir):
             win.pipeline.spark.accessibleDescription())
         assert "no program loaded" in (
             win.pipeline.konata.plot.accessibleDescription().lower())
+        assert win.pipeline.konata.plot.width() >= (
+            win.pipeline.konata.scroll.viewport().width())
+        assert win.pipeline.konata.plot.height() >= (
+            win.pipeline.konata.scroll.viewport().height())
         assert win.tables.ic._hint.isVisible()
         assert "no program loaded" in win.tables.ic._hint.text().lower()
         assert "its arrow" in win.tables.ic._hint.text()
@@ -1193,7 +1198,7 @@ def scenario_startup(app, outdir):
         assert win.regs._wide_host.isVisible()
         assert win.trace.tbl._empty_hint.isVisible()
         assert "No instructions retired" in win.trace.tbl._empty_hint.text()
-        assert "no instructions retired" in win.pipeline.konata.plot.empty_message
+        assert "No retirements yet" in win.pipeline.konata.plot.empty_message
         assert win.pipeline.spark.backend is win.backend
         assert "no program loaded" not in win.tables.ic._hint.text().lower()
         assert all(control.isEnabled()
@@ -1829,7 +1834,10 @@ def scenario_branch_transport(app, outdir):
         click(app, win.reset_btn)
         settle(app)
         assert win.regs.state_banner.text().startswith("LIVE")
-        assert win.pipeline.konata.plot.width() == 1
+        assert win.pipeline.konata.plot.width() >= (
+            win.pipeline.konata.scroll.viewport().width())
+        assert win.pipeline.konata.plot.height() >= (
+            win.pipeline.konata.scroll.viewport().height())
         assert win.pipeline.konata.scroll.horizontalScrollBar().maximum() == 0
         win.speed.setValue(8)
         before = win.backend.state().core_cyc

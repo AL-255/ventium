@@ -29,6 +29,9 @@ At the supported compact width, transient last-action text no longer takes
 unbounded space from persistent cycle/IPC/cache status. It is capped and
 right-elided on screen while its full value remains available through the
 tooltip and accessibility description.
+The Pipeline timing canvas now fills its viewport before the first retirement,
+and its empty guidance wraps inside that space. Startup and in-flight-only
+sessions no longer clip the message inside a tiny pre-retirement cycle canvas.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

@@ -779,6 +779,11 @@ def scenario(app, outdir):
         QTest.keyClick(board, Qt.Key_Return)
         settle(app)
         assert editor._execution_line == live_lines["V"]
+        assert not win.pipeline.konata.plot.insns
+        assert win.pipeline.konata.plot.width() >= (
+            win.pipeline.konata.scroll.viewport().width())
+        assert win.pipeline.konata.plot.height() >= (
+            win.pipeline.konata.scroll.viewport().height())
         save(win, outdir, "02a_live_uv_source_link")
 
         # A live lane is not a retirement pin, but its source marker is still
