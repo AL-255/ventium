@@ -938,7 +938,8 @@ def scenario_startup(app, outdir):
         QTest.keyClick(win, Qt.Key_0, Qt.AltModifier)
         settle(app)
         assert win.tables.tabs.currentIndex() == 9
-        assert app.focusWidget() is win.tables.accmap
+        assert app.focusWidget() is win.tables.tabs.tabBar()
+        assert win.tables.accmap.focusPolicy() == Qt.NoFocus
         QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
         settle(app)
         assert win.tables.tabs.currentIndex() == 0
@@ -1634,6 +1635,7 @@ def scenario_dcache_memory(app, outdir):
         settle(app)
         assert win.tables.tabs.currentIndex() == 9
         assert app.focusWidget() is win.tables.accmap
+        assert win.tables.accmap.focusPolicy() == Qt.StrongFocus
         win.tables.accmap.repaint()
         settle(app)
         assert len(win.tables.accmap._pts) == len(accesses)
@@ -1679,6 +1681,8 @@ def scenario_dcache_memory(app, outdir):
         assert win.tables.accmap.sel_n is None
         assert win.tables.mem._click_hl is None
         assert win._pinned_n is None and win.trace.tbl.currentRow() < 0
+        win.tables.accmap.set_accesses([])
+        assert win.tables.accmap.focusPolicy() == Qt.NoFocus
         print(f"OK D-cache/memory: lines={len(win.backend.dcache())}, "
               f"accesses={len(accesses)}, stalls={stalls}")
     finally:

@@ -72,6 +72,12 @@ Trace match, then selects/pins the nearest exact Pipeline retirement and reports
 the fallback; only a PC outside both windows reports unavailable. Acceptance
 forces the mismatch and verifies the retained row/pin/status.
 
+**Empty Mem-map focus audit:** Mem map remained a strong-focus Tab stop with no
+access points, unlike the now-honest live board and IPC strip. Its focus policy
+now follows the access stream: Alt+0 falls back to the analysis tab strip while
+empty, then focuses the keyboard-navigable scatter as soon as a point exists.
+Startup, populated, and cleared transitions are all asserted.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a

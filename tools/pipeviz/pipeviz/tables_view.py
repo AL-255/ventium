@@ -1012,7 +1012,7 @@ class AccessMap(QWidget):
         self.session_active = False
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.NoFocus)
         self.setAccessibleName("Memory access map")
         self.setAccessibleDescription(
             "Address versus retirement scatter. Use Left and Right to traverse "
@@ -1029,6 +1029,9 @@ class AccessMap(QWidget):
         if accs is not self.accesses:
             self.sel_n = None        # a fresh stream invalidates the selection
         self.accesses = accs
+        # Keep an empty scatter out of the Tab order. It becomes a keyboard
+        # control as soon as there is a point arrows can actually traverse.
+        self.setFocusPolicy(Qt.StrongFocus if accs else Qt.NoFocus)
         self.update()
 
     def clear_selection(self):

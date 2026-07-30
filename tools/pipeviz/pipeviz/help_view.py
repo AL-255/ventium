@@ -266,6 +266,8 @@ retirement order: a diagonal is a stride, a horizontal band is a hot location,
 and a cloud is irregular access. Click a point or use arrows, Page Up/Page Down,
 Home, and End on the focused plot to select its trace row, pin Registers, and
 highlight its translated physical bytes; Enter/Space reopens the selection.
+Until an access exists, Alt+0 leaves focus on the analysis tab strip instead of
+placing a dead empty canvas in the Tab order.
 Implicit stack and repeated-string traffic is not included in this client-side
 operand replay.</p>
 """),

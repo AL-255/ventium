@@ -443,7 +443,8 @@ class MainWindow(QMainWindow):
             self.tables.mem.addr_e, self.tables.accmap,
         )
         target = targets[index] if 0 <= index < len(targets) else None
-        if target is None or not target.isEnabled():
+        if (target is None or not target.isEnabled()
+                or target.focusPolicy() == Qt.NoFocus):
             target = self.tables.tabs.tabBar()
         if hasattr(target, "rowCount") and target.rowCount():
             if target.currentRow() < 0:

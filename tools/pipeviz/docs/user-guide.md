@@ -146,6 +146,8 @@ its time point explicit at 1280×800. **View → Reset panel layout**
 `Alt+1` through `Alt+0` jump directly among Code$, Data$, TLB, Prefetch,
 Hotspots, Branches, Mix, Cycles, Memory, and Mem map and focus the active
 table/control; display-only Prefetch/Cycles pages focus the tab strip.
+An empty Mem map likewise keeps focus on the tab strip until a traversable
+access exists.
 
 Trace filters are space-separated AND terms: free text plus exact-field
 `pc:08048`, retirement `n>=100` / `n<=200` / `n=150`, cycle
