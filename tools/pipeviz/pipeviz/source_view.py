@@ -813,11 +813,6 @@ class AssemblyEditor(CodeEditor):
         self._completion_insertable = True
         self._completion_case_sample = ""
 
-    def _word_prefix(self):
-        cursor = self.textCursor()
-        cursor.select(QTextCursor.WordUnderCursor)
-        return cursor.selectedText()
-
     def _opcode_prefix(self):
         """Return the mnemonic prefix only when the cursor is in opcode position."""
         cursor = self.textCursor()
@@ -910,10 +905,15 @@ class AssemblyEditor(CodeEditor):
             event.accept()
             return
         super().keyPressEvent(event)
-        if event.text().isalpha():
-            prefix = self._word_prefix()
-            if len(prefix) >= 2:
+        completion_edit = (
+            event.text().isalnum()
+            or event.key() in (Qt.Key_Backspace, Qt.Key_Delete))
+        if completion_edit:
+            prefix = self._opcode_prefix()
+            if prefix is not None and len(prefix) >= 2:
                 self.request_completion()
+            elif self.completion.isVisible():
+                self.completion.hide()
         elif self.completion.isVisible() and event.key() not in (
                 Qt.Key_Shift, Qt.Key_Control):
             self.completion.hide()

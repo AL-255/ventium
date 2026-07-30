@@ -579,6 +579,32 @@ def scenario(app, outdir):
         editor.completion.accept_current()
         assert editor.toPlainText() == "Mov "
 
+        # Numeric opcode characters keep filtering instead of dismissing the
+        # popup; destructive edits refresh the broader prefix in place.
+        editor.clear()
+        QTest.keyClicks(editor, "cmpxchg8")
+        settle(app)
+        assert editor.completion.isVisible()
+        assert editor.completion.list.count() == 1
+        assert (
+            editor.completion.list.currentItem().data(Qt.UserRole).mnemonic
+            == "cmpxchg8b")
+        editor.completion.accept_current()
+        assert editor.toPlainText() == "cmpxchg8b "
+
+        editor.setPlainText("cmpxchg8")
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        editor.setTextCursor(cursor)
+        assert editor.request_completion()
+        assert editor.completion.list.count() == 1
+        QTest.keyClick(editor, Qt.Key_Backspace)
+        settle(app)
+        assert editor.toPlainText() == "cmpxchg"
+        assert editor.completion.isVisible()
+        assert editor.completion.list.count() == 2  # cmpxchg, cmpxchg8b
+        QTest.keyClick(editor, Qt.Key_Escape)
+
         # Statement scanning is lexical, not a raw split/search: comment markers
         # and semicolons inside data strings neither trigger nor suppress opcode
         # completion in the real statement that follows.

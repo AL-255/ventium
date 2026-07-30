@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Digit-bearing completion audit:** completion refreshed only after alphabetic
+keypresses, so entering the `8` in `cmpxchg8b` dismissed useful opcode help;
+Backspace also closed it instead of broadening results. Filtering now tracks
+alphanumeric insertion plus Backspace/Delete while the cursor remains in an
+opcode slot. Acceptance types `cmpxchg8` from scratch, narrows to the one valid
+entry, then proves Backspace restores the two-member `cmpxchg*` result set.
+
 **Completion-style audit:** opcode matching accepted uppercase input but always
 inserted the catalogue's lowercase mnemonic, creating mixed-style source one
 completion at a time. Acceptance now derives casing from the entire token being

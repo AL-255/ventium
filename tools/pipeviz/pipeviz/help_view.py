@@ -215,7 +215,9 @@ semicolons separate statements, and completion follows the opcode in each
 statement while ignoring separators/comment markers inside quoted data.
 Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
 style, including when completion replaces text on both sides of the cursor.
-Build errors, including fatal compiler errors, highlight their source line. Editing
+Digits keep refining names such as <code>cmpxchg8b</code>, while Backspace and
+Delete refresh the current matches. Build errors, including fatal compiler
+errors, highlight their source line. Editing
 the source clears diagnostics from the old revision instead of leaving a stale
 green or red result visible. Ctrl+Shift+R is intentionally Visualizer-only:
 it reloads an already-built program rather than rebuilding editor text. Use
