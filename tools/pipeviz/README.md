@@ -179,7 +179,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   * **Memory** — a physical hex/ASCII inspector (type an address, or follow
     segment-relative EIP / ESP / the most-recent explicit load-store **access**
     through legacy page translation, which gold-outlines the touched bytes);
-    Page Up/Page Down moves by 256 physical bytes.
+    Page Up/Page Down moves by one contiguous visible block.
   * **Mem map** — an **address-vs-retire-order scatter** of explicit memory
     operand effective offsets
     (a strided walk reads as a diagonal, a hot location as a band) with the dominant
@@ -263,7 +263,9 @@ next retirement, and `F5` runs or pauses. `Ctrl+0` restores the recommended
 splitter proportions. `Alt+V`, `Alt+A`, and `Alt+C` switch workspaces and focus
 the Pipeline, Assembly editor, or C editor respectively;
 `Alt+1` through `Alt+0` select the ten analysis tabs and focus their primary
-table/control (or the tab strip when a page is display-only).
+table/control. When those labels do not fit, a complete Alt+1…Alt+0 selector
+replaces the scrolling tab strip; display-only pages focus the visible local
+navigator.
 `/` focuses the trace filter from anywhere; Enter/F3 and Shift+F3 move
 among its results; Escape clears a nonempty filter, or unpins the current
 retirement when the filter is already empty and the Pipeline diagram has focus.

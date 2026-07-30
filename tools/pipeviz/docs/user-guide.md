@@ -172,10 +172,12 @@ its time point explicit at 1280×800. **View → Reset panel layout**
 `Alt+1` through `Alt+0` jump directly among Code$, Data$, TLB, Prefetch,
 Hotspots, Branches, Mix, Cycles, Memory, and Mem map and focus the active
 table/control. They also return from Assembly/C to the Visualizer, so the
-shortcut never changes an invisible background tab; display-only
-Prefetch/Cycles pages focus the tab strip.
-An empty Mem map likewise keeps focus on the tab strip until a traversable
-access exists.
+shortcut never changes an invisible background tab. When all ten tab names do
+not fit, the scrolling tab strip becomes a complete **Alt+1 · Code$ … Alt+0 ·
+Mem map** selector; choosing an item or using its arrow keys selects the same
+view. Display-only Prefetch/Cycles pages focus whichever local navigator is
+visible. An empty Mem map likewise keeps focus on that navigator until a
+traversable access exists.
 Hover any Trace or analysis-table column header for its complete semantics,
 including units/denominators, cache address meaning, TLB `U/W/P` bit order,
 `big`/`D` flags, and histogram/bar normalization.
@@ -312,8 +314,9 @@ regression-rendered at 900×620—the window's practical minimum-size range—as
 well as the normal wide layout.
 The Visualizer is also regression-rendered there: its three toolbars remain
 overflow-free, the critical cycle/state/EIP status survives, the narrow
-analysis/register side remains usable through scrolling, and Alt+1…Alt+0 still
-reaches tabs that are not currently painted.
+analysis side exposes all ten destinations through its compact selector, the
+register side remains usable through its indexed pages, and Alt+1…Alt+0 still
+reaches views that are not currently painted.
 For longer generated files, `Ctrl+F` opens an inline search with highlighted
 matches and a current/total counter. Enter/F3 advances, Shift+Enter/Shift+F3
 moves backward, and Escape closes it. Click a line number to select that whole

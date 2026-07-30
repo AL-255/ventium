@@ -341,8 +341,8 @@ for every non-empty category, plus retired count and IPC.</p>
 bytes, and whether the slow-path buffer is idle or what it decodes.</p>
 <p>Memory displays physical backend bytes. EIP, ESP, and the latest explicit
 memory operand are resolved through segmentation and legacy page tables. Page
-Up/Page Down or the arrow buttons moves by 256 physical bytes and exits follow
-mode; navigation is disabled before a program is loaded. Its custom-painted
+Up/Page Down or the arrow buttons move by one contiguous visible block and
+exits follow mode; navigation is disabled before a program is loaded. Its custom-painted
 dump exposes the visible range, each hex/ASCII row, and visible marker addresses
 as an accessible textual description. Mem
 map intentionally plots the effective offset used by the timing D-cache against
@@ -350,8 +350,11 @@ retirement order: a diagonal is a stride, a horizontal band is a hot location,
 and a cloud is irregular access. Click a point or use arrows, Page Up/Page Down,
 Home, and End on the focused plot to select its trace row, pin Registers, and
 highlight its translated physical bytes; Enter/Space reopens the selection.
-Until an access exists, Alt+0 leaves focus on the analysis tab strip instead of
-placing a dead empty canvas in the Tab order.
+When all ten analysis tab names do not fit, a complete
+<b>Alt+1 · Code$ … Alt+0 · Mem map</b> selector replaces the clipped scrolling
+strip. Pointer/arrow selection and Alt+1…Alt+0 operate the same views.
+Until an access exists, Alt+0 leaves focus on that visible analysis navigator
+instead of placing a dead empty canvas in the Tab order.
 Implicit stack and repeated-string traffic is not included in this client-side
 operand replay.</p>
 """),

@@ -7,7 +7,7 @@ import re
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QTableWidget, QTableWidgetItem, QHeaderView,
                                QAbstractItemView, QLabel, QGridLayout, QSizePolicy,
-                               QLineEdit, QPushButton, QCheckBox,
+                               QLineEdit, QPushButton, QCheckBox, QComboBox,
                                QStyledItemDelegate, QStyle)
 from PySide6.QtGui import (QFont, QColor, QBrush, QPainter, QFontMetrics,
                            QPalette, QKeySequence, QRegularExpressionValidator,
@@ -862,6 +862,29 @@ class TablesView(QWidget):
         amv.addWidget(self.accmap_lbl); amv.addWidget(self.accmap, 1)
         self.tabs.addTab(amw, "Mem map")
         self.tabs.setTabToolTip(9, "Load/store address versus retirement-order scatter")
+        # Ten complete tab labels cannot coexist in the ~190 px analysis pane
+        # at the supported application minimum.  Qt's scrolling tab bar leaves
+        # orphan fragments such as "les" visible.  A synchronized compact
+        # selector exposes every destination by name and documented shortcut;
+        # the ordinary tab bar returns automatically once all labels fit.
+        self.analysis_selector = QComboBox()
+        self.analysis_selector.setAccessibleName("Analysis view selector")
+        self.analysis_selector.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.analysis_selector.setMaxVisibleItems(self.tabs.count())
+        shortcuts = tuple("1234567890")
+        for index in range(self.tabs.count()):
+            self.analysis_selector.addItem(
+                f"Alt+{shortcuts[index]} · {self.tabs.tabText(index)}")
+            self.analysis_selector.setItemData(
+                index, self.tabs.tabToolTip(index), Qt.ToolTipRole)
+        lay.insertWidget(0, self.analysis_selector)
+        self._compact_navigation = None
+        self.analysis_selector.currentIndexChanged.connect(
+            self._selector_changed)
+        self.tabs.currentChanged.connect(self._tab_changed)
+        self._tab_changed(self.tabs.currentIndex())
+        self._arrange_tab_navigation(self.width())
         # a Mem-map point click also pins the Memory tab to that access's bytes (no
         # forced tab switch — switch to Memory to see exactly what the load/store hit).
         self.accmap.accessClicked.connect(self.mem.goto_access)
@@ -887,6 +910,52 @@ class TablesView(QWidget):
         self._dcache_seed = []
         self._dcache_resident = 0
         self.set_session_active(False)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._arrange_tab_navigation(event.size().width())
+
+    def _arrange_tab_navigation(self, width):
+        tab_bar = self.tabs.tabBar()
+        compact = (
+            int(width) < tab_bar.sizeHint().width() + 8)
+        if compact == self._compact_navigation:
+            return
+        self._compact_navigation = compact
+        self.analysis_selector.setVisible(compact)
+        tab_bar.setVisible(not compact)
+
+    def _selector_changed(self, index):
+        if 0 <= index < self.tabs.count():
+            self.tabs.setCurrentIndex(index)
+            self._sync_selector_description(index)
+
+    def _tab_changed(self, index):
+        if not hasattr(self, "analysis_selector"):
+            return
+        if self.analysis_selector.currentIndex() != index:
+            self.analysis_selector.blockSignals(True)
+            self.analysis_selector.setCurrentIndex(index)
+            self.analysis_selector.blockSignals(False)
+        self._sync_selector_description(index)
+
+    def _sync_selector_description(self, index):
+        if not 0 <= index < self.tabs.count():
+            return
+        shortcut = "0" if index == 9 else str(index + 1)
+        title = self.tabs.tabText(index)
+        detail = self.tabs.tabToolTip(index)
+        description = (
+            f"Selected analysis view {title}. {detail}. "
+            f"Choose another view from this list or press Alt+{shortcut}.")
+        self.analysis_selector.setAccessibleDescription(description)
+        self.analysis_selector.setToolTip(description)
+
+    def analysis_navigation_control(self):
+        """Visible local analysis navigator for focus fallback."""
+        return (
+            self.analysis_selector
+            if self.analysis_selector.isVisible() else self.tabs.tabBar())
 
     def set_session_active(self, active):
         """Distinguish 'nothing loaded' from a real, currently empty structure."""

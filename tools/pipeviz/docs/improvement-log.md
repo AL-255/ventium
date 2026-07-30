@@ -103,6 +103,14 @@ inward-aligned complete ticks (`0, 32, 64, 96, 127`) and wide mode retains the
 paint and hit-testing cover all 128 sets without accumulated rounding gaps; the
 hovered cell also gains a visible outline. Endpoint mapping, label separation,
 and paint bounds are acceptance-tested.
+The ten analysis destinations no longer collapse into a scrolling tab strip
+with orphan label fragments at the 188 px minimum. When all tab names do not
+fit, a synchronized selector exposes complete numbered entries from
+`Alt+1 · Code$` through `Alt+0 · Mem map`; the normal tab bar returns as soon
+as width permits. Alt+1…Alt+0, pointer selection, and combo-arrow navigation
+all update the same tab model. Focus fallback for painter-only views now lands
+on this visible selector instead of a hidden tab bar, with the selected view's
+purpose and shortcut available through tooltip/accessibility text.
 The Mem-map scatter now adapts its own painted geometry too. At 188 px it
 reclaims the unused y-axis gutter, reduces five overlapping retirement ticks to
 three inward-aligned ticks, and selects a measured complete summary such as

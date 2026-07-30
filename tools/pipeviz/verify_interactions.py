@@ -827,6 +827,7 @@ def scenario_startup(app, outdir):
             win.trace.filt: "Retired instruction filter",
             win.trace.tbl: "Retired instruction trace",
             win.tables.tabs.tabBar(): "Analysis view tabs",
+            win.tables.analysis_selector: "Analysis view selector",
             win.tables.ic: "Instruction cache lines",
             win.tables.ic_map: "Instruction cache occupancy map",
             win.tables.dc: "Data cache lines",
@@ -2474,6 +2475,25 @@ def scenario_layout(app, outdir):
         settle(app)
         prefetch = win.tables.pf
         assert win.tables.tabs.currentIndex() == 3
+        assert win.tables._compact_navigation
+        assert win.tables.analysis_selector.isVisible()
+        assert not win.tables.tabs.tabBar().isVisible()
+        assert win.tables.analysis_selector.currentText() == "Alt+4 · Prefetch"
+        assert win.tables.analysis_selector.count() == 10
+        assert all(
+            win.tables.analysis_selector.itemData(index, Qt.ToolTipRole)
+            == win.tables.tabs.tabToolTip(index)
+            for index in range(win.tables.tabs.count()))
+        assert app.focusWidget() is win.tables.analysis_selector
+        assert "Selected analysis view Prefetch" in (
+            win.tables.analysis_selector.accessibleDescription())
+        QTest.keyClick(win.tables.analysis_selector, Qt.Key_Up)
+        settle(app)
+        assert win.tables.tabs.currentIndex() == 2
+        assert win.tables.analysis_selector.currentText() == "Alt+3 · TLB"
+        QTest.keyClick(win, Qt.Key_4, Qt.AltModifier)
+        settle(app)
+        assert app.focusWidget() is win.tables.analysis_selector
         assert prefetch._compact
         assert prefetch.info.displayText() == (
             "F:08048015 E:08048015 W:0")
@@ -2497,6 +2517,8 @@ def scenario_layout(app, outdir):
         settle(app)
         cycles = win.tables.cyc
         assert win.tables.tabs.currentIndex() == 7
+        assert win.tables.analysis_selector.currentText() == "Alt+8 · Cycles"
+        assert app.focusWidget() is win.tables.analysis_selector
         row_rects = cycles._row_rects(cycles.width())
         assert all(
             rect.left() >= 0 and rect.right() < cycles.width()
@@ -2756,6 +2778,9 @@ def scenario_layout(app, outdir):
         settle(app, 6)
         assert win.width() == 1280 and win.regs._compact
         assert win.regs._compact_tabs.currentIndex() == 2
+        assert not win.tables._compact_navigation
+        assert not win.tables.analysis_selector.isVisible()
+        assert win.tables.tabs.tabBar().isVisible()
         for toolbar in win.findChildren(QToolBar):
             overflow = toolbar.findChild(QToolButton, "qt_toolbar_ext_button")
             assert overflow is None or not overflow.isVisible(), (
