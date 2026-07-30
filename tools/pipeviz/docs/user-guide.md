@@ -431,7 +431,9 @@ tooltip and accessible description.
 The **Edit** menu appears between File and View and targets only the active
 Assembly or C workspace. It exposes Undo/Redo, Cut/Copy/Paste, Select All,
 Find, and Go to Line with their familiar shortcuts; every action is disabled
-in Visualizer so an editing command cannot mutate a hidden source buffer.
+in Visualizer so an editing command cannot mutate a hidden source buffer. While
+the inline Find field has focus, editing actions follow that query instead of
+the source buffer, matching direct keyboard behavior.
 Both authoring command rows, editors, preview/diagnostics, and status areas are
 regression-rendered at 900×620—the window's practical minimum-size range—as
 well as the normal wide layout.

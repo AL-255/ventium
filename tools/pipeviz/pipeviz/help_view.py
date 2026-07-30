@@ -301,7 +301,8 @@ centered editor line. Both workbenches remain usable at the tested
 <p>The workspace-aware <b>Edit</b> menu exposes Undo/Redo,
 Cut/Copy/Paste, Select All, Find, and Go to Line. Its actions follow the active
 Assembly or C editor and disable in Visualizer, so a menu command cannot alter
-a hidden source buffer.</p>
+a hidden source buffer. While the inline Find field has focus, editing actions
+follow that query rather than the source text.</p>
 <h2>Find in source</h2>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves

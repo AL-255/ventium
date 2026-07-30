@@ -496,8 +496,15 @@ class MainWindow(QMainWindow):
                 lambda _available: self._sync_source_edit_actions())
             editor.copyAvailable.connect(
                 lambda _available: self._sync_source_edit_actions())
+        for query in (
+                self.assembly.find_bar.query, self.c_source.find_bar.query):
+            query.selectionChanged.connect(self._sync_source_edit_actions)
+            query.textChanged.connect(
+                lambda _text: self._sync_source_edit_actions())
         QApplication.clipboard().dataChanged.connect(
             self._sync_source_edit_actions)
+        QApplication.instance().focusChanged.connect(
+            lambda _old, _new: self._sync_source_edit_actions())
         self._edit_menu = edit_menu
 
         # Alt+V is the documented Visualizer workspace shortcut. Giving the
@@ -1346,24 +1353,46 @@ class MainWindow(QMainWindow):
         index = self.workspace.currentIndex()
         return self.assembly if index == 1 else self.c_source if index == 2 else None
 
+    def _active_source_edit_target(self):
+        source = self._active_source_view()
+        if source is None:
+            return None
+        focus = QApplication.focusWidget()
+        if focus is source.find_bar.query:
+            return focus
+        return source.editor
+
     def _sync_source_edit_actions(self):
         if not hasattr(self, "undo_source_action"):
             return
         source = self._active_source_view()
-        editor = source.editor if source is not None else None
-        enabled = editor is not None
+        target = self._active_source_edit_target()
+        enabled = target is not None
+        line_edit = isinstance(target, QLineEdit)
         self.undo_source_action.setEnabled(
-            enabled and editor.document().isUndoAvailable())
+            enabled and (
+                target.isUndoAvailable() if line_edit
+                else target.document().isUndoAvailable()))
         self.redo_source_action.setEnabled(
-            enabled and editor.document().isRedoAvailable())
-        has_selection = enabled and editor.textCursor().hasSelection()
+            enabled and (
+                target.isRedoAvailable() if line_edit
+                else target.document().isRedoAvailable()))
+        has_selection = enabled and (
+            target.hasSelectedText() if line_edit
+            else target.textCursor().hasSelection())
         self.cut_source_action.setEnabled(has_selection)
         self.copy_source_action.setEnabled(has_selection)
-        self.paste_source_action.setEnabled(enabled and editor.canPaste())
+        can_paste = (
+            not target.isReadOnly()
+            and QApplication.clipboard().mimeData().hasText()
+            if line_edit else enabled and target.canPaste())
+        self.paste_source_action.setEnabled(enabled and can_paste)
         self.select_all_source_action.setEnabled(
-            enabled and not editor.document().isEmpty())
-        self.find_source_action.setEnabled(enabled)
-        self.goto_source_action.setEnabled(enabled)
+            enabled and (
+                bool(target.text()) if line_edit
+                else not target.document().isEmpty()))
+        self.find_source_action.setEnabled(source is not None)
+        self.goto_source_action.setEnabled(source is not None)
 
     def _invoke_source_edit(self, operation):
         source = self._active_source_view()
@@ -1375,9 +1404,11 @@ class MainWindow(QMainWindow):
         if operation == "goto":
             source.cursor_position.go_to_line()
             return
-        editor = source.editor
-        getattr(editor, operation)()
-        editor.setFocus(Qt.ShortcutFocusReason)
+        target = self._active_source_edit_target()
+        if target is None:
+            return
+        getattr(target, operation)()
+        target.setFocus(Qt.ShortcutFocusReason)
         self._sync_source_edit_actions()
 
     def _new_active_source(self):

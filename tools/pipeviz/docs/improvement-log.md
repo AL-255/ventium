@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — Edit follows the focused source text control
+
+**Focus-routing audit:** direct clipboard keys were correctly consumed by the
+inline Find field, but clicking an Edit-menu command while that field was
+focused still reflected and targeted the underlying source editor. Paste from
+the menu could therefore modify source while the user was visibly editing a
+query.
+
+**Changes:** Edit actions now resolve the focused source text control. In the
+inline Find field, undo/redo, selection, clipboard, and Select All state follow
+the query; elsewhere they follow the active Assembly/C editor. Focus,
+selection, text-history, and clipboard changes refresh action availability.
+
+**Verification:** acceptance focuses Assembly Find, replaces its selected query
+through Edit → Paste, undoes that query edit through the menu, and requires the
+Assembly source buffer to remain byte-for-byte unchanged throughout.
+
 ## July 30 continuation — workspace-aware Edit menu
 
 **Discoverability audit:** both source editors already honored conventional

@@ -508,6 +508,20 @@ def scenario(app, outdir):
         settle(app)
         assert win.assembly.find_bar.isVisible()
         assert app.focusWidget() is win.assembly.find_bar.query
+        source_before_find_edit = win.assembly.editor.toPlainText()
+        win.assembly.find_bar.query.setText("needle")
+        win.assembly.find_bar.query.selectAll()
+        QApplication.clipboard().setText("replacement")
+        assert win.copy_source_action.isEnabled()
+        assert win.cut_source_action.isEnabled()
+        assert win.paste_source_action.isEnabled()
+        win.paste_source_action.trigger()
+        assert win.assembly.find_bar.query.text() == "replacement"
+        assert win.assembly.editor.toPlainText() == source_before_find_edit
+        assert win.undo_source_action.isEnabled()
+        win.undo_source_action.trigger()
+        assert win.assembly.find_bar.query.text() == "needle"
+        assert win.assembly.editor.toPlainText() == source_before_find_edit
         win.assembly.find_bar.hide_find()
         win.assembly.editor.moveCursor(QTextCursor.Start)
         win.assembly.editor.document().setModified(False)
