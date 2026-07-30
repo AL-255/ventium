@@ -239,7 +239,9 @@ Accepted mnemonics preserve the token's uppercase, capitalized, or lowercase
 style, including when completion replaces text on both sides of the cursor.
 Digits keep refining names such as <code>cmpxchg8b</code>, while Backspace and
 Delete refresh the current matches. Build errors, including fatal compiler
-errors, highlight their source line. Editing
+errors, highlight their source line. The first diagnostic line is actionable:
+focus it and press Enter, or double-click it, to return to the marked editor
+line. Editing
 the source clears diagnostics from the old revision instead of leaving a stale
 green or red result visible. Ctrl+Shift+R is intentionally Visualizer-only:
 it reloads an already-built program rather than rebuilding editor text. Use
@@ -261,8 +263,9 @@ marker rather than showing a stale association.</p>
 Pentium target with no libc, builtins, MMX, or SSE; floating point therefore
 uses x87. It adds a small <code>_start</code>/HLT wrapper and opens the generated
 Intel-syntax source in Assembly. Review or edit it before running. Compiler
-errors also highlight their C line. Editing C or changing the optimization
-level clears the prior compiler result and asks for a fresh compile.</p>
+errors also highlight their C line; press Enter on the focused diagnostic or
+double-click it to jump there. Editing C or changing the optimization level
+clears the prior compiler result and asks for a fresh compile.</p>
 <p>Generated artifacts stay under <code>tools/pipeviz/.generated/</code> and
 are ignored by Git.</p>
 """),

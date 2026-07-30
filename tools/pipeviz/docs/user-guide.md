@@ -243,7 +243,9 @@ _start:
 
 **Assemble** checks and links the source; **Assemble + Run** (`Ctrl+Enter`)
 also loads the resulting ELF into the Visualizer. Diagnostics name and
-highlight the failing line. `Ctrl+Space` opens completion over the complete
+highlight the failing line. Their first line is an actionable jump: focus the
+diagnostic and press Enter, or double-click it, to return to that editor line.
+`Ctrl+Space` opens completion over the complete
 Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
 description, mode/build availability, approximate latency, pairing class
 (`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
@@ -347,7 +349,8 @@ The generated source opens in Assembly rather than running immediately. This
 lets you compare optimization levels, edit scheduling or register choices,
 inspect completion previews, and only then assemble and run it. Compiler errors
 remain in C and highlight their responsible line; assembler errors remain in
-Assembly. Build/compiler diagnostics belong to the exact source revision that
+Assembly. Press Enter on the focused diagnostic, or double-click it, to jump
+to the marked C/Assembly line. Build/compiler diagnostics belong to the exact source revision that
 produced them: editing either source clears the prior result, and changing C's
 optimization level clears the old compiler result and prompts you to compile
 again.

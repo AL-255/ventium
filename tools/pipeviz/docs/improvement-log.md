@@ -35,6 +35,8 @@ sessions no longer clip the message inside a tiny pre-retirement cycle canvas.
 Assembler and compiler failures now begin with an actionable source-line link.
 Enter from the focused diagnostic or a double-click returns directly to the
 marked editor line; editing clears both the diagnostic and its stale target.
+Both the indexed in-app guide and repository user guide document the same
+keyboard/pointer jump paths.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

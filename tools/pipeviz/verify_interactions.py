@@ -1163,6 +1163,7 @@ def scenario_startup(app, outdir):
         guide_text = win._guide_dialog.page.toPlainText()
         assert "Ctrl+Space" in guide_text and "Compile → Assembly" in guide_text
         assert "source badge" in guide_text
+        assert "press Enter, or double-click it" in guide_text
         authoring_shot = os.path.join(
             outdir, "00_help_authoring_guide.png")
         assert win._guide_dialog.grab().save(authoring_shot)
