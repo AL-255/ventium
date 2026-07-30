@@ -1018,6 +1018,10 @@ def scenario_branch_transport(app, outdir):
         QTest.keyClick(win.trace.filt, Qt.Key_F3, Qt.ShiftModifier)
         settle(app)
         assert win.trace.tbl.currentRow() == first_match
+        selected_match_n = win.trace.tbl.item(first_match, 0).text()
+        set_filter(app, win.trace, "")
+        assert win.trace.tbl.currentRow() == first_match
+        assert win.trace.tbl.item(first_match, 0).text() == selected_match_n
         pc_matches = set_filter(app, win.trace, "pc:0804800a")
         assert pc_matches > 50
         assert all(
@@ -1182,6 +1186,12 @@ def scenario_dcache_memory(app, outdir):
         mem_rows = set_filter(app, win.trace, "@")
         assert mem_rows >= 10
         set_filter(app, win.trace, "")
+        trace_scroll = win.trace.tbl.verticalScrollBar()
+        assert win.trace.tbl.currentRow() < 0
+        assert trace_scroll.value() == trace_scroll.maximum()
+        assert win.trace.tbl.rowAt(
+            win.trace.tbl.viewport().height() - 1
+        ) == win.trace.tbl.rowCount() - 1
 
         select_tab(app, win.tables.tabs, 1)
         assert win.tables.dc.rowCount() >= 10

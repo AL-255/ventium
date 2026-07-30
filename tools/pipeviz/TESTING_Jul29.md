@@ -188,7 +188,8 @@ Procedure:
 1. Step 160 clocks.
    Require the live board to say `[blocked]`, not `[paired]`, while the current
    `S_PIPE` instruction is held by a stall.
-2. Filter by `stall`, then by `@` (resolved memory access).
+2. Filter by `stall`, then by `@` (resolved memory access); clear the
+   unselected filter and require Trace to return to the newest retirement.
 3. Open Data$ and inspect residency plus replayed miss reporting.
 4. Open Memory and click `→access`.
 5. Open Mem map and click a midpoint in the plotted stride.
@@ -199,6 +200,8 @@ Observed evidence:
 
 - 57 retirements, 14 Data$ lines, 14 resolved accesses, 15 stall-tagged trace
   rows.
+- Transient filters restore tail-follow, while the branch-search regression
+  separately proves that clearing after choosing a result preserves it.
 - Mem map reports a `+0x20` dominant stride at 100%, matching the 32-byte cache
   line walk.
 - The clicked map point selected retirement 31 at address `0x080490e0`; the

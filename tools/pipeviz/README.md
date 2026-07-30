@@ -167,7 +167,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   `mov` / `pc:08048` / `n>=100` / `cyc>=133` / `pipe:V` / `stall` / `@` (memory-accessing
   rows); `/` focuses it, Enter/F3 and Shift+F3 navigate results, and Escape clears it.
   Selecting a row links by retirement ID, so U and V remain distinguishable
-  even when they commit in the same cycle.
+  even when they commit in the same cycle. Clearing an exploratory filter
+  returns to the newest rows when no result was chosen; a chosen result keeps
+  its context.
   Long refreshes retain and label the newest 6,000 retirements rather than
   silently skipping the tail.
 * **Registers panel** (bottom-right) — GPRs, **EFLAGS** as a named-bit grid (set =

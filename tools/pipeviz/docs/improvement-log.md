@@ -182,6 +182,15 @@ records and derives mnemonic, GPR/flag reads, and writes from each record's
 immutable bytes and D-bit. A synthetic backend makes all current-memory reads
 fatal while proving `inc eax` and its exact dependency metadata still render.
 
+**Trace filter-follow audit:** Trace initially followed the newest retirement,
+but hiding rows for a filter collapsed its scrollbar to zero. Clearing an
+unselected filter then left the viewport at the oldest rows, visually
+disconnecting it from live Pipeline/Registers. Trace now remembers whether the
+user entered filtering from an unselected tail: clearing restores the newest
+rows after Qt updates the row layout, while selecting or manually scrolling a
+result cancels that return. Regressions prove both tail restoration and
+selected-result preservation, and the D-cache capture now shows the live tail.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

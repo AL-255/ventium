@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QLabel, QStyledItemDelegate, QStyle, QLineEdit,
                                QToolButton)
 from PySide6.QtGui import QColor, QFont, QBrush, QFontMetrics
-from PySide6.QtCore import Qt, QRect, Signal
+from PySide6.QtCore import Qt, QRect, QTimer, Signal
 
 from . import disasm
 from .disasm import C_PIPE, C_FP, FIELD_COLOR
@@ -354,6 +354,12 @@ class TraceView(QWidget):
         self._bits = 32
         self._prev_seg_base = None
         self._prev_cr0 = self._prev_cr3 = self._prev_cr4 = 0
+        self._filter_return_tail = False
+        # actionTriggered is user navigation (wheel/keys/drag), unlike the
+        # value changes caused by hiding filtered rows. A user who deliberately
+        # scrolls a filtered result set should keep that context on clear.
+        self.tbl.verticalScrollBar().actionTriggered.connect(
+            self._filter_scroll_action)
 
     def _apply_column_profile(self):
         """Protect disassembly width when the debugger's left pane is compact."""
@@ -404,6 +410,9 @@ class TraceView(QWidget):
     def _on_row(self, row, col, prow, pcol):
         if row < 0:
             return
+        if self._tokens:
+            # A chosen match is stronger context than the pre-filter tail.
+            self._filter_return_tail = False
         it = self.tbl.item(row, 0)
         if it is not None:
             cyc = it.data(_CYC_ROLE)
@@ -469,6 +478,7 @@ class TraceView(QWidget):
         self._prev_cr0 = self._prev_cr3 = self._prev_cr4 = 0
         self.last_access = None   # newest resolved load/store address (Memory '→access')
         self.accesses = []        # access stream for the access map
+        self._filter_return_tail = False
         self._apply_filter()
 
     def start_session(self):
@@ -671,8 +681,34 @@ class TraceView(QWidget):
 
     # ---- filter box ----
     def _on_filter(self, text):
-        self._tokens = [t for t in text.strip().lower().split() if t]
+        tokens = [t for t in text.strip().lower().split() if t]
+        entering = not self._tokens and bool(tokens)
+        clearing = bool(self._tokens) and not tokens
+        if entering:
+            sb = self.tbl.verticalScrollBar()
+            self._filter_return_tail = (
+                self._filter_return_tail
+                or (self.tbl.currentRow() < 0
+                    and sb.value() >= sb.maximum() - 1))
+        self._tokens = tokens
         self._apply_filter()
+        if clearing:
+            if self._filter_return_tail:
+                # Unhiding rows updates the scrollbar range on the next layout
+                # pass. Keep the intent alive if Ctrl+A/Backspace is immediately
+                # followed by a replacement query before the timer fires.
+                self.tbl.doItemsLayout()
+                QTimer.singleShot(0, self._restore_filter_tail)
+
+    def _restore_filter_tail(self):
+        if not self._tokens and self._filter_return_tail:
+            self.tbl.doItemsLayout()
+            self.tbl.scrollToBottom()
+            self._filter_return_tail = False
+
+    def _filter_scroll_action(self, _action):
+        if self._tokens:
+            self._filter_return_tail = False
 
     @staticmethod
     def _match(filt, tokens):

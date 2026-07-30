@@ -177,7 +177,9 @@ fields.</p>
 <code>@</code> for memory accesses. Click any result to synchronize the timing
 view and pin Registers. Press <code>/</code> to focus the filter, Enter or F3
 to move to the next result, Shift+F3 for the previous result, and Escape to
-clear it. The arrows beside the match count provide the same navigation.</p>
+clear it. The arrows beside the match count provide the same navigation.
+Clearing an unselected exploratory filter returns to the newest rows; selecting
+a result preserves that historical context instead.</p>
 <p>If a single fast step produces more rows than fit in the rolling view, Trace
 keeps and labels the newest 6,000 retirements. The Pipeline title similarly
 labels a newest-cycle window after very large steps.</p>
