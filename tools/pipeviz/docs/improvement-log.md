@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Instruction-step wording audit:** the backend returns elapsed clocks for an
+Insn step, but the action line labeled that number “instruction boundary,”
+yielding claims such as “Advanced 7 instruction boundary.” Insn feedback now
+reports singular/plural clocks and independently states whether it reached the
+next retirement, hit a terminal program state, or exhausted the safety limit.
+A real branch workload locks the clock delta and exact retirement outcome.
+
 **Obscured-execution audit:** Run also continued inside the nested event loop of
 program/snapshot choosers and behind the Help window, allowing the model to race
 ahead while transport feedback was unavailable. These entry points now pause

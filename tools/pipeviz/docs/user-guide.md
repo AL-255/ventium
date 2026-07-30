@@ -91,7 +91,9 @@ The checkbox changes only after that fallback is constructed; if both
 constructions fail, the old live session and its requested mode remain intact.
 
 Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
-next retirement, and **Step N** for a useful analysis window.  `F5` runs and
+next retirement, and **Step N** for a useful analysis window. Insn feedback
+reports the actual clocks elapsed and the retirement/terminal/safety-limit stop
+reason separately. `F5` runs and
 pauses. Entering Assembly/C pauses continuous Run synchronously before its
 transport controls are hidden; returning to Visualizer does not resume without
 an explicit Run/F5. Opening a program/snapshot chooser or Help also pauses

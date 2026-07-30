@@ -262,6 +262,22 @@ def _session_progress(raw_ret, core_cyc, start_cyc, first_visible_n=None,
     return retired, elapsed, retired / max(1, elapsed)
 
 
+def _step_notice(stepped, stop_on_retire=False, retired_before=0,
+                 retired_after=0, done=False):
+    """Truthful transport feedback: elapsed time and stop reason are distinct."""
+    stepped = int(stepped)
+    clocks = f"{stepped} clock" + ("" if stepped == 1 else "s")
+    if not stop_on_retire:
+        return f"Advanced {clocks}"
+    if int(retired_after) > int(retired_before):
+        outcome = "reached next retirement"
+    elif done:
+        outcome = "program stopped before another retirement"
+    else:
+        outcome = "no retirement before the safety limit"
+    return f"Advanced {clocks} · {outcome}"
+
+
 class MainWindow(QMainWindow):
     def __init__(self, libpath=None):
         super().__init__()
@@ -1659,10 +1675,17 @@ class MainWindow(QMainWindow):
         if not self._has_session():
             return
         self._clear_selection_for_advance()
+        retired_before = (
+            self.backend.retire_count() if stop_on_retire else None)
         stepped = self.backend.step(n, stop_on_retire)
         self._refresh_all()
-        unit = "instruction boundary" if stop_on_retire else "clock" + ("s" if stepped != 1 else "")
-        self._notice(f"Advanced {stepped} {unit}")
+        if stop_on_retire:
+            retired_after = self.backend.retire_count()
+            self._notice(_step_notice(
+                stepped, True, retired_before, retired_after,
+                self.backend.is_done()))
+        else:
+            self._notice(_step_notice(stepped))
         if self.backend.is_done():
             self.stop_run()
 

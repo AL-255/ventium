@@ -35,7 +35,7 @@ from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
 from pipeviz.main import (DEF_ENTRY, DEF_ESP, MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
                           _manifest_bool,
-                          _session_progress, _system_load_address,
+                          _session_progress, _step_notice, _system_load_address,
                           _validate_segments)
 from pipeviz.pipeline_view import ROW_H
 from pipeviz.regs_view import RegsView
@@ -206,6 +206,13 @@ def scenario_startup(app, outdir):
     assert _session_progress(212, 120, 1) == (212, 120, 212 / 120)
     assert _session_progress(
         1_000_001, 5001, 5001, 1_000_000, snapshot=True) == (1, 1, 1.0)
+    assert _step_notice(1) == "Advanced 1 clock"
+    assert _step_notice(7, True, 10, 11) == (
+        "Advanced 7 clocks · reached next retirement")
+    assert _step_notice(4, True, 10, 10, done=True) == (
+        "Advanced 4 clocks · program stopped before another retirement")
+    assert _step_notice(200000, True, 10, 10, done=False) == (
+        "Advanced 200000 clocks · no retirement before the safety limit")
     assert _manifest_bool(True, "system") is True
     try:
         _manifest_bool(1, "system")
@@ -1263,8 +1270,14 @@ def scenario_branch_transport(app, outdir):
         click(app, win.step1_btn)
         assert win.backend.state().core_cyc == c0 + 1
         r0 = win.backend.retire_count()
+        step_cycle = win.backend.cycle_count()
         click(app, win.stepi_btn)
         assert win.backend.retire_count() > r0
+        elapsed = win.backend.cycle_count() - step_cycle
+        assert win.action_hint.text() == (
+            f"Advanced {elapsed} clock"
+            f"{'' if elapsed == 1 else 's'} · reached next retirement")
+        assert "instruction boundary" not in win.action_hint.text()
 
         assert win.reload_action.isEnabled()
         win.esp_e.setText("0x40c34000")

@@ -18,6 +18,9 @@ ELF, choose the execution mode, then advance with <b>Clock</b>, <b>Insn</b>,
 transport toolbar is hidden. Returning to Visualizer never resumes without an
 explicit F5/Run action. Program/snapshot choosers and Help also pause before
 obscuring the live debugger; canceling or closing them does not auto-resume.</p>
+<p>Insn advances clocks until the next retirement boundary; its feedback names
+the actual elapsed clocks separately from whether it reached a retirement,
+stopped with the program, or exhausted its safety limit.</p>
 <ol>
  <li>Open or drop a program. ELF entry and segments are automatic. The
  <b>File → Open example</b> menu rescans and exposes the built verification
