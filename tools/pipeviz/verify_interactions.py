@@ -22,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMessageBox, QPushButton,
                                QToolBar, QToolButton)
@@ -40,7 +41,7 @@ from pipeviz.main import (DEF_ENTRY, DEF_ESP, MainWindow, _PROGRAM_FILTER, _appl
 from pipeviz.pipeline_view import ROW_H
 from pipeviz.regs_view import RegsView
 from pipeviz.tables_view import (CycleBreakdown, TablesView, _dcache_per_pc,
-                                 _dcache_replay)
+                                 _dcache_replay, _mono)
 
 
 def repo_path(relative):
@@ -2645,6 +2646,41 @@ def scenario_layout(app, outdir):
         settle(app)
         assert win.tables.tabs.currentIndex() == 9
         assert app.focusWidget() is win.tables.accmap
+        access_map = win.tables.accmap
+        header = access_map._header_text()
+        header_font = _mono(8)
+        header_font.setBold(True)
+        assert QFontMetrics(header_font).horizontalAdvance(header) <= (
+            access_map.width() - 8)
+        assert not header.endswith("…")
+        assert "Δ+20 100%" in header
+        assert "effective-address range" in (
+            access_map.accessibleDescription())
+        assert "dominant stride +0x20 (100 percent)" in (
+            access_map.accessibleDescription())
+        left, right, top, bottom, tick_count, plot_rect = (
+            access_map._plot_geometry())
+        assert tick_count == 3
+        assert plot_rect.left() >= 0 and plot_rect.right() < access_map.width()
+        assert plot_rect.top() >= 0 and plot_rect.bottom() < access_map.height()
+        tick_rects = access_map._x_tick_rects(
+            access_map.width(), access_map.height(),
+            left, right, bottom, tick_count)
+        assert all(
+            rect.left() >= 0 and rect.right() < access_map.width()
+            for _x, rect, _alignment in tick_rects)
+        prior_selection = access_map.sel_n
+        first_access = access_map.accesses[0]
+        access_map.sel_n = first_access[0]
+        selected_header = access_map._header_text()
+        assert f"@{int(first_access[2]):08x}" in selected_header
+        assert QFontMetrics(header_font).horizontalAdvance(
+            selected_header) <= access_map.width() - 8
+        access_map.sel_n = prior_selection
+        access_map._sync_accessible_description()
+        save_shot(
+            app, win, outdir, "08i_true_minimum_memmap",
+            min_width=900, min_height=620)
         QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
         settle(app)
         assert win.tables.tabs.currentIndex() == 0

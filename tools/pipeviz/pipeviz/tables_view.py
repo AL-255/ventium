@@ -1564,6 +1564,117 @@ class AccessMap(QWidget):
             "access. Enter/Space reopens its Trace row and physical Memory bytes.")
         self._sync_accessible_description()
 
+    @staticmethod
+    def _stride_details(addrs):
+        """Return (delta, percent) for a dominant stride, else (None, percent)."""
+        if len(addrs) < 2:
+            return None, 0
+        deltas = [
+            addrs[index + 1] - addrs[index]
+            for index in range(len(addrs) - 1)]
+        frequencies = {}
+        for delta in deltas:
+            frequencies[delta] = frequencies.get(delta, 0) + 1
+        mode = max(frequencies, key=frequencies.get)
+        percent = round(100 * frequencies[mode] / len(deltas))
+        return (mode if percent >= 40 else None), percent
+
+    def _summary_parts(self):
+        if not self.accesses:
+            return None
+        addrs = [int(access[2]) for access in self.accesses]
+        loads = sum(1 for access in self.accesses if not access[3])
+        stride, percent = self._stride_details(addrs)
+        return (
+            len(self.accesses), loads, len(self.accesses) - loads,
+            min(addrs), max(addrs), stride, percent)
+
+    def _header_text(self, width=None):
+        """Measured complete header; shorter candidates never end in ellipsis."""
+        summary = self._summary_parts()
+        if summary is None:
+            return ""
+        count, loads, stores, low, high, stride, percent = summary
+        stride_full = (
+            "one sample" if count < 2 else
+            "irregular stride" if stride is None else
+            f"stride {'+' if stride >= 0 else '-'}0x{abs(stride):x} "
+            f"({percent}%)")
+        stride_short = (
+            "one sample" if count < 2 else
+            "irregular" if stride is None else
+            f"Δ{'+' if stride >= 0 else '-'}{abs(stride):x} {percent}%")
+        selected = self._sel_idx()
+        if selected is None:
+            candidates = (
+                f"{count} accesses · 0x{low:x}..0x{high:x} · "
+                f"{stride_full} · loads={loads} stores={stores}   "
+                "[blue=load · gold=store · click]",
+                f"{count} ops · L{loads} S{stores} · {stride_short}",
+                f"{count} · L{loads}/S{stores} · {stride_short}",
+                f"{count} memory ops")
+        else:
+            access = self.accesses[selected]
+            retirement, cycle, address, is_store = access[:4]
+            physical = access[7] if len(access) > 7 else address
+            mapping_full = (
+                " · untranslated" if physical is None else
+                f" → phys {int(physical):08x}"
+                if int(physical) != int(address) else "")
+            mapping_short = (
+                " · unmapped" if physical is None else
+                " · →p" if int(physical) != int(address) else "")
+            kind = "store" if is_store else "load"
+            kind_short = "S" if is_store else "L"
+            candidates = (
+                f"selected  n={retirement} cyc={cycle} @{int(address):08x} "
+                f"{kind}{mapping_full}   ·   {count} accesses · "
+                f"0x{low:x}..0x{high:x} · {stride_full}",
+                f"n{retirement} c{cycle} {kind_short} @{int(address):08x}"
+                f"{mapping_short} · {count} ops",
+                f"n{retirement} c{cycle} {kind_short} @{int(address):08x}"
+                f"{mapping_short}",
+                f"n{retirement} c{cycle} {kind_short}")
+        available = max(0, (self.width() if width is None else width) - 8)
+        header_font = _mono(8)
+        header_font.setBold(True)
+        metrics = QFontMetrics(header_font)
+        for candidate in candidates:
+            if metrics.horizontalAdvance(candidate) <= available:
+                return candidate
+        return candidates[-1]
+
+    def _plot_geometry(self, width=None, height=None):
+        """Return plot margins and retirement tick count for custom painting."""
+        canvas_width = self.width() if width is None else int(width)
+        canvas_height = self.height() if height is None else int(height)
+        left = 55 if canvas_width < 320 else 76
+        right, top, bottom = (6, 20, 16) if canvas_width < 320 else (8, 20, 16)
+        plot_width = max(1, canvas_width - left - right)
+        plot_height = max(1, canvas_height - top - bottom)
+        tick_count = 5 if plot_width >= 240 else 3 if plot_width >= 100 else 2
+        return left, right, top, bottom, tick_count, (
+            QRect(left, top, plot_width + 1, plot_height + 1))
+
+    @staticmethod
+    def _x_tick_rects(width, height, left, right, bottom, tick_count):
+        """Rects/alignment for in-bounds retirement-axis labels."""
+        plot_width = max(1, width - left - right)
+        result = []
+        for index in range(tick_count):
+            x = left + int(index * plot_width / max(1, tick_count - 1))
+            if index == 0:
+                rect = QRect(x + 2, height - bottom + 1, 48, 12)
+                align = Qt.AlignLeft | Qt.AlignTop
+            elif index == tick_count - 1:
+                rect = QRect(x - 50, height - bottom + 1, 48, 12)
+                align = Qt.AlignRight | Qt.AlignTop
+            else:
+                rect = QRect(x - 24, height - bottom + 1, 48, 12)
+                align = Qt.AlignHCenter | Qt.AlignTop
+            result.append((x, rect, align))
+        return result
+
     def set_session_active(self, active):
         self.session_active = bool(active)
         self._sync_accessible_description()
@@ -1586,20 +1697,28 @@ class AccessMap(QWidget):
 
     def _sync_accessible_description(self):
         navigation = (
-            "Use Left and Right or Up and Down, Page Up and Page Down, Home "
-            "and End to select an access; Enter opens its retirement and "
-            "physical bytes.")
+            "Click a point, or use Left and Right or Up and Down, Page Up and "
+            "Page Down, Home and End to select an access; Enter opens its "
+            "retirement and physical bytes.")
         if not self.accesses:
             state = (
                 "No memory accesses captured."
                 if self.session_active else "No program loaded.")
             self.setAccessibleDescription(f"{state} {navigation}")
+            self.setToolTip(f"{state}\n{navigation}")
             return
-        loads = sum(1 for access in self.accesses if not access[3])
-        stores = len(self.accesses) - loads
+        count, loads, stores, low, high, stride, percent = (
+            self._summary_parts())
+        pattern = (
+            "stride unavailable from one sample" if count < 2 else
+            "irregular stride" if stride is None else
+            f"dominant stride {'+' if stride >= 0 else '-'}0x"
+            f"{abs(stride):x} ({percent} percent)")
         selected = self._sel_idx()
         context = (
-            f"{len(self.accesses)} accesses: {loads} loads and {stores} stores.")
+            f"{count} accesses: {loads} loads and {stores} stores; "
+            f"effective-address range 0x{low:08x} through 0x{high:08x}; "
+            f"{pattern}.")
         if selected is not None:
             access = self.accesses[selected]
             physical = access[7] if len(access) > 7 else access[2]
@@ -1612,6 +1731,7 @@ class AccessMap(QWidget):
                 if physical is None else
                 f", physical address 0x{int(physical):08x}.")
         self.setAccessibleDescription(f"{context} {navigation}")
+        self.setToolTip(f"{context}\n{navigation}")
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -1639,10 +1759,13 @@ class AccessMap(QWidget):
         self._pts = []
         if not accs:
             p.setPen(QColor("#586069")); p.setFont(_mono(10))
-            message = ("no memory accesses yet — step a workload that loads/stores"
-                       if self.session_active else
-                       "no program loaded — open a program to inspect memory accesses")
-            p.drawText(self.rect(), Qt.AlignCenter, message)
+            message = (
+                "No memory accesses yet.\nStep a workload that loads or stores."
+                if self.session_active else
+                "No program loaded.\nOpen a program to inspect memory accesses.")
+            p.drawText(
+                self.rect().adjusted(8, 8, -8, -8),
+                Qt.AlignCenter | Qt.TextWordWrap, message)
             if self.hasFocus():
                 p.setPen(QColor("#1f6feb"))
                 p.drawRect(self.rect().adjusted(0, 0, -1, -1))
@@ -1650,40 +1773,16 @@ class AccessMap(QWidget):
         ns = [a[0] for a in accs]; addrs = [a[2] for a in accs]
         n0, n1 = min(ns), max(ns); a0, a1 = min(addrs), max(addrs)
         nspan = max(1, n1 - n0); aspan = max(1, a1 - a0)
-        nloads = sum(1 for a in accs if not a[3]); nstores = len(accs) - nloads
-        # dominant access STRIDE (mode of the consecutive-access deltas) — surfaces a
-        # strided walk numerically, which the scatter's slope shows only as a shape;
-        # e.g. dmiss strides +0x20 = exactly the 32-byte cache line, so every access
-        # misses. Shown only when one delta clearly dominates, else "irregular".
-        stride_str = ""
-        if len(addrs) >= 2:
-            deltas = [addrs[i + 1] - addrs[i] for i in range(len(addrs) - 1)]
-            freq = {}
-            for d in deltas:
-                freq[d] = freq.get(d, 0) + 1
-            mode = max(freq, key=freq.get); pct = round(100 * freq[mode] / len(deltas))
-            stride_str = (f" · stride {'+' if mode >= 0 else '-'}0x{abs(mode):x} ({pct}%)"
-                          if pct >= 40 else " · irregular stride")
         si = self._sel_idx()         # resolve the stable sel_n to a current index
         hf = _mono(8); hf.setBold(True)
         p.setPen(QColor("#8b949e")); p.setFont(hf)
         if si is not None:
-            sn, scy, sa, sst = accs[si][:4]
-            physical = accs[si][7] if len(accs[si]) > 7 else sa
-            mapped = (
-                " · untranslated"
-                if physical is None else
-                f" → phys {physical:08x}" if physical != sa else "")
+            sst = accs[si][3]
             p.setPen(QColor("#e3b341" if sst else "#79c0ff"))
-            p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
-                       f"selected  n={sn} cyc={scy} @{sa:08x} {'store' if sst else 'load'}"
-                       f"{mapped}   ·   {len(accs)} accesses · "
-                       f"0x{a0:x}..0x{a1:x}{stride_str}")
-        else:
-            p.drawText(QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
-                       f"{len(accs)} accesses · 0x{a0:x}..0x{a1:x}{stride_str} · "
-                       f"loads={nloads} stores={nstores}   [blue=load · gold=store · click]")
-        L, R, T, B = 76, 8, 20, 16
+        p.drawText(
+            QRect(4, 1, W - 8, 15), Qt.AlignVCenter | Qt.AlignLeft,
+            self._header_text(W))
+        L, R, T, B, tick_count, _plot_rect = self._plot_geometry(W, H)
         pw, ph = max(1, W - L - R), max(1, H - T - B)
         def yof(addr): return T + ph - int((addr - a0) * ph / aspan)
         def xof(n): return L + int((n - n0) * pw / nspan)
@@ -1698,16 +1797,12 @@ class AccessMap(QWidget):
             # its gridline instead (the others keep their centred placement).
             ly = (y - 12) if k == 0 else (y - 6)
             p.drawText(QRect(0, ly, L - 4, 12), Qt.AlignVCenter | Qt.AlignRight, f"{av:08x}")
-        for k in range(5):
-            nv = n0 + nspan * k // 4
-            x = xof(nv)
+        tick_rects = self._x_tick_rects(
+            W, H, L, R, B, tick_count)
+        for k, (_x, rect, alignment) in enumerate(tick_rects):
+            nv = n0 + nspan * k // max(1, tick_count - 1)
             p.setPen(QColor("#6e7681"))
-            # left-align the leftmost tick from the axis (not centred on it) so 'n0' clears
-            # the y-axis label gutter / origin point instead of overlapping them.
-            if k == 0:
-                p.drawText(QRect(x + 2, H - B + 1, 48, 12), Qt.AlignLeft | Qt.AlignTop, f"n{nv}")
-            else:
-                p.drawText(QRect(x - 24, H - B + 1, 48, 12), Qt.AlignHCenter | Qt.AlignTop, f"n{nv}")
+            p.drawText(rect, alignment, f"n{nv}")
         # Keep ordinary traces individually legible without turning long,
         # dense captures into a solid ribbon. The pointer hit radius below is
         # deliberately larger than either painted footprint.

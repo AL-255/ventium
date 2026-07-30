@@ -96,6 +96,15 @@ exactly the visible byte capacity when its width class changes. Page Up/Down
 advance by that contiguous visible block, so compact rows cannot create silent
 gaps in memory navigation; paint bounds, byte capacity, accessible contents,
 and paging continuity are regression-locked at the supported minimum.
+The Mem-map scatter now adapts its own painted geometry too. At 188 px it
+reclaims the unused y-axis gutter, reduces five overlapping retirement ticks to
+three inward-aligned ticks, and selects a measured complete summary such as
+`14 · L14/S0 · Δ+20 100%`; selected summaries retain the exact effective
+address. Full range, load/store counts, dominant stride, physical translation,
+and keyboard instructions remain in its dynamic tooltip and accessibility
+description. Its empty guidance now wraps rather than painting one clipped
+line. Compact header and axis bounds are regression-locked and visually
+captured.
 TLB, Hotspots, Branches, Mix, and Mem-map headers now use the same semantic
 responsive contract: each has a measured compact phrase containing its key
 counts/denominator/axes instead of a cropped sentence, plus the complete
