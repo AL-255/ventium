@@ -1,6 +1,7 @@
 # Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 # SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 """Integrated assembly/C authoring workbenches for pipeviz."""
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -90,11 +91,17 @@ class CodeEditor(QPlainTextEdit):
         self._find_text = ""
         self._find_ranges = []
         self._find_truncated = False
+        self._bracket_index = {}
+        self._bracket_positions = []
+        self._matched_bracket_positions = ()
+        self._unmatched_bracket_position = None
         self.blockCountChanged.connect(self._update_line_area_width)
         self.updateRequest.connect(self._update_line_area)
         self.cursorPositionChanged.connect(self._refresh_selections)
         self.textChanged.connect(self._rebuild_find_ranges)
+        self.textChanged.connect(self._rebuild_bracket_index)
         self._update_line_area_width()
+        self._rebuild_bracket_index()
         self._refresh_selections()
 
     def _set_source_font_size(self, size):
@@ -189,6 +196,134 @@ class CodeEditor(QPlainTextEdit):
             sel.format.setProperty(QTextFormat.FullWidthSelection, True)
         return sel
 
+    def _rebuild_bracket_index(self):
+        """Index source delimiters while ignoring strings and comments."""
+        brackets = {}
+        state = "code"
+        escaped = False
+        position = 0
+        end = max(0, self.document().characterCount() - 1)
+        while position < end:
+            char = self.document().characterAt(position)
+            following = (
+                self.document().characterAt(position + 1)
+                if position + 1 < end else "")
+            if state == "code":
+                if self._comment_prefix == "//" and char == "/" and following == "/":
+                    state = "line-comment"
+                    position += 1
+                elif self._comment_prefix == "//" and char == "/" and following == "*":
+                    state = "block-comment"
+                    position += 1
+                elif self._comment_prefix == "#" and char == "#":
+                    state = "line-comment"
+                elif char in ("'", '"'):
+                    state = "single-quote" if char == "'" else "double-quote"
+                    escaped = False
+                elif char in "()[]{}":
+                    brackets[position] = char
+            elif state == "line-comment":
+                if char in ("\n", "\u2029"):
+                    state = "code"
+            elif state == "block-comment":
+                if char == "*" and following == "/":
+                    state = "code"
+                    position += 1
+            else:
+                quote = "'" if state == "single-quote" else '"'
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    state = "code"
+            position += 1
+        self._bracket_index = brackets
+        self._bracket_positions = sorted(brackets)
+        self._refresh_selections()
+
+    def _matching_brackets(self):
+        """Return a matched pair, or one unmatched delimiter beside the caret."""
+        self._matched_bracket_positions = ()
+        self._unmatched_bracket_position = None
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            return
+        caret = cursor.position()
+        position = next(
+            (probe for probe in (caret - 1, caret)
+             if probe in self._bracket_index),
+            None)
+        if position is None:
+            return
+        char = self._bracket_index[position]
+        pairs = {"(": ")", "[": "]", "{": "}"}
+        reverse = {close: opening for opening, close in pairs.items()}
+        if char in pairs:
+            stack = [char]
+            candidates = (
+                self._bracket_positions[index]
+                for index in range(
+                    bisect_right(self._bracket_positions, position),
+                    len(self._bracket_positions)))
+            for probe in candidates:
+                found = self._bracket_index[probe]
+                if found in pairs:
+                    stack.append(found)
+                elif stack and pairs[stack[-1]] == found:
+                    stack.pop()
+                    if not stack:
+                        self._matched_bracket_positions = (position, probe)
+                        return
+                else:
+                    break
+        else:
+            stack = [char]
+            candidates = (
+                self._bracket_positions[index]
+                for index in range(
+                    bisect_left(self._bracket_positions, position) - 1,
+                    -1, -1))
+            for probe in candidates:
+                found = self._bracket_index[probe]
+                if found in reverse:
+                    stack.append(found)
+                elif stack and pairs[found] == stack[-1]:
+                    stack.pop()
+                    if not stack:
+                        self._matched_bracket_positions = (position, probe)
+                        return
+                else:
+                    break
+        self._unmatched_bracket_position = position
+
+    def _bracket_selections(self):
+        self._matching_brackets()
+        selections = []
+        for position in self._matched_bracket_positions:
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = QTextCursor(self.document())
+            selection.cursor.setPosition(position)
+            selection.cursor.setPosition(position + 1, QTextCursor.KeepAnchor)
+            selection.format.setBackground(QColor("#244b61"))
+            selection.format.setForeground(QColor("#f0f6fc"))
+            selection.format.setProperty(
+                QTextFormat.OutlinePen, QColor("#58a6ff"))
+            selections.append(selection)
+        if self._unmatched_bracket_position is not None:
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = QTextCursor(self.document())
+            selection.cursor.setPosition(self._unmatched_bracket_position)
+            selection.cursor.setPosition(
+                self._unmatched_bracket_position + 1,
+                QTextCursor.KeepAnchor)
+            selection.format.setBackground(QColor("#551b1f"))
+            selection.format.setForeground(QColor("#ff7b72"))
+            selection.format.setProperty(
+                QTextFormat.OutlinePen, QColor("#f85149"))
+            selections.append(selection)
+        return selections
+
     def _refresh_selections(self):
         selections = []
         current = self._selection(
@@ -215,6 +350,7 @@ class CodeEditor(QPlainTextEdit):
         if error is not None:
             error.format.setProperty(QTextFormat.OutlinePen, QColor("#f85149"))
             selections.append(error)
+        selections.extend(self._bracket_selections())
         self.setExtraSelections(selections)
         self._line_area.update()
 
@@ -1657,7 +1793,8 @@ class AssemblyView(QWidget):
         self.editor.setAccessibleName("Assembly source editor")
         self.editor.setAccessibleDescription(
             "Edit GNU Intel-syntax assembly. Tab indents; Ctrl+/ toggles "
-            "comments; Ctrl+Tab and Ctrl+Shift+Tab leave the editor.")
+            "comments; matching delimiters highlight beside the caret; "
+            "Ctrl+Tab and Ctrl+Shift+Tab leave the editor.")
         self.editor.setPlainText(_ASM_TEMPLATE)
         self.find_bar = SourceFindBar(self.editor)
         layout.addWidget(self.find_bar)
@@ -2009,6 +2146,7 @@ class CView(QWidget):
         self.editor.setAccessibleName("C source editor")
         self.editor.setAccessibleDescription(
             "Edit freestanding GNU C. Tab indents; Ctrl+/ toggles comments; "
+            "matching delimiters highlight beside the caret; "
             "Ctrl+Tab and Ctrl+Shift+Tab leave the editor.")
         self.highlighter = CHighlighter(self.editor.document())
         self.editor.setPlainText(_C_TEMPLATE)

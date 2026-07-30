@@ -613,11 +613,41 @@ def scenario(app, outdir):
         QApplication.sendEvent(editor.viewport(), wheel_down)
         assert wheel_down.isAccepted()
         assert editor.font().pointSize() == 10
+        editor.setPlainText("\n".join(
+            f"mov eax, {line}" for line in range(200)))
+        editor.verticalScrollBar().setValue(0)
         plain_wheel = QWheelEvent(
             QPoint(20, 20), QPoint(20, 20), QPoint(), QPoint(0, -120),
             Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
         QApplication.sendEvent(editor.viewport(), plain_wheel)
         assert editor.font().pointSize() == 10
+        assert editor.verticalScrollBar().value() > 0
+        bracket_probe = (
+            'mov eax, [ebx + (ecx * 4)]\n'
+            '# ignored [)]\n'
+            '.ascii "{still ignored}"\n')
+        editor.setPlainText(bracket_probe)
+        caret = editor.textCursor()
+        outer_open = bracket_probe.index("[")
+        outer_close = bracket_probe.index("]")
+        caret.setPosition(outer_open + 1)
+        editor.setTextCursor(caret)
+        assert set(editor._matched_bracket_positions) == {
+            outer_open, outer_close}
+        assert editor._unmatched_bracket_position is None
+        assert set(editor._bracket_index) == {
+            bracket_probe.index("["),
+            bracket_probe.index("("),
+            bracket_probe.index(")"),
+            bracket_probe.index("]"),
+        }
+        editor.setPlainText("mov eax, ([ebx)]")
+        caret = editor.textCursor()
+        unmatched = editor.toPlainText().index("(")
+        caret.setPosition(unmatched + 1)
+        editor.setTextCursor(caret)
+        assert editor._matched_bracket_positions == ()
+        assert editor._unmatched_bracket_position == unmatched
         indentation_probe = "mov eax, 1\nadd eax, 2\nhlt\n"
         editor.setPlainText(indentation_probe)
         selection = editor.textCursor()
@@ -1457,8 +1487,27 @@ def scenario(app, outdir):
         QTest.keyClick(
             win.c_source.editor, Qt.Key_0, Qt.ControlModifier)
         assert win.c_source.editor.font().pointSize() == 10
-        win.c_source.editor.setFocus()
         original_c_source = win.c_source.editor.toPlainText()
+        c_bracket_probe = (
+            "int main(void) {\n"
+            '    const char *ignored = "}"; // ]\n'
+            '    const char *escaped = "\\"[still ignored]";\n'
+            "    /* { [ ( also ignored */\n"
+            "    return (1 + 2);\n"
+            "}\n")
+        win.c_source.editor.setPlainText(c_bracket_probe)
+        caret = win.c_source.editor.textCursor()
+        body_open = c_bracket_probe.index("{")
+        body_close = c_bracket_probe.rindex("}")
+        caret.setPosition(body_open + 1)
+        win.c_source.editor.setTextCursor(caret)
+        assert set(win.c_source.editor._matched_bracket_positions) == {
+            body_open, body_close}
+        assert set(
+            win.c_source.editor._bracket_index.values()) == {
+            "(", ")", "{", "}"}
+        win.c_source.editor.setFocus()
+        win.c_source.editor.setPlainText(original_c_source)
         QTest.keyClick(
             win.c_source.editor, Qt.Key_Tab, Qt.ControlModifier)
         settle(app)

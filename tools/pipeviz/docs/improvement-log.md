@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source delimiter audit:** C blocks and Assembly memory operands had no
+matching feedback, making nested edits unnecessarily error-prone. Moving beside
+`()`, `[]`, or `{}` now highlights both ends of a structurally valid pair and
+marks an unmatched or misnested delimiter red. The index ignores quoted text,
+escaped characters, Assembly `#` comments, and C line/block comments.
+Acceptance covers Assembly nesting/mismatch behavior and C lexical exclusions.
+
 **Long-source orientation audit:** line numbers identified rows, but neither
 workbench exposed the active column or a persistent location once transient
 status changed. Both status rows now include a compact one-based Ln · Col

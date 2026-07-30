@@ -158,6 +158,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     one-based `Ln · Col` readout tracks the caret beside build/source status;
     click it or press `Ctrl+G` to go to a validated line.
     `Ctrl+wheel` also scales source text through the same 8–24 pt range.
+    Moving beside `()`, `[]`, or `{}` highlights its matching pair; an
+    unmatched delimiter is marked red, while delimiters inside comments and
+    quoted text are ignored.
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses

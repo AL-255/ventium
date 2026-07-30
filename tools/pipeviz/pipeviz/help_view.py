@@ -236,6 +236,10 @@ column zero; Shift+Home extends the selection and Ctrl+Home still moves to the
 start of the document. Ctrl+-/Ctrl+= changes source text and line-number size
 from 8 to 24 pt; Ctrl+wheel uses the same bounds, and Ctrl+0 restores 10 pt
 while in Assembly/C.</p>
+<p>Moving beside <code>()</code>, <code>[]</code>, or <code>{}</code>
+highlights its structurally matching pair; an unmatched or misnested delimiter
+is marked red. Delimiters inside quoted text, Assembly <code>#</code> comments,
+and C line/block comments are ignored.</p>
 <p>The source badge may elide a long filename visually; its tooltip and
 accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>
