@@ -1519,8 +1519,16 @@ class MemoryView(QWidget):
         self.addr = 0x08048000
         self.follow = None        # None | 'eip' | 'esp'
         v = QVBoxLayout(self); v.setContentsMargins(4, 4, 4, 4); v.setSpacing(4)
-        bar = QHBoxLayout(); bar.setSpacing(5)
-        bar.addWidget(QLabel("addr"))
+        self._nav = QVBoxLayout()
+        self._nav.setContentsMargins(0, 0, 0, 0)
+        self._nav.setSpacing(3)
+        self._nav_rows = tuple(QHBoxLayout() for _ in range(3))
+        for row in self._nav_rows:
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(5)
+            row.addStretch(1)
+            self._nav.addLayout(row)
+        self.addr_lbl = QLabel("addr")
         self.addr_e = QLineEdit("0x08048000"); self.addr_e.setFixedWidth(96)
         self.addr_e.setAccessibleName("Physical memory address")
         self.addr_e.setValidator(QRegularExpressionValidator(
@@ -1528,26 +1536,30 @@ class MemoryView(QWidget):
         self.addr_e.setToolTip("32-bit physical address in the backend memory image")
         self.addr_e.setFont(_mono(9))
         self.addr_e.returnPressed.connect(self._go)
-        bar.addWidget(self.addr_e)
         go = QPushButton("Go")
+        go.setFixedWidth(36)
         go.setAccessibleName("Open physical memory address")
         go.setToolTip("Open the typed physical address (Enter)")
-        go.clicked.connect(self._go); bar.addWidget(go)
+        go.clicked.connect(self._go)
         be = QPushButton("→EIP")
+        be.setFixedWidth(46)
         be.setAccessibleName("Follow instruction pointer in physical memory")
         be.setToolTip("Follow current CS:EIP after segmentation and paging")
-        be.clicked.connect(lambda: self._set_follow("eip")); bar.addWidget(be)
+        be.clicked.connect(lambda: self._set_follow("eip"))
         bs = QPushButton("→ESP")
+        bs.setFixedWidth(48)
         bs.setAccessibleName("Follow stack pointer in physical memory")
         bs.setToolTip("Follow current SS:ESP after segmentation and paging")
-        bs.clicked.connect(lambda: self._set_follow("esp")); bar.addWidget(bs)
+        bs.clicked.connect(lambda: self._set_follow("esp"))
         ba = QPushButton("→access")
+        ba.setFixedWidth(64)
         ba.setAccessibleName("Follow latest data access in physical memory")
         ba.setToolTip(
             "Follow the most-recent explicit load/store at its translated physical address")
-        ba.clicked.connect(lambda: self._set_follow("access")); bar.addWidget(ba)
+        ba.clicked.connect(lambda: self._set_follow("access"))
         self.eip_btn, self.esp_btn = be, bs
         self.access_btn = ba
+        self.go_btn = go
         self._access = None       # (addr, size) of the newest memory access
         self._click_hl = None     # (addr, size) pinned by a Mem-map point click
         self.page_buttons = []
@@ -1558,12 +1570,19 @@ class MemoryView(QWidget):
             b.setAccessibleName(
                 "Previous physical memory page"
                 if d < 0 else "Next physical memory page")
-            b.clicked.connect(lambda _=0, dd=d: self._page(dd)); bar.addWidget(b)
+            b.clicked.connect(lambda _=0, dd=d: self._page(dd))
             self.page_buttons.append(b)
         self.follow_lbl = QLabel(""); self.follow_lbl.setStyleSheet("color:#8b949e;font-size:8px;")
         self.follow_lbl.setAccessibleName("Physical memory navigation state")
-        bar.addWidget(self.follow_lbl); bar.addStretch(1)
-        v.addLayout(bar)
+        self.follow_lbl.setWordWrap(True)
+        self.follow_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.follow_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._nav_widgets = (
+            self.addr_lbl, self.addr_e, go, be, bs, ba,
+            *self.page_buttons, self.follow_lbl)
+        self._navigation_mode = None
+        self._arrange_navigation(self.width())
+        v.addLayout(self._nav)
         self.dump = _HexDump()
         v.addWidget(self.dump, 1)
         self._session_controls = (
@@ -1574,6 +1593,56 @@ class MemoryView(QWidget):
             shortcut.activated.connect(
                 lambda step=delta: self._page(step))
         self.set_session_active(False)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._arrange_navigation(event.size().width())
+
+    def _arrange_navigation(self, width):
+        """Keep every memory navigator legible when the analysis pane narrows.
+
+        The right-hand splitter can intentionally shrink to about 190 px at the
+        application's supported 900 px minimum. A single toolbar row gave its
+        seven controls only a few pixels each and reduced the navigation-state
+        label to 15 px. Reflow controls at two breakpoints instead of hiding
+        them in an overflow menu, so typed, follow, and page navigation remain
+        visible and discoverable at every supported size.
+        """
+        mode = "wide" if width >= 520 else "medium" if width >= 260 else "narrow"
+        if mode == self._navigation_mode:
+            return
+        self._navigation_mode = mode
+        for widget in self._nav_widgets:
+            for row in self._nav_rows:
+                row.removeWidget(widget)
+
+        def place(row_index, widgets):
+            row = self._nav_rows[row_index]
+            includes_state = self.follow_lbl in widgets
+            row.setStretch(row.count() - 1, 0 if includes_state else 1)
+            for widget in widgets:
+                row.insertWidget(
+                    row.count() - 1, widget,
+                    1 if widget is self.follow_lbl else 0)
+
+        prev_btn, next_btn = self.page_buttons
+        if mode == "wide":
+            place(0, (
+                self.addr_lbl, self.addr_e, self.go_btn,
+                self.eip_btn, self.esp_btn, self.access_btn,
+                prev_btn, next_btn))
+            place(1, (self.follow_lbl,))
+        elif mode == "medium":
+            place(0, (
+                    self.addr_lbl, self.addr_e, self.go_btn,
+                    prev_btn, next_btn))
+            place(1, (self.eip_btn, self.esp_btn, self.access_btn))
+            place(2, (self.follow_lbl,))
+        else:
+            place(0, (self.addr_lbl, self.addr_e, self.go_btn))
+            place(1, (self.eip_btn, self.esp_btn, self.access_btn))
+            place(2, (prev_btn, next_btn, self.follow_lbl))
+        self._nav.invalidate()
 
     def set_session_active(self, active):
         for control in self._session_controls:

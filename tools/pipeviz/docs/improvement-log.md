@@ -65,6 +65,10 @@ The retired trace row is now 20 px for the measured 14 px font, down from
 22 px while retaining 6 px of breathing room. This exposes about 10% more
 retirements per viewport; row hit-testing, snapping, selection, and compact
 screenshots remain regression-covered.
+The Memory navigator now reflows at 520 px and 260 px instead of crushing its
+address, EIP/ESP/access, and page controls into fragments. Its exact physical
+navigation state has a full-width row in the normal layout and a wrapped
+accessible label beside paging at the true 900 px application minimum.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

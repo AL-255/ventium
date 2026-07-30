@@ -2448,6 +2448,29 @@ def scenario_layout(app, outdir):
         assert "cycle 160" in win.status_lbl.toolTip()
         assert "EIP 0x08048015" in win.status_lbl.toolTip()
         assert "I$ 1/256" in win.status_lbl.toolTip()
+        QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
+        settle(app)
+        memory = win.tables.mem
+        assert win.tables.tabs.currentIndex() == 8
+        assert memory._navigation_mode == "narrow"
+        assert memory.addr_e.width() == 96
+        for button in (
+                memory.go_btn, memory.eip_btn, memory.esp_btn,
+                memory.access_btn):
+            assert button.width() >= (
+                button.fontMetrics().horizontalAdvance(button.text()) + 8)
+        for control in memory._nav_widgets:
+            top_left = control.mapTo(memory, control.rect().topLeft())
+            bottom_right = control.mapTo(memory, control.rect().bottomRight())
+            assert top_left.x() >= 0
+            assert bottom_right.x() < memory.width()
+        assert memory.follow_lbl.width() >= 90
+        assert memory.follow_lbl.wordWrap()
+        assert memory.follow_lbl.accessibleDescription() == (
+            memory.follow_lbl.text())
+        save_shot(
+            app, win, outdir, "08b_true_minimum_memory",
+            min_width=900, min_height=620)
         QTest.keyClick(win, Qt.Key_0, Qt.AltModifier)
         settle(app)
         assert win.tables.tabs.currentIndex() == 9
@@ -2506,6 +2529,15 @@ def scenario_layout(app, outdir):
             f"compact instruction column is only "
             f"{win.trace.tbl.columnWidth(6)}px")
         assert win.tables.width() >= 570
+        QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
+        settle(app)
+        assert win.tables.mem._navigation_mode == "wide"
+        assert (
+            win.tables.mem.follow_lbl.fontMetrics().horizontalAdvance(
+                win.tables.mem.follow_lbl.text())
+            <= win.tables.mem.follow_lbl.contentsRect().width())
+        QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
+        settle(app)
         assert win.status_lbl.width() >= 1000 and "IPC" in win.status_lbl.text()
         status_text = win.status_lbl.text()
         assert status_text.index("eip") < status_text.index("ret")
