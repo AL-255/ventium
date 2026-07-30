@@ -79,7 +79,8 @@ run of stall cells means one instruction held resources for several cycles.</p>
 <p>The compact stage board above the timeline is the live, pre-retirement view.
 Move over an occupied U, V, or FP cell to see its PC, then click it to mark the
 exact linked Assembly line. The Visualizer stays open and the Assembly tab gains
-<b>L…</b>; press Alt+A when you want to inspect or edit that line.</p>
+<b>L…</b>; press Alt+A when you want to inspect or edit that line. A finished
+HLT remains an occupied, clickable cell so the stop location is explicit.</p>
 <p>Click a row to place the cyan playhead, synchronize the Trace, pin Registers
 after that retirement, and draw producer-to-consumer edges. An amber thick edge
 marks a gating dependency such as a load-use stall. Shift-click another row to

@@ -200,8 +200,10 @@ Procedure:
    a pinned x87 control/status/tag and logical stack.
 4. Open Instr mix and require the FP class.
 5. Compare the full default RTL `state_e` order with the C ABI state names.
-   Open Cycles, require the full sample count, nonzero retire/I-fill cycles, and
-   zero false halt cycles.
+   Require every state to have nonempty lane/stage/description metadata, every
+   non-reset state to produce an occupied live-board cell, and no active state
+   to inherit halt styling. Open Cycles, require the full sample count, nonzero
+   retire/I-fill cycles, and zero false halt cycles.
 6. Click Clock and verify pinning clears back to live state.
 
 Observed evidence:
@@ -231,7 +233,7 @@ Procedure:
 Observed evidence:
 
 - Two ELF load segments were applied.
-- 484 instructions retired with 92 mispredict event cycles.
+- 484 instructions retired with 71 real `S_PIPE` mispredict-bubble cycles.
 - Branches shows 41 distinct sites and both 0% and 100% outcomes in this
   unrolled randomized stream.
 
@@ -389,7 +391,8 @@ Procedure:
    lines while Visualizer keeps focus. Then select authored Trace and Konata
    rows and require exact retired PC→line highlighting, including distinct U/V
    rows retiring on one cycle. In every path the composed
-   `Assembly * · L…` label retains both states.
+   `Assembly * · L…` label retains both states. At completion, require HLT to
+   remain a visible, clickable live cell linked to the authored `hlt` line.
 7. Reject a candidate replacement load and require the prior live backend,
    program bytes, source map, marker, and tab label to remain coherent. Then edit
    after build and require the map to become stale rather than use obsolete PCs.
@@ -421,6 +424,7 @@ Captures: `00_assembly_workbench.png`, `00a_assembly_compact.png`,
 `00b_assembly_find.png`,
 `01_opcode_completion_popup.png`,
 `02_assembly_source_link.png`, `02a_live_uv_source_link.png`,
+`02b_terminal_hlt_source_link.png`,
 `03_c_workbench.png`,
 `04_c_generated_assembly.png`, `05_c_run_source_link.png`,
 `06_c_x87_source_link.png`.
@@ -451,7 +455,14 @@ The screenshot review found and corrected the following:
 7. The bridge state-name table omitted unconditional RTL FSM members, shifting
    `S_PF`/`S_PIPE` into `S_PIPE`/`S_F00F_HANG` and making the x87 capture look
    63% halted. All 48 default states now match `state_e`; the regression parses
-   and compares the complete enum before checking cycle attribution.
+   and compares the complete enum before checking cycle attribution. A follow-up
+   found nine of those states absent from the UI stage metadata, where the
+   fallback also used the halt color; all 48 now render nonblank, categorized
+   live cells and unknown future states fall back to system work, not halt.
+   The terminal capture then exposed a latched bubble counter being counted
+   through 256 HLT clocks; hazard events are now gated to `S_PIPE`, reducing the
+   random-branch fixture from 92 to 71 real mispredict cycles and leaving the
+   halted tail event-free.
 8. Help was limited to a shortcut dialog. The Help menu now opens an indexed
    guide with dedicated loading, Pipeline View, and Assembly/C pages.
 9. Stale SoC detection occurred after dangerous model construction. It now

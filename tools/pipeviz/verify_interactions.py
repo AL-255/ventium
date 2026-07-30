@@ -29,6 +29,7 @@ import pipeviz.main as main_module
 import pipeviz.pipeline_view as pipeline_module
 import pipeviz.trace_view as trace_module
 from pipeviz.backend import VVRetire
+from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
 from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
                           _system_load_address, _validate_segments)
@@ -848,6 +849,31 @@ def scenario_x87(app, outdir):
         assert rtl_states == [
             win.backend.state_name(index) for index in range(len(rtl_states))]
         assert win.backend.state_name(len(rtl_states)) == "S_?"
+        assert set(rtl_states) == set(STATE_STAGE)
+        for state_name in rtl_states:
+            lane, stage, color, description = stage_of(state_name)
+            assert lane in {"U", "V", "FP", "MEM", "FE", "SYS"}
+            assert stage and description
+            if state_name not in {"S_HALT", "S_HLTWAIT", "S_F00F_HANG"}:
+                assert color != C_HALT, (
+                    f"active RTL state {state_name} was styled as halt")
+        assert stage_of("S_FUTURE_OPTIONAL")[2] == C_SYS
+
+        # The live board must not disappear during a valid slow/system state.
+        # Exercise every enum member using a detached state snapshot before the
+        # real x87 workload replaces it.
+        probe = win.backend.state()
+        probe.eip = 0x08048000
+        probe.q_pc = 0x08048000
+        probe.q_pc2 = 0x08048002
+        probe.walk_for_d = 0
+        for index, state_name in enumerate(rtl_states):
+            probe.state = index
+            win.pipeline.board.set_state(probe, win.backend, 32)
+            occupied = any(
+                stages for stages, _text in win.pipeline.board._cells.values())
+            assert occupied == (state_name != "S_RESET"), (
+                f"live stage board is blank in {state_name}")
         win.load_image(repo_path("build/verify/mb_fpindep.cycle.flat"))
         win.stepn.setValue(420)
         click(app, win.stepn_btn)

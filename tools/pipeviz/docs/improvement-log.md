@@ -54,6 +54,22 @@ regression advances through the first I-fill, clicks simultaneously occupied U
 and V cells, and requires two distinct exact source lines and the composed tab
 marker.
 
+**Full-state rendering audit:** fixing the bridge exposed a second stale list:
+nine valid states (ENTER, far-call/return, descriptor store, real-mode interrupt
+steps, HLT-wait, and task-switch LDT reload) were missing from stage metadata,
+and the unknown-state fallback used the halt color. Metadata now covers the same
+48-state contract as the ABI, every non-reset state produces a live-board cell,
+slow/system cells retain their `q_pc`, and an authored terminal HLT remains
+visible and source-clickable. A genuinely new optional state falls back to
+system/microcode styling rather than fabricating a hang.
+
+The terminal screenshot caught one more stale-register effect:
+`mispred_bubbles` remained latched at 3 in `S_HALT`, so 256 idle clocks became
+red phantom events and inflated status totals. Bubble/stall attribution and
+live hazard labels are now gated to the consuming `S_PIPE` state. The terminal
+tail is clean, while the random-branch fixture reports 71 actual bubble clocks
+instead of 92 mixed-state samples.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

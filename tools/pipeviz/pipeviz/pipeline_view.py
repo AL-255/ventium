@@ -120,6 +120,27 @@ class StageBoard(QWidget):
         elif name in ("S_FSTORE", "S_FENV_ST", "S_FENV_LD"):
             cells["FP"] = ([3], "fp store")
             pcs["FP"] = s.q_pc
+        elif name == "S_WALK":
+            # An I-side walk belongs to the fetch PC; a D-side walk belongs to
+            # the already-decoded instruction held in q_pc.
+            pc = s.q_pc if s.walk_for_d else s.eip
+            cells["U"] = ([3], f"{stage} · {dis(pc)}")
+            pcs["U"] = pc
+        elif name in ("S_HALT", "S_HLTWAIT", "S_F00F_HANG"):
+            cells["U"] = ([4], stage)
+            pcs["U"] = s.q_pc
+        elif name != "S_RESET":
+            # Keep every slow/system FSM state visible even when it has no
+            # dedicated stage-board branch. The full state metadata determines
+            # a representative physical lane; q_pc names the held instruction.
+            pc = s.eip if lane == "FE" else s.q_pc
+            if lane == "FP":
+                cells["FP"] = ([0, 1, 3], f"{stage} · {dis(pc)}")
+                pcs["FP"] = pc
+            else:
+                index = 0 if lane == "FE" else 3 if lane in ("U", "MEM") else 4
+                cells["U"] = ([index], f"{stage} · {dis(pc)}")
+                pcs["U"] = pc
 
         if s.fp_occ_pending and not cells["FP"][0]:
             cells["FP"] = ([0, 1, 3], "occ (busy)")
@@ -132,9 +153,16 @@ class StageBoard(QWidget):
         # queued repaint can never navigate to the previous instruction.
         self._lane_rects = []
         haz = []
-        if s.stall_cnt: haz.append(f"stall={s.stall_cnt}")
-        if s.mispred_bubbles: haz.append(f"mispredict-bubble={s.mispred_bubbles}")
-        if s.pending_mem_pen: haz.append(f"D$-pen={s.pending_mem_pen}")
+        # These counters are meaningful only while the fast-path FSM consumes
+        # them. RTL intentionally leaves their last values latched in HALT and
+        # system states; presenting those as live hazards fabricated activity.
+        if name == "S_PIPE":
+            if s.stall_cnt:
+                haz.append(f"stall={s.stall_cnt}")
+            if s.mispred_bubbles:
+                haz.append(f"mispredict-bubble={s.mispred_bubbles}")
+            if s.pending_mem_pen:
+                haz.append(f"D$-pen={s.pending_mem_pen}")
         if s.fp_occ_pending: haz.append("fp-occupancy")
         hz = ("    " + ", ".join(haz)) if haz else ""
         pair = "  [paired]" if (name == "S_PIPE" and s.pipe_pair) else (
@@ -386,7 +414,7 @@ def _stage_cell(name, ret, stall, mispred):
         return ("F", C_STG_FETCH)
     if name == "S_DECODE":
         return ("D", C_STG_DEC)
-    if name in ("S_LOAD", "S_LOAD2"):
+    if name in ("S_LOAD", "S_LOAD2", "S_ENTER"):
         return ("M", C_STG_MEM)
     if name == "S_EXEC":
         return ("X", C_STG_EXEC)
@@ -400,7 +428,7 @@ def _stage_cell(name, ret, stall, mispred):
         return ("W", C_FP)
     if name == "S_WALK":
         return ("w", C_WALK)
-    if name in ("S_HALT", "S_F00F_HANG"):
+    if name in ("S_HALT", "S_HLTWAIT", "S_F00F_HANG"):
         return (".", C_HALT)
     return ("S", C_STG_SYS)
 
@@ -550,8 +578,13 @@ class _KonataPlot(QWidget):
         new = backend.get_cycles(since_cyc, 8192)
         for c in new:
             name = backend.state_name(c.state)
-            stall = (c.stall_cnt > 0 or c.pending_mem_pen > 0)
-            mispred = c.mispred_bubbles > 0
+            # Bubble/penalty registers retain their last value outside S_PIPE.
+            # Gate them by their consuming state so HALT/system clocks do not
+            # become hundreds of phantom stalls or mispredicts.
+            stall = (
+                name == "S_PIPE"
+                and (c.stall_cnt > 0 or c.pending_mem_pen > 0))
+            mispred = name == "S_PIPE" and c.mispred_bubbles > 0
             ret = bool(c.retU or c.retV)
             ch, col = _stage_cell(name, ret, stall, mispred)
             self._pending.append((c.cyc, ch, col))
@@ -1288,13 +1321,14 @@ class SparklineStrip(QWidget):
             for c in new:
                 self.ret.append((1 if c.retU else 0) + (1 if c.retV else 0))
                 name = self.backend.state_name(c.state)
-                if c.mispred_bubbles > 0:
+                if name == "S_PIPE" and c.mispred_bubbles > 0:
                     e = "m"
                 elif name == "S_WALK":
                     e = "w"
                 elif name == "S_PF":
                     e = "f"
-                elif c.stall_cnt > 0 or c.pending_mem_pen > 0:
+                elif (name == "S_PIPE"
+                      and (c.stall_cnt > 0 or c.pending_mem_pen > 0)):
                     e = "s"
                 else:
                     e = ""
@@ -1375,7 +1409,7 @@ class SparklineStrip(QWidget):
             p.setPen(QColor(C_MISPRED)); p.setFont(_mono(8, True))
             p.drawText(QRect(labelw, ipc_y0, plotw, ipc_h), Qt.AlignCenter,
                        f"⚠ stuck in {self._last_state} — {k}c, 0 retired")
-        elif k >= 64 and self._last_state == "S_HALT":
+        elif k >= 64 and self._last_state in ("S_HALT", "S_HLTWAIT"):
             # HALT is a normal terminal outcome for system fixtures, not a
             # front-end livelock.  Keep the end-state visible without presenting
             # a successful boot/test completion as a red failure.

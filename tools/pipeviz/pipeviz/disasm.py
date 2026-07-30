@@ -261,6 +261,7 @@ STATE_STAGE = {
     "S_STORE":     ("MEM", "WB(st)",  C_SLOW, "slow-path store"),
     "S_USEQ":      ("U",   "useq",    C_SLOW, "microcode sequence"),
     "S_HALT":      ("FE",  "HALT",    C_HALT, "halted"),
+    "S_ENTER":     ("MEM", "ENTER",   C_SLOW, "ENTER stack-frame sequence"),
     "S_FLOAD":     ("FP",  "X1(ld)",  C_FP,   "x87 operand load"),
     "S_FEXEC":     ("FP",  "X1/X2",   C_FP,   "x87 execute + commit"),
     "S_FSTORE":    ("FP",  "ER(st)",  C_FP,   "x87 store"),
@@ -272,6 +273,13 @@ STATE_STAGE = {
     "S_LGDT":      ("SYS", "LGDT",    C_SYS,  "GDT/IDT table load"),
     "S_SEGLD":     ("SYS", "seg-ld",  C_SYS,  "segment descriptor load"),
     "S_LJMP":      ("SYS", "ljmp",    C_SYS,  "far jump"),
+    "S_LCALL":     ("SYS", "lcall",   C_SYS,  "far call"),
+    "S_RETF":      ("SYS", "retf",    C_SYS,  "far return"),
+    "S_SGDT":      ("SYS", "sgdt",    C_SYS,  "GDT/IDT table store"),
+    "S_RMINT_RD":  ("SYS", "rm-int",  C_SYS,  "real-mode IVT entry read"),
+    "S_RMINT_PUSH": ("SYS", "rm-push", C_SYS, "real-mode interrupt frame push"),
+    "S_RMIRET":    ("SYS", "rm-iret", C_SYS,  "real-mode IRET pop"),
+    "S_HLTWAIT":   ("FE",  "HLT-wait", C_HALT, "halted until an interrupt"),
     "S_WALK":      ("MEM", "TLB-walk", C_WALK, "2-level page-table walk"),
     "S_INT_GATE":  ("SYS", "int-gate", C_SYS, "read IDT gate"),
     "S_INT_CS":    ("SYS", "int-cs",  C_SYS,  "read GDT code descriptor"),
@@ -284,6 +292,7 @@ STATE_STAGE = {
     "S_IRET_SS":   ("SYS", "iret-ss", C_SYS,  "inter-priv IRET SS"),
     "S_TSW_SAVE":  ("SYS", "tsw-save", C_SYS, "task switch save"),
     "S_TSW_READ":  ("SYS", "tsw-read", C_SYS, "task switch read"),
+    "S_TSW_LDT":   ("SYS", "tsw-ldt", C_SYS, "task switch LDT reload"),
     "S_TSW_SEG":   ("SYS", "tsw-seg", C_SYS,  "task switch seg reload"),
     "S_TSW_BUSY":  ("SYS", "tsw-busy", C_SYS, "task switch busy commit"),
     "S_SMI_SAVE":  ("SYS", "smi",     C_SYS,  "SMI state save"),
@@ -293,7 +302,11 @@ STATE_STAGE = {
 
 
 def stage_of(state_name):
-    return STATE_STAGE.get(state_name, ("FE", state_name, C_HALT, state_name))
+    # A future or optional state is diagnostic system work, not evidence of a
+    # halted core. Unknown used to inherit C_HALT and visually fabricate hangs.
+    return STATE_STAGE.get(
+        state_name,
+        ("SYS", state_name, C_SYS, f"unrecognized RTL state {state_name}"))
 
 
 # ---------------------------------------------------------------------------

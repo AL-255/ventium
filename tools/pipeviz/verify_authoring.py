@@ -527,6 +527,28 @@ def scenario(app, outdir):
         win.stop_run()
         run_to_stop(win)
         assert win.backend.state().gpr[0] == 55
+
+        # A normal terminal HLT remains a visible, source-linked live cell; it
+        # must not make the stage board blank just when the experiment finishes.
+        settle(app)
+        assert win.backend.state_name(win.backend.state().state) == "S_HALT"
+        board = win.pipeline.board
+        assert "mispredict-bubble" not in board._status
+        assert win.pipeline.stats()["mispred"] < 50
+        assert not any(win.pipeline.spark.ev[-256:]), (
+            "latched hazard counters created events during terminal HLT")
+        assert board._lane_pcs["U"] in result.source_map
+        halt_rect = next(
+            rect for rect, lane, _pc in board._lane_rects if lane == "U")
+        QTest.mouseClick(
+            board, Qt.LeftButton, Qt.NoModifier, halt_rect.center())
+        settle(app)
+        halt_line = result.source_map[board._lane_pcs["U"]]
+        assert editor._execution_line == halt_line
+        assert editor.document().findBlockByNumber(
+            halt_line - 1).text().strip() == "hlt"
+        save(win, outdir, "02b_terminal_hlt_source_link")
+
         mapped_pcs = set(win._assembly_source_map)
         row = next(
             row for row in range(win.trace.tbl.rowCount())

@@ -125,7 +125,8 @@ V issue slots and U/V retirements sharing a cycle retain separate line
 identities. Live-cell navigation does not require the instruction to have
 retired, and it does not steal focus from the Visualizer. Editing the source
 invalidates the old map until it is assembled again, so a stale build cannot
-highlight the wrong line.
+highlight the wrong line. A terminal HLT remains visible and clickable after
+the run stops, which makes the experiment's exact stopping instruction clear.
 When the current built source has not been saved, both states remain visible as
 **Assembly * · L…** rather than one label hiding the other.
 Instructions synthesized outside the editor, such as a bare snippet's
