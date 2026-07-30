@@ -96,6 +96,13 @@ exactly the visible byte capacity when its width class changes. Page Up/Down
 advance by that contiguous visible block, so compact rows cannot create silent
 gaps in memory navigation; paint bounds, byte capacity, accessible contents,
 and paging continuity are regression-locked at the supported minimum.
+The compact cache heatmap no longer paints `set →` over its final `112` tick.
+The axis title occupies the unused way-label gutter, while narrow mode uses five
+inward-aligned complete ticks (`0, 32, 64, 96, 127`) and wide mode retains the
+16-set cadence. Cell rectangles now derive from exact adjacent boundaries, so
+paint and hit-testing cover all 128 sets without accumulated rounding gaps; the
+hovered cell also gains a visible outline. Endpoint mapping, label separation,
+and paint bounds are acceptance-tested.
 The Mem-map scatter now adapts its own painted geometry too. At 188 px it
 reclaims the unused y-axis gutter, reduces five overlapping retirement ticks to
 three inward-aligned ticks, and selects a measured complete summary such as

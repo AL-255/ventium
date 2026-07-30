@@ -2685,6 +2685,37 @@ def scenario_layout(app, outdir):
         settle(app)
         assert win.tables.tabs.currentIndex() == 0
         assert app.focusWidget() is win.tables.ic
+        cache_map = win.tables.ic_map
+        ticks = cache_map._axis_ticks()
+        assert [cache_set for cache_set, _x, _rect, _align in ticks] == [
+            0, 32, 64, 96, 127]
+        assert all(
+            rect.left() >= 0 and rect.right() < cache_map.width()
+            for _cache_set, _x, rect, _align in ticks)
+        assert all(
+            ticks[index][2].right() < ticks[index + 1][2].left()
+            for index in range(len(ticks) - 1))
+        left_cell = cache_map._cell_rect(0, 0)
+        right_cell = cache_map._cell_rect(127, 1)
+        assert left_cell.left() == cache_map.LX
+        assert right_cell.right() < cache_map.width()
+        assert cache_map._cell_at(left_cell.center()) == (0, 0)
+        assert cache_map._cell_at(right_cell.center()) == (127, 1)
+        compact_cells = [
+            cache_map._cell_rect(cache_set, 0)
+            for cache_set in range(cache_map.SETS)]
+        assert all(
+            compact_cells[index].right() + 1
+            == compact_cells[index + 1].left()
+            for index in range(cache_map.SETS - 1))
+        assert all(
+            cache_map._cell_at(cell.center()) == (cache_set, 0)
+            for cache_set, cell in enumerate(compact_cells))
+        assert [
+            cache_set
+            for cache_set, _x, _rect, _align
+            in cache_map._axis_ticks(400)
+        ] == [*range(0, 128, 16), 127]
         save_shot(
             app, win, outdir, "08a_true_minimum_layout",
             min_width=900, min_height=620)

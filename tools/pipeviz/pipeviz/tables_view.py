@@ -89,11 +89,51 @@ class CacheMap(QWidget):
                 self.LX <= point.x() < self.LX + plot_width
                 and self.TOP <= point.y() < self.TOP + 2 * self.WAYH):
             return None
+        # Invert _cell_rect's floor-divided boundaries exactly.  The simpler
+        # int(relative * SETS / width) maps the centre of the final painted
+        # cell to set 126 at compact widths even though it visibly belongs to
+        # set 127.
+        relative = point.x() - self.LX
         cache_set = min(
             self.SETS - 1,
-            int((point.x() - self.LX) * self.SETS / plot_width))
+            max(0, ((relative + 1) * self.SETS + plot_width - 1)
+                // plot_width - 1))
         way = min(1, int((point.y() - self.TOP) / self.WAYH))
         return cache_set, way
+
+    def _cell_rect(self, cache_set, way, width=None):
+        """Exact painted cell bounds shared by rendering and regression tests."""
+        canvas_width = self.width() if width is None else int(width)
+        plot_width = max(1, canvas_width - self.LX - 4)
+        x0 = self.LX + int(cache_set * plot_width / self.SETS)
+        x1 = self.LX + int((cache_set + 1) * plot_width / self.SETS)
+        return QRect(
+            x0, self.TOP + int(way) * self.WAYH + 1,
+            max(1, x1 - x0), self.WAYH - 2)
+
+    def _axis_ticks(self, width=None):
+        """Return complete, non-overlaid set-axis labels and their paint rects."""
+        canvas_width = self.width() if width is None else int(width)
+        plot_width = max(1, canvas_width - self.LX - 4)
+        values = (
+            (*range(0, self.SETS, 16), self.SETS - 1)
+            if plot_width >= 260 else
+            (0, 32, 64, 96, self.SETS - 1))
+        ticks = []
+        top = self.TOP + 2 * self.WAYH
+        for index, cache_set in enumerate(values):
+            x = self.LX + int(cache_set * plot_width / (self.SETS - 1))
+            if index == 0:
+                rect = QRect(x + 1, top, 20, self.BOT)
+                alignment = Qt.AlignLeft | Qt.AlignTop
+            elif index == len(values) - 1:
+                rect = QRect(x - 20, top, 20, self.BOT)
+                alignment = Qt.AlignRight | Qt.AlignTop
+            else:
+                rect = QRect(x - 10, top, 20, self.BOT)
+                alignment = Qt.AlignHCenter | Qt.AlignTop
+            ticks.append((cache_set, x, rect, alignment))
+        return ticks
 
     def mouseMoveEvent(self, event):
         cell = self._cell_at(event.position().toPoint())
@@ -132,8 +172,6 @@ class CacheMap(QWidget):
         p.fillRect(self.rect(), QColor("#0d1117"))
         f = QFont("monospace"); f.setStyleHint(QFont.Monospace); f.setPointSize(7)
         p.setFont(f)
-        plot_w = self.width() - self.LX - 4
-        cw = plot_w / self.SETS
         # title + legend (right-aligned swatches)
         p.setPen(QColor("#8b949e"))
         p.drawText(QRect(0, 0, self.LX + 80, self.TOP - 1), Qt.AlignVCenter | Qt.AlignLeft,
@@ -154,17 +192,23 @@ class CacheMap(QWidget):
                        f"way{way}")
             for s in range(self.SETS):
                 valid, mru = self.cells[s * 2 + way]
-                x = self.LX + s * cw
-                cell = QRect(int(x), y + 1, max(1, int(cw) - 0), self.WAYH - 2)
+                cell = self._cell_rect(s, way)
                 p.fillRect(cell, QColor("#56d364" if (valid and mru)
                                         else "#1f7a36" if valid else "#161b22"))
-        # set axis ticks every 16 (0..112; 128 would clip the right edge)
+        if self._hovered_cell is not None:
+            cache_set, way = self._hovered_cell
+            hovered = self._cell_rect(cache_set, way)
+            p.setPen(QColor("#f0f6fc"))
+            p.drawRect(hovered.adjusted(0, 0, -1, -1))
+        # Put the axis title in the otherwise-unused left gutter; drawing
+        # "set →" over the rightmost tick made 112 look like "112→".
         p.setPen(QColor("#586069"))
         ty = self.TOP + 2 * self.WAYH
-        for s in range(0, self.SETS, 16):
-            x = int(self.LX + s * cw)
-            p.drawText(QRect(x - 8, ty, 20, self.BOT), Qt.AlignHCenter | Qt.AlignTop, str(s))
-        p.drawText(QRect(self.LX, ty, plot_w, self.BOT), Qt.AlignRight | Qt.AlignTop, "set →")
+        p.drawText(
+            QRect(0, ty, self.LX - 4, self.BOT),
+            Qt.AlignRight | Qt.AlignTop, "set")
+        for cache_set, _x, rect, alignment in self._axis_ticks():
+            p.drawText(rect, alignment, str(cache_set))
         p.end()
 
 
