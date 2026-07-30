@@ -93,6 +93,12 @@ TLB, Hotspots, Branches, Mix, and Mem-map headers now use the same semantic
 responsive contract: each has a measured compact phrase containing its key
 counts/denominator/axes instead of a cropped sentence, plus the complete
 explanation in tooltip and accessible text.
+The other two compact register pages no longer silently lose digits.
+Segments/control uses one measured 11-line `selector base limit`/CR summary
+instead of two overcompressed grids. x87 hides only the decoded-value column at
+the true minimum, gives its space to the complete raw 80-bit value, and retains
+the decoded float in each row's tooltip/accessibility metadata; both normal
+grids return unchanged when widened.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

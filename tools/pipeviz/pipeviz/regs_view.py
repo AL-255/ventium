@@ -183,6 +183,7 @@ class RegsView(QWidget):
         col2 = QVBoxLayout(self.seg_pane)
         col2.setContentsMargins(0, 0, 0, 0)
         sg = QGroupBox("Segments")
+        self.seg_group = sg
         g2 = QGridLayout(sg)
         g2.setVerticalSpacing(2)
         g2.setHorizontalSpacing(5)
@@ -196,11 +197,27 @@ class RegsView(QWidget):
             sel = QLabel("0000"); sel.setFont(_mono(9))
             base = QLabel("00000000"); base.setFont(_mono(9))
             lim = QLabel("00000000"); lim.setFont(_mono(9))
+            sel.setAccessibleName(f"{name} selector")
+            base.setAccessibleName(f"{name} segment base")
+            lim.setAccessibleName(f"{name} segment limit")
             self.seg_lbls[name] = (sel, base, lim)
             g2.addWidget(sel, i + 1, 1); g2.addWidget(base, i + 1, 2); g2.addWidget(lim, i + 1, 3)
         g2.addWidget(QWidget(), 0, 4); g2.setColumnStretch(4, 1)   # absorb slack on the right
         col2.addWidget(sg)
+        self.seg_compact_group = QGroupBox(
+            "Segments/control · sel base limit")
+        seg_compact_layout = QVBoxLayout(self.seg_compact_group)
+        seg_compact_layout.setContentsMargins(6, 4, 4, 4)
+        self.seg_compact_lbl = QLabel()
+        self.seg_compact_lbl.setFont(_mono(7))
+        self.seg_compact_lbl.setAccessibleName("Compact segment register table")
+        self.seg_compact_lbl.setToolTip(
+            "One row per segment: selector, base, then limit")
+        seg_compact_layout.addWidget(self.seg_compact_lbl)
+        self.seg_compact_group.hide()
+        col2.addWidget(self.seg_compact_group)
         cr = QGroupBox("Control / mode")
+        self.control_group = cr
         g3 = QGridLayout(cr); g3.setSpacing(2)
         self.cr_lbls = {}
         for i, name in enumerate(["CR0", "CR2", "CR3", "CR4"]):
@@ -218,6 +235,8 @@ class RegsView(QWidget):
         col3.setContentsMargins(0, 0, 0, 0)
         fp = QGroupBox("x87 FPU")
         g4 = QGridLayout(fp); g4.setSpacing(2)
+        self._fp_grid = g4
+        self._fp_grid_margins = g4.getContentsMargins()
         self.fphdr = QLabel(""); self.fphdr.setFont(_mono(9))
         self.fphdr.setWordWrap(True)   # guard the header against width overrun
         g4.addWidget(self.fphdr, 0, 0, 1, 4)
@@ -229,13 +248,19 @@ class RegsView(QWidget):
         # col 2 is a fixed-width spacer so the decoded value never fuses with the
         # 20-hex-digit 80-bit mantissa; the value column (3) is right-aligned.
         g4.setColumnMinimumWidth(2, 12); g4.setColumnStretch(2, 1)
-        g4.addWidget(self._k("reg"), 1, 0); g4.addWidget(self._k("80-bit"), 1, 1)
-        g4.addWidget(self._k("value"), 1, 3, alignment=Qt.AlignRight)
+        self.fp_reg_hdr = self._k("reg")
+        self.fp_hex_hdr = self._k("80-bit")
+        self.fp_value_hdr = self._k("value")
+        g4.addWidget(self.fp_reg_hdr, 1, 0)
+        g4.addWidget(self.fp_hex_hdr, 1, 1)
+        g4.addWidget(self.fp_value_hdr, 1, 3, alignment=Qt.AlignRight)
         self.st_lbls = []
         for i in range(8):
             tag = QLabel(f"ST{i}"); tag.setFont(_mono(9))
             hexv = QLabel("0" * 20); hexv.setFont(_mono(9))
             val = QLabel("0.0"); val.setFont(_mono(9))
+            hexv.setAccessibleName(f"ST{i} raw 80-bit value")
+            val.setAccessibleName(f"ST{i} decoded value")
             self.st_lbls.append((tag, hexv, val))
             g4.addWidget(tag, i + 2, 0); g4.addWidget(hexv, i + 2, 1)
             g4.addWidget(val, i + 2, 3, alignment=Qt.AlignRight)
@@ -349,12 +374,57 @@ class RegsView(QWidget):
             self.unpin_btn.setMinimumWidth(0)
             self.unpin_btn.setMaximumWidth(16777215)
             self.unpin_btn.setText("× Unpin")
+        self._sync_narrow_registers(narrow)
         self._sync_flag_layout(narrow)
         self._set_compact(event.size().width() < self.COMPACT_WIDTH)
 
     def _k(self, t):
         l = QLabel(t); l.setStyleSheet("color:#8b949e;"); l.setFont(_mono(9, True))
         return l
+
+    def _sync_narrow_registers(self, narrow):
+        """Preserve every segment/x87 hex digit in the 196 px register pane."""
+        self.seg_group.setVisible(not narrow)
+        self.control_group.setVisible(not narrow)
+        self.seg_compact_group.setVisible(narrow)
+        self._sync_segment_compact()
+
+        # A decoded x87 float and its 21-character raw value cannot coexist in
+        # 164 px. Keep the complete architectural 80-bit value on-canvas and
+        # expose the decoded value through its tooltip/accessibility metadata.
+        self._fp_grid.setHorizontalSpacing(1 if narrow else 2)
+        left, top, right, bottom = self._fp_grid_margins
+        self._fp_grid.setContentsMargins(
+            6 if narrow else left, top,
+            6 if narrow else right, bottom)
+        self._fp_grid.setColumnMinimumWidth(0, 22 if narrow else 30)
+        self._fp_grid.setColumnMinimumWidth(2, 0 if narrow else 12)
+        self.fp_value_hdr.setVisible(not narrow)
+        for tag, raw, decoded in self.st_lbls:
+            tag.setFont(_mono(8 if narrow else 9))
+            raw.setFont(_mono(8 if narrow else 9))
+            decoded.setVisible(not narrow)
+
+    def _sync_segment_compact(self):
+        rows = []
+        descriptions = []
+        for name in SEG_NAMES:
+            selector, base, limit = self.seg_lbls[name]
+            rows.append(
+                f"{name} {selector.text()} {base.text()} {limit.text()}")
+            descriptions.append(
+                f"{name}: selector {selector.text()}, base {base.text()}, "
+                f"limit {limit.text()}")
+        for name in ("CR0", "CR2", "CR3", "CR4"):
+            value = self.cr_lbls[name].text()
+            rows.append(f"{name} {value}")
+            descriptions.append(f"{name}: {value}")
+        rows.append(self.mode_lbl.text())
+        descriptions.append(f"mode: {self.mode_lbl.text()}")
+        self.seg_compact_lbl.setText("\n".join(rows))
+        self.seg_compact_lbl.setAccessibleDescription(
+            "Compact segment and control registers. "
+            + "; ".join(descriptions) + ".")
 
     def _show_flags(self, eflags, previous=None):
         """Render all named EFLAGS, wrapping only between complete indicators."""
@@ -454,6 +524,7 @@ class RegsView(QWidget):
             f"{'SYS' if s.sys_mode else 'USER'}  CPL={s.cpl}"
             f"{'  SMM' if s.smm_active else ''}")
         self.mode_lbl.setToolTip("")
+        self._sync_segment_compact()
         # x87 — logical ST(i) = physical fpr[(ftop+i)&7]
         logical_tag = sum(
             ((s.fptag >> ((s.ftop + i) & 7)) & 1) << i
@@ -474,11 +545,22 @@ class RegsView(QWidget):
             tag.setStyleSheet("")
             tag.setToolTip(
                 f"Logical ST({i}) is {'empty' if empty else 'occupied'}")
-            hexv.setText(_fmt80(hexs))
+            raw_text = _fmt80(hexs)
+            hexv.setText(raw_text)
             hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
             fv = floatx80_to_float(b10)
-            val.setText("—" if empty else f"{fv:.6g}")
+            decoded_text = "—" if empty else f"{fv:.6g}"
+            val.setText(decoded_text)
             val.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
+            detail = (
+                f"Logical ST({i}), physical register {phys}: "
+                f"{'empty' if empty else 'occupied'}; raw 80-bit value "
+                f"{raw_text}; decoded value "
+                f"{'unavailable while empty' if empty else decoded_text}.")
+            hexv.setToolTip(detail)
+            hexv.setAccessibleDescription(detail)
+            val.setToolTip(detail)
+            val.setAccessibleDescription(detail)
 
     def show_retire(self, rec, prev):
         """Pin the panel to a retired instruction's post-commit architectural
@@ -541,6 +623,7 @@ class RegsView(QWidget):
         self.mode_lbl.setToolTip(
             "Execution mode sampled before this retirement; GPRs/selectors are "
             "post-commit; PC*, base*, and CR0/CR3/CR4 are pre-execution context")
+        self._sync_segment_compact()
         if rec.x87_valid:
             # Values are already rotated into logical ST(0..7), so label that
             # useful fact instead of repeating the global PINNED banner.
@@ -560,11 +643,23 @@ class RegsView(QWidget):
                 tag.setToolTip(
                     f"Pinned logical ST({i}) is "
                     f"{'empty' if empty else 'occupied'}")
-                hexv.setText(_fmt80(b10[::-1].hex()))
+                raw_text = _fmt80(b10[::-1].hex())
+                hexv.setText(raw_text)
                 hexv.setStyleSheet("color:#4b535d;" if empty else "color:#c9d1d9;")
-                val.setText("—" if empty else f"{floatx80_to_float(b10):.6g}")
+                decoded_text = (
+                    "—" if empty else f"{floatx80_to_float(b10):.6g}")
+                val.setText(decoded_text)
                 val.setStyleSheet(
                     "color:#4b535d;" if empty else "color:#c9d1d9;")
+                detail = (
+                    f"Pinned logical ST({i}): "
+                    f"{'empty' if empty else 'occupied'}; raw 80-bit value "
+                    f"{raw_text}; decoded value "
+                    f"{'unavailable while empty' if empty else decoded_text}.")
+                hexv.setToolTip(detail)
+                hexv.setAccessibleDescription(detail)
+                val.setToolTip(detail)
+                val.setAccessibleDescription(detail)
         else:
             # A partial/legacy backend record may not carry an x87 snapshot.
             # Never leave the last live or pinned values under a new pin.
@@ -579,8 +674,16 @@ class RegsView(QWidget):
                     f"ST({i}) is unavailable for this retirement")
                 hexv.setText("n/a")
                 hexv.setStyleSheet(na)
+                hexv.setToolTip(
+                    "Raw 80-bit value was not captured for this retirement")
+                hexv.setAccessibleDescription(
+                    f"Pinned logical ST({i}) raw 80-bit value unavailable.")
                 val.setText("—")
                 val.setStyleSheet(na)
+                val.setToolTip(
+                    "Decoded value was not captured for this retirement")
+                val.setAccessibleDescription(
+                    f"Pinned logical ST({i}) decoded value unavailable.")
         self._prev = None   # next live refresh re-highlights from scratch
 
     def unpin(self):

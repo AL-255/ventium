@@ -2534,6 +2534,42 @@ def scenario_layout(app, outdir):
         assert win.regs.flags_lbl.accessibleName() == "Decoded EFLAGS"
         for flag in ("CF", "PF", "AF", "ZF", "SF", "TF", "IF", "DF", "OF"):
             assert f"{flag}=" in win.regs.flags_lbl.accessibleDescription()
+        win.regs._compact_tabs.setCurrentIndex(1)
+        settle(app)
+        assert win.regs.seg_group.isHidden()
+        assert win.regs.control_group.isHidden()
+        assert not win.regs.seg_compact_group.isHidden()
+        segment_lines = win.regs.seg_compact_lbl.text().splitlines()
+        assert len(segment_lines) == 11
+        assert segment_lines[0] == "CS 0000 00000000 ffffffff"
+        assert segment_lines[-1] == "USER  CPL=0"
+        assert win.regs.seg_compact_lbl.height() >= (
+            len(segment_lines)
+            * win.regs.seg_compact_lbl.fontMetrics().height())
+        assert max(
+            win.regs.seg_compact_lbl.fontMetrics().horizontalAdvance(line)
+            for line in segment_lines
+        ) <= win.regs.seg_compact_lbl.contentsRect().width()
+        assert "CR4: 00000000" in (
+            win.regs.seg_compact_lbl.accessibleDescription())
+        save_shot(
+            app, win, outdir, "08e_true_minimum_segments",
+            min_width=900, min_height=620)
+        win.regs._compact_tabs.setCurrentIndex(2)
+        settle(app)
+        assert win.regs.fp_value_hdr.isHidden()
+        for index, (_tag, raw, decoded) in enumerate(win.regs.st_lbls):
+            assert decoded.isHidden()
+            assert raw.fontMetrics().horizontalAdvance(raw.text()) <= (
+                raw.contentsRect().width())
+            assert f"Logical ST({index})" in raw.accessibleDescription()
+            assert "raw 80-bit value" in raw.accessibleDescription()
+            assert "decoded value" in raw.accessibleDescription()
+        save_shot(
+            app, win, outdir, "08f_true_minimum_x87",
+            min_width=900, min_height=620)
+        win.regs._compact_tabs.setCurrentIndex(0)
+        settle(app)
         QTest.keyClick(win, Qt.Key_9, Qt.AltModifier)
         settle(app)
         memory = win.tables.mem
@@ -2577,6 +2613,12 @@ def scenario_layout(app, outdir):
         assert win.regs._compact and win.regs._compact_tabs.count() == 3
         assert not win.regs._flags_side
         assert "<br>" not in win.regs.flags_lbl.text()
+        assert not win.regs.seg_group.isHidden()
+        assert not win.regs.control_group.isHidden()
+        assert win.regs.seg_compact_group.isHidden()
+        assert not win.regs.fp_value_hdr.isHidden()
+        assert all(not decoded.isHidden()
+                   for _tag, _raw, decoded in win.regs.st_lbls)
         assert [win.regs._compact_tabs.tabText(i) for i in range(3)] == [
             "Integer", "Segments", "x87"]
         # A selected compact category survives a wide/compact transition.
