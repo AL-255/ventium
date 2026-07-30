@@ -749,11 +749,37 @@ class MainWindow(QMainWindow):
             self._clear_reset_required()
             self._notice("Setup matches running model · no reset needed")
             return
+        pending = self._pending_reset_fields()
+        pending_text = ", ".join(pending) if pending else "launch setup"
         self.reset_btn.setText(" Apply + Reset")
         self.reset_btn.setStyleSheet("border:1px solid #e3b341;")
-        self.reset_btn.setToolTip(
-            "Apply changed addresses/mode on a fresh model (R)")
-        self._notice("Setup changed — Reset to apply")
+        tip = (
+            "Apply changed addresses/mode on a fresh model (R)\n"
+            f"Pending: {pending_text}")
+        self.reset_btn.setToolTip(tip)
+        self.reset_btn.setAccessibleDescription(tip)
+        self._notice(
+            f"Pending: {pending_text} — Reset to apply setup")
+
+    def _pending_reset_fields(self):
+        """Name only meaningful differences from the running launch setup."""
+        current = self._current_reset_config()
+        applied = self._applied_reset_config
+        if current is None or applied is None:
+            return []
+        pending = []
+        for index, label in (
+                (0, "U/V issue"), (1, "system mode"), (2, "SoC mode")):
+            if current[index] != applied[index]:
+                pending.append(label)
+        # Once either side is system boot, entry/ESP/load are not controls for
+        # that launch mode; reporting their transition to/from None would
+        # misleadingly blame disabled fields.
+        if not current[1] and not applied[1]:
+            for index, label in ((3, "entry"), (4, "ESP"), (5, "load")):
+                if current[index] != applied[index]:
+                    pending.append(label)
+        return pending
 
     def _current_reset_config(self):
         """Return only launch fields consumed by Reset, normalized by value."""
@@ -826,7 +852,9 @@ class MainWindow(QMainWindow):
     def _clear_reset_required(self):
         self.reset_btn.setText(" Reset")
         self.reset_btn.setStyleSheet("")
-        self.reset_btn.setToolTip("Re-cold-reset the loaded program on a fresh model (R)")
+        tip = "Re-cold-reset the loaded program on a fresh model (R)"
+        self.reset_btn.setToolTip(tip)
+        self.reset_btn.setAccessibleDescription(tip)
 
     def _set_transport_enabled(self, enabled):
         """Keep controls honest: a fresh window cannot accidentally look runnable."""

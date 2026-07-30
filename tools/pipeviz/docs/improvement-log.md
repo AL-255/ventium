@@ -48,6 +48,10 @@ tooltip and accessible description rather than being color-only screen text.
 The example menu now exposes QAction tooltips. A disabled workload therefore
 shows its exact missing build path(s), matching the indexed and repository
 guides, instead of appearing as an unexplained dead command.
+Apply + Reset now names the pending launch fields/modes in its tooltip,
+accessible description, and action feedback. The comparison is mode-aware:
+switching to/from system boot does not falsely report disabled entry/load/ESP
+tuple changes.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run

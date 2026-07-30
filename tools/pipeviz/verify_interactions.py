@@ -1383,14 +1383,22 @@ def scenario_branch_transport(app, outdir):
         win.cyc_cb.setChecked(False)
         assert "Apply + Reset" in win.reset_btn.text()
         assert "#e3b341" in win.reset_btn.styleSheet()
+        assert "Pending: U/V issue" in win.reset_btn.toolTip()
+        assert win.reset_btn.accessibleDescription() == (
+            win.reset_btn.toolTip())
+        assert win.action_hint.text().startswith("Pending: U/V issue")
+        save_shot(app, win, outdir, "01a_pending_uv_reset")
         win.cyc_cb.setChecked(True)
         assert win.reset_btn.text().strip() == "Reset"
         assert not win.reset_btn.styleSheet()
+        assert "Pending:" not in win.reset_btn.toolTip()
         assert "no reset needed" in win.action_hint.text()
         applied_entry = win.entry_e.text()
         win.entry_e.setText("0x08048001")
         win.entry_e.textEdited.emit(win.entry_e.text())
         assert "Apply + Reset" in win.reset_btn.text()
+        assert "Pending: entry" in win.reset_btn.toolTip()
+        assert win.action_hint.text().startswith("Pending: entry")
         win.entry_e.setText(applied_entry.upper())
         win.entry_e.textEdited.emit(win.entry_e.text())
         assert win.reset_btn.text().strip() == "Reset"
@@ -1398,6 +1406,15 @@ def scenario_branch_transport(app, outdir):
         win.on_reset()
         assert win.reset_btn.text().strip() == "Reset"
         assert not win.reset_btn.styleSheet()
+
+        win.sys_cb.setChecked(True)
+        assert "Pending: system mode" in win.reset_btn.toolTip()
+        pending_tip = win.reset_btn.toolTip().split("Pending:", 1)[1]
+        assert "entry" not in pending_tip
+        assert "ESP" not in pending_tip
+        assert "load" not in pending_tip
+        win.sys_cb.setChecked(False)
+        assert win.reset_btn.text().strip() == "Reset"
 
         c0 = win.backend.state().core_cyc
         click(app, win.step1_btn)

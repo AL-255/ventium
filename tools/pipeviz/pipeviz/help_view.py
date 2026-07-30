@@ -44,7 +44,8 @@ status or the last-action message for its complete untruncated text.</p>
 <p>Launch fields and mode switches are disabled until a program exists. A
 change that differs from the running setup turns Reset into
 <b>Apply + Reset</b>; returning every field to its applied value removes that
-warning without disturbing the model.</p>
+warning without disturbing the model. Hover Apply + Reset to see the exact
+pending fields/modes.</p>
 """),
     ("Loading programs", """
 <h1>Loading programs</h1>

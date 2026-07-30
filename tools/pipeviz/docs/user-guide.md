@@ -84,6 +84,8 @@ addresses and mode switches.
 Changing entry/load/ESP or a mode switch marks the control **Apply + Reset**;
 the running backend is unchanged until you apply it. If you change the setup
 back to the values already running, the amber warning clears without resetting.
+The Apply + Reset tooltip and last-action message list the exact pending
+fields/modes; system boot transitions omit disabled entry/load/ESP fields.
 Invalid addresses are
 highlighted and rejected instead of silently falling back to a default;
 reload also leaves the current session intact until its preserved setup
