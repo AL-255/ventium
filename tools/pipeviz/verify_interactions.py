@@ -31,8 +31,9 @@ import pipeviz.pipeline_view as pipeline_module
 import pipeviz.trace_view as trace_module
 from pipeviz.backend import Backend, VVCline, VVCycle, VVRetire, VVState
 from pipeviz.disasm import C_HALT, C_SYS, STATE_STAGE, stage_of
-from pipeviz.main import (MainWindow, _PROGRAM_FILTER, _apply_dark,
+from pipeviz.main import (DEF_ENTRY, DEF_ESP, MainWindow, _PROGRAM_FILTER, _apply_dark,
                           _load_startup_target, _manifest_address, _read_program,
+                          _manifest_bool,
                           _session_progress, _system_load_address,
                           _validate_segments)
 from pipeviz.pipeline_view import ROW_H
@@ -203,6 +204,13 @@ def scenario_startup(app, outdir):
     assert _session_progress(212, 120, 1) == (212, 120, 212 / 120)
     assert _session_progress(
         1_000_001, 5001, 5001, 1_000_000, snapshot=True) == (1, 1, 1.0)
+    assert _manifest_bool(True, "system") is True
+    try:
+        _manifest_bool(1, "system")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("numeric manifest mode was accepted as a boolean")
     probe_cycle = type("ProbeCycle", (), {
         "mispred_bubbles": 0, "retU": 0, "retV": 0,
     })()
@@ -812,12 +820,71 @@ def scenario_startup(app, outdir):
         with open(os.path.join(manifest_dir, "manifest.json"), "w",
                   encoding="utf-8") as manifest_file:
             json.dump({"entry": 0x00100000,
-                       "load_addr": "0x00100000"}, manifest_file)
+                       "load_addr": "0x00100000",
+                       "esp": "0x001ff000",
+                       "uv_issue": False,
+                       "system": False,
+                       "soc": False}, manifest_file)
         win.load_image(manifest_image)
         assert int(win.entry_e.text(), 0) == 0x00100000
         assert int(win.load_e.text(), 0) == 0x00100000
+        assert int(win.esp_e.text(), 0) == 0x001ff000
+        assert not win.cyc_cb.isChecked()
+        assert not win.sys_cb.isChecked() and not win.soc_cb.isChecked()
         assert win.backend.state().eip == 0x00100000
         assert win.backend.mem_read(0x00100000, 2) == manifest_bytes
+
+        invalid_manifest_dir = os.path.join(outdir, "invalid_manifest")
+        os.makedirs(invalid_manifest_dir, exist_ok=True)
+        invalid_manifest_image = os.path.join(
+            invalid_manifest_dir, "partial.flat")
+        with open(invalid_manifest_image, "wb") as image_file:
+            image_file.write(manifest_bytes)
+        with open(os.path.join(invalid_manifest_dir, "manifest.json"), "w",
+                  encoding="utf-8") as manifest_file:
+            # The valid early entry must not leak through when a later launch
+            # field invalidates the manifest.
+            json.dump({"entry": "0x00100000", "system": 1}, manifest_file)
+        manifest_warnings = []
+        original_warning = main_module.QMessageBox.warning
+        main_module.QMessageBox.warning = (
+            lambda _parent, title, message:
+            manifest_warnings.append((title, message)))
+        try:
+            win.load_image(invalid_manifest_image)
+        finally:
+            main_module.QMessageBox.warning = original_warning
+        assert manifest_warnings and manifest_warnings[0][0] == "Manifest ignored"
+        assert "system must be true or false" in manifest_warnings[0][1]
+        assert int(win.entry_e.text(), 0) == DEF_ENTRY
+        assert int(win.load_e.text(), 0) == DEF_ENTRY
+
+        explicit_system_dir = os.path.join(outdir, "manifest_system")
+        os.makedirs(explicit_system_dir, exist_ok=True)
+        explicit_system_image = os.path.join(
+            explicit_system_dir, "firmware.bin")
+        with open(explicit_system_image, "wb") as system_file:
+            system_file.write(b"\0" * 0x8000)
+        with open(os.path.join(explicit_system_dir, "manifest.json"), "w",
+                  encoding="utf-8") as manifest_file:
+            json.dump({"system": True, "uv_issue": True}, manifest_file)
+        win.load_image(explicit_system_image)
+        assert win.sys_cb.isChecked() and not win.soc_cb.isChecked()
+        assert win.cyc_cb.isChecked()
+        assert int(win.load_e.text(), 0) == 0x000F8000
+        assert all(not field.isEnabled()
+                   for field in (win.entry_e, win.load_e, win.esp_e))
+
+        # `.bin` alone must not force an ordinary large flat program into BIOS
+        # boot, and a different workload must receive a fresh default stack.
+        large_user = os.path.join(outdir, "large_user.bin")
+        with open(large_user, "wb") as user_file:
+            user_file.write(b"\xf4" + b"\0" * (0x8000 - 1))
+        win.load_image(large_user)
+        assert not win.sys_cb.isChecked() and not win.soc_cb.isChecked()
+        assert all(field.isEnabled()
+                   for field in (win.entry_e, win.load_e, win.esp_e))
+        assert int(win.esp_e.text(), 0) == DEF_ESP
 
         long_loop = os.path.join(outdir, "long_refresh.flat")
         with open(long_loop, "wb") as loop_file:

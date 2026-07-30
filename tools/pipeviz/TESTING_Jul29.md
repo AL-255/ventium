@@ -105,25 +105,31 @@ Procedure:
 9. Select “Reading the Pipeline View” from the Help index.
 10. Confirm at least eight indexed topics, dedicated loading and Assembly/C
     help, and the stage-glyph explanation.
-11. Load a temporary flat image whose manifest mixes a JSON integer entry with
-    a hexadecimal-string load address; verify EIP, bytes, and displayed fields.
-12. Require empty files and MZ `.exe` inputs to fail with actionable errors,
+11. Load a temporary flat image whose manifest mixes numeric/string addresses
+    and boolean launch fields; verify entry/load/ESP, U/V, user mode, bytes, and
+    displayed state. Reject a numeric pseudo-boolean transactionally.
+12. Opt an external `.bin` into system boot through its manifest, then load a
+    different large `.bin` without a manifest and require ordinary user mode
+    plus a fresh default ESP.
+13. Require empty files and MZ `.exe` inputs to fail with actionable errors,
     while the Open filter advertises `.rom` and no unsupported generic `.exe`.
-13. Feed synthetic streams beyond the per-read/view caps and require Pipeline,
+14. Feed synthetic streams beyond the per-read/view caps and require Pipeline,
     IPC, Cycles, and Trace to reach the newest sample, label bounded history,
     and preserve predecessor-derived Trace state.
-14. Give Pipeline immutable retired bytes while making current-memory reads
+15. Give Pipeline immutable retired bytes while making current-memory reads
     fail; require its mnemonic and register/flag dependencies to decode solely
     from the retirement record.
-15. Require bounded-history status to use a captured U+V denominator and label
+16. Require bounded-history status to use a captured U+V denominator and label
     `pair(win)`/`mispred(win)` while retaining lifetime retirement/IPC.
-16. Run a real six-byte loop for 9,000 clocks in one refresh and require backend,
+17. Run a real six-byte loop for 9,000 clocks in one refresh and require backend,
     Pipeline, IPC, Cycles, and newest-6,000 Trace endpoints to agree.
 
 Expected and observed:
 
 - Status says no image is loaded.
 - Every data pane distinguishes unloaded state from sampled zero/empty state.
+- Manifest launch settings apply atomically; explicit system mode works outside
+  the repository, while a generic large `.bin` stays a fresh user workload.
 - Historical timing mnemonics/dependencies use captured retirement bytes and
   never re-read mutable code through the current mapping.
 - Disabled Run is visibly gray rather than looking executable.

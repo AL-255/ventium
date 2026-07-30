@@ -191,6 +191,16 @@ rows after Qt updates the row layout, while selecting or manually scrolling a
 result cancels that return. Regressions prove both tail restoration and
 selected-result preservation, and the D-cache capture now shows the live tail.
 
+**Deterministic raw-image loading audit:** every large `.bin` was guessed to be
+a BIOS, and opening a different program silently retained the previous
+program's custom ESP. Generic `.bin` now means a normal flat user image; only
+known repository system paths retain auto-detection. A sibling manifest can
+explicitly and atomically set `entry`, `load_addr`, `esp`, `uv_issue`, `system`,
+and `soc` with typed validation (`soc` implies system). New workloads receive
+the default stack while Reload still preserves the displayed setup. Acceptance
+covers numeric/string addresses, invalid pseudo-booleans without partial
+application, explicit external system boot, and a 32 KiB user `.bin`.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

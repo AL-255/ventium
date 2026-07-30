@@ -92,6 +92,13 @@ def _manifest_address(value, field):
     return address
 
 
+def _manifest_bool(value, field):
+    """Require an actual JSON boolean for launch-mode manifest fields."""
+    if not isinstance(value, bool):
+        raise TypeError(f"{field} must be true or false")
+    return value
+
+
 def _validate_segments(segments):
     """Reject any byte range that cannot be represented by the 32-bit core."""
     for address, chunk in segments:
@@ -959,17 +966,45 @@ class MainWindow(QMainWindow):
             data = b"".join(chunk for _, chunk in segments)
         except (OSError, ValueError, struct.error) as e:
             QMessageBox.critical(self, "Open failed", str(e)); return False
-        # honour a sibling manifest.json (load_addr / entry) if present
+        # Honour a sibling manifest transactionally. A malformed later field
+        # must not leave an earlier entry/load override partially applied.
         man = os.path.join(os.path.dirname(path), "manifest.json")
         load = min(addr for addr, _ in segments)
+        manifest_esp = None
+        manifest_uv = None
+        manifest_system = None
+        manifest_soc = None
         if os.path.exists(man):
             try:
                 with open(man, encoding="utf-8") as mf:
                     m = json.load(mf)
-                if "entry" in m:
-                    entry = _manifest_address(m["entry"], "entry")
-                if "load_addr" in m and kind == "flat image":
-                    load = _manifest_address(m["load_addr"], "load_addr")
+                if not isinstance(m, dict):
+                    raise TypeError("manifest root must be a JSON object")
+                candidate_entry = (
+                    _manifest_address(m["entry"], "entry")
+                    if "entry" in m else entry)
+                candidate_load = (
+                    _manifest_address(m["load_addr"], "load_addr")
+                    if "load_addr" in m and kind == "flat image" else load)
+                candidate_esp = (
+                    _manifest_address(m["esp"], "esp")
+                    if "esp" in m else None)
+                candidate_uv = (
+                    _manifest_bool(m["uv_issue"], "uv_issue")
+                    if "uv_issue" in m else None)
+                candidate_system = (
+                    _manifest_bool(m["system"], "system")
+                    if "system" in m else None)
+                candidate_soc = (
+                    _manifest_bool(m["soc"], "soc")
+                    if "soc" in m else None)
+                if candidate_soc and candidate_system is False:
+                    raise ValueError("soc=true conflicts with system=false")
+                entry, load = candidate_entry, candidate_load
+                manifest_esp = candidate_esp
+                manifest_uv = candidate_uv
+                manifest_system = candidate_system
+                manifest_soc = candidate_soc
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
                 QMessageBox.warning(self, "Manifest ignored",
                                     f"Could not read {man}: {e}\nLoading the program metadata instead.")
@@ -990,18 +1025,31 @@ class MainWindow(QMainWindow):
         self._last_program_dir = os.path.dirname(os.path.abspath(path))
         self.reload_action.setEnabled(True)
         self._clear_reset_required()
-        # heuristic: bare-metal/system images (.bin under sys/, ~64 KiB) boot in
-        # system mode (real-mode reset at F000:FFF0). Auto-tick `system` so they
-        # "just work"; the user can override.
-        looks_system = (("/sys/tests/" in path or path.endswith(".bin"))
-                        and len(data) >= 0x8000)
+        # Known repository system tests boot at F000:FFF0. A generic large
+        # `.bin` is not sufficient evidence: user flat binaries commonly use
+        # that extension. External images can opt in via manifest `system`.
+        normalized_path = path.replace("\\", "/")
+        looks_system = "/sys/tests/" in normalized_path
         # test386 / external CPU tests drive the SoC's port-I/O (POST codes),
         # so they need the full ventium_soc — auto-tick SoC for those.
-        looks_soc = any(k in path for k in ("test386", "09-external", "/soc/"))
-        self.sys_cb.setChecked(looks_system or looks_soc)
-        self.soc_cb.setChecked(looks_soc)
+        looks_soc = any(
+            k in normalized_path for k in ("test386", "09-external", "/soc/"))
+        if manifest_system is not None or manifest_soc is not None:
+            selected_soc = bool(manifest_soc)
+            selected_system = bool(manifest_system) or selected_soc
+        else:
+            selected_soc = looks_soc
+            selected_system = looks_system or looks_soc
+        self.sys_cb.setChecked(selected_system)
+        self.soc_cb.setChecked(selected_soc)
         self.entry_e.setText(f"0x{entry:08x}")
         self.load_e.setText(f"0x{load:08x}")
+        # A new workload must not inherit the previous workload's private
+        # stack choice. Reload below deliberately restores the current setup.
+        self.esp_e.setText(
+            f"0x{(manifest_esp if manifest_esp is not None else DEF_ESP):08x}")
+        if manifest_uv is not None:
+            self.cyc_cb.setChecked(manifest_uv)
         if setup is not None:
             # Reload is the edit/compile/debug loop: retain the user's reset
             # configuration while re-reading bytes and ELF segments from disk.

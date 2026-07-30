@@ -42,8 +42,15 @@ Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p
  an ELF may have several segments. A raw <code>.flat</code>, <code>.bin</code>,
  <code>.img</code>, or <code>.rom</code> uses the entry, load, and ESP fields.
  Empty files and DOS/PE executables are rejected with a format explanation. A sibling
- <code>manifest.json</code> may provide <code>entry</code> and
- <code>load_addr</code> as JSON integers or <code>"0x…"</code> strings.</p>
+ <code>manifest.json</code> may provide <code>entry</code>,
+ <code>load_addr</code>, and <code>esp</code> as JSON integers or
+ <code>"0x…"</code> strings, plus boolean <code>uv_issue</code>,
+ <code>system</code>, and <code>soc</code>. SoC implies system mode. The
+ manifest is applied as one validated unit.</p>
+<p>A new program receives the default ESP unless its manifest specifies one;
+ Reload still preserves the currently displayed setup. A generic
+ <code>.bin</code> stays in user mode unless a manifest, command-line option,
+ or explicit checkbox requests system boot.</p>
 <p>Editing an address or mode marks <b>Apply + Reset</b>. Addresses must be
  32-bit hexadecimal values such as <code>0x08048000</code>; invalid input is
  highlighted and never silently replaced with a default.</p>
