@@ -20,7 +20,8 @@ sys.path.insert(0, HERE)
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PySide6.QtWidgets import (QApplication, QMessageBox, QPushButton,
+                               QToolBar, QToolButton)
 
 from pipeviz.main import MainWindow, _apply_dark
 from pipeviz.pipeline_view import ROW_H
@@ -103,9 +104,22 @@ def scenario_startup(app, outdir):
         for widget in (win.reset_btn, win.step1_btn, win.stepi_btn, win.stepn_btn,
                        win.run_btn, win.evprev_btn, win.evnext_btn):
             assert not widget.isEnabled(), f"{widget.text()} active before a program is loaded"
-        shortcuts = {action.shortcut().toString() for action in win.actions()}
-        for expected in ("F5", "Ctrl+O", "Ctrl+Shift+O", "R", "."):
+        menu_actions = [
+            action for menu in (win._file_menu, win._view_menu, win._help_menu)
+            for action in menu.actions()
+        ]
+        shortcuts = {
+            action.shortcut().toString()
+            for action in [*win.actions(), *menu_actions]
+        }
+        for expected in ("F5", "Ctrl+O", "Ctrl+Shift+O", "Ctrl+Q",
+                         "Ctrl+0", "R", "."):
             assert expected in shortcuts, f"missing global shortcut {expected}"
+        file_actions = {action.text() for action in win._file_menu.actions()}
+        assert {"Open program…", "Open snapshot…", "Quit"} <= file_actions
+        view_actions = {action.text() for action in win._view_menu.actions()}
+        assert {"Reset panel layout", "Show session toolbar",
+                "Show transport toolbar", "Show status toolbar"} <= view_actions
         help_actions = {action.text() for action in win._help_menu.actions()}
         assert {"User Guide", "How to read the Pipeline View",
                 "Keyboard and mouse shortcuts"} <= help_actions
@@ -372,6 +386,13 @@ def scenario_layout(app, outdir):
         win.do_step(160, False)
         win.resize(1280, 800)
         settle(app, 8)
+        for toolbar in win.findChildren(QToolBar):
+            overflow = toolbar.findChild(QToolButton, "qt_toolbar_ext_button")
+            assert overflow is None or not overflow.isVisible(), (
+                f"{toolbar.windowTitle()} toolbar overflowed at compact size")
+        tab_bar = win.tables.tabs.tabBar()
+        assert tab_bar.tabRect(win.tables.tabs.count() - 1).right() < tab_bar.width(), (
+            "analysis tabs overflowed at compact size")
         for panel in (win.pipeline, win.trace, win.tables, win.regs):
             top_left = panel.mapTo(win, panel.rect().topLeft())
             bottom_right = panel.mapTo(win, panel.rect().bottomRight())

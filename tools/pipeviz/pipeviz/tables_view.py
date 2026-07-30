@@ -377,7 +377,8 @@ class TablesView(QWidget):
                             [46, 74, 60, 86, 9999],
                             hint="I-cache empty — step the core to fetch code into it")
         self.ic.setWordWrap(True)
-        self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code $ (I)")
+        self.tabs.addTab(self._wrap(self.ic_lbl, self.ic, self.ic_map), "Code$")
+        self.tabs.setTabToolTip(0, "Instruction cache (I$): resident lines and set/way map")
 
         # --- D-cache (data, timing-only) ---
         self.dc_lbl = QLabel(); self.dc_lbl.setWordWrap(True)
@@ -386,7 +387,8 @@ class TablesView(QWidget):
                             [56, 74, 90, 9999],
                             hint="D-cache empty — this workload has issued no data "
                                  "loads/stores yet")
-        self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data $ (D)")
+        self.tabs.addTab(self._wrap(self.dc_lbl, self.dc, self.dc_map), "Data$")
+        self.tabs.setTabToolTip(1, "Data cache (D$): residency and replayed miss rate")
 
         # --- TLB (I + D) ---
         self.tlb_lbl = QLabel()
@@ -394,11 +396,13 @@ class TablesView(QWidget):
             ["side", "idx", "V", "page (4K/4M)", "vpn->pfn", "perm U/W/P", "big", "D"],
             [44, 40, 30, 110, 150, 90, 40, 9999],
             hint="TLB empty — paging is off or no translations have been resolved yet")
-        self.tabs.addTab(self._wrap(self.tlb_lbl, self.tlb), "TLB (I/D)")
+        self.tabs.addTab(self._wrap(self.tlb_lbl, self.tlb), "TLB")
+        self.tabs.setTabToolTip(2, "Instruction and data translation lookaside buffers")
 
         # --- Prefetch buffer (ibuf) ---
         self.pf = _PrefetchView()
         self.tabs.addTab(self.pf, "Prefetch")
+        self.tabs.setTabToolTip(3, "Prefetch buffer, fetch window, and live decode")
 
         # --- Hotspots (per-PC cycle-cost profile, perf/VTune-style) ---
         self.hot_lbl = QLabel()
@@ -410,6 +414,7 @@ class TablesView(QWidget):
         _right_align_headers(self.hot, (1, 2, 3, 4))  # hits/cycles/cyc%/D$miss match data
         _align_headers(self.hot, (5,), Qt.AlignLeft)  # 'cost' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.hot_lbl, self.hot), "Hotspots")
+        self.tabs.setTabToolTip(4, "Per-PC cycle cost and attributed D-cache misses")
 
         # --- Branches (per-branch-PC taken/not-taken profile) ---
         self.br_lbl = QLabel()
@@ -420,20 +425,24 @@ class TablesView(QWidget):
         _right_align_headers(self.br, (3, 4, 5))     # hits / taken / T% match the data
         _align_headers(self.br, (6,), Qt.AlignLeft)   # 'bias' sits over its left-pinned bar
         self.tabs.addTab(self._wrap(self.br_lbl, self.br), "Branches")
+        self.tabs.setTabToolTip(5, "Per-branch target, hit count, taken rate, and bias")
 
         # --- Instruction mix (class histogram + U/V issue-port split) ---
         self.mix_lbl = QLabel()
         self.mix = _mk_table(["class", "count", "%", "bar"], [88, 60, 56, 9999])
         _align_headers(self.mix, (3,), Qt.AlignLeft)  # 'bar' sits over its left-pinned bar
-        self.tabs.addTab(self._wrap(self.mix_lbl, self.mix), "Instr mix")
+        self.tabs.addTab(self._wrap(self.mix_lbl, self.mix), "Mix")
+        self.tabs.setTabToolTip(6, "Instruction-class mix and U/V issue split")
 
         # --- Cycle attribution (where the cycles go / why IPC is low) ---
         self.cyc = CycleBreakdown()
         self.tabs.addTab(self.cyc, "Cycles")
+        self.tabs.setTabToolTip(7, "Cycle attribution: retire, stalls, fills, walks, and system")
 
         # --- Memory hex/ASCII inspector (follow EIP/ESP) ---
         self.mem = MemoryView()
         self.tabs.addTab(self.mem, "Memory")
+        self.tabs.setTabToolTip(8, "Hex/ASCII memory inspector with EIP, ESP, and access following")
 
         # --- Memory-access map (address-vs-sequence scatter / access pattern) ---
         self.accmap = AccessMap()
@@ -442,6 +451,7 @@ class TablesView(QWidget):
         self.accmap_lbl.setStyleSheet("color:#8b949e;")
         amv.addWidget(self.accmap_lbl); amv.addWidget(self.accmap, 1)
         self.tabs.addTab(amw, "Mem map")
+        self.tabs.setTabToolTip(9, "Load/store address versus retirement-order scatter")
         # a Mem-map point click also pins the Memory tab to that access's bytes (no
         # forced tab switch — switch to Memory to see exactly what the load/store hit).
         self.accmap.accessClicked.connect(self.mem.goto_access)

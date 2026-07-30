@@ -112,7 +112,7 @@ def _apply_dark(app):
         "QGroupBox::title{subcontrol-origin:margin;left:6px;padding:0 3px;color:#8b949e;}"
         "QTableWidget{background:#0d1117;alternate-background-color:#161b22;gridline-color:#21262d;}"
         "QHeaderView::section{background:#161b22;color:#8b949e;border:0;border-right:1px solid #30363d;padding:2px;}"
-        "QTabBar::tab{background:#161b22;color:#8b949e;padding:4px 10px;border:1px solid #30363d;}"
+        "QTabBar::tab{background:#161b22;color:#8b949e;padding:4px 6px;border:1px solid #30363d;}"
         "QTabBar::tab:selected{background:#0d1117;color:#c9d1d9;border-bottom:2px solid #1f6feb;}"
         "QLineEdit{background:#0d1117;border:1px solid #30363d;padding:2px;}"
         "QPushButton{background:#21262d;border:1px solid #30363d;padding:3px 8px;}"
@@ -152,8 +152,8 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._build_toolbar()
-        self._build_help_menu()
         self._build_central()
+        self._build_menus()
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._on_run_tick)
@@ -164,7 +164,35 @@ class MainWindow(QMainWindow):
         self._set_transport_enabled(False)
         self._refresh_status()
 
-    def _build_help_menu(self):
+    def _build_menus(self):
+        file_menu = self.menuBar().addMenu("&File")
+        open_action = QAction("Open program…", self)
+        open_action.setShortcut(QKeySequence("Ctrl+O"))
+        open_action.triggered.connect(self.on_open)
+        file_menu.addAction(open_action)
+        snapshot_action = QAction("Open snapshot…", self)
+        snapshot_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        snapshot_action.triggered.connect(self.on_open_snapshot)
+        file_menu.addAction(snapshot_action)
+        file_menu.addSeparator()
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+        self._file_menu = file_menu
+
+        view_menu = self.menuBar().addMenu("&View")
+        reset_layout = QAction("Reset panel layout", self)
+        reset_layout.setShortcut(QKeySequence("Ctrl+0"))
+        reset_layout.triggered.connect(self._reset_layout)
+        view_menu.addAction(reset_layout)
+        view_menu.addSeparator()
+        for toolbar in (self.session_toolbar, self.transport_toolbar, self.status_toolbar):
+            action = toolbar.toggleViewAction()
+            action.setText(f"Show {toolbar.windowTitle()} toolbar")
+            view_menu.addAction(action)
+        self._view_menu = view_menu
+
         menu = self.menuBar().addMenu("&Help")
         guide = QAction("User Guide", self)
         guide.setShortcut(QKeySequence(Qt.Key_F1))
@@ -179,6 +207,12 @@ class MainWindow(QMainWindow):
         self._help_menu = menu
         self._guide_dialog = None
 
+    def _reset_layout(self):
+        self.outer_split.setSizes([900, 740])
+        self.left_split.setSizes([500, 470])
+        self.right_split.setSizes([600, 300])
+        self._notice("Panel layout reset")
+
     def _show_guide(self, topic="Getting started"):
         if self._guide_dialog is None:
             self._guide_dialog = UserGuideDialog(self)
@@ -189,8 +223,9 @@ class MainWindow(QMainWindow):
 
     # ---- UI construction ----
     def _build_toolbar(self):
-        tb = QToolBar("main"); tb.setMovable(False)
+        tb = QToolBar("session"); tb.setMovable(False)
         self.addToolBar(tb)
+        self.session_toolbar = tb
 
         openbtn = QPushButton(" Open…")
         openbtn.setMinimumWidth(92)
@@ -222,30 +257,36 @@ class MainWindow(QMainWindow):
                                "PIT) — needed for bare-metal images like test386. "
                                "Requires build.sh --soc.")
         tb.addWidget(self.soc_cb)
-        tb.addSeparator()
+
+        # Transport gets its own row. Keeping file/config and execution controls
+        # separate avoids QToolBar's overflow chevron on 1280px displays.
+        self.addToolBarBreak()
+        ctl = QToolBar("transport"); ctl.setMovable(False)
+        self.addToolBar(ctl)
+        self.transport_toolbar = ctl
 
         self.reset_btn = QPushButton(" Reset")
         self.reset_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.reset_btn.clicked.connect(self.on_reset)
         self.reset_btn.setToolTip("Reset the loaded program (R)")
-        tb.addWidget(self.reset_btn)
+        ctl.addWidget(self.reset_btn)
 
         self.step1_btn = QPushButton("Clock")
         self.step1_btn.clicked.connect(lambda: self.do_step(1, False))
         self.step1_btn.setToolTip("Advance one clock (.)")
-        tb.addWidget(self.step1_btn)
+        ctl.addWidget(self.step1_btn)
         self.stepi_btn = QPushButton("Insn")
         self.stepi_btn.clicked.connect(lambda: self.do_step(200000, True))
         self.stepi_btn.setToolTip("Advance to the next retired instruction (I or Space)")
-        tb.addWidget(self.stepi_btn)
+        ctl.addWidget(self.stepi_btn)
 
-        tb.addWidget(QLabel(" N "))
+        ctl.addWidget(QLabel(" N "))
         self.stepn = QSpinBox(); self.stepn.setRange(1, 1000000); self.stepn.setValue(100)
-        self.stepn.setFixedWidth(90); tb.addWidget(self.stepn)
+        self.stepn.setFixedWidth(90); ctl.addWidget(self.stepn)
         self.stepn_btn = QPushButton("Step N")
         self.stepn_btn.clicked.connect(lambda: self.do_step(self.stepn.value(), False))
         self.stepn_btn.setToolTip("Advance the selected number of clocks")
-        tb.addWidget(self.stepn_btn)
+        ctl.addWidget(self.stepn_btn)
 
         self.run_btn = QPushButton(" Run")
         self.run_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
@@ -255,29 +296,30 @@ class MainWindow(QMainWindow):
             "solid #2ea043;padding:3px 12px;} QPushButton:hover{background:#2ea043;}"
             "QPushButton:disabled{background:#21262d;color:#6e7681;"
             "border-color:#30363d;}")
-        tb.addWidget(self.run_btn)
+        ctl.addWidget(self.run_btn)
         self.run_btn.setToolTip("Run or pause continuous execution (F5)")
-        tb.addWidget(QLabel(" speed "))
+        ctl.addWidget(QLabel(" speed "))
         self.speed = QSpinBox(); self.speed.setRange(1, 20000); self.speed.setValue(200)
         self.speed.setSuffix(" clk/tick"); self.speed.setFixedWidth(110)
-        tb.addWidget(self.speed)
+        ctl.addWidget(self.speed)
 
-        tb.addSeparator()   # transport | event-jump
-        tb.addWidget(QLabel(" event "))
+        ctl.addSeparator()   # transport | event-jump
+        ctl.addWidget(QLabel(" event "))
         self.evprev_btn = QPushButton("◀")
         self.evprev_btn.setToolTip("Jump the playhead to the PREVIOUS pipeline event "
                                    "(mispredict / stall / I-fill / page-walk)")
         self.evprev_btn.clicked.connect(lambda: self._jump_event(-1))
-        tb.addWidget(self.evprev_btn)
+        ctl.addWidget(self.evprev_btn)
         self.evnext_btn = QPushButton("▶")
         self.evnext_btn.setToolTip("Jump the playhead to the NEXT pipeline event "
                                    "(mispredict / stall / I-fill / page-walk)")
         self.evnext_btn.clicked.connect(lambda: self._jump_event(1))
-        tb.addWidget(self.evnext_btn)
+        ctl.addWidget(self.evnext_btn)
 
-        # status toolbar (second row)
+        # status toolbar (third row)
         self.addToolBarBreak()
         sb = QToolBar("status"); sb.setMovable(False); self.addToolBar(sb)
+        self.status_toolbar = sb
         self.status_lbl = QLabel("  no image loaded  ")
         f = QFont("monospace"); f.setStyleHint(QFont.Monospace); self.status_lbl.setFont(f)
         sb.addWidget(self.status_lbl)
@@ -291,9 +333,6 @@ class MainWindow(QMainWindow):
                         (Qt.Key_F5, self.on_run_toggle),
                         (Qt.Key_R, self.on_reset)]:
             a = QAction(self); a.setShortcut(QKeySequence(key)); a.triggered.connect(fn)
-            self.addAction(a)
-        for seq, fn in [("Ctrl+O", self.on_open), ("Ctrl+Shift+O", self.on_open_snapshot)]:
-            a = QAction(self); a.setShortcut(QKeySequence(seq)); a.triggered.connect(fn)
             self.addAction(a)
 
     def _has_session(self):
@@ -316,6 +355,8 @@ class MainWindow(QMainWindow):
     def _build_central(self):
         outer = QSplitter(Qt.Horizontal)
         left = QSplitter(Qt.Vertical)
+        self.outer_split = outer
+        self.left_split = left
         self.pipeline = PipelineView()
         self.trace = TraceView()
         left.addWidget(self.pipeline)
@@ -324,6 +365,7 @@ class MainWindow(QMainWindow):
         left.setStretchFactor(0, 3); left.setStretchFactor(1, 2)
         left.setSizes([500, 470])
         right = QSplitter(Qt.Vertical)
+        self.right_split = right
         self.tables = TablesView()
         self.regs = RegsView()
         right.addWidget(self.tables)
