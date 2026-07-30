@@ -309,6 +309,10 @@ Intel-syntax source in Assembly. Review or edit it before running. Compiler
 errors also highlight their C line; press Enter on the focused diagnostic or
 double-click it to jump there. Editing C or changing the optimization level
 clears the prior compiler result and asks for a fresh compile.</p>
+<p>Hover an optimization choice for its purpose: O0 is the most direct and
+source-like, O1 is a moderate compromise, O2 is the performance-oriented
+default for U/V experiments, and Os favors compact code. Every advertised level
+is compiled and assembled by the authoring regression.</p>
 <p>The built-in C template is a real U/V experiment: two independent Fibonacci
 chains run for a volatile, runtime-loaded 120 iterations, so O2 cannot replace
 them with constants. Compile at O2, Assemble + Run, then run the same ELF once

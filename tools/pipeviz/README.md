@@ -179,6 +179,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     folding and provides a direct U/V-on versus U/V-off experiment. The
     authoring regression requires the same `0x198c09a0` result in both modes,
     more than 400 V-pipe retirements, and at least a 20% cycle reduction.
+    Hover help explains the readability/performance intent of every optimization
+    level, and regression coverage compiles and assembles all four.
 * **Analysis tabs** (top-right) — ten tabs over the live microarch state:
   * **Code$ / Data$** — resident cache lines + a **256-cell set×way occupancy
     heatmap**; the Data$ header also reports a **replayed miss-rate** (the resolved

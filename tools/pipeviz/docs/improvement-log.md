@@ -9,6 +9,27 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — understandable C optimization choices
+
+**C-toolbar terminology audit:** the workbench exposed bare `-O0/-O1/-O2/-Os`
+tokens. They are familiar GCC flags to an experienced compiler developer, but
+gave a new user no reason to choose one when the actual task is comparing
+readability, scheduling, performance, or code size.
+
+**Changes:** each combo item now has concise hover help, the active choice
+updates the combo's accessible description, and the anonymous lower-case label
+is now the clearer `Optimize`. O0 is identified as direct/source-like, O1 as a
+moderate optimization, O2 as the performance/U-V default, and Os as
+size-oriented. A post-compile change retains the actionable “compile again”
+message before its explanation so compact layouts do not hide the required
+next step.
+
+**Verification:** acceptance checks every item tooltip and selected accessible
+description, exercises the stale-result transition, and now feeds the built-in
+C workload through compile and assemble at all four advertised levels. The full
+runtime/DWARF/U-V/x87 authoring scenario remains green under base Miniconda, and
+the 900×620 screenshot confirms the renamed label does not crowd the controls.
+
 ## July 30 continuation — C template as an honest U/V experiment
 
 **Experiment-validity audit:** the original built-in C template advanced one

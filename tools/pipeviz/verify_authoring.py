@@ -187,11 +187,13 @@ def verify_toolchain():
         '.warning "acceptance warning"\nhlt\n')
     assert warned.warning_line == 4
     assert "warning:" in warned.log.lower()
-    generated, _log = compile_c_source(_C_TEMPLATE)
-    assert ".intel_syntax noprefix" in generated
-    assert "_start:" in generated and "call main" in generated
-    compiled = assemble_source(generated)
-    assert len(compiled.source_map) >= 10
+    for optimization in ("-O0", "-O1", "-O2", "-Os"):
+        generated, _log = compile_c_source(
+            _C_TEMPLATE, optimization=optimization)
+        assert ".intel_syntax noprefix" in generated
+        assert "_start:" in generated and "call main" in generated
+        compiled = assemble_source(generated)
+        assert len(compiled.source_map) >= 10
     array_assembly, _log = compile_c_source(_C_ARRAY_TEMPLATE)
     assert "memset" not in array_assembly
     assert "_start:" in array_assembly
@@ -1622,6 +1624,16 @@ def scenario(app, outdir):
         assert win.c_source.source_badge.accessibleDescription() == (
             "Source origin built-in template; not saved. No unsaved changes.")
         assert win.c_source.optimization.accessibleName()
+        assert win.c_source.optimization.count() == 4
+        for index in range(win.c_source.optimization.count()):
+            option = win.c_source.optimization.itemText(index)
+            item_help = win.c_source.optimization.itemData(
+                index, Qt.ToolTipRole)
+            assert item_help.startswith(f"{option}: ")
+            assert len(item_help) > len(option) + 12
+        assert "U/V experiments" in win.c_source.optimization.toolTip()
+        assert (win.c_source.optimization.accessibleDescription()
+                == win.c_source.optimization.toolTip())
         assert win.c_source.diagnostics.accessibleName()
         assert win.c_source.diagnostics.placeholderText() == (
             "Compiler diagnostics appear here.")
@@ -2016,6 +2028,9 @@ def scenario(app, outdir):
         replacement_optimization = (
             "-O1" if old_optimization != "-O1" else "-O2")
         win.c_source.optimization.setCurrentText(replacement_optimization)
+        assert replacement_optimization in win.c_source.optimization.toolTip()
+        assert (win.c_source.optimization.accessibleDescription()
+                == win.c_source.optimization.toolTip())
         assert not win.c_source.diagnostics.toPlainText()
         assert (
             f"Optimization changed to {replacement_optimization}"

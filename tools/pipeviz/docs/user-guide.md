@@ -399,6 +399,13 @@ invokes:
   failures, including fatal errors such as a missing header; and
 - a tiny `_start` wrapper that calls `main` and halts.
 
+Hover an optimization entry for its intent: `-O0` gives the most direct,
+source-like output, `-O1` applies basic optimization, `-O2` is the
+performance-oriented default recommended for U/V scheduling experiments, and
+`-Os` favors compact code. The selected entry exposes the same explanation to
+assistive technology. Changing it after a compile marks that result stale and
+asks for a fresh compile.
+
 The generated source opens in Assembly rather than running immediately. This
 lets you compare optimization levels, edit scheduling or register choices,
 inspect completion previews, and only then assemble and run it. Compiler errors

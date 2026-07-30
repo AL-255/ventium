@@ -27,6 +27,12 @@ from .isa_catalog import CATALOG, MNEMONICS, instruction_info
 _TOOL_DIR = Path(__file__).resolve().parent.parent
 _GENERATED_DIR = _TOOL_DIR / ".generated"
 _ENTRY = 0x08048000
+_OPTIMIZATION_HELP = {
+    "-O0": "direct, unoptimized output; easiest to relate to the C source",
+    "-O1": "basic optimization with moderately readable generated assembly",
+    "-O2": "performance-oriented scheduling; recommended for U/V experiments",
+    "-Os": "size-oriented optimization for compact generated assembly",
+}
 
 
 def _mono(size=10, bold=False):
@@ -2223,13 +2229,19 @@ class CView(QWidget):
         controls.addWidget(self.template_btn)
         controls.addWidget(self.open_btn)
         controls.addWidget(self.save_btn)
-        controls.addWidget(QLabel(" optimization "))
+        self.optimization_label = QLabel("Optimize")
+        self.optimization_label.setToolTip(
+            "Choose how GCC transforms C into editable assembly")
+        controls.addWidget(self.optimization_label)
         self.optimization = QComboBox()
         self.optimization.setAccessibleName("Compiler optimization")
-        self.optimization.setToolTip(
-            "GCC optimization level used for generated editable assembly")
-        self.optimization.addItems(["-O0", "-O1", "-O2", "-Os"])
+        for option, description in _OPTIMIZATION_HELP.items():
+            self.optimization.addItem(option)
+            self.optimization.setItemData(
+                self.optimization.count() - 1,
+                f"{option}: {description}", Qt.ToolTipRole)
         self.optimization.setCurrentText("-O2")
+        self.optimization_label.setBuddy(self.optimization)
         controls.addWidget(self.optimization)
         self.compile_btn = QPushButton("Compile → Assembly")
         self.compile_btn.setToolTip(
@@ -2313,6 +2325,7 @@ class CView(QWidget):
         self.editor.textChanged.connect(self._source_changed)
         self.optimization.currentTextChanged.connect(
             self._optimization_changed)
+        self._sync_optimization_help(self.optimization.currentText())
         self.editor.document().setModified(False)
         self._sync_source_badge()
 
@@ -2350,6 +2363,7 @@ class CView(QWidget):
         self.statusChanged.emit(self.status.text())
 
     def _optimization_changed(self, optimization):
+        self._sync_optimization_help(optimization)
         if (self._compiled_optimization is None
                 or optimization == self._compiled_optimization):
             return
@@ -2358,9 +2372,17 @@ class CView(QWidget):
         self._diagnostic_revision = -1
         self._compiled_optimization = None
         self.status.setText(
-            f"Optimization changed to {optimization} — compile again")
+            f"Optimization changed to {optimization} — compile again · "
+            f"{_OPTIMIZATION_HELP.get(optimization, 'compiler optimization')}")
         self.status.setStyleSheet("color:#e3b341;padding:2px;")
         self.statusChanged.emit(self.status.text())
+
+    def _sync_optimization_help(self, optimization):
+        description = _OPTIMIZATION_HELP.get(
+            optimization, "GCC optimization for generated assembly")
+        text = f"{optimization}: {description}"
+        self.optimization.setToolTip(text)
+        self.optimization.setAccessibleDescription(text)
 
     def new_template(self):
         if not self.confirm_safe_to_discard("creating a new template"):
