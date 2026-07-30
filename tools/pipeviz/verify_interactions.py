@@ -353,9 +353,15 @@ def scenario_startup(app, outdir):
             action.text() for action, _candidates in win._example_actions
             if action.isEnabled()}
         view_actions = {action.text() for action in win._view_menu.actions()}
-        assert {"Reset panel layout", "Show session toolbar",
+        assert {"Workspace", "Reset panel layout", "Show session toolbar",
                 "Show transport toolbar", "Show status toolbar",
                 "Analysis tab"} <= view_actions
+        assert [action.text() for action in win._workspace_actions] == [
+            "Visualizer", "Assembly", "C source"]
+        assert [action.shortcut().toString() for action in win._workspace_actions] == [
+            "Alt+V", "Alt+A", "Alt+C"]
+        assert "Assembly and C workbenches" in {
+            action.text() for action in win._help_menu.actions()}
         assert [action.text() for action in win._analysis_actions] == [
             win.tables.tabs.tabText(i) for i in range(win.tables.tabs.count())]
         assert [action.shortcut().toString() for action in win._analysis_actions] == [
@@ -384,7 +390,7 @@ def scenario_startup(app, outdir):
         QTest.keyClick(win, Qt.Key_F1)
         settle(app)
         assert win._guide_dialog is not None and win._guide_dialog.isVisible()
-        assert win._guide_dialog.index.count() >= 7
+        assert win._guide_dialog.index.count() >= 8
         loading_row = next(i for i in range(win._guide_dialog.index.count())
                            if win._guide_dialog.index.item(i).text()
                            == "Loading programs")
@@ -398,6 +404,19 @@ def scenario_startup(app, outdir):
         win._guide_dialog.index.setCurrentRow(pipeline_row)
         settle(app)
         assert "Stage glyphs" in win._guide_dialog.page.toPlainText()
+        assert "Ctrl+-" in win._guide_dialog.page.toPlainText()
+        authoring_row = next(i for i in range(win._guide_dialog.index.count())
+                             if win._guide_dialog.index.item(i).text()
+                             == "Assembly and C workbenches")
+        win._guide_dialog.index.setCurrentRow(authoring_row)
+        settle(app)
+        guide_text = win._guide_dialog.page.toPlainText()
+        assert "Ctrl+Space" in guide_text and "Compile → Assembly" in guide_text
+        authoring_shot = os.path.join(
+            outdir, "00_help_authoring_guide.png")
+        assert win._guide_dialog.grab().save(authoring_shot)
+        win._guide_dialog.index.setCurrentRow(pipeline_row)
+        settle(app)
         guide_shot = os.path.join(outdir, "00_help_pipeline_guide.png")
         assert win._guide_dialog.grab().save(guide_shot)
         win._guide_dialog.close()
@@ -634,11 +653,72 @@ def scenario_branch_transport(app, outdir):
         settle(app)
         assert plot.anchor == anchor_cyc
 
+        # The timing diagram is a debugger surface, not a static picture: it
+        # must be traversable from the keyboard and keep Trace/Registers linked.
+        plot.setFocus()
+        QTest.keyClick(plot, Qt.Key_End)
+        settle(app)
+        assert plot.sel_row == len(plot.insns) - 1
+        assert win._pinned_n == plot.insns[-1]["n"]
+        QTest.keyClick(plot, Qt.Key_Up)
+        settle(app)
+        assert plot.sel_row == len(plot.insns) - 2
+        assert int(win.trace.tbl.item(win.trace.tbl.currentRow(), 0).text()) == (
+            plot.insns[plot.sel_row]["n"])
+        QTest.keyClick(plot, Qt.Key_PageUp)
+        settle(app)
+        assert plot.sel_row == len(plot.insns) - 12
+        QTest.keyClick(plot, Qt.Key_Home)
+        settle(app)
+        assert plot.sel_row == 0 and win._pinned_n == plot.insns[0]["n"]
+
+        # Cycle zoom changes geometry, keeps the selected cycle visible, and
+        # restores exactly to the default scale.
+        zoom = win.pipeline.konata
+        assert plot.cell_w == 20 and zoom.zoom_reset_btn.text() == "100%"
+        default_width = plot.width()
+        click(app, zoom.zoom_out_btn)
+        assert plot.cell_w == 12 and zoom.zoom_reset_btn.text() == "60%"
+        assert plot.width() < default_width
+        play_x = plot._x(plot.playhead)
+        hb = zoom.scroll.horizontalScrollBar()
+        assert hb.value() <= play_x <= hb.value() + zoom.scroll.viewport().width()
+        click(app, zoom.zoom_reset_btn)
+        assert plot.cell_w == 20 and plot.width() == default_width
+        QTest.keyClick(plot, Qt.Key_Minus, Qt.ControlModifier)
+        settle(app)
+        assert plot.cell_w == 12
+        QTest.keyClick(plot, Qt.Key_Equal, Qt.ControlModifier)
+        settle(app)
+        assert plot.cell_w == 20
+
         old_playhead = plot.playhead
+        spark = win.pipeline.spark
+        first_cyc = spark._last_cyc - len(spark.ev) + 1
+        assert spark.next_event(first_cyc - 1, -1) is None
+        assert spark.next_event(spark._last_cyc + 1, 1) is None
         click(app, win.evprev_btn)
         assert plot.playhead is not None and plot.playhead <= old_playhead
         click(app, win.evnext_btn)
         assert plot.playhead is not None
+        mispred_idx = win.event_kind.findData("m")
+        assert mispred_idx >= 0
+        win.event_kind.setCurrentIndex(mispred_idx)
+        plot.playhead = None
+        click(app, win.evprev_btn)
+        event_i = (
+            len(win.pipeline.spark.ev) - 1
+            - (win.pipeline.spark._last_cyc - plot.playhead))
+        assert win.pipeline.spark.ev[event_i] == "m"
+        assert "mispredict event at cycle" in win.action_hint.text()
+        walk_idx = win.event_kind.findData("w")
+        win.event_kind.setCurrentIndex(walk_idx)
+        plot.playhead = None
+        click(app, win.evnext_btn)
+        assert "No later page-walk" in win.action_hint.text()
+        win.event_kind.setCurrentIndex(win.event_kind.findData("any"))
+        QTest.keyClick(plot, Qt.Key_End)
+        settle(app)
 
         set_filter(app, win.trace, "no-visible-hotspot-row")
         select_tab(app, win.tables.tabs, 4)
@@ -652,6 +732,9 @@ def scenario_branch_transport(app, outdir):
         assert win.trace.tbl.currentRow() >= win.trace.tbl.rowCount() - 10
 
         click(app, win.reset_btn)
+        settle(app)
+        assert win.pipeline.konata.plot.width() == 1
+        assert win.pipeline.konata.scroll.horizontalScrollBar().maximum() == 0
         win.speed.setValue(8)
         before = win.backend.state().core_cyc
         click(app, win.run_btn)

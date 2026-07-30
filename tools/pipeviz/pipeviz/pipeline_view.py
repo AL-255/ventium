@@ -17,8 +17,9 @@
     instruction labels; a synced top axis shows the cycle ticks.
 """
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea,
-                               QSizePolicy, QHBoxLayout, QGridLayout)
-from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
+                               QSizePolicy, QHBoxLayout, QGridLayout, QToolButton)
+from PySide6.QtGui import (QPainter, QColor, QFont, QFontMetrics, QPen,
+                           QKeySequence, QShortcut)
 from PySide6.QtCore import Qt, QRect, QSize, QPoint, Signal
 
 from . import disasm
@@ -245,6 +246,14 @@ GUTTER_W = 340   # widened to fit full mnemonics (e.g. 'mov eax, dword ptr [esi]
 HDR_H = 18
 
 
+def _cycle_tick_step(cell_width):
+    """Choose a readable axis interval for the current horizontal zoom."""
+    for step in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000):
+        if step * cell_width >= 72:
+            return step
+    return 5000
+
+
 # Per-stage colours for the Konata cells — each P5 stage gets a DISTINCT hue so
 # fetch/decode/exec/mem/writeback are tellable apart by colour, not just letter.
 C_STG_FILL = "#e0a72e"    # I-cache fill          (amber)
@@ -327,6 +336,7 @@ class _KonataPlot(QWidget):
     """The cell grid (cycles x instructions). Reconstructs per-instruction
     lifecycles from the per-cycle trace and paints only the visible region."""
     rowClicked = Signal(int)     # emits the retire n of the clicked instruction
+    zoomRequested = Signal(int)  # focused Ctrl+- / Ctrl+=, reliable after dialogs
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -339,6 +349,7 @@ class _KonataPlot(QWidget):
         self.history_start = 1
         self.base_cyc = 1
         self.max_cyc = 1
+        self.cell_w = CELL_W
         self.sel_row = None
         self.sel_pc = None       # selected PC → tint all its other executions (loop)
         self._dep_edges = []     # [(prod_row, reg_idx, gating?)] producers of sel_row's sources
@@ -351,6 +362,11 @@ class _KonataPlot(QWidget):
         self.empty_message = (
             "no program loaded — use File → Open example or Ctrl+O")
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName("Pipeline timing diagram")
+        self.setToolTip(
+            "Click a row to pin it; Shift-click sets a cycle-distance anchor. "
+            "Use Up/Down, Page Up/Down, Home, and End to traverse retirements.")
 
     def reset(self, backend, bits, history_start=1):
         self.backend = backend
@@ -374,7 +390,22 @@ class _KonataPlot(QWidget):
             "no instructions retired in the captured cycle window"
             if self.history_start > 1 else
             "no instructions retired yet — use Insn, Step N, or Run")
-        self.setMinimumSize(1, 1)
+        # setFixedSize() is used while populated. Reset both constraints here so
+        # a shorter replacement session cannot inherit the old giant canvas and
+        # stale scrollbar range until its first retirement.
+        self.setFixedSize(1, 1)
+
+    def _resize_canvas(self):
+        w = (self.max_cyc - self.base_cyc + 3) * self.cell_w
+        # one row of bottom slack so a row-aligned bottom-follow scroll keeps the
+        # newest instruction fully visible (never a clipped half-row at the top).
+        h = max(1, len(self.insns) * ROW_H + ROW_H)
+        self.setFixedSize(max(1, w), h)
+
+    def set_cell_width(self, width):
+        self.cell_w = max(6, int(width))
+        self._resize_canvas()
+        self.update()
 
     def _mn(self, pc):
         key = (pc, self.cs_base, self.bits)
@@ -489,15 +520,11 @@ class _KonataPlot(QWidget):
             self._dep_for_row = -1        # row indices shifted → recompute dep edges
         self.base_cyc = (self.insns[0]["c0"] if self.insns
                          else self.history_start)
-        w = (self.max_cyc - self.base_cyc + 3) * CELL_W
-        # one row of bottom slack so a row-aligned bottom-follow scroll keeps the
-        # newest instruction fully visible (never a clipped half-row at the top).
-        h = max(1, len(self.insns) * ROW_H + ROW_H)
-        self.setFixedSize(max(1, w), h)
+        self._resize_canvas()
         return self.max_cyc
 
     def _x(self, cyc):
-        return (cyc - self.base_cyc) * CELL_W
+        return (cyc - self.base_cyc) * self.cell_w
 
     def paintEvent(self, ev):
         p = QPainter(self)
@@ -514,22 +541,23 @@ class _KonataPlot(QWidget):
         # dim-but-legible (#2b3340 ≈ 2x the old near-black #171c24 contrast),
         # kept below the stage board's #454f5d so they don't fight the dense cells.
         p.setPen(QColor("#2b3340"))
-        gc = self.base_cyc + ((10 - self.base_cyc % 10) % 10)
+        tick = _cycle_tick_step(self.cell_w)
+        gc = self.base_cyc + ((tick - self.base_cyc % tick) % tick)
         while True:
             gx = self._x(gc)
             if gx > vis.right():
                 break
             if gx >= vis.left():
                 p.drawLine(gx, vis.top(), gx, vis.bottom())
-            gc += 10
-            if gc > self.max_cyc + 10:
+            gc += tick
+            if gc > self.max_cyc + tick:
                 break
         # column highlights drawn BEHIND the cells — opaque cells then paint on top,
         # so the tint only shows through the inter-cell gaps and never washes a
         # glyph out (the playhead used to alpha-blend OVER the cells it crossed).
         if self.playhead is not None and self.anchor is not None:
-            xa = self._x(self.anchor) + CELL_W // 2
-            xp = self._x(self.playhead) + CELL_W // 2
+            xa = self._x(self.anchor) + self.cell_w // 2
+            xp = self._x(self.playhead) + self.cell_w // 2
             blo, bhi = sorted((xa, xp))
             p.fillRect(QRect(blo, vis.top(), max(1, bhi - blo), vis.height()),
                        QColor(240, 180, 70, 30))        # translucent AMBER Δ band
@@ -537,16 +565,16 @@ class _KonataPlot(QWidget):
             p.drawLine(xa, vis.top(), xa, vis.bottom())
         if self.playhead is not None:
             pcolx = self._x(self.playhead)
-            if pcolx <= vis.right() and pcolx + CELL_W >= vis.left():
-                p.fillRect(QRect(pcolx, vis.top(), CELL_W, vis.height()),
+            if pcolx <= vis.right() and pcolx + self.cell_w >= vis.left():
+                p.fillRect(QRect(pcolx, vis.top(), self.cell_w, vis.height()),
                            QColor(57, 197, 207, 34))    # playhead column tint
-            px = self._x(self.playhead) + CELL_W // 2
+            px = self._x(self.playhead) + self.cell_w // 2
             if vis.left() - 2 <= px <= vis.right() + 2:
                 p.setPen(QColor("#39c5cf"))             # cyan playhead line (behind cells)
                 p.drawLine(px, vis.top(), px, vis.bottom())
         r0 = max(0, vis.top() // ROW_H - 1)
         r1 = min(len(self.insns), vis.bottom() // ROW_H + 2)
-        xlo, xhi = vis.left() - CELL_W, vis.right() + CELL_W
+        xlo, xhi = vis.left() - self.cell_w, vis.right() + self.cell_w
         for r in range(r0, r1):
             ins = self.insns[r]
             y = r * ROW_H
@@ -564,26 +592,36 @@ class _KonataPlot(QWidget):
                     j = i
                     while j < len(cells) and cells[j][1] == "=":
                         j += 1
-                    x0 = self._x(cells[i][0]); x1 = self._x(cells[j - 1][0]) + CELL_W - 1
+                    x0 = self._x(cells[i][0])
+                    x1 = self._x(cells[j - 1][0]) + self.cell_w - 1
                     if x1 >= xlo and x0 <= xhi:
                         # inset the bar (3px gap on the left) so its border never
                         # abuts / clips the preceding lettered cell's glyph.
-                        span = QRect(x0 + 2, y + 1, max(CELL_W - 4, x1 - x0 - 3), ROW_H - 2)
+                        span = QRect(
+                            x0 + 2, y + 1,
+                            max(self.cell_w - 4, x1 - x0 - 3), ROW_H - 2)
                         p.fillRect(span, QColor(col))
                         # light border so the stall span stands out on any row
                         # background (incl. the amber Δ band / zebra stripe).
                         p.setPen(QColor("#aab4c0")); p.drawRect(span)
-                        p.setFont(_mono(9, True)); p.setPen(QColor("#0d1117"))
-                        p.drawText(span, Qt.AlignCenter, f"={j - i}" if j - i > 1 else "=")
+                        if span.width() >= 12:
+                            p.setFont(_mono(8 if self.cell_w < 18 else 9, True))
+                            p.setPen(QColor("#0d1117"))
+                            p.drawText(
+                                span, Qt.AlignCenter,
+                                f"={j - i}" if j - i > 1 else "=")
                     i = j
                 else:
                     x = self._x(cyc)
                     if xlo <= x <= xhi:
-                        cell = QRect(x, y + 1, CELL_W - 1, ROW_H - 2)
+                        cell = QRect(x, y + 1, self.cell_w - 1, ROW_H - 2)
                         p.fillRect(cell, QColor(col))
-                        p.setFont(_mono(9, True))    # 9pt: the F/D/X glyphs read at CELL_W=20
-                        p.setPen(QColor("#0d1117") if QColor(col).lightness() > 130 else QColor(_TXT))
-                        p.drawText(cell, Qt.AlignCenter, ch)
+                        if self.cell_w >= 11:
+                            p.setFont(_mono(8 if self.cell_w < 18 else 9, True))
+                            p.setPen(
+                                QColor("#0d1117")
+                                if QColor(col).lightness() > 130 else QColor(_TXT))
+                            p.drawText(cell, Qt.AlignCenter, ch)
                     i += 1
             # off-screen continuation cue: a chevron when this row's lifecycle runs
             # past the right viewport edge (scroll right for the rest). Paint it on an
@@ -618,7 +656,7 @@ class _KonataPlot(QWidget):
             p.setFont(_mono(8, True))
             for (j, reg, gating) in self._dep_edges:
                 prod = self.insns[j]
-                ex = self._x(prod["c1"]) + CELL_W // 2
+                ex = self._x(prod["c1"]) + self.cell_w // 2
                 ey = j * ROW_H + ROW_H // 2
                 col = QColor("#e3b341" if gating else "#6e7681")
                 pen = QPen(col); pen.setWidth(2 if gating else 1)
@@ -634,7 +672,7 @@ class _KonataPlot(QWidget):
                 # columns); only if neither fits, clamp into view. The old code flipped
                 # left ONTO the cells, occluding the F glyph when the producer sat near
                 # the right frontier (brloop row 210), or left it clipped at the edge.
-                rx = self._x(prod["c1"]) + CELL_W + 3
+                rx = self._x(prod["c1"]) + self.cell_w + 3
                 lx_left = self._x(prod["c0"]) - 3 - lw
                 if rx + lw <= vis.right() - 2:
                     lx = rx
@@ -649,8 +687,8 @@ class _KonataPlot(QWidget):
         # Δ-measure LABEL only (the band fill + amber anchor line are drawn BEHIND
         # the cells so they can't punch through a glyph); the label sits on top.
         if self.playhead is not None and self.anchor is not None:
-            xa = self._x(self.anchor) + CELL_W // 2
-            xp = self._x(self.playhead) + CELL_W // 2
+            xa = self._x(self.anchor) + self.cell_w // 2
+            xp = self._x(self.playhead) + self.cell_w // 2
             lo, hi = sorted((xa, xp))
             dn = abs(self.playhead - self.anchor)
             p.setFont(_mono(8, True))
@@ -663,7 +701,7 @@ class _KonataPlot(QWidget):
             p.drawText(QRect(lx, ly, lw, 12), Qt.AlignCenter, lbl)
         # playhead 'cyc N' callout (the cyan line + column tint are BEHIND the cells)
         if self.playhead is not None:
-            px = self._x(self.playhead) + CELL_W // 2
+            px = self._x(self.playhead) + self.cell_w // 2
             if vis.left() - 2 <= px <= vis.right() + 2:
                 lbl = f"cyc {self.playhead}"
                 p.setFont(_mono(8, True))
@@ -681,7 +719,7 @@ class _KonataPlot(QWidget):
         if 0 <= r < len(self.insns):
             ins = self.insns[r]
             # which exact cell is under the cursor → its cycle + full stage name
-            cyc = int(x // CELL_W) + self.base_cyc
+            cyc = int(x // self.cell_w) + self.base_cyc
             cell = next((c for c in ins["cells"] if c[0] == cyc), None)
             cellinfo = (f"\ncycle {cyc}: {_GLYPH_STAGE.get(cell[1], cell[1])}"
                         if cell else "")
@@ -705,6 +743,7 @@ class _KonataPlot(QWidget):
                 f"click: pin regs + trace data deps · shift-click: Δ-measure anchor")
 
     def mousePressEvent(self, ev):
+        self.setFocus(Qt.MouseFocusReason)
         y = (ev.position().y() if hasattr(ev, "position") else ev.y())
         r = int(y // ROW_H)
         if not (0 <= r < len(self.insns)):
@@ -715,11 +754,61 @@ class _KonataPlot(QWidget):
             self.anchor = None if self.anchor == cyc else cyc
             self.update()
             return
-        self.sel_row = r
-        self.sel_pc = self.insns[r]["pc"]
-        self.playhead = cyc
+        self.select_row(r)
+
+    def select_row(self, row):
+        if not self.insns:
+            return
+        row = max(0, min(int(row), len(self.insns) - 1))
+        selected = self.insns[row]
+        self.sel_row = row
+        self.sel_pc = selected["pc"]
+        self.playhead = selected["c1"]
         self.update()
-        self.rowClicked.emit(int(self.insns[r]["n"]))
+        self.rowClicked.emit(int(selected["n"]))
+        # Trace's legacy cycle signal runs synchronously and can map a dual-retire
+        # cycle to its V row. Restore the exact retirement the user chose so an
+        # Up/Down move from V to U does not visually bounce straight back to V.
+        self.sel_row = row
+        self.sel_pc = selected["pc"]
+        self.playhead = selected["c1"]
+        self.update()
+
+    def keyPressEvent(self, event):
+        """Make the timing diagram usable without pixel-precise clicking."""
+        key = event.key()
+        if event.modifiers() & Qt.ControlModifier:
+            if key == Qt.Key_Minus:
+                self.zoomRequested.emit(-1)
+                event.accept()
+                return
+            if key in (Qt.Key_Equal, Qt.Key_Plus):
+                self.zoomRequested.emit(1)
+                event.accept()
+                return
+        if key not in (Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp,
+                       Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End):
+            super().keyPressEvent(event)
+            return
+        if not self.insns:
+            event.accept()
+            return
+        if key == Qt.Key_Home:
+            row = 0
+        elif key == Qt.Key_End:
+            row = len(self.insns) - 1
+        elif self.sel_row is None:
+            row = len(self.insns) - 1 if key in (Qt.Key_Up, Qt.Key_PageUp) else 0
+        else:
+            delta = {
+                Qt.Key_Up: -1,
+                Qt.Key_Down: 1,
+                Qt.Key_PageUp: -10,
+                Qt.Key_PageDown: 10,
+            }.get(key, 0)
+            row = self.sel_row + delta
+        self.select_row(row)
+        event.accept()
 
 
 class _KonataGutter(QWidget):
@@ -736,10 +825,9 @@ class _KonataGutter(QWidget):
         y = (ev.position().y() if hasattr(ev, "position") else ev.y())
         r = int((y + voff) // ROW_H)
         if 0 <= r < len(self.plot.insns):
-            self.plot.sel_row = r
-            self.plot.sel_pc = self.plot.insns[r]["pc"]
-            self.plot.update(); self.update()
-            self.plot.rowClicked.emit(int(self.plot.insns[r]["n"]))
+            self.plot.setFocus(Qt.MouseFocusReason)
+            self.plot.select_row(r)
+            self.update()
 
     def paintEvent(self, ev):
         p = QPainter(self)
@@ -826,15 +914,19 @@ class _KonataHeader(QWidget):
         # label the per-row latency column (the '3c'/'11c' badges) in the gutter band
         p.setPen(QColor("#6e7681"))
         p.drawText(QRect(GUTTER_W - 50, 0, 44, HDR_H), Qt.AlignVCenter | Qt.AlignRight, "lat")
-        c = base + ((10 - base % 10) % 10)
-        while c <= maxc + 10:
-            x = GUTTER_W + (c - base) * CELL_W - hoff
+        tick = _cycle_tick_step(self.plot.cell_w)
+        c = base + ((tick - base % tick) % tick)
+        while c <= maxc + tick:
+            x = GUTTER_W + (c - base) * self.plot.cell_w - hoff
             if x > self.width():
                 break
             if x >= GUTTER_W:
                 p.setPen(QColor("#586069"))
-                p.drawText(QRect(x - 16, 0, 32, HDR_H), Qt.AlignCenter, str(c))
-            c += 10
+                label_w = max(40, len(str(c)) * 7 + 8)
+                p.drawText(
+                    QRect(x - label_w // 2, 0, label_w, HDR_H),
+                    Qt.AlignCenter, str(c))
+            c += tick
         p.end()
 
 
@@ -844,7 +936,31 @@ class Konata(QWidget):
         v = QVBoxLayout(self); v.setContentsMargins(2, 2, 2, 2); v.setSpacing(2)
         self.title = QLabel("Pipeline view  (gem5/Konata — instruction × cycle)")
         self.title.setStyleSheet("font-weight:bold;")
-        v.addWidget(self.title)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(3)
+        title_row.addWidget(self.title)
+        title_row.addStretch(1)
+        zoom_caption = QLabel("cycle zoom")
+        zoom_caption.setStyleSheet("color:#6e7681;font-size:8px;")
+        title_row.addWidget(zoom_caption)
+        self.zoom_out_btn = QToolButton()
+        self.zoom_out_btn.setText("−")
+        self.zoom_out_btn.setToolTip("Zoom out the cycle axis (Ctrl+-)")
+        self.zoom_reset_btn = QToolButton()
+        self.zoom_reset_btn.setText("100%")
+        self.zoom_reset_btn.setToolTip("Restore the default cycle scale")
+        self.zoom_in_btn = QToolButton()
+        self.zoom_in_btn.setText("+")
+        self.zoom_in_btn.setToolTip("Zoom in the cycle axis (Ctrl+=)")
+        for button in (self.zoom_out_btn, self.zoom_reset_btn, self.zoom_in_btn):
+            button.setAutoRaise(True)
+            button.setFixedHeight(18)
+            title_row.addWidget(button)
+        self.zoom_out_btn.setFixedWidth(20)
+        self.zoom_reset_btn.setFixedWidth(42)
+        self.zoom_in_btn.setFixedWidth(20)
+        v.addLayout(title_row)
         # legend on its OWN line so it can't clip off the right edge
         lw = self._legend_widget()
         lh = QHBoxLayout(); lh.setContentsMargins(0, 0, 0, 0)
@@ -869,7 +985,7 @@ class Konata(QWidget):
         # snap wheel/keyboard scrolling to whole rows / whole cycle-columns so a
         # row is never sliced in half at the viewport edge.
         self.scroll.verticalScrollBar().setSingleStep(ROW_H)
-        self.scroll.horizontalScrollBar().setSingleStep(CELL_W)
+        self.scroll.horizontalScrollBar().setSingleStep(self.plot.cell_w)
         # Auto-follow ("stick to the newest row/cycle") is EXPLICIT state, toggled
         # only by a user scroll. Inferring it each tick from value>=max-eps is
         # fragile: iter-9 row-snapped the at-rest position below max, so the next
@@ -883,6 +999,17 @@ class Konata(QWidget):
         self.scroll.horizontalScrollBar().valueChanged.connect(self._on_hscroll)
         self._last_cyc = 0
         self._history_truncated = False
+        self._zoom_widths = (8, 12, CELL_W, 28, 40)
+        self._zoom_index = self._zoom_widths.index(CELL_W)
+        self.zoom_out_btn.clicked.connect(lambda: self._change_zoom(-1))
+        self.zoom_in_btn.clicked.connect(lambda: self._change_zoom(1))
+        self.zoom_reset_btn.clicked.connect(self.reset_zoom)
+        self.plot.zoomRequested.connect(self._change_zoom)
+        QShortcut(QKeySequence("Ctrl+-"), self).activated.connect(
+            lambda: self._change_zoom(-1))
+        QShortcut(QKeySequence("Ctrl+="), self).activated.connect(
+            lambda: self._change_zoom(1))
+        self._sync_zoom_controls()
 
     def _on_vscroll(self, val):
         # Force a FULL repaint of the plot's visible area on every scroll. The
@@ -902,7 +1029,48 @@ class Konata(QWidget):
         self.plot.update()        # full repaint — see _on_vscroll (blit smears the overlays)
         self.header.update()
         if not self._adjusting:
-            self._stick_h = val >= self.scroll.horizontalScrollBar().maximum() - CELL_W
+            self._stick_h = (
+                val >= self.scroll.horizontalScrollBar().maximum() - self.plot.cell_w)
+
+    def _sync_zoom_controls(self):
+        pct = round(self.plot.cell_w / CELL_W * 100)
+        self.zoom_reset_btn.setText(f"{pct}%")
+        self.zoom_out_btn.setEnabled(self._zoom_index > 0)
+        self.zoom_in_btn.setEnabled(self._zoom_index < len(self._zoom_widths) - 1)
+
+    def _change_zoom(self, delta):
+        self.set_zoom_index(self._zoom_index + int(delta))
+
+    def reset_zoom(self):
+        self.set_zoom_index(self._zoom_widths.index(CELL_W))
+
+    def set_zoom_index(self, index):
+        index = max(0, min(int(index), len(self._zoom_widths) - 1))
+        if index == self._zoom_index:
+            return
+        hb = self.scroll.horizontalScrollBar()
+        viewport_w = self.scroll.viewport().width()
+        old_w = self.plot.cell_w
+        # Preserve the user's investigation point, not an arbitrary pixel. When
+        # the viewport is following live execution, the playhead/newest cycle is
+        # the most useful anchor; after a manual scroll, preserve the centre cycle.
+        if self._stick_h:
+            focus_cyc = (
+                self.plot.playhead
+                if self.plot.playhead is not None else self.plot.max_cyc)
+        else:
+            focus_cyc = (
+                self.plot.base_cyc
+                + (hb.value() + viewport_w // 2) / max(1, old_w))
+        self._zoom_index = index
+        self.plot.set_cell_width(self._zoom_widths[index])
+        hb.setSingleStep(self.plot.cell_w)
+        self._sync_zoom_controls()
+        self.header.update()
+        self._adjusting = True
+        target = self.plot._x(focus_cyc) - viewport_w // 2
+        hb.setValue(max(0, min(hb.maximum(), int(target))))
+        self._adjusting = False
 
     def _legend_widget(self):
         # Each swatch is tightly coupled to ITS label (3px), with a clear gap
@@ -928,6 +1096,10 @@ class Konata(QWidget):
         self.title.setText("Pipeline view  (gem5/Konata — instruction × cycle)")
         self._stick_v = True
         self._stick_h = True
+        self._adjusting = True
+        self.scroll.verticalScrollBar().setValue(0)
+        self.scroll.horizontalScrollBar().setValue(0)
+        self._adjusting = False
         self.gutter.update(); self.header.update()
 
     def set_bits(self, bits):
@@ -1160,8 +1332,19 @@ class SparklineStrip(QWidget):
         n = len(self.ev)
         if n == 0:
             return None
-        i = (n - 1 - (self._last_cyc - int(from_cyc))) + direction
-        i = max(0, min(i, n - 1))    # a from_cyc outside the strip starts at an edge
+        direction = 1 if direction > 0 else -1
+        first_cyc = self._last_cyc - n + 1
+        i = int(from_cyc) - first_cyc + direction
+        # An outward search beyond the corresponding edge has no match. From
+        # the opposite edge, start at the first/last captured cycle.
+        if i < 0:
+            if direction < 0:
+                return None
+            i = 0
+        elif i >= n:
+            if direction > 0:
+                return None
+            i = n - 1
         while 0 <= i < n:
             e = self.ev[i]
             if e and (cls == "any" or e == cls):

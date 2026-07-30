@@ -13,7 +13,8 @@ import struct
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QToolBar, QLabel,
                                QLineEdit, QPushButton, QCheckBox, QSpinBox, QSplitter,
-                               QFileDialog, QMessageBox, QStyle, QSizePolicy)
+                               QFileDialog, QMessageBox, QStyle, QSizePolicy,
+                               QComboBox, QTabWidget)
 from PySide6.QtGui import (QAction, QFont, QPalette, QColor, QKeySequence,
                            QShortcut, QRegularExpressionValidator)
 from PySide6.QtCore import Qt, QTimer, QRegularExpression
@@ -24,6 +25,7 @@ from .tables_view import TablesView
 from .trace_view import TraceView
 from .regs_view import RegsView
 from .help_view import UserGuideDialog
+from .source_view import AssemblyView, CView
 
 DEF_ENTRY = 0x08048000
 DEF_ESP = 0x40c34910
@@ -246,6 +248,9 @@ class MainWindow(QMainWindow):
         self.image_segments = []
         self.image_kind = None
         self.snapshot_prefix = None
+        self._assembly_source_map = {}
+        self._source_workspace_active = False
+        self._visual_toolbar_visibility = None
         verify_dir = os.path.join(_REPO_ROOT, "build", "verify")
         self._last_program_dir = verify_dir if os.path.isdir(verify_dir) else os.getcwd()
         self._last_snapshot_dir = os.getcwd()
@@ -302,6 +307,21 @@ class MainWindow(QMainWindow):
         self._file_menu = file_menu
 
         view_menu = self.menuBar().addMenu("&View")
+        workspace_menu = view_menu.addMenu("Workspace")
+        self._workspace_actions = []
+        for label, key, index in (
+                ("Visualizer", "Alt+V", 0),
+                ("Assembly", "Alt+A", 1),
+                ("C source", "Alt+C", 2)):
+            action = QAction(label, self)
+            action.setShortcut(QKeySequence(key))
+            action.triggered.connect(
+                lambda _checked=False, tab_index=index:
+                self._select_workspace(tab_index))
+            workspace_menu.addAction(action)
+            self._workspace_actions.append(action)
+        self._workspace_menu = workspace_menu
+        view_menu.addSeparator()
         reset_layout = QAction("Reset panel layout", self)
         reset_layout.setShortcut(QKeySequence("Ctrl+0"))
         reset_layout.triggered.connect(self._reset_layout)
@@ -334,6 +354,10 @@ class MainWindow(QMainWindow):
         pipeline = QAction("How to read the Pipeline View", self)
         pipeline.triggered.connect(lambda: self._show_guide("Reading the Pipeline View"))
         menu.addAction(pipeline)
+        authoring = QAction("Assembly and C workbenches", self)
+        authoring.triggered.connect(
+            lambda: self._show_guide("Assembly and C workbenches"))
+        menu.addAction(authoring)
         shortcuts = QAction("Keyboard and mouse shortcuts", self)
         shortcuts.triggered.connect(self._show_shortcuts)
         menu.addAction(shortcuts)
@@ -486,6 +510,16 @@ class MainWindow(QMainWindow):
 
         ctl.addSeparator()   # transport | event-jump
         ctl.addWidget(QLabel(" event "))
+        self.event_kind = QComboBox()
+        self.event_kind.addItem("any", "any")
+        self.event_kind.addItem("mispredict", "m")
+        self.event_kind.addItem("stall", "s")
+        self.event_kind.addItem("I-fill", "f")
+        self.event_kind.addItem("page-walk", "w")
+        self.event_kind.setFixedWidth(112)
+        self.event_kind.setToolTip(
+            "Choose which pipeline event [ and ] navigate")
+        ctl.addWidget(self.event_kind)
         self.evprev_btn = QPushButton("◀")
         self.evprev_btn.setToolTip("Jump the playhead to the PREVIOUS pipeline event "
                                    "(mispredict / stall / I-fill / page-walk)")
@@ -515,12 +549,14 @@ class MainWindow(QMainWindow):
         sb.addWidget(self.action_hint)
 
         # shortcuts
+        self._transport_shortcut_actions = []
         for key, fn in [(Qt.Key_Period, lambda: self.do_step(1, False)),
                         (Qt.Key_Space, lambda: self.do_step(200000, True)),
                         (Qt.Key_F5, self.on_run_toggle),
                         (Qt.Key_R, self.on_reset)]:
             a = QAction(self); a.setShortcut(QKeySequence(key)); a.triggered.connect(fn)
             self.addAction(a)
+            self._transport_shortcut_actions.append(a)
 
     def _has_session(self):
         return self.image_bytes is not None or self.snapshot_prefix is not None
@@ -590,6 +626,7 @@ class MainWindow(QMainWindow):
         self.reset_btn.setEnabled(enabled)
         for w in (self.evprev_btn, self.evnext_btn):
             w.setEnabled(enabled)
+        self.event_kind.setEnabled(enabled)
         runnable = enabled and not self.backend.is_done()
         for w in (self.step1_btn, self.stepi_btn, self.stepn,
                   self.stepn_btn, self.run_btn, self.speed):
@@ -641,7 +678,27 @@ class MainWindow(QMainWindow):
         outer.setSizes([880, 760])
         for sp in (outer, left, right):
             sp.setHandleWidth(4)
-        self.setCentralWidget(outer)
+        self.workspace = QTabWidget()
+        self.workspace.setDocumentMode(True)
+        self.workspace.setTabPosition(QTabWidget.North)
+        self.workspace.setAccessibleName("Pipeviz workspace")
+        self.visualizer_tab = outer
+        self.assembly = AssemblyView()
+        self.c_source = CView()
+        self.workspace.addTab(self.visualizer_tab, "Visualizer")
+        self.workspace.addTab(self.assembly, "Assembly")
+        self.workspace.addTab(self.c_source, "C")
+        self.workspace.setTabToolTip(
+            0, "Run programs and investigate pipeline behavior")
+        self.workspace.setTabToolTip(
+            1, "Edit, complete, assemble, and run 32-bit Intel-syntax assembly")
+        self.workspace.setTabToolTip(
+            2, "Compile a freestanding C experiment into editable assembly")
+        self.setCentralWidget(self.workspace)
+        self.assembly.runRequested.connect(self._run_assembly)
+        self.assembly.statusChanged.connect(self._authoring_notice)
+        self.c_source.assemblyGenerated.connect(self._accept_compiled_assembly)
+        self.c_source.statusChanged.connect(self._authoring_notice)
         # two-way link: trace row <-> Konata instruction row
         self.trace.rowSelected.connect(self.pipeline.highlight_cycle)
         self.pipeline.konata.plot.rowClicked.connect(self.trace.select_n)
@@ -662,14 +719,72 @@ class MainWindow(QMainWindow):
         # `.` is an QAction in the toolbar shortcut set above. Keep it out of
         # this QShortcut group: registering both lets Qt dispatch a single key
         # press twice on some platform styles, advancing two clocks unexpectedly.
+        self._debug_shortcuts = []
         for keys, fn in [("i", lambda: self.do_step(1, True)),
                          ("]", lambda: self._jump_event(1)),
                          ("[", lambda: self._jump_event(-1))]:
-            QShortcut(QKeySequence(keys), self).activated.connect(fn)
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.activated.connect(fn)
+            self._debug_shortcuts.append(shortcut)
         # Search should be reachable from anywhere in the debugger, not only
         # after first clicking the trace table.
-        QShortcut(QKeySequence("/"), self).activated.connect(
-            self.trace.focus_filter)
+        search_shortcut = QShortcut(QKeySequence("/"), self)
+        search_shortcut.activated.connect(self.trace.focus_filter)
+        self._debug_shortcuts.append(search_shortcut)
+        self.workspace.currentChanged.connect(self._workspace_changed)
+        self._workspace_changed(self.workspace.currentIndex())
+
+    def _select_workspace(self, index):
+        if 0 <= index < self.workspace.count():
+            self.workspace.setCurrentIndex(index)
+            self._notice(f"Workspace: {self.workspace.tabText(index)}")
+
+    def _workspace_changed(self, index):
+        """Plain debugger keys must remain ordinary text in source editors."""
+        visualizer = index == 0
+        for action in self._transport_shortcut_actions:
+            action.setEnabled(visualizer)
+        for shortcut in self._debug_shortcuts:
+            shortcut.setEnabled(visualizer)
+        toolbars = (
+            self.session_toolbar, self.transport_toolbar, self.status_toolbar)
+        if not visualizer and not self._source_workspace_active:
+            self._visual_toolbar_visibility = tuple(
+                not toolbar.isHidden() for toolbar in toolbars)
+            for toolbar in toolbars:
+                toolbar.hide()
+            self._source_workspace_active = True
+        elif visualizer and self._source_workspace_active:
+            visibility = self._visual_toolbar_visibility or (True, True, True)
+            for toolbar, shown in zip(toolbars, visibility):
+                toolbar.setVisible(shown)
+            self._source_workspace_active = False
+
+    def _clear_assembly_source_link(self):
+        self._assembly_source_map = {}
+        self.assembly.editor.mark_execution_line(None)
+        self.workspace.setTabText(1, "Assembly")
+        self.workspace.setTabToolTip(
+            1, "Edit, complete, assemble, and run 32-bit Intel-syntax assembly")
+
+    def _authoring_notice(self, text):
+        if text in ("Assembly source modified", "Assembly source replaced"):
+            self._clear_assembly_source_link()
+        self._notice(text)
+
+    def _accept_compiled_assembly(self, source, optimization):
+        self.assembly.set_source(source, f"C compiler ({optimization})")
+        self.workspace.setTabText(1, "Assembly")
+        self.workspace.setCurrentWidget(self.assembly)
+        self._notice("C compiled — review or edit the generated assembly, then run")
+
+    def _run_assembly(self, path, source_map):
+        if self.load_image(path):
+            self._assembly_source_map = dict(source_map)
+            self.workspace.setTabText(1, "Assembly")
+            self.workspace.setCurrentWidget(self.visualizer_tab)
+            self._notice(
+                f"Running authored assembly · {len(source_map)} source-linked instructions")
 
     # ---- image loading ----
     def on_open(self):
@@ -684,6 +799,26 @@ class MainWindow(QMainWindow):
             self.load_image(self.image_path, preserve_setup=True)
 
     def load_image(self, path, preserve_setup=False):
+        previous = {
+            "image_path": self.image_path,
+            "image_bytes": self.image_bytes,
+            "image_segments": self.image_segments,
+            "image_kind": self.image_kind,
+            "snapshot_prefix": self.snapshot_prefix,
+            "last_program_dir": self._last_program_dir,
+            "entry": self.entry_e.text(),
+            "load": self.load_e.text(),
+            "esp": self.esp_e.text(),
+            "cycle": self.cyc_cb.isChecked(),
+            "system": self.sys_cb.isChecked(),
+            "soc": self.soc_cb.isChecked(),
+            "reload_enabled": self.reload_action.isEnabled(),
+            "title": self.windowTitle(),
+            "reset_text": self.reset_btn.text(),
+            "reset_tip": self.reset_btn.toolTip(),
+            "reset_style": self.reset_btn.styleSheet(),
+            "notice": self.action_hint.text(),
+        }
         setup = None
         if preserve_setup:
             system = self.sys_cb.isChecked() or self.soc_cb.isChecked()
@@ -705,7 +840,7 @@ class MainWindow(QMainWindow):
                         self, "Invalid address",
                         f"Cannot reload while {label} is invalid. Enter a 32-bit "
                         "hexadecimal address, then reload again.")
-                    return
+                    return False
             setup = {
                 "kind": self.image_kind,
                 "entry": self.entry_e.text(),
@@ -719,7 +854,7 @@ class MainWindow(QMainWindow):
             segments, entry, kind = _read_program(path)
             data = b"".join(chunk for _, chunk in segments)
         except (OSError, ValueError, struct.error) as e:
-            QMessageBox.critical(self, "Open failed", str(e)); return
+            QMessageBox.critical(self, "Open failed", str(e)); return False
         # honour a sibling manifest.json (load_addr / entry) if present
         man = os.path.join(os.path.dirname(path), "manifest.json")
         load = min(addr for addr, _ in segments)
@@ -742,7 +877,7 @@ class MainWindow(QMainWindow):
             _validate_segments(segments)
         except ValueError as e:
             QMessageBox.critical(self, "Open failed", str(e))
-            return
+            return False
         self.image_path = path
         self.image_bytes = data
         self.image_segments = segments
@@ -778,10 +913,47 @@ class MainWindow(QMainWindow):
             field.setStyleSheet("")
         self._sync_config_enabled()
         self.setWindowTitle(f"Ventium pipeline visualizer — {os.path.basename(path)} ({kind})")
-        self.on_reset()
+        if not self.on_reset():
+            # Reset validates placement and constructs a replacement backend
+            # transactionally. If it rejects the candidate, keep every visible
+            # part of the still-live prior session coherent with that backend.
+            self.image_path = previous["image_path"]
+            self.image_bytes = previous["image_bytes"]
+            self.image_segments = previous["image_segments"]
+            self.image_kind = previous["image_kind"]
+            self.snapshot_prefix = previous["snapshot_prefix"]
+            self._last_program_dir = previous["last_program_dir"]
+            controls = (
+                (self.entry_e, previous["entry"]),
+                (self.load_e, previous["load"]),
+                (self.esp_e, previous["esp"]),
+                (self.cyc_cb, previous["cycle"]),
+                (self.sys_cb, previous["system"]),
+                (self.soc_cb, previous["soc"]),
+            )
+            blocked = [(widget, widget.blockSignals(True))
+                       for widget, _value in controls]
+            for widget, value in controls:
+                if isinstance(value, bool):
+                    widget.setChecked(value)
+                else:
+                    widget.setText(value)
+            for widget, old_blocked in blocked:
+                widget.blockSignals(old_blocked)
+            self.reload_action.setEnabled(previous["reload_enabled"])
+            self.setWindowTitle(previous["title"])
+            self.reset_btn.setText(previous["reset_text"])
+            self.reset_btn.setToolTip(previous["reset_tip"])
+            self.reset_btn.setStyleSheet(previous["reset_style"])
+            self.action_hint.setText(previous["notice"])
+            self._sync_config_enabled()
+            return False
+        if hasattr(self, "assembly"):
+            self._clear_assembly_source_link()
         self._notice(
             f"{'Reloaded' if preserve_setup else 'Loaded'} {kind}: "
             f"{os.path.basename(path)}")
+        return True
 
     def dragEnterEvent(self, event):
         urls = event.mimeData().urls()
@@ -829,7 +1001,7 @@ class MainWindow(QMainWindow):
             if candidate is not None:
                 candidate.close()
             QMessageBox.critical(self, "Snapshot restore failed", str(e))
-            return
+            return False
         old = self.backend
         self.backend = candidate
         old.close()
@@ -838,6 +1010,7 @@ class MainWindow(QMainWindow):
         self.image_segments = []
         self.image_kind = "snapshot"
         self.snapshot_prefix = prefix
+        self._clear_assembly_source_link()
         self._last_snapshot_dir = os.path.dirname(os.path.abspath(prefix))
         self.reload_action.setEnabled(False)
         self.sys_cb.setChecked(False)
@@ -861,6 +1034,7 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self._set_transport_enabled(True)
         self._notice(f"Restored snapshot at clock {s.clk}")
+        return True
 
     # ---- driving ----
     def _fresh_backend(self, soc=False):
@@ -894,17 +1068,16 @@ class MainWindow(QMainWindow):
     def on_reset(self):
         self.stop_run()
         if self.snapshot_prefix:
-            self.load_snapshot(self.snapshot_prefix)
-            return
+            return bool(self.load_snapshot(self.snapshot_prefix))
         if self.image_bytes is None:
-            return
+            return False
         soc = self.soc_cb.isChecked()
         system = self.sys_cb.isChecked() or soc      # SoC always boots system mode
         if system and self.image_kind == "ELF":
             QMessageBox.warning(self, "ELF is a user-mode program",
                                 "System/SoC boot expects a raw BIOS image. Untick system "
                                 "and SoC to run this ELF at its entry point.")
-            return
+            return False
         entry = esp = load = None
         if not system:
             entry = _parse_hex(self.entry_e)
@@ -924,14 +1097,14 @@ class MainWindow(QMainWindow):
                     self, "Invalid address",
                     f"{label} must be a 32-bit hexadecimal address "
                     "(for example 0x08048000).")
-                return
+                return False
         # Validate placement while the current backend is still intact.
         if system:
             try:
                 load = _system_load_address(len(self.image_bytes))
             except ValueError as e:
                 QMessageBox.warning(self, "Invalid system image", str(e))
-                return
+                return False
             segments = None
         else:
             # ELF images can have several non-contiguous PT_LOAD segments. A
@@ -943,10 +1116,10 @@ class MainWindow(QMainWindow):
                 _validate_segments(segments)
             except ValueError as e:
                 QMessageBox.warning(self, "Invalid program placement", str(e))
-                return
+                return False
         # fresh model => clean memory
         if not self._fresh_backend(soc=soc):
-            return
+            return False
         soc = self.backend.soc                        # may have fallen back
         if system:
             # -bios placement: the image's LAST byte sits at 0x000FFFFF so the
@@ -972,6 +1145,7 @@ class MainWindow(QMainWindow):
         self._clear_reset_required()
         self._refresh_all()
         self._set_transport_enabled(True)
+        return True
 
     # ---- register pinning (AS-OF a retired instruction) + playhead ----
     def _pin_to(self, n):
@@ -982,6 +1156,11 @@ class MainWindow(QMainWindow):
         prev = next((r for r in recs if r.n == n - 1), None)
         self._pinned_n = n
         self.regs.show_retire(rec, prev)
+        line = self._assembly_source_map.get(int(rec.pc))
+        if line is not None and self.assembly.highlight_pc(rec.pc, line):
+            self.workspace.setTabText(1, f"Assembly · L{line}")
+            self.workspace.setTabToolTip(
+                1, f"Selected PC 0x{int(rec.pc):08x} maps to assembly line {line}")
 
     def _unpin(self):
         if getattr(self, "_pinned_n", None) is not None:
@@ -996,11 +1175,24 @@ class MainWindow(QMainWindow):
         cur = plot.playhead
         if cur is None:                         # no playhead yet: start at an edge
             cur = plot.base_cyc - 1 if direction > 0 else plot.max_cyc + 1
-        cyc = self.pipeline.spark.next_event(cur, direction)
+        event_code = self.event_kind.currentData()
+        cyc = self.pipeline.spark.next_event(cur, direction, event_code)
         if cyc is not None:
             self.pipeline.highlight_cycle(cyc)
+            label = self.event_kind.currentText()
+            self._notice(
+                f"{'Next' if direction > 0 else 'Previous'} {label} event "
+                f"at cycle {cyc}")
         else:
-            self._notice("No pipeline event in the captured timeline")
+            label = (
+                "pipeline event"
+                if event_code == "any" else self.event_kind.currentText())
+            where = "later" if direction > 0 else "earlier"
+            if not self.pipeline.spark.ev:
+                self._notice("No captured cycle history yet")
+            else:
+                self._notice(
+                    f"No {where} {label} in the captured timeline")
 
     def do_step(self, n, stop_on_retire):
         if not self._has_session():

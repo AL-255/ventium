@@ -1,0 +1,1017 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+"""Integrated assembly/C authoring workbenches for pipeviz."""
+from dataclasses import dataclass
+from pathlib import Path
+import os
+import re
+import shutil
+import subprocess
+
+from PySide6.QtCore import Qt, QRect, QSize, Signal, QRegularExpression
+from PySide6.QtGui import (
+    QColor, QFont, QFontMetrics, QGuiApplication, QKeySequence, QPainter, QShortcut,
+    QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextFormat,
+)
+from PySide6.QtWidgets import (
+    QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QListWidget,
+    QListWidgetItem, QPlainTextEdit, QPushButton, QSizePolicy, QSplitter,
+    QTextEdit, QToolButton, QVBoxLayout, QWidget,
+)
+
+from .isa_catalog import CATALOG, MNEMONICS, instruction_info
+
+
+_TOOL_DIR = Path(__file__).resolve().parent.parent
+_GENERATED_DIR = _TOOL_DIR / ".generated"
+_ENTRY = 0x08048000
+
+
+def _mono(size=10, bold=False):
+    font = QFont("monospace")
+    font.setStyleHint(QFont.Monospace)
+    font.setPointSize(size)
+    font.setBold(bold)
+    return font
+
+
+class _LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+
+    def sizeHint(self):
+        return QSize(self.editor.line_number_area_width(), 0)
+
+    def paintEvent(self, event):
+        self.editor.paint_line_numbers(event)
+
+
+class CodeEditor(QPlainTextEdit):
+    """Monospace editor with line numbers and independent execution/error marks."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFont(_mono(10))
+        self.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.setTabStopDistance(QFontMetrics(self.font()).horizontalAdvance(" ") * 4)
+        self.setCenterOnScroll(True)
+        self._line_area = _LineNumberArea(self)
+        self._execution_line = None
+        self._error_line = None
+        self._execution_tip = ""
+        self.blockCountChanged.connect(self._update_line_area_width)
+        self.updateRequest.connect(self._update_line_area)
+        self.cursorPositionChanged.connect(self._refresh_selections)
+        self._update_line_area_width()
+        self._refresh_selections()
+
+    def line_number_area_width(self):
+        digits = max(2, len(str(max(1, self.blockCount()))))
+        return 12 + QFontMetrics(self.font()).horizontalAdvance("9") * digits
+
+    def _update_line_area_width(self, _count=0):
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def _update_line_area(self, rect, dy):
+        if dy:
+            self._line_area.scroll(0, dy)
+        else:
+            self._line_area.update(0, rect.y(), self._line_area.width(), rect.height())
+        if rect.contains(self.viewport().rect()):
+            self._update_line_area_width()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self._line_area.setGeometry(
+            QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
+
+    def paint_line_numbers(self, event):
+        painter = QPainter(self._line_area)
+        painter.fillRect(event.rect(), QColor("#0b0f14"))
+        block = self.firstVisibleBlock()
+        number = block.blockNumber()
+        top = round(self.blockBoundingGeometry(block).translated(
+            self.contentOffset()).top())
+        bottom = top + round(self.blockBoundingRect(block).height())
+        fm = QFontMetrics(self.font())
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                line = number + 1
+                if line == self._error_line:
+                    color = QColor("#f85149")
+                elif line == self._execution_line:
+                    color = QColor("#7ce0e8")
+                elif line == self.textCursor().blockNumber() + 1:
+                    color = QColor("#c9d1d9")
+                else:
+                    color = QColor("#586069")
+                painter.setPen(color)
+                painter.drawText(
+                    0, top, self._line_area.width() - 6, fm.height(),
+                    Qt.AlignRight, str(line))
+            block = block.next()
+            top = bottom
+            bottom = top + round(self.blockBoundingRect(block).height())
+            number += 1
+
+    def _selection(self, line, color, full_width=True):
+        if line is None or line < 1 or line > self.blockCount():
+            return None
+        sel = QTextEdit.ExtraSelection()
+        cursor = QTextCursor(self.document().findBlockByNumber(line - 1))
+        sel.cursor = cursor
+        sel.format.setBackground(QColor(color))
+        if full_width:
+            sel.format.setProperty(QTextFormat.FullWidthSelection, True)
+        return sel
+
+    def _refresh_selections(self):
+        selections = []
+        current = self._selection(
+            self.textCursor().blockNumber() + 1, "#121a24")
+        if current is not None:
+            selections.append(current)
+        execution = self._selection(self._execution_line, "#10313a")
+        if execution is not None:
+            execution.format.setProperty(QTextFormat.OutlinePen, QColor("#39c5cf"))
+            selections.append(execution)
+        error = self._selection(self._error_line, "#351418")
+        if error is not None:
+            error.format.setProperty(QTextFormat.OutlinePen, QColor("#f85149"))
+            selections.append(error)
+        self.setExtraSelections(selections)
+        self._line_area.update()
+
+    def mark_execution_line(self, line, tooltip=""):
+        self._execution_line = int(line) if line else None
+        self._execution_tip = tooltip
+        self._refresh_selections()
+        if self._execution_line:
+            cursor = QTextCursor(
+                self.document().findBlockByNumber(self._execution_line - 1))
+            self.setTextCursor(cursor)
+            self.centerCursor()
+            self.setToolTip(tooltip)
+        else:
+            self.setToolTip("")
+
+    def mark_error_line(self, line):
+        self._error_line = int(line) if line else None
+        self._refresh_selections()
+        if self._error_line:
+            cursor = QTextCursor(
+                self.document().findBlockByNumber(self._error_line - 1))
+            self.setTextCursor(cursor)
+            self.centerCursor()
+
+    def clear_marks(self):
+        self._execution_line = None
+        self._error_line = None
+        self.setToolTip("")
+        self._refresh_selections()
+
+
+def _fmt(color, bold=False, italic=False):
+    out = QTextCharFormat()
+    out.setForeground(QColor(color))
+    out.setFontWeight(QFont.Bold if bold else QFont.Normal)
+    out.setFontItalic(italic)
+    return out
+
+
+class AssemblyHighlighter(QSyntaxHighlighter):
+    def __init__(self, document):
+        super().__init__(document)
+        mnemonic_pattern = "|".join(
+            re.escape(word) for word in sorted(MNEMONICS, key=len, reverse=True))
+        registers = (
+            r"(?:e?[abcd]x|e?(?:si|di|sp|bp)|[abcd][lh]|"
+            r"[cdefgs]s|cr[0-4]|dr[0-7]|st(?:\([0-7]\))?)")
+        self.rules = [
+            (QRegularExpression(r"^\s*[.$A-Za-z_][\w.$]*:"), _fmt("#d2a8ff", True)),
+            (QRegularExpression(r"^\s*\.[A-Za-z_][\w.]*"), _fmt("#ff7b72")),
+            (QRegularExpression(
+                rf"\b(?:{mnemonic_pattern})\b",
+                QRegularExpression.CaseInsensitiveOption), _fmt("#79c0ff", True)),
+            (QRegularExpression(
+                rf"\b{registers}\b",
+                QRegularExpression.CaseInsensitiveOption), _fmt("#56d364")),
+            (QRegularExpression(r"\b(?:0x[0-9a-fA-F]+|[0-9]+)\b"), _fmt("#f2cc60")),
+            (QRegularExpression(r"[\[\]+*,:-]"), _fmt("#8b949e")),
+            (QRegularExpression(r"[#;].*$"), _fmt("#6e7681", italic=True)),
+        ]
+
+    def highlightBlock(self, text):
+        for pattern, form in self.rules:
+            it = pattern.globalMatch(text)
+            while it.hasNext():
+                match = it.next()
+                self.setFormat(match.capturedStart(), match.capturedLength(), form)
+
+
+class CHighlighter(QSyntaxHighlighter):
+    _KEYWORDS = (
+        "auto break case char const continue default do double else enum extern "
+        "float for goto if inline int long register restrict return short signed "
+        "sizeof static struct switch typedef union unsigned void volatile while "
+        "_Bool _Alignas _Alignof"
+    ).split()
+
+    def __init__(self, document):
+        super().__init__(document)
+        words = "|".join(self._KEYWORDS)
+        self.rules = [
+            (QRegularExpression(rf"\b(?:{words})\b"), _fmt("#ff7b72", True)),
+            (QRegularExpression(r"\b[A-Za-z_]\w*(?=\s*\()"), _fmt("#d2a8ff")),
+            (QRegularExpression(
+                r"\b(?:0[xX][0-9a-fA-F]+|[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?)\b"),
+             _fmt("#f2cc60")),
+            (QRegularExpression(r'"(?:\\.|[^"\\])*"'), _fmt("#a5d6ff")),
+            (QRegularExpression(r"'(?:\\.|[^'\\])+'"), _fmt("#a5d6ff")),
+            (QRegularExpression(r"^\s*#.*$"), _fmt("#79c0ff")),
+            (QRegularExpression(r"//.*$"), _fmt("#6e7681", italic=True)),
+        ]
+        self.comment = _fmt("#6e7681", italic=True)
+
+    def highlightBlock(self, text):
+        for pattern, form in self.rules:
+            it = pattern.globalMatch(text)
+            while it.hasNext():
+                match = it.next()
+                self.setFormat(match.capturedStart(), match.capturedLength(), form)
+        self.setCurrentBlockState(0)
+        start = 0 if self.previousBlockState() == 1 else text.find("/*")
+        while start >= 0:
+            end = text.find("*/", start + 2)
+            if end < 0:
+                self.setCurrentBlockState(1)
+                length = len(text) - start
+            else:
+                length = end - start + 2
+            self.setFormat(start, length, self.comment)
+            if end < 0:
+                break
+            start = text.find("/*", start + length)
+
+
+class InstructionPipelinePreview(QWidget):
+    """Small AP-500-style preview used both persistently and in completion."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.info = None
+        self.setMinimumHeight(105)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_instruction(self, info):
+        self.info = info
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#0b0f14"))
+        if self.info is None:
+            painter.setPen(QColor("#586069"))
+            painter.setFont(_mono(9))
+            painter.drawText(self.rect(), Qt.AlignCenter, "Place the cursor on an opcode")
+            return
+        info = self.info
+        colors = {
+            "F": "#4a9eff", "D": "#39c5cf", "X": "#3fb950", "M": "#f0883e",
+            "W": "#7d8fc9", "S": "#a87f55", "FP": "#bc8cff", "=": "#7a828d",
+            "!": "#f85149", ".": "#6e7681",
+        }
+        painter.setFont(_mono(8, True))
+        painter.setPen(QColor("#8b949e"))
+        painter.drawText(QRect(4, 3, 48, 16), Qt.AlignVCenter, "lane")
+        lane = {
+            "UV": "U or V (pairable)",
+            "PU": "U; may lead a pair",
+            "PV": "V slot / branch",
+            "NP": "U; non-pairable",
+            "FP": "x87 FP lane",
+            "SYS": "system / microcode",
+        }.get(info.pipe, info.pipe)
+        painter.setPen(QColor("#e6edf3"))
+        painter.drawText(QRect(52, 3, self.width() - 56, 16), Qt.AlignVCenter, lane)
+        x, y, cell_h = 5, 27, 26
+        stages = info.stages or ("F", "D", "X")
+        cell_w = max(34, min(62, (self.width() - 10) // max(1, len(stages))))
+        for stage in stages:
+            rect = QRect(x, y, cell_w - 3, cell_h)
+            painter.fillRect(rect, QColor(colors.get(stage, "#6e7681")))
+            painter.setPen(QColor("#0d1117"))
+            painter.drawText(rect, Qt.AlignCenter, stage)
+            x += cell_w
+        painter.setPen(QColor("#8b949e"))
+        painter.setFont(_mono(8))
+        painter.drawText(
+            QRect(5, 62, self.width() - 10, 36),
+            Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap,
+            f"{info.pipe} · {info.latency}")
+
+
+class InstructionInfoPane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
+        self.signature = QLabel("Instruction preview")
+        self.signature.setStyleSheet("font-weight:bold;color:#e6edf3;")
+        self.signature.setWordWrap(True)
+        self.description = QLabel(
+            "Place the cursor on an opcode or open completion with Ctrl+Space.")
+        self.description.setWordWrap(True)
+        self.description.setStyleSheet("color:#9aa3ad;")
+        self.availability = QLabel("")
+        self.availability.setWordWrap(True)
+        self.availability.setStyleSheet("color:#e3b341;font-size:9px;")
+        self.preview = InstructionPipelinePreview()
+        layout.addWidget(self.signature)
+        layout.addWidget(self.description)
+        layout.addWidget(self.availability)
+        layout.addWidget(self.preview)
+        layout.addStretch(1)
+
+    def set_instruction(self, info):
+        self.preview.set_instruction(info)
+        if info is None:
+            self.signature.setText("Instruction preview")
+            self.description.setText(
+                "Place the cursor on an opcode or open completion with Ctrl+Space.")
+            self.availability.setText("")
+            return
+        self.signature.setText(info.signature)
+        self.description.setText(info.description)
+        self.availability.setText(
+            f"{info.pipe} · {info.latency} · availability: {info.availability}")
+
+
+class CompletionPopup(QFrame):
+    accepted = Signal(str)
+
+    def __init__(self, editor):
+        super().__init__(None, Qt.ToolTip)
+        self.editor = editor
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setStyleSheet(
+            "QFrame{background:#161b22;border:1px solid #484f58;}"
+            "QListWidget{border:0;background:#0d1117;}"
+            "QListWidget::item{padding:3px;}"
+            "QListWidget::item:selected{background:#1f6feb;color:white;}")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(1, 1, 1, 1)
+        layout.setSpacing(0)
+        self.list = QListWidget()
+        self.list.setFixedWidth(285)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.setTextElideMode(Qt.ElideRight)
+        self.info = InstructionInfoPane()
+        self.info.setMinimumWidth(330)
+        layout.addWidget(self.list)
+        layout.addWidget(self.info, 1)
+        self.resize(650, 235)
+        self.list.currentItemChanged.connect(self._current_changed)
+        self.list.itemDoubleClicked.connect(lambda _item: self.accept_current())
+
+    def _current_changed(self, current, _previous):
+        self.info.set_instruction(current.data(Qt.UserRole) if current else None)
+
+    def show_for(self, prefix):
+        prefix = (prefix or "").lower()
+        matches = [
+            info for info in CATALOG
+            if not prefix or info.mnemonic.startswith(prefix)
+        ]
+        self.list.clear()
+        for info in matches:
+            item = QListWidgetItem(
+                f"{info.mnemonic:<10}  {info.pipe:<3}  {info.signature}")
+            item.setData(Qt.UserRole, info)
+            item.setToolTip(info.description)
+            self.list.addItem(item)
+        if not matches:
+            self.hide()
+            return
+        self.list.setCurrentRow(0)
+        cursor_rect = self.editor.cursorRect()
+        below = self.editor.mapToGlobal(cursor_rect.bottomLeft())
+        above = self.editor.mapToGlobal(cursor_rect.topLeft())
+        screen = QGuiApplication.screenAt(below) or QGuiApplication.primaryScreen()
+        pos = below
+        if screen is not None:
+            available = screen.availableGeometry()
+            width, height = self.width(), self.height()
+            x = max(
+                available.left(),
+                min(below.x(), available.right() - width + 1))
+            y = below.y()
+            if y + height - 1 > available.bottom():
+                y = above.y() - height
+            y = max(
+                available.top(),
+                min(y, available.bottom() - height + 1))
+            pos.setX(x)
+            pos.setY(y)
+        self.move(pos)
+        self.show()
+
+    def move_selection(self, delta):
+        if not self.isVisible() or self.list.count() == 0:
+            return
+        self.list.setCurrentRow(
+            max(0, min(self.list.count() - 1, self.list.currentRow() + delta)))
+
+    def accept_current(self):
+        item = self.list.currentItem()
+        if item is not None:
+            self.accepted.emit(item.data(Qt.UserRole).mnemonic)
+        self.hide()
+
+
+class AssemblyEditor(CodeEditor):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.highlighter = AssemblyHighlighter(self.document())
+        self.completion = CompletionPopup(self)
+        self.completion.accepted.connect(self._insert_completion)
+        self._completion_span = None
+
+    def _word_prefix(self):
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.WordUnderCursor)
+        return cursor.selectedText()
+
+    def _opcode_prefix(self):
+        """Return the mnemonic prefix only when the cursor is in opcode position."""
+        cursor = self.textCursor()
+        before = cursor.block().text()[:cursor.positionInBlock()]
+        comment = re.search(r"[#;]", before)
+        if comment is not None:
+            return None
+        word = re.search(r"([A-Za-z]\w*)$", before)
+        prefix = word.group(1) if word else ""
+        stem = before[:word.start()] if word else before
+        context = re.fullmatch(
+            r"\s*(?:[.$A-Za-z_][\w.$]*:\s*)?"
+            r"(?:(?:lock|rep|repe|repz|repne|repnz)\s+)*",
+            stem, re.IGNORECASE)
+        return prefix if context else None
+
+    def request_completion(self, force=False):
+        prefix = self._opcode_prefix()
+        cursor = self.textCursor()
+        if prefix is None:
+            if not force:
+                self.completion.hide()
+                return False
+            prefix = ""
+            self._completion_span = (cursor.position(), cursor.position())
+        else:
+            self._completion_span = (
+                cursor.position() - len(prefix), cursor.position())
+        self.completion.show_for(prefix)
+        return self.completion.isVisible()
+
+    def _insert_completion(self, mnemonic):
+        if self._completion_span is None:
+            cursor = self.textCursor()
+            cursor.select(QTextCursor.WordUnderCursor)
+        else:
+            start, end = self._completion_span
+            cursor = QTextCursor(self.document())
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.KeepAnchor)
+        cursor.insertText(mnemonic)
+        if not self.toPlainText()[cursor.position():cursor.position() + 1].isspace():
+            cursor.insertText(" ")
+        self.setTextCursor(cursor)
+        self._completion_span = None
+
+    def keyPressEvent(self, event):
+        if self.completion.isVisible():
+            if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown):
+                delta = {
+                    Qt.Key_Up: -1, Qt.Key_Down: 1,
+                    Qt.Key_PageUp: -8, Qt.Key_PageDown: 8,
+                }[event.key()]
+                self.completion.move_selection(delta)
+                event.accept()
+                return
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):
+                self.completion.accept_current()
+                event.accept()
+                return
+            if event.key() == Qt.Key_Escape:
+                self.completion.hide()
+                event.accept()
+                return
+        if (event.modifiers() & Qt.ControlModifier
+                and event.key() == Qt.Key_Space):
+            self.request_completion(force=True)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+        if event.text().isalpha():
+            prefix = self._word_prefix()
+            if len(prefix) >= 2:
+                self.request_completion()
+        elif self.completion.isVisible() and event.key() not in (
+                Qt.Key_Shift, Qt.Key_Control):
+            self.completion.hide()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        if not self.completion.underMouse():
+            self.completion.hide()
+
+
+@dataclass
+class AssemblyBuild:
+    elf_path: str
+    source_map: dict
+    log: str
+
+
+class BuildFailure(RuntimeError):
+    def __init__(self, message, line=None):
+        super().__init__(message)
+        self.line = line
+
+
+def _require_tool(name):
+    path = shutil.which(name)
+    if path is None:
+        raise BuildFailure(
+            f"Required tool '{name}' was not found in PATH. Install GNU binutils/GCC.")
+    return path
+
+
+def _run_tool(command, timeout=20):
+    try:
+        proc = subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, "LC_ALL": "C"})
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise BuildFailure(str(error)) from error
+    output = (proc.stdout + proc.stderr).strip()
+    if proc.returncode:
+        line = None
+        match = re.search(r":(\d+):(?:\d+:)?\s*(?:Error|error):", output)
+        if match:
+            line = int(match.group(1))
+        raise BuildFailure(output or f"{command[0]} exited with {proc.returncode}", line)
+    return output
+
+
+def _source_map(elf_path, source_name, prefix_lines, source_lines):
+    objdump = _require_tool("objdump")
+    decoded = _run_tool(
+        [objdump, "--dwarf=decodedline", str(elf_path)])
+    result = {}
+    base = os.path.basename(source_name)
+    # GNU objdump decoded-line rows are:
+    #   assembly.s            12          0x8048005
+    row_re = re.compile(
+        rf"^\s*{re.escape(base)}\s+(\d+)\s+0x([0-9a-fA-F]+)\b")
+    for row in decoded.splitlines():
+        match = row_re.match(row)
+        if not match:
+            continue
+        generated_line = int(match.group(1))
+        source_line = generated_line - prefix_lines
+        if 1 <= source_line <= source_lines:
+            result[int(match.group(2), 16)] = source_line
+    return result
+
+
+def assemble_source(source):
+    """Assemble/link editor text and return ELF path plus PC→editor-line map."""
+    _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    assembler = _require_tool("as")
+    linker = _require_tool("ld")
+    source_path = _GENERATED_DIR / "assembly.s"
+    object_path = _GENERATED_DIR / "assembly.o"
+    elf_path = _GENERATED_DIR / "assembly.elf"
+
+    original = source.rstrip() + "\n"
+    prefix = []
+    if not re.search(r"(?im)^\s*\.intel_syntax\b", original):
+        prefix.append(".intel_syntax noprefix")
+    auto_start = not re.search(r"(?im)^\s*_start\s*:", original)
+    if auto_start:
+        prefix.extend((".section .text", ".global _start", "_start:"))
+    # A bare instruction snippet should be safe to run without making the user
+    # learn ELF boilerplate first. Its synthesized fall-through HLT is outside
+    # the editor mapping; complete sources with an explicit _start stay exact.
+    suffix = ["hlt"] if auto_start else []
+    body = "\n".join(prefix + [original.rstrip()] + suffix + [""]) + "\n"
+    source_path.write_text(body, encoding="utf-8")
+    try:
+        as_log = _run_tool([
+            assembler, "--32", "--gdwarf-5", "--noexecstack",
+            "-o", str(object_path), str(source_path),
+        ])
+    except BuildFailure as error:
+        line = error.line - len(prefix) if error.line else None
+        raise BuildFailure(str(error), line if line and line > 0 else None) from error
+    ld_log = _run_tool([
+        linker, "-m", "elf_i386", "-Ttext", f"0x{_ENTRY:08x}",
+        "-e", "_start", "-o", str(elf_path), str(object_path),
+    ])
+    mapping = _source_map(
+        elf_path, source_path.name, len(prefix), len(original.splitlines()))
+    if not mapping:
+        raise BuildFailure(
+            "Assembly succeeded, but no PC-to-source line table was generated.")
+    return AssemblyBuild(str(elf_path), mapping, "\n".join(
+        part for part in (as_log, ld_log, f"Built {elf_path}") if part))
+
+
+def compile_c_source(source, optimization="-O2"):
+    """Compile freestanding 32-bit C to editable GNU Intel assembly text."""
+    _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    compiler = _require_tool("gcc")
+    source_path = _GENERATED_DIR / "program.c"
+    asm_path = _GENERATED_DIR / "program-from-c.s"
+    source_path.write_text(source.rstrip() + "\n", encoding="utf-8")
+    command = [
+        compiler, "-m32", "-march=pentium", "-mtune=pentium",
+        optimization, "-ffreestanding", "-fno-pic", "-fno-pie",
+        "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
+        "-fno-ident", "-masm=intel", "-S",
+        "-o", str(asm_path), str(source_path),
+    ]
+    try:
+        log = _run_tool(command)
+    except BuildFailure as error:
+        raise BuildFailure(str(error), error.line) from error
+    assembly = asm_path.read_text(encoding="utf-8")
+    if not re.search(r"(?m)^main:\s*$", assembly):
+        raise BuildFailure(
+            "Compilation produced no 'main' symbol. Define int main(void) as the entry.")
+    wrapper = """
+
+# pipeviz freestanding entry wrapper
+.section .text
+.global _start
+.type _start, @function
+_start:
+    call main
+    hlt
+.size _start, .-_start
+"""
+    return assembly.rstrip() + wrapper, log or "Compiled C to GNU Intel assembly"
+
+
+_ASM_TEMPLATE = """.intel_syntax noprefix
+.section .text
+.global _start
+_start:
+    mov eax, 0
+    mov ecx, 10
+.sum:
+    add eax, ecx
+    dec ecx
+    jnz .sum
+    hlt
+"""
+
+_C_TEMPLATE = """/* Freestanding 32-bit C: no libc; main returns into pipeviz's HLT wrapper. */
+volatile unsigned result;
+
+int main(void)
+{
+    unsigned a = 0, b = 1;
+    for (unsigned i = 0; i < 12; ++i) {
+        unsigned next = a + b;
+        a = b;
+        b = next;
+    }
+    result = a;
+    return (int)a;
+}
+"""
+
+
+class _Diagnostics(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setFont(_mono(8))
+        self.setMaximumBlockCount(1000)
+        self.setPlaceholderText("Build diagnostics appear here.")
+        self.setStyleSheet("color:#8b949e;background:#0b0f14;")
+
+    def success(self, text):
+        self.setStyleSheet("color:#3fb950;background:#0b0f14;")
+        self.setPlainText(text)
+
+    def failure(self, text):
+        self.setStyleSheet("color:#ff7b72;background:#0b0f14;")
+        self.setPlainText(text)
+
+
+class AssemblyView(QWidget):
+    runRequested = Signal(str, object)
+    statusChanged = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(5)
+        controls = QHBoxLayout()
+        title = QLabel("Assembly workbench")
+        title.setStyleSheet("font-size:14px;font-weight:bold;")
+        controls.addWidget(title)
+        dialect = QLabel("GNU Intel syntax · 32-bit P54C")
+        dialect.setStyleSheet("color:#8b949e;")
+        controls.addWidget(dialect)
+        controls.addStretch(1)
+        self.template_btn = QPushButton("New template")
+        self.open_btn = QPushButton("Open…")
+        self.save_btn = QPushButton("Save as…")
+        self.complete_btn = QPushButton("Complete")
+        self.complete_btn.setToolTip("Open opcode completion (Ctrl+Space)")
+        self.build_btn = QPushButton("Assemble")
+        self.run_btn = QPushButton("Assemble + Run")
+        self.run_btn.setStyleSheet(
+            "background:#238636;color:white;font-weight:bold;border:1px solid #2ea043;")
+        for button in (
+                self.template_btn, self.open_btn, self.save_btn,
+                self.complete_btn, self.build_btn, self.run_btn):
+            controls.addWidget(button)
+        layout.addLayout(controls)
+
+        split = QSplitter(Qt.Horizontal)
+        self.editor = AssemblyEditor()
+        self.editor.setAccessibleName("Assembly source editor")
+        self.editor.setPlainText(_ASM_TEMPLATE)
+        sidebar = QWidget()
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(4, 0, 0, 0)
+        side.addWidget(QLabel("<b>Instruction preview</b>"))
+        self.info = InstructionInfoPane()
+        side.addWidget(self.info)
+        side.addWidget(QLabel("<b>Build diagnostics</b>"))
+        self.diagnostics = _Diagnostics()
+        side.addWidget(self.diagnostics, 1)
+        split.addWidget(self.editor)
+        split.addWidget(sidebar)
+        split.setStretchFactor(0, 4)
+        split.setStretchFactor(1, 2)
+        split.setSizes([850, 420])
+        layout.addWidget(split, 1)
+        self.status = QLabel(
+            "Ready · Ctrl+Space completes opcodes · Ctrl+Enter assembles and runs")
+        self.status.setStyleSheet("color:#8b949e;padding:2px;")
+        layout.addWidget(self.status)
+
+        self._built_revision = -1
+        self._source_map = {}
+        self._path = None
+        self.editor.cursorPositionChanged.connect(self._cursor_instruction)
+        self.editor.textChanged.connect(self._source_changed)
+        self.template_btn.clicked.connect(self.new_template)
+        self.open_btn.clicked.connect(self.open_source)
+        self.save_btn.clicked.connect(self.save_source)
+        self.complete_btn.clicked.connect(
+            lambda: self.editor.request_completion(force=True))
+        self.build_btn.clicked.connect(lambda: self.build(False))
+        self.run_btn.clicked.connect(lambda: self.build(True))
+        QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
+            lambda: self.build(True))
+        self._cursor_instruction()
+
+    @property
+    def mapping_current(self):
+        return (
+            bool(self._source_map)
+            and self.editor.document().revision() == self._built_revision)
+
+    def _source_changed(self):
+        if self._built_revision >= 0 and not self.mapping_current:
+            self._built_revision = -1
+            self._source_map = {}
+            self.editor.mark_execution_line(None)
+            self.status.setText(
+                "Source changed since the last build — assemble again to refresh PC links")
+            self.status.setStyleSheet("color:#e3b341;padding:2px;")
+            self.statusChanged.emit("Assembly source modified")
+
+    def _cursor_instruction(self):
+        text = self.editor.textCursor().block().text()
+        text = re.sub(r"[#;].*$", "", text)
+        match = re.match(
+            r"^\s*(?:[.$A-Za-z_][\w.$]*:\s*)?"
+            r"(?:(?:lock|rep|repe|repz|repne|repnz)\s+)*([A-Za-z]\w*)",
+            text, re.IGNORECASE)
+        self.info.set_instruction(
+            instruction_info(match.group(1)) if match else None)
+
+    def new_template(self):
+        self._source_map = {}
+        self._built_revision = -1
+        self.editor.setPlainText(_ASM_TEMPLATE)
+        self.editor.clear_marks()
+        self._path = None
+        self.diagnostics.clear()
+        self.status.setText("New assembly template")
+        self.status.setStyleSheet("color:#8b949e;padding:2px;")
+        self.statusChanged.emit("Assembly source replaced")
+
+    def set_source(self, text, origin="generated"):
+        self._source_map = {}
+        self._built_revision = -1
+        self.editor.setPlainText(text)
+        self.editor.clear_marks()
+        self._path = None
+        self.diagnostics.success(f"Loaded assembly from {origin}. Review, edit, then run.")
+        self.status.setText(f"Assembly generated from {origin}")
+        self.status.setStyleSheet("color:#79c0ff;padding:2px;")
+        self.statusChanged.emit("Assembly source replaced")
+
+    def open_source(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open assembly", str(_TOOL_DIR),
+            "Assembly (*.s *.S *.asm);;All files (*)")
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except OSError as error:
+            self.diagnostics.failure(str(error))
+            return
+        self.set_source(text, os.path.basename(path))
+        self._path = path
+
+    def save_source(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save assembly", self._path or str(_TOOL_DIR / "program.s"),
+            "Assembly (*.s);;All files (*)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
+        except OSError as error:
+            self.diagnostics.failure(str(error))
+            return
+        self._path = path
+        self.status.setText(f"Saved {os.path.basename(path)}")
+
+    def build(self, run=False):
+        self.editor.mark_error_line(None)
+        self.status.setText("Assembling and linking…")
+        self.status.setStyleSheet("color:#e3b341;padding:2px;")
+        try:
+            result = assemble_source(self.editor.toPlainText())
+        except BuildFailure as error:
+            self.editor.mark_error_line(error.line)
+            self.diagnostics.failure(str(error))
+            self.status.setText(
+                f"Build failed{f' at line {error.line}' if error.line else ''}")
+            self.status.setStyleSheet("color:#f85149;padding:2px;")
+            self.statusChanged.emit(self.status.text())
+            return None
+        self._source_map = result.source_map
+        self._built_revision = self.editor.document().revision()
+        self.diagnostics.success(
+            f"{result.log}\n{len(result.source_map)} instruction addresses mapped")
+        self.status.setText(
+            f"Build succeeded · {len(result.source_map)} source-linked instructions")
+        self.status.setStyleSheet("color:#3fb950;padding:2px;")
+        self.statusChanged.emit(self.status.text())
+        if run:
+            self.runRequested.emit(result.elf_path, dict(result.source_map))
+        return result
+
+    def highlight_pc(self, pc, line):
+        if not self.mapping_current:
+            return False
+        self.editor.mark_execution_line(
+            line, f"Retired instruction at PC 0x{int(pc):08x} · source line {line}")
+        self.status.setText(f"Selected PC 0x{int(pc):08x} · assembly line {line}")
+        self.status.setStyleSheet("color:#7ce0e8;padding:2px;")
+        return True
+
+
+class CView(QWidget):
+    assemblyGenerated = Signal(str, str)
+    statusChanged = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(5)
+        controls = QHBoxLayout()
+        title = QLabel("Freestanding C workbench")
+        title.setStyleSheet("font-size:14px;font-weight:bold;")
+        controls.addWidget(title)
+        note = QLabel("32-bit Pentium · no libc")
+        note.setStyleSheet("color:#8b949e;")
+        controls.addWidget(note)
+        controls.addStretch(1)
+        self.template_btn = QPushButton("New template")
+        self.open_btn = QPushButton("Open…")
+        self.save_btn = QPushButton("Save as…")
+        controls.addWidget(self.template_btn)
+        controls.addWidget(self.open_btn)
+        controls.addWidget(self.save_btn)
+        controls.addWidget(QLabel(" optimization "))
+        self.optimization = QComboBox()
+        self.optimization.addItems(["-O0", "-O1", "-O2", "-Os"])
+        self.optimization.setCurrentText("-O2")
+        controls.addWidget(self.optimization)
+        self.compile_btn = QPushButton("Compile → Assembly")
+        self.compile_btn.setStyleSheet(
+            "background:#1f6feb;color:white;font-weight:bold;border:1px solid #388bfd;")
+        controls.addWidget(self.compile_btn)
+        layout.addLayout(controls)
+
+        split = QSplitter(Qt.Vertical)
+        self.editor = CodeEditor()
+        self.editor.setAccessibleName("C source editor")
+        self.highlighter = CHighlighter(self.editor.document())
+        self.editor.setPlainText(_C_TEMPLATE)
+        self.diagnostics = _Diagnostics()
+        self.diagnostics.setMaximumHeight(165)
+        split.addWidget(self.editor)
+        split.addWidget(self.diagnostics)
+        split.setStretchFactor(0, 5)
+        split.setStretchFactor(1, 1)
+        layout.addWidget(split, 1)
+        self.status = QLabel(
+            "Define int main(void); Compile emits editable GNU Intel assembly")
+        self.status.setStyleSheet("color:#8b949e;padding:2px;")
+        layout.addWidget(self.status)
+        self._path = None
+
+        self.template_btn.clicked.connect(self.new_template)
+        self.open_btn.clicked.connect(self.open_source)
+        self.save_btn.clicked.connect(self.save_source)
+        self.compile_btn.clicked.connect(self.compile)
+        QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
+            self.compile)
+
+    def new_template(self):
+        self.editor.setPlainText(_C_TEMPLATE)
+        self.editor.clear_marks()
+        self._path = None
+        self.diagnostics.clear()
+        self.status.setText("New freestanding C template")
+
+    def open_source(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open C source", str(_TOOL_DIR),
+            "C source (*.c *.h);;All files (*)")
+        if not path:
+            return
+        try:
+            self.editor.setPlainText(Path(path).read_text(encoding="utf-8"))
+        except OSError as error:
+            self.diagnostics.failure(str(error))
+            return
+        self._path = path
+        self.editor.clear_marks()
+        self.status.setText(f"Opened {os.path.basename(path)}")
+
+    def save_source(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save C source", self._path or str(_TOOL_DIR / "program.c"),
+            "C source (*.c);;All files (*)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
+        except OSError as error:
+            self.diagnostics.failure(str(error))
+            return
+        self._path = path
+        self.status.setText(f"Saved {os.path.basename(path)}")
+
+    def compile(self):
+        self.editor.mark_error_line(None)
+        self.status.setText("Compiling C to assembly…")
+        self.status.setStyleSheet("color:#e3b341;padding:2px;")
+        try:
+            assembly, log = compile_c_source(
+                self.editor.toPlainText(), self.optimization.currentText())
+        except BuildFailure as error:
+            self.editor.mark_error_line(error.line)
+            self.diagnostics.failure(str(error))
+            self.status.setText(
+                f"Compile failed{f' at line {error.line}' if error.line else ''}")
+            self.status.setStyleSheet("color:#f85149;padding:2px;")
+            self.statusChanged.emit(self.status.text())
+            return None
+        self.diagnostics.success(log)
+        self.status.setText("Compiled successfully · assembly tab is ready")
+        self.status.setStyleSheet("color:#3fb950;padding:2px;")
+        self.statusChanged.emit(self.status.text())
+        self.assemblyGenerated.emit(assembly, self.optimization.currentText())
+        return assembly

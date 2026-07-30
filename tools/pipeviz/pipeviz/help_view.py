@@ -79,7 +79,12 @@ run of stall cells means one instruction held resources for several cycles.</p>
 <p>Click a row to place the cyan playhead, synchronize the Trace, pin Registers
 after that retirement, and draw producer-to-consumer edges. An amber thick edge
 marks a gating dependency such as a load-use stall. Shift-click another row to
-place an amber anchor and measure the cycle delta.</p>
+place an amber anchor and measure the cycle delta. Use Up/Down, Page Up/Down,
+Home, and End while the diagram has focus to select exact retirements. The cycle
+zoom buttons (or Ctrl+- / Ctrl+=) trade context for cell detail without losing
+the selected cycle.</p>
+<p>The event selector beside ◀/▶ narrows <code>[</code>/<code>]</code>
+navigation to any event, mispredicts, stalls, I-cache fills, or page walks.</p>
 <h2>Examples</h2>
 <ul>
  <li><b>Dual Fibonacci:</b> two independent recurrence chains let adjacent
@@ -93,6 +98,35 @@ place an amber anchor and measure the cycle delta.</p>
  <li><b>mb_fpindep:</b> purple FP execution cells show x87 overlap. Pin an
  <code>fadd</code> to inspect its post-retirement x87 stack.</li>
 </ul>
+"""),
+    ("Assembly and C workbenches", """
+<h1>Assembly and C workbenches</h1>
+<h2>Assembly → RTL</h2>
+<p>Open the <b>Assembly</b> workspace (Alt+A) for a line-numbered, highlighted
+GNU Intel-syntax editor. <b>Assemble + Run</b> invokes GNU <code>as</code> and
+<code>ld</code>, creates a 32-bit ELF at <code>0x08048000</code>, and loads it
+into the same real RTL backend as an opened program. Ctrl+Enter is the keyboard
+equivalent. A bare instruction snippet is automatically wrapped in
+<code>.intel_syntax</code>, <code>_start</code>, and a fall-through HLT; an
+explicit <code>_start:</code> is assembled exactly as written.</p>
+<p>Ctrl+Space opens the Ventium/P54C opcode catalogue. Every entry includes its
+operand form, description, availability, estimated latency, U/V pairing class,
+and a miniature F→D→X/M/W/FP pipeline preview. Mode- or build-gated operations
+say so explicitly. Build errors highlight their source line.</p>
+<h2>Source-linked investigation</h2>
+<p>Assembly is built with a DWARF line table. Clicking a Trace or Pipeline row
+therefore marks the exact assembly line for that PC; the Assembly tab displays
+its line number without stealing focus from the Visualizer. Editing after a
+build invalidates that map until the next assembly, preventing stale links.</p>
+<h2>C → editable assembly</h2>
+<p>Open <b>C</b> (Alt+C), write a freestanding
+<code>int main(void)</code>, choose O0/O1/O2/Os, then click
+<b>Compile → Assembly</b>. Pipeviz uses GCC's 32-bit Pentium target with no
+libc, adds a small <code>_start</code>/HLT wrapper, and opens the generated
+Intel-syntax source in Assembly. Review or edit it before running. Compiler
+errors also highlight their C line.</p>
+<p>Generated artifacts stay under <code>tools/pipeviz/.generated/</code> and
+are ignored by Git.</p>
 """),
     ("Trace and filters", """
 <h1>Retired-instruction trace</h1>
@@ -138,16 +172,21 @@ and memory state, not the earlier visual history.</p>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
  <tr><td><b>Ctrl+Shift+R</b></td><td>reload the current program from disk</td></tr>
  <tr><td><b>Ctrl+0</b></td><td>reset panel proportions</td></tr>
+ <tr><td><b>Alt+V / Alt+A / Alt+C</b></td><td>Visualizer / Assembly / C workspace</td></tr>
  <tr><td><b>Alt+1 … Alt+0</b></td><td>select Code$ … Mem map analysis tab</td></tr>
  <tr><td><b>R</b></td><td>reset or restore snapshot</td></tr>
  <tr><td><b>.</b></td><td>one clock</td></tr>
  <tr><td><b>I / Space</b></td><td>next retired instruction</td></tr>
  <tr><td><b>F5</b></td><td>run/pause</td></tr>
- <tr><td><b>[ / ]</b></td><td>previous/next pipeline event</td></tr>
+ <tr><td><b>[ / ]</b></td><td>previous/next selected event class</td></tr>
+ <tr><td><b>Ctrl+- / Ctrl+=</b></td><td>zoom the focused Pipeline cycle axis</td></tr>
+ <tr><td><b>↑/↓, PgUp/PgDn, Home/End</b></td><td>traverse focused Pipeline rows</td></tr>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
  <tr><td><b>Enter / F3</b></td><td>next filtered retirement</td></tr>
  <tr><td><b>Shift+F3</b></td><td>previous filtered retirement</td></tr>
  <tr><td><b>Escape</b></td><td>clear the trace filter</td></tr>
+ <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
+ <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
  <tr><td><b>F1</b></td><td>this guide</td></tr>
 </table>
 <p>Click a trace/timing row to pin it. Shift-click a second timing row to

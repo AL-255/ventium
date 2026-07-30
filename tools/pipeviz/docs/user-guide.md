@@ -40,10 +40,15 @@ BIOS top-alignment, and firmware stack setup determine those values.
 
 Use **Clock** (`.`) for an individual clock, **Insn** (`I` or Space) for the
 next retirement, and **Step N** for a useful analysis window.  `F5` runs and
-pauses; `[` and `]` jump among visible stalls, fills, walks, and mispredicts.
+pauses. Choose an event class (any, mispredict, stall, I-fill, or page-walk);
+`[` and `]` jump among only those visible events.
 Click a trace row or timing cell to pin the registers to that retirement; use
 Shift-click on a second timing row to measure the cycle distance.  `F1` lists
 all shortcuts.
+
+The timing diagram itself is keyboard accessible: Up/Down selects adjacent
+retirements, Page Up/Page Down moves ten rows, and Home/End reaches the capture
+edges. `Ctrl+-` and `Ctrl+=` zoom the cycle axis around the selected cycle.
 
 The register bank automatically changes from three simultaneous columns to
 indexed **Integer / Segments / x87** pages when the right pane becomes narrow.
@@ -61,6 +66,76 @@ the mouse.
 Large steps remain bounded and honest: Trace labels its newest 6,000
 retirements, Pipeline labels its newest 50,000-cycle window, and the compact
 IPC strip retains the newest 12,000 cycles.
+
+## Write and run an assembly experiment
+
+Select the **Assembly** workspace (`Alt+A`). The initial GNU Intel-syntax
+template is immediately runnable:
+
+```asm
+.intel_syntax noprefix
+.section .text
+.global _start
+_start:
+    mov eax, 0
+    mov ecx, 10
+.sum:
+    add eax, ecx
+    dec ecx
+    jnz .sum
+    hlt
+```
+
+**Assemble** checks and links the source; **Assemble + Run** (`Ctrl+Enter`)
+also loads the resulting ELF into the Visualizer. Diagnostics name and
+highlight the failing line. `Ctrl+Space` opens completion over the complete
+Ventium/P54C mnemonic catalogue. Selecting an entry shows its operand form,
+description, mode/build availability, approximate latency, pairing class
+(`UV`, `PU`, `PV`, `NP`, `FP`, or `SYS`), and a miniature stage diagram.
+A bare list of instructions is also accepted: pipeviz supplies Intel-syntax,
+`_start`, and a fall-through HLT boilerplate. A source that declares its own
+`_start:` remains exact.
+
+The assembler emits a DWARF line table. After running, click any authored
+instruction in Trace or the Pipeline view: the Assembly tab becomes
+**Assembly · L…** and that exact source line is highlighted. U and V
+retirements sharing a cycle retain separate line identities. Editing the
+source invalidates the old map until it is assembled again, so a stale build
+cannot highlight the wrong line.
+
+GNU `as`, `ld`, and `objdump` must be available in `PATH`. Generated source,
+object, and ELF files stay in `tools/pipeviz/.generated/`, which Git ignores.
+
+## Compile C into editable assembly
+
+Select **C** (`Alt+C`) and write a freestanding `int main(void)`. Standard
+library calls and hosted headers are intentionally unavailable; the point is a
+small, inspectable microarchitecture experiment. Choose `-O0`, `-O1`, `-O2`,
+or `-Os`, then press **Compile → Assembly** (`Ctrl+Enter`). Pipeviz invokes:
+
+- GCC's 32-bit Pentium target;
+- Intel assembly syntax with SSE/MMX excluded by the P5 target;
+- freestanding, non-PIE, stack-protector-free code; and
+- a tiny `_start` wrapper that calls `main` and halts.
+
+The generated source opens in Assembly rather than running immediately. This
+lets you compare optimization levels, edit scheduling or register choices,
+inspect completion previews, and only then assemble and run it. Compiler errors
+remain in C and highlight their responsible line; assembler errors remain in
+Assembly.
+
+Run the dedicated regression for the entire authoring path:
+
+```sh
+QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
+  tools/pipeviz/verify_authoring.py
+```
+
+It verifies the 291-mnemonic catalogue against every current RTL decoder family,
+syntax highlighting, opcode-scoped completion and its description/pipeline
+preview, compact layout, transactional load failure, build errors, ELF/DWARF
+mapping, exact U/V source identity, a hand-written assembly result, and
+C → assembly → RTL execution.
 
 ## Worked examples
 

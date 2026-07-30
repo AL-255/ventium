@@ -11,9 +11,10 @@ tool, not merely as a Python import or backend ABI smoke test. It drives actual
 Qt controls, checks linked views and architectural evidence, and visually
 reviews screenshots from complicated workloads.
 
-The repeatable acceptance harness is `tools/pipeviz/verify_interactions.py`.
-It uses `PySide6.QtTest.QTest` for keyboard and mouse interaction and writes
-only temporary ELF/PNG artifacts to its `--out` directory.
+The repeatable acceptance harnesses are `tools/pipeviz/verify_interactions.py`
+and `tools/pipeviz/verify_authoring.py`. They use `PySide6.QtTest.QTest` for
+keyboard and mouse interaction; screenshots go to their `--out` directories,
+while ignored authoring build products stay in `tools/pipeviz/.generated/`.
 
 ## Environment
 
@@ -25,7 +26,7 @@ Review date and timezone: 2026-07-29, America/Detroit.
 | PySide6 | 6.11.1 |
 | Capstone | 5.0.7 |
 | Verilator | 5.046 (2026-02-28) |
-| continuation baseline | `f956912` plus the honest-state/keyboard fixes below |
+| continuation baseline | `11a1afb` plus the authoring/timeline changes below |
 | Qt platform for repeatability | `offscreen`, Fusion dark style |
 | principal window | 1640×980 |
 | compact request | 1280×800; honored exactly with responsive register pages |
@@ -50,6 +51,14 @@ Run the documented workload contracts independently:
 ```sh
 QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python -u \
   tools/pipeviz/verify_examples.py
+```
+
+Run the complete Assembly/C authoring path:
+
+```sh
+QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python -u \
+  tools/pipeviz/verify_authoring.py \
+  --out /tmp/pipeviz_authoring_jul29
 ```
 
 Run the broad per-tab visual capture sweep:
@@ -82,13 +91,13 @@ Procedure:
 5. Confirm Pipeline, IPC history, Trace, Registers, caches, Prefetch, Cycles, Memory, and Mem map
    explicitly say that no program is loaded; Memory navigation is disabled.
 6. Confirm `.`, `R`, `F5`, `Ctrl+O`, `Ctrl+Shift+O`, `Ctrl+Shift+R`,
-   `Ctrl+0`, `Alt+1…0`, and the File/View/Help menus exist.
+   `Ctrl+0`, `Alt+V/A/C`, `Alt+1…0`, and the File/View/Help menus exist.
 7. Switch analysis tabs with the Alt shortcuts and focus Trace search with `/`
    while another pane owns focus.
 8. Press F1 through `QTest`.
 9. Select “Reading the Pipeline View” from the Help index.
-10. Confirm at least seven indexed topics, dedicated loading help, and the
-   stage-glyph explanation.
+10. Confirm at least eight indexed topics, dedicated loading and Assembly/C
+    help, and the stage-glyph explanation.
 11. Load a temporary flat image whose manifest mixes a JSON integer entry with
     a hexadecimal-string load address; verify EIP, bytes, and displayed fields.
 12. Require empty files and MZ `.exe` inputs to fail with actionable errors,
@@ -328,6 +337,41 @@ diagonal.
 Captures: `09_fibonacci_single_issue_active.png`,
 `09_fibonacci_uv_active.png`.
 
+### 10. Assembly/C authoring and exact source linkage
+
+Procedure:
+
+1. Require at least 250 unique Ventium/P54C completion mnemonics, map every
+   current RTL decoder family to an advertised entry, and check representative
+   integer, system, x87, mode-gated, and build-gated families.
+2. Render the Assembly editor and verify mnemonic/register syntax formats.
+3. Open the complete Ctrl+Space popup; require its description, availability,
+   latency, pairing class, and pipeline stage preview. Confirm automatic
+   completion appears in opcode position but never interrupts operands/comments.
+4. Feed an invalid opcode and require line 5 to be highlighted without starting
+   a backend session.
+5. Assemble+run the default sum loop and require EAX = 55 on the real RTL.
+6. Select authored Trace and Konata rows; require exact PC→assembly-line
+   highlighting, including distinct U/V rows retiring on one cycle.
+7. Reject a candidate replacement load and require the prior live backend,
+   program bytes, source map, marker, and tab label to remain coherent. Then edit
+   after build and require the map to become stale rather than use obsolete PCs.
+8. Verify C keyword/function highlighting and compiler error-line navigation.
+9. Compile the freestanding Fibonacci C template at O2 into editable Intel
+   assembly, assemble+run it, and require EAX = 144.
+10. Select the C-generated entry/loop in Trace and require its emitted assembly
+    line to highlight.
+
+Evidence: GNU as/ld produces an ELF32 at `0x08048000`; DWARF decoded-line data
+maps every checked PC to the editor. The completion catalogue contains 291
+unique mnemonics and excludes SSE/MMX/later-x86 examples. Both authored programs
+reach HLT with the expected result.
+
+Captures: `00_assembly_workbench.png`, `00a_assembly_compact.png`,
+`01_opcode_completion_popup.png`,
+`02_assembly_source_link.png`, `03_c_workbench.png`,
+`04_c_generated_assembly.png`, `05_c_run_source_link.png`.
+
 ## Visual review findings and changes made
 
 The screenshot review found and corrected the following:
@@ -349,7 +393,7 @@ The screenshot review found and corrected the following:
 6. The retired trace used the Qt default row height. It now uses fixed compact
    22-pixel rows.
 7. Help was limited to a shortcut dialog. The Help menu now opens an indexed
-   seven-page guide, with dedicated loading and Pipeline View pages.
+   guide with dedicated loading, Pipeline View, and Assembly/C pages.
 8. Stale SoC detection occurred after dangerous model construction. It now
    occurs before construction.
 9. Register/table content hints forced the loaded window to 1446 pixels.
@@ -382,6 +426,6 @@ The screenshot review found and corrected the following:
 ## Acceptance result
 
 The core, GUI control, linked-navigation, workload-analysis, Help, compact
-layout, and U/V comparison scenarios pass under the base Miniconda environment.
-The two explicit exclusions above remain documented rather than being reported
-as tested.
+layout, U/V comparison, Assembly→RTL, and C→Assembly→RTL scenarios pass under
+the base Miniconda environment. The explicit exclusions above remain documented
+rather than being reported as tested.

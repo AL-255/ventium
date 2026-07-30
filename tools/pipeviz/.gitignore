@@ -5,6 +5,7 @@ obj_dir_soc/
 obj_dir_soc.o/
 obj_spike/
 build_o/
+.generated/
 libventium_viz.so
 libventium_viz_soc.so
 smoke_test

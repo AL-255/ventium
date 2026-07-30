@@ -58,7 +58,8 @@ An explicit missing program path is reported instead of silently opening an
 empty window.
 
 Requirements (all already present in this repo's toolchain): `verilator` (5.x),
-a C++17 compiler, `python3` with **PySide6** and **capstone**
+a C++17 compiler, GNU `gcc`/`as`/`ld`/`objdump`, and `python3` with
+**PySide6** and **capstone**
 (`pip install PySide6 capstone`).
 
 For guided, reproducible investigations of dual issue, cache pressure, x87, and
@@ -66,10 +67,10 @@ system paging, see [the user guide](docs/user-guide.md).  Its examples have an
 offscreen regression check: `QT_QPA_PLATFORM=offscreen python3
 tools/pipeviz/verify_examples.py`.
 
-The in-application **Help** menu (`F1`) contains a seven-page indexed guide,
-including loading/program-format help and a
-dedicated “Reading the Pipeline View” page with branch, cache-stall, x87, and
-dual-Fibonacci examples.
+The in-application **Help** menu (`F1`) contains an indexed guide, including
+loading/program-format help, a dedicated “Reading the Pipeline View” page with
+branch, cache-stall, x87, and dual-Fibonacci examples, and the integrated
+Assembly/C authoring workflow.
 
 ## What you see
 
@@ -104,6 +105,18 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   * *IPC / stall sparkline* — a windowed IPC track (0/1/2 axis) with per-cycle
     event pixels (mispredict / stall / I-fill / page-walk) that doubles as a
     **clickable seek bar** for the playhead.
+* **Authoring workspaces** — top-level **Assembly** and **C** tabs sit beside
+  the Visualizer:
+  * Assembly is a line-numbered GNU Intel-syntax editor with syntax highlighting,
+    build diagnostics, `Ctrl+Space` completion over 291 Ventium/P54C mnemonics,
+    mode/build availability notes, and a description plus miniature pipeline
+    preview for every completion. **Assemble + Run** builds a source-mapped
+    32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
+    Pipeline row highlights the exact responsible assembly line.
+  * C is a highlighted freestanding editor targeting 32-bit Pentium at
+    `-O0/-O1/-O2/-Os`. **Compile → Assembly** emits editable Intel-syntax code
+    with a small `_start`/HLT wrapper into the Assembly tab; compiler and
+    assembler errors highlight their source line.
 * **Analysis tabs** (top-right) — ten tabs over the live microarch state:
   * **Code$ / Data$** — resident cache lines + a **256-cell set×way occupancy
     heatmap**; the Data$ header also reports a **replayed miss-rate** (the resolved
@@ -157,6 +170,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 |---|---|
 | **Open program…** | load a raw `.flat`/`.bin`/`.img`/`.rom` or a little-endian 32-bit x86 **ELF** (ELF `PT_LOAD` segments and entry point are read automatically); drop a program file anywhere onto the window as a shortcut. Empty files and DOS/PE executables are rejected explicitly. Flat images honour a sibling `manifest.json` for `entry`/`load_addr`, written as JSON integers or `0x…` strings. |
 | **File → Open example** | open an available dual-issue, D-cache, x87, or system-paging verification workload directly. The menu rescans each time it opens, so newly built examples appear without restarting pipeviz. |
+| **Assembly** (`Alt+A`) | edit highlighted GNU Intel syntax, inspect opcode/pipeline completion, then assemble or assemble+run. |
+| **C** (`Alt+C`) | compile a freestanding `int main(void)` for Pentium into editable Assembly. |
+| **Visualizer** (`Alt+V`) | return to the linked pipeline/trace/analysis/register workspace. |
 | **Reload program** (`Ctrl+Shift+R`) | re-read the current image from disk after rebuilding it while preserving the displayed reset addresses and mode switches. |
 | **Open snapshot…** | resume a host testbench `--save-state` checkpoint. Select either `<prefix>.aux` or `<prefix>.vlt`; the visualizer loads the pair and begins a new visible timeline at that exact state. The **Restore snapshot** button returns to the same point after exploring. |
 | entry / load / esp | validated 32-bit-hex reset state. Edits mark **Apply + Reset** rather than silently diverging from the running model. The command-line equivalents `--entry`, `--load`, and `--esp` take precedence over file metadata. |
@@ -168,12 +184,14 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 | **Step insn** (`i`) | advance until the next retirement |
 | **Step N** | advance N clocks |
 | **Run / Pause** (`F5`) | free-run at *speed* clocks per refresh tick |
-| **event** ◀ / ▶ (`[` / `]`) | jump the playhead to the prev / next pipeline event (mispredict / stall / I-fill / page-walk) |
+| **event type + ◀ / ▶** (`[` / `]`) | choose any/mispredict/stall/I-fill/page-walk, then jump to the previous or next matching event |
+| **cycle zoom** (`Ctrl+-` / `Ctrl+=`) | zoom the Pipeline time axis while preserving the selected investigation point |
 
 Keyboard: `Ctrl+O` opens a program, `Ctrl+Shift+O` opens a snapshot, `R` resets
 (or restores a snapshot), `.` advances one clock, `I` / `Space` advances to the
 next retirement, and `F5` runs or pauses. `Ctrl+0` restores the recommended
-splitter proportions. `Alt+1` through `Alt+0` select the ten analysis tabs.
+splitter proportions. `Alt+V`, `Alt+A`, and `Alt+C` switch workspaces;
+`Alt+1` through `Alt+0` select the ten analysis tabs.
 `/` focuses the trace filter from anywhere; Enter/F3 and Shift+F3 move
 among its results; Escape clears it. `F1` opens the complete shortcut reference.
 
@@ -247,6 +265,9 @@ host I/O drivers.
 | `verify_gui.py` | offscreen GUI smoke + screenshot |
 | `verify_examples.py` | offscreen checks for every documented workload |
 | `verify_interactions.py` | QTest-driven controls, linked views, loading, layout, Help, and U–V comparison |
+| `verify_authoring.py` | Assembly/C completion, diagnostics, build, execution, and PC↔source regression |
+| `pipeviz/source_view.py` | line-numbered Assembly/C editors, GNU toolchain integration, and source mapping |
+| `pipeviz/isa_catalog.py` | Ventium/P54C mnemonic descriptions, availability, and pipeline metadata |
 | `examples/fibonacci_uv.c` | freestanding dual-chain C example demonstrating U/V issue |
 | `docs/user-guide.md` | guided workflow examples and their regression commands |
 | `TESTING_Jul29.md` | full interactive acceptance procedure, observations, and limitations |

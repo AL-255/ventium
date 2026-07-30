@@ -114,6 +114,50 @@ Status assertions cover the windowed labels, tooltip, and corrected pair ratio.
 A real six-byte loop stepped 9,000 clocks in one refresh independently confirms
 the backend endpoint, Pipeline, IPC, Cycles, and newest-6,000 Trace window.
 
+## July 29 continuation — source-level experimentation and timeline navigation
+
+**Self-critique:** Pipeline inspection was still fixed at one horizontal scale
+and mouse-only. Event arrows mixed four unrelated event types, and a U row could
+bounce to V when both retired on the same clock because the older synchronization
+path carried only a cycle. More fundamentally, exploring a new scheduling idea
+required leaving pipeviz, constructing a build by hand, and reopening its output;
+there was no route from a selected microarchitectural instruction back to source.
+
+**Changes:** the Pipeline cycle axis now has five zoom levels with Ctrl+-/Ctrl+=,
+adaptive tick spacing, selection-centred zoom, and Up/Down/Page/Home/End exact-row
+navigation. Exact retire identity is restored after cycle synchronization, so
+U and V remain independently selectable. Event navigation adds a typed selector
+for any/mispredict/stall/I-fill/page-walk and reports directional, class-specific
+misses. Reset also clears the previous fixed canvas immediately instead of
+retaining stale scrollbar ranges until a new retirement.
+
+Top-level Visualizer, Assembly, and C workspaces now form a complete authoring
+loop. Assembly provides line numbers, Intel-syntax highlighting, file/template
+controls, error-line diagnostics, and a 291-mnemonic Ventium/P54C completion
+catalogue derived from the RTL decoder and P5 timing classifier. Each completion
+shows description, operand form, availability, pairing class, latency, and a
+miniature pipeline diagram. GNU as/ld build a 32-bit ELF with DWARF line data;
+Assemble+Run loads it on the existing RTL backend. Trace/Konata selection maps
+the exact PC back to its assembly line, including distinct U/V instructions on
+one cycle; an edit invalidates the old map until rebuild.
+
+The C workspace adds line-numbered C highlighting, O0/O1/O2/Os selection, GCC
+error navigation, and a freestanding 32-bit Pentium compile path. It emits
+editable Intel assembly with a `_start`→`main`→HLT wrapper into Assembly rather
+than hiding or immediately running compiler output. Generated artifacts stay in
+the ignored local `.generated/` directory.
+
+**Verification:** `verify_authoring.py` checks the catalogue boundary and
+every current RTL decoder family, pipeline metadata, syntax formats,
+opcode-scoped completion (without operand/comment interruptions), popup
+description/preview, compact layout, assembler/compiler line errors,
+transactional rejected loads, ELF loading, DWARF PC mapping, exact U/V row
+identity, stale-map invalidation, assembly execution (`1+…+10 = 55`), and the
+full C Fibonacci → assembly → RTL result (`144`). It captures each authoring
+state for visual review. The existing interaction suite additionally covers all
+cycle zoom controls/shortcuts, typed event navigation, keyboard row selection,
+and reset-scroll cleanup.
+
 ## Current UI (keep this in sync each iteration — critics read it)
 - **Pipeline panel** = (a) a small LIVE *stage board* snapshot on top (3 lanes
   U/V/FP × P5 stages, current clock only; the FP group collapses to a thin "FP
@@ -149,7 +193,10 @@ the backend endpoint, Pipeline, IPC, Cycles, and newest-6,000 Trace window.
   a Konata instruction (cell or label) ↔ trace row, which also **pins the register
   panel** to that instruction's post-commit state and drops a **cyan cycle
   playhead** down the Konata view (labelled with a `cyc N` chip at the top);
-  stepping unpins. **Shift-click** a second row to
+  exact U/V identity is preserved even when both rows share that cycle.
+  The focused diagram supports Up/Down/Page/Home/End row traversal and five
+  adaptive cycle-zoom levels (buttons or Ctrl+-/Ctrl+=) centred on the selected
+  investigation point. Stepping unpins. **Shift-click** a second row to
   drop an amber **measurement anchor** — the band between it and the playhead is
   shaded and labelled `Δ<n>cyc` (latency between two instructions; shift-click the
   same row again to clear it). The playhead/Δ **lines + column tint + Δ-band all
@@ -281,6 +328,15 @@ the backend endpoint, Pipeline, IPC, Cycles, and newest-6,000 Trace window.
   amber on a stall gap; whole-row scroll snap; capstone disasm (16/32-bit per
   live CS.D). Click a row → highlights its Konata instruction row + pins the
   register panel to its post-commit state (two-way).
+- **Authoring workspaces**: Visualizer / Assembly / C top-level tabs.
+  Assembly is a line-numbered, syntax-highlighted GNU Intel editor with
+  file/template controls, assembler diagnostics, a 291-mnemonic completion
+  catalogue, description/availability/latency metadata, and a miniature
+  U/V/FP/system pipeline preview. Assemble+Run emits a DWARF-linked ELF and runs
+  it on the same RTL; Trace/Konata selection highlights the exact assembly line.
+  C is a line-numbered highlighted freestanding editor with O0/O1/O2/Os and
+  compiler error navigation; it emits editable Pentium Intel assembly into the
+  Assembly workspace before the user chooses to run it.
 - **Register panel**: GPRs/segs/CR/x87; **EFLAGS as a full named-bit grid** (all
   9 flags, set = amber, changed-this-step underlined); GPR/EIP values that
   changed since the last step are amber. Can be **pinned AS-OF a retired
@@ -298,9 +354,9 @@ the backend endpoint, Pipeline, IPC, Cycles, and newest-6,000 Trace window.
 - **Toolbar** (responsive session | transport | status rows, explicit **U/V
   issue**, validated reset addresses, **Apply + Reset** dirty-state affordance,
   built-in examples/reload in File, reset-layout/toolbars in View, accented Run,
-  + **event-jump**
-  ◀/▶ that move the Konata playhead to the prev/next pipeline event —
-  mispredict/stall/I-fill/page-walk — for fast "jump to the action" navigation).
+  + **typed event-jump** selector and ◀/▶ that move the Konata playhead to the
+  previous/next any/mispredict/stall/I-fill/page-walk event, with class-specific
+  boundary feedback).
 - Backends: `ventium_top` (user + system) and `ventium_soc` (test386 etc.).
 
 ## Iterations
