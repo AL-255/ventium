@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -211,6 +212,38 @@ def scenario_startup(app, outdir):
         pass
     else:
         raise AssertionError("numeric manifest mode was accepted as a boolean")
+
+    # Backend readiness includes the model inputs, not only the C++ bridge:
+    # changed RTL must not leave the GUI confidently visualizing an old ignored
+    # shared object. Exercise --check in a disposable fake repository.
+    launcher_root = os.path.join(outdir, "launcher_probe")
+    launcher_dir = os.path.join(launcher_root, "tools", "pipeviz")
+    rtl_dir = os.path.join(launcher_root, "rtl", "core")
+    os.makedirs(launcher_dir, exist_ok=True)
+    os.makedirs(rtl_dir, exist_ok=True)
+    launcher_copy = os.path.join(launcher_dir, "run.sh")
+    shutil.copy2(repo_path("tools/pipeviz/run.sh"), launcher_copy)
+    fake_backend = os.path.join(launcher_dir, "libventium_viz.so")
+    fake_rtl = os.path.join(rtl_dir, "core.sv")
+    with open(fake_backend, "wb") as backend_file:
+        backend_file.write(b"probe")
+    with open(fake_rtl, "w", encoding="utf-8") as rtl_file:
+        rtl_file.write("module core; endmodule\n")
+    os.utime(fake_rtl, (1_000_000, 1_000_000))
+    os.utime(fake_backend, (2_000_000, 2_000_000))
+    launcher_env = dict(os.environ, PIPEVIZ_PYTHON=sys.executable)
+    ready = subprocess.run(
+        ["bash", launcher_copy, "--check"], cwd=launcher_root,
+        env=launcher_env, text=True, capture_output=True, check=False)
+    assert ready.returncode == 0 and "backend ready" in ready.stdout
+    os.utime(fake_rtl, (3_000_000, 3_000_000))
+    stale = subprocess.run(
+        ["bash", launcher_copy, "--check"], cwd=launcher_root,
+        env=launcher_env, text=True, capture_output=True, check=False)
+    assert stale.returncode == 2
+    assert "backend stale" in stale.stderr and "core.sv changed" in stale.stderr
+    assert "--build" in stale.stderr
+
     probe_cycle = type("ProbeCycle", (), {
         "mispred_bubbles": 0, "retU": 0, "retV": 0,
     })()

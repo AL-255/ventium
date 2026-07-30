@@ -32,7 +32,10 @@ Hotspots, Branches, and Mem map navigate back to the responsible instruction.</p
 <p>The launcher uses <code>python3</code>, or the interpreter named by
 <code>PIPEVIZ_PYTHON</code>. It preflights PySide6 and Capstone and points to
 <code>requirements.txt</code> if either import is missing, before starting a
-potentially long backend build.</p>
+potentially long backend build. It also rebuilds when bridge/ABI, RTL
+sources/file lists/includes, or the memory BFM is newer than the backend.
+<code>run.sh --check</code> reports readiness without building or opening the
+GUI and names the first stale input.</p>
 <ul>
  <li><b>File → Open example</b> rescans and opens any built verification
  workload.</li>

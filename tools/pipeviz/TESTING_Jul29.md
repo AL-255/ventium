@@ -87,6 +87,11 @@ git diff --check -- tools/pipeviz
 
 ### 1. Empty startup, Help, and control honesty
 
+Launcher dependency preflight is exercised first in a disposable `/tmp`
+repository. `run.sh --check` must accept a backend newer than its RTL, then
+return status 2, name `core.sv changed`, and recommend `--build` after that RTL
+becomes newer. The check never builds or opens Qt.
+
 Procedure:
 
 1. Verify explicit-image, explicit-snapshot, and no-argument demo startup

@@ -50,6 +50,9 @@ tools/pipeviz/run.sh ventium-refs/09-external-cpu-tests/test386.asm/test386.bin
 
 # force a rebuild of the backend (add --soc to also build the SoC model)
 tools/pipeviz/run.sh --build
+
+# inspect dependencies/model freshness without building or launching
+tools/pipeviz/run.sh --check
 ```
 
 `--snapshot` is an exclusive startup target: it never falls through to an
@@ -73,6 +76,11 @@ environment explicitly, for example:
 ```sh
 PIPEVIZ_PYTHON="$HOME/miniconda3/bin/python" tools/pipeviz/run.sh
 ```
+
+It also rebuilds when the bridge, ctypes ABI, RTL/file lists/includes, or memory
+BFM is newer than the ignored backend. `run.sh --check` reports readiness
+without building or opening the GUI; a stale result names the first changed
+input and exits with status 2.
 
 For guided, reproducible investigations of dual issue, cache pressure, x87, and
 system paging, see [the user guide](docs/user-guide.md).  Its examples have an

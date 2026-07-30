@@ -53,6 +53,14 @@ CPL, and SMM alongside CS.D/translation context. Pinned Registers display those
 truthful values while the global strip alone carries selection state. ABI-size,
 user/x87, and real paged-system regressions lock the new fields.
 
+**Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
+changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
+inputs. That could launch a polished GUI over an obsolete model. Backend
+readiness now covers all of those dependencies and reports the exact first
+newer path. A non-mutating `--check` mode makes the decision inspectable; a
+temporary fake-repository regression proves ready→stale behavior and exit code
+2 without rebuilding or launching Qt.
+
 ## July 29 continuation — source-editor recovery and loading ergonomics
 
 **Self-critique:** valid quoted comment markers were miscolored, token priority
