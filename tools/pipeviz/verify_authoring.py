@@ -2100,6 +2100,8 @@ def scenario(app, outdir):
         settle(app)
         assert (win.assembly.editor._execution_line
                 == x87_result.source_map[x87_pc])
+        assert "Retired FP-lane instruction" in win.assembly.status.text()
+        assert " · FP · " in win.action_hint.text()
         win.workspace.setCurrentWidget(win.assembly)
         settle(app)
         save(win, outdir, "06_c_x87_source_link")

@@ -27,6 +27,7 @@ from .trace_view import TraceView
 from .regs_view import RegsView
 from .help_view import UserGuideDialog
 from .source_view import AssemblyView, CView
+from . import disasm
 
 DEF_ENTRY = 0x08048000
 DEF_ESP = 0x40c34910
@@ -1835,11 +1836,18 @@ class MainWindow(QMainWindow):
         prev = next((r for r in recs if r.n == n - 1), None)
         self._pinned_n = n
         self.regs.show_retire(rec, prev)
-        lane = "U" if int(rec.pipe) == 0 else (
+        raw = bytes(rec.bytes[:rec.nbytes])
+        _size, mnemonic, _operands, _shown = disasm.disasm_one(
+            raw, int(rec.pc), 32 if rec.d32 else 16)
+        is_fp = (
+            disasm.insn_class(mnemonic)[0] == "fp"
+            or mnemonic.lower() in ("wait", "fwait"))
+        lane = "FP" if is_fp else (
+            "U" if int(rec.pipe) == 0 else
             "V" if int(rec.pipe) == 1 else "—")
         source_context = (
             f"Retired {lane}-lane instruction n={int(rec.n)}"
-            if lane in ("U", "V") else
+            if lane in ("U", "V", "FP") else
             f"Retired instruction n={int(rec.n)}")
         line = self._highlight_assembly_pc(
             rec.pc, source_context)

@@ -388,7 +388,9 @@ Instructions synthesized outside the editor, such as a bare snippet's
 fall-through HLT, explicitly clear the prior line marker instead of leaving a
 stale source association. When the selected retirement came from U or V, the
 Assembly-side status retains that lane identity; inspecting the source never
-turns a same-cycle pair into an ambiguous generic retirement.
+turns a same-cycle pair into an ambiguous generic retirement. Retired x87
+instructions say `FP-lane` rather than leaking the integer dispatch slot into
+the source context.
 
 GNU `as`, `ld`, and `objdump` must be available in `PATH`. Generated source,
 object, and ELF files stay in `tools/pipeviz/.generated/`, which Git ignores.

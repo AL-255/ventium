@@ -153,7 +153,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     the backend; **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
     Pipeline row highlights the exact responsible assembly line, and the
-    Assembly-side status retains its U/V lane identity. Editing clears
+    Assembly-side status retains U/V identity or labels x87 as FP. Editing clears
     prior build diagnostics and PC links so green results never describe stale
     text. Errors are red and line-linked; successful toolchain warnings remain
     runnable but use an amber line-linked diagnostic. Source drops route to

@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — truthful x87 source-link lane
+
+**Lane-semantics audit:** an authored `fld` correctly highlighted its generated
+Assembly line and its instruction preview said `x87 FP lane`, but the
+Assembly status simultaneously said `Retired U-lane instruction`. The raw
+retirement pipe records the integer dispatch slot used to launch x87 work, not
+the execution lane the user is investigating.
+
+**Changes:** retirement source linking now disassembles the immutable captured
+bytes and classifies x87 operations as `FP-lane`; integer instructions continue
+to use the exact U/V retirement field. WAIT/FWAIT are covered explicitly.
+The global pin notice now says FP too.
+
+**Verification:** after live FP-cell linkage, authoring acceptance runs the x87
+C program to completion, selects a retired x87 instruction, requires its exact
+source line, `Retired FP-lane instruction` editor status, and `FP` global pin
+notice. The screenshot now agrees across source status and purple FP preview.
+
 ## July 30 continuation — exact timing-model opcode coverage
 
 **Catalogue-proof audit:** completion had 291 entries and the test mapped every
