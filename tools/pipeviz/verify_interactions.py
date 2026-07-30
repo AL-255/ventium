@@ -2489,6 +2489,22 @@ def scenario_layout(app, outdir):
         save_shot(
             app, win, outdir, "08d_true_minimum_prefetch",
             min_width=900, min_height=620)
+        QTest.keyClick(win, Qt.Key_8, Qt.AltModifier)
+        settle(app)
+        cycles = win.tables.cyc
+        assert win.tables.tabs.currentIndex() == 7
+        row_rects = cycles._row_rects(cycles.width())
+        assert all(
+            rect.left() >= 0 and rect.right() < cycles.width()
+            for rect in row_rects)
+        assert row_rects[0].width() >= 83  # complete "issue-stall" + bearing
+        assert row_rects[1].width() >= 28  # three-digit count
+        assert row_rects[3].width() >= 44  # measured "100.0%"
+        assert cycles._title_text(160, 57, 57 / 160, True) == (
+            "cyc160 · ret57 · IPC.356")
+        save_shot(
+            app, win, outdir, "08h_true_minimum_cycles",
+            min_width=900, min_height=620)
         compact_summaries = (
             (3, win.tables.tlb_lbl,
              "TLB 0 valid · 16 I/D · lin[15:12]"),

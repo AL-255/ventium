@@ -545,6 +545,47 @@ class CycleBreakdown(QWidget):
         self._sync_accessible_description()
         self.update()
 
+    @staticmethod
+    def _row_rects(width, y=30, row_height=22):
+        """Allocate label/count/bar/percentage fully inside the canvas."""
+        if width < 360:
+            left, right, gap = 6, 4, 3
+            count_width, bar_width, percent_width = 28, 14, 44
+            label_width = max(
+                20, width - left - right - 3 * gap
+                - count_width - bar_width - percent_width)
+            x = left
+            label = QRect(x, y, label_width, row_height)
+            x += label_width + gap
+            count = QRect(x, y, count_width, row_height)
+            x += count_width + gap
+            bar = QRect(x, y + 4, bar_width, row_height - 8)
+            x += bar_width + gap
+            percent = QRect(x, y, percent_width, row_height)
+            return label, count, bar, percent
+
+        label = QRect(8, y, 92, row_height)
+        count = QRect(100, y, 50, row_height)
+        bar_x = 154
+        percent_width = 52
+        bar_width = max(
+            8, width - bar_x - 6 - percent_width - 4)
+        bar = QRect(bar_x, y + 4, bar_width, row_height - 8)
+        percent = QRect(
+            bar_x + bar_width + 6, y, percent_width, row_height)
+        return label, count, bar, percent
+
+    @staticmethod
+    def _title_text(total, retired, ipc, compact=False):
+        ratio = f"{ipc:.3f}"
+        if compact and ratio.startswith("0."):
+            ratio = ratio[1:]
+        return (
+            f"cyc{total} · ret{retired} · IPC{ratio}"
+            if compact else
+            f"cycle attribution — {total} cyc · {retired} retired · "
+            f"IPC {ratio}")
+
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#0d1117"))
@@ -554,8 +595,10 @@ class CycleBreakdown(QWidget):
         fb = QFont(f); fb.setBold(True)
         ipc = (self.total_ret / total) if total else 0.0
         p.setFont(fb); p.setPen(QColor("#c9d1d9"))
+        title = self._title_text(
+            total, self.total_ret, ipc, compact=W < 360)
         p.drawText(QRect(8, 6, W - 16, 16), Qt.AlignLeft,
-                   f"cycle attribution — {total} cyc · {self.total_ret} retired · IPC {ipc:.3f}")
+                   title)
         if total == 0:
             p.setPen(QColor("#8b949e")); p.setFont(f)
             message = ("step the core to attribute cycles" if self.session_active else
@@ -566,20 +609,27 @@ class CycleBreakdown(QWidget):
         rows = sorted(((k, v) for k, v in self.counts.items() if v),
                       key=lambda kv: -kv[1])
         p.setFont(f)
-        y, rowh, labelw = 30, 22, 92
-        barx = 8 + labelw + 54
-        barw = max(40, W - barx - 60)
+        y, rowh = 30, 22
+        fm = QFontMetrics(f)
         for k, v in rows:
             pct = v / total
+            label_rect, count_rect, bar_rect, percent_rect = (
+                self._row_rects(W, y, rowh))
             p.setPen(QColor("#adbac7"))
-            p.drawText(QRect(8, y, labelw, rowh), Qt.AlignVCenter | Qt.AlignLeft, k)
+            p.drawText(
+                label_rect, Qt.AlignVCenter | Qt.AlignLeft,
+                fm.elidedText(k, Qt.ElideRight, label_rect.width()))
             p.setPen(QColor("#8b949e"))
-            p.drawText(QRect(8 + labelw, y, 50, rowh), Qt.AlignVCenter | Qt.AlignRight, str(v))
-            p.fillRect(QRect(barx, y + 4, barw, rowh - 8), QColor("#161b22"))
-            p.fillRect(QRect(barx, y + 4, int(barw * pct), rowh - 8), QColor(colmap[k]))
+            p.drawText(
+                count_rect, Qt.AlignVCenter | Qt.AlignRight, str(v))
+            p.fillRect(bar_rect, QColor("#161b22"))
+            filled = QRect(bar_rect)
+            filled.setWidth(int(bar_rect.width() * pct))
+            p.fillRect(filled, QColor(colmap[k]))
             p.setPen(QColor("#c9d1d9"))
-            p.drawText(QRect(barx + barw + 6, y, 52, rowh), Qt.AlignVCenter | Qt.AlignLeft,
-                       f"{pct * 100:.1f}%")
+            p.drawText(
+                percent_rect, Qt.AlignVCenter | Qt.AlignLeft,
+                f"{pct * 100:.1f}%")
             y += rowh
             if y > H - rowh:
                 break

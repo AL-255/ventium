@@ -100,6 +100,10 @@ the true minimum, gives its space to the complete raw 80-bit value, and retains
 the decoded float in each row's tooltip/accessibility metadata; both normal
 grids return unchanged when widened. The compact x87 header also reserves both
 measured lines, so TOP/control can no longer hide status/empty-mask below it.
+The custom-painted Cycles view now has a true narrow geometry: its complete
+compact total/retired/IPC title and every reason label, count, bar, and
+percentage remain inside 188 px. Rectangle-bound regressions prevent the
+previous off-canvas percentage column from returning.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
