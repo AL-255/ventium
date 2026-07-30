@@ -142,7 +142,8 @@ exact linked Assembly line. The Visualizer stays open and the Assembly tab gains
 pointer, Tab to the board's blue outline, choose an occupied lane with arrows
 or Home/End, and press Enter. A finished
 HLT remains an occupied, clickable cell so the stop location is explicit.
-The live source mark describes this clock only: Clock, Insn, Step N, Run, and
+Double-click an occupied lane to mark and open its Assembly line in one
+gesture. The live source mark describes this clock only: Clock, Insn, Step N, Run, and
 Apply + Reset clear it before execution moves, while retaining the assembled
 address map for the next selection.
 <b>[paired]</b> means U/V issue now; <b>[blocked]</b> means a candidate pair is
@@ -520,7 +521,8 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Source Tab / Shift+Tab</b></td><td>indent/outdent the caret or selected source lines</td></tr>
  <tr><td><b>Source Backspace</b></td><td>remove leading soft indentation to the previous four-column stop</td></tr>
  <tr><td><b>Gutter click / drag / Shift-click</b></td><td>select or extend complete source-line ranges</td></tr>
- <tr><td><b>Board arrows + Enter</b></td><td>choose and open an occupied live U/V/FP source line</td></tr>
+ <tr><td><b>Board arrows + Enter</b></td><td>choose and mark an occupied live U/V/FP source line</td></tr>
+ <tr><td><b>Board double-click</b></td><td>mark and open an occupied live lane's Assembly line</td></tr>
  <tr><td><b>IPC arrows/Pg/Home/End</b></td><td>seek captured cycles; Enter reopens one</td></tr>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
  <tr><td><b>Enter / F3</b></td><td>next filtered retirement (Visualizer)</td></tr>

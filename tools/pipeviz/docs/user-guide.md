@@ -130,6 +130,8 @@ PC, then click it to highlight that in-flight instruction's linked Assembly
 line. From the keyboard, Tab to the blue-outlined board, use arrows or Home/End
 to choose an occupied lane, and press Enter. The Visualizer remains in
 place and the Assembly tab gains `L…`; use `Alt+A` to inspect the marked line.
+Double-click an occupied lane when you want to mark and open its Assembly line
+in one gesture.
 That live mark describes the current clock only, so Clock, Insn, Step N, Run,
 and Apply + Reset clear it before the machine moves. The assembled address map
 stays active, and clicking the next live or retired instruction creates a fresh

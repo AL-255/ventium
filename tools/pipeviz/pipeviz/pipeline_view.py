@@ -47,6 +47,7 @@ def _mono(pt=9, bold=False):
 # ===========================================================================
 class StageBoard(QWidget):
     instructionClicked = Signal(int, str)  # live PC, U/V/FP lane
+    instructionOpenRequested = Signal(int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -69,7 +70,8 @@ class StageBoard(QWidget):
     def _sync_accessible_description(self):
         navigation = (
             "Occupied lanes can be clicked, or use arrow keys to choose one "
-            "and Enter to open its linked Assembly line.")
+            "and Enter to mark its linked Assembly line. Double-click opens "
+            "that line in the Assembly workspace.")
         if not self._lane_pcs:
             self.setAccessibleDescription(
                 f"{self._status}. No occupied source-linked lane. {navigation}")
@@ -370,7 +372,7 @@ class StageBoard(QWidget):
             self.setCursor(Qt.PointingHandCursor)
             self.setToolTip(
                 f"{lane} in-flight instruction · PC 0x{pc:08x}\n"
-                "Click to highlight its line in linked Assembly source")
+                "Click to mark its linked Assembly line; double-click to open it")
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):
@@ -390,6 +392,19 @@ class StageBoard(QWidget):
                 event.accept()
                 return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            hit = self._lane_at(event.position().toPoint())
+            if hit is not None:
+                lane, pc = hit
+                self._kbd_lane = lane
+                self._sync_accessible_description()
+                self.setFocus(Qt.MouseFocusReason)
+                self.instructionOpenRequested.emit(pc, lane)
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
 
     def focusInEvent(self, event):
         if self._kbd_lane not in self._lane_pcs:

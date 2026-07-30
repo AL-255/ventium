@@ -1150,6 +1150,8 @@ class MainWindow(QMainWindow):
         # cells directly by PC so authored source navigation works in-flight too.
         self.pipeline.board.instructionClicked.connect(
             self._live_instruction_clicked)
+        self.pipeline.board.instructionOpenRequested.connect(
+            self._live_instruction_opened)
         self.pipeline.spark.cycleClicked.connect(self._cycle_seeked)
         # drill-down: click a Hotspots / Branches PC row -> jump the trace to it
         self.tables.pcClicked.connect(self._select_pc_origin)
@@ -1911,6 +1913,17 @@ class MainWindow(QMainWindow):
             self._notice(
                 f"{context} at 0x{int(pc):08x} → Assembly line {line} "
                 "(Alt+A to inspect)")
+
+    def _live_instruction_opened(self, pc, lane):
+        context = f"In-flight {lane}-lane instruction"
+        line = self._highlight_assembly_pc(pc, context)
+        if line is None:
+            self._notice(
+                f"{context} at 0x{int(pc):08x} has no linked Assembly line")
+            return
+        self.workspace.setCurrentWidget(self.assembly)
+        self._notice(
+            f"Opened {context.lower()} at Assembly line {line}")
 
     def _cycle_seeked(self, cyc):
         """Describe a playhead-only seek without implying an instruction pin."""

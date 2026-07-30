@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — double-click opens a live source line
+
+**Source-navigation audit:** single-clicking a live U/V/FP lane correctly
+marked its Assembly line without stealing the Visualizer, and Alt+A completed
+keyboard navigation. Pointer users still needed a separate workspace gesture
+when their intent was immediate inspection.
+
+**Changes:** an occupied stage-board lane now follows the standard split:
+single-click marks while preserving comparison context; double-click marks and
+opens Assembly, centers the exact current-build line, and focuses the editor.
+Tooltips, accessible instructions, the indexed Pipeline guide, and the shortcut
+table state both choices.
+
+**Verification:** the authored dual-issue acceptance state retains distinct U
+and V line identities, double-clicks U after selecting V, requires the exact U
+line plus Assembly/editor focus, captures the opened workbench, then returns to
+Visualizer and verifies next-clock stale-marker clearing as before.
+
 ## July 30 continuation — high-DPI overlays stay contained
 
 **150% scaling audit:** Qt's offscreen high-DPI backend reported a 533-pixel

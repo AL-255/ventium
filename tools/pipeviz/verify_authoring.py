@@ -1694,13 +1694,16 @@ def scenario(app, outdir):
         assert board._lane_pcs["U"] in result.source_map
         assert board._lane_pcs["V"] in result.source_map
         live_lines = {}
+        live_rects = {}
         for lane in ("U", "V"):
             rect = next(
                 rect for rect, cell_lane, _pc in board._lane_rects
                 if cell_lane == lane)
+            live_rects[lane] = rect
             QTest.mouseMove(board, rect.center())
             settle(app)
             assert "in-flight instruction" in board.toolTip()
+            assert "double-click to open" in board.toolTip()
             QTest.mouseClick(board, Qt.LeftButton, Qt.NoModifier, rect.center())
             settle(app)
             line = result.source_map[board._lane_pcs[lane]]
@@ -1737,6 +1740,16 @@ def scenario(app, outdir):
             win.pipeline.konata.scroll.viewport().width())
         assert win.pipeline.konata.plot.height() >= (
             win.pipeline.konata.scroll.viewport().height())
+        QTest.mouseDClick(
+            board, Qt.LeftButton, Qt.NoModifier, live_rects["U"].center())
+        settle(app)
+        assert win.workspace.currentWidget() is win.assembly
+        assert app.focusWidget() is editor
+        assert editor._execution_line == live_lines["U"]
+        assert f"Assembly line {live_lines['U']}" in win.action_hint.text()
+        save(win, outdir, "02aa_live_uv_source_open")
+        win.workspace.setCurrentWidget(win.visualizer_tab)
+        settle(app)
         save(win, outdir, "02a_live_uv_source_link")
 
         # A live lane is not a retirement pin, but its source marker is still
