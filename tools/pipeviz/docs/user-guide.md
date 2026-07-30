@@ -207,8 +207,10 @@ empty, Escape instead returns a pinned retirement to LIVE without advancing.
 If you only inspected a filter, clearing it restores the
 newest live rows; if you selected a result, that historical context remains.
 Malformed structured terms (for example `n>200` or `pc:xyz`) turn red, explain
-the accepted syntax on hover, and leave the trace visible while you correct
-them; a valid free-text query with no hits still shows an ordinary zero-result
+the accepted syntax inline and in full on hover, and leave the trace visible
+while you correct them. Inline fixes distinguish comparison operators, lane
+names, non-negative values, field separators, and hexadecimal PCs; a valid
+free-text query with no hits still shows an ordinary zero-result
 state.
 The Trace table's description distinguishes no program, no retirement yet, and
 its current populated row count. Filter results likewise announce exact

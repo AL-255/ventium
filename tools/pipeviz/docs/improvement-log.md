@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — inline Trace-filter corrections
+
+**Invalid-filter audit:** malformed structured filters safely retained every
+row, but their only visible feedback was `invalid filter`; the actual correction
+required hovering. This was especially opaque for `pc:xyz`, `n>200`, or a
+misspelled lane.
+
+**Changes:** the red result label now gives a compact, error-specific fix:
+valid U/V/FP lanes, non-negative numbers, `>=`/`<=`, `n=`/`cyc=`/`pc:`
+separators, or 1–8 hex PC digits. The full token-specific explanation remains
+in the tooltip and accessible description.
+
+**Verification:** interaction acceptance exercises all five structured-error
+classes, proves every invalid query preserves all rows and disables navigation,
+and captures both full-size and 900×620 states. The compact state requires at
+least 180 pixels for the query and keeps the correction/buttons in bounds.
+
 ## July 30 continuation — explicit no-match completion state
 
 **Empty-completion audit:** a supported prefix exposed its count, but an

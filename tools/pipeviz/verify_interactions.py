@@ -1804,16 +1804,38 @@ def scenario_branch_transport(app, outdir):
         # the syntax and retain all rows as context while the query is fixed.
         total_rows = win.trace.tbl.rowCount()
         assert set_filter(app, win.trace, "n>200") == total_rows
-        assert win.trace.match_lbl.text() == "invalid filter"
+        assert win.trace.match_lbl.text() == "invalid · use >= or <="
         assert "use >=" in win.trace.filt.toolTip()
         assert "Invalid trace filter" in (
             win.trace.match_lbl.accessibleDescription())
         assert f"All {total_rows} rows remain visible" in (
             win.trace.match_lbl.accessibleDescription())
         assert not win.trace.next_match_btn.isEnabled()
+        for query, summary in (
+                ("pipe:q", "invalid · pipe: U / V / FP / -"),
+                ("cyc=-1", "invalid · expected number ≥ 0"),
+                ("pc=8048000", "invalid · use n= / cyc= / pc:")):
+            assert set_filter(app, win.trace, query) == total_rows
+            assert win.trace.match_lbl.text() == summary
         assert set_filter(app, win.trace, "pc:xyz") == total_rows
+        assert win.trace.match_lbl.text() == (
+            "invalid · PC needs 1–8 hex digits")
         assert "hexadecimal PC" in win.trace.filt.toolTip()
         save_shot(app, win, outdir, "01a_invalid_trace_filter")
+        win.resize(900, 620)
+        settle(app)
+        assert win.trace.filt.width() >= 180
+        match_corner = win.trace.match_lbl.mapTo(
+            win, win.trace.match_lbl.rect().bottomRight())
+        assert 0 <= match_corner.x() < win.width()
+        assert 0 <= match_corner.y() < win.height()
+        assert win.trace.match_lbl.text() == (
+            "invalid · PC needs 1–8 hex digits")
+        save_shot(
+            app, win, outdir, "01b_invalid_trace_filter_minimum",
+            min_width=900, min_height=620)
+        win.resize(1640, 980)
+        settle(app)
         assert set_filter(app, win.trace, "n>=0200") == 12
         set_filter(app, win.trace, "not-a-real-retirement")
         assert not win.trace.next_match_btn.isEnabled()

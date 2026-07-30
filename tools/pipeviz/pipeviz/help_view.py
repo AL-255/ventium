@@ -391,8 +391,10 @@ view and pin Registers. Press <code>/</code> to focus the filter, Enter or F3
 to move to the next result, Shift+F3 for the previous result, and Escape to
 clear it. The arrows beside the match count provide the same navigation.
 Malformed structured terms such as <code>n&gt;200</code> or
-<code>pc:xyz</code> report their expected syntax on hover and keep all rows
-visible while you correct them.
+<code>pc:xyz</code> show a concise correction beside the filter, retain the
+complete syntax on hover, and keep all rows visible while you correct them.
+Comparison, lane, non-negative-number, separator, and hex-PC errors receive
+different inline fixes.
 Clearing an unselected exploratory filter returns to the newest rows; selecting
 a result preserves that historical context instead.</p>
 <p>If a single fast step produces more rows than fit in the rolling view, Trace

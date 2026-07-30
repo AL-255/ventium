@@ -826,6 +826,21 @@ class TraceView(QWidget):
         return None
 
     @staticmethod
+    def _filter_error_summary(error):
+        """Short correction that fits beside the filter at minimum width."""
+        if "pipe must be" in error:
+            return "pipe: U / V / FP / -"
+        if "non-negative decimal" in error:
+            return "expected number ≥ 0"
+        if "hexadecimal PC" in error:
+            return "PC needs 1–8 hex digits"
+        if "use >= or <=" in error:
+            return "use >= or <="
+        if "use n=, cyc=, or pc:" in error:
+            return "use n= / cyc= / pc:"
+        return "check syntax"
+
+    @staticmethod
     def _match(filt, tokens):
         hay, retire_n, pc, cyc, pipe, stall = filt
         for tok in tokens:
@@ -884,7 +899,7 @@ class TraceView(QWidget):
         active = bool(toks)
         self.match_lbl.setText(
             "" if not active else
-            "invalid filter" if error else
+            f"invalid · {self._filter_error_summary(error)}" if error else
             f"{shown}/{n} match")
         self.match_lbl.setStyleSheet(
             "color:#f85149;font-size:8px;" if error or (active and shown == 0)

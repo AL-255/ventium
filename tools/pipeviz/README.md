@@ -256,7 +256,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   lane cell to see both facts. Raw U/V counters and pairing statistics still
   describe the issue slots.
   Malformed structured terms stay visibly red with an exact syntax hint and do
-  not hide the trace while they are corrected.
+  not hide the trace while they are corrected. A concise fix appears inline
+  (`use >= or <=`, valid lanes, non-negative number, or hex-PC form), while
+  hover retains the complete explanation.
   Selecting a row links by retirement ID, so U and V remain distinguishable
   even when they commit in the same cycle. Clearing an exploratory filter
   returns to the newest rows when no result was chosen; a chosen result keeps
