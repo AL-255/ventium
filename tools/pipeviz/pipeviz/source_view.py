@@ -2018,6 +2018,17 @@ def _confirm_source_replacement(view, label, action):
     return True
 
 
+def _report_source_save_failure(view, error):
+    """Replace any stale success state with one persistent save failure."""
+    message = f"Save failed · {error}"
+    view.diagnostics.failure(message)
+    view._diagnostic_revision = view.editor.document().revision()
+    view.status.setText(message)
+    view.status.setStyleSheet("color:#f85149;padding:2px;")
+    view.statusChanged.emit(message)
+    view._focus_editor()
+
+
 def _default_save_suffix(path, selected_filter, filter_prefix, suffix):
     """Honor the typed-file filter when a save dialog returns a bare name."""
     if (path and selected_filter.startswith(filter_prefix)
@@ -2340,9 +2351,7 @@ class AssemblyView(QWidget):
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except (OSError, UnicodeError) as error:
-            self.diagnostics.failure(str(error))
-            self._diagnostic_revision = self.editor.document().revision()
-            self._focus_editor()
+            _report_source_save_failure(self, error)
             return False
         self._path = path
         self._source_origin = os.path.basename(path)
@@ -2671,10 +2680,8 @@ class CView(QWidget):
                 path, selected_filter, "C source", ".c")
         try:
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
-        except OSError as error:
-            self.diagnostics.failure(str(error))
-            self._diagnostic_revision = self.editor.document().revision()
-            self._focus_editor()
+        except (OSError, UnicodeError) as error:
+            _report_source_save_failure(self, error)
             return False
         self._path = path
         self._source_origin = os.path.basename(path)

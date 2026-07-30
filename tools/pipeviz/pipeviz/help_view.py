@@ -245,7 +245,9 @@ The lower-right source badge remains visible when a later Build/Compile replaces
 the transient status message; it names the saved file, built-in template, or
 C-compiler origin, and its tooltip gives the full path.
 Open reports that same real filename in both places; Assembly never labels an
-opened file as compiler-generated.
+opened file as compiler-generated. A failed source save retains that identity
+and dirty state while diagnostics, persistent status, tooltip/accessibility
+text, and the global notice all show the same red Save failed explanation.
 New/Open, C-to-Assembly replacement, and Quit offer
 Save/Discard/Cancel protection. Back in Visualizer, Ctrl+O resumes its
 program-opening role. Dropped <code>.s/.S/.asm</code> and

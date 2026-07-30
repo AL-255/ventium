@@ -191,6 +191,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     one-based `Ln · Col` readout tracks the caret beside build/source status;
     a compact `nL` suffix confirms the selected line span. Click the readout or
     press `Ctrl+G` to go to a validated line.
+    Source-save I/O errors replace stale success text in diagnostics, status,
+    tooltip/accessibility, and the global notice while preserving the old source
+    identity and dirty state.
     `Ctrl+wheel` also scales source text through the same 8–24 pt range.
     Moving beside `()`, `[]`, or `{}` highlights its matching pair; an
     unmatched delimiter is marked red, while delimiters inside comments and

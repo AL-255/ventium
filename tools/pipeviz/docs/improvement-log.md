@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — source save failures replace stale success
+
+**Persistence audit:** Assembly and C save I/O errors appeared only in their
+diagnostic pane. The transient status could remain green from a prior build,
+compile, or save; no global notice was emitted, and a compact/hidden diagnostic
+made the failure easy to miss during replacement or keyboard-save workflows.
+
+**Changes:** both workbenches now share one save-failure transition. It preserves
+the old path/source badge and dirty state, retains editor focus, and publishes
+the complete red `Save failed` message through diagnostics, elided persistent
+status with full tooltip/accessibility text, and the global last-action notice.
+C now catches the same Unicode write failures as Assembly.
+
+**Verification:** Assembly and C acceptance each select a child path beneath a
+known regular file, require the save to fail, and verify unchanged source path,
+editor focus, error severity, red status, full tooltip/accessibility text,
+diagnostic/global-message agreement, and screenshots of both recovery states.
+
 ## July 30 continuation — partial build/run success stays explicit
 
 **Recovery-state audit:** Assemble + Run could successfully produce an ELF and

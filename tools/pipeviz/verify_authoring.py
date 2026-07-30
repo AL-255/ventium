@@ -688,6 +688,37 @@ def scenario(app, outdir):
         assert Path(assembly_bare_path + ".s").read_text(
             encoding="utf-8") == "i r . [ ] /"
         assert "Saved assembly-no-extension.s" in win.action_hint.text()
+        saved_assembly_path = win.assembly._path
+        editor.document().setModified(True)
+        assert win.workspace.tabText(1) == "Assembly *"
+        blocked_assembly_save = str(
+            blocked_artifacts / "cannot-save-assembly.s")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (blocked_assembly_save, "Assembly (*.s)"))
+        try:
+            assert not win.assembly.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.assembly._path == saved_assembly_path
+        assert editor.document().isModified()
+        assert win.workspace.tabText(1) == "Assembly *"
+        assert win.assembly.source_badge.text().endswith("*")
+        assert app.focusWidget() is editor
+        assert win.assembly.status.text().startswith("Save failed · ")
+        assert "cannot-save-assembly.s" in win.assembly.status.text()
+        assert win.assembly.status.toolTip() == win.assembly.status.text()
+        assert win.assembly.status.accessibleDescription() == (
+            win.assembly.status.text())
+        assert "#f85149" in win.assembly.status.styleSheet()
+        assert win.assembly.diagnostics._severity == "error"
+        assert win.assembly.status.text() in (
+            win.assembly.diagnostics.accessibleDescription())
+        assert win.action_hint.text() == win.assembly.status.text()
+        settle(app)
+        save(win, outdir, "00c_assembly_save_failure")
+        editor.document().setModified(False)
         dropped_assembly = Path(outdir) / "dropped-source.S"
         dropped_assembly.write_text(
             ".intel_syntax noprefix\nmov eax, 17\n", encoding="utf-8")
@@ -2096,6 +2127,36 @@ def scenario(app, outdir):
         assert Path(c_bare_path + ".c").read_text(
             encoding="utf-8") == win.c_source.editor.toPlainText()
         assert "Saved c-no-extension.c" in win.action_hint.text()
+        saved_c_path = win.c_source._path
+        win.c_source.editor.document().setModified(True)
+        assert win.workspace.tabText(2) == "C *"
+        blocked_c_save = str(blocked_artifacts / "cannot-save-c.c")
+        real_save_dialog = QFileDialog.getSaveFileName
+        QFileDialog.getSaveFileName = staticmethod(
+            lambda *_args, **_kwargs:
+            (blocked_c_save, "C source (*.c)"))
+        try:
+            assert not win.c_source.save_source(save_as=True)
+        finally:
+            QFileDialog.getSaveFileName = staticmethod(real_save_dialog)
+        assert win.c_source._path == saved_c_path
+        assert win.c_source.editor.document().isModified()
+        assert win.workspace.tabText(2) == "C *"
+        assert win.c_source.source_badge.text().endswith("*")
+        assert app.focusWidget() is win.c_source.editor
+        assert win.c_source.status.text().startswith("Save failed · ")
+        assert "cannot-save-c.c" in win.c_source.status.text()
+        assert win.c_source.status.toolTip() == win.c_source.status.text()
+        assert win.c_source.status.accessibleDescription() == (
+            win.c_source.status.text())
+        assert "#f85149" in win.c_source.status.styleSheet()
+        assert win.c_source.diagnostics._severity == "error"
+        assert win.c_source.status.text() in (
+            win.c_source.diagnostics.accessibleDescription())
+        assert win.action_hint.text() == win.c_source.status.text()
+        settle(app)
+        save(win, outdir, "03d_c_save_failure")
+        win.c_source.editor.document().setModified(False)
         invalid_c_path = Path(outdir) / "invalid-encoding.c"
         invalid_c_path.write_bytes(b"\x80\x81")
         preserved_c = win.c_source.editor.toPlainText()
