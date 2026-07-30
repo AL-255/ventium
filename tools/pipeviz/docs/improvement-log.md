@@ -9,6 +9,22 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — intentional compact source identity
+
+**Compact-authoring audit:** the C source badge fit inside the 900-pixel window,
+but Qt hard-clipped its text after `built-in U/V demo ·`. That silently hid the
+important `not saved` state and looked like a rendering defect.
+
+**Changes:** Assembly and C now share a resize-aware source badge. It retains
+the complete semantic text, tooltip, and accessible description while painting
+a true middle ellipsis whenever the allocated width is smaller; the trailing
+dirty `*` or `not saved` state therefore remains visible.
+
+**Verification:** compact authoring acceptance measures each actually painted
+badge string against its content rectangle and requires an ellipsis whenever
+the full value exceeds it, in addition to the existing 900×620 bounds and
+full-identity accessibility checks.
+
 ## July 30 continuation — honest event-navigation endpoints
 
 **Navigation-edge audit:** both event arrows remained enabled after reset, for

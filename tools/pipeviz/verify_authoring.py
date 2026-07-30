@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import (
-    QCloseEvent, QGuiApplication, QTextCursor, QWheelEvent,
+    QCloseEvent, QFontMetrics, QGuiApplication, QTextCursor, QWheelEvent,
 )
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -904,6 +904,16 @@ def scenario(app, outdir):
             win, win.assembly.cursor_position.rect().bottomRight())
         assert win.assembly.source_badge.isVisible()
         assert win.assembly.source_badge.width() >= 200
+        assembly_badge_display = win.assembly.source_badge.displayText()
+        assert QFontMetrics(
+            win.assembly.source_badge.font()).horizontalAdvance(
+                assembly_badge_display) <= (
+                    win.assembly.source_badge.contentsRect().width() + 1)
+        if QFontMetrics(
+                win.assembly.source_badge.font()).horizontalAdvance(
+                    win.assembly.source_badge.text()) > (
+                        win.assembly.source_badge.contentsRect().width()):
+            assert "…" in assembly_badge_display
         assert 0 <= badge_corner.x() < win.width()
         assert 0 <= badge_corner.y() < win.height()
         assert 0 <= cursor_corner.x() < win.width()
@@ -2002,6 +2012,42 @@ def scenario(app, outdir):
             win, win.c_source.cursor_position.rect().bottomRight())
         assert win.c_source.source_badge.isVisible()
         assert win.c_source.source_badge.width() >= 200
+        c_badge_display = win.c_source.source_badge.displayText()
+        assert QFontMetrics(
+            win.c_source.source_badge.font()).horizontalAdvance(
+                c_badge_display) <= (
+                    win.c_source.source_badge.contentsRect().width() + 1)
+        if QFontMetrics(
+                win.c_source.source_badge.font()).horizontalAdvance(
+                    win.c_source.source_badge.text()) > (
+                        win.c_source.source_badge.contentsRect().width()):
+            assert "…" in c_badge_display
+        badge_path = os.path.join(
+            outdir,
+            "dual-fibonacci-scheduling-experiment-with-a-deliberately-"
+            "long-source-name-for-compact-layout.c")
+        original_badge_path = win.c_source._path
+        original_badge_modified = (
+            win.c_source.editor.document().isModified())
+        win.c_source._path = badge_path
+        win.c_source.editor.document().setModified(True)
+        win.c_source._sync_source_badge()
+        settle(app)
+        assert win.c_source.source_badge.text().endswith(".c *")
+        assert "…" in win.c_source.source_badge.displayText()
+        assert win.c_source.source_badge.displayText().endswith("*")
+        assert QFontMetrics(
+            win.c_source.source_badge.font()).horizontalAdvance(
+                win.c_source.source_badge.displayText()) <= (
+                    win.c_source.source_badge.contentsRect().width() + 1)
+        assert win.c_source.source_badge.toolTip() == (
+            os.path.abspath(badge_path) + "\nUnsaved changes")
+        save(win, outdir, "03aa_c_compact_long_source")
+        win.c_source._path = original_badge_path
+        win.c_source.editor.document().setModified(
+            original_badge_modified)
+        win.c_source._sync_source_badge()
+        settle(app)
         assert 0 <= badge_corner.x() < win.width()
         assert 0 <= badge_corner.y() < win.height()
         assert 0 <= cursor_corner.x() < win.width()

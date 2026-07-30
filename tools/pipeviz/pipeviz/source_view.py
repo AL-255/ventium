@@ -1775,6 +1775,46 @@ class _StatusLabel(QLabel):
         self.setAccessibleDescription(text)
 
 
+class _SourceBadge(QLabel):
+    """Paint a width-aware identity while retaining its complete semantic text."""
+
+    def __init__(self, parent=None):
+        super().__init__("", parent)
+        self._full_text = ""
+        self._display_text = ""
+        self.setMinimumWidth(200)
+        self.setMaximumWidth(330)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+
+    def setText(self, text):
+        self._full_text = str(text)
+        self.updateGeometry()
+        self._sync_display()
+
+    def text(self):
+        return self._full_text
+
+    def displayText(self):
+        """Return the actual painted value for compact-layout acceptance."""
+        return self._display_text
+
+    def sizeHint(self):
+        base = QLabel.sizeHint(self)
+        natural = QFontMetrics(self.font()).horizontalAdvance(
+            self._full_text) + 8
+        return QSize(min(self.maximumWidth(), natural), base.height())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_display()
+
+    def _sync_display(self):
+        width = max(0, self.contentsRect().width())
+        self._display_text = QFontMetrics(self.font()).elidedText(
+            self._full_text, Qt.ElideMiddle, width)
+        QLabel.setText(self, self._display_text)
+
+
 class _CursorPositionLabel(QToolButton):
     """Persistent one-based source location and a compact Go-to-Line control."""
 
@@ -1869,9 +1909,7 @@ def _sync_source_badge(badge, editor, path, origin):
         full = f"{origin} (not saved)"
         identity = origin
         suffix = " *" if dirty else " · not saved"
-    display = QFontMetrics(badge.font()).elidedText(
-        identity, Qt.ElideMiddle, 215)
-    badge.setText(f"source · {display}{suffix}")
+    badge.setText(f"source · {identity}{suffix}")
     detail = full + ("\nUnsaved changes" if dirty else "")
     badge.setToolTip(detail)
     badge.setAccessibleDescription(
@@ -1970,10 +2008,9 @@ class AssemblyView(QWidget):
         status_row.addWidget(self.status, 1)
         self.cursor_position = _CursorPositionLabel(self.editor)
         status_row.addWidget(self.cursor_position)
-        self.source_badge = QLabel()
+        self.source_badge = _SourceBadge()
         self.source_badge.setAccessibleName("Assembly source identity")
         self.source_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.source_badge.setMaximumWidth(330)
         status_row.addWidget(self.source_badge)
         layout.addLayout(status_row)
 
@@ -2332,10 +2369,9 @@ class CView(QWidget):
         status_row.addWidget(self.status, 1)
         self.cursor_position = _CursorPositionLabel(self.editor)
         status_row.addWidget(self.cursor_position)
-        self.source_badge = QLabel()
+        self.source_badge = _SourceBadge()
         self.source_badge.setAccessibleName("C source identity")
         self.source_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.source_badge.setMaximumWidth(330)
         status_row.addWidget(self.source_badge)
         layout.addLayout(status_row)
         self._path = None
