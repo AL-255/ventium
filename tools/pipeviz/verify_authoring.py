@@ -263,6 +263,11 @@ def scenario(app, outdir):
         assert win.assembly.status.toolTip() == win.assembly.status.text()
         assert win.assembly.status.accessibleDescription() == (
             win.assembly.status.text())
+        assert win.assembly.cursor_position.text() == "Ln 1 · Col 1"
+        assert win.assembly.cursor_position.accessibleName() == (
+            "Source cursor position")
+        assert win.assembly.cursor_position.accessibleDescription() == (
+            "Cursor at source line 1, column 1")
         assert win.assembly.source_badge.accessibleName() == "Assembly source identity"
         assert win.assembly.source_badge.accessibleDescription() == (
             "Source origin built-in template; not saved. No unsaved changes.")
@@ -490,6 +495,9 @@ def scenario(app, outdir):
         assert editor.textCursor().blockNumber() + 1 == 5
         assert editor.textCursor().selectedText() == "    mov eax, 0"
         assert app.focusWidget() is editor
+        assert win.assembly.cursor_position.text().startswith("Ln 5 · Col ")
+        assert "source line 5" in (
+            win.assembly.cursor_position.accessibleDescription())
         save(win, outdir, "00_assembly_workbench")
         win.resize(900, 620)
         settle(app)
@@ -518,10 +526,14 @@ def scenario(app, outdir):
         assert not unnamed_assembly_focus, unnamed_assembly_focus
         badge_corner = win.assembly.source_badge.mapTo(
             win, win.assembly.source_badge.rect().bottomRight())
+        cursor_corner = win.assembly.cursor_position.mapTo(
+            win, win.assembly.cursor_position.rect().bottomRight())
         assert win.assembly.source_badge.isVisible()
         assert win.assembly.source_badge.width() >= 200
         assert 0 <= badge_corner.x() < win.width()
         assert 0 <= badge_corner.y() < win.height()
+        assert 0 <= cursor_corner.x() < win.width()
+        assert 0 <= cursor_corner.y() < win.height()
         assert editor.width() >= 500 and editor.height() >= 400
         assert "Ctrl+Tab" in editor.accessibleDescription()
         assert "Ctrl+/" in editor.accessibleDescription()
@@ -1339,6 +1351,11 @@ def scenario(app, outdir):
         assert win.c_source.status.toolTip() == win.c_source.status.text()
         assert win.c_source.status.accessibleDescription() == (
             win.c_source.status.text())
+        assert win.c_source.cursor_position.accessibleName() == (
+            "Source cursor position")
+        assert win.c_source.cursor_position.text().startswith("Ln ")
+        assert "column" in (
+            win.c_source.cursor_position.accessibleDescription())
         assert win.c_source.source_badge.accessibleDescription() == (
             "Source origin built-in template; not saved. No unsaved changes.")
         assert win.c_source.optimization.accessibleName()
@@ -1371,10 +1388,14 @@ def scenario(app, outdir):
         assert not unnamed_c_focus, unnamed_c_focus
         badge_corner = win.c_source.source_badge.mapTo(
             win, win.c_source.source_badge.rect().bottomRight())
+        cursor_corner = win.c_source.cursor_position.mapTo(
+            win, win.c_source.cursor_position.rect().bottomRight())
         assert win.c_source.source_badge.isVisible()
         assert win.c_source.source_badge.width() >= 200
         assert 0 <= badge_corner.x() < win.width()
         assert 0 <= badge_corner.y() < win.height()
+        assert 0 <= cursor_corner.x() < win.width()
+        assert 0 <= cursor_corner.y() < win.height()
         assert (
             win.c_source.editor.width() >= 800
             and win.c_source.editor.height() >= 320)

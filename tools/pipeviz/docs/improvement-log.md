@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Long-source orientation audit:** line numbers identified rows, but neither
+workbench exposed the active column or a persistent location once transient
+status changed. Both status rows now include a compact one-based Ln · Col
+readout with full tooltip/accessibility text. It updates for keyboard, gutter,
+diagnostic, and execution-link navigation without consuming build/source
+status; 900×620 acceptance locks both readouts inside the window.
+
 **Long-source readability audit:** Assembly/C text and line numbers were fixed
 at 10 pt, while their Ctrl+0 still reset hidden Visualizer splitters. Source
 editors now zoom together from 8–24 pt on Ctrl+-/Ctrl+=, recompute tab stops and

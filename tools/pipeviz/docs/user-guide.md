@@ -317,6 +317,8 @@ mislabelled as compiler-generated—and clears any obsolete PC map before the
 new source can be linked. Visualizer restores Ctrl+O to opening executable programs.
 Dropping `.s`/`.S`/`.asm` or `.c`/`.h` routes the file to its source workspace;
 it is never mistaken for a raw executable.
+The adjacent one-based `Ln · Col` readout tracks the active caret independently
+of build/source status and exposes the full location to assistive technology.
 Each workbench remembers its most recent source folder for later Open/Save As
 dialogs, including after starting a new template.
 New/Open, generated C-to-Assembly replacement, and application close never

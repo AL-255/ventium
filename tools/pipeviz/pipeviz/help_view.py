@@ -240,8 +240,9 @@ accessible description retain the complete saved path or generated/template
 origin plus not-saved and unsaved-change state.</p>
 <p>The adjacent Assembly/C status preserves its full build, stale-map, or
 PC/line message in both a tooltip and accessible description if the compact
-label is clipped. Both workbenches remain usable at the tested 900×620 compact
-window size.</p>
+label is clipped. A persistent one-based <b>Ln · Col</b> readout beside it
+tracks the active source caret independently of transient build messages. Both
+workbenches remain usable at the tested 900×620 compact window size.</p>
 <p>Ctrl+F opens an inline source search with all-match highlighting and a
 current/total count. Enter or F3 moves forward, Shift+Enter or Shift+F3 moves
 backward, and Escape closes the search. It is a case-insensitive literal search;

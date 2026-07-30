@@ -1500,6 +1500,30 @@ class _StatusLabel(QLabel):
         self.setAccessibleDescription(text)
 
 
+class _CursorPositionLabel(QLabel):
+    """Persistent one-based source location independent of build status."""
+
+    def __init__(self, editor, parent=None):
+        super().__init__(parent)
+        self.editor = editor
+        self.setAccessibleName("Source cursor position")
+        self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.setMinimumWidth(92)
+        self.setMaximumWidth(145)
+        self.setStyleSheet("color:#8b949e;padding:2px 6px;")
+        editor.cursorPositionChanged.connect(self.refresh)
+        self.refresh()
+
+    def refresh(self):
+        cursor = self.editor.textCursor()
+        line = cursor.blockNumber() + 1
+        column = cursor.positionInBlock() + 1
+        self.setText(f"Ln {line} · Col {column}")
+        detail = f"Cursor at source line {line}, column {column}"
+        self.setToolTip(detail)
+        self.setAccessibleDescription(detail)
+
+
 def _confirm_source_replacement(view, label, action):
     """Protect edited source before replacing it or closing the application."""
     if not view.editor.document().isModified():
@@ -1629,6 +1653,8 @@ class AssemblyView(QWidget):
             "Assembly workbench status")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         status_row.addWidget(self.status, 1)
+        self.cursor_position = _CursorPositionLabel(self.editor)
+        status_row.addWidget(self.cursor_position)
         self.source_badge = QLabel()
         self.source_badge.setAccessibleName("Assembly source identity")
         self.source_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -1972,6 +1998,8 @@ class CView(QWidget):
             "C compiler workbench status")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
         status_row.addWidget(self.status, 1)
+        self.cursor_position = _CursorPositionLabel(self.editor)
+        status_row.addWidget(self.cursor_position)
         self.source_badge = QLabel()
         self.source_badge.setAccessibleName("C source identity")
         self.source_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
