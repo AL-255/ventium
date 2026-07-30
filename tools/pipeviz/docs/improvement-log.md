@@ -9,6 +9,23 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — visible completion match count
+
+**Completion-navigation audit:** the popup exposed its match count only through
+assistive metadata. Visually, an explicit full-catalogue request and a narrowed
+prefix looked identical apart from list length, so users could not tell whether
+they were browsing all supported opcodes.
+
+**Changes:** the existing footer now begins with `291 opcodes` for reference
+mode or a singular/plural live match count for prefix mode. The compact wording
+retains arrows, paging, bounds, insertion, double-click, and Escape guidance
+without increasing the 650×257 popup.
+
+**Verification:** interaction acceptance requires `ad` to show exactly
+`2 matches`, full reference mode to show `291 opcodes`, and the tooltip and
+accessible description to retain prefix/catalogue scope plus complete controls.
+Both filtered and full popup captures verify the footer fits.
+
 ## July 30 continuation — directional system and x87 control help
 
 **System/control audit:** LGDT/SGDT, LTR/STR, segment loads, near/far returns,

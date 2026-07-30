@@ -1089,6 +1089,10 @@ def scenario(app, outdir):
         cursor.movePosition(QTextCursor.End)
         editor.setTextCursor(cursor)
         assert editor.request_completion()
+        assert editor.completion.list.count() == 2
+        assert editor.completion.hint.text().startswith("2 matches ·")
+        assert "prefix ad" in editor.completion.hint.accessibleDescription()
+        save(editor.completion, outdir, "01_opcode_filtered_popup")
         QTest.keyClick(editor, Qt.Key_Tab, Qt.ControlModifier)
         settle(app)
         assert app.focusWidget() is win.assembly.diagnostics
@@ -1150,7 +1154,11 @@ def scenario(app, outdir):
         assert editor.completion.accessibleName() == "Opcode completion popup"
         assert editor.completion.hint.accessibleName() == (
             "Completion keyboard help")
+        assert editor.completion.hint.text().startswith(
+            f"{len(CATALOG)} opcodes ·")
         assert "Enter/Tab insert" in editor.completion.hint.text()
+        assert "complete catalogue" in (
+            editor.completion.hint.accessibleDescription())
         completion_accessible = editor.completion.list.accessibleDescription()
         assert f"{len(CATALOG)} matching opcodes" in completion_accessible
         assert "Enter or Tab to insert" in completion_accessible

@@ -296,6 +296,8 @@ Ordinary `user` availability is neutral; system, build-flag, SMM, and
 co-simulation restrictions turn amber so the color signals a real constraint.
 The completion list does not repeat the mnemonic inside its operand form; the
 adjacent detail pane still shows the complete signature.
+The footer changes from `291 opcodes` to the live prefix-match count while
+keeping selection, insertion, pointer, and close controls visible.
 With no opcode selected, the persistent sidebar uses one compact empty state
 and points to caret placement or `Ctrl+Space`.
 Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,

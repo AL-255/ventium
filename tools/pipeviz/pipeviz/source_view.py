@@ -1190,9 +1190,7 @@ class CompletionPopup(QFrame):
         body.addWidget(self.list)
         body.addWidget(self.info, 1)
         layout.addLayout(body, 1)
-        self.hint = QLabel(
-            "↑/↓ choose · PgUp/PgDn jump · Home/End bounds · Enter/Tab insert · "
-            "Esc close · double-click insert")
+        self.hint = QLabel("")
         self.hint.setAccessibleName("Completion keyboard help")
         self.hint.setStyleSheet(
             "border:0;border-top:1px solid #30363d;"
@@ -1222,6 +1220,19 @@ class CompletionPopup(QFrame):
             self.hide()
             return
         scope = f"prefix {prefix}" if prefix else "the complete catalogue"
+        count_text = (
+            f"{len(matches)} {'match' if len(matches) == 1 else 'matches'}"
+            if prefix else
+            f"{len(matches)} opcodes")
+        controls = (
+            "↑↓/PgUp/PgDn/Home/End select · Enter/Tab insert · "
+            "double-click insert · Esc close")
+        self.hint.setText(f"{count_text} · {controls}")
+        self.hint.setToolTip(
+            f"{count_text} for {scope}. Use arrows or Page Up/Page Down to "
+            "choose, Home/End for the bounds, Enter/Tab or double-click to "
+            "insert, and Escape to close.")
+        self.hint.setAccessibleDescription(self.hint.toolTip())
         self.list.setAccessibleDescription(
             f"{len(matches)} matching opcodes for {scope}. "
             "Use arrows or Page Up and Page Down to choose, Home or End for "

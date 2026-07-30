@@ -289,7 +289,8 @@ stack/flag order. System/control and x87 environment/transcendental forms state
 load/store, near/far return, WAIT, stack, and mathematical direction. Normal user
 availability is neutral; mode- or build-gated operations say so explicitly in
 amber. Each list row shows mnemonic, pipe class, and operands without repeating
-the mnemonic; the detail pane shows the complete signature. Regression covers
+the mnemonic; the detail pane shows the complete signature. The footer reports
+all 291 opcodes or the live prefix-match count beside its controls. Regression covers
 every RTL decoder family and all 121 exact 32-bit P5 timing mnemonics. Use
 Up/Down or Page
 Up/Page Down to choose, Home/End for the

@@ -145,7 +145,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     mode/build availability notes (amber only when restricted), and an
     opcode-specific description plus miniature pipeline
     preview for every completion. The compact list shows mnemonic, pipe class,
-    and operands once; the detail pane retains the full signature.
+    and operands once; the detail pane retains the full signature. Its footer
+    reports all 291 opcodes or the current prefix-match count beside the controls.
     Jcc/SETcc aliases name their exact signed/unsigned flag predicate, while
     LOOP/JCXZ entries explain their counter and ZF behavior.
     x87 load/store/arithmetic/compare/constant/stack/control entries distinguish
