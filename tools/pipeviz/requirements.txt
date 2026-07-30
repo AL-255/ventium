@@ -1,0 +1,3 @@
+# Runtime-only Python dependencies for the Pipeviz GUI.
+PySide6>=6.6
+capstone>=5,<6

@@ -26,4 +26,16 @@ fi
 # run from the repo root so default image paths (build/...) resolve, with the
 # package dir on PYTHONPATH so `import pipeviz` works.
 cd "$ROOT"
-exec env PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" python3 -m pipeviz.main "${ARGS[@]}"
+PYTHON_BIN="${PIPEVIZ_PYTHON:-python3}"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  echo "[run] Python interpreter not found: $PYTHON_BIN" >&2
+  echo "[run] set PIPEVIZ_PYTHON=/path/to/python" >&2
+  exit 1
+fi
+if ! "$PYTHON_BIN" -c 'import PySide6, capstone' >/dev/null 2>&1; then
+  echo "[run] missing Python GUI dependencies for $PYTHON_BIN" >&2
+  echo "[run] install with: $PYTHON_BIN -m pip install -r $HERE/requirements.txt" >&2
+  exit 1
+fi
+exec env PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" \
+  "$PYTHON_BIN" -m pipeviz.main "${ARGS[@]}"

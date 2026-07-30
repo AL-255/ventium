@@ -91,6 +91,8 @@ Procedure:
 
 1. Verify explicit-image, explicit-snapshot, and no-argument demo startup
    resolution are mutually distinct (a snapshot never falls through to a demo).
+   Launch `run.sh --help` through the selected Miniconda interpreter and require
+   a missing `PIPEVIZ_PYTHON` to fail with an actionable override hint.
 2. Construct and show a fresh `MainWindow`.
 3. Inject a backend-construction failure and a separate SoC-plus-core
    double-failure; require the existing live handle and requested mode to
@@ -128,6 +130,8 @@ Procedure:
 Expected and observed:
 
 - Status says no image is loaded.
+- The launcher honors the selected Miniconda interpreter and diagnoses a
+  missing interpreter before Qt startup.
 - Backend replacement is transactional across both direct and SoC-fallback
   construction failures.
 - Every data pane distinguishes unloaded state from sampled zero/empty state.

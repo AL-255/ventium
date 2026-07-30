@@ -16,6 +16,16 @@ From the repository root, build and launch with a supplied program:
 tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
 ```
 
+The launcher uses `python3` by default. To use a particular environment:
+
+```sh
+PIPEVIZ_PYTHON="$HOME/miniconda3/bin/python" \
+  tools/pipeviz/run.sh build/verify/mb_brloop.cycle.flat
+```
+
+If PySide6 or Capstone is missing, the launcher prints the exact
+`pip install -r tools/pipeviz/requirements.txt` command before exiting.
+
 `Open…` accepts raw `.flat`/`.bin`/`.img`/`.rom` images and little-endian
 32-bit x86 ELF files. Empty files and DOS/PE executables are rejected with a
 clear format error. For a raw

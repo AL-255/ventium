@@ -223,6 +223,14 @@ finish with an accurate `Opened <name>` workbench state and an exact global
 Assembly/C notice after replacement safety/map invalidation. Drop-path
 acceptance locks both filenames and both status surfaces.
 
+**Launcher environment audit:** verification deliberately used the Miniconda
+base interpreter, but `run.sh` hardcoded the first `python3` on PATH and missing
+Qt/Capstone imports failed as a Python traceback. The launcher now honors
+`PIPEVIZ_PYTHON`, preflights the interpreter plus both imports, and emits an
+exact requirements install command. A local `requirements.txt` constrains
+PySide6 and Capstone, and acceptance proves both the selected-interpreter help
+path and actionable missing-interpreter failure.
+
 ## July 29 continuation — self-contained C/x87 and source-marker correctness
 
 **Self-critique:** the initial C path targeted Pentium but still allowed GCC

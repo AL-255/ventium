@@ -59,8 +59,19 @@ empty window.
 
 Requirements (all already present in this repo's toolchain): `verilator` (5.x),
 a C++17 compiler, GNU `gcc`/`as`/`ld`/`objdump`, and `python3` with
-**PySide6** and **capstone**
-(`pip install PySide6 capstone`).
+**PySide6** and **capstone**:
+
+```sh
+python3 -m pip install -r tools/pipeviz/requirements.txt
+```
+
+`run.sh` checks those imports before opening Qt and prints that command instead
+of a traceback when they are absent. Set `PIPEVIZ_PYTHON` to select an
+environment explicitly, for example:
+
+```sh
+PIPEVIZ_PYTHON="$HOME/miniconda3/bin/python" tools/pipeviz/run.sh
+```
 
 For guided, reproducible investigations of dual issue, cache pressure, x87, and
 system paging, see [the user guide](docs/user-guide.md).  Its examples have an

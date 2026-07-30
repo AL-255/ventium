@@ -639,6 +639,19 @@ def scenario_startup(app, outdir):
         cwd=HERE, text=True, capture_output=True)
     assert conflict.returncode == 2
     assert "cannot be combined" in conflict.stderr
+    launcher_env = os.environ.copy()
+    launcher_env["PIPEVIZ_PYTHON"] = sys.executable
+    launcher = subprocess.run(
+        ["bash", os.path.join(HERE, "run.sh"), "--help"],
+        cwd=HERE, env=launcher_env, text=True, capture_output=True)
+    assert launcher.returncode == 0
+    assert "Ventium pipeline visualizer" in launcher.stdout
+    launcher_env["PIPEVIZ_PYTHON"] = "/missing/pipeviz-python"
+    launcher = subprocess.run(
+        ["bash", os.path.join(HERE, "run.sh"), "--help"],
+        cwd=HERE, env=launcher_env, text=True, capture_output=True)
+    assert launcher.returncode == 1
+    assert "set PIPEVIZ_PYTHON=/path/to/python" in launcher.stderr
 
     win = new_window(app)
     try:
