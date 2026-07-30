@@ -82,6 +82,18 @@ the selected optimization and explicitly requests a recompile after it changes.
 Generated-Assembly, post-build, compiler-error, and optimization regressions
 cover every invalidation path.
 
+**Workspace-focus audit:** Alt+A/Alt+C/Alt+V changed tabs but could leave
+keyboard focus on the hidden surface, forcing an unexplained click before
+Ctrl+F, completion, editing, Pipeline traversal, or Escape worked. Workspace
+changes now defer focus to the Assembly editor, C editor, or Pipeline timing
+diagram after the tab event completes. The C→generated-Assembly transition gets
+the same editor focus. A full shortcut round-trip regression locks the focus
+contract rather than merely checking the visible tab.
+The first keyboard regression exposed that the View menu mnemonic also claimed
+Alt+V, which made Qt report an ambiguous shortcut and ignore the workspace
+action. View now uses Alt+W while Alt+V remains dedicated to Visualizer; tests
+exercise the actual keystrokes rather than only inspecting shortcut strings.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

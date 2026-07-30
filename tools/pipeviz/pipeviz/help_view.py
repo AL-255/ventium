@@ -269,7 +269,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Ctrl+Shift+O</b></td><td>open snapshot</td></tr>
  <tr><td><b>Ctrl+Shift+R</b></td><td>reload the current program from disk</td></tr>
  <tr><td><b>Ctrl+0</b></td><td>reset panel proportions</td></tr>
- <tr><td><b>Alt+V / Alt+A / Alt+C</b></td><td>Visualizer / Assembly / C workspace</td></tr>
+ <tr><td><b>Alt+V / Alt+A / Alt+C</b></td><td>switch workspace and focus Pipeline / Assembly / C</td></tr>
  <tr><td><b>Alt+1 … Alt+0</b></td><td>select Code$ … Mem map analysis tab</td></tr>
  <tr><td><b>R</b></td><td>reset or restore snapshot</td></tr>
  <tr><td><b>.</b></td><td>one clock</td></tr>

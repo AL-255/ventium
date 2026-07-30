@@ -905,6 +905,7 @@ def scenario_startup(app, outdir):
             action.text() for action, _candidates in win._example_actions
             if action.isEnabled()}
         view_actions = {action.text() for action in win._view_menu.actions()}
+        assert win._view_menu.title() == "Vie&w"
         assert {"Workspace", "Reset panel layout", "Show session toolbar",
                 "Show transport toolbar", "Show status toolbar",
                 "Analysis tab"} <= view_actions

@@ -218,8 +218,23 @@ def scenario(app, outdir):
             "Visualizer", "Assembly", "C"]
         assert [action.shortcut().toString()
                 for action in win._workspace_actions] == ["Alt+V", "Alt+A", "Alt+C"]
-        win.workspace.setCurrentWidget(win.assembly)
+        assert win._view_menu.title() == "Vie&w"
+        QTest.keyClick(win, Qt.Key_A, Qt.AltModifier)
         settle(app)
+        assert win.workspace.currentWidget() is win.assembly
+        assert app.focusWidget() is win.assembly.editor
+        QTest.keyClick(win.assembly.editor, Qt.Key_C, Qt.AltModifier)
+        settle(app)
+        assert win.workspace.currentWidget() is win.c_source
+        assert app.focusWidget() is win.c_source.editor
+        QTest.keyClick(win.c_source.editor, Qt.Key_V, Qt.AltModifier)
+        settle(app)
+        assert win.workspace.currentWidget() is win.visualizer_tab
+        assert app.focusWidget() is win.pipeline.konata.plot
+        QTest.keyClick(win.pipeline.konata.plot, Qt.Key_A, Qt.AltModifier)
+        settle(app)
+        assert win.workspace.currentWidget() is win.assembly
+        assert app.focusWidget() is win.assembly.editor
         toolbars = (
             win.session_toolbar, win.transport_toolbar, win.status_toolbar)
         assert all(toolbar.isHidden() for toolbar in toolbars)
@@ -883,6 +898,7 @@ def scenario(app, outdir):
         settle(app)
         assert generated is not None
         assert win.workspace.currentWidget() is win.assembly
+        assert app.focusWidget() is win.assembly.editor
         assert "call main" in win.assembly.editor.toPlainText()
         assert "Assembly generated from C compiler" in win.assembly.status.text()
         save(win, outdir, "04_c_generated_assembly")

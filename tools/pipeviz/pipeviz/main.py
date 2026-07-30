@@ -336,7 +336,10 @@ class MainWindow(QMainWindow):
         file_menu.addAction(quit_action)
         self._file_menu = file_menu
 
-        view_menu = self.menuBar().addMenu("&View")
+        # Alt+V is the documented Visualizer workspace shortcut. Giving the
+        # menu the same mnemonic makes QAction dispatch ambiguous on Qt/X11,
+        # so retain keyboard menu access on Alt+W instead.
+        view_menu = self.menuBar().addMenu("Vie&w")
         workspace_menu = view_menu.addMenu("Workspace")
         self._workspace_actions = []
         for label, key, index in (
@@ -810,6 +813,22 @@ class MainWindow(QMainWindow):
                 toolbar.setVisible(shown)
             self._source_workspace_active = False
         self._sync_workspace_file_actions()
+        # A workspace shortcut should complete the navigation, not strand
+        # keyboard focus on a now-hidden tab. Defer until the tab switch event
+        # finishes so mouse/shortcut dispatch cannot immediately steal it back.
+        QTimer.singleShot(
+            0, lambda selected=index:
+            self._focus_workspace_content(selected))
+
+    def _focus_workspace_content(self, index):
+        if self.workspace.currentIndex() != index:
+            return
+        target = (
+            self.pipeline.konata.plot if index == 0 else
+            self.assembly.editor if index == 1 else
+            self.c_source.editor if index == 2 else None)
+        if target is not None and target.isVisible():
+            target.setFocus(Qt.ShortcutFocusReason)
 
     def _sync_workspace_file_actions(self):
         if not hasattr(self, "open_action"):

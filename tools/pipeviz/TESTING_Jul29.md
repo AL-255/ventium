@@ -451,6 +451,8 @@ Procedure:
    Cancel the file chooser with dirty source and require no discard prompt.
    Drop `.S` and `.c` files and require routing to their source workspaces
    without loading either as executable bytes or replacing the active backend.
+   Traverse Alt+A→Alt+C→Alt+V→Alt+A and require focus to land on the Assembly
+   editor, C editor, Pipeline timing diagram, and Assembly editor in turn.
    Point the artifact directory at a regular file and require a normal
    `BuildFailure` diagnostic with no backend session or raw Python exception.
 3. Open the complete Ctrl+Space popup; require its description, availability,
@@ -490,7 +492,8 @@ Procedure:
    permits a new template and clears the marker.
 9. Compile the freestanding Fibonacci C template at O2 into editable Intel
    assembly, require editing that generated text to clear its origin/result
-   diagnostic, assemble+run it, and require EAX = 144.
+   diagnostic, require the automatic Assembly switch to focus its editor,
+   assemble+run it, and require EAX = 144.
 10. Select the C-generated entry/loop in Trace and require its emitted assembly
     line to highlight.
 11. Compile an array-initialization loop and require self-contained assembly

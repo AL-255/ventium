@@ -165,7 +165,9 @@ always a memory access.
 ## Write and run an assembly experiment
 
 Select the **Assembly** workspace (`Alt+A`). The initial GNU Intel-syntax
-template is immediately runnable:
+template is immediately runnable. Workspace shortcuts also place keyboard focus
+where it is useful: `Alt+A` in Assembly, `Alt+C` in C, and `Alt+V` on the
+Pipeline timing diagram.
 
 ```asm
 .intel_syntax noprefix

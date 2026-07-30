@@ -256,7 +256,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 Keyboard: `Ctrl+O` opens a program, `Ctrl+Shift+O` opens a snapshot, `R` resets
 (or restores a snapshot), `.` advances one clock, `I` / `Space` advances to the
 next retirement, and `F5` runs or pauses. `Ctrl+0` restores the recommended
-splitter proportions. `Alt+V`, `Alt+A`, and `Alt+C` switch workspaces;
+splitter proportions. `Alt+V`, `Alt+A`, and `Alt+C` switch workspaces and focus
+the Pipeline, Assembly editor, or C editor respectively;
 `Alt+1` through `Alt+0` select the ten analysis tabs.
 `/` focuses the trace filter from anywhere; Enter/F3 and Shift+F3 move
 among its results; Escape clears a nonempty filter, or unpins the current
