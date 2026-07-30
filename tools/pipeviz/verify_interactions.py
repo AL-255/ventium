@@ -2328,6 +2328,9 @@ def scenario_layout(app, outdir):
         assert win.outer_split.sizes()[1] >= 170
         status_html = win.status_lbl.text()
         assert status_html.index(">cyc</span>") < status_html.index(">eip</span>")
+        assert "mb_dmiss.cycle.flat" not in status_html
+        assert "mb_dmiss.cycle.flat" in win.status_lbl.toolTip()
+        assert "fills" in status_html and "walks" in status_html
         assert "cycle 160" in win.status_lbl.toolTip()
         assert "EIP 0x08048015" in win.status_lbl.toolTip()
         assert "I$ 1/256" in win.status_lbl.toolTip()
@@ -2357,6 +2360,7 @@ def scenario_layout(app, outdir):
         settle(app, 6)
         assert not win.regs._compact
         assert all(pane.isVisible() for pane, _label, _tip in win.regs._panes)
+        assert "mb_dmiss.cycle.flat" in win.status_lbl.text()
         assert win.regs.fp_pane.width() > win.regs.int_pane.width()
         assert win.regs.fp_pane.width() > win.regs.seg_pane.width()
         assert win.regs.flags_lbl.width() >= win.regs.flags_lbl.sizeHint().width()
@@ -2438,6 +2442,8 @@ def scenario_layout(app, outdir):
         assert win.action_hint.displayText().endswith("…")
         assert win.action_hint.displayText() != win.action_hint.text()
         assert win.action_hint.toolTip() == win.action_hint.text()
+        assert "mb_dmiss.cycle.flat" not in win.status_lbl.text()
+        assert "mb_dmiss.cycle.flat" in win.status_lbl.toolTip()
         save_shot(app, win, outdir, "08_compact_layout")
         print(f"OK layout: true minimum=900x620, supported compact="
               f"{win.width()}x{win.height()}, responsive trace/register "

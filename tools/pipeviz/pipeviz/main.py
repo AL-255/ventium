@@ -352,6 +352,11 @@ class MainWindow(QMainWindow):
         self.notice_timer = QTimer(self)
         self.notice_timer.setSingleShot(True)
         self.notice_timer.timeout.connect(self._clear_notice)
+        self.status_resize_timer = QTimer(self)
+        self.status_resize_timer.setSingleShot(True)
+        self.status_resize_timer.setInterval(30)
+        self.status_resize_timer.timeout.connect(
+            self._refresh_status_for_resize)
         self._running = False
         self._set_transport_enabled(False)
         self._sync_config_enabled()
@@ -870,11 +875,30 @@ class MainWindow(QMainWindow):
         self.action_hint.setToolTip(text)
         self.action_hint.setAccessibleDescription(text)
         self.notice_timer.start(ms)
+        if hasattr(self, "status_resize_timer"):
+            self.status_resize_timer.start(0)
 
     def _clear_notice(self):
         self.action_hint.setText("")
         self.action_hint.setToolTip("")
         self.action_hint.setAccessibleDescription("")
+        if hasattr(self, "status_resize_timer"):
+            self.status_resize_timer.start(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Child toolbar widths settle after the main-window resize. Debounce the
+        # rich status recomposition so interactive resizing stays cheap.
+        if hasattr(self, "status_resize_timer"):
+            self.status_resize_timer.start()
+
+    def _refresh_status_for_resize(self):
+        if not hasattr(self, "status_lbl"):
+            return
+        if self._has_session() and not getattr(self.backend, "h", None):
+            return
+        self._refresh_status(
+            self.backend.state() if self._has_session() else None)
 
     def _show_shortcuts(self):
         self._show_guide("Shortcuts")
@@ -1410,6 +1434,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # Closing while Run is active must not leave a timer dispatching into a
         # destroyed Verilator handle during Qt's deferred teardown.
+        self.status_resize_timer.stop()
         was_running = self._running
         self.stop_run()
         if not self.assembly.confirm_safe_to_discard("closing pipeviz"):
@@ -1888,7 +1913,6 @@ class MainWindow(QMainWindow):
             image = (f"{self.image_kind}: {os.path.basename(self.image_path)}"
                      if self.image_path else "no image")
         groups = [
-            f"<span style='color:#8b949e'>{image}</span>",
             chip("cyc", s.core_cyc),
             f"<span style='color:#79c0ff'>{name}</span> <span style='color:#6e7681'>{mode}</span>",
             chip("eip", f"0x{s.eip:08x}"),
@@ -1901,6 +1925,12 @@ class MainWindow(QMainWindow):
                 + "&nbsp;&nbsp;" + chip("fills", st["fill"])
                 + "&nbsp;&nbsp;" + chip("walks", st["walk"], st["walk"] > 0),
         ]
+        # The window title and full status tooltip retain image identity. At
+        # narrow widths, prioritize changing cycle/EIP/IPC/cache state instead
+        # of clipping it behind a redundant filename.
+        if self.status_lbl.width() >= 1120:
+            groups.insert(
+                0, f"<span style='color:#8b949e'>{image}</span>")
         html = "&nbsp;" + sep.join(groups)
         if self.backend.is_done():
             html += " <span style='color:#3fb950;font-weight:bold'>[DONE]</span>"

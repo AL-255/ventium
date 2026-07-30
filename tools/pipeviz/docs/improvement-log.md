@@ -37,6 +37,11 @@ Enter from the focused diagnostic or a double-click returns directly to the
 marked editor line; editing clears both the diagnostic and its stale target.
 Both the indexed in-app guide and repository user guide document the same
 keyboard/pointer jump paths.
+The simulation status now composes responsively: at narrow widths (or while a
+transient action needs room), it omits the redundant visible image name so
+cycle/EIP/IPC/cache/fill state survives. The window title, tooltip, and
+accessible description retain full image identity, and the name returns when
+space does.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
