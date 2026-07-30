@@ -107,6 +107,21 @@ def verify_catalog():
         assert set(info.stages) <= {"F", "D", "X", "M", "W", "S", "FP", "=", "!", "."}
         assert info.latency.strip()
         assert info.availability.strip()
+    expected_alu_actions = {
+        "add": "Add the source",
+        "sub": "Subtract the source",
+        "and": "Bitwise AND",
+        "or": "Bitwise OR",
+        "xor": "Bitwise XOR",
+        "cmp": "Compare by subtraction",
+    }
+    for mnemonic, opening in expected_alu_actions.items():
+        info = instruction_info(mnemonic)
+        assert info.description.startswith(opening)
+        assert mnemonic == "cmp" or "CMP" not in info.description
+    assert instruction_info("nop").description == (
+        "Perform no architectural operation.")
+    assert "CET compatibility" in instruction_info("endbr32").description
     required = {
         "aaa", "adc", "add", "bound", "bswap", "bt", "call", "cmpxchg8b",
         "cpuid", "endbr32", "f2xm1", "fadd", "fbld", "fldenv", "fprem1",

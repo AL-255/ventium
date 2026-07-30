@@ -55,8 +55,18 @@ _add("cmpxchg", "dst, src", "Compare EAX with dst, then conditionally exchange s
 _add("cmpxchg8b", "qword ptr [mem]",
      "Compare EDX:EAX with 64-bit memory, conditionally store ECX:EBX.",
      latency="two-word memory RMW")
-_add("add sub and or xor cmp", "dst, src",
-     "Integer ALU operation; CMP updates flags without storing a result.", "UV")
+_add("add", "dst, src",
+     "Add the source to the destination and update arithmetic flags.", "UV")
+_add("sub", "dst, src",
+     "Subtract the source from the destination and update arithmetic flags.", "UV")
+_add("and", "dst, src",
+     "Bitwise AND the operands, store the result, and update logical flags.", "UV")
+_add("or", "dst, src",
+     "Bitwise OR the operands, store the result, and update logical flags.", "UV")
+_add("xor", "dst, src",
+     "Bitwise XOR the operands, store the result, and update logical flags.", "UV")
+_add("cmp", "dst, src",
+     "Compare by subtraction and update flags without storing the result.", "UV")
 _add("adc sbb", "dst, src",
      "Add/subtract with carry. May lead a pair but cannot occupy V.", "PU")
 _add("test", "dst, src", "Bitwise AND for flags only.",
@@ -87,7 +97,8 @@ _add("bound", "reg, [bounds]", "Check a signed value against a memory bounds pai
      latency="slow/system path")
 _add("arpl", "r/m16, r16", "Adjust a selector's requested privilege level.",
      latency="slow/system path", availability="system/protected mode")
-_add("nop endbr32", "", "Architectural no-op / accepted CET compatibility marker.", "UV")
+_add("nop", "", "Perform no architectural operation.", "UV")
+_add("endbr32", "", "Accepted CET compatibility marker; modeled as a no-op.", "UV")
 _add("xlat", "", "Load AL from DS:[(E)BX + AL].", latency="memory load")
 
 # Stack, strings, flags, control flow, and I/O.

@@ -9,6 +9,25 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — opcode-specific common ALU descriptions
+
+**Completion-semantics audit:** selecting `add` in the generated Fibonacci loop
+showed “Integer ALU operation; CMP updates flags without storing a result.”
+The metadata was technically a family description, but mentioning a different
+opcode beside an exact source-linked instruction was needless cognitive noise.
+`nop` similarly shared a slash-separated sentence with `endbr32`.
+
+**Changes:** ADD, SUB, AND, OR, XOR, and CMP now each describe their actual
+operation and flag/result behavior. NOP and ENDBR32 also have distinct
+descriptions. Signatures, 291-entry count, pairing class, stages, latency, and
+availability are unchanged.
+
+**Verification:** catalogue acceptance requires the semantic opening of all six
+ALU descriptions, forbids the old CMP aside on non-CMP operations, and
+distinguishes NOP from the CET compatibility marker. The end-to-end C screenshot
+now pairs the V-lane Fibonacci `add` with “Add the source to the destination…”
+beside its U-or-V pipeline preview.
+
 ## July 30 continuation — wrap compiler diagnostics at compact width
 
 **Diagnostic-readability audit:** automatic expansion made compiler output
