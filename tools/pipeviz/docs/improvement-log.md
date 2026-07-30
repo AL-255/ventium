@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — invalid reload setup retains correction
+
+**Reload-validation audit:** reload correctly rejected an invalid preserved
+entry/load/ESP before replacing the backend, focused the field, and showed a
+modal. After dismissal, however, the action row still said only that loading
+had begun, obscuring both the blocking field and correction.
+
+**Changes:** an invalid preserved address now leaves an eight-second amber
+`Reload blocked` action naming the field and required 32-bit hexadecimal form.
+The existing parser red-outlines and focuses the invalid input; the prior
+backend/path/cycle remain untouched. A successful corrected reload restores
+neutral status.
+
+**Verification:** acceptance corrupts entry after a numeric-manifest load,
+requires exact modal and persistent text, red field styling, focus, unchanged
+backend/path/cycle, and amber severity, then restores the address and requires
+a successful neutral `Reloaded flat image` result.
+
 ## July 30 continuation — degraded manifest load stays visible
 
 **Successful-load warning audit:** a malformed sibling manifest correctly

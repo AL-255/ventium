@@ -330,7 +330,7 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 | **Assembly** (`Alt+A`) | edit highlighted GNU Intel syntax, inspect opcode/pipeline completion, save (`.s` is added for a bare name), then assemble or assemble+run. |
 | **C** (`Alt+C`) | write/save (`.c` is added for a bare name), then compile a freestanding `int main(void)` for Pentium into editable Assembly. |
 | **Visualizer** (`Alt+V`) | return to the linked pipeline/trace/analysis/register workspace. |
-| **Reload program** (`Ctrl+Shift+R`) | re-read the current image from disk after rebuilding it while preserving the displayed reset addresses and mode switches. |
+| **Reload program** (`Ctrl+Shift+R`) | re-read the current image from disk after rebuilding it while preserving the displayed reset addresses and mode switches. An invalid address keeps the backend intact, focuses/red-outlines the field, and leaves an amber correction after the modal warning. |
 | **Open snapshot…** | resume a host testbench `--save-state` checkpoint. Select either `<prefix>.aux` or `<prefix>.vlt`; the visualizer loads the pair and begins a new visible timeline at that exact state. The **Restore snapshot** button returns to the same point after exploring. |
 | entry / load / esp | validated 32-bit-hex reset state. Edits mark **Apply + Reset** rather than silently diverging from the running model. The command-line equivalents `--entry`, `--load`, and `--esp` take precedence over file metadata. |
 | **U/V issue** | enable the U/V fast path — **on by default**; changing it marks **Apply + Reset** because issue mode is selected at reset. Returning all setup fields to their applied values removes that warning. |

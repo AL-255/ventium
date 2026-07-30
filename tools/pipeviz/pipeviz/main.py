@@ -1638,10 +1638,15 @@ class MainWindow(QMainWindow):
                 if invalid is not None:
                     widget, label = invalid
                     widget.setFocus()
+                    message = (
+                        f"Cannot reload while {label} is invalid. Enter a "
+                        "32-bit hexadecimal address, then reload again.")
                     QMessageBox.warning(
-                        self, "Invalid address",
-                        f"Cannot reload while {label} is invalid. Enter a 32-bit "
-                        "hexadecimal address, then reload again.")
+                        self, "Invalid address", message)
+                    self._notice(
+                        f"Reload blocked · invalid {label} · "
+                        "enter a 32-bit hexadecimal address",
+                        ms=8000, severity="warning", detail=message)
                     return False
             setup = {
                 "kind": self.image_kind,

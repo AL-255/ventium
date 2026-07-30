@@ -104,7 +104,8 @@ fields/modes; system boot transitions omit disabled entry/load/ESP fields.
 Invalid addresses are
 highlighted and rejected instead of silently falling back to a default;
 reload also leaves the current session intact until its preserved setup
-validates.
+validates. An invalid reload focuses and red-outlines the blocking field and
+retains an eight-second amber correction in the action row.
 System boot disables entry/load/ESP because the architectural reset vector,
 BIOS top-alignment, and firmware stack setup determine those values.
 If a requested SoC model is unavailable, Pipeviz warns and uses the core model.

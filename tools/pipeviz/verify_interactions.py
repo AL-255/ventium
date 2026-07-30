@@ -1423,6 +1423,48 @@ def scenario_startup(app, outdir):
         assert win.backend.state().eip == 0x00100000
         assert win.backend.mem_read(0x00100000, 2) == manifest_bytes
 
+        # Reload preserves custom setup, but an invalid address must leave a
+        # persistent correction instead of only the earlier "loading" notice.
+        reload_backend = win.backend
+        reload_cycle = win.backend.cycle_count()
+        reload_path = win.image_path
+        valid_entry = win.entry_e.text()
+        win.activateWindow()
+        win.pipeline.konata.plot.setFocus()
+        settle(app)
+        win.entry_e.setText("not-hex")
+        reload_warnings = []
+        original_warning = main_module.QMessageBox.warning
+        main_module.QMessageBox.warning = (
+            lambda _parent, title, message:
+            reload_warnings.append((title, message)))
+        try:
+            assert not win.load_image(reload_path, preserve_setup=True)
+        finally:
+            main_module.QMessageBox.warning = original_warning
+        settle(app)
+        assert reload_warnings == [(
+            "Invalid address",
+            "Cannot reload while entry is invalid. Enter a 32-bit "
+            "hexadecimal address, then reload again.")]
+        assert win.backend is reload_backend
+        assert win.backend.cycle_count() == reload_cycle
+        assert win.image_path == reload_path
+        assert app.focusWidget() is win.entry_e
+        assert "#f85149" in win.entry_e.styleSheet()
+        assert win.action_hint.text() == (
+            "Reload blocked · invalid entry · "
+            "enter a 32-bit hexadecimal address")
+        assert win.action_hint.toolTip() == reload_warnings[0][1]
+        assert win.action_hint.accessibleDescription() == (
+            reload_warnings[0][1])
+        assert "#e3b341" in win.action_hint.styleSheet()
+        win.entry_e.setText(valid_entry)
+        assert win.load_image(reload_path, preserve_setup=True)
+        assert not win.entry_e.styleSheet()
+        assert win.action_hint.text().startswith("Reloaded flat image:")
+        assert "#8b949e" in win.action_hint.styleSheet()
+
         invalid_manifest_dir = os.path.join(outdir, "invalid_manifest")
         os.makedirs(invalid_manifest_dir, exist_ok=True)
         invalid_manifest_image = os.path.join(

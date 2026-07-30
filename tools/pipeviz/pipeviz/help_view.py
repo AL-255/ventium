@@ -109,7 +109,9 @@ explicit.</p>
  or explicit checkbox requests system boot.</p>
 <p>Editing an address or mode marks <b>Apply + Reset</b>. Addresses must be
  32-bit hexadecimal values such as <code>0x08048000</code>; invalid input is
- highlighted and never silently replaced with a default.</p>
+ highlighted and never silently replaced with a default. Reload with an
+ invalid preserved address leaves the live backend untouched, focuses that
+ field, and retains an amber correction after the modal warning.</p>
 <h2>System images and snapshots</h2>
 <p>Use <b>system</b> for a raw BIOS image that boots at F000:FFF0. <b>SoC</b>
  implies system and additionally needs a current <code>build.sh --soc</code>
