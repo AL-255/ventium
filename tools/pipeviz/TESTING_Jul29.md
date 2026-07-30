@@ -478,7 +478,8 @@ Procedure:
    remain a visible, clickable live cell linked to the authored `hlt` line.
 7. Reject a candidate replacement load and require the prior live backend,
    program bytes, source map, marker, and tab label to remain coherent. Then edit
-   after build and require the map to become stale rather than use obsolete PCs.
+   after build and require the map and green diagnostics to clear rather than
+   describe obsolete source or use obsolete PCs.
    Cancel generated-source replacement and require the dirty text to survive.
    Run a bare snippet and require selecting its generated fall-through HLT to
    clear—not retain—the previously linked editor line.
@@ -488,7 +489,8 @@ Procedure:
    Confirm unsaved edits mark `C *`, Cancel preserves them, and explicit Discard
    permits a new template and clears the marker.
 9. Compile the freestanding Fibonacci C template at O2 into editable Intel
-   assembly, assemble+run it, and require EAX = 144.
+   assembly, require editing that generated text to clear its origin/result
+   diagnostic, assemble+run it, and require EAX = 144.
 10. Select the C-generated entry/loop in Trace and require its emitted assembly
     line to highlight.
 11. Compile an array-initialization loop and require self-contained assembly
@@ -499,6 +501,8 @@ Procedure:
     assembly, assemble it, stop on and click its live FP-lane cell, and require
     the exact generated assembly line while the instruction is still in flight.
     Then run it to completion on the RTL to EAX = 3 and recheck retired linkage.
+    Change optimization after compilation and require the stale compiler output
+    to clear with an explicit compile-again status.
 
 Evidence: GNU as/ld produces an ELF32 at `0x08048000`; DWARF decoded-line data
 maps every checked PC to the editor. The completion catalogue contains 291

@@ -73,6 +73,15 @@ the complete current stack. A synthetic missing-snapshot regression covers
 n/a→LIVE; current-backend branch and x87 workloads prove that the bridge
 captures logical values and empty bits on every retirement.
 
+**Authoring-result truth audit:** successful Assembly/C diagnostics remained
+green after the responsible text changed, while a changed C optimization could
+leave an old compiler result looking current. Diagnostics are now keyed to the
+editor revision; any edit clears both successful and failed output, and
+Assembly invalidates PC links in the same transition. C also keys results to
+the selected optimization and explicitly requests a recompile after it changes.
+Generated-Assembly, post-build, compiler-error, and optimization regressions
+cover every invalidation path.
+
 **Stale-model launcher audit:** `run.sh` rebuilt for bridge/header/build-script
 changes but ignored newer RTL, include/file-list, ctypes ABI, and memory-BFM
 inputs. That could launch a polished GUI over an obsolete model. Backend

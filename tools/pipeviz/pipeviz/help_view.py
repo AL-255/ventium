@@ -178,7 +178,9 @@ say so explicitly. Completion inserts only when the cursor is in an opcode
 slot; elsewhere the full catalogue is safe, reference-only help. GNU as
 semicolons separate statements, and completion follows the opcode in each
 statement while ignoring separators/comment markers inside quoted data. Build
-errors, including fatal compiler errors, highlight their source line.</p>
+errors, including fatal compiler errors, highlight their source line. Editing
+the source clears diagnostics from the old revision instead of leaving a stale
+green or red result visible.</p>
 <h2>Source-linked investigation</h2>
 <p>Assembly is built with a DWARF line table. Clicking an occupied live U/V/FP
 stage cell, a Trace row, or a Pipeline timing row therefore marks the exact
@@ -195,7 +197,8 @@ marker rather than showing a stale association.</p>
 Pentium target with no libc, builtins, MMX, or SSE; floating point therefore
 uses x87. It adds a small <code>_start</code>/HLT wrapper and opens the generated
 Intel-syntax source in Assembly. Review or edit it before running. Compiler
-errors also highlight their C line.</p>
+errors also highlight their C line. Editing C or changing the optimization
+level clears the prior compiler result and asks for a fresh compile.</p>
 <p>Generated artifacts stay under <code>tools/pipeviz/.generated/</code> and
 are ignored by Git.</p>
 """),

@@ -257,7 +257,10 @@ The generated source opens in Assembly rather than running immediately. This
 lets you compare optimization levels, edit scheduling or register choices,
 inspect completion previews, and only then assemble and run it. Compiler errors
 remain in C and highlight their responsible line; assembler errors remain in
-Assembly.
+Assembly. Build/compiler diagnostics belong to the exact source revision that
+produced them: editing either source clears the prior result, and changing C's
+optimization level clears the old compiler result and prompts you to compile
+again.
 
 Run the dedicated regression for the entire authoring path:
 

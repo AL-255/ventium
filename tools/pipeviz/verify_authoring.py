@@ -680,6 +680,8 @@ def scenario(app, outdir):
         editor.appendPlainText("# edited after build")
         assert not win.assembly.mapping_current
         assert "assemble again" in win.assembly.status.text()
+        assert not win.assembly.diagnostics.toPlainText()
+        assert "#8b949e" in win.assembly.diagnostics.styleSheet()
         assert editor._execution_line is None
         assert not win._assembly_source_map
         assert win.workspace.tabText(1) == "Assembly *"
@@ -884,6 +886,14 @@ def scenario(app, outdir):
         assert "call main" in win.assembly.editor.toPlainText()
         assert "Assembly generated from C compiler" in win.assembly.status.text()
         save(win, outdir, "04_c_generated_assembly")
+        # The green origin/result text describes one exact editor revision.
+        # Editing generated source must retire it just like a build diagnostic.
+        generated_text = win.assembly.editor.toPlainText()
+        win.assembly.editor.appendPlainText("# scheduling experiment")
+        assert not win.assembly.diagnostics.toPlainText()
+        assert "assemble again" in win.assembly.status.text()
+        win.assembly.editor.setPlainText(generated_text)
+        win.assembly.editor.document().setModified(False)
         c_result = win.assembly.build(True)
         settle(app)
         assert c_result is not None and win.workspace.currentWidget() is win.visualizer_tab
@@ -962,6 +972,16 @@ def scenario(app, outdir):
         # Keep shutdown non-interactive: the C source was injected directly to
         # exercise dirty replacement, so save it as acceptance-test evidence.
         win.workspace.setCurrentWidget(win.c_source)
+        assert win.c_source.diagnostics.toPlainText()
+        old_optimization = win.c_source.optimization.currentText()
+        replacement_optimization = (
+            "-O1" if old_optimization != "-O1" else "-O2")
+        win.c_source.optimization.setCurrentText(replacement_optimization)
+        assert not win.c_source.diagnostics.toPlainText()
+        assert (
+            f"Optimization changed to {replacement_optimization}"
+            in win.c_source.status.text())
+        assert "#e3b341" in win.c_source.status.styleSheet()
         win.c_source._path = os.path.join(outdir, "x87-workbench.c")
         assert win.c_source.save_source()
         print("OK GUI authoring: completion/preview, syntax/error lines, "

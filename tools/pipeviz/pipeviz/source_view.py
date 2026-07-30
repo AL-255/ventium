@@ -1167,6 +1167,7 @@ class AssemblyView(QWidget):
         layout.addWidget(self.status)
 
         self._built_revision = -1
+        self._diagnostic_revision = -1
         self._source_map = {}
         self._path = None
         self._last_dir = str(_TOOL_DIR)
@@ -1195,11 +1196,14 @@ class AssemblyView(QWidget):
             and self.editor.document().revision() == self._built_revision)
 
     def _source_changed(self):
-        if self.editor._error_line is not None:
+        revision = self.editor.document().revision()
+        diagnostics_stale = (
+            self._diagnostic_revision >= 0
+            and revision != self._diagnostic_revision)
+        if diagnostics_stale:
             self.editor.mark_error_line(None)
             self.diagnostics.reset()
-            self.status.setText("Source changed — assemble again to refresh diagnostics")
-            self.status.setStyleSheet("color:#8b949e;padding:2px;")
+            self._diagnostic_revision = -1
         if self._built_revision >= 0 and not self.mapping_current:
             self._built_revision = -1
             self._source_map = {}
@@ -1208,6 +1212,11 @@ class AssemblyView(QWidget):
                 "Source changed since the last build — assemble again to refresh PC links")
             self.status.setStyleSheet("color:#e3b341;padding:2px;")
             self.statusChanged.emit("Assembly source modified")
+        elif diagnostics_stale:
+            self.status.setText(
+                "Source changed — assemble again to refresh diagnostics")
+            self.status.setStyleSheet("color:#8b949e;padding:2px;")
+            self.statusChanged.emit(self.status.text())
 
     def _completion_notice(self, text):
         self.status.setText(text)
@@ -1232,6 +1241,7 @@ class AssemblyView(QWidget):
             return False
         self._source_map = {}
         self._built_revision = -1
+        self._diagnostic_revision = -1
         self.editor.setPlainText(_ASM_TEMPLATE)
         self.editor.document().setModified(False)
         self.editor.clear_marks()
@@ -1248,11 +1258,13 @@ class AssemblyView(QWidget):
             return False
         self._source_map = {}
         self._built_revision = -1
+        self._diagnostic_revision = -1
         self.editor.setPlainText(text)
         self.editor.document().setModified(False)
         self.editor.clear_marks()
         self._path = None
         self.diagnostics.success(f"Loaded assembly from {origin}. Review, edit, then run.")
+        self._diagnostic_revision = self.editor.document().revision()
         self.status.setText(f"Assembly generated from {origin}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
         self.statusChanged.emit("Assembly source replaced")
@@ -1272,6 +1284,7 @@ class AssemblyView(QWidget):
             text = Path(path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
+            self._diagnostic_revision = self.editor.document().revision()
             return False
         if not self.set_source(text, os.path.basename(path), confirm=True):
             return False
@@ -1302,6 +1315,7 @@ class AssemblyView(QWidget):
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
+            self._diagnostic_revision = self.editor.document().revision()
             return False
         self._path = path
         self._last_dir = os.path.dirname(os.path.abspath(path))
@@ -1320,6 +1334,7 @@ class AssemblyView(QWidget):
         except BuildFailure as error:
             self.editor.mark_error_line(error.line)
             self.diagnostics.failure(str(error))
+            self._diagnostic_revision = self.editor.document().revision()
             self.status.setText(
                 f"Build failed{f' at line {error.line}' if error.line else ''}")
             self.status.setStyleSheet("color:#f85149;padding:2px;")
@@ -1327,6 +1342,7 @@ class AssemblyView(QWidget):
             return None
         self._source_map = result.source_map
         self._built_revision = self.editor.document().revision()
+        self._diagnostic_revision = self._built_revision
         self.diagnostics.success(
             f"{result.log}\n{len(result.source_map)} instruction addresses mapped")
         self.status.setText(
@@ -1412,6 +1428,8 @@ class CView(QWidget):
         layout.addWidget(self.status)
         self._path = None
         self._last_dir = str(_TOOL_DIR)
+        self._diagnostic_revision = -1
+        self._compiled_optimization = None
 
         self.template_btn.clicked.connect(self.new_template)
         self.open_btn.clicked.connect(self.open_source)
@@ -1423,15 +1441,34 @@ class CView(QWidget):
         self.editor.document().modificationChanged.connect(
             self.dirtyChanged.emit)
         self.editor.textChanged.connect(self._source_changed)
+        self.optimization.currentTextChanged.connect(
+            self._optimization_changed)
         self.editor.document().setModified(False)
 
     def _source_changed(self):
-        if self.editor._error_line is None:
+        revision = self.editor.document().revision()
+        if (self._diagnostic_revision < 0
+                or revision == self._diagnostic_revision):
             return
         self.editor.mark_error_line(None)
         self.diagnostics.reset()
+        self._diagnostic_revision = -1
+        self._compiled_optimization = None
         self.status.setText("Source changed — compile again to refresh diagnostics")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
+        self.statusChanged.emit(self.status.text())
+
+    def _optimization_changed(self, optimization):
+        if (self._compiled_optimization is None
+                or optimization == self._compiled_optimization):
+            return
+        self.editor.mark_error_line(None)
+        self.diagnostics.reset()
+        self._diagnostic_revision = -1
+        self._compiled_optimization = None
+        self.status.setText(
+            f"Optimization changed to {optimization} — compile again")
+        self.status.setStyleSheet("color:#e3b341;padding:2px;")
         self.statusChanged.emit(self.status.text())
 
     def new_template(self):
@@ -1442,8 +1479,11 @@ class CView(QWidget):
         self.editor.clear_marks()
         self._path = None
         self.diagnostics.reset()
+        self._diagnostic_revision = -1
+        self._compiled_optimization = None
         self.status.setText("New freestanding C template")
         self.status.setStyleSheet("color:#8b949e;padding:2px;")
+        self.statusChanged.emit("C source replaced")
         return True
 
     def open_source(self):
@@ -1460,6 +1500,7 @@ class CView(QWidget):
             text = Path(path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError) as error:
             self.diagnostics.failure(str(error))
+            self._diagnostic_revision = self.editor.document().revision()
             return False
         if not self.confirm_safe_to_discard("opening another file"):
             return False
@@ -1469,6 +1510,8 @@ class CView(QWidget):
         self._last_dir = os.path.dirname(os.path.abspath(path))
         self.editor.clear_marks()
         self.diagnostics.reset()
+        self._diagnostic_revision = -1
+        self._compiled_optimization = None
         name = os.path.basename(path)
         self.status.setText(f"Opened {name}")
         self.status.setStyleSheet("color:#79c0ff;padding:2px;")
@@ -1494,6 +1537,7 @@ class CView(QWidget):
             Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
         except OSError as error:
             self.diagnostics.failure(str(error))
+            self._diagnostic_revision = self.editor.document().revision()
             return False
         self._path = path
         self._last_dir = os.path.dirname(os.path.abspath(path))
@@ -1513,12 +1557,16 @@ class CView(QWidget):
         except BuildFailure as error:
             self.editor.mark_error_line(error.line)
             self.diagnostics.failure(str(error))
+            self._diagnostic_revision = self.editor.document().revision()
+            self._compiled_optimization = self.optimization.currentText()
             self.status.setText(
                 f"Compile failed{f' at line {error.line}' if error.line else ''}")
             self.status.setStyleSheet("color:#f85149;padding:2px;")
             self.statusChanged.emit(self.status.text())
             return None
         self.diagnostics.success(log)
+        self._diagnostic_revision = self.editor.document().revision()
+        self._compiled_optimization = self.optimization.currentText()
         self.status.setText("Compiled successfully · assembly tab is ready")
         self.status.setStyleSheet("color:#3fb950;padding:2px;")
         self.statusChanged.emit(self.status.text())
