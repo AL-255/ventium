@@ -182,8 +182,24 @@ def verify_catalog():
             assert mnemonic in MNEMONICS, (
                 f"decoder family {prefix}_{token} is absent from completion "
                 f"(expected mnemonic {mnemonic!r})")
+    # The independent P5 timing classifier names exact Capstone instruction
+    # IDs rather than RTL operation families. Cover every 32-bit P54C mnemonic
+    # it handles; MOVABS/MOVSXD are Capstone's non-Pentium 64-bit aliases.
+    timing_model = (
+        Path(__file__).resolve().parents[2]
+        / "verif/qemu-plugins/p5trace.c"
+    ).read_text(encoding="utf-8")
+    timing_mnemonics = {
+        token.lower()
+        for token in re.findall(r"\bX86_INS_([A-Z0-9_]+)\b", timing_model)
+    } - {"movabs", "movsxd"}
+    assert timing_mnemonics <= MNEMONICS, (
+        "P5 timing mnemonics absent from completion: "
+        + ", ".join(sorted(timing_mnemonics - MNEMONICS)))
     print(f"OK ISA catalogue: {len(CATALOG)} completion mnemonics, "
-          "all current decoder families, and P5 pipeline/mode metadata present")
+          "all current decoder families, "
+          f"{len(timing_mnemonics)} exact P5 timing mnemonics, "
+          "and pipeline/mode metadata present")
 
 
 def verify_toolchain():

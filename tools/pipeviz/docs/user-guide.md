@@ -459,7 +459,8 @@ QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
   tools/pipeviz/verify_authoring.py
 ```
 
-It verifies the 291-mnemonic catalogue against every current RTL decoder family,
+It verifies the 291-mnemonic catalogue against every current RTL decoder family
+and all 121 exact 32-bit mnemonics named by the P5 timing classifier,
 syntax highlighting, opcode-scoped completion and its description/pipeline
 preview, compact layout, transactional load failure, build errors, ELF/DWARF
 mapping, exact live and retired U/V source identity, a hand-written assembly result, and

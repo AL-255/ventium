@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — exact timing-model opcode coverage
+
+**Catalogue-proof audit:** completion had 291 entries and the test mapped every
+RTL operation family to at least one mnemonic. That caught a new execution
+family, but did not prove that every individually classified P5 instruction was
+present.
+
+**Changes:** no UI metadata needed correction. The authoring verifier now also
+parses every `X86_INS_*` ID from the independent P5 timing classifier and
+requires all 121 relevant 32-bit mnemonics in completion. Capstone's MOVABS and
+MOVSXD IDs are explicitly excluded because they are 64-bit, non-P54C aliases
+and should not be advertised by this workbench.
+
+**Verification:** the base-Miniconda report now names all three contracts:
+291 unique completion entries, every current RTL decoder family, and 121 exact
+P5 timing mnemonics, followed by the unchanged pipeline/mode metadata and full
+authoring runtime checks.
+
 ## July 30 continuation — make the C demo self-verifying
 
 **Experiment-portability audit:** the toolbar and guides explained the
