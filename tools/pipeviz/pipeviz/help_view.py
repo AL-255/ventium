@@ -207,6 +207,8 @@ into the same real RTL backend as an opened program. Ctrl+Enter is the keyboard
 equivalent. A bare instruction snippet is automatically wrapped in
 <code>.intel_syntax</code>, <code>_start</code>, and a fall-through HLT; an
 explicit <code>_start:</code> is assembled exactly as written.</p>
+<p>Ctrl+B assembles without loading the backend. In C, Ctrl+B and Ctrl+Enter
+both compile into the editable Assembly workspace.</p>
 <p>Within either source workspace, Ctrl+N creates its runnable template, Ctrl+O
 opens that source type, Ctrl+S saves the current file, and Ctrl+Shift+S saves
 under a new name. An asterisk on the Assembly or C tab marks unsaved changes.
@@ -434,6 +436,7 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Shift+F3</b></td><td>previous filtered retirement (Visualizer)</td></tr>
  <tr><td><b>Escape</b></td><td>clear a focused Trace filter; in focused Pipeline, Unpin to LIVE</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
+ <tr><td><b>Ctrl+B</b></td><td>assemble without running, or compile C to Assembly</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>
  <tr><td><b>Ctrl+/</b></td><td>toggle Assembly/C line comments</td></tr>
  <tr><td><b>Ctrl+G</b></td><td>go to a source line in Assembly/C</td></tr>

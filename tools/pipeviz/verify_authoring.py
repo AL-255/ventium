@@ -292,6 +292,18 @@ def scenario(app, outdir):
         assert win.pipeline.board.accessibleName() == "Live pipeline stage board"
         assert "clicked" in win.pipeline.board.accessibleDescription()
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
+        assert "Ctrl+B" in win.assembly.build_btn.toolTip()
+        build_requests = []
+        real_build = win.assembly.build
+        win.assembly.build = (
+            lambda run=False: build_requests.append(bool(run)))
+        try:
+            QTest.keyClick(
+                win.assembly.editor, Qt.Key_B, Qt.ControlModifier)
+            settle(app)
+        finally:
+            win.assembly.build = real_build
+        assert build_requests == [False]
         new_requests = []
         real_new_template = win.assembly.new_template
         win.assembly.new_template = lambda: new_requests.append("assembly")
@@ -311,6 +323,20 @@ def scenario(app, outdir):
         assert win.workspace.currentWidget() is win.visualizer_tab
         assert win.tables.tabs.currentIndex() == 0
         assert app.focusWidget() is win.tables.ic
+        hidden_build_requests = []
+        real_build = win.assembly.build
+        real_compile = win.c_source.compile
+        win.assembly.build = (
+            lambda run=False: hidden_build_requests.append(("asm", run)))
+        win.c_source.compile = (
+            lambda: hidden_build_requests.append(("c", False)))
+        try:
+            QTest.keyClick(win.tables.ic, Qt.Key_B, Qt.ControlModifier)
+            settle(app)
+        finally:
+            win.assembly.build = real_build
+            win.c_source.compile = real_compile
+        assert not hidden_build_requests
         assert win.reset_layout_action.isEnabled()
         assert all(action.isEnabled()
                    for action in win._toolbar_visibility_actions)
@@ -1575,6 +1601,18 @@ def scenario(app, outdir):
         assert win.c_source.optimization.accessibleName()
         assert win.c_source.diagnostics.accessibleName()
         assert "Ctrl+Enter" in win.c_source.compile_btn.toolTip()
+        assert "Ctrl+B" in win.c_source.compile_btn.toolTip()
+        compile_requests = []
+        real_compile = win.c_source.compile
+        win.c_source.compile = lambda: compile_requests.append("compile")
+        win.c_source.editor.setFocus()
+        try:
+            QTest.keyClick(
+                win.c_source.editor, Qt.Key_B, Qt.ControlModifier)
+            settle(app)
+        finally:
+            win.c_source.compile = real_compile
+        assert compile_requests == ["compile"]
         win.resize(900, 620)
         settle(app)
         assert win.width() == 900

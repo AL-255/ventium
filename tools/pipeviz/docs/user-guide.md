@@ -257,8 +257,9 @@ _start:
     hlt
 ```
 
-**Assemble** checks and links the source; **Assemble + Run** (`Ctrl+Enter`)
-also loads the resulting ELF into the Visualizer. Diagnostics name and
+**Assemble** (`Ctrl+B`) checks and links the source; **Assemble + Run**
+(`Ctrl+Enter`) also loads the resulting ELF into the Visualizer. In C,
+`Ctrl+B` and `Ctrl+Enter` both perform **Compile → Assembly**. Diagnostics name and
 highlight the failing line. Their first line is an actionable jump: focus the
 diagnostic and press Enter, or double-click it, to return to that editor line.
 Successful GCC/GNU-as warnings still emit runnable Assembly, but use an amber

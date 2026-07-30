@@ -142,7 +142,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     build diagnostics, `Ctrl+Space` completion over 291 Ventium/P54C mnemonics,
     mode/build availability notes, and a description plus miniature pipeline
     preview for every completion. Arrows/Page Up/Page Down traverse matches,
-    while Home/End jump to catalogue bounds. **Assemble + Run** builds a source-mapped
+    while Home/End jump to catalogue bounds. `Ctrl+B` assembles without loading
+    the backend; **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
     Pipeline row highlights the exact responsible assembly line. Editing clears
     prior build diagnostics and PC links so green results never describe stale
@@ -168,7 +169,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
   * C is a highlighted freestanding GNU C11 editor targeting 32-bit Pentium at
     `-O0/-O1/-O2/-Os`; builtins, loop-to-library substitutions, MMX, and SSE are
     disabled so simple experiments stay self-contained and floating point uses
-    x87. **Compile → Assembly** emits editable Intel-syntax code with a small
+    x87. **Compile → Assembly** (`Ctrl+B` or `Ctrl+Enter`) emits editable
+    Intel-syntax code with a small
     `_start`/HLT wrapper into the Assembly tab; compiler and assembler errors
     highlight their source line. Editing C or changing optimization clears the
     prior compiler result and asks for a fresh compile. C/header drops route

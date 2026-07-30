@@ -1842,7 +1842,8 @@ class AssemblyView(QWidget):
         self.complete_btn = QPushButton("Complete")
         self.complete_btn.setToolTip("Open opcode completion (Ctrl+Space)")
         self.build_btn = QPushButton("Assemble")
-        self.build_btn.setToolTip("Check, assemble, and link without loading the RTL")
+        self.build_btn.setToolTip(
+            "Check, assemble, and link without loading the RTL (Ctrl+B)")
         self.run_btn = QPushButton("Assemble + Run")
         self.run_btn.setToolTip("Assemble, load in the Visualizer, and reset (Ctrl+Enter)")
         self.run_btn.setStyleSheet(
@@ -1929,8 +1930,14 @@ class AssemblyView(QWidget):
             self._request_completion)
         self.build_btn.clicked.connect(lambda: self.build(False))
         self.run_btn.clicked.connect(lambda: self.build(True))
-        QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
-            lambda: self.build(True))
+        self._build_shortcut = QShortcut(
+            QKeySequence("Ctrl+B"), self.editor)
+        self._build_shortcut.setContext(Qt.WidgetShortcut)
+        self._build_shortcut.activated.connect(lambda: self.build(False))
+        self._run_shortcut = QShortcut(
+            QKeySequence("Ctrl+Return"), self.editor)
+        self._run_shortcut.setContext(Qt.WidgetShortcut)
+        self._run_shortcut.activated.connect(lambda: self.build(True))
         self._cursor_instruction()
         self.editor.document().setModified(False)
         self._sync_source_badge()
@@ -2199,7 +2206,7 @@ class CView(QWidget):
         controls.addWidget(self.optimization)
         self.compile_btn = QPushButton("Compile → Assembly")
         self.compile_btn.setToolTip(
-            "Compile to editable GNU Intel assembly (Ctrl+Enter)")
+            "Compile to editable GNU Intel assembly (Ctrl+B or Ctrl+Enter)")
         self.compile_btn.setStyleSheet(
             "background:#1f6feb;color:white;font-weight:bold;border:1px solid #388bfd;")
         c_actions = (
@@ -2264,8 +2271,14 @@ class CView(QWidget):
             lambda forward: (
                 self.diagnostics if forward else self.compile_btn).setFocus(
                     Qt.TabFocusReason))
-        QShortcut(QKeySequence("Ctrl+Return"), self.editor).activated.connect(
-            self.compile)
+        self._build_shortcut = QShortcut(
+            QKeySequence("Ctrl+B"), self.editor)
+        self._build_shortcut.setContext(Qt.WidgetShortcut)
+        self._build_shortcut.activated.connect(lambda: self.compile())
+        self._compile_shortcut = QShortcut(
+            QKeySequence("Ctrl+Return"), self.editor)
+        self._compile_shortcut.setContext(Qt.WidgetShortcut)
+        self._compile_shortcut.activated.connect(lambda: self.compile())
         self.editor.document().modificationChanged.connect(
             self.dirtyChanged.emit)
         self.editor.document().modificationChanged.connect(

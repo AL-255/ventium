@@ -11,6 +11,13 @@ not repeat itself.
 
 ## July 30 continuation — compact register time-point clarity
 
+**Source build-shortcut audit:** Assembly offered keyboard Assemble+Run but
+assemble-only remained pointer-only, making a safe preflight less convenient.
+Ctrl+B now assembles without loading the backend in Assembly and performs
+Compile→Assembly in C. Both it and Ctrl+Enter use editor-scoped shortcuts, so
+hidden source workspaces cannot steal Visualizer input. Acceptance dispatches
+each live shortcut and verifies Assemble versus Compile routing.
+
 **Source New-template audit:** the primary New template button had no direct
 keyboard equivalent while Open/Save/Save As did. File now exposes a contextual
 Ctrl+N action, labeled for Assembly or C and disabled in Visualizer. It routes
