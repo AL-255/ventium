@@ -318,7 +318,10 @@ Up/Page Down to choose, Home/End for the
 first/last entry, Enter/Tab or a double-click to insert, and Escape to close;
 these controls remain visible in the popup footer. Completion inserts only when
 the cursor is in an opcode slot;
-elsewhere the full catalogue is safe, reference-only help.
+elsewhere the full catalogue is safe, reference-only help. Type there to search
+mnemonics, operands, descriptions, lanes, latency, and availability without
+editing source; Backspace edits the query and Delete clears it. Zero matches
+remain visible as an explicit empty result.
 An unsupported opcode prefix closes the popup and produces a specific amber
 status notice without creating a build diagnostic. GNU as
 semicolons separate statements, and completion follows the opcode in each
@@ -527,14 +530,15 @@ fresh visible epoch at that point.</p>
  <tr><td><b>Source Tab / Shift+Tab</b></td><td>indent/outdent the caret or selected source lines</td></tr>
  <tr><td><b>Source Backspace</b></td><td>remove leading soft indentation to the previous four-column stop</td></tr>
  <tr><td><b>Gutter click / drag / Shift-click</b></td><td>select or extend complete source-line ranges</td></tr>
- <tr><td><b>Board arrows + Enter</b></td><td>choose and mark an occupied live U/V/FP source line</td></tr>
- <tr><td><b>Board double-click</b></td><td>mark and open an occupied live lane's Assembly line</td></tr>
+ <tr><td><b>Board arrows + Enter</b></td><td>inspect an occupied lane; mark it when its PC has an authored source line</td></tr>
+ <tr><td><b>Board double-click</b></td><td>open an occupied live lane only when its PC has an authored source line</td></tr>
  <tr><td><b>IPC arrows/Pg/Home/End</b></td><td>seek captured cycles; Enter reopens one</td></tr>
  <tr><td><b>/</b></td><td>focus the trace filter from anywhere</td></tr>
  <tr><td><b>Enter / F3</b></td><td>next filtered retirement (Visualizer)</td></tr>
  <tr><td><b>Shift+F3</b></td><td>previous filtered retirement (Visualizer)</td></tr>
  <tr><td><b>Escape</b></td><td>clear a focused Trace filter; in focused Pipeline, Unpin to LIVE</td></tr>
  <tr><td><b>Ctrl+Space</b></td><td>assembly opcode completion</td></tr>
+ <tr><td><b>Popup typing</b></td><td>search the reference catalogue without editing source; Backspace edits, Delete clears</td></tr>
  <tr><td><b>Popup Home / End</b></td><td>first / last opcode completion without moving source</td></tr>
  <tr><td><b>Ctrl+B</b></td><td>assemble without running, or compile C to Assembly</td></tr>
  <tr><td><b>Ctrl+Enter</b></td><td>assemble+run, or compile C</td></tr>

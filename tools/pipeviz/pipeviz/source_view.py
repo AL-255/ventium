@@ -1239,20 +1239,32 @@ class CompletionPopup(QFrame):
         self.hint.setStyleSheet(
             "border:0;border-top:1px solid #30363d;"
             "color:#8b949e;background:#0d1117;padding:3px 6px;")
+        self.hint.setMinimumWidth(0)
+        self.hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout.addWidget(self.hint)
         self.resize(650, 257)
+        self._reference_query = None
         self.list.currentItemChanged.connect(self._current_changed)
         self.list.itemDoubleClicked.connect(lambda _item: self.accept_current())
 
     def _current_changed(self, current, _previous):
         self.info.set_instruction(current.data(Qt.UserRole) if current else None)
 
-    def show_for(self, prefix):
+    def show_for(self, prefix, reference_query=None):
         prefix = (prefix or "").lower()
-        matches = [
-            info for info in CATALOG
-            if not prefix or info.mnemonic.startswith(prefix)
-        ]
+        self._reference_query = (
+            str(reference_query) if reference_query is not None else None)
+        if self._reference_query is None:
+            matches = [
+                info for info in CATALOG
+                if not prefix or info.mnemonic.startswith(prefix)
+            ]
+        else:
+            terms = self._reference_query.lower().split()
+            matches = [
+                info for info in CATALOG
+                if all(term in info.search_text for term in terms)
+            ]
         self.list.clear()
         for info in matches:
             item = QListWidgetItem(
@@ -1260,29 +1272,53 @@ class CompletionPopup(QFrame):
             item.setData(Qt.UserRole, info)
             item.setToolTip(info.description)
             self.list.addItem(item)
-        if not matches:
+        if not matches and self._reference_query is None:
             self.hide()
             return
-        scope = f"prefix {prefix}" if prefix else "the complete catalogue"
-        count_text = (
-            f"{len(matches)} {'match' if len(matches) == 1 else 'matches'}"
-            if prefix else
-            f"{len(matches)} opcodes")
-        controls = (
-            "↑↓/PgUp/PgDn/Home/End select · Enter/Tab insert · "
-            "double-click insert · Esc close")
+        if self._reference_query is not None:
+            query = self._reference_query
+            display_query = (
+                query if len(query) <= 16 else
+                f"{query[:7]}…{query[-7:]}")
+            scope = (
+                f'reference search "{query}"'
+                if query else "the complete catalogue")
+            count_text = (
+                f"{len(matches)} {'match' if len(matches) == 1 else 'matches'}"
+                if query else f"{len(matches)} opcodes")
+            controls = (
+                f'Search "{display_query}" · '
+                if query else "Type to search · ")
+            controls += (
+                "⌫ edit · Del clear · ↑↓/Pg/Home/End · Esc close")
+        else:
+            scope = f"prefix {prefix}" if prefix else "the complete catalogue"
+            count_text = (
+                f"{len(matches)} {'match' if len(matches) == 1 else 'matches'}"
+                if prefix else
+                f"{len(matches)} opcodes")
+            controls = (
+                "↑↓/PgUp/PgDn/Home/End select · Enter/Tab insert · "
+                "double-click insert · Esc close")
         self.hint.setText(f"{count_text} · {controls}")
         self.hint.setToolTip(
             f"{count_text} for {scope}. Use arrows or Page Up/Page Down to "
-            "choose, Home/End for the bounds, Enter/Tab or double-click to "
-            "insert, and Escape to close.")
+            "choose, Home/End for the bounds, "
+            + ("type to search, Backspace to edit the search, Delete to clear "
+               "it, and Escape to close."
+               if self._reference_query is not None else
+               "Enter/Tab or double-click to insert, and Escape to close."))
         self.hint.setAccessibleDescription(self.hint.toolTip())
         self.list.setAccessibleDescription(
             f"{len(matches)} matching opcodes for {scope}. "
             "Use arrows or Page Up and Page Down to choose, Home or End for "
-            "the first or last entry, Enter or Tab to insert, Escape to close, "
-            "or double-click an entry to insert it.")
-        self.list.setCurrentRow(0)
+            "the first or last entry, "
+            + ("type to search, Backspace to edit the search, Delete to clear "
+               "it, and Escape to close."
+               if self._reference_query is not None else
+               "Enter or Tab to insert, Escape to close, or double-click an "
+               "entry to insert it."))
+        self.list.setCurrentRow(0 if matches else -1)
         cursor_rect = self.editor.cursorRect()
         below = self.editor.mapToGlobal(cursor_rect.bottomLeft())
         above = self.editor.mapToGlobal(cursor_rect.topLeft())
@@ -1330,6 +1366,9 @@ class CompletionPopup(QFrame):
                 if frame.bottom() > bounds.bottom() else 0)
             if dx or dy:
                 self.move(self.x() + dx, self.y() + dy)
+
+    def show_reference(self, query=""):
+        self.show_for("", reference_query=query)
 
     def move_selection(self, delta):
         if not self.isVisible() or self.list.count() == 0:
@@ -1410,7 +1449,10 @@ class AssemblyEditor(CodeEditor):
                 cursor.position() + suffix_len)
             self._completion_insertable = True
             self._completion_case_sample = prefix + suffix_text
-        self.completion.show_for(prefix)
+        if self._completion_insertable:
+            self.completion.show_for(prefix)
+        else:
+            self.completion.show_reference()
         visible = self.completion.isVisible()
         if not visible and prefix:
             self.completionNotice.emit(
@@ -1470,6 +1512,28 @@ class AssemblyEditor(CodeEditor):
                 self.completion.hide()
                 event.accept()
                 return
+            if not self._completion_insertable:
+                if (event.key() == Qt.Key_Backspace
+                        and not event.modifiers() & (
+                            Qt.ControlModifier | Qt.AltModifier
+                            | Qt.MetaModifier)):
+                    self.completion.show_reference(
+                        (self.completion._reference_query or "")[:-1])
+                    event.accept()
+                    return
+                if (event.key() == Qt.Key_Delete
+                        and not event.modifiers()):
+                    self.completion.show_reference()
+                    event.accept()
+                    return
+                if (event.text() and event.text().isprintable()
+                        and not event.modifiers() & (
+                            Qt.ControlModifier | Qt.AltModifier
+                            | Qt.MetaModifier)):
+                    self.completion.show_reference(
+                        (self.completion._reference_query or "") + event.text())
+                    event.accept()
+                    return
         if (event.modifiers() & Qt.ControlModifier
                 and event.key() == Qt.Key_Space):
             self.request_completion(force=True)

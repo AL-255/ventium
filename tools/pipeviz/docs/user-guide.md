@@ -329,7 +329,11 @@ Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,
 Enter/Tab or a double-click to insert, and Escape to close; the popup keeps
 these controls visible at its foot.
 At a directive, comment, or operand it remains a reference-only catalogue, so
-accepting an entry cannot corrupt non-opcode text.
+accepting an entry cannot corrupt non-opcode text. In that reference mode,
+typing searches across mnemonics, operands, descriptions, lane classes,
+latencies, and availability without changing the editor; Backspace edits the
+query and Delete clears it. A zero-match query keeps the popup open with an
+explicit empty result instead of silently disappearing.
 Clicking or scrolling the source editor dismisses completion so it cannot
 remain detached from the caret; scrolling inside the popup still browses its
 list. At edge carets the rich popup flips above and clamps within the Pipeviz

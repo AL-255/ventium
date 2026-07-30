@@ -164,7 +164,10 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     Regression coverage checks every RTL decoder family and all 121 exact
     32-bit mnemonics named by the independent P5 timing classifier.
     Arrows/Page Up/Page Down traverse matches,
-    while Home/End jump to catalogue bounds. `Ctrl+B` assembles without loading
+    while Home/End jump to catalogue bounds. Outside an opcode slot, the safe
+    reference catalogue supports non-destructive type-to-search across
+    mnemonics, operands, descriptions, lanes, latency, and availability;
+    Backspace edits the query and Delete clears it. `Ctrl+B` assembles without loading
     the backend; **Assemble + Run** builds a source-mapped
     32-bit ELF and executes it on the same RTL backend. Selecting a Trace or
     Pipeline row highlights the exact responsible assembly line, and the

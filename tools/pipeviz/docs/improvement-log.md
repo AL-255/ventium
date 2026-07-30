@@ -9,6 +9,28 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — searchable full opcode reference
+
+**Reference-discovery audit:** prefix completion was fast while typing an
+opcode, but the Complete button's safe reference mode exposed all 291 entries
+with only arrows and paging. Typing from a directive/comment/operand dismissed
+the popup because no insertion target existed, making discovery by behavior
+(`divide`, `system`, `memory`, `FP`) unnecessarily difficult.
+
+**Changes:** reference-only completion now captures printable search text
+without touching source and matches all terms across mnemonic, signature,
+description, lane class, latency, and availability. The persistent footer shows
+the query and result count; Backspace edits, Delete clears, and a zero-match
+search remains open with an explicit empty result. Prefix completion and its
+normal insertion semantics are unchanged.
+
+**Verification:** GUI acceptance opens reference mode over a directive, searches
+`divide`, requires ten metadata-backed results spanning integer and x87
+division, captures the filtered rich preview, verifies source bytes are
+unchanged, exercises a visible zero-result query, and Backspaces to the complete
+291-opcode catalogue. Help and the indexed shortcut table document the two
+completion modes.
+
 ## July 30 continuation — live source affordances are exact per PC
 
 **Per-instruction audit:** session-level source-map availability was still too

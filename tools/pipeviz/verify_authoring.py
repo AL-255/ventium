@@ -1258,13 +1258,64 @@ def scenario(app, outdir):
             "Completion keyboard help")
         assert editor.completion.hint.text().startswith(
             f"{len(CATALOG)} opcodes ·")
-        assert "Enter/Tab insert" in editor.completion.hint.text()
+        assert "Type to search" in editor.completion.hint.text()
+        assert "Enter/Tab insert" not in editor.completion.hint.text()
         assert "complete catalogue" in (
             editor.completion.hint.accessibleDescription())
         completion_accessible = editor.completion.list.accessibleDescription()
         assert f"{len(CATALOG)} matching opcodes" in completion_accessible
-        assert "Enter or Tab to insert" in completion_accessible
+        assert "type to search" in completion_accessible
         assert "Home or End" in completion_accessible
+        reference_source = editor.toPlainText()
+        QTest.keyClicks(editor, "divide")
+        settle(app)
+        assert editor.toPlainText() == reference_source
+        assert editor.completion.isVisible()
+        assert editor.completion._reference_query == "divide"
+        assert editor.completion.list.count() == 10
+        assert editor.completion.hint.text().startswith(
+            '10 matches · Search "divide"')
+        assert 'reference search "divide"' in (
+            editor.completion.list.accessibleDescription())
+        searched_names = {
+            editor.completion.list.item(i).data(Qt.UserRole).mnemonic
+            for i in range(editor.completion.list.count())
+        }
+        assert {"div", "idiv", "fdivrp"} <= searched_names
+        assert all(
+            "divide" in editor.completion.list.item(i).data(
+                Qt.UserRole).search_text
+            for i in range(editor.completion.list.count()))
+        save(editor.completion, outdir, "01_opcode_reference_search")
+        QTest.keyClick(editor, Qt.Key_Delete)
+        assert editor.completion.list.count() == len(CATALOG)
+        QTest.keyClicks(editor, "zzzz")
+        settle(app)
+        assert editor.toPlainText() == reference_source
+        assert editor.completion.isVisible()
+        assert editor.completion.list.count() == 0
+        assert editor.completion.info.preview.info is None
+        assert editor.completion.hint.text().startswith(
+            '0 matches · Search "zzzz"')
+        assert "0 matching opcodes" in (
+            editor.completion.list.accessibleDescription())
+        QTest.keyClick(editor, Qt.Key_Backspace)
+        assert editor.completion._reference_query == "zzz"
+        QTest.keyClick(editor, Qt.Key_Delete)
+        assert editor.completion._reference_query == ""
+        assert editor.completion.list.count() == len(CATALOG)
+        long_reference_query = "unavailable-opcode-reference-query-" * 2
+        QTest.keyClicks(editor, long_reference_query)
+        settle(app)
+        assert editor.toPlainText() == reference_source
+        assert editor.completion._reference_query == long_reference_query
+        assert "…" in editor.completion.hint.text()
+        assert (
+            owner_rect.contains(editor.completion.frameGeometry())
+            or screen.availableGeometry().contains(
+                editor.completion.frameGeometry()))
+        QTest.keyClick(editor, Qt.Key_Delete)
+        assert editor.completion.list.count() == len(CATALOG)
         names = {
             editor.completion.list.item(i).data(Qt.UserRole).mnemonic
             for i in range(editor.completion.list.count())
