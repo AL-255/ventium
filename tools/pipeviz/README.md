@@ -154,6 +154,8 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     a microcode-plus-memory preview; flag/prefix entries state their exact effect.
     Common integer forms distinguish carry/borrow, signedness, bit direction,
     CF-preserving INC/DEC, shifts/rotates, and precise stack/flag transfers.
+    System/control and x87 environment/transcendental forms distinguish
+    load/store, near/far entry/return, WAIT, stack, and mathematical direction.
     Regression coverage checks every RTL decoder family and all 121 exact
     32-bit mnemonics named by the independent P5 timing classifier.
     Arrows/Page Up/Page Down traverse matches,

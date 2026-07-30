@@ -285,7 +285,8 @@ forms. String/I/O-string entries name width and DS:SI/ES:DI/port direction,
 and flag/prefix entries state their exact effect. Their miniature preview
 shows the microcode/memory path rather than a generic ALU cell. Common integer
 forms distinguish carry/borrow, signedness, bit direction, shifts/rotates, and
-stack/flag order. Normal user
+stack/flag order. System/control and x87 environment/transcendental forms state
+load/store, near/far return, WAIT, stack, and mathematical direction. Normal user
 availability is neutral; mode- or build-gated operations say so explicitly in
 amber. Each list row shows mnemonic, pipe class, and operands without repeating
 the mnemonic; the detail pane shows the complete signature. Regression covers

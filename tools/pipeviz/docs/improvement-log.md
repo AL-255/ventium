@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — directional system and x87 control help
+
+**System/control audit:** LGDT/SGDT, LTR/STR, segment loads, near/far returns,
+interrupt entry/return, and x87 environment load/save/restore shared
+directionless family text. Transcendentals such as FPATAN/FYL2XP1 likewise hid
+stack operands and pops.
+
+**Changes:** 46 BCD-adjust, return/interrupt, segment/descriptor/task-register,
+cache-control, x87 environment, rounding/remainder, and transcendental
+mnemonics now state exact data/control direction. WAIT versus FN no-WAIT,
+16/32-bit interrupt returns, save-and-initialize behavior, quotient rule, and
+stack formulas are explicit.
+
+**Verification:** catalogue acceptance samples every family and forbids all 11
+former generic descriptions. Popup interaction selects LGDT, requires its load
+direction, six-byte GDTR operand, system restriction, and
+F→D→system→memory stages, then captures the amber preview.
+
 ## July 30 continuation — form-specific integer completion help
 
 **Everyday-opcode audit:** the generated Fibonacci loop's `dec` preview still

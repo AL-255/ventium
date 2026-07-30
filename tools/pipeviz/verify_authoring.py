@@ -250,6 +250,42 @@ def verify_catalog():
         "Transfer selected status flags to/from AH.",
     }
     assert not any(info.description in obsolete_integer_help for info in CATALOG)
+    expected_system_details = {
+        "aaa": "after addition",
+        "aas": "after subtraction",
+        "aam": "quotient AH and remainder AL",
+        "retf": "CS:(E)IP",
+        "int3": "breakpoint interrupt vector 3",
+        "iretd": "32-bit EIP, CS, and EFLAGS",
+        "lss": "register and SS",
+        "lgdt": "Load the GDTR",
+        "sgdt": "Store the GDTR",
+        "ltr": "Load the task-register",
+        "str": "Store the current task-register",
+        "wbinvd": "Write back",
+        "fnstenv": "without an implicit WAIT",
+        "fsave": "then initialize x87 state",
+        "frndint": "control-word rounding mode",
+        "fprem1": "nearest quotient",
+        "fpatan": "arctan(ST(1) / ST(0))",
+        "fyl2xp1": "log2(ST(0)+1)",
+    }
+    for mnemonic, detail in expected_system_details.items():
+        assert detail in instruction_info(mnemonic).description
+    obsolete_system_help = {
+        "Legacy ASCII/BCD adjustment instruction implemented by the core.",
+        "Return from a near or far procedure.",
+        "Deliver/return from an interrupt through the IDT.",
+        "Load a general register and segment selector from a far pointer.",
+        "Load or store a six-byte descriptor-table register.",
+        "Load/store a task or local-descriptor selector.",
+        "Modeled cache-management serialization/no-op.",
+        "Load or store the x87 environment/full state image.",
+        "Round ST(0) to integer or scale it by a power of two.",
+        "Compute a partial IEEE/x87 remainder.",
+        "Iterative x87 transcendental operation.",
+    }
+    assert not any(info.description in obsolete_system_help for info in CATALOG)
     obsolete_condition_help = {
         "Conditional branch selected by EFLAGS.",
         "Assembler alias for a conditional branch selected by EFLAGS.",
@@ -1206,6 +1242,18 @@ def scenario(app, outdir):
             "Subtract one from the destination while preserving the carry flag.")
         assert editor.completion.info.preview.info.pipe == "UV"
         save(editor.completion, outdir, "01_opcode_fibonacci_popup")
+        lgdt_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic
+            == "lgdt")
+        editor.completion.list.setCurrentRow(lgdt_row)
+        settle(app)
+        assert editor.completion.info.description.text() == (
+            "Load the GDTR limit and base from a six-byte memory operand.")
+        assert editor.completion.info.preview.info.stages == (
+            "F", "D", "S", "M")
+        assert "system" in editor.completion.info.availability.text()
+        save(editor.completion, outdir, "01_opcode_system_popup")
         editor.completion.list.setCurrentRow(add_row)
         reference_source = editor.toPlainText()
         editor.completion.accept_current()
