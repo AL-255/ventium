@@ -1513,6 +1513,28 @@ def scenario_branch_transport(app, outdir):
         assert int(win.trace.tbl.item(win.trace.tbl.currentRow(), 4).text(), 16) == selected_pc
         assert not win.trace.filt.text()
         assert win.trace.tbl.currentRow() >= win.trace.tbl.rowCount() - 10
+        assert win.trace.select_pc(0xDEADBEEF) is False
+
+        # Analysis retains Pipeline's longer window. Force the exact condition
+        # where its PC has fallen out of Trace and require a visible, pinned
+        # Pipeline fallback instead of a silent no-op.
+        fallback_pc = plot.insns[0]["pc"]
+        candidates = [
+            row for row, insn in enumerate(plot.insns)
+            if insn["pc"] == fallback_pc]
+        expected_row = min(
+            candidates, key=lambda row: abs(row - plot.sel_row))
+        real_select_pc = win.trace.select_pc
+        win.trace.select_pc = lambda _pc: False
+        try:
+            win._select_pc_origin(fallback_pc)
+        finally:
+            win.trace.select_pc = real_select_pc
+        assert plot.sel_row == expected_row
+        assert win._pinned_n == plot.insns[expected_row]["n"]
+        assert "outside Trace" in win.action_hint.text()
+        win._select_pc_origin(0xDEADBEEF)
+        assert "outside the retained Trace/Pipeline windows" in win.action_hint.text()
 
         click(app, win.reset_btn)
         settle(app)

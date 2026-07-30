@@ -804,7 +804,7 @@ class MainWindow(QMainWindow):
         self.pipeline.board.instructionClicked.connect(
             self._live_instruction_clicked)
         # drill-down: click a Hotspots / Branches PC row -> jump the trace to it
-        self.tables.pcClicked.connect(self.trace.select_pc)
+        self.tables.pcClicked.connect(self._select_pc_origin)
         # drill-down: click a Mem-map access point -> jump the trace to that retire n
         # (+ pin regs), so an outlier/stripe in the scatter is one click from its row.
         self.tables.accmap.pointSelected.connect(
@@ -1430,6 +1430,31 @@ class MainWindow(QMainWindow):
         retained = self.trace.select_n(n)
         if not retained or getattr(self, "_pinned_n", None) != n:
             self._pin_to(n)
+
+    def _select_pc_origin(self, pc):
+        """Drill a summary PC into Trace, or its longer Pipeline fallback."""
+        pc = int(pc)
+        if self.trace.select_pc(pc):
+            return
+        plot = self.pipeline.konata.plot
+        candidates = [
+            row for row, insn in enumerate(plot.insns)
+            if int(insn["pc"]) == pc
+        ]
+        if not candidates:
+            self._notice(
+                f"PC 0x{pc:08x} is outside the retained Trace/Pipeline windows")
+            return
+        row = (
+            min(candidates, key=lambda candidate:
+                abs(candidate - plot.sel_row))
+            if plot.sel_row is not None else candidates[-1])
+        selected = plot.insns[row]
+        self.pipeline.select_n(int(selected["n"]))
+        self._pin_to(int(selected["n"]))
+        self._notice(
+            f"PC 0x{pc:08x} is outside Trace · selected retained "
+            f"Pipeline retirement n={int(selected['n'])}")
 
     def _highlight_assembly_pc(self, pc, context):
         """Highlight one live/retired PC without requiring a retirement record."""

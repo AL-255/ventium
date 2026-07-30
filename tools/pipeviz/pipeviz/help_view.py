@@ -236,7 +236,10 @@ Clearing an unselected exploratory filter returns to the newest rows; selecting
 a result preserves that historical context instead.</p>
 <p>If a single fast step produces more rows than fit in the rolling view, Trace
 keeps and labels the newest 6,000 retirements. The Pipeline title similarly
-labels a newest-cycle window after very large steps.</p>
+labels a newest-cycle window after very large steps. Hotspots and Branches use
+Pipeline's longer analysis window; if their PC has fallen out of Trace,
+drill-down selects its nearest retained Pipeline retirement and reports that
+fallback instead of becoming a silent no-op.</p>
 """),
     ("Caches and memory", """
 <h1>Caches and memory</h1>

@@ -162,7 +162,11 @@ Malformed structured terms (for example `n>200` or `pc:xyz`) turn red, explain
 the accepted syntax on hover, and leave the trace visible while you correct
 them; a valid free-text query with no hits still shows an ordinary zero-result
 state.
-Hotspots and Branches rows activate with Enter as well as the mouse.
+Hotspots and Branches rows activate with Enter as well as the mouse. They
+normally select the nearest matching Trace row. Because their analysis window
+is longer than Trace, an older-only PC falls back to its nearest retained
+Pipeline retirement and says so in the action row instead of silently doing
+nothing.
 Large steps remain bounded and honest: Trace labels its newest 6,000
 retirements, Pipeline labels its newest 50,000-cycle window, and the compact
 IPC strip retains the newest 12,000 cycles.

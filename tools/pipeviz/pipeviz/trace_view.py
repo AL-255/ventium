@@ -460,7 +460,7 @@ class TraceView(QWidget):
                 and self.tbl.item(row, 4).text() == target)
         ]
         if not matches:
-            return
+            return False
         visible = [row for row in matches if not self.tbl.isRowHidden(row)]
         if not visible and self._tokens:
             self.filt.clear()
@@ -473,6 +473,7 @@ class TraceView(QWidget):
         self.tbl.setCurrentCell(row, 0)
         if item is not None:
             self.tbl.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+        return True
 
     def reset(self):
         self.tbl.setRowCount(0)

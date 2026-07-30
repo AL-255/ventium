@@ -65,6 +65,13 @@ single linked transaction; only an older row outside Trace's shorter rolling
 window pins directly. A real Pipeline keyboard selection requires exactly one
 retirement read.
 
+**Rolling-window PC audit:** Hotspots and Branches aggregate Pipeline's 9,000
+retirements while Trace retains 6,000, so a valid older-only PC could be visible
+in analysis but click as a silent no-op. PC drill-down now prefers the nearest
+Trace match, then selects/pins the nearest exact Pipeline retirement and reports
+the fallback; only a PC outside both windows reports unavailable. Acceptance
+forces the mismatch and verifies the retained row/pin/status.
+
 **Self-critique:** the historical-state indicator lived inside the Segments
 page. At compact widths, selecting a retirement while Integer or x87 was open
 could therefore leave old values looking live. The register bank now has a
