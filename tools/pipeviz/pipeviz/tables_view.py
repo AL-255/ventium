@@ -646,7 +646,7 @@ class TablesView(QWidget):
         self.tabs.setTabToolTip(1, "Data cache (D$): residency and replayed miss rate")
 
         # --- TLB (I + D) ---
-        self.tlb_lbl = QLabel()
+        self.tlb_lbl = _ResponsiveSummary("Translation cache summary")
         self.tlb = _mk_table(
             ["side", "idx", "V", "page (4K/4M)", "vpn->pfn", "perm U/W/P", "big", "D"],
             [44, 40, 30, 110, 150, 90, 40, 9999],
@@ -672,7 +672,7 @@ class TablesView(QWidget):
         self.tabs.setTabToolTip(3, "Prefetch buffer, fetch window, and live decode")
 
         # --- Hotspots (per-PC cycle-cost profile, perf/VTune-style) ---
-        self.hot_lbl = QLabel()
+        self.hot_lbl = _ResponsiveSummary("Hotspot summary")
         self.hot = _mk_table(
             ["PC", "hits", "Σ lat", "share", "D$ miss/access", "Σlat bar",
              "instruction"],
@@ -701,7 +701,7 @@ class TablesView(QWidget):
             4, "Per-PC summed latency and attributed D-cache misses")
 
         # --- Branches (per-branch-PC observed taken/not-taken profile) ---
-        self.br_lbl = QLabel()
+        self.br_lbl = _ResponsiveSummary("Branch summary")
         self.br = _mk_table(
             ["PC", "branch", "target", "hits", "taken/resolved", "taken %",
              "bias bar"],
@@ -727,7 +727,7 @@ class TablesView(QWidget):
             5, "Per-branch target, hit count, resolved taken rate, and bias")
 
         # --- Instruction mix (class histogram + U/V issue-port split) ---
-        self.mix_lbl = QLabel()
+        self.mix_lbl = _ResponsiveSummary("Instruction mix summary")
         self.mix = _mk_table(
             ["class", "count", "%", "bar"], [88, 60, 56, 9999],
             hint="no instructions retired yet — step the core")
@@ -757,8 +757,13 @@ class TablesView(QWidget):
         # --- Memory-access map (address-vs-sequence scatter / access pattern) ---
         self.accmap = AccessMap()
         amw = QWidget(); amv = QVBoxLayout(amw); amv.setContentsMargins(4, 4, 4, 4)
-        self.accmap_lbl = QLabel(
-            "explicit memory operands — effective offset vs retire order")
+        self.accmap_lbl = _ResponsiveSummary("Memory access map axes")
+        self.accmap_lbl.set_summary(
+            "explicit memory operands — effective offset vs retire order",
+            "Mem ops · offset × retire order")
+        self.accmap_lbl.setToolTip(
+            "Explicit memory operands plotted by effective offset against "
+            "retirement order")
         self.accmap_lbl.setStyleSheet("color:#8b949e;")
         amv.addWidget(self.accmap_lbl); amv.addWidget(self.accmap, 1)
         self.tabs.addTab(amw, "Mem map")
@@ -855,7 +860,7 @@ class TablesView(QWidget):
         total = sum(cls.values())
         self.mix.setRowCount(0)
         if total == 0:
-            self.mix_lbl.setText("no instructions yet")
+            self.mix_lbl.set_summary("no instructions yet")
             self.mix.sync_hint()
             return
         maxc = max(cls.values())
@@ -874,9 +879,13 @@ class TablesView(QWidget):
                     it.setForeground(QBrush(QColor("#d2a24c")))
                 self.mix.setItem(r, c, it)
         u, v = pipe["U"], pipe["V"]
-        self.mix_lbl.setText(
+        full = (
             f"{total} retired   ·   U-port {u}   V-port {v}   ·   "
             f"{100 * v / total:.0f}% via the V-port (realised dual-issue)")
+        compact = (
+            f"{total} ret · U{u} V{v} · V {100 * v / total:.0f}%")
+        self.mix_lbl.set_summary(full, compact)
+        self.mix_lbl.setToolTip(full)
 
     def set_branches(self, insns):
         """Per-branch-PC profile: identify branch instructions and infer taken vs
@@ -910,10 +919,15 @@ class TablesView(QWidget):
         ranked = sorted(agg.items(), key=lambda kv: -kv[1]["hits"])[:300]
         hits = sum(e["hits"] for e in agg.values())
         resolved = sum(e["resolved"] for e in agg.values())
-        self.br_lbl.setText(
+        full = (
             f"{len(agg)} branch site{'' if len(agg) == 1 else 's'} · "
             f"{resolved}/{hits} outcomes resolved from the next retired PC "
             f"— an unresolved capture-tail branch is excluded from T%")
+        compact = (
+            f"{len(agg)} branch{'' if len(agg) == 1 else 'es'} · "
+            f"resolved {resolved}/{hits}")
+        self.br_lbl.set_summary(full, compact)
+        self.br_lbl.setToolTip(full)
         rows = []
         for pc, e in ranked:
             pct = (100.0 * e["taken"] / e["resolved"]) if e["resolved"] else 0.0
@@ -953,17 +967,23 @@ class TablesView(QWidget):
             max(it["c1"] for it in insns) - min(it["c0"] for it in insns) + 1
             if insns else 0)
         captured_span = max(0, int(captured_span or retired_span))
-        self.hot_lbl.setText(
+        full = (
             f"{len(agg)} distinct PC{'' if len(agg) == 1 else 's'} · "
             f"Σ latency {total} instruction-cycles · retired span "
             f"{retired_span}/{captured_span} captured cycles "
             f"— overlap counts separately")
-        self.hot_lbl.setToolTip(
+        compact = (
+            f"{len(agg)} PCs · Σlat {total} · "
+            f"span {retired_span}/{captured_span}")
+        tooltip = (
             "Σ latency sums fetch-to-retire time for retired instructions. "
             f"Their visible lifecycle span covers {retired_span} of "
             f"{captured_span} captured cycles; an in-flight tail is not yet "
             "attributed. Overlapping instructions count separately, and stalls "
             "inflate their held latency.")
+        self.hot_lbl.set_summary(
+            full, compact, f"{full}. {tooltip}")
+        self.hot_lbl.setToolTip(tooltip)
         rows = []
         maxc = ranked[0][1][1] if ranked else 1
         for pc, (hits, cyc, mnem) in ranked:
@@ -1078,7 +1098,13 @@ class TablesView(QWidget):
                 rows.append([side, i, "1", f"{pg} {vaddr:08x}",
                              f"{e.vpn:05x}->{e.pfn:05x}", perm,
                              "Y" if e.big else "", "Y" if e.dirty else ""])
-        self.tlb_lbl.setText(f"{nv} valid entries  (16-entry direct-mapped, split I/D; index = lin[15:12])")
+        tlb_full = (
+            f"{nv} valid entries  "
+            "(16-entry direct-mapped, split I/D; index = lin[15:12])")
+        self.tlb_lbl.set_summary(
+            tlb_full,
+            f"TLB {nv} valid · 16 I/D · lin[15:12]")
+        self.tlb_lbl.setToolTip(tlb_full)
         _fill(self.tlb, rows, dim_cols=(1, 3, 4))
 
         # Prefetch buffer

@@ -2489,6 +2489,28 @@ def scenario_layout(app, outdir):
         save_shot(
             app, win, outdir, "08d_true_minimum_prefetch",
             min_width=900, min_height=620)
+        compact_summaries = (
+            (3, win.tables.tlb_lbl,
+             "TLB 0 valid · 16 I/D · lin[15:12]"),
+            (5, win.tables.hot_lbl,
+             "7 PCs · Σlat 291 · span 154/160"),
+            (6, win.tables.br_lbl,
+             "1 branch · resolved 13/13"),
+            (7, win.tables.mix_lbl,
+             "57 ret · U30 V27 · V 47%"),
+            (0, win.tables.accmap_lbl,
+             "Mem ops · offset × retire order"),
+        )
+        for key, label, expected in compact_summaries:
+            QTest.keyClick(
+                win, Qt.Key_0 if key == 0 else getattr(Qt, f"Key_{key}"),
+                Qt.AltModifier)
+            settle(app)
+            assert label.displayText() == expected
+            assert not label.displayText().endswith("…")
+            assert label.fontMetrics().horizontalAdvance(
+                label.displayText()) <= label.contentsRect().width()
+            assert label.accessibleName()
         QTest.keyClick(win, Qt.Key_1, Qt.AltModifier)
         settle(app)
         assert win.regs.state_banner.text() == "LIVE · current state"

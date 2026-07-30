@@ -89,6 +89,10 @@ in the 196 px analysis pane. Below 520 px it reflows them into two indexed rows
 of eight with measured compact padding/font, abbreviates the address and decode
 captions without losing flin/EIP/fetch-word/decode state, and restores the
 single 16-byte row and full prose when widened.
+TLB, Hotspots, Branches, Mix, and Mem-map headers now use the same semantic
+responsive contract: each has a measured compact phrase containing its key
+counts/denominator/axes instead of a cropped sentence, plus the complete
+explanation in tooltip and accessible text.
 
 **HLT terminal-state audit:** the IPC strip said “program stopped” after 64 HLT
 clocks even though the backend was still in an interrupt-wait state and Run
