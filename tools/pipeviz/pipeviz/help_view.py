@@ -273,7 +273,9 @@ and reports the successful path without clearing an unrelated build/compiler
 warning merely because the source was saved.
 New/Open, C-to-Assembly replacement, and Quit offer
 Save/Discard/Cancel protection. Canceling the Save As chooser after selecting
-Save remains a cancellation, not an I/O failure. If a blocked close resumes
+Save remains a cancellation, not an I/O failure. New/Open/replacement reports
+that the source was kept in the action row without erasing local build
+diagnostics. If a blocked close resumes
 continuous execution, the global notice retains its cancellation/save-failure
 reason. Back in Visualizer, Ctrl+O resumes its
 program-opening role. Dropped <code>.s/.S/.asm</code> and

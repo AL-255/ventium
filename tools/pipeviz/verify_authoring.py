@@ -696,6 +696,11 @@ def scenario(app, outdir):
             QMessageBox.warning = real_warning
         assert editor.toPlainText() == dirty_before_cancelled_new
         assert win.workspace.tabText(1) == "Assembly *"
+        assert win.action_hint.text() == (
+            "Assembly source kept · cancelled creating a new template")
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.text())
+        assert app.focusWidget() is editor
         real_warning = QMessageBox.warning
         real_save_dialog = QFileDialog.getSaveFileName
         QMessageBox.warning = staticmethod(
@@ -711,6 +716,9 @@ def scenario(app, outdir):
         assert win.assembly._last_save_outcome == "cancelled"
         assert win.assembly._replacement_block_reason == "cancelled"
         assert win.workspace.tabText(1) == "Assembly *"
+        assert win.action_hint.text() == (
+            "Assembly source kept · cancelled creating a new template")
+        assert app.focusWidget() is editor
         opened = []
         real_open_source = win.assembly.open_source
         win.assembly.open_source = lambda: opened.append("assembly")
@@ -2212,6 +2220,12 @@ def scenario(app, outdir):
         assert editor.toPlainText() == dirty_source
         assert win.assembly._replacement_block_reason == "cancelled"
         assert win.workspace.tabText(1) == "Assembly *"
+        assert win.action_hint.text() == (
+            "Assembly source kept · cancelled replacing it with "
+            "generated assembly")
+        assert win.action_hint.accessibleDescription() == (
+            win.action_hint.text())
+        assert app.focusWidget() is editor
         win.assembly._path = os.path.join(outdir, "edited-after-build.s")
         assert win.assembly.save_source()
         assert win.workspace.tabText(1) == "Assembly"

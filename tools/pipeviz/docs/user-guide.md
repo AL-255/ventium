@@ -435,7 +435,9 @@ dialogs, including after starting a new template.
 New/Open, generated C-to-Assembly replacement, and application close never
 silently discard a dirty editor: choose Save, Discard, or Cancel.
 Choosing Save and then canceling an unnamed source's Save As chooser is treated
-as cancellation, not an I/O failure. If close is canceled or a protective save
+as cancellation, not an I/O failure. For New/Open/replacement, the global
+action row confirms that the source was kept without erasing the local build
+status or diagnostics. If close is canceled or a protective save
 fails while continuous execution was active, execution resumes but the global
 notice retains the close-canceled/blocked reason instead of reverting to a
 generic running message.

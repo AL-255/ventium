@@ -9,6 +9,24 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## July 30 continuation — cancelled source replacements say what survived
+
+**Dirty-source cancellation audit:** cancelling New/Open/generated-source
+replacement correctly preserved the editor, but its only global feedback could
+remain an older build result or the pause caused by a dropped file. That made a
+safe cancellation look like an unexplained no-op.
+
+**Changes:** the shared Assembly/C replacement guard now emits a compact
+`source kept` outcome when Cancel is chosen or the protective Save As chooser
+is cancelled. Editor focus returns after the dialog. The local workbench status
+and diagnostics are deliberately preserved, so acknowledging the replacement
+decision cannot erase an assembler/compiler warning.
+
+**Verification:** authoring acceptance cancels a dirty Assembly New directly,
+cancels the protective Save chooser, and cancels generated-C replacement. Each
+case requires byte-for-byte source retention, dirty identity, editor focus,
+and the exact global accessible outcome.
+
 ## July 30 continuation — every Reset rejection remains actionable
 
 **Reset-path audit:** malformed address text had durable feedback, but four

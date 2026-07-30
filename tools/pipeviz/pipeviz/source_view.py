@@ -2018,6 +2018,14 @@ class _CursorPositionLabel(QToolButton):
 
 def _confirm_source_replacement(view, label, action):
     """Protect edited source before replacing it or closing the application."""
+    def report_cancelled():
+        # Keep local status/diagnostics intact: they may describe a useful
+        # build warning. The main-window action row can still confirm that the
+        # requested replacement did not happen.
+        view.statusChanged.emit(
+            f"{label} source kept · cancelled {action}")
+        view._focus_editor()
+
     view._replacement_block_reason = None
     if not view.editor.document().isModified():
         return True
@@ -2028,6 +2036,7 @@ def _confirm_source_replacement(view, label, action):
         QMessageBox.Save)
     if choice == QMessageBox.Cancel:
         view._replacement_block_reason = "cancelled"
+        report_cancelled()
         return False
     if choice == QMessageBox.Save:
         if view.save_source():
@@ -2036,6 +2045,8 @@ def _confirm_source_replacement(view, label, action):
             "save_failed"
             if getattr(view, "_last_save_outcome", None) == "failed"
             else "cancelled")
+        if view._replacement_block_reason == "cancelled":
+            report_cancelled()
         return False
     return True
 
