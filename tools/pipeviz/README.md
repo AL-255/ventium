@@ -145,12 +145,12 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
 * **Authoring workspaces** — top-level **Assembly** and **C** tabs sit beside
   the Visualizer:
   * Assembly is a line-numbered GNU Intel-syntax editor with syntax highlighting,
-    build diagnostics, `Ctrl+Space` completion over 291 Ventium/P54C mnemonics,
+    build diagnostics, `Ctrl+Space` completion over 292 Ventium/P54C mnemonics,
     mode/build availability notes (amber only when restricted), and an
     opcode-specific description plus miniature pipeline
     preview for every completion. The compact list shows mnemonic, pipe class,
     and operands once; the detail pane retains the full signature. Its footer
-    reports all 291 opcodes or the current prefix-match count beside the controls.
+    reports all 292 opcodes or the current prefix-match count beside the controls.
     An unsupported opcode prefix closes the popup but leaves a specific amber
     no-match notice; it does not masquerade as an assembler diagnostic.
     Jcc/SETcc aliases name their exact signed/unsigned flag predicate, while
@@ -179,7 +179,9 @@ panel (top-left), the **analysis tabs** (top-right), the retired-instruction
     Assembly-side status retains U/V identity or labels x87 as FP. Editing clears
     prior build diagnostics and PC links so green results never describe stale
     text. Errors are red and line-linked; successful toolchain warnings remain
-    runnable but use an amber line-linked diagnostic. Diagnostics use compact
+    runnable but use an amber line-linked diagnostic. Empty Assembly diagnostics
+    collapse so instruction details/pipeline preview receive the sidebar space,
+    then expand automatically for output. Diagnostics use compact
     **Assembly:** and **C source:** locations instead of long internal generated
     paths, preserving line/column information in narrow windows. Source drops
     route to

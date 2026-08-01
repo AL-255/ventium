@@ -259,6 +259,7 @@ def verify_catalog():
         "iretd": "32-bit EIP, CS, and EFLAGS",
         "lss": "register and SS",
         "lgdt": "Load the GDTR",
+        "invlpg": "full TLB",
         "sgdt": "Store the GDTR",
         "ltr": "Load the task-register",
         "str": "Store the current task-register",
@@ -298,7 +299,7 @@ def verify_catalog():
     required = {
         "aaa", "adc", "add", "bound", "bswap", "bt", "call", "cmpxchg8b",
         "cpuid", "endbr32", "f2xm1", "fadd", "fbld", "fldenv", "fprem1",
-        "frstor", "fsincos", "lgdt", "lss", "rdtsc", "repnz", "rsm",
+        "frstor", "fsincos", "invlpg", "lgdt", "lss", "rdtsc", "repnz", "rsm",
         "setnz", "shrd", "ud2", "wbinvd", "xadd",
     }
     assert required <= MNEMONICS
@@ -390,6 +391,8 @@ def verify_toolchain():
     assert str(source_module._GENERATED_DIR) not in assembled.log
     snippet = assemble_source("mov eax, 7\n")
     assert set(snippet.source_map.values()) == {1}
+    privileged = assemble_source("invlpg [eax]\n")
+    assert set(privileged.source_map.values()) == {1}
     warned = assemble_source(
         ".intel_syntax noprefix\n.global _start\n_start:\n"
         '.warning "acceptance warning"\nhlt\n')
@@ -603,6 +606,7 @@ def scenario(app, outdir):
             "Build diagnostics appear here.")
         assert win.assembly.diagnostics.accessibleDescription() == (
             "No build diagnostics.")
+        assert win.assembly.diagnostics.height() <= 54
         assert win.pipeline.board.accessibleName() == "Live pipeline stage board"
         assert "clicked" in win.pipeline.board.accessibleDescription()
         assert "Ctrl+Enter" in win.assembly.run_btn.toolTip()
@@ -1492,7 +1496,17 @@ def scenario(app, outdir):
         QTest.keyClicks(editor, "add")
         settle(app)
         assert editor.toPlainText() == reference_source
-        assert editor.completion.list.count() == 14
+        expected_add_matches = {
+            info.mnemonic for info in CATALOG
+            if "add" in info.search_text
+        }
+        assert editor.completion.list.count() == len(expected_add_matches)
+        visible_add_matches = {
+            editor.completion.list.item(i).data(Qt.UserRole).mnemonic
+            for i in range(editor.completion.list.count())
+        }
+        assert visible_add_matches == expected_add_matches
+        assert "invlpg" in visible_add_matches  # "addressed page" metadata
         assert (
             editor.completion.list.item(0).data(Qt.UserRole).mnemonic
             == "add")
@@ -1596,6 +1610,19 @@ def scenario(app, outdir):
         assert editor.completion.info.preview.info.stages == (
             "F", "D", "S", "M")
         assert "system" in editor.completion.info.availability.text()
+        invlpg_row = next(
+            i for i in range(editor.completion.list.count())
+            if editor.completion.list.item(i).data(Qt.UserRole).mnemonic
+            == "invlpg")
+        editor.completion.list.setCurrentRow(invlpg_row)
+        settle(app)
+        assert editor.completion.info.signature.text() == "invlpg [address]"
+        assert "full TLB" in editor.completion.info.description.text()
+        assert editor.completion.info.preview.info.stages == ("F", "D", "S")
+        assert editor.completion.info.preview.info.pipe == "SYS"
+        assert "CPL0" in editor.completion.info.availability.text()
+        assert "full TLB flush" in (
+            editor.completion.info.preview.accessibleDescription())
         save(editor.completion, outdir, "01_opcode_system_popup")
         editor.completion.list.setCurrentRow(add_row)
         reference_source = editor.toPlainText()
@@ -1831,6 +1858,7 @@ def scenario(app, outdir):
         assert "Line 5" in win.assembly.diagnostics.toolTip()
         assert "press Enter" in (
             win.assembly.diagnostics.accessibleDescription())
+        assert win.assembly.diagnostics.height() >= 92
         editor.moveCursor(QTextCursor.Start)
         win.assembly.diagnostics.setFocus()
         QTest.keyClick(win.assembly.diagnostics, Qt.Key_Return)
@@ -1845,6 +1873,7 @@ def scenario(app, outdir):
         assert "Build error highlighted" not in editor.accessibleDescription()
         assert not win.assembly.diagnostics.toPlainText()
         assert "#8b949e" in win.assembly.diagnostics.styleSheet()
+        assert win.assembly.diagnostics.height() <= 54
         editor.document().setModified(False)
 
         # Successful assembler warnings stay runnable but are amber, source-
@@ -1867,6 +1896,7 @@ def scenario(app, outdir):
         assert str(source_module._GENERATED_DIR) not in (
             win.assembly.diagnostics.toPlainText())
         assert "#e3b341" in win.assembly.diagnostics.styleSheet()
+        assert win.assembly.diagnostics.height() >= 92
         assert "succeeded with warnings" in win.assembly.status.text()
         warning_save_path = os.path.join(
             outdir, "assembly-warning-preserved.s")

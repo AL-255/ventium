@@ -350,7 +350,7 @@ load/store, near/far return, WAIT, stack, and mathematical direction. Normal use
 availability is neutral; mode- or build-gated operations say so explicitly in
 amber. Each list row shows mnemonic, pipe class, and operands without repeating
 the mnemonic; the detail pane shows the complete signature. The footer reports
-all 291 opcodes or the live prefix-match count beside its controls. Regression covers
+all 292 opcodes or the live prefix-match count beside its controls. Regression covers
 every RTL decoder family and all 121 exact 32-bit P5 timing mnemonics. Use
 Up/Down or Page
 Up/Page Down to choose, Home/End for the
@@ -378,7 +378,9 @@ Delete refresh the current matches.</p>
 <h2>Diagnostics and build freshness</h2>
 <p>Build errors highlight their source line
 in red; successful GCC/GNU-as warnings remain runnable but mark their line and
-diagnostics in amber. The first diagnostic line is actionable:
+diagnostics in amber. Empty Assembly diagnostics collapse to a shallow
+placeholder so the instruction preview receives the sidebar space, then
+expand automatically for build output. The first diagnostic line is actionable:
 focus it and press Enter, or double-click it, to return to the marked editor
 line. Tool output says <code>Assembly:</code> or <code>C source:</code> instead
 of spending the compact pane on an internal generated-file path; exact

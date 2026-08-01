@@ -9,6 +9,41 @@ visuals → synthesize prioritized fixes → implement → verify → commit. Th
 records what each iteration changed and the outstanding ideas, so the loop does
 not repeat itself.
 
+## August 1 continuation — autocomplete follows the new INVLPG decoder
+
+**Decoder-drift audit:** the RTL gained the privileged `SYS_INVLPG` family
+after the previous green authoring run. The decoder-coupled acceptance gate
+correctly rejected the now-incomplete 291-entry catalogue instead of silently
+leaving Assembly users without completion or instruction guidance.
+
+**Changes:** `invlpg [address]` is now the 292nd completion. Its detail names
+the addressed-page intent, Ventium's conservative full-TLB implementation,
+system/CPL0 availability, system serialization latency, and F→D→S pipeline.
+Current help/counts follow the catalogue while historical audit entries retain
+the counts they actually measured.
+
+**Verification:** catalogue acceptance requires INVLPG's exact description and
+metadata, GNU `as` must accept a bare `invlpg [eax]` experiment with a DWARF
+source map, and the real completion popup renders and accessibly describes its
+SYS pipeline and full-TLB latency.
+
+## July 30 continuation — empty Assembly diagnostics stop wasting preview space
+
+**Compact-workbench visual audit:** at 900×620, the empty Assembly diagnostics
+box expanded through roughly half of the sidebar. Its placeholder carried no
+new information, while the instruction description and pipeline preview—the
+useful opcode-learning surface—were confined above it.
+
+**Changes:** Assembly diagnostics now collapse to a 42–54 px affordance while
+empty and expand to 92–165 px when success, warning, error, or file-I/O output
+exists. This mirrors the C workbench's established behavior and gives the
+instruction preview the reclaimed vertical space without hiding where build
+results will appear.
+
+**Verification:** authoring acceptance locks the empty compact height, expansion
+for both assembler errors and warnings, and collapse again as soon as an edit
+invalidates the stale diagnostic.
+
 ## July 30 continuation — cancelled source replacements say what survived
 
 **Dirty-source cancellation audit:** cancelling New/Open/generated-source

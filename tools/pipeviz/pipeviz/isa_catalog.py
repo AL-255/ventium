@@ -184,6 +184,10 @@ _add("rdtsc", "", "Read the modeled time-stamp counter into EDX:EAX.",
      "SYS", stages=("F", "D", "S"), availability="SoC/co-simulation")
 _add("invd wbinvd", "", "Modeled cache-management serialization/no-op.",
      "SYS", stages=("F", "D", "S"), availability="SoC/co-simulation")
+_add("invlpg", "[address]",
+     "Invalidate the translation for the addressed page; Ventium conservatively flushes the full TLB.",
+     "SYS", stages=("F", "D", "S"), latency="system serialization / full TLB flush",
+     availability="system/CPL0")
 _add("rsm", "", "Restore processor state from the SMM save-state area.",
      "SYS", stages=("F", "D", "S"), latency="long system sequence",
      availability="SMM only")

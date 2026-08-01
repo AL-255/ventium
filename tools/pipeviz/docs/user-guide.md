@@ -336,13 +336,16 @@ Ordinary `user` availability is neutral; system, build-flag, SMM, and
 co-simulation restrictions turn amber so the color signals a real constraint.
 The completion list does not repeat the mnemonic inside its operand form; the
 adjacent detail pane still shows the complete signature.
-The footer changes from `291 opcodes` to the live prefix-match count while
+The footer changes from `292 opcodes` to the live prefix-match count while
 keeping selection, insertion, pointer, and close controls visible.
 If a prefix has no supported Ventium/P54C opcode, the popup closes and the
 Assembly status names that token in amber. Continue editing freely; only
 **Assemble** creates a build diagnostic.
 With no opcode selected, the persistent sidebar uses one compact empty state
 and points to caret placement or `Ctrl+Space`.
+The empty Build diagnostics box also collapses to a shallow placeholder so the
+instruction description and pipeline preview receive the sidebar's space; it
+expands automatically when a build produces output.
 Use Up/Down or Page Up/Page Down to choose, Home/End for the first/last entry,
 Enter/Tab or a double-click to insert, and Escape to close; the popup keeps
 these controls visible at its foot.
@@ -570,7 +573,7 @@ QT_QPA_PLATFORM=offscreen ~/miniconda3/bin/python \
   tools/pipeviz/verify_authoring.py
 ```
 
-It verifies the 291-mnemonic catalogue against every current RTL decoder family
+It verifies the 292-mnemonic catalogue against every current RTL decoder family
 and all 121 exact 32-bit mnemonics named by the P5 timing classifier,
 syntax highlighting, opcode-scoped completion and its description/pipeline
 preview, compact layout, transactional load failure, build errors, ELF/DWARF

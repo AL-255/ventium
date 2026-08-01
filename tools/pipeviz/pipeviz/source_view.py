@@ -2176,6 +2176,9 @@ class AssemblyView(QWidget):
         self.diagnostics.setAccessibleName("Assembly build diagnostics")
         self.diagnostics.lineActivated.connect(self._activate_diagnostic)
         side.addWidget(self.diagnostics, 1)
+        self.diagnostics.textChanged.connect(
+            self._sync_diagnostics_height)
+        self._sync_diagnostics_height()
         split.addWidget(self.editor)
         split.addWidget(sidebar)
         split.setStretchFactor(0, 4)
@@ -2238,6 +2241,14 @@ class AssemblyView(QWidget):
     def _focus_editor(self):
         if self.isVisible():
             self.editor.setFocus(Qt.OtherFocusReason)
+
+    def _sync_diagnostics_height(self):
+        """Give preview space back until diagnostics contain useful output."""
+        populated = bool(self.diagnostics.toPlainText().strip())
+        minimum, maximum = (
+            (92, 165) if populated else (42, 54))
+        self.diagnostics.setMinimumHeight(minimum)
+        self.diagnostics.setMaximumHeight(maximum)
 
     def _activate_diagnostic(self, line):
         warning = self.diagnostics._severity == "warning"
