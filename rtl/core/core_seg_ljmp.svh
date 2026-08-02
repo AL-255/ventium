@@ -2,6 +2,48 @@
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
 // core/core_seg_ljmp.svh — RAW case-arm text `included inside core.sv's
+
+//
+// ===========================================================================
+// REVIEW2_aug2 C-06 -- PROTECTED FAR CALL/RETF MUTATE STATE BEFORE VALIDATING.
+// NOT FIXED. Recorded here rather than in a status note.
+//
+// Protected far CALL pushes the return CS:EIP and the GPR writeback decrements ESP
+// BEFORE the unvalidated selector reaches S_LJMP. A later selector, presence,
+// privilege, table-limit or target-limit fault therefore leaves the return frame
+// written and ESP moved -- the handler sees a stack that the faulting instruction
+// architecturally should not have touched.
+//
+// Protected RETF pops EIP/CS and advances ESP before validating the destination, then
+// reuses far-JMP semantics; it has NO outer-privilege SS:ESP pop/validation path.
+// Cross-privilege call gates loud-HALT instead of switching stack and copying
+// parameters (see docs/unsupported-isa.md).
+//
+// WHAT THE FIX REQUIRES: stage the stack operands AND the target descriptor state,
+// validate everything, then commit stack and control state atomically -- the same
+// shape the IRET whole-frame commit uses (REVIEW1_Aug2 C-06/C-07). Plus the two
+// architecturally distinct sequences that do not exist at all: RETF to an OUTER
+// privilege level (pop SS:ESP, validate the new SS, discard the inner frame), and the
+// call-gate privilege transition (switch to TSS.SS<n>:ESP<n>, copy the parameter
+// words, then push the outer return frame).
+//
+// WHY IT IS NOT ATTEMPTED IN THIS PASS, stated plainly rather than dressed up:
+//   * A partial pre-check is form-dependent and would be misleading. The selector is
+//     available at dispatch only for the IMMEDIATE ptr16:32 form; for CALL/JMP FAR
+//     m16:32 it is not known until the memory operand load completes, so "validate the
+//     selector early" cannot cover both and would leave the harder form unprotected
+//     while looking addressed.
+//   * This path is LOAD-BEARING for the project's own target: the dispatch comments
+//     record that DOS Quake's CWSDPMI far-calls and far-returns run through it in
+//     protected mode. A partial restructure that regresses it costs more than the
+//     unfixed ordering.
+//   * This is the finding class that produced the worst regression of this review --
+//     REVIEW2_aug2 C-01, a deadlock in the SHIPPING build, came from a same-shaped
+//     "obviously safe" reordering of fault handling.
+//
+// The ordering defect is real and unmitigated. It is not silent: a fault after the
+// push leaves observable stack damage, which is at least diagnosable.
+// ===========================================================================
 // always_ff `unique case (state)` (R2 modularization). NOT a standalone unit
 // (no module/always wrapper); pasted verbatim at the original FSM site, netlist
 // identical. Covers the M2S.1 descriptor-table reads + protected-mode far jmp:
