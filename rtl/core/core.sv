@@ -4570,6 +4570,8 @@ module core
   //   h01_ssb   : times the new SS.B captures (cross-priv delivery / task switch)
   //               actually changed ss_b.
   // Printed only with +ven_h01, so a normal run is byte-identical and silent.
+  logic ven_seglog_en;
+  initial ven_seglog_en = $test$plusargs("ven_seglog") != 0;
   logic ven_h01_en;
   initial ven_h01_en = $test$plusargs("ven_h01") != 0;
   int   ven_h01_ptr16, ven_h01_ssb;
@@ -4649,7 +4651,49 @@ module core
       seg_off_over_limit = sys_mode && !real_mode && a[7]
                         && (last_byte > {1'b0,dlimit});
     // The composite the delivery arm consumes.
-    seg_access_fault = seg_off_over_limit || seg_null_sel || seg_not_present;
+    // ---- REVIEW2_Aug1 C-06, THIRD false positive (measured, +ven_seglog) --------
+    // This whole block describes a DATA access -- it reads seg_attr[dseg]/
+    // seg_limit[dseg] and derives the offset from the data segment's base. It was
+    // never qualified on the access actually BEING a data access, so every
+    // INSTRUCTION FETCH was limit-checked against DS. Measured on pmode, and on all
+    // 19 system tests (12 firings is the floor, i.e. it is systematic):
+    //   [SEGCHK] st=1 dseg=2 sel=0000 base=00000000 lim=0000ffff attr=93
+    //            cur_lin=000f0066 off=000f0066 w=4 cpl=0 pc=00000066
+    // st=1 is S_FETCH and cur_lin is a CODE address, so of course 0x000f0066 exceeds
+    // the DS limit 0xFFFF. THIS is the "spurious #GP looping at 0xf020d" the previous
+    // round reverted the delivery for: not a subtle descriptor-cache window, just the
+    // check running on the wrong access class.
+    //
+    // cur_is_d is the same signal the paging permission logic already uses to split
+    // its D-side and I-side rules, so this reuses the existing classification rather
+    // than inventing a second one. A CS-limit check for fetches is a DIFFERENT check
+    // against a DIFFERENT descriptor and is NOT added here.
+    //
+    // WHAT IS STILL WRONG, measured with the same +ven_seglog after this qualifier.
+    // 16 of the 19 system tests go to zero; three do not, and they are all ONE class:
+    //   pseg     6   [SEGCHK] st=23 dseg=2 sel=0018 base=00020000 lim=0000ffff
+    //                         cur_lin=00000528 off=fffe0528
+    //   pv86    78   [SEGCHK] st=33 dseg=1 sel=2000 base=00020000 lim=0000ffff
+    //                         cur_lin=00001068 off=fffe1068
+    //   ptaskv86 18  (same shape)
+    // cur_lin 0x528 is the GDT (base 0x500) and 0x1068 is the IDT (base 0x1000):
+    // these are DESCRIPTOR-TABLE and system-structure reads. They address memory
+    // LINEARLY -- they do not go through dseg at all -- so subtracting the data
+    // segment's base underflows (off=0xfffe0528) and every one trivially "exceeds"
+    // the limit. They are data-side accesses, so cur_is_d cannot separate them.
+    //
+    // The missing input is one bit: IS THIS ACCESS SEGMENT-RELATIVE. Writing it here
+    // as a list of states would recreate the exact mirror that produced this whole
+    // family of false positives -- a second hand-maintained copy of the bus driver's
+    // base selection, which is what seg_chk_base already is and why it is wrong for
+    // these states. That bit belongs in the per-access descriptor (#65), alongside
+    // the linear address, width, class and split phase.
+    //
+    // So the delivery stays OFF and this stays a diagnostic. What changed is that the
+    // remaining blocker is now a NAMED, MEASURED single missing field rather than
+    // "a spurious #GP loops at 0xf020d".
+    seg_access_fault = cur_is_d
+                    && (seg_off_over_limit || seg_null_sel || seg_not_present);
   end
 
 
@@ -6996,6 +7040,20 @@ module core
           && (cur_lin != mem_addr_pre))
         $error("PAGING/C-03: address mirror drift in state %0d -- TLB looked up lin=%08h but the bus drives lin=%08h (pre-translate). One of cur_lin / mem_addr is wrong for this state.",
                int'(state), cur_lin, mem_addr_pre);
+
+      // ---- REVIEW2_Aug1 C-06 DIAGNOSTIC (+ven_seglog) ------------------------
+      // The delivery is REMOVED (see core_fetch_decode.svh), because two earlier
+      // attempts shipped false positives. This logs, WITHOUT faulting, every access
+      // the limit check WOULD have rejected -- qualified on a real bus request in a
+      // translatable state, the same qualifier CHECK 5 uses, so it reports accesses
+      // and not combinational glitches. The point is to find the remaining false
+      // positive by measurement instead of re-enabling delivery and bisecting a
+      // corpus-wide failure, which is how the first two were found the hard way.
+      if (ven_seglog_en && seg_access_fault && mem_req && fe_translatable)
+        $display("[SEGCHK] st=%0d dseg=%0d sel=%04h base=%08h lim=%08h attr=%02h ed=%b | cur_lin=%08h off=%08h w=%0d cpl=%0d pc=%08h",
+                 int'(state), int'(dseg), seg_sel[dseg], seg_chk_base, dlimit,
+                 seg_attr[dseg], seg_expand_down, cur_lin, seg_chk_off, q_w,
+                 int'(eff_cpl), eip);
 
       // ---- CHECK 4: the fast path must never issue while debugging is armed ---
       // The fast path implements neither single-step nor DR breakpoints, so if it

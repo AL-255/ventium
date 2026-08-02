@@ -1,6 +1,7 @@
 # Ventium — progress against REVIEW2_Aug1.md (session of Aug 1–2)
 
-**State: 41 of 43 findings addressed. `make verify-all` = 10/10 gates PASS.**
+**State: 41 of 43 findings addressed at the time of writing; 42 of 43 after the
+REVIEW_aug2 round (see the update in §6). `make verify-all` = 10/10 gates PASS.**
 
 Written for a review run, so it leads with what to check and where I am least confident,
 not with what went well.
@@ -170,10 +171,31 @@ and C-02's split proved the structure works.
 
 ## 6. Remaining, with the specific blocker (not a restatement)
 
+> **UPDATE (Aug 2, after the REVIEW_aug2 round).** Four of the items below were
+> closed by that round, which numbers them differently. The mapping, verified by
+> reading REVIEW2_Aug1.md out of git (`git show f6f6ced:REVIEW2_Aug1.md` — the file
+> is no longer in the working tree):
+>
+> | REVIEW2_Aug1 | REVIEW_aug2 | closed by |
+> |---|---|---|
+> | **C-10** IRET restores privilege/flags without validation | C-07 | `87a7852`, gated by `pssiret` |
+> | **C-07** stack address size does not follow SS.B | H-01 | `a83e199`, gated by `pstk16` |
+> | **H-03** (nested-delivery / #DF escalation half) | H-04 | `140ff92`, gated by `pdf` |
+> | **H-09** NMI cleared at IRET decode | H-05 | `c2b21ee`, gated by run-sys-golden step 7c |
+>
+> REVIEW2_Aug1 C-07 is closed for the PROTECTED-mode half and for retaining SS.B in
+> the hidden SS cache (its stated "required direction"). One nuance is deliberately
+> left: in steady-state V86 the stack ADDRESS wraps but the POINTER does not, because
+> masking on `seg_real` truncates the monitor's ESP during a V86->CPL0 delivery
+> (measured: pv86 n=705, expected 0x00087fc8 got 0x00007fc8). It is identity in
+> practice and recorded in core.sv. See PROGRESS_REVIEW_aug2.md for the full round.
+>
+> **C-06 is therefore the last open CRITICAL from this review.**
+
 | finding | blocker |
 |---|---|
 | **C-06** | third false positive; needs #65's access descriptor, not another patch |
-| **C-07** | not started |
+| ~~**C-07**~~ | CLOSED as REVIEW_aug2 H-01 — see the update above |
 | **H-16** (alias half) | needs physical I-tags or a reverse alias map |
 | **H-17** | needs a **fetch bypass** — deliver bytes without a validated line |
 | **H-21** | fix does **not** belong in `fpu_top.sv:218-257` where the finding points; `fpu_top` does not own `fstat` (full 16-bit replace from the spine). Belongs in `fpu_writeback.sv`. Blocked on H-22 — the unmasked branch has nowhere to go until `#MF` exists |
