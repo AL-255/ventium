@@ -146,6 +146,18 @@
                 if (desc_present(attr) && (desc_type(attr) == 4'hB)) begin
                   start_fault(8'd13, 1'b1, {16'd0, q_ljmp_sel[15:2], 2'b00}, q_pc);
                   seg_step <= 1'b0;
+                end else if (desc_present(attr) && (desc_type(attr) == 4'h9)
+                             && (desc_limit(desc) < 32'h67)) begin
+                  // REVIEW1_Aug2 C-09 (last bullet): the TSS LIMIT was never checked.
+                  // A 32-bit TSS must be at least 0x67 bytes -- the microsequence reads
+                  // EIP@0x20, EFLAGS@0x24, eight GPRs, six selectors and LDTR@0x60, so
+                  // a smaller one is read PAST ITS END and the new task starts from
+                  // whatever follows it in memory. IA-32 raises #TS(selector).
+                  // Present and available-vs-busy were already checked above; this is
+                  // the size, which is the part that decides whether the fields the
+                  // switch is about to read even exist.
+                  start_fault(8'd10, 1'b1, {16'd0, q_ljmp_sel} & 32'h0000_FFFC, q_pc);
+                  seg_step <= 1'b0;
                 end else if (desc_present(attr) && (desc_type(attr) == 4'h9)) begin
                   // HARDWARE TASK SWITCH to a 32-bit TSS.
                   tsw_new_base  <= desc_base(desc);
