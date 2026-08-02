@@ -173,11 +173,29 @@ module fpu_top (
   // a single definition even though it is applied in three places, which is the
   // distinction that matters for drift.
   //
-  // NOT DONE HERE: deriving ES itself. See the note in fpu_writeback.sv -- ES is a
-  // STICKY bit set when an unmasked exception occurs, not a continuous function of
-  // (flags & ~masks), so computing it combinationally would be wrong.
+  // ---- REVIEW1_Aug2 H-12: DERIVE ES, which nothing did --------------------------
+  // The note that used to sit here said ES could not be computed combinationally
+  // because it is STICKY. That is right about ES and wrong about where to compute it:
+  // sticky means "once set, stays set until FNCLEX/FNINIT/FLDENV", and the place to
+  // set it is exactly where the exception FLAGS are committed. Every fstat write goes
+  // through the three commit points below, so ES is derived there and OR'd with what
+  // the incoming value already carries -- which preserves the sticky bit across writes
+  // that do not raise anything new, and preserves an ES restored by FLDENV/FRSTOR.
+  //
+  // ES = any exception flag SET and NOT MASKED by the control word. FSW[5:0] and
+  // FCW[5:0] are both {PE,UE,OE,ZE,DE,IE} in the same bit order.
+  //
+  // Consequence, and the reason this matters beyond the bit itself: with_b() mirrors
+  // B from ES, and the previous round measured ES set in 0 of 10165 fstat records --
+  // the mirror was correct and completely inert because nothing ever raised the
+  // summary. Deriving ES makes both live, and gives #MF something to key off.
+  function automatic logic [15:0] with_es_b(input logic [15:0] v);
+    logic es;
+    es = v[7] | (|(v[5:0] & ~fctrl[5:0]));
+    with_es_b = {es, v[14:8], es, v[6:0]};   // B (bit 15) := ES (bit 7) := es
+  endfunction
   function automatic logic [15:0] with_b(input logic [15:0] v);
-    with_b = {v[7], v[14:0]};   // B (bit 15) := ES (bit 7)
+    with_b = with_es_b(v);
   endfunction
   logic [7:0]  fptag;        // bit i = tag for fpr[i] (1=empty)
   // M11: FPU instruction/data pointers (env-image only; never the graded trace).

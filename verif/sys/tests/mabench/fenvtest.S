@@ -58,12 +58,55 @@ _start16:
 
     fnstcw  0x0604                    /* THE CHECK: must now read 0x037F */
 
+    /* ---- REVIEW1_Aug2 H-12: ES (and therefore B) must actually be DERIVED -------
+     * FSW.ES is the error summary: set when an exception flag is raised AND that
+     * exception is UNMASKED. Nothing derived it, so ES was 0 in every one of the
+     * 10165 fstat records the previous round measured -- which also made the B:=ES
+     * mirror (bit 15) completely inert, since B is a copy of a bit that was never set.
+     *
+     * FNSTENV above has just re-masked everything (that is the M-01 behaviour this
+     * test exists for), so clear the masks again, then raise a genuine INVALID
+     * OPERATION with IM clear: 0.0 / 0.0. That must set IE (bit 0), and because IE is
+     * unmasked it must also set ES (bit 7) and B (bit 15).
+     *
+     * Expected FSW: IE|ES|B = 0x0001 | 0x0080 | 0x8000 = 0x8081, plus whatever C0..C3
+     * the operation leaves. The check masks to those three bits so it does not depend
+     * on the condition codes. A core that does not derive ES reads 0x0001 here. */
+    fldcw   0x0600                    /* CW = 0x0340 again, ALL MASKS CLEAR */
+    fldz                              /* ST0 = 0.0 */
+    fldz                              /* ST0 = 0.0, ST1 = 0.0 */
+    fdivp   %st, %st(1)               /* 0.0 / 0.0 -> INVALID OPERATION, IE set */
+    fnstsw  0x0606                    /* witness: IE|ES|B must all be set */
+
     /* ---- print "CW=" hex(cw_after) ---- */
     movw $0x03F8,%dx
     movb $'C',%al; outb %al,%dx
     movb $'W',%al; outb %al,%dx
     movb $'=',%al; outb %al,%dx
     movw 0x0604, %ax
+    movw $4, %cx
+1:  rolw $4, %ax
+    movb %al, %bl
+    andb $0x0F, %bl
+    cmpb $10, %bl
+    jb 2f
+    addb $87, %bl
+    jmp 3f
+2:  addb $48, %bl
+3:  pushw %ax
+    movb %bl, %al
+    movw $0x03F8,%dx
+    outb %al,%dx
+    popw %ax
+    decw %cx
+    jnz 1b
+    movb $' ',%al; outb %al,%dx
+    movb $'S',%al; outb %al,%dx
+    movb $'W',%al; outb %al,%dx
+    movb $'=',%al; outb %al,%dx
+    /* REVIEW1_Aug2 H-12: report only IE|ES|B so the condition codes do not matter. */
+    movw 0x0606, %ax
+    andw $0x8081, %ax
     movw $4, %cx
 1:  rolw $4, %ax
     movb %al, %bl

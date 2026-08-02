@@ -48,14 +48,35 @@ set -e
 [ "$RC" != 124 ] || { echo "FENV-GATE-FAIL (timeout — the run HUNG)"; exit 1; }
 
 CW=$(printf '%s' "$OUT" | grep -oE "CW=[0-9a-f]+" | head -1 | cut -d= -f2)
+SW=$(printf '%s' "$OUT" | grep -oE "SW=[0-9a-f]+" | head -1 | cut -d= -f2)
 echo "  CW after FNSTENV = ${CW:-<none>}  (loaded 0340 with ALL masks clear)"
-if [ "$CW" = "037f" ]; then
+echo "  FSW IE|ES|B      = ${SW:-<none>}  (0.0/0.0 with IM clear)"
+
+# REVIEW1_Aug2 H-12: FSW.ES is the error summary -- set when a flag is raised AND that
+# exception is unmasked. Nothing derived it, so ES read 0 in all 10165 fstat records the
+# previous round measured, which ALSO made the B:=ES mirror inert. 0.0/0.0 with IM clear
+# must set IE (0x0001), ES (0x0080) and B (0x8000) => 0x8081. A core that does not derive
+# ES prints 0001 here.
+fenv_fail=0
+if [ "$CW" != "037f" ]; then
+  [ "$CW" = "0340" ] && echo "  FAIL FNSTENV left FCW untouched — the mask-after-store is missing"
+  [ "$CW" != "0340" ] && [ -n "${CW:-}" ] && echo "  FAIL unexpected FCW '$CW' (want 037f)"
+  [ -z "${CW:-}" ] && echo "  FAIL no CW= line in the output"
+  fenv_fail=1
+else
   echo "  PASS FNSTENV set FCW[5:0] (all x87 exceptions masked, per SDM Vol.2)"
+fi
+if [ "$SW" != "8081" ]; then
+  [ "$SW" = "0001" ] && echo "  FAIL IE was raised but ES/B were NOT derived (H-12)"
+  [ "$SW" != "0001" ] && [ -n "${SW:-}" ] && echo "  FAIL unexpected FSW '$SW' (want 8081 = IE|ES|B)"
+  [ -z "${SW:-}" ] && echo "  FAIL no SW= line in the output"
+  fenv_fail=1
+else
+  echo "  PASS an UNMASKED exception sets FSW.ES and mirrors it to FSW.B"
+fi
+if [ "$fenv_fail" = 0 ]; then
   echo "FENV-GATE-OK"
   exit 0
 fi
-[ "$CW" = "0340" ] && echo "  FAIL FNSTENV left FCW untouched — the mask-after-store is missing"
-[ "$CW" != "0340" ] && [ -n "${CW:-}" ] && echo "  FAIL unexpected FCW '$CW' (want 037f)"
-[ -z "${CW:-}" ] && echo "  FAIL no CW= line in the output"
 echo "FENV-GATE-FAIL"
 exit 1
