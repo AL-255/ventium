@@ -23,6 +23,13 @@
     // Set at the top of each arm that builds its address from a segment base, so it
     // lives with the code it describes rather than in a remote list in core.sv.
     cur_seg_rel=1'b0;
+    // REVIEW1_Aug2 C-01: the access also carries WHICH segment governs it. Default to
+    // dseg, which already resolves SS for push/pop/RET/PUSHA/LEAVE and ES for SCAS.
+    // The arms below override it where the ADDRESS uses a different segment than dseg
+    // names -- string STORES go to ES via dbase_edi while dseg names the string SOURCE
+    // (DS), and the stack arms anchor on SS directly. Before this, the linear address
+    // could be right while the LIMIT came from the wrong hidden descriptor.
+    cur_seg_idx=dseg;
     unique case (state)
       // task #54: no bus transaction when the window is served from the I-cache.
       S_FETCH: begin mem_req=!sfetch_fast; mem_addr=flin+{27'd0,fetch_word,2'b00}; end
@@ -79,7 +86,8 @@
         // 32-bit far JMP/CALL indirect (m16:32): selector 2 bytes at [mem+4]; use
         // opbase to match the first read (opbase+q_ea, S_LOAD line 44).
         else if (q_jmpf_mem || q_callf_mem) mem_addr=opbase+q_ea+{28'd0,q_w};
-        else mem_addr=dbase_edi+str_edi;   // CMPS second operand ([EDI])
+        else begin mem_addr=dbase_edi+str_edi;   // CMPS second operand ([EDI])
+          cur_seg_idx=3'(SG_ES); end              // C-01: the [EDI] side is ES
       end
       // Nested ENTER (level>0) micro-sequence: all accesses are STACK-relative (SS).
       // ent_rd beat reads the display source SS:[EBP-(ent_k-1)*w]; the push beat writes
@@ -115,13 +123,10 @@
       // until the S_LCALL commit, so BOTH beats reference the OLD ESP. Width q_w
       // (2 real-mode default / 4 under 0x66) selects the byte-strobe + the SP steps.
       S_LCALL: begin
-        // REVIEW2_Aug1 C-06: deliberately NOT marked segment-relative. This arm
-        // anchors on seg_base[SG_SS] directly, but `dseg` -- which supplies the
-        // DESCRIPTOR the limit check reads -- does not follow SS for the far-transfer
-        // ops (its SS condition covers push/pop/RETN/PUSHF/LEAVE/PUSHA/POPA, not
-        // SYS_LCALL/SYS_RETF/the real-mode IRET). Marking it would check an SS-based
-        // address against whatever descriptor dseg happened to name. Excluded until
-        // the access carries its own segment index; fail-open, and stated.
+        // REVIEW1_Aug2 C-01: now checkable. This arm anchors on seg_base[SG_SS] and
+        // says so explicitly, so the limit comes from SS rather than from whatever
+        // dseg happened to name (which is why it was excluded before).
+        cur_seg_rel=1'b1; cur_seg_idx=3'(SG_SS);
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=(q_w==3'd2)?4'b0011:4'b1111;
         if (!seg_step) begin
           mem_addr  = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {28'd0,q_w});    // SP - w
@@ -135,13 +140,10 @@
       // pops CS at [SS:SP+w]. ESP is unchanged until the S_RETF commit.
       S_RETF: begin
         mem_req=1'b1;
-        // REVIEW2_Aug1 C-06: deliberately NOT marked segment-relative. This arm
-        // anchors on seg_base[SG_SS] directly, but `dseg` -- which supplies the
-        // DESCRIPTOR the limit check reads -- does not follow SS for the far-transfer
-        // ops (its SS condition covers push/pop/RETN/PUSHF/LEAVE/PUSHA/POPA, not
-        // SYS_LCALL/SYS_RETF/the real-mode IRET). Marking it would check an SS-based
-        // address against whatever descriptor dseg happened to name. Excluded until
-        // the access carries its own segment index; fail-open, and stated.
+        // REVIEW1_Aug2 C-01: now checkable. This arm anchors on seg_base[SG_SS] and
+        // says so explicitly, so the limit comes from SS rather than from whatever
+        // dseg happened to name (which is why it was excluded before).
+        cur_seg_rel=1'b1; cur_seg_idx=3'(SG_SS);
         if (!seg_step) mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]);       // pop IP
         else           mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]+{28'd0,q_w}); // pop CS
       end
@@ -185,13 +187,10 @@
       // FLAGS (beat2 @SS:SP+4).
       S_RMIRET: begin
         mem_req=1'b1;
-        // REVIEW2_Aug1 C-06: deliberately NOT marked segment-relative. This arm
-        // anchors on seg_base[SG_SS] directly, but `dseg` -- which supplies the
-        // DESCRIPTOR the limit check reads -- does not follow SS for the far-transfer
-        // ops (its SS condition covers push/pop/RETN/PUSHF/LEAVE/PUSHA/POPA, not
-        // SYS_LCALL/SYS_RETF/the real-mode IRET). Marking it would check an SS-based
-        // address against whatever descriptor dseg happened to name. Excluded until
-        // the access carries its own segment index; fail-open, and stated.
+        // REVIEW1_Aug2 C-01: now checkable. This arm anchors on seg_base[SG_SS] and
+        // says so explicitly, so the limit comes from SS rather than from whatever
+        // dseg happened to name (which is why it was excluded before).
+        cur_seg_rel=1'b1; cur_seg_idx=3'(SG_SS);
         mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] + {27'd0, int_step, 1'b0});
       end
       S_FLOAD: begin
@@ -229,6 +228,7 @@
         if (q_kind==K_STR) begin
           // string store [EDI] uses ES.
           mem_wstrb=strb_of(q_w); mem_addr=dbase_edi+str_store_addr; mem_wdata=str_store_data;
+          cur_seg_idx=3'(SG_ES);   // C-01: MOVS/STOS write ES:[EDI], not dseg's DS
         end else begin
           mem_wstrb=st_strb; mem_addr=stbase+st_addr; mem_wdata=st_data;
         end
@@ -326,6 +326,9 @@
                    + {29'd0, int_step[0], 2'b00};
       end
       S_INT_PUSH: begin mem_req=1'b1; mem_we=1'b1;
+        // REVIEW1_Aug2 C-01: the interrupt frame is pushed on SS and its limit was
+        // not checked at all -- this arm carried no segment identity.
+        cur_seg_rel=1'b1; cur_seg_idx=3'(SG_SS);
         mem_wstrb = (!from_v86 && !xpl_active && int_gate_op16) ? 4'b0011 : 4'b1111;
         if (from_v86) begin
           // M7.2 V86: push the 9-WORD V86 frame (+errcode) descending from the NEW
@@ -406,6 +409,7 @@
                  + {16'd0, iret_ss[15:3], 3'd0} + ({29'd0, int_step[0], 2'b00});
       end
       S_IRET: begin mem_req=1'b1;                // pop EIP/CS/EFLAGS[+ESP/SS] asc
+        cur_seg_rel=1'b1; cur_seg_idx=3'(SG_SS);   // REVIEW1_Aug2 C-01: SS-relative
         // 16-bit IRETW (same-priv only): ascending 2-byte pop IP @SP, CS @SP+2,
         // FLAGS @SP+4 (mirrors S_RMIRET). The memmodel returns a 32-bit dword at the
         // byte address (read32 @ addr), so the low 16 bits carry the popped word; the

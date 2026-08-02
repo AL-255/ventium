@@ -4299,9 +4299,15 @@ module core
   // always_ff so the writeback's combinational block is untouched.
   always_ff @(posedge clk) begin
     if (!rst_n) begin ven_h01_ptr16 <= 0; ven_h01_ssb <= 0;
+                      ven_seg_chk_n <= 0; ven_seg_chk_ss <= 0; ven_seg_chk_es <= 0;
                       ven_h01_ssb_prev <= 1'b1; ven_h01_state_prev <= S_PIPE; end
     else begin
       if (gpr_we[R_ESP] && stk_ptr16 && !real_mode) ven_h01_ptr16 <= ven_h01_ptr16 + 1;
+      if (cur_is_d && cur_seg_rel && mem_req_pre_sq && sys_mode && !real_mode) begin
+        ven_seg_chk_n <= ven_seg_chk_n + 1;
+        if (cur_seg_idx == 3'(SG_SS)) ven_seg_chk_ss <= ven_seg_chk_ss + 1;
+        if (cur_seg_idx == 3'(SG_ES)) ven_seg_chk_es <= ven_seg_chk_es + 1;
+      end
       // Attribute an ss_b CHANGE to the new sites by looking at the state it came
       // from -- exact, and independent of the beat encoding inside each sequence.
       ven_h01_ssb_prev  <= ss_b;
@@ -4589,8 +4595,18 @@ module core
   logic ven_h01_en;
   initial ven_h01_en = $test$plusargs("ven_h01") != 0;
   int   ven_h01_ptr16, ven_h01_ssb;
+  // REVIEW1_Aug2 C-01: how many accesses the segment check actually EXAMINES, split by
+  // governing segment. "Zero rejections" is only meaningful alongside a non-zero
+  // examined count -- otherwise the check could be passing by not running.
+  int   ven_seg_chk_n, ven_seg_chk_ss, ven_seg_chk_es;
   logic ven_h01_ssb_prev;
   state_e ven_h01_state_prev;
+  final if (ven_seglog_en)
+    // Tag deliberately NOT "SEGCHK...": run-seg-gate.sh counts per-access rejections
+    // with `grep -c SEGCHK`, and a summary line sharing that prefix was counted as
+    // a 19th rejection. Distinct prefix so the two can never be confused.
+    $display("[SEGSTAT] segment-relative accesses examined: %0d  (SS %0d, ES %0d)",
+             ven_seg_chk_n, ven_seg_chk_ss, ven_seg_chk_es);
   final if (ven_h01_en)
     $display("[H01] 16-bit PM-stack ESP writebacks: %0d   new SS.B captures: %0d",
              ven_h01_ptr16, ven_h01_ssb);
@@ -4628,13 +4644,17 @@ module core
   // Both need the access to carry its segment INDEX, not just a base -- see #65.
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        cur_seg_rel;              // this access is SEGMENT-RELATIVE
+  logic [2:0]  cur_seg_idx;              // ...governed by THIS segment
   logic [31:0] seg_chk_base, seg_chk_off;
   logic        seg_access_fault;
   always_comb begin
     logic [32:0] last_byte;
     logic [7:0]  a;
-    dlimit = seg_limit[dseg];
-    a      = seg_attr[dseg];
+    // REVIEW1_Aug2 C-01: the descriptor comes from the access's OWN segment index,
+    // published by the bus driver next to the address, not from dseg. They differ for
+    // string stores (ES vs the DS the source names) and for every stack access.
+    dlimit = seg_limit[cur_seg_idx];
+    a      = seg_attr[cur_seg_idx];
     // Data-segment type bits (S=1, bit4): bit3=0 data, bit2=E expand-down, bit1=W.
     seg_expand_down = a[4] && !a[3] && a[2];
     // MEASURED (UPDATE 355): this fired spuriously inside the Err79 #GP handler with
@@ -4673,7 +4693,9 @@ module core
     //
     // offset = cur_lin - segment base, using the base the bus driver uses for THIS
     // state (stbase for S_STORE, opbase otherwise -- see the S_LOAD/S_STORE arms).
-    seg_chk_base = (state == S_STORE) ? stbase : opbase;
+    // ...and so does the base, so the offset is the real segment offset rather than a
+    // reconstruction that guessed stbase-or-opbase by state.
+    seg_chk_base = seg_base[cur_seg_idx];
     seg_chk_off  = cur_lin - seg_chk_base;
     // Real access extent: last touched byte = offset + (width-1), not a fixed +3.
     last_byte = {1'b0, seg_chk_off} + {30'd0, q_w} - 33'd1;
@@ -7093,8 +7115,8 @@ module core
       // self-defeating -- it printed nothing precisely when it had something to say.
       if (ven_seglog_en && seg_access_fault && mem_req_pre_sq && fe_translatable)
         $display("[SEGCHK] st=%0d dseg=%0d sel=%04h base=%08h lim=%08h attr=%02h ed=%b | cur_lin=%08h off=%08h w=%0d cpl=%0d pc=%08h",
-                 int'(state), int'(dseg), seg_sel[dseg], seg_chk_base, dlimit,
-                 seg_attr[dseg], seg_expand_down, cur_lin, seg_chk_off, q_w,
+                 int'(state), int'(cur_seg_idx), seg_sel[cur_seg_idx], seg_chk_base, dlimit,
+                 seg_attr[cur_seg_idx], seg_expand_down, cur_lin, seg_chk_off, q_w,
                  int'(eff_cpl), eip);
 
       // ---- CHECK 4: the fast path must never issue while debugging is armed ---
