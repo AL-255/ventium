@@ -416,6 +416,11 @@ module core
     // reset. The core also stops (S_SHUTDOWN); a platform that wires this to a
     // reset controller gets the architectural behaviour.
     output logic        fast_reset_req,
+    // REVIEW2_aug2 C-08: the memory hierarchy has to know where SMRAM ACTUALLY is.
+    // The guard was hard-coded to 0xA0000-0xBFFFF (the 82437FX video aperture) while
+    // this core's SMBASE is 0x30000 -- so it protected a range this core does not use
+    // and left the real handler and save map unprotected.
+    output logic [31:0] smbase_o,
     output logic        mem_req,
     output logic        mem_we,
     // ---- REVIEW1_Aug2 C-10: the core now REQUESTS a locked transaction ------------
@@ -655,6 +660,7 @@ module core
   // SMM addressing context is driven directly by CR0.PE==0 + the SMM CS/base set
   // up at entry.)
   logic [31:0] smbase;            // SMRAM base (default 0x30000)
+  assign smbase_o = smbase;       // C-08: exported so the L1/AXI guard tracks it
   logic        smm_active;        // in SMM (1 = HF_SMM)
   assign smm_active_o = smm_active;   // REVIEW2 H-24: export to the memory hierarchy
   logic        smi_pending;       // a recognised SMI# is waiting for an insn boundary

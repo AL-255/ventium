@@ -514,6 +514,7 @@ module ventium_top
       .bus_err      (l1_bus_err),
       // Phase D.6: northbridge → icache snoop (DMA-loaded code coherence).
       .smm_active_o   (core_smm_active),   // REVIEW2 H-24
+      .smbase_o       (core_smbase),       // REVIEW2_aug2 C-08
       .ic_snoop_valid (ic_snoop_v),
       .ic_snoop_addr  (ic_snoop_a),
       .ic_snoop_valid1(ic_snoop_v1),
@@ -968,6 +969,7 @@ module ventium_top
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
   logic        core_smm_active;                       // REVIEW2 H-24: core SMM state
+  logic [31:0] core_smbase;   // REVIEW2_aug2 C-08: the real SMRAM base
   logic        ic_snoop_v; logic [31:0] ic_snoop_a;   // Phase D.6: NB → icache snoop
   logic        ic_snoop_v1; logic [31:0] ic_snoop_a1; // H-09: SMC store, first line
   logic        ic_snoop_v2; logic [31:0] ic_snoop_a2; // H-09: SMC store, second line
@@ -984,6 +986,7 @@ module ventium_top
       .golden_l1 (golden_l1),
       .shutdown  (shutdown), .m_idle (m_idle),
       .smm_active         (core_smm_active),            // REVIEW2 H-24
+      .smbase             (core_smbase),                // REVIEW2_aug2 C-08
       .icache_snoop_valid (ic_snoop_v), .icache_snoop_addr (ic_snoop_a),
       .icache_snoop_valid1(ic_snoop_v1), .icache_snoop_addr1(ic_snoop_a1),   // H-09
       .icache_snoop_valid2(ic_snoop_v2), .icache_snoop_addr2(ic_snoop_a2),

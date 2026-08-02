@@ -10,6 +10,12 @@
 // ven_cachemap, but that source is on an unmerged branch -- and the branch that BUILDS
 // consumed smm_active nowhere.
 //
+// REVIEW2_aug2 C-08: this gate ORIGINALLY drove 0xA0000 -- the 82437FX video aperture,
+// which is what the guard named. But this core's SMBASE is 0x30000, so SMM actually
+// lives at SMBASE+0x8000 = 0x38000 with the save map at 0x3FE00..0x3FFFC. The guard
+// protected a range the core does not use, and the test agreed with it. Both now name
+// the real window, and the case addresses below are inside it.
+//
 // 82437FX SMRAM (0x72): bit 3 = DEN, bit 6 = DOPEN. DRAM-backed iff DEN && (DOPEN ||
 // in SMM). This gate instantiates with DEN=1, DOPEN=0 and drives four cases:
 //
@@ -47,6 +53,7 @@ module tb_l1axi_smram;
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all(1'b0), .golden_l1(1'b1), .shutdown(1'b0), .m_idle(),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(smm_active),
+      .smbase(32'h0003_0000),   // REVIEW2_aug2 C-08: the core's ACTUAL default SMBASE
       .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
@@ -113,20 +120,20 @@ module tb_l1axi_smram;
     repeat (4) @(posedge clk); rst_n = 1; repeat (4) @(posedge clk);
 
     $display("== REVIEW1_Aug2 H-08: SMRAM must be invisible outside SMM ==");
-    $display("   NB_SMRAM=0x08 -> DEN=1, DOPEN=0 (SMM space enabled and CLOSED)");
+    $display("   NB_SMRAM=0x08 -> DEN=1, DOPEN=0; SMBASE=0x30000, window 0x30000-0x3FFFF");
 
     // A — SMM writes the secret, then reads it back from SMM. This must work, or the
     //     check has simply broken SMM instead of protecting it.
-    do_write(32'h000A_0000, 32'h5EC2_E7A1, 1'b1);
-    do_read (32'h000A_0000, 1'b1, rv);
+    do_write(32'h0003_8000, 32'h5EC2_E7A1, 1'b1);
+    do_read (32'h0003_8000, 1'b1, rv);
     if (rv !== 32'h5EC2_E7A1) begin
       $display("  FAIL SMM cannot see its own SMRAM: read %08h, want 5ec2e7a1", rv);
       fails++;
     end else $display("  ok   SMM reads back its own SMRAM (%08h)", rv);
 
     // B/C — THE FINDING: non-SMM must neither read nor overwrite it.
-    do_write(32'h000A_0000, 32'hBAD0_BAD0, 1'b0);
-    do_read (32'h000A_0000, 1'b1, rv);          // re-read FROM SMM to see the truth
+    do_write(32'h0003_8000, 32'hBAD0_BAD0, 1'b0);
+    do_read (32'h0003_8000, 1'b1, rv);          // re-read FROM SMM to see the truth
     if (rv !== 32'h5EC2_E7A1) begin
       $display("  FAIL a NON-SMM write reached SMRAM: it now holds %08h", rv);
       $display("       Ordinary code can rewrite the SMM handler and its saved state.");
@@ -137,8 +144,8 @@ module tb_l1axi_smram;
     // B: in a build where B's write got through, the secret is already clobbered, so
     // the non-SMM read trivially differs from it and C "passes" for the wrong reason.
     // Measured on the reverted build -- C reported ok while SMRAM was wide open.
-    do_write(32'h000A_0000, 32'h5EC2_E7A1, 1'b1);
-    do_read (32'h000A_0000, 1'b0, rv);
+    do_write(32'h0003_8000, 32'h5EC2_E7A1, 1'b1);
+    do_read (32'h0003_8000, 1'b0, rv);
     if (rv === 32'h5EC2_E7A1) begin
       $display("  FAIL a NON-SMM read returned the SMRAM contents (%08h)", rv);
       fails++;

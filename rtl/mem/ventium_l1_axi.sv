@@ -99,6 +99,9 @@ module ventium_l1_axi #(
     // REVIEW2 H-24: the core's live SMM state, for SMRAM open/close in the cache map
     // and northbridge. Was hard-wired 1'b0 at both instances below.
     input  logic        smm_active,
+    // REVIEW2_aug2 C-08: the ACTUAL SMRAM base. The guard used to name 0xA0000 --
+    // the 82437FX aperture -- which this core does not use for SMM.
+    input  logic [31:0] smbase,
     input  logic [31:0] core_wdata,
     input  logic [3:0]  core_wstrb,
     output logic [31:0] core_rdata,
@@ -522,8 +525,14 @@ module ventium_l1_axi #(
       // INERT AT THE DEFAULT NB_SMRAM=8'h00 (DEN=0): byte-identical to before unless
       // a configuration actually enables SMRAM.
       logic smram_deny, smram_deny_q;
+      // REVIEW2_aug2 C-08: guard the window SMM ACTUALLY occupies -- [SMBASE,
+      // SMBASE+0xFFFF]. The handler entry is SMBASE+0x8000 and the state save map is
+      // SMBASE+0xFE00..+0xFFFF, so with the default SMBASE=0x30000 the real region is
+      // 0x30000-0x3FFFF and the old 0xA0000-0xBFFFF guard protected nothing that
+      // mattered: ordinary guest code could read or rewrite the SMM handler and the
+      // saved CPU state.
       assign smram_deny = NB_SMRAM[3] && !NB_SMRAM[6] && !smm_active
-                       && (m_addr >= 32'h000A_0000) && (m_addr < 32'h000C_0000);
+                       && (m_addr >= smbase) && (m_addr <= (smbase + 32'h0000_FFFF));
       always_ff @(posedge core_clk or negedge core_rst_n)
         if (!core_rst_n) smram_deny_q <= 1'b0;
         else             smram_deny_q <= m_req && smram_deny && !smram_deny_q;
