@@ -421,7 +421,34 @@ module icache #(
       do_snoop(snoop_inv_valid2, snoop_inv_addr2);
       // GLOBAL flush (REVIEW_Jul29 H-12) — LAST, so it also wins over a same-cycle
       // fill_done allocate: after an external "flush all" nothing may stay resident.
-      if (flush_all) begin
+      // REVIEW1_Aug2 H-05: the I-cache is LINEAR-tagged, but a physical page can be
+      // mapped by more than one linear address. A store through alias A invalidates
+      // only the line tagged with A's linear address; a stale executable copy stays
+      // resident under alias B's tag and is fetched and EXECUTED. A20 mask changes
+      // create the same shape by changing address identity under a fixed mapping.
+      //
+      // Ports 1/2 are the CPU store snoops (icache_snoop_addr1/2 = core_lin, the
+      // store's LINEAR address). Port 0 is the DMA/northbridge snoop, which already
+      // responds with a conservative full flush, so only the CPU-alias half is open.
+      //
+      // The review offers three remedies: physical I-tags, a reverse-alias mechanism,
+      // or "flushing all executable state on every CPU store would be correct but
+      // expensive". This is the third, behind a define -- correct, and honestly
+      // priced rather than silently shipped:
+      //
+      //   VEN_IC_ALIAS_SAFE OFF (default): a store invalidates only its own linear
+      //       line. FAST, and WRONG for aliased executable pages. Unchanged behaviour.
+      //   VEN_IC_ALIAS_SAFE ON: every CPU store flushes the whole I-cache. Correct
+      //       under any aliasing, and expensive -- every store costs a full refill.
+      //
+      // The real fix is physical I-tags; that is an icache datapath rework and is NOT
+      // done. This makes the correct behaviour AVAILABLE and TESTED (run-ic-alias-gate)
+      // instead of leaving the hazard with no way to demonstrate or avoid it.
+      if (flush_all
+`ifdef VEN_IC_ALIAS_SAFE
+          || snoop_inv_valid1 || snoop_inv_valid2
+`endif
+         ) begin
         for (int s=0; s<IC_SETS; s++)
           for (int w=0; w<IC_WAYS; w++) ic_val[s][w] <= 1'b0;
       end

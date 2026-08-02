@@ -1,8 +1,8 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**32 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
-and reverted with its measurement, 1 open.**
-`make verify-all` = 11/11 gates. `make l1` = 16 gates (was 13). `verify-sys` = 19 tests.
+**33 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
+and reverted with its measurement, 2 open (H-06, H-07 — one shared bypass).**
+`make verify-all` = 11/11 gates. `make l1` = 17 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
 
@@ -141,10 +141,13 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
 - **C-10** LOCKed RMW is not atomic against DMA.
 
 **Remaining, and none of these is a small edit:**
-- **H-05/H-06/H-07** — one shared non-allocating bypass datapath seen from three
-  angles: coherence across virtual aliases, I-side cacheability, and the
-  `VEN_L1_HONOR_CD` read path. H-07 was attempted directly, DEADLOCKED the core, and
-  was reverted with its measurement (§3). This is the one genuinely open finding.
+- **H-06 / H-07** — these two DO share a datapath: a non-allocating bypass that can
+  deliver bytes without allocating a line. H-06 needs it on the fetch side
+  (`ic_fill_nocache` is tied to 0; the I-cache is also the fetch datapath, so merely
+  poisoning the fill livelocks). H-07 needs it on the L1D read side
+  (`BYPASS_RD_EN=0` under `VEN_L1_HONOR_CD`). H-07 was attempted directly, DEADLOCKED
+  the core, and was reverted with its measurement (§3).
+  **H-05 was NOT part of this** — see §4g; that framing was mine and it was wrong.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
 
@@ -409,6 +412,59 @@ had already clobbered the secret, so the read trivially differed from it. C was 
 independent of B. Re-seeding from SMM before the read makes it discriminate — the
 reverted build now fails both B and C rather than only B. Same lesson as E3/E7 in §4b:
 a witness that depends on an earlier witness's failure proves nothing.
+
+---
+
+## 4g. H-05 — the review named a remedy I had not read
+
+I had been describing H-05/H-06/H-07 as "one shared bypass datapath seen from three
+angles". H-06 and H-07 genuinely do share one. **H-05 does not** — it is I-cache tag
+aliasing, and the review ends it with an explicitly acceptable remedy:
+
+> Use physical I-tags or maintain a reverse alias mechanism; flushing all executable
+> state on every CPU store would be correct but expensive.
+
+I had not read that sentence. The finding sat classified as structural for the whole
+cycle because I was working from my own summary again.
+
+### The hazard, now reproduced
+
+The I-cache is LINEAR-tagged and a CPU store snoops with the store's LINEAR address
+(`ventium_l1_axi.sv:333`, `icache_snoop_addr1 = core_lin`). With one physical page
+mapped by two linear addresses, a store through alias B invalidates only B, and a stale
+EXECUTABLE copy stays resident under A and is fetched and executed. Self-modifying code,
+a loader writing code through a scratch mapping, and A20 mask changes all produce it.
+
+`VEN_IC_ALIAS_SAFE` is the review's third option: every CPU store flushes executable
+state. Self-contained in `icache.sv` because `flush_all` already existed.
+
+  - default: a store invalidates only its own linear line. Fast, wrong under aliasing.
+  - `+VEN_IC_ALIAS_SAFE`: correct under any aliasing, and expensive — every store costs
+    a full I-cache refill, on a core where S_FETCH is already 52% of all clocks.
+
+**The real fix is physical I-tags and is NOT done.** This makes the correct behaviour
+available and tested rather than leaving the hazard with no way to demonstrate or avoid
+it, and prices it explicitly instead of shipping it silently.
+
+### The gate asserts the DEFAULT build still misbehaves
+
+| build | assertion |
+|---|---|
+| default | alias A MUST survive a store through alias B — the hazard reproduces |
+| `+VEN_IC_ALIAS_SAFE` | alias A MUST be dropped |
+
+If the default ever stops reproducing it, the gate FAILS rather than continuing to print
+OK. That is the M-08 lesson applied forward: a gate that cannot tell "fixed properly"
+from "no longer testing anything" is worse than no gate. Both directions also run the
+control (a store to a line invalidates THAT line), so a build that cached nothing could
+not pass either direction by accident.
+
+### A testbench written against an interface that does not exist
+
+My first attempt assumed `icache` had `fetch_req`/`fetch_valid` ports. It does not — it
+is array-exposed and driven by the core's FSM. Rebuilt on `tb_icache_snoop`'s proven
+harness, which also has the useful property of driving snoop PORT 1 — the CPU store port
+that gate deliberately ties off, and which therefore had no coverage at all until now.
 
 ---
 
