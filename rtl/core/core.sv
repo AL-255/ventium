@@ -4783,6 +4783,7 @@ module core
   //   * S_INT_PUSH / S_IRET stack accesses carry no segment identity, so their SS
   //     limits are not checked at all.
   // Both need the access to carry its segment INDEX, not just a base -- see #65.
+  logic        tsw_seg_bad;              // C-09: this task-switch segment is invalid
   logic        walk_usr_lat;             // C-04: the class of the access that missed
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        xs_probing;               // C-02: the crossing-store probe phase

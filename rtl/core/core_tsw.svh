@@ -84,10 +84,28 @@
               // still record the selector, which is what the new task's TSS specifies.
               ldt_sel <= tsw_new_ldt;
               if (|tsw_new_ldt[15:3]) begin
+                // ---- REVIEW1_Aug2 C-09: VALIDATE the incoming LDTR ------------------
+                // The descriptor was installed unconditionally: no table-limit check on
+                // the selector, and no type or Present check on what came back. A
+                // malformed TSS therefore handed the new task an arbitrary LDT base and
+                // limit, and every subsequent TI=1 selector resolved through it.
+                // IA-32: the selector must be a GDT selector (TI=0) inside the table,
+                // the descriptor must be an LDT (S=0, type 2), and it must be present.
+                // #TS(selector) otherwise -- the task-switch error code.
+                if (tsw_new_ldt[2] || !sel_in_table(tsw_new_ldt)
+                    || desc_s(desc_attr(desc))
+                    || (desc_attr(desc)[3:0] != 4'h2)
+                    || !desc_present(desc_attr(desc))) begin
+                  start_fault(8'd10, 1'b1,
+                              {16'd0, tsw_new_ldt} & 32'h0000_FFFC, int_src_pc);
+                end else begin
                 ldt_base  <= desc_base(desc);
                 ldt_limit <= desc_limit16(desc);
+                tsw_step <= 5'd0; state <= S_TSW_SEG;
+                end
+              end else begin
+                tsw_step <= 5'd0; state <= S_TSW_SEG;
               end
-              tsw_step <= 5'd0; state <= S_TSW_SEG;
             end
           end
         end
@@ -117,6 +135,32 @@
               // and qemu switch_tss_ra's `if (new_eflags & VM_MASK) load_seg_vm(...)`.
               // (The bus driver still issues the GDT reads; mem_rdata is just ignored here
               //  — harmless: DOS low memory is mapped, so the overrun read can't fault.)
+              // REVIEW1_Aug2 C-09: one statement of the per-segment task-switch rules.
+              //   CS  must be a present CODE segment, inside its table, non-null.
+              //   SS  must be a present WRITABLE DATA segment whose DPL and RPL equal
+              //       the new CPL (CS.RPL).
+              //   DS/ES/FS/GS may be NULL; if not null they must be inside the table,
+              //       present, and readable (data, or a readable code segment).
+              // V86 tasks (EFLAGS.VM) bypass all of it -- their selectors are real-mode
+              // paragraphs, not descriptors, which is why this sits in the else branch.
+              tsw_seg_bad = 1'b0;
+              if (!tsw_eflags[17]) begin
+                if (!sel_in_table(tsw_sel[sidx]) && |tsw_sel[sidx][15:3])
+                  tsw_seg_bad = 1'b1;
+                else if (sidx == 3'(SG_CS))
+                  tsw_seg_bad = (tsw_sel[SG_CS][15:2] == 14'd0)
+                             || !desc_present(sattr) || !desc_s(sattr)
+                             || !seg_is_code(sattr);
+                else if (sidx == 3'(SG_SS))
+                  tsw_seg_bad = (tsw_sel[SG_SS][15:2] == 14'd0)
+                             || !desc_present(sattr) || !desc_s(sattr)
+                             ||  seg_is_code(sattr) || !sattr[1]
+                             || (tsw_sel[SG_SS][1:0]  != tsw_sel[SG_CS][1:0])
+                             || (desc_dpl(sattr)      != tsw_sel[SG_CS][1:0]);
+                else if (|tsw_sel[sidx][15:3])   // DS/ES/FS/GS, non-null only
+                  tsw_seg_bad = !desc_present(sattr) || !desc_s(sattr)
+                             || (seg_is_code(sattr) && !sattr[1]);  // execute-only code
+              end
               if (tsw_eflags[17]) begin
                 seg_base [sidx] <= {12'd0, tsw_sel[sidx], 4'd0};   // base = sel<<4
                 seg_limit[sidx] <= 32'h0000_FFFF;
@@ -127,6 +171,15 @@
                   // REVIEW1_Aug2 M-02: and so is its stack.
                   if (sidx == 3'(SG_SS)) ss_b <= 1'b0;
                 end
+              end else if (tsw_seg_bad) begin
+                // ---- REVIEW1_Aug2 C-09: VALIDATE each incoming segment descriptor ----
+                // All six were installed with no selector, type, privilege or Present
+                // check at all, so a malformed TSS gave the new task arbitrary segment
+                // bases and limits at an arbitrary CPL. IA-32 raises #TS(selector) for
+                // each of these on a task switch (see tsw_seg_bad, which states the
+                // per-segment rules once rather than repeating them per arm).
+                start_fault(8'd10, 1'b1,
+                            {16'd0, tsw_sel[sidx]} & 32'h0000_FFFC, int_src_pc);
               end else begin
                 seg_base [sidx] <= desc_base(desc);
                 seg_limit[sidx] <= desc_limit(desc);
