@@ -133,6 +133,10 @@
                   cpl_r <= tsw_sel[SG_CS][1:0];  // CPL = new CS.RPL
                   cs_d  <= desc[54];              // D/B: 32-bit default op/addr size
                 end
+                // REVIEW_aug2 H-01: the incoming task's SS width. Exactly the cs_d
+                // capture above, for the stack -- it was simply missing, so a task
+                // switch into a 16-bit-stack task inherited the outgoing task's width.
+                if (sidx == 3'(SG_SS)) ss_b <= desc[54];
               end
               if (tsw_step == 5'd11) begin tsw_step <= 5'd0; state <= S_TSW_BUSY; end
               else tsw_step <= tsw_step + 5'd1;

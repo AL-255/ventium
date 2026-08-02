@@ -113,6 +113,11 @@
               seg_base [SG_SS] <= desc_base(desc);
               seg_limit[SG_SS] <= desc_limit(desc);
               seg_attr [SG_SS] <= desc_attr(desc);
+              // REVIEW_aug2 H-01: capture SS.B here too. ss_b was updated ONLY on the
+              // ordinary segment-load path, so a cross-privilege delivery onto a
+              // 16-bit inner stack kept the PREVIOUS descriptor's width and pushed the
+              // frame with the wrong address size.
+              ss_b             <= desc[54];
               int_step         <= 4'd0;
               state            <= S_INT_PUSH;
             end

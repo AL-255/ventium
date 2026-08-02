@@ -1,0 +1,30 @@
+{
+  "name": "pstk16",
+  "kind": "system",
+  "src": "pstk16.S",
+  "linker": "pstk16.ld",
+  "image": "pstk16.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 700,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, far jump to flat 32-bit code 0x08)",
+    "GDT adds idx6 0x30: a 16-BIT DPL0 data descriptor (base 0, limit 0xFFFF, access 0x92, gran byte 0x00 => G=0 B=0) used as the stack",
+    "case 1: SS <- 0x30, ESP <- 0xDEAD0000 (SP=0). A pushl must write linear 0x0000FFFC and leave ESP=0xDEADFFFC -- high half preserved, only SP changed; the pop restores ESP=0xDEAD0000",
+    "TSS.SS0 <- 0x30 and TSS.ESP0 <- 0x00010000, so the CPL0 interrupt stack is that same 16-bit segment",
+    "transfer DOWN to CPL3 (CS 0x1B / SS 0x23) by inter-priv IRET",
+    "case 2: INT 0x80 from CPL3 -- the cross-priv delivery loads SS:ESP from the TSS and must push the 5-word frame with 16-BIT arithmetic, so the handler runs at ESP=0x0001FFEC (SP 0x0000->0xFFEC, high half 0x0001 intact) on SS=0x0030",
+    "syscall exit (INT 0x40) -> sys_exit at CPL0 reports and performs the isa-debug-exit"
+  ],
+  "delivery_records": {
+    "why_the_values_discriminate": "0xDEADFFFC distinguishes three implementations: a correct 16-bit stack gives 0xDEADFFFC, a 32-bit stack gives 0xDEACFFFC (borrow out of SP into the high half), and a mask-the-whole-pointer implementation gives 0x0000FFFC. Likewise the handler ESP: 0x0001FFEC is correct, 0x0000FFEC means the delivery pushed 32-bit because SS.B was not captured.",
+    "success_proof": "at sys_exit (CPL0): eax=0xDEADFFFC (ESP after the 16-bit push), ebx=0x11223344 (read back at linear 0xFFFC, so the push used the WRAPPED address), ecx=0xDEAD0000 (ESP after the pop), ebp=0x11223344 (popped value), edx=0x0001FFEC (handler ESP on the 16-bit TSS stack -- the SS.B-at-delivery proof), esi=0x30 (handler SS), edi=1 (delivery counter); then out 0xf4 = qemu status 133"
+  },
+  "description": "REVIEW_aug2 H-01 gate: 16-bit PROTECTED-mode stacks, both halves. (1) Only the stack ADDRESS went through stk16(); the GPR writeback masked ESP on `real_mode` alone, so on a 16-bit protected stack a push at SP=0 accessed SS:FFFC and then committed ESP=FFFFFFFC instead of preserving ESP[31:16] and changing only SP -- with paging on, the next access off that ESP lands on a different page. (2) ss_b was captured ONLY on the ordinary segment-load path, so SS installed by a cross-privilege delivery (from TSS.SS0) or a task switch kept the PREVIOUS descriptor's width. Both halves were measured UNREACHABLE before this test: instrumenting the core (+ven_h01) across all 16 existing system tests reported '16-bit PM-stack ESP writebacks: 0, new SS.B captures: 0' for every one, so a green verify-all said nothing about either. Same -bios bootstrap as pcpl, with a 16-bit DPL0 data descriptor added at 0x30. Case 1 exercises the pointer/address pair directly at CPL0 and reads the pushed slot back through the FLAT DS, so 'which address did the push use' is decided by memory, not by trusting ESP. Case 2 points TSS.SS0:ESP0 at that same 16-bit segment and takes a cross-privilege INT from CPL3, so the frame must be pushed with 16-bit arithmetic. Every value is deterministic and QEMU implements both, so it is graded differentially. NOTE: the ESP writeback masks on stk_ptr16 = real_mode || (!seg_real && !ss_b) rather than on stk16()'s own condition, because during a V86->CPL0 delivery the frame is pushed on the 32-bit monitor stack while v86 is still set; masking there truncated the monitor's ESP and diverged pv86 at n=705 (expected 0x00087fc8, got 0x00007fc8). Steady-state V86 therefore still wraps the address but not the pointer -- identity in practice, and recorded in core.sv rather than hidden. NO paging; CR0.PG stays 0."
+}

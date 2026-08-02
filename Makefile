@@ -288,6 +288,9 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pssiret
 	# REVIEW_aug2 H-06: INVD/WBINVD are CPL0-only and RDTSC honours CR4.TSD.
 	bash verif/sys/run-sys-golden.sh ppriv
+	# REVIEW_aug2 H-01: 16-bit PROTECTED-mode stacks (address AND pointer, plus
+	# SS.B captured at a cross-privilege delivery). Measured unreachable before.
+	bash verif/sys/run-sys-golden.sh pstk16
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh ptaskcpl
 	bash verif/sys/run-sys-golden.sh psmm

@@ -829,8 +829,43 @@ module core
   //     descriptor load exactly as cs_d captures desc[54] for CS. Resets to 1 (32-bit)
   //     so user mode and pre-load PM behave exactly as before.
   logic ss_b;
+  // ---- REVIEW_aug2 H-01: ONE definition of "this stack is 16-bit" -------------
+  // stk16() masked the stack ADDRESS on (seg_real || !ss_b), but the ESP writeback
+  // masked on `real_mode` alone. Three ways for those to disagree, all of them live:
+  //   * V86 (seg_real=1, real_mode=0): the address wrapped, ESP did not.
+  //   * a 16-bit PROTECTED stack (ss_b=0): the address wrapped, ESP did not.
+  //   * so a push at SP=0 accessed SS:FFFE and then committed ESP=FFFFFFFE instead
+  //     of leaving ESP[31:16] alone and changing only SP -- and with paging on, the
+  //     NEXT access off that ESP lands on an entirely different page.
+  // Both sites now read this one signal.
+  logic stk_is16;
+  assign stk_is16 = seg_real || !ss_b;
+  // The POINTER writeback cannot simply reuse stk_is16, and the reason is measured,
+  // not theoretical. During a V86 -> CPL0 delivery the frame is pushed on the 32-bit
+  // monitor stack (TSS.SS0:ESP0) while v86 -- and therefore seg_real -- is STILL 1,
+  // because v86 clears as part of the delivery commit. Masking ESP there truncates
+  // the monitor's stack pointer: pv86 diverged at n=705 with
+  //     field=esp: expected(A)=0x00087fc8 got(C)=0x00007fc8
+  // So the pointer masks on real mode (as before) OR a 16-bit PROTECTED stack, which
+  // is exactly the case H-01 identifies, and V86 is left byte-identical.
+  // STILL OPEN, stated rather than hidden: in steady-state V86 the address wraps and
+  // the pointer does not. It is identity in practice (V86 guests keep ESP < 64k) and
+  // closing it means fixing WHEN v86/ss_b update relative to the delivery pushes,
+  // which is a different change from this one.
+  logic stk_ptr16;
+  assign stk_ptr16 = real_mode || (!seg_real && !ss_b);
+  // ...and it applies only to IMPLICIT stack updates. SS.B governs the STACK
+  // POINTER arithmetic of push/pop/call/ret/enter/leave/interrupt; it does not make
+  // an explicit write to ESP 16-bit. `MOV ESP, imm32` stores all 32 bits whatever
+  // SS.B says. Without this qualifier the mask swallowed exactly that: pstk16's
+  // `movl $0xDEAD0000,%esp` committed 0x00090000 (the old high half kept, the new
+  // one thrown away) and the test diverged at its very first instruction. The old
+  // `real_mode`-only condition had the same flaw; it simply never showed, because
+  // real-mode code writes SP, not ESP.
+  logic esp_arch_dst;
+  assign esp_arch_dst = q_writes_reg && (q_dst_reg == R_ESP);
   function automatic logic [31:0] stk16(input logic [31:0] off);
-    stk16 = (seg_real || !ss_b) ? {16'd0, off[15:0]} : off;
+    stk16 = stk_is16 ? {16'd0, off[15:0]} : off;
   endfunction
   // eff_cpl = the EFFECTIVE current privilege. In V86 it is architecturally 3
   // (USER) regardless of the CS selector's RPL (the CS selector is a real-mode
@@ -4199,13 +4234,36 @@ module core
         default: ;
       endcase
     end
-    // Real-mode 16-bit SS: wrap the ESP writeback within 64k (SP-only changes; the
-    // high half of ESP is preserved). Pairs with stk16() on the stack ADDRESS so a
-    // wrapping push/pop writes and reads the SAME ss_base+0xFFFx slot. Identity in
-    // user/PM (real_mode=0) -> make verify byte-identical.
-    if (real_mode && gpr_we[R_ESP])
+    // 16-bit SS: wrap the ESP writeback within 64k (SP-only changes; the high half of
+    // ESP is preserved). Pairs with stk16() on the stack ADDRESS so a wrapping
+    // push/pop writes and reads the SAME ss_base+0xFFFx slot.
+    // REVIEW_aug2 H-01: the condition was `real_mode` alone, so a 16-bit PROTECTED
+    // stack wrapped its ADDRESS but not its POINTER -- a push at SP=0 accessed
+    // SS:FFFE and then committed ESP=FFFFFFFE instead of changing only SP. It now
+    // reads stk_ptr16 (see its definition above, including why it is not simply
+    // stk_is16). Identity in user mode and on a 32-bit PM stack, so make verify is
+    // byte-identical.
+    if (stk_ptr16 && gpr_we[R_ESP] && !esp_arch_dst)
       gpr_wd[R_ESP] = {gpr_o[R_ESP][31:16], gpr_wd[R_ESP][15:0]};
   end
+`ifndef SYNTHESIS
+  // REVIEW_aug2 H-01 measurement (see ven_h01 above). Observation only -- a separate
+  // always_ff so the writeback's combinational block is untouched.
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin ven_h01_ptr16 <= 0; ven_h01_ssb <= 0;
+                      ven_h01_ssb_prev <= 1'b1; ven_h01_state_prev <= S_PIPE; end
+    else begin
+      if (gpr_we[R_ESP] && stk_ptr16 && !real_mode) ven_h01_ptr16 <= ven_h01_ptr16 + 1;
+      // Attribute an ss_b CHANGE to the new sites by looking at the state it came
+      // from -- exact, and independent of the beat encoding inside each sequence.
+      ven_h01_ssb_prev  <= ss_b;
+      ven_h01_state_prev <= state;
+      if ((ss_b != ven_h01_ssb_prev) &&
+          ((ven_h01_state_prev == S_INT_SS) || (ven_h01_state_prev == S_TSW_SEG)))
+        ven_h01_ssb <= ven_h01_ssb + 1;
+    end
+  end
+`endif
 
   // ===========================================================================
   // x87 store-operand value + exception flags (combinational). `fstore_val`
@@ -4469,6 +4527,24 @@ module core
   // The end state is IDENTICAL either way (each faulting IRET is followed by a handler
   // IRET that commits), which is why the count, not the final register value, is the
   // thing worth measuring.
+  // ---- REVIEW_aug2 H-01 instrumentation ---------------------------------------
+  // Counts the cases the H-01 fix actually CHANGES, so "verify-all is green" cannot
+  // be mistaken for "this is covered":
+  //   h01_ptr16 : ESP writebacks masked by stk_ptr16 that the OLD `real_mode`
+  //               condition would have left unmasked -- i.e. a genuine 16-bit
+  //               PROTECTED-mode stack push/pop.
+  //   h01_ssb   : times the new SS.B captures (cross-priv delivery / task switch)
+  //               actually changed ss_b.
+  // Printed only with +ven_h01, so a normal run is byte-identical and silent.
+  logic ven_h01_en;
+  initial ven_h01_en = $test$plusargs("ven_h01") != 0;
+  int   ven_h01_ptr16, ven_h01_ssb;
+  logic ven_h01_ssb_prev;
+  state_e ven_h01_state_prev;
+  final if (ven_h01_en)
+    $display("[H01] 16-bit PM-stack ESP writebacks: %0d   new SS.B captures: %0d",
+             ven_h01_ptr16, ven_h01_ssb);
+
   logic ven_nmi_arm_en;
   initial ven_nmi_arm_en = $test$plusargs("ven_nmi_arm") != 0;
   int   ven_h05_armed_faults;
