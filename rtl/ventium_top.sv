@@ -182,6 +182,12 @@ module ventium_top
     input  logic        m_axi_rvalid,
     output logic        m_axi_rready,
     output logic        bus_err,         // #34 fatal AXI fault (PS observes -> reset)
+    // REVIEW2_aug2 M-01: port-0x92 bit 0 (FAST RESET). The core enters shutdown so the
+    // request is no longer silently dropped, but it was left UNCONNECTED here, so an
+    // FPGA system could not actually perform the reset the guest asked for. ventium_top
+    // cannot reset itself -- rst_n is an INPUT -- so the request is EXPORTED for the
+    // platform to act on, the same contract bus_err already uses above.
+    output logic        fast_reset_req,  // M-01: guest asked for a platform reset
     // clean-shutdown quiesce: R_CTRL.SHUTDOWN stops new AXI txns + drains in-flight;
     // the PS polls m_idle (R_STATUS.AXI_IDLE) before xmutil unloadapp so the PL→PS AXI
     // master is protocol-clean (no outstanding burst) when the overlay is torn down.
@@ -504,7 +510,7 @@ module ventium_top
       // here -- this checkout has no reset controller to drive -- but it is now
       // a real output a platform can wire, and the core stops on its own so the
       // request cannot be silently ignored the way bit 0 was.
-      .fast_reset_req (),
+      .fast_reset_req (fast_reset_req),   // REVIEW2_aug2 M-01: exported to the platform
       .init_eip     (init_eip),
       .init_esp     (init_esp),
       .boot_mode    (boot_mode),
