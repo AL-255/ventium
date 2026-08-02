@@ -74,6 +74,38 @@ if [ "$SW" != "8081" ]; then
 else
   echo "  PASS an UNMASKED exception sets FSW.ES and mirrors it to FSW.B"
 fi
+# REVIEW1_Aug2 M-04: the 14-byte (16-bit operand-size) FNSTENV/FLDENV forms. The
+# sequencer wrote the 28-byte image for these too, so 14 bytes PAST the guest's object
+# were destroyed on every 16-bit FNSTENV -- and 16-bit code takes that form by DEFAULT,
+# with no prefix. All three witnesses below were graded against the harness QEMU, which
+# prints exactly `E1=ffff E2=eeee E3=037f`.
+E1=$(printf '%s' "$OUT" | grep -oE "E1=[0-9a-f]+" | head -1 | cut -d= -f2)
+E2=$(printf '%s' "$OUT" | grep -oE "E2=[0-9a-f]+" | head -1 | cut -d= -f2)
+E3=$(printf '%s' "$OUT" | grep -oE "E3=[0-9a-f]+" | head -1 | cut -d= -f2)
+echo "  14-byte env: layout=[+4]=${E1:-<none>} past-end=${E2:-<none>} reload=${E3:-<none>}"
+if [ "$E1" != "ffff" ]; then
+  [ "$E1" = "0000" ] && echo "  FAIL [+4] holds SW, not TW — the 28-BYTE layout was written to a 14-byte object"
+  [ "$E1" != "0000" ] && [ -n "${E1:-}" ] && echo "  FAIL unexpected [+4] '$E1' (want ffff = TW)"
+  [ -z "${E1:-}" ] && echo "  FAIL no E1= line — the 14-byte form did not execute (decoder #UD?)"
+  fenv_fail=1
+else
+  echo "  PASS 14-byte FNSTENV wrote the 14-byte LAYOUT (TW at +4, not SW)"
+fi
+if [ "$E2" != "eeee" ]; then
+  echo "  FAIL the word PAST the 14-byte object reads '$E2', not the eeee poison —"
+  echo "       FNSTENV overran the guest's object. This is the finding itself."
+  fenv_fail=1
+else
+  echo "  PASS 14-byte FNSTENV wrote exactly 14 bytes (nothing past the object)"
+fi
+if [ "$E3" != "037f" ]; then
+  echo "  FAIL 14-byte FLDENV round trip gave CW='$E3' (want 037f) — the load half"
+  echo "       does not read back the layout the store half wrote."
+  fenv_fail=1
+else
+  echo "  PASS 14-byte FLDENV read back what 14-byte FNSTENV wrote"
+fi
+
 if [ "$fenv_fail" = 0 ]; then
   echo "FENV-GATE-OK"
   exit 0

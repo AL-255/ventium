@@ -125,9 +125,87 @@ _start16:
     jnz 1b
     movb $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
 
+    /* ==== REVIEW1_Aug2 M-04: the 14-byte (16-bit) FNSTENV / FLDENV ==============
+     * This is .code16, so a *prefixless* FNSTENV selects the 14-BYTE form (the 28-byte
+     * case above says 0x66 explicitly). The sequencer emitted the 28-byte image for
+     * both: right-looking at +0, while 14 bytes of the guest's memory PAST the object
+     * were destroyed. Three witnesses, each aimed at a different half of the defect:
+     *
+     *   E1 = [0x0724]   LAYOUT probe. At +4 the 14-byte form has TW; the 28-byte form
+     *                   has SW. FNINIT leaves TW=0xffff and SW=0x0000, so this one
+     *                   word says which layout was actually written. Reading +0 would
+     *                   NOT discriminate -- CW is at +0 in both.
+     *   E2 = [0x072e]   CORRUPTION witness: the first word past a 14-byte object,
+     *                   poisoned 0xeeee. The 28-byte image reaches +27 and destroys it.
+     *   E3              CW after a 14-byte FLDENV round trip: the load half has to read
+     *                   back the same layout the store half wrote.
+     */
+    fninit                            /* CW=0x037f  TW=0xffff  SW=0x0000 */
+
+    movw    $0x0720, %di              /* poison 0x0720..0x0737 (24 bytes) */
+    movw    $12, %cx
+    movw    $0xeeee, %ax
+1:  movw    %ax, (%di)
+    addw    $2, %di
+    decw    %cx
+    jnz     1b
+
+    fnstenv 0x0720                    /* 14-byte form -- deliberately NO 0x66 */
+
+    movw    0x0724, %ax; movw %ax, 0x0740      /* E1: layout probe */
+    movw    0x072e, %ax; movw %ax, 0x0742      /* E2: corruption witness */
+
+    movw    $0x0340, 0x0600
+    fldcw   0x0600                    /* perturb CW away from the saved 0x037f */
+    fldenv  0x0720                    /* 14-byte load must restore CW=0x037f */
+    fnstcw  0x0744                    /* E3: round-trip witness */
+
+    movw    $0x03F8,%dx
+    movb    $'E',%al; outb %al,%dx
+    movb    $'1',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0740, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'E',%al; outb %al,%dx
+    movb    $'2',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0742, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'E',%al; outb %al,%dx
+    movb    $'3',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0744, %ax
+    call    puthexw
+    movw    $0x03F8,%dx
+    movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
+
     /* clean exit via isa-debug-exit (status = (0x42<<1)|1 = 133) */
     movb $0x42,%al; movw $0xF4,%dx; outb %al,%dx
 9:  hlt; jmp 9b
+
+/* AX = value to print as 4 hex digits on COM1. Clobbers AX/BX/CX/DX (the callers
+ * above stash anything they still need in memory first, which is why the witnesses
+ * are written to 0x0740.. before any printing starts). */
+puthexw:
+    movw    $4, %cx
+1:  rolw    $4, %ax
+    movb    %al, %bl
+    andb    $0x0F, %bl
+    cmpb    $10, %bl
+    jb      2f
+    addb    $87, %bl
+    jmp     3f
+2:  addb    $48, %bl
+3:  pushw   %ax
+    movb    %bl, %al
+    movw    $0x03F8, %dx
+    outb    %al, %dx
+    popw    %ax
+    decw    %cx
+    jnz     1b
+    ret
 
     .section .reset,"ax"
     .global _reset

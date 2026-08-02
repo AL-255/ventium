@@ -1551,19 +1551,19 @@ module decode_stages
                   3'd0: begin d_fxop=FX_FLD_M32;  d_f_mem_read=1'b1;  d_f_mbytes=4'd4; end
                   3'd2: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; end
                   3'd3: begin d_fxop=FX_FST_M32;  d_f_mem_write=1'b1; d_f_mbytes=4'd4; d_f_pop=1'b1; end
-                  // REVIEW1_Aug2 M-04: only the 32-bit (28/108-byte) forms exist. The
-                  // 16-bit operand-size forms are 14/94 bytes, and the sequencer wrote
-                  // the 28/108-byte image REGARDLESS -- 14 bytes of SILENT CORRUPTION
-                  // past a 14-byte object, or 14 past a 94-byte one. Until the 14/94
-                  // layouts are implemented (the register area lands at a 2-byte-aligned
-                  // offset, which the dword sequencer cannot express), the 16-bit form
-                  // is a LOUD unknown instead: a visible omission beats corrupting the
-                  // guest's memory, which is how the review itself grades this class.
-                  3'd4: begin d_fxop=FX_FLDENV;  // 28-byte env load (S_FENV_LD owns the beats)
-                        if (eff_opsize) d_unknown=1'b1; end   // M-04: 14-byte form
+                  // REVIEW1_Aug2 M-04: with a 66h prefix these move a 14-byte object,
+                  // not a 28-byte one. The sequencer wrote the 28-byte image REGARDLESS,
+                  // corrupting 14 bytes past the guest's object; the form was then made
+                  // a LOUD unknown so the omission was at least visible. It is now
+                  // IMPLEMENTED: d_f_mbytes carries the width to the FSM (nothing else
+                  // consults it outside S_FLOAD/S_FSTORE, which these never enter), the
+                  // beat COUNT is unchanged at seven, and only the stride, the strobe
+                  // and the field layout differ -- see fenv_image16 in core.sv.
+                  3'd4: begin d_fxop=FX_FLDENV;   // env load  (S_FENV_LD owns the beats)
+                        d_f_mbytes = eff_opsize ? 4'd2 : 4'd4; end
                   3'd5: begin d_fxop=FX_FLDCW;    d_f_mem_read=1'b1;  d_f_mbytes=4'd2; end
-                  3'd6: begin d_fxop=FX_FNSTENV; // 28-byte env store (S_FENV_ST owns the beats)
-                        if (eff_opsize) d_unknown=1'b1; end   // M-04: 14-byte form
+                  3'd6: begin d_fxop=FX_FNSTENV;  // env store (S_FENV_ST owns the beats)
+                        d_f_mbytes = eff_opsize ? 4'd2 : 4'd4; end
                   3'd7: begin d_fxop=FX_FNSTCW;   d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
                   default: d_unknown=1'b1;
                 endcase
@@ -1677,9 +1677,15 @@ module decode_stages
                   3'd2: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; end
                   3'd3: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; d_f_pop=1'b1; end
                   3'd4: begin d_fxop=FX_FRSTOR;  // 108-byte state load + reg reload
-                        if (eff_opsize) d_unknown=1'b1; end   // M-04: 94-byte form
+                        // M-04: the 94-byte form needs 47 word-beats; f_seq_step is
+                        // 5 bits (max 31) and env_tmp is 27 entries, so it stays loud
+                        // pending that widening. FNSTENV/FLDENV above are implemented.
+                        if (eff_opsize) d_unknown=1'b1; end
                   3'd6: begin d_fxop=FX_FNSAVE;  // 108-byte state store + FNINIT reinit
-                        if (eff_opsize) d_unknown=1'b1; end   // M-04: 94-byte form
+                        // M-04: the 94-byte form needs 47 word-beats; f_seq_step is
+                        // 5 bits (max 31) and env_tmp is 27 entries, so it stays loud
+                        // pending that widening. FNSTENV/FLDENV above are implemented.
+                        if (eff_opsize) d_unknown=1'b1; end
                   3'd7: begin d_fxop=FX_FNSTSW_M; d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
                   default: d_unknown=1'b1;
                 endcase

@@ -207,13 +207,22 @@
       // M11b: env/state transfers — one full dword per wide beat (f_seq_step).
       S_FENV_ST: begin
         cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
-        mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
-        mem_addr = dbase+q_ea + {25'd0, f_seq_step, 2'b00};
-        mem_wdata = fenv_image[f_seq_step*32 +: 32];
+        mem_req=1'b1; mem_we=1'b1;
+        mem_addr = dbase+q_ea + fenv_off;   // M-04: stride lives in fenv_off, not here
+        // REVIEW1_Aug2 M-04: the 66h-prefixed form moves a 14-byte object -- one WORD
+        // per beat from the 16-bit image. wstrb/wdata are byte-address relative (the
+        // memory subsystem lane-shifts), exactly as the m16 S_FSTORE beat above.
+        if (q_f_mbytes == 4'd2) begin
+          mem_wstrb = 4'b0011;
+          mem_wdata = {16'd0, fenv_image16[f_seq_step*16 +: 16]};
+        end else begin
+          mem_wstrb = 4'b1111;
+          mem_wdata = fenv_image[f_seq_step*32 +: 32];
+        end
       end
       S_FENV_LD: begin
         cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
-        mem_req=1'b1; mem_addr=dbase+q_ea + {25'd0, f_seq_step, 2'b00};
+        mem_req=1'b1; mem_addr=dbase+q_ea + fenv_off;  // M-04: 2-byte beats when 16-bit
       end
       S_FSTORE: begin
         cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access

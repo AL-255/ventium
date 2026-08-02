@@ -4540,6 +4540,37 @@ module core
   logic [863:0] fenv_image;
   logic [15:0]  fenv_ftw;
   logic [639:0] fenv_streg;
+
+  // REVIEW1_Aug2 M-04: the 16-bit (14-byte) environment image. With a 66h operand-size
+  // prefix FNSTENV/FLDENV move a 14-byte object, not a 28-byte one, and every field is
+  // a WORD. Writing the 28-byte image over it corrupted 14 bytes past the object; the
+  // decoder was made to reject the form so the omission was at least loud. It is now
+  // implemented: SAME seven beats, stride 2 instead of 4, one word per beat.
+  //
+  // The layout is NOT a narrowing of the 32-bit one -- fields 4 and 6 differ by mode:
+  //   +0 CW  +2 SW  +4 TW  +6 IP[15:0]
+  //   +8  protected: CS selector      real: {IP[19:16], 1'b0, opcode[10:0]}
+  //   +10 DP[15:0]
+  //   +12 protected: operand selector real: {DP[19:16], 12'b0}
+  // FOP stays 0 to match the oracle, exactly as the 32-bit image does.
+  logic [111:0] fenv_image16;
+  always_comb begin
+    fenv_image16 = { real_mode ? {fdp[19:16], 12'd0} : fds,          // w6 +12
+                     fdp[15:0],                                      // w5 +10
+                     real_mode ? {fip[19:16], 1'b0, 11'd0} : fcs,    // w4 +8
+                     fip[15:0],                                      // w3 +6
+                     fenv_ftw,                                       // w2 +4
+                     (fstat & ~16'h3800) | ({13'd0,ftop}<<11),       // w1 +2
+                     fctrl };                                        // w0 +0
+  end
+
+  // REVIEW1_Aug2 M-04 + C-03: the beat's byte offset, defined ONCE. cur_lin (the TLB
+  // lookup) and mem_addr (the bus) both derive from this signal rather than each
+  // open-coding the stride -- which is the exact defect C-03 exists to prevent, and
+  // would fire CHECK 5 the moment the two shifts disagreed.
+  logic [31:0] fenv_off;
+  assign fenv_off = (q_f_mbytes == 4'd2) ? {26'd0, f_seq_step, 1'b0}    // 14-byte: x2
+                                         : {25'd0, f_seq_step, 2'b00};  // 28-byte: x4
   always_comb begin
     int pidx;
     for (int p = 0; p < 8; p++)
@@ -5768,8 +5799,10 @@ module core
       end
       S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
       S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end
-      S_FENV_ST: begin cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00}; cur_is_w = 1'b1; end
-      S_FENV_LD:       cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00};
+      // REVIEW1_Aug2 M-04: fenv_off carries the stride (4-byte or 2-byte beats); it is
+      // the SAME signal the bus arm uses, so the two cannot drift apart (CHECK 5).
+      S_FENV_ST: begin cur_lin = dbase+q_ea + fenv_off; cur_is_w = 1'b1; end
+      S_FENV_LD:       cur_lin = dbase+q_ea + fenv_off;
       S_STORE: begin
         cur_is_w = 1'b1;
         // F3/paging fix: POP r/m16 (8F) writes its operand in the operand's OWN
