@@ -1,7 +1,7 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**28 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
-and reverted with its measurement, 5 open.**
+**29 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
+and reverted with its measurement, 4 open.**
 `make verify-all` = 11/11 gates. `make l1` = 14 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
@@ -144,12 +144,11 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
   `VEN_L1_HONOR_CD` read path, the no-L2 config's cache map / coherent DMA / SMRAM
   isolation, and the ao486 L2 invalidation skid. Several reference modules that are not
   in this checkout.
-- **H-11, + the rest of H-12** — x87 stack under/overflow and empty-register
-  semantics, `#MF` delivery and FWAIT. `we_push` (`rtl/fpu/fpu_top.sv:256`) pushes
-  without consulting `fptag[ftop-1]`, so neither overflow nor underflow is detected at
-  all. Four connected pieces: detection, IE+SF with C1 encoding the direction, the
-  masked response (indefinite QNaN, instruction completes), and the unmasked `#MF`
-  route.
+- **the rest of H-12** — the UNMASKED stack-fault route. H-11's masked half landed
+  (below); with CW.IM clear the SDM requires suppressing the operation and raising
+  `#MF`, which needs the FWAIT/`#MF` delivery machinery. Currently an unmasked stack
+  fault sets IE/SF and, through the ES derivation that landed earlier, ES and B — so
+  software polling FSW sees it — but it does not trap.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
 
@@ -219,6 +218,63 @@ I placed the 94-byte layout probe at +36 instead of +4, and sized the poison loo
 bytes when it needed 228, so the overrun witness sat outside the poisoned region and read
 as uninitialised memory. Writing the expected values down first and asking QEMU before
 looking at Ventium is what surfaced both.
+
+---
+
+## 4c. H-11 — right fix, wrong default, and a measurement I over-read
+
+`we_push` wrote `fpr[ftop-1]` without consulting `fptag`, and `we_pop` advanced TOP
+without checking: a 9th push silently DESTROYED a live register, and popping an empty
+stack handed back whatever bits were in the slot. Neither raised anything.
+
+Implemented per SDM Vol.1 8.5.1 + Table 8-4 — IE+SF, C1 giving the direction (1
+overflow, 0 underflow), and on a MASKED fault the destination receiving the QNaN
+indefinite rather than the value. Detection sits at the resolved `fp_we_push` /
+`fp_we_pop` signals, so all ~10 drive sites funnel through one check.
+
+### The oracle cannot grade this
+
+```c
+static inline void fpush(CPUX86State *env)
+{ env->fpstt = (env->fpstt - 1) & 7; env->fptags[env->fpstt] = 0; }
+```
+
+No tag check. And `#define FPUS_SF (1 << 6)` at `target/i386/tcg/fpu_helper.c:59` is the
+**only** occurrence of that symbol in QEMU's entire i386 target — defined, never used.
+Measured, the harness QEMU prints `S1=3800 S2=3fff S3=0800`: TOP moved, nothing else.
+
+### The measurement I over-read
+
+I measured 68 images from `verif/sys/tests/` — zero stack faults — and reported both
+"no false positives" AND "no differential test regresses." The first was right. The
+second was a claim about a corpus I had not measured: the m1–m5 differential programs
+live in `verif/tests/`. Three of them (`tx_stack`, `tx_regform`, `tx_regform2`) drive
+the stack past its ends ON PURPOSE — `tx_stack`'s own header says "push 8 deep + wrap,
+then unwind to empty" — and turning the response on failed `verify` AND `l1` at
+95 PASS / 3 FAIL.
+
+Disassembly confirmed Ventium was RIGHT, not over-firing:
+
+```
+8048003..8048011   eight pushes (fld1, fldl2t ... fld %st(1))
+8048013..804801d   fxch/fadd/fmul/fsub/fdiv/frndint  -- none of these pop
+804801f            fld1        <- a 9th push, with fptag=00 (all eight slots live)
+```
+
+### So it is DEFAULT-OFF, and that is a limitation, not a completion
+
+`VEN_X87_STKFLT` follows the `VEN_SEG_ENFORCE` precedent this repo already set for the
+identical situation with segment limits:
+
+- default build: QEMU-equivalent, so the 98-program differential keeps its meaning
+- DETECTION is unconditional, so `+ven_stklog` still measures reachability in the
+  shipping build (it counts 1 overflow + 1 underflow on the gate's own image there)
+- gate build: `+define+VEN_X87_STKFLT`, self-checked against the SDM
+
+**The FPGA build Win95 and Quake run on therefore does NOT get stack-fault semantics.**
+I judged that trading a working 98-program differential for a feature correct code never
+exercises (0 firings across 68 system images) was the wrong trade — but that is a
+judgement call, and it is recorded here as one rather than as "H-11 closed."
 
 ---
 

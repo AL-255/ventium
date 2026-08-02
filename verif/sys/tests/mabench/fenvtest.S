@@ -241,6 +241,53 @@ _start16:
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
 
+    /* ==== REVIEW1_Aug2 H-11: x87 STACK FAULTS ===================================
+     * we_push wrote fpr[ftop-1] without consulting fptag, so a 9th push silently
+     * DESTROYED a live register; we_pop advanced TOP without checking, so popping an
+     * empty stack handed back whatever bits were in the slot. Both are #IS: IE (bit 0)
+     * + SF (bit 6), with C1 (bit 9) giving the direction -- 1 overflow, 0 underflow.
+     *
+     *   S1 = FSW after a 9th push  (overflow;  C1 must be SET)
+     *   S2 = the sign/exponent word of ST0 in a saved image. With IM MASKED the push
+     *        still happens but the destination gets the QNaN indefinite, whose top
+     *        word is ffff. This is the masked-response half, not just the flag.
+     *   S3 = FSW after popping an empty stack (underflow; C1 must be CLEAR)
+     */
+    fninit                            /* CW=0x037f -> IM MASKED */
+    fld1; fld1; fld1; fld1
+    fld1; fld1; fld1; fld1            /* 8 pushes: the stack is now FULL */
+    fld1                              /* the 9th -- STACK OVERFLOW */
+    fnstsw  0x0750                    /* S1 */
+
+    fnsave  0x0900                    /* 94-byte image; ST0 slot starts at +14 */
+    movw    0x0916, %ax               /* +14+8 = +22: ST0's sign||exponent word */
+    movw    %ax, 0x0752               /* S2 */
+
+    fninit                            /* empty stack, IM still masked */
+    fstp    %st(0)                    /* pop with nothing on the stack -- UNDERFLOW */
+    fnstsw  0x0754                    /* S3 */
+
+    movw    $0x03F8,%dx
+    movb    $'S',%al; outb %al,%dx
+    movb    $'1',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0750, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'S',%al; outb %al,%dx
+    movb    $'2',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0752, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'S',%al; outb %al,%dx
+    movb    $'3',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0754, %ax
+    call    puthexw
+    movw    $0x03F8,%dx
+    movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
+
     /* clean exit via isa-debug-exit (status = (0x42<<1)|1 = 133) */
     movb $0x42,%al; movw $0xF4,%dx; outb %al,%dx
 9:  hlt; jmp 9b

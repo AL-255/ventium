@@ -4577,6 +4577,9 @@ module core
   // and fpu_writeback.sv's commit all read this rather than re-deriving it.
   //   env only  (FNSTENV/FLDENV): 7 beats  -> 6
   //   full state (FNSAVE/FRSTOR): 27 dwords -> 26, or 47 words -> 46
+  // REVIEW1_Aug2 H-11: x87 stack over/underflow, detected in fpu_writeback.
+  logic fp_stk_ovf, fp_stk_unf;
+
   logic [5:0] fenv_last;
   always_comb begin
     if (q_fxop == FX_FNSAVE || q_fxop == FX_FRSTOR)
@@ -4724,6 +4727,42 @@ module core
   // were wrong; the interaction has to be OBSERVED, not reasoned about.
   logic ven_faultlog_en;
   initial ven_faultlog_en = $test$plusargs("ven_faultlog") != 0;
+
+  // ---- REVIEW1_Aug2 H-11 instrumentation --------------------------------------
+  // Counts x87 stack over/underflows, so "the fix is in and verify-all is green"
+  // cannot be mistaken for "the fix does anything". Several fixes this session would
+  // have been correct-but-INERT (H-05's nmi was never driven; M-03's I/O bitmap was
+  // never consulted), and the only way to tell is to count the events BEFORE relying
+  // on the repair. A stack fault should be RARE in correct code -- a nonzero count
+  // across the ordinary corpus would mean the detector has false positives, which is
+  // the failure mode that matters here.
+`ifndef SYNTHESIS
+  logic ven_stklog_en;
+  int   ven_stk_ovf_n, ven_stk_unf_n;
+  initial begin
+    ven_stklog_en = $test$plusargs("ven_stklog") != 0;
+    ven_stk_ovf_n = 0; ven_stk_unf_n = 0;
+  end
+  always_ff @(posedge clk) begin
+    if (rst_n) begin
+      if (fp_stk_ovf) begin
+        ven_stk_ovf_n <= ven_stk_ovf_n + 1;
+        if (ven_stklog_en)
+          $display("[STKFLT] OVERFLOW  pc=%08h ftop=%0d fptag=%02h im=%0b",
+                   q_pc, ftop, fptag, fctrl[0]);
+      end
+      if (fp_stk_unf) begin
+        ven_stk_unf_n <= ven_stk_unf_n + 1;
+        if (ven_stklog_en)
+          $display("[STKFLT] UNDERFLOW pc=%08h ftop=%0d fptag=%02h im=%0b",
+                   q_pc, ftop, fptag, fctrl[0]);
+      end
+    end
+  end
+  final if (ven_stklog_en)
+    $display("[STKSTAT] x87 stack faults: overflow=%0d underflow=%0d",
+             ven_stk_ovf_n, ven_stk_unf_n);
+`endif
 
   // ---- REVIEW_aug2 H-05 instrumentation ---------------------------------------
   // The H-05 property is "a FAULTING IRET must not re-arm NMI". Nothing in the test
@@ -6519,6 +6558,8 @@ module core
     .f_mem80          (f_mem80),
     .f_step           (f_step),
     .f_seq_step       (f_seq_step),
+    .fp_stk_ovf       (fp_stk_ovf),
+    .fp_stk_unf       (fp_stk_unf),
     .fenv_last        (fenv_last),
     .env_tmp          (env_tmp),
     .fp_st            (fp_st),

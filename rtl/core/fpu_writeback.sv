@@ -161,6 +161,10 @@ module fpu_writeback
 `endif
 
     // ===== OUTPUTS (drive the fpu_top write ports + the iterative engines) ==
+    // REVIEW1_Aug2 H-11: x87 stack-fault detection (see the block at the end of the
+    // writeback always_comb). Exported so core.sv can count them under +ven_stklog.
+    output logic        fp_stk_ovf,
+    output logic        fp_stk_unf,
     output logic        fp_we_push,
     output logic [79:0] fp_push_data,
     output logic        fp_we_top,
@@ -239,6 +243,9 @@ module fpu_writeback
   // core.sv's `localparam int ERR_FDIV = 0` (Erratum 23). The block reads only this
   // one errata index, so just the constant is replicated here (behaviour-identical).
   localparam int ERR_FDIV = 0;
+  // H-11: the QNaN "real indefinite" -- the masked stack-fault result. Same encoding
+  // fpu_srt_div and fpu_fprem already use for their masked-invalid results.
+  localparam logic [79:0] QNAN_INDEF = {1'b1, 15'h7fff, 1'b1, 63'h4000000000000000};
 
   // st(i) read helper — copied VERBATIM from core.sv (module-local there because
   // it reads module state). fst(i) = fp_st[i] (= fpr[ftop+i], TOP-relative).
@@ -275,6 +282,7 @@ module fpu_writeback
 
     // default: no writes this clock
     fp_we_push=1'b0; fp_push_data=80'd0;
+    fp_stk_ovf=1'b0; fp_stk_unf=1'b0;
     fp_we_top=1'b0;  fp_top_data=80'd0;
     fp_we_fstat=1'b0; fp_fstat_wval=16'd0;
     fp_we_sti=1'b0;  fp_wsti_idx=3'd0; fp_wsti_data=80'd0; fp_wsti_clr_tag=1'b0;
@@ -1094,6 +1102,52 @@ module fpu_writeback
                         (q_f_mbytes==4'd8 && f_step==4'd1) ||
                         (q_f_mbytes==4'd10 && f_step==4'd2));
     if (fstore_last_beat && q_f_pop) fp_we_pop=1'b1;
+
+    // =====================================================================
+    // REVIEW1_Aug2 H-11 — x87 STACK FAULTS.
+    //
+    // fpu_top's we_push wrote fpr[ftop-1] unconditionally and we_pop advanced TOP
+    // unconditionally: neither consulted fptag, so a 9th push silently DESTROYED a
+    // live register and a pop of an empty stack silently handed back whatever bits
+    // were in the slot. Per SDM Vol.1 8.5.1 both are #IS -- IE (bit 0) together with
+    // SF (bit 6), and C1 says WHICH: 1 = overflow, 0 = underflow.
+    //
+    // Detection is central rather than per-site because fp_we_push / fp_we_pop are
+    // each a single resolved signal by this point; the ~10 drive sites above (fast
+    // path FLD/FLD1/FLDPI, slow path FLD m32/m64/m80, FILD, FBLD ...) all funnel
+    // through them. fptag bit i is 1 when fpr[i] is EMPTY.
+    fp_stk_ovf =  fp_we_push               && !fptag[ftop - 3'd1];  // push onto a LIVE slot
+    fp_stk_unf = (fp_we_pop || fp_we_pop2) &&  fptag[ftop];         // pop an EMPTY ST(0)
+
+    // The RESPONSE is behind VEN_X87_STKFLT; the DETECTION above is always live so
+    // +ven_stklog can measure reachability in the shipping build.
+    //
+    // WHY DEFAULT-OFF -- the same reason VEN_SEG_ENFORCE is (see run-seg-gate.sh).
+    // QEMU does not implement x87 stack faults at all: fpush()/fpop() in
+    // target/i386/tcg/fpu_helper.c never look at fptags, and FPUS_SF is defined on
+    // line 59 of that file and used NOWHERE in the i386 target. Three programs in the
+    // 98-program differential corpus deliberately drive the stack past its ends
+    // (tx_stack's header says "push 8 deep + wrap, then unwind to empty"), so with the
+    // response ON, a CORRECT Ventium diverges from the oracle and both `verify` and
+    // `l1` fail -- measured: tx_stack/tx_regform/tx_regform2, 95 PASS / 3 FAIL.
+    // Turning it on by default would trade a real 98-program differential for a
+    // feature correct code does not exercise (0 firings across 68 system images).
+`ifdef VEN_X87_STKFLT
+    if (fp_stk_ovf || fp_stk_unf) begin
+      // IE|SF, and C1 rewritten (not OR-ed) -- a stale C1 from a previous op would
+      // otherwise report an underflow as an overflow.
+      fp_we_fstat   = 1'b1;
+      fp_fstat_wval = ((fstat | 16'h0041) & ~16'h0200)
+                      | (fp_stk_ovf ? 16'h0200 : 16'h0000);
+      // MASKED overflow (CW.IM set, which is the state FNINIT leaves): the push still
+      // happens, but the destination receives the QNaN indefinite instead of the value
+      // -- SDM Vol.1 Table 8-4. The UNMASKED case must instead suppress the operation
+      // and raise #MF; that route is H-12's remainder and is NOT here yet, so an
+      // unmasked stack fault currently sets IE/SF/ES/B (visible to software polling
+      // FSW) but does not trap. Recorded in PROGRESS_REVIEW1_Aug2.md, not silent.
+      if (fp_stk_ovf && fctrl[0]) fp_push_data = QNAN_INDEF;
+    end
+`endif
   end
 
 endmodule

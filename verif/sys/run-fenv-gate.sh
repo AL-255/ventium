@@ -138,6 +138,63 @@ else
   echo "  PASS 94-byte FRSTOR restored the ST registers (pi survived the round trip)"
 fi
 
+# REVIEW1_Aug2 H-11: x87 STACK FAULTS. These three are a SELF-CHECK against the SDM,
+# not a differential, because the oracle does not implement the feature at all:
+#
+#   target/i386/tcg/fpu_helper.c
+#     static inline void fpush(CPUX86State *env)
+#     { env->fpstt = (env->fpstt - 1) & 7; env->fptags[env->fpstt] = 0; }
+#
+#   no tag check. And `#define FPUS_SF (1 << 6)` at line 59 of that file is the ONLY
+#   occurrence of the symbol in the entire i386 target -- defined, never used.
+#
+# Measured: the harness QEMU prints S1=3800 S2=3fff S3=0800, i.e. TOP moved and nothing
+# else happened. So a CORRECT Ventium diverges here and a diff would fail exactly when
+# the core is right -- the same situation as pseglim/segment limits.
+#
+# Expected per SDM Vol.1 8.5.1 + Table 8-4, with IM MASKED (the state FNINIT leaves):
+#   S1 = 3a41  TOP=7 (nine pushes from 0), C1=1 (overflow), SF, IE
+#   S2 = ffff  ST0's sign||exponent word: the masked response is the QNaN INDEFINITE,
+#              not the pushed value. This is the response half, not just the flag.
+#   S3 = 0841  TOP=1, C1=0 (underflow), SF, IE
+# Enforcement is NOT in the default build (see fpu_writeback.sv for why), so build a
+# separate object directory with +define+VEN_X87_STKFLT and re-run the SAME image.
+STKOBJ=obj_dir_stk
+STKTB="$ROOT/verif/tb/$STKOBJ/tb_ventium"
+make -s -C "$TB" rtl OBJDIR="$STKOBJ" VL_EXTRA_DEFINES="+define+VEN_X87_STKFLT" >/dev/null
+[ -x "$STKTB" ] || { echo "FENV-GATE-FAIL (stack-fault TB not built)"; exit 1; }
+SOUT=$(timeout 180 "$STKTB" --system --cosim --image "$T/fenvtest.bin" --out /dev/null \
+       --max-insn 12000 --quiesce 8000 2>&1 || true)
+S1=$(printf '%s' "$SOUT" | grep -oE "S1=[0-9a-f]+" | head -1 | cut -d= -f2)
+S2=$(printf '%s' "$SOUT" | grep -oE "S2=[0-9a-f]+" | head -1 | cut -d= -f2)
+S3=$(printf '%s' "$SOUT" | grep -oE "S3=[0-9a-f]+" | head -1 | cut -d= -f2)
+echo "  stack faults: overflow FSW=${S1:-<none>} ST0=${S2:-<none>} underflow FSW=${S3:-<none>}"
+if [ "$S1" != "3a41" ]; then
+  [ "$S1" = "3800" ] && echo "  FAIL a 9th push raised NOTHING — the push overwrote a live register silently"
+  [ "$S1" != "3800" ] && [ -n "${S1:-}" ] && echo "  FAIL overflow FSW '$S1' (want 3a41 = TOP7|C1|SF|IE)"
+  [ -z "${S1:-}" ] && echo "  FAIL no S1= line in the output"
+  fenv_fail=1
+else
+  echo "  PASS stack OVERFLOW sets IE+SF with C1=1"
+fi
+if [ "$S2" != "ffff" ]; then
+  [ "$S2" = "3fff" ] && echo "  FAIL ST0 holds the pushed 1.0, not the indefinite — flag set, RESPONSE missing"
+  [ "$S2" != "3fff" ] && [ -n "${S2:-}" ] && echo "  FAIL ST0 sign/exp '$S2' (want ffff = QNaN indefinite)"
+  [ -z "${S2:-}" ] && echo "  FAIL no S2= line in the output"
+  fenv_fail=1
+else
+  echo "  PASS masked overflow delivered the QNaN indefinite to the destination"
+fi
+if [ "$S3" != "0841" ]; then
+  [ "$S3" = "0800" ] && echo "  FAIL popping an empty stack raised NOTHING"
+  [ "$S3" = "0a41" ] && echo "  FAIL C1 is SET on an underflow — C1 must distinguish the direction"
+  [ "$S3" != "0800" ] && [ "$S3" != "0a41" ] && [ -n "${S3:-}" ] && echo "  FAIL underflow FSW '$S3' (want 0841)"
+  [ -z "${S3:-}" ] && echo "  FAIL no S3= line in the output"
+  fenv_fail=1
+else
+  echo "  PASS stack UNDERFLOW sets IE+SF with C1=0"
+fi
+
 if [ "$fenv_fail" = 0 ]; then
   echo "FENV-GATE-OK"
   exit 0
