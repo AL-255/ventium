@@ -4043,7 +4043,10 @@ module core
         walk_ret_state <= state;
         walk_lin       <= cur_lin;
         walk_for_d     <= cur_is_d;
-        walk_is_write  <= cur_is_w;
+        // REVIEW1_Aug2 C-02: a walk triggered BY THE PROBE must not set Dirty --
+        // the store may still fault on page 1 and never happen. Phase 2 walks
+        // again for the real write and sets it then.
+        walk_is_write  <= cur_is_w && !xs_probing;
         walk_step      <= 3'd0;
         walk_pf        <= 1'b0;
         // PDE physical address = (CR3 & ~0xFFF) + PDIndex*4, PDIndex = lin[31:22].
@@ -4645,6 +4648,7 @@ module core
   //     limits are not checked at all.
   // Both need the access to carry its segment INDEX, not just a base -- see #65.
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
+  logic        xs_probing;               // C-02: the crossing-store probe phase
   logic        cur_seg_rel;              // this access is SEGMENT-RELATIVE
   logic [2:0]  cur_seg_idx;              // ...governed by THIS segment
   logic [31:0] seg_chk_base, seg_chk_off;
@@ -5669,16 +5673,31 @@ module core
     if (paging_on && translatable)
       fe_xlate_pend = cur_is_d ? !(fe_dtlb_v && (fe_dtlb_page == cur_lin[31:12]))
                                : !(fe_itlb_v && (fe_itlb_page == cur_lin[31:12]));
+    // ---- REVIEW1_Aug2 C-02: the crossing-store PROBE is not a write -------------
+    // Phase 0 validates page 2 (mapping present + WRITE PERMISSION) but performs no
+    // transaction and must not mark the page dirty -- if page 1 then faults, the store
+    // never happened. But a write to a hit-but-CLEAN entry is treated as a miss below
+    // (the `cur_is_w && !dirty` term) so the walker can set D, which means simply
+    // suppressing D during the probe would LIVELOCK it: the walk would not set D, the
+    // entry would stay clean, and the miss would re-assert forever.
+    //
+    // So the probe drops the DIRTY requirement while keeping the permission check.
+    // perm_fault reads the RW bit straight out of the TLB entry and is independent of
+    // dirty, so write permission is still enforced. D is then set by phase 2, when the
+    // write actually happens and the same clean entry is walked for real -- which is
+    // where it architecturally belongs.
+    xs_probing = (state == S_STORE) && xs_eff_act && (xs_eff_ph == 2'd0);
+
     // xlate_miss from the REGISTERED hit (off the critical path); 0 during the pend
     // stall (the FSM holds, no premature walk).
     xlate_miss = paging_on && translatable && !fe_xlate_pend &&
-                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !fe_dtlb_dirty))
+                 (cur_is_d ? (!fe_dtlb_hit || (cur_is_w && !xs_probing && !fe_dtlb_dirty))
                            : !fe_itlb_hit);
 `else
     xlate_miss = paging_on && translatable &&
                  (cur_is_d
                     ? (!dtlb_lk_hit ||
-                       (cur_is_w && !dtlb_lk_dirty))
+                       (cur_is_w && !xs_probing && !dtlb_lk_dirty))
                     : !itlb_lk_hit);
 `endif
   end

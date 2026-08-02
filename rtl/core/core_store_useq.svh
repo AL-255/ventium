@@ -17,10 +17,18 @@
           // retired until phase 2 acks, so the instruction is atomic with respect to
           // a fault on either page. Detection is arm-first: latch xs_first from the
           // pre-translate offset the moment the crossing store is seen.
-          if (mem_ack && xs_cross_now && !xs_act) begin
+          // REVIEW1_Aug2 C-02: the probe no longer issues a bus transaction, so it
+          // cannot complete on mem_ack. It completes when the SECOND page's
+          // translation has RESOLVED and is permitted: a TLB hit with no permission
+          // or segment fault. On a miss the FSM diverts to S_WALK (driven by
+          // xlate_miss, not by mem_req) and returns here, where the lookup now hits.
+          // A fault on page 2 is delivered by the arms in core.sv and never reaches
+          // this point, so the store is still all-or-nothing.
+          if (xs_cross_now && !xs_act && !xlate_miss && !perm_fault
+              && !seg_access_fault && !fe_xlate_pend) begin
             xs_act   <= 1'b1;
             xs_first <= 3'(13'h1000 - {1'b0, st_lin_nat[11:0]});
-            xs_ph    <= 2'd1;          // the PROBE just completed -> write the first page
+            xs_ph    <= 2'd1;          // page 2 validated -> write the first page
           end else if (mem_ack && xs_act && (xs_ph == 2'd1)) begin
             xs_ph    <= 2'd2;          // first page written -> write the second
           end else

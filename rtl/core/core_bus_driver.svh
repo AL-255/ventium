@@ -239,8 +239,16 @@
           logic [5:0] sh;
           sh = 6'(xs_first) << 3;
           unique case (xs_eff_ph)
-            2'd0: begin  // PROBE the second page: translate + WRITE-permission check,
-                         // but drive NO write.
+            2'd0: begin  // PROBE the second page: translate + WRITE-permission check.
+                    // REVIEW1_Aug2 C-02: NO BUS TRANSACTION. This used to leave
+                    // mem_req=1 with mem_we=0, which is a real READ of page 2's base
+                    // -- it could consume a read-sensitive MMIO register or allocate
+                    // a cache line for a store that may never happen (if page 1 then
+                    // faults). The probe needs the TRANSLATION and the PERMISSION
+                    // check, not the data: the TLB lookup keys off cur_lin, and the
+                    // walk divert keys off xlate_miss, neither of which needs a
+                    // request. So drive the address for the lookup and nothing else.
+                    mem_req   = 1'b0;
                     mem_we    = 1'b0;
                     mem_wstrb = 4'd0;
                     mem_addr  = {mem_addr[31:12] + 20'd1, 12'd0};
