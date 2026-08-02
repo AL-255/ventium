@@ -3057,6 +3057,23 @@ module core
   // (v_br_taken_eff). Every other fpd_t field is opcode/operand-derived => the
   // stored value IS the live value (structural bit-exactness).
   fpd_t        u_d_raw, v_d_raw;
+`ifdef VEN_UOPCACHE
+`ifndef VEN_IC_BRAM
+  // REVIEW1_Aug2 M-05: refuse to elaborate the unpaired configuration. Without
+  // VEN_IC_BRAM the uop decode reads I-cache port A unconditionally (see the `else
+  // branch below), so a redirect whose target line landed in port B decodes STALE
+  // predecode/uop data -- the wrong uop issues. That is not something to ship behind a
+  // comment.
+  // Elaboration-time (IEEE 1800 s20.11): $error inside a generate scope is evaluated
+  // during elaboration, so the unpaired configuration fails to BUILD rather than
+  // failing at time 0. The `initial $fatal` is kept alongside it as the belt-and-braces
+  // runtime stop for any tool that only honours the procedural form.
+  if (1) begin : g_m05_cfg_guard
+    $error("VEN_UOPCACHE requires VEN_IC_BRAM (REVIEW1_Aug2 M-05): the uop decode reads I-cache port A unconditionally without the rdA/rdB tracking registers, which is stale after a redirect.");
+  end
+  initial $fatal(1, "VEN_UOPCACHE requires VEN_IC_BRAM: without the rdA/rdB tracking registers the uop decode cannot tell which I-cache port holds the current line and reads port A unconditionally, which is stale after a redirect (REVIEW1_Aug2 M-05).");
+`endif
+`endif
   logic [4:0]  uc_uoff, uc_voff;
   logic [2:0]  uc_uslot, uc_vslot;
   logic        uc_v_in_a;
@@ -3086,11 +3103,17 @@ module core
     end
 `else
     // Without VEN_IC_BRAM there are no rdA/rdB_*_q tracking registers -- the I-cache
-    // reads are asynchronous, so nothing records which buffer last latched which line.
-    // Keep the pre-existing port-A behaviour there rather than inventing a comparison
-    // against registers that do not exist. NOTE this means H-15 is only actually FIXED
-    // in the +VEN_IC_BRAM configuration; the plain +VEN_UOPCACHE build still reads port
-    // A unconditionally. Neither is in the deployed define set. Recorded in #69.
+    // reads are asynchronous, so nothing records which buffer last latched which line,
+    // and there is no honest way to choose the port. Port A unconditionally is the
+    // pre-existing behaviour and it is WRONG after a redirect: predicted-target
+    // prefetch deliberately parks a taken target in port B, so the I-cache data can be
+    // ready from B while the uop decode reads stale predecode state from A.
+    //
+    // REVIEW1_Aug2 M-05: this used to be a comment saying so. A configuration that can
+    // issue the wrong uop must not be silently buildable, so the pairing is now
+    // enforced at ELABORATION -- +VEN_UOPCACHE requires +VEN_IC_BRAM. Anyone who wants
+    // the unpaired build has to implement tagged selection first, which is the actual
+    // fix. Neither define is in the deployed set, so nothing shipping changes.
     uc_u_in_b = 1'b0;
 `endif
     uc_uoff  = flin[4:0];
