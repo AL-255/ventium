@@ -352,13 +352,25 @@
           endcase
         end
       end
-      S_IRET, S_IRET_SS: begin mem_req=1'b1;     // pop EIP/CS/EFLAGS[+ESP/SS] asc
+      // REVIEW_aug2 C-06: S_IRET_SS is a DESCRIPTOR-TABLE read, not a stack pop. It
+      // used to share the S_IRET arm below and therefore read
+      //     seg_base[SG_SS] + ESP + step*4
+      // -- i.e. two dwords from the OLD stack (and, after beat 4, at the freshly
+      // installed OUTER ESP) -- and installed those arbitrary stack bytes as the new
+      // SS base/limit/attr. Ordinary ring0->ring3 IRET was structurally wrong.
+      // Address the GDT/LDT by the POPPED SS selector, honouring its TI bit, exactly
+      // as S_INT_SS and S_INT_CS_RET already do. cur_lin mirrors this (CHECK 5).
+      S_IRET_SS: begin mem_req=1'b1;
+        mem_addr = (iret_ss[2] ? ldt_base : gdt_base)
+                 + {16'd0, iret_ss[15:3], 3'd0} + ({29'd0, int_step[0], 2'b00});
+      end
+      S_IRET: begin mem_req=1'b1;                // pop EIP/CS/EFLAGS[+ESP/SS] asc
         // 16-bit IRETW (same-priv only): ascending 2-byte pop IP @SP, CS @SP+2,
         // FLAGS @SP+4 (mirrors S_RMIRET). The memmodel returns a 32-bit dword at the
         // byte address (read32 @ addr), so the low 16 bits carry the popped word; the
         // S_IRET arm masks to [15:0] for IP/CS and merges FLAGS' high half. Inter-priv
         // / V86 IRET is never 16-bit in this corpus, so S_IRET_SS keeps the *4 stride.
-        if (int_gate_op16 && state == S_IRET)
+        if (int_gate_op16)
           mem_addr = seg_base[SG_SS] + gpr_o[R_ESP] + ({27'd0, int_step, 1'b0});
         else
           mem_addr = seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4);
@@ -463,7 +475,9 @@
     // without mirroring their addresses first would look up one linear address and
     // drive another -- exactly the C-03 failure. Tracked in #67.
     if (paging_on && state != S_WALK &&
-        state != S_LGDT &&
+        // REVIEW_aug2 C-05: S_LGDT REMOVED from this exclusion -- LGDT/LIDT reads an
+        // ordinary linear operand and must translate under paging (it was reading a
+        // physical address). It now has a cur_lin case and is in `translatable`.
         state != S_SMI_SAVE && state != S_RSM &&
         state != S_TSW_SAVE && state != S_TSW_READ && state != S_TSW_LDT &&
         state != S_TSW_SEG && state != S_TSW_BUSY) begin

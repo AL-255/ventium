@@ -5058,12 +5058,22 @@ module core
       S_PF:    cur_lin = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
       S_PIPE:  cur_lin = pf_miss ? {pf_miss_fa[31:5],5'd0}
                                  : (seg_base[SG_DS]+gpr_o[pipe_load_base]);
+      // REVIEW_aug2 C-05: this must mirror core_bus_driver.svh's S_LOAD arm EXACTLY.
+      // Two rows of the review's mismatch table were here:
+      //   * stack loads used RAW ESP/EBP while the bus applies stk16() -- so with a
+      //     16-bit stack (SS.B=0) the TLB looked up a different page than the bus drove;
+      //   * XLAT had no case at all and fell through to opbase+q_ea, so a paged XLATB
+      //     translated an unrelated page while the bus addressed DS+(E)BX+AL.
       S_LOAD: begin
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
-            (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+gpr_o[R_ESP];
-        else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+gpr_o[R_EBP];
+            (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+stk16(gpr_o[R_ESP]);
+        else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+stk16(gpr_o[R_EBP]);
         else if (q_kind==K_STR)
           cur_lin = (q_st==ST_SCAS) ? dbase+str_edi : dbase+str_esi;
+        else if (q_xlat)
+          cur_lin = dbase
+                  + (q_cnt16 ? {16'd0, gpr_o[R_EBX][15:0]} : gpr_o[R_EBX])
+                  + {24'd0, gpr_o[R_EAX][7:0]};
         else                                           cur_lin = opbase+q_ea;  // M7.1 opbase
         // REVIEW2 C-02: on the SECOND beat of a split access the TLB must look up the
         // SECOND page, not the first. Mirrors the bus driver's S_LOAD arm exactly --
@@ -5129,6 +5139,20 @@ module core
       end
       S_RETF: cur_lin = !seg_step ? seg_base[SG_SS] + stk16(gpr_o[R_ESP])
                                   : seg_base[SG_SS] + stk16(gpr_o[R_ESP]+{28'd0,q_w});
+      // REVIEW_aug2 C-05 (state selection): LGDT/LIDT and SGDT/SIDT take an ORDINARY
+      // linear memory operand, but neither had a cur_lin case.
+      //   * S_LGDT was additionally EXCLUDED from the post-translate stage, so under
+      //     paging it read the pseudo-descriptor from a PHYSICAL address.
+      //   * S_SGDT was excluded from nothing, so it reached mem_xlate() with the
+      //     DEFAULT cur_lin of 0 -- the D-TLB lookup for linear page ZERO. If page 0
+      //     happened to be resident the pseudo-descriptor was WRITTEN through page
+      //     zero's translation; if not, the operand silently bypassed paging.
+      // Both now mirror their bus-driver arms and are translatable.
+      S_LGDT:  cur_lin = dbase + q_ea + {29'd0, seg_step, 2'b00};
+      S_SGDT: begin
+        cur_is_w = 1'b1;
+        cur_lin  = dbase + q_ea + {29'd0, seg_step, 2'b00};
+      end
       S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
       S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end
       S_FENV_ST: begin cur_lin = dbase+q_ea + {25'd0, f_seq_step, 2'b00}; cur_is_w = 1'b1; end
@@ -5149,17 +5173,31 @@ module core
         // Uses the EFFECTIVE phase so the FIRST clock is the probe (REVIEW_aug2 C-01).
         if (xs_eff_act && (xs_eff_ph != 2'd1)) cur_lin = {cur_lin[31:12] + 20'd1, 12'd0};
       end
+      // REVIEW_aug2 C-05: three mismatches lived here. The bus driver is width-aware
+      // (q_w: PUSHAW/POPAW are 2-byte spaced) and applies stk16(); this used a HARD 4
+      // and no stk16(), so 16-bit PUSHA/POPA looked up the wrong page at most beats and
+      // at SP wrap. CMPXCHG8B had no case at all and fell through to the STACK address
+      // while the bus drives dbase+q_ea -- a successful paged CMPXCHG8B wrote through
+      // the wrong translation. Mirrors core_bus_driver.svh's S_USEQ arm exactly.
       S_USEQ: begin
-        if (q_sm==SM_PUSHA) begin
+        if (q_kind==K_CX8B) begin
           cur_is_w = 1'b1;
-          cur_lin = dbase+pusha_esp - (32'd4*({28'd0,step}+32'd1));
-        end else cur_lin = dbase+gpr_o[R_ESP] + (32'd4*{28'd0,step});
+          cur_lin = dbase + q_ea + (step==4'd0 ? 32'd0 : {28'd0,q_w});
+        end else if (q_sm==SM_PUSHA) begin
+          cur_is_w = 1'b1;
+          cur_lin = dbase + stk16(pusha_esp - (({28'd0,step}+32'd1)*{29'd0,q_w}));
+        end else
+          cur_lin = dbase + stk16(gpr_o[R_ESP] + ({28'd0,step}*{29'd0,q_w}));
       end
       // M2S.3 IDT delivery linear addresses (mirror the bus driver arms).
       S_INT_GATE:   cur_lin = idt_base + {21'd0, int_vec, 3'd0}
                               + {29'd0, int_step[0], 2'b00};
+      // REVIEW_aug2 C-05: the bus honours the selector's TI bit (GDT vs LDT) for both
+      // of these; cur_lin hard-coded the GDT, so an LDT-backed interrupt/IRET CS made
+      // the TLB translate a different linear page than the bus addressed.
       S_INT_CS, S_INT_CS_RET:
-                    cur_lin = gdt_base + {16'd0, int_gate_sel[15:3], 3'd0}
+                    cur_lin = (int_gate_sel[2] ? ldt_base : gdt_base)
+                            + {16'd0, int_gate_sel[15:3], 3'd0}
                               + {29'd0, int_step[0], 2'b00};
       S_INT_PUSH: begin
         cur_is_w = 1'b1;
@@ -5169,8 +5207,13 @@ module core
                   ? (seg_base[SG_SS] + int_new_esp - ({28'd0, int_step} * 32'd4) - 32'd4)
                   : (seg_base[SG_SS] + gpr_o[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
       end
-      S_IRET, S_IRET_SS:
-                    cur_lin = seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4);
+      // REVIEW_aug2 C-06: S_IRET_SS reads the popped SS DESCRIPTOR from the GDT/LDT,
+      // not the stack. Mirrors core_bus_driver.svh exactly (CHECK 5 enforces it).
+      S_IRET_SS:    cur_lin = (iret_ss[2] ? ldt_base : gdt_base)
+                            + {16'd0, iret_ss[15:3], 3'd0} + ({29'd0, int_step[0], 2'b00});
+      S_IRET:       cur_lin = int_gate_op16
+                            ? (seg_base[SG_SS] + gpr_o[R_ESP] + ({27'd0, int_step, 1'b0}))
+                            : (seg_base[SG_SS] + gpr_o[R_ESP] + ({28'd0, int_step} * 32'd4));
       // REVIEW2 C-04: S_LTR reads the GDT TSS descriptor; S_INT_TSS reads TSS.ssN:espN;
       // S_INT_SS reads the new SS descriptor. All three are architecturally LINEAR and
       // are now TRANSLATED -- the old comment here said they "address their (linear)
@@ -5218,6 +5261,8 @@ module core
       // above); they are ordinary SS:ESP stack accesses and must translate like every
       // other stack access.
       S_FENV_ST, S_FENV_LD, S_LCALL, S_RETF,
+      // REVIEW_aug2 C-05: LGDT/LIDT and SGDT/SIDT are ordinary linear operands.
+      S_LGDT, S_SGDT,
       // REVIEW2 C-04: descriptor/TSS structures are architecturally LINEAR.
       // NOT included: S_WALK (the page-table walk is physical by definition) and
       // S_SMI_SAVE/S_RSM (the SMM save map is architecturally physical). Those two

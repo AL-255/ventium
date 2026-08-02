@@ -10871,3 +10871,53 @@ C-01 is the third time this session a fix of mine passed its own test while bein
 and the second where the test was blind in a way I could have predicted -- I checked the
 two frames I meant to write and never the one I might corrupt. The review found it by
 reading the RTL, not by running anything.
+
+
+## UPDATE 358 — REVIEW_aug2 C-06 + the whole C-05 mismatch table.
+
+### C-06 — inter-privilege IRET was reading the STACK as a descriptor
+
+`S_IRET_SS` shared the S_IRET bus arm, so it addressed
+    seg_base[SG_SS] + ESP + step*4
+-- two dwords from the OLD stack, and after beat 4 at the freshly installed OUTER ESP --
+and installed those arbitrary stack bytes as the new SS base/limit/attr. Ordinary
+ring0->ring3 IRET was structurally wrong, independent of the missing validation.
+
+It now has its own arm addressing the GDT/LDT by the POPPED SS selector, honouring the
+TI bit exactly as S_INT_SS and S_INT_CS_RET already do, with cur_lin mirroring it.
+
+### C-05 — every row of the review's mismatch table
+
+The table listed seven cur_lin/bus divergences plus two state-selection failures. All
+are now mirrored:
+
+  XLAT              cur_lin had NO case and fell through to opbase+q_ea while the bus
+                    drives DS+(E)BX+AL -- a paged XLATB translated an unrelated page.
+  stack loads       cur_lin used RAW ESP/EBP; the bus applies stk16(). Wrong page on a
+                    16-bit stack.
+  CMPXCHG8B S_USEQ  cur_lin had no case and used the STACK address while the bus drives
+                    dbase+q_ea -- a successful paged CMPXCHG8B wrote via the wrong
+                    translation.
+  16-bit PUSHA/POPA cur_lin used a hard 4-byte stride and no stk16(); the bus is q_w-
+                    aware. Wrong lookup at most beats and at SP wrap.
+  LDT-backed CS     cur_lin hard-coded the GDT for S_INT_CS/S_INT_CS_RET; the bus
+                    honours selector.TI.
+  16-bit IRET pop   cur_lin used a fixed 4-byte stride; the bus uses 2 under
+                    int_gate_op16. (Fixed alongside C-06.)
+  LGDT/LIDT         had NO cur_lin case AND was excluded from post-translation, so under
+                    paging it read the pseudo-descriptor from a PHYSICAL address.
+  SGDT/SIDT         had no cur_lin case and was excluded from NOTHING, so it reached
+                    mem_xlate() with the DEFAULT cur_lin of 0 -- the D-TLB lookup for
+                    linear page ZERO. With page 0 resident the pseudo-descriptor was
+                    WRITTEN through page zero's translation; otherwise it silently
+                    bypassed paging. This is the worst of the set.
+
+verify-all 10/10 after each change, zero PAGING/C-03 firings throughout.
+
+### Still true, and the reason this keeps happening
+
+These were all hand-mirrored again. CHECK 5 proves the pair agrees only for states the
+gates actually execute, and most of these are not executed. The durable fix remains ONE
+per-request descriptor (linear/width/write) consumed by the TLB, the permission checker,
+the segment checker, the bus and the split engine -- the review says so and it is the
+same conclusion C-06/#65 reached from the other direction.
