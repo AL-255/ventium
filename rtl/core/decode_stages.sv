@@ -1757,6 +1757,52 @@ module decode_stages
     // correct in core_fetch_decode.svh: the F00F erratum arm is tested BEFORE the #UD
     // arm, so with errata_en[ERR_F00F] set the documented hang still wins.
     if (pfx_lock && !(d_mem_read || d_mem_write)) d_unknown = 1'b1;
+
+    // ---- REVIEW1_Aug2 M-01: LOCK is legal only on specific opcodes ---------------
+    // The rule above rejects LOCK when there is no memory operand at all. It does not
+    // reject LOCK on an opcode that HAS one but is not lockable -- `lock mov [mem],eax`
+    // executed. The old comment said deciding this needed a per-arm flag on ~18 decode
+    // arms; it does not. Lockability is a property of the OPCODE, so it is a pure
+    // function of the opcode bytes and ModR/M.reg, written here in one place.
+    //
+    // ALLOW-LIST, deliberately, and FAIL-OPEN: an opcode not recognised below is left
+    // alone rather than faulted. A wrong #UD on a legal `lock add [mem],eax` would be
+    // far worse than a missed check, so anything uncertain stays permitted. The list is
+    // the SDM's: ADD ADC AND BTC BTR BTS CMPXCHG CMPXCHG8B DEC INC NEG NOT OR SBB SUB
+    // XOR XADD XCHG -- and only in their MEMORY-DESTINATION forms.
+    begin
+      logic lock_legal;
+      lock_legal = 1'b0;
+      if (two_byte) begin
+        unique case (ibuf[pfx_len+1])
+          8'hB0, 8'hB1: lock_legal = 1'b1;                 // CMPXCHG r/m, r
+          8'hC0, 8'hC1: lock_legal = 1'b1;                 // XADD    r/m, r
+          8'hB3, 8'hBB, 8'hAB: lock_legal = 1'b1;          // BTR / BTC / BTS r/m, r
+          8'hBA: lock_legal = (modrm_reg >= 3'd5);         // BTS/BTR/BTC imm8 (not BT=4)
+          8'hC7: lock_legal = (modrm_reg == 3'd1);         // CMPXCHG8B m64
+          default: lock_legal = 1'b0;
+        endcase
+      end else begin
+        unique case (op0)
+          // The r/m,reg (memory-DESTINATION) forms of the group-1 ALU ops. The
+          // reg,r/m forms (02/03, 0A/0B, ...) read memory and write a REGISTER, so
+          // LOCK is illegal on them -- that asymmetry is the point of listing the
+          // even/odd pairs explicitly rather than masking.
+          8'h00, 8'h01, 8'h08, 8'h09, 8'h10, 8'h11, 8'h18, 8'h19,
+          8'h20, 8'h21, 8'h28, 8'h29, 8'h30, 8'h31: lock_legal = 1'b1;
+          8'h80, 8'h81, 8'h83: lock_legal = (modrm_reg != 3'd7);   // group 1, not CMP
+          8'h86, 8'h87: lock_legal = 1'b1;                          // XCHG r/m, r
+          8'hF6, 8'hF7: lock_legal = (modrm_reg == 3'd2)            // NOT
+                                  || (modrm_reg == 3'd3);           // NEG
+          8'hFE:        lock_legal = (modrm_reg <= 3'd1);            // INC/DEC r/m8
+          8'hFF:        lock_legal = (modrm_reg <= 3'd1);            // INC/DEC r/m
+          default:      lock_legal = 1'b0;
+        endcase
+      end
+      // Only fault when there IS a memory operand -- the no-memory case is already
+      // handled above, and doubling it up would just obscure which rule fired.
+      if (pfx_lock && (d_mem_read || d_mem_write) && !lock_legal) d_unknown = 1'b1;
+    end
   end
 
 endmodule : decode_stages
