@@ -66,12 +66,10 @@
                 // (pcpl/pfcpl3) is what verify-sys covers.
                 end else if (iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
                 else begin
-                  // SAME-PRIV: commit now (ESP += 12 or 6), reload CS, retire via _RET.
-                  // R3: ESP adjust moved to the gpr writeback driver (S_IRET int_step 2).
-                  eip          <= iret_eip;
-                  eflags       <= int_gate_op16          // REVIEW2 C-10
-                    ? {eflags[31:16], iret_flags({eflags[31:16], mem_rdata[15:0]}, eflags)[15:0]}
-                    : iret_flags(mem_rdata, eflags);
+                  // SAME-PRIV: REVIEW1_Aug2 C-06 -- commit NOTHING here. EIP, EFLAGS
+                  // and ESP all land in S_INT_CS_RET once the returned-to CS has been
+                  // read and validated. iret_eip/iret_eflags already hold the popped
+                  // values; they simply stay staged across the descriptor read.
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
                   state        <= S_INT_CS_RET;
@@ -179,12 +177,10 @@
               //  well -- is the rest of C-07 and is NOT done here; this closes the
               //  descriptor half, which is the part that installs attacker-chosen
               //  segment state.)
-              cs_bad = (int_gate_sel[15:2] == 14'd0)                    // null selector
-                    || !cs_a[7]                                          // P=0
-                    || !cs_a[4] || !cs_a[3]                              // not code (S=1,type[3]=1)
-                    || (int_gate_sel[1:0] < cpl_r)                       // must not raise privilege
-                    || (cs_a[2] ? (cs_a[6:5] > int_gate_sel[1:0])        // conforming: DPL <= RPL
-                                : (cs_a[6:5] != int_gate_sel[1:0]));     // non-conf : DPL == RPL
+              // REVIEW1_Aug2 C-06: the rule now lives in core.sv as iret_cs_ok, because
+              // the ESP writeback has to branch on the identical condition. Same
+              // expression, one definition.
+              cs_bad = !iret_cs_ok;
               if (cs_bad) begin
                 start_fault(!cs_a[7] ? 8'd11 : 8'd13, 1'b1,
                             {16'd0, int_gate_sel} & 32'h0000_FFFC, int_src_pc);
@@ -201,7 +197,11 @@
                 state            <= S_IRET_SS;   // read + validate outer SS, then commit ALL
               end else begin
                 // SAME-PRIVILEGE return: there is no SS to validate, so this IS the
-                // single commit point and CS installs here as before.
+                // single commit point -- and after REVIEW1_Aug2 C-06 that means EIP
+                // and EFLAGS commit here too, not at S_IRET beat 2. ESP is advanced
+                // by core_gpr_wb.svh off the shared iret_cs_commit on this same clock.
+                eip              <= iret_eip;
+                eflags           <= iret_eflags;
                 seg_sel  [SG_CS] <= int_gate_sel;
                 seg_base [SG_CS] <= desc_base(desc);
                 seg_limit[SG_CS] <= desc_limit(desc);

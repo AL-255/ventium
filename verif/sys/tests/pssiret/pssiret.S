@@ -239,7 +239,7 @@ caseB:
      * SS = 0x43 (idx8 RPL3) = writable DPL3 but P=0 => #SS(0x40), not #GP.  */
     .align 16
 caseC:
-    movl    $caseD, 0x00002080
+    movl    $caseE, 0x00002080
     movl    $0x00000040, 0x00002084
     pushl   $0x00000043                 /* SS  (idx8, RPL3) -- not present */
     pushl   $0x00080000
@@ -248,6 +248,36 @@ caseC:
     pushl   $0x0000001B
     pushl   $user_entry
     iret                                /* must #SS(0x40) */
+
+    /* ============================ CASE E ================================
+     * REVIEW1_Aug2 C-06: a SAME-PRIVILEGE IRET with a bad CS must also commit
+     * nothing. Cases A-C are inter-privilege; this one stays at CPL0, where the
+     * frame is only EIP/CS/EFLAGS and there is no SS to validate -- which is exactly
+     * why the same-privilege path kept writing EIP and EFLAGS at S_IRET beat 2 while
+     * ESP advanced by 12 on the same clock, all before CS was read.
+     *
+     * CS = 0x10 is the flat DATA selector: present and in range, but NOT a code
+     * segment, so it must raise #GP(0x10) and leave everything alone.
+     *
+     * The discriminator is ESP. Counting from the value recorded here:
+     *     -12  the three dwords this case pushes as the IRET frame
+     *     -16  the 4-word #GP frame (error code, EIP, CS, EFLAGS), same privilege
+     *      -8  fault_common's own two pushes
+     * so the handler's ESP sits 36 (0x24) below it. If ESP had already been advanced
+     * past the IRET frame -- +12 before the fault -- the gap is 24 (0x18) instead,
+     * and the IRET is not restartable. Both values are produced by QEMU too, so the
+     * gap is graded by the ordinary differential diff, not just asserted here.
+     */
+    .align 16
+caseE:
+    movl    %esp, 0x00002078            /* ESP immediately before the frame is built */
+    movl    $caseD, 0x00002080          /* where the fault handler resumes */
+    movl    $0x00000010, 0x00002084     /* expected error code = the CS selector */
+    pushfl
+    orl     $0x00000200, (%esp)         /* IF set in the PUSHED image only */
+    pushl   $0x00000010                 /* CS = flat DATA selector -> NOT code */
+    pushl   $user_entry                 /* EIP */
+    iret                                /* must #GP(0x10), committing nothing */
 
     /* ============================ CASE D ================================
      * The WELL-FORMED frame: SS = 0x23 (idx4 RPL3), a present writable DPL3
@@ -390,9 +420,16 @@ fault_common:
 sys_exit:
     movl    0x000020B0, %ebp            /* EBP = faults taken            (want 3) */
     movl    0x000020B4, %ebx            /* EBX = error codes correct     (want 3) */
-    movl    0x000020B8, %ecx            /* ECX = frames NOT pre-committed(want 3) */
+    movl    0x000020B8, %ecx            /* ECX = frames NOT pre-committed(want 4) */
+    movl    0x0000207C, %eax            /* EAX = case E's ESP gap  (want 36 = 0x24) */
     movl    0x0000208C, %edx            /* EDX = CPL3 reached sentinel (0xC3C3C3C3) */
     movl    0x00002090, %esi            /* ESI = user SS               (want 0x23) */
+    /* REVIEW1_Aug2 C-06: the same-privilege gap. 24 = nothing was committed before
+     * the CS was validated; 12 = ESP had already advanced past the IRET frame. */
+    movl    0x00002078, %eax            /* ESP recorded before case E's frame */
+    subl    0x000020A8, %eax            /* minus the handler ESP that case E produced */
+    movl    %eax, 0x0000207C            /* the gap (want 36 = 0x24; 24 = 0x18 is the bug) */
+
     movl    0x00002094, %edi            /* EDI = last fault path (want 0x0B0C = the
                                          *  not-present-SS handler, i.e. case C did NOT
                                          *  come through #GP) */

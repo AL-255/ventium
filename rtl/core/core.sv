@@ -2179,6 +2179,32 @@ module core
                    && (iret_ss[1:0]        == iret_cs[1:0])  // SS.RPL == return CPL
                    && (iret_ss_attr_w[6:5] == iret_cs[1:0]); // SS.DPL == return CPL
   assign iret_ss_ok = iret_ss_wellformed && iret_ss_present;
+
+  // ---- REVIEW1_Aug2 C-06: the SAME-PRIVILEGE return needs the same treatment ----
+  // C-07 staged the inter-privilege frame, but the same-privilege path still wrote EIP
+  // and EFLAGS at S_IRET beat 2 and advanced ESP by 6/12 on that clock, while CS was
+  // not read or validated until S_INT_CS_RET. A frame carrying a null, non-code,
+  // wrong-privilege or not-present CS therefore faulted with EIP already redirected to
+  // the rejected target, EFLAGS already replaced by the popped image, and ESP already
+  // past the frame -- not restartable, and exactly the atomicity failure C-07 removed
+  // from the other path.
+  //
+  // Same shape as iret_ss_ok: written ONCE here because the FSM arm and the ESP
+  // writeback are different always blocks. The rule is the CS-return validation that
+  // already lived in S_INT_CS_RET, lifted out verbatim.
+  logic [7:0] iret_cs_attr_w;
+  logic       iret_cs_ok, iret_cs_commit;
+  assign iret_cs_attr_w = mem_rdata[15:8];   // access byte of {mem_rdata, int_lo}
+  assign iret_cs_ok = (int_gate_sel[15:2] != 14'd0)      // not the null selector
+                   &&  iret_cs_attr_w[7]                  // P=1
+                   &&  iret_cs_attr_w[4] && iret_cs_attr_w[3]   // S=1 and CODE
+                   && (int_gate_sel[1:0] >= cpl_r)        // must not RAISE privilege
+                   && (iret_cs_attr_w[2] ? (iret_cs_attr_w[6:5] <= int_gate_sel[1:0])
+                                         : (iret_cs_attr_w[6:5] == int_gate_sel[1:0]));
+  // The same-privilege commit clock: CS descriptor read complete and accepted, and the
+  // return is NOT dropping privilege (the inter-priv path commits in S_IRET_SS).
+  assign iret_cs_commit = (state == S_INT_CS_RET) && mem_ack && (int_step != 4'd0)
+                       && iret_cs_ok && !iret_interpriv;
   assign iret_ss_commit = (state == S_IRET_SS) && mem_ack
                        && (int_step != 4'd0) && iret_ss_ok;
   // M7.2: IRET from CPL0 with the popped EFLAGS.VM set = a RETURN INTO V86 (the

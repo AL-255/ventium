@@ -640,8 +640,11 @@
                 // offsets. The privilege decision is iret_interpriv in both places now.
                 if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin end
                 else if (iret_interpriv) begin end
-                else begin gpr_we[R_ESP]=1'b1;
-                  gpr_wd[R_ESP]=gpr_o[R_ESP] + (int_gate_op16 ? 32'd6 : 32'd12); end
+                // REVIEW1_Aug2 C-06: the same-privilege ESP advance no longer happens
+                // here either. It commits with EIP/EFLAGS/CS in S_INT_CS_RET, gated by
+                // the shared iret_cs_commit -- a frame rejected for a bad CS must leave
+                // ESP pointing at the frame so the IRET is restartable.
+                else begin end
               end
               4'd4: begin
                 // REVIEW_aug2 C-07: ESP no longer commits here. On the inter-priv path
@@ -661,6 +664,12 @@
         // the two drivers cannot disagree about whether the frame was accepted.
         S_IRET_SS: begin
           if (iret_ss_commit) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=iret_esp; end
+        end
+        // REVIEW1_Aug2 C-06: the SAME-PRIVILEGE ESP advance, on the validated commit
+        // clock. iret_cs_commit is the same expression core_iret.svh branches on.
+        S_INT_CS_RET: begin
+          if (iret_cs_commit) begin gpr_we[R_ESP]=1'b1;
+            gpr_wd[R_ESP]=gpr_o[R_ESP] + (int_gate_op16 ? 32'd6 : 32'd12); end
         end
 
         // -------------------------------------------------------------------
