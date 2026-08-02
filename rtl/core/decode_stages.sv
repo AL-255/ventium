@@ -60,6 +60,9 @@ module decode_stages
     // d_is_nop is all the rest of the machine needs -- but that leaves NO predicate
     // for the centralized CPL0 check to reject them at CPL3. Flagged explicitly.
     output logic        d_cacheinv,
+    // REVIEW1_Aug2 C-10: expose the LOCK prefix so the core can request a locked
+    // bus transaction. pfx_lock was consumed only by the #UD/errata checks.
+    output logic        d_lock,
     output logic        d_int80,
     output logic        d_unknown,
     output logic        d_int,
@@ -239,7 +242,7 @@ module decode_stages
   // Combinational decoder (moved VERBATIM from core.sv)
   // ===========================================================================
   always_comb begin
-    d_len=4'd1; d_halt=1'b0; d_cacheinv=1'b0; d_int80=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
+    d_len=4'd1; d_halt=1'b0; d_cacheinv=1'b0; d_lock=1'b0; d_int80=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
     d_rel=32'd0; d_alu_op=ALU_ADD; d_writes_reg=1'b0; d_writes_flags=1'b0;
     d_mem_read=1'b0; d_mem_write=1'b0; d_mem_dst=1'b0; d_dst_reg=3'd0; d_src_reg=3'd0;
     d_imm=32'd0; d_use_imm=1'b0; d_is_push=1'b0; d_is_pop=1'b0; d_is_lea=1'b0;
@@ -1769,6 +1772,8 @@ module decode_stages
     // correct in core_fetch_decode.svh: the F00F erratum arm is tested BEFORE the #UD
     // arm, so with errata_en[ERR_F00F] set the documented hang still wins.
     if (pfx_lock && !(d_mem_read || d_mem_write)) d_unknown = 1'b1;
+    // REVIEW1_Aug2 C-10: a LOCK on a memory RMW is the case that must reach the bus.
+    d_lock = pfx_lock && (d_mem_read || d_mem_write);
 
     // ---- REVIEW1_Aug2 M-01: LOCK is legal only on specific opcodes ---------------
     // The rule above rejects LOCK when there is no memory operand at all. It does not

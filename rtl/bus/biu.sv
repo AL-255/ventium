@@ -72,6 +72,10 @@ module biu (
     // ----- FRONT: core-side 32-bit single-beat mem request (mirrors core.sv) --
     input  logic        c_req,          // core mem_req
     input  logic        c_we,           // core mem_we (1 = write)
+    // REVIEW1_Aug2 C-10: the core's locked-RMW request. Was hardwired 0 below, so
+    // the integrated core never asked the back end for atomicity even though
+    // biu_p5 has always had the pin and the standalone gate exercises it.
+    input  logic        c_lock,
     input  logic [31:0] c_addr,         // core mem_addr (byte address)
     input  logic [31:0] c_wdata,        // core mem_wdata
     input  logic [3:0]  c_wstrb,        // core mem_wstrb (per-byte enables)
@@ -156,7 +160,11 @@ module biu (
   wire         bp_req       = c_req;
   wire         bp_req_we    = c_we;
   wire         bp_req_cache = 1'b0;     // never cacheable -> no 4-beat line fill
-  wire         bp_req_lock  = 1'b0;     // no locked groups in single-cycle bridging
+  // REVIEW1_Aug2 C-10: driven from the core instead of tied off. This asks the
+  // back end to keep the bus for the read and write beats of a locked RMW; it
+  // does NOT by itself make the sequence atomic against every requester (see the
+  // commit message for what remains).
+  wire         bp_req_lock  = c_lock;
   wire         bp_req_split = 1'b0;
   wire         bp_req_mio   = 1'b1;     // memory cycle (M/IO# = 1 = memory)
   wire         bp_req_dc    = 1'b1;     // data cycle (D/C# = 1 = data)

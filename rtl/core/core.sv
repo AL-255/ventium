@@ -418,6 +418,13 @@ module core
     output logic        fast_reset_req,
     output logic        mem_req,
     output logic        mem_we,
+    // ---- REVIEW1_Aug2 C-10: the core now REQUESTS a locked transaction ------------
+    // LOCK was a decoder-level no-op for implemented RMW ops, and every bus wrapper
+    // hardwired its lock pin low, so the integrated core never asked the interconnect
+    // for atomicity at all. This carries the architectural intent out to the bus for
+    // the whole RMW: asserted from the read beat through the write beat of a locked
+    // read-modify-write, so a wrapper can hold the bus across both.
+    output logic        mem_lock,
     output logic [31:0] mem_addr,
     // task #51: the PRE-TRANSLATE linear address for the SAME access mem_addr describes. The
     // I-cache is LINEAR-tagged (flin = seg_base[SG_CS] + eip) but the self-modifying-code snoop
@@ -1637,6 +1644,8 @@ module core
   // mode / dword in 32-bit). The port is an imm8 (E4-E7) or DX[15:0] (EC-EF).
   // d_io_w reuses the wmask width code (1=byte, 2=word, 4=dword). These are 0 for
   // every non-IN/OUT instruction, so the dispatch below is inert elsewhere.
+  logic        d_lock;          // REVIEW1_Aug2 C-10: LOCK prefix on this insn
+  logic        q_lock;          // ...latched for the whole RMW
   logic        d_io;            // this instruction is IN/OUT
   // ---- REVIEW1_Aug2 M-03: TSS I/O-permission bitmap consult -----------------------
   // Needed only when the instruction is port I/O AND the current privilege exceeds
@@ -1820,6 +1829,7 @@ module core
     .d_cnt16       (d_cnt16),
     .d_br16        (d_br16),
     .d_io          (d_io),
+    .d_lock        (d_lock),
     .d_io_write    (d_io_write),
     .d_io_imm      (d_io_imm),
     .d_io_port_imm (d_io_port_imm),

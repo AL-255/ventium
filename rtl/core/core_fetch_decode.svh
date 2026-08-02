@@ -102,6 +102,7 @@
           q_len<=d_len; q_is_branch<=d_is_branch; q_branch_taken<=d_branch_taken;
           q_rel<=d_rel; q_alu_op<=d_alu_op; q_writes_reg<=d_writes_reg;
           q_writes_flags<=d_writes_flags; q_mem_read<=d_mem_read; q_mem_write<=d_mem_write;
+          q_lock<=d_lock;   // REVIEW1_Aug2 C-10: hold LOCK across the whole RMW
           q_mem_dst<=d_mem_dst; q_dst_reg<=d_dst_reg; q_src_reg<=d_src_reg; q_imm<=d_imm;
           q_use_imm<=d_use_imm; q_is_push<=d_is_push; q_is_pop<=d_is_pop; q_is_lea<=d_is_lea;
           q_is_mov<=d_is_mov; q_ea<=d_ea; q_pc<=eip; q_w<=d_w; q_dst_high8<=d_dst_high8;

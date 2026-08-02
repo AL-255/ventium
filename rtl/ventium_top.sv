@@ -303,6 +303,7 @@ module ventium_top
   // to the bus subsystem FRONT and the response side comes back from it. The mux
   // is below the core instance. (Declared here so the core can bind to them.)
   logic        core_mem_req, core_mem_we;
+  logic core_mem_lock;   // REVIEW1_Aug2 C-10
   logic [31:0] core_mem_addr, core_mem_wdata;
   logic [31:0] core_mem_lin;   // task #51: pre-translate linear addr for the SMC snoop
   logic [3:0]  core_mem_wstrb;
@@ -609,6 +610,8 @@ module ventium_top
 `endif
       .mem_req      (core_mem_req),
       .mem_we       (core_mem_we),
+      // REVIEW1_Aug2 C-10: the locked-RMW request, carried to the bus wrapper.
+      .mem_lock     (core_mem_lock),
       .mem_addr     (core_mem_addr),
       .mem_lin      (core_mem_lin),
       .mem_wdata    (core_mem_wdata),
@@ -913,6 +916,7 @@ module ventium_top
       // FRONT: core 32b request (gated by bus_mode so the subsystem is inert at 0)
       .c_req    (bus_mode ? core_mem_req : 1'b0),
       .c_we     (core_mem_we),
+      .c_lock   (core_mem_lock),   // REVIEW1_Aug2 C-10
       .c_addr   (core_mem_addr),
       .c_wdata  (core_mem_wdata),
       .c_wstrb  (core_mem_wstrb),

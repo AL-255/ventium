@@ -14,6 +14,10 @@
   // ===========================================================================
   always_comb begin
     mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
+    // REVIEW1_Aug2 C-10: assert LOCK for every beat of a locked RMW. q_lock is latched
+    // at decode and held until the next instruction, so the read beat AND the write
+    // beat both carry it -- which is what lets a wrapper keep the bus across the pair.
+    mem_lock = q_lock;
     // ---- REVIEW2_Aug1 C-06 -----------------------------------------------------
     // Publish, next to the address, whether this access goes THROUGH A SEGMENT at
     // all. Default: it does not. The arms that leave it 0 are exactly the ones that
