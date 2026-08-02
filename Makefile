@@ -286,6 +286,8 @@ verify-sys:
 	# nothing until it has. Grades the FAULT FRAME (saved CS/EFLAGS.IF + the
 	# handler's own SS:ESP), not merely that a fault occurred.
 	bash verif/sys/run-sys-golden.sh pssiret
+	# REVIEW_aug2 H-06: INVD/WBINVD are CPL0-only and RDTSC honours CR4.TSD.
+	bash verif/sys/run-sys-golden.sh ppriv
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh ptaskcpl
 	bash verif/sys/run-sys-golden.sh psmm

@@ -56,6 +56,10 @@ module decode_stages
     // ---- outputs: the decoded fields (the d_* the q_* latch consumes) ------
     output logic [3:0]  d_len,
     output logic        d_halt,
+    // REVIEW_aug2 H-06: INVD (0F 08) / WBINVD (0F 09). They retire as NOPs, so
+    // d_is_nop is all the rest of the machine needs -- but that leaves NO predicate
+    // for the centralized CPL0 check to reject them at CPL3. Flagged explicitly.
+    output logic        d_cacheinv,
     output logic        d_int80,
     output logic        d_unknown,
     output logic        d_int,
@@ -235,7 +239,7 @@ module decode_stages
   // Combinational decoder (moved VERBATIM from core.sv)
   // ===========================================================================
   always_comb begin
-    d_len=4'd1; d_halt=1'b0; d_int80=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
+    d_len=4'd1; d_halt=1'b0; d_cacheinv=1'b0; d_int80=1'b0; d_unknown=1'b0; d_f00f=1'b0; d_is_branch=1'b0; d_branch_taken=1'b0;
     d_rel=32'd0; d_alu_op=ALU_ADD; d_writes_reg=1'b0; d_writes_flags=1'b0;
     d_mem_read=1'b0; d_mem_write=1'b0; d_mem_dst=1'b0; d_dst_reg=3'd0; d_src_reg=3'd0;
     d_imm=32'd0; d_use_imm=1'b0; d_is_push=1'b0; d_is_pop=1'b0; d_is_lea=1'b0;
@@ -730,7 +734,12 @@ module decode_stages
         // Ungated like CPUID/RDTSC (cosim_en || soc_en); user-mode corpus keeps the HALT.
         8'h08, 8'h09: begin
           d_len=pfx_len+4'd2;
-          if (cosim_en || soc_en) d_is_nop=1'b1; else d_unknown=1'b1;
+          // REVIEW_aug2 H-06: these are CPL0-ONLY. Retiring them as NOPs is fine for
+          // their (absent) architectural effect, but an anonymous NOP is invisible to
+          // the privilege check, so CPL3 code could execute WBINVD. d_cacheinv gives
+          // core.sv's one privilege predicate something to reject.
+          if (cosim_en || soc_en) begin d_is_nop=1'b1; d_cacheinv=1'b1; end
+          else d_unknown=1'b1;
         end
         // ---- 0F 0B: UD2, the architecturally-undefined opcode -> #UD (vector 6).
         // In SYSTEM mode it DELIVERS #UD through the IDT (a FAULT: pushes the

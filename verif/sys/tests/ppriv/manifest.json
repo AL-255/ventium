@@ -1,0 +1,33 @@
+{
+  "name": "ppriv",
+  "kind": "system",
+  "src": "ppriv.S",
+  "linker": "ppriv.ld",
+  "image": "ppriv.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 700,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, far jump to flat 32-bit code 0x08)",
+    "GDT: null, code0 0x08, data0 0x10, code3 0x18(DPL3), data3 0x20(DPL3), TSS32 0x28; TSS SS0=0x10 ESP0=0x00088000",
+    "CPL0 CONTROLS: WBINVD and INVD execute as NOPs at CPL0 and the 0x00C0FFEE marker is written -- the check must be CPL-conditional, not a blanket rejection",
+    "CR4.TSD <- 1 at CPL0 (CR4=0x00000004), which makes RDTSC CPL0-only",
+    "transfer DOWN to CPL3 via inter-priv IRET (CS 0x1B / SS 0x23, ESP 0x00080000)",
+    "case A: WBINVD at CPL3 -> #GP(0), cross-priv delivery to the CPL0 handler on the TSS stack",
+    "case B: INVD at CPL3 -> #GP(0)",
+    "case C: RDTSC at CPL3 with CR4.TSD=1 -> #GP(0); the fault means EDX:EAX are NOT written, so no free-running counter value enters the graded trace",
+    "each handler patches the saved EIP past the faulting instruction and inter-priv IRETs back to CPL3",
+    "syscall exit (INT 0x40) -> sys_exit at CPL0 reports and performs the isa-debug-exit"
+  ],
+  "delivery_records": {
+    "oracle": "qemu-system-i386 8.2.2 (the harness build used by this gate) raises all three: v=0d e=0000 cpl=3 at 000f01d2 (WBINVD), 000f01ea (INVD) and 000f01fa (RDTSC). NOTE: the SYSTEM qemu 10.2.1 raises only the RDTSC one -- it permits INVD/WBINVD at CPL3 -- so this test must be run against the harness oracle, which is what run-sys-golden.sh uses.",
+    "success_proof": "at sys_exit (CPL0): ebp=3 (faults taken), ebx=3 (error code 0 every time), ecx=3 (all three raised while genuinely at CPL3, saved CS=0x1B), edx=0xC3C3C3C3 (CPL3 survived all three), esi=0x23 (user SS), edi=0x00C0FFEE (the CPL0 controls ran); then out 0xf4 = qemu status 133"
+  },
+  "description": "REVIEW_aug2 H-06 gate: privileged instructions CPL3 could still execute. The centralized CPL0 predicate omitted INVD (0F 08) and WBINVD (0F 09) -- they decode to ANONYMOUS NOPs, which is right for their architectural effect but leaves the privilege check nothing to reject -- and did not model CR4.TSD for RDTSC (0F 31), on the stated grounds that firmware runs CPL0 with TSD=0, which says nothing about the CPL3 software TSD exists to restrict. Same -bios bootstrap as pcpl. Runs WBINVD and INVD at CPL0 first as CONTROLS (they must still retire as NOPs -- a blanket rejection would fail here, before the test reaches CPL3), sets CR4.TSD, drops to CPL3 by inter-priv IRET, and executes WBINVD, INVD and RDTSC there; each must raise #GP(0), delivered cross-privilege to the CPL0 handler on the TSS stack, and each handler patches the saved EIP past the faulting instruction and returns. All three faults are value-safe: no register is written, so every graded record is deterministic. KNOWN GAP, stated rather than implied: the PERMISSIVE direction -- RDTSC at CPL3 with CR4.TSD=0 must NOT fault -- is deliberately absent, because a successful RDTSC writes EDX:EAX from a free-running counter whose value can never match between QEMU and the RTL, and verif/diff/compare.py has no per-field ignore; including it would make the gate unpassable for a reason unrelated to H-06. Requires --soc-en (the runner passes it): with soc_en=0 the decoder treats RDTSC/INVD/WBINVD as out-of-scope opcodes and HALTs before the privilege predicate is reached. NO paging; CR0.PG stays 0."
+}

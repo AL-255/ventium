@@ -1476,6 +1476,7 @@ module core
   // ===========================================================================
   logic [3:0]  d_len;
   logic        d_halt;
+  logic        d_cacheinv;   // REVIEW_aug2 H-06: INVD/WBINVD (CPL0-only)
   logic        d_int80;   // M7.1: decoded `int 0x80` (cd80) — the proxy site
   logic        d_unknown;
   // M2S.3 software/conditional interrupt + return decode (gated sys_mode in the
@@ -1676,6 +1677,7 @@ module core
     // decoded fields (the d_* the q_* latch consumes)
     .d_len         (d_len),
     .d_halt        (d_halt),
+    .d_cacheinv    (d_cacheinv),
     .d_int80       (d_int80),
     .d_unknown     (d_unknown),
     .d_int         (d_int),
@@ -6494,7 +6496,7 @@ module core
   // and runs its own privilege model). eff_cpl is already V86-correct (forced to 3).
   logic priv_fault;
   always_comb begin
-    logic cpl0_only, iopl_sensitive;
+    logic cpl0_only, iopl_sensitive, rdtsc_priv;
     // CPL0-only. SGDT/SIDT/STR/SMSW are deliberately ABSENT -- they are readable at
     // any CPL on a P5 (that is the well-known store-descriptor-table leak, not a bug
     // to fix here). MOV CR/DR covers both directions: reading CR/DR is CPL0-only too.
@@ -6502,7 +6504,15 @@ module core
              || (d_sysop==SYS_MOVDR_TO)  || (d_sysop==SYS_MOVDR_FROM)
              || (d_sysop==SYS_LGDT)      || (d_sysop==SYS_LIDT)
              || (d_sysop==SYS_LLDT)      || (d_sysop==SYS_LTR)
-             || (d_sysop==SYS_INVLPG)    || d_halt;
+             || (d_sysop==SYS_INVLPG)    || d_halt
+    // REVIEW_aug2 H-06: INVD (0F 08) and WBINVD (0F 09). They decode to anonymous
+    // NOPs -- correct for their architectural effect, but it left no predicate here,
+    // so CPL3 code could execute them. d_cacheinv exists solely to be rejected here.
+             || d_cacheinv;
+    // REVIEW_aug2 H-06: RDTSC is NOT unconditionally CPL0-only -- it is readable at
+    // any CPL unless CR4.TSD (bit 2) is set, which is the whole point of that bit.
+    // So it gets its own term rather than joining the list above.
+    rdtsc_priv = (d_kind==K_RDTSC) && creg4[2] && (eff_cpl != 2'd0);
     // IOPL-sensitive: CLI/STI and all port I/O. The TSS I/O permission bitmap is NOT
     // consulted yet -- with a bitmap a CPL>IOPL task may still be granted a port, so
     // this is STRICTER than architectural for that case. Recorded honestly rather
@@ -6510,7 +6520,8 @@ module core
     iopl_sensitive = d_cli || d_sti || d_io;
     priv_fault = sys_mode &&
                  ( (cpl0_only      && (eff_cpl != 2'd0))
-                || (iopl_sensitive && (eff_cpl >  iopl)) );
+                || (iopl_sensitive && (eff_cpl >  iopl))
+                || rdtsc_priv );
   end
 
   logic perm_fault, perm_fault_i;

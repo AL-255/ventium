@@ -51,7 +51,8 @@
  * test is graded DIFFERENTIALLY against the golden, and the golden also pins the
  * fault-frame contents above.
  *
- * ORACLE GAP (measured 2026-08-02, qemu-system-i386 10.2.1): for the NOT-PRESENT
+ * ORACLE GAP (measured 2026-08-02 on BOTH the gate's oracle, the harness
+ * qemu-system-i386 8.2.2, and the system 10.2.1): for the NOT-PRESENT
  * stack segment QEMU raises #NP (vector 11), not #SS (vector 12):
  *     seg_helper.c helper_ret_protected():
  *         if (!(ss_e2 & DESC_P_MASK)) {

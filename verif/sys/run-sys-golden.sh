@@ -628,7 +628,23 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   fi
 else
   say "7. RTL --system sys-diff: SKIPPED for '$TEST'"
-  if echo " $INTR_TESTS " | grep -q " $TEST "; then
+  if [[ "$TEST" == "ppriv" ]]; then
+    echo "  (REVIEW_aug2 H-06. The GOLDEN is fully validated above and pins the"
+    echo "   behaviour: qemu 8.2.2 raises #GP(0) at CPL3 for WBINVD, INVD and (with"
+    echo "   CR4.TSD=1) RDTSC. The RTL side cannot run yet, and the reason is a"
+    echo "   SEPARATE defect, not a property of H-06:"
+    echo "     * the decoder only recognises RDTSC/INVD/WBINVD when cosim_en or"
+    echo "       soc_en is set; with both off they are out-of-scope opcodes that HALT"
+    echo "       before the privilege predicate is ever consulted, and"
+    echo "     * tb_main.cpp's --soc-en flag is a NO-OP in this build: the"
+    echo "       'top->soc_en = args.soc_en' assignment sits inside #ifdef"
+    echo "       VEN_KV260_SOC, and ventium_top ties the core's soc_en to 1'b0 in the"
+    echo "       non-KV260 generate branch. Passing --soc-en changes nothing."
+    echo "   So the RTL fix (d_cacheinv + rdtsc_priv in core.sv) is LIVE only in the"
+    echo "   soc_en=1 configurations -- which is where it matters, since that is the"
+    echo "   deployed config -- and is UNGATED here. Enabling this needs --soc-en to"
+    echo "   reach the core in the default TB build; tracked separately."
+  elif echo " $INTR_TESTS " | grep -q " $TEST "; then
     echo "  ($TEST exercises M2S.3 IDT DELIVERY (interrupts/faults); the RTL"
     echo "   delivery path lands in M2S.3 Phase 2, so this is golden self-diff +"
     echo "   the step-5b delivery validation only. Phase 2 adds $TEST to"
