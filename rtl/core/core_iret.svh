@@ -20,7 +20,13 @@
               // slots IP:CS:FLAGS. Capture only the low 16 bits and preserve the upper
               // half of EIP/EFLAGS (a 16-bit pop leaves bits[31:16] untouched).
               4'd0: begin
-                iret_eip   <= int_gate_op16 ? {eip[31:16], mem_rdata[15:0]} : mem_rdata;
+                // REVIEW_aug2 C-07: a 16-bit IRET must ZERO-EXTEND the popped IP
+                // (SDM: with 16-bit operand size the new EIP is the popped value AND
+                // 0000FFFFh). This preserved the OLD eip[31:16], so a 16-bit return
+                // jumped to a target built half from the frame and half from whatever
+                // the interrupted context happened to have. The real-mode IRET and RETF
+                // paths in this core already zero-extend; this one did not.
+                iret_eip   <= int_gate_op16 ? {16'd0, mem_rdata[15:0]} : mem_rdata;
                 int_step <= 4'd1;
               end
               4'd1: begin
@@ -50,7 +56,15 @@
                 if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin
                   iret_to_v86 <= 1'b1;
                   int_step    <= 4'd3;             // pop ESP, SS, ES, DS, FS, GS
-                end else if (!int_gate_op16 && iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
+                // REVIEW_aug2 C-07: the inter-privilege branch was ALSO gated off for
+                // 16-bit, so a valid 16-bit protected-mode outer-level IRET was treated
+                // as same-privilege and never popped SP/SS -- it returned to CPL3 on the
+                // INNER stack. The V86 gate above genuinely does need !int_gate_op16
+                // (EFLAGS.VM lives in the high half a 16-bit pop does not load), but the
+                // privilege decision comes from the popped CS RPL, which IS loaded.
+                // NOTE: no gate exercises 16-bit inter-privilege IRET; the 32-bit path
+                // (pcpl/pfcpl3) is what verify-sys covers.
+                end else if (iret_interpriv) int_step <= 4'd3;   // pop ESP, SS
                 else begin
                   // SAME-PRIV: commit now (ESP += 12 or 6), reload CS, retire via _RET.
                   // R3: ESP adjust moved to the gpr writeback driver (S_IRET int_step 2).
@@ -142,7 +156,36 @@
               int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [63:0] desc;
+              logic [7:0]  cs_a;
+              logic        cs_bad;
               desc = {mem_rdata, int_lo};
+              cs_a = desc_attr(desc);
+              // ---- REVIEW_aug2 C-07: VALIDATE the returned-to CS before installing it.
+              // This arm previously installed selector/base/limit/attr and CPL blindly.
+              // A frame carrying a null selector, a non-code descriptor, a not-present
+              // one, or one whose DPL does not match the return privilege was accepted,
+              // so IRET could install an arbitrary descriptor and set CPL from its RPL.
+              //   * null selector           -> #GP(0)
+              //   * not present (P=0)       -> #NP(sel)
+              //   * not a CODE descriptor   -> #GP(sel)   (S=1 and type bit3=1)
+              //   * privilege: a non-conforming code segment must have DPL == RPL; a
+              //     conforming one must have DPL <= RPL. IRET may not RAISE privilege,
+              //     so RPL < CPL is rejected too.
+              // Checked BEFORE any commit, so nothing is installed on a bad frame.
+              // (The full validate-then-commit restructure -- staging EIP/EFLAGS/ESP as
+              //  well -- is the rest of C-07 and is NOT done here; this closes the
+              //  descriptor half, which is the part that installs attacker-chosen
+              //  segment state.)
+              cs_bad = (int_gate_sel[15:2] == 14'd0)                    // null selector
+                    || !cs_a[7]                                          // P=0
+                    || !cs_a[4] || !cs_a[3]                              // not code (S=1,type[3]=1)
+                    || (int_gate_sel[1:0] < cpl_r)                       // must not raise privilege
+                    || (cs_a[2] ? (cs_a[6:5] > int_gate_sel[1:0])        // conforming: DPL <= RPL
+                                : (cs_a[6:5] != int_gate_sel[1:0]));     // non-conf : DPL == RPL
+              if (cs_bad) begin
+                start_fault(!cs_a[7] ? 8'd11 : 8'd13, 1'b1,
+                            {16'd0, int_gate_sel} & 32'h0000_FFFC, int_src_pc);
+              end else begin
               seg_sel  [SG_CS] <= int_gate_sel;
               seg_base [SG_CS] <= desc_base(desc);
               seg_limit[SG_CS] <= desc_limit(desc);
@@ -157,6 +200,7 @@
                 retire_valid   <= 1'b1;
                 state          <= S_PIPE;
               end
+              end   // REVIEW_aug2 C-07: closes the cs_bad guard
             end
           end
         end

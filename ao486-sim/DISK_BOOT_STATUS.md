@@ -10949,3 +10949,49 @@ exercised.
 
 REVIEW_aug2 running total: C-01, C-02, C-03(consumer half), C-04, C-05 (all rows),
 C-06, H-07 fixed. 10/10 gates green throughout.
+
+
+## UPDATE 360 — REVIEW_aug2 C-07 (partial): 16-bit IRET defects + CS validation on return.
+
+Three of C-07's items are done; the full validate-then-commit restructure is not.
+
+### DONE — two unambiguous 16-bit defects
+
+  * `iret_eip <= {eip[31:16], mem_rdata[15:0]}` PRESERVED the old high EIP. The SDM says
+    a 16-bit-operand IRET loads (popped AND 0000FFFFh), and this core's real-mode IRET
+    and RETF paths already zero-extend. A 16-bit return therefore jumped to a target
+    built half from the frame and half from the interrupted context. Now zero-extended.
+  * `!int_gate_op16 && iret_interpriv` gated the ENTIRE inter-privilege branch off for
+    16-bit, so a valid 16-bit protected-mode outer-level IRET was treated as
+    same-privilege and never popped SP/SS -- it returned to CPL3 on the INNER stack.
+    The V86 gate beside it genuinely does need !int_gate_op16 (EFLAGS.VM lives in the
+    high half a 16-bit pop does not load), but the privilege decision comes from the
+    popped CS RPL, which IS loaded. Now `iret_interpriv` alone.
+
+### DONE — S_INT_CS_RET validates the returned-to CS
+
+It installed selector/base/limit/attr and CPL BLINDLY. A frame carrying a null selector,
+a non-code descriptor, a not-present one, or one whose DPL did not match the return
+privilege was accepted -- so IRET could install an arbitrary descriptor and take CPL from
+its RPL. Now checked BEFORE any commit:
+    null selector        -> #GP(0)
+    P=0                  -> #NP(sel)
+    not a code segment   -> #GP(sel)
+    RPL < CPL            -> #GP(sel)   (IRET may not RAISE privilege)
+    non-conforming       -> DPL == RPL
+    conforming           -> DPL <= RPL
+
+pcpl/pfcpl3 exercise legitimate inter-privilege IRET and still pass, so the checks do not
+reject valid frames. verify-all 10/10.
+
+### NOT DONE — the property C-07 is actually about
+
+EIP/EFLAGS and the outer ESP are still committed BEFORE CS/SS are validated
+(core_iret.svh same-priv path, and the inter-priv beat-4 / gpr writeback). A fault after
+those commits is not restartable. That needs the whole frame and both descriptors staged
+and validated, then committed in one architectural step -- the same validate-then-commit
+shape the review asks for, and it is item 4 in its fix order. S_IRET_SS likewise still
+installs its descriptor without writable-data/present/RPL/DPL checks.
+
+REVIEW_aug2 running total: C-01, C-02, C-03(consumer half), C-04, C-05 (all rows), C-06,
+C-07 (partial), H-07. 10/10 gates green throughout.
