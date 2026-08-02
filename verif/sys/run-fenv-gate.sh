@@ -195,6 +195,29 @@ else
   echo "  PASS stack UNDERFLOW sets IE+SF with C1=0"
 fi
 
+# REVIEW1_Aug2 H-12 (remainder): a pending UNMASKED x87 exception must be delivered as
+# #MF (vector 16) before the next waiting FP instruction. FSW.ES was derived but never
+# consumed, so an unmasked exception was raised and then ignored forever.
+#
+# Unlike the stack faults above, the ORACLE IMPLEMENTS THIS -- QEMU emits
+# gen_helper_fwait at translate.c:5538 (FWAIT) and :4608 (FNOP) -- so this one is graded
+# DIFFERENTIALLY. The harness QEMU prints M1=0001, and so must Ventium.
+#
+# M1 counts handler entries. It must be exactly 1, which checks both directions at once:
+#   0  -> ES was set but never consumed (the finding)
+#   2+ -> the handler's FNCLEX did not clear ES, so the second FWAIT faulted again;
+#         that would be an unrecoverable loop in real software.
+M1=$(printf '%s' "$OUT" | grep -oE "M1=[0-9a-f]+" | head -1 | cut -d= -f2)
+echo "  pending unmasked exception -> #MF deliveries: ${M1:-<none>} (want 0001)"
+if [ "$M1" != "0001" ]; then
+  [ "$M1" = "0000" ] && echo "  FAIL FWAIT did not trap on a pending unmasked exception — ES is still inert"
+  [ "$M1" != "0000" ] && [ -n "${M1:-}" ] && echo "  FAIL #MF fired $M1 times; the handler's FNCLEX must clear ES (want 1)"
+  [ -z "${M1:-}" ] && echo "  FAIL no M1= line in the output"
+  fenv_fail=1
+else
+  echo "  PASS #MF delivered once on FWAIT, and FNCLEX cleared it (matches QEMU)"
+fi
+
 if [ "$fenv_fail" = 0 ]; then
   echo "FENV-GATE-OK"
   exit 0

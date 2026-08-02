@@ -1,7 +1,7 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**29 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
-and reverted with its measurement, 4 open.**
+**30 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
+and reverted with its measurement, 3 open.**
 `make verify-all` = 11/11 gates. `make l1` = 14 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
@@ -36,7 +36,7 @@ Commits `a5bab55` … HEAD on `ao486-mister-sim`.
 | **C-04** | implicit descriptor/TSS refs used CPL3 paging class | **86** reclassified per pv86 run |
 | **C-09** | task switch unpaged, unvalidated, incrementally committed | all four parts; ptask/ptaskcpl/ptaskv86 EQUIVALENT |
 | **C-10** (part) | the core never *requested* a locked transaction | `bp_req_lock` driven; AXI side deliberately not |
-| **H-12** (part) | FSW.ES was never derived, so the B mirror was inert | `SW=8081` vs `0001` reverted |
+| **H-12** | FSW.ES was never derived, and once derived was never CONSUMED | `SW=8081` vs `0001`; `#MF` `M1=0001` matches QEMU |
 
 ### M-08 deserves separate attention
 
@@ -144,11 +144,6 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
   `VEN_L1_HONOR_CD` read path, the no-L2 config's cache map / coherent DMA / SMRAM
   isolation, and the ao486 L2 invalidation skid. Several reference modules that are not
   in this checkout.
-- **the rest of H-12** — the UNMASKED stack-fault route. H-11's masked half landed
-  (below); with CW.IM clear the SDM requires suppressing the operation and raising
-  `#MF`, which needs the FWAIT/`#MF` delivery machinery. Currently an unmasked stack
-  fault sets IE/SF and, through the ES derivation that landed earlier, ES and B — so
-  software polling FSW sees it — but it does not trap.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
 
@@ -275,6 +270,37 @@ identical situation with segment limits:
 I judged that trading a working 98-program differential for a feature correct code never
 exercises (0 firings across 68 system images) was the wrong trade — but that is a
 judgement call, and it is recorded here as one rather than as "H-11 closed."
+
+---
+
+## 4d. H-12's remainder — the oracle decided the design
+
+FSW.ES was derived by H-12's first half and then **consumed by nothing**: an unmasked
+exception was raised and ignored forever. A pending one must be delivered as #MF
+(vector 16) before the next WAITING FP instruction, with CR0.NE selecting the route
+(NE=1 internal #MF; NE=0 the external FERR#/IGNNE# path this core does not model, so
+NE=0 behaviour is unchanged).
+
+The real question was WHERE to check, and I let the oracle answer it rather than
+guessing. Real hardware checks on every waiting FP instruction. QEMU does not — it emits
+`gen_helper_fwait` at exactly two sites, `translate.c:5538` (FWAIT) and `:4608` (FNOP,
+commented "FreeBSD FPU probe"), and nowhere else. So:
+
+- **FWAIT + FNOP**: unconditional. Matches the oracle, differential-safe, and it is the
+  path real software uses to synchronise.
+- **every other waiting op**: behind `VEN_X87_MF_STRICT` (elaborates and runs clean).
+- **the no-wait forms** (`FNINIT`/`FNCLEX`/`FNSTSW`/`FNSTCW`/`FNSTENV`/`FNSAVE`): never
+  checked, in EITHER mode. This is the detail that decides whether the feature is usable
+  at all — they are precisely what a handler uses to read and clear the status word, so
+  trapping them would make an unmasked exception permanently unrecoverable.
+
+Unlike the stack faults, QEMU implements this one, so the witness is graded
+DIFFERENTIALLY: both print `M1=0001`.
+
+`M1` counts handler entries and must be exactly 1, which tests both directions from a
+single number: **0** = ES set but never consumed (the finding); **2+** = the handler's
+FNCLEX did not clear ES, so the second FWAIT faulted again — an unrecoverable loop in
+real software. Reversion gives 0.
 
 ---
 

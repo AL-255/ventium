@@ -63,6 +63,10 @@ module decode_stages
     // REVIEW1_Aug2 C-10: expose the LOCK prefix so the core can request a locked
     // bus transaction. pfx_lock was consumed only by the #UD/errata checks.
     output logic        d_lock,
+    // REVIEW1_Aug2 H-12: FWAIT (9B) retires as a NOP, so like INVD/WBINVD above it
+    // leaves no predicate for the pending-#MF check to hook onto. Flagged explicitly
+    // rather than widening d_is_nop, which 0x90 also sets.
+    output logic        d_is_fwait,
     output logic        d_int80,
     output logic        d_unknown,
     output logic        d_int,
@@ -246,7 +250,7 @@ module decode_stages
     d_rel=32'd0; d_alu_op=ALU_ADD; d_writes_reg=1'b0; d_writes_flags=1'b0;
     d_mem_read=1'b0; d_mem_write=1'b0; d_mem_dst=1'b0; d_dst_reg=3'd0; d_src_reg=3'd0;
     d_imm=32'd0; d_use_imm=1'b0; d_is_push=1'b0; d_is_pop=1'b0; d_is_lea=1'b0;
-    d_is_mov=1'b0; d_is_nop=1'b0; d_ea=32'd0; d_w=3'd4; d_dst_high8=1'b0; d_src_high8=1'b0;
+    d_is_mov=1'b0; d_is_nop=1'b0; d_is_fwait=1'b0; d_ea=32'd0; d_w=3'd4; d_dst_high8=1'b0; d_src_high8=1'b0;
     d_kind=K_ALU; d_shrot=3'd0; d_shift_cl=1'b0; d_shift_one=1'b0; d_shift_imm=5'd0;
     d_shrd=1'b0; d_md=3'd0; d_imul_3op=1'b0; d_imul_imm=32'd0; d_ext_signed=1'b0;
     d_ext_srcw=3'd1; d_cc=4'd0; d_bit_imm=1'b0; d_bit_op=3'd4; d_conv_cdq=1'b0;
@@ -1052,7 +1056,10 @@ module decode_stages
         // exception masks at their (default) masked state — as glibc/musl libm
         // (floor/ceil via FSTCW) and Quake leave them — there is nothing to
         // service, so it retires as a 1-byte NOP. (Was undecoded -> S_HALT hang.)
-        8'h9B: begin d_is_nop=1'b1; d_len=pfx_len+4'd1; end
+        // REVIEW1_Aug2 H-12: it still RETIRES as a nop -- the wait itself is
+        // architecturally invisible when nothing is pending -- but it now carries a
+        // predicate so core_fetch_decode can raise a pending unmasked #MF on it.
+        8'h9B: begin d_is_nop=1'b1; d_is_fwait=1'b1; d_len=pfx_len+4'd1; end
         8'h9C: begin d_kind=K_STKMISC; d_sm=SM_PUSHF; d_mem_write=1'b1; d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'h9D: begin d_kind=K_STKMISC; d_sm=SM_POPF;  d_mem_read=1'b1;  d_w=eff_opsize?3'd2:3'd4; d_len=pfx_len+4'd1; end
         8'h9E: begin d_kind=K_STKMISC; d_sm=SM_SAHF; d_len=pfx_len+4'd1; end

@@ -1591,6 +1591,18 @@ module core
   logic        d_is_lea;
   logic        d_is_mov;
   logic        d_is_nop;
+  logic        d_is_fwait;   // REVIEW1_Aug2 H-12
+  // REVIEW1_Aug2 H-12: the "no-wait" x87 forms -- the N in FNINIT/FNCLEX/FNSTSW/
+  // FNSTCW/FNSTENV/FNSAVE. These do NOT check for a pending unmasked exception,
+  // because they are exactly the instructions software uses to READ the status and
+  // CLEAR it. Trapping them would make an unmasked exception unrecoverable: the
+  // handler could not read FSW to find out what happened, nor FNCLEX it away.
+  // (FLDCW / FLDENV / FRSTOR have no N and DO wait.)
+  logic        fx_nowait;
+  assign fx_nowait = (d_fxop == FX_FNINIT)   || (d_fxop == FX_FNCLEX)
+                  || (d_fxop == FX_FNSTSW_M) || (d_fxop == FX_FNSTSW_AX)
+                  || (d_fxop == FX_FNSTCW)   || (d_fxop == FX_FNSTENV)
+                  || (d_fxop == FX_FNSAVE);
   logic [31:0] d_ea;
   logic [2:0]  d_w;
   logic        d_dst_high8;
@@ -1793,6 +1805,7 @@ module core
     .d_is_lea      (d_is_lea),
     .d_is_mov      (d_is_mov),
     .d_is_nop      (d_is_nop),
+    .d_is_fwait    (d_is_fwait),
     .d_ea          (d_ea),
     .d_w           (d_w),
     .d_dst_high8   (d_dst_high8),

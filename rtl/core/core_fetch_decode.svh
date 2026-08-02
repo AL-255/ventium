@@ -521,6 +521,34 @@
           else if (d_is_x87 && (creg0[2] || creg0[3])) begin
             start_fault(8'd7, 1'b0, 32'd0, eip);
           end
+          // REVIEW1_Aug2 H-12 (remainder): a PENDING UNMASKED x87 exception must be
+          // delivered as #MF (vector 16) BEFORE the next waiting FP instruction runs.
+          // FSW.ES is now derived (H-12's first half) but nothing ever consumed it, so
+          // an unmasked exception was raised and then silently ignored forever.
+          //
+          // CR0.NE (bit 5) selects the delivery route: NE=1 is the internal #MF, NE=0
+          // is the external FERR#/IGNNE# PC-AT path (DOS IRQ13), which this core does
+          // not model -- so with NE=0 the behaviour is unchanged, as before.
+          //
+          // WHERE the check goes is the whole design question. Real hardware checks it
+          // on EVERY waiting FP instruction. The oracle does NOT: QEMU emits
+          // gen_helper_fwait at exactly two sites -- translate.c:5538 (FWAIT, 9B) and
+          // :4608 (FNOP, D9 D0, commented "FreeBSD FPU probe") -- and nowhere else. So
+          // those two are checked unconditionally (matching the oracle, differential-
+          // safe), and the architecturally-complete "every waiting op" form sits behind
+          // VEN_X87_MF_STRICT. Both routes are gated; see run-fenv-gate.sh.
+          //
+          // The no-wait forms (the N in FNINIT/FNCLEX/FNSTSW/FNSTCW/FNSTENV/FNSAVE) are
+          // NEVER checked, in either mode. They are the instructions software uses to
+          // READ and CLEAR the status word; trapping them would make an unmasked
+          // exception permanently unrecoverable.
+          else if ((d_is_fwait || (d_is_x87 && d_fxop == FX_FNOP)
+`ifdef VEN_X87_MF_STRICT
+                    || (d_is_x87 && !fx_nowait)
+`endif
+                   ) && fstat[7] && creg0[5]) begin
+            start_fault(8'd16, 1'b0, 32'd0, eip);   // #MF takes no error code
+          end
           else if (d_is_x87) begin
             // M11b: env/state ops own a dedicated wide-beat sequencer.
             if (d_fxop==FX_FNSTENV || d_fxop==FX_FNSAVE)  begin f_seq_step<=5'd0; state<=S_FENV_ST; end

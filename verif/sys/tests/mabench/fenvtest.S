@@ -288,6 +288,55 @@ _start16:
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
 
+    /* ==== REVIEW1_Aug2 H-12 (remainder): pending unmasked exception -> #MF ======
+     * FSW.ES was DERIVED but never CONSUMED: an unmasked exception was raised and then
+     * ignored forever. A pending one must be delivered as #MF (vector 16) before the
+     * next WAITING FP instruction. CR0.NE selects the route -- NE=1 internal #MF, NE=0
+     * the external FERR#/IGNNE# path this core does not model.
+     *
+     * Unlike the stack faults above, the oracle DOES implement this one (QEMU emits
+     * gen_helper_fwait for FWAIT and FNOP), so M1 is graded differentially.
+     *
+     *   M1 = the #MF handler's counter. Must be 1: raised once, and the handler's
+     *        FNCLEX must clear ES so the following FWAIT does NOT fault again.
+     */
+    /* A tiny #MF handler assembled at 0x0500 by hand -- writing it at runtime avoids
+     * the R_386_16 truncation that stops this image using code labels as data. */
+    xorw    %ax, %ax
+    movw    %ax, %es
+    movb    $0xDB, %es:0x0500       /* fnclex  (DB E2) -- clears IE/SF/ES/B          */
+    movb    $0xE2, %es:0x0501
+    movb    $0xFF, %es:0x0502       /* incw [0x0760]  (FF 06 60 07)                  */
+    movb    $0x06, %es:0x0503
+    movb    $0x60, %es:0x0504
+    movb    $0x07, %es:0x0505
+    movb    $0xCF, %es:0x0506       /* iret                                          */
+    movw    $0x0500, %es:0x0040     /* IVT[16] offset  */
+    movw    $0x0000, %es:0x0042     /* IVT[16] segment */
+    movw    $0, 0x0760              /* the counter */
+
+    movl    %cr0, %eax              /* CR0.NE (bit 5) = 1: deliver #MF internally */
+    orl     $0x20, %eax
+    movl    %eax, %cr0
+
+    fninit
+    movw    $0x0340, 0x0600         /* PC=11 RC=00 bit6, ALL MASKS CLEAR */
+    fldcw   0x0600
+    fldz
+    fldz
+    fdivp   %st, %st(1)             /* 0.0/0.0 -> IE, and IM is clear -> ES set */
+    fwait                           /* THE CHECK: must trap #MF here */
+    fwait                           /* and NOT again -- the handler FNCLEXed it */
+
+    movw    $0x03F8,%dx
+    movb    $'M',%al; outb %al,%dx
+    movb    $'1',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0760, %ax
+    call    puthexw
+    movw    $0x03F8,%dx
+    movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
+
     /* clean exit via isa-debug-exit (status = (0x42<<1)|1 = 133) */
     movb $0x42,%al; movw $0xF4,%dx; outb %al,%dx
 9:  hlt; jmp 9b
