@@ -169,6 +169,36 @@ module ven_l1d #(
   assign hit_n     = hit_n0 || hit_n1;
   assign hit_way_n = hit_n1;
   assign xline     = (c_addr[4:0] > 5'd28);    // 4-byte access spills into the next line
+  // ---- REVIEW1_Aug2 H-07: a non-cacheable READ must not be served from the array ---
+  // NOT FIXED. The analysis below is correct and the fix attempt is recorded because it
+  // failed in an instructive way.
+  // Under VEN_L1_HONOR_CD the bypass-read FSM is disabled (it deadlocks in the
+  // full-core+bridge context -- a measured claim recorded at the L1_IDLE arm), and the
+  // comment there argues the allocating path is "correct (returns the fresh line)".
+  // That is true of a read MISS and false of a read HIT: rd_hit is computed from the
+  // array regardless of `cacheable`, so a still-resident line served CACHED data after
+  // CD was set -- stale pre-CD RAM, and for a cache-mapped MMIO region a suppressed
+  // read side effect. That is the half of H-07 that is a correctness bug rather than a
+  // performance one.
+  //
+  // Suppressing the HIT sends the access down the ordinary allocating fill, which
+  // fetches the line from memory and therefore returns FRESH data. It does not fix the
+  // allocation itself -- MMIO read side effects are still duplicated by the burst, and
+  // that needs the bypass FSM the review asks for -- but it removes the stale-data
+  // path without touching the FSM that is documented to hang.
+  //
+  // Only under VEN_L1_HONOR_CD: with the bypass enabled (the default build) a
+  // non-cacheable read already takes L1_BYP and never consults rd_hit for service.
+  // MEASURED, not reasoned: gating this on `cacheable` under VEN_L1_HONOR_CD -- the
+  // obvious fix, and the one that removes the stale-data path -- DEADLOCKS. The access
+  // is routed to the fill, but the post-fill serve consults rd_hit too, and rd_hit is
+  // still suppressed because `cacheable` is still 0, so the read never acks:
+  //     [9c] ... FAIL nc read of resident line is FRESH: got 00000000 exp deadbeef
+  //          FAIL read 0000509c: no ack
+  // That is the same shape the L1_IDLE comment records for the bypass FSM, and it is
+  // why H-07 needs an actual SERVE path that does not depend on a cacheable hit --
+  // exactly the "non-deadlocking read bypass" the review asks for. Left as the plain
+  // array hit; the [9c] case below documents the property a correct fix must satisfy.
   assign rd_hit    = hit && (!xline || hit_n); // a READ hits iff both needed lines resident
 
   // addressed line read (the hit way) + the BYTE offset within it. The core's mem

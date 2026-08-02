@@ -178,6 +178,26 @@ module tb_l1d;
     // the non-cacheable accesses must NOT have polluted/evicted resident lines:
     do_read(32'h0000_1004, d); chk("resident line intact", d, 32'h1004 ^ 32'hA5A5_0000);
 
+    // ----- REVIEW1_Aug2 H-07: a non-cacheable read of a RESIDENT line -------------
+    // Group [9] above reads addresses that were never cached, so it cannot see this:
+    // rd_hit is computed from the array regardless of `cacheable`, so a line that is
+    // STILL RESIDENT when CD is set served CACHED data -- stale pre-CD RAM, and a
+    // suppressed read side effect for a cache-mapped MMIO region. Under
+    // VEN_L1_HONOR_CD the bypass-read FSM is disabled, so nothing else caught it.
+    //
+    // Make a line resident, change the backing underneath, then read it with
+    // cacheable=0. It must return the NEW value. The default build reaches that via
+    // the bypass path and the HONOR_CD build via a forced miss + allocating fill, so
+    // this check is valid for BOTH configurations.
+    $display("[9c] NON-CACHEABLE read of a RESIDENT line must not serve stale data");
+    cacheable = 1'b1;
+    do_read(32'h0000_4200, d); chk("prime resident", d, 32'h4200 ^ 32'hA5A5_0000);
+    dma_poke(32'h0000_4200, 32'hDEAD_BEEF);   // backing changes, no snoop issued
+    cacheable = 1'b0;                          // CD asserted with the line still resident
+    do_read(32'h0000_4200, d);
+    chk("nc read of resident line is FRESH", d, 32'hDEAD_BEEF);
+    cacheable = 1'b1;
+
     $display("[10] SNOOP invalidate: DMA write + snoop -> next read refills new data");
     do_read(32'h0000_4000, d); chk("cache line@4000", d, 32'h4000 ^ 32'hA5A5_0000); // now resident
     dma_poke(32'h0000_4000, 32'h0BAD_C0DE);             // DMA overwrites it in DRAM
