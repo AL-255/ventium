@@ -162,15 +162,17 @@
                              || (seg_is_code(sattr) && !sattr[1]);  // execute-only code
               end
               if (tsw_eflags[17]) begin
-                seg_base [sidx] <= {12'd0, tsw_sel[sidx], 4'd0};   // base = sel<<4
-                seg_limit[sidx] <= 32'h0000_FFFF;
-                seg_attr [sidx] <= (sidx == 3'(SG_CS)) ? 8'h9B : 8'h93;
+                // REVIEW1_Aug2 C-09: STAGED, not installed (see the commit in
+                // S_TSW_BUSY). V86 selectors are paragraphs, so base = sel<<4.
+                tsw_st_base [sidx] <= {12'd0, tsw_sel[sidx], 4'd0};
+                tsw_st_limit[sidx] <= 32'h0000_FFFF;
+                tsw_st_attr [sidx] <= (sidx == 3'(SG_CS)) ? 8'h9B : 8'h93;
                 if (sidx == 3'(SG_CS)) begin
-                  cpl_r <= 2'd3;                 // V86 runs at CPL3
-                  cs_d  <= 1'b0;                 // V86 is 16-bit default
-                  // REVIEW1_Aug2 M-02: and so is its stack.
-                  if (sidx == 3'(SG_SS)) ss_b <= 1'b0;
+                  tsw_st_cpl <= 2'd3;            // V86 runs at CPL3
+                  tsw_st_cs_d<= 1'b0;            // V86 is 16-bit default
                 end
+                // REVIEW1_Aug2 M-02: a V86 stack is 16-bit.
+                if (sidx == 3'(SG_SS)) tsw_st_ss_b <= 1'b0;
               end else if (tsw_seg_bad) begin
                 // ---- REVIEW1_Aug2 C-09: VALIDATE each incoming segment descriptor ----
                 // All six were installed with no selector, type, privilege or Present
@@ -181,17 +183,17 @@
                 start_fault(8'd10, 1'b1,
                             {16'd0, tsw_sel[sidx]} & 32'h0000_FFFC, int_src_pc);
               end else begin
-                seg_base [sidx] <= desc_base(desc);
-                seg_limit[sidx] <= desc_limit(desc);
-                seg_attr [sidx] <= sattr;
+                // REVIEW1_Aug2 C-09: STAGED. Nothing architectural moves until every
+                // descriptor has been read and validated.
+                tsw_st_base [sidx] <= desc_base(desc);
+                tsw_st_limit[sidx] <= desc_limit(desc);
+                tsw_st_attr [sidx] <= sattr;
                 if (sidx == 3'(SG_CS)) begin
-                  cpl_r <= tsw_sel[SG_CS][1:0];  // CPL = new CS.RPL
-                  cs_d  <= desc[54];              // D/B: 32-bit default op/addr size
+                  tsw_st_cpl  <= tsw_sel[SG_CS][1:0];  // CPL = new CS.RPL
+                  tsw_st_cs_d <= desc[54];             // D/B: 32-bit default op/addr
                 end
-                // REVIEW_aug2 H-01: the incoming task's SS width. Exactly the cs_d
-                // capture above, for the stack -- it was simply missing, so a task
-                // switch into a 16-bit-stack task inherited the outgoing task's width.
-                if (sidx == 3'(SG_SS)) ss_b <= desc[54];
+                // REVIEW_aug2 H-01: the incoming task's SS width.
+                if (sidx == 3'(SG_SS)) tsw_st_ss_b <= desc[54];
               end
               if (tsw_step == 5'd11) begin tsw_step <= 5'd0; state <= S_TSW_BUSY; end
               else tsw_step <= tsw_step + 5'd1;
@@ -213,6 +215,19 @@
               tsw_step <= 5'd1;
             end else begin
               // ---- COMMIT the incoming task ----
+              // REVIEW1_Aug2 C-09: the SIX SEGMENTS land here too, from the staging
+              // written during S_TSW_SEG. Before this they were installed one at a
+              // time as each descriptor was read, so a rejected descriptor -- or a
+              // page fault on its read -- left the task half switched. Now the whole
+              // context moves on one clock.
+              for (int t = 0; t < NUM_SEG; t++) begin
+                seg_base [t] <= tsw_st_base [t];
+                seg_limit[t] <= tsw_st_limit[t];
+                seg_attr [t] <= tsw_st_attr [t];
+              end
+              cpl_r   <= tsw_st_cpl;
+              cs_d    <= tsw_st_cs_d;
+              ss_b    <= tsw_st_ss_b;
               eip     <= tsw_eip;
               eflags  <= tsw_eflags;
               // R3: the incoming-task GPR-file load moved to the gpr writeback driver

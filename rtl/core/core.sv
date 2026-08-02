@@ -4784,6 +4784,18 @@ module core
   //     limits are not checked at all.
   // Both need the access to carry its segment INDEX, not just a base -- see #65.
   logic        tsw_seg_bad;              // C-09: this task-switch segment is invalid
+  // ---- REVIEW1_Aug2 C-09 (atomicity): stage the incoming segment state -----------
+  // S_TSW_SEG wrote seg_base/seg_limit/seg_attr, cpl_r and ss_b one descriptor at a
+  // time, before the EIP/EFLAGS/GPR/CR3/TR commit in S_TSW_BUSY. A descriptor rejected
+  // at beat 9 -- or a page fault on its read -- therefore left beats 0..8 already
+  // INSTALLED and the task half switched: segments from the new task, everything else
+  // from the old one. Same failure C-06/C-07 removed from the IRET paths, over a
+  // larger state set. The six descriptors now land here and commit together.
+  logic [31:0] tsw_st_base  [NUM_SEG];
+  logic [31:0] tsw_st_limit [NUM_SEG];
+  logic [7:0]  tsw_st_attr  [NUM_SEG];
+  logic        tsw_st_cs_d, tsw_st_ss_b;
+  logic [1:0]  tsw_st_cpl;
   logic        walk_usr_lat;             // C-04: the class of the access that missed
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        xs_probing;               // C-02: the crossing-store probe phase
