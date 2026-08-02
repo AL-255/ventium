@@ -659,7 +659,25 @@
                 // LTR — read the GDT TSS descriptor (S_LTR fetches it, loads the
                 // TR hidden base/limit + sets the descriptor busy bit). LLDT reuses
                 // the same read FSM but loads ldt_base/ldt_limit (branched in S_LTR).
-                seg_step<=1'b0; state<=S_LTR;
+                //
+                // REVIEW2_aug2 H-01 (one of four paths): the selector was validated only
+                // AFTER both descriptor words had been READ. An out-of-table selector
+                // therefore issued an arbitrary GDT-relative read first, which under
+                // paging can take a #PF -- delivering the WRONG exception, ahead of the
+                // architecturally prior #GP. The table-limit and TI checks depend on
+                // nothing the read returns, so they belong here, before mem_req.
+                //
+                // A null selector is NOT rejected here: it is legal for LLDT (H-10) and
+                // illegal for LTR, and the illegal case is caught by the type check in
+                // S_LTR, which does need the descriptor.
+                if (gpr_o[d_src_reg][2]                                   // TI=1: not GDT
+                    || ({16'd0, gpr_o[d_src_reg][15:3], 3'd0} + 32'd7
+                        > {16'd0, gdt_limit}))                            // past the GDT
+                  start_fault(8'd13, 1'b1,
+                              {16'd0, gpr_o[d_src_reg][15:0]} & 32'h0000_FFFC, eip);
+                else begin
+                  seg_step<=1'b0; state<=S_LTR;
+                end
               end
               // M9.5 — real-mode far CALL / RETF. The S_LCALL/S_RETF micro-sequences
               // push/pop CS:IP on SS:SP and do the real-mode CS load (base=sel<<4).
