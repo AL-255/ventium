@@ -178,11 +178,26 @@ module ven_axi_master #(
   // scribbled on low memory. The H-07 work proved rejection for a bad STARTING address
   // only, which is exactly the hole.
   //
-  // The highest byte a request can touch is the top of the second aligned dword, i.e.
-  // {m_addr[31:2],2'b00} + 7. Testing that covers every beat the datapath can generate,
-  // aligned or not, because the two beats are the only ones there are.
+  // REVIEW2_aug2 H-15: "+7 always" was WRONG in the safe direction-turned-unsafe. The
+  // second beat EXISTS only when the request actually spills past lane 3; assuming it
+  // unconditionally rejected legal accesses at the top of the window -- a 4-byte access
+  // at 0x0FFF_FFFC under the deployed 0x0FFF_FFFF mask is entirely inside it, but the
+  // hypothetical second word is not. Worse, ven_l1d walks m_addr through a 32-byte line
+  // fill word by word, so the FINAL word of a fill that began fully inside the window
+  // tripped the sticky alias_err.
+  //
+  // Mirror the datapath's OWN second-beat condition (the W_IDLE arm below): the extra
+  // beat is issued iff the strobe, shifted by the byte offset, spills past lane 3. For
+  // a read the master fetches 4 bytes at the byte address, so it needs the second word
+  // iff the address is unaligned. Deriving the check from the same expression that
+  // generates the beat is the point -- an independently-written bound is what produced
+  // this bug.
+  logic [7:0]  alias_ssh;
+  logic        alias_two;
   logic [31:0] alias_last;
-  assign alias_last = {m_addr[31:2], 2'b00} + 32'd7;
+  assign alias_ssh  = {4'd0, m_wstrb} << m_addr[1:0];
+  assign alias_two  = m_we ? (alias_ssh[7:4] != 4'd0) : (m_addr[1:0] != 2'b00);
+  assign alias_last = {m_addr[31:2], 2'b00} + (alias_two ? 32'd7 : 32'd3);
   assign alias_bad = m_req && !(m_addr >= 32'hFFFE_0000)
                            && ( ((m_addr     & ~ADDR_MASK) != 32'd0)
                              || ((alias_last & ~ADDR_MASK) != 32'd0) );

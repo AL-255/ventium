@@ -118,6 +118,30 @@ module tb_l1axi_alias;
     // remap({addr[31:2],2'b00} + 4) = remap(0x10000000) -> wraps to the carveout base.
     try_write(32'h0FFF_FFFE, 4'b1111, "C extent crosses out (H-04)", 1'b1);
 
+    // ---- REVIEW2_aug2 H-15: the LEGAL boundary cases ----------------------------
+    // The extent was hard-coded to "+7 always", i.e. it assumed the second aligned beat
+    // ALWAYS exists. It does not: the master issues it only when the strobe, shifted by
+    // the byte offset, spills past lane 3. Assuming it rejected accesses that are
+    // entirely inside the window -- the exact opposite failure from case C, and one the
+    // deployed 0x0FFFFFFF mask hits at the top of DRAM.
+    // These are driven so the DETECTOR sees them; the pass/fail assertion is on the
+    // alias-rejected ADDRESS SET in run-l1axi-alias-gate.sh, NOT on bus_err. Measured
+    // reason (the same one recorded for case C last round): bus_err is raised by more
+    // than one mechanism -- these addresses lie past the BFM's backing memory, so the
+    // request never acks and the WATCHDOG raises bus_err regardless of the alias check.
+    // Asserting want_err=0 here would fail for a reason unrelated to the finding.
+    try_write(32'h0FFF_FFFC, 4'b1111, "D aligned dword at window end", 1'b1);
+    // NOT 0x0FFFFFFE: case C already drives that address (with a full strobe, where it
+    // genuinely crosses), and the gate's check greps the rejected set BY ADDRESS, so the
+    // two would be indistinguishable. 0x0FFFFFF9+strb0011 spans bytes 1-2 of the word at
+    // ...F8 -- no second beat, entirely inside the window.
+    try_write(32'h0FFF_FFF9, 4'b0011, "E halfword inside a word, near end", 1'b1);
+    try_write(32'h0FFF_FFFF, 4'b0001, "F final byte of the window", 1'b1);
+    // The final word of a 32-byte line fill: ven_l1d walks m_addr word by word, so this
+    // address is reached by a fill that began fully inside the window. It must not trip
+    // the sticky alias_err.
+    try_write(32'h0FFF_FFE0, 4'b1111, "G final line base", 1'b1);
+
     if (fails == 0) $display("L1AXIALIAS-GATE-OK (extent-aware alias rejection; control accepted)");
     else            $display("L1AXIALIAS-GATE-FAIL (%0d)", fails);
     $finish;

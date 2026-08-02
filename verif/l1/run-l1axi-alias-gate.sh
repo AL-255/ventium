@@ -28,6 +28,24 @@ echo "$OUT" | grep -vE "^- |Verilator:" | grep -v "M-07 ALIAS"
 #     with it                  : {0ffffffe, 10000000}
 ADDRS="$(sed -n 's/.*ALIAS: addr=\([0-9a-f]*\).*/\1/p' <<<"$OUT" | sort -u | tr '\n' ' ')"
 echo "  alias-rejected addresses: ${ADDRS:-<none>}"
+
+# REVIEW2_aug2 H-15: the LEGAL end-of-window accesses must NOT appear in that set. The
+# extent was hard-coded "+7 always", assuming the second aligned beat always exists --
+# it exists only when the shifted strobe spills past lane 3. So a 4-byte access at
+# 0x0FFFFFFC, entirely inside the deployed 0x0FFFFFFF window, was rejected; and the
+# FINAL word of a 32-byte line fill that began inside the window tripped sticky
+# alias_err as ven_l1d walked m_addr.
+#
+# Asserted on the rejected SET, not bus_err: these addresses are past the BFM's backing
+# memory, so the watchdog raises bus_err for an unrelated reason.
+for legal in 0ffffffc 0ffffff9 0fffffff 0fffffe0; do
+  if grep -qi "ALIAS: addr=$legal" <<<"$OUT"; then
+    echo "  FAIL $legal is INSIDE the window but was alias-rejected"
+    echo "       (extent assumed a second beat the datapath would not issue)"
+    exit 1
+  fi
+done
+echo "  legal end-of-window accesses (0ffffffc, 0ffffff9, 0fffffff, 0fffffe0): none rejected"
 fail=0
 grep -q "10000000" <<<"$ADDRS" || { echo "  FAIL: first-byte-outside case was NOT rejected"; fail=1; }
 grep -q "0ffffffe" <<<"$ADDRS" || { echo "  FAIL: REVIEW1_Aug2 H-04 -- an access whose EXTENT crosses out of"; \
