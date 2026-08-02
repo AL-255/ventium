@@ -421,6 +421,9 @@ module core
     // this core's SMBASE is 0x30000 -- so it protected a range this core does not use
     // and left the real handler and save map unprotected.
     output logic [31:0] smbase_o,
+    // REVIEW2_aug2 H-18: INVD/WBINVD must reach the D-side/L2 too; flush_all is a
+    // top-level input, so the core exports the request instead of driving it.
+    output logic        cache_inv_req,
     output logic        mem_req,
     output logic        mem_we,
     // ---- REVIEW1_Aug2 C-10: the core now REQUESTS a locked transaction ------------
@@ -661,6 +664,7 @@ module core
   // up at entry.)
   logic [31:0] smbase;            // SMRAM base (default 0x30000)
   assign smbase_o = smbase;       // C-08: exported so the L1/AXI guard tracks it
+  assign cache_inv_req = cache_inv_go;   // H-18: INVD/WBINVD -> invalidate the hierarchy
   logic        smm_active;        // in SMM (1 = HF_SMM)
   assign smm_active_o = smm_active;   // REVIEW2 H-24: export to the memory hierarchy
   logic        smi_pending;       // a recognised SMI# is waiting for an insn boundary
@@ -702,6 +706,28 @@ module core
     if (!rst_n) a20_on_q <= 1'b1;        // matches a20_r's reset value (enabled)
     else        a20_on_q <= a20_on;
   assign a20_flush = (a20_on != a20_on_q);
+
+  // REVIEW2_aug2 H-18: INVD/WBINVD retired as privileged NOPs, invalidating nothing.
+  // QEMU's flat cache model is not an oracle for FPGA cache state: firmware and OSes
+  // issue WBINVD across cache/memory-type transitions, and leaving L1I/L1D/L2 contents
+  // resident preserves exactly the stale code/data the instruction exists to discard.
+  //
+  // The I-cache is invalidated here (the core owns it). The D-side/L2 flush is a
+  // top-level input the core cannot drive, so the request is EXPORTED and ventium_top
+  // ORs it into the L1's flush_all -- the same shape M-01 uses for fast_reset_req.
+  //
+  // NOT the full fix the review asks for: it does not SEQUENCE a writeback and retire
+  // only once the hierarchy is quiescent. Ventium's L1D is write-through, so there are
+  // no dirty lines to write back and invalidate-only is the whole of WBINVD's effect
+  // here; a write-back cache would need the sequenced form.
+  logic cache_inv_go;
+  assign cache_inv_go = d_cacheinv && (state == S_DECODE) && !d_unknown;
+`ifndef SYNTHESIS
+  int ven_cinv_n; logic ven_cinvlog_en;
+  initial begin ven_cinvlog_en = $test$plusargs("ven_cinvlog") != 0; ven_cinv_n = 0; end
+  always_ff @(posedge clk) if (rst_n && cache_inv_go) ven_cinv_n <= ven_cinv_n + 1;
+  final if (ven_cinvlog_en) $display("[CACHEINV] INVD/WBINVD invalidations: %0d", ven_cinv_n);
+`endif
 `ifndef SYNTHESIS
   // Reachability probe: a fix that never fires is not a fix. +ven_a20log counts the
   // transitions, so "the a20 gate is green" cannot be mistaken for "this does anything".
@@ -6604,7 +6630,7 @@ module core
     // storing through another): those are CPU stores on ports 1/2, exact in linear
     // space but only for the aliases that share a linear address. That needs physical
     // tags or an alias map -- see task #69.
-    .flush_all       (ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush)
+    .flush_all       (ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush || cache_inv_go)
 `else
     // REVIEW Aug-1 M-06: the non-L1-AXI branch omitted .flush_all entirely, so
     // a PINMISSING warning was raised on the DEFAULT full-core build. The
@@ -6675,7 +6701,7 @@ module core
     // REVIEW2 H-16: flush the predecode array with the I-cache, for the same reason
     // and on the same condition -- otherwise the I-cache refills correct bytes while
     // this keeps serving uops predecoded from the stale ones.
-    .flush_all(ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush),
+    .flush_all(ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush || cache_inv_go),
     .inv_en(ic_fill_done), .inv_set(ic_fill_set), .inv_way(ic_fill_way),
     .pd_busy()
   );

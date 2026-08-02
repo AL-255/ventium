@@ -521,6 +521,7 @@ module ventium_top
       // Phase D.6: northbridge → icache snoop (DMA-loaded code coherence).
       .smm_active_o   (core_smm_active),   // REVIEW2 H-24
       .smbase_o       (core_smbase),       // REVIEW2_aug2 C-08
+      .cache_inv_req  (core_cache_inv),    // REVIEW2_aug2 H-18
       .ic_snoop_valid (ic_snoop_v),
       .ic_snoop_addr  (ic_snoop_a),
       .ic_snoop_valid1(ic_snoop_v1),
@@ -976,6 +977,7 @@ module ventium_top
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
   logic        core_smm_active;                       // REVIEW2 H-24: core SMM state
   logic [31:0] core_smbase;   // REVIEW2_aug2 C-08: the real SMRAM base
+  logic        core_cache_inv; // REVIEW2_aug2 H-18: INVD/WBINVD invalidate request
   logic        ic_snoop_v; logic [31:0] ic_snoop_a;   // Phase D.6: NB → icache snoop
   logic        ic_snoop_v1; logic [31:0] ic_snoop_a1; // H-09: SMC store, first line
   logic        ic_snoop_v2; logic [31:0] ic_snoop_a2; // H-09: SMC store, second line
@@ -988,7 +990,7 @@ module ventium_top
   ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK),
                    .L1_SETS(ventium_pkg::L1D_SETS_DEF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
-      .flush_all (flush_all),
+      .flush_all (flush_all || core_cache_inv),   // REVIEW2_aug2 H-18
       .golden_l1 (golden_l1),
       .shutdown  (shutdown), .m_idle (m_idle),
       .smm_active         (core_smm_active),            // REVIEW2 H-24
