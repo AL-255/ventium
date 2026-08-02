@@ -124,6 +124,8 @@
                 if (sidx == 3'(SG_CS)) begin
                   cpl_r <= 2'd3;                 // V86 runs at CPL3
                   cs_d  <= 1'b0;                 // V86 is 16-bit default
+                  // REVIEW1_Aug2 M-02: and so is its stack.
+                  if (sidx == 3'(SG_SS)) ss_b <= 1'b0;
                 end
               end else begin
                 seg_base [sidx] <= desc_base(desc);

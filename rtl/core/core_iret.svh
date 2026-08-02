@@ -122,6 +122,11 @@
                 seg_base [SG_SS] <= {12'd0, iret_ss, 4'd0};
                 seg_limit[SG_SS] <= 32'h0000_FFFF;
                 seg_attr [SG_SS] <= 8'h93;
+                // REVIEW1_Aug2 M-02: a V86 stack is 16-bit. ss_b was left at whatever
+                // the PREVIOUS (protected) SS descriptor set, so the one signal that
+                // is supposed to mean "this stack's width" was wrong for the whole of
+                // V86 execution -- which is why stk_ptr16 had to exclude V86 by name.
+                ss_b             <= 1'b0;
                 // ES/DS/FS/GS:base = popped sel<<4 (the V86 data segments).
                 seg_sel  [SG_ES] <= iret_v86_es;
                 seg_base [SG_ES] <= {12'd0, iret_v86_es, 4'd0};

@@ -853,12 +853,21 @@ module core
   //     field=esp: expected(A)=0x00087fc8 got(C)=0x00007fc8
   // So the pointer masks on real mode (as before) OR a 16-bit PROTECTED stack, which
   // is exactly the case H-01 identifies, and V86 is left byte-identical.
-  // STILL OPEN, stated rather than hidden: in steady-state V86 the address wraps and
-  // the pointer does not. It is identity in practice (V86 guests keep ESP < 64k) and
-  // closing it means fixing WHEN v86/ss_b update relative to the delivery pushes,
-  // which is a different change from this one.
+  // (REVIEW1_Aug2 M-02 closed the V86 gap this comment used to describe.)
   logic stk_ptr16;
-  assign stk_ptr16 = real_mode || (!seg_real && !ss_b);
+  // REVIEW1_Aug2 M-02: ss_b is now authoritative for EVERY stack -- real mode, V86 and
+  // protected -- because every SS install sets it: the ordinary segment load, the
+  // cross-privilege delivery, the task switch, the outer IRET, and (new here) V86
+  // entry, which leaves it 0 because a V86 stack is 16-bit.
+  //
+  // That removes the reason stk_ptr16 had to exclude V86 by name. The old exclusion
+  // existed because masking on `seg_real` truncated the CPL0 MONITOR's ESP during a
+  // V86 -> monitor delivery, while v86 was still set. The real distinction was never
+  // "are we in V86" but "which stack is this" -- and ss_b answers that directly: it is
+  // 0 for the V86 guest stack and 1 for the 32-bit monitor stack the moment S_INT_SS
+  // loads it. So steady-state V86 now wraps its POINTER as well as its address, which
+  // is the half M-02 says was left open.
+  assign stk_ptr16 = real_mode || !ss_b;
   // ...and it applies only to IMPLICIT stack updates. SS.B governs the STACK
   // POINTER arithmetic of push/pop/call/ret/enter/leave/interrupt; it does not make
   // an explicit write to ESP 16-bit. `MOV ESP, imm32` stores all 32 bits whatever
