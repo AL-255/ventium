@@ -225,7 +225,7 @@ module ven_axi_master #(
   wire rd_hold = (wr_cd != 8'd0) && (m_addr[31:5] == wr_line);
   always_ff @(posedge core_clk) begin
     if (!core_rst_n)                         begin wr_line <= 27'd0; wr_cd <= 8'd0; end
-    else if (m_req && m_we && !shutdown)     begin wr_line <= m_addr[31:5]; wr_cd <= WRBAR; end
+    else if (m_req && m_we && !shutdown && !alias_bad) begin wr_line <= m_addr[31:5]; wr_cd <= WRBAR; end  // C-01/H-07
     else if (wr_cd != 8'd0)                        wr_cd   <= wr_cd - 8'd1;
   end
 
@@ -324,7 +324,14 @@ module ven_axi_master #(
       r_wd <= 16'd0; wd_err_r <= 1'b0; rd_primed <= 1'b0;
     end else begin
       unique case (rst)
-        R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold) begin
+        // REVIEW_aug2 H-07: an ALIASING request must be REJECTED, not merely recorded.
+        // alias_err was sticky and fed bus_err, but neither FSM start tested it -- the
+        // same clock that recorded the error latched the remapped address, so a write
+        // went out through AW/W/B and could corrupt the aliased LOW DDR location before
+        // the delayed bus_err halted the core. That is detection, not rejection.
+        // Gating the start means no AXI transaction is ever launched for an out-of-
+        // window address; bus_err still halts the core, exactly as the #34 watchdog does.
+        R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad) begin
                   // a backing read == a full line fill: latch the 32B-aligned base.
                   araddr_q <= remap({m_addr[31:5], 5'd0});
                   r_beat <= 8'd0; rresp_err <= 1'b0; r_wd <= 16'd0;
@@ -406,7 +413,7 @@ module ven_axi_master #(
       aw_done <= 1'b0; w_done <= 1'b0; bresp_err <= 1'b0; w_wd <= 16'd0; wd_err_w <= 1'b0;
     end else begin
       unique case (wst)
-        W_IDLE: if (m_req && m_we && !shutdown) begin
+        W_IDLE: if (m_req && m_we && !shutdown && !alias_bad) begin  // H-07: reject, do not launch
                   // BYTE-LANE ALIGN (P2 fix): the core's mem port is byte-addressed —
                   // the byte at m_addr sits in LANE 0 of m_wdata/m_wstrb (symmetric with
                   // the read window c_rdata = line[boff*8 +: 32]). A 32-bit AXI write

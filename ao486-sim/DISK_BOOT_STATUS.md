@@ -10921,3 +10921,31 @@ gates actually execute, and most of these are not executed. The durable fix rema
 per-request descriptor (linear/width/write) consumed by the TLB, the permission checker,
 the segment checker, the bus and the split engine -- the review says so and it is the
 same conclusion C-06/#65 reached from the other direction.
+
+
+## UPDATE 359 — REVIEW_aug2 H-07: the alias detector recorded but did not REJECT.
+
+UPDATE 335 claimed M-07 was closed by making the alias a sticky bus_err. The new review
+shows that is still detection, not rejection: neither AXI FSM start condition tested
+alias_bad, so the SAME CLOCK that recorded the error latched the remapped address. A
+write then proceeded through AW/W/B and could corrupt the aliased LOW DDR location before
+the delayed bus_err halted the core.
+
+Fixed by gating all three capture points on !alias_bad -- the read start, the write start,
+and the write-barrier line capture. No AXI transaction is now launched for an out-of-
+window address; bus_err still halts the core, exactly as the #34 watchdog does.
+
+    make l1     : 13 PASS / 0 FAIL
+    verify-all  : 10/10 gates PASS
+
+### Pattern worth naming
+
+This is the second time in two days that a fix of mine stopped one step short of the
+property it claimed: H-07 recorded the fault but let the write out, and C-01's store
+split "probed" only after the unsplit write had already committed. Both read correctly in
+the code and in my own summary; both were caught by someone reading the RTL against the
+claim rather than running a gate. The gates cannot catch either, because neither path is
+exercised.
+
+REVIEW_aug2 running total: C-01, C-02, C-03(consumer half), C-04, C-05 (all rows),
+C-06, H-07 fixed. 10/10 gates green throughout.
