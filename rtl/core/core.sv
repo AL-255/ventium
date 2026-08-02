@@ -2873,6 +2873,11 @@ module core
       p = 1'b0;
       for (int w=0; w<IC_WAYS; w++)
         if (ic_val_o[set][w] && ic_tag_o[set][w]==tag) p = 1'b1;
+`ifdef VEN_IC_FETCH_BYPASS
+      // H-06: the non-cacheable line just filled is readable ONCE without being valid.
+      for (int i=0; i<2; i++)
+        if (icbp_v[i] && (set == icbp_set[i]) && (tag == icbp_tag[i])) p = 1'b1;
+`endif
       ic_present = p;
     end
   endfunction
@@ -2886,6 +2891,10 @@ module core
       hw = IC_WAYW'(IC_WAYS-1);
       for (int w=0; w<IC_WAYS; w++)
         if (ic_val_o[set][w] && ic_tag_o[set][w]==tag) hw = IC_WAYW'(w);
+`ifdef VEN_IC_FETCH_BYPASS
+      for (int i=0; i<2; i++)
+        if (icbp_v[i] && (set == icbp_set[i]) && (tag == icbp_tag[i])) hw = icbp_way[i]; // H-06
+`endif
       ic_hit_way = hw;
     end
   endfunction
@@ -6267,7 +6276,63 @@ module core
   // unit-tested (run-icache-snoop-gate checks [6][7][8] including a cacheable
   // control), and is the right hook for that work -- it just has nothing safe to
   // drive it until the bypass exists.
+`ifdef VEN_IC_FETCH_BYPASS
+  // REVIEW1_Aug2 H-06: the FETCH BYPASS the comment above says this needs.
+  //
+  // Why poisoning alone livelocks: the I-cache IS the fetch datapath, so a line that
+  // never validates is refetched forever (measured: 0 instructions in 8000 clocks,
+  // 31997 bus reads). A snoop poison is TRANSIENT so the retry succeeds; a CD/memory-
+  // type condition is PERSISTENT so it never can.
+  //
+  // The way out is the same shape H-07 used on the D-side: SERVE WITHOUT ALLOCATING.
+  // The fill already writes the DATA array -- only the valid bit is withheld -- so the
+  // bytes are present at {fill_set, fill_way} and the fetch just needs to be allowed
+  // to read them once. This registers that one line as a BYPASS WINDOW which
+  // ic_present()/ic_hit_way() honour, and which is retired as soon as the fetch line
+  // moves on. The line's valid bit is never set, so nothing can hit it later: the next
+  // fetch of the same address refetches, which IS non-cacheable semantics.
+  // TWO entries, not one. MEASURED with a single entry: 10 instructions in 2089 clocks
+  // and 8229 bus reads -- ~820 reads per instruction against 8 for one line fill. The
+  // fetch reads TWO lines (ic_rd_wayA from flin and ic_rd_wayB from flin_nl, for
+  // instructions straddling a line boundary), so with CD set and every line
+  // non-cacheable, the two lines evicted each other's window on every straddle and
+  // both refilled continuously. That is the same single-entry mistake H-09's
+  // invalidation skid had, rebuilt here by me two commits after fixing it there.
+  logic [1:0]          icbp_v;
+  logic [IC_IDXW-1:0]  icbp_set [2];
+  logic [IC_WAYW-1:0]  icbp_way [2];
+  logic [IC_TAGW-1:0]  icbp_tag [2];
+  logic                icbp_rr;      // round-robin insert pointer
+  // does entry i cover either line the fetch currently needs?
+  function automatic logic icbp_needed(input int i);
+    icbp_needed = ((flin[5 +: IC_IDXW]         == icbp_set[i]) &&
+                   (flin[5+IC_IDXW +: IC_TAGW] == icbp_tag[i]))
+               || ((flin_nl[5 +: IC_IDXW]         == icbp_set[i]) &&
+                   (flin_nl[5+IC_IDXW +: IC_TAGW] == icbp_tag[i]));
+  endfunction
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin icbp_v <= 2'b00; icbp_rr <= 1'b0; end
+    else begin
+      if (ic_fill_en && ic_fill_done && ic_fill_nocache) begin
+        icbp_v  [icbp_rr] <= 1'b1;
+        icbp_set[icbp_rr] <= ic_fill_set;
+        icbp_way[icbp_rr] <= ic_fill_way;
+        icbp_tag[icbp_rr] <= ic_fill_tag;
+        icbp_rr           <= ~icbp_rr;
+      end
+      // retire an entry only when NEITHER fetch line needs it
+      for (int i = 0; i < 2; i++)
+        if (icbp_v[i] && !icbp_needed(i)) icbp_v[i] <= 1'b0;
+    end
+  end
+`endif
+
+`ifdef VEN_IC_FETCH_BYPASS
+  // CR0.CD (bit 30) is the driver the comment above says had nothing safe to drive it.
+  assign ic_fill_nocache = creg0[30];
+`else
   assign ic_fill_nocache = 1'b0;
+`endif
 
   logic        ic_tch0_en, ic_tch1_en, ic_tch2_en;
   logic [IC_IDXW-1:0]  ic_tch0_set, ic_tch1_set, ic_tch2_set;

@@ -1,6 +1,7 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**34 findings closed or partially closed, 3 claims refuted with evidence, 1 open (H-06).**
+**34 findings closed or partially closed, 3 claims refuted with evidence, 1 open (H-06:
+mechanism built and measured, validation insufficient — see §4i).**
 `make verify-all` = 11/11 gates. `make l1` = 17 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
@@ -140,12 +141,10 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
 - **C-10** LOCKed RMW is not atomic against DMA.
 
 **Remaining, and none of these is a small edit:**
-- **H-06** — the same bypass idea on the FETCH side. `ic_fill_nocache` is tied to 0,
-  and the I-cache is itself the fetch datapath, so merely poisoning the fill livelocks:
-  the fetch has nowhere else to get its bytes. Needs a fetch path that can deliver
-  instruction bytes without a valid I-cache line. H-07's fix does NOT carry over —
-  the L1D already had a private bypass buffer and an `st==L1_BYP` serve; the I-side has
-  neither. This is the last open finding.
+- **H-06** — a fetch bypass now EXISTS behind `VEN_IC_FETCH_BYPASS` and the core runs
+  at full baseline speed with no I-cache line ever validated (§4i). It is NOT claimed
+  closed: the validating measurement cannot distinguish "the bypass is serving" from
+  "this test does not reuse lines". Needs a test with real line reuse.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
 
@@ -508,6 +507,56 @@ unreachable either way.
   the finding lives in. It now runs `VEN_L1_HONOR_CD` as a third configuration.
 - my first attempt at that addition broke the build by putting a space and a `+` into
   the `-Mdir` path.
+
+---
+
+## 4i. H-06 — a working mechanism and an insufficient measurement
+
+`ic_fill_nocache` was tied to 0 because driving it from CR0.CD livelocks: the I-cache
+IS the fetch datapath, so a line that never validates is refetched forever. A snoop
+poison is transient and the retry succeeds; a CD condition is persistent and it cannot.
+
+`VEN_IC_FETCH_BYPASS` (default OFF) adds the datapath the review asks for. The fill
+already writes the DATA array — only the valid bit is withheld — so the bytes are
+present at `{fill_set, fill_way}`; a small BYPASS WINDOW registers that line, and
+`ic_present()`/`ic_hit_way()` honour it until the fetch no longer needs it. The valid
+bit is never set, so nothing hits it later: the next fetch refetches, which IS
+non-cacheable semantics.
+
+### Measured, CR0.CD confirmed set for all 1084 records
+
+| window | retired | clocks | bus reads |
+|---|---|---|---|
+| naive poison (recorded, no window) | **0** | 8000 | 31997 |
+| ONE entry | 10 | 2089 | 8229 |
+| TWO entries | **1084** | 10714 | 17724 |
+| default build (lines cached) | 1084 | 10714 | 17724 |
+
+The one-entry version thrashed: ~820 bus reads per instruction against 8 for a single
+line fill. The cause is `ic_rd_wayB = ic_hit_way(flin_nl)` — the fetch reads TWO lines,
+the current one and the next, for instructions straddling a line boundary. With CD set
+every line is non-cacheable, so the two evicted each other's window on every straddle.
+
+**That is the same single-entry mistake H-09's invalidation skid had.** I diagnosed and
+fixed it there, then rebuilt it here two commits later.
+
+### Why this is NOT claimed closed
+
+The two-entry run matches the caching build EXACTLY. That is consistent with two
+different explanations: the bypass serving correctly, or `pmode` simply not reusing
+lines enough to tell the difference. I tried to discriminate with a loop-heavy image and
+picked one that needs `--cosim`, so both builds returned the same trivial 10 instructions
+and the comparison said nothing.
+
+Without a test that separates "serving from the window" from "effectively still cached",
+the result is not evidence of correctness. **The next step is a directed test with real
+line reuse** — a tight loop spanning several I-cache lines, where a true bypass MUST show
+more bus reads than the caching build.
+
+A note on process: I also removed a dead `VEN_IC_FETCH_BYPASS_UNUSED` block left
+mid-edit. Ifdef'd-out code referencing signals whose width has since changed is exactly
+what misleads the next reader — the same failure mode as the stale "it deadlocks" note
+that cost me H-07 for most of this cycle.
 
 ---
 
