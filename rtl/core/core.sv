@@ -5275,8 +5275,21 @@ module core
         dlv_pf      <= 1'b0;      // at depth 2 the next fault shuts down regardless.
       end else begin
         dlv_depth   <= 2'd1;
-        dlv_ctrb    <= vec_contributory(vec);
-        dlv_pf      <= (vec == 8'd14);
+        // REVIEW1_Aug2 C-08 (found while checking the review's first claim against
+        // QEMU's check_exception): the recorded CLASS must only be replaced when the
+        // new exception is itself contributory or a page fault. QEMU:
+        //     if (second_contributory || intno == EXCP0E_PAGE || intno == EXCP08_DBLE)
+        //         env->old_exception = intno;
+        // A BENIGN fault taken during the delivery of a contributory one does not
+        // become the new context -- the contributory one is still what a subsequent
+        // fault must be paired against. Overwriting it here LOST that, so
+        //     #GP -> (benign) -> #GP
+        // failed to escalate when the second #GP arrived. Keep the class unless the
+        // new vector supplies one.
+        if (vec_contributory(vec) || (vec == 8'd14)) begin
+          dlv_ctrb  <= vec_contributory(vec);
+          dlv_pf    <= (vec == 8'd14);
+        end
       end
       int_step    <= 4'd0;
       int_sw      <= 1'b0;        // HW fault: bypass the gate DPL>=CPL check
@@ -5293,11 +5306,38 @@ module core
       // This closes the 'out-of-limit gate is fetched and interpreted' half; the
       // escalation-to-#DF chain is still a single re-vector (see S_INT_GATE) and is
       // tracked in #66.
+      // REVIEW1_Aug2 C-08: the IDT-limit re-vector generates a #GP, and that #GP is a
+      // second exception in its own right -- it has to be paired with what was already
+      // being delivered exactly like any other. Previously it overwrote int_vec with 13
+      // AFTER the escalation decision above, so it could not become a #DF, it left
+      // dlv_ctrb describing the ORIGINAL vector rather than the generated #GP, and it
+      // never asked whether IDT[13] is itself inside the limit -- which would fetch the
+      // replacement gate from outside the table.
       if (!real_mode && ({19'd0, vec, 3'd7} > {17'd0, idt_limit})) begin
-        int_vec     <= 8'd13;
-        int_err     <= {21'd0, vec, 3'b010};
-        int_has_err <= 1'b1;
-        state       <= S_INT_GATE;
+        if (esc_shut || esc_to_df(8'd13)) begin
+          // the generated #GP pairs into a #DF (or a triple fault) -- the shutdown
+          // override at the end of this task still has the final say on `state`.
+          int_vec     <= 8'd8;
+          int_err     <= 32'd0;
+          int_has_err <= 1'b1;
+          dlv_depth   <= 2'd2;
+          dlv_ctrb    <= 1'b0;
+          dlv_pf      <= 1'b0;
+          // ...and if the #DF gate is ALSO out of limit there is nothing left to
+          // deliver: that is a triple fault.
+          state       <= ({19'd0, 8'd8, 3'd7} > {17'd0, idt_limit})
+                       ? S_SHUTDOWN : S_INT_GATE;
+        end else begin
+          int_vec     <= 8'd13;
+          int_err     <= {21'd0, vec, 3'b010};
+          int_has_err <= 1'b1;
+          dlv_depth   <= 2'd1;
+          dlv_ctrb    <= 1'b1;      // #GP is contributory -- describe what we DELIVER
+          dlv_pf      <= 1'b0;
+          // A #GP whose own gate is out of limit cannot be delivered either.
+          state       <= ({19'd0, 8'd13, 3'd7} > {17'd0, idt_limit})
+                       ? S_SHUTDOWN : S_INT_GATE;
+        end
       end else
       state       <= real_mode ? S_RMINT_RD : S_INT_GATE;
       // ---- REVIEW_aug2 H-04: SHUTDOWN. A fault arriving while #DF is being
