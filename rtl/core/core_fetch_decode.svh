@@ -373,7 +373,23 @@
             // cosim_en==0 and soc_en==0: the existing !cosim path is unchanged
             // (HALT on any IN/OUT), so every existing gate is byte-for-byte the
             // same.
-            if (cosim_en && d_kind==K_STR && d_st==ST_INS) state <= S_INS;
+            // ---- REVIEW1_Aug2 M-03: the TSS I/O-permission bitmap -----------------
+            // Port I/O at CPL > IOPL is not automatically illegal -- the bitmap can
+            // grant individual ports, and rejecting all of it (which the old blanket
+            // iopl_sensitive term did) breaks protected-mode I/O virtualisation. When
+            // the consult is required, divert to S_IOPERM, which reads TSS+0x66 for the
+            // map base and then the byte covering this port, and either continues to
+            // the original target or raises #GP(0).
+            //
+            // ioperm_ret records where to resume, so the bitmap consult is transparent
+            // to the three dispatch shapes below rather than duplicated into each.
+            if (ioperm_needed) begin
+              ioperm_ret  <= (d_kind==K_STR && d_st==ST_INS) ? S_INS : S_IO;
+              ioperm_port <= d_io_imm ? {8'd0, d_io_port_imm} : gpr_o[R_EDX][15:0];
+              int_step    <= 4'd0;
+              state       <= S_IOPERM;
+            end
+            else if (cosim_en && d_kind==K_STR && d_st==ST_INS) state <= S_INS;
             else if (cosim_en)                             state <= S_IO;
             // SoC: execute device I/O via S_IO, except the `out 0xf4` exit -> HALT.
             else if (soc_en) begin

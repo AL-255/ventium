@@ -438,6 +438,14 @@
         mem_addr = gdt_base + {16'd0, gpr_o[q_src_reg][15:3], 3'd0}
                    + {29'd0, seg_step, 2'b00};
       end
+      // REVIEW1_Aug2 M-03: beat 0 = TSS+0x66 (the I/O map base); beat 1 = the dword
+      // holding the bitmap byte for this port. Both are TSS-relative and LINEAR, so
+      // this arm sets no cur_seg_rel (see the C-01 default at the top).
+      S_IOPERM: begin mem_req=1'b1;
+        mem_addr = (int_step == 4'd0)
+                 ? (tr_base + 32'h64)                       // dword holding [0x66]
+                 : (tr_base + {16'd0, ioperm_base} + {19'd0, ioperm_port[15:3]});
+      end
       S_INT_TSS: begin mem_req=1'b1;             // TSS.ssN:espN (ESPn then SSn)
         mem_addr = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
       end

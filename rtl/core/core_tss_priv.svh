@@ -69,6 +69,40 @@
         // S_INT_TSS (M2S.4 cross-priv): read TSS.ssN:espN (N = int_new_cpl). The
         // 32-bit TSS stores ESPn then SSn contiguously at 0x04 + 8*N; beat 0 reads
         // ESPn, beat 1 reads SSn. Then read the new SS descriptor (S_INT_SS).
+        // ---- REVIEW1_Aug2 M-03: TSS I/O-permission bitmap -----------------------
+        // Beat 0 reads the I/O map base (TSS+0x66, a 16-bit field). Beat 1 reads the
+        // dword containing the bitmap byte for this port and tests its bit. A SET bit
+        // denies the port; a clear bit allows it.
+        //
+        // Denials, all #GP(0), and all architectural:
+        //   * the TSS cannot hold a map base at all (tr_limit < 0x67);
+        //   * the map base points at or past the TSS limit (no bitmap present);
+        //   * the byte covering this port lies outside the TSS limit -- IA-32 treats
+        //     bits beyond the bitmap as SET, i.e. denied;
+        //   * the bit is set.
+        S_IOPERM: begin
+          if (mem_ack) begin
+            if (int_step == 4'd0) begin
+              ioperm_base <= mem_rdata[15:0];
+              // A TSS too small to contain the map-base field denies everything.
+              if ((tr_limit < 32'h67) || ({16'd0, mem_rdata[15:0]} >= tr_limit))
+                start_fault(8'd13, 1'b1, 32'd0, q_pc);
+              else int_step <= 4'd1;
+            end else begin
+              // bit index = port; byte = base + port>>3; bit = port & 7.
+              if (({16'd0, ioperm_base} + {19'd0, ioperm_port[15:3]}) > tr_limit)
+                start_fault(8'd13, 1'b1, 32'd0, q_pc);   // past the bitmap => denied
+              else if (mem_rdata[{2'b00, ioperm_port[2:0]} +
+                                 {2'b00, ioperm_port[1:0], 3'd0}[4:0]])
+                start_fault(8'd13, 1'b1, 32'd0, q_pc);   // the bit is SET => denied
+              else begin
+                int_step <= 4'd0;
+                state    <= ioperm_ret;                  // permitted: carry on
+              end
+            end
+          end
+        end
+
         S_INT_TSS: begin
           if (mem_ack) begin
             if (int_step == 4'd0) begin

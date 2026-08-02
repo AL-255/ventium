@@ -63,6 +63,9 @@ typedef enum logic [4:0] {
 // exactly filled a [4:0] enum).
 typedef enum logic [5:0] {
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
+    // REVIEW1_Aug2 M-03: the TSS I/O-permission bitmap consult. Two beats -- the I/O
+    // map base at TSS+0x66, then the bitmap byte that covers the port.
+    S_IOPERM,
     // REVIEW_aug2 H-04: a fault while delivering #DF. Architecturally the CPU
     // enters SHUTDOWN; here it parks with no retire, which is what the loud HALT
     // already means to the TB, so a triple fault STOPS instead of looping.
@@ -1624,6 +1627,17 @@ module core
   // d_io_w reuses the wmask width code (1=byte, 2=word, 4=dword). These are 0 for
   // every non-IN/OUT instruction, so the dispatch below is inert elsewhere.
   logic        d_io;            // this instruction is IN/OUT
+  // ---- REVIEW1_Aug2 M-03: TSS I/O-permission bitmap consult -----------------------
+  // Needed only when the instruction is port I/O AND the current privilege exceeds
+  // IOPL. At CPL <= IOPL the access is unconditionally allowed and no TSS read happens,
+  // so the common case costs nothing. tr_limit must also be large enough to HOLD a map
+  // base field (offset 0x66..0x67); a TSS too small to contain one denies all I/O,
+  // which is the architectural behaviour.
+  state_e      ioperm_ret;      // where to resume once the bitmap says yes
+  logic [15:0] ioperm_port;     // the port being checked
+  logic [15:0] ioperm_base;     // TSS.io_map_base, read on beat 0
+  logic        ioperm_needed;
+  assign ioperm_needed = sys_mode && !real_mode && d_io && (eff_cpl > iopl);
   logic        d_io_write;      // 1 = OUT (CPU drives the port), 0 = IN (CPU reads)
   logic        d_io_imm;        // 1 = port is the imm8 byte (E4-E7), 0 = DX (EC-EF)
   logic [7:0]  d_io_port_imm;   // the imm8 port (when d_io_imm)
@@ -3732,6 +3746,7 @@ module core
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_sw<=1'b0;
+      ioperm_ret<=S_IO; ioperm_port<=16'd0; ioperm_base<=16'd0;
       dlv_depth<=2'd0; dlv_ctrb<=1'b0; dlv_pf<=1'b0;  // REVIEW_aug2 H-04
       // M2S.4 TR/TSS + cross-priv + inter-priv IRET state idle out of reset.
       tr_sel<=16'd0; tr_base<=32'd0; tr_limit<=32'd0; tr_valid<=1'b0; tr_attr<=8'd0;
@@ -4678,6 +4693,11 @@ module core
   int   ven_seg_chk_n, ven_seg_chk_ss, ven_seg_chk_es;
   logic ven_h01_ssb_prev;
   state_e ven_h01_state_prev;
+  int ven_ioperm_n;
+  always_ff @(posedge clk) if (!rst_n) ven_ioperm_n <= 0;
+    else if (ioperm_needed && state == S_DECODE) ven_ioperm_n <= ven_ioperm_n + 1;
+  final if (ven_seglog_en)
+    $display("[IOPERM] bitmap consults required: %0d", ven_ioperm_n);
   final if (ven_seglog_en)
     // Tag deliberately NOT "SEGCHK...": run-seg-gate.sh counts per-access rejections
     // with `grep -c SEGCHK`, and a summary line sharing that prefix was counted as
@@ -5738,6 +5758,10 @@ module core
       // moment translation was switched on. Fixed here to match the bus driver.
       S_LTR:     cur_lin = gdt_base + {16'd0, gpr_o[q_src_reg][15:3], 3'd0}
                            + {29'd0, seg_step, 2'b00};
+      // REVIEW1_Aug2 M-03: mirrors the S_IOPERM arm in core_bus_driver.svh verbatim.
+      S_IOPERM: cur_lin = (int_step == 4'd0)
+                        ? (tr_base + 32'h64)
+                        : (tr_base + {16'd0, ioperm_base} + {19'd0, ioperm_port[15:3]});
       S_INT_TSS: cur_lin = tr_base + tss_stk_off + {29'd0, int_step[0], 2'b00};
       S_INT_SS:  cur_lin = (int_new_ss[2] ? ldt_base : gdt_base)
                            + {16'd0, int_new_ss[15:3], 3'd0}
@@ -5780,6 +5804,7 @@ module core
       // exclusions are correct and stay.
       S_SEGLD, S_LJMP, S_LTR, S_INT_TSS, S_INT_SS,
       S_IRET_SS: translatable = 1'b1;
+      S_IOPERM:  translatable = 1'b1;   // REVIEW1_Aug2 M-03: a TSS read, so it pages
       default: translatable = 1'b0;
     endcase
     // S_PIPE only reads memory when a load or an icache fill is requested.
@@ -6942,7 +6967,12 @@ module core
     // consulted yet -- with a bitmap a CPL>IOPL task may still be granted a port, so
     // this is STRICTER than architectural for that case. Recorded honestly rather
     // than silently: see #66 for the bitmap.
-    iopl_sensitive = d_cli || d_sti || d_io;
+    // REVIEW1_Aug2 M-03: CLI/STI are IOPL-only -- there is no bitmap for them. Port
+    // I/O at CPL > IOPL is NOT automatically illegal: the TSS I/O-permission bitmap can
+    // grant individual ports, and rejecting everything (which is what this did) blocks
+    // legitimate protected-mode I/O virtualisation. d_io is therefore removed from the
+    // unconditional predicate and routed through S_IOPERM instead.
+    iopl_sensitive = d_cli || d_sti;
     priv_fault = sys_mode &&
                  ( (cpl0_only      && (eff_cpl != 2'd0))
                 || (iopl_sensitive && (eff_cpl >  iopl))
