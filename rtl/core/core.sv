@@ -1163,7 +1163,8 @@ module core
   // walk_for_d selects the D-TLB (else I).
   logic [31:0] walk_lin;           // the linear address being translated
   logic        walk_for_d;         // 1 = data access (D-TLB), 0 = fetch (I-TLB)
-  logic        walk_is_write;      // the resumed access is a write (sets Dirty)
+  logic        walk_is_write;      // H-02: the resumed access is architecturally a
+                                   // WRITE -> the #PF error code's W/R bit
   logic [2:0]  walk_step;          // 0=read PDE,1=write PDE A,2=read PTE,3=write PTE A/D
   logic [31:0] walk_pde;           // latched PDE
   logic [31:0] walk_pte;           // latched PTE
@@ -3805,7 +3806,7 @@ module core
       // arm (rtl/mem/tlb.sv) — u_itlb / u_dtlb. Only the page-walk FSM regs (which
       // stay in the spine) are reset here.
       walk_ret_state<=S_PIPE; walk_lin<=32'd0; walk_for_d<=1'b0;
-      walk_is_write<=1'b0; walk_usr_lat<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
+      walk_is_write<=1'b0; walk_set_dirty<=1'b0; walk_usr_lat<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
       walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
       // M2S.3 IDT delivery state idle out of reset.
       int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
@@ -4201,7 +4202,14 @@ module core
         // REVIEW1_Aug2 C-02: a walk triggered BY THE PROBE must not set Dirty --
         // the store may still fault on page 1 and never happen. Phase 2 walks
         // again for the real write and sets it then.
-        walk_is_write  <= cur_is_w && !xs_probing;
+        // REVIEW2_aug2 H-02: ONE signal was doing TWO jobs. `!xs_probing` exists so a
+        // phase-zero crossing-store PROBE does not set Dirty -- but walk_is_write also
+        // feeds the #PF error code's W/R bit, so an architectural WRITE whose second
+        // page is non-present or reserved reported W/R=0, i.e. a READ fault. A handler
+        // doing copy-on-write on that report would map the page read-only and loop.
+        // Split the two meanings; only the Dirty decision keeps the probe suppression.
+        walk_is_write  <= cur_is_w;                   // architectural class -> #PF W/R
+        walk_set_dirty <= cur_is_w && !xs_probing;    // may set D -> probe excluded
         walk_usr_lat   <= acc_usr;   // REVIEW1_Aug2 C-04: latch the requester's class
         walk_step      <= 3'd0;
         walk_pf        <= 1'b0;
@@ -4992,6 +5000,8 @@ module core
   logic        walk_usr_lat;             // C-04: the class of the access that missed
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        xs_probing;               // C-02: the crossing-store probe phase
+  logic        walk_set_dirty;           // H-02: may set D (probe excluded), vs
+                                         //       walk_is_write = architectural W/R
   logic        cur_seg_rel;              // this access is SEGMENT-RELATIVE
   logic [2:0]  cur_seg_idx;              // ...governed by THIS segment
   logic [31:0] seg_chk_base, seg_chk_off;
