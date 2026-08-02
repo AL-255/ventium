@@ -32,7 +32,7 @@ Commits `a5bab55` … HEAD on `ao486-mister-sim`.
 | **M-03** | the TSS I/O bitmap was never consulted -- all CPL>IOPL I/O denied | no-op when no bitmap exists |
 | **M-04** | 16-bit x87 env forms wrote the 28/108-byte image over a 14/94-byte object | all 7 witnesses match the harness QEMU |
 | **M-07** | port 0x92 bit 0 (fast reset) silently dropped | `fast_reset_req` output + `S_SHUTDOWN` |
-| **C-03** (part) | the crossing split covered only `S_LOAD` | `S_LOAD2` added; `pxpage` CMPSD, eflags `0x46` vs `0x87` |
+| **C-03** (part) | the crossing split covered only `S_LOAD` | `S_LOAD2` added; extent layer + a LOUD assertion for the rest, now gated |
 | **C-04** | implicit descriptor/TSS refs used CPL3 paging class | **86** reclassified per pv86 run |
 | **C-09** | task switch unpaged, unvalidated, incrementally committed | all four parts; ptask/ptaskcpl/ptaskv86 EQUIVALENT |
 | **C-10** (part) | the core never *requested* a locked transaction | `bp_req_lock` driven; AXI side deliberately not |
@@ -130,10 +130,11 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
 
 **Structural, deliberately not attempted shallowly:**
 
-- **C-03** page-crossing splitting covers only `S_LOAD`/`S_STORE`. Every other
-  multi-beat state translates its starting address only. The fix belongs below FSM-state
-  selection, at a canonical byte-addressed request layer — the same rework as C-01's
-  remaining bullets.
+- **C-03** the canonical request-layer REWORK is still not done: the states that
+  cannot split a page-crossing access still cannot. What changed is that the extent is
+  now represented (`cur_size` beside `cur_lin`), the gap is MEASURED rather than
+  assumed (0 reachable under paging across 68 images), it is LOUD rather than silent,
+  and the assertion guarding it is finally enforced by a gate. See §4e.
 - **C-09** hardware task switching: unpaged, unvalidated, incrementally committed.
 - **C-04** implicit descriptor/TSS references use CPL3 page permissions; they need a
   supervisor access class carried with the request.
@@ -301,6 +302,53 @@ DIFFERENTIALLY: both print `M1=0001`.
 single number: **0** = ES set but never consumed (the finding); **2+** = the handler's
 FNCLEX did not clear ES, so the second FWAIT faulted again — an unrecoverable loop in
 real software. Reversion gives 0.
+
+---
+
+## 4e. C-03 — an unenforced assertion, and a number that was 94% noise
+
+Two things surfaced here that matter more than the code I wrote.
+
+### CHECK 5 was firing into the void
+
+`PAGING/C-03` — the assertion that `cur_lin` (the TLB lookup) and `mem_addr` (the bus)
+agree — appears in this repo ONLY in build artifacts. Nothing under `verif/` greps for
+it. It has been the stated acceptance criterion for every address-path change this
+session, and a real firing would have printed to a log and been ignored. That is the
+same class as the M-08 exit-code bug: a check that exists, reports, and is not read.
+The seg gate's corpus sweep now counts it and fails on a nonzero count.
+
+### The measurement I nearly published
+
+A generic detector over every translatable state found **47 unsplit page-crossing
+beats** — which reads as a serious reachable defect. It is not. I had not qualified on
+`paging_on`, and with PG=0 the linear address IS the physical one: a straddling extent
+is one contiguous access, there is no second translation to get wrong and no #PF owed.
+
+| | crossing beats | UNSPLIT |
+|---|---|---|
+| unqualified | 50 | 47 |
+| **paging enabled** | **3** | **0** |
+
+All three are in split-capable states. So the remaining half of C-03 is UNREACHABLE
+across the 68-image system corpus — now an evidence-backed statement rather than an
+assumption. Had I reported the 47, it would have been a real-sounding number that was
+94% real-mode boot traffic.
+
+### What landed
+
+`(cur_lin, cur_size)` is the (start, length) pair a canonical byte-addressed request
+layer carries, defined per-state right beside `cur_lin` so the two cannot drift. The
+detector covers EVERY translatable state, not the three that can split, and the
+remaining gap is now loud: if Win95 or Quake drives a straddling extent through a state
+that cannot split, the assertion names the state, address and extent instead of
+corrupting a page and continuing.
+
+Self-tested by removing `S_LOAD` from the split-capable set: fires exactly once on
+`pxpage`, so it discriminates rather than decorates.
+
+**The rework itself is still open.** This makes the gap measurable, loud and gated; it
+does not close it.
 
 ---
 

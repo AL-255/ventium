@@ -1039,6 +1039,12 @@ module core
   // Architectural crossing test for the CURRENT S_LOAD access, off the PRE-translate
   // linear. Uses the operand width, not the bus's 4-byte fetch: a 1-byte load at
   // offset 0xFFF does not architecturally cross.
+  // REVIEW1_Aug2 C-03: the byte EXTENT of the beat the current state is issuing.
+  // cur_lin gives the START of the access; this gives its LENGTH, and the (start,
+  // length) pair is exactly what a canonical byte-addressed request layer carries.
+  // Declared beside cur_lin's own machinery so the two cannot drift apart.
+  logic [3:0]  cur_size;
+
   logic        xp_cross;
   logic [12:0] xp_end;
   assign xp_end   = {1'b0, cur_lin[11:0]} + {10'd0, q_w};
@@ -4741,6 +4747,70 @@ module core
   logic ven_faultlog_en;
   initial ven_faultlog_en = $test$plusargs("ven_faultlog") != 0;
 
+  // ---- REVIEW1_Aug2 C-03 instrumentation --------------------------------------
+  // The page-crossing SPLIT exists only for S_LOAD/S_LOAD2/S_STORE. Every other
+  // multi-beat state translates the page its access STARTS in and then drives the
+  // whole extent through that one translation -- so an access straddling a page
+  // boundary writes the tail bytes through the WRONG physical page, silently, and
+  // never raises the #PF the second page might owe.
+  //
+  // The finding asks for a canonical byte-addressed request layer BELOW the FSM-state
+  // selection, which is a rework. (cur_lin, cur_size) is the (start, length) pair such
+  // a layer carries, and this counts the beats where the pair straddles a boundary in
+  // a state that CANNOT split -- i.e. exactly the reachable half of the finding.
+  //
+  // Counting before rebuilding is the point: extending the split state-by-state is
+  // what C-03 exists to stop, and a measurement says which states are reachable at all.
+  logic [12:0] cur_ext_end;
+  logic        cur_crosses, cross_split_capable, cross_unhandled;
+  assign cur_ext_end         = {1'b0, cur_lin[11:0]} + {9'd0, cur_size};
+  assign cross_split_capable = (state == S_LOAD) || (state == S_LOAD2) ||
+                               (state == S_STORE);
+  // QUALIFIED ON paging_on. With PG=0 the linear address IS the physical one and a
+  // straddling extent is a single contiguous access -- there is no second translation
+  // to get wrong and no #PF to owe, so it is not a defect. Counting it would have
+  // reported 47 "unsplit crossings" that are all harmless real-mode boot traffic.
+  assign cur_crosses         = paging_on && fe_translatable && mem_req_pre_sq &&
+                               !xp_pend && (cur_ext_end > 13'h1000);
+  assign cross_unhandled     = cur_crosses && !cross_split_capable;
+
+`ifndef SYNTHESIS
+  logic ven_xlog_en;
+  int   ven_cross_n, ven_cross_unh_n;
+  initial begin
+    ven_xlog_en = $test$plusargs("ven_xpagelog") != 0;
+    ven_cross_n = 0; ven_cross_unh_n = 0;
+  end
+  always_ff @(posedge clk) begin
+    if (rst_n) begin
+      if (cur_crosses) ven_cross_n <= ven_cross_n + 1;
+      if (cross_unhandled) begin
+        ven_cross_unh_n <= ven_cross_unh_n + 1;
+        if (ven_xlog_en)
+          $display("[XPAGE] UNSPLIT state=%0d lin=%08h size=%0d pc=%08h",
+                   state, cur_lin, cur_size, q_pc);
+      end
+    end
+  end
+  final if (ven_xlog_en)
+    $display("[XPAGESTAT] page-crossing beats: total=%0d UNSPLIT=%0d",
+             ven_cross_n, ven_cross_unh_n);
+
+  // The remaining half of C-03 is now LOUD instead of silent. Measured across the
+  // 68-image system corpus this NEVER fires (3 crossing beats under paging, all of
+  // them in split-capable states), so it costs nothing today -- but if Win95 or Quake
+  // ever drives a straddling extent through a state that cannot split, this names the
+  // state and the address instead of corrupting a page and carrying on. Same principle
+  // as making the 16-bit env forms a loud #UD before they were implemented: a visible
+  // omission beats silent corruption.
+  //
+  // NOT an $fatal: it is a diagnostic for a gap, not a broken invariant like CHECK 5.
+  always_ff @(posedge clk)
+    if (rst_n && cross_unhandled)
+      $error("PAGING/C-03: UNSPLIT page-crossing access in state %0d -- lin=%08h size=%0d ends at %03h, past the page end. This state translates only the page the access STARTS in, so the tail bytes go through the WRONG physical page and any #PF the second page owes is never raised. pc=%08h",
+             int'(state), cur_lin, cur_size, cur_ext_end, q_pc);
+`endif
+
   // ---- REVIEW1_Aug2 H-11 instrumentation --------------------------------------
   // Counts x87 stack over/underflows, so "the fix is in and verify-all is green"
   // cannot be mistaken for "the fix does anything". Several fixes this session would
@@ -5763,6 +5833,9 @@ module core
   always_comb begin
     cur_lin  = 32'd0;
     cur_is_w = 1'b0;
+    // C-03: most beats are a full dword. The arms below narrow it where the state
+    // genuinely moves fewer bytes; anything left at 4 is the conservative reading.
+    cur_size = 4'd4;
     unique case (state)
       S_FETCH: cur_lin = flin + {27'd0,fetch_word,2'b00};
       S_PF:    cur_lin = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
@@ -5774,7 +5847,7 @@ module core
       //     16-bit stack (SS.B=0) the TLB looked up a different page than the bus drove;
       //   * XLAT had no case at all and fell through to opbase+q_ea, so a paged XLATB
       //     translated an unrelated page while the bus addressed DS+(E)BX+AL.
-      S_LOAD: begin
+      S_LOAD: begin cur_size = {1'b0, q_w};
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
             (q_kind==K_STKMISC && q_sm==SM_POPF))      cur_lin = dbase+stk16(gpr_o[R_ESP]);
         else if (q_kind==K_STKMISC && q_sm==SM_LEAVE)  cur_lin = dbase+stk16(gpr_o[R_EBP]);
@@ -5866,13 +5939,20 @@ module core
         cur_is_w = 1'b1;
         cur_lin  = dbase + q_ea + {29'd0, seg_step, 2'b00};
       end
-      S_FLOAD: cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
-      S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1; end
+      // C-03: the m80 third beat and the m16 forms move 2 bytes, not 4.
+      S_FLOAD: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00};
+                     cur_size = ((q_f_mbytes==4'd10 && f_step==4'd2) ||
+                                 (q_f_mbytes==4'd2)) ? 4'd2 : 4'd4; end
+      S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1;
+                     cur_size = ((q_f_mbytes==4'd10 && f_step==4'd2) ||
+                                 (q_f_mbytes==4'd2)) ? 4'd2 : 4'd4; end
       // REVIEW1_Aug2 M-04: fenv_off carries the stride (4-byte or 2-byte beats); it is
       // the SAME signal the bus arm uses, so the two cannot drift apart (CHECK 5).
-      S_FENV_ST: begin cur_lin = dbase+q_ea + fenv_off; cur_is_w = 1'b1; end
-      S_FENV_LD:       cur_lin = dbase+q_ea + fenv_off;
-      S_STORE: begin
+      S_FENV_ST: begin cur_lin = dbase+q_ea + fenv_off; cur_is_w = 1'b1;
+                       cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4; end
+      S_FENV_LD: begin cur_lin = dbase+q_ea + fenv_off;
+                       cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4; end
+      S_STORE: begin cur_size = {1'b0, q_w};
         cur_is_w = 1'b1;
         // F3/paging fix: POP r/m16 (8F) writes its operand in the operand's OWN
         // segment (DS default/override), NOT the SS that `dbase` forces for the
@@ -5894,7 +5974,7 @@ module core
       // at SP wrap. CMPXCHG8B had no case at all and fell through to the STACK address
       // while the bus drives dbase+q_ea -- a successful paged CMPXCHG8B wrote through
       // the wrong translation. Mirrors core_bus_driver.svh's S_USEQ arm exactly.
-      S_USEQ: begin
+      S_USEQ: begin cur_size = {1'b0, q_w};
         if (q_kind==K_CX8B) begin
           cur_is_w = 1'b1;
           cur_lin = dbase + q_ea + (step==4'd0 ? 32'd0 : {28'd0,q_w});

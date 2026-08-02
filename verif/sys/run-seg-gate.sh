@@ -103,14 +103,26 @@ echo "                   neither violating store reached memory; test completed"
 echo
 echo "=== 4. NEGATIVE: the check must reject NOTHING across the system corpus ==="
 TESTS="pseg pmode ppage pxpage pintr pintr16 pfault pfcpl3 pde pcpl pssiret pstk16 pdf ptask ptaskcpl ptaskv86 pdebug ppopf pv86"
-TOTAL=0; NRUN=0
+TOTAL=0; NRUN=0; C03=0
 for t in $TESTS; do
   TIMG="$REPO/verif/sys/tests/$t/$t.bin"
   [[ -f "$TIMG" ]] || continue
   NRUN=$((NRUN+1))
-  N="$("$TB" --image "$TIMG" --system --out /dev/null --max-insn 1200 --quiesce 400 \
-        +ven_seglog 2>&1 | grep -c SEGCHK || true)"
+  RAW="$("$TB" --image "$TIMG" --system --out /dev/null --max-insn 1200 --quiesce 400 \
+        +ven_seglog +ven_xpagelog 2>&1 || true)"
+  N="$(printf '%s\n' "$RAW" | grep -c SEGCHK || true)"
   TOTAL=$((TOTAL+N))
+  # REVIEW1_Aug2 C-03: count the PAGING/C-03 assertions in the SAME sweep. Both of
+  # them -- the address-mirror drift (CHECK 5) and the new unsplit page-crossing
+  # diagnostic -- were firing into the void: nothing in verif/ grepped for either, so
+  # a real firing would have printed and been ignored, exactly the class of miss that
+  # the M-08 exit-code bug was.
+  C="$(printf '%s\n' "$RAW" | grep -c 'PAGING/C-03' || true)"
+  C03=$((C03+C))
+  if [[ "$C" != "0" ]]; then
+    echo "  $t: $C PAGING/C-03 assertion firing(s)"
+    printf '%s\n' "$RAW" | grep 'PAGING/C-03' | head -2
+  fi
   if [[ "$N" != "0" ]]; then echo "  $t: $N would-be rejections"; fi
 done
 echo "  ran $NRUN system tests; total would-be rejections: $TOTAL (want 0)"
@@ -121,6 +133,18 @@ if [[ "$TOTAL" != "0" ]]; then
   exit 1
 fi
 echo "  SEG-NEGATIVE-OK: zero false positives across $NRUN system tests"
+
+echo
+echo "=== 5. C-03: the address mirror and the page-crossing extent must both hold ==="
+echo "  PAGING/C-03 assertion firings across $NRUN system tests: $C03 (want 0)"
+if [[ "$C03" != "0" ]]; then
+  echo "FATAL: a PAGING/C-03 assertion fired. Either cur_lin and mem_addr disagree for"
+  echo "       some state (the address-mirror drift this pair has suffered before), or"
+  echo "       an access straddled a page boundary in a state that cannot SPLIT it --"
+  echo "       in which case the tail bytes went through the wrong physical page."
+  exit 1
+fi
+echo "  C03-OK: address mirror agrees, and no unsplit page-crossing access occurred"
 
 echo
 echo "SEG-GATE-OK  (C-06: per-access segment limits enforced; positive + negative)"
