@@ -201,6 +201,35 @@ pm32_entry:
      * checker is needed: QEMU translates both pages, Ventium (today) does not. */
     movl    0x00400FFE, %esi
 
+    /* ==== REVIEW1_Aug2 C-03: the split must work in S_LOAD2, not just S_LOAD ====
+     * The crossing predicate was bound to S_LOAD, so every OTHER multi-byte access
+     * translated only its starting page. S_LOAD2 is the reachable one: CMPS's second
+     * operand, BOUND's and CMPXCHG8B's high word, and both far-pointer reads all use
+     * it.
+     *
+     * CMPSD compares [ESI] (an S_LOAD) against [EDI] (an S_LOAD2). Point EDI at the
+     * SAME straddling address the load phase above used, and ESI at a scratch dword
+     * holding the value a CORRECT split produces. The [EDI] read then crosses inside
+     * S_LOAD2:
+     *   correct : [EDI] = 0xBBBBAAAA -> equal -> ZF=1 -> EBP = 1
+     *   C-03 bug: [EDI] = 0xCCCCAAAA -> not equal -> ZF=0 -> EBP = 0
+     * ZF is graded by the ordinary GPR/EFLAGS diff against QEMU, and EBP makes the
+     * outcome visible as a register too. Both pointers are DS/ES-relative with flat
+     * bases, so this adds no segmentation variable. */
+    cld
+    movl    $0xBBBBAAAA, 0x00403000  /* scratch: linear 0x403000 -> phys 0x802000 (PT1[3],
+                                      * RW, and collides with none of the sentinels --
+                                      * 0x402000 maps to phys 0x801000, the READ-ONLY
+                                      * page holding the 0xCCCC witness the earlier
+                                      * phases depend on) */
+    movl    $0x00403000, %esi        /* [ESI]: the expected value  (S_LOAD) */
+    movl    $0x00400FFE, %edi        /* [EDI]: the STRADDLING dword (S_LOAD2) */
+    cmpsl                            /* compares [ESI] with [EDI] */
+    movl    $0, %ebp
+    jne     1f
+    movl    $1, %ebp                 /* EBP = 1 iff the S_LOAD2 side split correctly */
+1:
+
     /* ============ NON-IDENTITY proof: store @0x400000, read @0x401000 ======== */
     /* store a sentinel through linear 0x00400000 (-> phys 0x00800000) */
     movl    $0xCAFEBABE, %eax

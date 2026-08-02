@@ -88,6 +88,9 @@
         else if (q_jmpf_mem || q_callf_mem) mem_addr=opbase+q_ea+{28'd0,q_w};
         else begin mem_addr=dbase_edi+str_edi;   // CMPS second operand ([EDI])
           cur_seg_idx=3'(SG_ES); end              // C-01: the [EDI] side is ES
+        // REVIEW1_Aug2 C-03: page-crossing S_LOAD2 re-issues at the second page's
+        // base. cur_lin in core.sv carries the identical expression (CHECK 5).
+        if (xp_pend) mem_addr = {mem_addr[31:12] + 20'd1, 12'd0};
       end
       // Nested ENTER (level>0) micro-sequence: all accesses are STACK-relative (SS).
       // ent_rd beat reads the display source SS:[EBP-(ent_k-1)*w]; the push beat writes

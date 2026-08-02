@@ -1006,7 +1006,8 @@ module core
   // / permission check, and its low bytes supply the high half.
   //
   // xp_first = how many of the access's bytes live in the first page.
-  logic [31:0] ld_val;         // REVIEW_aug2 C-03: the merged load value (see core_load.svh)
+  logic [31:0] ld_val;
+  logic [31:0] ld2_val;   // REVIEW1_Aug2 C-03: the merged S_LOAD2 value         // REVIEW_aug2 C-03: the merged load value (see core_load.svh)
   logic        xp_pend;        // beat 2 is the one in flight
   logic [31:0] xp_lo;          // beat 1's data (low bytes are the first page's)
   logic [2:0]  xp_first;       // bytes taken from the first page (1..3)
@@ -1034,7 +1035,17 @@ module core
   logic        xp_cross;
   logic [12:0] xp_end;
   assign xp_end   = {1'b0, cur_lin[11:0]} + {10'd0, q_w};
-  assign xp_cross = (state==S_LOAD) && !xp_pend && (xp_end > 13'h1000);
+  // REVIEW1_Aug2 C-03: S_LOAD2 splits too. The crossing predicate was bound to a
+  // single FSM state, so every other multi-byte access translated only its STARTING
+  // page: bytes in page 2 were read from the frame page 1 happened to select. S_LOAD2
+  // is the reachable one -- CMPS's second operand, BOUND's and CMPXCHG8B's high word,
+  // and both far-pointer reads all land there -- and it takes the SAME engine as
+  // S_LOAD, because it is the same shape: one access, re-issued at the second page.
+  // The bus driver and the cur_lin mirror carry the identical `xp_pend` redirect for
+  // both states (CHECK 5 asserts they agree), and the S_LOAD2 arm latches and merges
+  // exactly as S_LOAD does.
+  assign xp_cross = ((state==S_LOAD) || (state==S_LOAD2))
+                 && !xp_pend && (xp_end > 13'h1000);
   // Crossing STORE detect. st_strb is the byte-enable the store drives, so its
   // population count is the true architectural width (POP r/m16, string stores and
   // the 8F form all differ from q_w).
@@ -5624,6 +5635,9 @@ module core
         else if (q_seg_load)                   cur_lin = dbase+q_ea+{28'd0,q_w};
         else if (q_jmpf_mem || q_callf_mem)    cur_lin = opbase+q_ea+{28'd0,q_w};
         else                                   cur_lin = dbase_edi+str_edi;
+        // REVIEW1_Aug2 C-03: beat 2 of a page-crossing S_LOAD2 re-issues at the SECOND
+        // page's base, exactly as S_LOAD does. Mirrors core_bus_driver.svh.
+        if (xp_pend) cur_lin = {cur_lin[31:12] + 20'd1, 12'd0};
       end
       // nested ENTER: mirror the bus driver S_ENTER address so paging translates the same
       // linear (inert in real mode where the case is exercised; correct under paging).

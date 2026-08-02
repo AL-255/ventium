@@ -115,28 +115,49 @@
           end
         end
         S_LOAD2: begin
+          // REVIEW1_Aug2 C-03: the crossing split, identical in shape to S_LOAD above.
+          // Beat 1 keeps the low bytes and re-issues for the second page (the bus
+          // driver and cur_lin both redirect off xp_pend); beat 2 merges. Nothing is
+          // committed on the first beat, so a fault on page 2 leaves no partial state.
+          if (mem_ack && xp_cross) begin
+            xp_lo    <= mem_rdata;
+            xp_first <= 3'(13'h1000 - {1'b0, cur_lin[11:0]});
+            xp_w     <= q_w;
+            xp_pend  <= 1'b1;
+          end else
           if (mem_ack) begin
+            // REVIEW1_Aug2 C-03: ONE merged value for this arm, for the same reason
+            // C-03's first half gave S_LOAD its ld_val -- the selector arms below read
+            // it too, so a crossing far pointer must not forward page 2's raw beat.
+            begin
+              logic [5:0] sh2;
+              sh2 = 6'(xp_first) << 3;
+              ld2_val = xp_pend ? ((xp_lo & ~(32'hFFFF_FFFF << sh2))
+                                   | (mem_rdata << sh2))
+                                : mem_rdata;
+            end
+            if (xp_pend) xp_pend <= 1'b0;
             // 32-bit far JMP/CALL indirect (m16:32): the 2nd read is the 2-byte
             // selector @[mem+4]; q_ljmp_off already holds the full 32-bit offset.
             if (q_jmpf_mem) begin
               if (seg_real) begin
                 // real-mode far JMP (m16:32): CS.base=sel<<4, EIP=32-bit offset.
-                seg_sel [SG_CS] <= mem_rdata[15:0];
-                seg_base[SG_CS] <= {12'd0, mem_rdata[15:0], 4'd0};
+                seg_sel [SG_CS] <= ld2_val[15:0];
+                seg_base[SG_CS] <= {12'd0, ld2_val[15:0], 4'd0};
                 seg_attr[SG_CS] <= 8'h9B;
                 eip <= q_ljmp_off;                 // full 32-bit offset (NOT truncated)
                 retire_valid <= 1'b1; state <= S_PIPE;
               end else begin
                 // PROTECTED-mode far JMP (m16:32): q_ljmp_off already holds the 32-bit
                 // offset; stage the selector and hand off to the S_LJMP CS-descriptor load.
-                q_ljmp_sel <= mem_rdata[15:0];
+                q_ljmp_sel <= ld2_val[15:0];
                 seg_step   <= 1'b0; state <= S_LJMP;
               end
             end else if (q_callf_mem) begin
-              q_ljmp_sel <= mem_rdata[15:0];     // q_ljmp_off already 32-bit
+              q_ljmp_sel <= ld2_val[15:0];       // q_ljmp_off already 32-bit
               seg_step   <= 1'b0; state <= S_LCALL;
             end else begin
-              mem_load_data2<=mem_rdata; state<=S_EXEC;
+              mem_load_data2<=ld2_val; state<=S_EXEC;
               // CMPS second operand [EDI] is also a data load -> D-cache access.
               // dc_lu_hit/dc_acc_* are driven to gpr_o[R_EDI] this clock (S_LOAD2).
               if (cycle_mode) begin
