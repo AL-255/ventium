@@ -601,6 +601,13 @@
                 // (seg_real) the S_EXEC SYS_LJMP arm loads CS.base = sel<<4 with no
                 // descriptor read, matching real-mode V86 segmentation.
                 if (seg_real) state<=S_EXEC;
+                // REVIEW1_Aug2 H-02: S_SEGLD checks GDT/LDT bounds before reading a
+                // descriptor; S_LJMP did not, so a far jump/call to a selector past the
+                // end of the table read arbitrary memory AS a descriptor. Checked here,
+                // BEFORE the read, for the same reason as the IRET case in H-01 -- the
+                // read itself is the defect. Same sel_in_table() helper.
+                else if (!sel_in_table(d_ljmp_sel))
+                  start_fault(8'd13, 1'b1, {16'd0, d_ljmp_sel} & 32'h0000_FFFC, eip);
                 else state<=S_LJMP;
               end
               SYS_LTR, SYS_LLDT: begin

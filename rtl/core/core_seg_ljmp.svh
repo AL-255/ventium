@@ -237,6 +237,17 @@
                 cs_d <= desc[54];   // D/B bit: 1 => 32-bit default operand/addr size
                 eip<=q_ljmp_off; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
                 gate_via <= 1'b0;
+                // REVIEW1_Aug2 H-02: the target OFFSET was installed without ever being
+                // checked against the destination CS limit, so a far jump/call could
+                // transfer to an architecturally invalid EIP outside the code segment.
+                // Overrides the commit above -- last assignment wins -- so nothing is
+                // installed when the target is out of range. #GP(0), which is the code
+                // for a control transfer past the segment limit (the selector is fine;
+                // the offset is not).
+                if ({1'b0, q_ljmp_off} > {1'b0, desc_limit(desc)}) begin
+                  retire_valid <= 1'b0;
+                  start_fault(8'd13, 1'b1, 32'd0, q_pc);
+                end
               end
             end
           end
