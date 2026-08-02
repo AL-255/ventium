@@ -170,8 +170,22 @@ module ven_axi_master #(
   // top-of-4G BIOS shadow that the fold exists to serve.
   logic alias_err;   // sticky: an access was folded onto a DIFFERENT physical address
   logic alias_bad;
-  assign alias_bad = m_req && ((m_addr & ~ADDR_MASK) != 32'd0)
-                           && !(m_addr >= 32'hFFFE_0000);
+  // REVIEW1_Aug2 H-04: validate the whole request EXTENT, not just its first byte.
+  // This checked m_addr alone. An unaligned access whose first byte is inside the mask
+  // can still need a SECOND aligned beat at remap({m_addr[31:2],2'b00} + 4), computed
+  // independently further down -- so with the KV260 256 MiB mask a dword starting near
+  // 0x0FFF_FFFF passed the check while its second beat wrapped to the carveout base and
+  // scribbled on low memory. The H-07 work proved rejection for a bad STARTING address
+  // only, which is exactly the hole.
+  //
+  // The highest byte a request can touch is the top of the second aligned dword, i.e.
+  // {m_addr[31:2],2'b00} + 7. Testing that covers every beat the datapath can generate,
+  // aligned or not, because the two beats are the only ones there are.
+  logic [31:0] alias_last;
+  assign alias_last = {m_addr[31:2], 2'b00} + 32'd7;
+  assign alias_bad = m_req && !(m_addr >= 32'hFFFE_0000)
+                           && ( ((m_addr     & ~ADDR_MASK) != 32'd0)
+                             || ((alias_last & ~ADDR_MASK) != 32'd0) );
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) alias_err <= 1'b0;
     else if (alias_bad) begin
