@@ -499,6 +499,11 @@ module ventium_top
       .clk          (clk),
       .rst_n        (rst_n),
       .a20_gate     (a20_gate_r),        // REVIEW2 M-03
+      // REVIEW1_Aug2 M-07: the port-0x92 fast-reset request. Left unconnected
+      // here -- this checkout has no reset controller to drive -- but it is now
+      // a real output a platform can wire, and the core stops on its own so the
+      // request cannot be silently ignored the way bit 0 was.
+      .fast_reset_req (),
       .init_eip     (init_eip),
       .init_esp     (init_esp),
       .boot_mode    (boot_mode),

@@ -409,6 +409,10 @@ module core
     // function (port 0x92 / the keyboard controller), so it is an input here and is
     // driven by ventium_top; only the masking belongs in the core.
     input  logic        a20_gate,
+    // REVIEW1_Aug2 M-07: pulsed high when software requests the port-0x92 fast
+    // reset. The core also stops (S_SHUTDOWN); a platform that wires this to a
+    // reset controller gets the architectural behaviour.
+    output logic        fast_reset_req,
     output logic        mem_req,
     output logic        mem_we,
     output logic [31:0] mem_addr,

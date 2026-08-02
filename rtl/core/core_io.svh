@@ -43,6 +43,24 @@
             // I/O bus exactly as before, so whatever already services 0x92 is
             // unaffected.
             if (q_io_write && q_io_port == 16'h0092) a20_r <= io_wdata[1];
+            // ---- REVIEW1_Aug2 M-07: port 0x92 bit 0 is FAST RESET ------------------
+            // It was consumed for A20 (bit 1) and bit 0 deliberately dropped, so
+            // software asking System Control Port A for a reset simply kept executing
+            // -- the one outcome that is certainly wrong, because the guest believes
+            // the machine restarted and continues from a state that no longer matches.
+            //
+            // A CPU cannot reset the platform by itself, so two things happen:
+            //   * fast_reset_req is asserted as a core OUTPUT, which is the "expose a
+            //     platform reset request" half -- a chipset/PS can drive rst_n from it;
+            //   * the core enters S_SHUTDOWN, the same terminal no-retire state a
+            //     triple fault uses. If nothing consumes the request, the machine STOPS
+            //     instead of running on with stale state.
+            // Gated on bit 0 alone, so the ordinary A20 idiom `out 0x92, 0x02` (A20 on,
+            // reset off) is untouched -- which is what every A20 user writes.
+            if (q_io_write && q_io_port == 16'h0092 && io_wdata[0]) begin
+              fast_reset_req <= 1'b1;
+              state          <= S_SHUTDOWN;
+            end
             // ---- REVIEW1_Aug2 H-10: the KEYBOARD-CONTROLLER A20 path ---------------
             // Port 0x92 is the "fast" A20. The CLASSIC route -- which is what real BIOS
             // and DOS use, and what HIMEM.SYS falls back to -- goes through the 8042:
