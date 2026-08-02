@@ -536,13 +536,11 @@
             // stacked inside the NMI (incremented in start_fault, which every delivery
             // path funnels through), so a nested IRET unwinds one level instead.
             //
-            // KNOWN REMAINING GAP, stated rather than papered over: this still acts at
-            // IRET DECODE, so an IRET that FAULTS during its own stack reads has
-            // already decremented. Closing that needs validate-the-whole-frame-then-
-            // commit, which is REVIEW2 C-10 and a much larger change; the nesting
-            // escalation fixed here is the more serious of the two.
-            if (nmi_nest != 4'd0) nmi_nest <= nmi_nest - 4'd1;
-            else                  nmi_in_progress <= 1'b0;
+            // REVIEW_aug2 H-05: the re-arm itself is NO LONGER DONE HERE. Acting at
+            // decode meant an IRET that faulted during its own stack reads or frame
+            // validation had already re-armed NMI. It now happens at the four IRET
+            // COMMIT sites via iret_retire_nmi() (core.sv), which the C-07 whole-frame
+            // commit made possible. Nothing NMI-related is decided at decode.
           end
           // ---- M2S.5 RSM (0F AA): leave SMM, restore the saved state ---------
           else if (d_rsm) begin

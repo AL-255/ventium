@@ -605,6 +605,26 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
     fi
     echo "  RTL-FAULT-VECTOR-OK: #GP(0x30), #GP(0x38) and #SS(0x40) all raised;"
     echo "                       #SS follows the SDM, not QEMU's #NP"
+
+    # --- 7c. REVIEW_aug2 H-05: a FAULTING IRET must not re-arm NMI --------------
+    # Nothing in the corpus drives the core's nmi input, so this property is
+    # unreachable without stimulus: +ven_nmi_arm forces nmi_in_progress out of reset
+    # ("pretend an NMI handler is running"), and the core counts faults delivered
+    # from an IRET state while NMI is still armed. pssiret rejects three frames, so
+    # the count must be 3. If the re-arm moves back to IRET DECODE the first IRET
+    # disarms NMI before it ever reaches its stack reads and the count is 0 -- the
+    # FINAL register state is identical either way, which is why the count is what
+    # gets measured. Verified both ways by reintroducing the defect.
+    H05="$("$TB" --image "$IMG" --system --out /dev/null --max-insn "$MAXI" \
+            --quiesce 400 +ven_nmi_arm 2>&1 | sed -n 's/.*\[H05\][^:]*: //p')"
+    echo "  H-05: faults delivered from an IRET with NMI still armed: ${H05:-<none>}"
+    if [[ "${H05:-0}" != "3" ]]; then
+      echo "FATAL: pssiret H-05: expected 3 armed-NMI IRET faults, got '${H05:-<none>}'."
+      echo "       0 means the NMI re-arm happened at IRET DECODE again, so an IRET"
+      echo "       that FAULTS re-enables NMI while the original frame is still live."
+      exit 1
+    fi
+    echo "  RTL-H05-OK: a faulting IRET leaves NMI blocked; the re-arm is at commit"
   fi
 else
   say "7. RTL --system sys-diff: SKIPPED for '$TEST'"

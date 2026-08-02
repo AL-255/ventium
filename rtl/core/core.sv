@@ -3613,7 +3613,16 @@ module core
       smm_step<=6'd0; smm_resume_eip<=32'd0;
       // M8.1 external-interrupt latches idle out of reset (all INERT when soc_en==0).
       intr_pending<=1'b0; nmi_pending<=1'b0; nmi_prev<=1'b0;
-      irq_shadow<=1'b0; nmi_in_progress<=1'b0; nmi_nest<=4'd0;
+      irq_shadow<=1'b0; nmi_nest<=4'd0;
+`ifdef SYNTHESIS
+      nmi_in_progress<=1'b0;
+`else
+      // REVIEW_aug2 H-05 stimulus: +ven_nmi_arm pretends an NMI handler is already
+      // running so the "a faulting IRET must not re-arm NMI" property is REACHABLE.
+      // Without the plusarg this is identical to the synthesis path.
+      nmi_in_progress    <= ven_nmi_arm_en;
+      ven_h05_armed_faults <= 0;
+`endif
       // M2S.6 debug registers idle out of reset (Vol.3 power-on values). The DR
       // file resets identically in user mode — it is just never written there.
       dr0<=32'd0; dr1<=32'd0; dr2<=32'd0; dr3<=32'd0;
@@ -4439,6 +4448,31 @@ module core
   // were wrong; the interaction has to be OBSERVED, not reasoned about.
   logic ven_faultlog_en;
   initial ven_faultlog_en = $test$plusargs("ven_faultlog") != 0;
+
+  // ---- REVIEW_aug2 H-05 instrumentation ---------------------------------------
+  // The H-05 property is "a FAULTING IRET must not re-arm NMI". Nothing in the test
+  // corpus drives the core's nmi input (the sys/verify TBs leave it tied low and
+  // soc_en gates nmi_take), so without stimulus the fix would be correct-but-INERT
+  // and no gate could tell the two behaviours apart.
+  //
+  // +ven_nmi_arm forces nmi_in_progress out of reset, i.e. "pretend an NMI handler is
+  // running". ven_h05_armed_faults then counts faults delivered FROM an IRET state
+  // while NMI is still armed -- which is exactly the observation that discriminates:
+  //
+  //   re-arm at COMMIT (correct): the faulting IRET has not touched the NMI state, so
+  //       every one of pssiret's three rejected frames is counted.
+  //   re-arm at DECODE (the bug): the first IRET disarmed NMI before it ever reached
+  //       its stack reads, so the count is 0.
+  //
+  // The end state is IDENTICAL either way (each faulting IRET is followed by a handler
+  // IRET that commits), which is why the count, not the final register value, is the
+  // thing worth measuring.
+  logic ven_nmi_arm_en;
+  initial ven_nmi_arm_en = $test$plusargs("ven_nmi_arm") != 0;
+  int   ven_h05_armed_faults;
+  final if (ven_nmi_arm_en)
+    $display("[H05] faults delivered from an IRET with NMI still armed: %0d",
+             ven_h05_armed_faults);
 `endif
   logic        seg_off_over_limit, seg_null_sel, seg_not_present, seg_expand_down;
   logic [31:0] seg_chk_base, seg_chk_off;   // REVIEW2 C-06: offset derived from cur_lin
@@ -4862,6 +4896,24 @@ module core
     end
   endtask
 
+  // ---- REVIEW_aug2 H-05: NMI re-arms at IRET COMMIT, not at IRET decode --------
+  // The re-arm used to happen in S_DECODE the moment an IRET was recognised, before
+  // any of its stack reads, before descriptor validation, before commit. An IRET that
+  // FAULTED had therefore already re-armed NMI, so a second NMI could be accepted
+  // while the first NMI's frame was still live -- the exact corruption nmi_nest was
+  // added to prevent, reachable through a different door.
+  //
+  // The blocker recorded at the old site was "this needs validate-the-whole-frame-
+  // then-commit"; that landed with C-07, so the re-arm now moves to the commit sites.
+  // ONE definition of the rule, called from each of the four places an IRET can
+  // actually retire (real-mode, same-privilege, inter-privilege, V86-return). A
+  // faulting IRET reaches none of them and so re-arms nothing; when the handler
+  // returns and the IRET restarts, decode runs again and it gets another chance.
+  task automatic iret_retire_nmi();
+    if (nmi_nest != 4'd0) nmi_nest <= nmi_nest - 4'd1;
+    else                  nmi_in_progress <= 1'b0;
+  endtask
+
   task automatic start_fault(input logic [7:0] vec, input logic has_err,
                              input logic [31:0] err, input logic [31:0] fault_pc);
     begin
@@ -4895,6 +4947,14 @@ module core
       // the count cannot miss a path the way the hand-copied guards did. vec==2 while
       // nmi_in_progress cannot occur (NMI is blocked), so no self-count.
       if (nmi_in_progress && (nmi_nest != 4'hF)) nmi_nest <= nmi_nest + 4'd1;
+`ifndef SYNTHESIS
+      // REVIEW_aug2 H-05: see the ven_nmi_arm block above. Counted here, in the one
+      // task every delivery funnels through, for the same reason the H-09 count is.
+      if (nmi_in_progress &&
+          (state == S_IRET || state == S_INT_CS_RET || state == S_IRET_SS ||
+           state == S_RMIRET))
+        ven_h05_armed_faults <= ven_h05_armed_faults + 1;
+`endif
       int_vec     <= vec;
 `ifdef VEN_DBG_CORE
       // F4A: capture EVERY hardware fault (vec/eip/cs/err) — the abort's true vector

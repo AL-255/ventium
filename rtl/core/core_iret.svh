@@ -138,6 +138,7 @@
                 seg_base [SG_GS] <= {12'd0, mem_rdata[15:0], 4'd0};
                 seg_limit[SG_GS] <= 32'h0000_FFFF; seg_attr[SG_GS] <= 8'h93;
                 iret_to_v86  <= 1'b0;
+                iret_retire_nmi();      // REVIEW_aug2 H-05 (V86-return commit)
                 int_step     <= 4'd0;
                 q_pc         <= int_src_pc;            // stamp the IRET insn's PC
                 retire_valid <= 1'b1;
@@ -207,6 +208,7 @@
                 seg_attr [SG_CS] <= desc_attr(desc);
                 cpl_r            <= int_gate_sel[1:0];
                 cs_d             <= desc[54];
+                iret_retire_nmi();      // REVIEW_aug2 H-05 (same-privilege commit)
                 q_pc             <= int_src_pc;
                 retire_valid     <= 1'b1;
                 state            <= S_PIPE;
@@ -285,6 +287,7 @@
                 end
               end
               iret_interpriv   <= 1'b0;
+              iret_retire_nmi();        // REVIEW_aug2 H-05 (inter-privilege commit)
               int_step         <= 4'd0;
               q_pc             <= int_src_pc;
               retire_valid     <= 1'b1;
