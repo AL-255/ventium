@@ -4612,10 +4612,21 @@ module core
   // spurious rejections in pseg/pv86/ptaskv86, all with off=0xfffe0528-style
   // underflows because a linear GDT/IDT address had a segment base subtracted from it.
   //
-  // Now core_bus_driver.svh sets cur_seg_rel/cur_seg_base at each of the 21 sites that
-  // build an address from a segment base, right next to the base it names. The check
-  // CONSUMES that instead of re-deriving it, so the reconstruction is deleted rather
-  // than corrected -- one source, at the point of truth.
+  // core_bus_driver.svh now sets cur_seg_rel at each arm that builds an address from a
+  // segment base, so the check no longer runs on fetches or on linear descriptor-table
+  // reads. That fixed the false positives.
+  //
+  // HONEST LIMIT (REVIEW1_Aug2 C-01 called this out, correctly): the driver publishes
+  // the FLAG but NOT the base. seg_chk_base below is still the reconstruction
+  // `(state==S_STORE) ? stbase : opbase`, and an earlier revision of this comment
+  // claimed a cur_seg_base signal that was never committed. Consequences that remain:
+  //   * string stores use dbase_edi (ES) while dseg names the string SOURCE (DS), so
+  //     the linear address can be right while the LIMIT comes from the wrong hidden
+  //     descriptor. Same for the ES side of CMPS in S_LOAD2.
+  //   * S_INT_PUSH / S_IRET stack accesses carry no segment identity, so their SS
+  //     limits are not checked at all.
+  // Both need the access to carry its segment INDEX, not just a base -- see #65.
+  logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        cur_seg_rel;              // this access is SEGMENT-RELATIVE
   logic [31:0] seg_chk_base, seg_chk_off;
   logic        seg_access_fault;
@@ -7077,7 +7088,10 @@ module core
       // and not combinational glitches. The point is to find the remaining false
       // positive by measurement instead of re-enabling delivery and bisecting a
       // corpus-wide failure, which is how the first two were found the hard way.
-      if (ven_seglog_en && seg_access_fault && mem_req && fe_translatable)
+      // NOTE the qualifier: mem_req_pre_sq, not mem_req. Once C-01 made
+      // seg_access_fault SQUASH the request, qualifying on mem_req made this probe
+      // self-defeating -- it printed nothing precisely when it had something to say.
+      if (ven_seglog_en && seg_access_fault && mem_req_pre_sq && fe_translatable)
         $display("[SEGCHK] st=%0d dseg=%0d sel=%04h base=%08h lim=%08h attr=%02h ed=%b | cur_lin=%08h off=%08h w=%0d cpl=%0d pc=%08h",
                  int'(state), int'(dseg), seg_sel[dseg], seg_chk_base, dlimit,
                  seg_attr[dseg], seg_expand_down, cur_lin, seg_chk_off, q_w,

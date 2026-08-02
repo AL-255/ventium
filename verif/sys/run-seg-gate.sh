@@ -17,8 +17,10 @@
 # when the core is right. This gate therefore checks Ventium against the SDM directly.
 #
 # WHAT IT ASSERTS
-#   1. POSITIVE: pseglim's out-of-limit access raises exactly ONE #GP(0), at the
-#      faulting instruction, and the program then RUNS TO COMPLETION (ecx == 1).
+#   1. POSITIVE: pseglim's out-of-limit LOAD and out-of-limit STORE each raise a
+#      #GP(0) (ecx == 2), the program runs to completion, AND the store's target
+#      memory is UNTOUCHED -- the fault must suppress the access, not merely follow
+#      it (REVIEW1_Aug2 C-01).
 #   2. NEGATIVE: across every system test, the check rejects NOTHING. This is the
 #      false-positive tripwire, and it is the assertion that matters -- C-06's
 #      delivery was reverted twice for shipping false positives, so "it fires on the
@@ -45,33 +47,51 @@ IMG="$REPO/verif/sys/tests/pseglim/pseglim.bin"
 echo "  image: $IMG"
 
 echo
-echo "=== 3. POSITIVE: the out-of-limit access must raise exactly one #GP(0) ==="
+echo "=== 3. POSITIVE: both violations must fault, and the store must not commit ==="
 OUT="$REPO/build/sys/pseglim.seg.vtrace"
 mkdir -p "$REPO/build/sys"
 LOG="$("$TB" --image "$IMG" --system --out "$OUT" --max-insn 900 --quiesce 400 \
         +ven_faultlog 2>&1 || true)"
 NGP="$(printf '%s\n' "$LOG" | grep -c 'vec=13 ' || true)"
 GPPC="$(printf '%s\n' "$LOG" | sed -n 's/.*vec=13 .*pc=\([0-9a-f]*\).*/\1/p' | head -1)"
-echo "  #GP(13) deliveries: $NGP   at pc=${GPPC:-<none>}"
-if [[ "$NGP" != "1" ]]; then
-  echo "FATAL: expected exactly ONE #GP; got $NGP."
+echo "  #GP(13) deliveries: $NGP   at pc=${GPPC:-<none>} (first)"
+if [[ "$NGP" != "2" ]]; then
+  echo "FATAL: expected exactly TWO #GP (one load violation, one STORE violation);"
+  echo "       got $NGP."
   echo "       0 = the limit violation was not caught (enforcement inert)."
-  echo "       >1 = the handler itself is faulting (a false positive, which is how"
+  echo "       1 = one of the two forms is not checked."
+  echo "       >2 = the handler itself is faulting (a false positive, which is how"
   echo "            this finding's delivery got reverted the last two times)."
-  printf '%s\n' "$LOG" | grep FAULT | head -6
+  printf '%s\n' "$LOG" | grep FAULT | head -8
   exit 1
 fi
 
-# ecx is the #GP counter the handler increments; PROGRESS_aug2.md set `ecx == 1` as
-# the condition for re-admitting this test to the gates.
+# REVIEW1_Aug2 C-01: a #GP must SUPPRESS the faulting access, not merely follow it.
+# seg_access_fault was consumed by the FSM but absent from the bus driver's squash
+# list, so a limit-violating STORE reached memory before the fault was delivered.
+# ebp carries a witness seeded at the linear address that store targets; it must be
+# untouched. Without the squash it reads 0xcafebabe (the store's data).
+EBP="$(tail -1 "$OUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["ebp"])')"
+echo "  witness at the violating store's target = $EBP  (want 0x5eedf00d)"
+if [[ "$EBP" != "0x5eedf00d" ]]; then
+  echo "FATAL: the limit-violating STORE reached memory before the #GP was delivered."
+  echo "       0xcafebabe means the store committed; the access must be SQUASHED, not"
+  echo "       merely followed by a fault. See core_bus_driver.svh (the squash must sit"
+  echo "       OUTSIDE the paging block -- segment limits apply with paging off too)."
+  exit 1
+fi
+
+# ecx is the #GP counter the handler increments. PROGRESS_aug2.md set `ecx == 1` as
+# the condition for re-admitting this test; it is 2 now that C-01 added the store.
 ECX="$(tail -1 "$OUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["ecx"])')"
-echo "  final ecx (#GP counter) = $ECX  (want 0x00000001)"
-if [[ "$ECX" != "0x00000001" ]]; then
+echo "  final ecx (#GP counter) = $ECX  (want 0x00000002)"
+if [[ "$ECX" != "0x00000002" ]]; then
   echo "FATAL: the #GP was delivered but the program did not complete normally."
   echo "       ecx=$ECX means the handler did not run to its increment, or ran twice."
   exit 1
 fi
-echo "  SEG-POSITIVE-OK: one #GP(0) at the violating access; handler ran; test completed"
+echo "  SEG-POSITIVE-OK: load+store violations both faulted; the store never reached"
+echo "                   memory; handler ran; test completed"
 
 echo
 echo "=== 4. NEGATIVE: the check must reject NOTHING across the system corpus ==="

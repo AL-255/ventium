@@ -296,6 +296,17 @@ pm32_entry:
     /* (the LSL probe that confirmed limit==0xFFFF has been removed: Ventium does not
      * implement LSL, so it HALTED the RTL run at that instruction and the test never
      * reached the violation below. It served its purpose under QEMU.) */
+    /* REVIEW1_Aug2 C-01: restore a FLAT DS before the violation block. The pop-DS
+     * test above leaves DS = 0x18 (base 0x20000), and everything below -- the resume
+     * EIP at 0x704, the #GP counter at 0x700, the witness at 0x30000 -- is addressed
+     * DS-relative. With a based DS the mainline writes linear 0x20704 while the
+     * handler (which loads a flat DS so its own accesses are well-defined) reads
+     * 0x704, so the handler IRETed to garbage: measured as a #UD at pc=0x00000508
+     * followed by the #NP/#DF cascade. The violating accesses below all use explicit
+     * %es: overrides, so a flat DS does not weaken the test at all. */
+    movw    $0x10, %ax
+    movw    %ax, %ds
+
     movl    $seglim_resume, %eax
     movl    %eax, 0x00000704            /* resume EIP for the handler */
     movw    $0x18, %ax
@@ -303,9 +314,40 @@ pm32_entry:
     movl    $0xDEADBEEF, %edx           /* witness: must survive (no commit on fault) */
     movl    %es:0x00010000, %edx        /* #GP(0) here -- one byte past the limit */
 seglim_resume:
+
+    /* ---- REVIEW1_Aug2 C-01: the faulting access must not REACH MEMORY ------
+     * The load above proves a #GP is raised. It cannot prove the access was
+     * SUPPRESSED: a load leaves no trace, and the old test checked only the fault
+     * counter. seg_access_fault was consumed by the FSM but was absent from the bus
+     * driver's squash list, so the same clock both delivered #GP(13) and presented
+     * mem_req/mem_we to memory -- a limit-violating STORE committed before faulting.
+     *
+     * So: seed a witness at the linear address the violating store would hit
+     * (ES.base 0x20000 + offset 0x10000 = 0x30000, one byte past the 0xFFFF limit),
+     * perform the store, and read the witness back through the FLAT DS afterwards.
+     * It must still be the seed. A store is used deliberately -- it is the case that
+     * corrupts memory, and the only one that leaves evidence. */
+    /* DS is still the LIMITED selector here (the mainline restores it only at the
+     * end), so the seed store must set a flat DS first -- writing 0x30000 through a
+     * base-0x20000/limit-0xFFFF DS is itself a violation and loops. Measured the hard
+     * way: 81 faults at the seed instruction. */
+    movw    $0x10, %ax                  /* flat ES for the seeding (DS is already flat) */
+    movw    %ax, %es
+    movl    $0x5EEDF00D, 0x00030000     /* the witness, written through the FLAT map */
+
+    movl    $seglim_store_resume, %eax
+    movl    %eax, 0x00000704            /* resume EIP for the handler */
+    movw    $0x18, %ax                  /* the LIMITED ES again (limit 0xFFFF) */
+    movw    %ax, %es
+    movl    $0xCAFEBABE, %ebx
+    movl    %ebx, %es:0x00010000        /* #GP(0): a limit-violating STORE. If the
+                                         * access is not suppressed this overwrites
+                                         * the witness at linear 0x30000. */
+seglim_store_resume:
     movw    $0x10, %ax                  /* restore a flat ES */
     movw    %ax, %es
-    movl    0x00000700, %ecx            /* ecx = 1 iff the #GP was delivered */
+    movl    0x00030000, %ebp            /* ebp = the witness: MUST still be 0x5EEDF00D */
+    movl    0x00000700, %ecx            /* ecx = 2 iff BOTH #GPs were delivered */
 
     /* restore DS to the flat RW selector so the final state is well-defined */
     movw    $0x10, %ax
@@ -317,7 +359,11 @@ seglim_resume:
      * no trace parsing and no QMP -- every layer I have been second-guessing is
      * removed. isa-debug-exit gives status (v<<1)|1:
      *     counter == 0  -> v=0x42 -> 133   NO #GP was raised
-     *     counter != 0  -> v=0x43 -> 135   the #GP WAS raised */
+     *     counter != 0  -> v=0x43 -> 135   a #GP WAS raised
+     * (REVIEW1_Aug2 C-01: the counter is now 2 -- one load violation, one STORE
+     *  violation -- and ebp carries the witness that proves the store never reached
+     *  memory. The exit status only distinguishes zero from non-zero; the seg gate
+     *  checks the exact count and the witness.) */
     movl    0x00000700, %eax
     testl   %eax, %eax
     jz      1f
@@ -355,6 +401,16 @@ hang:
     .global gp_handler
 gp_handler:
     pushl   %eax
+    /* The handler's own data accesses must not depend on whatever DS the faulting
+     * context happened to have. They did: the counter at 0x700 is reached through DS,
+     * so a fault taken with the LIMITED DS (base 0x20000) incremented linear 0x20700
+     * while one taken with a flat DS incremented 0x700 -- two different counters, and
+     * the mainline read only one of them (measured: two #GP deliveries but ecx==1).
+     * Load a flat DS and leave it: every violating access in this test uses an
+     * explicit %es: override, and the mainline wants a flat DS afterwards anyway.
+     * (push/pop %ds was tried first and derailed the handler -- 58 faults.) */
+    movw    $0x10, %ax
+    movw    %ax, %ds
     incl    0x00000700                  /* #GP counter */
     movl    0x00000704, %eax            /* the resume EIP the mainline stashed */
     movl    %eax, 0x08(%esp)            /* overwrite saved EIP -> skip the faulting insn */

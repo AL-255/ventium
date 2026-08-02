@@ -552,6 +552,33 @@
       end
     end
     // =========================================================================
+    // REVIEW1_Aug2 C-01: a SEGMENT fault must suppress the faulting access.
+    // =========================================================================
+    // seg_access_fault was consumed by the FSM (core.sv, beside perm_fault) but was
+    // NOT in the squash list above, so on a TLB hit -- or with paging off entirely --
+    // the same clock both called start_fault(13) AND presented mem_req/mem_we to RAM,
+    // L1, AXI or MMIO. A limit-violating STORE committed before the #GP; a load from
+    // MMIO consumed a read-sensitive register before faulting.
+    //
+    // PLACEMENT, and this is the second time this exact mistake has been made in this
+    // file: the squash above lives inside `if (paging_on && ...)`, so putting the
+    // segment case there would have covered protected+paged only and done NOTHING in
+    // real mode or in protected mode without paging -- where segment limits still
+    // apply. That is precisely the A20 placement bug documented immediately below,
+    // which was found only because a probe printed nothing while 52 writes occurred.
+    // Segmentation is not conditional on paging, so the suppression is not either.
+    //
+    // Unconditional (not `ifdef VEN_SEG_ENFORCE`): seg_access_fault is tied to the
+    // enforcement build by its own definition -- with enforcement off nothing raises
+    // it, so this is inert there and cannot be left behind when the default flips.
+    // Snapshot the request BEFORE suppressing it, so the +ven_seglog diagnostic can
+    // still see that an access was attempted (qualifying it on the post-squash
+    // mem_req makes it silent exactly when it matters).
+    mem_req_pre_sq = mem_req;
+    if (seg_access_fault) begin
+      mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
+    end
+    // =========================================================================
     // REVIEW2 M-03: the A20 gate, applied to the FINAL physical address.
     // =========================================================================
     // A20 was ABSENT from the design -- no masking anywhere in the core and no
