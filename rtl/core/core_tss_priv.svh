@@ -108,10 +108,34 @@
               int_lo <= mem_rdata; int_step <= 4'd1;
             end else begin
               logic [63:0] desc;
+              logic [7:0]  ss_int_a;
+              logic        ss_int_bad;
               desc = {mem_rdata, int_lo};
+              ss_int_a   = desc_attr(desc);
+              // cpl_r already holds the NEW CPL: S_INT_CS committed it before chaining
+              // here, and this arm only runs on the cross-privilege path.
+              ss_int_bad = (int_new_ss[15:2] == 14'd0)          // null selector
+                        || !ss_int_a[4] || ss_int_a[3] || !ss_int_a[1]  // not writable DATA
+                        || (int_new_ss[1:0] != cpl_r)           // RPL must equal the new CPL
+                        || (ss_int_a[6:5]   != cpl_r);          // DPL must equal the new CPL
               seg_sel  [SG_SS] <= int_new_ss;
               seg_base [SG_SS] <= desc_base(desc);
               seg_limit[SG_SS] <= desc_limit(desc);
+              // ---- REVIEW1_Aug2 C-07: VALIDATE the TSS-supplied SS before installing.
+              // This loaded selector/base/limit/attr unconditionally -- no table limit,
+              // RPL, DPL, writable-data, type or Present check -- so a malformed TSS
+              // handed the handler an arbitrary stack segment. IA-32 (interrupt with a
+              // stack switch) requires:
+              //   * a non-null SS selector                       -> #TS(0) otherwise
+              //   * SS.RPL == the target CS DPL (the new CPL)    -> #TS(sel)
+              //   * SS.DPL == the new CPL                        -> #TS(sel)
+              //   * a WRITABLE DATA segment (S=1, type[3]=0, W)  -> #TS(sel)
+              //   * present                                      -> #SS(sel)
+              // Checked BEFORE any commit, exactly as the outer-IRET SS is.
+              if (ss_int_bad || !ss_int_a[7]) begin
+                start_fault(ss_int_a[7] ? 8'd10 : 8'd12, 1'b1,
+                            {16'd0, int_new_ss} & 32'h0000_FFFC, int_src_pc);
+              end else begin
               seg_attr [SG_SS] <= desc_attr(desc);
               // REVIEW_aug2 H-01: capture SS.B here too. ss_b was updated ONLY on the
               // ordinary segment-load path, so a cross-privilege delivery onto a
@@ -120,6 +144,7 @@
               ss_b             <= desc[54];
               int_step         <= 4'd0;
               state            <= S_INT_PUSH;
+              end
             end
           end
         end

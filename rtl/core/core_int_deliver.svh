@@ -102,9 +102,15 @@
               logic [7:0]  cattr;
               logic [1:0]  tgt_dpl;
               logic        cs_bad;
+              // REVIEW1_Aug2 C-07: a CONFORMING code target keeps the current CPL and
+              // does not switch stacks. Both facts derive from one bit, so name it once
+              // and use it for the CPL, the stack-switch branch and the V86 latch.
+              logic        int_tgt_conf, int_xpriv;
               desc    = {mem_rdata, int_lo};
               cattr   = desc_attr(desc);
               tgt_dpl = desc_dpl(cattr);
+              int_tgt_conf = seg_is_code(cattr) && cattr[2];   // code + C bit
+              int_xpriv    = !int_tgt_conf && (tgt_dpl < eff_cpl);
               // target CS must be present, a code segment, DPL <= the EFFECTIVE
               // CPL (V86 forces eff_cpl=3, so a DPL0 monitor CS is accepted).
               cs_bad  = !desc_present(cattr) || !desc_s(cattr) ||
@@ -131,7 +137,15 @@
                 seg_base [SG_CS] <= desc_base(desc);
                 seg_limit[SG_CS] <= desc_limit(desc);
                 seg_attr [SG_CS] <= cattr;
-                cpl_r            <= tgt_dpl;     // CPL = target CS.DPL
+                // ---- REVIEW1_Aug2 C-07: CONFORMING targets do not change CPL -----
+                // A conforming code segment with DPL <= CPL is a legal interrupt
+                // target and the CPU keeps running at the CURRENT privilege -- no CPL
+                // change and NO stack switch. This unconditionally set CPL to the
+                // target's DPL and then took the stack-switch branch whenever
+                // tgt_dpl < eff_cpl, turning a same-privilege conforming transfer into
+                // a spurious privilege transition: CPL silently dropped and the
+                // handler ran on a TSS stack it was never supposed to get.
+                cpl_r            <= int_tgt_conf ? eff_cpl : tgt_dpl;
                 cs_d             <= desc[54];
                 int_step         <= 4'd0;
                 // M7.2: latch whether THIS delivery's source was V86 (eflags[17] is
@@ -147,17 +161,17 @@
                 // the 9-word frame off a never-loaded int_new_esp/SS base -> a corrupt
                 // frame at a stale address. Pinning from_v86 to the cross-priv arm
                 // closes that latent path with no functional change.
-                from_v86 <= v86 && (tgt_dpl < eff_cpl);
+                from_v86 <= v86 && int_xpriv;
 `ifdef VEN_DBG_WD
                 // [VEN-XPL] the cross-priv-vs-same-priv decision for the Quake #PF. A
                 // nested CPL0 fault (cs=0x18) MUST be same-priv; if this prints XPL with
                 // cpl_r!=0 (or v86=1), that stale privilege is the frame-corruption bug.
                 if (creg3==32'h0007e000 && int_vec==8'd14)
                   $display("[VEN-XPL] vec=%0d tgt_dpl=%0d eff_cpl=%0d cpl_r=%0d v86=%b -> %s @cs:eip=%04x:%08h old_esp=%08h",
-                           int_vec, tgt_dpl, eff_cpl, cpl_r, v86, (tgt_dpl<eff_cpl)?"XPL":"SAME",
+                           int_vec, tgt_dpl, eff_cpl, cpl_r, v86, int_xpriv?"XPL":"SAME",
                            seg_sel[SG_CS], eip, gpr_o[R_ESP]);
 `endif
-                if (tgt_dpl < eff_cpl) begin
+                if (int_xpriv) begin
                   // CROSS-PRIV (includes EVERY V86 delivery, eff_cpl=3): freeze the
                   // interrupted task's CS:SS:ESP for the frame (seg_sel[] here still
                   // hold the OLD values), record the target CPL, read TSS.ssN:espN.
