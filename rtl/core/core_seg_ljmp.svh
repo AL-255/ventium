@@ -209,11 +209,20 @@
                     seg_step   <= 1'b0;      // re-read: now the TARGET CS descriptor
                   end
                 end else begin
-                  // Still-unimplemented SYSTEM descriptor on a far transfer. The tag's
-                  // low nibble carries the DESCRIPTOR TYPE so a freeze read names it
-                  // exactly instead of just "not a TSS":
+                  // REVIEW2_aug2 H-19: UNIMPLEMENTED system descriptor on a far
+                  // transfer. Documented as unsupported CPU behaviour in
+                  // docs/unsupported-isa.md §1, which the review asks for explicitly as
+                  // the alternative to implementing these forms.
+                  //
+                  // The tag's low nibble carries the DESCRIPTOR TYPE, so a freeze names
+                  // the form exactly instead of just "not a TSS":
                   //   0xD5 = TASK GATE   0xD2 = LDT   0xD1/0xD3 = 16-bit TSS
-                  // (0xDC/0xD4 — the call gates — are now HANDLED above.)
+                  // (0xDC/0xD4 — the call gates — are HANDLED above, same-privilege.)
+                  //
+                  // HALT rather than #GP, deliberately: these are LEGAL descriptor
+                  // types. Faulting would tell the guest its descriptor is malformed
+                  // when the truth is that this CPU does not implement the transfer.
+                  // A halt is an honest "unimplemented" and the tag says which.
                   state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<={4'hD, desc_type(attr)}; `endif seg_step<=1'b0;
                 end
               end else if (seg_load_fault(1'b1, 1'b0, q_ljmp_sel, attr, cpl_r)) begin

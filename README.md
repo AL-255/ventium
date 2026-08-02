@@ -21,6 +21,14 @@ level clone (see [`docs/isa-coverage.md`](docs/isa-coverage.md)
   (Intel manuals, Alpert & Avnon, Agner Fog, datasheet, spec updates, and a
   working QEMU `-cpu pentium` functional + cycle golden harness). This submodule contains proprietary material, so it is not public; the reference material is cited in the design docs and the code comments, and the QEMU harness is described in `verif/qemu-trace/`.
 
+## Unsupported CPU behaviour
+
+`docs/unsupported-isa.md` lists what this core **cannot do** — unimplemented system
+descriptor forms (task gates, 16-bit TSS), cross-privilege call gates, and the
+correctness modes that are compiled out of the shipping build with the measured reason
+for each. Everything listed there reaches a loud halt or is explicitly gated; none of it
+fails silently.
+
 ## What's implemented
 
 - **Integer core:** a 5-stage in-order **dual-issue (U/V)** pipeline (PF/D1/D2/EX/WB). With correct pairing rules.
