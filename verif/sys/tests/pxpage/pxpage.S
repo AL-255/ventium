@@ -245,6 +245,16 @@ pm32_entry:
     movl    $0x12345678, %eax
     movl    %eax, 0x00400FFE        /* the crossing STORE */
     movl    0x00401000, %ebp        /* second page: proves where the high bytes went */
+    /* REVIEW_aug2 C-01: also prove the FOREIGN, physically-adjacent frame was NOT
+     * touched. phys 0x801000 sits immediately after the first page's frame
+     * (0x800000+0x1000) and belongs to a DIFFERENT mapping; it was seeded 0xCCCC
+     * before paging. A store that writes its full width through page 1's translation
+     * before splitting corrupts it, and the two checks above CANNOT see that -- they
+     * only look at the two intended frames. Reach it via PT1[4] (linear 0x404000 ->
+     * phys 0x801000, RW).
+     *   correct : esi = 0x0000CCCC   (seed intact, nothing spilled)
+     *   C-01 bug: esi = 0x0000????   (the crossing store's high half landed here) */
+    movl    0x00404000, %esi
 
     /* ====================== clean exit via isa-debug-exit ================== */
     movl    $0x42, %eax

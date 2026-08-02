@@ -10807,3 +10807,67 @@ the guest software the gates cannot see (Win95, Quake), so it stays out.
 
 C-06 NOT FIXED. Delivery proven, two false positives fixed, one remains, oracle settled,
 harness built. Tree 10/10 green.
+
+
+## UPDATE 357 — REVIEW_aug2: C-01 through C-04 fixed. C-01 was a real bug in MY C-02 fix.
+
+New review (REVIEW_aug2.md, 9 critical / 15 high / 7 medium) against commit f6f6ced. It
+does not accept "41 of 43" and it is right not to. Started at the top.
+
+### C-01 — my crossing-store split never probed. Confirmed, and it was corrupting memory.
+
+The review's finding: the phase logic was gated on the REGISTERED xs_act, which is 0 on
+the clock a crossing store first enters S_STORE. So the first request went out as the
+ORIGINAL, UNSPLIT, full-width write through page 1's translation -- and only ITS mem_ack
+armed the "probe". The real sequence was unsplit-write / write-page-1 / write-page-2.
+
+pxpage passed because it only checked the two INTENDED frames. Added the check the review
+says is missing -- re-read the foreign, physically-adjacent frame (phys 0x801000, reached
+via PT1[4]) -- and it failed immediately:
+
+    esi: expected(A)=0x0ff1ce00  got(C)=0x0ff11234
+
+0x1234 is the crossing store's high half landing in a frame belonging to a different
+mapping. My "atomic" store was corrupting memory on every crossing write.
+
+FIXED by deriving the phase COMBINATIONALLY (xs_eff_act/xs_eff_ph) so the FIRST request
+is the probe. The crossing test now keys off st_lin_nat (the natural store address)
+rather than cur_lin, which both avoids a combinational loop and stops mis-measuring the
+offset once redirected. pxpage now EQUIVALENT (137 records) WITH the foreign-frame check.
+
+### C-02 — split state survived faults
+
+xp_pend / xs_act / xs_ph were cleared only at reset and on successful completion, so a
+second-page fault left the transfer ARMED through exception delivery and the whole
+handler: the handler's next load was redirected to the stale second page and merged with
+a stale xp_lo; its next store inherited a stale phase. Exactly the case the split exists
+for. Now aborted in start_fault -- placed there for the same reason the H-09 NMI count
+is, because every delivery funnels through it and hand-copied guards is what produced #58.
+
+### C-03 (consumer half) — the merge was written but not read
+
+mem_load_data got the merged value while MOVS, OUTS and the far-pointer arms went on
+reading the RAW second beat, so a page-crossing MOVSW/MOVSD/OUTSW/OUTSD or far pointer
+forwarded page 2's beat. Now computed ONCE into ld_val and consumed everywhere in that
+arm. (The remaining raw mem_rdata uses are S_LOAD2/S_FLOAD -- different states, which is
+C-03's second half: the split covers only two hand-picked states and needs the shared
+access layer.)
+
+### C-04 — Dirty was set on a DENIED write
+
+Permission is checked only on a TLB hit. On a miss the walker set D from walk_is_write
+alone, filled, and only the NEXT clock raised #PF -- so a CPL3 write to a supervisor page,
+or a write to a read-only page under WP, dirtied the leaf entry with no architectural
+write. One predicate (walk_wr_ok_big / walk_wr_ok_4k) now evaluates the same US/RW/WP rule
+perm_fault uses, from the WALKED entries, and gates all FOUR mirrors of the D expression
+(core.sv x2, core_bus_driver.svh x2, core_walk.svh x1). A is untouched -- Accessed
+semantics are a separate question, as the review says.
+
+verify-all: 10/10 gates PASS after each fix, zero PAGING/C-03 firings.
+
+### Note to self
+
+C-01 is the third time this session a fix of mine passed its own test while being wrong,
+and the second where the test was blind in a way I could have predicted -- I checked the
+two frames I meant to write and never the one I might corrupt. The review found it by
+reading the RTL, not by running anything.

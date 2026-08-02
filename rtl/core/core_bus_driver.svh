@@ -195,10 +195,10 @@
         // ---- REVIEW2 C-02 (store half): PROBE-2 -> WRITE-1 -> WRITE-2 ----------
         // See core.sv for why this order needs no rollback. cur_lin carries the same
         // second-page redirect for phases 0 and 2 (CHECK 5 keeps them honest).
-        if (xs_act) begin
+        if (xs_eff_act) begin
           logic [5:0] sh;
           sh = 6'(xs_first) << 3;
-          unique case (xs_ph)
+          unique case (xs_eff_ph)
             2'd0: begin  // PROBE the second page: translate + WRITE-permission check,
                          // but drive NO write.
                     mem_we    = 1'b0;
@@ -262,13 +262,15 @@
           3'd1: begin mem_we=1'b1; mem_wstrb=4'b1111;
                       mem_addr  = walk_pde_addr;
                       mem_wdata = walk_pde | 32'h0000_0020
-                                  | (((cr4_pse && walk_pde[7]) && walk_is_write)
+                                  | (((cr4_pse && walk_pde[7]) && walk_is_write
+                                      && walk_wr_ok_big)   // REVIEW_aug2 C-04
                                      ? 32'h0000_0040 : 32'd0); end
           3'd2: mem_addr = walk_pte_addr;                        // read PTE
           default: begin mem_we=1'b1; mem_wstrb=4'b1111;         // write PTE (set A/D)
                       mem_addr = walk_pte_addr;
                       mem_wdata = walk_pte | 32'h0000_0020
-                                  | (walk_is_write ? 32'h0000_0040 : 32'd0); end
+                                  | ((walk_is_write && walk_wr_ok_4k)   // REVIEW_aug2 C-04
+                                     ? 32'h0000_0040 : 32'd0); end
         endcase
       end
       // M2S.3 — IDT delivery: gate read, CS-descriptor read, frame pushes, IRET

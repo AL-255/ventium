@@ -19,8 +19,8 @@
           // pre-translate offset the moment the crossing store is seen.
           if (mem_ack && xs_cross_now && !xs_act) begin
             xs_act   <= 1'b1;
-            xs_first <= 3'(13'h1000 - {1'b0, cur_lin[11:0]});
-            xs_ph    <= 2'd1;          // probe just completed -> write the first page
+            xs_first <= 3'(13'h1000 - {1'b0, st_lin_nat[11:0]});
+            xs_ph    <= 2'd1;          // the PROBE just completed -> write the first page
           end else if (mem_ack && xs_act && (xs_ph == 2'd1)) begin
             xs_ph    <= 2'd2;          // first page written -> write the second
           end else

@@ -950,6 +950,7 @@ module core
   // / permission check, and its low bytes supply the high half.
   //
   // xp_first = how many of the access's bytes live in the first page.
+  logic [31:0] ld_val;         // REVIEW_aug2 C-03: the merged load value (see core_load.svh)
   logic        xp_pend;        // beat 2 is the one in flight
   logic [31:0] xp_lo;          // beat 1's data (low bytes are the first page's)
   logic [2:0]  xp_first;       // bytes taken from the first page (1..3)
@@ -985,10 +986,31 @@ module core
   assign xs_w = (q_kind==K_STR) ? q_w
               : ({2'd0, st_strb[0]} + {2'd0, st_strb[1]}
                + {2'd0, st_strb[2]} + {2'd0, st_strb[3]});
+  // REVIEW_aug2 C-01: the crossing test MUST key off the NATURAL store address, not
+  // cur_lin. cur_lin carries the phase redirect (page+1 on phases 0/2), so testing it
+  // would be a combinational loop AND would mis-measure the offset once redirected.
+  logic [31:0] st_lin_nat;
+  assign st_lin_nat = (q_kind==K_STR) ? dbase_edi+str_store_addr : stbase+st_addr;
   logic [12:0] xs_end;
-  assign xs_end = {1'b0, cur_lin[11:0]} + {10'd0, xs_w};
+  assign xs_end = {1'b0, st_lin_nat[11:0]} + {10'd0, xs_w};
   logic xs_cross_now;
   assign xs_cross_now = (state==S_STORE) && (xs_end > 13'h1000);
+  // EFFECTIVE phase, used by BOTH cur_lin and the bus driver.
+  //
+  // THE BUG THIS FIXES (REVIEW_aug2 C-01): the phase logic was gated on the REGISTERED
+  // xs_act, which is 0 on the clock a crossing store first enters S_STORE. So the very
+  // first request went out as the ORIGINAL, UNSPLIT, full-width write translated only
+  // through page 1 -- committing bytes into the physically adjacent frame -- and only
+  // its mem_ack armed the "probe". There was never a probe; the sequence was
+  // unsplit-write / write-page-1 / write-page-2. Measured: pxpage's foreign frame at
+  // phys 0x801000 came back 0x0ff11234 instead of 0x0ff1ce00.
+  //
+  // Deriving the phase COMBINATIONALLY makes the first request the probe, which is what
+  // "commit stores only after every piece has passed" actually requires.
+  logic       xs_eff_act;
+  logic [1:0] xs_eff_ph;
+  assign xs_eff_act = xs_act || xs_cross_now;
+  assign xs_eff_ph  = xs_act ? xs_ph : 2'd0;   // not yet armed => phase 0 = PROBE
 `ifndef SYNTHESIS
   // REVIEW2 C-02 exposure measurement (see core_bus_driver.svh). Sim-only.
   logic       c02_xpage_hits;
@@ -997,9 +1019,12 @@ module core
   // Access width for the crossing test: writes carry a strobe, reads are the
   // operand width the state requested. 4 is the conservative default (the widest
   // single beat this bus issues), so the count never UNDER-reports.
-  assign c02_bytes = mem_we ? ((mem_wstrb==4'b0001) ? 3'd1 :
-                               (mem_wstrb==4'b0011) ? 3'd2 : 3'd4)
-                            : 3'd4;
+  // REVIEW_aug2 C-01 follow-up: this read the DRIVEN mem_we/mem_wstrb, which now depend
+  // on the store phase, so Verilator reported circular combinational logic. Use the
+  // pre-driver operand width instead -- same measurement, no feedback path.
+  assign c02_bytes = cur_is_w ? ((st_strb==4'b0001) ? 3'd1 :
+                                 (st_strb==4'b0011) ? 3'd2 : 3'd4)
+                              : 3'd4;
   always_ff @(posedge clk) if (rst_n && c02_xpage_hits) c02_count <= c02_count + 1;
   final if (c02_count != 0)
     $display("[C-02] page-crossing translated accesses (paging on): %0d -- each used the FIRST page's translation for BOTH pages", c02_count);
@@ -4543,7 +4568,8 @@ module core
         3'd1: begin
           is_big = cr4_pse && walk_pde[7];
           if (is_big) begin
-            pde = walk_pde | 32'h0000_0020 | (walk_is_write ? 32'h0000_0040 : 32'd0);
+            pde = walk_pde | 32'h0000_0020
+                | ((walk_is_write && walk_wr_ok_big) ? 32'h0000_0040 : 32'd0);  // C-04
             tlb_fill_en   = 1'b1;
             tlb_fill_big  = 1'b1;
             tlb_fill_pfn  = {pde[31:22], 10'd0};
@@ -4563,7 +4589,8 @@ module core
           end
         end
         default: begin   // step 3: PTE writeback then fill
-          pte_new = walk_pte | 32'h0000_0020 | (walk_is_write ? 32'h0000_0040 : 32'd0);
+          pte_new = walk_pte | 32'h0000_0020
+                  | ((walk_is_write && walk_wr_ok_4k) ? 32'h0000_0040 : 32'd0);  // C-04
           tlb_fill_en   = 1'b1;
           tlb_fill_big  = 1'b0;
           tlb_fill_pfn  = pte_new[31:12];
@@ -4590,6 +4617,28 @@ module core
   // H-01 helper pulses: the exact clocks the task-switch and RSM arms COMMIT a new
   // CR3. Both are the final beat of their micro-sequence, gated on mem_ack the same
   // way the commit itself is, so the flush lands on the same edge as the CR3 write.
+  // ===========================================================================
+  // REVIEW_aug2 C-04: Dirty must correspond to an ALLOWED write.
+  // ===========================================================================
+  // Permission is checked only on a TLB HIT (perm_fault). On a MISS the walker set D
+  // from walk_is_write alone, filled the TLB, and only on the FOLLOWING clock did
+  // perm_fault see RW/US and raise #PF. So a CPL3 write to a supervisor page, or a
+  // write to a read-only page under WP, DIRTIED the leaf entry even though no
+  // architectural write ever happened -- and the comment claiming "a permission fault
+  // causes no A/D writeback" was true only for an already-resident translation.
+  //
+  // walk_wr_ok evaluates the SAME rule perm_fault uses, but from the WALKED entries:
+  //   US: access allowed if the entry is user or we are supervisor
+  //   RW: write allowed if the entry is writable, or supervisor with CR0.WP clear
+  // 4 KiB combines PDE and PTE; a 4 MiB page has only the PDE. A is left alone --
+  // Accessed semantics are a separate question, per the review.
+  logic walk_usr, walk_wr_ok_big, walk_wr_ok_4k;
+  assign walk_usr       = (eff_cpl == 2'd3);
+  assign walk_wr_ok_big = (walk_pde[2] || !walk_usr)
+                       && (walk_pde[1] || (!walk_usr && !creg0[16]));
+  assign walk_wr_ok_4k  = ((walk_pde[2] & walk_pte[2]) || !walk_usr)
+                       && ((walk_pde[1] & walk_pte[1]) || (!walk_usr && !creg0[16]));
+
   logic tsw_cr3_commit, rsm_ctx_restore;
   assign tsw_cr3_commit  = (state == S_TSW_BUSY) && mem_ack && (tsw_step != 5'd0);
   assign rsm_ctx_restore = (state == S_RSM)      && (smm_step == SMM_LAST);
@@ -4782,6 +4831,25 @@ module core
         $display("[FAULT] vec=%0d err=%08h pc=%08h state=%0d v86=%0b",
                  vec, err, fault_pc, int'(state), v86);
 `endif
+      // ===================================================================
+      // REVIEW_aug2 C-02: ABORT any in-flight split memory microsequence.
+      // ===================================================================
+      // xp_pend (split LOAD) and xs_act/xs_ph (split STORE) were cleared only at reset
+      // and on successful completion. A second-page fault therefore left the transfer
+      // ARMED while exception delivery and the whole handler ran:
+      //   * the handler's next S_LOAD was redirected to the stale second page and
+      //     merged with a stale xp_lo;
+      //   * the handler's next S_STORE inherited a stale phase and xs_first;
+      //   * and on IRET-restart, page 1 was never re-read, so the restarted access
+      //     could consume pre-fault data even after the handler repaired the mapping.
+      // That is precisely the fault case the split exists to support.
+      //
+      // Placed HERE, in start_fault, for the same reason the H-09 NMI count is: every
+      // exception and interrupt delivery funnels through this task, so a divert path
+      // cannot be missed the way hand-copied guards were (that mistake produced #58).
+      xp_pend <= 1'b0;
+      xs_act  <= 1'b0;
+      xs_ph   <= 2'd0;
       // H-09: a delivery that happens while an NMI handler is running stacks a frame
       // inside it. Doing this in start_fault (rather than at each divert site) is
       // deliberate -- every exception and interrupt delivery funnels through here, so
@@ -5075,10 +5143,11 @@ module core
         // go32's `pop ds; pop word [ds:0x4f6c]` (ds!=ss, paging on) stored the popped
         // value to SS_base+0x4f6c instead of DS_base+0x4f6c, corrupting the coroutine
         // fault-dispatch word. stbase==dbase for every non-pop store (byte-identical).
-        cur_lin = (q_kind==K_STR) ? dbase_edi+str_store_addr : stbase+st_addr;
+        cur_lin = st_lin_nat;
         // REVIEW2 C-02 (store half): phases 0 (PROBE) and 2 (WRITE) address the SECOND
         // page. Mirrors core_bus_driver.svh's S_STORE arm exactly -- CHECK 5 enforces it.
-        if (xs_act && (xs_ph != 2'd1)) cur_lin = {cur_lin[31:12] + 20'd1, 12'd0};
+        // Uses the EFFECTIVE phase so the FIRST clock is the probe (REVIEW_aug2 C-01).
+        if (xs_eff_act && (xs_eff_ph != 2'd1)) cur_lin = {cur_lin[31:12] + 20'd1, 12'd0};
       end
       S_USEQ: begin
         if (q_sm==SM_PUSHA) begin

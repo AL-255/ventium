@@ -65,7 +65,8 @@
                 is_big = cr4_pse && walk_pde[7];
                 // reflect the just-written bits into the latched PDE.
                 walk_pde <= walk_pde | 32'h0000_0020
-                            | ((is_big && walk_is_write) ? 32'h0000_0040 : 32'd0);
+                            | ((is_big && walk_is_write && walk_wr_ok_big)  // REVIEW_aug2 C-04
+                               ? 32'h0000_0040 : 32'd0);
                 if (is_big) begin
                   // 4 MiB fill (PDE-writeback path) committed combinationally into
                   // u_itlb/u_dtlb this clock (tlb_fill driver below).
