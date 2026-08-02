@@ -117,11 +117,11 @@ for t in $TESTS; do
   # diagnostic -- were firing into the void: nothing in verif/ grepped for either, so
   # a real firing would have printed and been ignored, exactly the class of miss that
   # the M-08 exit-code bug was.
-  C="$(printf '%s\n' "$RAW" | grep -c 'PAGING/C-03' || true)"
+  C="$(printf '%s\n' "$RAW" | grep -c 'PAGING/C-0' || true)"
   C03=$((C03+C))
   if [[ "$C" != "0" ]]; then
     echo "  $t: $C PAGING/C-03 assertion firing(s)"
-    printf '%s\n' "$RAW" | grep 'PAGING/C-03' | head -2
+    printf '%s\n' "$RAW" | grep -E 'PAGING/C-0[34]' | head -2
   fi
   if [[ "$N" != "0" ]]; then echo "  $t: $N would-be rejections"; fi
 done
@@ -136,9 +136,9 @@ echo "  SEG-NEGATIVE-OK: zero false positives across $NRUN system tests"
 
 echo
 echo "=== 5. C-03: the address mirror and the page-crossing extent must both hold ==="
-echo "  PAGING/C-03 assertion firings across $NRUN system tests: $C03 (want 0)"
+echo "  PAGING/C-03+C-04 assertion firings across $NRUN system tests: $C03 (want 0)"
 if [[ "$C03" != "0" ]]; then
-  echo "FATAL: a PAGING/C-03 assertion fired. Either cur_lin and mem_addr disagree for"
+  echo "FATAL: a PAGING/C-03 or C-04 assertion fired. Either cur_lin and mem_addr disagree for"
   echo "       some state (the address-mirror drift this pair has suffered before), or"
   echo "       an access straddled a page boundary in a state that cannot SPLIT it --"
   echo "       in which case the tail bytes went through the wrong physical page."

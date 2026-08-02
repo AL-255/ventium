@@ -4923,9 +4923,19 @@ module core
   // omission beats silent corruption.
   //
   // NOT an $fatal: it is a diagnostic for a gap, not a broken invariant like CHECK 5.
+  // REVIEW2_aug2 C-04: this was a NON-FATAL $error, so a firing could be scrolled past
+  // in a long run -- and the finding rightly notes that "0 reachable in 68 images" is
+  // corpus coverage, not architectural unreachability. An unsplit crossing sends tail
+  // bytes to the physically adjacent frame and drops a fault page two owed; that is
+  // memory corruption, not a warning. $fatal so it cannot be ignored, and so any future
+  // reachable case stops at the point of corruption instead of continuing past it.
+  //
+  // Safe to make fatal precisely BECAUSE it does not fire today: verified 0 firings
+  // across the corpus (seg gate section 5 counts them and fails on nonzero). If it ever
+  // does fire, stopping is the correct response.
   always_ff @(posedge clk)
     if (rst_n && cross_unhandled)
-      $error("PAGING/C-03: UNSPLIT page-crossing access in state %0d -- lin=%08h size=%0d ends at %03h, past the page end. This state translates only the page the access STARTS in, so the tail bytes go through the WRONG physical page and any #PF the second page owes is never raised. pc=%08h",
+      $fatal(1, "PAGING/C-04: UNSPLIT page-crossing access in state %0d -- lin=%08h size=%0d ends at %03h, past the page end. This state translates only the page the access STARTS in, so the tail bytes go through the WRONG physical page and any #PF the second page owes is never raised. pc=%08h",
              int'(state), cur_lin, cur_size, cur_ext_end, q_pc);
 `endif
 
