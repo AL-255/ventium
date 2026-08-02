@@ -689,6 +689,30 @@ module core
   logic        a20_on;
   assign a20_on = a20_gate && a20_r;
 
+  // REVIEW2_aug2 H-14: the I-cache is LINEAR-tagged, but A20 masking is applied to the
+  // FINAL PHYSICAL address. Toggling A20 therefore changes which physical byte a fixed
+  // linear fetch denotes WITHOUT changing its tag, so a line filled with A20 enabled can
+  // be executed after A20 is disabled, or the reverse. Nothing invalidated on the
+  // transition. This is the same class as H-05 (linear tags vs aliases), and the same
+  // conservative remedy applies: flush executable state on the EDGE. A20 changes are
+  // rare -- the BIOS/DOS enable-disable sequence, and HIMEM -- so the cost is bounded,
+  // unlike flushing on every store.
+  logic a20_on_q, a20_flush;
+  always_ff @(posedge clk or negedge rst_n)
+    if (!rst_n) a20_on_q <= 1'b1;        // matches a20_r's reset value (enabled)
+    else        a20_on_q <= a20_on;
+  assign a20_flush = (a20_on != a20_on_q);
+`ifndef SYNTHESIS
+  // Reachability probe: a fix that never fires is not a fix. +ven_a20log counts the
+  // transitions, so "the a20 gate is green" cannot be mistaken for "this does anything".
+  int ven_a20_edges;
+  logic ven_a20log_en;
+  initial begin ven_a20log_en = $test$plusargs("ven_a20log") != 0; ven_a20_edges = 0; end
+  always_ff @(posedge clk) if (rst_n && a20_flush) ven_a20_edges <= ven_a20_edges + 1;
+  final if (ven_a20log_en)
+    $display("[A20FLUSH] I-cache flushes on an A20 transition: %0d", ven_a20_edges);
+`endif
+
   logic [31:0] rsm_gdtb, rsm_idtb, rsm_smbase;
   logic [15:0] rsm_gdtl, rsm_idtl;
   // REVIEW2 M-02: the save map omitted DR6/DR7 and the whole of TR/LDTR, so an SMM
@@ -6580,7 +6604,7 @@ module core
     // storing through another): those are CPU stores on ports 1/2, exact in linear
     // space but only for the aliases that share a linear address. That needs physical
     // tags or an alias map -- see task #69.
-    .flush_all       (ic_flush_all || (ic_snoop_valid && paging_on))
+    .flush_all       (ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush)
 `else
     // REVIEW Aug-1 M-06: the non-L1-AXI branch omitted .flush_all entirely, so
     // a PINMISSING warning was raised on the DEFAULT full-core build. The
@@ -6651,7 +6675,7 @@ module core
     // REVIEW2 H-16: flush the predecode array with the I-cache, for the same reason
     // and on the same condition -- otherwise the I-cache refills correct bytes while
     // this keeps serving uops predecoded from the stale ones.
-    .flush_all(ic_flush_all || (ic_snoop_valid && paging_on)),
+    .flush_all(ic_flush_all || (ic_snoop_valid && paging_on) || a20_flush),
     .inv_en(ic_fill_done), .inv_set(ic_fill_set), .inv_way(ic_fill_way),
     .pd_busy()
   );
