@@ -3750,7 +3750,7 @@ module core
       // arm (rtl/mem/tlb.sv) — u_itlb / u_dtlb. Only the page-walk FSM regs (which
       // stay in the spine) are reset here.
       walk_ret_state<=S_PIPE; walk_lin<=32'd0; walk_for_d<=1'b0;
-      walk_is_write<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
+      walk_is_write<=1'b0; walk_usr_lat<=1'b0; walk_step<=3'd0; walk_pde<=32'd0; walk_pte<=32'd0;
       walk_pde_addr<=32'd0; walk_pte_addr<=32'd0; walk_pf<=1'b0; pf_errcode<=3'd0;
       // M2S.3 IDT delivery state idle out of reset.
       int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
@@ -4147,6 +4147,7 @@ module core
         // the store may still fault on page 1 and never happen. Phase 2 walks
         // again for the real write and sets it then.
         walk_is_write  <= cur_is_w && !xs_probing;
+        walk_usr_lat   <= acc_usr;   // REVIEW1_Aug2 C-04: latch the requester's class
         walk_step      <= 3'd0;
         walk_pf        <= 1'b0;
         // PDE physical address = (CR3 & ~0xFFF) + PDIndex*4, PDIndex = lin[31:22].
@@ -4704,6 +4705,15 @@ module core
   int   ven_seg_chk_n, ven_seg_chk_ss, ven_seg_chk_es;
   logic ven_h01_ssb_prev;
   state_e ven_h01_state_prev;
+  // REVIEW1_Aug2 C-04 measurement: accesses whose paging class the fix CHANGES --
+  // CPL3 implicit system-structure references that used to be checked as user data.
+  int ven_c04_n;
+  always_ff @(posedge clk) if (!rst_n) ven_c04_n <= 0;
+    else if (paging_on && cur_is_d && mem_req_pre_sq && (eff_cpl == 2'd3) && !cur_seg_rel)
+      ven_c04_n <= ven_c04_n + 1;
+  final if (ven_seglog_en)
+    $display("[C04] CPL3 implicit system references reclassified: %0d", ven_c04_n);
+
   int ven_ioperm_n;
   always_ff @(posedge clk) if (!rst_n) ven_ioperm_n <= 0;
     else if (ioperm_needed && state == S_DECODE) ven_ioperm_n <= ven_ioperm_n + 1;
@@ -4752,6 +4762,7 @@ module core
   //   * S_INT_PUSH / S_IRET stack accesses carry no segment identity, so their SS
   //     limits are not checked at all.
   // Both need the access to carry its segment INDEX, not just a base -- see #65.
+  logic        walk_usr_lat;             // C-04: the class of the access that missed
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        xs_probing;               // C-02: the crossing-store probe phase
   logic        cur_seg_rel;              // this access is SEGMENT-RELATIVE
@@ -5072,8 +5083,31 @@ module core
   //   RW: write allowed if the entry is writable, or supervisor with CR0.WP clear
   // 4 KiB combines PDE and PTE; a 4 MiB page has only the PDE. A is left alone --
   // Accessed semantics are a separate question, per the review.
+  // ---- REVIEW1_Aug2 C-04: the PAGING ACCESS CLASS, not just the CPL --------------
+  // walk_usr and perm_fault derived user/supervisor from eff_cpl alone, with no
+  // override for IMPLICIT system-structure references. But cur_lin/translatable
+  // include S_INT_GATE, S_INT_CS, S_INT_CS_RET, S_SEGLD, S_LJMP, S_LTR, S_INT_TSS,
+  // S_INT_SS, S_IRET_SS and (new) S_IOPERM -- so when CPL3 executed a permitted
+  // software interrupt, loaded a segment, or ran an IRET path, the PROCESSOR'S OWN
+  // GDT/LDT/IDT/TSS fetch was checked as a USER data access. Real operating systems
+  // put descriptor tables and TSS pages in supervisor-only mappings, and the guest's
+  // CPL3 code is not the one reading those bytes -- the implicit access must succeed.
+  // The current tests hide it by mapping the tables user-accessible.
+  //
+  // The class is exactly "is this access segment-relative": a guest operand or stack
+  // access goes through a segment and carries the architectural CPL; an implicit
+  // descriptor/gate/TSS/page-table reference addresses memory LINEARLY and is a
+  // supervisor access. cur_seg_rel already answers that -- it was added for C-01 and
+  // is measured against all 19 system tests -- so no new classification is invented.
+  // Instruction fetch (cur_is_d=0) keeps the plain CPL rule.
+  logic acc_usr;
+  assign acc_usr = (eff_cpl == 2'd3) && (cur_is_d ? cur_seg_rel : 1'b1);
+
   logic walk_usr, walk_wr_ok_big, walk_wr_ok_4k;
-  assign walk_usr       = (eff_cpl == 2'd3);
+  // The walk runs AFTER the access that missed, and its own PTE reads are not
+  // segment-relative, so the class has to be the one latched at the divert -- not
+  // recomputed here, which would call every walk a supervisor access.
+  assign walk_usr       = walk_usr_lat;
   assign walk_wr_ok_big = (walk_pde[2] || !walk_usr)
                        && (walk_pde[1] || (!walk_usr && !creg0[16]));
   assign walk_wr_ok_4k  = ((walk_pde[2] & walk_pte[2]) || !walk_usr)
@@ -6999,7 +7033,7 @@ module core
     logic [2:0] pd, pi; logic usr, wp;
     pd  = dtlb_lk_perm;   // {US, RW, P} (D-TLB lookup at cur_lin)
     pi  = itlb_lk_perm;   // {US, RW, P} (I-TLB lookup at cur_lin)
-    usr = (eff_cpl == 2'd3);   // V86 forces effective CPL 3 (USER access)
+    usr = acc_usr;   // REVIEW1_Aug2 C-04: the access CLASS (V86 forces eff_cpl 3)
     wp  = creg0[16];
     perm_fault   = 1'b0;
     perm_fault_i = 1'b0;
