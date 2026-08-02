@@ -4936,7 +4936,11 @@ module core
             tlb_fill_big  = 1'b0;
             tlb_fill_pfn  = pte[31:12];
             tlb_fill_perm = {walk_pde[2]&pte[2], walk_pde[1]&pte[1], walk_pde[0]&pte[0]};
-            tlb_fill_dirty= walk_is_write;
+            // REVIEW1_Aug2 C-05: the TLB's dirty bit must be the LEAF ENTRY'S dirty
+            // bit, not "this was a write". The 4 MiB paths above already do exactly
+            // this (pde[6] of the raw entry, pde[6] of the updated one); the 4 KiB
+            // paths did not, and that is the asymmetry the finding names.
+            tlb_fill_dirty= pte[6];
           end
         end
         default: begin   // step 3: PTE writeback then fill
@@ -4947,7 +4951,13 @@ module core
           tlb_fill_pfn  = pte_new[31:12];
           tlb_fill_perm = {walk_pde[2]&pte_new[2], walk_pde[1]&pte_new[1],
                            walk_pde[0]&pte_new[0]};
-          tlb_fill_dirty= walk_is_write;
+          // REVIEW1_Aug2 C-05: pte_new sets D only when the write is PERMITTED
+          // (walk_wr_ok_4k), but this recorded dirty=walk_is_write unconditionally --
+          // so after a DENIED write the PTE still had D=0 while the TLB claimed the
+          // page was dirty. A later legal supervisor write to the same translation
+          // would then skip the required D-bit update, leaving PTE.D clear on a page
+          // that had genuinely been written. Record what was actually stored.
+          tlb_fill_dirty= pte_new[6];
         end
       endcase
     end
