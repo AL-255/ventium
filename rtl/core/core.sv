@@ -63,6 +63,10 @@ typedef enum logic [4:0] {
 // exactly filled a [4:0] enum).
 typedef enum logic [5:0] {
     S_RESET, S_FETCH, S_DECODE, S_LOAD, S_LOAD2, S_EXEC, S_STORE, S_USEQ, S_HALT,
+    // REVIEW_aug2 H-04: a fault while delivering #DF. Architecturally the CPU
+    // enters SHUTDOWN; here it parks with no retire, which is what the loud HALT
+    // already means to the TB, so a triple fault STOPS instead of looping.
+    S_SHUTDOWN,
     S_ENTER,    // nested ENTER (level>0): read-display + push micro-sequence
     S_FLOAD, S_FEXEC, S_FSTORE,
 `ifdef VEN_SRT_ITER
@@ -2078,6 +2082,32 @@ module core
                                   // 0x6/0x7 = 16-bit) on a gated INT delivery, or from
                                   // the IRET's effective operand size (eff_opsize) on
                                   // an IRET. Only the SAME-PRIV push/pop arm honours it.
+  // ---- REVIEW_aug2 H-04: delivery-depth escalation (#DF and shutdown) ---------
+  // There was NO delivery-depth state at all. start_fault() could re-vector an
+  // IDT-limit failure and S_INT_GATE could re-vector bad gate attributes, but each
+  // was a documented "single re-vector", so a fault while delivering a fault just
+  // started another ordinary delivery. Measured on a real image (verif/sys/tests/
+  // ppriv before soc_en was understood): an undefined opcode with an empty IDT gave
+  //     [FAULT] vec=6  err=00000000   (#UD)
+  //     [FAULT] vec=11 err=00000032   (IDT[6] not present  -> #NP, 6*8+2)
+  //     [FAULT] vec=11 err=0000005A   (IDT[11] not present -> #NP, 11*8+2)
+  //     [FAULT] vec=11 err=0000005A   ... forever
+  // A real CPU raises #DF at the second one and shuts down at the third.
+  //
+  //   dlv_depth 0 = not delivering, 1 = delivering an exception, 2 = delivering #DF.
+  // IA-32 6.15 Table 6-5: escalate to #DF when a CONTRIBUTORY fault arrives during
+  // delivery of a contributory one, or when a page fault arrives during delivery of
+  // a page fault or of a contributory one. Everything else (benign, and software
+  // INT n) nests normally, which is why the class of what is CURRENTLY being
+  // delivered has to be tracked, not merely the fact that a delivery is in flight.
+  logic [1:0] dlv_depth;
+  logic       dlv_ctrb;   // what we are delivering is CONTRIBUTORY
+  logic       dlv_pf;     // ...or is a page fault
+  function automatic logic vec_contributory(input logic [7:0] v);
+    // #DE(0), #TS(10), #NP(11), #SS(12), #GP(13). #DF itself is handled by depth.
+    vec_contributory = (v==8'd0) || (v==8'd10) || (v==8'd11) || (v==8'd12) || (v==8'd13);
+  endfunction
+
   logic        int_sw;            // delivery is a SOFTWARE INT n/INT3/INTO (the
                                   // gate DPL>=CPL privilege check applies; HW
                                   // faults / external INTs bypass it)
@@ -3628,6 +3658,7 @@ module core
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_sw<=1'b0;
+      dlv_depth<=2'd0; dlv_ctrb<=1'b0; dlv_pf<=1'b0;  // REVIEW_aug2 H-04
       // M2S.4 TR/TSS + cross-priv + inter-priv IRET state idle out of reset.
       tr_sel<=16'd0; tr_base<=32'd0; tr_limit<=32'd0; tr_valid<=1'b0; tr_attr<=8'd0;
       // M2S.4b task-switch scratch idle out of reset (the tsw_* holding regs are
@@ -4153,6 +4184,9 @@ module core
         `include "core_walk.svh"
 
         S_HALT: state<=S_HALT;
+        // REVIEW_aug2 H-04: triple fault. Terminal, like S_HALT -- no retire, no
+        // wake. Separate from S_HALT so the two are distinguishable in a trace.
+        S_SHUTDOWN: state<=S_SHUTDOWN;
 
         // F3 INTERRUPTIBLE HLT wait (system mode). EIP already points past the HLT
         // (advanced when it retired), so start_fault's pushed return = the instruction
@@ -4992,13 +5026,26 @@ module core
     else                  nmi_in_progress <= 1'b0;
   endtask
 
+  // REVIEW_aug2 H-04: escalate a fault taken DURING a delivery. Split out of
+  // start_fault so the decision is written once and start_fault stays a single
+  // straight-line commit. Returns the vector to actually deliver.
+  //   esc_df  : this pair must become #DF (vector 8, error code 0)
+  //   esc_shut: a fault arrived while #DF itself was being delivered -> shutdown
+  logic esc_shut;
+  assign esc_shut = (dlv_depth == 2'd2);
+  function automatic logic esc_to_df(input logic [7:0] v);
+    esc_to_df = (dlv_depth == 2'd1)
+             && ( (dlv_ctrb && vec_contributory(v))
+               || (dlv_pf   && (vec_contributory(v) || v == 8'd14)) );
+  endfunction
+
   task automatic start_fault(input logic [7:0] vec, input logic has_err,
                              input logic [31:0] err, input logic [31:0] fault_pc);
     begin
 `ifndef SYNTHESIS
       if (ven_faultlog_en)
-        $display("[FAULT] vec=%0d err=%08h pc=%08h state=%0d v86=%0b",
-                 vec, err, fault_pc, int'(state), v86);
+        $display("[FAULT] vec=%0d err=%08h pc=%08h state=%0d v86=%0b depth=%0d",
+                 vec, err, fault_pc, int'(state), v86, dlv_depth);
 `endif
       // ===================================================================
       // REVIEW_aug2 C-02: ABORT any in-flight split memory microsequence.
@@ -5049,6 +5096,22 @@ module core
       int_src_pc  <= fault_pc;
       int_has_err <= has_err;
       int_err     <= err;
+      // ---- REVIEW_aug2 H-04: escalation. Placed HERE, after the ordinary vector and
+      // error code are assigned, so this is the LAST word on them (a later nonblocking
+      // assignment in the same block wins). dlv_* is updated to describe what is being
+      // delivered FROM NOW, so a further fault during THIS delivery sees the new depth.
+      if (esc_to_df(vec)) begin
+        int_vec     <= 8'd8;      // #DF
+        int_has_err <= 1'b1;      // #DF always pushes an error code, and it is ZERO
+        int_err     <= 32'd0;
+        dlv_depth   <= 2'd2;
+        dlv_ctrb    <= 1'b0;      // #DF is neither contributory nor a page fault;
+        dlv_pf      <= 1'b0;      // at depth 2 the next fault shuts down regardless.
+      end else begin
+        dlv_depth   <= 2'd1;
+        dlv_ctrb    <= vec_contributory(vec);
+        dlv_pf      <= (vec == 8'd14);
+      end
       int_step    <= 4'd0;
       int_sw      <= 1'b0;        // HW fault: bypass the gate DPL>=CPL check
       // F3: in PURE real mode (PE=0) a hardware interrupt / exception delivers through
@@ -5071,6 +5134,13 @@ module core
         state       <= S_INT_GATE;
       end else
       state       <= real_mode ? S_RMINT_RD : S_INT_GATE;
+      // ---- REVIEW_aug2 H-04: SHUTDOWN. A fault arriving while #DF is being
+      // delivered is a triple fault; the CPU stops. Last assignment to `state` in
+      // this block, so it overrides every delivery target chosen above -- including
+      // the IDT-limit re-vector. Parks with no retire, which is what the loud HALT
+      // already means to the TB, so the machine STOPS instead of looping the way the
+      // measured #UD -> #NP -> #NP -> ... cascade did.
+      if (esc_shut) state <= S_SHUTDOWN;
     end
   endtask
 

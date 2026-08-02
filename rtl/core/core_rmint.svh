@@ -41,6 +41,7 @@
               retire_valid    <= 1'b1;
               int_step        <= 4'd0;
               state           <= S_PIPE;
+              dlv_depth <= 2'd0; dlv_ctrb <= 1'b0; dlv_pf <= 1'b0;  // REVIEW_aug2 H-04
             end
           end
         end

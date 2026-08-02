@@ -291,6 +291,9 @@ verify-sys:
 	# REVIEW_aug2 H-01: 16-bit PROTECTED-mode stacks (address AND pointer, plus
 	# SS.B captured at a cross-privilege delivery). Measured unreachable before.
 	bash verif/sys/run-sys-golden.sh pstk16
+	# REVIEW_aug2 H-04: a fault DURING delivery must escalate to #DF (and a fault
+	# during #DF delivery must shut down, which ppriv's sparse IDT exercises).
+	bash verif/sys/run-sys-golden.sh pdf
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh ptaskcpl
 	bash verif/sys/run-sys-golden.sh psmm

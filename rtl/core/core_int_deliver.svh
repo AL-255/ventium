@@ -276,6 +276,12 @@
               // emit it before the handler runs; all other deliveries go to S_PIPE.
               else if (db_wp_extra) state <= S_DB_EXTRA;
               else             state <= S_PIPE;
+              // REVIEW_aug2 H-04: the delivery COMPLETED -- control is now at the
+              // handler's first instruction, so a fault from here on is a fresh one,
+              // not a nested delivery fault. Clearing it here (rather than at the
+              // handler's first retire) is what makes the depth mean "a delivery is
+              // in flight" and nothing more.
+              dlv_depth <= 2'd0; dlv_ctrb <= 1'b0; dlv_pf <= 1'b0;
             end else begin
               int_step <= int_step + 4'd1;
             end

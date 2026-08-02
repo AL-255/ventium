@@ -1,0 +1,31 @@
+{
+  "name": "pdf",
+  "kind": "system",
+  "src": "pdf.S",
+  "linker": "pdf.ld",
+  "image": "pdf.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 400,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, far jump to flat 32-bit code 0x08)",
+    "GDT has only THREE entries (limit 0x17) so selector 0x80 is far past the end",
+    "IDT: vector 8 (#DF) -> df_handler with P=1; vector 13 (#GP) -> the SAME target but with P=0, so only the present bit distinguishes them",
+    "trigger: `movw %ax,%ds` with AX=0x0080 raises #GP(0x80) -- contributory",
+    "delivering it finds IDT[13] not present -> #NP(0x6A = 13*8+2) -- also contributory",
+    "contributory during contributory => #DF with error code 0 (qemu: `check_exception old: 0xd new 0xb` then `v=08 e=0000`)",
+    "df_handler runs at CPL0 and exits; #DF is an ABORT so it does not IRET"
+  ],
+  "delivery_records": {
+    "what_the_error_code_decides": "the handler grades the PUSHED ERROR CODE, not merely which handler ran. IDT[13] and IDT[8] name the same target, so if the machine had skipped the escalation and just delivered the #NP, control would still reach df_handler -- but with error code 0x6A. IA-32 requires #DF's code to be 0 regardless of what either contributing fault carried.",
+    "motivating_measurement": "before the fix, an undefined opcode against a sparse IDT looped forever: vec=6, then vec=11 err=0x32, then vec=11 err=0x5A repeating. After it, the same image gives four faults and stops -- the last one vec=11 err=0x42 (8*8+2), proving the #DF delivery was attempted before SHUTDOWN.",
+    "success_proof": "at the exit (CPL0): ebx=0 (#DF error code), ecx=the trigger's DS-load EIP (the ORIGINAL faulting instruction, not either handler), edx=0x08 (saved CS), esi=1 (df_handler entered exactly once), edi=0 (the not-reached marker after the trigger never ran); then out 0xf4 = qemu status 133"
+  },
+  "description": "REVIEW_aug2 H-04 gate: a fault taken DURING delivery must escalate to #DF, and a fault during #DF delivery must shut the machine down. There was no delivery-depth state at all -- start_fault() could re-vector an IDT-limit failure and S_INT_GATE could re-vector bad gate attributes, but each was a documented 'single re-vector', so a fault while delivering a fault just started another ordinary delivery and the machine could loop forever. The core now tracks dlv_depth plus the CLASS of what is being delivered (contributory / page fault), because IA-32 6.15 Table 6-5 escalates only for contributory-during-contributory and page-fault combinations -- benign faults and software INT n nest normally. This test isolates the escalation from the privilege machinery: no paging, no CPL3, everything at CPL0. It builds a 3-entry GDT so selector 0x80 gives a clean deterministic #GP(0x80), and an IDT where vector 13 and vector 8 name the SAME handler and differ ONLY in the present bit. That is deliberate: control reaches df_handler either way, so the test grades the PUSHED ERROR CODE (0 for a real #DF, 0x6A for a merely-delivered #NP) and the saved EIP, which must point at the original DS load rather than at any handler. QEMU implements the full table (observed: `check_exception old: 0xd new 0xb` then `v=08 e=0000`), so it is graded differentially. The shutdown half is exercised separately by the ppriv image, whose sparse IDT now terminates in four faults instead of looping."
+}
