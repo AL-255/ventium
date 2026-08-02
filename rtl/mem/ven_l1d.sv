@@ -349,6 +349,37 @@ module ven_l1d #(
   // The real fix is to split the access by its actual byte span and merge the two
   // responses (the cacheable path already builds a {next,current} window for this);
   // that needs bypass-FSM work and is tracked in task #40.
+  // ===========================================================================
+  // REVIEW2_aug2 H-11 -- NON-CACHEABLE READS ARE AMPLIFIED INTO FULL LINE BURSTS.
+  // NOT FIXED. Recorded here, at the code it indicts, rather than in a status note.
+  //
+  // A non-cacheable read reuses the FILL burst (L1_IDLE -> L1_FILL with bypass_q),
+  // so ONE architectural read becomes a 32-byte, eight-beat request -- and
+  // ven_axi_master's priming normally issues it twice. For MMIO that is not a
+  // performance question but a CORRECTNESS one: read-to-clear registers are cleared
+  // eight-plus times, FIFOs pop repeatedly, and adjacent addresses with unrelated
+  // side effects are touched.
+  //
+  // EXPOSURE: the bypass branch is taken only when `cacheable` is 0, and
+  // ventium_l1_axi ties l1d_cacheable to 1'b1 except under VEN_L1_HONOR_CD (line
+  // ~604, `~cr0_cd`). So this is live in the HONOR_CD build -- the one H-07 just
+  // repaired -- and dormant in the default one. It is not "unreachable"; it is
+  // reachable exactly where the CD feature is switched on.
+  //
+  // WHAT THE FIX REQUIRES: a width-accurate single-access path -- issue ONE beat at
+  // the exact byte address and width, and serve from that beat rather than from a
+  // 256-bit line image. That is a COORDINATED change to both halves: the fill driver
+  // (stop after one beat when bypass_q) and the L1_BYP serve (bp_line_x is indexed by
+  // c_addr[4:0] on the assumption the whole line was fetched, so a single-beat fill
+  // would leave it indexing bytes that were never read).
+  //
+  // NOT ATTEMPTED HERE, deliberately: this FSM has a recorded deadlock history
+  // (L1_FILL->L1_BYP, see the rd_hit note above), the H-07 repair in it landed only
+  // after a misdiagnosis was unwound, and a half-done split would produce exactly the
+  // silent wrong-data class this comment exists to prevent. It wants a directed
+  // read-side-effect test (a read-to-clear model in the BFM) alongside it, which does
+  // not exist yet.
+  // ===========================================================================
   logic [287:0] bp_line_x;
   assign bp_line_x = {bp_hi, bp_line};   // H-19: real high word, not zeros
   wire byp_cross = (st==L1_BYP) && (c_req && !c_we) && (c_addr[4:0] > 5'd28);
