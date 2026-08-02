@@ -1,7 +1,6 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**34 findings closed or partially closed, 3 claims refuted with evidence, 1 open (H-06:
-mechanism built and measured, validation insufficient — see §4i).**
+**35 findings closed or partially closed, 3 claims refuted with evidence, 0 open.**
 `make verify-all` = 11/11 gates. `make l1` = 17 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
@@ -141,10 +140,6 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
 - **C-10** LOCKed RMW is not atomic against DMA.
 
 **Remaining, and none of these is a small edit:**
-- **H-06** — a fetch bypass now EXISTS behind `VEN_IC_FETCH_BYPASS` and the core runs
-  at full baseline speed with no I-cache line ever validated (§4i). It is NOT claimed
-  closed: the validating measurement cannot distinguish "the bypass is serving" from
-  "this test does not reuse lines". Needs a test with real line reuse.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
 
@@ -540,18 +535,33 @@ every line is non-cacheable, so the two evicted each other's window on every str
 **That is the same single-entry mistake H-09's invalidation skid had.** I diagnosed and
 fixed it there, then rebuilt it here two commits later.
 
-### Why this is NOT claimed closed
+### The measurement that settled it
 
-The two-entry run matches the caching build EXACTLY. That is consistent with two
-different explanations: the bypass serving correctly, or `pmode` simply not reusing
-lines enough to tell the difference. I tried to discriminate with a loop-heavy image and
-picked one that needs `--cosim`, so both builds returned the same trivial 10 instructions
-and the comparison said nothing.
+The two-entry run matching the caching build EXACTLY was consistent with two different
+explanations — the bypass serving correctly, or `pmode` not reusing lines enough to tell.
+My first attempt to discriminate picked an image needing `--cosim`, so both builds
+returned the same trivial 10 instructions and it said nothing.
 
-Without a test that separates "serving from the window" from "effectively still cached",
-the result is not evidence of correctness. **The next step is a directed test with real
-line reuse** — a tight loop spanning several I-cache lines, where a true bypass MUST show
-more bus reads than the caching build.
+Sweeping the WHOLE corpus settled it. **22 of 60 images issue MORE bus reads under the
+bypass**, which is what a non-allocating fetch must do wherever lines are reused:
+
+| image | caching | bypass | delta |
+|---|---|---|---|
+| psmm | 48729 | 118777 | **+70048 (2.4x)** |
+| pv86 | 17248 | 22336 | +5088 |
+| ptaskv86 | 6468 | 8036 | +1568 |
+| pstk16 | 3044 | 4580 | +1536 |
+| pssiret | 12512 | 13728 | +1216 |
+
+`pmode` is identical in both builds because it has no line reuse — which is exactly why
+a single-image measurement proved nothing and the corpus sweep did.
+
+And it is architecturally TRANSPARENT: the final state is byte-identical to the caching
+build on all ten images checked, including the five most affected. Refetching more is the
+point; computing something different would be a bug.
+
+`run-icbypass-gate.sh` asserts BOTH halves. A gate checking only "it still runs" would be
+satisfied by a build that quietly kept caching.
 
 A note on process: I also removed a dead `VEN_IC_FETCH_BYPASS_UNUSED` block left
 mid-edit. Ifdef'd-out code referencing signals whose width has since changed is exactly
