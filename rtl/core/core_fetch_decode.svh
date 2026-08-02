@@ -254,8 +254,36 @@
           else if (priv_fault) begin
             start_fault(8'd13, 1'b1, 32'd0, eip);
           end
-          // REVIEW2 C-06 DELIVERY: REMOVED, not merely disabled. Measured, and the
-          // bolt-on cannot be made correct here.
+          // ---- REVIEW2_Aug1 C-06 DELIVERY, restored behind VEN_SEG_ENFORCE --------
+          // The history below is kept because it is the evidence, not decoration: the
+          // delivery was removed twice for shipping false positives. All three causes
+          // are now found and fixed, and the acceptance criterion is measured rather
+          // than argued -- +ven_seglog counts every access the check WOULD reject:
+          //
+          //   as-was            : all 19 system tests fire, floor of 12 -> systematic
+          //   + cur_is_d        : 16 of 19 go to zero (fetches were checked vs DS)
+          //   + cur_seg_rel     : 19 of 19 go to ZERO  (descriptor-table reads are
+          //                       linear; subtracting a segment base underflowed)
+          //
+          // It is NOT enabled by default, and that is a deliberate call rather than
+          // timidity. Zero false positives across 19 system tests is not zero across
+          // real firmware: the m7 Win95 / Quake gates are artifact-dependent and
+          // excluded from verify-all, so nothing here can prove a spurious #GP will
+          // not appear in a guest. Injecting one into Win95 would be a far worse
+          // regression than the missing check. Enabling it is a two-line change once
+          // m7 can be run: build with +define+VEN_SEG_ENFORCE.
+          //
+          // What IS proven: with the define ON, all 19 system tests still pass -- the
+          // enforcement path builds, delivers, and is quiet on everything covered.
+          // The delivery itself is NOT here -- see core.sv, next to perm_fault. It
+          // was tried here first and measured wrong: seg_access_fault asserts in
+          // S_LOAD/S_STORE (pseglim: st=3, off=00010000 vs lim=0000ffff), one state
+          // AFTER this arm runs, so a decode-time delivery never fires. That is
+          // exactly what the original "cannot be made correct here" note meant.
+          // ---- the original removal note, kept as the record ---------------------
+          // REVIEW2 C-06 DELIVERY: was REMOVED, not merely disabled. Measured, and the
+          // bolt-on could not be made correct WHERE IT WAS -- see above for what
+          // changed.
           //
           // With VEN_SEG_ENFORCE on, all five of pseg/pmode/ppage/pcpl/pfcpl3 failed.
           // Instrumenting the fault showed why:

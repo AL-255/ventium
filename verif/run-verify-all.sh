@@ -55,6 +55,13 @@ GATES=(
   # 1 MiB aliases DISTINCT), so it fails both for a build with no A20 and for one
   # that masks unconditionally.
   "a20       (A20 1 MiB alias wrap via port 0x92)|a20"
+  # REVIEW2_Aug1 C-06: per-access segment LIMIT enforcement. Also NOT differential --
+  # QEMU does not enforce segment limits at all (pseglim exits 133 there, counter 0),
+  # so a diff would fail exactly when Ventium is correct. Carries BOTH directions: the
+  # violating access must raise one #GP(0) and complete, AND the check must reject
+  # nothing across all 19 system tests. The negative half is the point -- this
+  # finding's delivery was reverted twice for shipping false positives.
+  "seg       (per-access segment limits, +/- both directions)|seg"
   # REVIEW2 M-01: FNSTENV must mask all x87 exceptions. Deliberately NOT differential
   # -- the default CW already has the mask bits set (so the corpus never reaches the
   # behaviour) and QEMU does not implement it, so a diff would fail when Ventium is

@@ -164,6 +164,20 @@ x87b:
 a20:
 	bash verif/sys/run-a20-gate.sh
 
+# --- segment-limit gate (verif/sys/run-seg-gate.sh) -------------------------
+# REVIEW2_Aug1 C-06. Per-access segment LIMIT enforcement. This CANNOT be a
+# differential test: QEMU does not enforce segment limits at all (measured --
+# pseglim exits 133 there, i.e. its #GP counter stayed 0), so a diff would fail
+# exactly when Ventium is correct. Two assertions: the violating access raises
+# exactly ONE #GP(0) and the program completes (ecx==1), and the check rejects
+# NOTHING across all 19 system tests. The second is the one that matters: this
+# finding's delivery was reverted twice for shipping false positives.
+# Builds its own objdir with +define+VEN_SEG_ENFORCE; the default build is
+# unchanged (see core_fetch_decode.svh for why enforcement is not yet default).
+.PHONY: seg
+seg:
+	bash verif/sys/run-seg-gate.sh
+
 # --- x87 environment gate (verif/sys/run-fenv-gate.sh) ----------------------
 # REVIEW2 M-01. Asserts that FNSTENV MASKS ALL x87 exceptions after storing the
 # environment (SDM Vol.2). This CANNOT be a differential test: the default CW 0x037F

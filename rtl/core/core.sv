@@ -4022,6 +4022,20 @@ module core
       // HIT, that one only on a miss -- but ordered first so the exclusion is stated,
       // not inferred. CR2 = the faulting linear address; the error code carries P=1,
       // which is what distinguishes this from the S_WALK not-present fault.
+      // ---- REVIEW2_Aug1 C-06: SEGMENT limit violation, delivered AT THE ACCESS ----
+      // Ordered BEFORE the paging faults on purpose: segmentation precedes paging, so
+      // an offset outside the segment must #GP without ever producing a linear address
+      // to translate, let alone a #PF. Delivered here, beside perm_fault, because this
+      // is where a per-access fault belongs -- the decode arm runs a state too early
+      // (measured: seg_access_fault asserts in S_LOAD, st=3).
+      // #GP(0): every access that reaches here is one whose governing descriptor dseg
+      // provably names (core_bus_driver.svh excludes the far-transfer stack states,
+      // whose base is SS but whose dseg does not follow it).
+`ifdef VEN_SEG_ENFORCE
+      if (seg_access_fault) begin
+        start_fault(8'd13, 1'b1, 32'd0, q_pc);
+      end else
+`endif
       if (perm_fault) begin
         creg2 <= cur_lin;
         start_fault(8'd14, 1'b1, perm_err, q_pc);
@@ -4589,7 +4603,21 @@ module core
              ven_h05_armed_faults);
 `endif
   logic        seg_off_over_limit, seg_null_sel, seg_not_present, seg_expand_down;
-  logic [31:0] seg_chk_base, seg_chk_off;   // REVIEW2 C-06: offset derived from cur_lin
+  // ---- REVIEW2_Aug1 C-06: the bus driver publishes its OWN segment basis --------
+  // seg_chk_base used to RECONSTRUCT the base as `(state==S_STORE) ? stbase : opbase`.
+  // That is a second copy of a decision the bus driver already makes, and it was wrong
+  // three ways: it claimed a base for descriptor-table states that use none, it used
+  // opbase for the string arms that actually use dbase_edi (the ES base), and it
+  // guessed for every state it had never heard of. Measured consequence: 6/78/18
+  // spurious rejections in pseg/pv86/ptaskv86, all with off=0xfffe0528-style
+  // underflows because a linear GDT/IDT address had a segment base subtracted from it.
+  //
+  // Now core_bus_driver.svh sets cur_seg_rel/cur_seg_base at each of the 21 sites that
+  // build an address from a segment base, right next to the base it names. The check
+  // CONSUMES that instead of re-deriving it, so the reconstruction is deleted rather
+  // than corrected -- one source, at the point of truth.
+  logic        cur_seg_rel;              // this access is SEGMENT-RELATIVE
+  logic [31:0] seg_chk_base, seg_chk_off;
   logic        seg_access_fault;
   always_comb begin
     logic [32:0] last_byte;
@@ -4692,7 +4720,7 @@ module core
     // So the delivery stays OFF and this stays a diagnostic. What changed is that the
     // remaining blocker is now a NAMED, MEASURED single missing field rather than
     // "a spurious #GP loops at 0xf020d".
-    seg_access_fault = cur_is_d
+    seg_access_fault = cur_is_d && cur_seg_rel
                     && (seg_off_over_limit || seg_null_sel || seg_not_present);
   end
 

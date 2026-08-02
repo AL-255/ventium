@@ -336,9 +336,22 @@ hang:
     hlt
     jmp     hang
 
-    /* ===================== 16-bit reset stub @ 0xFFF0 ====================== */
-    .code16
     /* ========================= #GP handler ================================ */
+    /* TEST BUG, fixed: this handler is written in 32-bit syntax (pushl/incl/movl,
+     * %esp) and runs in the 32-bit code segment 0x08 -- but a `.code16` directive
+     * for the reset stub was left IN FORCE above it, so the assembler emitted
+     * 16-bit-mode encodings. Executed with D=1 the same bytes mean something else:
+     *     66 ff 06 00 07   ->  incw (0x0700)   as assembled (16-bit)
+     *                      ->  inc dword [esi] as executed  (32-bit)
+     * ESI holds garbage on entry, so the handler dereferenced it and took a
+     * GENUINE segment-limit #GP before it could do anything -- looping forever at
+     * 0x000f020d. That loop was recorded in the previous round as C-06's "third
+     * false positive" in the CORE. It was not: the core was right and the test was
+     * mis-assembled. Measured with +ven_seglog:
+     *     [SEGCHK] st=3 dseg=2 sel=0018 base=00020000 lim=0000ffff
+     *              cur_lin=600f600d off=600d600d w=2 pc=000f020d
+     * off=0x600d600d is ESI's sentinel contents, i.e. a real out-of-limit access.
+     * The reset stub's .code16 now starts AFTER the handler, where it belongs. */
     .global gp_handler
 gp_handler:
     pushl   %eax
@@ -349,6 +362,8 @@ gp_handler:
     addl    $4, %esp                    /* discard the #GP error code */
     iret
 
+    /* ===================== 16-bit reset stub @ 0xFFF0 ====================== */
+    .code16
     .section .reset, "ax"
     .global _reset
 _reset:

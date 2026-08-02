@@ -14,6 +14,15 @@
   // ===========================================================================
   always_comb begin
     mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
+    // ---- REVIEW2_Aug1 C-06 -----------------------------------------------------
+    // Publish, next to the address, whether this access goes THROUGH A SEGMENT at
+    // all. Default: it does not. The arms that leave it 0 are exactly the ones that
+    // address memory LINEARLY -- instruction fetch, prefetch, gate/descriptor/TSS
+    // reads, page-table walks -- and subtracting a segment base from those is what
+    // produced the measured off=0xfffe0528 underflows and their spurious rejections.
+    // Set at the top of each arm that builds its address from a segment base, so it
+    // lives with the code it describes rather than in a remote list in core.sv.
+    cur_seg_rel=1'b0;
     unique case (state)
       // task #54: no bus transaction when the window is served from the I-cache.
       S_FETCH: begin mem_req=!sfetch_fast; mem_addr=flin+{27'd0,fetch_word,2'b00}; end
@@ -30,6 +39,7 @@
       end
       S_LOAD: begin
         mem_req=1'b1;
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         if (q_is_pop || q_ct==CT_RETN || q_ct==CT_RETN_IMM ||
             (q_kind==K_STKMISC && q_sm==SM_POPF))
           mem_addr=dbase+stk16(gpr_o[R_ESP]);
@@ -60,6 +70,7 @@
         if (xp_pend) mem_addr = {mem_addr[31:12] + 20'd1, 12'd0};
       end
       S_LOAD2: begin mem_req=1'b1;
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         // BOUND / CMPXCHG8B: the SECOND word is the upper bound / high dword at
         // [mem + w] (w=4 for 32-bit BOUND & CMPXCHG8B, 2 for a 16-bit BOUND).
         if (q_kind==K_BOUND || q_kind==K_CX8B) mem_addr=dbase+q_ea+{28'd0,q_w};
@@ -75,7 +86,8 @@
       // ent_val to SS:[ESP-ent_k*w]. ESP/EBP stay at their pre-ENTER values until the
       // final commit (gpr_wb), so every address is a function of ent_k off the originals.
       S_ENTER: begin
-        logic [31:0] koff, joff;
+        logic [31:0] koff, joff;   // declarations must precede statements
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         koff = {26'd0, ent_k} * {29'd0, q_w};
         joff = ({26'd0, ent_k} - 32'd1) * {29'd0, q_w};
         mem_req = 1'b1;
@@ -88,7 +100,7 @@
         end
       end
       // M2S.1 — LGDT/LIDT 6-byte read + PM descriptor fetches.
-      S_LGDT: begin mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
+      S_LGDT: begin cur_seg_rel=1'b1; mem_req=1'b1; mem_addr=dbase+q_ea+{29'd0,seg_step,2'b00}; end
       S_SEGLD: begin
         // selector source: a GPR (reg-form MOV Sreg) or the latched mem value (PM mov-sreg-from-mem)
         logic [15:0] ssel; ssel = q_seg_from_mem ? seg_mem_sel : gpr_o[q_src_reg][15:0];
@@ -103,6 +115,13 @@
       // until the S_LCALL commit, so BOTH beats reference the OLD ESP. Width q_w
       // (2 real-mode default / 4 under 0x66) selects the byte-strobe + the SP steps.
       S_LCALL: begin
+        // REVIEW2_Aug1 C-06: deliberately NOT marked segment-relative. This arm
+        // anchors on seg_base[SG_SS] directly, but `dseg` -- which supplies the
+        // DESCRIPTOR the limit check reads -- does not follow SS for the far-transfer
+        // ops (its SS condition covers push/pop/RETN/PUSHF/LEAVE/PUSHA/POPA, not
+        // SYS_LCALL/SYS_RETF/the real-mode IRET). Marking it would check an SS-based
+        // address against whatever descriptor dseg happened to name. Excluded until
+        // the access carries its own segment index; fail-open, and stated.
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=(q_w==3'd2)?4'b0011:4'b1111;
         if (!seg_step) begin
           mem_addr  = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {28'd0,q_w});    // SP - w
@@ -116,6 +135,13 @@
       // pops CS at [SS:SP+w]. ESP is unchanged until the S_RETF commit.
       S_RETF: begin
         mem_req=1'b1;
+        // REVIEW2_Aug1 C-06: deliberately NOT marked segment-relative. This arm
+        // anchors on seg_base[SG_SS] directly, but `dseg` -- which supplies the
+        // DESCRIPTOR the limit check reads -- does not follow SS for the far-transfer
+        // ops (its SS condition covers push/pop/RETN/PUSHF/LEAVE/PUSHA/POPA, not
+        // SYS_LCALL/SYS_RETF/the real-mode IRET). Marking it would check an SS-based
+        // address against whatever descriptor dseg happened to name. Excluded until
+        // the access carries its own segment index; fail-open, and stated.
         if (!seg_step) mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]);       // pop IP
         else           mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]+{28'd0,q_w}); // pop CS
       end
@@ -124,6 +150,7 @@
       // (4 bytes); beat 1 @[mem+4] = base[31:16] (2 bytes). SYS_SGDT -> GDTR, else IDTR.
       S_SGDT: begin
         mem_req=1'b1; mem_we=1'b1;
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         mem_addr = dbase + q_ea + {29'd0, seg_step, 2'b00};
         if (!seg_step) begin
           mem_wstrb = 4'b1111;
@@ -145,6 +172,7 @@
       // (beat1 @SS:SP-4), return IP (beat2 @SS:SP-6). ESP holds the OLD SP until
       // the S_RMINT_PUSH commit.
       S_RMINT_PUSH: begin
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b0011;
         mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] - {27'd0, (int_step+4'd1), 1'b0});
         unique case (int_step)
@@ -157,21 +185,32 @@
       // FLAGS (beat2 @SS:SP+4).
       S_RMIRET: begin
         mem_req=1'b1;
+        // REVIEW2_Aug1 C-06: deliberately NOT marked segment-relative. This arm
+        // anchors on seg_base[SG_SS] directly, but `dseg` -- which supplies the
+        // DESCRIPTOR the limit check reads -- does not follow SS for the far-transfer
+        // ops (its SS condition covers push/pop/RETN/PUSHF/LEAVE/PUSHA/POPA, not
+        // SYS_LCALL/SYS_RETF/the real-mode IRET). Marking it would check an SS-based
+        // address against whatever descriptor dseg happened to name. Excluded until
+        // the access carries its own segment index; fail-open, and stated.
         mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] + {27'd0, int_step, 1'b0});
       end
       S_FLOAD: begin
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         mem_req=1'b1; mem_addr=dbase+q_ea + {26'd0, f_step, 2'b00};   // base + q_ea + 4*f_step
       end
       // M11b: env/state transfers — one full dword per wide beat (f_seq_step).
       S_FENV_ST: begin
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b1111;
         mem_addr = dbase+q_ea + {25'd0, f_seq_step, 2'b00};
         mem_wdata = fenv_image[f_seq_step*32 +: 32];
       end
       S_FENV_LD: begin
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         mem_req=1'b1; mem_addr=dbase+q_ea + {25'd0, f_seq_step, 2'b00};
       end
       S_FSTORE: begin
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         mem_req=1'b1; mem_we=1'b1;
         mem_addr = dbase+q_ea + {26'd0, f_step, 2'b00};
         // the m80 third beat writes only 2 bytes; all others write a full word.
@@ -185,6 +224,7 @@
         endcase
       end
       S_STORE: begin
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         mem_req=1'b1; mem_we=1'b1;
         if (q_kind==K_STR) begin
           // string store [EDI] uses ES.
@@ -218,6 +258,7 @@
       end
       S_USEQ: begin
         mem_req=1'b1;
+        cur_seg_rel=1'b1;  // REVIEW2_Aug1 C-06: segment-relative access
         if (q_kind==K_CX8B) begin
           // CMPXCHG8B equal-case store: EBX -> [mem] (beat 0), ECX -> [mem+4] (beat 1).
           mem_we=1'b1; mem_wstrb=4'b1111;
