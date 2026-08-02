@@ -42,6 +42,25 @@
 `endif
                   start_fault(8'd14, 1'b1,
                               {29'd0, eff_cpl == 2'd3, walk_is_write, 1'b0}, q_pc);
+                end else if (is_big && (pde[21:13] != 9'd0)) begin
+                  // ---- REVIEW1_Aug2 H-03: RESERVED BITS in a 4 MiB PDE ------------
+                  // For 32-bit (non-PAE) paging without PSE-36, bits 21:13 of a
+                  // 4 MiB PDE are RESERVED and must be zero. The walker never looked:
+                  // tlb_fill_pfn is {pde[31:22], 10'd0}, so those bits were silently
+                  // DISCARDED and the access mapped somewhere the entry did not name.
+                  // IA-32 requires #PF with RSVD=1 -- and it must be raised BEFORE any
+                  // A/D writeback or TLB fill, which is why this arm sits ahead of
+                  // both. P=1 (the entry IS present; that is what distinguishes a
+                  // reserved-bit fault from a not-present one) and RSVD=1 (bit 3).
+                  //
+                  // NOT included, deliberately: the review's other example, a PDE with
+                  // PS=1 while CR4.PSE=0. The SDM has bit 7 IGNORED in that case, not
+                  // reserved, so treating the entry as an ordinary 4 KiB PDE -- which
+                  // `is_big = cr4_pse && pde[7]` already does -- is correct, and
+                  // faulting it would be a new bug.
+                  walk_pf <= 1'b1;
+                  start_fault(8'd14, 1'b1,
+                              {28'd0, 1'b1, eff_cpl == 2'd3, walk_is_write, 1'b1}, q_pc);
                 end else if (is_big) begin
                   // 4 MiB large page: PDE is the leaf. Write A/D back if needed,
                   // else fill the TLB directly (reuse step-1's PDE writeback arm).

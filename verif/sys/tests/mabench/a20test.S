@@ -20,7 +20,11 @@
  * A build with no A20 support at all fails phase 2; a build that wrongly masks all
  * the time fails phase 1. Only correct gating passes both.
  *
- * Output: "A=1111 B=3333" on the serial port, then isa-debug-exit.
+ * Output: "A=1111 B=3333 D=3333" on the serial port, then isa-debug-exit.
+ *   A: A20 ENABLED  -> the 1 MiB aliases stay DISTINCT
+ *   B: A20 DISABLED via port 0x92 -> the high write WRAPS onto the low one
+ *   D: A20 RE-ENABLED via the 8042 0xD1/0x60 sequence (REVIEW1_Aug2 H-10) -> the
+ *      aliasing STOPS, so the low location keeps B's value instead of taking 0x4444
  */
     .code16
     .section .text16,"ax"
@@ -55,6 +59,30 @@ _start16:
     movw %bx, %es:0x0510              /* now linear 0x000500 (bit 20 forced low) */
     movw 0x0500, %di                  /* DI = low location; want 0x3333 */
 
+    /* ---- phase 3: RE-ENABLE A20 through the CLASSIC 8042 SEQUENCE -------------
+     * REVIEW1_Aug2 H-10. Port 0x92 above is the "fast" A20. The route real BIOS and
+     * DOS actually use goes through the keyboard controller:
+     *     OUT 0x64, 0xD1     command: write the 8042 output port
+     *     OUT 0x60, <data>   bit 1 of <data> is A20
+     * Nothing connected that to the gate, so this sequence changed NOTHING. It is
+     * used here to RE-ENABLE A20 (bit 1 = 1) after phase 2 disabled it, so the check
+     * is that the aliasing STOPS -- which only a working KBC path can produce, and
+     * which the port-0x92 phases cannot fake.
+     * (No status-port polling: this test's 8042 is the co-sim model and the writes
+     *  complete when the OUT retires.) */
+    movb $0xD1,%al
+    movw $0x0064,%dx
+    outb %al,%dx
+    movb $0x02,%al                    /* bit 1 = 1 -> A20 ENABLED */
+    movw $0x0060,%dx
+    outb %al,%dx
+
+    movw $0x4444, %bx
+    movw %bx, %es:0x0510              /* linear 0x100500 again IF A20 is back on */
+    movw 0x0500, %bx                  /* low location: must STILL be 0x3333 */
+    movw %bx, 0x0600                  /* stash it -- puthex16 clobbers BX and CX, so
+                                       * no register survives to the print below */
+
     /* ---- diagnostic: read 0x0510 through DS (no override). If the ES override
      * were being IGNORED, the phase-1/2 writes would have landed here at linear
      * 0x0510 instead of 0x100500, which would explain A/B without A20 being
@@ -71,6 +99,9 @@ _start16:
     movb $' ',%al; outb %al,%dx
     movb $'C',%al; outb %al,%dx; movb $'=',%al; outb %al,%dx
     movw %bp,%ax; call puthex16
+    movb $' ',%al; outb %al,%dx
+    movb $'D',%al; outb %al,%dx; movb $'=',%al; outb %al,%dx
+    movw 0x0600,%ax; call puthex16  /* REVIEW1_Aug2 H-10: the 8042 A20 re-enable */
     movb $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
 
     /* clean exit via isa-debug-exit (status = (0x42<<1)|1 = 133) */

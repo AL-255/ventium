@@ -43,6 +43,33 @@
             // I/O bus exactly as before, so whatever already services 0x92 is
             // unaffected.
             if (q_io_write && q_io_port == 16'h0092) a20_r <= io_wdata[1];
+            // ---- REVIEW1_Aug2 H-10: the KEYBOARD-CONTROLLER A20 path ---------------
+            // Port 0x92 is the "fast" A20. The CLASSIC route -- which is what real BIOS
+            // and DOS use, and what HIMEM.SYS falls back to -- goes through the 8042:
+            //     OUT 0x64, 0xD1     command: write the output port
+            //     OUT 0x60, <data>   bit 1 of <data> is A20
+            // Nothing in this design connected that to the gate. ventium_top ties its
+            // a20_gate override high and the SoC modules that would decode 0x60/0x64
+            // are not in this checkout, so the classic sequence changed NOTHING and the
+            // address mask stayed put.
+            //
+            // Handled HERE for exactly the reason the port-0x92 latch is (see above):
+            // the core's S_IO arm is the one place that observes every completed I/O
+            // write in every configuration. Two-step, because the data byte's meaning
+            // depends on the command that preceded it -- kbc_d1_armed is set by the
+            // 0xD1 command and consumed by the next write to 0x60.
+            //
+            // Observed, not intercepted: both OUTs still go out on the I/O bus, so
+            // whatever services the 8042 is unaffected.
+            if (q_io_write && q_io_port == 16'h0064)
+              // 0xD1 arms the output-port write; ANY other command cancels it, so an
+              // unrelated 8042 command cannot leave the core primed to misread the
+              // next 0x60 data byte as an A20 update.
+              kbc_d1_armed <= (io_wdata[7:0] == 8'hD1);
+            if (q_io_write && q_io_port == 16'h0060 && kbc_d1_armed) begin
+              a20_r        <= io_wdata[1];
+              kbc_d1_armed <= 1'b0;
+            end
             // OUTS (K_STR ST_OUTS, routed here per element): retire with the string
             // loop EIP latched in S_EXEC (q_pc while REP has elements left, next_eip
             // on the last), exactly like the S_STORE string retire. Plain IN/OUT

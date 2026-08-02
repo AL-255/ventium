@@ -663,6 +663,7 @@ module core
   // ENABLED, matching post-reset hardware and keeping every existing configuration
   // bit-identical until software actually clears it.
   logic        a20_r;
+  logic       kbc_d1_armed;  // REVIEW1_Aug2 H-10: 8042 0xD1 seen, next 0x60 write carries A20
   // Effective gate = the platform override AND the software latch. Either can
   // disable A20; both must agree to enable it.
   logic        a20_on;

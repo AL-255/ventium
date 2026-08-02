@@ -16,7 +16,7 @@
 #   B = [0x0500] after a write through the HIGH alias with A20 DISABLED (port 0x92)
 #   C = [0x0510] read through DS, no override
 #
-# Expected: A=1111 B=3333 C=0000
+# Expected: A=1111 B=3333 C=0000 D=3333
 #
 # All three matter, and each rules out a different way of being wrong:
 #   A=1111  CONTROL. With A20 enabled the two addresses must stay DISTINCT. A build
@@ -57,7 +57,7 @@ RC=$?
 set -e
 [ "$RC" != 124 ] || { echo "A20-GATE-FAIL (timeout — the run HUNG)"; exit 1; }
 
-RES=$(printf '%s' "$OUT" | grep -oE "A=[0-9a-f]+ B=[0-9a-f]+ C=[0-9a-f]+" | head -1 || true)
+RES=$(printf '%s' "$OUT" | grep -oE "A=[0-9a-f]+ B=[0-9a-f]+ C=[0-9a-f]+ D=[0-9a-f]+" | head -1 || true)
 echo "  result: ${RES:-<no result line>}"
 
 fails=0
@@ -68,9 +68,17 @@ chk() {  # <name> <got> <want>
 A=$(printf '%s' "$RES" | sed -n 's/.*A=\([0-9a-f]*\).*/\1/p')
 B=$(printf '%s' "$RES" | sed -n 's/.*B=\([0-9a-f]*\).*/\1/p')
 C=$(printf '%s' "$RES" | sed -n 's/.*C=\([0-9a-f]*\).*/\1/p')
+D=$(printf '%s' "$RES" | sed -n 's/.*D=\([0-9a-f]*\).*/\1/p')
 chk "CONTROL: A20 ENABLED keeps 0x100500 and 0x000500 DISTINCT" "$A" "1111"
 chk "FIX:     A20 DISABLED wraps the 1 MiB alias onto 0x000500" "$B" "3333"
 chk "SANITY:  the ES override really addresses above 1 MiB"     "$C" "0000"
+# REVIEW1_Aug2 H-10: the CLASSIC keyboard-controller route (OUT 0x64,0xD1 then
+# OUT 0x60,<bit1>) had no connection to the A20 gate at all, so BIOS/DOS software
+# using it could not change the mask. Phase 3 re-enables A20 that way after phase 2
+# disabled it via port 0x92: the aliasing must STOP, so the low location keeps B's
+# 0x3333 instead of taking phase 3's 0x4444. A build where the 8042 path does
+# nothing leaves A20 disabled and reads 4444 here.
+chk "H-10:    the 8042 0xD1/0x60 sequence RE-ENABLES A20"       "$D" "3333"
 
 if [ "$fails" -ne 0 ]; then
   echo "A20-GATE-FAIL ($fails check(s) failed)"
