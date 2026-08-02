@@ -5116,9 +5116,38 @@ module core
     // So the delivery stays OFF and this stays a diagnostic. What changed is that the
     // remaining blocker is now a NAMED, MEASURED single missing field rather than
     // "a spurious #GP loops at 0xf020d".
+    // REVIEW2_aug2 C-01: DETECTION MUST FOLLOW THE SAME POLICY AS DELIVERY.
+    //
+    // This was computed unconditionally while delivery lives under
+    // `ifdef VEN_SEG_ENFORCE (core.sv ~4175) and the bus-driver SQUASH was likewise
+    // unconditional. In the DEFAULT build that gave: fault asserts -> request
+    // suppressed -> no #GP started -> the FSM waits forever for an ack that can never
+    // arrive. A latent DEADLOCK on any segment violation.
+    //
+    // MEASURED on pseglim, which violates deliberately:
+    //     default build      95 instructions, then "quiescent (core idle)"
+    //     +VEN_SEG_ENFORCE  154 instructions -- the #GP is delivered and it continues
+    //
+    // The bus-driver comment asserted this signal was "tied to the enforcement build
+    // by its own definition". It was not; I wrote that justification without checking
+    // it. Now it IS true, which makes the squash genuinely inert in the default build
+    // and keeps the two halves from drifting apart again.
+    //
+    // Why not simply enable enforcement everywhere (the review's stated preference):
+    // H-05 in the same review documents that enforcement is still architecturally
+    // INCOMPLETE when enabled, and m7 (Win95/Quake) is excluded from verify-all, so a
+    // spurious #GP in a real guest cannot be ruled out from here. Flipping the default
+    // belongs with H-05's remaining descriptor-state gaps, not ahead of them.
+`ifdef VEN_SEG_ENFORCE
     seg_access_fault = cur_is_d && cur_seg_rel
                     && (seg_off_over_limit || seg_null_sel || seg_not_present
                      || seg_type_fault);
+`else
+    // Diagnostic-only in the default build: +ven_seglog still reports what WOULD be
+    // rejected (that probe reads the sub-terms directly), but nothing suppresses an
+    // access that nothing will fault.
+    seg_access_fault = 1'b0;
+`endif
   end
 
 
@@ -6112,6 +6141,18 @@ module core
     // is TLB-resident but its Dirty bit has not yet been set in memory — that
     // first write must re-walk to set D (matching qemu's set-D-on-first-write).
     fe_xlate_pend = 1'b0;
+    // REVIEW2_aug2 C-02: HOISTED ABOVE THE FEATURE CONDITIONAL. This lived inside the
+    // `ifdef VEN_FE_PIPE branch while the `else` branch READ it -- so in the DEFAULT
+    // build it was never assigned. Verilator randomises an unassigned signal at
+    // construction, and it is read in two places that decide whether a store re-walks
+    // to set the TLB Dirty bit (here, and `walk_is_write <= cur_is_w && !xs_probing`).
+    // An ordinary store miss could therefore skip or require the Dirty walk depending
+    // on simulator seed, synthesis treatment, or power-up state -- nondeterminism in
+    // the paging datapath, not a lint nit.
+    //
+    // It derives from FSM state only (S_STORE + the crossing-store phase), so there was
+    // never a reason for it to sit inside a feature branch.
+    xs_probing = (state == S_STORE) && xs_eff_act && (xs_eff_ph == 2'd0);
 `ifdef VEN_FE_PIPE
     // page crossing -> the registered micro-TLB doesn't yet hold cur_lin's page;
     // stall 1 clock while the fe_*_q always_ff samples it (separate, runs this edge).
@@ -6131,7 +6172,6 @@ module core
     // dirty, so write permission is still enforced. D is then set by phase 2, when the
     // write actually happens and the same clean entry is walked for real -- which is
     // where it architecturally belongs.
-    xs_probing = (state == S_STORE) && xs_eff_act && (xs_eff_ph == 2'd0);
 
     // xlate_miss from the REGISTERED hit (off the critical path); 0 during the pend
     // stall (the FSM holds, no premature walk).
@@ -7672,7 +7712,13 @@ module core
       // NOTE the qualifier: mem_req_pre_sq, not mem_req. Once C-01 made
       // seg_access_fault SQUASH the request, qualifying on mem_req made this probe
       // self-defeating -- it printed nothing precisely when it had something to say.
-      if (ven_seglog_en && seg_access_fault && mem_req_pre_sq && fe_translatable)
+      // REVIEW2_aug2 C-01: read the SUB-TERMS, not seg_access_fault. That signal is now
+      // gated on VEN_SEG_ENFORCE (it had to be -- see its definition), so keying the
+      // probe off it would make this diagnostic silent in exactly the build where you
+      // most want to know what enforcement WOULD reject before flipping the default.
+      if (ven_seglog_en && mem_req_pre_sq && fe_translatable
+          && cur_is_d && cur_seg_rel
+          && (seg_off_over_limit || seg_null_sel || seg_not_present || seg_type_fault))
         $display("[SEGCHK] st=%0d dseg=%0d sel=%04h base=%08h lim=%08h attr=%02h ed=%b | cur_lin=%08h off=%08h w=%0d cpl=%0d pc=%08h",
                  int'(state), int'(cur_seg_idx), seg_sel[cur_seg_idx], seg_chk_base, dlimit,
                  seg_attr[cur_seg_idx], seg_expand_down, cur_lin, seg_chk_off, q_w,

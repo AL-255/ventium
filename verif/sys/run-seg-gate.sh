@@ -147,4 +147,40 @@ fi
 echo "  C03-OK: address mirror agrees, and no unsplit page-crossing access occurred"
 
 echo
+echo "=== 6. C-01: a violation must not DEADLOCK the DEFAULT build ==="
+# REVIEW2_aug2 C-01: seg_access_fault was computed UNCONDITIONALLY while delivery lived
+# under `ifdef VEN_SEG_ENFORCE and the bus-driver squash was likewise unconditional. In
+# the default build that gave: fault asserts -> request suppressed -> no #GP started ->
+# the FSM waits forever for an ack that can never arrive.
+#
+# This gate could not see it: every check above builds with +define+VEN_SEG_ENFORCE.
+# Hence a DEFAULT-BUILD case, and it needs a witness rather than an instruction count --
+# the TB reports "quiescent (core idle)" for a NORMAL exit too (pseglim included), so
+# "fewer instructions" cannot tell completion from a hang. psegdl parks 0x5eed11fe in ebp
+# immediately before its isa-debug-exit; reaching that value IS the liveness assertion.
+#
+#   measured pre-fix  default build ebp = 0x00000000   (hung on the violating load)
+#   measured post-fix default build ebp = 0x5eed11fe   (both accesses completed)
+DEFTB="$REPO/verif/tb/obj_dir/tb_ventium"
+make -s -C "$REPO/verif/sys/tests/psegdl" >/dev/null 2>&1 || true
+DLIMG="$REPO/verif/sys/tests/psegdl/psegdl.bin"
+if [[ -x "$DEFTB" && -f "$DLIMG" ]]; then
+  "$DEFTB" --system --image "$DLIMG" --out "$REPO/build/sys/psegdl.vtrace" \
+      --max-insn 500 --quiesce 300 >/dev/null 2>&1 || true
+  DLEBP="$(tail -1 "$REPO/build/sys/psegdl.vtrace" 2>/dev/null | \
+           python3 -c 'import sys,json;print(json.loads(sys.stdin.read()).get("ebp"))' 2>/dev/null)"
+  echo "  default-build liveness witness ebp = ${DLEBP:-<none>}  (want 0x5eed11fe)"
+  if [[ "$DLEBP" != "0x5eed11fe" ]]; then
+    echo "FATAL: a segment violation DEADLOCKED the default build."
+    echo "       seg_access_fault must not be computed in a build that cannot DELIVER"
+    echo "       the fault -- the squash suppresses the access and the FSM then waits"
+    echo "       forever for an acknowledgement that can never arrive."
+    exit 1
+  fi
+  echo "  C01-OK: a violating load+store complete in the default build (no deadlock)"
+else
+  echo "  SKIP: default TB or psegdl.bin missing"
+fi
+
+echo
 echo "SEG-GATE-OK  (C-06: per-access segment limits enforced; positive + negative)"
