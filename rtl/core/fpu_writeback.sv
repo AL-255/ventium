@@ -1117,7 +1117,13 @@ module fpu_writeback
     // path FLD/FLD1/FLDPI, slow path FLD m32/m64/m80, FILD, FBLD ...) all funnel
     // through them. fptag bit i is 1 when fpr[i] is EMPTY.
     fp_stk_ovf =  fp_we_push               && !fptag[ftop - 3'd1];  // push onto a LIVE slot
-    fp_stk_unf = (fp_we_pop || fp_we_pop2) &&  fptag[ftop];         // pop an EMPTY ST(0)
+    // REVIEW2_aug2 H-16: POP2 retires TWO registers (FCOMPP/FUCOMPP pop ST(0) AND
+    // ST(1)), and only ST(0)'s tag was checked. A pop2 with a LIVE ST(0) over an EMPTY
+    // ST(1) is an underflow that went entirely undetected -- the common shape after a
+    // single FLD, where exactly one register is live and a compare-and-pop-both
+    // consumes one register that exists and one that does not.
+    fp_stk_unf = (fp_we_pop  &&  fptag[ftop])                       // pop an EMPTY ST(0)
+              || (fp_we_pop2 && (fptag[ftop] || fptag[ftop + 3'd1]));  // either of the two
 
     // The RESPONSE is behind VEN_X87_STKFLT; the DETECTION above is always live so
     // +ven_stklog can measure reachability in the shipping build.

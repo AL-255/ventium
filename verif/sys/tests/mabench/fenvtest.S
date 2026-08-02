@@ -400,6 +400,32 @@ _start16:
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
 
+    /* ==== REVIEW2_aug2 H-16: POP2 must check BOTH retired registers =============
+     * FCOMPP/FUCOMPP pop ST(0) AND ST(1). The detection I wrote last round checked
+     * only ST(0), so a pop2 with a LIVE ST(0) over an EMPTY ST(1) was missed entirely
+     * -- and that is the COMMON shape: after a single FLD exactly one register is
+     * live, and a compare-and-pop-both consumes one that exists and one that does not.
+     *
+     *   S4 = FSW after FCOMPP with only ST(0) live. IE|SF must be set (C1=0,
+     *        underflow). Before the fix: no fault flags at all.
+     */
+    fninit                            /* all empty, IM masked */
+    fld1                              /* exactly ONE register live */
+    fcompp                            /* pops ST(0) and ST(1) -- ST(1) is EMPTY */
+    fnstsw  0x0768
+    movw    0x0768, %ax
+    andw    $0x0241, %ax              /* IE(0x0001) | SF(0x0040) | C1(0x0200) */
+    movw    %ax, 0x076a               /* S4 */
+
+    movw    $0x03F8,%dx
+    movb    $'S',%al; outb %al,%dx
+    movb    $'4',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x076a, %ax
+    call    puthexw
+    movw    $0x03F8,%dx
+    movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
+
     /* clean exit via isa-debug-exit (status = (0x42<<1)|1 = 133) */
     movb $0x42,%al; movw $0xF4,%dx; outb %al,%dx
 9:  hlt; jmp 9b

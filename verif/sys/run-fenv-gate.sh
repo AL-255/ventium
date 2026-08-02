@@ -236,6 +236,21 @@ else
   echo "  PASS FWAIT #NM only when CR0.MP and CR0.TS are BOTH set"
 fi
 
+# REVIEW2_aug2 H-16: FCOMPP/FUCOMPP retire TWO registers, and the detection checked only
+# ST(0). A pop2 with a LIVE ST(0) over an EMPTY ST(1) went undetected -- the common shape
+# after a single FLD. Read from the VEN_X87_STKFLT build (the response is gated there).
+# Measured: pre-fix 0000, post-fix 0041 (IE|SF, C1=0).
+S4=$(printf '%s' "$SOUT" | grep -oE "S4=[0-9a-f]+" | head -1 | cut -d= -f2)
+echo "  pop2 over one live register: FSW(IE|SF|C1) = ${S4:-<none>} (want 0041)"
+if [ "$S4" != "0041" ]; then
+  [ "$S4" = "0000" ] && echo "  FAIL pop2 raised nothing — only ST(0)'s tag is being checked"
+  [ "$S4" = "0241" ] && echo "  FAIL C1 is SET; an underflow must report C1=0"
+  [ "$S4" != "0000" ] && [ "$S4" != "0241" ] && [ -n "${S4:-}" ] && echo "  FAIL unexpected '$S4'"
+  fenv_fail=1
+else
+  echo "  PASS pop2 checks BOTH retired registers (IE+SF, C1=0)"
+fi
+
 if [ "$fenv_fail" = 0 ]; then
   echo "FENV-GATE-OK"
   exit 0
