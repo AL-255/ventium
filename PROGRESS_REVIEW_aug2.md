@@ -1,6 +1,7 @@
 # Ventium — progress against REVIEW_aug2.md
 
-**Six findings closed (C-01…C-05 previously, then C-07, H-05, H-06, H-01, H-04).
+**Nine findings closed (C-01…C-05 previously, then C-07, H-05, H-06, H-01, H-04),
+plus REVIEW2_Aug1's last critical made actionable (§8).
 `make verify-all` = 10/10 gates. `verify-sys` grew from 15 tests to 19.**
 
 Written for a review run, so it leads with what to attack and where I am least
@@ -171,7 +172,51 @@ This is the check I would apply to every prior "fixed" claim in the tree.
 
 ---
 
-## 8. What I would question first in a review
+## 8. REVIEW2_Aug1 reconciliation (the earlier review), and its last critical
+
+The two reviews number several of the same defects differently. Verified by reading
+`REVIEW2_Aug1.md` out of git (`git show f6f6ced:REVIEW2_Aug1.md` — it is no longer in
+the working tree):
+
+| REVIEW2_Aug1 | REVIEW_aug2 | closed by |
+|---|---|---|
+| **C-10** IRET restores privilege/flags without validation | C-07 | `87a7852`, `pssiret` |
+| **C-07** stack address size does not follow SS.B | H-01 | `a83e199`, `pstk16` |
+| **H-03** (nested-delivery / #DF escalation half) | H-04 | `140ff92`, `pdf` |
+| **H-09** NMI cleared at IRET decode | H-05 | `c2b21ee`, step 7c |
+
+That leaves **C-06 (per-access segment protection)** as its last open critical, and
+this session moved it from unexplained to actionable.
+
+`+ven_seglog` logs every access the limit check *would* reject, without faulting. It
+found the third false positive immediately, and it is not subtle:
+
+```
+[SEGCHK] st=1 dseg=2 sel=0000 lim=0000ffff cur_lin=000f0066 off=000f0066 pc=00000066
+```
+
+`st=1` is **S_FETCH**. The whole block reads `seg_attr[dseg]`/`seg_limit[dseg]` and
+derives its offset from the data segment's base — it describes a *data* access — but
+was never qualified on the access being one, so **every instruction fetch was
+limit-checked against DS**. That is the "spurious #GP looping at 0xf020d" the previous
+round reverted delivery for. Qualifying on `cur_is_d` takes **16 of 19 tests to zero**.
+
+The three that remain are one class — `pseg` 6, `pv86` 78, `ptaskv86` 18 — all
+descriptor-table reads (`cur_lin` 0x528 = GDT, 0x1068 = IDT). They address memory
+**linearly**, so subtracting the data segment's base underflows (`off=fffe0528`) and
+every one trivially exceeds the limit. They are data-side, so `cur_is_d` cannot
+separate them.
+
+**The blocker is now exactly one bit: "is this access segment-relative."** Writing it
+here as a state list would recreate the very mirror that caused this family —
+`seg_chk_base` already *is* such a copy of the bus driver's base selection, which is
+precisely why it is wrong for these states. It belongs in the per-access descriptor.
+Delivery stays off; the diagnostic ships. Acceptance test for the descriptor work:
+`+ven_seglog` reports **zero** across all 19 sys tests.
+
+---
+
+## 9. What I would question first in a review
 
 1. **The C-07 restructure** — it moved when *every* inter-privilege IRET commits. The
    evidence is `pssiret` plus 19 green sys tests; verify it independently.
