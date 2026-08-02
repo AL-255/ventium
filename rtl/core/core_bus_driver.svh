@@ -538,17 +538,18 @@
     // ordinary data operand, so it is already covered by the normal data path -- it
     // was only in this list by association with the other "descriptor" states.
     //
-    // The S_TSW_* task-switch states are also still excluded, deliberately and
-    // separately: they have no cur_lin cases at all, so making them translatable
-    // without mirroring their addresses first would look up one linear address and
-    // drive another -- exactly the C-03 failure. Tracked in #67.
+    // REVIEW1_Aug2 C-09: the S_TSW_* states are NO LONGER excluded. They now have
+    // cur_lin cases mirroring these arms exactly (core.sv), so they translate like any
+    // other linear access and CHECK 5 holds them in step.
     if (paging_on && state != S_WALK &&
         // REVIEW_aug2 C-05: S_LGDT REMOVED from this exclusion -- LGDT/LIDT reads an
         // ordinary linear operand and must translate under paging (it was reading a
         // physical address). It now has a cur_lin case and is in `translatable`.
-        state != S_SMI_SAVE && state != S_RSM &&
-        state != S_TSW_SAVE && state != S_TSW_READ && state != S_TSW_LDT &&
-        state != S_TSW_SEG && state != S_TSW_BUSY) begin
+        // REVIEW1_Aug2 C-09: the five S_TSW_* states are OUT of this exclusion. They
+        // now have cur_lin cases mirroring their arms above, so the task-switch
+        // microsequence translates like every other linear access instead of driving
+        // GDT/TSS linear addresses straight at physical memory.
+        state != S_SMI_SAVE && state != S_RSM) begin
       // CRITICAL (Phase-3 [high] fix): on a TLB MISS this clock the FSM diverts to
       // S_WALK (the clocked block, gated on the same `xlate_miss`), so the bus this
       // clock belongs to the PAGE WALK, not to this state's access. But `state` is

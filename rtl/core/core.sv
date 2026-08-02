@@ -4717,6 +4717,17 @@ module core
   state_e ven_h01_state_prev;
   // REVIEW1_Aug2 C-04 measurement: accesses whose paging class the fix CHANGES --
   // CPL3 implicit system-structure references that used to be checked as user data.
+  // REVIEW1_Aug2 C-09 measurement: task-switch accesses that now TRANSLATE. Zero would
+  // mean the corpus never performs a task switch with paging on, i.e. the fix is
+  // correct but unexercised.
+  int ven_c09_n;
+  always_ff @(posedge clk) if (!rst_n) ven_c09_n <= 0;
+    else if (paging_on && mem_req_pre_sq &&
+             (state==S_TSW_SAVE || state==S_TSW_READ || state==S_TSW_LDT ||
+              state==S_TSW_SEG  || state==S_TSW_BUSY)) ven_c09_n <= ven_c09_n + 1;
+  final if (ven_seglog_en)
+    $display("[C09] paged task-switch accesses translated: %0d", ven_c09_n);
+
   int ven_c04_n;
   always_ff @(posedge clk) if (!rst_n) ven_c04_n <= 0;
     else if (paging_on && cur_is_d && mem_req_pre_sq && (eff_cpl == 2'd3) && !cur_seg_rel)
@@ -5817,6 +5828,27 @@ module core
       S_LTR:     cur_lin = gdt_base + {16'd0, gpr_o[q_src_reg][15:3], 3'd0}
                            + {29'd0, seg_step, 2'b00};
       // REVIEW1_Aug2 M-03: mirrors the S_IOPERM arm in core_bus_driver.svh verbatim.
+      // ---- REVIEW1_Aug2 C-09 (paging half): the task-switch microsequence ---------
+      // All five S_TSW_* states were excluded from the paging post-stage because they
+      // had no cur_lin cases, so a paged non-identity task switch read and wrote the
+      // WRONG PHYSICAL MEMORY and could not raise the page faults it must. GDT and TSS
+      // bases are LINEAR architectural addresses, so these are ordinary translated
+      // supervisor accesses -- and after C-04 they are correctly classified as
+      // supervisor, because none of these arms sets cur_seg_rel.
+      //
+      // Each case mirrors its core_bus_driver.svh arm EXACTLY; CHECK 5 asserts the two
+      // agree on every translatable request, which is the guard that makes adding a
+      // mirror safe rather than the drift that produced the C-05 family.
+      S_TSW_SAVE: cur_lin = tr_base + {24'd0, tsw_save_off(tsw_step)};
+      S_TSW_READ: cur_lin = tsw_new_base + {24'd0, tsw_read_off(tsw_step)};
+      S_TSW_LDT:  cur_lin = gdt_base + {16'd0, tsw_new_ldt[15:3], 3'd0}
+                          + {29'd0, tsw_step[0], 2'b00};
+      S_TSW_SEG:  cur_lin = (tsw_sel[3'(tsw_step[4:1])][2] ? ldt_base : gdt_base)
+                          + {16'd0, tsw_sel[3'(tsw_step[4:1])][15:3], 3'd0}
+                          + {29'd0, tsw_step[0], 2'b00};
+      S_TSW_BUSY: cur_lin = (tsw_step == 5'd0)
+                          ? (gdt_base + {16'd0, tr_sel[15:3], 3'd0} + 32'd4)
+                          : (gdt_base + {16'd0, tsw_new_sel[15:3], 3'd0} + 32'd4);
       S_IOPERM: cur_lin = (int_step == 4'd0)
                         ? (tr_base + 32'h64)
                         : (tr_base + {16'd0, ioperm_base} + {19'd0, ioperm_port[15:3]});
@@ -5863,6 +5895,8 @@ module core
       S_SEGLD, S_LJMP, S_LTR, S_INT_TSS, S_INT_SS,
       S_IRET_SS: translatable = 1'b1;
       S_IOPERM:  translatable = 1'b1;   // REVIEW1_Aug2 M-03: a TSS read, so it pages
+      // REVIEW1_Aug2 C-09: the task switch now pages like every other linear access.
+      S_TSW_SAVE, S_TSW_READ, S_TSW_LDT, S_TSW_SEG, S_TSW_BUSY: translatable = 1'b1;
       default: translatable = 1'b0;
     endcase
     // S_PIPE only reads memory when a load or an icache fill is requested.
