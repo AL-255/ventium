@@ -1,6 +1,7 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**19 findings closed or partially closed, 3 claims refuted with evidence, 11 open.**
+**27 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
+and reverted with its measurement, 6 open.**
 `make verify-all` = 11/11 gates. `make l1` = 14 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
@@ -31,6 +32,11 @@ Commits `a5bab55` … HEAD on `ao486-mister-sim`.
 | **M-03** | the TSS I/O bitmap was never consulted -- all CPL>IOPL I/O denied | no-op when no bitmap exists |
 | **M-04** (part) | 16-bit x87 env forms wrote the 28/108-byte image over a 14/94-byte object | now loud instead of corrupting |
 | **M-07** | port 0x92 bit 0 (fast reset) silently dropped | `fast_reset_req` output + `S_SHUTDOWN` |
+| **C-03** (part) | the crossing split covered only `S_LOAD` | `S_LOAD2` added; `pxpage` CMPSD, eflags `0x46` vs `0x87` |
+| **C-04** | implicit descriptor/TSS refs used CPL3 paging class | **86** reclassified per pv86 run |
+| **C-09** | task switch unpaged, unvalidated, incrementally committed | all four parts; ptask/ptaskcpl/ptaskv86 EQUIVALENT |
+| **C-10** (part) | the core never *requested* a locked transaction | `bp_req_lock` driven; AXI side deliberately not |
+| **H-12** (part) | FSW.ES was never derived, so the B mirror was inert | `SW=8081` vs `0001` reverted |
 
 ### M-08 deserves separate attention
 
