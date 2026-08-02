@@ -6479,6 +6479,23 @@ module core
 `endif
 
 `ifdef VEN_IC_FETCH_BYPASS
+  // REVIEW2_aug2 H-13: MEASURED COST of honouring CR0.CD on instruction fetch, with the
+  // two builds confirmed different by checksum first (an earlier "0% cost" reading here
+  // turned out to be a build compared against itself):
+  //
+  //     psmm   21268 -> 38780 clocks   +82%
+  //     pv86    8971 -> 10243          +14%
+  //     ppage   2567 ->  2783           +8%
+  //     pmode / pcpl / pfault           ~0%
+  //
+  // Left DEFAULT-OFF, and the reason is architectural rather than squeamish: CR0 resets
+  // with CD=1, and a real 486/P5 BIOS CLEARS CD/NW after POST. A guest that never clears
+  // it runs uncached forever -- that is the guest's defect, and paying up to 82% in the
+  // CPU to paper over it is the wrong trade for a design whose target is Win95 + Quake.
+  // The datapath is REAL and validated (H-06: 22/60 corpus images refetch, final state
+  // byte-identical); only the default is off. Driving it from the physical memory type
+  // as well needs ven_cachemap, which is on an unmerged branch.
+  //
   // CR0.CD (bit 30) is the driver the comment above says had nothing safe to drive it.
   assign ic_fill_nocache = creg0[30];
 `else
