@@ -261,11 +261,11 @@ module ven_l1d #(
   // (or vice versa) a non-cacheable read would either serve stale data or never be
   // served at all. Under VEN_L1_HONOR_CD the bypass FSM is deliberately disabled (see
   // the L1_IDLE arm), so there the capture must stay ungated or the read deadlocks.
-`ifdef VEN_L1_HONOR_CD
-  localparam bit BYPASS_RD_EN = 1'b0;
-`else
+// REVIEW1_Aug2 H-07: this was 0 under VEN_L1_HONOR_CD, so a non-cacheable read was
+// served from the ARRAY -- returning pre-CD data, and for MMIO duplicating or
+// suppressing read side effects. It is now 1 in both builds; see the L1_IDLE arm and
+// the c_ack gating below for the two changes that make that non-deadlocking.
   localparam bit BYPASS_RD_EN = 1'b1;
-`endif
   assign do_rd_cap = c_req && !c_we && rd_hit && (st==L1_IDLE) && !rd_match
                      && !snoop_inv_valid
                      && !(BYPASS_RD_EN && !cacheable);   // H-18: CD/KEN# read bypass
@@ -380,7 +380,14 @@ module ven_l1d #(
     if (c_req) begin
       if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;  // write-through forwards EVERY write (allocate disabled) -> ack on backing
       // REVIEW2 H-13: same gating on the combinational-ack variant.
-      else                 c_ack = (rd_hit && (st==L1_IDLE) && !flush_all && !snoop_inv_valid)
+      // REVIEW1_Aug2 H-07: the ARRAY ack term must not fire for a non-cacheable read of
+      // a RESIDENT line -- that is precisely the "resident data returned after CD is
+      // set" the finding describes, and it would also ack with stale data on the same
+      // clock the L1_IDLE arm starts the bypass fill. Gated HERE, on the ack term,
+      // rather than on rd_hit: rd_hit is also consulted by the POST-FILL serve, and
+      // gating it there is what made the previous attempt deadlock.
+      else                 c_ack = (rd_hit && (st==L1_IDLE) && !flush_all && !snoop_inv_valid
+                                    && !(BYPASS_RD_EN && !cacheable))
                                  || (st==L1_BYP);                            // non-cacheable bypass serve
     end
 `else
@@ -393,6 +400,8 @@ module ven_l1d #(
     c_ack   = 1'b0;
     if (c_req) begin
       if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;  // write-through forwards EVERY write (allocate disabled) -> ack on backing
+      // REVIEW1_Aug2 H-07: same array-ack suppression as the combinational variant
+      // above -- see the comment there for why this is on the ack term, not rd_hit.
       // REVIEW2 H-13: suppressing the CAPTURE during a snoop was not enough. If a
       // window was armed on the PREVIOUS clock and the snoop arrives on the SERVE
       // edge, rd_match is still true (it compares only the address, never current
@@ -438,23 +447,29 @@ module ven_l1d #(
       end
       unique case (st)
         L1_IDLE: begin
-`ifdef VEN_L1_HONOR_CD
-          // VEN_L1_HONOR_CD: honor CR0.CD for the perf-critical WRITE path only. When
-          // cacheable=0 (CD=1, BIOS POST) a write MISS goes write-through with NO 8-beat
-          // write-allocate fill (the ao486-parity path, handled by the comb driver +
-          // the write-allocate gate `&& cacheable` below). READS still take the normal
-          // ALLOCATING path (bypass-read DISABLED here) — it is correct (returns the
-          // fresh line) and, crucially, avoids the under-tested non-cacheable bypass-read
-          // FSM (L1_FILL→L1_BYP) that deadlocks in the full-core+bridge context. Reads
-          // during POST are sequential, so the fill amortizes; writes were the 8x cost.
-          if (1'b0) begin  // bypass-read path intentionally disabled under VEN_L1_HONOR_CD
-`else
+          // REVIEW1_Aug2 H-07: this branch was `if (1'b0)` under VEN_L1_HONOR_CD, on the
+          // grounds that the bypass FSM "deadlocks in the full-core+bridge context".
+          // The recorded deadlock was real but was caused by a DIFFERENT change --
+          // gating rd_hit itself on `cacheable`, which also suppresses the POST-FILL
+          // serve, so the read never acks (see the rd_hit comment above).
+          //
+          // The serve path this needs already exists and does NOT consult rd_hit:
+          //     c_ack   = (array hit ...) || (st==L1_BYP)
+          //     c_rdata = (st==L1_BYP) ? bp_line_x[...] : rd_window[...]
+          // L1_BYP serves from the PRIVATE bp_line buffer and acks on state alone. The
+          // one thing missing was suppressing the ARRAY ack term for a non-cacheable
+          // read of a RESIDENT line -- otherwise c_ack fired from the array with stale
+          // data on the same clock this branch started the bypass fill. That gating is
+          // on the c_ack term, NOT on rd_hit, which is the whole distinction.
+          //
+          // NOTE this branch was also dead in the non-HONOR_CD build: there
+          // ventium_l1_axi ties l1d_cacheable to 1'b1, so `!cacheable` never held. The
+          // FSM was unreachable in BOTH configurations, which is why the review calls
+          // it untested.
           if (c_req && !c_we && !cacheable) begin
             // NON-CACHEABLE READ (KEN# negated): fetch the addressed line into the
             // private bp_line buffer (no array touch, no LRU), then serve the word in
-            // L1_BYP. Reuses the FILL burst; allocates NOTHING. (cacheable=1 never
-            // takes this branch, so the path below is unchanged.)
-`endif
+            // L1_BYP. Reuses the FILL burst; allocates NOTHING.
             fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             fw <= 3'd0;  bypass_q <= 1'b1;  st <= L1_FILL;
             // H-19: does this access need bytes from the following line?

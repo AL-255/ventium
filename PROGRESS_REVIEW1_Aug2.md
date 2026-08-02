@@ -1,7 +1,6 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**33 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
-and reverted with its measurement, 2 open (H-06, H-07 — one shared bypass).**
+**34 findings closed or partially closed, 3 claims refuted with evidence, 1 open (H-06).**
 `make verify-all` = 11/11 gates. `make l1` = 17 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
@@ -141,13 +140,12 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
 - **C-10** LOCKed RMW is not atomic against DMA.
 
 **Remaining, and none of these is a small edit:**
-- **H-06 / H-07** — these two DO share a datapath: a non-allocating bypass that can
-  deliver bytes without allocating a line. H-06 needs it on the fetch side
-  (`ic_fill_nocache` is tied to 0; the I-cache is also the fetch datapath, so merely
-  poisoning the fill livelocks). H-07 needs it on the L1D read side
-  (`BYPASS_RD_EN=0` under `VEN_L1_HONOR_CD`). H-07 was attempted directly, DEADLOCKED
-  the core, and was reverted with its measurement (§3).
-  **H-05 was NOT part of this** — see §4g; that framing was mine and it was wrong.
+- **H-06** — the same bypass idea on the FETCH side. `ic_fill_nocache` is tied to 0,
+  and the I-cache is itself the fetch datapath, so merely poisoning the fill livelocks:
+  the fetch has nowhere else to get its bytes. Needs a fetch path that can deliver
+  instruction bytes without a valid I-cache line. H-07's fix does NOT carry over —
+  the L1D already had a private bypass buffer and an `st==L1_BYP` serve; the I-side has
+  neither. This is the last open finding.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
 
@@ -465,6 +463,51 @@ My first attempt assumed `icache` had `fetch_req`/`fetch_valid` ports. It does n
 is array-exposed and driven by the core's FSM. Rebuilt on `tb_icache_snoop`'s proven
 harness, which also has the useful property of driving snoop PORT 1 — the CPU store port
 that gate deliberately ties off, and which therefore had no coverage at all until now.
+
+---
+
+## 4h. H-07 — the deadlock was my own, not the FSM's
+
+This tree recorded that the non-cacheable bypass FSM "deadlocks in the full-core+bridge
+context", and I repeated that for the whole cycle as the reason H-07 could not be
+closed. Reading the code, two things were true that the note did not capture.
+
+**The serve path the review asks for already existed.**
+
+```systemverilog
+c_ack   = (rd_hit && st==L1_IDLE && ...) || (st==L1_BYP);
+c_rdata = (st==L1_BYP) ? bp_line_x[...] : rd_window[...];
+```
+
+`L1_BYP` acks on STATE ALONE and serves from the private `bp_line` buffer. Neither term
+consults `rd_hit`. That is already "a serve path that does not depend on a cacheable
+hit".
+
+**The deadlock came from a different change — mine.** I had gated `rd_hit` itself on
+`cacheable`. But `rd_hit` is ALSO consulted by the post-fill serve, so the fill
+completed and then never acked. The file's own comment records the symptom
+(`got 00000000` / `no ack`) without identifying that as the cause, and I took the
+symptom for a property of the FSM.
+
+The actual missing piece was one term: suppress the **array ack** — not `rd_hit` — when
+a non-cacheable read hits a resident line. Without it `c_ack` fired from the array with
+stale data on the same clock the L1_IDLE arm started the bypass fill.
+
+| | pre-fix (`HONOR_CD`) | now |
+|---|---|---|
+| nc read of a resident line | `a5a54200` (stale) | `deadbeef` (fresh) |
+
+**The branch was dead in BOTH configurations.** Under `VEN_L1_HONOR_CD` it was
+`if (1'b0)`; in the default build `ventium_l1_axi` ties `l1d_cacheable` to `1'b1`, so
+`!cacheable` never held. That is why the review calls the FSM untested — it was
+unreachable either way.
+
+### Two verification gaps closed with it
+
+- the L1D gate ran only the default build, so `[9c]` never exercised the configuration
+  the finding lives in. It now runs `VEN_L1_HONOR_CD` as a third configuration.
+- my first attempt at that addition broke the build by putting a space and a `+` into
+  the `-Mdir` path.
 
 ---
 

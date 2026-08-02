@@ -13,22 +13,29 @@ trap 'rm -rf "$OBJ"' EXIT
 # past their end AND split the address at the wrong bit -- silently wrong data, not a
 # compile error. The 128 run is the regression; the 64 run is what actually proves the
 # split now FOLLOWS the parameter. A 64-set build of the old body could not pass.
-run_one() {  # <sets>
-  local sets="$1"
-  local dir="$OBJ/s$sets"
+run_one() {  # <sets> [extra-defines] [label]
+  local sets="$1"; local defs="${2:-}"; local label="${3:-}"
+  local dir="$OBJ/s${sets}${label// /_}"
   mkdir -p "$dir"
   verilator --binary -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
-      -Wno-INITIALDLY -Wno-IMPLICITSTATIC --top-module tb_l1d \
+      -Wno-INITIALDLY -Wno-IMPLICITSTATIC $defs --top-module tb_l1d \
       -GTB_L1_SETS="$sets" -Mdir "$dir" -o tb_l1d \
       "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/verif/l1/tb_l1d.sv" > "$dir/build.log" 2>&1 \
-      || { echo "L1D-GATE-FAIL (build, L1_SETS=$sets)"; tail -20 "$dir/build.log"; exit 1; }
+      || { echo "L1D-GATE-FAIL (build, L1_SETS=$sets $label)"; tail -20 "$dir/build.log"; exit 1; }
   local out
   out="$("$dir/tb_l1d" 2>&1)"
   echo "$out"
-  grep -q "L1D-GATE-OK" <<<"$out" || { echo "L1D-GATE-FAIL (L1_SETS=$sets)"; exit 1; }
-  echo "-- L1D gate PASS at L1_SETS=$sets --"
+  grep -q "L1D-GATE-OK" <<<"$out" || { echo "L1D-GATE-FAIL (L1_SETS=$sets $label)"; exit 1; }
+  echo "-- L1D gate PASS at L1_SETS=$sets $label --"
 }
 
 run_one 128
 run_one 64
-echo "== L1D gate PASS (both geometries: the set/tag split follows L1_SETS) =="
+# REVIEW1_Aug2 H-07: the finding lives in the VEN_L1_HONOR_CD build -- that is the
+# configuration where BYPASS_RD_EN was 0 and a non-cacheable read of a resident line
+# was served from the ARRAY (stale post-CD data; for MMIO, duplicated or suppressed
+# read side effects). The gate ran only the default build, so [9c] never exercised it
+# and the fix would have been untested in CI. Measured on the pre-fix tree this run
+# reports: FAIL nc read of resident line is FRESH: got a5a54200 exp deadbeef.
+run_one 128 "-DVEN_L1_HONOR_CD" "HONOR_CD"
+echo "== L1D gate PASS (both geometries + the VEN_L1_HONOR_CD read-bypass path) =="
