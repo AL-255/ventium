@@ -499,9 +499,42 @@ module ventium_l1_axi #(
 `endif
     end else begin : g_nol2
       // L2 bypassed: the backing port is transparent (byte-identical to pre-L2).
-      assign b_req = m_req;   assign b_we = m_we;   assign b_addr = m_addr;
-      assign b_wdata = m_wdata; assign b_wstrb = m_wstrb;
-      assign m_rdata = b_rdata; assign m_ack = b_ack;
+      // REVIEW1_Aug2 H-08: this branch is the one that BUILDS, and it consumed
+      // smm_active nowhere -- so the A0000-BFFFF SMRAM aperture was reachable by
+      // ordinary (non-SMM) code. SMM's entire security model is that its RAM is
+      // invisible outside SMM; without this the handler's code and saved state can be
+      // read or rewritten by the guest. The EN_L2=1 branch enforces it through
+      // ven_cachemap, but those sources are on an unmerged branch (see PROGRESS §4f),
+      // so the buildable path needs the check itself.
+      //
+      // 82437FX SMRAM register (0x72): bit 3 = DEN (SMM space enabled), bit 6 = DOPEN
+      // (aperture forced open so the BIOS can initialise it). DRAM-backed iff
+      // DEN && (DOPEN || in SMM) -- so a NON-SMM access with DEN set and DOPEN clear
+      // must NOT reach DRAM.
+      //
+      // Denied accesses are completed as an unbacked aperture (reads 0, writes
+      // dropped) rather than stalled. That is deliberate: real hardware forwards them
+      // to the video aperture, there is no PCI path in this config to forward to, and
+      // withholding the ack would HANG the core -- which is exactly how the H-07
+      // attempt failed. The ack is registered rather than combinational so it cannot
+      // form a loop with the requester's req-until-ack handshake.
+      //
+      // INERT AT THE DEFAULT NB_SMRAM=8'h00 (DEN=0): byte-identical to before unless
+      // a configuration actually enables SMRAM.
+      logic smram_deny, smram_deny_q;
+      assign smram_deny = NB_SMRAM[3] && !NB_SMRAM[6] && !smm_active
+                       && (m_addr >= 32'h000A_0000) && (m_addr < 32'h000C_0000);
+      always_ff @(posedge core_clk or negedge core_rst_n)
+        if (!core_rst_n) smram_deny_q <= 1'b0;
+        else             smram_deny_q <= m_req && smram_deny && !smram_deny_q;
+
+      assign b_req = m_req && !smram_deny;
+      assign b_we  = m_we  && !smram_deny;
+      assign b_addr = m_addr;
+      assign b_wdata = m_wdata;
+      assign b_wstrb = smram_deny ? 4'd0 : m_wstrb;
+      assign m_rdata = smram_deny_q ? 32'd0 : b_rdata;
+      assign m_ack   = smram_deny_q ? 1'b1  : b_ack;
       assign l2_ready = 1'b1;
 `ifdef VEN_L1_HONOR_CD
       // honor CR0.CD: when the BIOS disables the cache (CD=1, e.g. the POST memory test),

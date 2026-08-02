@@ -1,8 +1,8 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**30 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
-and reverted with its measurement, 3 open.**
-`make verify-all` = 11/11 gates. `make l1` = 14 gates (was 13). `verify-sys` = 19 tests.
+**32 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
+and reverted with its measurement, 1 open.**
+`make verify-all` = 11/11 gates. `make l1` = 16 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
 
@@ -141,10 +141,10 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
 - **C-10** LOCKed RMW is not atomic against DMA.
 
 **Remaining, and none of these is a small edit:**
-- **H-05…H-09** — cache coherence across virtual aliases, I-side cacheability, the
-  `VEN_L1_HONOR_CD` read path, the no-L2 config's cache map / coherent DMA / SMRAM
-  isolation, and the ao486 L2 invalidation skid. Several reference modules that are not
-  in this checkout.
+- **H-05/H-06/H-07** — one shared non-allocating bypass datapath seen from three
+  angles: coherence across virtual aliases, I-side cacheability, and the
+  `VEN_L1_HONOR_CD` read path. H-07 was attempted directly, DEADLOCKED the core, and
+  was reverted with its measurement (§3). This is the one genuinely open finding.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
 
@@ -349,6 +349,66 @@ Self-tested by removing `S_LOAD` from the split-capable set: fires exactly once 
 
 **The rework itself is still open.** This makes the gap measurable, loud and gated; it
 does not close it.
+
+---
+
+## 4f. H-08 / H-09 — I was wrong that these were unfixable here
+
+I wrote "no source in this checkout" for H-08 and H-09 across several updates. That was
+wrong, and it came from paraphrasing my own earlier summary instead of reading
+REVIEW1_Aug2.md. **Both findings name files that are in this tree.**
+
+- H-08 targets `rtl/mem/ventium_l1_axi.sv:500-529` — the `EN_L2=0` branch, i.e. the one
+  that BUILDS. Only its `EN_L2=1` half references the northbridge modules.
+- H-09 targets `3rd-party/ao486_MiSTer/rtl/cache/l2_cache.v:90-111`, a live submodule.
+
+Even the northbridge sources exist — on an unmerged branch
+(`worktree-agent-ae43c03eda066c796` @ `b511932`, verified NOT an ancestor of HEAD, and
+`rtl/northbridge/` has history in this repo but is absent from HEAD's tree). So the
+accurate statement was never "absent"; it was "the L2-enabled half lives on a branch
+this one does not contain."
+
+That is the FOURTH time this round I called something blocked that was not (C-09,
+M-04's second half, and C-03's reachability were the others).
+
+### H-09 — the skid lost invalidations two ways, and one was silent
+
+```
+port FREE, one PENDING, a fresh pulse arrives:
+  sequential : `else if (l2_inv_pend && !update_tag_we)` -> l2_inv_pend <= 0
+  combinational: l2_inv_go_a = l2_inv_pulse ? fresh : pending   -> FRESH wins
+  result     : the pending set is retired WITHOUT being applied
+```
+
+Case 1 (a colliding pulse overwriting the held address) at least printed a warning.
+This one had none. A dropped invalidation leaves a stale L2 line valid, so a later read
+returns data another master has overwritten — silent memory corruption.
+
+Replaced with a **pending bitmap**, one bit per set. This works because invalidation
+here is IDEMPOTENT and SET-INDEXED: duplicates collapse with no loss of meaning, so the
+state needed is 128 bits rather than a queue of addresses. Lossless at any pulse rate
+with no producer contract — which is exactly what the review said was missing.
+
+The gate runs BOTH directions. The original skid loses **5 of 8** requested sets.
+
+### H-08 — SMRAM was reachable on the configuration that ships
+
+`smm_active` was consumed only inside the `EN_L2=1` branch. On the buildable path,
+ordinary code could read and rewrite the SMM handler and its saved state at A0000-BFFFF,
+which is the entirety of SMM's security model.
+
+Added the 82437FX DEN/DOPEN rule (`DRAM iff DEN && (DOPEN || in SMM)`) to the buildable
+path. Denied accesses complete as an unbacked aperture rather than stalling — deliberate,
+because withholding the ack is precisely how the H-07 attempt hung the core. Inert at the
+default `NB_SMRAM=0x00`.
+
+### A test that passed for the wrong reason
+
+My first SMRAM test had case C (non-SMM read) passing EVEN IN THE BROKEN BUILD: case B
+had already clobbered the secret, so the read trivially differed from it. C was not
+independent of B. Re-seeding from SMM before the read makes it discriminate — the
+reverted build now fails both B and C rather than only B. Same lesson as E3/E7 in §4b:
+a witness that depends on an earlier witness's failure proves nothing.
 
 ---
 
