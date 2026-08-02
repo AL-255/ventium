@@ -271,13 +271,32 @@ caseC:
     .align 16
 caseE:
     movl    %esp, 0x00002078            /* ESP immediately before the frame is built */
-    movl    $caseD, 0x00002080          /* where the fault handler resumes */
+    movl    $caseF, 0x00002080          /* where the fault handler resumes */
     movl    $0x00000010, 0x00002084     /* expected error code = the CS selector */
     pushfl
     orl     $0x00000200, (%esp)         /* IF set in the PUSHED image only */
     pushl   $0x00000010                 /* CS = flat DATA selector -> NOT code */
     pushl   $user_entry                 /* EIP */
     iret                                /* must #GP(0x10), committing nothing */
+
+    /* ============================ CASE F ================================
+     * REVIEW1_Aug2 H-01: a NULL returned-to CS must raise #GP(0), not #NP.
+     * GDT[0] is the ordinary all-zero descriptor, so its P bit is 0 -- and the fault
+     * vector was chosen from P alone, which picked #NP(11). Null is a #GP(0) case and
+     * its error code is ZERO, not the selector, so both the vector and the code
+     * distinguish the fix: #NP would route to the shared 11/12 handler instead of the
+     * #GP one, and a selector-derived code would be 0x0000 anyway -- which is why the
+     * VECTOR is what this case grades, via the 0x2094 marker.
+     */
+    .align 16
+caseF:
+    movl    $caseD, 0x00002080          /* where the fault handler resumes */
+    movl    $0x00000000, 0x00002084     /* expected error code = 0 for a null selector */
+    pushfl
+    orl     $0x00000200, (%esp)
+    pushl   $0x00000000                 /* CS = NULL selector */
+    pushl   $user_entry
+    iret                                /* must #GP(0) -- vector 13, code 0 */
 
     /* ============================ CASE D ================================
      * The WELL-FORMED frame: SS = 0x23 (idx4 RPL3), a present writable DPL3
@@ -420,7 +439,7 @@ fault_common:
 sys_exit:
     movl    0x000020B0, %ebp            /* EBP = faults taken            (want 3) */
     movl    0x000020B4, %ebx            /* EBX = error codes correct     (want 3) */
-    movl    0x000020B8, %ecx            /* ECX = frames NOT pre-committed(want 4) */
+    movl    0x000020B8, %ecx            /* ECX = frames NOT pre-committed(want 5) */
     movl    0x0000207C, %eax            /* EAX = case E's ESP gap  (want 36 = 0x24) */
     movl    0x0000208C, %edx            /* EDX = CPL3 reached sentinel (0xC3C3C3C3) */
     movl    0x00002090, %esi            /* ESI = user SS               (want 0x23) */

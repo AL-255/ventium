@@ -618,8 +618,8 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
     H05="$("$TB" --image "$IMG" --system --out /dev/null --max-insn "$MAXI" \
             --quiesce 400 +ven_nmi_arm 2>&1 | sed -n 's/.*\[H05\][^:]*: //p')"
     echo "  H-05: faults delivered from an IRET with NMI still armed: ${H05:-<none>}"
-    if [[ "${H05:-0}" != "4" ]]; then
-      echo "FATAL: pssiret H-05: expected 4 armed-NMI IRET faults, got '${H05:-<none>}'."
+    if [[ "${H05:-0}" != "5" ]]; then
+      echo "FATAL: pssiret H-05: expected 5 armed-NMI IRET faults, got '${H05:-<none>}'."
       echo "       0 means the NMI re-arm happened at IRET DECODE again, so an IRET"
       echo "       that FAULTS re-enables NMI while the original frame is still live."
       exit 1

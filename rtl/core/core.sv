@@ -2206,6 +2206,17 @@ module core
   // Same shape as iret_ss_ok: written ONCE here because the FSM arm and the ESP
   // writeback are different always blocks. The rule is the CS-return validation that
   // already lived in S_INT_CS_RET, lifted out verbatim.
+  // ---- REVIEW1_Aug2 H-01: a selector must be INSIDE its descriptor table ---------
+  // IRET read the popped CS/SS descriptor without ever consulting gdt_limit/ldt_limit,
+  // so a selector past the end of the table read arbitrary memory AS a descriptor --
+  // and then validated whatever came back. The check has to happen BEFORE the read,
+  // not as another term in iret_cs_ok/iret_ss_ok, because the read itself is the
+  // defect. A descriptor occupies sel[15:3]*8 .. +7, so its last byte must be <= limit.
+  function automatic logic sel_in_table(input logic [15:0] sel);
+    sel_in_table = ({16'd0, sel[15:3], 3'd7} <=
+                    {17'd0, (sel[2] ? ldt_limit : gdt_limit)});
+  endfunction
+
   logic [7:0] iret_cs_attr_w;
   logic       iret_cs_ok, iret_cs_commit;
   assign iret_cs_attr_w = mem_rdata[15:8];   // access byte of {mem_rdata, int_lo}

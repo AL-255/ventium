@@ -72,7 +72,10 @@
                   // values; they simply stay staged across the descriptor read.
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
-                  state        <= S_INT_CS_RET;
+                  // REVIEW1_Aug2 H-01: table-limit check BEFORE the descriptor read.
+                  if (!sel_in_table(iret_cs))
+                    start_fault(8'd13, 1'b1, {16'd0, iret_cs} & 32'h0000_FFFC, int_src_pc);
+                  else state <= S_INT_CS_RET;
                 end
               end
               4'd3: begin iret_esp <= mem_rdata;         int_step <= 4'd4; end
@@ -92,7 +95,9 @@
                   // reads.
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
-                  state        <= S_INT_CS_RET;
+                  if (!sel_in_table(iret_cs))   // REVIEW1_Aug2 H-01
+                    start_fault(8'd13, 1'b1, {16'd0, iret_cs} & 32'h0000_FFFC, int_src_pc);
+                  else state <= S_INT_CS_RET;
                 end
               end
               // ---- M7.2 V86-return tail: pop ES, DS, FS, GS (beats 5..8) --------
@@ -187,8 +192,15 @@
               // expression, one definition.
               cs_bad = !iret_cs_ok;
               if (cs_bad) begin
-                start_fault(!cs_a[7] ? 8'd11 : 8'd13, 1'b1,
-                            {16'd0, int_gate_sel} & 32'h0000_FFFC, int_src_pc);
+                // REVIEW1_Aug2 H-01: fault SELECTION, not just detection. The vector was
+                // chosen from P alone, so a NULL selector -- whose GDT[0] is the ordinary
+                // all-zero non-present descriptor -- raised #NP instead of the required
+                // #GP(0). Null is decided first and carries error code 0; only a
+                // well-formed-but-absent descriptor is #NP.
+                start_fault((int_gate_sel[15:2] == 14'd0) ? 8'd13
+                            : (!cs_a[7] ? 8'd11 : 8'd13), 1'b1,
+                            (int_gate_sel[15:2] == 14'd0) ? 32'd0
+                            : ({16'd0, int_gate_sel} & 32'h0000_FFFC), int_src_pc);
               end else begin
               int_step         <= 4'd0;
               if (iret_interpriv) begin
@@ -199,6 +211,10 @@
                 iret_cs_limit    <= desc_limit(desc);
                 iret_cs_attr     <= desc_attr(desc);
                 iret_cs_d        <= desc[54];
+                // REVIEW1_Aug2 H-01: the outer SS selector needs the same check.
+                if (!sel_in_table(iret_ss))
+                  start_fault(8'd13, 1'b1, {16'd0, iret_ss} & 32'h0000_FFFC, int_src_pc);
+                else
                 state            <= S_IRET_SS;   // read + validate outer SS, then commit ALL
               end else begin
                 // SAME-PRIVILEGE return: there is no SS to validate, so this IS the
