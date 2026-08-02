@@ -17,7 +17,7 @@
             if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
             else begin
               logic [63:0] desc; logic [7:0] dattr; logic [15:0] dsel;
-              logic bad_sel, bad_type, not_present;
+              logic bad_sel, bad_type, not_present, lldt_null;
               desc  = {mem_rdata, gdt_lo};
               dattr = desc_attr(desc);
               dsel  = gpr_o[q_src_reg][15:0];
@@ -32,12 +32,23 @@
               //   * descriptor must be Present                    -> #NP(sel & 0xFFFC)
               // The error code for a descriptor-sourced fault is the selector with the
               // low two bits cleared (EXT=0, IDT=0 -- this is a GDT reference).
-              bad_sel     = (dsel[15:3] == 13'd0) || dsel[2]
-                         || ({16'd0, dsel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit});
-              bad_type    = dattr[4]   // S must be 0 (system descriptor)
-                         || (q_sysop==SYS_LLDT ? (dattr[3:0] != 4'h2)
-                                               : (dattr[3:0] != 4'h9));
-              not_present = !dattr[7];
+              // REVIEW2_aug2 H-10: a NULL selector is legal for LLDT and illegal for
+              // LTR, so the two cannot share this term. `lldt $0` is the ordinary way
+              // software INVALIDATES LDTR (every task switch to a task with no LDT does
+              // it), and rejecting it with #GP breaks that outright. LTR keeps the null
+              // rejection: TR must always name a real TSS.
+              lldt_null   = (q_sysop == SYS_LLDT) && (dsel[15:3] == 13'd0) && !dsel[2];
+              bad_sel     = !lldt_null
+                         && ((dsel[15:3] == 13'd0) || dsel[2]
+                          || ({16'd0, dsel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit}));
+              // A null LLDT names no descriptor, so there is nothing to type- or
+              // present-check; the GDT[0] bytes just read are the null descriptor and
+              // must be ignored rather than validated.
+              bad_type    = !lldt_null
+                         && (dattr[4]   // S must be 0 (system descriptor)
+                          || (q_sysop==SYS_LLDT ? (dattr[3:0] != 4'h2)
+                                                : (dattr[3:0] != 4'h9)));
+              not_present = !lldt_null && !dattr[7];
               if (bad_sel || bad_type) begin
                 seg_step <= 1'b0;
                 start_fault(8'd13, 1'b1, {16'd0, dsel[15:2], 2'b00}, q_pc);
@@ -49,9 +60,12 @@
                 // LLDT: load the LDTR hidden base/limit from the GDT LDT descriptor.
                 // REVIEW2 M-02: also keep the SELECTOR. It was being discarded here,
                 // so the LDTR's architectural half did not exist anywhere in the core.
-                ldt_sel   <= dsel;
-                ldt_base  <= desc_base(desc);
-                ldt_limit <= desc_limit16(desc);
+                // REVIEW2_aug2 H-10: a null selector INVALIDATES LDTR -- selector 0 and
+                // a zero limit, so any later LDT-backed reference is out of range rather
+                // than resolving through a stale base.
+                ldt_sel   <= lldt_null ? 16'd0 : dsel;
+                ldt_base  <= lldt_null ? 32'd0 : desc_base(desc);
+                ldt_limit <= lldt_null ? 16'd0 : desc_limit16(desc);
               end else begin
                 tr_sel   <= dsel;
                 tr_base  <= desc_base(desc);
