@@ -4619,6 +4619,8 @@ module core
              ven_h05_armed_faults);
 `endif
   logic        seg_off_over_limit, seg_null_sel, seg_not_present, seg_expand_down;
+  logic [31:0] seg_ed_upper;      // expand-down upper bound (by the segment's B bit)
+  logic        seg_type_fault;    // write to non-writable / read of execute-only
   // ---- REVIEW2_Aug1 C-06: the bus driver publishes its OWN segment basis --------
   // seg_chk_base used to RECONSTRUCT the base as `(state==S_STORE) ? stbase : opbase`.
   // That is a second copy of a decision the bus driver already makes, and it was wrong
@@ -4657,6 +4659,16 @@ module core
     a      = seg_attr[cur_seg_idx];
     // Data-segment type bits (S=1, bit4): bit3=0 data, bit2=E expand-down, bit1=W.
     seg_expand_down = a[4] && !a[3] && a[2];
+    // The expand-down upper bound follows the B bit of the segment governing THIS
+    // access. The core caches B only for SS (ss_b) and D for CS (cs_d); there is no
+    // per-segment array. Expand-down segments are essentially always stacks, so SS is
+    // the case that exists and it is exact. For a non-SS expand-down data segment the
+    // bound falls back to 4 GiB, which is FAIL-OPEN (it can miss a violation, never
+    // invent one) -- stated rather than silently assumed, and it needs the same
+    // per-access descriptor work as the rest of C-01 to do properly.
+    seg_ed_upper = (cur_seg_idx == 3'(SG_SS))
+                 ? (ss_b ? 32'hFFFF_FFFF : 32'h0000_FFFF)
+                 : 32'hFFFF_FFFF;
     // MEASURED (UPDATE 355): this fired spuriously inside the Err79 #GP handler with
     // dseg=2 dlimit=00000000 attr=00 -- the hidden descriptor cache was EMPTY, not "a
     // descriptor that says not-present". This core has no "descriptor has been loaded"
@@ -4700,17 +4712,35 @@ module core
     // Real access extent: last touched byte = offset + (width-1), not a fixed +3.
     last_byte = {1'b0, seg_chk_off} + {30'd0, q_w} - 33'd1;
     if (seg_expand_down)
-      // Expand-down: the VALID range is (limit, max], so an access is out of range
-      // when its FIRST byte is at or below the limit. (max is 0xFFFF/0xFFFFFFFF by
-      // SS.B; the upper end is covered by the wrap, not by this check.)
+      // Expand-down: the VALID range is (limit, upper], so an access is out of range
+      // when its FIRST byte is at or below the limit -- OR when its LAST byte passes
+      // the upper bound. REVIEW1_Aug2 C-01: only the lower half was checked, and the
+      // comment claimed "the upper end is covered by the wrap", which is not a check.
+      // The upper bound is 0xFFFF when the segment's B bit is clear and 0xFFFFFFFF
+      // when it is set (SDM 3.4.5.1), so a 16-bit expand-down stack could address
+      // above 64 KiB unchallenged. last_byte is 33-bit, so an extent that wraps past
+      // the top exceeds it too rather than aliasing back into range.
       seg_off_over_limit = sys_mode && !real_mode && a[7]
-                        && ({1'b0,seg_chk_off} <= {1'b0,dlimit});
+                        && (({1'b0,seg_chk_off} <= {1'b0,dlimit})
+                         || (last_byte > {1'b0, seg_ed_upper}));
     else
       // a[7] (P) REQUIRED: with an unpopulated descriptor cache (attr=00, limit=0)
       // EVERY offset trivially exceeds a zero limit. Measured at 0xf02f1 in the Err79
       // handler, where this produced a spurious #GP that broke m6.
       seg_off_over_limit = sys_mode && !real_mode && a[7]
                         && (last_byte > {1'b0,dlimit});
+    // ---- REVIEW1_Aug2 C-01: TYPE permission, not just the limit --------------
+    // Nothing checked what the segment PERMITS, only how big it is, so a write
+    // through a read-only data segment and a read through an execute-only code
+    // segment both reached memory. Data-segment type bits (S=1, bit3=0): bit1 = W.
+    // Code (S=1, bit3=1): bit1 = R, and a code segment is never writable.
+    //   a[7] (P) is required for the same reason the limit check requires it -- an
+    //   unpopulated descriptor cache reads as attr=00 and would trivially "fail"
+    //   every rule. Real mode and non-segment-relative accesses are excluded by the
+    //   composite below, exactly as for the limit.
+    seg_type_fault = sys_mode && !real_mode && a[7] && a[4]
+                  && ( cur_is_w ?  (a[3] || !a[1])   // write: code seg, or data !W
+                                : ( a[3] && !a[1])); // read : execute-only code seg
     // The composite the delivery arm consumes.
     // ---- REVIEW2_Aug1 C-06, THIRD false positive (measured, +ven_seglog) --------
     // This whole block describes a DATA access -- it reads seg_attr[dseg]/
@@ -4754,7 +4784,8 @@ module core
     // remaining blocker is now a NAMED, MEASURED single missing field rather than
     // "a spurious #GP loops at 0xf020d".
     seg_access_fault = cur_is_d && cur_seg_rel
-                    && (seg_off_over_limit || seg_null_sel || seg_not_present);
+                    && (seg_off_over_limit || seg_null_sel || seg_not_present
+                     || seg_type_fault);
   end
 
 

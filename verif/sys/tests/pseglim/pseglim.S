@@ -347,7 +347,29 @@ seglim_store_resume:
     movw    $0x10, %ax                  /* restore a flat ES */
     movw    %ax, %es
     movl    0x00030000, %ebp            /* ebp = the witness: MUST still be 0x5EEDF00D */
-    movl    0x00000700, %ecx            /* ecx = 2 iff BOTH #GPs were delivered */
+
+    /* ---- REVIEW1_Aug2 C-01: TYPE permission, not just the limit ------------
+     * Selector 0x20 is a READ-ONLY flat data segment (type 0x0). This file already
+     * loaded it and read through it, with a comment saying a write "would #GP --
+     * deliberately avoided so this test does not fault". Nothing checked segment
+     * TYPE at the time, so that write would in fact have gone straight to memory.
+     * Now it must fault, so do it -- with a witness, because a type violation
+     * corrupts memory in exactly the same way a limit violation does.
+     * The segment is FLAT (base 0, limit 4 GiB), so nothing here is a limit case:
+     * this isolates the type rule. */
+    movl    $0x1111AAAA, 0x00030010     /* seed through the flat DS */
+    movl    $segtype_resume, %eax
+    movl    %eax, 0x00000704
+    movw    $0x20, %ax
+    movw    %ax, %ds                    /* DS := READ-ONLY flat data segment */
+    movl    $0x2222BBBB, %eax
+    movl    %eax, 0x00030010            /* #GP(0): write through a read-only segment */
+segtype_resume:
+    movw    $0x10, %ax                  /* flat RW DS again */
+    movw    %ax, %ds
+    movl    0x00030010, %edi            /* edi = witness: MUST still be 0x1111AAAA */
+
+    movl    0x00000700, %ecx            /* ecx = 3 iff ALL THREE #GPs were delivered */
 
     /* restore DS to the flat RW selector so the final state is well-defined */
     movw    $0x10, %ax

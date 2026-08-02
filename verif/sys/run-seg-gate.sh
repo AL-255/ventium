@@ -18,9 +18,9 @@
 #
 # WHAT IT ASSERTS
 #   1. POSITIVE: pseglim's out-of-limit LOAD and out-of-limit STORE each raise a
-#      #GP(0) (ecx == 2), the program runs to completion, AND the store's target
-#      memory is UNTOUCHED -- the fault must suppress the access, not merely follow
-#      it (REVIEW1_Aug2 C-01).
+#      #GP(0), as does a WRITE THROUGH A READ-ONLY segment (ecx == 3), the program
+#      runs to completion, AND both violating stores' target memory is UNTOUCHED --
+#      the fault must suppress the access, not merely follow it (REVIEW1_Aug2 C-01).
 #   2. NEGATIVE: across every system test, the check rejects NOTHING. This is the
 #      false-positive tripwire, and it is the assertion that matters -- C-06's
 #      delivery was reverted twice for shipping false positives, so "it fires on the
@@ -55,11 +55,11 @@ LOG="$("$TB" --image "$IMG" --system --out "$OUT" --max-insn 900 --quiesce 400 \
 NGP="$(printf '%s\n' "$LOG" | grep -c 'vec=13 ' || true)"
 GPPC="$(printf '%s\n' "$LOG" | sed -n 's/.*vec=13 .*pc=\([0-9a-f]*\).*/\1/p' | head -1)"
 echo "  #GP(13) deliveries: $NGP   at pc=${GPPC:-<none>} (first)"
-if [[ "$NGP" != "2" ]]; then
-  echo "FATAL: expected exactly TWO #GP (one load violation, one STORE violation);"
+if [[ "$NGP" != "3" ]]; then
+  echo "FATAL: expected exactly THREE #GP (limit-load, limit-STORE, read-only WRITE);"
   echo "       got $NGP."
   echo "       0 = the limit violation was not caught (enforcement inert)."
-  echo "       1 = one of the two forms is not checked."
+  echo "       <3 = one of the three forms is not checked (limit vs type)."
   echo "       >2 = the handler itself is faulting (a false positive, which is how"
   echo "            this finding's delivery got reverted the last two times)."
   printf '%s\n' "$LOG" | grep FAULT | head -8
@@ -73,6 +73,13 @@ fi
 # untouched. Without the squash it reads 0xcafebabe (the store's data).
 EBP="$(tail -1 "$OUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["ebp"])')"
 echo "  witness at the violating store's target = $EBP  (want 0x5eedf00d)"
+EDI="$(tail -1 "$OUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["edi"])')"
+echo "  witness at the read-only write's target = $EDI  (want 0x1111aaaa)"
+if [[ "$EDI" != "0x1111aaaa" ]]; then
+  echo "FATAL: a write through a READ-ONLY data segment reached memory."
+  echo "       0x2222bbbb means seg_type_fault did not fire or did not suppress."
+  exit 1
+fi
 if [[ "$EBP" != "0x5eedf00d" ]]; then
   echo "FATAL: the limit-violating STORE reached memory before the #GP was delivered."
   echo "       0xcafebabe means the store committed; the access must be SQUASHED, not"
@@ -84,14 +91,14 @@ fi
 # ecx is the #GP counter the handler increments. PROGRESS_aug2.md set `ecx == 1` as
 # the condition for re-admitting this test; it is 2 now that C-01 added the store.
 ECX="$(tail -1 "$OUT" | python3 -c 'import sys,json;print(json.loads(sys.stdin.read())["ecx"])')"
-echo "  final ecx (#GP counter) = $ECX  (want 0x00000002)"
-if [[ "$ECX" != "0x00000002" ]]; then
+echo "  final ecx (#GP counter) = $ECX  (want 0x00000003)"
+if [[ "$ECX" != "0x00000003" ]]; then
   echo "FATAL: the #GP was delivered but the program did not complete normally."
   echo "       ecx=$ECX means the handler did not run to its increment, or ran twice."
   exit 1
 fi
-echo "  SEG-POSITIVE-OK: load+store violations both faulted; the store never reached"
-echo "                   memory; handler ran; test completed"
+echo "  SEG-POSITIVE-OK: limit-load, limit-store and read-only-write all faulted;"
+echo "                   neither violating store reached memory; test completed"
 
 echo
 echo "=== 4. NEGATIVE: the check must reject NOTHING across the system corpus ==="
