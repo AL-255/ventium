@@ -69,8 +69,9 @@ module fpu_writeback
     input  logic [31:0] mem_rdata,
     input  logic [79:0] f_mem80,
     input  logic [3:0]  f_step,
-    input  logic [4:0]  f_seq_step,
-    input  logic [31:0] env_tmp [27],
+    input  logic [5:0]  f_seq_step,
+    input  logic [5:0]  fenv_last,     // M-04: the last-beat index, defined in core.sv
+    input  logic [31:0] env_tmp [47],
 
     // fpu_top architectural-state readback
     input  logic [79:0] fp_st [8],
@@ -494,8 +495,7 @@ module fpu_writeback
     // M11b FLDENV/FRSTOR commit on the LAST load beat: reload CW/SW/TOP verbatim +
     // re-derive the per-reg empty bits from the loaded FTW (env_tmp[] holds the read
     // dwords; 0=CW,1=SW,2=FTW). FRSTOR also reloads the 8 ST regs (see below).
-    if (state==S_FENV_LD && mem_ack &&
-        f_seq_step == ((q_fxop==FX_FRSTOR) ? 5'd26 : 5'd6)) begin
+    if (state==S_FENV_LD && mem_ack && f_seq_step == fenv_last) begin
       fp_we_envld  = 1'b1;
       fp_env_fctrl = env_tmp[0][15:0];
       fp_env_ftop  = env_tmp[1][13:11];
@@ -510,8 +510,15 @@ module fpu_writeback
       // i.e. fpr[p] = logical ST((p - loaded_ftop)&7).
       if (q_fxop==FX_FRSTOR) begin
         fp_we_envregs = 1'b1;
-        for (int j = 0; j < 20; j++)
-          frstor_streg[j*32 +: 32] = (j==19) ? mem_rdata : env_tmp[7+j];
+        // REVIEW1_Aug2 M-04: the 94-byte form delivers the SAME 640 bits one WORD
+        // at a time (40 beats) instead of one dword at a time (20). Either way the
+        // final beat is still live on mem_rdata rather than in env_tmp.
+        if (q_f_mbytes == 4'd2)
+          for (int j = 0; j < 40; j++)
+            frstor_streg[j*16 +: 16] = (j==39) ? mem_rdata[15:0] : env_tmp[7+j][15:0];
+        else
+          for (int j = 0; j < 20; j++)
+            frstor_streg[j*32 +: 32] = (j==19) ? mem_rdata : env_tmp[7+j];
         for (int p = 0; p < 8; p++) begin
           frli = (p - int'(env_tmp[1][13:11])) & 7;
           fp_env_fpr_flat[p*80 +: 80] = frstor_streg[frli*80 +: 80];

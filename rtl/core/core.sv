@@ -2303,8 +2303,11 @@ module core
   logic        q_f_pop, q_f_pop2;
   logic [2:0]  q_f_sti, q_f_aluop, q_f_const;
   logic [3:0]  f_step;             // x87 memory beat counter
-  logic [4:0]  f_seq_step;         // M11b: wide beat counter for FNSTENV/FNSAVE (0..26)
-  logic [31:0] env_tmp [27];       // M11b: FLDENV/FRSTOR read-back holding regs (dwords)
+  // REVIEW1_Aug2 M-04: 6 bits, not 5. The 94-byte FNSAVE/FRSTOR forms take 47 WORD
+  // beats (7 env + 40 register), so the counter has to reach 46; at 5 bits it wrapped
+  // at 31, which is why the 16-bit form was left as a loud #UD rather than half-done.
+  logic [5:0]  f_seq_step;         // M11b: wide beat counter (0..26 dwords / 0..46 words)
+  logic [31:0] env_tmp [47];       // M11b: FLDENV/FRSTOR read-back regs (27 dwords / 47 words)
   logic [79:0] f_mem80;            // assembled memory operand (m16/32/64/80)
 
   logic [31:0] mem_load_data, mem_load_data2;
@@ -4553,9 +4556,11 @@ module core
   //   +10 DP[15:0]
   //   +12 protected: operand selector real: {DP[19:16], 12'b0}
   // FOP stays 0 to match the oracle, exactly as the 32-bit image does.
-  logic [111:0] fenv_image16;
+  // 47 words: [0..6] the 14-byte env, [7..46] the 80-byte ST region (FNSAVE only).
+  logic [751:0] fenv_image16;
   always_comb begin
-    fenv_image16 = { real_mode ? {fdp[19:16], 12'd0} : fds,          // w6 +12
+    fenv_image16 = { fenv_streg,                                     // w7..46 (ST0..7)
+                     real_mode ? {fdp[19:16], 12'd0} : fds,          // w6 +12
                      fdp[15:0],                                      // w5 +10
                      real_mode ? {fip[19:16], 1'b0, 11'd0} : fcs,    // w4 +8
                      fip[15:0],                                      // w3 +6
@@ -4568,9 +4573,21 @@ module core
   // lookup) and mem_addr (the bus) both derive from this signal rather than each
   // open-coding the stride -- which is the exact defect C-03 exists to prevent, and
   // would fire CHECK 5 the moment the two shifts disagreed.
+  // REVIEW1_Aug2 M-04: the LAST beat index, defined once. core_fenv.svh (both arms)
+  // and fpu_writeback.sv's commit all read this rather than re-deriving it.
+  //   env only  (FNSTENV/FLDENV): 7 beats  -> 6
+  //   full state (FNSAVE/FRSTOR): 27 dwords -> 26, or 47 words -> 46
+  logic [5:0] fenv_last;
+  always_comb begin
+    if (q_fxop == FX_FNSAVE || q_fxop == FX_FRSTOR)
+      fenv_last = (q_f_mbytes == 4'd2) ? 6'd46 : 6'd26;
+    else
+      fenv_last = 6'd6;
+  end
+
   logic [31:0] fenv_off;
-  assign fenv_off = (q_f_mbytes == 4'd2) ? {26'd0, f_seq_step, 1'b0}    // 14-byte: x2
-                                         : {25'd0, f_seq_step, 2'b00};  // 28-byte: x4
+  assign fenv_off = (q_f_mbytes == 4'd2) ? {25'd0, f_seq_step, 1'b0}    // 16-bit: x2
+                                         : {24'd0, f_seq_step, 2'b00};  // 32-bit: x4
   always_comb begin
     int pidx;
     for (int p = 0; p < 8; p++)
@@ -6502,6 +6519,7 @@ module core
     .f_mem80          (f_mem80),
     .f_step           (f_step),
     .f_seq_step       (f_seq_step),
+    .fenv_last        (fenv_last),
     .env_tmp          (env_tmp),
     .fp_st            (fp_st),
     .ftop             (ftop),

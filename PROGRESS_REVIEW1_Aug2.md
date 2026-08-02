@@ -1,7 +1,7 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**27 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
-and reverted with its measurement, 6 open.**
+**28 findings closed or partially closed, 3 claims refuted with evidence, 1 attempted
+and reverted with its measurement, 5 open.**
 `make verify-all` = 11/11 gates. `make l1` = 14 gates (was 13). `verify-sys` = 19 tests.
 
 Commits `a5bab55` … HEAD on `ao486-mister-sim`.
@@ -30,7 +30,7 @@ Commits `a5bab55` … HEAD on `ao486-mister-sim`.
 | **H-10** | the classic 8042 A20 route was not connected at all | `D=3333` with, `D=4444` reverted |
 | **M-02** | V86 wrapped its stack ADDRESS but not its POINTER | `ss_b` made authoritative; pv86 949/949 |
 | **M-03** | the TSS I/O bitmap was never consulted -- all CPL>IOPL I/O denied | no-op when no bitmap exists |
-| **M-04** (part) | 16-bit x87 env forms wrote the 28/108-byte image over a 14/94-byte object | now loud instead of corrupting |
+| **M-04** | 16-bit x87 env forms wrote the 28/108-byte image over a 14/94-byte object | all 7 witnesses match the harness QEMU |
 | **M-07** | port 0x92 bit 0 (fast reset) silently dropped | `fast_reset_req` output + `S_SHUTDOWN` |
 | **C-03** (part) | the crossing split covered only `S_LOAD` | `S_LOAD2` added; `pxpage` CMPSD, eflags `0x46` vs `0x87` |
 | **C-04** | implicit descriptor/TSS refs used CPL3 paging class | **86** reclassified per pv86 run |
@@ -144,13 +144,14 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
   `VEN_L1_HONOR_CD` read path, the no-L2 config's cache map / coherent DMA / SMRAM
   isolation, and the ao486 L2 invalidation skid. Several reference modules that are not
   in this checkout.
-- **H-11, H-12** — x87 stack under/overflow and empty-register semantics; exception
-  masks, ES/`#MF` and FWAIT.
+- **H-11, + the rest of H-12** — x87 stack under/overflow and empty-register
+  semantics, `#MF` delivery and FWAIT. `we_push` (`rtl/fpu/fpu_top.sv:256`) pushes
+  without consulting `fptag[ftop-1]`, so neither overflow nor underflow is detected at
+  all. Four connected pieces: detection, IE+SF with C1 encoding the direction, the
+  masked response (indefinite QNaN, instruction completes), and the unmasked `#MF`
+  route.
 - **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
   ISA mechanisms.
-- **M-04's real fix** — the 94-byte FNSAVE register area starts at offset 14, so it is
-  2-byte aligned while the sequencer addresses `ea + 4*beat`. Needs a byte-granular
-  stride in the FENV/FSAVE sequencers.
 
 **Remaining inside partially-closed findings:**
 
@@ -164,6 +165,60 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
   `idt_limit`, which no test builds).
 - M-01: the positive direction is unexercised — nothing runs a `lock` on a non-lockable
   memory opcode.
+
+---
+
+## 4b. M-04 — a diagnosis I got wrong, and what it cost
+
+I closed M-04's second half as structurally blocked and wrote, in this document:
+
+> the 94-byte FNSAVE register area starts at offset 14, so it is 2-byte aligned while
+> the sequencer addresses `ea + 4*beat`. Needs a byte-granular stride.
+
+**14 is even.** Every field in both 16-bit images is a word, so the whole transfer is a
+stride of 2 with a 2-byte strobe — which the core already emits for m16 (`S_FSTORE`
+does exactly this for FNSTCW). Nothing byte-granular was ever required. What actually
+differs between the forms is the field LAYOUT, and the beat COUNT is identical at seven:
+
+```
+32-bit, 28 bytes            16-bit, 14 bytes
+  +0  CW                      +0  CW
+  +4  SW                      +2  SW
+  +8  TW                      +4  TW
+  +12 FIP                     +6  IP[15:0]
+  +16 {FOP, CS}               +8  protected: CS   real: {IP[19:16],0,FOP}
+  +20 FDP                     +10 DP[15:0]
+  +24 FDS                     +12 protected: DS   real: {DP[19:16], 0}
+```
+
+The 94-byte form is the same object plus the 8 ST registers — the SAME 640 bits the
+108-byte image carries, gathered 40 words at a time instead of 20 dwords. 47 beats, so
+`f_seq_step` went to 6 bits and `env_tmp` to 47 entries. That was the whole blocker.
+
+Both halves now share two single-source signals, `fenv_off` (the beat's byte offset) and
+`fenv_last` (the final beat index), read by the FSM, the bus arm and the commit block
+alike. Open-coding either in two places is precisely the defect C-03 exists to catch.
+
+### What the witnesses caught that a round trip would not
+
+Seven witnesses, all graded against the harness QEMU (`E1=ffff E2=eeee E3=037f E4=3fff
+E5=eeee E6=eeee E7=0003`); Ventium prints the same.
+
+The **round-trip witnesses passed under reversion.** E3 (FLDENV reload) reported PASS
+with the 14-byte fix reverted, because the store and load halves were wrong in the same
+direction and therefore agreed with each other. A gate built only from "save it, load it,
+check it came back" would have been decorative here. What discriminates is:
+
+- a **layout probe** — the word at +4, which holds TW in the narrow form and SW in the
+  wide one, values FNINIT makes distinguishable. Reading +0 proves nothing: CW is at +0
+  in both layouts.
+- a **poison witness** past the object's end, which is the corruption itself.
+
+The oracle also caught two arithmetic errors in my own test before Ventium ever ran it:
+I placed the 94-byte layout probe at +36 instead of +4, and sized the poison loop at 138
+bytes when it needed 228, so the overrun witness sat outside the poisoned region and read
+as uninitialised memory. Writing the expected values down first and asking QEMU before
+looking at Ventium is what surfaced both.
 
 ---
 

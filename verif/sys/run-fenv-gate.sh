@@ -106,6 +106,38 @@ else
   echo "  PASS 14-byte FLDENV read back what 14-byte FNSTENV wrote"
 fi
 
+# REVIEW1_Aug2 M-04, second half: the 94-byte FNSAVE/FRSTOR forms. Same 640 bits of ST
+# register data as the 108-byte form, delivered as 40 WORD beats instead of 20 dword
+# beats (47 total). Oracle prints E4=3fff E5=eeee E6=eeee E7=0003.
+E4=$(printf '%s' "$OUT" | grep -oE "E4=[0-9a-f]+" | head -1 | cut -d= -f2)
+E5=$(printf '%s' "$OUT" | grep -oE "E5=[0-9a-f]+" | head -1 | cut -d= -f2)
+E6=$(printf '%s' "$OUT" | grep -oE "E6=[0-9a-f]+" | head -1 | cut -d= -f2)
+E7=$(printf '%s' "$OUT" | grep -oE "E7=[0-9a-f]+" | head -1 | cut -d= -f2)
+echo "  94-byte state: layout=[+4]=${E4:-<none>} below=${E5:-<none>} past-end=${E6:-<none>} ST0=${E7:-<none>}"
+if [ "$E4" != "3fff" ]; then
+  [ "$E4" = "3800" ] && echo "  FAIL [+4] holds SW, not TW — the 108-BYTE layout went to a 94-byte object"
+  [ "$E4" != "3800" ] && [ -n "${E4:-}" ] && echo "  FAIL unexpected [+4] '$E4' (want 3fff = TW with ST0 valid)"
+  [ -z "${E4:-}" ] && echo "  FAIL no E4= line — the 94-byte form did not execute (decoder #UD?)"
+  fenv_fail=1
+else
+  echo "  PASS 94-byte FNSAVE wrote the 94-byte LAYOUT (TW at +4)"
+fi
+if [ "$E5" != "eeee" ] || [ "$E6" != "eeee" ]; then
+  echo "  FAIL FNSAVE wrote OUTSIDE its 94-byte object (below='$E5' past-end='$E6', both"
+  echo "       want eeee). The 108-byte image overruns the end by 14 bytes."
+  fenv_fail=1
+else
+  echo "  PASS 94-byte FNSAVE wrote exactly 94 bytes (clean above and below)"
+fi
+if [ "$E7" != "0003" ]; then
+  echo "  FAIL 94-byte FRSTOR did not restore ST0: (int)ST0='$E7', want 0003 (pi)."
+  echo "       FNSAVE reinitializes the FPU, so FRSTOR is the ONLY way pi comes back —"
+  echo "       this is the 40-word REGISTER reassembly, not just the env header."
+  fenv_fail=1
+else
+  echo "  PASS 94-byte FRSTOR restored the ST registers (pi survived the round trip)"
+fi
+
 if [ "$fenv_fail" = 0 ]; then
   echo "FENV-GATE-OK"
   exit 0

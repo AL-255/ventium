@@ -181,6 +181,66 @@ _start16:
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
 
+    /* ==== REVIEW1_Aug2 M-04, second half: the 94-byte FNSAVE / FRSTOR ===========
+     * Same 640 bits of ST register data as the 108-byte form, delivered as 40 WORD
+     * beats instead of 20 dword beats -- 47 beats in all, which is why the counter
+     * needed a sixth bit. Witnesses:
+     *   E4 = [0x0804]  layout probe again (TW at +4, not SW)
+     *   E5 = [0x077e]  CORRUPTION witness: first word past a 94-byte object at
+     *                  0x0800..0x085d. Poisoned eeee. (Placed BELOW the buffer as
+     *                  well as above, so an overrun in either direction shows.)
+     *   E6 = [0x085e]  the same, immediately past the 94-byte end.
+     *   E7            ST0 after a 94-byte FNSAVE/FRSTOR round trip. FNSAVE reinits
+     *                 the FPU, so a working FRSTOR is the ONLY way this comes back.
+     */
+    fninit
+    fldpi                             /* ST0 = pi -- a value with a distinctive mantissa */
+
+    movw    $0x077e, %di              /* poison 0x077e..0x0861 (0x72 bytes) */
+    movw    $114, %cx                 /* 0x077e..0x0861 = 228 bytes = 114 words */
+    movw    $0xeeee, %ax
+1:  movw    %ax, (%di)
+    addw    $2, %di
+    decw    %cx
+    jnz     1b
+
+    fnsave  0x0800                    /* 94-byte form -- deliberately NO 0x66 */
+    /* FNSAVE has now reinitialized the FPU: ST0 is empty and CW is back to 0x037f. */
+
+    movw    0x0804, %ax; movw %ax, 0x0746      /* E4: layout probe */
+    movw    0x077e, %ax; movw %ax, 0x0748      /* E5: underrun witness */
+    movw    0x085e, %ax; movw %ax, 0x074a      /* E6: overrun witness */
+
+    frstor  0x0800                    /* 94-byte load: must bring pi back into ST0 */
+    fistpl  0x074c                     /* E7 = (int)ST0 -- pi truncates to 3 */
+
+    movw    $0x03F8,%dx
+    movb    $'E',%al; outb %al,%dx
+    movb    $'4',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0746, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'E',%al; outb %al,%dx
+    movb    $'5',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0748, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'E',%al; outb %al,%dx
+    movb    $'6',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x074a, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'E',%al; outb %al,%dx
+    movb    $'7',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x074c, %ax
+    call    puthexw
+    movw    $0x03F8,%dx
+    movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
+
     /* clean exit via isa-debug-exit (status = (0x42<<1)|1 = 133) */
     movb $0x42,%al; movw $0xF4,%dx; outb %al,%dx
 9:  hlt; jmp 9b

@@ -1677,15 +1677,17 @@ module decode_stages
                   3'd2: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; end
                   3'd3: begin d_fxop=FX_FST_M64; d_f_mem_write=1'b1; d_f_mbytes=4'd8; d_f_pop=1'b1; end
                   3'd4: begin d_fxop=FX_FRSTOR;  // 108-byte state load + reg reload
-                        // M-04: the 94-byte form needs 47 word-beats; f_seq_step is
-                        // 5 bits (max 31) and env_tmp is 27 entries, so it stays loud
-                        // pending that widening. FNSTENV/FLDENV above are implemented.
-                        if (eff_opsize) d_unknown=1'b1; end
+                        // REVIEW1_Aug2 M-04: the 94-byte form. Same 640 bits of ST
+                        // register data as the 108-byte one, delivered 40 words instead
+                        // of 20 dwords -- 47 beats total, which is why f_seq_step went
+                        // to 6 bits and env_tmp to 47 entries.
+                        d_f_mbytes = eff_opsize ? 4'd2 : 4'd4; end
                   3'd6: begin d_fxop=FX_FNSAVE;  // 108-byte state store + FNINIT reinit
-                        // M-04: the 94-byte form needs 47 word-beats; f_seq_step is
-                        // 5 bits (max 31) and env_tmp is 27 entries, so it stays loud
-                        // pending that widening. FNSTENV/FLDENV above are implemented.
-                        if (eff_opsize) d_unknown=1'b1; end
+                        // REVIEW1_Aug2 M-04: the 94-byte form. Same 640 bits of ST
+                        // register data as the 108-byte one, delivered 40 words instead
+                        // of 20 dwords -- 47 beats total, which is why f_seq_step went
+                        // to 6 bits and env_tmp to 47 entries.
+                        d_f_mbytes = eff_opsize ? 4'd2 : 4'd4; end
                   3'd7: begin d_fxop=FX_FNSTSW_M; d_f_mem_write=1'b1; d_f_mbytes=4'd2; end
                   default: d_unknown=1'b1;
                 endcase

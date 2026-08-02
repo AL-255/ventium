@@ -20,12 +20,12 @@
         // ===================================================================
         S_FENV_ST: begin
           if (mem_ack) begin
-            if (f_seq_step == ((q_fxop==FX_FNSAVE) ? 5'd26 : 5'd6)) begin
+            if (f_seq_step == fenv_last) begin   // M-04: one definition (core.sv)
               // last beat: advance EIP + retire (FNSAVE's FNINIT reinit rides
               // fp_we_fninit from the fp_we_* block on this same beat).
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
-              state<=S_PIPE; f_seq_step<=5'd0;
-            end else f_seq_step <= f_seq_step + 5'd1;
+              state<=S_PIPE; f_seq_step<=6'd0;
+            end else f_seq_step <= f_seq_step + 6'd1;
           end
         end
 
@@ -43,9 +43,9 @@
             // is the whole of each 16-bit field.
             env_tmp[f_seq_step] <= (q_f_mbytes == 4'd2) ? {16'd0, mem_rdata[15:0]}
                                                         : mem_rdata;
-            if (f_seq_step == ((q_fxop==FX_FRSTOR) ? 5'd26 : 5'd6)) begin
+            if (f_seq_step == fenv_last) begin   // M-04: one definition (core.sv)
               eip<=next_eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
-              state<=S_PIPE; f_seq_step<=5'd0;
-            end else f_seq_step <= f_seq_step + 5'd1;
+              state<=S_PIPE; f_seq_step<=6'd0;
+            end else f_seq_step <= f_seq_step + 6'd1;
           end
         end
