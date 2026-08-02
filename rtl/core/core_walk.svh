@@ -59,6 +59,11 @@
                   // `is_big = cr4_pse && pde[7]` already does -- is correct, and
                   // faulting it would be a new bug.
                   walk_pf <= 1'b1;
+                  // REVIEW2_aug2 H-04: CR2 must name the faulting LINEAR address. The
+                  // not-present arms assign it; this one did not, so a reserved-bit #PF
+                  // left software reading a STALE CR2 -- it would fix up, or report, the
+                  // wrong page entirely. Every #PF exit from this walker must set it.
+                  creg2   <= walk_lin;
                   start_fault(8'd14, 1'b1,
                               {28'd0, 1'b1, eff_cpl == 2'd3, walk_is_write, 1'b1}, q_pc);
                 end else if (is_big) begin

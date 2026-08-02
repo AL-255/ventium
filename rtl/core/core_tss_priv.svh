@@ -83,18 +83,41 @@
         S_IOPERM: begin
           if (mem_ack) begin
             if (int_step == 4'd0) begin
-              ioperm_base <= mem_rdata[15:0];
-              // A TSS too small to contain the map-base field denies everything.
-              if ((tr_limit < 32'h67) || ({16'd0, mem_rdata[15:0]} >= tr_limit))
+              // REVIEW2_aug2 C-07(a): the I/O-map base lives at TSS offset 0x66, and
+              // the bus arm addresses tr_base+0x64 -- so it is the HIGH half of the
+              // returned dword. Taking [15:0] read offset 0x64-0x65, the preceding
+              // trap/reserved field, which is normally ZERO: the map base then looked
+              // like 0, and every permission read was directed into unrelated TSS
+              // fields near the top of the descriptor.
+              ioperm_base <= mem_rdata[31:16];
+              // REVIEW2_aug2 M-02: a TSS limit is INCLUSIVE, so base == limit still
+              // names a byte that exists and legitimately covers ports 0-7. Rejecting
+              // `>=` denied a legal one-byte bitmap. The per-access width check below
+              // decides whether the bytes actually needed exist.
+              if ((tr_limit < 32'h67) || ({16'd0, mem_rdata[31:16]} > tr_limit))
                 start_fault(8'd13, 1'b1, 32'd0, q_pc);
               else int_step <= 4'd1;
             end else begin
-              // bit index = port; byte = base + port>>3; bit = port & 7.
-              if (({16'd0, ioperm_base} + {19'd0, ioperm_port[15:3]}) > tr_limit)
+              // REVIEW2_aug2 C-07(b)+(c). Two separate bugs lived here.
+              //
+              // (b) the bit index was
+              //         port[2:0] + (port[1:0] << 3)
+              //     which yields 0, 9, 18, 27, 4, 13, 22, 31 for ports 0..7 -- for most
+              //     ports a bit from a DIFFERENT byte of the returned dword. The read is
+              //     a byte-addressed dword at tr_base+base+(port>>3), so bit j of it
+              //     covers port (port & ~7) + j; the wanted bit is simply port[2:0].
+              //
+              // (c) only the FIRST port was checked, while word and dword IN/OUT cover
+              //     2 and 4 consecutive ports. A permitted first port let the rest
+              //     through unchecked -- a direct privilege bypass.
+              //
+              // All q_io_w ports fit in the SAME read: the dword covers 32 consecutive
+              // ports starting at (port & ~7), and port[2:0]+3 <= 10 < 32. So no extra
+              // beat is needed; only the LIMIT check has to account for the last byte.
+              if (({16'd0, ioperm_base} + {19'd0, ioperm_last[15:3]}) > tr_limit)
                 start_fault(8'd13, 1'b1, 32'd0, q_pc);   // past the bitmap => denied
-              else if (mem_rdata[{2'b00, ioperm_port[2:0]} +
-                                 {2'b00, ioperm_port[1:0], 3'd0}[4:0]])
-                start_fault(8'd13, 1'b1, 32'd0, q_pc);   // the bit is SET => denied
+              else if (|(io_perm_mask & mem_rdata))
+                start_fault(8'd13, 1'b1, 32'd0, q_pc);   // any covered bit SET => denied
               else begin
                 int_step <= 4'd0;
                 state    <= ioperm_ret;                  // permitted: carry on

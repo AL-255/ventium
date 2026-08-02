@@ -1674,6 +1674,20 @@ module core
   state_e      ioperm_ret;      // where to resume once the bitmap says yes
   logic [15:0] ioperm_port;     // the port being checked
   logic [15:0] ioperm_base;     // TSS.io_map_base, read on beat 0
+  // REVIEW2_aug2 C-07(c): the bits this access actually covers. The beat-1 read is a
+  // byte-addressed dword at tr_base+base+(port>>3), so bit j of it is port
+  // (port & ~7) + j; port p+i therefore sits at port[2:0]+i. A 4-byte access needs at
+  // most bits port[2:0]..port[2:0]+3, and port[2:0]+3 <= 10, so every covered port is
+  // inside the one dword already fetched.
+  logic [15:0] ioperm_last;     // the HIGHEST port this access covers
+  assign ioperm_last = ioperm_port + {13'd0, q_io_w} - 16'd1;
+  logic [31:0] io_perm_mask;
+  always_comb begin
+    io_perm_mask = 32'd0;
+    for (int i = 0; i < 4; i++)
+      if (i < int'(q_io_w))
+        io_perm_mask[{2'd0, ioperm_port[2:0]} + i[4:0]] = 1'b1;
+  end
   logic        ioperm_needed;
   assign ioperm_needed = sys_mode && !real_mode && d_io && (eff_cpl > iopl);
   logic        d_io_write;      // 1 = OUT (CPU drives the port), 0 = IN (CPU reads)
