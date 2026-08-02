@@ -218,6 +218,24 @@ else
   echo "  PASS #MF delivered once on FWAIT, and FNCLEX cleared it (matches QEMU)"
 fi
 
+# REVIEW2_aug2 H-17: FWAIT is the ONE x87 instruction whose #NM rule is not "EM or TS".
+# It traps only when CR0.MP=1 AND CR0.TS=1, so a lazy-FPU OS with MP=0 expects WAIT to
+# pass even with TS set. The code NAMED this rule in a comment and never implemented it.
+# Graded DIFFERENTIALLY -- the harness QEMU prints N1=0000 N2=0001.
+N1=$(printf '%s' "$OUT" | grep -oE "N1=[0-9a-f]+" | head -1 | cut -d= -f2)
+N2=$(printf '%s' "$OUT" | grep -oE "N2=[0-9a-f]+" | head -1 | cut -d= -f2)
+echo "  FWAIT #NM: TS=1/MP=0 -> ${N1:-<none>} (want 0000)   TS=1/MP=1 -> ${N2:-<none>} (want 0001)"
+if [ "$N1" != "0000" ]; then
+  echo "  FAIL FWAIT trapped with MP=0 — a blanket TS->#NM breaks lazy-FPU switching"
+  fenv_fail=1
+elif [ "$N2" != "0001" ]; then
+  [ "$N2" = "0000" ] && echo "  FAIL FWAIT did NOT trap with TS=1 and MP=1 (the rule is unimplemented)"
+  [ "$N2" != "0000" ] && echo "  FAIL FWAIT trapped $N2 times, want 1"
+  fenv_fail=1
+else
+  echo "  PASS FWAIT #NM only when CR0.MP and CR0.TS are BOTH set"
+fi
+
 if [ "$fenv_fail" = 0 ]; then
   echo "FENV-GATE-OK"
   exit 0

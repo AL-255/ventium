@@ -515,11 +515,21 @@
           //           save/restore it and clear TS.
           // #NM takes no error code.
           //
-          // FWAIT is NOT covered here: it decodes as d_is_nop (decode_stages.sv:1028),
-          // and its rule is different anyway (it traps only when TS=1 AND MP=1). That,
-          // and making FWAIT actually wait on pending unmasked exceptions, is H-22.
           else if (d_is_x87 && (creg0[2] || creg0[3])) begin
             start_fault(8'd7, 1'b0, 32'd0, eip);
+          end
+          // REVIEW2_aug2 H-17: FWAIT's #NM rule differs from every other x87 op and was
+          // never implemented -- the comment that used to sit here NAMED the rule and
+          // then deferred it. FWAIT/WAIT traps only when CR0.MP=1 AND CR0.TS=1 (SDM
+          // Vol.2: "WAIT/FWAIT ... #NM if CR0.MP and CR0.TS are both set"), NOT on EM
+          // and not on TS alone. That asymmetry is deliberate: MP ("monitor
+          // coprocessor") is what tells the CPU a WAIT should synchronise with an FPU
+          // whose context is stale, so with MP=0 a lazy-FPU OS expects WAIT to pass.
+          //
+          // Checked BEFORE the pending-#MF arm below: #NM asks "is the FPU usable at
+          // all", which precedes "does it have an unreported error".
+          else if (d_is_fwait && creg0[1] && creg0[3]) begin
+            start_fault(8'd7, 1'b0, 32'd0, eip);       // #NM, no error code
           end
           // REVIEW1_Aug2 H-12 (remainder): a PENDING UNMASKED x87 exception must be
           // delivered as #MF (vector 16) BEFORE the next waiting FP instruction runs.

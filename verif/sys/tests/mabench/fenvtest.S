@@ -337,6 +337,69 @@ _start16:
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
 
+    /* ==== REVIEW2_aug2 H-17: FWAIT's #NM rule ==================================
+     * FWAIT/WAIT is the ONE x87 instruction whose #NM rule is not "EM or TS": it traps
+     * only when CR0.MP=1 AND CR0.TS=1. With MP=0 a lazy-FPU OS expects WAIT to pass
+     * even with TS set, which is why the asymmetry matters and why a blanket
+     * "TS -> #NM" would be wrong.
+     *
+     * The code NAMED this rule in a comment and then never implemented it.
+     *
+     *   N1 = #NM count with TS=1, MP=0  -> must be 0 (WAIT passes)
+     *   N2 = #NM count with TS=1, MP=1  -> must be 1 (WAIT traps)
+     * Handler at vector 7 counts and clears TS so the resumed FWAIT completes.
+     */
+    xorw    %ax, %ax
+    movw    %ax, %es
+    /* #NM handler at 0x0520: clts ; incw [0x0762] ; iret */
+    movb    $0x0F, %es:0x0520
+    movb    $0x06, %es:0x0521       /* clts */
+    movb    $0xFF, %es:0x0522       /* incw [0x0762] */
+    movb    $0x06, %es:0x0523
+    movb    $0x62, %es:0x0524
+    movb    $0x07, %es:0x0525
+    movb    $0xCF, %es:0x0526       /* iret */
+    movw    $0x0520, %es:0x001C     /* IVT[7] offset  (7*4 = 0x1C) */
+    movw    $0x0000, %es:0x001E     /* IVT[7] segment */
+    movw    $0, 0x0762
+
+    /* TS=1, MP=0 -> FWAIT must NOT trap */
+    movl    %cr0, %eax
+    andl    $0xFFFFFFFD, %eax       /* MP=0 (bit 1) */
+    orl     $0x00000008, %eax       /* TS=1 (bit 3) */
+    movl    %eax, %cr0
+    fwait
+    movw    0x0762, %ax
+    movw    %ax, 0x0764             /* N1 */
+
+    /* TS=1, MP=1 -> FWAIT MUST trap */
+    movl    %cr0, %eax
+    orl     $0x0000000A, %eax       /* MP=1 and TS=1 */
+    movl    %eax, %cr0
+    fwait
+    movw    0x0762, %ax
+    subw    0x0764, %ax
+    movw    %ax, 0x0766             /* N2 = the delta */
+
+    movl    %cr0, %eax
+    andl    $0xFFFFFFF7, %eax       /* clear TS again for anything after */
+    movl    %eax, %cr0
+
+    movw    $0x03F8,%dx
+    movb    $'N',%al; outb %al,%dx
+    movb    $'1',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0764, %ax
+    call    puthexw
+    movw    $0x03F8,%dx; movb $' ',%al; outb %al,%dx
+    movb    $'N',%al; outb %al,%dx
+    movb    $'2',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0766, %ax
+    call    puthexw
+    movw    $0x03F8,%dx
+    movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
+
     /* clean exit via isa-debug-exit (status = (0x42<<1)|1 = 133) */
     movb $0x42,%al; movw $0xF4,%dx; outb %al,%dx
 9:  hlt; jmp 9b
