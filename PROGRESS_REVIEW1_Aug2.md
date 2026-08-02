@@ -1,9 +1,9 @@
 # Ventium — progress against REVIEW1_Aug2.md
 
-**11 findings closed, 2 claims refuted with evidence, 19 open.**
+**19 findings closed or partially closed, 3 claims refuted with evidence, 11 open.**
 `make verify-all` = 11/11 gates. `make l1` = 14 gates (was 13). `verify-sys` = 19 tests.
 
-Commits `a5bab55` … `fbab7d7` on `ao486-mister-sim`.
+Commits `a5bab55` … HEAD on `ao486-mister-sim`.
 
 ---
 
@@ -23,6 +23,14 @@ Commits `a5bab55` … `fbab7d7` on `ao486-mister-sim`.
 | **M-01** | LOCK legality inferred from "has a memory operand" | per-opcode allow-list, fail-open; m6 + 98 programs green |
 | **M-05** | the unpaired `VEN_UOPCACHE` build could decode stale uops | now refuses to elaborate/run |
 | **M-08** | **a gate that reported failure and exited zero** | `exit 1` + an injectable self-test |
+| **H-01** (part) | IRET read descriptors without checking the table limit; a null CS raised #NP not #GP(0) | oracle `v=0d e=0000`; `vec=11` reverted |
+| **H-02** | far transfers checked neither the selector table limit nor the target CS limit | shares `sel_in_table()` with H-01 |
+| **H-03** | 4 MiB PDE reserved bits silently discarded | #PF(RSVD) before A/D writeback or fill |
+| **H-10** | the classic 8042 A20 route was not connected at all | `D=3333` with, `D=4444` reverted |
+| **M-02** | V86 wrapped its stack ADDRESS but not its POINTER | `ss_b` made authoritative; pv86 949/949 |
+| **M-03** | the TSS I/O bitmap was never consulted -- all CPL>IOPL I/O denied | no-op when no bitmap exists |
+| **M-04** (part) | 16-bit x87 env forms wrote the 28/108-byte image over a 14/94-byte object | now loud instead of corrupting |
+| **M-07** | port 0x92 bit 0 (fast reset) silently dropped | `fast_reset_req` output + `S_SHUTDOWN` |
 
 ### M-08 deserves separate attention
 
@@ -64,6 +72,14 @@ Implementing the claim would make Ventium diverge from both the SDM and the orac
 class only when the new exception supplies one. I overwrote it unconditionally, so a
 benign fault during a contributory delivery erased the contributory context and a
 subsequent contributory failed to escalate. Fixed.
+
+### H-03's PS=1-with-CR4.PSE=0 example
+
+The review lists "a PDE with PS=1 while CR4.PSE=0" as being wrongly treated as a normal
+4 KiB PDE. That treatment is correct: the SDM has PDE bit 7 IGNORED when CR4.PSE=0, not
+reserved, so `is_big = cr4_pse && pde[7]` is right and faulting it would introduce a bug.
+The finding's *other* example -- reserved address bits in a 4 MiB PDE -- was real and is
+fixed.
 
 ### C-05's livelock half
 
@@ -117,8 +133,18 @@ construct it. The *dirty-lie* half of C-05 was real and is fixed.
   supervisor access class carried with the request.
 - **C-10** LOCKed RMW is not atomic against DMA.
 
-**Bounded, simply not reached yet:** H-01, H-02, H-03, H-05…H-12, M-02, M-03, M-04,
-M-06, M-07.
+**Remaining, and none of these is a small edit:**
+- **H-05…H-09** — cache coherence across virtual aliases, I-side cacheability, the
+  `VEN_L1_HONOR_CD` read path, the no-L2 config's cache map / coherent DMA / SMRAM
+  isolation, and the ao486 L2 invalidation skid. Several reference modules that are not
+  in this checkout.
+- **H-11, H-12** — x87 stack under/overflow and empty-register semantics; exception
+  masks, ES/`#MF` and FWAIT.
+- **M-06** — task gates, 16-bit TSS types, and cross-privilege call gates. Three distinct
+  ISA mechanisms.
+- **M-04's real fix** — the 94-byte FNSAVE register area starts at offset 14, so it is
+  2-byte aligned while the sequencer addresses `ea + 4*beat`. Needs a byte-granular
+  stride in the FENV/FSAVE sequencers.
 
 **Remaining inside partially-closed findings:**
 
