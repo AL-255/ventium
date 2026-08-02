@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -303,6 +304,7 @@ module ventium_top
   // is below the core instance. (Declared here so the core can bind to them.)
   logic        core_mem_req, core_mem_we;
   logic [31:0] core_mem_addr, core_mem_wdata;
+  logic [31:0] core_mem_lin;   // task #51: pre-translate linear addr for the SMC snoop
   logic [3:0]  core_mem_wstrb;
   logic [31:0] core_mem_rdata;
   logic        core_mem_ack;
@@ -346,6 +348,7 @@ module ventium_top
     cs_pit = cio_req && (cio_addr == 16'h0040 || cio_addr == 16'h0041 ||
                          cio_addr == 16'h0042 || cio_addr == 16'h0043);
   end
+
   // ---------------------------------------------------------------------------
   // WNS FIX (routed bitstream): the in-PL PIT/PIC are placed FAR from the core,
   // so the combinational path GPR -> core-IO-write-logic -> cio_wdata ->
@@ -482,9 +485,20 @@ module ventium_top
   assign io_wdata  = cio_wdata;
 `endif
 
+  // The A20 CONTROL LATCH lives in the core (see core.sv `a20_r`), because the core
+  // is the only place that observes every I/O write in every configuration: the
+  // port-0x92 OUT is serviced by the PS in one build, by a co-sim DPI hook in another,
+  // and by in-PL devices in a third, and the top-level io_ack handshake is not visible
+  // at a clock edge here in all of them. This input is the PLATFORM OVERRIDE: a real
+  // chipset can force A20 low by driving it 0, and the core ANDs the two. Tied high
+  // here, which is the normal "A20 enabled unless software says otherwise" state.
+  logic a20_gate_r;
+  assign a20_gate_r = 1'b1;
+
   core u_core (
       .clk          (clk),
       .rst_n        (rst_n),
+      .a20_gate     (a20_gate_r),        // REVIEW2 M-03
       .init_eip     (init_eip),
       .init_esp     (init_esp),
       .boot_mode    (boot_mode),
@@ -493,8 +507,14 @@ module ventium_top
       .real_bus     (l1axi_en),
       .bus_err      (l1_bus_err),
       // Phase D.6: northbridge → icache snoop (DMA-loaded code coherence).
+      .smm_active_o   (core_smm_active),   // REVIEW2 H-24
       .ic_snoop_valid (ic_snoop_v),
       .ic_snoop_addr  (ic_snoop_a),
+      .ic_snoop_valid1(ic_snoop_v1),
+      .ic_snoop_addr1 (ic_snoop_a1),   // H-09
+      .ic_snoop_valid2(ic_snoop_v2),
+      .ic_snoop_addr2 (ic_snoop_a2),
+      .ic_flush_all   (flush_all),        // H-12: global I-cache invalidate
 `endif
       .errata_en    (errata_en),
       .cpu_hung     (cpu_hung),
@@ -585,6 +605,7 @@ module ventium_top
       .mem_req      (core_mem_req),
       .mem_we       (core_mem_we),
       .mem_addr     (core_mem_addr),
+      .mem_lin      (core_mem_lin),
       .mem_wdata    (core_mem_wdata),
       .mem_wstrb    (core_mem_wstrb),
       .mem_rdata    (core_mem_rdata),
@@ -937,20 +958,32 @@ module ventium_top
   localparam logic [31:0] L1AXI_ADDR_MASK  = 32'hFFFF_FFFF;
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
+  logic        core_smm_active;                       // REVIEW2 H-24: core SMM state
   logic        ic_snoop_v; logic [31:0] ic_snoop_a;   // Phase D.6: NB → icache snoop
+  logic        ic_snoop_v1; logic [31:0] ic_snoop_a1; // H-09: SMC store, first line
+  logic        ic_snoop_v2; logic [31:0] ic_snoop_a2; // H-09: SMC store, second line
   assign bus_err = l1_bus_err;   // #34 expose the fatal AXI fault to the PS
-  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK)) u_l1axi (
+  // REVIEW2 M-04: pass the L1D geometry DOWN. This instantiation used to override
+  // nothing, so ventium_l1_axi (and therefore ven_l1d) stayed at its 128-set default
+  // even in a +VEN_CACHE_HALF build where the core's own D$ model had shrunk to 64 --
+  // the advertised half-cache config did not shrink the cache that holds the data.
+  // ventium_pkg::L1D_SETS_DEF is the single definition the core uses for DC_SETS.
+  ventium_l1_axi #(.ADDR_W(40), .REMAP_BASE(L1AXI_REMAP_BASE), .ADDR_MASK(L1AXI_ADDR_MASK),
+                   .L1_SETS(ventium_pkg::L1D_SETS_DEF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all),
       .golden_l1 (golden_l1),
       .shutdown  (shutdown), .m_idle (m_idle),
+      .smm_active         (core_smm_active),            // REVIEW2 H-24
       .icache_snoop_valid (ic_snoop_v), .icache_snoop_addr (ic_snoop_a),
+      .icache_snoop_valid1(ic_snoop_v1), .icache_snoop_addr1(ic_snoop_a1),   // H-09
+      .icache_snoop_valid2(ic_snoop_v2), .icache_snoop_addr2(ic_snoop_a2),
 `ifdef VEN_DBG_CORE
       .dbg_rd_valid (dbg_rd_valid), .dbg_rd_addr (dbg_rd_addr), .dbg_rd_data (dbg_rd_data),
 `endif
       .core_req  (l1axi_en ? core_mem_req : 1'b0),   // L1 inert in modes 0/1
       .core_we   (core_mem_we),
-      .core_addr (core_mem_addr),
+      .core_addr (core_mem_addr), .core_lin (core_mem_lin),
       .core_wdata(core_mem_wdata),
       .core_wstrb(core_mem_wstrb),
       .core_rdata(l1_c_rdata),
@@ -969,6 +1002,12 @@ module ventium_top
       .m_axi_arready(m_axi_arready), .m_axi_rid(m_axi_rid), .m_axi_rdata(m_axi_rdata),
       .m_axi_rresp(m_axi_rresp), .m_axi_rlast(m_axi_rlast), .m_axi_rvalid(m_axi_rvalid),
       .m_axi_rready(m_axi_rready)
+`ifdef VEN_L1_HONOR_CD
+      // live CR0.CD (core_cr0 = continuous `assign retire_cr0 = creg0`, so valid every
+      // cycle, not just on retire). CD=1 (BIOS POST memory test) => L1 D$ honors the
+      // cache-disable and bypasses (no 8-beat write-allocate fill amplification).
+      , .cr0_cd(core_cr0[30])
+`endif
   );
 
   assign mem_req   = l1axi_en ? 1'b0 : (bus_mode ? bus_mem_req   : core_mem_req);

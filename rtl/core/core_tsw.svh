@@ -18,9 +18,16 @@
         // one dword per beat at the documented 32-bit-TSS offsets. The store data +
         // address are driven by the bus arm; this block only advances the beat and,
         // after the last save, moves to read the incoming state.
+        // FIX (Quake task #25): terminate at beat 15 (GS@0x5C), NOT beat 16 (LDTR@0x60).
+        // IA-32 SDM Vol.3 7.3: a task switch SAVES only EIP/EFLAGS/GPR/ES..GS to the old
+        // TSS — the LDTR field is STATIC (set once when the task is created) and is NOT
+        // written by the CPU. The old code wrote LDTR:=0, corrupting the outgoing task's
+        // LDT selector; on its next restore a bogus/stale LDT base makes its LDT-selector
+        // segments (the extender's page-fault handler runs on ds/es=0xAF LDT selectors)
+        // resolve to the wrong linear base -> wrong-memory writes -> state corruption.
         S_TSW_SAVE: begin
           if (mem_ack) begin
-            if (tsw_step == 5'd16) begin tsw_step <= 5'd0; state <= S_TSW_READ; end
+            if (tsw_step == 5'd15) begin tsw_step <= 5'd0; state <= S_TSW_READ; end
             else tsw_step <= tsw_step + 5'd1;
           end
         end
@@ -46,6 +53,14 @@
               5'd17: tsw_new_ldt <= mem_rdata[15:0];  // capture the new task's LDTR selector
               default: ;
             endcase
+`ifdef VEN_DBG_WD
+            // esi is beat 9 (TSS+0x40). Log the value the READ pulls from memory for the garbage pointer
+            // 0x11b354 -> tells us if the TSS.esi MEMORY is corrupt (mem_rdata==0x11b354) vs a READ mis-load.
+            if (tsw_step == 5'd9)
+              $display("[VEN-TSWR] esi<-%08h from TSS_base=%08h untranslated_addr=%08h TRANSLATED_phys=%08h paging=%b @cs:eip=%04x:%08h",
+                       mem_rdata, tsw_new_base, tsw_new_base + 32'h40,
+                       mem_xlate(tsw_new_base + 32'h40, 1'b1), paging_on, seg_sel[SG_CS], eip);
+`endif
             // After the last TSS field, load the LDTR's hidden base/limit (S_TSW_LDT)
             // BEFORE reloading the segments, so LDT-selector CS/SS/etc. resolve right.
             if (tsw_step == 5'd17) begin tsw_step <= 5'd0; state <= S_TSW_LDT; end
@@ -63,6 +78,11 @@
             else begin
               logic [63:0] desc;
               desc = {mem_rdata, tsw_seg_lo};
+              // REVIEW2 M-02: track the LDTR selector across a task switch too, so the
+              // SMM save map and any future SLDT see the LDTR the new task actually has.
+              // A null LDT selector leaves the hidden cache alone (as before) but must
+              // still record the selector, which is what the new task's TSS specifies.
+              ldt_sel <= tsw_new_ldt;
               if (|tsw_new_ldt[15:3]) begin
                 ldt_base  <= desc_base(desc);
                 ldt_limit <= desc_limit16(desc);
@@ -139,6 +159,14 @@
               // R3: the incoming-task GPR-file load moved to the gpr writeback driver
               // (core_gpr_wb.svh, S_TSW_BUSY arm).
               creg3   <= tsw_cr3;                 // new task CR3 (0 here; paging off)
+`ifdef VEN_DBG_WD
+              $display("[VEN-CR3] TASKSW CR3 <- %08h (was %08h) @ cs:eip=%04x:%08h new_sel=%04x new_base=%08h (read cr3 @ %08h)",
+                       tsw_cr3, creg3, seg_sel[SG_CS], eip, tsw_new_sel, tsw_new_base, tsw_new_base + 32'h1c);
+              // [VEN-TSWIN] the INCOMING task's loaded EIP/EFLAGS/GPRs — compare vs golden (task should
+              // start at 0x3f49, esi 0x758, and PROGRESS; a wrong entry EIP/flags => the 3-task deadlock).
+              $display("[VEN-TSWIN] -> sel=%04x IN eip=%08h efl=%08h esi=%08h edi=%08h esp=%08h eax=%08h",
+                       tsw_new_sel, tsw_eip, tsw_eflags, tsw_gpr[R_ESI], tsw_gpr[R_EDI], tsw_gpr[R_ESP], tsw_gpr[R_EAX]);
+`endif
               creg0   <= creg0 | 32'h0000_0008;   // CR0.TS = 1 on every task switch
               // new TR <- the incoming TSS descriptor (now busy).
               tr_sel  <= tsw_new_sel;

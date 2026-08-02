@@ -8,8 +8,46 @@
 //   S_LOAD (memory source / RMW dst / [ESI]/[EDI]), S_LOAD2 (CMPS 2nd operand),
 //   S_FLOAD (x87 memory operand read).
         S_LOAD: begin
+          // ---- REVIEW2 C-02: page-crossing split ------------------------------
+          // Beat 1 of a crossing access: keep its data (the LOW bytes are the first
+          // page's, correctly translated) and re-issue for the SECOND page. The FSM
+          // stays in S_LOAD, so the bus driver + cur_lin -- both of which key off
+          // xp_pend -- present the next page's base and it gets its OWN TLB
+          // lookup/walk/permission check. Nothing is committed on this beat.
+          if (mem_ack && xp_cross) begin
+            xp_lo    <= mem_rdata;
+            xp_first <= 3'(13'h1000 - {1'b0, cur_lin[11:0]});
+            xp_w     <= q_w;
+            xp_pend  <= 1'b1;
+          end else
           if (mem_ack) begin
+            // Beat 2 (or a normal, non-crossing access). On a split, merge: the low
+            // xp_first bytes came from the first page, the rest from THIS beat, whose
+            // low bytes start at the second page's base.
+            if (xp_pend) begin
+              logic [31:0] m;
+              logic [5:0]  sh;
+              sh = 6'(xp_first) << 3;                       // bits from the first page
+              m  = (xp_lo & ~(32'hFFFF_FFFF << sh))         // keep first-page bytes
+                 | (mem_rdata << sh);                       // second page supplies the rest
+              mem_load_data <= m;
+              xp_pend       <= 1'b0;
+            end else
             mem_load_data<=mem_rdata;
+            // VEN FIX (Win95 REP MOVSB relocation): capture the MOVS store byte SINGLE-HOP, directly at
+            // THIS iteration's validated load ack, into str_store_data — instead of routing it through the
+            // GLOBAL persistent mem_load_data (core.sv:2301 ST_MOVS: str_wdata=mem_load_data), which another
+            // memory op (self-referential fetch/BIOS-ROM table read) can clobber before S_EXEC consumes it
+            // under real FPGA latency. The S_EXEC re-latch for MOVS is skipped (core_exec.svh) so the store
+            // uses ONLY this byte. Store wrote a scancode table where the load served code -> the desync.
+            if (q_kind==K_STR && q_st==ST_MOVS && q_str_storedi)
+              str_store_data <= mem_rdata;
+            // OUTS: capture the port-out element SINGLE-HOP at this load ack too — the SAME
+            // clobber hazard as MOVS above. The S_EXEC re-latch read the clobbered global
+            // (a constant), so Win95's first disk WRITE pushed one stale word 256x and
+            // overwrote the FAT root directory with a uniform pattern (0x1c38).
+            if (q_kind==K_STR && q_st==ST_OUTS)
+              ins_data <= wmask(mem_rdata, q_w);
             // M5 finding [med] (D-cache state consistency): a SLOW-PATH data load
             // (displacement/SIB load, RMW source, string/stack load) must mutate
             // the D-cache timing model exactly like the oracle's p5_mem (which runs
@@ -34,13 +72,20 @@
                 // selector is at [mem+4] -> 2nd S_LOAD2 read, then commit CS:EIP.
                 q_ljmp_off <= mem_rdata;
                 state <= S_LOAD2;
-              end else begin
+              end else if (seg_real) begin
                 // real-mode far JMP (m16:16): CS.sel=sel, CS.base=sel<<4, EIP=off.
                 seg_sel [SG_CS] <= mem_rdata[31:16];
                 seg_base[SG_CS] <= {12'd0, mem_rdata[31:16], 4'd0};
                 seg_attr[SG_CS] <= 8'h9B;
                 eip <= {16'd0, mem_rdata[15:0]};
                 retire_valid <= 1'b1; state <= S_PIPE;
+              end else begin
+                // PROTECTED-mode far JMP (m16:16): stage the target, then hand off to
+                // S_LJMP — the SAME CS-descriptor load path the direct far JMP uses
+                // (GDT/LDT read, seg_load_fault delivery, cs_d/CPL from the descriptor).
+                q_ljmp_sel <= mem_rdata[31:16];
+                q_ljmp_off <= {16'd0, mem_rdata[15:0]};
+                seg_step   <= 1'b0; state <= S_LJMP;
               end
             end else if (q_callf_mem) begin
               if (q_w==3'd4) begin
@@ -69,11 +114,19 @@
             // 32-bit far JMP/CALL indirect (m16:32): the 2nd read is the 2-byte
             // selector @[mem+4]; q_ljmp_off already holds the full 32-bit offset.
             if (q_jmpf_mem) begin
-              seg_sel [SG_CS] <= mem_rdata[15:0];
-              seg_base[SG_CS] <= {12'd0, mem_rdata[15:0], 4'd0};
-              seg_attr[SG_CS] <= 8'h9B;
-              eip <= q_ljmp_off;                 // full 32-bit offset (NOT truncated)
-              retire_valid <= 1'b1; state <= S_PIPE;
+              if (seg_real) begin
+                // real-mode far JMP (m16:32): CS.base=sel<<4, EIP=32-bit offset.
+                seg_sel [SG_CS] <= mem_rdata[15:0];
+                seg_base[SG_CS] <= {12'd0, mem_rdata[15:0], 4'd0};
+                seg_attr[SG_CS] <= 8'h9B;
+                eip <= q_ljmp_off;                 // full 32-bit offset (NOT truncated)
+                retire_valid <= 1'b1; state <= S_PIPE;
+              end else begin
+                // PROTECTED-mode far JMP (m16:32): q_ljmp_off already holds the 32-bit
+                // offset; stage the selector and hand off to the S_LJMP CS-descriptor load.
+                q_ljmp_sel <= mem_rdata[15:0];
+                seg_step   <= 1'b0; state <= S_LJMP;
+              end
             end else if (q_callf_mem) begin
               q_ljmp_sel <= mem_rdata[15:0];     // q_ljmp_off already 32-bit
               seg_step   <= 1'b0; state <= S_LCALL;

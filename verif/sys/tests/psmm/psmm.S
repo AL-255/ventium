@@ -92,7 +92,12 @@ _start16:
     movl    $0x00CF9A00, 12(%ebx)
     movl    $0x0000FFFF, 16(%ebx)       /* idx 2 (0x10): data32 flat */
     movl    $0x00CF9200, 20(%ebx)
-    movw    $0x0017, 0x0480             /* gdt pseudo-desc: limit 24-1 */
+    /* REVIEW2 M-02: idx 3 (0x18) = a 32-bit TSS descriptor, base 0x3000 limit 0x67,
+     * type 0x9 (available TSS), P=1 DPL=0 -> attr byte 0x89. LTR below loads TR from
+     * it so the SMM save map has REAL task state to capture instead of zero. */
+    movl    $0x30000067, 24(%ebx)       /* idx 3 (0x18): TSS base[15:0]<<16 | limit */
+    movl    $0x00008900, 28(%ebx)       /* P=1 DPL=0 type=9 (32-bit TSS, available) */
+    movw    $0x001F, 0x0480             /* gdt pseudo-desc: limit 32-1 */
     movl    $0x00000500, 0x0482         /* base 0x0500 */
     lgdt    0x0480
 
@@ -116,10 +121,27 @@ pm32_entry:
     movw    %ax, %gs
     movl    $0x00090000, %esp
 
-    /* --- zero the sentinel area (3 dwords) at 0x2000..0x200B --- */
+    /* --- zero the sentinel area (4 dwords) at 0x2000..0x200F --- */
     movl    $0, 0x00002000             /* [0] SMM-ran sentinel    */
     movl    $0, 0x00002004             /* [1] mainline-resume     */
     movl    $0, 0x00002008             /* [2] state-intact proof  */
+    movl    $0, 0x0000200C             /* [3] DR7 round-trip proof (REVIEW2 M-02) */
+
+    /* === REVIEW2 M-02: arm DEBUG + TASK state before the SMI ==================
+     * The SMM save map used to skip DR6/DR7/TR/LDTR entirely, so an SMM handler
+     * that touched them silently corrupted the interrupted context. Give the
+     * mainline distinctive values, let the handler CLOBBER DR7, and read DR7 back
+     * after RSM -- the sentinel at 0x200C is the round-trip proof.
+     *
+     * DR7 = 0x000F0400: bit 10 is the architecturally-always-1 bit, the 0xF in
+     * [19:16] is a real R/W+LEN field for slot 0, and the ENABLE byte [7:0] is
+     * ZERO -- distinctive but no breakpoint can actually fire, so the test cannot
+     * be perturbed by a #DB it did not mean to provoke. */
+    movl    $0x000F0400, %eax
+    movl    %eax, %dr7
+    /* LTR: load TR from the GDT TSS descriptor built above (selector 0x18). */
+    movw    $0x0018, %ax
+    ltr     %ax
 
     /* === install the SMM handler at SMBASE(0x30000)+0x8000 = 0x38000 === */
     movl    $smm_handler, %esi
@@ -154,6 +176,12 @@ pm32_entry:
     /* === post-SMI: record resume + state-intact sentinels === */
     movl    $0x52455421, 0x00002004    /* 'RET!' proof mainline resumed after RSM */
     movl    %ebx, 0x00002008           /* must read back 0x5A4D900D if RSM intact */
+    /* REVIEW2 M-02: DR7 round-trip. The handler overwrote DR7 with 0x00FF0400; if
+     * the save map carries DR7 this reads back the mainline's 0x000F0400, and if it
+     * does not it reads back the handler's value. Before the fix this slot was never
+     * written OR restored, so the handler's DR7 leaked into the resumed context. */
+    movl    %dr7, %eax
+    movl    %eax, 0x0000200C
 
     /* === clean exit via isa-debug-exit === */
     movl    $0x42, %eax
@@ -171,10 +199,18 @@ hang:
      *   rsm                 : 0F AA
      * The handler touches only EAX; EBX (the state-intact witness) is untouched
      * here and is saved/restored by the SMI/RSM save map, so the mainline reads
-     * it back unchanged -- proving RSM restored the interrupted GPR state. */
+     * it back unchanged -- proving RSM restored the interrupted GPR state.
+     *
+     * REVIEW2 M-02: it now ALSO clobbers DR7, so RSM has something to restore:
+     *   mov eax, 0x00FF0400 : 66 B8 00 04 FF 00      (opsize32 + imm32)
+     *   mov dr7, eax        : 0F 23 F8               (modrm 11 111 000 -> DR7 <- EAX)
+     * 0x00FF0400 keeps the enable byte [7:0] at zero, so the clobbered DR7 cannot
+     * fire a breakpoint inside SMM or in the window before RSM restores it. */
     .align 16
     .global smm_handler
 smm_handler:
+    .byte 0x66, 0xB8, 0x00, 0x04, 0xFF, 0x00
+    .byte 0x0F, 0x23, 0xF8
     .byte 0x66, 0xB8, 0x4D, 0x5A, 0x4D, 0x5A
     .byte 0x67, 0x66, 0xA3, 0x00, 0x20, 0x00, 0x00
     .byte 0x0F, 0xAA

@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -32,8 +33,9 @@ package ventium_decode_pkg;
   typedef enum logic [2:0] { SM_PUSHA, SM_POPA, SM_PUSHF, SM_POPF, SM_LAHF, SM_SAHF,
                              SM_LEAVE, SM_ENTER } smk_e;
   typedef enum logic [2:0] { ST_MOVS, ST_STOS, ST_LODS, ST_SCAS, ST_CMPS,
-                             ST_INS  // M7.3c: INS (6C/6D) — IN per element -> [EDI]
-                           } st_e;  // 6 values -> still fits [2:0]
+                             ST_INS, // M7.3c: INS (6C/6D) — IN per element -> [EDI]
+                             ST_OUTS // Win95 disk-write: OUTS (6E/6F) — [SI] element -> OUT port DX
+                           } st_e;  // 7 values -> still fits [2:0]
   typedef enum logic [3:0] {
     CT_CALLREL, CT_RETN, CT_RETN_IMM, CT_CALLIND, CT_JMPIND,
     CT_LOOP, CT_LOOPE, CT_LOOPNE, CT_JECXZ
@@ -164,6 +166,16 @@ package ventium_decode_pkg;
     // behind errata_en[ERR_MOFFS]. Cycle-mode only (func mode keeps moffs on the
     // proven slow FSM) -> no functional risk; the store value is not traced.
     logic        is_moffs;     // A2/A3 absolute-displacement MOV store (cycle-mode)
+    // ---- task #56 step A: OPERAND-SIZE support for the fast path ------------
+    // The fast-path datapath has never had a width concept -- every arm is hardwired
+    // 32-bit, which is why core_fastpath.svh:288 must send ALL sys_mode instructions
+    // to the slow FSM (the slow path carries d_w on every arm, decode_stages.sv:355).
+    // w16=1 means "this instruction operates on 16 bits": the destination's UPPER 16
+    // BITS MUST BE PRESERVED and flags computed on the 16-bit result.
+    // STEP A lands the plumbing with w16 hardwired 0 everywhere, so behaviour is
+    // bit-identical; decode.sv starts setting it in step B, once it can derive
+    // eff_opsize (which needs prefix recognition it does not yet have).
+    logic        w16;         // 1 = 16-bit operand size (upper half of dst preserved)
     // ---- M5 x87/FP cycle-accuracy fast-path fields (cycle-mode only) --------
     // A small whitelist of register-form x87 ops is recognised here so the FP
     // *cycle* model (latency/throughput, the p5model fp_role scoreboard) is

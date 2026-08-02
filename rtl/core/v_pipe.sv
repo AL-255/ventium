@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -40,9 +41,24 @@ module v_pipe
 
   // V datapath (independent of U by the pairing rule, so reading the OLD gpr
   // state is correct for both).
+  logic [31:0] v_a_w, v_b_w;   // task #56 layer 11: width-masked ALU operands
   always_comb begin
-    v_alu   = alu_result(v_d.alu_op, v_dst_val, fp_bop(v_d), eflags[0]);
-    v_flags = flags_next(v_d.alu_op, v_dst_val, fp_bop(v_d), v_alu, eflags, 3'd4);
+    // task #56 layer 11: the SLOW path masks BOTH ALU operands to the operand width
+    //   core.sv:2028  a_op = reg_read(q_dst_reg, q_w, ...)
+    //   core.sv:2029  b_op = wmask(q_imm, q_w)
+    // The fast path fed FULL 32-bit operands to alu_result, which takes no width argument at all.
+    // A 16-bit ADD/SUB therefore carried past bit 15 into the upper half, and flags_next (fixed in
+    // step H) then derived CF/OF from an already-contaminated result. Mask with the SAME wmask
+    // helper the slow path uses (ventium_alu_pkg:47). At w16=0 wmask(v,3'd4) is the identity, so
+    // this is inert in user mode.
+    v_a_w  = wmask(v_dst_val,  v_d.w16 ? 3'd2 : 3'd4);
+    v_b_w  = wmask(fp_bop(v_d), v_d.w16 ? 3'd2 : 3'd4);
+    v_alu   = alu_result(v_d.alu_op, v_a_w, v_b_w, eflags[0]);
+    // task #56 step H: the width argument was HARDCODED 3'd4 (32-bit) while the slow
+    // path passes q_w (core.sv:2034). A 16-bit op therefore set ZF/SF/CF/OF from the
+    // full 32-bit result -> wrong conditional branches -> guest divergence (UPDATE 279).
+    // flags_next already handles width; it was simply never told.
+    v_flags = flags_next(v_d.alu_op, v_a_w, v_b_w, v_alu, eflags, v_d.w16 ? 3'd2 : 3'd4);
   end
 
 endmodule : v_pipe

@@ -173,6 +173,41 @@ with tempfile.TemporaryDirectory() as td:
           D("save_smbase") == SMBASE,
           "save_smbase=%s (the relocation slot)" % d["save_smbase"])
 
+    # ---- REVIEW2 M-02: DR6/DR7/TR/LDTR ------------------------------------
+    # These four dwords are architectural P5 save-map slots that the serializer
+    # jumped straight over (an unwritten hole between EAX @0x7FD0 and GS @0x7FBC),
+    # so debug and task state could not round-trip an SMI. The mainline now arms
+    # DR7=0x000F0400 and LTRs selector 0x18 before the SMI; the handler clobbers
+    # DR7 with 0x00FF0400; the mainline reads DR7 back into [0x200C] after RSM.
+    check("REVIEW2 M-02: save-map DR7 @ SMBASE+0xFFC8 (off 0x7FC8) holds the MAINLINE DR7",
+          D("save_dr7") == 0x000F0400,
+          "save_dr7=%s (want 0x000F0400 — the value armed before the SMI)"
+          % d["save_dr7"])
+    # DR7 is cleared to 0x00000400 on SMM entry (P5 Vol.3 §20.1.4 initial state), so
+    # a saved value equal to that would mean the save beat ran AFTER the clear.
+    check("REVIEW2 M-02: DR7 saved BEFORE the SMM-entry clear (not 0x00000400)",
+          D("save_dr7") != 0x00000400,
+          "save_dr7=%s (entry clears DR7 to 0x400; the save must capture the "
+          "interrupted value first)" % d["save_dr7"])
+    check("REVIEW2 M-02: save-map DR6 @ SMBASE+0xFFCC (off 0x7FCC) written",
+          (D("save_dr6") & 0xFFFF0FF0) == 0xFFFF0FF0,
+          "save_dr6=%s (DR6 reserved bits read as 1s — the slot carries real DR6, "
+          "not zeroed SMRAM)" % d["save_dr6"])
+    check("REVIEW2 M-02: save-map TR selector @ SMBASE+0xFFC4 (off 0x7FC4)",
+          D("save_tr") == 0x18,
+          "save_tr=%s (want 0x18 — the selector LTR loaded before the SMI)"
+          % d["save_tr"])
+    check("REVIEW2 M-02: TR HIDDEN base saved (implementation-private block)",
+          D("save_tr_base") == 0x3000,
+          "save_tr_base=%s (want 0x3000 — the TSS base from the GDT descriptor)"
+          % d["save_tr_base"])
+    # THE round-trip proof: without the DR7 save/restore beats the mainline would
+    # read back the HANDLER's 0x00FF0400 here.
+    check("REVIEW2 M-02: DR7 ROUND-TRIP — RSM restored the mainline DR7 [0x200C]",
+          D("sent_dr7") == 0x000F0400,
+          "[0x200C]=%s (want 0x000F0400; the handler left 0x00FF0400, so this "
+          "reading 0x00FF0400 means RSM did not restore DR7)" % d["sent_dr7"])
+
 if fails:
     print("\nSMM-RTL-SELFCHECK: FAIL (%s)" % ", ".join(fails))
     sys.exit(1)

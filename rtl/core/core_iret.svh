@@ -33,9 +33,11 @@
                 // EFLAGS popped. Hold it; the actual eflags/eip/ESP commit happens
                 // on the final beat so an inter-priv pop can still read ESP/SS. A
                 // 16-bit pop restores only the low-16 settable flags + keeps [31:16].
+                // REVIEW2 C-10: privilege-masked, not raw. One helper for both widths
+                // and both commit sites so they cannot drift.
                 iret_eflags <= int_gate_op16
-                  ? {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)}
-                  : mem_rdata;
+                  ? {eflags[31:16], iret_flags({eflags[31:16], mem_rdata[15:0]}, eflags)[15:0]}
+                  : iret_flags(mem_rdata, eflags);
                 // M7.2: IRET from CPL0 with the popped EFLAGS.VM (bit17) set is a
                 // RETURN INTO V86. It always pops the full 9-word frame (ESP,SS +
                 // ES,DS,FS,GS follow) and switches stacks, regardless of the popped
@@ -53,9 +55,9 @@
                   // SAME-PRIV: commit now (ESP += 12 or 6), reload CS, retire via _RET.
                   // R3: ESP adjust moved to the gpr writeback driver (S_IRET int_step 2).
                   eip          <= iret_eip;
-                  eflags       <= int_gate_op16
-                    ? {eflags[31:16], ((mem_rdata[15:0] & 16'h7FD5) | 16'h0002)}
-                    : mem_rdata;
+                  eflags       <= int_gate_op16          // REVIEW2 C-10
+                    ? {eflags[31:16], iret_flags({eflags[31:16], mem_rdata[15:0]}, eflags)[15:0]}
+                    : iret_flags(mem_rdata, eflags);
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
                   state        <= S_INT_CS_RET;

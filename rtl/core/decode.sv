@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -33,6 +34,10 @@ module decode
     input  logic [7:0]  ib4,
     input  logic [7:0]  ib5,
     input  logic [31:0] iflags,
+    // task #56 step C: the 16-bit-default flag (core.sv:770, def16 = sys_mode && !cs_d).
+    // decode.sv was written for 32-bit flat code and had NO operand-size concept at all,
+    // which is precisely what core_fastpath.svh:288's sys_mode bail-out exists to avoid.
+    input  logic        def16,
     input  logic        cycle_mode,
     output fpd_t        uop
 );
@@ -47,12 +52,18 @@ module decode
     begin
       d = '{default:'0};
       d.alu_op = ALU_ADD; d.len = 4'd1;
+      // task #56 step F: for UNPREFIXED instructions eff_opsize == def16, so w16 follows it
+      // directly. decode.sv still does not recognise prefixes (an unrecognised prefix byte lands
+      // as b0 and yields d.simple=0), so every instruction that reaches an arm below is
+      // unprefixed by construction -- which makes this exact, not an approximation.
+      d.w16 = def16;
+
       mod = b1[7:6]; reg_f = b1[5:3]; rm = b1[2:0];
       unique casez (b0)
         // ---- MOV r32, imm32 (B8+r) -------------------------------------------
         8'b1011_1???: begin
-          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_MOV; d.wreg=1'b1; d.use_imm=1'b1;
-          d.dst=b0[2:0]; d.imm={b4,b3,b2,b1};
+          d.simple=1'b1; d.len=def16?4'd3:4'd5; d.alu_op=ALU_MOV; d.wreg=1'b1; d.use_imm=1'b1;
+          d.dst=b0[2:0]; d.imm=def16?{16'd0,b2,b1}:{b4,b3,b2,b1};
           d.writes={5'd0, _onehot(b0[2:0])}[7:0];
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
@@ -94,8 +105,9 @@ module decode
         // 0x66 prefix as b0, so it never reaches this arm — it stays on the slow
         // FSM. ADC(op2)/SBB(op3) = PU (U-only-pairable); CMP(op7) writes no reg.
         8'b00??_?101: begin
-          d.simple=1'b1; d.len=4'd5; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
-          d.dst=R_EAX; d.src=R_EAX; d.use_imm=1'b1; d.imm={b4,b3,b2,b1};
+          d.simple=1'b1; d.len=def16?4'd3:4'd5; d.alu_op={2'b00,b0[5:3]}; d.wflags=1'b1;
+          d.dst=R_EAX; d.src=R_EAX; d.use_imm=1'b1;
+          d.imm=def16?{16'd0,b2,b1}:{b4,b3,b2,b1};   // step D: 16-bit immediate is b2:b1
           d.wreg=(b0[5:3]!=3'b111);
           d.reads = _onehot(R_EAX);
           d.writes = d.wreg ? _onehot(R_EAX) : 8'd0;
@@ -121,8 +133,10 @@ module decode
         // only (mod11, no memory). ALU op = reg_f; ADC/SBB=PU; CMP writes no reg.
         8'h81: begin
           if (mod==2'b11) begin
-            d.simple=1'b1; d.len=4'd6; d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
-            d.use_imm=1'b1; d.imm={b5,b4,b3,b2}; d.dst=rm; d.src=rm;
+            d.simple=1'b1; d.len=def16?4'd4:4'd6; d.alu_op={2'b00,reg_f}; d.wflags=1'b1;
+            d.use_imm=1'b1;
+            d.imm=def16?{16'd0,b3,b2}:{b5,b4,b3,b2};  // step D: 16-bit immediate is b3:b2
+            d.dst=rm; d.src=rm;
             d.wreg=(reg_f!=3'b111);
             d.reads = _onehot(rm);
             d.writes = d.wreg ? _onehot(rm) : 8'd0;
@@ -135,8 +149,10 @@ module decode
         // group11/UD — left to the slow FSM). Reg form only; no flags; imm=b2..b5.
         8'hC7: begin
           if (mod==2'b11 && reg_f==3'b000) begin
-            d.simple=1'b1; d.len=4'd6; d.alu_op=ALU_MOV;
-            d.use_imm=1'b1; d.imm={b5,b4,b3,b2}; d.dst=rm; d.wreg=1'b1;
+            d.simple=1'b1; d.len=def16?4'd4:4'd6; d.alu_op=ALU_MOV;
+            d.use_imm=1'b1;
+            d.imm=def16?{16'd0,b3,b2}:{b5,b4,b3,b2};  // step D: 16-bit immediate is b3:b2
+            d.dst=rm; d.wreg=1'b1;
             d.writes=_onehot(rm);
             d.pairs_first=1'b1; d.pairs_second=1'b1;
           end
@@ -162,8 +178,11 @@ module decode
             d.simple=1'b1; d.len=4'd2; d.alu_op=ALU_MOV; d.dst=reg_f; d.src=rm;
             d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
             d.pairs_first=1'b1; d.pairs_second=1'b1;
-          end else if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
+          end else if (!def16 && mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
             // MOV r32,(base) : register-indirect load, no SIB/disp.
+            // task #56 step E DEFERRED: 16-bit MODRM is a DIFFERENT table (no SIB;
+            // [BX+SI]/[BP+DI]/... encodings), so memory forms stay on the slow FSM
+            // while def16. Register forms above are unaffected.
             d.simple=1'b1; d.is_load=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
             d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
             d.addr_mask=_onehot(rm);
@@ -172,7 +191,7 @@ module decode
         end
         // ---- LEA r32, m (8D /r) : register-indirect form only ----------------
         8'h8D: begin
-          if (mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin
+          if (!def16 && mod==2'b00 && rm!=3'b100 && rm!=3'b101) begin   // step E deferred: 16-bit modrm differs
             d.simple=1'b1; d.is_lea=1'b1; d.len=4'd2; d.dst=reg_f; d.base=rm;
             d.wreg=1'b1; d.reads=_onehot(rm); d.writes=_onehot(reg_f);
             d.addr_mask=_onehot(rm);
@@ -208,8 +227,9 @@ module decode
         end
         // ---- TEST eAX, imm32 (A9) --------------------------------------------
         8'hA9: begin
-          d.simple=1'b1; d.len=4'd5; d.alu_op=ALU_TEST; d.wflags=1'b1;
-          d.dst=R_EAX; d.use_imm=1'b1; d.imm={b4,b3,b2,b1};
+          d.simple=1'b1; d.len=def16?4'd3:4'd5; d.alu_op=ALU_TEST; d.wflags=1'b1;
+          d.dst=R_EAX; d.use_imm=1'b1;
+          d.imm=def16?{16'd0,b2,b1}:{b4,b3,b2,b1};   // step D: 16-bit immediate is b2:b1
           d.reads=_onehot(R_EAX);
           d.pairs_first=1'b1; d.pairs_second=1'b1;
         end
@@ -239,13 +259,19 @@ module decode
         // errata flag. The store reads EAX (its data source) -> reads=EAX so a
         // genuine RAW with a prior EAX writer is still honored; the ERRATUM adds a
         // false dep on the FOLLOWING EAX reader (handled in core.sv pairing).
-        8'hA2, 8'hA3: if (cycle_mode) begin
-          d.simple=1'b1; d.is_moffs=1'b1; d.len=4'd5;
-          d.dst=R_EAX; d.src=R_EAX;             // data source = (e)AX
-          d.reads=_onehot(R_EAX);               // reads EAX (the stored datum)
-          d.writes=8'd0;                        // a store writes no GP register
-          d.pairs_first=1'b1; d.pairs_second=1'b1;
-        end
+        // DISABLED (REVIEW_Jul29 H-02). This arm claimed the FAST path for a STORE
+        // while modelling ONLY retire+pairing — it never issued the memory write, so
+        // `MOV moffs,AL/eAX` retired having written NOTHING. tmp/review_jul29/
+        // moffs_cycle.s reproduces it: functional mode performs four byte-enabled
+        // writes and reaches PC 0x0804801d; cycle mode performs ZERO writes and
+        // derails to 0x08048016. That is not a timing-model inaccuracy, it is
+        // architectural corruption — and it was LIVE on the FPGA, because the
+        // deployed ao486 shim hard-wires cycle_mode=1 (ven_ao486_shim.sv:180-188).
+        // A0..A3 now always take the proven slow store/load FSM. The erratum-59
+        // false-EAX-dependency pairing model is given up until the fast path can
+        // carry a real store handshake that cannot retire before the write is
+        // accepted (the review's recommended shape).
+        // 8'hA2, 8'hA3: if (cycle_mode) begin ... d.simple=1'b1; d.is_moffs=1'b1; ... end
         // ---- Jcc rel8 (70..7F) -----------------------------------------------
         8'b0111_????: begin
           d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd2;
@@ -268,8 +294,8 @@ module decode
         // The near (32-bit displacement) sibling of EB; same branch datapath with
         // rel = b4..b1 (len 5). PV (V-only-pairable, like EB).
         8'hE9: begin
-          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b0; d.len=4'd5;
-          d.br_taken=1'b1; d.rel={b4,b3,b2,b1};
+          d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b0; d.len=def16?4'd3:4'd5;
+          d.br_taken=1'b1; d.rel=def16?{{16{b2[7]}},b2,b1}:{b4,b3,b2,b1};
           d.pairs_first=1'b0; d.pairs_second=1'b1;
         end
         // ---- Jcc rel32 (0F 8x) — fast-path batch 4 ---------------------------
@@ -279,8 +305,8 @@ module decode
         // op leaves simple=0 and falls to the slow FSM.
         8'h0F: begin
           if (b1[7:4]==4'h8) begin
-            d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=4'd6;
-            d.cc=b1[3:0]; d.br_taken=cond_true(b1[3:0],flags_in); d.rel={b5,b4,b3,b2};
+            d.simple=1'b1; d.is_branch=1'b1; d.br_cond=1'b1; d.len=def16?4'd4:4'd6;
+            d.cc=b1[3:0]; d.br_taken=cond_true(b1[3:0],flags_in); d.rel=def16?{{16{b3[7]}},b3,b2}:{b5,b4,b3,b2};
             d.pairs_first=1'b0; d.pairs_second=1'b1;
           end
         end
@@ -349,9 +375,22 @@ module decode
               end
               8'hDD: begin
                 unique casez (b1)
-                  8'b1101_1???: begin   // DD D8+i  FSTP ST(i)  (pop). FSTP st(0)=discard.
+                  // DD D8 ONLY — FSTP ST(0), i.e. "discard the top", which is a pure
+                  // pop. REVIEW_Jul29 H-01: this used to match DD D8+i for ALL i
+                  // (8'b1101_1???) and commit as a bare pop, silently dropping the
+                  // required ST0->ST(i) copy for i!=0.
+                  // First fix attempt performed the indexed write here (fp_we_sti with
+                  // a variable index) — correct, but it added a mux to the FAST-path
+                  // fpr write and cost ~2.7 ns on an already-marginal core path: the
+                  // routed WNS went +0.187 -> -2.565 with the failing endpoints named
+                  // as u_fpu_state/fpr_flat[*], fpp_a[*], u_fpu_wb/fpp_valid_reg[*].
+                  // So take the review's OTHER option instead: fast-path only i==0 and
+                  // let FSTP ST(i!=0) fall to the SLOW decoder, which already
+                  // implements the copy-then-pop correctly (decode_stages.sv:1627-1633).
+                  // Same correctness, zero timing cost.
+                  8'b1101_1000: begin   // DD D8  FSTP ST(0)  (discard + pop)
                     d.is_fp=1'b1; d.fp_kind=FK_FSTP0; d.len=4'd2;
-                    d.fp_sti=b1[2:0]; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
+                    d.fp_sti=3'd0; d.fp_role=3'd0; d.fp_lat=7'd1; d.fp_occ=7'd1;
                   end
                   default: ;
                 endcase
@@ -362,7 +401,18 @@ module decode
         end
         default: ;
       endcase
-      return d;
+    // ---- (removed) three 16-bit BISECT scaffolds ---------------------------
+    // VEN_D16_MOVONLY / VEN_D16_NOWREG / VEN_D16_NOPAIR used to sit here, each
+    // narrowing what `simple` admits in 16-bit mode to binary-search the boot
+    // failure. All three premises are REFUTED: the bug was never in the register
+    // write, the flag commit, or the pairing decision -- it was C-01, a stale copy
+    // of the issue predicate in core_gpr_wb.svh that dropped gpr_we entirely.
+    // VEN_D16_NOWREG "worked" only because rejecting register writers removed
+    // exactly the instructions whose writes were being discarded, which is what
+    // made it look like a writeback defect. Removed rather than left gated off:
+    // the comments asserted those hypotheses as live leads and would send the next
+    // reader down three dead paths. (DISK_BOOT_STATUS UPDATE 301.)
+    return d;
     end
   endfunction
 

@@ -51,7 +51,7 @@
           f_pc_bad = f_is_arith && (fctrl[9:8] != 2'b11);
 `endif
           if (f_pc_bad) begin
-            state<=S_HALT;
+            state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE2; `endif
           end else
           unique case (q_fxop)
             // ---- memory stores: defer to S_FSTORE ----

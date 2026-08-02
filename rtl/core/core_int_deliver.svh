@@ -58,8 +58,22 @@
               // the new vector. (A second nesting would escalate toward #DF; the
               // corpus never triggers it, so the single re-vector is sufficient and
               // honest — full #DF chaining is a documented follow-on.)
+              // REVIEW2 H-03: the gate TYPE was never validated -- any 8 bytes at
+              // IDT[vec] were interpreted as a gate, so a task gate, a call gate, a
+              // data descriptor or plain garbage was decoded as an interrupt/trap gate
+              // and its "offset"/"selector" fields used to transfer control. Only
+              // types 0x6/0x7 (16-bit int/trap) and 0xE/0xF (32-bit int/trap) are
+              // legal here; S=0 (system) is required. A bad type is #GP(vec*8+2).
+              //
+              // NOTE: task gates (type 0x5) are a legitimate IDT entry that this core
+              // does not implement. Faulting is the honest behaviour -- previously
+              // such a gate was silently misinterpreted as an interrupt gate, which is
+              // strictly worse than a diagnosable #GP.
               if (!gattr[7]) begin
                 start_fault(8'd11, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
+              end else if (gattr[4] || !(gattr[3:0] inside {4'h6,4'h7,4'hE,4'hF})) begin
+                // S must be 0 (system descriptor) and the type must be int/trap gate.
+                start_fault(8'd13, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
               end else if (int_sw && (gattr[6:5] < cpl_r)) begin
                 start_fault(8'd13, 1'b1, {21'd0, int_vec, 3'b010}, int_src_pc);
               end else begin
@@ -134,6 +148,15 @@
                 // frame at a stale address. Pinning from_v86 to the cross-priv arm
                 // closes that latent path with no functional change.
                 from_v86 <= v86 && (tgt_dpl < eff_cpl);
+`ifdef VEN_DBG_WD
+                // [VEN-XPL] the cross-priv-vs-same-priv decision for the Quake #PF. A
+                // nested CPL0 fault (cs=0x18) MUST be same-priv; if this prints XPL with
+                // cpl_r!=0 (or v86=1), that stale privilege is the frame-corruption bug.
+                if (creg3==32'h0007e000 && int_vec==8'd14)
+                  $display("[VEN-XPL] vec=%0d tgt_dpl=%0d eff_cpl=%0d cpl_r=%0d v86=%b -> %s @cs:eip=%04x:%08h old_esp=%08h",
+                           int_vec, tgt_dpl, eff_cpl, cpl_r, v86, (tgt_dpl<eff_cpl)?"XPL":"SAME",
+                           seg_sel[SG_CS], eip, gpr_o[R_ESP]);
+`endif
                 if (tgt_dpl < eff_cpl) begin
                   // CROSS-PRIV (includes EVERY V86 delivery, eff_cpl=3): freeze the
                   // interrupted task's CS:SS:ESP for the frame (seg_sel[] here still

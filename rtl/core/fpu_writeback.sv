@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -80,6 +81,12 @@ module fpu_writeback
 
     // pipeline / cycle gating
     input  logic        xlate_miss,
+    // An accepted interrupt diverts the S_PIPE spine before anything issues. Without
+    // this the FP fast arm below still fired and committed x87 architectural state
+    // (fpr/ftop/fstat/fptag) for an op that did NOT retire -- and since the divert
+    // does not advance EIP, that op re-executes after IRET and the stack drifts.
+    // Canonical signal, driven from core.sv (see fp_irq_divert there).
+    input  logic        irq_divert,
     input  logic [6:0]  stall_cnt,
     input  logic        pipe_bytes_ok,
     input  logic [6:0]  pending_mem_pen,
@@ -357,9 +364,14 @@ module fpu_writeback
 `endif
 
     // ===== FAST ARM (M5 cycle-mode FP issue+commit) — same guard as ic_fp_commit.
-    fp_in_pipe = (state==S_PIPE) && !xlate_miss && (stall_cnt==7'd0) &&
+    fp_in_pipe = (state==S_PIPE) && !irq_divert && !xlate_miss && (stall_cnt==7'd0) &&
                  pipe_bytes_ok && (pending_mem_pen==7'd0);
+`ifdef VEN_FP_PC_RELAX
+    fp_halt4   = 1'b0;   // BUG#3: PC-relax computes FK_ARITH under PC!=11 (no fast-path halt);
+                         // must match core_fastpath.svh + ic_halt4 so the result IS written.
+`else
     fp_halt4   = u_d.is_fp && (u_d.fp_kind==FK_ARITH) && (fctrl[9:8]!=2'b11);
+`endif
     fp_fp_arm  = fp_in_pipe && !fp_halt4 && u_d.is_fp;
     fp_dep_ready = (u_d.fp_role>=3'd2) ? fp_ready_cyc : 32'd0;
 `ifdef VEN_FP_OVERLAP
@@ -429,6 +441,15 @@ module fpu_writeback
           fp_we_fstat=1'b1; fp_fstat_wval=f_arith_fstat(fstat, fp_arf);
 `endif
         end
+        // FSTP ST(0) (DD D8) — a pure pop, which is all this fast-path arm ever sees.
+        // REVIEW_Jul29 H-01: the fast decoder used to claim DD D8+i for ALL i and
+        // commit as a bare pop, silently dropping the required ST0->ST(i) copy.
+        // The indexed write was implemented HERE first (fp_we_sti with a variable
+        // index) and was correct, but it added a mux to the fast-path fpr write and
+        // cost ~2.7 ns on an already-marginal core path (routed WNS +0.187 -> -2.565,
+        // failing endpoints u_fpu_state/fpr_flat[*], u_fpu_wb/fpp_valid_reg[*]).
+        // decode.sv now fast-paths ONLY i==0, so FSTP ST(i!=0) takes the slow decoder
+        // which already does copy-then-pop — same correctness, no timing cost.
         FK_FSTP0:  begin fp_we_pop=1'b1; end
         FK_FXCH:   begin
           fp_we_fxch=1'b1; fp_fxch_idx=u_d.fp_sti;
@@ -504,6 +525,23 @@ module fpu_writeback
     // pre-reinit state and the live state reinitializes. (FNSTENV has no side effect.)
     if (state==S_FENV_ST && mem_ack && q_fxop==FX_FNSAVE && f_seq_step==5'd26)
       fp_we_fninit = 1'b1;
+    // REVIEW2 M-01: FSTENV/FNSTENV MASKS ALL x87 EXCEPTIONS after storing the
+    // environment (SDM Vol.2: "After saving the FPU environment, the FPU exception
+    // masks are set", i.e. FCW[5:0] <- 6'b111111). This was missing; the old comment
+    // beside it -- "(FNSTENV has no side effect.)" -- described the ORACLE, not the
+    // architecture. It is a real behaviour that code depends on: the classic idiom
+    // stores the environment expecting the FPU to come back exception-masked.
+    //
+    // Applied on the LAST store beat, so the image already captured the OLD (unmasked)
+    // FCW, exactly like FNSAVE's reinit rides the last beat above.
+    // 5'd6 = the FNSTENV last beat, matching the sequencer's own
+    // `(q_fxop==FX_FNSAVE) ? 5'd26 : 5'd6` in core_fenv.svh. Keep the two in step;
+    // when the 14/94-byte operand-size forms land, both must move to a shared
+    // constant rather than a third copy of the magic number.
+    if (state==S_FENV_ST && mem_ack && q_fxop!=FX_FNSAVE && f_seq_step==5'd6) begin
+      fp_we_fctrl  = 1'b1;
+      fp_fctrl_wval = fctrl | 16'h003F;   // mask IM/DM/ZM/OM/UM/PM
+    end
     s_opnd_f = q_f_mem_read ? f_mem_as_float(f_mem80, q_f_mbytes) : 80'd0;
     s_st0v   = fst(3'd0);
     s_stiv   = fst(q_f_sti);

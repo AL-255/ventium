@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // ao486-sim behavioral primitives + stubs.
 //
 // Replaces Altera megafunctions (altsyncram, altdpram) and the repo's dpram/
@@ -67,6 +68,61 @@ module altsyncram #(
     localparam BA    = width_a / 8;   // bytes per port-A word
     localparam BB    = width_b / 8;   // bytes per port-B word
 
+`ifdef VEN_ALTSYNCRAM_XPM
+`ifdef VERILATOR
+    // ---- cosim XPM-FIDELITY model: reproduce the on-FPGA xpm_memory_sdpram timing
+    // EXACTLY so the Verilator build exercises the same read-during-write semantics
+    // as the real BRAM. The `else Altera model has a REGISTERED ADDRESS + COMBINATIONAL
+    // OUTPUT (q_b reflects a same-cycle write); the XPM below has a REGISTERED OUTPUT
+    // with WRITE_MODE_B="read_first" (a coincident read+write returns the OLD word).
+    // Those differ on a read-during-write -> a bug that only appears on hardware. This
+    // branch makes the cosim faithful to the XPM so that difference is testable in sim.
+    reg [7:0] memx [0:BYTES-1];
+    always @(posedge clock0)
+        for (int wk = 0; wk < BA; wk = wk + 1)
+            if (wren_a && byteena_a[wk]) memx[address_a*BA + wk] <= data_a[wk*8 +: 8];
+    reg [width_b-1:0] qbx;
+    always @(posedge clock0)   // READ_LATENCY_B=1, read_first: NBA RHS samples pre-write mem
+        for (int rk = 0; rk < BB; rk = rk + 1) qbx[rk*8 +: 8] <= memx[address_b*BB + rk];
+    assign q_b = qbx;
+    assign q_a = {width_a{1'b0}};
+    assign eccstatus = 1'b0;
+`else
+    // ---- FPGA path: force BLOCK RAM via xpm_memory_sdpram ---------------------
+    // The behavioral model below (`else) is byte-addressed with a registered
+    // ADDRESS + combinational OUTPUT, which Vivado maps to distributed LUTRAM
+    // (the ao486 l2_cache = ~495K LUTs, the dominant fit blocker). XPM SDPRAM with
+    // mixed width (64b write / 32b read) + byte-enable + READ_LATENCY_B=1 is the
+    // SAME behavior (q_b valid 1 clock after address_b) but guaranteed BRAM.
+    // Gated by VEN_ALTSYNCRAM_XPM so the Verilator/cosim build is byte-identical.
+    // Byte-enabled (BEN) vs whole-word write: pick the XPM byte-write granularity
+    // so non-byte-multiple widths (tag/LRU RAMs, width_byteena_a==1) stay legal.
+    localparam BEN = (width_byteena_a > 1);
+    localparam BWW = BEN ? 8 : width_a;        // XPM BYTE_WRITE_WIDTH_A
+    localparam NWE = width_a / BWW;            // # write-enable bits
+    wire [NWE-1:0] wea = BEN ? ({NWE{wren_a}} & byteena_a[NWE-1:0]) : {NWE{wren_a}};
+    xpm_memory_sdpram #(
+        .MEMORY_SIZE        (numwords_a * width_a),
+        .MEMORY_PRIMITIVE   ("block"),
+        .CLOCKING_MODE      ("common_clock"),
+        .WRITE_DATA_WIDTH_A (width_a),
+        .BYTE_WRITE_WIDTH_A (BWW),
+        .ADDR_WIDTH_A       (widthad_a),
+        .READ_DATA_WIDTH_B  (width_b),
+        .ADDR_WIDTH_B       (widthad_b),
+        .READ_LATENCY_B     (1),
+        .WRITE_MODE_B       ("read_first"),
+        .USE_MEM_INIT       (0)
+    ) u_xpm (
+        .clka(clock0), .ena(1'b1), .wea(wea), .addra(address_a), .dina(data_a),
+        .clkb(clock0), .enb(1'b1), .addrb(address_b), .doutb(q_b),
+        .rstb(1'b0), .regceb(1'b1), .sleep(1'b0),
+        .injectsbiterra(1'b0), .injectdbiterra(1'b0), .sbiterrb(), .dbiterrb()
+    );
+    assign q_a = {width_a{1'b0}};
+    assign eccstatus = 1'b0;
+`endif // VERILATOR
+`else
     reg [7:0] mem [0:BYTES-1];
 
     // Port A: byte-enabled write (local loop var per block — must NOT share)
@@ -86,6 +142,7 @@ module altsyncram #(
     assign q_b = qb;
     assign q_a = {width_a{1'b0}};
     assign eccstatus = 1'b0;
+`endif
 endmodule
 
 // ---------------------------------------------------------------------------
@@ -144,21 +201,56 @@ module dpram #(
     input  [ADDR-1:0]      address_a,
     input  [DATA-1:0]      data_a,
     input                  wren_a,
-    output reg [DATA-1:0]  q_a,
+    output     [DATA-1:0]  q_a,
     input  [ADDR-1:0]      address_b,
     input  [DATA-1:0]      data_b,
     input                  wren_b,
-    output reg [DATA-1:0]  q_b
+    output     [DATA-1:0]  q_b
 );
+`ifdef VEN_ALTSYNCRAM_XPM
+`ifndef VERILATOR
+    // ---- FPGA path: force a SHARED true-dual-port BRAM via xpm_memory_tdpram ----
+    // The behavioral `else model (two always blocks both accessing mem[]) is recognized
+    // by Vivado as a "true dual port RAM template" (Synth 8-3971) yet does NOT share
+    // storage across ports on hardware: port-A writes (the mgmt disk-buffer fill) never
+    // reach port-B reads (the CPU draining the IDE data FIFO) -> the core reads all-zero
+    // (io_readdata=0000, buf_q=0000 while the port-A mgmt readback returns correct data).
+    // xpm_memory_tdpram guarantees ONE shared BRAM with independent R/W on both ports.
+    // READ_LATENCY=1 + read_first matches `q <= mem[addr]` behavioral timing exactly.
+    xpm_memory_tdpram #(
+        .MEMORY_SIZE        ((2**ADDR) * DATA),
+        .MEMORY_PRIMITIVE   ("block"),
+        .CLOCKING_MODE      ("common_clock"),
+        .WRITE_DATA_WIDTH_A (DATA), .READ_DATA_WIDTH_A (DATA), .BYTE_WRITE_WIDTH_A (DATA), .ADDR_WIDTH_A (ADDR),
+        .WRITE_DATA_WIDTH_B (DATA), .READ_DATA_WIDTH_B (DATA), .BYTE_WRITE_WIDTH_B (DATA), .ADDR_WIDTH_B (ADDR),
+        .READ_LATENCY_A     (1), .READ_LATENCY_B (1),
+        .WRITE_MODE_A       ("read_first"), .WRITE_MODE_B ("read_first"),
+        .USE_MEM_INIT       (0)
+    ) u_tdp (
+        .clka(clock), .clkb(clock), .rsta(1'b0), .rstb(1'b0),
+        .ena(1'b1), .enb(1'b1), .regcea(1'b1), .regceb(1'b1),
+        .wea(wren_a), .web(wren_b),
+        .addra(address_a), .addrb(address_b),
+        .dina(data_a), .dinb(data_b),
+        .douta(q_a), .doutb(q_b),
+        .sleep(1'b0),
+        .injectsbiterra(1'b0), .injectdbiterra(1'b0), .injectsbiterrb(1'b0), .injectdbiterrb(1'b0),
+        .sbiterra(), .dbiterra(), .sbiterrb(), .dbiterrb()
+    );
+`else
     reg [DATA-1:0] mem [0:(2**ADDR)-1];
-    always @(posedge clock) begin
-        if (wren_a) mem[address_a] <= data_a;
-        q_a <= mem[address_a];
-    end
-    always @(posedge clock) begin
-        if (wren_b) mem[address_b] <= data_b;
-        q_b <= mem[address_b];
-    end
+    reg [DATA-1:0] qa, qb;
+    always @(posedge clock) begin if (wren_a) mem[address_a] <= data_a; qa <= mem[address_a]; end
+    always @(posedge clock) begin if (wren_b) mem[address_b] <= data_b; qb <= mem[address_b]; end
+    assign q_a = qa; assign q_b = qb;
+`endif
+`else
+    reg [DATA-1:0] mem [0:(2**ADDR)-1];
+    reg [DATA-1:0] qa, qb;
+    always @(posedge clock) begin if (wren_a) mem[address_a] <= data_a; qa <= mem[address_a]; end
+    always @(posedge clock) begin if (wren_b) mem[address_b] <= data_b; qb <= mem[address_b]; end
+    assign q_a = qa; assign q_b = qb;
+`endif
 endmodule
 
 // ---------------------------------------------------------------------------

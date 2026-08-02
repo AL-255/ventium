@@ -8,7 +8,15 @@
 //   S_FETCH (16-byte fetch window), S_DECODE (prefix/length/operand decode +
 //   the SYS_* -> S_LGDT/S_SEGLD/S_LJMP/S_LTR routing and load/exec dispatch).
         S_FETCH: begin
-          if (mem_ack) begin
+          // task #54: the whole 16-byte window is already in the I-cache -> take it
+          // in ONE clock instead of four bus reads. sfetch_fast (core.sv) is the
+          // residency predicate; the bus driver suppresses mem_req on the same
+          // condition so this issues no transaction at all.
+          if (sfetch_fast) begin
+            for (int i = 0; i < IWORDS*4; i++) ibuf[i] <= ic_byte(flin + 32'(i));
+            fetch_word <= 3'd0;
+            state      <= S_DECODE;
+          end else if (mem_ack) begin
             ibuf[{fetch_word,2'b00}+0]<=mem_rdata[7:0];
             ibuf[{fetch_word,2'b00}+1]<=mem_rdata[15:8];
             ibuf[{fetch_word,2'b00}+2]<=mem_rdata[23:16];
@@ -19,6 +27,34 @@
         end
 
         S_DECODE: begin
+`ifdef VEN_DBG_WD
+          // [VEN-DECPROBE] ground-truth of the decode at the far-jmp task switch (cs=002b:0x3e93) and the
+          // resume (cs=0018:0x3f49) during the cascade: ibuf bytes + effective op/addr size + decoded uop.
+          if ((eip[15:0]==16'h3f49 || eip[15:0]==16'h3e93 || eip[15:0]==16'h3e98)
+              && (gpr_o[R_ESI]==32'h0011b354 || gpr_o[R_ESI]==32'h00000758)) begin
+            $display("[VEN-DECPROBE] cs:eip=%04x:%04x ib=%02x %02x %02x %02x %02x %02x | eff_op=%b eff_addr=%b def16=%b cs_d=%b | d_memrd=%b d_memwr=%b d_ea=%08h d_len=%0d esi=%08h",
+                     seg_sel[SG_CS], eip[15:0], ibuf[0],ibuf[1],ibuf[2],ibuf[3],ibuf[4],ibuf[5],
+                     eff_opsize, eff_addr, def16, cs_d, d_mem_read, d_mem_write, d_ea, d_len, gpr_o[R_ESI]);
+          end
+          // [VEN-TBLWRITER] the writer at cs=0087:0x3d8 populates the fn-ptr table but at 0x5c004+ (never
+          // 0x5c000). Log its decode + EA + base/index regs to see if the loop base is off-by-4 (should start
+          // at 0x5c000) or if 0x5c000 is a separate write that Ventium skips.
+          if (seg_sel[SG_CS]==16'h0087 && eip>=32'h000003c0 && eip<=32'h000003ec) begin
+            $display("[VEN-TBLWRITER] cs:eip=0087:%04h ib=%02x %02x %02x %02x %02x %02x | eff_addr=%b d_memwr=%b d_ea=%08h(ds_lin=%08h) d_len=%0d | eax=%08h ecx=%08h edx=%08h esi=%08h edi=%08h ebp=%08h",
+                     eip[15:0], ibuf[0],ibuf[1],ibuf[2],ibuf[3],ibuf[4],ibuf[5], eff_addr, d_mem_write,
+                     d_ea, seg_base[SG_DS]+d_ea, d_len,
+                     gpr_o[R_EAX], gpr_o[R_ECX], gpr_o[R_EDX], gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_EBP]);
+          end
+          // [VEN-NULLCALL] the 2nd bug: Quake client sets eax->0 near cs=00a7:0x515b2 then `call eax` (=null).
+          // Log the decode + eax + the memory operand (if a load) for the whole 0x515a0..0x515b6 window so we
+          // see WHICH instruction zeroes eax and whether it is a load (mov eax,[ptr] with [ptr]=0) or a compute.
+          if (seg_sel[SG_CS]==16'h00a7 && eip>=32'h000515a0 && eip<=32'h000515b6) begin
+            $display("[VEN-NULLCALL] cs:eip=00a7:%08h ib=%02x %02x %02x %02x %02x %02x | eff_op=%b eff_addr=%b | d_memrd=%b d_memwr=%b d_ea=%08h(ds_lin=%08h) d_len=%0d | eax=%08h ebx=%08h esi=%08h edi=%08h",
+                     eip, ibuf[0],ibuf[1],ibuf[2],ibuf[3],ibuf[4],ibuf[5], eff_opsize, eff_addr,
+                     d_mem_read, d_mem_write, d_ea, seg_base[SG_DS]+d_ea, d_len,
+                     gpr_o[R_EAX], gpr_o[R_EBX], gpr_o[R_ESI], gpr_o[R_EDI]);
+          end
+`endif
 `ifdef VEN_DBG_CORE
           // DOS-Quake #DE CONFIRM (hook cfg[2]): the JMP FAR `ea 00 00 70 00` (JMP FAR
           // 0x0070:0x0000) at cs=0x2b:0x3E93 is the divergence — the board lands at
@@ -78,7 +114,7 @@
           q_str_scandi<=d_str_scandi; q_ct<=d_ct; q_ret_imm<=d_ret_imm;
           q_cld<=d_cld; q_std<=d_std; step<=4'd0;
           q_clc<=d_clc; q_stc<=d_stc; q_cmc<=d_cmc; q_cnt16<=d_cnt16;
-          q_cli<=d_cli; q_sti<=d_sti; q_br16<=d_br16;
+          q_cli<=d_cli; q_sti<=d_sti; q_br16<=d_br16; q_clts<=d_clts;   // H-23
           // M8.1: the STI/MOV-SS interrupt shadow lasts exactly ONE instruction.
           // It was set in S_EXEC by the STI; this S_DECODE (the boundary BEFORE the
           // shadowed instruction) still sees it set in the combinational intr_take
@@ -97,7 +133,7 @@
           f_step<=4'd0;
           // M2S.1 system decode latch.
           q_sysop<=d_sysop; q_sys_sreg<=d_sys_sreg; q_sys_creg<=d_sys_creg;
-          q_seg<=d_seg; q_ljmp_off<=d_ljmp_off; q_ljmp_sel<=d_ljmp_sel;
+          q_seg<=d_seg; q_pfx_seg_en<=d_pfx_seg_en; q_ljmp_off<=d_ljmp_off; q_ljmp_sel<=d_ljmp_sel;
           q_seg_load<=d_seg_load; q_lseg<=d_lseg;   // M9.5 LES/LDS/LSS/LFS/LGS
           q_push_sreg<=d_push_sreg; q_pop_sreg<=d_pop_sreg;   // F3 PUSH/POP sreg
           q_seg_load_lo<=d_seg_load_lo;                       // F3 MOV Sreg,[mem]
@@ -116,10 +152,7 @@
           // S_SMI_SAVE. smm_active blocks re-entrant SMI (SMI is masked in SMM).
           // This takes priority over the decoded instruction below.
           if (smi_pending && sys_mode && !smm_active) begin
-            smi_pending    <= 1'b0;
-            smm_resume_eip <= eip;          // restart this instruction after RSM
-            smm_step       <= 6'd0;
-            state          <= S_SMI_SAVE;
+            smi_enter(eip);   // REVIEW2 C-08: shared with the fast boundary
           end
           // ---- M8.1 EXTERNAL INTERRUPT divert (gated soc_en) -----------------
           // ADDED to the existing instruction-boundary priority chain RIGHT AFTER
@@ -213,6 +246,45 @@
           // have distinct V86 semantics (#BP/#OF vectoring) that the golden never
           // exercises — left as a documented follow-on rather than guessing an
           // un-oracled behaviour. The pv86 corpus uses CLI/STI/PUSHF/POPF/INT n.
+          // REVIEW2 C-05: architectural CPL/IOPL check, ahead of the V86 special case
+          // (which stays because it also covers PUSHF/POPF/INT n/IRET, which are V86-
+          // specific rather than CPL0-only). priv_fault is the single predicate
+          // computed in core.sv; #GP(0) is a FAULT, so the faulting EIP is pushed and
+          // the instruction is restartable.
+          else if (priv_fault) begin
+            start_fault(8'd13, 1'b1, 32'd0, eip);
+          end
+          // REVIEW2 C-06 DELIVERY: REMOVED, not merely disabled. Measured, and the
+          // bolt-on cannot be made correct here.
+          //
+          // With VEN_SEG_ENFORCE on, all five of pseg/pmode/ppage/pcpl/pfcpl3 failed.
+          // Instrumenting the fault showed why:
+          //
+          //     [SEGFAULT-DBG] dseg=2 sel=0000 ea=60000011 w=2 limit=0000ffff over=1
+          //
+          // ea=0x60000011 is CR0's VALUE, not an address. Two structural errors, and
+          // both are the mirror problem this session keeps finding:
+          //   1. The check was not gated on the instruction actually MAKING a data
+          //      memory access. For a register-only instruction q_ea holds whatever
+          //      the decoder left there, and the limit check faulted on it.
+          //   2. It read q_* (the PREVIOUS instruction's latched decode -- q_ea<=d_ea
+          //      is nonblocking) while being delivered at the S_DECODE dispatch for the
+          //      CURRENT one. Wrong signal domain entirely.
+          //
+          // Gating and re-timing this in place would mean reconstructing dseg, the
+          // effective address and the width in the decode domain -- i.e. building a
+          // SECOND copy of the address-generation logic beside the one in cur_lin and
+          // the one in the bus driver. That is precisely what C-03 documents as
+          // already broken with two copies; adding a third to enforce segment limits
+          // would be the same mistake with a fresh name.
+          //
+          // Segment limits are a PER-ACCESS check, like page permissions. C-01 could
+          // be delivered because paging already has per-access plumbing (cur_lin,
+          // cur_is_d, cur_is_w, translatable) to hook into. Segmentation has no
+          // equivalent, and creating one IS the access descriptor of #65. So the
+          // computation stays (lint-sunk, and now width-accurate with expand-down),
+          // and the delivery waits for #65 rather than shipping behind a flag that
+          // is known not to work.
           else if (v86 && iopl < 2'd3 &&
                    (d_cli || d_sti ||
                     (d_kind==K_STKMISC && (d_sm==SM_PUSHF || d_sm==SM_POPF)) ||
@@ -256,9 +328,12 @@
           //  (3) !cosim_en + any other IN/OUT: a genuine out-of-scope op outside
           //      co-sim -> HALT LOUDLY (no retire), exactly as the pre-M7.3b
           //      d_unknown path did (the corpus never uses port I/O elsewhere).
-          else if (d_io) begin
+          else if (d_io && !(d_kind==K_STR && d_st==ST_OUTS)) begin
             // INS (string port-input) routes to its dedicated per-element handshake
             // S_INS (it is BOTH d_io and a K_STR); plain IN/OUT routes to S_IO.
+            // OUTS (ST_OUTS) is EXCLUDED here: its element must be LOADED from [SI]
+            // first, so it takes the normal K_STR d_mem_read -> S_LOAD -> S_EXEC path
+            // (the K_STR arm then routes to S_IO for the per-element OUT handshake).
             // M8.1: the ventium_soc (soc_en=1) drives REAL device I/O — the PMIO
             // decoder routes IN/OUT to ven_pic/ven_pit over the SAME io_* seam the
             // co-sim uses (so soc_en, like cosim_en, EXECUTES IN/OUT through S_IO),
@@ -277,7 +352,7 @@
               if (d_io_write &&
                   (d_io_imm ? ({8'd0, d_io_port_imm}==16'h00F4)
                             : (gpr_o[R_EDX][15:0]==16'h00F4)))
-                state <= S_HALT;          // isa-debug-exit terminator (no retire)
+                begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE4; `endif end  // isa-debug-exit terminator (no retire)
               else if (d_kind==K_STR && d_st==ST_INS) state <= S_INS;
               else                                    state <= S_IO;
             end
@@ -285,7 +360,7 @@
             // (HALT, no retire); every other IN/OUT is a loud out-of-scope HALT.
             // Either way -> S_HALT with NO retire (matches the pre-M7.3b path
             // exactly, so the sys gates are byte-for-byte unchanged).
-            else          state <= S_HALT;
+            else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE5; `endif end
           end
           // ---- M7.1 int-0x80 PROXY (user-mode Quake lock-step) ---------------
           // When proxy_en is set, an `int 0x80` does NOT halt. We apply the GOLDEN
@@ -360,12 +435,46 @@
                 q_pc<=eip; retire_valid<=1'b1;
                 retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
               end
+`ifdef VEN_DBG_WD
+              // Capture the exact opcode bytes that halt the core (Quake d_unknown wedge).
+              if (d_unknown)
+                $display("[VEN-UNK] d_unknown HALT cs:eip=%04x:%08x lin=%08x ibuf= %02x %02x %02x %02x %02x %02x %02x %02x",
+                         seg_sel[SG_CS], eip, seg_base[SG_CS]+eip,
+                         ibuf[0],ibuf[1],ibuf[2],ibuf[3],ibuf[4],ibuf[5],ibuf[6],ibuf[7]);
+`endif
               // M6 Erratum 81 (F00F): the locked CMPXCHG8B reg-dst HANG.
               if (d_f00f && errata_en[ERR_F00F] && pfx_lock)
                 state<=S_F00F_HANG;
+              // REVIEW2 H-11: an invalid/unsupported encoding used to drop straight into
+              // terminal S_HALT. An OS then cannot catch or emulate it, and malformed
+              // USER code halts the whole machine instead of taking a fault -- which is
+              // both a denial of service and the reason several legitimate encodings
+              // (now #UD'd by H-02) looked like hangs. In SYSTEM mode deliver the
+              // architectural #UD (vector 6) so the guest's handler runs.
+              //
+              // USER mode keeps the loud HALT deliberately: there is no IDT there, the
+              // bare-metal corpus has no #UD handler, and a silent fault would turn a
+              // decoder gap into a mysterious wrong answer instead of an obvious stop.
+              else if (sys_mode)
+                start_fault(8'd6, 1'b0, 32'd0, eip);
               else
-                state<=S_HALT;
+                state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE6; `endif
             end
+          end
+          // REVIEW2 H-23: CR0.EM / CR0.TS must trap x87 execution with #NM (vector 7).
+          // Neither was inspected at all, so lazy FPU context switching was impossible:
+          // a task switch sets CR0.TS (core_tsw.svh:165) and the very next x87
+          // instruction just executed against the OUTGOING task's register file.
+          //   EM=1 -> no x87 hardware; every x87 op traps so software can emulate.
+          //   TS=1 -> the x87 context belongs to another task; trap so the handler can
+          //           save/restore it and clear TS.
+          // #NM takes no error code.
+          //
+          // FWAIT is NOT covered here: it decodes as d_is_nop (decode_stages.sv:1028),
+          // and its rule is different anyway (it traps only when TS=1 AND MP=1). That,
+          // and making FWAIT actually wait on pending unmasked exceptions, is H-22.
+          else if (d_is_x87 && (creg0[2] || creg0[3])) begin
+            start_fault(8'd7, 1'b0, 32'd0, eip);
           end
           else if (d_is_x87) begin
             // M11b: env/state ops own a dedicated wide-beat sequencer.
@@ -419,10 +528,21 @@
             // += 6); 32-bit (cs_d=1 or 16-bit+0x66) keeps the 12-byte legacy pop. Only
             // the SAME-PRIV S_IRET arm honours int_gate_op16 (inter-priv/V86 unchanged).
             int_gate_op16 <= eff_opsize;
-            // M8.1: IRET ends an interrupt/NMI handler -> re-arm NMI (clear the NMI
-            // block, IA-32). nmi_in_progress is only ever SET in the soc_en NMI
-            // divert, so this clear is a no-op (stays 0) when soc_en==0 — INERT.
-            nmi_in_progress <= 1'b0;
+            // REVIEW2 H-09: IRET re-arms NMI -- but only the IRET that unwinds the
+            // NMI's OWN frame. This used to clear nmi_in_progress unconditionally, so
+            // a maskable interrupt taken INSIDE an NMI handler could run its own IRET
+            // and re-arm NMI while the outer NMI handler was still executing; a second
+            // NMI would then corrupt the first one's frame. nmi_nest counts frames
+            // stacked inside the NMI (incremented in start_fault, which every delivery
+            // path funnels through), so a nested IRET unwinds one level instead.
+            //
+            // KNOWN REMAINING GAP, stated rather than papered over: this still acts at
+            // IRET DECODE, so an IRET that FAULTS during its own stack reads has
+            // already decremented. Closing that needs validate-the-whole-frame-then-
+            // commit, which is REVIEW2 C-10 and a much larger change; the nesting
+            // escalation fixed here is the more serious of the two.
+            if (nmi_nest != 4'd0) nmi_nest <= nmi_nest - 4'd1;
+            else                  nmi_in_progress <= 1'b0;
           end
           // ---- M2S.5 RSM (0F AA): leave SMM, restore the saved state ---------
           else if (d_rsm) begin
@@ -473,7 +593,7 @@
                 // CS:EIP then S_LCALL hands off to S_LJMP's GDT descriptor CS load
                 // (DOS Quake's CWSDPMI far-calls in PM). seg_real && paging_on stays HALT.
                 if ((seg_real && !paging_on) || !seg_real) begin seg_step<=1'b0; state<=S_LCALL; end
-                else state<=S_HALT;
+                else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE7; `endif end
               end
               SYS_RETF: begin
                 // real/V86: pop CS:IP + real-mode CS load (base=sel<<4). PM: pop
@@ -481,7 +601,7 @@
                 // (DOS Quake's CWSDPMI far-returns in PM — same-privilege, the popped
                 // CS RPL == CPL). seg_real && paging_on stays HALT. Mirrors SYS_LCALL.
                 if ((seg_real && !paging_on) || !seg_real) begin seg_step<=1'b0; state<=S_RETF; end
-                else state<=S_HALT;
+                else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE8; `endif end
               end
               // M9.5 — SGDT/SIDT: 2-beat store of the GDTR/IDTR pseudo-descriptor.
               // Decode already gated on !paging_on; mode-agnostic otherwise.

@@ -23,7 +23,18 @@ module axi_slave_bfm #(
     parameter int          RD_LAT     = 4,        // AR accept -> first R beat
     parameter int          WR_LAT     = 3,        // last W -> B
     parameter int          BUBBLE     = 0,        // >0: drop RVALID for 1 cyc mid-burst
-    parameter int          STUCK      = 0         // 1: NEVER respond (exercise the #34 watchdog)
+    parameter int          STUCK      = 0,        // 1: NEVER respond (exercise the #34 watchdog)
+    // REVIEW2 M-08: RLAST fault injection. A compliant slave can never exercise the
+    // master's RLAST/beat-count mismatch recovery, so the drain path was unreachable
+    // by any existing test.
+    //   RLAST_EXTRA > 0 : send N EXTRA beats past arlen, asserting RLAST only on the
+    //                     real final one -> a LATE RLAST. The master's count is
+    //                     satisfied early, so it must DRAIN these before any new AR
+    //                     or they get consumed as the next burst's data.
+    //   RLAST_EARLY > 0 : assert RLAST N beats EARLY and end the burst -> the master
+    //                     is left waiting for beats that never arrive.
+    parameter int          RLAST_EXTRA = 0,
+    parameter int          RLAST_EARLY = 0
 ) (
     input  logic              clk,
     input  logic              rst_n,
@@ -93,19 +104,27 @@ module axi_slave_bfm #(
       automatic logic [ADDR_W-1:0] ix = unmap(r_addr);
       rvalid = 1'b1;
       rdata  = {mem[ix+3], mem[ix+2], mem[ix+1], mem[ix+0]};
-      rlast  = (r_cnt == 8'd0);
+      // M-08 injection: EARLY asserts RLAST while beats remain; EXTRA withholds it
+      // until the padded count is exhausted.
+      rlast  = (RLAST_EARLY > 0) ? (r_cnt == 8'(RLAST_EARLY))
+                                 : (r_cnt == 8'd0);
     end
   end
   always_ff @(posedge clk) begin
     if (!rst_n) begin rst_s <= R_IDLE; r_addr<=0; r_cnt<=0; r_id<=0; r_timer<=0; bubbled<=0; end
     else unique case (rst_s)
       R_IDLE: if (arvalid && STUCK==0) begin
-                r_addr <= araddr; r_cnt <= arlen; r_id <= arid;
+                // M-08: RLAST_EXTRA pads the burst so the slave outlives the master's
+                // own beat count -- the LATE-RLAST case.
+                r_addr <= araddr; r_cnt <= arlen + 8'(RLAST_EXTRA); r_id <= arid;
                 r_timer <= RD_LAT; bubbled <= 1'b0; rst_s <= R_WAIT;
               end
       R_WAIT: if (r_timer == 0) rst_s <= R_BEAT; else r_timer <= r_timer - 1;
       R_BEAT: if (rready) begin                         // beat accepted (rvalid=1)
-                if (r_cnt == 8'd0) rst_s <= R_IDLE;     // RLAST consumed
+                // M-08: with RLAST_EARLY the burst ENDS at the early RLAST -- no
+                // further beats, which is what strands a count-driven master.
+                if ((RLAST_EARLY > 0) && (r_cnt == 8'(RLAST_EARLY))) rst_s <= R_IDLE;
+                else if (r_cnt == 8'd0) rst_s <= R_IDLE;     // RLAST consumed
                 else begin
                   r_cnt <= r_cnt - 8'd1; r_addr <= r_addr + 32'd4;
                   // AFTER delivering beat 2, insert ONE genuine rvalid-low bubble

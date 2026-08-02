@@ -61,6 +61,27 @@ public:
     void service(bool req, bool we, uint32_t addr, uint32_t wdata,
                  uint8_t wstrb, uint32_t* rdata, bool* ack);
 
+    // ---- task #52: OPTIONAL access latency ---------------------------------
+    // The model above acks in the SAME cycle, always. That makes the cycle gate's
+    // M4/M5 bands a statement about the core's fill FSM, NOT about memory cost --
+    // which is how a machine retiring nothing on 98.66% of hardware cycles
+    // (DISK_BOOT_STATUS UPDATE 229/230) stayed green through every gate.
+    //
+    // set_latency() adds a per-request stall: `ack` is withheld for N cycles
+    // before completing. DEFAULT IS 0 => byte-identical to the previous model, so
+    // every existing golden stays reproducible and enabling this is an explicit,
+    // auditable act. Reads and writes are separate because the real path is
+    // asymmetric: a read waits for data to come back, whereas a write's cost
+    // depends on whether the backing posts it or blocks for the B response
+    // (ventium_l1_axi.sv:226-231 documents the backing as SINGLE-OUTSTANDING).
+    //
+    // CALIBRATE THESE FROM HARDWARE (perf counters at 0x100-0x150), do not guess.
+    void set_latency(unsigned read_cycles, unsigned write_cycles) {
+        rd_lat_ = read_cycles; wr_lat_ = write_cycles;
+    }
+    unsigned read_latency()  const { return rd_lat_; }
+    unsigned write_latency() const { return wr_lat_; }
+
     // ---- checkpoint snapshot / restore (M14 periodic-state replay) ---------
     // Dump/load every mapped page (page number + 4 KiB) to/from an open binary
     // file. Sparse: only touched pages are written, so the size tracks the
@@ -74,6 +95,11 @@ public:
     uint64_t writes() const { return writes_; }
 
 private:
+    // task #52 latency state. wait_ counts down the stall for the request currently
+    // held off. Default 0 => ack in-cycle, byte-identical to the previous model.
+    unsigned rd_lat_ = 0, wr_lat_ = 0;
+    unsigned wait_   = 0;
+
     struct Page { uint8_t b[PAGE_SIZE] = {0}; };
 
     Page&       page_for(uint32_t addr);          // create-on-write

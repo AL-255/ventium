@@ -24,6 +24,7 @@ module tb_icache_snoop;
   logic tch0_en=0, tch1_en=0, tch2_en=0; logic [IDXW-1:0] tch0_set=0, tch1_set=0, tch2_set=0;
   logic [TAGW-1:0] tch0_tag=0, tch1_tag=0, tch2_tag=0;
   logic        snoop_inv_valid=0; logic [31:0] snoop_inv_addr=0;
+  logic        fill_nocache=0;   // REVIEW2 H-17
 
   icache #(.IC_SETS(IC_SETS), .IC_LINE(IC_LINE), .IC_WAYS(IC_WAYS)) dut (
       .clk(clk), .rst_n(rst_n),
@@ -32,11 +33,22 @@ module tb_icache_snoop;
       .rd_collA(rd_collA), .rd_collB(rd_collB),
       .ic_tag_o(ic_tag_o), .ic_val_o(ic_val_o), .ic_victim_o(ic_victim_o),
       .fill_en(fill_en), .fill_set(fill_set), .fill_way(fill_way), .fill_off(fill_off),
-      .fill_data(fill_data), .fill_done(fill_done), .fill_tag(fill_tag),
+      .fill_data(fill_data), .fill_nocache(fill_nocache),
+      .fill_done(fill_done), .fill_tag(fill_tag),
       .tch0_en(tch0_en), .tch0_set(tch0_set), .tch0_tag(tch0_tag),
       .tch1_en(tch1_en), .tch1_set(tch1_set), .tch1_tag(tch1_tag),
       .tch2_en(tch2_en), .tch2_set(tch2_set), .tch2_tag(tch2_tag),
-      .snoop_inv_valid(snoop_inv_valid), .snoop_inv_addr(snoop_inv_addr));
+      .snoop_inv_valid(snoop_inv_valid), .snoop_inv_addr(snoop_inv_addr),
+      // REVIEW Aug-1 H-09: two further INDEPENDENT invalidation ports (a DMA snoop
+      // and a self-modifying store, plus that store's second line when it crosses an
+      // I-line boundary, are up to three distinct events in one clock). This gate
+      // exercises port 0 only; ports 1/2 are tied off so their behaviour is untested
+      // here rather than accidentally aliased onto port 0.
+      .snoop_inv_valid1(1'b0), .snoop_inv_addr1(32'd0),
+      .snoop_inv_valid2(1'b0), .snoop_inv_addr2(32'd0),
+      // REVIEW_Jul29 H-12 added a global-invalidate port; this TB exercises the
+      // per-line snoop path only, so tie it off rather than leave it floating.
+      .flush_all(1'b0));
 
   int errors=0;
   task automatic chk(input string what, input logic got, exp);
@@ -86,6 +98,39 @@ module tb_icache_snoop;
     snoop(32'h0000_4000);
     @(posedge clk); #1;
     chk("0x4000 (set0/way1) invalidated", ic_val_o[0][1], 1'b0);
+
+    // ---- REVIEW2 H-17: a NON-CACHEABLE fill must not be retained --------------
+    // The I-cache had no cacheable input and validated EVERY fill, so instruction
+    // fetches from a disabled cache (CR0.CD) or a mutable/side-effecting region were
+    // kept indefinitely with no reliable invalidator. fill_nocache makes the fill
+    // proceed (the fetch data still flows) but leaves the line INVALID, so the next
+    // fetch re-reads memory.
+    $display("[6] REVIEW2 H-17: fill @0x1000 with fill_nocache=1 -> line NOT retained");
+    fill_nocache = 1'b1;
+    fill_line(32'h0000_1000, 1'b0);
+    @(posedge clk); #1;
+    chk("nocache fill left set0/way0 INVALID", ic_val_o[0][0], 1'b0);
+
+    $display("[7] control: same line, fill_nocache=0 -> retained (proves [6] is the flag)");
+    fill_nocache = 1'b0;
+    fill_line(32'h0000_1000, 1'b0);
+    @(posedge clk); #1;
+    chk("cacheable fill left set0/way0 VALID", ic_val_o[0][0], 1'b1);
+
+    $display("[8] REVIEW2 H-17: fill_nocache asserted MID-fill also poisons");
+    // Start cacheable, raise the flag partway: the fill must still be discarded.
+    // Covers the `else if` poison arm, not just the fill_off==0 latch.
+    @(negedge clk);
+    for (int w=0; w<8; w++) begin
+      fill_en<=1; fill_set<=IDXW'(0); fill_way<=1'b1; fill_off<=5'(w*4);
+      fill_data<=32'hBEEF_0000+w; fill_done<=(w==7);
+      fill_tag<=TAGW'(32'h0000_4000 >> (5+IDXW));
+      fill_nocache <= (w >= 3);        // becomes non-cacheable at beat 3
+      @(negedge clk);
+    end
+    fill_en<=0; fill_done<=0; fill_nocache<=1'b0;
+    @(posedge clk); #1;
+    chk("mid-fill nocache left set0/way1 INVALID", ic_val_o[0][1], 1'b0);
 
     // [COV] full breadth sweep: fill EVERY set x way with walking-bit data + diverse
     //       tags, read every line, touch diverse (age/LRU), then snoop-invalidate all

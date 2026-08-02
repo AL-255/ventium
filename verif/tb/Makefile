@@ -108,23 +108,52 @@ rtl:
 # obj_dir/tb_ventium (byte-identical default). The L1+AXI leaf modules are appended
 # ONLY here (they are not in ventium.f); -DVEN_L1_AXI reaches the C++ TB too.
 # Run: make l1axi && ./obj_dir_l1axi/tb_ventium --l1-axi <image> ...
+# REVIEW_Jul29 M-04: L1AXI_RTL used to also list the three northbridge/L2 sources
+# (ven_cachemap.sv, ven_l2.sv, ven_northbridge.sv). Those files are ABSENT from this
+# checkout, and L1AXI_RTL feeds ~14 targets — so EVERY one of them was handing
+# Verilator non-existent paths, not just the L2 target. The northbridge modules are
+# only ever instantiated under +VEN_EN_L2, which only `l1axi_l2` defines, so the
+# other targets never needed them. Split out: the common list is now buildable, and
+# only the L2 target pulls NB_RTL (behind a guard that fails with a clear message).
 L1AXI_RTL := $(RTL_DIR)/mem/ven_l1d.sv $(RTL_DIR)/mem/ven_axi_master.sv \
-             $(RTL_DIR)/northbridge/ven_cachemap.sv $(RTL_DIR)/northbridge/ven_l2.sv \
-             $(RTL_DIR)/northbridge/ven_northbridge.sv \
              $(RTL_DIR)/mem/ventium_l1_axi.sv
+
+NB_RTL := $(RTL_DIR)/northbridge/ven_cachemap.sv $(RTL_DIR)/northbridge/ven_l2.sv \
+          $(RTL_DIR)/northbridge/ven_northbridge.sv
+
+.PHONY: check-nb
+check-nb:
+	@missing=""; for f in $(NB_RTL); do [ -f "$$f" ] || missing="$$missing $$f"; done; \
+	 if [ -n "$$missing" ]; then \
+	   echo "ERROR: the northbridge/L2 sources are ABSENT from this checkout:"; \
+	   for f in $$missing; do echo "         $$f"; done; \
+	   echo "       so the L2 target cannot be built here. This is REVIEW_Jul29 M-04"; \
+	   echo "       (documented-but-missing sources); tracked in task #43."; \
+	   echo "       Every OTHER l1axi* target builds fine — they never needed these."; \
+	   exit 1; \
+	 fi
 .PHONY: l1axi
 l1axi:
 	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/obj_dir_l1axi/$(EXE)"
 
+# EXPERIMENT (task #24): identical to l1axi but +VEN_SINGLE_FILL, which skips ven_axi_master's
+# priming burst so a line fill costs ONE burst instead of two. Exists to MEASURE the payoff of
+# fixing the HP0 stale-read root cause. NOT a shippable configuration — the priming read is there
+# because a stale burst froze the guest. Compare against l1axi at the same AXI_RLAT.
+l1axi_sf:
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_SINGLE_FILL -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi_sf \
+	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (L1+AXI, SINGLE FILL experiment): $(CURDIR)/obj_dir_l1axi_sf/$(EXE)"
+
 # ---- l1axi_l2: the L1+AXI build with the L2/northbridge stack ON (+VEN_EN_L2) ----
 # EN_L2=1 routes the core's backing through ven_northbridge (ven_cachemap + ven_l2 +
 # uncacheable bypass). Proves the REAL core runs through the L2 + cacheability routing.
 .PHONY: l1axi_l2
-l1axi_l2:
+l1axi_l2: check-nb
 	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_EN_L2 -CFLAGS "-DVEN_L1_AXI" \
-	  -Mdir obj_dir_l1axi_l2 -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	  -Mdir obj_dir_l1axi_l2 -F $(RTL_FILELIST) $(L1AXI_RTL) $(NB_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI + L2/NB, EN_L2=1): $(CURDIR)/obj_dir_l1axi_l2/$(EXE)"
 
 # ---- l1axi_kv: the DEPLOYED KV260 memory config (+VEN_L1_AXI +VEN_KV260_SOC) ---

@@ -37,6 +37,46 @@
         // prefetch buffer hand control to the proven multi-cycle FSM / refill.
         // -------------------------------------------------------------------
         S_PIPE: begin
+`ifdef VEN_SYS_FASTPATH
+          // ---- task #57: INTERRUPT ACCEPTANCE IN THE FAST PATH ----------------------
+          // The fast path previously contained NO reference to smi_take/nmi_take/intr_take
+          // and never left to S_DECODE, so while it was issuing the core COULD NOT BE
+          // INTERRUPTED (core.sv:1678 accepts only in S_DECODE/S_HLTWAIT). That is why
+          // enabling the fast path in sys_mode hung the boot in S_HLTWAIT with retires
+          // frozen -- timer/keyboard/disk IRQs were simply never taken. It went unnoticed
+          // forever because intr_take is gated on soc_en, which is 0 in user mode, and the
+          // microbenchmarks are the only workloads that ever ran through here.
+          //
+          // Checked FIRST in the arm, i.e. at an INSTRUCTION BOUNDARY before anything
+          // issues, so no U/V pair is left half-retired: this clock issues nothing and the
+          // divert takes eip as the interrupted address. Priority SMI > NMI > INTR matches
+          // the S_DECODE divert (core.sv:3597+). intr_take already folds in soc_en,
+          // EFLAGS.IF and irq_shadow (core.sv:1679).
+          //
+          // CORRECTION: this comment used to end "...so the STI / MOV SS one-instruction
+          // shadow is honoured without extra logic here." Half true and dangerously so.
+          // Reading irq_shadow needs no extra logic, but CLEARING it did: the only clear
+          // site was S_DECODE, a slow-FSM state. A fast path that never enters S_DECODE
+          // therefore latched the shadow forever. The clear now lives in the retire arms
+          // below, where the boundary actually is.
+          // The CONDITION is fp_irq_divert (core.sv) so the mirrors consume the same
+          // signal instead of re-typing it; only the TARGET selection stays here.
+          if (fp_irq_divert) begin
+            agi_wr0<=9'h100; agi_wr1<=9'h100;   // the divert writes no GPR this clock
+            if (smi_take) begin
+              // REVIEW2 C-08: was `smi_pending<=0; state<=S_SMI_SAVE;` only -- it did
+              // NOT capture the resume EIP or reset the save sequencer, so RSM
+              // resumed the wrong instruction. One shared task with the slow arm.
+              smi_enter(eip);
+            end else if (nmi_take) begin
+              nmi_pending     <= 1'b0;
+              nmi_in_progress <= 1'b1;
+              start_fault(8'd2, 1'b0, 32'd0, eip);
+            end else begin
+              start_fault(inta_vector, 1'b0, 32'd0, eip);
+            end
+          end else
+`endif
           if (stall_cnt!=7'd0) begin
             // M5: burn a materialised stall clock (D-cache miss / misalign /
             // FP-latency wait). No retirement; cyc = clock-count-at-retire thus
@@ -165,7 +205,9 @@
             // edge, so next clock fpp_valid=0 and the op issues with fresh data.
             agi_wr0<=9'h100; agi_wr1<=9'h100;
 `endif
-          end else if (u_d.is_fp && u_d.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin
+          end
+`ifndef VEN_FP_PC_RELAX
+          else if (u_d.is_fp && u_d.fp_kind==FK_ARITH && fctrl[9:8]!=2'b11) begin
             // M5 finding [low]: an FK_ARITH (D8 reg-form fadd/fsub/fmul/fdiv) under
             // a non-extended precision control word (PC != 11) must NOT silently
             // compute the full extended-precision result (the datapath only
@@ -174,8 +216,16 @@
             // so cycle-mode FP cannot diverge functionally from QEMU's
             // programmed-precision rounding. Default cw 0x037f has PC=11 (fine), so
             // the gate kernels never trip this; non-default-PC code HALTs.
-            state<=S_HALT;
-          end else if (u_d.is_fp) begin
+            // BUG #3 FIX: under +VEN_FP_PC_RELAX this fast-path HALT was UNGATED while
+            // the slow-path f_pc_bad (core_fp_exec.svh) WAS gated -> a D8-form FMUL/
+            // FADD under PC=24 (Quake atof @0xe938) took the fast path and HALTed on
+            // HW even with the define. Now gated identically: PC!=11 arith falls to the
+            // FP fast path and computes 80-bit (more precise than PC-narrowed; benign
+            // for Quake, which stores back to f32). Matches the slow-path relax.
+            state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE1; `endif
+          end
+`endif
+          else if (u_d.is_fp) begin
             // M5: x87 FP fast path (cycle-mode whitelist). Functional execution
             // reuses the exact M3 helpers; the FP latency/throughput timing is
             // emergent from TWO distinct mechanisms, both mirroring the p5model
@@ -202,7 +252,16 @@
                 && $signed(fp_busy_cyc - dep_ready) > 0)
               dep_ready = fp_busy_cyc;
 `endif
-            if (!fp_occ_pending && $signed(dep_ready - core_cyc) > 0) begin
+            // WRAP-ROBUST (Quake HW blocker #2): a real FP result-latency is <= fp_lat
+            // (7-bit, <=127). A signed gap >= 128 means fp_ready_cyc is STALE across a
+            // core_cyc (32-bit) WRAP — on HW, after the guest runs >~86 s (2^32 cyc @
+            // 50 MHz) the FP-heavy Quake code sees a wrapped gap and spin-stalls in
+            // S_PIPE ~2^31 cyc (tick frozen at an FDIV) — the second HW wedge, invisible
+            // to a <2^32-cyc cosim. Clamp: gap>=128 => treat as ready (no stall). NEVER
+            // fires in normal operation (gap<=fp_lat<128) so p5 timing + make-verify are
+            // byte-identical; reproduced deterministically via +VEN_TEST_CYCWRAP.
+            if (!fp_occ_pending && $signed(dep_ready - core_cyc) > 0
+                && $signed(dep_ready - core_cyc) < 32'sd128) begin
               // stall until core_cyc reaches dep_ready (materialise the latency).
               stall_cnt <= 7'(dep_ready - core_cyc) - 7'd1;
               agi_wr0<=9'h100; agi_wr1<=9'h100;
@@ -248,6 +307,11 @@
               // The touch lands in u_icache via tch0 (ic_tch0_* driver above, gated
               // on this exact FP-issue+commit arm).
               q_pc<=eip; retire_valid<=1'b1; x87_touched_r<=1'b1;
+              // The STI / MOV-SS interrupt shadow lasts exactly ONE instruction and
+              // was cleared ONLY in S_DECODE -- i.e. only on the slow path. See the
+              // integer ISSUE arm below for the full note; an FP op is just as much
+              // an instruction boundary, so it clears the shadow too.
+              irq_shadow <= 1'b0;
               retire_pipe_valid<=1'b1; retire_pipe<=2'd0; retire_paired<=1'b0;
               agi_wr0<=9'h100; agi_wr1<=9'h100;   // FP writes no GP reg
 `ifdef VEN_FXCH_FREE
@@ -259,14 +323,26 @@
               // post-arith FXCH falls through to its own occ=1 commit next clock.
               if ((u_d.fp_kind==FK_FLDC || u_d.fp_kind==FK_FLDSTI)
                   && v_d.is_fxch_free && v_bytes_ok && v_d.fp_sti!=3'd0) begin
-                eip            <= eip + {28'd0,u_d.len} + {28'd0,v_d.len};
-                q_pc2          <= eip + {28'd0,u_d.len};   // the FXCH's own pc (V retire)
+                // task #56 layer 10: real mode / 16-bit address size WRAPS EIP at 64 KiB.
+                // The fast path advanced a full 32-bit EIP with no wrap. Inert at w16=0.
+                eip            <= u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len} + {12'd0,v_d.len})}
+                                          :         (eip + {28'd0,u_d.len} + {28'd0,v_d.len});
+                // REVIEW2 H-07: was unwrapped, unlike the integer arm's q_pc2 (:578).
+                q_pc2          <= u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len})}
+                                          :         (eip     + {28'd0,u_d.len});
                 retire2_valid  <= 1'b1; retire2_pipe<=2'd1; retire2_paired<=1'b1;
               end else
 `endif
-              eip<=eip + {28'd0,u_d.len};
+              // task #56 layer 10: 16-bit address size wraps EIP at 64 KiB (real mode).
+              eip <= u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len})}
+                             :         (eip + {28'd0,u_d.len});
             end
-          end else if (!u_d.simple || sys_mode) begin
+          // task #55: sys_mode alone no longer forces the slow FSM -- only sys_mode WITHOUT the
+          // fast path's assumptions holding (see sys_fp_ok in core.sv).
+          // REVIEW Aug-1 C-01: this condition now lives in exactly ONE place (fp_sys_bail,
+          // core.sv) and is consumed by the spine, the GPR mirror, BTB resolve, I-cache LRU,
+          // and the D-side request. It must never be re-typed at a consumer again.
+          end else if (fp_sys_bail) begin
             // hand this one instruction to the slow functional FSM. Clear the
             // AGI write-tracking: the slow op runs many cycles, so on return to
             // (M2S.1: a SYSTEM-mode core ALWAYS takes the slow FSM — the fast-path
@@ -297,6 +373,7 @@
             logic [8:0]  w0, w1;
             logic        do_v;
             logic [31:0] post_eip;
+            logic [31:0] eip_nx;          // H-03: U-only next IP, 16-bit-wrapped
             logic        u_is_br, redirect, u_taken;
             logic [31:0] redir_tgt;
             do_v   = pipe_pair;
@@ -349,10 +426,26 @@
                 // CF & OF per QEMU (OF = MSB(shm1) ^ MSB(result)). Matches the
                 // slow path's K_SHIFT block exactly (only this group reaches the
                 // fast path; rotates fall back to the slow FSM).
+                // REVIEW Aug-1 H-02: SF/OF/ZF are WIDTH-dependent. This block hard-coded
+                // bit 31 and an all-32-bit zero test, so a 16-bit shift committed SF and
+                // OF from bit 31 of a value whose architectural MSB is bit 15, and ZF
+                // from bits the instruction does not write. The upipe16 suite (530/530)
+                // does not cover this because the flag ASSEMBLY lives here in the spine,
+                // not in u_pipe. PF is the low byte at every width, and CF arrives
+                // width-aware from u_pipe's shrot helper, so only SF/ZF/OF change.
+                // Width comes from u_d.w16, and the EXTRACTION uses the same wmask/
+                // sbit helpers as the slow path's K_SHIFT arm (core_exec.svh) rather
+                // than hand-rolled bit indices. Two formulas that must agree is the
+                // C-01 pattern; one shared formula parameterised by width cannot
+                // drift. Byte-identical to the slow path arm, term for term.
+                logic [2:0] shw;
+                shw = u_d.w16 ? 3'd2 : 3'd4;
                 fl=eflags & 32'hFFFF_F72A;
                 fl[0]=u_shcf; fl[2]=parity8(u_sh[7:0]); fl[4]=1'b0;
-                fl[6]=(u_sh==32'd0); fl[7]=u_sh[31];
-                fl[11]=u_shm1[31]^u_sh[31]; fl[1]=1'b1;
+                fl[6]=(wmask(u_sh,shw)==32'd0);
+                fl[7]=sbit(u_sh,shw);
+                fl[11]=sbit(u_shm1,shw) ^ sbit(u_sh,shw);
+                fl[1]=1'b1;
                 eflags<=fl;
               end
               if (u_d.dst!=R_ESP) w0={6'd0,u_d.dst};
@@ -387,12 +480,27 @@
             // (unpaired) or the V member of a pair.
             u_is_br  = u_d.is_branch;
             u_taken  = 1'b0; redirect=1'b0; redir_tgt=32'd0;
-            post_eip = eip + {28'd0,u_d.len} + (do_v ? {28'd0,v_d.len} : 32'd0);
+            // REVIEW Aug-1 H-03: 16-bit sequential flow WRAPS IP at 64 KiB. Taken branch
+            // targets got this in task #56 step G and the FP retire arm got it in layer
+            // 10, but ordinary integer advance and NOT-TAKEN fallthrough were left
+            // full-width -- so code running off offset FFFF walked into the next 64 KiB
+            // linear region instead of wrapping to 0000. The asymmetry with the already-
+            // fixed taken path is what made it easy to miss.
+            //   eip_nx  = U-only next IP        (also the U not-taken fallthrough)
+            //   post_eip= U(+V) next IP         (the no-branch advance)
+            eip_nx   = u_d.w16 ? {16'd0, (eip[15:0] + {12'd0,u_d.len})}
+                               :         (eip     + {28'd0,u_d.len});
+            post_eip = u_d.w16
+                     ? {16'd0, (eip[15:0] + {12'd0,u_d.len}
+                                          + (do_v ? {12'd0,v_d.len} : 16'd0))}
+                     :         (eip       + {28'd0,u_d.len}
+                                          + (do_v ? {28'd0,v_d.len} : 32'd0));
 
             if (u_is_br) begin
               // U is the (sole) branch this clock.
               u_taken = u_d.br_cond ? u_d.br_taken : 1'b1;
-              redir_tgt = u_taken ? u_target : (eip + {28'd0,u_d.len});
+              // H-03: not-taken fallthrough wraps (u_target is already truncated).
+              redir_tgt = u_taken ? u_target : eip_nx;
               if (u_taken != u_pred_taken) begin
                 mispred_bubbles <= 3'd3;     // U-pipe mispredict penalty
                 redirect=1'b1;
@@ -404,9 +512,12 @@
               // V member is a simple branch (e.g. a jcc paired into V). Use the
               // flags FORWARDED from U (cmp/dec/test + jcc pairing case).
               logic v_taken; logic [31:0] vpc;
-              vpc = eip + {28'd0,u_d.len};
+              // H-03: the V member's own PC and its not-taken fallthrough wrap too.
+              vpc = eip_nx;
               v_taken = v_br_taken_eff;
-              redir_tgt = v_taken ? v_target : (vpc + {28'd0,v_d.len});
+              redir_tgt = v_taken ? v_target
+                                  : (v_d.w16 ? {16'd0, (vpc[15:0] + {12'd0,v_d.len})}
+                                             :         (vpc       + {28'd0,v_d.len}));
               if (v_taken != v_pred_taken) begin
                 // Mispredict penalty matches the oracle resolve_pending_branch
                 // (verif/qemu-plugins/p5trace.c:402-403): an UNCONDITIONAL taken
@@ -428,6 +539,28 @@
             // ---- retire records (cyc/pipe/paired emerge from the cadence) --
             q_pc <= eip;                       // primary (U) retire pc
             retire_valid <= 1'b1;
+            // ---- STI / MOV-SS interrupt shadow ---------------------------
+            // irq_shadow is SET in S_EXEC (core_exec.svh:32) by STI/MOV SS and was
+            // CLEARED ONLY in S_DECODE (core_fetch_decode.svh:125). Both of those are
+            // slow-FSM states. Once the fast path runs in sys_mode, an STI returns to
+            // S_PIPE and, if the following instructions are all fast-path eligible,
+            // S_DECODE is never entered -- so the shadow is NEVER cleared and
+            // intr_take (core.sv:1679, gated on !irq_shadow) stays 0. Interrupts are
+            // then blocked for the WHOLE run of fast instructions, not for one.
+            //
+            // `sti` followed by a tight polling loop is exactly the DOS/BIOS idiom,
+            // and that loop is precisely the shape the fast path executes best, so
+            // the failure is worst where it is most likely. It survives today only
+            // because 53.7% of the boot stream is non-simple, so some instruction
+            // wanders into S_DECODE soon enough to clear it.
+            //
+            // A retiring fast-path instruction IS an instruction boundary, so clear
+            // it here for the same reason S_DECODE does. Ordering is right: the
+            // divert arm at the top of S_PIPE sampled the REGISTERED irq_shadow this
+            // clock (still set, correctly masking the shadowed instruction), and this
+            // nonblocking clear opens the NEXT boundary. Shadow duration is exactly
+            // one instruction, matching S_DECODE.
+            irq_shadow <= 1'b0;
             retire_pipe_valid <= 1'b1;
             retire_pipe <= 2'd0;        // U
             retire_paired <= 1'b0;
@@ -444,7 +577,7 @@
                 $error("core: paired V retire (do_v) in func mode (cycle_mode=0): retire2_state is U's snap, not the V insn's post-commit state");
               end
               // synopsys translate_on
-              q_pc2 <= eip + {28'd0,u_d.len};   // V retire pc
+              q_pc2 <= eip_nx;                  // V retire pc (H-03: 16-bit wrapped)
               retire2_valid <= 1'b1;
               retire2_pipe  <= 2'd1;    // V
               retire2_paired<= 1'b1;

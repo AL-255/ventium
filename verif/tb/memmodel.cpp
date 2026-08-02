@@ -217,7 +217,23 @@ void MemModel::service(bool req, bool we, uint32_t addr, uint32_t wdata,
     if (!req) {
         *rdata = 0;
         *ack   = false;
+        wait_  = 0;          // request withdrawn: drop any pending stall
         return;
+    }
+
+    // task #52: optional access latency. rd_lat_/wr_lat_ default to 0, in which
+    // case this whole block is skipped and the model acks in-cycle exactly as
+    // before (so every existing golden stays bit-reproducible). When set, we hold
+    // ack low for N cycles first, WITHOUT performing the access -- the read must
+    // observe memory as of the cycle it completes, not the cycle it was issued.
+    const unsigned lat = we ? wr_lat_ : rd_lat_;
+    if (lat) {
+        if (wait_ == 0) wait_ = lat;      // first cycle of this request
+        if (--wait_ > 0) {                // still stalling
+            *rdata = 0;
+            *ack   = false;
+            return;
+        }
     }
 
     if (we) {

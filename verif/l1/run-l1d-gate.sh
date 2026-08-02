@@ -8,12 +8,27 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OBJ="$(mktemp -d)"
 trap 'rm -rf "$OBJ"' EXIT
 
-verilator --binary -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
-    -Wno-INITIALDLY -Wno-IMPLICITSTATIC --top-module tb_l1d -Mdir "$OBJ" -o tb_l1d \
-    "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/verif/l1/tb_l1d.sv" > "$OBJ/build.log" 2>&1 \
-    || { echo "L1D-GATE-FAIL (build)"; tail -20 "$OBJ/build.log"; exit 1; }
+# REVIEW2 M-04: run the SAME checks at TWO geometries. ven_l1d advertised L1_SETS but
+# hard-coded a 7-bit set index and a 20-bit tag, so an override indexed dc_tag/dc_val
+# past their end AND split the address at the wrong bit -- silently wrong data, not a
+# compile error. The 128 run is the regression; the 64 run is what actually proves the
+# split now FOLLOWS the parameter. A 64-set build of the old body could not pass.
+run_one() {  # <sets>
+  local sets="$1"
+  local dir="$OBJ/s$sets"
+  mkdir -p "$dir"
+  verilator --binary -sv -Wno-WIDTH -Wno-UNUSED -Wno-DECLFILENAME \
+      -Wno-INITIALDLY -Wno-IMPLICITSTATIC --top-module tb_l1d \
+      -GTB_L1_SETS="$sets" -Mdir "$dir" -o tb_l1d \
+      "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/verif/l1/tb_l1d.sv" > "$dir/build.log" 2>&1 \
+      || { echo "L1D-GATE-FAIL (build, L1_SETS=$sets)"; tail -20 "$dir/build.log"; exit 1; }
+  local out
+  out="$("$dir/tb_l1d" 2>&1)"
+  echo "$out"
+  grep -q "L1D-GATE-OK" <<<"$out" || { echo "L1D-GATE-FAIL (L1_SETS=$sets)"; exit 1; }
+  echo "-- L1D gate PASS at L1_SETS=$sets --"
+}
 
-OUT="$("$OBJ/tb_l1d" 2>&1)"
-echo "$OUT"
-grep -q "L1D-GATE-OK" <<<"$OUT" || { echo "L1D-GATE-FAIL"; exit 1; }
-echo "== L1D gate PASS =="
+run_one 128
+run_one 64
+echo "== L1D gate PASS (both geometries: the set/tag split follows L1_SETS) =="

@@ -16,14 +16,44 @@
           if (mem_ack) begin
             if (!seg_step) begin gdt_lo<=mem_rdata; seg_step<=1'b1; end
             else begin
-              logic [63:0] desc;
-              desc      = {mem_rdata, gdt_lo};
+              logic [63:0] desc; logic [7:0] dattr; logic [15:0] dsel;
+              logic bad_sel, bad_type, not_present;
+              desc  = {mem_rdata, gdt_lo};
+              dattr = desc_attr(desc);
+              dsel  = gpr_o[q_src_reg][15:0];
+              // REVIEW2 H-04: LTR/LLDT committed the descriptor with NO validation at
+              // all -- malformed task state was installed and then USED FOR MEMORY
+              // ADDRESSING (tr_base feeds S_INT_TSS). The required faults:
+              //   * selector must be non-null and in the GDT (TI=0), and its index must
+              //     lie within the GDT limit          -> #GP(sel & 0xFFFC)
+              //   * type must be the right SYSTEM type: LTR needs an AVAILABLE 32-bit
+              //     TSS (0x9); a BUSY one (0xB) is #GP, which is also what makes a
+              //     re-LTR of a running task fault. LLDT needs an LDT (0x2).
+              //   * descriptor must be Present                    -> #NP(sel & 0xFFFC)
+              // The error code for a descriptor-sourced fault is the selector with the
+              // low two bits cleared (EXT=0, IDT=0 -- this is a GDT reference).
+              bad_sel     = (dsel[15:3] == 13'd0) || dsel[2]
+                         || ({16'd0, dsel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit});
+              bad_type    = dattr[4]   // S must be 0 (system descriptor)
+                         || (q_sysop==SYS_LLDT ? (dattr[3:0] != 4'h2)
+                                               : (dattr[3:0] != 4'h9));
+              not_present = !dattr[7];
+              if (bad_sel || bad_type) begin
+                seg_step <= 1'b0;
+                start_fault(8'd13, 1'b1, {16'd0, dsel[15:2], 2'b00}, q_pc);
+              end else if (not_present) begin
+                seg_step <= 1'b0;
+                start_fault(8'd11, 1'b1, {16'd0, dsel[15:2], 2'b00}, q_pc);
+              end else begin
               if (q_sysop==SYS_LLDT) begin
                 // LLDT: load the LDTR hidden base/limit from the GDT LDT descriptor.
+                // REVIEW2 M-02: also keep the SELECTOR. It was being discarded here,
+                // so the LDTR's architectural half did not exist anywhere in the core.
+                ldt_sel   <= dsel;
                 ldt_base  <= desc_base(desc);
                 ldt_limit <= desc_limit16(desc);
               end else begin
-                tr_sel   <= gpr_o[q_src_reg][15:0];
+                tr_sel   <= dsel;
                 tr_base  <= desc_base(desc);
                 tr_limit <= desc_limit(desc);
                 tr_attr  <= desc_attr(desc);   // M2S.4b: held for the busy-clear on a switch
@@ -31,6 +61,7 @@
               end
               seg_step <= 1'b0;
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE;
+              end
             end
           end
         end
@@ -42,6 +73,14 @@
           if (mem_ack) begin
             if (int_step == 4'd0) begin
               int_new_esp <= mem_rdata; int_step <= 4'd1;
+`ifdef VEN_DBG_WD
+              // [VEN-ESP0] the TSS.ESPn value pulled from memory for a cross-priv
+              // delivery. Compares vs golden (0x3862): 0x3860 => TSS memory corrupt
+              // (earlier bug); 0x3862 => the frame/writeback math drops the 2 bytes.
+              if (creg3==32'h0007e000)
+                $display("[VEN-ESP0] TSS.ESPn<=%08h from addr=%08h tr_base=%08h new_cpl=%0d vec=%0d @cs:eip=%04x:%08h",
+                         mem_rdata, mem_addr, tr_base, int_new_cpl, int_vec, seg_sel[SG_CS], eip);
+`endif
             end else begin
               int_new_ss  <= mem_rdata[15:0];
               int_step    <= 4'd0;

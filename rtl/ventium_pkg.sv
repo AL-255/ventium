@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -160,6 +161,29 @@ package ventium_pkg;
       input longint unsigned n,        // SAME retire seq as the paired vtm_retire
       input int     unsigned cr0, input int unsigned cr2,
       input int     unsigned cr3, input int unsigned cr4);
+`endif
+
+  // ===========================================================================
+  // REVIEW2 M-04: ONE definition of the L1 D-cache set count.
+  // ===========================================================================
+  // The core derived DC_SETS from its own `ifdef ladder while ventium_top
+  // instantiated ventium_l1_axi with NO L1_SETS override at all -- so a
+  // +VEN_CACHE_HALF build shrank the core's internal D$ model to 64 sets while the
+  // functional AXI L1D silently stayed at 128. The advertised half-cache
+  // configuration therefore did not shrink the thing that actually holds data.
+  //
+  // Defining the ladder ONCE here and consuming it from both places fixes the
+  // mismatch without creating a second copy to drift -- which is the same defect
+  // class as the C-03 address mirror and the m6 last-beat constant.
+  localparam int L1D_SETS_DEF =
+`ifdef VEN_DC_SETS
+      `VEN_DC_SETS;
+`elsif VEN_L1_SETS
+      `VEN_L1_SETS;
+`elsif VEN_CACHE_HALF
+      64;                      // +VEN_CACHE_HALF: 4 KB D$
+`else
+      128;
 `endif
 
 endpackage : ventium_pkg

@@ -15,7 +15,8 @@
   always_comb begin
     mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
     unique case (state)
-      S_FETCH: begin mem_req=1'b1; mem_addr=flin+{27'd0,fetch_word,2'b00}; end
+      // task #54: no bus transaction when the window is served from the I-cache.
+      S_FETCH: begin mem_req=!sfetch_fast; mem_addr=flin+{27'd0,fetch_word,2'b00}; end
       S_PF:    begin mem_req=1'b1; mem_addr={pf_fill_addr[31:5],5'd0}+{27'd0,pf_word,2'b00}; end
       S_PIPE:  begin
         // a register-base load issued this clock reads [base] combinationally.
@@ -39,10 +40,24 @@
           // F3: a16 string EA uses SI/DI low-16 (str_esi/str_edi mask).
           if (q_st==ST_SCAS) mem_addr=dbase+str_edi;
           else               mem_addr=dbase+str_esi;
-        end else if (q_xlat) mem_addr=dbase+gpr_o[R_EBX]+{24'd0,gpr_o[R_EAX][7:0]};
-                                          // XLATB: byte at [DS:(E)BX + AL]
+        end else if (q_xlat)
+          // XLATB: byte at [DS:(E)BX + AL].
+          // REVIEW_Jul29 M-06: this always used the full EBX, so the address-size-16
+          // form (0x67, or real mode without a 0x67) indexed the table from EBX
+          // instead of BX — a deterministic WRONG ADDRESS whenever EBX[31:16] was
+          // non-zero. q_cnt16 is the latched effective-address-size-16 flag
+          // (d_cnt16 = eff_addr, set for every instruction), which the string
+          // pointers already use, so the correct operand is available with no new
+          // plumbing.
+          mem_addr = dbase
+                   + (q_cnt16 ? {16'd0, gpr_o[R_EBX][15:0]} : gpr_o[R_EBX])
+                   + {24'd0, gpr_o[R_EAX][7:0]};
         else mem_addr=opbase+q_ea;        // M7.1: opbase==dbase except a proxy
                                           // gs-override indirect-call operand read
+        // REVIEW2 C-02: beat 2 of a page-crossing load re-issues at the SECOND page's
+        // base so it gets its own translation and permission check. cur_lin in core.sv
+        // carries the identical expression -- keep them in step (CHECK 5 enforces it).
+        if (xp_pend) mem_addr = {mem_addr[31:12] + 20'd1, 12'd0};
       end
       S_LOAD2: begin mem_req=1'b1;
         // BOUND / CMPXCHG8B: the SECOND word is the upper bound / high dword at
@@ -177,6 +192,29 @@
         end else begin
           mem_wstrb=st_strb; mem_addr=stbase+st_addr; mem_wdata=st_data;
         end
+        // ---- REVIEW2 C-02 (store half): PROBE-2 -> WRITE-1 -> WRITE-2 ----------
+        // See core.sv for why this order needs no rollback. cur_lin carries the same
+        // second-page redirect for phases 0 and 2 (CHECK 5 keeps them honest).
+        if (xs_act) begin
+          logic [5:0] sh;
+          sh = 6'(xs_first) << 3;
+          unique case (xs_ph)
+            2'd0: begin  // PROBE the second page: translate + WRITE-permission check,
+                         // but drive NO write.
+                    mem_we    = 1'b0;
+                    mem_wstrb = 4'd0;
+                    mem_addr  = {mem_addr[31:12] + 20'd1, 12'd0};
+                  end
+            2'd1: begin  // write only the FIRST page's bytes at the natural address
+                    mem_wstrb = mem_wstrb & 4'((1 << xs_first) - 1);
+                  end
+            default: begin // write the remaining bytes at the SECOND page's base
+                    mem_addr  = {mem_addr[31:12] + 20'd1, 12'd0};
+                    mem_wstrb = 4'((1 << (xs_w - xs_first)) - 1);
+                    mem_wdata = mem_wdata >> sh;
+                  end
+          endcase
+        end
       end
       S_USEQ: begin
         mem_req=1'b1;
@@ -212,8 +250,20 @@
         mem_req=1'b1;
         unique case (walk_step)
           3'd0: mem_addr = walk_pde_addr;                        // read PDE
-          3'd1: begin mem_we=1'b1; mem_wstrb=4'b1111;            // write PDE (set A)
-                      mem_addr = walk_pde_addr; mem_wdata = walk_pde | 32'h0000_0020; end
+          // write PDE: set A, and — on a 4 MiB LEAF page being WRITTEN — also D.
+          // REVIEW_Jul29 H-04: this used to write A only, while core_walk.svh:67-68
+          // latches `walk_pde | 0x20 | (is_big && walk_is_write ? 0x40 : 0)` and the
+          // TLB fill (core.sv:3981-3990) fabricates A+D. So on the first write to a
+          // clean 4 MiB page the TLB believed the page was dirty but the PDE IN
+          // MEMORY stayed clean: software reading the tables saw the wrong dirty
+          // state, and after any TLB invalidation the core rediscovered and re-"set"
+          // a bit it never actually wrote. Mirror the walker's expression exactly so
+          // memory and the internal latch agree.
+          3'd1: begin mem_we=1'b1; mem_wstrb=4'b1111;
+                      mem_addr  = walk_pde_addr;
+                      mem_wdata = walk_pde | 32'h0000_0020
+                                  | (((cr4_pse && walk_pde[7]) && walk_is_write)
+                                     ? 32'h0000_0040 : 32'd0); end
           3'd2: mem_addr = walk_pte_addr;                        // read PTE
           default: begin mem_we=1'b1; mem_wstrb=4'b1111;         // write PTE (set A/D)
                       mem_addr = walk_pte_addr;
@@ -397,11 +447,22 @@
     // IA-32 the GDT and TSS are linear structures, but the M2S.1/.2 identity-map
     // simplification reads them physically — S_INT_TSS is excluded consistently
     // with the sibling GDT read S_INT_SS (both feed the same cross-priv delivery).
+    // REVIEW2 C-04: the descriptor / TSS states are no longer excluded -- they read and
+    // write architecturally LINEAR structures and must translate. Only two exclusions
+    // remain, and both are correct: S_WALK (a page-table walk is physical by
+    // definition) and S_SMI_SAVE/S_RSM (the SMM save map is architecturally physical).
+    //
+    // S_LGDT stays excluded too: it reads the LGDT/LIDT pseudo-descriptor from an
+    // ordinary data operand, so it is already covered by the normal data path -- it
+    // was only in this list by association with the other "descriptor" states.
+    //
+    // The S_TSW_* task-switch states are also still excluded, deliberately and
+    // separately: they have no cur_lin cases at all, so making them translatable
+    // without mirroring their addresses first would look up one linear address and
+    // drive another -- exactly the C-03 failure. Tracked in #67.
     if (paging_on && state != S_WALK &&
-        state != S_LGDT && state != S_SEGLD && state != S_LJMP &&
-        state != S_LTR && state != S_INT_SS && state != S_INT_TSS &&
+        state != S_LGDT &&
         state != S_SMI_SAVE && state != S_RSM &&
-        // M2S.4b task-switch TSS/GDT reads+writes address physical memory directly.
         state != S_TSW_SAVE && state != S_TSW_READ && state != S_TSW_LDT &&
         state != S_TSW_SEG && state != S_TSW_BUSY) begin
       // CRITICAL (Phase-3 [high] fix): on a TLB MISS this clock the FSM diverts to
@@ -419,10 +480,72 @@
       // a stale physical address; the FSM holds and re-drives next clock with the
       // freshly-registered translate. fe_xlate_pend is tied 0 in the default build, so
       // this is exactly the existing squash there.
-      if (xlate_miss || fe_xlate_pend) begin
+      // REVIEW2 C-03: snapshot the ARCHITECTURAL (pre-translate) bus address here,
+      // after every case arm has driven it and before mem_xlate replaces it. The
+      // assertion in core.sv compares this against cur_lin -- the address the TLB
+      // lookup/walk actually used -- for every translatable request.
+      mem_addr_pre = mem_addr;
+      // REVIEW2 C-01: a permission fault must produce NO side effect -- no bus
+      // transaction, no cache fill, no A/D writeback. Squash exactly like a TLB
+      // miss does; the FSM arm below delivers the #PF on this same clock.
+      if (xlate_miss || fe_xlate_pend || perm_fault) begin
         mem_req=1'b0; mem_we=1'b0; mem_addr=32'd0; mem_wdata=32'd0; mem_wstrb=4'd0;
       end else if (mem_req) begin
         mem_addr = mem_xlate(mem_addr, cur_is_d);
       end
     end
+    // =========================================================================
+    // REVIEW2 M-03: the A20 gate, applied to the FINAL physical address.
+    // =========================================================================
+    // A20 was ABSENT from the design -- no masking anywhere in the core and no
+    // top-level control -- so accesses that must ALIAS at 1 MiB stayed distinct in
+    // memory and in the caches.
+    //
+    // PLACEMENT: this MUST sit outside the `if (paging_on && ...)` block above. It
+    // was first written inside it, right after mem_xlate(), on the reasoning that the
+    // gate acts on the POST-TRANSLATION address. That reasoning is right but the
+    // placement is wrong, because that whole tail only runs WITH PAGING ON -- so in
+    // REAL MODE, which is exactly where A20 matters most (the HMA wrap that BIOS and
+    // DOS depend on), the mask never executed at all. The directed test failed its
+    // phase-2 check and an instrumented probe at the old site printed NOTHING for any
+    // store, even though the run performed 52 writes. That zero-hit probe is what
+    // located this: the branch simply is not on the real-mode store path.
+    //
+    // Here, at the end of the driver, mem_addr is the final physical address in EVERY
+    // mode -- real mode (linear == physical), protected mode without paging, and
+    // paged mode after mem_xlate(). That is where the gate sits on real silicon (on
+    // the address pins), so one expression covers data, I-cache fills and page-walk
+    // reads, and the physically-tagged L1D aliases correctly because it never sees
+    // the unmasked bit.
+    //
+    // a20_on = the platform override AND the software latch (port 0x92 bit 1, latched
+    // in the core's S_IO arm). Both default and reset to 1 = A20 ENABLED = no masking,
+    // so every existing configuration is bit-identical until software clears it.
+    if (mem_req && !a20_on) mem_addr[20] = 1'b0;
+
+`ifndef SYNTHESIS
+    // =========================================================================
+    // REVIEW2 C-02 EXPOSURE COUNTER (measurement only -- changes no behaviour).
+    // =========================================================================
+    // C-02: a page-crossing access translates only its FIRST page. The high bytes
+    // are taken from the physically adjacent frame, so when the two virtual pages
+    // map to non-adjacent frames the access returns/writes the WRONG MEMORY, and a
+    // required second-page #PF is suppressed.
+    //
+    // Unlike M-07's aliasing, this CANNOT be turned into a loud rejection: an
+    // unaligned access spanning a 4 KiB boundary is perfectly legal x86 and real
+    // code does it, so faulting on it would break the very guests that must run.
+    // The only correct fix is the SPLIT (translate/check each piece, commit stores
+    // only after every piece passes) -- the review's own fix-priority #1.
+    //
+    // What IS cheap and honest right now is to MEASURE the exposure rather than
+    // assert it: count accesses that cross a page while paging is on. Zero means
+    // the defect is real but unreached by the current gates (and explains why
+    // nothing has caught it); non-zero means it is being hit today.
+    if (mem_req && paging_on && fe_translatable
+        && (({20'd0, mem_addr_pre[11:0]} + {29'd0, c02_bytes} - 32'd1) > 32'd4095))
+      c02_xpage_hits = 1'b1;
+    else
+      c02_xpage_hits = 1'b0;
+`endif
   end

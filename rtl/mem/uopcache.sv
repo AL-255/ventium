@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -81,11 +82,28 @@ module uopcache
     input  logic [IC_LINE*8-1:0] pd_line,
     input  logic [31:0]  pd_flags,
     input  logic         pd_cycle_mode,
+    // REVIEW Aug-1 H-04: the DEFAULT OPERAND/ADDRESS SIZE the line was walked under.
+    // The three live decoders in core.sv all receive .def16; this one did not, so the
+    // walker decoded every line as 32-bit. With +VEN_UOPCACHE plus system fast mode a
+    // 16-bit line was walked with the wrong default: wrong instruction LENGTHS, hence
+    // wrong boundaries, hence a whole line of wrong slots and a corrupt byte->slot map.
+    input  logic         pd_def16,
     // invalidate a (set,way)'s predecode validity (refill/SMC) — the spine pulses
     // this on allocate so a stale predecode never reads back valid.
+    // REVIEW2 H-16: global predecode flush requested from outside (the I-cache is
+    // being flushed wholesale because a PHYSICAL DMA snoop cannot be matched against
+    // its LINEAR tags). Without this the I-cache would refill correct bytes while the
+    // uop cache kept serving predecoded uops built from the STALE ones -- a worse
+    // failure than the one being fixed, because the bytes would look right.
+    input  logic         flush_all,
     input  logic         inv_en,
     input  logic [IC_IDXW-1:0]   inv_set,
     input  logic         inv_way,
+    // REVIEW Aug-1 H-04: the CURRENT default size. A line predecoded under one default
+    // must never be READ BACK under the other, so any change to it invalidates every
+    // predecoded line. CS.D changes are rare (mode switches / far transfers), so this
+    // costs a re-walk at a boundary the pipeline is already flushing.
+    input  logic         cur_def16,
     output logic         pd_busy
 );
 
@@ -208,7 +226,20 @@ module uopcache
   logic [5:0]            woff;         // current byte offset within the line (0..32)
   logic [3:0]            wslot;        // current slot index
   logic [IC_IDXW-1:0]     wset; logic wway;
-  logic [31:0]           wflags; logic wcyc;
+  logic [31:0]           wflags; logic wcyc; logic wd16;   // H-04: latched pd_def16
+  // REVIEW2 H-14: the walk is a TRANSACTION and pd_start had no handshake.
+  //  * A fill completing while the walker is busy was DROPPED entirely (the core
+  //    ignores pd_busy and pulses pd_start for every completed I-cache fill), so the
+  //    new line stayed un-predecoded -- a performance hole, and worse:
+  //  * if that dropped fill targeted the SAME (set,way) the walker was working on,
+  //    the old walk's final `store_pdv <= 1` at W_WRITE ran AFTER the new fill's
+  //    inv_en had cleared it, RE-VALIDATING stale predecoded uops against freshly
+  //    filled instruction bytes. That is the H-08/H-12 shape one level up.
+  logic                  wpz;         // this walk was invalidated -> must not validate
+  logic                  pd_pend;     // a start arrived while busy (1-deep skid)
+  logic [IC_IDXW-1:0]    pd_pend_set; logic pd_pend_way;
+  logic [IC_LINE*8-1:0]  pd_pend_line;
+  logic [31:0]           pd_pend_flags; logic pd_pend_cyc, pd_pend_d16;
 
   // walker working buffers (written into the store on W_WRITE)
   logic [NSLOT*FPDW-1:0] wbuf_slots;
@@ -219,7 +250,7 @@ module uopcache
   decode u_pd_decode (
       .ib0(residual[7:0]),   .ib1(residual[15:8]),  .ib2(residual[23:16]),
       .ib3(residual[31:24]), .ib4(residual[39:32]), .ib5(residual[47:40]),
-      .iflags(wflags), .cycle_mode(wcyc), .uop(pd_uop)
+      .iflags(wflags), .def16(wd16), .cycle_mode(wcyc), .uop(pd_uop)
   );
 
   // decoded length, clamped to >=1 so the walk always advances (a non-simple op
@@ -229,25 +260,68 @@ module uopcache
 
   assign pd_busy = (wst != W_IDLE);
 
+  // REVIEW Aug-1 H-04: the default operand size every RESIDENT predecode was walked
+  // under. When the live default changes (CS.D flip on a far transfer / mode switch)
+  // every stored line's boundaries are wrong, so drop the whole predecode array.
+  logic d16_q, d16_flush;
+  // H-16: an external flush drops the whole predecode array by the same path as the
+  // default-size change, so there is ONE global-clear mechanism rather than two.
+  assign d16_flush = (cur_def16 != d16_q) || flush_all;
+
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       wst <= W_IDLE;
+      d16_q <= 1'b0;
+      wpz <= 1'b0; pd_pend <= 1'b0;   // H-14
       for (int i=0;i<IC_SETS*2;i++) store_pdv[i] <= 1'b0;
     end else begin
+      d16_q <= cur_def16;
+      // H-04: global predecode flush on a default-size change (takes priority over
+      // the per-(set,way) invalidate below and over this fill's own validation).
+      if (d16_flush)
+        for (int i=0;i<IC_SETS*2;i++) store_pdv[i] <= 1'b0;
       // invalidate (refill/SMC): clear predecoded-valid for the (set,way).
       if (inv_en) store_pdv[{inv_set,inv_way}] <= 1'b0;
+      // H-14: if that invalidation (or a global d16 flush) hits the line THIS WALK is
+      // building, the walk's result is stale before it is even written -- poison it so
+      // W_WRITE does not resurrect it.
+      if ((wst != W_IDLE) &&
+          (d16_flush || (inv_en && (inv_set == wset) && (inv_way == wway))))
+        wpz <= 1'b1;
+      // H-14: a start arriving while the walker is busy used to be dropped on the
+      // floor. Hold it (1-deep) and run it when the walker goes idle. Deeper queueing
+      // is unnecessary: starts are one per I-cache line fill, which cannot outrun the
+      // walk by more than one in this design -- and if that ever changes, the
+      // simulation warning below says so instead of silently losing predecode.
+      if (pd_start && (wst != W_IDLE)) begin
+`ifndef SYNTHESIS
+        if (pd_pend)
+          $display("[UOPC] WARNING: second pd_start while one is pending (set %0d way %0d dropped) -- REVIEW2 H-14 skid is 1-deep",
+                   pd_pend_set, pd_pend_way);
+`endif
+        pd_pend       <= 1'b1;
+        pd_pend_set   <= pd_set;   pd_pend_way <= pd_way;
+        pd_pend_line  <= pd_line;
+        pd_pend_flags <= pd_flags; pd_pend_cyc <= pd_cycle_mode; pd_pend_d16 <= pd_def16;
+      end
 
       unique case (wst)
         W_IDLE: begin
-          if (pd_start) begin
-            residual   <= pd_line;
+          // H-14: a fresh start wins; otherwise run a held one.
+          if (pd_start || pd_pend) begin
+            residual   <= pd_start ? pd_line       : pd_pend_line;
             woff       <= 6'd0;
             wslot      <= 4'd0;
-            wset       <= pd_set;  wway <= pd_way;
-            wflags     <= pd_flags; wcyc <= pd_cycle_mode;
+            wset       <= pd_start ? pd_set        : pd_pend_set;
+            wway       <= pd_start ? pd_way        : pd_pend_way;
+            wflags     <= pd_start ? pd_flags      : pd_pend_flags;
+            wcyc       <= pd_start ? pd_cycle_mode : pd_pend_cyc;
+            wd16       <= pd_start ? pd_def16      : pd_pend_d16;
             wbuf_slots <= '0;
             wbuf_bmap  <= '0;
+            wpz        <= 1'b0;      // fresh transaction
             wst        <= W_WALK;
+            if (!pd_start) pd_pend <= 1'b0;   // consumed the held one
           end
         end
         W_WALK: begin
@@ -290,7 +364,12 @@ module uopcache
           store_slots_b[{wset,wway}] <= wbuf_slots;
           store_bmap_a [{wset,wway}] <= wbuf_bmap;
           store_bmap_b [{wset,wway}] <= wbuf_bmap;
-          store_pdv[{wset,wway}]     <= 1'b1;
+          // H-04: a walk that started under the OLD default size must not validate.
+          // This assignment is textually last, so it would otherwise override the
+          // global flush above for this one line.
+          // H-14: also refuse to validate a walk that was invalidated mid-flight.
+          store_pdv[{wset,wway}]     <= !(wpz || d16_flush || (wd16 != cur_def16)
+                                        || (inv_en && (inv_set==wset) && (inv_way==wway)));
           wst <= W_IDLE;
         end
         default: wst <= W_IDLE;

@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -146,16 +147,87 @@ module ven_axi_master #(
     remap = REMAP_BASE + ADDR_W'(a & ADDR_MASK);
   endfunction
 
+  // REVIEW2 M-07: when ADDR_MASK is narrower than 32 bits (the KV260 build folds the
+  // whole 4 GiB into a 256 MiB carveout), every physical address sharing the low mask
+  // bits COLLIDES -- guest RAM above the window, PCI apertures and high aliases all
+  // land on unrelated low memory. That is a platform memory-map LIMIT, and the design
+  // is safe only because the supported guest keeps its accesses inside the window
+  // apart from the BIOS shadow the fold deliberately catches.
+  //
+  // A compile-time check is not possible: guest RAM size is configured by the PS at
+  // RUNTIME, not by a parameter. So the configuration is REJECTED AT THE ACCESS --
+  // any request whose address has bits outside ADDR_MASK, other than the BIOS shadow
+  // the fold deliberately catches, raises a STICKY error that feeds bus_err.
+  //
+  // This replaces a simulation-only $display. That was a notification, not a
+  // rejection: it was invisible in synthesis, so on real hardware an aliased access
+  // corrupted unrelated low memory silently. M-07's required direction is to "reject
+  // unsupported RAM/aperture configurations", and bus_err is how this design already
+  // reports a fatal bus fault (the core's bus_err -> S_HALT path), so an out-of-window
+  // access now HALTS LOUDLY instead of scribbling on someone else's memory.
+  //
+  // alias_ok is the supported envelope: everything inside the mask, plus the
+  // top-of-4G BIOS shadow that the fold exists to serve.
+  logic alias_err;   // sticky: an access was folded onto a DIFFERENT physical address
+  logic alias_bad;
+  assign alias_bad = m_req && ((m_addr & ~ADDR_MASK) != 32'd0)
+                           && !(m_addr >= 32'hFFFE_0000);
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) alias_err <= 1'b0;
+    else if (alias_bad) begin
+      alias_err <= 1'b1;
+`ifndef SYNTHESIS
+      $display("[AXI] M-07 ALIAS: addr=%08h has bits outside ADDR_MASK=%08h -- would fold onto %08h, which belongs to a different physical address. Raising bus_err.",
+               m_addr, ADDR_MASK, (m_addr & ADDR_MASK));
+`endif
+    end
+  end
+
   // ---- READ FSM (coalesced INCR line fill) ----------------------------------
-  typedef enum logic [1:0] { R_IDLE, R_AR, R_DATA } rstate_e;
+  // REVIEW2 M-08: R_DRAIN deterministically resynchronises the R channel after an
+  // RLAST/beat-count mismatch (see the R_DATA arm).
+  typedef enum logic [1:0] { R_IDLE, R_AR, R_DATA, R_DRAIN } rstate_e;
   rstate_e          rst;
   logic [ADDR_W-1:0] araddr_q;     // line-aligned burst base (registered, stable)
   logic [7:0]        r_beat;       // accepted-R-beat counter (exit on count, not RLAST)
+  // HP0 DOUBLE-READ (port of the proven ven_ddram_axi build-#31 workaround): the PS S_AXI_HP
+  // async DDR read FIFO can return a STALE prior burst. PROVEN on the VEN path too: with a
+  // daemon-injected BDA key resident in DDR (kbd head!=tail), the guest's INT16 buffer peek
+  // read head==tail through a FLUSHED L1D — the fill itself returned stale data — freezing
+  // the retire comparator on the empty branch (f000:0x490e) while DDR held the key. Issue
+  // every line fill TWICE at the same address: the FIRST (priming) burst is DISCARDED, the
+  // SECOND is delivered. 2x fill latency; correctness over speed (ao486 runs this way).
+  logic              rd_primed;    // 0 = priming (discard) burst; 1 = the real (delivered) burst
   logic              rresp_err;    // sticky: a read beat returned non-OKAY RRESP
+  // REVIEW2 M-08: RLAST disagreeing with the beat count is a PROTOCOL VIOLATION by
+  // the slave. Exiting on the beat count (below) is the right defensive choice -- an
+  // early RLAST must not freeze ven_l1d's fill mid-line -- but silently tolerating
+  // the mismatch means an early RLAST leaves the master waiting for beats the slave
+  // considers sent, and a late/missing one lets it return idle and potentially launch
+  // a new transaction over an incomplete burst. Neither is recoverable by guessing.
+  // Make it a sticky FATAL bus error so the core halts deterministically instead of
+  // running on data the bus never agreed about. A compliant slave never sets this.
+  logic              rlast_err;    // sticky: RLAST did not match the beat count
   logic              bresp_err;    // sticky: a write returned non-OKAY BRESP
   logic              wd_err_r;     // sticky: a READ watchdog timeout aborted (read-FF driven)
   logic              wd_err_w;     // sticky: a WRITE watchdog timeout aborted (write-FF driven)
   logic [15:0]       r_wd, w_wd;   // #34 read/write watchdog cycle counters (since last progress)
+
+  // ---- write->read landing barrier (build-#21 class, CORE path) ---------------
+  // The CPU write-through's BVALID fires BEFORE the store lands in PS-DDR (HP0 posted). A
+  // line FILL issued a few instructions later (in-order) BEATS the store to DDR and caches
+  // stale bytes — fine-timing proved the Win95 AH=87 GDT CS-descriptor store lands in DDR the
+  // same t it's read as 0. HOLD a fill of a JUST-WRITTEN line for WRBAR cycles so the posted
+  // store lands first. SAME-LINE only: fetches + other-line reads are never held (no global
+  // slowdown), and wr_cd re-arms on every write so back-to-back GDT stores extend the window.
+  localparam logic [7:0] WRBAR = 8'd0;   // DIAGNOSTIC build: barrier DISABLED (didn't help; slowed boot)
+  logic [26:0] wr_line; logic [7:0] wr_cd;
+  wire rd_hold = (wr_cd != 8'd0) && (m_addr[31:5] == wr_line);
+  always_ff @(posedge core_clk) begin
+    if (!core_rst_n)                         begin wr_line <= 27'd0; wr_cd <= 8'd0; end
+    else if (m_req && m_we && !shutdown)     begin wr_line <= m_addr[31:5]; wr_cd <= WRBAR; end
+    else if (wr_cd != 8'd0)                        wr_cd   <= wr_cd - 8'd1;
+  end
 
   // ---- WRITE FSM (write-through, decoupled AW/W; up to 2 word beats) ----------
   // A core store is byte-addressed: the byte at m_addr is lane 0 of m_wstrb/m_wdata.
@@ -186,11 +258,17 @@ module ven_axi_master #(
     m_axi_arsize  = 3'b010;               // 4 bytes/beat
     m_axi_arburst = 2'b01;               // INCR
     m_axi_arlock  = 1'b0;
-    m_axi_arcache = 4'b1111;             // write-back R/W-allocate (HPC0 coherent)
+    m_axi_arcache = 4'b0011;             // Normal NON-cacheable bufferable: the BD uses NON-coherent
+                                         // HP0, and cacheable attrs legally let the SmartConnect width
+                                         // converter serve reads from PREVIOUSLY FETCHED data — the
+                                         // stale-read source (PS-written DDR invisible to the guest).
     m_axi_arprot  = 3'b000;
     m_axi_arqos   = 4'd0;
     m_axi_arvalid = (rst == R_AR);
-    m_axi_rready  = (rst == R_DATA);
+    // M-08: RREADY is also asserted while DRAINING -- the whole point of the drain is
+    // to consume the beats a late-RLAST slave still owes, so the next transaction does
+    // not inherit them.
+    m_axi_rready  = (rst == R_DATA) || (rst == R_DRAIN);
 
     // write address channel — single 4-byte beat at the raw (un-line-aligned) addr.
     m_axi_awid    = AXI_ID;
@@ -199,7 +277,7 @@ module ven_axi_master #(
     m_axi_awsize  = 3'b010;
     m_axi_awburst = 2'b01;
     m_axi_awlock  = 1'b0;
-    m_axi_awcache = 4'b1111;
+    m_axi_awcache = 4'b0011;             // (same rationale as arcache — never mark HP0 traffic cacheable)
     m_axi_awprot  = 3'b000;
     m_axi_awqos   = 4'd0;
     m_axi_awvalid = (wst == W_RUN) && !aw_done;
@@ -226,15 +304,15 @@ module ven_axi_master #(
     // ack the core write only after the FINAL beat (beat A of an aligned store, or
     // beat B of a straddling one) — a per-beat ack would complete the core's store
     // after only the first word landed.
-    m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready) ||
+    m_ack   = ((rst == R_DATA) && m_axi_rvalid && m_axi_rready && rd_primed) ||   // deliver ONLY the 2nd (real) burst
               ((wst == W_RESP) && m_axi_bvalid && (!xword_q || wbeat)) ||
               (shutdown && m_idle && m_req);          // shutdown: local ack, no DDR
-    bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err;  // #34 sticky fatal-fault to core
+    bus_err = wd_err_r | wd_err_w | rresp_err | bresp_err | rlast_err | alias_err; // #34 + M-08 + M-07
   end
 
 `ifdef VEN_DBG_CORE
   // read-beat trace taps: capture the address + data of every ACCEPTED read beat.
-  assign dbg_rd_valid = (rst == R_DATA) && m_axi_rvalid && m_axi_rready;
+  assign dbg_rd_valid = (rst == R_DATA) && m_axi_rvalid && m_axi_rready && rd_primed;  // real burst only
   assign dbg_rd_addr  = araddr_q[31:0] + {22'd0, r_beat, 2'b00};
   assign dbg_rd_data  = m_axi_rdata;
 `endif
@@ -242,14 +320,24 @@ module ven_axi_master #(
   // ---- READ sequencing -------------------------------------------------------
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
-      rst <= R_IDLE; araddr_q <= '0; r_beat <= 8'd0; rresp_err <= 1'b0;
-      r_wd <= 16'd0; wd_err_r <= 1'b0;
+      rst <= R_IDLE; araddr_q <= '0; r_beat <= 8'd0; rresp_err <= 1'b0; rlast_err <= 1'b0;
+      r_wd <= 16'd0; wd_err_r <= 1'b0; rd_primed <= 1'b0;
     end else begin
       unique case (rst)
-        R_IDLE: if (m_req && !m_we && !shutdown) begin
+        R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold) begin
                   // a backing read == a full line fill: latch the 32B-aligned base.
                   araddr_q <= remap({m_addr[31:5], 5'd0});
                   r_beat <= 8'd0; rresp_err <= 1'b0; r_wd <= 16'd0;
+`ifdef VEN_SINGLE_FILL
+                  // EXPERIMENT ONLY (task #24). Skips the priming burst so a fill costs ONE
+                  // burst instead of two. NOT SAFE TO SHIP as-is: the priming read exists
+                  // because the PS S_AXI_HP async read FIFO returned a STALE prior burst and
+                  // froze the guest (see the header comment). This define exists to MEASURE
+                  // the payoff of fixing that root cause, not to work around it.
+                  rd_primed <= 1'b1;
+`else
+                  rd_primed <= 1'b0;                 // double-read: burst 1 = priming (discard)
+`endif
                   rst <= R_AR;
                 end
         R_AR:   if (m_axi_arready) begin rst <= R_DATA; r_wd <= 16'd0; end // AR accepted
@@ -264,11 +352,47 @@ module ven_axi_master #(
                   // compliant slave (RLAST lands exactly at r_beat==LINE_BEATS-1, the
                   // rlast_align SVA below checks it). Sticky-flag a non-OKAY RRESP.
                   if (m_axi_rresp != 2'b00)        rresp_err <= 1'b1;
-                  if (r_beat == 8'(LINE_BEATS-1))  rst <= R_IDLE;  // burst complete
-                  r_beat <= r_beat + 8'd1; r_wd <= 16'd0;
+                  // M-08: RLAST must be high exactly on the final beat. Flagging the
+                  // mismatch (sticky -> bus_err) is only half of what the review asks
+                  // for; the other half is to RECOVER DETERMINISTICALLY rather than
+                  // leave the channel in an unknown state.
+                  if (m_axi_rlast != (r_beat == 8'(LINE_BEATS-1))) rlast_err <= 1'b1;
+                  if (m_axi_rlast && (r_beat != 8'(LINE_BEATS-1))) begin
+                    // EARLY RLAST: the slave has ENDED the burst, so the beats this
+                    // master is still counting will never arrive. Previously the FSM
+                    // sat here until the #34 watchdog fired -- a timeout, not a defined
+                    // recovery. Terminate now; bus_err is already sticky, so the core
+                    // halts on a known cycle instead of an arbitrary one.
+                    r_beat <= 8'd0; rst <= R_IDLE;
+                  end else if (r_beat == 8'(LINE_BEATS-1)) begin
+                    if (!m_axi_rlast) begin
+                      // LATE RLAST: our count is satisfied but the slave still owes
+                      // beats. Returning to IDLE here would let the NEXT AR be issued
+                      // while those beats are in flight, and they would be consumed as
+                      // the new burst's data -- silent cross-transaction corruption.
+                      // Drain to the real RLAST first.
+                      rst <= R_DRAIN;
+                    end else if (!rd_primed) begin
+                      // priming burst done (all beats DISCARDED): re-issue the SAME
+                      // burst (araddr_q preserved); the second one is delivered.
+                      rd_primed <= 1'b1; r_beat <= 8'd0; rst <= R_AR;
+                    end else rst <= R_IDLE;                       // real burst complete
+                  end else r_beat <= r_beat + 8'd1;
+                  r_wd <= 16'd0;
                 end
+
                 else if (r_wd >= 16'(WATCHDOG)) wd_err_r <= 1'b1;  // #34 stall watchdog
                 else r_wd <= r_wd + 16'd1;
+
+        // M-08: consume the remaining beats of an over-long burst until the slave's
+        // real RLAST, then return to IDLE with the channel resynchronised. The #34
+        // watchdog still backstops a slave that never asserts RLAST at all.
+        R_DRAIN: if (m_axi_rvalid && m_axi_rready) begin
+                   if (m_axi_rlast) begin r_beat <= 8'd0; rst <= R_IDLE; end
+                   r_wd <= 16'd0;
+                 end
+                 else if (r_wd >= 16'(WATCHDOG)) wd_err_r <= 1'b1;
+                 else r_wd <= r_wd + 16'd1;
         default: rst <= R_IDLE;
       endcase
     end

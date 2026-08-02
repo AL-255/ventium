@@ -98,3 +98,7 @@ ao486-sim/**/*.bak
 # logs and editor/script backups are scratch anywhere in the tree
 *.log
 *.bak
+
+# ao486-sim boot/co-sim snapshots — multi-GB simulation state, regenerated on demand
+ao486-sim/snaps/
+ao486-sim/snaps_cb/

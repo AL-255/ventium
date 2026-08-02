@@ -22,7 +22,13 @@
               // base[31:16] is the low half of the second word.
               logic [31:0] nb; logic [15:0] nl;
               nl = gdt_lo[15:0];
-              nb = {mem_rdata[15:0], gdt_lo[31:16]};
+              // IA-32: a 16-bit-operand LGDT/LIDT loads a 24-bit base with bits 31:24
+              // CLEARED; only a 32-bit operand loads the full 32-bit base. q_w==2 is the
+              // 16-bit form (set 0x66-aware in the 0F 01 decode). Without the mask the 4th
+              // base byte (the descriptor's access byte) leaks into base[31:24] and the
+              // subsequent descriptor read lands tens of MB off -> Win95 AH=87 PM-entry hang.
+              nb = (q_w==3'd2) ? {8'd0, mem_rdata[7:0], gdt_lo[31:16]}
+                               : {mem_rdata[15:0], gdt_lo[31:16]};
               if (q_sysop==SYS_LGDT) begin gdt_base<=nb; gdt_limit<=nl; end
               else begin idt_base<=nb; idt_limit<=nl; end
               eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
@@ -92,6 +98,11 @@
                 seg_base [tgt] <= desc_base(desc);
                 seg_limit[tgt] <= desc_limit(desc);
                 seg_attr [tgt] <= attr;
+                // REVIEW2 C-07: capture SS's D/B bit exactly as the CS path captures
+                // desc[54] into cs_d. Without it there was no hidden SS.B state at all,
+                // so stk16() could not know a protected-mode stack was 16-bit and never
+                // wrapped SP at 64 KiB.
+                if (tgt == SG_SS) ss_b <= desc[54];
                 q_seg_from_mem <= 1'b0;
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
               end
@@ -127,8 +138,15 @@
               // run the S_TSW_* micro-sequence. Other system descriptors (task gate
               // 0x5, call gate, LDT, ...) are not in the corpus -> HALT cleanly.
               if (!desc_s(attr)) begin
-                if (desc_present(attr) &&
-                    (desc_type(attr) == 4'h9 || desc_type(attr) == 4'hB)) begin
+                // REVIEW2 H-04: a JMP to a BUSY TSS (type 0xB) must #GP -- it means the
+                // target task is already active, and switching to it would corrupt its
+                // saved state. Only an AVAILABLE TSS (0x9) is a legal JMP target; the
+                // busy type is legal only for an IRET back to a nested task. Accepting
+                // both let a JMP re-enter a running task and overwrite its context.
+                if (desc_present(attr) && (desc_type(attr) == 4'hB)) begin
+                  start_fault(8'd13, 1'b1, {16'd0, q_ljmp_sel[15:2], 2'b00}, q_pc);
+                  seg_step <= 1'b0;
+                end else if (desc_present(attr) && (desc_type(attr) == 4'h9)) begin
                   // HARDWARE TASK SWITCH to a 32-bit TSS.
                   tsw_new_base  <= desc_base(desc);
                   tsw_new_limit <= desc_limit(desc);
@@ -138,22 +156,87 @@
                   tsw_step      <= 5'd0;
                   seg_step      <= 1'b0;
                   state         <= S_TSW_SAVE;
+`ifdef VEN_DBG_WD
+                  $display("[VEN-TSW] far-switch -> TSS sel=%04x type=%01x base=%08h @ outgoing cs:eip=%04x:%08h next_eip=%08h cur_tr=%04x off=%08h cr3=%08h",
+                           q_ljmp_sel, desc_type(attr), desc_base(desc), seg_sel[SG_CS], eip, next_eip, tr_sel, q_ljmp_off, creg3);
+`endif
+                end else if (desc_present(attr) &&
+                            (desc_type(attr) == 4'hC || desc_type(attr) == 4'h4)) begin
+                  // ===== CALL GATE (32-bit type 0xC / 16-bit type 0x4) =============
+                  // BUG #6 (HW-confirmed): DOS-Quake's CWSDPMI far-transfers through a
+                  // gate right after the RETF into the DPMI-side segment, and this arm
+                  // used to loud-HALT (tag 0xE3 / 0xDC at FRZEIP=0x10dc).
+                  //
+                  // A call gate is NOT a code segment: it carries the real target in
+                  //   offset = {desc[63:48], desc[15:0]}   (16-bit gate: low half only)
+                  //   selector = desc[31:16]               (the target CODE selector)
+                  //   DPL      = desc[45:44],  P = desc[47]
+                  // IA-32 6.11: the gate is usable when gate.DPL >= CPL AND
+                  // gate.DPL >= RPL(gate selector) — else #GP(selector).
+                  //
+                  // We RE-VECTOR: install the gate's target selector/offset into
+                  // q_ljmp_sel/q_ljmp_off and restart this same 2-beat descriptor read
+                  // (seg_step<=0, state stays S_LJMP). The bus driver addresses the
+                  // descriptor from q_ljmp_sel, so the next pass reads the TARGET CS
+                  // descriptor and falls into the ordinary code-segment path below.
+                  // gate_via records that we arrived through a gate, because the CPL
+                  // rule then differs from a plain far jump (see below).
+                  logic [15:0] gsel; logic [31:0] goff; logic [1:0] gdpl;
+                  gsel = desc[31:16];
+                  goff = (desc_type(attr) == 4'hC) ? {desc[63:48], desc[15:0]}
+                                                   : {16'd0,      desc[15:0]};
+                  gdpl = desc[45:44];
+                  if ((gdpl < cpl_r) || (gdpl < q_ljmp_sel[1:0])) begin
+                    // gate not reachable from this privilege level -> #GP(selector)
+                    start_fault(8'd13, 1'b1, {16'd0, q_ljmp_sel[15:3], 3'd0}, q_pc);
+                    seg_step <= 1'b0; gate_via <= 1'b0;
+                  end else begin
+                    q_ljmp_sel <= gsel;
+                    q_ljmp_off <= goff;
+                    gate_via   <= 1'b1;
+                    seg_step   <= 1'b0;      // re-read: now the TARGET CS descriptor
+                  end
                 end else begin
-                  state<=S_HALT; seg_step<=1'b0;     // other system descriptors
+                  // Still-unimplemented SYSTEM descriptor on a far transfer. The tag's
+                  // low nibble carries the DESCRIPTOR TYPE so a freeze read names it
+                  // exactly instead of just "not a TSS":
+                  //   0xD5 = TASK GATE   0xD2 = LDT   0xD1/0xD3 = 16-bit TSS
+                  // (0xDC/0xD4 — the call gates — are now HANDLED above.)
+                  state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<={4'hD, desc_type(attr)}; `endif seg_step<=1'b0;
                 end
               end else if (seg_load_fault(1'b1, 1'b0, q_ljmp_sel, attr, cpl_r)) begin
                 // #GP/#NP on a far-jump CS load -> DELIVER (error code = selector).
                 start_fault(seg_fault_vec(1'b1, 1'b0, q_ljmp_sel, attr), 1'b1,
                             {16'd0, q_ljmp_sel[15:3], 3'd0}, q_pc);
                 seg_step<=1'b0;
+              end else if (gate_via && (desc_dpl(attr) < cpl_r)) begin
+                // CROSS-PRIVILEGE call gate (target CS.DPL < CPL). IA-32 requires a
+                // STACK SWITCH here: load SS:ESP from TSS.ssN/espN for the new CPL,
+                // copy `param count` dwords from the old stack, then push the old
+                // SS:ESP and the return CS:EIP. NOT implemented yet — and it must not
+                // be faked, because taking the same-privilege path would push the
+                // return frame on the CALLER's stack while running at a HIGHER
+                // privilege: a silent privilege escalation with a corrupt frame.
+                // Halt loudly with its own tag (0xDB) so a freeze read distinguishes
+                // "cross-priv gate" from every other gate case. The machinery to reuse
+                // already exists in the interrupt path (S_INT_TSS reads TSS.ssN:espN,
+                // S_INT_SS loads the new SS, S_INT_PUSH builds the frame) — see task #47.
+                state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hDB; `endif
+                seg_step<=1'b0; gate_via<=1'b0;
               end else begin
                 seg_sel  [SG_CS] <= q_ljmp_sel;
                 seg_base [SG_CS] <= desc_base(desc);
                 seg_limit[SG_CS] <= desc_limit(desc);
                 seg_attr [SG_CS] <= attr;
-                cpl_r    <= q_ljmp_sel[1:0];  // CPL = CS.RPL after a far jump
+                // CPL: a plain far jump takes CS.RPL. Through a CALL GATE the selector
+                // RPL is NOT the new privilege (gates commonly carry RPL 0 while the
+                // transfer is same-privilege) — using it would silently escalate to
+                // ring 0. Same-privilege gate transfers KEEP the current CPL; the
+                // cross-privilege case is rejected above.
+                cpl_r    <= gate_via ? cpl_r : q_ljmp_sel[1:0];
                 cs_d <= desc[54];   // D/B bit: 1 => 32-bit default operand/addr size
                 eip<=q_ljmp_off; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
+                gate_via <= 1'b0;
               end
             end
           end

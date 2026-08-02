@@ -177,12 +177,36 @@ grep -q "CPU HUNG" "$LOG_MEM" \
     || ok "F00F errata ON  -> VALID memory CMPXCHG8B does NOT hang (only reg-dst does)"
 
 # =============================================================================
-# 4. MOV moffs A2/A3 fails to pair (Erratum 59). Cycle trace: the A3 store
-#    (pc 0x08048009) is followed by an EAX-using MOV (pc 0x0804800e):
-#      errata OFF -> that MOV is PAIRED (pipe=V, paired=true).
-#      errata ON  -> that MOV is NOT paired (pipe=U, paired=false).
+# 4. MOV moffs A2/A3 fails to pair (Erratum 59)  -- MODEL WITHDRAWN, see below.
 # =============================================================================
-say "4. MOV moffs (A2/A3) fails to pair (Erratum 59)  -- cycle gate"
+# This check ORIGINALLY asserted the pairing erratum:
+#     errata OFF -> the EAX-using follower is PAIRED   (pipe=V, paired=true)
+#     errata ON  -> that follower is NOT paired        (the documented defect)
+#
+# That model is GONE. REVIEW_Jul29 H-02 found the decode.sv A2/A3 fast-path arm
+# was architecturally corrupt: it claimed the fast path for a STORE while
+# modelling only retire+pairing, so `MOV moffs,AL/eAX` retired having written
+# NOTHING -- and cycle_mode is hard-wired to 1 on the deployed FPGA shim, so the
+# corruption was LIVE. The arm was correctly disabled (decode.sv, the commented
+# `8'hA2, 8'hA3:` block). Consequence: moffs now always takes the slow FSM and
+# can never pair, in EITHER mode.
+#
+# So this check was failing on the OFF side -- and, far worse, PASSING on the ON
+# side FOR THE WRONG REASON. `d.is_moffs` is not assigned anywhere in the RTL
+# (its only occurrence is inside that disabled comment), so `moffs_falsedep` in
+# core.sv is permanently 0 and errata_en[ERR_MOFFS] is fully INERT: the ON and
+# OFF traces are byte-identical. A green "Erratum 59 reproduced" line was being
+# printed by a bit that does nothing.
+#
+# The check below now asserts the TRUTH, and is built to trip the moment that
+# truth changes:
+#   (a) the errata bit is inert    -- ON and OFF traces must be byte-identical;
+#   (b) moffs does not pair at all -- in either mode.
+# Re-enabling a real moffs fast path (with a store handshake that cannot retire
+# before the write is accepted, per H-02's recommended shape) will break BOTH,
+# forcing whoever does it to restore the real erratum-59 assertions above.
+# =============================================================================
+say "4. MOV moffs (A2/A3) fails to pair (Erratum 59)  -- MODEL WITHDRAWN (H-02)"
 build_test err_moffs
 MOFFS_FOLLOWER="0x0804800e"   # the EAX-using MOV right after the A3 store
 
@@ -195,14 +219,24 @@ hit = [r for r in t.records if r["pc"].lower() == pc]
 print("1" if (hit and bool(hit[-1]["paired"]) and hit[-1]["pipe"] == "V") else "0")
 PY
 }
-tr=$(run_tb err_moffs off --cycle --max-insn 30); OFF_P=$(paired_at "$tr" "$MOFFS_FOLLOWER")
-tr=$(run_tb err_moffs on  --cycle --errata 0x8 --max-insn 30); ON_P=$(paired_at "$tr" "$MOFFS_FOLLOWER")
-printf '    errata OFF follower-paired = %s (want 1)\n    errata ON  follower-paired = %s (want 0)\n' \
+TR_OFF=$(run_tb err_moffs off --cycle --max-insn 30); OFF_P=$(paired_at "$TR_OFF" "$MOFFS_FOLLOWER")
+TR_ON=$(run_tb err_moffs on  --cycle --errata 0x8 --max-insn 30); ON_P=$(paired_at "$TR_ON" "$MOFFS_FOLLOWER")
+printf '    errata OFF follower-paired = %s | errata ON follower-paired = %s (want 0/0 while withdrawn)\n' \
        "$OFF_P" "$ON_P"
-[ "$OFF_P" = "1" ] && ok "moffs errata OFF -> A3 store PAIRS with the EAX-using follower (UV-pairable)" \
-                   || bad "moffs errata OFF: follower not paired (expected pairing)"
-[ "$ON_P"  = "0" ] && ok "moffs errata ON  -> A3 store FAILS to pair with the EAX-using follower (Erratum 59)" \
-                   || bad "moffs errata ON: follower still paired (expected non-pairing)"
+
+# (a) the errata bit must be INERT -- if it ever starts doing something, the
+#     withdrawal is over and the real assertions must come back.
+if cmp -s "$TR_OFF" "$TR_ON"; then
+    ok "moffs Erratum 59 WITHDRAWN -> errata_en[ERR_MOFFS] is inert (ON trace == OFF trace)"
+else
+    bad "moffs: errata_en[ERR_MOFFS] now CHANGES behavior -- the erratum model is back; restore the real Erratum-59 pairing assertions in this script"
+fi
+# (b) moffs takes the slow FSM and cannot pair, in either mode.
+if [ "$OFF_P" = "0" ] && [ "$ON_P" = "0" ]; then
+    ok "moffs Erratum 59 WITHDRAWN -> A3 store takes the slow FSM, never pairs (H-02 fix intact)"
+else
+    bad "moffs: the A3 store PAIRED (off=$OFF_P on=$ON_P) -- a fast-path moffs arm is live again; it MUST carry a real store handshake (REVIEW_Jul29 H-02) and this script's Erratum-59 assertions MUST be restored"
+fi
 
 # =============================================================================
 # 5. Erroneous #DB on V86 POPF/IRET with a #GP fault (Erratum 79, M6B). This is a
@@ -304,8 +338,16 @@ if [ "$FAIL" -ne 0 ]; then
     exit 1
 fi
 echo ""
-echo "M6 GATE: PASS -- all 5 documented P5 errata reproduced behind the flag and"
-echo "         self-checked against the Specification-Update values (errata ON),"
-echo "         with the clean behavior confirmed (errata OFF). The HARD complement"
-echo "         is 'make verify' (errata OFF) staying GREEN -- run it separately."
+echo "M6 GATE: PASS -- 4 of 5 documented P5 errata (FDIV 23, FIST 20, F00F 81,"
+echo "         V86-#DB 79) reproduced behind the flag and self-checked against the"
+echo "         Specification-Update values (errata ON), with the clean behavior"
+echo "         confirmed (errata OFF)."
+echo ""
+echo "         NOT reproduced: Erratum 59 (MOV moffs A2/A3 non-pairing). Its model"
+echo "         was withdrawn when REVIEW_Jul29 H-02 disabled the corrupt moffs"
+echo "         fast-path arm; errata_en[ERR_MOFFS] is INERT and check 4 now only"
+echo "         guards that withdrawal. Do not read this gate as 5-of-5 coverage."
+echo ""
+echo "         The HARD complement is 'make verify' (errata OFF) staying GREEN --"
+echo "         run it separately."
 exit 0

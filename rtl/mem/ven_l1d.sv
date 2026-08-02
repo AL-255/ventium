@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -82,6 +83,9 @@ module ven_l1d #(
     input  logic [3:0]  c_wstrb,
     output logic [31:0] c_rdata,
     output logic        c_ack,
+    // VEN DIAG (load-serve forensics): expose the read-serve hit state so the dbg ring can show WHY a
+    // load got its data. {1'b0,st[1:0],flush_all,rd_match,hit_way,hit1,hit0} sampled at the current request.
+    output logic [7:0]  dbg_serve,
 
     // ---- backing side (BFM now; AXI4 master → PS-DDR later) -------------------
     output logic        m_req,
@@ -95,21 +99,54 @@ module ven_l1d #(
 
   localparam int LW = L1_LINE*8;         // 256 line bits
   localparam int WORDS = L1_LINE/4;      // 8 words/line
+  // REVIEW2 M-04: DERIVED geometry. The set-index / tag split was hard-coded as
+  // [11:5] and [31:12], so overriding L1_SETS indexed dc_tag/dc_val past their end AND
+  // split the address at the wrong bit -- silently wrong data, not a compile error.
+  // These make the split follow the parameter instead.
+  localparam int OFFW  = $clog2(L1_LINE);              // 5 for 32-byte lines
+  localparam int IDXW  = $clog2(L1_SETS);              // 7 for 128 sets
+  localparam int TAGW  = 32 - OFFW - IDXW;             // 20 for the 128x32 geometry
 
   // ---- arrays ----------------------------------------------------------------
   // Data: packed 256-bit lines, flat {set,way} index → distributed RAM (async
   // read for the same-cycle hit). tag/val/lru: 2-way LRU (== dcache_timing).
   (* ram_style = "distributed" *)
   logic [LW-1:0] dc_line [L1_SETS*2];
-  logic [19:0]   dc_tag  [L1_SETS][2];   // addr[31:12]
+  logic [TAGW-1:0] dc_tag [L1_SETS][2];  // addr[31 -: TAGW]
   logic          dc_val  [L1_SETS][2];
   logic          dc_lru  [L1_SETS];      // way most-recently-used
 
+  // REVIEW2 M-04: this module ADVERTISED L1_SETS/L1_LINE but hard-coded seven set-index
+  // bits [11:5], a 20-bit tag [31:12] and offset bit 5, so overriding L1_SETS indexed
+  // dc_tag/dc_val past their end AND split the address at the wrong bit -- silently
+  // wrong data, not a compile error.
+  //
+  // FIXED for L1_SETS: the split is now derived (OFFW/IDXW/TAGW above) and every set/
+  // tag reference follows the parameter, so 64/128/256 sets all index and tag
+  // correctly. That is the half the review's hazard was about ("overriding the
+  // parameter to 64 can index beyond the array and uses the wrong tag split").
+  //
+  // STILL PINNED for L1_LINE: the line geometry is woven through the byte-select
+  // datapath, not just the address split. Guarded below.
+  initial begin
+    // L1_SETS is now HONOURED: the set/tag split is derived above, so 64/128/256 all
+    // index correctly and tag the right bits. It must still be a power of two, since
+    // $clog2 is what makes the split exact.
+    if ((L1_SETS & (L1_SETS-1)) != 0 || L1_SETS < 2)
+      $fatal(1, "ven_l1d: L1_SETS=%0d must be a power of two >= 2 (the set/tag split is derived with $clog2).", L1_SETS);
+    // L1_LINE is still PINNED. Unlike the set/tag split, the line geometry is woven
+    // through the byte-select datapath -- the 32-byte read window, the bypass line
+    // extract, the 8-beat fill loop and the within-line store offset all assume 5
+    // offset bits. Refuse to elaborate rather than let it be found as corrupted data.
+    if (L1_LINE != 32)
+      $fatal(1, "ven_l1d: L1_LINE=%0d unsupported -- the byte-select datapath assumes 32-byte lines / 5 offset bits (REVIEW2 M-04, remaining half).", L1_LINE);
+  end
+
   // ---- combinational lookup off the registered arrays (PRE-update) ----------
-  logic [6:0]  set_c; logic [19:0] tag_c;
+  logic [IDXW-1:0] set_c; logic [TAGW-1:0] tag_c;
   logic        hit0, hit1, hit; logic hit_way;
-  assign set_c   = c_addr[11:5];
-  assign tag_c   = c_addr[31:12];
+  assign set_c   = c_addr[OFFW +: IDXW];
+  assign tag_c   = c_addr[OFFW+IDXW +: TAGW];
   assign hit0    = dc_val[set_c][0] && dc_tag[set_c][0]==tag_c;
   assign hit1    = dc_val[set_c][1] && dc_tag[set_c][1]==tag_c;
   assign hit     = hit0 || hit1;
@@ -122,11 +159,11 @@ module ven_l1d #(
   // reads from {next_line, line}. For a read to HIT, BOTH lines must be resident;
   // a miss fills whichever line is missing (L first, then L+1).
   logic [31:0] addr_n;
-  logic [6:0]  set_n; logic [19:0] tag_n;
+  logic [IDXW-1:0] set_n; logic [TAGW-1:0] tag_n;
   logic        hit_n0, hit_n1, hit_n, hit_way_n, xline, rd_hit;
   assign addr_n    = c_addr + 32'd32;          // the next 32-byte line
-  assign set_n     = addr_n[11:5];
-  assign tag_n     = addr_n[31:12];
+  assign set_n     = addr_n[OFFW +: IDXW];
+  assign tag_n     = addr_n[OFFW+IDXW +: TAGW];
   assign hit_n0    = dc_val[set_n][0] && dc_tag[set_n][0]==tag_n;
   assign hit_n1    = dc_val[set_n][1] && dc_tag[set_n][1]==tag_n;
   assign hit_n     = hit_n0 || hit_n1;
@@ -171,7 +208,46 @@ module ven_l1d #(
   logic            rd_match;        // captured window is valid for the CURRENT request
   logic            do_rd_cap;
   assign rd_match  = rd_armed && (rd_addr_q == c_addr);
-  assign do_rd_cap = c_req && !c_we && rd_hit && (st==L1_IDLE) && !rd_match;
+  // REVIEW Aug-1 H-05: do_rd_cap is derived from the COMBINATIONAL hit, which reads
+  // pre-edge tag/valid. If a snoop for that same line lands on the same clock, the
+  // array's valid bit is cleared at the edge but the OLD window has already been
+  // captured and rd_armed set -- and the next response is served through rd_match,
+  // which compares only the ADDRESS and never re-checks current tag/valid. The core
+  // then gets acked with pre-DMA data (repro: HIT_SNOOP_RACE stale=11110000
+  // backing=22220000). Suppress the capture whenever a snoop is in flight.
+  //
+  // The window is 2*LW wide (it spans the addressed line AND the next one, for
+  // cross-line reads), so a precise per-line comparison would have to cover both.
+  // Snoops are rare (DMA bursts), so kill ANY capture during one: cheap, and there
+  // is no address arithmetic left to get wrong.
+  // REVIEW2 H-18: CR0.CD / KEN# were honoured for WRITES but not for READS. rd_hit is
+  // computed from the array regardless of `cacheable`, so a still-resident line served
+  // a CACHED HIT even when the access must bypass -- returning pre-CD data, and with
+  // the optional cache map, duplicating or suppressing MMIO side effects.
+  //
+  // bypass_rd_en is the single predicate for "a non-cacheable read takes the L1_BYP
+  // path". It gates BOTH this capture and the FSM branch that starts the bypass fill,
+  // so the two cannot disagree -- if the capture were gated while the branch was not
+  // (or vice versa) a non-cacheable read would either serve stale data or never be
+  // served at all. Under VEN_L1_HONOR_CD the bypass FSM is deliberately disabled (see
+  // the L1_IDLE arm), so there the capture must stay ungated or the read deadlocks.
+`ifdef VEN_L1_HONOR_CD
+  localparam bit BYPASS_RD_EN = 1'b0;
+`else
+  localparam bit BYPASS_RD_EN = 1'b1;
+`endif
+  assign do_rd_cap = c_req && !c_we && rd_hit && (st==L1_IDLE) && !rd_match
+                     && !snoop_inv_valid
+                     && !(BYPASS_RD_EN && !cacheable);   // H-18: CD/KEN# read bypass
+  assign dbg_serve = {1'b0, st[1:0], flush_all, rd_match, hit_way, hit1, hit0};  // mini-ILA: L1D FSM + serve state
+
+  // H-06/H-07: does an in-flight snoop hit the line currently being allocated?
+  // fset/ftag are REGISTERED at fill start, so this is a clean compare that does not
+  // depend on the (pre-edge) array contents. Bypass fills allocate nothing, so they
+  // cannot go stale in the array and are excluded.
+  assign snoop_hits_fill = snoop_inv_valid && !bypass_q &&
+                           (snoop_inv_addr[OFFW +: IDXW]      == fset) &&
+                           (snoop_inv_addr[OFFW+IDXW +: TAGW] == ftag);
 
   // ---- fill FSM --------------------------------------------------------------
   // L1_BYP: a non-cacheable read has finished its line fetch into bp_line; serve the
@@ -179,11 +255,35 @@ module ven_l1d #(
   typedef enum logic [1:0] { L1_IDLE, L1_FILL, L1_DONE, L1_BYP } l1_state_e;
   l1_state_e   st;
   logic [2:0]  fw;                       // fill word counter 0..7
-  logic [6:0]  fset; logic fway; logic [19:0] ftag;
+  logic [IDXW-1:0] fset; logic fway; logic [TAGW-1:0] ftag;
+  // REVIEW Aug-1 H-06/H-07: a line fill is an 8-beat TRANSACTION, but its tag/valid
+  // are installed only on the LAST beat. An invalidation arriving during beats 0..6
+  // therefore has nothing to match and is silently lost; the last beat then validates
+  // a line whose backing store has already changed underneath it (repros:
+  // FLUSH_DURING_FILL and SNOOP_DURING_FILL, both stale=11110000 backing=22220000).
+  // A same-cycle LAST-beat snoop is lost too: the snoop block's `dc_val[set][way] &&
+  // dc_tag[set][way]==tag` guard reads the PRE-EDGE array (nonblocking), which for the
+  // line being allocated is still valid=0 -- so the "LAST in the FF so an invalidation
+  // wins over a same-cycle allocate" comment does not actually hold for a fill.
+  //
+  // Make it transactional: latch a poison bit on any flush, or on a snoop matching the
+  // line being filled, at any point between start and finish. A poisoned fill still
+  // drains its beats on the bus (the AXI transaction must complete) but does NOT
+  // validate, so the core misses and refills from the now-current backing.
+  logic fill_poison;
+  logic snoop_hits_fill;
   logic [31:0] fbase;                    // line base address of the miss
   // non-cacheable bypass: capture the fetched line into a PRIVATE buffer (not the
   // array) and remember we are bypassing, so the fill commits nothing.
   logic [LW-1:0] bp_line;
+  // REVIEW2 H-19: a non-cacheable read at byte offsets 29..31 needs up to 4 bytes from
+  // the FOLLOWING line. The bypass buffer held ONE line and the top 32 bits of the
+  // window were hard-zeroed, so those reads returned CORRUPT DATA -- in precisely the
+  // path intended for MMIO / CR0.CD bypass, where a wrong value is a wrong device
+  // access. Fetch the next line's first word in a 9th beat instead of inventing zeros.
+  logic [31:0]   bp_hi;      // next line's word 0 (only meaningful when byp_need_hi)
+  logic          byp_need_hi;  // this bypass access crosses the line end
+  logic          byp_hi_beat;  // the 9th beat is in flight
   logic          bypass_q;
 
   // backing-side drive: during a FILL, burst-read the 8 line words; on a
@@ -192,18 +292,41 @@ module ven_l1d #(
     m_req=1'b0; m_we=1'b0; m_addr=32'd0; m_wdata=32'd0; m_wstrb=4'd0;
     if (st==L1_FILL) begin
       m_req  = 1'b1; m_we = 1'b0;
-      m_addr = {fbase[31:5], 5'd0} + {27'd0, fw, 2'b00};
-    end else if (st==L1_IDLE && c_req && c_we && (hit || xline || !cacheable)) begin
-      // write-through: forward the core write to the backing verbatim. A within-line
-      // write MISS (!hit && !xline) is NOT forwarded here — it first WRITE-ALLOCATES
-      // (fills the line in the FF below), then retries as a hit and forwards on that
-      // second pass. (Cross-line writes keep the invalidate path and forward now.)
-      // A NON-CACHEABLE write (!cacheable) is forwarded straight through here with NO
-      // write-allocate, regardless of residency. (At cacheable=1 this is (hit||xline),
-      // byte-identical to the original.)
+      // H-19: during the extra beat, address the NEXT line's word 0.
+      m_addr = byp_hi_beat ? ({fbase[31:5], 5'd0} + 32'd32)
+                           : ({fbase[31:5], 5'd0} + {27'd0, fw, 2'b00});
+    end else if (st==L1_IDLE && c_req && c_we) begin
+      // write-through: forward EVERY core write to the backing verbatim (the
+      // write-allocate is disabled above). This now includes the within-line cacheable
+      // write MISS (!hit && !xline && cacheable) — with no allocate, its store MUST be
+      // forwarded here or it would never reach backing and c_ack would never fire (the
+      // core would stall forever). HIT updates the cached copy (FF below); MISS caches
+      // nothing; xline invalidates + forwards; non-cacheable forwards straight through.
       m_req=1'b1; m_we=1'b1; m_addr=c_addr; m_wdata=c_wdata; m_wstrb=c_wstrb;
     end
   end
+
+  // REVIEW_Jul29 H-13: the L1_BYP (non-cacheable) serve indexed the 256-bit bp_line
+  // with {c_addr[4:0],3'b000} +: 32. At byte offsets 29..31 that selects bits
+  // 232..279 — PAST THE END of the vector. An out-of-range part-select is not an
+  // error, it silently yields X / zero / TOOL-DEPENDENT bits, so Verilator and
+  // Vivado could disagree on the same unaligned uncacheable/MMIO dword.
+  // Two things here:
+  //   1) index a zero-extended copy so the select is always IN RANGE and the
+  //      behaviour is at least DETERMINISTIC and identical across tools;
+  //   2) flag the crossing loudly in simulation, because deterministic-but-wrong
+  //      would otherwise MASK the defect.
+  // The real fix is to split the access by its actual byte span and merge the two
+  // responses (the cacheable path already builds a {next,current} window for this);
+  // that needs bypass-FSM work and is tracked in task #40.
+  logic [287:0] bp_line_x;
+  assign bp_line_x = {bp_hi, bp_line};   // H-19: real high word, not zeros
+  wire byp_cross = (st==L1_BYP) && (c_req && !c_we) && (c_addr[4:0] > 5'd28);
+`ifndef SYNTHESIS
+  always @(posedge clk) if (byp_cross)
+    $display("[VEN-L1D] WARNING: non-cacheable read crosses the bp_line end (addr=%08h off=%0d) — split access NOT implemented (REVIEW H-13); high bytes read as 0.",
+             c_addr, c_addr[4:0]);
+`endif
 
   // core-side response: HIT (read) returns combinationally; a write acks with the
   // backing; a read miss deasserts c_ack and kicks the fill (handled in the FF).
@@ -213,27 +336,66 @@ module ven_l1d #(
     // In L1_BYP (non-cacheable read) the data comes from the private bp_line buffer
     // instead — the addressed word at c_addr[4:0] (aligned; cross-line uncacheable
     // reads are not generated for MMIO and are out of scope here).
-    c_rdata = (st==L1_BYP) ? bp_line[{c_addr[4:0],3'b000} +: 32]
-                           : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];   // mux off the REGISTERED window with the REGISTERED offset (synth-safe: data & select from the same capture)
+`ifdef VEN_L1D_COMB_ACK
+    // COSIM-ONLY perf (NEVER synthesize — the registered rd_window_q path below exists for
+    // 40 MHz fmax / anti-glitch closure; this combinational serve does not meet timing on
+    // silicon). Serve the read HIT in the SAME cycle: both the data AND the byte-select come
+    // from the LIVE c_addr window (rd_window / c_addr), so there is no captured-window stale
+    // exposure at all — strictly VALUE-IDENTICAL to the registered serve, just one cycle
+    // earlier. Saves 1 clk on every S_FETCH word + every data-load HIT (~20-30% of POST
+    // cycles). rd_armed/rd_window_q/rd_addr_q still update below (harmless dead logic here).
+    c_rdata = (st==L1_BYP) ? bp_line_x[{1'b0,c_addr[4:0],3'b000} +: 32]   // H-13: in-range select
+                           : rd_window[{1'b0,c_addr[4:0],3'b000} +: 32];   // LIVE window, LIVE offset
     c_ack   = 1'b0;
     if (c_req) begin
-      if (c_we)            c_ack = (st==L1_IDLE && (hit || xline || !cacheable)) ? m_ack : 1'b0;
-      else                 c_ack = (rd_match && !flush_all)   // cacheable hit serve
+      if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;  // write-through forwards EVERY write (allocate disabled) -> ack on backing
+      // REVIEW2 H-13: same gating on the combinational-ack variant.
+      else                 c_ack = (rd_hit && (st==L1_IDLE) && !flush_all && !snoop_inv_valid)
+                                 || (st==L1_BYP);                            // non-cacheable bypass serve
+    end
+`else
+    // (STLD REMOVED — the store-to-load overlay POISONED PS-visible updates: an ancient CPU
+    // write of BDA kbd tail=0x1E sat in the 32-entry buffer and overlaid EVERY fresh read of
+    // 0x41C forever, so daemon-injected keys were invisible. The coherence problem it was
+    // built for was actually the LGDT base bug. Clean registered serve restored.)
+    c_rdata = (st==L1_BYP) ? bp_line_x[{1'b0,c_addr[4:0],3'b000} +: 32]   // H-13: in-range select
+                           : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
+    c_ack   = 1'b0;
+    if (c_req) begin
+      if (c_we)            c_ack = (st==L1_IDLE) ? m_ack : 1'b0;  // write-through forwards EVERY write (allocate disabled) -> ack on backing
+      // REVIEW2 H-13: suppressing the CAPTURE during a snoop was not enough. If a
+      // window was armed on the PREVIOUS clock and the snoop arrives on the SERVE
+      // edge, rd_match is still true (it compares only the address, never current
+      // tag/valid) and the core's sequential logic samples c_ack=1 with the stale
+      // rd_window_q at that very edge, while the array clears valid. Gate the
+      // RESPONSE itself, not just the capture.
+      else                 c_ack = (rd_match && !flush_all && !snoop_inv_valid)
                                  || (st==L1_BYP);             // non-cacheable bypass serve
     end
+`endif
   end
 
   // golden / "L1-useless" mode: a core transaction completes (acks) this clock. We
   // drop all cached state on the NEXT edge so nothing carries into the following
   // access. c_ack is the completion edge for both reads (rd_match) and writes (m_ack).
   logic txn_done;
-  assign txn_done = golden && c_req && c_ack;
+  // build #24: NARROW golden to the low 1 MiB (real-mode DOS memory, incl. the FreeDOS relocation
+  // source). golden (flush-all + rd_window_q clear per txn) FIXED the relocation coherence bug in
+  // build #23, but flushing on EVERY access (incl. Win95 protected-mode >=1MB) is ~10x slow. Gating to
+  // <1MB keeps the real-mode boot coherent (correct copy) while extended-memory accesses cache at full
+  // speed -> the boot can actually reach the desktop.
+  assign txn_done = golden && c_req && c_ack && (c_addr[31:20] == 12'h000);
+
+  // (STLD store-to-load forwarding REMOVED — see the serve-path note above. It was built
+  // for a misdiagnosed coherence theory (the real bug was the 16-bit LGDT base) and its
+  // indefinite-lifetime entries overlaid stale CPU-write data onto PS-updated lines.)
 
   // ---- sequential: fill sequencing + array writes ---------------------------
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st<=L1_IDLE; fw<=3'd0; rd_armed<=1'b0; rd_window_q<='0; rd_addr_q<=32'd0;
-      bypass_q<=1'b0; bp_line<='0;
+      bypass_q<=1'b0; bp_line<='0; fill_poison<=1'b0;
+      bp_hi<=32'd0; byp_need_hi<=1'b0; byp_hi_beat<=1'b0;   // H-19
       for (int s=0;s<L1_SETS;s++) begin
         dc_lru[s]<=1'b0; dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0;
         dc_tag[s][0]<=20'd0; dc_tag[s][1]<=20'd0;
@@ -246,13 +408,29 @@ module ven_l1d #(
       end
       unique case (st)
         L1_IDLE: begin
+`ifdef VEN_L1_HONOR_CD
+          // VEN_L1_HONOR_CD: honor CR0.CD for the perf-critical WRITE path only. When
+          // cacheable=0 (CD=1, BIOS POST) a write MISS goes write-through with NO 8-beat
+          // write-allocate fill (the ao486-parity path, handled by the comb driver +
+          // the write-allocate gate `&& cacheable` below). READS still take the normal
+          // ALLOCATING path (bypass-read DISABLED here) — it is correct (returns the
+          // fresh line) and, crucially, avoids the under-tested non-cacheable bypass-read
+          // FSM (L1_FILL→L1_BYP) that deadlocks in the full-core+bridge context. Reads
+          // during POST are sequential, so the fill amortizes; writes were the 8x cost.
+          if (1'b0) begin  // bypass-read path intentionally disabled under VEN_L1_HONOR_CD
+`else
           if (c_req && !c_we && !cacheable) begin
             // NON-CACHEABLE READ (KEN# negated): fetch the addressed line into the
             // private bp_line buffer (no array touch, no LRU), then serve the word in
             // L1_BYP. Reuses the FILL burst; allocates NOTHING. (cacheable=1 never
             // takes this branch, so the path below is unchanged.)
+`endif
             fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             fw <= 3'd0;  bypass_q <= 1'b1;  st <= L1_FILL;
+            // H-19: does this access need bytes from the following line?
+            byp_need_hi <= (c_addr[4:0] > 5'd28);
+            byp_hi_beat <= 1'b0; bp_hi <= 32'd0;
+            fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
           end else if (c_req && !c_we && !rd_hit) begin
             // read MISS → fill the MISSING line into its not-MRU victim way. On a
             // xline-line read where L is resident but L+1 is not, fill L+1; the core
@@ -264,7 +442,15 @@ module ven_l1d #(
               fset <= set_n; fway <= ~dc_lru[set_n]; ftag <= tag_n; fbase <= addr_n;
             end
             fw <= 3'd0;  st <= L1_FILL;
-          end else if (c_req && c_we && !xline && !hit && cacheable) begin
+            fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
+          end else if (1'b0 && c_req && c_we && !xline && !hit && cacheable) begin
+            // DISABLED (Win95 REP-MOVSB relocation fix): the write-allocate STALLS the core
+            // (c_ack=0) through an 8-beat fill on every write MISS. Under real FPGA DDR latency a
+            // long back-to-back REP MOVSB relocation to fresh dest lines (FreeDOS kernel -> 0x80000)
+            // diverges here — the dest keeps stale data. The write ack now waits for BVALID (posted
+            // writes drain), so a clean per-store write-through (the else-branch below) is globally
+            // visible without the allocate's fill/retry/stall. The original __init_libc AXI_WPOST
+            // read-back is covered by the BVALID wait. Keep the allocate arm text for reference:
             // WRITE-ALLOCATE: a within-line write MISS fills the addressed line into
             // the not-MRU victim FIRST; the core holds the store (c_ack=0) and the
             // post-fill retry hits -> RMW the cached copy + write-through. Without the
@@ -276,6 +462,7 @@ module ven_l1d #(
             bypass_q <= 1'b0;
             fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             fw <= 3'd0;  st <= L1_FILL;
+            fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
           end else if (c_req && !c_we && rd_hit) begin
             // read HIT → 2-way LRU touch (both lines on a xline-line hit).
             dc_lru[set_c] <= hit_way;
@@ -286,46 +473,72 @@ module ven_l1d #(
             // store into per-word AXI beats); the core STALLS (c_ack=m_ack, below)
             // until that completes, so committing the array now is correct and robust
             // to multi-cycle backing latency. Keep the cached copy coherent:
-            logic [31:0] oldw, neww;
-            if (xline) begin
-              // cross-LINE store (4 bytes span the 32-byte line end): the within-line
-              // array RMW cannot cross the boundary, so INVALIDATE every RESIDENT line
-              // the store touches -> a re-read refills the full, correct data from the
-              // backing. This MUST run even when the ADDRESSED line missed (hit==0):
-              // the spilled HIGH bytes land in the NEXT line, and if only that next
-              // line is resident (hit==0, hit_n==1) its STALE copy would be served by a
-              // later cross-line read. This was the FreeDOS __call16 iret-frame
-              // corruption: a `pushl` to ...x7E spilled the return CS into a resident
-              // next line that was never updated, so the iret popped CS=0 and derailed.
-              if (hit)   begin dc_val[set_c][hit_way]   <= 1'b0; dc_lru[set_c] <= hit_way; end
-              if (hit_n) dc_val[set_n][hit_way_n] <= 1'b0;
-            end else if (hit) begin
-              // within-line write HIT → RMW the 4 bytes at the addressed BYTE offset
-              // (boff): keep the old byte where the strobe is 0, take c_wdata where 1.
-              // Decoupled from the backing ack (the core cannot re-read during its own
-              // stalled write); idempotent across a multi-clock backing write.
+            if (!xline && hit) begin
+              // FIX D (UPDATE 94, cluster->sector RMW): WRITE HIT, within a single line ->
+              // byte-accurate UPDATE-IN-PLACE of the hit way, keeping the line VALID+MRU, so an
+              // immediately-following LOAD of the same address HITS the fresh value. This is the
+              // fix for tight same-address read-modify-write loops — the FAT driver's
+              // (cluster-2)*spc multiword shift `rcl dx,1 / rcl word ss:[0x607],1` (x6): under
+              // FIX A's blind-invalidate each rcl store cleared the line, so the NEXT rcl load
+              // MISSED and re-filled STALE from the backing before the store's write-through was
+              // globally visible -> the high word never accumulated -> COMMAND.COM's LBA 0x2F3C0
+              // truncated to 0x0F3C0 (62400) -> Win95 shell load fails. Byte map = ven_axi_master's
+              // (ven_axi_master.sv:186): the byte at c_addr is lane 0 of c_wstrb/c_wdata, so byte i
+              // lands at line byte offset c_addr[4:0]+i (a within-line cross-WORD store — e.g.
+              // [0x607] at offset 23 spanning 23,24 — is handled naturally; xline stores that spill
+              // to the NEXT line keep the blind-invalidate arm below). The store is still
+              // write-through (comb driver), so the backing stays authoritative.
+              for (int i = 0; i < 4; i++)
+                if (c_wstrb[i])
+                  dc_line[{set_c, hit_way}][8*(c_addr[4:0] + i[4:0]) +: 8] <= c_wdata[8*i +: 8];
+              dc_val[set_c][~hit_way] <= 1'b0;   // defensively drop any stale alias in the other way
               dc_lru[set_c] <= hit_way;
-              oldw = dc_line[{set_c,hit_way}][{boff,3'b000} +: 32];
-              for (int b=0;b<4;b++)
-                neww[b*8 +: 8] = c_wstrb[b] ? c_wdata[b*8 +: 8] : oldw[b*8 +: 8];
-              dc_line[{set_c,hit_way}][{boff,3'b000} +: 32] <= neww;
+            end else begin
+              // FIX A (Win95 relocation coherence, build #16): WRITE MISS or cross-line -> BLIND-
+              // invalidate BOTH ways of every set the store touches. The DCACHE has NO external-write
+              // snoop (g_nol2, ventium_l1_axi.sv:443); the hardware-proven failure is a source load of
+              // 0xb00 served stale 0x00000000 from a valid way-1 HIT while DDR held CODE (06 8b 4e 68).
+              // A hit-only invalidate (build #13) cannot catch a stale line the store MISSED, so clear
+              // BOTH ways: if the store MISSED a stale line (filled later) the set is clean so a
+              // subsequent read MISS re-fills committed DDR (write-through already waited BVALID). Also
+              // subsumes the xline __call16 iret-frame case (addressed + spilled-into lines cleared).
+              dc_val[set_c][0] <= 1'b0;
+              dc_val[set_c][1] <= 1'b0;
+              if (xline) begin dc_val[set_n][0] <= 1'b0; dc_val[set_n][1] <= 1'b0; end
             end
-            // (within-line write MISS: no cached copy → nothing to update; write-through.)
+            // (STLD write-capture removed with the forwarding buffer.)
           end
         end
         L1_FILL: begin
+          // H-06/H-07: an invalidation arriving MID-fill (beats 0..6) has no allocated
+          // line to match, so it must be remembered instead of dropped.
+          if (flush_all || snoop_hits_fill) fill_poison <= 1'b1;
           if (m_ack) begin
             // capture the returned word: into the PRIVATE buffer for a non-cacheable
             // bypass (no array write), else into the victim line being allocated.
-            if (bypass_q) bp_line[{fw,5'b00000} +: 32] <= m_rdata;
+            if (bypass_q && !byp_hi_beat) bp_line[{fw,5'b00000} +: 32] <= m_rdata;
             else          dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
-            if (fw==3'(WORDS-1)) begin
+            if (byp_hi_beat) begin
+              // H-19: the extra beat returned the next line's word 0. Serve now.
+              bp_hi       <= m_rdata;
+              byp_hi_beat <= 1'b0;
+              st          <= L1_BYP;
+            end else if (fw==3'(WORDS-1)) begin
               if (bypass_q) begin
-                // non-cacheable: serve the word from bp_line next clock; allocate NOTHING.
-                st<=L1_BYP;
+                // non-cacheable: serve from bp_line next clock; allocate NOTHING.
+                // H-19: unless the access crosses the line end, in which case run ONE
+                // more beat for the following line's word 0 first.
+                if (byp_need_hi) byp_hi_beat <= 1'b1;
+                else             st          <= L1_BYP;
               end else begin
                 // last word → allocate the victim (tag/val) + MRU, then retry hits.
-                dc_tag[fset][fway]<=ftag; dc_val[fset][fway]<=1'b1; dc_lru[fset]<=fway;
+                // REVIEW Aug-1 H-06/H-07: only VALIDATE if the transaction was never
+                // poisoned -- and re-test flush/snoop on this very clock too, because a
+                // same-cycle invalidation cannot be caught by the pre-edge guards in the
+                // flush/snoop blocks below (they see valid=0 for this not-yet-allocated
+                // line). The tag is written either way; val is what gates it.
+                dc_tag[fset][fway]<=ftag; dc_lru[fset]<=fway;
+                dc_val[fset][fway]<= !(fill_poison || flush_all || snoop_hits_fill);
                 st<=L1_DONE;
               end
             end else fw<=fw+3'd1;
@@ -362,13 +575,33 @@ module ven_l1d #(
       // allocate of that line (a DMA write must never leave a stale cached copy). Gated
       // by snoop_inv_valid — tied 0 in modes 0/1, so the default path is byte-identical.
       if (snoop_inv_valid) begin
-        logic [6:0] snp_set; logic [19:0] snp_tag;
-        snp_set = snoop_inv_addr[11:5];
-        snp_tag = snoop_inv_addr[31:12];
+        logic [IDXW-1:0] snp_set; logic [TAGW-1:0] snp_tag;
+        snp_set = snoop_inv_addr[OFFW +: IDXW];
+        snp_tag = snoop_inv_addr[OFFW+IDXW +: TAGW];
         if (dc_val[snp_set][0] && dc_tag[snp_set][0]==snp_tag) dc_val[snp_set][0]<=1'b0;
         if (dc_val[snp_set][1] && dc_tag[snp_set][1]==snp_tag) dc_val[snp_set][1]<=1'b0;
       end
     end
   end
+
+`ifdef VEN_DBG_CORE
+  // DEADLOCK detector (Quake cs=0087:0x334 non-retiring stall): if the core holds a request with no ack
+  // for a long time, the L1D/AXI is stuck servicing it. Log the address + memory-path state ONCE so the
+  // deadlocking access (upper-memory/MMIO/out-of-range?) can be identified.
+  logic [23:0] stuck_cnt = 24'd0;
+  logic        stuck_shown = 1'b0;
+  always_ff @(posedge clk) begin
+    if (!rst_n) begin stuck_cnt <= 24'd0; stuck_shown <= 1'b0; end
+    else begin
+      if ((c_req && !c_ack) || st != L1_IDLE) stuck_cnt <= stuck_cnt + 24'd1;
+      else stuck_cnt <= 24'd0;
+      if (stuck_cnt == 24'd500000 && !stuck_shown) begin
+        stuck_shown <= 1'b1;
+        $display("[L1DSTUCK] c_req=%b c_we=%b c_addr=%08x ws=%b cacheable=%b hit=%b rd_hit=%b st=%0d | m_req=%b m_we=%b m_addr=%08x m_ack=%b fbase=%08x fw=%0d bypass=%b",
+                 c_req, c_we, c_addr, c_wstrb, cacheable, hit, rd_hit, st, m_req, m_we, m_addr, m_ack, fbase, fw, bypass_q);
+      end
+    end
+  end
+`endif
 
 endmodule : ven_l1d

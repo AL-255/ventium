@@ -106,6 +106,25 @@ module fpu_srt_div
 
   assign busy   = (st != ST_IDLE);
   assign done   = done_q;
+
+`ifdef VEN_DBG_WD
+  // [VEN-FDIVHANG] stuck-detector: the SRT engine finishes in ~NSTEP+few cycles.
+  // If it stays out of ST_IDLE >256 cycles it is HUNG -> log state+latched operands.
+  logic [15:0] dbg_bcnt;
+  logic [79:0] dbg_a, dbg_b; logic [1:0] dbg_mode;
+  always_ff @(posedge clk) begin
+    if (!rst_n) dbg_bcnt <= 16'd0;
+    else if (st == ST_IDLE) begin
+      dbg_bcnt <= 16'd0;
+      if (start) begin dbg_a <= a; dbg_b <= b; dbg_mode <= mode; end
+    end else begin
+      dbg_bcnt <= dbg_bcnt + 16'd1;
+      if (dbg_bcnt == 16'd256)
+        $display("[VEN-FDIVHANG] SRT stuck st=%0d k=%0d mode=%0d a=%020x b=%020x rc=%0d pc=%0d",
+                 st, k, dbg_mode, dbg_a, dbg_b, rc, pc);
+    end
+  end
+`endif
   assign result = result_q;
 
   // ==========================================================================

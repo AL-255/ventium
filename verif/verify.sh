@@ -62,7 +62,12 @@ export P5TRACE="$ROOT/build/p5trace.so"
 export M5_METRICS="$ROOT/verif/m5_metrics.py"
 TESTS_DIR="$ROOT/verif/tests"
 TB_DIR="$ROOT/verif/tb"
-export TB_BIN="$TB_DIR/obj_dir/tb_ventium"
+# REVIEW Aug-1 L-04 (config matrix): allow the gate to be pointed at a VARIANT
+# build. Defines like VEN_FAST_SFETCH / VEN_SYS_FASTPATH change behaviour, and
+# until now the only way to run the 98-program gate against one was to overwrite
+# obj_dir -- so in practice nobody did, and variants shipped ungated. Build into
+# obj_dir_<variant> and run:  TB_BIN=verif/tb/obj_dir_<variant>/tb_ventium make verify
+export TB_BIN="${TB_BIN:-$TB_DIR/obj_dir/tb_ventium}"
 BUILD="$ROOT/build"
 export WORKDIR="$BUILD/verify"
 export CACHE_DIR="$BUILD/golden-cache"
@@ -268,6 +273,10 @@ done
 # =============================================================================
 declare -a K_NAME K_CLASS K_VERD K_CPI K_PAIR K_EXTRA K_BAND K_CMP K_ABS
 CYCLE_OK=1
+# REVIEW_Jul29 M-01 structural-comparator accounting (non-gating, but REPORTED).
+CMP_CLEAN=0
+CMP_DIVERGENT=0
+declare -a CMP_DIVERGENT_KERNELS
 FADDCHAIN_CPI=""
 for k in $M4_INT_KERNELS $M5_FP_KERNELS $M5_CACHE_KERNELS $M5_DIV_KERNELS $M5_MUL_KERNELS $M5_PAIR_KERNELS $INFO_KERNELS; do
     CLS="$(class_of "$k")"
@@ -306,6 +315,23 @@ for k in $M4_INT_KERNELS $M5_FP_KERNELS $M5_CACHE_KERNELS $M5_DIV_KERNELS $M5_MU
     if [[ "$_cmp" == *"CONTROL-FLOW DIVERGENCE"* ]] && [ "$VERD" = "PASS" ]; then
         VERD="FAIL"
         DETAIL="control-flow divergence vs golden (RTL ran a different stream); $DETAIL"
+    fi
+
+    # REVIEW_Jul29 M-01: the structural per-instruction comparator's verdict used to
+    # be DISCARDED unless it happened to be a PC/retire-order mismatch, so a run in
+    # which EVERY comparator returned exit=1 / "RESULT: DIVERGENT" still reported a
+    # clean top-level PASS. That is now COUNTED and reported loudly below. It is
+    # deliberately NON-GATING (the metric bands are the cycle gate), but it can no
+    # longer pass silently — the review's "explicitly define and report a different
+    # non-gating diagnostic" option. Tracked in task #42 along with the deeper
+    # problem: cycle records carry only {n,pc,cyc,pipe,paired}, so registers, flags,
+    # x87 state and memory are invisible to this compare (exactly how H-01/H-02
+    # escaped it).
+    if [[ "$_cmp" == *"exit=0"* ]]; then
+        CMP_CLEAN=$((CMP_CLEAN+1))
+    else
+        CMP_DIVERGENT=$((CMP_DIVERGENT+1))
+        CMP_DIVERGENT_KERNELS+=("$k")
     fi
 
     # capture faddchain CPI for the fpindep relation check.
@@ -386,4 +412,18 @@ echo "             RTL, AND every M5 FP/cache band met (faddchain CPI ~3, fpinde
 echo "             < faddchain, dmiss/imiss miss-driven elevation + abs-cyc"
 echo "             within $M5_TOL_PCT% of the p5model golden). Same verdict as"
 echo "             the slow make m5 — parallel + cached + no redundant 3x."
+# REVIEW_Jul29 M-01: qualify that PASS with the structural comparator's real state,
+# so "PASS" can never again be read as "the per-instruction compare was clean".
+if [ "$CMP_DIVERGENT" -gt 0 ]; then
+    echo
+    echo "  NOTE (non-gating diagnostic, REVIEW_Jul29 M-01 / task #42):"
+    echo "    structural per-instruction comparators: $CMP_CLEAN clean, $CMP_DIVERGENT DIVERGENT."
+    echo "    divergent kernels: ${CMP_DIVERGENT_KERNELS[*]}"
+    echo "    The cycle gate is the METRIC BANDS above; this structural verdict does"
+    echo "    NOT gate it. It is reported because it used to be discarded silently."
+    echo "    Note also that cycle records carry only {n,pc,cyc,pipe,paired} — no"
+    echo "    registers/flags/x87/memory — so a wrong operation retiring at the right"
+    echo "    PC is invisible here (that is how H-01/H-02 escaped). Adding an"
+    echo "    architectural-equivalence stream is tracked in task #42."
+fi
 exit 0

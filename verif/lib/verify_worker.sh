@@ -98,14 +98,37 @@ if ! "$PYTHON" "$ELF2FLAT" "$ELF" --out "$FLAT" --base "$LOAD" > "$W/${TAG}_flat
     exit 0
 fi
 
-# ---- cache key: sha1(.s) (+ mode/x87/max for func) --------------------------
+# ---- cache key --------------------------------------------------------------
+# REVIEW_Jul29 M-02: the key used to be sha1(.s) (+ mode/x87/max for func; nothing
+# extra for cycle). That omits nearly everything that actually DEFINES a golden —
+# the produced ELF/flat bytes, the compiler/binutils, the link/load/entry settings,
+# the CPU model, the QEMU binary, and the trace plugin. A toolchain, plugin, load
+# address or oracle change would therefore silently REUSE a stale golden and yield
+# a convincing but invalid comparison. Key on the real produced image plus a
+# versioned signature of every oracle input.
 SRC_SHA="$(sha1sum "$SRC" | cut -d' ' -f1)"
+
+# GOLDEN_FMT: bump whenever the trace format or comparator semantics change, so
+# every cached golden is invalidated on purpose rather than by accident.
+GOLDEN_FMT="v2"
+_sha_of() { [ -e "$1" ] && sha1sum "$1" 2>/dev/null | cut -d' ' -f1 || echo "absent"; }
+ELF_SHA="$(_sha_of "$ELF")"
+ORACLE_SIG="$(printf '%s|%s|%s|%s|%s|%s|%s\n' \
+    "$GOLDEN_FMT" \
+    "cpu=pentium" \
+    "qemu=$(_sha_of "$QEMU")" \
+    "p5trace=$(_sha_of "$P5TRACE")" \
+    "cc=$("$CC" --version 2>/dev/null | head -1)" \
+    "cflags=$CFLAGS_BASE" \
+    "load=$LOAD,entry=$ENTRY" \
+    | sha1sum | cut -d' ' -f1)"
 
 # =============================================================================
 # FUNC PATH
 # =============================================================================
 if [ "$MODE" = "func" ]; then
-    KEY="${SRC_SHA}.func.x87${X87}.max${MAX}"
+    # M-02: image bytes + oracle signature now participate in the key.
+    KEY="${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.func.x87${X87}.max${MAX}"
     GOLD="$CACHE_DIR/${KEY}.vtrace"
     CACHEHIT=0
     X87_FLAG=""; [ "$X87" = "1" ] && X87_FLAG="--x87"
@@ -185,7 +208,8 @@ fi
 # CYCLE PATH — expensive parts only (golden + RTL trace + compare). The band
 # verdict is computed serially by verify.sh (so faddchain CPI can feed fpindep).
 # =============================================================================
-KEY="${SRC_SHA}.cycle"
+# M-02: image bytes + oracle signature now participate in the key.
+KEY="${SRC_SHA}.${ELF_SHA:0:12}.${ORACLE_SIG:0:12}.cycle"
 GOLD="$CACHE_DIR/${KEY}.vtrace"
 CACHEHIT=0
 TB_X87FLAG=""; { [ "$X87" = "1" ] || [ "$CLASS" = "FP" ]; } && TB_X87FLAG="--x87"

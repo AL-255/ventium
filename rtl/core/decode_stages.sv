@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -127,6 +128,7 @@ module decode_stages
     output sysop_e      d_sysop,
     output logic [2:0]  d_sys_sreg,
     output logic [2:0]  d_sys_creg,
+    output logic        d_clts,          // REVIEW2 H-23: CLTS (0F 06)
     output logic [31:0] d_ljmp_off,
     output logic [15:0] d_ljmp_sel,
     output logic        d_seg_load,
@@ -251,7 +253,8 @@ module decode_stages
     d_f_aluop=3'd0; d_f_const=3'd0;
     // M2S.1 system-decode defaults. d_seg defaults to DS for data accesses (stack
     // ops override to SS in their handlers below); a segment-override prefix wins.
-    d_sysop=SYS_NONE; d_sys_sreg=3'd0; d_sys_creg=3'd0;
+    d_sysop=SYS_NONE;
+    d_clts = 1'b0; d_sys_sreg=3'd0; d_sys_creg=3'd0;
     d_ljmp_off=32'd0; d_ljmp_sel=16'd0;
     d_seg_load=1'b0; d_lseg=3'd0;
     d_push_sreg=1'b0; d_pop_sreg=1'b0; d_seg_load_lo=1'b0; d_store_sreg=1'b0;
@@ -406,6 +409,11 @@ module decode_stages
           if (modrm_reg==3'd2 || modrm_reg==3'd3) begin
             d_sysop=(modrm_reg==3'd2)?SYS_LGDT:SYS_LIDT;
             d_mem_read=1'b1;       // read the 6-byte pseudo-descriptor from memory
+            // Operand size (0x66-aware) so S_LGDT masks the base to 24 bits for a 16-bit
+            // LGDT/LIDT (IA-32: 16-bit operand -> base[31:24] cleared). Real-mode `lgdt word`
+            // is 16-bit; without this the access byte leaks into base[31:24] (0x93088f6b) and
+            // the descriptor read lands ~48.5MB off (the Win95 AH=87 PM-entry hang).
+            d_w=eff_opsize?3'd2:3'd4;
             d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end else if ((modrm_reg==3'd0 || modrm_reg==3'd1) && modrm_mod!=2'b11 && !paging_on) begin
             // M9.5 SGDT (/0) / SIDT (/1): STORE the 6-byte pseudo-descriptor. Not
@@ -420,26 +428,57 @@ module decode_stages
             // (creg0) at 16-bit width so the reg_merge keeps the dst reg's high 16.
             d_sysop=SYS_MOVCR_FROM; d_sys_creg=3'd0; d_dst_reg=modrm_rm;
             d_writes_reg=1'b1; d_w=3'd2; d_len=pfx_len+4'd3;
+          end else if (modrm_reg==3'd7 && modrm_mod!=2'b11) begin
+            // INVLPG m (0F 01 /7) — REVIEW_Jul29 H-05. Previously undecoded, so it
+            // hit d_unknown and LOUD-HALTED the core. Guests that edit page tables
+            // and then invalidate (DPMI hosts, Win95) issue this. No memory access
+            // is needed: the operand only names the page. Implemented as a FULL TLB
+            // flush (IA-32 allows invalidating more than the named page), driven
+            // from the tlb_flush pulse alongside MOV CR3.
+            d_sysop=SYS_INVLPG;
+            d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
           end else d_unknown=1'b1;  // /4 SMSW mem form, /6 LMSW etc deferred
         end
-        8'h20: begin // 0F 20 /r MOV r32, CRn  (mod field ignored, always reg)
-          d_sysop=SYS_MOVCR_FROM; d_sys_creg=modrm_reg; d_dst_reg=modrm_rm;
-          d_writes_reg=1'b1; d_w=3'd4; d_len=pfx_len+4'd3;
+        // REVIEW2 H-02: MOV CR/DR REQUIRE mod==11 (register form only) -- the mod
+        // field was explicitly ignored, so a memory-form encoding executed as a valid
+        // control-register operation. And only CR0/CR2/CR3/CR4 exist: core_exec.svh
+        // maps EVERY other index to CR4, so the illegal CR1/CR5/CR6/CR7 encodings
+        // silently WROTE CR4. Both are #UD.
+        // REVIEW2 H-23: CLTS (0F 06) -- clear CR0.TS. Without it a guest cannot exit
+        // the #NM handler that H-23's trap now generates, except via a full MOV CR0
+        // read-modify-write, so lazy FPU switching would be implementable but absurd.
+        // CPL0-only; the priv_fault check in core.sv covers that via SYS_MOVCR_TO.
+        // Modelled as a CR0 write with a fixed operand rather than a new sysop: it
+        // reuses the existing S_EXEC MOV-CR path, so there is no second CR0 commit
+        // site to keep in sync.
+        8'h06: begin
+          if (sys_mode) begin
+            d_sysop=SYS_MOVCR_TO; d_sys_creg=3'd0; d_clts=1'b1;
+            d_w=3'd4; d_len=pfx_len+4'd2;
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
+        end
+        8'h20: begin // 0F 20 /r MOV r32, CRn
+          if (modrm_mod==2'b11 && (modrm_reg inside {3'd0,3'd2,3'd3,3'd4})) begin
+            d_sysop=SYS_MOVCR_FROM; d_sys_creg=modrm_reg; d_dst_reg=modrm_rm;
+            d_writes_reg=1'b1; d_w=3'd4; d_len=pfx_len+4'd3;
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd3; end
         end
         8'h22: begin // 0F 22 /r MOV CRn, r32
-          d_sysop=SYS_MOVCR_TO; d_sys_creg=modrm_reg; d_src_reg=modrm_rm;
-          d_w=3'd4; d_len=pfx_len+4'd3;
+          if (modrm_mod==2'b11 && (modrm_reg inside {3'd0,3'd2,3'd3,3'd4})) begin
+            d_sysop=SYS_MOVCR_TO; d_sys_creg=modrm_reg; d_src_reg=modrm_rm;
+            d_w=3'd4; d_len=pfx_len+4'd3;
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd3; end
         end
         8'h21: begin // 0F 21 /r MOV r32, DRn  (M2S.6; mod field ignored, always reg)
           // Gated on sys_mode so USER mode is byte-identical: 0F 21 stays d_unknown
           // (loud HALT) exactly as before M2S.6 — no new user-mode path.
-          if (sys_mode) begin
+          if (sys_mode && modrm_mod==2'b11) begin   // H-02: register form only
             d_sysop=SYS_MOVDR_FROM; d_sys_creg=modrm_reg; d_dst_reg=modrm_rm;
             d_writes_reg=1'b1; d_w=3'd4; d_len=pfx_len+4'd3;
           end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
         end
         8'h23: begin // 0F 23 /r MOV DRn, r32  (M2S.6)
-          if (sys_mode) begin
+          if (sys_mode && modrm_mod==2'b11) begin   // H-02: register form only
             d_sysop=SYS_MOVDR_TO; d_sys_creg=modrm_reg; d_src_reg=modrm_rm;
             d_w=3'd4; d_len=pfx_len+4'd3;
           end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
@@ -1032,27 +1071,35 @@ module decode_stages
         // and desynced the stream for a 16-bit-address `66 a3 disp16` store — exactly
         // the V86 task's `mov %eax,%ds:0`. M0-M6/sys gates only ever hit the 32-bit
         // form, so the eff_addr branch is additive (bit-identical where eff_addr==0).
+        // MOV moffs (A0-A3): the moffs form has NO ModRM byte — its bytes are the raw
+        // absolute displacement. The ea16 block above unconditionally treats ibuf[m_idx]
+        // as a ModRM and (for a BP-based rm=010/011 or rm=110/mod!=00) forces d_seg=SS.
+        // For a moffs whose displacement's low byte aliases such a rm (e.g. 0x0002 -> rm=010),
+        // that wrongly selects SS instead of the DS default, so the absolute access uses the
+        // (usually null) stack base — e.g. the VGA-BIOS option-ROM scan's `mov al,[0xc0002]`
+        // read SS:2 (=0) instead of DS:2, so the ROM length came back 0 and POST looped
+        // forever. Re-assert the moffs default segment (DS, or a real seg-override prefix).
         8'hA0: begin // MOV AL, moffs8 (8-bit load, preserve [31:8])
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=R_EAX; d_mem_read=1'b1;
-          d_w=3'd1;
+          d_w=3'd1; d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
           if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'hA1: begin // MOV eAX, moffs
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_writes_reg=1'b1; d_dst_reg=R_EAX; d_mem_read=1'b1;
-          d_w=eff_opsize?3'd2:3'd4;
+          d_w=eff_opsize?3'd2:3'd4; d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
           if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'hA2: begin // MOV moffs8, AL (8-bit store)
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_mem_dst=1'b1; d_src_reg=R_EAX;
-          d_w=3'd1;
+          d_w=3'd1; d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
           if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
         8'hA3: begin // MOV moffs, eAX
           d_is_mov=1'b1; d_alu_op=ALU_MOV; d_mem_write=1'b1; d_mem_dst=1'b1; d_src_reg=R_EAX;
-          d_w=eff_opsize?3'd2:3'd4;
+          d_w=eff_opsize?3'd2:3'd4; d_seg = d_pfx_seg_en ? d_pfx_seg_idx : 3'(SG_DS);
           if (eff_addr) begin d_ea={16'd0,ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd3; end
           else begin d_ea={ibuf[pfx_len+4],ibuf[pfx_len+3],ibuf[pfx_len+2],ibuf[pfx_len+1]}; d_len=pfx_len+4'd5; end
         end
@@ -1094,6 +1141,23 @@ module decode_stages
             d_kind=K_STR; d_st=ST_INS; d_str_storedi=1'b1; d_mem_write=1'b1;
             d_w=(op0==8'h6C) ? 3'd1 : (eff_opsize?3'd2:3'd4);
             d_io=1'b1; d_io_write=1'b0; d_io_imm=1'b0;  // port is DX (resolved at issue)
+            d_io_w=d_w;
+            d_len=pfx_len+4'd1;
+          end else begin d_unknown=1'b1; d_len=pfx_len+4'd1; end
+        end
+        // OUTSB (6E) / OUTSW/D (6F): read a byte/word/dword from DS:[ESI] (segment
+        // overridable) and write it to port DX, ESI += width; REP iterates ECX times.
+        // The MIRROR of INS: a K_STR (ST_OUTS, d_str_loadsi) whose element goes through
+        // the normal S_LOAD slow-load, then a per-element S_IO OUT handshake (the K_STR
+        // S_EXEC arm routes ST_OUTS to S_IO with the loaded element on io_wdata, and
+        // S_IO retires with str_next_eip so REP loops at the same PC). First exercised
+        // by Win95's IDE PIO disk WRITE (REP OUTSW to port 0x1F0) — was undecoded ->
+        // the guest HALTed at the first disk write and the daemon spun forever.
+        8'h6E, 8'h6F: begin
+          if (cosim_en || soc_en) begin
+            d_kind=K_STR; d_st=ST_OUTS; d_str_loadsi=1'b1; d_mem_read=1'b1;
+            d_w=(op0==8'h6E) ? 3'd1 : (eff_opsize?3'd2:3'd4);
+            d_io=1'b1; d_io_write=1'b1; d_io_imm=1'b0;  // port is DX (resolved at issue)
             d_io_w=d_w;
             d_len=pfx_len+4'd1;
           end else begin d_unknown=1'b1; d_len=pfx_len+4'd1; end
@@ -1236,13 +1300,18 @@ module decode_stages
             // S_LOAD reads the pointer: JMPF loads CS:IP inline, CALLF stages it then
             // S_LCALL pushes CS:next_eip + loads.
             3'd3: begin // CALLF m16:16 (16-bit) / m16:32 (0x66, 32-bit far ptr)
-              if (modrm_mod!=2'b11 && seg_real && !paging_on) begin
+              // MEMORY form only (reg mod=11 is invalid -> #UD). Both REAL and
+              // PROTECTED mode: the servicing reads the far pointer, then real mode
+              // loads CS.base=sel<<4 inline while PM hands off to S_LCALL->S_LJMP
+              // (descriptor load, incl. LDT selectors). Quake's DOS/4GW extender uses
+              // the PM indirect far CALL/JMP; Win95 does not, so this was deferred.
+              if (modrm_mod!=2'b11) begin
                 d_callf_mem=1'b1; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
                 d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
               end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
             end
             3'd5: begin // JMPF m16:16 (16-bit) / m16:32 (0x66, 32-bit far ptr)
-              if (modrm_mod!=2'b11 && seg_real && !paging_on) begin
+              if (modrm_mod!=2'b11) begin
                 d_jmpf_mem=1'b1; d_mem_read=1'b1; d_w=eff_opsize?3'd2:3'd4;
                 d_len=m_idx+mfl_e(eff_addr,modrm_mod,modrm_rm,has_sib,sib_base);
               end else begin d_unknown=1'b1; d_len=pfx_len+4'd2; end
@@ -1312,9 +1381,11 @@ module decode_stages
         // One-byte, no ModR/M. The default (no 0x67) 32-bit address form: linear
         // EA = DS.base + EBX + AL; a segment-override prefix redirects DS (handled
         // by dbase/q_seg). Touches no flags. The byte-load address is driven in the
-        // S_LOAD bus arm (q_xlat); S_EXEC writes AL from the loaded byte. The 0x67
-        // 16-bit-address form (BX, not EBX) is rare and not modelled here — it is
-        // only reachable under an address-size prefix the user corpus never uses.
+        // S_LOAD bus arm (q_xlat); S_EXEC writes AL from the loaded byte.
+        // REVIEW_Jul29 M-06: the 0x67 16-bit-address form (BX, not EBX) is NOW
+        // modelled — the bus arm selects BX vs EBX on q_cnt16 (the latched
+        // effective-address-size flag). It used to always use EBX, which is a
+        // deterministic wrong address in real mode / under 0x67 when EBX[31:16]!=0.
         8'hD7: begin d_xlat=1'b1; d_mem_read=1'b1; d_w=3'd1; d_len=pfx_len+4'd1; end
         8'hE2: begin d_kind=K_CTRL; d_ct=CT_LOOP;   d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
         8'hE1: begin d_kind=K_CTRL; d_ct=CT_LOOPE;  d_len=pfx_len+4'd2; d_rel={{24{ibuf[pfx_len+1][7]}},ibuf[pfx_len+1]}; end
@@ -1654,6 +1725,29 @@ module decode_stages
     // gpr[d_*_reg] directly.
     if (d_dst_high8) d_dst_reg = {1'b0, d_dst_reg[1:0]};
     if (d_src_high8) d_src_reg = {1'b0, d_src_reg[1:0]};
+
+    // REVIEW2 C-09 (the #UD half): an illegal LOCK prefix must raise #UD. LOCK was
+    // decoded and then reached only the F00F erratum check and a lint sink, so
+    // `lock` on anything at all was silently accepted.
+    //
+    // LOCK architecturally requires a MEMORY destination operand. The rule applied
+    // here is the unambiguous subset: a LOCK on an instruction with NO memory operand
+    // at all is illegal, full stop. That covers `lock` on register-form RMWs -- which
+    // is also the shape of the F00F erratum (locked CMPXCHG8B with a register
+    // destination) -- and cannot false-positive.
+    //
+    // NOT covered: LOCK on an instruction that HAS a memory operand but is not one of
+    // the permitted RMW opcodes (ADD/ADC/AND/BTC/BTR/BTS/CMPXCHG/CMPXCHG8B/DEC/INC/
+    // NEG/NOT/OR/SBB/SUB/XOR/XADD/XCHG). Deciding that needs a per-arm `lock_ok` flag
+    // on ~18 decode arms; guessing it from the existing d_* flags would either miss
+    // cases or wrongly fault a legal locked RMW. Marked as remaining rather than
+    // approximated -- a wrong #UD on a legal `lock add [mem],eax` would be far worse
+    // than the missing check.
+    //
+    // Routed through d_unknown so it reuses H-11's #UD delivery. Ordering is already
+    // correct in core_fetch_decode.svh: the F00F erratum arm is tested BEFORE the #UD
+    // arm, so with errata_en[ERR_F00F] set the documented hang still wins.
+    if (pfx_lock && !(d_mem_read || d_mem_write)) d_unknown = 1'b1;
   end
 
 endmodule : decode_stages

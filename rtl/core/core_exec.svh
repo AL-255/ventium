@@ -42,10 +42,16 @@
             // 0 so the TLBs are already empty, but the flush keeps it correct.
             flags_we=1'b0;
             unique case (q_sys_creg)
-              3'd0: creg0<=gpr_o[q_src_reg];
+              // REVIEW2 H-23: CLTS reuses this CR0 commit rather than adding a
+              // second one -- it clears TS (bit 3) and touches nothing else.
+              3'd0: creg0<= q_clts ? (creg0 & ~32'h0000_0008) : gpr_o[q_src_reg];
               3'd2: creg2<=gpr_o[q_src_reg];
               3'd3: begin
                 creg3<=gpr_o[q_src_reg];
+`ifdef VEN_DBG_WD
+                $display("[VEN-CR3] MOV CR3 <- %08h (was %08h) @ cs:eip=%04x:%08h src_reg=%0d",
+                         gpr_o[q_src_reg], creg3, seg_sel[SG_CS], eip, q_src_reg);
+`endif
                 // TLB flush (clear val bits only) now lands in u_itlb/u_dtlb via
                 // tlb_flush (driven combinationally from this exact MOV CR3
                 // condition; see the flush driver at the TLB instantiation).
@@ -94,6 +100,15 @@
             // writeback driver (core_gpr_wb.svh, SYS_STR arm).
             flags_we=1'b0;
           end
+          else if (q_sysop==SYS_INVLPG) begin
+            // INVLPG m (REVIEW_Jul29 H-05). Its ONLY architectural effect is the
+            // TLB invalidation, which the tlb_flush pulse in core.sv drives
+            // combinationally off exactly this {state==S_EXEC, q_sysop} pair. No
+            // GPR write, no flags, no memory access — so this arm just claims the
+            // instruction (keeping it out of the generic q_kind dispatch below)
+            // and lets the shared S_EXEC retire commit it.
+            flags_we=1'b0;
+          end
           else if (q_sysop==SYS_MOVSREG_TO && !sys_mode && proxy_en) begin
             // M7.1 USER+proxy MOV Sreg, r16 (linux-user, no GDT): selector :=
             // value; the hidden base is FLAT (0) EXCEPT a %gs load of the musl TLS
@@ -140,7 +155,21 @@
                 // R3: all GPR writes in this arm (XLATB AL, LEA dst, POP dst/ESP,
                 // ALU dst) moved to the gpr writeback driver (core_gpr_wb.svh,
                 // K_ALU arm). Only the flags/store/state/seg-load logic stays here.
-                if (q_xlat) begin
+                //
+                // REVIEW H-03 (task #32): `AAM imm8=0` is a DIVIDE, and imm8==0 must raise #DE
+                // BEFORE anything commits. uv_common.sv:92-95 previously substituted AH=AL=0 and
+                // the instruction retired normally, so a guest that relies on the fault ran on
+                // into whatever followed. Delivered through the SAME precise path DIV/IDIV use
+                // (core_exec.svh:376): sys_mode goes through the IDT via start_fault(vec 0,
+                // FAULT semantics = push the faulting EIP); user mode loud-HALTs. do_retire=0
+                // and flags_we=0 suppress the AX/flag/EIP commit. AAD is NOT affected — it
+                // multiplies, so base 0 is perfectly legal there.
+                if (q_alu_op == ALU_AAM && q_imm[7:0] == 8'd0) begin
+                  do_retire=1'b0; flags_we=1'b0;
+                  if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
+                  else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEF; `endif end
+                end
+                else if (q_xlat) begin
                   // XLATB: AL <- the byte loaded from [DS:(E)BX + AL]. No flags.
                   flags_we=1'b0;
                 end
@@ -224,6 +253,13 @@
               end
 
               K_SHIFT: begin
+                // Latch the store value NOW (S_EXEC), with eflags.CF still at the INCOMING carry.
+                // The `eflags<=fl` below overwrites CF with this shift's own cf_out this same edge, so a
+                // memory-dst RCL/RCR that stores in the later S_STORE would otherwise recompute st_data
+                // (=sh_out, combinational on eflags[0]) with the wrong post-commit cfin and drop the
+                // incoming carry. sh_out here is computed from the pre-edge eflags[0] (NBA reads pre-edge),
+                // so this captures the correct result. (SHL/SHR/SAR don't read cfin -> value-identical.)
+                sh_out_st_r <= sh_out;
                 // count masked to 0 -> NO flag change, NO value change (QEMU).
                 if (sh_cnt==6'd0) begin
                   flags_we=1'b0;
@@ -354,7 +390,7 @@
                       dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
-                      else          state<=S_HALT;
+                      else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE9; `endif end
                     end else
                       // P5 DIVIDE OCCUPANCY (cycle-modeled, p5model occ DIV
                       // 17/25/41 for r/m8/16/32). The native helper above produces
@@ -394,7 +430,7 @@
                       dbg_div_fault_q <= 1'b1;   // #DE delivered -> freeze the PC ring (freeze-on-#DE)
 `endif
                       if (sys_mode) start_fault(8'd0, 1'b0, 32'd0, q_pc);
-                      else          state<=S_HALT;
+                      else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEA; `endif end
                     end else
                       // P5 IDIV OCCUPANCY (cycle-modeled, p5model occ IDIV 22/30/46
                       // for r/m8/16/32 — a few clocks over DIV for the sign handling).
@@ -557,7 +593,7 @@
                   // (no IDT) — exactly the #DE policy. Carries no error code.
                   do_retire=1'b0;
                   if (sys_mode) start_fault(8'd5, 1'b0, 32'd0, q_pc);
-                  else          state<=S_HALT;
+                  else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hEB; `endif end
                 end
                 // in-bounds: do_retire stays 1 -> advance EIP, no state change.
               end
@@ -752,13 +788,32 @@
                   end
 
                   if (store_needed) begin do_store=1'b1; do_retire=1'b0; end
+                  else if (q_st==ST_OUTS) begin
+                    // OUTS: the [SI] element (just loaded via S_LOAD) goes OUT to port
+                    // DX via the S_IO handshake; S_IO retires with str_next_eip (loop
+                    // at q_pc under REP / next_eip on the last element). SI/ECX were
+                    // already updated by the gpr-wb K_STR arm this S_EXEC cycle.
+                    do_store=1'b0; do_retire=1'b0;
+                    // ins_data was captured SINGLE-HOP at the S_LOAD ack (core_load.svh) —
+                    // do NOT re-latch from the clobbable global mem_load_data here (the
+                    // MOVS-fix hazard; the re-latch fed a constant -> uniform-word writes).
+                    state <= S_IO;
+                  end
                   else do_retire=1'b1;
 
                   // latch pre-increment [EDI] + data for the store stage (EDI is
                   // being incremented this cycle via NBA, so S_STORE must not
                   // re-read gpr_o[EDI]).
-                  str_store_addr <= str_edi;   // F3: a16-masked DI
-                  str_store_data <= str_wdata;
+                  str_store_addr <= str_edi;   // F3: a16-masked DI (= pre-advance EDI)
+                  // FIX (Quake #20 2nd bug): snapshot FULL pre-advance ESI/EDI/ECX (gpr_o, high halves intact)
+                  // for the string-store #PF rollback (S_WALK arm in core_gpr_wb.svh).
+                  str_pre_esi <= gpr_o[R_ESI];
+                  str_pre_edi <= gpr_o[R_EDI];
+                  str_pre_ecx <= gpr_o[R_ECX];
+                  // VEN FIX: MOVS store data is captured single-hop at the load ack (core_load.svh); do
+                  // NOT re-latch it from the GLOBAL mem_load_data here (it may have been clobbered). STOS/
+                  // INS/etc keep the S_EXEC latch (their str_wdata is a register/IN value, not a load).
+                  if (q_st != ST_MOVS) str_store_data <= str_wdata;
                   // remember the eip we want after this element commit
                   str_next_eip <= new_eip;
                 end

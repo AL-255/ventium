@@ -555,7 +555,7 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 the S_IRET return-into-V86) is gated behind `v86` so it is INERT when
 #                 EFLAGS.VM=0 (every prior sys gate stays byte-identical). pv86 is now
 #                 in RTL_SYS_TESTS for the real RTL --system V86 diff vs the golden.
-RTL_SYS_TESTS="pseg pmode ppage psldram pintr pintr16 pfault pde pcpl ptask ptaskcpl ptaskv86 pfcpl3 pdebug pv86 ppopf"
+RTL_SYS_TESTS="pseg pmode ppage pxpage psldram pintr pintr16 pfault pde pcpl ptask ptaskcpl ptaskv86 pfcpl3 pdebug pv86 ppopf"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"

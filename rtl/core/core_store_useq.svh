@@ -9,7 +9,24 @@
 
         // -------------------------------------------------------------------
         S_STORE: begin
+          // ---- REVIEW2 C-02 (store half): PROBE-2 -> WRITE-1 -> WRITE-2 --------
+          // A crossing store must not commit ANY byte until BOTH pages are known
+          // translatable and writable. Phase 0 probes the second page (translated,
+          // write-permission checked, mem_we=0 so nothing is written); phase 1 writes
+          // the first page's bytes; phase 2 writes the second page's. Nothing is
+          // retired until phase 2 acks, so the instruction is atomic with respect to
+          // a fault on either page. Detection is arm-first: latch xs_first from the
+          // pre-translate offset the moment the crossing store is seen.
+          if (mem_ack && xs_cross_now && !xs_act) begin
+            xs_act   <= 1'b1;
+            xs_first <= 3'(13'h1000 - {1'b0, cur_lin[11:0]});
+            xs_ph    <= 2'd1;          // probe just completed -> write the first page
+          end else if (mem_ack && xs_act && (xs_ph == 2'd1)) begin
+            xs_ph    <= 2'd2;          // first page written -> write the second
+          end else
           if (mem_ack) begin
+            if (xs_act) begin xs_act <= 1'b0; xs_ph <= 2'd0; end
+            begin
             logic [3:0] wr_hit;   // M2S.6: data-write breakpoint hit (DR6.Bn) bits
             // M2S.5 — SMI# source (gated sys_mode). The psmm corpus fires SMI by
             // writing the local-APIC ICR-low (physical 0xFEE00300) with delivery
@@ -145,6 +162,7 @@
                 end
               end
             endcase
+            end   // REVIEW2 C-02: closes the phase-guard `begin`
           end
         end
 

@@ -22,7 +22,7 @@
 #include "hardware.h"
 #include "ide.h"
 
-#if 0
+#if 1
 	#define dbg_printf     printf
 	#define dbg_print_regs ide_print_regs
 	#define dbg_hexdump    hexdump
@@ -32,7 +32,7 @@
 	#define dbg_hexdump(...)  void()
 #endif
 
-#if 0
+#if 1
 	#define dbg2_printf     printf
 #else
 	#define dbg2_printf(...)   void()
@@ -79,6 +79,55 @@ const uint32_t ide_io_max_size = 32;
 uint8_t ide_buf[ide_io_max_size * 512];
 
 ide_config ide_inst[2] = {};
+
+// VEN bug#7 (task #50): read ide.v mgmt register 6 = {13'd0, sw_reset, disable_irq, irq}.
+// These three bits decide whether the guest's IDE interrupt is being SUPPRESSED at the
+// device (nIEN / SRST, both written by the guest to port 0x3F6) or is being asserted and
+// LOST on the way to the CPU (slave-PIC / IRQ2-cascade). Nothing else on the PS can see
+// them: the guest writes 0x3F6 directly to ide.v in RTL, never through the daemon.
+//   bit0 = irq          1 => device IS asserting IRQ14; a stall here means delivery is broken
+//   bit1 = disable_irq  1 => guest set nIEN; the device will never assert
+//   bit2 = sw_reset     1 => SRST held; `reset = ~rst_n | sw_reset` freezes the WHOLE device
+// Read-only: ide_recvbuf issues a mgmt read, which has no side effect on the register file.
+extern "C" uint16_t ven_ide_irqstate(int num)
+{
+	uint16_t v = 0;
+	ide_recvbuf(&ide_inst[num & 1], 6, 1, &v);
+	return v;
+}
+
+// VEN bug#7 (task #50): full device+daemon snapshot at the stall.
+//
+// The observed failure is an INT 13h RETRY LOOP (PC ring: f000:e83x INT13 entry -> BIOS ATA
+// routines at f000:44xx/47xx/48xx -> IO.SYS 0070 -> app 05f7 -> repeat, all in S_PIPE), with
+// NO new IDE command reaching the daemon for ~29 min. ide.v's status FSM explains how that
+// happens without anything crashing:
+//     162: else if(io_done & drq & last_read) status <= 8'h40;  // RDY  -> BIOS proceeds
+//     163: else if(io_done & drq)             status <= 8'h80;  // BSY  + request=5
+// A block that completes WITHOUT last_read parks the device at BSY and asks the daemon for
+// more data. If the daemon already left process_read (sector_count hit 0), that request is
+// never serviced -> BSY forever -> every later INT 13h fails its not-BSY wait -> retry loop.
+//
+// These registers ALREADY EXIST in the deployed bitstream (no new build needed):
+//   reg 0  = {features, 6'd0, use_fast, io_done}   io_done = (blk_size && io_cnt >= blk_size)
+//   reg 5  = {cmd, drv_addr}
+//   reg 12 = ven_dbg_rdcnt = count of core data-port reads  (256 = one fully drained sector)
+// rdcnt is the discriminator: 256 => the core drained the sector and the device state machine
+// is at fault; <256 => the core stopped mid-sector and the drain path is at fault.
+extern "C" void ven_ide_snapshot(int num, uint16_t *r0, uint16_t *r5, uint16_t *r12,
+                                 uint32_t *dstate, uint32_t *dcmd, uint32_t *dstatus,
+                                 uint32_t *dseccnt)
+{
+	ide_config *ide = &ide_inst[num & 1];
+	*r0 = 0; *r5 = 0; *r12 = 0;
+	ide_recvbuf(ide, 0,  1, r0);
+	ide_recvbuf(ide, 5,  1, r5);
+	ide_recvbuf(ide, 12, 1, r12);
+	*dstate   = ide->state;          // IDE_STATE_IDLE(0) etc — daemon's view
+	*dcmd     = ide->regs.cmd;
+	*dstatus  = ide->regs.status;    // what the daemon LAST pushed, not what ide.v holds now
+	*dseccnt  = ide->regs.sector_count;
+}
 
 uint16_t ide_check()
 {
@@ -777,6 +826,14 @@ static void process_read(ide_config *ide, int multi)
 	dbg2_printf("  sector_count: %d\n", ide->regs.sector_count);
 
 	uint32_t cnt = multi ? get_cnt(ide) : 1;
+	// VEN-DISK DIAG: log every read the boot issues — cmd (0x20=READ SECTORS single, 0xC4=READ MULTIPLE),
+	// LBA, requested sector_count, and per-block cnt. If the FreeDOS boot uses multi-sector (cnt>1) a
+	// single block push of cnt*256 words may overflow the IDE FIFO -> only 1 sector reaches the core ->
+	// partial IO.SYS load -> the relocation copies incomplete source -> cs=8000:0x3a0.
+	printf("[VEN-DISK] rd cmd=%02x drv=%d lba=%u sec_cnt=%u blk_cnt=%u multi=%d\n",
+	       ide->regs.cmd, ide->regs.drv, lba, ide->regs.sector_count, cnt, multi);
+	extern volatile unsigned long g_disk_reads;   // PC-trajectory disk-idle trigger
+	g_disk_reads++;
 	ide->null = !FileSeekLBA(ide->drive[ide->regs.drv].f, (lba <= ide->drive[ide->regs.drv].offset) ? 0 : (lba - ide->drive[ide->regs.drv].offset));
 	if (!ide->null) ide->null = (readhdd(&ide->drive[ide->regs.drv], lba, cnt) <= 0);
 	if (ide->null) memset(ide_buf, 0, cnt * 512);
@@ -791,7 +848,13 @@ static void process_read(ide_config *ide, int multi)
 		ide->regs.status = ATA_STATUS_RDP | ATA_STATUS_RDY | ATA_STATUS_DRQ | ATA_STATUS_IRQ;
 		if (!ide->regs.sector_count) ide->regs.status |= ATA_STATUS_END;
 
-		if (ide->regs.io_fast)
+		// VEN FIX (Win95 relocation): FORCE the non-fast (fill-FIFO-THEN-DRQ) order for READS. io_fast is a
+		// STREAMING mode (RDP set + regs BEFORE the FIFO is filled) that relies on n_data flow-control to
+		// stop the core reading ahead of the daemon's fill. On the free-running FPGA core that race lets
+		// the core drain a PARTIALLY-filled FIFO -> partial IO.SYS stored to 0x700 -> the REP CS MOVSB
+		// relocation copies incomplete source + leftover data -> RETF into garbage -> cs=8000:0x3a0.
+		// Filling the whole block into the buffer BEFORE asserting DRQ removes the race (slower, correct).
+		if (0 && ide->regs.io_fast)
 		{
 			ide_set_regs(ide);
 			ide_send_data(ide_buf, cnt * 256);
@@ -799,6 +862,19 @@ static void process_read(ide_config *ide, int multi)
 		else
 		{
 			ide_send_data(ide_buf, cnt * 256);
+			{
+				// VEN DIAG (one-shot): READ BACK the buffer just written via ide_sendbuf and compare.
+				// Readback garbage/uniform => the mgmt READOUT path (mgmt_cnt/mux) is broken (the
+				// disk-WRITE 0x1c38 corruption source); readback OK => the guest OUT data path is.
+				static int rb_done = 0;
+				if (!rb_done && cnt >= 1) { rb_done = 1;
+					static uint16_t rb[256]; uint16_t *w = (uint16_t*)ide_buf;
+					ide_recvbuf(ide, 255, 256, rb);
+					int mm = -1; for (int k = 0; k < 256; k++) if (rb[k] != w[k]) { mm = k; break; }
+					printf("[VEN-RDBK] %s mm=%d sent[0..3]=%04x %04x %04x %04x got[0..3]=%04x %04x %04x %04x got[128..131]=%04x %04x %04x %04x\n",
+						(mm < 0) ? "MATCH" : "MISMATCH", mm, w[0],w[1],w[2],w[3], rb[0],rb[1],rb[2],rb[3], rb[128],rb[129],rb[130],rb[131]);
+				}
+			}
 			ide->regs.status &= ~ATA_STATUS_RDP;
 			ide_set_regs(ide);
 		}
@@ -846,7 +922,19 @@ static void process_write(ide_config *ide, int multi)
 		ide_set_regs(ide);
 
 		ide_req = 0;
-		while (!ide_req) ide_req = (ide_check() >> ide->bitoff) & 7;
+		{
+			// VEN DIAG (Win95 first disk WRITE hang): this spin waits for the guest to push the
+			// write-sector data (req=5 = io_done & drq). If the guest's REP OUTSW or the fabric
+			// write-count path is broken, it spins FOREVER and freezes the whole daemon loop.
+			// After ~2M idle polls, call the (weak, board-only) dump hook to show the guest's
+			// live EIP + fabric state, so guest-stuck vs fabric-miscount is distinguishable.
+			extern void ven_write_spin_dump(uint32_t spins) __attribute__((weak));
+			uint32_t spins = 0;
+			while (!ide_req) {
+				ide_req = (ide_check() >> ide->bitoff) & 7;
+				if (!ide_req && ++spins % 2000000 == 0 && ven_write_spin_dump) ven_write_spin_dump(spins);
+			}
+		}
 
 		if (ide_req != 5)
 		{
@@ -855,6 +943,14 @@ static void process_write(ide_config *ide, int multi)
 		}
 
 		ide_recv_data(ide_buf, cnt * 256);
+		{
+			// VEN DIAG (uniform-word write corruption): show what the daemon RECEIVED from the
+			// fabric buffer — distinguishes guest-pushed-uniform vs fabric/readout-stuck.
+			uint16_t *w = (uint16_t*)ide_buf;
+			printf("[VEN-WRBUF] w[0..7]=%04x %04x %04x %04x %04x %04x %04x %04x  w[248..255]=%04x %04x %04x %04x %04x %04x %04x %04x\n",
+				w[0],w[1],w[2],w[3],w[4],w[5],w[6],w[7],
+				w[248],w[249],w[250],w[251],w[252],w[253],w[254],w[255]);
+		}
 
 		if (ide->regs.cmd == 0xFA)
 		{
@@ -898,6 +994,64 @@ static int handle_hdd(ide_config *ide)
 		ide->regs.status = ATA_STATUS_RDY | ATA_STATUS_DRQ | ATA_STATUS_IRQ | ATA_STATUS_END;
 		ide_send_data(ide->drive[ide->regs.drv].id, 256);
 		ide_set_regs(ide);
+#ifdef VEN_IDE_RB_DIAG
+		{ extern int g_ident_win; g_ident_win = 800; }   // arm an aggressive per-iteration RAM scan
+#endif
+#ifdef VEN_IDE_RB_DIAG
+		// DIAG (board_shim): read the identify buffer back over mgmt and compare to the id[]
+		// we just wrote. ide_set_regs above wrote regs 0-5 -> a register mgmt access whose
+		// falling edge resets ide.v mgmt_cnt to 0, so the readback starts at buffer word 0.
+		// If rb[] matches id[], the mgmt burst-fill is correct and the fault is the CPU-side
+		// io read; if it's zeros/garbage, the burst-fill itself is broken on hardware.
+		{
+			uint16_t rb[8] = {0};
+			uint16_t *id = ide->drive[ide->regs.drv].id;
+			EnableIO();
+			fpga_spi_fast(UIO_DMA_READ);
+			fpga_spi_fast(ide->base + 255);
+			fpga_spi_fast(0);
+			fpga_spi_fast_block_read(rb, 8);
+			DisableIO();
+			printf("ID-RB drv%d base=%04x: id[0..3]=%04x %04x %04x %04x | rb[0..3]=%04x %04x %04x %04x | id[4..7]=%04x %04x %04x %04x rb=%04x %04x %04x %04x\n",
+			       ide->regs.drv, ide->base, id[0],id[1],id[2],id[3], rb[0],rb[1],rb[2],rb[3],
+			       id[4],id[5],id[6],id[7], rb[4],rb[5],rb[6],rb[7]);
+		}
+		// DIAG: DRQ is now set + FIFO full. Does the free-running core actually DRAIN it?
+		// ide reg0 bit0 = io_done (io_cnt >= blk_size). Poll it over mgmt while the core runs.
+		//   SET   => core read all 256 words -> the io read WORKS (fault is downstream).
+		//   NEVER => core never drained the FIFO -> DRQ-poll / INSW / io-read handshake is broken.
+		{
+			int seen = -1;
+			for (int s = 0; s < 6000 && seen < 0; s++) {
+				EnableIO(); fpga_spi_fast(UIO_DMA_READ); fpga_spi_fast(ide->base + 0); fpga_spi_fast(0);
+				uint16_t r0 = 0; fpga_spi_fast_block_read(&r0, 1); DisableIO();
+				if (r0 & 1) seen = s;
+			}
+			// Read the word-indexed io-side capture: reg8=word0 reg9=word1(cyl) reg10=word3(heads)
+			// reg11=word6(spt) reg12=read count. These are what the CORE actually read from the FIFO.
+			uint16_t w0=0,w1=0,w3=0,w6=0,rc=0;
+			EnableIO(); fpga_spi_fast(UIO_DMA_READ); fpga_spi_fast(ide->base + 8); fpga_spi_fast(0);
+			fpga_spi_fast_block_read(&w0,1); fpga_spi_fast_block_read(&w1,1); fpga_spi_fast_block_read(&w3,1);
+			fpga_spi_fast_block_read(&w6,1); fpga_spi_fast_block_read(&rc,1);
+			DisableIO();
+			printf("ID io_done: %s (poll=%d) | CORE read word0=%04x word1(cyl)=%04x word3(heads)=%04x word6(spt)=%04x rdcnt=%u  [expect 0040 001f 0010 0100]\n",
+			       seen >= 0 ? "SET" : "NEVER", seen, w0, w1, w3, w6, rc);
+			// DIAG2: what the core RECEIVES (the write ring proved it STORES zero). regs 13-17 =
+			// io_readdata across 3 phases around the iobus latch (S_READ_CHK) for the 1st read,
+			// plus raw buf_q + {io_address,drq} at the latch. If fm1 is 0040 but fp1/latch is 0,
+			// the iobus latches io_readdata one cycle too late (after drq/io_cnt moved on).
+			uint16_t fm1=0,f0=0,fp1=0,bq=0,fl=0;
+			EnableIO(); fpga_spi_fast(UIO_DMA_READ); fpga_spi_fast(ide->base + 13); fpga_spi_fast(0);
+			fpga_spi_fast_block_read(&fm1,1); fpga_spi_fast_block_read(&f0,1); fpga_spi_fast_block_read(&fp1,1);
+			fpga_spi_fast_block_read(&bq,1); fpga_spi_fast_block_read(&fl,1);
+			DisableIO();
+			printf("ID RECV-latch: io_readdata fall-1=%04x fall=%04x fall+1=%04x | buf_q=%04x {ioaddr,drq}=%x  [want the latch cycle non-zero]\n",
+			       fm1, f0, fp1, bq, fl);
+			// Peek low guest RAM NOW for the identify the core just STORED. word0=0x0040 lives at
+			// ES:[DI] (~0xfda0, below the stack) so it survives. Decisive: STORE WORKS vs dropped.
+			{ extern void ven_peek_ident(); ven_peek_ident(); }
+		}
+#endif
 		break;
 
 	case 0xC4: // read multiple

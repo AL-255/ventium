@@ -23,7 +23,31 @@
           if (io_ack) begin
             logic [31:0] io_eip;
             logic [3:0]  io_xbp;
-            io_eip = next_eip;
+            // REVIEW2 M-03: the A20 gate control latch. Port 0x92 ("fast A20" /
+            // System Control Port A) bit 1: 1 = A20 enabled, 0 = A20 forced low so
+            // physical addresses wrap at 1 MiB. Bit 0 is FAST RESET and is ignored
+            // here.
+            //
+            // WHY THE LATCH IS IN THE CORE. On real silicon this is a chipset
+            // register, and it was first written in ventium_top. That does not work:
+            // the port-0x92 OUT is serviced by the PS in one build, by a co-sim DPI
+            // hook in another and by in-PL devices in a third, and the top-level
+            // io_req/io_ack handshake is not observable at a clock edge in all of
+            // them -- an instrumented probe there never fired once. The core's own
+            // S_IO arm is the ONE place that sees every completed I/O write in every
+            // configuration, because it is the same condition the core already uses
+            // to retire the OUT. ventium_top keeps an `a20_gate` PLATFORM OVERRIDE
+            // input (ANDed with this latch) so a real chipset can still force A20 low.
+            //
+            // The write is observed, NOT intercepted: the OUT still goes out on the
+            // I/O bus exactly as before, so whatever already services 0x92 is
+            // unaffected.
+            if (q_io_write && q_io_port == 16'h0092) a20_r <= io_wdata[1];
+            // OUTS (K_STR ST_OUTS, routed here per element): retire with the string
+            // loop EIP latched in S_EXEC (q_pc while REP has elements left, next_eip
+            // on the last), exactly like the S_STORE string retire. Plain IN/OUT
+            // keeps next_eip.
+            io_eip = (q_kind==K_STR) ? str_next_eip : next_eip;
             // R3: the IN value -> AL/AX/eAX write moved to the gpr writeback driver
             // (core_gpr_wb.svh, S_IO arm).
             eip <= io_eip;

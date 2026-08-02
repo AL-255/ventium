@@ -10,6 +10,7 @@
 // `verilator --binary`; prints L1D-GATE-OK / L1D-GATE-FAIL.
 
 module tb_l1d;
+  parameter int TB_L1_SETS = 128;   // REVIEW2 M-04: overridden by the gate script
   logic clk=0, rst_n=0;
   always #5 clk = ~clk;
 
@@ -24,9 +25,21 @@ module tb_l1d;
   logic        snoop_inv_valid = 1'b0;
   logic [31:0] snoop_inv_addr  = 32'd0;
 
-  ven_l1d dut (.clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
+  // REVIEW Aug-1 M-17: this instantiation had gone stale against the module -- the
+  // dbg_serve output added for load-serve forensics was never connected, and because
+  // the gate runs warning-fatal it FAILED AT BUILD TIME. Every other L1 gate passed,
+  // so the most important cache block was being silently skipped while the suite as a
+  // whole still looked healthy.
+  // REVIEW2 M-04: the geometry is now a TB parameter so the gate can be run at more
+  // than one L1_SETS. The module used to hard-code a 7-bit set index and a 20-bit tag
+  // regardless of L1_SETS, so any override silently indexed past the arrays and split
+  // the address at the wrong bit. run-l1d-gate.sh runs this at 128 AND at 64; the
+  // second run is what actually proves the split follows the parameter.
+  ven_l1d #(.L1_SETS(TB_L1_SETS)) dut (.clk, .rst_n, .flush_all(1'b0), .golden(1'b0),
                .cacheable, .snoop_inv_valid, .snoop_inv_addr,
                .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
+               .dbg_serve(),                       // M-17: diagnostic only
+
                .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack);
 
   // ---- behavioral backing: byte-addressable, same-cycle ack -----------------

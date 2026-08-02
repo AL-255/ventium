@@ -36,6 +36,10 @@
                   // US bit = the EFFECTIVE CPL (V86 forces 3) at the faulting access.
                   pf_errcode <= {eff_cpl == 2'd3, walk_is_write, 1'b0};
                   walk_pf <= 1'b1;
+`ifdef VEN_DBG_WD
+                  $display("[VEN-PFW] #PF PDE-np lin=%08h pde=%08h pde_addr=%08h @cs:eip=%04x:%08h cr3=%08h w=%b",
+                           walk_lin, pde, {creg3[31:12], walk_lin[31:22], 2'b00}, seg_sel[SG_CS], q_pc, creg3, walk_is_write);
+`endif
                   start_fault(8'd14, 1'b1,
                               {29'd0, eff_cpl == 2'd3, walk_is_write, 1'b0}, q_pc);
                 end else if (is_big) begin
@@ -83,6 +87,14 @@
                   // US bit = the EFFECTIVE CPL (V86 forces 3) at the faulting access.
                   pf_errcode <= {eff_cpl == 2'd3, walk_is_write, 1'b0};
                   walk_pf <= 1'b1;
+`ifdef VEN_DBG_WD
+                  $display("[VEN-PFW] #PF PTE-np lin=%08h @cs:eip=%04x:%08h w=%b for_d=%b ret_state=%s q_mrd=%b q_mwr=%b q_ea=%08h ibuf=%016h | eax=%08h ebx=%08h ecx=%08h edx=%08h esi=%08h edi=%08h ebp=%08h esp=%08h | segsel cs=%04x ss=%04x ds=%04x es=%04x fs=%04x gs=%04x | segbase ss=%08h ds=%08h es=%08h fs=%08h gs=%08h",
+                           walk_lin, seg_sel[SG_CS], q_pc, walk_is_write, walk_for_d, walk_ret_state.name(), q_mem_read, q_mem_write, q_ea, dbg_ibuf,
+                           gpr_o[R_EAX], gpr_o[R_EBX], gpr_o[R_ECX], gpr_o[R_EDX],
+                           gpr_o[R_ESI], gpr_o[R_EDI], gpr_o[R_EBP], gpr_o[R_ESP],
+                           seg_sel[SG_CS], seg_sel[SG_SS], seg_sel[SG_DS], seg_sel[SG_ES], seg_sel[SG_FS], seg_sel[SG_GS],
+                           seg_base[SG_SS], seg_base[SG_DS], seg_base[SG_ES], seg_base[SG_FS], seg_base[SG_GS]);
+`endif
                   start_fault(8'd14, 1'b1,
                               {29'd0, eff_cpl == 2'd3, walk_is_write, 1'b0}, q_pc);
                 end else if (!pte[5] || (walk_is_write && !pte[6])) begin

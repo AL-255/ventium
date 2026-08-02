@@ -172,6 +172,21 @@ module fpu_fpatan
   } state_t;
   state_t st;
 
+  // ---- multicycle throttle ------------------------------------------------
+  // Each FSM state performs an enormous amount of combinational work (128x128->256
+  // wide multiplies, estDiv, Horner) so the per-state register-to-register path is
+  // ~315 ns (2322 logic levels), which alone caps the whole core clock at ~3 MHz on
+  // the FPGA. Advance the state machine only once every MCP core clocks: the state
+  // registers (and thus the mul operands) stay stable for MCP cycles, giving the
+  // combinational cone MCP clock periods to settle. A matching set_multicycle_path
+  // (MCP) constraint on the u_fpatan hierarchy tells STA the same, so the core clock
+  // can run MCP-times faster. FPATAN is rare (x87 D9F3), so its MCP-times longer
+  // latency is negligible. Math is byte-identical to the ungated engine (same values,
+  // just more idle cycles); the phase counter free-runs while busy and resets in IDLE.
+  localparam int MCP = 4;
+  logic [$clog2(MCP)-1:0] ph;
+  wire step_en = (st==S_IDLE) || (ph == MCP-1);
+
   logic [79:0] x_q, y_q, result_q, accum_q, z2_q;
   logic [1:0]  rc_q;
   logic        done_q, pe_q, ie_q;
@@ -219,8 +234,10 @@ module fpu_fpatan
   end
 
   always_ff @(posedge clk) begin
-    if (!rst_n) begin st<=S_IDLE; done_q<=1'b0; end
+    if (!rst_n) begin st<=S_IDLE; done_q<=1'b0; ph<='0; end
     else begin
+      ph <= (st==S_IDLE) ? '0 : (ph + 1'b1);   // free-run while busy; MCP-cycle throttle
+      if (step_en) begin
       done_q<=1'b0;
       unique case (st)
         S_IDLE: if (start) begin x_q<=x; y_q<=y; rc_q<=rc; st<=S_CLASS; end
@@ -457,6 +474,7 @@ module fpu_fpatan
         S_DONE: begin done_q<=1'b1; st<=S_IDLE; end
         default: st<=S_IDLE;
       endcase
+      end   // if (step_en)
     end
   end
 endmodule

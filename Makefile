@@ -12,7 +12,7 @@ BUILD       := build
 VERILATOR   ?= verilator
 PYTHON      ?= python3
 
-.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
+.PHONY: all m0-smoke m1 m2 m3 m4 m5 m6 a20 fenv x87b l1 bus bus-sva verify verify-clean rtl plugin tests clean help verify-sys verify-srt verify-srt-iter verify-idiv verify-bcd verify-fbld verify-fppipe verify-fppipe2 verify-all coverage coverage-sys coverage-mem coverage-unit coverage-all opgen opgen-modes
 .DEFAULT_GOAL := help
 
 help:
@@ -31,8 +31,12 @@ help:
 	@echo "  make verify-srt radix-4 SRT divider gate: fx_srt_div bit-exact vs the golden model"
 	@echo "  make verify-srt-iter  iterative (1-step/clk) SRT divider engine: bit-exact vs the golden"
 	@echo "                  (correct PLA == QEMU; buggy PLA == documented Pentium FDIV flaw)"
+	@echo "  make x87b       x87 deferred-op boundary gate (REVIEW2 M-09)"
+	@echo "  make a20        A20 gate: 1 MiB alias wrap via port 0x92 (REVIEW2 M-03)"
+	@echo "  make fenv       x87 env gate: FNSTENV masks all exceptions (REVIEW2 M-01)"
+	@echo "  make l1         all L1/TLB/BTB/AXI memory-subsystem unit gates (auto-discovered)"
 	@echo "  make verify-all UMBRELLA: every routinely-runnable gate (verify + verify-sys +"
-	@echo "                  verify-srt + m6 + bus + bus-sva); one pass/fail summary"
+	@echo "                  verify-srt + m6 + x87b + a20 + fenv + l1 + bus + bus-sva); one pass/fail summary"
 	@echo "  make coverage   Verilator code-coverage + ISA-execution gate: run the full"
 	@echo "                  user-mode ISA suite through a --coverage core build, report"
 	@echo "                  line/toggle % per file + the executed-opcode histogram +"
@@ -131,13 +135,76 @@ m5:
 # behavior (NOT a differential oracle — QEMU computes the CORRECT result, so the
 # errata are verified vs the Intel Specification-Update values): the FDIV/SRT
 # divide flaw (Err 23), FIST/FISTP overflow undetected (Err 20/21), the F00F
-# LOCK CMPXCHG8B reg-dst hang (Err 81), and the MOV moffs A2/A3 non-pairing
-# (Err 59). Each test asserts the documented BUGGY value with the flag ON and
+# LOCK CMPXCHG8B reg-dst hang (Err 81), and the erroneous V86 POPF/IRET #DB
+# (Err 79). MOV moffs A2/A3 non-pairing (Err 59) is NOT reproduced: its model was
+# withdrawn when REVIEW_Jul29 H-02 disabled the corrupt moffs fast-path arm, and
+# errata_en[ERR_MOFFS] is now inert -- check 4 only guards that withdrawal (see
+# task #72). Each reproduced test asserts the documented BUGGY value with the flag ON and
 # the CLEAN value with the flag OFF. The HARD complement — `make verify` (errata
 # OFF) staying GREEN — is enforced separately by the verify gate. (run-m6.sh
 # builds the TB + each ELF itself.)
 m6:
 	bash verif/errata/run-m6.sh
+
+# --- x87 deferred-op boundary gate (verif/tests/run_x87_boundary.sh) --------
+# REVIEW2 M-09. tx_deferred_halt is the 99th corpus program and is DELIBERATELY kept
+# out of the differential gate (QEMU executes FSIN, the RTL must HALT, so the
+# length mismatch would read as a divergence). Its manifest delegates coverage to
+# this script -- which NOTHING invoked, so the program was covered by nothing at all.
+# Same shape as the 12 L1 gates that were absent from verify-all: an advertised gate
+# that exists, passes, and is never run.
+x87b:
+	bash verif/tests/run_x87_boundary.sh
+
+# --- A20 gate (verif/sys/run-a20-gate.sh) -----------------------------------
+# REVIEW2 M-03. Exercises the 1 MiB alias wrap through a real-mode seg:off above
+# 1 MiB (ES=0xFFFF:0x0510) with A20 enabled and then disabled via port 0x92. Carries
+# its own control (A20 enabled must keep the addresses DISTINCT) so a pass cannot be
+# produced by a build that masks unconditionally.
+a20:
+	bash verif/sys/run-a20-gate.sh
+
+# --- x87 environment gate (verif/sys/run-fenv-gate.sh) ----------------------
+# REVIEW2 M-01. Asserts that FNSTENV MASKS ALL x87 exceptions after storing the
+# environment (SDM Vol.2). This CANNOT be a differential test: the default CW 0x037F
+# already has bits[5:0] set, so the behaviour is unreachable on the existing corpus,
+# and QEMU does not implement the masking at all -- a diff would fail exactly when
+# Ventium is correct. The test clears the mask bits first and checks against the SDM.
+fenv:
+	bash verif/sys/run-fenv-gate.sh
+
+# --- L1 / memory-subsystem unit gates ---------------------------------------
+# `l1` runs EVERY verif/l1/run-*.sh gate -- the list is GLOBBED, not enumerated, so a
+# new gate script is picked up automatically (the M-08 RLAST-recovery gate arrived that
+# way). Covers the L1D coherence + store/load gates,
+# the I-cache snoop gate, the TLB and BTB gates, and the L1/AXI family (base,
+# CDC, watchdog, cross-line, cross-word, CALL/RET-in-deployed-config, and the
+# two longer *-verify sweeps).
+#
+# These existed for a long time but were reachable ONLY by invoking each script
+# by hand — no make target, and no entry in verify-all, which nevertheless called
+# itself "every routinely-runnable gate". They cover exactly the memory-path RTL
+# that REVIEW2's C-0x/H-0x cache findings touch, so they were the least safe
+# thing to leave out. Wiring them in found run-l1axi-callret-gate.sh permanently
+# broken (it aborted on the tb's isa-debug-exit status before running a single
+# check, so it could not pass in ANY tree state).
+#
+# The loop is deliberately NOT `set -e`-style early-exit: every gate runs even
+# after one fails, so a single break cannot hide the state of the other eleven.
+l1:
+	@fail=0; pass=0; \
+	for s in verif/l1/run-*.sh; do \
+	  n=$$(basename $$s .sh); \
+	  printf '\n---------- L1 GATE: %s ----------\n' "$$n"; \
+	  if bash $$s; then \
+	    printf '  L1 GATE PASS: %s\n' "$$n"; pass=$$((pass+1)); \
+	  else \
+	    printf '  L1 GATE FAIL: %s (rc=%s)\n' "$$n" "$$?"; fail=$$((fail+1)); \
+	  fi; \
+	done; \
+	printf '\nL1 GATES: %d PASS / %d FAIL\n' "$$pass" "$$fail"; \
+	if [ "$$fail" -ne 0 ]; then echo "L1 GATE SET: FAIL"; exit 1; fi; \
+	echo "L1 GATE SET: PASS (all $$pass memory-subsystem gates green)"
 
 # --- bus gates --------------------------------------------------------------
 # `bus`     = the STANDALONE biu_p5 protocol gate (19 SVA + 76 directed checks).
@@ -204,6 +271,9 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pseg
 	bash verif/sys/run-sys-golden.sh pmode
 	bash verif/sys/run-sys-golden.sh ppage
+	# REVIEW2 C-02: directed page-crossing test. XFAILs today (that divergence IS
+	# the defect); the runner fails loudly if it ever starts passing.
+	bash verif/sys/run-sys-golden.sh pxpage
 	bash verif/sys/run-sys-golden.sh pintr
 	bash verif/sys/run-sys-golden.sh pintr16
 	bash verif/sys/run-sys-golden.sh pfault
@@ -219,11 +289,20 @@ verify-sys:
 
 # --- verify-all umbrella (verif/run-verify-all.sh) --------------------------
 # One command that runs EVERY routinely-runnable gate (verify + verify-sys +
-# verify-soc + verify-srt + m6 + bus + bus-sva) and reports a single pass/fail
-# summary, so a regression in the bus-protocol SVA, the errata flag, or the SRT
-# divider cannot slip through by only running the differential aggregates. The
-# m7 macro co-sims (Quake/Win95) are EXCLUDED-and-logged: they need gitignored
-# producer artifacts that cannot be regenerated from a clean checkout.
+# verify-srt + m6 + a20 + l1 + bus + bus-sva) and reports a single pass/fail summary,
+# so a regression in the bus-protocol SVA, the errata flag, the memory subsystem
+# or the SRT divider cannot slip through by only running the differential
+# aggregates.
+#
+# The AUTHORITATIVE list is the GATES array in verif/run-verify-all.sh, which
+# prints itself at run time -- this comment is a convenience copy and must not be
+# trusted over that output. It previously listed `verify-soc`, which has no make
+# target and no gate script in this checkout, and omitted the 12 `l1`
+# memory-subsystem gates entirely.
+#
+# EXCLUDED-and-logged (not silently dropped): verify-soc (absent — M-03/M-04) and
+# the m7 macro co-sims (Quake/Win95), which need gitignored producer artifacts
+# that cannot be regenerated from a clean checkout.
 verify-all:
 	bash verif/run-verify-all.sh
 

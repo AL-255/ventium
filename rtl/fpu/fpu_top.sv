@@ -1,3 +1,4 @@
+`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
 // Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 
@@ -159,6 +160,25 @@ module fpu_top (
   logic [2:0]  ftop;
   logic [15:0] fctrl;        // control word; reset 0x037f
   logic [15:0] fstat;        // condition codes + exception flags; TOP not overlaid
+
+  // REVIEW2 H-22 (partial): FSW.B (bit 15) MIRRORS FSW.ES (bit 7) on the P5 -- the
+  // "FPU busy" bit is architecturally a copy of the error-summary bit on a processor
+  // with no asynchronous FPU. It was only ever set on the FRSTOR/FLDENV path (the
+  // spine composed it from the image's ES); every other fstat write left it 0, so
+  // FNSTSW reported B=0 even with an error summarised. QEMU does exactly this
+  // derivation in cpu_set_fpus(): `env->fpus |= env->fpus & FPUS_SE ? FPUS_B : 0`.
+  //
+  // Applied through ONE function at each of the three fstat commit points rather than
+  // recomputed inline at the ~15 places the spine builds an fstat value -- the rule has
+  // a single definition even though it is applied in three places, which is the
+  // distinction that matters for drift.
+  //
+  // NOT DONE HERE: deriving ES itself. See the note in fpu_writeback.sv -- ES is a
+  // STICKY bit set when an unmasked exception occurs, not a continuous function of
+  // (flags & ~masks), so computing it combinationally would be wrong.
+  function automatic logic [15:0] with_b(input logic [15:0] v);
+    with_b = {v[7], v[14:0]};   // B (bit 15) := ES (bit 7)
+  endfunction
   logic [7:0]  fptag;        // bit i = tag for fpr[i] (1=empty)
   // M11: FPU instruction/data pointers (env-image only; never the graded trace).
   // FOP is always 0 in this oracle, so it is not stored (hardwired 0 at emit).
@@ -261,7 +281,7 @@ module fpu_top (
 
       // (9) DIRECT scalar writes — fctrl<=fctrl_wval (FLDCW); fstat replace.
       if (we_fctrl) fctrl <= fctrl_wval;
-      if (we_fstat) fstat <= fstat_wval;
+      if (we_fstat) fstat <= with_b(fstat_wval);
 
       // (10) M11 env-pointer latches. we_eptr fires on every non-control FP op
       // (FIP=instr addr, FCS=code sel); we_dptr only on memory-operand FP ops
@@ -275,7 +295,7 @@ module fpu_top (
       if (we_envld) begin
         fctrl <= env_fctrl;
         ftop  <= env_ftop;
-        fstat <= env_fstat;
+        fstat <= with_b(env_fstat);
         fptag <= env_fptag;
       end
       if (we_envregs)
@@ -286,7 +306,7 @@ module fpu_top (
       // pipelined arith op suppresses its same-cycle we_top/we_fstat, so there is
       // no double-write to fpr[wabs_idx] / fstat from one op.
       if (we_wabs)       fpr[wabs_idx] <= wabs_data;
-      if (we_wabs_fstat) fstat         <= wabs_fstat;
+      if (we_wabs_fstat) fstat         <= with_b(wabs_fstat);
     end
   end
 

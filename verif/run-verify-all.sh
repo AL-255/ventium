@@ -11,18 +11,20 @@
 # the SRT divider would NOT be caught by the routinely-run differential
 # aggregates. `verify-all` closes that umbrella gap.
 #
-# Included gates (each is self-contained — builds what it needs):
-#   1. verify     — FAST unified m1-m5 differential gate (func + cycle bands)
-#   2. verify-sys — M2S system-mode oracle + RTL --system differential (11 tests)
-#   3. verify-soc — M8 SoC regression aggregate (every ventium_soc gate)
-#   4. verify-srt — radix-4 SRT divider bit-exactness (both PLAs)
-#   5. m6         — M6 documented-errata self-checks (flag ON=defect / OFF=clean)
-#   6. bus        — standalone biu_p5 protocol gate (19 SVA + 76 directed checks)
-#   7. bus-sva    — INTEGRATED bus_mode=1 corpus run with the protocol SVA LIVE
+# Included gates: see the GATES array below — it is the SINGLE SOURCE OF TRUTH,
+# and the script PRINTS it at startup and in the summary. (REVIEW_Jul29 M-03: this
+# header used to carry its own hand-maintained list which had drifted out of sync
+# with GATES, so the umbrella advertised a gate it never ran.)
 #
-# DELIBERATELY EXCLUDED (logged below, NOT silently dropped) — the m7 macro
-# co-simulations depend on producer artifacts that are gitignored and cannot be
-# regenerated from a clean checkout:
+# DELIBERATELY EXCLUDED (logged below, NOT silently dropped):
+#   * verify-soc  — REVIEW_Jul29 M-03/M-04. The header used to list this as gate 3,
+#                   but there is NO `verify-soc` make target and no runnable gate
+#                   script in this checkout (verif/soc/ holds only obj_dir build
+#                   artifacts). It was therefore advertised-but-never-run, while the
+#                   final message still claimed every gate had passed. Restoring it
+#                   is tracked with the rest of the missing-source problem (M-04).
+# The m7 macro co-simulations depend on producer artifacts that are gitignored and
+# cannot be regenerated from a clean checkout:
 #   * m7 Quake lock-step  (needs the built Quake guest + shareware pak0.pak)
 #   * m7 Win95 co-sim     (needs the rr-recorded replay.bin/overlay producer set)
 # Run those manually after staging their producer inputs:
@@ -44,6 +46,27 @@ GATES=(
   "verify-sys (M2S system-mode + RTL --system diff)|verify-sys"
   "verify-srt (radix-4 SRT divider, both PLAs)|verify-srt"
   "m6        (documented P5 errata self-checks)|m6"
+  # REVIEW2 M-09: tx_deferred_halt (the 99th corpus program) is deliberately outside
+  # the differential gate and its manifest delegates coverage to run_x87_boundary.sh --
+  # which nothing invoked, so it was covered by nothing. Same shape as the missing L1
+  # gates below.
+  "x87b      (x87 deferred-op loud-HALT boundary)|x87b"
+  # REVIEW2 M-03: the A20 gate. Carries its own control (A20 ENABLED must keep the
+  # 1 MiB aliases DISTINCT), so it fails both for a build with no A20 and for one
+  # that masks unconditionally.
+  "a20       (A20 1 MiB alias wrap via port 0x92)|a20"
+  # REVIEW2 M-01: FNSTENV must mask all x87 exceptions. Deliberately NOT differential
+  # -- the default CW already has the mask bits set (so the corpus never reaches the
+  # behaviour) and QEMU does not implement it, so a diff would fail when Ventium is
+  # right. Asserted against the SDM instead.
+  "fenv      (x87 FNSTENV masks all exceptions)|fenv"
+  # The 12 verif/l1/run-*.sh memory-subsystem gates (L1D coherence + store/load,
+  # I-cache snoop, TLB, BTB, and the L1/AXI family). These existed for a long time
+  # with NO make target and NO entry here, while this script's own banner called
+  # itself "every routinely-runnable gate" -- so the gates covering exactly the RTL
+  # that REVIEW2's cache findings touch were the ones being skipped. Adding them
+  # immediately found run-l1axi-callret-gate.sh permanently broken.
+  "l1        (all L1/TLB/BTB/AXI memory-subsystem gates)|l1"
   "bus       (standalone biu_p5 protocol gate)|bus"
   "bus-sva   (integrated bus_mode SVA corpus run)|bus-sva"
 )
@@ -54,9 +77,14 @@ FAILED=0
 echo "######################################################################"
 echo "# Ventium verify-all — every routinely-runnable gate"
 echo "######################################################################"
-echo "# EXCLUDED (need gitignored producer artifacts; run manually):"
-echo "#   - m7 Quake lock-step  (verif/m7/run-quake-lockstep.sh)"
-echo "#   - m7 Win95 co-sim     (verif/m7/win95/run-win95-cosim.sh)"
+# REVIEW_Jul29 M-03: print the ACTUAL gate list, derived from the GATES array, so
+# what this umbrella claims can never drift from what it runs again.
+echo "# INCLUDED (${#GATES[@]} gates, from the GATES array):"
+for entry in "${GATES[@]}"; do echo "#   - ${entry%%|*}   [make ${entry##*|}]"; done
+echo "# EXCLUDED (NOT run here):"
+echo "#   - verify-soc          (no such make target / gate script in this checkout — M-03/M-04)"
+echo "#   - m7 Quake lock-step  (verif/m7/run-quake-lockstep.sh; needs gitignored producers)"
+echo "#   - m7 Win95 co-sim     (verif/m7/win95/run-win95-cosim.sh; needs gitignored producers)"
 
 for entry in "${GATES[@]}"; do
   name="${entry%%|*}"
@@ -79,10 +107,14 @@ for i in "${!NAMES[@]}"; do
   printf "  %-6s  %s\n" "${RESULTS[$i]}" "${NAMES[$i]}"
 done
 echo
-echo "  (excluded, artifact-dependent: m7 Quake lock-step, m7 Win95 co-sim)"
+echo "  (excluded: verify-soc [absent in this checkout — M-03/M-04];"
+echo "             artifact-dependent m7 Quake lock-step, m7 Win95 co-sim)"
 echo
 if [[ "$FAILED" == "0" ]]; then
-  echo "VERIFY-ALL-OK  (every routinely-runnable Ventium gate PASSED)"
+  # REVIEW_Jul29 M-03: state exactly WHAT passed (the N gates actually run), rather
+  # than the old blanket "every routinely-runnable gate PASSED" — which was untrue
+  # while verify-soc was advertised in the header but missing from GATES.
+  echo "VERIFY-ALL-OK  (all ${#GATES[@]} included gates PASSED; see the EXCLUDED list above)"
   exit 0
 else
   echo "VERIFY-ALL: one or more gates FAILED (see above)"

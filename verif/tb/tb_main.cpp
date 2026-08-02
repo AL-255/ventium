@@ -301,6 +301,24 @@ int main(int argc, char** argv) {
 
     // ---- backing memory + image -------------------------------------------
     ventium::MemModel mem;
+    // task #52: optional backing-store latency. The model acks in-cycle by default,
+    // which makes the M4/M5 cycle bands a statement about the core's fill FSM rather
+    // than about memory cost -- that is how hardware retiring nothing on 98.66% of
+    // cycles passed every gate green (DISK_BOOT_STATUS UPDATE 229/230). Unset => 0 =>
+    // byte-identical to before, so all existing goldens stay reproducible.
+    //   VEN_MEM_RD_LAT / VEN_MEM_WR_LAT : per-access stall in core cycles.
+    // CALIBRATE from hardware (perf counters at 0x100-0x150); do not guess.
+    {
+        const char* rl = getenv("VEN_MEM_RD_LAT");
+        const char* wl = getenv("VEN_MEM_WR_LAT");
+        unsigned r = rl ? (unsigned)strtoul(rl, nullptr, 0) : 0u;
+        unsigned w = wl ? (unsigned)strtoul(wl, nullptr, 0) : 0u;
+        if (r || w) {
+            mem.set_latency(r, w);
+            fprintf(stderr, "[memmodel] latency ENABLED: read=%u write=%u core cycles "
+                            "(cycle bands below are NOT comparable to the 0-latency goldens)\n", r, w);
+        }
+    }
     if (!args.image.empty()) {
         // M2S.1 --system: a -bios image is mapped so its LAST byte is at
         // 0x000FFFFF (and the reset vector F000:FFF0 -> 0x000FFFF0 lands on its
@@ -2225,6 +2243,7 @@ int main(int argc, char** argv) {
                 "  \"sent_smm_ran\":  \"0x%08x\",\n"   // [0x2000] handler sentinel
                 "  \"sent_resumed\":  \"0x%08x\",\n"   // [0x2004] 'RET!' resume
                 "  \"sent_intact\":   \"0x%08x\",\n"   // [0x2008] EBX witness
+                "  \"sent_dr7\":      \"0x%08x\",\n"   // [0x200C] DR7 after RSM (M-02)
                 "  \"save_cr0\":      \"0x%08x\",\n"   // SMBASE+0xFFFC (offset 0x7FFC)
                 "  \"save_cr3\":      \"0x%08x\",\n"   // +0xFFF8
                 "  \"save_eflags\":   \"0x%08x\",\n"   // +0xFFF4
@@ -2232,14 +2251,33 @@ int main(int argc, char** argv) {
                 "  \"save_eax\":      \"0x%08x\",\n"   // +0xFFD0
                 "  \"save_ebx\":      \"0x%08x\",\n"   // +0xFFDC
                 "  \"save_cs_sel\":   \"0x%08x\",\n"   // +0xFFAC
-                "  \"save_smbase\":   \"0x%08x\"\n"    // +0xFEF8 SMBASE relocation slot
+                "  \"save_smbase\":   \"0x%08x\",\n"   // +0xFEF8 SMBASE relocation slot
+                // REVIEW2 M-02: the four ARCHITECTURAL P5 slots that used to be an
+                // unwritten hole between EAX (0x7FD0) and GS (0x7FBC). Dumped so the
+                // self-check can prove they are actually populated -- adding save-map
+                // beats without a check that reads them back is how the previous gap
+                // went unnoticed in the first place.
+                "  \"save_dr6\":      \"0x%08x\",\n"   // +0xFFCC
+                "  \"save_dr7\":      \"0x%08x\",\n"   // +0xFFC8
+                "  \"save_tr\":       \"0x%08x\",\n"   // +0xFFC4 TR selector
+                "  \"save_ldtr\":     \"0x%08x\",\n"   // +0xFFC0 LDTR selector
+                // ... and the implementation-private TR/LDTR hidden descriptor cache.
+                "  \"save_tr_base\":  \"0x%08x\",\n"   // +0xFE50
+                "  \"save_tr_limit\": \"0x%08x\",\n"   // +0xFE54
+                "  \"save_ldt_base\": \"0x%08x\",\n"   // +0xFE58
+                "  \"save_ldt_pack\": \"0x%08x\"\n"    // +0xFE5C {ldt_limit,tr_valid,tr_attr}
                 "}\n",
                 args.smbase,
                 mem.read32(0x2000), mem.read32(0x2004), mem.read32(0x2008),
+                mem.read32(0x200C),
                 mem.read32(sm + 0x7FFC), mem.read32(sm + 0x7FF8),
                 mem.read32(sm + 0x7FF4), mem.read32(sm + 0x7FF0),
                 mem.read32(sm + 0x7FD0), mem.read32(sm + 0x7FDC),
-                mem.read32(sm + 0x7FAC), mem.read32(sm + 0x7EF8));
+                mem.read32(sm + 0x7FAC), mem.read32(sm + 0x7EF8),
+                mem.read32(sm + 0x7FCC), mem.read32(sm + 0x7FC8),
+                mem.read32(sm + 0x7FC4), mem.read32(sm + 0x7FC0),
+                mem.read32(sm + 0x7E50), mem.read32(sm + 0x7E54),
+                mem.read32(sm + 0x7E58), mem.read32(sm + 0x7E5C));
             std::fclose(df);
             std::fprintf(stderr, "tb: wrote SMM memory dump to %s\n",
                          args.smm_dump.c_str());
