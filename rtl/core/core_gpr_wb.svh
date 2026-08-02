@@ -632,19 +632,35 @@
                 // 16-bit IRETW (int_gate_op16) is always the same-priv 6-byte commit
                 // (SP += 6); guard the V86/inter-priv suppression off so a garbage
                 // high-half VM bit (from the dword read of a 2-byte slot) can't divert.
+                // REVIEW_aug2 C-07 (mirror drift): the inter-priv suppression carried a
+                // `!int_gate_op16` that core_iret.svh no longer has -- once the 16-bit
+                // inter-privilege IRET was un-gated there, a 16-bit outer-level return
+                // took the pop-ESP/SS path in the FSM while THIS driver still added 6 to
+                // ESP at beat 2, so beats 3 and 4 read their ESP/SS slots from the wrong
+                // offsets. The privilege decision is iret_interpriv in both places now.
                 if (!int_gate_op16 && mem_rdata[17] && cpl_r == 2'd0) begin end
-                else if (!int_gate_op16 && iret_interpriv) begin end
+                else if (iret_interpriv) begin end
                 else begin gpr_we[R_ESP]=1'b1;
                   gpr_wd[R_ESP]=gpr_o[R_ESP] + (int_gate_op16 ? 32'd6 : 32'd12); end
               end
               4'd4: begin
-                if (iret_to_v86) begin end
-                else begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=iret_esp; end
+                // REVIEW_aug2 C-07: ESP no longer commits here. On the inter-priv path
+                // it commits with the rest of the frame, in S_IRET_SS, gated by the
+                // SAME predicate the FSM uses (iret_ss_commit) -- see the S_IRET_SS arm
+                // below. The V86 return still commits at beat 8.
               end
               4'd0, 4'd1, 4'd3, 4'd5, 4'd6, 4'd7: ;
               default: begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=iret_esp; end  // beat 8 (V86 commit)
             endcase
           end
+        end
+        // REVIEW_aug2 C-07: the OUTER ESP of an inter-privilege IRET. It commits with
+        // CS/SS/EIP/EFLAGS on the single validated commit clock, never before -- a frame
+        // rejected for a bad SS must leave the inner ESP untouched. iret_ss_commit is
+        // the same expression core_iret.svh branches on (defined once, in core.sv), so
+        // the two drivers cannot disagree about whether the frame was accepted.
+        S_IRET_SS: begin
+          if (iret_ss_commit) begin gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=iret_esp; end
         end
 
         // -------------------------------------------------------------------

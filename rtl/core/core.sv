@@ -2075,6 +2075,45 @@ module core
   logic        iret_interpriv;    // this IRET returns to a lower privilege
   logic [15:0] iret_ss;           // IRET-popped SS selector (inter-priv)
   logic [31:0] iret_esp;          // IRET-popped ESP (inter-priv)
+
+  // ---- REVIEW_aug2 C-07: whole-frame IRET commit -----------------------------
+  // An inter-privilege IRET used to commit its frame in three separate places, in
+  // the order the bytes happened to arrive: EIP/EFLAGS/ESP at S_IRET beat 4, CS in
+  // S_INT_CS_RET, SS in S_IRET_SS. So a frame whose SS was bad had ALREADY installed
+  // a new EIP, EFLAGS and CS (i.e. a new CPL) by the time anyone looked at the SS --
+  // the fault was raised from a half-updated architectural state, which is both
+  // wrong and the more dangerous half (CPL had already dropped).
+  //
+  // Now the CS descriptor is STAGED here instead of installed, and every part of the
+  // frame commits at ONE point: the success branch of S_IRET_SS. Nothing architectural
+  // moves until the whole frame has been validated.
+  logic [31:0] iret_cs_base, iret_cs_limit;
+  logic [7:0]  iret_cs_attr;
+  logic        iret_cs_d;
+
+  // ONE definition of "the outer SS descriptor on the bus this cycle is acceptable",
+  // consumed by the FSM commit (core_iret.svh) AND the ESP writeback
+  // (core_gpr_wb.svh). These are two different always blocks; giving each its own
+  // copy of the rule is exactly the mirror-drift that produced the C-05 family of
+  // bugs, so the predicate is written once, here.
+  //   desc = {mem_rdata, int_lo}  =>  access byte (desc[47:40]) = mem_rdata[15:8].
+  logic [7:0] iret_ss_attr_w;
+  logic       iret_ss_present, iret_ss_wellformed, iret_ss_ok, iret_ss_commit;
+  assign iret_ss_attr_w  = mem_rdata[15:8];
+  assign iret_ss_present = iret_ss_attr_w[7];
+  // Everything EXCEPT presence. The SDM checks P last, so a descriptor that is both
+  // not-present AND malformed some other way is #GP, not #SS; splitting the predicate
+  // here is what makes the vector choice in core_iret.svh order-faithful without
+  // sequencing the checks.
+  assign iret_ss_wellformed = (iret_ss[15:2] != 14'd0)      // not the null selector
+                   &&  iret_ss_attr_w[4]                     // S=1 (not a system descriptor)
+                   && !iret_ss_attr_w[3]                     // type[3]=0 => DATA, not code
+                   &&  iret_ss_attr_w[1]                     // type[1]=1 => WRITABLE
+                   && (iret_ss[1:0]        == iret_cs[1:0])  // SS.RPL == return CPL
+                   && (iret_ss_attr_w[6:5] == iret_cs[1:0]); // SS.DPL == return CPL
+  assign iret_ss_ok = iret_ss_wellformed && iret_ss_present;
+  assign iret_ss_commit = (state == S_IRET_SS) && mem_ack
+                       && (int_step != 4'd0) && iret_ss_ok;
   // M7.2: IRET from CPL0 with the popped EFLAGS.VM set = a RETURN INTO V86 (the
   // monitor resumes the V86 task). Pops the full 9-word frame (EIP,CS,EFLAGS,ESP,
   // SS,ES,DS,FS,GS), forces CPL=3, sets EFLAGS.VM, and loads every segment base as

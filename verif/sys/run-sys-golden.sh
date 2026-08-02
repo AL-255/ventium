@@ -555,7 +555,7 @@ echo "  SELF-DIFF-OK: comparator sys path engaged (sys compared: True) + EQUIVAL
 #                 the S_IRET return-into-V86) is gated behind `v86` so it is INERT when
 #                 EFLAGS.VM=0 (every prior sys gate stays byte-identical). pv86 is now
 #                 in RTL_SYS_TESTS for the real RTL --system V86 diff vs the golden.
-RTL_SYS_TESTS="pseg pmode ppage pxpage psldram pintr pintr16 pfault pde pcpl ptask ptaskcpl ptaskv86 pfcpl3 pdebug pv86 ppopf"
+RTL_SYS_TESTS="pseg pmode ppage pxpage psldram pintr pintr16 pfault pde pcpl pssiret ptask ptaskcpl ptaskv86 pfcpl3 pdebug pv86 ppopf"
 if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   say "7. RTL (Producer C) --system sys-diff vs golden (segmentation/paging gate)"
   TB="$REPO/verif/tb/obj_dir/tb_ventium"
@@ -575,6 +575,37 @@ if echo " $RTL_SYS_TESTS " | grep -q " $TEST "; then
   [[ "$RDIFF_RC" == "0" ]] || { echo "FATAL: RTL sys-diff DIVERGENT vs golden"; exit 1; }
   echo "  RTL-SYS-DIFF-OK: RTL system-mode trace EQUIVALENT to the golden"
   echo "                   (cr0..cr4 + selectors + GPRs + eflags + eip)"
+
+  # --- 7b. pssiret only: grade the FAULT VECTORS, which the trace diff cannot ----
+  # pssiret routes IDT vectors 11 (#NP) and 12 (#SS) to ONE handler on purpose, so
+  # that QEMU's non-SDM choice of #NP for a not-present stack segment (seg_helper.c
+  # helper_ret_protected -> EXCP0B_NOSEG; SDM Vol.2A IRET and Vol.3A 6.15 both say
+  # #SS) cannot make the two oracles diverge. That shared entry is exactly what
+  # makes the vector NUMBER invisible to the differential diff -- so grade it here,
+  # directly, from the RTL fault log. Without this the SDM behaviour would be
+  # unverified and the sharing would read as if it were hiding a difference.
+  if [[ "$TEST" == "pssiret" ]]; then
+    FLOG="$OUTDIR/$TEST.faultlog"
+    "$TB" --image "$IMG" --system --out /dev/null --max-insn "$MAXI" \
+        --quiesce 400 +ven_faultlog >"$FLOG" 2>&1 || true
+    # Expected, in order: #GP(0x30) case A, #GP(0x38) case B, #SS(0x40) case C.
+    GP30="$(grep -c 'vec=13 .*err=00000030' "$FLOG" || true)"
+    GP38="$(grep -c 'vec=13 .*err=00000038' "$FLOG" || true)"
+    SS40="$(grep -c 'vec=12 .*err=00000040' "$FLOG" || true)"
+    NP40="$(grep -c 'vec=11 .*err=00000040' "$FLOG" || true)"
+    echo "  fault log: #GP(0x30)=$GP30  #GP(0x38)=$GP38  #SS(0x40)=$SS40  #NP(0x40)=$NP40"
+    if [[ "$GP30" -lt 1 || "$GP38" -lt 1 ]]; then
+      echo "FATAL: pssiret: the read-only / wrong-DPL stack selectors did not raise #GP"
+      echo "       with the expected error codes (see $FLOG)"; exit 1
+    fi
+    if [[ "$SS40" -lt 1 ]]; then
+      echo "FATAL: pssiret: a NOT-PRESENT stack segment on an outer-level IRET must"
+      echo "       raise #SS(12) per SDM Vol.2A IRET / Vol.3A 6.15. Got #NP(11)=$NP40."
+      echo "       (QEMU raises #NP here; Ventium must not copy that.) See $FLOG"; exit 1
+    fi
+    echo "  RTL-FAULT-VECTOR-OK: #GP(0x30), #GP(0x38) and #SS(0x40) all raised;"
+    echo "                       #SS follows the SDM, not QEMU's #NP"
+  fi
 else
   say "7. RTL --system sys-diff: SKIPPED for '$TEST'"
   if echo " $INTR_TESTS " | grep -q " $TEST "; then

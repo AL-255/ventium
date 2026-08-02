@@ -82,14 +82,16 @@
                 iret_ss      <= mem_rdata[15:0];
                 if (iret_to_v86) int_step <= 4'd5;   // V86: keep popping ES,DS,FS,GS
                 else begin
-                  // M2S.4 inter-priv (non-V86): SS popped. Commit the inter-priv
-                  // return: EIP, EFLAGS, and the OUTER ESP/SS. seg_base[SG_SS] is
-                  // still the inner base while we reload the CS (S_INT_CS_RET), then
-                  // S_IRET_SS loads the outer SS descriptor. ESP <- popped outer ESP.
-                  // R3: ESP<-outer popped ESP moved to the gpr writeback driver
-                  // (core_gpr_wb.svh, S_IRET/int_step 4 arm).
-                  eip          <= iret_eip;
-                  eflags       <= iret_eflags;
+                  // M2S.4 inter-priv (non-V86): SS popped -- the whole frame is now
+                  // in the iret_* staging registers.
+                  // ---- REVIEW_aug2 C-07: DO NOT COMMIT ANYTHING HERE.
+                  // This used to write eip/eflags (and the gpr driver wrote ESP) two
+                  // states before the outer SS descriptor was even read, so a frame
+                  // with an unusable SS had already redirected execution. EIP, EFLAGS,
+                  // ESP, CS and SS now all commit together in S_IRET_SS, after the SS
+                  // has been validated. iret_eip/iret_eflags/iret_esp already hold the
+                  // popped values; they simply stay staged across the two descriptor
+                  // reads.
                   int_gate_sel <= iret_cs;
                   int_step     <= 4'd0;
                   state        <= S_INT_CS_RET;
@@ -186,19 +188,28 @@
                 start_fault(!cs_a[7] ? 8'd11 : 8'd13, 1'b1,
                             {16'd0, int_gate_sel} & 32'h0000_FFFC, int_src_pc);
               end else begin
-              seg_sel  [SG_CS] <= int_gate_sel;
-              seg_base [SG_CS] <= desc_base(desc);
-              seg_limit[SG_CS] <= desc_limit(desc);
-              seg_attr [SG_CS] <= desc_attr(desc);
-              cpl_r            <= int_gate_sel[1:0];
-              cs_d             <= desc[54];
               int_step         <= 4'd0;
               if (iret_interpriv) begin
-                state          <= S_IRET_SS;   // reload outer SS, then retire
+                // ---- REVIEW_aug2 C-07: STAGE, do not install. The outer SS has not
+                // been read yet; committing CS (and with it CPL) here is what let a
+                // bad-SS frame lower privilege before anything checked the stack.
+                iret_cs_base     <= desc_base(desc);
+                iret_cs_limit    <= desc_limit(desc);
+                iret_cs_attr     <= desc_attr(desc);
+                iret_cs_d        <= desc[54];
+                state            <= S_IRET_SS;   // read + validate outer SS, then commit ALL
               end else begin
-                q_pc           <= int_src_pc;
-                retire_valid   <= 1'b1;
-                state          <= S_PIPE;
+                // SAME-PRIVILEGE return: there is no SS to validate, so this IS the
+                // single commit point and CS installs here as before.
+                seg_sel  [SG_CS] <= int_gate_sel;
+                seg_base [SG_CS] <= desc_base(desc);
+                seg_limit[SG_CS] <= desc_limit(desc);
+                seg_attr [SG_CS] <= desc_attr(desc);
+                cpl_r            <= int_gate_sel[1:0];
+                cs_d             <= desc[54];
+                q_pc             <= int_src_pc;
+                retire_valid     <= 1'b1;
+                state            <= S_PIPE;
               end
               end   // REVIEW_aug2 C-07: closes the cs_bad guard
             end
@@ -211,12 +222,11 @@
         // 6.12.3: on a privilege-lowering return, segment registers loaded with a
         // selector that is now inaccessible are zeroed to prevent a less-privileged
         // task from using a more-privileged data segment). Retire the IRET.
-        // DONE-PARTIAL (documented follow-on): the outer SS is reloaded from the
-        // popped selector WITHOUT re-validating that SS.RPL == popped CS.RPL and
-        // SS.DPL == popped CS.RPL (IA-32 requires both on an inter-priv return,
-        // else #GP(SS-selector)). The pcpl corpus uses matching RPL=3 selectors
-        // (CS=0x1B, SS=0x23), so this never trips and there is no oracle for the
-        // #GP path; deferred with the other negative-path SS checks above.
+        // REVIEW_aug2 C-07: this is now also the SINGLE COMMIT POINT of an
+        // inter-privilege IRET -- CS/SS/EIP/EFLAGS/CPL/ESP all land here, after the
+        // SS has been validated (iret_ss_ok, defined once in core.sv). The previous
+        // version reloaded SS from the popped selector with no checks whatsoever,
+        // downstream of three states that had already committed the rest of the frame.
         S_IRET_SS: begin
           if (mem_ack) begin
             if (int_step == 4'd0) begin
@@ -224,10 +234,45 @@
             end else begin
               logic [63:0] desc;
               desc = {mem_rdata, int_lo};
+              // ---- REVIEW_aug2 C-07: VALIDATE the outer SS, then commit the WHOLE frame.
+              // This arm used to install base/limit/attr from whatever descriptor the
+              // frame named, with no checks at all -- and by then EIP, EFLAGS, ESP and
+              // CS (hence CPL) were already committed by three earlier states.
+              // IA-32 requires, on a privilege-lowering return:
+              //   * SS.RPL == the return CPL (the popped CS RPL)
+              //   * SS.DPL == the return CPL
+              //   * SS is a WRITABLE DATA segment (S=1, type[3]=0 data, type[1]=W)
+              //   * SS is present, else #SS(sel)
+              //   * a null SS is not usable at the outer level -> #GP(0)
+              // The rule itself lives in core.sv as iret_ss_ok, because the ESP
+              // writeback in core_gpr_wb.svh must agree with it exactly.
+              // A not-present (but otherwise well-formed, non-null) SS raises #SS (12);
+              // everything else #GP (13), with the selector as the error code.
+              if (!iret_ss_ok) begin
+                start_fault(iret_ss_wellformed ? 8'd12 : 8'd13,   // P is the LAST check
+                            1'b1, {16'd0, iret_ss} & 32'h0000_FFFC, int_src_pc);
+              end else begin
+              // ===== THE SINGLE COMMIT POINT for an inter-privilege IRET ==========
+              // CS (staged by S_INT_CS_RET), SS, EIP, EFLAGS and CPL all land on this
+              // one clock. ESP lands with them, driven from core_gpr_wb.svh off the
+              // shared iret_ss_commit. Before this, nothing architectural has moved.
+              seg_sel  [SG_CS] <= int_gate_sel;
+              seg_base [SG_CS] <= iret_cs_base;
+              seg_limit[SG_CS] <= iret_cs_limit;
+              seg_attr [SG_CS] <= iret_cs_attr;
+              cpl_r            <= int_gate_sel[1:0];
+              cs_d             <= iret_cs_d;
+              eip              <= iret_eip;
+              eflags           <= iret_eflags;
               seg_sel  [SG_SS] <= iret_ss;
               seg_base [SG_SS] <= desc_base(desc);
               seg_limit[SG_SS] <= desc_limit(desc);
               seg_attr [SG_SS] <= desc_attr(desc);
+              // REVIEW_aug2 C-07 (ss_b): the outer stack's B bit governs stk16(); it was
+              // never updated here, so after an inter-priv return the stack width came
+              // from the PREVIOUS SS descriptor -- a 16-bit outer stack was addressed as
+              // 32-bit (and vice-versa) for every push/pop until something else reloaded SS.
+              ss_b <= desc[54];
               // null a data segment whose DPL < new CPL (would be inaccessible).
               for (int s = 0; s < NUM_SEG; s++) begin
                 if ((s == int'(SG_DS) || s == int'(SG_ES) ||
@@ -244,6 +289,7 @@
               q_pc             <= int_src_pc;
               retire_valid     <= 1'b1;
               state            <= S_PIPE;
+              end
             end
           end
         end

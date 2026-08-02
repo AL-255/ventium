@@ -249,6 +249,8 @@ verify:
 #   pfault (M2S.3) #PF / #GP / #UD hardware faults DELIVERING through the IDT ->
 #                  handler -> IRET/restart.
 #   pcpl   (M2S.4) TR/TSS + cross-privilege delivery + inter-priv IRET.
+#   pssiret (REVIEW_aug2 C-07) inter-priv IRET outer-SS VALIDATION + the proof that
+#                  a rejected frame commits NOTHING (no EIP/EFLAGS/ESP/CS/CPL move).
 #   ptask  (M2S.4) hardware task switch (self-diff + step-5d validation).
 #   psmm   (M2S.5) SMM / RSM — a PARTIAL-ORACLE stage. The qemu-system gdbstub
 #                  single-step path MASKS SMI and has no SMM awareness, so a
@@ -280,6 +282,10 @@ verify-sys:
 	bash verif/sys/run-sys-golden.sh pfcpl3
 	bash verif/sys/run-sys-golden.sh pde
 	bash verif/sys/run-sys-golden.sh pcpl
+	# REVIEW_aug2 C-07: inter-priv IRET must VALIDATE the outer SS and commit
+	# nothing until it has. Grades the FAULT FRAME (saved CS/EFLAGS.IF + the
+	# handler's own SS:ESP), not merely that a fault occurred.
+	bash verif/sys/run-sys-golden.sh pssiret
 	bash verif/sys/run-sys-golden.sh ptask
 	bash verif/sys/run-sys-golden.sh ptaskcpl
 	bash verif/sys/run-sys-golden.sh psmm

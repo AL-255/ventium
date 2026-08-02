@@ -1,0 +1,32 @@
+{
+  "name": "pssiret",
+  "kind": "system",
+  "src": "pssiret.S",
+  "linker": "pssiret.ld",
+  "image": "pssiret.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 700,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, CS far-jump to 32-bit flat code segment 0x08)",
+    "GDT: 10 entries -- null, code0 0x08, data0 0x10, code3 0x18(DPL3), data3 0x20(DPL3, the GOOD outer SS), TSS32 0x28, plus three DELIBERATELY BAD stack descriptors: 0x30 data3 READ-ONLY (0xF0), 0x38 data0 writable DPL0 (0x92), 0x40 data3 writable NOT-PRESENT (0x72)",
+    "TR load: LTR 0x28; TSS SS0=0x10 ESP0=0x00088000 (the CPL0 cross-priv stack, DISTINCT from the 0x00090000 boot stack -- this separation is what makes the handler's own ESP prove whether CPL had already dropped)",
+    "IDT: vectors 11 (#NP) and 12 (#SS) SHARE one entry (stk_handler) so the QEMU/SDM vector disagreement for a not-present SS cannot make the two oracles diverge; vector 13 (#GP) -> gp_handler; vector 0x40 -> sys_exit (DPL3)",
+    "case A: inter-priv IRET with SS=0x33 (DPL3 READ-ONLY) -> #GP(0x30), taken at CPL0 on the boot stack with saved CS=0x08 and saved EFLAGS.IF=0 (nothing committed)",
+    "case B: inter-priv IRET with SS=0x3B (writable but DPL0) -> #GP(0x38), same no-commit signature",
+    "case C: inter-priv IRET with SS=0x43 (writable DPL3 but P=0) -> the not-present-SS path with error code 0x40 (Ventium raises #SS/12 per the SDM; QEMU raises #NP/11 -- shared IDT entry, identical trace)",
+    "case D: inter-priv IRET with the GOOD SS=0x23 -> CPL 0->3 at user_entry, SS:ESP switched to the CPL3 stack 0x00080000 -- the positive control proving the three rejections did not simply break IRET",
+    "syscall exit (INT 0x40): CPL 3->0 cross-priv delivery on the TSS stack -> sys_exit reports the accumulated proof in the GPRs and performs the isa-debug-exit"
+  ],
+  "delivery_records": {
+    "no_partial_commit": "each of the three rejected frames faults with saved CS=0x0008 (NOT 0x001B), saved EFLAGS.IF=0 (the pushed image set IF), handler SS=0x0010 and handler ESP >= 0x0008F000 (the CPL0 BOOT stack, not the TSS stack at 0x00088000) -- i.e. EIP, EFLAGS, ESP, CS and CPL were all still unmodified when the SS was rejected",
+    "success_proof": "at sys_exit (CPL0): ebp=3 (faults taken), ebx=3 (error codes 0x30/0x38/0x40 all correct), ecx=3 (all three arrived with NOTHING committed), edx=0xC3C3C3C3 (case D reached CPL3), esi=0x23 (the CPL3 task's SS), edi=0x0B0C (the last fault came through the not-present-SS handler, not #GP); then out 0xf4 = qemu status 133"
+  },
+  "description": "REVIEW_aug2 C-07 gate: an inter-privilege IRET must VALIDATE the outer SS descriptor, and must commit NOTHING until it has. Before this test the RTL committed the frame in three places in bus-arrival order (EIP/EFLAGS/ESP at S_IRET beat 4, CS+CPL in S_INT_CS_RET, SS in S_IRET_SS with no checks at all), so a frame naming an unusable stack selector had already redirected EIP, replaced EFLAGS and LOWERED CPL before anything examined the SS -- and then installed whatever descriptor it named. Same -bios bootstrap as pcpl. Builds a 10-entry GDT that adds three deliberately bad stack descriptors (read-only DPL3 at 0x30, writable DPL0 at 0x38, writable DPL3 but not-present at 0x40) alongside the good DPL3 stack at 0x20, a TSS at 0x3000 with SS0=0x10/ESP0=0x00088000, and an IDT whose #GP gate and shared #NP/#SS gate are DPL0. It then attempts four inter-privilege IRETs. The first three must be REJECTED with error code (sel & 0xFFFC), and the graded evidence is the fault frame, not merely the fault: saved CS must still be 0x08 (a fault after the CS commit would be delivered from CPL3 with CS=0x1B), saved EFLAGS.IF must be 0 (every pushed image sets IF), and the handler must be running on the CPL0 BOOT stack near 0x00090000 rather than the TSS stack at 0x00088000 -- the two stacks are deliberately far apart so the handler's own ESP alone decides whether CPL had already dropped. The fourth IRET uses the good SS and must still work, transferring to CPL3 at user_entry, which traps back through INT 0x40 (a genuine cross-privilege delivery, and the control showing the TSS-stack discriminator is meaningful) so CPL0 can report ebp/ebx/ecx = 3/3/3 and exit. ORACLE NOTE: QEMU implements these IRET SS checks in the same order Ventium does, but for the NOT-PRESENT stack segment it raises #NP (vector 11) where SDM Vol.2A IRET and Vol.3A 6.15 both require #SS (vector 12); measured on qemu-system-i386 10.2.1 as `v=0b e=0040 cpl=0`. Ventium follows the SDM. Vectors 11 and 12 therefore share a single IDT entry so both oracles execute a byte-identical instruction stream and case C stays differentially graded; the vector number itself is graded separately against the RTL fault log. NO paging; CR0.PG stays 0."
+}
