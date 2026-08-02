@@ -1,8 +1,8 @@
 # Ventium — progress against REVIEW_aug2.md
 
 **Nine findings closed (C-01…C-05 previously, then C-07, H-05, H-06, H-01, H-04),
-plus REVIEW2_Aug1's last critical made actionable (§8).
-`make verify-all` = 10/10 gates. `verify-sys` grew from 15 tests to 19.**
+plus REVIEW2_Aug1's last critical CLOSED (§8).
+`make verify-all` = 11/11 gates. `verify-sys` grew from 15 tests to 19.**
 
 Written for a review run, so it leads with what to attack and where I am least
 confident, not with what went well.
@@ -207,12 +207,34 @@ descriptor-table reads (`cur_lin` 0x528 = GDT, 0x1068 = IDT). They address memor
 every one trivially exceeds the limit. They are data-side, so `cur_is_d` cannot
 separate them.
 
-**The blocker is now exactly one bit: "is this access segment-relative."** Writing it
-here as a state list would recreate the very mirror that caused this family —
-`seg_chk_base` already *is* such a copy of the bus driver's base selection, which is
-precisely why it is wrong for these states. It belongs in the per-access descriptor.
-Delivery stays off; the diagnostic ships. Acceptance test for the descriptor work:
-`+ven_seglog` reports **zero** across all 19 sys tests.
+That bit is "is this access segment-relative", and it did **not** need the descriptor
+rework: the bus driver now *publishes* `cur_seg_rel` next to each address it builds
+from a segment base, and the check consumes it. Putting it there rather than in
+`core.sv` matters — `seg_chk_base` already *is* a remote copy of the driver's base
+selection, which is precisely why it was wrong. **19 of 19 tests go to zero.**
+
+The third cause turned out to be the most interesting: **the "spurious #GP looping at
+0xf020d" was a TEST bug, not a core bug.** A `.code16` for the reset stub was left in
+force above `pseglim`'s 32-bit `gp_handler`, so the assembler emitted 16-bit
+encodings — and with D=1 the same bytes mean something else:
+
+```
+66 ff 06 00 07  ->  incw (0x0700)     as assembled (16-bit)
+                ->  inc dword [esi]   as executed  (32-bit)
+```
+
+ESI holds garbage on entry, so the handler dereferenced it and took a **genuine**
+out-of-limit #GP before it could do anything. The core was right the whole time; the
+previous round attributed a test defect to the RTL.
+
+New `make seg` gate (verify-all is now 11) asserts **both** directions: one #GP(0) at
+the violating access with `ecx == 1`, and **zero** would-be rejections across all 19
+system tests. Enforcement is still off by default — deliberately. 19 system tests is
+not real firmware, m7 (Win95/Quake) is artifact-dependent and excluded from
+verify-all, and a spurious #GP in Win95 would be a worse regression than the missing
+check. What is proven: with `+define+VEN_SEG_ENFORCE` the whole corpus passes, where
+previously *all five* of pseg/pmode/ppage/pcpl/pfcpl3 failed. Flipping the default is
+one line once m7 can be run.
 
 ---
 

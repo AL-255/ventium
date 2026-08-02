@@ -1,7 +1,7 @@
 # Ventium — progress against REVIEW2_Aug1.md (session of Aug 1–2)
 
-**State: 41 of 43 findings addressed at the time of writing; 42 of 43 after the
-REVIEW_aug2 round (see the update in §6). `make verify-all` = 10/10 gates PASS.**
+**State: 41 of 43 at the time of writing; ALL 43 after the REVIEW_aug2 round
+(see the update in §6). `make verify-all` = 11/11 gates PASS.**
 
 Written for a review run, so it leads with what to check and where I am least confident,
 not with what went well.
@@ -190,11 +190,27 @@ and C-02's split proved the structure works.
 > (measured: pv86 n=705, expected 0x00087fc8 got 0x00007fc8). It is identity in
 > practice and recorded in core.sv. See PROGRESS_REVIEW_aug2.md for the full round.
 >
-> **C-06 is therefore the last open CRITICAL from this review.**
+> **C-06 is now closed too** (`f36dd76`), so this review has no open criticals.
+> All three false-positive causes were found by measurement (`+ven_seglog`, which
+> logs would-be rejections without faulting):
+>   1. the check ran on INSTRUCTION FETCHES against the DATA segment — all 19 sys
+>      tests fired; qualifying on `cur_is_d` took 16 of 19 to zero;
+>   2. descriptor-table reads are LINEAR, so subtracting a segment base underflowed.
+>      The bus driver now publishes `cur_seg_rel` next to each address it builds from
+>      a segment base and the check consumes it → 19 of 19 zero;
+>   3. **the "spurious #GP looping at 0xf020d" was a TEST bug, not a core bug** — a
+>      `.code16` left in force above pseglim's 32-bit handler, so `66 ff 06 00 07`
+>      assembled as `incw (0x0700)` but executed as `inc dword [esi]` with garbage
+>      ESI: a genuine out-of-limit access. The core was right.
+> New `make seg` gate asserts both directions. Enforcement is still off by default,
+> deliberately — 19 system tests is not real firmware, and m7 (Win95/Quake) is
+> excluded from verify-all, so a spurious #GP there cannot be ruled out. Proven: with
+> `+define+VEN_SEG_ENFORCE` the whole corpus passes, where previously all five of
+> pseg/pmode/ppage/pcpl/pfcpl3 failed.
 
 | finding | blocker |
 |---|---|
-| **C-06** | third false positive; needs #65's access descriptor, not another patch |
+| ~~**C-06**~~ | CLOSED — see the update above; `make seg` gates both directions |
 | ~~**C-07**~~ | CLOSED as REVIEW_aug2 H-01 — see the update above |
 | **H-16** (alias half) | needs physical I-tags or a reverse alias map |
 | **H-17** | needs a **fetch bypass** — deliver bytes without a validated line |
