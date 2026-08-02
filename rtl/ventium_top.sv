@@ -991,6 +991,11 @@ module ventium_top
                    .L1_SETS(ventium_pkg::L1D_SETS_DEF)) u_l1axi (
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all (flush_all || core_cache_inv),   // REVIEW2_aug2 H-18
+      // REVIEW2_aug2 C-10: LOCK reaches biu_p5 in bus mode 1 but was DROPPED here, so
+      // the configuration used for FPGA memory has no lock information at all. Passed
+      // in now -- see ventium_l1_axi for why it is MEASURED rather than driven onto
+      // AxLOCK.
+      .core_lock (core_mem_lock),
       .golden_l1 (golden_l1),
       .shutdown  (shutdown), .m_idle (m_idle),
       .smm_active         (core_smm_active),            // REVIEW2 H-24

@@ -102,6 +102,9 @@ module ventium_l1_axi #(
     // REVIEW2_aug2 C-08: the ACTUAL SMRAM base. The guard used to name 0xA0000 --
     // the 82437FX aperture -- which this core does not use for SMM.
     input  logic [31:0] smbase,
+    // REVIEW2_aug2 C-10: the core's LOCK for this access. Present so the gap can be
+    // MEASURED; deliberately NOT forwarded to AxLOCK -- see the note at its use.
+    input  logic        core_lock,
     input  logic [31:0] core_wdata,
     input  logic [3:0]  core_wstrb,
     output logic [31:0] core_rdata,
@@ -320,6 +323,42 @@ module ventium_l1_axi #(
   // core_wstrb gives the store's real byte extent, so the last written byte is
   // core_lin + (index of the highest set strobe). A crossing exists iff that byte
   // lands in a different 32-byte line than core_lin.
+  // ===========================================================================
+  // REVIEW2_aug2 C-10 -- LOCKED RMW ATOMICITY IS NOT PROVIDED ON THIS PATH.
+  //
+  // The core produces mem_lock and bus mode 1 carries it into biu_p5, but the L1/AXI
+  // instantiation -- the configuration used for FPGA memory -- had no lock input at
+  // all, and ven_axi_master ties ARLOCK/AWLOCK low. A locked read-modify-write is
+  // therefore not atomic against DMA or another requester.
+  //
+  // WHY THE WIRE IS NOT THE FIX, and why AxLOCK stays low: m_axi_{ar,aw}lock here are
+  // ONE bit, i.e. AXI4, where that bit means EXCLUSIVE ACCESS -- an exclusive read that
+  // arms a monitor, an exclusive write that returns EXOKAY on success or OKAY on
+  // failure, and a master that CHECKS the response and retries. Asserting AxLOCK
+  // without that handshake is worse than leaving it low: it claims semantics this
+  // master does not honour, and a compliant interconnect answering OKAY (failure)
+  // would be silently ignored -- atomicity broken while APPEARING to be requested.
+  //
+  // The two real options (both in the review) are carrying lock ownership through
+  // L1D/L2/arbitration so the bus is held across the RMW, or implementing AXI4
+  // exclusive access properly. Both are protocol work, not a connection.
+  //
+  // So the gap is made MEASURABLE instead of papered over: count the locked core
+  // requests that traverse this path with no exclusion behind them. That number is
+  // what a reader needs to judge the exposure, and it is the same treatment C-03's
+  // unsplit page crossings got.
+  logic        c10_lock_unprotected;
+  assign c10_lock_unprotected = core_req && core_lock;
+`ifndef SYNTHESIS
+  int   ven_c10_n;
+  logic ven_c10log_en;
+  initial begin ven_c10log_en = $test$plusargs("ven_locklog") != 0; ven_c10_n = 0; end
+  always_ff @(posedge core_clk)
+    if (core_rst_n && c10_lock_unprotected && core_ack) ven_c10_n <= ven_c10_n + 1;
+  final if (ven_c10log_en)
+    $display("[C10LOCK] locked accesses with NO bus exclusion: %0d", ven_c10_n);
+`endif
+
   logic [31:0] smc_last_lin;
   logic        smc_xline;
   always_comb begin

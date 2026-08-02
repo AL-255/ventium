@@ -53,7 +53,7 @@ module tb_l1axi_smram;
       .core_clk(clk), .core_rst_n(rst_n), .axi_clk(clk), .axi_rst_n(rst_n),
       .flush_all(1'b0), .golden_l1(1'b1), .shutdown(1'b0), .m_idle(),
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(smm_active),
-      .smbase(32'h0003_0000),   // REVIEW2_aug2 C-08: the core's ACTUAL default SMBASE
+      .smbase(32'h0003_0000), /* C-10 */ .core_lock(1'b0),   // REVIEW2_aug2 C-08: the core's ACTUAL default SMBASE
       .core_lin(c_addr), .core_wdata(c_wdata),
       .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
