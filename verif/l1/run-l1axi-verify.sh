@@ -105,10 +105,25 @@ if [ -x "$TB0" ]; then
 fi
 
 echo
+# ---- REVIEW1_Aug2 M-08: harness self-test --------------------------------------
+# The failure branch below used to print and then return zero. Fixing that is not
+# self-proving: a gate that CANNOT fail looks identical to one that never does. With
+# VEN_L1AXI_SELFTEST=1 a failure is injected here, so the exit path can be exercised
+# on demand -- `VEN_L1AXI_SELFTEST=1 bash verif/l1/run-l1axi-verify.sh; echo $?`
+# must print L1AXI-VERIFY-FAIL and 1.
+if [ "${VEN_L1AXI_SELFTEST:-0}" != "0" ]; then
+  echo "SELFTEST: injecting one deliberate failure to exercise the exit path"
+  FAIL=$((FAIL+1)); FAILED="$FAILED <selftest-injected>"
+fi
 if [ "$FAIL" -eq 0 ] && [ "$SFAIL" -eq 0 ]; then
   echo "L1AXI-VERIFY-OK  (user $PASS/$TOTAL vs QEMU + system $SPASS mode-2==mode-0)"
 else
   [ "$FAIL"  -ne 0 ] && echo "USER FAILING:$FAILED"
   [ "$SFAIL" -ne 0 ] && echo "SYS FAILING:$SFAILED"
   echo "L1AXI-VERIFY-FAIL"
+  # REVIEW1_Aug2 M-08: this branch printed the failure and then RETURNED ZERO,
+  # because `echo` was the last command. `make l1` -- and therefore verify-all --
+  # reported this sweep as passing while its own summary said PASS=51 FAIL=47.
+  # run-l1axi-cdc-verify.sh `exec`s this script, so both sweeps lied the same way.
+  exit 1
 fi
