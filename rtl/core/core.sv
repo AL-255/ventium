@@ -5056,6 +5056,53 @@ module core
              ven_h05_armed_faults);
 `endif
   logic        seg_off_over_limit, seg_null_sel, seg_not_present, seg_expand_down;
+
+  // REVIEW2_aug2 H-05: the "descriptor has been loaded IN PROTECTED MODE" bit that
+  // seg_not_present and seg_null_sel were tied off for want of.
+  //
+  // The measured objection to both checks was the real->protected TRANSITION WINDOW: at
+  // the instant CR0.PE goes 0->1 the segment registers still hold real-mode values
+  // (DS=SS=0x0000) with their real-mode hidden descriptors cached and valid, and IA-32
+  // says the HIDDEN DESCRIPTOR governs until a reload. Faulting there killed every one
+  // of pseg/pmode/ppage/pcpl/pfcpl3, and an empty descriptor cache (attr=00) is
+  // indistinguishable from "a descriptor that says not-present" without this bit.
+  //
+  // Derived rather than wired: a segment counts as protected-mode-loaded once its
+  // seg_attr CHANGES while PE=1. That needs no edit at any of the 15 seg_attr write
+  // sites -- and missing one of those would have left a segment permanently unchecked.
+  // Cleared wholesale on a return to real mode, where the question is moot.
+  //
+  // FAIL-OPEN by construction: a protected-mode load that happens to write the SAME
+  // attr byte is not detected, so the check simply stays off for that segment. That is
+  // the same direction as the rest of C-01's fallbacks -- it can miss a violation, never
+  // invent one, which is what got the previous attempts reverted.
+  logic        seg_pm_loaded [NUM_SEG];
+`ifndef SYNTHESIS
+  // A check that is "live" but whose enable never sets is just a tie-off with extra
+  // steps. Count how many segments actually reach protected-mode-loaded.
+  int ven_pmld_n; logic ven_pmldlog_en;
+  initial begin ven_pmldlog_en = $test$plusargs("ven_pmldlog") != 0; ven_pmld_n = 0; end
+  always_ff @(posedge clk) if (rst_n && creg0[0])
+    for (int i = 0; i < NUM_SEG; i++)
+      if (creg0[0] && (seg_attr[i] != seg_attr_q[i]) && !seg_pm_loaded[i])
+        ven_pmld_n <= ven_pmld_n + 1;
+  final if (ven_pmldlog_en)
+    $display("[PMLOAD] segments reaching protected-mode-loaded: %0d", ven_pmld_n);
+`endif
+  logic [7:0]  seg_attr_q    [NUM_SEG];
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      for (int i = 0; i < NUM_SEG; i++) begin
+        seg_pm_loaded[i] <= 1'b0; seg_attr_q[i] <= 8'd0;
+      end
+    end else begin
+      for (int i = 0; i < NUM_SEG; i++) begin
+        seg_attr_q[i] <= seg_attr[i];
+        if (!creg0[0])                          seg_pm_loaded[i] <= 1'b0;
+        else if (seg_attr[i] != seg_attr_q[i])  seg_pm_loaded[i] <= 1'b1;
+      end
+    end
+  end
   logic [31:0] seg_ed_upper;      // expand-down upper bound (by the segment's B bit)
   logic        seg_type_fault;    // write to non-writable / read of execute-only
   // ---- REVIEW2_Aug1 C-06: the bus driver publishes its OWN segment basis --------
@@ -5129,7 +5176,9 @@ module core
     // bit, so it cannot tell those apart -- the same reason seg_null_sel is tied off
     // below. Tied off rather than fault legitimate code in a window where the cache is
     // simply unpopulated.
-    seg_not_present = 1'b0;
+    // REVIEW2_aug2 H-05: live once the descriptor was actually loaded in protected
+    // mode. Before that, attr=00 means "cache unpopulated", not "not present".
+    seg_not_present = seg_pm_loaded[cur_seg_idx] && !seg_attr[cur_seg_idx][7];
     // A null selector may be LOADED but never used to address memory -- #GP(0).
     //
     // BUT NOT FROM THE SELECTOR VALUE ALONE, which is what this used to test and which
@@ -5145,7 +5194,11 @@ module core
     // the honest thing is to NOT guess: drop the check rather than fault legitimate
     // transition-window accesses. Tracked in #65 with the access descriptor, which is
     // where that state belongs.
-    seg_null_sel    = 1'b0;
+    // REVIEW2_aug2 H-05: likewise. Selector 0 is legitimate in the transition window
+    // (the real-mode hidden descriptor still governs); it is a #GP(0) only once the
+    // segment has been reloaded in protected mode and is then used to address memory.
+    seg_null_sel    = seg_pm_loaded[cur_seg_idx]
+                   && (seg_sel[cur_seg_idx][15:2] == 14'd0);
     // REVIEW2 C-06: the offset comes from cur_lin, NOT q_ea.
     //
     // MEASURED (UPDATE 355): trusting q_ea produced a repeating spurious #GP with
