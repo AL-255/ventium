@@ -102,7 +102,11 @@ pm32_entry:
      * to the task it names. TSS_B needs enough state to be entered. */
     movl    $0x00003000, %edi
     xorl    %eax, %eax
-    movl    $52, %ecx                   /* zero both TSSes (2 x 104 bytes) */
+    /* 128 dwords = 0x3000..0x31FF. 52 was WRONG: it stops at 0x30D0 and never reaches
+     * TSS_B at 0x3100, so the switch read TSS_B's GPRs, selectors and LDTR out of
+     * whatever was in memory. Symptom was #UD at pc=0x508 -- a garbage EIP -- which
+     * looked like an RTL fault and was mine. */
+    movl    $128, %ecx                  /* zero BOTH TSSes: 0x3000..0x31FF */
 1:  movl    %eax, (%edi)
     addl    $4, %edi
     loop    1b

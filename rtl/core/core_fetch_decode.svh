@@ -662,11 +662,26 @@
             //     under an ntret_pend flag and to LEAVE the busy bit rather than
             //     re-setting it -- a backlink names the suspended outer task, which
             //     never stopped being busy.
-            //   SYMPTOM to chase: pntret still ended at ebp=0x07000000 with CS=0x0030,
-            //   i.e. a TSS SELECTOR loaded into CS -- S_LJMP took its ordinary CS-load
-            //   path instead of the task-switch arm. Either ntret_pend was not asserted
-            //   when that arm evaluated, or an earlier arm in the chain claims type 0xB
-            //   first.
+            //   SECOND ATTEMPT went further and narrowed it, so start from here:
+            //     - PROBED, not guessed: S_NTRET_RD works. It reads tr_base=0x3000,
+            //       gets backlink=0x0030, and ntret_pend is 1 at that point.
+            //     - ONE blocker found and fixed: an EARLIER arm in S_LJMP claims type
+            //       0xB unconditionally (`if (desc_present && type==4'hB) start_fault
+            //       #GP`) -- correct for a JMP, since you cannot jump into a running
+            //       task, but an NT return's backlink names the suspended outer task
+            //       and is busy BY DEFINITION. That arm needs `!ntret_pend &&`.
+            //     - STILL FAILING after that fix, and this is the open end: a probe
+            //       placed at the top of S_LJMP's descriptor-processing block NEVER
+            //       PRINTS with ntret_pend set. So the block is not being entered at
+            //       all -- S_NTRET_RD's `state <= S_LJMP` fires, but S_LJMP's
+            //       `if (mem_ack) ... else` body is not reaching the arm chain. Probe
+            //       S_LJMP's entry and its mem_ack next; do not touch the arm chain
+            //       again until that is understood.
+            //     - A TEST BUG was also found and fixed on the way: pntret's zero loop
+            //       covered 52 dwords (0x3000..0x30D0) and never reached TSS_B at
+            //       0x3100, so the switch read its GPRs/selectors/LDTR out of garbage.
+            //       Symptom was #UD at pc=0x508, which looked like an RTL fault and was
+            //       mine. That fix is KEPT.
             //
             // REVERTED rather than iterated on, because verify-all was 19/19 WITH the
             // half-working version: nothing but pntret sets NT, so the suite cannot
