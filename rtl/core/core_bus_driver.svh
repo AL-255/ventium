@@ -618,6 +618,27 @@
       // after every case arm has driven it and before mem_xlate replaces it. The
       // assertion in core.sv compares this against cur_lin -- the address the TLB
       // lookup/walk actually used -- for every translatable request.
+      // ===== REVIEW2_aug2 C-04: THE CANONICAL REQUEST ADDRESS ====================
+      // "Paging lookup and bus address are generated independently" -- 56 cur_lin arms
+      // in core.sv against 62 mem_addr arms here, hand-maintained in parallel and
+      // already not one-to-one. They had drifted repeatedly (stk16() on one side only,
+      // fixed 4-byte strides vs q_w, GDT hard-coded vs selector.TI, states present in
+      // one list and not the other), and every drift is a silent wrong-memory failure:
+      // a TLB miss walks the wrong page, a coincidental hit post-translates the wrong
+      // linear.
+      //
+      // For a TRANSLATABLE state the architectural address IS cur_lin -- that is the
+      // address the TLB looked up and the walk filled, so it is the address the access
+      // is defined to be at. Taking it directly leaves ONE generator.
+      //
+      // Deliberately an OVERRIDE rather than a deletion of the arms above: CHECK 5 in
+      // core.sv has compared the two on every translatable request all along and is
+      // green, so this changes nothing the corpus reaches -- and keeping the arms lets
+      // that check keep proving it per-state, so they can be removed one at a time with
+      // evidence instead of by inspection. Non-translatable states (descriptor and TSS
+      // traffic, which run with paging off) are untouched.
+      mem_addr_arm = mem_addr;
+      if (fe_translatable) mem_addr = cur_lin;
       mem_addr_pre = mem_addr;
       // REVIEW2 C-01: a permission fault must produce NO side effect -- no bus
       // transaction, no cache fill, no A/D writeback. Squash exactly like a TLB

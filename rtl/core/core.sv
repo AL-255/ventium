@@ -1092,6 +1092,11 @@ module core
   // REVIEW2 C-03: the architectural bus address BEFORE mem_xlate (driven in
   // core_bus_driver.svh). Diagnostic only -- nothing in the datapath reads it.
   logic [31:0] mem_addr_pre;
+  // REVIEW2_aug2 C-04: what the per-state arms in core_bus_driver.svh produced, before
+  // the canonical override supersedes them for translatable states. Inert in the
+  // datapath -- it exists so CHECK 5 can keep detecting drift in those now-dead arms,
+  // which is what lets them be deleted with evidence rather than by inspection.
+  logic [31:0] mem_addr_arm;
   // ===========================================================================
   // REVIEW2 C-02: PAGE-CROSSING LOAD SPLIT.
   // ===========================================================================
@@ -8181,10 +8186,43 @@ module core
       //
       // Until the mirror is deleted outright (the real fix), this makes any drift
       // fail loudly at the first access instead of corrupting memory quietly.
+      //
+      // ---- REVIEW2_aug2 C-04: THE MIRROR IS GONE FROM THE DATAPATH ---------------
+      // core_bus_driver.svh now overrides mem_addr with cur_lin for exactly the states
+      // `translatable` names, so the bus address for a translatable access has ONE
+      // generator and the second cannot disagree with it. That is the finding itself,
+      // not a symptom of it.
+      //
+      // THIS CHECK IS WHY THE CHANGE COULD BE MADE SAFELY. It had been comparing the
+      // two generators on every translatable request and was green throughout, so the
+      // override is a no-op on all reachable behaviour -- known, not hoped. The old
+      // claim at core.sv:1242 ("cur_lin == the bus mem_addr in every translatable
+      // state, proven verbatim across the FSM arms") rested on reading 56 arms against
+      // 62 by eye; this is the version that keeps holding.
+      //
+      // It keeps running, now against mem_addr_arm -- the value the LEGACY arms still
+      // compute -- because those arms are dead for translatable states and should be
+      // deleted. Comparing against the live mem_addr would be tautological and would
+      // destroy the evidence needed to remove them safely: each arm can go once this
+      // has stayed silent for it. Drift here is no longer a wrong-memory event (the
+      // datapath ignores these arms); it is a stale-code report.
+      //
+      // THE CHECK IS LIVE, not vacuous: a positive control (mem_addr_arm = mem_addr+4)
+      // makes it fire on pxpage; the real arms leave it silent. Worth stating, because
+      // "silent" and "cannot speak" look identical in a log, and this review has
+      // already found one fix that was entirely dead while every witness stayed green.
+      //
+      // A NOTE ON THE COMBINATIONAL CYCLE, because it nearly got this abandoned on a
+      // false premise. Adding the override draws an UNOPTFLAT on cur_seg_rel -- the
+      // bus driver's always_comb produces the segment identity cur_lin consumes and
+      // now also consumes cur_lin. MEASURED: that warning is PRE-EXISTING at HEAD,
+      // byte-identical, with no working changes at all. The override does not create
+      // it. The cycle is real and predates this work; it is recorded as its own issue
+      // rather than credited to, or used to veto, this change.
       if (paging_on && fe_translatable && mem_req && !xlate_miss
-          && (cur_lin != mem_addr_pre))
-        $error("PAGING/C-03: address mirror drift in state %0d -- TLB looked up lin=%08h but the bus drives lin=%08h (pre-translate). One of cur_lin / mem_addr is wrong for this state.",
-               int'(state), cur_lin, mem_addr_pre);
+          && (cur_lin != mem_addr_arm))
+        $error("PAGING/C-04: DEAD bus-driver arm for state %0d disagrees with cur_lin -- TLB looks up lin=%08h, the superseded arm computes lin=%08h. The datapath now uses cur_lin, so this is not a wrong-memory event: that arm is stale and must be corrected or deleted.",
+               int'(state), cur_lin, mem_addr_arm);
 
       // ---- REVIEW2_Aug1 C-06 DIAGNOSTIC (+ven_seglog) ------------------------
       // The delivery is REMOVED (see core_fetch_decode.svh), because two earlier
