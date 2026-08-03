@@ -36,6 +36,10 @@ n=0; nt=0; rf=0; hit=""
 for d in "$REPO"/verif/sys/tests/*/; do
   t="$(basename "$d")"; img="$d$t.bin"
   [[ -f "$img" ]] || continue
+  # pntret is the deliberate PROBE for the NT return: its count is 1 by construction.
+  # The sweep's question is whether any ORDINARY test reaches these paths. Same split
+  # as pxc04* versus the seg gate's PAGING/C-0 sweep.
+  [[ "$t" == "pntret" ]] && continue
   n=$((n+1))
   out="$("$TB" --image "$img" --system --out /dev/null --max-insn 4000 --quiesce 400 2>&1 || true)"
   a="$(printf '%s\n' "$out" | grep -c 'VEN-NTRET'   || true)"
@@ -52,6 +56,36 @@ if [[ "$nt" == "0" && "$rf" == "0" ]]; then
   echo "  ok   neither unimplemented sequence is reached by this corpus"
   echo "  NOTE this is CORPUS COVERAGE, not proof of unreachability -- the same"
   echo "       distinction the review draws about C-04's \"0 in 68 images\"."
+  # ---- the DIRECTED probe: pntret reaches the NT return on purpose ---------------
+  # Nothing in verif/sys/ reached an NT task return, so the gap was inferred from
+  # absence. pntret builds it: TSS_A's backlink names a BUSY TSS_B whose EIP is
+  # nt_land, NT is set, and IRET executes. Today the core ignores NT and nt_land is
+  # never reached.
+  #
+  #   0x07000000  NT ignored -- the CURRENT, unimplemented behaviour
+  #   0x07000001  the task return actually happened
+  #
+  # This gate asserts the UNIMPLEMENTED value, deliberately, in the same shape as
+  # run-ic-alias-gate.sh: it holds the answer, so implementing the sequence makes this
+  # FAIL and forces the claim to be restated instead of the gap quietly disappearing.
+  pimg="$REPO/verif/sys/tests/pntret/pntret.bin"
+  if [[ -f "$pimg" ]]; then
+    ptr="$(mktemp)"
+    "$TB" --image "$pimg" --system --out "$ptr" --max-insn 4000 --quiesce 400 >/dev/null 2>&1 || true
+    pe="$(tail -1 "$ptr" 2>/dev/null | grep -o '"ebp":"[^"]*"' | cut -d'"' -f4 || true)"
+    rm -f "$ptr"
+    echo "  directed NT-return probe (pntret): ebp = ${pe:-<none>}"
+    if [[ "$pe" == "0x07000001" ]]; then
+      echo "  FAIL the NT task return now WORKS. That is good news and this gate is stale:"
+      echo "       restate it to assert 0x07000001, and drop the [VEN-NTRET] instrument"
+      echo "       and this gate's H-08 half, which exist only to track an ABSENT path."
+      echo "UNIMPL-GATE-FAIL"; exit 1
+    elif [[ "$pe" != "0x07000000" ]]; then
+      echo "  FAIL neither value -- the probe did not reach its IRET as designed."
+      echo "UNIMPL-GATE-FAIL"; exit 1
+    fi
+    echo "    ok   still unimplemented, and now PROVEN reachable rather than inferred"
+  fi
   echo "UNIMPL-GATE-OK"; exit 0
 fi
 echo "  REACHED:$hit"

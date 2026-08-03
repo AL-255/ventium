@@ -253,6 +253,7 @@ xc04:
 # section 3.5 is about. Nonzero = the path became reachable and now needs implementing.
 .PHONY: unimpl
 unimpl:
+	@$(MAKE) -s -C verif/sys/tests/pntret
 	bash verif/sys/run-unimpl-gate.sh
 
 # --- instruction-fetch cacheability (verif/sys/run-icbypass-gate.sh) ---------
