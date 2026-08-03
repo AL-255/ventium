@@ -187,6 +187,18 @@ seg:
 fenv:
 	bash verif/sys/run-fenv-gate.sh
 
+# --- IDT gate offset vs CS limit (verif/sys/run-intlim-gate.sh) --------------
+# REVIEW2_aug2 C-03. A gate whose offset lies beyond the destination CS limit must be
+# rejected during DELIVERY, before CS/CPL are installed. Deliberately NOT differential:
+# both a fixed and a broken core end up taking a #GP, so the presence of a fault proves
+# nothing -- the first draft of this test passed with the fix reverted for exactly that
+# reason. The assertion is the SAVED CS on the #GP frame, which names where the fault
+# was taken. Verified to FAIL against a build with the limit compare removed.
+.PHONY: intlim
+intlim:
+	@$(MAKE) -s -C verif/sys/tests/pintlim
+	bash verif/sys/run-intlim-gate.sh
+
 # --- L1 / memory-subsystem unit gates ---------------------------------------
 # `l1` runs EVERY verif/l1/run-*.sh gate -- the list is GLOBBED, not enumerated, so a
 # new gate script is picked up automatically (the M-08 RLAST-recovery gate arrived that

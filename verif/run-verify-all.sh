@@ -67,6 +67,14 @@ GATES=(
   # behaviour) and QEMU does not implement it, so a diff would fail when Ventium is
   # right. Asserted against the SDM instead.
   "fenv      (x87 FNSTENV masks all exceptions)|fenv"
+  # REVIEW2_aug2 C-03: an IDT gate offset beyond the destination CS limit must be
+  # rejected DURING delivery, before CS/CPL are installed. NOT differential: the
+  # harness QEMU takes a #GP here too, so a diff cannot tell the two apart. The
+  # assertion is the SAVED CS on the fault frame (0x08 = rejected before install,
+  # 0x18 = installed and the overrun fetch faulted) -- "a #GP happened" is true in
+  # BOTH builds, which is precisely how this test's first draft passed with the fix
+  # reverted. Verified to FAIL against a build with the limit compare removed.
+  "intlim    (IDT gate offset vs destination CS limit)|intlim"
   # The 12 verif/l1/run-*.sh memory-subsystem gates (L1D coherence + store/load,
   # I-cache snoop, TLB, BTB, and the L1/AXI family). These existed for a long time
   # with NO make target and NO entry here, while this script's own banner called
