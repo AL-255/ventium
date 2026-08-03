@@ -366,12 +366,36 @@ module ven_l1d #(
   // repaired -- and dormant in the default one. It is not "unreachable"; it is
   // reachable exactly where the CD feature is switched on.
   //
-  // WHAT THE FIX REQUIRES: a width-accurate single-access path -- issue ONE beat at
-  // the exact byte address and width, and serve from that beat rather than from a
-  // 256-bit line image. That is a COORDINATED change to both halves: the fill driver
-  // (stop after one beat when bypass_q) and the L1_BYP serve (bp_line_x is indexed by
-  // c_addr[4:0] on the assumption the whole line was fetched, so a single-beat fill
-  // would leave it indexing bytes that were never read).
+  // WHAT THE FIX REQUIRES -- TRACED, not asserted. This decline was re-examined after
+  // C-06's was tested and found partly WRONG, so it is recorded as a work list rather
+  // than a judgement, and someone should be able to check it without repeating the
+  // trace:
+  //
+  //   1. ven_axi_master.sv:286 sets `m_axi_arlen = 8'(LINE_BEATS-1)` as a CONSTANT.
+  //      The L1D cannot ask for fewer beats; the master decides. So a width-accurate
+  //      access is not something this file can do alone, which is the crux.
+  //   2. That needs a new request-width input on ven_axi_master, and its read FSM
+  //      (r_beat / rlast / the rd_primed priming at ~414) must handle a 1-beat burst --
+  //      the finding notes the priming normally issues the burst TWICE.
+  //   3. ventium_l1_axi must plumb the new signal through.
+  //   4. ven_l1d must drive it when bypass_q, and address the WORD containing c_addr
+  //      rather than the line base (m_addr at ~326 is {fbase[31:5],5'd0}).
+  //   5. The L1_BYP serve indexes bp_line_x by c_addr[4:0] assuming the whole line was
+  //      fetched; with one word present that indexes bytes never read.
+  //   6. An UNALIGNED access spanning two words still needs two beats, so "single
+  //      beat" is really "one or two, by width and alignment" -- the same shape as the
+  //      byp_need_hi cross-line case already here.
+  //
+  // Six coordinated changes across three modules, on the memory path every gate
+  // depends on. That is materially larger than the rest of this review's fixes, and
+  // unlike C-06 -- where the selector turned out to be already in hand at a point
+  // before the push -- there is no smaller true step hiding inside it: any partial
+  // version still issues the wrong number of beats, which IS the finding.
+  //
+  // NOTE the overlap: C-09's first option ("give bypass traffic an explicit
+  // single-beat backing operation") is this same change. C-09 was closed by its SECOND
+  // option -- drain the burst -- which fixes the residual-beat corruption but leaves
+  // the amplification untouched. Doing this would supersede that drain.
   //
   // NOT ATTEMPTED HERE, deliberately: this FSM has a recorded deadlock history
   // (L1_FILL->L1_BYP, see the rd_hit note above), the H-07 repair in it landed only
