@@ -5076,6 +5076,13 @@ module core
   // attr byte is not detected, so the check simply stays off for that segment. That is
   // the same direction as the rest of C-01's fallbacks -- it can miss a violation, never
   // invent one, which is what got the previous attempts reverted.
+`ifndef SYNTHESIS
+  // H-06 reachability: does any test actually take the same-priv 16-bit gate?
+  logic ven_h06_hit; int ven_h06_n; logic ven_h06log_en;
+  initial begin ven_h06log_en = $test$plusargs("ven_h06log") != 0; ven_h06_n = 0; end
+  always_ff @(posedge clk) if (rst_n && ven_h06_hit) ven_h06_n <= ven_h06_n + 1;
+  final if (ven_h06log_en) $display("[H06GATE] same-priv 16-bit gate pushes: %0d", ven_h06_n);
+`endif
   logic        seg_pm_loaded [NUM_SEG];
 `ifndef SYNTHESIS
   // A check that is "live" but whose enable never sets is just a tie-off with extra
@@ -6048,6 +6055,9 @@ module core
     // C-03: most beats are a full dword. The arms below narrow it where the state
     // genuinely moves fewer bytes; anything left at 4 is the conservative reading.
     cur_size = 4'd4;
+`ifndef SYNTHESIS
+    ven_h06_hit = 1'b0;
+`endif
     unique case (state)
       S_FETCH: cur_lin = flin + {27'd0,fetch_word,2'b00};
       S_PF:    cur_lin = {pf_fill_addr[31:5],5'd0} + {27'd0,pf_word,2'b00};
@@ -6210,9 +6220,30 @@ module core
         cur_is_w = 1'b1;
         // CROSS-PRIV: push descending from the NEW stack (TSS.espN). SAME-PRIV:
         // descending from the current SS:ESP. (mirror the bus driver arm.)
-        cur_lin = xpl_active
-                  ? (seg_base[SG_SS] + int_new_esp - ({28'd0, int_step} * 32'd4) - 32'd4)
-                  : (seg_base[SG_SS] + gpr_o[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
+        //
+        // REVIEW2_aug2 H-06: the SAME-PRIVILEGE 16-BIT GATE was missing here. The bus
+        // arm pushes a 6-byte frame in 2-BYTE slots -- ESP-2, ESP-4, ESP-6, with a
+        // low-half strobe (core_bus_driver.svh, the `int_gate_op16` branch) -- while
+        // this mirror always subtracted 4 per entry and the extent defaulted to 4. So
+        // for a 16-bit gate the TLB checked and translated one address while the bus
+        // wrote another; near a page boundary those are DIFFERENT PAGES, and the frame
+        // lands in the wrong one with page two's fault never raised.
+        //
+        // The three arms must agree exactly, which is what CHECK 5 (PAGING/C-03)
+        // asserts -- it did not catch this because no corpus test takes a 16-bit gate
+        // with paging on. Same shape as C-03's own finding: one address, one source.
+        if (!xpl_active && !from_v86 && int_gate_op16) begin
+          cur_lin  = seg_base[SG_SS]
+                     + (gpr_o[R_ESP] - {27'd0, (int_step + 4'd1), 1'b0});
+          cur_size = 4'd2;                       // low-half strobe: 2 bytes, not 4
+`ifndef SYNTHESIS
+          ven_h06_hit = 1'b1;                    // reachability probe (see below)
+`endif
+        end else begin
+          cur_lin = xpl_active
+                    ? (seg_base[SG_SS] + int_new_esp - ({28'd0, int_step} * 32'd4) - 32'd4)
+                    : (seg_base[SG_SS] + gpr_o[R_ESP] - ({28'd0, int_step} * 32'd4) - 32'd4);
+        end
       end
       // REVIEW_aug2 C-06: S_IRET_SS reads the popped SS DESCRIPTOR from the GDT/LDT,
       // not the stack. Mirrors core_bus_driver.svh exactly (CHECK 5 enforces it).
