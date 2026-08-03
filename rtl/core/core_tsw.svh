@@ -87,10 +87,10 @@
               // descriptors, which is precisely the isolation a task switch exists to
               // provide. Clearing base and limit makes any such reference fall out of
               // range instead. Same treatment H-10 gave `lldt $0`.
-              ldt_sel <= tsw_new_ldt;
+              tsw_st_ldt_sel <= tsw_new_ldt;   // C-05: staged, committed in S_TSW_BUSY
               if (!(|tsw_new_ldt[15:3])) begin
-                ldt_base  <= 32'd0;
-                ldt_limit <= 16'd0;
+                tsw_st_ldt_base  <= 32'd0;
+                tsw_st_ldt_limit <= 16'd0;
               end
               if (|tsw_new_ldt[15:3]) begin
                 // ---- REVIEW1_Aug2 C-09: VALIDATE the incoming LDTR ------------------
@@ -108,8 +108,8 @@
                   start_fault(8'd10, 1'b1,
                               {16'd0, tsw_new_ldt} & 32'h0000_FFFC, int_src_pc);
                 end else begin
-                ldt_base  <= desc_base(desc);
-                ldt_limit <= desc_limit16(desc);
+                tsw_st_ldt_base  <= desc_base(desc);
+                tsw_st_ldt_limit <= desc_limit16(desc);
                 tsw_step <= 5'd0; state <= S_TSW_SEG;
                 end
               end else begin
@@ -241,6 +241,11 @@
                 seg_limit[t] <= tsw_st_limit[t];
                 seg_attr [t] <= tsw_st_attr [t];
               end
+              // REVIEW2_aug2 C-05: LDTR lands HERE now, with the segments it governs,
+              // instead of back in S_TSW_LDT before any of them had been read.
+              ldt_sel   <= tsw_st_ldt_sel;
+              ldt_base  <= tsw_st_ldt_base;
+              ldt_limit <= tsw_st_ldt_limit;
               cpl_r   <= tsw_st_cpl;
               cs_d    <= tsw_st_cs_d;
               ss_b    <= tsw_st_ss_b;

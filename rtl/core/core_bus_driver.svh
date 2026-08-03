@@ -502,7 +502,11 @@
       S_TSW_SEG: begin mem_req=1'b1;             // reload incoming seg descriptors
         // beat = seg_idx*2 + half; the selector for seg_idx is tsw_sel[seg_idx]
         // (CS,SS,DS,ES,FS,GS order). TI bit (sel[2]) picks GDT vs the just-loaded LDT.
-        mem_addr = (tsw_sel[3'(tsw_step[4:1])][2]?ldt_base:gdt_base)
+        // REVIEW2_aug2 C-05: the INCOMING task's LDT is staged (tsw_st_ldt_base) and
+        // is not committed to ldt_base until S_TSW_BUSY, so address through the staged
+        // copy. Using the live ldt_base here would resolve the new task's TI=1
+        // selectors through the OUTGOING task's LDT.
+        mem_addr = (tsw_sel[3'(tsw_step[4:1])][2]?tsw_st_ldt_base:gdt_base)
                    + {16'd0, tsw_sel[3'(tsw_step[4:1])][15:3], 3'd0}
                    + {29'd0, tsw_step[0], 2'b00};
       end

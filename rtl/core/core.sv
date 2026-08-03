@@ -5219,6 +5219,20 @@ module core
   logic [7:0]  tsw_st_attr  [NUM_SEG];
   logic        tsw_st_cs_d, tsw_st_ss_b;
   logic [1:0]  tsw_st_cpl;
+  // REVIEW2_aug2 C-05 (second bullet): the incoming LDTR, STAGED. S_TSW_LDT wrote
+  // ldt_sel/ldt_base/ldt_limit the moment the LDT descriptor validated -- before ANY
+  // of the six task segments had been read, let alone validated -- so a #TS or #PF
+  // during S_TSW_SEG left the OLD task running with the NEW task's LDT installed, and
+  // every subsequent TI=1 selector resolved through a table the running task does not
+  // own. Committed with the rest of the context in S_TSW_BUSY.
+  //
+  // S_TSW_SEG must still ADDRESS through the incoming LDT (IA-32 loads LDTR before the
+  // segment registers precisely so the new task's selectors resolve against it), so the
+  // bus driver reads tsw_st_ldt_base rather than the live ldt_base. Staging the commit
+  // and preserving that ordering are separate things, and both are required.
+  logic [15:0] tsw_st_ldt_sel;
+  logic [31:0] tsw_st_ldt_base;
+  logic [15:0] tsw_st_ldt_limit;
   logic        walk_usr_lat;             // C-04: the class of the access that missed
   logic        mem_req_pre_sq;           // mem_req before the C-01 segment squash
   logic        xs_probing;               // C-02: the crossing-store probe phase
