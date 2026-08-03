@@ -480,6 +480,23 @@
               // CWSDPMI far-returns same-privilege (popped CS RPL == CPL).
               q_ljmp_sel <= mem_rdata[15:0];
               q_ljmp_off <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
+`ifndef SYNTHESIS
+              // ---- REVIEW2_aug2 C-06 (RETF outer-level): INSTRUMENTED, not fixed.
+              // A protected RETF whose popped CS has RPL > CPL is a return to an OUTER
+              // privilege level, and IA-32 requires popping and validating SS:ESP as
+              // well and discarding the inner frame. This core has no such path (see
+              // the file header): it reuses far-JMP semantics, so cpl_r would take the
+              // popped RPL while SS:ESP stay the INNER ones -- outer code running on
+              // the inner stack, silently, with nothing reporting it.
+              //
+              // Measured before deciding what to do about it, exactly as the H-08 NT
+              // return was: a hard halt here would be a behavioural change on the RETF
+              // path, and the workloads that would say whether real guests take this
+              // (m7 Quake/Win95) are EXCLUDED from verify-all.
+              if (!seg_real && (mem_rdata[1:0] > cpl_r))
+                $display("[VEN-RETFOUT] protected RETF to an OUTER level: popped CS=%04h RPL=%0d > CPL=%0d at cs:eip=%04x:%08h -- SS:ESP are NOT popped or validated (REVIEW2_aug2 C-06)",
+                         mem_rdata[15:0], mem_rdata[1:0], cpl_r, seg_sel[SG_CS], q_pc);
+`endif
               // REVIEW2_aug2 H-07: the POPPED CS is the least trustworthy selector in
               // the core -- it comes straight off the stack -- and it reached S_LJMP
               // with no bounds test at all.
