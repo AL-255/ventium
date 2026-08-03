@@ -645,8 +645,33 @@
             // exercising it. That is worse than the instrumented status quo -- it is
             // the shape of defect this review found twice in my own work, where a fix
             // was dead or fail-closed and every gate stayed green. Test first: an image
-            // that sets NT, builds a backlink TSS and IRETs. ptsslim and pxc04t both
-            // build TSSes and are the templates.
+            // that sets NT, builds a backlink TSS and IRETs.
+            //
+            // THAT TEST NOW EXISTS -- verif/sys/tests/pntret, graded by
+            // run-unimpl-gate.sh -- so the prerequisite is met. An implementation was
+            // then ATTEMPTED AND REVERTED. Recorded so the next attempt starts past
+            // what already worked:
+            //   * S_NTRET_RD must be appended LAST in the state enum. run-xc04-gate.sh
+            //     asserts state NUMBERS (23/36/14/16/43/34) for the C-04 probes;
+            //     inserting anywhere else renumbers them while that gate keeps printing
+            //     green about different states.
+            //   * dispatch on EFLAGS.NT, the backlink read at tr_base+0, its null /
+            //     out-of-table #TS check, and handing the selector to S_LJMP all built
+            //     cleanly.
+            //   * S_LJMP's task-switch arm was widened to accept a BUSY TSS (type 0xB)
+            //     under an ntret_pend flag and to LEAVE the busy bit rather than
+            //     re-setting it -- a backlink names the suspended outer task, which
+            //     never stopped being busy.
+            //   SYMPTOM to chase: pntret still ended at ebp=0x07000000 with CS=0x0030,
+            //   i.e. a TSS SELECTOR loaded into CS -- S_LJMP took its ordinary CS-load
+            //   path instead of the task-switch arm. Either ntret_pend was not asserted
+            //   when that arm evaluated, or an earlier arm in the chain claims type 0xB
+            //   first.
+            //
+            // REVERTED rather than iterated on, because verify-all was 19/19 WITH the
+            // half-working version: nothing but pntret sets NT, so the suite cannot
+            // tell working from broken here. Leaving it would have been a third
+            // instance of the defect shape above.
 `ifndef SYNTHESIS
             if (!real_mode && eflags[14])
               $display("[VEN-NTRET] IRET with EFLAGS.NT=1 at cs:eip=%04x:%08h -- an NT task-return is NOT implemented; this is being treated as an ordinary IRET (REVIEW2_aug2 H-08)",
