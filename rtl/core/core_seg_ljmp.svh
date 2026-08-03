@@ -360,11 +360,29 @@
               // ptr16:32 and both memory-indirect forms all funnel through S_LCALL --
               // whereas the dispatch precheck only ever covered SYS_LJMP.
               //
-              // NOTE (C-06, not fixed here): the return frame has ALREADY been pushed
-              // by this point, so a rejected selector faults with CS:next_eip on the
-              // stack and ESP decremented. Preventing the out-of-table descriptor READ
-              // is what H-07 asks for and is independent of that; unwinding the push
-              // needs the far-transfer staging rework C-06 describes.
+              // ---- C-06 STATUS at this site, traced rather than asserted -----------
+              // SELECTOR half: DONE, but NOT here. A bad selector is now rejected at
+              // dispatch and at both memory-indirect load completions -- i.e. BEFORE
+              // S_LCALL pushes anything (see core_fetch_decode.svh SYS_LCALL and
+              // core_load.svh). This site is the backstop that stops the out-of-table
+              // descriptor READ; by the time it runs the frame is already pushed.
+              //
+              // DESCRIPTOR half: NOT DONE, and there is no smaller true step inside it.
+              // The checks (present, code segment, DPL, conforming) need the read that
+              // S_LJMP performs, which is after the push. Moving the read earlier is
+              // the "validate, then push, then commit" reorder the finding asks for,
+              // and it CANNOT be done for the ordinary case alone: S_LJMP's commit at
+              // ~313 also serves CALL GATES, which re-enter this state with the gate's
+              // embedded target selector (gate_via). A gate is precisely what decides
+              // whether the transfer changes privilege, and therefore what the stack
+              // does -- so validation and stack behaviour are coupled through the gate
+              // pass. A reorder covering the non-gate case would still push before
+              // validating on the gate path, which is the case DOS Quake's CWSDPMI
+              // actually uses (task #47).
+              //
+              // This is the same test applied to H-11's decline: not "is it big" but
+              // "is there a smaller step that is fully true". For C-06's selector half
+              // there was one, and it landed. For this half there is not.
               if (far_sel_bad(q_ljmp_sel))
                 start_fault(8'd13, 1'b1,
                             {16'd0, q_ljmp_sel} & 32'h0000_FFFC, q_pc);
