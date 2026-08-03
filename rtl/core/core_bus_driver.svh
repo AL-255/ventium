@@ -515,15 +515,36 @@
                    + {29'd0, tsw_step[0], 2'b00};
       end
       S_TSW_BUSY: begin mem_req=1'b1; mem_we=1'b1; mem_wstrb=4'b0010;
-        // toggle the descriptor busy bit (access byte @ descriptor+5 = dword
-        // descriptor+4, byte 1). beat 0 CLEARS the outgoing TSS busy (B->9),
-        // beat 1 SETS the incoming TSS busy (9->B). Single-byte write via wstrb.
+        // Toggle the descriptor busy bit (access byte @ descriptor+5 = dword
+        // descriptor+4, byte 1). Single-byte write via wstrb.
+        //
+        // ---- REVIEW2_aug2 C-05 (fifth bullet): ORDER MATTERS, and it was backwards.
+        // The two writes straddle the final commit and cannot be made atomic here -- a
+        // fault between them is possible in principle and IA-32 itself leaves such a
+        // task switch for the #TS handler to clean up. What CAN be fixed is WHICH
+        // partial state a fault leaves behind, and the old order left the worse one:
+        //
+        //   old  beat0 CLEAR outgoing, beat1 SET incoming.  A fault on beat 1 leaves
+        //        the STILL-RUNNING task's descriptor marked AVAILABLE while it is very
+        //        much still running -- so a later JMP to it succeeds and re-enters a
+        //        task that never left, which is precisely what the busy bit exists to
+        //        prevent.
+        //   new  beat0 SET incoming, beat1 CLEAR outgoing.  A fault on beat 1 leaves
+        //        the outgoing descriptor BUSY (true: that task is still running) and
+        //        the incoming one busy but not entered -- a state the #TS handler can
+        //        see and clear, and which cannot be mistaken for a free task.
+        //
+        // The commit still happens on the LAST beat's ack (core_tsw.svh), so clearing
+        // the outgoing bit is now adjacent to the commit rather than four beats ahead
+        // of it. Making the pair genuinely recoverable needs undoable descriptor
+        // writes -- a probe-before-write or a rollback -- which is a bigger change and
+        // is NOT done here.
         if (tsw_step == 5'd0) begin
-          mem_addr  = gdt_base + {16'd0, tr_sel[15:3], 3'd0} + 32'd4;
-          mem_wdata = {16'd0, (tr_attr & ~8'h02), 8'd0};   // outgoing -> available
-        end else begin
           mem_addr  = gdt_base + {16'd0, tsw_new_sel[15:3], 3'd0} + 32'd4;
           mem_wdata = {16'd0, tsw_new_attr, 8'd0};         // incoming -> busy
+        end else begin
+          mem_addr  = gdt_base + {16'd0, tr_sel[15:3], 3'd0} + 32'd4;
+          mem_wdata = {16'd0, (tr_attr & ~8'h02), 8'd0};   // outgoing -> available
         end
       end
       // M2S.5 — SMRAM save-map accesses. The SMRAM region is addressed PHYSICALLY
