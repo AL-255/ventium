@@ -447,11 +447,33 @@ _start16:
     andw    $0x0241, %ax              /* IE(0x0001) | SF(0x0040) | C1(0x0200) */
     movw    %ax, 0x076a               /* S4 */
 
+    /* ==== REVIEW2_aug2 H-16 (EXCHANGE operand): FXCH with an EMPTY ST(i) =========
+     * FXCH consumes ST(0) and ST(i) as OPERANDS with no push/pop transition, so
+     * neither tag was consulted and exchanging with an empty register silently
+     * swapped in whatever bits the slot held. IA-32 makes an empty operand #IS, the
+     * same as popping an empty stack, with C1=0 (underflow direction).
+     *
+     *   S6 = FSW(IE|SF|C1) after `fxch %st(1)` with only ST(0) live.
+     *        correct 0041 (IE|SF, C1 clear) / before the fix 0000.
+     */
+    fninit
+    fld1                              /* ST(0) live, ST(1)..ST(7) EMPTY */
+    fxch    %st(1)                    /* ST(1) is empty -> #IS */
+    fnstsw  0x076c
+    movw    0x076c, %ax
+    andw    $0x0241, %ax
+    movw    %ax, 0x076e               /* S6 */
+
     movw    $0x03F8,%dx
     movb    $'S',%al; outb %al,%dx
     movb    $'4',%al; outb %al,%dx
     movb    $'=',%al; outb %al,%dx
     movw    0x076a, %ax
+    call    puthexw
+    movb    $'S',%al; outb %al,%dx
+    movb    $'6',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x076e, %ax
     call    puthexw
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx

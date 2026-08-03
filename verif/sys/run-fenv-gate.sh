@@ -206,6 +206,19 @@ fi
 #   suppression TOP (bits 13:11) still 0 -- eight pushes wrapped TOP back to 0 and the
 #               ninth did nothing. Unsuppressed it decrements to 7.
 # Measured: 82c1 suppressed, bac1 not.
+# REVIEW2_aug2 H-16 (EXCHANGE operand): FXCH consumes ST(0) and ST(i) with no push/pop
+# transition, so neither tag was consulted -- exchanging with an EMPTY register silently
+# swapped in whatever bits the slot held. Measured: 0041 with the check, 0000 without.
+S6=$(printf '%s' "$SOUT" | grep -oE "S6=[0-9a-f]+" | head -1 | cut -d= -f2)
+if [ "$S6" != "0041" ]; then
+  [ "$S6" = "0000" ] && echo "  FAIL FXCH with an EMPTY ST(i) raised NOTHING -- the operand tags are unchecked"
+  [ "$S6" != "0000" ] && [ -n "${S6:-}" ] && echo "  FAIL FXCH-empty FSW '$S6' (want 0041 = IE|SF, C1 clear)"
+  [ -z "${S6:-}" ] && echo "  FAIL no S6= line in the output"
+  fenv_fail=1
+else
+  echo "  PASS FXCH with an empty ST(i) raises #IS (IE+SF, C1=0)"
+fi
+
 S5=$(printf '%s' "$SOUT" | grep -oE "S5=[0-9a-f]+" | head -1 | cut -d= -f2)
 if [ -z "${S5:-}" ]; then
   echo "  FAIL no S5= line -- the unmasked stack-fault witness did not run"

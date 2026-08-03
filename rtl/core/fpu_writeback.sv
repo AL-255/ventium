@@ -1123,7 +1123,20 @@ module fpu_writeback
     // single FLD, where exactly one register is live and a compare-and-pop-both
     // consumes one register that exists and one that does not.
     fp_stk_unf = (fp_we_pop  &&  fptag[ftop])                       // pop an EMPTY ST(0)
-              || (fp_we_pop2 && (fptag[ftop] || fptag[ftop + 3'd1]));  // either of the two
+              || (fp_we_pop2 && (fptag[ftop] || fptag[ftop + 3'd1]))   // either of the two
+    // REVIEW2_aug2 H-16 (second bullet, EXCHANGE): FXCH consumes BOTH ST(0) and ST(i)
+    // as operands without any push/pop transition, so neither tag was ever consulted --
+    // exchanging with an empty register silently swapped in whatever bits the slot
+    // held. IA-32: an operand that is empty is #IS, exactly like a pop of an empty
+    // stack, and C1=0 marks it as an underflow.
+    //
+    // FXCH is the one case of the review's four (arithmetic, compare, exchange, store)
+    // that is EXACTLY identifiable from signals this block already produces:
+    // fp_we_fxch names the operation and fp_fxch_idx names the second register. The
+    // other three consume operands through fst()/st0/st1 reads that carry no per-op
+    // "which registers did I read" signal, so covering them needs the per-operation
+    // operand-validity layer the finding asks for and is NOT done here.
+              || (fp_we_fxch && (fptag[ftop] || fptag[ftop + fp_fxch_idx]));
 
     // The RESPONSE is behind VEN_X87_STKFLT; the DETECTION above is always live so
     // +ven_stklog can measure reachability in the shipping build.
