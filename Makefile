@@ -222,6 +222,16 @@ retfsel:
 	@$(MAKE) -s -C verif/sys/tests/pretfsel
 	bash verif/sys/run-retfsel-gate.sh
 
+# --- instruction-fetch cacheability (verif/sys/run-icbypass-gate.sh) ---------
+# REVIEW2_aug2 H-13. CR0.CD now drives ic_fill_nocache in the DEFAULT build, so the
+# comparison sides swapped: the CACHING build is the one needing an opt-out define.
+# This gate existed but NOTHING RAN IT -- the same orphan-gate problem that hid the
+# missing L1 gates. Asserts both halves: the CD-honouring build really refetches, and
+# it is architecturally transparent.
+.PHONY: icbypass
+icbypass:
+	bash verif/sys/run-icbypass-gate.sh
+
 # --- L1 / memory-subsystem unit gates ---------------------------------------
 # `l1` runs EVERY verif/l1/run-*.sh gate -- the list is GLOBBED, not enumerated, so a
 # new gate script is picked up automatically (the M-08 RLAST-recovery gate arrived that

@@ -3021,7 +3021,7 @@ module core
       p = 1'b0;
       for (int w=0; w<IC_WAYS; w++)
         if (ic_val_o[set][w] && ic_tag_o[set][w]==tag) p = 1'b1;
-`ifdef VEN_IC_FETCH_BYPASS
+`ifndef VEN_IC_NO_FETCH_BYPASS
       // H-06: the non-cacheable line just filled is readable ONCE without being valid.
       for (int i=0; i<2; i++)
         if (icbp_v[i] && (set == icbp_set[i]) && (tag == icbp_tag[i])) p = 1'b1;
@@ -3039,7 +3039,7 @@ module core
       hw = IC_WAYW'(IC_WAYS-1);
       for (int w=0; w<IC_WAYS; w++)
         if (ic_val_o[set][w] && ic_tag_o[set][w]==tag) hw = IC_WAYW'(w);
-`ifdef VEN_IC_FETCH_BYPASS
+`ifndef VEN_IC_NO_FETCH_BYPASS
       for (int i=0; i<2; i++)
         if (icbp_v[i] && (set == icbp_set[i]) && (tag == icbp_tag[i])) hw = icbp_way[i]; // H-06
 `endif
@@ -6636,7 +6636,7 @@ module core
   // unit-tested (run-icache-snoop-gate checks [6][7][8] including a cacheable
   // control), and is the right hook for that work -- it just has nothing safe to
   // drive it until the bypass exists.
-`ifdef VEN_IC_FETCH_BYPASS
+`ifndef VEN_IC_NO_FETCH_BYPASS
   // REVIEW1_Aug2 H-06: the FETCH BYPASS the comment above says this needs.
   //
   // Why poisoning alone livelocks: the I-cache IS the fetch datapath, so a line that
@@ -6687,7 +6687,7 @@ module core
   end
 `endif
 
-`ifdef VEN_IC_FETCH_BYPASS
+`ifndef VEN_IC_NO_FETCH_BYPASS
   // REVIEW2_aug2 H-13: MEASURED COST of honouring CR0.CD on instruction fetch, with the
   // two builds confirmed different by checksum first (an earlier "0% cost" reading here
   // turned out to be a build compared against itself):

@@ -85,6 +85,10 @@ GATES=(
   # descriptor read. The pre-fix core raises no fault and STALLS at the LRET, so the
   # gate fails on an absent witness rather than treating it as inconclusive.
   "retfsel   (far RETF bounds its popped CS selector)|retfsel"
+  # REVIEW2_aug2 H-13: CR0.CD drives instruction-fill cacheability in the DEFAULT build
+  # now. This gate existed and nothing ran it. Asserts that the CD-honouring build
+  # really refetches AND that it is architecturally transparent vs the caching build.
+  "icbypass  (CR0.CD drives instruction-fill cacheability)|icbypass"
   # The 12 verif/l1/run-*.sh memory-subsystem gates (L1D coherence + store/load,
   # I-cache snoop, TLB, BTB, and the L1/AXI family). These existed for a long time
   # with NO make target and NO entry here, while this script's own banner called

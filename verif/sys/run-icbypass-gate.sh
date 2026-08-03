@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # verif/sys/run-icbypass-gate.sh
-# REVIEW1_Aug2 H-06: the non-allocating INSTRUCTION-FETCH bypass (VEN_IC_FETCH_BYPASS).
+# REVIEW1_Aug2 H-06 / REVIEW2_aug2 H-13: the non-allocating INSTRUCTION-FETCH bypass.
+#
+# H-13 MADE THIS THE DEFAULT, so the two sides of this comparison SWAPPED. The shipping
+# build now honours CR0.CD; the CACHING build is the one that needs an opt-out define
+# (VEN_IC_NO_FETCH_BYPASS). The gate compares default-vs-opt-out rather than
+# default-vs-define, and its "must refetch MORE" direction is unchanged in meaning:
+# the honouring build (now the default) must issue more reads than the ignoring one.
 #
 # ic_fill_nocache was tied to 0 because driving it from CR0.CD livelocks: the I-cache IS
 # the fetch datapath, so a line that never validates is refetched forever (0 instructions
@@ -22,14 +28,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TB="$ROOT/verif/tb"
 DEF="$TB/obj_dir/tb_ventium"
-BYP_OBJ=obj_dir_icbyp
-BYP="$TB/$BYP_OBJ/tb_ventium"
+# NOTE the naming: DEF is now the BYPASSING (CD-honouring) build, and CCH is the
+# CACHING one built with the opt-out. The variables keep their old roles -- BYP is
+# whichever build bypasses -- so the comparison logic below is untouched.
+CCH_OBJ=obj_dir_iccache
+CCH="$TB/$CCH_OBJ/tb_ventium"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 
-echo "=== build the VEN_IC_FETCH_BYPASS object dir ==="
-make -s -C "$TB" rtl OBJDIR="$BYP_OBJ" VL_EXTRA_DEFINES="+define+VEN_IC_FETCH_BYPASS" >/dev/null
-[ -x "$BYP" ] || { echo "ICBYPASS-GATE-FAIL (bypass TB not built)"; exit 1; }
+echo "=== build the CACHING (opt-out) object dir; the DEFAULT now bypasses ==="
+make -s -C "$TB" rtl OBJDIR="$CCH_OBJ" VL_EXTRA_DEFINES="+define+VEN_IC_NO_FETCH_BYPASS" >/dev/null
+[ -x "$CCH" ] || { echo "ICBYPASS-GATE-FAIL (caching TB not built)"; exit 1; }
 [ -x "$DEF" ] || { make -s -C "$TB" rtl OBJDIR=obj_dir >/dev/null; }
+# The roles: the CACHING build is the baseline, the DEFAULT build is the bypassing one.
+BYP="$DEF"
+DEF="$CCH"
 
 run() { timeout 120 "$1" --system --image "$2" --out "$3" --max-insn 3000 --quiesce 1500 2>&1; }
 
