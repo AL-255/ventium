@@ -1148,10 +1148,42 @@ module fpu_writeback
       // MASKED overflow (CW.IM set, which is the state FNINIT leaves): the push still
       // happens, but the destination receives the QNaN indefinite instead of the value
       // -- SDM Vol.1 Table 8-4. The UNMASKED case must instead suppress the operation
-      // and raise #MF; that route is H-12's remainder and is NOT here yet, so an
-      // unmasked stack fault currently sets IE/SF/ES/B (visible to software polling
-      // FSW) but does not trap. Recorded in PROGRESS_REVIEW1_Aug2.md, not silent.
+      // and raise #MF -- both now happen. The #MF route is H-12's (fstat[7] drives the
+      // fault arm in core_fetch_decode.svh) and it is already fed here, because ES is
+      // derived centrally in fpu_top.sv's with_es_b() as "any flag set and not masked":
+      // an unmasked IE sets ES and B by construction. Deferring the trap to the next
+      // WAITING FP instruction is architectural, not a shortcut -- that is how x87
+      // reports exceptions. The suppression is below.
       if (fp_stk_ovf && fctrl[0]) fp_push_data = QNAN_INDEF;
+
+      // ---- REVIEW2_aug2 H-16: UNMASKED -> SUPPRESS THE OPERATION ---------------
+      // A masked stack fault completes with the QNaN indefinite (above). An UNMASKED
+      // one must not complete at all: SDM Vol.1 8.5 / Table 8-4 -- the register file
+      // and TOP are left untouched and the exception is reported on the next waiting
+      // FP instruction. Previously the flags were set and the operation ran anyway,
+      // so an unmasked 9th push still destroyed the live register the fault exists to
+      // protect, and an unmasked pop of an empty stack still advanced TOP.
+      //
+      // Every architectural write this block can issue is suppressed, not just the
+      // push/pop that raised it: fp_we_sti/fxch/ffree/incstp/decstp are the other
+      // paths that reach the register file and TOP from here. Leaving any of them
+      // live would be the same half-suppression in a different register.
+      //
+      // fp_we_fstat and fp_fstat_wval are DELIBERATELY left alone -- the whole point
+      // is that IE|SF (and, through with_es_b(), ES and B) are recorded so the #MF
+      // route H-12 built has something to key off at the next waiting instruction.
+      // Suppressing the status write too would make the fault unobservable.
+      if (!fctrl[0]) begin
+        fp_we_push   = 1'b0;
+        fp_we_pop    = 1'b0;
+        fp_we_pop2   = 1'b0;
+        fp_we_top    = 1'b0;
+        fp_we_sti    = 1'b0;
+        fp_we_fxch   = 1'b0;
+        fp_we_ffree  = 1'b0;
+        fp_we_incstp = 1'b0;
+        fp_we_decstp = 1'b0;
+      end
     end
 `endif
   end

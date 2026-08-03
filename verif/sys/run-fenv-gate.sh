@@ -195,6 +195,37 @@ else
   echo "  PASS stack UNDERFLOW sets IE+SF with C1=0"
 fi
 
+# REVIEW2_aug2 H-16: an UNMASKED stack fault must SUPPRESS the operation. S1..S3 above
+# are all MASKED, where completing with the QNaN indefinite is correct. Unmasked is a
+# different rule (SDM Vol.1 8.5): the register file and TOP are left untouched and the
+# exception surfaces at the next waiting FP instruction.
+#
+# Asserted as TWO INDEPENDENT facts, because IE|SF|ES are set whether or not the
+# operation was suppressed -- "a stack fault was detected" cannot distinguish them:
+#   detection   IE (bit 0) and SF (bit 6) set
+#   suppression TOP (bits 13:11) still 0 -- eight pushes wrapped TOP back to 0 and the
+#               ninth did nothing. Unsuppressed it decrements to 7.
+# Measured: 82c1 suppressed, bac1 not.
+S5=$(printf '%s' "$SOUT" | grep -oE "S5=[0-9a-f]+" | head -1 | cut -d= -f2)
+if [ -z "${S5:-}" ]; then
+  echo "  FAIL no S5= line -- the unmasked stack-fault witness did not run"
+  fenv_fail=1
+else
+  S5TOP=$(python3 -c "print((0x$S5 >> 11) & 7)")
+  S5DET=$(python3 -c "print(1 if (0x$S5 & 0x41) == 0x41 else 0)")
+  echo "  unmasked overflow FSW=$S5  TOP=$S5TOP  IE|SF=$S5DET"
+  if [ "$S5DET" != "1" ]; then
+    echo "  FAIL an UNMASKED stack overflow did not even set IE|SF"
+    fenv_fail=1
+  elif [ "$S5TOP" != "0" ]; then
+    echo "  FAIL TOP=$S5TOP: the unmasked push was NOT suppressed -- it decremented TOP"
+    echo "       and overwrote the live register the stack fault exists to protect."
+    fenv_fail=1
+  else
+    echo "  PASS unmasked overflow is DETECTED and the operation is SUPPRESSED (TOP intact)"
+  fi
+fi
+
 # REVIEW1_Aug2 H-12 (remainder): a pending UNMASKED x87 exception must be delivered as
 # #MF (vector 16) before the next waiting FP instruction. FSW.ES was derived but never
 # consumed, so an unmasked exception was raised and then ignored forever.

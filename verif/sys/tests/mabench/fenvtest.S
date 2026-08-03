@@ -267,6 +267,31 @@ _start16:
     fstp    %st(0)                    /* pop with nothing on the stack -- UNDERFLOW */
     fnstsw  0x0754                    /* S3 */
 
+    /* ==== REVIEW2_aug2 H-16: an UNMASKED stack fault must SUPPRESS the operation ===
+     * S1..S3 above all run with IM MASKED, where the architectural response is to
+     * complete the operation with the QNaN indefinite. The UNMASKED case is different
+     * and was not covered at all: the flags were set and the operation ran anyway, so
+     * an unmasked 9th push still destroyed the live register the fault exists to
+     * protect. SDM Vol.1 8.5: on an unmasked stack fault the register file and TOP are
+     * left untouched and the exception is reported at the next waiting FP instruction.
+     *
+     * TOP is the discriminator, and it needs no guesswork about the other bits:
+     *   suppressed      8 pushes leave TOP=0; the 9th does nothing      -> TOP stays 0
+     *   not suppressed  the 9th push decrements TOP and writes fpr[7]   -> TOP = 7
+     *
+     *   S5 = FSW after an UNMASKED 9th push. The gate reads TOP (bits 13:11) from it
+     *        and separately requires IE|SF, so "the fault was detected" and "the
+     *        operation was suppressed" are asserted as two independent facts rather
+     *        than one magic word.
+     */
+    fninit
+    movw    $0x037E, 0x0602           /* CW with IM CLEAR -- unmasked invalid/stack */
+    fldcw   0x0602
+    fld1; fld1; fld1; fld1
+    fld1; fld1; fld1; fld1            /* 8 pushes: TOP wraps back to 0, stack FULL */
+    fld1                              /* the 9th -- UNMASKED STACK OVERFLOW */
+    fnstsw  0x0756                    /* S5 */
+
     movw    $0x03F8,%dx
     movb    $'S',%al; outb %al,%dx
     movb    $'1',%al; outb %al,%dx
@@ -284,6 +309,11 @@ _start16:
     movb    $'3',%al; outb %al,%dx
     movb    $'=',%al; outb %al,%dx
     movw    0x0754, %ax
+    call    puthexw
+    movb    $'S',%al; outb %al,%dx
+    movb    $'5',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0756, %ax
     call    puthexw
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx
