@@ -296,10 +296,33 @@
               // from the PREVIOUS SS descriptor -- a 16-bit outer stack was addressed as
               // 32-bit (and vice-versa) for every push/pop until something else reloaded SS.
               ss_b <= desc[54];
-              // null a data segment whose DPL < new CPL (would be inaccessible).
+              // ---- REVIEW2_aug2 H-08: null a data segment that is INACCESSIBLE at the
+              // new CPL. This tested DPL alone, which is not the architectural rule and
+              // is wrong in a specific direction: IA-32 (IRET, "segment register loading
+              // on return to outer privilege") nulls a register only when its descriptor
+              // is a DATA segment or a NON-CONFORMING code segment whose DPL is below the
+              // new CPL. A CONFORMING code segment is accessible from ANY privilege level
+              // by definition, so DPL < CPL is the normal case for one and clearing it
+              // destroyed a perfectly legal segment the returning code could still use.
+              //
+              // seg_attr is the access byte: bit4 = S, bit3 = code, bit2 = C (conforming
+              // for code). So "data or non-conforming code" is S && !(code && C), and a
+              // descriptor with S=0 -- an unpopulated hidden cache reads as attr 0 -- is
+              // not a usable data segment either and is nulled, which is what the old
+              // DPL-only test already did for it.
               for (int s = 0; s < NUM_SEG; s++) begin
+`ifdef VEN_C03_PROBE
+                if ((s == int'(SG_DS) || s == int'(SG_ES) ||
+                     s == int'(SG_FS) || s == int'(SG_GS)))
+                  $display("[H08-SEG] outer-IRET seg%0d attr=%02h dpl=%0d newcpl=%0d conf=%0b -> %s",
+                           s, seg_attr[s], desc_dpl(seg_attr[s]), iret_cs[1:0],
+                           (seg_attr[s][4] && seg_attr[s][3] && seg_attr[s][2]),
+                           (!(seg_attr[s][4] && seg_attr[s][3] && seg_attr[s][2]) &&
+                            (desc_dpl(seg_attr[s]) < iret_cs[1:0])) ? "NULLED" : "kept");
+`endif
                 if ((s == int'(SG_DS) || s == int'(SG_ES) ||
                      s == int'(SG_FS) || s == int'(SG_GS)) &&
+                    !(seg_attr[s][4] && seg_attr[s][3] && seg_attr[s][2]) &&
                     (desc_dpl(seg_attr[s]) < iret_cs[1:0])) begin
                   seg_sel  [s] <= 16'd0;
                   seg_base [s] <= 32'd0;
