@@ -385,11 +385,28 @@
               // WHAT ACTUALLY REMAINS is ordinary work, not an impossibility: route
               // SYS_LCALL through S_LJMP in a no-commit mode, stage the validated CS
               // (the int_cs_*/iret_cs_* pattern already in the tree), return to
-              // S_LCALL for the pushes, and commit there. It is a real reorder of the
-              // far-transfer path, and the honest reason it is not done here is scope
-              // and validation reach -- the m7 Quake/Win95 gates that exercise CWSDPMI
-              // far calls hardest are EXCLUDED from verify-all -- not that a smaller
-              // true step is absent.
+              // S_LCALL for the pushes, and commit there.
+              //
+              // IT IS NOT DONE BECAUSE THE FAR-TRANSFER PATH HAS ALMOST NO REGRESSION
+              // COVER, and that is measured, not felt:
+              //   * verify-sys's golden list does NOT contain psocfarcall,
+              //     psoccallfmem or psocpmretf. Grepped every gate script and the
+              //     Makefile: those three are referenced by ZERO gates. They are
+              //     orphan tests, the same class as run-icbypass-gate.sh was before it
+              //     was registered this review.
+              //   * WORSE, they cannot be registered as they stand. Their directories
+              //     hold only .bin/.elf/.o -- there is NO .S, no Makefile, no linker
+              //     script. They are unrebuildable artifacts, which is the same
+              //     missing-source problem the review raises as M-04/M-05 and which
+              //     task #64 tracks.
+              //   * The only rebuildable far-CALL test with source in the tree is
+              //     pcallsel, written during this review, and it covers the REJECT
+              //     path only -- a far CALL that succeeds is exercised by nothing that
+              //     any gate runs.
+              // So a reorder of this path would ship essentially unregressed. The
+              // prerequisite is a positive far-CALL test WITH SOURCE and a golden;
+              // that is a bounded, separable piece of work and it is the thing to do
+              // first.
               //
               // Sixth time this review a "blocked" call of mine was wrong. The pattern
               // every time: I described what the code would do instead of reading what
