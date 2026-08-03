@@ -89,6 +89,11 @@ GATES=(
   # now. This gate existed and nothing ran it. Asserts that the CD-honouring build
   # really refetches AND that it is architecturally transparent vs the caching build.
   "icbypass  (CR0.CD drives instruction-fill cacheability)|icbypass"
+  # REVIEW2_aug2 C-07/M-02: the TSS I/O permission bitmap. Recorded as UNVALIDATED for
+  # this whole review ("S_IOPERM consults corpus-wide = 0") because --soc-en never
+  # reached the core. Witness is the #GP count in ecx: 6 correct, 4 with only the first
+  # port of a multi-port access checked. Verified to FAIL against that reverted build.
+  "ioperm    (TSS I/O permission bitmap, multi-port)|ioperm"
   # The 12 verif/l1/run-*.sh memory-subsystem gates (L1D coherence + store/load,
   # I-cache snoop, TLB, BTB, and the L1/AXI family). These existed for a long time
   # with NO make target and NO entry here, while this script's own banner called

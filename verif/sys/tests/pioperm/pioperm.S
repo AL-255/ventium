@@ -30,29 +30,25 @@
  *
  * Exit: isa-debug-exit 0x42 -> 133. ecx is read from the final trace record.
  *
- * ============================ STATUS: DOES NOT PASS YET =====================
- * NOT wired into any gate. Committed so the setup is not lost, and so the next
- * session starts from a measured position rather than a blank page.
+ * ============================ STATUS: PASSES (ecx = 6) ======================
+ * Wired into verify-all as the `ioperm` gate. Requires --soc-en.
  *
- * WHERE IT STOPS: Ventium reaches CPL3 (cs=0x1b confirmed in the trace) and then goes
- * QUIESCENT at the first CPL3 OUT, around pc=0x000f0175. The harness QEMU also fails to
- * reach the exit (timeout).
+ * TWO THINGS had to be fixed before this could ever run, and neither was in the
+ * permission logic (S_IOPERM was correct throughout):
  *
- * THAT IS AMBIGUOUS AND MUST NOT BE READ AS AN RTL FINDING. Two live possibilities:
- *   (a) a real stall in the S_IOPERM path (the TSS permission read never completing);
- *   (b) a defect in this test's TSS/descriptor setup -- QEMU not reaching the exit
- *       either points this way, since QEMU's I/O permission path is known good.
- * (b) is the more likely reading and should be eliminated first.
+ *   1. ventium_top tied .soc_en(1'b0) on the verification top's core instance, so
+ *      --soc-en reached nothing and the core's io_req never asserted -- every IN/OUT
+ *      outside cosim took the "out of scope -> HALT LOUDLY" arm. tb_main.cpp also
+ *      acked no I/O outside cosim mode. Both fixed in d2e8117.
  *
- * BUGS ALREADY FOUND AND FIXED IN THIS FILE, each caught by comparing against QEMU
- * rather than by reading it:
- *   1. the exit OUT also faults at CPL3/IOPL=0; with a stale resume address the
- *      handler looped forever. The handler now performs the exit itself at CPL0.
- *   2. IRET loads CS and SS but NOT DS/ES, so at CPL3 they still held the DPL0
- *      selector and the first data store faulted with no resume address stashed.
- *   3. an early reading of "ecx=23" as a fault count was wrong -- ecx is the zeroing
- *      loops' counter, and the run had merely been cut off by --max-insn.
- * ===========================================================================
+ *   2. THIS TEST wrote ESP0/SS0 one TSS slot high (0x08/0x0C instead of 0x04/0x08),
+ *      leaving ESP0 = 0 and SS0 = a null selector, so every cross-privilege delivery
+ *      of the #GP raised #SS and escalated to shutdown.
+ *
+ * The old exit path is gone too: it assumed the CPL3 exit OUT would fault on IOPL,
+ * but once the bitmap is actually consulted the byte covering port 0xF4 is ZERO, i.e.
+ * PERMITTED, so that OUT succeeds at CPL3 and the handler was never entered. ecx is
+ * now loaded before the exit rather than inside a handler that does not run.
  */
     .code16
     .section .text16,"ax"
@@ -130,8 +126,14 @@ pm32_entry:
     addl    $4, %edi
     loop    2b
 
-    movl    $0x00080000, 0x00003008      /* ESP0 */
-    movl    $0x00000010, 0x0000300C      /* SS0  */
+    /* 32-bit TSS layout: 0x00 link, 0x04 ESP0, 0x08 SS0, 0x0C ESP1, 0x10 SS1.
+     * These were written ONE SLOT HIGH -- ESP0 into SS0's dword and SS0 into ESP1's --
+     * which left ESP0 = 0 and SS0 = 0x00080000, i.e. selector 0x0000, a NULL stack
+     * segment. Every cross-privilege delivery from CPL3 then raised #SS while
+     * delivering the #GP the test exists to observe, and the chain escalated to
+     * shutdown, so the test could never reach its exit. */
+    movl    $0x00080000, 0x00003004      /* ESP0 @ +0x04 */
+    movl    $0x00000010, 0x00003008      /* SS0  @ +0x08 */
     movw    $0x0068,     0x00003066      /* I/O map base = 0x68  (NONZERO: C-07a) */
 
     /* bitmap byte covering ports 0x100-0x107 = 0x3068 + (0x100>>3) = 0x3088.
@@ -198,15 +200,20 @@ t9: movl    $t10, 0x00002010
     movw    $0x0102, %dx
     outw    %ax, %dx                     /* covers 0x102 (ok) + 0x103 (denied) */
 t10:
-    /* The exit OUT also faults (IOPL=0 at CPL3), so it cannot be issued from here --
-     * and with a stale resume address it LOOPED forever. Both QEMU (timeout) and
-     * Ventium (max-insn) reported that, which is how the bug was caught before it was
-     * mistaken for an RTL fault. Set a done flag and let the handler exit at CPL0.
-     */
-    movl    $1,   0x00002020             /* done flag */
-    movl    $t11, 0x00002010
+    /* THE EXIT. The old comment here said this OUT "also faults (IOPL=0 at CPL3)" and
+     * routed the exit through the #GP handler with a done-flag. That reasoning was
+     * about IOPL, and it is the WRONG rule once the I/O permission bitmap is actually
+     * consulted: with IOPL < CPL the bitmap decides, and the bitmap byte covering port
+     * 0xF4 (at map_base + 0xF4>>3) is ZERO in this TSS, i.e. PERMITTED. So this OUT
+     * succeeds at CPL3, the handler is never entered, and the done-flag path could
+     * never load ecx -- which is exactly what was observed: the run exited from CPL3
+     * with ecx=0 while six #GP had genuinely been raised.
+     *
+     * Load the count FIRST, then exit directly from CPL3. ecx therefore reaches the
+     * final retired record, which is what the gate reads. */
+    movl    0x00002000, %ecx             /* #GP count -> the trace witness */
     movw    $0x00F4, %dx
-    outb    %al, %dx                     /* faults -> handler sees the flag and exits */
+    outb    %al, %dx                     /* PERMITTED by the bitmap: exits from CPL3 */
 t11:
     hlt
     jmp     t11

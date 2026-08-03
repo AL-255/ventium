@@ -232,6 +232,16 @@ retfsel:
 icbypass:
 	bash verif/sys/run-icbypass-gate.sh
 
+# --- TSS I/O permission bitmap (verif/sys/run-ioperm-gate.sh) ----------------
+# REVIEW2_aug2 C-07 + M-02. CPL3 with IOPL=0, so every I/O access consults the bitmap:
+# odd ports 0x101..0x107 denied, even permitted, plus two WORD accesses whose SECOND
+# port is denied. Witness is the #GP count in ecx: 6 correct, 4 if only the first port
+# of a multi-port access is checked. Needs --soc-en (see task #73).
+.PHONY: ioperm
+ioperm:
+	@$(MAKE) -s -C verif/sys/tests/pioperm
+	bash verif/sys/run-ioperm-gate.sh
+
 # --- L1 / memory-subsystem unit gates ---------------------------------------
 # `l1` runs EVERY verif/l1/run-*.sh gate -- the list is GLOBBED, not enumerated, so a
 # new gate script is picked up automatically (the M-08 RLAST-recovery gate arrived that
