@@ -20,6 +20,11 @@ module tb_l1d;
   // backing side
   logic        m_req, m_we; logic [31:0] m_addr, m_wdata; logic [3:0] m_wstrb;
   logic [31:0] m_rdata; logic m_ack;
+  logic        m_rd_narrow, m_rd_narrow_2;
+  // REVIEW2_aug2 H-11: count backing READ beats, so a non-cacheable access can be
+  // asserted to cost ONE (or two, unaligned) instead of a full 8-beat line.
+  int          rbeats;
+  always_ff @(posedge clk) if (rst_n && m_req && !m_we) rbeats <= rbeats + 1;
   // KEN# / snoop (Phase A): default cacheable, no snoop — groups [9]/[10] drive them.
   logic        cacheable = 1'b1;
   logic        snoop_inv_valid = 1'b0;
@@ -40,7 +45,12 @@ module tb_l1d;
                .c_req, .c_we, .c_addr, .c_wdata, .c_wstrb, .c_rdata, .c_ack,
                .dbg_serve(),                       // M-17: diagnostic only
 
-               .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack);
+               .m_req, .m_we, .m_addr, .m_wdata, .m_wstrb, .m_rdata, .m_ack,
+               // REVIEW2_aug2 H-11: the narrow-read request width. This TB has no AXI
+               // master, so it does not consume these -- but counting backing beats
+               // (below) is how the fix is MEASURED, and leaving the pins unconnected
+               // is what made this gate fail warning-fatal at build time.
+               .m_rd_narrow, .m_rd_narrow_2);
 
   // ---- behavioral backing: byte-addressable, same-cycle ack -----------------
   logic [7:0] mem [0:(1<<20)-1];
@@ -248,6 +258,52 @@ module tb_l1d;
     cacheable = 1'b1;
     do_read (32'h0000_6000 + 32'd28, d);
     chk("victim word 7 SURVIVED the cross-line bypass", d, 32'hA1C7_0007);
+
+    // ---- [11e] REVIEW2_aug2 H-11: A NON-CACHEABLE READ COSTS ONE BEAT ------------
+    // The finding: a non-cacheable read reused the FILL burst, so ONE architectural
+    // read became a 32-byte eight-beat request (sixteen when it crossed a line end).
+    // For MMIO that is a CORRECTNESS bug, not a performance one -- read-to-clear
+    // registers are cleared eight times over, FIFOs pop repeatedly, and seven
+    // neighbouring addresses with unrelated side effects are touched.
+    //
+    // This counts BACKING READ BEATS across a single non-cacheable read, which is the
+    // only thing that actually distinguishes the fix from the bug. The data checks
+    // above all passed WITH the amplification -- serving the right word was never the
+    // problem, so no data assertion can see this.
+    //
+    // MEASURED, by forcing the old line-shaped fetch back on with the new ports left
+    // in place, so these are counts from a real run and not read off the old source:
+    //   aligned    8 beats -> 1
+    //   unaligned  8 beats -> 2   (at offset 2; a line-CROSSING access cost 8 + an
+    //                              extra 8-beat request, which is the [11c] case)
+    // The H-19 cross-line special case disappears here: once the fetch is word-shaped
+    // instead of line-shaped, two contiguous words are just two contiguous words, and
+    // whether a 32-byte boundary falls between them stops mattering.
+    cacheable = 1'b1;
+    do_write(32'h0000_7000, 32'h1111_2222);
+    do_write(32'h0000_7004, 32'h3333_4444);
+    cacheable = 1'b0;
+    rbeats = 0;
+    do_read (32'h0000_7000, d);
+    chk("H-11 aligned non-cacheable data", d, 32'h1111_2222);
+    if (rbeats != 1) begin
+      $display("  FAIL H-11: aligned non-cacheable read took %0d backing beats, want 1", rbeats);
+      errors++;
+    end else $display("  ok   H-11 aligned non-cacheable read = 1 backing beat (was 8)");
+
+    // unaligned: spans two words, so exactly TWO beats -- not one, and not eight.
+    rbeats = 0;
+    do_read (32'h0000_7002, d);
+    // Also check the DATA: the serve now indexes a 2-word window by c_addr[1:0]
+    // instead of indexing the whole line by c_addr[4:0], and that is new logic.
+    // bytes @7002..7005 = 11 11 44 44 -> 0x44441111
+    chk("H-11 unaligned non-cacheable data (2-word window)", d, 32'h4444_1111);
+    if (rbeats != 2) begin
+      $display("  FAIL H-11: unaligned non-cacheable read took %0d backing beats, want 2", rbeats);
+      errors++;
+    end else $display("  ok   H-11 unaligned non-cacheable read = 2 backing beats (was 8)");
+
+    cacheable = 1'b1;
 
     // ---- [11d] REVIEW2_aug2 C-09 (second half): a cacheable miss issued IMMEDIATELY
     // after a cross-line uncacheable read must get ITS OWN data, every word.

@@ -63,6 +63,14 @@ module ven_axi_master #(
     input  logic        m_req,
     input  logic        m_we,
     input  logic [31:0] m_addr,
+    // REVIEW2_aug2 H-11: this READ is a NARROW, non-cacheable access -- serve it with
+    // a 1- or 2-beat burst at the requested word, NOT a 32-byte line fill. A
+    // non-cacheable read amplified into eight beats is an MMIO CORRECTNESS bug, not a
+    // performance one: read-to-clear registers are cleared eight times over, FIFOs pop
+    // repeatedly, and seven neighbouring addresses with unrelated side effects are
+    // touched. Ignored for writes (the write path was never a burst).
+    input  logic        m_rd_narrow,
+    input  logic        m_rd_narrow_2,   // the narrow access straddles a word -> 2 beats
     input  logic [31:0] m_wdata,
     input  logic [3:0]  m_wstrb,
     output logic [31:0] m_rdata,
@@ -268,6 +276,13 @@ module ven_axi_master #(
   // these unaligned stores; the byte-addressed sim BFM masked the bug on silicon.
   typedef enum logic [1:0] { W_IDLE, W_RUN, W_RESP } wstate_e;
   wstate_e          wst;
+  // REVIEW2_aug2 H-11: the read burst's beat count, LATCHED with araddr_q at accept.
+  // It used to be the constant LINE_BEATS, which is why the L1D could not ask for a
+  // narrower access however it addressed the request -- the master decided, and it
+  // always decided "a whole line". Everything downstream (arlen, the r_beat terminal
+  // compare, the priming re-issue) now reads this instead of the constant, so the two
+  // cannot disagree about how long the burst is.
+  logic [8:0]        rbeats_q;
   logic [ADDR_W-1:0] awaddr_q;       // current beat's word-aligned AXI address
   logic [31:0]       wdata_q;        // current beat's data (lane-shifted)
   logic [3:0]        wstrb_q;        // current beat's strobe (lane-shifted)
@@ -283,7 +298,7 @@ module ven_axi_master #(
     // read address channel — burst base forced 32B-aligned (never crosses 4KiB).
     m_axi_arid    = AXI_ID;
     m_axi_araddr  = araddr_q;
-    m_axi_arlen   = 8'(LINE_BEATS - 1);   // LINE_BEATS-beat INCR burst
+    m_axi_arlen   = 8'(rbeats_q - 9'd1);  // H-11: latched length (LINE_BEATS, or 1/2 narrow)
     m_axi_arsize  = 3'b010;               // 4 bytes/beat
     m_axi_arburst = 2'b01;               // INCR
     m_axi_arlock  = 1'b0;
@@ -350,6 +365,7 @@ module ven_axi_master #(
   always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       rst <= R_IDLE; araddr_q <= '0; r_beat <= 8'd0; rresp_err <= 1'b0; rlast_err <= 1'b0;
+      rbeats_q <= 9'(LINE_BEATS);
       r_wd <= 16'd0; wd_err_r <= 1'b0; rd_primed <= 1'b0;
     end else begin
       unique case (rst)
@@ -361,8 +377,18 @@ module ven_axi_master #(
         // Gating the start means no AXI transaction is ever launched for an out-of-
         // window address; bus_err still halts the core, exactly as the #34 watchdog does.
         R_IDLE: if (m_req && !m_we && !shutdown && !rd_hold && !alias_bad) begin
-                  // a backing read == a full line fill: latch the 32B-aligned base.
-                  araddr_q <= remap({m_addr[31:5], 5'd0});
+                  // REVIEW2_aug2 H-11: a CACHEABLE backing read is a full line fill and
+                  // latches the 32B-aligned base, as before. A NARROW read latches the
+                  // WORD address instead and asks for 1 beat (2 when it straddles a
+                  // word) -- addressing the line base for a narrow access would return
+                  // the wrong word AND still touch the whole line.
+                  if (m_rd_narrow) begin
+                    araddr_q <= remap({m_addr[31:2], 2'd0});
+                    rbeats_q <= m_rd_narrow_2 ? 9'd2 : 9'd1;
+                  end else begin
+                    araddr_q <= remap({m_addr[31:5], 5'd0});
+                    rbeats_q <= 9'(LINE_BEATS);
+                  end
                   r_beat <= 8'd0; rresp_err <= 1'b0; r_wd <= 16'd0;
 `ifdef VEN_SINGLE_FILL
                   // EXPERIMENT ONLY (task #24). Skips the priming burst so a fill costs ONE
@@ -400,7 +426,7 @@ module ven_axi_master #(
                     // recovery. Terminate now; bus_err is already sticky, so the core
                     // halts on a known cycle instead of an arbitrary one.
                     r_beat <= 8'd0; rst <= R_IDLE;
-                  end else if (r_beat == 8'(LINE_BEATS-1)) begin
+                  end else if (r_beat == 8'(rbeats_q - 9'd1)) begin
                     if (!m_axi_rlast) begin
                       // LATE RLAST: our count is satisfied but the slave still owes
                       // beats. Returning to IDLE here would let the NEXT AR be issued

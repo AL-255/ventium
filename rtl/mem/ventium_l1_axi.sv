@@ -272,6 +272,8 @@ module ventium_l1_axi #(
   logic        m_ack;
 
   // ---- post-L2 backing port (b_*): the seam between the L2 (or the bypass) and the
+  logic m_rd_narrow, m_rd_narrow_2;      // H-11: L1D -> backing, narrow read request
+  logic b_rd_narrow, b_rd_narrow_2;      // H-11: post-L2 (== m_* when EN_L2=0)
   // AXI master / CDC. With EN_L2=0 these are wired straight to m_* (transparent);
   // with EN_L2=1 ven_l2 sits between m_* (its upstream u_*) and b_* (its downstream d_*).
   logic        b_req, b_we;
@@ -441,6 +443,13 @@ module ventium_l1_axi #(
   assign l1d_rst_n = core_rst_n;
   assign axm_clk   = core_clk;
   assign axm_rst_n = core_rst_n;
+  // REVIEW2_aug2 H-11: the narrow-read request width, from ven_l1d to ven_axi_master.
+  // It is passed through ONLY on the L2-BYPASS path (EN_L2=0). A line-based L2 has no
+  // meaning for a narrow, non-cacheable access -- and non-cacheable traffic should not
+  // be entering the L2 in the first place -- so with the northbridge in the datapath
+  // these are tied 0 and the behaviour there is exactly what it was. That keeps this
+  // change inside the configuration whose gates actually run it, rather than making an
+  // untested claim about the L2 build.
   assign axm_req   = b_req;   assign axm_we    = b_we;
   assign axm_addr  = b_addr;  assign axm_wdata = b_wdata;  assign axm_wstrb = b_wstrb;
   assign b_rdata   = axm_rdata; assign b_ack   = axm_ack;  assign bus_err   = axm_bus_err;
@@ -528,6 +537,7 @@ module ventium_l1_axi #(
       );
 `ifdef VEN_NB_MMIO
       // device MMIO exits on the external port; DDR path goes to the AXI master.
+      assign b_rd_narrow = 1'b0; assign b_rd_narrow_2 = 1'b0;   // H-11: not through the L2
       assign b_req = nb_d_req; assign b_we = nb_d_we; assign b_addr = nb_d_addr;
       assign b_wdata = nb_d_wdata; assign b_wstrb = nb_d_wstrb;
       assign nb_d_rdata = b_rdata; assign nb_d_ack = b_ack;
@@ -551,6 +561,7 @@ module ventium_l1_axi #(
       // no external device fabric in this build: MERGE the MMIO master back onto the
       // single AXI backing (device space falls through to DDR — keeps the pre-D.5 gates
       // byte-identical, since only one of nb_d_*/nb_mmio_* is ever active at a time).
+      assign b_rd_narrow = 1'b0; assign b_rd_narrow_2 = 1'b0;   // H-11: not through the L2
       assign b_req   = nb_d_req | nb_mmio_req;
       assign b_we    = nb_mmio_req ? nb_mmio_we    : nb_d_we;
       assign b_addr  = nb_mmio_req ? nb_mmio_addr  : nb_d_addr;
@@ -600,6 +611,8 @@ module ventium_l1_axi #(
         if (!core_rst_n) smram_deny_q <= 1'b0;
         else             smram_deny_q <= m_req && smram_deny && !smram_deny_q;
 
+      assign b_rd_narrow   = m_rd_narrow;      // H-11: L2 bypassed -> pass it through
+      assign b_rd_narrow_2 = m_rd_narrow_2;
       assign b_req = m_req && !smram_deny;
       assign b_we  = m_we  && !smram_deny;
       assign b_addr = m_addr;
@@ -685,6 +698,8 @@ module ventium_l1_axi #(
       .m_wdata (m_wdata),
       .m_wstrb (m_wstrb),
       .m_rdata (m_rdata),
+      .m_rd_narrow   (m_rd_narrow),
+      .m_rd_narrow_2 (m_rd_narrow_2),
       .m_ack   (m_ack)
   );
 
@@ -700,6 +715,8 @@ module ventium_l1_axi #(
       .core_rst_n  (axm_rst_n),
       .axi_clk     (axi_clk),
       .axi_rst_n   (axi_rst_n),
+      .m_rd_narrow   (b_rd_narrow),
+      .m_rd_narrow_2 (b_rd_narrow_2),
       .m_req       (axm_req),
       .m_we        (axm_we),
       .m_addr      (axm_addr),

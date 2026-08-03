@@ -94,6 +94,11 @@ module ven_l1d #(
     output logic [31:0] m_wdata,
     output logic [3:0]  m_wstrb,
     input  logic [31:0] m_rdata,
+    // REVIEW2_aug2 H-11: tell the backing this READ is NARROW -- one word (two when it
+    // straddles a word boundary) at m_addr, NOT a 32-byte line fill. See the H-11 note
+    // below for why an amplified non-cacheable read is an MMIO CORRECTNESS bug.
+    output logic        m_rd_narrow,
+    output logic        m_rd_narrow_2,
     input  logic        m_ack
 );
 
@@ -312,7 +317,14 @@ module ven_l1d #(
   // path intended for MMIO / CR0.CD bypass, where a wrong value is a wrong device
   // access. Fetch the next line's first word in a 9th beat instead of inventing zeros.
   logic [31:0]   bp_hi;      // next line's word 0 (only meaningful when byp_need_hi)
-  logic          byp_need_hi;  // this bypass access crosses the line end
+  logic          byp_need_hi;  // this bypass access crosses the line end (H-19; dead under H-11)
+  // REVIEW2_aug2 H-11: this bypass access is not word-aligned, so it may span two
+  // words and needs a 2-beat narrow burst. This REPLACES byp_need_hi's role: once the
+  // fetch is word-shaped rather than line-shaped, "crosses the line end" stops being a
+  // special case at all -- the two words are simply contiguous addresses, and whether a
+  // 32-byte boundary falls between them is irrelevant to a request that never had a
+  // line shape to begin with.
+  logic          byp_n2;
   logic          byp_hi_beat;  // the 9th beat is in flight
   logic          bypass_q;
 
@@ -320,8 +332,24 @@ module ven_l1d #(
   // write-through (IDLE), pass the core write straight to the backing.
   always_comb begin
     m_req=1'b0; m_we=1'b0; m_addr=32'd0; m_wdata=32'd0; m_wstrb=4'd0;
+    m_rd_narrow=1'b0; m_rd_narrow_2=1'b0;
     if (st==L1_FILL) begin
       m_req  = 1'b1; m_we = 1'b0;
+      // REVIEW2_aug2 H-11: a NON-CACHEABLE read is a narrow access at the requested
+      // WORD -- not a line fill from the line base. Addressing the line base was half
+      // the bug: it both over-read seven neighbouring words AND started at the wrong
+      // address, which is why the serve then had to index the whole line by
+      // c_addr[4:0]. A CACHEABLE fill is unchanged, byte for byte.
+      if (bypass_q) begin
+        // The per-beat address is presented incrementally, exactly as the cacheable
+        // fill does. ven_axi_master latches only beat 0 (it drives the INCR burst
+        // itself), but the L1D-only testbench serves each beat's m_addr directly, so
+        // both consumers need the address to advance. Same contract as before; only
+        // the base and the beat COUNT changed.
+        m_addr        = {fbase[31:2], 2'd0} + {27'd0, fw, 2'b00};
+        m_rd_narrow   = 1'b1;
+        m_rd_narrow_2 = byp_n2;
+      end else
       // H-19: during the extra beat, address the NEXT line's word 0.
       m_addr = byp_hi_beat ? ({fbase[31:5], 5'd0} + 32'd32)
                            : ({fbase[31:5], 5'd0} + {27'd0, fw, 2'b00});
@@ -350,55 +378,50 @@ module ven_l1d #(
   // responses (the cacheable path already builds a {next,current} window for this);
   // that needs bypass-FSM work and is tracked in task #40.
   // ===========================================================================
-  // REVIEW2_aug2 H-11 -- NON-CACHEABLE READS ARE AMPLIFIED INTO FULL LINE BURSTS.
-  // NOT FIXED. Recorded here, at the code it indicts, rather than in a status note.
+  // REVIEW2_aug2 H-11 -- NON-CACHEABLE READS WERE AMPLIFIED INTO FULL LINE BURSTS.
+  // FIXED. The note below is kept because it was written as a work list, and every
+  // item on it turned out to be real -- it is a fair record of what the fix cost.
   //
-  // A non-cacheable read reuses the FILL burst (L1_IDLE -> L1_FILL with bypass_q),
-  // so ONE architectural read becomes a 32-byte, eight-beat request -- and
-  // ven_axi_master's priming normally issues it twice. For MMIO that is not a
-  // performance question but a CORRECTNESS one: read-to-clear registers are cleared
-  // eight-plus times, FIFOs pop repeatedly, and adjacent addresses with unrelated
-  // side effects are touched.
+  // A non-cacheable read reused the FILL burst (L1_IDLE -> L1_FILL with bypass_q), so
+  // ONE architectural read became a 32-byte, eight-beat request. For MMIO that is not
+  // a performance question but a CORRECTNESS one: read-to-clear registers are cleared
+  // eight-plus times, FIFOs pop repeatedly, and adjacent addresses with unrelated side
+  // effects are touched.
   //
   // EXPOSURE: the bypass branch is taken only when `cacheable` is 0, and
-  // ventium_l1_axi ties l1d_cacheable to 1'b1 except under VEN_L1_HONOR_CD (line
-  // ~604, `~cr0_cd`). So this is live in the HONOR_CD build -- the one H-07 just
-  // repaired -- and dormant in the default one. It is not "unreachable"; it is
-  // reachable exactly where the CD feature is switched on.
+  // ventium_l1_axi ties l1d_cacheable to 1'b1 except under VEN_L1_HONOR_CD, so this
+  // was live in the HONOR_CD build and dormant in the default one.
   //
-  // WHAT THE FIX REQUIRES -- TRACED, not asserted. This decline was re-examined after
-  // C-06's was tested and found partly WRONG, so it is recorded as a work list rather
-  // than a judgement, and someone should be able to check it without repeating the
-  // trace:
+  // HOW IT WAS FIXED, against the six-item list:
+  //   1+2. ven_axi_master's `m_axi_arlen = 8'(LINE_BEATS-1)` constant became rbeats_q,
+  //        LATCHED with araddr_q at accept. The r_beat terminal compare and the
+  //        priming re-issue both read it, so they cannot disagree about the length.
+  //   3.   ventium_l1_axi plumbs m_rd_narrow/_2 through -- but only on the L2-BYPASS
+  //        path. With the northbridge in the datapath they are tied 0, because a
+  //        line-based L2 has no meaning for a narrow access and this change should not
+  //        make an untested claim about a configuration its gates do not run.
+  //   4.   this file drives them under bypass_q and addresses the WORD containing
+  //        c_addr instead of the line base. Addressing the line base was half the bug:
+  //        it over-read seven neighbours AND started at the wrong address, which is
+  //        why the serve then had to index the whole line.
+  //   5.   the L1_BYP serve indexes a 2-WORD window by c_addr[1:0], not the line by
+  //        c_addr[4:0].
+  //   5b.  the priming double-read is UNCHANGED and still a separate piece of work --
+  //        it is a documented workaround for a PS S_AXI_HP FIFO bug (task #24), not an
+  //        oversight, and removing it here would reintroduce a guest freeze.
+  //   6.   an unaligned access still needs two beats, so "single beat" is really "one
+  //        or two, by alignment". The seam carries no read SIZE, so alignment alone
+  //        decides: conservative in the safe direction (never fetches too few).
   //
-  //   1. ven_axi_master.sv:286 sets `m_axi_arlen = 8'(LINE_BEATS-1)` as a CONSTANT.
-  //      The L1D cannot ask for fewer beats; the master decides. So a width-accurate
-  //      access is not something this file can do alone, which is the crux.
-  //   2. That needs a new request-width input on ven_axi_master, and its read FSM
-  //      (r_beat / rlast / the rd_primed priming at ~414) must handle a 1-beat burst --
-  //      the finding notes the priming normally issues the burst TWICE.
-  //   3. ventium_l1_axi must plumb the new signal through.
-  //   4. ven_l1d must drive it when bypass_q, and address the WORD containing c_addr
-  //      rather than the line base (m_addr at ~326 is {fbase[31:5],5'd0}).
-  //   5. The L1_BYP serve indexes bp_line_x by c_addr[4:0] assuming the whole line was
-  //      fetched; with one word present that indexes bytes never read.
-  //   5b. ON THE "TWICE" -- checked separately, and it is NOT a smaller true step.
-  //      Halving every read would be worth having on its own, so I went looking. The
-  //      priming burst is a documented workaround for a HARDWARE bug, not an
-  //      oversight: the PS S_AXI_HP async read FIFO returned a STALE PRIOR BURST and
-  //      froze the guest. ven_axi_master:368 already carries an EXPERIMENT-ONLY define
-  //      to skip it, labelled NOT SAFE TO SHIP for exactly that reason, and task #24
-  //      owns the root cause. So the doubling is a separate piece of work from H-11,
-  //      and removing it here would reintroduce a guest freeze.
-  //   6. An UNALIGNED access spanning two words still needs two beats, so "single
-  //      beat" is really "one or two, by width and alignment" -- the same shape as the
-  //      byp_need_hi cross-line case already here.
+  // AND IT SUBSUMED TWO EARLIER WORKAROUNDS. H-19's cross-LINE bypass case and C-09's
+  // seven-beat DRAIN both existed only because the fetch was line-shaped. C-09's note
+  // said so explicitly -- it offered "a real single-beat backing operation" as the
+  // alternative fix and took the drain instead, because the seam could not express a
+  // single word. It can now, so nothing is left outstanding to drain.
   //
-  // Six coordinated changes across three modules, on the memory path every gate
-  // depends on. That is materially larger than the rest of this review's fixes, and
-  // unlike C-06 -- where the selector turned out to be already in hand at a point
-  // before the push -- there is no smaller true step hiding inside it: any partial
-  // version still issues the wrong number of beats, which IS the finding.
+  // MEASURED, not asserted: tb_l1d case [11e] counts backing read beats. Forcing the
+  // old line-shaped fetch back on with the new ports in place gives 8 beats aligned
+  // and 8 unaligned; the fix gives 1 and 2, with the served data checked both ways.
   //
   // NOTE the overlap: C-09's first option ("give bypass traffic an explicit
   // single-beat backing operation") is this same change. C-09 was closed by its SECOND
@@ -437,7 +460,7 @@ module ven_l1d #(
     // exposure at all — strictly VALUE-IDENTICAL to the registered serve, just one cycle
     // earlier. Saves 1 clk on every S_FETCH word + every data-load HIT (~20-30% of POST
     // cycles). rd_armed/rd_window_q/rd_addr_q still update below (harmless dead logic here).
-    c_rdata = (st==L1_BYP) ? bp_line_x[{1'b0,c_addr[4:0],3'b000} +: 32]   // H-13: in-range select
+    c_rdata = (st==L1_BYP) ? bp_line_x[{4'd0,c_addr[1:0],3'b000} +: 32]  // H-11: 2-word window
                            : rd_window[{1'b0,c_addr[4:0],3'b000} +: 32];   // LIVE window, LIVE offset
     c_ack   = 1'b0;
     if (c_req) begin
@@ -458,7 +481,7 @@ module ven_l1d #(
     // write of BDA kbd tail=0x1E sat in the 32-entry buffer and overlaid EVERY fresh read of
     // 0x41C forever, so daemon-injected keys were invisible. The coherence problem it was
     // built for was actually the LGDT base bug. Clean registered serve restored.)
-    c_rdata = (st==L1_BYP) ? bp_line_x[{1'b0,c_addr[4:0],3'b000} +: 32]   // H-13: in-range select
+    c_rdata = (st==L1_BYP) ? bp_line_x[{4'd0,c_addr[1:0],3'b000} +: 32]  // H-11: 2-word window
                            : rd_window_q[{1'b0,rd_addr_q[4:0],3'b000} +: 32];
     c_ack   = 1'b0;
     if (c_req) begin
@@ -496,7 +519,7 @@ module ven_l1d #(
   always_ff @(posedge clk) begin
     if (!rst_n) begin
       st<=L1_IDLE; fw<=3'd0; rd_armed<=1'b0; rd_window_q<='0; rd_addr_q<=32'd0;
-      bypass_q<=1'b0; bp_line<='0; fill_poison<=1'b0;
+      bypass_q<=1'b0; bp_line<='0; fill_poison<=1'b0; byp_n2<=1'b0;
       bp_hi<=32'd0; byp_need_hi<=1'b0; byp_hi_beat<=1'b0;   // H-19
       for (int s=0;s<L1_SETS;s++) begin
         dc_lru[s]<=1'b0; dc_val[s][0]<=1'b0; dc_val[s][1]<=1'b0;
@@ -535,8 +558,15 @@ module ven_l1d #(
             // L1_BYP. Reuses the FILL burst; allocates NOTHING.
             fset <= set_c; fway <= ~dc_lru[set_c]; ftag <= tag_c; fbase <= c_addr;
             fw <= 3'd0;  bypass_q <= 1'b1;  st <= L1_FILL;
-            // H-19: does this access need bytes from the following line?
-            byp_need_hi <= (c_addr[4:0] > 5'd28);
+            // REVIEW2_aug2 H-11: a narrow fetch needs a SECOND word only when the
+            // access is not word-aligned. Alignment, not width, is the test: the L1D
+            // seam carries no read size, so an unaligned access is assumed to span two
+            // words. That is conservative in the safe direction -- it can fetch one
+            // word more than strictly needed, never one fewer -- and it is still 1-2
+            // beats where this path previously issued 8 (or 16 across a line end).
+            byp_n2      <= (c_addr[1:0] != 2'd0);
+            // H-19's cross-LINE case is subsumed: see the byp_n2 declaration.
+            byp_need_hi <= 1'b0;
             byp_hi_beat <= 1'b0; bp_hi <= 32'd0;
             fill_poison <= flush_all || snoop_inv_valid;   // H-06/H-07
           end else if (c_req && !c_we && !rd_hit) begin
@@ -638,7 +668,11 @@ module ven_l1d #(
             // !bypass_q rather than on the beat index. The high word is captured as
             // bp_hi immediately below.
             if (bypass_q) begin
-              if (!byp_hi_beat) bp_line[{fw,5'b00000} +: 32] <= m_rdata;
+              // REVIEW2_aug2 H-11: the narrow fetch returns the addressed word first
+              // and (when unaligned) the following one, so they land at bp_line words
+              // 0 and 1 rather than at their line offsets.
+              if (fw == 3'd0) bp_line[31:0]  <= m_rdata;
+              else            bp_line[63:32] <= m_rdata;
             end else begin
               dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
             end
@@ -666,8 +700,17 @@ module ven_l1d #(
                 byp_hi_beat <= 1'b0;
                 st          <= L1_BYP;
               end else fw <= fw + 3'd1;
+            end else if (bypass_q) begin
+              // REVIEW2_aug2 H-11: the burst is 1 or 2 beats now, so it ends here --
+              // and the C-09 DRAIN is gone with it. That drain existed only because
+              // ven_axi_master could not request a single word and left seven beats
+              // outstanding; the review named "a real single-beat backing operation"
+              // as the alternative fix, and this is it. Nothing is left in flight to
+              // drain, so a following fill cannot inherit residual beats.
+              if (fw == (byp_n2 ? 3'd1 : 3'd0)) st <= L1_BYP;
+              else                              fw <= fw + 3'd1;
             end else if (fw==3'(WORDS-1)) begin
-              if (bypass_q) begin
+              if (1'b0) begin
                 // non-cacheable: serve from bp_line next clock; allocate NOTHING.
                 // H-19: unless the access crosses the line end, in which case run ONE
                 // more beat for the following line's word 0 first.
