@@ -5024,9 +5024,25 @@ module core
   //   * "Probe/translate every page before stores commit" is the layer itself.
   //   * The one genuinely separable piece is TEST work: directed boundary cases per
   //     request producer, to turn "0 reachable across 68 images" (corpus coverage)
-  //     into a per-producer reachability answer. That is worth doing on its own and is
-  //     NOT done here -- it needs a paged image that forces, say, an S_INT_PUSH frame
-  //     to straddle a boundary, which is a test per producer rather than one test.
+  //     into a per-producer reachability answer.
+  //
+  //     ATTEMPTED AND NOT LANDED, so the next attempt does not restart from zero. I
+  //     built a probe on top of pxpage (paging already on, low 4 MiB identity-mapped)
+  //     targeting first an FSTP m64 and then an LGDT at linear 0x20FFE, both crossing
+  //     into 0x21000, both in states absent from cross_split_capable. NEITHER fired
+  //     the assertion, and in both cases the run stalled on the FIRST instruction I
+  //     added after CR0.PG is set -- pc=0x000F011A (fldz) and pc=0x000F0117 -- which
+  //     points at the scaffold, not at C-04. What it needs first:
+  //       - pxpage installs NO IDT, so ANY fault (including a #PF from an unmapped or
+  //         read-only target) stalls the core with nothing reported. A usable probe
+  //         needs an IDT before it can distinguish "crossed undetected" from "faulted".
+  //       - the write permissions of the identity map over the target page were never
+  //         confirmed; the probe writes its operand there first.
+  //     Separately observed and NOT diagnosed: `fldz` did not retire at all in that
+  //     context, with CR0=0xE0000011 (PE|PG set, EM/TS/MP clear), under both --system
+  //     and --system --cosim. That is its own question, not C-04's, and it is recorded
+  //     rather than asserted -- with no IDT present it may simply be a fault that
+  //     cannot be delivered.
   always_ff @(posedge clk)
     if (rst_n && cross_unhandled)
       $fatal(1, "PAGING/C-04: UNSPLIT page-crossing access in state %0d -- lin=%08h size=%0d ends at %03h, past the page end. This state translates only the page the access STARTS in, so the tail bytes go through the WRONG physical page and any #PF the second page owes is never raised. pc=%08h",
