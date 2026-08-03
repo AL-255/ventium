@@ -331,7 +331,14 @@
                 end
               end
               iret_interpriv   <= 1'b0;
-              iret_retire_nmi();        // REVIEW_aug2 H-05 (inter-privilege commit)
+              // REVIEW2_aug2 C-06: this commit is now shared with the OUTER-level far
+              // RETF, and NMI unblocking is IRET-only semantics -- a RETF that also
+              // cleared nmi_in_progress would re-open the NMI window early, inside a
+              // handler that never took an NMI. retf_out is the discriminator, and it
+              // is cleared here (and in start_fault) so the flag cannot outlive the
+              // sequence that set it.
+              if (!retf_out) iret_retire_nmi();   // REVIEW_aug2 H-05
+              retf_out         <= 1'b0;
               int_step         <= 4'd0;
               q_pc             <= int_src_pc;
               retire_valid     <= 1'b1;

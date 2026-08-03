@@ -246,11 +246,22 @@ xc04:
 	@$(MAKE) -s -C verif/sys/tests/pxc04m
 	bash verif/sys/run-xc04-gate.sh
 
+# --- far RETF to an OUTER privilege level (verif/sys/run-retfout-gate.sh) ----
+# REVIEW2_aug2 C-06, stack half. The witness is the ring-3 SS (0x23 fixed / 0x10 broken),
+# NOT the privilege level: CPL takes the popped CS.RPL in the broken build too, so a
+# test asking "did we reach ring 3" passes against the bug. esi carries ESP for the
+# case where SS is switched but the pointer is not.
+.PHONY: retfout
+retfout:
+	@$(MAKE) -s -C verif/sys/tests/pretfout
+	bash verif/sys/run-retfout-gate.sh
+
 # --- unimplemented-sequence reachability (verif/sys/run-unimpl-gate.sh) ------
-# REVIEW2_aug2 H-08 + C-06. Two sequences this core does not implement fail SILENTLY
-# (NT task-return; outer-level RETF). Both were instrumented rather than faulted, and
-# this gate READS those instruments -- an instrument nobody greps is what PROGRESS2
-# section 3.5 is about. Nonzero = the path became reachable and now needs implementing.
+# REVIEW2_aug2 H-08 + C-06. BOTH sequences this gate was built for are now IMPLEMENTED
+# (NT task-return -> the directed pntret probe below; outer-level RETF -> `make retfout`),
+# so both instrument counters are pinned to 0 and the gate's remaining job is the
+# directed pntret assertion. Kept rather than deleted: it is the record that the two
+# gaps were closed, and it still fails loudly if the NT return regresses.
 .PHONY: unimpl
 unimpl:
 	@$(MAKE) -s -C verif/sys/tests/pntret

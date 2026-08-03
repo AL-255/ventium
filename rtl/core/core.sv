@@ -2278,6 +2278,11 @@ module core
   // everything (present / code / DPL / conforming / gate resolution / offset vs limit),
   // parks the result here, and only then goes to S_LCALL to push and commit.
   logic        ntret_pend;
+  // REVIEW2_aug2 C-06: a far RETF to an OUTER privilege level. retf_out marks the
+  // pop-and-validate sequence in flight; retf_ob is its extra-beat counter (0=ESP,
+  // 1=SS). retf_out stays set through S_INT_CS_RET/S_IRET_SS so the shared commit
+  // can tell a RETF from an IRET -- see the NMI note there.
+  logic        retf_out, retf_ob;
   logic        lcall_pend;      // 1 = this S_LJMP pass is the far CALL's probe
   logic [31:0] lc_cs_base, lc_cs_limit;
   logic [7:0]  lc_cs_attr;
@@ -3986,7 +3991,7 @@ module core
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_cs_base<=32'd0; int_cs_limit<=32'd0; int_cs_attr<=8'd0; int_cs_d<=1'b0;
-      ntret_pend<=1'b0;
+      ntret_pend<=1'b0; retf_out<=1'b0; retf_ob<=1'b0;
       lcall_pend<=1'b0; lc_cs_base<=32'd0; lc_cs_limit<=32'd0;
       lc_cs_attr<=8'd0; lc_cs_d<=1'b0; lc_cs_cpl<=2'd0;
       int_sw<=1'b0;
@@ -5972,6 +5977,11 @@ module core
       // were a task return -- exactly the re-entry H-04 exists to prevent. Same shape,
       // and the same reason, as the split-transfer aborts below.
       ntret_pend <= 1'b0;
+      // REVIEW2_aug2 C-06: and an in-flight outer RETF, for the same reason -- a #PF
+      // on the ESP/SS pop or on either descriptor read must not leave the sequence
+      // armed across the handler, where the next RETF would consume its staged frame.
+      retf_out   <= 1'b0;
+      retf_ob    <= 1'b0;
       // REVIEW_aug2 C-02: ABORT any in-flight split memory microsequence.
       // ===================================================================
       // xp_pend (split LOAD) and xs_act/xs_ph (split STORE) were cleared only at reset

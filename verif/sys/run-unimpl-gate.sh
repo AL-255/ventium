@@ -43,7 +43,7 @@ for d in "$REPO"/verif/sys/tests/*/; do
   n=$((n+1))
   out="$("$TB" --image "$img" --system --out /dev/null --max-insn 4000 --quiesce 400 2>&1 || true)"
   a=0   # H-08 is IMPLEMENTED; the [VEN-NTRET] instrument it counted is gone.
-  b="$(printf '%s\n' "$out" | grep -c 'VEN-RETFOUT' || true)"
+  b=0   # C-06 is IMPLEMENTED; the [VEN-RETFOUT] instrument it counted is gone.
   nt=$((nt+a)); rf=$((rf+b))
   [[ "$a" != "0" || "$b" != "0" ]] && hit="$hit $t(NT=$a,RETF=$b)"
 done

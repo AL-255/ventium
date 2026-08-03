@@ -151,7 +151,13 @@
         // says so explicitly, so the limit comes from SS rather than from whatever
         // dseg happened to name (which is why it was excluded before).
         cur_seg_rel=1'b1; cur_seg_idx=3'(SG_SS);
-        if (!seg_step) mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]);       // pop IP
+        // REVIEW2_aug2 C-06: an OUTER-level return keeps popping -- ESP at +2w and SS
+        // at +3w. ESP is NOT bumped at beat 1 for this case (see core_gpr_wb.svh), so
+        // these stay anchored to the ORIGINAL inner ESP and the arithmetic is plain.
+        if (retf_out)  mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP] +
+                                    (retf_ob ? ({27'd0,q_w,1'b0} + {28'd0,q_w})   // 3w: SS
+                                             :  {27'd0,q_w,1'b0}));               // 2w: ESP
+        else if (!seg_step) mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]);       // pop IP
         else           mem_addr = seg_base[SG_SS] + stk16(gpr_o[R_ESP]+{28'd0,q_w}); // pop CS
       end
       // M9.5 — SGDT/SIDT: 2-beat store of the 6-byte pseudo-descriptor (the exact

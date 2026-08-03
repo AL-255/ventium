@@ -496,30 +496,61 @@
               // CWSDPMI far-returns same-privilege (popped CS RPL == CPL).
               q_ljmp_sel <= mem_rdata[15:0];
               q_ljmp_off <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
-`ifndef SYNTHESIS
-              // ---- REVIEW2_aug2 C-06 (RETF outer-level): INSTRUMENTED, not fixed.
-              // A protected RETF whose popped CS has RPL > CPL is a return to an OUTER
-              // privilege level, and IA-32 requires popping and validating SS:ESP as
-              // well and discarding the inner frame. This core has no such path (see
-              // the file header): it reuses far-JMP semantics, so cpl_r would take the
-              // popped RPL while SS:ESP stay the INNER ones -- outer code running on
-              // the inner stack, silently, with nothing reporting it.
+              // ---- REVIEW2_aug2 C-06 (RETF outer-level): IMPLEMENTED ------------
+              // A protected RETF whose popped CS.RPL > CPL returns to an OUTER
+              // privilege level: the frame carries ESP and SS as well, and both must
+              // be popped and VALIDATED before anything commits. This core reused
+              // far-JMP semantics, so CPL took the popped RPL while SS:ESP stayed the
+              // INNER ones -- outer code holding an inner stack pointer, silently.
               //
-              // Measured before deciding what to do about it, exactly as the H-08 NT
-              // return was: a hard halt here would be a behavioural change on the RETF
-              // path, and the workloads that would say whether real guests take this
-              // (m7 Quake/Win95) are EXCLUDED from verify-all.
-              if (!seg_real && (mem_rdata[1:0] > cpl_r))
-                $display("[VEN-RETFOUT] protected RETF to an OUTER level: popped CS=%04h RPL=%0d > CPL=%0d at cs:eip=%04x:%08h -- SS:ESP are NOT popped or validated (REVIEW2_aug2 C-06)",
-                         mem_rdata[15:0], mem_rdata[1:0], cpl_r, seg_sel[SG_CS], q_pc);
-`endif
-              // REVIEW2_aug2 H-07: the POPPED CS is the least trustworthy selector in
+              // Rather than write a second cross-privilege path, this reuses the one
+              // C-07 already built for the inter-privilege IRET: stage the frame into
+              // the iret_* registers, then hand off to S_INT_CS_RET, which validates
+              // the CS, and S_IRET_SS, which validates the SS and commits CS/SS/EIP/
+              // EFLAGS/CPL/ESP on ONE clock. The rules are identical for both
+              // instructions, so sharing them is what keeps them from drifting.
+              //
+              // The ONE architectural difference is EFLAGS: an IRET restores it from
+              // the frame, a RETF does not touch it. Staging iret_eflags <= eflags
+              // makes the shared commit a no-op for flags, so no commit variant is
+              // needed. (The other difference, NMI unblocking, is gated on retf_out
+              // at the commit itself -- see core_iret.svh.)
+              if (retf_out) begin
+                if (!retf_ob) begin
+                  // beat 2: the OUTER ESP. `RET imm16` adds imm to the OUTER stack
+                  // pointer, not the inner one, so fold it in here.
+                  iret_esp <= mem_rdata + {16'd0, q_ret_imm};
+                  retf_ob  <= 1'b1;
+                end else begin
+                  // beat 3: the OUTER SS. Hand off to the validated CS reload.
+                  iret_ss      <= mem_rdata[15:0];
+                  int_gate_sel <= iret_cs;
+                  int_step     <= 4'd0;
+                  seg_step     <= 1'b0;
+                  retf_ob      <= 1'b0;
+                  if (!sel_in_table(iret_cs))
+                    start_fault(8'd13, 1'b1, {16'd0, iret_cs} & 32'h0000_FFFC, q_pc);
+                  else state <= S_INT_CS_RET;
+                end
+              end else if (mem_rdata[1:0] > cpl_r) begin
+                // beat 1 detected the outer return. Stage what is already known and
+                // keep popping; NOTHING architectural moves until S_IRET_SS.
+                retf_out       <= 1'b1;
+                retf_ob        <= 1'b0;
+                iret_interpriv <= 1'b1;
+                iret_cs        <= mem_rdata[15:0];
+                iret_eip       <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
+                iret_eflags    <= eflags;      // a RETF does not restore EFLAGS
+                int_src_pc     <= q_pc;        // the retire record stamps at the RETF
+              end else begin
+                            // REVIEW2_aug2 H-07: the POPPED CS is the least trustworthy selector in
               // the core -- it comes straight off the stack -- and it reached S_LJMP
               // with no bounds test at all.
               if (far_sel_bad(mem_rdata[15:0]))
                 start_fault(8'd13, 1'b1,
                             {16'd0, mem_rdata[15:0]} & 32'h0000_FFFC, q_pc);
               else begin seg_step <= 1'b0; state <= S_LJMP; end
+              end   // C-06: closes the same-privilege else
             end else begin
               logic [15:0] new_cs;
               new_cs = mem_rdata[15:0];               // popped CS (beat 1)

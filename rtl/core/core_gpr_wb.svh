@@ -543,7 +543,14 @@
         end
 
         S_RETF: begin
-          if (mem_ack && seg_step) begin
+          // REVIEW2_aug2 C-06: an OUTER-level return does not ADVANCE the inner ESP --
+          // it REPLACES ESP from the frame, at the single validated commit in
+          // S_IRET_SS. Bumping it here would also move the anchor the bus driver uses
+          // to address the remaining ESP/SS pops, so the beat-1 detection has to
+          // suppress this write on the same clock it fires. The condition is the
+          // popped CS.RPL, exactly as in the S_RETF arm of core_seg_ljmp.svh.
+          if (mem_ack && seg_step && !retf_out &&
+              !(!seg_real && (mem_rdata[1:0] > cpl_r))) begin
             gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=gpr_o[R_ESP] + {27'd0, q_w, 1'b0} + {16'd0, q_ret_imm};
           end
         end
