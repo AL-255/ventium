@@ -7,7 +7,7 @@
 # Two architectural sequences this core does not implement fail SILENTLY rather than
 # loudly, which is why each got an instrument during this review:
 #
-#   VEN-NTRET    IRET with EFLAGS.NT=1 -- an NT task-return should switch through the
+#   VEN-NTRET    (H-08, RETIRED) IRET with EFLAGS.NT=1 now performs a real task return
 #                current TSS backlink. IRET never examines NT, so such an IRET is
 #                treated as an ordinary return and the machine keeps running in the
 #                wrong task.                                            (H-08)
@@ -42,7 +42,7 @@ for d in "$REPO"/verif/sys/tests/*/; do
   [[ "$t" == "pntret" ]] && continue
   n=$((n+1))
   out="$("$TB" --image "$img" --system --out /dev/null --max-insn 4000 --quiesce 400 2>&1 || true)"
-  a="$(printf '%s\n' "$out" | grep -c 'VEN-NTRET'   || true)"
+  a=0   # H-08 is IMPLEMENTED; the [VEN-NTRET] instrument it counted is gone.
   b="$(printf '%s\n' "$out" | grep -c 'VEN-RETFOUT' || true)"
   nt=$((nt+a)); rf=$((rf+b))
   [[ "$a" != "0" || "$b" != "0" ]] && hit="$hit $t(NT=$a,RETF=$b)"
@@ -62,12 +62,18 @@ if [[ "$nt" == "0" && "$rf" == "0" ]]; then
   # nt_land, NT is set, and IRET executes. Today the core ignores NT and nt_land is
   # never reached.
   #
-  #   0x07000000  NT ignored -- the CURRENT, unimplemented behaviour
+  #   0x07000000  NT ignored -- the old, unimplemented behaviour
   #   0x07000001  the task return actually happened
   #
-  # This gate asserts the UNIMPLEMENTED value, deliberately, in the same shape as
-  # run-ic-alias-gate.sh: it holds the answer, so implementing the sequence makes this
-  # FAIL and forces the claim to be restated instead of the gap quietly disappearing.
+  # H-08 IS NOW IMPLEMENTED, so this asserts 0x07000001. It used to assert the
+  # UNIMPLEMENTED value on purpose (the run-ic-alias-gate.sh shape: hold the answer so
+  # that implementing the sequence FAILS the gate and forces the claim to be restated
+  # rather than letting the gap quietly disappear). That is exactly what happened --
+  # the gate failed, said "restate me", and this is the restatement.
+  #
+  # The value is known to discriminate: with the NT dispatch in core_fetch_decode.svh
+  # forced false, the SAME image yields 0x07000000 and CR0=0x60000011; with it live,
+  # 0x07000001 and CR0=0x60000019 (CR0.TS set, as every task switch must).
   pimg="$REPO/verif/sys/tests/pntret/pntret.bin"
   if [[ -f "$pimg" ]]; then
     ptr="$(mktemp)"
@@ -75,16 +81,17 @@ if [[ "$nt" == "0" && "$rf" == "0" ]]; then
     pe="$(tail -1 "$ptr" 2>/dev/null | grep -o '"ebp":"[^"]*"' | cut -d'"' -f4 || true)"
     rm -f "$ptr"
     echo "  directed NT-return probe (pntret): ebp = ${pe:-<none>}"
-    if [[ "$pe" == "0x07000001" ]]; then
-      echo "  FAIL the NT task return now WORKS. That is good news and this gate is stale:"
-      echo "       restate it to assert 0x07000001, and drop the [VEN-NTRET] instrument"
-      echo "       and this gate's H-08 half, which exist only to track an ABSENT path."
+    if [[ "$pe" == "0x07000000" ]]; then
+      echo "  FAIL the NT task return REGRESSED -- NT was ignored and the IRET was"
+      echo "       treated as an ordinary stack return, so nt_land never ran."
       echo "UNIMPL-GATE-FAIL"; exit 1
-    elif [[ "$pe" != "0x07000000" ]]; then
+    elif [[ "$pe" != "0x07000001" ]]; then
       echo "  FAIL neither value -- the probe did not reach its IRET as designed."
+      echo "       (Check the GDT: writing index 6 twice silently turns TSS_B into a"
+      echo "       code segment and the core then takes the far-jump path, cs=0x0030.)"
       echo "UNIMPL-GATE-FAIL"; exit 1
     fi
-    echo "    ok   still unimplemented, and now PROVEN reachable rather than inferred"
+    echo "    ok   the NT task return SWITCHED TASKS: nt_land ran (ebp=0x07000001)"
   fi
   echo "UNIMPL-GATE-OK"; exit 0
 fi

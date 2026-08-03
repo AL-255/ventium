@@ -70,8 +70,12 @@ _start16:
      * a backlink names) */
     movl    $0x31000067, 48(%ebx)
     movl    $0x00008b00, 52(%ebx)
-    movl    $0x0000FFFF, 48(%ebx)       /* idx6 0x30 code3 CONFORMING */
-    movl    $0x00CFFE00, 52(%ebx)       /* access 0xFE = P|DPL3|S|code|conforming|R */
+    /* NOTE: idx6 used to be written a SECOND time here as a conforming code segment,
+     * left over from the image this test was derived from. It silently clobbered the
+     * TSS_B descriptor above, so selector 0x30 was S=1 CODE, the core took the ordinary
+     * far-jump path instead of the task-switch path, and the run ended with cs=0x0030 --
+     * which reads exactly like "the NT return was ignored" and cost an implementation
+     * round. The descriptor a backlink names must be a TSS. */
 
     movw    $0x0037, 0x0480             /* GDT limit = 56-1 */
     movl    $0x00000500, 0x0482

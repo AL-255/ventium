@@ -639,60 +639,43 @@
             //      while the outgoing one is cleared -- the JMP form does `attr|8'h02`;
             //   4. clearing NT in the outgoing EFLAGS image.
             //
-            // WHY IT IS STILL NOT DONE: nothing in the corpus reaches an NT return (0
-            // across 61 images, and run-unimpl-gate.sh now holds that answer), so
-            // implementing it would put NEW logic on the IRET path with NOTHING
-            // exercising it. That is worse than the instrumented status quo -- it is
-            // the shape of defect this review found twice in my own work, where a fix
-            // was dead or fail-closed and every gate stayed green. Test first: an image
-            // that sets NT, builds a backlink TSS and IRETs.
+            // IMPLEMENTED (REVIEW2_aug2 H-08). All four parts land as follows:
+            //   1. the dispatch below, on NT and not-V86;
+            //   2. S_NTRET_RD reads the back-link at tr_base+0 and hands the selector
+            //      to S_LJMP, which already knows how to run a task switch;
+            //   3. tsw_type_ok() widens S_LJMP's two type tests to accept a BUSY TSS
+            //      (0xB) under ntret_pend, and the busy-TSS #GP arm above it is
+            //      qualified with !ntret_pend -- a back-link names the suspended OUTER
+            //      task, which never stopped being busy, so H-04's "you may not JMP
+            //      into a running task" guard must not fire here;
+            //   4. eflags[14] is cleared AT THE ARM, before S_TSW_SAVE beat 1 writes
+            //      the outgoing EFLAGS image.
+            // The S_TSW_BUSY beats needed NO change: beat 0 clears the outgoing busy
+            // bit, and beat 1's `attr | 8'h02` rewrites B over B for an already-busy
+            // incoming TSS. Reusing them is why this is ~15 lines and not a new
+            // micro-sequence.
             //
-            // THAT TEST NOW EXISTS -- verif/sys/tests/pntret, graded by
-            // run-unimpl-gate.sh -- so the prerequisite is met. An implementation was
-            // then ATTEMPTED AND REVERTED. Recorded so the next attempt starts past
-            // what already worked:
-            //   * S_NTRET_RD must be appended LAST in the state enum. run-xc04-gate.sh
-            //     asserts state NUMBERS (23/36/14/16/43/34) for the C-04 probes;
-            //     inserting anywhere else renumbers them while that gate keeps printing
-            //     green about different states.
-            //   * dispatch on EFLAGS.NT, the backlink read at tr_base+0, its null /
-            //     out-of-table #TS check, and handing the selector to S_LJMP all built
-            //     cleanly.
-            //   * S_LJMP's task-switch arm was widened to accept a BUSY TSS (type 0xB)
-            //     under an ntret_pend flag and to LEAVE the busy bit rather than
-            //     re-setting it -- a backlink names the suspended outer task, which
-            //     never stopped being busy.
-            //   SECOND ATTEMPT went further and narrowed it, so start from here:
-            //     - PROBED, not guessed: S_NTRET_RD works. It reads tr_base=0x3000,
-            //       gets backlink=0x0030, and ntret_pend is 1 at that point.
-            //     - ONE blocker found and fixed: an EARLIER arm in S_LJMP claims type
-            //       0xB unconditionally (`if (desc_present && type==4'hB) start_fault
-            //       #GP`) -- correct for a JMP, since you cannot jump into a running
-            //       task, but an NT return's backlink names the suspended outer task
-            //       and is busy BY DEFINITION. That arm needs `!ntret_pend &&`.
-            //     - STILL FAILING after that fix, and this is the open end: a probe
-            //       placed at the top of S_LJMP's descriptor-processing block NEVER
-            //       PRINTS with ntret_pend set. So the block is not being entered at
-            //       all -- S_NTRET_RD's `state <= S_LJMP` fires, but S_LJMP's
-            //       `if (mem_ack) ... else` body is not reaching the arm chain. Probe
-            //       S_LJMP's entry and its mem_ack next; do not touch the arm chain
-            //       again until that is understood.
-            //     - A TEST BUG was also found and fixed on the way: pntret's zero loop
-            //       covered 52 dwords (0x3000..0x30D0) and never reached TSS_B at
-            //       0x3100, so the switch read its GPRs/selectors/LDTR out of garbage.
-            //       Symptom was #UD at pc=0x508, which looked like an RTL fault and was
-            //       mine. That fix is KEPT.
+            // TWO EARLIER ATTEMPTS WERE REVERTED, and the reason is worth keeping:
+            // both were diagnosed as "S_LJMP is never entered". That was WRONG. A
+            // probe on S_LJMP's entry showed it IS entered with ntret_pend set and
+            // BOTH descriptor beats acking. The real blocker was in the TEST -- pntret
+            // wrote GDT index 6 twice, clobbering the TSS_B descriptor with a
+            // conforming CODE segment, so the core correctly took the far-jump path
+            // and the run ended cs=0x0030. That reads exactly like "NT was ignored".
+            // Probing the RTL's actual state, instead of re-editing on a theory, is
+            // what separated the two.
             //
-            // REVERTED rather than iterated on, because verify-all was 19/19 WITH the
-            // half-working version: nothing but pntret sets NT, so the suite cannot
-            // tell working from broken here. Leaving it would have been a third
-            // instance of the defect shape above.
-`ifndef SYNTHESIS
-            if (!real_mode && eflags[14])
-              $display("[VEN-NTRET] IRET with EFLAGS.NT=1 at cs:eip=%04x:%08h -- an NT task-return is NOT implemented; this is being treated as an ordinary IRET (REVIEW2_aug2 H-08)",
-                       seg_sel[SG_CS], eip);
-`endif
-            int_step <= 4'd0; int_src_pc <= eip; state <= real_mode ? S_RMIRET : S_IRET;
+            // pntret discriminates: ebp 0x07000001 implemented / 0x07000000 not, and
+            // CR0.TS (0x...19 vs 0x...11) says the same thing independently. MEASURED
+            // against a build with this dispatch forced false, not asserted.
+            int_step <= 4'd0; int_src_pc <= eip;
+            // REVIEW2_aug2 H-08: IRET with NT=1 in protected mode is a TASK RETURN,
+            // not a stack return -- it switches back to the task named by the current
+            // TSS back-link. V86 (EFLAGS.VM) is excluded: NT has no such meaning there.
+            if (!real_mode && eflags[14] && !eflags[17]) begin
+              ntret_pend <= 1'b1; seg_step <= 1'b0; state <= S_NTRET_RD;
+            end else
+            state <= real_mode ? S_RMIRET : S_IRET;
             // 16-bit IRET (IRETW): in PM the frame width follows the IRET's EFFECTIVE
             // operand size (eff_opsize = pfx_opsize ^ def16). In 16-bit PM (cs_d=0, no
             // 0x66) eff_opsize=1 -> pop a 6-byte IP:CS:FLAGS frame (2-byte slots, ESP

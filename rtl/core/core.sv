@@ -170,7 +170,8 @@ typedef enum logic [5:0] {
     // M2S.6 — the extra data-watchpoint handler-entry record (the qemu gdbstub
     // single-step quirk: a DATA breakpoint #DB re-reports the post-delivery state
     // stamped at the handler entry PC before the handler's first instruction).
-    S_DB_EXTRA
+    S_DB_EXTRA,
+    S_NTRET_RD
 } state_e;
 
 module core
@@ -2276,6 +2277,7 @@ module core
   // already on the stack. SYS_LCALL now runs S_LJMP in a NO-COMMIT pass that validates
   // everything (present / code / DPL / conforming / gate resolution / offset vs limit),
   // parks the result here, and only then goes to S_LCALL to push and commit.
+  logic        ntret_pend;
   logic        lcall_pend;      // 1 = this S_LJMP pass is the far CALL's probe
   logic [31:0] lc_cs_base, lc_cs_limit;
   logic [7:0]  lc_cs_attr;
@@ -2428,6 +2430,14 @@ module core
   function automatic logic sel_in_table(input logic [15:0] sel);
     sel_in_table = ({16'd0, sel[15:3], 3'd7} <=
                     {17'd0, (sel[2] ? ldt_limit : gdt_limit)});
+  endfunction
+
+  // REVIEW2_aug2 H-08: which TSS types may be switched TO. A far JMP/CALL may target
+  // only an AVAILABLE TSS (0x9); an IRET-with-NT task RETURN targets its back-link,
+  // which is necessarily BUSY (0xB). Stated once so the three S_LJMP arms that test it
+  // cannot drift apart.
+  function automatic logic tsw_type_ok(input logic [7:0] a, input logic ntret);
+    tsw_type_ok = (desc_type(a) == 4'h9) || (ntret && (desc_type(a) == 4'hB));
   endfunction
 
   function automatic logic far_sel_bad(input logic [15:0] sel);
@@ -3976,6 +3986,7 @@ module core
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_cs_base<=32'd0; int_cs_limit<=32'd0; int_cs_attr<=8'd0; int_cs_d<=1'b0;
+      ntret_pend<=1'b0;
       lcall_pend<=1'b0; lc_cs_base<=32'd0; lc_cs_limit<=32'd0;
       lc_cs_attr<=8'd0; lc_cs_d<=1'b0; lc_cs_cpl<=2'd0;
       int_sw<=1'b0;
@@ -5954,6 +5965,13 @@ module core
                  vec, err, fault_pc, int'(state), v86, dlv_depth);
 `endif
       // ===================================================================
+      // REVIEW2_aug2 H-08: ABORT an in-flight NT task RETURN. ntret_pend is set at the
+      // IRET and consumed in S_LJMP's second descriptor beat; a fault BEFORE that beat
+      // (a #PF on the back-link read or on the descriptor read itself) would otherwise
+      // leave it set, and the next far JMP to a busy TSS would be accepted as if it
+      // were a task return -- exactly the re-entry H-04 exists to prevent. Same shape,
+      // and the same reason, as the split-transfer aborts below.
+      ntret_pend <= 1'b0;
       // REVIEW_aug2 C-02: ABORT any in-flight split memory microsequence.
       // ===================================================================
       // xp_pend (split LOAD) and xs_act/xs_ph (split STORE) were cleared only at reset
@@ -6508,6 +6526,7 @@ module core
       S_TSW_BUSY: cur_lin = (tsw_step == 5'd0)
                           ? (gdt_base + {16'd0, tr_sel[15:3], 3'd0} + 32'd4)
                           : (gdt_base + {16'd0, tsw_new_sel[15:3], 3'd0} + 32'd4);
+      S_NTRET_RD: cur_lin = tr_base;
       S_IOPERM: cur_lin = (int_step == 4'd0)
                         ? (tr_base + 32'h64)
                         : (tr_base + {16'd0, ioperm_base} + {19'd0, ioperm_port[15:3]});
@@ -6553,6 +6572,7 @@ module core
       // exclusions are correct and stay.
       S_SEGLD, S_LJMP, S_LTR, S_INT_TSS, S_INT_SS,
       S_IRET_SS: translatable = 1'b1;
+      S_NTRET_RD: translatable = 1'b1;
       S_IOPERM:  translatable = 1'b1;   // REVIEW1_Aug2 M-03: a TSS read, so it pages
       // REVIEW1_Aug2 C-09: the task switch now pages like every other linear access.
       S_TSW_SAVE, S_TSW_READ, S_TSW_LDT, S_TSW_SEG, S_TSW_BUSY: translatable = 1'b1;

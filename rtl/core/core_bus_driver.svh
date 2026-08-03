@@ -457,6 +457,7 @@
       // REVIEW1_Aug2 M-03: beat 0 = TSS+0x66 (the I/O map base); beat 1 = the dword
       // holding the bitmap byte for this port. Both are TSS-relative and LINEAR, so
       // this arm sets no cur_seg_rel (see the C-01 default at the top).
+      S_NTRET_RD: begin mem_req=1'b1; mem_addr = tr_base; end
       S_IOPERM: begin mem_req=1'b1;
         mem_addr = (int_step == 4'd0)
                  ? (tr_base + 32'h64)                       // dword holding [0x66]

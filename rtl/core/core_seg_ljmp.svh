@@ -188,10 +188,16 @@
                 // saved state. Only an AVAILABLE TSS (0x9) is a legal JMP target; the
                 // busy type is legal only for an IRET back to a nested task. Accepting
                 // both let a JMP re-enter a running task and overwrite its context.
-                if (desc_present(attr) && (desc_type(attr) == 4'hB)) begin
+                // REVIEW2_aug2 H-08: ...EXCEPT for a task RETURN (IRET with NT=1),
+                // where a busy back-link is the CORRECT and only legal case -- the
+                // task being returned TO is by definition still active (it CALLed us).
+                // ntret_pend distinguishes the two; without it H-04's guard rejected
+                // every NT return with #GP.
+                if (!ntret_pend && desc_present(attr) && (desc_type(attr) == 4'hB)) begin
                   start_fault(8'd13, 1'b1, {16'd0, q_ljmp_sel[15:2], 2'b00}, q_pc);
-                  seg_step <= 1'b0;
-                end else if (desc_present(attr) && (desc_type(attr) == 4'h9)
+                  seg_step  <= 1'b0;
+                  ntret_pend<= 1'b0;
+                end else if (desc_present(attr) && tsw_type_ok(attr, ntret_pend)
                              && (desc_limit(desc) < 32'h67)) begin
                   // REVIEW1_Aug2 C-09 (last bullet): the TSS LIMIT was never checked.
                   // A 32-bit TSS must be at least 0x67 bytes -- the microsequence reads
@@ -202,13 +208,23 @@
                   // the size, which is the part that decides whether the fields the
                   // switch is about to read even exist.
                   start_fault(8'd10, 1'b1, {16'd0, q_ljmp_sel} & 32'h0000_FFFC, q_pc);
-                  seg_step <= 1'b0;
-                end else if (desc_present(attr) && (desc_type(attr) == 4'h9)) begin
+                  seg_step  <= 1'b0;
+                  ntret_pend<= 1'b0;
+                end else if (desc_present(attr) && tsw_type_ok(attr, ntret_pend)) begin
                   // HARDWARE TASK SWITCH to a 32-bit TSS.
                   tsw_new_base  <= desc_base(desc);
                   tsw_new_limit <= desc_limit(desc);
                   tsw_new_sel   <= q_ljmp_sel;
-                  tsw_new_attr  <= attr | 8'h02;     // incoming busy bit set (9->B)
+                  // For a JMP this promotes 9->B. For an NT RETURN the incoming TSS is
+                  // ALREADY busy (0xB) and must STAY busy, which this same expression
+                  // gives (0xB|2 == 0xB) -- so the S_TSW_BUSY beats need no NT case:
+                  // beat 0 still clears the outgoing bit, beat 1 rewrites B over B.
+                  tsw_new_attr  <= attr | 8'h02;
+                  // H-08: IA-32 clears NT in the EFLAGS image saved to the OUTGOING
+                  // TSS on a task return. S_TSW_SAVE beat 1 writes `eflags` directly,
+                  // so clear it here, at the arm, before that beat runs.
+                  if (ntret_pend) eflags[14] <= 1'b0;
+                  ntret_pend    <= 1'b0;
                   tsw_save_eip  <= next_eip;          // outgoing resume EIP (after jmp)
                   tsw_step      <= 5'd0;
                   seg_step      <= 1'b0;

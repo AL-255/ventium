@@ -94,6 +94,15 @@
         //   * the byte covering this port lies outside the TSS limit -- IA-32 treats
         //     bits beyond the bitmap as SET, i.e. denied;
         //   * the bit is set.
+        S_NTRET_RD: begin
+          if (mem_ack) begin
+            q_ljmp_sel <= mem_rdata[15:0];
+            q_ljmp_off <= 32'd0;
+            seg_step   <= 1'b0;
+            state      <= S_LJMP;
+          end
+        end
+
         S_IOPERM: begin
           if (mem_ack) begin
             if (int_step == 4'd0) begin
