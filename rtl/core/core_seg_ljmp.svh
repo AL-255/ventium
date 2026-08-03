@@ -244,6 +244,26 @@
                     // gate not reachable from this privilege level -> #GP(selector)
                     start_fault(8'd13, 1'b1, {16'd0, q_ljmp_sel[15:3], 3'd0}, q_pc);
                     seg_step <= 1'b0; gate_via <= 1'b0;
+                  // REVIEW2_aug2 H-07: the gate's EMBEDDED TARGET selector was accepted
+                  // unchecked and then used to index the descriptor table on the next
+                  // pass. A gate whose target selector is null, or points past the GDT/
+                  // LDT limit, therefore issued an out-of-table descriptor read -- which
+                  // under paging can take a #PF, delivering the wrong exception ahead of
+                  // the architecturally prior #GP. The initial selector is prechecked at
+                  // dispatch (SYS_LJMP) and LTR/LLDT got the same treatment under H-01;
+                  // the gate's target is the third selector dereference and was the one
+                  // still unguarded.
+                  //
+                  // A NULL target is #GP(0) per the SDM (a gate may not point at the
+                  // null descriptor); an out-of-table one is #GP(sel & 0xFFFC).
+                  end else if (gsel[15:3] == 13'd0) begin
+                    start_fault(8'd13, 1'b1, 32'd0, q_pc);          // null gate target
+                    seg_step <= 1'b0; gate_via <= 1'b0;
+                  end else if (gsel[2]
+                               ? ({16'd0, gsel[15:3], 3'd0} + 32'd7 > {16'd0, ldt_limit})
+                               : ({16'd0, gsel[15:3], 3'd0} + 32'd7 > {16'd0, gdt_limit})) begin
+                    start_fault(8'd13, 1'b1, {16'd0, gsel[15:3], 3'd0}, q_pc);
+                    seg_step <= 1'b0; gate_via <= 1'b0;
                   end else begin
                     q_ljmp_sel <= gsel;
                     q_ljmp_off <= goff;
