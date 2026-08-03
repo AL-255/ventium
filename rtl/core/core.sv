@@ -2270,6 +2270,17 @@ module core
                                   // (4-bit: the M7.2 V86 push needs 10 beats 0..9)
   logic [31:0] int_gate_off;      // assembled handler offset from the IDT gate
   logic [15:0] int_gate_sel;      // gate's code selector
+  // REVIEW2_aug2 C-06 (descriptor half): the far-CALL target's validated CS, STAGED.
+  // A protected far CALL used to push its return frame FIRST and validate the target
+  // descriptor afterwards in S_LJMP, so a rejected descriptor faulted with CS:next_eip
+  // already on the stack. SYS_LCALL now runs S_LJMP in a NO-COMMIT pass that validates
+  // everything (present / code / DPL / conforming / gate resolution / offset vs limit),
+  // parks the result here, and only then goes to S_LCALL to push and commit.
+  logic        lcall_pend;      // 1 = this S_LJMP pass is the far CALL's probe
+  logic [31:0] lc_cs_base, lc_cs_limit;
+  logic [7:0]  lc_cs_attr;
+  logic        lc_cs_d;
+  logic [1:0]  lc_cs_cpl;
   // REVIEW2_aug2 C-03 (first bullet): the target CS HIDDEN state, STAGED. S_INT_CS
   // used to write seg_base/limit/attr[SG_CS] and cs_d the instant the descriptor was
   // accepted, so every later step of a cross-privilege delivery -- the TSS bound
@@ -3965,6 +3976,8 @@ module core
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_cs_base<=32'd0; int_cs_limit<=32'd0; int_cs_attr<=8'd0; int_cs_d<=1'b0;
+      lcall_pend<=1'b0; lc_cs_base<=32'd0; lc_cs_limit<=32'd0;
+      lc_cs_attr<=8'd0; lc_cs_d<=1'b0; lc_cs_cpl<=2'd0;
       int_sw<=1'b0;
       ioperm_ret<=S_IO; ioperm_port<=16'd0; ioperm_base<=16'd0;
       dlv_depth<=2'd0; dlv_ctrb<=1'b0; dlv_pf<=1'b0;  // REVIEW_aug2 H-04

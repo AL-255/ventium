@@ -739,7 +739,13 @@
                 if (!seg_real && far_sel_bad(d_ljmp_sel))
                   start_fault(8'd13, 1'b1,
                               {16'd0, d_ljmp_sel} & 32'h0000_FFFC, eip);
-                else if ((seg_real && !paging_on) || !seg_real) begin seg_step<=1'b0; state<=S_LCALL; end
+                // REVIEW2_aug2 C-06: in PM, run the descriptor VALIDATION first
+                // (S_LJMP with lcall_pend), then push in S_LCALL, then commit there.
+                // Real mode keeps the old order -- it has no descriptor to validate.
+                else if (seg_real && !paging_on) begin seg_step<=1'b0; state<=S_LCALL; end
+                else if (!seg_real) begin
+                  seg_step<=1'b0; lcall_pend<=1'b1; state<=S_LJMP;
+                end
                 else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE7; `endif end
               end
               SYS_RETF: begin

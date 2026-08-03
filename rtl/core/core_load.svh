@@ -114,7 +114,10 @@
                 if (far_sel_bad(ld_val[31:16]))
                   start_fault(8'd13, 1'b1,
                               {16'd0, ld_val[31:16]} & 32'h0000_FFFC, q_pc);
-                else begin seg_step <= 1'b0; state <= S_LCALL; end
+                // REVIEW2_aug2 C-06: validate the descriptor BEFORE pushing -- the
+                // indirect forms take the same probe path as the immediate one, or
+                // they would reach S_LCALL with stale lc_cs_* staging.
+                else begin seg_step <= 1'b0; lcall_pend <= 1'b1; state <= S_LJMP; end
               end
             end
             else if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
@@ -175,7 +178,8 @@
               if (far_sel_bad(ld2_val[15:0]))
                 start_fault(8'd13, 1'b1,
                             {16'd0, ld2_val[15:0]} & 32'h0000_FFFC, q_pc);
-              else begin seg_step <= 1'b0; state <= S_LCALL; end
+              // REVIEW2_aug2 C-06: same probe-first routing for the m16:32 form.
+              else begin seg_step <= 1'b0; lcall_pend <= 1'b1; state <= S_LJMP; end
             end else begin
               mem_load_data2<=ld2_val; state<=S_EXEC;
               // CMPS second operand [EDI] is also a data load -> D-cache access.

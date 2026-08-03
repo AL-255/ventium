@@ -228,6 +228,7 @@ retfsel:
 .PHONY: callsel
 callsel:
 	@$(MAKE) -s -C verif/sys/tests/pcallsel
+	@$(MAKE) -s -C verif/sys/tests/pcalldesc
 	bash verif/sys/run-callsel-gate.sh
 
 # --- C-04 producer reachability (verif/sys/run-xc04-gate.sh) -----------------

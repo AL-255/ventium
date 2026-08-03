@@ -309,6 +309,26 @@
                 // S_INT_SS loads the new SS, S_INT_PUSH builds the frame) — see task #47.
                 state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hDB; `endif
                 seg_step<=1'b0; gate_via<=1'b0;
+              end else if (lcall_pend) begin
+                // ---- REVIEW2_aug2 C-06 (descriptor half): PROBE PASS of a far CALL.
+                // Everything above has already run -- gate resolution, seg_load_fault,
+                // the cross-priv-gate halt -- so by here the target is fully validated
+                // and NOTHING has touched the stack. Park the result and go push.
+                // The offset-vs-limit check is repeated here rather than deferred,
+                // because it is the last thing that can reject the target.
+                if ({1'b0, q_ljmp_off} > {1'b0, desc_limit(desc)}) begin
+                  lcall_pend <= 1'b0; seg_step <= 1'b0; gate_via <= 1'b0;
+                  start_fault(8'd13, 1'b1, 32'd0, q_pc);
+                end else begin
+                  lc_cs_base  <= desc_base(desc);
+                  lc_cs_limit <= desc_limit(desc);
+                  lc_cs_attr  <= attr;
+                  lc_cs_d     <= desc[54];
+                  lc_cs_cpl   <= gate_via ? cpl_r : q_ljmp_sel[1:0];
+                  gate_via    <= 1'b0;
+                  seg_step    <= 1'b0;
+                  state       <= S_LCALL;   // now push, then commit there
+                end
               end else begin
                 seg_sel  [SG_CS] <= q_ljmp_sel;
                 seg_base [SG_CS] <= desc_base(desc);
@@ -411,10 +431,23 @@
               // Sixth time this review a "blocked" call of mine was wrong. The pattern
               // every time: I described what the code would do instead of reading what
               // it does.
-              if (far_sel_bad(q_ljmp_sel))
-                start_fault(8'd13, 1'b1,
-                            {16'd0, q_ljmp_sel} & 32'h0000_FFFC, q_pc);
-              else begin seg_step <= 1'b0; state <= S_LJMP; end
+              // REVIEW2_aug2 C-06: the descriptor was validated BEFORE these pushes,
+              // in the S_LJMP probe pass, and its result is parked in lc_cs_*. Commit
+              // it here, with the frame already on the stack and nothing left that can
+              // reject the transfer. (The far_sel_bad backstop is gone from this arm
+              // because the selector is checked at dispatch and the descriptor at the
+              // probe -- both before any push.)
+              seg_sel  [SG_CS] <= q_ljmp_sel;
+              seg_base [SG_CS] <= lc_cs_base;
+              seg_limit[SG_CS] <= lc_cs_limit;
+              seg_attr [SG_CS] <= lc_cs_attr;
+              cs_d             <= lc_cs_d;
+              cpl_r            <= lc_cs_cpl;
+              eip              <= q_ljmp_off;
+              lcall_pend       <= 1'b0;
+              seg_step         <= 1'b0;
+              retire_valid     <= 1'b1;
+              state            <= S_PIPE;
             end
             else begin
               // R3: SP -= 2w bump moved to the gpr writeback driver (S_LCALL arm).
