@@ -200,12 +200,16 @@
               logic        ss_int_bad;
               desc = {mem_rdata, int_lo};
               ss_int_a   = desc_attr(desc);
-              // cpl_r already holds the NEW CPL: S_INT_CS committed it before chaining
-              // here, and this arm only runs on the cross-privilege path.
+              // REVIEW2_aug2 C-03 (staging, CPL half): compare against int_new_cpl,
+              // NOT cpl_r. S_INT_CS used to commit the new CPL before chaining here,
+              // so cpl_r happened to hold it; it now defers that commit to this state
+              // so a fault raised in between is still classified at the ORIGINAL
+              // privilege. int_new_cpl is the staged target CPL and has been correct
+              // all along -- tss_stk_off already addressed the TSS with it.
               ss_int_bad = (int_new_ss[15:2] == 14'd0)          // null selector
                         || !ss_int_a[4] || ss_int_a[3] || !ss_int_a[1]  // not writable DATA
-                        || (int_new_ss[1:0] != cpl_r)           // RPL must equal the new CPL
-                        || (ss_int_a[6:5]   != cpl_r);          // DPL must equal the new CPL
+                        || (int_new_ss[1:0] != int_new_cpl)     // RPL must equal the new CPL
+                        || (ss_int_a[6:5]   != int_new_cpl);    // DPL must equal the new CPL
               // ---- REVIEW1_Aug2 C-07: VALIDATE the TSS-supplied SS before installing.
               // This loaded selector/base/limit/attr unconditionally -- no table limit,
               // RPL, DPL, writable-data, type or Present check -- so a malformed TSS
@@ -236,6 +240,11 @@
                 seg_base [SG_SS] <= desc_base(desc);
                 seg_limit[SG_SS] <= desc_limit(desc);
                 seg_attr [SG_SS] <= desc_attr(desc);
+                // REVIEW2_aug2 C-03 (staging, CPL half): THIS is the cross-privilege
+                // CPL commit point -- the new stack has just been validated and
+                // accepted, so the privilege change and the stack it depends on now
+                // become visible together instead of a whole TSS + SS sequence apart.
+                cpl_r            <= int_new_cpl;
                 // REVIEW_aug2 H-01: capture SS.B here too. ss_b was updated ONLY on the
                 // ordinary segment-load path, so a cross-privilege delivery onto a
                 // 16-bit inner stack kept the PREVIOUS descriptor's width and pushed the

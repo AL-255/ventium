@@ -7695,18 +7695,16 @@ module core
                    // GDT limit (descriptor-table bounds) + the IDTR (interrupts =
                    // M2S.3). Retained as the home for those checks.
                    gdt_limit[0], idt_base[0], idt_limit[0],
-                   // M2S.4 — TR/TSS protection state COMPUTED-not-delivered. The
-                   // cross-priv delivery reads TSS.ssN:espN unconditionally; the
-                   // negative cases would consult:
-                   //   tr_valid   : no TSS loaded -> a cross-priv delivery is #TS;
-                   //                the pcpl corpus always LTRs a valid TSS first,
-                   //                so this is always 1 and never gates a fault.
-                   //   tr_limit   : the TSS limit (the ssN:espN read must lie within
-                   //                it, else #TS); the 104-byte TSS always covers
-                   //                SS0:ESP0, so the bound never trips. Retained as
-                   //                the home for the #TS bound check (documented
-                   //                M2S.4 follow-on; needs a truncated-TSS test).
-                   tr_valid, tr_limit[0],
+                   // REVIEW2_aug2 C-03 (fifth bullet): tr_valid and tr_limit USED to be
+                   // sunk here as "COMPUTED-not-delivered", with a comment saying the
+                   // negative cases "would consult" them. They are now consulted for
+                   // real, in core_int_deliver.svh at the S_INT_CS -> S_INT_TSS
+                   // transition: a cross-privilege delivery requires a loaded TSS and
+                   // bounds the ssN:espN read against tr_limit, raising #TS(0) and
+                   // #TS(tr_sel) respectively. Removed from the sink accordingly --
+                   // leaving them here would keep -Wall quiet about a signal that no
+                   // longer needs the exemption, and the stale comment claimed the
+                   // opposite of what the RTL now does.
                    // M8.1 — inta_valid: the PIC asserts it with a meaningful
                    // inta_vector. The master 8259 always supplies a vector on the
                    // 2nd INTA cycle, so the divert latches inta_vector

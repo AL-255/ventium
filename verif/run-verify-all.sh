@@ -75,6 +75,12 @@ GATES=(
   # BOTH builds, which is precisely how this test's first draft passed with the fix
   # reverted. Verified to FAIL against a build with the limit compare removed.
   "intlim    (IDT gate offset vs destination CS limit)|intlim"
+  # REVIEW2_aug2 C-03: a truncated TSS must raise #TS instead of reading ssN:espN from
+  # past tr_limit, and that #TS must be classified at the ORIGINAL privilege. Both a
+  # fixed and a broken core run to completion here, so the witness identifies WHICH
+  # handler ran. An absent witness FAILS: before the CPL half was staged this chain
+  # escalated #TS -> #GP -> #NP -> shutdown and reported nothing.
+  "tsslim    (truncated TSS -> #TS at the original CPL)|tsslim"
   # The 12 verif/l1/run-*.sh memory-subsystem gates (L1D coherence + store/load,
   # I-cache snoop, TLB, BTB, and the L1/AXI family). These existed for a long time
   # with NO make target and NO entry here, while this script's own banner called

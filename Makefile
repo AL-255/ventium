@@ -199,6 +199,18 @@ intlim:
 	@$(MAKE) -s -C verif/sys/tests/pintlim
 	bash verif/sys/run-intlim-gate.sh
 
+# --- truncated TSS / cross-priv delivery (verif/sys/run-tsslim-gate.sh) ------
+# REVIEW2_aug2 C-03, fifth bullet + the CPL half of the first. A cross-privilege
+# delivery must bound the TSS.ssN:espN read against tr_limit and raise #TS -- and that
+# #TS must be classified at the ORIGINAL privilege. tr_valid/tr_limit previously sat in
+# a lint sink, consumed by nothing. Both a fixed and a broken core complete, so the
+# witness names WHICH handler ran rather than whether a fault occurred. Verified to
+# FAIL against the pre-fix build.
+.PHONY: tsslim
+tsslim:
+	@$(MAKE) -s -C verif/sys/tests/ptsslim
+	bash verif/sys/run-tsslim-gate.sh
+
 # --- L1 / memory-subsystem unit gates ---------------------------------------
 # `l1` runs EVERY verif/l1/run-*.sh gate -- the list is GLOBBED, not enumerated, so a
 # new gate script is picked up automatically (the M-08 RLAST-recovery gate arrived that

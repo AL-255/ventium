@@ -123,9 +123,18 @@
               // does not switch stacks. Both facts derive from one bit, so name it once
               // and use it for the CPL, the stack-switch branch and the V86 latch.
               logic        int_tgt_conf, int_xpriv;
+              // REVIEW2_aug2 C-03 (fifth bullet): the LAST byte the S_INT_TSS pair of
+              // reads will touch. Derived from tgt_dpl, NOT from tss_stk_off: that
+              // signal is a function of int_new_cpl, which is assigned NONBLOCKING a
+              // few lines below, so it still holds the PREVIOUS delivery's CPL here
+              // and would bound the wrong window. Same registered-vs-combinational
+              // distinction H-08 settled for the IRET target limit.
+              //   layout: ESPn at 4 + n*8, SSn at 8 + n*8  ->  last byte = 11 + n*8
+              logic [31:0] tss_last;
               desc    = {mem_rdata, int_lo};
               cattr   = desc_attr(desc);
               tgt_dpl = desc_dpl(cattr);
+              tss_last = 32'd11 + ({30'd0, tgt_dpl} << 3);
               int_tgt_conf = seg_is_code(cattr) && cattr[2];   // code + C bit
               int_xpriv    = !int_tgt_conf && (tgt_dpl < eff_cpl);
               // target CS must be present, a code segment, DPL <= the EFFECTIVE
@@ -181,7 +190,34 @@
                 // tgt_dpl < eff_cpl, turning a same-privilege conforming transfer into
                 // a spurious privilege transition: CPL silently dropped and the
                 // handler ran on a TSS stack it was never supposed to get.
-                cpl_r            <= int_tgt_conf ? eff_cpl : tgt_dpl;
+                // ---- REVIEW2_aug2 C-03 (staging, CPL half): commit the new CPL HERE
+                // only on the SAME-PRIVILEGE path, where it is a no-op anyway (a
+                // conforming target keeps eff_cpl; a non-conforming same-priv target
+                // has tgt_dpl == eff_cpl, since cs_bad already rejected tgt_dpl >
+                // eff_cpl and int_xpriv covers tgt_dpl < eff_cpl).
+                //
+                // On the CROSS-PRIVILEGE path it is now DEFERRED to S_INT_SS, where
+                // the new stack is accepted. Committing it here was observable, not
+                // theoretical: with cpl_r already lowered to the target's DPL, any
+                // fault raised later in delivery -- including the #TS from the TSS
+                // bound check below -- was classified against the NEW privilege. A
+                // #TS handler reached through a DPL3 conforming gate (the only kind
+                // that can report a broken TSS, since it needs no stack switch) was
+                // then rejected by its own tgt_dpl > eff_cpl test and escalated.
+                // Measured on ptsslim before this change:
+                //   [FAULT] vec=10 err=00000028 depth=0   the #TS, correct
+                //   [FAULT] vec=13 err=00000032 depth=1   #GP: handler CS refused
+                //   [FAULT] vec=11 err=00000042 depth=2   escalation -> no report
+                // int_new_cpl already carried the staged value and tss_stk_off already
+                // used it, so nothing between here and S_INT_SS needed cpl_r.
+                //
+                // STILL OPEN: the CS hidden state (seg_sel/base/limit/attr/cs_d) is
+                // committed above and is NOT staged. A late fault therefore still
+                // pushes the handler's CS rather than the interrupted one. That is the
+                // remainder of C-03's first bullet and needs the iret_cs_*-style
+                // staging registers; it is not done here.
+                if (!int_xpriv)
+                  cpl_r          <= int_tgt_conf ? eff_cpl : tgt_dpl;
                 cs_d             <= desc[54];
                 int_step         <= 4'd0;
                 // M7.2: latch whether THIS delivery's source was V86 (eflags[17] is
@@ -224,6 +260,35 @@
                   int_old_fs   <= seg_sel[SG_FS];
                   int_old_gs   <= seg_sel[SG_GS];
                   int_old_eflags <= eflags;
+                  // ---- REVIEW2_aug2 C-03 (fifth bullet): REQUIRE a loaded TSS and
+                  // BOUND the ssN:espN read against tr_limit before issuing it. Both
+                  // signals existed and were consumed by NOTHING -- they sat in the
+                  // lint sink at core.sv:7699-7709 with a comment stating outright
+                  // that the negative cases "would consult" them. A cross-privilege
+                  // delivery with no TSS loaded, or a TSS truncated before ssN:espN,
+                  // read whatever memory followed tr_base and used it as the handler's
+                  // stack selector and pointer.
+                  //
+                  // IA-32 raises #TS for both: error code 0 when no TSS is loaded (no
+                  // selector to name), the TR selector when the TSS is too small.
+                  //
+                  // HONEST LIMITATION: this rejects the read, but CS/CPL were already
+                  // committed above, so the #TS still begins from a partially
+                  // installed handler context. That is C-03's REMAINING bullet (stage
+                  // the whole control context to one commit point) and is not fixed
+                  // here. Bounding the read is strictly better than performing it out
+                  // of bounds, and it does not depend on the staging rework landing.
+`ifdef VEN_C03_PROBE
+                  $display("[C03-TSSB] xpriv deliver vec=%0d tgt_dpl=%0d tr_valid=%0b tr_limit=%0h tss_last=%0d -> %s",
+                           int_vec, tgt_dpl, tr_valid, tr_limit, tss_last,
+                           (!tr_valid || (tss_last > tr_limit)) ? "#TS" : "ok");
+`endif
+                  if (!tr_valid)
+                    start_fault(8'd10, 1'b1, 32'd0, int_src_pc);
+                  else if (tss_last > tr_limit)
+                    start_fault(8'd10, 1'b1,
+                                {16'd0, tr_sel} & 32'h0000_FFFC, int_src_pc);
+                  else
                   state        <= S_INT_TSS;
                 end else begin
                   xpl_active   <= 1'b0;          // SAME-PRIV: push on current stack
