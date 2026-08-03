@@ -23,6 +23,7 @@
 // A is the control: a check that rejects everything would pass B and C and be useless.
 
 module tb_l1axi_alias;
+  logic ic_nocache_unused;   // REVIEW2_aug2 H-13
   localparam int ADDR_W = 40;
   logic clk=0, rst_n=0; always #5 clk=~clk;
 
@@ -48,7 +49,10 @@ module tb_l1axi_alias;
       .core_req(c_req), .core_we(c_we), .core_addr(c_addr), .smm_active(1'b0),
       .smbase(32'h0003_0000), /* C-10 */ .core_lock(1'b0), /* REVIEW2_aug2 C-08: core reset default */
       .core_lin(c_addr), .core_wdata(c_wdata),
-      .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack), .bus_err(bus_err),
+      .core_wstrb(c_wstrb), .core_rdata(c_rdata), .core_ack(c_ack),
+      // REVIEW2_aug2 H-13: the I-side memory type. Not exercised by this
+      // memory-subsystem gate; connected so the build stays warning-clean.
+      .core_ic_nocache (ic_nocache_unused), .bus_err(bus_err),
       .m_axi_awid(awid), .m_axi_awaddr(awaddr), .m_axi_awlen(awlen), .m_axi_awsize(awsize),
       .m_axi_awburst(awburst), .m_axi_awlock(awlock), .m_axi_awcache(awcache),
       .m_axi_awprot(awprot), .m_axi_awqos(awqos), .m_axi_awvalid(awvalid), .m_axi_awready(awready),

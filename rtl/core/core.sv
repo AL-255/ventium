@@ -434,6 +434,11 @@ module core
     // the whole RMW: asserted from the read beat through the write beat of a locked
     // read-modify-write, so a wrapper can hold the bus across both.
     output logic        mem_lock,
+    // REVIEW2_aug2 H-13: the physical MEMORY TYPE of the line being fetched, from the
+    // chipset cacheability map (ven_cachemap in ventium_l1_axi). 1 = do not retain this
+    // line in the icache. Tied 0 in builds with no L1AXI/northbridge in front of the
+    // core, where there is no region information to have.
+    input  logic        ic_mtype_nc,
     output logic [31:0] mem_addr,
     // task #51: the PRE-TRANSLATE linear address for the SAME access mem_addr describes. The
     // I-cache is LINEAR-tagged (flin = seg_base[SG_CS] + eip) but the self-modifying-code snoop
@@ -6861,9 +6866,30 @@ module core
   // as well needs ven_cachemap, which is on an unmerged branch.
   //
   // CR0.CD (bit 30) is the driver the comment above says had nothing safe to drive it.
-  assign ic_fill_nocache = creg0[30];
+  //
+  // REVIEW2_aug2 H-13 IS NOW CLOSED. ven_cachemap was landed on this branch, so the
+  // physical MEMORY TYPE is the second driver: ic_mtype_nc is the chipset's KEN#
+  // analogue for the line being fetched, queried with is_code=1 (a PAM window opened
+  // read-only is L1-cacheable for CODE reads and not for data -- the shadowed-BIOS
+  // case). ORed in, not substituted: CR0.CD and the memory type are independent
+  // reasons not to retain a line and either alone is sufficient.
+  //
+  // The perf figures above are unaffected BY CONSTRUCTION: on cacheable DRAM the map
+  // returns l1_cacheable=1, so the new term is 0 and the OR is inert. What it changes
+  // is only the regions where retaining the line was WRONG.
+`ifndef VEN_IC_NO_MTYPE
+  assign ic_fill_nocache = creg0[30] | ic_mtype_nc;
 `else
-  assign ic_fill_nocache = 1'b0;
+  // Opt-out, for the H-13 gate's CONTROL build only: drops the memory-type term so the
+  // gate can measure the difference the term makes rather than assert it. Same shape as
+  // VEN_IC_NO_FETCH_BYPASS, and for the same reason -- a gate that cannot build the
+  // other side of the comparison is not measuring anything.
+  assign ic_fill_nocache = creg0[30];
+`endif
+`else
+  // H-13: with the CR0.CD bypass compiled out, an UNCACHEABLE-BY-MEMORY-TYPE line must
+  // still not be retained -- that is a chipset-decode property, not a CR0 policy.
+  assign ic_fill_nocache = ic_mtype_nc;
 `endif
 
   logic        ic_tch0_en, ic_tch1_en, ic_tch2_en;

@@ -267,6 +267,15 @@ callxpl:
 	@$(MAKE) -s -C verif/sys/tests/pcallxpl
 	bash verif/sys/run-callxpl-gate.sh
 
+# --- H-13: fetch cacheability follows the physical memory type ---------------
+# REVIEW2_aug2 H-13. ven_cachemap is on this branch now, so the I-side query exists in
+# the default build (outside the EN_L2 generate). Compares the l1axi build against a
+# +VEN_IC_NO_MTYPE control: uncacheable code must refetch AND compute the same answer.
+.PHONY: mtype
+mtype:
+	@$(MAKE) -s -C verif/sys/tests/pmtype
+	bash verif/sys/run-mtype-gate.sh
+
 # --- unimplemented-sequence reachability (verif/sys/run-unimpl-gate.sh) ------
 # REVIEW2_aug2 H-08 + C-06. BOTH sequences this gate was built for are now IMPLEMENTED
 # (NT task-return -> the directed pntret probe below; outer-level RETF -> `make retfout`),

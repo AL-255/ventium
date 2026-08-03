@@ -102,6 +102,7 @@ rtl/mem/ven_reset_sync.sv
 rtl/mem/ven_axi_cdc.sv
 rtl/mem/ven_l1d.sv
 rtl/mem/ven_axi_master.sv
+rtl/northbridge/ven_cachemap.sv
 rtl/mem/ventium_l1_axi.sv
 ao486-sim/ven/ven_axi2avalon.sv
 ao486-sim/ven/ven_ao486_shim.sv

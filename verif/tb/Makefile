@@ -115,10 +115,15 @@ rtl:
 # only ever instantiated under +VEN_EN_L2, which only `l1axi_l2` defines, so the
 # other targets never needed them. Split out: the common list is now buildable, and
 # only the L2 target pulls NB_RTL (behind a guard that fails with a clear message).
+# REVIEW2_aug2 H-13: ven_cachemap moved from NB_RTL into the COMMON list. It is no
+# longer an L2-only module -- the DEFAULT build now instantiates it for the I-side
+# memory-type query that drives ic_fill_nocache, outside the EN_L2 generate. That was
+# blocker (2) of the finding: an is_code query added inside that generate would have
+# been neither built nor tested by anything in verify-all.
 L1AXI_RTL := $(RTL_DIR)/mem/ven_l1d.sv $(RTL_DIR)/mem/ven_axi_master.sv \
-             $(RTL_DIR)/mem/ventium_l1_axi.sv
+             $(RTL_DIR)/mem/ventium_l1_axi.sv $(RTL_DIR)/northbridge/ven_cachemap.sv
 
-NB_RTL := $(RTL_DIR)/northbridge/ven_cachemap.sv $(RTL_DIR)/northbridge/ven_l2.sv \
+NB_RTL := $(RTL_DIR)/northbridge/ven_l2.sv \
           $(RTL_DIR)/northbridge/ven_northbridge.sv
 
 .PHONY: check-nb
@@ -137,6 +142,16 @@ l1axi:
 	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI -CFLAGS "-DVEN_L1_AXI" -Mdir obj_dir_l1axi \
 	  -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
 	@echo "built (L1+AXI bus_mode=2): $(CURDIR)/obj_dir_l1axi/$(EXE)"
+
+# REVIEW2_aug2 H-13 CONTROL BUILD: identical to l1axi but +VEN_IC_NO_MTYPE, which drops
+# the physical-memory-type term from ic_fill_nocache. run-mtype-gate.sh compares the two
+# so the effect of honouring the cacheability map is MEASURED, not asserted. A gate that
+# cannot build the other side of its comparison is not measuring anything.
+.PHONY: l1axi_nomt
+l1axi_nomt:
+	$(VERILATOR) $(VL_FLAGS) +define+VEN_L1_AXI +define+VEN_IC_NO_MTYPE -CFLAGS "-DVEN_L1_AXI" \
+	  -Mdir obj_dir_l1axi_nomt -F $(RTL_FILELIST) $(L1AXI_RTL) $(CPP_SRCS)
+	@echo "built (L1+AXI, H-13 memory-type term OFF): $(CURDIR)/obj_dir_l1axi_nomt/$(EXE)"
 
 # EXPERIMENT (task #24): identical to l1axi but +VEN_SINGLE_FILL, which skips ven_axi_master's
 # priming burst so a line fill costs ONE burst instead of two. Exists to MEASURE the payoff of

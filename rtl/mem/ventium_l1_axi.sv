@@ -108,6 +108,11 @@ module ventium_l1_axi #(
     input  logic [31:0] core_wdata,
     input  logic [3:0]  core_wstrb,
     output logic [31:0] core_rdata,
+    // REVIEW2_aug2 H-13: the INSTRUCTION-side memory type for the address currently on
+    // the core's bus. 1 = this line must not be retained in the icache. The core ORs it
+    // into ic_fill_nocache beside the CR0.CD term, and consumes it only during a fetch
+    // fill (S_PF), where core_addr IS the fetch's physical address.
+    output logic        core_ic_nocache,
     output logic        core_ack,
     output logic        bus_err,        // #34 fatal AXI fault (watchdog timeout / SLVERR)
 
@@ -274,6 +279,29 @@ module ventium_l1_axi #(
   // ---- post-L2 backing port (b_*): the seam between the L2 (or the bypass) and the
   logic m_rd_narrow, m_rd_narrow_2;      // H-11: L1D -> backing, narrow read request
   logic b_rd_narrow, b_rd_narrow_2;      // H-11: post-L2 (== m_* when EN_L2=0)
+  // ===== REVIEW2_aug2 H-13: THE I-SIDE CACHEABILITY QUERY ======================
+  // The finding: instruction-fetch cacheability was driven by CR0.CD alone, with no
+  // notion of the MEMORY TYPE of the address being fetched. A line in a region the
+  // chipset marks non-cacheable (a PAM window opened for a shadowed BIOS write, an
+  // MMIO aperture, memory above TOM, an open SMRAM aperture) was cached anyway, so
+  // later fetches from it were served from a stale icache copy.
+  //
+  // This query is DELIBERATELY OUTSIDE the EN_L2 generate block. The D-side one
+  // (u_cmap_l1) lives inside it and therefore elaborates only with EN_L2=1 -- that was
+  // blocker (2) of this finding: an is_code query added there would be neither built
+  // nor tested by any gate in verify-all. Here it is in the DEFAULT build.
+  //
+  // is_code=1 matters and is not cosmetic: a PAM window set read-only (RE=1, WE=0) is
+  // L1-cacheable for CODE reads and not for data, which is exactly the shadowed-BIOS
+  // case this decoder exists to model.
+  logic core_ic_l1c, core_ic_dram_u, core_ic_l2c_u; logic [3:0] core_ic_region;
+  ven_cachemap u_cmap_ic (
+      .addr(core_addr), .is_write(1'b0), .is_code(1'b1), .smm_active(smm_active),
+      .pam(NB_PAM), .dramc(NB_DRAMC), .cc(NB_CC), .tom_mb4(NB_TOM_MB4), .smram(NB_SMRAM),
+      .to_dram(core_ic_dram_u), .l1_cacheable(core_ic_l1c), .l2_cacheable(core_ic_l2c_u),
+      .region(core_ic_region));
+  assign core_ic_nocache = !core_ic_l1c;
+
   // AXI master / CDC. With EN_L2=0 these are wired straight to m_* (transparent);
   // with EN_L2=1 ven_l2 sits between m_* (its upstream u_*) and b_* (its downstream d_*).
   logic        b_req, b_we;

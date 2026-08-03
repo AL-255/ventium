@@ -16,7 +16,7 @@ verilator --binary -sv --assert +define+VEN_AXI_CDC \
     --top-module tb_l1axi_cdc -Mdir "$OBJ" -o tb_l1axi_cdc \
     "$ROOT/rtl/mem/ven_cdc_afifo.sv" "$ROOT/rtl/mem/ven_reset_sync.sv" \
     "$ROOT/rtl/mem/ven_axi_cdc.sv" "$ROOT/rtl/mem/ven_l1d.sv" \
-    "$ROOT/rtl/mem/ven_axi_master.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" \
+    "$ROOT/rtl/mem/ven_axi_master.sv" "$ROOT/rtl/northbridge/ven_cachemap.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" \
     "$ROOT/verif/l1/axi_slave_bfm.sv" "$ROOT/verif/l1/tb_l1axi_cdc.sv" \
     > "$OBJ/build.log" 2>&1 \
     || { echo "L1AXICDC-GATE-FAIL (build)"; tail -40 "$OBJ/build.log"; exit 1; }

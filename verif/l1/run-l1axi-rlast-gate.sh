@@ -41,7 +41,7 @@ run_mode() {  # <mode> <label>
       "$ROOT/rtl/mem/ven_l1d.sv" "$ROOT/rtl/mem/ven_axi_master.sv" \
       "$ROOT/rtl/mem/ven_cdc_afifo.sv" "$ROOT/rtl/mem/ven_axi_cdc.sv" \
       "$ROOT/rtl/mem/ven_reset_sync.sv" \
-      "$ROOT/rtl/mem/ventium_l1_axi.sv" "$ROOT/verif/l1/axi_slave_bfm.sv" \
+      "$ROOT/rtl/northbridge/ven_cachemap.sv" "$ROOT/rtl/mem/ventium_l1_axi.sv" "$ROOT/verif/l1/axi_slave_bfm.sv" \
       "$ROOT/verif/l1/tb_l1axi_rlast.sv" > "$dir/build.log" 2>&1 \
       || { echo "L1AXIRLAST-GATE-FAIL (build, mode $mode)"; tail -25 "$dir/build.log"; exit 1; }
   echo "---- $label ----"

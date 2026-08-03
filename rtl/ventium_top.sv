@@ -315,6 +315,10 @@ module ventium_top
   logic [3:0]  core_mem_wstrb;
   logic [31:0] core_mem_rdata;
   logic        core_mem_ack;
+  // REVIEW2_aug2 H-13: the I-side memory type reaching the core. Declared HERE, outside
+  // the VEN_L1_AXI ifdef, because the core port exists in every build; the producer
+  // (l1_ic_nocache, from ven_cachemap) only exists where the northbridge does.
+  logic        core_ic_nc;
 
   // M8.1: the core's INTERRUPT-ACKNOWLEDGE strobe output is the M8 ventium_soc's
   // (it drives the 8259). ventium_top (the verification top) ties off the
@@ -631,6 +635,7 @@ module ventium_top
       .mem_we       (core_mem_we),
       // REVIEW1_Aug2 C-10: the locked-RMW request, carried to the bus wrapper.
       .mem_lock     (core_mem_lock),
+      .ic_mtype_nc  (core_ic_nc),          // REVIEW2_aug2 H-13
       .mem_addr     (core_mem_addr),
       .mem_lin      (core_mem_lin),
       .mem_wdata    (core_mem_wdata),
@@ -986,6 +991,11 @@ module ventium_top
   localparam logic [31:0] L1AXI_ADDR_MASK  = 32'hFFFF_FFFF;
 `endif
   logic [31:0] l1_c_rdata; logic l1_c_ack; logic l1_bus_err;
+  // REVIEW2_aug2 H-13: the I-side memory type, from ven_cachemap inside ventium_l1_axi.
+  // Gated on l1axi_en for the same reason core_req is: in bus modes 0/1 there is no
+  // northbridge in the datapath, so its region model does not apply and those modes
+  // stay byte-identical.
+  logic        l1_ic_nocache;
   logic        core_smm_active;                       // REVIEW2 H-24: core SMM state
   logic [31:0] core_smbase;   // REVIEW2_aug2 C-08: the real SMRAM base
   logic        core_cache_inv; // REVIEW2_aug2 H-18: INVD/WBINVD invalidate request
@@ -1023,6 +1033,7 @@ module ventium_top
       .core_wdata(core_mem_wdata),
       .core_wstrb(core_mem_wstrb),
       .core_rdata(l1_c_rdata),
+      .core_ic_nocache (l1_ic_nocache),      // REVIEW2_aug2 H-13
       .core_ack  (l1_c_ack),
       .bus_err   (l1_bus_err),
       .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
@@ -1054,6 +1065,7 @@ module ventium_top
 
   assign core_mem_rdata = l1axi_en ? l1_c_rdata : (bus_mode ? bus_c_rdata : mem_rdata);
   assign core_mem_ack   = l1axi_en ? l1_c_ack   : (bus_mode ? bus_c_ack   : mem_ack);
+  assign core_ic_nc     = l1axi_en ? l1_ic_nocache : 1'b0;    // REVIEW2_aug2 H-13
 `else
   assign mem_req   = bus_mode ? bus_mem_req   : core_mem_req;
   assign mem_we    = bus_mode ? bus_mem_we    : core_mem_we;
@@ -1063,6 +1075,9 @@ module ventium_top
 
   assign core_mem_rdata = bus_mode ? bus_c_rdata : mem_rdata;
   assign core_mem_ack   = bus_mode ? bus_c_ack   : mem_ack;
+  // H-13: no L1AXI/northbridge in this build, so there is no region information to
+  // have. Tied 0 rather than guessed.
+  assign core_ic_nc     = 1'b0;
 `endif
 
   // M8.1 lint sink: the tied-off core inta output (soc_en=0 here; in the KV260 SoC

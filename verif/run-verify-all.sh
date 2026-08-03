@@ -105,6 +105,9 @@ GATES=(
   # bit misread that made every DPL-3 gate #GP from ring 3 -- which is why the
   # "cross-priv gate unimplemented" halt had never been seen by any corpus run.
   "callxpl   (cross-privilege call gate switches stacks)|callxpl"
+  # REVIEW2_aug2 H-13: ven_cachemap landed on this branch, so instruction-fetch
+  # cacheability now follows the PHYSICAL MEMORY TYPE and not CR0.CD alone.
+  "mtype     (fetch cacheability follows the memory type)|mtype"
   # REVIEW2_aug2 H-13: CR0.CD drives instruction-fill cacheability in the DEFAULT build
   # now. This gate existed and nothing ran it. Asserts that the CD-honouring build
   # really refetches AND that it is architecturally transparent vs the caching build.
