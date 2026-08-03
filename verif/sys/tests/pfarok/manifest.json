@@ -10,7 +10,7 @@
   "exit_method": "isa-debug-exit",
   "exit_port": "0xf4",
   "exit_code": 133,
-  "max_insn": 200,
+  "max_insn": 1200,
   "sys": true,
   "paging": false,
   "transitions": [
@@ -20,7 +20,8 @@
     "  loads CS from the GDT descriptor, transfers",
     "FAR RETURN: lret pops CS:EIP and comes back to the caller's segment",
     "witness ebp: 0x00000000 never transferred / 0xFA000001 reached the target but did",
-    "  not return / 0xFA000003 both halves completed"
+    "  not return / 0xFA00000F all four halves completed",
+    "CALL GATE: a second lcall through selector 0x20, a 32-bit call gate onto 0x18:gate_target -- the form CWSDPMI uses (task #47), previously exercised only by the EXCLUDED m7 cosims"
   ],
   "why": "REVIEW2_aug2 C-06 prerequisite. verify-sys had NO far-CALL golden: psocfarcall/psoccallfmem/psocpmretf are referenced by zero gates AND have no source (.bin/.elf/.o only), so they cannot be rebuilt or registered. pcallsel covers the REJECT path only. This is the positive case, so a reorder of the far-transfer path (C-06's remaining half) has something to regress against."
 }

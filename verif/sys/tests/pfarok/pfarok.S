@@ -20,9 +20,14 @@
  * RETF back. ebp accumulates both halves, so the witness distinguishes "never called"
  * from "called but never returned":
  *
- *   0x00000000  the far CALL never transferred
- *   0xFA000001  reached the target but the RETF did not come back
- *   0xFA000003  both the call and the return completed   <- correct
+ *   0x00000000  the direct far CALL never transferred
+ *   0xFA000001  reached the direct target but the RETF did not come back
+ *   0xFA000003  direct call + return completed, but the CALL GATE did not transfer
+ *   0xFA000007  the gate transferred but its RETF did not come back
+ *   0xFA00000F  all four: direct call, direct return, gate call, gate return  <- correct
+ *
+ * (The bits accumulate 1|2|4|8. An earlier draft of this header said 0x0B; that was my
+ *  arithmetic, not the machine's, and the run disagreeing is what caught it.)
  */
 
     .code16
@@ -46,8 +51,16 @@ _start16:
     movl    $0x00cf9200, 0x0514
     movl    $0x0000ffff, 0x0518        /* 0x18 code32 flat DPL0 -- the CALL target */
     movl    $0x00cf9a00, 0x051c
+    /* 0x20 = a 32-bit CALL GATE onto 0x18:gate_target. Layout:
+     *   low  = selector<<16 | offset[15:0]
+     *   high = offset[31:16] | access<<8 | param_count
+     * access 0xEC = P, DPL3, S=0, type 0xC (32-bit call gate); DPL3 so CPL0 may use
+     * it (a call gate requires CPL <= gate DPL). Param count 0.
+     * Written in .code16, so the offset is split by hand from the linked address. */
+    movl    $0x00180000, 0x0520
+    movl    $0x0000ec00, 0x0524
 
-    movw    $0x001f, 0x0480            /* GDT limit = 4*8-1 */
+    movw    $0x0027, 0x0480            /* GDT limit = 5*8-1 */
     movl    $0x00000500, 0x0482
     lgdt    0x0480
 
@@ -106,6 +119,16 @@ pm_entry:
     movl    $0x00000600, 0x0492
     lidt    0x0490
 
+    /* finish the call gate now that 32-bit label arithmetic is available */
+    movl    $gate_target, %eax
+    andl    $0x0000FFFF, %eax
+    orl     $0x00180000, %eax          /* selector 0x18 in the high half */
+    movl    %eax, 0x0520
+    movl    $gate_target, %eax
+    andl    $0xFFFF0000, %eax
+    orl     $0x0000EC00, %eax          /* access 0xEC, param count 0 */
+    movl    %eax, 0x0524
+
     xorl    %ebp, %ebp                 /* 0 = the far CALL never transferred */
 
     /* far CALL to selector 0x18, which the GDT above defines as a VALID flat code32
@@ -116,7 +139,21 @@ pm_entry:
     .word   0x0018
     /* control returns HERE from the RETF */
     orl     $0x00000002, %ebp          /* -> 0xFA000003 */
+
+    /* SECOND TRANSFER: through the CALL GATE at selector 0x20. This is the form DOS
+     * Quake's CWSDPMI uses (task #47) and it was covered by nothing any gate runs --
+     * the m7 Quake/Win95 cosims exercise it, and both are excluded from verify-all.
+     * The gate supplies the target selector AND offset, so the operand offset here is
+     * ignored; 0 keeps the encoding relocation-free. */
+    .byte   0x9A
+    .long   0
+    .word   0x0020
+    orl     $0x00000008, %ebp          /* -> 0xFA00000F once the gate call returns */
     jmp     exit
+
+gate_target:
+    orl     $0x00000004, %ebp          /* reached the target THROUGH the gate */
+    lret
 
 far_target:
     movl    $0xFA000001, %ebp          /* reached the far target */
