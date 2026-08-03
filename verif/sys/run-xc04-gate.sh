@@ -34,17 +34,36 @@ echo "== REVIEW2_aug2 C-04: is a non-split-capable producer REACHABLE? =="
 [[ -x "$TB"  ]] || { echo "  SKIP: $TB missing"; exit 0; }
 [[ -f "$IMG" ]] || { echo "  SKIP: pxc04.bin missing"; exit 0; }
 
-OUT="$("$TB" --image "$IMG" --system --out /dev/null --max-insn 4000 --quiesce 400 2>&1 || true)"
-LINE="$(printf '%s\n' "$OUT" | grep -o 'PAGING/C-04: UNSPLIT page-crossing access in state [0-9]*' | head -1 || true)"
+probe() {   # $1 = image basename, $2 = expected state number, $3 = producer name
+  local img="$REPO/verif/sys/tests/$1/$1.bin"
+  if [[ ! -f "$img" ]]; then echo "  SKIP: $1.bin missing"; return 0; fi
+  local out line st
+  out="$("$TB" --image "$img" --system --out /dev/null --max-insn 4000 --quiesce 400 2>&1 || true)"
+  line="$(printf '%s\n' "$out" | grep -o 'PAGING/C-04: UNSPLIT page-crossing access in state [0-9]*' | head -1 || true)"
+  if [[ -z "$line" ]]; then
+    echo "  FAIL $3: the PAGING/C-04 assertion did NOT fire."
+    echo "       Either the split now covers this producer -- in which case this gate has"
+    echo "       served its purpose and must be RESTATED -- or the probe no longer reaches"
+    echo "       the crossing, which means the TEST regressed, not the core."
+    return 1
+  fi
+  st="$(printf '%s' "$line" | grep -oE '[0-9]+$')"
+  if [[ "$st" != "$2" ]]; then
+    echo "  FAIL $3: fired in state $st, expected $2 -- the probe is reaching a DIFFERENT"
+    echo "       producer than it names, so its answer is about the wrong thing."
+    return 1
+  fi
+  echo "  ok   $3 (state $st) crosses a page boundary with only the first page translated"
+  return 0
+}
 
-if [[ -n "$LINE" ]]; then
-  echo "  $LINE"
-  echo "  ok   the crossing IS reachable -- 'not observed in the corpus' is coverage,"
-  echo "       not unreachability, exactly as the finding says"
+fails=0
+probe pxc04  23 "S_LGDT      6-byte descriptor read" || fails=1
+probe pxc04i 36 "S_INT_PUSH  exception frame write"  || fails=1
+
+if [[ "$fails" == "0" ]]; then
+  echo "  => TWO producers proven reachable. \"0 in 68 images\" was corpus coverage,"
+  echo "     exactly as the finding says -- not architectural unreachability."
   echo "XC04-GATE-OK"; exit 0
 fi
-echo "  FAIL the PAGING/C-04 assertion did NOT fire."
-echo "       Either the split now covers this producer -- in which case this gate has"
-echo "       served its purpose and must be restated -- or the probe no longer reaches"
-echo "       the crossing, which means the TEST regressed, not the core."
 echo "XC04-GATE-FAIL"; exit 1
