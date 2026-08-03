@@ -352,7 +352,20 @@
               // which reads the target CS descriptor from the GDT, loads CS:base/
               // limit/attr/CPL/D, sets EIP=q_ljmp_off and retires — identical CS-load
               // path the PM far JMP already uses (incl. seg_load_fault delivery).
-              seg_step <= 1'b0; state <= S_LJMP;
+              // REVIEW2_aug2 H-07: bound the target selector before S_LJMP issues the
+              // descriptor read. This one arm covers EVERY far CALL form -- immediate
+              // ptr16:32 and both memory-indirect forms all funnel through S_LCALL --
+              // whereas the dispatch precheck only ever covered SYS_LJMP.
+              //
+              // NOTE (C-06, not fixed here): the return frame has ALREADY been pushed
+              // by this point, so a rejected selector faults with CS:next_eip on the
+              // stack and ESP decremented. Preventing the out-of-table descriptor READ
+              // is what H-07 asks for and is independent of that; unwinding the push
+              // needs the far-transfer staging rework C-06 describes.
+              if (far_sel_bad(q_ljmp_sel))
+                start_fault(8'd13, 1'b1,
+                            {16'd0, q_ljmp_sel} & 32'h0000_FFFC, q_pc);
+              else begin seg_step <= 1'b0; state <= S_LJMP; end
             end
             else begin
               // R3: SP -= 2w bump moved to the gpr writeback driver (S_LCALL arm).
@@ -385,7 +398,13 @@
               // CWSDPMI far-returns same-privilege (popped CS RPL == CPL).
               q_ljmp_sel <= mem_rdata[15:0];
               q_ljmp_off <= (q_w==3'd2) ? {16'd0, retf_off[15:0]} : retf_off;
-              seg_step <= 1'b0; state <= S_LJMP;
+              // REVIEW2_aug2 H-07: the POPPED CS is the least trustworthy selector in
+              // the core -- it comes straight off the stack -- and it reached S_LJMP
+              // with no bounds test at all.
+              if (far_sel_bad(mem_rdata[15:0]))
+                start_fault(8'd13, 1'b1,
+                            {16'd0, mem_rdata[15:0]} & 32'h0000_FFFC, q_pc);
+              else begin seg_step <= 1'b0; state <= S_LJMP; end
             end else begin
               logic [15:0] new_cs;
               new_cs = mem_rdata[15:0];               // popped CS (beat 1)

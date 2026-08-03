@@ -81,6 +81,10 @@ GATES=(
   # handler ran. An absent witness FAILS: before the CPL half was staged this chain
   # escalated #TS -> #GP -> #NP -> shutdown and reported nothing.
   "tsslim    (truncated TSS -> #TS at the original CPL)|tsslim"
+  # REVIEW2_aug2 H-07: far RETF must bound its POPPED CS against the table before the
+  # descriptor read. The pre-fix core raises no fault and STALLS at the LRET, so the
+  # gate fails on an absent witness rather than treating it as inconclusive.
+  "retfsel   (far RETF bounds its popped CS selector)|retfsel"
   # The 12 verif/l1/run-*.sh memory-subsystem gates (L1D coherence + store/load,
   # I-cache snoop, TLB, BTB, and the L1/AXI family). These existed for a long time
   # with NO make target and NO entry here, while this script's own banner called

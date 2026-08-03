@@ -90,7 +90,14 @@
                 // (GDT/LDT read, seg_load_fault delivery, cs_d/CPL from the descriptor).
                 q_ljmp_sel <= ld_val[31:16];
                 q_ljmp_off <= {16'd0, ld_val[15:0]};
-                seg_step   <= 1'b0; state <= S_LJMP;
+                // REVIEW2_aug2 H-07: bound the selector BEFORE S_LJMP issues the
+                // descriptor read. The dispatch precheck only covers the IMMEDIATE
+                // far JMP; this indirect form loads its selector from memory and
+                // reached S_LJMP unchecked.
+                if (far_sel_bad(ld_val[31:16]))
+                  start_fault(8'd13, 1'b1,
+                              {16'd0, ld_val[31:16]} & 32'h0000_FFFC, q_pc);
+                else begin seg_step <= 1'b0; state <= S_LJMP; end
               end
             end else if (q_callf_mem) begin
               if (q_w==3'd4) begin
@@ -151,7 +158,11 @@
                 // PROTECTED-mode far JMP (m16:32): q_ljmp_off already holds the 32-bit
                 // offset; stage the selector and hand off to the S_LJMP CS-descriptor load.
                 q_ljmp_sel <= ld2_val[15:0];
-                seg_step   <= 1'b0; state <= S_LJMP;
+                // REVIEW2_aug2 H-07: same bound for the m16:32 indirect far JMP.
+                if (far_sel_bad(ld2_val[15:0]))
+                  start_fault(8'd13, 1'b1,
+                              {16'd0, ld2_val[15:0]} & 32'h0000_FFFC, q_pc);
+                else begin seg_step <= 1'b0; state <= S_LJMP; end
               end
             end else if (q_callf_mem) begin
               q_ljmp_sel <= ld2_val[15:0];       // q_ljmp_off already 32-bit

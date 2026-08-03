@@ -211,6 +211,16 @@ tsslim:
 	@$(MAKE) -s -C verif/sys/tests/ptsslim
 	bash verif/sys/run-tsslim-gate.sh
 
+# --- far RETF selector bounds (verif/sys/run-retfsel-gate.sh) ----------------
+# REVIEW2_aug2 H-07. Far CALL/RETF reach S_LJMP after stack activity and had no
+# null/TI/table-limit test, so the popped CS -- the least trustworthy selector in the
+# core -- indexed the GDT unchecked. NOT differential. The pre-fix core raises no
+# fault at all and stalls at the LRET, so an ABSENT witness fails.
+.PHONY: retfsel
+retfsel:
+	@$(MAKE) -s -C verif/sys/tests/pretfsel
+	bash verif/sys/run-retfsel-gate.sh
+
 # --- L1 / memory-subsystem unit gates ---------------------------------------
 # `l1` runs EVERY verif/l1/run-*.sh gate -- the list is GLOBBED, not enumerated, so a
 # new gate script is picked up automatically (the M-08 RLAST-recovery gate arrived that

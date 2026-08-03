@@ -2379,10 +2379,25 @@ module core
   // and then validated whatever came back. The check has to happen BEFORE the read,
   // not as another term in iret_cs_ok/iret_ss_ok, because the read itself is the
   // defect. A descriptor occupies sel[15:3]*8 .. +7, so its last byte must be <= limit.
+  // REVIEW2_aug2 H-07: every FAR-TRANSFER selector dereference needs the same
+  // null/TI/table-limit test before the descriptor read is issued. The dispatch arm
+  // for SYS_LJMP had it (H-02) and the call gate's embedded target got it, but far
+  // CALL and RETF reach S_LJMP after stack activity and were still unguarded, so a
+  // selector past the table end read arbitrary memory AS a descriptor -- and under
+  // paging that read can take a #PF, delivering the wrong exception ahead of the
+  // architecturally prior #GP. Named once here so the four remaining entries into
+  // S_LJMP cannot drift apart. sel_in_table() already picks LDT vs GDT off TI; the
+  // null test is separate because a null selector indexes offset 0, which is inside
+  // any non-degenerate table and therefore passes the bounds test.
   function automatic logic sel_in_table(input logic [15:0] sel);
     sel_in_table = ({16'd0, sel[15:3], 3'd7} <=
                     {17'd0, (sel[2] ? ldt_limit : gdt_limit)});
   endfunction
+
+  function automatic logic far_sel_bad(input logic [15:0] sel);
+    far_sel_bad = (sel[15:3] == 13'd0) || !sel_in_table(sel);
+  endfunction
+
 
   // H-08: the target CS limit from the descriptor BEING READ, granularity-scaled.
   // Deliberately NOT the staged iret_cs_limit above: that one is REGISTERED at the
