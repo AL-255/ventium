@@ -61,9 +61,13 @@ fails=0
 probe pxc04  23 "S_LGDT      6-byte descriptor read" || fails=1
 probe pxc04i 36 "S_INT_PUSH  exception frame write"  || fails=1
 probe pxc04f 14 "S_FSTORE    x87 FSTP m64 beat"       || fails=1
+probe pxc04e 16 "S_FENV_ST   FNSTENV image beat"      || fails=1
 
 if [[ "$fails" == "0" ]]; then
-  echo "  => THREE producers proven reachable. \"0 in 68 images\" was corpus coverage,"
+  echo "  => FOUR producers proven reachable, spanning four of the SIX categories the"
+  echo "     finding names (descriptor / stack-frame / x87 / environment; task and"
+  echo "     microsequence are not covered -- they need a PAGED task-switch image,"
+  echo "     which no test in verif/sys/ builds today). \"0 in 68 images\" was corpus coverage,"
   echo "     exactly as the finding says -- not architectural unreachability."
   echo "XC04-GATE-OK"; exit 0
 fi
