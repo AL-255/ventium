@@ -592,8 +592,24 @@ module ven_l1d #(
           if (m_ack) begin
             // capture the returned word: into the PRIVATE buffer for a non-cacheable
             // bypass (no array write), else into the victim line being allocated.
-            if (bypass_q && !byp_hi_beat) bp_line[{fw,5'b00000} +: 32] <= m_rdata;
-            else          dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
+            // REVIEW2_aug2 C-09: A BYPASS BEAT MUST NEVER WRITE THE ARRAY.
+            //
+            // This used to read `if (bypass_q && !byp_hi_beat) ... else dc_line ...`,
+            // so the NINTH (high-word) beat of a cross-line non-cacheable read -- where
+            // bypass_q=1 AND byp_hi_beat=1 -- failed the first condition and fell into
+            // the array write. fw is still 7 at that point, so the returned word was
+            // written into victim word 7 of {fset,fway} with NO tag or valid update: a
+            // valid, unrelated line silently corrupted beneath its existing tag, which
+            // a later hit then serves as if it were real data.
+            //
+            // A bypass allocates nothing by definition, so the array write is gated on
+            // !bypass_q rather than on the beat index. The high word is captured as
+            // bp_hi immediately below.
+            if (bypass_q) begin
+              if (!byp_hi_beat) bp_line[{fw,5'b00000} +: 32] <= m_rdata;
+            end else begin
+              dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
+            end
             if (byp_hi_beat) begin
               // H-19: the extra beat returned the next line's word 0. Serve now.
               bp_hi       <= m_rdata;

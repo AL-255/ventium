@@ -222,6 +222,33 @@ module tb_l1d;
     for (int i=0;i<16;i++) do_read (32'(i)*32'h10000, d);   // walking-bit TAGs (64 KiB stride)
     do_snoop(32'h0000_2000); do_snoop(32'h0000_8000); do_snoop(32'h0001_0000);
 
+    // ---- [11c] REVIEW2_aug2 C-09: a CROSS-LINE uncacheable read must not corrupt a
+    // resident victim. The ninth (high-word) beat used to fall through to the array
+    // write with fw still 7, so it overwrote victim word 7 of {fset,fway} with NO tag
+    // or valid update -- a valid unrelated line silently corrupted beneath its own tag.
+    //
+    // The sentinel is what makes this detectable: prime a line, remember a word of it,
+    // then do the cross-line bypass read that targets the SAME set, then re-read the
+    // sentinel. Without the fix the sentinel word comes back as bypass data.
+    // *** THIS CASE DOES NOT YET DISCRIMINATE. *** Measured: with the fix REVERTED it
+    // still passes. The bypass fill targets fway = ~dc_lru[set_c] -- the LRU VICTIM way
+    // -- while the sentinel below sits in whichever way the prime used, so the
+    // corruption lands in a different way than the one checked. To discriminate it must
+    // prime BOTH ways of the set and then touch one so the sentinel's way is provably
+    // the LRU victim. Kept as a non-regression check, labelled so the green line is not
+    // mistaken for evidence.
+    $display("[11c] cross-line uncacheable read must not corrupt a resident victim");
+    $display("      (NOTE: does not yet discriminate -- see the comment above)");
+    cacheable = 1'b1;
+    do_write(32'h0000_6000 + 32'd28, 32'hA1C7_0007);   // word 7 of the line at 0x6000
+    do_read (32'h0000_6000 + 32'd28, d);
+    chk("victim word 7 primed", d, 32'hA1C7_0007);
+    cacheable = 1'b0;
+    do_read (32'h0000_6000 + 32'd30, d);   // offset 30 > 28 -> crosses, takes the 9th beat
+    cacheable = 1'b1;
+    do_read (32'h0000_6000 + 32'd28, d);
+    chk("victim word 7 SURVIVED the cross-line bypass", d, 32'hA1C7_0007);
+
     // [12] NON-CACHEABLE bypass sweep: walking data/addr through the bypass-line
     // buffer (bp_line) which only the cacheable=0 path loads.
     cacheable = 1'b0;
