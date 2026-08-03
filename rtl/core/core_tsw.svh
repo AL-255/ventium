@@ -126,7 +126,21 @@
         // reads GDT[0] = all-zeros -> a null (base/limit/attr 0) segment. The new
         // selectors are committed here; CPL = the new CS.RPL, cs_d = its D/B bit.
         S_TSW_SEG: begin
-          if (mem_ack) begin
+          // ---- REVIEW2_aug2 C-05 (fourth bullet): a V86 incoming task issues NO
+          // descriptor reads at all. Its six "selectors" are real-mode PARAGRAPHS, so
+          // the bus driver used them to index the GDT and the results were discarded.
+          // The in-source note called that "harmless: DOS low memory is mapped, so the
+          // overrun read can't fault" -- an assumption about the GUEST, not about the
+          // architecture. gdt_base + (paragraph << 3) is an arbitrary linear address:
+          // under paging it can #PF, and it is an address the architecture must never
+          // touch, so the fault is both spurious and attributable to nothing.
+          //
+          // mem_req is suppressed for this case in core_bus_driver.svh; suppressing a
+          // request while still WAITING for its acknowledgement is the C-01 deadlock,
+          // so the beat cadence must advance on its own here. The two-beat-per-segment
+          // structure is kept as-is so the staging logic below is untouched -- the V86
+          // path simply runs it with no bus traffic and ignores tsw_seg_lo.
+          if (tsw_eflags[17] || mem_ack) begin
             if (!tsw_step[0]) begin
               tsw_seg_lo <= mem_rdata; tsw_step <= tsw_step + 5'd1;
             end else begin

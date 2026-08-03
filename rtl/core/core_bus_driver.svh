@@ -499,7 +499,11 @@
         mem_addr = gdt_base + {16'd0, tsw_new_ldt[15:3], 3'd0}
                    + {29'd0, tsw_step[0], 2'b00};
       end
-      S_TSW_SEG: begin mem_req=1'b1;             // reload incoming seg descriptors
+      // REVIEW2_aug2 C-05: NO descriptor read for a V86 incoming task -- its segment
+      // values are real-mode paragraphs, and indexing the GDT with them reads an
+      // arbitrary linear address that can #PF under paging. core_tsw.svh advances the
+      // beat cadence itself in that case, so suppressing the request here cannot stall.
+      S_TSW_SEG: begin mem_req=!tsw_eflags[17];  // reload incoming seg descriptors
         // beat = seg_idx*2 + half; the selector for seg_idx is tsw_sel[seg_idx]
         // (CS,SS,DS,ES,FS,GS order). TI bit (sel[2]) picks GDT vs the just-loaded LDT.
         // REVIEW2_aug2 C-05: the INCOMING task's LDT is staged (tsw_st_ldt_base) and
