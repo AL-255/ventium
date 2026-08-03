@@ -219,6 +219,19 @@ else
   echo "  PASS FXCH with an empty ST(i) raises #IS (IE+SF, C1=0)"
 fi
 
+# REVIEW2_aug2 H-16 (ARITHMETIC operand): FSQRT consumes ST(0) with no push/pop, so
+# before the operand-validity check nothing consulted the tag and it ran on whatever the
+# empty slot held. Measured: 0041 with the check, 0000 without.
+S7=$(printf '%s' "$SOUT" | grep -oE "S7=[0-9a-f]+" | head -1 | cut -d= -f2)
+if [ "$S7" != "0041" ]; then
+  [ "$S7" = "0000" ] && echo "  FAIL FSQRT on an EMPTY stack raised NOTHING -- ST(0) is unchecked as an operand"
+  [ "$S7" != "0000" ] && [ -n "${S7:-}" ] && echo "  FAIL FSQRT-empty FSW '$S7' (want 0041 = IE|SF, C1 clear)"
+  [ -z "${S7:-}" ] && echo "  FAIL no S7= line in the output"
+  fenv_fail=1
+else
+  echo "  PASS arithmetic on an empty ST(0) raises #IS (IE+SF, C1=0)"
+fi
+
 S5=$(printf '%s' "$SOUT" | grep -oE "S5=[0-9a-f]+" | head -1 | cut -d= -f2)
 if [ -z "${S5:-}" ]; then
   echo "  FAIL no S5= line -- the unmasked stack-fault witness did not run"

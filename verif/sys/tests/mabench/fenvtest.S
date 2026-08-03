@@ -464,6 +464,21 @@ _start16:
     andw    $0x0241, %ax
     movw    %ax, 0x076e               /* S6 */
 
+    /* ==== REVIEW2_aug2 H-16: ARITHMETIC reading an EMPTY ST(0) ===================
+     * The class the finding names alongside compare/exchange/store. FSQRT takes ST(0)
+     * as its source with NO push or pop, so before this check nothing consulted the
+     * tag and the operation ran on whatever bits the empty slot held.
+     *
+     *   S7 = FSW(IE|SF|C1) after `fsqrt` on an EMPTY stack.
+     *        correct 0041 (IE|SF, C1 clear) / before the fix 0000.
+     */
+    fninit                            /* stack completely EMPTY */
+    fsqrt                             /* consumes ST(0), which does not exist -> #IS */
+    fnstsw  0x0770
+    movw    0x0770, %ax
+    andw    $0x0241, %ax
+    movw    %ax, 0x0772               /* S7 */
+
     movw    $0x03F8,%dx
     movb    $'S',%al; outb %al,%dx
     movb    $'4',%al; outb %al,%dx
@@ -474,6 +489,11 @@ _start16:
     movb    $'6',%al; outb %al,%dx
     movb    $'=',%al; outb %al,%dx
     movw    0x076e, %ax
+    call    puthexw
+    movb    $'S',%al; outb %al,%dx
+    movb    $'7',%al; outb %al,%dx
+    movb    $'=',%al; outb %al,%dx
+    movw    0x0772, %ax
     call    puthexw
     movw    $0x03F8,%dx
     movb    $13,%al; outb %al,%dx; movb $10,%al; outb %al,%dx

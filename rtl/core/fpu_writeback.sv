@@ -277,12 +277,14 @@ module fpu_writeback
     logic [65:0] s_ri;                       // fx_to_int_ex result {ovf,inexact,sval}
     logic signed [63:0] s_qn;                // FSCALE: trunc(ST1); FPREM: quotient
     logic signed [17:0] s_se;                // FSCALE: ST0 biased-exp + n
+    logic        fx_reads_st0, fx_reads_sti;  // H-16 operand-validity predicates
     logic [79:0] s_st1v;                     // ST1
     logic [80:0] s_pr;                       // FPREM: ST0 - Q*ST1
 
     // default: no writes this clock
     fp_we_push=1'b0; fp_push_data=80'd0;
     fp_stk_ovf=1'b0; fp_stk_unf=1'b0;
+    fx_reads_st0=1'b0; fx_reads_sti=1'b0;   // H-16
     fp_we_top=1'b0;  fp_top_data=80'd0;
     fp_we_fstat=1'b0; fp_fstat_wval=16'd0;
     fp_we_sti=1'b0;  fp_wsti_idx=3'd0; fp_wsti_data=80'd0; fp_wsti_clr_tag=1'b0;
@@ -1116,6 +1118,52 @@ module fpu_writeback
     // each a single resolved signal by this point; the ~10 drive sites above (fast
     // path FLD/FLD1/FLDPI, slow path FLD m32/m64/m80, FILD, FBLD ...) all funnel
     // through them. fptag bit i is 1 when fpr[i] is EMPTY.
+    fx_reads_st0 = 1'b0; fx_reads_sti = 1'b0;   // H-16, driven below
+    // ---- REVIEW2_aug2 H-16: arithmetic / compare / store reading an EMPTY operand.
+    //
+    // CORRECTION TO MY OWN PRIOR NOTE HERE, which said this could not be done because
+    // the block had no "an FP op commits this clock" qualifier and that q_fxop alone
+    // would fire on a stale opcode. The first half was simply wrong: `slow_arm`
+    // ((state==S_FEXEC) && !slow_pc_bad, line ~484) is exactly that strobe, and it
+    // already guards the very `unique case (q_fxop)` these opcodes are decoded in. The
+    // reasoning about q_fxop was right; the conclusion that no qualifier existed was
+    // not, and it was reached by looking for a signal named like one instead of at
+    // what guards the arm.
+    //
+    // IA-32: an operand that is empty is #IS, with C1=0 (underflow), for every op that
+    // CONSUMES a register -- not only for the push/pop transitions.
+    //   fx_reads_st0  ops taking ST(0) as a source: arithmetic, compare, store, and the
+    //                 single-operand transforms/transcendentals.
+    //   fx_reads_sti  ops ALSO taking ST(i): the register-form arithmetic and compares,
+    //                 FST ST(i), and FLD ST(i) (whose SOURCE is ST(i); its destination
+    //                 is covered by the push/overflow term above).
+    // FX_FXAM is deliberately absent: it is DEFINED for an empty register and reports
+    // that through its condition codes, so faulting it would be wrong.
+    // FXCH is handled by its own term above (it reads both and is exactly identifiable).
+    fx_reads_st0 = (q_fxop==FX_AR_ST0_STI) || (q_fxop==FX_AR_STI_ST0)
+                || (q_fxop==FX_AR_M32)     || (q_fxop==FX_AR_M64)
+                || (q_fxop==FX_AR_I16)     || (q_fxop==FX_AR_I32)
+                || (q_fxop==FX_FCOM_M32)   || (q_fxop==FX_FCOM_M64)
+                || (q_fxop==FX_FCOM_STI)   || (q_fxop==FX_FUCOM_STI)
+                || (q_fxop==FX_FCOMPP)     || (q_fxop==FX_FUCOMPP)
+                || (q_fxop==FX_FTST)
+                || (q_fxop==FX_FICOM_M16)  || (q_fxop==FX_FICOM_M32)
+                || (q_fxop==FX_FST_M32)    || (q_fxop==FX_FST_M64)
+                || (q_fxop==FX_FST_M80)    || (q_fxop==FX_FST_STI)
+                || (q_fxop==FX_FIST_M16)   || (q_fxop==FX_FIST_M32)
+                || (q_fxop==FX_FIST_M64)   || (q_fxop==FX_FBSTP)
+                || (q_fxop==FX_FCHS)       || (q_fxop==FX_FABS)
+                || (q_fxop==FX_FSQRT)      || (q_fxop==FX_FRNDINT)
+                || (q_fxop==FX_F2XM1)      || (q_fxop==FX_FPATAN)
+                || (q_fxop==FX_FYL2X)      || (q_fxop==FX_FYL2XP1)
+                || (q_fxop==FX_FSIN)       || (q_fxop==FX_FCOS)
+                || (q_fxop==FX_FSINCOS)    || (q_fxop==FX_FPTAN)
+                || (q_fxop==FX_FSCALE)     || (q_fxop==FX_FPREM)
+                || (q_fxop==FX_FPREM1);
+    fx_reads_sti = (q_fxop==FX_AR_ST0_STI) || (q_fxop==FX_AR_STI_ST0)
+                || (q_fxop==FX_FCOM_STI)   || (q_fxop==FX_FUCOM_STI)
+                || (q_fxop==FX_FST_STI)    || (q_fxop==FX_FLD_STI);
+
     fp_stk_ovf =  fp_we_push               && !fptag[ftop - 3'd1];  // push onto a LIVE slot
     // REVIEW2_aug2 H-16: POP2 retires TWO registers (FCOMPP/FUCOMPP pop ST(0) AND
     // ST(1)), and only ST(0)'s tag was checked. A pop2 with a LIVE ST(0) over an EMPTY
@@ -1136,33 +1184,10 @@ module fpu_writeback
     // other three consume operands through fst()/st0/st1 reads that carry no per-op
     // "which registers did I read" signal, so covering them needs the per-operation
     // operand-validity layer the finding asks for and is NOT done here.
-              || (fp_we_fxch && (fptag[ftop] || fptag[ftop + fp_fxch_idx]));
+              || (fp_we_fxch && (fptag[ftop] || fptag[ftop + fp_fxch_idx]))
+              || (slow_arm && fx_reads_st0 && fptag[ftop])
+              || (slow_arm && fx_reads_sti && fptag[ftop + q_f_sti]);
 
-    // ---- REVIEW2_aug2 H-16, REMAINING: arithmetic / compare / store reading an
-    // EMPTY ST(0) or ST(i). NOT IMPLEMENTED, and this note exists so the next attempt
-    // does not repeat the one that was rejected here.
-    //
-    // The opcode set is known and small enough to enumerate -- the ops that CONSUME
-    // ST(0) are FX_AR_{ST0_STI,STI_ST0,M32,M64,I16,I32}, FX_FCOM_{M32,M64,STI},
-    // FX_FUCOM_STI, FX_FTST, FX_FICOM_{M16,M32}, FX_FST_{M32,M64,M80,STI},
-    // FX_FIST_{M16,M32,M64}, FX_FBSTP, FX_FCHS, FX_FABS, FX_FSQRT, FX_FRNDINT,
-    // FX_F2XM1 and the transcendentals; FX_FXAM is DEFINED for an empty register and
-    // must never fault; the FX_FLD_*/FX_FILD_*/FX_FLDCONST/FX_FBLD pushes and the
-    // no-wait control forms read nothing.
-    //
-    // What is MISSING is a qualifier, not the enumeration. Every term above is gated on
-    // a WRITE-ENABLE (fp_we_pop / fp_we_pop2 / fp_we_fxch) that asserts only on the
-    // clock the operation actually commits. There is no equivalent "an FP op commits
-    // this clock" signal exposed to this block, and q_fxop alone is NOT one: it holds
-    // its value across unrelated clocks, so `fx_reads_st0 && fptag[ftop]` would assert
-    // whenever a stale opcode happened to sit in q_fxop with ST(0) empty -- and because
-    // fp_stk_unf drives the fstat write, that is continuous IE|SF corruption rather
-    // than a missed check. The DEFAULT build would not catch it either, since the
-    // response is behind VEN_X87_STKFLT.
-    //
-    // So the prerequisite is a per-operation commit strobe (or per-arm read
-    // declarations) in this block. Adding the enumeration without it is strictly worse
-    // than leaving the gap.
 
     // The RESPONSE is behind VEN_X87_STKFLT; the DETECTION above is always live so
     // +ven_stklog can measure reachability in the shipping build.
