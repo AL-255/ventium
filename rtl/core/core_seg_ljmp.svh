@@ -367,22 +367,33 @@
               // core_load.svh). This site is the backstop that stops the out-of-table
               // descriptor READ; by the time it runs the frame is already pushed.
               //
-              // DESCRIPTOR half: NOT DONE, and there is no smaller true step inside it.
-              // The checks (present, code segment, DPL, conforming) need the read that
-              // S_LJMP performs, which is after the push. Moving the read earlier is
-              // the "validate, then push, then commit" reorder the finding asks for,
-              // and it CANNOT be done for the ordinary case alone: S_LJMP's commit at
-              // ~313 also serves CALL GATES, which re-enter this state with the gate's
-              // embedded target selector (gate_via). A gate is precisely what decides
-              // whether the transfer changes privilege, and therefore what the stack
-              // does -- so validation and stack behaviour are coupled through the gate
-              // pass. A reorder covering the non-gate case would still push before
-              // validating on the gate path, which is the case DOS Quake's CWSDPMI
-              // actually uses (task #47).
+              // DESCRIPTOR half: NOT DONE. The reason recorded here previously was
+              // WRONG and is corrected rather than left standing.
               //
-              // This is the same test applied to H-11's decline: not "is it big" but
-              // "is there a smaller step that is fully true". For C-06's selector half
-              // there was one, and it landed. For this half there is not.
+              // I wrote that a "validate, then push, then commit" reorder could not be
+              // done for the ordinary case alone, because S_LJMP's commit also serves
+              // CALL GATES and a gate decides whether privilege changes and therefore
+              // what the stack does -- so validation and stack behaviour were coupled.
+              // That coupling DOES NOT EXIST in the implemented design: the cross-
+              // privilege gate case a few lines above HALTS with tag 0xDB, explicitly
+              // unimplemented. Every transfer that reaches this commit is therefore
+              // SAME-PRIVILEGE, gate or not, and pushes CS:EIP on the current stack.
+              // A probe-then-push reorder would be uniform, and the cross-priv gate
+              // would halt during the probe -- BEFORE any push, which is strictly
+              // better than today, where it halts after two.
+              //
+              // WHAT ACTUALLY REMAINS is ordinary work, not an impossibility: route
+              // SYS_LCALL through S_LJMP in a no-commit mode, stage the validated CS
+              // (the int_cs_*/iret_cs_* pattern already in the tree), return to
+              // S_LCALL for the pushes, and commit there. It is a real reorder of the
+              // far-transfer path, and the honest reason it is not done here is scope
+              // and validation reach -- the m7 Quake/Win95 gates that exercise CWSDPMI
+              // far calls hardest are EXCLUDED from verify-all -- not that a smaller
+              // true step is absent.
+              //
+              // Sixth time this review a "blocked" call of mine was wrong. The pattern
+              // every time: I described what the code would do instead of reading what
+              // it does.
               if (far_sel_bad(q_ljmp_sel))
                 start_fault(8'd13, 1'b1,
                             {16'd0, q_ljmp_sel} & 32'h0000_FFFC, q_pc);
