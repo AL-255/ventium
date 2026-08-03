@@ -230,6 +230,16 @@ callsel:
 	@$(MAKE) -s -C verif/sys/tests/pcallsel
 	bash verif/sys/run-callsel-gate.sh
 
+# --- C-04 producer reachability (verif/sys/run-xc04-gate.sh) -----------------
+# REVIEW2_aug2 C-04's directed boundary case. ASSERTS THE PAGING/C-04 ASSERTION FIRES
+# for S_LGDT -- same shape as run-ic-alias-gate.sh, which requires the default build to
+# still exhibit its hazard. It holds the reachability answer so a later split extension
+# must restate the claim instead of going quietly green.
+.PHONY: xc04
+xc04:
+	@$(MAKE) -s -C verif/sys/tests/pxc04
+	bash verif/sys/run-xc04-gate.sh
+
 # --- instruction-fetch cacheability (verif/sys/run-icbypass-gate.sh) ---------
 # REVIEW2_aug2 H-13. CR0.CD now drives ic_fill_nocache in the DEFAULT build, so the
 # comparison sides swapped: the CACHING build is the one needing an opt-out define.

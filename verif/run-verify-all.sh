@@ -89,6 +89,10 @@ GATES=(
   # rejecting a bad selector. Witness is the ESP delta across the fault. Verified to
   # FAIL (0x0CA10008) against a build with the dispatch check removed.
   "callsel   (far CALL validates before touching the stack)|callsel"
+  # REVIEW2_aug2 C-04: the directed boundary case the finding asks for. Asserts the
+  # core's PAGING/C-04 assertion FIRES for S_LGDT -- i.e. that "0 reachable in 68
+  # images" was corpus coverage, not architectural unreachability.
+  "xc04      (C-04 producer reachability: S_LGDT crosses)|xc04"
   # REVIEW2_aug2 H-13: CR0.CD drives instruction-fill cacheability in the DEFAULT build
   # now. This gate existed and nothing ran it. Asserts that the CD-honouring build
   # really refetches AND that it is architecturally transparent vs the caching build.
