@@ -246,6 +246,15 @@ xc04:
 	@$(MAKE) -s -C verif/sys/tests/pxc04m
 	bash verif/sys/run-xc04-gate.sh
 
+# --- unimplemented-sequence reachability (verif/sys/run-unimpl-gate.sh) ------
+# REVIEW2_aug2 H-08 + C-06. Two sequences this core does not implement fail SILENTLY
+# (NT task-return; outer-level RETF). Both were instrumented rather than faulted, and
+# this gate READS those instruments -- an instrument nobody greps is what PROGRESS2
+# section 3.5 is about. Nonzero = the path became reachable and now needs implementing.
+.PHONY: unimpl
+unimpl:
+	bash verif/sys/run-unimpl-gate.sh
+
 # --- instruction-fetch cacheability (verif/sys/run-icbypass-gate.sh) ---------
 # REVIEW2_aug2 H-13. CR0.CD now drives ic_fill_nocache in the DEFAULT build, so the
 # comparison sides swapped: the CACHING build is the one needing an opt-out define.

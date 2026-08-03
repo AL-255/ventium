@@ -93,6 +93,10 @@ GATES=(
   # core's PAGING/C-04 assertion FIRES for S_LGDT -- i.e. that "0 reachable in 68
   # images" was corpus coverage, not architectural unreachability.
   "xc04      (C-04 producer reachability: S_LGDT crosses)|xc04"
+  # REVIEW2_aug2 H-08 + C-06: the two sequences that fail SILENTLY (NT task-return,
+  # outer-level RETF) are instrumented; this gate reads the instruments so a future
+  # workload reaching them is REPORTED rather than printed into a log nobody greps.
+  "unimpl    (unimplemented sequences stay unreachable)|unimpl"
   # REVIEW2_aug2 H-13: CR0.CD drives instruction-fill cacheability in the DEFAULT build
   # now. This gate existed and nothing ran it. Asserts that the CD-honouring build
   # really refetches AND that it is architecturally transparent vs the caching build.
