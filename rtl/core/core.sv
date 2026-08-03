@@ -4328,6 +4328,10 @@ module core
         // violation was delivered as #GP, so a handler distinguishing the two -- which
         // is the normal way software grows a stack -- saw the wrong one.
         start_fault((cur_seg_idx == 3'(SG_SS)) ? 8'd12 : 8'd13, 1'b1, 32'd0, q_pc);
+      end else if (cs_fetch_fault) begin
+        // An instruction fetched from outside CS.limit is #GP(0), and like the data
+        // side it precedes paging: no linear address should be translated for it.
+        start_fault(8'd13, 1'b1, 32'd0, eip);
       end else
 `endif
       if (perm_fault) begin
@@ -5224,6 +5228,20 @@ module core
   logic [2:0]  cur_seg_idx;              // ...governed by THIS segment
   logic [31:0] seg_chk_base, seg_chk_off;
   logic        seg_access_fault;
+  // REVIEW2_aug2 H-05: the INSTRUCTION-FETCH CS-limit check, which did not exist. The
+  // data-side check is deliberately qualified on cur_is_d (a fetch address measured
+  // against the DS limit is the spurious #GP an earlier round reverted the whole
+  // delivery for), so fetches were left entirely unchecked: EIP could leave the code
+  // segment and the core kept fetching.
+  //
+  // Checked at the FIRST word of the instruction only (fetch_word==0). IA-32 checks
+  // every byte fetched, but this core's S_FETCH pulls whole words ahead of knowing the
+  // instruction length, so checking later beats would fault on PREFETCH past the last
+  // instruction in a segment -- inventing violations, which is exactly the failure this
+  // finding's delivery was reverted for twice. An instruction whose FIRST byte is
+  // outside CS is the case that matters and the one that cannot false-positive; an
+  // instruction straddling the limit is still missed and is recorded as such.
+  logic        cs_fetch_fault;
   always_comb begin
     logic [32:0] last_byte;
     logic [7:0]  a;
@@ -5398,6 +5416,10 @@ module core
     // spurious #GP in a real guest cannot be ruled out from here. Flipping the default
     // belongs with H-05's remaining descriptor-state gaps, not ahead of them.
 `ifdef VEN_SEG_ENFORCE
+    cs_fetch_fault = sys_mode && !real_mode && !cur_is_d
+                  && (state == S_FETCH) && (fetch_word == 3'd0)
+                  && seg_attr[SG_CS][7]                    // P: unpopulated cache reads 0
+                  && ((cur_lin - seg_base[SG_CS]) > seg_limit[SG_CS]);
     seg_access_fault = cur_is_d && cur_seg_rel
                     && (seg_off_over_limit || seg_null_sel || seg_not_present
                      || seg_type_fault);
@@ -5406,6 +5428,7 @@ module core
     // rejected (that probe reads the sub-terms directly), but nothing suppresses an
     // access that nothing will fault.
     seg_access_fault = 1'b0;
+    cs_fetch_fault   = 1'b0;
 `endif
   end
 

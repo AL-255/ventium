@@ -182,5 +182,51 @@ else
   echo "  SKIP: default TB or psegdl.bin missing"
 fi
 
+# ---- REVIEW2_aug2 H-05: the INSTRUCTION-FETCH CS-limit check ------------------
+# The per-access check is qualified on cur_is_d (a fetch measured against the DS limit
+# is the spurious #GP this delivery was reverted for), which left fetches checked by
+# nothing: EIP could leave the code segment and the core kept fetching.
+#
+# pcslim runs inside a 16-byte code segment; 16 NOPs fill offsets 0..15 and the
+# instruction at offset 16 is outside. Both halves are asserted, because the poison
+# witness is what proves the test actually REACHES the out-of-limit fetch:
+#
+#   enforcing build  ebp = 0x0C510010  -> #GP, and the faulting EIP is exactly 16
+#   default build    ebp = 0xBADBAD00  -> no enforcement, the code past the limit RAN
+#
+echo
+echo "=== H-05: instruction fetch must be checked against the CS limit ==="
+CSIMG="$REPO/verif/sys/tests/pcslim/pcslim.bin"
+if [[ -f "$CSIMG" ]]; then
+  "$TB" --system --image "$CSIMG" --out "$REPO/build/sys/pcslim.vtrace" \
+      --max-insn 4000 --quiesce 400 >/dev/null 2>&1 || true
+  CSEBP="$(tail -1 "$REPO/build/sys/pcslim.vtrace" 2>/dev/null | \
+           python3 -c 'import sys,json;print(json.loads(sys.stdin.read()).get("ebp"))' 2>/dev/null)"
+  echo "  enforcing-build witness ebp = ${CSEBP:-<none>}  (want 0x0c510010)"
+  if [[ "$CSEBP" != "0x0c510010" ]]; then
+    echo "FATAL: the fetch at offset 16 was NOT rejected against a limit of 15."
+    echo "       0xbadbad00 means the out-of-limit instruction EXECUTED; anything else"
+    echo "       means the test faulted somewhere other than the fetch it targets."
+    exit 1
+  fi
+  echo "  H05-FETCH-OK: #GP raised at EIP=16, the first byte outside CS.limit"
+
+  if [[ -x "$DEFTB" ]]; then
+    "$DEFTB" --system --image "$CSIMG" --out "$REPO/build/sys/pcslim_def.vtrace" \
+        --max-insn 4000 --quiesce 400 >/dev/null 2>&1 || true
+    CSDEF="$(tail -1 "$REPO/build/sys/pcslim_def.vtrace" 2>/dev/null | \
+             python3 -c 'import sys,json;print(json.loads(sys.stdin.read()).get("ebp"))' 2>/dev/null)"
+    echo "  default-build control    ebp = ${CSDEF:-<none>}  (want 0xbadbad00)"
+    if [[ "$CSDEF" != "0xbadbad00" ]]; then
+      echo "FATAL: the DEFAULT build did not run past the limit, so this test is not"
+      echo "       exercising the fetch path and the check above proves nothing."
+      exit 1
+    fi
+    echo "  H05-ANTIVACUITY-OK: the default build really does fetch past CS.limit"
+  fi
+else
+  echo "  SKIP: pcslim.bin missing (make -C verif/sys/tests/pcslim)"
+fi
+
 echo
 echo "SEG-GATE-OK  (C-06: per-access segment limits enforced; positive + negative)"

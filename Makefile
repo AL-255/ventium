@@ -176,6 +176,7 @@ a20:
 # unchanged (see core_fetch_decode.svh for why enforcement is not yet default).
 .PHONY: seg
 seg:
+	@$(MAKE) -s -C verif/sys/tests/pcslim
 	bash verif/sys/run-seg-gate.sh
 
 # --- x87 environment gate (verif/sys/run-fenv-gate.sh) ----------------------
