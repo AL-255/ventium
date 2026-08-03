@@ -460,9 +460,22 @@ module ventium_l1_axi #(
       // whose line must not be retained (core.sv, ic_fill_nocache), enforcing CR0.CD.
       // What is STILL missing is the memory-TYPE half -- a second query with
       // is_code(1'b1) over the fetch address, whose result would OR into the core's
-      // ic_fill_nocache. It is not added here because ven_cachemap's module source is
-      // ABSENT from this checkout (REVIEW2 M-05) and this whole generate branch only
-      // elaborates with EN_L2=1, so such a query could be neither built nor tested.
+      // ic_fill_nocache.
+      //
+      // REVIEW2_aug2 H-13, re-verified rather than repeated. The CR0.CD half is now the
+      // DEFAULT (c78c576); this half has TWO independent blockers, and both still hold:
+      //   1. ven_cachemap's module source is not under rtl/. Searched the whole tree:
+      //      the only copy is .claude/worktrees/agent-.../rtl/northbridge/ven_cachemap.sv
+      //      -- an agent scratch worktree, not a reviewed source, so it is not something
+      //      to pull in blind. Getting it into rtl/ is the first step and is a
+      //      provenance question, not an RTL one.
+      //   2. Even with the module, this whole generate branch elaborates only under
+      //      EN_L2=1, so an is_code query added here would be neither built nor tested
+      //      by any gate in verify-all.
+      // Neither is something the core side can route around: there is no region
+      // information anywhere in core.sv to OR into ic_fill_nocache. Unlike C-06's
+      // selector half -- where the value turned out to be already in hand -- there is
+      // no smaller true step here, because the input does not exist in this checkout.
       logic core_l1c, core_to_dram_u, core_l2c_u; logic [3:0] core_cm_region;
       ven_cachemap u_cmap_l1 (
           .addr(core_addr), .is_write(core_we), .is_code(1'b0), .smm_active(smm_active),
