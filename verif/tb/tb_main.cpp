@@ -941,7 +941,31 @@ int main(int argc, char** argv) {
     uint32_t io_ring_val[IO_RING]  = {0}; uint64_t io_ring_seq[IO_RING] = {0};
     int io_ring_pos = 0;
     auto service_io = [&]() {
-        if (!cosim_mode) { top->io_rdata = 0; top->io_ack = 0; return; }
+        if (!cosim_mode) {
+            if (getenv("VEN_IOPROBE") && top->io_req) {
+                static long n = 0;
+                if (n < 8) fprintf(stderr, "[IOPROBE] io_req=1 addr=%04x we=%d size=%u\n",
+                                   (unsigned)top->io_addr, (int)top->io_we, (unsigned)top->io_size);
+                n++;
+                if (n == 8) fprintf(stderr, "[IOPROBE] (further io_req assertions suppressed)\n");
+            }
+            // task #73: acknowledge the cycle. An unclaimed port reads as 0 and
+            // swallows writes -- what an empty ISA slot does -- and 0xf4 terminates the
+            // run exactly as in cosim mode. Leaving io_ack at 0 modelled nothing and
+            // held the core forever. Same once-per-assertion discipline as the cosim
+            // path below: do the side effect once, then hold ack until io_req drops.
+            if (!top->io_req) {
+                top->io_rdata = 0; top->io_ack = 0;
+                io_pending_in = false; io_serviced = false;
+                return;
+            }
+            if (io_serviced) { top->io_rdata = 0; top->io_ack = 1; return; }
+            io_serviced = true;
+            if (top->io_we && ((uint32_t)top->io_addr == 0xf4)) {
+                io_exit = true; io_exit_al = (uint8_t)(top->io_wdata & 0xff);
+            }
+            top->io_rdata = 0; top->io_ack = 1;
+            return; }
         if (!top->io_req) {            // bus idle: ready for the next op
             top->io_rdata = 0; top->io_ack = 0;
             io_pending_in = false; io_serviced = false;

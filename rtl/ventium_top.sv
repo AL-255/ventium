@@ -606,10 +606,21 @@ module ventium_top
 `endif
 `else
       // M8.1: the external-interrupt path is the M8 ventium_soc's; ventium_top
-      // (the verification top) TIES IT OFF so every existing gate stays
-      // byte-identical. soc_en=0 makes the whole divert dead; the input pins are
-      // 0 and inta is left dangling (driven 0 by the core, never observed here).
-      .soc_en       (1'b0),
+      // (the verification top) leaves the INTERRUPT pins tied off so every existing
+      // gate stays byte-identical -- the divert is dead whenever soc_en is 0.
+      //
+      // ---- task #73 / REVIEW2_aug2 C-07-M-02 blocker: soc_en itself was ALSO tied to
+      // 1'b0 here, so --soc-en set the top-level port and it reached nothing. Measured:
+      // the core's io_req NEVER asserted on a --system --soc-en run, so port I/O could
+      // not execute and every IN/OUT outside cosim took the "out of scope -> HALT
+      // LOUDLY" arm in core_fetch_decode.svh. That is why pioperm stops dead on its
+      // first PERMITTED out and why C-07/M-02 had no way to be validated.
+      //
+      // Passing the port through is byte-identical for every existing gate, because
+      // the TB drives soc_en=0 unless --soc-en is given (tb_main.cpp:1251). The
+      // interrupt pins below stay tied off -- this changes ONLY whether the flag can
+      // reach the core at all.
+      .soc_en       (soc_en),
       .intr         (1'b0),
       .nmi          (1'b0),
       .inta         (soc_inta_unused),
