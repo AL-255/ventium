@@ -2373,6 +2373,13 @@ module core
                     {17'd0, (sel[2] ? ldt_limit : gdt_limit)});
   endfunction
 
+  // H-08: the target CS limit from the descriptor BEING READ, granularity-scaled.
+  // Deliberately NOT the staged iret_cs_limit above: that one is REGISTERED at the
+  // commit stage, so consuming it here -- in a combinational term evaluated during the
+  // read -- would test the PREVIOUS descriptor. Same source and same _w convention as
+  // iret_cs_attr_w, which is the value this check must agree with.
+  logic [31:0] iret_cs_limit_w;
+  assign iret_cs_limit_w = desc_limit({mem_rdata, int_lo});
   logic [7:0] iret_cs_attr_w;
   logic       iret_cs_ok, iret_cs_commit;
   assign iret_cs_attr_w = mem_rdata[15:8];   // access byte of {mem_rdata, int_lo}
@@ -2381,7 +2388,14 @@ module core
                    &&  iret_cs_attr_w[4] && iret_cs_attr_w[3]   // S=1 and CODE
                    && (int_gate_sel[1:0] >= cpl_r)        // must not RAISE privilege
                    && (iret_cs_attr_w[2] ? (iret_cs_attr_w[6:5] <= int_gate_sel[1:0])
-                                         : (iret_cs_attr_w[6:5] == int_gate_sel[1:0]));
+                                         : (iret_cs_attr_w[6:5] == int_gate_sel[1:0]))
+                   // REVIEW2_aug2 H-08: the popped EIP must lie within the TARGET CS's
+                   // limit. Class and privilege were checked; the OFFSET was not, and
+                   // the commit then wrote it unconditionally -- so an IRET frame whose
+                   // EIP is past the handler segment's limit resumed OUTSIDE it instead
+                   // of raising #GP. Far transfers got this check under REVIEW1_Aug2
+                   // H-02; IRET is the same dereference and was missed.
+                   && (iret_eip <= iret_cs_limit_w);
   // The same-privilege commit clock: CS descriptor read complete and accepted, and the
   // return is NOT dropping privilege (the inter-priv path commits in S_IRET_SS).
   assign iret_cs_commit = (state == S_INT_CS_RET) && mem_ack && (int_step != 4'd0)
