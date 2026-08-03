@@ -1,0 +1,26 @@
+{
+  "name": "pfarok",
+  "kind": "system",
+  "src": "pfarok.S",
+  "linker": "pfarok.ld",
+  "image": "pfarok.bin",
+  "image_mode": "bios",
+  "image_bytes": 65536,
+  "reset_vector": "0xfff0",
+  "exit_method": "isa-debug-exit",
+  "exit_port": "0xf4",
+  "exit_code": 133,
+  "max_insn": 200,
+  "sys": true,
+  "paging": false,
+  "transitions": [
+    "real->protected (CR0.PE 0->1, far-jump to 32-bit flat code segment 0x08)",
+    "GDT: null + code0 0x08 + data0 0x10 + code0 0x18 (the far-CALL target segment)",
+    "PROTECTED-MODE FAR CALL: lcall ptr16:32 to 0x18:far_target -- pushes CS:next_eip,",
+    "  loads CS from the GDT descriptor, transfers",
+    "FAR RETURN: lret pops CS:EIP and comes back to the caller's segment",
+    "witness ebp: 0x00000000 never transferred / 0xFA000001 reached the target but did",
+    "  not return / 0xFA000003 both halves completed"
+  ],
+  "why": "REVIEW2_aug2 C-06 prerequisite. verify-sys had NO far-CALL golden: psocfarcall/psoccallfmem/psocpmretf are referenced by zero gates AND have no source (.bin/.elf/.o only), so they cannot be rebuilt or registered. pcallsel covers the REJECT path only. This is the positive case, so a reorder of the far-transfer path (C-06's remaining half) has something to regress against."
+}

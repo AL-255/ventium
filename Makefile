@@ -378,6 +378,12 @@ verify-sys:
 	# nothing until it has. Grades the FAULT FRAME (saved CS/EFLAGS.IF + the
 	# handler's own SS:ESP), not merely that a fault occurred.
 	bash verif/sys/run-sys-golden.sh pssiret
+	# REVIEW2_aug2 C-06 prerequisite: the ONLY golden-compared far CALL/RETF in the
+	# tree. psocfarcall/psoccallfmem/psocpmretf are referenced by zero gates AND have
+	# no source (.bin/.elf/.o only), so they can be neither rebuilt nor registered;
+	# pcallsel covers the reject path only. Without this, a reorder of the
+	# far-transfer path would ship unregressed.
+	bash verif/sys/run-sys-golden.sh pfarok
 	# REVIEW_aug2 H-06: INVD/WBINVD are CPL0-only and RDTSC honours CR4.TSD.
 	bash verif/sys/run-sys-golden.sh ppriv
 	# REVIEW_aug2 H-01: 16-bit PROTECTED-mode stacks (address AND pointer, plus
