@@ -5009,6 +5009,24 @@ module core
   // Safe to make fatal precisely BECAUSE it does not fire today: verified 0 firings
   // across the corpus (seg gate section 5 counts them and fails on nonzero). If it ever
   // does fire, stopping is the correct response.
+  // ---- C-04 STATUS, traced rather than labelled --------------------------------
+  // The finding's text says this diagnostic "is simulation-only and is not fatal".
+  // The first half is still true and unavoidable here; the second is NOT -- it is a
+  // $fatal, and the seg gate counts PAGING/C-0* firings across the corpus and fails on
+  // a nonzero count, so it is read rather than printed into a log nobody greps.
+  //
+  // The REST of C-04 is the canonical request layer, and there is no smaller true step
+  // inside it -- the same test that re-opened C-06's selector half and confirmed
+  // H-11's decline:
+  //   * Extending the split state-by-state is explicitly what this finding exists to
+  //     stop; each added state is a new copy of the same logic, so a partial version
+  //     makes the divergence it warns about WORSE, not smaller.
+  //   * "Probe/translate every page before stores commit" is the layer itself.
+  //   * The one genuinely separable piece is TEST work: directed boundary cases per
+  //     request producer, to turn "0 reachable across 68 images" (corpus coverage)
+  //     into a per-producer reachability answer. That is worth doing on its own and is
+  //     NOT done here -- it needs a paged image that forces, say, an S_INT_PUSH frame
+  //     to straddle a boundary, which is a test per producer rather than one test.
   always_ff @(posedge clk)
     if (rst_n && cross_unhandled)
       $fatal(1, "PAGING/C-04: UNSPLIT page-crossing access in state %0d -- lin=%08h size=%0d ends at %03h, past the page end. This state translates only the page the access STARTS in, so the tail bytes go through the WRONG physical page and any #PF the second page owes is never raised. pc=%08h",
