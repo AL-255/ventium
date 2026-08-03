@@ -1138,6 +1138,32 @@ module fpu_writeback
     // operand-validity layer the finding asks for and is NOT done here.
               || (fp_we_fxch && (fptag[ftop] || fptag[ftop + fp_fxch_idx]));
 
+    // ---- REVIEW2_aug2 H-16, REMAINING: arithmetic / compare / store reading an
+    // EMPTY ST(0) or ST(i). NOT IMPLEMENTED, and this note exists so the next attempt
+    // does not repeat the one that was rejected here.
+    //
+    // The opcode set is known and small enough to enumerate -- the ops that CONSUME
+    // ST(0) are FX_AR_{ST0_STI,STI_ST0,M32,M64,I16,I32}, FX_FCOM_{M32,M64,STI},
+    // FX_FUCOM_STI, FX_FTST, FX_FICOM_{M16,M32}, FX_FST_{M32,M64,M80,STI},
+    // FX_FIST_{M16,M32,M64}, FX_FBSTP, FX_FCHS, FX_FABS, FX_FSQRT, FX_FRNDINT,
+    // FX_F2XM1 and the transcendentals; FX_FXAM is DEFINED for an empty register and
+    // must never fault; the FX_FLD_*/FX_FILD_*/FX_FLDCONST/FX_FBLD pushes and the
+    // no-wait control forms read nothing.
+    //
+    // What is MISSING is a qualifier, not the enumeration. Every term above is gated on
+    // a WRITE-ENABLE (fp_we_pop / fp_we_pop2 / fp_we_fxch) that asserts only on the
+    // clock the operation actually commits. There is no equivalent "an FP op commits
+    // this clock" signal exposed to this block, and q_fxop alone is NOT one: it holds
+    // its value across unrelated clocks, so `fx_reads_st0 && fptag[ftop]` would assert
+    // whenever a stale opcode happened to sit in q_fxop with ST(0) empty -- and because
+    // fp_stk_unf drives the fstat write, that is continuous IE|SF corruption rather
+    // than a missed check. The DEFAULT build would not catch it either, since the
+    // response is behind VEN_X87_STKFLT.
+    //
+    // So the prerequisite is a per-operation commit strobe (or per-arm read
+    // declarations) in this block. Adding the enumeration without it is strictly worse
+    // than leaving the gap.
+
     // The RESPONSE is behind VEN_X87_STKFLT; the DETECTION above is always live so
     // +ven_stklog can measure reachability in the shipping build.
     //
