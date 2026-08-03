@@ -80,9 +80,18 @@
               desc = {mem_rdata, tsw_seg_lo};
               // REVIEW2 M-02: track the LDTR selector across a task switch too, so the
               // SMM save map and any future SLDT see the LDTR the new task actually has.
-              // A null LDT selector leaves the hidden cache alone (as before) but must
-              // still record the selector, which is what the new task's TSS specifies.
+              // REVIEW2_aug2 C-05: a null incoming LDTR used to record the null
+              // SELECTOR while leaving the OUTGOING task's hidden LDT base/limit intact.
+              // With no LDTR-valid bit, every subsequent TI=1 selector in the new task
+              // then resolved through the PREVIOUS task's LDT -- reading another task's
+              // descriptors, which is precisely the isolation a task switch exists to
+              // provide. Clearing base and limit makes any such reference fall out of
+              // range instead. Same treatment H-10 gave `lldt $0`.
               ldt_sel <= tsw_new_ldt;
+              if (!(|tsw_new_ldt[15:3])) begin
+                ldt_base  <= 32'd0;
+                ldt_limit <= 16'd0;
+              end
               if (|tsw_new_ldt[15:3]) begin
                 // ---- REVIEW1_Aug2 C-09: VALIDATE the incoming LDTR ------------------
                 // The descriptor was installed unconditionally: no table-limit check on
@@ -127,7 +136,13 @@
               desc  = {mem_rdata, tsw_seg_lo};
               sidx  = 3'(tsw_step[4:1]);     // 0..5 = CS,SS,DS,ES,FS,GS
               sattr = desc_attr(desc);
-              seg_sel  [sidx] <= tsw_sel[sidx];
+              // REVIEW2_aug2 C-05: STAGED, not committed. This used to write
+              // seg_sel[sidx] here -- before tsw_seg_bad is even computed below -- while
+              // base/limit/attr went to the staging registers. A later #TS or #PF (on a
+              // subsequent segment's descriptor read, say) therefore left the incoming
+              // task's NEW SELECTOR paired with the OUTGOING task's hidden descriptor:
+              // a segment register that names one thing and addresses another.
+              tsw_st_sel[sidx] <= tsw_sel[sidx];
               // V86 incoming task (tsw_eflags[17]=VM): load FLAT real-mode segments
               // (base = sel<<4, limit 0xFFFF, CPL3, 16-bit) instead of decoding the V86
               // segment VALUES as GDT descriptors — they are real-mode paragraphs, not
@@ -221,6 +236,7 @@
               // page fault on its read -- left the task half switched. Now the whole
               // context moves on one clock.
               for (int t = 0; t < NUM_SEG; t++) begin
+                seg_sel  [t] <= tsw_st_sel  [t];   // C-05: selector moves with the rest
                 seg_base [t] <= tsw_st_base [t];
                 seg_limit[t] <= tsw_st_limit[t];
                 seg_attr [t] <= tsw_st_attr [t];

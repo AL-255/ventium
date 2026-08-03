@@ -5157,6 +5157,10 @@ module core
   // INSTALLED and the task half switched: segments from the new task, everything else
   // from the old one. Same failure C-06/C-07 removed from the IRET paths, over a
   // larger state set. The six descriptors now land here and commit together.
+  // REVIEW2_aug2 C-05: the SELECTOR belongs in the staging too. It was committed
+  // immediately in S_TSW_SEG while base/limit/attr were staged, so a later #TS or #PF
+  // left the new selector paired with the OLD hidden descriptor.
+  logic [15:0] tsw_st_sel   [NUM_SEG];
   logic [31:0] tsw_st_base  [NUM_SEG];
   logic [31:0] tsw_st_limit [NUM_SEG];
   logic [7:0]  tsw_st_attr  [NUM_SEG];
