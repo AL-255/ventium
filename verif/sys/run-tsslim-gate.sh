@@ -44,10 +44,12 @@ TR="$(mktemp)"; trap 'rm -f "$TR"' EXIT
 LAST="$(tail -1 "$TR" 2>/dev/null || true)"
 EBP="$(printf '%s' "$LAST" | grep -o '"ebp":"[^"]*"' | cut -d'"' -f4 || true)"
 ESI="$(printf '%s' "$LAST" | grep -o '"esi":"[^"]*"' | cut -d'"' -f4 || true)"
+EDI="$(printf '%s' "$LAST" | grep -o '"edi":"[^"]*"' | cut -d'"' -f4 || true)"
 CS="$( printf '%s' "$LAST" | grep -o '"cs":"[^"]*"'  | cut -d'"' -f4 || true)"
 SS="$( printf '%s' "$LAST" | grep -o '"ss":"[^"]*"'  | cut -d'"' -f4 || true)"
 
 echo "  witness ebp = ${EBP:-<none>}  saved EIP esi = ${ESI:-<none>}  cs = ${CS:-?} ss = ${SS:-?}"
+echo "  saved CS on the #TS frame edi = ${EDI:-<none>}  (must be 0x1b = the interrupted CS)"
 
 case "$EBP" in
   0x75510028)
@@ -56,7 +58,16 @@ case "$EBP" in
       echo "       conforming handler cs=0x0030 on the UNSWITCHED CPL3 stack ss=0x0023."
       echo "TSSLIM-GATE-FAIL"; exit 1
     fi
+    if [[ "$EDI" != "0x0000001b" ]]; then
+      echo "  FAIL the #TS frame saved CS=$EDI. This fault is raised LATE in the INT 0x40"
+      echo "       delivery, so a saved CS of 0x08 means the handler's CS was installed"
+      echo "       before the delivery was known to succeed and the frame reports a"
+      echo "       selector the interrupted code never ran in. That is C-03's first"
+      echo "       bullet (stage the control context to one commit point)."
+      echo "TSSLIM-GATE-FAIL"; exit 1
+    fi
     echo "  ok   #TS(0x28) raised before the read, delivered at CPL3 with no stack switch"
+    echo "  ok   the #TS frame reports the INTERRUPTED CS (0x1b), not the handler's"
     echo "TSSLIM-GATE-OK"; exit 0 ;;
   0x0bad0040)
     echo "  FAIL the ssN:espN read ran PAST tr_limit and delivery succeeded on values"

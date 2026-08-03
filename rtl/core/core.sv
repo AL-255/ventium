@@ -2245,6 +2245,17 @@ module core
                                   // (4-bit: the M7.2 V86 push needs 10 beats 0..9)
   logic [31:0] int_gate_off;      // assembled handler offset from the IDT gate
   logic [15:0] int_gate_sel;      // gate's code selector
+  // REVIEW2_aug2 C-03 (first bullet): the target CS HIDDEN state, STAGED. S_INT_CS
+  // used to write seg_base/limit/attr[SG_CS] and cs_d the instant the descriptor was
+  // accepted, so every later step of a cross-privilege delivery -- the TSS bound
+  // check, the new-SS validation, and the frame push itself, any of which can fault --
+  // ran with the handler's CS already installed. These hold it until the delivery is
+  // committed alongside eip at the end of S_INT_PUSH. Same device as iret_cs_*.
+  // (The SELECTOR needs no new register: int_gate_sel already carries it.)
+  logic [31:0] int_cs_base;
+  logic [31:0] int_cs_limit;
+  logic [7:0]  int_cs_attr;
+  logic        int_cs_d;
   logic        int_gate_trap;     // 1 = trap gate (leave IF), 0 = interrupt gate
   logic        int_gate_op16;     // 1 = 16-bit gate/IRET (6-byte IP:CS:FLAGS frame,
                                   // 2-byte slots, ESP +/-6); 0 = 32-bit (the legacy
@@ -3913,6 +3924,7 @@ module core
       int_vec<=8'd0; int_ret_eip<=32'd0; int_src_pc<=32'd0; int_has_err<=1'b0;
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
+      int_cs_base<=32'd0; int_cs_limit<=32'd0; int_cs_attr<=8'd0; int_cs_d<=1'b0;
       int_sw<=1'b0;
       ioperm_ret<=S_IO; ioperm_port<=16'd0; ioperm_base<=16'd0;
       dlv_depth<=2'd0; dlv_ctrb<=1'b0; dlv_pf<=1'b0;  // REVIEW_aug2 H-04

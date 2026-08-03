@@ -178,10 +178,18 @@
                 // the client -> #GP. (The cross-priv arm re-captures int_old_cs below;
                 // same value, harmless.)
                 int_old_cs       <= seg_sel[SG_CS];
-                seg_sel  [SG_CS] <= int_gate_sel;
-                seg_base [SG_CS] <= desc_base(desc);
-                seg_limit[SG_CS] <= desc_limit(desc);
-                seg_attr [SG_CS] <= cattr;
+                // ---- REVIEW2_aug2 C-03 (first bullet): STAGE the target CS hidden
+                // state instead of installing it here. These four writes used to land
+                // the moment the descriptor was accepted, so the TSS bound check, the
+                // new-SS validation and the frame push -- every one of which can fault
+                // -- ran with the handler's CS already in the hidden cache. A fault
+                // there was then classified, and its own frame built, against a CS the
+                // interrupted code never had. Committed with eip at the end of
+                // S_INT_PUSH, which is the single point where the delivery is known to
+                // have succeeded. int_gate_sel already holds the selector.
+                int_cs_base      <= desc_base(desc);
+                int_cs_limit     <= desc_limit(desc);
+                int_cs_attr      <= cattr;
                 // ---- REVIEW1_Aug2 C-07: CONFORMING targets do not change CPL -----
                 // A conforming code segment with DPL <= CPL is a legal interrupt
                 // target and the CPU keeps running at the CURRENT privilege -- no CPL
@@ -218,7 +226,7 @@
                 // staging registers; it is not done here.
                 if (!int_xpriv)
                   cpl_r          <= int_tgt_conf ? eff_cpl : tgt_dpl;
-                cs_d             <= desc[54];
+                int_cs_d         <= desc[54];   // REVIEW2_aug2 C-03: staged, not live
                 int_step         <= 4'd0;
                 // M7.2: latch whether THIS delivery's source was V86 (eflags[17] is
                 // still set here — it is cleared on the S_INT_PUSH final beat). A V86
@@ -324,6 +332,17 @@
               // priv 5-6-word / same-priv 3-4-word, all gated on int_has_err) moved to
               // the gpr writeback driver (core_gpr_wb.svh, S_INT_PUSH arm).
               xpl_active <= 1'b0;
+              // ---- REVIEW2_aug2 C-03 (first bullet): THE SINGLE COMMIT POINT for the
+              // handler's control context. CS's selector and hidden cache land here,
+              // with eip, once the whole frame is on the stack and nothing further in
+              // this delivery can fault. Until now they were installed back in
+              // S_INT_CS, so a #TS/#SS/#GP/#PF raised anywhere in between started from
+              // a handler CS the interrupted code never executed in.
+              seg_sel  [SG_CS] <= int_gate_sel;
+              seg_base [SG_CS] <= int_cs_base;
+              seg_limit[SG_CS] <= int_cs_limit;
+              seg_attr [SG_CS] <= int_cs_attr;
+              cs_d             <= int_cs_d;
               eip        <= int_gate_off;
               // IA-32 6.12.1: on ANY interrupt/trap-gate entry the CPU clears TF
               // (bit8), NT (bit14), RF (bit16) and VM (bit17). An INTERRUPT gate

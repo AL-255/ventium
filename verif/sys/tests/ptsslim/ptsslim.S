@@ -208,6 +208,15 @@ ts_handler:
     orl     $0x75510000, %eax           /* witness = 0x7551_00<errcode> */
     movl    %eax, %ebp
     movl    4(%esp), %esi               /* saved EIP, for corroboration */
+    /* REVIEW2_aug2 C-03 (first bullet): the SAVED CS on this frame is the direct
+     * witness for the CS-staging half. The #TS is raised in S_INT_CS, i.e. LATE in
+     * the INT 0x40 delivery. S_INT_CS used to install the handler's CS the moment the
+     * descriptor was accepted, so this frame reported CS=0x08 -- a selector the
+     * interrupted code never executed in. With the hidden state staged to the single
+     * commit point at the end of S_INT_PUSH it reports the real interrupted CS:
+     *   staged      edi = 0x0000001B   (the CPL3 user segment that ran INT 0x40)
+     *   not staged  edi = 0x00000008   (the handler CS, installed prematurely) */
+    movl    8(%esp), %edi               /* saved CS */
 cpl3_exit:
     movb    $0x42, %al
     movw    $0xF4, %dx
