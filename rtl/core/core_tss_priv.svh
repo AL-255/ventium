@@ -155,7 +155,24 @@
             end else begin
               int_new_ss  <= mem_rdata[15:0];
               int_step    <= 4'd0;
-              state       <= S_INT_SS;
+              // ---- REVIEW2_aug2 C-03 (second bullet): bound the TSS-supplied SS
+              // selector against its table BEFORE issuing the descriptor read, the
+              // same precheck the outer-IRET SS gets (core_iret.svh:215) and for the
+              // same reason: sel_in_table() is what stops an out-of-table selector
+              // from being turned into an ADDRESS. Without it, S_INT_SS reads eight
+              // bytes from gdt_base + sel*8 past the end of the GDT, then validates
+              // whatever those bytes happen to be -- so the descriptor test cannot
+              // reject it, because the test is applied to memory that is not a
+              // descriptor. #TS(sel): the selector came from the TSS.
+`ifdef VEN_C03_PROBE
+              $display("[C03-TSSSS] TSS.ssN=%04h in_table=%0b", mem_rdata[15:0],
+                       sel_in_table(mem_rdata[15:0]));
+`endif
+              if (!sel_in_table(mem_rdata[15:0]))
+                start_fault(8'd10, 1'b1,
+                            {16'd0, mem_rdata[15:0]} & 32'h0000_FFFC, int_src_pc);
+              else
+                state     <= S_INT_SS;
             end
           end
         end
@@ -189,9 +206,6 @@
                         || !ss_int_a[4] || ss_int_a[3] || !ss_int_a[1]  // not writable DATA
                         || (int_new_ss[1:0] != cpl_r)           // RPL must equal the new CPL
                         || (ss_int_a[6:5]   != cpl_r);          // DPL must equal the new CPL
-              seg_sel  [SG_SS] <= int_new_ss;
-              seg_base [SG_SS] <= desc_base(desc);
-              seg_limit[SG_SS] <= desc_limit(desc);
               // ---- REVIEW1_Aug2 C-07: VALIDATE the TSS-supplied SS before installing.
               // This loaded selector/base/limit/attr unconditionally -- no table limit,
               // RPL, DPL, writable-data, type or Present check -- so a malformed TSS
@@ -203,18 +217,32 @@
               //   * a WRITABLE DATA segment (S=1, type[3]=0, W)  -> #TS(sel)
               //   * present                                      -> #SS(sel)
               // Checked BEFORE any commit, exactly as the outer-IRET SS is.
+              //
+              // ---- REVIEW2_aug2 C-03 (third bullet): the comment above was FALSE.
+              // seg_sel/seg_base/seg_limit[SS] were written HERE, above this check,
+              // while seg_attr and ss_b were written below it. A rejected SS therefore
+              // left SS half-installed: the selector, base and limit named the REJECTED
+              // descriptor while the attributes and B-bit still described the OLD stack.
+              // Every later consumer that pairs them -- the #TS/#SS frame push itself,
+              // the expand-down limit test (which reads attr AND limit), and any handler
+              // that reports SS -- then saw a selector and a hidden cache that describe
+              // two different segments. All five writes now sit on the accepted path, so
+              // SS is either fully replaced or wholly untouched.
               if (ss_int_bad || !ss_int_a[7]) begin
                 start_fault(ss_int_a[7] ? 8'd10 : 8'd12, 1'b1,
                             {16'd0, int_new_ss} & 32'h0000_FFFC, int_src_pc);
               end else begin
-              seg_attr [SG_SS] <= desc_attr(desc);
-              // REVIEW_aug2 H-01: capture SS.B here too. ss_b was updated ONLY on the
-              // ordinary segment-load path, so a cross-privilege delivery onto a
-              // 16-bit inner stack kept the PREVIOUS descriptor's width and pushed the
-              // frame with the wrong address size.
-              ss_b             <= desc[54];
-              int_step         <= 4'd0;
-              state            <= S_INT_PUSH;
+                seg_sel  [SG_SS] <= int_new_ss;
+                seg_base [SG_SS] <= desc_base(desc);
+                seg_limit[SG_SS] <= desc_limit(desc);
+                seg_attr [SG_SS] <= desc_attr(desc);
+                // REVIEW_aug2 H-01: capture SS.B here too. ss_b was updated ONLY on the
+                // ordinary segment-load path, so a cross-privilege delivery onto a
+                // 16-bit inner stack kept the PREVIOUS descriptor's width and pushed the
+                // frame with the wrong address size.
+                ss_b             <= desc[54];
+                int_step         <= 4'd0;
+                state            <= S_INT_PUSH;
               end
             end
           end

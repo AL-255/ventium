@@ -37,7 +37,24 @@
             end else begin
               logic [7:0] gattr;
               gattr        = mem_rdata[15:8];
-              int_gate_off <= {mem_rdata[31:16], int_lo[15:0]};
+              // ---- REVIEW2_aug2 C-03 (fourth bullet, prerequisite): a 16-bit (286)
+              // gate -- type 0x6/0x7, gattr[3]=0 -- has a SIXTEEN-bit offset. Word1
+              // bits [31:16] are RESERVED there, not offset bits. This assembled them
+              // in unconditionally, so a 286 gate with nonzero reserved bits committed
+              // a garbage upper half straight into eip at :226. Well-formed tables zero
+              // them, which is why the corpus never showed it -- but the CPU must IGNORE
+              // them, not trust the table. Masking here is also what makes the CS-limit
+              // check below safe: comparing an unmasked 16-bit gate offset against the
+              // limit would fault spuriously on the DPMI 16-bit-gate path the
+              // int_gate_op16 comment above describes as live.
+              int_gate_off <= gattr[3] ? {mem_rdata[31:16], int_lo[15:0]}
+                                       : {16'd0,            int_lo[15:0]};
+`ifdef VEN_C03_PROBE
+              if (!gattr[3])
+                $display("[C03-G16] 16-bit gate vec=%0d reserved=%04h %s", int_vec,
+                         mem_rdata[31:16],
+                         (mem_rdata[31:16] != 16'd0) ? "NONZERO -- mask CHANGES eip" : "zero");
+`endif
               int_gate_sel <= int_lo[31:16];
               int_gate_trap<= gattr[0];   // 0xF trap -> leave IF; 0xE int -> clear IF
               // Gate SIZE bit gattr[3]: 0 = 16-bit gate (type 0x6 int / 0x7 trap ->
@@ -121,6 +138,25 @@
                 int_step <= 4'd0;
                 start_fault(desc_present(cattr) ? 8'd13 : 8'd11, 1'b1,
                             {16'd0, int_gate_sel[15:3], 3'b010}, int_src_pc);
+              // ---- REVIEW2_aug2 C-03 (fourth bullet): the handler OFFSET was never
+              // compared against the destination CS limit. A gate naming a valid,
+              // present, correctly-privileged code segment but an offset past its end
+              // installed the handler context and then began fetching outside the
+              // segment -- the fault surfaced later, from the handler's own first
+              // fetch, with CS/CPL already switched and (cross-priv) a stack switch
+              // already begun. IA-32: the offset is checked as part of delivery and
+              // raises #GP(0) -- error code ZERO, not the selector, because the fault
+              // is attributed to the target address rather than to a bad descriptor.
+              // desc_limit() granularity-scales, and desc is the descriptor read in
+              // THIS state, so this is the same combinational-vs-registered
+              // distinction H-08 settled for the IRET target.
+              end else if (int_gate_off > desc_limit(desc)) begin
+`ifdef VEN_C03_PROBE
+                $display("[C03-OFF] handler offset %08h > CS limit %08h (vec=%0d)",
+                         int_gate_off, desc_limit(desc), int_vec);
+`endif
+                int_step <= 4'd0;
+                start_fault(8'd13, 1'b1, 32'd0, int_src_pc);
               end else begin
                 // FIX (DOS-Quake #GP): capture the interrupted CS for the same-priv
                 // frame push BEFORE seg_sel[SG_CS] is overwritten with the handler CS.
