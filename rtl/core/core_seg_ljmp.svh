@@ -258,7 +258,22 @@
                   gsel = desc[31:16];
                   goff = (desc_type(attr) == 4'hC) ? {desc[63:48], desc[15:0]}
                                                    : {16'd0,      desc[15:0]};
-                  gdpl = desc[45:44];
+                  // REVIEW2_aug2 C-06: THE GATE'S DPL WAS READ FROM THE WRONG BITS.
+                  // The access byte is desc[47:40] and DPL is its [6:5], i.e.
+                  // desc[46:45] -- this read desc[45:44], which is {DPL[0], S}. For a
+                  // SYSTEM descriptor S=0, so a DPL-3 gate decoded as DPL 2 and a
+                  // DPL-1 gate as DPL 0; only DPL 0 was right, by accident.
+                  //
+                  // The consequence is not subtle: `gdpl < cpl_r` then rejected every
+                  // DPL-3 gate called from ring 3 with #GP(selector) -- and a DPL-3
+                  // gate is the ONLY kind ring-3 code can use, so NO cross-privilege
+                  // call gate could ever be taken. That is also why the 0xDB
+                  // "cross-priv gate not implemented" halt below was never observed by
+                  // any corpus run: the transfer was killed one check earlier.
+                  //
+                  // Use the shared accessor rather than a literal slice, so this
+                  // cannot drift from desc_dpl() again.
+                  gdpl = desc_dpl(desc_attr(desc));
                   if ((gdpl < cpl_r) || (gdpl < q_ljmp_sel[1:0])) begin
                     // gate not reachable from this privilege level -> #GP(selector)
                     start_fault(8'd13, 1'b1, {16'd0, q_ljmp_sel[15:3], 3'd0}, q_pc);
@@ -287,6 +302,10 @@
                     q_ljmp_sel <= gsel;
                     q_ljmp_off <= goff;
                     gate_via   <= 1'b1;
+                    // REVIEW2_aug2 C-06: the gate's parameter count, kept for the
+                    // cross-privilege arm -- on the next pass `desc` is the TARGET
+                    // CS descriptor and the gate's own fields are gone.
+                    cg_pcount  <= desc[36:32];
                     seg_step   <= 1'b0;      // re-read: now the TARGET CS descriptor
                   end
                 end else begin
@@ -323,8 +342,49 @@
                 // "cross-priv gate" from every other gate case. The machinery to reuse
                 // already exists in the interrupt path (S_INT_TSS reads TSS.ssN:espN,
                 // S_INT_SS loads the new SS, S_INT_PUSH builds the frame) — see task #47.
-                state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hDB; `endif
-                seg_step<=1'b0; gate_via<=1'b0;
+                // IMPLEMENTED (REVIEW2_aug2 C-06, call-gate half) by reusing the
+                // interrupt path's cross-privilege machinery exactly as the note
+                // above predicted: S_INT_TSS reads TSS.ssN:espN, S_INT_SS validates
+                // and loads the new SS (and commits cpl_r <= int_new_cpl), and
+                // S_INT_PUSH builds the frame and is the single commit point for
+                // CS/EIP. This arm only stages the target and enters that sequence.
+                //
+                // PARAM COUNT > 0 IS STILL NOT IMPLEMENTED and still halts loudly,
+                // now with its OWN tag (0xDA) so a freeze read tells the two apart.
+                // Copying parameters needs a read/write beat pair per dword against
+                // the CALLER's stack -- a separate micro-sequence -- and dropping
+                // them silently would corrupt the callee's arguments. The
+                // escalation-relevant half is the STACK SWITCH, which is what lands
+                // here; the remaining sub-case keeps the fail-safe posture the whole
+                // arm used to have.
+                if (cg_pcount != 5'd0) begin
+                  state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hDA; `endif
+                  seg_step<=1'b0; gate_via<=1'b0;
+                end else begin
+                  // Stage the TARGET CS: the commit in S_INT_PUSH reads int_cs_*, so
+                  // nothing is installed until the whole frame is on the new stack.
+                  int_cs_base  <= desc_base(desc);
+                  int_cs_limit <= desc_limit(desc);
+                  int_cs_attr  <= attr;
+                  int_cs_d     <= desc[54];
+                  int_gate_sel <= {q_ljmp_sel[15:2], desc_dpl(attr)};  // RPL = new CPL
+                  int_gate_off <= q_ljmp_off;
+                  int_new_cpl  <= desc_dpl(attr);
+                  int_old_ss   <= seg_sel[SG_SS];
+                  int_old_esp  <= gpr_o[R_ESP];
+                  int_old_cs   <= seg_sel[SG_CS];
+                  int_ret_eip  <= next_eip;      // a CALL returns AFTER itself
+                  int_src_pc   <= q_pc;
+                  int_has_err  <= 1'b0;
+                  from_v86     <= 1'b0;
+                  xpl_active   <= 1'b1;
+                  cg_xpl       <= 1'b1;
+                  int_step     <= 4'd0;
+                  seg_step     <= 1'b0;
+                  gate_via     <= 1'b0;
+                  lcall_pend   <= 1'b0;   // S_INT_PUSH builds the frame now
+                  state        <= S_INT_TSS;
+                end
               end else if (lcall_pend) begin
                 // ---- REVIEW2_aug2 C-06 (descriptor half): PROBE PASS of a far CALL.
                 // Everything above has already run -- gate resolution, seg_load_fault,

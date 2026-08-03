@@ -2283,6 +2283,16 @@ module core
   // 1=SS). retf_out stays set through S_INT_CS_RET/S_IRET_SS so the shared commit
   // can tell a RETF from an IRET -- see the NMI note there.
   logic        retf_out, retf_ob;
+  // REVIEW2_aug2 C-06 (call-gate half): this cross-privilege delivery is a far CALL
+  // through a call gate, not an interrupt. It reuses S_INT_TSS/S_INT_SS/S_INT_PUSH,
+  // and cg_xpl is what tells those shared states the three things that differ:
+  // the frame has NO EFLAGS word, EFLAGS is not masked on entry, and the frame is
+  // 16 bytes rather than 20.
+  logic        cg_xpl;
+  // The gate's PARAMETER COUNT (descriptor high dword bits [4:0]). Captured when the
+  // gate is resolved, because by the time the cross-privilege arm runs the descriptor
+  // being examined is the TARGET CS, not the gate.
+  logic [4:0]  cg_pcount;
   logic        lcall_pend;      // 1 = this S_LJMP pass is the far CALL's probe
   logic [31:0] lc_cs_base, lc_cs_limit;
   logic [7:0]  lc_cs_attr;
@@ -3991,7 +4001,7 @@ module core
       int_err<=32'd0; int_step<=4'd0; int_gate_off<=32'd0; int_gate_sel<=16'd0;
       int_gate_trap<=1'b0; int_gate_op16<=1'b0; int_lo<=32'd0; iret_eip<=32'd0; iret_cs<=16'd0;
       int_cs_base<=32'd0; int_cs_limit<=32'd0; int_cs_attr<=8'd0; int_cs_d<=1'b0;
-      ntret_pend<=1'b0; retf_out<=1'b0; retf_ob<=1'b0;
+      ntret_pend<=1'b0; retf_out<=1'b0; retf_ob<=1'b0; cg_xpl<=1'b0; cg_pcount<=5'd0;
       lcall_pend<=1'b0; lc_cs_base<=32'd0; lc_cs_limit<=32'd0;
       lc_cs_attr<=8'd0; lc_cs_d<=1'b0; lc_cs_cpl<=2'd0;
       int_sw<=1'b0;
@@ -5982,6 +5992,10 @@ module core
       // armed across the handler, where the next RETF would consume its staged frame.
       retf_out   <= 1'b0;
       retf_ob    <= 1'b0;
+      // C-06 (call-gate half): likewise. A #TS/#SS/#PF anywhere in the TSS read, the
+      // SS load or the frame push must not leave the call-gate shape latched onto the
+      // NEXT interrupt delivery, which would push it a frame with no EFLAGS word.
+      cg_xpl     <= 1'b0;
       // REVIEW_aug2 C-02: ABORT any in-flight split memory microsequence.
       // ===================================================================
       // xp_pend (split LOAD) and xs_act/xs_ph (split STORE) were cleared only at reset

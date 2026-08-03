@@ -597,7 +597,8 @@
             if (from_v86)
               last = int_has_err ? (int_step == 4'd9) : (int_step == 4'd8);
             else if (xpl_active)
-              last = int_has_err ? (int_step == 4'd5) : (int_step == 4'd4);
+              last = cg_xpl ? (int_step == 4'd3)      // REVIEW2_aug2 C-06
+                            : (int_has_err ? (int_step == 4'd5) : (int_step == 4'd4));
             else
               last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
             if (last) begin
@@ -605,7 +606,9 @@
                 fsz = int_has_err ? 32'd40 : 32'd36;
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=int_new_esp - fsz;
               end else if (xpl_active) begin
-                fsz = int_has_err ? 32'd24 : 32'd20;
+                // REVIEW2_aug2 C-06: a call-gate frame is 4 dwords (SS, ESP, CS, EIP),
+                // not 5 -- there is no EFLAGS word and never an error code.
+                fsz = cg_xpl ? 32'd16 : (int_has_err ? 32'd24 : 32'd20);
                 gpr_we[R_ESP]=1'b1; gpr_wd[R_ESP]=int_new_esp - fsz;
 `ifdef VEN_DBG_WD
                 // [VEN-ESPWR] the cross-priv handler-ESP writeback. Golden lands the

@@ -389,11 +389,15 @@
           //   3 CS @ esp-16, 4 EIP @ esp-20, 5 errcode @ esp-24.
           mem_addr = seg_base[SG_SS] + int_new_esp
                      - ({28'd0, int_step} * 32'd4) - 32'd4;
+          // REVIEW2_aug2 C-06: a cross-privilege CALL GATE reuses this frame, minus
+          // the EFLAGS word -- a far CALL does not save flags. So under cg_xpl the
+          // frame is old SS, old ESP, return CS, return EIP (4 dwords, 16 bytes) and
+          // beat 2 is CS rather than EFLAGS.
           unique case (int_step)
             4'd0:    mem_wdata = {16'd0, int_old_ss};
             4'd1:    mem_wdata = int_old_esp;
-            4'd2:    mem_wdata = eflags;
-            4'd3:    mem_wdata = {16'd0, int_old_cs};   // interrupted task's CS
+            4'd2:    mem_wdata = cg_xpl ? {16'd0, int_old_cs} : eflags;
+            4'd3:    mem_wdata = cg_xpl ? int_ret_eip : {16'd0, int_old_cs};
             4'd4:    mem_wdata = int_ret_eip;
             default: mem_wdata = int_err;
           endcase

@@ -324,7 +324,10 @@
             if (from_v86)
               last = int_has_err ? (int_step == 4'd9) : (int_step == 4'd8);
             else if (xpl_active)
-              last = int_has_err ? (int_step == 4'd5) : (int_step == 4'd4);
+              // REVIEW2_aug2 C-06: a call-gate frame is one word shorter (no EFLAGS),
+              // so it ends at beat 3. It never carries an error code.
+              last = cg_xpl ? (int_step == 4'd3)
+                            : (int_has_err ? (int_step == 4'd5) : (int_step == 4'd4));
             else
               last = int_has_err ? (int_step == 4'd3) : (int_step == 4'd2);
             if (last) begin
@@ -332,6 +335,7 @@
               // priv 5-6-word / same-priv 3-4-word, all gated on int_has_err) moved to
               // the gpr writeback driver (core_gpr_wb.svh, S_INT_PUSH arm).
               xpl_active <= 1'b0;
+              cg_xpl     <= 1'b0;   // REVIEW2_aug2 C-06
               // ---- REVIEW2_aug2 C-03 (first bullet): THE SINGLE COMMIT POINT for the
               // handler's control context. CS's selector and hidden cache land here,
               // with eip, once the whole frame is on the stack and nothing further in
@@ -352,7 +356,13 @@
               // the non-V86 corpus, so masking them is a no-op there; under V86 the
               // VM-clear is the LOAD-BEARING transition into the PM monitor.
               //   common mask = TF|NT|RF|VM = 0x0003_4100; +IF (0x200) for int gate.
-              if (!int_gate_trap)
+              // REVIEW2_aug2 C-06: NONE of this applies to a far CALL through a call
+              // gate. A CALL does not clear IF/TF/NT/RF/VM -- it is not an exception
+              // entry, and masking IF here would silently disable interrupts across
+              // every cross-privilege call.
+              if (cg_xpl)
+                ;                                    // call gate: EFLAGS untouched
+              else if (!int_gate_trap)
                 eflags <= eflags & ~32'h0003_4300;   // clear IF+TF+NT+RF+VM (int gate)
               else
                 eflags <= eflags & ~32'h0003_4100;   // clear TF+NT+RF+VM (trap gate)

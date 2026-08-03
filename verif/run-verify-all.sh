@@ -101,6 +101,10 @@ GATES=(
   # The witness is the ring-3 SS, not the privilege level -- CPL takes the popped RPL
   # in the broken build too, so "did we reach ring 3" cannot see this bug.
   "retfout   (far RETF to an outer level switches stacks)|retfout"
+  # REVIEW2_aug2 C-06, call-gate half: the INBOUND direction. Also covers the gate-DPL
+  # bit misread that made every DPL-3 gate #GP from ring 3 -- which is why the
+  # "cross-priv gate unimplemented" halt had never been seen by any corpus run.
+  "callxpl   (cross-privilege call gate switches stacks)|callxpl"
   # REVIEW2_aug2 H-13: CR0.CD drives instruction-fill cacheability in the DEFAULT build
   # now. This gate existed and nothing ran it. Asserts that the CD-honouring build
   # really refetches AND that it is architecturally transparent vs the caching build.

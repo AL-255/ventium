@@ -256,6 +256,17 @@ retfout:
 	@$(MAKE) -s -C verif/sys/tests/pretfout
 	bash verif/sys/run-retfout-gate.sh
 
+# --- cross-privilege call gate (verif/sys/run-callxpl-gate.sh) ---------------
+# REVIEW2_aug2 C-06, call-gate half. Covers BOTH the desc[45:44] DPL misread (which
+# made every DPL-3 gate #GP from ring 3, and hid the missing feature behind it) and
+# the stack switch itself. Witness is the ring-0 SS + the caller ESP read back out of
+# the pushed frame + the callee ESP, so "SS loaded" and "frame actually pushed on it"
+# are distinguished.
+.PHONY: callxpl
+callxpl:
+	@$(MAKE) -s -C verif/sys/tests/pcallxpl
+	bash verif/sys/run-callxpl-gate.sh
+
 # --- unimplemented-sequence reachability (verif/sys/run-unimpl-gate.sh) ------
 # REVIEW2_aug2 H-08 + C-06. BOTH sequences this gate was built for are now IMPLEMENTED
 # (NT task-return -> the directed pntret probe below; outer-level RETF -> `make retfout`),
