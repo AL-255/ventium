@@ -464,18 +464,29 @@ module ventium_l1_axi #(
       //
       // REVIEW2_aug2 H-13, re-verified rather than repeated. The CR0.CD half is now the
       // DEFAULT (c78c576); this half has TWO independent blockers, and both still hold:
-      //   1. ven_cachemap's module source is not under rtl/. Searched the whole tree:
-      //      the only copy is .claude/worktrees/agent-.../rtl/northbridge/ven_cachemap.sv
-      //      -- an agent scratch worktree, not a reviewed source, so it is not something
-      //      to pull in blind. Getting it into rtl/ is the first step and is a
-      //      provenance question, not an RTL one.
+      //   1. ven_cachemap's module source is not under rtl/ on THIS branch. My earlier
+      //      note called the only copy "an agent scratch worktree ... a provenance
+      //      question"; that was WRONG and I am correcting it rather than leaving it.
+      //      The module is properly committed -- c8dbf3b "northbridge: cacheability map
+      //      + L1/L2 integration gates (Phase A/B)" -- and lives on real branches
+      //      including soc-northbridge-v1. The worktree copy is just a checkout of it.
+      //      Verified NOT an ancestor of HEAD, so the original PROGRESS wording
+      //      ("on an unmerged branch") was the accurate one.
+      //      That makes step 1 a MERGE decision -- which branch state ships -- not a
+      //      technical blocker and not mine to take unilaterally mid-review.
       //   2. Even with the module, this whole generate branch elaborates only under
       //      EN_L2=1, so an is_code query added here would be neither built nor tested
       //      by any gate in verify-all.
       // Neither is something the core side can route around: there is no region
-      // information anywhere in core.sv to OR into ic_fill_nocache. Unlike C-06's
-      // selector half -- where the value turned out to be already in hand -- there is
-      // no smaller true step here, because the input does not exist in this checkout.
+      // information anywhere in core.sv to OR into ic_fill_nocache.
+      //
+      // With the correction above, the chain is now concrete rather than vague, and
+      // whoever owns the branch decision can price it: (a) land ven_cachemap on this
+      // branch; (b) instantiate an is_code(1'b1) query OUTSIDE the EN_L2 generate
+      // block, since the existing D-side one only elaborates with EN_L2=1 and the
+      // default build needs it; (c) add a core input and OR it into ic_fill_nocache
+      // beside the CR0.CD term that shipped in c78c576. Steps (b) and (c) are ordinary
+      // work; (a) is the decision.
       logic core_l1c, core_to_dram_u, core_l2c_u; logic [3:0] core_cm_region;
       ven_cachemap u_cmap_l1 (
           .addr(core_addr), .is_write(core_we), .is_code(1'b0), .smm_active(smm_active),
