@@ -624,6 +624,29 @@
             // return is: a task switch to the backlink at tr_base+0, with the incoming
             // task's busy bit left SET rather than re-set, and NT cleared in the
             // outgoing image).
+            //
+            // HOW MUCH IS ACTUALLY MISSING -- checked, because "a new architectural
+            // feature" was my phrase and this review has corrected seven such calls.
+            // The task-switch machinery FULLY exists (S_TSW_SAVE/READ/SEG/BUSY) and a
+            // JMP-form switch enters it from core_seg_ljmp.svh:206 after S_LJMP has
+            // read the target TSS descriptor. An NT return reuses all of that. What is
+            // genuinely absent is small and specific:
+            //   1. a state that reads the BACKLINK selector from tr_base+0 -- no
+            //      existing state reads TSS offset 0;
+            //   2. a flag through S_LJMP so that selector is treated as a TSS target;
+            //   3. a busy-bit variant in S_TSW_BUSY: the incoming (suspended outer)
+            //      task is ALREADY busy, so it must be left set rather than re-set,
+            //      while the outgoing one is cleared -- the JMP form does `attr|8'h02`;
+            //   4. clearing NT in the outgoing EFLAGS image.
+            //
+            // WHY IT IS STILL NOT DONE: nothing in the corpus reaches an NT return (0
+            // across 61 images, and run-unimpl-gate.sh now holds that answer), so
+            // implementing it would put NEW logic on the IRET path with NOTHING
+            // exercising it. That is worse than the instrumented status quo -- it is
+            // the shape of defect this review found twice in my own work, where a fix
+            // was dead or fail-closed and every gate stayed green. Test first: an image
+            // that sets NT, builds a backlink TSS and IRETs. ptsslim and pxc04t both
+            // build TSSes and are the templates.
 `ifndef SYNTHESIS
             if (!real_mode && eflags[14])
               $display("[VEN-NTRET] IRET with EFLAGS.NT=1 at cs:eip=%04x:%08h -- an NT task-return is NOT implemented; this is being treated as an ordinary IRET (REVIEW2_aug2 H-08)",
