@@ -249,6 +249,43 @@ module tb_l1d;
     do_read (32'h0000_6000 + 32'd28, d);
     chk("victim word 7 SURVIVED the cross-line bypass", d, 32'hA1C7_0007);
 
+    // ---- [11d] REVIEW2_aug2 C-09 (second half): a cacheable miss issued IMMEDIATELY
+    // after a cross-line uncacheable read must get ITS OWN data, every word.
+    //
+    // The high-word request is a single word to ven_l1d but an EIGHT-BEAT line burst on
+    // the backing seam -- ven_axi_master cannot request one word -- and the seam has no
+    // transaction ID. Taking beat 0 and leaving to serve left SEVEN beats outstanding,
+    // so the very next L1_FILL could consume the old burst's residual data AS ITS OWN
+    // LINE, under a tag that says it is correct.
+    //
+    // This is the review's own suggested shape: cross-line uncacheable read, then a
+    // cacheable miss, checking EVERY returned word rather than one.
+    //
+    // *** IT DOES NOT DISCRIMINATE IN THIS HARNESS, AND CANNOT. *** Measured: with the
+    // drain reverted it still passes, all eight words. The reason is structural rather
+    // than a flaw in the case -- THIS testbench drives m_ack directly, one word per
+    // request, so an eight-beat burst with seven residual beats does not exist here.
+    // The hazard lives on the ven_axi_master seam, which tb_l1d does not instantiate.
+    //
+    // To actually catch it the case has to run against the real burst master, i.e. in
+    // the tb_l1_axi family, issuing the cross-line uncacheable read and the following
+    // cacheable miss back to back with no idle gap. Kept here as a non-regression check
+    // of the data path, labelled so the green line is not mistaken for evidence -- the
+    // same reason [11c] above carries its own label.
+    $display("[11d] a cacheable miss right after a cross-line bypass gets its own data");
+    $display("      (NOTE: does not discriminate in this TB -- see the comment above)");
+    cacheable = 1'b1;
+    for (int w = 0; w < 8; w++)
+      do_write(32'h0000_8000 + w*4, 32'hC090_0000 + w);   // 8 distinct words, write-through
+    cacheable = 1'b0;
+    do_read (32'h0000_6000 + 32'd30, d);   // cross-line bypass: takes the high request
+    cacheable = 1'b1;
+    for (int w = 0; w < 8; w++) begin
+      do_read(32'h0000_8000 + w*4, d);
+      chk($sformatf("word %0d of the line filled after the bypass", w),
+          d, 32'hC090_0000 + w);
+    end
+
     // [12] NON-CACHEABLE bypass sweep: walking data/addr through the bypass-line
     // buffer (bp_line) which only the cacheable=0 path loads.
     cacheable = 1'b0;

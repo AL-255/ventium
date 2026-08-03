@@ -611,16 +611,37 @@ module ven_l1d #(
               dc_line[{fset,fway}][{fw,5'b00000} +: 32] <= m_rdata;
             end
             if (byp_hi_beat) begin
-              // H-19: the extra beat returned the next line's word 0. Serve now.
-              bp_hi       <= m_rdata;
-              byp_hi_beat <= 1'b0;
-              st          <= L1_BYP;
+              // H-19: the extra request returns the NEXT line's word 0, which is beat 0
+              // of that request.
+              //
+              // ---- REVIEW2_aug2 C-09 (second half): DRAIN THE REST OF THE BURST.
+              // This used to capture beat 0 and jump straight to L1_BYP, leaving SEVEN
+              // beats of that burst outstanding on the backing interface. ven_axi_master
+              // turns every read into an eight-beat line burst -- it cannot request a
+              // single word -- and the seam carries no transaction ID, so if the core
+              // started another miss before those beats drained, the new L1_FILL
+              // consumed the OLD burst's residual data as its own line. Silent, and it
+              // corrupts a line that was filled correctly as far as any tag can tell.
+              //
+              // The review offers two fixes: a real single-beat backing operation, or
+              // drain and identify the transaction before allowing a new fill. The
+              // first needs a new request size on the ven_axi_master seam; this is the
+              // second, and it is contained entirely in this state. fw is reused as the
+              // drain counter (it is dead once the line is captured), so only word 0 is
+              // taken and beats 1..7 are consumed and discarded before L1_BYP.
+              if (fw == 3'd0) bp_hi <= m_rdata;
+              if (fw == 3'(WORDS-1)) begin
+                byp_hi_beat <= 1'b0;
+                st          <= L1_BYP;
+              end else fw <= fw + 3'd1;
             end else if (fw==3'(WORDS-1)) begin
               if (bypass_q) begin
                 // non-cacheable: serve from bp_line next clock; allocate NOTHING.
                 // H-19: unless the access crosses the line end, in which case run ONE
                 // more beat for the following line's word 0 first.
-                if (byp_need_hi) byp_hi_beat <= 1'b1;
+                // C-09: restart fw at 0 so the high request's own eight beats are
+                // counted and fully drained above.
+                if (byp_need_hi) begin byp_hi_beat <= 1'b1; fw <= 3'd0; end
                 else             st          <= L1_BYP;
               end else begin
                 // last word → allocate the victim (tag/val) + MRU, then retry hits.
