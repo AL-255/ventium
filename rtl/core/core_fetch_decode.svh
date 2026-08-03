@@ -698,7 +698,23 @@
                 // real/V86: push CS:IP + real-mode CS load (base=sel<<4). PM: push
                 // CS:EIP then S_LCALL hands off to S_LJMP's GDT descriptor CS load
                 // (DOS Quake's CWSDPMI far-calls in PM). seg_real && paging_on stays HALT.
-                if ((seg_real && !paging_on) || !seg_real) begin seg_step<=1'b0; state<=S_LCALL; end
+                // ---- REVIEW2_aug2 C-06 (first bullet, selector half): validate the
+                // target selector BEFORE the return frame is pushed. H-07 added this
+                // check at S_LCALL -> S_LJMP, which stops the out-of-table descriptor
+                // READ but runs AFTER both pushes, so a rejected selector still faults
+                // with CS:next_eip on the stack and ESP decremented -- exactly what
+                // C-06 describes. For the IMMEDIATE ptr16:32 form the selector is known
+                // here, at dispatch, before anything touches the stack.
+                //
+                // This does NOT close C-06: the DESCRIPTOR checks (present, code, DPL,
+                // conforming) still need the read that S_LJMP performs after the push,
+                // and unwinding THAT needs the far-transfer staging the finding asks
+                // for. It removes the selector class, which is the one that can be
+                // decided without a memory access.
+                if (!seg_real && far_sel_bad(d_ljmp_sel))
+                  start_fault(8'd13, 1'b1,
+                              {16'd0, d_ljmp_sel} & 32'h0000_FFFC, eip);
+                else if ((seg_real && !paging_on) || !seg_real) begin seg_step<=1'b0; state<=S_LCALL; end
                 else begin state<=S_HALT; `ifdef VEN_DBG_CORE int_vec<=8'hE7; `endif end
               end
               SYS_RETF: begin

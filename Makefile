@@ -222,6 +222,14 @@ retfsel:
 	@$(MAKE) -s -C verif/sys/tests/pretfsel
 	bash verif/sys/run-retfsel-gate.sh
 
+# --- far CALL selector before the push (verif/sys/run-callsel-gate.sh) -------
+# REVIEW2_aug2 C-06, selector half. Witness is the ESP DELTA across the fault:
+# 0x0CA10000 = stack untouched, 0x0CA10008 = CS:next_eip already pushed.
+.PHONY: callsel
+callsel:
+	@$(MAKE) -s -C verif/sys/tests/pcallsel
+	bash verif/sys/run-callsel-gate.sh
+
 # --- instruction-fetch cacheability (verif/sys/run-icbypass-gate.sh) ---------
 # REVIEW2_aug2 H-13. CR0.CD now drives ic_fill_nocache in the DEFAULT build, so the
 # comparison sides swapped: the CACHING build is the one needing an opt-out define.

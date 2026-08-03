@@ -109,7 +109,12 @@
                 // stage the target; S_LCALL then pushes CS:next_eip + loads CS:off.
                 q_ljmp_off <= {16'd0, ld_val[15:0]};
                 q_ljmp_sel <= ld_val[31:16];
-                seg_step   <= 1'b0; state <= S_LCALL;
+                // REVIEW2_aug2 C-06: reject a bad selector BEFORE S_LCALL pushes the
+                // return frame. The selector is already in hand here.
+                if (far_sel_bad(ld_val[31:16]))
+                  start_fault(8'd13, 1'b1,
+                              {16'd0, ld_val[31:16]} & 32'h0000_FFFC, q_pc);
+                else begin seg_step <= 1'b0; state <= S_LCALL; end
               end
             end
             else if (q_kind==K_STR && q_st==ST_CMPS) state<=S_LOAD2;
@@ -166,7 +171,11 @@
               end
             end else if (q_callf_mem) begin
               q_ljmp_sel <= ld2_val[15:0];       // q_ljmp_off already 32-bit
-              seg_step   <= 1'b0; state <= S_LCALL;
+              // REVIEW2_aug2 C-06: same, for the m16:32 indirect far CALL.
+              if (far_sel_bad(ld2_val[15:0]))
+                start_fault(8'd13, 1'b1,
+                            {16'd0, ld2_val[15:0]} & 32'h0000_FFFC, q_pc);
+              else begin seg_step <= 1'b0; state <= S_LCALL; end
             end else begin
               mem_load_data2<=ld2_val; state<=S_EXEC;
               // CMPS second operand [EDI] is also a data load -> D-cache access.
