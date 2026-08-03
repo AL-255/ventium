@@ -623,6 +623,12 @@ module core
   logic [31:0] seg_base [NUM_SEG];
   logic [31:0] seg_limit[NUM_SEG];   // hidden limit (byte granular; limit checks)
   logic [7:0]  seg_attr [NUM_SEG];   // descriptor access byte: P|DPL[1:0]|S|type[3:0]
+  // REVIEW2_aug2 H-05: the descriptor's B/D bit, PER SEGMENT. The core cached it only
+  // for SS (ss_b) and CS (cs_d), so a non-SS expand-down data segment had no upper
+  // bound available and fell back to 4 GiB -- fail-open. Defaults to 1 (= the old 4 GiB
+  // bound) so any load path not yet covered keeps EXACTLY today's behaviour: this can
+  // only start catching violations it used to miss, never invent one.
+  logic        seg_b   [NUM_SEG];
   // CPL = the current privilege level, derived from CS.RPL on a CS load (far
   // jump). Reset/real mode: 0. Used as the EFFECTIVE privilege in the DPL checks.
   logic [1:0]  cpl_r;
@@ -4317,7 +4323,11 @@ module core
       // whose base is SS but whose dseg does not follow it).
 `ifdef VEN_SEG_ENFORCE
       if (seg_access_fault) begin
-        start_fault(8'd13, 1'b1, 32'd0, q_pc);
+        // REVIEW2_aug2 H-05: a violation of an SS-based access is #SS(0), not #GP(0)
+        // (IA-32: stack-segment limit and presence violations use vector 12). Every
+        // violation was delivered as #GP, so a handler distinguishing the two -- which
+        // is the normal way software grows a stack -- saw the wrong one.
+        start_fault((cur_seg_idx == 3'(SG_SS)) ? 8'd12 : 8'd13, 1'b1, 32'd0, q_pc);
       end else
 `endif
       if (perm_fault) begin
@@ -4978,6 +4988,17 @@ module core
     if (rst_n && cross_unhandled)
       $fatal(1, "PAGING/C-04: UNSPLIT page-crossing access in state %0d -- lin=%08h size=%0d ends at %03h, past the page end. This state translates only the page the access STARTS in, so the tail bytes go through the WRONG physical page and any #PF the second page owes is never raised. pc=%08h",
              int'(state), cur_lin, cur_size, cur_ext_end, q_pc);
+
+`ifdef VEN_C03_PROBE
+  // REVIEW2_aug2 H-05: does the canonical extent actually DIFFER from q_w on a
+  // segment-checked access? If it never does, swapping the limit check onto cur_size
+  // is a no-op dressed as a fix. Measured separately from correctness, as ever.
+  always_ff @(posedge clk)
+    if (rst_n && cur_is_d && cur_seg_rel && sys_mode && !real_mode
+        && ({29'd0, cur_size} != {30'd0, q_w}))
+      $display("[H05-SZ] state=%0d seg=%0d cur_size=%0d q_w=%0d lin=%08h",
+               int'(state), cur_seg_idx, cur_size, q_w, cur_lin);
+`endif
 `endif
 
   // ---- REVIEW1_Aug2 H-11 instrumentation --------------------------------------
@@ -5142,6 +5163,7 @@ module core
     if (!rst_n) begin
       for (int i = 0; i < NUM_SEG; i++) begin
         seg_pm_loaded[i] <= 1'b0; seg_attr_q[i] <= 8'd0;
+        seg_b[i] <= 1'b1;   // REVIEW2_aug2 H-05: 4 GiB bound until a descriptor says otherwise
       end
     end else begin
       for (int i = 0; i < NUM_SEG; i++) begin
@@ -5219,9 +5241,14 @@ module core
     // bound falls back to 4 GiB, which is FAIL-OPEN (it can miss a violation, never
     // invent one) -- stated rather than silently assumed, and it needs the same
     // per-access descriptor work as the rest of C-01 to do properly.
+    // REVIEW2_aug2 H-05: use the segment's OWN B bit. SS keeps reading ss_b (that
+    // register is also the stack-width source and is maintained on every path that
+    // sets SS); every other segment now consults seg_b[], which S_SEGLD captures from
+    // desc[54]. A segment whose load path does not yet write seg_b[] still reads 1 and
+    // therefore still gets the 4 GiB bound -- unchanged, not newly faulting.
     seg_ed_upper = (cur_seg_idx == 3'(SG_SS))
-                 ? (ss_b ? 32'hFFFF_FFFF : 32'h0000_FFFF)
-                 : 32'hFFFF_FFFF;
+                 ? (ss_b               ? 32'hFFFF_FFFF : 32'h0000_FFFF)
+                 : (seg_b[cur_seg_idx] ? 32'hFFFF_FFFF : 32'h0000_FFFF);
     // MEASURED (UPDATE 355): this fired spuriously inside the Err79 #GP handler with
     // dseg=2 dlimit=00000000 attr=00 -- the hidden descriptor cache was EMPTY, not "a
     // descriptor that says not-present". This core has no "descriptor has been loaded"
@@ -5269,7 +5296,13 @@ module core
     seg_chk_base = seg_base[cur_seg_idx];
     seg_chk_off  = cur_lin - seg_chk_base;
     // Real access extent: last touched byte = offset + (width-1), not a fixed +3.
-    last_byte = {1'b0, seg_chk_off} + {30'd0, q_w} - 33'd1;
+    // REVIEW2_aug2 H-05: extent from the CANONICAL access size, not q_w. cur_size is
+    // the same (start,length) descriptor the C-03/C-04 page-crossing layer uses and the
+    // one the bus driver's strobes follow; q_w is the decoded operand width, which is
+    // not the same thing for the states that access a fixed-size object (descriptor
+    // reads, frame pushes, TSS fields). Sharing one source is the point -- a limit
+    // check computed off a different width than the access it guards is not a check.
+    last_byte = {1'b0, seg_chk_off} + {29'd0, cur_size} - 33'd1;
     if (seg_expand_down)
       // Expand-down: the VALID range is (limit, upper], so an access is out of range
       // when its FIRST byte is at or below the limit -- OR when its LAST byte passes

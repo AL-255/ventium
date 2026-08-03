@@ -145,6 +145,9 @@
                 // so stk16() could not know a protected-mode stack was 16-bit and never
                 // wrapped SP at 64 KiB.
                 if (tgt == SG_SS) ss_b <= desc[54];
+                // REVIEW2_aug2 H-05: capture B for EVERY segment, so a non-SS
+                // expand-down data segment has a real upper bound instead of 4 GiB.
+                seg_b[tgt] <= desc[54];
                 q_seg_from_mem <= 1'b0;
                 eip<=next_eip; retire_valid<=1'b1; state<=S_PIPE; seg_step<=1'b0;
               end
