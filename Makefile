@@ -242,6 +242,7 @@ xc04:
 	@$(MAKE) -s -C verif/sys/tests/pxc04f
 	@$(MAKE) -s -C verif/sys/tests/pxc04e
 	@$(MAKE) -s -C verif/sys/tests/pxc04t
+	@$(MAKE) -s -C verif/sys/tests/pxc04m
 	bash verif/sys/run-xc04-gate.sh
 
 # --- instruction-fetch cacheability (verif/sys/run-icbypass-gate.sh) ---------

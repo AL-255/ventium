@@ -1,0 +1,39 @@
+# Copyright 2026 Anhang Li (AL-255, thelithcore@gmail.com)
+# SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+
+# Ventium M2S.3 — build the bare-metal HARDWARE-FAULT demonstrator.
+#
+# Output: pxc04m.bin, a flat 64 KiB image loadable with
+#   qemu-system-i386 -bios pxc04m.bin
+# whose reset vector (F000:FFF0) bootstraps real->protected + PAGING (reusing the
+# M2S.2 ppage bootstrap), stands up an IDT with #PF / #GP / #UD interrupt gates,
+# deliberately triggers each hardware fault (a not-present page; a selector past
+# the GDT limit; UD2) so the M2S.1/.2 fault DECISIONS now DELIVER through the IDT,
+# and exits via isa-debug-exit.  See pxc04m.S / pxc04m.ld.
+#
+# Toolchain: a 32-bit-capable gcc (gcc -m32) + GNU ld + objcopy.  No nasm needed
+# (GNU-as syntax inside pxc04m.S).
+CC      ?= gcc
+OBJCOPY ?= objcopy
+CFLAGS  := -m32 -ffreestanding -nostdlib -fno-pic -fno-pie -Wall
+
+IMG_BYTES := 65536      # exactly 64 KiB (a -bios image's reset vector is F000:FFF0)
+
+all: pxc04m.bin
+
+pxc04m.o: pxc04m.S
+	$(CC) $(CFLAGS) -c $< -o $@
+
+pxc04m.elf: pxc04m.o pxc04m.ld
+	$(CC) $(CFLAGS) -static -no-pie -nostdlib -Wl,-T,pxc04m.ld -Wl,--build-id=none \
+	    pxc04m.o -o pxc04m.elf
+
+pxc04m.bin: pxc04m.elf
+	$(OBJCOPY) -O binary pxc04m.elf pxc04m.bin
+	@truncate -s $(IMG_BYTES) pxc04m.bin
+	@echo "pxc04m.bin: $$(stat -c%s pxc04m.bin) bytes (want $(IMG_BYTES))"
+
+clean:
+	rm -f pxc04m.o pxc04m.elf pxc04m.bin
+
+.PHONY: all clean

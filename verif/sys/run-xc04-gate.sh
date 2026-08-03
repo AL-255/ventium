@@ -63,11 +63,11 @@ probe pxc04i 36 "S_INT_PUSH  exception frame write"  || fails=1
 probe pxc04f 14 "S_FSTORE    x87 FSTP m64 beat"       || fails=1
 probe pxc04e 16 "S_FENV_ST   FNSTENV image beat"      || fails=1
 probe pxc04t 43 "S_TSW_SAVE  task-switch state save"   || fails=1
+probe pxc04m 34 "S_INT_GATE  IDT gate read (microseq)" || fails=1
 
 if [[ "$fails" == "0" ]]; then
-  echo "  => FIVE producers proven reachable, spanning five of the SIX categories the"
-  echo "     finding names: descriptor / stack-frame / x87 / environment / task."
-  echo "     MICROSEQUENCE is the one still uncovered. \"0 in 68 images\" was corpus coverage,"
+  echo "  => SIX producers proven reachable, covering ALL SIX categories the finding"
+  echo "     names: descriptor / stack-frame / x87 / environment / task / microsequence. \"0 in 68 images\" was corpus coverage,"
   echo "     exactly as the finding says -- not architectural unreachability."
   echo "XC04-GATE-OK"; exit 0
 fi
