@@ -604,6 +604,31 @@
           else if (d_iret) begin
             // F3: real-mode IRET pops a 16-bit FLAGS:CS:IP frame (S_RMIRET); V86/PM
             // keep the 32-bit S_IRET pop (incl. the descriptor reload / priv return).
+            // ---- REVIEW2_aug2 H-08 (NT task-return): INSTRUMENTED, not implemented.
+            // IRET with EFLAGS.NT=1 must task-switch through the current TSS backlink.
+            // Nothing here has ever looked at NT, so such an IRET is silently treated
+            // as an ordinary return -- the machine keeps running in the wrong task.
+            //
+            // I did NOT make this a fault. The honest-#GP precedent used for task gates
+            // in the IDT does not transfer: an NT return is a LEGAL operation the core
+            // simply does not implement, the core itself never SETS NT (no S_TSW_* arm
+            // writes it, and a CALL-type switch would), so the only way to reach this
+            // is guest software -- and the workloads that would tell me whether they do
+            // (m7 Quake, m7 Win95) are EXCLUDED from verify-all and artifact-gated. A
+            // hard #GP would be a behavioural change validated by nothing.
+            //
+            // So: measure first, exactly as the C-03/C-04 crossing work did. This
+            // counts NT-set IRETs and says so loudly, without changing behaviour. If a
+            // real workload ever trips it, that is the evidence needed to justify
+            // routing it into the existing S_TSW_* machinery (which is what an NT
+            // return is: a task switch to the backlink at tr_base+0, with the incoming
+            // task's busy bit left SET rather than re-set, and NT cleared in the
+            // outgoing image).
+`ifndef SYNTHESIS
+            if (!real_mode && eflags[14])
+              $display("[VEN-NTRET] IRET with EFLAGS.NT=1 at cs:eip=%04x:%08h -- an NT task-return is NOT implemented; this is being treated as an ordinary IRET (REVIEW2_aug2 H-08)",
+                       seg_sel[SG_CS], eip);
+`endif
             int_step <= 4'd0; int_src_pc <= eip; state <= real_mode ? S_RMIRET : S_IRET;
             // 16-bit IRET (IRETW): in PM the frame width follows the IRET's EFFECTIVE
             // operand size (eff_opsize = pfx_opsize ^ def16). In 16-bit PM (cs_d=0, no
