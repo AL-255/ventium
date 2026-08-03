@@ -382,6 +382,14 @@ module ven_l1d #(
   //      rather than the line base (m_addr at ~326 is {fbase[31:5],5'd0}).
   //   5. The L1_BYP serve indexes bp_line_x by c_addr[4:0] assuming the whole line was
   //      fetched; with one word present that indexes bytes never read.
+  //   5b. ON THE "TWICE" -- checked separately, and it is NOT a smaller true step.
+  //      Halving every read would be worth having on its own, so I went looking. The
+  //      priming burst is a documented workaround for a HARDWARE bug, not an
+  //      oversight: the PS S_AXI_HP async read FIFO returned a STALE PRIOR BURST and
+  //      froze the guest. ven_axi_master:368 already carries an EXPERIMENT-ONLY define
+  //      to skip it, labelled NOT SAFE TO SHIP for exactly that reason, and task #24
+  //      owns the root cause. So the doubling is a separate piece of work from H-11,
+  //      and removing it here would reintroduce a guest freeze.
   //   6. An UNALIGNED access spanning two words still needs two beats, so "single
   //      beat" is really "one or two, by width and alignment" -- the same shape as the
   //      byp_need_hi cross-line case already here.
