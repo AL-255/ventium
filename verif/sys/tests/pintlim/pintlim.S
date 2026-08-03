@@ -35,7 +35,16 @@
  * to change its verdict: REVIEW2_aug2 C-08 and C-09 both agreed with the code for the
  * wrong reason, and this test's own first draft made it three.
  *
- * Exit: isa-debug-exit with 0x42 -> status 133, with ebp = 0x0C030008 (the saved CS).
+ * HOW THIS RUN ACTUALLY ENDS -- and the header used to state this wrongly. The final
+ * `outb %al,(%dx)` to 0xF4 does NOT complete: tb_main.cpp services I/O only in cosim
+ * mode (`if (!cosim_mode) { io_ack = 0; return; }`), and the gates run this image with
+ * --system and no --cosim, so io_ack never asserts and the core stalls ON that OUT.
+ * The TB then reports "quiescent (core idle)".
+ *
+ * The WITNESS is unaffected and that is why the gate is still valid: ebp is set BEFORE
+ * the OUT, so it appears in the last RETIRED record, which is exactly what the gate
+ * reads with tail -1. What is not true is "exit status 133" -- nothing exits. Stated
+ * accurately here rather than repeating a mechanism this harness does not provide.
  */
     .code16
     .section .text16,"ax"

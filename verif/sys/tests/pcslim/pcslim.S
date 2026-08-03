@@ -25,7 +25,16 @@
  * #GP only against the enforcing build, and asserts the poison against the default one,
  * which also proves the test is really reaching the out-of-limit fetch.
  *
- * Exit: isa-debug-exit with 0x42 -> status 133, ebp = 0x0C510010 (enforcing build).
+ * HOW THIS RUN ACTUALLY ENDS -- and the header used to state this wrongly. The final
+ * `outb %al,(%dx)` to 0xF4 does NOT complete: tb_main.cpp services I/O only in cosim
+ * mode (`if (!cosim_mode) { io_ack = 0; return; }`), and the gates run this image with
+ * --system and no --cosim, so io_ack never asserts and the core stalls ON that OUT.
+ * The TB then reports "quiescent (core idle)".
+ *
+ * The WITNESS is unaffected and that is why the gate is still valid: ebp is set BEFORE
+ * the OUT, so it appears in the last RETIRED record, which is exactly what the gate
+ * reads with tail -1. What is not true is "exit status 133" -- nothing exits. Stated
+ * accurately here rather than repeating a mechanism this harness does not provide.
  */
     .code16
     .section .text16,"ax"
