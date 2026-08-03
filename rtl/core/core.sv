@@ -1152,10 +1152,10 @@ module core
   // violation). That is precisely the false-positive class this finding's delivery was
   // reverted for twice. seg_ext_size now follows cur_size unless a state explicitly
   // says the object is bigger than this beat.
-  logic [4:0]  seg_ext_ovr;    // whole-object extent, when a state knows it
+  logic [7:0]  seg_ext_ovr;    // whole-object extent, when a state knows it
   logic        seg_ext_ovr_v;  // 1 = use seg_ext_ovr instead of cur_size
   logic        seg_ext_skip;   // this beat is inside an already-checked extent
-  wire  [4:0]  seg_ext_size;   // extent the LIMIT check uses (resolved below)
+  wire  [7:0]  seg_ext_size;   // extent the LIMIT check uses (resolved below)
 
   logic        xp_cross;
   logic [12:0] xp_end;
@@ -4953,7 +4953,7 @@ module core
   //
   // Counting before rebuilding is the point: extending the split state-by-state is
   // what C-03 exists to stop, and a measurement says which states are reachable at all.
-  assign seg_ext_size = seg_ext_ovr_v ? seg_ext_ovr : {1'b0, cur_size};
+  assign seg_ext_size = seg_ext_ovr_v ? seg_ext_ovr : {4'd0, cur_size};
 
   logic [12:0] cur_ext_end;
   logic        cur_crosses, cross_split_capable, cross_unhandled;
@@ -5037,7 +5037,7 @@ module core
   // the beat moves -- i.e. where the whole-object extent is doing work cur_size cannot.
   always_ff @(posedge clk)
     if (rst_n && cur_is_d && cur_seg_rel && sys_mode && !real_mode
-        && ({28'd0, seg_ext_size} != {29'd0, cur_size}))
+        && ({25'd0, seg_ext_size} != {29'd0, cur_size}))
       $display("[H05-MB] state=%0d ext=%0d cur_size=%0d skip=%0b lin=%08h",
                int'(state), seg_ext_size, cur_size, seg_ext_skip, cur_lin);
   // REVIEW2_aug2 H-05: does the canonical extent actually DIFFER from q_w on a
@@ -5384,7 +5384,7 @@ module core
     // not the same thing for the states that access a fixed-size object (descriptor
     // reads, frame pushes, TSS fields). Sharing one source is the point -- a limit
     // check computed off a different width than the access it guards is not a check.
-    last_byte = {1'b0, seg_chk_off} + {28'd0, seg_ext_size} - 33'd1;
+    last_byte = {1'b0, seg_chk_off} + {25'd0, seg_ext_size} - 33'd1;
     if (seg_expand_down)
       // Expand-down: the VALID range is (limit, upper], so an access is out of range
       // when its FIRST byte is at or below the limit -- OR when its LAST byte passes
@@ -6220,7 +6220,7 @@ module core
     // C-03: most beats are a full dword. The arms below narrow it where the state
     // genuinely moves fewer bytes; anything left at 4 is the conservative reading.
     cur_size = 4'd4;
-    seg_ext_ovr   = 5'd0;   // H-05: no override -> the check follows cur_size
+    seg_ext_ovr   = 8'd0;   // H-05: no override -> the check follows cur_size
     seg_ext_ovr_v = 1'b0;
     seg_ext_skip  = 1'b0;
 `ifndef SYNTHESIS
@@ -6334,21 +6334,38 @@ module core
                      cur_size = ((q_f_mbytes==4'd10 && f_step==4'd2) ||
                                  (q_f_mbytes==4'd2)) ? 4'd2 : 4'd4;
                      // H-05: check the WHOLE m16/m32/m64/m80 at the first beat.
-                     seg_ext_ovr   = {1'b0, q_f_mbytes};
+                     seg_ext_ovr   = {4'd0, q_f_mbytes};
                      seg_ext_ovr_v = 1'b1;
                      seg_ext_skip  = (f_step != 4'd0); end
       S_FSTORE: begin cur_lin = dbase+q_ea + {26'd0, f_step, 2'b00}; cur_is_w = 1'b1;
                      cur_size = ((q_f_mbytes==4'd10 && f_step==4'd2) ||
                                  (q_f_mbytes==4'd2)) ? 4'd2 : 4'd4;
-                     seg_ext_ovr   = {1'b0, q_f_mbytes};
+                     seg_ext_ovr   = {4'd0, q_f_mbytes};
                      seg_ext_ovr_v = 1'b1;
                      seg_ext_skip  = (f_step != 4'd0); end
       // REVIEW1_Aug2 M-04: fenv_off carries the stride (4-byte or 2-byte beats); it is
       // the SAME signal the bus arm uses, so the two cannot drift apart (CHECK 5).
+      // REVIEW2_aug2 H-05: the ENVIRONMENT IMAGES get the whole-object extent too. I
+      // recorded these as needing "a second mechanism rather than a reuse of
+      // q_f_mbytes"; that was wrong. The total is (fenv_last+1) * stride and lands on
+      // exactly the four architectural sizes -- 16-bit FNSTENV (6+1)*2 = 14, 32-bit
+      // (6+1)*4 = 28, 16-bit FNSAVE (46+1)*2 = 94, 32-bit (26+1)*4 = 108 -- so it is
+      // the SAME override, with the size computed instead of taken from a field. The
+      // extent is 8 bits because 108 does not fit in 5.
       S_FENV_ST: begin cur_lin = dbase+q_ea + fenv_off; cur_is_w = 1'b1;
-                       cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4; end
+                       cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4;
+                       seg_ext_ovr   = (q_f_mbytes == 4'd2)
+                                     ? 8'((fenv_last + 6'd1) * 2)
+                                     : 8'((fenv_last + 6'd1) * 4);
+                       seg_ext_ovr_v = 1'b1;
+                       seg_ext_skip  = (fenv_off != 32'd0); end
       S_FENV_LD: begin cur_lin = dbase+q_ea + fenv_off;
-                       cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4; end
+                       cur_size = (q_f_mbytes == 4'd2) ? 4'd2 : 4'd4;
+                       seg_ext_ovr   = (q_f_mbytes == 4'd2)
+                                     ? 8'((fenv_last + 6'd1) * 2)
+                                     : 8'((fenv_last + 6'd1) * 4);
+                       seg_ext_ovr_v = 1'b1;
+                       seg_ext_skip  = (fenv_off != 32'd0); end
       S_STORE: begin cur_size = {1'b0, q_w};
         cur_is_w = 1'b1;
         // F3/paging fix: POP r/m16 (8F) writes its operand in the operand's OWN
