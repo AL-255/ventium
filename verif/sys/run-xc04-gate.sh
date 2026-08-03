@@ -60,9 +60,10 @@ probe() {   # $1 = image basename, $2 = expected state number, $3 = producer nam
 fails=0
 probe pxc04  23 "S_LGDT      6-byte descriptor read" || fails=1
 probe pxc04i 36 "S_INT_PUSH  exception frame write"  || fails=1
+probe pxc04f 14 "S_FSTORE    x87 FSTP m64 beat"       || fails=1
 
 if [[ "$fails" == "0" ]]; then
-  echo "  => TWO producers proven reachable. \"0 in 68 images\" was corpus coverage,"
+  echo "  => THREE producers proven reachable. \"0 in 68 images\" was corpus coverage,"
   echo "     exactly as the finding says -- not architectural unreachability."
   echo "XC04-GATE-OK"; exit 0
 fi

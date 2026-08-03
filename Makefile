@@ -239,6 +239,7 @@ callsel:
 xc04:
 	@$(MAKE) -s -C verif/sys/tests/pxc04
 	@$(MAKE) -s -C verif/sys/tests/pxc04i
+	@$(MAKE) -s -C verif/sys/tests/pxc04f
 	bash verif/sys/run-xc04-gate.sh
 
 # --- instruction-fetch cacheability (verif/sys/run-icbypass-gate.sh) ---------
