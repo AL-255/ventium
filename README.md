@@ -160,13 +160,16 @@ utilization reports before programming the board.  A generated `fpga_run_*`
 directory is disposable except for a deliberately retained deployable artifact
 or capture needed by the next debug session.
 
-### Latest retained placed-utilization snapshot
+### Latest retained placed CLB visualization
 
-The following chart was regenerated from the retained 2026-08-28 Vivado 2025.2
-placed report for `rk_ao486_bd_wrapper` on `xczu15eg-ffvb1156-2-i`.  It is a
-capacity/routability warning, not timing, DRC, or guest-correctness sign-off.
+This graphical device view was regenerated from the retained 2026-08-28 Vivado
+2025.2 placed checkpoint for `rk_ao486_bd_wrapper` on
+`xczu15eg-ffvb1156-2-i`.  Each plotted tile is a placed primitive site; color
+identifies the recognized RTL module and luminance separates its major leaf
+groups.  White regions are not populated by the plotted CLB primitives.  This
+is a capacity/routability view, not timing, DRC, or guest-correctness sign-off.
 
-![Placed utilization for the RK-XCZU15EG-F image](docs/fpga-utilization-rk-xczu15eg.svg)
+![Color-coded placed CLB usage for the RK-XCZU15EG-F Ventium ao486 integration](docs/fpga-clb-placement-rk-xczu15eg.png)
 
 | Resource | Used / available | Utilization |
 | --- | ---: | ---: |
@@ -182,12 +185,21 @@ one-burst cache fills, exact request widths, and explicit shared-arithmetic
 handshakes.  Do not trade congestion for global flushing, duplicate line fills,
 unbounded replay, guest-specific RTL, or a serialized common path.
 
-Regenerate the chart from a new placed utilization report with:
+Regenerate the graphical view from a new placed checkpoint with the historical
+device-view flow.  The Vivado step is read-only against the checkpoint and must
+use the single-run guard:
 
 ```bash
-python3 tools/render_fpga_utilization.py \
-  <impl>/rk_ao486_bd_wrapper_utilization_placed.rpt \
-  docs/fpga-utilization-rk-xczu15eg.svg
+DCP=<impl>/rk_ao486_bd_wrapper_placed.dcp \
+OUT=/tmp/ventium-cells.csv \
+  fpga/run_vivado_exclusive.sh -mode batch \
+  -source fpga/scripts/dump_cells_loc_soc.tcl
+
+MPLCONFIGDIR=/tmp/ventium-matplotlib \
+  python3 fpga/scripts/render_device_view.py \
+    /tmp/ventium-cells.csv \
+    docs/fpga-clb-placement-rk-xczu15eg.png \
+    "RK-XCZU15EG-F placed CLB view — Ventium ao486 integration"
 ```
 
 [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) remains an explicitly
