@@ -1,0 +1,158 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
+| Date         : Sun Aug 23 00:39:02 2026
+| Host         : AL-MS790S-U26 running 64-bit Ubuntu 26.04 LTS
+| Command      : report_utilization -hierarchical -hierarchical_depth 12 -file /home/yukidama/github/ventium/fpga_verify_20260822/compactness_reports/utilization_hier_postroute.rpt
+| Design       : rk_ao486_bd_wrapper
+| Device       : xczu15eg-ffvb1156-2-i
+| Speed File   : -2
+| Design State : Physopt postRoute
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Utilization Design Information
+
+Table of Contents
+-----------------
+1. Utilization by Hierarchy
+
+1. Utilization by Hierarchy
+---------------------------
+
++------------------------------------------------------------------+-------------------------------------------------------------------+------------+------------+---------+------+-------+--------+--------+------+------------+
+|                             Instance                             |                               Module                              | Total LUTs | Logic LUTs | LUTRAMs | SRLs |  FFs  | RAMB36 | RAMB18 | URAM | DSP Blocks |
++------------------------------------------------------------------+-------------------------------------------------------------------+------------+------------+---------+------+-------+--------+--------+------+------------+
+| rk_ao486_bd_wrapper                                              |                                                             (top) |     316176 |     312766 |    3334 |   76 | 42341 |     84 |      2 |    0 |       1265 |
+|   (rk_ao486_bd_wrapper)                                          |                                                             (top) |          0 |          0 |       0 |    0 |     0 |      0 |      0 |    0 |          0 |
+|   rk_ao486_bd_i                                                  |                                                       rk_ao486_bd |     316176 |     312766 |    3334 |   76 | 42341 |     84 |      2 |    0 |       1265 |
+|     acc_mem                                                      |                                             rk_ao486_bd_acc_mem_0 |        348 |        198 |     150 |    0 |   976 |      0 |      0 |    0 |          0 |
+|       inst                                                       |                   axi_clock_converter_v2_1_35_axi_clock_converter |        348 |        198 |     150 |    0 |   976 |      0 |      0 |    0 |          0 |
+|         gen_clock_conv.gen_async_conv.asyncfifo_axi              |                                           fifo_generator_v13_2_14 |        347 |        197 |     150 |    0 |   976 |      0 |      0 |    0 |          0 |
+|           inst_fifo_gen                                          |                                     fifo_generator_v13_2_14_synth |        347 |        197 |     150 |    0 |   976 |      0 |      0 |    0 |          0 |
+|             gaxi_full_lite.gread_ch.grach2.axi_rach              |                                                fifo_generator_top |         73 |         41 |      32 |    0 |   202 |      0 |      0 |    0 |          0 |
+|               grf.rf                                             |                                         fifo_generator_ramfifo_44 |         73 |         41 |      32 |    0 |   202 |      0 |      0 |    0 |          0 |
+|                 gntv_or_sync_fifo.mem                            |                                                         memory_48 |         32 |          0 |      32 |    0 |   104 |      0 |      0 |    0 |          0 |
+|                   (gntv_or_sync_fifo.mem)                        |                                                         memory_48 |          0 |          0 |       0 |    0 |    52 |      0 |      0 |    0 |          0 |
+|                   gdm.dm_gen.dm                                  |                                                           dmem_50 |         32 |          0 |      32 |    0 |    52 |      0 |      0 |    0 |          0 |
+|             gaxi_full_lite.gread_ch.grdch2.axi_rdch              |                                fifo_generator_top__parameterized2 |         77 |         37 |      40 |    0 |   232 |      0 |      0 |    0 |          0 |
+|               grf.rf                                             |                            fifo_generator_ramfifo__parameterized2 |         77 |         37 |      40 |    0 |   232 |      0 |      0 |    0 |          0 |
+|                 gntv_or_sync_fifo.mem                            |                                            memory__parameterized2 |         40 |          0 |      40 |    0 |   134 |      0 |      0 |    0 |          0 |
+|                   (gntv_or_sync_fifo.mem)                        |                                            memory__parameterized2 |          0 |          0 |       0 |    0 |    67 |      0 |      0 |    0 |          0 |
+|                   gdm.dm_gen.dm                                  |                                              dmem__parameterized2 |         40 |          0 |      40 |    0 |    67 |      0 |      0 |    0 |          0 |
+|             gaxi_full_lite.gwrite_ch.gwach2.axi_wach             |                                             fifo_generator_top_16 |         73 |         41 |      32 |    0 |   196 |      0 |      0 |    0 |          0 |
+|               grf.rf                                             |                                            fifo_generator_ramfifo |         73 |         41 |      32 |    0 |   196 |      0 |      0 |    0 |          0 |
+|                 gntv_or_sync_fifo.mem                            |                                                            memory |         32 |          0 |      32 |    0 |    98 |      0 |      0 |    0 |          0 |
+|             gaxi_full_lite.gwrite_ch.gwdch2.axi_wdch             |                                fifo_generator_top__parameterized0 |         84 |         40 |      44 |    0 |   244 |      0 |      0 |    0 |          0 |
+|               grf.rf                                             |                            fifo_generator_ramfifo__parameterized0 |         84 |         40 |      44 |    0 |   244 |      0 |      0 |    0 |          0 |
+|                 gntv_or_sync_fifo.mem                            |                                            memory__parameterized0 |         44 |          0 |      44 |    0 |   146 |      0 |      0 |    0 |          0 |
+|                   (gntv_or_sync_fifo.mem)                        |                                            memory__parameterized0 |          0 |          0 |       0 |    0 |    73 |      0 |      0 |    0 |          0 |
+|                   gdm.dm_gen.dm                                  |                                              dmem__parameterized0 |         44 |          0 |      44 |    0 |    73 |      0 |      0 |    0 |          0 |
+|             gaxi_full_lite.gwrite_ch.gwrch2.axi_wrch             |                                fifo_generator_top__parameterized1 |         41 |         39 |       2 |    0 |   102 |      0 |      0 |    0 |          0 |
+|               grf.rf                                             |                            fifo_generator_ramfifo__parameterized1 |         41 |         39 |       2 |    0 |   102 |      0 |      0 |    0 |          0 |
+|     dwc_mem                                                      |                                             rk_ao486_bd_dwc_mem_0 |        619 |        550 |       0 |   69 |   933 |      0 |      0 |    0 |          0 |
+|       inst                                                       |                                  axi_dwidth_converter_v2_1_37_top |        619 |        550 |       0 |   69 |   933 |      0 |      0 |    0 |          0 |
+|         gen_upsizer.gen_full_upsizer.axi_upsizer_inst            |                          axi_dwidth_converter_v2_1_37_axi_upsizer |        619 |        550 |       0 |   69 |   933 |      0 |      0 |    0 |          0 |
+|           USE_READ.gen_non_fifo_r_upsizer.mi_register_slice_inst |                     axi_register_slice_v2_1_36_axi_register_slice |         67 |         67 |       0 |    0 |   266 |      0 |      0 |    0 |          0 |
+|             r.r_pipe                                             |    axi_register_slice_v2_1_36_axic_register_slice__parameterized2 |         67 |         67 |       0 |    0 |   266 |      0 |      0 |    0 |          0 |
+|           USE_READ.gen_non_fifo_r_upsizer.read_data_inst         |                            axi_dwidth_converter_v2_1_37_r_upsizer |         89 |         89 |       0 |    0 |   150 |      0 |      0 |    0 |          0 |
+|           USE_READ.read_addr_inst                                |            axi_dwidth_converter_v2_1_37_a_upsizer__parameterized0 |         67 |         31 |       0 |   36 |    53 |      0 |      0 |    0 |          0 |
+|             GEN_CMD_QUEUE.cmd_queue                              |         generic_baseblocks_v2_1_2_command_fifo__parameterized0_14 |         52 |         19 |       0 |   33 |    41 |      0 |      0 |    0 |          0 |
+|           USE_WRITE.gen_non_fifo_w_upsizer.write_data_inst       |                            axi_dwidth_converter_v2_1_37_w_upsizer |        190 |        190 |       0 |    0 |   309 |      0 |      0 |    0 |          0 |
+|           USE_WRITE.write_addr_inst                              |                            axi_dwidth_converter_v2_1_37_a_upsizer |         94 |         61 |       0 |   33 |    50 |      0 |      0 |    0 |          0 |
+|             GEN_CMD_QUEUE.cmd_queue                              |            generic_baseblocks_v2_1_2_command_fifo__parameterized0 |         82 |         49 |       0 |   33 |    41 |      0 |      0 |    0 |          0 |
+|           si_register_slice_inst                                 |     axi_register_slice_v2_1_36_axi_register_slice__parameterized0 |        112 |        112 |       0 |    0 |   105 |      0 |      0 |    0 |          0 |
+|             ar.ar_pipe                                           |    axi_register_slice_v2_1_36_axic_register_slice__parameterized3 |         53 |         53 |       0 |    0 |    54 |      0 |      0 |    0 |          0 |
+|             aw.aw_pipe                                           | axi_register_slice_v2_1_36_axic_register_slice__parameterized3_13 |         59 |         59 |       0 |    0 |    51 |      0 |      0 |    0 |          0 |
+|     sc_ctrl                                                      |                                             rk_ao486_bd_sc_ctrl_0 |        515 |        514 |       0 |    1 |   715 |      0 |      0 |    0 |          0 |
+|       inst                                                       |                                                           bd_a90e |        515 |        514 |       0 |    1 |   715 |      0 |      0 |    0 |          0 |
+|         s00_entry_pipeline                                       |                                     s00_entry_pipeline_imp_7D4Z5R |        457 |        457 |       0 |    0 |   522 |      0 |      0 |    0 |          0 |
+|           s00_mmu                                                |                                                  bd_a90e_s00mmu_0 |        161 |        161 |       0 |    0 |   259 |      0 |      0 |    0 |          0 |
+|             inst                                                 |                                                sc_mmu_v1_0_16_top |        161 |        161 |       0 |    0 |   259 |      0 |      0 |    0 |          0 |
+|               aw_reg_stall                                       |                    sc_util_v1_0_4_axi_reg_stall__parameterized0_7 |         47 |         47 |       0 |    0 |    94 |      0 |      0 |    0 |          0 |
+|               ar_reg_stall                                       |                      sc_util_v1_0_4_axi_reg_stall__parameterized0 |         47 |         47 |       0 |    0 |    94 |      0 |      0 |    0 |          0 |
+|           s00_si_converter                                       |                                                  bd_a90e_s00sic_0 |        291 |        291 |       0 |    0 |   223 |      0 |      0 |    0 |          0 |
+|             inst                                                 |                                       sc_si_converter_v1_0_16_top |        291 |        291 |       0 |    0 |   223 |      0 |      0 |    0 |          0 |
+|               gen_axilite_conv.axilite_conv_inst                 |                              sc_si_converter_v1_0_16_axilite_conv |        290 |        290 |       0 |    0 |   219 |      0 |      0 |    0 |          0 |
+|         s00_nodes                                                |                                              s00_nodes_imp_47SU79 |         38 |         38 |       0 |    0 |   154 |      0 |      0 |    0 |          0 |
+|     u_soc                                                        |                                               rk_ao486_bd_u_soc_0 |     314675 |     311487 |    3184 |    4 | 39651 |     84 |      2 |    0 |       1265 |
+|       inst                                                       |                                                rk_ao486_system_pl |     314675 |     311487 |    3184 |    4 | 39651 |     84 |      2 |    0 |       1265 |
+|         (inst)                                                   |                                                rk_ao486_system_pl |         28 |         28 |       0 |    0 |   183 |      0 |      0 |    0 |          0 |
+|         u_dbg                                                    |                                                       ven_soc_dbg |        287 |        287 |       0 |    0 |   451 |      2 |      0 |    0 |          0 |
+|         u_ddr                                                    |                                                     ven_ddram_axi |         56 |         56 |       0 |    0 |   214 |      0 |      0 |    0 |          0 |
+|         u_mgmt                                                   |                                                     ven_mgmt_axil |        359 |        359 |       0 |    0 |   197 |      0 |      0 |    0 |          0 |
+|         u_soc                                                    |                                                            system |     313978 |     310790 |    3184 |    4 | 38606 |     82 |      2 |    0 |       1265 |
+|           vga                                                    |                                                               vga |        919 |        912 |       6 |    1 |   860 |     64 |      1 |    0 |          0 |
+|             (vga)                                                |                                                               vga |        580 |        579 |       0 |    1 |   845 |      0 |      0 |    0 |          0 |
+|             plane_ram_0                                          |                                                      dpram_difclk |         95 |         95 |       0 |    0 |     2 |     16 |      0 |    0 |          0 |
+|             plane_ram_1                                          |                                                   dpram_difclk_57 |         76 |         76 |       0 |    0 |     0 |     16 |      0 |    0 |          0 |
+|             plane_ram_2                                          |                                                   dpram_difclk_58 |         82 |         82 |       0 |    0 |     1 |     16 |      0 |    0 |          0 |
+|             plane_ram_3                                          |                                                   dpram_difclk_59 |         58 |         58 |       0 |    0 |     0 |     16 |      0 |    0 |          0 |
+|           cache                                                  |                                                          l2_cache |        717 |        565 |     152 |    0 |   396 |      8 |      0 |    0 |          0 |
+|             (cache)                                              |                                                          l2_cache |        372 |        372 |       0 |    0 |   396 |      0 |      0 |    0 |          0 |
+|             (gcache[2].ram)                                      |                                                     altsyncram_79 |         80 |         80 |       0 |    0 |     0 |      0 |      0 |    0 |          0 |
+|           dma                                                    |                                                               dma |        388 |        388 |       0 |    0 |   504 |      0 |      0 |    0 |          0 |
+|             (dma)                                                |                                                               dma |         24 |         24 |       0 |    0 |    80 |      0 |      0 |    0 |          0 |
+|             dma_mas                                              |                                                             i8237 |        185 |        185 |       0 |    0 |   211 |      0 |      0 |    0 |          0 |
+|             dma_sla                                              |                                                          i8237_70 |        179 |        179 |       0 |    0 |   213 |      0 |      0 |    0 |          0 |
+|               chan[2].dma_chan                                   |                                        i8237_chan__parameterized1 |         52 |         52 |       0 |    0 |    48 |      0 |      0 |    0 |          0 |
+|           floppy                                                 |                                                            floppy |        929 |        751 |     178 |    0 |   550 |      0 |      0 |    0 |          0 |
+|             (floppy)                                             |                                                            floppy |        646 |        628 |      18 |    0 |   519 |      0 |      0 |    0 |          0 |
+|             fifo_to_floppy_inst                                  |                                                       simple_fifo |        283 |        123 |     160 |    0 |    31 |      0 |      0 |    0 |          0 |
+|           ide0                                                   |                                                               ide |        221 |        221 |       0 |    0 |   372 |      4 |      0 |    0 |          0 |
+|             (ide0)                                               |                                                               ide |        156 |        156 |       0 |    0 |   372 |      0 |      0 |    0 |          0 |
+|           ide1                                                   |                                                            ide_56 |        192 |        192 |       0 |    0 |   372 |      4 |      0 |    0 |          0 |
+|             (ide1)                                               |                                                            ide_56 |        124 |        124 |       0 |    0 |   372 |      0 |      0 |    0 |          0 |
+|             (io_buf1)                                            |                                                          dpram_67 |         51 |         51 |       0 |    0 |     0 |      0 |      0 |    0 |          0 |
+|           iobus                                                  |                                                             iobus |        646 |        646 |       0 |    0 |   110 |      0 |      0 |    0 |          0 |
+|           pic                                                    |                                                               pic |        181 |        181 |       0 |    0 |   133 |      0 |      0 |    0 |          0 |
+|             pic_sla                                              |                                                          i8259_66 |         82 |         82 |       0 |    0 |    58 |      0 |      0 |    0 |          0 |
+|             pic_mas                                              |                                                             i8259 |         99 |         99 |       0 |    0 |    67 |      0 |      0 |    0 |          0 |
+|           pit                                                    |                                                               pit |        277 |        277 |       0 |    0 |   279 |      0 |      0 |    0 |          0 |
+|             (pit)                                                |                                                               pit |         85 |         85 |       0 |    0 |    47 |      0 |      0 |    0 |          0 |
+|             pit_counter_0                                        |                                                       pit_counter |         65 |         65 |       0 |    0 |    77 |      0 |      0 |    0 |          0 |
+|             pit_counter_1                                        |                                                    pit_counter_64 |         62 |         62 |       0 |    0 |    75 |      0 |      0 |    0 |          0 |
+|             pit_counter_2                                        |                                                    pit_counter_65 |         65 |         65 |       0 |    0 |    80 |      0 |      0 |    0 |          0 |
+|           ps2                                                    |                                                               ps2 |        371 |        351 |      20 |    0 |   252 |      0 |      0 |    0 |          0 |
+|             (ps2)                                                |                                                               ps2 |        258 |        258 |       0 |    0 |   214 |      0 |      0 |    0 |          0 |
+|             keyb_fifo                                            |                                       simple_fifo__parameterized0 |         67 |         57 |      10 |    0 |    19 |      0 |      0 |    0 |          0 |
+|           rtc                                                    |                                                               rtc |        426 |        406 |      20 |    0 |   214 |      0 |      0 |    0 |          0 |
+|             (rtc)                                                |                                                               rtc |        381 |        381 |       0 |    0 |   207 |      0 |      0 |    0 |          0 |
+|           sound                                                  |                                                             sound |        699 |        684 |      12 |    3 |   585 |      0 |      0 |    0 |          0 |
+|             (sound)                                              |                                                             sound |        222 |        222 |       0 |    0 |   164 |      0 |      0 |    0 |          0 |
+|             opl                                                  |                                                              opl3 |        117 |        102 |      12 |    3 |   207 |      0 |      0 |    0 |          0 |
+|               host_if                                            |                                                           host_if |         71 |         56 |      12 |    3 |   137 |      0 |      0 |    0 |          0 |
+|                 trick_sw_detection                               |                                                trick_sw_detection |         25 |         25 |       0 |    0 |    50 |      0 |      0 |    0 |          0 |
+|                 afifo                                            |                                                             afifo |         38 |         26 |      12 |    0 |    65 |      0 |      0 |    0 |          0 |
+|             sound_dsp_inst                                       |                                                         sound_dsp |        360 |        360 |       0 |    0 |   214 |      0 |      0 |    0 |          0 |
+|           u_cpu                                                  |                                                    ven_ao486_shim |     308035 |     305239 |    2796 |    0 | 33956 |      2 |      1 |    0 |       1265 |
+|             u_core                                               |                                                       ventium_top |     308013 |     305217 |    2796 |    0 | 33913 |      2 |      1 |    0 |       1265 |
+|               u_l1axi                                            |                                                    ventium_l1_axi |       4402 |       3162 |    1240 |    0 |  3578 |      0 |      0 |    0 |          0 |
+|                 (u_l1axi)                                        |                                                    ventium_l1_axi |        146 |        146 |       0 |    0 |    35 |      0 |      0 |    0 |          0 |
+|                 u_axi                                            |                                                    ven_axi_master |        162 |        162 |       0 |    0 |   196 |      0 |      0 |    0 |          0 |
+|                 u_l1d                                            |                                                           ven_l1d |       4094 |       2854 |    1240 |    0 |  3347 |      0 |      0 |    0 |          0 |
+|               u_core                                             |                                                              core |     303607 |     302051 |    1556 |    0 | 30318 |      2 |      1 |    0 |       1265 |
+|                 (u_core)                                         |                                                              core |      42236 |      42216 |      20 |    0 |  8397 |      0 |      0 |    0 |         17 |
+|                 u_bcd                                            |                                                           ven_bcd |         80 |         80 |       0 |    0 |   219 |      0 |      0 |    0 |          0 |
+|                 u_bcd2fp                                         |                                                     ven_bcd_to_fp |        679 |        679 |       0 |    0 |   226 |      0 |      0 |    0 |          0 |
+|                 u_bpred_btb                                      |                                                         bpred_btb |       7297 |       7297 |       0 |    0 |  7698 |      0 |      0 |    0 |          0 |
+|                 u_dtlb                                           |                                               tlb__parameterized0 |        247 |        247 |       0 |    0 |   720 |      0 |      0 |    0 |          0 |
+|                 u_f2xm1                                          |                                                         fpu_f2xm1 |      10735 |      10735 |       0 |    0 |   465 |      2 |      1 |    0 |        248 |
+|                 u_fpatan                                         |                                                        fpu_fpatan |      59339 |      59339 |       0 |    0 |  1321 |      0 |      0 |    0 |        516 |
+|                 u_fpu_state                                      |                                                           fpu_top |      78721 |      78721 |       0 |    0 |   780 |      0 |      0 |    0 |          0 |
+|                 u_fpu_wb                                         |                                                     fpu_writeback |       5908 |       5908 |       0 |    0 |     0 |      0 |      0 |    0 |         16 |
+|                 u_fsincos                                        |                                                       fpu_fsincos |      29975 |      29975 |       0 |    0 |  1118 |      0 |      0 |    0 |         80 |
+|                   (u_fsincos)                                    |                                                       fpu_fsincos |      23871 |      23871 |       0 |    0 |   899 |      0 |      0 |    0 |          0 |
+|                   u_fx                                           |                                                        fpu_fx_ppl |       6145 |       6145 |       0 |    0 |   219 |      0 |      0 |    0 |         80 |
+|                 u_fyl2x                                          |                                                         fpu_fyl2x |      22890 |      22890 |       0 |    0 |  1818 |      0 |      0 |    0 |        387 |
+|                   (u_fyl2x)                                      |                                                         fpu_fyl2x |      16330 |      16330 |       0 |    0 |  1425 |      0 |      0 |    0 |        371 |
+|                   u_estdiv                                       |                                                        fpu_estdiv |       6561 |       6561 |       0 |    0 |   393 |      0 |      0 |    0 |         16 |
+|                 u_icache                                         |                                                            icache |      22418 |      20882 |    1536 |    0 |  5660 |      0 |      0 |    0 |          0 |
+|                 u_idiv                                           |                                                          ven_idiv |        582 |        582 |       0 |    0 |   208 |      0 |      0 |    0 |          0 |
+|                 u_itlb                                           |                                                               tlb |        264 |        264 |       0 |    0 |   688 |      0 |      0 |    0 |          0 |
+|                 u_regfile                                        |                                                           regfile |      16779 |      16779 |       0 |    0 |   256 |      0 |      0 |    0 |          0 |
+|                 u_srt_div                                        |                                                       fpu_srt_div |       6286 |       6286 |       0 |    0 |   744 |      0 |      0 |    0 |          0 |
+|                 u_uv_common                                      |                                                         uv_common |        310 |        310 |       0 |    0 |     0 |      0 |      0 |    0 |          1 |
++------------------------------------------------------------------+-------------------------------------------------------------------+------------+------------+---------+------+-------+--------+--------+------+------------+
+* Note: The sum of lower-level cells may be larger than their parent cells total, due to cross-hierarchy LUT combining
+
+
