@@ -11,8 +11,9 @@
 // It mirrors the p5model can_pair RULES (AP-500/Agner-Fog P5 pairing classes,
 // docs/ap500-pairing-table.md): both members simple, U a U-member (pairs_first),
 // V a V-candidate (pairs_second), no disp+imm, and no RAW/WAW GP-register
-// dependency (the reads/writes bitmasks the decoder produced already exclude
-// ESP/flags). A V-slot load is kept out of the pair (conservative + correct).
+// dependency.  ESP RAW dependencies are included because this implementation
+// has no U-to-V stack-pointer bypass; an ESP-only WAW remains pairable. A
+// V-slot load is kept out of the pair (conservative + correct).
 //
 // IF (docs/rtl-refactor-plan.md §6 issue_uv.sv): two decoded uops (+ the
 // reg-write state, which is carried inside the structs' reads/writes masks) ->
@@ -27,17 +28,23 @@ module issue_uv
     output logic pair_ok   // 1 => U and V may issue together this clock
 );
 
+  localparam logic [7:0] ESP_MASK = 8'h10;
+
   // pairing checker (mirrors p5model can_pair RULES, not its formula): both
   // simple, V is a V-candidate, U is a U-member, no disp+imm, no prefixes
   // (the fast path only decodes unprefixed forms), no RAW/WAW on GP regs
-  // (ESP/flags excepted -> already excluded from reads/writes masks).
+  // (ESP RAW included; only an ESP-only WAW is deliberately retained).
   function automatic logic fp_can_pair(input fpd_t u, input fpd_t v);
     begin
       if (!u.simple || !v.simple) return 1'b0;
       if (!u.pairs_first || !v.pairs_second) return 1'b0;
       if (u.disp_imm || v.disp_imm) return 1'b0;
-      if ((v.reads & u.writes) != 8'd0) return 1'b0;   // RAW
-      if ((v.writes & u.writes) != 8'd0) return 1'b0;  // WAW
+      // V reads pre-issue architectural registers, so every RAW dependency
+      // (including ESP) must serialize.  Existing stack write/write pairing
+      // is safe because V does not consume U's result; retain it for density.
+      if ((v.reads & u.writes) != 8'd0) return 1'b0;   // RAW, incl. ESP
+      if ((v.writes & (u.writes & ~ESP_MASK)) != 8'd0)
+        return 1'b0;                                    // WAW, except ESP-only
       // a load in the V slot is allowed in P5 only as the leading member; keep
       // V-candidate loads out of the pair to stay conservative+correct.
       if (v.is_load) return 1'b0;

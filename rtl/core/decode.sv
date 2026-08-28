@@ -416,9 +416,11 @@ module decode
     end
   endfunction
 
-  // one-hot of a 3-bit GP index, ESP (index 4) excluded from dep masks.
+  // One-hot of a 3-bit GP index.  ESP must participate in the dependency masks:
+  // V reads the pre-issue register file and there is no stack-pointer bypass.
+  // issue_uv retains the deliberate ESP-WAW-only pairing exception separately.
   function automatic logic [7:0] _onehot(input logic [2:0] r);
-    _onehot = (r==R_ESP) ? 8'd0 : (8'd1 << r);
+    _onehot = 8'd1 << r;
   endfunction
 
   // Drive the decoded-uop output combinationally. Bit-identical to the in-line

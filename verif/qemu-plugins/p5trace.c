@@ -77,7 +77,9 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
 /* GP register bit indices: a c d b sp bp si di */
 enum { R_A, R_C, R_D, R_B, R_SP, R_BP, R_SI, R_DI, R_N };
-#define GP_NOSP_MASK (0xFFu & ~(1u << R_SP))   /* deps ignore ESP (stack engine) */
+/* Ventium has no U-to-V stack-pointer bypass.  RAW sees every GP register;
+ * ESP remains excluded only from WAW so the timing producer matches issue_uv. */
+#define GP_WAW_NOESP_MASK (0xFFu & ~(1u << R_SP))
 
 /* Pairing class. */
 typedef enum { NP=0, UV, PU, PV } pclass_t;
@@ -397,8 +399,9 @@ static bool can_pair(insn_t *u, insn_t *v)
     if (!u || !u->pairs_first || !v->pairs_second) return false;
     if (u->has_disp_imm || v->has_disp_imm) return false;
     if (u->prefixes || v->prefixes) return false;     /* prefixed => U-only */
-    uint8_t wU = u->writes & GP_NOSP_MASK;             /* deps ignore ESP, flags */
-    if ((v->reads & wU) || (v->writes & wU)) return false; /* RAW / WAW */
+    uint8_t raw = v->reads & u->writes;                 /* RAW includes ESP */
+    uint8_t waw = v->writes & (u->writes & GP_WAW_NOESP_MASK);
+    if (raw || waw) return false;
     return true;
 }
 
