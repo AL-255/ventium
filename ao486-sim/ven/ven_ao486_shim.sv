@@ -61,10 +61,12 @@ module ven_ao486_shim
     // ---- on-die debug bundle (VEN_DBG_CORE): packed to keep the ao486 `system` boundary small.
     // dbg_bus (up):   [0]inta [1]retire_valid [33:2]eip [49:34]cs [81:50]esp [113:82]eflags
     //                 [119:114]state [127:120]int_vec [159:128]fault_pc [191:160]cr0 [192]rd_valid
-    //                 [224:193]rd_addr [256:225]rd_data [257]cmp_freeze
-    // dbg_cmp (down): [31:0]cmp_cfg [63:32]cmp_range  (PS-programmable retire comparator)
-    output      [257:0] dbg_bus,
-    input       [63:0]  dbg_cmp
+    //                 [224:193]rd_addr [256:225]rd_data [257]cmp_freeze [258]halted
+    //                 [290:259]selected architectural-state word
+    // dbg_cmp (down): [31:0]cmp_cfg [63:32]cmp_range [64]halt_req [65]step [66]bp_en
+    //                 [98:67]bp_addr [99]bp_clr [106:100]arch_sel
+    output      [290:0] dbg_bus,
+    input       [127:0] dbg_cmp
 );
 
     // KV260 build offsets the AXI address by REMAP_BASE and folds to 256 MiB
@@ -235,20 +237,38 @@ module ven_ao486_shim
         , .dbg_retire_valid(d_retire_valid), .dbg_eip(d_eip), .dbg_cs(d_cs), .dbg_esp(d_esp),
         .dbg_eflags(d_eflags), .dbg_state(d_state), .dbg_int_vec(d_int_vec), .dbg_fault_pc(d_fault_pc),
         .dbg_cr0(d_cr0), .dbg_rd_valid(d_rd_valid), .dbg_rd_addr(d_rd_addr), .dbg_rd_data(d_rd_data),
-        .dbg_cmp_cfg(dbg_cmp[31:0]), .dbg_cmp_range(dbg_cmp[63:32]), .dbg_cmp_freeze(d_cmp_freeze)
+        .dbg_cmp_cfg(dbg_cmp[31:0]), .dbg_cmp_range(dbg_cmp[63:32]), .dbg_cmp_freeze(d_cmp_freeze),
+        .dbg_halt_req(dbg_cmp[64]), .dbg_step(dbg_cmp[65]), .dbg_bp_en(dbg_cmp[66]),
+        .dbg_bp_addr(dbg_cmp[98:67]), .dbg_bp_clr(dbg_cmp[99]),
+        .dbg_arch_sel(dbg_cmp[106:100]), .dbg_arch_data(d_arch_data), .dbg_halted(d_halted)
 `endif
     );
 `ifdef VEN_DBG_CORE
     // debug taps + pack into dbg_bus (layout documented at the port)
-    logic        d_retire_valid, d_rd_valid, d_cmp_freeze;
-    logic [31:0] d_eip, d_esp, d_eflags, d_fault_pc, d_cr0, d_rd_addr, d_rd_data;
+    logic        d_retire_valid, d_rd_valid, d_cmp_freeze, d_halted;
+    logic [31:0] d_eip, d_esp, d_eflags, d_fault_pc, d_cr0, d_rd_addr, d_rd_data, d_arch_data;
     logic [15:0] d_cs;
     logic [5:0]  d_state;
     logic [7:0]  d_int_vec;
-    assign dbg_bus = { d_cmp_freeze, d_rd_data, d_rd_addr, d_rd_valid, d_cr0, d_fault_pc,
+    assign dbg_bus = { d_arch_data, d_halted, d_cmp_freeze, d_rd_data, d_rd_addr, d_rd_valid, d_cr0, d_fault_pc,
                        d_int_vec, d_state, d_eflags, d_esp, d_cs, d_eip, d_retire_valid, v_inta };
+`ifndef SYNTHESIS
+    // Stall watchdog (sim-only): if the core goes many cycles without a retire,
+    // dump the FSM/fault taps so a livelock is diagnosable from the log.
+    integer stall_n;
+    always @(posedge clk) begin
+        if (!rst_n) stall_n <= 0;
+        else if (d_retire_valid) stall_n <= 0;
+        else begin
+            stall_n <= stall_n + 1;
+            if (stall_n == 1000000 || (stall_n > 1000000 && (stall_n % 5000000) == 0))
+                $display("[STALL] no retire for %0d cyc: state=%0d cs=%04x:eip=%08x fault_pc=%08x int_vec=%02x cr0=%08x rd_v=%b rd_addr=%08x",
+                         stall_n, d_state, d_cs, d_eip, d_fault_pc, d_int_vec, d_cr0, d_rd_valid, d_rd_addr);
+        end
+    end
+`endif
 `else
-    assign dbg_bus = 258'd0;
+    assign dbg_bus = 291'd0;
 `endif
 
     // ---------------------------------------------- AXI4 → Avalon bridge (+A20/remap)

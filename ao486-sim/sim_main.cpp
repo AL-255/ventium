@@ -49,6 +49,10 @@ static int      ide_dwords = 0;        // 16-bit words to stream to the buffer
 static int      ide_in_reset = 0;
 static uint64_t ide_served = 0;
 static unsigned ide_curreq = 0;
+// PC-trajectory disk-idle trigger counter, bumped by ps/ide.cpp on every disk
+// read. The trace hooks that consume it live in the ventium-cosim main
+// (ven/sim_ven.cpp); this legacy main only needs the definition to link.
+volatile unsigned long g_disk_reads = 0;
 
 Vsystem  *top = nullptr;   // non-static: ps_shim.cpp drives mgmt via this
 static uint64_t g_polls = 0;

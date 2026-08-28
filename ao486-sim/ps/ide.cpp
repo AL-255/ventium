@@ -909,6 +909,30 @@ static void process_write(ide_config *ide, int multi)
 	uint32_t cnt = 1;
 	uint16_t ide_req;
 
+	// A timedemo image is intentionally disposable.  On the real board a
+	// particular late BIOS PIO write reaches the command register but never
+	// receives DRQ, leaving the PS daemon in the transfer wait and the guest in
+	// its INT 13h retry loop.  Keep the normal, data-preserving PIO path as the
+	// default.  The explicit environment switch is only for read-mostly
+	// diagnostic workloads: complete the whole ATA request without modifying
+	// the backing image, while preserving the guest-visible LBA/count result.
+	// This is deliberately scoped here (rather than changing the RTL device)
+	// and excludes the MiSTer image-mount pseudo-command.
+	const char *drop_writes = getenv("VEN_IDE_DROP_WRITES");
+	if (ide->regs.cmd != 0xFA && drop_writes && drop_writes[0] &&
+		strcmp(drop_writes, "0") != 0)
+	{
+		uint32_t sectors = ide->regs.sector_count ? ide->regs.sector_count : 256;
+		printf("[VEN-DROP-WRITE] cmd=%02x lba=%u sectors=%u (disposable workload)\n",
+		       ide->regs.cmd, lba, sectors);
+		put_lba(ide, lba + sectors);
+		ide->regs.sector_count = 0;
+		ide->state = IDE_STATE_IDLE;
+		ide->regs.status = ATA_STATUS_RDY | ATA_STATUS_IRQ;
+		ide_set_regs(ide);
+		return;
+	}
+
 	ide->null = (ide->regs.cmd != 0xFA) ? !FileSeekLBA(ide->drive[ide->regs.drv].f, (lba <= ide->drive[ide->regs.drv].offset) ? 0 : (lba - ide->drive[ide->regs.drv].offset)) : 1;
 	uint8_t irq = 0;
 

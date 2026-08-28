@@ -1,0 +1,1110 @@
+diff --git a/rtl/ao486/autogen/decode_commands.v b/rtl/ao486/autogen/decode_commands.v
+index f77d94b..799545f 100644
+--- a/rtl/ao486/autogen/decode_commands.v
++++ b/rtl/ao486/autogen/decode_commands.v
+@@ -200,6 +200,7 @@ assign dec_cmd =
+     (cond_63 && ~cond_22)? ( `CMD_LGDT) :
+     (cond_64 && ~cond_22)? ( `CMD_LIDT) :
+     (cond_65 && ~cond_4)? ( `CMD_PUSHA) :
++    (dec_ready_modregrm_one && decoder[7:0]==8'hDF && decoder[15:8]==8'hE0 && ~cond_4)? ( `CMD_FNSTSW) :
+     (cond_66 && ~cond_4)? ( `CMD_fpu) :
+     (cond_67 && ~cond_4)? ( `CMD_fpu) :
+     (cond_68 && ~cond_4)? ( `CMD_SETcc) :
+diff --git a/rtl/ao486/autogen/defines.v b/rtl/ao486/autogen/defines.v
+index d06999b..0744f31 100644
+--- a/rtl/ao486/autogen/defines.v
++++ b/rtl/ao486/autogen/defines.v
+@@ -446,4 +446,5 @@
+ `define CMDEX_CALL_Ap_STEP_1 4'd6
+ `define CMDEX_CALL_Ap_STEP_0 4'd3
+ `define CMD_INVD 7'd9
++`define CMD_FNSTSW 7'd118
+ `define CMDEX_PUSH_immediate_se 4'd1
+diff --git a/rtl/ao486/autogen/execute_commands.v b/rtl/ao486/autogen/execute_commands.v
+index 691a17a..2c45942 100644
+--- a/rtl/ao486/autogen/execute_commands.v
++++ b/rtl/ao486/autogen/execute_commands.v
+@@ -1055,7 +1055,9 @@ assign exe_glob_descriptor_set =
+     (cond_184 && ~cond_44)? (`TRUE) :
+     (cond_185)? ( exe_ready) :
+     1'd0;
++import "DPI-C" function int ao486_fpu_status();
+ assign exe_result =
++    (exe_cmd == `CMD_FNSTSW)? ( { 16'd0, ao486_fpu_status()[15:0] } ) :
+     (cond_0)? (  exe_arith_add[31:0]) :
+     (cond_1)? ( exe_buffer) :
+     (cond_48)? ( { 16'd0, e_seg_by_cmdex }) :
+diff --git a/rtl/ao486/autogen/read_commands.v b/rtl/ao486/autogen/read_commands.v
+index 2722747..85c9aea 100644
+--- a/rtl/ao486/autogen/read_commands.v
++++ b/rtl/ao486/autogen/read_commands.v
+@@ -454,6 +454,7 @@ assign address_stack_for_ret_first =
+     (cond_158)? (`TRUE) :
+     1'd0;
+ assign rd_req_eax =
++    (rd_cmd == `CMD_FNSTSW)? (`TRUE) :
+     (cond_67)? (`TRUE) :
+     (cond_107)? (`TRUE) :
+     (cond_127)? (`TRUE) :
+diff --git a/rtl/ao486/autogen/write_commands.v b/rtl/ao486/autogen/write_commands.v
+index b97e9d9..3767f49 100644
+--- a/rtl/ao486/autogen/write_commands.v
++++ b/rtl/ao486/autogen/write_commands.v
+@@ -555,6 +555,7 @@ assign ldtr_cache_to_reg =
+     (cond_242 && cond_243)? (         glob_descriptor) :
+     ldtr_cache;
+ assign eax_to_reg =
++    (wr_cmd == `CMD_FNSTSW)? ( { eax[31:16], result[15:0] }) :
+     (cond_66)? ( { eax[31:16], result[15:0] }) :
+     (cond_100)? ( (wr_is_8bit || wr_operand_16bit)? { eax[31:16], result[15:0] } : result) :
+     (cond_129 && ~cond_5)? ( (wr_is_8bit)? { eax[31:8], result2[7:0] } : (wr_operand_16bit)? { eax[31:16], result2[15:0] } : result2) :
+diff --git a/rtl/ao486/pipeline/read.v b/rtl/ao486/pipeline/read.v
+index f0cb4c6..a7e53e0 100644
+--- a/rtl/ao486/pipeline/read.v
++++ b/rtl/ao486/pipeline/read.v
+@@ -375,7 +375,17 @@ wire rd_dst_is_eip;
+ 
+ //------------------------------------------------------------------------------
+ 
+-assign rd_ready = ~(rd_reset) && ~(rd_waiting) && rd_cmd != `CMD_NULL && ~(exe_busy);
++// Co-simulated x87 FPU operand-address fix: CMD_fpu (ESC opcodes D8-DF) have no <read>
++// microcode step, so without this a memory ESC op leaves the read stage in a single cycle
++// and latches exe_linear from the still-stale, 1-cycle-lagged registered rd_address_effective
++// (= the PREVIOUS read-stage op's effective address). The software FPU model then loads/
++// stores at the wrong guest address, corrupting descriptors/stack and crashing DOS-Quake.
++// Hold a memory-operand ESC op one extra cycle until rd_address_effective_ready, so the
++// registered rd_address_effective settles to THIS op's EA before exe_linear latches it.
++// (Ordinary memory instructions already dwell like this via their read handshake.)
++wire rd_fpu_ea_wait = (rd_cmd == `CMD_fpu) && (rd_modregrm_mod != 2'b11) && ~(rd_address_effective_ready);
++
++assign rd_ready = ~(rd_reset) && ~(rd_waiting) && rd_cmd != `CMD_NULL && ~(exe_busy) && ~(rd_fpu_ea_wait);
+ 
+ assign rd_busy  = rd_waiting || (rd_ready == `FALSE && rd_cmd != `CMD_NULL);
+ 
+diff --git a/rtl/cache/l1_icache.v b/rtl/cache/l1_icache.v
+index 9e2eaa1..381eb28 100644
+--- a/rtl/cache/l1_icache.v
++++ b/rtl/cache/l1_icache.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ 
+ module l1_icache
+ (
+diff --git a/rtl/cache/l2_cache.v b/rtl/cache/l2_cache.v
+index 846d737..6af3acb 100644
+--- a/rtl/cache/l2_cache.v
++++ b/rtl/cache/l2_cache.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ 
+ module l2_cache #(parameter ADDRBITS = 24)
+ (
+@@ -6,6 +7,13 @@ module l2_cache #(parameter ADDRBITS = 24)
+ 
+ 	input         DISABLE,
+ 
++	// FPU co-sim cache-line invalidation:
++	// pulse l2_inv_pulse high for one cycle to mark all ways of the set
++	// selected by l2_inv_addr's line-index bits as needing-refetch.
++	// l2_inv_addr is in the same units as read_addr (64-bit-beat address = byte_addr>>3).
++	input         l2_inv_pulse,
++	input [ADDRBITS:0] l2_inv_addr,
++
+ 	// CPU bus, master, 32bit
+ 	input  [29:0] CPU_ADDR,
+ 	input  [31:0] CPU_DIN,
+@@ -64,6 +72,83 @@ wire   [ADDRBITS-RAMSIZEBITS:0] tags_read[0:ASSOCIATIVITY-1];
+ reg                             update_tag_we;
+ reg    [LINE_BITS-1:0]          update_tag_addr;
+ 
++// REVIEW2 H-20: the old comment said "Harness only pulses when the CPU bus is idle,
++// so the two never collide in practice" -- and the interface does not enforce that.
++// The actual co-sim generates the pulse immediately after FPU store processing
++// (ao486-sim/sim_main.cpp) with NO L2-idle handshake, so a collision with
++// update_tag_we silently DROPPED the invalidation and left stale data valid. Test-
++// harness scheduling is not a coherence protocol.
++//
++// One-deep skid: an invalidation that collides is HELD and applied on the next cycle
++// the state machine is not writing tags. Invalidation pulses are rare relative to tag
++// writes, so one entry is sufficient; a second collision while one is pending is
++// reported in simulation rather than silently dropped (see below).
++// REVIEW1_Aug2 H-09: the one-entry skid above LOST invalidations two distinct ways,
++// and a $display is not a fix:
++//
++//   1. a second colliding pulse OVERWROTE l2_inv_pend_addr -- the older set was
++//      never invalidated;
++//   2. worse and quieter: with the port free and one already pending, the mux picked
++//      the FRESH address (l2_inv_pulse ? ...) while the sequential block took its
++//      `else if (l2_inv_pend && !update_tag_we)` arm and cleared l2_inv_pend. The
++//      pending set was retired WITHOUT ever being applied. No warning covered this one.
++//
++// The review's point is that a 1-deep overwriteable skid cannot be lossless for
++// unconstrained pulses, and there is no ready/credit signal to constrain them.
++//
++// FIX: a pending BITMAP, one bit per set. This works because invalidation here is
++// IDEMPOTENT and SET-INDEXED -- it just forces the dirty bits of every way in one set
++// -- so two invalidations of the same set collapse to one with no loss of meaning, and
++// the state needed is one bit per set rather than a queue of addresses. LINES is 128,
++// so this is a 128-bit register and a 128-entry priority encoder.
++//
++// It is lossless for ANY pulse rate without a producer contract: every pulse either
++// applies in the same cycle or sets a bit, and a bit is only ever cleared by being
++// applied. Backpressure is unnecessary; pulses arriving faster than free tag-write
++// cycles are DELAYED, never dropped, which is the semantic the old code broke.
++reg    [LINES-1:0]              l2_inv_pend_set;
++wire   [LINE_BITS-1:0]          l2_inv_addr_idx = l2_inv_addr[LINEMASKMSB:LINEMASKLSB];
++wire                            l2_inv_any = |l2_inv_pend_set;
++
++// lowest pending set index (128-wide priority encoder)
++reg    [LINE_BITS-1:0]          l2_inv_drain_idx;
++integer                         l2_inv_i;
++always @* begin
++	l2_inv_drain_idx = {LINE_BITS{1'b0}};
++	for (l2_inv_i = LINES-1; l2_inv_i >= 0; l2_inv_i = l2_inv_i - 1)
++		if (l2_inv_pend_set[l2_inv_i]) l2_inv_drain_idx = l2_inv_i[LINE_BITS-1:0];
++end
++
++// A fresh pulse takes the port directly only when nothing is queued -- otherwise the
++// QUEUE drains first, so invalidations cannot be starved by a steady pulse stream
++// (which is how loss case 2 hid: the fresh one always won the mux).
++wire                            l2_inv_apply_fresh = !update_tag_we && l2_inv_pulse && !l2_inv_any;
++wire                            l2_inv_apply_pend  = !update_tag_we && l2_inv_any;
++
++always @(posedge CLK) begin
++	if (RESET) begin
++		l2_inv_pend_set <= {LINES{1'b0}};
++	end else begin
++		// drain first, then enqueue: if both target the SAME set in one cycle the
++		// enqueue wins (last NBA), so the invalidation is retried rather than lost.
++		// A redundant re-invalidation is harmless; a dropped one is not.
++		if (l2_inv_apply_pend)                    l2_inv_pend_set[l2_inv_drain_idx] <= 1'b0;
++		if (l2_inv_pulse && !l2_inv_apply_fresh)  l2_inv_pend_set[l2_inv_addr_idx]  <= 1'b1;
++	end
++end
++
++// An invalidation happens this cycle if a fresh pulse takes a free port, or a queued
++// one is drained.
++wire                            l2_inv_go   = l2_inv_apply_fresh || l2_inv_apply_pend;
++wire   [LINE_BITS-1:0]          l2_inv_go_a = l2_inv_apply_fresh ? l2_inv_addr_idx
++                                                                 : l2_inv_drain_idx;
++
++// dirtyram write-port mux: state-machine tag write still has the port; an invalidation
++// that loses now WAITS instead of vanishing.
++wire   [ASSOCIATIVITY-1:0]      dirtyram_data   = update_tag_we ? tags_dirty_in : (l2_inv_go ? {ASSOCIATIVITY{1'b1}} : tags_dirty_in);
++wire   [LINE_BITS-1:0]          dirtyram_wraddr = update_tag_we ? update_tag_addr : l2_inv_go_a;
++wire                            dirtyram_wren   = update_tag_we | l2_inv_go;
++
+ reg    [ASSO_BITS-1:0] LRU_in [0:ASSOCIATIVITY-1];
+ reg    [ASSO_BITS-1:0] LRU_out[0:ASSOCIATIVITY-1];
+ reg                             LRU_we;
+@@ -497,11 +582,11 @@ altdpram #(
+ dirtyram (
+ 	.inclock(CLK),
+ 	.outclock(CLK),
+-	
+-	.data(tags_dirty_in),
++
++	.data(dirtyram_data),
+ 	.rdaddress(read_addr[LINEMASKMSB:LINEMASKLSB]),
+-	.wraddress(update_tag_addr),
+-	.wren(update_tag_we),
++	.wraddress(dirtyram_wraddr),
++	.wren(dirtyram_wren),
+ 	.q(tags_dirty_out)
+ );
+ 
+diff --git a/rtl/common/simple_fifo.v b/rtl/common/simple_fifo.v
+index 7e2da82..a804bf7 100644
+--- a/rtl/common/simple_fifo.v
++++ b/rtl/common/simple_fifo.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/common/simple_fifo_mlab.v b/rtl/common/simple_fifo_mlab.v
+index d3f4770..91d669b 100644
+--- a/rtl/common/simple_fifo_mlab.v
++++ b/rtl/common/simple_fifo_mlab.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/common/simple_mult.v b/rtl/common/simple_mult.v
+index 8aaaf82..a61ffba 100644
+--- a/rtl/common/simple_mult.v
++++ b/rtl/common/simple_mult.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/common/simple_ram.v b/rtl/common/simple_ram.v
+index 388b0ba..604e294 100644
+--- a/rtl/common/simple_ram.v
++++ b/rtl/common/simple_ram.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/common/simple_rom.v b/rtl/common/simple_rom.v
+index b0c52d6..d5f9cf7 100644
+--- a/rtl/common/simple_rom.v
++++ b/rtl/common/simple_rom.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/common/simple_single_rom.v b/rtl/common/simple_single_rom.v
+index 13fa34c..fca66b3 100644
+--- a/rtl/common/simple_single_rom.v
++++ b/rtl/common/simple_single_rom.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/hps_ext.v b/rtl/hps_ext.v
+index dbdb2cc..54f1f1f 100644
+--- a/rtl/hps_ext.v
++++ b/rtl/hps_ext.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ //
+ // hps_ext for ao486
+ //
+diff --git a/rtl/soc/cdda.v b/rtl/soc/cdda.v
+index 0a04f40..87d8e08 100644
+--- a/rtl/soc/cdda.v
++++ b/rtl/soc/cdda.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ 
+ module cdda #(parameter CLK_AUDIO_RATE)
+ (
+diff --git a/rtl/soc/dma.v b/rtl/soc/dma.v
+index 6c0b096..c33e370 100644
+--- a/rtl/soc/dma.v
++++ b/rtl/soc/dma.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * Copyright (C) 2017-2020 Alexey Melnikov
+diff --git a/rtl/soc/floppy.v b/rtl/soc/floppy.v
+index 2d8d08a..db525ba 100644
+--- a/rtl/soc/floppy.v
++++ b/rtl/soc/floppy.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * Copyright (c) 2020, Alexey Melnikov
+diff --git a/rtl/soc/ide.v b/rtl/soc/ide.v
+index 3efe611..9fc1145 100644
+--- a/rtl/soc/ide.v
++++ b/rtl/soc/ide.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2020, Alexey Melnikov
+  * All rights reserved.
+@@ -31,6 +32,17 @@ module ide
+ 
+ 	output reg        irq,
+ 	output            drq,
++
++	// Ventium bug#7 DEBUG (task #50): the guest sleeps in a DOS `sti; HLT` loop after a
++	// completed read, and the two bits that can suppress the completion IRQ live HERE and
++	// are invisible to the PS (ide.v's mgmt read mux, lines ~192-197, returns only
++	// sector/cylinder/count/cmd). Both come from one guest write to Device Control
++	// (io_address 14 == port 0x3F6): bit1 -> disable_irq (nIEN), bit2 -> sw_reset (SRST),
++	// and `reset = ~rst_n | sw_reset` holds the WHOLE device in reset. Export them so the
++	// debug block can latch {disable_irq, sw_reset, irq} into FRZINFO's spare bits [30:24].
++	// Pure observers — no behavioural change.
++	output            dbg_disable_irq,
++	output            dbg_sw_reset,
+ 	
+ 	input             use_fast, // 1 - supports fast read mode
+ 	output            no_data,  // pause for system when no data is available in fast mode
+@@ -147,22 +159,31 @@ always @(posedge clk) begin
+ 	if(reset)                                status <= 8'h80;
+ 	else if(mgmt_write && mgmt_address == 5) status <= {mgmt_writedata[15:14],1'b0,mgmt_writedata[12:11],2'b00,mgmt_writedata[8]};
+ 	else if(io_wr && io_address == 7)        status <= 8'h80;
+-	else if(io_done & drq & last_read)       status <= 8'h40;
+-	else if(io_done & drq)                   status <= 8'h80;
++	// `io_done` remains high until the daemon publishes the next block through
++	// mgmt word 5.  Treating that level as a completion in several independent
++	// always blocks races the terminal bit: one block clears last_read while
++	// another decides whether to request another block.  Consume one owned
++	// completion edge instead, so status and request use the same terminal
++	// classification for the whole completed transfer.
++	// A terminal PIO block only withdraws DRQ.  Preserve the published drive
++	// state (in particular DRDY/DSC): hard-coding 40h discarded valid ATA
++	// state and made a ready/seek-complete drive look partially not-ready.
++	else if(block_done_pending & block_done_last) status <= block_done_status;
++	else if(block_done_pending)                   status <= 8'h80;
+ end
+ 
+ reg last_read = 0;
+ always @(posedge clk) begin
+ 	if(reset)                                last_read <= 0;
+ 	else if(mgmt_write && mgmt_address == 5) last_read <= mgmt_writedata[9];
+-	else if(io_done & drq)                   last_read <= 0;
++	else if(block_done_pending)              last_read <= 0;
+ end
+ 
+ reg fast_read = 0;
+ always @(posedge clk) begin
+ 	if(reset)                                fast_read <= 0;
+ 	else if(mgmt_write && mgmt_address == 5) fast_read <= mgmt_writedata[13];
+-	else if(io_done & drq)                   fast_read <= 0;
++	else if(block_done_pending)              fast_read <= 0;
+ end
+ 
+ always @(posedge clk) begin
+@@ -170,19 +191,20 @@ always @(posedge clk) begin
+ 	else if(sw_reset)                        io_wait <= use_wait;
+ 	else if(mgmt_write && mgmt_address == 5) io_wait <= 1'd0;
+ 	else if(io_wr && io_address == 7)        io_wait <= use_wait;
+-	else if(io_done & drq)                   io_wait <= use_wait;
++	else if(block_done_pending)              io_wait <= use_wait;
+ end
+ 
+ always @(posedge clk) begin
+ 	if(reset)                                request <= 3'b110; // reset
+ 	else if(mgmt_write && mgmt_address == 5) request <= 3'b000;
+ 	else if(io_wr && io_address == 7)        request <= 3'b100; // new command 
+-	else if(io_done & drq & ~last_read)      request <= 3'b101; // data send/recv
++	else if(block_done_pending & ~block_done_last) request <= 3'b101; // data send/recv
+ end
+ 
+ always @(posedge clk) begin
+ 	if(reset)                                                                      irq <= 1'b0;
+ 	else if(mgmt_write && mgmt_address == 5 && mgmt_writedata[10] && ~disable_irq) irq <= 1'b1;
++	else if(block_done_pending && block_done_last && block_done_irq && ~disable_irq) irq <= 1'b1;
+ 	else if((io_read | io_wr) && io_address == 7)                                  irq <= 1'b0;
+ end
+ 
+@@ -194,6 +216,27 @@ always @(posedge clk) begin
+ 			3: mgmt_readdata <= {sector[15:8], sector_count[15:8]};
+ 			4: mgmt_readdata <= {cylinder[31:16]};
+ 			5: mgmt_readdata <= {cmd, drv_addr};
++			// VEN bug#7 (task #50): IRQ-suppression state, otherwise INVISIBLE to the PS.
++			// The guest sleeps in a DOS `sti; HLT` loop after a COMPLETED read, so the
++			// question is whether the completion IRQ was raised, masked, or gated away.
++			// Both suppressors come from one guest write to Device Control (io_address 14
++			// == port 0x3F6): bit1 -> disable_irq (nIEN), bit2 -> sw_reset (SRST, which
++			// gates the WHOLE device via reset = ~rst_n | sw_reset). Read-only observers.
++			// Layout: [0]=irq  [1]=disable_irq(nIEN)  [2]=sw_reset(SRST)
++			6: mgmt_readdata <= {13'd0, sw_reset, disable_irq, irq};
++			8: mgmt_readdata <= ven_dbg_w0;     // VEN DIAG: io_readdata @word0 (expect 0040)
++			9: mgmt_readdata <= ven_dbg_w1;     // VEN DIAG: io_readdata @word1 cyl (expect 001f)
++		   10: mgmt_readdata <= ven_dbg_w3;     // VEN DIAG: io_readdata @word3 heads (expect 0010)
++		   11: mgmt_readdata <= ven_dbg_w6;     // VEN DIAG: io_readdata @word6 spt (expect 0100)
++		   12: mgmt_readdata <= ven_dbg_rdcnt;  // VEN DIAG: count of core data-port reads
++		   13: mgmt_readdata <= ven_dbg_fm1;    // VEN DIAG2: io_readdata ~S_READ_W2 (should be 0040)
++		   14: mgmt_readdata <= ven_dbg_f0;     // VEN DIAG2: io_readdata ~S_READ_CHK-1
++		   // VEN FIX (Win95 disk-WRITE corruption): cases 15/16/17 REMOVED. mgmt_address is [3:0], so
++		   // `15:` SHADOWED address 0xF — the BUFFER access address — and every ide_recvbuf word
++		   // returned the ven_dbg_fp1 diag register (a constant, e.g. 0x0040/0x1c38) instead of the
++		   // buffer: the guest's disk writes reached the file as ONE REPEATED WORD, overwriting the
++		   // FAT root directory. (16/17 could never match a 4-bit address — dead code.) Address 0xF
++		   // now falls to the default arm = the buffer word at mgmt_cnt, as the protocol requires.
+ 	default: mgmt_readdata <= (mgmt_cnt[0]) ? buf_readdata[31:16] : buf_readdata[15:0];
+ 	endcase
+ end
+@@ -223,6 +266,8 @@ always @(posedge clk) begin
+ end
+ 
+ reg sw_reset;
++assign dbg_disable_irq = disable_irq;   // bug#7 observers
++assign dbg_sw_reset    = sw_reset;
+ always @(posedge clk) begin
+ 	if(~rst_n)                         sw_reset <= 1'b0;
+ 	else if(io_wr && io_address == 14) sw_reset <= io_writedata[2];
+@@ -246,6 +291,56 @@ wire       io_done = (blk_size && io_cnt >= blk_size);
+ reg [13:0] io_cnt;
+ wire       io_stb = read_data_io | write_data_io;
+ 
++// One completion record per daemon-published block.  The terminal decision is
++// sampled exactly once at io_done, then the status/request consumers use that
++// record on later clocks.  Do not consume the io_done level directly: mgmt
++// word-5 publication and the last-read clear are independent sequential
++// actions, so a level lets synthesis/order decide whether a terminal block is
++// mistaken for a continuation.  Word 5 is the ownership handoff for the next
++// block; it clears the old record and rearms the detector.
++reg block_done_seen;
++reg block_done_pending;
++reg block_done_last;
++reg block_done_irq;
++reg [7:0] block_done_status;
++always @(posedge clk) begin
++	if(reset) begin
++		block_done_seen    <= 1'b0;
++		block_done_pending <= 1'b0;
++		block_done_last    <= 1'b0;
++		block_done_irq     <= 1'b0;
++		block_done_status  <= 8'h00;
++	end
++	else if(mgmt_write && mgmt_address == 5) begin
++		block_done_seen    <= 1'b0;
++		block_done_pending <= 1'b0;
++		// ATA_STATUS_IRQ is transported out-of-band (word-5 bit 10), not in
++		// the visible status register.  Retain it with this descriptor until
++		// its terminal PIO drain completes.
++		block_done_irq     <= mgmt_writedata[10];
++	end
++	// A new command supersedes a completed descriptor even before the daemon
++	// publishes its next word-5 descriptor.  Keep `seen` set: io_done still
++	// belongs to the old buffer and must not be consumed a second time.
++	else if(io_wr && io_address == 7) begin
++		block_done_pending <= 1'b0;
++	end
++	else if(io_done & drq & ~block_done_seen) begin
++		block_done_seen    <= 1'b1;
++		block_done_pending <= 1'b1;
++		block_done_last    <= last_read;
++		// The daemon's word-5 state is already latched in status.  Completion
++		// changes only the data-ready ownership, so clear DRQ and retain DRDY,
++		// DSC, ERR and the remaining ATA status bits as one immutable record.
++		block_done_status  <= status & ~8'h08;
++	end
++	// `pending` is a one-clock dispatch record.  `seen` remains set until word
++	// 5 ownership changes, preventing the held io_done level from replaying it.
++	else if(block_done_pending) begin
++		block_done_pending <= 1'b0;
++	end
++end
++
+ always @(posedge clk) begin
+ 	reg old_stb, r_32;
+ 	old_stb <= io_stb;
+@@ -310,5 +405,55 @@ dpram #(12,16) io_buf1
+ );
+ 
+ //------------------------------------------------------------------------------
++// VEN DIAG: observe the CORE's IDE data-port reads on real hardware. read_data_io is
++// the core's data-FIFO read strobe; io_readdata is what the iobus latches for the core;
++// buf_q is the raw dpram port-B output. If rdcnt advances but iord==0 while bufq!=0 the
++// io_readdata mux (drq gate) is dropping it; if bufq==0 too the BRAM port-B read is dead.
++// Capture the io_readdata the core takes at SPECIFIC word indices (0,1,3,6 = the identify
++// geometry words config/cyl/heads/spt), so a zero vs a shift vs the correct value is visible.
++reg [15:0] ven_dbg_w0 = 0, ven_dbg_w1 = 0, ven_dbg_w3 = 0, ven_dbg_w6 = 0, ven_dbg_rdcnt = 0;
++reg        ven_dbg_rd_d = 0;
++always @(posedge clk) begin
++	ven_dbg_rd_d <= read_data_io;
++	if (reset) ven_dbg_rdcnt <= 0;
++	else begin
++		if (read_data_io) case (io_cnt)
++			14'd0: ven_dbg_w0 <= io_readdata[15:0];
++			14'd1: ven_dbg_w1 <= io_readdata[15:0];
++			14'd3: ven_dbg_w3 <= io_readdata[15:0];
++			14'd6: ven_dbg_w6 <= io_readdata[15:0];
++			default: ;
++		endcase
++		if (read_data_io & ~ven_dbg_rd_d) ven_dbg_rdcnt <= ven_dbg_rdcnt + 1'b1;
++	end
++end
++
++// VEN DIAG 2: what does the CORE actually RECEIVE? The write-beat ring proved the core
++// STORES zero from the identify -> io_rdata=0 at the core even though io_readdata (above)
++// reads correct DURING read_data_io. The iobus latches io_readdata into cpu_read_data at
++// S_READ_CHK (the cycle read_data_io deasserts). Capture io_readdata across THREE phases
++// around that falling edge for the FIRST data read, so the valid window vs the latch cycle
++// is visible: fall-1 (~S_READ_W2), fall (~S_READ_CHK), fall+1. Plus the raw buf_q & drq so
++// a dead port-B vs a mis-timed latch vs a drq-gate drop are distinguishable.
++reg [15:0] ven_dbg_iord_d1 = 0, ven_dbg_iord_d2 = 0;
++reg [15:0] ven_dbg_fm1 = 0, ven_dbg_f0 = 0, ven_dbg_fp1 = 0;
++reg [15:0] ven_dbg_bufq0 = 0;
++reg [3:0]  ven_dbg_flags = 0;
++reg [13:0] ven_dbg_fn = 0;
++always @(posedge clk) begin
++	ven_dbg_iord_d1 <= io_readdata[15:0];
++	ven_dbg_iord_d2 <= ven_dbg_iord_d1;
++	if (reset) ven_dbg_fn <= 0;
++	else if (ven_dbg_rd_d & ~read_data_io) begin   // read_data_io just fell = iobus S_READ_CHK region
++		if (ven_dbg_fn == 14'd0) begin
++			ven_dbg_fm1   <= ven_dbg_iord_d2;      // ~S_READ_W2 (my ven_dbg_w0 capture point)
++			ven_dbg_f0    <= ven_dbg_iord_d1;      // ~S_READ_CHK-1
++			ven_dbg_fp1   <= io_readdata[15:0];    // ~S_READ_CHK / latch cycle
++			ven_dbg_bufq0 <= buf_q[15:0];          // raw dpram port-B at the latch
++			ven_dbg_flags <= {io_address[2:0], status[3]};   // drq + io_address at the latch
++		end
++		ven_dbg_fn <= ven_dbg_fn + 1'b1;
++	end
++end
+ 
+ endmodule
+diff --git a/rtl/soc/iobus.v b/rtl/soc/iobus.v
+index cec837b..03027e9 100644
+--- a/rtl/soc/iobus.v
++++ b/rtl/soc/iobus.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ 
+ module iobus
+ (
+@@ -32,6 +33,13 @@ localparam S_WRITE_CHK = 3;
+ localparam S_READ      = 4;
+ localparam S_READ_W    = 5;
+ localparam S_READ_CHK  = 6;
++localparam S_READ_W2   = 7;   // extra read settle cycle: the io_readdata path (BRAM read +
++                              // ide.v io_readdata register) needs one more clock than S_READ_W
++                              // provides, else the core latches mem[io_cnt-1] (identify read
++                              // came back shifted by one word on hardware -> zero geometry).
++`ifdef VEN_SNOW_DBG
++	integer ven_io_cnt = 0;
++`endif
+ 
+ always @(posedge clk) begin
+ 	reg [2:0] state;
+@@ -84,6 +92,27 @@ always @(posedge clk) begin
+ 			end
+ 
+ 		S_READ_W:
++			// REVIEW Aug-1 H-13: this used to re-assert `bus_read <= 1` here, which made
++			// ONE logical I/O read drive the device read strobe for TWO clocks. Several
++			// devices tolerate the level; the floppy does not -- it consumes io_read
++			// directly to pop its reply FIFO and count down the reply (floppy.v:631
++			// `reply_left <= reply_left - 1` and :657 `reply <= reply >> 8`, plus :233/:246
++			// clearing transfer_to_cpu/busy and :465 clearing irq). A single guest FDC
++			// data-port read therefore consumed TWO result bytes and could drop IRQ/busy
++			// early. (Repro: IOBUS_READ_STROBE high_cycles=2.)
++			//
++			// The extra settle CYCLE it was added for is still needed and is still here:
++			// S_READ_W2 delays S_READ_CHK's sample by one clock so the ide.v io_readdata
++			// register (plus its BRAM read) has caught up. Holding the STROBE was never
++			// what produced that delay. ide.v advances io_cnt on the strobe's FALLING edge
++			// (`old_stb & ~io_stb`, ide.v:292), so a one-clock pulse still latches
++			// io_readdata against the PRE-advance io_cnt -- which is the off-by-one-word
++			// IDENTIFY behaviour the extra state was introduced to fix -- and the latched
++			// value then stays stable through S_READ_W2/S_READ_CHK because the strobe is
++			// low. So the IDE fix is preserved and the double-consume is gone.
++			state <= S_READ_W2;
++
++		S_READ_W2:
+ 			state <= S_READ_CHK;
+ 
+ 		S_READ_CHK:
+@@ -92,6 +121,12 @@ always @(posedge clk) begin
+ 				cnt <= cnt + 1'd1;
+ 				bus_datasize <= bus_datasize - 1'd1;
+ 				cpu_read_data[{cnt, 3'b000} +:8] <= bus_readdata[7:0];
++`ifdef VEN_SNOW_DBG
++				if(bus_address[7:0]==8'hDA || bus_address[7:0]==8'hBA) begin
++					ven_io_cnt = ven_io_cnt + 1;
++					if(ven_io_cnt<30 || ven_io_cnt%100000==0) $display("[IOBUS] addr=%h #%0d rdata=%02h b1=%b", bus_address, ven_io_cnt, bus_readdata[7:0], bus_readdata[1]);
++				end
++`endif
+ 				state <= S_READ;
+ 
+ 				if(bus_io32) cpu_read_data <= bus_readdata;
+diff --git a/rtl/soc/joystick.v b/rtl/soc/joystick.v
+index 62695aa..ff59bf5 100644
+--- a/rtl/soc/joystick.v
++++ b/rtl/soc/joystick.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ // Joystick Module - Implements PC-compatible joystick interface with support for:
+ // - Standard analog joysticks or digital joysticks/gamepads
+ // - Options to use timed (IBM joystick time formula) or count methods
+diff --git a/rtl/soc/pic.v b/rtl/soc/pic.v
+index 7e20be2..5d973d0 100644
+--- a/rtl/soc/pic.v
++++ b/rtl/soc/pic.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * Copyright (C) 2020, Alexey Melnikov
+diff --git a/rtl/soc/pit.v b/rtl/soc/pit.v
+index 499b307..8f20a71 100644
+--- a/rtl/soc/pit.v
++++ b/rtl/soc/pit.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/soc/pit_counter.v b/rtl/soc/pit_counter.v
+index 8243041..54f7bd3 100644
+--- a/rtl/soc/pit_counter.v
++++ b/rtl/soc/pit_counter.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/soc/ps2.v b/rtl/soc/ps2.v
+index a112b43..24cdc4c 100644
+--- a/rtl/soc/ps2.v
++++ b/rtl/soc/ps2.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+@@ -391,6 +392,12 @@ end
+ // Detect writes to keyboard or mouse devices
+ wire write_to_keyb  = io_m_write && io_address[2:0] == 3'd0 && ~(expecting_port_60h) && ~(status_inputbufferfull);
+ wire write_to_mouse = cmd_write_to_mouse;
++`ifdef VEN_KBD_AUTOACK
++// Headless: the host->device send stalls in PS2_SEND_BITS (no keyboard to clock the shift), so the
++// real ps2_kb_write_done never fires. Complete it one cycle after write_to_keyb instead.
++reg wtk_q;
++always @(posedge clk) if(!rst_n) wtk_q <= 1'b0; else wtk_q <= write_to_keyb;
++`endif
+ 
+ // Input buffer full flag (data pending to device)
+ reg status_inputbufferfull;
+@@ -406,6 +413,9 @@ always @(posedge clk) begin
+     if(rst_n == 1'b0)                                   input_write_done <= 1'b0;
+     else if(write_to_keyb || write_to_mouse)            input_write_done <= 1'b0;
+     else if(ps2_kb_write_done || ps2_mouse_write_done)  input_write_done <= 1'b1;
++`ifdef VEN_KBD_AUTOACK
++    else if(wtk_q)                                      input_write_done <= 1'b1;   // headless: send "done"
++`endif
+ end
+ 
+ // Track destination of pending write
+@@ -501,10 +511,20 @@ always @(posedge clk) begin
+ end    
+ 
+ // Keyboard timeout counter (detects stuck communication)
++`ifdef VEN_KBC_FAST
++// Headless (no PS/2 keyboard): the host->device send self-clocks and completes, but IBF only clears
++// after the (never-present) keyboard ACK sets OBF, so the 8042 falls back on THIS timeout. At the
++// stock 26'h3FFFFFF (67M cyc) that is ~11s/op @ 6 MHz and ~168s/op in cosim — POST does several
++// keyboard ops so cold-boot crawls. 26'h00FFFFF (~1M cyc, ~0.17s @ 6 MHz) is still >>10x the
++// ~150k-cyc host->device shift, so a real keyboard would still ACK first; only the empty-wait shrinks.
++localparam [25:0] KBC_TIMEOUT_INIT = 26'h00FFFFF;
++`else
++localparam [25:0] KBC_TIMEOUT_INIT = 26'h3FFFFFF;  // stock ~1.3 seconds @ 50MHz
++`endif
+ reg [25:0] keyb_timeout;
+ always @(posedge clk) begin
+     if(rst_n == 1'b0)                                                       keyb_timeout <= 26'h0;
+-    else if(keyb_state == PS2_SEND_INHIBIT || keyb_state == PS2_RECV_START) keyb_timeout <= 26'h3FFFFFF;  // ~1.3 seconds @ 50MHz
++    else if(keyb_state == PS2_SEND_INHIBIT || keyb_state == PS2_RECV_START) keyb_timeout <= KBC_TIMEOUT_INIT;
+     else if(keyb_state == PS2_IDLE)                                         keyb_timeout <= 26'h0;
+     else if(keyb_timeout > 26'd0)                                           keyb_timeout <= keyb_timeout - 26'd1;
+ end
+@@ -695,6 +715,22 @@ wire ps2_kb_write_shift = keyb_state == PS2_SEND_BITS && was_ps2_kbclk;
+ wire ps2_kb_write_done = keyb_state == PS2_SEND_FINISHED;
+ wire ps2_kb_reply_done = keyb_reply_valid && keyb_fifo_counter < 7'd60 && ~(keyb_recv_final);
+ 
++// Headless keyboard auto-ACK: with no attached PS/2 keyboard the host->device send self-clocks and
++// finishes, but IBF only clears once the (absent) keyboard ACK lands in the fifo. The BIOS then
++// grinds a ~64k-iteration software timeout per keyboard op (and the compressed-clock timer ISR makes
++// each iteration ~1000 retires) -> the 8042 init crawls (minutes @ 6 MHz / ~16 min in cosim). Inject
++// a 0xFA (ACK) on each send completion so the fifo goes non-empty -> OBF sets -> IBF clears at once,
++// exactly as a real keyboard would ACK. Edge-detected so PS2_SEND_FINISHED writes exactly one byte.
++`ifdef VEN_KBD_AUTOACK
++wire kb_autoack = wtk_q;   // inject ACK one cycle after write_to_keyb (device-less send completion)
++wire       kb_fifo_wrreq = ps2_kb_reply_done || kb_autoack || (keyb_recv_final && (~(translate) || keyb_recv_buffer != 8'hF0));
++wire [7:0] kb_fifo_wdata = kb_autoack ? 8'hFA :
++                           (ps2_kb_reply_done)? keyb_reply : (translate)? ({ keyb_translate_escape, 7'd0 } | trans) : keyb_recv_buffer;
++`else
++wire       kb_fifo_wrreq = ps2_kb_reply_done || (keyb_recv_final && (~(translate) || keyb_recv_buffer != 8'hF0));
++wire [7:0] kb_fifo_wdata = (ps2_kb_reply_done)? keyb_reply : (translate)? ({ keyb_translate_escape, 7'd0 } | trans) : keyb_recv_buffer;
++`endif
++
+ // Keyboard FIFO instance
+ simple_fifo #(
+     .width      (8),
+@@ -703,11 +739,11 @@ simple_fifo #(
+ keyb_fifo(
+     .clk        (clk),
+     .rst_n      (rst_n),
+-    
++
+     .sclr       (cmd_self_test),                                                                                                //Clear on self-test
+-    
+-    .wrreq      (ps2_kb_reply_done || (keyb_recv_final && (~(translate) || keyb_recv_buffer != 8'hF0))),                        //Write when data ready
+-    .data       ((ps2_kb_reply_done)? keyb_reply : (translate)? ({ keyb_translate_escape, 7'd0 } | trans) : keyb_recv_buffer),  //Data with translation
++
++    .wrreq      (kb_fifo_wrreq),                                                                                                //Write when data ready (+headless auto-ACK)
++    .data       (kb_fifo_wdata),                                                                                                //Data with translation
+     .full       (keyb_fifo_full),                                                                                               
+     .usedw      (keyb_fifo_usedw),                                                                                              
+     
+diff --git a/rtl/soc/rtc.v b/rtl/soc/rtc.v
+index 343aeba..a890a17 100644
+--- a/rtl/soc/rtc.v
++++ b/rtl/soc/rtc.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+@@ -54,27 +55,36 @@ module rtc(
+ reg [27:0] clk_rate;
+ always @(posedge clk) clk_rate <= clock_rate;
+ 
+-reg ce_800hz;
++// NOTE: originally these ce generators used blocking (=) assignments to
++// ce_800hz/ce_8192hz inside a clocked always. On real silicon that infers a
++// clean flip-flop (Q stable for the whole cycle, all readers agree), but the
++// verilated sim treats a blocking-assigned reg read from OTHER clocked blocks
++// as an evaluation-order hazard: the periodic_major decrement block saw the
++// NEW ce_8192hz (so it counted) while the periodic_interrupt set block saw the
++// STALE value (so IRQ8 periodic NEVER fired -> Win95 VTD 1024Hz tick dead).
++// Rewritten to the PIT's registered non-blocking (<=) pattern: identical
++// synthesis, but ce is a proper 1-cycle-stable FF so all readers agree.
++reg [27:0] sum_800hz = 0;
++reg ce_800hz = 0;
+ always @(posedge clk) begin
+-	reg [27:0] sum = 0;
+-
+-	ce_800hz = 0;
+-	sum = sum + 28'd800;
+-	if(sum >= clk_rate) begin
+-		sum = sum - clk_rate;
+-		ce_800hz = 1;
++	if((sum_800hz + 28'd800) >= clk_rate) begin
++		sum_800hz <= (sum_800hz + 28'd800) - clk_rate;
++		ce_800hz  <= 1'b1;
++	end else begin
++		sum_800hz <= sum_800hz + 28'd800;
++		ce_800hz  <= 1'b0;
+ 	end
+ end
+ 
+-reg ce_8192hz;
++reg [27:0] sum_8192hz = 0;
++reg ce_8192hz = 0;
+ always @(posedge clk) begin
+-	reg [27:0] sum = 0;
+-
+-	ce_8192hz = 0;
+-	sum = sum + 28'd8192;
+-	if(sum >= clk_rate) begin
+-		sum = sum - clk_rate;
+-		ce_8192hz = 1;
++	if((sum_8192hz + 28'd8192) >= clk_rate) begin
++		sum_8192hz <= (sum_8192hz + 28'd8192) - clk_rate;
++		ce_8192hz  <= 1'b1;
++	end else begin
++		sum_8192hz <= sum_8192hz + 28'd8192;
++		ce_8192hz  <= 1'b0;
+ 	end
+ end
+ 
+diff --git a/rtl/soc/sound/opl3/afifo.v b/rtl/soc/sound/opl3/afifo.v
+index 7886324..7966e9e 100644
+--- a/rtl/soc/sound/opl3/afifo.v
++++ b/rtl/soc/sound/opl3/afifo.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ ////////////////////////////////////////////////////////////////////////////////
+ //
+ // Filename:	rtl/afifo.v
+diff --git a/rtl/soc/sound/opl3/opl3_pkg.sv b/rtl/soc/sound/opl3/opl3_pkg.sv
+old mode 100755
+new mode 100644
+index e456c3d..826af99
+--- a/rtl/soc/sound/opl3/opl3_pkg.sv
++++ b/rtl/soc/sound/opl3/opl3_pkg.sv
+@@ -1,3 +1,4 @@
++`default_nettype wire  // Vivado project-flow: reset nettype (files compile as one unit; prevents `none` leak)
+ /*******************************************************************************
+ #   +html+<pre>
+ #
+diff --git a/rtl/soc/sound/saa1099.sv b/rtl/soc/sound/saa1099.sv
+index 6faf199..61ce3ca 100644
+--- a/rtl/soc/sound/saa1099.sv
++++ b/rtl/soc/sound/saa1099.sv
+@@ -22,7 +22,7 @@
+ //
+ //============================================================================
+ `timescale 1ns / 1ps
+-`default_nettype none
++`default_nettype wire   // was `none`: ports use implicit nets; Vivado (unlike Quartus/Verilator) rejects that
+ 
+ 
+ module saa1099
+diff --git a/rtl/soc/sound/sound.v b/rtl/soc/sound/sound.v
+index 3b36d54..bb0f110 100644
+--- a/rtl/soc/sound/sound.v
++++ b/rtl/soc/sound/sound.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * Copyright (C) 2017-2020 Alexey Melnikov
+diff --git a/rtl/soc/sound/sound_dsp.v b/rtl/soc/sound/sound_dsp.v
+index b4e9547..4850fcb 100644
+--- a/rtl/soc/sound/sound_dsp.v
++++ b/rtl/soc/sound/sound_dsp.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+diff --git a/rtl/soc/vga.v b/rtl/soc/vga.v
+index fdafd3a..3a819e9 100644
+--- a/rtl/soc/vga.v
++++ b/rtl/soc/vga.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ /*
+  * Copyright (c) 2014, Aleksander Osman
+  * All rights reserved.
+@@ -804,11 +805,105 @@ end
+ wire host_io_vertical_retrace;
+ wire host_io_not_displaying;
+ 
+-wire [7:0] host_io_read_wire = 
++`ifdef VEN_CORE
++// -- Sticky vertical-retrace for the 0x3DA Input-Status-1 read (VEN_CORE / Ventium co-sim).
++// A cycle-accurate core polling 0x3DA over the io bus samples the clk_vga-domain retrace
++// LEVEL at a fixed clk_sys phase; that phase can alias to always miss the (wide but
++// bounded) retrace window, so the VGA-BIOS retrace-sync poll (boot1.rom 0xC066d) spins
++// forever. This latch SETS on the retrace level (clk_sys integrates the whole window, so
++// it can never be missed regardless of sampling phase) and CLEARS when the CPU reads
++// 0x3DA (io_b/d read of index 0xA); set-wins holds it high across an in-progress retrace.
++// So the poll always observes both edges of the toggle. Sync reset (matches this file's
++// style). Guarded so the stock ao486 build is byte-identical.
++reg ven_sticky_vretrace;
++`ifdef VEN_FAST_RETRACE
++// SIM TIMEBASE COMPRESSION (VEN_FAST_RETRACE): the harness already compresses the PIT/RTC
++// timebase for sim speed (clock_rate=4MHz), but the VGA retrace period was left at the full
++// ~1.6M-cycle CRTC frame. Profiling shows POST does ~8750 program-FIXED retrace-synced ops
++// (INT10h mode-set/palette/border/DAC anti-snow waits), each burning a full frame -> ~77% of
++// a ~14B-cycle POST. No BIOS logic depends on the retrace PERIOD (the poll's iteration count
++// is discarded at all 8 call sites; there is no accumulate-until-target), so inject a fast
++// synthetic retrace edge to compress the retrace timescale like the other timers. The sticky
++// latch guarantees the CPU still catches every edge. ~16k-cycle period -> POST ~100-200M cyc.
++reg [13:0] ven_fastr_cnt;
++always @(posedge clk_sys) if(!rst_n) ven_fastr_cnt <= 14'd0; else ven_fastr_cnt <= ven_fastr_cnt + 14'd1;
++wire ven_fastr_edge = (ven_fastr_cnt == 14'd0);
++`endif
++always @(posedge clk_sys) begin
++	if(!rst_n)                        ven_sticky_vretrace <= 1'b0;
++	else if(host_io_vertical_retrace) ven_sticky_vretrace <= 1'b1;
++`ifdef VEN_FAST_RETRACE
++	else if(ven_fastr_edge)           ven_sticky_vretrace <= 1'b1;   // synthetic fast retrace (timebase compression)
++`endif
++	else if((io_b_read_valid || io_d_read_valid) && io_address == 4'hA) ven_sticky_vretrace <= 1'b0;
++end
++`ifdef VEN_FAST_SNOW
++// The VGA-BIOS char-output / monitor-detect wait (boot1.rom 0x630a) polls 0x3DA bit1 (0x02)
++// for a level TOGGLE (2 passes: `xor al,bh; test al,2; loopne` waits bit1==bh1, with bh
++// flipped between passes), but bit1 is hardwired 0 here, so each pass runs the FULL cx=0x1000
++// (4096) io-read timeout. At the Ventium io latency (~40 cyc/read), called per printed char
++// and per monitor-detect, this dominates POST (billions of cycles). bit1 is a reserved status
++// bit (no BIOS logic depends on its VALUE, only that it toggles), so drive it from a flip-flop
++// that inverts on every 0x3DA read: consecutive reads see alternating bit1, so each poll pass
++// exits within ~2 iterations. Cosmetic (monitor-type / anti-snow timing); the detect caller
++// (0x647B) is cx=2-bounded regardless. Same class of fix as VEN_FAST_RETRACE (bit3).
++// bit1 (0x02) of Input Status 1 is polled by the VGA-BIOS DAC-sense/anti-snow wait (0x630a)
++// for a level toggle across 2 passes. A per-read toggle ALIASES with the core's io sample
++// cadence (it resamples the same phase -> value looks stuck -> full 4096-iter timeout).
++// Instead drive it from a free-running ~512-cyc square wave: a stable LEVEL (like the retrace
++// sticky) that both poll passes reliably catch within ~256 cyc. Cosmetic (monitor-type sense).
++reg [9:0] ven_snow_cnt2;
++always @(posedge clk_sys) if(!rst_n) ven_snow_cnt2 <= 10'd0; else ven_snow_cnt2 <= ven_snow_cnt2 + 10'd1;
++wire ven_is1_b1 = ven_snow_cnt2[8];
++// Headless DAC-sense (Input Status 0 / 0x3C2, bit4): the VGA-BIOS monitor-detect (boot1.rom 0x635d,
++// called with cx=0x480) runs a 1152-iteration slow scan for as long as consecutive 0x3C2 bit4 reads
++// are STABLE, which they are when bit4 is hardwired 1 (no real monitor). Toggle bit4 on each 0x3C2
++// read so the detect's first consecutive-sample compare mismatches and it exits at once with the
++// default monitor id. Cosmetic (monitor-type detection only; WIN95/Quake set their own video mode).
++reg ven_dacsense_tgl;
++always @(posedge clk_sys) if(!rst_n) ven_dacsense_tgl <= 1'b0;
++    else if(io_c_read_valid && io_address == 4'h2) ven_dacsense_tgl <= ~ven_dacsense_tgl;
++wire ven_is0_b4 = ven_dacsense_tgl;
++`else
++wire ven_is1_b1 = 1'b0;
++wire ven_is0_b4 = 1'b1;
++`endif
++`ifdef VEN_VGA_DBG
++// diagnostic: does the VGA actually assert vertical retrace, and does the CPU read 0x3DA?
++integer ven_vr_dbg = 0, ven_rd_dbg = 0, ven_hit_dbg = 0; reg ven_vr_last = 1'b0;
++always @(posedge clk_sys) if(rst_n) begin
++	ven_vr_last <= host_io_vertical_retrace;
++	if(host_io_vertical_retrace && !ven_vr_last) begin ven_vr_dbg = ven_vr_dbg + 1;
++		if(ven_vr_dbg<=3 || ven_vr_dbg%120==0) $display("[VGA-DBG] vretrace#%0d cpu0x3DAreads=%0d hits=%0d", ven_vr_dbg, ven_rd_dbg, ven_hit_dbg); end
++	if((io_b_read_valid || io_d_read_valid) && io_address == 4'hA) begin ven_rd_dbg = ven_rd_dbg + 1;
++		// does a 0x3DA read ever coincide with the sticky bit being SET? (i.e. does the CPU ever read bit3=1)
++		if(ven_sticky_vretrace) begin ven_hit_dbg = ven_hit_dbg + 1;
++			if(ven_hit_dbg<=5 || ven_hit_dbg%500==0) $display("[VGA-DBG] read0x3DA sees STICKY-SET (bit3=1) hit#%0d rd#%0d", ven_hit_dbg, ven_rd_dbg); end
++		if(ven_rd_dbg<=3 || ven_rd_dbg%200000==0) $display("[VGA-DBG] read0x3DA#%0d vretraces_seen=%0d hits=%0d", ven_rd_dbg, ven_vr_dbg, ven_hit_dbg); end
++end
++`endif
++`endif
++
++// Fallbacks for the non-VEN_CORE build: the toggle/fallback pair above lives
++// inside the VEN_CORE guard, but the status-word reads below use these wires
++// in every configuration.
++`ifndef VEN_CORE
++wire ven_is1_b1 = 1'b0;
++wire ven_is0_b4 = 1'b1;
++`endif
++
++wire [7:0] host_io_read_wire =
++`ifdef VEN_FAST_SNOW
++	(host_io_ignored && (io_b_read_valid || io_d_read_valid) && io_address == 4'hA) ? { 6'h3F, ven_is1_b1, 1'b1 } : // ignored Input Status 1 (mono 0x3BA in color mode): toggle bit1 so DAC-sense mono-probe exits
++`endif
+ 	(host_io_ignored)                                            ? 8'hFF :
+ 	(io_c_read_valid && io_address == 4'hC)                      ? { general_vsync, general_hsync, general_odd_even_page, 1'b0, general_clock_select, general_enable_ram, general_io_space } : //misc output reg
+-	(io_c_read_valid && io_address == 4'h2)                      ? { interrupt, 2'b0, 1'b1, 4'b0 } : //input status 0
++	(io_c_read_valid && io_address == 4'h2)                      ? { interrupt, 2'b0, ven_is0_b4, 4'b0 } : //input status 0 (bit4 DAC-sense: toggles w/ VEN_FAST_SNOW so headless monitor-detect exits)
++`ifdef VEN_CORE
++	((io_b_read_valid || io_d_read_valid) && io_address == 4'hA) ? { ~ven_sticky_vretrace, 3'b0, ven_sticky_vretrace, 1'b0, ven_is1_b1, host_io_not_displaying } : //input status 1 (sticky vretrace bit3 + toggling bit1 VEN_FAST_SNOW, VEN_CORE)
++`else
+ 	((io_b_read_valid || io_d_read_valid) && io_address == 4'hA) ? { ~host_io_vertical_retrace, 3'b0, host_io_vertical_retrace, 2'b0, host_io_not_displaying } : //input status 1
++`endif
+ 	((io_b_read_valid || io_d_read_valid) && io_address == 4'h8) ? { dmc_bit_7_key, herc_2nd_page_enabled, dmc_bit_5_key, 5'b00000} : // display mode control
+ 	(io_c_read_valid && io_address == 4'h0)                      ? { 2'b0, attrib_pas, attrib_io_index } : //attrib read index (regardless the flip-flop state)
+ 	(io_c_read_valid && io_address == 4'h1)                      ? host_io_read_attrib : //attrib read data
+@@ -1400,6 +1495,25 @@ end
+ //------------------------------------------------------------------------------ host io read
+ 
+ always @(posedge clk_sys) begin
++`ifdef VEN_CORE
++	// HOLD io_readdata: update ONLY on an actual read pulse so the captured status stays
++	// valid until the NEXT read, instead of reverting to host_io_read_wire's default the
++	// next cycle. The stock build tracks host_io_read_wire every cycle → io_readdata is the
++	// real status for only ~1 cycle after the pulse; Ventium's io-read handshake captures a
++	// cycle off and samples that default (bit3=0 for 0x3DA), so the VGA-BIOS retrace poll
++	// never saw the retrace even though the VGA presented it 7000+ times. Guarded → ao486
++	// build byte-identical.
++	if(io_b_read_valid || io_c_read_valid || io_d_read_valid) begin
++		io_readdata <= host_io_read_wire;
++		if(io_c_read_valid) begin
++			if(io_address == 4'h1 && attrib_io_index <= 5'hF) io_readdata <= host_palette_q;
++			if(io_address == 4'h9 && ~dac_is_read)            io_readdata <= 8'h3F;
++			if(io_address == 4'h9 && dac_cnt == 2'd0)         io_readdata <= dac_read_q[17:12];
++			if(io_address == 4'h9 && dac_cnt == 2'd1)         io_readdata <= dac_read_q[11:6];
++			if(io_address == 4'h9 && dac_cnt == 2'd2)         io_readdata <= dac_read_q[5:0];
++		end
++	end
++`else
+ 	io_readdata <= host_io_read_wire;
+ 	if(io_c_read_valid) begin
+ 		if(io_address == 4'h1 && attrib_io_index <= 5'hF) io_readdata <= host_palette_q;
+@@ -1408,6 +1522,7 @@ always @(posedge clk_sys) begin
+ 		if(io_address == 4'h9 && dac_cnt == 2'd1)         io_readdata <= dac_read_q[11:6];
+ 		if(io_address == 4'h9 && dac_cnt == 2'd2)         io_readdata <= dac_read_q[5:0];
+ 	end
++`endif
+ end
+ 
+ //------------------------------------------------------------------------------ sequencer
+diff --git a/rtl/system.v b/rtl/system.v
+index 6b23e68..edf7392 100644
+--- a/rtl/system.v
++++ b/rtl/system.v
+@@ -1,3 +1,4 @@
++`default_nettype wire  // added for Vivado project-flow synth (leak-proof; Quartus-style expects wire)
+ 
+ module system
+ (
+@@ -5,10 +6,17 @@ module system
+ 
+ 	input         clk_sys,
+ 	input  [27:0] clock_rate,
++	input  [27:0] rtc_clock_rate,   // sim-only: RTC time-base rate (smaller => RTC seconds advance faster; PIT unaffected)
+ 
+ 	input         l1_disable,
+ 	input         l2_disable,
+ 
++	// FPU co-sim L2 cache-line invalidation. Harness supplies the guest
++	// PHYSICAL BYTE address of the FPU store in l2_fpu_inv_addr and pulses
++	// l2_fpu_inv_pulse high for one clk_sys posedge after each store.
++	input         l2_fpu_inv_pulse,
++	input  [31:0] l2_fpu_inv_addr,
++
+ 	output [1:0]  fdd_request,
+ 	output [2:0]  ide0_request,
+ 	output [2:0]  ide1_request,
+@@ -124,7 +132,11 @@ module system
+ 	output        DDRAM_RD,
+ 	output [63:0] DDRAM_DIN,
+ 	output  [7:0] DDRAM_BE,
+-	output        DDRAM_WE
++	output        DDRAM_WE,
++
++	// on-die debug bundle from the Ventium core (VEN_DBG_CORE) — packed, see ven_ao486_shim
++	output [290:0] cpu_dbg_bus,
++	input  [127:0] cpu_dbg_cmp
+ );
+ 
+ wire        a20_enable;
+@@ -162,6 +174,7 @@ wire        interrupt_do;
+ wire  [7:0] interrupt_vector;
+ reg  [15:0] interrupt;
+ wire        irq_0, irq_1, irq_2, irq_3, irq_4, irq_5, irq_6, irq_7, irq_8, irq_9, irq_10, irq_12, irq_14, irq_15;
++wire        ide0_dbg_nien, ide0_dbg_srst;   // bug#7 observers (task #50)
+ 
+ wire        cpu_io_read_do;
+ wire [15:0] cpu_io_read_address;
+@@ -247,6 +260,11 @@ l2_cache cache
+ 
+ 	.DISABLE           (l2_disable),
+ 
++	// FPU co-sim invalidation. l2_inv_addr is a 64-bit-beat address (byte>>3);
++	// ADDRBITS=24 so slice byte-address bits [27:3] -> l2_inv_addr[24:0].
++	.l2_inv_pulse      (l2_fpu_inv_pulse),
++	.l2_inv_addr       (l2_fpu_inv_addr[27:3]),
++
+ 	.CPU_ADDR          (mem_address),
+ 	.CPU_DIN           (mem_writedata),
+ 	.CPU_DOUT          (mem_readdata),
+@@ -281,7 +299,11 @@ l2_cache cache
+ 	.uma_ram           (uma_ram)
+ );
+ 
++`ifdef VEN_CORE
++ven_ao486_shim u_cpu
++`else
+ ao486 ao486
++`endif
+ (
+ 	.clk               (clk_sys),
+ 	.rst_n             (~reset),
+@@ -323,6 +345,12 @@ ao486 ao486
+ 	.dma_waitrequest   (dma_waitrequest),
+ 	.dma_write         (dma_write),
+ 	.dma_writedata     (dma_writedata)
++`ifdef VEN_CORE
++	// the on-die debug bundle exists only on the ven_ao486_shim port list
++	,
++	.dbg_bus           (cpu_dbg_bus),
++	.dbg_cmp           (cpu_dbg_cmp)
++`endif
+ );
+ 
+ always @(posedge clk_sys) begin
+@@ -515,7 +543,15 @@ ide ide0
+ 	.mgmt_read         (mgmt_read & mgmt_ide0_cs),
+ 
+ 	.request           (ide0_request),
+-	.irq               (irq_14)
++	.irq               (irq_14),
++
++	// Ventium bug#7 (task #50): export the two bits that can suppress the IDE
++	// completion IRQ. Both come from one guest write to Device Control (0x3F6):
++	// bit1 -> disable_irq (nIEN), bit2 -> sw_reset (SRST, which gates the whole
++	// device via reset = ~rst_n | sw_reset). Invisible to the PS otherwise —
++	// ide.v's mgmt read mux returns only sector/cylinder/count/cmd. Pure observers.
++	.dbg_disable_irq   (ide0_dbg_nien),
++	.dbg_sw_reset      (ide0_dbg_srst)
+ );
+ 
+ wire ide1_nodata;
+@@ -624,7 +660,7 @@ rtc rtc
+ 	.clk               (clk_sys),
+ 	.rst_n             (~reset),
+ 
+-	.clock_rate        (clock_rate),
++	.clock_rate        (rtc_clock_rate),
+ 
+ 	.io_address        (iobus_address[0]),
+ 	.io_writedata      (iobus_writedata[7:0]),
+

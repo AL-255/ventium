@@ -12,21 +12,29 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."   # repo root
 
 SUB=3rd-party/ao486_MiSTer
-PATCH="$(pwd)/ao486-sim/patches/ao486_MiSTer.patch"
 
 echo "==> [1/4] init submodule $SUB"
 git submodule update --init --recursive "$SUB"
 
-echo "==> [2/4] apply boot-path RTL patch to $SUB"
-if git -C "$SUB" apply --check --reverse "$PATCH" 2>/dev/null; then
-  echo "    already applied."
-elif git -C "$SUB" apply --check "$PATCH" 2>/dev/null; then
-  git -C "$SUB" apply "$PATCH"; echo "    applied ao486_MiSTer.patch."
-else
-  echo "    ERROR: patch does not apply cleanly. Is the submodule at the pinned commit?" >&2
-  echo "    Expected base: $(git ls-tree HEAD "$SUB" | awk '{print $3}')" >&2
-  exit 1
-fi
+echo "==> [2/4] apply the canonical Ventium platform overlay to $SUB"
+# This is deliberately one patch generated against the submodule revision pinned
+# by the superproject.  Keeping the complete overlay together makes a clean
+# checkout reproduce the live co-simulation and FPGA platform exactly; layering
+# partially-overlapping historical patches made the result order-dependent.
+for PATCH in "$(pwd)/ao486-sim/patches/ao486_MiSTer_ventium.patch"; do
+  # The upstream ao486 tree contains a few CRLF Verilog sources.  The overlay
+  # is stored with normalized LF text, so make the apply/reverse probe ignore
+  # end-of-line whitespace while preserving every token-level source change.
+  if git -C "$SUB" apply --ignore-space-change --check --reverse "$PATCH" 2>/dev/null; then
+    echo "    $(basename "$PATCH") already applied."
+  elif git -C "$SUB" apply --ignore-space-change --check "$PATCH" 2>/dev/null; then
+    git -C "$SUB" apply --ignore-space-change "$PATCH"; echo "    applied $(basename "$PATCH")."
+  else
+    echo "    ERROR: $(basename "$PATCH") does not apply cleanly. Is the submodule at the pinned commit?" >&2
+    echo "    Expected base: $(git ls-tree HEAD "$SUB" | awk '{print $3}')" >&2
+    exit 1
+  fi
+done
 
 echo "==> [3/4] build the time() shim -> tmp/time_shim.so"
 mkdir -p tmp

@@ -8,6 +8,7 @@
 // Reuses ps_shim.cpp + support/x86/x86.cpp + ide.cpp verbatim. See VENTIUM_SWAP.md §7.
 
 #include "Vsystem.h"
+#include "Vsystem___024root.h"   // VGA plane-RAM/DAC frame capture
 #include "verilated.h"
 #include <cstdio>
 #include <cstdlib>
@@ -47,6 +48,204 @@ extern "C" { extern uint64_t g_vtm_retires; extern uint32_t g_vtm_eip,g_vtm_efla
 // reads=71; used below to auto-enable the per-retire register trace right before the open so the
 // dir-search compare (and the flag/branch that mis-decides "not found") is captured.
 volatile unsigned long g_disk_reads = 0;
+
+// --open-trace: arms the July open-failure trace/memdump hooks (off by default —
+// the 700k-retire register dump otherwise floods every disk-boot run).
+static int g_open_trace = 0;
+// --rmtest: stop once the focused nested-IRQ ROM records success/failure and
+// print its low-RAM witness counters. AO486_BIOS_DIR selects that test ROM.
+static int g_rmtest = 0;
+// --vgatext-every N: print the guest text console (0xB8000, 80x25) every N
+// cycles, so boot/Quake progress is observable without a display.
+extern "C" int ao486_peek_guest(unsigned int phys, void *dst, int nbytes);
+static uint64_t g_vgatext_every = 0;
+static uint64_t g_vgatext_next  = 0;
+static void vgatext_dump() {
+    if (!ddr) return;
+    unsigned char v[4000]; ao486_peek_guest(0x000b8000, v, 4000);
+    fprintf(stderr, "[VGATEXT @%llu]\n", (unsigned long long)main_time);
+    for (int row = 0; row < 25; row++) {
+        char line[81]; int e = 80;
+        for (int col = 0; col < 80; col++) {
+            unsigned char c = v[(row*80+col)*2];
+            line[col] = (c >= 32 && c < 127) ? (char)c : ' ';
+        }
+        line[80] = 0; while (e > 0 && line[e-1] == ' ') e--; line[e] = 0;
+        if (e > 0) fprintf(stderr, "  |%s\n", line);
+    }
+}
+
+static uint16_t guest_word(uint32_t phys) {
+    uint8_t v[2] = {0, 0};
+    ao486_peek_guest(phys, v, 2);
+    return (uint16_t)(v[0] | ((uint16_t)v[1] << 8));
+}
+
+static void rmtest_dump() {
+    fprintf(stderr,
+            "[RMTEST] irq=%u sw_enter=%u sw_return=%u nested=%u bad=%u "
+            "pop_return=%u pop_bad=%u pop_nested=%u main_bad=%u\n",
+            guest_word(0x500), guest_word(0x502), guest_word(0x504),
+            guest_word(0x506), guest_word(0x508), guest_word(0x50c),
+            guest_word(0x50e), guest_word(0x512), guest_word(0x514));
+}
+
+// ---- VGA frame capture (ported from the legacy sim) ----------------------------
+// Reads the displayed image straight out of the VGA plane RAM + DAC palette in the
+// verilated model (mode 13h 320x200x256 chain-4; mode 12h 640x480x16 planar).
+// --fb-every N: dump a numbered PPM every N cycles while in a graphics mode.
+static uint64_t g_fb_every = 0;
+static uint64_t g_fb_next  = 0;
+static int      g_fb_n = 0;
+static const char *g_fb_out = "/home/yukidama/external/ventium_run/ven_fb";   // --fb-out
+static int in_graphics_mode() {
+    auto *R = top->rootp;
+    return R->system__DOT__vga__DOT__attrib_graphic_mode;
+}
+static void dump_fb_frame(int n) {
+    auto *R = top->rootp;
+    if (!R->system__DOT__vga__DOT__attrib_graphic_mode) return;
+    int chain4 = R->system__DOT__vga__DOT__seq_access_chain4;
+    int pel2   = R->system__DOT__vga__DOT__attrib_pelclock_div2;
+    uint32_t start = R->system__DOT__vga__DOT__crtc_address_start & 0xffffu;
+    char path[300];
+    snprintf(path, sizeof path, "%s_%05d.ppm", g_fb_out, n);
+    FILE *f = fopen(path, "wb"); if (!f) return;
+    auto DAC = [&](uint8_t idx)->uint32_t { return R->system__DOT__vga__DOT__dac_ram__DOT__mem[idx]; };
+    auto WR  = [&](uint32_t d){ fputc(((d>>12)&0x3f)*255/63, f); fputc(((d>>6)&0x3f)*255/63, f); fputc((d&0x3f)*255/63, f); };
+    long nz = 0; const char *modestr;
+    if (chain4 && pel2) {
+        // mode 13h: 320x200x256 chain-4 doubleword: pixel N -> plane N&3, offset N&~3
+        modestr = "13h-256";
+        fprintf(f, "P6\n320 200\n255\n");
+        for (int y = 0; y < 200; y++) for (int x = 0; x < 320; x++) {
+            uint32_t off = start + (uint32_t)y * 320u + (uint32_t)x;
+            uint32_t po = (off & ~3u) & 0xffffu; uint8_t idx;
+            switch (off & 3u) {
+                case 0:  idx = R->system__DOT__vga__DOT__plane_ram_0__DOT__mem[po]; break;
+                case 1:  idx = R->system__DOT__vga__DOT__plane_ram_1__DOT__mem[po]; break;
+                case 2:  idx = R->system__DOT__vga__DOT__plane_ram_2__DOT__mem[po]; break;
+                default: idx = R->system__DOT__vga__DOT__plane_ram_3__DOT__mem[po]; break;
+            }
+            if (idx) nz++; WR(DAC(idx));
+        }
+    } else {
+        // mode 12h: 640x480x16 planar (Win95 std VGA)
+        modestr = "12h-16planar";
+        int W = 640, H = 480;
+        uint32_t stride = 2u * (R->system__DOT__vga__DOT__crtc_address_offset & 0x1ffu);
+        if (stride == 0) stride = 80;
+        fprintf(f, "P6\n%d %d\n255\n", W, H);
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            uint32_t addr = (start + (uint32_t)y * stride + (uint32_t)(x >> 3)) & 0xffffu;
+            int bit = 7 - (x & 7);
+            int b0 = (R->system__DOT__vga__DOT__plane_ram_0__DOT__mem[addr] >> bit) & 1;
+            int b1 = (R->system__DOT__vga__DOT__plane_ram_1__DOT__mem[addr] >> bit) & 1;
+            int b2 = (R->system__DOT__vga__DOT__plane_ram_2__DOT__mem[addr] >> bit) & 1;
+            int b3 = (R->system__DOT__vga__DOT__plane_ram_3__DOT__mem[addr] >> bit) & 1;
+            int index = (b3 << 3) | (b2 << 2) | (b1 << 1) | b0;
+            uint8_t pel6 = R->system__DOT__vga__DOT__internal_palette_ram__DOT__mem[index] & 0x3f;
+            if (index) nz++; WR(DAC(pel6));
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "[FBCAP] %s mode=%s chain4=%d pel2=%d start=%u nz=%ld\n", path, modestr, chain4, pel2, start, nz);
+}
+
+// ---- PS/2 keyboard injection (device->host, Set-2 scancodes) ------------------
+// Ported from the legacy sim (sim_main.cpp): the 8042 (ps2.v) runs with
+// translate=1, so we transmit Set-2 make/break codes and it translates to Set-1.
+// Open-drain wired-AND against the host's release lines; one bit = 24 sys-cycles
+// high then 24 low. Dormant unless --kb is given. Tokens: named keys
+// (enter/esc/space/tab/arrows/backspace), or type:<text> for an ASCII string
+// (lowercase letters, digits, and ./~-_ map directly).
+static const char *g_kb_script = nullptr;
+static uint64_t g_kb_start = 3000000;
+static uint64_t g_kb_gap   = 6000000;
+static std::vector<std::vector<uint8_t>> g_kb_events;
+static size_t   g_kb_ev_idx = 0;
+static uint64_t g_kb_next_ev = 0;
+static bool     g_kb_started = false;
+static uint64_t g_kb_base = 0;
+static bool     g_kb_base_set = false;
+static std::deque<uint8_t> g_kbfifo;
+static int      g_kb_bits[11];
+static int      g_kb_phase = -1;
+static int      g_kb_sub = 0;
+static int      g_kb_gapcnt = 0;
+
+static uint8_t ascii_to_set2(char c, int &ext) {
+    ext = 0;
+    if (c >= 'a' && c <= 'z') {
+        static const uint8_t L[26] = {0x1C,0x32,0x21,0x23,0x24,0x2B,0x34,0x33,0x43,0x3B,
+                                      0x42,0x4B,0x3A,0x31,0x44,0x4D,0x15,0x2D,0x1B,0x2C,
+                                      0x3C,0x2A,0x1D,0x22,0x35,0x1A};
+        return L[c - 'a'];
+    }
+    if (c >= '1' && c <= '9') { static const uint8_t D[9] = {0x16,0x1E,0x26,0x25,0x2E,0x36,0x3D,0x3E,0x46}; return D[c - '1']; }
+    switch (c) {
+        case '0': return 0x45; case ' ': return 0x29; case '.': return 0x49;
+        case ',': return 0x41; case '/': return 0x4A; case '-': return 0x4E;
+        case '=': return 0x55; case ';': return 0x4C; case '~': case '`': return 0x0E;
+        case '_': return 0x4E;   /* shifted -: FreeDOS/Quake console treats it as - without shift */
+    }
+    return 0;
+}
+static void kb_push_key(uint8_t make, int ext) {
+    std::vector<uint8_t> ev;
+    if (ext) ev.push_back(0xE0); ev.push_back(make);
+    if (ext) ev.push_back(0xE0); ev.push_back(0xF0); ev.push_back(make);
+    g_kb_events.push_back(ev);
+}
+static void kb_build_events(const char *script) {
+    char *dup = strdup(script); if (!dup) return;
+    static const struct { const char *name; uint8_t make; int ext; } NAMED[] = {
+        {"enter",0x5A,0},{"esc",0x76,0},{"space",0x29,0},{"tab",0x0D,0},
+        {"backspace",0x66,0},{"up",0x75,1},{"down",0x72,1},{"left",0x6B,1},{"right",0x74,1},
+    };
+    for (char *tok = strtok(dup, ","); tok; tok = strtok(nullptr, ",")) {
+        if (!strncmp(tok, "type:", 5)) {
+            for (const char *p = tok + 5; *p; p++) {
+                int ext; uint8_t m = ascii_to_set2(*p, ext);
+                if (m) kb_push_key(m, ext);
+            }
+            continue;
+        }
+        for (auto &km : NAMED) if (!strcmp(tok, km.name)) { kb_push_key(km.make, km.ext); break; }
+    }
+    free(dup);
+    fprintf(stderr, ">>> [kbinject] %zu key event(s) parsed from \"%s\"\n", g_kb_events.size(), script);
+}
+static void kb_load_byte(uint8_t b) {
+    int par = 1; g_kb_bits[0] = 0;
+    for (int k = 0; k < 8; k++) { int bit = (b >> k) & 1; g_kb_bits[1 + k] = bit; par ^= bit; }
+    g_kb_bits[9] = par; g_kb_bits[10] = 1; g_kb_phase = 0; g_kb_sub = 0;
+}
+static void ps2_kb_drive() {
+    if (!g_kb_script) return;
+    if (!g_kb_base_set) { g_kb_base = main_time; g_kb_base_set = true; }
+    if (!g_kb_started && main_time >= g_kb_base + g_kb_start) { g_kb_started = true; g_kb_next_ev = main_time; }
+    if (g_kb_started && g_kb_ev_idx < g_kb_events.size() && main_time >= g_kb_next_ev
+        && g_kbfifo.empty() && g_kb_phase < 0) {
+        for (uint8_t b : g_kb_events[g_kb_ev_idx]) g_kbfifo.push_back(b);
+        g_kb_ev_idx++; g_kb_next_ev = main_time + g_kb_gap;
+        fprintf(stderr, ">>> [kbinject] event %zu/%zu queued @cyc=%llu\n",
+                g_kb_ev_idx, g_kb_events.size(), (unsigned long long)main_time);
+    }
+    int dat = 1, clk = 1;
+    if (g_kb_phase < 0) {
+        if (!g_kbfifo.empty() && top->ps2_kbclk_out && top->ps2_kbdat_out) {
+            if (++g_kb_gapcnt >= 80) { g_kb_gapcnt = 0; uint8_t b = g_kbfifo.front(); g_kbfifo.pop_front(); kb_load_byte(b); }
+        }
+    }
+    if (g_kb_phase >= 0) {
+        dat = g_kb_bits[g_kb_phase];
+        clk = (g_kb_sub < 24) ? 1 : 0;
+        if (++g_kb_sub >= 48) { g_kb_sub = 0; if (++g_kb_phase > 10) g_kb_phase = -1; }
+    }
+    top->ps2_kbclk_in = clk & (top->ps2_kbclk_out ? 1 : 0);
+    top->ps2_kbdat_in = dat & (top->ps2_kbdat_out ? 1 : 0);
+}
 
 // ---- PS-facing helpers ps_shim.cpp / x86.cpp expect --------------------------
 static inline uint8_t *ddr_bytes() { return (uint8_t *)ddr; }
@@ -272,8 +471,17 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--save-every") && i+1<argc) { g_save_every = strtoull(argv[++i], 0, 0); g_next_save = g_save_every; }
         else if (!strcmp(argv[i], "--save-file") && i+1<argc) g_save_file = argv[++i];
         else if (!strcmp(argv[i], "--restore") && i+1<argc) g_restore_file = argv[++i];
+        else if (!strcmp(argv[i], "--open-trace")) g_open_trace = 1;
+        else if (!strcmp(argv[i], "--rmtest")) g_rmtest = 1;
+        else if (!strcmp(argv[i], "--kb") && i+1<argc) g_kb_script = argv[++i];
+        else if (!strcmp(argv[i], "--kb-start") && i+1<argc) g_kb_start = strtoull(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--kb-gap") && i+1<argc) g_kb_gap = strtoull(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--vgatext-every") && i+1<argc) g_vgatext_every = strtoull(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--fb-every") && i+1<argc) g_fb_every = strtoull(argv[++i], 0, 0);
+        else if (!strcmp(argv[i], "--fb-out") && i+1<argc) g_fb_out = argv[++i];
     }
     fprintf(stderr, ">>> sim_ven: vga_div=%d vga_jit=%d clock_rate=%u\n", g_vga_div, g_vga_jit, g_clock_rate);
+    if (g_kb_script) kb_build_events(g_kb_script);
 
     top = new Vsystem;
     ddr = (uint64_t *)calloc(DDR_WORDS, sizeof(uint64_t));
@@ -299,6 +507,20 @@ int main(int argc, char **argv) {
     uint64_t last_report = 0;
     while (main_time < cycles && !Verilated::gotFinish()) {
         tick();
+        if (g_rmtest) {
+            auto *R = top->rootp;
+            if (R->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__rm_read_armed
+                && R->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__mem_ack) {
+                fprintf(stderr,
+                        "[RMREAD] cyc=%llu state=%u step=%u addr=%08x data=%08x cs:eip=%04x:%08x\n",
+                        (unsigned long long)main_time,
+                        (unsigned)R->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__state,
+                        (unsigned)R->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__int_step,
+                        R->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__bd_addr,
+                        R->system__DOT__u_cpu__DOT__u_core__DOT__u_core__DOT__mem_rdata,
+                        g_vtm_cs, g_vtm_eip);
+            }
+        }
         // Serve disk/floppy mgmt requests exactly like the ao486 sim.
         if (top->ide0_request || top->ide1_request || top->fdd_request) x86_poll(0);
         // IDE RESET-FINISH: the FPGA daemon calls ide_io(0,0) UNCONDITIONALLY every iteration
@@ -307,12 +529,32 @@ int main(int argc, char **argv) {
         // leaves the IDE stuck in RESET -> BIOS never detects the drive -> INT19 boot fails -> HALT).
         // ide_io(n,0) is a no-op unless state==RESET, so calling it every tick is safe.
         { extern void ide_io(int, int); ide_io(0, 0); ide_io(1, 0); }
+        ps2_kb_drive();   // inject queued keystrokes (no-op unless --kb given)
+        if (g_vgatext_every && main_time >= g_vgatext_next) {
+            g_vgatext_next = main_time + g_vgatext_every;
+            vgatext_dump();
+        }
+        if (g_fb_every && main_time >= g_fb_next) {
+            g_fb_next = main_time + g_fb_every;
+            if (in_graphics_mode()) dump_fb_frame(g_fb_n++);
+        }
+        if (g_rmtest && !(main_time % 10000)) {
+            const uint16_t sw_return = guest_word(0x504);
+            const uint16_t pop_return = guest_word(0x50c);
+            const uint16_t bad = guest_word(0x508);
+            const uint16_t pop_bad = guest_word(0x50e);
+            const uint16_t main_bad = guest_word(0x514);
+            if ((sw_return == 256 && pop_return == 256) || bad || pop_bad || main_bad) {
+                rmtest_dump();
+                break;
+            }
+        }
         // OPEN-FAILURE TRACE: the failed COMMAND.COM open is at reads=71. Enable the per-retire
         // register trace (vtm_retire -> stderr) once reads>=66 so the IO.SYS dir-search/open decision
         // is captured with full register/flag state. Auto-off after a bounded window so the log stays
         // finite (the open + a few idle cycles is enough).
         static int trace_armed = 0;
-        if (g_disk_reads >= 66 && !trace_armed) {
+        if (g_open_trace && g_disk_reads >= 66 && !trace_armed) {
             trace_armed = 1;
             g_vtm_dump = 700000;   // vtm_retire decrements this once per retire -> a BOUNDED, contiguous
                                    // 700k-retire trace covering reads 66->71 (the open) + the error path.
@@ -323,7 +565,7 @@ int main(int argc, char **argv) {
         // entry (is IO.SYS's in-memory dir intact?) and for the target FCB name IO.SYS parsed (is the
         // path-parse correct?). Distinguishes a corrupt dir buffer / mis-parsed name from a compare bug.
         static int memdump_done = 0;
-        if (!memdump_done && g_disk_reads >= 70 && ddr) {
+        if (g_open_trace && !memdump_done && g_disk_reads >= 70 && ddr) {
             memdump_done = 1;
             uint8_t *g = (uint8_t*)ddr;
             static const uint8_t cc[11] = {0x43,0x4F,0x4D,0x4D,0x41,0x4E,0x44,0x20,0x43,0x4F,0x4D}; // "COMMAND COM"
@@ -391,6 +633,7 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, ">>> done: cyc=%llu retires=%llu last cs=%04x:eip=%08x\n",
             (unsigned long long)main_time, (unsigned long long)g_vtm_retires, g_vtm_cs, g_vtm_eip);
+    if (g_rmtest) rmtest_dump();
     top->final(); delete top; free(ddr);
     return 0;
 }

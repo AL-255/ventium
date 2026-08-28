@@ -1,5 +1,12 @@
 # Ventium-on-ao486-SoC: disk-boot bring-up status (FPGA, real hardware)
 
+> **Historical forensic log.** This append-only chronology contains superseded
+> diagnoses, build labels, paths, commands, and statements of current status.
+> Preserve it as bring-up evidence, but use
+> [`../HOW_TO_RUN_FPGA.md`](../HOW_TO_RUN_FPGA.md) for the current
+> RK-XCZU15EG-F build, deployment, and verification procedure. Reconcile any
+> command here with the exact source and artifact revisions before running it.
+
 ## ============ DISK BOOT WORKS — io_done_seen fix CONFIRMED on hardware ============
 The shim io-read race fix (ven_ao486_shim.sv: `io_read_do &= ~(io_read_done|io_write_done)`)
 UNBLOCKED the disk boot on real FPGA. Verified:

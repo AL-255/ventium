@@ -88,7 +88,7 @@ its own scheduler.
 
 - **Caches:** the successful Win95 boot ran with **both L1 and L2 enabled**
   (default `g_l1dis=0`, `sim_main.cpp:965,973`; no `--no-l1`). An earlier L1
-  icache "wrong-data" race documented in `STATUS.md` was ultimately a
+  icache "wrong-data" race recorded during early bring-up was ultimately a
   DDR-read-model timing problem, resolved by fixes #5/#6 (capture-at-issue +
   service-before-poll); with the DDR beats delivered correctly the L1 fill is
   correct and no cache needs disabling.

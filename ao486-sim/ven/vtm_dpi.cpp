@@ -93,9 +93,11 @@ extern "C" void vtm_retire(
             }
         }
         static FILE *pctf = (FILE*)-1;
-        if (pctf == (FILE*)-1) { const char *p = getenv("VEN_PCTRACE"); pctf = p ? fopen(p, "w") : nullptr; }
-        // gate to the cascade region (retire >= 4.60M), add DS + EFLAGS (bit9=IF) for the halt-idle analysis.
-        if (pctf && g_vtm_retires >= 4600000ull)
+        static unsigned long long pctf_start = 0;
+        if (pctf == (FILE*)-1) { const char *p = getenv("VEN_PCTRACE"); pctf = p ? fopen(p, "w") : nullptr;
+            const char *st = getenv("VEN_PCTRACE_START"); pctf_start = st ? strtoull(st, 0, 0) : 4600000ull; }
+        // gate to the cascade region (retire >= 4.60M, env-overridable), add DS + EFLAGS (bit9=IF) for the halt-idle analysis.
+        if (pctf && g_vtm_retires >= pctf_start)
             fprintf(pctf, "%llu %04x:%08x esp=%08x eax=%08x ecx=%08x esi=%08x edi=%08x edx=%08x ds=%04x efl=%08x IF=%d\n",
                           (unsigned long long)g_vtm_retires, cs, pc, esp, eax, ecx, esi, edi, edx, ds, eflags, (eflags>>9)&1);
     }

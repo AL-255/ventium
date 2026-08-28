@@ -168,7 +168,9 @@ char     is_minimig() { return 0; }
 // the BIOS ROM filenames x86_init loads via user_io_make_filepath(home, "bootN.rom")
 char *user_io_make_filepath(const char *path, const char *filename) {
     (void)path; static char s[1024];
-    snprintf(s, sizeof(s), "../3rd-party/ao486_MiSTer/releases/%s", filename);
+    const char *bios_dir = getenv("AO486_BIOS_DIR");
+    if (!bios_dir || !*bios_dir) bios_dir = "../3rd-party/ao486_MiSTer/releases";
+    snprintf(s, sizeof(s), "%s/%s", bios_dir, filename);
     return s;
 }
 
