@@ -102,3 +102,70 @@ ao486-sim/**/*.bak
 # ao486-sim boot/co-sim snapshots — multi-GB simulation state, regenerated on demand
 ao486-sim/snaps/
 ao486-sim/snaps_cb/
+
+# Per-invocation Verilator/Vivado runs.  Their sources, constraints, scripts,
+# compact reports, and Markdown evidence live elsewhere in the tree; these are
+# reproducible products (object trees, DCPs, bitstreams, disk copies, caches,
+# and logs) and must never be mistaken for source revisions.
+/ao486-sim/obj_dir*
+/rtl/obj_dir
+/verif/tb/obj_dir*
+/fpga/build*
+/fpga/.Xil
+/fpga/**/__pycache__
+/fpga/*.bit.bin
+/fpga_run_*
+/fpga_debug_snapshot_synth*/
+/verify_run_*
+/obj_dir_*
+/build
+/tmp
+/run_probe
+/run_vfpu
+/.Xil
+/.pytest_cache
+
+# FPGA verification evidence retains its README/Markdown reports and small
+# reproducer scripts.  The disk/media copies and generated simulator work
+# trees beneath it are disposable and often multi-gigabyte.
+/fpga_verify_*/**/*.vhd
+/fpga_verify_*/**/*.img
+/fpga_verify_*/**/*.elf
+/fpga_verify_*/**/*.bin
+/fpga_verify_*/**/*.flat
+/fpga_verify_*/**/*.result
+/fpga_verify_*/**/*.EXE
+/fpga_verify_*/**/*.COM
+/fpga_verify_*/**/*.rom
+/fpga_verify_*/**/*.gz
+/fpga_verify_*/**/*.gold
+/fpga_verify_*/**/*.goldlog
+/fpga_verify_*/**/*.flatlog
+/fpga_verify_*/**/*.rtl_A
+/fpga_verify_*/**/*.rtl_B
+/fpga_verify_*/**/*.cmp_A
+/fpga_verify_*/**/*.cmp_B
+/fpga_verify_*/**/*.LOG
+/fpga_verify_*/**/ccache
+/fpga_verify_*/**/obj_dir*
+/fpga_verify_*/**/obj_*
+/fpga_verify_*/**/work
+/fpga_verify_*/**/work2
+/fpga_verify_*/**/*_work
+/fpga_verify_*/**/*_cmp.txt
+/fpga_verify_*/**/*_metrics.txt
+/fpga_verify_20260820/hwcompact
+/fpga_verify_20260820/fppipe2_ab
+/fpga_verify_20260822/quake_bios_workaround/patch_boot0_cr0
+
+# The fragment-abort gate builds its tiny guest locally from the tracked
+# assembly/linker sources.
+/verif/fxabort/fxprog.bin
+/verif/fxabort/fxprog.elf
+
+# Historical progress/review notes are local working material, not source of
+# truth.  Keep copies on each engineer's machine without publishing them.
+/PROGRESS*.md
+/REVIEW*.md
+/docs_old/PROGRESS*.md
+/docs_old/REVIEW*.md
