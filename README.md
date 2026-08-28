@@ -8,249 +8,222 @@
   <img src="docs/ventium.png" alt="Ventium" width="440">
 </p>
 
-An RTL reconstruction of the original Intel **Pentium (P5 / P54C, non-MMX)**
-microarchitecture, written in synthesizable SystemVerilog, simulated with
-**Verilator**, and verified differentially against **QEMU**. It is **ISA-exact
-and cycle-approximate for the broad subset it verifies** — high fidelity as an
-architectural + cycle model, medium fidelity as a full microarchitectural / pin-
-level clone (see [`docs/isa-coverage.md`](docs/isa-coverage.md)
-/ [`docs/modeled-by-effect.md`](docs/modeled-by-effect.md)).
+Ventium is a synthesizable SystemVerilog reconstruction of the original Intel
+**Pentium P5/P54C (non-MMX)**.  It has a five-stage, in-order U/V integer
+pipeline, a pipelined x87 unit, split L1 caches/TLBs, two-level paging, and
+substantial system-mode support.  Verilator simulations produce per-retirement
+architectural traces and compare them with a pinned QEMU Pentium oracle.
 
-- **Sphinx Documentation:** <https://al-255.github.io/ventium/>
-- **Reference Material + Benchmark Programs: (Private)** [`ventium-refs/`](ventium-refs/) submodule
-  (Intel manuals, Alpert & Avnon, Agner Fog, datasheet, spec updates, and a
-  working QEMU `-cpu pentium` functional + cycle golden harness). This submodule contains proprietary material, so it is not public; the reference material is cited in the design docs and the code comments, and the QEMU harness is described in `verif/qemu-trace/`.
+This README describes the current **`ao486-mister-sim`** branch.  The hosted
+Sphinx site primarily follows `main` and is useful background, but can describe
+a different checkout.  Consult the files and commands below before relying on
+any older status report or web page.
 
-## Unsupported CPU behaviour
+## Status and scope
 
-`docs/unsupported-isa.md` lists what this core **cannot do** — unimplemented system
-descriptor forms (task gates, 16-bit TSS), cross-privilege call gates, and the
-correctness modes that are compiled out of the shipping build with the measured reason
-for each. Everything listed there reaches a loud halt or is explicitly gated; none of it
-fails silently.
+The differential gate is the functional authority.  A source change is not
+accepted merely because it improves a cycle match, produces a bitstream, or
+reaches farther in a guest.
 
-## What's implemented
+- **Core:** the supported instruction/system-mode subset includes dual issue,
+  x87 (including the P5 FDIV erratum model), protected mode, paging, exceptions
+  and interrupts, task-switch/SMM/debug paths, and virtual-8086 mode.  The
+  precise unsupported or deliberately scoped behavior is in
+  [`docs/unsupported-isa.md`](docs/unsupported-isa.md).
+- **Current PC platform:** Ventium replaces the CPU in the ao486 MiSTer system
+  through [`ao486-sim/ven/ven_ao486_shim.sv`](ao486-sim/ven/ven_ao486_shim.sv).
+  The rest of the PC platform is retained; the integration design is in
+  [`ao486-sim/VENTIUM_SWAP.md`](ao486-sim/VENTIUM_SWAP.md).
+- **L2/northbridge:** deliberately disabled in this branch.  `EN_L2=1` is not
+  a supported build, and no result here establishes L2 coherence, maintenance,
+  or system-wide LOCK atomicity.
+- **Board acceptance:** experimental and still open.  A boot progress trace,
+  a debug capture, modified guest media, or a save-state/replay is diagnostic
+  evidence only.  The acceptance ladder requires ordinary media and real
+  SeaBIOS → disk → FreeDOS → Quake → Windows 95 execution.
 
-- **Integer core:** a 5-stage in-order **dual-issue (U/V)** pipeline (PF/D1/D2/EX/WB). With correct pairing rules.
-- **Pipelined x87 FPU:** Implemented using ROM constants discovered by Ken Shirriff's reverse engineering. The SRT divider is able to faithfully reproduce the P5's infamous FDIV bug.
-- **x87 transcendentals** (`F2XM1 FYL2X FPTAN FPATAN FYL2XP1 FSINCOS FSIN FCOS`, behind `+VEN_TRANSCENDENTAL`): iterative microcoded engines. F2XM1/FPATAN/FYL2X/FYL2XP1 are **bit-exact vs qemu-i386** (verbatim softfloat transcription); FSIN/FCOS/FSINCOS/FPTAN are **bit-exact vs a shared-polynomial silicon model** (~1.8 ulp vs quad — more faithful than qemu, which computes them at double precision). See `docs/m11-transcendental-spec.md`.
-- **Memory:** 8 KiB / 2-way / 32 B split L1 I/D caches (LRU), split 16-entry I/D
-  TLBs, and the 2-level paging MMU (A/D bits, 4 KiB + 4 MiB pages).
-- **System mode:**  cold reset → real mode → protected-mode segmentation →
-  paging → IDT-delivered interrupts/exceptions + `IRET`, TSS + cross-privilege +
-  the **hardware task switch**, **SMM / `RSM`**, **debug registers + `#DB`**, and
-  **virtual-8086** mode.
-- **Errata:** documented P5 silicon errata (FDIV, FIST, F00F, MOV-moffs, the V86
-  `POPF`/`IRET` `#DB`) reproduced behind a default-off flag, self-checked against
-  the Intel Specification Updates (never against QEMU, which computes correctly).
-- **Macro-workload lock-step (M7)** -- real programs run on the RTL in lock-step
-  vs QEMU: **Quake** is bit-exact through **~1.83M instructions** (to a documented
-  QEMU-environment boundary, not a CPU divergence — see below), and a **Windows 95
-  boot** is bit-exact to **213,859 instructions** (input-replay: QEMU is the golden
-  + environment, the RTL is the checked CPU). This found + fixed **6 real ISA gaps**
-  (`TEST r/m,imm` mem-form, `call gs:[]`, `LOCK CMPXCHG`, `IN`/`OUT`, `CPUID`, `INS`).
-- **A self-contained PC SoC (M8/M9/F-track):** PIC/PIT/RTC/i8042/port92/UART/VGA/
-  IDE/DMA/FDC device models, pinned to `qemu-system-i386` by per-record differential
-  gates (`verif/soc/run-all-soc-gates.sh`: **24 gates** = 23 SoC differentials + the
-  external `test386` tester; plus a standalone SeaBIOS boot gate). The **unmodified
-  QEMU SeaBIOS `bios.bin`** completes its full POST on the RTL and boots **FreeDOS to
-  an interactive `C:\>` prompt** — in Verilator simulation (see below).
-- **FPGA full SoC (KV260):** a routed, deployable **40 MHz** bitstream for the Kria
-  KV260 (XCK26) — core + FPU + L1/AXI fully in the PL, the slow peripherals emulated
-  by the PS A53 under Linux. **No board has been attached yet** — the image is
-  structurally verified (timing/DRC/unit gates), not hardware-tested.
-- **PipeViz Visualizer:** A Custom PyQt5-based trace visualizer.
+The private [`ventium-refs/`](ventium-refs/) submodule supplies the Intel
+reference material, the pinned QEMU 8.2.2 build, and selected test programs.
+It must be initialized for most differential gates; a distribution QEMU is not
+an equivalent substitute.
 
-## Layout
+## Architecture
 
 ```
-rtl/                synthesizable SystemVerilog
-  core/               the pipeline spine (core.sv) + ALU/decode packages,
-                      the variable-length decoder, U/V issue, bpred_btb
-  fpu/                x87 FPU — the 80-bit datapath package (+ state file)
-  mem/                dcache_timing / icache / tlb
-  bus/                biu_p5 pin-level 64-bit bus + the gated bus subsystem
-  soc/                PC peripheral device models (PIC/PIT/RTC/i8042/port92/
-                      acpipm/vga) — the M8 self-contained-SoC track
-  ventium_top.sv      the verification top (core + leaf modules)
-verif/
-  qemu-trace/         gen_trace.py — golden architectural-state trace via the
-                      QEMU gdbstub (-g); --system + the syscall/replay proxies
-  tb/                 Verilator C++ testbench + bus-functional memory + DPI retire
-  diff/               compare.py / compare_stream.py (O(1) memory) + tracefmt.py
-  bench/              standard-benchmark differential harness (deep lock-step +
-                      free-run syscall-emulation; coremark/whetstone/.../Quake)
-  sys/                bare-metal system-mode tests + qemu-system goldens
-  m7/                 Quake + Win95 lock-step harnesses
-  soc/                the SoC differential gates (run-all-soc-gates.sh) + unit checks
-  bus/ errata/        biu_p5 standalone + 19 SVA gate; errata self-checks (make m6)
-fpga/               KV260 build scripts (BD + impl → bit/.xsa), the microSD
-                    boot-image pipeline (sd/), timing + architecture notes
-sw/                 PS-side software — ven_soc_app + the HID/VNC daemons (ps/),
-                    the PS-offload peripheral C models (ps_periph/)
-docs/               trace-format.md (the producer/consumer contract), the
-                    m*-spec.md design docs, and sphinx/ (the live catalog)
-3rd-party/          opl3_fpga submodule (OPL3 FM synth, for a SoundBlaster card)
+                      architectural traces
+  test image ──► Ventium RTL ─────────────────► compare.py ──► QEMU golden
+                  │
+                  ├─ U/V integer pipeline + branch prediction
+                  ├─ x87 state/datapath + iterative divide/transcendentals
+                  ├─ split I/D L1s, TLBs, paging, fragment engine
+                  └─ ao486 shim: AXI-to-Avalon, I/O, interrupt, and A20 adapters
+                                      │
+                              ao486 MiSTer PC peripherals / DDR model
 ```
 
-## Build & verify
+The core's memory interface follows important contracts that tests depend on:
+
+- translatable requests use one canonical linear-address generator;
+- the fragment engine owns cross-page splitting, probes, aborts, and response
+  merging — producers may not bypass it;
+- non-cacheable reads are byte-exact aligned AXI pieces, not silently widened
+  line accesses; and
+- flushing, translation, cacheability, and physical executable coherence are
+  configuration-sensitive and must be tested in the profile being changed.
+
+See [`docs/rtl-interface.md`](docs/rtl-interface.md) and
+[`docs/trace-format.md`](docs/trace-format.md) before changing interfaces or
+trace production.
+
+## Repository layout
+
+```
+rtl/                Synthesizable core, x87, cache/TLB, AXI, and P5 bus RTL
+  core/             Pipeline spine, decoder, U/V issue, branch prediction
+  fpu/              x87 state and iterative arithmetic engines
+  mem/              L1s, TLBs, fragment/AXI support, CDC helpers
+  bus/              Pin-level P5 bus model
+verif/              QEMU differentials, system tests, L1/bus/unit gates
+ao486-sim/          Full-PC Verilator harness and Ventium ao486-core swap
+fpga/               RK board host tools, Vivado helpers, and debug utilities
+docs/               RTL/specification/trace documentation and Sphinx sources
+tools/              Trace, opcode, arithmetic, and utilization helpers
+3rd-party/          MiSTer and OPL3 submodules
+ventium-refs/       Private manuals, QEMU oracle, and test payloads
+```
+
+There is no `rtl/soc/` directory in this branch.  The historical standalone
+SoC, M7 workload harness, and older `verif/soc` gate references are not part of
+the checked-out supported flow.
+
+## Quick start and verification
 
 ```bash
-git submodule update --init --recursive    # ventium-refs + 3rd-party/opl3_fpga
+git submodule update --init --recursive
 
-make verify          # fast differential gate (~2 s warm): user-mode functional
-                     # + the M4/M5 cycle bands, parallelised + golden-cached
-make verify-sys      # system-mode gates (pseg/pmode/ppage/pintr/pfault/pcpl/
-                     # ptask/pdebug/pv86 + psmm structural)
-make m1 m2 m3 m4 m5 m6    # per-milestone gates (m3 = x87, m6 = errata behind a flag)
+# Fast required gate: functional differential tests plus M4/M5 cycle bands.
+make verify
 
-bash verif/soc/run-all-soc-gates.sh   # the SoC battery: 24 gates (23 per-record
-                                      # qemu-system differentials + test386)
+# System-mode corpus and focused system regressions.
+make verify-sys
 
-bash verif/m7/run-quake-lockstep.sh 1000000     # macro lock-step (Quake prefix;
-bash verif/m7/win95/run-win95-cosim.sh          #  + Win95 boot — see docs/m7-*)
+# Cache/memory, P5-bus, structural lint, and status-documentation checks.
+make l1
+make bus bus-sva
+make lint
+make docs-status
 
-cd rtl && verilator --lint-only -sv -Wall -Wno-UNUSED -f ventium.f   # lint
+# Aggregate gate.  PASS gates and any explicitly pinned expected failures are
+# reported separately; a pin is never a correctness pass.
+make verify-all
 ```
 
-The instruction catalog at <https://al-255.github.io/ventium/> is built from
-`docs/sphinx/` and deployed by `.github/workflows/docs.yml` on every push.
+`make verify` is required after every RTL change.  Run the focused gate for the
+changed contract as well: for example, fragment changes require `pxfrag`/
+`fxabort`; flush changes require `prsmflush`; AXI-width changes require the
+narrow-read gate; and changes to a supported configuration require its lint
+profile.  Use the pinned filelists (`rtl/ventium.f`, `rtl_ven_core.f`, and
+`rtl_ven_soc.f`); do not glob `rtl/**`, because package order is significant.
 
-## Standard benchmarks
+### Full-PC Verilator simulation
 
-The classic CPU benchmark suite — **coremark, whetstone, stream, dhrystone,
-linpack**, and a kernel set (**sieve, matmul-int, matmul-fp, crc32, nqueens**),
-all prebuilt as static linux-user i386 ELFs in `ventium-refs/` — runs on the RTL
-two ways, both graded against QEMU `-cpu pentium`:
+```bash
+ao486-sim/setup.sh
+make -C ao486-sim          # baseline ao486 platform
+make -C ao486-sim ven      # Ventium-swapped platform
+```
 
-- **Per-instruction lock-step** (the rigorous net, `verif/bench/run-deep-sweep.sh`):
-  every retired instruction's full architectural + x87 state is compared vs the
-  QEMU gdbstub golden, deep (tens of millions of instructions per config) and
-  parallel, with zstd-compressed goldens streamed through `compare_stream.py`
-  (O(1) disk + memory). **18 of the 19 configs are bit-exact (EQUIVALENT)**; the
-  19th, a 30M-instruction Quake prefix, is bit-exact through **1.83M instructions**,
-  up to a documented environmental boundary (musl's netlink interface enumeration
-  branches on the host QEMU PID — producer nondeterminism, not a CPU divergence).
-- **Free-run to completion** (`--emulate-syscalls`, `verif/bench/run-freerun.sh`):
-  the testbench emulates `int 0x80` directly, so the RTL runs a whole program at
-  full Verilator speed, graded by its output vs QEMU-native. **coremark** runs its
-  full **1.45-billion-instruction** workload and prints *"Correct operation
-  validated"* with the canonical CRCs.
+The full-PC model is an integration/debug environment, not a replacement for
+the core differential gate.  Its current bring-up history is intentionally
+kept separate in [`ao486-sim/DISK_BOOT_STATUS.md`](ao486-sim/DISK_BOOT_STATUS.md).
 
-Realistic **P5 (U+V dual-issue) IPC** per workload, from the same cycle model the
-`make verify` bands hold the RTL to (P5 ceiling = 2.0):
+## FPGA: RK-XCZU15EG-F
 
-| workload  | IPC  |   | workload   | IPC  |
-|-----------|------|---|------------|------|
-| nqueens   | 1.23 |   | linpack    | 0.69 |
-| sieve     | 1.22 |   | matmul-fp  | 0.63 |
-| crc32     | 0.98 |   | stream     | 0.50 |
-| dhrystone | 0.87 |   | matmul-int | 0.46 |
-| coremark  | 0.81 |   | whetstone  | 0.43 |
+The current hardware target is the RK-XCZU15EG-F board, not the historical
+KV260 flow described in older synthesis material.  The complete operating
+procedure — source boundaries, single-Vivado rule, preflight, build, deploy,
+debug register map, and acceptance ladder — is
+[`HOW_TO_RUN_FPGA.md`](HOW_TO_RUN_FPGA.md).
 
-Integer-loop kernels approach IPC ~1.2; x87/transcendental and memory-bound code
-sit lower (multi-cycle `imul`/`FSIN`, U-pipe-only FP, branch mispredicts).
+The board integration has three source boundaries:
 
-**Quake** (the TyrQuake P5 build) also free-runs on the RTL: it boots fully (pak
-load, palette, renderer) and renders its console frame via the software rasteriser.
-From cycles-per-frame the cycle model estimates **~15 FPS** at 320×200 at 66 MHz
-(in line with a real Pentium-66) — **~9 FPS** at the KV260 image's 40 MHz; both are
-cycle-model estimates, not hardware measurements. Getting all this clean cost
-**three fixes**: a CET `endbr32` / multi-byte-NOP decode gap (a real RTL miss,
-regression-tested by `t_endbr`) and two QEMU-golden producer-fidelity bugs
-(`clock_gettime64` capture width, the i386 `recvfrom` syscall number).
+| Location | Responsibility |
+| --- | --- |
+| This repository | Ventium RTL, ao486 shim, simulation gates, host debug tools |
+| External `ao486_MiSTer/fpga/rk-ao486-system` flow | Board top, PS/PL bridges, Vivado project, daemon/deployment helpers |
+| `RK-XCZU15EG-F-Template` | Board preset, Linux/FPGA-manager reference, BSP/SD-image flow |
 
-### Booting the real PC stack: SeaBIOS → FreeDOS (RTL, Verilator simulation)
+Builds must use `fpga/run_vivado_exclusive.sh`; it prevents orphaned Vivado
+jobs from consuming memory or racing a new implementation run.  Run a clean
+source-matched implementation and review final timing, DRC, clock, and
+utilization reports before programming the board.  A generated `fpga_run_*`
+directory is disposable except for a deliberately retained deployable artifact
+or capture needed by the next debug session.
 
-The F3 milestone: the **unmodified QEMU SeaBIOS** `bios.bin` (rel-1.16.3) runs its
-entire power-on self-test on the RTL (real → 32-bit protected mode → back, ~5.55M
-instructions), chain-loads via `INT 13h` from the `ven_ide` disk model, and boots
-**FreeDOS** (kernel ke2045, FreeCom 0.86) to an interactive prompt. Keystrokes
-(set-1 scancodes injected into the i8042 model by the testbench) traverse the full PC
-input path — i8042 → IRQ1 → 8259 PIC → `INT 9` → BIOS keyboard buffer → FreeCom — and
-the typed commands run through `INT 21h` → FAT16 → IDE, with output drawn by SeaVGABIOS
-`INT 10h` into text VRAM at `0xB8000`.
+### Latest retained placed-utilization snapshot
 
-## FPGA Deployment (Xilinx/AMD K26 SoM)
+The following chart was regenerated from the retained 2026-08-28 Vivado 2025.2
+placed report for `rk_ao486_bd_wrapper` on `xczu15eg-ffvb1156-2-i`.  It is a
+capacity/routability warning, not timing, DRC, or guest-correctness sign-off.
 
-K26 is chosen for its highly affordable price and decent capacity. The SoM contains a ZU5EV-equivalent FPGA manufactured in 16nm process technology, with 256k system logic cells (117,120 LUTs), 5.1 Mb of block RAM, and 1,248 DSP slices. The PS side is a quad-core A53 running up to 1.5 GHz, with 4 GB of DDR4 memory and a rich set of peripherals.
+![Placed utilization for the RK-XCZU15EG-F image](docs/fpga-utilization-rk-xczu15eg.svg)
 
-**The PS as the I/O processor.** Only the latency-critical elements live in the PL: core + FPU, L1 + AXI master into the PS DDR (carveout at `REMAP_BASE = 0x4000_0000`), and the `ven_soc_axil` control slave. The slow PC peripherals run as **C models on the A53 under Linux** — the same C models the `ps-cosims` gate holds to *C model == RTL == qemu*. `ven_soc_app --dos` routes the PIC, i8042 and VGA-register ports to the PS and injects interrupts through the `R_INTR` seam (the PS stages {vector, level}; the core's INTA strobe auto-clears it and latches a sticky `INTA_SEEN` bit, mirroring the 8259's INTA boundary); `hid_kbd` turns USB-keyboard evdev events into set-1 scancodes; `fb_vnc` serves the mode-13h framebuffer + live DAC palette over VNC (a dependency-free RFB 3.3 server).
+| Resource | Used / available | Utilization |
+| --- | ---: | ---: |
+| CLB LUTs | 317,438 / 341,280 | 93.01% |
+| CLB sites | 41,650 / 42,660 | 97.63% |
+| Registers | 42,743 / 682,560 | 6.26% |
+| Block RAM tiles | 85 / 744 | 11.42% |
+| DSP48E2 | 1,264 / 3,528 | 35.83% |
 
-### Full SoC deployable bitstream
+The CLB-site figure leaves little placement headroom.  Treat logic compaction
+as a correctness-sensitive engineering task: preserve single-owner FSM state,
+one-burst cache fills, exact request widths, and explicit shared-arithmetic
+handshakes.  Do not trade congestion for global flushing, duplicate line fills,
+unbounded replay, guest-specific RTL, or a serialized common path.
 
-The actual K26 image adds the L1/AXI memory subsystem (PS-DDR), the `ven_soc_axil` PS bridge, and the BD interconnect, routed to a bitstream + `.xsa`.
-60 MHz full-SoC close is not feasible on the XCK26 due to resource limits: the OOC ceiling (i.e. just the core itself) is 65.3 MHz; the SoC's extra fabric leaves diffuse fill `eip` congestion. To fix congestion, the current image implements a **half-cache** (4 KiB 2-way per L1, 64 sets of 32 B lines) instead of the full 8 KiB; this reduces congestion enough to meet timing at 40 MHz.
+Regenerate the chart from a new placed utilization report with:
 
-Shipped image targets **`pl_clk0` = 40 MHz**, routed at **WNS +0.104 ns** (timing met); the
-PS owns the PL clock (`CRL_APB.PL0_REF_CTRL`), and `venclk.sh` can step it from the PS at
-runtime. A larger part (e.g. the ZU15EG) would clear 60+ with all features enabled with flying
-colors.
+```bash
+python3 tools/render_fpga_utilization.py \
+  <impl>/rk_ao486_bd_wrapper_utilization_placed.rpt \
+  docs/fpga-utilization-rk-xczu15eg.svg
+```
 
-### On silicon (live KV260) — first light + overclock
+[`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) remains an explicitly
+historical KV260/OOC study; use it for background only, not current board
+commands or current resource claims.
 
-The image has now run on a real **XCK26**. First light: the PS (`ven_soc_app`) stages the F2
-firmware into the DDR carveout, releases the core, and the core executes real-mode x86 from the
-reset vector, printing over the io-bridge — `Ventium SoC: Pentium (P54C) core alive on KV260`,
-clean `isa-debug-exit`. The control slave reads back `IDENT = 0x5654_4D43` ("VTMC"). Loading the
-PL on the stock Kria Ubuntu uses the supported dfx-mgr path (`xmutil loadapp ventium`, DMA-heap
-programming); the recipe and the bring-up gotchas are in
-[`fpga/sd/kv260-runtime/`](fpga/sd/kv260-runtime/).
+## Debugging and acceptance rules
 
-**Overclock characterization** (`verif/sys/tests/mabench` — a deterministic FP+BCD+integer
-checksum kernel that stresses the Fmax-critical x87 FADD/FMUL/FSQRT cone, the FBSTP BCD engine,
-and integer mul/div; corroborated by `mabench2`, a dual-issue U/V/FP exerciser):
+The custom board debug block can capture retirement state, trace rings,
+breakpoints, freeze context, and selected memory/transaction observations.  It
+is not full JTAG: the deployed image does not contain a Xilinx debug hub/ILA/VIO
+scan chain.  The current capabilities and safe use are documented in
+[`HOW_TO_RUN_FPGA.md`](HOW_TO_RUN_FPGA.md).
 
-| `pl_clk0` | result |
-|---|---:|
-| 40.0 MHz (sign-off) | correct |
-| up to **71.4 MHz** | correct — rock-solid, single *and* dual issue |
-| **76.9 MHz** | **marginal/flaky** — non-deterministic wrong results; dual-issue fails where single sometimes passes |
+When debugging a board failure:
 
-So the silicon computes correctly to **~71.4 MHz (≈1.79× the 40 MHz routed sign-off** — the part
-runs far past the worst-case STA corner), with marginal failures beginning at 76.9 MHz. The
-dual-issue U/V path is the most sensitive stressor. `cycle_mode` (dual-issue) is functionally
-correct on hardware (identical checksum to single-issue). A conservative tested overclock is
-~66.7 MHz; 40 MHz remains the only signed-off corner. Note the trivial boot-firmware smoke is
-*insensitive* (it "passes" to 83+ MHz) — Fmax must be validated with a critical-path workload.
+1. Preserve source revision, defines, bitstream hash, clock profile, disk-image
+   hash, and daemon/debug-tool version.
+2. Use the least invasive capture that distinguishes the next hypothesis.
+3. Reproduce any RTL repair in the differential and focused simulation gates.
+4. Repeat the board ladder on unmodified media.  A patched Quake/CWSDPMI image,
+   injected marker, or restored save-state may diagnose a point in execution,
+   but cannot prove a general processor.
 
-Live-board ISA/coherence findings (all at 40 MHz, not overclock-induced): `FWAIT` (0x9B) hangs
-(use the no-wait x87 forms; bare x87 arithmetic works); `MOV`-moffs (A0–A3) direct addressing
-isn't decoded (the core uses ModRM `[disp16]`); and the core's interrupt-delivery reads the IVT
-uncached from DDR while guest writes sit in the write-back L1 — a coherence gap that blocks
-interrupt-driven real-mode guests (SeaBIOS/FreeDOS) on hardware until an RTL fix. The I/O bridge
-and the PS→core interrupt-injection seam are both proven working on silicon.
+## Contributing
 
-The routed 40 MHz image, split into its two halves — the CPU core + FPU (left, memory/BD
-grayed) and the L1/AXI memory + PS bridge + BD interconnect (right, core grayed), every leaf
-cell colored by RTL module with per-panel legends:
+- Keep one module per file and package/filelist ordering intact.
+- Do not hand-format `.vtrace` files; emit through `verif/diff/tracefmt.py`.
+- Never make a green gate by weakening comparison masks, downgrading a failure
+  to a pin, or silently widening/serializing a request.
+- Update `tools/opcode_map/coverage_data.json` and regenerate the opcode map when decoder arms
+  change.
+- Keep generated Vivado products, disk images, object trees, and local review
+  notes out of commits.  Commit source, tests, concise run provenance, and
+  reproducible scripts instead.
 
-![Ventium full SoC on the KV260 — CPU core + FPU (left) and the surrounding memory/PS fabric (right)](docs/fpga-device-view-soc-split.png)
-
-**Full results, the all-modules device view, congestion maps, the ZU15EG + half-cache +
-FP_PIPE2 experiments, and methodology:** [`docs/fpga-synthesis.md`](docs/fpga-synthesis.md) ·
-[`fpga/TIMING_PROBLEMS.md`](fpga/TIMING_PROBLEMS.md).
-
-### The K26 PS Firmware
-
-Two flashable microSD images exist:
-
-- **Primary — Kria Ubuntu 24.04** (`ventium_kv260_ubuntu.img`, built out-of-repo in
-  `ventium-refs/kria-ubuntu/`): the stock Kria server image with the Ventium package
-  injected (bitstream + `ven_soc_app`/`hid_kbd`/`ven_fb_vnc`/`venclk.sh`); SSH and
-  USB-HID work out of the box.
-- **Baremetal** (`fpga/sd/`, no PetaLinux): `BOOT.BIN` = FSBL + PMUFW + bitstream +
-  `ven_boot.elf` on FAT32; an IDENT smoke test, then the gate-proven COM1-banner
-  firmware on the UART1 (MIO36/37) console.
-
-## Status
-
-The original roadmap (M0–M6, the M2S system-mode track, M5B, M6B, R1/R2) is
-**complete**, as are **M7** (macro-workload lock-step), **M8–M9.5** (the
-self-contained PC SoC + first boot), **M11** (x87 transcendentals) and the
-benchmark stack (M13/M14). On the F-track, **F2** (boot firmware) and **F3**
-(interactive FreeDOS) are done *in Verilator simulation*, and the **40 MHz KV260
-board image now runs on real silicon** (first light + an overclock characterization to
-~71.4 MHz; see *On silicon* above); **F4** (DOS Quake on the RTL) is in progress. See
-[`PROGRESS.md`](PROGRESS.md) and [`PROGRESS_Jun04.md`](PROGRESS_Jun04.md) for the full,
-dated detail.
+Keep current engineering state, open boundaries, and the required acceptance
+ladder in checked-in tests and procedures.  Local review notes are deliberately
+excluded from the repository and must not become a second source of truth.
